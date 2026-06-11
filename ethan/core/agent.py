@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from ethan.core.config import get_config
 from ethan.memory.procedures import ProcedureStore
@@ -43,8 +44,9 @@ class Agent:
         self.usage = UsageStats()
 
     def _build_system(self, messages: list[Message]) -> str:
-        """构建 system prompt，注入 Skills + Procedures。"""
-        parts = [self._base_system]
+        """构建 system prompt，注入时间、Skills、Procedures。"""
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S %A")
+        parts = [self._base_system, f"Current time: {now}"]
 
         # Procedural memory
         proc_ctx = self._procedures.build_context()

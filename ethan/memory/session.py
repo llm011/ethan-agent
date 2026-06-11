@@ -180,3 +180,38 @@ class SessionStore:
         ) as cursor:
             row = await cursor.fetchone()
             return row[0] if row else 0
+
+    async def search(self, query: str, limit: int = 50) -> list[Session]:
+        """全文搜索：匹配 session 标题或消息内容。返回去重后的 session 列表。"""
+        q = f"%{query}%"
+        sessions: dict[str, Session] = {}
+        # 先搜标题
+        async with self._db.execute(
+            "SELECT id, title, model, created_at, updated_at FROM sessions WHERE title LIKE ? ORDER BY updated_at DESC LIMIT ?",
+            (q, limit),
+        ) as cursor:
+            async for row in cursor:
+                sessions[row[0]] = Session(id=row[0], title=row[1], model=row[2], created_at=row[3], updated_at=row[4])
+        # 再搜消息内容，找到对应的 session
+        async with self._db.execute(
+            """SELECT DISTINCT s.id, s.title, s.model, s.created_at, s.updated_at
+               FROM sessions s
+               JOIN messages m ON m.session_id = s.id
+               WHERE m.content LIKE ? AND m.role IN ('user', 'assistant')
+               ORDER BY s.updated_at DESC LIMIT ?""",
+            (q, limit),
+        ) as cursor:
+            async for row in cursor:
+                if row[0] not in sessions:
+                    sessions[row[0]] = Session(id=row[0], title=row[1], model=row[2], created_at=row[3], updated_at=row[4])
+        # 按 updated_at 倒序返回
+        return sorted(sessions.values(), key=lambda s: s.updated_at, reverse=True)[:limit]
+
+    async def cleanup_empty(self) -> int:
+        """删除没有任何消息的空 session，返回删除数量。"""
+        cursor = await self._db.execute(
+            "DELETE FROM sessions WHERE id NOT IN (SELECT DISTINCT session_id FROM messages)"
+        )
+        await self._db.commit()
+        return cursor.rowcount
+

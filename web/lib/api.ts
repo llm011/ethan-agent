@@ -55,8 +55,10 @@ export interface SessionDetail {
   messages: { role: string; content: string }[];
 }
 
-export async function fetchSessions(limit = 50): Promise<SessionInfo[]> {
-  const res = await fetch(`${API_URL}/sessions?limit=${limit}`, { headers: headers() });
+export async function fetchSessions(limit = 50, q?: string): Promise<SessionInfo[]> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (q) params.set("q", q);
+  const res = await fetch(`${API_URL}/sessions?${params}`, { headers: headers() });
   if (!res.ok) throw new Error("Failed to fetch sessions");
   const data = await res.json();
   return data.sessions;

@@ -198,7 +198,30 @@ ethan/
 - [x] 登录鉴权（Bearer token）
 - [x] Tool 状态可视化 — 显示 agent 正在调用什么工具
 - [ ] 响应式布局 — 移动端适配优化
-- [x] Session 搜索
+- [x] Session 搜索（仅标题）
+- [ ] Session 全文搜索（搜索消息内容）
+- [ ] 日间模式（浅橙主题）切换支持
+
+---
+
+## 阶段十：体验与质量提升
+
+### 时间感知
+- [x] Agent 系统提示中注入实时时间（每次对话都带上当前时间）
+  - 在 `ethan/core/agent.py` 的 `_build_system()` 中注入 `datetime.now()` 格式化时间串
+
+### Session 管理优化
+- [x] 不保存空 session：仅在第一条消息发送后才持久化 session
+  - 修改 `ethan/interface/repl.py`：延迟 `store.create()` 调用
+- [x] 清理历史空 session：`SessionStore.cleanup_empty()` + 退出时自动清理
+
+### Web UI
+- [x] Session 搜索（仅标题）
+- [x] Session 全文搜索（后端：同时搜标题和消息内容；前端：防抖 300ms 调 `/sessions?q=`）
+- [x] 日间模式（浅橙主题）：添加 `.light` 主题变量，顶部 Sun/Moon 切换按钮，localStorage 持久化
+
+### 端到端测试
+- [x] `test_repl_e2e.py` — 20 轮对话上下文感知测试（全部通过 ✅）
 
 ---
 

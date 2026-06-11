@@ -253,8 +253,9 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
     store = SessionStore()
     await store.init()
 
-    # 恢复或新建 session
+    # 恢复或新建 session（新建时先不写 DB，等到第一条消息再持久化）
     session: Session | None = None
+    session_persisted = False
     if resume_id:
         if resume_id == "last":
             recent = await store.list_recent(1)
@@ -263,10 +264,16 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
         else:
             session = await store.load(resume_id)
         if session:
+            session_persisted = True
             console.print(f"[green]Session restored: {session.title}[/green] [dim]({len(session.messages)} messages)[/dim]")
 
     if not session:
-        session = await store.create(model_id)
+        # 仅构造内存对象，不写 DB
+        import time as _time
+        _now = _time.time()
+        from ethan.memory.session import _generate_id
+        session = Session(id=_generate_id(), title="新对话", model=model_id, created_at=_now, updated_at=_now)
+        session_persisted = False
 
     _banner()
 
@@ -344,6 +351,16 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
 
         msg = Message(role="user", content=user_input)
         history.append(msg)
+
+        # 第一条消息时才真正持久化 session
+        if not session_persisted:
+            await store._db.execute(
+                "INSERT INTO sessions (id, title, model, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                (session.id, session.title, session.model, session.created_at, session.updated_at),
+            )
+            await store._db.commit()
+            session_persisted = True
+
         await store.save_message(session.id, msg)
         approx_tokens += len(user_input)
 
@@ -459,5 +476,13 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
             )
         except Exception:
             pass
+
+    # 清理历史空 session（包括本次如果没有发任何消息的情况）
+    try:
+        cleaned = await store.cleanup_empty()
+        if cleaned:
+            pass  # 静默清理，不打印
+    except Exception:
+        pass
 
     await store.close()

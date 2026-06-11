@@ -139,10 +139,13 @@ async def chat(req: ChatRequest):
 
 
 @app.get("/sessions", dependencies=[Depends(verify_token)])
-async def list_sessions(limit: int = 50):
+async def list_sessions(limit: int = 50, q: str | None = None):
     store = SessionStore()
     await store.init()
-    sessions = await store.list_recent(limit)
+    if q:
+        sessions = await store.search(q, limit)
+    else:
+        sessions = await store.list_recent(limit)
     await store.close()
     return {"sessions": [
         {"id": s.id, "title": s.title, "model": s.model, "created_at": s.created_at, "updated_at": s.updated_at}

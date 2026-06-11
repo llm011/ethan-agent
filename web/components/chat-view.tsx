@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Send, Paperclip, Loader2, Plus, Trash2, MessageSquare, Search } from "lucide-react";
+import { Send, Paperclip, Loader2, Plus, Trash2, MessageSquare, Search, Sun, Moon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -27,16 +27,48 @@ interface Message {
   toolActivity?: string;  // tool call indicator
 }
 
+function useTheme() {
+  const [theme, setTheme] = useState<"dark" | "light">(() => {
+    if (typeof window !== "undefined") {
+      return (localStorage.getItem("ethan-theme") as "dark" | "light") || "dark";
+    }
+    return "dark";
+  });
+
+  const toggle = useCallback(() => {
+    setTheme((prev) => {
+      const next = prev === "dark" ? "light" : "dark";
+      localStorage.setItem("ethan-theme", next);
+      document.documentElement.classList.toggle("dark", next === "dark");
+      document.documentElement.classList.toggle("light", next === "light");
+      return next;
+    });
+  }, []);
+
+  return { theme, toggle };
+}
+
 export function ChatView() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [sessionSearch, setSessionSearch] = useState("");
-  const filteredSessions = useMemo(() => {
-    const q = sessionSearch.toLowerCase();
-    return q ? sessions.filter((s) => s.title.toLowerCase().includes(q)) : sessions;
-  }, [sessions, sessionSearch]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const { theme, toggle: toggleTheme } = useTheme();
+
+  // 防抖全文搜索：空时加载全部，有内容时调后端搜索
+  useEffect(() => {
+    const q = sessionSearch.trim();
+    const timer = setTimeout(() => {
+      setSearchLoading(true);
+      fetchSessions(50, q || undefined)
+        .then(setSessions)
+        .catch(() => {})
+        .finally(() => setSearchLoading(false));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [sessionSearch]);
   const [activeSession, setActiveSession] = useState<string | null>(null);
   const [models, setModels] = useState<{ id: string; description: string }[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>("");
@@ -56,7 +88,6 @@ export function ChatView() {
   useEffect(() => { scrollToBottom(); }, [messages, scrollToBottom]);
 
   useEffect(() => {
-    fetchSessions().then(setSessions).catch(() => {});
     fetchModels().then((m) => {
       setModels(m);
       if (m.length > 0) setSelectedModel((prev) => prev || m[0].id);
@@ -157,7 +188,7 @@ export function ChatView() {
 
     setMessages([...newMessages, { role: "assistant", content: assistantContent }]);
     setStreaming(false);
-    fetchSessions().then(setSessions).catch(() => {});
+    if (!sessionSearch.trim()) fetchSessions().then(setSessions).catch(() => {});
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -179,7 +210,7 @@ export function ChatView() {
         </div>
         <div className="px-3 pb-2">
           <div className="relative">
-            <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+            <Search className={`absolute left-2.5 top-2.5 h-3.5 w-3.5 ${searchLoading ? "text-primary animate-pulse" : "text-muted-foreground"}`} />
             <Input
               placeholder="Search sessions..."
               value={sessionSearch}
@@ -190,7 +221,7 @@ export function ChatView() {
         </div>
         <Separator />
         <ScrollArea className="flex-1 p-2">
-          {filteredSessions.map((s) => (
+          {sessions.map((s) => (
             <div
               key={s.id}
               className={`group flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer text-sm transition-colors ${
@@ -231,6 +262,15 @@ export function ChatView() {
               ↑{usage.input} ↓{usage.output} tokens
             </span>
           )}
+          <Button
+            variant="ghost"
+            size="icon"
+            className={usage ? "ml-2" : "ml-auto"}
+            onClick={toggleTheme}
+            title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+          >
+            {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          </Button>
         </header>
 
         {/* Messages */}
