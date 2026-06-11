@@ -59,6 +59,7 @@ _register_subcommands()
 def _build_agent(model: str | None = None):
     from ethan.core.agent import Agent
     from ethan.skills.registry import SkillRegistry
+    from ethan.tools.builtin.acp import DelegateCodingTool
     from ethan.tools.builtin.file import FileListTool, FileReadTool, FileWriteTool
     from ethan.tools.builtin.knowledge import KnowledgeAddTool, KnowledgeSearchTool
     from ethan.tools.builtin.schedule import ScheduleCreateTool, ScheduleListTool, ScheduleRemoveTool
@@ -79,6 +80,7 @@ def _build_agent(model: str | None = None):
     registry.register(ScheduleRemoveTool())
     registry.register(KnowledgeSearchTool())
     registry.register(KnowledgeAddTool())
+    registry.register(DelegateCodingTool())
 
     skills = SkillRegistry()
     skills.load()

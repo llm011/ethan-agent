@@ -102,7 +102,7 @@ ethan/
 - [x] 示例 Skill：weather-query.md
 - [x] 验证：Skill 被 agent 自动识别并影响行为 ✅
 - [ ] 验证：完成复杂任务后自动生成新 Skill 文件（需实际长对话触发）
-- [ ] `docs/skills.md` — Skill 系统设计文档
+- [x] `docs/skills.md` — Skill 系统设计文档
 
 ---
 
@@ -114,7 +114,7 @@ ethan/
 - [x] 验证：创建定时任务 + 列出 + 删除 ✅
 - [x] `ethan/scheduler/heartbeat.py` — 定期心跳（回顾待办）
 - [x] REPL 内通过对话创建任务（agent 自己调 schedule tool）
-- [ ] `docs/scheduler.md` — 调度器设计文档
+- [x] `docs/scheduler.md` — 调度器设计文档
 
 ---
 
@@ -126,7 +126,7 @@ ethan/
 - [x] `ethan/tools/mcp_client.py` — MCP client（连接外部 MCP server，自动注册工具）
 - [x] 验证：agent 读取本地文件并总结 ✅
 - [x] 验证：MCP 模块导入正常 ✅
-- [ ] 更新 `docs/tools.md` — 补充 MCP 接入说明
+- [x] 更新 `docs/tools.md` — 补充 MCP 接入说明
 - [ ] 验证：连接实际 MCP server 调用工具（需要具体 server）
 
 ---
@@ -147,11 +147,11 @@ ethan/
 
 > Ethan 自身不擅长复杂编码，遇到代码任务时委托给专业 coding agent。
 
-- [ ] ACP（Agent Communication Protocol）客户端实现
-- [ ] 支持调用本地 Claude Code / OpenCode / Codex CLI
-- [ ] 自动判断任务复杂度 — 简单代码自己写，复杂任务转交
-- [ ] 结果回收 — 拿回 coding agent 的输出，整合进对话
-- [ ] `docs/acp.md` — ACP 集成设计文档
+- [x] ACP（Agent Communication Protocol）客户端实现
+- [x] 支持调用本地 Claude Code / OpenCode / Codex CLI
+- [x] 自动判断任务复杂度 — 简单代码自己写，复杂任务转交
+- [x] 结果回收 — 拿回 coding agent 的输出，整合进对话
+- [x] `docs/acp.md` — ACP 集成设计文档
 - [ ] 验证：用户问代码问题时，Ethan 自动拉起 Claude Code 完成，结果返回对话
 
 ---
