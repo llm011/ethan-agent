@@ -50,13 +50,16 @@ class FactStore:
         self._path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def add(self, content: str, confidence: float = 0.8, source: str = "", category: str = "knowledge") -> None:
+        # Check for contradiction against all active facts
+        for f in self._facts:
+            if not f.superseded and self._is_contradiction(f.content, content):
+                f.superseded = True
+
         existing = self._find_similar(content)
-        if existing:
+        if existing and not existing.superseded:
             existing.content = content
             existing.confidence = max(existing.confidence, confidence)
             existing.last_accessed = time.time()
-            if existing.superseded:
-                existing.superseded = False
         else:
             self._facts.append(Fact(
                 content=content,
@@ -65,6 +68,40 @@ class FactStore:
                 category=category,
             ))
         self._save()
+
+    def _is_contradiction(self, old: str, new: str) -> bool:
+        """Detect if new content contradicts old (heuristic for both CJK and Latin)."""
+        old_lower = old.lower().strip()
+        new_lower = new.lower().strip()
+        if old_lower == new_lower:
+            return False
+
+        # Character-level overlap (works for CJK)
+        old_chars = set(old_lower)
+        new_chars = set(new_lower)
+        char_overlap = len(old_chars & new_chars) / max(len(old_chars), len(new_chars), 1)
+
+        # Word-level overlap (works for Latin)
+        old_words = set(old_lower.split())
+        new_words = set(new_lower.split())
+        word_overlap = len(old_words & new_words) / max(len(old_words), len(new_words), 1)
+
+        overlap = max(char_overlap, word_overlap)
+
+        if overlap > 0.5:
+            # Check for update/negation signals
+            update_signals = [
+                "不", "没", "non", "not", "no longer", "instead",
+                "而不是", "改为", "换成", "变成", "更新为", "升级到",
+                "changed", "switched", "updated", "migrated",
+            ]
+            for sig in update_signals:
+                if sig in new_lower and sig not in old_lower:
+                    return True
+            # High overlap but different → likely an update
+            if overlap > 0.6 and old_lower != new_lower:
+                return True
+        return False
 
     def supersede(self, old_content: str, new_content: str, source: str = "") -> None:
         for f in self._facts:
