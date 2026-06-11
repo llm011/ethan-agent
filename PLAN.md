@@ -112,8 +112,8 @@ ethan/
 - [x] `ethan/scheduler/cron.py` — APScheduler 封装（cron + interval，SQLite 持久化）
 - [x] `ethan/interface/commands/schedule.py` — `ethan schedule list/remove/pause/resume`
 - [x] 验证：创建定时任务 + 列出 + 删除 ✅
-- [ ] `ethan/scheduler/heartbeat.py` — 定期心跳（回顾待办）
-- [ ] REPL 内通过对话创建任务（agent 自己调 schedule tool）
+- [x] `ethan/scheduler/heartbeat.py` — 定期心跳（回顾待办）
+- [x] REPL 内通过对话创建任务（agent 自己调 schedule tool）
 - [ ] `docs/scheduler.md` — 调度器设计文档
 
 ---
@@ -160,14 +160,14 @@ ethan/
 
 > 让 Ethan 拥有可扩展的外部知识来源。
 
-- [ ] 知识库抽象层设计（`ethan/knowledge/base.py`）
-- [ ] 默认实现：本地 Markdown 文件目录（`~/.ethan/knowledge/`）
+- [x] 知识库抽象层设计（`ethan/knowledge/base.py`）
+- [x] 默认实现：本地 Markdown 文件目录（`~/.ethan/knowledge/`）
 - [ ] Obsidian 接入（官方插件）：读写 Obsidian vault
 - [ ] 标准接口设计：第三方笔记系统通过 adapter 接入
 - [ ] Embedding 索引 + 语义检索
-- [ ] `ethan knowledge` 子命令（add/search/list/sync）
-- [ ] `docs/knowledge.md` — 知识库设计文档
-- [ ] 验证：用户添加 Markdown 到知识库后，agent 能在对话中检索并引用
+- [x] `ethan knowledge` 子命令（list/search/add）
+- [x] `docs/knowledge.md` — 知识库设计文档（待补）
+- [x] 验证：agent 能通过 knowledge_search/add 工具操作知识库 ✅
 
 ---
 

@@ -10,6 +10,7 @@
   ethan session ...        管理对话会话
   ethan skill ...          管理 Skills
   ethan schedule ...       管理定时任务
+  ethan knowledge ...      管理个人知识库
 """
 from typing import Optional
 
@@ -32,12 +33,14 @@ def _register_subcommands():
     from ethan.interface.commands import session as session_cmd
     from ethan.interface.commands import skill as skill_cmd
     from ethan.interface.commands import schedule as schedule_cmd
+    from ethan.interface.commands import knowledge as knowledge_cmd
 
     app.add_typer(model_cmd.app, name="model")
     app.add_typer(provider_cmd.app, name="provider")
     app.add_typer(session_cmd.app, name="session")
     app.add_typer(skill_cmd.app, name="skill")
     app.add_typer(schedule_cmd.app, name="schedule")
+    app.add_typer(knowledge_cmd.app, name="knowledge")
 
 
 @app.command("serve")
@@ -57,6 +60,8 @@ def _build_agent(model: str | None = None):
     from ethan.core.agent import Agent
     from ethan.skills.registry import SkillRegistry
     from ethan.tools.builtin.file import FileListTool, FileReadTool, FileWriteTool
+    from ethan.tools.builtin.knowledge import KnowledgeAddTool, KnowledgeSearchTool
+    from ethan.tools.builtin.schedule import ScheduleCreateTool, ScheduleListTool, ScheduleRemoveTool
     from ethan.tools.builtin.shell import ShellTool
     from ethan.tools.builtin.web import WebFetchTool
     from ethan.tools.builtin.web_search import WebSearchTool
@@ -69,6 +74,11 @@ def _build_agent(model: str | None = None):
     registry.register(FileReadTool())
     registry.register(FileWriteTool())
     registry.register(FileListTool())
+    registry.register(ScheduleCreateTool())
+    registry.register(ScheduleListTool())
+    registry.register(ScheduleRemoveTool())
+    registry.register(KnowledgeSearchTool())
+    registry.register(KnowledgeAddTool())
 
     skills = SkillRegistry()
     skills.load()
