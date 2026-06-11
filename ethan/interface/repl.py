@@ -11,6 +11,7 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import HTML, FormattedText
 from prompt_toolkit.styles import Style
 from rich.console import Console
+from rich.markdown import Markdown as RichMarkdown
 from rich.panel import Panel
 from rich.spinner import Spinner
 from rich.live import Live
@@ -97,16 +98,22 @@ async def run_once(agent: Agent, prompt: str) -> None:
     """单轮对话：发送一句，流式打印回复，退出。"""
     messages = [Message(role="user", content=prompt)]
 
-    with Live(Spinner("dots", text="thinking...", style="dim"), console=console, transient=True):
-        first = True
-        full = ""
-        async for chunk in agent.stream_chat(messages):
-            if first:
-                first = False
-            print(chunk, end="", flush=True)
-            full += chunk
-    if not first:
-        print()
+    spinner = Live(Spinner("dots", text="thinking...", style="dim"), console=console, transient=True)
+    spinner.start()
+
+    full = ""
+    first = True
+    async for chunk in agent.stream_chat(messages):
+        if first:
+            spinner.stop()
+            first = False
+        full += chunk
+
+    if first:
+        spinner.stop()
+
+    if full:
+        console.print(RichMarkdown(full))
 
 
 async def _handle_slash_command(cmd: str, store: SessionStore, session: Session, agent: Agent) -> Session | None:
@@ -290,6 +297,7 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
 
         full = ""
         first_chunk = True
+        console.print()
         live = Live(Spinner("dots", text="thinking...", style="dim"), console=console, transient=True)
         live.start()
 
@@ -297,13 +305,16 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
         context.append(msg)
 
         try:
+            render_live = Live(console=console, refresh_per_second=8, vertical_overflow="visible")
+            render_live.start()
             async for chunk in agent.stream_chat(context):
                 if first_chunk:
                     live.stop()
                     first_chunk = False
-                print(chunk, end="", flush=True)
                 full += chunk
-            print("\n")
+                render_live.update(RichMarkdown(full))
+            render_live.stop()
+            console.print()
         except KeyboardInterrupt:
             print("\n[interrupted]")
         except Exception as e:
