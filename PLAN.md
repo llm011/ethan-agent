@@ -188,14 +188,17 @@ ethan/
 
 > 好看、酷、现代的 Web 界面。
 
-- [ ] 前端框架选型（React / Svelte / Solid）
-- [ ] 对话界面 — 流式渲染、Markdown 支持、代码高亮
-- [ ] 暗色主题 + 动效（打字机效果、tool call 可视化）
-- [ ] Session 管理 — 侧边栏列出历史会话，可搜索
-- [ ] 模型切换 — 顶部快速切换
+- [x] 前端框架选型 — Next.js 14 + shadcn/ui + Tailwind
+- [x] 对话界面 — 流式渲染、Markdown 支持、代码高亮
+- [x] 暗色主题 + 动效（打字机效果）
+- [x] Session 管理 — 侧边栏列出历史会话
+- [x] 模型切换 — 顶部快速切换
+- [x] 文件上传 — 📎 按钮 + 与 query 一起发送
+- [x] Token 用量显示
+- [x] 登录鉴权（Bearer token）
 - [ ] Tool 状态可视化 — 显示 agent 正在调用什么工具
-- [ ] 响应式布局 — 桌面 + 移动端适配
-- [ ] 与 FastAPI 后端对接（阶段六的 SSE/WebSocket）
+- [ ] 响应式布局 — 移动端适配优化
+- [ ] Session 搜索
 
 ---
 
