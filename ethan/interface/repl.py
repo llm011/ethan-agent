@@ -22,6 +22,7 @@ from rich.text import Text
 from ethan.core.agent import Agent
 from ethan.core.config import get_config
 from ethan.memory.consolidator import Consolidator
+from ethan.memory.episodic import EpisodeStore
 from ethan.memory.facts import FactStore
 from ethan.memory.session import Session, SessionStore, _auto_title
 from ethan.memory.working import MemoryConfig, WorkingMemory
@@ -250,6 +251,7 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
 
     # 初始化分层记忆
     fact_store = FactStore()
+    episode_store = EpisodeStore()
     memory = WorkingMemory(config=MemoryConfig())
     memory.cold_facts = fact_store.build_context()
     consolidator = Consolidator(main_model=model_id)
@@ -394,5 +396,26 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
                     pass
         else:
             history.pop()
+
+    # Save episode summary on exit (if enough turns)
+    user_turns = sum(1 for m in history if m.role == "user")
+    if user_turns >= 2 and session.id:
+        try:
+            summary = " ".join(
+                m.content[:50] for m in history if m.role == "user" and m.content
+            )[:200]
+            keywords = list(set(
+                w for m in history if m.role == "user" and m.content
+                for w in m.content.split()[:5]
+            ))[:10]
+            episode_store.add(
+                session_id=session.id,
+                summary=summary,
+                model=model_id,
+                turn_count=user_turns,
+                keywords=keywords,
+            )
+        except Exception:
+            pass
 
     await store.close()

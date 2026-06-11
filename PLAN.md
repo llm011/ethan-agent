@@ -178,7 +178,7 @@ ethan/
 - [x] Phase 2a：冷区升级为结构化 facts（JSON，带 confidence / timestamp / source）
 - [ ] Phase 2b：加 embedding 索引，支持语义检索（chromadb 或 sqlite-vec）
 - [x] Phase 2c：重要性评分 — 决策/偏好/纠正 > 闲聊，影响压缩策略
-- [ ] Phase 2d：Episodic memory — 每个 session summary 独立存储，按时间和相关性检索
+- [x] Phase 2d：Episodic memory — 每个 session summary 独立存储，按时间和相关性检索
 - [x] Phase 2e：Procedural memory — agent 从纠正中学习，维护行为准则文件
 - [x] Phase 2f：记忆防污染 — contradiction detection + confidence scoring
 
