@@ -138,8 +138,8 @@ ethan/
 - [x] SSE 流式输出（`stream: true`）
 - [x] `ethan serve` 命令启动 API 服务（默认端口 8900）
 - [x] 验证：/health、/models、/chat 全部通过 ✅
-- [ ] `launchd` plist 配置 — Mac mini 开机自启
-- [ ] `docs/interface.md` — API 接口文档
+- [x] `launchd` plist 配置 — Mac mini 开机自启
+- [x] `docs/interface.md` — API 接口文档
 
 ---
 

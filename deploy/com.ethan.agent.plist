@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.ethan.agent</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/jsongo/.local/bin/uv</string>
+        <string>run</string>
+        <string>python</string>
+        <string>-m</string>
+        <string>ethan.interface.cli</string>
+        <string>serve</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/jsongo/code/life/ethan-ai</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/jsongo/.ethan/logs/api.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jsongo/.ethan/logs/api.err.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/Users/jsongo/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+</dict>
+</plist>
