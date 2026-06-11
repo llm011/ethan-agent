@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Send, Paperclip, Loader2, Plus, Trash2, MessageSquare } from "lucide-react";
+import { Send, Paperclip, Loader2, Plus, Trash2, MessageSquare, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -31,6 +32,11 @@ export function ChatView() {
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [sessionSearch, setSessionSearch] = useState("");
+  const filteredSessions = useMemo(() => {
+    const q = sessionSearch.toLowerCase();
+    return q ? sessions.filter((s) => s.title.toLowerCase().includes(q)) : sessions;
+  }, [sessions, sessionSearch]);
   const [activeSession, setActiveSession] = useState<string | null>(null);
   const [models, setModels] = useState<{ id: string; description: string }[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>("");
@@ -171,9 +177,20 @@ export function ChatView() {
             <Plus className="h-4 w-4" />
           </Button>
         </div>
+        <div className="px-3 pb-2">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+            <Input
+              placeholder="Search sessions..."
+              value={sessionSearch}
+              onChange={(e) => setSessionSearch(e.target.value)}
+              className="h-8 pl-8 text-xs"
+            />
+          </div>
+        </div>
         <Separator />
         <ScrollArea className="flex-1 p-2">
-          {sessions.map((s) => (
+          {filteredSessions.map((s) => (
             <div
               key={s.id}
               className={`group flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer text-sm transition-colors ${
