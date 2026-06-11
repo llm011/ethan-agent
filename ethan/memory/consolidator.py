@@ -3,13 +3,14 @@
 两个触发点：
   1. 热区溢出攒够一批 → compress(): 生成温区 rolling summary
   2. 温区累积够了 → extract_cold(): 提取 key facts 并精简 summary
+
+Phase 2c: 重要性评分 — 决策/偏好/纠正的轮次得到更高权重。
 """
 from ethan.providers.base import BaseProvider, Message
 from ethan.providers.manager import create_provider
 from ethan.core.config import get_config
 
 
-# 自动推断廉价模型
 _CHEAP_MODEL_MAP = {
     "claude-opus": "claude-haiku-4-5",
     "claude-sonnet": "claude-haiku-4-5",
@@ -18,18 +19,36 @@ _CHEAP_MODEL_MAP = {
     "gemini-2.5-flash": "gemini-2.5-flash-lite",
     "gemini-3-pro": "gemini-3-flash",
     "gemini-3-flash": "gemini-3-flash",
+    "gemini-3.5-flash": "gemini-3.1-flash-lite-preview",
+    "gemini-3.1-pro": "gemini-3.1-flash-lite-preview",
+    "gemini-3.1-flash": "gemini-3.1-flash-lite-preview",
     "gpt-5": "gpt-4o-mini",
     "gpt-4o": "gpt-4o-mini",
     "gpt-4o-mini": "gpt-4o-mini",
 }
 
+# Keywords indicating high-importance turns
+_HIGH_IMPORTANCE_SIGNALS = [
+    "决定", "prefer", "偏好", "always", "never", "一定", "不要", "记住",
+    "correct", "纠正", "错了", "不对", "wrong", "改成", "应该",
+    "重要", "关键", "critical", "deadline", "截止",
+]
+
+
+def _score_importance(messages: list[Message]) -> float:
+    """Score a pair of messages for importance (0.0-1.0)."""
+    text = " ".join(m.content.lower() for m in messages if m.content)
+    score = 0.3  # baseline
+    for signal in _HIGH_IMPORTANCE_SIGNALS:
+        if signal in text:
+            score += 0.15
+    return min(score, 1.0)
+
 
 def _infer_cheap_model(main_model: str) -> str:
-    """根据主模型推断用于压缩的廉价模型。"""
     for prefix, cheap in _CHEAP_MODEL_MAP.items():
         if main_model.startswith(prefix):
             return cheap
-    # 默认回退到主模型自身
     return main_model
 
 
@@ -46,8 +65,11 @@ class Consolidator:
         return self._provider
 
     async def compress(self, messages: list[Message], existing_summary: str = "") -> str:
-        """将一批消息压缩成摘要文本。"""
+        """将一批消息压缩成摘要文本，高重要性内容保留更多细节。"""
         provider = await self._get_provider()
+
+        # Score importance per pair
+        importance = _score_importance(messages)
 
         conversation = "\n".join(
             f"{'用户' if m.role == 'user' else 'AI'}: {m.content}"
@@ -58,7 +80,12 @@ class Consolidator:
         if existing_summary:
             prompt_parts.append(f"已有的对话摘要：\n{existing_summary}\n")
         prompt_parts.append(f"新的对话内容：\n{conversation}")
-        prompt_parts.append("\n请将以上对话内容压缩成一段简洁的摘要（中文，100-200字），保留关键信息和用户意图。只输出摘要，不要其他内容。")
+
+        if importance > 0.6:
+            prompt_parts.append("\n注意：这段对话包含重要的决策、偏好或纠正，请保留更多细节。")
+            prompt_parts.append("请压缩为 150-300 字的摘要，关键决策和偏好要保留原文。只输出摘要。")
+        else:
+            prompt_parts.append("\n请将以上对话内容压缩成一段简洁的摘要（100-200字），保留关键信息和用户意图。只输出摘要。")
 
         resp = await provider.chat(
             [Message(role="user", content="\n".join(prompt_parts))],
@@ -98,18 +125,15 @@ class Consolidator:
         text = resp.content.strip()
 
         # 解析输出
-        key_facts = existing_facts
         condensed = ""
+        facts_list: list[str] = []
 
         if "[KEY_FACTS]" in text and "[SUMMARY]" in text:
             facts_part = text.split("[KEY_FACTS]")[1].split("[SUMMARY]")[0].strip()
             summary_part = text.split("[SUMMARY]")[1].strip()
-            if existing_facts:
-                key_facts = f"{existing_facts}\n{facts_part}"
-            else:
-                key_facts = facts_part
+            facts_list = [line.strip().lstrip("- ") for line in facts_part.split("\n") if line.strip()]
             condensed = summary_part
         else:
             condensed = text[:200]
 
-        return key_facts, condensed
+        return facts_list, condensed

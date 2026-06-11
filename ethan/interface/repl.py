@@ -22,7 +22,7 @@ from rich.text import Text
 from ethan.core.agent import Agent
 from ethan.core.config import get_config
 from ethan.memory.consolidator import Consolidator
-from ethan.memory.persistent import load_persistent, save_persistent
+from ethan.memory.facts import FactStore
 from ethan.memory.session import Session, SessionStore, _auto_title
 from ethan.memory.working import MemoryConfig, WorkingMemory
 from ethan.providers.base import Message
@@ -249,8 +249,9 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
     _banner()
 
     # 初始化分层记忆
+    fact_store = FactStore()
     memory = WorkingMemory(config=MemoryConfig())
-    memory.cold_facts = load_persistent()
+    memory.cold_facts = fact_store.build_context()
     consolidator = Consolidator(main_model=model_id)
 
     # 从 session 恢复历史到记忆系统
@@ -315,7 +316,7 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
                 approx_tokens = sum(len(m.content) for m in history)
                 model_id = session.model
                 memory = WorkingMemory(config=MemoryConfig())
-                memory.cold_facts = load_persistent()
+                memory.cold_facts = fact_store.build_context()
             continue
 
         msg = Message(role="user", content=user_input)
@@ -383,11 +384,12 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
 
             if memory.needs_cold_extraction():
                 try:
-                    facts, condensed = await consolidator.extract_cold(
+                    facts_list, condensed = await consolidator.extract_cold(
                         memory.warm_summary, memory.cold_facts
                     )
-                    memory.apply_cold_extraction(facts, condensed)
-                    save_persistent(facts)
+                    for fact in facts_list:
+                        fact_store.add(fact, confidence=0.8, source=session.id)
+                    memory.apply_cold_extraction(fact_store.build_context(), condensed)
                 except Exception:
                     pass
         else:
