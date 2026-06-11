@@ -9,7 +9,6 @@ import asyncio
 from datetime import datetime
 
 import typer
-import uvloop
 from rich.console import Console
 from rich.table import Table
 
@@ -23,6 +22,7 @@ app = typer.Typer(help="管理对话会话", invoke_without_command=True)
 def _default(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is None:
         console.print(ctx.get_help())
+        raise typer.Exit()
 
 
 @app.command("list")
@@ -52,7 +52,7 @@ def list_sessions(
 
         console.print(table)
 
-    uvloop.run(_run())
+    asyncio.run(_run())
 
 
 @app.command("show")
@@ -78,7 +78,7 @@ def show_session(
                 preview = msg.content[:100].replace("\n", " ")
                 console.print(f"  {preview}{'…' if len(msg.content) > 100 else ''}")
 
-    uvloop.run(_run())
+    asyncio.run(_run())
 
 
 @app.command("delete")
@@ -98,4 +98,4 @@ def delete_session(
             console.print(f"[red]会话 {session_id!r} 不存在。[/red]")
             raise typer.Exit(1)
 
-    uvloop.run(_run())
+    asyncio.run(_run())

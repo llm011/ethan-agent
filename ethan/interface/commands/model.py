@@ -22,6 +22,7 @@ app = typer.Typer(help="管理模型注册表", invoke_without_command=True)
 def _default(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is None:
         console.print(ctx.get_help())
+        raise typer.Exit()
 
 
 @app.command("list")

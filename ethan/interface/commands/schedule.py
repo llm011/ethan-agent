@@ -21,6 +21,7 @@ app = typer.Typer(help="Manage scheduled tasks", invoke_without_command=True)
 def _default(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is None:
         console.print(ctx.get_help())
+        raise typer.Exit()
 
 
 def _get_scheduler() -> Scheduler:

@@ -6,7 +6,7 @@
   ethan skill add               交互式创建新 Skill
 """
 import typer
-import uvloop
+import asyncio
 from rich.console import Console
 from rich.table import Table
 
@@ -20,6 +20,7 @@ app = typer.Typer(help="管理 Skills", invoke_without_command=True)
 def _default(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is None:
         console.print(ctx.get_help())
+        raise typer.Exit()
 
 
 @app.command("list")

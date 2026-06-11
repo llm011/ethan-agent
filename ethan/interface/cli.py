@@ -99,14 +99,14 @@ def chat(
     if ctx.invoked_subcommand is not None:
         return
 
-    import uvloop
+    import asyncio
     from ethan.interface.repl import run_repl, run_once
 
     agent = _build_agent(model)
     if prompt and not resume:
-        uvloop.run(run_once(agent, prompt))
+        asyncio.run(run_once(agent, prompt))
     else:
-        uvloop.run(run_repl(agent, resume_id=resume))
+        asyncio.run(run_repl(agent, resume_id=resume))
 
 
 if __name__ == "__main__":

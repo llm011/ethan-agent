@@ -198,7 +198,7 @@ ethan/
 - [x] 登录鉴权（Bearer token）
 - [x] Tool 状态可视化 — 显示 agent 正在调用什么工具
 - [ ] 响应式布局 — 移动端适配优化
-- [ ] Session 搜索
+- [x] Session 搜索
 
 ---
 

@@ -20,6 +20,7 @@ app = typer.Typer(help="管理 LLM provider 连接配置", invoke_without_comman
 def _default(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is None:
         console.print(ctx.get_help())
+        raise typer.Exit()
 
 
 @app.command("list")
