@@ -52,7 +52,7 @@ export function ChatView() {
     fetchSessions().then(setSessions).catch(() => {});
     fetchModels().then((m) => {
       setModels(m);
-      if (m.length > 0 && !selectedModel) setSelectedModel(m[0].id);
+      if (m.length > 0) setSelectedModel((prev) => prev || m[0].id);
     }).catch(() => {});
   }, []);
 

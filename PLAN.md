@@ -123,10 +123,11 @@ ethan/
 - [x] `ethan/tools/builtin/web_search.py` — Web Search（DuckDuckGo，免费无需 key）
 - [x] `ethan/tools/builtin/web.py` — Web Fetch（获取网页内容提取文本）
 - [x] `ethan/tools/builtin/file.py` — 文件读写 + 目录列表
+- [x] `ethan/tools/mcp_client.py` — MCP client（连接外部 MCP server，自动注册工具）
 - [x] 验证：agent 读取本地文件并总结 ✅
-- [ ] MCP client 接入（`mcp` Python SDK）
-- [ ] 更新 `docs/tools.md` — 补充内置工具和 MCP 接入
-- [ ] 验证：连接 MCP server 正常调用工具
+- [x] 验证：MCP 模块导入正常 ✅
+- [ ] 更新 `docs/tools.md` — 补充 MCP 接入说明
+- [ ] 验证：连接实际 MCP server 调用工具（需要具体 server）
 
 ---
 
