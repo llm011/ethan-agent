@@ -46,3 +46,4 @@ htmlcov/
 .agents/
 skills-lock.json
 .claude/
+.run/
