@@ -7,7 +7,7 @@ from typing import Any, AsyncIterator, Optional
 class ToolDefinition:
     name: str
     description: str
-    parameters: dict[str, Any]  # JSON Schema
+    parameters: dict[str, Any]
 
 
 @dataclass
@@ -19,10 +19,10 @@ class ToolCall:
 
 @dataclass
 class Message:
-    role: str  # "user" | "assistant" | "tool"
+    role: str
     content: str
     tool_calls: list[ToolCall] = field(default_factory=list)
-    tool_call_id: Optional[str] = None  # for tool result messages
+    tool_call_id: Optional[str] = None
     usage: Optional[dict] = None  # {"input": N, "output": N, "cache": N}
 
     @property
@@ -35,7 +35,16 @@ class StreamChunk:
     content: str
     tool_calls: list[ToolCall] = field(default_factory=list)
     is_final: bool = False
-    usage: Optional[dict] = None  # {"input": N, "output": N, "cache": N}
+    usage: Optional[dict] = None
+
+
+@dataclass
+class ToolEvent:
+    """Emitted by stream_chat when a tool is called."""
+    tool_name: str
+    args_summary: str
+    state: str  # "start" | "done" | "error"
+    result_preview: str = ""
 
 
 class BaseProvider(ABC):

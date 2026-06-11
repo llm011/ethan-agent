@@ -124,24 +124,45 @@ def _banner():
 
 async def run_once(agent: Agent, prompt: str) -> None:
     """单轮对话：发送一句，流式打印回复，退出。"""
+    from ethan.providers.base import ToolEvent
     messages = [Message(role="user", content=prompt)]
 
     spinner = Live(Spinner("dots", text="thinking...", style="dim"), console=console, transient=True)
     spinner.start()
-
+    spinner_stopped = False
+    render_live = Live(console=console, refresh_per_second=8, vertical_overflow="visible")
+    render_started = False
     full = ""
-    first = True
-    async for chunk in agent.stream_chat(messages):
-        if first:
+
+    async for item in agent.stream_chat(messages):
+        if isinstance(item, ToolEvent):
+            if item.state == "start":
+                if not spinner_stopped:
+                    spinner.stop()
+                    spinner_stopped = True
+                if render_started:
+                    render_live.stop()
+                    render_started = False
+                    console.print()
+                args = f"({item.args_summary})" if item.args_summary else ""
+                console.print(f"[dim]⚡ {item.tool_name}{args}[/dim]")
+            continue
+
+        if not spinner_stopped:
             spinner.stop()
-            first = False
-        full += chunk
+            spinner_stopped = True
+        if not render_started:
+            render_live.start()
+            render_started = True
+        full += item
+        render_live.update(RichMarkdown(full))
 
-    if first:
+    if render_started:
+        render_live.stop()
+    if not spinner_stopped:
         spinner.stop()
-
     if full:
-        console.print(RichMarkdown(full))
+        console.print()
 
 
 async def _handle_slash_command(cmd: str, store: SessionStore, session: Session, agent: Agent) -> Session | None:
@@ -335,6 +356,7 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
 
         full = ""
         first_chunk = True
+        current_activity = ""
         console.print()
         live = Live(Spinner("dots", text="thinking...", style="dim"), console=console, transient=True)
         live.start()
@@ -343,15 +365,35 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
         context.append(msg)
 
         try:
+            from ethan.providers.base import ToolEvent
             render_live = Live(console=console, refresh_per_second=8, vertical_overflow="visible")
-            render_live.start()
-            async for chunk in agent.stream_chat(context):
+            async for item in agent.stream_chat(context):
+                if isinstance(item, ToolEvent):
+                    if item.state == "start":
+                        activity_text = f"⚡ {item.tool_name}"
+                        if item.args_summary:
+                            activity_text += f"({item.args_summary})"
+                        current_activity = activity_text
+                        if first_chunk:
+                            live.stop()
+                            first_chunk = False
+                        if render_live.is_started:
+                            render_live.stop()
+                        console.print(f"[dim]{activity_text}[/dim]")
+                    elif item.state in ("done", "error"):
+                        current_activity = ""
+                    continue
+
+                # Text chunk
                 if first_chunk:
                     live.stop()
                     first_chunk = False
-                full += chunk
+                    render_live.start()
+                full += item
                 render_live.update(RichMarkdown(full))
-            render_live.stop()
+
+            if render_live.is_started:
+                render_live.stop()
             console.print()
         except KeyboardInterrupt:
             print("\n[interrupted]")

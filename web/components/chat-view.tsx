@@ -23,6 +23,7 @@ interface Message {
   role: "user" | "assistant";
   content: string;
   files?: string[];
+  toolActivity?: string;  // tool call indicator
 }
 
 export function ChatView() {
@@ -119,6 +120,7 @@ export function ChatView() {
     const chatMessages: ChatMessage[] = newMessages.map((m) => ({ role: m.role, content: m.content }));
 
     let assistantContent = "";
+    let currentActivity = "";
     setMessages([...newMessages, { role: "assistant", content: "" }]);
 
     try {
@@ -127,12 +129,20 @@ export function ChatView() {
           assistantContent = `Error: ${chunk.error}`;
           break;
         }
+        if (chunk.tool && chunk.state === "start") {
+          currentActivity = `⚡ ${chunk.tool}(${chunk.args || ""})`;
+          setMessages([...newMessages, { role: "assistant", content: assistantContent, toolActivity: currentActivity }]);
+        }
+        if (chunk.tool && chunk.state !== "start") {
+          currentActivity = "";
+        }
         if (chunk.content) {
           assistantContent += chunk.content;
-          setMessages([...newMessages, { role: "assistant", content: assistantContent }]);
+          setMessages([...newMessages, { role: "assistant", content: assistantContent, toolActivity: currentActivity }]);
         }
         if (chunk.done && chunk.usage) {
           setUsage({ input: chunk.usage.input, output: chunk.usage.output });
+          currentActivity = "";
         }
       }
     } catch (err) {
@@ -232,20 +242,28 @@ export function ChatView() {
                     <p className="whitespace-pre-wrap">{msg.content.split("\n\n").pop()}</p>
                   </>
                 ) : (
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    components={{
-                      pre: ({ children }) => <pre className="bg-background/50 rounded-lg p-3 overflow-x-auto text-xs">{children}</pre>,
-                      code: ({ className, children, ...props }) => {
-                        const isInline = !className;
-                        return isInline
-                          ? <code className="bg-background/50 px-1 py-0.5 rounded text-xs" {...props}>{children}</code>
-                          : <code className={className} {...props}>{children}</code>;
-                      },
-                    }}
-                  >
-                    {msg.content}
-                  </ReactMarkdown>
+                  <>
+                    {msg.toolActivity && (
+                      <div className="text-xs text-muted-foreground mb-2 flex items-center gap-1">
+                        <span className="animate-pulse">⚡</span>
+                        <span>{msg.toolActivity}</span>
+                      </div>
+                    )}
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        pre: ({ children }) => <pre className="bg-background/50 rounded-lg p-3 overflow-x-auto text-xs">{children}</pre>,
+                        code: ({ className, children, ...props }) => {
+                          const isInline = !className;
+                          return isInline
+                            ? <code className="bg-background/50 px-1 py-0.5 rounded text-xs" {...props}>{children}</code>
+                            : <code className={className} {...props}>{children}</code>;
+                        },
+                      }}
+                    >
+                      {msg.content}
+                    </ReactMarkdown>
+                  </>
                 )}
                 {msg.role === "assistant" && streaming && i === messages.length - 1 && (
                   <span className="inline-block w-2 h-4 bg-foreground/50 animate-pulse ml-0.5" />

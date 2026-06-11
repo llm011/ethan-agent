@@ -90,7 +90,9 @@ class Agent:
         return Message(role="assistant", content="[max tool iterations reached]")
 
     async def stream_chat(self, messages: list[Message]):
-        """流式 ReAct loop，逐 chunk yield 文本内容。"""
+        """流式 ReAct loop。Yields str chunks and ToolEvent objects."""
+        from ethan.providers.base import ToolEvent
+
         working = list(messages)
         tools = [t.to_definition() for t in self._registry.all()] or None
         system = self._build_system(working)
@@ -116,8 +118,16 @@ class Agent:
             if not response.is_tool_call:
                 return
 
+            # Emit tool events + execute
+            for tc in tool_calls:
+                args_summary = ", ".join(f"{k}={str(v)[:30]}" for k, v in list(tc.arguments.items())[:2])
+                yield ToolEvent(tool_name=tc.name, args_summary=args_summary, state="start")
+
             results: list[ToolResult] = await self._executor.execute(tool_calls)
-            for r in results:
+
+            for r, tc in zip(results, tool_calls):
+                preview = r.content[:60].replace("\n", " ") if r.content else ""
+                yield ToolEvent(tool_name=tc.name, args_summary="", state="done" if not r.is_error else "error", result_preview=preview)
                 working.append(Message(
                     role="tool",
                     content=r.content,

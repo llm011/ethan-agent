@@ -205,16 +205,25 @@ async def _stream_response(
     store: SessionStore,
     session_id: str | None,
 ) -> AsyncGenerator[str, None]:
+    from ethan.providers.base import ToolEvent
+
     full = ""
     try:
-        async for chunk in agent.stream_chat(messages):
-            full += chunk
-            data = json.dumps({"content": chunk}, ensure_ascii=False)
-            yield f"data: {data}\n\n"
+        async for item in agent.stream_chat(messages):
+            if isinstance(item, ToolEvent):
+                evt_data = json.dumps({
+                    "tool": item.tool_name,
+                    "args": item.args_summary,
+                    "state": item.state,
+                }, ensure_ascii=False)
+                yield f"data: {evt_data}\n\n"
+            else:
+                full += item
+                data = json.dumps({"content": item}, ensure_ascii=False)
+                yield f"data: {data}\n\n"
     except Exception as e:
         yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
-    # Save assistant response to session
     if session_id and full:
         await store.save_message(session_id, Message(role="assistant", content=full))
         await store.touch(session_id)
