@@ -1,0 +1,304 @@
+"use client";
+
+import { useState, useRef, useEffect, useCallback } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { Send, Paperclip, Loader2, Plus, Trash2, MessageSquare } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
+import {
+  ChatMessage,
+  SessionInfo,
+  createSession,
+  deleteSession,
+  fetchModels,
+  fetchSession,
+  fetchSessions,
+  streamChat,
+  uploadFile,
+} from "@/lib/api";
+
+interface Message {
+  role: "user" | "assistant";
+  content: string;
+  files?: string[];
+}
+
+export function ChatView() {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState("");
+  const [streaming, setStreaming] = useState(false);
+  const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [activeSession, setActiveSession] = useState<string | null>(null);
+  const [models, setModels] = useState<{ id: string; description: string }[]>([]);
+  const [selectedModel, setSelectedModel] = useState<string>("");
+  const [pendingFiles, setPendingFiles] = useState<{ name: string; path: string }[]>([]);
+  const [usage, setUsage] = useState<{ input: number; output: number } | null>(null);
+
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const scrollToBottom = useCallback(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, []);
+
+  useEffect(() => { scrollToBottom(); }, [messages, scrollToBottom]);
+
+  useEffect(() => {
+    fetchSessions().then(setSessions).catch(() => {});
+    fetchModels().then((m) => {
+      setModels(m);
+      if (m.length > 0 && !selectedModel) setSelectedModel(m[0].id);
+    }).catch(() => {});
+  }, []);
+
+  const loadSession = async (id: string) => {
+    const detail = await fetchSession(id);
+    setActiveSession(id);
+    setMessages(detail.messages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })));
+    setSelectedModel(detail.model);
+  };
+
+  const newSession = async () => {
+    const s = await createSession(selectedModel);
+    setActiveSession(s.id);
+    setMessages([]);
+    setUsage(null);
+    setSessions((prev) => [{ id: s.id, title: s.title, model: s.model, created_at: Date.now() / 1000, updated_at: Date.now() / 1000 }, ...prev]);
+  };
+
+  const removeSession = async (id: string) => {
+    await deleteSession(id);
+    setSessions((prev) => prev.filter((s) => s.id !== id));
+    if (activeSession === id) {
+      setActiveSession(null);
+      setMessages([]);
+    }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+    for (const file of Array.from(files)) {
+      const result = await uploadFile(file);
+      setPendingFiles((prev) => [...prev, { name: result.filename, path: result.path }]);
+    }
+    e.target.value = "";
+  };
+
+  const handleSend = async () => {
+    const text = input.trim();
+    if (!text && pendingFiles.length === 0) return;
+    if (streaming) return;
+
+    let sessionId = activeSession;
+    if (!sessionId) {
+      const s = await createSession(selectedModel);
+      sessionId = s.id;
+      setActiveSession(s.id);
+      setSessions((prev) => [{ id: s.id, title: text.slice(0, 30) || "New chat", model: s.model, created_at: Date.now() / 1000, updated_at: Date.now() / 1000 }, ...prev]);
+    }
+
+    let content = text;
+    if (pendingFiles.length > 0) {
+      const fileContext = pendingFiles.map((f) => `[Uploaded file: ${f.name} at ${f.path}]`).join("\n");
+      content = `${fileContext}\n\n${text}`;
+    }
+
+    const userMsg: Message = { role: "user", content, files: pendingFiles.map((f) => f.name) };
+    const newMessages = [...messages, userMsg];
+    setMessages(newMessages);
+    setInput("");
+    setPendingFiles([]);
+    setStreaming(true);
+
+    const chatMessages: ChatMessage[] = newMessages.map((m) => ({ role: m.role, content: m.content }));
+
+    let assistantContent = "";
+    setMessages([...newMessages, { role: "assistant", content: "" }]);
+
+    try {
+      for await (const chunk of streamChat(chatMessages, selectedModel, sessionId)) {
+        if (chunk.error) {
+          assistantContent = `Error: ${chunk.error}`;
+          break;
+        }
+        if (chunk.content) {
+          assistantContent += chunk.content;
+          setMessages([...newMessages, { role: "assistant", content: assistantContent }]);
+        }
+        if (chunk.done && chunk.usage) {
+          setUsage({ input: chunk.usage.input, output: chunk.usage.output });
+        }
+      }
+    } catch (err) {
+      assistantContent = `Error: ${err instanceof Error ? err.message : "Unknown error"}`;
+    }
+
+    setMessages([...newMessages, { role: "assistant", content: assistantContent }]);
+    setStreaming(false);
+    fetchSessions().then(setSessions).catch(() => {});
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  return (
+    <div className="flex h-screen bg-background">
+      {/* Sidebar */}
+      <aside className="w-64 border-r border-border flex flex-col bg-muted/30">
+        <div className="p-4 flex items-center justify-between">
+          <h1 className="text-lg font-semibold">Ethan</h1>
+          <Button variant="ghost" size="icon" onClick={newSession} title="New chat">
+            <Plus className="h-4 w-4" />
+          </Button>
+        </div>
+        <Separator />
+        <ScrollArea className="flex-1 p-2">
+          {sessions.map((s) => (
+            <div
+              key={s.id}
+              className={`group flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer text-sm transition-colors ${
+                activeSession === s.id ? "bg-accent text-accent-foreground" : "hover:bg-muted"
+              }`}
+              onClick={() => loadSession(s.id)}
+            >
+              <MessageSquare className="h-3.5 w-3.5 shrink-0 opacity-50" />
+              <span className="truncate flex-1">{s.title}</span>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 opacity-0 group-hover:opacity-100"
+                onClick={(e) => { e.stopPropagation(); removeSession(s.id); }}
+              >
+                <Trash2 className="h-3 w-3" />
+              </Button>
+            </div>
+          ))}
+        </ScrollArea>
+      </aside>
+
+      {/* Main area */}
+      <main className="flex-1 flex flex-col">
+        {/* Header */}
+        <header className="h-12 border-b border-border flex items-center px-4 gap-4">
+          <select
+            value={selectedModel}
+            onChange={(e) => setSelectedModel(e.target.value)}
+            className="text-sm bg-transparent border border-border rounded-md px-2 py-1 outline-none"
+          >
+            {models.map((m) => (
+              <option key={m.id} value={m.id}>{m.description || m.id}</option>
+            ))}
+          </select>
+          {usage && (
+            <span className="text-xs text-muted-foreground ml-auto">
+              ↑{usage.input} ↓{usage.output} tokens
+            </span>
+          )}
+        </header>
+
+        {/* Messages */}
+        <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
+          {messages.length === 0 && (
+            <div className="flex items-center justify-center h-full text-muted-foreground">
+              <p>Start a conversation</p>
+            </div>
+          )}
+          {messages.map((msg, i) => (
+            <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+              <div
+                className={`max-w-[80%] rounded-2xl px-4 py-3 ${
+                  msg.role === "user"
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted prose prose-sm dark:prose-invert max-w-none"
+                }`}
+              >
+                {msg.role === "user" ? (
+                  <>
+                    {msg.files && msg.files.length > 0 && (
+                      <div className="text-xs opacity-70 mb-1">
+                        {msg.files.map((f, j) => <span key={j} className="mr-2">📎 {f}</span>)}
+                      </div>
+                    )}
+                    <p className="whitespace-pre-wrap">{msg.content.split("\n\n").pop()}</p>
+                  </>
+                ) : (
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      pre: ({ children }) => <pre className="bg-background/50 rounded-lg p-3 overflow-x-auto text-xs">{children}</pre>,
+                      code: ({ className, children, ...props }) => {
+                        const isInline = !className;
+                        return isInline
+                          ? <code className="bg-background/50 px-1 py-0.5 rounded text-xs" {...props}>{children}</code>
+                          : <code className={className} {...props}>{children}</code>;
+                      },
+                    }}
+                  >
+                    {msg.content}
+                  </ReactMarkdown>
+                )}
+                {msg.role === "assistant" && streaming && i === messages.length - 1 && (
+                  <span className="inline-block w-2 h-4 bg-foreground/50 animate-pulse ml-0.5" />
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Input area */}
+        <div className="border-t border-border p-4">
+          {pendingFiles.length > 0 && (
+            <div className="flex gap-2 mb-2 flex-wrap">
+              {pendingFiles.map((f, i) => (
+                <span key={i} className="text-xs bg-muted px-2 py-1 rounded-md flex items-center gap-1">
+                  📎 {f.name}
+                  <button onClick={() => setPendingFiles((prev) => prev.filter((_, j) => j !== i))} className="text-muted-foreground hover:text-foreground">×</button>
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="flex items-end gap-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="shrink-0"
+              onClick={() => fileRef.current?.click()}
+              disabled={streaming}
+            >
+              <Paperclip className="h-4 w-4" />
+            </Button>
+            <input ref={fileRef} type="file" className="hidden" multiple onChange={handleFileUpload} />
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Type a message... (Enter to send, Shift+Enter for newline)"
+              className="flex-1 resize-none bg-muted border border-border rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-ring min-h-[44px] max-h-[200px]"
+              rows={1}
+              disabled={streaming}
+            />
+            <Button
+              size="icon"
+              className="shrink-0"
+              onClick={handleSend}
+              disabled={streaming || (!input.trim() && pendingFiles.length === 0)}
+            >
+              {streaming ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            </Button>
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}

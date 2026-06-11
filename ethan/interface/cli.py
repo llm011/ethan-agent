@@ -5,7 +5,6 @@
   ethan -p "你好"          直接发送一句并返回
   ethan -m MODEL           用指定模型
   ethan -r last            恢复上次会话
-  ethan --tui              使用 Textual 全屏 TUI
   ethan model ...          管理模型注册表
   ethan provider ...       管理 provider 连接配置
   ethan session ...        管理对话会话
@@ -83,16 +82,9 @@ def chat(
     model: Optional[str] = typer.Option(None, "-m", "--model", help="Model ID"),
     prompt: Optional[str] = typer.Option(None, "-p", "--prompt", help="Single-turn prompt"),
     resume: Optional[str] = typer.Option(None, "-r", "--resume", help="Resume session (ID or 'last')"),
-    tui: bool = typer.Option(False, "--tui", help="Full-screen TUI mode"),
 ) -> None:
     """Start a conversation. Defaults to lightweight REPL mode."""
     if ctx.invoked_subcommand is not None:
-        return
-
-    if tui:
-        from ethan.interface.tui import ChatApp
-        agent = _build_agent(model)
-        ChatApp(agent=agent, initial_prompt=prompt).run()
         return
 
     import uvloop

@@ -25,6 +25,7 @@ class ModelEntry(BaseModel):
 
 class NetworkConfig(BaseModel):
     proxy: Optional[str] = None  # http://127.0.0.1:7890
+    auth_token: str = ""  # API auth token for web UI
 
 
 class DefaultsConfig(BaseModel):

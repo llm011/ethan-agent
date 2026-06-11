@@ -8,6 +8,7 @@ import time
 from datetime import datetime
 
 from prompt_toolkit import PromptSession
+from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.formatted_text import HTML, FormattedText
 from prompt_toolkit.styles import Style
 from rich.console import Console
@@ -46,6 +47,32 @@ def _format_duration(seconds: float) -> str:
         return f"{m}m{s}s"
     h, m = divmod(m, 60)
     return f"{h}h{m}m"
+
+
+_SLASH_COMMANDS = [
+    ("/sessions", "List recent sessions"),
+    ("/resume", "Resume a session by ID"),
+    ("/new", "Start new session"),
+    ("/model", "Show or switch model"),
+    ("/help", "Show available commands"),
+]
+
+
+class SlashCompleter(Completer):
+    """Auto-complete slash commands with dynamic matching."""
+
+    def get_completions(self, document, complete_event):
+        text = document.text_before_cursor
+        if not text.startswith("/"):
+            return
+
+        for cmd, desc in _SLASH_COMMANDS:
+            if cmd.startswith(text):
+                yield Completion(
+                    cmd,
+                    start_position=-len(text),
+                    display_meta=desc,
+                )
 
 
 def _shorten_path(path: str, max_len: int = 30) -> str:
@@ -247,8 +274,9 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
     total_tokens_out = 0
     total_tokens_cache = 0
 
-    # prompt_toolkit session
-    pt_session = PromptSession(style=_PT_STYLE)
+    # prompt_toolkit session with slash command completion
+    pt_session = PromptSession(style=_PT_STYLE, completer=SlashCompleter(), complete_while_typing=True)
+    _exit_press_time = 0.0
 
     while True:
         toolbar = _make_toolbar(model_id, total_tokens_in, total_tokens_out, total_tokens_cache, session.id)
@@ -259,10 +287,17 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
                 "› ",
                 bottom_toolbar=toolbar,
             )).strip()
+            _exit_press_time = 0.0  # reset on successful input
         except (EOFError, KeyboardInterrupt):
-            elapsed = _format_duration(time.time() - start_time)
-            console.print(f"\n[dim]Bye · {elapsed}[/dim]")
-            break
+            now = time.time()
+            if now - _exit_press_time < 2.0:
+                elapsed = _format_duration(now - start_time)
+                console.print(f"\n[dim]Bye · {elapsed}[/dim]")
+                break
+            else:
+                _exit_press_time = now
+                console.print("\n[dim]Press Ctrl+C again to exit[/dim]")
+                continue
 
         if not user_input:
             continue
