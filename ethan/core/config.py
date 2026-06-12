@@ -28,6 +28,27 @@ class NetworkConfig(BaseModel):
     auth_token: str = ""  # API auth token for web UI
 
 
+class LarkConfig(BaseModel):
+    app_id: str = ""
+    app_secret: str = ""
+    verification_token: str = ""  # for event subscription verification
+    encrypt_key: str = ""  # optional, for encrypted events
+
+
+class RoutingConfig(BaseModel):
+    """任务路由配置：匹配 fast_keywords 中任意关键词且消息长度 ≤ fast_max_length 时走 Fast Path。"""
+    fast_keywords: list[str] = Field(default_factory=lambda: [
+        "关*灯", "开*灯",
+        "关*窗帘", "开*窗帘",
+        "关*空调", "开*空调",
+        "关*电视", "开*电视",
+        "关*风扇", "开*风扇",
+        "调*亮度", "调*温度", "调*音量",
+        "播放音乐", "暂停", "下一首", "上一首",
+    ])
+    fast_max_length: int = 12  # 消息超过此长度不走 Fast Path（简单控制命令通常 ≤ 10 字）
+
+
 class DefaultsConfig(BaseModel):
     workspace: str = str(Path.home() / ".ethan")
     model: str = "claude-sonnet-4-6"
@@ -36,6 +57,7 @@ class DefaultsConfig(BaseModel):
     language: str = "zh"
     max_tokens: int = 4096
     max_tool_iterations: int = 10
+    routing: RoutingConfig = Field(default_factory=RoutingConfig)
 
 
 class Config(BaseModel):
@@ -43,6 +65,7 @@ class Config(BaseModel):
     models: list[ModelEntry] = Field(default_factory=list)
     network: NetworkConfig = Field(default_factory=NetworkConfig)
     defaults: DefaultsConfig = Field(default_factory=DefaultsConfig)
+    lark: LarkConfig = Field(default_factory=LarkConfig)
 
     def get_model(self, model_id: str) -> Optional[ModelEntry]:
         for m in self.models:

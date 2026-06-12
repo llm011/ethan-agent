@@ -10,6 +10,49 @@ from ethan.skills.registry import SkillRegistry
 from ethan.tools.base import ToolResult
 from ethan.tools.registry import ToolExecutor, ToolRegistry
 
+import re
+
+# 强制走完整 Loop 的信号（不可配置，优先级最高）
+_FORCE_FULL_SIGNALS = [
+    "帮我写", "写一个", "写代码", "实现", "分析", "解释", "为什么",
+    "怎么", "如何", "总结", "生成", "创建", "建立", "搭建",
+    "重构", "优化代码", "调试", "debug", "修复", "定时任务",
+    "提醒我", "设置一个", "schedule", "reminder",
+    "write", "implement", "analyze", "explain", "generate", "create",
+    "why", "how to", "refactor", "summarize",
+]
+
+
+def _is_fast_path(text: str) -> bool:
+    """
+    任务路由判断。规则：
+    1. 有 FORCE_FULL 信号 → Full Path（最高优先）
+    2. 命中 config.routing.fast_keywords 且长度 ≤ fast_max_length → Fast Path
+       关键词支持简单通配符 * (e.g. "关*灯" 匹配 "关客厅灯")
+    3. 其余 → Full Path
+    """
+    lower = text.lower()
+
+    # 强制走完整路径
+    if any(sig in lower for sig in _FORCE_FULL_SIGNALS):
+        return False
+
+    routing = get_config().defaults.routing
+    if len(text.strip()) > routing.fast_max_length:
+        return False
+
+    for kw in routing.fast_keywords:
+        if "*" in kw:
+            # 支持通配符：把 * 转换为 .* 进行正则匹配
+            pattern = re.compile(kw.replace("*", ".*"))
+            if pattern.search(text):
+                return True
+        else:
+            if kw in text:
+                return True
+
+    return False
+
 
 @dataclass
 class UsageStats:
@@ -44,77 +87,87 @@ class Agent:
         self._max_iterations = config.defaults.max_tool_iterations
         self.usage = UsageStats()
 
-    def _build_system(self, messages: list[Message]) -> str:
-        """构建 system prompt，注入时间、长期记忆、Skills、Procedures。"""
-        import os
+    def _get_last_user_text(self, messages: list[Message]) -> str:
+        for m in reversed(messages):
+            if m.role == "user" and m.content:
+                return m.content
+        return ""
+
+    def _build_system(self, messages: list[Message], fast: bool = False) -> str:
+        """构建 system prompt。fast=True 时使用极简版本减少 token。"""
         from pathlib import Path
 
         config = get_config()
         workspace = config.defaults.workspace
         system_dir = Path(workspace) / "system"
-        
-        identity_path = system_dir / "identity.md"
-        soul_path = system_dir / "soul.md"
-        format_path = system_dir / "format.md"
 
-        identity_content = ""
-        if identity_path.exists():
-            identity_content = identity_path.read_text(encoding="utf-8").strip()
-
-        soul_content = ""
-        if soul_path.exists():
-            soul_content = soul_path.read_text(encoding="utf-8").strip()
-
-        format_content = ""
-        if format_path.exists():
-            format_content = format_path.read_text(encoding="utf-8").strip()
+        identity_content = self._base_system
+        if (system_dir / "identity.md").exists():
+            identity_content = (system_dir / "identity.md").read_text(encoding="utf-8").strip()
 
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S %A")
-        
-        parts = []
-        if identity_content:
-            parts.append(f"<identity>\n{identity_content}\n</identity>")
-        elif self._base_system:
-            parts.append(self._base_system)
-            
+
+        if fast:
+            # Fast Path: 极简 Prompt — 身份 + 时间 + 少量记忆 + 相关 Skill
+            parts = [identity_content, f"Current time: {now}"]
+            facts_ctx = self._facts.build_context(max_facts=5)
+            if facts_ctx:
+                parts.append(f"<user_context>\n{facts_ctx}\n</user_context>")
+            last_user = self._get_last_user_text(messages)
+            if self._skills and last_user:
+                skill_ctx = self._skills.build_context(last_user)
+                if skill_ctx:
+                    parts.append(f"<relevant_skills>\n{skill_ctx}\n</relevant_skills>")
+            return "\n\n".join(parts)
+
+        # Full Path: 完整 Prompt
+        soul_content = ""
+        if (system_dir / "soul.md").exists():
+            soul_content = (system_dir / "soul.md").read_text(encoding="utf-8").strip()
+
+        format_content = ""
+        if (system_dir / "format.md").exists():
+            format_content = (system_dir / "format.md").read_text(encoding="utf-8").strip()
+
+        parts = [f"<identity>\n{identity_content}\n</identity>"]
         if soul_content:
             parts.append(f"<operating_principles>\n{soul_content}\n</operating_principles>")
-            
         if format_content:
             parts.append(f"<formatting_rules>\n{format_content}\n</formatting_rules>")
-            
         parts.append(f"Current time: {now}")
         parts.append(f"Your workspace directory is {workspace}. System configurations and memories reside here.")
 
-        # Long-term facts (cold memory) — injected for all interfaces
         facts_ctx = self._facts.build_context(max_facts=15)
         if facts_ctx:
             parts.append(f"<user_context>\n{facts_ctx}\n</user_context>")
 
-        # Procedural memory
         proc_ctx = self._procedures.build_context()
         if proc_ctx:
             parts.append(f"<procedures>\n{proc_ctx}\n</procedures>")
 
-        # Skills
-        if self._skills and messages:
-            last_user = ""
-            for m in reversed(messages):
-                if m.role == "user" and m.content:
-                    last_user = m.content
-                    break
-            if last_user:
-                skill_ctx = self._skills.build_context(last_user)
-                if skill_ctx:
-                    parts.append(f"<relevant_skills>\n{skill_ctx}\n</relevant_skills>")
+        last_user = self._get_last_user_text(messages)
+        if self._skills and last_user:
+            skill_ctx = self._skills.build_context(last_user)
+            if skill_ctx:
+                parts.append(f"<relevant_skills>\n{skill_ctx}\n</relevant_skills>")
 
         return "\n\n".join(parts)
 
     async def chat(self, messages: list[Message]) -> Message:
-        """运行 ReAct loop，直到 LLM 返回非 tool_call 的回复。"""
+        """运行对话。简单控制类请求走 Fast Path（单次调用，无工具）。"""
         working = list(messages)
+        last_user = self._get_last_user_text(working)
+        fast = _is_fast_path(last_user)
+
+        if fast:
+            system = self._build_system(working, fast=True)
+            response = await self._provider.chat(working, tools=None, system=system)
+            self.usage.add(response.usage)
+            return response
+
+        # Full Path: 完整 ReAct Loop
         tools = [t.to_definition() for t in self._registry.all()] or None
-        system = self._build_system(working)
+        system = self._build_system(working, fast=False)
 
         for _ in range(self._max_iterations):
             response = await self._provider.chat(working, tools=tools, system=system)
@@ -135,20 +188,31 @@ class Agent:
         return Message(role="assistant", content="[max tool iterations reached]")
 
     async def stream_chat(self, messages: list[Message]):
-        """流式 ReAct loop。Yields str chunks and ToolEvent objects."""
+        """流式对话。简单控制类请求走 Fast Path。"""
         from ethan.providers.base import ToolEvent
 
         working = list(messages)
+        last_user = self._get_last_user_text(working)
+        fast = _is_fast_path(last_user)
+
+        if fast:
+            system = self._build_system(working, fast=True)
+            async for chunk in self._provider.stream_chat(working, tools=None, system=system):
+                if chunk.content:
+                    yield chunk.content
+                if chunk.is_final:
+                    self.usage.add(chunk.usage)
+            return
+
+        # Full Path: 完整流式 ReAct Loop
         tools = [t.to_definition() for t in self._registry.all()] or None
-        system = self._build_system(working)
+        system = self._build_system(working, fast=False)
 
         for _ in range(self._max_iterations):
             full_content = ""
             final_chunk = None
 
-            async for chunk in self._provider.stream_chat(
-                working, tools=tools, system=system
-            ):
+            async for chunk in self._provider.stream_chat(working, tools=tools, system=system):
                 if chunk.content:
                     full_content += chunk.content
                     yield chunk.content
@@ -163,7 +227,6 @@ class Agent:
             if not response.is_tool_call:
                 return
 
-            # Emit tool events + execute
             for tc in tool_calls:
                 args_summary = ", ".join(f"{k}={str(v)[:30]}" for k, v in list(tc.arguments.items())[:2])
                 yield ToolEvent(tool_name=tc.name, args_summary=args_summary, state="start")

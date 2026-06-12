@@ -2,6 +2,7 @@
 import json
 import os
 import tempfile
+from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
@@ -25,8 +26,20 @@ from ethan.tools.registry import ToolRegistry
 from ethan.scheduler.cron import Scheduler
 from ethan.knowledge.base import FilesystemKnowledgeBase
 from ethan.core.config import CONFIG_DIR
+from ethan.interface.lark import lark_router
+from ethan.interface.lark_events import start_lark_listener, stop_lark_listener
 
-app = FastAPI(title="Ethan Agent API", version=__version__)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: auto-connect to Feishu via WebSocket (skips if not configured)
+    start_lark_listener()
+    yield
+    # Shutdown
+    stop_lark_listener()
+
+
+app = FastAPI(title="Ethan Agent API", version=__version__, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -35,6 +48,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(lark_router)
 
 
 # ── Auth ────────────────────────────────────────────────────────
