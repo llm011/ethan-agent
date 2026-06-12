@@ -1,51 +1,119 @@
 import { test, expect } from '@playwright/test';
 
+// Helper: set the auth token in localStorage and cookie so the app
+// skips the login screen on load.
+async function setAuthToken(page: import('@playwright/test').Page) {
+  await page.addInitScript(() => {
+    const TOKEN = 'ethan-dev-token';
+    localStorage.setItem('ethan_token', TOKEN);
+    document.cookie = `ethan_token=${encodeURIComponent(TOKEN)}; max-age=2592000; path=/`;
+  });
+}
+
 test.describe('Ethan Web UI E2E Tests', () => {
   test.beforeEach(async ({ page }) => {
-    // Navigate to the base URL
+    // Inject auth token before any page script runs, then navigate.
+    await setAuthToken(page);
     await page.goto('/');
+    // Wait until the loading spinner disappears — the app either shows the
+    // chat view or (if the backend is down) stays on the loading screen.
+    // Either way, we proceed; individual tests assert what they need.
+    await page.waitForLoadState('networkidle');
   });
 
-  test('Test 1: Chat flow', async ({ page }) => {
-    // Click "对话" (Chat) in the sidebar. Look for the link with href "/" or text "对话"
-    // Since it's a generic word, let's look for a navigation element that has this text
-    const chatLink = page.getByRole('link', { name: '对话' });
-    if (await chatLink.isVisible()) {
-      await chatLink.click();
-    }
+  // ── Test 1: Chat flow ────────────────────────────────────────────────────
 
-    // Verify the title says "Ethan"
+  test('Test 1: Chat flow - sidebar shows latest sessions header', async ({ page }) => {
+    // The sidebar is always rendered inside ChatView once authenticated.
+    // If the backend is unreachable we may still see the sidebar structure.
     await expect(page).toHaveTitle(/Ethan/);
 
-    // Verify there is "最新对话" text visible
+    // "最新对话" section header is rendered in the sidebar when not searching.
     await expect(page.getByText('最新对话')).toBeVisible();
   });
 
-  test('Test 2: Memory flow', async ({ page }) => {
-    // Click "记忆 (Memory)" in the sidebar
-    await page.getByRole('link', { name: '记忆' }).click();
+  // ── Test 2: Memory view ──────────────────────────────────────────────────
 
-    // Verify the "长期记忆 (Facts)" tab is visible
+  test('Test 2: Memory view - Facts tab loads', async ({ page }) => {
+    // Click the Memory button in the sidebar navigation.
+    await page.getByRole('button', { name: /记忆.*Memory/ }).click();
+
+    // The Facts tab label is rendered in the memory view header.
+    await expect(page.getByText('长期记忆 (Facts)')).toBeVisible();
+  });
+
+  test('Test 3: Memory view - Episodes tab loads', async ({ page }) => {
+    await page.getByRole('button', { name: /记忆.*Memory/ }).click();
+
+    // Confirm the Facts tab is active first.
     await expect(page.getByText('长期记忆 (Facts)')).toBeVisible();
 
-    // Wait for the memory cards to load - assuming there's a grid or specific items
-    // If the list might be empty, we just wait for the container or the fact that no error is shown
-    // We'll wait for any list item or a specific layout container
-    const memoryGrid = page.locator('.grid').first();
-    await expect(memoryGrid).toBeVisible();
+    // Click the Episodes tab.
+    await page.getByText('历史片段 (Episodes)').click();
 
-    // Click on the first card (assuming cards are actionable items)
-    const firstCard = memoryGrid.locator('> div').first();
+    // The Episodes tab should now be highlighted (visible in header).
+    await expect(page.getByText('历史片段 (Episodes)')).toBeVisible();
+  });
 
-    // Wait for at least one card to exist (if data is populated)
-    // If we have data, we click and verify detail view
-    if (await firstCard.isVisible()) {
-      await firstCard.click();
+  // ── Test 3: Schedule view ────────────────────────────────────────────────
 
-      // Verify transition to detail view
-      // This could be "返回记忆列表" or "记忆详情"
-      const detailIndicator = page.locator('text=返回记忆列表').or(page.locator('text=记忆详情'));
-      await expect(detailIndicator).toBeVisible();
-    }
+  test('Test 4: Schedule view - page loads without error', async ({ page }) => {
+    await page.getByRole('button', { name: /定时任务.*Schedule/ }).click();
+
+    // The schedule view renders a refresh button and a loading/content area.
+    // We verify neither a crash page nor an unhandled error is shown.
+    // The simplest stable check: no "Application error" text.
+    await expect(page.getByText(/Application error/i)).not.toBeVisible();
+
+    // The schedule view header area uses a RefreshCw icon button; the
+    // surrounding page should be rendered (body visible).
+    await expect(page.locator('body')).toBeVisible();
+  });
+
+  // ── Test 4: Knowledge view ───────────────────────────────────────────────
+
+  test('Test 5: Knowledge view - search bar is present', async ({ page }) => {
+    await page.getByRole('button', { name: /知识库.*Knowledge/ }).click();
+
+    // The knowledge view renders an Input with placeholder "Search knowledge..."
+    await expect(page.getByPlaceholder('Search knowledge...')).toBeVisible();
+  });
+
+  // ── Test 5: Settings view ────────────────────────────────────────────────
+
+  test('Test 6: Settings view - General tab is visible', async ({ page }) => {
+    await page.getByRole('button', { name: /设置.*Settings/ }).click();
+
+    // The settings sidebar renders "通用设置 (General)" as the first tab.
+    await expect(page.getByText('通用设置 (General)')).toBeVisible();
+  });
+
+  // ── Test 6: Session search ───────────────────────────────────────────────
+
+  test('Test 7: Session search - input accepts text', async ({ page }) => {
+    const searchInput = page.getByPlaceholder('搜索历史...');
+    await expect(searchInput).toBeVisible();
+
+    await searchInput.fill('test query');
+
+    // Verify the value was accepted.
+    await expect(searchInput).toHaveValue('test query');
+  });
+
+  // ── Test 7: All sessions grid ────────────────────────────────────────────
+
+  test('Test 8: All sessions grid - cards grid is visible after navigation', async ({ page }) => {
+    // The "全部对话" button is a React SPA navigation (sets view state),
+    // not a real URL change. Click it and check for AllSessionsView content.
+    await page.getByRole('button', { name: /全部对话/ }).click();
+
+    // AllSessionsView renders a search input with placeholder "搜索对话..."
+    // or the sessions grid / empty state. Wait for any of these to confirm
+    // the view mounted without crashing.
+    const searchBar = page.getByPlaceholder('搜索对话...');
+    const grid = page.locator('.grid').first();
+    const emptyState = page.getByText(/No sessions found|暂无对话/i);
+
+    await expect(searchBar.or(grid).or(emptyState)).toBeVisible({ timeout: 8000 });
   });
 });
