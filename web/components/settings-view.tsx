@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { fetchAgentSettings, updateAgentSettings, AgentSettings } from "@/lib/api";
+import { fetchAgentSettings, updateAgentSettings, AgentSettings, fetchSystemSettings, updateSystemSettings, SystemSettings } from "@/lib/api";
 
 interface SettingsViewProps {
   models: { id: string; description: string }[];
@@ -17,13 +17,20 @@ export function SettingsView({ models }: SettingsViewProps) {
     language: "zh",
     default_model: "",
   });
+  const [sysForm, setSysForm] = useState<SystemSettings>({
+    identity: "",
+    soul: "",
+  });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   useEffect(() => {
-    fetchAgentSettings()
-      .then((data) => setForm(data))
+    Promise.all([fetchAgentSettings(), fetchSystemSettings()])
+      .then(([agentData, sysData]) => {
+        setForm(agentData);
+        setSysForm(sysData);
+      })
       .catch(() => setMessage({ type: "error", text: "加载设置失败" }))
       .finally(() => setLoading(false));
   }, []);
@@ -32,7 +39,10 @@ export function SettingsView({ models }: SettingsViewProps) {
     setSaving(true);
     setMessage(null);
     try {
-      await updateAgentSettings(form);
+      await Promise.all([
+        updateAgentSettings(form),
+        updateSystemSettings(sysForm)
+      ]);
       setMessage({ type: "success", text: "设置已保存" });
     } catch {
       setMessage({ type: "error", text: "保存失败，请重试" });
@@ -66,17 +76,30 @@ export function SettingsView({ models }: SettingsViewProps) {
             />
           </div>
 
-          {/* System Prompt */}
+          {/* Identity (~/.ethan/system/identity.md) */}
           <div className="space-y-1.5">
-            <label className="text-sm font-medium">System Prompt</label>
+            <label className="text-sm font-medium">Identity (Core Persona)</label>
             <textarea
-              rows={8}
-              value={form.system_prompt}
-              onChange={(e) => setForm((prev) => ({ ...prev, system_prompt: e.target.value }))}
-              placeholder="输入系统提示词..."
-              className="w-full resize-y bg-muted border border-border rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+              rows={6}
+              value={sysForm.identity}
+              onChange={(e) => setSysForm((prev) => ({ ...prev, identity: e.target.value }))}
+              placeholder="定义核心人格（Ethan、数字实体等）..."
+              className="w-full resize-y bg-muted border border-border rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-ring font-mono"
             />
-            <p className="text-xs text-muted-foreground">(每次对话注入到 system prompt)</p>
+            <p className="text-xs text-muted-foreground">存储于 ~/.ethan/system/identity.md</p>
+          </div>
+
+          {/* Soul (~/.ethan/system/soul.md) */}
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Soul (Operating Principles)</label>
+            <textarea
+              rows={10}
+              value={sysForm.soul}
+              onChange={(e) => setSysForm((prev) => ({ ...prev, soul: e.target.value }))}
+              placeholder="定义执行原则（Loop、ReAct、Error Handling等）..."
+              className="w-full resize-y bg-muted border border-border rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-ring font-mono"
+            />
+            <p className="text-xs text-muted-foreground">存储于 ~/.ethan/system/soul.md，建议包含正反示例</p>
           </div>
 
           {/* 默认语言 */}

@@ -1,4 +1,6 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8900";
+const API_URL = typeof window !== "undefined" 
+  ? `${window.location.protocol}//${window.location.hostname}:8900`
+  : (process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8900");
 
 let authToken = "";
 
@@ -131,7 +133,28 @@ export async function updateAgentSettings(patch: Partial<AgentSettings>): Promis
   });
 }
 
-export interface Fact { id: string; content: string; created_at?: number; confidence: number; category: string; source: string; timestamp: number; superseded_by: string | null; }
+
+export interface SystemSettings {
+  identity: string;
+  soul: string;
+}
+
+export async function fetchSystemSettings(): Promise<SystemSettings> {
+  const res = await fetch(`${API_URL}/settings/system`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed to fetch system settings");
+  return res.json();
+}
+
+export async function updateSystemSettings(patch: Partial<SystemSettings>): Promise<void> {
+  await fetch(`${API_URL}/settings/system`, {
+    method: "PATCH",
+    headers: headers(),
+    body: JSON.stringify(patch),
+  });
+}
+
+
+export interface Fact { id: string; content: string; confidence: number; category: string; source: string; created_at: number; superseded_by: string | null; }
 export interface Episode { id: string; session_id: string; timestamp: number; summary: string; turn_count: number; keywords: string[]; model: string; }
 
 export interface ScheduleJob {
@@ -245,4 +268,43 @@ export async function deleteKnowledge(source: string): Promise<void> {
     headers: headers()
   });
   if (!res.ok) throw new Error("Failed");
+}
+
+export async function fetchLogs(type: "backend" | "frontend" = "backend", lines: number = 500, q?: string): Promise<string> {
+  const params = new URLSearchParams({ type, lines: String(lines) });
+  if (q) params.set("q", q);
+  const res = await fetch(`${API_URL}/logs?${params}`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed to fetch logs");
+  const data = await res.json();
+  return data.content || "";
+}
+
+
+export interface SkillInfo {
+  name: string;
+  description: string;
+  trigger: string[];
+  content: string;
+}
+
+export async function fetchSkills(): Promise<SkillInfo[]> {
+  const res = await fetch(`${API_URL}/skills`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed to fetch skills");
+  return res.json().then(data => data.skills);
+}
+
+export async function fetchSkill(name: string): Promise<SkillInfo> {
+  const res = await fetch(`${API_URL}/skills/${encodeURIComponent(name)}`, { headers: headers() });
+  if (!res.ok) throw new Error("Skill not found");
+  return res.json();
+}
+
+export async function saveSkill(skill: SkillInfo): Promise<{ name: string }> {
+  const res = await fetch(`${API_URL}/skills`, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify(skill)
+  });
+  if (!res.ok) throw new Error("Failed to save skill");
+  return res.json();
 }

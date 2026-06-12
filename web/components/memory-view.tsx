@@ -139,7 +139,7 @@ export function MemoryView() {
         {activeTab === "facts" && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {facts.map((fact, i) => (
-              <Card key={i} className="cursor-pointer hover:border-primary transition-colors" onClick={() => setSelectedFact(fact)}>
+              <Card key={i} className="cursor-pointer hover:border-primary transition-colors shadow-none border-border/60 bg-muted/10" onClick={() => setSelectedFact(fact)}>
                 <CardHeader className="pb-2">
                   <div className="flex justify-between items-start">
                     <CardTitle className="text-sm font-semibold">{fact.category}</CardTitle>
@@ -148,7 +148,7 @@ export function MemoryView() {
                     </Badge>
                   </div>
                   <CardDescription className="text-xs">
-                    {new Date(fact.timestamp * 1000).toLocaleString()}
+                    {new Date(fact.created_at * 1000).toLocaleString()}
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -167,7 +167,7 @@ export function MemoryView() {
         {activeTab === "episodes" && (
           <div className="space-y-4">
             {episodes.map((episode, i) => (
-              <Card key={i} className="cursor-pointer hover:border-primary transition-colors" onClick={() => setSelectedEpisode(episode)}>
+              <Card key={i} className="cursor-pointer hover:border-primary transition-colors shadow-none border-border/60 bg-muted/10" onClick={() => setSelectedEpisode(episode)}>
                 <CardHeader className="pb-2">
                   <div className="flex justify-between items-center">
                     <CardTitle className="text-sm font-semibold">

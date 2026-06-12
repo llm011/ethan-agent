@@ -50,7 +50,9 @@ import { SettingsView } from "./settings-view";
 import { KnowledgeView } from "./knowledge-view";
 import { ScheduleView } from "./schedule-view";
 import { MemoryView } from "./memory-view";
-import { Clock, Database, Calendar } from "lucide-react";
+import { SkillsView } from "./skills-view";
+import { LogsView } from "./logs-view";
+import { Clock, Database, Calendar, Wrench } from "lucide-react";
 
 interface Message {
   role: "user" | "assistant";
@@ -85,7 +87,7 @@ export function ChatView() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
-  const [view, setView] = useState<"chat" | "settings" | "knowledge" | "schedule" | "memory">("chat");
+  const [view, setView] = useState<"chat" | "settings" | "knowledge" | "schedule" | "memory" | "logs" | "skills">("chat");
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [sessionSearch, setSessionSearch] = useState("");
   const [searchLoading, setSearchLoading] = useState(false);
@@ -195,7 +197,7 @@ export function ChatView() {
     const v = params.get("view") as any;
     const s = params.get("session");
     
-    if (v && ["chat", "settings", "knowledge", "schedule", "memory"].includes(v)) {
+    if (v && ["chat", "settings", "knowledge", "schedule", "memory", "skills"].includes(v)) {
       setView(v);
     }
     
@@ -484,8 +486,12 @@ export function ChatView() {
           <KnowledgeView />
         ) : view === "schedule" ? (
           <ScheduleView />
+        ) : view === "logs" ? (
+          <LogsView />
         ) : view === "memory" ? (
           <MemoryView />
+        ) : view === "skills" ? (
+          <SkillsView />
         ) : (
           <>
         {/* Header */}
