@@ -452,6 +452,7 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
                 if first_chunk:
                     live.stop()
                     first_chunk = False
+                if not render_live.is_started:
                     render_live.start()
                 full += item
                 render_live.update(RichMarkdown(full))

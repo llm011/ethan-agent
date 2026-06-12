@@ -90,6 +90,7 @@ async def _handle_message(event_data: dict) -> None:
     from ethan.tools.builtin.shell import ShellTool
     from ethan.tools.builtin.web import WebFetchTool
     from ethan.tools.builtin.web_search import WebSearchTool
+    from ethan.tools.builtin.search import RipgrepTool, FdTool
     from ethan.tools.registry import ToolRegistry
 
     # lark-cli 已经把 event 字段展平，直接从顶层读取

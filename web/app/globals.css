@@ -164,13 +164,13 @@
   }
   /* 消息内容行间距 */
   .prose p {
-    line-height: 1.9;
-    margin-top: 0.6em;
-    margin-bottom: 0.6em;
+    line-height: 1.8;
+    margin-top: 0.3em;
+    margin-bottom: 0.3em;
   }
   .prose li {
-    line-height: 1.9;
-    margin-top: 0.25em;
-    margin-bottom: 0.25em;
+    line-height: 1.8;
+    margin-top: 0.15em;
+    margin-bottom: 0.15em;
   }
 }

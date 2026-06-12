@@ -1,16 +1,38 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { 
-  fetchAgentSettings, updateAgentSettings, AgentSettings, 
+import { Sun, Moon } from "lucide-react";
+import {
+  fetchAgentSettings, updateAgentSettings, AgentSettings,
   fetchSystemSettings, updateSystemSettings, SystemSettings,
-  fetchProviderSettings, updateProviderSettings, ProviderSettings 
+  fetchProviderSettings, updateProviderSettings, ProviderSettings
 } from "@/lib/api";
+
+function useTheme() {
+  const [theme, setTheme] = useState<"dark" | "light">(() => {
+    if (typeof window !== "undefined") {
+      return (localStorage.getItem("ethan-theme") as "dark" | "light") || "dark";
+    }
+    return "dark";
+  });
+
+  const toggle = useCallback(() => {
+    setTheme((prev) => {
+      const next = prev === "dark" ? "light" : "dark";
+      localStorage.setItem("ethan-theme", next);
+      document.documentElement.classList.toggle("dark", next === "dark");
+      document.documentElement.classList.toggle("light", next === "light");
+      return next;
+    });
+  }, []);
+
+  return { theme, toggle };
+}
 
 interface SettingsViewProps {
   models: { id: string; description: string }[];
@@ -20,6 +42,7 @@ type TabType = "general" | "providers" | "identity" | "soul" | "format";
 
 export function SettingsView({ models }: SettingsViewProps) {
   const [activeTab, setActiveTab] = useState<TabType>("general");
+  const { theme, toggle: toggleTheme } = useTheme();
   
   const [agentForm, setAgentForm] = useState<AgentSettings>({
     workspace: "",
@@ -147,6 +170,21 @@ export function SettingsView({ models }: SettingsViewProps) {
                           ))}
                         </SelectContent>
                       </Select>
+                    </div>
+
+                    <div className="grid gap-2">
+                      <label className="text-sm font-medium">外观</label>
+                      <div className="flex items-center gap-3">
+                        <Button
+                          variant="outline"
+                          className="flex items-center gap-2"
+                          onClick={toggleTheme}
+                        >
+                          {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+                          {theme === "dark" ? "切换到日间模式" : "切换到暗黑模式"}
+                        </Button>
+                        <span className="text-xs text-muted-foreground">当前：{theme === "dark" ? "暗黑模式" : "日间模式"}</span>
+                      </div>
                     </div>
 
                     <div className="grid gap-2">

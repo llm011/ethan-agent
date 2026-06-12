@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Send, Paperclip, Loader2, Plus, Trash2, MessageSquare, Search, Sun, Moon, Pencil, Check, X, Settings, Book } from "lucide-react";
+import { Send, Paperclip, Loader2, Plus, Trash2, MessageSquare, Search, Sun, Moon, Pencil, Check, X, Settings, Book, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -63,6 +63,7 @@ interface Message {
   files?: string[];
   toolActivity?: string;  // tool call indicator
   created_at?: number;
+  usage?: { input: number; output: number; cache: number };
 }
 
 function useTheme() {
@@ -107,6 +108,7 @@ export function ChatView() {
   const { theme, toggle: toggleTheme } = useTheme();
 
   const [normalExpanded, setNormalExpanded] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [scheduleExpanded, setScheduleExpanded] = useState(false);
   const [lastSeenSchedule, setLastSeenSchedule] = useState(() => {
     if (typeof window !== "undefined") {
@@ -200,7 +202,7 @@ export function ChatView() {
   const [models, setModels] = useState<{ id: string; description: string }[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>("");
   const [pendingFiles, setPendingFiles] = useState<{ name: string; path: string }[]>([]);
-  const [usage, setUsage] = useState<{ input: number; output: number } | null>(null);
+  const [sessionUsage, setSessionUsage] = useState<{ input: number; output: number; cache: number }>({ input: 0, output: 0, cache: 0 });
 
   // Onboarding state
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -284,7 +286,7 @@ export function ChatView() {
     const s = await createSession(selectedModel);
     setActiveSession(s.id);
     setMessages([]);
-    setUsage(null);
+    setSessionUsage({ input: 0, output: 0, cache: 0 });
     setSessions((prev) => [{ id: s.id, title: s.title, model: s.model, created_at: Date.now() / 1000, updated_at: Date.now() / 1000 }, ...prev]);
   };
 
@@ -374,7 +376,15 @@ export function ChatView() {
           setMessages([...newMessages, { role: "assistant", content: assistantContent, toolActivity: currentActivity, created_at: Date.now() / 1000 }]);
         }
         if (chunk.done && chunk.usage) {
-          setUsage({ input: chunk.usage.input, output: chunk.usage.output });
+          const u = { input: chunk.usage.input || 0, output: chunk.usage.output || 0, cache: chunk.usage.cache || 0 };
+          setSessionUsage(prev => ({ input: prev.input + u.input, output: prev.output + u.output, cache: prev.cache + u.cache }));
+          // Store per-message usage on last assistant message
+          setMessages(prev => {
+            const msgs = [...prev];
+            const last = msgs[msgs.length - 1];
+            if (last && last.role === "assistant") msgs[msgs.length - 1] = { ...last, usage: u };
+            return msgs;
+          });
           currentActivity = "";
         }
       }
@@ -410,7 +420,7 @@ export function ChatView() {
   return (
     <div className="flex h-screen bg-background">
       {/* Sidebar */}
-      <aside className="w-64 border-r border-border flex flex-col bg-muted/30">
+      <aside className={`${sidebarOpen ? "w-64" : "w-0 overflow-hidden"} border-r border-border flex flex-col bg-muted/30 transition-all duration-200 shrink-0`}>
         <div className="p-4 flex items-center justify-between">
           <h1 className="text-lg font-semibold flex items-center gap-2">
             Ethan
@@ -525,6 +535,17 @@ export function ChatView() {
         </div>
       </aside>
 
+      {/* Sidebar collapse toggle on border */}
+      <div className="relative flex flex-col">
+        <button
+          onClick={() => setSidebarOpen(!sidebarOpen)}
+          className="absolute -left-3 top-1/2 -translate-y-1/2 z-10 w-6 h-12 flex items-center justify-center rounded-full bg-background border border-border hover:bg-muted hover:border-primary transition-all shadow-sm text-muted-foreground hover:text-foreground"
+          title={sidebarOpen ? "收起侧边栏" : "展开侧边栏"}
+        >
+          {sidebarOpen ? <ChevronLeft className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        </button>
+      </div>
+
       {/* Main area */}
       <main className="flex-1 flex flex-col">
         {view === "settings" ? (
@@ -585,10 +606,9 @@ export function ChatView() {
               );
             })()}
 
-            {/* Tokens Usage */}
-            {usage && (
-              <span className="text-xs text-muted-foreground ml-auto">
-                ↑{usage.input} ↓{usage.output} tokens
+            {(sessionUsage.input > 0 || sessionUsage.output > 0) && (
+              <span className="text-xs text-muted-foreground ml-auto" title="本次对话累计 token 消耗">
+                ↑{sessionUsage.input.toLocaleString()} ↓{sessionUsage.output.toLocaleString()}{sessionUsage.cache > 0 ? ` ⚡${sessionUsage.cache.toLocaleString()}` : ""}
               </span>
             )}
             
@@ -596,7 +616,7 @@ export function ChatView() {
             <Button
               variant="ghost"
               size="icon"
-              className={usage ? "ml-2" : "ml-auto"}
+              className={sessionUsage.input > 0 ? "ml-2" : "ml-auto"}
               onClick={toggleTheme}
               title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
             >
@@ -675,11 +695,14 @@ export function ChatView() {
                     >
                       {fixBold(msg.content)}
                     </ReactMarkdown>
-                    {msg.created_at && (
-                      <div className="text-[10px] text-muted-foreground/40 mt-2">
-                        {formatTime(msg.created_at)}
-                      </div>
-                    )}
+                    <div className="flex justify-between items-end mt-2">
+                      <span className="text-[10px] text-muted-foreground/40">{msg.created_at ? formatTime(msg.created_at) : ""}</span>
+                      {msg.usage && (
+                        <span className="text-[10px] text-muted-foreground/30">
+                          ↑{msg.usage.input} ↓{msg.usage.output}{msg.usage.cache > 0 ? ` ⚡${msg.usage.cache}` : ""}
+                        </span>
+                      )}
+                    </div>
                   </>
                 )}
                 {msg.role === "assistant" && streaming && i === messages.length - 1 && (

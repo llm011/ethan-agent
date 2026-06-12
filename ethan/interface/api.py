@@ -20,6 +20,7 @@ from ethan.providers.base import Message
 from ethan.skills.registry import SkillRegistry
 from ethan.tools.builtin.file import FileListTool, FileReadTool, FileWriteTool
 from ethan.tools.builtin.shell import ShellTool
+from ethan.tools.builtin.search import RipgrepTool, FdTool
 from ethan.tools.builtin.web import WebFetchTool
 from ethan.tools.builtin.web_search import WebSearchTool
 from ethan.tools.registry import ToolRegistry
@@ -70,6 +71,8 @@ def _create_agent(model: str | None = None) -> Agent:
     registry = ToolRegistry()
     registry.register(ShellTool())
     registry.register(WebSearchTool())
+    registry.register(RipgrepTool())
+    registry.register(FdTool())
     registry.register(WebFetchTool())
     registry.register(FileReadTool())
     registry.register(FileWriteTool())
