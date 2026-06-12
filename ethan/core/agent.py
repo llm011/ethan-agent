@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from ethan.core.config import get_config
+from ethan.memory.facts import FactStore
 from ethan.memory.procedures import ProcedureStore
 from ethan.providers.base import Message
 from ethan.providers.manager import create_provider
@@ -38,15 +39,21 @@ class Agent:
         self._executor = ToolExecutor(self._registry)
         self._skills = skill_registry
         self._procedures = ProcedureStore()
+        self._facts = FactStore()
         agent_name = config.defaults.agent_name
         self._base_system = system or f"You are {agent_name}, a helpful personal AI assistant. 请用中文回复。"
         self._max_iterations = config.defaults.max_tool_iterations
         self.usage = UsageStats()
 
     def _build_system(self, messages: list[Message]) -> str:
-        """构建 system prompt，注入时间、Skills、Procedures。"""
+        """构建 system prompt，注入时间、长期记忆、Skills、Procedures。"""
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S %A")
         parts = [self._base_system, f"Current time: {now}"]
+
+        # Long-term facts (cold memory) — injected for all interfaces
+        facts_ctx = self._facts.build_context(max_facts=15)
+        if facts_ctx:
+            parts.append(f"---\n以下是你对用户的长期记忆，回答时请优先参考：\n{facts_ctx}")
 
         # Procedural memory
         proc_ctx = self._procedures.build_context()

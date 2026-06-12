@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Send, Paperclip, Loader2, Plus, Trash2, MessageSquare, Search, Sun, Moon, Pencil, Check, X } from "lucide-react";
@@ -8,6 +8,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+
+// 让中文字符旁的 **bold** 正确解析：在 CJK 与 ** 之间插零宽空格
+const CJK = /[一-鿿㐀-䶿　-〿＀-￯⺀-⻿]/;
+function fixBold(text: string): string {
+  return text
+    .replace(/([^\s*_`])\*\*/g, (_, c) => (CJK.test(c) ? `${c}​**` : `${c} **`))
+    .replace(/\*\*([^\s*_`])/g, (_, c) => (CJK.test(c) ? `**​${c}` : `** ${c}`));
+}
 import {
   ChatMessage,
   SessionInfo,
@@ -383,7 +391,7 @@ export function ChatView() {
                         },
                       }}
                     >
-                      {msg.content}
+                      {fixBold(msg.content)}
                     </ReactMarkdown>
                   </>
                 )}

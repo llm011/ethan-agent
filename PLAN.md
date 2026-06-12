@@ -220,8 +220,44 @@ ethan/
 - [x] Session 全文搜索（后端：同时搜标题和消息内容；前端：防抖 300ms 调 `/sessions?q=`）
 - [x] 日间模式（浅橙主题）：添加 `.light` 主题变量，顶部 Sun/Moon 切换按钮，localStorage 持久化
 
-### 端到端测试
-- [x] `test_repl_e2e.py` — 20 轮对话上下文感知测试（全部通过 ✅）
+## 阶段十：Web 全功能面板
+
+> 把 CLI 已有的所有能力搬到 Web UI，重构为多页面导航架构。
+
+### 导航结构（左侧 icon nav）
+- Chat — 当前对话界面（已有）
+- Memory — Facts / Episodes 查看
+- Skills — 列表/查看/创建
+- Schedule — 定时任务管理
+- Knowledge — 知识库列表/搜索/添加
+- Logs — 后端日志查看（分页 + 搜索）
+
+### 后端 API 扩展
+- [ ] `GET /memory/facts` — 返回 facts.json 内容
+- [ ] `GET /memory/episodes` — 返回 episodes.json 内容
+- [ ] `GET /skills` — 列出所有 skill（name/description/trigger）
+- [ ] `GET /skills/:name` — 返回 skill 完整内容
+- [ ] `POST /skills` — 创建 skill
+- [ ] `GET /schedule` — 列出定时任务
+- [ ] `DELETE /schedule/:id` — 删除定时任务
+- [ ] `PATCH /schedule/:id` — pause/resume 定时任务
+- [ ] `GET /knowledge` — 列出知识库
+- [ ] `POST /knowledge` — 添加条目
+- [ ] `DELETE /knowledge/:source` — 删除条目
+- [ ] `GET /logs?page=&q=` — 读取 backend.log，分页+搜索
+
+### 前端实现
+- [ ] 重构 layout：左侧 icon 导航栏 + 内容区
+- [ ] Memory 页面：Facts 卡片（含 confidence/category）+ Episodes 列表
+- [ ] Skills 页面：列表 + 内容预览 + 创建表单
+- [ ] Schedule 页面：任务列表 + pause/resume/delete + 创建对话框
+- [ ] Knowledge 页面：列表 + 搜索 + 添加 + 删除
+- [ ] Logs 页面：日志列表、分页（每页 100 行）、关键词高亮搜索
+
+### 知识库向量检索（后续）
+- [ ] 引入 `sqlite-vec` 或本地 embedding 接口
+- [ ] 知识库条目入库时同步生成 embedding
+- [ ] `/knowledge/search` 支持语义检索
 
 ---
 
