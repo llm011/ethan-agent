@@ -208,14 +208,14 @@ export function Sidebar() {
   );
 
   return (
-    <aside className="w-64 border-r border-border flex flex-col bg-muted/30 shrink-0">
+    <aside className="w-full h-full border-r border-border flex flex-col bg-muted/30">
       <div className="p-4 flex items-center justify-between">
         <h1 className="text-lg font-semibold">Ethan</h1>
         <Button
           variant="ghost"
           size="icon"
           className="h-6 w-6 hover:bg-background"
-          onClick={handleNewSession}
+          onClick={() => { handleNewSession(); if (window.innerWidth < 768) setSidebarOpen(false); }}
           title="New chat"
         >
           <Plus className="h-4 w-4" />
@@ -251,7 +251,7 @@ export function Sidebar() {
                 ? "bg-accent text-accent-foreground"
                 : "text-muted-foreground"
             }`}
-            onClick={() => router.push("/sessions")}
+            onClick={() => navigate("/sessions")}
           >
             <List className="h-4 w-4 mr-2" /> 全部对话 (All Sessions)
           </Button>
@@ -319,7 +319,7 @@ export function Sidebar() {
               ? "bg-accent text-accent-foreground"
               : "text-muted-foreground"
           }`}
-          onClick={() => router.push("/memory")}
+          onClick={() => navigate("/memory")}
         >
           <Database className="h-4 w-4 mr-2" /> 记忆 (Memory)
         </Button>
@@ -330,7 +330,7 @@ export function Sidebar() {
               ? "bg-accent text-accent-foreground"
               : "text-muted-foreground"
           }`}
-          onClick={() => router.push("/knowledge")}
+          onClick={() => navigate("/knowledge")}
         >
           <Book className="h-4 w-4 mr-2" /> 知识库 (Knowledge)
         </Button>
@@ -341,7 +341,7 @@ export function Sidebar() {
               ? "bg-accent text-accent-foreground"
               : "text-muted-foreground"
           }`}
-          onClick={() => router.push("/schedule")}
+          onClick={() => navigate("/schedule")}
         >
           <Clock className="h-4 w-4 mr-2" /> 定时任务 (Schedule)
         </Button>
@@ -356,7 +356,7 @@ export function Sidebar() {
               ? "bg-accent text-accent-foreground"
               : "text-muted-foreground"
           }`}
-          onClick={() => router.push("/settings")}
+          onClick={() => navigate("/settings")}
         >
           <Settings className="h-4 w-4 mr-2" /> 设置 (Settings)
         </Button>

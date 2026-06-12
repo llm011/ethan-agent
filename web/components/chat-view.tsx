@@ -383,7 +383,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         {messages.map((msg, i) => (
           <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
             <div
-              className={`max-w-[80%] rounded-2xl px-4 py-3 ${
+              className={`max-w-[90%] md:max-w-[80%] rounded-2xl px-4 py-3 ${
                 msg.role === "user"
                   ? "bg-primary text-primary-foreground"
                   : "bg-muted prose prose-sm dark:prose-invert max-w-none"

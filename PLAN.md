@@ -197,10 +197,10 @@ ethan/
 - [x] Token 用量显示
 - [x] 登录鉴权（Bearer token）
 - [x] Tool 状态可视化 — 显示 agent 正在调用什么工具
-- [ ] 响应式布局 — 移动端适配优化
+- [x] 响应式布局 — 移动端适配优化
 - [x] Session 搜索（仅标题）
-- [ ] Session 全文搜索（搜索消息内容）
-- [ ] 日间模式（浅橙主题）切换支持
+- [x] Session 全文搜索（搜索消息内容）
+- [x] 日间模式（浅橙主题）切换支持
 
 ---
 
@@ -233,18 +233,18 @@ ethan/
 - Logs — 后端日志查看（分页 + 搜索）
 
 ### 后端 API 扩展
-- [ ] `GET /memory/facts` — 返回 facts.json 内容
-- [ ] `GET /memory/episodes` — 返回 episodes.json 内容
-- [ ] `GET /skills` — 列出所有 skill（name/description/trigger）
-- [ ] `GET /skills/:name` — 返回 skill 完整内容
-- [ ] `POST /skills` — 创建 skill
-- [ ] `GET /schedule` — 列出定时任务
-- [ ] `DELETE /schedule/:id` — 删除定时任务
-- [ ] `PATCH /schedule/:id` — pause/resume 定时任务
-- [ ] `GET /knowledge` — 列出知识库
-- [ ] `POST /knowledge` — 添加条目
-- [ ] `DELETE /knowledge/:source` — 删除条目
-- [ ] `GET /logs?page=&q=` — 读取 backend.log，分页+搜索
+- [x] `GET /memory/facts` — 返回 facts.json 内容
+- [x] `GET /memory/episodes` — 返回 episodes.json 内容
+- [x] `GET /skills` — 列出所有 skill（name/description/trigger）
+- [x] `GET /skills/:name` — 返回 skill 完整内容
+- [x] `POST /skills` — 创建 skill
+- [x] `GET /schedule` — 列出定时任务
+- [x] `DELETE /schedule/:id` — 删除定时任务
+- [x] `PATCH /schedule/:id` — pause/resume 定时任务
+- [x] `GET /knowledge` — 列出知识库
+- [x] `POST /knowledge` — 添加条目
+- [x] `DELETE /knowledge/:source` — 删除条目
+- [x] `GET /logs?page=&q=` — 读取 backend.log，分页+搜索
 
 ### 前端实现
 - [x] 重构 layout：左侧 icon 导航栏 + 内容区
@@ -307,7 +307,7 @@ ethan/
 
 ### 新增优化需求（用户反馈提取）
 - [x] **First-Time Onboarding (新用户冷启动引导)**: 无论是 REPL 还是 Web 界面，如果是第一次使用，Agent 需要主动发起第一条消息打招呼，引导用户：“请为我设置一个名字，并告诉我你是谁”。这些信息将通过自动记忆系统存入 `facts.json` 和 `config.yaml`。
-- [ ] **Web 端路由重构 (Path-based Routing)**: 废除 `?view=memory&session=xxx` 这种丑陋的 Query 参数形式。重构为 Next.js 原生的文件系统路由，如 `/memory`, `/settings`, `/chat/[id]`。
+- [x] **Web 端路由重构 (Path-based Routing)**: 废除 `?view=memory&session=xxx` 这种丑陋的 Query 参数形式。重构为 Next.js 原生的文件系统路由，如 `/memory`, `/settings`, `/chat/[id]`。
 
 ### Agent 认知与交互架构（正在进行）
 - [ ] **异步中断与连续对话 (Asynchronous Interrupt & Batching)**: 借鉴 Claude Code 机制。允许用户在 Agent 执行漫长任务时连续发送多条消息，将其缓冲进上下文队列。在合适的中断点（如一个 Tool 执行完毕时），Agent 能够感知到新指令并调整原有规划，做到不遗忘之前的任务，同时响应新的插话。
@@ -328,14 +328,14 @@ ethan/
 - [x] 收到消息时添加 THINKING 表情
 - [x] 收到回复后自动移除 THINKING 表情
 - [x] 消息使用 --markdown 渲染（已验证飞书支持 post 格式 markdown）
-- [ ] 流式回复体验：先发一条占位消息，追加内容模拟流式效果（buffer 积累再 patch）
-- [ ] 新用户完成飞书授权后自动发欢迎消息（onboarding 集成）
+- [x] 流式回复体验：先发一条占位消息，追加内容模拟流式效果（buffer 积累再 patch）
+- [x] 新用户完成飞书授权后自动发欢迎消息（onboarding 集成）
 
 ### 体验与健壮性问题（积压）
-- [ ] 工具调用返回空时的 fallback 机制：工具结果为空或无后续文本时，Agent 应主动告知用户（简短一句）
-- [ ] 登录页自动重试机制：后端短暂重启期间，前端 auth 失败后自动重试 3 次（每次 2 秒间隔）
-- [ ] 对话来源渠道标签（source）展示在侧边栏（web/repl/lark/custom）
-- [ ] 对话标题必须是对 query 的摘要，禁止以 `lark:oc_xxx` 等内部前缀作为标题
+- [x] 工具调用返回空时的 fallback 机制：工具结果为空或无后续文本时，Agent 应主动告知用户（简短一句）
+- [x] 登录页自动重试机制：后端短暂重启期间，前端 auth 失败后自动重试 3 次（每次 2 秒间隔）
+- [x] 对话来源渠道标签（source）展示在侧边栏（web/repl/lark/custom）
+- [x] 对话标题必须是对 query 的摘要，禁止以 `lark:oc_xxx` 等内部前缀作为标题
 
 ### H5/移动端适配
 - [ ] Web UI H5 适配：对话区气泡宽度适配移动端、侧边栏改为底部 Tab 或汉堡菜单、触摸手势支持、输入法键盘弹起适配
