@@ -11,7 +11,28 @@ import shutil
 logger = logging.getLogger(__name__)
 
 _listener_task: asyncio.Task | None = None
-_lark_chat_map: dict[str, str] = {}  # chat_id -> session_id, in-memory for performance
+_lark_chat_map: dict[str, str] = {}  # chat_id -> session_id, in-memory cache
+
+def _lark_map_file():
+    from pathlib import Path
+    from ethan.core.config import CONFIG_DIR
+    return CONFIG_DIR / "memory" / "lark_sessions.json"
+
+def _load_lark_map():
+    import json
+    f = _lark_map_file()
+    if f.exists():
+        try:
+            return json.loads(f.read_text())
+        except Exception:
+            pass
+    return {}
+
+def _save_lark_map(mapping: dict):
+    import json
+    f = _lark_map_file()
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps(mapping, ensure_ascii=False))
 
 
 async def _send_reaction(message_id: str) -> str | None:
@@ -118,15 +139,10 @@ async def _handle_message(event_data: dict) -> None:
     try:
         from ethan.core.config import get_config
         prefix = f"lark:{chat_id}:"
-        # Fast lookup: check in-memory cache first
+        # Fast lookup: in-memory cache first, then persistent file
+        if not _lark_chat_map:
+            _lark_chat_map.update(_load_lark_map())
         session_id = _lark_chat_map.get(chat_id)
-        if not session_id:
-            sessions = await store.list_recent(limit=100)
-            for s in sessions:
-                if s.title and s.title.startswith(prefix):
-                    session_id = s.id
-                    _lark_chat_map[chat_id] = s.id
-                    break
 
         if not session_id:
             cfg = get_config()
@@ -138,6 +154,7 @@ async def _handle_message(event_data: dict) -> None:
             await store.update_title(session.id, auto)
             session_id = session.id
             _lark_chat_map[chat_id] = session.id
+            _save_lark_map(_lark_chat_map)
             # New user first contact — send a welcome
             welcome = "嘿！我是 Ethan，你的私人 AI 助手 👋\n\n我已经在这台 Mac mini 上常驻了，有任何事直接找我就行——写代码、查信息、控制设备、管理日程都行。\n\n你叫什么名字？让我记住你~"
             await _send_reply(chat_id, welcome)

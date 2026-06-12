@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { Plus, Trash2, Search, Settings, Book, Pencil, Check, X, List } from "lucide-react";
 import { Clock, Database } from "lucide-react";
+import { useSidebar } from "@/app/layout-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
@@ -19,6 +20,13 @@ import {
 export function Sidebar() {
   const router = useRouter();
   const pathname = usePathname();
+  const { setSidebarOpen } = useSidebar();
+
+  // Close sidebar on mobile after navigating
+  const navigate = (path: string) => {
+    router.push(path);
+    if (window.innerWidth < 768) setSidebarOpen(false);
+  };
 
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [sessionSearch, setSessionSearch] = useState("");
