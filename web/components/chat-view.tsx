@@ -513,7 +513,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           <Button
             variant="ghost"
             size="icon"
-            className="shrink-0"
+            className="shrink-0 h-11 w-11 md:h-9 md:w-9"
             onClick={() => fileRef.current?.click()}
             disabled={streaming}
           >
@@ -532,7 +532,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           />
           <Button
             size="icon"
-            className="shrink-0"
+            className="shrink-0 h-11 w-11 md:h-9 md:w-9"
             onClick={handleSend}
             disabled={streaming || (!input.trim() && pendingFiles.length === 0)}
           >
