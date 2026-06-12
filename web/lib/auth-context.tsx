@@ -51,6 +51,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAuthenticated(false);
     if (typeof window !== "undefined") {
       localStorage.removeItem("ethan_token");
+      document.cookie = "ethan_token=; max-age=0; path=/";
     }
   };
 

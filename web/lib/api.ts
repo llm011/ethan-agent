@@ -1,4 +1,4 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8900";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8900";
 
 let authToken = "";
 
@@ -6,6 +6,7 @@ export function setAuthToken(token: string) {
   authToken = token;
   if (typeof window !== "undefined") {
     localStorage.setItem("ethan_token", token);
+    document.cookie = `ethan_token=${encodeURIComponent(token)}; max-age=2592000; path=/`; // 30 days
   }
 }
 
@@ -13,6 +14,10 @@ export function getAuthToken(): string {
   if (authToken) return authToken;
   if (typeof window !== "undefined") {
     authToken = localStorage.getItem("ethan_token") || "";
+    if (!authToken) {
+      const match = document.cookie.match(/(?:^|; )ethan_token=([^;]+)/);
+      if (match) authToken = decodeURIComponent(match[1]);
+    }
   }
   return authToken;
 }
@@ -45,14 +50,14 @@ export interface SessionInfo {
   title: string;
   model: string;
   created_at: number;
-  updated_at: number;
+  updated_at: number; snippet?: string;
 }
 
 export interface SessionDetail {
   id: string;
   title: string;
   model: string;
-  messages: { role: string; content: string }[];
+  messages: { role: string; content: string; created_at?: number }[];
 }
 
 export async function fetchSessions(limit = 50, q?: string): Promise<SessionInfo[]> {
@@ -104,7 +109,72 @@ export async function uploadFile(file: File): Promise<{ path: string; filename: 
 
 export interface ChatMessage {
   role: "user" | "assistant";
-  content: string;
+  content: string; created_at?: number;
+}
+
+export interface AgentSettings {
+  system_prompt: string;
+  agent_name: string;
+  language: string;
+  default_model: string;
+}
+export async function fetchAgentSettings(): Promise<AgentSettings> {
+  const res = await fetch(`${API_URL}/settings/agent`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed to fetch settings");
+  return res.json();
+}
+export async function updateAgentSettings(patch: Partial<AgentSettings>): Promise<void> {
+  await fetch(`${API_URL}/settings/agent`, {
+    method: "PATCH",
+    headers: headers(),
+    body: JSON.stringify(patch),
+  });
+}
+
+export interface Fact { id: string; content: string; created_at?: number; confidence: number; category: string; source: string; timestamp: number; superseded_by: string | null; }
+export interface Episode { id: string; session_id: string; timestamp: number; summary: string; turn_count: number; keywords: string[]; model: string; }
+
+export interface ScheduleJob {
+  id: string;
+  name: string;
+  next_run_time: string | null;
+  trigger: string;
+  state?: "paused" | "active";
+}
+
+export async function fetchSchedules(): Promise<ScheduleJob[]> {
+  const res = await fetch(`${API_URL}/schedule`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed");
+  return res.json().then(data => data.jobs);
+}
+
+export async function deleteSchedule(jobId: string): Promise<void> {
+  const res = await fetch(`${API_URL}/schedule/${jobId}`, {
+    method: "DELETE",
+    headers: headers()
+  });
+  if (!res.ok) throw new Error("Failed");
+}
+
+export async function patchSchedule(jobId: string, state: "paused" | "active"): Promise<void> {
+  const res = await fetch(`${API_URL}/schedule/${jobId}`, {
+    method: "PATCH",
+    headers: headers(),
+    body: JSON.stringify({ state })
+  });
+  if (!res.ok) throw new Error("Failed");
+}
+
+export async function fetchFacts(): Promise<Fact[]> {
+  const res = await fetch(`${API_URL}/memory/facts`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed");
+  return res.json().then(data => data.facts);
+}
+
+export async function fetchEpisodes(): Promise<Episode[]> {
+  const res = await fetch(`${API_URL}/memory/episodes`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed");
+  return res.json().then(data => data.episodes);
 }
 
 export async function* streamChat(
@@ -144,4 +214,35 @@ export async function* streamChat(
       }
     }
   }
+}
+
+export interface KnowledgeItem {
+  source: string;
+  title: string;
+  content?: string;
+  tags?: string[];
+}
+
+export async function fetchKnowledge(query?: string): Promise<KnowledgeItem[]> {
+  const url = query ? `${API_URL}/knowledge?q=${encodeURIComponent(query)}` : `${API_URL}/knowledge`;
+  const res = await fetch(url, { headers: headers() });
+  if (!res.ok) throw new Error("Failed");
+  return res.json().then(data => data.items);
+}
+
+export async function addKnowledge(item: { title: string; content: string; created_at?: number; tags: string[] }): Promise<void> {
+  const res = await fetch(`${API_URL}/knowledge`, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify(item)
+  });
+  if (!res.ok) throw new Error("Failed");
+}
+
+export async function deleteKnowledge(source: string): Promise<void> {
+  const res = await fetch(`${API_URL}/knowledge/${encodeURIComponent(source)}`, {
+    method: "DELETE",
+    headers: headers()
+  });
+  if (!res.ok) throw new Error("Failed");
 }

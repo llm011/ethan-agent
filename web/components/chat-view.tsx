@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Send, Paperclip, Loader2, Plus, Trash2, MessageSquare, Search, Sun, Moon, Pencil, Check, X } from "lucide-react";
+import { Send, Paperclip, Loader2, Plus, Trash2, MessageSquare, Search, Sun, Moon, Pencil, Check, X, Settings, Book } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -12,10 +12,28 @@ import { Separator } from "@/components/ui/separator";
 // 让中文字符旁的 **bold** 正确解析：在 CJK 与 ** 之间插零宽空格
 const CJK = /[一-鿿㐀-䶿　-〿＀-￯⺀-⻿]/;
 function fixBold(text: string): string {
-  return text
-    .replace(/([^\s*_`])\*\*/g, (_, c) => (CJK.test(c) ? `${c}​**` : `${c} **`))
-    .replace(/\*\*([^\s*_`])/g, (_, c) => (CJK.test(c) ? `**​${c}` : `** ${c}`));
+  // 1. 修复 AI 生成的内部带空格的加粗格式：** text ** -> **text**
+  let fixed = text.replace(/\*\*\s+([^\*]+?)\s+\*\*/g, '**$1**');
+
+  // 2. 修复中文旁边的加粗格式不渲染：在 CJK 与 ** 之间插零宽空格
+  fixed = fixed
+    .replace(/([^\s*_`])\*\*/g, (match, c) => (CJK.test(c) ? `${c}​**` : `${c} **`))
+    .replace(/\*\*([^\s*_`])/g, (match, c) => (CJK.test(c) ? `**​${c}` : `** ${c}`));
+
+  return fixed;
 }
+
+function formatTime(ts?: number) {
+  if (!ts) return "";
+  const d = new Date(ts * 1000);
+  const yyyy = d.getFullYear();
+  const MM = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const HH = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${yyyy}-${MM}-${dd} ${HH}:${mm}`;
+}
+
 import {
   ChatMessage,
   SessionInfo,
@@ -23,17 +41,23 @@ import {
   deleteSession,
   fetchModels,
   fetchSession,
-  fetchSessions,
+  fetchSessions, fetchSchedules,
   renameSession,
   streamChat,
   uploadFile,
 } from "@/lib/api";
+import { SettingsView } from "./settings-view";
+import { KnowledgeView } from "./knowledge-view";
+import { ScheduleView } from "./schedule-view";
+import { MemoryView } from "./memory-view";
+import { Clock, Database, Calendar } from "lucide-react";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
   files?: string[];
   toolActivity?: string;  // tool call indicator
+  created_at?: number;
 }
 
 function useTheme() {
@@ -61,12 +85,90 @@ export function ChatView() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
+  const [view, setView] = useState<"chat" | "settings" | "knowledge" | "schedule" | "memory">("chat");
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [sessionSearch, setSessionSearch] = useState("");
   const [searchLoading, setSearchLoading] = useState(false);
+
+  const [schedules, setSchedules] = useState<any[]>([]);
+  useEffect(() => {
+    fetchSchedules().then(setSchedules).catch(() => {});
+  }, [view]); // refresh when view changes
+
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
+
+  
   const { theme, toggle: toggleTheme } = useTheme();
+
+  const [normalExpanded, setNormalExpanded] = useState(true);
+  const [scheduleExpanded, setScheduleExpanded] = useState(false);
+  const [lastSeenSchedule, setLastSeenSchedule] = useState(() => {
+    if (typeof window !== "undefined") {
+      return Number(localStorage.getItem("ethan_last_seen_schedule") || "0");
+    }
+    return 0;
+  });
+
+  const normalSessions = sessions.filter(s => !s.title.startsWith("[定时]"));
+  const scheduleSessions = sessions.filter(s => s.title.startsWith("[定时]"));
+  const scheduleUnreadCount = scheduleSessions.filter(s => s.updated_at > lastSeenSchedule).length;
+
+  const renderSession = (s: SessionInfo) => (
+    <div
+      key={s.id}
+      className={`group flex flex-col px-3 py-2 rounded-lg cursor-pointer text-xs transition-colors ${
+        activeSession === s.id && view === "chat" ? "bg-accent text-accent-foreground" : "hover:bg-muted"
+      }`}
+      onClick={() => { if (editingSessionId !== s.id) { loadSession(s.id); setView("chat"); } }}
+    >
+      <div className="flex items-center gap-2">
+        {editingSessionId === s.id ? (
+          <input
+            autoFocus
+            value={editingTitle}
+            onChange={(e) => setEditingTitle(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") commitRename(s.id); if (e.key === "Escape") cancelEdit(); }}
+            onClick={(e) => e.stopPropagation()}
+            className="flex-1 bg-transparent outline-none border-b border-primary"
+          />
+        ) : (
+          <span 
+            className="truncate flex-1 font-medium" 
+            dangerouslySetInnerHTML={{
+              __html: sessionSearch 
+                ? s.title.replace(new RegExp(sessionSearch, 'gi'), match => `<span class="bg-yellow-500/30 text-yellow-500 rounded px-0.5">${match}</span>`)
+                : s.title
+            }} 
+          />
+        )}
+        {editingSessionId === s.id ? (
+          <div className="flex gap-1">
+            <button onClick={(e) => { e.stopPropagation(); commitRename(s.id); }} className="text-primary hover:opacity-70"><Check className="h-3 w-3" /></button>
+            <button onClick={(e) => { e.stopPropagation(); cancelEdit(); }} className="text-muted-foreground hover:opacity-70"><X className="h-3 w-3" /></button>
+          </div>
+        ) : (
+          <div className="flex opacity-0 group-hover:opacity-100 transition-opacity">
+            <Button variant="ghost" size="icon" className="h-5 w-5" onClick={(e) => startEditSession(s.id, s.title, e)}>
+              <Pencil className="h-3 w-3" />
+            </Button>
+            <Button variant="ghost" size="icon" className="h-5 w-5" onClick={(e) => { e.stopPropagation(); removeSession(s.id); }}>
+              <Trash2 className="h-3 w-3" />
+            </Button>
+          </div>
+        )}
+      </div>
+      {sessionSearch && s.snippet && (
+        <div 
+          className="mt-1 text-muted-foreground line-clamp-2 leading-relaxed"
+          dangerouslySetInnerHTML={{
+            __html: s.snippet.replace(new RegExp(sessionSearch, 'gi'), match => `<span class="bg-yellow-500/30 text-yellow-500 rounded px-0.5">${match}</span>`)
+          }}
+        />
+      )}
+    </div>
+  );
+
 
   // 防抖全文搜索：空时加载全部，有内容时调后端搜索
   useEffect(() => {
@@ -85,6 +187,44 @@ export function ChatView() {
   const [selectedModel, setSelectedModel] = useState<string>("");
   const [pendingFiles, setPendingFiles] = useState<{ name: string; path: string }[]>([]);
   const [usage, setUsage] = useState<{ input: number; output: number } | null>(null);
+
+  // URL 同步：初始化加载
+  const [isUrlLoaded, setIsUrlLoaded] = useState(false);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const v = params.get("view") as any;
+    const s = params.get("session");
+    
+    if (v && ["chat", "settings", "knowledge", "schedule", "memory"].includes(v)) {
+      setView(v);
+    }
+    
+    if (s && (!v || v === "chat")) {
+      fetchSession(s).then(detail => {
+        setActiveSession(s);
+        setMessages(detail.messages.map((m: any) => ({ role: m.role, content: m.content, created_at: m.created_at })));
+        setSelectedModel(detail.model);
+      }).catch(() => {
+        setActiveSession(null);
+      });
+    }
+    setIsUrlLoaded(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // URL 同步：状态变化时写入 URL
+  useEffect(() => {
+    if (!isUrlLoaded) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set("view", view);
+    if (activeSession && view === "chat") {
+      url.searchParams.set("session", activeSession);
+    } else {
+      url.searchParams.delete("session");
+    }
+    window.history.replaceState({}, "", url.toString());
+  }, [view, activeSession, isUrlLoaded]);
+
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -108,7 +248,7 @@ export function ChatView() {
   const loadSession = async (id: string) => {
     const detail = await fetchSession(id);
     setActiveSession(id);
-    setMessages(detail.messages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })));
+    setMessages(detail.messages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content, created_at: m.created_at })));
     setSelectedModel(detail.model);
   };
 
@@ -175,7 +315,7 @@ export function ChatView() {
       content = `${fileContext}\n\n${text}`;
     }
 
-    const userMsg: Message = { role: "user", content, files: pendingFiles.map((f) => f.name) };
+    const userMsg: Message = { role: "user", content, files: pendingFiles.map((f) => f.name), created_at: Date.now() / 1000 };
     const newMessages = [...messages, userMsg];
     setMessages(newMessages);
     setInput("");
@@ -186,7 +326,7 @@ export function ChatView() {
 
     let assistantContent = "";
     let currentActivity = "";
-    setMessages([...newMessages, { role: "assistant", content: "" }]);
+    setMessages([...newMessages, { role: "assistant", content: "", created_at: Date.now() / 1000 }]);
 
     try {
       for await (const chunk of streamChat(chatMessages, selectedModel, sessionId)) {
@@ -196,14 +336,14 @@ export function ChatView() {
         }
         if (chunk.tool && chunk.state === "start") {
           currentActivity = `⚡ ${chunk.tool}(${chunk.args || ""})`;
-          setMessages([...newMessages, { role: "assistant", content: assistantContent, toolActivity: currentActivity }]);
+          setMessages([...newMessages, { role: "assistant", content: assistantContent, toolActivity: currentActivity, created_at: Date.now() / 1000 }]);
         }
         if (chunk.tool && chunk.state !== "start") {
           currentActivity = "";
         }
         if (chunk.content) {
           assistantContent += chunk.content;
-          setMessages([...newMessages, { role: "assistant", content: assistantContent, toolActivity: currentActivity }]);
+          setMessages([...newMessages, { role: "assistant", content: assistantContent, toolActivity: currentActivity, created_at: Date.now() / 1000 }]);
         }
         if (chunk.done && chunk.usage) {
           setUsage({ input: chunk.usage.input, output: chunk.usage.output });
@@ -214,7 +354,7 @@ export function ChatView() {
       assistantContent = `Error: ${err instanceof Error ? err.message : "Unknown error"}`;
     }
 
-    setMessages([...newMessages, { role: "assistant", content: assistantContent }]);
+    setMessages([...newMessages, { role: "assistant", content: assistantContent, created_at: Date.now() / 1000 }]);
     setStreaming(false);
     if (!sessionSearch.trim()) fetchSessions().then(setSessions).catch(() => {});
   };
@@ -231,119 +371,201 @@ export function ChatView() {
       {/* Sidebar */}
       <aside className="w-64 border-r border-border flex flex-col bg-muted/30">
         <div className="p-4 flex items-center justify-between">
-          <h1 className="text-lg font-semibold">Ethan</h1>
-          <Button variant="ghost" size="icon" onClick={newSession} title="New chat">
+          <h1 className="text-lg font-semibold flex items-center gap-2">
+            Ethan
+          </h1>
+          <Button variant="ghost" size="icon" className="h-6 w-6 hover:bg-background" onClick={newSession} title="New chat">
             <Plus className="h-4 w-4" />
           </Button>
         </div>
-        <div className="px-3 pb-2">
-          <div className="relative">
-            <Search className={`absolute left-2.5 top-2.5 h-3.5 w-3.5 ${searchLoading ? "text-primary animate-pulse" : "text-muted-foreground"}`} />
-            <Input
-              placeholder="Search sessions..."
-              value={sessionSearch}
-              onChange={(e) => setSessionSearch(e.target.value)}
-              className="h-8 pl-8 text-xs"
-            />
-          </div>
-        </div>
-        <Separator className="my-1 opacity-40" />
-        <ScrollArea className="flex-1 p-2">
-          {sessions.map((s) => (
-            <div
-              key={s.id}
-              className={`group flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer text-sm transition-colors ${
-                activeSession === s.id ? "bg-accent text-accent-foreground" : "hover:bg-muted"
-              }`}
-              onClick={() => editingSessionId !== s.id && loadSession(s.id)}
-            >
-              <MessageSquare className="h-3.5 w-3.5 shrink-0 opacity-50" />
-              {editingSessionId === s.id ? (
-                <input
-                  autoFocus
-                  value={editingTitle}
-                  onChange={(e) => setEditingTitle(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") commitRename(s.id); if (e.key === "Escape") cancelEdit(); }}
-                  onClick={(e) => e.stopPropagation()}
-                  className="flex-1 bg-transparent outline-none border-b border-primary text-sm"
+        
+        <div className="flex-1 p-2 flex flex-col gap-2 overflow-y-auto">
+          {/* Chat Section */}
+          <div className="flex flex-col">
+            
+            
+            {/* Search */}
+            <div className="px-3 py-2">
+              <div className="relative">
+                <Search className={`absolute left-2.5 top-2.5 h-3.5 w-3.5 ${searchLoading ? "text-primary animate-pulse" : "text-muted-foreground"}`} />
+                <Input
+                  placeholder="搜索历史..."
+                  value={sessionSearch}
+                  onChange={(e) => setSessionSearch(e.target.value)}
+                  className="h-8 pl-8 text-xs bg-background"
                 />
-              ) : (
-                <span className="truncate flex-1">{s.title}</span>
-              )}
-              {editingSessionId === s.id ? (
-                <>
-                  <button onClick={(e) => { e.stopPropagation(); commitRename(s.id); }} className="text-primary hover:opacity-70"><Check className="h-3 w-3" /></button>
-                  <button onClick={(e) => { e.stopPropagation(); cancelEdit(); }} className="text-muted-foreground hover:opacity-70"><X className="h-3 w-3" /></button>
-                </>
-              ) : (
-                <>
-                  <Button variant="ghost" size="icon" className="h-6 w-6 opacity-0 group-hover:opacity-100" onClick={(e) => startEditSession(s.id, s.title, e)}>
-                    <Pencil className="h-3 w-3" />
-                  </Button>
-                  <Button variant="ghost" size="icon" className="h-6 w-6 opacity-0 group-hover:opacity-100" onClick={(e) => { e.stopPropagation(); removeSession(s.id); }}>
-                    <Trash2 className="h-3 w-3" />
-                  </Button>
-                </>
-              )}
+              </div>
             </div>
-          ))}
-        </ScrollArea>
+
+            {/* Session List */}
+            <div className="pl-6 pr-1 flex flex-col gap-1">
+              {!sessionSearch && (
+                <>
+                  <div 
+                    className="flex items-center justify-between py-1 mt-1 cursor-pointer text-muted-foreground hover:text-foreground"
+                    onClick={() => setNormalExpanded(!normalExpanded)}
+                  >
+                    <span className="text-xs font-semibold">最新对话</span>
+                    <span className="text-[10px]">{normalExpanded ? "▼" : "▶"}</span>
+                  </div>
+                  {normalExpanded && normalSessions.slice(0, 5).map(renderSession)}
+                  
+                  <div 
+                    className="flex items-center justify-between py-1 mt-2 cursor-pointer text-muted-foreground hover:text-foreground"
+                    onClick={() => {
+                      setScheduleExpanded(!scheduleExpanded);
+                      if (!scheduleExpanded && scheduleSessions.length > 0) {
+                        const maxUpdated = Math.max(...scheduleSessions.map(s => s.updated_at));
+                        if (maxUpdated > lastSeenSchedule) {
+                          setLastSeenSchedule(maxUpdated);
+                          localStorage.setItem("ethan_last_seen_schedule", String(maxUpdated));
+                        }
+                      }
+                    }}
+                  >
+                    <span className="text-xs font-semibold flex items-center gap-1">
+                      定时任务
+                      {scheduleUnreadCount > 0 && !scheduleExpanded && (
+                        <span className="bg-red-500 text-white text-[9px] px-1.5 py-0.2 rounded-full">{scheduleUnreadCount}</span>
+                      )}
+                    </span>
+                    <span className="text-[10px]">{scheduleExpanded ? "▼" : "▶"}</span>
+                  </div>
+                  {scheduleExpanded && scheduleSessions.slice(0, 5).map(renderSession)}
+                </>
+              )}
+              {sessionSearch && sessions.map(renderSession)}
+            </div>
+          </div>
+
+          <Separator className="my-2 opacity-40" />
+
+          {/* Other Menus */}
+          <Button
+            variant="ghost"
+            className={`w-full justify-start h-9 px-3 ${view === "memory" ? "bg-accent text-accent-foreground" : "text-muted-foreground"}`}
+            onClick={() => setView("memory")}
+          >
+            <Database className="h-4 w-4 mr-2" /> 记忆 (Memory)
+          </Button>
+          <Button
+            variant="ghost"
+            className={`w-full justify-start h-9 px-3 ${view === "knowledge" ? "bg-accent text-accent-foreground" : "text-muted-foreground"}`}
+            onClick={() => setView("knowledge")}
+          >
+            <Book className="h-4 w-4 mr-2" /> 知识库 (Knowledge)
+          </Button>
+          <Button
+            variant="ghost"
+            className={`w-full justify-start h-9 px-3 ${view === "schedule" ? "bg-accent text-accent-foreground" : "text-muted-foreground"}`}
+            onClick={() => setView("schedule")}
+          >
+            <Clock className="h-4 w-4 mr-2" /> 定时任务 (Schedule)
+          </Button>
+        </div>
+
+        {/* Bottom Settings */}
+        <div className="p-2 border-t border-border">
+          <Button
+            variant="ghost"
+            className={`w-full justify-start h-9 px-3 ${view === "settings" ? "bg-accent text-accent-foreground" : "text-muted-foreground"}`}
+            onClick={() => setView("settings")}
+          >
+            <Settings className="h-4 w-4 mr-2" /> 设置 (Settings)
+          </Button>
+        </div>
       </aside>
 
       {/* Main area */}
       <main className="flex-1 flex flex-col">
+        {view === "settings" ? (
+          <SettingsView models={models} />
+        ) : view === "knowledge" ? (
+          <KnowledgeView />
+        ) : view === "schedule" ? (
+          <ScheduleView />
+        ) : view === "memory" ? (
+          <MemoryView />
+        ) : (
+          <>
         {/* Header */}
-        <header className="h-12 border-b border-border flex items-center px-4 gap-3">
-          <select
-            value={selectedModel}
-            onChange={(e) => setSelectedModel(e.target.value)}
-            className="text-sm bg-transparent border border-border rounded-md px-2 py-1 outline-none"
-          >
-            {models.map((m) => (
-              <option key={m.id} value={m.id}>{m.description || m.id}</option>
-            ))}
-          </select>
-          {/* 当前 session 标题，可点击编辑 */}
-          {activeSession && (() => {
-            const cur = sessions.find((s) => s.id === activeSession);
-            if (!cur) return null;
-            return editingSessionId === activeSession ? (
-              <div className="flex items-center gap-1 flex-1 min-w-0">
-                <input
-                  autoFocus
-                  value={editingTitle}
-                  onChange={(e) => setEditingTitle(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") commitRename(activeSession); if (e.key === "Escape") cancelEdit(); }}
-                  className="flex-1 min-w-0 bg-transparent outline-none border-b border-primary text-sm"
-                />
-                <button onClick={() => commitRename(activeSession)} className="text-primary hover:opacity-70"><Check className="h-3.5 w-3.5" /></button>
-                <button onClick={cancelEdit} className="text-muted-foreground hover:opacity-70"><X className="h-3.5 w-3.5" /></button>
-              </div>
-            ) : (
-              <button
-                className="flex items-center gap-1.5 text-sm font-medium truncate max-w-[240px] hover:text-primary group"
-                onClick={(e) => startEditSession(activeSession, cur.title, e)}
-                title="Click to rename"
-              >
-                <span className="truncate">{cur.title}</span>
-                <Pencil className="h-3 w-3 opacity-0 group-hover:opacity-50 shrink-0" />
-              </button>
-            );
+        <header className="h-auto min-h-14 border-b border-border flex flex-col justify-center px-4 py-2 shrink-0">
+          <div className="flex items-center gap-3 w-full">
+            {/* Model Select */}
+            <select
+              value={selectedModel}
+              onChange={(e) => setSelectedModel(e.target.value)}
+              className="text-sm bg-transparent border border-border rounded-md px-2 py-1 outline-none"
+            >
+              {models.map((m) => (
+                <option key={m.id} value={m.id}>{m.description || m.id}</option>
+              ))}
+            </select>
+            
+            {/* 当前 session 标题，可点击编辑 */}
+            {activeSession && (() => {
+              const cur = sessions.find((s) => s.id === activeSession);
+              if (!cur) return null;
+              return editingSessionId === activeSession ? (
+                <div className="flex items-center gap-1 flex-1 min-w-0">
+                  <input
+                    autoFocus
+                    value={editingTitle}
+                    onChange={(e) => setEditingTitle(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") commitRename(activeSession); if (e.key === "Escape") cancelEdit(); }}
+                    className="flex-1 min-w-0 bg-transparent outline-none border-b border-primary text-lg font-semibold"
+                  />
+                  <button onClick={() => commitRename(activeSession)} className="text-primary hover:opacity-70"><Check className="h-4 w-4" /></button>
+                  <button onClick={cancelEdit} className="text-muted-foreground hover:opacity-70"><X className="h-4 w-4" /></button>
+                </div>
+              ) : (
+                <button
+                  className="flex items-center gap-1.5 text-lg font-semibold truncate hover:text-primary group"
+                  onClick={(e) => startEditSession(activeSession, cur.title, e)}
+                  title="Click to rename"
+                >
+                  <span className="truncate">{cur.title}</span>
+                  <Pencil className="h-3 w-3 opacity-0 group-hover:opacity-50 shrink-0" />
+                </button>
+              );
+            })()}
+
+            {/* Tokens Usage */}
+            {usage && (
+              <span className="text-xs text-muted-foreground ml-auto">
+                ↑{usage.input} ↓{usage.output} tokens
+              </span>
+            )}
+            
+            {/* Theme Toggle */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className={usage ? "ml-2" : "ml-auto"}
+              onClick={toggleTheme}
+              title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            >
+              {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </Button>
+          </div>
+          
+          {/* Scheduled Task Info Banner */}
+          {(() => {
+            const activeSessionInfo = sessions.find((s) => s.id === activeSession);
+            if (activeSessionInfo && activeSessionInfo.title.startsWith("[定时]")) {
+              const jobId = activeSessionInfo.title.replace("[定时] ", "").trim();
+              const job = schedules.find(j => j.id === jobId || j.name === jobId);
+              if (job) {
+                return (
+                  <div className="mt-2 text-xs bg-muted/50 rounded-md p-2 flex items-center gap-4 text-muted-foreground border border-border/50">
+                    <div className="flex items-center gap-1"><Clock className="h-3 w-3" /> <span>定时规则: {job.trigger}</span></div>
+                    <div className="flex items-center gap-1"><Calendar className="h-3 w-3" /> <span>下次执行: {job.next_run_time || "已暂停"}</span></div>
+                  </div>
+                );
+              }
+            }
+            return null;
           })()}
-          {usage && (
-            <span className="text-xs text-muted-foreground ml-auto">
-              ↑{usage.input} ↓{usage.output} tokens
-            </span>
-          )}
-          <Button
-            variant="ghost"
-            size="icon"
-            className={usage ? "ml-2" : "ml-auto"}
-            onClick={toggleTheme}
-            title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-          >
-            {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-          </Button>
         </header>
 
         {/* Messages */}
@@ -370,6 +592,11 @@ export function ChatView() {
                       </div>
                     )}
                     <p className="whitespace-pre-wrap">{msg.content.split("\n\n").pop()}</p>
+                    {msg.created_at && (
+                      <div className="text-[10px] opacity-40 mt-1 text-right">
+                        {formatTime(msg.created_at)}
+                      </div>
+                    )}
                   </>
                 ) : (
                   <>
@@ -393,6 +620,11 @@ export function ChatView() {
                     >
                       {fixBold(msg.content)}
                     </ReactMarkdown>
+                    {msg.created_at && (
+                      <div className="text-[10px] text-muted-foreground/40 mt-2">
+                        {formatTime(msg.created_at)}
+                      </div>
+                    )}
                   </>
                 )}
                 {msg.role === "assistant" && streaming && i === messages.length - 1 && (
@@ -446,6 +678,8 @@ export function ChatView() {
             </Button>
           </div>
         </div>
+          </>
+        )}
       </main>
     </div>
   );
