@@ -31,6 +31,10 @@ class KnowledgeBase(ABC):
         """Search by keyword."""
 
     @abstractmethod
+    async def semantic_search(self, query: str, limit: int = 5) -> list[KnowledgeItem]:
+        """Search by semantic similarity."""
+
+    @abstractmethod
     def list_all(self) -> list[KnowledgeItem]:
         """List all items."""
 
@@ -40,11 +44,22 @@ class KnowledgeBase(ABC):
 
 
 class FilesystemKnowledgeBase(KnowledgeBase):
-    """Markdown files in a local directory."""
+    """Markdown files in a local directory, with optional vector search."""
 
     def __init__(self, directory: Path):
         self._dir = directory
         self._dir.mkdir(parents=True, exist_ok=True)
+        self._vector_store: "VectorStore | None" = None  # lazy init
+
+    # ── Vector store (lazy) ────────────────────────────────────────────────
+
+    def _get_vector_store(self):
+        if self._vector_store is None:
+            from ethan.memory.vector_store import VectorStore
+            self._vector_store = VectorStore()
+        return self._vector_store
+
+    # ── Write ──────────────────────────────────────────────────────────────
 
     def add(self, title: str, content: str, tags: list[str] | None = None) -> str:
         slug = re.sub(r"[^\w\-]", "-", title.lower())[:50].strip("-")
@@ -56,7 +71,25 @@ class FilesystemKnowledgeBase(KnowledgeBase):
 
         tag_line = f"\ntags: {', '.join(tags)}" if tags else ""
         path.write_text(f"# {title}{tag_line}\n\n{content}", encoding="utf-8")
+
+        # Index embedding in background — best effort, never blocks callers
+        try:
+            from ethan.memory.embeddings import embed_sync
+            text_for_embed = f"{title} {' '.join(tags or [])} {content}"
+            embedding = embed_sync(text_for_embed)
+            vs = self._get_vector_store()
+            vs.add(
+                id=str(path),
+                text=text_for_embed,
+                embedding=embedding,
+                metadata={"title": title, "source": str(path), "tags": tags or []},
+            )
+        except Exception:
+            pass  # vector indexing is optional
+
         return str(path)
+
+    # ── Keyword search (existing) ──────────────────────────────────────────
 
     def search(self, query: str, limit: int = 5) -> list[KnowledgeItem]:
         query_words = set(query.lower().split())
@@ -70,6 +103,26 @@ class FilesystemKnowledgeBase(KnowledgeBase):
 
         results.sort(key=lambda x: -x[0])
         return [item for _, item in results[:limit]]
+
+    # ── Semantic search (new) ──────────────────────────────────────────────
+
+    async def semantic_search(self, query: str, limit: int = 5) -> list[KnowledgeItem]:
+        """Vector similarity search using sqlite-vec embeddings."""
+        from ethan.memory.embeddings import embed
+
+        query_embedding = await embed(query)
+        vs = self._get_vector_store()
+        hits = vs.search(query_embedding, limit=limit)
+
+        items: list[KnowledgeItem] = []
+        for hit in hits:
+            source = hit["metadata"].get("source") or hit["id"]
+            item = self.get(source)
+            if item:
+                items.append(item)
+        return items
+
+    # ── Read ───────────────────────────────────────────────────────────────
 
     def list_all(self) -> list[KnowledgeItem]:
         items = []

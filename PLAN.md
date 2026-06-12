@@ -274,3 +274,43 @@ ethan/
 | 定时任务 | `APScheduler` | 3.x | 待安装 |
 | 数据持久化 | `aiosqlite` | — | 待安装 |
 | HTTP API | `FastAPI` + `uvicorn` | — | 待安装 |
+
+### Bug Fixes
+- [x] Web UI 中 CJK markdown 加粗不渲染的问题修复（在 `**` 和中文字符间插入零宽空格）
+- [x] Web UI 修复 AI 生成 `** text **`（内部带空格）的格式问题，通过正则转换为 `**text**`
+
+### Web UI 进阶功能（正在进行）
+- [x] Web 导航重构：去掉冗余侧边栏底色，新增两级菜单结构（普通对话 / 定时对话分离）
+- [x] Memory 管理面板：从弹窗重构为全屏二级页面，采用标准 Markdown 引擎渲染
+- [x] Knowledge 管理面板：支持本地文件知识库检索、添加、删除
+- [x] Schedule 管理面板：支持 APScheduler 任务状态查看、暂停、恢复、删除
+- [x] URL 路由同步：将当前选中的 View 和 Session ID 同步至 URL（解决刷新丢失状态问题）
+- [ ] Skills 管理面板：技能列表展示、预览与创建（待开发）
+- [ ] Logs 日志面板：提供 Web 端的后端日志查看与分页检索（待开发）
+
+### CLI 与 ACP 功能（正在进行）
+- [x] `ethan code` 命令：支持挂载本地 ACP（Claude Code / OpenCode）做复杂任务委派
+- [x] PTY 终端会话持久化（通过 pexpect 维持 Claude Code 交互流）
+
+### 知识库加强（计划中）
+- [ ] 引入 `sqlite-vec` 扩展，替换现有的关键词搜索为本地 Embedding 语义检索
+
+### 自动化与质量保障（正在进行）
+- [ ] 引入 E2E 端到端测试（Playwright）：覆盖 Web 核心主路径（新建/切换对话、浏览记忆列表、查看记忆详情、切换标签页等），确保 UI 和 API 层的稳定性。
+
+### Agent 认知架构升级（正在进行）
+- [ ] 模块化系统提示词引擎：废除单一字符串，引入 `~/.ethan/system/` 目录化内核（基于 `identity.md` 与 `soul.md`）。采用 XML 标签化拼接，结合具体执行的 Good/Bad Case（Anti-Looping，文件读写安全）彻底规范 Agent 行为。
+- [ ] 优化 Web 端设置：将原先单文本框的系统设定页拆分为多模组编辑器（针对内核文件直接渲染修改）。
+
+### Web UI 进阶功能（正在进行）
+- [ ] 设置中心重构：将原先单页面的 Settings 升级为类 IDE 的双栏结构。支持通用设置、模型 Provider 配置，以及独立的 `identity.md`, `soul.md`, `format.md` 内核文件编辑区。
+
+### 新增优化需求（用户反馈提取）
+- [ ] **First-Time Onboarding (新用户冷启动引导)**: 无论是 REPL 还是 Web 界面，如果是第一次使用，Agent 需要主动发起第一条消息打招呼，引导用户：“请为我设置一个名字，并告诉我你是谁”。这些信息将通过自动记忆系统存入 `facts.json` 和 `config.yaml`。
+- [ ] **Web 端路由重构 (Path-based Routing)**: 废除 `?view=memory&session=xxx` 这种丑陋的 Query 参数形式。重构为 Next.js 原生的文件系统路由，如 `/memory`, `/settings`, `/chat/[id]`。
+
+### Agent 认知与交互架构（正在进行）
+- [ ] **异步中断与连续对话 (Asynchronous Interrupt & Batching)**: 借鉴 Claude Code 机制。允许用户在 Agent 执行漫长任务时连续发送多条消息，将其缓冲进上下文队列。在合适的中断点（如一个 Tool 执行完毕时），Agent 能够感知到新指令并调整原有规划，做到不遗忘之前的任务，同时响应新的插话。
+
+### Web UI 进阶功能（正在进行）
+- [ ] **全部对话 (All Sessions) 聚合页**: 在左侧菜单新增“全部对话”入口，点击后在右侧主区域以网格卡片（3-4列）的形式展示所有的历史对话，包含摘要与元信息，支持点击直接进入会话。

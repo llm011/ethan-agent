@@ -277,14 +277,48 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
 
     _banner()
 
+    # ── First-time onboarding ────────────────────────────────────
+    from ethan.core.onboarding import is_first_time, ONBOARDING_MESSAGE
+    if is_first_time():
+        import asyncio
+        console.print()
+        console.print(Panel(ONBOARDING_MESSAGE, border_style="yellow", padding=(0, 2)))
+        console.print()
+
+        # Agent name
+        raw_name = await asyncio.to_thread(input, "  Agent name (press Enter to keep 'Ethan'): ")
+        agent_name = raw_name.strip() or "Ethan"
+
+        # User info
+        raw_info = await asyncio.to_thread(input, "  About you (e.g. 'I'm Alex, a software engineer'): ")
+        user_info = raw_info.strip()
+
+        # Persist agent name to config
+        from ethan.core.config import save_config, reload_config
+        _cfg = get_config()
+        _cfg.defaults.agent_name = agent_name
+        save_config(_cfg)
+        reload_config()
+
+        # Persist user info to FactStore
+        if user_info:
+            _fs = FactStore()
+            _fs.add(user_info, confidence=1.0, source="onboarding", category="preference")
+
+        console.print()
+        console.print(f"[green]Great! I'll go by [bold]{agent_name}[/bold] from now on.[/green]")
+        if user_info:
+            console.print(f"[dim]I'll remember: {user_info}[/dim]")
+        console.print()
+
     # 初始化分层记忆
     fact_store = FactStore()
     episode_store = EpisodeStore()
-    memory = WorkingMemory(config=MemoryConfig())
+    memory = WorkingMemory(config=MemoryConfig(hot_size=10))
     memory.cold_facts = fact_store.build_context()
     consolidator = Consolidator(main_model=model_id)
 
-    # 从 session 恢复历史到记忆系统
+    # 从 session 恢复历史到记忆系统，最多恢复 hot_size 轮到热区
     history = list(session.messages)
     pairs = []
     i = 0
@@ -342,11 +376,24 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
             result = await _handle_slash_command(user_input, store, session, agent)
             if result is not None:
                 session = result
+                session_persisted = True  # /resume 和 /new 返回的都是已持久化的 session
                 history = list(session.messages)
                 approx_tokens = sum(len(m.content) for m in history)
                 model_id = session.model
-                memory = WorkingMemory(config=MemoryConfig())
+                memory = WorkingMemory(config=MemoryConfig(hot_size=10))
                 memory.cold_facts = fact_store.build_context()
+                # 恢复历史到热区
+                pairs = []
+                j = 0
+                while j < len(history) - 1:
+                    if history[j].role == "user" and history[j + 1].role == "assistant":
+                        pairs.append((history[j], history[j + 1]))
+                        j += 2
+                    else:
+                        j += 1
+                for u, a in pairs[-memory.config.hot_size:]:
+                    memory.hot.append(u)
+                    memory.hot.append(a)
             continue
 
         msg = Message(role="user", content=user_input)

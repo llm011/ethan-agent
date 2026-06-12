@@ -24,6 +24,7 @@ class Message:
     tool_calls: list[ToolCall] = field(default_factory=list)
     tool_call_id: Optional[str] = None
     usage: Optional[dict] = None  # {"input": N, "output": N, "cache": N}
+    created_at: Optional[float] = None
 
     @property
     def is_tool_call(self) -> bool:

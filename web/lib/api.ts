@@ -1,5 +1,5 @@
 const API_URL = typeof window !== "undefined" 
-  ? `${window.location.protocol}//${window.location.hostname}:8900`
+  ? `${window.location.protocol}//${window.location.hostname === "localhost" ? "127.0.0.1" : window.location.hostname}:8900`
   : (process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8900");
 
 let authToken = "";
@@ -62,8 +62,8 @@ export interface SessionDetail {
   messages: { role: string; content: string; created_at?: number }[];
 }
 
-export async function fetchSessions(limit = 50, q?: string): Promise<SessionInfo[]> {
-  const params = new URLSearchParams({ limit: String(limit) });
+export async function fetchSessions(limit = 50, offset = 0, q?: string): Promise<SessionInfo[]> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
   if (q) params.set("q", q);
   const res = await fetch(`${API_URL}/sessions?${params}`, { headers: headers() });
   if (!res.ok) throw new Error("Failed to fetch sessions");
@@ -115,6 +115,7 @@ export interface ChatMessage {
 }
 
 export interface AgentSettings {
+  workspace: string;
   system_prompt: string;
   agent_name: string;
   language: string;
@@ -134,9 +135,27 @@ export async function updateAgentSettings(patch: Partial<AgentSettings>): Promis
 }
 
 
+
+export type ProviderSettings = Record<string, { api_key: string, base_url: string | null }>;
+
+export async function fetchProviderSettings(): Promise<ProviderSettings> {
+  const res = await fetch(`${API_URL}/settings/providers`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed to fetch provider settings");
+  return res.json();
+}
+
+export async function updateProviderSettings(patch: ProviderSettings): Promise<void> {
+  await fetch(`${API_URL}/settings/providers`, {
+    method: "PATCH",
+    headers: headers(),
+    body: JSON.stringify(patch),
+  });
+}
+
 export interface SystemSettings {
   identity: string;
   soul: string;
+  format: string;
 }
 
 export async function fetchSystemSettings(): Promise<SystemSettings> {
@@ -162,7 +181,9 @@ export interface ScheduleJob {
   name: string;
   next_run_time: string | null;
   trigger: string;
-  state?: "paused" | "active";
+  status: "paused" | "active";
+  prompt: string;
+  session_id: string;
 }
 
 export async function fetchSchedules(): Promise<ScheduleJob[]> {
@@ -246,8 +267,11 @@ export interface KnowledgeItem {
   tags?: string[];
 }
 
-export async function fetchKnowledge(query?: string): Promise<KnowledgeItem[]> {
-  const url = query ? `${API_URL}/knowledge?q=${encodeURIComponent(query)}` : `${API_URL}/knowledge`;
+export async function fetchKnowledge(query?: string, mode: "keyword" | "semantic" = "keyword"): Promise<KnowledgeItem[]> {
+  const params = new URLSearchParams();
+  if (query) params.set("q", query);
+  if (query && mode !== "keyword") params.set("mode", mode);
+  const url = params.toString() ? `${API_URL}/knowledge?${params}` : `${API_URL}/knowledge`;
   const res = await fetch(url, { headers: headers() });
   if (!res.ok) throw new Error("Failed");
   return res.json().then(data => data.items);
@@ -306,5 +330,26 @@ export async function saveSkill(skill: SkillInfo): Promise<{ name: string }> {
     body: JSON.stringify(skill)
   });
   if (!res.ok) throw new Error("Failed to save skill");
+  return res.json();
+}
+
+export interface OnboardingStatus {
+  first_time: boolean;
+  message: string;
+}
+
+export async function fetchOnboardingStatus(): Promise<OnboardingStatus> {
+  const res = await fetch(`${API_URL}/onboarding/status`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed to fetch onboarding status");
+  return res.json();
+}
+
+export async function completeOnboarding(agent_name: string, user_info: string): Promise<{ ok: boolean; agent_name: string }> {
+  const res = await fetch(`${API_URL}/onboarding/complete`, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify({ agent_name, user_info }),
+  });
+  if (!res.ok) throw new Error("Failed to complete onboarding");
   return res.json();
 }

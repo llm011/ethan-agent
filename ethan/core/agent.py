@@ -40,25 +40,61 @@ class Agent:
         self._skills = skill_registry
         self._procedures = ProcedureStore()
         self._facts = FactStore()
-        agent_name = config.defaults.agent_name
-        self._base_system = system or f"You are {agent_name}, a helpful personal AI assistant. 请用中文回复。"
+        self._base_system = system or config.defaults.system_prompt
         self._max_iterations = config.defaults.max_tool_iterations
         self.usage = UsageStats()
 
     def _build_system(self, messages: list[Message]) -> str:
         """构建 system prompt，注入时间、长期记忆、Skills、Procedures。"""
+        import os
+        from pathlib import Path
+
+        config = get_config()
+        workspace = config.defaults.workspace
+        system_dir = Path(workspace) / "system"
+        
+        identity_path = system_dir / "identity.md"
+        soul_path = system_dir / "soul.md"
+        format_path = system_dir / "format.md"
+
+        identity_content = ""
+        if identity_path.exists():
+            identity_content = identity_path.read_text(encoding="utf-8").strip()
+
+        soul_content = ""
+        if soul_path.exists():
+            soul_content = soul_path.read_text(encoding="utf-8").strip()
+
+        format_content = ""
+        if format_path.exists():
+            format_content = format_path.read_text(encoding="utf-8").strip()
+
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S %A")
-        parts = [self._base_system, f"Current time: {now}"]
+        
+        parts = []
+        if identity_content:
+            parts.append(f"<identity>\n{identity_content}\n</identity>")
+        elif self._base_system:
+            parts.append(self._base_system)
+            
+        if soul_content:
+            parts.append(f"<operating_principles>\n{soul_content}\n</operating_principles>")
+            
+        if format_content:
+            parts.append(f"<formatting_rules>\n{format_content}\n</formatting_rules>")
+            
+        parts.append(f"Current time: {now}")
+        parts.append(f"Your workspace directory is {workspace}. System configurations and memories reside here.")
 
         # Long-term facts (cold memory) — injected for all interfaces
         facts_ctx = self._facts.build_context(max_facts=15)
         if facts_ctx:
-            parts.append(f"---\n以下是你对用户的长期记忆，回答时请优先参考：\n{facts_ctx}")
+            parts.append(f"<user_context>\n{facts_ctx}\n</user_context>")
 
         # Procedural memory
         proc_ctx = self._procedures.build_context()
         if proc_ctx:
-            parts.append(proc_ctx)
+            parts.append(f"<procedures>\n{proc_ctx}\n</procedures>")
 
         # Skills
         if self._skills and messages:
@@ -70,7 +106,7 @@ class Agent:
             if last_user:
                 skill_ctx = self._skills.build_context(last_user)
                 if skill_ctx:
-                    parts.append(f"---\nRelevant skills for this request:\n\n{skill_ctx}")
+                    parts.append(f"<relevant_skills>\n{skill_ctx}\n</relevant_skills>")
 
         return "\n\n".join(parts)
 

@@ -1,162 +1,130 @@
+
+"use client";
+
 import { useEffect, useState, useCallback } from "react";
 import { ScheduleJob, fetchSchedules, deleteSchedule, patchSchedule } from "@/lib/api";
-import { RefreshCw, Play, Pause, Trash2, Clock } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Loader2, RefreshCw, Play, Pause, Trash2, Clock, TerminalSquare, Hash } from "lucide-react";
 
 export function ScheduleView() {
   const [jobs, setJobs] = useState<ScheduleJob[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
-  const loadSchedules = useCallback(() => {
-    let mounted = true;
-    fetchSchedules()
-      .then(data => {
-        if (mounted) {
-          setJobs(data);
-          setLoading(false);
-          setError(null);
-        }
-      })
-      .catch((err: unknown) => {
-        if (mounted) {
-          const error = err as Error;
-          setError(error.message || "Failed to load schedules");
-          setLoading(false);
-        }
-      });
-    return () => { mounted = false; };
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await fetchSchedules();
+      setJobs(data);
+    } catch (e) {
+      console.error("Failed to load schedules", e);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    const cleanup = loadSchedules();
-    return cleanup;
-  }, [loadSchedules]);
+    loadData();
+  }, [loadData]);
 
-  const handleToggleState = async (job: ScheduleJob) => {
+  const toggleStatus = async (job: ScheduleJob) => {
+    const newState = job.status === "active" ? "paused" : "active";
+    // Optimistic UI update
+    setJobs(prev => prev.map(j => j.id === job.id ? { ...j, status: newState } : j));
     try {
-      setLoading(true);
-      // Assuming missing state implies active if it has a next_run_time
-      const isCurrentlyActive = job.state === "active" || (job.state == null && job.next_run_time !== null);
-      const newState = isCurrentlyActive ? "paused" : "active";
       await patchSchedule(job.id, newState);
-      loadSchedules();
-    } catch (err: unknown) {
-      const error = err as Error;
-      setError(`Failed to toggle job: ${error.message}`);
-      setLoading(false);
+      await loadData();
+    } catch {
+      // Revert if failed
+      await loadData();
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this schedule?")) return;
+  const removeJob = async (id: string) => {
+    if (!window.confirm("确定要删除这个定时任务吗？")) return;
+    setJobs(prev => prev.filter(j => j.id !== id));
     try {
-      setLoading(true);
       await deleteSchedule(id);
-      loadSchedules();
-    } catch (err: unknown) {
-      const error = err as Error;
-      setError(`Failed to delete job: ${error.message}`);
-      setLoading(false);
+    } catch {
+      await loadData();
     }
-  };
-
-  const formatDate = (dateStr: string | null) => {
-    if (!dateStr) return "Never";
-    return new Date(dateStr).toLocaleString();
   };
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-white dark:bg-zinc-900 overflow-hidden">
-      <div className="h-14 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between px-4 shrink-0">
-        <div className="flex items-center gap-2">
-          <Clock className="w-5 h-5 text-zinc-500" />
-          <h1 className="font-medium text-zinc-900 dark:text-zinc-100">Schedules</h1>
-        </div>
-        <button
-          onClick={() => {
-            setLoading(true);
-            loadSchedules();
-          }}
-          className="p-2 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-md transition-colors"
-          title="Refresh"
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-        </button>
-      </div>
-
-      <div className="flex-1 overflow-auto p-4 md:p-6">
-        {error && (
-          <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-md text-sm">
-            {error}
-          </div>
-        )}
-
+    <div className="flex flex-col h-full bg-background text-foreground">
+      <header className="h-12 border-b border-border flex items-center px-4 justify-between shrink-0">
+        <h1 className="font-semibold text-lg">定时任务 (Schedules)</h1>
+        <Button variant="ghost" size="icon" onClick={loadData} disabled={loading}>
+          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+        </Button>
+      </header>
+      
+      <ScrollArea className="flex-1 p-6">
         {loading && jobs.length === 0 ? (
-          <div className="flex items-center justify-center h-40 text-zinc-500">
-            Loading schedules...
+          <div className="flex items-center justify-center h-full pt-10">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
           </div>
         ) : jobs.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-40 text-zinc-500 space-y-2">
-            <Clock className="w-8 h-8 opacity-20" />
-            <p>No schedules found.</p>
-            <p className="text-sm opacity-70">Create one by asking the assistant in Chat.</p>
+          <div className="text-center text-muted-foreground pt-10">
+            暂无定时任务
           </div>
         ) : (
-          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden">
-            <table className="w-full text-sm text-left">
-              <thead className="bg-zinc-50 dark:bg-zinc-800/50 text-zinc-500 dark:text-zinc-400 border-b border-zinc-200 dark:border-zinc-800">
-                <tr>
-                  <th className="px-4 py-3 font-medium">Name</th>
-                  <th className="px-4 py-3 font-medium">Trigger</th>
-                  <th className="px-4 py-3 font-medium">Next Run Time</th>
-                  <th className="px-4 py-3 font-medium">Status</th>
-                  <th className="px-4 py-3 font-medium text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800 text-zinc-900 dark:text-zinc-100">
-                {jobs.map((job) => {
-                  const isActive = job.state === "active" || (job.state == null && job.next_run_time !== null);
-
-                  return (
-                    <tr key={job.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
-                      <td className="px-4 py-3 font-medium">{job.name}</td>
-                      <td className="px-4 py-3 font-mono text-xs">{job.trigger}</td>
-                      <td className="px-4 py-3">{formatDate(job.next_run_time)}</td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                          isActive
-                            ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"
-                            : "bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-400"
-                        }`}>
-                          {isActive ? "Active" : "Paused"}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-2">
-                          <button
-                            onClick={() => handleToggleState(job)}
-                            className="p-1.5 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded transition-colors"
-                            title={isActive ? "暂停 (Pause)" : "恢复 (Resume)"}
-                          >
-                            {isActive ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-                          </button>
-                          <button
-                            onClick={() => handleDelete(job.id)}
-                            className="p-1.5 text-zinc-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
-                            title="删除 (Delete)"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {jobs.map(job => (
+              <Card key={job.id} className="flex flex-col shadow-sm border-border/60 bg-muted/10">
+                <CardHeader className="pb-3 border-b border-border/30">
+                  <div className="flex justify-between items-start">
+                    <CardTitle className="text-base font-semibold leading-tight line-clamp-2 pr-2">
+                      {job.name}
+                    </CardTitle>
+                    <Badge variant={job.status === "active" ? "default" : "secondary"} className="shrink-0 text-[10px]">
+                      {job.status === "active" ? "运行中" : "已暂停"}
+                    </Badge>
+                  </div>
+                  <CardDescription className="flex items-center gap-1.5 mt-2 text-xs">
+                    <Clock className="h-3 w-3" /> 
+                    {job.next_run_time ? new Date(job.next_run_time).toLocaleString() : "暂无下次执行时间"}
+                  </CardDescription>
+                </CardHeader>
+                
+                <CardContent className="pt-4 pb-2 flex-1">
+                  <div className="space-y-3">
+                    <div className="flex items-start gap-2 text-sm">
+                      <TerminalSquare className="h-4 w-4 shrink-0 text-muted-foreground mt-0.5" />
+                      <p className="text-muted-foreground line-clamp-3 leading-relaxed">
+                        {job.prompt}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground/80 bg-muted/30 p-2 rounded-md">
+                      <Hash className="h-3.5 w-3.5" />
+                      <span className="truncate">绑定的会话: {job.session_id}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground/80 bg-muted/30 p-2 rounded-md">
+                      <Clock className="h-3.5 w-3.5" />
+                      <span>触发规则: {job.trigger}</span>
+                    </div>
+                  </div>
+                </CardContent>
+                
+                <CardFooter className="pt-3 pb-4 flex justify-end gap-2 border-t border-border/30 mt-auto">
+                  <Button 
+                    variant={job.status === "active" ? "secondary" : "default"} 
+                    size="sm" 
+                    onClick={() => toggleStatus(job)}
+                  >
+                    {job.status === "active" ? <><Pause className="h-3.5 w-3.5 mr-1" /> 暂停</> : <><Play className="h-3.5 w-3.5 mr-1" /> 恢复</>}
+                  </Button>
+                  <Button variant="destructive" size="sm" onClick={() => removeJob(job.id)}>
+                    <Trash2 className="h-3.5 w-3.5 mr-1" /> 删除
+                  </Button>
+                </CardFooter>
+              </Card>
+            ))}
           </div>
         )}
-      </div>
+      </ScrollArea>
     </div>
   );
 }

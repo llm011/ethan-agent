@@ -1,4 +1,4 @@
-"use client";
+content = """"use client";
 
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
@@ -134,7 +134,7 @@ export function SettingsView({ models }: SettingsViewProps) {
                       <label className="text-sm font-medium">默认模型</label>
                       <Select
                         value={agentForm.default_model}
-                        onValueChange={(val) => setAgentForm({ ...agentForm, default_model: val || "" })}
+                        onValueChange={(val) => setAgentForm({ ...agentForm, default_model: val })}
                       >
                         <SelectTrigger>
                           <SelectValue placeholder="选择模型" />
@@ -153,7 +153,7 @@ export function SettingsView({ models }: SettingsViewProps) {
                       <label className="text-sm font-medium">语言</label>
                       <Select
                         value={agentForm.language}
-                        onValueChange={(val) => setAgentForm({ ...agentForm, language: val || "" })}
+                        onValueChange={(val) => setAgentForm({ ...agentForm, language: val })}
                       >
                         <SelectTrigger>
                           <SelectValue placeholder="Language" />
@@ -273,3 +273,6 @@ export function SettingsView({ models }: SettingsViewProps) {
     </div>
   );
 }
+"""
+with open("web/components/settings-view.tsx", "w", encoding="utf-8") as f:
+    f.write(content)

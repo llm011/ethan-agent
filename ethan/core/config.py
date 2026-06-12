@@ -29,8 +29,11 @@ class NetworkConfig(BaseModel):
 
 
 class DefaultsConfig(BaseModel):
+    workspace: str = str(Path.home() / ".ethan")
     model: str = "claude-sonnet-4-6"
     agent_name: str = "Ethan"
+    system_prompt: str = "You are Ethan, a helpful personal AI assistant. 请用中文回复。"
+    language: str = "zh"
     max_tokens: int = 4096
     max_tool_iterations: int = 10
 

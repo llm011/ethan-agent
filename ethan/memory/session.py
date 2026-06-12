@@ -24,6 +24,7 @@ class Session:
     created_at: float
     updated_at: float
     messages: list[Message] = field(default_factory=list)
+    snippet: str | None = None
 
 
 def _generate_id() -> str:
@@ -100,9 +101,11 @@ class SessionStore:
             for tc in msg.tool_calls
         ]) if msg.tool_calls else None
 
+        msg_created_at = msg.created_at if msg.created_at else time.time()
+
         await self._db.execute(
-            "INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id) VALUES (?, ?, ?, ?, ?)",
-            (session_id, msg.role, msg.content, tool_calls_json, msg.tool_call_id),
+            "INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (session_id, msg.role, msg.content, tool_calls_json, msg.tool_call_id, msg_created_at),
         )
         await self._db.commit()
 
@@ -138,7 +141,7 @@ class SessionStore:
         )
 
         async with self._db.execute(
-            "SELECT role, content, tool_calls, tool_call_id FROM messages WHERE session_id = ? ORDER BY id",
+            "SELECT role, content, tool_calls, tool_call_id, created_at FROM messages WHERE session_id = ? ORDER BY id",
             (session_id,),
         ) as cursor:
             async for r in cursor:
@@ -150,15 +153,16 @@ class SessionStore:
                     role=r[0], content=r[1],
                     tool_calls=tool_calls,
                     tool_call_id=r[3],
+                    created_at=r[4],
                 ))
 
         return session
 
-    async def list_recent(self, limit: int = 20) -> list[Session]:
+    async def list_recent(self, limit: int = 20, offset: int = 0) -> list[Session]:
         sessions = []
         async with self._db.execute(
-            "SELECT id, title, model, created_at, updated_at FROM sessions ORDER BY updated_at DESC LIMIT ?",
-            (limit,),
+            "SELECT id, title, model, created_at, updated_at FROM sessions ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+            (limit, offset),
         ) as cursor:
             async for row in cursor:
                 sessions.append(Session(
@@ -166,20 +170,6 @@ class SessionStore:
                     created_at=row[3], updated_at=row[4],
                 ))
         return sessions
-
-    async def delete(self, session_id: str) -> bool:
-        cursor = await self._db.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
-        await self._db.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
-        await self._db.commit()
-        return cursor.rowcount > 0
-
-    async def message_count(self, session_id: str) -> int:
-        async with self._db.execute(
-            "SELECT COUNT(*) FROM messages WHERE session_id = ? AND role = 'user'",
-            (session_id,),
-        ) as cursor:
-            row = await cursor.fetchone()
-            return row[0] if row else 0
 
     async def search(self, query: str, limit: int = 50) -> list[Session]:
         """全文搜索：匹配 session 标题或消息内容。返回去重后的 session 列表。"""
@@ -194,16 +184,28 @@ class SessionStore:
                 sessions[row[0]] = Session(id=row[0], title=row[1], model=row[2], created_at=row[3], updated_at=row[4])
         # 再搜消息内容，找到对应的 session
         async with self._db.execute(
-            """SELECT DISTINCT s.id, s.title, s.model, s.created_at, s.updated_at
+            """SELECT s.id, s.title, s.model, s.created_at, s.updated_at, m.content
                FROM sessions s
                JOIN messages m ON m.session_id = s.id
                WHERE m.content LIKE ? AND m.role IN ('user', 'assistant')
                ORDER BY s.updated_at DESC LIMIT ?""",
-            (q, limit),
+            (q, limit * 2),
         ) as cursor:
             async for row in cursor:
-                if row[0] not in sessions:
-                    sessions[row[0]] = Session(id=row[0], title=row[1], model=row[2], created_at=row[3], updated_at=row[4])
+                sid = row[0]
+                content = row[5]
+                idx = content.lower().find(query.lower())
+                if idx >= 0:
+                    start = max(0, idx - 20)
+                    end = min(len(content), idx + len(query) + 20)
+                    snippet = ("..." if start > 0 else "") + content[start:end].replace("\n", " ") + ("..." if end < len(content) else "")
+                else:
+                    snippet = None
+
+                if sid not in sessions:
+                    sessions[sid] = Session(id=row[0], title=row[1], model=row[2], created_at=row[3], updated_at=row[4], snippet=snippet)
+                elif snippet and not sessions[sid].snippet:
+                    sessions[sid].snippet = snippet
         # 按 updated_at 倒序返回
         return sorted(sessions.values(), key=lambda s: s.updated_at, reverse=True)[:limit]
 

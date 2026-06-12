@@ -45,14 +45,17 @@ import {
   renameSession,
   streamChat,
   uploadFile,
+  fetchOnboardingStatus,
+  completeOnboarding,
 } from "@/lib/api";
+import { AllSessionsView } from "./all-sessions-view";
 import { SettingsView } from "./settings-view";
 import { KnowledgeView } from "./knowledge-view";
 import { ScheduleView } from "./schedule-view";
 import { MemoryView } from "./memory-view";
 import { SkillsView } from "./skills-view";
 import { LogsView } from "./logs-view";
-import { Clock, Database, Calendar, Wrench } from "lucide-react";
+import { Clock, Database, Calendar, Wrench, List } from "lucide-react";
 
 interface Message {
   role: "user" | "assistant";
@@ -87,7 +90,7 @@ export function ChatView() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
-  const [view, setView] = useState<"chat" | "settings" | "knowledge" | "schedule" | "memory" | "logs" | "skills">("chat");
+  const [view, setView] = useState<"chat" | "settings" | "knowledge" | "schedule" | "memory" | "logs" | "skills" | "all_sessions">("chat");
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [sessionSearch, setSessionSearch] = useState("");
   const [searchLoading, setSearchLoading] = useState(false);
@@ -119,7 +122,7 @@ export function ChatView() {
   const renderSession = (s: SessionInfo) => (
     <div
       key={s.id}
-      className={`group flex flex-col px-3 py-2 rounded-lg cursor-pointer text-xs transition-colors ${
+      className={`group flex flex-col px-3 py-2 rounded-lg cursor-pointer text-sm transition-colors ${
         activeSession === s.id && view === "chat" ? "bg-accent text-accent-foreground" : "hover:bg-muted"
       }`}
       onClick={() => { if (editingSessionId !== s.id) { loadSession(s.id); setView("chat"); } }}
@@ -177,7 +180,7 @@ export function ChatView() {
     const q = sessionSearch.trim();
     const timer = setTimeout(() => {
       setSearchLoading(true);
-      fetchSessions(50, q || undefined)
+      fetchSessions(50, 0, q || undefined)
         .then(setSessions)
         .catch(() => {})
         .finally(() => setSearchLoading(false));
@@ -190,6 +193,12 @@ export function ChatView() {
   const [pendingFiles, setPendingFiles] = useState<{ name: string; path: string }[]>([]);
   const [usage, setUsage] = useState<{ input: number; output: number } | null>(null);
 
+  // Onboarding state
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [onboardingAgentName, setOnboardingAgentName] = useState("");
+  const [onboardingUserInfo, setOnboardingUserInfo] = useState("");
+  const [onboardingSubmitting, setOnboardingSubmitting] = useState(false);
+
   // URL 同步：初始化加载
   const [isUrlLoaded, setIsUrlLoaded] = useState(false);
   useEffect(() => {
@@ -197,7 +206,7 @@ export function ChatView() {
     const v = params.get("view") as any;
     const s = params.get("session");
     
-    if (v && ["chat", "settings", "knowledge", "schedule", "memory", "skills"].includes(v)) {
+    if (v && ["chat", "settings", "knowledge", "schedule", "memory", "skills", "all_sessions"].includes(v)) {
       setView(v);
     }
     
@@ -245,6 +254,14 @@ export function ChatView() {
       setModels(m);
       if (m.length > 0) setSelectedModel((prev) => prev || m[0].id);
     }).catch(() => {});
+  }, []);
+
+  // Check first-time onboarding on mount
+  useEffect(() => {
+    fetchOnboardingStatus().then((status) => {
+      if (status.first_time) setShowOnboarding(true);
+    }).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadSession = async (id: string) => {
@@ -368,6 +385,19 @@ export function ChatView() {
     }
   };
 
+  const handleOnboardingSubmit = async () => {
+    setOnboardingSubmitting(true);
+    try {
+      await completeOnboarding(onboardingAgentName.trim() || "Ethan", onboardingUserInfo.trim());
+      setShowOnboarding(false);
+    } catch {
+      // silently ignore — onboarding is best-effort
+      setShowOnboarding(false);
+    } finally {
+      setOnboardingSubmitting(false);
+    }
+  };
+
   return (
     <div className="flex h-screen bg-background">
       {/* Sidebar */}
@@ -400,6 +430,14 @@ export function ChatView() {
             </div>
 
             {/* Session List */}
+            
+          <Button
+            variant="ghost"
+            className={`w-full justify-start h-9 px-3 ${view === "all_sessions" ? "bg-accent text-accent-foreground" : "text-muted-foreground"}`}
+            onClick={() => setView("all_sessions")}
+          >
+            <List className="h-4 w-4 mr-2" /> 全部对话 (All Sessions)
+          </Button>
             <div className="pl-6 pr-1 flex flex-col gap-1">
               {!sessionSearch && (
                 <>
@@ -407,7 +445,7 @@ export function ChatView() {
                     className="flex items-center justify-between py-1 mt-1 cursor-pointer text-muted-foreground hover:text-foreground"
                     onClick={() => setNormalExpanded(!normalExpanded)}
                   >
-                    <span className="text-xs font-semibold">最新对话</span>
+                    <span className="text-sm font-semibold">最新对话</span>
                     <span className="text-[10px]">{normalExpanded ? "▼" : "▶"}</span>
                   </div>
                   {normalExpanded && normalSessions.slice(0, 5).map(renderSession)}
@@ -425,7 +463,7 @@ export function ChatView() {
                       }
                     }}
                   >
-                    <span className="text-xs font-semibold flex items-center gap-1">
+                    <span className="text-sm font-semibold flex items-center gap-1">
                       定时任务
                       {scheduleUnreadCount > 0 && !scheduleExpanded && (
                         <span className="bg-red-500 text-white text-[9px] px-1.5 py-0.2 rounded-full">{scheduleUnreadCount}</span>
@@ -492,6 +530,8 @@ export function ChatView() {
           <MemoryView />
         ) : view === "skills" ? (
           <SkillsView />
+        ) : view === "all_sessions" ? (
+          <AllSessionsView onSelectSession={(id) => { loadSession(id); setView("chat"); }} />
         ) : (
           <>
         {/* Header */}
@@ -643,6 +683,60 @@ export function ChatView() {
 
         {/* Input area */}
         <div className="border-t border-border p-4">
+          {/* Onboarding banner */}
+          {showOnboarding && (
+            <div className="mb-4 rounded-xl border border-yellow-500/40 bg-yellow-500/10 p-4 space-y-3">
+              <p className="text-sm font-semibold text-yellow-600 dark:text-yellow-400">
+                👋 Welcome! Let me introduce myself.
+              </p>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Before we get started, I have two quick questions to personalize our experience.
+                You can always update these in Settings later.
+              </p>
+              <div className="space-y-2">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground block mb-1">
+                    What would you like to call me? <span className="opacity-60">(default: Ethan)</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Ethan"
+                    value={onboardingAgentName}
+                    onChange={(e) => setOnboardingAgentName(e.target.value)}
+                    className="w-full bg-background border border-border rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground block mb-1">
+                    Who are you? <span className="opacity-60">(e.g. "I'm Alex, a software engineer")</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="I'm ..."
+                    value={onboardingUserInfo}
+                    onChange={(e) => setOnboardingUserInfo(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") handleOnboardingSubmit(); }}
+                    className="w-full bg-background border border-border rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring"
+                  />
+                </div>
+              </div>
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={() => setShowOnboarding(false)}
+                  className="text-xs text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-lg hover:bg-muted transition-colors"
+                >
+                  Skip
+                </button>
+                <button
+                  onClick={handleOnboardingSubmit}
+                  disabled={onboardingSubmitting}
+                  className="text-xs bg-yellow-500 hover:bg-yellow-400 text-white font-semibold px-4 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+                >
+                  {onboardingSubmitting ? "Saving..." : "Let's go!"}
+                </button>
+              </div>
+            </div>
+          )}
           {pendingFiles.length > 0 && (
             <div className="flex gap-2 mb-2 flex-wrap">
               {pendingFiles.map((f, i) => (

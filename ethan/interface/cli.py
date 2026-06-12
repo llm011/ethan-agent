@@ -34,6 +34,7 @@ def _register_subcommands():
     from ethan.interface.commands import skill as skill_cmd
     from ethan.interface.commands import schedule as schedule_cmd
     from ethan.interface.commands import knowledge as knowledge_cmd
+    from ethan.interface.commands import code as code_cmd
 
     app.add_typer(model_cmd.app, name="model")
     app.add_typer(provider_cmd.app, name="provider")
@@ -41,6 +42,7 @@ def _register_subcommands():
     app.add_typer(skill_cmd.app, name="skill")
     app.add_typer(schedule_cmd.app, name="schedule")
     app.add_typer(knowledge_cmd.app, name="knowledge")
+    app.add_typer(code_cmd.app, name="code")
 
 
 @app.command("serve")

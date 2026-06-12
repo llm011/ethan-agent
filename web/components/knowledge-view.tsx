@@ -10,6 +10,7 @@ import { KnowledgeItem, fetchKnowledge, addKnowledge, deleteKnowledge } from "@/
 export function KnowledgeView() {
   const [items, setItems] = useState<KnowledgeItem[]>([]);
   const [search, setSearch] = useState("");
+  const [searchMode, setSearchMode] = useState<"keyword" | "semantic">("keyword");
   const [loading, setLoading] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
 
@@ -20,10 +21,10 @@ export function KnowledgeView() {
   const [addLoading, setAddLoading] = useState(false);
 
   // Fetch knowledge data
-  const loadData = useCallback(async (q?: string) => {
+  const loadData = useCallback(async (q?: string, mode: "keyword" | "semantic" = "keyword") => {
     setLoading(true);
     try {
-      const data = await fetchKnowledge(q);
+      const data = await fetchKnowledge(q, mode);
       setItems(data);
     } catch (err) {
       console.error("Failed to load knowledge", err);
@@ -37,13 +38,13 @@ export function KnowledgeView() {
     loadData();
   }, [loadData]);
 
-  // Debounced search
+  // Debounced search — re-runs when query or mode changes
   useEffect(() => {
     const timer = setTimeout(() => {
-      loadData(search.trim() || undefined);
+      loadData(search.trim() || undefined, searchMode);
     }, 300);
     return () => clearTimeout(timer);
-  }, [search, loadData]);
+  }, [search, searchMode, loadData]);
 
   const handleDelete = async (source: string) => {
     if (!window.confirm("Are you sure you want to delete this knowledge item?")) return;
@@ -68,7 +69,7 @@ export function KnowledgeView() {
       setNewTitle("");
       setNewContent("");
       setNewTags("");
-      loadData(search.trim() || undefined); // Refresh
+      loadData(search.trim() || undefined, searchMode); // Refresh
     } catch (err) {
       console.error("Failed to add", err);
       alert("Failed to add item");
@@ -89,14 +90,30 @@ export function KnowledgeView() {
       </header>
 
       <div className="p-4 border-b border-border">
-        <div className="relative max-w-md">
-          <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search knowledge..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-9"
-          />
+        <div className="flex items-center gap-2 max-w-lg">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search knowledge..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+          {/* Search mode toggle */}
+          <button
+            type="button"
+            onClick={() => setSearchMode(m => m === "keyword" ? "semantic" : "keyword")}
+            className={
+              "shrink-0 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors " +
+              (searchMode === "semantic"
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-input bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40")
+            }
+            title={searchMode === "semantic" ? "切换为关键词检索" : "切换为语义检索"}
+          >
+            {searchMode === "semantic" ? "语义检索" : "关键词检索"}
+          </button>
         </div>
       </div>
 
