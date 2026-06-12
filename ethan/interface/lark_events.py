@@ -13,50 +13,77 @@ logger = logging.getLogger(__name__)
 _listener_task: asyncio.Task | None = None
 
 
-async def _send_reaction(message_id: str) -> None:
-    """给消息添加思考表情，告知用户已收到。"""
+async def _send_reaction(message_id: str) -> str | None:
+    """给消息添加 THINKING 表情，返回 reaction_id 以便后续删除。"""
     try:
         proc = await asyncio.create_subprocess_exec(
             "lark-cli", "im", "reactions", "create",
             "--as", "bot",
             "--params", json.dumps({"message_id": message_id}),
-            "--data", json.dumps({"reaction_type": {"emoji_type": "THINKING_FACE"}}),
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
+            "--data", json.dumps({"reaction_type": {"emoji_type": "THINKING"}}),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
         )
-        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=5)
-        if stderr:
-            logger.debug("reaction stderr: %s", stderr.decode(errors="replace").strip())
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+        data = json.loads(stdout.decode(errors="replace"))
+        return data.get("data", {}).get("reaction_id")
     except Exception:
         logger.debug("Failed to add reaction to %s", message_id, exc_info=True)
+        return None
 
 
-async def _send_reply(chat_id: str, text: str) -> None:
-    """通过 lark-cli 回复消息。"""
+async def _remove_reaction(message_id: str, reaction_id: str) -> None:
+    """删除之前添加的 THINKING 表情。"""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "lark-cli", "im", "reactions", "delete",
+            "--as", "bot",
+            "--params", json.dumps({"message_id": message_id, "reaction_id": reaction_id}),
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await asyncio.wait_for(proc.wait(), timeout=5)
+    except Exception:
+        pass
+
+
+async def _send_reply(chat_id: str, text: str) -> str | None:
+    """通过 lark-cli 回复消息，使用 --markdown 以正确渲染格式。
+    返回发出的消息 message_id（从 JSON stdout 解析），失败时返回 None。
+    """
     try:
         proc = await asyncio.create_subprocess_exec(
             "lark-cli", "im", "+messages-send",
             "--chat-id", chat_id,
-            "--text", text,
+            "--markdown", text,
             "--as", "bot",
-            stdout=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
-        await asyncio.wait_for(proc.wait(), timeout=15)
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
+        data = json.loads(stdout.decode(errors="replace"))
+        return data.get("data", {}).get("message_id")
     except Exception:
         logger.exception("Failed to send Lark reply to chat %s", chat_id)
+        return None
 
 
 async def _handle_message(event_data: dict) -> None:
-    """处理收到的消息事件，调用 Agent 并回复。
+    """处理收到的消息事件，调用 Agent 并流式回复。
 
     lark-cli event consume 输出的是扁平结构：
     {"chat_id": "oc_xxx", "content": "text", "message_id": "om_xxx",
      "message_type": "text", "sender_id": "ou_xxx", ...}
+
+    流式策略：
+    - 积累 chunk 直到 ≥80 字符或距上次发送 ≥2 秒
+    - 首次 flush：移除 THINKING 表情后发送第一条消息
+    - 后续 flush：lark-cli 不支持 patch，直接追加新消息
+    - 最终确保完整内容已发出
     """
     from ethan.core.agent import Agent
     from ethan.memory.session import SessionStore
-    from ethan.providers.base import Message
+    from ethan.providers.base import Message, ToolEvent
     from ethan.skills.registry import SkillRegistry
     from ethan.tools.builtin.file import FileListTool, FileReadTool, FileWriteTool
     from ethan.tools.builtin.shell import ShellTool
@@ -79,8 +106,8 @@ async def _handle_message(event_data: dict) -> None:
     if not chat_id:
         return
 
-    # 立刻加思考表情（不等 Agent 响应）
-    asyncio.create_task(_send_reaction(message_id))
+    # 立刻加思考表情，保存 reaction_id 以便回复后删除
+    reaction_id = await _send_reaction(message_id)
 
     # 查找或创建对应的 Session
     store = SessionStore()
@@ -101,6 +128,14 @@ async def _handle_message(event_data: dict) -> None:
             session = await store.create(cfg.defaults.model)
             await store.update_title(session.id, f"{prefix}{session.id[:8]}")
             session_id = session.id
+            # New user first contact — send a welcome
+            welcome = "嘿！我是 Ethan，你的私人 AI 助手 👋\n\n我已经在这台 Mac mini 上常驻了，有任何事直接找我就行——写代码、查信息、控制设备、管理日程都行。\n\n你叫什么名字？让我记住你~"
+            await _send_reply(chat_id, welcome)
+            # Let reaction stay visible while user reads welcome, then process their actual message
+
+        # 加载完整历史，让 Agent 拥有上下文
+        session_obj = await store.load(session_id)
+        session_messages = session_obj.messages if session_obj else []
 
         user_msg = Message(role="user", content=text)
         await store.save_message(session_id, user_msg)
@@ -113,19 +148,60 @@ async def _handle_message(event_data: dict) -> None:
         skills.load()
         agent = Agent(tool_registry=registry, skill_registry=skills)
 
-        response = await agent.chat([user_msg])
+        # --- 流式回复 ---
+        FLUSH_CHARS = 80
+        FLUSH_SECS = 2.0
 
+        buffer = ""
+        full_content = ""
+        reaction_removed = False
+        last_flush_time = asyncio.get_event_loop().time()
+
+        async def flush(is_final: bool = False) -> None:
+            nonlocal buffer, reaction_removed, last_flush_time
+            if not buffer:
+                return
+            # 首次发送前先移除 THINKING 表情
+            if not reaction_removed:
+                if reaction_id and message_id:
+                    await _remove_reaction(message_id, reaction_id)
+                reaction_removed = True
+            await _send_reply(chat_id, buffer)
+            buffer = ""
+            last_flush_time = asyncio.get_event_loop().time()
+
+        async for chunk in agent.stream_chat(session_messages + [user_msg]):
+            if isinstance(chunk, ToolEvent):
+                continue  # 工具调用事件不发给 Lark
+
+            buffer += chunk
+            full_content += chunk
+
+            now = asyncio.get_event_loop().time()
+            if len(buffer) >= FLUSH_CHARS or (buffer and now - last_flush_time >= FLUSH_SECS):
+                await flush()
+
+        # 发送剩余内容
+        await flush(is_final=True)
+
+        # 如果整个流没有触发过任何 flush（空响应），还没移除表情
+        if not reaction_removed and reaction_id and message_id:
+            await _remove_reaction(message_id, reaction_id)
+
+        # 保存完整 assistant 消息到 session
+        response = Message(role="assistant", content=full_content)
         await store.save_message(session_id, response)
         await store.touch(session_id)
+
     except Exception:
         logger.exception("Agent error handling Lark message")
+        # 确保表情被清理
+        if reaction_id and message_id:
+            await _remove_reaction(message_id, reaction_id)
         await store.close()
         return
 
     await store.close()
-
-    if response.content:
-        await _send_reply(chat_id, response.content)
 
 
 async def _event_loop() -> None:

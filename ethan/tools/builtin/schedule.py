@@ -26,10 +26,7 @@ def fire_schedule_job(session_id: str, prompt: str):
             async def log_error():
                 store = SessionStore()
                 await store.init()
-                err_msg = Message(role="assistant", content=f"⚠️ 定时任务后台执行失败:
-```text
-{e}
-```")
+                err_msg = Message(role="assistant", content=f"⚠️ 定时任务后台执行失败:\n```text\n{e}\n```")
                 await store.save_message(session_id, err_msg)
                 await store.touch(session_id)
                 await store.close()
