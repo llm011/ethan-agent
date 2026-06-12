@@ -162,4 +162,15 @@
   html {
     @apply font-sans;
   }
+  /* 消息内容行间距 */
+  .prose p {
+    line-height: 1.9;
+    margin-top: 0.6em;
+    margin-bottom: 0.6em;
+  }
+  .prose li {
+    line-height: 1.9;
+    margin-top: 0.25em;
+    margin-bottom: 0.25em;
+  }
 }
