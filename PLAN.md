@@ -247,16 +247,16 @@ ethan/
 - [ ] `GET /logs?page=&q=` — 读取 backend.log，分页+搜索
 
 ### 前端实现
-- [ ] 重构 layout：左侧 icon 导航栏 + 内容区
-- [ ] Memory 页面：Facts 卡片（含 confidence/category）+ Episodes 列表
-- [ ] Skills 页面：列表 + 内容预览 + 创建表单
-- [ ] Schedule 页面：任务列表 + pause/resume/delete + 创建对话框
-- [ ] Knowledge 页面：列表 + 搜索 + 添加 + 删除
-- [ ] Logs 页面：日志列表、分页（每页 100 行）、关键词高亮搜索
+- [x] 重构 layout：左侧 icon 导航栏 + 内容区
+- [x] Memory 页面：Facts 卡片（含 confidence/category）+ Episodes 列表
+- [x] Skills 页面：列表 + 内容预览 + 创建表单
+- [x] Schedule 页面：任务列表 + pause/resume/delete + 创建对话框
+- [x] Knowledge 页面：列表 + 搜索 + 添加 + 删除
+- [x] Logs 页面：日志列表、分页（每页 100 行）、关键词高亮搜索
 
 ### 知识库向量检索（后续）
-- [ ] 引入 `sqlite-vec` 或本地 embedding 接口
-- [ ] 知识库条目入库时同步生成 embedding
+- [x] 引入 `sqlite-vec` 或本地 embedding 接口
+- [x] 知识库条目入库时同步生成 embedding
 - [ ] `/knowledge/search` 支持语义检索
 
 ---
@@ -285,32 +285,54 @@ ethan/
 - [x] Knowledge 管理面板：支持本地文件知识库检索、添加、删除
 - [x] Schedule 管理面板：支持 APScheduler 任务状态查看、暂停、恢复、删除
 - [x] URL 路由同步：将当前选中的 View 和 Session ID 同步至 URL（解决刷新丢失状态问题）
-- [ ] Skills 管理面板：技能列表展示、预览与创建（待开发）
-- [ ] Logs 日志面板：提供 Web 端的后端日志查看与分页检索（待开发）
+- [x] Skills 管理面板：技能列表展示、预览与创建（待开发）
+- [x] Logs 日志面板：提供 Web 端的后端日志查看与分页检索（待开发）
 
 ### CLI 与 ACP 功能（正在进行）
 - [x] `ethan code` 命令：支持挂载本地 ACP（Claude Code / OpenCode）做复杂任务委派
 - [x] PTY 终端会话持久化（通过 pexpect 维持 Claude Code 交互流）
 
 ### 知识库加强（计划中）
-- [ ] 引入 `sqlite-vec` 扩展，替换现有的关键词搜索为本地 Embedding 语义检索
+- [x] 引入 `sqlite-vec` 扩展，替换现有的关键词搜索为本地 Embedding 语义检索
 
 ### 自动化与质量保障（正在进行）
-- [ ] 引入 E2E 端到端测试（Playwright）：覆盖 Web 核心主路径（新建/切换对话、浏览记忆列表、查看记忆详情、切换标签页等），确保 UI 和 API 层的稳定性。
+- [x] 引入 E2E 端到端测试（Playwright）：覆盖 Web 核心主路径（新建/切换对话、浏览记忆列表、查看记忆详情、切换标签页等），确保 UI 和 API 层的稳定性。
 
 ### Agent 认知架构升级（正在进行）
-- [ ] 模块化系统提示词引擎：废除单一字符串，引入 `~/.ethan/system/` 目录化内核（基于 `identity.md` 与 `soul.md`）。采用 XML 标签化拼接，结合具体执行的 Good/Bad Case（Anti-Looping，文件读写安全）彻底规范 Agent 行为。
-- [ ] 优化 Web 端设置：将原先单文本框的系统设定页拆分为多模组编辑器（针对内核文件直接渲染修改）。
+- [x] 模块化系统提示词引擎：废除单一字符串，引入 `~/.ethan/system/` 目录化内核（基于 `identity.md` 与 `soul.md`）。采用 XML 标签化拼接，结合具体执行的 Good/Bad Case（Anti-Looping，文件读写安全）彻底规范 Agent 行为。
+- [x] 优化 Web 端设置：将原先单文本框的系统设定页拆分为多模组编辑器（针对内核文件直接渲染修改）。
 
 ### Web UI 进阶功能（正在进行）
-- [ ] 设置中心重构：将原先单页面的 Settings 升级为类 IDE 的双栏结构。支持通用设置、模型 Provider 配置，以及独立的 `identity.md`, `soul.md`, `format.md` 内核文件编辑区。
+- [x] 设置中心重构：将原先单页面的 Settings 升级为类 IDE 的双栏结构。支持通用设置、模型 Provider 配置，以及独立的 `identity.md`, `soul.md`, `format.md` 内核文件编辑区。
 
 ### 新增优化需求（用户反馈提取）
-- [ ] **First-Time Onboarding (新用户冷启动引导)**: 无论是 REPL 还是 Web 界面，如果是第一次使用，Agent 需要主动发起第一条消息打招呼，引导用户：“请为我设置一个名字，并告诉我你是谁”。这些信息将通过自动记忆系统存入 `facts.json` 和 `config.yaml`。
+- [x] **First-Time Onboarding (新用户冷启动引导)**: 无论是 REPL 还是 Web 界面，如果是第一次使用，Agent 需要主动发起第一条消息打招呼，引导用户：“请为我设置一个名字，并告诉我你是谁”。这些信息将通过自动记忆系统存入 `facts.json` 和 `config.yaml`。
 - [ ] **Web 端路由重构 (Path-based Routing)**: 废除 `?view=memory&session=xxx` 这种丑陋的 Query 参数形式。重构为 Next.js 原生的文件系统路由，如 `/memory`, `/settings`, `/chat/[id]`。
 
 ### Agent 认知与交互架构（正在进行）
 - [ ] **异步中断与连续对话 (Asynchronous Interrupt & Batching)**: 借鉴 Claude Code 机制。允许用户在 Agent 执行漫长任务时连续发送多条消息，将其缓冲进上下文队列。在合适的中断点（如一个 Tool 执行完毕时），Agent 能够感知到新指令并调整原有规划，做到不遗忘之前的任务，同时响应新的插话。
 
 ### Web UI 进阶功能（正在进行）
-- [ ] **全部对话 (All Sessions) 聚合页**: 在左侧菜单新增“全部对话”入口，点击后在右侧主区域以网格卡片（3-4列）的形式展示所有的历史对话，包含摘要与元信息，支持点击直接进入会话。
+- [x] **全部对话 (All Sessions) 聚合页**: 在左侧菜单新增“全部对话”入口，点击后在右侧主区域以网格卡片（3-4列）的形式展示所有的历史对话，包含摘要与元信息，支持点击直接进入会话。
+
+### Agent 速度优化（新需求 - 高优先级）
+- [x] **Fast Path 任务分类路由**: 引入轻量级意图检测，把请求分为两类：
+  - 简单快速类（智能家居控制、简短提醒等）→ 最快模型 + 极简 Prompt + 不走 Agent Loop
+  - 复杂任务类（代码重构、分析等）→ 完整 Agent Loop + 全量上下文
+- [x] **最小化 System Prompt**: 当前每次请求 ~370 tokens，需按任务类型动态裁剪
+- [ ] **Tools on demand**: 简单任务不加载工具列表，减少 LLM 决策时间
+- [ ] **延迟优化目标**: 智能家居类命令（如"关灯"）→ ≤2s TTFT，普通对话 ≤5s TTFT
+
+### 飞书(Lark)集成优化
+- [x] 基础飞书 WebSocket 长连接（无需公网 IP）
+- [x] 收到消息时添加 THINKING 表情
+- [x] 收到回复后自动移除 THINKING 表情
+- [x] 消息使用 --markdown 渲染（已验证飞书支持 post 格式 markdown）
+- [ ] 流式回复体验：先发一条占位消息，追加内容模拟流式效果（buffer 积累再 patch）
+- [ ] 新用户完成飞书授权后自动发欢迎消息（onboarding 集成）
+
+### 体验与健壮性问题（积压）
+- [ ] 工具调用返回空时的 fallback 机制：工具结果为空或无后续文本时，Agent 应主动告知用户（简短一句）
+- [ ] 登录页自动重试机制：后端短暂重启期间，前端 auth 失败后自动重试 3 次（每次 2 秒间隔）
+- [ ] 对话来源渠道标签（source）展示在侧边栏（web/repl/lark/custom）
+- [ ] 对话标题必须是对 query 的摘要，禁止以 `lark:oc_xxx` 等内部前缀作为标题

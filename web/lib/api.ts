@@ -52,7 +52,9 @@ export interface SessionInfo {
   title: string;
   model: string;
   created_at: number;
-  updated_at: number; snippet?: string;
+  updated_at: number;
+  snippet?: string;
+  source?: string;
 }
 
 export interface SessionDetail {

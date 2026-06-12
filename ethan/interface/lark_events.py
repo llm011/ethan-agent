@@ -11,6 +11,7 @@ import shutil
 logger = logging.getLogger(__name__)
 
 _listener_task: asyncio.Task | None = None
+_lark_chat_map: dict[str, str] = {}  # chat_id -> session_id, in-memory for performance
 
 
 async def _send_reaction(message_id: str) -> str | None:
@@ -116,18 +117,26 @@ async def _handle_message(event_data: dict) -> None:
     try:
         from ethan.core.config import get_config
         prefix = f"lark:{chat_id}:"
-        sessions = await store.list_recent(limit=100)
-        session_id = None
-        for s in sessions:
-            if s.title and s.title.startswith(prefix):
-                session_id = s.id
-                break
+        # Fast lookup: check in-memory cache first
+        session_id = _lark_chat_map.get(chat_id)
+        if not session_id:
+            sessions = await store.list_recent(limit=100)
+            for s in sessions:
+                if s.title and s.title.startswith(prefix):
+                    session_id = s.id
+                    _lark_chat_map[chat_id] = s.id
+                    break
 
         if not session_id:
             cfg = get_config()
-            session = await store.create(cfg.defaults.model)
-            await store.update_title(session.id, f"{prefix}{session.id[:8]}")
+            session = await store.create(cfg.defaults.model, source="lark")
+            # Set a clean title from the first user message
+            from ethan.memory.session import _auto_title
+            from ethan.providers.base import Message as _Msg
+            auto = _auto_title([_Msg(role="user", content=text)])
+            await store.update_title(session.id, auto)
             session_id = session.id
+            _lark_chat_map[chat_id] = session.id
             # New user first contact — send a welcome
             welcome = "嘿！我是 Ethan，你的私人 AI 助手 👋\n\n我已经在这台 Mac mini 上常驻了，有任何事直接找我就行——写代码、查信息、控制设备、管理日程都行。\n\n你叫什么名字？让我记住你~"
             await _send_reply(chat_id, welcome)
@@ -187,6 +196,11 @@ async def _handle_message(event_data: dict) -> None:
         # 如果整个流没有触发过任何 flush（空响应），还没移除表情
         if not reaction_removed and reaction_id and message_id:
             await _remove_reaction(message_id, reaction_id)
+
+        # 工具调用完成但没有文字回复时，发一条默认提示
+        if not full_content:
+            full_content = "（没有找到相关内容）"
+            await _send_reply(chat_id, full_content)
 
         # 保存完整 assistant 消息到 session
         response = Message(role="assistant", content=full_content)

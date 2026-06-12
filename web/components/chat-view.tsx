@@ -138,14 +138,23 @@ export function ChatView() {
             className="flex-1 bg-transparent outline-none border-b border-primary"
           />
         ) : (
-          <span 
-            className="truncate flex-1 font-medium" 
-            dangerouslySetInnerHTML={{
-              __html: sessionSearch 
-                ? s.title.replace(new RegExp(sessionSearch, 'gi'), match => `<span class="bg-yellow-500/30 text-yellow-500 rounded px-0.5">${match}</span>`)
-                : s.title
-            }} 
-          />
+          <>
+            <span
+              className="flex-1 font-medium break-all line-clamp-2 leading-snug"
+              dangerouslySetInnerHTML={{
+                __html: sessionSearch
+                  ? s.title.replace(new RegExp(sessionSearch, 'gi'), match => `<span class="bg-yellow-500/30 text-yellow-500 rounded px-0.5">${match}</span>`)
+                  : s.title
+              }}
+            />
+            {s.title.startsWith("[定时]") ? (
+              <span className="text-[9px] px-1 rounded shrink-0 bg-orange-500/20 text-orange-400">定时</span>
+            ) : s.source && s.source !== "web" ? (
+              <span className={`text-[9px] px-1 rounded shrink-0 ${s.source === "lark" ? "bg-blue-500/20 text-blue-400" : "bg-green-500/20 text-green-400"}`}>
+                {s.source === "lark" ? "飞书" : "终端"}
+              </span>
+            ) : null}
+          </>
         )}
         {editingSessionId === s.id ? (
           <div className="flex gap-1">

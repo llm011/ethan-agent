@@ -201,7 +201,7 @@ async def list_sessions(limit: int = 50, offset: int = 0, q: str | None = None):
         sessions = await store.list_recent(limit, offset)
     await store.close()
     return {"sessions": [
-        {"id": s.id, "title": s.title, "model": s.model, "created_at": s.created_at, "updated_at": s.updated_at, "snippet": getattr(s, "snippet", None)}
+        {"id": s.id, "title": s.title, "model": s.model, "created_at": s.created_at, "updated_at": s.updated_at, "snippet": getattr(s, "snippet", None), "source": getattr(s, 'source', 'web')}
         for s in sessions
     ]}
 

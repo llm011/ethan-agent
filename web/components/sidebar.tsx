@@ -1,0 +1,358 @@
+"use client";
+
+import { useState, useEffect, useCallback } from "react";
+import { useRouter, usePathname } from "next/navigation";
+import { Plus, Trash2, Search, Settings, Book, Pencil, Check, X, List } from "lucide-react";
+import { Clock, Database } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Separator } from "@/components/ui/separator";
+import {
+  SessionInfo,
+  fetchSessions,
+  fetchSchedules,
+  deleteSession,
+  renameSession,
+  createSession,
+} from "@/lib/api";
+
+export function Sidebar() {
+  const router = useRouter();
+  const pathname = usePathname();
+
+  const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [sessionSearch, setSessionSearch] = useState("");
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState("");
+  const [normalExpanded, setNormalExpanded] = useState(true);
+  const [scheduleExpanded, setScheduleExpanded] = useState(false);
+  const [schedules, setSchedules] = useState<any[]>([]);
+  const [lastSeenSchedule, setLastSeenSchedule] = useState(() => {
+    if (typeof window !== "undefined") {
+      return Number(localStorage.getItem("ethan_last_seen_schedule") || "0");
+    }
+    return 0;
+  });
+
+  // Derive active session id from pathname: /chat/[id]
+  const activeSessionId = pathname.match(/^\/chat\/(.+)$/)?.[1] ?? null;
+
+  // Derive active view from pathname
+  const activeView = pathname === "/" || pathname.startsWith("/chat")
+    ? "chat"
+    : pathname.slice(1).replace(/\/$/, ""); // "memory", "knowledge", etc.
+
+  const normalSessions = sessions.filter((s) => !s.title.startsWith("[定时]"));
+  const scheduleSessions = sessions.filter((s) => s.title.startsWith("[定时]"));
+  const scheduleUnreadCount = scheduleSessions.filter(
+    (s) => s.updated_at > lastSeenSchedule
+  ).length;
+
+  // Re-fetch sessions on pathname change
+  useEffect(() => {
+    const q = sessionSearch.trim();
+    const timer = setTimeout(() => {
+      setSearchLoading(true);
+      fetchSessions(50, 0, q || undefined)
+        .then(setSessions)
+        .catch(() => {})
+        .finally(() => setSearchLoading(false));
+    }, 300);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionSearch, pathname]);
+
+  useEffect(() => {
+    fetchSchedules().then(setSchedules).catch(() => {});
+  }, [pathname]);
+
+  const handleNewSession = () => {
+    router.push("/chat");
+  };
+
+  const handleSelectSession = (id: string) => {
+    if (editingSessionId !== id) {
+      router.push(`/chat/${id}`);
+    }
+  };
+
+  const handleDeleteSession = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    await deleteSession(id);
+    setSessions((prev) => prev.filter((s) => s.id !== id));
+    if (activeSessionId === id) {
+      router.push("/chat");
+    }
+  };
+
+  const startEdit = (id: string, title: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingSessionId(id);
+    setEditingTitle(title);
+  };
+
+  const commitRename = async (id: string) => {
+    const title = editingTitle.trim();
+    if (title) {
+      await renameSession(id, title);
+      setSessions((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, title } : s))
+      );
+    }
+    setEditingSessionId(null);
+  };
+
+  const cancelEdit = () => setEditingSessionId(null);
+
+  const renderSession = (s: SessionInfo) => (
+    <div
+      key={s.id}
+      className={`group flex flex-col px-3 py-2 rounded-lg cursor-pointer text-sm transition-colors ${
+        activeSessionId === s.id
+          ? "bg-accent text-accent-foreground"
+          : "hover:bg-muted"
+      }`}
+      onClick={() => handleSelectSession(s.id)}
+    >
+      <div className="flex items-center gap-2">
+        {editingSessionId === s.id ? (
+          <input
+            autoFocus
+            value={editingTitle}
+            onChange={(e) => setEditingTitle(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commitRename(s.id);
+              if (e.key === "Escape") cancelEdit();
+            }}
+            onClick={(e) => e.stopPropagation()}
+            className="flex-1 bg-transparent outline-none border-b border-primary"
+          />
+        ) : (
+          <span
+            className="truncate flex-1 font-medium"
+            dangerouslySetInnerHTML={{
+              __html: sessionSearch
+                ? s.title.replace(
+                    new RegExp(sessionSearch, "gi"),
+                    (match) =>
+                      `<span class="bg-yellow-500/30 text-yellow-500 rounded px-0.5">${match}</span>`
+                  )
+                : s.title,
+            }}
+          />
+        )}
+        {editingSessionId === s.id ? (
+          <div className="flex gap-1">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                commitRename(s.id);
+              }}
+              className="text-primary hover:opacity-70"
+            >
+              <Check className="h-3 w-3" />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                cancelEdit();
+              }}
+              className="text-muted-foreground hover:opacity-70"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        ) : (
+          <div className="flex opacity-0 group-hover:opacity-100 transition-opacity">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-5 w-5"
+              onClick={(e) => startEdit(s.id, s.title, e)}
+            >
+              <Pencil className="h-3 w-3" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-5 w-5"
+              onClick={(e) => handleDeleteSession(s.id, e)}
+            >
+              <Trash2 className="h-3 w-3" />
+            </Button>
+          </div>
+        )}
+      </div>
+      {sessionSearch && s.snippet && (
+        <div
+          className="mt-1 text-muted-foreground line-clamp-2 leading-relaxed"
+          dangerouslySetInnerHTML={{
+            __html: s.snippet.replace(
+              new RegExp(sessionSearch, "gi"),
+              (match) =>
+                `<span class="bg-yellow-500/30 text-yellow-500 rounded px-0.5">${match}</span>`
+            ),
+          }}
+        />
+      )}
+    </div>
+  );
+
+  return (
+    <aside className="w-64 border-r border-border flex flex-col bg-muted/30 shrink-0">
+      <div className="p-4 flex items-center justify-between">
+        <h1 className="text-lg font-semibold">Ethan</h1>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6 hover:bg-background"
+          onClick={handleNewSession}
+          title="New chat"
+        >
+          <Plus className="h-4 w-4" />
+        </Button>
+      </div>
+
+      <div className="flex-1 p-2 flex flex-col gap-2 overflow-y-auto">
+        <div className="flex flex-col">
+          {/* Search */}
+          <div className="px-3 py-2">
+            <div className="relative">
+              <Search
+                className={`absolute left-2.5 top-2.5 h-3.5 w-3.5 ${
+                  searchLoading
+                    ? "text-primary animate-pulse"
+                    : "text-muted-foreground"
+                }`}
+              />
+              <Input
+                placeholder="搜索历史..."
+                value={sessionSearch}
+                onChange={(e) => setSessionSearch(e.target.value)}
+                className="h-8 pl-8 text-xs bg-background"
+              />
+            </div>
+          </div>
+
+          {/* All Sessions button */}
+          <Button
+            variant="ghost"
+            className={`w-full justify-start h-9 px-3 ${
+              pathname === "/sessions"
+                ? "bg-accent text-accent-foreground"
+                : "text-muted-foreground"
+            }`}
+            onClick={() => router.push("/sessions")}
+          >
+            <List className="h-4 w-4 mr-2" /> 全部对话 (All Sessions)
+          </Button>
+
+          {/* Session list */}
+          <div className="pl-6 pr-1 flex flex-col gap-1">
+            {!sessionSearch && (
+              <>
+                <div
+                  className="flex items-center justify-between py-1 mt-1 cursor-pointer text-muted-foreground hover:text-foreground"
+                  onClick={() => setNormalExpanded(!normalExpanded)}
+                >
+                  <span className="text-sm font-semibold">最新对话</span>
+                  <span className="text-[10px]">
+                    {normalExpanded ? "▼" : "▶"}
+                  </span>
+                </div>
+                {normalExpanded && normalSessions.slice(0, 5).map(renderSession)}
+
+                <div
+                  className="flex items-center justify-between py-1 mt-2 cursor-pointer text-muted-foreground hover:text-foreground"
+                  onClick={() => {
+                    setScheduleExpanded(!scheduleExpanded);
+                    if (!scheduleExpanded && scheduleSessions.length > 0) {
+                      const maxUpdated = Math.max(
+                        ...scheduleSessions.map((s) => s.updated_at)
+                      );
+                      if (maxUpdated > lastSeenSchedule) {
+                        setLastSeenSchedule(maxUpdated);
+                        localStorage.setItem(
+                          "ethan_last_seen_schedule",
+                          String(maxUpdated)
+                        );
+                      }
+                    }
+                  }}
+                >
+                  <span className="text-sm font-semibold flex items-center gap-1">
+                    定时任务
+                    {scheduleUnreadCount > 0 && !scheduleExpanded && (
+                      <span className="bg-red-500 text-white text-[9px] px-1.5 py-0.2 rounded-full">
+                        {scheduleUnreadCount}
+                      </span>
+                    )}
+                  </span>
+                  <span className="text-[10px]">
+                    {scheduleExpanded ? "▼" : "▶"}
+                  </span>
+                </div>
+                {scheduleExpanded &&
+                  scheduleSessions.slice(0, 5).map(renderSession)}
+              </>
+            )}
+            {sessionSearch && sessions.map(renderSession)}
+          </div>
+        </div>
+
+        <Separator className="my-2 opacity-40" />
+
+        {/* Other nav items */}
+        <Button
+          variant="ghost"
+          className={`w-full justify-start h-9 px-3 ${
+            pathname === "/memory"
+              ? "bg-accent text-accent-foreground"
+              : "text-muted-foreground"
+          }`}
+          onClick={() => router.push("/memory")}
+        >
+          <Database className="h-4 w-4 mr-2" /> 记忆 (Memory)
+        </Button>
+        <Button
+          variant="ghost"
+          className={`w-full justify-start h-9 px-3 ${
+            pathname === "/knowledge"
+              ? "bg-accent text-accent-foreground"
+              : "text-muted-foreground"
+          }`}
+          onClick={() => router.push("/knowledge")}
+        >
+          <Book className="h-4 w-4 mr-2" /> 知识库 (Knowledge)
+        </Button>
+        <Button
+          variant="ghost"
+          className={`w-full justify-start h-9 px-3 ${
+            pathname === "/schedule"
+              ? "bg-accent text-accent-foreground"
+              : "text-muted-foreground"
+          }`}
+          onClick={() => router.push("/schedule")}
+        >
+          <Clock className="h-4 w-4 mr-2" /> 定时任务 (Schedule)
+        </Button>
+      </div>
+
+      {/* Bottom: Settings */}
+      <div className="p-2 border-t border-border">
+        <Button
+          variant="ghost"
+          className={`w-full justify-start h-9 px-3 ${
+            pathname === "/settings"
+              ? "bg-accent text-accent-foreground"
+              : "text-muted-foreground"
+          }`}
+          onClick={() => router.push("/settings")}
+        >
+          <Settings className="h-4 w-4 mr-2" /> 设置 (Settings)
+        </Button>
+      </div>
+    </aside>
+  );
+}

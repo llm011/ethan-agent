@@ -25,6 +25,7 @@ class Session:
     updated_at: float
     messages: list[Message] = field(default_factory=list)
     snippet: str | None = None
+    source: str = "web"  # web | repl | lark | custom
 
 
 def _generate_id() -> str:
@@ -58,7 +59,8 @@ class SessionStore:
                 title TEXT NOT NULL,
                 model TEXT NOT NULL,
                 created_at REAL NOT NULL,
-                updated_at REAL NOT NULL
+                updated_at REAL NOT NULL,
+                source TEXT NOT NULL DEFAULT 'web'
             )
         """)
         await self._db.execute("""
@@ -78,7 +80,7 @@ class SessionStore:
         if self._db:
             await self._db.close()
 
-    async def create(self, model: str) -> Session:
+    async def create(self, model: str, source: str = "web") -> Session:
         now = time.time()
         session = Session(
             id=_generate_id(),
@@ -86,10 +88,11 @@ class SessionStore:
             model=model,
             created_at=now,
             updated_at=now,
+            source=source,
         )
         await self._db.execute(
-            "INSERT INTO sessions (id, title, model, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-            (session.id, session.title, session.model, session.created_at, session.updated_at),
+            "INSERT INTO sessions (id, title, model, created_at, updated_at, source) VALUES (?, ?, ?, ?, ?, ?)",
+            (session.id, session.title, session.model, session.created_at, session.updated_at, source),
         )
         await self._db.commit()
         return session
@@ -161,13 +164,13 @@ class SessionStore:
     async def list_recent(self, limit: int = 20, offset: int = 0) -> list[Session]:
         sessions = []
         async with self._db.execute(
-            "SELECT id, title, model, created_at, updated_at FROM sessions ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+            "SELECT id, title, model, created_at, updated_at, COALESCE(source, 'web') as source FROM sessions ORDER BY updated_at DESC LIMIT ? OFFSET ?",
             (limit, offset),
         ) as cursor:
             async for row in cursor:
                 sessions.append(Session(
                     id=row[0], title=row[1], model=row[2],
-                    created_at=row[3], updated_at=row[4],
+                    created_at=row[3], updated_at=row[4], source=row[5] if len(row) > 5 else "web",
                 ))
         return sessions
 

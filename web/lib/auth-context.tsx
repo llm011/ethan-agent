@@ -22,19 +22,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    const retryVerify = async (token: string, retries = 3): Promise<boolean> => {
+      for (let i = 0; i < retries; i++) {
+        try {
+          const ok = await verifyAuth(token);
+          return ok;
+        } catch (err) {
+          if (i < retries - 1) await new Promise((r) => setTimeout(r, 2000));
+        }
+      }
+      return false;
+    };
+
     const token = getAuthToken();
-    if (token) {
-      verifyAuth(token).then((ok) => {
-        setAuthenticated(ok);
-        setLoading(false);
-      }).catch(() => setLoading(false));
-    } else {
-      // Try without token (server might not require auth)
-      verifyAuth("").then((ok) => {
-        setAuthenticated(ok);
-        setLoading(false);
-      }).catch(() => setLoading(false));
-    }
+    retryVerify(token ?? "").then((ok) => {
+      setAuthenticated(ok);
+      setLoading(false);
+    });
   }, []);
 
   const login = async (token: string) => {

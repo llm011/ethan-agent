@@ -154,6 +154,59 @@ ethan schedule list/remove/pause/resume
 
 ---
 
+## Feishu (Lark) Bot（`ethan/interface/lark.py`）
+
+### 概述
+
+允许用户通过飞书机器人与 Ethan 对话。每条消息经 FastAPI 路由到 Agent，回复写回同一飞书会话。
+
+### 端点
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/lark/webhook` | 飞书事件回调入口（URL 验证 + 消息接收） |
+
+### 配置步骤
+
+1. 在[飞书开放平台](https://open.feishu.cn)创建企业自建应用，获取 `App ID` 和 `App Secret`。
+
+2. 在 `~/.ethan/config.yaml` 中添加：
+
+```yaml
+lark:
+  app_id: "cli_xxxxxxxxxxxxxxxx"
+  app_secret: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  verification_token: ""   # 事件订阅验证 Token（可选）
+  encrypt_key: ""          # 加密密钥（可选）
+```
+
+也可通过环境变量方式后续扩展；目前直接写入 config 文件即可。
+
+3. 在飞书开放平台 → **事件订阅** → 请求网址 URL 填写：
+
+```
+https://your-domain:8900/lark/webhook
+```
+
+4. 订阅事件：`im.message.receive_v1`（接收消息）。
+
+5. 在应用权限管理中开通：
+   - `im:message:send_as_bot`（发送消息）
+   - `im:message`（读取消息内容）
+
+6. 发布应用并将机器人添加到目标群组或开启单聊权限。
+
+### 会话持久化
+
+每个飞书 `open_chat_id` 对应一个独立 Session，标题格式为 `lark:<chat_id>:<short_id>`，存储在同一 SQLite 数据库中，可在 Web UI 中查看历史。
+
+### 当前限制
+
+- 仅处理 `text` 类型消息，图片/文件等消息类型静默忽略。
+- 暂不验证 `verification_token` / `encrypt_key`（可在 `lark.py` 中按需启用）。
+
+---
+
 ## 启动速度优化
 
 当前 `ethan -h` 约 0.3s（Python 导入），进入 REPL 约 1.5s（uv + 解释器冷启动）。
