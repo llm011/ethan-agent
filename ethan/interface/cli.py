@@ -66,7 +66,7 @@ def _build_agent(model: str | None = None):
     from ethan.tools.builtin.knowledge import KnowledgeAddTool, KnowledgeSearchTool
     from ethan.tools.builtin.schedule import ScheduleCreateTool, ScheduleListTool, ScheduleRemoveTool
     from ethan.tools.builtin.shell import ShellTool
-from ethan.tools.builtin.search import RipgrepTool, FdTool
+    from ethan.tools.builtin.search import RipgrepTool, FdTool
     from ethan.tools.builtin.web import WebFetchTool
     from ethan.tools.builtin.web_search import WebSearchTool
     from ethan.tools.registry import ToolRegistry
