@@ -190,6 +190,22 @@ async def delete_session(session_id: str):
     return {"ok": True}
 
 
+class RenameSessionRequest(BaseModel):
+    title: str
+
+
+@app.patch("/sessions/{session_id}", dependencies=[Depends(verify_token)])
+async def rename_session(session_id: str, req: RenameSessionRequest):
+    store = SessionStore()
+    await store.init()
+    title = req.title.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Title cannot be empty")
+    await store.update_title(session_id, title)
+    await store.close()
+    return {"ok": True}
+
+
 @app.post("/upload", dependencies=[Depends(verify_token)])
 async def upload_file(file: UploadFile = File(...)):
     content = await file.read()

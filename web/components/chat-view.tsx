@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Send, Paperclip, Loader2, Plus, Trash2, MessageSquare, Search, Sun, Moon } from "lucide-react";
+import { Send, Paperclip, Loader2, Plus, Trash2, MessageSquare, Search, Sun, Moon, Pencil, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -16,6 +16,7 @@ import {
   fetchModels,
   fetchSession,
   fetchSessions,
+  renameSession,
   streamChat,
   uploadFile,
 } from "@/lib/api";
@@ -55,6 +56,8 @@ export function ChatView() {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [sessionSearch, setSessionSearch] = useState("");
   const [searchLoading, setSearchLoading] = useState(false);
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState("");
   const { theme, toggle: toggleTheme } = useTheme();
 
   // 防抖全文搜索：空时加载全部，有内容时调后端搜索
@@ -117,6 +120,23 @@ export function ChatView() {
       setMessages([]);
     }
   };
+
+  const startEditSession = (id: string, currentTitle: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingSessionId(id);
+    setEditingTitle(currentTitle);
+  };
+
+  const commitRename = async (id: string) => {
+    const title = editingTitle.trim();
+    if (title) {
+      await renameSession(id, title);
+      setSessions((prev) => prev.map((s) => s.id === id ? { ...s, title } : s));
+    }
+    setEditingSessionId(null);
+  };
+
+  const cancelEdit = () => setEditingSessionId(null);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -219,7 +239,7 @@ export function ChatView() {
             />
           </div>
         </div>
-        <Separator />
+        <Separator className="my-1 opacity-40" />
         <ScrollArea className="flex-1 p-2">
           {sessions.map((s) => (
             <div
@@ -227,18 +247,36 @@ export function ChatView() {
               className={`group flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer text-sm transition-colors ${
                 activeSession === s.id ? "bg-accent text-accent-foreground" : "hover:bg-muted"
               }`}
-              onClick={() => loadSession(s.id)}
+              onClick={() => editingSessionId !== s.id && loadSession(s.id)}
             >
               <MessageSquare className="h-3.5 w-3.5 shrink-0 opacity-50" />
-              <span className="truncate flex-1">{s.title}</span>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6 opacity-0 group-hover:opacity-100"
-                onClick={(e) => { e.stopPropagation(); removeSession(s.id); }}
-              >
-                <Trash2 className="h-3 w-3" />
-              </Button>
+              {editingSessionId === s.id ? (
+                <input
+                  autoFocus
+                  value={editingTitle}
+                  onChange={(e) => setEditingTitle(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") commitRename(s.id); if (e.key === "Escape") cancelEdit(); }}
+                  onClick={(e) => e.stopPropagation()}
+                  className="flex-1 bg-transparent outline-none border-b border-primary text-sm"
+                />
+              ) : (
+                <span className="truncate flex-1">{s.title}</span>
+              )}
+              {editingSessionId === s.id ? (
+                <>
+                  <button onClick={(e) => { e.stopPropagation(); commitRename(s.id); }} className="text-primary hover:opacity-70"><Check className="h-3 w-3" /></button>
+                  <button onClick={(e) => { e.stopPropagation(); cancelEdit(); }} className="text-muted-foreground hover:opacity-70"><X className="h-3 w-3" /></button>
+                </>
+              ) : (
+                <>
+                  <Button variant="ghost" size="icon" className="h-6 w-6 opacity-0 group-hover:opacity-100" onClick={(e) => startEditSession(s.id, s.title, e)}>
+                    <Pencil className="h-3 w-3" />
+                  </Button>
+                  <Button variant="ghost" size="icon" className="h-6 w-6 opacity-0 group-hover:opacity-100" onClick={(e) => { e.stopPropagation(); removeSession(s.id); }}>
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
+                </>
+              )}
             </div>
           ))}
         </ScrollArea>
@@ -247,7 +285,7 @@ export function ChatView() {
       {/* Main area */}
       <main className="flex-1 flex flex-col">
         {/* Header */}
-        <header className="h-12 border-b border-border flex items-center px-4 gap-4">
+        <header className="h-12 border-b border-border flex items-center px-4 gap-3">
           <select
             value={selectedModel}
             onChange={(e) => setSelectedModel(e.target.value)}
@@ -257,6 +295,33 @@ export function ChatView() {
               <option key={m.id} value={m.id}>{m.description || m.id}</option>
             ))}
           </select>
+          {/* 当前 session 标题，可点击编辑 */}
+          {activeSession && (() => {
+            const cur = sessions.find((s) => s.id === activeSession);
+            if (!cur) return null;
+            return editingSessionId === activeSession ? (
+              <div className="flex items-center gap-1 flex-1 min-w-0">
+                <input
+                  autoFocus
+                  value={editingTitle}
+                  onChange={(e) => setEditingTitle(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") commitRename(activeSession); if (e.key === "Escape") cancelEdit(); }}
+                  className="flex-1 min-w-0 bg-transparent outline-none border-b border-primary text-sm"
+                />
+                <button onClick={() => commitRename(activeSession)} className="text-primary hover:opacity-70"><Check className="h-3.5 w-3.5" /></button>
+                <button onClick={cancelEdit} className="text-muted-foreground hover:opacity-70"><X className="h-3.5 w-3.5" /></button>
+              </div>
+            ) : (
+              <button
+                className="flex items-center gap-1.5 text-sm font-medium truncate max-w-[240px] hover:text-primary group"
+                onClick={(e) => startEditSession(activeSession, cur.title, e)}
+                title="Click to rename"
+              >
+                <span className="truncate">{cur.title}</span>
+                <Pencil className="h-3 w-3 opacity-0 group-hover:opacity-50 shrink-0" />
+              </button>
+            );
+          })()}
           {usage && (
             <span className="text-xs text-muted-foreground ml-auto">
               ↑{usage.input} ↓{usage.output} tokens

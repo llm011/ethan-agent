@@ -64,6 +64,14 @@ export async function fetchSessions(limit = 50, q?: string): Promise<SessionInfo
   return data.sessions;
 }
 
+export async function renameSession(id: string, title: string): Promise<void> {
+  await fetch(`${API_URL}/sessions/${id}`, {
+    method: "PATCH",
+    headers: headers(),
+    body: JSON.stringify({ title }),
+  });
+}
+
 export async function createSession(model?: string): Promise<{ id: string; title: string; model: string }> {
   const res = await fetch(`${API_URL}/sessions${model ? `?model=${model}` : ""}`, {
     method: "POST",
