@@ -214,61 +214,30 @@ async def _handle_message(event_data: dict) -> None:
         skills.load()
         agent = Agent(tool_registry=registry, skill_registry=skills)
 
-        # --- 流式回复（单消息追加模式）---
-        FLUSH_CHARS = 80
-        FLUSH_SECS = 2.0
-
-        buffer = ""
+        # --- 收集完整回复后一次性发送 ---
+        # 飞书 patch API 只支持卡片消息，文本消息无法 patch
+        # 所以采用：THINKING 表情作为"处理中"指示，完成后一次性发整条消息
         full_content = ""
         reaction_removed = False
-        reply_message_id: str | None = None  # 第一条回复消息的 ID
-        last_flush_time = asyncio.get_event_loop().time()
-
-        async def flush(is_final: bool = False) -> None:
-            nonlocal buffer, reaction_removed, last_flush_time, reply_message_id
-            if not buffer:
-                return
-            # 首次发送前先移除 THINKING 表情
-            if not reaction_removed:
-                if reaction_id and message_id:
-                    await _remove_reaction(message_id, reaction_id)
-                reaction_removed = True
-
-            if reply_message_id is None:
-                # 第一次：新建消息
-                reply_message_id = await _send_reply(chat_id, buffer)
-            else:
-                # 后续：patch 同一条消息（追加内容），实现流式效果
-                patched = await _patch_message(reply_message_id, full_content)
-                if not patched:
-                    # patch 失败则降级为发新消息
-                    await _send_reply(chat_id, buffer)
-
-            buffer = ""
-            last_flush_time = asyncio.get_event_loop().time()
 
         async for chunk in agent.stream_chat(session_messages + [user_msg]):
             if isinstance(chunk, ToolEvent):
-                continue  # 工具调用事件不发给 Lark
-
-            buffer += chunk
+                continue
             full_content += chunk
 
-            now = asyncio.get_event_loop().time()
-            if len(buffer) >= FLUSH_CHARS or (buffer and now - last_flush_time >= FLUSH_SECS):
-                await flush()
-
-        # 发送剩余内容
-        await flush(is_final=True)
-
-        # 如果整个流没有触发过任何 flush（空响应），还没移除表情
-        if not reaction_removed and reaction_id and message_id:
+        # 移除 THINKING 表情后发送完整回复
+        if reaction_id and message_id:
             await _remove_reaction(message_id, reaction_id)
+            reaction_removed = True
 
-        # 工具调用完成但没有文字回复时，发一条默认提示
-        if not full_content:
+        if full_content:
+            await _send_reply(chat_id, full_content)
+        else:
             full_content = "（没有找到相关内容）"
             await _send_reply(chat_id, full_content)
+
+        if not reaction_removed and reaction_id and message_id:
+            await _remove_reaction(message_id, reaction_id)
 
         # 保存完整 assistant 消息到 session
         response = Message(role="assistant", content=full_content)

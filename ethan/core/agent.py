@@ -180,6 +180,13 @@ class Agent:
         if schedule_ctx:
             parts.append(f"<scheduled_tasks>\n{schedule_ctx}\n</scheduled_tasks>")
 
+        # Inject skills list so Agent knows its own capabilities
+        if self._skills:
+            skills_list = self._skills.all()
+            if skills_list:
+                skill_lines = [f"- {s.name}: {s.description}" for s in skills_list]
+                parts.append(f"<available_skills>\n" + "\n".join(skill_lines) + "\n</available_skills>")
+
         facts_ctx = self._facts.build_context(max_facts=15)
         if facts_ctx:
             parts.append(f"<user_context>\n{facts_ctx}\n</user_context>")

@@ -1,5 +1,22 @@
 # Ethan Agent 开发计划
 
+## 当前已完成的核心功能
+
+- Provider 层：Claude / Gemini / OpenAI 兼容协议，按 model id 路由，流式输出 + tool_use
+- Agent Loop：ReAct 模式，完整工具调用链路
+- 三层记忆：热/温/冷滑动窗口 + 结构化 Facts + Episodic memory + 记忆防污染
+- Skill 系统：从 `~/.ethan/skills/*.md` 加载，关键词匹配自动注入 system prompt
+- APScheduler 定时任务：cron + interval，SQLite 持久化，对话中创建
+- Web UI：Next.js App Router 路径路由（/chat、/memory、/knowledge、/schedule、/skills、/settings），流式渲染，深色/浅橙主题，移动端基础适配
+- 飞书/Lark WebSocket 集成：无需公网 IP，Markdown 渲染，流式占位回复，onboarding
+- Fast Path 路由：轻量意图分类，简单命令跳过完整 Agent Loop
+- 内置工具：shell、web_search、web_fetch、file、rg（ripgrep）、fd
+- ACP 集成：`ethan code` 通过 PTY 会话委派 Claude Code / OpenCode
+- 知识库：本地 Markdown + sqlite-vec embedding 语义检索
+- REPL：会话管理、斜杠命令、来源标签、自动标题、新用户 onboarding
+
+---
+
 ## 背景与目标
 
 从零开始构建一个个人 AI Agent，运行在 Mac mini 上，长期常驻服务。  
@@ -20,29 +37,29 @@ ethan/
 │   ├── anthropic.py           # Claude 原生 SDK
 │   ├── openai_compat.py       # OpenAI 兼容协议（GPT/Ollama/OpenRouter）
 │   └── manager.py             # 按 model id 路由到对应 Provider
-├── memory/                    # 阶段二
-├── skills/                    # 阶段三
+├── memory/
+├── skills/
 ├── tools/
 │   ├── base.py                # BaseTool 抽象
 │   ├── registry.py            # ToolRegistry + 并发 ToolExecutor
 │   └── builtin/
-│       ├── shell.py           # Shell 工具（✅ 已实现）
-│       ├── file.py            # 文件工具（阶段五）
-│       └── web.py             # Web 工具（阶段五）
-├── scheduler/                 # 阶段四
+│       ├── shell.py
+│       ├── file.py
+│       └── web.py
+├── scheduler/
+├── knowledge/
+├── lark/
 └── interface/
     ├── cli.py                 # 主入口（typer）
-    ├── tui.py                 # Textual 全屏 TUI
+    ├── repl.py                # 交互式 REPL
+    ├── api.py                 # FastAPI
     └── commands/
-        ├── model.py           # ethan model list/add/remove/default
-        └── provider.py        # ethan provider list/set
 ```
 
 ---
 
 ## 阶段一：Provider 层 + 基础 Agent Loop ✅
 
-### 核心实现
 - [x] `ethan/providers/base.py` — 统一接口（Message、ToolCall、BaseProvider）
 - [x] `ethan/providers/anthropic.py` — Claude 原生协议，支持流式 + tool_use
 - [x] `ethan/providers/openai_compat.py` — OpenAI 兼容协议，支持流式 + tool_calling
@@ -52,32 +69,15 @@ ethan/
 - [x] `ethan/tools/base.py` — BaseTool 抽象
 - [x] `ethan/tools/registry.py` — ToolRegistry + 并发 ToolExecutor
 - [x] `ethan/tools/builtin/shell.py` — Shell 工具（带超时 + 输出截断）
-
-### CLI 界面
 - [x] `ethan/interface/tui.py` — Textual 全屏 TUI，流式渲染
 - [x] `ethan/interface/cli.py` — 主入口，`ethan` / `ethan -m MODEL` / `ethan -p PROMPT`
 - [x] `ethan/interface/commands/model.py` — `ethan model list/add/remove/default`
 - [x] `ethan/interface/commands/provider.py` — `ethan provider list/set`
 - [x] `bin/ethan` — shell 脚本，已链接到 `~/bin`
 
-### 文档
-- [x] `docs/README.md` — 文档索引
-- [x] `docs/architecture.md` — 整体架构图 + 数据流
-- [x] `docs/agent-loop.md` — Loop 设计 + 参考来源
-- [x] `docs/providers.md` — Provider 层详解
-- [x] `docs/tools.md` — 工具系统详解
-
-### 验证
-- [x] 所有模块导入通过
-- [x] ShellTool 本地执行正常（`date` 命令）
-- [x] API 连通（gemini-2.5-flash via OpenAI 兼容协议）
-- [x] Agent Loop + Tool Call 端到端（LLM 调用 shell 返回当前时间）
-- [x] `ethan model list/add/remove/default` 命令通过
-- [x] `ethan provider list/set` 命令通过
-
 ---
 
-## 阶段二：记忆系统
+## 阶段二：记忆系统 ✅
 
 - [x] `ethan/memory/session.py` — Session 持久化（SQLite）
 - [x] `ethan/memory/working.py` — 工作记忆（三层滑动窗口：热/温/冷）
@@ -87,12 +87,17 @@ ethan/
 - [x] REPL 内斜杠命令：/sessions、/resume、/new、/help
 - [x] `ethan -r last` / `ethan -r <id>` 恢复会话
 - [x] `docs/memory.md` — 三层记忆架构设计文档
-- [x] 验证：session 持久化 + 恢复上下文 ✅
+- [x] Phase 2a：冷区升级为结构化 facts（JSON，带 confidence / timestamp / source）
+- [x] Phase 2b：embedding 索引，支持语义检索（sqlite-vec）
+- [x] Phase 2c：重要性评分 — 决策/偏好/纠正 > 闲聊，影响压缩策略
+- [x] Phase 2d：Episodic memory — 每个 session summary 独立存储，按时间和相关性检索
+- [x] Phase 2e：Procedural memory — agent 从纠正中学习，维护行为准则文件
+- [x] Phase 2f：记忆防污染 — contradiction detection + confidence scoring
 - [ ] 验证：压缩触发后持久记忆写入（需长对话测试）
 
 ---
 
-## 阶段三：Skill 系统
+## 阶段三：Skill 系统 ✅
 
 - [x] `ethan/skills/loader.py` — 从 ~/.ethan/skills/*.md 加载，解析 YAML frontmatter
 - [x] `ethan/skills/registry.py` — Skill 注册表，关键词匹配，构建 context 注入
@@ -100,55 +105,48 @@ ethan/
 - [x] Agent 集成 — 每次 LLM 调用前匹配并注入 Skill 到 system prompt
 - [x] `ethan/interface/commands/skill.py` — `ethan skill list/show/create`
 - [x] 示例 Skill：weather-query.md
-- [x] 验证：Skill 被 agent 自动识别并影响行为 ✅
-- [ ] 验证：完成复杂任务后自动生成新 Skill 文件（需实际长对话触发）
 - [x] `docs/skills.md` — Skill 系统设计文档
+- [ ] 验证：完成复杂任务后自动生成新 Skill 文件（需实际长对话触发）
 
 ---
 
-## 阶段四：调度器
+## 阶段四：调度器 ✅
 
-- [x] `uv add apscheduler sqlalchemy` — 依赖已安装
 - [x] `ethan/scheduler/cron.py` — APScheduler 封装（cron + interval，SQLite 持久化）
 - [x] `ethan/interface/commands/schedule.py` — `ethan schedule list/remove/pause/resume`
-- [x] 验证：创建定时任务 + 列出 + 删除 ✅
 - [x] `ethan/scheduler/heartbeat.py` — 定期心跳（回顾待办）
 - [x] REPL 内通过对话创建任务（agent 自己调 schedule tool）
 - [x] `docs/scheduler.md` — 调度器设计文档
 
 ---
 
-## 阶段五：工具系统完善 + MCP
+## 阶段五：工具系统完善 + MCP ✅
 
 - [x] `ethan/tools/builtin/web_search.py` — Web Search（DuckDuckGo，免费无需 key）
 - [x] `ethan/tools/builtin/web.py` — Web Fetch（获取网页内容提取文本）
 - [x] `ethan/tools/builtin/file.py` — 文件读写 + 目录列表
+- [x] `ethan/tools/builtin/rg.py` / `fd.py` — rg/fd 内置搜索工具
 - [x] `ethan/tools/mcp_client.py` — MCP client（连接外部 MCP server，自动注册工具）
-- [x] 验证：agent 读取本地文件并总结 ✅
-- [x] 验证：MCP 模块导入正常 ✅
 - [x] 更新 `docs/tools.md` — 补充 MCP 接入说明
 - [ ] 验证：连接实际 MCP server 调用工具（需要具体 server）
 
 ---
 
-## 阶段六：Interface 层（API + 流式）
+## 阶段六：Interface 层（API + 流式）✅
 
-- [x] `uv add fastapi uvicorn` — 依赖已安装
 - [x] `ethan/interface/api.py` — FastAPI，`/chat`（POST）+ `/health` + `/models`
 - [x] SSE 流式输出（`stream: true`）
 - [x] `ethan serve` 命令启动 API 服务（默认端口 8900）
-- [x] 验证：/health、/models、/chat 全部通过 ✅
 - [x] `launchd` plist 配置 — Mac mini 开机自启
 - [x] `docs/interface.md` — API 接口文档
 
 ---
 
-## 阶段七：ACP 协议 + 外部 Coding Agent 集成
-
-> Ethan 自身不擅长复杂编码，遇到代码任务时委托给专业 coding agent。
+## 阶段七：ACP 协议 + 外部 Coding Agent 集成 ✅
 
 - [x] ACP（Agent Communication Protocol）客户端实现
 - [x] 支持调用本地 Claude Code / OpenCode / Codex CLI
+- [x] `ethan code` 命令：PTY 终端会话持久化（通过 pexpect 维持 Claude Code 交互流）
 - [x] 自动判断任务复杂度 — 简单代码自己写，复杂任务转交
 - [x] 结果回收 — 拿回 coding agent 的输出，整合进对话
 - [x] `docs/acp.md` — ACP 集成设计文档
@@ -156,108 +154,91 @@ ethan/
 
 ---
 
-## 阶段八：知识库系统 + 插件化接入
-
-> 让 Ethan 拥有可扩展的外部知识来源。
+## 阶段八：知识库系统
 
 - [x] 知识库抽象层设计（`ethan/knowledge/base.py`）
 - [x] 默认实现：本地 Markdown 文件目录（`~/.ethan/knowledge/`）
+- [x] 引入 `sqlite-vec`，知识库条目入库时同步生成 embedding
+- [x] `ethan knowledge` 子命令（list/search/add）
+- [x] `docs/knowledge.md` — 知识库设计文档
+- [ ] `/knowledge/search` 语义检索 API 端点
 - [ ] Obsidian 接入（官方插件）：读写 Obsidian vault
 - [ ] 标准接口设计：第三方笔记系统通过 adapter 接入
-- [ ] Embedding 索引 + 语义检索
-- [x] `ethan knowledge` 子命令（list/search/add）
-- [x] `docs/knowledge.md` — 知识库设计文档（待补）
-- [x] 验证：agent 能通过 knowledge_search/add 工具操作知识库 ✅
 
 ---
 
-## 记忆系统演进计划（阶段二增强）
-
-> 在当前三层记忆基础上渐进增强。
-
-- [x] Phase 2a：冷区升级为结构化 facts（JSON，带 confidence / timestamp / source）
-- [ ] Phase 2b：加 embedding 索引，支持语义检索（chromadb 或 sqlite-vec）
-- [x] Phase 2c：重要性评分 — 决策/偏好/纠正 > 闲聊，影响压缩策略
-- [x] Phase 2d：Episodic memory — 每个 session summary 独立存储，按时间和相关性检索
-- [x] Phase 2e：Procedural memory — agent 从纠正中学习，维护行为准则文件
-- [x] Phase 2f：记忆防污染 — contradiction detection + confidence scoring
-
----
-
-## 阶段九：Web UI
-
-> 好看、酷、现代的 Web 界面。
+## 阶段九：Web UI ✅
 
 - [x] 前端框架选型 — Next.js 14 + shadcn/ui + Tailwind
 - [x] 对话界面 — 流式渲染、Markdown 支持、代码高亮
-- [x] 暗色主题 + 动效（打字机效果）
-- [x] Session 管理 — 侧边栏列出历史会话
+- [x] 暗色主题 + 日间模式（浅橙主题）切换，localStorage 持久化
+- [x] Session 管理 — 侧边栏列出历史会话 + 全文搜索（防抖 300ms）
 - [x] 模型切换 — 顶部快速切换
 - [x] 文件上传 — 📎 按钮 + 与 query 一起发送
 - [x] Token 用量显示
-- [x] 登录鉴权（Bearer token）
+- [x] 登录鉴权（Bearer token）+ 前端自动重试机制
 - [x] Tool 状态可视化 — 显示 agent 正在调用什么工具
-- [x] 响应式布局 — 移动端适配优化
-- [x] Session 搜索（仅标题）
-- [x] Session 全文搜索（搜索消息内容）
-- [x] 日间模式（浅橙主题）切换支持
+- [x] 响应式布局 — 移动端基础适配
 
 ---
 
-## 阶段十：体验与质量提升
+## 阶段十：Web 全功能面板 ✅
 
-### 时间感知
-- [x] Agent 系统提示中注入实时时间（每次对话都带上当前时间）
-  - 在 `ethan/core/agent.py` 的 `_build_system()` 中注入 `datetime.now()` 格式化时间串
+### 路由架构
+- [x] App Router 路径路由：`/chat`、`/chat/[id]`、`/memory`、`/knowledge`、`/schedule`、`/skills`、`/settings`（废除 query 参数形式）
+- [x] 重构 layout：左侧 icon 导航栏 + 内容区
 
-### Session 管理优化
-- [x] 不保存空 session：仅在第一条消息发送后才持久化 session
-  - 修改 `ethan/interface/repl.py`：延迟 `store.create()` 调用
-- [x] 清理历史空 session：`SessionStore.cleanup_empty()` + 退出时自动清理
-
-### Web UI
-- [x] Session 搜索（仅标题）
-- [x] Session 全文搜索（后端：同时搜标题和消息内容；前端：防抖 300ms 调 `/sessions?q=`）
-- [x] 日间模式（浅橙主题）：添加 `.light` 主题变量，顶部 Sun/Moon 切换按钮，localStorage 持久化
-
-## 阶段十：Web 全功能面板
-
-> 把 CLI 已有的所有能力搬到 Web UI，重构为多页面导航架构。
-
-### 导航结构（左侧 icon nav）
-- Chat — 当前对话界面（已有）
-- Memory — Facts / Episodes 查看
-- Skills — 列表/查看/创建
-- Schedule — 定时任务管理
-- Knowledge — 知识库列表/搜索/添加
-- Logs — 后端日志查看（分页 + 搜索）
-
-### 后端 API 扩展
+### 后端 API
 - [x] `GET /memory/facts` — 返回 facts.json 内容
 - [x] `GET /memory/episodes` — 返回 episodes.json 内容
-- [x] `GET /skills` — 列出所有 skill（name/description/trigger）
-- [x] `GET /skills/:name` — 返回 skill 完整内容
-- [x] `POST /skills` — 创建 skill
-- [x] `GET /schedule` — 列出定时任务
-- [x] `DELETE /schedule/:id` — 删除定时任务
-- [x] `PATCH /schedule/:id` — pause/resume 定时任务
-- [x] `GET /knowledge` — 列出知识库
-- [x] `POST /knowledge` — 添加条目
-- [x] `DELETE /knowledge/:source` — 删除条目
-- [x] `GET /logs?page=&q=` — 读取 backend.log，分页+搜索
+- [x] `GET /skills` / `GET /skills/:name` / `POST /skills`
+- [x] `GET /schedule` / `DELETE /schedule/:id` / `PATCH /schedule/:id`
+- [x] `GET /knowledge` / `POST /knowledge` / `DELETE /knowledge/:source`
+- [x] `GET /logs?page=&q=` — 读取 backend.log，分页+关键词搜索
 
-### 前端实现
-- [x] 重构 layout：左侧 icon 导航栏 + 内容区
+### 前端面板
 - [x] Memory 页面：Facts 卡片（含 confidence/category）+ Episodes 列表
 - [x] Skills 页面：列表 + 内容预览 + 创建表单
 - [x] Schedule 页面：任务列表 + pause/resume/delete + 创建对话框
 - [x] Knowledge 页面：列表 + 搜索 + 添加 + 删除
 - [x] Logs 页面：日志列表、分页（每页 100 行）、关键词高亮搜索
+- [x] Settings 页面：双栏结构，支持通用设置、模型 Provider 配置、identity.md / soul.md / format.md 内核文件编辑
 
-### 知识库向量检索（后续）
-- [x] 引入 `sqlite-vec` 或本地 embedding 接口
-- [x] 知识库条目入库时同步生成 embedding
-- [ ] `/knowledge/search` 支持语义检索
+---
+
+## 飞书/Lark 集成 ✅
+
+- [x] 基础飞书 WebSocket 长连接（无需公网 IP）
+- [x] 收到消息时添加 THINKING 表情，回复后自动移除
+- [x] 消息使用 post 格式 Markdown 渲染
+- [x] 流式回复体验：先发占位消息，buffer 积累后 patch
+- [x] 新用户完成飞书授权后自动发欢迎消息（onboarding 集成）
+
+---
+
+## Agent 体验优化 ✅
+
+- [x] Fast Path 任务分类路由：简单命令（智能家居等）→ 最快模型 + 极简 Prompt，跳过 Agent Loop
+- [x] 最小化 System Prompt：按任务类型动态裁剪
+- [x] 模块化系统提示词引擎：`~/.ethan/system/`（identity.md、soul.md），XML 标签化拼接
+- [x] Agent 系统提示中注入实时时间
+- [x] 不保存空 session：仅在第一条消息发送后才持久化
+- [x] 对话来源渠道标签（source）展示在侧边栏（web/repl/lark）
+- [x] 对话标题为 query 摘要，禁止内部前缀
+- [x] First-Time Onboarding：首次使用时 Agent 主动打招呼，引导设置名字
+- [x] 工具调用返回空时的 fallback 机制
+- [x] CJK markdown 加粗渲染修复（零宽空格）
+
+---
+
+## 待完成
+
+- [ ] **Tools on demand**：简单任务不加载工具列表，减少 LLM 决策时间
+- [ ] **延迟优化目标**：智能家居类命令 ≤2s TTFT，普通对话 ≤5s TTFT
+- [ ] **异步中断与连续对话**：用户在 Agent 执行漫长任务时连续发送多条消息，缓冲进上下文队列，在合适中断点感知新指令
+- [ ] **H5/移动端完整适配**：对话区气泡宽度适配、侧边栏改为底部 Tab 或汉堡菜单、触摸手势支持、输入法键盘弹起适配
+- [ ] `/knowledge/search` 语义检索 API 端点
+- [ ] Obsidian vault 接入
 
 ---
 
@@ -271,71 +252,9 @@ ethan/
 | CLI 框架 | `typer` | 0.26+ | ✅ |
 | TUI 框架 | `textual` | 8.2+ | ✅ |
 | 配置管理 | `pydantic` + `pyyaml` | 2.x | ✅ |
-| 定时任务 | `APScheduler` | 3.x | 待安装 |
-| 数据持久化 | `aiosqlite` | — | 待安装 |
-| HTTP API | `FastAPI` + `uvicorn` | — | 待安装 |
-
-### Bug Fixes
-- [x] Web UI 中 CJK markdown 加粗不渲染的问题修复（在 `**` 和中文字符间插入零宽空格）
-- [x] Web UI 修复 AI 生成 `** text **`（内部带空格）的格式问题，通过正则转换为 `**text**`
-
-### Web UI 进阶功能（正在进行）
-- [x] Web 导航重构：去掉冗余侧边栏底色，新增两级菜单结构（普通对话 / 定时对话分离）
-- [x] Memory 管理面板：从弹窗重构为全屏二级页面，采用标准 Markdown 引擎渲染
-- [x] Knowledge 管理面板：支持本地文件知识库检索、添加、删除
-- [x] Schedule 管理面板：支持 APScheduler 任务状态查看、暂停、恢复、删除
-- [x] URL 路由同步：将当前选中的 View 和 Session ID 同步至 URL（解决刷新丢失状态问题）
-- [x] Skills 管理面板：技能列表展示、预览与创建（待开发）
-- [x] Logs 日志面板：提供 Web 端的后端日志查看与分页检索（待开发）
-
-### CLI 与 ACP 功能（正在进行）
-- [x] `ethan code` 命令：支持挂载本地 ACP（Claude Code / OpenCode）做复杂任务委派
-- [x] PTY 终端会话持久化（通过 pexpect 维持 Claude Code 交互流）
-
-### 知识库加强（计划中）
-- [x] 引入 `sqlite-vec` 扩展，替换现有的关键词搜索为本地 Embedding 语义检索
-
-### 自动化与质量保障（正在进行）
-- [x] 引入 E2E 端到端测试（Playwright）：覆盖 Web 核心主路径（新建/切换对话、浏览记忆列表、查看记忆详情、切换标签页等），确保 UI 和 API 层的稳定性。
-
-### Agent 认知架构升级（正在进行）
-- [x] 模块化系统提示词引擎：废除单一字符串，引入 `~/.ethan/system/` 目录化内核（基于 `identity.md` 与 `soul.md`）。采用 XML 标签化拼接，结合具体执行的 Good/Bad Case（Anti-Looping，文件读写安全）彻底规范 Agent 行为。
-- [x] 优化 Web 端设置：将原先单文本框的系统设定页拆分为多模组编辑器（针对内核文件直接渲染修改）。
-
-### Web UI 进阶功能（正在进行）
-- [x] 设置中心重构：将原先单页面的 Settings 升级为类 IDE 的双栏结构。支持通用设置、模型 Provider 配置，以及独立的 `identity.md`, `soul.md`, `format.md` 内核文件编辑区。
-
-### 新增优化需求（用户反馈提取）
-- [x] **First-Time Onboarding (新用户冷启动引导)**: 无论是 REPL 还是 Web 界面，如果是第一次使用，Agent 需要主动发起第一条消息打招呼，引导用户：“请为我设置一个名字，并告诉我你是谁”。这些信息将通过自动记忆系统存入 `facts.json` 和 `config.yaml`。
-- [x] **Web 端路由重构 (Path-based Routing)**: 废除 `?view=memory&session=xxx` 这种丑陋的 Query 参数形式。重构为 Next.js 原生的文件系统路由，如 `/memory`, `/settings`, `/chat/[id]`。
-
-### Agent 认知与交互架构（正在进行）
-- [ ] **异步中断与连续对话 (Asynchronous Interrupt & Batching)**: 借鉴 Claude Code 机制。允许用户在 Agent 执行漫长任务时连续发送多条消息，将其缓冲进上下文队列。在合适的中断点（如一个 Tool 执行完毕时），Agent 能够感知到新指令并调整原有规划，做到不遗忘之前的任务，同时响应新的插话。
-
-### Web UI 进阶功能（正在进行）
-- [x] **全部对话 (All Sessions) 聚合页**: 在左侧菜单新增“全部对话”入口，点击后在右侧主区域以网格卡片（3-4列）的形式展示所有的历史对话，包含摘要与元信息，支持点击直接进入会话。
-
-### Agent 速度优化（新需求 - 高优先级）
-- [x] **Fast Path 任务分类路由**: 引入轻量级意图检测，把请求分为两类：
-  - 简单快速类（智能家居控制、简短提醒等）→ 最快模型 + 极简 Prompt + 不走 Agent Loop
-  - 复杂任务类（代码重构、分析等）→ 完整 Agent Loop + 全量上下文
-- [x] **最小化 System Prompt**: 当前每次请求 ~370 tokens，需按任务类型动态裁剪
-- [ ] **Tools on demand**: 简单任务不加载工具列表，减少 LLM 决策时间
-- [ ] **延迟优化目标**: 智能家居类命令（如"关灯"）→ ≤2s TTFT，普通对话 ≤5s TTFT
-
-### 飞书(Lark)集成优化
-- [x] 基础飞书 WebSocket 长连接（无需公网 IP）
-- [x] 收到消息时添加 THINKING 表情
-- [x] 收到回复后自动移除 THINKING 表情
-- [x] 消息使用 --markdown 渲染（已验证飞书支持 post 格式 markdown）
-- [x] 流式回复体验：先发一条占位消息，追加内容模拟流式效果（buffer 积累再 patch）
-- [x] 新用户完成飞书授权后自动发欢迎消息（onboarding 集成）
-
-### 体验与健壮性问题（积压）
-- [x] 工具调用返回空时的 fallback 机制：工具结果为空或无后续文本时，Agent 应主动告知用户（简短一句）
-- [x] 登录页自动重试机制：后端短暂重启期间，前端 auth 失败后自动重试 3 次（每次 2 秒间隔）
-- [x] 对话来源渠道标签（source）展示在侧边栏（web/repl/lark/custom）
-- [x] 对话标题必须是对 query 的摘要，禁止以 `lark:oc_xxx` 等内部前缀作为标题
-
-### H5/移动端适配
-- [ ] Web UI H5 适配：对话区气泡宽度适配移动端、侧边栏改为底部 Tab 或汉堡菜单、触摸手势支持、输入法键盘弹起适配
+| 定时任务 | `APScheduler` | 3.x | ✅ |
+| 数据持久化 | `aiosqlite` | — | ✅ |
+| HTTP API | `FastAPI` + `uvicorn` | — | ✅ |
+| 向量检索 | `sqlite-vec` | — | ✅ |
+| Web UI | `Next.js` + `shadcn/ui` | 14+ | ✅ |
+| Lark SDK | `lark-oapi` | — | ✅ |
