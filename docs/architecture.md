@@ -75,6 +75,22 @@ Ethan 是一个运行在 Mac mini 上的个人 AI Agent，全程异步（`asynci
 基于 APScheduler，支持 cron 表达式和 interval。Job 持久化到 SQLite，重启后自动恢复。
 → 详见 [scheduler.md](./scheduler.md)
 
+### Web UI (`web/`)
+Next.js 16 App Router 构建的浏览器界面，通过 FastAPI SSE 与后端通信。路由包括 `/chat`、`/chat/[id]`、`/memory`、`/knowledge`、`/schedule`、`/skills`、`/sessions`、`/settings`。
+
+### 飞书 / Lark 集成 (`ethan/interface/lark.py`)
+基于 `lark-cli event consume` 的 WebSocket 长连接方案，无需公网 IP。收到消息后先加 THINKING 表情确认收到，Agent 处理完毕后发送单条完整回复。`chat_id` → `session_id` 映射持久化到 `~/.ethan/memory/lark_sessions.json`。
+→ 详见 [interface.md](./interface.md)
+
+### Fast-path Router
+部分简单指令（如查询天气、读取 session 列表）在进入 Agent Loop 之前由路由层短路处理，直接返回结果，减少不必要的 LLM 调用延迟。
+
+### 知识库 (`ethan/memory/knowledge.py`)
+基于 `sqlite-vec` 的向量检索，文档在写入时生成 embedding，查询时做余弦相似度检索。支持从 Web UI 上传、删除文档，Agent 可通过 `knowledge_search` 工具主动检索。
+
+### 搜索工具（`rg` / `fd`）
+`ripgrep`（`rg`）和 `fd` 作为内置工具注册到 ToolRegistry，供 Agent 在本地文件系统做高速全文搜索和文件查找，替代慢速的 Python glob/os.walk 方案。
+
 ---
 
 ## 数据流（一次对话）

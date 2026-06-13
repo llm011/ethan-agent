@@ -19,6 +19,8 @@ from ethan.memory.episodic import EpisodeStore
 from ethan.providers.base import Message
 from ethan.skills.registry import SkillRegistry
 from ethan.tools.builtin.file import FileListTool, FileReadTool, FileWriteTool
+from ethan.tools.builtin.knowledge import KnowledgeAddTool, KnowledgeSearchTool
+from ethan.tools.builtin.schedule import ScheduleCreateTool, ScheduleListTool, ScheduleRemoveTool
 from ethan.tools.builtin.shell import ShellTool
 from ethan.tools.builtin.search import RipgrepTool, FdTool
 from ethan.tools.builtin.web import WebFetchTool
@@ -29,15 +31,18 @@ from ethan.knowledge.base import FilesystemKnowledgeBase
 from ethan.core.config import CONFIG_DIR
 from ethan.interface.lark import lark_router
 from ethan.interface.lark_events import start_lark_listener, stop_lark_listener
+from ethan.core.heartbeat import start_heartbeat, stop_heartbeat
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: auto-connect to Feishu via WebSocket (skips if not configured)
     start_lark_listener()
+    start_heartbeat()
     yield
     # Shutdown
     stop_lark_listener()
+    stop_heartbeat()
 
 
 app = FastAPI(title="Ethan Agent API", version=__version__, lifespan=lifespan)
@@ -77,6 +82,11 @@ def _create_agent(model: str | None = None) -> Agent:
     registry.register(FileReadTool())
     registry.register(FileWriteTool())
     registry.register(FileListTool())
+    registry.register(ScheduleCreateTool())
+    registry.register(ScheduleListTool())
+    registry.register(ScheduleRemoveTool())
+    registry.register(KnowledgeSearchTool())
+    registry.register(KnowledgeAddTool())
 
     skills = SkillRegistry()
     skills.load()
@@ -173,6 +183,14 @@ async def chat(req: ChatRequest):
             if m.role == "user":
                 await store.save_message(req.session_id, m)
 
+    # Truncate to hot window: keep only last HOT_SIZE user/assistant messages
+    # to prevent token bloat on long sessions (mirrors WorkingMemory sliding window)
+    if req.session_id:
+        HOT_SIZE = 20
+        ua_messages = [m for m in messages if m.role in ("user", "assistant")]
+        if len(ua_messages) > HOT_SIZE:
+            messages = ua_messages[-HOT_SIZE:]
+
     if req.stream:
         return StreamingResponse(
             _stream_response(agent, messages, store, req.session_id),
@@ -268,6 +286,14 @@ class AgentSettingsPatch(BaseModel):
     agent_name: str | None = None
     language: str | None = None
     default_model: str | None = None
+    heartbeat_enabled: bool | None = None
+    heartbeat_interval_minutes: int | None = None
+    proxy: str | None = None
+    max_tokens: int | None = None
+    max_tool_iterations: int | None = None
+    fast_keywords: list[str] | None = None
+    fast_max_length: int | None = None
+    fast_skill_triggers: list[str] | None = None
 
 
 @app.get("/settings/agent", dependencies=[Depends(verify_token)])
@@ -279,6 +305,14 @@ async def get_agent_settings():
         "agent_name": config.defaults.agent_name,
         "language": config.defaults.language,
         "default_model": config.defaults.model,
+        "heartbeat_enabled": config.defaults.heartbeat.enabled,
+        "heartbeat_interval_minutes": config.defaults.heartbeat.interval_minutes,
+        "proxy": config.network.proxy or "",
+        "max_tokens": config.defaults.max_tokens,
+        "max_tool_iterations": config.defaults.max_tool_iterations,
+        "fast_keywords": config.defaults.routing.fast_keywords,
+        "fast_max_length": config.defaults.routing.fast_max_length,
+        "fast_skill_triggers": config.defaults.routing.fast_skill_triggers,
     }
 
 
@@ -295,15 +329,44 @@ async def update_agent_settings(req: AgentSettingsPatch):
         config.defaults.model = req.default_model
     if req.workspace is not None:
         config.defaults.workspace = req.workspace
+    if req.heartbeat_enabled is not None:
+        config.defaults.heartbeat.enabled = req.heartbeat_enabled
+    if req.heartbeat_interval_minutes is not None:
+        config.defaults.heartbeat.interval_minutes = req.heartbeat_interval_minutes
+    if req.proxy is not None:
+        config.network.proxy = req.proxy or None
+    if req.max_tokens is not None:
+        config.defaults.max_tokens = req.max_tokens
+    if req.max_tool_iterations is not None:
+        config.defaults.max_tool_iterations = req.max_tool_iterations
+    if req.fast_keywords is not None:
+        config.defaults.routing.fast_keywords = req.fast_keywords
+    if req.fast_max_length is not None:
+        config.defaults.routing.fast_max_length = req.fast_max_length
+    if req.fast_skill_triggers is not None:
+        config.defaults.routing.fast_skill_triggers = req.fast_skill_triggers
     save_config(config)
     reload_config()
     return {"ok": True}
 
 
+@app.get("/system-prompt-preview", dependencies=[Depends(verify_token)])
+async def system_prompt_preview(model: str | None = None):
+    """返回当前 system prompt 预览（不含对话历史），供 UI 透明展示。"""
+    from ethan.providers.base import Message
+    agent = _create_agent(model)
+    dummy_messages = [Message(role="user", content="(preview)")]
+    system = agent._build_system(dummy_messages, fast=False)
+    # 粗略估算 token 数（英文 ~4 chars/token，中文 ~1.5 chars/token）
+    approx_tokens = len(system) // 2
+    return {"system_prompt": system, "approx_tokens": approx_tokens, "chars": len(system)}
+
+
 class SystemSettingsPatch(BaseModel):
     identity: str | None = None
     soul: str | None = None
-    format: str | None = None
+    tools: str | None = None
+    heartbeat: str | None = None
 
 @app.get("/settings/system", dependencies=[Depends(verify_token)])
 async def get_system_settings():
@@ -312,17 +375,14 @@ async def get_system_settings():
     system_dir = Path(os.path.expanduser("~/.ethan/system"))
     identity_path = system_dir / "identity.md"
     soul_path = system_dir / "soul.md"
-    format_path = system_dir / "format.md"
-    
+    tools_path = system_dir / "tools.md"
+    heartbeat_path = system_dir / "heartbeat.md"
+
     identity = identity_path.read_text(encoding="utf-8") if identity_path.exists() else ""
     soul = soul_path.read_text(encoding="utf-8") if soul_path.exists() else ""
-    format_content = format_path.read_text(encoding="utf-8") if format_path.exists() else ""
-    
-    return {
-        "identity": identity,
-        "soul": soul,
-        "format": format_content
-    }
+    tools_content = tools_path.read_text(encoding="utf-8") if tools_path.exists() else ""
+    heartbeat_content = heartbeat_path.read_text(encoding="utf-8") if heartbeat_path.exists() else ""
+    return {"identity": identity, "soul": soul, "tools": tools_content, "heartbeat": heartbeat_content}
 
 @app.patch("/settings/system", dependencies=[Depends(verify_token)])
 async def update_system_settings(req: SystemSettingsPatch):
@@ -335,9 +395,11 @@ async def update_system_settings(req: SystemSettingsPatch):
         (system_dir / "identity.md").write_text(req.identity, encoding="utf-8")
     if req.soul is not None:
         (system_dir / "soul.md").write_text(req.soul, encoding="utf-8")
-    if req.format is not None:
-        (system_dir / "format.md").write_text(req.format, encoding="utf-8")
-        
+    if req.tools is not None:
+        (system_dir / "tools.md").write_text(req.tools, encoding="utf-8")
+    if req.heartbeat is not None:
+        (system_dir / "heartbeat.md").write_text(req.heartbeat, encoding="utf-8")
+
     return {"ok": True}
 
 
@@ -369,6 +431,41 @@ async def update_provider_settings(req: dict[str, dict]):
     return {"ok": True}
 
 
+@app.get("/channels", dependencies=[Depends(verify_token)])
+async def get_channels():
+    config = get_config()
+    return {
+        "channels": [
+            {
+                "id": "lark",
+                "name": "飞书 (Feishu/Lark)",
+                "enabled": bool(config.lark.app_id and config.lark.app_secret),
+                "config": {
+                    "app_id": config.lark.app_id,
+                    "app_secret": config.lark.app_secret,
+                }
+            }
+        ]
+    }
+
+
+class ChannelPatchRequest(BaseModel):
+    channel_id: str
+    config: dict
+
+
+@app.patch("/channels", dependencies=[Depends(verify_token)])
+async def patch_channel(req: ChannelPatchRequest):
+    config = get_config()
+    if req.channel_id == "lark":
+        config.lark.app_id = req.config.get("app_id", "")
+        config.lark.app_secret = req.config.get("app_secret", "")
+        save_config(config)
+        reload_config()
+        return {"ok": True}
+    raise HTTPException(400, f"Unknown channel: {req.channel_id}")
+
+
 @app.post("/upload", dependencies=[Depends(verify_token)])
 async def upload_file(file: UploadFile = File(...)):
     content = await file.read()
@@ -381,6 +478,61 @@ async def upload_file(file: UploadFile = File(...)):
 
 # ── SSE streaming ───────────────────────────────────────────────
 
+async def _maybe_consolidate(session_id: str, model: str) -> None:
+    """每隔 ~10 轮对话，自动从温区摘要提取事实写入冷区 facts.json。"""
+    try:
+        from ethan.memory.consolidator import Consolidator
+        from ethan.memory.facts import FactStore
+        from ethan.memory.working import MemoryConfig, WorkingMemory
+
+        store = SessionStore()
+        await store.init()
+        session = await store.load(session_id)
+        await store.close()
+        if not session:
+            return
+
+        user_turns = sum(1 for m in session.messages if m.role == "user")
+        # 只在 10 的倍数轮时跑（首次 10 轮、20 轮、30 轮…）
+        if user_turns == 0 or user_turns % 10 != 0:
+            return
+
+        memory = WorkingMemory(config=MemoryConfig(hot_size=10))
+        fact_store = FactStore()
+        memory.cold_facts = fact_store.build_context()
+
+        # 把 session 历史加载进 working memory
+        history = list(session.messages)
+        pairs = []
+        i = 0
+        while i < len(history) - 1:
+            if history[i].role == "user" and history[i + 1].role == "assistant":
+                pairs.append((history[i], history[i + 1]))
+                i += 2
+            else:
+                i += 1
+        for u, a in pairs:
+            memory.add_turn(u, a)
+
+        # 先压缩 hot → warm
+        consolidator = Consolidator(main_model=model)
+        while memory.needs_compression():
+            batch = memory.get_compress_batch()
+            summary = await consolidator.compress(batch, memory.warm_summary)
+            memory.apply_summary(summary)
+
+        # 再从 warm 提取 cold facts
+        if memory.needs_cold_extraction():
+            facts_list, condensed = await consolidator.extract_cold(
+                memory.warm_summary, memory.cold_facts
+            )
+            for fact in facts_list:
+                fact_store.add(fact, confidence=0.8, source=session_id)
+            memory.apply_cold_extraction(fact_store.build_context(), condensed)
+    except Exception:
+        pass  # 后台任务失败不影响主流程
+
+
 async def _stream_response(
     agent: Agent,
     messages: list[Message],
@@ -388,6 +540,7 @@ async def _stream_response(
     session_id: str | None,
 ) -> AsyncGenerator[str, None]:
     from ethan.providers.base import ToolEvent
+    import asyncio
 
     full = ""
     try:
@@ -409,6 +562,8 @@ async def _stream_response(
     if session_id and full:
         await store.save_message(session_id, Message(role="assistant", content=full))
         await store.touch(session_id)
+        # 后台异步跑记忆沉淀，不阻塞响应
+        asyncio.create_task(_maybe_consolidate(session_id, agent._provider.model))
 
     done_data = json.dumps({
         "done": True,
@@ -516,6 +671,64 @@ async def get_episodes():
     store = EpisodeStore()
     return {"episodes": [e.__dict__ for e in store._episodes]}
 
+
+@app.patch("/memory/facts/{fact_id}", dependencies=[Depends(verify_token)])
+async def update_fact(fact_id: str, req: dict):
+    store = FactStore()
+    facts = store._facts
+    idx = int(fact_id)
+    if idx < 0 or idx >= len(facts):
+        raise HTTPException(404, "Fact not found")
+    if "content" in req:
+        facts[idx].content = req["content"]
+    store._save()
+    return {"ok": True}
+
+
+@app.delete("/memory/facts/{fact_id}", dependencies=[Depends(verify_token)])
+async def delete_fact(fact_id: str):
+    store = FactStore()
+    idx = int(fact_id)
+    if idx < 0 or idx >= len(store._facts):
+        raise HTTPException(404, "Fact not found")
+    store._facts[idx].superseded = True
+    store._save()
+    return {"ok": True}
+
+
+@app.delete("/memory/episodes/{episode_id}", dependencies=[Depends(verify_token)])
+async def delete_episode(episode_id: str):
+    store = EpisodeStore()
+    before = len(store._episodes)
+    store._episodes = [e for e in store._episodes if e.session_id != episode_id]
+    if len(store._episodes) == before:
+        raise HTTPException(404, "Not found")
+    store._save()
+    return {"ok": True}
+
+
+@app.get("/memory/procedures", dependencies=[Depends(verify_token)])
+async def list_procedures():
+    from ethan.memory.procedures import ProcedureStore
+    store = ProcedureStore()
+    return {"procedures": [
+        {"id": str(i), "rule": p.rule, "context": p.context, "hit_count": p.hit_count, "created_at": p.created_at}
+        for i, p in enumerate(store._procedures)
+    ]}
+
+
+@app.delete("/memory/procedures/{proc_id}", dependencies=[Depends(verify_token)])
+async def delete_procedure(proc_id: str):
+    from ethan.memory.procedures import ProcedureStore
+    store = ProcedureStore()
+    idx = int(proc_id)
+    if idx < 0 or idx >= len(store._procedures):
+        raise HTTPException(404, "Not found")
+    store._procedures.pop(idx)
+    store._save()
+    return {"ok": True}
+
+
 # ── Knowledge Base ───────────────────────────────────────────────────
 
 _knowledge_manager = None
@@ -547,6 +760,27 @@ async def get_knowledge(q: str = None, mode: str = "keyword"):
             "tags": item.tags
         } for item in items
     ]}
+
+
+@app.get("/knowledge/search", dependencies=[Depends(verify_token)])
+async def search_knowledge(q: str, limit: int = 10, semantic: bool = True):
+    """语义搜索知识库。semantic=true 用 embedding，false 用关键词。"""
+    manager = get_knowledge_manager()
+    if semantic:
+        results = await manager.semantic_search(q, limit=limit)
+    else:
+        results = manager.search(q, limit=limit)
+    return {"results": [
+        {
+            "source": r.source,
+            "title": r.title,
+            "content": r.content[:500],
+            "tags": r.tags,
+            "score": None,
+        }
+        for r in results
+    ]}
+
 
 class KnowledgeAddRequest(BaseModel):
     title: str

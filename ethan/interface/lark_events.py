@@ -147,6 +147,8 @@ async def _handle_message(event_data: dict) -> None:
     from ethan.providers.base import Message, ToolEvent
     from ethan.skills.registry import SkillRegistry
     from ethan.tools.builtin.file import FileListTool, FileReadTool, FileWriteTool
+    from ethan.tools.builtin.knowledge import KnowledgeAddTool, KnowledgeSearchTool
+    from ethan.tools.builtin.schedule import ScheduleCreateTool, ScheduleListTool, ScheduleRemoveTool
     from ethan.tools.builtin.shell import ShellTool
     from ethan.tools.builtin.web import WebFetchTool
     from ethan.tools.builtin.web_search import WebSearchTool
@@ -208,7 +210,10 @@ async def _handle_message(event_data: dict) -> None:
 
         registry = ToolRegistry()
         for tool in [ShellTool(), WebSearchTool(), WebFetchTool(),
-                     FileReadTool(), FileWriteTool(), FileListTool()]:
+                     FileReadTool(), FileWriteTool(), FileListTool(),
+                     RipgrepTool(), FdTool(),
+                     ScheduleCreateTool(), ScheduleListTool(), ScheduleRemoveTool(),
+                     KnowledgeSearchTool(), KnowledgeAddTool()]:
             registry.register(tool)
         skills = SkillRegistry()
         skills.load()

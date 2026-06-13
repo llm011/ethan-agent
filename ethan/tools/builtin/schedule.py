@@ -39,6 +39,7 @@ def fire_schedule_job(session_id: str, prompt: str):
     threading.Thread(target=_do_fire, daemon=True).start()
 
 class ScheduleCreateTool(BaseTool):
+    fast_path = False
     name = "schedule_create"
     description = "Create a scheduled task. Use for reminders, recurring checks, or timed automations."
     parameters = {
@@ -85,6 +86,7 @@ class ScheduleCreateTool(BaseTool):
             return f"Failed to create job '{job_id}' via API: {e}"
 
 class ScheduleListTool(BaseTool):
+    fast_path = False
     name = "schedule_list"
     description = "List all scheduled tasks."
     parameters = {"type": "object", "properties": {}, "required": []}
@@ -108,6 +110,7 @@ class ScheduleListTool(BaseTool):
 
 
 class ScheduleRemoveTool(BaseTool):
+    fast_path = False
     name = "schedule_remove"
     description = "Remove a scheduled task by its ID."
     parameters = {

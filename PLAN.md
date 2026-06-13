@@ -231,14 +231,56 @@ ethan/
 
 ---
 
-## 待完成
+## 阶段十一：Agent 体验深化 ✅（部分）
 
-- [ ] **Tools on demand**：简单任务不加载工具列表，减少 LLM 决策时间
-- [ ] **延迟优化目标**：智能家居类命令 ≤2s TTFT，普通对话 ≤5s TTFT
+### Prompt 工程
+- [x] **Prompt Caching**：anthropic.py 按 `Current time:` 分割稳定/动态部分，稳定层加 `cache_control: ephemeral`，每轮对话节省 ~80% 输入 token
+- [x] **format.md 合并**：输出格式规则并入 soul.md，减少 XML 块拼接
+- [x] **tools.md 支持**：用户可自定义工具描述，注入为 `<tools_reference>`；设置页可编辑
+- [x] **System Prompt 预览**：设置页实时展示每轮拼接内容及 token 估算
+- [x] **定时任务摘要**：不再把完整任务列表注入 prompt，改为 "You have N active tasks, call schedule_list to view"
+- [x] **max_tokens 读 config**：不再硬编码 4096，从 `config.defaults.max_tokens` 读取
+
+### Fast Path 修复与增强
+- [x] **Fast Path tools 修复**：之前 fast path 传 `tools=None` 导致无法执行动作，现在 fast/full 共用工具列表，只有 system prompt 不同
+- [x] **Fast Path + Skill 关联**：Skill frontmatter 支持 `fast_path: true`，config 支持 `fast_skill_triggers`（不受长度限制），Web 设置页可配置
+- [ ] **Home Assistant 集成**：`home-assistant` skill + Fast Path 确定性管道，真正实现 ≤2s 智能家居控制
+
+### Skill 系统重构
+- [x] **双来源加载**：内置技能 `ethan/skills/<name>/SKILL.md`（随代码发布），用户技能 `~/.ethan/skills/<name>/SKILL.md`，同名用户覆盖内置
+- [x] **目录格式**：每个 skill 是子目录，含 `SKILL.md` + `references/`（与 lark-cli 官方格式一致）
+- [x] **内置技能**：`channels`（渠道接入配置）、`lark-im`（官方完整版，含 24 个 reference 文档）
+- [ ] **Skill 匹配升级**：当前为 trigger 子串匹配，考虑改为 embedding 语义匹配（低优先级，等 skill 数量 > 20 再做）
+
+### 记忆系统
+- [x] **Web 端记忆沉淀**：`_stream_response` 完成后 `asyncio.create_task` 后台跑 `_maybe_consolidate()`，每 10 轮触发一次 facts 整理
+- [x] **Heartbeat 心跳**：系统级定时任务（默认 10min），facts 去重整理 + 执行 `heartbeat.md` 中的周期任务；设置页可配置开关和间隔
+- [x] **Memory 页面完善**：Facts/Episodes/Procedures 三 Tab，支持 Markdown 渲染、编辑（分栏预览）、删除
+
+### Web UI
+- [x] **渠道页面** `/channels`：飞书配置卡片，可扩展架构，侧边栏入口
+- [x] **设置页完善**：代理、max_tokens、max_tool_iterations、Fast-path 关键词、Fast-path Skill 触发词、心跳配置
+- [x] **TTFT 显示**：消息气泡底部展示首字耗时（Web + REPL）
+
+---
+
+## 待完成（按优先级）
+
+### P0 架构问题（需讨论后动手）
+- [ ] **域隔离（Space 概念）**：当前 FactStore / SkillRegistry / 知识库是全局单例，生活/工作/项目记忆混在一起。需在 config 和各 Store 引入 `space` 维度（life/work/proj-xxx），路由时带上下文。这是防止系统变"乱"的核心屏障
 - [ ] **异步中断与连续对话**：用户在 Agent 执行漫长任务时连续发送多条消息，缓冲进上下文队列，在合适中断点感知新指令
-- [ ] **H5/移动端完整适配**：对话区气泡宽度适配、侧边栏改为底部 Tab 或汉堡菜单、触摸手势支持、输入法键盘弹起适配
+
+### P1 功能完善
+- [ ] **Home Assistant 集成**：用户已有 HA skill，放入 `~/.ethan/skills/` 后即可生效；如需 Fast Path 确定性管道（完全绕过 LLM），后续在 skill frontmatter 加 `fast_path: true` 并配置触发词
+- [ ] **REPL 与 API 记忆一致性**：REPL 有完整 WorkingMemory 滑动窗口，Web/Lark 没有，长对话 token 会膨胀。Web/Lark 需要加同等的 hot/warm 窗口管理
+- [ ] **facts 矛盾检测升级**：当前是字符重叠 + 否定词启发式，误杀率高。改为 LLM 判断（在 heartbeat consolidation 时处理）
+- [ ] **SystemSettingsPatch 验证**：检查 api.py 中 SystemSettingsPatch 是否有悬空字段，确保可以正常 PATCH
+
+### P2 体验优化
+- [ ] **H5/移动端完整适配**：对话区气泡宽度、侧边栏底部 Tab、触摸手势、输入法键盘弹起
 - [ ] `/knowledge/search` 语义检索 API 端点
 - [ ] Obsidian vault 接入
+- [ ] **Tools on demand**：按 Fast/Full Path 按需加载工具，减少 Full Path tool schema token
 
 ---
 

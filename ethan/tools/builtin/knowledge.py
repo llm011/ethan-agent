@@ -8,6 +8,7 @@ _kb = FilesystemKnowledgeBase(_KB_DIR)
 
 
 class KnowledgeSearchTool(BaseTool):
+    fast_path = False
     name = "knowledge_search"
     description = "Search the personal knowledge base for information on a topic. Use before web_search for topics the user has documented."
     parameters = {
@@ -30,6 +31,7 @@ class KnowledgeSearchTool(BaseTool):
 
 
 class KnowledgeAddTool(BaseTool):
+    fast_path = False
     name = "knowledge_add"
     description = "Save a note or piece of information to the personal knowledge base."
     parameters = {

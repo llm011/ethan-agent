@@ -1,149 +1,216 @@
 #!/usr/bin/env bash
 
 # manager.sh - 一键启停 Ethan AI 前后端
-# 用法: ./manager.sh [start|stop|restart|status]
+# 用法: ./manager.sh [start|stop|restart|status|logs]
+
+set -euo pipefail
 
 PROJECT_ROOT="/Users/jsongo/code/life/ethan-ai"
 PID_DIR="$PROJECT_ROOT/.run"
 BACKEND_PID_FILE="$PID_DIR/backend.pid"
 FRONTEND_PID_FILE="$PID_DIR/frontend.pid"
+BACKEND_LOG="$PID_DIR/backend.log"
+FRONTEND_LOG="$PID_DIR/frontend.log"
+BACKEND_PORT=8900
+FRONTEND_PORT=3000
 
 mkdir -p "$PID_DIR"
 
-# 获取进程状态 (1 运行中, 0 已停止)
-get_status() {
-    local pid_file=$1
-    if [ -f "$pid_file" ]; then
-        local pid=$(cat "$pid_file")
-        if ps -p "$pid" > /dev/null; then
-            echo 1
-            return
-        fi
-    fi
-    echo 0
+# ── 工具函数 ────────────────────────────────────────────────────
+
+pid_alive() {
+    local pid=$1
+    [[ -n "$pid" ]] && ps -p "$pid" > /dev/null 2>&1
 }
 
-start_backend() {
-    if [ "$(get_status "$BACKEND_PID_FILE")" -eq 1 ]; then
-        echo "[后端] 已经在运行中 (PID: $(cat "$BACKEND_PID_FILE"))"
+port_occupied() {
+    lsof -ti :"$1" > /dev/null 2>&1
+}
+
+kill_port() {
+    local port=$1
+    local pids
+    pids=$(lsof -ti :"$port" 2>/dev/null || true)
+    if [[ -n "$pids" ]]; then
+        echo "$pids" | xargs kill -9 2>/dev/null || true
+    fi
+}
+
+# 等待端口就绪（最多 N 秒）
+wait_for_port() {
+    local port=$1 timeout=${2:-15} elapsed=0
+    while ! lsof -ti :"$port" > /dev/null 2>&1; do
+        sleep 0.5
+        elapsed=$((elapsed + 1))
+        if [[ $elapsed -ge $((timeout * 2)) ]]; then
+            return 1
+        fi
+    done
+    return 0
+}
+
+# 等待端口释放（最多 N 秒）
+wait_port_free() {
+    local port=$1 timeout=${2:-10} elapsed=0
+    while lsof -ti :"$port" > /dev/null 2>&1; do
+        sleep 0.5
+        elapsed=$((elapsed + 1))
+        if [[ $elapsed -ge $((timeout * 2)) ]]; then
+            return 1
+        fi
+    done
+    return 0
+}
+
+stop_by_pid_and_port() {
+    local name=$1 pid_file=$2 port=$3
+
+    # 先尝试通过 PID 停止（包括进程组）
+    if [[ -f "$pid_file" ]]; then
+        local pid
+        pid=$(cat "$pid_file")
+        if pid_alive "$pid"; then
+            echo "[$name] 停止中 (PID: $pid)..."
+            # 先发 SIGTERM 给整个进程组
+            kill -- "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
+            # 等待最多 5 秒
+            local i=0
+            while pid_alive "$pid" && [[ $i -lt 10 ]]; do
+                sleep 0.5; i=$((i+1))
+            done
+            # 还活着就 SIGKILL
+            if pid_alive "$pid"; then
+                kill -9 -- "-$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null || true
+            fi
+        fi
+        rm -f "$pid_file"
+    fi
+
+    # 兜底：清理端口上的残留进程
+    if port_occupied "$port"; then
+        echo "[$name] 清理残留端口 $port..."
+        kill_port "$port"
+    fi
+
+    # 等待端口真正释放
+    if ! wait_port_free "$port" 8; then
+        echo "[$name] 警告：端口 $port 未能完全释放"
     else
-        echo "[后端] 启动中..."
-        cd "$PROJECT_ROOT" || exit 1
-        nohup uv run ethan serve > "$PID_DIR/backend.log" 2>&1 &
-        echo $! > "$BACKEND_PID_FILE"
-        echo "[后端] 已启动 (PID: $(cat "$BACKEND_PID_FILE"))，日志: $PID_DIR/backend.log"
+        echo "[$name] 已停止"
+    fi
+}
+
+# ── 启动 ────────────────────────────────────────────────────────
+
+start_backend() {
+    if port_occupied "$BACKEND_PORT"; then
+        echo "[后端] 端口 $BACKEND_PORT 已被占用，跳过启动"
+        return
+    fi
+    echo "[后端] 启动中..."
+    cd "$PROJECT_ROOT"
+    # 用 setsid 让子进程成为新进程组组长，便于后续整组 kill
+    setsid nohup uv run ethan serve >> "$BACKEND_LOG" 2>&1 &
+    local bgpid=$!
+    echo "$bgpid" > "$BACKEND_PID_FILE"
+
+    if wait_for_port "$BACKEND_PORT" 20; then
+        echo "[后端] 已就绪 http://localhost:$BACKEND_PORT (PID: $bgpid)"
+    else
+        echo "[后端] 警告：启动超时，请检查日志: $BACKEND_LOG"
+        tail -5 "$BACKEND_LOG" | sed 's/^/  /'
     fi
 }
 
 start_frontend() {
-    if [ "$(get_status "$FRONTEND_PID_FILE")" -eq 1 ]; then
-        echo "[前端] 已经在运行中 (PID: $(cat "$FRONTEND_PID_FILE"))"
+    if port_occupied "$FRONTEND_PORT"; then
+        echo "[前端] 端口 $FRONTEND_PORT 已被占用，跳过启动"
+        return
+    fi
+    echo "[前端] 启动中..."
+    cd "$PROJECT_ROOT/web"
+    setsid nohup npm run dev >> "$FRONTEND_LOG" 2>&1 &
+    local bgpid=$!
+    echo "$bgpid" > "$FRONTEND_PID_FILE"
+
+    if wait_for_port "$FRONTEND_PORT" 30; then
+        echo "[前端] 已就绪 http://localhost:$FRONTEND_PORT (PID: $bgpid)"
     else
-        echo "[前端] 启动中..."
-        cd "$PROJECT_ROOT/web" || exit 1
-        nohup npm run dev > "$PID_DIR/frontend.log" 2>&1 &
-        echo $! > "$FRONTEND_PID_FILE"
-        echo "[前端] 已启动 (PID: $(cat "$FRONTEND_PID_FILE"))，日志: $PID_DIR/frontend.log"
+        echo "[前端] 警告：启动超时，请检查日志: $FRONTEND_LOG"
+        tail -5 "$FRONTEND_LOG" | sed 's/^/  /'
     fi
 }
 
-stop_process() {
-    local name=$1
-    local pid_file=$2
-    if [ "$(get_status "$pid_file")" -eq 1 ]; then
-        local pid=$(cat "$pid_file")
-        echo "[$name] 停止中 (PID: $pid)..."
-        # 尝试优雅停止
-        kill "$pid" 2>/dev/null
-        # 等待最多 5 秒
-        for i in {1..5}; do
-            if ! ps -p "$pid" > /dev/null; then
-                break
-            fi
-            sleep 1
-        done
-        # 如果还在运行，强制停止
-        if ps -p "$pid" > /dev/null; then
-            echo "[$name] 强制停止中..."
-            kill -9 "$pid" 2>/dev/null
-        fi
-        echo "[$name] 已停止"
-    else
-        echo "[$name] 未运行"
-    fi
-    rm -f "$pid_file"
-}
-
-status_process() {
-    local name=$1
-    local pid_file=$2
-    if [ "$(get_status "$pid_file")" -eq 1 ]; then
-        echo -e "🟢 [$name] 运行中 (PID: $(cat "$pid_file"))"
-    else
-        echo -e "🔴 [$name] 已停止"
-    fi
-}
+# ── 公共命令 ────────────────────────────────────────────────────
 
 start() {
     start_backend
     start_frontend
     echo "========================================="
-    echo "后端 API: http://localhost:8900"
-    echo "前端 Web: http://localhost:3000"
+    echo "后端 API: http://localhost:$BACKEND_PORT"
+    echo "前端 Web: http://localhost:$FRONTEND_PORT"
     echo "========================================="
 }
 
 stop() {
-    stop_frontend
-    stop_backend
-    
-    # 清理可能遗留的 Node 进程 (Next.js dev 启动可能会有子进程)
-    if lsof -i :3000 >/dev/null 2>&1; then
-        echo "[清理] 发现残留的 3000 端口占用，强制清理..."
-        lsof -ti :3000 | xargs kill -9 2>/dev/null
-    fi
+    stop_by_pid_and_port "前端" "$FRONTEND_PID_FILE" "$FRONTEND_PORT"
+    stop_by_pid_and_port "后端" "$BACKEND_PID_FILE" "$BACKEND_PORT"
 }
 
-stop_frontend() {
-    stop_process "前端" "$FRONTEND_PID_FILE"
-}
-
-stop_backend() {
-    stop_process "后端" "$BACKEND_PID_FILE"
+restart() {
+    stop
+    start
 }
 
 status() {
-    status_backend
-    status_frontend
+    if port_occupied "$BACKEND_PORT"; then
+        local bpid
+        bpid=$(lsof -ti :"$BACKEND_PORT" | head -1)
+        echo "🟢 [后端] 运行中 (port $BACKEND_PORT, PID: $bpid)"
+    else
+        echo "🔴 [后端] 已停止"
+    fi
+
+    if port_occupied "$FRONTEND_PORT"; then
+        local fpid
+        fpid=$(lsof -ti :"$FRONTEND_PORT" | head -1)
+        echo "🟢 [前端] 运行中 (port $FRONTEND_PORT, PID: $fpid)"
+    else
+        echo "🔴 [前端] 已停止"
+    fi
 }
 
-status_frontend() {
-    status_process "前端" "$FRONTEND_PID_FILE"
+logs() {
+    local target=${2:-both}
+    case "$target" in
+        backend|be)
+            echo "=== 后端日志 ($BACKEND_LOG) ==="
+            tail -50 "$BACKEND_LOG"
+            ;;
+        frontend|fe)
+            echo "=== 前端日志 ($FRONTEND_LOG) ==="
+            tail -50 "$FRONTEND_LOG"
+            ;;
+        *)
+            echo "=== 后端日志 ==="
+            tail -20 "$BACKEND_LOG"
+            echo ""
+            echo "=== 前端日志 ==="
+            tail -20 "$FRONTEND_LOG"
+            ;;
+    esac
 }
 
-status_backend() {
-    status_process "后端" "$BACKEND_PID_FILE"
-}
+# ── 入口 ────────────────────────────────────────────────────────
 
-case "$1" in
-    start)
-        start
-        ;;
-    stop)
-        stop
-        ;;
-    restart)
-        stop
-        sleep 2
-        start
-        ;;
-    status)
-        status
-        ;;
+case "${1:-}" in
+    start)   start ;;
+    stop)    stop ;;
+    restart) restart ;;
+    status)  status ;;
+    logs)    logs "$@" ;;
     *)
-        echo "用法: $0 {start|stop|restart|status}"
+        echo "用法: $0 {start|stop|restart|status|logs [backend|frontend]}"
         exit 1
         ;;
 esac
-
-exit 0

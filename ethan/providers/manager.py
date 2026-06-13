@@ -1,7 +1,5 @@
 from ethan.core.config import get_config
-from ethan.providers.anthropic import AnthropicProvider
 from ethan.providers.base import BaseProvider
-from ethan.providers.openai_compat import OpenAICompatProvider
 
 
 def create_provider(model: str | None = None) -> BaseProvider:
@@ -28,6 +26,8 @@ def create_provider(model: str | None = None) -> BaseProvider:
     effective_proxy = provider_cfg.proxy or proxy
 
     if provider_key == "anthropic":
+        from ethan.providers.anthropic import AnthropicProvider  # lazy: avoids top-level SDK import
         return AnthropicProvider(provider_cfg=provider_cfg, model=model_id, proxy=effective_proxy)
     else:
+        from ethan.providers.openai_compat import OpenAICompatProvider  # lazy: avoids top-level SDK import
         return OpenAICompatProvider(provider_cfg=provider_cfg, model=model_id, proxy=effective_proxy)

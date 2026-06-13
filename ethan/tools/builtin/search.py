@@ -5,6 +5,7 @@ from ethan.tools.base import BaseTool
 
 
 class RipgrepTool(BaseTool):
+    fast_path = False
     name = "rg_search"
     description = (
         "Search file contents with ripgrep (rg). Extremely fast, respects .gitignore. "
@@ -60,6 +61,7 @@ class RipgrepTool(BaseTool):
 
 
 class FdTool(BaseTool):
+    fast_path = False
     name = "fd_find"
     description = (
         "Find files and directories with fd (fast find). Respects .gitignore by default. "

@@ -424,6 +424,8 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
         console.print()
         live = Live(Spinner("dots", text="thinking...", style="dim"), console=console, transient=True)
         live.start()
+        send_time = time.time()
+        ttft: float | None = None
 
         context = memory.build_context()
         context.append(msg)
@@ -450,6 +452,7 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
 
                 # Text chunk
                 if first_chunk:
+                    ttft = time.time() - send_time
                     live.stop()
                     first_chunk = False
                 if not render_live.is_started:
@@ -480,6 +483,14 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
             total_tokens_in = agent.usage.input_tokens
             total_tokens_out = agent.usage.output_tokens
             total_tokens_cache = agent.usage.cache_tokens
+
+            # Print per-turn stats in dim color
+            stats_parts = [f"↑{total_tokens_in} ↓{total_tokens_out}"]
+            if total_tokens_cache:
+                stats_parts.append(f"⚡{total_tokens_cache}")
+            if ttft is not None:
+                stats_parts.append(f"TTFT {ttft*1000:.0f}ms" if ttft < 1 else f"TTFT {ttft:.1f}s")
+            console.print(f"[dim]  {' · '.join(stats_parts)}[/dim]")
 
             memory.add_turn(msg, resp)
 

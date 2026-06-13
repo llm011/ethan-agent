@@ -10,7 +10,8 @@ import { Sun, Moon } from "lucide-react";
 import {
   fetchAgentSettings, updateAgentSettings, AgentSettings,
   fetchSystemSettings, updateSystemSettings, SystemSettings,
-  fetchProviderSettings, updateProviderSettings, ProviderSettings
+  fetchProviderSettings, updateProviderSettings, ProviderSettings,
+  fetchSystemPromptPreview,
 } from "@/lib/api";
 
 function useTheme() {
@@ -38,7 +39,46 @@ interface SettingsViewProps {
   models: { id: string; description: string }[];
 }
 
-type TabType = "general" | "providers" | "identity" | "soul" | "format";
+type TabType = "general" | "providers" | "identity" | "soul" | "tools" | "heartbeat" | "prompt-preview";
+
+function PromptPreview() {
+  const [data, setData] = useState<{ system_prompt: string; approx_tokens: number; chars: number } | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const d = await fetchSystemPromptPreview();
+      setData(d);
+    } catch {
+      // ignore
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  return (
+    <div className="h-full flex flex-col min-h-[500px]">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-lg font-medium">Prompt 预览</h3>
+        <Button variant="ghost" size="sm" onClick={load} disabled={loading}>
+          {loading ? "加载中..." : "刷新"}
+        </Button>
+      </div>
+      {data && (
+        <p className="text-xs text-muted-foreground mb-3">
+          每轮对话 system prompt 约 <span className="font-mono text-foreground">{data.approx_tokens.toLocaleString()}</span> tokens（{data.chars.toLocaleString()} 字符）
+        </p>
+      )}
+      <pre className="flex-1 text-xs font-mono bg-muted/40 rounded-lg p-4 overflow-auto whitespace-pre-wrap leading-relaxed text-muted-foreground">
+        {data ? data.system_prompt : (loading ? "加载中..." : "")}
+      </pre>
+    </div>
+  );
+}
+
 
 export function SettingsView({ models }: SettingsViewProps) {
   const [activeTab, setActiveTab] = useState<TabType>("general");
@@ -50,12 +90,22 @@ export function SettingsView({ models }: SettingsViewProps) {
     system_prompt: "",
     language: "zh",
     default_model: "",
+    heartbeat_enabled: true,
+    heartbeat_interval_minutes: 10,
+    proxy: "",
+    max_tokens: 4096,
+    max_tool_iterations: 10,
+    fast_keywords: [],
+    fast_max_length: 12,
+    fast_skill_triggers: [],
   });
   
   const [sysForm, setSysForm] = useState<SystemSettings>({
     identity: "",
     soul: "",
     format: "",
+    tools: "",
+    heartbeat: "",
   });
 
   const [providerForm, setProviderForm] = useState<ProviderSettings>({});
@@ -67,7 +117,11 @@ export function SettingsView({ models }: SettingsViewProps) {
   useEffect(() => {
     Promise.all([fetchAgentSettings(), fetchSystemSettings(), fetchProviderSettings()])
       .then(([agentData, sysData, providerData]) => {
-        setAgentForm(agentData);
+        setAgentForm({
+          ...agentData,
+          heartbeat_enabled: agentData.heartbeat_enabled ?? true,
+          heartbeat_interval_minutes: agentData.heartbeat_interval_minutes ?? 10,
+        });
         setSysForm(sysData);
         setProviderForm(providerData);
       })
@@ -100,13 +154,14 @@ export function SettingsView({ models }: SettingsViewProps) {
     { id: "providers", label: "模型配置 (Providers)" },
     { id: "identity", label: "身份设定 (Identity)" },
     { id: "soul", label: "运行准则 (Soul)" },
-    { id: "format", label: "输出规范 (Format)" },
+    { id: "tools", label: "工具说明 (Tools)" },
+    { id: "heartbeat", label: "心跳任务 (Heartbeat)" },
+    { id: "prompt-preview", label: "System Prompt 预览" },
   ];
 
   return (
     <div className="flex h-full w-full bg-background overflow-hidden border rounded-md">
-      {/* Sidebar */}
-      <div className="w-[200px] border-r bg-muted/30 flex flex-col">
+      {/* Sidebar */}      <div className="w-[200px] border-r bg-muted/30 flex flex-col">
         <div className="p-4 border-b">
           <h2 className="font-semibold">设置</h2>
         </div>
@@ -202,6 +257,98 @@ export function SettingsView({ models }: SettingsViewProps) {
                         </SelectContent>
                       </Select>
                     </div>
+
+                    <div className="grid gap-2">
+                      <label className="text-sm font-medium">心跳间隔（分钟）</label>
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="number"
+                          min={1}
+                          max={1440}
+                          value={agentForm.heartbeat_interval_minutes ?? 10}
+                          onChange={(e) => setAgentForm({ ...agentForm, heartbeat_interval_minutes: parseInt(e.target.value) || 10 })}
+                          className="w-24 bg-background border border-border rounded-md px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring"
+                        />
+                        <label className="flex items-center gap-2 text-sm cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={agentForm.heartbeat_enabled ?? true}
+                            onChange={(e) => setAgentForm({ ...agentForm, heartbeat_enabled: e.target.checked })}
+                            className="w-4 h-4"
+                          />
+                          启用心跳
+                        </label>
+                      </div>
+                      <p className="text-xs text-muted-foreground">系统级定时维护：facts 去重整理 + 执行 heartbeat.md 中的任务</p>
+                    </div>
+
+                    <div className="grid gap-2">
+                      <label className="text-sm font-medium">网络代理</label>
+                      <Input
+                        value={agentForm.proxy ?? ""}
+                        onChange={(e) => setAgentForm({ ...agentForm, proxy: e.target.value })}
+                        placeholder="http://127.0.0.1:7890"
+                      />
+                      <p className="text-xs text-muted-foreground">留空则不使用代理</p>
+                    </div>
+
+                    <div className="grid gap-2">
+                      <label className="text-sm font-medium">高级参数</label>
+                      <div className="flex gap-4">
+                        <div className="flex-1 grid gap-1">
+                          <label className="text-xs text-muted-foreground">Max Tokens</label>
+                          <Input
+                            type="number"
+                            value={agentForm.max_tokens ?? 4096}
+                            onChange={(e) => setAgentForm({ ...agentForm, max_tokens: parseInt(e.target.value) || 4096 })}
+                          />
+                        </div>
+                        <div className="flex-1 grid gap-1">
+                          <label className="text-xs text-muted-foreground">Max Tool Iterations</label>
+                          <Input
+                            type="number"
+                            value={agentForm.max_tool_iterations ?? 10}
+                            onChange={(e) => setAgentForm({ ...agentForm, max_tool_iterations: parseInt(e.target.value) || 10 })}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-2">
+                      <label className="text-sm font-medium">Fast-path 关键词</label>
+                      <p className="text-xs text-muted-foreground">命中这些关键词且消息长度 ≤ {agentForm.fast_max_length} 字时走快捷路径（不调工具，直接回复）。支持通配符 *，如 "关*灯"。每行一个。</p>
+                      <textarea
+                        className="font-mono text-sm bg-background border border-border rounded-md px-3 py-2 outline-none focus:ring-2 focus:ring-ring resize-none"
+                        rows={6}
+                        value={(agentForm.fast_keywords ?? []).join("\n")}
+                        onChange={(e) => setAgentForm({ ...agentForm, fast_keywords: e.target.value.split("\n").map(s => s.trim()).filter(Boolean) })}
+                        placeholder={"关*灯\n开*灯\n..."}
+                      />
+                      <div className="flex items-center gap-2">
+                        <label className="text-xs text-muted-foreground">最大消息长度</label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={100}
+                          value={agentForm.fast_max_length ?? 12}
+                          onChange={(e) => setAgentForm({ ...agentForm, fast_max_length: parseInt(e.target.value) || 12 })}
+                          className="w-20 bg-background border border-border rounded-md px-2 py-1 text-sm outline-none"
+                        />
+                        <span className="text-xs text-muted-foreground">字</span>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-2">
+                      <label className="text-sm font-medium">Fast-path Skill 触发词</label>
+                      <p className="text-xs text-muted-foreground">命中这些关键词时强制走快捷路径，不受消息长度限制。适合绑定 Home Assistant 等确定性 Skill 命令。支持通配符 *。每行一个。</p>
+                      <textarea
+                        className="font-mono text-sm bg-background border border-border rounded-md px-3 py-2 outline-none focus:ring-2 focus:ring-ring resize-none"
+                        rows={4}
+                        value={(agentForm.fast_skill_triggers ?? []).join("\n")}
+                        onChange={(e) => setAgentForm({ ...agentForm, fast_skill_triggers: e.target.value.split("\n").map(s => s.trim()).filter(Boolean) })}
+                        placeholder={"打开客厅灯\n关闭空调\n..."}
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -277,21 +424,40 @@ export function SettingsView({ models }: SettingsViewProps) {
               </div>
             )}
 
-            {activeTab === "format" && (
+            {activeTab === "tools" && (
               <div className="h-full flex flex-col min-h-[500px]">
-                <h3 className="text-lg font-medium mb-2">输出规范 (format.md)</h3>
+                <h3 className="text-lg font-medium mb-2">工具说明 (tools.md)</h3>
                 <p className="text-sm text-muted-foreground mb-4">
-                  定义 Agent 回复的具体格式要求（如 Markdown、JSON、字数限制等）。
+                  补充描述 Agent 可用的工具及使用原则，注入到系统 prompt 的 &lt;tools_reference&gt; 标签中。
                 </p>
                 <Textarea
                   className="flex-1 font-mono text-sm resize-none"
-                  value={sysForm.format}
-                  onChange={(e) => setSysForm({ ...sysForm, format: e.target.value })}
-                  placeholder="Output rules..."
+                  value={sysForm.tools}
+                  onChange={(e) => setSysForm({ ...sysForm, tools: e.target.value })}
+                  placeholder="- shell: 执行 shell 命令..."
                 />
               </div>
             )}
-            
+
+            {activeTab === "heartbeat" && (
+              <div className="h-full flex flex-col min-h-[500px]">
+                <h3 className="text-lg font-medium mb-2">心跳任务 (heartbeat.md)</h3>
+                <p className="text-sm text-muted-foreground mb-4">
+                  每次心跳时执行的周期性任务，由 Agent 自主维护。以 # 开头的行是注释不会执行。
+                </p>
+                <Textarea
+                  className="flex-1 font-mono text-sm resize-none"
+                  value={sysForm.heartbeat}
+                  onChange={(e) => setSysForm({ ...sysForm, heartbeat: e.target.value })}
+                  placeholder="# 在这里添加心跳任务..."
+                />
+              </div>
+            )}
+
+            {activeTab === "prompt-preview" && (
+              <PromptPreview />
+            )}
+
           </div>
         </ScrollArea>
         

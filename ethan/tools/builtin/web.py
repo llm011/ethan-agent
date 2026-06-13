@@ -7,6 +7,7 @@ from ethan.tools.base import BaseTool
 
 
 class WebFetchTool(BaseTool):
+    fast_path = False
     name = "web_fetch"
     description = "Fetch a webpage URL and extract its text content. Use for reading articles, documentation, or any web page."
     parameters = {

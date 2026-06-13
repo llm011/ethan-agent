@@ -51,6 +51,7 @@ class FileReadTool(BaseTool):
 
 
 class FileWriteTool(BaseTool):
+    fast_path = False
     name = "file_write"
     description = "Write content to a local file. Creates parent directories if needed."
     parameters = {
@@ -85,6 +86,7 @@ class FileWriteTool(BaseTool):
 
 
 class FileListTool(BaseTool):
+    fast_path = False
     name = "file_list"
     description = "List files and directories at a given path."
     parameters = {

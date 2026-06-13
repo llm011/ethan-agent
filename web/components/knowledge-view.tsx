@@ -5,7 +5,7 @@ import { Loader2, Plus, Trash2, Search, Book } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { KnowledgeItem, fetchKnowledge, addKnowledge, deleteKnowledge } from "@/lib/api";
+import { KnowledgeItem, fetchKnowledge, addKnowledge, deleteKnowledge, searchKnowledge } from "@/lib/api";
 
 export function KnowledgeView() {
   const [items, setItems] = useState<KnowledgeItem[]>([]);
@@ -24,7 +24,12 @@ export function KnowledgeView() {
   const loadData = useCallback(async (q?: string, mode: "keyword" | "semantic" = "keyword") => {
     setLoading(true);
     try {
-      const data = await fetchKnowledge(q, mode);
+      let data: KnowledgeItem[];
+      if (q) {
+        data = await searchKnowledge(q, 20, mode === "semantic");
+      } else {
+        data = await fetchKnowledge();
+      }
       setItems(data);
     } catch (err) {
       console.error("Failed to load knowledge", err);

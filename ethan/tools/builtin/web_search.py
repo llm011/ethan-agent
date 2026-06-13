@@ -8,6 +8,7 @@ from ethan.tools.base import BaseTool
 
 
 class WebSearchTool(BaseTool):
+    fast_path = False
     name = "web_search"
     description = "Search the web for current information. Use when you need up-to-date data, facts you're unsure about, or real-time information."
     parameters = {

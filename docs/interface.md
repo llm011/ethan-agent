@@ -85,13 +85,14 @@ REPL 内部维护 `WorkingMemory` 实例：
 | 路径 | 功能 |
 |------|------|
 | `/chat` | 新建对话（默认落地页） |
-| `/chat/[id]` | 指定会话的对话界面，支持流式输出和工具调用可视化 |
-| `/memory` | 查看/编辑持久记忆条目 |
+| `/chat/[id]` | 指定会话的对话界面，支持流式输出和工具调用可视化；消息气泡显示 TTFT 耗时 |
+| `/memory` | 查看/编辑持久记忆，三个 Tab：Facts / Episodes / Procedures；支持编辑、删除，内容 Markdown 渲染 |
 | `/knowledge` | 知识库管理（查询、上传、删除文档） |
 | `/schedule` | 定时任务列表，支持暂停/恢复/删除 |
 | `/skills` | Skill 列表及内容预览 |
 | `/sessions` | 历史会话列表，支持按标题搜索 |
-| `/settings` | 配置项（模型、Provider、系统设置） |
+| `/settings` | 配置项：代理、max_tokens、max_tool_iterations、fast-path 关键词、心跳配置、System Prompt 预览 |
+| `/channels` | 渠道管理：查看/编辑已配置的通知渠道 |
 
 ### 与后端通信
 
@@ -115,7 +116,11 @@ REPL 内部维护 `WorkingMemory` 实例：
 |------|------|------|
 | GET | `/health` | 健康检查，返回版本号 |
 | GET | `/models` | 列出所有已配置模型 |
-| POST | `/chat` | 对话（支持 stream） |
+| POST | `/chat` | 对话（支持 stream），使用 HOT_SIZE=20 滑动窗口截断历史 |
+| POST | `/knowledge/search` | 语义检索知识库，返回最相关的条目 |
+| GET | `/channels` | 列出所有已配置渠道 |
+| PATCH | `/channels` | 更新渠道配置 |
+| GET | `/system-prompt-preview` | 预览当前实际使用的完整 system prompt（含 skill 注入结果） |
 
 ### /chat 请求格式
 

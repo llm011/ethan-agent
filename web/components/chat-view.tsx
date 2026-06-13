@@ -8,18 +8,13 @@ import { Send, Paperclip, Loader2, Pencil, Check, X, Sun, Moon } from "lucide-re
 import { Button } from "@/components/ui/button";
 import { Clock, Calendar } from "lucide-react";
 
-// 让中文字符旁的 **bold** 正确解析：在 CJK 与 ** 之间插零宽空格
-const CJK = /[一-鿿㐀-䶿　-〿＀-￯⺀-⻿]/;
+// CommonMark 规定 ** 紧内侧不能有空格，否则不渲染加粗。
+// 此函数去掉 AI 生成文本中 ** 内侧的多余空白，修复渲染。
 function fixBold(text: string): string {
-  // 1. 修复 AI 生成的内部带空格的加粗格式：** text ** -> **text**
-  let fixed = text.replace(/\*\*\s+([^\*]+?)\s+\*\*/g, '**$1**');
-
-  // 2. 修复中文旁边的加粗格式不渲染：在 CJK 与 ** 之间插零宽空格
-  fixed = fixed
-    .replace(/([^\s*_`])\*\*/g, (match, c) => (CJK.test(c) ? `${c}​**` : `${c} **`))
-    .replace(/\*\*([^\s*_`])/g, (match, c) => (CJK.test(c) ? `**​${c}` : `** ${c}`));
-
-  return fixed;
+  return text.replace(/\*\*[ \t]*((?:[^*\n]|\*(?!\*))+?)[ \t]*\*\*/g, (_, inner) => {
+    const trimmed = inner.trim();
+    return trimmed ? `**${trimmed}**` : `**${inner}**`;
+  });
 }
 
 function formatTime(ts?: number) {
@@ -55,6 +50,7 @@ interface Message {
   toolActivity?: string;
   created_at?: number;
   usage?: { input: number; output: number; cache: number };
+  ttft?: number; // ms to first token
 }
 
 function useTheme() {
@@ -233,10 +229,16 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
     let assistantContent = "";
     let currentActivity = "";
+    const sendTime = Date.now();
+    let ttft: number | undefined;
+    let finalUsage: { input: number; output: number; cache: number } | undefined;
     setMessages([...newMessages, { role: "assistant", content: "", created_at: Date.now() / 1000 }]);
 
     try {
       for await (const chunk of streamChat(chatMessages, selectedModel, sessionId)) {
+        // Record TTFT on the very first chunk of any kind (tool or content)
+        if (ttft === undefined) ttft = Date.now() - sendTime;
+
         if (chunk.error) {
           assistantContent = `Error: ${chunk.error}`;
           break;
@@ -253,14 +255,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           setMessages([...newMessages, { role: "assistant", content: assistantContent, toolActivity: currentActivity, created_at: Date.now() / 1000 }]);
         }
         if (chunk.done && chunk.usage) {
-          const u = { input: chunk.usage.input || 0, output: chunk.usage.output || 0, cache: chunk.usage.cache || 0 };
-          setSessionUsage(prev => ({ input: prev.input + u.input, output: prev.output + u.output, cache: prev.cache + u.cache }));
-          setMessages(prev => {
-            const msgs = [...prev];
-            const last = msgs[msgs.length - 1];
-            if (last && last.role === "assistant") msgs[msgs.length - 1] = { ...last, usage: u };
-            return msgs;
-          });
+          finalUsage = { input: chunk.usage.input || 0, output: chunk.usage.output || 0, cache: chunk.usage.cache || 0 };
+          setSessionUsage(prev => ({ input: prev.input + finalUsage!.input, output: prev.output + finalUsage!.output, cache: prev.cache + finalUsage!.cache }));
           currentActivity = "";
         }
       }
@@ -268,7 +264,18 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       assistantContent = `Error: ${err instanceof Error ? err.message : "Unknown error"}`;
     }
 
-    setMessages([...newMessages, { role: "assistant", content: assistantContent, created_at: Date.now() / 1000 }]);
+    setMessages(prev => {
+      const msgs = [...prev];
+      const last = msgs[msgs.length - 1];
+      if (last && last.role === "assistant") {
+        const updated = { ...last };
+        if (finalUsage) updated.usage = finalUsage;
+        if (ttft !== undefined) updated.ttft = ttft;
+        msgs[msgs.length - 1] = updated;
+        return msgs;
+      }
+      return [...newMessages, { role: "assistant", content: assistantContent, created_at: Date.now() / 1000, usage: finalUsage, ttft }];
+    });
     setStreaming(false);
     fetchSessions().then(setSessions).catch(() => {});
   };
@@ -374,77 +381,80 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       </header>
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.length === 0 && (
-          <div className="flex items-center justify-center h-full text-muted-foreground">
-            <p>Start a conversation</p>
-          </div>
-        )}
-        {messages.map((msg, i) => (
-          <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-            <div
-              className={`max-w-[90%] md:max-w-[80%] rounded-2xl px-4 py-3 ${
-                msg.role === "user"
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted prose prose-sm dark:prose-invert max-w-none"
-              }`}
-            >
-              {msg.role === "user" ? (
-                <>
-                  {msg.files && msg.files.length > 0 && (
-                    <div className="text-xs opacity-70 mb-1">
-                      {msg.files.map((f, j) => <span key={j} className="mr-2">📎 {f}</span>)}
-                    </div>
-                  )}
-                  <p className="whitespace-pre-wrap">{msg.content.split("\n\n").pop()}</p>
-                  {msg.created_at && (
-                    <div className="text-[10px] opacity-40 mt-1 text-right">
-                      {formatTime(msg.created_at)}
-                    </div>
-                  )}
-                </>
-              ) : (
-                <>
-                  {msg.toolActivity && (
-                    <div className="text-xs text-muted-foreground mb-2 flex items-center gap-1">
-                      <span className="animate-pulse">⚡</span>
-                      <span>{msg.toolActivity}</span>
-                    </div>
-                  )}
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    components={{
-                      pre: ({ children }) => <pre className="bg-background/50 rounded-lg p-3 overflow-x-auto text-xs">{children}</pre>,
-                      code: ({ className, children, ...props }) => {
-                        const isInline = !className;
-                        return isInline
-                          ? <code className="bg-background/50 px-1 py-0.5 rounded text-xs" {...props}>{children}</code>
-                          : <code className={className} {...props}>{children}</code>;
-                      },
-                    }}
-                  >
-                    {fixBold(msg.content)}
-                  </ReactMarkdown>
-                  <div className="flex justify-between items-end mt-2">
-                    <span className="text-[10px] text-muted-foreground/40">{msg.created_at ? formatTime(msg.created_at) : ""}</span>
-                    {msg.usage && (
-                      <span className="text-[10px] text-muted-foreground/30">
-                        ↑{msg.usage.input} ↓{msg.usage.output}{msg.usage.cache > 0 ? ` ⚡${msg.usage.cache}` : ""}
-                      </span>
-                    )}
-                  </div>
-                </>
-              )}
-              {msg.role === "assistant" && streaming && i === messages.length - 1 && (
-                <span className="inline-block w-2 h-4 bg-foreground/50 animate-pulse ml-0.5" />
-              )}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4">
+        <div className="max-w-3xl mx-auto space-y-4">
+          {messages.length === 0 && (
+            <div className="flex items-center justify-center h-full text-muted-foreground">
+              <p>Start a conversation</p>
             </div>
-          </div>
-        ))}
+          )}
+          {messages.map((msg, i) => (
+            <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+              <div
+                className={`max-w-[90%] md:max-w-[80%] rounded-2xl px-4 py-3 ${
+                  msg.role === "user"
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted prose prose-sm dark:prose-invert max-w-none"
+                }`}
+              >
+                {msg.role === "user" ? (
+                  <>
+                    {msg.files && msg.files.length > 0 && (
+                      <div className="text-xs opacity-70 mb-1">
+                        {msg.files.map((f, j) => <span key={j} className="mr-2">📎 {f}</span>)}
+                      </div>
+                    )}
+                    <p className="whitespace-pre-wrap">{msg.content.split("\n\n").pop()}</p>
+                    {msg.created_at && (
+                      <div className="text-[10px] opacity-40 mt-1 text-right">
+                        {formatTime(msg.created_at)}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {msg.toolActivity && (
+                      <div className="text-xs text-muted-foreground mb-2 flex items-center gap-1">
+                        <span className="animate-pulse">⚡</span>
+                        <span>{msg.toolActivity}</span>
+                      </div>
+                    )}
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        pre: ({ children }) => <pre className="bg-background/50 rounded-lg p-3 overflow-x-auto text-xs">{children}</pre>,
+                        code: ({ className, children, ...props }) => {
+                          const isInline = !className;
+                          return isInline
+                            ? <code className="bg-background/50 px-1 py-0.5 rounded text-xs" {...props}>{children}</code>
+                            : <code className={className} {...props}>{children}</code>;
+                        },
+                      }}
+                    >
+                      {fixBold(msg.content)}
+                    </ReactMarkdown>
+                    <div className="flex justify-between items-end mt-2">
+                      <span className="text-[10px] text-muted-foreground/40">{msg.created_at ? formatTime(msg.created_at) : ""}</span>
+                      {msg.usage && (
+                        <span className="text-[10px] text-muted-foreground/30 tabular-nums">
+                          ↑{msg.usage.input.toLocaleString()} ↓{msg.usage.output.toLocaleString()}{msg.usage.cache > 0 ? ` ⚡${msg.usage.cache.toLocaleString()}` : ""}{msg.ttft !== undefined ? ` · ${msg.ttft < 1000 ? `${msg.ttft}ms` : `${(msg.ttft / 1000).toFixed(1)}s`}` : ""}
+                        </span>
+                      )}
+                    </div>
+                  </>
+                )}
+                {msg.role === "assistant" && streaming && i === messages.length - 1 && (
+                  <span className="inline-block w-2 h-4 bg-foreground/50 animate-pulse ml-0.5" />
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Input area */}
       <div className="border-t border-border p-4">
+        <div className="max-w-3xl mx-auto">
         {/* Onboarding banner */}
         {showOnboarding && (
           <div className="mb-4 rounded-xl border border-yellow-500/40 bg-yellow-500/10 p-4 space-y-3">
@@ -538,6 +548,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           >
             {streaming ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
           </Button>
+        </div>
         </div>
       </div>
     </div>

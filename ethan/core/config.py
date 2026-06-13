@@ -2,7 +2,6 @@ import os
 from pathlib import Path
 from typing import Optional
 
-import yaml
 from pydantic import BaseModel, Field
 
 
@@ -47,6 +46,12 @@ class RoutingConfig(BaseModel):
         "播放音乐", "暂停", "下一首", "上一首",
     ])
     fast_max_length: int = 12  # 消息超过此长度不走 Fast Path（简单控制命令通常 ≤ 10 字）
+    fast_skill_triggers: list[str] = Field(default_factory=list)  # 命中时强制走 Fast Path，不受长度限制（给 Skill 关联用）
+
+
+class HeartbeatConfig(BaseModel):
+    enabled: bool = True
+    interval_minutes: int = 10
 
 
 class DefaultsConfig(BaseModel):
@@ -58,6 +63,7 @@ class DefaultsConfig(BaseModel):
     max_tokens: int = 4096
     max_tool_iterations: int = 10
     routing: RoutingConfig = Field(default_factory=RoutingConfig)
+    heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
 
 
 class Config(BaseModel):
@@ -113,6 +119,7 @@ def _default_config() -> dict:
 
 
 def load_config() -> Config:
+    import yaml
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
     if not CONFIG_FILE.exists():
@@ -132,6 +139,7 @@ def save_config(config: Config) -> None:
 
 
 def _write_raw(data: dict) -> None:
+    import yaml
     with open(CONFIG_FILE, "w") as f:
         yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
 

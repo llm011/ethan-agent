@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { Plus, Trash2, Search, Settings, Book, Pencil, Check, X, List, Wrench } from "lucide-react";
+import { Plus, Trash2, Search, Settings, Book, Pencil, Check, X, List, Wrench, Radio } from "lucide-react";
 import { Clock, Database } from "lucide-react";
 import { useSidebar } from "@/app/layout-shell";
 import { Button } from "@/components/ui/button";
@@ -360,6 +360,17 @@ export function Sidebar() {
 
       {/* Bottom: Settings */}
       <div className="p-2 border-t border-border">
+        <Button
+          variant="ghost"
+          className={`w-full justify-start h-9 px-3 ${
+            pathname === "/channels"
+              ? "bg-accent text-accent-foreground"
+              : "text-muted-foreground"
+          }`}
+          onClick={() => navigate("/channels")}
+        >
+          <Radio className="h-4 w-4 mr-2" /> 渠道 (Channels)
+        </Button>
         <Button
           variant="ghost"
           className={`w-full justify-start h-9 px-3 ${

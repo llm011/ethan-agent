@@ -1,9 +1,9 @@
+from __future__ import annotations
+
 import json
 from typing import AsyncIterator, Optional
 
 import httpx
-from openai import AsyncOpenAI
-
 from ethan.core.config import ProviderConfig
 from ethan.providers.base import (
     BaseProvider,
@@ -16,6 +16,7 @@ from ethan.providers.base import (
 
 class OpenAICompatProvider(BaseProvider):
     def __init__(self, provider_cfg: ProviderConfig, model: str, proxy: Optional[str] = None):
+        from openai import AsyncOpenAI  # lazy: SDK is heavy; only load when a provider instance is created
         http_client = None
         if proxy:
             http_client = httpx.AsyncClient(proxy=proxy)

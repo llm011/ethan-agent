@@ -1,10 +1,11 @@
+from __future__ import annotations
+
 import json
 from typing import AsyncIterator, Optional
 
-import anthropic
 import httpx
 
-from ethan.core.config import ProviderConfig
+from ethan.core.config import ProviderConfig, get_config
 from ethan.providers.base import (
     BaseProvider,
     Message,
@@ -14,8 +15,47 @@ from ethan.providers.base import (
 )
 
 
+def _split_system_for_cache(system: str) -> tuple[str, str]:
+    """Split system prompt into stable (cacheable) and dynamic (non-cached) parts.
+
+    Split point: everything before 'Current time:' is stable; from there on is dynamic
+    (includes current time, scheduled_tasks, available_skills, user_context, etc.).
+    """
+    marker = "Current time:"
+    idx = system.find(marker)
+    if idx == -1:
+        return system, ""
+    return system[:idx].rstrip(), system[idx:]
+
+
+def _build_system_blocks(system: str) -> list[dict]:
+    """Convert a system prompt string into Anthropic content blocks with prompt caching.
+
+    The stable prefix gets cache_control so repeated calls within 5 min pay only 0.1x.
+    The dynamic suffix (time, tasks, skills, context) is always sent fresh.
+    """
+    stable, dynamic = _split_system_for_cache(system)
+    blocks: list[dict] = []
+    if stable:
+        blocks.append({
+            "type": "text",
+            "text": stable,
+            "cache_control": {"type": "ephemeral"},
+        })
+    if dynamic:
+        blocks.append({
+            "type": "text",
+            "text": dynamic,
+        })
+    # Fallback: if split produced nothing, wrap the whole string uncached
+    if not blocks and system:
+        blocks.append({"type": "text", "text": system})
+    return blocks
+
+
 class AnthropicProvider(BaseProvider):
     def __init__(self, provider_cfg: ProviderConfig, model: str, proxy: Optional[str] = None):
+        import anthropic  # lazy: SDK is heavy; only load when a provider instance is created
         http_client = None
         if proxy:
             http_client = httpx.AsyncClient(proxy=proxy)
@@ -86,7 +126,8 @@ class AnthropicProvider(BaseProvider):
             usage_dict = {
                 "input": response.usage.input_tokens,
                 "output": response.usage.output_tokens,
-                "cache": getattr(response.usage, "cache_read_input_tokens", 0) or 0,
+                "cache_read": getattr(response.usage, "cache_read_input_tokens", 0) or 0,
+                "cache_creation": getattr(response.usage, "cache_creation_input_tokens", 0) or 0,
             }
 
         return Message(role="assistant", content=text_content, tool_calls=tool_calls, usage=usage_dict)
@@ -99,11 +140,11 @@ class AnthropicProvider(BaseProvider):
     ) -> Message:
         kwargs: dict = {
             "model": self._model,
-            "max_tokens": 4096,
+            "max_tokens": get_config().defaults.max_tokens,
             "messages": self._to_anthropic_messages(messages),
         }
         if system:
-            kwargs["system"] = system
+            kwargs["system"] = _build_system_blocks(system)
         if tools:
             kwargs["tools"] = self._to_anthropic_tools(tools)
 
@@ -118,11 +159,11 @@ class AnthropicProvider(BaseProvider):
     ) -> AsyncIterator[StreamChunk]:
         kwargs: dict = {
             "model": self._model,
-            "max_tokens": 4096,
+            "max_tokens": get_config().defaults.max_tokens,
             "messages": self._to_anthropic_messages(messages),
         }
         if system:
-            kwargs["system"] = system
+            kwargs["system"] = _build_system_blocks(system)
         if tools:
             kwargs["tools"] = self._to_anthropic_tools(tools)
 

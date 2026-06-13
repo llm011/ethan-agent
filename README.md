@@ -14,13 +14,21 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 
 - **Session management** — Every conversation is automatically saved to SQLite. Resume any past session with `ethan -r last` or browse history with `/sessions`. Sessions include full message replay and metadata.
 
-- **Skill system** — Drop a Markdown file into `~/.ethan/skills/` and Ethan picks it up instantly. Skills are matched by keyword triggers and injected into the system prompt when relevant. The agent can also auto-generate new skills from complex problem-solving sessions (Hermes-style self-improvement).
+- **Skill system** — Two-source loading: built-in skills ship with the project (`ethan/skills/<name>/SKILL.md`); user skills live in `~/.ethan/skills/`. Both support a directory format (`<name>/SKILL.md` + `references/`) and the legacy single-file `.md` format. Built-in skills include `channels`, `lark-im`, and `home-assistant`. Skills matched by keyword triggers are injected into the system prompt; skills can also be auto-generated from complex sessions (Hermes-style).
 
-- **Tool system** — Fully pluggable: implement `BaseTool`, register it, done. Ships with shell execution, web search (DuckDuckGo, no API key needed), web page fetching, and file I/O. Adding a new capability never touches the agent loop.
+- **Fast Path** — Simple commands short-circuit the full agent loop. The fast path shares the same tool set as the full agent (filtered by `tool.fast_path = True`, e.g. `shell` and `file_read`), only the system prompt differs. Skills can opt into the fast path via `fast_path: true` frontmatter, and config supports `fast_skill_triggers`.
 
-- **Scheduled tasks** — Create cron or interval jobs that persist across restarts (APScheduler + SQLite). Useful for periodic reminders, data checks, or heartbeat routines.
+- **Prompt Caching** — The Anthropic provider splits the system prompt at the `Current time:` boundary. The stable prefix gets `cache_control` (ephemeral), so repeated calls within 5 minutes pay only 0.1× input token cost.
 
-- **HTTP API** — A FastAPI server (`ethan serve`) exposes `/chat` with optional SSE streaming, `/models`, and `/health`. Ready to plug into a web frontend or mobile app.
+- **Tool system** — Fully pluggable: implement `BaseTool`, register it, done. Ships with shell execution, web search (DuckDuckGo), web page fetching, file I/O, ripgrep/fd search, schedule management, and knowledge base operations. Tools expose a `fast_path` field to control whether they are available in fast-path mode.
+
+- **Scheduled tasks** — Create cron or interval jobs that persist across restarts (APScheduler + SQLite). A built-in heartbeat job runs periodically to deduplicate facts and execute tasks defined in `heartbeat.md`.
+
+- **Knowledge base** — Vector search powered by `sqlite-vec`. Add notes/snippets via the `knowledge_add` tool or Web UI; retrieve with `knowledge_search`. The `/knowledge/search` HTTP endpoint exposes semantic search to external callers.
+
+- **HTTP API** — A FastAPI server (`ethan serve`) exposes `/chat` (SSE streaming, HOT_SIZE=20 sliding window), `/models`, `/health`, `/knowledge/search`, `/channels`, and `/system-prompt-preview`. Ready to plug into a web frontend or mobile app.
+
+- **Web UI** — Next.js 16 browser interface with pages for chat, memory (Facts / Episodes / Procedures tabs with edit/delete and Markdown rendering), knowledge base, schedule, skills, sessions, settings (proxy, max_tokens, fast-path keywords, heartbeat config, system prompt preview), and a new `/channels` channel management page. Message bubbles show TTFT latency.
 
 - **Fast CLI** — A lightweight REPL powered by prompt_toolkit with proper CJK character handling, a bottom status bar (model, tokens, path), slash commands for in-session control, and streaming output that starts printing the moment the first token arrives.
 
@@ -140,13 +148,20 @@ Compression is **batched** (not per-turn) and uses an automatically inferred che
 
 ## Skills
 
-Skills are Markdown files in `~/.ethan/skills/` with YAML frontmatter:
+Skills are Markdown files loaded from two sources, in priority order:
+
+1. **内置 skills** — `ethan/skills/<name>/SKILL.md`（随项目发布）
+2. **用户 skills** — `~/.ethan/skills/<name>/SKILL.md` 或 `~/.ethan/skills/<name>.md`
+
+两种来源都支持目录格式（`<name>/SKILL.md` + `references/` 子目录）和旧版单文件 `.md` 格式。
 
 ```markdown
 ---
 name: deploy-checklist
 trigger: deploy|ship|release
 description: Pre-deployment checklist
+fast_path: true      # 是否在 fast path 模式下也生效
+version: "1.0"
 ---
 
 Steps before deploying:
@@ -155,7 +170,7 @@ Steps before deploying:
 3. ...
 ```
 
-When the user's input matches a skill's trigger keywords, the skill content is injected into the system prompt to guide the agent's behavior.
+当用户输入匹配到 skill 的 `trigger` 关键词时，skill 内容自动注入 system prompt。内置 skill 包括 `channels`、`lark-im`、`home-assistant`。
 
 ## Tools
 
@@ -252,15 +267,17 @@ Environment variables in `.env` override config values (useful for secrets).
 - [x] ReAct agent loop with streaming
 - [x] Session persistence & resume
 - [x] Three-tier memory with auto-compression
-- [x] Skill system (load + match + auto-generate)
-- [x] Scheduler (cron + interval)
-- [x] Built-in tools (shell, search, file, web)
-- [x] HTTP API with SSE streaming
+- [x] Skill system (dual-source, directory format, fast-path opt-in, auto-generate)
+- [x] Built-in skills: channels, lark-im, home-assistant
+- [x] Scheduler (cron + interval) + heartbeat job
+- [x] Built-in tools (shell, search, file, web, rg/fd, schedule, knowledge)
+- [x] HTTP API with SSE streaming + knowledge/channels/system-prompt-preview endpoints
+- [x] Web UI (chat, memory, knowledge, schedule, skills, sessions, settings, channels)
+- [x] Knowledge base with semantic vector search (sqlite-vec)
+- [x] Prompt Caching (Anthropic stable-prefix cache_control)
+- [x] Fast Path router with per-tool and per-skill opt-in
+- [x] ACP protocol client
 - [ ] MCP protocol client
-- [ ] ACP protocol (delegate to Claude Code / Codex)
-- [ ] Knowledge base with Obsidian integration
-- [ ] Web UI
-- [ ] Structured memory with embedding retrieval
 - [ ] Procedural memory (learn from corrections)
 
 ## Documentation

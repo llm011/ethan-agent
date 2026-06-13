@@ -23,13 +23,22 @@ _FORCE_FULL_SIGNALS = [
 ]
 
 
+def _match_keyword(kw: str, text: str) -> bool:
+    """关键词匹配，支持通配符 *。"""
+    if "*" in kw:
+        pattern = re.compile(kw.replace("*", ".*"))
+        return bool(pattern.search(text))
+    return kw in text
+
+
 def _is_fast_path(text: str) -> bool:
     """
     任务路由判断。规则：
     1. 有 FORCE_FULL 信号 → Full Path（最高优先）
-    2. 命中 config.routing.fast_keywords 且长度 ≤ fast_max_length → Fast Path
+    2. 命中 config.routing.fast_skill_triggers 中任意关键词 → Fast Path（不受长度限制）
+    3. 命中 config.routing.fast_keywords 且长度 ≤ fast_max_length → Fast Path
        关键词支持简单通配符 * (e.g. "关*灯" 匹配 "关客厅灯")
-    3. 其余 → Full Path
+    4. 其余 → Full Path
     """
     lower = text.lower()
 
@@ -38,18 +47,19 @@ def _is_fast_path(text: str) -> bool:
         return False
 
     routing = get_config().defaults.routing
+
+    # Skill 关联触发词：命中即走 Fast Path，不受长度限制
+    for kw in routing.fast_skill_triggers:
+        if _match_keyword(kw, text):
+            return True
+
+    # 普通快捷关键词：还需满足长度限制
     if len(text.strip()) > routing.fast_max_length:
         return False
 
     for kw in routing.fast_keywords:
-        if "*" in kw:
-            # 支持通配符：把 * 转换为 .* 进行正则匹配
-            pattern = re.compile(kw.replace("*", ".*"))
-            if pattern.search(text):
-                return True
-        else:
-            if kw in text:
-                return True
+        if _match_keyword(kw, text):
+            return True
 
     return False
 
@@ -162,23 +172,28 @@ class Agent:
         soul_content = ""
         if (system_dir / "soul.md").exists():
             soul_content = (system_dir / "soul.md").read_text(encoding="utf-8").strip()
+            soul_content = soul_content.replace("{workspace}", workspace)
 
-        format_content = ""
-        if (system_dir / "format.md").exists():
-            format_content = (system_dir / "format.md").read_text(encoding="utf-8").strip()
+        tools_content = ""
+        if (system_dir / "tools.md").exists():
+            tools_content = (system_dir / "tools.md").read_text(encoding="utf-8").strip()
+            tools_content = tools_content.replace("{workspace}", workspace)
+
+        identity_content = identity_content.replace("{workspace}", workspace)
 
         parts = [f"<identity>\n{identity_content}\n</identity>"]
         if soul_content:
             parts.append(f"<operating_principles>\n{soul_content}\n</operating_principles>")
-        if format_content:
-            parts.append(f"<formatting_rules>\n{format_content}\n</formatting_rules>")
+        if tools_content:
+            parts.append(f"<tools_reference>\n{tools_content}\n</tools_reference>")
         parts.append(f"Current time: {now}")
         parts.append(f"Your workspace directory is {workspace}. System configurations and memories reside here.")
 
         # Inject active scheduled tasks so Agent always knows them
         schedule_ctx = self._build_schedule_context(workspace)
         if schedule_ctx:
-            parts.append(f"<scheduled_tasks>\n{schedule_ctx}\n</scheduled_tasks>")
+            task_count = schedule_ctx.count("\n- ") + 1
+            parts.append(f"You have {task_count} active scheduled task(s). Call schedule_list to view details.")
 
         # Inject skills list so Agent knows its own capabilities
         if self._skills:
@@ -204,20 +219,16 @@ class Agent:
         return "\n\n".join(parts)
 
     async def chat(self, messages: list[Message]) -> Message:
-        """运行对话。简单控制类请求走 Fast Path（单次调用，无工具）。"""
+        """运行对话。Fast Path 使用简化 system prompt，Full Path 使用完整 prompt，两者均支持工具。"""
         working = list(messages)
         last_user = self._get_last_user_text(working)
         fast = _is_fast_path(last_user)
-
+        system = self._build_system(working, fast=fast)
         if fast:
-            system = self._build_system(working, fast=True)
-            response = await self._provider.chat(working, tools=None, system=system)
-            self.usage.add(response.usage)
-            return response
-
-        # Full Path: 完整 ReAct Loop
-        tools = [t.to_definition() for t in self._registry.all()] or None
-        system = self._build_system(working, fast=False)
+            tools_list = [t for t in self._registry.all() if t.fast_path]
+        else:
+            tools_list = self._registry.all()
+        tools = [t.to_definition() for t in tools_list] or None
 
         for _ in range(self._max_iterations):
             response = await self._provider.chat(working, tools=tools, system=system)
@@ -238,25 +249,18 @@ class Agent:
         return Message(role="assistant", content="[max tool iterations reached]")
 
     async def stream_chat(self, messages: list[Message]):
-        """流式对话。简单控制类请求走 Fast Path。"""
+        """流式对话。Fast Path 使用简化 system prompt，Full Path 使用完整 prompt，两者均支持工具。"""
         from ethan.providers.base import ToolEvent
 
         working = list(messages)
         last_user = self._get_last_user_text(working)
         fast = _is_fast_path(last_user)
-
+        system = self._build_system(working, fast=fast)
         if fast:
-            system = self._build_system(working, fast=True)
-            async for chunk in self._provider.stream_chat(working, tools=None, system=system):
-                if chunk.content:
-                    yield chunk.content
-                if chunk.is_final:
-                    self.usage.add(chunk.usage)
-            return
-
-        # Full Path: 完整流式 ReAct Loop
-        tools = [t.to_definition() for t in self._registry.all()] or None
-        system = self._build_system(working, fast=False)
+            tools_list = [t for t in self._registry.all() if t.fast_path]
+        else:
+            tools_list = self._registry.all()
+        tools = [t.to_definition() for t in tools_list] or None
 
         for _ in range(self._max_iterations):
             full_content = ""

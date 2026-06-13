@@ -122,6 +122,14 @@ export interface AgentSettings {
   agent_name: string;
   language: string;
   default_model: string;
+  heartbeat_enabled: boolean;
+  heartbeat_interval_minutes: number;
+  proxy: string;
+  max_tokens: number;
+  max_tool_iterations: number;
+  fast_keywords: string[];
+  fast_max_length: number;
+  fast_skill_triggers: string[];
 }
 export async function fetchAgentSettings(): Promise<AgentSettings> {
   const res = await fetch(`${API_URL}/settings/agent`, { headers: headers() });
@@ -158,6 +166,8 @@ export interface SystemSettings {
   identity: string;
   soul: string;
   format: string;
+  tools: string;
+  heartbeat: string;
 }
 
 export async function fetchSystemSettings(): Promise<SystemSettings> {
@@ -172,6 +182,12 @@ export async function updateSystemSettings(patch: Partial<SystemSettings>): Prom
     headers: headers(),
     body: JSON.stringify(patch),
   });
+}
+
+export async function fetchSystemPromptPreview(): Promise<{ system_prompt: string; approx_tokens: number; chars: number }> {
+  const res = await fetch(`${API_URL}/system-prompt-preview`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed");
+  return res.json();
 }
 
 
@@ -217,10 +233,44 @@ export async function fetchFacts(): Promise<Fact[]> {
   return res.json().then(data => data.facts);
 }
 
+export async function deleteFact(factId: string): Promise<void> {
+  await fetch(`${API_URL}/memory/facts/${factId}`, { method: "DELETE", headers: headers() });
+}
+
+export async function updateFact(factId: string, content: string): Promise<void> {
+  await fetch(`${API_URL}/memory/facts/${factId}`, {
+    method: "PATCH",
+    headers: { ...headers(), "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+}
+
 export async function fetchEpisodes(): Promise<Episode[]> {
   const res = await fetch(`${API_URL}/memory/episodes`, { headers: headers() });
   if (!res.ok) throw new Error("Failed");
   return res.json().then(data => data.episodes);
+}
+
+export async function deleteEpisode(id: string): Promise<void> {
+  await fetch(`${API_URL}/memory/episodes/${id}`, { method: "DELETE", headers: headers() });
+}
+
+export interface Procedure {
+  id: string;
+  rule: string;
+  context: string;
+  hit_count: number;
+  created_at: number;
+}
+
+export async function fetchProcedures(): Promise<Procedure[]> {
+  const res = await fetch(`${API_URL}/memory/procedures`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed");
+  return res.json().then(d => d.procedures);
+}
+
+export async function deleteProcedure(id: string): Promise<void> {
+  await fetch(`${API_URL}/memory/procedures/${id}`, { method: "DELETE", headers: headers() });
 }
 
 export async function* streamChat(
@@ -267,6 +317,14 @@ export interface KnowledgeItem {
   title: string;
   content?: string;
   tags?: string[];
+  score?: number | null;
+}
+
+export async function searchKnowledge(q: string, limit = 10, semantic = true): Promise<KnowledgeItem[]> {
+  const params = new URLSearchParams({ q, limit: String(limit), semantic: String(semantic) });
+  const res = await fetch(`${API_URL}/knowledge/search?${params}`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed");
+  return res.json().then(d => d.results);
 }
 
 export async function fetchKnowledge(query?: string, mode: "keyword" | "semantic" = "keyword"): Promise<KnowledgeItem[]> {
@@ -354,4 +412,26 @@ export async function completeOnboarding(agent_name: string, user_info: string):
   });
   if (!res.ok) throw new Error("Failed to complete onboarding");
   return res.json();
+}
+
+export interface ChannelInfo {
+  id: string;
+  name: string;
+  enabled: boolean;
+  config: Record<string, string>;
+}
+
+export async function fetchChannels(): Promise<ChannelInfo[]> {
+  const res = await fetch(`${API_URL}/channels`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed");
+  return res.json().then(d => d.channels);
+}
+
+export async function patchChannel(channelId: string, config: Record<string, string>): Promise<void> {
+  const res = await fetch(`${API_URL}/channels`, {
+    method: "PATCH",
+    headers: headers(),
+    body: JSON.stringify({ channel_id: channelId, config }),
+  });
+  if (!res.ok) throw new Error("Failed");
 }
