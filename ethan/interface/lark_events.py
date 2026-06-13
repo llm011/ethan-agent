@@ -69,6 +69,45 @@ async def _remove_reaction(message_id: str, reaction_id: str) -> None:
         pass
 
 
+async def _patch_message(message_id: str, text: str) -> bool:
+    """用 lark_oapi SDK 更新已发送的消息内容（追加流式效果）。"""
+    import lark_oapi as lark
+    from lark_oapi.api.im.v1 import PatchMessageRequest, PatchMessageRequestBody
+    from ethan.core.config import get_config
+    import json as _json
+
+    cfg = get_config()
+    lark_cfg = getattr(cfg, "lark", None)
+    if not lark_cfg or not lark_cfg.app_id:
+        return False
+
+    client = (
+        lark.Client.builder()
+        .app_id(lark_cfg.app_id)
+        .app_secret(lark_cfg.app_secret)
+        .build()
+    )
+
+    content = _json.dumps({"text": text}, ensure_ascii=False)
+    req = (
+        PatchMessageRequest.builder()
+        .message_id(message_id)
+        .request_body(
+            PatchMessageRequestBody.builder()
+            .content(content)
+            .build()
+        )
+        .build()
+    )
+
+    try:
+        import asyncio
+        resp = await asyncio.to_thread(client.im.v1.message.patch, req)
+        return resp.success()
+    except Exception:
+        return False
+
+
 async def _send_reply(chat_id: str, text: str) -> str | None:
     """通过 lark-cli 回复消息，使用 --markdown 以正确渲染格式。
     返回发出的消息 message_id（从 JSON stdout 解析），失败时返回 None。
@@ -175,17 +214,18 @@ async def _handle_message(event_data: dict) -> None:
         skills.load()
         agent = Agent(tool_registry=registry, skill_registry=skills)
 
-        # --- 流式回复 ---
+        # --- 流式回复（单消息追加模式）---
         FLUSH_CHARS = 80
         FLUSH_SECS = 2.0
 
         buffer = ""
         full_content = ""
         reaction_removed = False
+        reply_message_id: str | None = None  # 第一条回复消息的 ID
         last_flush_time = asyncio.get_event_loop().time()
 
         async def flush(is_final: bool = False) -> None:
-            nonlocal buffer, reaction_removed, last_flush_time
+            nonlocal buffer, reaction_removed, last_flush_time, reply_message_id
             if not buffer:
                 return
             # 首次发送前先移除 THINKING 表情
@@ -193,7 +233,17 @@ async def _handle_message(event_data: dict) -> None:
                 if reaction_id and message_id:
                     await _remove_reaction(message_id, reaction_id)
                 reaction_removed = True
-            await _send_reply(chat_id, buffer)
+
+            if reply_message_id is None:
+                # 第一次：新建消息
+                reply_message_id = await _send_reply(chat_id, buffer)
+            else:
+                # 后续：patch 同一条消息（追加内容），实现流式效果
+                patched = await _patch_message(reply_message_id, full_content)
+                if not patched:
+                    # patch 失败则降级为发新消息
+                    await _send_reply(chat_id, buffer)
+
             buffer = ""
             last_flush_time = asyncio.get_event_loop().time()
 

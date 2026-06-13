@@ -87,6 +87,44 @@ class Agent:
         self._max_iterations = config.defaults.max_tool_iterations
         self.usage = UsageStats()
 
+    def _build_schedule_context(self, workspace: str) -> str:
+        """读取 APScheduler SQLite 数据库，返回当前活跃定时任务摘要（不需要启动 scheduler）。"""
+        from pathlib import Path
+        import sqlite3, json, datetime as dt
+        db_path = Path(workspace) / "scheduler.db"
+        if not db_path.exists():
+            return ""
+        try:
+            con = sqlite3.connect(str(db_path))
+            rows = con.execute(
+                "SELECT id, next_run_time, job_state FROM apscheduler_jobs"
+            ).fetchall()
+            con.close()
+            if not rows:
+                return ""
+            lines = []
+            for job_id, next_run_ts, job_state_blob in rows:
+                next_run = "paused"
+                if next_run_ts:
+                    try:
+                        next_run = dt.datetime.fromtimestamp(next_run_ts).strftime("%Y-%m-%d %H:%M")
+                    except Exception:
+                        pass
+                # Extract prompt from kwargs if available
+                prompt = ""
+                try:
+                    state = __import__('pickle').loads(job_state_blob)
+                    prompt = state.get("kwargs", {}).get("prompt", "")[:60]
+                except Exception:
+                    pass
+                line = f"- {job_id}: next={next_run}"
+                if prompt:
+                    line += f", task=\"{prompt}\""
+                lines.append(line)
+            return "\n".join(lines)
+        except Exception:
+            return ""
+
     def _get_last_user_text(self, messages: list[Message]) -> str:
         for m in reversed(messages):
             if m.role == "user" and m.content:
@@ -136,6 +174,11 @@ class Agent:
             parts.append(f"<formatting_rules>\n{format_content}\n</formatting_rules>")
         parts.append(f"Current time: {now}")
         parts.append(f"Your workspace directory is {workspace}. System configurations and memories reside here.")
+
+        # Inject active scheduled tasks so Agent always knows them
+        schedule_ctx = self._build_schedule_context(workspace)
+        if schedule_ctx:
+            parts.append(f"<scheduled_tasks>\n{schedule_ctx}\n</scheduled_tasks>")
 
         facts_ctx = self._facts.build_context(max_facts=15)
         if facts_ctx:
