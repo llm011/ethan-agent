@@ -9,6 +9,8 @@ Ethan 提供三种交互方式，适应不同场景：
 | REPL | `ethan` | 日常对话，快速启动 |
 | 单轮 | `ethan -p "..."` | 脚本集成，一问一答 |
 | HTTP API | `ethan serve` | Web UI 对接，远程调用 |
+| Web UI | `http://localhost:3000` | 浏览器访问，多页面管理 |
+| 飞书 Bot | `lark-cli event consume` | 手机/飞书消息接入，无需公网 IP |
 
 ---
 
@@ -68,6 +70,34 @@ REPL 内部维护 `WorkingMemory` 实例：
 - 每轮对话后调用 `memory.add_turn()`
 - 热区满后检查是否需要压缩
 - 发送给 LLM 的 context 由 `memory.build_context()` 构建
+
+---
+
+## Web UI（`web/`）
+
+### 技术栈
+
+- **Next.js 16**，App Router，React 19
+- 使用 `(protected)` 路由组做统一鉴权，所有页面共享同一 layout shell
+
+### 路由结构
+
+| 路径 | 功能 |
+|------|------|
+| `/chat` | 新建对话（默认落地页） |
+| `/chat/[id]` | 指定会话的对话界面，支持流式输出和工具调用可视化 |
+| `/memory` | 查看/编辑持久记忆条目 |
+| `/knowledge` | 知识库管理（查询、上传、删除文档） |
+| `/schedule` | 定时任务列表，支持暂停/恢复/删除 |
+| `/skills` | Skill 列表及内容预览 |
+| `/sessions` | 历史会话列表，支持按标题搜索 |
+| `/settings` | 配置项（模型、Provider、系统设置） |
+
+### 与后端通信
+
+- 所有数据请求走 `ethan serve` 暴露的 FastAPI（默认 `http://localhost:8900`）
+- 流式回复使用 SSE（`/chat` 端点 `stream: true`）
+- 工具调用过程通过 SSE 事件分块推送，前端实时渲染调用详情
 
 ---
 
@@ -154,56 +184,92 @@ ethan schedule list/remove/pause/resume
 
 ---
 
-## Feishu (Lark) Bot（`ethan/interface/lark.py`）
+## 飞书 (Lark) 接入（`ethan/interface/lark.py`）
 
 ### 概述
 
-允许用户通过飞书机器人与 Ethan 对话。每条消息经 FastAPI 路由到 Agent，回复写回同一飞书会话。
+允许用户通过飞书机器人与 Ethan 对话。采用 **WebSocket 长连接**方式，无需公网 IP 或手动配置 Webhook 回调地址，由 `lark-cli` 在本地建立持久连接并消费事件。
 
-### 端点
+### 接入方式：WebSocket 长连接（lark-cli）
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/lark/webhook` | 飞书事件回调入口（URL 验证 + 消息接收） |
+与传统 HTTP Webhook 不同，本方案基于 `lark-cli event consume`，由客户端主动与飞书服务器建立 WebSocket 长连接。优点：
 
-### 配置步骤
+- **无需公网 IP**，本地开发环境直接可用
+- **无需 HTTPS 证书**，无需反向代理
+- 飞书开放平台不需要填写回调 URL
 
-1. 在[飞书开放平台](https://open.feishu.cn)创建企业自建应用，获取 `App ID` 和 `App Secret`。
+运行方式：
 
-2. 在 `~/.ethan/config.yaml` 中添加：
+```bash
+lark-cli event consume
+```
+
+该命令会持续监听 `im.message.receive_v1` 事件，并将消息分发给本地的 Ethan Agent 处理。
+
+### 配置方式
+
+在 `~/.ethan/config.yaml` 中添加：
 
 ```yaml
 lark:
   app_id: "cli_xxxxxxxxxxxxxxxx"
   app_secret: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-  verification_token: ""   # 事件订阅验证 Token（可选）
-  encrypt_key: ""          # 加密密钥（可选）
 ```
 
-也可通过环境变量方式后续扩展；目前直接写入 config 文件即可。
+`app_id` 和 `app_secret` 从飞书开放平台 → 应用凭证中获取。
 
-3. 在飞书开放平台 → **事件订阅** → 请求网址 URL 填写：
+### 初始化流程
+
+```bash
+lark-cli config init    # 写入 app_id / app_secret
+lark-cli auth login     # 获取访问令牌，验证凭证有效性
+lark-cli event consume  # 启动 WebSocket 长连接，开始监听消息
+```
+
+### 事件处理流程
 
 ```
-https://your-domain:8900/lark/webhook
+收到 im.message.receive_v1 事件
+   │
+   ├─ 立即给原消息加 THINKING_FACE 表情 → 告知用户已收到
+   │
+   ├─ 根据 chat_id 查找或创建 Session
+   │
+   ├─ 调用 Agent.chat() 处理消息
+   │
+   └─ 发送单条完整回复（非流式，飞书 IM 协议限制）
 ```
 
-4. 订阅事件：`im.message.receive_v1`（接收消息）。
+收到消息后第一步加 `THINKING_FACE` 表情是关键的用户体验设计：飞书消息处理可能需要数秒，及时反馈避免用户以为机器人离线。Agent 处理完成后发送一条完整的文本回复，不做增量推送。
 
-5. 在应用权限管理中开通：
-   - `im:message:send_as_bot`（发送消息）
-   - `im:message`（读取消息内容）
+### 新用户引导
 
-6. 发布应用并将机器人添加到目标群组或开启单聊权限。
+首次私聊机器人时，Session 为空，Agent 会发送引导消息介绍自己的能力，帮助用户了解可以提问的内容。
 
-### 会话持久化
+### 飞书 Session 与普通 Session 的区别
 
-每个飞书 `open_chat_id` 对应一个独立 Session，标题格式为 `lark:<chat_id>:<short_id>`，存储在同一 SQLite 数据库中，可在 Web UI 中查看历史。
+| 维度 | 普通 Session | 飞书 Session |
+|------|-------------|-------------|
+| `source` 标记 | — | `"lark"` |
+| Session 标识 | 启动时生成 UUID | 由 `chat_id` 映射 |
+| chat_id 映射持久化 | 不适用 | `~/.ethan/memory/lark_sessions.json` |
+| Session 标题格式 | 用户自定义或自动摘要 | `lark:<chat_id>:<short_id>` |
+| 可在 Web UI 查看 | 是 | 是（同一 SQLite 数据库） |
+| 消息来源 | REPL / Web UI | 飞书客户端 |
+
+`chat_id` → `session_id` 的映射写入 `~/.ethan/memory/lark_sessions.json`，确保同一个飞书会话在 Ethan 重启后仍能延续上下文。
+
+### 应用权限要求
+
+在飞书开放平台 → 权限管理中开通：
+- `im:message`（读取消息内容）
+- `im:message:send_as_bot`（发送消息）
+- `im:message.reaction:write`（添加表情反应）
 
 ### 当前限制
 
 - 仅处理 `text` 类型消息，图片/文件等消息类型静默忽略。
-- 暂不验证 `verification_token` / `encrypt_key`（可在 `lark.py` 中按需启用）。
+- 回复为单条完整消息，不支持流式增量输出。
 
 ---
 

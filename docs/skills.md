@@ -123,3 +123,68 @@ LLM 收到增强后的 system prompt → 按照 Skill 描述的流程执行
     ▼
 返回结构化的天气信息
 ```
+
+---
+
+## 内置 Lark 技能
+
+Ethan 内置了一套 Feishu（飞书）IM 操作技能，通过 `lark-cli` 工具链驱动。
+
+### 默认内置：`lark-im.md`
+
+`lark-im` 是默认内置的 Feishu IM 技能，存放在内置 skills 目录中。它是一个轻量级的引导文件（bootstrap），内容如下：
+
+```markdown
+---
+name: lark-im
+trigger: 飞书|lark|feishu|发消息|IM|群消息
+description: 飞书 IM 操作（发消息、查群、管理会话等）
+---
+
+运行 `lark-cli skills read lark-im` 获取完整操作文档，然后按照文档指引执行飞书 IM 操作。
+```
+
+Agent 匹配到该技能后，会先执行 `lark-cli skills read lark-im` 获取完整文档，再根据文档内容执行具体的飞书操作。这种"按需拉取"的设计避免了把大量文档常驻 context。
+
+### 其他可用 Lark 技能
+
+通过 `lark-cli skills list` 可以查看全部可用技能，目前共有 **26 个**额外 Lark 技能，涵盖：
+
+| 类别 | 代表技能 |
+|------|---------|
+| 日历 | `lark-calendar` |
+| 文档 | `lark-doc` |
+| 多维表格 | `lark-base` |
+| 任务 | `lark-task` |
+| 审批 | `lark-approval` |
+| 云空间 | `lark-drive` |
+| 视频会议 | `lark-meeting` |
+| 通讯录 | `lark-contact` |
+
+查看完整列表：
+
+```bash
+lark-cli skills list
+```
+
+### 安装/使用其他 Lark 技能
+
+读取某个技能的完整文档：
+
+```bash
+lark-cli skills read lark-<name>
+```
+
+例如，读取日历技能：
+
+```bash
+lark-cli skills read lark-calendar
+```
+
+如需将某个技能安装到 Ethan 的本地 skills 目录（使其自动触发），可复制到 `~/.ethan/skills/`：
+
+```bash
+lark-cli skills read lark-calendar > ~/.ethan/skills/lark-calendar.md
+```
+
+之后当用户输入包含该技能 trigger 关键词时，Ethan 会自动加载并使用它。
