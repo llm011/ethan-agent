@@ -161,6 +161,17 @@ class SessionStore:
         )
         await self._db.commit()
 
+    async def delete(self, session_id: str) -> bool:
+        async with self._db.execute(
+            "SELECT id FROM sessions WHERE id = ?", (session_id,)
+        ) as cursor:
+            if not await cursor.fetchone():
+                return False
+        await self._db.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
+        await self._db.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+        await self._db.commit()
+        return True
+
     async def load(self, session_id: str) -> Session | None:
         import json
         from ethan.providers.base import ToolCall
