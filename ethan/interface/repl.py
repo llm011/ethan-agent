@@ -443,12 +443,17 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
 
         full = ""
         first_chunk = True
+        first_item = True  # for TTFT: fire on any first item (tool or text)
         current_activity = ""
         console.print()
         live = Live(Spinner("dots", text="thinking...", style="dim"), console=console, transient=True)
         live.start()
         send_time = time.time()
         ttft: float | None = None
+        # Snapshot before this turn so we can compute per-turn delta
+        prev_input = agent.usage.input_tokens
+        prev_output = agent.usage.output_tokens
+        prev_cache = agent.usage.cache_tokens
 
         context = memory.build_context()
         context.append(msg)
@@ -458,6 +463,9 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
             render_live = Live(console=console, refresh_per_second=8, vertical_overflow="visible")
             async for item in agent.stream_chat(context):
                 if isinstance(item, ToolEvent):
+                    if first_item:
+                        ttft = time.time() - send_time
+                        first_item = False
                     if item.state == "start":
                         activity_text = f"⚡ {item.tool_name}"
                         if item.args_summary:
@@ -474,8 +482,12 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
                     continue
 
                 # Text chunk
-                if first_chunk:
+                if first_item:
                     ttft = time.time() - send_time
+                    first_item = False
+                if first_chunk:
+                    if ttft is None:
+                        ttft = time.time() - send_time
                     live.stop()
                     first_chunk = False
                 if not render_live.is_started:
@@ -512,15 +524,15 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
                 for _name in agent.last_matched_skills:
                     _asyncio.create_task(_asyncio.to_thread(agent._skills.record_hit, _name))
 
-            # Update token tracking from agent usage
-            total_tokens_in = agent.usage.input_tokens
-            total_tokens_out = agent.usage.output_tokens
-            total_tokens_cache = agent.usage.cache_tokens
+            # Per-turn delta (not cumulative)
+            turn_in = agent.usage.input_tokens - prev_input
+            turn_out = agent.usage.output_tokens - prev_output
+            turn_cache = agent.usage.cache_tokens - prev_cache
 
             # Print per-turn stats in dim color
-            stats_parts = [f"↑{total_tokens_in} ↓{total_tokens_out}"]
-            if total_tokens_cache:
-                stats_parts.append(f"⚡{total_tokens_cache}")
+            stats_parts = [f"↑{turn_in} ↓{turn_out}"]
+            if turn_cache:
+                stats_parts.append(f"⚡{turn_cache}")
             if ttft is not None:
                 stats_parts.append(f"TTFT {ttft*1000:.0f}ms" if ttft < 1 else f"TTFT {ttft:.1f}s")
             console.print(f"[dim]  {' · '.join(stats_parts)}[/dim]")
