@@ -130,6 +130,29 @@ async def health():
     return {"status": "ok", "version": __version__}
 
 
+@app.get("/poll", dependencies=[Depends(verify_token)])
+async def poll():
+    """轻量轮询端点，返回需要客户端刷新的数据摘要。
+    当前只返回最近会话列表，未来可在此扩展更多字段。
+    """
+    store = SessionStore()
+    await store.init()
+    sessions = await store.list_recent(50)
+    await store.close()
+    return {
+        "sessions": [
+            {
+                "id": s.id,
+                "title": s.title,
+                "model": s.model,
+                "updated_at": s.updated_at,
+                "source": getattr(s, "source", "web"),
+            }
+            for s in sessions
+        ]
+    }
+
+
 # ── Onboarding ───────────────────────────────────────────────────
 
 class OnboardingCompleteRequest(BaseModel):

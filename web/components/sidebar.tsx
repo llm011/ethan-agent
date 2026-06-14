@@ -12,6 +12,7 @@ import {
   SessionInfo,
   fetchSessions,
   fetchSchedules,
+  fetchPoll,
   deleteSession,
   renameSession,
   createSession,
@@ -74,6 +75,24 @@ export function Sidebar() {
   useEffect(() => {
     fetchSchedules().then(setSchedules).catch(() => {});
   }, [pathname]);
+
+  // Poll every 3s — skip if user is actively searching
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      if (sessionSearch.trim()) return; // don't interfere while searching
+      try {
+        const data = await fetchPoll();
+        setSessions(prev => {
+          const incoming = data.sessions as SessionInfo[];
+          const changed = incoming.length !== prev.length ||
+            incoming.some((s, i) => s.updated_at !== prev[i]?.updated_at || s.title !== prev[i]?.title);
+          return changed ? incoming : prev;
+        });
+      } catch {}
+    }, 3000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionSearch]);
 
   const handleNewSession = () => {
     router.push("/chat");

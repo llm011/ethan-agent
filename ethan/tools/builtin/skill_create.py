@@ -45,11 +45,12 @@ class SkillCreateTool(BaseTool):
         if not safe_name:
             return "Error: invalid skill name"
 
-        skill_path = _SKILLS_DIR / f"{safe_name}.md"
-        if skill_path.exists():
-            return f"Skill '{safe_name}' already exists at {skill_path}. Not overwriting."
+        skill_dir = _SKILLS_DIR / safe_name
+        skill_path = skill_dir / "SKILL.md"
+        if skill_path.exists() or (_SKILLS_DIR / f"{safe_name}.md").exists():
+            return f"Skill '{safe_name}' already exists. Not overwriting."
 
-        _SKILLS_DIR.mkdir(parents=True, exist_ok=True)
+        skill_dir.mkdir(parents=True, exist_ok=True)
         frontmatter = {"name": safe_name, "description": description, "trigger": trigger}
         text = f"---\n{yaml.dump(frontmatter, allow_unicode=True, sort_keys=False)}---\n\n{content}"
         skill_path.write_text(text, encoding="utf-8")

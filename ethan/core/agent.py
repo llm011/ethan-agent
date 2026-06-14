@@ -125,6 +125,10 @@ class Agent:
                 content = content.replace("{workspace}", workspace)
                 self._system_files[name] = content
 
+        profile_p = Path(workspace) / "memory" / "user_profile.md"
+        if profile_p.exists():
+            self._system_files["user_profile"] = profile_p.read_text(encoding="utf-8").strip()
+
     def reload_system_files(self) -> None:
         """Settings 更新后调用，重新加载 system 文件缓存。"""
         self._load_system_files()
@@ -234,13 +238,11 @@ class Agent:
                 "</memory_context>"
             )
 
-        profile_path = Path(workspace) / "memory" / "user_profile.md"
-        if profile_path.exists():
-            profile_content = profile_path.read_text(encoding="utf-8").strip()
-            if profile_content:
-                parts.append(
-                    f"<user_profile>\n[User profile — personalize responses]\n\n{profile_content}\n</user_profile>"
-                )
+        profile_content = self._system_files.get("user_profile", "")
+        if profile_content:
+            parts.append(
+                f"<user_profile>\n[User profile — personalize responses]\n\n{profile_content}\n</user_profile>"
+            )
 
         proc_ctx = self._procedures.build_context()
         if proc_ctx:

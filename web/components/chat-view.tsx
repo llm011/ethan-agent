@@ -6,6 +6,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Send, Paperclip, Loader2, Pencil, Check, X, Sun, Moon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Clock, Calendar } from "lucide-react";
 
 // CommonMark 规定 ** 紧内侧不能有空格，否则不渲染加粗。
@@ -362,17 +363,6 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       {/* Header */}
       <header className="h-auto min-h-14 border-b border-border flex flex-col justify-center px-4 py-2 shrink-0">
         <div className="flex items-center gap-3 w-full">
-          {/* Model Select */}
-          <select
-            value={selectedModel}
-            onChange={(e) => setSelectedModel(e.target.value)}
-            className="text-sm bg-transparent border border-border rounded-md px-2 py-1 outline-none"
-          >
-            {models.map((m) => (
-              <option key={m.id} value={m.id}>{m.description || m.id}</option>
-            ))}
-          </select>
-
           {/* Current session title, editable */}
           {activeSession && (() => {
             const cur = sessions.find((s) => s.id === activeSession);
@@ -584,7 +574,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           </div>
         )}
         {pendingFiles.length > 0 && (
-          <div className="flex gap-2 mb-2 flex-wrap">
+          <div className="flex gap-2 mb-2 flex-wrap max-w-3xl mx-auto">
             {pendingFiles.map((f, i) => (
               <span key={i} className="text-xs bg-muted px-2 py-1 rounded-md flex items-center gap-1">
                 📎 {f.name}
@@ -593,35 +583,52 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
             ))}
           </div>
         )}
-        <div className="flex items-end gap-2">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="shrink-0 h-11 w-11 md:h-9 md:w-9"
-            onClick={() => fileRef.current?.click()}
-            disabled={streaming}
-          >
-            <Paperclip className="h-4 w-4" />
-          </Button>
-          <input ref={fileRef} type="file" className="hidden" multiple onChange={handleFileUpload} />
+        {/* Unified input container */}
+        <div className="max-w-3xl mx-auto rounded-2xl border border-border bg-muted/40 focus-within:border-ring/50 focus-within:bg-background transition-colors">
           <textarea
             ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Type a message... (Enter to send, Shift+Enter for newline)"
-            className="flex-1 resize-none bg-muted border border-border rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-ring min-h-[44px] max-h-[200px]"
+            placeholder="输入消息… (Enter 发送，Shift+Enter 换行)"
+            className="w-full resize-none bg-transparent px-4 pt-3 pb-2 text-sm outline-none min-h-[52px] max-h-[200px] leading-relaxed"
             rows={1}
             disabled={streaming}
           />
-          <Button
-            size="icon"
-            className="shrink-0 h-11 w-11 md:h-9 md:w-9"
-            onClick={handleSend}
-            disabled={streaming || (!input.trim() && pendingFiles.length === 0)}
-          >
-            {streaming ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-          </Button>
+          {/* Bottom toolbar */}
+          <div className="flex items-center gap-1 px-3 pb-2.5">
+            {/* Attach */}
+            <button
+              onClick={() => fileRef.current?.click()}
+              disabled={streaming}
+              className="h-7 w-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40"
+              title="附件"
+            >
+              <Paperclip className="h-4 w-4" />
+            </button>
+            <input ref={fileRef} type="file" className="hidden" multiple onChange={handleFileUpload} />
+            {/* Model selector */}
+            <Select value={selectedModel} onValueChange={(v) => v && setSelectedModel(v)} disabled={streaming}>
+              <SelectTrigger className="h-7 px-2.5 text-xs bg-transparent border-0 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg shadow-none focus:ring-0 focus:ring-offset-0 gap-1 w-auto max-w-[160px]">
+                <SelectValue placeholder="模型" />
+              </SelectTrigger>
+              <SelectContent>
+                {models.map((m) => (
+                  <SelectItem key={m.id} value={m.id} className="text-xs">{m.description || m.id}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {/* Spacer */}
+            <div className="flex-1" />
+            {/* Send button */}
+            <button
+              onClick={handleSend}
+              disabled={streaming || (!input.trim() && pendingFiles.length === 0)}
+              className="h-7 w-7 flex items-center justify-center rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {streaming ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+            </button>
+          </div>
         </div>
         </div>
       </div>

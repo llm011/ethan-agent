@@ -355,6 +355,16 @@ export async function deleteKnowledge(source: string): Promise<void> {
   if (!res.ok) throw new Error("Failed");
 }
 
+export interface PollData {
+  sessions: Pick<SessionInfo, "id" | "title" | "model" | "updated_at" | "source">[];
+}
+
+export async function fetchPoll(): Promise<PollData> {
+  const res = await fetch(`${API_URL}/poll`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed");
+  return res.json();
+}
+
 export async function fetchLogs(type: "backend" | "frontend" = "backend", lines: number = 500, q?: string): Promise<string> {
   const params = new URLSearchParams({ type, lines: String(lines) });
   if (q) params.set("q", q);

@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { format } from "date-fns";
 import { zhCN } from "date-fns/locale";
-import { SessionInfo, fetchSessions, renameSession, deleteSession } from "@/lib/api";
+import { SessionInfo, fetchSessions, fetchPoll, renameSession, deleteSession } from "@/lib/api";
 import { Loader2, Search, Calendar, MessageSquare, ChevronLeft, ChevronRight, Pencil, Trash2, Check, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -55,6 +55,24 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
       loadSessions(page, search.trim());
     }
   }, [page, search, loadSessions]);
+
+  // Poll for new sessions every 3s
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      if (search.trim()) return;
+      try {
+        const data = await fetchPoll();
+        setSessions(prev => {
+          const incoming = data.sessions as SessionInfo[];
+          const changed = incoming.length !== prev.length ||
+            incoming.some((s, i) => s.updated_at !== prev[i]?.updated_at || s.title !== prev[i]?.title);
+          return changed ? incoming : prev;
+        });
+      } catch {}
+    }, 3000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
 
   const commitRename = async (id: string) => {
     const title = editingTitle.trim();
