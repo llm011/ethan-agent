@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeHighlight from "rehype-highlight";
 import { fetchDoc } from "@/lib/api";
 import { DOC_NAV } from "@/lib/docs-nav";
 import { Loader2, ChevronDown, ChevronRight } from "lucide-react";
@@ -86,6 +87,7 @@ export function DocsView({ initialSlug }: DocsViewProps = {}) {
           <div className="max-w-3xl mx-auto px-8 py-8">
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
+              rehypePlugins={[rehypeHighlight]}
               components={{
                 h1: ({ children }) => <h1 className="text-2xl font-bold mt-0 mb-4 pb-2 border-b border-border">{children}</h1>,
                 h2: ({ children }) => <h2 className="text-xl font-semibold mt-8 mb-3">{children}</h2>,

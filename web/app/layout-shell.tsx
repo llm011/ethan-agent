@@ -80,7 +80,7 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
         </div>
 
         {/* Main content */}
-        <main className="flex-1 flex flex-col min-w-0 relative">
+        <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
           {/* Mobile hamburger — floats over content when sidebar is closed */}
           {!sidebarOpen && (
             <button
