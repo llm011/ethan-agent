@@ -207,7 +207,7 @@ async def _handle_slash_command(cmd: str, store: SessionStore, session: Session,
         return None
 
     elif command == "/new":
-        new_session = await store.create(agent._provider.model)
+        new_session = await store.create(agent._provider.model, source="repl")
         console.print(f"[green]New session created[/green]")
         return new_session
 
@@ -272,7 +272,7 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
         import time as _time
         _now = _time.time()
         from ethan.memory.session import _generate_id
-        session = Session(id=_generate_id(), title="新对话", model=model_id, created_at=_now, updated_at=_now)
+        session = Session(id=_generate_id(), title="新对话", model=model_id, created_at=_now, updated_at=_now, source="repl")
         session_persisted = False
 
     _banner()

@@ -186,21 +186,22 @@ class Agent:
             parts.append(f"<operating_principles>\n{soul_content}\n</operating_principles>")
         if tools_content:
             parts.append(f"<tools_reference>\n{tools_content}\n</tools_reference>")
-        parts.append(f"Current time: {now}")
-        parts.append(f"Your workspace directory is {workspace}. System configurations and memories reside here.")
 
-        # Inject active scheduled tasks so Agent always knows them
-        schedule_ctx = self._build_schedule_context(workspace)
-        if schedule_ctx:
-            task_count = schedule_ctx.count("\n- ") + 1
-            parts.append(f"You have {task_count} active scheduled task(s). Call schedule_list to view details.")
-
-        # Inject skills list so Agent knows its own capabilities
+        # Inject skills list so Agent knows its own capabilities (stable, cacheable)
         if self._skills:
             skills_list = self._skills.all()
             if skills_list:
                 skill_lines = [f"- {s.name}: {s.description}" for s in skills_list]
                 parts.append(f"<available_skills>\n" + "\n".join(skill_lines) + "\n</available_skills>")
+
+        # --- 动态内容放后面，不命中缓存 ---
+        parts.append(f"Current time: {now}")
+        parts.append(f"Your workspace directory is {workspace}. System configurations and memories reside here.")
+
+        schedule_ctx = self._build_schedule_context(workspace)
+        if schedule_ctx:
+            task_count = schedule_ctx.count("\n- ") + 1
+            parts.append(f"You have {task_count} active scheduled task(s). Call schedule_list to view details.")
 
         facts_ctx = self._facts.build_context(max_facts=15)
         if facts_ctx:
