@@ -97,7 +97,7 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
                   className="group p-3 rounded-xl border border-border bg-card hover:border-primary/50 hover:shadow-md transition-all cursor-pointer flex flex-col"
                 >
                   <h3
-                    className="font-medium text-sm text-card-foreground line-clamp-2 leading-snug group-hover:text-primary transition-colors mb-1.5"
+                    className="font-semibold text-sm text-card-foreground line-clamp-2 leading-snug group-hover:text-primary transition-colors mb-0.5"
                     dangerouslySetInnerHTML={{
                       __html: search.trim()
                         ? session.title.replace(new RegExp(search.trim(), 'gi'), match => `<span class="bg-yellow-500/30 text-yellow-500 rounded px-0.5">${match}</span>`)
@@ -107,11 +107,11 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
 
                   {session.snippet && (
                     <p
-                      className="text-xs text-muted-foreground line-clamp-2 mb-2"
+                      className="text-xs text-muted-foreground/70 line-clamp-1 mb-2"
                       dangerouslySetInnerHTML={{
                         __html: search.trim()
-                          ? session.snippet.replace(new RegExp(search.trim(), 'gi'), match => `<span class="bg-yellow-500/30 text-yellow-500 rounded px-0.5">${match}</span>`)
-                          : session.snippet
+                          ? session.snippet.slice(0, 40).replace(new RegExp(search.trim(), 'gi'), match => `<span class="bg-yellow-500/30 text-yellow-500 rounded px-0.5">${match}</span>`)
+                          : session.snippet.slice(0, 40)
                       }}
                     />
                   )}

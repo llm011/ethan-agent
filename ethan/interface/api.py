@@ -183,13 +183,37 @@ async def chat(req: ChatRequest):
             if m.role == "user":
                 await store.save_message(req.session_id, m)
 
-    # Truncate to hot window: keep only last HOT_SIZE user/assistant messages
-    # to prevent token bloat on long sessions (mirrors WorkingMemory sliding window)
+    # Rebuild context via WorkingMemory (hot=10 rounds, cold facts), matching REPL behaviour
     if req.session_id:
-        HOT_SIZE = 20
-        ua_messages = [m for m in messages if m.role in ("user", "assistant")]
-        if len(ua_messages) > HOT_SIZE:
-            messages = ua_messages[-HOT_SIZE:]
+        from ethan.memory.working import MemoryConfig, WorkingMemory
+
+        session = await store.load(req.session_id)
+        history = session.messages if session else []
+
+        memory = WorkingMemory(config=MemoryConfig(hot_size=10))
+        fact_store = FactStore()
+        memory.cold_facts = fact_store.build_context()
+
+        # Build completed (user, assistant) pairs from history.
+        # The current user message was just saved above so it appears last in history
+        # without a matching assistant reply — the loop below skips it automatically.
+        pairs: list[tuple[Message, Message]] = []
+        hist_ua = [m for m in history if m.role in ("user", "assistant")]
+        i = 0
+        while i < len(hist_ua) - 1:
+            if hist_ua[i].role == "user" and hist_ua[i + 1].role == "assistant":
+                pairs.append((hist_ua[i], hist_ua[i + 1]))
+                i += 2
+            else:
+                i += 1
+
+        # Load only the last hot_size rounds directly into hot (no add_turn overflow needed)
+        for u, a in pairs[-memory.config.hot_size:]:
+            memory.hot.append(u)
+            memory.hot.append(a)
+
+        current_user = messages[-1]
+        messages = memory.build_context() + [current_user]
 
     if req.stream:
         return StreamingResponse(
