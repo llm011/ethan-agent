@@ -56,27 +56,20 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
 
   return (
     <div className="flex-1 flex flex-col h-full bg-background overflow-hidden">
-      <div className="p-6 border-b border-border flex items-center justify-between shrink-0">
-        <div>
-          <h1 className="text-2xl font-semibold flex items-center gap-2">
-            全部历史对话
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            浏览和搜索所有历史会话记录
-          </p>
-        </div>
-        <div className="relative w-64">
+      <div className="p-4 border-b border-border flex items-center justify-between shrink-0">
+        <h1 className="text-lg font-semibold">全部历史对话</h1>
+        <div className="relative w-56">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="搜索对话..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="pl-9 bg-background"
+            className="pl-9 bg-background h-8 text-sm"
           />
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 overflow-y-auto p-4">
         {loading && sessions.length === 0 ? (
           <div className="flex items-center justify-center h-full">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -87,45 +80,56 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
             <p>未找到相关对话</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {sessions.map((session) => (
-              <div
-                key={session.id}
-                onClick={() => onSelectSession(session.id)}
-                className="group p-4 rounded-xl border border-border bg-card hover:border-primary/50 hover:shadow-md transition-all cursor-pointer flex flex-col h-40"
-              >
-                <div className="flex justify-between items-start mb-2 gap-2">
-                  <h3 
-                    className="font-semibold text-card-foreground line-clamp-2 leading-tight group-hover:text-primary transition-colors flex-1"
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {sessions.map((session) => {
+              const sourceLabel: Record<string, string> = { lark: "飞书", repl: "REPL", web: "Web", heartbeat: "心跳" };
+              const sourceColor: Record<string, string> = {
+                lark: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
+                repl: "bg-purple-500/15 text-purple-600 dark:text-purple-400",
+                web: "bg-green-500/15 text-green-600 dark:text-green-400",
+                heartbeat: "bg-orange-500/15 text-orange-600 dark:text-orange-400",
+              };
+              const src = session.source || "web";
+              return (
+                <div
+                  key={session.id}
+                  onClick={() => onSelectSession(session.id)}
+                  className="group p-3 rounded-xl border border-border bg-card hover:border-primary/50 hover:shadow-md transition-all cursor-pointer flex flex-col"
+                >
+                  <h3
+                    className="font-medium text-sm text-card-foreground line-clamp-2 leading-snug group-hover:text-primary transition-colors mb-1.5"
                     dangerouslySetInnerHTML={{
-                      __html: search.trim() 
+                      __html: search.trim()
                         ? session.title.replace(new RegExp(search.trim(), 'gi'), match => `<span class="bg-yellow-500/30 text-yellow-500 rounded px-0.5">${match}</span>`)
                         : session.title
                     }}
                   />
-                </div>
-                
-                {session.snippet && (
-                  <p 
-                    className="text-xs text-muted-foreground line-clamp-3 mb-auto"
-                    dangerouslySetInnerHTML={{
-                      __html: session.snippet.replace(new RegExp(search.trim(), 'gi'), match => `<span class="bg-yellow-500/30 text-yellow-500 rounded px-0.5">${match}</span>`)
-                    }}
-                  />
-                )}
-                {!session.snippet && <div className="mb-auto"></div>}
 
-                <div className="flex items-center justify-between mt-4 pt-3 border-t border-border/50 text-xs">
-                  <div className="flex items-center text-muted-foreground gap-1.5">
-                    <Calendar className="h-3.5 w-3.5" />
-                    {format(session.updated_at * 1000, "MM-dd HH:mm")}
+                  {session.snippet && (
+                    <p
+                      className="text-xs text-muted-foreground line-clamp-2 mb-2"
+                      dangerouslySetInnerHTML={{
+                        __html: search.trim()
+                          ? session.snippet.replace(new RegExp(search.trim(), 'gi'), match => `<span class="bg-yellow-500/30 text-yellow-500 rounded px-0.5">${match}</span>`)
+                          : session.snippet
+                      }}
+                    />
+                  )}
+
+                  <div className="flex items-center gap-1.5 mt-auto flex-wrap">
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${sourceColor[src] || sourceColor.web}`}>
+                      {sourceLabel[src] || src}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">
+                      {format(session.updated_at * 1000, "MM-dd HH:mm")}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground ml-auto truncate max-w-[100px]">
+                      {session.model.split('/').pop() || session.model}
+                    </span>
                   </div>
-                  <Badge variant="secondary" className="text-[10px] font-normal px-1.5 py-0">
-                    {session.model.split('/').pop() || session.model}
-                  </Badge>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
