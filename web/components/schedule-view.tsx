@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Loader2, RefreshCw, Play, Pause, Trash2, Clock, TerminalSquare, Hash } from "lucide-react";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { formatTrigger, formatNextRun } from "@/lib/utils";
 
 export function ScheduleView() {
   const [jobs, setJobs] = useState<ScheduleJob[]>([]);
@@ -100,7 +101,7 @@ export function ScheduleView() {
                   </div>
                   <CardDescription className="flex items-center gap-1.5 mt-2 text-xs">
                     <Clock className="h-3 w-3" /> 
-                    {job.next_run_time ? new Date(job.next_run_time).toLocaleString() : "暂无下次执行时间"}
+                    {job.next_run_time ? formatNextRun(job.next_run_time) : "暂无下次执行时间"}
                   </CardDescription>
                 </CardHeader>
                 
@@ -118,7 +119,7 @@ export function ScheduleView() {
                     </div>
                     <div className="flex items-center gap-2 text-xs text-muted-foreground/80 bg-muted/30 p-2 rounded-md">
                       <Clock className="h-3.5 w-3.5" />
-                      <span>触发规则: {job.trigger}</span>
+                      <span>{formatTrigger(job.trigger)}</span>
                     </div>
                   </div>
                 </CardContent>

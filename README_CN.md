@@ -12,21 +12,21 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 - 热区/温区/冷区三层滑动窗口维持长对话上下文，廉价模型自动压缩较早内容
 - 结构化 Facts：带置信度的条目，有矛盾检测和自动去重（`~/.ethan/memory/facts.json`）
 - 行为准则 Procedures：从用户纠正中自动学习，每次对话加载（`procedures.json`）
-- 会话 Episodes：对话结束后自动生成摘要存档，支持语义检索（`episodes.json`）
+- 会话 Episodes：对话结束后自动生成摘要存档，支持关键词检索（`episodes.json`）
 - 用户画像 Profile：叙事型文档，按章节存储个人语言、目标、约定等（`user_profile.md`）
 - **主动写记忆**：Agent 在对话中识别到可记忆信息时，主动调用工具即时写入，无需批量处理
 
 **Skill 技能系统**
 - 触发词匹配，自动注入 system prompt 引导行为
 - `fast_path: true` 触发后走毫秒级快速路径，适合全屋智能等高频控制
-- `channels: [lark, repl]` 按渠道过滤，Skill 只在指定场景下生效
+- `channels: [lark, web]` 按渠道过滤，Skill 只在指定场景下生效
 - Skill 命中统计与纠正收集，积累后 Heartbeat 自动用廉价模型更新 Skill 内容
 - Agent 可在对话中即时创建新 Skill（`skill_create` 工具）
 
 **三档智能路由**
-- Fast：短命令 + 关键词匹配 → 极简 prompt + 仅限 fast_path 工具 + 2 次迭代
-- Medium：中等消息 → 完整 prompt + 全部工具 + 4 次迭代
-- Full：复杂任务 → 完整 prompt + 全部工具 + 10 次迭代
+- **fast**：短命令 + 关键词匹配 → 极简 prompt + 仅限 fast_path 工具 + 2 次迭代
+- **medium**：中等消息 → 完整 prompt + 全部工具 + 4 次迭代
+- **full**：复杂任务 → 完整 prompt + 全部工具 + 10 次迭代
 
 **定时任务**
 - 对话中创建 cron 或 interval 任务，SQLite 持久化，重启自动恢复
@@ -35,7 +35,7 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 **工具系统**
 - Shell 执行、Web 搜索（DuckDuckGo）、Web 抓取、文件读写、知识库检索
 - 工具结果超 4000 字自动用廉价模型压缩摘要
-- 同参数重复调用自动命中缓存，不重复执行
+- 同参数重复调用自动命中轮次内缓存，不重复执行
 
 **Prompt Caching**
 - system prompt 分稳定层/动态层，稳定层缓存 5 分钟，token 成本降至 0.1×
@@ -100,17 +100,9 @@ docker compose up -d --build
 ### 5. 常用命令
 
 ```bash
-# 查看日志
-docker compose logs -f ethan
-
-# 重启服务
-docker compose restart ethan
-
-# 停止
-docker compose down
-
-# 数据目录（记忆、技能、配置）
-docker volume inspect deploy_ethan-data
+docker compose logs -f ethan      # 查看日志
+docker compose restart ethan      # 重启服务
+docker compose down               # 停止
 ```
 
 ---
@@ -183,6 +175,225 @@ npm run dev   # http://localhost:3000
 
 ```bash
 ./deploy/install.sh
+```
+
+---
+
+## 架构
+
+```
+ethan/
+├── core/
+│   ├── agent.py          # ReAct loop，三档路由（fast/medium/full）
+│   ├── config.py         # YAML 配置（~/.ethan/config.yaml）
+│   └── heartbeat.py      # 心跳系统，定期维护任务
+├── providers/
+│   ├── anthropic.py      # Claude 原生协议 + Prompt Caching
+│   └── openai_compat.py  # OpenAI 兼容协议
+├── memory/
+│   ├── working.py        # 热/温/冷三层滑动窗口
+│   ├── facts.py          # 结构化 Facts（矛盾检测 + 置信度）
+│   ├── procedures.py     # 行为准则（从纠正中学习）
+│   ├── episodic.py       # 会话 Episode 摘要存档
+│   └── consolidator.py   # 廉价模型压缩器
+├── skills/
+│   ├── loader.py         # 加载（目录格式 + 旧格式兼容）
+│   ├── registry.py       # 匹配（含 channel 过滤）+ stats
+│   ├── stats.py          # 命中统计 + 纠正记录
+│   ├── updater.py        # 用廉价模型自动更新 Skill 内容
+│   └── generator.py      # 从会话自动生成新 Skill
+├── tools/
+│   ├── registry.py           # 注册表 + 并发执行 + 轮次缓存
+│   ├── result_compressor.py  # 超长结果摘要压缩
+│   └── builtin/
+│       ├── memory_write.py   # 主动写 Facts
+│       ├── procedure_write.py # 主动写行为准则
+│       ├── profile_update.py  # 更新用户画像
+│       └── skill_create.py    # 对话中创建 Skill
+├── scheduler/
+│   └── cron.py           # APScheduler + SQLite
+└── interface/
+    ├── api.py            # FastAPI + SSE 流式
+    ├── repl.py           # CLI REPL
+    └── lark_events.py    # 飞书 WebSocket
+```
+
+---
+
+## 记忆体系
+
+五层架构：
+
+| 层 | 内容 | 存储 |
+|----|------|------|
+| 热区 | 最近 N 轮完整消息 | 内存 |
+| 温区 | 较早对话的滚动摘要 | 内存 |
+| 冷区（Facts） | 跨 session 提炼的关键事实 | `~/.ethan/memory/facts.json` |
+| 行为准则 | 从用户纠正中学习的规则 | `~/.ethan/memory/procedures.json` |
+| 用户画像 | 叙事型个人信息（目标、短语、约定） | `~/.ethan/memory/user_profile.md` |
+
+压缩是**批量触发**的（而非逐轮），使用自动推断的廉价模型（Claude 用户用 Haiku，Gemini 用户用 Flash Lite）。
+
+Agent 通过 `memory_write`、`procedure_write`、`profile_update` 工具在对话中主动写入各层，无需等待下一个压缩周期。
+
+---
+
+## Skill 技能系统
+
+Skill 从两个来源加载，优先级从低到高：
+
+1. **内置技能** — `ethan/skills/<name>/SKILL.md`（随项目发布）
+2. **用户技能** — `~/.ethan/skills/<name>/SKILL.md` 或 `~/.ethan/skills/<name>.md`
+
+两种来源都支持目录格式（`<name>/SKILL.md` + `references/` 子目录）和旧版单文件 `.md` 格式。
+
+```markdown
+---
+name: deploy-checklist
+trigger: deploy|ship|发布
+description: 发布前检查清单
+fast_path: true       # 命中 trigger 时走 fast 轨
+channels:             # 空 = 所有渠道；列表 = 限制渠道
+  - web
+version: "1.0"
+---
+
+发布前步骤：
+1. 运行测试
+2. 检查未提交的改动
+3. ...
+```
+
+Skill 会累积命中次数和用户纠正记录。当纠正达到阈值（默认 2 条），Heartbeat 任务用廉价模型将纠正合并进 Skill 文件。
+
+---
+
+## 工具扩展
+
+工具完全可插拔，无需修改 agent loop：
+
+```python
+from ethan.tools.base import BaseTool
+
+class MyTool(BaseTool):
+    name = "my_tool"
+    description = "执行某些有用操作"
+    fast_path = False   # True 则在 fast 轨下也可用
+    cacheable = False   # True 则同参数调用命中轮次内缓存
+
+    parameters = {"type": "object", "properties": {...}, "required": [...]}
+
+    async def run(self, **kwargs) -> str:
+        return "结果"
+```
+
+在 `cli.py` 注册后，LLM 会在合适时机自动调用。
+
+---
+
+## CLI 命令
+
+```
+ethan                              启动交互式 REPL
+ethan -p "..."                     单轮对话
+ethan -m MODEL                     指定模型
+ethan -r last                      恢复上次会话
+ethan serve                        启动 HTTP API 服务
+
+ethan model list|add|remove|default
+ethan provider list|set
+ethan session list|show|delete
+ethan skill list|show|create
+ethan schedule list|remove|pause|resume
+```
+
+---
+
+## HTTP API
+
+```bash
+GET  /health                    # 健康检查
+GET  /models                    # 可用模型列表
+POST /chat                      # 对话（stream: true 开启 SSE 流式）
+GET  /sessions                  # 会话列表
+GET  /sessions/{id}             # 会话详情（含消息历史）
+GET  /memory/facts              # Facts 列表
+GET  /memory/episodes           # Episode 摘要列表
+GET  /skills                    # Skill 列表
+POST /skills                    # 创建 Skill
+POST /skills/evolve             # 手动触发 Skill 自动更新
+GET  /schedule                  # 定时任务列表
+GET  /system-prompt-preview     # 当前 system prompt 预览
+GET  /channels                  # 渠道列表
+GET  /knowledge/search          # 语义检索
+```
+
+---
+
+## 配置
+
+所有配置存储在 `~/.ethan/config.yaml`：
+
+```yaml
+providers:
+  anthropic:
+    api_key: sk-ant-xxx
+    base_url: https://api.anthropic.com   # 可选
+    proxy: null                           # provider 级别代理
+  openai_compat:
+    api_key: sk-xxx
+    base_url: https://api.openai.com/v1
+
+models:
+  - id: claude-sonnet-4-6
+    provider: anthropic
+    description: Claude Sonnet 4.6
+    alias: [sonnet]
+  - id: gpt-4o
+    provider: openai_compat
+    alias: [gpt]
+
+network:
+  proxy: http://127.0.0.1:7890           # 全局代理
+
+defaults:
+  model: claude-sonnet-4-6
+  agent_name: Ethan
+  max_tokens: 4096
+  max_tool_iterations: 10
+  routing:
+    fast_max_length: 12        # 超过此字数不走 fast 轨
+    medium_max_length: 80      # 超过 fast 阈值、不超过此值走 medium 轨
+    medium_max_iters: 4        # medium 轨最多迭代次数
+    fast_keywords:
+      - "关*灯"
+      - "开*灯"
+      - "播放音乐"
+    fast_skill_triggers:       # 命中后走 fast 轨（不受长度限制）
+      - "home assistant"
+      - "发飞书消息"
+```
+
+`.env` 中的环境变量会覆盖 config 文件中的值（适合管理密钥）。
+
+### 配置目录结构
+
+```
+~/.ethan/
+├── config.yaml          # 主配置（Provider、模型、路由）
+├── system/
+│   ├── identity.md      # Agent 身份（名字、角色）
+│   ├── soul.md          # 行为原则（主动写记忆的指令在这里）
+│   └── heartbeat.md     # 心跳任务（自然语言定义）
+├── memory/
+│   ├── facts.json       # 结构化 Facts
+│   ├── procedures.json  # 行为准则
+│   ├── episodes.json    # 会话摘要存档
+│   └── user_profile.md  # 用户画像（叙事型）
+├── skills/              # 用户自定义 Skill
+│   └── <name>/
+│       └── SKILL.md
+└── sessions.db          # 会话历史（SQLite）
 ```
 
 ---
@@ -290,90 +501,48 @@ EOF
 
 ---
 
-## 架构
+## Roadmap
 
-```
-ethan/
-├── core/
-│   ├── agent.py          # ReAct loop，三档路由（fast/medium/full）
-│   ├── config.py         # YAML 配置（~/.ethan/config.yaml）
-│   └── heartbeat.py      # 心跳系统，定期维护任务
-├── providers/
-│   ├── anthropic.py      # Claude 原生协议 + Prompt Caching
-│   └── openai_compat.py  # OpenAI 兼容协议
-├── memory/
-│   ├── working.py        # 热/温/冷三层滑动窗口
-│   ├── facts.py          # 结构化 Facts（矛盾检测 + 置信度）
-│   ├── procedures.py     # 行为准则（从纠正中学习）
-│   ├── episodic.py       # 会话 Episode 摘要存档
-│   └── consolidator.py   # 廉价模型压缩器
-├── skills/
-│   ├── loader.py         # 加载（目录格式 + 旧格式兼容）
-│   ├── registry.py       # 匹配（含 channel 过滤）+ stats
-│   ├── stats.py          # 命中统计 + 纠正记录
-│   ├── updater.py        # 用廉价模型自动更新 Skill 内容
-│   └── generator.py      # 从会话自动生成新 Skill
-├── tools/
-│   ├── result_compressor.py  # 超长结果摘要压缩
-│   └── builtin/
-│       ├── memory_write.py   # 主动写 Facts
-│       ├── procedure_write.py # 主动写行为准则
-│       ├── profile_update.py  # 更新用户画像
-│       └── skill_create.py    # 对话中创建 Skill
-├── scheduler/
-│   └── cron.py           # APScheduler + SQLite
-└── interface/
-    ├── api.py            # FastAPI + SSE 流式
-    ├── repl.py           # CLI REPL
-    └── lark_events.py    # 飞书 WebSocket
-```
-
----
-
-## 配置文件结构
-
-```
-~/.ethan/
-├── config.yaml          # 主配置（Provider、模型、路由）
-├── system/
-│   ├── identity.md      # Agent 身份（名字、角色）
-│   ├── soul.md          # 行为原则（主动写记忆的指令在这里）
-│   └── heartbeat.md     # 心跳任务（自然语言定义）
-├── memory/
-│   ├── facts.json       # 结构化 Facts
-│   ├── procedures.json  # 行为准则
-│   ├── episodes.json    # 会话摘要存档
-│   └── user_profile.md  # 用户画像（叙事型）
-├── skills/              # 用户自定义 Skill
-│   └── <name>/
-│       └── SKILL.md
-└── sessions.db          # 会话历史（SQLite）
-```
-
----
-
-## HTTP API
-
-```bash
-GET  /health                    # 健康检查
-GET  /models                    # 可用模型列表
-POST /chat                      # 对话（支持 stream: true SSE 流式）
-GET  /sessions                  # 会话列表
-GET  /sessions/{id}             # 会话详情（含消息历史）
-GET  /memory/facts              # Facts 列表
-GET  /memory/episodes           # Episode 摘要列表
-GET  /skills                    # Skill 列表
-POST /skills                    # 创建 Skill
-POST /skills/evolve             # 手动触发 Skill 自动更新
-GET  /schedule                  # 定时任务列表
-GET  /system-prompt-preview     # 当前 system prompt 预览
-```
+- [x] 多模型 Provider 系统（Anthropic + OpenAI 兼容）
+- [x] ReAct agent loop + 流式输出
+- [x] Session 持久化与恢复
+- [x] 三层记忆（热/温/冷）+ 自动压缩
+- [x] 结构化 Facts（置信度评分）
+- [x] 行为准则（从纠正中学习）
+- [x] 会话 Episode 存档
+- [x] 用户画像（叙事型，五章节文档）
+- [x] 主动写记忆工具（`memory_write`、`procedure_write`、`profile_update`）
+- [x] Skill 系统（双来源、目录格式、渠道过滤、fast_path 标记）
+- [x] Skill 命中追踪 + 纠正收集 + 自动更新（Updater）
+- [x] Skill 自动生成（Hermes 风格）
+- [x] 内置技能：channels、lark-im、home-assistant
+- [x] 三档路由：fast / medium / full
+- [x] 工具结果自动压缩（超长输出 → 廉价模型摘要）
+- [x] 轮次内工具调用去重缓存
+- [x] 定时任务（cron + interval）+ 心跳任务
+- [x] 内置工具（shell、搜索、文件、Web、定时、知识库、skill_create）
+- [x] HTTP API + SSE 流式 + 完整 REST 接口
+- [x] Web UI（对话、记忆、知识库、定时、技能、会话、设置、渠道）
+- [x] 知识库语义向量检索（sqlite-vec）
+- [x] Prompt Caching（Anthropic 稳定层 cache_control）
+- [x] ACP 协议客户端
+- [ ] MCP 协议客户端
 
 ---
 
 ## 文档
 
-详细设计文档在 [`docs/`](./docs/) 目录下。
+详细设计文档在 [`docs/`](./docs/) 目录下：
+
+- [架构总览](docs/architecture.md)
+- [Agent Loop](docs/agent-loop.md)
+- [三档路由](docs/routing.md)
+- [Provider 层](docs/providers.md)
+- [工具系统](docs/tools.md)
+- [记忆系统](docs/memory.md)
+- [Skill 系统](docs/skills.md)
+- [定时任务](docs/scheduler.md)
+- [接口层](docs/interface.md)
 
 ## 许可证
 

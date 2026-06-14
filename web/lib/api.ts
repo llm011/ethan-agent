@@ -62,7 +62,19 @@ export interface SessionDetail {
   title: string;
   model: string;
   source?: string;
-  messages: { role: string; content: string; created_at?: number; usage?: { input: number; output: number; cache: number } }[];
+  messages: {
+    role: string;
+    content: string;
+    created_at?: number;
+    usage?: { input: number; output: number; cache: number };
+    tool_steps?: Array<{
+      tool: string;
+      args: string;
+      state: string;
+      duration_ms?: number | null;
+      result_preview?: string;
+    }>;
+  }[];
 }
 
 export async function fetchSessions(limit = 50, offset = 0, q?: string): Promise<SessionInfo[]> {
@@ -185,7 +197,24 @@ export async function updateSystemSettings(patch: Partial<SystemSettings>): Prom
   });
 }
 
-export async function fetchSystemPromptPreview(): Promise<{ system_prompt: string; approx_tokens: number; chars: number }> {
+export interface ToolSchema {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+  fast_path: boolean;
+}
+
+export interface SystemPromptPreview {
+  system_prompt: string;
+  tools: ToolSchema[];
+  approx_tokens: number;
+  approx_tools_tokens: number;
+  tool_count: number;
+  approx_total_tokens: number;
+  chars: number;
+}
+
+export async function fetchSystemPromptPreview(): Promise<SystemPromptPreview> {
   const res = await fetch(`${API_URL}/system-prompt-preview`, { headers: headers() });
   if (!res.ok) throw new Error("Failed");
   return res.json();
@@ -343,6 +372,15 @@ export async function addKnowledge(item: { title: string; content: string; creat
     method: "POST",
     headers: headers(),
     body: JSON.stringify(item)
+  });
+  if (!res.ok) throw new Error("Failed");
+}
+
+export async function updateKnowledge(source: string, item: { title: string; content: string; tags: string[] }): Promise<void> {
+  const res = await fetch(`${API_URL}/knowledge/${encodeURIComponent(source)}`, {
+    method: "PUT",
+    headers: headers(),
+    body: JSON.stringify(item),
   });
   if (!res.ok) throw new Error("Failed");
 }

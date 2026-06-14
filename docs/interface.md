@@ -6,7 +6,7 @@ Ethan 提供三种交互方式，适应不同场景：
 
 | 模式 | 入口 | 适用场景 |
 |------|------|---------|
-| REPL | `ethan` | 日常对话，快速启动 |
+| CLI | `ethan` | 日常对话，快速启动 |
 | 单轮 | `ethan -p "..."` | 脚本集成，一问一答 |
 | HTTP API | `ethan serve` | Web UI 对接，远程调用 |
 | Web UI | `http://localhost:3000` | 浏览器访问，多页面管理 |
@@ -49,7 +49,7 @@ Ethan 提供三种交互方式，适应不同场景：
 
 ### 斜杠命令
 
-在 REPL 内输入以 `/` 开头的命令：
+在 CLI 内输入以 `/` 开头的命令：
 
 | 命令 | 功能 |
 |------|------|
@@ -61,12 +61,12 @@ Ethan 提供三种交互方式，适应不同场景：
 
 ### Session 集成
 
-每次 REPL 启动自动创建 Session，消息实时写入 SQLite。
+每次 CLI 启动自动创建 Session，消息实时写入 SQLite。
 退出后可用 `ethan -r last` 恢复。
 
 ### 记忆集成
 
-REPL 内部维护 `WorkingMemory` 实例：
+CLI 内部维护 `WorkingMemory` 实例：
 - 每轮对话后调用 `memory.add_turn()`
 - 热区满后检查是否需要压缩
 - 发送给 LLM 的 context 由 `memory.build_context()` 构建
@@ -174,7 +174,7 @@ ethan serve --port 9000        # 自定义端口
 ### 命令树
 
 ```
-ethan                           → REPL 对话
+ethan                           → CLI (REPL) 对话
 ethan -p "..."                  → 单轮对话
 ethan -m MODEL                  → 指定模型
 ethan -r last                   → 恢复上次会话

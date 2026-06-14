@@ -12,7 +12,7 @@ import {
   fetchAgentSettings, updateAgentSettings, AgentSettings,
   fetchSystemSettings, updateSystemSettings, SystemSettings,
   fetchProviderSettings, updateProviderSettings, ProviderSettings,
-  fetchSystemPromptPreview,
+  fetchSystemPromptPreview, SystemPromptPreview,
 } from "@/lib/api";
 
 function useTheme() {
@@ -43,8 +43,9 @@ interface SettingsViewProps {
 type TabType = "general" | "providers" | "identity" | "soul" | "tools" | "heartbeat" | "prompt-preview";
 
 function PromptPreview() {
-  const [data, setData] = useState<{ system_prompt: string; approx_tokens: number; chars: number } | null>(null);
+  const [data, setData] = useState<SystemPromptPreview | null>(null);
   const [loading, setLoading] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -61,18 +62,61 @@ function PromptPreview() {
   useEffect(() => { load(); }, []);
 
   return (
-    <div className="h-full flex flex-col min-h-[500px]">
-      <div className="flex items-center justify-between mb-2">
+    <div className="h-full flex flex-col min-h-[500px] gap-4">
+      <div className="flex items-center justify-between">
         <h3 className="text-lg font-medium">Prompt 预览</h3>
         <Button variant="ghost" size="sm" onClick={load} disabled={loading}>
           {loading ? "加载中..." : "刷新"}
         </Button>
       </div>
+
       {data && (
-        <p className="text-xs text-muted-foreground mb-3">
-          每轮对话 system prompt 约 <span className="font-mono text-foreground">{data.approx_tokens.toLocaleString()}</span> tokens（{data.chars.toLocaleString()} 字符）
-        </p>
+        <div className="rounded-lg border bg-muted/30 px-4 py-3 text-sm space-y-1">
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">System prompt</span>
+            <span className="font-mono">~{data.approx_tokens.toLocaleString()} tokens ({data.chars.toLocaleString()} 字符)</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Tools schema（{data.tool_count} 个工具）</span>
+            <span className="font-mono">~{data.approx_tools_tokens.toLocaleString()} tokens</span>
+          </div>
+          <div className="border-t pt-1 mt-1 flex justify-between font-semibold">
+            <span>Total（每轮 input 底线）</span>
+            <span className="font-mono">~{data.approx_total_tokens.toLocaleString()} tokens</span>
+          </div>
+        </div>
       )}
+
+      {data && (
+        <div className="rounded-lg border overflow-hidden">
+          <button
+            className="w-full flex items-center justify-between px-4 py-2 text-sm font-medium bg-muted/30 hover:bg-muted/50 transition-colors"
+            onClick={() => setToolsOpen(o => !o)}
+          >
+            <span>工具 Schema（{data.tool_count} 个）</span>
+            <span className="text-muted-foreground text-xs">{toolsOpen ? "收起 ▲" : "展开 ▼"}</span>
+          </button>
+          {toolsOpen && (
+            <div className="divide-y max-h-[400px] overflow-auto">
+              {data.tools.map(tool => (
+                <div key={tool.name} className="p-3 space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-xs font-semibold">{tool.name}</span>
+                    {!tool.fast_path && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">full-path only</span>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">{tool.description}</p>
+                  <pre className="text-[11px] font-mono bg-muted/40 rounded p-2 overflow-auto whitespace-pre-wrap text-muted-foreground leading-relaxed">
+                    {JSON.stringify(tool.parameters, null, 2)}
+                  </pre>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <pre className="flex-1 text-xs font-mono bg-muted/40 rounded-lg p-4 overflow-auto whitespace-pre-wrap leading-relaxed text-muted-foreground">
         {data ? data.system_prompt : (loading ? "加载中..." : "")}
       </pre>

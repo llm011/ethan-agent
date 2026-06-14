@@ -313,6 +313,7 @@ async def get_session(session_id: str):
                 "content": m.content,
                 "created_at": getattr(m, "created_at", None),
                 "usage": getattr(m, "usage", None),
+                "tool_steps": getattr(m, "tool_steps", None) or [],
             }
             for m in session.messages if m.role in ("user", "assistant")
         ],
@@ -425,7 +426,27 @@ async def system_prompt_preview(model: str | None = None):
     system = agent._build_system(dummy_messages, fast=False)
     # 粗略估算 token 数（英文 ~4 chars/token，中文 ~1.5 chars/token）
     approx_tokens = len(system) // 2
-    return {"system_prompt": system, "approx_tokens": approx_tokens, "chars": len(system)}
+    tools = agent._registry.all()
+    tool_count = len(tools)
+    approx_tools_tokens = tool_count * 70
+    tools_schemas = [
+        {
+            "name": t.name,
+            "description": t.description,
+            "parameters": t.parameters,
+            "fast_path": t.fast_path,
+        }
+        for t in tools
+    ]
+    return {
+        "system_prompt": system,
+        "tools": tools_schemas,
+        "approx_tokens": approx_tokens,
+        "approx_tools_tokens": approx_tools_tokens,
+        "tool_count": tool_count,
+        "approx_total_tokens": approx_tokens + approx_tools_tokens,
+        "chars": len(system),
+    }
 
 
 class SystemSettingsPatch(BaseModel):
@@ -626,12 +647,20 @@ async def _stream_response(
     import time as _time
 
     tool_start_times: dict[str, float] = {}
+    collected_tool_steps: list[dict] = []
     full = ""
     try:
         async for item in agent.stream_chat(messages):
             if isinstance(item, ToolEvent):
                 if item.state == "start":
                     tool_start_times[item.tool_name] = _time.time()
+                    collected_tool_steps.append({
+                        "tool": item.tool_name,
+                        "args": item.args_summary,
+                        "state": "running",
+                        "duration_ms": None,
+                        "result_preview": "",
+                    })
                     evt = {
                         "tool": item.tool_name,
                         "args": item.args_summary,
@@ -641,6 +670,12 @@ async def _stream_response(
                     duration_ms = int(
                         (_time.time() - tool_start_times.pop(item.tool_name, _time.time())) * 1000
                     )
+                    for step in reversed(collected_tool_steps):
+                        if step["tool"] == item.tool_name and step["state"] == "running":
+                            step["state"] = item.state
+                            step["duration_ms"] = duration_ms
+                            step["result_preview"] = item.result_preview or ""
+                            break
                     evt = {
                         "tool": item.tool_name,
                         "args": item.args_summary,
@@ -659,7 +694,7 @@ async def _stream_response(
     if session_id and full:
         # 把 usage 存到 assistant 消息里
         usage_dict = {"input": agent.usage.input_tokens, "output": agent.usage.output_tokens, "cache": agent.usage.cache_tokens}
-        asst_msg = Message(role="assistant", content=full, usage=usage_dict)
+        asst_msg = Message(role="assistant", content=full, usage=usage_dict, tool_steps=collected_tool_steps or [])
         await store.save_message(session_id, asst_msg)
         await store.touch(session_id)
         if agent._skills and agent.last_matched_skills:
@@ -895,6 +930,20 @@ async def add_knowledge(req: KnowledgeAddRequest):
     manager = get_knowledge_manager()
     source = manager.add(title=req.title, content=req.content, tags=req.tags)
     return {"ok": True, "source": source}
+
+class KnowledgeUpdateRequest(BaseModel):
+    title: str
+    content: str
+    tags: list[str] | None = None
+
+@app.put("/knowledge/{source:path}", dependencies=[Depends(verify_token)])
+async def update_knowledge(source: str, req: KnowledgeUpdateRequest):
+    manager = get_knowledge_manager()
+    item = manager.get(source)
+    if not item:
+        raise HTTPException(status_code=404, detail="Knowledge item not found")
+    manager.update(source, title=req.title, content=req.content, tags=req.tags)
+    return {"ok": True}
 
 @app.delete("/knowledge/{source:path}", dependencies=[Depends(verify_token)])
 async def delete_knowledge(source: str):

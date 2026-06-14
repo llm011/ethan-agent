@@ -46,8 +46,8 @@ messages  (session_id, role, content, tool_calls, tool_call_id)
 
 ### 关键行为
 
-- **延迟持久化**：REPL 启动时只在内存中构造 session 对象，发送第一条消息后才写入 DB
-- **自动清理**：REPL 退出时调用 `cleanup_empty()` 删除没有消息的历史空 session
+- **延迟持久化**：CLI 启动时只在内存中构造 session 对象，发送第一条消息后才写入 DB
+- **自动清理**：CLI 退出时调用 `cleanup_empty()` 删除没有消息的历史空 session
 - **全文搜索**：`search(query)` 同时匹配 session 标题和消息内容（SQLite LIKE）
 
 ### 操作命令
@@ -60,7 +60,7 @@ ethan session show <id>          # 查看消息摘要
 ethan session delete <id>        # 删除
 ```
 
-REPL 内斜杠命令：
+CLI 斜杠命令：
 ```
 /sessions          列出最近会话
 /resume <id>       恢复指定会话
@@ -127,13 +127,13 @@ memory.build_context() 返回:
 
 ### 三路接口对齐
 
-REPL、Web API (`/chat`)、Lark 三路接口均使用相同的 `WorkingMemory(hot_size=10)` 配置，不再存在截断策略不一致的问题。
+CLI、Web API (`/chat`)、Lark 三路接口均使用相同的 `WorkingMemory(hot_size=10)` 配置，不再存在截断策略不一致的问题。
 
 ### 配置
 
 ```python
 MemoryConfig(
-    hot_size=10,         # 热区保留轮数（REPL / API / Lark 统一）
+    hot_size=10,         # 热区保留轮数（CLI / API / Lark 统一）
     compress_batch=5,    # 攒够多少轮再压缩一次
     warm_capacity=20,    # 温区累积多少轮后提取冷区
 )
@@ -197,7 +197,7 @@ await profile_update.run(
 
 ### 作用
 
-每次 REPL 退出时（≥2 轮对话），自动将本次 session 的关键词 + 摘要写成一条 Episode，独立于 Working Memory 的滚动压缩保留下来。
+每次 CLI 退出时（≥2 轮对话），自动将本次 session 的关键词 + 摘要写成一条 Episode，独立于 Working Memory 的滚动压缩保留下来。
 
 ### 数据结构
 
@@ -311,7 +311,7 @@ Agent.stream_chat(context) → LLM（注入实时时间 + user_profile + procedu
     │   ├─ procedure_write → 立即写入 procedures.json
     │   └─ profile_update  → 立即写入 user_profile.md
     ▼
-REPL 退出 → EpisodeStore.add() → episodes.json
+CLI 退出 → EpisodeStore.add() → episodes.json
           → SessionStore.cleanup_empty() → 清理空 session
 ```
 

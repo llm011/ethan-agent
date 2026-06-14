@@ -25,6 +25,7 @@ class Message:
     tool_call_id: Optional[str] = None
     usage: Optional[dict] = None  # {"input": N, "output": N, "cache": N}
     created_at: Optional[float] = None
+    tool_steps: Optional[list] = field(default_factory=list)  # ToolEvent 执行摘要
 
     @property
     def is_tool_call(self) -> bool:

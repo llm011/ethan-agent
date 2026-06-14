@@ -91,7 +91,7 @@ defaults:
 
 心跳在 `ethan serve`（FastAPI 服务）启动时通过 `start_heartbeat()` 创建后台 asyncio task。服务关闭时调用 `stop_heartbeat()` 取消 task。
 
-REPL 模式下不启动心跳（心跳更适合长期运行的服务端场景）。
+CLI 模式下不启动心跳（心跳更适合长期运行的服务端场景）。
 
 ---
 

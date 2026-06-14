@@ -6,38 +6,115 @@ A lightweight, extensible personal AI agent built in Python. Designed to run per
 
 Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (structured agent loop, layered memory), [Hermes Agent](https://github.com/NousResearch/hermes-agent) (self-improving skills, memory consolidation), and [nanobot](https://github.com/HKUDS/nanobot) (minimal core, readable codebase).
 
+---
+
 ## Features
 
-- **Multi-model support** — Connect to Claude, GPT, Gemini, or any OpenAI-compatible endpoint (Ollama, LM Studio, OpenRouter). Switch models mid-conversation with a single slash command. Provider-level proxy and alias support built in.
+**Memory system (five layers)**
+- Hot/warm/cold three-tier sliding window for long-conversation context; older content auto-compressed by a cheap model
+- Structured Facts: confidence-scored entries with conflict detection and deduplication (`~/.ethan/memory/facts.json`)
+- Behavioral Procedures: learned from user corrections, loaded every conversation (`procedures.json`)
+- Session Episodes: auto-summarized on exit, supports keyword search (`episodes.json`)
+- User Profile: narrative document storing personal phrases, goals, and agent agreements (`user_profile.md`)
+- **Proactive memory write**: Agent calls tools mid-conversation to instantly persist anything worth remembering — no waiting for batch processing
 
-- **Persistent memory** — A three-tier memory system (hot/warm/cold) keeps context across long conversations without blowing up token costs. Recent turns stay verbatim; older context is batch-compressed into summaries by a cheap model (auto-inferred from your main model); key facts persist forever in a cross-session store.
+**Skill system**
+- Keyword trigger matching, auto-injected into system prompt
+- `fast_path: true` routes matched input to the millisecond fast track
+- `channels: [lark, web]` filters skills by channel so each surface gets only relevant skills
+- Hit tracking and correction collection; Heartbeat auto-updates skill content with a cheap model when corrections accumulate
+- Agent can create new skills mid-conversation via the `skill_create` tool
 
-- **Session management** — Every conversation is automatically saved to SQLite. Resume any past session with `ethan -r last` or browse history with `/sessions`. Sessions include full message replay and metadata.
+**Three-track routing**
+- **fast**: short commands + keyword match → minimal prompt + fast_path tools only + 2 iterations
+- **medium**: mid-length messages → full prompt + all tools + 4 iterations
+- **full**: complex tasks → full prompt + all tools + 10 iterations
 
-- **Skill system** — Two-source loading: built-in skills ship with the project (`ethan/skills/<name>/SKILL.md`); user skills live in `~/.ethan/skills/`. Both support a directory format (`<name>/SKILL.md` + `references/`) and the legacy single-file `.md` format. Built-in skills include `channels`, `lark-im`, and `home-assistant`. Skills matched by keyword triggers are injected into the system prompt; skills can also be auto-generated from complex sessions (Hermes-style).
+**Scheduler**
+- Create cron or interval jobs in conversation; SQLite-persisted, survives restarts
+- `heartbeat.md`: write natural-language tasks; the system runs them periodically
 
-- **Fast Path** — Simple commands short-circuit the full agent loop. The fast path shares the same tool set as the full agent (filtered by `tool.fast_path = True`, e.g. `shell` and `file_read`), only the system prompt differs. Skills can opt into the fast path via `fast_path: true` frontmatter, and config supports `fast_skill_triggers`.
+**Tool system**
+- Shell execution, web search (DuckDuckGo), web fetch, file I/O, knowledge base
+- Tool results over 4 000 chars are auto-summarized by a cheap model before going back to the main model
+- Identical calls within the same turn hit an in-memory cache — no duplicate execution
 
-- **Prompt Caching** — The Anthropic provider splits the system prompt at the `Current time:` boundary. The stable prefix gets `cache_control` (ephemeral), so repeated calls within 5 minutes pay only 0.1× input token cost.
+**Prompt Caching**
+- System prompt split into stable layer / dynamic layer; stable layer cached 5 min, token cost drops to 0.1×
 
-- **Tool system** — Fully pluggable: implement `BaseTool`, register it, done. Ships with shell execution, web search (DuckDuckGo), web page fetching, file I/O, ripgrep/fd search, schedule management, and knowledge base operations. Tools expose a `fast_path` field to control whether they are available in fast-path mode.
+**Multi-channel**
+- CLI REPL, Web UI (Next.js), Lark/Feishu (WebSocket, no public IP required)
 
-- **Scheduled tasks** — Create cron or interval jobs that persist across restarts (APScheduler + SQLite). A built-in heartbeat job runs periodically to deduplicate facts and execute tasks defined in `heartbeat.md`.
+---
 
-- **Knowledge base** — Vector search powered by `sqlite-vec`. Add notes/snippets via the `knowledge_add` tool or Web UI; retrieve with `knowledge_search`. The `/knowledge/search` HTTP endpoint exposes semantic search to external callers.
+## Quick Start (Docker, recommended)
 
-- **HTTP API** — A FastAPI server (`ethan serve`) exposes `/chat` (SSE streaming, HOT_SIZE=20 sliding window), `/models`, `/health`, `/knowledge/search`, `/channels`, and `/system-prompt-preview`. Ready to plug into a web frontend or mobile app.
+Docker is the easiest deployment path — backend and Web UI run as separate containers, data persisted to a local volume.
 
-- **Web UI** — Next.js 16 browser interface with pages for chat, memory (Facts / Episodes / Procedures tabs with edit/delete and Markdown rendering), knowledge base, schedule, skills, sessions, settings (proxy, max_tokens, fast-path keywords, heartbeat config, system prompt preview), and a new `/channels` channel management page. Message bubbles show TTFT latency.
+### Prerequisites
 
-- **Fast CLI** — A lightweight REPL powered by prompt_toolkit with proper CJK character handling, a bottom status bar (model, tokens, path), slash commands for in-session control, and streaming output that starts printing the moment the first token arrives.
+- Docker 20.10+
+- Docker Compose v2
 
-## Quick Start
+### 1. Clone
+
+```bash
+git clone https://github.com/llm011/ethan-agent.git
+cd ethan-agent
+```
+
+### 2. Configure
+
+```bash
+cp deploy/.env.example deploy/.env
+# Edit deploy/.env with your API keys
+```
+
+At least one provider is required:
+
+```bash
+# Anthropic (recommended — supports Prompt Caching)
+ANTHROPIC_API_KEY=sk-ant-xxx
+
+# Or any OpenAI-compatible API
+OPENAI_API_KEY=sk-xxx
+OPENAI_BASE_URL=https://api.example.com/v1
+
+AGENT_DEFAULT_MODEL=claude-sonnet-4-6
+```
+
+### 3. Build and start
+
+```bash
+cd deploy
+docker compose up -d --build
+```
+
+First build takes ~3–5 minutes (installing deps + building Next.js).
+
+### 4. Access
+
+- **Web UI**: http://localhost:3000
+- **API**: http://localhost:8900
+- **Health check**: http://localhost:8900/health
+
+### 5. Common commands
+
+```bash
+docker compose logs -f ethan      # tail logs
+docker compose restart ethan      # restart backend
+docker compose down               # stop
+```
+
+---
+
+## Local Development
 
 ### Prerequisites
 
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/) package manager
+- Node.js 20+ (Web UI)
 
 ### Install
 
@@ -49,24 +126,16 @@ uv sync
 
 ### Configure
 
-Create `~/.ethan/config.yaml` (auto-generated on first run), or set environment variables:
-
 ```bash
 cp .env.example .env
 # Edit .env with your API keys
 ```
 
-Alternatively, use the CLI:
+Or via CLI:
 
 ```bash
-# Set up a provider
-ethan provider set openai_compat --api-key sk-xxx --base-url https://api.example.com/v1
-
-# Add a model
-ethan model add gpt-4o -p openai_compat -d "GPT-4o"
-
-# Set default model
-ethan model default gpt-4o
+ethan provider set anthropic --api-key sk-ant-xxx
+ethan model default claude-sonnet-4-6
 ```
 
 ### Run
@@ -93,74 +162,110 @@ uv run python -m ethan.interface.cli serve
 ```bash
 chmod +x bin/ethan
 ln -s $(pwd)/bin/ethan ~/bin/ethan
-# Then use: ethan "hello"
 ```
+
+### Web UI (dev mode)
+
+```bash
+cd web
+npm install
+npm run dev   # http://localhost:3000
+```
+
+### macOS auto-start (launchd)
+
+```bash
+./deploy/install.sh
+```
+
+---
 
 ## Architecture
 
 ```
 ethan/
 ├── core/
-│   ├── agent.py               # ReAct agent loop
-│   └── config.py              # YAML config (~/.ethan/config.yaml)
+│   ├── agent.py               # ReAct loop, three-track router (fast/medium/full)
+│   ├── config.py              # YAML config (~/.ethan/config.yaml)
+│   └── heartbeat.py           # Heartbeat system, periodic maintenance
 ├── providers/
 │   ├── base.py                # Unified interface (Message, ToolCall, BaseProvider)
-│   ├── anthropic.py           # Claude native protocol
+│   ├── anthropic.py           # Claude native protocol + Prompt Caching
 │   ├── openai_compat.py       # OpenAI-compatible protocol
 │   └── manager.py             # Route model ID → provider
 ├── memory/
 │   ├── session.py             # Session persistence (SQLite)
 │   ├── working.py             # Three-tier sliding window memory
-│   ├── consolidator.py        # Compress with cheap model
-│   └── persistent.py          # Cross-session key facts
+│   ├── facts.py               # Structured Facts (conflict detection + confidence)
+│   ├── procedures.py          # Behavioral rules (learned from corrections)
+│   ├── episodic.py            # Session episode archive
+│   └── consolidator.py        # Compress with cheap model
 ├── skills/
-│   ├── loader.py              # Load .md skills from disk
-│   ├── registry.py            # Match & inject skills into context
-│   └── generator.py           # Auto-generate skills from experience
+│   ├── loader.py              # Load skills (directory format + legacy .md)
+│   ├── registry.py            # Match (with channel filter) + hit stats
+│   ├── stats.py               # Hit count + correction collection
+│   ├── updater.py             # Auto-update skill content via cheap model
+│   └── generator.py           # Auto-generate skills from sessions
 ├── tools/
 │   ├── base.py                # BaseTool abstract class
-│   ├── registry.py            # Registry + concurrent executor
+│   ├── registry.py            # Registry + concurrent executor + turn cache
+│   ├── result_compressor.py   # Auto-summarize long tool output
 │   └── builtin/
 │       ├── shell.py           # Execute shell commands
-│       ├── web_search.py      # DuckDuckGo search (no API key needed)
+│       ├── web_search.py      # DuckDuckGo search
 │       ├── web.py             # Fetch & extract web page text
-│       └── file.py            # File read/write/list
+│       ├── file.py            # File read/write/list
+│       ├── memory_write.py    # Proactive fact write
+│       ├── procedure_write.py # Proactive procedure write
+│       ├── profile_update.py  # Update user profile
+│       └── skill_create.py    # Create skill mid-conversation
 ├── scheduler/
 │   └── cron.py                # APScheduler with SQLite persistence
 └── interface/
     ├── cli.py                 # Typer CLI entry point
     ├── repl.py                # Interactive REPL with prompt_toolkit
     ├── api.py                 # FastAPI HTTP + SSE streaming
+    ├── lark_events.py         # Lark WebSocket
     └── commands/              # Subcommands (model, provider, session, skill, schedule)
 ```
 
+---
+
 ## Memory System
 
-Ethan uses a three-tier memory architecture to maintain context without blowing up token costs:
+Ethan uses a five-layer memory architecture:
 
 | Layer | Content | Storage |
 |-------|---------|---------|
-| Hot   | Last N turns (full messages) | In-memory |
-| Warm  | Rolling summary of older turns | In-memory |
-| Cold  | Key facts extracted across sessions | `~/.ethan/memory/persistent.md` |
+| Hot | Last N turns (full messages) | In-memory |
+| Warm | Rolling summary of older turns | In-memory |
+| Cold (Facts) | Key facts extracted across sessions | `~/.ethan/memory/facts.json` |
+| Procedures | Behavioral rules learned from corrections | `~/.ethan/memory/procedures.json` |
+| User Profile | Narrative personal context (goals, phrases, agreements) | `~/.ethan/memory/user_profile.md` |
 
-Compression is **batched** (not per-turn) and uses an automatically inferred cheap model (e.g., Haiku for Claude users, Flash Lite for Gemini users).
+Compression is **batched** (not per-turn) and uses an automatically inferred cheap model (e.g. Haiku for Claude users, Flash Lite for Gemini users).
+
+Agent proactively writes to all layers mid-conversation via `memory_write`, `procedure_write`, and `profile_update` tools — no waiting for the next compression cycle.
+
+---
 
 ## Skills
 
 Skills are Markdown files loaded from two sources, in priority order:
 
-1. **内置 skills** — `ethan/skills/<name>/SKILL.md`（随项目发布）
-2. **用户 skills** — `~/.ethan/skills/<name>/SKILL.md` 或 `~/.ethan/skills/<name>.md`
+1. **Built-in skills** — `ethan/skills/<name>/SKILL.md` (shipped with the project)
+2. **User skills** — `~/.ethan/skills/<name>/SKILL.md` or `~/.ethan/skills/<name>.md`
 
-两种来源都支持目录格式（`<name>/SKILL.md` + `references/` 子目录）和旧版单文件 `.md` 格式。
+Both support a directory format (`<name>/SKILL.md` + `references/`) and the legacy single-file `.md` format.
 
 ```markdown
 ---
 name: deploy-checklist
 trigger: deploy|ship|release
 description: Pre-deployment checklist
-fast_path: true      # 是否在 fast path 模式下也生效
+fast_path: true       # route to fast track when triggered
+channels:             # empty = all channels; list = restrict
+  - web
 version: "1.0"
 ---
 
@@ -170,7 +275,11 @@ Steps before deploying:
 3. ...
 ```
 
-当用户输入匹配到 skill 的 `trigger` 关键词时，skill 内容自动注入 system prompt。内置 skill 包括 `channels`、`lark-im`、`home-assistant`。
+When a user message matches a skill's `trigger`, the skill content is injected into the system prompt. Built-in skills include `channels`, `lark-im`, and `home-assistant`.
+
+Skills accumulate hit stats and user corrections. When corrections reach a threshold (default: 2), the Heartbeat job merges them into the skill file using a cheap model.
+
+---
 
 ## Tools
 
@@ -182,6 +291,8 @@ from ethan.tools.base import BaseTool
 class MyTool(BaseTool):
     name = "my_tool"
     description = "Does something useful"
+    fast_path = False   # set True to make available in fast-track mode
+    cacheable = False   # set True to cache identical calls within a turn
     parameters = {"type": "object", "properties": {...}, "required": [...]}
 
     async def run(self, **kwargs) -> str:
@@ -189,6 +300,8 @@ class MyTool(BaseTool):
 ```
 
 Register it in `cli.py` and the LLM will automatically use it when relevant.
+
+---
 
 ## CLI Commands
 
@@ -206,25 +319,28 @@ ethan skill list|show|create
 ethan schedule list|remove|pause|resume
 ```
 
+---
+
 ## HTTP API
 
 ```bash
-# Health check
-curl http://localhost:8900/health
-
-# List models
-curl http://localhost:8900/models
-
-# Chat
-curl -X POST http://localhost:8900/chat \
-  -H "Content-Type: application/json" \
-  -d '{"messages": [{"role": "user", "content": "hello"}]}'
-
-# Chat with streaming (SSE)
-curl -X POST http://localhost:8900/chat \
-  -H "Content-Type: application/json" \
-  -d '{"messages": [{"role": "user", "content": "hello"}], "stream": true}'
+GET  /health                    # Health check
+GET  /models                    # Available models
+POST /chat                      # Chat (stream: true for SSE)
+GET  /sessions                  # Session list
+GET  /sessions/{id}             # Session detail + messages
+GET  /memory/facts              # Facts list
+GET  /memory/episodes           # Episode summaries
+GET  /skills                    # Skill list
+POST /skills                    # Create skill
+POST /skills/evolve             # Trigger skill auto-update
+GET  /schedule                  # Scheduled jobs
+GET  /system-prompt-preview     # Current system prompt preview
+GET  /channels                  # Channel list
+GET  /knowledge/search          # Semantic search
 ```
+
+---
 
 ## Configuration
 
@@ -257,28 +373,69 @@ defaults:
   agent_name: Ethan
   max_tokens: 4096
   max_tool_iterations: 10
+  routing:
+    fast_max_length: 12
+    medium_max_length: 80
+    medium_max_iters: 4
+    fast_keywords:
+      - "turn off*light"
+      - "play music"
+    fast_skill_triggers:
+      - "home assistant"
 ```
 
 Environment variables in `.env` override config values (useful for secrets).
+
+### Config directory layout
+
+```
+~/.ethan/
+├── config.yaml          # Main config (providers, models, routing)
+├── system/
+│   ├── identity.md      # Agent identity (name, role)
+│   ├── soul.md          # Behavioral principles
+│   └── heartbeat.md     # Heartbeat tasks (natural language)
+├── memory/
+│   ├── facts.json       # Structured facts
+│   ├── procedures.json  # Behavioral rules
+│   ├── episodes.json    # Session episode archive
+│   └── user_profile.md  # User profile (narrative)
+├── skills/              # User-defined skills
+│   └── <name>/
+│       └── SKILL.md
+└── sessions.db          # Session history (SQLite)
+```
+
+---
 
 ## Roadmap
 
 - [x] Multi-model provider system (Anthropic + OpenAI compatible)
 - [x] ReAct agent loop with streaming
 - [x] Session persistence & resume
-- [x] Three-tier memory with auto-compression
-- [x] Skill system (dual-source, directory format, fast-path opt-in, auto-generate)
+- [x] Three-tier memory (hot/warm/cold) with auto-compression
+- [x] Structured facts with confidence scoring
+- [x] Behavioral procedures (learned from corrections)
+- [x] Session episode archive
+- [x] User profile (narrative, five-section document)
+- [x] Proactive memory write tools (`memory_write`, `procedure_write`, `profile_update`)
+- [x] Skill system (dual-source, directory format, channel filter, fast-path opt-in)
+- [x] Skill hit tracking + correction collection + auto-update (Updater)
+- [x] Skill auto-generation from sessions (Hermes-style)
 - [x] Built-in skills: channels, lark-im, home-assistant
+- [x] Three-track router: fast / medium / full
+- [x] Tool result auto-compression (long output → cheap model summary)
+- [x] Per-turn tool call deduplication cache
 - [x] Scheduler (cron + interval) + heartbeat job
-- [x] Built-in tools (shell, search, file, web, rg/fd, schedule, knowledge)
-- [x] HTTP API with SSE streaming + knowledge/channels/system-prompt-preview endpoints
+- [x] Built-in tools (shell, search, file, web, schedule, knowledge, skill_create)
+- [x] HTTP API with SSE streaming + full REST endpoints
 - [x] Web UI (chat, memory, knowledge, schedule, skills, sessions, settings, channels)
 - [x] Knowledge base with semantic vector search (sqlite-vec)
 - [x] Prompt Caching (Anthropic stable-prefix cache_control)
-- [x] Fast Path router with per-tool and per-skill opt-in
 - [x] ACP protocol client
 - [ ] MCP protocol client
-- [ ] Procedural memory (learn from corrections)
+
+---
 
 ## Documentation
 
@@ -286,6 +443,7 @@ Detailed design docs for each module are in [`docs/`](./docs/):
 
 - [Architecture Overview](docs/architecture.md)
 - [Agent Loop](docs/agent-loop.md)
+- [Routing](docs/routing.md)
 - [Provider Layer](docs/providers.md)
 - [Tool System](docs/tools.md)
 - [Memory System](docs/memory.md)

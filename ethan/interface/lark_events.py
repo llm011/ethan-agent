@@ -247,9 +247,31 @@ async def _handle_message(event_data: dict) -> None:
         # 所以采用：THINKING 表情作为"处理中"指示，完成后一次性发整条消息
         full_content = ""
         reaction_removed = False
+        collected_tool_steps: list[dict] = []
+        import time as _lark_time
+        lark_tool_start_times: dict[str, float] = {}
 
         async for chunk in agent.stream_chat(context_messages):
             if isinstance(chunk, ToolEvent):
+                if chunk.state == "start":
+                    lark_tool_start_times[chunk.tool_name] = _lark_time.time()
+                    collected_tool_steps.append({
+                        "tool": chunk.tool_name,
+                        "args": chunk.args_summary,
+                        "state": "running",
+                        "duration_ms": None,
+                        "result_preview": "",
+                    })
+                else:
+                    duration_ms = int(
+                        (_lark_time.time() - lark_tool_start_times.pop(chunk.tool_name, _lark_time.time())) * 1000
+                    )
+                    for step in reversed(collected_tool_steps):
+                        if step["tool"] == chunk.tool_name and step["state"] == "running":
+                            step["state"] = chunk.state
+                            step["duration_ms"] = duration_ms
+                            step["result_preview"] = chunk.result_preview or ""
+                            break
                 continue
             full_content += chunk
 
@@ -280,7 +302,7 @@ async def _handle_message(event_data: dict) -> None:
             "output": agent.usage.output_tokens,
             "cache": agent.usage.cache_tokens,
         }
-        response = Message(role="assistant", content=full_content, usage=usage_dict)
+        response = Message(role="assistant", content=full_content, usage=usage_dict, tool_steps=collected_tool_steps or [])
         await store.save_message(session_id, response)
         await store.touch(session_id)
 

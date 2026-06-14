@@ -42,6 +42,10 @@ class KnowledgeBase(ABC):
     def get(self, source: str) -> KnowledgeItem | None:
         """Get item by source identifier."""
 
+    @abstractmethod
+    def update(self, source: str, title: str, content: str, tags: list[str] | None = None) -> None:
+        """Update an existing item in place."""
+
 
 class FilesystemKnowledgeBase(KnowledgeBase):
     """Markdown files in a local directory, with optional vector search."""
@@ -88,6 +92,15 @@ class FilesystemKnowledgeBase(KnowledgeBase):
             pass  # vector indexing is optional
 
         return str(path)
+
+    def update(self, source: str, title: str, content: str, tags: list[str] | None = None) -> None:
+        path = Path(source)
+        if not path.exists():
+            path = self._dir / source
+        if not path.exists():
+            raise FileNotFoundError(f"Knowledge item not found: {source}")
+        tag_line = f"\ntags: {', '.join(tags)}" if tags else ""
+        path.write_text(f"# {title}{tag_line}\n\n{content}", encoding="utf-8")
 
     # ── Keyword search (existing) ──────────────────────────────────────────
 

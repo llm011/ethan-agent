@@ -326,7 +326,7 @@ export function Sidebar() {
                   }}
                 >
                   <span className="text-sm font-semibold flex items-center gap-1">
-                    定时任务
+                    定时任务(对话)
                     {scheduleUnreadCount > 0 && !scheduleExpanded && (
                       <span className="bg-red-500 text-white text-[9px] px-1.5 py-0.2 rounded-full">
                         {scheduleUnreadCount}

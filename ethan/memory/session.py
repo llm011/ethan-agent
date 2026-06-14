@@ -103,7 +103,7 @@ class SessionStore:
         """)
         await self._db.commit()
         # Migration: add columns if they don't exist (for existing databases)
-        for col, definition in [("created_at", "REAL"), ("usage", "TEXT")]:
+        for col, definition in [("created_at", "REAL"), ("usage", "TEXT"), ("tool_steps", "TEXT")]:
             try:
                 await self._db.execute(f"ALTER TABLE messages ADD COLUMN {col} {definition}")
                 await self._db.commit()
@@ -140,10 +140,11 @@ class SessionStore:
 
         msg_created_at = msg.created_at if msg.created_at else time.time()
         usage_json = json.dumps(msg.usage) if msg.usage else None
+        tool_steps_json = json.dumps(msg.tool_steps) if msg.tool_steps else None
 
         await self._db.execute(
-            "INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, created_at, usage) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (session_id, msg.role, msg.content, tool_calls_json, msg.tool_call_id, msg_created_at, usage_json),
+            "INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (session_id, msg.role, msg.content, tool_calls_json, msg.tool_call_id, msg_created_at, usage_json, tool_steps_json),
         )
         await self._db.commit()
 
@@ -191,7 +192,7 @@ class SessionStore:
         )
 
         async with self._db.execute(
-            "SELECT role, content, tool_calls, tool_call_id, created_at, usage FROM messages WHERE session_id = ? ORDER BY id",
+            "SELECT role, content, tool_calls, tool_call_id, created_at, usage, tool_steps FROM messages WHERE session_id = ? ORDER BY id",
             (session_id,),
         ) as cursor:
             async for r in cursor:
@@ -200,12 +201,14 @@ class SessionStore:
                     for tc in json.loads(r[2]):
                         tool_calls.append(ToolCall(id=tc["id"], name=tc["name"], arguments=tc["arguments"]))
                 usage = json.loads(r[5]) if r[5] else None
+                tool_steps = json.loads(r[6]) if r[6] else []
                 session.messages.append(Message(
                     role=r[0], content=r[1],
                     tool_calls=tool_calls,
                     tool_call_id=r[3],
                     created_at=r[4],
                     usage=usage,
+                    tool_steps=tool_steps,
                 ))
 
         return session

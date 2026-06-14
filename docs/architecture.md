@@ -17,7 +17,7 @@ Ethan 是一个运行在 Mac mini 上的个人 AI Agent，全程异步（`asynci
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │                          Interface 层                             │
-│  CLI/REPL  │  FastAPI (HTTP/SSE)  │  Web UI (Next.js 16)  │ Lark │
+│  CLI (REPL)  │  FastAPI (HTTP/SSE)  │  Web UI (Next.js 16)  │ Lark │
 └────────────┴──────────┬──────────┴──────────────────────── ┴──────┘
                         │ 用户输入 / 定时触发
                         ▼

@@ -82,7 +82,7 @@ config.yaml 中可通过 `fast_skill_triggers` 手动指定额外的 fast 轨关
          → 最多注入 3 个 Skill 到 system prompt
 ```
 
-**渠道过滤**：`SkillRegistry.match(query, channel="")` 接收当前渠道标识（如 `"lark"`、`"web"` 或 `""`）。如果 Skill 的 `channels` 列表非空且当前渠道不在其中，该 Skill 不会被注入。这样可以为飞书、Web、REPL 分别准备专属 Skill，互不干扰。
+**渠道过滤**：`SkillRegistry.match(query, channel="")` 接收当前渠道标识（如 `"lark"`、`"web"` 或 `""`）。如果 Skill 的 `channels` 列表非空且当前渠道不在其中，该 Skill 不会被注入。这样可以为飞书、Web、CLI 分别准备专属 Skill，互不干扰。
 
 ---
 

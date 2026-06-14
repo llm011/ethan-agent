@@ -16,7 +16,7 @@
 - **内置搜索工具**：rg（ripgrep）和 fd 作为内置工具，供 agent 在文件系统中高效检索
 - **ACP 集成**：`ethan code` 命令通过 PTY 持久会话将复杂编码任务委派给 Claude Code / OpenCode，结果回收进对话
 - **知识库**：本地 Markdown 知识库 + sqlite-vec 语义检索（embedding 索引），支持 add/search/delete
-- **REPL**：交互式会话管理，支持 `/sessions`、`/resume`、`/new` 等斜杠命令；会话来源标签（web/repl/lark）；自动生成标题；新用户 onboarding
+- **CLI (REPL)**：交互式会话管理，支持 `/sessions`、`/resume`、`/new` 等斜杠命令；会话来源标签（web/repl/lark）；自动生成标题；新用户 onboarding
 
 ---
 
@@ -31,6 +31,6 @@
 | [记忆系统](./memory.md) | Session 持久化、三层记忆（热/温/冷）、Facts、Episodic memory、压缩机制 |
 | [Skill 系统](./skills.md) | Skill 加载、关键词匹配注入、自动生成 |
 | [调度器](./scheduler.md) | 定时任务、cron + interval、SQLite 持久化 |
-| [接口层](./interface.md) | REPL、HTTP API (SSE)、CLI 命令结构、Web UI 路由 |
+| [接口层](./interface.md) | CLI (REPL)、HTTP API (SSE)、命令行工具、Web UI 路由 |
 | [ACP 集成](./acp.md) | 外部 Coding Agent 委派协议、Claude Code / OpenCode 接入、PTY 会话 |
 | Feishu/Lark 集成 | WebSocket 长连接、消息格式、onboarding 流程（见 `ethan/lark/`） |
