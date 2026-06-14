@@ -143,30 +143,55 @@ Next.js 16 App Router 构建的浏览器界面，通过 FastAPI SSE 与后端通
 ethan-ai/
 ├── ethan/
 │   ├── core/
-│   │   ├── agent.py          # 主 Agent Loop
-│   │   ├── session.py        # 会话管理（待实现）
-│   │   └── config.py         # 全局配置
+│   │   ├── agent.py          # 主 Agent Loop（含 fast/full path 路由）
+│   │   ├── config.py         # 全局配置（Pydantic）
+│   │   ├── heartbeat.py      # 系统心跳（facts 去重 + heartbeat.md 任务）
+│   │   └── onboarding.py     # 新用户引导
 │   ├── providers/
 │   │   ├── base.py           # 抽象 Provider 接口
-│   │   ├── anthropic.py      # Claude 原生 SDK
+│   │   ├── anthropic.py      # Claude 原生 SDK（含 Prompt Caching）
 │   │   ├── openai_compat.py  # OpenAI 兼容协议
 │   │   └── manager.py        # Provider 路由
-│   ├── memory/               # 记忆系统（阶段二）
-│   ├── skills/               # Skill 系统（阶段三）
+│   ├── memory/
+│   │   ├── session.py        # Session 持久化（SQLite）
+│   │   ├── working.py        # 三层工作记忆（hot/warm/cold）
+│   │   ├── consolidator.py   # 记忆压缩（廉价模型）
+│   │   ├── facts.py          # FactStore（跨 session 长期 facts）
+│   │   ├── procedures.py     # ProcedureStore（操作规范记忆）
+│   │   ├── episodic.py       # EpisodicStore（历史 session 摘要）
+│   │   └── knowledge.py      # 知识库（sqlite-vec 向量检索）
+│   ├── skills/
+│   │   ├── loader.py         # 双来源加载（内置 + 用户）
+│   │   ├── registry.py       # 关键词匹配 + 注入
+│   │   ├── generator.py      # 从经验自动生成 Skill
+│   │   ├── channels/         # 内置 Skill：渠道管理
+│   │   ├── lark-im/          # 内置 Skill：飞书 IM 操作
+│   │   └── home-assistant/   # 内置 Skill：智能家居控制
 │   ├── tools/
 │   │   ├── base.py           # BaseTool 抽象
 │   │   ├── registry.py       # ToolRegistry + ToolExecutor
 │   │   └── builtin/
-│   │       ├── shell.py      # Shell 工具
-│   │       ├── file.py       # 文件工具（待实现）
-│   │       └── web.py        # Web 工具（待实现）
-│   ├── scheduler/            # 调度器（阶段四）
+│   │       ├── shell.py      # Shell 命令执行
+│   │       ├── file.py       # 文件读写列出
+│   │       ├── web.py        # 网页抓取
+│   │       ├── web_search.py # DuckDuckGo 搜索
+│   │       ├── rg_search.py  # ripgrep 全文搜索
+│   │       ├── fd_find.py    # fd 文件查找
+│   │       ├── schedule.py   # 定时任务管理
+│   │       ├── knowledge.py  # 知识库工具
+│   │       └── acp.py        # 委托 Coding Agent
+│   ├── scheduler/
+│   │   └── cron.py           # APScheduler（SQLite 持久化）
+│   ├── acp/
+│   │   └── __init__.py       # ACP 复杂度判断 + 委托执行
 │   └── interface/
-│       ├── cli.py            # CLI REPL
-│       └── api.py            # FastAPI（阶段六）
+│       ├── cli.py            # Typer CLI（含延迟导入优化）
+│       ├── repl.py           # 交互式 REPL（prompt_toolkit）
+│       ├── api.py            # FastAPI HTTP + SSE
+│       ├── lark.py           # 飞书 Bot（WebSocket 长连接）
+│       └── commands/         # 子命令（model/provider/session/skill/schedule）
+├── web/                      # Next.js 16 Web UI
 ├── docs/                     # 本文档体系
-├── skills/                   # 用户 Skill 文件目录
 ├── .env                      # API Key 配置（不入 git）
-├── config.yaml               # 可选的 YAML 配置
 └── PLAN.md                   # 开发计划
 ```

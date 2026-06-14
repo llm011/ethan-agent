@@ -121,11 +121,15 @@ memory.build_context() 返回:
 ]
 ```
 
+### 三路接口对齐
+
+REPL、Web API (`/chat`) 三路接口均使用相同的 `WorkingMemory(hot_size=10)` 配置，不再存在截断策略不一致的问题。每个请求从 SessionStore 取出历史消息后，加载最近 `hot_size` 轮到热区，冷区 facts 由 Agent 内部 `FactStore` 统一注入。
+
 ### 配置
 
 ```python
 MemoryConfig(
-    hot_size=5,          # 热区保留轮数
+    hot_size=10,         # 热区保留轮数（REPL / API / Lark 统一）
     compress_batch=5,    # 攒够多少轮再压缩一次
     warm_capacity=20,    # 温区累积多少轮后提取冷区
 )

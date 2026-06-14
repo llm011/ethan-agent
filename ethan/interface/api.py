@@ -3,6 +3,7 @@ import json
 import os
 import tempfile
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import AsyncGenerator
 
 from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
@@ -946,6 +947,50 @@ async def save_skill_api(req: SkillSaveRequest):
     
     skill_path.write_text(content, encoding="utf-8")
     return {"ok": True, "name": safe_name}
+
+
+# ── Docs ─────────────────────────────────────────────────────────────
+
+_REPO_ROOT = Path(__file__).parent.parent.parent
+
+
+@app.get("/docs", dependencies=[Depends(verify_token)])
+async def list_docs():
+    """列出所有文档文件及其元数据（用于构建导航菜单）。"""
+    docs_dir = _REPO_ROOT / "docs"
+    if not docs_dir.exists():
+        return {"docs": []}
+
+    docs = []
+    for f in sorted(docs_dir.glob("*.md")):
+        content = f.read_text(encoding="utf-8")
+        first_heading = ""
+        for line in content.splitlines():
+            if line.startswith("# "):
+                first_heading = line[2:].strip()
+                break
+        docs.append({
+            "slug": f.stem,
+            "title": first_heading or f.stem,
+            "filename": f.name,
+        })
+    return {"docs": docs}
+
+
+@app.get("/docs/{slug}", dependencies=[Depends(verify_token)])
+async def get_doc(slug: str):
+    """返回指定文档的 Markdown 内容。"""
+    import re as _re
+    if not _re.match(r'^[a-zA-Z0-9_-]+$', slug):
+        raise HTTPException(400, "Invalid slug")
+
+    docs_dir = _REPO_ROOT / "docs"
+    doc_path = docs_dir / f"{slug}.md"
+    if not doc_path.exists():
+        raise HTTPException(404, "Doc not found")
+
+    content = doc_path.read_text(encoding="utf-8")
+    return {"slug": slug, "content": content}
 
 
 def run_server(host: str = "0.0.0.0", port: int = 8900):

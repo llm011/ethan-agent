@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { Plus, Trash2, Search, Settings, Book, Pencil, Check, X, List, Wrench, Radio } from "lucide-react";
+import { Plus, Trash2, Search, Settings, Book, BookOpen, Pencil, Check, X, List, Wrench, Radio } from "lucide-react";
 import { Clock, Database } from "lucide-react";
 import { useSidebar } from "@/app/layout-shell";
 import { Button } from "@/components/ui/button";
@@ -355,6 +355,17 @@ export function Sidebar() {
           onClick={() => navigate("/schedule")}
         >
           <Clock className="h-4 w-4 mr-2" /> 定时任务 (Schedule)
+        </Button>
+        <Button
+          variant="ghost"
+          className={`w-full justify-start h-9 px-3 ${
+            pathname.startsWith("/docs")
+              ? "bg-accent text-accent-foreground"
+              : "text-muted-foreground"
+          }`}
+          onClick={() => navigate("/docs")}
+        >
+          <BookOpen className="h-4 w-4 mr-2" /> 文档 (Docs)
         </Button>
       </div>
 
