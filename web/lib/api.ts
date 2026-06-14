@@ -278,7 +278,7 @@ export async function* streamChat(
   messages: ChatMessage[],
   model?: string,
   sessionId?: string,
-): AsyncGenerator<{ content?: string; done?: boolean; error?: string; model?: string; usage?: Record<string, number>; tool?: string; args?: string; state?: string }> {
+): AsyncGenerator<{ content?: string; done?: boolean; error?: string; model?: string; usage?: Record<string, number>; tool?: string; args?: string; state?: string; duration_ms?: number; result_preview?: string }> {
   const res = await fetch(`${API_URL}/chat`, {
     method: "POST",
     headers: headers(),

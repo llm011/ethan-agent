@@ -591,17 +591,32 @@ async def _stream_response(
 ) -> AsyncGenerator[str, None]:
     from ethan.providers.base import ToolEvent
     import asyncio
+    import time as _time
 
+    tool_start_times: dict[str, float] = {}
     full = ""
     try:
         async for item in agent.stream_chat(messages):
             if isinstance(item, ToolEvent):
-                evt_data = json.dumps({
-                    "tool": item.tool_name,
-                    "args": item.args_summary,
-                    "state": item.state,
-                }, ensure_ascii=False)
-                yield f"data: {evt_data}\n\n"
+                if item.state == "start":
+                    tool_start_times[item.tool_name] = _time.time()
+                    evt = {
+                        "tool": item.tool_name,
+                        "args": item.args_summary,
+                        "state": "start",
+                    }
+                else:
+                    duration_ms = int(
+                        (_time.time() - tool_start_times.pop(item.tool_name, _time.time())) * 1000
+                    )
+                    evt = {
+                        "tool": item.tool_name,
+                        "args": item.args_summary,
+                        "state": item.state,
+                        "duration_ms": duration_ms,
+                        "result_preview": item.result_preview or "",
+                    }
+                yield f"data: {json.dumps(evt, ensure_ascii=False)}\n\n"
             else:
                 full += item
                 data = json.dumps({"content": item}, ensure_ascii=False)

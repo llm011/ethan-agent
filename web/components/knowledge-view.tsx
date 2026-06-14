@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Loader2, Plus, Trash2, Search, Book } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -194,8 +196,10 @@ export function KnowledgeView() {
                   Source: {item.source}
                 </div>
                 {item.content && (
-                  <div className="text-sm text-card-foreground/80 line-clamp-3 mb-4 flex-1">
-                    {item.content}
+                  <div className="text-xs text-card-foreground/80 mb-4 flex-1 overflow-hidden prose prose-sm dark:prose-invert max-w-none line-clamp-4">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {item.content.slice(0, 300)}
+                    </ReactMarkdown>
                   </div>
                 )}
                 <div className="flex flex-wrap gap-1 mt-auto">

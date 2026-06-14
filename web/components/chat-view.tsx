@@ -42,15 +42,17 @@ import {
   fetchOnboardingStatus,
   completeOnboarding,
 } from "@/lib/api";
+import { ToolTimeline, ToolStep } from "@/components/tool-timeline";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
   files?: string[];
-  toolActivity?: string;
+  toolSteps?: ToolStep[];
+  toolsExpanded?: boolean;
   created_at?: number;
   usage?: { input: number; output: number; cache: number };
-  ttft?: number; // ms to first token
+  ttft?: number;
 }
 
 function useTheme() {
@@ -240,7 +242,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     const chatMessages: ChatMessage[] = newMessages.map((m) => ({ role: m.role, content: m.content }));
 
     let assistantContent = "";
-    let currentActivity = "";
+    const currentToolSteps: ToolStep[] = [];
     const sendTime = Date.now();
     let ttft: number | undefined;
     let finalUsage: { input: number; output: number; cache: number } | undefined;
@@ -248,7 +250,6 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
     try {
       for await (const chunk of streamChat(chatMessages, selectedModel, sessionId)) {
-        // Record TTFT on the very first chunk of any kind (tool or content)
         if (ttft === undefined) ttft = Date.now() - sendTime;
 
         if (chunk.error) {
@@ -256,20 +257,50 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           break;
         }
         if (chunk.tool && chunk.state === "start") {
-          currentActivity = `⚡ ${chunk.tool}(${chunk.args || ""})`;
-          setMessages([...newMessages, { role: "assistant", content: assistantContent, toolActivity: currentActivity, created_at: Date.now() / 1000 }]);
+          currentToolSteps.push({ tool: chunk.tool, args: chunk.args || "", state: "running" });
+          setMessages([...newMessages, {
+            role: "assistant",
+            content: assistantContent,
+            toolSteps: [...currentToolSteps],
+            toolsExpanded: true,
+            created_at: Date.now() / 1000,
+          }]);
         }
-        if (chunk.tool && chunk.state !== "start") {
-          currentActivity = "";
+        if (chunk.tool && (chunk.state === "done" || chunk.state === "error")) {
+          for (let i = currentToolSteps.length - 1; i >= 0; i--) {
+            if (currentToolSteps[i].tool === chunk.tool && currentToolSteps[i].state === "running") {
+              currentToolSteps[i] = {
+                ...currentToolSteps[i],
+                state: chunk.state as "done" | "error",
+                duration_ms: chunk.duration_ms,
+                result_preview: chunk.result_preview,
+              };
+              break;
+            }
+          }
+          setMessages([...newMessages, {
+            role: "assistant",
+            content: assistantContent,
+            toolSteps: [...currentToolSteps],
+            toolsExpanded: true,
+            created_at: Date.now() / 1000,
+          }]);
         }
         if (chunk.content) {
           assistantContent += chunk.content;
-          setMessages([...newMessages, { role: "assistant", content: assistantContent, toolActivity: currentActivity, created_at: Date.now() / 1000 }]);
+          setMessages([...newMessages, {
+            role: "assistant",
+            content: assistantContent,
+            toolSteps: currentToolSteps.length > 0 ? [...currentToolSteps] : undefined,
+            toolsExpanded: currentToolSteps.length > 0 ? true : undefined,
+            created_at: Date.now() / 1000,
+          }]);
         }
-        if (chunk.done && chunk.usage) {
-          finalUsage = { input: chunk.usage.input || 0, output: chunk.usage.output || 0, cache: chunk.usage.cache || 0 };
-          setSessionUsage(prev => ({ input: prev.input + finalUsage!.input, output: prev.output + finalUsage!.output, cache: prev.cache + finalUsage!.cache }));
-          currentActivity = "";
+        if (chunk.done) {
+          if (chunk.usage) {
+            finalUsage = { input: chunk.usage.input || 0, output: chunk.usage.output || 0, cache: chunk.usage.cache || 0 };
+            setSessionUsage(prev => ({ input: prev.input + finalUsage!.input, output: prev.output + finalUsage!.output, cache: prev.cache + finalUsage!.cache }));
+          }
         }
       }
     } catch (err) {
@@ -280,10 +311,12 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       const msgs = [...prev];
       const last = msgs[msgs.length - 1];
       if (last && last.role === "assistant") {
-        const updated = { ...last };
-        if (finalUsage) updated.usage = finalUsage;
-        if (ttft !== undefined) updated.ttft = ttft;
-        msgs[msgs.length - 1] = updated;
+        msgs[msgs.length - 1] = {
+          ...last,
+          toolsExpanded: false,
+          usage: finalUsage || last.usage,
+          ttft,
+        };
         return msgs;
       }
       return [...newMessages, { role: "assistant", content: assistantContent, created_at: Date.now() / 1000, usage: finalUsage, ttft }];
@@ -441,11 +474,11 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
                   </>
                 ) : (
                   <>
-                    {msg.toolActivity && (
-                      <div className="text-xs text-muted-foreground mb-2 flex items-center gap-1">
-                        <span className="animate-pulse">⚡</span>
-                        <span>{msg.toolActivity}</span>
-                      </div>
+                    {msg.toolSteps && msg.toolSteps.length > 0 && (
+                      <ToolTimeline
+                        steps={msg.toolSteps}
+                        defaultExpanded={msg.toolsExpanded ?? false}
+                      />
                     )}
                     <ReactMarkdown
                       remarkPlugins={[remarkGfm]}

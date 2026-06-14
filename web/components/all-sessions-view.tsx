@@ -3,8 +3,8 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { format } from "date-fns";
 import { zhCN } from "date-fns/locale";
-import { SessionInfo, fetchSessions } from "@/lib/api";
-import { Loader2, Search, Calendar, MessageSquare, ChevronLeft, ChevronRight } from "lucide-react";
+import { SessionInfo, fetchSessions, renameSession, deleteSession } from "@/lib/api";
+import { Loader2, Search, Calendar, MessageSquare, ChevronLeft, ChevronRight, Pencil, Trash2, Check, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -19,6 +19,8 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState("");
   const limit = 20;
 
   const loadSessions = useCallback(async (pageNum: number, q: string) => {
@@ -53,6 +55,21 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
       loadSessions(page, search.trim());
     }
   }, [page, search, loadSessions]);
+
+  const commitRename = async (id: string) => {
+    const title = editingTitle.trim();
+    if (title) {
+      await renameSession(id, title);
+      setSessions(prev => prev.map(s => s.id === id ? { ...s, title } : s));
+    }
+    setEditingId(null);
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!window.confirm("确定要删除这个对话吗？")) return;
+    await deleteSession(id);
+    setSessions(prev => prev.filter(s => s.id !== id));
+  };
 
   return (
     <div className="flex-1 flex flex-col h-full bg-background overflow-hidden">
@@ -96,14 +113,47 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
                   onClick={() => onSelectSession(session.id)}
                   className="group p-3 rounded-xl border border-border bg-card hover:border-primary/50 hover:shadow-md transition-all cursor-pointer flex flex-col"
                 >
-                  <h3
-                    className="font-semibold text-sm text-card-foreground line-clamp-2 leading-snug group-hover:text-primary transition-colors mb-0.5"
-                    dangerouslySetInnerHTML={{
-                      __html: search.trim()
-                        ? session.title.replace(new RegExp(search.trim(), 'gi'), match => `<span class="bg-yellow-500/30 text-yellow-500 rounded px-0.5">${match}</span>`)
-                        : session.title
-                    }}
-                  />
+                  <div className="flex items-start gap-1 mb-0.5">
+                    {editingId === session.id ? (
+                      <div className="flex items-center gap-1 flex-1 min-w-0" onClick={e => e.stopPropagation()}>
+                        <input
+                          autoFocus
+                          value={editingTitle}
+                          onChange={e => setEditingTitle(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === "Enter") commitRename(session.id);
+                            if (e.key === "Escape") setEditingId(null);
+                          }}
+                          className="flex-1 min-w-0 bg-transparent outline-none border-b border-primary text-sm font-medium"
+                        />
+                        <button onClick={e => { e.stopPropagation(); commitRename(session.id); }} className="text-primary shrink-0"><Check className="h-3 w-3" /></button>
+                        <button onClick={e => { e.stopPropagation(); setEditingId(null); }} className="text-muted-foreground shrink-0"><X className="h-3 w-3" /></button>
+                      </div>
+                    ) : (
+                      <h3
+                        className="font-semibold text-sm text-card-foreground line-clamp-2 leading-snug group-hover:text-primary transition-colors flex-1 min-w-0"
+                        dangerouslySetInnerHTML={{
+                          __html: search.trim()
+                            ? session.title.replace(new RegExp(search.trim(), 'gi'), match => `<span class="bg-yellow-500/30 text-yellow-500 rounded px-0.5">${match}</span>`)
+                            : session.title
+                        }}
+                      />
+                    )}
+                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                      <button
+                        onClick={e => { e.stopPropagation(); setEditingTitle(session.title); setEditingId(session.id); }}
+                        className="p-1 hover:text-foreground text-muted-foreground rounded"
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </button>
+                      <button
+                        onClick={e => { e.stopPropagation(); handleDelete(session.id); }}
+                        className="p-1 hover:text-destructive text-muted-foreground rounded"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </div>
+                  </div>
 
                   {session.snippet && (
                     <p

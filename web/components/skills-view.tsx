@@ -5,8 +5,8 @@ import { SkillInfo, fetchSkills, saveSkill } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { MdEditor } from "@/components/md-editor";
 import { Plus, Save, Wrench } from "lucide-react";
 
 export function SkillsView() {
@@ -173,12 +173,11 @@ export function SkillsView() {
               </div>
 
               <div className="grid gap-2">
-                <label className="text-sm font-medium">Content (Markdown)</label>
-                <Textarea 
-                  value={content} 
-                  onChange={e => setContent(e.target.value)} 
-                  placeholder="Instructions for the agent..." 
-                  className="min-h-[400px] font-mono text-sm"
+                <label className="text-sm font-medium">内容 (Content)</label>
+                <MdEditor
+                  value={content}
+                  onChange={setContent}
+                  placeholder="Instructions for the agent..."
                 />
               </div>
             </div>
