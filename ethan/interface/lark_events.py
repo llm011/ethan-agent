@@ -201,12 +201,30 @@ async def _handle_message(event_data: dict) -> None:
             await _send_reply(chat_id, welcome)
             # Let reaction stay visible while user reads welcome, then process their actual message
 
-        # 加载完整历史，让 Agent 拥有上下文
+        # 加载完整历史，用 WorkingMemory 重建热区（与 REPL/API 一致）
         session_obj = await store.load(session_id)
-        session_messages = session_obj.messages if session_obj else []
+        history = session_obj.messages if session_obj else []
 
         user_msg = Message(role="user", content=text)
         await store.save_message(session_id, user_msg)
+
+        # 重建 WorkingMemory：热区最近 10 轮 + cold facts
+        from ethan.memory.working import MemoryConfig, WorkingMemory
+        from ethan.memory.facts import FactStore
+        memory = WorkingMemory(config=MemoryConfig(hot_size=10))
+        memory.cold_facts = FactStore().build_context()
+        hist_ua = [m for m in history if m.role in ("user", "assistant")]
+        pairs, i = [], 0
+        while i < len(hist_ua) - 1:
+            if hist_ua[i].role == "user" and hist_ua[i+1].role == "assistant":
+                pairs.append((hist_ua[i], hist_ua[i+1]))
+                i += 2
+            else:
+                i += 1
+        for u, a in pairs[-memory.config.hot_size:]:
+            memory.hot.append(u)
+            memory.hot.append(a)
+        context_messages = memory.build_context() + [user_msg]
 
         registry = ToolRegistry()
         for tool in [ShellTool(), WebSearchTool(), WebFetchTool(),
@@ -225,7 +243,7 @@ async def _handle_message(event_data: dict) -> None:
         full_content = ""
         reaction_removed = False
 
-        async for chunk in agent.stream_chat(session_messages + [user_msg]):
+        async for chunk in agent.stream_chat(context_messages):
             if isinstance(chunk, ToolEvent):
                 continue
             full_content += chunk
