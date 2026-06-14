@@ -164,6 +164,13 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
   useEffect(() => { scrollToBottom(); }, [messages, scrollToBottom]);
 
+  // 进入对话或新建时 focus 输入框
+  useEffect(() => {
+    if (!streaming) {
+      setTimeout(() => inputRef.current?.focus(), 50);
+    }
+  }, [initialSessionId, streaming]);
+
   useEffect(() => {
     fetchModels().then((m) => {
       setModels(m);
