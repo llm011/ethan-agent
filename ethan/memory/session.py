@@ -177,7 +177,7 @@ class SessionStore:
         from ethan.providers.base import ToolCall
 
         async with self._db.execute(
-            "SELECT id, title, model, created_at, updated_at FROM sessions WHERE id = ?",
+            "SELECT id, title, model, created_at, updated_at, COALESCE(source, 'web') FROM sessions WHERE id = ?",
             (session_id,),
         ) as cursor:
             row = await cursor.fetchone()
@@ -187,6 +187,7 @@ class SessionStore:
         session = Session(
             id=row[0], title=row[1], model=row[2],
             created_at=row[3], updated_at=row[4],
+            source=row[5],
         )
 
         async with self._db.execute(
