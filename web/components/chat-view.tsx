@@ -113,6 +113,10 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   // Load session from initialSessionId prop (route param)
   useEffect(() => {
     if (initialSessionId) {
+      // 如果正在流式输出中（刚新建会话并发送消息），不重新加载
+      // 因为此时 session 刚创建，DB 里还没有消息，fetchSession 会返回空数组
+      if (initialSessionId === activeSession && streaming) return;
+
       fetchSession(initialSessionId)
         .then((detail) => {
           setActiveSession(initialSessionId);
@@ -125,7 +129,6 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
             }))
           );
           setSelectedModel(detail.model);
-          // 累加历史 assistant 消息的 usage 作为初始总量
           const historicUsage = detail.messages
             .filter((m: any) => m.role === "assistant" && m.usage)
             .reduce((acc: any, m: any) => ({
@@ -222,8 +225,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         { id: s.id, title: text.slice(0, 30) || "New chat", model: s.model, created_at: Date.now() / 1000, updated_at: Date.now() / 1000 },
         ...prev,
       ]);
-      // Navigate to the new session URL
-      router.push(`/chat/${s.id}`);
+      // 用 pushState 更新 URL，不触发组件卸载（router.push 会卸载当前组件，中断流式输出）
+      window.history.pushState(null, '', `/chat/${s.id}`);
     }
 
     let content = text;
