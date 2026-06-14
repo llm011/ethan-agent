@@ -61,7 +61,8 @@ export interface SessionDetail {
   id: string;
   title: string;
   model: string;
-  messages: { role: string; content: string; created_at?: number }[];
+  source?: string;
+  messages: { role: string; content: string; created_at?: number; usage?: { input: number; output: number; cache: number } }[];
 }
 
 export async function fetchSessions(limit = 50, offset = 0, q?: string): Promise<SessionInfo[]> {

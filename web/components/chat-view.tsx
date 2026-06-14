@@ -100,6 +100,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const [selectedModel, setSelectedModel] = useState<string>("");
   const [pendingFiles, setPendingFiles] = useState<{ name: string; path: string }[]>([]);
   const [sessionUsage, setSessionUsage] = useState<{ input: number; output: number; cache: number }>({ input: 0, output: 0, cache: 0 });
+  const [sessionSource, setSessionSource] = useState<string>("web");
 
   // Onboarding state
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -118,10 +119,20 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
               role: m.role,
               content: m.content,
               created_at: m.created_at,
+              usage: m.usage || undefined,
             }))
           );
           setSelectedModel(detail.model);
-          setSessionUsage({ input: 0, output: 0, cache: 0 });
+          // 累加历史 assistant 消息的 usage 作为初始总量
+          const historicUsage = detail.messages
+            .filter((m: any) => m.role === "assistant" && m.usage)
+            .reduce((acc: any, m: any) => ({
+              input: acc.input + (m.usage.input || 0),
+              output: acc.output + (m.usage.output || 0),
+              cache: acc.cache + (m.usage.cache || 0),
+            }), { input: 0, output: 0, cache: 0 });
+          setSessionUsage(historicUsage);
+          setSessionSource(detail.source || "web");
         })
         .catch(() => {
           setActiveSession(null);
@@ -131,6 +142,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       setActiveSession(null);
       setMessages([]);
       setSessionUsage({ input: 0, output: 0, cache: 0 });
+      setSessionSource("web");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialSessionId]);
@@ -340,6 +352,22 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
                 <span className="truncate">{cur.title}</span>
                 <Pencil className="h-3 w-3 opacity-0 group-hover:opacity-50 shrink-0" />
               </button>
+            );
+          })()}
+
+          {/* 来源 badge */}
+          {activeSession && sessionSource && (() => {
+            const sourceLabel: Record<string, string> = { lark: "飞书", repl: "REPL", web: "Web", heartbeat: "心跳" };
+            const sourceColor: Record<string, string> = {
+              lark: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
+              repl: "bg-purple-500/15 text-purple-600 dark:text-purple-400",
+              web: "bg-green-500/15 text-green-600 dark:text-green-400",
+              heartbeat: "bg-orange-500/15 text-orange-600 dark:text-orange-400",
+            };
+            return (
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0 ${sourceColor[sessionSource] || "bg-muted text-muted-foreground"}`}>
+                {sourceLabel[sessionSource] || sessionSource}
+              </span>
             );
           })()}
 

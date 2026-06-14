@@ -193,23 +193,7 @@ ethan schedule list/remove/pause/resume
 
 ### 概述
 
-允许用户通过飞书机器人与 Ethan 对话。采用 **WebSocket 长连接**方式，无需公网 IP 或手动配置 Webhook 回调地址，由 `lark-cli` 在本地建立持久连接并消费事件。
-
-### 接入方式：WebSocket 长连接（lark-cli）
-
-与传统 HTTP Webhook 不同，本方案基于 `lark-cli event consume`，由客户端主动与飞书服务器建立 WebSocket 长连接。优点：
-
-- **无需公网 IP**，本地开发环境直接可用
-- **无需 HTTPS 证书**，无需反向代理
-- 飞书开放平台不需要填写回调 URL
-
-运行方式：
-
-```bash
-lark-cli event consume
-```
-
-该命令会持续监听 `im.message.receive_v1` 事件，并将消息分发给本地的 Ethan Agent 处理。
+允许用户通过飞书机器人与 Ethan 对话。采用 **HTTP Webhook** 方式，由 `ethan serve` 暴露的 `/lark/webhook` 端点接收飞书推送的事件。
 
 ### 配置方式
 
@@ -221,35 +205,25 @@ lark:
   app_secret: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 ```
 
-`app_id` 和 `app_secret` 从飞书开放平台 → 应用凭证中获取。
-
-### 初始化流程
-
-```bash
-lark-cli config init    # 写入 app_id / app_secret
-lark-cli auth login     # 获取访问令牌，验证凭证有效性
-lark-cli event consume  # 启动 WebSocket 长连接，开始监听消息
-```
+在飞书开放平台的「事件与回调」中，将 Webhook URL 设置为 `https://<your-domain>:8900/lark/webhook`，并订阅 `im.message.receive_v1` 事件。
 
 ### 事件处理流程
 
 ```
-收到 im.message.receive_v1 事件
+POST /lark/webhook
+   │
+   ├─ URL verification challenge → 直接返回 challenge
    │
    ├─ 立即给原消息加 THINKING_FACE 表情 → 告知用户已收到
    │
-   ├─ 根据 chat_id 查找或创建 Session
+   ├─ 根据 chat_id 查找或创建 Session（title 前缀 lark:<chat_id>:）
    │
    ├─ 调用 Agent.chat() 处理消息
    │
    └─ 发送单条完整回复（非流式，飞书 IM 协议限制）
 ```
 
-收到消息后第一步加 `THINKING_FACE` 表情是关键的用户体验设计：飞书消息处理可能需要数秒，及时反馈避免用户以为机器人离线。Agent 处理完成后发送一条完整的文本回复，不做增量推送。
-
-### 新用户引导
-
-首次私聊机器人时，Session 为空，Agent 会发送引导消息介绍自己的能力，帮助用户了解可以提问的内容。
+收到消息后第一步加 `THINKING_FACE` 表情是关键的用户体验设计：飞书消息处理可能需要数秒，及时反馈避免用户以为机器人离线。
 
 ### 飞书 Session 与普通 Session 的区别
 
@@ -257,12 +231,8 @@ lark-cli event consume  # 启动 WebSocket 长连接，开始监听消息
 |------|-------------|-------------|
 | `source` 标记 | — | `"lark"` |
 | Session 标识 | 启动时生成 UUID | 由 `chat_id` 映射 |
-| chat_id 映射持久化 | 不适用 | `~/.ethan/memory/lark_sessions.json` |
-| Session 标题格式 | 用户自定义或自动摘要 | `lark:<chat_id>:<short_id>` |
+| 识别方式 | — | Session title 前缀 `lark:<chat_id>:` |
 | 可在 Web UI 查看 | 是 | 是（同一 SQLite 数据库） |
-| 消息来源 | REPL / Web UI | 飞书客户端 |
-
-`chat_id` → `session_id` 的映射写入 `~/.ethan/memory/lark_sessions.json`，确保同一个飞书会话在 Ethan 重启后仍能延续上下文。
 
 ### 应用权限要求
 
@@ -280,12 +250,4 @@ lark-cli event consume  # 启动 WebSocket 长连接，开始监听消息
 
 ## 启动速度优化
 
-当前 `ethan -h` 约 0.3s（Python 导入），进入 REPL 约 1.5s（uv + 解释器冷启动）。
-
-已做的优化：
-- 延迟导入重量级模块（anthropic、openai 只在对话时加载）
-- `_build_agent()` 在 callback 内部调用，不影响子命令
-
-未来可选方案：
-- Daemon + client 架构（类似 Claude Code）：进程常驻，客户端只做 IPC
-- `uv tool install` 预编译，跳过每次的依赖解析
+延迟导入重量级模块（`anthropic`、`openai` 只在实际发起对话时加载），加上 `uv` 的依赖缓存，`ethan` 命令冷启动到第一次响应已降至约 0.16s（相比优化前的 7.6s）。

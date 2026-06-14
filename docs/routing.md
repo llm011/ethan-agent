@@ -28,16 +28,26 @@ Ethan 受认知科学中**双进程理论**（Dual-Process Theory）的启发，
     → Yes → Deliberation Track
    │
    ▼
-[2] 是否命中 Skill 触发词？（fast_skill_triggers，不受长度限制）
+[2] 是否命中 fast_path Skill 的 trigger？（Skill frontmatter fast_path: true，自动注册）
     → Yes → Reflex Track + 关联 Skill
    │
    ▼
-[3] 是否命中快捷关键词 且 消息长度 ≤ N 字？（fast_keywords）
+[3] 是否命中 config.routing.fast_skill_triggers？（手动配置，不受长度限制）
     → Yes → Reflex Track
    │
    ▼
-[4] 默认 → Deliberation Track
+[4] 消息长度 > fast_max_length？
+    → Yes → Deliberation Track
+   │
+   ▼
+[5] 是否命中 fast_keywords？（受长度限制）
+    → Yes → Reflex Track
+   │
+   ▼
+[6] 默认 → Deliberation Track
 ```
+
+[2] 和 [3] 的区别：[2] 是自动的，只要 Skill 的 frontmatter 写了 `fast_path: true`，它的所有 trigger 关键词就会在 `Agent.chat()` 中自动收集并注入路由判断，无需额外配置；[3] 是手动补充的备用列表。
 
 路由结果不仅决定推理深度，还决定工具集合、系统提示词的范围和记忆注入的深度。
 

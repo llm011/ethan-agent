@@ -274,7 +274,16 @@ async def get_session(session_id: str):
         "id": session.id,
         "title": session.title,
         "model": session.model,
-        "messages": [{"role": m.role, "content": m.content, "created_at": getattr(m, "created_at", None)} for m in session.messages if m.role in ("user", "assistant")],
+        "source": getattr(session, "source", "web"),
+        "messages": [
+            {
+                "role": m.role,
+                "content": m.content,
+                "created_at": getattr(m, "created_at", None),
+                "usage": getattr(m, "usage", None),
+            }
+            for m in session.messages if m.role in ("user", "assistant")
+        ],
     }
 
 
@@ -601,10 +610,12 @@ async def _stream_response(
         yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
     if session_id and full:
-        await store.save_message(session_id, Message(role="assistant", content=full))
+        # 把 usage 存到 assistant 消息里
+        usage_dict = {"input": agent.usage.input_tokens, "output": agent.usage.output_tokens, "cache": agent.usage.cache_tokens}
+        asst_msg = Message(role="assistant", content=full, usage=usage_dict)
+        await store.save_message(session_id, asst_msg)
         await store.touch(session_id)
         asyncio.create_task(_maybe_consolidate(session_id, agent._provider.model))
-        # 第 3 轮对话后异步生成智能标题
         asyncio.create_task(_maybe_regen_title(session_id, store))
 
     done_data = json.dumps({

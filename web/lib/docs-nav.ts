@@ -13,6 +13,7 @@ export const DOC_NAV: DocNavGroup[] = [
     group: "入门",
     items: [
       { slug: "architecture", label: "系统架构" },
+      { slug: "providers", label: "模型 Provider" },
     ],
   },
   {
@@ -22,6 +23,7 @@ export const DOC_NAV: DocNavGroup[] = [
       { slug: "memory", label: "记忆系统" },
       { slug: "caching", label: "Prompt Caching" },
       { slug: "heartbeat", label: "心跳机制" },
+      { slug: "agent-loop", label: "Agent Loop" },
     ],
   },
   {
