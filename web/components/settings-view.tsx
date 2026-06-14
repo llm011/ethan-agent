@@ -205,7 +205,7 @@ export function SettingsView({ models }: SettingsViewProps) {
   ];
 
   return (
-    <div className="flex h-full w-full bg-background overflow-hidden border rounded-md">
+    <div className="flex h-full w-full bg-background overflow-hidden">
       {/* Sidebar */}      <div className="w-[200px] border-r bg-muted/30 flex flex-col">
         <div className="p-4 border-b">
           <h2 className="font-semibold">设置</h2>
