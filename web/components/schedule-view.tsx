@@ -8,10 +8,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Loader2, RefreshCw, Play, Pause, Trash2, Clock, TerminalSquare, Hash } from "lucide-react";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 
 export function ScheduleView() {
   const [jobs, setJobs] = useState<ScheduleJob[]>([]);
   const [loading, setLoading] = useState(true);
+  const [confirmState, setConfirmState] = useState<{ open: boolean; id: string }>({ open: false, id: "" });
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -42,8 +44,13 @@ export function ScheduleView() {
     }
   };
 
-  const removeJob = async (id: string) => {
-    if (!window.confirm("确定要删除这个定时任务吗？")) return;
+  const removeJob = (id: string) => {
+    setConfirmState({ open: true, id });
+  };
+
+  const doRemoveJob = async () => {
+    const id = confirmState.id;
+    setConfirmState({ open: false, id: "" });
     setJobs(prev => prev.filter(j => j.id !== id));
     try {
       await deleteSchedule(id);
@@ -54,6 +61,14 @@ export function ScheduleView() {
 
   return (
     <div className="flex flex-col h-full bg-background text-foreground">
+      <ConfirmDialog
+        open={confirmState.open}
+        title="删除定时任务"
+        description="确定要删除这个定时任务吗？此操作无法撤销。"
+        confirmLabel="删除"
+        onConfirm={doRemoveJob}
+        onCancel={() => setConfirmState({ open: false, id: "" })}
+      />
       <header className="h-12 border-b border-border flex items-center px-4 justify-between shrink-0">
         <h1 className="font-semibold text-lg">定时任务 (Schedules)</h1>
         <Button variant="ghost" size="icon" onClick={loadData} disabled={loading}>

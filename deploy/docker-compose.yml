@@ -1,0 +1,55 @@
+version: "3.9"
+
+services:
+  # ── Ethan Backend API ──────────────────────────────────────────
+  ethan:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: ethan-agent:latest
+    container_name: ethan-backend
+    restart: unless-stopped
+    ports:
+      - "8900:8900"
+    volumes:
+      # 持久化数据（记忆、会话、Skills、配置）
+      - ethan-data:/root/.ethan
+    environment:
+      # 必填：至少填一个 Provider
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      # 默认模型（不填则使用 gemini-2.5-flash）
+      - AGENT_DEFAULT_MODEL=${AGENT_DEFAULT_MODEL:-claude-sonnet-4-6}
+      # Web UI 访问鉴权 Token（留空则不鉴权）
+      - ETHAN_AUTH_TOKEN=${ETHAN_AUTH_TOKEN:-}
+      # 代理（可选）
+      - ETHAN_PROXY=${ETHAN_PROXY:-}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8900/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ── Ethan Web UI ──────────────────────────────────────────────
+  ethan-web:
+    build:
+      context: ../web
+      dockerfile: Dockerfile
+    image: ethan-web:latest
+    container_name: ethan-web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # 后端 API 地址（容器内互联）
+      - NEXT_PUBLIC_API_URL=http://ethan:8900
+    depends_on:
+      ethan:
+        condition: service_healthy
+
+volumes:
+  ethan-data:
+    driver: local

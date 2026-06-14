@@ -8,6 +8,7 @@ import { Loader2, Search, Calendar, MessageSquare, ChevronLeft, ChevronRight, Pe
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 
 interface AllSessionsViewProps {
   onSelectSession: (id: string) => void;
@@ -21,6 +22,7 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
   const [hasMore, setHasMore] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
+  const [confirmState, setConfirmState] = useState<{ open: boolean; id: string }>({ open: false, id: "" });
   const limit = 20;
 
   const loadSessions = useCallback(async (pageNum: number, q: string) => {
@@ -83,14 +85,27 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
     setEditingId(null);
   };
 
-  const handleDelete = async (id: string) => {
-    if (!window.confirm("确定要删除这个对话吗？")) return;
+  const handleDelete = (id: string) => {
+    setConfirmState({ open: true, id });
+  };
+
+  const doDelete = async () => {
+    const id = confirmState.id;
+    setConfirmState({ open: false, id: "" });
     await deleteSession(id);
     setSessions(prev => prev.filter(s => s.id !== id));
   };
 
   return (
     <div className="flex-1 flex flex-col h-full bg-background overflow-hidden">
+      <ConfirmDialog
+        open={confirmState.open}
+        title="删除对话"
+        description="确定要删除这个对话吗？此操作无法撤销。"
+        confirmLabel="删除"
+        onConfirm={doDelete}
+        onCancel={() => setConfirmState({ open: false, id: "" })}
+      />
       <div className="p-4 border-b border-border flex items-center justify-between shrink-0">
         <h1 className="text-lg font-semibold">全部历史对话</h1>
         <div className="relative w-56">
@@ -117,7 +132,7 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {sessions.map((session) => {
-              const sourceLabel: Record<string, string> = { lark: "飞书", repl: "REPL", web: "Web", heartbeat: "心跳" };
+              const sourceLabel: Record<string, string> = { lark: "飞书", repl: "命令行", web: "Web", heartbeat: "心跳" };
               const sourceColor: Record<string, string> = {
                 lark: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
                 repl: "bg-purple-500/15 text-purple-600 dark:text-purple-400",

@@ -2,13 +2,17 @@
 
 ## 概述
 
-Ethan 的记忆系统由三个独立层次构成，覆盖「短期上下文」到「长期知识」：
+Ethan 的记忆系统由四个独立层次构成，覆盖「短期上下文」到「长期知识」：
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│  第三层：情节记忆（Episodic Memory）                      │
+│  第四层：情节记忆（Episodic Memory）                      │
 │  每次 session 结束时写入一条摘要 + 关键词                 │
 │  存储：~/.ethan/memory/episodes.json                     │
+├──────────────────────────────────────────────────────────┤
+│  第三层：用户画像（User Profile）                         │
+│  结构化叙述性信息（目标、沟通方式、约定等）               │
+│  存储：~/.ethan/memory/user_profile.md                   │
 ├──────────────────────────────────────────────────────────┤
 │  第二层：分层工作记忆（Working Memory）                   │
 │  cold facts ← warm summary ← hot 最近 N 轮               │
@@ -123,7 +127,7 @@ memory.build_context() 返回:
 
 ### 三路接口对齐
 
-REPL、Web API (`/chat`) 三路接口均使用相同的 `WorkingMemory(hot_size=10)` 配置，不再存在截断策略不一致的问题。每个请求从 SessionStore 取出历史消息后，加载最近 `hot_size` 轮到热区，冷区 facts 由 Agent 内部 `FactStore` 统一注入。
+REPL、Web API (`/chat`)、Lark 三路接口均使用相同的 `WorkingMemory(hot_size=10)` 配置，不再存在截断策略不一致的问题。
 
 ### 配置
 
@@ -147,7 +151,46 @@ MemoryConfig(
 
 ---
 
-## 第三层：情节记忆（Episodic Memory）
+## 第三层：用户画像（User Profile）
+
+文件：`ethan/tools/builtin/profile_update.py`  
+数据文件：`~/.ethan/memory/user_profile.md`
+
+### 作用
+
+存储无法压缩为单条 fact 的叙述性信息：个人目标、沟通风格、激励语、与 agent 的约定等。全量注入 system prompt（full/medium 路径），不参与置信度排名。
+
+### 章节结构
+
+文件以 Markdown 格式，分为固定五个章节：
+
+| 章节 | 用途 |
+|------|------|
+| `身份与背景` | 职业、地区、角色等 |
+| `目标与方向` | 长期目标、当前专注 |
+| `工作与沟通方式` | 偏好的沟通风格、工作节奏 |
+| `个人语言与激励` | 用户自创词汇、激励短语 |
+| `与 Agent 的约定` | 特定场景下的行为约定 |
+
+### 写入方式
+
+Agent 通过 `profile_update` 工具主动更新，支持两种模式：
+
+- `append`（默认）：在对应章节下追加一条 bullet
+- `overwrite`：替换整个章节内容
+
+```python
+# 示例调用
+await profile_update.run(
+    section="目标与方向",
+    entry="2026 年底前完成独立产品上线",
+    mode="append",
+)
+```
+
+---
+
+## 第四层：情节记忆（Episodic Memory）
 
 文件：`ethan/memory/episodic.py`  
 数据文件：`~/.ethan/memory/episodes.json`
@@ -173,30 +216,71 @@ MemoryConfig(
 
 支持关键词搜索（对 summary + keywords 做词频打分），可按时间倒序取最近几条。目前用于日志回顾，尚未接入 LLM 上下文召回（计划中）。
 
+---
 
-## 第四层：置信度与记忆注入（Confidence & Injection）
+## 主动写入记忆工具（Proactive Memory Write）
+
+以上各层都依赖后台压缩提炼。三个工具让 Agent **即时、主动**将信息持久化，无需等待滑动窗口触发：
+
+### `memory_write`
+
+文件：`ethan/tools/builtin/memory_write.py`
+
+将一条用户事实写入冷区（`facts.json`），置信度固定为 `0.95`，来源标记为 `agent_proactive`。
+
+```python
+# 触发场景：用户分享姓名、职业、偏好、一次性决策
+await memory_write.run(
+    content="用户在 Acme Corp 担任后端工程师",
+    category="knowledge",  # preference | decision | knowledge | correction
+)
+```
+
+### `procedure_write`
+
+文件：`ethan/tools/builtin/procedure_write.py`
+
+将一条行为规则写入 `ProcedureStore`（`procedures.json`），通过 `<behavioral_guidelines>` 注入 system prompt，每轮对话都生效。
+
+```python
+# 触发场景：用户说"以后回复都用英文"、"不要用韩语"
+await procedure_write.run(
+    rule="Always reply in Chinese",
+    context="用户明确要求",
+)
+```
+
+### `profile_update`
+
+文件：`ethan/tools/builtin/profile_update.py`
+
+更新 `user_profile.md` 中的指定章节（见 [用户画像](#第三层用户画像user-profile)）。
+
+---
+
+## 置信度与记忆注入（Confidence & Injection）
 
 ### 置信度机制（Confidence）
 
 每个保存在冷区（`facts.json`）的 Fact 都带有一个 `confidence` 分数（0.0 ~ 1.0）。
+
 - **默认提炼（80%）**：日常闲聊中由后台自动提炼出的信息，默认置信度通常为 `0.8`。
-- **强信号加权（90%~95%）**：当用户在对话中使用强烈指令（如“记住”、“纠正”、“不要这样做”、“偏好”）时，`Consolidator` 会赋予该轮次较高的重要性评分。后续提取时，该记忆可能获得更高的初始置信度。
-- **动态更新与淘汰**：如果在后续对话中同样的事实被反复提炼命中，其置信度将叠加（越发接近 1.0）。反之，如果置信度较低且长期未被命中访问，它将在存储空间不足时优先被清理（遗忘策略）。
+- **主动写入（95%）**：通过 `memory_write` 工具直接写入的 fact，置信度固定为 `0.95`。
+- **强信号加权（90%~95%）**：用户使用强烈指令（"记住"、"纠正"、"偏好"）时，Consolidator 赋予更高重要性评分。
+- **动态更新与淘汰**：相同 fact 被反复命中则叠加置信度；低置信度且长期未访问的 fact 在存储空间不足时优先清理。
 
 ### 记忆注入机制（Injection）
 
-Agent 在每次执行大模型调用前（`Agent._build_system`），会进行如下操作：
-1. **自动检索与排序**：从 `FactStore` 读取非废弃且置信度大于等于 `0.3` 的活跃事实。
-2. **权重优先提取**：按照 `confidence`（置信度降序） 和 `last_accessed`（最近访问时间降序）进行双重排序。
-3. **无感注入**：截取排名最靠前的 **Top 15** 条记忆，转换为上下文文本，直接拼接在 System Prompt 最顶部。
-   - 注入格式示例：`"--- 以下是你对用户的长期记忆，回答时请优先参考：..."`
+`Agent._build_system()` 在每次 LLM 调用前执行：
 
-这种机制确保了大模型始终能“无感知”地带着最核心、最确定的事实偏好去回应用户的每次请求。
+1. 从 `FactStore` 读取 `confidence >= 0.3` 的活跃 fact
+2. 按 `confidence`（降序）和 `last_accessed`（降序）双重排序
+3. 取 top-15 注入 `<memory_context>`（fast 路径取 top-5）
+4. `user_profile.md` 全量注入 `<user_profile>`（仅 full/medium 路径）
 
 ---
 
 ## 完整数据流
-
 
 ```
 用户输入
@@ -220,8 +304,12 @@ WorkingMemory.build_context()
     = [冷区 facts] + [温区 summary] + [热区完整消息] + [当前输入]
     │
     ▼
-Agent.stream_chat(context) → LLM（每次都注入实时时间）
+Agent.stream_chat(context) → LLM（注入实时时间 + user_profile + procedures）
     │
+    │  LLM 主动调用工具（任意时机）：
+    │   ├─ memory_write    → 立即写入 facts.json
+    │   ├─ procedure_write → 立即写入 procedures.json
+    │   └─ profile_update  → 立即写入 user_profile.md
     ▼
 REPL 退出 → EpisodeStore.add() → episodes.json
           → SessionStore.cleanup_empty() → 清理空 session
@@ -235,5 +323,7 @@ REPL 退出 → EpisodeStore.add() → episodes.json
 |------|------|------|
 | Session DB | `~/.ethan/sessions.db` | 所有对话历史（SQLite） |
 | Cold Facts | `~/.ethan/memory/facts.json` | 结构化长期 facts |
+| Procedures | `~/.ethan/memory/procedures.json` | 行为规则 |
+| User Profile | `~/.ethan/memory/user_profile.md` | 用户画像（叙述性） |
 | Episodes | `~/.ethan/memory/episodes.json` | 历次 session 情节摘要 |
 | Config | `~/.ethan/config.yaml` | 全局配置 |

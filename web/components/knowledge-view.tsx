@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { KnowledgeItem, fetchKnowledge, addKnowledge, deleteKnowledge, searchKnowledge } from "@/lib/api";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 
 export function KnowledgeView() {
   const [items, setItems] = useState<KnowledgeItem[]>([]);
@@ -15,6 +16,7 @@ export function KnowledgeView() {
   const [searchMode, setSearchMode] = useState<"keyword" | "semantic">("keyword");
   const [loading, setLoading] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
+  const [confirmState, setConfirmState] = useState<{ open: boolean; source: string }>({ open: false, source: "" });
 
   // Add form state
   const [newTitle, setNewTitle] = useState("");
@@ -53,8 +55,13 @@ export function KnowledgeView() {
     return () => clearTimeout(timer);
   }, [search, searchMode, loadData]);
 
-  const handleDelete = async (source: string) => {
-    if (!window.confirm("Are you sure you want to delete this knowledge item?")) return;
+  const handleDelete = (source: string) => {
+    setConfirmState({ open: true, source });
+  };
+
+  const doDelete = async () => {
+    const source = confirmState.source;
+    setConfirmState({ open: false, source: "" });
     try {
       await deleteKnowledge(source);
       setItems(items.filter((item) => item.source !== source));
@@ -87,6 +94,14 @@ export function KnowledgeView() {
 
   return (
     <div className="flex-1 flex flex-col h-full bg-background">
+      <ConfirmDialog
+        open={confirmState.open}
+        title="删除知识条目"
+        description="确定要删除这条知识吗？此操作无法撤销。"
+        confirmLabel="删除"
+        onConfirm={doDelete}
+        onCancel={() => setConfirmState({ open: false, source: "" })}
+      />
       <header className="h-12 border-b border-border flex items-center justify-between px-4">
         <h2 className="text-lg font-semibold flex items-center gap-2">
           <Book className="h-5 w-5" /> 知识库 (Knowledge Base)

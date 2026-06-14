@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { Plus, Trash2, Search, Settings, Book, BookOpen, Pencil, Check, X, List, Wrench, Radio } from "lucide-react";
 import { Clock, Database } from "lucide-react";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { useSidebar } from "@/app/layout-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,6 +35,7 @@ export function Sidebar() {
   const [searchLoading, setSearchLoading] = useState(false);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
+  const [confirmState, setConfirmState] = useState<{ open: boolean; id: string }>({ open: false, id: "" });
   const [normalExpanded, setNormalExpanded] = useState(true);
   const [scheduleExpanded, setScheduleExpanded] = useState(false);
   const [schedules, setSchedules] = useState<any[]>([]);
@@ -104,8 +106,14 @@ export function Sidebar() {
     }
   };
 
-  const handleDeleteSession = async (id: string, e: React.MouseEvent) => {
+  const handleDeleteSession = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    setConfirmState({ open: true, id });
+  };
+
+  const doDeleteSession = async () => {
+    const id = confirmState.id;
+    setConfirmState({ open: false, id: "" });
     await deleteSession(id);
     setSessions((prev) => prev.filter((s) => s.id !== id));
     if (activeSessionId === id) {
@@ -227,6 +235,15 @@ export function Sidebar() {
   );
 
   return (
+    <>
+    <ConfirmDialog
+      open={confirmState.open}
+      title="删除对话"
+      description="确定要删除这个对话吗？此操作无法撤销。"
+      confirmLabel="删除"
+      onConfirm={doDeleteSession}
+      onCancel={() => setConfirmState({ open: false, id: "" })}
+    />
     <aside className="w-full h-full border-r border-border flex flex-col bg-muted/30">
       <div className="p-4 flex items-center justify-between">
         <h1 className="text-lg font-semibold">Ethan</h1>
@@ -414,5 +431,6 @@ export function Sidebar() {
         </Button>
       </div>
     </aside>
+    </>
   );
 }

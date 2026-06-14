@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Loader2, RefreshCw, Pencil, Trash2, Check, X } from "lucide-react";
 
 // ── Markdown helpers ──────────────────────────────────────────────────────────
@@ -103,8 +104,12 @@ export function MemoryView() {
   const [procedures, setProcedures] = useState<Procedure[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Index of the fact being edited (into the displayed list)
   const [editingFactIdx, setEditingFactIdx] = useState<number | null>(null);
+  const [confirmState, setConfirmState] = useState<{
+    open: boolean;
+    description: string;
+    onConfirm: () => void;
+  }>({ open: false, description: "", onConfirm: () => {} });
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -157,17 +162,19 @@ export function MemoryView() {
     if (activeTab === "facts") loadFacts();
   }, [activeTab, loadFacts]);
 
-  const handleDeleteFact = async (fact: Fact) => {
-    if (!window.confirm("确认删除这条记忆？")) return;
-    // Find original index in allFacts
-    const originalIdx = allFacts.findIndex((f: any) => f === (allFacts.find((af: any) =>
-      af.content === fact.content && af.created_at === (fact as any).created_at
-    )));
-    const idx = allFacts.indexOf(allFacts.find((af: any) =>
-      af.content === fact.content && af.created_at === (fact as any).created_at
-    ));
-    await deleteFact(String(idx));
-    await loadFacts();
+  const handleDeleteFact = (fact: Fact) => {
+    setConfirmState({
+      open: true,
+      description: "确认删除这条记忆？",
+      onConfirm: async () => {
+        setConfirmState(prev => ({ ...prev, open: false }));
+        const idx = allFacts.indexOf(allFacts.find((af: any) =>
+          af.content === fact.content && af.created_at === (fact as any).created_at
+        ));
+        await deleteFact(String(idx));
+        await loadFacts();
+      },
+    });
   };
 
   const handleSaveFact = async (fact: Fact, newContent: string) => {
@@ -181,18 +188,30 @@ export function MemoryView() {
 
   // ── Episodes handlers ───────────────────────────────────────────────────────
 
-  const handleDeleteEpisode = async (episode: Episode) => {
-    if (!window.confirm("确认删除这段历史？")) return;
-    await deleteEpisode(episode.session_id);
-    setEpisodes((prev) => prev.filter((e) => e.session_id !== episode.session_id));
+  const handleDeleteEpisode = (episode: Episode) => {
+    setConfirmState({
+      open: true,
+      description: "确认删除这段历史？",
+      onConfirm: async () => {
+        setConfirmState(prev => ({ ...prev, open: false }));
+        await deleteEpisode(episode.session_id);
+        setEpisodes((prev) => prev.filter((e) => e.session_id !== episode.session_id));
+      },
+    });
   };
 
   // ── Procedures handlers ─────────────────────────────────────────────────────
 
-  const handleDeleteProcedure = async (proc: Procedure) => {
-    if (!window.confirm("确认删除这条行为准则？")) return;
-    await deleteProcedure(proc.id);
-    setProcedures((prev) => prev.filter((p) => p.id !== proc.id));
+  const handleDeleteProcedure = (proc: Procedure) => {
+    setConfirmState({
+      open: true,
+      description: "确认删除这条行为准则？",
+      onConfirm: async () => {
+        setConfirmState(prev => ({ ...prev, open: false }));
+        await deleteProcedure(proc.id);
+        setProcedures((prev) => prev.filter((p) => p.id !== proc.id));
+      },
+    });
   };
 
   // ── Tabs ────────────────────────────────────────────────────────────────────
@@ -210,6 +229,12 @@ export function MemoryView() {
 
   return (
     <div className="flex flex-col h-full bg-background text-foreground">
+      <ConfirmDialog
+        open={confirmState.open}
+        description={confirmState.description}
+        onConfirm={confirmState.onConfirm}
+        onCancel={() => setConfirmState(prev => ({ ...prev, open: false }))}
+      />
       {/* Header / Tabs */}
       <header className="h-12 border-b border-border flex items-center px-4 justify-between shrink-0">
         <div className="flex gap-4">

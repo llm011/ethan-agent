@@ -90,7 +90,7 @@ class OpenAICompatProvider(BaseProvider):
             usage_dict = {
                 "input": getattr(usage, "prompt_tokens", 0),
                 "output": getattr(usage, "completion_tokens", 0),
-                "cache": getattr(usage, "prompt_tokens_details", {}).get("cached_tokens", 0) if hasattr(usage, "prompt_tokens_details") and usage.prompt_tokens_details else 0,
+                "cache": getattr(usage.prompt_tokens_details, "cached_tokens", 0) if hasattr(usage, "prompt_tokens_details") and usage.prompt_tokens_details else 0,
             }
 
         return Message(

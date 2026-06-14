@@ -393,7 +393,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
           {/* 来源 badge */}
           {activeSession && sessionSource && (() => {
-            const sourceLabel: Record<string, string> = { lark: "飞书", repl: "REPL", web: "Web", heartbeat: "心跳" };
+            const sourceLabel: Record<string, string> = { lark: "飞书", repl: "命令行", web: "Web", heartbeat: "心跳" };
             const sourceColor: Record<string, string> = {
               lark: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
               repl: "bg-purple-500/15 text-purple-600 dark:text-purple-400",
