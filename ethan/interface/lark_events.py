@@ -254,7 +254,14 @@ async def _handle_message(event_data: dict) -> None:
             reaction_removed = True
 
         if full_content:
-            await _send_reply(chat_id, full_content)
+            # 末尾加分隔线 + token 消耗
+            usage = agent.usage
+            stats_parts = [f"↑{usage.input_tokens} ↓{usage.output_tokens}"]
+            if usage.cache_tokens:
+                stats_parts.append(f"⚡{usage.cache_tokens}")
+            stats_line = "  ".join(stats_parts)
+            reply_text = f"{full_content}\n\n---\n_{stats_line}_"
+            await _send_reply(chat_id, reply_text)
         else:
             full_content = "（没有找到相关内容）"
             await _send_reply(chat_id, full_content)
@@ -262,8 +269,13 @@ async def _handle_message(event_data: dict) -> None:
         if not reaction_removed and reaction_id and message_id:
             await _remove_reaction(message_id, reaction_id)
 
-        # 保存完整 assistant 消息到 session
-        response = Message(role="assistant", content=full_content)
+        # 保存完整 assistant 消息到 session（带 usage）
+        usage_dict = {
+            "input": agent.usage.input_tokens,
+            "output": agent.usage.output_tokens,
+            "cache": agent.usage.cache_tokens,
+        }
+        response = Message(role="assistant", content=full_content, usage=usage_dict)
         await store.save_message(session_id, response)
         await store.touch(session_id)
 
