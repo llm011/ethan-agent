@@ -848,7 +848,7 @@ async def get_logs(type: str = "backend", lines: int = 500, q: str | None = None
 
 # ── Skills ───────────────────────────────────────────────────────────
 
-from ethan.skills.loader import SKILLS_DIR
+from ethan.skills.loader import USER_SKILLS_DIR as SKILLS_DIR
 import yaml
 
 @app.get("/skills", dependencies=[Depends(verify_token)])

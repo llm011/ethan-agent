@@ -109,8 +109,7 @@ start_backend() {
     fi
     echo "[后端] 启动中..."
     cd "$PROJECT_ROOT"
-    # 用 setsid 让子进程成为新进程组组长，便于后续整组 kill
-    setsid nohup uv run ethan serve >> "$BACKEND_LOG" 2>&1 &
+    nohup uv run ethan serve >> "$BACKEND_LOG" 2>&1 &
     local bgpid=$!
     echo "$bgpid" > "$BACKEND_PID_FILE"
 
@@ -129,7 +128,7 @@ start_frontend() {
     fi
     echo "[前端] 启动中..."
     cd "$PROJECT_ROOT/web"
-    setsid nohup npm run dev >> "$FRONTEND_LOG" 2>&1 &
+    nohup npm run dev >> "$FRONTEND_LOG" 2>&1 &
     local bgpid=$!
     echo "$bgpid" > "$FRONTEND_PID_FILE"
 

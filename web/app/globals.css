@@ -162,6 +162,9 @@
   html {
     @apply font-sans;
   }
+  button:not([disabled]) {
+    @apply cursor-pointer;
+  }
   /* 消息内容行间距 */
   .prose p {
     line-height: 1.8;

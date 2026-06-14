@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -79,6 +81,65 @@ function PromptPreview() {
   );
 }
 
+
+function MdEditor({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  const [mode, setMode] = useState<"edit" | "preview" | "split">("edit");
+
+  return (
+    <div className="flex flex-col flex-1 min-h-[400px] border border-border rounded-lg overflow-hidden">
+      {/* Toolbar */}
+      <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border bg-muted/30 shrink-0">
+        {(["edit", "split", "preview"] as const).map((m) => (
+          <button
+            key={m}
+            onClick={() => setMode(m)}
+            className={`px-2.5 py-1 text-xs rounded transition-colors ${
+              mode === m
+                ? "bg-background border border-border font-medium"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {m === "edit" ? "编辑" : m === "split" ? "分栏" : "预览"}
+          </button>
+        ))}
+        <span className="ml-auto text-xs text-muted-foreground">{value.length} 字符</span>
+      </div>
+
+      {/* Editor area */}
+      <div className="flex flex-1 min-h-0">
+        {/* Edit pane */}
+        {(mode === "edit" || mode === "split") && (
+          <textarea
+            className="flex-1 font-mono text-sm p-4 bg-background outline-none resize-none leading-relaxed"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder={placeholder}
+            style={mode === "split" ? { borderRight: "1px solid var(--border)", maxWidth: "50%" } : {}}
+          />
+        )}
+
+        {/* Preview pane */}
+        {(mode === "preview" || mode === "split") && (
+          <div className="flex-1 overflow-y-auto p-4 prose prose-sm dark:prose-invert max-w-none text-sm">
+            {value ? (
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{value}</ReactMarkdown>
+            ) : (
+              <p className="text-muted-foreground italic">（空内容）</p>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export function SettingsView({ models }: SettingsViewProps) {
   const [activeTab, setActiveTab] = useState<TabType>("general");
@@ -181,9 +242,9 @@ export function SettingsView({ models }: SettingsViewProps) {
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col h-full overflow-hidden">
-        <ScrollArea className="flex-1 p-6">
-          <div className="max-w-3xl h-full flex flex-col gap-6">
+      <div className="flex-1 flex flex-col min-h-0">
+        <div className="flex-1 overflow-y-auto p-6">
+          <div className="max-w-3xl flex flex-col gap-6 pb-6">
             
             {activeTab === "general" && (
               <div className="space-y-6">
@@ -266,7 +327,7 @@ export function SettingsView({ models }: SettingsViewProps) {
                           min={1}
                           max={1440}
                           value={agentForm.heartbeat_interval_minutes ?? 10}
-                          onChange={(e) => setAgentForm({ ...agentForm, heartbeat_interval_minutes: parseInt(e.target.value) || 10 })}
+                          onChange={(e) => { const n = parseInt(e.target.value); if (!isNaN(n)) setAgentForm({ ...agentForm, heartbeat_interval_minutes: n }); }}
                           className="w-24 bg-background border border-border rounded-md px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring"
                         />
                         <label className="flex items-center gap-2 text-sm cursor-pointer">
@@ -300,7 +361,7 @@ export function SettingsView({ models }: SettingsViewProps) {
                           <Input
                             type="number"
                             value={agentForm.max_tokens ?? 4096}
-                            onChange={(e) => setAgentForm({ ...agentForm, max_tokens: parseInt(e.target.value) || 4096 })}
+                            onChange={(e) => { const n = parseInt(e.target.value); if (!isNaN(n)) setAgentForm({ ...agentForm, max_tokens: n }); }}
                           />
                         </div>
                         <div className="flex-1 grid gap-1">
@@ -308,7 +369,7 @@ export function SettingsView({ models }: SettingsViewProps) {
                           <Input
                             type="number"
                             value={agentForm.max_tool_iterations ?? 10}
-                            onChange={(e) => setAgentForm({ ...agentForm, max_tool_iterations: parseInt(e.target.value) || 10 })}
+                            onChange={(e) => { const n = parseInt(e.target.value); if (!isNaN(n)) setAgentForm({ ...agentForm, max_tool_iterations: n }); }}
                           />
                         </div>
                       </div>
@@ -331,7 +392,7 @@ export function SettingsView({ models }: SettingsViewProps) {
                           min={1}
                           max={100}
                           value={agentForm.fast_max_length ?? 12}
-                          onChange={(e) => setAgentForm({ ...agentForm, fast_max_length: parseInt(e.target.value) || 12 })}
+                          onChange={(e) => { const n = parseInt(e.target.value); if (!isNaN(n)) setAgentForm({ ...agentForm, fast_max_length: n }); }}
                           className="w-20 bg-background border border-border rounded-md px-2 py-1 text-sm outline-none"
                         />
                         <span className="text-xs text-muted-foreground">字</span>
@@ -400,10 +461,9 @@ export function SettingsView({ models }: SettingsViewProps) {
                 <p className="text-sm text-muted-foreground mb-4">
                   定义 Agent 的核心身份、角色扮演、说话语气等基本特征。
                 </p>
-                <Textarea
-                  className="flex-1 font-mono text-sm resize-none"
+                <MdEditor
                   value={sysForm.identity}
-                  onChange={(e) => setSysForm({ ...sysForm, identity: e.target.value })}
+                  onChange={(v) => setSysForm({ ...sysForm, identity: v })}
                   placeholder="You are Ethan..."
                 />
               </div>
@@ -415,10 +475,9 @@ export function SettingsView({ models }: SettingsViewProps) {
                 <p className="text-sm text-muted-foreground mb-4">
                   定义 Agent 处理问题的思维方式、工作流原则、安全准则等深层认知逻辑。
                 </p>
-                <Textarea
-                  className="flex-1 font-mono text-sm resize-none"
+                <MdEditor
                   value={sysForm.soul}
-                  onChange={(e) => setSysForm({ ...sysForm, soul: e.target.value })}
+                  onChange={(v) => setSysForm({ ...sysForm, soul: v })}
                   placeholder="Thinking process..."
                 />
               </div>
@@ -430,10 +489,9 @@ export function SettingsView({ models }: SettingsViewProps) {
                 <p className="text-sm text-muted-foreground mb-4">
                   补充描述 Agent 可用的工具及使用原则，注入到系统 prompt 的 &lt;tools_reference&gt; 标签中。
                 </p>
-                <Textarea
-                  className="flex-1 font-mono text-sm resize-none"
+                <MdEditor
                   value={sysForm.tools}
-                  onChange={(e) => setSysForm({ ...sysForm, tools: e.target.value })}
+                  onChange={(v) => setSysForm({ ...sysForm, tools: v })}
                   placeholder="- shell: 执行 shell 命令..."
                 />
               </div>
@@ -445,10 +503,9 @@ export function SettingsView({ models }: SettingsViewProps) {
                 <p className="text-sm text-muted-foreground mb-4">
                   每次心跳时执行的周期性任务，由 Agent 自主维护。以 # 开头的行是注释不会执行。
                 </p>
-                <Textarea
-                  className="flex-1 font-mono text-sm resize-none"
+                <MdEditor
                   value={sysForm.heartbeat}
-                  onChange={(e) => setSysForm({ ...sysForm, heartbeat: e.target.value })}
+                  onChange={(v) => setSysForm({ ...sysForm, heartbeat: v })}
                   placeholder="# 在这里添加心跳任务..."
                 />
               </div>
@@ -459,9 +516,9 @@ export function SettingsView({ models }: SettingsViewProps) {
             )}
 
           </div>
-        </ScrollArea>
-        
-        <div className="p-4 border-t bg-background flex items-center justify-between mt-auto">
+        </div>
+
+        <div className="p-4 border-t bg-background flex items-center justify-between">
           <div className="text-sm">
             {message && (
               <span className={message.type === "success" ? "text-green-500" : "text-red-500"}>
