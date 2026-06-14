@@ -3,6 +3,7 @@
 支持 Session 持久化、分层记忆、斜杠命令。
 使用 prompt_toolkit 实现 Hermes 风格的状态栏 + 输入框。
 """
+import asyncio
 import os
 import time
 from datetime import datetime
@@ -120,6 +121,21 @@ def _banner():
         padding=(0, 1),
     ))
     console.print()
+
+
+async def _background_consolidate(memory, consolidator, fact_store, session_id):
+    try:
+        if memory.needs_compression():
+            batch = memory.get_compress_batch()
+            summary = await consolidator.compress(batch, memory.warm_summary)
+            memory.apply_summary(summary)
+        if memory.needs_cold_extraction():
+            facts_list, condensed = await consolidator.extract_cold(memory.warm_summary, memory.cold_facts)
+            for fact in facts_list:
+                fact_store.add(fact, confidence=0.8, source=session_id)
+            memory.apply_cold_extraction(fact_store.build_context(), condensed)
+    except Exception:
+        pass
 
 
 async def run_once(agent: Agent, prompt: str) -> None:
@@ -481,10 +497,20 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
                 live.stop()
 
         if full:
-            resp = Message(role="assistant", content=full)
+            usage_dict = {
+                "input": agent.usage.input_tokens,
+                "output": agent.usage.output_tokens,
+                "cache": agent.usage.cache_tokens,
+            }
+            resp = Message(role="assistant", content=full, usage=usage_dict)
             history.append(resp)
             await store.save_message(session.id, resp)
             await store.touch(session.id)
+
+            if agent._skills and agent.last_matched_skills:
+                import asyncio as _asyncio
+                for _name in agent.last_matched_skills:
+                    _asyncio.create_task(_asyncio.to_thread(agent._skills.record_hit, _name))
 
             # Update token tracking from agent usage
             total_tokens_in = agent.usage.input_tokens
@@ -501,24 +527,8 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
 
             memory.add_turn(msg, resp)
 
-            if memory.needs_compression():
-                batch = memory.get_compress_batch()
-                try:
-                    summary = await consolidator.compress(batch, memory.warm_summary)
-                    memory.apply_summary(summary)
-                except Exception:
-                    pass
-
-            if memory.needs_cold_extraction():
-                try:
-                    facts_list, condensed = await consolidator.extract_cold(
-                        memory.warm_summary, memory.cold_facts
-                    )
-                    for fact in facts_list:
-                        fact_store.add(fact, confidence=0.8, source=session.id)
-                    memory.apply_cold_extraction(fact_store.build_context(), condensed)
-                except Exception:
-                    pass
+            if memory.needs_compression() or memory.needs_cold_extraction():
+                asyncio.create_task(_background_consolidate(memory, consolidator, fact_store, session.id))
         else:
             history.pop()
 
