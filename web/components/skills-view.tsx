@@ -7,13 +7,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { MdEditor } from "@/components/md-editor";
-import { Plus, Save, Wrench } from "lucide-react";
+import { Plus, Save, Search, Wrench } from "lucide-react";
 
 export function SkillsView() {
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [selectedSkill, setSelectedSkill] = useState<SkillInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -43,6 +44,16 @@ export function SkillsView() {
     setTriggers(skill.trigger?.join(", ") || "");
     setContent(skill.content || "");
   }
+
+  const filteredSkills = skills.filter(skill => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      skill.name.toLowerCase().includes(q) ||
+      (skill.description || "").toLowerCase().includes(q) ||
+      (skill.trigger || []).some(t => t.toLowerCase().includes(q))
+    );
+  });
 
   function handleNew() {
     setSelectedSkill(null);
@@ -93,15 +104,29 @@ export function SkillsView() {
             <Plus className="w-4 h-4" />
           </Button>
         </div>
-        
+
+        <div className="px-3 py-2 border-b border-border/40">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+            <Input
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Search skills..."
+              className="pl-8 h-8 text-sm"
+            />
+          </div>
+        </div>
+
         <ScrollArea className="flex-1">
           <div className="p-2 space-y-2">
             {loading ? (
               <div className="p-4 text-sm text-muted-foreground text-center">Loading skills...</div>
-            ) : skills.length === 0 ? (
-              <div className="p-4 text-sm text-muted-foreground text-center">No skills found.</div>
+            ) : filteredSkills.length === 0 ? (
+              <div className="p-4 text-sm text-muted-foreground text-center">
+                {searchQuery.trim() ? "No matching skills." : "No skills found."}
+              </div>
             ) : (
-              skills.map(skill => (
+              filteredSkills.map(skill => (
                 <div
                   key={skill.name}
                   onClick={() => handleSelect(skill)}

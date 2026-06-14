@@ -238,7 +238,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
       <MessageList messages={messages} streaming={streaming} />
 
-      <div className="border-t border-border">
+      <div>
         <div className="max-w-3xl mx-auto px-4 pt-4">
           {showOnboarding && <OnboardingBanner onDismiss={() => setShowOnboarding(false)} />}
         </div>

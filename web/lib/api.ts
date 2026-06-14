@@ -178,7 +178,7 @@ export async function updateProviderSettings(patch: ProviderSettings): Promise<v
 export interface SystemSettings {
   identity: string;
   soul: string;
-  format: string;
+  agent: string;
   tools: string;
   heartbeat: string;
 }

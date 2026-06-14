@@ -65,7 +65,7 @@ export function ChatInput({
   };
 
   return (
-    <div className="border-t border-border p-4">
+    <div className="p-4">
       <div className="max-w-3xl mx-auto">
         {pendingFiles.length > 0 && (
           <div className="flex gap-2 mb-2 flex-wrap">

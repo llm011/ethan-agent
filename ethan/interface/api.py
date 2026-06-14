@@ -452,6 +452,7 @@ async def system_prompt_preview(model: str | None = None):
 class SystemSettingsPatch(BaseModel):
     identity: str | None = None
     soul: str | None = None
+    agent: str | None = None
     tools: str | None = None
     heartbeat: str | None = None
 
@@ -462,14 +463,16 @@ async def get_system_settings():
     system_dir = Path(os.path.expanduser("~/.ethan/system"))
     identity_path = system_dir / "identity.md"
     soul_path = system_dir / "soul.md"
+    agent_path = system_dir / "agent.md"
     tools_path = system_dir / "tools.md"
     heartbeat_path = system_dir / "heartbeat.md"
 
     identity = identity_path.read_text(encoding="utf-8") if identity_path.exists() else ""
     soul = soul_path.read_text(encoding="utf-8") if soul_path.exists() else ""
+    agent_content = agent_path.read_text(encoding="utf-8") if agent_path.exists() else ""
     tools_content = tools_path.read_text(encoding="utf-8") if tools_path.exists() else ""
     heartbeat_content = heartbeat_path.read_text(encoding="utf-8") if heartbeat_path.exists() else ""
-    return {"identity": identity, "soul": soul, "tools": tools_content, "heartbeat": heartbeat_content}
+    return {"identity": identity, "soul": soul, "agent": agent_content, "tools": tools_content, "heartbeat": heartbeat_content}
 
 @app.patch("/settings/system", dependencies=[Depends(verify_token)])
 async def update_system_settings(req: SystemSettingsPatch):
@@ -477,11 +480,13 @@ async def update_system_settings(req: SystemSettingsPatch):
     import os
     system_dir = Path(os.path.expanduser("~/.ethan/system"))
     system_dir.mkdir(parents=True, exist_ok=True)
-    
+
     if req.identity is not None:
         (system_dir / "identity.md").write_text(req.identity, encoding="utf-8")
     if req.soul is not None:
         (system_dir / "soul.md").write_text(req.soul, encoding="utf-8")
+    if req.agent is not None:
+        (system_dir / "agent.md").write_text(req.agent, encoding="utf-8")
     if req.tools is not None:
         (system_dir / "tools.md").write_text(req.tools, encoding="utf-8")
     if req.heartbeat is not None:

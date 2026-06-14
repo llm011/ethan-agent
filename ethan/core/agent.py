@@ -118,7 +118,7 @@ class Agent:
         cfg = get_config()
         workspace = cfg.defaults.workspace
         system_dir = Path(workspace) / "system"
-        for name in ("identity", "soul", "tools", "format"):
+        for name in ("identity", "soul", "agent", "tools"):
             p = system_dir / f"{name}.md"
             if p.exists():
                 content = p.read_text(encoding="utf-8").strip()
@@ -205,11 +205,14 @@ class Agent:
 
         # Full Path: 完整 Prompt（从缓存读取静态文件）
         soul_content = self._system_files.get("soul", "")
+        agent_content = self._system_files.get("agent", "")
         tools_content = self._system_files.get("tools", "")
 
         parts = [f"<identity>\n{identity_content}\n</identity>"]
         if soul_content:
             parts.append(f"<operating_principles>\n{soul_content}\n</operating_principles>")
+        if agent_content:
+            parts.append(f"<behavior_protocols>\n{agent_content}\n</behavior_protocols>")
         if tools_content:
             parts.append(f"<tools_reference>\n{tools_content}\n</tools_reference>")
 

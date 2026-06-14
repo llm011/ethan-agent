@@ -8,12 +8,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sun, Moon } from "lucide-react";
 import { MdEditor } from "@/components/md-editor";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   fetchAgentSettings, updateAgentSettings, AgentSettings,
   fetchSystemSettings, updateSystemSettings, SystemSettings,
   fetchProviderSettings, updateProviderSettings, ProviderSettings,
   fetchSystemPromptPreview, SystemPromptPreview,
+  fetchChannels, patchChannel, ChannelInfo,
 } from "@/lib/api";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { ChevronDown, ChevronRight } from "lucide-react";
 
 function useTheme() {
   const [theme, setTheme] = useState<"dark" | "light">(() => {
@@ -40,12 +46,46 @@ interface SettingsViewProps {
   models: { id: string; description: string }[];
 }
 
-type TabType = "general" | "providers" | "identity" | "soul" | "tools" | "heartbeat" | "prompt-preview";
+type TabId = "general" | "providers" | "channels" | "identity" | "soul" | "tools" | "heartbeat" | "prompt-preview";
+
+const TAB_GROUPS = [
+  {
+    group: "基础配置",
+    items: [
+      { id: "general" as TabId, label: "通用" },
+      { id: "providers" as TabId, label: "模型" },
+      { id: "channels" as TabId, label: "渠道" },
+    ],
+  },
+  {
+    group: "系统提示词",
+    items: [
+      { id: "identity" as TabId, label: "身份设定" },
+      { id: "soul" as TabId, label: "运行准则" },
+      { id: "tools" as TabId, label: "工具说明" },
+      { id: "heartbeat" as TabId, label: "心跳任务" },
+    ],
+  },
+  {
+    group: "调试",
+    items: [
+      { id: "prompt-preview" as TabId, label: "Prompt 预览" },
+    ],
+  },
+];
+
+const CHANNEL_FIELDS: Record<string, { key: string; label: string; secret?: boolean; placeholder?: string }[]> = {
+  lark: [
+    { key: "app_id", label: "App ID", placeholder: "cli_xxx" },
+    { key: "app_secret", label: "App Secret", secret: true, placeholder: "xxxxxxxx" },
+  ],
+};
 
 function PromptPreview() {
   const [data, setData] = useState<SystemPromptPreview | null>(null);
   const [loading, setLoading] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [promptView, setPromptView] = useState<"raw" | "md">("md");
 
   const load = async () => {
     setLoading(true);
@@ -60,6 +100,38 @@ function PromptPreview() {
   };
 
   useEffect(() => { load(); }, []);
+
+  // Parse the prompt into sections split by XML-like tags.
+  // Returns an array of {tag, content} — untagged content has tag = null.
+  function parseSections(text: string): { tag: string | null; content: string }[] {
+    const lines = text.split("\n");
+    const sections: { tag: string | null; content: string }[] = [];
+    let currentTag: string | null = null;
+    let currentLines: string[] = [];
+
+    for (const line of lines) {
+      const openMatch = line.match(/^<([a-zA-Z_][a-zA-Z0-9_-]*)(?:\s[^>]*)?>$/);
+      const closeMatch = line.match(/^<\/([a-zA-Z_][a-zA-Z0-9_-]*)>$/);
+
+      if (openMatch) {
+        if (currentLines.join("").trim()) {
+          sections.push({ tag: currentTag, content: currentLines.join("\n").trim() });
+        }
+        currentTag = openMatch[1];
+        currentLines = [];
+      } else if (closeMatch) {
+        sections.push({ tag: currentTag, content: currentLines.join("\n").trim() });
+        currentTag = null;
+        currentLines = [];
+      } else {
+        currentLines.push(line);
+      }
+    }
+    if (currentLines.join("").trim()) {
+      sections.push({ tag: currentTag, content: currentLines.join("\n").trim() });
+    }
+    return sections;
+  }
 
   return (
     <div className="h-full flex flex-col min-h-[500px] gap-4">
@@ -117,18 +189,60 @@ function PromptPreview() {
         </div>
       )}
 
-      <pre className="flex-1 text-xs font-mono bg-muted/40 rounded-lg p-4 overflow-auto whitespace-pre-wrap leading-relaxed text-muted-foreground">
-        {data ? data.system_prompt : (loading ? "加载中..." : "")}
-      </pre>
+      {/* View toggle */}
+      <div className="flex items-center gap-1 self-end">
+        {(["md", "raw"] as const).map(v => (
+          <button
+            key={v}
+            onClick={() => setPromptView(v)}
+            className={`px-2.5 py-1 text-xs rounded transition-colors border ${
+              promptView === v
+                ? "bg-background border-border font-medium"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {v === "md" ? "预览" : "原文"}
+          </button>
+        ))}
+      </div>
+
+      {promptView === "raw" ? (
+        <pre className="flex-1 text-xs font-mono bg-muted/40 rounded-lg p-4 overflow-auto whitespace-pre-wrap leading-relaxed text-muted-foreground">
+          {data ? data.system_prompt : (loading ? "加载中..." : "")}
+        </pre>
+      ) : (
+        <div className="flex-1 overflow-auto space-y-2 pb-4">
+          {data ? parseSections(data.system_prompt).map((section, i) => (
+            <div key={i} className="rounded-lg border border-border/60 overflow-hidden">
+              {section.tag && (
+                <div className="px-4 py-1.5 bg-muted/40 border-b border-border/40 flex items-center gap-2">
+                  <span className="text-xs font-mono text-muted-foreground">{section.tag}.md</span>
+                </div>
+              )}
+              <div className="px-4 py-3 prose prose-sm dark:prose-invert max-w-none">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{section.content}</ReactMarkdown>
+              </div>
+            </div>
+          )) : (
+            <p className="text-muted-foreground italic text-sm">{loading ? "加载中..." : ""}</p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
 
 export function SettingsView({ models }: SettingsViewProps) {
-  const [activeTab, setActiveTab] = useState<TabType>("general");
+  const [activeTab, setActiveTab] = useState<TabId>("general");
   const { theme, toggle: toggleTheme } = useTheme();
-  
+
+  const [channels, setChannels] = useState<ChannelInfo[]>([]);
+  const [channelExpanded, setChannelExpanded] = useState<string | null>("lark");
+  const [channelForms, setChannelForms] = useState<Record<string, Record<string, string>>>({});
+  const [channelSaving, setChannelSaving] = useState<string | null>(null);
+  const [channelMessages, setChannelMessages] = useState<Record<string, { type: "success" | "error"; text: string }>>({});
+
   const [agentForm, setAgentForm] = useState<AgentSettings>({
     workspace: "",
     agent_name: "",
@@ -148,7 +262,7 @@ export function SettingsView({ models }: SettingsViewProps) {
   const [sysForm, setSysForm] = useState<SystemSettings>({
     identity: "",
     soul: "",
-    format: "",
+    agent: "",
     tools: "",
     heartbeat: "",
   });
@@ -160,8 +274,8 @@ export function SettingsView({ models }: SettingsViewProps) {
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   useEffect(() => {
-    Promise.all([fetchAgentSettings(), fetchSystemSettings(), fetchProviderSettings()])
-      .then(([agentData, sysData, providerData]) => {
+    Promise.all([fetchAgentSettings(), fetchSystemSettings(), fetchProviderSettings(), fetchChannels()])
+      .then(([agentData, sysData, providerData, channelData]) => {
         setAgentForm({
           ...agentData,
           heartbeat_enabled: agentData.heartbeat_enabled ?? true,
@@ -169,10 +283,29 @@ export function SettingsView({ models }: SettingsViewProps) {
         });
         setSysForm(sysData);
         setProviderForm(providerData);
+        setChannels(channelData);
+        const initial: Record<string, Record<string, string>> = {};
+        for (const ch of channelData) initial[ch.id] = { ...ch.config };
+        setChannelForms(initial);
       })
       .catch(() => setMessage({ type: "error", text: "加载设置失败" }))
       .finally(() => setLoading(false));
   }, []);
+
+  const handleChannelSave = async (channelId: string) => {
+    setChannelSaving(channelId);
+    try {
+      await patchChannel(channelId, channelForms[channelId] || {});
+      const updated = await fetchChannels();
+      setChannels(updated);
+      setChannelMessages(prev => ({ ...prev, [channelId]: { type: "success", text: "已保存" } }));
+      setTimeout(() => setChannelMessages(prev => { const n = { ...prev }; delete n[channelId]; return n; }), 3000);
+    } catch {
+      setChannelMessages(prev => ({ ...prev, [channelId]: { type: "error", text: "保存失败" } }));
+    } finally {
+      setChannelSaving(null);
+    }
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -194,33 +327,33 @@ export function SettingsView({ models }: SettingsViewProps) {
 
   if (loading) return <div className="p-4 text-muted-foreground">Loading settings...</div>;
 
-  const tabs = [
-    { id: "general", label: "通用设置 (General)" },
-    { id: "providers", label: "模型配置 (Providers)" },
-    { id: "identity", label: "身份设定 (Identity)" },
-    { id: "soul", label: "运行准则 (Soul)" },
-    { id: "tools", label: "工具说明 (Tools)" },
-    { id: "heartbeat", label: "心跳任务 (Heartbeat)" },
-    { id: "prompt-preview", label: "System Prompt 预览" },
-  ];
-
   return (
     <div className="flex h-full w-full bg-background overflow-hidden">
-      {/* Sidebar */}      <div className="w-[200px] border-r bg-muted/30 flex flex-col">
+      {/* Sidebar */}
+      <div className="w-[200px] border-r bg-muted/30 flex flex-col">
         <div className="p-4 border-b">
           <h2 className="font-semibold">设置</h2>
         </div>
-        <div className="flex-1 py-2">
-          {tabs.map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as TabType)}
-              className={`w-full text-left px-4 py-2 text-sm transition-colors hover:bg-muted/50 ${
-                activeTab === tab.id ? "bg-muted font-medium border-l-2 border-primary" : "text-muted-foreground border-l-2 border-transparent"
-              }`}
-            >
-              {tab.label}
-            </button>
+        <div className="flex-1 py-2 overflow-y-auto">
+          {TAB_GROUPS.map(group => (
+            <div key={group.group} className="mb-1">
+              <div className="px-4 py-1.5 text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider">
+                {group.group}
+              </div>
+              {group.items.map(item => (
+                <button
+                  key={item.id}
+                  onClick={() => setActiveTab(item.id)}
+                  className={`w-full text-left px-4 py-2 text-sm transition-colors border-l-2 ${
+                    activeTab === item.id
+                      ? "border-primary text-foreground font-medium bg-muted/40"
+                      : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/20"
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
           ))}
         </div>
       </div>
@@ -439,6 +572,78 @@ export function SettingsView({ models }: SettingsViewProps) {
               </div>
             )}
 
+            {activeTab === "channels" && (
+              <div className="space-y-4">
+                <h3 className="text-lg font-medium">渠道配置</h3>
+                {channels.map(ch => {
+                  const fields = CHANNEL_FIELDS[ch.id] || [];
+                  const isOpen = channelExpanded === ch.id;
+                  return (
+                    <Card key={ch.id} className="border-border/60">
+                      <CardHeader
+                        className="cursor-pointer select-none"
+                        onClick={() => setChannelExpanded(isOpen ? null : ch.id)}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            {isOpen ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                            <CardTitle className="text-base">{ch.name}</CardTitle>
+                            <Badge variant={ch.enabled ? "default" : "secondary"} className="text-[10px]">
+                              {ch.enabled ? "已连接" : "未配置"}
+                            </Badge>
+                          </div>
+                        </div>
+                        <CardDescription className="ml-7 text-xs">
+                          {ch.id === "lark" ? "通过 WebSocket 长连接接收飞书消息，无需公网 IP" : ""}
+                        </CardDescription>
+                      </CardHeader>
+                      {isOpen && (
+                        <CardContent className="pt-0 ml-7">
+                          <div className="space-y-3">
+                            {fields.map(f => (
+                              <div key={f.key} className="grid gap-1.5">
+                                <label className="text-xs font-medium text-muted-foreground">{f.label}</label>
+                                <Input
+                                  type={f.secret ? "password" : "text"}
+                                  placeholder={f.placeholder}
+                                  value={channelForms[ch.id]?.[f.key] || ""}
+                                  onChange={e => setChannelForms(prev => ({
+                                    ...prev,
+                                    [ch.id]: { ...prev[ch.id], [f.key]: e.target.value }
+                                  }))}
+                                />
+                              </div>
+                            ))}
+                            <div className="flex items-center justify-between pt-2">
+                              <span className="text-xs text-muted-foreground">
+                                {channelMessages[ch.id] && (
+                                  <span className={channelMessages[ch.id].type === "success" ? "text-green-500" : "text-red-500"}>
+                                    {channelMessages[ch.id].text}
+                                  </span>
+                                )}
+                              </span>
+                              <Button size="sm" onClick={() => handleChannelSave(ch.id)} disabled={channelSaving === ch.id}>
+                                {channelSaving === ch.id ? "保存中..." : "保存"}
+                              </Button>
+                            </div>
+                          </div>
+                        </CardContent>
+                      )}
+                    </Card>
+                  );
+                })}
+                <Card className="border-dashed border-border/40 bg-muted/10">
+                  <CardHeader>
+                    <div className="flex items-center gap-3">
+                      <ChevronRight className="h-4 w-4 text-muted-foreground/40" />
+                      <CardTitle className="text-base text-muted-foreground/50">更多渠道即将支持...</CardTitle>
+                    </div>
+                    <CardDescription className="ml-7 text-xs text-muted-foreground/40">WeChat、Telegram、Slack 等</CardDescription>
+                  </CardHeader>
+                </Card>
+              </div>
+            )}
+
             {activeTab === "identity" && (
               <div className="h-full flex flex-col min-h-[500px]">
                 <h3 className="text-lg font-medium mb-2">身份设定 (identity.md)</h3>
@@ -466,6 +671,7 @@ export function SettingsView({ models }: SettingsViewProps) {
                 />
               </div>
             )}
+
 
             {activeTab === "tools" && (
               <div className="h-full flex flex-col min-h-[500px]">

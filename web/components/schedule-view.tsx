@@ -87,7 +87,7 @@ export function ScheduleView() {
             暂无定时任务
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 p-0.5">
             {jobs.map(job => (
               <Card key={job.id} className="flex flex-col shadow-sm border-border/60 bg-muted/10">
                 <CardHeader className="pb-3 border-b border-border/30">
