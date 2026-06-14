@@ -5,11 +5,11 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 export function MdEditor({
-  value,
+  value = "",
   onChange,
   placeholder,
 }: {
-  value: string;
+  value?: string;
   onChange: (v: string) => void;
   placeholder?: string;
 }) {
