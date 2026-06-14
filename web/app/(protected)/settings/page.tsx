@@ -13,5 +13,9 @@ export default function SettingsPage() {
       .catch(() => {});
   }, []);
 
-  return <SettingsView models={models} />;
+  return (
+    <div className="flex flex-col flex-1 h-full min-h-0">
+      <SettingsView models={models} />
+    </div>
+  );
 }
