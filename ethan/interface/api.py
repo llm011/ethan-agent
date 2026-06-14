@@ -478,6 +478,22 @@ async def upload_file(file: UploadFile = File(...)):
 
 # ── SSE streaming ───────────────────────────────────────────────
 
+async def _maybe_regen_title(session_id: str, store: SessionStore) -> None:
+    """第 3 轮对话后用廉价模型重新生成更准确的标题。"""
+    try:
+        from ethan.memory.session import _generate_smart_title
+        session = await store.load(session_id)
+        if not session:
+            return
+        user_turns = sum(1 for m in session.messages if m.role == "user")
+        if user_turns != 3:
+            return
+        title = await _generate_smart_title(session.messages)
+        await store.update_title(session_id, title)
+    except Exception:
+        pass
+
+
 async def _maybe_consolidate(session_id: str, model: str) -> None:
     """每隔 ~10 轮对话，自动从温区摘要提取事实写入冷区 facts.json。"""
     try:
@@ -562,8 +578,9 @@ async def _stream_response(
     if session_id and full:
         await store.save_message(session_id, Message(role="assistant", content=full))
         await store.touch(session_id)
-        # 后台异步跑记忆沉淀，不阻塞响应
         asyncio.create_task(_maybe_consolidate(session_id, agent._provider.model))
+        # 第 3 轮对话后异步生成智能标题
+        asyncio.create_task(_maybe_regen_title(session_id, store))
 
     done_data = json.dumps({
         "done": True,

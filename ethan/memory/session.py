@@ -43,6 +43,31 @@ def _auto_title(messages: list[Message]) -> str:
     return "新对话"
 
 
+async def _generate_smart_title(messages: list[Message]) -> str:
+    """第 3 轮对话后用廉价模型生成 ≤20 字的简洁标题。"""
+    from ethan.providers.manager import create_provider
+    from ethan.memory.consolidator import _infer_cheap_model
+    from ethan.core.config import get_config
+
+    turns = [(m.role, m.content[:100]) for m in messages if m.role in ("user", "assistant") and m.content][:6]
+    if not turns:
+        return "新对话"
+
+    conv = "\n".join(f"{'用户' if r == 'user' else 'AI'}: {c}" for r, c in turns)
+    prompt = f"根据以下对话，用不超过15个汉字或30个英文字符生成一个简洁的标题，只输出标题本身：\n\n{conv}"
+
+    try:
+        cfg = get_config()
+        cheap_model = _infer_cheap_model(cfg.defaults.model)
+        provider = create_provider(cheap_model)
+        resp = await provider.chat([Message(role="user", content=prompt)],
+                                   system="你是一个标题生成助手，只输出标题，不加引号或标点。")
+        title = resp.content.strip().strip('"\'""').strip()
+        return title[:20] if title else "新对话"
+    except Exception:
+        return _auto_title(messages)
+
+
 class SessionStore:
     """SQLite-backed session 存储。"""
 

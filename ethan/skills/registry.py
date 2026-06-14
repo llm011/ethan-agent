@@ -2,7 +2,8 @@
 from ethan.skills.loader import Skill, load_all_skills
 
 # 超过此长度的 skill content 会截断，避免 token 膨胀
-_MAX_SKILL_CONTENT = 800
+# 复杂 Skill（如 HA 设备列表）需要更大空间；可在 config 里调整
+_MAX_SKILL_CONTENT = 3000
 
 
 class SkillRegistry:

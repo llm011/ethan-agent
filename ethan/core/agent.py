@@ -31,29 +31,33 @@ def _match_keyword(kw: str, text: str) -> bool:
     return kw in text
 
 
-def _is_fast_path(text: str) -> bool:
+def _is_fast_path(text: str, skill_triggers: list[str] | None = None) -> bool:
     """
     任务路由判断。规则：
     1. 有 FORCE_FULL 信号 → Full Path（最高优先）
-    2. 命中 config.routing.fast_skill_triggers 中任意关键词 → Fast Path（不受长度限制）
-    3. 命中 config.routing.fast_keywords 且长度 ≤ fast_max_length → Fast Path
-       关键词支持简单通配符 * (e.g. "关*灯" 匹配 "关客厅灯")
-    4. 其余 → Full Path
+    2. 命中 fast_path Skill 的 trigger 关键词 → Fast Path（不受长度限制，自动从 Skill 注册）
+    3. 命中 config.routing.fast_skill_triggers → Fast Path（手动配置，不受长度限制）
+    4. 命中 config.routing.fast_keywords 且长度 ≤ fast_max_length → Fast Path
+    5. 其余 → Full Path
     """
     lower = text.lower()
 
-    # 强制走完整路径
     if any(sig in lower for sig in _FORCE_FULL_SIGNALS):
         return False
 
     routing = get_config().defaults.routing
 
-    # Skill 关联触发词：命中即走 Fast Path，不受长度限制
+    # fast_path Skill 的 trigger 自动注册（无需手动维护 fast_skill_triggers）
+    if skill_triggers:
+        for kw in skill_triggers:
+            if _match_keyword(kw, text):
+                return True
+
+    # 手动配置的 Skill 触发词
     for kw in routing.fast_skill_triggers:
         if _match_keyword(kw, text):
             return True
 
-    # 普通快捷关键词：还需满足长度限制
     if len(text.strip()) > routing.fast_max_length:
         return False
 
@@ -75,7 +79,8 @@ class UsageStats:
             return
         self.input_tokens += usage.get("input", 0)
         self.output_tokens += usage.get("output", 0)
-        self.cache_tokens += usage.get("cache", 0)
+        # cache_read + cache_creation 两者都算入 cache_tokens 展示
+        self.cache_tokens += usage.get("cache", 0) + usage.get("cache_read", 0) + usage.get("cache_creation", 0)
 
 
 class Agent:
@@ -223,15 +228,22 @@ class Agent:
         """运行对话。Fast Path 使用简化 system prompt，Full Path 使用完整 prompt，两者均支持工具。"""
         working = list(messages)
         last_user = self._get_last_user_text(working)
-        fast = _is_fast_path(last_user)
+        # 收集 fast_path Skill 的 trigger，自动注入路由
+        skill_triggers = [
+            kw for s in (self._skills.all() if self._skills else [])
+            if s.fast_path for kw in s.trigger
+        ]
+        fast = _is_fast_path(last_user, skill_triggers=skill_triggers)
         system = self._build_system(working, fast=fast)
         if fast:
             tools_list = [t for t in self._registry.all() if t.fast_path]
+            max_iters = 2  # Fast Path 最多 2 次（1 次调用 + 1 次工具结果回收）
         else:
             tools_list = self._registry.all()
+            max_iters = self._max_iterations
         tools = [t.to_definition() for t in tools_list] or None
 
-        for _ in range(self._max_iterations):
+        for _ in range(max_iters):
             response = await self._provider.chat(working, tools=tools, system=system)
             self.usage.add(response.usage)
             working.append(response)
@@ -255,15 +267,21 @@ class Agent:
 
         working = list(messages)
         last_user = self._get_last_user_text(working)
-        fast = _is_fast_path(last_user)
+        skill_triggers = [
+            kw for s in (self._skills.all() if self._skills else [])
+            if s.fast_path for kw in s.trigger
+        ]
+        fast = _is_fast_path(last_user, skill_triggers=skill_triggers)
         system = self._build_system(working, fast=fast)
         if fast:
             tools_list = [t for t in self._registry.all() if t.fast_path]
+            max_iters = 2
         else:
             tools_list = self._registry.all()
+            max_iters = self._max_iterations
         tools = [t.to_definition() for t in tools_list] or None
 
-        for _ in range(self._max_iterations):
+        for _ in range(max_iters):
             full_content = ""
             final_chunk = None
 
