@@ -418,8 +418,8 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
         # 第一条消息时才真正持久化 session
         if not session_persisted:
             await store._db.execute(
-                "INSERT INTO sessions (id, title, model, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-                (session.id, session.title, session.model, session.created_at, session.updated_at),
+                "INSERT INTO sessions (id, title, model, created_at, updated_at, source) VALUES (?, ?, ?, ?, ?, ?)",
+                (session.id, session.title, session.model, session.created_at, session.updated_at, "repl"),
             )
             await store._db.commit()
             session_persisted = True

@@ -14,6 +14,7 @@ class ToolResult:
 
 class BaseTool(ABC):
     fast_path: bool = True  # 是否在 Fast Path 时加载。设为 False 的工具只在 Full Path 使用
+    cacheable: bool = True  # 同参数是否可缓存；副作用类工具（shell）应设为 False
 
     @property
     @abstractmethod

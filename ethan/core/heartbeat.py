@@ -129,10 +129,21 @@ async def _run_heartbeat_md() -> None:
 
 
 async def _tick() -> None:
-    """执行一次心跳：facts 整理 + heartbeat.md 任务。"""
+    """执行一次心跳：facts 整理 + heartbeat.md 任务 + skill 进化。"""
     logger.info("[Heartbeat] tick")
     await _consolidate_facts()
     await _run_heartbeat_md()
+    await _update_skills()
+
+
+async def _update_skills() -> None:
+    try:
+        from ethan.skills.updater import update_skills_from_corrections
+        n = await update_skills_from_corrections()
+        if n:
+            logger.info("[Heartbeat] Updated %d skill(s)", n)
+    except Exception:
+        logger.exception("[Heartbeat] Skill update failed")
 
 
 _heartbeat_task: asyncio.Task | None = None

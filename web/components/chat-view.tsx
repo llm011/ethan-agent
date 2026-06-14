@@ -232,8 +232,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         { id: s.id, title: text.slice(0, 30) || "New chat", model: s.model, created_at: Date.now() / 1000, updated_at: Date.now() / 1000 },
         ...prev,
       ]);
-      // 用 pushState 更新 URL，不触发组件卸载（router.push 会卸载当前组件，中断流式输出）
-      window.history.pushState(null, '', `/chat/${s.id}`);
+      // URL 延迟到流式结束后再更新，避免 Next.js App Router 在流式中途卸载组件
     }
 
     let content = text;
@@ -333,6 +332,10 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     });
     setStreaming(false);
     fetchSessions().then(setSessions).catch(() => {});
+    // 流式结束后再更新 URL，此时 session 已有消息，不会触发空消息覆盖
+    if (!initialSessionId && sessionId) {
+      router.replace(`/chat/${sessionId}`);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

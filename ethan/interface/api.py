@@ -21,7 +21,11 @@ from ethan.providers.base import Message
 from ethan.skills.registry import SkillRegistry
 from ethan.tools.builtin.file import FileListTool, FileReadTool, FileWriteTool
 from ethan.tools.builtin.knowledge import KnowledgeAddTool, KnowledgeSearchTool
+from ethan.tools.builtin.memory_write import MemoryWriteTool
+from ethan.tools.builtin.procedure_write import ProcedureWriteTool
+from ethan.tools.builtin.profile_update import ProfileUpdateTool
 from ethan.tools.builtin.schedule import ScheduleCreateTool, ScheduleListTool, ScheduleRemoveTool
+from ethan.tools.builtin.skill_create import SkillCreateTool
 from ethan.tools.builtin.shell import ShellTool
 from ethan.tools.builtin.search import RipgrepTool, FdTool
 from ethan.tools.builtin.web import WebFetchTool
@@ -73,7 +77,7 @@ async def verify_token(request: Request):
 
 # ── Agent factory ───────────────────────────────────────────────
 
-def _create_agent(model: str | None = None) -> Agent:
+def _create_agent(model: str | None = None, channel: str = "web") -> Agent:
     registry = ToolRegistry()
     registry.register(ShellTool())
     registry.register(WebSearchTool())
@@ -88,11 +92,15 @@ def _create_agent(model: str | None = None) -> Agent:
     registry.register(ScheduleRemoveTool())
     registry.register(KnowledgeSearchTool())
     registry.register(KnowledgeAddTool())
+    registry.register(MemoryWriteTool())
+    registry.register(ProcedureWriteTool())
+    registry.register(ProfileUpdateTool())
+    registry.register(SkillCreateTool())
 
     skills = SkillRegistry()
     skills.load()
 
-    return Agent(tool_registry=registry, skill_registry=skills, model=model)
+    return Agent(tool_registry=registry, skill_registry=skills, model=model, channel=channel)
 
 
 # ── Request/Response models ─────────────────────────────────────
@@ -102,6 +110,7 @@ class ChatRequest(BaseModel):
     model: str | None = None
     stream: bool = False
     session_id: str | None = None
+    channel: str = "web"
 
 
 class ChatResponse(BaseModel):
@@ -172,7 +181,7 @@ async def list_models():
 
 @app.post("/chat", dependencies=[Depends(verify_token)])
 async def chat(req: ChatRequest):
-    agent = _create_agent(req.model)
+    agent = _create_agent(req.model, channel=req.channel)
     messages = [Message(role=m["role"], content=m.get("content", "")) for m in req.messages]
 
     # Persist to session if session_id provided
@@ -630,6 +639,9 @@ async def _stream_response(
         asst_msg = Message(role="assistant", content=full, usage=usage_dict)
         await store.save_message(session_id, asst_msg)
         await store.touch(session_id)
+        if agent._skills and agent.last_matched_skills:
+            for _name in agent.last_matched_skills:
+                asyncio.create_task(asyncio.to_thread(agent._skills.record_hit, _name))
         asyncio.create_task(_maybe_consolidate(session_id, agent._provider.model))
         asyncio.create_task(_maybe_regen_title(session_id, store))
 
@@ -918,6 +930,12 @@ async def get_logs(type: str = "backend", lines: int = 500, q: str | None = None
 
 from ethan.skills.loader import USER_SKILLS_DIR as SKILLS_DIR
 import yaml
+
+@app.post("/skills/evolve", dependencies=[Depends(verify_token)])
+async def evolve_skills():
+    from ethan.skills.updater import update_skills_from_corrections
+    return {"ok": True, "updated_count": await update_skills_from_corrections()}
+
 
 @app.get("/skills", dependencies=[Depends(verify_token)])
 async def list_skills():

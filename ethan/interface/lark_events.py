@@ -148,7 +148,11 @@ async def _handle_message(event_data: dict) -> None:
     from ethan.skills.registry import SkillRegistry
     from ethan.tools.builtin.file import FileListTool, FileReadTool, FileWriteTool
     from ethan.tools.builtin.knowledge import KnowledgeAddTool, KnowledgeSearchTool
+    from ethan.tools.builtin.memory_write import MemoryWriteTool
+    from ethan.tools.builtin.procedure_write import ProcedureWriteTool
+    from ethan.tools.builtin.profile_update import ProfileUpdateTool
     from ethan.tools.builtin.schedule import ScheduleCreateTool, ScheduleListTool, ScheduleRemoveTool
+    from ethan.tools.builtin.skill_create import SkillCreateTool
     from ethan.tools.builtin.shell import ShellTool
     from ethan.tools.builtin.web import WebFetchTool
     from ethan.tools.builtin.web_search import WebSearchTool
@@ -231,11 +235,12 @@ async def _handle_message(event_data: dict) -> None:
                      FileReadTool(), FileWriteTool(), FileListTool(),
                      RipgrepTool(), FdTool(),
                      ScheduleCreateTool(), ScheduleListTool(), ScheduleRemoveTool(),
-                     KnowledgeSearchTool(), KnowledgeAddTool()]:
+                     KnowledgeSearchTool(), KnowledgeAddTool(),
+                     MemoryWriteTool(), ProcedureWriteTool(), ProfileUpdateTool(), SkillCreateTool()]:
             registry.register(tool)
         skills = SkillRegistry()
         skills.load()
-        agent = Agent(tool_registry=registry, skill_registry=skills)
+        agent = Agent(tool_registry=registry, skill_registry=skills, channel="lark")
 
         # --- 收集完整回复后一次性发送 ---
         # 飞书 patch API 只支持卡片消息，文本消息无法 patch

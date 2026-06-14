@@ -64,7 +64,11 @@ def _build_agent(model: str | None = None):
     from ethan.tools.builtin.acp import DelegateCodingTool
     from ethan.tools.builtin.file import FileListTool, FileReadTool, FileWriteTool
     from ethan.tools.builtin.knowledge import KnowledgeAddTool, KnowledgeSearchTool
+    from ethan.tools.builtin.memory_write import MemoryWriteTool
+    from ethan.tools.builtin.procedure_write import ProcedureWriteTool
+    from ethan.tools.builtin.profile_update import ProfileUpdateTool
     from ethan.tools.builtin.schedule import ScheduleCreateTool, ScheduleListTool, ScheduleRemoveTool
+    from ethan.tools.builtin.skill_create import SkillCreateTool
     from ethan.tools.builtin.shell import ShellTool
     from ethan.tools.builtin.search import RipgrepTool, FdTool
     from ethan.tools.builtin.web import WebFetchTool
@@ -85,12 +89,16 @@ def _build_agent(model: str | None = None):
     registry.register(ScheduleRemoveTool())
     registry.register(KnowledgeSearchTool())
     registry.register(KnowledgeAddTool())
+    registry.register(MemoryWriteTool())
+    registry.register(ProcedureWriteTool())
+    registry.register(ProfileUpdateTool())
+    registry.register(SkillCreateTool())
     registry.register(DelegateCodingTool())
 
     skills = SkillRegistry()
     skills.load()
 
-    return Agent(tool_registry=registry, skill_registry=skills, model=model)
+    return Agent(tool_registry=registry, skill_registry=skills, model=model, channel="repl")
 
 
 @app.callback(invoke_without_command=True)

@@ -60,7 +60,7 @@ def _create_agent() -> Agent:
     registry.register(FileListTool())
     skills = SkillRegistry()
     skills.load()
-    return Agent(tool_registry=registry, skill_registry=skills)
+    return Agent(tool_registry=registry, skill_registry=skills, channel="lark")
 
 
 async def _get_or_create_session(store: SessionStore, chat_id: str) -> str:

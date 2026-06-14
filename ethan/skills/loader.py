@@ -7,7 +7,7 @@
 每个技能目录下 references/*.md 可供 agent 按需读取，不注入 prompt。
 """
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -30,6 +30,7 @@ class Skill:
     source: Path
     builtin: bool = False  # True = 内置，False = 用户安装
     fast_path: bool = False  # True = 命中 trigger 时走 Fast Path（不受长度限制）
+    channels: list[str] = field(default_factory=list)  # 空列表 = 所有渠道
 
 
 def _parse_frontmatter(text: str) -> tuple[dict, str]:
@@ -62,9 +63,12 @@ def load_skill_from_file(path: Path, builtin: bool = False) -> Optional[Skill]:
         triggers = []
 
     fast_path = bool(meta.get("fast_path", False))
+    channels_raw = meta.get("channels", [])
+    channels = channels_raw if isinstance(channels_raw, list) else []
 
     return Skill(name=name, description=description, trigger=triggers,
-                 content=content, source=path, builtin=builtin, fast_path=fast_path)
+                 content=content, source=path, builtin=builtin, fast_path=fast_path,
+                 channels=channels)
 
 
 def load_skill_from_dir(skill_dir: Path, builtin: bool = False) -> Optional[Skill]:
