@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { fetchDoc } from "@/lib/api";
@@ -12,7 +13,8 @@ interface DocsViewProps {
 }
 
 export function DocsView({ initialSlug }: DocsViewProps = {}) {
-  const [activeSlug, setActiveSlug] = useState(initialSlug || DOC_NAV[0]?.items[0]?.slug || "");
+  const router = useRouter();
+  const activeSlug = initialSlug || DOC_NAV[0]?.items[0]?.slug || "";
   const [content, setContent] = useState("");
   const [loading, setLoading] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() =>
@@ -22,6 +24,7 @@ export function DocsView({ initialSlug }: DocsViewProps = {}) {
   useEffect(() => {
     if (!activeSlug) return;
     setLoading(true);
+    setContent("");
     fetchDoc(activeSlug)
       .then(d => setContent(d.content))
       .catch(() => setContent(""))
@@ -30,6 +33,10 @@ export function DocsView({ initialSlug }: DocsViewProps = {}) {
 
   const toggleGroup = (group: string) => {
     setExpandedGroups(prev => ({ ...prev, [group]: !prev[group] }));
+  };
+
+  const navigate = (slug: string) => {
+    router.push(`/docs/${slug}`);
   };
 
   return (
@@ -54,7 +61,7 @@ export function DocsView({ initialSlug }: DocsViewProps = {}) {
               {expandedGroups[group.group] && group.items.map(item => (
                 <button
                   key={item.slug}
-                  onClick={() => setActiveSlug(item.slug)}
+                  onClick={() => navigate(item.slug)}
                   className={`w-full text-left px-6 py-1.5 text-sm transition-colors border-l-2 ${
                     activeSlug === item.slug
                       ? "border-primary text-foreground font-medium bg-muted/40"
