@@ -29,6 +29,7 @@ from ethan.tools.builtin.file import FileListTool, FileReadTool, FileWriteTool
 from ethan.tools.builtin.shell import ShellTool
 from ethan.tools.builtin.web import WebFetchTool
 from ethan.tools.builtin.web_search import WebSearchTool
+from ethan.tools.builtin.schedule import lark_chat_id_var
 
 logger = logging.getLogger(__name__)
 
@@ -179,8 +180,13 @@ async def lark_webhook(request: Request):
         user_msg = Message(role="user", content=text)
         await store.save_message(session_id, user_msg)
 
-        agent = _create_agent()
-        response = await agent.chat([user_msg])
+        # 注入 chat_id，让 ScheduleCreateTool 创建定时任务时能读到来源渠道
+        token = lark_chat_id_var.set(chat_id)
+        try:
+            agent = _create_agent()
+            response = await agent.chat([user_msg])
+        finally:
+            lark_chat_id_var.reset(token)
 
         await store.save_message(session_id, response)
         await store.touch(session_id)

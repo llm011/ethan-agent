@@ -750,7 +750,8 @@ async def get_schedules():
             "next_run_time": str(job.next_run_time) if job.next_run_time else None,
             "status": "paused" if is_paused else "active",
             "prompt": prompt,
-            "session_id": session_id
+            "session_id": session_id,
+            "channel": kwargs.get("channel", "web"),
         })
     return {"jobs": result}
 
@@ -760,15 +761,18 @@ class ScheduleCreateRequest(BaseModel):
     cron: str = ""
     interval_minutes: int = 0
     session_id: str
+    channel: str = "web"
+    channel_context: str = "{}"
 
 @app.post("/schedule", dependencies=[Depends(verify_token)])
 async def create_schedule(req: ScheduleCreateRequest):
     scheduler = get_scheduler()
     from ethan.tools.builtin.schedule import fire_schedule_job
+    kwargs = dict(session_id=req.session_id, prompt=req.prompt, channel=req.channel, channel_context=req.channel_context)
     if req.cron:
-        scheduler.add_cron(req.job_id, fire_schedule_job, req.cron, session_id=req.session_id, prompt=req.prompt)
+        scheduler.add_cron(req.job_id, fire_schedule_job, req.cron, **kwargs)
     elif req.interval_minutes > 0:
-        scheduler.add_interval(req.job_id, fire_schedule_job, minutes=req.interval_minutes, session_id=req.session_id, prompt=req.prompt)
+        scheduler.add_interval(req.job_id, fire_schedule_job, minutes=req.interval_minutes, **kwargs)
     else:
         raise HTTPException(400, "Need cron or interval_minutes")
     return {"ok": True}

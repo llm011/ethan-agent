@@ -1,25 +1,32 @@
 """Schedule Tool — 让 agent 通过 tool call 创建和管理定时任务。"""
 import json
 import threading
+from contextvars import ContextVar
 from typing import Any
 
 from ethan.tools.base import BaseTool
 
-def fire_schedule_job(session_id: str, prompt: str):
+# 存储当前请求的飞书 chat_id，在 lark webhook 里设置，ScheduleCreateTool 里读取
+lark_chat_id_var: ContextVar[str] = ContextVar("lark_chat_id", default="")
+
+
+def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channel_context: str = "{}"):
     def _do_fire():
         import requests
         from ethan.core.config import get_config
+        result_text = ""
         try:
             token = get_config().network.auth_token
             headers = {"Authorization": f"Bearer {token}"} if token else {}
-            # Fire and forget (don't care about the response stream here, it will be saved to session DB by the server)
             res = requests.post("http://127.0.0.1:8900/chat", json={
                 "messages": [{"role": "user", "content": prompt}],
                 "session_id": session_id,
             }, headers=headers, timeout=120)
             res.raise_for_status()
+            result_text = res.json().get("content", "")
         except Exception as e:
             print(f"Schedule fire error: {e}")
+            result_text = f"⚠️ 定时任务执行失败: {e}"
             import asyncio
             from ethan.memory.session import SessionStore
             from ethan.providers.base import Message
@@ -34,7 +41,21 @@ def fire_schedule_job(session_id: str, prompt: str):
                 asyncio.run(log_error())
             except Exception as e2:
                 print(f"Failed to log error to session: {e2}")
-            
+
+        # 如果是飞书渠道发起的定时任务，把结果回发到对应的 chat
+        if channel == "lark" and result_text:
+            try:
+                ctx = json.loads(channel_context)
+                chat_id = ctx.get("chat_id", "")
+                if chat_id:
+                    from ethan.interface.lark import _get_lark_client, _send_lark_reply
+                    import asyncio
+                    client = _get_lark_client()
+                    if client:
+                        asyncio.run(_send_lark_reply(client, chat_id, result_text))
+            except Exception as e3:
+                print(f"Schedule lark reply error: {e3}")
+
     # Run in a separate thread so we don't block the APScheduler worker pool!
     threading.Thread(target=_do_fire, daemon=True).start()
 
@@ -61,6 +82,11 @@ class ScheduleCreateTool(BaseTool):
         if not cron and interval_minutes <= 0:
             return "Error: provide either 'cron' or 'interval_minutes'"
 
+        # 读取当前请求上下文中的飞书 chat_id（非飞书渠道时为空字符串）
+        chat_id = lark_chat_id_var.get("")
+        channel = "lark" if chat_id else "web"
+        channel_context = json.dumps({"chat_id": chat_id}) if chat_id else "{}"
+
         # Create a dedicated session for this task
         store = SessionStore()
         await store.init()
@@ -78,7 +104,9 @@ class ScheduleCreateTool(BaseTool):
                     "prompt": prompt,
                     "cron": cron,
                     "interval_minutes": interval_minutes,
-                    "session_id": session.id
+                    "session_id": session.id,
+                    "channel": channel,
+                    "channel_context": channel_context,
                 }, headers=headers)
                 res.raise_for_status()
                 return f"Scheduled '{job_id}' successfully. (Session: {session.id})"
