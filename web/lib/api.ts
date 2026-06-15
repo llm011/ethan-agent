@@ -1,4 +1,4 @@
-const API_URL = typeof window !== "undefined" 
+export const API_URL = typeof window !== "undefined"
   ? `${window.location.protocol}//${window.location.hostname === "localhost" ? "127.0.0.1" : window.location.hostname}:8900`
   : (process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8900");
 
@@ -498,3 +498,42 @@ export async function fetchDoc(slug: string): Promise<{ slug: string; content: s
   if (!res.ok) throw new Error("Failed");
   return res.json();
 }
+
+// ── API Keys ─────────────────────────────────────────────────────
+
+export interface APIKeyInfo {
+  id: string;
+  name: string;
+  key_preview: string;
+  created_at: number;
+  last_used_at: number | null;
+}
+
+export interface APIKeyCreated extends APIKeyInfo {
+  key: string; // full key, only returned on creation
+}
+
+export async function fetchAPIKeys(): Promise<APIKeyInfo[]> {
+  const res = await fetch(`${API_URL}/api-keys`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed");
+  return res.json().then(d => d.keys);
+}
+
+export async function createAPIKey(name: string): Promise<APIKeyCreated> {
+  const res = await fetch(`${API_URL}/api-keys`, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) throw new Error("Failed");
+  return res.json();
+}
+
+export async function deleteAPIKey(keyId: string): Promise<void> {
+  const res = await fetch(`${API_URL}/api-keys/${keyId}`, {
+    method: "DELETE",
+    headers: headers(),
+  });
+  if (!res.ok) throw new Error("Failed");
+}
+

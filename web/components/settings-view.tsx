@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -16,6 +17,7 @@ import {
   fetchProviderSettings, updateProviderSettings, ProviderSettings,
   fetchSystemPromptPreview, SystemPromptPreview,
   fetchChannels, patchChannel, ChannelInfo,
+  fetchAPIKeys, createAPIKey, deleteAPIKey, APIKeyInfo, APIKeyCreated,
 } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -44,9 +46,10 @@ function useTheme() {
 
 interface SettingsViewProps {
   models: { id: string; description: string }[];
+  initialTab?: TabId;
 }
 
-type TabId = "general" | "providers" | "channels" | "identity" | "soul" | "tools" | "heartbeat" | "prompt-preview";
+type TabId = "general" | "providers" | "channels" | "identity" | "soul" | "tools" | "heartbeat" | "prompt-preview" | "api-keys";
 
 const TAB_GROUPS = [
   {
@@ -64,6 +67,12 @@ const TAB_GROUPS = [
       { id: "soul" as TabId, label: "运行准则" },
       { id: "tools" as TabId, label: "工具说明" },
       { id: "heartbeat" as TabId, label: "心跳任务" },
+    ],
+  },
+  {
+    group: "开放接口",
+    items: [
+      { id: "api-keys" as TabId, label: "API Keys" },
     ],
   },
   {
@@ -233,8 +242,14 @@ function PromptPreview() {
 }
 
 
-export function SettingsView({ models }: SettingsViewProps) {
-  const [activeTab, setActiveTab] = useState<TabId>("general");
+export function SettingsView({ models, initialTab = "general" }: SettingsViewProps) {
+  const router = useRouter();
+  const [activeTab, setActiveTab] = useState<TabId>(initialTab);
+
+  const handleTabChange = useCallback((tab: TabId) => {
+    setActiveTab(tab);
+    router.replace(`/settings/${tab}`, { scroll: false });
+  }, [router]);
   const { theme, toggle: toggleTheme } = useTheme();
 
   const [channels, setChannels] = useState<ChannelInfo[]>([]);
@@ -242,6 +257,17 @@ export function SettingsView({ models }: SettingsViewProps) {
   const [channelForms, setChannelForms] = useState<Record<string, Record<string, string>>>({});
   const [channelSaving, setChannelSaving] = useState<string | null>(null);
   const [channelMessages, setChannelMessages] = useState<Record<string, { type: "success" | "error"; text: string }>>({});
+
+  const [apiKeys, setApiKeys] = useState<APIKeyInfo[]>([]);
+  const [apiKeyNewName, setApiKeyNewName] = useState("");
+  const [apiKeyCreating, setApiKeyCreating] = useState(false);
+  const [apiKeyJustCreated, setApiKeyJustCreated] = useState<APIKeyCreated | null>(null);
+
+  useEffect(() => {
+    if (activeTab === "api-keys") {
+      fetchAPIKeys().then(setApiKeys).catch(() => {});
+    }
+  }, [activeTab]);
 
   const [agentForm, setAgentForm] = useState<AgentSettings>({
     workspace: "",
@@ -343,7 +369,7 @@ export function SettingsView({ models }: SettingsViewProps) {
               {group.items.map(item => (
                 <button
                   key={item.id}
-                  onClick={() => setActiveTab(item.id)}
+                  onClick={() => handleTabChange(item.id)}
                   className={`w-full text-left px-4 py-2 text-sm transition-colors border-l-2 ${
                     activeTab === item.id
                       ? "border-primary text-foreground font-medium bg-muted/40"
@@ -691,7 +717,7 @@ export function SettingsView({ models }: SettingsViewProps) {
               <div className="h-full flex flex-col min-h-[500px]">
                 <h3 className="text-lg font-medium mb-2">心跳任务 (heartbeat.md)</h3>
                 <p className="text-sm text-muted-foreground mb-4">
-                  每次心跳时执行的周期性任务，由 Agent 自主维护。以 # 开头的行是注释不会执行。
+                  每次心跳时执行的周期性任务，由 Agent 自主维护。文件内容完整传给 Agent 执行，支持 Markdown 格式。示例：检查今日日历并发送桌面通知。
                 </p>
                 <MdEditor
                   value={sysForm.heartbeat}
@@ -703,6 +729,103 @@ export function SettingsView({ models }: SettingsViewProps) {
 
             {activeTab === "prompt-preview" && (
               <PromptPreview />
+            )}
+
+            {activeTab === "api-keys" && (
+              <div className="space-y-6">
+                <div>
+                  <h3 className="text-sm font-semibold mb-1">API Keys</h3>
+                  <p className="text-xs text-muted-foreground mb-4">
+                    用于 <code className="bg-muted px-1 rounded">/v1/chat/completions</code> 接口。
+                    Key 以 <code className="bg-muted px-1 rounded">sk-ethan-</code> 开头，创建后只显示一次。
+                  </p>
+
+                  {/* Create new key */}
+                  <div className="flex gap-2 mb-6">
+                    <Input
+                      placeholder="Key 名称（如 my-app）"
+                      value={apiKeyNewName}
+                      onChange={e => setApiKeyNewName(e.target.value)}
+                      className="max-w-xs"
+                    />
+                    <Button
+                      size="sm"
+                      disabled={apiKeyCreating || !apiKeyNewName.trim()}
+                      onClick={async () => {
+                        setApiKeyCreating(true);
+                        try {
+                          const created = await createAPIKey(apiKeyNewName.trim());
+                          setApiKeyJustCreated(created);
+                          setApiKeyNewName("");
+                          fetchAPIKeys().then(setApiKeys).catch(() => {});
+                        } catch {
+                          // ignore
+                        } finally {
+                          setApiKeyCreating(false);
+                        }
+                      }}
+                    >
+                      {apiKeyCreating ? "创建中..." : "创建"}
+                    </Button>
+                  </div>
+
+                  {/* Show full key once after creation */}
+                  {apiKeyJustCreated && (
+                    <div className="mb-4 p-3 rounded-md bg-green-500/10 border border-green-500/30 text-sm">
+                      <p className="font-medium text-green-600 mb-1">Key 已创建，请立即复制，之后无法再查看完整 Key：</p>
+                      <code className="font-mono text-xs break-all select-all">{apiKeyJustCreated.key}</code>
+                      <Button variant="ghost" size="sm" className="ml-2 text-xs" onClick={() => setApiKeyJustCreated(null)}>
+                        我已复制
+                      </Button>
+                    </div>
+                  )}
+
+                  {/* Keys list */}
+                  {apiKeys.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">暂无 API Key</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {apiKeys.map(k => (
+                        <div key={k.id} className="flex items-center justify-between p-3 rounded-md border border-border bg-muted/20">
+                          <div>
+                            <div className="text-sm font-medium">{k.name}</div>
+                            <div className="text-xs text-muted-foreground font-mono mt-0.5">{k.key_preview}</div>
+                            <div className="text-xs text-muted-foreground mt-0.5">
+                              创建于 {new Date(k.created_at * 1000).toLocaleString()}
+                              {k.last_used_at && ` · 最近使用 ${new Date(k.last_used_at * 1000).toLocaleString()}`}
+                            </div>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-muted-foreground hover:text-destructive"
+                            onClick={async () => {
+                              await deleteAPIKey(k.id);
+                              setApiKeys(prev => prev.filter(x => x.id !== k.id));
+                            }}
+                          >
+                            删除
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="mt-6 p-3 rounded-md bg-muted/30 text-xs text-muted-foreground space-y-1">
+                    <p className="font-medium text-foreground">调用示例</p>
+                    <pre className="font-mono whitespace-pre-wrap">{`POST http://your-server:8900/v1/chat/completions
+Authorization: Bearer sk-ethan-xxxx
+Content-Type: application/json
+
+{
+  "model": "claude-sonnet-4-6",
+  "messages": [{"role": "user", "content": "你好"}],
+  "session_id": "optional-existing-session-id"
+}`}</pre>
+                    <p>返回中 <code>ethan.session_id</code> 字段可用于下次继续对话。</p>
+                  </div>
+                </div>
+              </div>
             )}
 
           </div>

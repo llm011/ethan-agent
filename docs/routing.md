@@ -16,6 +16,8 @@
 
 每轮对话开始时，`_get_route()` 对用户输入做实时分类，决定走哪条轨道。路由优先级如下：
 
+![路由决策流程](./images/routing-decision.jpg)
+<!-- diagram-source
 ```
 输入文本
    │
@@ -43,6 +45,7 @@
    ▼
 [6] 默认 → full
 ```
+-->
 
 [2] 和 [3] 的区别：[2] 是自动的，只要 Skill 的 frontmatter 写了 `fast_path: true`，它的所有 trigger 关键词就会在 `Agent.chat()` 中自动收集并注入路由判断，无需额外配置；[3] 是手动补充的备用列表。
 

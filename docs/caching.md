@@ -16,6 +16,8 @@ system prompt 中有大量内容在多轮对话间几乎不变（identity、soul
 
 分割点：`Current time:` 字符串。
 
+![Prompt Caching 分割策略](./images/caching-split.jpg)
+<!-- diagram-source
 ```
 [稳定层]                         ← 打 cache_control: ephemeral
 <identity>...</identity>
@@ -32,6 +34,7 @@ workspace 路径
 <procedures>
 <relevant_skills>（关键词匹配结果）
 ```
+-->
 
 稳定层内容由 `system/identity.md`、`system/soul.md`、`system/tools.md` 和 Skill 名称列表组成，这些文件在服务运行期间几乎不变，缓存命中率极高。
 

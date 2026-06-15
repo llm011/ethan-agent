@@ -10,6 +10,8 @@ ACP（Agent Communication Protocol）是 Ethan 委托复杂编码任务给专业
 
 ## 架构
 
+![ACP Coding Agent 架构](./images/acp-arch.jpg)
+<!-- diagram-source
 ```
 用户输入 "帮我实现 JWT 认证的 FastAPI 应用"
     │
@@ -29,6 +31,7 @@ Coding Agent 执行，输出代码/修改文件
     ▼
 结果返回给 Ethan，整合进对话
 ```
+-->
 
 ---
 

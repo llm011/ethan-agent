@@ -75,12 +75,15 @@ config.yaml 中可通过 `fast_skill_triggers` 手动指定额外的 fast 轨关
 
 文件：`ethan/skills/registry.py`
 
+![Skill 匹配机制](./images/skills-matching.jpg)
+<!-- diagram-source
 ```
 用户输入 → 逐个检查每个 Skill 的 trigger 列表
          → 渠道过滤：skill.channels 非空 且 当前渠道不在其中 → 跳过
          → 如果某个 trigger 关键词出现在用户输入中（子串匹配）→ 命中
          → 最多注入 3 个 Skill 到 system prompt
 ```
+-->
 
 **渠道过滤**：`SkillRegistry.match(query, channel="")` 接收当前渠道标识（如 `"lark"`、`"web"` 或 `""`）。如果 Skill 的 `channels` 列表非空且当前渠道不在其中，该 Skill 不会被注入。这样可以为飞书、Web、CLI 分别准备专属 Skill，互不干扰。
 
@@ -191,6 +194,8 @@ ethan skill create my-skill -t "k1|k2" -d "desc"  # 创建空 Skill 文件
 
 ## 数据流
 
+![Skills 系统数据流](./images/skills-dataflow.jpg)
+<!-- diagram-source
 ```
 用户输入: "北京天气怎么样"（渠道: web）
     │
@@ -212,3 +217,4 @@ LLM 收到增强后的 system prompt → 按照 Skill 描述的流程执行
     ▼
 SkillRegistry.record_hit("weather-query")  ← 记录命中
 ```
+-->
