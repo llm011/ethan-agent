@@ -148,7 +148,7 @@ export function SkillsView() {
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col min-h-0">
         <div className="p-4 border-b border-border/40 flex items-center justify-between bg-card">
           <h2 className="font-semibold">
             {selectedSkill ? `Edit Skill: ${selectedSkill.name}` : "Create New Skill"}

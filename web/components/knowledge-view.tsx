@@ -224,7 +224,7 @@ export function KnowledgeView() {
       </div>
 
       {/* Main panel */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 min-h-0">
         {/* Header */}
         <div className="p-4 border-b border-border/40 flex items-center justify-between bg-card shrink-0">
           <h2 className="font-semibold truncate flex-1 pr-4">
