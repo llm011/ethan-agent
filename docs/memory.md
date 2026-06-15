@@ -263,7 +263,7 @@ await procedure_write.run(
 
 文件：`ethan/tools/builtin/profile_update.py`
 
-更新 `user_profile.md` 中的指定章节（见 [用户画像](#第三层用户画像user-profile)）。
+更新 `user_profile.md` 中的指定章节（见 [三层架构](#三层架构)）。
 
 ---
 

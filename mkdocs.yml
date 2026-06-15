@@ -50,7 +50,7 @@ plugins:
       lang: zh
 
 nav:
-  - 首页: index.md
+  - 首页: README.md
   - 入门:
     - 安装指南: installation.md
     - 快速上手: quickstart.md
