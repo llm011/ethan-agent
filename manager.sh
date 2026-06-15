@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-PROJECT_ROOT="/Users/jsongo/code/life/ethan-ai"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PID_DIR="$PROJECT_ROOT/.run"
 BACKEND_PID_FILE="$PID_DIR/backend.pid"
 FRONTEND_PID_FILE="$PID_DIR/frontend.pid"

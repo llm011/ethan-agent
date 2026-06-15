@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- 模板文件：install.sh 会自动替换 __USER__ 和 __PROJECT_ROOT__ -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -6,7 +7,7 @@
     <string>com.ethan.agent</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/jsongo/.local/bin/uv</string>
+        <string>__UV_BIN__</string>
         <string>run</string>
         <string>python</string>
         <string>-m</string>
@@ -14,19 +15,19 @@
         <string>serve</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>/Users/jsongo/code/life/ethan-ai</string>
+    <string>__PROJECT_ROOT__</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/Users/jsongo/.ethan/logs/api.out.log</string>
+    <string>__ETHAN_HOME__/logs/api.out.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/jsongo/.ethan/logs/api.err.log</string>
+    <string>__ETHAN_HOME__/logs/api.err.log</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/Users/jsongo/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <string>__UV_BIN_DIR__:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
     </dict>
 </dict>
 </plist>

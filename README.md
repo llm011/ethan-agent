@@ -410,30 +410,66 @@ Environment variables in `.env` override config values (useful for secrets).
 
 ## Roadmap
 
-- [x] Multi-model provider system (Anthropic + OpenAI compatible)
-- [x] ReAct agent loop with streaming
-- [x] Session persistence & resume
-- [x] Three-tier memory (hot/warm/cold) with auto-compression
-- [x] Structured facts with confidence scoring
-- [x] Behavioral procedures (learned from corrections)
-- [x] Session episode archive
-- [x] User profile (narrative, five-section document)
-- [x] Proactive memory write tools (`memory_write`, `procedure_write`, `profile_update`)
-- [x] Skill system (dual-source, directory format, channel filter, fast-path opt-in)
-- [x] Skill hit tracking + correction collection + auto-update (Updater)
-- [x] Skill auto-generation from sessions (Hermes-style)
-- [x] Built-in skills: channels, lark-im, home-assistant
-- [x] Three-track router: fast / medium / full
-- [x] Tool result auto-compression (long output → cheap model summary)
-- [x] Per-turn tool call deduplication cache
-- [x] Scheduler (cron + interval) + heartbeat job
-- [x] Built-in tools (shell, search, file, web, schedule, knowledge, skill_create)
-- [x] HTTP API with SSE streaming + full REST endpoints
-- [x] Web UI (chat, memory, knowledge, schedule, skills, sessions, settings, channels)
-- [x] Knowledge base with semantic vector search (sqlite-vec)
-- [x] Prompt Caching (Anthropic stable-prefix cache_control)
-- [x] ACP protocol client
-- [ ] MCP protocol client
+### ✅ Completed
+
+**Core Agent**
+- [x] Multi-model provider (Anthropic + OpenAI-compatible: Gemini, GPT, Ollama, etc.)
+- [x] ReAct agent loop with streaming output
+- [x] Three-track router: fast / medium / full, tool result compression, per-turn dedup cache
+- [x] Prompt Caching (Anthropic stable-prefix cache_control, ~0.1× input cost)
+
+**Five-Layer Memory**
+- [x] Hot/warm/cold sliding window + cheap-model batch compression
+- [x] Structured Facts (confidence scoring + conflict detection)
+- [x] Behavioral Procedures (learned from user corrections)
+- [x] Session Episode archive (auto-summary, keyword search)
+- [x] User Profile — narrative document with five named sections
+- [x] Proactive memory write: `memory_write`, `procedure_write`, `profile_update`, `skill_create`
+- [x] Memory context isolation (anti-pollution XML tags)
+
+**Skill System**
+- [x] Dual-source loading (built-in + user-defined) + channel filter (`channels` field)
+- [x] `fast_path` opt-in, hit stats, correction collection, auto-update (Updater)
+- [x] Session-end background Skill generation (Hermes-style)
+- [x] Built-in skills: home-assistant, lark-im, channels, deepwiki
+
+**Tools**
+- [x] shell, web_search, web_fetch, file_read/write/list, rg, fd
+- [x] Knowledge base (sqlite-vec semantic search), scheduler tools, ACP → Claude Code
+
+**Scheduler**
+- [x] Cron + interval, SQLite persistence, auto-restore on restart
+- [x] `heartbeat.md`: natural-language periodic tasks executed automatically
+
+**Channels & API**
+- [x] Web UI (Next.js): chat timeline, memory, skills, schedule, knowledge, settings
+- [x] Tool call timeline (collapsible, with icons + duration)
+- [x] Feishu/Lark WebSocket (no public IP required)
+- [x] OpenAI-compatible Completions API (`/v1/chat/completions`) + API key management
+- [x] Docker deployment + macOS launchd auto-start
+
+---
+
+### 🚀 Planned
+
+**UX Improvements**
+- [ ] **Message quoting**: quote a previous message in the input box
+- [ ] **User profile settings**: avatar upload, display name shown in chat bubbles
+- [ ] **Scheduler suggestions**: Agent detects scheduling opportunities in conversation and prompts user with 1-2-3 options
+- [ ] **Scheduler templates**: ready-to-use tasks (daily briefing, HA device check, knowledge digest)
+
+**Channel Expansion**
+- [ ] **WeCom (Enterprise WeChat)**: alongside Feishu as a second messaging channel
+- [ ] **Mobile UI**: bottom tab nav, touch gestures, keyboard inset handling
+
+**Coding Agent Integration**
+- [ ] **ACP multi-turn optimization**: smoother Claude Code / OpenCode / Codex sessions with collapsible tool traces
+- [ ] **MCP client**: connect external MCP servers, auto-register tools
+
+**Long-term**
+- [ ] **Space isolation**: separate memory/skills per context (life / work / project)
+- [ ] **Async interrupt**: detect new messages during long tasks, respond between tool calls
+- [ ] **Obsidian integration**: read/write Obsidian vault as knowledge base
 
 ---
 

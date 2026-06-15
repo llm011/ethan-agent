@@ -503,30 +503,65 @@ EOF
 
 ## Roadmap
 
-- [x] 多模型 Provider 系统（Anthropic + OpenAI 兼容）
+### ✅ 已完成
+
+**核心 Agent**
+- [x] 多模型 Provider（Anthropic + OpenAI 兼容：Gemini、GPT、Ollama 等）
 - [x] ReAct agent loop + 流式输出
-- [x] Session 持久化与恢复
-- [x] 三层记忆（热/温/冷）+ 自动压缩
-- [x] 结构化 Facts（置信度评分）
-- [x] 行为准则（从纠正中学习）
-- [x] 会话 Episode 存档
-- [x] 用户画像（叙事型，五章节文档）
-- [x] 主动写记忆工具（`memory_write`、`procedure_write`、`profile_update`）
-- [x] Skill 系统（双来源、目录格式、渠道过滤、fast_path 标记）
-- [x] Skill 命中追踪 + 纠正收集 + 自动更新（Updater）
-- [x] Skill 自动生成（Hermes 风格）
-- [x] 内置技能：channels、lark-im、home-assistant
-- [x] 三档路由：fast / medium / full
-- [x] 工具结果自动压缩（超长输出 → 廉价模型摘要）
-- [x] 轮次内工具调用去重缓存
-- [x] 定时任务（cron + interval）+ 心跳任务
-- [x] 内置工具（shell、搜索、文件、Web、定时、知识库、skill_create）
-- [x] HTTP API + SSE 流式 + 完整 REST 接口
-- [x] Web UI（对话、记忆、知识库、定时、技能、会话、设置、渠道）
-- [x] 知识库语义向量检索（sqlite-vec）
-- [x] Prompt Caching（Anthropic 稳定层 cache_control）
-- [x] ACP 协议客户端
-- [ ] MCP 协议客户端
+- [x] 三档路由：fast / medium / full，工具结果压缩，轮次内去重缓存
+- [x] Prompt Caching（Anthropic 稳定层 cache_control，成本降至 0.1×）
+
+**记忆体系（五层）**
+- [x] 热/温/冷三层滑动窗口 + 廉价模型批量压缩
+- [x] 结构化 Facts（置信度 + 矛盾检测）
+- [x] 行为准则 Procedures（从用户纠正中学习）
+- [x] 会话 Episode 存档（自动摘要，关键词检索）
+- [x] 用户画像 UserProfile（叙事型，五章节文档）
+- [x] 主动写记忆（`memory_write`、`procedure_write`、`profile_update`、`skill_create`）
+- [x] Memory context 隔离（防污染标签）
+
+**Skill 系统**
+- [x] 双来源加载（内置 + 用户自定义）+ 渠道过滤（channels 字段）
+- [x] fast_path 标记、Skill 命中统计、纠正收集、自动更新（Updater）
+- [x] 会话结束后后台自动生成 Skill（Hermes 风格）
+- [x] 内置技能：home-assistant、lark-im、channels、deepwiki
+
+**工具**
+- [x] shell、web_search、web_fetch、file_read/write/list、rg、fd
+- [x] 知识库（sqlite-vec 语义检索）、定时任务管理、ACP 委派 Claude Code
+
+**定时任务**
+- [x] cron + interval，SQLite 持久化，重启自动恢复
+- [x] heartbeat.md：自然语言定义周期任务，系统自动执行
+
+**渠道与 API**
+- [x] Web UI（Next.js）：对话时间轴、记忆管理、技能、定时、知识库、设置
+- [x] 飞书 WebSocket（无需公网 IP）
+- [x] OpenAI 兼容 Completions API（`/v1/chat/completions`）+ API Key 管理
+- [x] Docker 部署 + macOS launchd 自启
+
+---
+
+### 🚀 规划中
+
+**体验增强**
+- [ ] **消息引用**：引用某条历史消息进行对话（气泡右键 → 引用）
+- [ ] **用户设置**：头像上传、显示名称，显示在对话气泡中
+- [ ] **定时任务引导**：Agent 识别对话中潜在的定时需求，主动列出建议并询问用户是否创建
+- [ ] **复杂定时任务样例**：每日简报、设备巡检、定时知识整理等开箱即用模板
+
+**渠道扩展**
+- [ ] **企业微信（WeCom）**：接入企业微信应用消息，与飞书渠道并列
+- [ ] **移动端适配**：底部 Tab 导航、触摸手势、键盘弹起适配
+
+**Coding Agent 集成**
+- [ ] **ACP 持续对话优化**：Claude Code / OpenCode / Codex 多轮对话，工具过程折叠展示
+- [ ] **MCP client 完善**：连接外部 MCP server，自动注册工具
+
+**长期**
+- [ ] **域隔离（Space）**：生活 / 工作 / 项目记忆独立，防止混杂
+- [ ] **异步中断**：长任务执行中感知新消息，在工具调用间隙响应
+- [ ] **Obsidian 接入**：读写 Obsidian vault 作为知识库
 
 ---
 
