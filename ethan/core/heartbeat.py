@@ -84,12 +84,7 @@ async def _run_heartbeat_md() -> None:
         return
 
     content = hb_path.read_text(encoding="utf-8")
-    # 去掉注释行，看是否有实质性内容
-    active_lines = [
-        l for l in content.split("\n")
-        if l.strip() and not l.strip().startswith("#")
-    ]
-    if not active_lines:
+    if not content.strip():
         return
 
     logger.info("[Heartbeat] Running heartbeat.md tasks...")

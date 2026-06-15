@@ -10,7 +10,8 @@ _DB_PATH = CONFIG_DIR / "api_keys.db"
 
 
 class APIKeyStore:
-    _db: aiosqlite.Connection | None = None
+    def __init__(self):
+        self._db: aiosqlite.Connection | None = None
 
     async def init(self) -> None:
         _DB_PATH.parent.mkdir(parents=True, exist_ok=True)

@@ -310,11 +310,18 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
         user_info = raw_info.strip()
 
         # Persist agent name to config
-        from ethan.core.config import save_config, reload_config
+        from ethan.core.config import save_config, reload_config, CONFIG_DIR
         _cfg = get_config()
         _cfg.defaults.agent_name = agent_name
         save_config(_cfg)
         reload_config()
+
+        # Patch agent name in identity.md if user chose a non-default name
+        if agent_name != "Ethan":
+            identity_path = CONFIG_DIR / "system" / "identity.md"
+            if identity_path.exists():
+                _id_content = identity_path.read_text(encoding="utf-8")
+                identity_path.write_text(_id_content.replace("Ethan", agent_name), encoding="utf-8")
 
         # Persist user info to FactStore
         if user_info:
@@ -564,6 +571,19 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
             )
         except Exception:
             pass
+
+    # 后台尝试提炼 Skill（fire-and-forget）
+    if user_turns >= 3:
+        async def _maybe_gen_skill():
+            try:
+                from ethan.skills.generator import SkillGenerator
+                gen = SkillGenerator(agent._provider)
+                path = await gen.maybe_generate(history[-30:])
+                if path:
+                    console.print(f"[dim]✨ 已自动创建 Skill：{path.parent.name}[/dim]")
+            except Exception:
+                pass
+        asyncio.create_task(_maybe_gen_skill())
 
     # 清理历史空 session（包括本次如果没有发任何消息的情况）
     try:

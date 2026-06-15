@@ -92,9 +92,9 @@ export function SkillsView() {
   }
 
   return (
-    <div className="flex h-full w-full bg-background border-l border-border/40">
+    <div className="flex flex-1 min-h-0 w-full bg-background border-l border-border/40">
       {/* Sidebar */}
-      <div className="w-64 border-r border-border/40 flex flex-col bg-muted/10">
+      <div className="w-64 border-r border-border/40 flex flex-col bg-muted/10 min-h-0">
         <div className="p-4 border-b border-border/40 flex items-center justify-between">
           <h2 className="font-semibold flex items-center gap-2">
             <Wrench className="w-4 h-4" />
@@ -149,7 +149,7 @@ export function SkillsView() {
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-h-0">
-        <div className="p-4 border-b border-border/40 flex items-center justify-between bg-card">
+        <div className="p-4 border-b border-border/40 flex items-center justify-between bg-background">
           <h2 className="font-semibold">
             {selectedSkill ? `Edit Skill: ${selectedSkill.name}` : "Create New Skill"}
           </h2>
