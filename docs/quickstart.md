@@ -3,17 +3,7 @@
 ## 安装
 
 ```bash
-# 基础安装（CLI + Web UI）
 pip install ethan-agent
-
-# 使用飞书 / Lark 集成
-pip install ethan-agent[lark]
-
-# 使用 ethan code 命令（ACP 编程 Agent）
-pip install ethan-agent[code]
-
-# 全部可选功能
-pip install ethan-agent[all]
 ```
 
 设置 API Key：

@@ -50,17 +50,7 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 ## Install
 
 ```bash
-# Basic install (CLI + Web UI)
 pip install ethan-agent
-
-# With Lark/Feishu integration
-pip install ethan-agent[lark]
-
-# With ethan code command (ACP coding agent)
-pip install ethan-agent[code]
-
-# Everything
-pip install ethan-agent[all]
 ```
 
 Set an API key and start:

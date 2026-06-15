@@ -51,3 +51,8 @@ plan/
 
 # Local bin scripts
 bin/
+
+# Local personal notes
+TODO.md
+
+pypi/
