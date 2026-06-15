@@ -13,7 +13,8 @@
 - **Web UI**：基于 Next.js App Router 的路径路由（`/chat`、`/memory`、`/knowledge`、`/schedule`、`/skills`、`/settings`），流式渲染、Markdown 高亮、深色/浅橙主题切换、移动端适配
 - **飞书/Lark 集成**：WebSocket 长连接接入（无需公网 IP），支持 Markdown post 格式渲染、流式占位回复（buffer 积累再 patch）、THINKING 表情、新用户 onboarding
 - **Fast Path 路由**：轻量意图检测，简单命令（智能家居控制等）走极简 Prompt + 最快模型，跳过完整 Agent Loop
-- **内置搜索工具**：rg（ripgrep）和 fd 作为内置工具，供 agent 在文件系统中高效检索
+- **网络搜索工具**：内置 `web_search`（DuckDuckGo 搜索，免费无需 API Key）和 `web_fetch`（抓取网页正文），让 Agent 随时获取互联网实时信息
+- **文件系统搜索**：rg（ripgrep）和 fd 作为内置工具，供 Agent 在本地文件系统中高效检索代码和文件
 - **ACP 集成**：`ethan code` 命令通过 PTY 持久会话将复杂编码任务委派给 Claude Code / OpenCode，结果回收进对话
 - **知识库**：本地 Markdown 知识库 + sqlite-vec 语义检索（embedding 索引），支持 add/search/delete
 - **CLI (REPL)**：交互式会话管理，支持 `/sessions`、`/resume`、`/new` 等斜杠命令；会话来源标签（web/repl/lark）；自动生成标题；新用户 onboarding
