@@ -48,3 +48,6 @@ skills-lock.json
 .claude/
 .run/
 plan/
+
+# Local bin scripts
+bin/

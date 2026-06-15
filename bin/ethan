@@ -1,4 +1,0 @@
-#!/usr/bin/env zsh
-# ethan CLI 入口脚本
-cd /Users/jsongo/code/life/ethan-ai
-exec uv run python -c "import sys; sys.argv[0] = 'ethan'; from ethan.interface.cli import app; app()" "$@"
