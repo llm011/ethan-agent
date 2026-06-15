@@ -5,13 +5,14 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 # 安装依赖
-COPY package.json package-lock.json* ./
-RUN npm ci --legacy-peer-deps
+RUN npm install -g pnpm
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
 
 # 构建
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN npm run build
+RUN pnpm run build
 
 # ── 生产镜像 ──────────────────────────────────────────
 FROM node:20-alpine AS runner

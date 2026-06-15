@@ -28,7 +28,6 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 # 复制源码
 COPY ethan/ ./ethan/
-COPY bin/ ./bin/
 
 # 安装项目本身（editable install）
 RUN uv sync --frozen --no-dev

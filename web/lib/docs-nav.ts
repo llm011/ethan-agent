@@ -12,6 +12,13 @@ export const DOC_NAV: DocNavGroup[] = [
   {
     group: "入门",
     items: [
+      { slug: "installation", label: "安装指南" },
+      { slug: "quickstart", label: "快速上手" },
+    ],
+  },
+  {
+    group: "系统设计",
+    items: [
       { slug: "architecture", label: "系统架构" },
       { slug: "providers", label: "模型 Provider" },
     ],

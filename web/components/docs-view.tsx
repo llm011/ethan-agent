@@ -129,7 +129,7 @@ export function DocsView({ initialSlug }: DocsViewProps = {}) {
       {/* Left nav */}
       <div className="w-56 border-r bg-muted/20 flex flex-col shrink-0 overflow-y-auto">
         <div className="p-4 border-b">
-          <h2 className="font-semibold text-sm">文档</h2>
+          <h2 className="font-semibold text-sm">Ethan Agent</h2>
         </div>
         <nav className="flex-1 py-2">
           {DOC_NAV.map((group) => (

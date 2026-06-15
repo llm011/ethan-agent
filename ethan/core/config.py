@@ -94,7 +94,7 @@ def _default_config() -> dict:
     return {
         "providers": {
             "anthropic": {
-                "api_key": os.environ.get("ANTHROPIC_AUTH_TOKEN", ""),
+                "api_key": os.environ.get("ANTHROPIC_API_KEY", "") or os.environ.get("ANTHROPIC_AUTH_TOKEN", ""),
                 "base_url": os.environ.get("ANTHROPIC_BASE_URL", None),
             },
             "openai_compat": {
@@ -120,6 +120,25 @@ def _default_config() -> dict:
     }
 
 
+def _init_system_files(agent_name: str) -> None:
+    """首次安装时将默认系统文件释放到 ~/.ethan/system/。只在目标文件不存在时创建，不覆盖用户已有配置。"""
+    import shutil
+
+    defaults_dir = Path(__file__).parent.parent / "defaults" / "system"
+    if not defaults_dir.exists():
+        return
+
+    system_dir = CONFIG_DIR / "system"
+    system_dir.mkdir(parents=True, exist_ok=True)
+
+    for src in defaults_dir.glob("*.md"):
+        dst = system_dir / src.name
+        if not dst.exists():
+            content = src.read_text(encoding="utf-8")
+            content = content.replace("{agent_name}", agent_name)
+            dst.write_text(content, encoding="utf-8")
+
+
 def load_config() -> Config:
     import yaml
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -132,7 +151,9 @@ def load_config() -> Config:
             raw = yaml.safe_load(f) or {}
 
     _apply_env_overrides(raw)
-    return Config.model_validate(raw)
+    config = Config.model_validate(raw)
+    _init_system_files(config.defaults.agent_name)
+    return config
 
 
 def save_config(config: Config) -> None:
