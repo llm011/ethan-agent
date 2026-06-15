@@ -47,9 +47,26 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 
 ---
 
-## Quick Start (Docker, recommended)
+## Install
 
-Docker is the easiest deployment path — backend and Web UI run as separate containers, data persisted to a local volume.
+```bash
+pip install ethan-agent
+```
+
+Set an API key and start:
+
+```bash
+ethan provider set anthropic --api-key sk-ant-xxx
+ethan
+```
+
+That's it. On first run, default skills and system files are written to `~/.ethan/`.
+
+---
+
+## Quick Start (Docker, recommended for server deployment)
+
+Docker runs backend and Web UI as separate containers, data persisted to a local volume.
 
 ### Prerequisites
 
@@ -108,17 +125,21 @@ docker compose down               # stop
 
 ---
 
-## Local Development
+## Local Development / Install from Source
 
 ### Prerequisites
 
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/) package manager
-- Node.js 20+ (Web UI)
+- Node.js 20+ (Web UI only)
 
 ### Install
 
 ```bash
+# From PyPI
+pip install ethan-agent
+
+# Or from source
 git clone https://github.com/llm011/ethan-agent.git
 cd ethan-agent
 uv sync
@@ -127,41 +148,28 @@ uv sync
 ### Configure
 
 ```bash
-cp .env.example .env
-# Edit .env with your API keys
-```
-
-Or via CLI:
-
-```bash
 ethan provider set anthropic --api-key sk-ant-xxx
-ethan model default claude-sonnet-4-6
+# or
+ethan provider set openai_compat --api-key sk-xxx --base-url https://api.example.com/v1
 ```
 
 ### Run
 
 ```bash
 # Interactive REPL
-uv run python -m ethan.interface.cli
+ethan
 
 # Single-turn query
-uv run python -m ethan.interface.cli -p "What's the weather in Tokyo?"
+ethan -p "What's the weather in Tokyo?"
 
 # Specify model
-uv run python -m ethan.interface.cli -m claude-sonnet-4-6
+ethan -m claude-sonnet-4-6
 
 # Resume last session
-uv run python -m ethan.interface.cli -r last
+ethan -r last
 
-# Start HTTP API server
-uv run python -m ethan.interface.cli serve
-```
-
-### Install globally (optional)
-
-```bash
-chmod +x bin/ethan
-ln -s $(pwd)/bin/ethan ~/bin/ethan
+# Start HTTP API server (needed for Web UI)
+ethan serve
 ```
 
 ### Web UI (dev mode)
@@ -251,12 +259,9 @@ Agent proactively writes to all layers mid-conversation via `memory_write`, `pro
 
 ## Skills
 
-Skills are Markdown files loaded from two sources, in priority order:
+Skills are Markdown files loaded from `~/.ethan/skills/`. On first run, default skills (channels, deepwiki, lark-im, lark-shared, skills-manager) are automatically copied there from the package.
 
-1. **Built-in skills** — `ethan/skills/<name>/SKILL.md` (shipped with the project)
-2. **User skills** — `~/.ethan/skills/<name>/SKILL.md` or `~/.ethan/skills/<name>.md`
-
-Both support a directory format (`<name>/SKILL.md` + `references/`) and the legacy single-file `.md` format.
+Both directory format (`<name>/SKILL.md` + `references/`) and legacy single-file `.md` format are supported.
 
 ```markdown
 ---

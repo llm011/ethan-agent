@@ -1,6 +1,28 @@
 # 快速上手
 
-安装完成后，5 分钟内就能跑起来。本页涵盖最常用的几个场景。
+## 安装
+
+```bash
+pip install ethan-agent
+```
+
+设置 API Key：
+
+```bash
+# Anthropic Claude
+ethan provider set anthropic --api-key sk-ant-xxx
+
+# 或 OpenAI 兼容 API（Gemini / OpenRouter / Ollama 等）
+ethan provider set openai_compat --api-key sk-xxx --base-url https://api.example.com/v1
+```
+
+启动：
+
+```bash
+ethan
+```
+
+首次运行自动初始化 `~/.ethan/`。
 
 ---
 

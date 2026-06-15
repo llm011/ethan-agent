@@ -98,5 +98,3 @@ def load_all_skills() -> list[Skill]:
                 skills[skill.name] = skill
 
     return list(skills.values())
-
-    return list(skills.values())

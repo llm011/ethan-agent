@@ -6,11 +6,16 @@
 """
 import typer
 import shutil
-import pexpect
 import sys
 import os
 from typing import Optional
 from rich.console import Console
+
+try:
+    import pexpect
+    _pexpect_available = True
+except ImportError:
+    _pexpect_available = False
 
 console = Console()
 app = typer.Typer(help="ACP Coding Agent commands", invoke_without_command=True)
@@ -39,6 +44,10 @@ def main(
 
 def _run_persistent_session(agent_name: str, query: str) -> None:
     """Run a persistent CLI session using pexpect."""
+    if not _pexpect_available:
+        console.print("[red]pexpect is not installed. Run: pip install ethan-agent[code][/red]")
+        raise typer.Exit(1)
+
     agent_bin = shutil.which(agent_name)
     if not agent_bin:
         console.print(f"[red]Error: {agent_name} command not found.[/red]")

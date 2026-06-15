@@ -3,8 +3,12 @@ import asyncio
 import json
 from typing import Any
 
-from mcp import ClientSession
-from mcp.client.stdio import StdioServerParameters, stdio_client
+try:
+    from mcp import ClientSession
+    from mcp.client.stdio import StdioServerParameters, stdio_client
+    _mcp_available = True
+except ImportError:
+    _mcp_available = False
 
 from ethan.tools.base import BaseTool
 

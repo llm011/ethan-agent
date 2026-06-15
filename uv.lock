@@ -314,20 +314,17 @@ wheels = [
 ]
 
 [[package]]
-name = "ethan"
-version = "0.0.1"
-source = { virtual = "." }
+name = "ethan-agent"
+version = "0.1.1"
+source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
     { name = "anthropic" },
     { name = "apscheduler" },
     { name = "fastapi" },
-    { name = "lark-oapi" },
-    { name = "mcp" },
     { name = "openai" },
-    { name = "pexpect" },
     { name = "prompt-toolkit" },
-    { name = "pydantic-settings" },
+    { name = "python-dotenv" },
     { name = "python-multipart" },
     { name = "pyyaml" },
     { name = "rich" },
@@ -335,7 +332,26 @@ dependencies = [
     { name = "sqlite-vec" },
     { name = "typer" },
     { name = "uvicorn" },
+]
+
+[package.optional-dependencies]
+all = [
+    { name = "lark-oapi" },
+    { name = "mcp" },
+    { name = "pexpect" },
     { name = "uvloop" },
+]
+code = [
+    { name = "pexpect" },
+]
+fast = [
+    { name = "uvloop" },
+]
+lark = [
+    { name = "lark-oapi" },
+]
+mcp = [
+    { name = "mcp" },
 ]
 
 [package.metadata]
@@ -344,12 +360,15 @@ requires-dist = [
     { name = "anthropic", specifier = ">=0.109.1" },
     { name = "apscheduler", specifier = ">=3.11.2" },
     { name = "fastapi", specifier = ">=0.136.3" },
-    { name = "lark-oapi", specifier = ">=1.6.8" },
-    { name = "mcp", specifier = ">=1.27.2" },
+    { name = "lark-oapi", marker = "extra == 'all'", specifier = ">=1.6.8" },
+    { name = "lark-oapi", marker = "extra == 'lark'", specifier = ">=1.6.8" },
+    { name = "mcp", marker = "extra == 'all'", specifier = ">=1.27.2" },
+    { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.27.2" },
     { name = "openai", specifier = ">=2.41.1" },
-    { name = "pexpect", specifier = ">=4.9.0" },
+    { name = "pexpect", marker = "extra == 'all'", specifier = ">=4.9.0" },
+    { name = "pexpect", marker = "extra == 'code'", specifier = ">=4.9.0" },
     { name = "prompt-toolkit", specifier = ">=3.0.52" },
-    { name = "pydantic-settings", specifier = ">=2.14.1" },
+    { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "rich", specifier = ">=15.0.0" },
@@ -357,8 +376,10 @@ requires-dist = [
     { name = "sqlite-vec", specifier = ">=0.1.9" },
     { name = "typer", specifier = ">=0.26.7" },
     { name = "uvicorn", specifier = ">=0.49.0" },
-    { name = "uvloop", specifier = ">=0.22.1" },
+    { name = "uvloop", marker = "extra == 'all'", specifier = ">=0.22.1" },
+    { name = "uvloop", marker = "extra == 'fast'", specifier = ">=0.22.1" },
 ]
+provides-extras = ["lark", "mcp", "code", "fast", "all"]
 
 [[package]]
 name = "fastapi"
