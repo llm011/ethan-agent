@@ -1,10 +1,14 @@
-"""Skill 加载器 — 支持两种技能来源：
+"""Skill 加载器 — 从用户目录 ~/.ethan/skills/ 加载技能。
 
-1. 内置技能（代码随附）：ethan/skills/builtin/<name>/SKILL.md
-2. 用户技能（自行安装）：~/.ethan/skills/<name>/SKILL.md 或 ~/.ethan/skills/<name>.md（兼容旧格式）
+首次运行时，config.py 的 _init_default_skills() 会自动将内置默认技能
+从 ethan/defaults/skills/ 复制到 ~/.ethan/skills/，之后 loader 只认 ~/.ethan/skills/。
+这样 agent 运行完全不依赖源码目录。
 
-加载顺序：内置先加载，用户技能可按同名覆盖内置。
-每个技能目录下 references/*.md 可供 agent 按需读取，不注入 prompt。
+每个技能目录结构：
+    ~/.ethan/skills/<name>/SKILL.md          ← 技能主文件
+    ~/.ethan/skills/<name>/references/*.md   ← 参考文件（不注入 prompt）
+
+也支持旧格式：~/.ethan/skills/<name>.md（单文件）
 """
 import re
 from dataclasses import dataclass, field
@@ -15,8 +19,6 @@ import yaml
 
 from ethan.core.config import CONFIG_DIR
 
-# 内置技能目录（随代码发布，ethan/skills/<name>/SKILL.md）
-BUILTIN_SKILLS_DIR = Path(__file__).parent
 # 用户技能目录（~/.ethan/skills/）
 USER_SKILLS_DIR = CONFIG_DIR / "skills"
 
@@ -28,7 +30,6 @@ class Skill:
     trigger: list[str]
     content: str
     source: Path
-    builtin: bool = False  # True = 内置，False = 用户安装
     fast_path: bool = False  # True = 命中 trigger 时走 Fast Path（不受长度限制）
     channels: list[str] = field(default_factory=list)  # 空列表 = 所有渠道
 
@@ -45,7 +46,7 @@ def _parse_frontmatter(text: str) -> tuple[dict, str]:
     return meta, match.group(2).strip()
 
 
-def load_skill_from_file(path: Path, builtin: bool = False) -> Optional[Skill]:
+def load_skill_from_file(path: Path) -> Optional[Skill]:
     """从单个 .md 文件加载 Skill（旧格式兼容）。"""
     text = path.read_text(encoding="utf-8")
     meta, content = _parse_frontmatter(text)
@@ -67,50 +68,35 @@ def load_skill_from_file(path: Path, builtin: bool = False) -> Optional[Skill]:
     channels = channels_raw if isinstance(channels_raw, list) else []
 
     return Skill(name=name, description=description, trigger=triggers,
-                 content=content, source=path, builtin=builtin, fast_path=fast_path,
+                 content=content, source=path, fast_path=fast_path,
                  channels=channels)
 
 
-def load_skill_from_dir(skill_dir: Path, builtin: bool = False) -> Optional[Skill]:
+def load_skill_from_dir(skill_dir: Path) -> Optional[Skill]:
     """从技能子目录加载 Skill（新格式：<name>/SKILL.md）。"""
     skill_md = skill_dir / "SKILL.md"
     if not skill_md.exists():
         return None
-    skill = load_skill_from_file(skill_md, builtin=builtin)
-    if skill:
-        # name 默认用目录名
-        if not skill.name or skill.name == "SKILL":
-            skill.name = skill_dir.name
+    skill = load_skill_from_file(skill_md)
+    if skill and (not skill.name or skill.name == "SKILL"):
+        skill.name = skill_dir.name
     return skill
 
 
 def load_all_skills() -> list[Skill]:
-    """加载所有技能，内置先加载，用户技能可按同名覆盖。"""
+    """从 ~/.ethan/skills/ 加载所有技能。"""
     skills: dict[str, Skill] = {}
 
-    # 1. 加载内置技能（跳过 Python 模块文件和缓存）
-    _SKIP = {"__pycache__", "__init__.py"}
-    if BUILTIN_SKILLS_DIR.exists():
-        for entry in sorted(BUILTIN_SKILLS_DIR.iterdir()):
-            if entry.name in _SKIP or entry.suffix == ".py":
-                continue
-            skill = None
-            if entry.is_dir():
-                skill = load_skill_from_dir(entry, builtin=True)
-            elif entry.suffix == ".md":
-                skill = load_skill_from_file(entry, builtin=True)
-            if skill:
-                skills[skill.name] = skill
-
-    # 2. 加载用户技能（同名则覆盖内置）
     if USER_SKILLS_DIR.exists():
         for entry in sorted(USER_SKILLS_DIR.iterdir()):
             skill = None
             if entry.is_dir() and not entry.name.endswith("-references"):
-                skill = load_skill_from_dir(entry, builtin=False)
+                skill = load_skill_from_dir(entry)
             elif entry.suffix == ".md":
-                skill = load_skill_from_file(entry, builtin=False)
+                skill = load_skill_from_file(entry)
             if skill:
                 skills[skill.name] = skill
+
+    return list(skills.values())
 
     return list(skills.values())

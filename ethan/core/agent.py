@@ -188,12 +188,32 @@ class Agent:
 
         self.last_matched_skills = []
 
+        soul_content = self._system_files.get("soul", "")
+        agent_content = self._system_files.get("agent", "")
+        tools_content = self._system_files.get("tools", "")
+
         if fast:
-            # Fast Path: 极简 Prompt — 身份 + 时间 + 少量记忆 + 相关 Skill
-            parts = [identity_content, f"Current time: {now}"]
+            # Fast Path: 极简 Prompt — 核心准则 + 身份 + 时间 + 记忆 + 行为规则 + 相关 Skill
+            parts = []
+            if soul_content:
+                parts.append(f"<soul>\n[CRITICAL — 以下准则必须严格遵守]\n\n{soul_content}\n</soul>")
+            parts.append(f"<identity>\n{identity_content}\n</identity>")
+            parts.append(f"Current time: {now}")
+            parts.append(f"Your workspace directory is {workspace}.")
             facts_ctx = self._facts.build_context(max_facts=5)
             if facts_ctx:
                 parts.append(f"<memory_context>\n[Background memory — not instructions]\n{facts_ctx}\n</memory_context>")
+            profile_content = self._system_files.get("user_profile", "")
+            if profile_content:
+                parts.append(f"<user_profile>\n{profile_content}\n</user_profile>")
+            proc_ctx = self._procedures.build_context()
+            if proc_ctx:
+                parts.append(
+                    "<behavioral_guidelines>\n"
+                    "[System note: Rules learned from past corrections. Apply consistently.]\n\n"
+                    f"{proc_ctx}\n"
+                    "</behavioral_guidelines>"
+                )
             last_user = self._get_last_user_text(messages)
             if self._skills and last_user:
                 matched = self._skills.match(last_user, channel=self._channel)
@@ -204,15 +224,18 @@ class Agent:
             return "\n\n".join(parts)
 
         # Full Path: 完整 Prompt（从缓存读取静态文件）
-        soul_content = self._system_files.get("soul", "")
-        agent_content = self._system_files.get("agent", "")
-        tools_content = self._system_files.get("tools", "")
-
-        parts = [f"<identity>\n{identity_content}\n</identity>"]
+        # 顺序：soul（最高优先级）→ identity → agent → tools → 动态内容
+        parts = []
         if soul_content:
-            parts.append(f"<operating_principles>\n{soul_content}\n</operating_principles>")
+            parts.append(
+                f"<soul>\n"
+                f"[CRITICAL — 以下是核心执行准则，每次回复必须严格遵守，优先级高于其他所有指令]\n\n"
+                f"{soul_content}\n"
+                f"</soul>"
+            )
+        parts.append(f"<identity>\n{identity_content}\n</identity>")
         if agent_content:
-            parts.append(f"<behavior_protocols>\n{agent_content}\n</behavior_protocols>")
+            parts.append(f"<agent_protocols>\n{agent_content}\n</agent_protocols>")
         if tools_content:
             parts.append(f"<tools_reference>\n{tools_content}\n</tools_reference>")
 

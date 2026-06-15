@@ -139,6 +139,25 @@ def _init_system_files(agent_name: str) -> None:
             dst.write_text(content, encoding="utf-8")
 
 
+def _init_default_skills() -> None:
+    """首次安装时将默认技能释放到 ~/.ethan/skills/。只在目标不存在时创建，不覆盖用户已有技能。"""
+    import shutil
+
+    defaults_dir = Path(__file__).parent.parent / "defaults" / "skills"
+    if not defaults_dir.exists():
+        return
+
+    skills_dir = CONFIG_DIR / "skills"
+    skills_dir.mkdir(parents=True, exist_ok=True)
+
+    for src in defaults_dir.iterdir():
+        if not src.is_dir():
+            continue
+        dst = skills_dir / src.name
+        if not dst.exists():
+            shutil.copytree(src, dst)
+
+
 def load_config() -> Config:
     import yaml
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -153,6 +172,7 @@ def load_config() -> Config:
     _apply_env_overrides(raw)
     config = Config.model_validate(raw)
     _init_system_files(config.defaults.agent_name)
+    _init_default_skills()
     return config
 
 
