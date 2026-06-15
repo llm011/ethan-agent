@@ -1,8 +1,11 @@
 "use client";
 
+import Image from "next/image";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ToolTimeline } from "@/components/tool-timeline";
+import { CodeBlock } from "@/components/code-block";
+import { PlainCodeBlock } from "@/components/plain-code-block";
 import type { Message } from "./types";
 
 function formatTime(ts?: number) {
@@ -33,7 +36,12 @@ interface MessageBubbleProps {
 
 export function MessageBubble({ msg, isStreaming, isLast }: MessageBubbleProps) {
   return (
-    <div className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+    <div className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"} gap-2`}>
+      {msg.role === "assistant" && (
+        <div className="flex-shrink-0 mt-1">
+          <Image src="/logo-avatar.png" alt="Ethan" width={28} height={28} className="rounded-full" />
+        </div>
+      )}
       <div
         className={`max-w-[90%] md:max-w-[80%] rounded-2xl px-4 py-3 ${
           msg.role === "user"
@@ -63,13 +71,18 @@ export function MessageBubble({ msg, isStreaming, isLast }: MessageBubbleProps) 
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               components={{
-                pre: ({ children }) => <pre className="bg-background/50 rounded-lg p-3 overflow-x-auto text-xs">{children}</pre>,
-                code: ({ className, children, ...props }) => {
-                  const isInline = !className;
-                  return isInline
-                    ? <code className="bg-background/50 px-1 py-0.5 rounded text-xs" {...props}>{children}</code>
-                    : <code className={className} {...props}>{children}</code>;
+                code: ({ className, children }) => {
+                  const match = /language-(\w+)/.exec(className || "");
+                  const raw = String(children);
+                  if (match) {
+                    return <CodeBlock language={match[1]} code={raw.replace(/\n$/, "")} />;
+                  }
+                  if (raw.includes("\n")) {
+                    return <PlainCodeBlock code={raw.replace(/\n$/, "")} />;
+                  }
+                  return <code className="bg-background/50 px-1 py-0.5 rounded text-xs font-mono">{children}</code>;
                 },
+                pre: ({ children }) => <>{children}</>,
               }}
             >
               {fixBold(msg.content)}

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { fetchDoc, API_URL } from "@/lib/api";
@@ -129,7 +130,10 @@ export function DocsView({ initialSlug }: DocsViewProps = {}) {
       {/* Left nav */}
       <div className="w-56 border-r bg-muted/20 flex flex-col shrink-0 overflow-y-auto">
         <div className="p-4 border-b">
-          <h2 className="font-semibold text-sm">Ethan Agent</h2>
+          <h2 className="font-semibold text-sm flex items-center gap-2">
+            <Image src="/logo-sidebar.png" alt="Ethan Agent" width={20} height={20} className="rounded-full" />
+            Ethan Agent
+          </h2>
         </div>
         <nav className="flex-1 py-2">
           {DOC_NAV.map((group) => (
