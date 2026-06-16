@@ -18,12 +18,10 @@ When the user says "发版" or "release":
    - Default: increment patch → `X.Y.Z+1`
    - User says "中版本" / minor: increment minor → `X.Y+1.0`
    - User says "大版本" / major: increment major → `X+1.0.0`
-3. Update **both** files with the new version (easy to forget the second one):
-   - `pyproject.toml` → `version = "X.Y.Z"`
-   - `ethan/__init__.py` → `__version__ = "X.Y.Z"`
+3. Update `pyproject.toml` with the new version.
 4. Create and push the tag — this triggers the GitHub Action which builds and publishes to PyPI:
    ```bash
-   git add pyproject.toml ethan/__init__.py
+   git add pyproject.toml
    git commit -m "chore: bump version to vX.Y.Z"
    git tag vX.Y.Z
    git push origin main
