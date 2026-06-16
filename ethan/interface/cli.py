@@ -103,12 +103,25 @@ def _build_agent(model: str | None = None):
     return Agent(tool_registry=registry, skill_registry=skills, model=model, channel="repl")
 
 
+def version_callback(value: bool):
+    if value:
+        from ethan import __version__
+        import typer
+        from rich.console import Console
+        console = Console()
+        console.print(f"ethan-agent version [cyan]{__version__}[/cyan]")
+        raise typer.Exit()
+
+
 @app.callback(invoke_without_command=True)
 def chat(
     ctx: typer.Context,
     model: Optional[str] = typer.Option(None, "-m", "--model", help="Model ID"),
     prompt: Optional[str] = typer.Option(None, "-p", "--prompt", help="Single-turn prompt"),
     resume: Optional[str] = typer.Option(None, "-r", "--resume", help="Resume session (ID or 'last')"),
+    version: Optional[bool] = typer.Option(
+        None, "--version", "-v", callback=version_callback, is_eager=True, help="Show the version and exit."
+    ),
 ) -> None:
     """Start a conversation. Defaults to lightweight REPL mode."""
     if ctx.invoked_subcommand is not None:
