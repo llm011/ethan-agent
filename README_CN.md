@@ -64,49 +64,40 @@ ethan
 
 ## 快速开始（Docker，适合服务器部署）
 
-Docker 方式最省事，Backend 和 Web UI 各自独立容器，数据持久化到本地卷。
+Docker 方式最省事，Backend 和 Web UI 各自独立容器，数据持久化到本地卷。**无需克隆代码库。**
 
 ### 前置条件
 
 - Docker 20.10+
 - Docker Compose v2
 
-### 1. 克隆项目
+### 1. 下载配置并启动
 
 ```bash
-git clone https://github.com/llm011/ethan-agent.git
-cd ethan-agent
+mkdir ethan-agent && cd ethan-agent
+curl -O https://raw.githubusercontent.com/llm011/ethan-agent/main/docker-compose.yml
 ```
 
 ### 2. 配置环境变量
 
-```bash
-cp deploy/.env.example deploy/.env
-# 编辑 deploy/.env，填入 API Key
-```
-
-至少填一个 Provider：
+创建 `.env` 文件，填入你的 API Key：
 
 ```bash
-# Anthropic（推荐，支持 Prompt Caching）
+cat > .env << 'EOF'
 ANTHROPIC_API_KEY=sk-ant-xxx
-
-# 或者任意 OpenAI 兼容 API
-OPENAI_API_KEY=sk-xxx
-OPENAI_BASE_URL=https://api.example.com/v1
-
-# 设置默认模型
+# OPENAI_API_KEY=sk-xxx
+# OPENAI_BASE_URL=https://api.example.com/v1
 AGENT_DEFAULT_MODEL=claude-sonnet-4-6
+EOF
 ```
 
-### 3. 构建并启动
+### 3. 启动
 
 ```bash
-cd deploy
-docker compose up -d --build
+docker compose up -d
 ```
 
-首次构建约 3-5 分钟（安装依赖 + 构建 Next.js）。
+镜像会自动从 GitHub 下载。
 
 ### 4. 访问
 
@@ -117,9 +108,10 @@ docker compose up -d --build
 ### 5. 常用命令
 
 ```bash
-docker compose logs -f ethan      # 查看日志
-docker compose restart ethan      # 重启服务
-docker compose down               # 停止
+docker compose logs -f ethan-backend   # 查看日志
+docker compose restart ethan-backend   # 重启服务
+docker compose pull && docker compose up -d  # 更新到最新版本
+docker compose down                    # 停止
 ```
 
 ---

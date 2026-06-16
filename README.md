@@ -66,48 +66,38 @@ That's it. On first run, default skills and system files are written to `~/.etha
 
 ## Quick Start (Docker, recommended for server deployment)
 
-Docker runs backend and Web UI as separate containers, data persisted to a local volume.
+Docker runs backend and Web UI as separate containers, data persisted to a local volume. No need to clone the repository.
 
 ### Prerequisites
 
 - Docker 20.10+
 - Docker Compose v2
 
-### 1. Clone
+### 1. Download compose file
 
 ```bash
-git clone https://github.com/llm011/ethan-agent.git
-cd ethan-agent
+mkdir ethan-agent && cd ethan-agent
+curl -O https://raw.githubusercontent.com/llm011/ethan-agent/main/docker-compose.yml
 ```
 
 ### 2. Configure
 
-```bash
-cp deploy/.env.example deploy/.env
-# Edit deploy/.env with your API keys
-```
-
-At least one provider is required:
+Create a `.env` file and add your API keys:
 
 ```bash
-# Anthropic (recommended — supports Prompt Caching)
+cat > .env << 'EOF'
 ANTHROPIC_API_KEY=sk-ant-xxx
-
-# Or any OpenAI-compatible API
-OPENAI_API_KEY=sk-xxx
-OPENAI_BASE_URL=https://api.example.com/v1
-
+# OPENAI_API_KEY=sk-xxx
+# OPENAI_BASE_URL=https://api.example.com/v1
 AGENT_DEFAULT_MODEL=claude-sonnet-4-6
+EOF
 ```
 
-### 3. Build and start
+### 3. Start
 
 ```bash
-cd deploy
-docker compose up -d --build
+docker compose up -d
 ```
-
-First build takes ~3–5 minutes (installing deps + building Next.js).
 
 ### 4. Access
 
@@ -118,9 +108,10 @@ First build takes ~3–5 minutes (installing deps + building Next.js).
 ### 5. Common commands
 
 ```bash
-docker compose logs -f ethan      # tail logs
-docker compose restart ethan      # restart backend
-docker compose down               # stop
+docker compose logs -f ethan-backend  # tail logs
+docker compose restart ethan-backend  # restart backend
+docker compose pull && docker compose up -d  # update to latest version
+docker compose down                   # stop
 ```
 
 ---

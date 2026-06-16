@@ -1,0 +1,48 @@
+# Ethan Agent - Standalone Docker Compose
+# Download and run: docker compose up -d
+
+services:
+  ethan-backend:
+    image: ghcr.io/llm011/ethan-backend:latest
+    container_name: ethan-backend
+    restart: unless-stopped
+    ports:
+      - "8900:8900"
+    volumes:
+      - ethan-data:/root/.ethan
+    environment:
+      # Provider API Keys (Fill at least one)
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+
+      # Agent Settings
+      - AGENT_DEFAULT_MODEL=${AGENT_DEFAULT_MODEL:-claude-sonnet-4-6}
+
+      # Security (Optional auth token for Web UI)
+      - ETHAN_AUTH_TOKEN=${ETHAN_AUTH_TOKEN:-}
+
+      # Proxy (Optional)
+      - ETHAN_PROXY=${ETHAN_PROXY:-}
+
+  ethan-web:
+    image: ghcr.io/llm011/ethan-web:latest
+    container_name: ethan-web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      - ethan-backend
+    environment:
+      # Internal API URL (backend container)
+      - ETHAN_API_URL=http://ethan-backend:8900
+
+      # Public API URL (what the browser sees)
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8900}
+
+      # Match backend token
+      - ETHAN_AUTH_TOKEN=${ETHAN_AUTH_TOKEN:-}
+
+volumes:
+  ethan-data:
+    name: ethan-data
