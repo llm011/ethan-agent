@@ -26,8 +26,9 @@ COPY pyproject.toml uv.lock ./
 # 安装 Python 依赖（不安装项目本身）
 RUN uv sync --frozen --no-dev --no-install-project
 
-# 复制源码
+# 复制源码和元数据文件（打包需要 README）
 COPY ethan/ ./ethan/
+COPY README.md README_CN.md ./
 
 # 安装项目本身（editable install）
 RUN uv sync --frozen --no-dev
