@@ -116,15 +116,9 @@ def _sync_deps(repo: Path) -> bool:
 
 
 def _pip_upgrade() -> bool:
-    """PyPI 安装方式：pip install --upgrade ethan。"""
-    import importlib.metadata
-    try:
-        pkg_name = importlib.metadata.metadata("ethan-agent")["Name"]
-    except Exception:
-        pkg_name = "ethan"
-
-    console.print(f"[dim]pip install --upgrade {pkg_name} ...[/dim]")
-    r = _run([sys.executable, "-m", "pip", "install", "--upgrade", pkg_name], timeout=120)
+    """PyPI 安装方式：pip install --upgrade ethan-agent。"""
+    console.print("[dim]pip install --upgrade ethan-agent ...[/dim]")
+    r = _run([sys.executable, "-m", "pip", "install", "--upgrade", "ethan-agent"], timeout=120)
     if r.returncode != 0:
         console.print(f"[red]pip upgrade 失败：{r.stderr.strip()[-500:]}[/red]")
         return False
@@ -201,12 +195,12 @@ def update(
     # ── PyPI 安装方式 ────────────────────────────────────────────
     if repo is None:
         if check:
-            console.print("[yellow]PyPI 安装方式：运行 `pip install --upgrade ethan` 检查最新版本。[/yellow]")
+            console.print("[yellow]PyPI 安装方式：运行 `pip install --upgrade ethan-agent` 检查最新版本。[/yellow]")
             return
         if to:
-            console.print(f"[dim]pip install ethan=={to.lstrip('v')} ...[/dim]")
+            console.print(f"[dim]pip install ethan-agent=={to.lstrip('v')} ...[/dim]")
             ok = _run(
-                [sys.executable, "-m", "pip", "install", f"ethan=={to.lstrip('v')}"],
+                [sys.executable, "-m", "pip", "install", f"ethan-agent=={to.lstrip('v')}"],
                 timeout=120,
             ).returncode == 0
         else:
