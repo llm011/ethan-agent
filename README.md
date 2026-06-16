@@ -49,8 +49,10 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 
 ## Install
 
+Requires Python 3.12+.
+
 ```bash
-pip install ethan-agent
+pip3 install ethan-agent
 ```
 
 Set an API key and start:

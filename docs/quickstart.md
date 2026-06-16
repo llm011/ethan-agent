@@ -2,8 +2,10 @@
 
 ## 安装
 
+需要 Python 3.12+：
+
 ```bash
-pip install ethan-agent
+pip3 install ethan-agent
 ```
 
 设置 API Key：

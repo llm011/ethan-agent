@@ -47,8 +47,10 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 
 ## 安装
 
+需要 Python 3.12+ 环境：
+
 ```bash
-pip install ethan-agent
+pip3 install ethan-agent
 ```
 
 设置 API Key 后直接启动：

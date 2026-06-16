@@ -5,7 +5,7 @@
 仅需 Python 3.12+，无需克隆仓库：
 
 ```bash
-pip install ethan-agent
+pip3 install ethan-agent
 ```
 
 安装后 `ethan` 命令即可使用：
