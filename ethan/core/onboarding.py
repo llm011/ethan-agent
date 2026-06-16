@@ -1,14 +1,9 @@
 """First-time user onboarding detection and messaging."""
-from pathlib import Path
-
 from ethan.core.config import get_config, CONFIG_DIR
 
 
 def is_first_time() -> bool:
-    """Returns True if this looks like a fresh installation.
-
-    Criteria: facts.json is absent/empty AND agent_name is the default "Ethan".
-    """
+    """Returns True if this looks like a fresh installation."""
     facts_file = CONFIG_DIR / "memory" / "facts.json"
     config = get_config()
     no_facts = not facts_file.exists() or facts_file.read_text(encoding="utf-8").strip() in ("[]", "")
@@ -16,9 +11,12 @@ def is_first_time() -> bool:
     return no_facts and default_name
 
 
-ONBOARDING_MESSAGE = """👋 Hi! I'm your new AI partner. Before we get started, let me ask a couple of quick questions:
+def needs_provider_setup() -> bool:
+    """Returns True if no provider has an API key configured."""
+    config = get_config()
+    return not any(p.api_key for p in config.providers.values())
 
-1. What would you like to call me? (default: Ethan)
-2. What's your name and what do you do? (e.g., "I'm Alex, a software engineer")
 
-This helps me personalize our experience together. You can always change these in Settings later."""
+ONBOARDING_MESSAGE = """\
+Welcome! Before we start, let me ask a couple of quick questions.
+You can always change these later via `ethan provider set` or in Web UI Settings."""

@@ -293,12 +293,62 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
 
     _banner()
 
-    # ── First-time onboarding ────────────────────────────────────
-    from ethan.core.onboarding import is_first_time, ONBOARDING_MESSAGE
-    if is_first_time():
-        import asyncio
+    # ── Provider setup (runs any time no API key is configured) ──
+    from ethan.core.onboarding import is_first_time, needs_provider_setup, ONBOARDING_MESSAGE
+    if needs_provider_setup():
         console.print()
-        console.print(Panel(ONBOARDING_MESSAGE, border_style="yellow", padding=(0, 2)))
+        console.print(Panel(
+            "[bold yellow]No API key configured.[/bold yellow]\n\n"
+            "Choose a provider:\n"
+            "  [cyan]1[/cyan]  Anthropic (Claude)       — api.anthropic.com\n"
+            "  [cyan]2[/cyan]  OpenAI-compatible        — OpenAI / Gemini / OpenRouter / Ollama\n\n"
+            "You can also run [dim]ethan provider set[/dim] later to change this.",
+            border_style="yellow", padding=(0, 2)
+        ))
+        console.print()
+
+        from ethan.core.config import save_config, reload_config as _reload, CONFIG_DIR, ProviderConfig
+        _cfg = get_config()
+
+        raw_choice = await asyncio.to_thread(input, "  Provider [1/2] (default: 1): ")
+        choice = raw_choice.strip() or "1"
+
+        if choice == "2":
+            raw_key = await asyncio.to_thread(input, "  API Key: ")
+            api_key = raw_key.strip()
+            raw_url = await asyncio.to_thread(input, "  Base URL (e.g. https://generativelanguage.googleapis.com/v1beta/openai): ")
+            base_url = raw_url.strip() or None
+            _cfg.providers.setdefault("openai_compat", ProviderConfig())
+            _cfg.providers["openai_compat"].api_key = api_key
+            if base_url:
+                _cfg.providers["openai_compat"].base_url = base_url
+            # default model
+            raw_model = await asyncio.to_thread(input, "  Default model ID (e.g. gemini-2.5-flash): ")
+            default_model = raw_model.strip()
+            if default_model:
+                _cfg.defaults.model = default_model
+        else:
+            raw_key = await asyncio.to_thread(input, "  Anthropic API Key (sk-ant-...): ")
+            api_key = raw_key.strip()
+            _cfg.providers.setdefault("anthropic", ProviderConfig())
+            _cfg.providers["anthropic"].api_key = api_key
+            _cfg.defaults.model = "claude-sonnet-4-6"
+
+        save_config(_cfg)
+        _reload()
+        config = get_config()
+        model_id = config.defaults.model
+        # rebuild agent with new config
+        from ethan.interface.cli import _build_agent
+        agent = _build_agent(model_id)
+        console.print()
+        console.print(f"[green]Provider configured. Using model: [bold]{model_id}[/bold][/green]")
+        console.print()
+
+    # ── First-time onboarding (name + user info) ─────────────────
+    if is_first_time():
+        console.print()
+        console.print(Panel(ONBOARDING_MESSAGE, border_style="dim", padding=(0, 2)))
         console.print()
 
         # Agent name
