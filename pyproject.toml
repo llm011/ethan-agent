@@ -35,7 +35,6 @@ dependencies = [
     "sqlite-vec>=0.1.9",
     "typer>=0.26.7",
     "uvicorn>=0.49.0",
-    "uvloop>=0.22.1",
 ]
 
 [project.urls]
