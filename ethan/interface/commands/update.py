@@ -156,10 +156,12 @@ def _restart_serve(repo: Optional[Path]) -> None:
 
     console.print("[dim]重启 ethan serve ...[/dim]")
     cwd = str(repo) if repo else None
-    # 后台启动，不阻塞当前进程
+    # 后台启动，不阻塞当前进程，同时丢弃输出防止污染终端
     subprocess.Popen(
         [sys.executable, "-m", "ethan.interface.cli", "serve"],
         cwd=cwd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
         start_new_session=True,
     )
     console.print("[green]✓ ethan serve 已重启（后台运行）[/green]")
