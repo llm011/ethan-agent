@@ -120,8 +120,10 @@ CLI 内部维护 `WorkingMemory` 实例：
   "messages": [
     {"role": "user", "content": "你好"}
   ],
-  "model": "gemini-3.1-flash-lite-preview",  // 可选
-  "stream": false                             // true 则 SSE
+  "model": "claude-sonnet-4-6",  // 可选
+  "stream": false,               // true 则 SSE
+  "session_id": "s_xxx",        // 可选，关联已有会话
+  "channel": "web"              // 可选，默认 "web"
 }
 ```
 
@@ -130,7 +132,7 @@ CLI 内部维护 `WorkingMemory` 实例：
 ```json
 {
   "content": "你好！有什么可以帮你？",
-  "model": "gemini-3.1-flash-lite-preview",
+  "model": "claude-sonnet-4-6",
   "usage": {"input": 67, "output": 12, "cache": 0}
 }
 ```
@@ -182,11 +184,11 @@ ethan update [--channel dev] [--to v0.2.0] [--check] [--no-restart]
 
 ---
 
-## 飞书 (Lark) 接入（`ethan/interface/lark.py`）
+## 飞书 (Lark) 接入（`ethan/interface/lark_events.py`）
 
 ### 概述
 
-允许用户通过飞书机器人与 Ethan 对话。采用 **HTTP Webhook** 方式，由 `ethan serve` 暴露的 `/lark/webhook` 端点接收飞书推送的事件。
+允许用户通过飞书机器人与 Ethan 对话。采用 **WebSocket 长连接**方式：`ethan serve` 启动时自动调用 `lark-cli event consume im.message.receive_v1`，无需公网 IP，无需配置 Webhook URL。
 
 ### 配置方式
 
@@ -198,26 +200,21 @@ lark:
   app_secret: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 ```
 
-在飞书开放平台的「事件与回调」中，将 Webhook URL 设置为 `https://<your-domain>:8900/lark/webhook`，并订阅 `im.message.receive_v1` 事件。
+`ethan serve` 启动时自动建立长连接，无需额外配置 Webhook URL。
 
 ### 事件处理流程
 
-![飞书事件处理流程](./images/interface-lark-flow.jpg)
-<!-- diagram-source
 ```
-POST /lark/webhook
+lark-cli event consume im.message.receive_v1（WebSocket 长连接）
    │
-   ├─ URL verification challenge → 直接返回 challenge
+   ├─ 根据 chat_id 查找或创建 Session
    │
    ├─ 立即给原消息加 THINKING_FACE 表情 → 告知用户已收到
-   │
-   ├─ 根据 chat_id 查找或创建 Session（title 前缀 lark:<chat_id>:）
    │
    ├─ 调用 Agent.chat() 处理消息
    │
    └─ 发送单条完整回复（非流式，飞书 IM 协议限制）
 ```
--->
 
 收到消息后第一步加 `THINKING_FACE` 表情是关键的用户体验设计：飞书消息处理可能需要数秒，及时反馈避免用户以为机器人离线。
 

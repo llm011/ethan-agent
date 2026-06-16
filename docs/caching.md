@@ -20,8 +20,9 @@ system prompt 中有大量内容在多轮对话间几乎不变（identity、soul
 <!-- diagram-source
 ```
 [稳定层]                         ← 打 cache_control: ephemeral
+<soul>...</soul>
 <identity>...</identity>
-<operating_principles>...</operating_principles>
+<agent_protocols>...</agent_protocols>
 <tools_reference>...</tools_reference>
 <available_skills>...</available_skills>
 
@@ -30,13 +31,14 @@ system prompt 中有大量内容在多轮对话间几乎不变（identity、soul
 [动态层]                         ← 不缓存，每次新鲜传输
 workspace 路径
 定时任务摘要
-<user_context>（facts）
-<procedures>
+<memory_context>（facts）
+<user_profile>
+<behavioral_guidelines>（procedures）
 <relevant_skills>（关键词匹配结果）
 ```
 -->
 
-稳定层内容由 `system/identity.md`、`system/soul.md`、`system/tools.md` 和 Skill 名称列表组成，这些文件在服务运行期间几乎不变，缓存命中率极高。
+稳定层内容由 `system/soul.md`、`system/identity.md`、`system/agent.md`、`system/tools.md` 和 Skill 名称列表组成，这些文件在服务运行期间几乎不变，缓存命中率极高。
 
 动态层包含当前时间、记忆注入结果和 Skill 匹配结果，每轮都会变化，不适合缓存。
 

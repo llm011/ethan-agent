@@ -47,8 +47,9 @@ return "[max tool iterations reached]"
 Full / Medium Path 按以下顺序拼接，`Current time:` 是稳定层与动态层的分界点（用于 Prompt Caching）：
 
 ```
-<identity>              ← system/identity.md（稳定，可缓存）
-<operating_principles>  ← system/soul.md（稳定）
+<soul>                  ← system/soul.md（CRITICAL，最高优先级，稳定，可缓存）
+<identity>              ← system/identity.md（稳定）
+<agent_protocols>       ← system/agent.md（稳定）
 <tools_reference>       ← system/tools.md（稳定）
 <available_skills>      ← 所有 Skill 名称列表（稳定）
 ─── Current time: ───   ← 缓存分割线
@@ -60,7 +61,7 @@ workspace 路径
 <relevant_skills>       ← 关键词匹配的 Skill 正文
 ```
 
-Fast Path 只保留：`identity + Current time: + top-5 facts + 匹配到的 Skill`。
+Fast Path 保留：`soul + identity + 当前时间 + workspace 路径 + top-5 facts + user_profile + behavioral_guidelines + 匹配到的 Skill`。
 
 ---
 

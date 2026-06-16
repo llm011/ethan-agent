@@ -57,7 +57,7 @@
 
 | 维度 | 配置 |
 |------|------|
-| 系统提示词 | 极简版：身份 + 当前时间 + 最多 5 条长期记忆 |
+| 系统提示词 | soul + identity + 当前时间 + top-5 facts + user_profile + behavioral_guidelines + 匹配到的 Skill |
 | 工具集 | 仅 `fast_path=True` 的工具（如 `shell`、`file_read`） |
 | 记忆注入 | 轻量（高置信度 facts，top-5） |
 | Skill 注入 | 仅注入匹配的相关 Skill |

@@ -158,7 +158,7 @@ curl -X POST http://localhost:8900/chat \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer YOUR_TOKEN" \
   -d '{
-    "message": "今天天气怎么样？",
+    "messages": [{"role": "user", "content": "今天天气怎么样？"}],
     "stream": false
   }'
 ```
@@ -167,8 +167,9 @@ curl -X POST http://localhost:8900/chat \
 
 ```json
 {
-  "reply": "我没有实时天气数据，不过可以帮你搜索一下——你在哪个城市？",
-  "session_id": "abc123"
+  "content": "我没有实时天气数据，不过可以帮你搜索一下——你在哪个城市？",
+  "model": "claude-sonnet-4-6",
+  "usage": {"input": 67, "output": 12, "cache": 0}
 }
 ```
 
@@ -179,12 +180,10 @@ curl -X POST http://localhost:8900/chat \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer YOUR_TOKEN" \
   -d '{
-    "message": "写一首关于秋天的诗",
+    "messages": [{"role": "user", "content": "写一首关于秋天的诗"}],
     "stream": true
   }'
 ```
-
-设置 `"stream": true` 后，服务器会以 Server-Sent Events 格式逐 token 推送内容。
 
 ### 继续已有会话
 
@@ -193,8 +192,8 @@ curl -X POST http://localhost:8900/chat \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer YOUR_TOKEN" \
   -d '{
-    "message": "继续刚才的话题",
-    "session_id": "abc123",
+    "messages": [{"role": "user", "content": "继续刚才的话题"}],
+    "session_id": "s_20260611_1753_d139",
     "stream": false
   }'
 ```

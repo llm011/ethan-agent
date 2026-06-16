@@ -7,7 +7,7 @@
 ## 当前能力
 
 - **多模型支持**：Claude、Gemini、OpenAI 兼容协议（OpenRouter、Ollama 等），通过配置文件按 model id 路由，支持流式输出与 tool_use
-- **三层记忆系统**：热/温/冷滑动窗口 + 结构化 Facts（含 confidence/category/timestamp）+ Episodic memory（会话摘要，按时间和相关性检索）
+- **三层记忆系统**：热/温/冷滑动窗口 + 结构化 Facts（含 confidence/category/timestamp）+ 用户画像 + Episodic memory（会话摘要，按时间和相关性检索）
 - **Skill 系统**：从 `~/.ethan/skills/*.md` 加载，YAML frontmatter 声明触发关键词，自动注入 system prompt；内置 lark-cli 系列技能
 - **定时任务**：APScheduler（cron + interval），SQLite 持久化，支持通过对话创建任务，Web/CLI 均可管理
 - **Web UI**：基于 Next.js App Router 的路径路由（`/chat`、`/memory`、`/knowledge`、`/schedule`、`/skills`、`/settings`），流式渲染、Markdown 高亮、深色/浅橙主题切换、移动端适配
@@ -34,4 +34,4 @@
 | [调度器](./scheduler.md) | 定时任务、cron + interval、SQLite 持久化 |
 | [接口层](./interface.md) | CLI (REPL)、HTTP API (SSE)、命令行工具、Web UI 路由 |
 | [ACP 集成](./acp.md) | 外部 Coding Agent 委派协议、Claude Code / OpenCode 接入、PTY 会话 |
-| Feishu/Lark 集成 | WebSocket 长连接、消息格式、onboarding 流程（见 `ethan/lark/`） |
+| Feishu/Lark 集成 | WebSocket 长连接、消息格式、onboarding 流程（见 `ethan/interface/lark_events.py`） |
