@@ -56,7 +56,13 @@ pip3 install ethan-agent
 设置 API Key 后直接启动：
 
 ```bash
+# Anthropic 官方接口
 ethan provider set anthropic --api-key sk-ant-xxx
+
+# 或者任意 OpenAI 兼容接口（如 DeepSeek、OpenRouter、Gemini、Ollama）
+ethan provider set openai_compat --api-key sk-xxx --base-url https://api.example.com/v1
+ethan model default <model-id>
+
 ethan
 ```
 

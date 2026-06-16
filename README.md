@@ -58,7 +58,13 @@ pip3 install ethan-agent
 Set an API key and start:
 
 ```bash
+# Anthropic Claude
 ethan provider set anthropic --api-key sk-ant-xxx
+
+# OR any OpenAI-compatible API (Gemini, OpenRouter, DeepSeek, Ollama, etc.)
+ethan provider set openai_compat --api-key sk-xxx --base-url https://api.example.com/v1
+ethan model default <model-id>
+
 ethan
 ```
 
