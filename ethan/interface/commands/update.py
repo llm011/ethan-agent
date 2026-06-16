@@ -115,6 +115,17 @@ def _sync_deps(repo: Path) -> bool:
     return True
 
 
+def _get_pypi_latest_version() -> Optional[str]:
+    import urllib.request
+    import json
+    try:
+        req = urllib.request.Request("https://pypi.org/pypi/ethan-agent/json")
+        with urllib.request.urlopen(req, timeout=5) as res:
+            data = json.loads(res.read().decode())
+            return data["info"]["version"]
+    except Exception:
+        return None
+
 def _pip_upgrade() -> bool:
     """PyPI 安装方式：pip install --upgrade ethan-agent。"""
     console.print("[dim]pip install --upgrade ethan-agent ...[/dim]")
@@ -186,16 +197,32 @@ def update(
         return
 
     repo = _repo_root()
-    current_ref = _current_ref(repo) if repo else "[pip install]"
+    current_ref = _current_ref(repo) if repo else None
     current_tag = _current_tag(repo) if repo else None
-    current_display = current_tag or current_ref
+
+    if repo is None:
+        import importlib.metadata
+        try:
+            current_display = importlib.metadata.version("ethan-agent")
+        except Exception:
+            current_display = "[pip install]"
+    else:
+        current_display = current_tag or current_ref
 
     console.print(f"当前版本：[cyan]{current_display}[/cyan]")
 
     # ── PyPI 安装方式 ────────────────────────────────────────────
     if repo is None:
+        latest = _get_pypi_latest_version()
+        if latest and current_display != "[pip install]" and latest == current_display and not to:
+            console.print("[green]已是最新版本，无需更新。[/green]")
+            return
+
+        if latest and not to:
+            console.print(f"可更新到：[cyan]{latest}[/cyan]")
+
         if check:
-            console.print("[yellow]PyPI 安装方式：运行 `pip install --upgrade ethan-agent` 检查最新版本。[/yellow]")
+            console.print("[yellow]运行 `pip install --upgrade ethan-agent` 更新。[/yellow]")
             return
         if to:
             console.print(f"[dim]pip install ethan-agent=={to.lstrip('v')} ...[/dim]")
@@ -206,7 +233,15 @@ def update(
         else:
             ok = _pip_upgrade()
         if ok:
-            console.print("[green]✓ 更新成功[/green]")
+            # Re-check version to confirm
+            try:
+                new_display = importlib.metadata.version("ethan-agent")
+            except Exception:
+                new_display = "新版本"
+            if new_display == current_display and not to:
+                console.print("[green]已是最新版本。[/green]")
+            else:
+                console.print(f"[green]✓ 更新完成：{current_display} → {new_display}[/green]")
             if restart:
                 _restart_serve(None)
         else:
