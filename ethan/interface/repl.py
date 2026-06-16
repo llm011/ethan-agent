@@ -491,7 +491,6 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
             await store.update_title(session.id, title)
             session.title = title
         elif len(user_msgs) == 3:
-            import asyncio
             async def _regen_title():
                 t = await _generate_smart_title(history)
                 await store.update_title(session.id, t)
@@ -577,9 +576,8 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
             await store.touch(session.id)
 
             if agent._skills and agent.last_matched_skills:
-                import asyncio as _asyncio
                 for _name in agent.last_matched_skills:
-                    _asyncio.create_task(_asyncio.to_thread(agent._skills.record_hit, _name))
+                    asyncio.create_task(asyncio.to_thread(agent._skills.record_hit, _name))
 
             # Per-turn delta (not cumulative)
             turn_in = agent.usage.input_tokens - prev_input
