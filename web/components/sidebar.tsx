@@ -247,7 +247,10 @@ export function Sidebar() {
     />
     <aside className="w-full h-full border-r border-border flex flex-col bg-muted/30">
       <div className="p-4 flex items-center justify-between">
-        <h1 className="text-lg font-semibold flex items-center gap-2">
+        <h1
+          className="text-lg font-semibold flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity"
+          onClick={() => { navigate("/chat"); if (window.innerWidth < 768) setSidebarOpen(false); }}
+        >
           <Image src="/logo-sidebar.png" alt="Ethan Agent" width={28} height={28} className="rounded-full" />
           Ethan Agent
         </h1>

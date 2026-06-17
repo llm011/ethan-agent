@@ -131,7 +131,6 @@ export interface ChatMessage {
 
 export interface AgentSettings {
   workspace: string;
-  system_prompt: string;
   agent_name: string;
   language: string;
   default_model: string;

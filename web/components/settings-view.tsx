@@ -272,7 +272,6 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
   const [agentForm, setAgentForm] = useState<AgentSettings>({
     workspace: "",
     agent_name: "",
-    system_prompt: "",
     language: "zh",
     default_model: "",
     heartbeat_enabled: true,
