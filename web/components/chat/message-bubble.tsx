@@ -56,7 +56,7 @@ export function MessageBubble({ msg, isStreaming, isLast }: MessageBubbleProps) 
                 {msg.files.map((f, j) => <span key={j} className="mr-2">📎 {f}</span>)}
               </div>
             )}
-            <p className="whitespace-pre-wrap">{msg.content.split("\n\n").pop()}</p>
+            <p className="whitespace-pre-wrap">{msg.content.replace(/^(\[Uploaded file: [^\]]+\]\n)+\n?/, '')}</p>
             {msg.created_at && (
               <div className="text-[10px] opacity-40 mt-1 text-right">
                 {formatTime(msg.created_at)}
@@ -65,6 +65,16 @@ export function MessageBubble({ msg, isStreaming, isLast }: MessageBubbleProps) 
           </>
         ) : (
           <>
+            {msg.thought && (
+              <details className="mb-2 border border-border/50 bg-background/50 rounded-lg overflow-hidden group">
+                <summary className="px-3 py-1.5 text-xs text-muted-foreground font-medium cursor-pointer hover:bg-background/80 flex items-center transition-colors list-none select-none">
+                  <span className="opacity-70 group-open:opacity-100 transition-opacity">🤔 思考过程</span>
+                </summary>
+                <div className="px-3 py-2 text-xs text-muted-foreground opacity-80 border-t border-border/50 bg-background/30 whitespace-pre-wrap leading-relaxed">
+                  {msg.thought}
+                </div>
+              </details>
+            )}
             {msg.toolSteps && msg.toolSteps.length > 0 && (
               <ToolTimeline steps={msg.toolSteps} defaultExpanded={msg.toolsExpanded ?? false} />
             )}

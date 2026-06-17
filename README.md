@@ -68,6 +68,8 @@ ethan model default <model-id>
 ethan
 ```
 
+> 💡 **Notice**: Run `ethan` command to start the interactive chat REPL in your terminal. If you are developing locally, running `ethan` will also automatically launch the Web UI on port `8011` and open it in your browser. You can also run `ethan web` to launch/open the Web UI directly.
+
 That's it. On first run, default skills and system files are written to `~/.ethan/`.
 
 ---
@@ -158,6 +160,14 @@ ethan provider set openai_compat --api-key sk-xxx --base-url https://api.example
 # Interactive REPL
 ethan
 
+# Launch Web UI and open in browser
+ethan web
+# (Supports custom port via `--port 8011` or direct URL via `--url`)
+
+# Manage Web UI login token
+ethan web token
+ethan web token --rotate
+
 # Single-turn query
 ethan -p "What's the weather in Tokyo?"
 
@@ -176,7 +186,7 @@ ethan serve
 ```bash
 cd web
 npm install
-npm run dev   # http://localhost:3000
+npm run dev   # http://localhost:8011 (default in next.config or command args)
 ```
 
 ### macOS auto-start (launchd)

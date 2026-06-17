@@ -57,6 +57,82 @@ def serve(
     run_server(host=host, port=port)
 
 
+def _launch_web(port: int = 8011, url: Optional[str] = None) -> None:
+    import socket, subprocess, webbrowser
+    from pathlib import Path
+
+    if url:
+        webbrowser.open(url)
+        return
+
+    _WEB_DIR = Path(__file__).resolve().parent.parent.parent / "web"
+
+    def _port_open(p: int) -> bool:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.3)
+            return s.connect_ex(("127.0.0.1", p)) == 0
+
+    if _WEB_DIR.exists() and not _port_open(port):
+        _next_dir = _WEB_DIR / ".next"
+        if not _next_dir.exists():
+            from rich.console import Console as _Console
+            _Console().print("[dim]Building web UI (first time)...[/dim]")
+            subprocess.run(["pnpm", "exec", "next", "build"], cwd=str(_WEB_DIR), check=False)
+        subprocess.Popen(
+            ["pnpm", "exec", "next", "start", "--port", str(port)],
+            cwd=str(_WEB_DIR),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+
+        # 轮询检测服务是否成功启动，最长等待 5s
+        import time as _time
+        for _ in range(25):
+            if _port_open(port):
+                break
+            _time.sleep(0.2)
+
+    if _WEB_DIR.exists():
+        webbrowser.open(f"http://localhost:{port}")
+
+
+web_app = typer.Typer(help="Web UI 管理")
+app.add_typer(web_app, name="web")
+
+@web_app.callback(invoke_without_command=True)
+def web_main(
+    ctx: typer.Context,
+    port: int = typer.Option(8011, "--port", help="Web UI port"),
+    url: Optional[str] = typer.Option(None, "--url", help="Direct URL to open"),
+):
+    """Launch the Web UI and open it in the browser."""
+    if ctx.invoked_subcommand is None:
+        _launch_web(port=port, url=url)
+
+@web_app.command("token")
+def web_token(
+    rotate: bool = typer.Option(False, "--rotate", help="Rotate and generate a new token"),
+) -> None:
+    """查看或轮换 Web UI 的登录 Token。"""
+    from rich.console import Console
+    console = Console()
+    from ethan.core.config import get_config, save_config
+    config = get_config()
+
+    if rotate:
+        import secrets
+        config.network.auth_token = secrets.token_hex(6)
+        save_config(config)
+        console.print("[green]✓ Web Token 已重新生成并保存。[/green]")
+
+    token = config.network.auth_token
+    if not token:
+        console.print("[yellow]当前未配置 Web Token。[/yellow]")
+    else:
+        console.print(f"Web 登录 Token: [cyan]{token}[/cyan]")
+
+
 _register_subcommands()
 
 
@@ -126,6 +202,10 @@ def chat(
     """Start a conversation. Defaults to lightweight REPL mode."""
     if ctx.invoked_subcommand is not None:
         return
+
+    # ── Auto-launch web UI on port 8011 ──────────────────────────────
+    _launch_web(8011)
+    # ─────────────────────────────────────────────────────────────────
 
     import asyncio
     from ethan.interface.repl import run_repl, run_once

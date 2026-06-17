@@ -13,6 +13,7 @@ class ProviderConfig(BaseModel):
     api_key: str = ""
     base_url: Optional[str] = None
     proxy: Optional[str] = None  # provider 级别代理，覆盖全局
+    type: str = "openai_compat"  # "anthropic" | "openai_compat"
 
 
 class ModelEntry(BaseModel):
@@ -44,6 +45,7 @@ class RoutingConfig(BaseModel):
         "关*风扇", "开*风扇",
         "调*亮度", "调*温度", "调*音量",
         "播放音乐", "暂停", "下一首", "上一首",
+        "定时任务", "有哪些任务", "任务列表", "什么任务", "定时提醒",
     ])
     fast_max_length: int = 12  # 消息超过此长度不走 Fast Path（简单控制命令通常 ≤ 10 字）
     fast_skill_triggers: list[str] = Field(default_factory=list)  # 命中时强制走 Fast Path，不受长度限制（给 Skill 关联用）
@@ -60,7 +62,6 @@ class DefaultsConfig(BaseModel):
     workspace: str = str(Path.home() / ".ethan")
     model: str = "claude-sonnet-4-6"
     agent_name: str = "Ethan"
-    system_prompt: str = "You are Ethan, a helpful personal AI assistant. 请用中文回复。"
     language: str = "zh"
     max_tokens: int = 4096
     max_tool_iterations: int = 10
@@ -76,8 +77,25 @@ class Config(BaseModel):
     lark: LarkConfig = Field(default_factory=LarkConfig)
 
     def get_model(self, model_id: str) -> Optional[ModelEntry]:
+        # 检查是否为数字索引
+        if model_id.isdigit():
+            idx = int(model_id) - 1
+            if 0 <= idx < len(self.models):
+                return self.models[idx]
+
+        # 格式支持: "my-provider/gemini-1.5"
+        target_provider = None
+        target_model = model_id
+        if "/" in model_id:
+            parts = model_id.split("/", 1)
+            target_provider = parts[0]
+            target_model = parts[1]
+
         for m in self.models:
-            if m.id == model_id or model_id in m.alias:
+            # 如果指定了 provider，强制匹配
+            if target_provider and m.provider != target_provider:
+                continue
+            if m.id == target_model or target_model in m.alias:
                 return m
         return None
 
@@ -96,10 +114,12 @@ def _default_config() -> dict:
             "anthropic": {
                 "api_key": os.environ.get("ANTHROPIC_API_KEY", "") or os.environ.get("ANTHROPIC_AUTH_TOKEN", ""),
                 "base_url": os.environ.get("ANTHROPIC_BASE_URL", None),
+                "type": "anthropic",
             },
             "openai_compat": {
                 "api_key": os.environ.get("OPENAI_API_KEY", ""),
                 "base_url": os.environ.get("OPENAI_BASE_URL", None),
+                "type": "openai_compat",
             },
         },
         "models": [
@@ -113,7 +133,6 @@ def _default_config() -> dict:
         },
         "defaults": {
             "model": os.environ.get("AGENT_DEFAULT_MODEL", "gemini-2.5-flash"),
-            "system_prompt": "You are Ethan, a helpful personal AI assistant. 请用中文回复。",
             "max_tokens": 4096,
             "max_tool_iterations": 10,
         },
@@ -171,6 +190,16 @@ def load_config() -> Config:
 
     _apply_env_overrides(raw)
     config = Config.model_validate(raw)
+
+    need_save = False
+    if not config.network.auth_token:
+        import secrets
+        config.network.auth_token = secrets.token_hex(6)
+        need_save = True
+
+    if need_save:
+        save_config(config)
+
     _init_system_files(config.defaults.agent_name)
     _init_default_skills()
     return config
@@ -178,7 +207,18 @@ def load_config() -> Config:
 
 def save_config(config: Config) -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    _write_raw(config.model_dump())
+
+    # 手动序列化，保留 type 字段，但去除其他可选/空字段
+    data = config.model_dump(exclude_defaults=True, exclude_none=True)
+
+    # 由于 exclude_defaults 会把等于默认值的字段去掉（比如 type="openai_compat"），
+    # 但我们需要明确持久化 type，所以对于存在于 config.providers 中的，强制把 type 写进去
+    if "providers" in data:
+        for k, p in config.providers.items():
+            if k in data["providers"]:
+                data["providers"][k]["type"] = p.type
+
+    _write_raw(data)
 
 
 def _write_raw(data: dict) -> None:
@@ -194,11 +234,13 @@ def _apply_env_overrides(raw: dict) -> None:
     providers = raw.setdefault("providers", {})
 
     mapping = {
-        "anthropic":    ("ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL"),
-        "openai_compat": ("OPENAI_API_KEY", None, "OPENAI_BASE_URL"),
+        "anthropic":    ("ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "anthropic"),
+        "openai_compat": ("OPENAI_API_KEY", None, "OPENAI_BASE_URL", "openai_compat"),
     }
-    for key, (env_key1, env_key2, env_base) in mapping.items():
+    for key, (env_key1, env_key2, env_base, default_type) in mapping.items():
         p = providers.setdefault(key, {})
+        if "type" not in p:
+            p["type"] = default_type
         token = os.environ.get(env_key1, "") if env_key1 else ""
         fallback = os.environ.get(env_key2, "") if env_key2 else ""
         if token or fallback:

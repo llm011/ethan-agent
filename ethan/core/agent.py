@@ -104,7 +104,6 @@ class Agent:
         self._skills = skill_registry
         self._procedures = ProcedureStore()
         self._facts = FactStore()
-        self._base_system = system or config.defaults.system_prompt
         self._max_iterations = config.defaults.max_tool_iterations
         self.usage = UsageStats()
         self.last_matched_skills: list[str] = []
@@ -183,7 +182,7 @@ class Agent:
         workspace = config.defaults.workspace
 
         # 从缓存读取，避免每次对话都做磁盘 I/O
-        identity_content = self._system_files.get("identity", self._base_system)
+        identity_content = self._system_files.get("identity", "You are a helpful assistant.")
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S %A")
 
         self.last_matched_skills = []

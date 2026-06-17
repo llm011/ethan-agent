@@ -13,10 +13,14 @@ def create_provider(model: str | None = None) -> BaseProvider:
         # alias 命中时，用真实的 model id 去调 API
         model_id = entry.id
         provider_key = entry.provider
-    elif model_id.startswith("claude"):
-        provider_key = "anthropic"
     else:
-        provider_key = "openai_compat"
+        # 兜底：如果用户输入的带有 provider_name/model_id 格式，我们在回传给 SDK 前剥离 provider 名字
+        if "/" in model_id:
+            provider_key, model_id = model_id.split("/", 1)
+        elif model_id.startswith("claude"):
+            provider_key = "anthropic"
+        else:
+            provider_key = "openai_compat"
 
     provider_cfg = config.get_provider_config(provider_key)
     if provider_cfg is None:
@@ -25,7 +29,10 @@ def create_provider(model: str | None = None) -> BaseProvider:
     # provider 级别代理优先，全局兜底
     effective_proxy = provider_cfg.proxy or proxy
 
-    if provider_key == "anthropic":
+    # 判断具体的 Provider 类型
+    provider_type = getattr(provider_cfg, "type", None) or ("anthropic" if provider_key == "anthropic" else "openai_compat")
+
+    if provider_type == "anthropic":
         from ethan.providers.anthropic import AnthropicProvider  # lazy: avoids top-level SDK import
         return AnthropicProvider(provider_cfg=provider_cfg, model=model_id, proxy=effective_proxy)
     else:

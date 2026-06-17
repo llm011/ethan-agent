@@ -68,7 +68,6 @@ async def upload_file(file: UploadFile = File(...)):
 
 class AgentSettingsPatch(BaseModel):
     workspace: str | None = None
-    system_prompt: str | None = None
     agent_name: str | None = None
     language: str | None = None
     default_model: str | None = None
@@ -87,7 +86,6 @@ async def get_agent_settings():
     config = get_config()
     return {
         "workspace": config.defaults.workspace,
-        "system_prompt": config.defaults.system_prompt,
         "agent_name": config.defaults.agent_name,
         "language": config.defaults.language,
         "default_model": config.defaults.model,
@@ -105,8 +103,6 @@ async def get_agent_settings():
 @router.patch("/settings/agent", dependencies=[Depends(verify_token)])
 async def update_agent_settings(req: AgentSettingsPatch):
     config = get_config()
-    if req.system_prompt is not None:
-        config.defaults.system_prompt = req.system_prompt
     if req.agent_name is not None:
         config.defaults.agent_name = req.agent_name
     if req.language is not None:

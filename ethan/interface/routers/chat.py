@@ -145,10 +145,14 @@ async def _stream_response(
     tool_start_times: dict[str, float] = {}
     collected_tool_steps: list[dict] = []
     full = ""
+    thought = ""
     try:
         async for item in agent.stream_chat(messages):
             if isinstance(item, ToolEvent):
                 if item.state == "start":
+                    if full:
+                        thought += ("\n\n" if thought else "") + full
+                        full = ""
                     tool_start_times[item.tool_name] = time.time()
                     collected_tool_steps.append({
                         "tool": item.tool_name,
@@ -182,7 +186,7 @@ async def _stream_response(
     except Exception as e:
         yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
-    if session_id and full:
+    if session_id and (full or thought):
         usage_dict = {
             "input": agent.usage.input_tokens,
             "output": agent.usage.output_tokens,
@@ -191,6 +195,7 @@ async def _stream_response(
         asst_msg = Message(
             role="assistant",
             content=full,
+            thought=thought,
             usage=usage_dict,
             tool_steps=collected_tool_steps or [],
         )

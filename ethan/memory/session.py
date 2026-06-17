@@ -103,7 +103,7 @@ class SessionStore:
         """)
         await self._db.commit()
         # Migration: add columns if they don't exist (for existing databases)
-        for col, definition in [("created_at", "REAL"), ("usage", "TEXT"), ("tool_steps", "TEXT")]:
+        for col, definition in [("created_at", "REAL"), ("usage", "TEXT"), ("tool_steps", "TEXT"), ("thought", "TEXT")]:
             try:
                 await self._db.execute(f"ALTER TABLE messages ADD COLUMN {col} {definition}")
                 await self._db.commit()
@@ -143,8 +143,8 @@ class SessionStore:
         tool_steps_json = json.dumps(msg.tool_steps) if msg.tool_steps else None
 
         await self._db.execute(
-            "INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (session_id, msg.role, msg.content, tool_calls_json, msg.tool_call_id, msg_created_at, usage_json, tool_steps_json),
+            "INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (session_id, msg.role, msg.content, tool_calls_json, msg.tool_call_id, msg_created_at, usage_json, tool_steps_json, msg.thought),
         )
         await self._db.commit()
 
@@ -192,7 +192,7 @@ class SessionStore:
         )
 
         async with self._db.execute(
-            "SELECT role, content, tool_calls, tool_call_id, created_at, usage, tool_steps FROM messages WHERE session_id = ? ORDER BY id",
+            "SELECT role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought FROM messages WHERE session_id = ? ORDER BY id",
             (session_id,),
         ) as cursor:
             async for r in cursor:
@@ -209,6 +209,7 @@ class SessionStore:
                     created_at=r[4],
                     usage=usage,
                     tool_steps=tool_steps,
+                    thought=r[7],
                 ))
 
         return session

@@ -18,7 +18,15 @@ ethan provider set openai_compat --api-key sk-xxx --base-url https://api.example
 
 # 启动
 ethan
+
+# 或直接拉起/打开 Web 页面控制台
+ethan web
+
+# 查看你的 Web 登录 Token (登录 Web 时需要)
+ethan web token
 ```
+
+> 💡 **小贴士**：运行 `ethan` 启动对话 REPL 时，如果你是在源码开发环境，系统会自动检测 8011 端口并自动用默认浏览器将 Web UI 控制台页面打开；通过 `pip install` 安装包形式运行时，该检测自启会安全地静默跳过，你可以通过手动配置或容器启动 Web。
 
 首次运行会自动初始化 `~/.ethan/`，写入默认技能和系统文件。
 

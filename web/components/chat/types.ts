@@ -15,4 +15,5 @@ export interface Message {
   created_at?: number;
   usage?: Usage;
   ttft?: number;
+  thought?: string;
 }

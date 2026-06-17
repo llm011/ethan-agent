@@ -242,6 +242,11 @@ def update(
                 console.print("[green]已是最新版本。[/green]")
             else:
                 console.print(f"[green]✓ 更新完成：{current_display} → {new_display}[/green]")
+                from ethan.core.config import get_config
+                token = get_config().network.auth_token
+                console.print("[yellow]💡 更新已生效。运行 `ethan` 开始对话，或运行 `ethan web` 打开网页界面。[/yellow]")
+                if token:
+                    console.print(f"[dim]   (你的 Web 登录 Token 是: [cyan]{token}[/cyan])[/dim]")
             if restart:
                 _restart_serve(None)
         else:
@@ -291,6 +296,11 @@ def update(
     new_tag = _current_tag(repo)
     new_display = new_tag or new_ref
     console.print(f"[green]✓ 更新完成：{current_display} → {new_display}[/green]")
+    from ethan.core.config import get_config
+    token = get_config().network.auth_token
+    console.print("[yellow]💡 更新已生效。运行 `ethan` 开始对话，或运行 `ethan web` 打开网页界面。[/yellow]")
+    if token:
+        console.print(f"[dim]   (你的 Web 登录 Token 是: [cyan]{token}[/cyan])[/dim]")
 
     if restart and _find_serve_pid():
         _restart_serve(repo)

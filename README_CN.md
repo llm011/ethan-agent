@@ -66,6 +66,8 @@ ethan model default <model-id>
 ethan
 ```
 
+> 💡 **提示**: 运行 `ethan` 命令将在终端中启动交互式对话 REPL。如果你在本地源码开发环境下，运行 `ethan` 还会自动在后台拉起运行于 `8011` 端口的 Web 管理界面并在浏览器中打开。你也可以随时运行 `ethan web` 来单独拉起或打开 Web 界面。
+
 首次运行会自动初始化 `~/.ethan/`，写入默认技能和系统文件。
 
 ---
@@ -158,6 +160,14 @@ ethan provider set openai_compat --api-key sk-xxx --base-url https://api.example
 # 交互式 REPL
 ethan
 
+# 启动 Web 界面并在浏览器打开
+ethan web
+# (支持用 `--port 8011` 指定自定义端口，用 `--url` 快速打开指定页面)
+
+# 管理 Web 界面登录凭证
+ethan web token          # 查看当前 token
+ethan web token --rotate # 重新生成并覆盖 token
+
 # 单轮对话
 ethan -p "今天有什么提醒？"
 
@@ -176,7 +186,7 @@ ethan serve
 ```bash
 cd web
 npm install
-npm run dev   # http://localhost:3000
+npm run dev   # http://localhost:8011 (默认使用 8011)
 ```
 
 ### macOS 开机自启（launchd）

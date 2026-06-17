@@ -5,6 +5,7 @@
 """
 import asyncio
 import os
+import signal
 import time
 from datetime import datetime
 
@@ -106,6 +107,38 @@ def _make_toolbar(model: str, tokens_in: int = 0, tokens_out: int = 0, tokens_ca
         parts.append(("class:separator", " · "))
         parts.append(("class:tokens", activity))
     return parts
+
+
+def _print_history(messages: list[Message], limit: int = 30) -> None:
+    """渲染最近的历史消息（最新 limit 条）。"""
+    if not messages:
+        return
+
+    # 提取最新的 limit 条消息
+    display_messages = messages[-limit:]
+
+    # 打印一条提示
+    from ethan.core.config import get_config
+    config = get_config()
+    agent_name = config.defaults.agent_name
+
+    console.print(f"[dim]Showing last {len(display_messages)} messages of history...[/dim]\n")
+
+    for msg in display_messages:
+        if msg.role == "user":
+            console.print(f"[bold cyan]› {msg.content}[/bold cyan]")
+        elif msg.role == "assistant":
+            # 如果是工具执行的提示，也以暗色打印
+            if msg.tool_steps:
+                for step in msg.tool_steps:
+                    # step 结构类似：{"tool_name": "...", "args_summary": "...", "state": "done"}
+                    name = step.get("tool_name", "")
+                    args = step.get("args_summary", "")
+                    args_str = f"({args})" if args else ""
+                    console.print(f"[dim]⚡ {name}{args_str}[/dim]")
+            if msg.content:
+                console.print(RichMarkdown(msg.content))
+            console.print()
 
 
 def _banner():
@@ -231,10 +264,10 @@ async def _handle_slash_command(cmd: str, store: SessionStore, session: Session,
         if len(parts) < 2:
             config = get_config()
             current = agent._provider.model
-            models = config.model_ids()
+            models_str = ", ".join(f"[{i}] {m.id}" for i, m in enumerate(config.models, start=1))
             console.print(f"[dim]Current: [cyan]{current}[/cyan][/dim]")
-            console.print(f"[dim]Available: {', '.join(models)}[/dim]")
-            console.print(f"[dim]Switch: /model <id>[/dim]")
+            console.print(f"[dim]Available: {models_str}[/dim]")
+            console.print(f"[dim]Switch: /model <id_or_index>[/dim]")
         else:
             # Return special signal — caller handles model switch
             from ethan.providers.manager import create_provider
@@ -282,6 +315,7 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
         if session:
             session_persisted = True
             console.print(f"[green]Session restored: {session.title}[/green] [dim]({len(session.messages)} messages)[/dim]")
+            _print_history(session.messages, limit=30)
 
     if not session:
         # 仅构造内存对象，不写 DB
@@ -467,6 +501,7 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
                 for u, a in pairs[-memory.config.hot_size:]:
                     memory.hot.append(u)
                     memory.hot.append(a)
+                _print_history(session.messages, limit=30)
             continue
 
         msg = Message(role="user", content=user_input)
@@ -498,6 +533,7 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
             asyncio.create_task(_regen_title())
 
         full = ""
+        thought = ""
         first_chunk = True
         first_item = True  # for TTFT: fire on any first item (tool or text)
         current_activity = ""
@@ -514,48 +550,71 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
         context = memory.build_context()
         context.append(msg)
 
-        try:
+        # Inner coroutine — captured by closure, can be awaited as a Task
+        async def _consume_stream():
+            nonlocal full, thought, first_chunk, first_item, ttft
             from ethan.providers.base import ToolEvent
             render_live = Live(console=console, refresh_per_second=8, vertical_overflow="visible")
-            async for item in agent.stream_chat(context):
-                if isinstance(item, ToolEvent):
+            try:
+                async for item in agent.stream_chat(context):
+                    if isinstance(item, ToolEvent):
+                        if first_item:
+                            ttft = time.time() - send_time
+                            first_item = False
+                        if item.state == "start":
+                            if render_live.is_started:
+                                # Erase the thinking text from screen before stopping the live render
+                                render_live.update(Text(""))
+                                render_live.stop()
+                            if full:
+                                thought += ("\n\n" if thought else "") + full
+                                full = ""
+                            activity_text = f"⚡ {item.tool_name}"
+                            if item.args_summary:
+                                activity_text += f"({item.args_summary})"
+                            if first_chunk:
+                                live.stop()
+                                first_chunk = False
+                            console.print(f"[dim]{activity_text}[/dim]")
+                        elif item.state in ("done", "error"):
+                            pass
+                        continue
+
+                    # Text chunk
                     if first_item:
                         ttft = time.time() - send_time
                         first_item = False
-                    if item.state == "start":
-                        activity_text = f"⚡ {item.tool_name}"
-                        if item.args_summary:
-                            activity_text += f"({item.args_summary})"
-                        current_activity = activity_text
-                        if first_chunk:
-                            live.stop()
-                            first_chunk = False
-                        if render_live.is_started:
-                            render_live.stop()
-                        console.print(f"[dim]{activity_text}[/dim]")
-                    elif item.state in ("done", "error"):
-                        current_activity = ""
-                    continue
-
-                # Text chunk
-                if first_item:
-                    ttft = time.time() - send_time
-                    first_item = False
+                    if first_chunk:
+                        if ttft is None:
+                            ttft = time.time() - send_time
+                        live.stop()
+                        first_chunk = False
+                    if not render_live.is_started:
+                        render_live.start()
+                    full += item
+                    render_live.update(RichMarkdown(full))
+            finally:
+                if render_live.is_started:
+                    render_live.stop()
                 if first_chunk:
-                    if ttft is None:
-                        ttft = time.time() - send_time
                     live.stop()
-                    first_chunk = False
-                if not render_live.is_started:
-                    render_live.start()
-                full += item
-                render_live.update(RichMarkdown(full))
 
-            if render_live.is_started:
-                render_live.stop()
+        # Run stream as a cancellable asyncio Task
+        _stream_task: asyncio.Task | None = None
+        loop = asyncio.get_running_loop()
+
+        def _sigint_during_stream():
+            if _stream_task is not None and not _stream_task.done():
+                _stream_task.cancel()
+
+        loop.add_signal_handler(signal.SIGINT, _sigint_during_stream)
+        try:
+            _stream_task = asyncio.ensure_future(_consume_stream())
+            await _stream_task
             console.print()
-        except KeyboardInterrupt:
-            print("\n[interrupted]")
+        except asyncio.CancelledError:
+            full = ""   # discard partial; history.pop() in the else branch will clean up
+            console.print("\n[dim]Interrupted.[/dim]")
         except Exception as e:
             if first_chunk:
                 live.stop()
@@ -563,14 +622,16 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
         finally:
             if first_chunk:
                 live.stop()
+            loop.remove_signal_handler(signal.SIGINT)
+            signal.signal(signal.SIGINT, signal.default_int_handler)
 
-        if full:
+        if full or thought:
             usage_dict = {
                 "input": agent.usage.input_tokens,
                 "output": agent.usage.output_tokens,
                 "cache": agent.usage.cache_tokens,
             }
-            resp = Message(role="assistant", content=full, usage=usage_dict)
+            resp = Message(role="assistant", content=full, thought=thought, usage=usage_dict)
             history.append(resp)
             await store.save_message(session.id, resp)
             await store.touch(session.id)

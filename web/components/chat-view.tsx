@@ -149,6 +149,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     const chatMessages: ChatMessage[] = newMessages.map((m) => ({ role: m.role, content: m.content }));
 
     let assistantContent = "";
+    let assistantThought = "";
     const currentToolSteps: ToolStep[] = [];
     const sendTime = Date.now();
     let ttft: number | undefined;
@@ -164,9 +165,13 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           break;
         }
         if (chunk.tool && chunk.state === "start") {
+          if (assistantContent) {
+            assistantThought += (assistantThought ? "\n\n" : "") + assistantContent;
+            assistantContent = "";
+          }
           currentToolSteps.push({ tool: chunk.tool, args: chunk.args || "", state: "running" });
           setMessages([...newMessages, {
-            role: "assistant", content: assistantContent,
+            role: "assistant", content: assistantContent, thought: assistantThought,
             toolSteps: [...currentToolSteps], toolsExpanded: true, created_at: Date.now() / 1000,
           }]);
         }
@@ -183,14 +188,14 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
             }
           }
           setMessages([...newMessages, {
-            role: "assistant", content: assistantContent,
+            role: "assistant", content: assistantContent, thought: assistantThought,
             toolSteps: [...currentToolSteps], toolsExpanded: true, created_at: Date.now() / 1000,
           }]);
         }
         if (chunk.content) {
           assistantContent += chunk.content;
           setMessages([...newMessages, {
-            role: "assistant", content: assistantContent,
+            role: "assistant", content: assistantContent, thought: assistantThought,
             toolSteps: currentToolSteps.length > 0 ? [...currentToolSteps] : undefined,
             toolsExpanded: currentToolSteps.length > 0 ? true : undefined,
             created_at: Date.now() / 1000,
@@ -213,10 +218,10 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       const msgs = [...prev];
       const last = msgs[msgs.length - 1];
       if (last && last.role === "assistant") {
-        msgs[msgs.length - 1] = { ...last, toolsExpanded: false, usage: finalUsage || last.usage, ttft };
+        msgs[msgs.length - 1] = { ...last, content: assistantContent, thought: assistantThought, toolsExpanded: false, usage: finalUsage || last.usage, ttft };
         return msgs;
       }
-      return [...newMessages, { role: "assistant", content: assistantContent, created_at: Date.now() / 1000, usage: finalUsage, ttft }];
+      return [...newMessages, { role: "assistant", content: assistantContent, thought: assistantThought, created_at: Date.now() / 1000, usage: finalUsage, ttft }];
     });
     setStreaming(false);
     // 流式结束后再更新 URL，此时 session 已有消息，不会触发空消息覆盖

@@ -24,13 +24,15 @@ ethan provider set openai_compat --api-key sk-xxx --base-url https://api.example
 ethan
 ```
 
+（源码开发环境下，`ethan` 会在后台自启 Web UI 并自动用浏览器打开它。如果你想在不进对话的情况下单独打开 Web 界面，也可以在终端运行 `ethan web` 命令。Web 界面可能需要认证，你可以使用 `ethan web token` 查看初始生成的登录密钥）。
+
 首次运行自动初始化 `~/.ethan/`。
 
 ---
 
 ## 对话
 
-打开 Web UI（http://localhost:3000），在底部输入框输入消息，按 Enter 发送。
+打开 Web UI（http://localhost:8011，如果使用 Docker compose 容器化运行则是 http://localhost:3000），在底部输入框输入消息，按 Enter 发送。
 
 Ethan 会根据消息长度和内容自动选择推理路径：
 
