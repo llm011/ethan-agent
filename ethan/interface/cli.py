@@ -57,43 +57,19 @@ def serve(
     run_server(host=host, port=port)
 
 
-def _launch_web(port: int = 8011, url: Optional[str] = None) -> None:
-    import socket, subprocess, webbrowser
-    from pathlib import Path
+def _launch_web(port: int = 8900, url: Optional[str] = None) -> None:
+    import socket, webbrowser
 
     if url:
         webbrowser.open(url)
         return
-
-    _WEB_DIR = Path(__file__).resolve().parent.parent.parent / "web"
 
     def _port_open(p: int) -> bool:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.settimeout(0.3)
             return s.connect_ex(("127.0.0.1", p)) == 0
 
-    if _WEB_DIR.exists() and not _port_open(port):
-        _next_dir = _WEB_DIR / ".next"
-        if not _next_dir.exists():
-            from rich.console import Console as _Console
-            _Console().print("[dim]Building web UI (first time)...[/dim]")
-            subprocess.run(["pnpm", "exec", "next", "build"], cwd=str(_WEB_DIR), check=False)
-        subprocess.Popen(
-            ["pnpm", "exec", "next", "start", "--port", str(port)],
-            cwd=str(_WEB_DIR),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-
-        # 轮询检测服务是否成功启动，最长等待 5s
-        import time as _time
-        for _ in range(25):
-            if _port_open(port):
-                break
-            _time.sleep(0.2)
-
-    if _WEB_DIR.exists():
+    if _port_open(port):
         webbrowser.open(f"http://localhost:{port}")
 
 
@@ -103,7 +79,7 @@ app.add_typer(web_app, name="web")
 @web_app.callback(invoke_without_command=True)
 def web_main(
     ctx: typer.Context,
-    port: int = typer.Option(8011, "--port", help="Web UI port"),
+    port: int = typer.Option(8900, "--port", help="Web UI port"),
     url: Optional[str] = typer.Option(None, "--url", help="Direct URL to open"),
 ):
     """Launch the Web UI and open it in the browser."""
@@ -203,8 +179,8 @@ def chat(
     if ctx.invoked_subcommand is not None:
         return
 
-    # ── Auto-launch web UI on port 8011 ──────────────────────────────
-    _launch_web(8011)
+    # ── Auto-launch web UI on port 8900 ──────────────────────────────
+    _launch_web(8900)
     # ─────────────────────────────────────────────────────────────────
 
     import asyncio

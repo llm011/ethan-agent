@@ -32,7 +32,7 @@ ethan
 
 ## 对话
 
-打开 Web UI（http://localhost:8011，如果使用 Docker compose 容器化运行则是 http://localhost:3000），在底部输入框输入消息，按 Enter 发送。
+打开 Web UI（http://localhost:8900 ，如果使用 Docker compose 容器化运行则是 http://localhost:3000），在底部输入框输入消息，按 Enter 发送。
 
 Ethan 会根据消息长度和内容自动选择推理路径：
 

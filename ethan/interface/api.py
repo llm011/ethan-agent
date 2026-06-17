@@ -1,7 +1,11 @@
 """FastAPI 入口 — 挂载所有路由模块。"""
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from pathlib import Path
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, Response
+from fastapi.staticfiles import StaticFiles
 
 from ethan import __version__
 from ethan.core.heartbeat import start_heartbeat, stop_heartbeat
@@ -15,6 +19,8 @@ try:
     _lark_available = True
 except ImportError:
     _lark_available = False
+
+_WEB_DIST = Path(__file__).parent.parent / "web_dist"
 
 
 @asynccontextmanager
@@ -55,6 +61,30 @@ app.include_router(skills.router)
 app.include_router(docs.router)
 app.include_router(completions.router)
 app.include_router(logs.router)
+
+if _WEB_DIST.exists():
+    app.mount("/_next", StaticFiles(directory=str(_WEB_DIST / "_next")), name="next-static")
+
+    @app.get("/{path:path}")
+    async def serve_spa(request: Request, path: str):
+        # Skip API-like paths (already handled by routers above)
+        file_path = _WEB_DIST / path
+        # Try exact file (e.g. favicon.ico, logo.png)
+        if file_path.is_file():
+            return FileResponse(file_path)
+        # Try directory with index.html (trailingSlash: true generates /chat/index.html)
+        index_in_dir = file_path / "index.html"
+        if index_in_dir.is_file():
+            return FileResponse(index_in_dir)
+        # Try path.html
+        html_path = _WEB_DIST / f"{path}.html"
+        if html_path.is_file():
+            return FileResponse(html_path)
+        # Fallback to root index.html for client-side routing
+        root_index = _WEB_DIST / "index.html"
+        if root_index.is_file():
+            return FileResponse(root_index)
+        return Response(status_code=404)
 
 
 def run_server(host: str = "0.0.0.0", port: int = 8900):

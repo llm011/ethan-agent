@@ -1,6 +1,6 @@
 [project]
 name = "ethan-agent"
-version = "0.1.9"
+version = "0.1.10"
 description = "Ethan — Lightweight personal AI agent with memory, skills, and multi-model support"
 readme = "README.md"
 license = { text = "MIT" }
@@ -53,6 +53,7 @@ build-backend = "hatchling.build"
 include = [
     "ethan/**/*.py",
     "ethan/defaults/**",
+    "ethan/web_dist/**",
 ]
 
 [tool.hatch.build.targets.sdist]

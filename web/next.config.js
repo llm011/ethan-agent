@@ -1,6 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: 'standalone',  // 用于 Docker 多阶段构建
+  output: 'export',
+  trailingSlash: true,
+  images: { unoptimized: true },
   experimental: {
     turbopack: {
       root: __dirname,

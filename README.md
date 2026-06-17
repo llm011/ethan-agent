@@ -68,7 +68,7 @@ ethan model default <model-id>
 ethan
 ```
 
-> 💡 **Notice**: Run `ethan` command to start the interactive chat REPL in your terminal. If you are developing locally, running `ethan` will also automatically launch the Web UI on port `8011` and open it in your browser. You can also run `ethan web` to launch/open the Web UI directly.
+> 💡 **Notice**: Run `ethan` command to start the interactive chat REPL in your terminal. When `ethan serve` is running, it also hosts the Web UI on port `8900`. Running `ethan` will automatically open it in your browser. You can also run `ethan web` to open the Web UI directly.
 
 That's it. On first run, default skills and system files are written to `~/.ethan/`.
 
@@ -162,7 +162,7 @@ ethan
 
 # Launch Web UI and open in browser
 ethan web
-# (Supports custom port via `--port 8011` or direct URL via `--url`)
+# (Supports custom port via `--port 8900` or direct URL via `--url`)
 
 # Manage Web UI login token
 ethan web token
@@ -186,7 +186,7 @@ ethan serve
 ```bash
 cd web
 npm install
-npm run dev   # http://localhost:8011 (default in next.config or command args)
+npm run dev   # http://localhost:3000 (dev mode, API still on port 8900)
 ```
 
 ### macOS auto-start (launchd)

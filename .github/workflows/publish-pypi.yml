@@ -19,6 +19,21 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v5
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Build Web UI
+        run: |
+          cd web
+          pnpm install --frozen-lockfile
+          npm run build
+          cp -r out ../ethan/web_dist
+
       - name: Set version from tag
         run: |
           VERSION="${GITHUB_REF_NAME#v}"

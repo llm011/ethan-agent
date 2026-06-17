@@ -1,5 +1,7 @@
 export const API_URL = typeof window !== "undefined"
-  ? `${window.location.protocol}//${window.location.hostname === "localhost" ? "127.0.0.1" : window.location.hostname}:8900`
+  ? (window.location.port === "8900"
+    ? window.location.origin
+    : `${window.location.protocol}//${window.location.hostname === "localhost" ? "127.0.0.1" : window.location.hostname}:8900`)
   : (process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8900");
 
 let authToken = "";
