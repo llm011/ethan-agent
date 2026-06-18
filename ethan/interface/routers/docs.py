@@ -9,7 +9,9 @@ router = APIRouter(prefix="/docs")
 
 # When installed via pip, docs live at ethan/docs/ (copied in by CI)
 # When running from source, this resolves to the repo-root docs/ folder
-_DOCS_DIR = Path(__file__).parent.parent.parent / "docs"
+_PACKAGE_DOCS = Path(__file__).parent.parent.parent / "docs"    # ethan/docs/ — pip install
+_REPO_DOCS = Path(__file__).parent.parent.parent.parent / "docs"  # repo root — dev mode
+_DOCS_DIR = _PACKAGE_DOCS if _PACKAGE_DOCS.exists() else _REPO_DOCS
 
 
 @router.get("")
