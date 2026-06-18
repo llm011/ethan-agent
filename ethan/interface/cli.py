@@ -58,7 +58,8 @@ def serve(
 
 
 def _launch_web(port: int = 8900, url: Optional[str] = None) -> None:
-    import socket, webbrowser
+    import os, socket, subprocess, sys, time, webbrowser
+    from pathlib import Path
 
     if url:
         webbrowser.open(url)
@@ -69,8 +70,32 @@ def _launch_web(port: int = 8900, url: Optional[str] = None) -> None:
             s.settimeout(0.3)
             return s.connect_ex(("127.0.0.1", p)) == 0
 
+    if not _port_open(port):
+        # Find the `ethan` script next to the current Python executable
+        bin_dir = Path(sys.executable).parent
+        ethan_exe = bin_dir / "ethan"
+        if not ethan_exe.exists():
+            ethan_exe = Path(sys.argv[0])  # fallback to the running script
+        subprocess.Popen(
+            [str(ethan_exe), "serve", "--port", str(port)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            env={**os.environ},
+        )
+        # Wait up to 15s for the server to come up
+        for _ in range(75):
+            if _port_open(port):
+                break
+            time.sleep(0.2)
+
     if _port_open(port):
         webbrowser.open(f"http://localhost:{port}")
+    else:
+        from rich.console import Console
+        Console().print(
+            f"[yellow]Web UI 未能自动启动，请手动运行 [bold]ethan serve[/bold] 后访问 http://localhost:{port}[/yellow]"
+        )
 
 
 web_app = typer.Typer(help="Web UI 管理")
