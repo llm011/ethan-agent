@@ -12,6 +12,7 @@ RUN pnpm install --frozen-lockfile
 # 构建
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV NEXT_OUTPUT=standalone
 RUN pnpm run build
 
 # ── 生产镜像 ──────────────────────────────────────────
