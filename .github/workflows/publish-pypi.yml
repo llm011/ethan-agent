@@ -33,6 +33,8 @@ jobs:
           pnpm install --frozen-lockfile
           npm run build
           cp -r out ../ethan/web_dist
+          cd ..
+          git add -f ethan/web_dist
 
       - name: Set version from tag
         run: |
@@ -41,7 +43,7 @@ jobs:
           sed -i "s/^version = .*/version = \"$VERSION\"/" pyproject.toml
 
       - name: Build
-        run: uv build
+        run: uv build --wheel
 
       - name: Publish to PyPI
         run: uv publish --token ${{ secrets.PYPI_API_TOKEN }}
