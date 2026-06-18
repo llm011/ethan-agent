@@ -245,7 +245,7 @@ export function DocsView({ initialSlug }: DocsViewProps = {}) {
                 img: ({ src, alt }) => {
                   const srcStr = typeof src === "string" ? src : "";
                   const resolved = srcStr.startsWith("./images/")
-                    ? `${API_URL}/api/docs/images/${srcStr.slice("./images/".length)}`
+                    ? `${API_URL}/docs/images/${srcStr.slice("./images/".length)}`
                     : srcStr;
                   return (
                     <img

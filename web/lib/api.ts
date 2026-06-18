@@ -1,8 +1,8 @@
 export const API_URL = typeof window !== "undefined"
   ? (window.location.port === "8900"
-    ? window.location.origin
-    : `${window.location.protocol}//${window.location.hostname === "localhost" ? "127.0.0.1" : window.location.hostname}:8900`)
-  : (process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8900");
+    ? `${window.location.origin}/api`
+    : `${window.location.protocol}//${window.location.hostname === "localhost" ? "127.0.0.1" : window.location.hostname}:8900/api`)
+  : (process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8900/api");
 
 let authToken = "";
 
@@ -489,13 +489,13 @@ export async function patchChannel(channelId: string, config: Record<string, str
 export interface DocMeta { slug: string; title: string; filename: string; }
 
 export async function fetchDocsList(): Promise<DocMeta[]> {
-  const res = await fetch(`${API_URL}/api/docs`, { headers: headers() });
+  const res = await fetch(`${API_URL}/docs`, { headers: headers() });
   if (!res.ok) throw new Error("Failed");
   return res.json().then(d => d.docs);
 }
 
 export async function fetchDoc(slug: string): Promise<{ slug: string; content: string }> {
-  const res = await fetch(`${API_URL}/api/docs/${slug}`, { headers: headers() });
+  const res = await fetch(`${API_URL}/docs/${slug}`, { headers: headers() });
   if (!res.ok) throw new Error("Failed");
   return res.json();
 }

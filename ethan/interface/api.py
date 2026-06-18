@@ -38,7 +38,14 @@ async def lifespan(app: FastAPI):
     await app.state.api_key_store.close()
 
 
-app = FastAPI(title="Ethan Agent API", version=__version__, lifespan=lifespan, docs_url="/api/docs", redoc_url="/api/redoc", openapi_url="/api/openapi.json")
+app = FastAPI(
+    title="Ethan Agent API",
+    version=__version__,
+    lifespan=lifespan,
+    docs_url="/api/swagger",
+    redoc_url="/api/redoc",
+    openapi_url="/api/openapi.json",
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -51,36 +58,40 @@ app.add_middleware(
 if _lark_available:
     app.include_router(lark_router)
 
-app.include_router(chat.router)
-app.include_router(sessions.router)
-app.include_router(settings.router)
-app.include_router(memory.router)
-app.include_router(schedule.router)
-app.include_router(knowledge.router)
-app.include_router(skills.router)
-app.include_router(docs.router)
-app.include_router(completions.router)
-app.include_router(logs.router)
+app.include_router(chat.router, prefix="/api")
+app.include_router(sessions.router, prefix="/api")
+app.include_router(settings.router, prefix="/api")
+app.include_router(memory.router, prefix="/api")
+app.include_router(schedule.router, prefix="/api")
+app.include_router(knowledge.router, prefix="/api")
+app.include_router(skills.router, prefix="/api")
+app.include_router(docs.router, prefix="/api")
+app.include_router(completions.router)  # /v1 OpenAI-compat, no /api prefix
+app.include_router(logs.router, prefix="/api")
 
 if _WEB_DIST.exists():
     app.mount("/_next", StaticFiles(directory=str(_WEB_DIST / "_next")), name="next-static")
 
     @app.get("/{path:path}")
     async def serve_spa(request: Request, path: str):
-        # Skip API-like paths (already handled by routers above)
         file_path = _WEB_DIST / path
-        # Try exact file (e.g. favicon.ico, logo.png)
+        # Exact static file (favicon, images, etc.)
         if file_path.is_file():
             return FileResponse(file_path)
-        # Try directory with index.html (trailingSlash: true generates /chat/index.html)
-        index_in_dir = file_path / "index.html"
-        if index_in_dir.is_file():
-            return FileResponse(index_in_dir)
-        # Try path.html
-        html_path = _WEB_DIST / f"{path}.html"
-        if html_path.is_file():
-            return FileResponse(html_path)
-        # Fallback to root index.html for client-side routing
+        # Directory index (trailingSlash: true generates /chat/index.html)
+        if (file_path / "index.html").is_file():
+            return FileResponse(file_path / "index.html")
+        # Flat .html (e.g. web_dist/skills.html)
+        if (_WEB_DIST / f"{path}.html").is_file():
+            return FileResponse(_WEB_DIST / f"{path}.html")
+        # Dynamic route: Next.js static export only pre-generates __placeholder__
+        # e.g. /chat/abc123 → chat/__placeholder__/index.html
+        parts = path.strip("/").split("/")
+        if len(parts) >= 2:
+            placeholder = _WEB_DIST / "/".join(parts[:-1]) / "__placeholder__" / "index.html"
+            if placeholder.is_file():
+                return FileResponse(placeholder)
+        # SPA fallback
         root_index = _WEB_DIST / "index.html"
         if root_index.is_file():
             return FileResponse(root_index)

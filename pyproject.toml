@@ -1,6 +1,6 @@
 [project]
 name = "ethan-agent"
-version = "0.1.14"
+version = "0.1.15"
 description = "Ethan — Lightweight personal AI agent with memory, skills, and multi-model support"
 readme = "README.md"
 license = { text = "MIT" }
@@ -54,6 +54,7 @@ include = [
     "ethan/**/*.py",
     "ethan/defaults/**",
     "ethan/web_dist/**",
+    "ethan/docs/**",
 ]
 
 [tool.hatch.build.targets.sdist]
