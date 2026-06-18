@@ -34,7 +34,9 @@ jobs:
           npm run build
           cp -r out ../ethan/web_dist
           cd ..
-          git add -f ethan/web_dist
+          # Crucial: remove from .gitignore so hatchling actually scans it
+          sed -i '/ethan\/web_dist\//d' .gitignore
+          sed -i '/ethan\/web_dist/d' .gitignore
 
       - name: Set version from tag
         run: |
