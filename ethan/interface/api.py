@@ -38,7 +38,7 @@ async def lifespan(app: FastAPI):
     await app.state.api_key_store.close()
 
 
-app = FastAPI(title="Ethan Agent API", version=__version__, lifespan=lifespan)
+app = FastAPI(title="Ethan Agent API", version=__version__, lifespan=lifespan, docs_url="/api/docs", redoc_url="/api/redoc", openapi_url="/api/openapi.json")
 
 app.add_middleware(
     CORSMiddleware,

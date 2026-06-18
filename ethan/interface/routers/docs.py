@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 from .deps import verify_token
 from fastapi import Depends
 
-router = APIRouter(prefix="/docs")
+router = APIRouter(prefix="/api/docs")
 
 _REPO_ROOT = Path(__file__).parent.parent.parent.parent
 

@@ -489,13 +489,13 @@ export async function patchChannel(channelId: string, config: Record<string, str
 export interface DocMeta { slug: string; title: string; filename: string; }
 
 export async function fetchDocsList(): Promise<DocMeta[]> {
-  const res = await fetch(`${API_URL}/docs`, { headers: headers() });
+  const res = await fetch(`${API_URL}/api/docs`, { headers: headers() });
   if (!res.ok) throw new Error("Failed");
   return res.json().then(d => d.docs);
 }
 
 export async function fetchDoc(slug: string): Promise<{ slug: string; content: string }> {
-  const res = await fetch(`${API_URL}/docs/${slug}`, { headers: headers() });
+  const res = await fetch(`${API_URL}/api/docs/${slug}`, { headers: headers() });
   if (!res.ok) throw new Error("Failed");
   return res.json();
 }
