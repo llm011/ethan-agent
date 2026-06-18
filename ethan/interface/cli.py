@@ -83,8 +83,8 @@ def _launch_web(port: int = 8900, url: Optional[str] = None) -> None:
             start_new_session=True,
             env={**os.environ},
         )
-        # Wait up to 15s for the server to come up
-        for _ in range(75):
+        # Wait up to 60s for the server to come up (cold start can take ~35s)
+        for _ in range(300):
             if _port_open(port):
                 break
             time.sleep(0.2)
