@@ -1,10 +1,9 @@
-import { DocsView } from "@/components/docs-view";
+import DocPageClient from "./client";
 
 export function generateStaticParams() {
   return [{ slug: "__placeholder__" }];
 }
 
-export default async function DocPage({ params }: { params: Promise<{ slug: string }> }) {
-  const { slug } = await params;
-  return <DocsView initialSlug={slug} />;
+export default function DocPage() {
+  return <DocPageClient />;
 }
