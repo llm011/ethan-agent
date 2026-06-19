@@ -129,7 +129,7 @@ def _get_pypi_latest_version() -> Optional[str]:
 def _pip_upgrade() -> bool:
     """PyPI 安装方式：pip install --upgrade ethan-agent。"""
     console.print("[dim]pip install --upgrade ethan-agent ...[/dim]")
-    r = _run([sys.executable, "-m", "pip", "install", "--upgrade", "ethan-agent"], timeout=120)
+    r = _run([sys.executable, "-m", "pip", "install", "--no-cache-dir", "--upgrade", "ethan-agent"], timeout=120)
     if r.returncode != 0:
         console.print(f"[red]pip upgrade 失败：{r.stderr.strip()[-500:]}[/red]")
         return False
