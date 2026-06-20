@@ -56,15 +56,27 @@ def _build_system_blocks(system: str) -> list[dict]:
 class AnthropicProvider(BaseProvider):
     def __init__(self, provider_cfg: ProviderConfig, model: str, proxy: Optional[str] = None):
         import anthropic  # lazy: SDK is heavy; only load when a provider instance is created
-        http_client = None
-        if proxy:
-            http_client = httpx.AsyncClient(proxy=proxy)
+
+        # httpx event hooks must be async; strip SDK fingerprint headers that
+        # third-party relays (yuntoken.vip etc.) block, and replace the user-agent.
+        async def _clean_headers(request: httpx.Request) -> None:
+            for key in [k for k in request.headers if k.lower().startswith("x-stainless")]:
+                del request.headers[key]
+            # Some relays block the default anthropic-python user-agent
+            request.headers["user-agent"] = "python-httpx/0.28.1"
+
+        http_client = httpx.AsyncClient(
+            proxy=proxy if proxy else None,
+            event_hooks={"request": [_clean_headers]},
+        )
+
         self._client = anthropic.AsyncAnthropic(
             api_key=provider_cfg.api_key,
             base_url=provider_cfg.base_url,
             http_client=http_client,
         )
         self._model = model
+        self._disable_prompt_cache = getattr(provider_cfg, "disable_prompt_cache", False)
 
     @property
     def model(self) -> str:
@@ -144,7 +156,7 @@ class AnthropicProvider(BaseProvider):
             "messages": self._to_anthropic_messages(messages),
         }
         if system:
-            kwargs["system"] = _build_system_blocks(system)
+            kwargs["system"] = system if self._disable_prompt_cache else _build_system_blocks(system)
         if tools:
             kwargs["tools"] = self._to_anthropic_tools(tools)
 
@@ -163,7 +175,7 @@ class AnthropicProvider(BaseProvider):
             "messages": self._to_anthropic_messages(messages),
         }
         if system:
-            kwargs["system"] = _build_system_blocks(system)
+            kwargs["system"] = system if self._disable_prompt_cache else _build_system_blocks(system)
         if tools:
             kwargs["tools"] = self._to_anthropic_tools(tools)
 

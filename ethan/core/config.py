@@ -14,6 +14,7 @@ class ProviderConfig(BaseModel):
     base_url: Optional[str] = None
     proxy: Optional[str] = None  # provider 级别代理，覆盖全局
     type: str = "openai_compat"  # "anthropic" | "openai_compat"
+    disable_prompt_cache: bool = False  # 第三方 Anthropic 兼容服务不支持 cache_control 时设为 true
 
 
 class ModelEntry(BaseModel):
