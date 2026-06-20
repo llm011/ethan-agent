@@ -142,6 +142,7 @@ class OpenAICompatProvider(BaseProvider):
             kwargs["tool_choice"] = "auto"
 
         tool_calls_acc: dict[int, dict] = {}
+        stream_usage = None
 
         async for chunk in await self._client.chat.completions.create(**kwargs):  # type: ignore
             delta = chunk.choices[0].delta if chunk.choices else None
