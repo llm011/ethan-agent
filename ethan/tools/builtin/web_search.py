@@ -29,12 +29,48 @@ class WebSearchTool(BaseTool):
 
     async def run(self, query: str, max_results: int = 5) -> str:
         try:
-            results = await self._ddg_search(query, max_results)
+            from ethan.core.config import get_config
+            cfg = get_config().tools.web_search
+
+            if cfg.provider == "tavily" and cfg.api_key:
+                results = await self._tavily_search(query, max_results, cfg.api_key)
+            else:
+                results = await self._ddg_search(query, max_results)
+
             if not results:
                 return f"No results found for: {query}"
             return "\n\n".join(results)
         except Exception as e:
             return f"Search failed: {e}"
+
+    async def _tavily_search(self, query: str, max_results: int, api_key: str) -> list[str]:
+        url = "https://api.tavily.com/search"
+        headers = {
+            "Content-Type": "application/json",
+        }
+        data = {
+            "api_key": api_key,
+            "query": query,
+            "search_depth": "basic",
+            "include_answer": False,
+            "include_images": False,
+            "include_raw_content": False,
+            "max_results": max_results,
+        }
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(url, json=data, headers=headers)
+            resp.raise_for_status()
+
+        resp_data = resp.json()
+        results = []
+        for item in resp_data.get("results", [])[:max_results]:
+            title = item.get("title", "")
+            content = item.get("content", "")
+            item_url = item.get("url", "")
+            results.append(f"**{title}**\n{content}\n{item_url}")
+
+        return results
 
     async def _ddg_search(self, query: str, max_results: int) -> list[str]:
         url = "https://html.duckduckgo.com/html/"

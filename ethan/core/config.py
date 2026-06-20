@@ -69,12 +69,20 @@ class DefaultsConfig(BaseModel):
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
 
 
+class WebSearchToolConfig(BaseModel):
+    provider: str = "duckduckgo"
+    api_key: str = ""
+
+class ToolsConfig(BaseModel):
+    web_search: WebSearchToolConfig = Field(default_factory=WebSearchToolConfig)
+
 class Config(BaseModel):
     providers: dict[str, ProviderConfig] = Field(default_factory=dict)
     models: list[ModelEntry] = Field(default_factory=list)
     network: NetworkConfig = Field(default_factory=NetworkConfig)
     defaults: DefaultsConfig = Field(default_factory=DefaultsConfig)
     lark: LarkConfig = Field(default_factory=LarkConfig)
+    tools: ToolsConfig = Field(default_factory=ToolsConfig)
 
     def get_model(self, model_id: str) -> Optional[ModelEntry]:
         # 检查是否为数字索引
