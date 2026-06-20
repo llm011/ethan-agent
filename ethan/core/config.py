@@ -50,7 +50,7 @@ class RoutingConfig(BaseModel):
     fast_max_length: int = 12  # 消息超过此长度不走 Fast Path（简单控制命令通常 ≤ 10 字）
     fast_skill_triggers: list[str] = Field(default_factory=list)  # 命中时强制走 Fast Path，不受长度限制（给 Skill 关联用）
     medium_max_length: int = 80   # 超过 fast_max_length 且不超过此值走 Medium Path
-    medium_max_iters: int = 4     # Medium Path 最多迭代次数
+    medium_max_iters: int = 8     # Medium Path 最多迭代次数，设为 8 给 web search 留足空间
 
 
 class HeartbeatConfig(BaseModel):
