@@ -33,7 +33,7 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 - `heartbeat.md`：写入自然语言任务，系统定期自动执行
 
 **工具系统**
-- Shell 执行、Web 搜索（DuckDuckGo）、Web 抓取、文件读写、知识库检索
+- Shell 执行、Web 搜索（默认 DuckDuckGo，可配置切换 Tavily）、Web 抓取、文件读写、知识库检索
 - 工具结果超 4000 字自动用廉价模型压缩摘要
 - 同参数重复调用自动命中轮次内缓存，不重复执行
 
@@ -379,7 +379,7 @@ defaults:
   routing:
     fast_max_length: 12        # 超过此字数不走 fast 轨
     medium_max_length: 80      # 超过 fast 阈值、不超过此值走 medium 轨
-    medium_max_iters: 4        # medium 轨最多迭代次数
+    medium_max_iters: 15       # medium 轨最多迭代次数（可按需调大）
     fast_keywords:
       - "关*灯"
       - "开*灯"

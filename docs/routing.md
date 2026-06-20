@@ -90,9 +90,11 @@ trigger: "开灯|关灯|开空调|关空调|关*灯|开*灯"
 | 系统提示词 | 完整版（与 full 相同） |
 | 工具集 | 全量工具 |
 | 记忆注入 | 深度（与 full 相同） |
-| 推理轮次 | 最多 `medium_max_iters`（默认 4） |
+| 推理轮次 | 最多 `medium_max_iters`（默认 15） |
 
 **适用场景**：消息长度超过 fast 阈值、但不触发强制 full 信号的短问答、轻量任务。通过限制迭代次数，比 full 路径更快结束，避免为简单问题跑完整个 10 轮 ReAct 循环。
+
+> **注意**：即使消息长度很短（如"帮我搜索最新 AI 新闻"），若未命中 fast 触发词也不会走 fast，而是 medium。这类短文本但搜索密集的任务可能会多次调用工具，默认 15 次上限已经对大多数情况足够。
 
 ---
 
@@ -134,7 +136,7 @@ defaults:
   routing:
     fast_max_length: 12          # 消息超过此字数不走 fast 轨
     medium_max_length: 80        # 超过 fast、不超过此值走 medium 轨
-    medium_max_iters: 4          # medium 轨最多迭代次数
+    medium_max_iters: 15         # medium 轨最多迭代次数（可按需调大）
     fast_keywords:               # 命中后走 fast 轨（受长度限制）
       - "关*灯"
       - "开*灯"

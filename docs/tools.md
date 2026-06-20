@@ -76,16 +76,25 @@ shell(command="ls -la", timeout=30)
 
 ### WebSearchTool — `ethan/tools/builtin/web_search.py`
 
-搜索互联网信息。用 DuckDuckGo HTML 接口，无需 API Key。
+搜索互联网信息。默认使用 DuckDuckGo，无需 API Key；也支持切换到 Tavily 以获得更精准的结构化结果。
 
 ```
 web_search(query="今天科技新闻", max_results=5)
 ```
 
+**切换 Tavily**：在 `~/.ethan/config.yaml` 中添加：
+
+```yaml
+tools:
+  web_search:
+    provider: tavily
+    api_key: tvly-xxxxxxxxxxxxxxxx
+```
+
 设计决策：
-- 选择 DuckDuckGo 是因为免费、无需注册、无 rate limit
-- 解析 HTML 结果（标题 + 摘要 + URL），不依赖第三方搜索 SDK
-- 后续可配置切换到 Tavily/Serper 等付费 API（更精准）
+- 默认 DuckDuckGo：免费、无需注册、无 rate limit
+- Tavily：需要 API Key，结果更精准，适合研究型搜索任务
+- 配置热切换，无需重启服务
 
 ### WebFetchTool — `ethan/tools/builtin/web.py`
 

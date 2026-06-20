@@ -35,7 +35,7 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 - `heartbeat.md`: write natural-language tasks; the system runs them periodically
 
 **Tool system**
-- Shell execution, web search (DuckDuckGo), web fetch, file I/O, knowledge base
+- Shell execution, web search (DuckDuckGo by default, or Tavily via config), web fetch, file I/O, knowledge base
 - Tool results over 4 000 chars are auto-summarized by a cheap model before going back to the main model
 - Identical calls within the same turn hit an in-memory cache — no duplicate execution
 
@@ -390,7 +390,7 @@ defaults:
   routing:
     fast_max_length: 12
     medium_max_length: 80
-    medium_max_iters: 4
+    medium_max_iters: 15
     fast_keywords:
       - "turn off*light"
       - "play music"
