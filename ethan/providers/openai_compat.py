@@ -157,6 +157,11 @@ class OpenAICompatProvider(BaseProvider):
                 if hasattr(chunk.usage, "prompt_tokens_details") and chunk.usage.prompt_tokens_details:
                     stream_usage["cache"] = getattr(chunk.usage.prompt_tokens_details, "cached_tokens", 0) or 0
 
+                # If this is the standalone usage chunk (choices is empty), yield it and we're done
+                if not chunk.choices:
+                    yield StreamChunk(content="", is_final=True, usage=stream_usage)
+                    continue
+
             if delta is None:
                 continue
 
@@ -184,4 +189,5 @@ class OpenAICompatProvider(BaseProvider):
                     except json.JSONDecodeError:
                         args = {}
                     tool_calls.append(ToolCall(id=tc["id"], name=tc["name"], arguments=args))
-                yield StreamChunk(content="", tool_calls=tool_calls, is_final=True, usage=stream_usage)
+                # Not passing stream_usage here because it might arrive in a later standalone chunk
+                yield StreamChunk(content="", tool_calls=tool_calls, is_final=not kwargs.get("stream_options"))
