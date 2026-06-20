@@ -186,12 +186,13 @@ async def _stream_response(
     except Exception as e:
         yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
+    usage_dict = {
+        "input": agent.usage.input_tokens,
+        "output": agent.usage.output_tokens,
+        "cache": agent.usage.cache_tokens,
+    }
+
     if session_id and (full or thought):
-        usage_dict = {
-            "input": agent.usage.input_tokens,
-            "output": agent.usage.output_tokens,
-            "cache": agent.usage.cache_tokens,
-        }
         asst_msg = Message(
             role="assistant",
             content=full,
@@ -207,6 +208,10 @@ async def _stream_response(
         asyncio.create_task(_maybe_consolidate(session_id, agent._provider.model))
         asyncio.create_task(_maybe_regen_title(session_id, store))
         asyncio.create_task(_maybe_generate_skill(session_id, agent._provider.model))
+
+    # Always send final usage to frontend so it knows the stream is done
+    evt = {"done": True, "usage": usage_dict}
+    yield f"data: {json.dumps(evt)}\n\n"
 
 
 async def _maybe_regen_title(session_id: str, store: SessionStore) -> None:
