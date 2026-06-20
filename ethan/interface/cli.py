@@ -205,7 +205,8 @@ def chat(
         return
 
     # ── Auto-launch web UI on port 8900 ──────────────────────────────
-    _launch_web(8900)
+    if not prompt:
+        _launch_web(8900)
     # ─────────────────────────────────────────────────────────────────
 
     import asyncio
