@@ -391,3 +391,6 @@ class Agent:
                     content=r.content,
                     tool_call_id=r.tool_call_id,
                 ))
+
+        # If we exhausted max_iters and the last message was still a tool call response
+        yield "\n\n*[System: Maximum tool iterations reached. Process terminated to prevent infinite loops.]*"
