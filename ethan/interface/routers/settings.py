@@ -19,22 +19,23 @@ class OnboardingCompleteRequest(BaseModel):
     user_info: str
 
 
-@router.get("/onboarding/status", dependencies=[Depends(verify_token)])
-async def onboarding_status():
+@router.get("/onboarding/status")
+async def onboarding_status(user_id: str = Depends(verify_token)):
     from ethan.core.onboarding import is_first_time, ONBOARDING_MESSAGE
-    first_time = is_first_time()
+    first_time = is_first_time(user_id)
     return {"first_time": first_time, "message": ONBOARDING_MESSAGE if first_time else ""}
 
 
-@router.post("/onboarding/complete", dependencies=[Depends(verify_token)])
-async def onboarding_complete(req: OnboardingCompleteRequest):
+@router.post("/onboarding/complete")
+async def onboarding_complete(req: OnboardingCompleteRequest, user_id: str = Depends(verify_token)):
     from ethan.core.config import CONFIG_DIR
     from ethan.core.onboarding import mark_onboarded
     from ethan.memory.facts import FactStore
+    from ethan.core.paths import user_facts_path
 
     agent_name = req.agent_name.strip() or "Ethan"
     user_info = req.user_info.strip()
-    mark_onboarded()
+    mark_onboarded(user_id)
 
     if agent_name != "Ethan":
         identity_path = CONFIG_DIR / "system" / "identity.md"
@@ -43,7 +44,7 @@ async def onboarding_complete(req: OnboardingCompleteRequest):
             identity_path.write_text(content.replace("Ethan", agent_name), encoding="utf-8")
 
     if user_info:
-        store = FactStore()
+        store = FactStore(path=user_facts_path(user_id))
         store.add(user_info, confidence=1.0, source="onboarding", category="preference")
 
     return {"ok": True, "agent_name": agent_name}

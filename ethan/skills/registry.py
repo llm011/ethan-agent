@@ -8,13 +8,17 @@ _MAX_SKILL_CONTENT = 3000
 
 
 class SkillRegistry:
-    def __init__(self):
+    def __init__(self, user_id: str = ""):
+        from ethan.core.paths import user_skill_stats_path
+        self._user_id = user_id
         self._skills: list[Skill] = []
-        self._stats = SkillStats()
+        # per-user 技能统计；user_id 为空时回退全局路径（兼容无用户场景）
+        stats_path = user_skill_stats_path(user_id) if user_id else None
+        self._stats = SkillStats(path=stats_path) if stats_path else SkillStats()
 
     def load(self) -> None:
         """从磁盘加载所有 Skills。"""
-        self._skills = load_all_skills()
+        self._skills = load_all_skills(self._user_id)
 
     def all(self) -> list[Skill]:
         return list(self._skills)

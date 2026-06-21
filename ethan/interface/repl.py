@@ -308,8 +308,10 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
     config = get_config()
     model_id = agent._provider.model
     start_time = time.time()
+    uid = getattr(agent, "_user_id", "") or ""
 
-    store = SessionStore()
+    from ethan.core.paths import user_sessions_db_path
+    store = SessionStore(db_path=user_sessions_db_path(uid))
     await store.init()
 
     # 恢复或新建 session（新建时先不写 DB，等到第一条消息再持久化）
@@ -419,7 +421,8 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
 
         # Persist user info to FactStore
         if user_info:
-            _fs = FactStore()
+            from ethan.core.paths import user_facts_path
+            _fs = FactStore(path=user_facts_path(uid))
             _fs.add(user_info, confidence=1.0, source="onboarding", category="preference")
 
         console.print()
@@ -428,9 +431,10 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
             console.print(f"[dim]I'll remember: {user_info}[/dim]")
         console.print()
 
-    # 初始化分层记忆
-    fact_store = FactStore()
-    episode_store = EpisodeStore()
+    # 初始化分层记忆（per-user）
+    from ethan.core.paths import user_facts_path, user_episodes_path
+    fact_store = FactStore(path=user_facts_path(uid))
+    episode_store = EpisodeStore(path=user_episodes_path(uid))
     memory = WorkingMemory(config=MemoryConfig(hot_size=10))
     memory.cold_facts = fact_store.build_context()
     consolidator = Consolidator(main_model=model_id)

@@ -174,8 +174,10 @@ def web_token(
 _register_subcommands()
 
 
-def _build_agent(model: str | None = None):
+def _build_agent(model: str | None = None, user_id: str = ""):
     from ethan.core.agent import Agent
+    from ethan.core.paths import ensure_user_dirs
+    from ethan.core.users import get_user_store
     from ethan.skills.registry import SkillRegistry
     from ethan.tools.builtin.acp import DelegateCodingTool
     from ethan.tools.builtin.file import FileListTool, FileReadTool, FileWriteTool
@@ -191,6 +193,10 @@ def _build_agent(model: str | None = None):
     from ethan.tools.builtin.web_search import WebSearchTool
     from ethan.tools.registry import ToolRegistry
 
+    # CLI/REPL 无登录上下文，默认 admin 用户
+    uid = user_id or get_user_store().get_admin_user_id()
+    ensure_user_dirs(uid)
+
     registry = ToolRegistry()
     registry.register(ShellTool())
     registry.register(WebSearchTool())
@@ -200,21 +206,21 @@ def _build_agent(model: str | None = None):
     registry.register(FileReadTool())
     registry.register(FileWriteTool())
     registry.register(FileListTool())
-    registry.register(ScheduleCreateTool())
+    registry.register(ScheduleCreateTool(user_id=uid))
     registry.register(ScheduleListTool())
     registry.register(ScheduleRemoveTool())
-    registry.register(KnowledgeSearchTool())
-    registry.register(KnowledgeAddTool())
-    registry.register(MemoryWriteTool())
-    registry.register(ProcedureWriteTool())
-    registry.register(ProfileUpdateTool())
-    registry.register(SkillCreateTool())
+    registry.register(KnowledgeSearchTool(user_id=uid))
+    registry.register(KnowledgeAddTool(user_id=uid))
+    registry.register(MemoryWriteTool(user_id=uid))
+    registry.register(ProcedureWriteTool(user_id=uid))
+    registry.register(ProfileUpdateTool(user_id=uid))
+    registry.register(SkillCreateTool(user_id=uid))
     registry.register(DelegateCodingTool())
 
-    skills = SkillRegistry()
+    skills = SkillRegistry(user_id=uid)
     skills.load()
 
-    return Agent(tool_registry=registry, skill_registry=skills, model=model, channel="repl")
+    return Agent(tool_registry=registry, skill_registry=skills, model=model, channel="repl", user_id=uid)
 
 
 def version_callback(value: bool):

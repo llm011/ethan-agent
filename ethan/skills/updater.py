@@ -5,16 +5,18 @@ logger = logging.getLogger(__name__)
 CORRECTION_THRESHOLD = 2
 
 
-async def update_skills_from_corrections() -> int:
+async def update_skills_from_corrections(user_id: str = "") -> int:
     from ethan.skills.stats import SkillStats
     from ethan.skills.loader import load_skill_from_file
-    stats = SkillStats()
+    from ethan.core.paths import user_skill_stats_path
+    stats_path = user_skill_stats_path(user_id) if user_id else None
+    stats = SkillStats(path=stats_path) if stats_path else SkillStats()
     updated = 0
     for skill_name, data in stats.all().items():
         corrections = data.get("corrections", [])
         if len(corrections) < CORRECTION_THRESHOLD:
             continue
-        skill_file = _find_user_skill_file(skill_name)
+        skill_file = _find_user_skill_file(skill_name, user_id)
         if not skill_file:
             continue
         skill = load_skill_from_file(skill_file)
@@ -32,12 +34,16 @@ async def update_skills_from_corrections() -> int:
     return updated
 
 
-def _find_user_skill_file(skill_name: str) -> Path | None:
-    from ethan.skills.loader import USER_SKILLS_DIR
-    p = USER_SKILLS_DIR / skill_name / "SKILL.md"
+def _find_user_skill_file(skill_name: str, user_id: str = "") -> Path | None:
+    from ethan.core.paths import user_skills_dir
+    skills_dir = user_skills_dir(user_id) if user_id else None
+    if skills_dir is None:
+        from ethan.skills.loader import USER_SKILLS_DIR
+        skills_dir = USER_SKILLS_DIR
+    p = skills_dir / skill_name / "SKILL.md"
     if p.exists():
         return p
-    p = USER_SKILLS_DIR / f"{skill_name}.md"
+    p = skills_dir / f"{skill_name}.md"
     if p.exists():
         return p
     return None

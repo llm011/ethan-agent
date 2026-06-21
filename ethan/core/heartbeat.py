@@ -11,13 +11,23 @@ logger = logging.getLogger(__name__)
 
 
 async def _consolidate_facts() -> None:
-    """用 LLM 对 facts.json 做去重合并，只在 facts >= 10 条时触发。"""
+    """用 LLM 对每个用户的 facts.json 做去重合并，只在 facts >= 10 条时触发。"""
+    from ethan.core.users import get_user_store
+    for uid in get_user_store().all_user_ids():
+        try:
+            await _consolidate_facts_for_user(uid)
+        except Exception:
+            logger.exception("[Heartbeat] Facts consolidation failed for user %s", uid)
+
+
+async def _consolidate_facts_for_user(user_id: str) -> None:
     from ethan.memory.facts import FactStore
     from ethan.providers.manager import create_provider
     from ethan.providers.base import Message
     from ethan.core.config import get_config
+    from ethan.core.paths import user_facts_path
 
-    store = FactStore()
+    store = FactStore(path=user_facts_path(user_id))
     active = store.get_active()
     if len(active) < 10:
         return
@@ -87,25 +97,31 @@ async def _run_heartbeat_md() -> None:
     if not content.strip():
         return
 
+    # 心跳 MVP 归到 admin 用户
+    from ethan.core.users import get_user_store
+    from ethan.core.paths import ensure_user_dirs, user_sessions_db_path
+    hb_user_id = get_user_store().get_admin_user_id()
+    ensure_user_dirs(hb_user_id)
+
     logger.info("[Heartbeat] Running heartbeat.md tasks...")
     prompt = f"[Heartbeat] 正在执行系统心跳任务：heartbeat.md\n\n{content.strip()}"
 
     registry = ToolRegistry()
     for tool in [ShellTool(), WebSearchTool(), WebFetchTool(),
                  FileReadTool(), FileWriteTool(), FileListTool(),
-                 ScheduleCreateTool(), ScheduleListTool(), ScheduleRemoveTool(),
-                 KnowledgeSearchTool(), KnowledgeAddTool()]:
+                 ScheduleCreateTool(user_id=hb_user_id), ScheduleListTool(), ScheduleRemoveTool(),
+                 KnowledgeSearchTool(user_id=hb_user_id), KnowledgeAddTool(user_id=hb_user_id)]:
         registry.register(tool)
-    skills = SkillRegistry()
+    skills = SkillRegistry(user_id=hb_user_id)
     skills.load()
-    agent = Agent(tool_registry=registry, skill_registry=skills)
+    agent = Agent(tool_registry=registry, skill_registry=skills, user_id=hb_user_id)
 
     try:
         from ethan.providers.base import ToolEvent
         import time
 
         # 每次心跳创建一个全新的专属 session，便于在 Web 上独立查看
-        store = SessionStore()
+        store = SessionStore(db_path=user_sessions_db_path(hb_user_id))
         await store.init()
         hb_session = await store.create(cfg.defaults.model, source="heartbeat")
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M")

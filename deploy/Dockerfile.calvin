@@ -1,0 +1,52 @@
+# Ethan Agent — Calvin 的自建镜像（脱离 jason PyPI/GHCR）
+# 包含：本地源码（含所有改动）+ 前端 web_dist + UA 覆盖 + 正确的 cheap model
+#
+# 构建：docker build -t ethan-agent:calvin -f deploy/Dockerfile.calvin .
+# 导出：docker save ethan-agent:calvin -o ethan-agent-calvin.tar
+# NAS 导入：docker load -i ethan-agent-calvin.tar
+
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# 构建时代理：apt/uv/pip 走代理出外网。
+# 传 --build-arg HTTP_PROXY=... HTTPS_PROXY=... 覆盖；不传则为空（直连）。
+ARG HTTP_PROXY=
+ARG HTTPS_PROXY=
+ENV http_proxy=${HTTP_PROXY} https_proxy=${HTTPS_PROXY} \
+    HTTP_PROXY=${HTTP_PROXY} HTTPS_PROXY=${HTTPS_PROXY}
+
+# 系统依赖：gcc/make 编译 sqlite-vec，ripgrep/fd 搜索工具
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc make \
+    ripgrep fd-find \
+    curl git ca-certificates \
+    && ln -s /usr/bin/fdfind /usr/local/bin/fd \
+    && rm -rf /var/lib/apt/lists/*
+
+# 装完系统依赖后清掉构建代理，避免打进运行镜像
+ENV http_proxy= https_proxy= HTTP_PROXY= HTTPS_PROXY=
+
+# 安装 uv
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
+# 先复制依赖文件，利用层缓存
+COPY pyproject.toml uv.lock ./
+
+# 安装依赖（不装项目本身）
+RUN uv sync --frozen --no-dev --no-install-project
+
+# 复制源码（含 web_dist，本地已 build 前端）
+COPY ethan/ ./ethan/
+COPY README.md README_CN.md ./
+
+# 安装项目本身
+RUN uv sync --frozen --no-dev
+
+# 数据目录挂载点
+VOLUME /root/.ethan
+
+EXPOSE 8900
+
+CMD ["uv", "run", "python", "-m", "ethan.interface.cli", "serve"]

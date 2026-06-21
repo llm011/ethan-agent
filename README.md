@@ -124,6 +124,28 @@ docker compose pull && docker compose up -d  # update to latest version
 docker compose down                   # stop
 ```
 
+### 6. Multi-user (optional)
+
+Ethan supports multiple isolated users sharing one instance. Each user has their own memory (facts / procedures / episodes / sessions), skills, and knowledge base — fully isolated per user. System prompts and provider config stay shared.
+
+Define users in `config.yaml` (each user binds a `web_token` for browser login and `api_keys` for the `/v1/chat/completions` API — both resolve to the same `user_id`):
+
+```yaml
+users:
+  - id: admin              # stable identifier, also the data dir name (use ASCII)
+    name: Admin
+    web_token: admin_pass  # browser login
+    api_keys: [sk-ethan-admin-key]  # programmatic API access
+    is_admin: true
+  - id: alice
+    name: Alice
+    web_token: alice_pass
+    api_keys: [sk-ethan-alice-key]
+    is_admin: false
+```
+
+If `users` is empty (or absent), Ethan auto-creates an `admin` user whose `web_token` reuses `network.auth_token` — so existing single-user deployments keep working with zero config change. On first launch, existing global data is migrated to the admin user's directory (originals kept as backup; idempotent).
+
 ---
 
 ## Local Development / Install from Source

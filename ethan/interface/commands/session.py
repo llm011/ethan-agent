@@ -18,6 +18,13 @@ console = Console()
 app = typer.Typer(help="管理对话会话", invoke_without_command=True)
 
 
+def _user_session_db_path() -> "Path":
+    """CLI session 命令默认操作 admin 用户的会话库。"""
+    from ethan.core.users import get_user_store
+    from ethan.core.paths import user_sessions_db_path
+    return user_sessions_db_path(get_user_store().get_admin_user_id())
+
+
 @app.callback(invoke_without_command=True)
 def _default(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is None:
@@ -31,7 +38,7 @@ def list_sessions(
 ) -> None:
     """列出最近的会话。"""
     async def _run():
-        store = SessionStore()
+        store = SessionStore(db_path=_user_session_db_path())
         await store.init()
         sessions = await store.list_recent(limit)
         await store.close()
@@ -61,7 +68,7 @@ def show_session(
 ) -> None:
     """查看某个会话的消息摘要。"""
     async def _run():
-        store = SessionStore()
+        store = SessionStore(db_path=_user_session_db_path())
         await store.init()
         session = await store.load(session_id)
         await store.close()
@@ -87,7 +94,7 @@ def delete_session(
 ) -> None:
     """删除一个会话及其所有消息。"""
     async def _run():
-        store = SessionStore()
+        store = SessionStore(db_path=_user_session_db_path())
         await store.init()
         ok = await store.delete(session_id)
         await store.close()

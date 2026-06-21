@@ -10,13 +10,21 @@ from ethan.tools.base import BaseTool
 lark_chat_id_var: ContextVar[str] = ContextVar("lark_chat_id", default="")
 
 
-def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channel_context: str = "{}"):
+def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channel_context: str = "{}", user_id: str = ""):
     def _do_fire():
         import requests
         from ethan.core.config import get_config
         result_text = ""
         try:
-            token = get_config().network.auth_token
+            # 用该 job 所属用户的 web_token 调 /chat（落到该用户的会话/记忆）
+            token = ""
+            if user_id:
+                from ethan.core.users import get_user_store
+                user = get_user_store().get_user(user_id)
+                if user:
+                    token = user.web_token
+            if not token:
+                token = get_config().network.auth_token
             headers = {"Authorization": f"Bearer {token}"} if token else {}
             res = requests.post("http://127.0.0.1:8900/chat", json={
                 "messages": [{"role": "user", "content": prompt}],
@@ -30,8 +38,9 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
             import asyncio
             from ethan.memory.session import SessionStore
             from ethan.providers.base import Message
+            from ethan.core.paths import user_sessions_db_path
             async def log_error():
-                store = SessionStore()
+                store = SessionStore(db_path=user_sessions_db_path(user_id))
                 await store.init()
                 err_msg = Message(role="assistant", content=f"⚠️ 定时任务后台执行失败:\n```text\n{e}\n```")
                 await store.save_message(session_id, err_msg)
@@ -74,9 +83,13 @@ class ScheduleCreateTool(BaseTool):
         "required": ["job_id", "prompt"],
     }
 
+    def __init__(self, user_id: str = ""):
+        self._user_id = user_id
+
     async def run(self, job_id: str, prompt: str, cron: str = "", interval_minutes: int = 0) -> str:
         from ethan.memory.session import SessionStore
         from ethan.core.config import get_config
+        from ethan.core.paths import user_sessions_db_path
         import httpx
 
         if not cron and interval_minutes <= 0:
@@ -87,8 +100,8 @@ class ScheduleCreateTool(BaseTool):
         channel = "lark" if chat_id else "web"
         channel_context = json.dumps({"chat_id": chat_id}) if chat_id else "{}"
 
-        # Create a dedicated session for this task
-        store = SessionStore()
+        # Create a dedicated session for this task (per-user)
+        store = SessionStore(db_path=user_sessions_db_path(self._user_id))
         await store.init()
         session = await store.create(get_config().defaults.model)
         await store.update_title(session.id, f"[定时] {job_id}")
@@ -107,6 +120,7 @@ class ScheduleCreateTool(BaseTool):
                     "session_id": session.id,
                     "channel": channel,
                     "channel_context": channel_context,
+                    "user_id": self._user_id,
                 }, headers=headers)
                 res.raise_for_status()
                 return f"Scheduled '{job_id}' successfully. (Session: {session.id})"

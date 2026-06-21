@@ -83,12 +83,18 @@ def load_skill_from_dir(skill_dir: Path) -> Optional[Skill]:
     return skill
 
 
-def load_all_skills() -> list[Skill]:
-    """从 ~/.ethan/skills/ 加载所有技能。"""
+def load_all_skills(user_id: str = "") -> list[Skill]:
+    """从 per-user 技能目录加载所有技能。
+
+    user_id 非空时读 ~/.ethan/users/<uid>/skills/（per-user 隔离）；
+    user_id 为空时回退到全局 ~/.ethan/skills/（兼容 CLI/REPL 等无用户场景）。
+    """
+    from ethan.core.paths import user_skills_dir
     skills: dict[str, Skill] = {}
 
-    if USER_SKILLS_DIR.exists():
-        for entry in sorted(USER_SKILLS_DIR.iterdir()):
+    skills_dir = user_skills_dir(user_id) if user_id else USER_SKILLS_DIR
+    if skills_dir.exists():
+        for entry in sorted(skills_dir.iterdir()):
             skill = None
             if entry.is_dir() and not entry.name.endswith("-references"):
                 skill = load_skill_from_dir(entry)

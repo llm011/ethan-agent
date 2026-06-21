@@ -23,14 +23,23 @@ router = APIRouter()
 # ── API Key鉴权 ───────────────────────────────────────────────────
 
 
-async def _verify_api_key(request: Request):
+async def _verify_api_key(request: Request) -> str:
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Bearer "):
         raise HTTPException(401, "Missing Bearer token")
     key = auth.removeprefix("Bearer ").strip()
-    store: APIKeyStore = request.app.state.api_key_store
-    if not await store.verify(key):
-        raise HTTPException(401, "Invalid API key")
+    # 优先用 config.yaml 的多用户 api_keys 解析（user_id 隔离）
+    from ethan.core.users import get_user_store
+    user_id = get_user_store().resolve_api_key(key)
+    if user_id is None:
+        # 兼容旧的 api_keys.db（无 user 绑定 → admin）
+        store: APIKeyStore = request.app.state.api_key_store
+        if await store.verify(key):
+            user_id = get_user_store().get_admin_user_id()
+        else:
+            raise HTTPException(401, "Invalid API key")
+    request.state.user_id = user_id
+    return user_id
 
 
 # ── API Key 管理 ──────────────────────────────────────────────────
@@ -75,17 +84,18 @@ class CompletionsRequest(BaseModel):
     session_id: str | None = None  # Ethan 扩展字段：指定对话 session
 
 
-@router.post("/v1/chat/completions", dependencies=[Depends(_verify_api_key)])
-async def completions(req: CompletionsRequest, request: Request):
+@router.post("/v1/chat/completions")
+async def completions(req: CompletionsRequest, request: Request, user_id: str = Depends(_verify_api_key)):
     """OpenAI 兼容的 completions 接口。
 
     扩展字段 `session_id`：绑定到已有 Session 实现上下文持续对话，
     效果与 Web UI 完全一致（WorkingMemory + cold facts）。
     返回体中 `ethan.session_id` 可用于下次继续对话。
     """
-    agent = create_agent(req.model, channel="api")
+    from ethan.core.paths import user_sessions_db_path, user_facts_path
+    agent = create_agent(req.model, channel="api", user_id=user_id)
 
-    store = SessionStore()
+    store = SessionStore(db_path=user_sessions_db_path(user_id))
     await store.init()
 
     if req.session_id:
@@ -99,7 +109,7 @@ async def completions(req: CompletionsRequest, request: Request):
         history = session_obj.messages if session_obj else []
 
         memory = WorkingMemory(config=MemoryConfig(hot_size=10))
-        memory.cold_facts = FactStore().build_context()
+        memory.cold_facts = FactStore(path=user_facts_path(user_id)).build_context()
 
         pairs: list[tuple[Message, Message]] = []
         hist_ua = [m for m in history if m.role in ("user", "assistant")]
@@ -122,7 +132,7 @@ async def completions(req: CompletionsRequest, request: Request):
 
     if req.stream:
         return StreamingResponse(
-            _stream_completions(agent, messages, store, session_id, req.model),
+            _stream_completions(agent, messages, store, session_id, req.model, user_id),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
@@ -149,7 +159,7 @@ async def completions(req: CompletionsRequest, request: Request):
         await store.close()
 
 
-async def _stream_completions(agent, messages, store: SessionStore, session_id: str | None, model: str | None):
+async def _stream_completions(agent, messages, store: SessionStore, session_id: str | None, model: str | None, user_id: str = ""):
     from ethan.providers.base import ToolEvent
     from ethan.interface.routers.chat import _maybe_consolidate, _maybe_generate_skill
 
@@ -179,7 +189,7 @@ async def _stream_completions(agent, messages, store: SessionStore, session_id: 
             usage_dict = {"input": agent.usage.input_tokens, "output": agent.usage.output_tokens, "cache": agent.usage.cache_tokens}
             await store.save_message(session_id, Message(role="assistant", content=full, usage=usage_dict))
             await store.touch(session_id)
-            asyncio.create_task(_maybe_consolidate(session_id, agent._provider.model))
-            asyncio.create_task(_maybe_generate_skill(session_id, agent._provider.model))
+            asyncio.create_task(_maybe_consolidate(session_id, agent._provider.model, user_id))
+            asyncio.create_task(_maybe_generate_skill(session_id, agent._provider.model, user_id))
     finally:
         await store.close()

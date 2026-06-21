@@ -35,11 +35,14 @@ Skill 正文（清晰的步骤/要点，100-300字）
 
 
 class SkillGenerator:
-    def __init__(self, provider: BaseProvider):
+    def __init__(self, provider: BaseProvider | None = None, model: str | None = None, user_id: str = ""):
         self._provider = provider
+        self._user_id = user_id
 
     async def maybe_generate(self, messages: list[Message]) -> Path | None:
         """分析对话，如果值得则自动生成 Skill 文件。返回文件路径或 None。"""
+        from ethan.core.paths import user_skills_dir
+        skills_dir = user_skills_dir(self._user_id) if self._user_id else USER_SKILLS_DIR
         turns = sum(1 for m in messages if m.role == "user")
         if turns < MIN_TURNS:
             return None
@@ -84,9 +87,9 @@ class SkillGenerator:
             return None
 
         # 去重：已存在则不覆盖（同时检查目录格式和旧平铺格式）
-        skill_dir = USER_SKILLS_DIR / name
+        skill_dir = skills_dir / name
         skill_file = skill_dir / "SKILL.md"
-        if skill_file.exists() or (USER_SKILLS_DIR / f"{name}.md").exists():
+        if skill_file.exists() or (skills_dir / f"{name}.md").exists():
             return None
 
         skill_dir.mkdir(parents=True, exist_ok=True)
