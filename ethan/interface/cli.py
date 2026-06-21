@@ -239,6 +239,7 @@ def chat(
     model: Optional[str] = typer.Option(None, "-m", "--model", help="Model ID"),
     prompt: Optional[str] = typer.Option(None, "-p", "--prompt", help="Single-turn prompt"),
     resume: Optional[str] = typer.Option(None, "-r", "--resume", help="Resume session (ID or 'last')"),
+    profile: Optional[str] = typer.Option(None, "--profile", help="User ID/Profile to use"),
     version: Optional[bool] = typer.Option(
         None, "--version", "-v", callback=version_callback, is_eager=True, help="Show the version and exit."
     ),
@@ -253,13 +254,23 @@ def chat(
     # ─────────────────────────────────────────────────────────────────
 
     import asyncio
-    from ethan.interface.repl import run_repl, run_once
+    from ethan.interface.repl import run_repl, run_once, ProfileSwitchException
 
-    agent = _build_agent(model)
     if prompt and not resume:
+        agent = _build_agent(model, user_id=profile or "")
         asyncio.run(run_once(agent, prompt))
     else:
-        asyncio.run(run_repl(agent, resume_id=resume))
+        current_uid = profile or ""
+        while True:
+            agent = _build_agent(model, user_id=current_uid)
+            try:
+                asyncio.run(run_repl(agent, resume_id=resume))
+                break  # Normal exit (e.g., EOF/exit command)
+            except ProfileSwitchException as e:
+                current_uid = e.new_uid
+                resume = None  # Clear resume to start a fresh session for the new profile
+                from rich.console import Console
+                Console().print(f"\n[green]Switched to profile: {current_uid}[/green]\n")
 
 
 if __name__ == "__main__":

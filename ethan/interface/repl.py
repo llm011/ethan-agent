@@ -52,11 +52,18 @@ def _format_duration(seconds: float) -> str:
     return f"{h}h{m}m"
 
 
+class ProfileSwitchException(Exception):
+    """Raised to trigger a profile switch and agent rebuild."""
+    def __init__(self, new_uid: str):
+        super().__init__(f"Switch to user {new_uid}")
+        self.new_uid = new_uid
+
 _SLASH_COMMANDS = [
     ("/sessions", "List recent sessions"),
     ("/resume", "Resume a session by ID"),
     ("/new", "Start new session"),
     ("/model", "Show or switch model"),
+    ("/profile", "Show or switch user profile"),
     ("/help", "Show available commands"),
 ]
 
@@ -90,11 +97,14 @@ def _shorten_path(path: str, max_len: int = 30) -> str:
     return parts[0] + os.sep + "…" + os.sep + parts[-1]
 
 
-def _make_toolbar(model: str, tokens_in: int = 0, tokens_out: int = 0, tokens_cache: int = 0, session_id: str = "", activity: str = ""):
+def _make_toolbar(model: str, tokens_in: int = 0, tokens_out: int = 0, tokens_cache: int = 0, session_id: str = "", activity: str = "", user_id: str = ""):
     """构建 prompt_toolkit bottom_toolbar。"""
     cwd = _shorten_path(os.getcwd())
     parts = []
     parts.append(("class:model", f" ⚡ {model}"))
+    if user_id:
+        parts.append(("class:separator", " · "))
+        parts.append(("class:tokens", f"user: {user_id}"))
     parts.append(("class:separator", " · "))
     parts.append(("class:path", cwd))
     if tokens_in or tokens_out:
@@ -279,12 +289,39 @@ async def _handle_slash_command(cmd: str, store: SessionStore, session: Session,
                 console.print(f"[red]Failed: {e}[/red]")
         return None
 
+    elif command in ("/profile", "/p"):
+        from ethan.core.users import get_user_store
+        user_store = get_user_store()
+        all_uids = user_store.all_user_ids()
+        current_uid = getattr(agent, "_user_id", "") or user_store.get_admin_user_id()
+
+        if len(parts) < 2:
+            profiles_str = ", ".join(
+                f"[cyan]{uid}[/cyan]" + (" (current)" if uid == current_uid else "")
+                for uid in all_uids
+            )
+            console.print(f"[dim]Available profiles: {profiles_str}[/dim]")
+            console.print(f"[dim]Switch: /profile <profile_id>[/dim]")
+        else:
+            target_uid = parts[1].strip()
+            if target_uid not in all_uids:
+                console.print(f"[red]Profile not found: {target_uid}[/red]")
+                profiles_str = ", ".join(all_uids)
+                console.print(f"[dim]Available profiles: {profiles_str}[/dim]")
+            elif target_uid == current_uid:
+                console.print(f"[yellow]Already using profile: {target_uid}[/yellow]")
+            else:
+                console.print(f"[green]Switching profile to: {target_uid}...[/green]")
+                raise ProfileSwitchException(target_uid)
+        return None
+
     elif command in ("/help", "/h"):
         console.print("""[dim]Commands:
   /sessions      List recent sessions
   /resume ID     Resume a session
   /new           Start new session
   /model [ID]    Show or switch model
+  /profile [ID]  Show or switch user profile
   /update        Update Ethan Agent
   /help          Show this help[/dim]""")
         return None
@@ -384,9 +421,10 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
         _reload()
         config = get_config()
         model_id = config.defaults.model
-        # rebuild agent with new config
+        current_uid = getattr(agent, "_user_id", "") or ""
+        # rebuild agent with new config and same profile
         from ethan.interface.cli import _build_agent
-        agent = _build_agent(model_id)
+        agent = _build_agent(model_id, user_id=current_uid)
         console.print()
         console.print(f"[green]Provider configured. Using model: [bold]{model_id}[/bold][/green]")
         console.print()
@@ -465,7 +503,8 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
     _exit_press_time = 0.0
 
     while True:
-        toolbar = _make_toolbar(model_id, total_tokens_in, total_tokens_out, total_tokens_cache, session.id)
+        current_uid = getattr(agent, "_user_id", "") or ""
+        toolbar = _make_toolbar(model_id, total_tokens_in, total_tokens_out, total_tokens_cache, session.id, user_id=current_uid)
         try:
             console.print()
             console.rule(style="dim")
