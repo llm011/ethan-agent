@@ -47,14 +47,51 @@ def _register_subcommands():
     app.add_typer(update_cmd.app, name="update")
 
 
-@app.command("serve")
-def serve(
+serve_app = typer.Typer(help="管理 API 服务")
+app.add_typer(serve_app, name="serve")
+
+@serve_app.callback(invoke_without_command=True)
+def serve_main(
+    ctx: typer.Context,
     host: str = typer.Option("0.0.0.0", "--host", help="Bind host"),
     port: int = typer.Option(8900, "--port", help="Bind port"),
 ) -> None:
-    """Start the HTTP API server."""
-    from ethan.interface.api import run_server
-    run_server(host=host, port=port)
+    """Start the HTTP API server. Default runs in foreground."""
+    if ctx.invoked_subcommand is None:
+        from ethan.interface.api import run_server
+        run_server(host=host, port=port)
+
+@serve_app.command("stop")
+def serve_stop() -> None:
+    """停止后台运行的 serve 进程。"""
+    from ethan.interface.commands.update import _find_serve_pid
+    import os
+    import signal
+    import time
+    from rich.console import Console
+
+    console = Console()
+    pid = _find_serve_pid()
+    if pid:
+        console.print(f"[dim]发送 SIGTERM 到 ethan serve (pid={pid})...[/dim]")
+        try:
+            os.kill(pid, signal.SIGTERM)
+            time.sleep(1)
+            # 再检查一次，如果还没死就发 SIGKILL
+            if _find_serve_pid() == pid:
+                os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        console.print("[green]✓ ethan serve 已停止[/green]")
+    else:
+        console.print("[yellow]未发现后台运行的 ethan serve 进程。[/yellow]")
+
+@serve_app.command("restart")
+def serve_restart() -> None:
+    """重启后台运行的 serve 进程。"""
+    from ethan.interface.commands.update import _restart_serve
+    serve_stop()
+    _restart_serve(None)
 
 
 def _launch_web(port: int = 8900, url: Optional[str] = None) -> None:
