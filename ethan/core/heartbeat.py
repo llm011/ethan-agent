@@ -88,7 +88,7 @@ async def _run_heartbeat_md() -> None:
         return
 
     logger.info("[Heartbeat] Running heartbeat.md tasks...")
-    prompt = content.strip()
+    prompt = f"[Heartbeat] 正在执行系统心跳任务：heartbeat.md\n\n{content.strip()}"
 
     registry = ToolRegistry()
     for tool in [ShellTool(), WebSearchTool(), WebFetchTool(),
@@ -101,21 +101,66 @@ async def _run_heartbeat_md() -> None:
     agent = Agent(tool_registry=registry, skill_registry=skills)
 
     try:
-        response = await agent.chat([Message(role="user", content=prompt)])
+        from ethan.providers.base import ToolEvent
+        import time
 
-        # 保存到专属心跳 session
+        # 每次心跳创建一个全新的专属 session，便于在 Web 上独立查看
         store = SessionStore()
         await store.init()
-        # 查找或创建心跳 session
-        sessions = await store.list_recent(100)
-        hb_session = next((s for s in sessions if s.title == "[心跳] System"), None)
-        if not hb_session:
-            hb_session = await store.create(cfg.defaults.model, source="heartbeat")
-            await store.update_title(hb_session.id, "[心跳] System")
-
+        hb_session = await store.create(cfg.defaults.model, source="heartbeat")
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-        await store.save_message(hb_session.id, Message(role="user", content=f"[{now_str}] 心跳任务\n\n{prompt}"))
-        await store.save_message(hb_session.id, response)
+        await store.update_title(hb_session.id, f"[心跳] {now_str}")
+
+        user_msg = Message(role="user", content=prompt)
+        await store.save_message(hb_session.id, user_msg)
+        await store.touch(hb_session.id)
+
+        # 用 stream_chat 执行，收集工具步骤 / 思考 / 正文
+        tool_start_times: dict[str, float] = {}
+        collected_tool_steps: list[dict] = []
+        full = ""
+        thought = ""
+
+        async for item in agent.stream_chat([user_msg]):
+            if isinstance(item, ToolEvent):
+                if item.state == "start":
+                    if full:
+                        thought += ("\n\n" if thought else "") + full
+                        full = ""
+                    tool_start_times[item.tool_name] = time.time()
+                    collected_tool_steps.append({
+                        "tool": item.tool_name,
+                        "args": item.args_summary,
+                        "state": "running",
+                        "duration_ms": None,
+                        "result_preview": "",
+                    })
+                else:
+                    duration_ms = int(
+                        (time.time() - tool_start_times.pop(item.tool_name, time.time())) * 1000
+                    )
+                    for step in reversed(collected_tool_steps):
+                        if step["tool"] == item.tool_name and step["state"] == "running":
+                            step["state"] = item.state
+                            step["duration_ms"] = duration_ms
+                            step["result_preview"] = item.result_preview or ""
+                            break
+            else:
+                full += item
+
+        usage_dict = {
+            "input": agent.usage.input_tokens,
+            "output": agent.usage.output_tokens,
+            "cache": agent.usage.cache_tokens,
+        }
+        asst_msg = Message(
+            role="assistant",
+            content=full,
+            thought=thought,
+            usage=usage_dict,
+            tool_steps=collected_tool_steps,
+        )
+        await store.save_message(hb_session.id, asst_msg)
         await store.touch(hb_session.id)
         await store.close()
         logger.info("[Heartbeat] heartbeat.md task done")

@@ -189,5 +189,7 @@ class OpenAICompatProvider(BaseProvider):
                     except json.JSONDecodeError:
                         args = {}
                     tool_calls.append(ToolCall(id=tc["id"], name=tc["name"], arguments=args))
-                # Not passing stream_usage here because it might arrive in a later standalone chunk
-                yield StreamChunk(content="", tool_calls=tool_calls, is_final=not kwargs.get("stream_options"))
+                # If usage is already present in this chunk, it's the true final chunk.
+                # If not, and stream_options is enabled, we expect a subsequent standalone usage chunk.
+                is_final_now = bool(stream_usage) or not kwargs.get("stream_options")
+                yield StreamChunk(content="", tool_calls=tool_calls, is_final=is_final_now, usage=stream_usage if is_final_now else None)

@@ -25,6 +25,9 @@ _WEB_DIST = Path(__file__).parent.parent / "web_dist"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import logging
+    logging.getLogger("ethan").setLevel(logging.INFO)
+
     if _lark_available:
         start_lark_listener()
     start_heartbeat()

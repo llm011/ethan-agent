@@ -111,27 +111,100 @@ blocks = [
 | OpenAI 官方 | （不填，默认） | GPT-4o、o3 等 |
 | Gemini（Google AI Studio） | `https://generativelanguage.googleapis.com/v1beta/openai/` | gemini-2.5-flash 等 |
 | Ollama（本地） | `http://localhost:11434/v1` | llama3、qwen 等 |
-| LM Studio | `http://localhost:1234/v1` | 本地模型 |
 | OpenRouter | `https://openrouter.ai/api/v1` | 聚合多家模型 |
+| 火山引擎（字节跳动） | `https://ark.cn-beijing.volces.com/api/v3` | 需使用 `ep-xxx` 作为模型 ID |
 
-配置示例（`~/.ethan/config.yaml`）：
+## 配置教程
+
+所有的配置都在 `~/.ethan/config.yaml` 文件中进行修改。
+
+### 1. 接入 Anthropic 官方
+
+官方协议支持最深度的优化（例如 Prompt Caching）。
 
 ```yaml
 providers:
-  openai_compat:
-    api_key: "AIza-xxx"    # Gemini API Key
-    base_url: "https://generativelanguage.googleapis.com/v1beta/openai/"
+  anthropic:
+    api_key: sk-ant-xxxxxxxxx
+    base_url: https://api.anthropic.com  # 默认可不填
+    type: anthropic
 
 models:
-  - id: gemini-2.5-flash
-    provider: openai_compat
-    description: Gemini 2.5 Flash
-    alias: [flash, gemini]
-  - id: gemini-2.5-pro
-    provider: openai_compat
-    description: Gemini 2.5 Pro
-    alias: [pro]
+  - id: claude-3-7-sonnet-20250219
+    provider: anthropic
+    description: Claude 3.7 Sonnet
+    alias: [sonnet]
 ```
+
+### 2. 接入 OpenAI 兼容服务（如 Gemini / DeepSeek 等）
+
+```yaml
+providers:
+  # 这里起的名字(如 deepseek)会在 models 列表中被引用
+  deepseek:
+    api_key: sk-xxxxxxxx
+    base_url: https://api.deepseek.com
+    type: openai_compat
+  
+  google:
+    api_key: AIzaSyxxxxxxx
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai/
+    type: openai_compat
+
+models:
+  - id: deepseek-chat
+    provider: deepseek
+  - id: gemini-2.5-flash
+    provider: google
+```
+
+### 3. 接入火山引擎 (Volcengine ARK) 避坑指南
+
+火山引擎虽然支持提供 Claude 和 Doubao 等模型，但它的网关**只兼容 OpenAI 协议格式**。如果错误地用 `anthropic` 协议去请求火山，会报 `502 unknown provider` 错误。
+
+另外，火山引擎**绝对不能使用模型的原名**（如 `claude-sonnet` 或 `doubao-pro`），必须使用**推理接入点 ID**。
+
+**(1) 获取推理接入点 ID**
+登录火山引擎控制台，进入【大模型服务平台】->【在线推理】->【创建推理接入点】，绑定你需要使用的模型后，复制生成的以 `ep-` 开头的 ID。
+`[在此补充火山引擎控制台推理接入点页面的截图]`
+
+**(2) 获取 API Key**
+在【API Key 管理】页面生成并复制你的 Key。
+`[在此补充火山引擎 API Key 页面截图]`
+
+**(3) 修改 Ethan 配置**
+
+```yaml
+providers:
+  volcengine:
+    type: openai_compat  # 必须是 openai_compat！
+    api_key: ark-xxxxxxxx-xxxx-xxxx
+    base_url: https://ark.cn-beijing.volces.com/api/v3
+
+models:
+  - id: ep-20251218165528-tt2hm   # 必须填入刚才复制的推理接入点 ID
+    provider: volcengine          # 指向上面定义的 provider
+    description: 火山版 Claude/Doubao
+```
+
+### 4. 接入第三方中转服务 (如 yuntoken 等)
+
+许多国内中转服务号称“支持原生的 Anthropic 接口”，但它们往往使用了反向代理或者 Node.js 路由（如 `claude-code-router`）来转发请求。
+
+如果你配置了 `type: anthropic`，但一请求就遇到 **`PermissionDeniedError: Your request was blocked`** 或 **`Error code 500: fetch failed`**，极大概率是该中转商不支持 Anthropic SDK 默认发送的打点请求头，或者不支持 `cache_control`（Prompt Caching）。
+
+Ethan Agent 内置了修复机制，请这样配置：
+
+```yaml
+providers:
+  my_relay:
+    type: anthropic
+    api_key: sk-xxxxxxxx
+    base_url: https://yuntoken.vip    # 注意末尾不要带 /v1
+    disable_prompt_cache: true        # 关闭 Prompt Cache 防止中转网关解析数组崩溃
+```
+
+> **注意**：Ethan Agent (自 v0.1.25 起) 会在底层自动拦截并清理 `x-stainless-*` 特征头，这能绕过 90% 以上中转站的 403 拦截。
 
 ### 协议特点
 
