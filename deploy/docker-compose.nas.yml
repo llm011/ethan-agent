@@ -27,7 +27,7 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
       # ── 默认模型 ────────────────────────────────────────
-      - AGENT_DEFAULT_MODEL=${AGENT_DEFAULT_MODEL:-claude-haiku-4.5}
+      - AGENT_DEFAULT_MODEL=${AGENT_DEFAULT_MODEL:-claude-sonnet-4.6}
       # ── Web UI 鉴权 Token（留空则 fallback 到 admin 用户）──
       - ETHAN_AUTH_TOKEN=${ETHAN_AUTH_TOKEN:-}
       # ── 出网代理（NAS 拉模型时用；不需要则留空）─────────
