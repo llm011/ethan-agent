@@ -177,8 +177,11 @@ async def _handle_message(event_data: dict) -> None:
     # 立刻加思考表情，保存 reaction_id 以便回复后删除
     reaction_id = await _send_reaction(message_id)
 
-    # 查找或创建对应的 Session
-    store = SessionStore()
+    # 查找或创建对应的 Session（lark 渠道归 admin）
+    from ethan.core.users import get_user_store
+    from ethan.core.paths import user_sessions_db_path
+    lark_uid = get_user_store().get_admin_user_id()
+    store = SessionStore(db_path=user_sessions_db_path(lark_uid))
     await store.init()
 
     try:
@@ -212,11 +215,12 @@ async def _handle_message(event_data: dict) -> None:
         user_msg = Message(role="user", content=text)
         await store.save_message(session_id, user_msg)
 
-        # 重建 WorkingMemory：热区最近 10 轮 + cold facts
+        # 重建 WorkingMemory：热区最近 10 轮 + cold facts（per-user）
         from ethan.memory.working import MemoryConfig, WorkingMemory
         from ethan.memory.facts import FactStore
+        from ethan.core.paths import user_facts_path
         memory = WorkingMemory(config=MemoryConfig(hot_size=10))
-        memory.cold_facts = FactStore().build_context()
+        memory.cold_facts = FactStore(path=user_facts_path(lark_uid)).build_context()
         hist_ua = [m for m in history if m.role in ("user", "assistant")]
         pairs, i = [], 0
         while i < len(hist_ua) - 1:

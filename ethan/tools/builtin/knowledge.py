@@ -1,10 +1,11 @@
 """知识库工具 — 让 agent 能查询和添加知识库内容。"""
-from ethan.core.config import CONFIG_DIR
 from ethan.knowledge.base import FilesystemKnowledgeBase
 from ethan.tools.base import BaseTool
 
-_KB_DIR = CONFIG_DIR / "knowledge"
-_kb = FilesystemKnowledgeBase(_KB_DIR)
+
+def _kb_for(user_id: str) -> FilesystemKnowledgeBase:
+    from ethan.core.paths import user_knowledge_dir
+    return FilesystemKnowledgeBase(user_knowledge_dir(user_id))
 
 
 class KnowledgeSearchTool(BaseTool):
@@ -20,8 +21,11 @@ class KnowledgeSearchTool(BaseTool):
         "required": ["query"],
     }
 
+    def __init__(self, user_id: str = ""):
+        self._user_id = user_id
+
     async def run(self, query: str, limit: int = 3) -> str:
-        results = _kb.search(query, limit=limit)
+        results = _kb_for(self._user_id).search(query, limit=limit)
         if not results:
             return f"No results found in knowledge base for: {query}"
         lines = []
@@ -44,6 +48,9 @@ class KnowledgeAddTool(BaseTool):
         "required": ["title", "content"],
     }
 
+    def __init__(self, user_id: str = ""):
+        self._user_id = user_id
+
     async def run(self, title: str, content: str, tags: list[str] | None = None) -> str:
-        path = _kb.add(title, content, tags=tags)
+        path = _kb_for(self._user_id).add(title, content, tags=tags)
         return f"Saved to knowledge base: {path}"

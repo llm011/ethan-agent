@@ -817,7 +817,7 @@ Authorization: Bearer sk-ethan-xxxx
 Content-Type: application/json
 
 {
-  "model": "claude-sonnet-4-6",
+  "model": "claude-sonnet-4.6",
   "messages": [{"role": "user", "content": "你好"}],
   "session_id": "optional-existing-session-id"
 }`}</pre>

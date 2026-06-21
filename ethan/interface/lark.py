@@ -51,7 +51,16 @@ def _get_lark_client() -> lark.Client | None:
     )
 
 
-def _create_agent() -> Agent:
+def _get_lark_user_id() -> str:
+    """Lark 渠道无用户登录上下文，MVP 固定归到 admin 用户。"""
+    from ethan.core.users import get_user_store
+    return get_user_store().get_admin_user_id()
+
+
+def _create_agent(user_id: str = "") -> Agent:
+    from ethan.core.paths import ensure_user_dirs
+    uid = user_id or _get_lark_user_id()
+    ensure_user_dirs(uid)
     registry = ToolRegistry()
     registry.register(ShellTool())
     registry.register(WebSearchTool())
@@ -59,9 +68,9 @@ def _create_agent() -> Agent:
     registry.register(FileReadTool())
     registry.register(FileWriteTool())
     registry.register(FileListTool())
-    skills = SkillRegistry()
+    skills = SkillRegistry(user_id=uid)
     skills.load()
-    return Agent(tool_registry=registry, skill_registry=skills, channel="lark")
+    return Agent(tool_registry=registry, skill_registry=skills, channel="lark", user_id=uid)
 
 
 async def _get_or_create_session(store: SessionStore, chat_id: str) -> str:
@@ -171,7 +180,9 @@ async def lark_webhook(request: Request):
         await _add_reaction(client, message_id, "THINKING_FACE")
 
     # ── 4. Run Agent ──────────────────────────────────────────────
-    store = SessionStore()
+    from ethan.core.paths import user_sessions_db_path
+    lark_user_id = _get_lark_user_id()
+    store = SessionStore(db_path=user_sessions_db_path(lark_user_id))
     await store.init()
 
     try:
@@ -183,7 +194,7 @@ async def lark_webhook(request: Request):
         # 注入 chat_id，让 ScheduleCreateTool 创建定时任务时能读到来源渠道
         token = lark_chat_id_var.set(chat_id)
         try:
-            agent = _create_agent()
+            agent = _create_agent(user_id=lark_user_id)
             response = await agent.chat([user_msg])
         finally:
             lark_chat_id_var.reset(token)

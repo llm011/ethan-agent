@@ -29,9 +29,10 @@ async def health():
     return {"status": "ok", "version": __version__}
 
 
-@router.get("/poll", dependencies=[Depends(verify_token)])
-async def poll():
-    store = SessionStore()
+@router.get("/poll")
+async def poll(user_id: str = Depends(verify_token)):
+    from ethan.core.paths import user_sessions_db_path
+    store = SessionStore(db_path=user_sessions_db_path(user_id))
     await store.init()
     sessions = await store.list_recent(50)
     await store.close()
@@ -66,12 +67,13 @@ class ChatResponse(BaseModel):
     usage: dict
 
 
-@router.post("/chat", dependencies=[Depends(verify_token)])
-async def chat(req: ChatRequest):
-    agent = create_agent(req.model, channel=req.channel)
+@router.post("/chat")
+async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
+    from ethan.core.paths import user_sessions_db_path, user_facts_path
+    agent = create_agent(req.model, channel=req.channel, user_id=user_id)
     messages = [Message(role=m["role"], content=m.get("content", "")) for m in req.messages]
 
-    store = SessionStore()
+    store = SessionStore(db_path=user_sessions_db_path(user_id))
     await store.init()
 
     if req.session_id:
@@ -86,7 +88,7 @@ async def chat(req: ChatRequest):
         history = session.messages if session else []
 
         memory = WorkingMemory(config=MemoryConfig(hot_size=10))
-        fact_store = FactStore()
+        fact_store = FactStore(path=user_facts_path(user_id))
         memory.cold_facts = fact_store.build_context()
 
         pairs: list[tuple[Message, Message]] = []
@@ -108,7 +110,7 @@ async def chat(req: ChatRequest):
 
     if req.stream:
         return StreamingResponse(
-            _stream_response(agent, messages, store, req.session_id),
+            _stream_response(agent, messages, store, req.session_id, user_id),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
@@ -139,6 +141,7 @@ async def _stream_response(
     messages: list[Message],
     store: SessionStore,
     session_id: str | None,
+    user_id: str = "",
 ) -> AsyncGenerator[str, None]:
     from ethan.providers.base import ToolEvent
 
@@ -205,9 +208,9 @@ async def _stream_response(
         if agent._skills and agent.last_matched_skills:
             for _name in agent.last_matched_skills:
                 asyncio.create_task(asyncio.to_thread(agent._skills.record_hit, _name))
-        asyncio.create_task(_maybe_consolidate(session_id, agent._provider.model))
+        asyncio.create_task(_maybe_consolidate(session_id, agent._provider.model, user_id))
         asyncio.create_task(_maybe_regen_title(session_id, store))
-        asyncio.create_task(_maybe_generate_skill(session_id, agent._provider.model))
+        asyncio.create_task(_maybe_generate_skill(session_id, agent._provider.model, user_id))
 
     # Always send final usage to frontend so it knows the stream is done
     evt = {"done": True, "usage": usage_dict}
@@ -229,13 +232,14 @@ async def _maybe_regen_title(session_id: str, store: SessionStore) -> None:
         pass
 
 
-async def _maybe_consolidate(session_id: str, model: str) -> None:
+async def _maybe_consolidate(session_id: str, model: str, user_id: str = "") -> None:
     try:
         from ethan.memory.consolidator import Consolidator
         from ethan.memory.facts import FactStore
         from ethan.memory.working import MemoryConfig, WorkingMemory
+        from ethan.core.paths import user_sessions_db_path, user_facts_path
 
-        store = SessionStore()
+        store = SessionStore(db_path=user_sessions_db_path(user_id))
         await store.init()
         session = await store.load(session_id)
         await store.close()
@@ -247,7 +251,7 @@ async def _maybe_consolidate(session_id: str, model: str) -> None:
             return
 
         memory = WorkingMemory(config=MemoryConfig(hot_size=10))
-        fact_store = FactStore()
+        fact_store = FactStore(path=user_facts_path(user_id))
         memory.cold_facts = fact_store.build_context()
 
         history = list(session.messages)
@@ -279,10 +283,11 @@ async def _maybe_consolidate(session_id: str, model: str) -> None:
         pass
 
 
-async def _maybe_generate_skill(session_id: str, model: str) -> None:
+async def _maybe_generate_skill(session_id: str, model: str, user_id: str = "") -> None:
     try:
         from ethan.skills.generator import SkillGenerator, MIN_TURNS
-        store = SessionStore()
+        from ethan.core.paths import user_sessions_db_path
+        store = SessionStore(db_path=user_sessions_db_path(user_id))
         await store.init()
         session = await store.load(session_id)
         await store.close()
@@ -291,7 +296,7 @@ async def _maybe_generate_skill(session_id: str, model: str) -> None:
         user_turns = sum(1 for m in session.messages if m.role == "user")
         if user_turns < MIN_TURNS or user_turns % 5 != 0:
             return
-        generator = SkillGenerator(model=model)
+        generator = SkillGenerator(model=model, user_id=user_id)
         await generator.maybe_generate(session)
     except Exception:
         pass

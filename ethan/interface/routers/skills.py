@@ -1,4 +1,4 @@
-"""skills 路由：Skill CRUD + evolve。"""
+"""skills 路由：Skill CRUD + evolve（per-user 隔离）。"""
 import yaml
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -7,29 +7,29 @@ from .deps import verify_token
 router = APIRouter(prefix="/skills")
 
 
-def _skills_dir():
-    from ethan.skills.loader import USER_SKILLS_DIR
-    return USER_SKILLS_DIR
+def _skills_dir(user_id: str):
+    from ethan.core.paths import user_skills_dir
+    return user_skills_dir(user_id)
 
 
-@router.post("/evolve", dependencies=[Depends(verify_token)])
-async def evolve_skills():
+@router.post("/evolve")
+async def evolve_skills(user_id: str = Depends(verify_token)):
     from ethan.skills.updater import update_skills_from_corrections
-    return {"ok": True, "updated_count": await update_skills_from_corrections()}
+    return {"ok": True, "updated_count": await update_skills_from_corrections(user_id=user_id)}
 
 
-@router.get("", dependencies=[Depends(verify_token)])
-async def list_skills():
+@router.get("")
+async def list_skills(user_id: str = Depends(verify_token)):
     from ethan.skills.registry import SkillRegistry
-    reg = SkillRegistry()
+    reg = SkillRegistry(user_id=user_id)
     reg.load()
     return {"skills": [{"name": s.name, "description": s.description, "trigger": s.trigger, "content": s.content} for s in reg.all()]}
 
 
-@router.get("/{name}", dependencies=[Depends(verify_token)])
-async def get_skill(name: str):
+@router.get("/{name}")
+async def get_skill(name: str, user_id: str = Depends(verify_token)):
     from ethan.skills.registry import SkillRegistry
-    reg = SkillRegistry()
+    reg = SkillRegistry(user_id=user_id)
     reg.load()
     skill = reg.get(name)
     if not skill:
@@ -44,9 +44,9 @@ class SkillSaveRequest(BaseModel):
     content: str
 
 
-@router.post("", dependencies=[Depends(verify_token)])
-async def save_skill(req: SkillSaveRequest):
-    skills_dir = _skills_dir()
+@router.post("")
+async def save_skill(req: SkillSaveRequest, user_id: str = Depends(verify_token)):
+    skills_dir = _skills_dir(user_id)
     skills_dir.mkdir(parents=True, exist_ok=True)
     safe_name = "".join(c for c in req.name if c.isalnum() or c in "-_")
     if not safe_name:

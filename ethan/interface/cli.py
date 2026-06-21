@@ -174,8 +174,10 @@ def web_token(
 _register_subcommands()
 
 
-def _build_agent(model: str | None = None):
+def _build_agent(model: str | None = None, user_id: str = ""):
     from ethan.core.agent import Agent
+    from ethan.core.paths import ensure_user_dirs
+    from ethan.core.users import get_user_store
     from ethan.skills.registry import SkillRegistry
     from ethan.tools.builtin.acp import DelegateCodingTool
     from ethan.tools.builtin.file import FileListTool, FileReadTool, FileWriteTool
@@ -191,6 +193,10 @@ def _build_agent(model: str | None = None):
     from ethan.tools.builtin.web_search import WebSearchTool
     from ethan.tools.registry import ToolRegistry
 
+    # CLI/REPL 无登录上下文，默认 admin 用户
+    uid = user_id or get_user_store().get_admin_user_id()
+    ensure_user_dirs(uid)
+
     registry = ToolRegistry()
     registry.register(ShellTool())
     registry.register(WebSearchTool())
@@ -200,21 +206,21 @@ def _build_agent(model: str | None = None):
     registry.register(FileReadTool())
     registry.register(FileWriteTool())
     registry.register(FileListTool())
-    registry.register(ScheduleCreateTool())
+    registry.register(ScheduleCreateTool(user_id=uid))
     registry.register(ScheduleListTool())
     registry.register(ScheduleRemoveTool())
-    registry.register(KnowledgeSearchTool())
-    registry.register(KnowledgeAddTool())
-    registry.register(MemoryWriteTool())
-    registry.register(ProcedureWriteTool())
-    registry.register(ProfileUpdateTool())
-    registry.register(SkillCreateTool())
+    registry.register(KnowledgeSearchTool(user_id=uid))
+    registry.register(KnowledgeAddTool(user_id=uid))
+    registry.register(MemoryWriteTool(user_id=uid))
+    registry.register(ProcedureWriteTool(user_id=uid))
+    registry.register(ProfileUpdateTool(user_id=uid))
+    registry.register(SkillCreateTool(user_id=uid))
     registry.register(DelegateCodingTool())
 
-    skills = SkillRegistry()
+    skills = SkillRegistry(user_id=uid)
     skills.load()
 
-    return Agent(tool_registry=registry, skill_registry=skills, model=model, channel="repl")
+    return Agent(tool_registry=registry, skill_registry=skills, model=model, channel="repl", user_id=uid)
 
 
 def version_callback(value: bool):
@@ -233,6 +239,7 @@ def chat(
     model: Optional[str] = typer.Option(None, "-m", "--model", help="Model ID"),
     prompt: Optional[str] = typer.Option(None, "-p", "--prompt", help="Single-turn prompt"),
     resume: Optional[str] = typer.Option(None, "-r", "--resume", help="Resume session (ID or 'last')"),
+    profile: Optional[str] = typer.Option(None, "--profile", help="User ID/Profile to use"),
     version: Optional[bool] = typer.Option(
         None, "--version", "-v", callback=version_callback, is_eager=True, help="Show the version and exit."
     ),
@@ -247,13 +254,23 @@ def chat(
     # ─────────────────────────────────────────────────────────────────
 
     import asyncio
-    from ethan.interface.repl import run_repl, run_once
+    from ethan.interface.repl import run_repl, run_once, ProfileSwitchException
 
-    agent = _build_agent(model)
     if prompt and not resume:
+        agent = _build_agent(model, user_id=profile or "")
         asyncio.run(run_once(agent, prompt))
     else:
-        asyncio.run(run_repl(agent, resume_id=resume))
+        current_uid = profile or ""
+        while True:
+            agent = _build_agent(model, user_id=current_uid)
+            try:
+                asyncio.run(run_repl(agent, resume_id=resume))
+                break  # Normal exit (e.g., EOF/exit command)
+            except ProfileSwitchException as e:
+                current_uid = e.new_uid
+                resume = None  # Clear resume to start a fresh session for the new profile
+                from rich.console import Console
+                Console().print(f"\n[green]Switched to profile: {current_uid}[/green]\n")
 
 
 if __name__ == "__main__":

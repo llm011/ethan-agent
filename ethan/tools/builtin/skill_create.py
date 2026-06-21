@@ -1,10 +1,7 @@
 """Skill 自生成工具 — 让 agent 将可复用模式写入 ~/.ethan/skills/。"""
 import yaml
 
-from ethan.core.config import CONFIG_DIR
 from ethan.tools.base import BaseTool
-
-_SKILLS_DIR = CONFIG_DIR / "skills"
 
 
 class SkillCreateTool(BaseTool):
@@ -39,15 +36,20 @@ class SkillCreateTool(BaseTool):
         "required": ["name", "description", "trigger", "content"],
     }
 
+    def __init__(self, user_id: str = ""):
+        self._user_id = user_id
+
     async def run(self, name: str, description: str, trigger: list[str], content: str) -> str:
+        from ethan.core.paths import user_skills_dir
         # Sanitize name to prevent path traversal
         safe_name = "".join(c for c in name if c.isalnum() or c in "-_")
         if not safe_name:
             return "Error: invalid skill name"
 
-        skill_dir = _SKILLS_DIR / safe_name
+        skills_dir = user_skills_dir(self._user_id)
+        skill_dir = skills_dir / safe_name
         skill_path = skill_dir / "SKILL.md"
-        if skill_path.exists() or (_SKILLS_DIR / f"{safe_name}.md").exists():
+        if skill_path.exists() or (skills_dir / f"{safe_name}.md").exists():
             return f"Skill '{safe_name}' already exists. Not overwriting."
 
         skill_dir.mkdir(parents=True, exist_ok=True)

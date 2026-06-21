@@ -96,14 +96,17 @@ class Agent:
         model: str | None = None,
         system: str | None = None,
         channel: str = "",
+        user_id: str = "",
     ):
+        from ethan.core.paths import user_facts_path, user_procedures_path
         config = get_config()
+        self._user_id = user_id
         self._provider = create_provider(model)
         self._registry = tool_registry or ToolRegistry()
         self._executor = ToolExecutor(self._registry)
         self._skills = skill_registry
-        self._procedures = ProcedureStore()
-        self._facts = FactStore()
+        self._procedures = ProcedureStore(path=user_procedures_path(user_id))
+        self._facts = FactStore(path=user_facts_path(user_id))
         self._max_iterations = config.defaults.max_tool_iterations
         self.usage = UsageStats()
         self.last_matched_skills: list[str] = []
@@ -114,8 +117,10 @@ class Agent:
     def _load_system_files(self) -> None:
         """启动时一次性读入 system 目录下的 md 文件，避免每次对话都做磁盘 I/O。"""
         from pathlib import Path
+        from ethan.core.paths import user_profile_path
         cfg = get_config()
         workspace = cfg.defaults.workspace
+        # system/*.md 全局共享（ethan 角色定义）；user_profile.md 按用户隔离
         system_dir = Path(workspace) / "system"
         for name in ("identity", "soul", "agent", "tools"):
             p = system_dir / f"{name}.md"
@@ -124,7 +129,7 @@ class Agent:
                 content = content.replace("{workspace}", workspace)
                 self._system_files[name] = content
 
-        profile_p = Path(workspace) / "memory" / "user_profile.md"
+        profile_p = user_profile_path(self._user_id)
         if profile_p.exists():
             self._system_files["user_profile"] = profile_p.read_text(encoding="utf-8").strip()
 

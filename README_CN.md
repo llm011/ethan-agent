@@ -124,6 +124,28 @@ docker compose pull && docker compose up -d  # 更新到最新版本
 docker compose down                    # 停止
 ```
 
+### 6. 多用户（可选）
+
+Ethan 支持多用户共享一个实例，记忆（facts / procedures / episodes / sessions）、skills、知识库按用户完全隔离，互不可见。System prompt 和 provider 配置全局共享。
+
+在 `config.yaml` 中预置用户（每个用户绑定一个 `web_token` 用于浏览器登录，和 `api_keys` 用于 `/v1/chat/completions` API 调用 —— 两者都解析到同一个 `user_id`）：
+
+```yaml
+users:
+  - id: admin              # 稳定标识符，同时是数据目录名（建议用纯英文）
+    name: Admin
+    web_token: admin_pass  # 浏览器登录
+    api_keys: [sk-ethan-admin-key]  # 程序调用 API
+    is_admin: true
+  - id: alice
+    name: Alice
+    web_token: alice_pass
+    api_keys: [sk-ethan-alice-key]
+    is_admin: false
+```
+
+若 `users` 为空（或缺失），Ethan 会自动生成一个 `admin` 用户，其 `web_token` 复用 `network.auth_token` —— 现有单用户部署零配置即可升级。首次启动时，现有全局数据会迁移到 admin 用户目录（原文件保留作备份，迁移幂等）。
+
 ---
 
 ## 本地开发 / 从源码安装

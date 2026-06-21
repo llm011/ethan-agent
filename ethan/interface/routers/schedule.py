@@ -44,17 +44,21 @@ class ScheduleCreateRequest(BaseModel):
     session_id: str
     channel: str = "web"
     channel_context: str = "{}"
+    user_id: str = ""
 
 
-@router.post("", dependencies=[Depends(verify_token)])
-async def create_schedule(req: ScheduleCreateRequest):
+@router.post("")
+async def create_schedule(req: ScheduleCreateRequest, user_id: str = Depends(verify_token)):
     scheduler = get_scheduler()
     from ethan.tools.builtin.schedule import fire_schedule_job
+    # 优先用请求里带的 user_id（来自 ScheduleCreateTool），否则用当前登录用户
+    job_user_id = req.user_id or user_id
     kwargs = dict(
         session_id=req.session_id,
         prompt=req.prompt,
         channel=req.channel,
         channel_context=req.channel_context,
+        user_id=job_user_id,
     )
     if req.cron:
         scheduler.add_cron(req.job_id, fire_schedule_job, req.cron, **kwargs)

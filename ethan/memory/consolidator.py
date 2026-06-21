@@ -12,9 +12,9 @@ from ethan.core.config import get_config
 
 
 _CHEAP_MODEL_MAP = {
-    "claude-opus": "claude-haiku-4-5",
-    "claude-sonnet": "claude-haiku-4-5",
-    "claude-haiku": "claude-haiku-4-5",
+    "claude-opus": "claude-haiku-4.5",
+    "claude-sonnet": "claude-haiku-4.5",
+    "claude-haiku": "claude-haiku-4.5",
     "gemini-2.5-pro": "gemini-2.5-flash-lite",
     "gemini-2.5-flash": "gemini-2.5-flash-lite",
     "gemini-3-pro": "gemini-3-flash",

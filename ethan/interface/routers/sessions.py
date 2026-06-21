@@ -15,12 +15,27 @@ class AuthRequest(BaseModel):
 
 @router.post("/auth")
 async def auth(req: AuthRequest):
-    config = get_config()
-    if not config.network.auth_token:
-        return {"ok": True}
-    if req.token == config.network.auth_token:
-        return {"ok": True}
-    raise HTTPException(status_code=401, detail="Invalid token")
+    from ethan.core.users import get_user_store
+    user_store = get_user_store()
+    user_id = user_store.resolve_web_token(req.token)
+
+    if user_id is None:
+        # 兼容旧 auth_token → admin
+        config = get_config()
+        if not config.network.auth_token:
+            return {"ok": True, "user_id": user_store.get_admin_user_id(), "user_name": "", "is_admin": True}
+        if req.token == config.network.auth_token:
+            user_id = user_store.get_admin_user_id()
+        else:
+            raise HTTPException(status_code=401, detail="Invalid token")
+
+    user = user_store.get_user(user_id)
+    return {
+        "ok": True,
+        "user_id": user_id,
+        "user_name": user.name if user else "",
+        "is_admin": user.is_admin if user else False,
+    }
 
 
 @router.get("/models", dependencies=[Depends(verify_token)])
@@ -29,9 +44,10 @@ async def list_models():
     return {"models": [m.model_dump() for m in config.models]}
 
 
-@router.get("/sessions", dependencies=[Depends(verify_token)])
-async def list_sessions(limit: int = 50, offset: int = 0, q: str | None = None):
-    store = SessionStore()
+@router.get("/sessions")
+async def list_sessions(limit: int = 50, offset: int = 0, q: str | None = None, user_id: str = Depends(verify_token)):
+    from ethan.core.paths import user_sessions_db_path
+    store = SessionStore(db_path=user_sessions_db_path(user_id))
     await store.init()
     if q:
         sessions = await store.search(q, limit, offset)
@@ -52,19 +68,21 @@ async def list_sessions(limit: int = 50, offset: int = 0, q: str | None = None):
     ]}
 
 
-@router.post("/sessions", dependencies=[Depends(verify_token)])
-async def create_session(model: str | None = None):
+@router.post("/sessions")
+async def create_session(model: str | None = None, user_id: str = Depends(verify_token)):
+    from ethan.core.paths import user_sessions_db_path
     config = get_config()
-    store = SessionStore()
+    store = SessionStore(db_path=user_sessions_db_path(user_id))
     await store.init()
     session = await store.create(model or config.defaults.model)
     await store.close()
     return {"id": session.id, "title": session.title, "model": session.model}
 
 
-@router.get("/sessions/{session_id}", dependencies=[Depends(verify_token)])
-async def get_session(session_id: str):
-    store = SessionStore()
+@router.get("/sessions/{session_id}")
+async def get_session(session_id: str, user_id: str = Depends(verify_token)):
+    from ethan.core.paths import user_sessions_db_path
+    store = SessionStore(db_path=user_sessions_db_path(user_id))
     await store.init()
     session = await store.load(session_id)
     await store.close()
@@ -88,9 +106,10 @@ async def get_session(session_id: str):
     }
 
 
-@router.delete("/sessions/{session_id}", dependencies=[Depends(verify_token)])
-async def delete_session(session_id: str):
-    store = SessionStore()
+@router.delete("/sessions/{session_id}")
+async def delete_session(session_id: str, user_id: str = Depends(verify_token)):
+    from ethan.core.paths import user_sessions_db_path
+    store = SessionStore(db_path=user_sessions_db_path(user_id))
     await store.init()
     ok = await store.delete(session_id)
     await store.close()
@@ -103,9 +122,10 @@ class RenameSessionRequest(BaseModel):
     title: str
 
 
-@router.patch("/sessions/{session_id}", dependencies=[Depends(verify_token)])
-async def rename_session(session_id: str, req: RenameSessionRequest):
-    store = SessionStore()
+@router.patch("/sessions/{session_id}")
+async def rename_session(session_id: str, req: RenameSessionRequest, user_id: str = Depends(verify_token)):
+    from ethan.core.paths import user_sessions_db_path
+    store = SessionStore(db_path=user_sessions_db_path(user_id))
     await store.init()
     title = req.title.strip()
     if not title:

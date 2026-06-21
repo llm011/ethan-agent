@@ -1,0 +1,44 @@
+# Ethan Agent — NAS 部署（从 Docker Hub 拉取 calvinlai0211/ethan-agent）
+#
+# 前端已内置进镜像（后端 8900 端口同时提供 Web UI + API），单容器即可。
+#
+# 用法：
+#   1. 在 NAS 上建目录并放入本文件 + .env
+#   2. docker compose pull && docker compose up -d
+#   3. 访问 http://<nas-ip>:8900
+#
+# 更新到新版本：
+#   docker compose pull && docker compose up -d
+
+services:
+  ethan:
+    image: calvinlai0211/ethan-agent:multiuser
+    container_name: ethan-backend
+    restart: unless-stopped
+    ports:
+      - "8900:8900"
+    volumes:
+      # 持久化数据：记忆 / 会话 / skills / knowledge / config（多用户隔离目录 users/<id>/）
+      - ethan-data:/root/.ethan
+    environment:
+      # ── Provider（必填其一）────────────────────────────
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      # ── 默认模型 ────────────────────────────────────────
+      - AGENT_DEFAULT_MODEL=${AGENT_DEFAULT_MODEL:-claude-sonnet-4.6}
+      # ── Web UI 鉴权 Token（留空则 fallback 到 admin 用户）──
+      - ETHAN_AUTH_TOKEN=${ETHAN_AUTH_TOKEN:-}
+      # ── 出网代理（NAS 拉模型时用；不需要则留空）─────────
+      - ETHAN_PROXY=${ETHAN_PROXY:-}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8900/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  ethan-data:
+    driver: local

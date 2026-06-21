@@ -9,10 +9,7 @@
 """
 from pathlib import Path
 
-from ethan.core.config import CONFIG_DIR
 from ethan.tools.base import BaseTool
-
-_PROFILE_PATH = CONFIG_DIR / "memory" / "user_profile.md"
 
 _SECTIONS = [
     "身份与背景",
@@ -25,17 +22,17 @@ _SECTIONS = [
 _SECTION_HEADER = "## "
 
 
-def _ensure_profile() -> str:
+def _ensure_profile(profile_path: Path) -> str:
     """Ensure user_profile.md exists with all section headers and return its content."""
-    if _PROFILE_PATH.exists():
-        return _PROFILE_PATH.read_text(encoding="utf-8")
+    if profile_path.exists():
+        return profile_path.read_text(encoding="utf-8")
 
-    _PROFILE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    profile_path.parent.mkdir(parents=True, exist_ok=True)
     lines = ["# 用户画像\n"]
     for s in _SECTIONS:
         lines.append(f"\n{_SECTION_HEADER}{s}\n")
     content = "\n".join(lines)
-    _PROFILE_PATH.write_text(content, encoding="utf-8")
+    profile_path.write_text(content, encoding="utf-8")
     return content
 
 
@@ -117,12 +114,17 @@ class ProfileUpdateTool(BaseTool):
         "required": ["section", "entry"],
     }
 
+    def __init__(self, user_id: str = ""):
+        self._user_id = user_id
+
     async def run(self, section: str, entry: str, mode: str = "append") -> str:
+        from ethan.core.paths import user_profile_path
         if section not in _SECTIONS:
             valid = " / ".join(_SECTIONS)
             return f"Unknown section '{section}'. Valid sections: {valid}"
 
-        content = _ensure_profile()
+        profile_path = user_profile_path(self._user_id)
+        content = _ensure_profile(profile_path)
         updated = _update_section(content, section, entry, mode)
-        _PROFILE_PATH.write_text(updated, encoding="utf-8")
+        profile_path.write_text(updated, encoding="utf-8")
         return f"Profile updated [{section}]: {entry}"

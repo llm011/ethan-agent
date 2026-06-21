@@ -61,7 +61,7 @@ class HeartbeatConfig(BaseModel):
 
 class DefaultsConfig(BaseModel):
     workspace: str = str(Path.home() / ".ethan")
-    model: str = "claude-sonnet-4-6"
+    model: str = "claude-sonnet-4.6"
     agent_name: str = "Ethan"
     language: str = "zh"
     max_tokens: int = 4096
@@ -77,6 +77,7 @@ class WebSearchToolConfig(BaseModel):
 class ToolsConfig(BaseModel):
     web_search: WebSearchToolConfig = Field(default_factory=WebSearchToolConfig)
 
+
 class Config(BaseModel):
     providers: dict[str, ProviderConfig] = Field(default_factory=dict)
     models: list[ModelEntry] = Field(default_factory=list)
@@ -84,6 +85,7 @@ class Config(BaseModel):
     defaults: DefaultsConfig = Field(default_factory=DefaultsConfig)
     lark: LarkConfig = Field(default_factory=LarkConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    users: list["UserConfig"] = Field(default_factory=list)  # 多用户体系；为空时自动生成 admin
 
     def get_model(self, model_id: str) -> Optional[ModelEntry]:
         # 检查是否为数字索引
@@ -115,6 +117,11 @@ class Config(BaseModel):
         return [m.id for m in self.models]
 
 
+# 多用户体系：UserConfig 前向引用在此解析（users.py 仅在函数内 import config，无循环）
+from ethan.core.users import UserConfig  # noqa: E402
+Config.model_rebuild()
+
+
 # ── 持久化 ───────────────────────────────────────────────────────
 
 def _default_config() -> dict:
@@ -132,16 +139,17 @@ def _default_config() -> dict:
             },
         },
         "models": [
-            {"id": "claude-sonnet-4-6", "provider": "anthropic", "description": "Claude Sonnet 4.6"},
-            {"id": "claude-opus-4-6",   "provider": "anthropic", "description": "Claude Opus 4.6"},
-            {"id": "gemini-2.5-flash",  "provider": "openai_compat", "description": "Gemini 2.5 Flash"},
-            {"id": "gemini-2.5-pro",    "provider": "openai_compat", "description": "Gemini 2.5 Pro"},
+            {"id": "claude-opus-4.8",   "provider": "anthropic", "description": "Claude Opus 4.8"},
+            {"id": "claude-opus-4.7",   "provider": "anthropic", "description": "Claude Opus 4.7"},
+            {"id": "claude-opus-4.6",   "provider": "anthropic", "description": "Claude Opus 4.6"},
+            {"id": "claude-sonnet-4.6", "provider": "anthropic", "description": "Claude Sonnet 4.6"},
+            {"id": "claude-haiku-4.5",  "provider": "anthropic", "description": "Claude Haiku 4.5（cheap model）"},
         ],
         "network": {
             "proxy": None,
         },
         "defaults": {
-            "model": os.environ.get("AGENT_DEFAULT_MODEL", "gemini-2.5-flash"),
+            "model": os.environ.get("AGENT_DEFAULT_MODEL", "claude-sonnet-4.6"),
             "max_tokens": 4096,
             "max_tool_iterations": 10,
         },
@@ -206,11 +214,31 @@ def load_config() -> Config:
         config.network.auth_token = secrets.token_hex(6)
         need_save = True
 
+    # 多用户体系：users 为空时自动生成 admin 用户，web_token 复用 auth_token
+    from ethan.core.users import ensure_admin_user_exists
+    new_users = ensure_admin_user_exists(config.users, fallback_token=config.network.auth_token)
+    if new_users is not config.users:
+        config.users = new_users
+        need_save = True
+
     if need_save:
         save_config(config)
 
+    # 同步 UserStore 单例（首次构建或 reload 后重建）
+    from ethan.core.users import UserStore, set_user_store
+    set_user_store(UserStore(config.users))
+
     _init_system_files(config.defaults.agent_name)
     _init_default_skills()
+
+    # 多用户迁移：把现有全局数据归给 admin（幂等）。放最后，确保 users 已就绪。
+    try:
+        from ethan.core.paths import migrate_to_multiuser
+        migrate_to_multiuser()
+    except Exception as e:  # 迁移失败不应阻断启动
+        import sys
+        print(f"[multiuser] migration skipped: {e}", file=sys.stderr)
+
     return config
 
 
@@ -262,6 +290,12 @@ def _apply_env_overrides(raw: dict) -> None:
     proxy_env = os.environ.get("ETHAN_PROXY", "")
     if proxy_env:
         raw.setdefault("network", {})["proxy"] = proxy_env
+
+    # Web UI 登录 token：环境变量 ETHAN_AUTH_TOKEN 覆盖
+    # （否则 load_config 会用 secrets.token_hex(6) 随机生成一个写进 config.yaml）
+    auth_env = os.environ.get("ETHAN_AUTH_TOKEN", "")
+    if auth_env:
+        raw.setdefault("network", {})["auth_token"] = auth_env
 
 
 # ── 单例 ────────────────────────────────────────────────────────
