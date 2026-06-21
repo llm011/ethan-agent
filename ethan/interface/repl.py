@@ -378,7 +378,7 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
             api_key = raw_key.strip()
             _cfg.providers.setdefault("anthropic", ProviderConfig())
             _cfg.providers["anthropic"].api_key = api_key
-            _cfg.defaults.model = "claude-sonnet-4-6"
+            _cfg.defaults.model = "claude-sonnet-4.6"
 
         save_config(_cfg)
         _reload()

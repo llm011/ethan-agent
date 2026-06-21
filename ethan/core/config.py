@@ -61,7 +61,7 @@ class HeartbeatConfig(BaseModel):
 
 class DefaultsConfig(BaseModel):
     workspace: str = str(Path.home() / ".ethan")
-    model: str = "claude-sonnet-4-6"
+    model: str = "claude-sonnet-4.6"
     agent_name: str = "Ethan"
     language: str = "zh"
     max_tokens: int = 4096
@@ -139,16 +139,17 @@ def _default_config() -> dict:
             },
         },
         "models": [
-            {"id": "claude-sonnet-4-6", "provider": "anthropic", "description": "Claude Sonnet 4.6"},
-            {"id": "claude-opus-4-6",   "provider": "anthropic", "description": "Claude Opus 4.6"},
-            {"id": "gemini-2.5-flash",  "provider": "openai_compat", "description": "Gemini 2.5 Flash"},
-            {"id": "gemini-2.5-pro",    "provider": "openai_compat", "description": "Gemini 2.5 Pro"},
+            {"id": "claude-opus-4.8",   "provider": "anthropic", "description": "Claude Opus 4.8"},
+            {"id": "claude-opus-4.7",   "provider": "anthropic", "description": "Claude Opus 4.7"},
+            {"id": "claude-opus-4.6",   "provider": "anthropic", "description": "Claude Opus 4.6"},
+            {"id": "claude-sonnet-4.6", "provider": "anthropic", "description": "Claude Sonnet 4.6"},
+            {"id": "claude-haiku-4.5",  "provider": "anthropic", "description": "Claude Haiku 4.5（cheap model）"},
         ],
         "network": {
             "proxy": None,
         },
         "defaults": {
-            "model": os.environ.get("AGENT_DEFAULT_MODEL", "gemini-2.5-flash"),
+            "model": os.environ.get("AGENT_DEFAULT_MODEL", "claude-sonnet-4.6"),
             "max_tokens": 4096,
             "max_tool_iterations": 10,
         },
