@@ -285,7 +285,17 @@ async def _handle_slash_command(cmd: str, store: SessionStore, session: Session,
   /resume ID     Resume a session
   /new           Start new session
   /model [ID]    Show or switch model
+  /update        Update Ethan Agent
   /help          Show this help[/dim]""")
+        return None
+
+    elif command == "/update":
+        import sys
+        import subprocess
+        console.print("[dim]Starting update process...[/dim]")
+        # Execute the update command directly
+        subprocess.run([sys.executable, "-m", "ethan.interface.cli", "update"])
+        console.print("[yellow]Update check finished. If an update was installed, you may need to restart the REPL.[/yellow]")
         return None
 
     else:
