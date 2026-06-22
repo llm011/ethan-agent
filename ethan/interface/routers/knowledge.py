@@ -14,7 +14,7 @@ def get_knowledge_manager(user_id: str):
     from ethan.core.paths import user_knowledge_dir
     from ethan.knowledge.base import FilesystemKnowledgeBase
     if user_id not in _knowledge_managers:
-        _knowledge_managers[user_id] = FilesystemKnowledgeBase(user_knowledge_dir(user_id))
+        _knowledge_managers[user_id] = FilesystemKnowledgeBase(user_knowledge_dir())
     return _knowledge_managers[user_id]
 
 

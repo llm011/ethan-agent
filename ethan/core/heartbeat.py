@@ -27,7 +27,7 @@ async def _consolidate_facts_for_user(user_id: str) -> None:
     from ethan.core.config import get_config
     from ethan.core.paths import user_facts_path
 
-    store = FactStore(path=user_facts_path(user_id))
+    store = FactStore(path=user_facts_path())
     active = store.get_active()
     if len(active) < 10:
         return
@@ -101,27 +101,18 @@ async def _run_heartbeat_md() -> None:
     from ethan.core.users import get_user_store
     from ethan.core.paths import ensure_user_dirs, user_sessions_db_path
     hb_user_id = get_user_store().get_admin_user_id()
-    ensure_user_dirs(hb_user_id)
+    from ethan.core.agent_factory import create_agent as _create_agent
+    agent = _create_agent(user_id=hb_user_id, toolset="heartbeat")
 
     logger.info("[Heartbeat] Running heartbeat.md tasks...")
     prompt = f"[Heartbeat] 正在执行系统心跳任务：heartbeat.md\n\n{content.strip()}"
-
-    registry = ToolRegistry()
-    for tool in [ShellTool(), WebSearchTool(), WebFetchTool(),
-                 FileReadTool(), FileWriteTool(), FileListTool(),
-                 ScheduleCreateTool(user_id=hb_user_id), ScheduleListTool(), ScheduleRemoveTool(),
-                 KnowledgeSearchTool(user_id=hb_user_id), KnowledgeAddTool(user_id=hb_user_id)]:
-        registry.register(tool)
-    skills = SkillRegistry(user_id=hb_user_id)
-    skills.load()
-    agent = Agent(tool_registry=registry, skill_registry=skills, user_id=hb_user_id)
 
     try:
         from ethan.providers.base import ToolEvent
         import time
 
         # 每次心跳创建一个全新的专属 session，便于在 Web 上独立查看
-        store = SessionStore(db_path=user_sessions_db_path(hb_user_id))
+        store = SessionStore(db_path=user_sessions_db_path())
         await store.init()
         hb_session = await store.create(cfg.defaults.model, source="heartbeat")
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M")

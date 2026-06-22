@@ -8,19 +8,19 @@ router = APIRouter(prefix="/memory")
 def _fact_store(user_id: str):
     from ethan.memory.facts import FactStore
     from ethan.core.paths import user_facts_path
-    return FactStore(path=user_facts_path(user_id))
+    return FactStore(path=user_facts_path())
 
 
 def _episode_store(user_id: str):
     from ethan.memory.episodic import EpisodeStore
     from ethan.core.paths import user_episodes_path
-    return EpisodeStore(path=user_episodes_path(user_id))
+    return EpisodeStore(path=user_episodes_path())
 
 
 def _procedure_store(user_id: str):
     from ethan.memory.procedures import ProcedureStore
     from ethan.core.paths import user_procedures_path
-    return ProcedureStore(path=user_procedures_path(user_id))
+    return ProcedureStore(path=user_procedures_path())
 
 
 @router.get("/facts")

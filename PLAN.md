@@ -103,6 +103,7 @@ ethan/
 - [x] **`agent.md` 加入 system prompt 加载**：`_load_system_files()` 已加载 `"agent"`，`_build_system()` 注入为 `<agent_protocols>`，主动写记忆指令生效
 - [x] **ACP 持续对话优化**：`delegate_coding` 支持 `--resume` 多轮会话（按「用户×工作目录」持久化 session_id），用 stream-json 解析 Coding Agent 的工具调用为 sub_steps；Web UI 时间轴折叠展示子步骤、最终结果高亮。Claude Code / OpenCode / Codex 三者均接入
 - [x] **定时任务引导**：soul.md 增加模糊场景主动引导规则——明确指令直接调 schedule_create，模糊周期需求主动列 1-2-3 候选方案让用户选
+- [x] **Profile 架构重构（hermes 式）**：default profile = `~/.ethan` 本身（向后兼容），命名 profile 走 `~/.ethan/profiles/<name>/`；ContextVar 替代 user_id 串参；system files 全局共享
 
 ### P1 功能完善
 - [x] **消息引用**：Web UI 气泡悬浮显示引用按钮，输入框显示引用预览条；引用块以 `> [引用 ...]` 前缀注入给模型，原始消息干净入库
@@ -121,6 +122,49 @@ ethan/
 - [ ] **域隔离（Space）**：FactStore / SkillRegistry / 知识库引入 `space` 维度（life/work/proj-xxx），防止记忆混杂
 - [ ] **异步中断**：Agent 执行长任务时，感知新消息并在工具调用间隙响应
 - [ ] **MCP client 完善**：连接外部 MCP server，自动注册工具
+
+---
+
+## 🏗 架构借鉴（openclaw / hermes 对比）
+
+对比 hermes（`~/.hermes`，profile 模式）和 openclaw（`~/.openclaw/agents/<id>/`，agent+session 分离）后的可借鉴清单。
+
+### 能力对比
+
+| 维度 | ethan（现状） | hermes | openclaw |
+|------|--------------|--------|----------|
+| 多实例 | profiles/ per-profile（已重构） | profiles/ 完整独立 HOME | agents/<id>/ + session 分离 |
+| default | ~/.ethan 本身（隐式，已实现） | ~/.hermes 本身 | agents/main |
+| 切换 | ContextVar（已实现） | HERMES_HOME env + ContextVar | session key 路由 |
+| agent vs session | 混淆 | 不区分 | **清晰分离** |
+| 凭证 | config.yaml 静态 | auth.json + OAuth refresh + 冷却 | auth-profiles.json + 轮换 |
+| 心跳 | 全局单一 | per-profile | per-agent + ack/dedup/静默 |
+| 子进程凭证 | 无隔离 | per-profile home/ | sandbox |
+
+### 已借鉴（本次完成）
+- [x] **ContextVar 替代 user_id 串参**（hermes `hermes_constants.py`）
+- [x] **default profile = 根目录**（hermes profile 模式）
+
+### 可借鉴清单
+
+**P1**
+- [ ] **profile create/clone/export**（hermes `profiles.py:664-826`）：`ethan profile create/clone/delete/export/import`
+- [ ] **per-profile HOME 隔离**（hermes `get_subprocess_home`）：ACP spawn 注入 HOME，隔离 git/ssh 凭证
+- [ ] **channel→profile binding**（openclaw bindings）：lark 绑定到特定 profile 而非永远 default
+- [ ] **per-profile 心跳**：`profiles/<name>/system/heartbeat.md` + 独立调度
+- [ ] **auth.json 凭证存储**：API key/OAuth 抽到 per-profile，支持 refresh + 冷却
+
+**P2**
+- [ ] **心跳 ack/dedup/静默时段**（openclaw heartbeat-runner）：空回复跳过 + 重复抑制 + active hours
+- [ ] **cron 工具集限制**（hermes）：定时触发的 agent 用 `toolset="schedule"` 子集，防递归建 cron
+- [ ] **session scope: per-sender vs global**（openclaw）：lark 可选共享会话或 per-chat
+- [ ] **profile 元数据 + 自动描述**（hermes profile.yaml）：description/role 供路由
+
+**P3**
+- [ ] **agent 与 session 分离**（openclaw agent-scope）：一个 profile 多 session，session key 路由
+- [ ] **subagents 框架**（openclaw subagent-registry）：agent spawn 子 agent，带深度限制 + 工具 allowlist
+- [ ] **per-profile 工具策略**（openclaw tool-policy）：profile 配置 tools.allow/deny
+- [ ] **per-profile skill allowlist**（openclaw）：profile 配置 skill 子集
 
 ---
 

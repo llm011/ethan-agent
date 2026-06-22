@@ -9,7 +9,7 @@ router = APIRouter(prefix="/skills")
 
 def _skills_dir(user_id: str):
     from ethan.core.paths import user_skills_dir
-    return user_skills_dir(user_id)
+    return user_skills_dir()
 
 
 @router.post("/evolve")

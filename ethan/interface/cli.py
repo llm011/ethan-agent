@@ -175,52 +175,9 @@ _register_subcommands()
 
 
 def _build_agent(model: str | None = None, user_id: str = ""):
-    from ethan.core.agent import Agent
-    from ethan.core.paths import ensure_user_dirs
-    from ethan.core.users import get_user_store
-    from ethan.skills.registry import SkillRegistry
-    from ethan.tools.builtin.acp import DelegateCodingTool
-    from ethan.tools.builtin.file import FileListTool, FileReadTool, FileWriteTool
-    from ethan.tools.builtin.knowledge import KnowledgeAddTool, KnowledgeSearchTool
-    from ethan.tools.builtin.memory_write import MemoryWriteTool
-    from ethan.tools.builtin.procedure_write import ProcedureWriteTool
-    from ethan.tools.builtin.profile_update import ProfileUpdateTool
-    from ethan.tools.builtin.schedule import ScheduleCreateTool, ScheduleListTool, ScheduleRemoveTool
-    from ethan.tools.builtin.skill_create import SkillCreateTool
-    from ethan.tools.builtin.shell import ShellTool
-    from ethan.tools.builtin.search import RipgrepTool, FdTool
-    from ethan.tools.builtin.web import WebFetchTool
-    from ethan.tools.builtin.web_search import WebSearchTool
-    from ethan.tools.registry import ToolRegistry
-
-    # CLI/REPL 无登录上下文，默认 admin 用户
-    uid = user_id or get_user_store().get_admin_user_id()
-    ensure_user_dirs(uid)
-
-    registry = ToolRegistry()
-    registry.register(ShellTool())
-    registry.register(WebSearchTool())
-    registry.register(RipgrepTool())
-    registry.register(FdTool())
-    registry.register(WebFetchTool())
-    registry.register(FileReadTool())
-    registry.register(FileWriteTool())
-    registry.register(FileListTool())
-    registry.register(ScheduleCreateTool(user_id=uid))
-    registry.register(ScheduleListTool())
-    registry.register(ScheduleRemoveTool())
-    registry.register(KnowledgeSearchTool(user_id=uid))
-    registry.register(KnowledgeAddTool(user_id=uid))
-    registry.register(MemoryWriteTool(user_id=uid))
-    registry.register(ProcedureWriteTool(user_id=uid))
-    registry.register(ProfileUpdateTool(user_id=uid))
-    registry.register(SkillCreateTool(user_id=uid))
-    registry.register(DelegateCodingTool(user_id=uid))
-
-    skills = SkillRegistry(user_id=uid)
-    skills.load()
-
-    return Agent(tool_registry=registry, skill_registry=skills, model=model, channel="repl", user_id=uid)
+    """CLI/REPL Agent 工厂，委托给 core.agent_factory。"""
+    from ethan.core.agent_factory import create_agent
+    return create_agent(model=model, channel="repl", user_id=user_id, toolset="full")
 
 
 def version_callback(value: bool):

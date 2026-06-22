@@ -12,8 +12,8 @@ class SkillRegistry:
         from ethan.core.paths import user_skill_stats_path
         self._user_id = user_id
         self._skills: list[Skill] = []
-        # per-user 技能统计；user_id 为空时回退全局路径（兼容无用户场景）
-        stats_path = user_skill_stats_path(user_id) if user_id else None
+        # per-profile 技能统计；user_id 为空（default profile）时读顶层路径
+        stats_path = user_skill_stats_path()
         self._stats = SkillStats(path=stats_path) if stats_path else SkillStats()
 
     def load(self) -> None:

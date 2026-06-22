@@ -3,9 +3,9 @@ from ethan.core.config import get_config, CONFIG_DIR
 
 
 def is_first_time(user_id: str = "") -> bool:
-    """Returns True if this looks like a fresh installation for the given user."""
+    """Returns True if this looks like a fresh installation for the given profile."""
     from ethan.core.paths import user_facts_path
-    facts_file = user_facts_path(user_id) if user_id else (CONFIG_DIR / "memory" / "facts.json")
+    facts_file = user_facts_path()
     config = get_config()
     no_facts = not facts_file.exists() or facts_file.read_text(encoding="utf-8").strip() in ("[]", "")
     default_name = config.defaults.agent_name == "Ethan"

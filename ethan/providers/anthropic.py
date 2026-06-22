@@ -199,10 +199,21 @@ class AnthropicProvider(BaseProvider):
 
         # Accumulate tool use blocks during streaming
         tool_calls_acc: dict[int, dict] = {}
+        # usage 在 message_start（input）和 message_delta（output）事件里累积
+        usage_input = 0
+        usage_output = 0
+        usage_cache_read = 0
+        usage_cache_creation = 0
 
         async with self._client.messages.stream(**kwargs) as stream:
             async for event in stream:
-                if event.type == "content_block_start":
+                if event.type == "message_start":
+                    u = getattr(event.message, "usage", None)
+                    if u:
+                        usage_input = getattr(u, "input_tokens", 0) or 0
+                        usage_cache_read = getattr(u, "cache_read_input_tokens", 0) or 0
+                        usage_cache_creation = getattr(u, "cache_creation_input_tokens", 0) or 0
+                elif event.type == "content_block_start":
                     if event.content_block.type == "tool_use":
                         tool_calls_acc[event.index] = {
                             "id": event.content_block.id,
@@ -215,6 +226,10 @@ class AnthropicProvider(BaseProvider):
                     elif event.delta.type == "input_json_delta":
                         if event.index in tool_calls_acc:
                             tool_calls_acc[event.index]["input_raw"] += event.delta.partial_json
+                elif event.type == "message_delta":
+                    u = getattr(event.usage, "output_tokens", None)
+                    if u:
+                        usage_output = u
                 elif event.type == "message_stop":
                     tool_calls = []
                     for tc in tool_calls_acc.values():
@@ -223,4 +238,10 @@ class AnthropicProvider(BaseProvider):
                         except json.JSONDecodeError:
                             args = {}
                         tool_calls.append(ToolCall(id=tc["id"], name=tc["name"], arguments=args))
-                    yield StreamChunk(content="", tool_calls=tool_calls, is_final=True)
+                    usage_dict = {
+                        "input": usage_input,
+                        "output": usage_output,
+                        "cache_read": usage_cache_read,
+                        "cache_creation": usage_cache_creation,
+                    }
+                    yield StreamChunk(content="", tool_calls=tool_calls, is_final=True, usage=usage_dict)

@@ -92,7 +92,7 @@ def load_all_skills(user_id: str = "") -> list[Skill]:
     from ethan.core.paths import user_skills_dir
     skills: dict[str, Skill] = {}
 
-    skills_dir = user_skills_dir(user_id) if user_id else USER_SKILLS_DIR
+    skills_dir = user_skills_dir()
     if skills_dir.exists():
         for entry in sorted(skills_dir.iterdir()):
             skill = None

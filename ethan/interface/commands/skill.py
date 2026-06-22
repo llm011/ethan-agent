@@ -66,9 +66,9 @@ def create_skill(
     description: str = typer.Option("", "-d", "--desc", help="Short description"),
 ) -> None:
     """创建一个新的空 Skill 文件。"""
-    from ethan.core.config import CONFIG_DIR
+    from ethan.core.paths import user_skills_dir
 
-    skills_dir = CONFIG_DIR / "skills"
+    skills_dir = user_skills_dir()
     skills_dir.mkdir(parents=True, exist_ok=True)
     path = skills_dir / f"{name}.md"
 

@@ -40,7 +40,7 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
             from ethan.providers.base import Message
             from ethan.core.paths import user_sessions_db_path
             async def log_error():
-                store = SessionStore(db_path=user_sessions_db_path(user_id))
+                store = SessionStore(db_path=user_sessions_db_path())
                 await store.init()
                 err_msg = Message(role="assistant", content=f"⚠️ 定时任务后台执行失败:\n```text\n{e}\n```")
                 await store.save_message(session_id, err_msg)
@@ -101,7 +101,7 @@ class ScheduleCreateTool(BaseTool):
         channel_context = json.dumps({"chat_id": chat_id}) if chat_id else "{}"
 
         # Create a dedicated session for this task (per-user)
-        store = SessionStore(db_path=user_sessions_db_path(self._user_id))
+        store = SessionStore(db_path=user_sessions_db_path())
         await store.init()
         session = await store.create(get_config().defaults.model)
         await store.update_title(session.id, f"[定时] {job_id}")

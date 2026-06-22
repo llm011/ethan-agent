@@ -5,7 +5,7 @@ from ethan.tools.base import BaseTool
 
 def _kb_for(user_id: str) -> FilesystemKnowledgeBase:
     from ethan.core.paths import user_knowledge_dir
-    return FilesystemKnowledgeBase(user_knowledge_dir(user_id))
+    return FilesystemKnowledgeBase(user_knowledge_dir())
 
 
 class KnowledgeSearchTool(BaseTool):

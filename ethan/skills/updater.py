@@ -9,7 +9,7 @@ async def update_skills_from_corrections(user_id: str = "") -> int:
     from ethan.skills.stats import SkillStats
     from ethan.skills.loader import load_skill_from_file
     from ethan.core.paths import user_skill_stats_path
-    stats_path = user_skill_stats_path(user_id) if user_id else None
+    stats_path = user_skill_stats_path()
     stats = SkillStats(path=stats_path) if stats_path else SkillStats()
     updated = 0
     for skill_name, data in stats.all().items():
@@ -36,10 +36,7 @@ async def update_skills_from_corrections(user_id: str = "") -> int:
 
 def _find_user_skill_file(skill_name: str, user_id: str = "") -> Path | None:
     from ethan.core.paths import user_skills_dir
-    skills_dir = user_skills_dir(user_id) if user_id else None
-    if skills_dir is None:
-        from ethan.skills.loader import USER_SKILLS_DIR
-        skills_dir = USER_SKILLS_DIR
+    skills_dir = user_skills_dir()
     p = skills_dir / skill_name / "SKILL.md"
     if p.exists():
         return p

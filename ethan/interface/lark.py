@@ -58,19 +58,9 @@ def _get_lark_user_id() -> str:
 
 
 def _create_agent(user_id: str = "") -> Agent:
-    from ethan.core.paths import ensure_user_dirs
+    from ethan.core.agent_factory import create_agent
     uid = user_id or _get_lark_user_id()
-    ensure_user_dirs(uid)
-    registry = ToolRegistry()
-    registry.register(ShellTool())
-    registry.register(WebSearchTool())
-    registry.register(WebFetchTool())
-    registry.register(FileReadTool())
-    registry.register(FileWriteTool())
-    registry.register(FileListTool())
-    skills = SkillRegistry(user_id=uid)
-    skills.load()
-    return Agent(tool_registry=registry, skill_registry=skills, channel="lark", user_id=uid)
+    return create_agent(channel="lark", user_id=uid, toolset="full")
 
 
 async def _get_or_create_session(store: SessionStore, chat_id: str) -> str:
@@ -182,7 +172,7 @@ async def lark_webhook(request: Request):
     # ── 4. Run Agent ──────────────────────────────────────────────
     from ethan.core.paths import user_sessions_db_path
     lark_user_id = _get_lark_user_id()
-    store = SessionStore(db_path=user_sessions_db_path(lark_user_id))
+    store = SessionStore(db_path=user_sessions_db_path())
     await store.init()
 
     try:

@@ -57,7 +57,7 @@ class SkillCreateTool(BaseTool):
         if not safe_name:
             return "Error: invalid skill name"
 
-        skills_dir = user_skills_dir(self._user_id)
+        skills_dir = user_skills_dir()
         skill_dir = skills_dir / safe_name
         skill_path = skill_dir / "SKILL.md"
         if skill_path.exists() or (skills_dir / f"{safe_name}.md").exists():

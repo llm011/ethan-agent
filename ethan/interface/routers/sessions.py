@@ -47,7 +47,7 @@ async def list_models():
 @router.get("/sessions")
 async def list_sessions(limit: int = 50, offset: int = 0, q: str | None = None, user_id: str = Depends(verify_token)):
     from ethan.core.paths import user_sessions_db_path
-    store = SessionStore(db_path=user_sessions_db_path(user_id))
+    store = SessionStore(db_path=user_sessions_db_path())
     await store.init()
     if q:
         sessions = await store.search(q, limit, offset)
@@ -72,7 +72,7 @@ async def list_sessions(limit: int = 50, offset: int = 0, q: str | None = None, 
 async def create_session(model: str | None = None, user_id: str = Depends(verify_token)):
     from ethan.core.paths import user_sessions_db_path
     config = get_config()
-    store = SessionStore(db_path=user_sessions_db_path(user_id))
+    store = SessionStore(db_path=user_sessions_db_path())
     await store.init()
     session = await store.create(model or config.defaults.model)
     await store.close()
@@ -82,7 +82,7 @@ async def create_session(model: str | None = None, user_id: str = Depends(verify
 @router.get("/sessions/{session_id}")
 async def get_session(session_id: str, user_id: str = Depends(verify_token)):
     from ethan.core.paths import user_sessions_db_path
-    store = SessionStore(db_path=user_sessions_db_path(user_id))
+    store = SessionStore(db_path=user_sessions_db_path())
     await store.init()
     session = await store.load(session_id)
     await store.close()
@@ -109,7 +109,7 @@ async def get_session(session_id: str, user_id: str = Depends(verify_token)):
 @router.delete("/sessions/{session_id}")
 async def delete_session(session_id: str, user_id: str = Depends(verify_token)):
     from ethan.core.paths import user_sessions_db_path
-    store = SessionStore(db_path=user_sessions_db_path(user_id))
+    store = SessionStore(db_path=user_sessions_db_path())
     await store.init()
     ok = await store.delete(session_id)
     await store.close()
@@ -125,7 +125,7 @@ class RenameSessionRequest(BaseModel):
 @router.patch("/sessions/{session_id}")
 async def rename_session(session_id: str, req: RenameSessionRequest, user_id: str = Depends(verify_token)):
     from ethan.core.paths import user_sessions_db_path
-    store = SessionStore(db_path=user_sessions_db_path(user_id))
+    store = SessionStore(db_path=user_sessions_db_path())
     await store.init()
     title = req.title.strip()
     if not title:

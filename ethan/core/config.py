@@ -26,7 +26,8 @@ class ModelEntry(BaseModel):
 
 class NetworkConfig(BaseModel):
     proxy: Optional[str] = None  # http://127.0.0.1:7890
-    auth_token: str = ""  # API auth token for web UI
+    auth_token: str = ""  # Web UI 浏览器登录 token（default profile 的 web_token）
+    api_keys: list[str] = Field(default_factory=list)  # /v1/chat/completions API keys（default profile）
 
 
 class LarkConfig(BaseModel):
@@ -214,27 +215,36 @@ def load_config() -> Config:
         config.network.auth_token = secrets.token_hex(6)
         need_save = True
 
-    # 多用户体系：users 为空时自动生成 admin 用户，web_token 复用 auth_token
-    from ethan.core.users import ensure_admin_user_exists
-    new_users = ensure_admin_user_exists(config.users, fallback_token=config.network.auth_token)
-    if new_users is not config.users:
-        config.users = new_users
-        need_save = True
-
+    # default profile 隐式存在，users 为空时不再生成 admin 条目
     if need_save:
         save_config(config)
 
-    # 同步 UserStore 单例（首次构建或 reload 后重建）
+    # 同步 UserStore 单例（首次构建或 reload 后重建），注入 default profile tokens
     from ethan.core.users import UserStore, set_user_store
-    set_user_store(UserStore(config.users))
+    store = UserStore(config.users)
+    store.set_default_tokens(
+        web_token=config.network.auth_token,
+        api_keys=config.network.api_keys,
+    )
+    set_user_store(store)
 
     _init_system_files(config.defaults.agent_name)
     _init_default_skills()
 
-    # 多用户迁移：把现有全局数据归给 admin（幂等）。放最后，确保 users 已就绪。
+    # 旧 users/<admin>/ 架构 → 新 profile 架构（default = 顶层）。幂等，放最后。
     try:
-        from ethan.core.paths import migrate_to_multiuser
-        migrate_to_multiuser()
+        from ethan.core.paths import migrate_to_profiles
+        migrated = migrate_to_profiles(config)
+        if migrated:
+            save_config(config)
+            # 重建 UserStore（config.users 变了）
+            from ethan.core.users import UserStore, set_user_store
+            store = UserStore(config.users)
+            store.set_default_tokens(
+                web_token=config.network.auth_token,
+                api_keys=config.network.api_keys,
+            )
+            set_user_store(store)
     except Exception as e:  # 迁移失败不应阻断启动
         import sys
         print(f"[multiuser] migration skipped: {e}", file=sys.stderr)

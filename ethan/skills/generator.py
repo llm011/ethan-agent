@@ -42,7 +42,7 @@ class SkillGenerator:
     async def maybe_generate(self, messages: list[Message]) -> Path | None:
         """分析对话，如果值得则自动生成 Skill 文件。返回文件路径或 None。"""
         from ethan.core.paths import user_skills_dir
-        skills_dir = user_skills_dir(self._user_id) if self._user_id else USER_SKILLS_DIR
+        skills_dir = user_skills_dir()
         turns = sum(1 for m in messages if m.role == "user")
         if turns < MIN_TURNS:
             return None

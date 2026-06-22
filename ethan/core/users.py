@@ -1,18 +1,20 @@
-"""多用户体系 — 用户定义与 token→user_id 解析。
+"""Profile 体系 — 命名 profile 定义与 token→user_id 解析。
 
-每个用户在 config.yaml 的 users 段定义，拥有：
-  - id          稳定标识符（用作 per-user 数据目录名，建议纯英文）
+default profile（user_id=""）隐式存在，数据在 ~/.ethan 顶层，无需 config 条目。
+命名 profile 在 config.yaml 的 users 段定义：
+  - id          稳定标识符（= profiles/<id> 目录名，建议纯英文）
   - name        显示名
   - web_token   Web UI 浏览器登录 token
   - api_keys    /v1/chat/completions 用的 API key 列表
-  - is_admin    是否管理员
+  - is_admin    是否管理员（仅用于标记，default profile 始终是事实上的 admin）
 
-同一个用户的 web_token 和 api_keys 都解析到同一个 user_id ——
-浏览器登录和程序调用 API 访问的是同一份记忆/skills/knowledge。
+default profile 的鉴权：
+  - web_token 复用 network.auth_token
+  - api_keys 复用 network.api_keys（新增字段）
+  命中均解析到 user_id=""。
 """
 from __future__ import annotations
 
-import secrets
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -27,7 +29,11 @@ class UserConfig(BaseModel):
 
 
 class UserStore:
-    """用户解析：web_token → user_id，api_key → user_id。"""
+    """用户解析：web_token → user_id，api_key → user_id。
+
+    default profile（""）的 token 来自 network.auth_token / network.api_keys，
+    由 set_default_tokens() 注入，命中返回 ""。
+    """
 
     def __init__(self, users: list[UserConfig]):
         self._users: list[UserConfig] = users
@@ -40,26 +46,41 @@ class UserStore:
             for k in u.api_keys:
                 if k:
                     self._api_key_map[k] = u.id
+        # default profile 的 token（由 set_default_tokens 注入）
+        self._default_web_tokens: set[str] = set()
+        self._default_api_keys: set[str] = set()
+
+    def set_default_tokens(self, web_token: str = "", api_keys: list[str] | None = None) -> None:
+        """注入 default profile 的鉴权 token。"""
+        self._default_web_tokens = {web_token} if web_token else set()
+        self._default_api_keys = set(api_keys or [])
 
     def resolve_web_token(self, token: str) -> Optional[str]:
-        return self._web_token_map.get(token)
+        if token in self._web_token_map:
+            return self._web_token_map[token]
+        if token in self._default_web_tokens:
+            return ""  # default profile
+        return None
 
     def resolve_api_key(self, key: str) -> Optional[str]:
-        return self._api_key_map.get(key)
+        if key in self._api_key_map:
+            return self._api_key_map[key]
+        if key in self._default_api_keys:
+            return ""  # default profile
+        return None
 
     def get_admin_user_id(self) -> str:
-        """第一个 is_admin=True 的用户；都没有则回退第一个用户；都没有则 'admin'。"""
-        for u in self._users:
-            if u.is_admin:
-                return u.id
-        if self._users:
-            return self._users[0].id
-        return "admin"
+        """default profile（""）就是事实上的 admin。命名 profile 里有 is_admin 的也返回其 id。"""
+        return ""  # default profile 隐式为 admin
 
     def all_user_ids(self) -> list[str]:
-        return [u.id for u in self._users]
+        """所有 profile id，default（""）始终首位。"""
+        ids = [u.id for u in self._users]
+        return [""] + ids
 
     def get_user(self, user_id: str) -> Optional[UserConfig]:
+        if user_id == "":
+            return None  # default profile 无 config 条目
         return self._by_id.get(user_id)
 
 
@@ -73,12 +94,17 @@ def set_user_store(store: UserStore) -> None:
 
 
 def get_user_store() -> UserStore:
-    """惰性初始化：从 get_config() 读取 users 构建 UserStore。"""
+    """惰性初始化：从 get_config() 读取 users 构建 UserStore，并注入 default tokens。"""
     global _user_store
     if _user_store is None:
         from ethan.core.config import get_config
         config = get_config()
-        _user_store = UserStore(config.users)
+        store = UserStore(config.users)
+        store.set_default_tokens(
+            web_token=config.network.auth_token,
+            api_keys=config.network.api_keys,
+        )
+        _user_store = store
     return _user_store
 
 
@@ -89,16 +115,5 @@ def reset_user_store() -> None:
 
 
 def ensure_admin_user_exists(users: list[UserConfig], fallback_token: str = "") -> list[UserConfig]:
-    """users 为空时自动生成一个 admin 用户（兼容现有单用户部署）。
-
-    web_token 复用现有 network.auth_token，保证旧 token 仍能登录。
-    """
-    if users:
-        return users
-    return [UserConfig(
-        id="admin",
-        name="Admin",
-        web_token=fallback_token or secrets.token_hex(6),
-        api_keys=[],
-        is_admin=True,
-    )]
+    """default profile 隐式存在，无需为它创建 config 条目。直接返回原列表。"""
+    return users

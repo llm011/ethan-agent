@@ -44,7 +44,7 @@ async def onboarding_complete(req: OnboardingCompleteRequest, user_id: str = Dep
             identity_path.write_text(content.replace("Ethan", agent_name), encoding="utf-8")
 
     if user_info:
-        store = FactStore(path=user_facts_path(user_id))
+        store = FactStore(path=user_facts_path())
         store.add(user_info, confidence=1.0, source="onboarding", category="preference")
 
     return {"ok": True, "agent_name": agent_name}

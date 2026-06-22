@@ -95,7 +95,7 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
     from ethan.core.paths import user_sessions_db_path, user_facts_path
     agent = create_agent(req.model, channel="api", user_id=user_id)
 
-    store = SessionStore(db_path=user_sessions_db_path(user_id))
+    store = SessionStore(db_path=user_sessions_db_path())
     await store.init()
 
     if req.session_id:
@@ -109,7 +109,7 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
         history = session_obj.messages if session_obj else []
 
         memory = WorkingMemory(config=MemoryConfig(hot_size=10))
-        memory.cold_facts = FactStore(path=user_facts_path(user_id)).build_context()
+        memory.cold_facts = FactStore(path=user_facts_path()).build_context()
 
         pairs: list[tuple[Message, Message]] = []
         hist_ua = [m for m in history if m.role in ("user", "assistant")]

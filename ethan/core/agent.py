@@ -99,14 +99,18 @@ class Agent:
         user_id: str = "",
     ):
         from ethan.core.paths import user_facts_path, user_procedures_path
+        from ethan.core.context import set_user_id
         config = get_config()
-        self._user_id = user_id
+        # 若调用方显式传了 user_id，set 进 ContextVar，供后续 path 函数读取
+        if user_id:
+            set_user_id(user_id)
+        self._user_id = user_id or ""
         self._provider = create_provider(model)
         self._registry = tool_registry or ToolRegistry()
         self._executor = ToolExecutor(self._registry)
         self._skills = skill_registry
-        self._procedures = ProcedureStore(path=user_procedures_path(user_id))
-        self._facts = FactStore(path=user_facts_path(user_id))
+        self._procedures = ProcedureStore(path=user_procedures_path())
+        self._facts = FactStore(path=user_facts_path())
         self._max_iterations = config.defaults.max_tool_iterations
         self.usage = UsageStats()
         self.last_matched_skills: list[str] = []
@@ -120,7 +124,7 @@ class Agent:
         from ethan.core.paths import user_profile_path
         cfg = get_config()
         workspace = cfg.defaults.workspace
-        # system/*.md 全局共享（ethan 角色定义）；user_profile.md 按用户隔离
+        # system/*.md 全局共享（ethan 角色定义）；user_profile.md 按 profile 隔离
         system_dir = Path(workspace) / "system"
         for name in ("identity", "soul", "agent", "tools"):
             p = system_dir / f"{name}.md"
@@ -129,7 +133,7 @@ class Agent:
                 content = content.replace("{workspace}", workspace)
                 self._system_files[name] = content
 
-        profile_p = user_profile_path(self._user_id)
+        profile_p = user_profile_path()
         if profile_p.exists():
             self._system_files["user_profile"] = profile_p.read_text(encoding="utf-8").strip()
 
@@ -293,9 +297,8 @@ class Agent:
 
         return "\n\n".join(parts)
 
-    async def chat(self, messages: list[Message]) -> Message:
-        """运行对话。fast/medium/full 三档路由，按消息长度和关键词自动选择。"""
-        self._executor.reset_cache()
+    def _select_route(self, messages: list[Message]) -> tuple[str, str, list, int]:
+        """三档路由选择，返回 (route, system, tools_list, max_iters)。chat/stream_chat 共用。"""
         working = list(messages)
         last_user = self._get_last_user_text(working)
         skill_triggers = [
@@ -316,6 +319,13 @@ class Agent:
             system = self._build_system(working, fast=False)
             tools_list = self._registry.all()
             max_iters = self._max_iterations
+        return route, system, tools_list, max_iters
+
+    async def chat(self, messages: list[Message]) -> Message:
+        """运行对话。fast/medium/full 三档路由，按消息长度和关键词自动选择。"""
+        self._executor.reset_cache()
+        working = list(messages)
+        _route, system, tools_list, max_iters = self._select_route(working)
         tools = [t.to_definition() for t in tools_list] or None
 
         for _ in range(max_iters):
@@ -342,25 +352,7 @@ class Agent:
 
         self._executor.reset_cache()
         working = list(messages)
-        last_user = self._get_last_user_text(working)
-        skill_triggers = [
-            kw for s in (self._skills.all() if self._skills else [])
-            if s.fast_path for kw in s.trigger
-        ]
-        route = _get_route(last_user, skill_triggers=skill_triggers)
-        routing = get_config().defaults.routing
-        if route == "fast":
-            system = self._build_system(working, fast=True)
-            tools_list = [t for t in self._registry.all() if t.fast_path]
-            max_iters = 2
-        elif route == "medium":
-            system = self._build_system(working, fast=False)
-            tools_list = self._registry.all()
-            max_iters = routing.medium_max_iters
-        else:
-            system = self._build_system(working, fast=False)
-            tools_list = self._registry.all()
-            max_iters = self._max_iterations
+        _route, system, tools_list, max_iters = self._select_route(working)
         tools = [t.to_definition() for t in tools_list] or None
 
         for _ in range(max_iters):

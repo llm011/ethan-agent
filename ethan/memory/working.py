@@ -55,6 +55,28 @@ class WorkingMemory:
             self._compress_buffer.append(oldest_assistant)
             hot_rounds -= 1
 
+    @classmethod
+    def from_history(cls, history: list[Message], cold_facts: str = "", hot_size: int = 10) -> "WorkingMemory":
+        """从历史消息构建 WorkingMemory：配对 user/assistant，取最近 hot_size 轮进热区。
+
+        消除 chat/lark/repl/completions 六处重复的「遍历 history 配对 append」逻辑。
+        """
+        memory = cls(config=MemoryConfig(hot_size=hot_size))
+        memory.cold_facts = cold_facts
+        hist_ua = [m for m in history if m.role in ("user", "assistant")]
+        pairs: list[tuple[Message, Message]] = []
+        i = 0
+        while i < len(hist_ua) - 1:
+            if hist_ua[i].role == "user" and hist_ua[i + 1].role == "assistant":
+                pairs.append((hist_ua[i], hist_ua[i + 1]))
+                i += 2
+            else:
+                i += 1
+        for u, a in pairs[-hot_size:]:
+            memory.hot.append(u)
+            memory.hot.append(a)
+        return memory
+
     def needs_compression(self) -> bool:
         """压缩缓冲区是否攒够了一批。"""
         buffer_rounds = len(self._compress_buffer) // 2

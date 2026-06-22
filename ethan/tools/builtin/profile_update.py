@@ -123,7 +123,7 @@ class ProfileUpdateTool(BaseTool):
             valid = " / ".join(_SECTIONS)
             return f"Unknown section '{section}'. Valid sections: {valid}"
 
-        profile_path = user_profile_path(self._user_id)
+        profile_path = user_profile_path()
         content = _ensure_profile(profile_path)
         updated = _update_section(content, section, entry, mode)
         profile_path.write_text(updated, encoding="utf-8")

@@ -31,6 +31,6 @@ class ProcedureWriteTool(BaseTool):
 
     async def run(self, rule: str, context: str = "") -> str:
         from ethan.core.paths import user_procedures_path
-        store = ProcedureStore(path=user_procedures_path(self._user_id))
+        store = ProcedureStore(path=user_procedures_path())
         store.add(rule, context=context)
         return f"Rule saved: {rule}"

@@ -181,7 +181,7 @@ async def _handle_message(event_data: dict) -> None:
     from ethan.core.users import get_user_store
     from ethan.core.paths import user_sessions_db_path
     lark_uid = get_user_store().get_admin_user_id()
-    store = SessionStore(db_path=user_sessions_db_path(lark_uid))
+    store = SessionStore(db_path=user_sessions_db_path())
     await store.init()
 
     try:
@@ -220,7 +220,7 @@ async def _handle_message(event_data: dict) -> None:
         from ethan.memory.facts import FactStore
         from ethan.core.paths import user_facts_path
         memory = WorkingMemory(config=MemoryConfig(hot_size=10))
-        memory.cold_facts = FactStore(path=user_facts_path(lark_uid)).build_context()
+        memory.cold_facts = FactStore(path=user_facts_path()).build_context()
         hist_ua = [m for m in history if m.role in ("user", "assistant")]
         pairs, i = [], 0
         while i < len(hist_ua) - 1:
