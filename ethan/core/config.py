@@ -152,6 +152,7 @@ def _default_config() -> dict:
         },
         "defaults": {
             "model": os.environ.get("AGENT_DEFAULT_MODEL", "claude-sonnet-4.6"),
+            "lite_model": "",  # 轻量模型（记忆压缩/标题生成等后台任务用）；空则按主模型推断或与主模型相同
             "max_tokens": 4096,
             "max_tool_iterations": 10,
         },
