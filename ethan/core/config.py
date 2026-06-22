@@ -265,6 +265,13 @@ def _write_raw(data: dict) -> None:
 
 
 def _apply_env_overrides(raw: dict) -> None:
+    """环境变量作为 config.yaml 的兜底，不覆盖显式配置。
+
+    设计原则：用户在 config.yaml 里显式写的 provider 字段优先；环境变量仅在
+    config.yaml 没配该字段时填充。这样用户在 config.yaml 配了 api_key/base_url 后，
+    即使 shell 里残留了 ANTHROPIC_BASE_URL 等环境变量（常见于同时用 Claude Code 的机器）
+    也不会被篡改。
+    """
     from dotenv import load_dotenv
     load_dotenv()
 
@@ -278,12 +285,13 @@ def _apply_env_overrides(raw: dict) -> None:
         p = providers.setdefault(key, {})
         if "type" not in p:
             p["type"] = default_type
+        # api_key / base_url：仅当 config.yaml 没有显式配置时，才用环境变量兜底
         token = os.environ.get(env_key1, "") if env_key1 else ""
         fallback = os.environ.get(env_key2, "") if env_key2 else ""
-        if token or fallback:
+        if (token or fallback) and not p.get("api_key"):
             p["api_key"] = token or fallback
         base = os.environ.get(env_base, "") if env_base else ""
-        if base:
+        if base and not p.get("base_url"):
             p["base_url"] = base
 
     # 代理：环境变量 ETHAN_PROXY 覆盖
