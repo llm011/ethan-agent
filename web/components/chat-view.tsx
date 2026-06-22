@@ -38,6 +38,9 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const [showOnboarding, setShowOnboarding] = useState(false);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  // 记录「刚由本组件流式完成并 router.replace 进来的 session id」，
+  // 让下面的 useEffect 跳过对它的重新 fetch，避免流式刚结束就刷新覆盖。
+  const justFinishedRef = useRef<string | null>(null);
 
   // Load session when route param changes
   useEffect(() => {
@@ -45,6 +48,12 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       // 如果正在流式输出中（刚新建会话并发送消息），不重新加载
       // 因为此时 session 刚创建，DB 里还没有消息，fetchSession 会返回空数组
       if (initialSessionId === activeSession && streaming) return;
+      // 流式刚结束、本组件自己 router.replace 进来的 session：消息已是最新，
+      // 跳过 fetch 避免覆盖（否则会闪烁、丢失 ttft/toolsExpanded 状态）
+      if (justFinishedRef.current === initialSessionId) {
+        justFinishedRef.current = null;
+        return;
+      }
       fetchSession(initialSessionId)
         .then((detail) => {
           setActiveSession(initialSessionId);
@@ -249,6 +258,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     setStreaming(false);
     // 流式结束后再更新 URL，此时 session 已有消息，不会触发空消息覆盖
     if (!initialSessionId && sessionId) {
+      // 标记：本次 URL 变更是流式完成后由本组件发起的，useEffect 应跳过重新 fetch
+      justFinishedRef.current = sessionId;
       router.replace(`/chat/${sessionId}`);
     }
   };
