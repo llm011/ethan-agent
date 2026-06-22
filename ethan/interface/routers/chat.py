@@ -59,6 +59,7 @@ class ChatRequest(BaseModel):
     stream: bool = False
     session_id: str | None = None
     channel: str = "web"
+    quote: dict | None = None  # {role, content}：引用某条历史消息，注入给模型但不入库
 
 
 class ChatResponse(BaseModel):
@@ -105,8 +106,10 @@ async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
             memory.hot.append(u)
             memory.hot.append(a)
 
-        current_user = messages[-1]
+        current_user = _with_quote(messages[-1], req.quote)
         messages = memory.build_context() + [current_user]
+    elif req.quote and messages and messages[-1].role == "user":
+        messages[-1] = _with_quote(messages[-1], req.quote)
 
     if req.stream:
         return StreamingResponse(
@@ -134,6 +137,19 @@ async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
 
 
 # ── SSE helpers ───────────────────────────────────────────────────
+
+
+def _with_quote(user_msg: Message, quote: dict | None) -> Message:
+    """返回一份带「引用块」前缀的用户消息副本（仅发给模型，不入库）。
+
+    quote 形如 {"role": "user"|"assistant", "content": "..."}。
+    """
+    if not quote or not quote.get("content"):
+        return user_msg
+    role_label = "用户" if quote.get("role") == "user" else "Ethan"
+    quote_text = str(quote["content"]).replace("\n", "\n> ")
+    prefixed = f"> [引用 {role_label} 的消息]:\n> {quote_text}\n\n{user_msg.content}"
+    return Message(role=user_msg.role, content=prefixed, created_at=user_msg.created_at)
 
 
 async def _stream_response(
@@ -174,6 +190,7 @@ async def _stream_response(
                             step["state"] = item.state
                             step["duration_ms"] = duration_ms
                             step["result_preview"] = item.result_preview or ""
+                            step["sub_steps"] = item.sub_steps or []
                             break
                     evt = {
                         "tool": item.tool_name,
@@ -181,6 +198,7 @@ async def _stream_response(
                         "state": item.state,
                         "duration_ms": duration_ms,
                         "result_preview": item.result_preview or "",
+                        "sub_steps": item.sub_steps or [],
                     }
                 yield f"data: {json.dumps(evt, ensure_ascii=False)}\n\n"
             else:

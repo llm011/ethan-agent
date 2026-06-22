@@ -206,6 +206,10 @@ async def run_once(agent: Agent, prompt: str) -> None:
                     console.print()
                 args = f"({item.args_summary})" if item.args_summary else ""
                 console.print(f"[dim]⚡ {item.tool_name}{args}[/dim]")
+            elif item.state in ("done", "error") and item.sub_steps:
+                # 委派类工具（如 delegate_coding）的子步骤摘要
+                ok = sum(1 for s in item.sub_steps if s.get("state") == "done")
+                console.print(f"[dim]   ↳ {len(item.sub_steps)} 步工具调用（{ok} 成功）[/dim]")
             continue
 
         if not spinner_stopped:
@@ -631,7 +635,9 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
                                 first_chunk = False
                             console.print(f"[dim]{activity_text}[/dim]")
                         elif item.state in ("done", "error"):
-                            pass
+                            if item.sub_steps:
+                                ok = sum(1 for s in item.sub_steps if s.get("state") == "done")
+                                console.print(f"[dim]   ↳ {len(item.sub_steps)} 步工具调用（{ok} 成功）[/dim]")
                         continue
 
                     # Text chunk

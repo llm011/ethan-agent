@@ -172,7 +172,9 @@ ethan -p "..."                  → 单轮对话
 ethan -m MODEL                  → 指定模型
 ethan -r last                   → 恢复上次会话
 ethan --tui                     → 全屏 TUI 模式
-ethan serve                     → 启动 HTTP API
+ethan serve                     → 启动 HTTP API（前台运行）
+ethan serve stop                → 停止后台运行的 serve 进程
+ethan serve restart             → 重启后台 serve 进程
 ethan model list/add/remove/default
 ethan provider list/set
 ethan session list/show/delete
@@ -180,6 +182,7 @@ ethan skill list/show/create
 ethan schedule list/remove/pause/resume
 ethan knowledge list/add/search/delete
 ethan update [--channel dev] [--to v0.2.0] [--check] [--no-restart]
+ethan code "query"              → ACP 委派 Coding Agent（详见 acp.md）
 ```
 
 ---

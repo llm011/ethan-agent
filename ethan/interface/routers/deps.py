@@ -11,6 +11,7 @@ from ethan.tools.builtin.procedure_write import ProcedureWriteTool
 from ethan.tools.builtin.profile_update import ProfileUpdateTool
 from ethan.tools.builtin.schedule import ScheduleCreateTool, ScheduleListTool, ScheduleRemoveTool
 from ethan.tools.builtin.skill_create import SkillCreateTool
+from ethan.tools.builtin.acp import DelegateCodingTool
 from ethan.tools.builtin.shell import ShellTool
 from ethan.tools.builtin.search import RipgrepTool, FdTool
 from ethan.tools.builtin.web import WebFetchTool
@@ -68,6 +69,7 @@ def create_agent(model: str | None = None, channel: str = "web", user_id: str = 
     registry.register(ProcedureWriteTool(user_id=user_id))
     registry.register(ProfileUpdateTool(user_id=user_id))
     registry.register(SkillCreateTool(user_id=user_id))
+    registry.register(DelegateCodingTool(user_id=user_id))
 
     skills = SkillRegistry(user_id=user_id)
     skills.load()

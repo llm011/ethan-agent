@@ -6,6 +6,11 @@ export interface Usage {
   cache: number;
 }
 
+export interface Quote {
+  role: "user" | "assistant";
+  content: string;
+}
+
 export interface Message {
   role: "user" | "assistant";
   content: string;
@@ -16,4 +21,5 @@ export interface Message {
   usage?: Usage;
   ttft?: number;
   thought?: string;
+  quote?: Quote;
 }

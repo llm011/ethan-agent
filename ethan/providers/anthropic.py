@@ -70,12 +70,20 @@ class AnthropicProvider(BaseProvider):
             event_hooks={"request": [_clean_headers]},
         )
 
+        # 空字符串 api_key 会让 SDK 抛 "Could not resolve authentication method"。
+        # 转成 None，让 SDK fall back 到 ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN 环境变量。
+        api_key = provider_cfg.api_key or None
         self._client = anthropic.AsyncAnthropic(
-            api_key=provider_cfg.api_key,
+            api_key=api_key,
             base_url=provider_cfg.base_url,
             http_client=http_client,
         )
         self._model = model
+        self._provider_key = "anthropic"
+        self._api_key_configured = bool(api_key) or bool(
+            __import__("os").environ.get("ANTHROPIC_API_KEY")
+            or __import__("os").environ.get("ANTHROPIC_AUTH_TOKEN")
+        )
         self._disable_prompt_cache = getattr(provider_cfg, "disable_prompt_cache", False)
 
     @property
@@ -144,12 +152,21 @@ class AnthropicProvider(BaseProvider):
 
         return Message(role="assistant", content=text_content, tool_calls=tool_calls, usage=usage_dict)
 
+    def _check_auth(self) -> None:
+        """启动时未配置 api_key 且环境变量也没有时，给友好错误而非 SDK 晦涩报错。"""
+        if not self._api_key_configured:
+            raise RuntimeError(
+                "未配置 anthropic provider 的 api_key。请在 ~/.ethan/config.yaml 的 "
+                "providers.anthropic.api_key 填入密钥，或设置环境变量 ANTHROPIC_API_KEY。"
+            )
+
     async def chat(
         self,
         messages: list[Message],
         tools: list[ToolDefinition] | None = None,
         system: str | None = None,
     ) -> Message:
+        self._check_auth()
         kwargs: dict = {
             "model": self._model,
             "max_tokens": get_config().defaults.max_tokens,
@@ -169,6 +186,7 @@ class AnthropicProvider(BaseProvider):
         tools: list[ToolDefinition] | None = None,
         system: str | None = None,
     ) -> AsyncIterator[StreamChunk]:
+        self._check_auth()
         kwargs: dict = {
             "model": self._model,
             "max_tokens": get_config().defaults.max_tokens,

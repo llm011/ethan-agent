@@ -335,7 +335,9 @@ ethan                              启动交互式 REPL
 ethan -p "..."                     单轮对话
 ethan -m MODEL                     指定模型
 ethan -r last                      恢复上次会话
-ethan serve                        启动 HTTP API 服务
+ethan serve                        启动 HTTP API 服务（前台运行）
+ethan serve stop                   停止后台运行的 serve 进程
+ethan serve restart                重启后台 serve 进程
 
 ethan model list|add|remove|default
 ethan provider list|set
@@ -582,9 +584,9 @@ EOF
 ### 🚀 规划中
 
 **体验增强**
-- [ ] **消息引用**：引用某条历史消息进行对话（气泡右键 → 引用）
+- [x] **消息引用**：悬浮气泡显示引用按钮 → 输入框显示引用预览条；引用块以 `> [引用 ...]` 前缀注入给模型，原始消息干净入库
 - [ ] **用户设置**：头像上传、显示名称，显示在对话气泡中
-- [ ] **定时任务引导**：Agent 识别对话中潜在的定时需求，主动列出建议并询问用户是否创建
+- [x] **定时任务引导**：Agent 识别对话中模糊的周期性需求，主动列出 1-2-3 候选定时方案让用户选（明确指令则直接创建）
 - [ ] **复杂定时任务样例**：每日简报、设备巡检、定时知识整理等开箱即用模板
 
 **渠道扩展**
@@ -592,7 +594,7 @@ EOF
 - [ ] **移动端适配**：底部 Tab 导航、触摸手势、键盘弹起适配
 
 **Coding Agent 集成**
-- [ ] **ACP 持续对话优化**：Claude Code / OpenCode / Codex 多轮对话，工具过程折叠展示
+- [x] **ACP 持续对话优化**：`delegate_coding` 按「用户×工作目录」持久化 session_id，用 `--resume` 续接 Claude Code 多轮会话；stream-json 解析为 sub_steps，Web UI 时间轴折叠展示、最终结果高亮。OpenCode / Codex 也已接入（单轮）
 - [ ] **MCP client 完善**：连接外部 MCP server，自动注册工具
 
 **长期**

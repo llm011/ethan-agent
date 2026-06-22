@@ -215,7 +215,7 @@ def _build_agent(model: str | None = None, user_id: str = ""):
     registry.register(ProcedureWriteTool(user_id=uid))
     registry.register(ProfileUpdateTool(user_id=uid))
     registry.register(SkillCreateTool(user_id=uid))
-    registry.register(DelegateCodingTool())
+    registry.register(DelegateCodingTool(user_id=uid))
 
     skills = SkillRegistry(user_id=uid)
     skills.load()

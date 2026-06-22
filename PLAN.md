@@ -100,12 +100,12 @@ ethan/
 ## 🚧 待完成（按优先级）
 
 ### P0 核心体验
-- [ ] **`agent.md` 加入 system prompt 加载**：`_load_system_files()` 需加入 `"agent"`，`_build_system()` 注入为 `<agent_protocols>`，使主动写记忆指令生效
-- [ ] **ACP 持续对话优化**：跑通 Claude Code / OpenCode / Codex 的多轮对话，优化回复内容展示（工具调用过程折叠，最终结果高亮）
-- [ ] **定时任务引导**：Agent 在对话中识别到可能需要创建定时任务的场景，主动列出 1-2-3 问用户是否创建（soul.md 指令 + schedule_create 工具配合）
+- [x] **`agent.md` 加入 system prompt 加载**：`_load_system_files()` 已加载 `"agent"`，`_build_system()` 注入为 `<agent_protocols>`，主动写记忆指令生效
+- [x] **ACP 持续对话优化**：`delegate_coding` 支持 `--resume` 多轮会话（按「用户×工作目录」持久化 session_id），用 stream-json 解析 Coding Agent 的工具调用为 sub_steps；Web UI 时间轴折叠展示子步骤、最终结果高亮。Claude Code / OpenCode / Codex 三者均接入
+- [x] **定时任务引导**：soul.md 增加模糊场景主动引导规则——明确指令直接调 schedule_create，模糊周期需求主动列 1-2-3 候选方案让用户选
 
 ### P1 功能完善
-- [ ] **消息引用**：Web UI 支持引用某条消息进行对话（气泡右键菜单 → 引用，输入框显示引用预览）
+- [x] **消息引用**：Web UI 气泡悬浮显示引用按钮，输入框显示引用预览条；引用块以 `> [引用 ...]` 前缀注入给模型，原始消息干净入库
 - [ ] **用户设置**：头像上传、显示名称，头像显示在对话气泡中
 - [ ] **企业微信渠道**：参考 `lark_events.py`，接入企业微信 WebHook（WeCom）
 - [ ] **复杂定时任务样例**：提供几个开箱即用的实用定时任务模板（每日简报、定时检查 HA 设备、定时知识库整理）

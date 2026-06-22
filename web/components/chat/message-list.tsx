@@ -7,9 +7,10 @@ import type { Message } from "./types";
 interface MessageListProps {
   messages: Message[];
   streaming: boolean;
+  onQuote?: (msg: Message) => void;
 }
 
-export function MessageList({ messages, streaming }: MessageListProps) {
+export function MessageList({ messages, streaming, onQuote }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = useCallback(() => {
@@ -34,6 +35,7 @@ export function MessageList({ messages, streaming }: MessageListProps) {
             msg={msg}
             isStreaming={streaming}
             isLast={i === messages.length - 1}
+            onQuote={onQuote}
           />
         ))}
       </div>

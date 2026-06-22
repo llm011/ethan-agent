@@ -15,7 +15,7 @@
 - **Fast Path 路由**：轻量意图检测，简单命令（智能家居控制等）走极简 Prompt + 最快模型，跳过完整 Agent Loop
 - **网络搜索工具**：内置 `web_search`（DuckDuckGo 搜索，免费无需 API Key）和 `web_fetch`（抓取网页正文），让 Agent 随时获取互联网实时信息
 - **文件系统搜索**：rg（ripgrep）和 fd 作为内置工具，供 Agent 在本地文件系统中高效检索代码和文件
-- **ACP 集成**：`ethan code` 命令通过 PTY 持久会话将复杂编码任务委派给 Claude Code / OpenCode，结果回收进对话
+- **ACP 集成**：`delegate_coding` 工具 / `ethan code` 命令将复杂编码任务委派给 Claude Code / OpenCode / Codex；Claude Code 支持按工作目录续接多轮会话，工具调用过程解析为 sub_steps 在 Web UI 折叠展示
 - **知识库**：本地 Markdown 知识库 + sqlite-vec 语义检索（embedding 索引），支持 add/search/delete
 - **CLI (REPL)**：交互式会话管理，支持 `/sessions`、`/resume`、`/new` 等斜杠命令；会话来源标签（web/repl/lark）；自动生成标题；新用户 onboarding
 
@@ -33,5 +33,5 @@
 | [Skill 系统](./skills.md) | Skill 加载、关键词匹配注入、自动生成 |
 | [调度器](./scheduler.md) | 定时任务、cron + interval、SQLite 持久化 |
 | [接口层](./interface.md) | CLI (REPL)、HTTP API (SSE)、命令行工具、Web UI 路由 |
-| [ACP 集成](./acp.md) | 外部 Coding Agent 委派协议、Claude Code / OpenCode 接入、PTY 会话 |
+| [ACP 集成](./acp.md) | 外部 Coding Agent 委派协议、Claude Code / OpenCode / Codex 接入、多轮会话、sub_steps 解析 |
 | Feishu/Lark 集成 | WebSocket 长连接、消息格式、onboarding 流程（见 `ethan/interface/lark_events.py`） |

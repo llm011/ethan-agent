@@ -52,17 +52,23 @@ class ToolExecutor:
                 return ToolResult(tool_call_id=tc.id, content=self._cache[cache_key])
 
         try:
-            result = await tool.run(**tc.arguments)
+            out = await tool.run(**tc.arguments)
+            # 工具可返回 str（普通）或 ToolResult（携带 sub_steps 等元信息）
+            if isinstance(out, ToolResult):
+                result = out
+                result.tool_call_id = tc.id  # 工具自身不知道 call id，由执行器回填
+            else:
+                result = ToolResult(tool_call_id=tc.id, content=out)
 
             if tool.cacheable:
-                self._cache[cache_key] = result  # type: ignore[possibly-undefined]
+                self._cache[cache_key] = result.content
 
-            # 超长结果用廉价模型压缩
-            if len(result) > _COMPRESS_THRESHOLD:
+            # 超长结果用廉价模型压缩（只压缩 content，保留 sub_steps）
+            if len(result.content) > _COMPRESS_THRESHOLD:
                 from ethan.tools.result_compressor import maybe_compress
-                result = await maybe_compress(tc.name, result)
+                result.content = await maybe_compress(tc.name, result.content)
 
-            return ToolResult(tool_call_id=tc.id, content=result)
+            return result
         except Exception as e:
             return ToolResult(
                 tool_call_id=tc.id,

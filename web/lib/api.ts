@@ -75,6 +75,13 @@ export interface SessionDetail {
       state: string;
       duration_ms?: number | null;
       result_preview?: string;
+      sub_steps?: Array<{
+        tool: string;
+        args: string;
+        state: string;
+        duration_ms?: number | null;
+        result_preview?: string;
+      }>;
     }>;
   }[];
 }
@@ -308,11 +315,12 @@ export async function* streamChat(
   messages: ChatMessage[],
   model?: string,
   sessionId?: string,
-): AsyncGenerator<{ content?: string; done?: boolean; error?: string; model?: string; usage?: Record<string, number>; tool?: string; args?: string; state?: string; duration_ms?: number; result_preview?: string }> {
+  quote?: { role: "user" | "assistant"; content: string } | null,
+): AsyncGenerator<{ content?: string; done?: boolean; error?: string; model?: string; usage?: Record<string, number>; tool?: string; args?: string; state?: string; duration_ms?: number; result_preview?: string; sub_steps?: Array<{ tool: string; args: string; state: string; duration_ms?: number | null; result_preview?: string }> }> {
   const res = await fetch(`${API_URL}/chat`, {
     method: "POST",
     headers: headers(),
-    body: JSON.stringify({ messages, model, stream: true, session_id: sessionId }),
+    body: JSON.stringify({ messages, model, stream: true, session_id: sessionId, quote: quote ?? undefined }),
   });
 
   if (!res.ok) {

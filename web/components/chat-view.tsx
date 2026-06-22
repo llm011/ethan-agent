@@ -12,7 +12,7 @@ import {
   fetchOnboardingStatus,
 } from "@/lib/api";
 import type { ToolStep } from "@/components/tool-timeline";
-import type { Message, Usage } from "@/components/chat/types";
+import type { Message, Usage, Quote } from "@/components/chat/types";
 import { ChatHeader } from "@/components/chat/chat-header";
 import { MessageList } from "@/components/chat/message-list";
 import { ChatInput } from "@/components/chat/chat-input";
@@ -33,6 +33,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const [models, setModels] = useState<{ id: string; description: string }[]>([]);
   const [selectedModel, setSelectedModel] = useState("");
   const [pendingFiles, setPendingFiles] = useState<{ name: string; path: string }[]>([]);
+  const [quote, setQuote] = useState<Quote | null>(null);
   const [schedules, setSchedules] = useState<any[]>([]);
   const [showOnboarding, setShowOnboarding] = useState(false);
 
@@ -62,6 +63,13 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
                     state: s.state as "running" | "done" | "error",
                     duration_ms: s.duration_ms,
                     result_preview: s.result_preview,
+                    sub_steps: s.sub_steps?.map((ss: any) => ({
+                      tool: ss.tool,
+                      args: ss.args,
+                      state: ss.state as "running" | "done" | "error",
+                      duration_ms: ss.duration_ms ?? undefined,
+                      result_preview: ss.result_preview,
+                    })),
                   }))
                 : undefined,
               toolsExpanded: false,
@@ -140,10 +148,18 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       content = `${fileContext}\n\n${text}`;
     }
 
-    const userMsg: Message = { role: "user", content, files: pendingFiles.map((f) => f.name), created_at: Date.now() / 1000 };
+    const userMsg: Message = {
+      role: "user",
+      content,
+      files: pendingFiles.map((f) => f.name),
+      created_at: Date.now() / 1000,
+      quote: quote ?? undefined,
+    };
     const newMessages = [...messages, userMsg];
     setMessages(newMessages);
+    const sentQuote = quote;
     setPendingFiles([]);
+    setQuote(null);
     setStreaming(true);
 
     const chatMessages: ChatMessage[] = newMessages.map((m) => ({ role: m.role, content: m.content }));
@@ -157,7 +173,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     setMessages([...newMessages, { role: "assistant", content: "", created_at: Date.now() / 1000 }]);
 
     try {
-      for await (const chunk of streamChat(chatMessages, selectedModel, sessionId)) {
+      for await (const chunk of streamChat(chatMessages, selectedModel, sessionId, sentQuote)) {
         if (ttft === undefined) ttft = Date.now() - sendTime;
 
         if (chunk.error) {
@@ -183,6 +199,13 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
                 state: chunk.state as "done" | "error",
                 duration_ms: chunk.duration_ms,
                 result_preview: chunk.result_preview,
+                sub_steps: chunk.sub_steps?.map((s) => ({
+                  tool: s.tool,
+                  args: s.args,
+                  state: s.state as "running" | "done" | "error",
+                  duration_ms: s.duration_ms ?? undefined,
+                  result_preview: s.result_preview,
+                })),
               };
               break;
             }
@@ -241,7 +264,14 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         onTitleChange={setSessionTitle}
       />
 
-      <MessageList messages={messages} streaming={streaming} />
+      <MessageList
+        messages={messages}
+        streaming={streaming}
+        onQuote={(m) => {
+          setQuote({ role: m.role, content: m.content });
+          setTimeout(() => inputRef.current?.focus(), 30);
+        }}
+      />
 
       <div>
         <div className="max-w-3xl mx-auto px-4 pt-4">
@@ -252,10 +282,12 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           models={models}
           selectedModel={selectedModel}
           pendingFiles={pendingFiles}
+          quote={quote}
           inputRef={inputRef}
           onModelChange={setSelectedModel}
           onSend={handleSend}
           onFilesChange={setPendingFiles}
+          onQuoteCancel={() => setQuote(null)}
         />
       </div>
     </div>

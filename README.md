@@ -346,7 +346,9 @@ ethan                              Start interactive REPL
 ethan -p "..."                     Single-turn query
 ethan -m MODEL                     Use specific model
 ethan -r last                      Resume last session
-ethan serve                        Start HTTP API server
+ethan serve                        Start HTTP API server (foreground)
+ethan serve stop                   Stop background serve process
+ethan serve restart                Restart background serve process
 
 ethan model list|add|remove|default
 ethan provider list|set
@@ -489,9 +491,9 @@ Environment variables in `.env` override config values (useful for secrets).
 ### 🚀 Planned
 
 **UX Improvements**
-- [ ] **Message quoting**: quote a previous message in the input box
+- [x] **Message quoting**: hover a chat bubble → quote button → quote preview bar in input box; quote block injected to model, original message stays clean
 - [ ] **User profile settings**: avatar upload, display name shown in chat bubbles
-- [ ] **Scheduler suggestions**: Agent detects scheduling opportunities in conversation and prompts user with 1-2-3 options
+- [x] **Scheduler suggestions**: Agent detects ambiguous periodic needs in conversation and proactively lists 1-2-3 candidate schedules (clear intent → creates directly)
 - [ ] **Scheduler templates**: ready-to-use tasks (daily briefing, HA device check, knowledge digest)
 
 **Channel Expansion**
@@ -499,7 +501,7 @@ Environment variables in `.env` override config values (useful for secrets).
 - [ ] **Mobile UI**: bottom tab nav, touch gestures, keyboard inset handling
 
 **Coding Agent Integration**
-- [ ] **ACP multi-turn optimization**: smoother Claude Code / OpenCode / Codex sessions with collapsible tool traces
+- [x] **ACP multi-turn optimization**: `delegate_coding` resumes Claude Code sessions per (user × working_dir) via `--resume`; stream-json parsed into collapsible sub-steps in the Web UI tool timeline with highlighted final result. OpenCode / Codex also wired in (single-turn)
 - [ ] **MCP client**: connect external MCP servers, auto-register tools
 
 **Long-term**

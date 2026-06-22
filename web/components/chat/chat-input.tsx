@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useRef, RefObject } from "react";
-import { Send, Paperclip, Loader2 } from "lucide-react";
+import { Send, Paperclip, Loader2, X, Reply } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { uploadFile } from "@/lib/api";
+import type { Quote } from "./types";
 
 interface PendingFile {
   name: string;
@@ -15,10 +16,12 @@ interface ChatInputProps {
   models: { id: string; description: string }[];
   selectedModel: string;
   pendingFiles: PendingFile[];
+  quote: Quote | null;
   inputRef: RefObject<HTMLTextAreaElement | null>;
   onModelChange: (model: string) => void;
   onSend: (text: string) => void;
   onFilesChange: (files: PendingFile[]) => void;
+  onQuoteCancel: () => void;
 }
 
 export function ChatInput({
@@ -26,10 +29,12 @@ export function ChatInput({
   models,
   selectedModel,
   pendingFiles,
+  quote,
   inputRef,
   onModelChange,
   onSend,
   onFilesChange,
+  onQuoteCancel,
 }: ChatInputProps) {
   const [input, setInput] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
@@ -67,6 +72,24 @@ export function ChatInput({
   return (
     <div className="p-4">
       <div className="max-w-3xl mx-auto">
+        {quote && (
+          <div className="flex items-center gap-2 mb-2 px-3 py-1.5 rounded-md bg-muted/60 border border-border/60 text-xs">
+            <Reply className="h-3 w-3 shrink-0 text-muted-foreground" />
+            <span className="text-muted-foreground shrink-0">
+              {quote.role === "user" ? "我" : "Ethan"}:
+            </span>
+            <span className="truncate text-muted-foreground/80 flex-1">
+              {quote.content.replace(/\n/g, " ")}
+            </span>
+            <button
+              onClick={onQuoteCancel}
+              className="text-muted-foreground hover:text-foreground shrink-0"
+              title="取消引用"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        )}
         {pendingFiles.length > 0 && (
           <div className="flex gap-2 mb-2 flex-wrap">
             {pendingFiles.map((f, i) => (

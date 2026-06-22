@@ -390,7 +390,7 @@ class Agent:
 
             for r, tc in zip(results, tool_calls):
                 preview = r.content[:60].replace("\n", " ") if r.content else ""
-                yield ToolEvent(tool_name=tc.name, args_summary="", state="done" if not r.is_error else "error", result_preview=preview)
+                yield ToolEvent(tool_name=tc.name, args_summary="", state="done" if not r.is_error else "error", result_preview=preview, sub_steps=getattr(r, "sub_steps", []) or [])
                 working.append(Message(
                     role="tool",
                     content=r.content,

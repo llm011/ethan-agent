@@ -48,6 +48,7 @@ class ToolEvent:
     args_summary: str
     state: str  # "start" | "done" | "error"
     result_preview: str = ""
+    sub_steps: list = field(default_factory=list)  # 委派类工具（如 delegate_coding）的子步骤
 
 
 class BaseProvider(ABC):

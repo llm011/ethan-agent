@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from ethan.providers.base import ToolDefinition
@@ -10,6 +10,7 @@ class ToolResult:
     tool_call_id: str
     content: str
     is_error: bool = False
+    sub_steps: list = field(default_factory=list)  # 委派类工具的子步骤（如 delegate_coding 的 Coding Agent 工具调用）
 
 
 class BaseTool(ABC):
@@ -29,7 +30,7 @@ class BaseTool(ABC):
     def parameters(self) -> dict[str, Any]: ...
 
     @abstractmethod
-    async def run(self, **kwargs) -> str: ...
+    async def run(self, **kwargs) -> str | ToolResult: ...
 
     def to_definition(self) -> ToolDefinition:
         return ToolDefinition(

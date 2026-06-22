@@ -3,6 +3,7 @@
 import Image from "next/image";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { Quote as QuoteIcon } from "lucide-react";
 import { ToolTimeline } from "@/components/tool-timeline";
 import { CodeBlock } from "@/components/code-block";
 import { PlainCodeBlock } from "@/components/plain-code-block";
@@ -32,38 +33,58 @@ interface MessageBubbleProps {
   msg: Message;
   isStreaming: boolean;
   isLast: boolean;
+  onQuote?: (msg: Message) => void;
 }
 
-export function MessageBubble({ msg, isStreaming, isLast }: MessageBubbleProps) {
+export function MessageBubble({ msg, isStreaming, isLast, onQuote }: MessageBubbleProps) {
   return (
-    <div className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"} gap-2`}>
+    <div className={`group flex ${msg.role === "user" ? "justify-end" : "justify-start"} gap-2`}>
       {msg.role === "assistant" && (
         <div className="flex-shrink-0 mt-1">
           <Image src="/logo-avatar.png" alt="Ethan" width={28} height={28} className="rounded-full" />
         </div>
       )}
-      <div
-        className={`max-w-[90%] md:max-w-[80%] rounded-2xl px-4 py-3 ${
-          msg.role === "user"
-            ? "bg-primary text-primary-foreground"
-            : "bg-muted prose prose-sm dark:prose-invert max-w-none"
-        }`}
-      >
-        {msg.role === "user" ? (
-          <>
-            {msg.files && msg.files.length > 0 && (
-              <div className="text-xs opacity-70 mb-1">
-                {msg.files.map((f, j) => <span key={j} className="mr-2">📎 {f}</span>)}
-              </div>
-            )}
-            <p className="whitespace-pre-wrap">{msg.content.replace(/^(\[Uploaded file: [^\]]+\]\n)+\n?/, '')}</p>
-            {msg.created_at && (
-              <div className="text-[10px] opacity-40 mt-1 text-right">
-                {formatTime(msg.created_at)}
-              </div>
-            )}
-          </>
-        ) : (
+      <div className="relative max-w-[90%] md:max-w-[80%]">
+        {/* 悬浮引用按钮 */}
+        {onQuote && !isStreaming && (
+          <button
+            onClick={() => onQuote(msg)}
+            className={`absolute -top-2 ${msg.role === "user" ? "-left-7" : "-right-7"} opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 flex items-center justify-center rounded-md bg-muted border border-border text-muted-foreground hover:text-foreground hover:bg-accent`}
+            title="引用此消息"
+          >
+            <QuoteIcon className="h-3 w-3" />
+          </button>
+        )}
+        <div
+          className={`rounded-2xl px-4 py-3 ${
+            msg.role === "user"
+              ? "bg-primary text-primary-foreground"
+              : "bg-muted prose prose-sm dark:prose-invert max-w-none"
+          }`}
+        >
+          {msg.role === "user" ? (
+            <>
+              {msg.quote && (
+                <div className="mb-1.5 pl-2 border-l-2 border-primary-foreground/40 text-xs opacity-80">
+                  <div className="font-medium opacity-70">
+                    {msg.quote.role === "user" ? "引用 我" : "引用 Ethan"}
+                  </div>
+                  <p className="truncate opacity-70">{msg.quote.content.replace(/\n/g, " ")}</p>
+                </div>
+              )}
+              {msg.files && msg.files.length > 0 && (
+                <div className="text-xs opacity-70 mb-1">
+                  {msg.files.map((f, j) => <span key={j} className="mr-2">📎 {f}</span>)}
+                </div>
+              )}
+              <p className="whitespace-pre-wrap">{msg.content.replace(/^(\[Uploaded file: [^\]]+\]\n)+\n?/, '')}</p>
+              {msg.created_at && (
+                <div className="text-[10px] opacity-40 mt-1 text-right">
+                  {formatTime(msg.created_at)}
+                </div>
+              )}
+            </>
+          ) : (
           <>
             {msg.thought && (
               <details className="mb-2 border border-border/50 bg-background/50 rounded-lg overflow-hidden group">
@@ -114,6 +135,7 @@ export function MessageBubble({ msg, isStreaming, isLast }: MessageBubbleProps) 
         {msg.role === "assistant" && isStreaming && isLast && (
           <span className="inline-block w-2 h-4 bg-foreground/50 animate-pulse ml-0.5" />
         )}
+        </div>
       </div>
     </div>
   );
