@@ -72,6 +72,7 @@ class AgentSettingsPatch(BaseModel):
     agent_name: str | None = None
     language: str | None = None
     default_model: str | None = None
+    lite_model: str | None = None
     heartbeat_enabled: bool | None = None
     heartbeat_interval_minutes: int | None = None
     proxy: str | None = None
@@ -90,6 +91,7 @@ async def get_agent_settings():
         "agent_name": config.defaults.agent_name,
         "language": config.defaults.language,
         "default_model": config.defaults.model,
+        "lite_model": config.defaults.lite_model,
         "heartbeat_enabled": config.defaults.heartbeat.enabled,
         "heartbeat_interval_minutes": config.defaults.heartbeat.interval_minutes,
         "proxy": config.network.proxy or "",
@@ -110,6 +112,8 @@ async def update_agent_settings(req: AgentSettingsPatch):
         config.defaults.language = req.language
     if req.default_model is not None:
         config.defaults.model = req.default_model
+    if req.lite_model is not None:
+        config.defaults.lite_model = req.lite_model or ""
     if req.workspace is not None:
         config.defaults.workspace = req.workspace
     if req.heartbeat_enabled is not None:

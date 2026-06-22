@@ -52,11 +52,20 @@ def _infer_cheap_model(main_model: str) -> str:
     return main_model
 
 
+def get_lite_model(main_model: str | None = None) -> str:
+    """获取轻量模型：优先 config.defaults.lite_model，空则按主模型推断。"""
+    from ethan.core.config import get_config
+    cfg = get_config()
+    if cfg.defaults.lite_model:
+        return cfg.defaults.lite_model
+    return _infer_cheap_model(main_model or cfg.defaults.model)
+
+
 class Consolidator:
     """用廉价模型做记忆压缩。"""
 
     def __init__(self, main_model: str, summary_model: str | None = None):
-        self._cheap_model = summary_model or _infer_cheap_model(main_model)
+        self._cheap_model = summary_model or get_lite_model(main_model)
         self._provider: BaseProvider | None = None
 
     async def _get_provider(self) -> BaseProvider:

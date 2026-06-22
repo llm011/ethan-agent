@@ -577,13 +577,13 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
         await store.save_message(session.id, msg)
         approx_tokens += len(user_input)
 
-        # 第一条用户消息时用 _auto_title 占位；第 3 轮后改用智能标题
+        # 第一条用户消息时用 _auto_title 占位；第 2 轮后改用智能标题
         user_msgs = [m for m in history if m.role == "user"]
         if len(user_msgs) == 1:
             title = _auto_title(history)
             await store.update_title(session.id, title)
             session.title = title
-        elif len(user_msgs) == 3:
+        elif len(user_msgs) == 2:
             async def _regen_title():
                 t = await _generate_smart_title(history)
                 await store.update_title(session.id, t)

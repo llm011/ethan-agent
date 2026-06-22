@@ -2,7 +2,7 @@
 import logging
 
 from ethan.core.config import get_config
-from ethan.memory.consolidator import _infer_cheap_model
+from ethan.memory.consolidator import get_lite_model
 from ethan.providers.base import Message
 from ethan.providers.manager import create_provider
 
@@ -18,7 +18,7 @@ async def maybe_compress(tool_name: str, result: str, context: str = "") -> str:
         return result
 
     cfg = get_config()
-    cheap_model = _infer_cheap_model(cfg.defaults.model)
+    cheap_model = get_lite_model(cfg.defaults.model)
 
     prompt = (
         f"以下是工具 `{tool_name}` 的执行结果：\n\n"

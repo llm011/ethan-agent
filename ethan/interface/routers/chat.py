@@ -221,7 +221,7 @@ async def _maybe_regen_title(session_id: str, store: SessionStore) -> None:
         if not session:
             return
         user_turns = sum(1 for m in session.messages if m.role == "user")
-        if user_turns != 3:
+        if user_turns != 2:
             return
         title = await _generate_smart_title(session.messages)
         await store.update_title(session_id, title)

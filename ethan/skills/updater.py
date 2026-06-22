@@ -48,11 +48,11 @@ def _find_user_skill_file(skill_name: str, user_id: str = "") -> Path | None:
 
 async def _merge_corrections(current_content: str, corrections: list[str]) -> str:
     from ethan.core.config import get_config
-    from ethan.memory.consolidator import _infer_cheap_model
+    from ethan.memory.consolidator import get_lite_model
     from ethan.providers.base import Message
     from ethan.providers.manager import create_provider
     cfg = get_config()
-    cheap_model = _infer_cheap_model(cfg.defaults.model)
+    cheap_model = get_lite_model(cfg.defaults.model)
     corrections_text = "\n".join(f"- {c}" for c in corrections)
     prompt = (
         f"Skill 当前内容：\n<current_skill>\n{current_content}\n</current_skill>\n\n"

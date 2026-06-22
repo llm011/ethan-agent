@@ -45,8 +45,8 @@ async def _consolidate_facts_for_user(user_id: str) -> None:
     )
 
     cfg = get_config()
-    from ethan.memory.consolidator import _infer_cheap_model
-    cheap_model = _infer_cheap_model(cfg.defaults.model)
+    from ethan.memory.consolidator import get_lite_model
+    cheap_model = get_lite_model(cfg.defaults.model)
     try:
         provider = create_provider(cheap_model)
         resp = await provider.chat(

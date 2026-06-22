@@ -57,11 +57,11 @@ class SkillGenerator:
         # 用廉价模型分析
         provider = self._provider
         try:
-            from ethan.memory.consolidator import _infer_cheap_model
+            from ethan.memory.consolidator import get_lite_model
             from ethan.core.config import get_config
             from ethan.providers.manager import create_provider
             cfg = get_config()
-            cheap_model = _infer_cheap_model(cfg.defaults.model)
+            cheap_model = get_lite_model(cfg.defaults.model)
             provider = create_provider(cheap_model)
         except Exception:
             pass

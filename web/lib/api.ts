@@ -143,6 +143,7 @@ export interface AgentSettings {
   agent_name: string;
   language: string;
   default_model: string;
+  lite_model: string;
   heartbeat_enabled: boolean;
   heartbeat_interval_minutes: number;
   proxy: string;

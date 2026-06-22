@@ -63,6 +63,7 @@ class HeartbeatConfig(BaseModel):
 class DefaultsConfig(BaseModel):
     workspace: str = str(Path.home() / ".ethan")
     model: str = "claude-sonnet-4.6"
+    lite_model: str = ""  # 轻量模型，用于记忆压缩/标题生成/skill 生成等（空则按主模型推断）
     agent_name: str = "Ethan"
     language: str = "zh"
     max_tokens: int = 4096

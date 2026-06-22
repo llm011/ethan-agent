@@ -46,7 +46,7 @@ def _auto_title(messages: list[Message]) -> str:
 async def _generate_smart_title(messages: list[Message]) -> str:
     """第 3 轮对话后用廉价模型生成 ≤20 字的简洁标题。"""
     from ethan.providers.manager import create_provider
-    from ethan.memory.consolidator import _infer_cheap_model
+    from ethan.memory.consolidator import get_lite_model
     from ethan.core.config import get_config
 
     turns = [(m.role, m.content[:100]) for m in messages if m.role in ("user", "assistant") and m.content][:6]
@@ -58,7 +58,7 @@ async def _generate_smart_title(messages: list[Message]) -> str:
 
     try:
         cfg = get_config()
-        cheap_model = _infer_cheap_model(cfg.defaults.model)
+        cheap_model = get_lite_model(cfg.defaults.model)
         provider = create_provider(cheap_model)
         resp = await provider.chat([Message(role="user", content=prompt)],
                                    system="你是一个标题生成助手，只输出标题，不加引号或标点。")

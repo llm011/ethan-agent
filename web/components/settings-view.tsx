@@ -274,6 +274,7 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
     agent_name: "",
     language: "zh",
     default_model: "",
+    lite_model: "",
     heartbeat_enabled: true,
     heartbeat_interval_minutes: 10,
     proxy: "",
@@ -428,6 +429,27 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
                           ))}
                         </SelectContent>
                       </Select>
+                    </div>
+
+                    <div className="grid gap-2">
+                      <label className="text-sm font-medium">轻量模型（可选）</label>
+                      <Select
+                        value={agentForm.lite_model}
+                        onValueChange={(val) => setAgentForm({ ...agentForm, lite_model: val || "" })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="留空则按主模型推断" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="">留空（自动推断）</SelectItem>
+                          {models.map((m) => (
+                            <SelectItem key={m.id} value={m.id}>
+                              {m.description || m.id}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">用于记忆压缩、智能标题、skill 自生成等后台任务，选个便宜快的。</p>
                     </div>
 
                     <div className="grid gap-2">
