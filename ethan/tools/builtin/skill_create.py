@@ -39,8 +39,19 @@ class SkillCreateTool(BaseTool):
     def __init__(self, user_id: str = ""):
         self._user_id = user_id
 
-    async def run(self, name: str, description: str, trigger: list[str], content: str) -> str:
+    async def run(self, name: str, description: str, trigger: list[str] | None = None, content: str = "") -> str:
         from ethan.core.paths import user_skills_dir
+
+        # 参数校验：缺任何一个都返回明确错误，不要静默创建空 skill
+        if not name or not name.strip():
+            return "Error: name is required."
+        if not description or not description.strip():
+            return "Error: description is required."
+        if not trigger:
+            return "Error: trigger is required (a non-empty list of keywords)."
+        if not content or not content.strip():
+            return "Error: content is required (the skill's Markdown body)."
+
         # Sanitize name to prevent path traversal
         safe_name = "".join(c for c in name if c.isalnum() or c in "-_")
         if not safe_name:
@@ -52,8 +63,11 @@ class SkillCreateTool(BaseTool):
         if skill_path.exists() or (skills_dir / f"{safe_name}.md").exists():
             return f"Skill '{safe_name}' already exists. Not overwriting."
 
-        skill_dir.mkdir(parents=True, exist_ok=True)
-        frontmatter = {"name": safe_name, "description": description, "trigger": trigger}
-        text = f"---\n{yaml.dump(frontmatter, allow_unicode=True, sort_keys=False)}---\n\n{content}"
-        skill_path.write_text(text, encoding="utf-8")
+        try:
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            frontmatter = {"name": safe_name, "description": description, "trigger": trigger}
+            text = f"---\n{yaml.dump(frontmatter, allow_unicode=True, sort_keys=False)}---\n\n{content}"
+            skill_path.write_text(text, encoding="utf-8")
+        except Exception as e:
+            return f"Error creating skill '{safe_name}': {e}"
         return f"Skill '{safe_name}' created at {skill_path}"
