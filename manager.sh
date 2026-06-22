@@ -11,8 +11,8 @@ BACKEND_PID_FILE="$PID_DIR/backend.pid"
 FRONTEND_PID_FILE="$PID_DIR/frontend.pid"
 BACKEND_LOG="$PID_DIR/backend.log"
 FRONTEND_LOG="$PID_DIR/frontend.log"
-BACKEND_PORT=8900
-FRONTEND_PORT=3000
+BACKEND_PORT="${BACKEND_PORT:-8900}"
+FRONTEND_PORT="${FRONTEND_PORT:-3000}"
 
 mkdir -p "$PID_DIR"
 
@@ -109,7 +109,7 @@ start_backend() {
     fi
     echo "[后端] 启动中..."
     cd "$PROJECT_ROOT"
-    nohup uv run ethan serve >> "$BACKEND_LOG" 2>&1 &
+    nohup uv run ethan serve --port "$BACKEND_PORT" >> "$BACKEND_LOG" 2>&1 &
     local bgpid=$!
     echo "$bgpid" > "$BACKEND_PID_FILE"
 
@@ -128,12 +128,14 @@ start_frontend() {
     fi
     echo "[前端] 启动中..."
     cd "$PROJECT_ROOT/web"
-    nohup npm run dev >> "$FRONTEND_LOG" 2>&1 &
+    # NEXT_OUTPUT=standalone：动态路由 /chat/[id] 支持运行时任意 id（export 模式会 Runtime Error）
+    # NEXT_PUBLIC_API_URL：前端 dev 连本地后端，避免打到 Docker 容器
+    nohup env NEXT_OUTPUT=standalone NEXT_PUBLIC_API_URL="http://localhost:${BACKEND_PORT}/api" npm run dev >> "$FRONTEND_LOG" 2>&1 &
     local bgpid=$!
     echo "$bgpid" > "$FRONTEND_PID_FILE"
 
     if wait_for_port "$FRONTEND_PORT" 30; then
-        echo "[前端] 已就绪 http://localhost:$FRONTEND_PORT (PID: $bgpid)"
+        echo "[前端] 已就绪 http://localhost:$FRONTEND_PORT (PID: $bgpid, → 后端 $BACKEND_PORT)"
     else
         echo "[前端] 警告：启动超时，请检查日志: $FRONTEND_LOG"
         tail -5 "$FRONTEND_LOG" | sed 's/^/  /'

@@ -214,7 +214,8 @@ def load_config() -> Config:
     need_save = False
     if not config.network.auth_token:
         import secrets
-        config.network.auth_token = secrets.token_hex(6)
+        # 128 位随机 token（32 字符十六进制），抗暴力破解
+        config.network.auth_token = secrets.token_hex(16)
         need_save = True
 
     # default profile 隐式存在，users 为空时不再生成 admin 条目

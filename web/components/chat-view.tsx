@@ -10,6 +10,7 @@ import {
   fetchSchedules,
   streamChat,
   fetchOnboardingStatus,
+  fetchAgentSettings,
 } from "@/lib/api";
 import type { ToolStep } from "@/components/tool-timeline";
 import type { Message, Usage, Quote } from "@/components/chat/types";
@@ -110,10 +111,17 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   }, [initialSessionId]);
 
   useEffect(() => {
-    fetchModels().then((m) => {
+    // 加载模型列表 + agent 设置（取 default_model 作为新建对话的默认选中）
+    Promise.all([fetchModels(), fetchAgentSettings()]).then(([m, settings]) => {
       setModels(m);
-      if (m.length > 0) setSelectedModel((prev) => prev || m[0].id);
-    }).catch(() => {});
+      // 仅当当前没选中模型时初始化：优先用 default_model，否则列表第一个
+      setSelectedModel((prev) => prev || settings.default_model || (m.length > 0 ? m[0].id : ""));
+    }).catch(() => {
+      fetchModels().then((m) => {
+        setModels(m);
+        if (m.length > 0) setSelectedModel((prev) => prev || m[0].id);
+      }).catch(() => {});
+    });
   }, []);
 
   // Only fetch schedules for scheduled-task sessions
@@ -256,11 +264,12 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       return [...newMessages, { role: "assistant", content: assistantContent, thought: assistantThought, created_at: Date.now() / 1000, usage: finalUsage, ttft }];
     });
     setStreaming(false);
-    // 流式结束后再更新 URL，此时 session 已有消息，不会触发空消息覆盖
+    // 新建会话流式结束后，改地址栏 URL 让用户能复制/刷新。
+    // 用 window.history.replaceState 而非 router.replace：前者只改 URL 不触发
+    // Next 路由导航，避免 /chat → /chat/[id] 跨路由导致 ChatView 卸载重建（state 丢失、刷新）。
     if (!initialSessionId && sessionId) {
-      // 标记：本次 URL 变更是流式完成后由本组件发起的，useEffect 应跳过重新 fetch
       justFinishedRef.current = sessionId;
-      router.replace(`/chat/${sessionId}`);
+      window.history.replaceState(null, "", `/chat/${sessionId}`);
     }
   };
 

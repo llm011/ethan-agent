@@ -1,7 +1,9 @@
 export const API_URL = typeof window !== "undefined"
-  ? (window.location.port === "8900"
-    ? `${window.location.origin}/api`
-    : `${window.location.protocol}//${window.location.hostname === "localhost" ? "127.0.0.1" : window.location.hostname}:8900/api`)
+  ? (process.env.NEXT_PUBLIC_API_URL
+    ? process.env.NEXT_PUBLIC_API_URL
+    : window.location.port === "8900"
+      ? `${window.location.origin}/api`
+      : `${window.location.protocol}//${window.location.hostname === "localhost" ? "127.0.0.1" : window.location.hostname}:8900/api`)
   : (process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8900/api");
 
 let authToken = "";
@@ -42,11 +44,41 @@ export async function verifyAuth(token: string): Promise<boolean> {
   return res.ok;
 }
 
-export async function fetchModels(): Promise<{ id: string; description: string; alias: string[] }[]> {
+export interface ModelEntry {
+  id: string;
+  provider: string;
+  description: string;
+  alias: string[];
+}
+
+export async function fetchModels(): Promise<ModelEntry[]> {
   const res = await fetch(`${API_URL}/models`, { headers: headers() });
   if (!res.ok) throw new Error("Failed to fetch models");
   const data = await res.json();
   return data.models;
+}
+
+export async function addModel(m: ModelEntry): Promise<{ ok: boolean; error?: string }> {
+  const res = await fetch(`${API_URL}/models`, {
+    method: "POST", headers: { ...headers(), "Content-Type": "application/json" },
+    body: JSON.stringify(m),
+  });
+  return res.json();
+}
+
+export async function deleteModel(provider: string, modelId: string): Promise<{ ok: boolean; error?: string }> {
+  const res = await fetch(`${API_URL}/models/${encodeURIComponent(provider)}/${encodeURIComponent(modelId)}`, {
+    method: "DELETE", headers: headers(),
+  });
+  return res.json();
+}
+
+export async function discoverModels(provider: string): Promise<{ ok: boolean; models?: (ModelEntry & { exists?: boolean })[]; error?: string; url?: string }> {
+  const res = await fetch(`${API_URL}/models/discover`, {
+    method: "POST", headers: { ...headers(), "Content-Type": "application/json" },
+    body: JSON.stringify({ provider }),
+  });
+  return res.json();
 }
 
 export interface SessionInfo {
@@ -449,6 +481,18 @@ export async function saveSkill(skill: SkillInfo): Promise<{ name: string }> {
     body: JSON.stringify(skill)
   });
   if (!res.ok) throw new Error("Failed to save skill");
+  return res.json();
+}
+
+export async function deleteSkill(name: string): Promise<{ ok: boolean; removed?: string[]; error?: string }> {
+  const res = await fetch(`${API_URL}/skills/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+    headers: headers(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    return { ok: false, error: err.detail || `Failed (${res.status})` };
+  }
   return res.json();
 }
 

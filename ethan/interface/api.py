@@ -11,7 +11,7 @@ from ethan import __version__
 from ethan.core.heartbeat import start_heartbeat, stop_heartbeat
 from ethan.memory.api_keys import APIKeyStore
 
-from ethan.interface.routers import chat, sessions, settings, memory, schedule, knowledge, skills, docs, completions, logs
+from ethan.interface.routers import chat, sessions, settings, memory, schedule, knowledge, skills, docs, completions, logs, models
 
 try:
     from ethan.interface.lark import lark_router
@@ -71,6 +71,7 @@ app.include_router(skills.router, prefix="/api")
 app.include_router(docs.router, prefix="/api")
 app.include_router(completions.router)  # /v1 OpenAI-compat, no /api prefix
 app.include_router(logs.router, prefix="/api")
+app.include_router(models.router, prefix="/api")
 
 if _WEB_DIST.exists():
     app.mount("/_next", StaticFiles(directory=str(_WEB_DIST / "_next")), name="next-static")

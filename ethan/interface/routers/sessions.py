@@ -38,12 +38,6 @@ async def auth(req: AuthRequest):
     }
 
 
-@router.get("/models", dependencies=[Depends(verify_token)])
-async def list_models():
-    config = get_config()
-    return {"models": [m.model_dump() for m in config.models]}
-
-
 @router.get("/sessions")
 async def list_sessions(limit: int = 50, offset: int = 0, q: str | None = None, user_id: str = Depends(verify_token)):
     from ethan.core.paths import user_sessions_db_path

@@ -160,7 +160,7 @@ def web_token(
 
     if rotate:
         import secrets
-        config.network.auth_token = secrets.token_hex(6)
+        config.network.auth_token = secrets.token_hex(16)
         save_config(config)
         console.print("[green]✓ Web Token 已重新生成并保存。[/green]")
 

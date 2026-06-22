@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { SkillInfo, fetchSkills, saveSkill } from "@/lib/api";
+import { SkillInfo, fetchSkills, saveSkill, deleteSkill } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { MdEditor } from "@/components/md-editor";
-import { Plus, Save, Search, Wrench } from "lucide-react";
+import { ConfirmDialog } from "@/components/confirm-dialog";
+import { Plus, Save, Search, Wrench, Trash2 } from "lucide-react";
 
 export function SkillsView() {
   const [skills, setSkills] = useState<SkillInfo[]>([]);
@@ -20,6 +21,7 @@ export function SkillsView() {
   const [description, setDescription] = useState("");
   const [triggers, setTriggers] = useState("");
   const [content, setContent] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<SkillInfo | null>(null);
 
   useEffect(() => {
     loadSkills();
@@ -153,15 +155,28 @@ export function SkillsView() {
           <h2 className="font-semibold">
             {selectedSkill ? `Edit Skill: ${selectedSkill.name}` : "Create New Skill"}
           </h2>
-          <Button 
-            onClick={handleSave} 
-            disabled={saving || !name.trim() || !content.trim()}
-            size="sm"
-            className="gap-2"
-          >
-            <Save className="w-4 h-4" />
-            {saving ? "Saving..." : "Save Skill"}
-          </Button>
+          <div className="flex items-center gap-2">
+            {selectedSkill && (
+              <Button
+                variant="outline"
+                onClick={() => setDeleteTarget(selectedSkill)}
+                size="sm"
+                className="gap-2 text-destructive hover:text-destructive"
+              >
+                <Trash2 className="w-4 h-4" />
+                Delete
+              </Button>
+            )}
+            <Button
+              onClick={handleSave}
+              disabled={saving || !name.trim() || !content.trim()}
+              size="sm"
+              className="gap-2"
+            >
+              <Save className="w-4 h-4" />
+              {saving ? "Saving..." : "Save Skill"}
+            </Button>
+          </div>
         </div>
 
         <ScrollArea className="flex-1 p-6">
@@ -209,6 +224,28 @@ export function SkillsView() {
           </div>
         </ScrollArea>
       </div>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="删除 Skill"
+        description={`确定删除 skill "${deleteTarget?.name}" 吗？此操作不可撤销。`}
+        confirmLabel="删除"
+        destructive
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          const r = await deleteSkill(deleteTarget.name);
+          if (r.ok) {
+            const data = await fetchSkills();
+            setSkills(data);
+            setSelectedSkill(null);
+            setName(""); setDescription(""); setTriggers(""); setContent("");
+          } else {
+            alert(r.error || "删除失败");
+          }
+          setDeleteTarget(null);
+        }}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

@@ -18,9 +18,11 @@ import {
   fetchSystemPromptPreview, SystemPromptPreview,
   fetchChannels, patchChannel, ChannelInfo,
   fetchAPIKeys, createAPIKey, deleteAPIKey, APIKeyInfo, APIKeyCreated,
+  fetchModels, addModel, deleteModel, discoverModels, ModelEntry,
 } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 function useTheme() {
@@ -253,6 +255,15 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
   const { theme, toggle: toggleTheme } = useTheme();
 
   const [channels, setChannels] = useState<ChannelInfo[]>([]);
+  // 模型管理
+  const [modelList, setModelList] = useState<ModelEntry[]>([]);
+  const [discovered, setDiscovered] = useState<(ModelEntry & { exists?: boolean })[]>([]);
+  const [discoverProvider, setDiscoverProvider] = useState("");
+  const [discovering, setDiscovering] = useState(false);
+  const [discoverOpen, setDiscoverOpen] = useState(false); // 拉取弹窗开关
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set()); // 弹窗里勾选的 model id
+  const [discoverSearch, setDiscoverSearch] = useState(""); // 弹窗搜索词
+  const [newModel, setNewModel] = useState<ModelEntry>({ id: "", provider: "openai_compat", description: "", alias: [] });
   const [channelExpanded, setChannelExpanded] = useState<string | null>("lark");
   const [channelForms, setChannelForms] = useState<Record<string, Record<string, string>>>({});
   const [channelSaving, setChannelSaving] = useState<string | null>(null);
@@ -300,8 +311,8 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   useEffect(() => {
-    Promise.all([fetchAgentSettings(), fetchSystemSettings(), fetchProviderSettings(), fetchChannels()])
-      .then(([agentData, sysData, providerData, channelData]) => {
+    Promise.all([fetchAgentSettings(), fetchSystemSettings(), fetchProviderSettings(), fetchChannels(), fetchModels()])
+      .then(([agentData, sysData, providerData, channelData, models]) => {
         setAgentForm({
           ...agentData,
           heartbeat_enabled: agentData.heartbeat_enabled ?? true,
@@ -310,9 +321,12 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
         setSysForm(sysData);
         setProviderForm(providerData);
         setChannels(channelData);
+        setModelList(models);
         const initial: Record<string, Record<string, string>> = {};
         for (const ch of channelData) initial[ch.id] = { ...ch.config };
         setChannelForms(initial);
+        // 默认选中第一个 provider 做 discover
+        if (models.length > 0) setDiscoverProvider(models[0].provider);
       })
       .catch(() => setMessage({ type: "error", text: "加载设置失败" }))
       .finally(() => setLoading(false));
@@ -422,7 +436,7 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
                           <SelectValue placeholder="选择模型" />
                         </SelectTrigger>
                         <SelectContent>
-                          {models.map((m) => (
+                          {modelList.map((m) => (
                             <SelectItem key={m.id} value={m.id}>
                               {m.description || m.id}
                             </SelectItem>
@@ -442,7 +456,7 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="">留空（自动推断）</SelectItem>
-                          {models.map((m) => (
+                          {modelList.map((m) => (
                             <SelectItem key={m.id} value={m.id}>
                               {m.description || m.id}
                             </SelectItem>
@@ -450,6 +464,165 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
                         </SelectContent>
                       </Select>
                       <p className="text-xs text-muted-foreground">用于记忆压缩、智能标题、skill 自生成等后台任务，选个便宜快的。</p>
+                    </div>
+
+                    {/* 模型列表管理 */}
+                    <div className="grid gap-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-sm font-medium">模型列表</label>
+                        <span className="text-xs text-muted-foreground">{modelList.length} 个</span>
+                      </div>
+                      <div className="rounded-md border border-border/60 divide-y divide-border/40">
+                        {modelList.map((m, i) => (
+                          <div key={`${m.provider}/${m.id}`} className="flex items-center gap-2 px-3 py-2 text-sm">
+                            <span className="font-mono text-xs text-muted-foreground shrink-0">{m.provider}</span>
+                            <span className="font-mono">{m.id}</span>
+                            {m.description && m.description !== m.id && (
+                              <span className="text-xs text-muted-foreground truncate">· {m.description}</span>
+                            )}
+                            <button
+                              className="ml-auto text-xs text-muted-foreground hover:text-red-400 shrink-0"
+                              onClick={async () => {
+                                const r = await deleteModel(m.provider, m.id);
+                                if (r.ok) setModelList(await fetchModels());
+                                else setMessage({ type: "error", text: r.error || "删除失败" });
+                              }}
+                            >删除</button>
+                          </div>
+                        ))}
+                        {modelList.length === 0 && (
+                          <div className="px-3 py-3 text-sm text-muted-foreground">暂无模型</div>
+                        )}
+                      </div>
+
+                      {/* 手工添加 */}
+                      <div className="flex flex-wrap items-center gap-2 pt-1">
+                        <Input
+                          className="flex-1 min-w-[120px]"
+                          placeholder="model id（如 gemini-3-flash）"
+                          value={newModel.id}
+                          onChange={(e) => setNewModel({ ...newModel, id: e.target.value })}
+                        />
+                        <Select
+                          value={newModel.provider}
+                          onValueChange={(v) => setNewModel({ ...newModel, provider: v || "" })}
+                        >
+                          <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {Object.keys(providerForm).map((p) => (
+                              <SelectItem key={p} value={p}>{p}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Button
+                          variant="outline"
+                          disabled={!newModel.id.trim()}
+                          onClick={async () => {
+                            const r = await addModel({ ...newModel, id: newModel.id.trim() });
+                            if (r.ok) { setModelList(await fetchModels()); setNewModel({ ...newModel, id: "" }); }
+                            else setMessage({ type: "error", text: r.error || "添加失败" });
+                          }}
+                        >添加</Button>
+                      </div>
+
+                      {/* provider 模型发现 */}
+                      <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border/40">
+                        <Select value={discoverProvider} onValueChange={(v) => setDiscoverProvider(v || "")}>
+                          <SelectTrigger className="w-[160px]"><SelectValue placeholder="选 provider" /></SelectTrigger>
+                          <SelectContent>
+                            {Object.keys(providerForm).map((p) => (
+                              <SelectItem key={p} value={p}>{p}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Button
+                          variant="outline"
+                          disabled={!discoverProvider || discovering}
+                          onClick={async () => {
+                            if (!discoverProvider) return;
+                            setDiscovering(true);
+                            setDiscoverSearch("");
+                            setSelectedIds(new Set());
+                            try {
+                              const r = await discoverModels(discoverProvider);
+                              if (r.ok && r.models) {
+                                setDiscovered(r.models);
+                                setDiscoverOpen(true);
+                              } else {
+                                setMessage({ type: "error", text: r.error || "拉取失败" });
+                              }
+                            } finally { setDiscovering(false); }
+                          }}
+                        >{discovering ? "拉取中…" : "从 provider 拉取候选"}</Button>
+                      </div>
+
+                      {/* 拉取结果弹窗：搜索 + 勾选 + 批量加入 */}
+                      <Dialog open={discoverOpen} onOpenChange={setDiscoverOpen}>
+                        <DialogContent className="max-w-lg">
+                          <DialogHeader>
+                            <DialogTitle>从 {discoverProvider} 拉取的模型</DialogTitle>
+                            <DialogDescription>
+                              勾选要加入的模型，点「确认加入」。{discovered.length} 个候选。
+                            </DialogDescription>
+                          </DialogHeader>
+                          <Input
+                            placeholder="搜索 model id…"
+                            value={discoverSearch}
+                            onChange={(e) => setDiscoverSearch(e.target.value)}
+                            className="mb-2"
+                          />
+                          <div className="rounded-md border border-border/60 max-h-80 overflow-y-auto divide-y divide-border/30">
+                            {discovered
+                              .filter((m) => m.id.toLowerCase().includes(discoverSearch.toLowerCase()))
+                              .map((m) => {
+                                const checked = selectedIds.has(m.id);
+                                return (
+                                  <label key={m.id} className={`flex items-center gap-2 px-3 py-2 text-sm cursor-pointer ${m.exists ? "opacity-50" : "hover:bg-muted/40"}`}>
+                                    <input
+                                      type="checkbox"
+                                      className="accent-primary"
+                                      disabled={m.exists}
+                                      checked={checked}
+                                      onChange={(e) => {
+                                        setSelectedIds((prev) => {
+                                          const next = new Set(prev);
+                                          if (e.target.checked) next.add(m.id);
+                                          else next.delete(m.id);
+                                          return next;
+                                        });
+                                      }}
+                                    />
+                                    <span className="font-mono text-xs">{m.id}</span>
+                                    {m.exists && <span className="text-[10px] text-muted-foreground">已添加</span>}
+                                  </label>
+                                );
+                              })}
+                            {discovered.filter((m) => m.id.toLowerCase().includes(discoverSearch.toLowerCase())).length === 0 && (
+                              <div className="px-3 py-4 text-sm text-muted-foreground text-center">无匹配结果</div>
+                            )}
+                          </div>
+                          <DialogFooter>
+                            <Button variant="outline" onClick={() => setDiscoverOpen(false)}>取消</Button>
+                            <Button
+                              disabled={selectedIds.size === 0}
+                              onClick={async () => {
+                                let added = 0;
+                                for (const m of discovered) {
+                                  if (selectedIds.has(m.id) && !m.exists) {
+                                    const r = await addModel({ id: m.id, provider: m.provider, description: m.description, alias: [] });
+                                    if (r.ok) added++;
+                                  }
+                                }
+                                setModelList(await fetchModels());
+                                setDiscovered((prev) => prev.map((x) => selectedIds.has(x.id) ? { ...x, exists: true } : x));
+                                setSelectedIds(new Set());
+                                setDiscoverOpen(false);
+                                if (added > 0) setMessage({ type: "success", text: `已加入 ${added} 个模型` });
+                              }}
+                            >确认加入{selectedIds.size > 0 ? `（${selectedIds.size}）` : ""}</Button>
+                          </DialogFooter>
+                        </DialogContent>
+                      </Dialog>
                     </div>
 
                     <div className="grid gap-2">
