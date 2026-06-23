@@ -219,11 +219,13 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           break;
         }
         if (chunk.tool && chunk.state === "start") {
-          if (assistantContent) {
-            assistantThought += (assistantThought ? "\n\n" : "") + assistantContent;
-            assistantContent = "";
-          }
-          currentToolSteps.push({ tool: chunk.tool, args: chunk.args || "", state: "running", id: chunk.id });
+          // 工具调用前的叙述文字挂到这个工具下面（可折叠），不再全塞进顶部"思考过程"
+          const preToolThought = assistantContent.trim();
+          assistantContent = "";
+          currentToolSteps.push({
+            tool: chunk.tool, args: chunk.args || "", state: "running", id: chunk.id,
+            thought: preToolThought || undefined,
+          });
           setMessages([...newMessages, {
             role: "assistant", content: assistantContent, thought: assistantThought,
             toolSteps: [...currentToolSteps], toolsExpanded: true, created_at: Date.now() / 1000,
@@ -252,6 +254,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
               state: chunk.state as "done" | "error",
               duration_ms: chunk.duration_ms,
               result_preview: chunk.result_preview,
+              result_detail: chunk.result_detail,
               sub_steps: chunk.sub_steps?.map((s) => ({
                 tool: s.tool,
                 args: s.args,

@@ -198,6 +198,7 @@ async def _stream_response(
                         "id": item.tool_call_id,
                         "duration_ms": step.get("duration_ms"),
                         "result_preview": item.result_preview or "",
+                        "result_detail": item.result_detail or "",
                         "sub_steps": item.sub_steps or [],
                     }
                 yield f"data: {json.dumps(evt, ensure_ascii=False)}\n\n"

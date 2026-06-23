@@ -18,6 +18,7 @@ import {
   deleteSession,
   renameSession,
   createSession,
+  fetchVersion,
 } from "@/lib/api";
 
 export function Sidebar() {
@@ -40,6 +41,7 @@ export function Sidebar() {
   const [normalExpanded, setNormalExpanded] = useState(true);
   const [scheduleExpanded, setScheduleExpanded] = useState(false);
   const [schedules, setSchedules] = useState<any[]>([]);
+  const [version, setVersion] = useState<string | null>(null);
   const [lastSeenSchedule, setLastSeenSchedule] = useState(() => {
     if (typeof window !== "undefined") {
       return Number(localStorage.getItem("ethan_last_seen_schedule") || "0");
@@ -78,6 +80,11 @@ export function Sidebar() {
   useEffect(() => {
     fetchSchedules().then(setSchedules).catch(() => {});
   }, [pathname]);
+
+  // 获取版本号（挂载时一次）
+  useEffect(() => {
+    fetchVersion().then(setVersion);
+  }, []);
 
   // Poll every 3s — skip if user is actively searching
   useEffect(() => {
@@ -253,6 +260,14 @@ export function Sidebar() {
         >
           <Image src="/logo-sidebar.png" alt="Ethan Agent" width={28} height={28} className="rounded-full" />
           Ethan Agent
+          {version && (
+            <span
+              className="text-[9px] font-mono text-muted-foreground/60 bg-muted border border-border/60 rounded-full px-1.5 py-0.5 leading-none"
+              title={`ethan-agent v${version}`}
+            >
+              v{version}
+            </span>
+          )}
         </h1>
         <Button
           variant="ghost"

@@ -20,6 +20,10 @@ export interface ToolStep {
   state: "running" | "done" | "error";
   duration_ms?: number;
   result_preview?: string;
+  /** 展开看的完整结果（多行） */
+  result_detail?: string;
+  /** 这个工具调用前 agent 的叙述文字（挂到工具下，可折叠） */
+  thought?: string;
   /** 唯一标识，用于精确配对 start/done（同名工具并发时不串） */
   id?: string;
   /** 委派类工具（如 delegate_coding）的内部子步骤 */
@@ -54,12 +58,16 @@ function formatDuration(ms?: number) {
   return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
 }
 
-/** 单个工具步骤行（可折叠 sub_steps） */
+/** 单个工具步骤行（可折叠 sub_steps + 展开 thought/result_detail） */
 function StepRow({ step, isLast }: { step: ToolStep; isLast: boolean }) {
   const hasSubs = step.sub_steps && step.sub_steps.length > 0;
   const [subOpen, setSubOpen] = useState(false);
   const isDelegate = step.tool === "delegate_coding";
   const subDoneCount = hasSubs ? step.sub_steps!.filter(s => s.state !== "running").length : 0;
+
+  // 有 thought 或 result_detail 才允许展开看细节
+  const hasDetail = (step.thought || step.result_detail) && step.state !== "running";
+  const [detailOpen, setDetailOpen] = useState(false);
 
   return (
     <div className="flex gap-2 pt-2">
@@ -73,7 +81,10 @@ function StepRow({ step, isLast }: { step: ToolStep; isLast: boolean }) {
 
       {/* 工具内容 */}
       <div className="flex-1 min-w-0 pb-1">
-        <div className="flex items-center gap-1.5 flex-wrap">
+        <div
+          className={"flex items-center gap-1.5 flex-wrap" + (hasDetail ? " cursor-pointer" : "")}
+          onClick={() => hasDetail && setDetailOpen(o => !o)}
+        >
           <span className="text-muted-foreground/60">
             {TOOL_ICONS[step.tool] ?? <Terminal className="h-3 w-3" />}
           </span>
@@ -94,6 +105,17 @@ function StepRow({ step, isLast }: { step: ToolStep; isLast: boolean }) {
                 ? <ChevronDown className="h-2.5 w-2.5" />
                 : <ChevronRight className="h-2.5 w-2.5" />}
               {subDoneCount}/{step.sub_steps!.length} 步
+            </button>
+          )}
+          {hasDetail && (
+            <button
+              className="text-[10px] text-muted-foreground/70 hover:text-foreground flex items-center gap-0.5 px-1 py-0.5 rounded hover:bg-muted/60 transition-colors"
+              onClick={(e) => { e.stopPropagation(); setDetailOpen(o => !o); }}
+            >
+              {detailOpen
+                ? <ChevronDown className="h-2.5 w-2.5" />
+                : <ChevronRight className="h-2.5 w-2.5" />}
+              详情
             </button>
           )}
           {step.duration_ms !== undefined && step.state !== "running" && (
@@ -140,7 +162,7 @@ function StepRow({ step, isLast }: { step: ToolStep; isLast: boolean }) {
         )}
 
         {/* 委派工具的最终结果：高亮展示 */}
-        {isDelegate && step.result_preview && step.state !== "running" && (
+        {isDelegate && step.result_preview && step.state !== "running" && !detailOpen && (
           <div className="mt-1.5 flex items-start gap-1.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 px-2 py-1">
             <Sparkles className="h-3 w-3 text-emerald-400 shrink-0 mt-0.5" />
             <p className="text-[10px] text-emerald-300/90 leading-relaxed line-clamp-3">
@@ -149,11 +171,33 @@ function StepRow({ step, isLast }: { step: ToolStep; isLast: boolean }) {
           </div>
         )}
 
-        {/* 普通工具的结果预览 */}
-        {!isDelegate && step.result_preview && step.state !== "running" && (
+        {/* 普通工具的结果预览（未展开时显示） */}
+        {!isDelegate && step.result_preview && step.state !== "running" && !detailOpen && (
           <p className="text-[10px] text-muted-foreground/50 mt-0.5 leading-relaxed line-clamp-3 font-mono break-all">
             {step.result_preview}
           </p>
+        )}
+
+        {/* 展开的详情：工具前的叙述 + 完整结果 */}
+        {detailOpen && (
+          <div className="mt-1.5 rounded-md border border-border/40 bg-background/40 overflow-hidden">
+            {step.thought && (
+              <div className="px-2.5 py-1.5 border-b border-border/30">
+                <div className="text-[9px] uppercase tracking-wide text-muted-foreground/50 mb-0.5">思考</div>
+                <p className="text-[10px] text-muted-foreground/70 whitespace-pre-wrap leading-relaxed">
+                  {step.thought}
+                </p>
+              </div>
+            )}
+            {step.result_detail && (
+              <div className="px-2.5 py-1.5">
+                <div className="text-[9px] uppercase tracking-wide text-muted-foreground/50 mb-0.5">输出</div>
+                <pre className="text-[10px] text-muted-foreground/70 whitespace-pre-wrap break-all font-mono leading-relaxed max-h-64 overflow-y-auto">
+                  {step.result_detail}
+                </pre>
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>

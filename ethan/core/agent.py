@@ -62,6 +62,18 @@ def _preview(content: str, max_lines: int = 3, max_chars: int = 200) -> str:
     return text
 
 
+def _detail(content: str, max_chars: int = 2000) -> str:
+    """工具结果的详细版本（前端展开看），保留多行，封顶避免 SSE 过大。
+
+    工具结果超过 4000 字会被 result_compressor 压缩，所以这里 2000 字够用。
+    """
+    if not content:
+        return ""
+    if len(content) > max_chars:
+        return content[:max_chars] + f"\n…(共 {len(content)} 字，已截断)"
+    return content
+
+
 def _get_route(text: str, skill_triggers: list[str] | None = None) -> str:
     """
     返回路由档位：'fast' | 'medium' | 'full'
@@ -463,7 +475,8 @@ class Agent:
 
             for r, tc in zip(results, allowed_calls):
                 preview = _preview(r.content) if r.content else ""
-                yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary="", state="done" if not r.is_error else "error", result_preview=preview, sub_steps=getattr(r, "sub_steps", []) or [])
+                detail = _detail(r.content) if r.content else ""
+                yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary="", state="done" if not r.is_error else "error", result_preview=preview, result_detail=detail, sub_steps=getattr(r, "sub_steps", []) or [])
                 working.append(Message(
                     role="tool",
                     content=r.content,

@@ -48,6 +48,7 @@ class ToolEvent:
     args_summary: str
     state: str  # "start" | "done" | "error"
     result_preview: str = ""
+    result_detail: str = ""  # 更长的多行结果（前端展开看）
     sub_steps: list = field(default_factory=list)  # 委派类工具（如 delegate_coding）的子步骤
     tool_call_id: str = ""  # 唯一标识，前端用来精确配对 start/done（同名工具并发时不串）
 
