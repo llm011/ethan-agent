@@ -12,7 +12,14 @@ from rich.console import Console
 from rich.table import Table
 
 console = Console()
-app = typer.Typer(help="管理消息渠道（飞书 Lark 等）")
+app = typer.Typer(help="管理消息渠道（飞书 Lark 等）", invoke_without_command=True)
+
+
+@app.callback()
+def _main(ctx: typer.Context):
+    """管理消息渠道。无子命令时打印 help。"""
+    if ctx.invoked_subcommand is None:
+        console.print(ctx.get_help())
 
 # 支持的渠道及其字段定义：key → (字段名, 说明, 是否必填)
 _CHANNEL_FIELDS = {
