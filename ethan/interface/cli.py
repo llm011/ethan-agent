@@ -98,7 +98,10 @@ def serve_restart() -> None:
 
 def _launch_web(port: int = 8900, url: Optional[str] = None) -> None:
     import os, socket, subprocess, sys, time, webbrowser
+    import urllib.request
     from pathlib import Path
+    from rich.console import Console
+    console = Console()
 
     if url:
         webbrowser.open(url)
@@ -108,6 +111,14 @@ def _launch_web(port: int = 8900, url: Optional[str] = None) -> None:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.settimeout(0.3)
             return s.connect_ex(("127.0.0.1", p)) == 0
+
+    def _http_ready(p: int) -> bool:
+        """确认 HTTP 服务真正就绪（/api/health 返回 200），而不只是 TCP 端口能连。"""
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{p}/api/health", timeout=1) as r:
+                return r.status == 200
+        except Exception:
+            return False
 
     if not _port_open(port):
         # Find the `ethan` script next to the current Python executable
@@ -122,19 +133,39 @@ def _launch_web(port: int = 8900, url: Optional[str] = None) -> None:
             start_new_session=True,
             env={**os.environ},
         )
-        # Wait up to 60s for the server to come up (cold start can take ~35s)
+        # Wait up to 60s for the port to come up (cold start can take ~35s)
         for _ in range(300):
             if _port_open(port):
                 break
             time.sleep(0.2)
 
-    if _port_open(port):
-        webbrowser.open(f"http://localhost:{port}")
-    else:
-        from rich.console import Console
-        Console().print(
-            f"[yellow]Web UI 未能自动启动，请手动运行 [bold]ethan serve[/bold] 后访问 http://localhost:{port}[/yellow]"
+    # 端口可连 ≠ HTTP 已就绪；再等 /api/health 返回 200 才开浏览器
+    ready = False
+    for _ in range(150):  # 最多再等 30s
+        if _http_ready(port):
+            ready = True
+            break
+        time.sleep(0.2)
+
+    if not ready:
+        console.print(
+            f"[yellow]Web UI 未能就绪，请手动运行 [bold]ethan serve[/bold] 后访问 http://localhost:{port}[/yellow]"
         )
+        return
+
+    webbrowser.open(f"http://localhost:{port}")
+
+    # 提示 token，方便用户登录
+    from ethan.core.config import get_config
+    token = get_config().network.auth_token
+    console.print()
+    console.print(f"[dim]🌐 Web UI 已打开：[/dim][cyan]http://localhost:{port}[/cyan]")
+    if token:
+        console.print(f"[dim]🔑 登录 Token：[/dim][cyan bold]{token}[/cyan bold]")
+        console.print("[dim]   REPL 里输入 /token 可随时查看或轮换（/token rotate）[/dim]")
+    else:
+        console.print("[yellow]当前未配置 Web Token，首次访问可能需要先设置。[/yellow]")
+    console.print()
 
 
 web_app = typer.Typer(help="Web UI 管理")
