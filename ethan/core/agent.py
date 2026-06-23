@@ -301,11 +301,6 @@ class Agent:
         parts.append(f"Current model: {self._provider.model}（用户问起你用的什么模型/是谁驱动时，如实回答这个 model id）")
         parts.append(f"Your workspace directory is {workspace}. System configurations and memories reside here.")
 
-        schedule_ctx = self._build_schedule_context(workspace)
-        if schedule_ctx:
-            task_count = schedule_ctx.count("\n- ") + 1
-            parts.append(f"You have {task_count} active scheduled task(s). Call schedule_list to view details.")
-
         facts_ctx = self._facts.build_context(max_facts=15)
         if facts_ctx:
             parts.append(
@@ -316,7 +311,12 @@ class Agent:
             )
 
         profile_content = self._system_files.get("user_profile", "")
-        if profile_content:
+        # 只有实质内容（非空行/标题）才注入，避免把空模板塞进 system prompt
+        _profile_text = "\n".join(
+            l for l in profile_content.splitlines()
+            if l.strip() and not l.strip().startswith("#")
+        )
+        if _profile_text:
             parts.append(
                 f"<user_profile>\n[User profile — personalize responses]\n\n{profile_content}\n</user_profile>"
             )

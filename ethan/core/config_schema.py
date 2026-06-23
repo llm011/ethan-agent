@@ -54,9 +54,11 @@ def is_editable(path: str) -> bool:
 
 
 def get_value(obj, path: str):
-    """按点分路径读取属性值。"""
+    """按点分路径读取属性值。属性不存在时返回 None。"""
     for p in path.split("."):
-        obj = getattr(obj, p)
+        obj = getattr(obj, p, None)
+        if obj is None:
+            return None
     return obj
 
 
