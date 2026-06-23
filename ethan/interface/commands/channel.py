@@ -32,9 +32,9 @@ _CHANNEL_FIELDS = {
 }
 
 
-@app.command("list")
-def list_channels():
-    """列出所有渠道及配置状态。"""
+@app.command("list", context_settings={"allow_extra_args": True})
+def list_channels(ctx: typer.Context):
+    """列出所有渠道及配置状态。忽略多余参数（如 `list lark` 仍列出全部）。"""
     from ethan.core.config import get_config
     config = get_config()
 
@@ -73,9 +73,13 @@ def list_channels():
 
 @app.command("add")
 def add_channel(
-    channel: str = typer.Argument(..., help="渠道名，目前支持: lark"),
+    ctx: typer.Context,
+    channel: str = typer.Argument(None, help="渠道名，目前支持: lark"),
 ):
     """引导式新建/配置渠道（会提示每个字段填什么、从哪获取）。"""
+    if not channel:
+        console.print(ctx.get_help())
+        raise typer.Exit()
     if channel not in _CHANNEL_FIELDS:
         console.print(f"[red]不支持的渠道: {channel}[/red]")
         console.print(f"目前支持: {', '.join(_CHANNEL_FIELDS.keys())}")
@@ -118,13 +122,17 @@ def _add_lark_interactive():
 
 @app.command("set")
 def set_channel(
-    channel: str = typer.Argument(..., help="渠道名: lark"),
+    ctx: typer.Context,
+    channel: str = typer.Argument(None, help="渠道名: lark"),
     app_id: str = typer.Option("", "--app-id", help="App ID"),
     app_secret: str = typer.Option("", "--app-secret", help="App Secret"),
     verification_token: str = typer.Option("", "--verification-token", help="Verification Token"),
     encrypt_key: str = typer.Option("", "--encrypt-key", help="Encrypt Key"),
 ):
     """直接设置渠道字段（非交互，适合脚本）。"""
+    if not channel:
+        console.print(ctx.get_help())
+        raise typer.Exit()
     if channel != "lark":
         console.print(f"[red]不支持的渠道: {channel}[/red]")
         raise typer.Exit(1)
@@ -146,9 +154,13 @@ def set_channel(
 
 @app.command("unset")
 def unset_channel(
-    channel: str = typer.Argument(..., help="渠道名: lark"),
+    ctx: typer.Context,
+    channel: str = typer.Argument(None, help="渠道名: lark"),
 ):
     """清除渠道配置。"""
+    if not channel:
+        console.print(ctx.get_help())
+        raise typer.Exit()
     if channel != "lark":
         console.print(f"[red]不支持的渠道: {channel}[/red]")
         raise typer.Exit(1)
