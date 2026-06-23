@@ -5,6 +5,17 @@ from pathlib import Path
 from ethan.tools.base import BaseTool
 
 
+def _is_inside_secrets(path: str) -> bool:
+    """路径是否落在 ~/.ethan/.secrets/ 目录内。"""
+    try:
+        from ethan.core.config import CONFIG_DIR
+        secrets_dir = (CONFIG_DIR / ".secrets").resolve()
+        p = Path(path).expanduser().resolve()
+        return secrets_dir in p.parents or p == secrets_dir
+    except Exception:
+        return ".secrets" in Path(path).parts
+
+
 class FileReadTool(BaseTool):
     name = "file_read"
     description = "Read the contents of a local file. Use when you need to see what's in a file."
@@ -23,6 +34,11 @@ class FileReadTool(BaseTool):
         },
         "required": ["path"],
     }
+
+    def consent_check(self, path: str = "", **kwargs) -> str | None:
+        if _is_inside_secrets(str(path)):
+            return f"读取密钥文件 {path}（密钥请改用 get_secret 工具）"
+        return None
 
     async def run(self, path: str, max_lines: int = 0) -> str:
         p = Path(path).expanduser().resolve()

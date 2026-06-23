@@ -17,6 +17,14 @@ class BaseTool(ABC):
     fast_path: bool = True  # 是否在 Fast Path 时加载。设为 False 的工具只在 Full Path 使用
     cacheable: bool = True  # 同参数是否可缓存；副作用类工具（shell）应设为 False
 
+    def consent_check(self, **kwargs) -> str | None:
+        """检查此次调用是否需要用户授权。
+
+        返回非空字符串 → 需要授权，字符串作为授权说明展示给用户；
+        返回 None → 放行。默认所有工具放行，子类按参数判定（如 file_read 命中 .secrets/）。
+        """
+        return None
+
     @property
     @abstractmethod
     def name(self) -> str: ...

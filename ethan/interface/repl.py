@@ -52,6 +52,19 @@ def _format_duration(seconds: float) -> str:
     return f"{h}h{m}m"
 
 
+def _fmt_tokens(n: int) -> str:
+    """紧凑显示 token 数：890379 → '890k'，1500000 → '1.5M'。"""
+    n = int(n or 0)
+    if n >= 1_000_000:
+        v = (n // 10000) / 100  # floor 到百分位，避免 999999 → 1.0M
+        return f"{v:.1f}M".replace(".0M", "M")
+    if n >= 10_000:
+        return f"{n // 1000}k"
+    if n >= 1000:
+        return f"{(n // 100) / 10:.1f}k"
+    return str(n)
+
+
 class ProfileSwitchException(Exception):
     """Raised to trigger a profile switch and agent rebuild."""
     def __init__(self, new_uid: str):
@@ -64,6 +77,9 @@ _SLASH_COMMANDS = [
     ("/new", "Start new session"),
     ("/model", "Show or switch model"),
     ("/profile", "Show or switch user profile"),
+    ("/config", "Edit settings interactively"),
+    ("/token", "Show or rotate Web login token"),
+    ("/skills", "List installed skills"),
     ("/update", "Update Ethan Agent"),
     ("/help", "Show available commands"),
 ]
@@ -109,9 +125,9 @@ def _make_toolbar(model: str, tokens_in: int = 0, tokens_out: int = 0, tokens_ca
     parts.append(("class:separator", " · "))
     parts.append(("class:path", cwd))
     if tokens_in or tokens_out:
-        token_str = f"↑{tokens_in} ↓{tokens_out}"
+        token_str = f"↑{_fmt_tokens(tokens_in)} ↓{_fmt_tokens(tokens_out)}"
         if tokens_cache:
-            token_str += f" ⚡{tokens_cache}"
+            token_str += f" ⚡{_fmt_tokens(tokens_cache)}"
         parts.append(("class:separator", " · "))
         parts.append(("class:tokens", token_str))
     if activity:
@@ -192,7 +208,9 @@ async def run_once(agent: Agent, prompt: str) -> None:
     spinner_stopped = False
     render_live = Live(console=console, refresh_per_second=8, vertical_overflow="visible")
     render_started = False
+    direct_mode = False  # 长文本超过阈值后直接增量打印，不再用 Live 重渲染
     full = ""
+    after_tool = False  # 上一条输出是工具调用行，后续文字前需加空行
 
     async for item in agent.stream_chat(messages):
         if isinstance(item, ToolEvent):
@@ -206,6 +224,7 @@ async def run_once(agent: Agent, prompt: str) -> None:
                     console.print()
                 args = f"({item.args_summary})" if item.args_summary else ""
                 console.print(f"[dim]⚡ {item.tool_name}{args}[/dim]")
+                after_tool = True
             elif item.state in ("done", "error") and item.sub_steps:
                 # 委派类工具（如 delegate_coding）的子步骤摘要
                 ok = sum(1 for s in item.sub_steps if s.get("state") == "done")
@@ -215,14 +234,26 @@ async def run_once(agent: Agent, prompt: str) -> None:
         if not spinner_stopped:
             spinner.stop()
             spinner_stopped = True
+        full += item
+        if direct_mode:
+            console.print(item, end="", highlight=False, soft_wrap=True)
+            continue
         if not render_started:
+            if after_tool:
+                console.print()
             render_live.start()
             render_started = True
-        full += item
         render_live.update(RichMarkdown(full))
+        # 超过阈值：提交 Live，切到直接打印（防 Rich Live 超长内容重复刷屏）
+        if full.count("\n") >= 12:
+            render_live.stop()
+            render_started = False
+            direct_mode = True
 
     if render_started:
         render_live.stop()
+    if direct_mode:
+        console.print()
     if not spinner_stopped:
         spinner.stop()
     if full:
@@ -327,8 +358,75 @@ async def _handle_slash_command(cmd: str, store: SessionStore, session: Session,
   /new           Start new session
   /model [ID]    Show or switch model
   /profile [ID]  Show or switch user profile
+  /config        Edit settings interactively
+  /token [rotate]  Show or rotate Web login token
+  /skills        List installed skills
   /update        Update Ethan Agent
   /help          Show this help[/dim]""")
+        return None
+
+    elif command == "/config":
+        from ethan.core.config import save_config, reload_config
+        from ethan.interface.config_editor import run_config_editor
+        config = get_config()
+        old_model = config.defaults.model
+        try:
+            changed = await run_config_editor(config)
+        except Exception as e:
+            console.print(f"[red]配置编辑器异常: {e}[/red]")
+            return None
+        if changed:
+            save_config(config)
+            reload_config()
+            config = get_config()
+            # 模型改动 → 实时切换 provider
+            if config.defaults.model != old_model:
+                try:
+                    from ethan.providers.manager import create_provider
+                    agent._provider = create_provider(config.defaults.model)
+                    console.print(f"[green]✓ 模型已切换: {agent._provider.model}[/green]")
+                except Exception as e:
+                    console.print(f"[yellow]模型切换失败（已保存，重启生效）: {e}[/yellow]")
+            console.print("[green]✓ 配置已保存[/green]")
+        else:
+            console.print("[dim]未做改动[/dim]")
+        return None
+
+    elif command == "/token":
+        from ethan.core.config import save_config
+        config = get_config()
+        arg = parts[1].strip().lower() if len(parts) > 1 else ""
+        # 无参数或 show/get/view → 只显示；任何其它参数 → 轮转
+        if arg in ("show", "get", "view", "?", "help"):
+            arg = ""
+        if arg:
+            import secrets
+            config.network.auth_token = secrets.token_hex(16)
+            save_config(config)
+            console.print("[green]✓ Web Token 已重新生成（旧 Token 失效）[/green]")
+        token = config.network.auth_token
+        if not token:
+            console.print("[yellow]当前未配置 Web Token。[/yellow]")
+        else:
+            console.print(f"Web 登录 Token: [cyan]{token}[/cyan]")
+        if not arg:
+            console.print("[dim]轮换: /token rotate[/dim]")
+        return None
+
+    elif command == "/skills":
+        skills = agent._skills.all() if agent._skills else []
+        if not skills:
+            console.print("[dim]No skills installed.[/dim]")
+            return None
+        table = Table(title="Skills", show_header=True, header_style="dim", padding=(0, 1))
+        table.add_column("Name", style="cyan", no_wrap=True)
+        table.add_column("Description")
+        table.add_column("Trigger", style="dim")
+        for s in skills:
+            trigger = ", ".join(s.trigger) if s.trigger else "—"
+            table.add_row(s.name, s.description or "", trigger)
+        console.print(table)
+        console.print("[dim]管理 Skills: ethan skill list/create/delete[/dim]")
         return None
 
     elif command == "/update":
@@ -351,6 +449,10 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
     model_id = agent._provider.model
     start_time = time.time()
     uid = getattr(agent, "_user_id", "") or ""
+
+    # 注入 TUI 授权 provider（敏感操作时 y/N 确认）
+    from ethan.core.consent import TuiConsentProvider, set_consent_provider
+    set_consent_provider(TuiConsentProvider(console=console))
 
     from ethan.core.paths import user_sessions_db_path
     store = SessionStore(db_path=user_sessions_db_path())
@@ -509,7 +611,7 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
 
     while True:
         current_uid = getattr(agent, "_user_id", "") or ""
-        toolbar = _make_toolbar(model_id, total_tokens_in, total_tokens_out, total_tokens_cache, session.id, user_id=current_uid)
+        toolbar = _make_toolbar(agent._provider.model, total_tokens_in, total_tokens_out, total_tokens_cache, session.id, user_id=current_uid)
         try:
             console.print()
             console.rule(style="dim")
@@ -594,6 +696,7 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
         thought = ""
         first_chunk = True
         first_item = True  # for TTFT: fire on any first item (tool or text)
+        last_was_tool = False  # 上一条输出是工具调用行，后续文字前加空行
         current_activity = ""
         console.print()
         live = Live(Spinner("dots", text="thinking...", style="dim"), console=console, transient=True)
@@ -610,9 +713,10 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
 
         # Inner coroutine — captured by closure, can be awaited as a Task
         async def _consume_stream():
-            nonlocal full, thought, first_chunk, first_item, ttft
+            nonlocal full, thought, first_chunk, first_item, ttft, last_was_tool
             from ethan.providers.base import ToolEvent
             render_live = Live(console=console, refresh_per_second=8, vertical_overflow="visible")
+            direct_mode = False  # 长文本超过阈值后直接增量打印，不再用 Live 重渲染（防 Rich 溢出重复刷屏）
             try:
                 async for item in agent.stream_chat(context):
                     if isinstance(item, ToolEvent):
@@ -634,6 +738,7 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
                                 live.stop()
                                 first_chunk = False
                             console.print(f"[dim]{activity_text}[/dim]")
+                            last_was_tool = True
                         elif item.state in ("done", "error"):
                             if item.sub_steps:
                                 ok = sum(1 for s in item.sub_steps if s.get("state") == "done")
@@ -649,13 +754,27 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
                             ttft = time.time() - send_time
                         live.stop()
                         first_chunk = False
-                    if not render_live.is_started:
-                        render_live.start()
                     full += item
-                    render_live.update(RichMarkdown(full))
+                    if direct_mode:
+                        # 长文本：直接增量打印，不再 Live 重渲染
+                        console.print(item, end="", highlight=False, soft_wrap=True)
+                    else:
+                        if not render_live.is_started:
+                            if last_was_tool:
+                                console.print()
+                                last_was_tool = False
+                            render_live.start()
+                        render_live.update(RichMarkdown(full))
+                        # 超过阈值：Live 内容提交（transient=False 会保留），切到直接打印
+                        # 避免 Rich Live 无法原地更新超长内容导致整块重复打印
+                        if full.count("\n") >= 12:
+                            render_live.stop()
+                            direct_mode = True
             finally:
                 if render_live.is_started:
                     render_live.stop()
+                if direct_mode:
+                    console.print()  # 直接打印模式结尾补换行
                 if first_chunk:
                     live.stop()
 
@@ -706,9 +825,9 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
             turn_cache = agent.usage.cache_tokens - prev_cache
 
             # Print per-turn stats in dim color
-            stats_parts = [f"↑{turn_in} ↓{turn_out}"]
+            stats_parts = [f"↑{_fmt_tokens(turn_in)} ↓{_fmt_tokens(turn_out)}"]
             if turn_cache:
-                stats_parts.append(f"⚡{turn_cache}")
+                stats_parts.append(f"⚡{_fmt_tokens(turn_cache)}")
             if ttft is not None:
                 stats_parts.append(f"TTFT {ttft*1000:.0f}ms" if ttft < 1 else f"TTFT {ttft:.1f}s")
             console.print(f"[dim]  {' · '.join(stats_parts)}[/dim]")

@@ -81,6 +81,15 @@ export async function discoverModels(provider: string): Promise<{ ok: boolean; m
   return res.json();
 }
 
+export async function respondConsent(requestId: string, allowed: boolean): Promise<{ ok: boolean }> {
+  const res = await fetch(`${API_URL}/consent/${encodeURIComponent(requestId)}`, {
+    method: "POST",
+    headers: { ...headers(), "Content-Type": "application/json" },
+    body: JSON.stringify({ allowed }),
+  });
+  return res.json();
+}
+
 export interface SessionInfo {
   id: string;
   title: string;
@@ -349,7 +358,7 @@ export async function* streamChat(
   model?: string,
   sessionId?: string,
   quote?: { role: "user" | "assistant"; content: string } | null,
-): AsyncGenerator<{ content?: string; done?: boolean; error?: string; model?: string; usage?: Record<string, number>; tool?: string; args?: string; state?: string; duration_ms?: number; result_preview?: string; sub_steps?: Array<{ tool: string; args: string; state: string; duration_ms?: number | null; result_preview?: string }> }> {
+): AsyncGenerator<{ content?: string; done?: boolean; error?: string; model?: string; usage?: Record<string, number>; tool?: string; args?: string; state?: string; duration_ms?: number; result_preview?: string; sub_steps?: Array<{ tool: string; args: string; state: string; duration_ms?: number | null; result_preview?: string }>; consent_request?: boolean; request_id?: string; description?: string; detail?: string }> {
   const res = await fetch(`${API_URL}/chat`, {
     method: "POST",
     headers: headers(),

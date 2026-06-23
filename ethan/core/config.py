@@ -51,8 +51,9 @@ class RoutingConfig(BaseModel):
     ])
     fast_max_length: int = 12  # 消息超过此长度不走 Fast Path（简单控制命令通常 ≤ 10 字）
     fast_skill_triggers: list[str] = Field(default_factory=list)  # 命中时强制走 Fast Path，不受长度限制（给 Skill 关联用）
+    fast_max_iters: int = 10     # Fast Path 最多工具迭代次数
     medium_max_length: int = 80   # 超过 fast_max_length 且不超过此值走 Medium Path
-    medium_max_iters: int = 15    # Medium Path 最多迭代次数，应对短文本但重搜索的任务
+    medium_max_iters: int = 30    # Medium Path 最多迭代次数，应对短文本但重搜索的任务
 
 
 class HeartbeatConfig(BaseModel):
@@ -67,7 +68,7 @@ class DefaultsConfig(BaseModel):
     agent_name: str = "Ethan"
     language: str = "zh"
     max_tokens: int = 4096
-    max_tool_iterations: int = 10
+    max_tool_iterations: int = 100
     routing: RoutingConfig = Field(default_factory=RoutingConfig)
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
 
@@ -154,7 +155,7 @@ def _default_config() -> dict:
             "model": os.environ.get("AGENT_DEFAULT_MODEL", "claude-sonnet-4.6"),
             "lite_model": "",  # 轻量模型（记忆压缩/标题生成等后台任务用）；空则按主模型推断或与主模型相同
             "max_tokens": 4096,
-            "max_tool_iterations": 10,
+            "max_tool_iterations": 100,
         },
     }
 

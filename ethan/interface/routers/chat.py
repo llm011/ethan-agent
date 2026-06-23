@@ -97,8 +97,12 @@ async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
         messages[-1] = _with_quote(messages[-1], req.quote)
 
     if req.stream:
+        # 注入 Web 授权 provider（敏感操作经 SSE 弹窗确认）
+        from ethan.core.consent import WebConsentProvider, set_consent_provider
+        consent = WebConsentProvider()
+        set_consent_provider(consent)
         return StreamingResponse(
-            _stream_response(agent, messages, store, req.session_id, user_id),
+            _stream_response(agent, messages, store, req.session_id, user_id, consent),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
@@ -161,14 +165,25 @@ async def _stream_response(
     store: SessionStore,
     session_id: str | None,
     user_id: str = "",
+    consent=None,
 ) -> AsyncGenerator[str, None]:
     from ethan.core.stream_collector import StreamCollector
+    from ethan.core.consent import ConsentEvent
     from ethan.providers.base import ToolEvent
 
     collector = StreamCollector().bind(agent)
     try:
         async for item in agent.stream_chat(messages):
-            if isinstance(item, ToolEvent):
+            if isinstance(item, ConsentEvent):
+                evt = {
+                    "consent_request": True,
+                    "request_id": item.request_id,
+                    "tool": item.tool,
+                    "description": item.description,
+                    "detail": item.detail,
+                }
+                yield f"data: {json.dumps(evt, ensure_ascii=False)}\n\n"
+            elif isinstance(item, ToolEvent):
                 collector.feed(item)
                 # 即时把 ToolEvent 推给前端（SSE 不能等批处理）
                 if item.state == "start":
@@ -189,6 +204,10 @@ async def _stream_response(
                 yield f"data: {json.dumps({'content': item}, ensure_ascii=False)}\n\n"
     except Exception as e:
         yield f"data: {json.dumps({'error': _friendly_error(e, agent)}, ensure_ascii=False)}\n\n"
+    finally:
+        # 流结束（正常或异常）时，取消所有未决的授权 Future，避免泄漏
+        if consent is not None:
+            consent.cancel_all()
 
     usage_dict = collector.usage_dict
 

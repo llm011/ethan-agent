@@ -5,6 +5,7 @@ import { Pencil, Check, X, Sun, Moon } from "lucide-react";
 import { Clock, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { renameSession } from "@/lib/api";
+import { fmtTokens } from "@/lib/utils";
 import { formatTrigger, formatNextRun } from "@/lib/utils";
 import { useTheme } from "./use-theme";
 import type { Usage } from "./types";
@@ -94,8 +95,8 @@ export function ChatHeader({ sessionId, title, source, usage, schedules, onTitle
         )}
 
         {(usage.input > 0 || usage.output > 0) && (
-          <span className="text-xs text-muted-foreground ml-auto" title="本次对话累计 token 消耗">
-            ↑{usage.input.toLocaleString()} ↓{usage.output.toLocaleString()}{usage.cache > 0 ? ` ⚡${usage.cache.toLocaleString()}` : ""}
+          <span className="text-xs text-muted-foreground ml-auto" title={`本次对话累计：↑${usage.input.toLocaleString()} ↓${usage.output.toLocaleString()}${usage.cache > 0 ? ` ⚡${usage.cache.toLocaleString()}` : ""}`}>
+            ↑{fmtTokens(usage.input)} ↓{fmtTokens(usage.output)}{usage.cache > 0 ? ` ⚡${fmtTokens(usage.cache)}` : ""}
           </span>
         )}
 

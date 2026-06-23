@@ -38,3 +38,28 @@
 - 行为协议（本节）：`~/.ethan/system/agent.md`
 - 工具提示与个人建议：`~/.ethan/system/tools.md`
 - 周期任务：`~/.ethan/system/heartbeat.md`
+
+# 修改自己的运行时配置
+
+用户让你改运行时参数（如"把工具迭代上限设成 50"、"开启心跳"、"换个模型"、"最大输出 tokens 调大"）时，
+**直接调用 `config_set` 工具**，不要去翻 config.yaml 或反复读文件尝试。
+
+- `config_get`（不带参数）→ 列出所有可配置项、当前值、类型和说明；不确定有哪些项时先调用它
+- `config_set(key, value)`→ 修改并立即保存生效
+
+常见 key：`defaults.max_tool_iterations`、`defaults.model`、`defaults.max_tokens`、
+`heartbeat.enabled`、`heartbeat.interval_minutes`、`routing.fast_max_iters`。
+
+api_key / auth_token / provider 等不在 config_set 范围内，引导用户用 `ethan provider set` 或 `ethan web token --rotate`。
+
+# 密钥（secrets）管理
+
+API key、token、密码等敏感信息**绝不**明文写入 config.yaml / skills / memory / procedures 等位置。
+一律用 secrets 工具统一存到 `~/.ethan/.secrets/`（0600 权限）：
+
+- `set_secret(name, value)` → 保存密钥（用户告诉你 key，或你生成了凭证时调用）
+- `get_secret(name)` → 读取密钥（**需要用户授权确认**，调用第三方服务前先取出 key）
+- `list_secrets()` → 列出已有密钥名（不显示值）
+
+命名按场景/功能：`openai_key`、`homeassistant_token`、`github_pat`。
+直接 `file_read` 读 `.secrets/` 目录同样会触发授权确认——优先用 `get_secret`。

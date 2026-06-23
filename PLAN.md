@@ -168,6 +168,31 @@ ethan/
 
 ---
 
+## 待重构
+
+### repl.py 拆分（844 行 → 包）
+
+`ethan/interface/repl.py` 单文件已膨胀到 800+ 行，职责过多（session 管理 + 主循环 + 流式渲染 + 斜杠命令 + onboarding + 配置编辑）。拆成 `ethan/interface/repl/` 包：
+
+| 新文件 | 内容 | 来源行 |
+|--------|------|--------|
+| `repl/__init__.py` | 导出 `run_repl`/`run_once`/`ProfileSwitchException` | — |
+| `repl/toolbar.py` | `_PT_STYLE`/`_make_toolbar`/`_shorten_path`/`_format_duration` | 35-120 |
+| `repl/banner.py` | `_banner`/`_print_history` | 123-167 |
+| `repl/slash_commands.py` | `_handle_slash_command`/`SlashCompleter`/`_SLASH_COMMANDS`/`ProfileSwitchException` | 55-86, 232-440 |
+| `repl/onboarding.py` | `run_provider_setup`/`run_first_time_onboarding` | 384-475 |
+| `repl/render.py` | 流式渲染逻辑（`_consume_stream` 闭包抽成函数）| 612-760 |
+| `repl/core.py` | 瘦身后的 `run_repl`（session 恢复 + 主循环 + 退出清理）| 348-765 剩余 |
+
+目标：`repl/core.py` < 200 行，无单文件超 600 行。
+
+注意事项：
+- `_consume_stream` 是 `run_repl` 内的闭包，依赖大量 nonlocal 变量（full/thought/first_chunk 等），拆分时需把这些状态收进一个 `StreamState` dataclass 传入
+- `run_repl` 里直接操作 `store._db.execute` 绕过 SessionStore（570-574 行），顺手改用 `SessionStore.persist_inmemory(session)` 正规化
+- `/config` 编辑器已拆到 `ethan/interface/config_editor.py`，`/token`/`/skills` 等小命令随 slash_commands.py 走
+
+---
+
 ## 技术选型
 
 | 用途 | 库 | 版本 | 状态 |

@@ -11,6 +11,7 @@ import {
   streamChat,
   fetchOnboardingStatus,
   fetchAgentSettings,
+  respondConsent,
 } from "@/lib/api";
 import type { ToolStep } from "@/components/tool-timeline";
 import type { Message, Usage, Quote } from "@/components/chat/types";
@@ -18,6 +19,7 @@ import { ChatHeader } from "@/components/chat/chat-header";
 import { MessageList } from "@/components/chat/message-list";
 import { ChatInput } from "@/components/chat/chat-input";
 import { OnboardingBanner } from "@/components/chat/onboarding-banner";
+import { ConsentDialog, type ConsentRequest } from "@/components/consent-dialog";
 
 interface ChatViewProps {
   initialSessionId?: string;
@@ -37,6 +39,16 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const [quote, setQuote] = useState<Quote | null>(null);
   const [schedules, setSchedules] = useState<any[]>([]);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [consentRequest, setConsentRequest] = useState<ConsentRequest | null>(null);
+
+  const handleConsentRespond = async (requestId: string, allowed: boolean) => {
+    setConsentRequest(null);
+    try {
+      await respondConsent(requestId, allowed);
+    } catch {
+      // 网络错误时按拒绝处理，避免 Agent 卡死
+    }
+  };
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   // 记录「刚由本组件流式完成并 router.replace 进来的 session id」，
@@ -193,6 +205,15 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       for await (const chunk of streamChat(chatMessages, selectedModel, sessionId, sentQuote)) {
         if (ttft === undefined) ttft = Date.now() - sendTime;
 
+        if (chunk.consent_request) {
+          setConsentRequest({
+            request_id: chunk.request_id || "",
+            tool: chunk.tool || "",
+            description: chunk.description || "",
+            detail: chunk.detail,
+          });
+          continue;
+        }
         if (chunk.error) {
           assistantContent = `Error: ${chunk.error}`;
           break;
@@ -310,6 +331,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           onQuoteCancel={() => setQuote(null)}
         />
       </div>
+      <ConsentDialog request={consentRequest} onRespond={handleConsentRespond} />
     </div>
   );
 }

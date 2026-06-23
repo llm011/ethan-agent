@@ -5,6 +5,18 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+// token 数紧凑显示：890379 → "890k"，1500000 → "1.5M"。按十进制 /1000（token 是计数，非字节）。
+export function fmtTokens(n: number | undefined | null): string {
+  const v = Number(n || 0)
+  if (v >= 1_000_000) {
+    const m = Math.floor(v / 10000) / 100  // floor 到百分位，避免 999999 → "1.0M"
+    return `${m.toFixed(1).replace(/\.0$/, "")}M`
+  }
+  if (v >= 10_000) return `${Math.floor(v / 1000)}k`
+  if (v >= 1000) return `${(Math.floor(v / 100) / 10).toFixed(1)}k`
+  return String(v)
+}
+
 // "interval[0:10:00]" → "每 10 分钟"
 // "cron[minute='0', hour='9', ...]" → "每天 09:00"
 export function formatTrigger(trigger: string): string {

@@ -32,6 +32,25 @@ def _match_keyword(kw: str, text: str) -> bool:
     return kw in text
 
 
+# 这些参数值可能很长（用户输入/代码），需要截断避免刷屏
+_TRUNCATE_ARGS = {"content", "text", "code", "prompt", "body", "description", "new_content", "value"}
+
+
+def _format_args(arguments: dict, max_items: int = 3) -> str:
+    """格式化工具参数为单行摘要。路径/命令等不截断，content/text 等长文本截断。"""
+    parts = []
+    for k, v in list(arguments.items())[:max_items]:
+        s = str(v).replace("\n", " ")
+        if k in _TRUNCATE_ARGS:
+            if len(s) > 80:
+                s = s[:80] + "…"
+        elif len(s) > 150:
+            # 超长路径/命令：保留头尾
+            s = s[:100] + "…" + s[-40:]
+        parts.append(f"{k}={s}")
+    return ", ".join(parts)
+
+
 def _get_route(text: str, skill_triggers: list[str] | None = None) -> str:
     """
     返回路由档位：'fast' | 'medium' | 'full'
@@ -312,7 +331,7 @@ class Agent:
         if route == "fast":
             system = self._build_system(working, fast=True)
             tools_list = [t for t in self._registry.all() if t.fast_path]
-            max_iters = 2
+            max_iters = routing.fast_max_iters
         elif route == "medium":
             system = self._build_system(working, fast=False)
             tools_list = self._registry.all()
@@ -320,8 +339,27 @@ class Agent:
         else:
             system = self._build_system(working, fast=False)
             tools_list = self._registry.all()
-            max_iters = self._max_iterations
+            # 实时读取，使 config_set 改的迭代上限立即生效（无需重建 Agent）
+            max_iters = get_config().defaults.max_tool_iterations
         return route, system, tools_list, max_iters
+
+    async def _request_consent(self, description: str, tool: str, detail: str = "") -> bool:
+        """请求用户授权。根据 channel 走不同 provider：
+        - 无 provider（如 heartbeat）：放行
+        - TUI：阻塞式 y/N
+        - Web：yield ConsentEvent 后 await Future（由 stream_chat 处理，见下）
+        Web 的流式注入在 stream_chat 内联处理（因为只有 generator 能 yield），
+        这里只兜底处理非流式 chat() 的情况。
+        """
+        import asyncio
+        from ethan.core.consent import get_consent_provider, ConsentEvent
+        provider = get_consent_provider()
+        if provider is None:
+            return True
+        if provider.streamed:
+            # 流式路径在 stream_chat 里内联处理；此处为非流式兜底，无法注入事件，默认放行
+            return True
+        return await provider.request(description, tool, detail)
 
     async def chat(self, messages: list[Message]) -> Message:
         """运行对话。fast/medium/full 三档路由，按消息长度和关键词自动选择。"""
@@ -376,13 +414,44 @@ class Agent:
             if not response.is_tool_call:
                 return
 
+            # --- 授权检查：执行前对需要 consent 的工具请求用户确认 ---
+            from ethan.core.consent import get_consent_provider
+            import asyncio as _aio
+            allowed_calls = []
             for tc in tool_calls:
-                args_summary = ", ".join(f"{k}={str(v)[:30]}" for k, v in list(tc.arguments.items())[:2])
-                yield ToolEvent(tool_name=tc.name, args_summary=args_summary, state="start")
+                tool = self._registry.get(tc.name)
+                desc = tool.consent_check(**tc.arguments) if tool else None
+                if desc:
+                    detail = _format_args(tc.arguments)
+                    provider = get_consent_provider()
+                    ok = True
+                    if provider is None:
+                        ok = True
+                    elif provider.streamed:
+                        # Web：向流注入 ConsentEvent，await 前端响应
+                        event, fut = provider.create(desc, tc.name, detail)
+                        yield event
+                        try:
+                            ok = await fut
+                        except _aio.CancelledError:
+                            ok = False
+                    else:
+                        ok = await provider.request(desc, tc.name, detail)
+                    if not ok:
+                        yield ToolEvent(tool_name=tc.name, args_summary="", state="error",
+                                        result_preview="用户拒绝")
+                        working.append(Message(
+                            role="tool",
+                            content="[用户拒绝此操作]",
+                            tool_call_id=tc.id,
+                        ))
+                        continue
+                allowed_calls.append(tc)
+                yield ToolEvent(tool_name=tc.name, args_summary=_format_args(tc.arguments), state="start")
 
-            results: list[ToolResult] = await self._executor.execute(tool_calls)
+            results: list[ToolResult] = await self._executor.execute(allowed_calls) if allowed_calls else []
 
-            for r, tc in zip(results, tool_calls):
+            for r, tc in zip(results, allowed_calls):
                 preview = r.content[:60].replace("\n", " ") if r.content else ""
                 yield ToolEvent(tool_name=tc.name, args_summary="", state="done" if not r.is_error else "error", result_preview=preview, sub_steps=getattr(r, "sub_steps", []) or [])
                 working.append(Message(

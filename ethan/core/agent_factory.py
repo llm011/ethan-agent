@@ -11,6 +11,7 @@ from ethan.core.agent import Agent
 from ethan.core.context import set_user_id
 from ethan.skills.registry import SkillRegistry
 from ethan.tools.builtin.acp import DelegateCodingTool
+from ethan.tools.builtin.config import ConfigGetTool, ConfigSetTool
 from ethan.tools.builtin.file import FileListTool, FileReadTool, FileWriteTool
 from ethan.tools.builtin.knowledge import KnowledgeAddTool, KnowledgeSearchTool
 from ethan.tools.builtin.memory_write import MemoryWriteTool
@@ -18,6 +19,7 @@ from ethan.tools.builtin.procedure_write import ProcedureWriteTool
 from ethan.tools.builtin.profile_update import ProfileUpdateTool
 from ethan.tools.builtin.schedule import ScheduleCreateTool, ScheduleListTool, ScheduleRemoveTool
 from ethan.tools.builtin.search import FdTool, RipgrepTool
+from ethan.tools.builtin.secrets import GetSecretTool, ListSecretsTool, SetSecretTool
 from ethan.tools.builtin.shell import ShellTool
 from ethan.tools.builtin.skill_create import SkillCreateTool
 from ethan.tools.builtin.web import WebFetchTool
@@ -58,6 +60,11 @@ def build_tool_registry(user_id: str = "", toolset: str = "full") -> ToolRegistr
     registry.register(ProfileUpdateTool(user_id=user_id))
     registry.register(SkillCreateTool(user_id=user_id))
     registry.register(DelegateCodingTool(user_id=user_id))
+    registry.register(ConfigGetTool())
+    registry.register(ConfigSetTool())
+    registry.register(SetSecretTool())
+    registry.register(GetSecretTool())
+    registry.register(ListSecretsTool())
     return registry
 
 

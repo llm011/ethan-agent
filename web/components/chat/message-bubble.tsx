@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Quote as QuoteIcon } from "lucide-react";
 import { ToolTimeline } from "@/components/tool-timeline";
+import { fmtTokens } from "@/lib/utils";
 import { CodeBlock } from "@/components/code-block";
 import { PlainCodeBlock } from "@/components/plain-code-block";
 import type { Message } from "./types";
@@ -123,9 +124,9 @@ export function MessageBubble({ msg, isStreaming, isLast, onQuote }: MessageBubb
               {msg.usage && (
                 <>
                   {msg.created_at && <span className="inline-block w-px h-2.5 bg-muted-foreground/20" />}
-                  <span>↑{msg.usage.input.toLocaleString()}</span>
-                  <span>↓{msg.usage.output.toLocaleString()}</span>
-                  {msg.usage.cache > 0 && <span>⚡{msg.usage.cache.toLocaleString()}</span>}
+                  <span title={`${msg.usage.input.toLocaleString()} tokens`}>↑{fmtTokens(msg.usage.input)}</span>
+                  <span title={`${msg.usage.output.toLocaleString()} tokens`}>↓{fmtTokens(msg.usage.output)}</span>
+                  {msg.usage.cache > 0 && <span title={`${msg.usage.cache.toLocaleString()} tokens`}>⚡{fmtTokens(msg.usage.cache)}</span>}
                   {msg.ttft !== undefined && <span>{msg.ttft < 1000 ? `${msg.ttft}ms` : `${(msg.ttft / 1000).toFixed(1)}s`}</span>}
                 </>
               )}
