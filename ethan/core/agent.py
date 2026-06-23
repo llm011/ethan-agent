@@ -127,6 +127,7 @@ class Agent:
         system: str | None = None,
         channel: str = "",
         user_id: str = "",
+        mode: str = "",
     ):
         from ethan.core.paths import user_facts_path, user_procedures_path
         from ethan.core.context import set_user_id
@@ -135,6 +136,7 @@ class Agent:
         if user_id:
             set_user_id(user_id)
         self._user_id = user_id or ""
+        self._mode = mode or ""  # "" = 默认工作助手(Ethan); "陪伴" = 苏念·陪伴倾听模式
         self._provider = create_provider(model)
         self._registry = tool_registry or ToolRegistry()
         self._executor = ToolExecutor(self._registry)
@@ -215,6 +217,34 @@ class Agent:
                 return m.content
         return ""
 
+    def _counselor_persona_text(self) -> str:
+        """读取「陪伴倾听」SKILL.md 正文(去掉 YAML frontmatter)。
+
+        优先用户 skills 目录(可被用户改写),回退包内默认。找不到返回空串。
+        """
+        from pathlib import Path
+        name = "陪伴倾听"
+        candidates: list[Path] = []
+        try:
+            from ethan.core.paths import user_skills_dir
+            candidates.append(user_skills_dir() / name / "SKILL.md")
+        except Exception:
+            pass
+        # 包内默认:ethan/defaults/skills/<name>/SKILL.md
+        candidates.append(Path(__file__).resolve().parent.parent / "defaults" / "skills" / name / "SKILL.md")
+        for p in candidates:
+            if p.exists():
+                text = p.read_text(encoding="utf-8")
+                if text.startswith("---"):
+                    seg = text.split("---", 2)
+                    if len(seg) >= 3:
+                        text = seg[2]
+                return text.strip()
+        return ""
+
+    def _is_counselor_mode(self) -> bool:
+        return self._mode in ("陪伴", "counselor", "苏念")
+
     def _build_system(self, messages: list[Message], fast: bool = False) -> str:
         """构建 system prompt。fast=True 时使用极简版本减少 token。"""
         config = get_config()
@@ -236,6 +266,16 @@ class Agent:
             if soul_content:
                 parts.append(f"<soul>\n[CRITICAL — 以下准则必须严格遵守]\n\n{soul_content}\n</soul>")
             parts.append(f"<identity>\n{identity_content}\n</identity>")
+            if self._is_counselor_mode():
+                persona = self._counselor_persona_text()
+                if persona:
+                    parts.append(
+                        "<counselor_persona>\n"
+                        "[CRITICAL — 当前处于「陪伴倾听」模式。以下人格覆盖你的默认身份,完全化身苏念,"
+                        "用她的语气、温度和方式回应,严格遵守其中的说话方式要求。]\n\n"
+                        f"{persona}\n"
+                        "</counselor_persona>"
+                    )
             parts.append(f"Current time: {now}")
             parts.append(f"Your workspace directory is {workspace}.")
             parts.append(f"Current model: {self._provider.model}（用户问起你用的什么模型/是谁驱动时，如实回答这个 model id）")
@@ -273,6 +313,16 @@ class Agent:
                 f"</soul>"
             )
         parts.append(f"<identity>\n{identity_content}\n</identity>")
+        if self._is_counselor_mode():
+            persona = self._counselor_persona_text()
+            if persona:
+                parts.append(
+                    "<counselor_persona>\n"
+                    "[CRITICAL — 当前处于「陪伴倾听」模式。以下人格覆盖你的默认身份,完全化身苏念,"
+                    "用她的语气、温度和方式回应,严格遵守其中的说话方式要求。该模式优先级高于默认身份。]\n\n"
+                    f"{persona}\n"
+                    "</counselor_persona>"
+                )
         if agent_content:
             parts.append(f"<agent_protocols>\n{agent_content}\n</agent_protocols>")
         if tools_content:

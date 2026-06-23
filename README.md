@@ -15,8 +15,13 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 - Structured Facts: confidence-scored entries with conflict detection and deduplication (`~/.ethan/memory/facts.json`)
 - Behavioral Procedures: learned from user corrections, loaded every conversation (`procedures.json`)
 - Session Episodes: auto-summarized on exit, supports keyword search (`episodes.json`)
-- User Profile: narrative document storing personal phrases, goals, and agent agreements (`user_profile.md`)
+- User Profile: narrative document storing personal phrases, goals, and agent agreements (`user_profile.md`); sections include 基础特征 (basic traits) and 心理与情绪 (emotional/psychological traits)
 - **Proactive memory write**: Agent calls tools mid-conversation to instantly persist anything worth remembering — no waiting for batch processing
+
+**Companion mode — 苏念 (Surrender Experiment counselor)**
+- A loadable plugin: toggle "苏念 · 陪伴倾听" in the chat UI to switch from the work assistant into a young, gentle female listener grounded in *The Surrender Experiment* (道法自然)
+- In this mode the agent affirms first, listens deeply, and accompanies rather than rushing to solve — speaking like a real person, no AI stiffness
+- While in companion mode, the consolidator auto-extracts 心理与情绪 (mood / stressors / what soothes you / inner feelings) into your profile; basic traits are set by you in the "我的画像" (My Profile) settings tab
 
 **Skill system**
 - Keyword trigger matching, auto-injected into system prompt

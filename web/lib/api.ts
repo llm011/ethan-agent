@@ -247,6 +247,22 @@ export async function updateSystemSettings(patch: Partial<SystemSettings>): Prom
   });
 }
 
+// ── User profile (我的画像) ───────────────────────────────────────
+
+export async function fetchUserProfile(): Promise<string> {
+  const res = await fetch(`${API_URL}/settings/profile`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed to fetch user profile");
+  return (await res.json()).content;
+}
+
+export async function updateUserProfile(content: string): Promise<void> {
+  await fetch(`${API_URL}/settings/profile`, {
+    method: "PATCH",
+    headers: headers(),
+    body: JSON.stringify({ content }),
+  });
+}
+
 export interface ToolSchema {
   name: string;
   description: string;
@@ -358,11 +374,12 @@ export async function* streamChat(
   model?: string,
   sessionId?: string,
   quote?: { role: "user" | "assistant"; content: string } | null,
+  mode?: string,
 ): AsyncGenerator<{ content?: string; done?: boolean; error?: string; model?: string; usage?: Record<string, number>; tool?: string; args?: string; state?: string; id?: string; duration_ms?: number; result_preview?: string; sub_steps?: Array<{ tool: string; args: string; state: string; duration_ms?: number | null; result_preview?: string }>; consent_request?: boolean; request_id?: string; description?: string; detail?: string }> {
   const res = await fetch(`${API_URL}/chat`, {
     method: "POST",
     headers: headers(),
-    body: JSON.stringify({ messages, model, stream: true, session_id: sessionId, quote: quote ?? undefined }),
+    body: JSON.stringify({ messages, model, stream: true, session_id: sessionId, quote: quote ?? undefined, mode: mode || undefined }),
   });
 
   if (!res.ok) {
