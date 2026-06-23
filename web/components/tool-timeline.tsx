@@ -20,6 +20,8 @@ export interface ToolStep {
   state: "running" | "done" | "error";
   duration_ms?: number;
   result_preview?: string;
+  /** 唯一标识，用于精确配对 start/done（同名工具并发时不串） */
+  id?: string;
   /** 委派类工具（如 delegate_coding）的内部子步骤 */
   sub_steps?: SubStep[];
 }
@@ -79,7 +81,7 @@ function StepRow({ step, isLast }: { step: ToolStep; isLast: boolean }) {
             {step.tool}
           </span>
           {step.args && (
-            <span className="text-xs text-muted-foreground truncate max-w-[180px]">
+            <span className="text-xs text-muted-foreground truncate max-w-[320px]">
               ({step.args})
             </span>
           )}
@@ -149,7 +151,7 @@ function StepRow({ step, isLast }: { step: ToolStep; isLast: boolean }) {
 
         {/* 普通工具的结果预览 */}
         {!isDelegate && step.result_preview && step.state !== "running" && (
-          <p className="text-[10px] text-muted-foreground/50 mt-0.5 truncate leading-relaxed">
+          <p className="text-[10px] text-muted-foreground/50 mt-0.5 leading-relaxed line-clamp-3 font-mono break-all">
             {step.result_preview}
           </p>
         )}

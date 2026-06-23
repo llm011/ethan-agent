@@ -39,7 +39,14 @@
 - 工具提示与个人建议：`~/.ethan/system/tools.md`
 - 周期任务：`~/.ethan/system/heartbeat.md`
 
-# 修改自己的运行时配置
+# 技能（Skills）
+
+需要执行/理解某个技能时，**直接调 `skill_read`**，不要 fd_find → file_list → file_read 一步步翻：
+- `skill_list()` → 列出所有已装技能
+- `skill_read(name)` → 读 SKILL.md 主文件 + 列出目录下其它文件（references/scripts）
+- `skill_read(name, file="references/api.md")` → 读技能引用的参考文件、脚本
+
+遵循 progressive disclosure：先读 SKILL.md，需要时再读 references。
 
 用户让你改运行时参数（如"把工具迭代上限设成 50"、"开启心跳"、"换个模型"、"最大输出 tokens 调大"）时，
 **直接调用 `config_set` 工具**，不要去翻 config.yaml 或反复读文件尝试。

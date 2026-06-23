@@ -115,21 +115,22 @@ def _shorten_path(path: str, max_len: int = 30) -> str:
 
 
 def _make_toolbar(model: str, tokens_in: int = 0, tokens_out: int = 0, tokens_cache: int = 0, session_id: str = "", activity: str = "", user_id: str = ""):
-    """构建 prompt_toolkit bottom_toolbar。"""
+    """构建 prompt_toolkit bottom_toolbar。token 总消耗紧跟 model，保证醒目。"""
     cwd = _shorten_path(os.getcwd())
     parts = []
     parts.append(("class:model", f" ⚡ {model}"))
-    if user_id:
-        parts.append(("class:separator", " · "))
-        parts.append(("class:tokens", f"user: {user_id}"))
-    parts.append(("class:separator", " · "))
-    parts.append(("class:path", cwd))
+    # token 紧跟 model —— 这是用户最关心的会话级总消耗
     if tokens_in or tokens_out:
         token_str = f"↑{_fmt_tokens(tokens_in)} ↓{_fmt_tokens(tokens_out)}"
         if tokens_cache:
             token_str += f" ⚡{_fmt_tokens(tokens_cache)}"
         parts.append(("class:separator", " · "))
         parts.append(("class:tokens", token_str))
+    if user_id:
+        parts.append(("class:separator", " · "))
+        parts.append(("class:tokens", f"user: {user_id}"))
+    parts.append(("class:separator", " · "))
+    parts.append(("class:path", cwd))
     if activity:
         parts.append(("class:separator", " · "))
         parts.append(("class:tokens", activity))
@@ -225,10 +226,14 @@ async def run_once(agent: Agent, prompt: str) -> None:
                 args = f"({item.args_summary})" if item.args_summary else ""
                 console.print(f"[dim]⚡ {item.tool_name}{args}[/dim]")
                 after_tool = True
-            elif item.state in ("done", "error") and item.sub_steps:
-                # 委派类工具（如 delegate_coding）的子步骤摘要
-                ok = sum(1 for s in item.sub_steps if s.get("state") == "done")
-                console.print(f"[dim]   ↳ {len(item.sub_steps)} 步工具调用（{ok} 成功）[/dim]")
+            elif item.state in ("done", "error"):
+                if item.sub_steps:
+                    # 委派类工具（如 delegate_coding）的子步骤摘要
+                    ok = sum(1 for s in item.sub_steps if s.get("state") == "done")
+                    console.print(f"[dim]   ↳ {len(item.sub_steps)} 步工具调用（{ok} 成功）[/dim]")
+                if item.result_preview:
+                    prefix = "  → " if item.state == "done" else "  ✗ "
+                    console.print(f"[dim]{prefix}{item.result_preview}[/dim]", soft_wrap=True)
             continue
 
         if not spinner_stopped:
@@ -743,6 +748,10 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
                             if item.sub_steps:
                                 ok = sum(1 for s in item.sub_steps if s.get("state") == "done")
                                 console.print(f"[dim]   ↳ {len(item.sub_steps)} 步工具调用（{ok} 成功）[/dim]")
+                            # 展示结果预览（shell/file_read 等的输出摘要），让用户看到工具做了什么
+                            if item.result_preview:
+                                prefix = "  → " if item.state == "done" else "  ✗ "
+                                console.print(f"[dim]{prefix}{item.result_preview}[/dim]", soft_wrap=True)
                         continue
 
                     # Text chunk

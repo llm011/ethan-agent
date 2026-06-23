@@ -22,6 +22,7 @@ from ethan.tools.builtin.search import FdTool, RipgrepTool
 from ethan.tools.builtin.secrets import GetSecretTool, ListSecretsTool, SetSecretTool
 from ethan.tools.builtin.shell import ShellTool
 from ethan.tools.builtin.skill_create import SkillCreateTool
+from ethan.tools.builtin.skill_read import SkillListTool, SkillReadTool
 from ethan.tools.builtin.web import WebFetchTool
 from ethan.tools.builtin.web_search import WebSearchTool
 from ethan.tools.registry import ToolRegistry
@@ -59,6 +60,8 @@ def build_tool_registry(user_id: str = "", toolset: str = "full") -> ToolRegistr
     registry.register(ProcedureWriteTool(user_id=user_id))
     registry.register(ProfileUpdateTool(user_id=user_id))
     registry.register(SkillCreateTool(user_id=user_id))
+    registry.register(SkillReadTool())
+    registry.register(SkillListTool())
     registry.register(DelegateCodingTool(user_id=user_id))
     registry.register(ConfigGetTool())
     registry.register(ConfigSetTool())

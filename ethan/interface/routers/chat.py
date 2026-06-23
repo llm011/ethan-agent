@@ -187,13 +187,15 @@ async def _stream_response(
                 collector.feed(item)
                 # 即时把 ToolEvent 推给前端（SSE 不能等批处理）
                 if item.state == "start":
-                    evt = {"tool": item.tool_name, "args": item.args_summary, "state": "start"}
+                    evt = {"tool": item.tool_name, "args": item.args_summary, "state": "start",
+                           "id": item.tool_call_id}
                 else:
                     step = collector.tool_steps[-1]  # feed 刚追加/关闭的那个
                     evt = {
                         "tool": item.tool_name,
                         "args": item.args_summary,
                         "state": item.state,
+                        "id": item.tool_call_id,
                         "duration_ms": step.get("duration_ms"),
                         "result_preview": item.result_preview or "",
                         "sub_steps": item.sub_steps or [],

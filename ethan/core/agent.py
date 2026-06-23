@@ -51,6 +51,17 @@ def _format_args(arguments: dict, max_items: int = 3) -> str:
     return ", ".join(parts)
 
 
+def _preview(content: str, max_lines: int = 3, max_chars: int = 200) -> str:
+    """工具结果的紧凑预览：取前几行、总长度封顶，单行化。"""
+    if not content:
+        return ""
+    lines = [ln.strip() for ln in content.splitlines() if ln.strip()][:max_lines]
+    text = " ⏎ ".join(lines)
+    if len(text) > max_chars:
+        text = text[:max_chars] + "…"
+    return text
+
+
 def _get_route(text: str, skill_triggers: list[str] | None = None) -> str:
     """
     返回路由档位：'fast' | 'medium' | 'full'
@@ -438,7 +449,7 @@ class Agent:
                     else:
                         ok = await provider.request(desc, tc.name, detail)
                     if not ok:
-                        yield ToolEvent(tool_name=tc.name, args_summary="", state="error",
+                        yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary="", state="error",
                                         result_preview="用户拒绝")
                         working.append(Message(
                             role="tool",
@@ -447,13 +458,13 @@ class Agent:
                         ))
                         continue
                 allowed_calls.append(tc)
-                yield ToolEvent(tool_name=tc.name, args_summary=_format_args(tc.arguments), state="start")
+                yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary=_format_args(tc.arguments), state="start")
 
             results: list[ToolResult] = await self._executor.execute(allowed_calls) if allowed_calls else []
 
             for r, tc in zip(results, allowed_calls):
-                preview = r.content[:60].replace("\n", " ") if r.content else ""
-                yield ToolEvent(tool_name=tc.name, args_summary="", state="done" if not r.is_error else "error", result_preview=preview, sub_steps=getattr(r, "sub_steps", []) or [])
+                preview = _preview(r.content) if r.content else ""
+                yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary="", state="done" if not r.is_error else "error", result_preview=preview, sub_steps=getattr(r, "sub_steps", []) or [])
                 working.append(Message(
                     role="tool",
                     content=r.content,

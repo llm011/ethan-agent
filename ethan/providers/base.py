@@ -49,6 +49,7 @@ class ToolEvent:
     state: str  # "start" | "done" | "error"
     result_preview: str = ""
     sub_steps: list = field(default_factory=list)  # 委派类工具（如 delegate_coding）的子步骤
+    tool_call_id: str = ""  # 唯一标识，前端用来精确配对 start/done（同名工具并发时不串）
 
 
 class BaseProvider(ABC):

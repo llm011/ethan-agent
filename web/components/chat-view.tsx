@@ -223,30 +223,43 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
             assistantThought += (assistantThought ? "\n\n" : "") + assistantContent;
             assistantContent = "";
           }
-          currentToolSteps.push({ tool: chunk.tool, args: chunk.args || "", state: "running" });
+          currentToolSteps.push({ tool: chunk.tool, args: chunk.args || "", state: "running", id: chunk.id });
           setMessages([...newMessages, {
             role: "assistant", content: assistantContent, thought: assistantThought,
             toolSteps: [...currentToolSteps], toolsExpanded: true, created_at: Date.now() / 1000,
           }]);
         }
         if (chunk.tool && (chunk.state === "done" || chunk.state === "error")) {
-          for (let i = currentToolSteps.length - 1; i >= 0; i--) {
-            if (currentToolSteps[i].tool === chunk.tool && currentToolSteps[i].state === "running") {
-              currentToolSteps[i] = {
-                ...currentToolSteps[i],
-                state: chunk.state as "done" | "error",
-                duration_ms: chunk.duration_ms,
-                result_preview: chunk.result_preview,
-                sub_steps: chunk.sub_steps?.map((s) => ({
-                  tool: s.tool,
-                  args: s.args,
-                  state: s.state as "running" | "done" | "error",
-                  duration_ms: s.duration_ms ?? undefined,
-                  result_preview: s.result_preview,
-                })),
-              };
-              break;
+          // 优先按 id 精确匹配（同名工具并发不串），fallback 到 tool 名
+          let matchedIdx = -1;
+          if (chunk.id) {
+            for (let i = currentToolSteps.length - 1; i >= 0; i--) {
+              if (currentToolSteps[i].id === chunk.id && currentToolSteps[i].state === "running") {
+                matchedIdx = i; break;
+              }
             }
+          }
+          if (matchedIdx < 0) {
+            for (let i = currentToolSteps.length - 1; i >= 0; i--) {
+              if (currentToolSteps[i].tool === chunk.tool && currentToolSteps[i].state === "running") {
+                matchedIdx = i; break;
+              }
+            }
+          }
+          if (matchedIdx >= 0) {
+            currentToolSteps[matchedIdx] = {
+              ...currentToolSteps[matchedIdx],
+              state: chunk.state as "done" | "error",
+              duration_ms: chunk.duration_ms,
+              result_preview: chunk.result_preview,
+              sub_steps: chunk.sub_steps?.map((s) => ({
+                tool: s.tool,
+                args: s.args,
+                state: s.state as "running" | "done" | "error",
+                duration_ms: s.duration_ms ?? undefined,
+                result_preview: s.result_preview,
+              })),
+            };
           }
           setMessages([...newMessages, {
             role: "assistant", content: assistantContent, thought: assistantThought,
