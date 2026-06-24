@@ -70,6 +70,11 @@ ethan provider set anthropic --api-key sk-ant-xxx
 ethan provider set openai_compat --api-key sk-xxx --base-url https://api.example.com/v1
 ethan model default <model-id>
 
+# OR Zhipu GLM (built-in preset — fills base_url/type/anti-cache + registers glm-5.2 etc.)
+ethan provider set glm --api-key <your-glm-key>
+ethan model default glm-5.2
+# (see `ethan provider presets` for all built-in presets)
+
 ethan
 ```
 

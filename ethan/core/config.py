@@ -308,6 +308,27 @@ def _apply_env_overrides(raw: dict) -> None:
         if base and not p.get("base_url"):
             p["base_url"] = base
 
+    # 内置 provider 预设(glm 等):环境变量兜底填充 api_key/base_url/type/disable_prompt_cache
+    # 仅在 config.yaml 未显式配置该字段时填充,与上面的兜底原则一致。
+    try:
+        from ethan.core.provider_presets import PROVIDER_PRESETS
+    except Exception:
+        PROVIDER_PRESETS = {}
+    for pkey, preset in PROVIDER_PRESETS.items():
+        env_keys = preset.get("env_keys") or []
+        token = next((os.environ.get(k, "") for k in env_keys if os.environ.get(k)), "")
+        if not token:
+            continue
+        p = providers.setdefault(pkey, {})
+        if not p.get("api_key"):
+            p["api_key"] = token
+        if preset.get("type") and not p.get("type"):
+            p["type"] = preset["type"]
+        if preset.get("base_url") and not p.get("base_url"):
+            p["base_url"] = preset["base_url"]
+        if preset.get("disable_prompt_cache"):
+            p["disable_prompt_cache"] = True
+
     # 代理：环境变量 ETHAN_PROXY 覆盖
     proxy_env = os.environ.get("ETHAN_PROXY", "")
     if proxy_env:

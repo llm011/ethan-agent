@@ -158,7 +158,40 @@ models:
     provider: google
 ```
 
-### 3. 接入火山引擎 (Volcengine ARK) 避坑指南
+### 3. 接入智谱 GLM (BigModel)
+
+智谱 BigModel 提供 Anthropic 兼容网关 (`/api/anthropic`),GLM 模型可走现有 Anthropic Provider,无需新实现。
+内置预设,一条命令搞定:
+
+```bash
+ethan provider set glm --api-key <你的GLM key>
+# 自动填好:base_url=https://open.bigmodel.cn/api/anthropic,type=anthropic,
+#          disable_prompt_cache=true,并注册 glm-5.2 / glm-4.6 / glm-4.5
+```
+
+或手动写 `config.yaml`(等价):
+
+```yaml
+providers:
+  glm:
+    api_key: <你的GLM key>
+    base_url: https://open.bigmodel.cn/api/anthropic
+    type: anthropic
+    disable_prompt_cache: true   # BigModel 不支持 cache_control,必须开
+
+models:
+  - id: glm-5.2
+    provider: glm
+    description: GLM 5.2
+  - id: glm-4.6
+    provider: glm
+```
+
+也可用环境变量兜底(无需写 config.yaml):设 `GLM_API_KEY`(或 `ZHIPU_API_KEY`)即可,启动时自动填充上述 provider。
+
+注意:model id 是 `glm-5.2`、`glm-4.6` 等,不要带 `[1m]` 后缀(那是 Claude Code 的 1M 上下文别名,网关不认)。实测对话/流式/工具调用均正常。
+
+### 4. 接入火山引擎 (Volcengine ARK) 避坑指南
 
 火山引擎虽然支持提供 Claude 和 Doubao 等模型，但它的网关**只兼容 OpenAI 协议格式**。如果错误地用 `anthropic` 协议去请求火山，会报 `502 unknown provider` 错误。
 
@@ -187,7 +220,7 @@ models:
     description: 火山版 Claude/Doubao
 ```
 
-### 4. 接入第三方中转服务 (如 yuntoken 等)
+### 5. 接入第三方中转服务 (如 yuntoken 等)
 
 许多国内中转服务号称“支持原生的 Anthropic 接口”，但它们往往使用了反向代理或者 Node.js 路由（如 `claude-code-router`）来转发请求。
 
