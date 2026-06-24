@@ -69,12 +69,71 @@ async def _remove_reaction(message_id: str, reaction_id: str) -> None:
         pass
 
 
+def _render_post_content(text: str) -> str:
+    """把多行文本/markdown 渲染成飞书 post 消息的 content JSON 字符串。
+
+    post 格式：每行一个段落（content 数组的一个元素），行内不做 markdown 解析，
+    直接当纯文本——飞书 post 的 text 标签会保留换行和原始字符。
+    流式编辑时整条消息用同一个 post，patch 时整体替换 content。
+    """
+    import json as _json
+    lines = text.split("\n")
+    content = [[{"tag": "text", "text": line}] for line in lines]
+    return _json.dumps({"zh_cn": {"content": content}}, ensure_ascii=False)
+
+
+async def _send_post_message(chat_id: str, text: str) -> str | None:
+    """用 lark_oapi SDK 发一条 post（富文本）消息，返回 message_id。
+
+    post 类型可被 patch 更新（text 类型不行），用于流式编辑同一条消息。
+    """
+    import lark_oapi as lark
+    from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
+    from ethan.core.config import get_config
+    import json as _json
+
+    cfg = get_config()
+    lark_cfg = getattr(cfg, "lark", None)
+    if not lark_cfg or not lark_cfg.app_id:
+        return None
+    client = (
+        lark.Client.builder()
+        .app_id(lark_cfg.app_id)
+        .app_secret(lark_cfg.app_secret)
+        .build()
+    )
+    content = _render_post_content(text)
+    req = (
+        CreateMessageRequest.builder()
+        .receive_id_type("chat_id")
+        .request_body(
+            CreateMessageRequestBody.builder()
+            .receive_id(chat_id)
+            .msg_type("post")
+            .content(content)
+            .build()
+        )
+        .build()
+    )
+    try:
+        resp = await asyncio.to_thread(client.im.v1.message.create, req)
+        if resp.success() and resp.data:
+            return resp.data.message_id
+        return None
+    except Exception:
+        logger.exception("Failed to send post message to chat %s", chat_id)
+        return None
+
+
 async def _patch_message(message_id: str, text: str) -> bool:
-    """用 lark_oapi SDK 更新已发送的消息内容（追加流式效果）。"""
+    """用 lark_oapi SDK 更新已发送的 post 消息内容（流式追加效果）。
+
+    飞书 patch 只支持 post/卡片，不支持 text。所以流式消息必须用 post 类型发出，
+    之后用本函数整体替换 content。
+    """
     import lark_oapi as lark
     from lark_oapi.api.im.v1 import PatchMessageRequest, PatchMessageRequestBody
     from ethan.core.config import get_config
-    import json as _json
 
     cfg = get_config()
     lark_cfg = getattr(cfg, "lark", None)
@@ -88,7 +147,7 @@ async def _patch_message(message_id: str, text: str) -> bool:
         .build()
     )
 
-    content = _json.dumps({"text": text}, ensure_ascii=False)
+    content = _render_post_content(text)
     req = (
         PatchMessageRequest.builder()
         .message_id(message_id)
@@ -101,7 +160,6 @@ async def _patch_message(message_id: str, text: str) -> bool:
     )
 
     try:
-        import asyncio
         resp = await asyncio.to_thread(client.im.v1.message.patch, req)
         return resp.success()
     except Exception:
@@ -246,17 +304,52 @@ async def _handle_message(event_data: dict) -> None:
         skills.load()
         agent = Agent(tool_registry=registry, skill_registry=skills, channel="lark")
 
-        # --- 收集完整回复后一次性发送 ---
-        # 飞书 patch API 只支持卡片消息，文本消息无法 patch
-        # 所以采用：THINKING 表情作为"处理中"指示，完成后一次性发整条消息
-        full_content = ""
-        reaction_removed = False
-        collected_tool_steps: list[dict] = []
+        # --- 流式输出：一条 post 消息，靠 patch 不断追加 ---
+        # 策略：
+        # 1. 收到消息先发一条 "🤔 thinking..." 的 post（替代纯表情），拿到 msg_id 作为编辑目标
+        # 2. stream_chat 过程中：
+        #    - content 首块立即 patch 显示；之后每 ~2s 攒一批 patch 一次（节流，少调 API）
+        #    - ToolEvent start：把工具叙述 + 🔧 工具(参数) 追加进消息
+        #    - ToolEvent done：追加一行结果预览
+        # 3. 全程只编辑这同一条消息；结束追加 token 统计
         import time as _lark_time
+
+        post_msg_id = await _send_post_message(chat_id, "🤔 thinking...")
+        # 发出首条后即可移除 THINKING 表情（消息本身已是处理中指示）
+        if reaction_id and message_id:
+            await _remove_reaction(message_id, reaction_id)
+            reaction_id = None  # 标记已移除，后面不再处理
+
+        # displayed = 已经 patch 进飞书消息的文本；pending = 还没 flush 的累积正文
+        # "🤔 thinking..." 占位留在开头，首个真实内容出现后追加在其后
+        displayed = "🤔 thinking..."
+        pending = ""
+        collected_tool_steps: list[dict] = []
         lark_tool_start_times: dict[str, float] = {}
+        last_flush = _lark_time.time()
+        first_chunk_flushed = False
+        FLUSH_INTERVAL = 2.0  # 秒：首块后每 2s 攒一批 patch 一次
+
+        async def _flush(force: bool = False) -> None:
+            """把 pending 追加进 displayed 并 patch 消息。force=True 无视节流立即 flush。"""
+            nonlocal displayed, pending, last_flush, first_chunk_flushed
+            if not pending:
+                return
+            now = _lark_time.time()
+            # 首块立即 flush；之后按 FLUSH_INTERVAL 节流
+            if not force and first_chunk_flushed and (now - last_flush) < FLUSH_INTERVAL:
+                return
+            displayed = displayed + pending
+            pending = ""
+            last_flush = now
+            first_chunk_flushed = True
+            if post_msg_id:
+                await _patch_message(post_msg_id, displayed)
 
         async for chunk in agent.stream_chat(context_messages):
             if isinstance(chunk, ToolEvent):
+                # 工具事件：先把积压的正文 flush，再追加工具调用信息
+                await _flush(force=True)
                 if chunk.state == "start":
                     lark_tool_start_times[chunk.tool_name] = _lark_time.time()
                     collected_tool_steps.append({
@@ -266,7 +359,13 @@ async def _handle_message(event_data: dict) -> None:
                         "duration_ms": None,
                         "result_preview": "",
                     })
-                else:
+                    tool_line = f"🔧 {chunk.tool_name}"
+                    if chunk.args_summary:
+                        tool_line += f"({chunk.args_summary})"
+                    displayed = displayed.rstrip() + "\n" + tool_line + "\n"
+                    if post_msg_id:
+                        await _patch_message(post_msg_id, displayed)
+                else:  # done / error
                     duration_ms = int(
                         (_lark_time.time() - lark_tool_start_times.pop(chunk.tool_name, _lark_time.time())) * 1000
                     )
@@ -276,31 +375,44 @@ async def _handle_message(event_data: dict) -> None:
                             step["duration_ms"] = duration_ms
                             step["result_preview"] = chunk.result_preview or ""
                             break
+                    # 工具结束：追加一行结果预览（截断到 ~80 字）
+                    mark = "✓" if chunk.state == "done" else "✗"
+                    preview = (chunk.result_preview or "").replace("\n", " ")[:80]
+                    if preview:
+                        displayed = displayed.rstrip() + f"\n  {mark} {preview}\n"
+                    else:
+                        displayed = displayed.rstrip() + f"\n  {mark} {duration_ms}ms\n"
+                    if post_msg_id:
+                        await _patch_message(post_msg_id, displayed)
                 continue
-            full_content += chunk
+            # 正文 chunk
+            pending += chunk
+            await _flush()
 
-        # 移除 THINKING 表情后发送完整回复
-        if reaction_id and message_id:
-            await _remove_reaction(message_id, reaction_id)
-            reaction_removed = True
+        # 流结束：把剩余 pending 全部 flush
+        await _flush(force=True)
 
-        if full_content:
-            # 末尾加分隔线 + token 消耗
-            usage = agent.usage
-            stats_parts = [f"↑{usage.input_tokens} ↓{usage.output_tokens}"]
-            if usage.cache_tokens:
-                stats_parts.append(f"⚡{usage.cache_tokens}")
-            stats_line = "  ".join(stats_parts)
-            reply_text = f"{full_content}\n\n---\n_{stats_line}_"
-            await _send_reply(chat_id, reply_text)
+        # 如果整条消息还停在 thinking 占位（没产出任何内容/工具），给个兜底
+        if displayed == "🤔 thinking...":
+            displayed = "（没有找到相关内容）"
+
+        # 末尾加分隔线 + token 消耗
+        usage = agent.usage
+        stats_parts = [f"↑{usage.input_tokens} ↓{usage.output_tokens}"]
+        if usage.cache_tokens:
+            stats_parts.append(f"⚡{usage.cache_tokens}")
+        stats_line = "  ".join(stats_parts)
+        final_text = displayed.rstrip() + f"\n\n---\n_{stats_line}_"
+        if post_msg_id:
+            await _patch_message(post_msg_id, final_text)
         else:
-            full_content = "（没有找到相关内容）"
-            await _send_reply(chat_id, full_content)
+            # post 消息没发成功（如未配 lark app），兜底用 lark-cli text 发
+            await _send_reply(chat_id, final_text)
 
-        if not reaction_removed and reaction_id and message_id:
-            await _remove_reaction(message_id, reaction_id)
+        # full_content 存库：去掉 thinking 占位和工具调用行，只留正文（与最终回复一致）
+        full_content = final_text
 
-        # 保存完整 assistant 消息到 session（带 usage）
+        # 保存完整 assistant 消息到 session（带 usage + tool_steps）
         usage_dict = {
             "input": agent.usage.input_tokens,
             "output": agent.usage.output_tokens,
