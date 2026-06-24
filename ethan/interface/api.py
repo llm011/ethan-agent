@@ -26,7 +26,15 @@ _WEB_DIST = Path(__file__).parent.parent / "web_dist"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     import logging
-    logging.getLogger("ethan").setLevel(logging.INFO)
+    # 给 ethan logger 配 handler + INFO 级别，否则 lark/heartbeat 等子模块的
+    # info 日志会被 root logger（默认 WARNING）吞掉，serve 前台看不到任何状态。
+    ethan_logger = logging.getLogger("ethan")
+    ethan_logger.setLevel(logging.INFO)
+    if not ethan_logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(asctime)s [%(name)s] %(message)s", "%H:%M:%S"))
+        ethan_logger.addHandler(handler)
+    ethan_logger.propagate = False  # 已有自己的 handler，别再冒泡到 root 重复打印
 
     if _lark_available:
         start_lark_listener()

@@ -116,6 +116,10 @@ def _add_lark_interactive():
     _save_lark(values)
     console.print()
     console.print("[green]✓ 飞书配置已保存[/green]")
+
+    # 同步到 lark-cli（事件监听依赖它，且必须用同一个 app 才能收到消息）
+    _ensure_lark_cli_sync(values.get("app_id", ""), values.get("app_secret", ""))
+
     console.print("[dim]重启 ethan serve 后生效（自动建立长连接）。[/dim]")
     console.print("  重启：ethan serve restart")
 
@@ -184,3 +188,91 @@ def _save_lark(values: dict) -> None:
             setattr(config.lark, k, v)
     save_config(config)
     reload_config()
+
+
+# ── lark-cli 检测 / 安装 / app 同步 ──────────────────────────────
+
+_LARK_CLI_INSTALL_HINT = (
+    "  macOS:  brew install larksuite/tap/lark-cli\n"
+    "  或参考: https://github.com/larksuite/lark-cli"
+)
+
+
+def _lark_cli_current_app() -> str | None:
+    """读取 lark-cli 当前配置的第一个 app_id，没有返回 None。"""
+    import json
+    from pathlib import Path
+    cfg = Path.home() / ".lark-cli" / "config.json"
+    if not cfg.exists():
+        return None
+    try:
+        data = json.loads(cfg.read_text(encoding="utf-8"))
+        apps = data.get("apps") or []
+        return apps[0].get("appId") if apps else None
+    except Exception:
+        return None
+
+
+def _ensure_lark_cli_sync(app_id: str, app_secret: str) -> None:
+    """检测 lark-cli 是否安装、app 是否与 config 一致；不一致则引导同步。
+
+    ethan 收飞书消息靠 lark-cli 的长连接，lark-cli 必须用同一个 app
+    才能收到事件。这里在配置后自动检查并引导同步，避免「配了却收不到消息」。
+    """
+    import subprocess
+
+    console.print()
+    lark_cli = shutil.which("lark-cli")
+
+    # 1. 没装 → 提示安装
+    if not lark_cli:
+        console.print("[yellow]⚠ 未检测到 lark-cli，飞书事件监听无法启动[/yellow]")
+        console.print("  ethan 收飞书消息依赖 lark-cli 的长连接，请先安装：")
+        console.print(_LARK_CLI_INSTALL_HINT)
+        console.print("  安装后重新运行 [cyan]ethan channel add lark[/cyan] 完成同步。")
+        return
+
+    # 2. 装了 → 检查 app 是否一致
+    current = _lark_cli_current_app()
+    if current == app_id:
+        console.print(f"[green]✓ lark-cli 已绑定同一应用（{app_id}）[/green]")
+        return
+
+    # 3. 不一致（或 lark-cli 还没配 app）→ 引导同步
+    if current:
+        console.print(
+            f"[yellow]⚠ lark-cli 当前绑定的是另一个应用：{current}[/yellow]\n"
+            f"  你刚配置的是 {app_id}，两者不一致会导致收不到消息。"
+        )
+    else:
+        console.print("[yellow]⚠ lark-cli 还没绑定任何应用[/yellow]")
+
+    console.print("  需要把 app 同步到 lark-cli（用 app secret 初始化）。")
+    ans = input("  现在同步？[Y/n]: ").strip().lower()
+    if ans in ("n", "no"):
+        console.print("[dim]已跳过。手动同步：lark-cli config init --app-id <id> --app-secret-stdin[/dim]")
+        return
+
+    if not app_secret:
+        console.print("[red]缺少 app_secret，无法同步。请用 `ethan channel set lark --app-secret ...` 补上。[/red]")
+        return
+
+    # lark-cli config init --app-id <id> --app-secret-stdin（secret 走 stdin 防泄露）
+    try:
+        proc = subprocess.run(
+            [lark_cli, "config", "init", "--app-id", app_id, "--app-secret-stdin", "--brand", "feishu"],
+            input=app_secret.encode("utf-8"),
+            capture_output=True,
+            timeout=30,
+        )
+    except Exception as e:
+        console.print(f"[red]同步失败：{e}[/red]")
+        return
+
+    if proc.returncode == 0:
+        console.print(f"[green]✓ 已同步应用到 lark-cli（{app_id}）[/green]")
+        console.print("[dim]若需要用户身份能力（如以本人身份发消息），再跑：lark-cli auth login --domain im[/dim]")
+    else:
+        console.print(f"[red]lark-cli config init 失败[/red]")
+        console.print(f"[dim]{proc.stderr.decode(errors='replace').strip()[-400:]}[/dim]")
+        console.print("  可手动执行：lark-cli config init --app-id <id> --app-secret-stdin")
