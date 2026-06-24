@@ -3,6 +3,7 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkBreaks from "remark-breaks";
 
 export function MdEditor({
   value = "",
@@ -53,7 +54,7 @@ export function MdEditor({
           <div className="flex-1 overflow-y-auto p-4 text-sm leading-relaxed" style={{ minWidth: 0 }}>
             {value ? (
               <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
+                remarkPlugins={[remarkGfm, remarkBreaks]}
                 components={{
                   h1: ({ children }) => <h1 className="text-xl font-bold mt-4 mb-2 pb-1 border-b border-border">{children}</h1>,
                   h2: ({ children }) => <h2 className="text-lg font-semibold mt-3 mb-2">{children}</h2>,
