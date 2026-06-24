@@ -92,7 +92,7 @@ function StepRow({ step, isLast }: { step: ToolStep; isLast: boolean }) {
             {step.tool}
           </span>
           {step.args && (
-            <span className="text-xs text-muted-foreground truncate max-w-[320px]">
+            <span className="text-xs text-muted-foreground truncate max-w-[800px]">
               ({step.args})
             </span>
           )}
@@ -140,7 +140,7 @@ function StepRow({ step, isLast }: { step: ToolStep; isLast: boolean }) {
                       {sub.tool}
                     </span>
                     {sub.args && (
-                      <span className="text-[10px] text-muted-foreground/50 truncate max-w-[220px]">
+                      <span className="text-[10px] text-muted-foreground/50 truncate max-w-[550px]">
                         {sub.args}
                       </span>
                     )}
