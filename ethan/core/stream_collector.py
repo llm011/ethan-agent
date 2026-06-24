@@ -50,9 +50,10 @@ class StreamCollector:
 
     def _handle_tool_event(self, item: ToolEvent) -> None:
         if item.state == "start":
-            # 工具开始前累积的文本转入 thought
+            # 工具开始前累积的文本：作为这个工具的 thought（前端可折叠展示），不污染全局
+            pre_thought = ""
             if self.full:
-                self.thought += ("\n\n" if self.thought else "") + self.full
+                pre_thought = self.full
                 self.full = ""
             self._times[item.tool_name] = time.time()
             self.tool_steps.append({
@@ -61,6 +62,8 @@ class StreamCollector:
                 "state": "running",
                 "duration_ms": None,
                 "result_preview": "",
+                "result_detail": "",
+                "thought": pre_thought,
                 "sub_steps": [],
             })
         else:  # done / error
@@ -73,6 +76,7 @@ class StreamCollector:
                     step["state"] = item.state
                     step["duration_ms"] = duration_ms
                     step["result_preview"] = item.result_preview or ""
+                    step["result_detail"] = item.result_detail or ""
                     step["sub_steps"] = item.sub_steps or []
                     break
 

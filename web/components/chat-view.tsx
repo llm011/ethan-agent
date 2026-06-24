@@ -85,6 +85,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
                     state: s.state as "running" | "done" | "error",
                     duration_ms: s.duration_ms,
                     result_preview: s.result_preview,
+                    result_detail: s.result_detail,
+                    thought: s.thought,
                     sub_steps: s.sub_steps?.map((ss: any) => ({
                       tool: ss.tool,
                       args: ss.args,

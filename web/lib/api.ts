@@ -127,6 +127,8 @@ export interface SessionDetail {
       state: string;
       duration_ms?: number | null;
       result_preview?: string;
+      result_detail?: string;
+      thought?: string;
       sub_steps?: Array<{
         tool: string;
         args: string;
