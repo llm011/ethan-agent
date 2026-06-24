@@ -68,6 +68,11 @@ ethan provider set anthropic --api-key sk-ant-xxx
 ethan provider set openai_compat --api-key sk-xxx --base-url https://api.example.com/v1
 ethan model default <model-id>
 
+# 或者智谱 GLM（内置预设，自动填好 base_url/type/抗缓存 + 注册 glm-5.2 等）
+ethan provider set glm --api-key <你的GLM key>
+ethan model default glm-5.2
+# （所有内置预设见 `ethan provider presets`）
+
 ethan
 ```
 
