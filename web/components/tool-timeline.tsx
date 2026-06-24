@@ -173,7 +173,7 @@ function StepRow({ step, isLast }: { step: ToolStep; isLast: boolean }) {
 
         {/* 普通工具的结果预览（未展开时显示） */}
         {!isDelegate && step.result_preview && step.state !== "running" && !detailOpen && (
-          <p className="text-[10px] text-muted-foreground/50 mt-0.5 leading-relaxed line-clamp-3 font-mono break-all">
+          <p className="text-[10px] text-muted-foreground/50 mt-0.5 leading-relaxed line-clamp-3 font-mono whitespace-pre-wrap break-all">
             {step.result_preview}
           </p>
         )}
