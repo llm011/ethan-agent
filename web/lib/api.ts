@@ -247,6 +247,22 @@ export async function updateSystemSettings(patch: Partial<SystemSettings>): Prom
   });
 }
 
+// ── User profile (我的画像) ───────────────────────────────────────
+
+export async function fetchUserProfile(): Promise<string> {
+  const res = await fetch(`${API_URL}/settings/profile`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed to fetch user profile");
+  return (await res.json()).content;
+}
+
+export async function updateUserProfile(content: string): Promise<void> {
+  await fetch(`${API_URL}/settings/profile`, {
+    method: "PATCH",
+    headers: headers(),
+    body: JSON.stringify({ content }),
+  });
+}
+
 export interface ToolSchema {
   name: string;
   description: string;

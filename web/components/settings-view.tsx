@@ -16,6 +16,7 @@ import {
   fetchSystemSettings, updateSystemSettings, SystemSettings,
   fetchProviderSettings, updateProviderSettings, ProviderSettings,
   fetchSystemPromptPreview, SystemPromptPreview,
+  fetchUserProfile, updateUserProfile,
   fetchChannels, patchChannel, ChannelInfo,
   fetchAPIKeys, createAPIKey, deleteAPIKey, APIKeyInfo, APIKeyCreated,
   fetchModels, addModel, deleteModel, discoverModels, ModelEntry,
@@ -51,7 +52,7 @@ interface SettingsViewProps {
   initialTab?: TabId;
 }
 
-type TabId = "general" | "providers" | "channels" | "identity" | "soul" | "tools" | "heartbeat" | "prompt-preview" | "api-keys";
+type TabId = "general" | "providers" | "channels" | "identity" | "soul" | "tools" | "heartbeat" | "profile" | "prompt-preview" | "api-keys";
 
 const TAB_GROUPS = [
   {
@@ -60,6 +61,12 @@ const TAB_GROUPS = [
       { id: "general" as TabId, label: "通用" },
       { id: "providers" as TabId, label: "模型" },
       { id: "channels" as TabId, label: "渠道" },
+    ],
+  },
+  {
+    group: "个人画像",
+    items: [
+      { id: "profile" as TabId, label: "我的画像" },
     ],
   },
   {
@@ -238,6 +245,65 @@ function PromptPreview() {
             <p className="text-muted-foreground italic text-sm">{loading ? "加载中..." : ""}</p>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+
+function ProfileEditor() {
+  const [content, setContent] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const c = await fetchUserProfile();
+        if (alive) setContent(c);
+      } catch {
+        // ignore
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await updateUserProfile(content);
+      setSavedAt(Date.now());
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="h-full flex flex-col min-h-[500px]">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-lg font-medium">我的画像 (user_profile.md)</h3>
+        <div className="flex items-center gap-3">
+          {savedAt && <span className="text-xs text-muted-foreground">已保存</span>}
+          <Button size="sm" onClick={save} disabled={saving || loading}>
+            {saving ? "保存中…" : "保存"}
+          </Button>
+        </div>
+      </div>
+      <p className="text-sm text-muted-foreground mb-4">
+        关于你的长期画像。填写姓名、性格、偏好等信息，Agent 会在回复时参考。后台记忆整理时会自动抽取并补充，也可在此直接查看与编辑。
+      </p>
+      {loading ? (
+        <div className="text-sm text-muted-foreground">加载中…</div>
+      ) : (
+        <MdEditor
+          value={content}
+          onChange={setContent}
+          placeholder={"# 用户画像\n\n## 基础特征\n- ...\n\n## 心理与情绪\n- ..."}
+        />
       )}
     </div>
   );
@@ -919,6 +985,10 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
                   placeholder="# 在这里添加心跳任务..."
                 />
               </div>
+            )}
+
+            {activeTab === "profile" && (
+              <ProfileEditor />
             )}
 
             {activeTab === "prompt-preview" && (

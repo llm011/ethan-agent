@@ -8,6 +8,10 @@
 
 同一句话可能同时触发多个工具。
 
+## companion-listen（苏念陪伴模式）
+
+触发词（"陪我聊聊"/"心情不好"/"心里难受"等）命中 companion-listen skill 时进入苏念模式。该模式下主动用 `profile_update(section="心理与情绪")` 记录用户的情绪/困扰/压力源；用户主动告知的基础信息写 `profile_update(section="基础特征")`。用户转向做事时恢复通用语气。
+
 ## skill_create 的严格触发条件
 
 `skill_create` **只在以下情况**调用，绝不用于单次任务：

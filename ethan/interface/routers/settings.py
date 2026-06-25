@@ -167,8 +167,37 @@ async def update_system_settings(req: SystemSettingsPatch):
         "heartbeat": req.heartbeat,
     }
     for name, val in mapping.items():
-        if val is not None:
-            (system_dir / f"{name}.md").write_text(val, encoding="utf-8")
+        if val is None:
+            continue
+        if not val.strip():
+            continue  # 空串视为不修改,避免误清空
+        (system_dir / f"{name}.md").write_text(val, encoding="utf-8")
+    return {"ok": True}
+
+
+# ── User profile (我的画像) ────────────────────────────────────────
+
+
+class UserProfilePatch(BaseModel):
+    content: str  # 完整 user_profile.md 文本
+
+
+@router.get("/settings/profile")
+async def get_user_profile(user_id: str = Depends(verify_token)):
+    """读取当前用户的 user_profile.md(不存在则生成含全部 section 的空模板)。"""
+    from ethan.core.paths import user_profile_path
+    from ethan.core.profile import ensure_profile
+    content = ensure_profile(user_profile_path())
+    return {"content": content}
+
+
+@router.patch("/settings/profile")
+async def update_user_profile(req: UserProfilePatch, user_id: str = Depends(verify_token)):
+    """整篇覆盖写回当前用户的 user_profile.md。"""
+    from ethan.core.paths import user_profile_path
+    p = user_profile_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(req.content, encoding="utf-8")
     return {"ok": True}
 
 

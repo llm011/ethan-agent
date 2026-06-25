@@ -13,8 +13,13 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 - 结构化 Facts：带置信度的条目，有矛盾检测和自动去重（`~/.ethan/memory/facts.json`）
 - 行为准则 Procedures：从用户纠正中自动学习，每次对话加载（`procedures.json`）
 - 会话 Episodes：对话结束后自动生成摘要存档，支持关键词检索（`episodes.json`）
-- 用户画像 Profile：叙事型文档，按章节存储个人语言、目标、约定等（`user_profile.md`）
+- 用户画像 Profile：叙事型文档，按章节存储个人语言、目标、约定等（`user_profile.md`）；含「基础特征」「心理与情绪」等章节
 - **主动写记忆**：Agent 在对话中识别到可记忆信息时，主动调用工具即时写入，无需批量处理
+
+**陪伴倾听模式 · 苏念（《臣服实验》心理咨询师）**
+- 可加载插件：在聊天界面一键切换「苏念 · 陪伴倾听」，从工作助手变成一位年轻温柔的女性陪伴者，熟读《臣服实验》、深谙道法自然
+- 该模式下 Agent 先赞许安抚、深度倾听、陪伴而非急于解决问题——说话像真人、温柔口语，拒绝 AI 腔
+- 陪伴模式下，后台自动把「心理与情绪」（情绪/压力源/什么能安抚你/内心感受）整理进画像；基础特征由你在设置页「我的画像」里填写
 
 **Skill 技能系统**
 - 触发词匹配，自动注入 system prompt 引导行为
@@ -62,6 +67,11 @@ ethan provider set anthropic --api-key sk-ant-xxx
 # 或者任意 OpenAI 兼容接口（如 DeepSeek、OpenRouter、Gemini、Ollama）
 ethan provider set openai_compat --api-key sk-xxx --base-url https://api.example.com/v1
 ethan model default <model-id>
+
+# 或者智谱 GLM（内置预设，自动填好 base_url/type/抗缓存 + 注册 glm-5.2 等）
+ethan provider set glm --api-key <你的GLM key>
+ethan model default glm-5.2
+# （所有内置预设见 `ethan provider presets`）
 
 ethan
 ```

@@ -102,10 +102,10 @@ class Consolidator:
         )
         return resp.content.strip()
 
-    async def extract_cold(self, warm_summary: str, existing_facts: str = "") -> tuple[str, str]:
-        """从温区 summary 中提取 key facts（冷区），并精简 summary。
+    async def extract_cold(self, warm_summary: str, existing_facts: str = "") -> dict:
+        """从温区 summary 中提取长期记忆，并精简 summary。
 
-        返回: (key_facts, condensed_summary)
+        返回 dict: {"key_facts": [...], "profile_psych": [...], "condensed": str}
         """
         provider = await self._get_provider()
 
@@ -113,18 +113,17 @@ class Consolidator:
         if existing_facts:
             prompt_parts.append(f"已有的长期记忆：\n{existing_facts}\n")
         prompt_parts.append(f"对话摘要：\n{warm_summary}")
-        prompt_parts.append("""
-请完成两件事：
-1. 提取值得长期记住的 key facts（用户偏好、重要决定、关键信息），用简短的要点列出
-2. 将剩余的对话摘要精简为 1-2 句话
+        prompt_parts.append("""请从对话摘要中抽取用户的长期记忆，严格按以下格式输出（每个块都要有，没有内容的块留空即可，不要编造）：
 
-格式：
 [KEY_FACTS]
-- fact 1
-- fact 2
+值得长期记住的关键事实（用户偏好、重要决定、关键信息），每条一个简短要点：
+- 要点 1
+- 要点 2
+
 [SUMMARY]
-精简后的摘要
-""")
+将剩余对话精简为 1-2 句话。
+
+抽取要求：每条要点要原子化、能脱离对话独立成立；若信息与已知的长期记忆冲突，输出最新的一条即可。""")
 
         resp = await provider.chat(
             [Message(role="user", content="\n".join(prompt_parts))],
@@ -132,17 +131,37 @@ class Consolidator:
         )
 
         text = resp.content.strip()
+        return _parse_extraction(text)
 
-        # 解析输出
-        condensed = ""
-        facts_list: list[str] = []
 
-        if "[KEY_FACTS]" in text and "[SUMMARY]" in text:
-            facts_part = text.split("[KEY_FACTS]")[1].split("[SUMMARY]")[0].strip()
-            summary_part = text.split("[SUMMARY]")[1].strip()
-            facts_list = [line.strip().lstrip("- ") for line in facts_part.split("\n") if line.strip()]
-            condensed = summary_part
-        else:
-            condensed = text[:200]
+def _parse_block(text: str, marker: str) -> list[str]:
+    """从 text 中抽取某个 [MARKER] 块下的 bullet 列表。块边界 = 下一个 [开头的标记或文末。"""
+    if marker not in text:
+        return []
+    after = text.split(marker, 1)[1]
+    # 块到下一个 [MARKER] 为止
+    rest = after
+    for i, ch in enumerate(after):
+        if ch == "[" and i > 0 and after[i - 1] in ("\n", " "):
+            rest = after[:i]
+            break
+    lines = [ln.strip().lstrip("- ").lstrip("•").strip() for ln in rest.split("\n")]
+    return [ln for ln in lines if ln]
 
-        return facts_list, condensed
+
+def _parse_extraction(text: str) -> dict:
+    """解析 extract_cold 的输出。容错：标记缺失时对应字段为空。"""
+    key_facts = _parse_block(text, "[KEY_FACTS]")
+    profile_psych = _parse_block(text, "[PROFILE_PSYCH]")
+
+    condensed = ""
+    if "[SUMMARY]" in text:
+        condensed = text.split("[SUMMARY]", 1)[1].strip()
+    elif not (key_facts or profile_psych):
+        # 完全没按格式，fallback 取前 200 字当摘要
+        condensed = text[:200]
+    return {
+        "key_facts": key_facts,
+        "profile_psych": profile_psych,
+        "condensed": condensed,
+    }

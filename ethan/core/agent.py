@@ -131,7 +131,6 @@ class Agent:
         from ethan.core.paths import user_facts_path, user_procedures_path
         from ethan.core.context import set_user_id
         config = get_config()
-        # 若调用方显式传了 user_id，set 进 ContextVar，供后续 path 函数读取
         if user_id:
             set_user_id(user_id)
         self._user_id = user_id or ""

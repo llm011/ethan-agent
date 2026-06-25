@@ -191,10 +191,12 @@ async def _background_consolidate(memory, consolidator, fact_store, session_id):
             summary = await consolidator.compress(batch, memory.warm_summary)
             memory.apply_summary(summary)
         if memory.needs_cold_extraction():
-            facts_list, condensed = await consolidator.extract_cold(memory.warm_summary, memory.cold_facts)
-            for fact in facts_list:
+            result = await consolidator.extract_cold(memory.warm_summary, memory.cold_facts)
+            for fact in result["key_facts"]:
                 fact_store.add(fact, confidence=0.8, source=session_id)
-            memory.apply_cold_extraction(fact_store.build_context(), condensed)
+            from ethan.core.profile import apply_extraction
+            apply_extraction(result)
+            memory.apply_cold_extraction(fact_store.build_context(), result["condensed"])
     except Exception:
         pass
 

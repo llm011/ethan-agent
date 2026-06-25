@@ -162,31 +162,34 @@ MemoryConfig(
 
 ## 第三层：用户画像（User Profile）
 
-文件：`ethan/tools/builtin/profile_update.py`  
+文件：`ethan/core/profile.py`（共享读写）、`ethan/tools/builtin/profile_update.py`（工具）  
 数据文件：`~/.ethan/memory/user_profile.md`
 
 ### 作用
 
-存储无法压缩为单条 fact 的叙述性信息：个人目标、沟通风格、激励语、与 agent 的约定等。全量注入 system prompt（full/medium 路径），不参与置信度排名。
+存储无法压缩为单条 fact 的叙述性信息：个人目标、沟通风格、激励语、与 agent 的约定，以及用户的基础特征与心理情绪特征。全量注入 system prompt（full/medium 路径），不参与置信度排名。
 
 ### 章节结构
 
-文件以 Markdown 格式，分为固定五个章节：
+文件以 Markdown 格式，包含以下章节：
 
 | 章节 | 用途 |
 |------|------|
+| `基础特征` | 名字、年龄、性格、兴趣等稳定身份信息（建议用户在「我的画像」设置页填写，避免后台抽错） |
 | `身份与背景` | 职业、地区、角色等 |
 | `目标与方向` | 长期目标、当前专注 |
 | `工作与沟通方式` | 偏好的沟通风格、工作节奏 |
+| `心理与情绪` | 情绪模式、压力源、什么能安抚 ta、重要内心感受、价值观 |
 | `个人语言与激励` | 用户自创词汇、激励短语 |
 | `与 Agent 的约定` | 特定场景下的行为约定 |
 
 ### 写入方式
 
-Agent 通过 `profile_update` 工具主动更新，支持两种模式：
+Agent 通过 `profile_update` 工具主动更新，支持三种模式：
 
 - `append`（默认）：在对应章节下追加一条 bullet
 - `overwrite`：替换整个章节内容
+- `merge`：与已有 bullet 相似/矛盾则替换该条（UPDATE），否则追加（ADD）——后台自动抽取用此模式，避免堆砌重复
 
 ```python
 # 示例调用
@@ -196,6 +199,12 @@ await profile_update.run(
     mode="append",
 )
 ```
+
+### 后台自动抽取（心理画像）
+
+`consolidator.extract_cold()` 除了抽取 `key_facts`，还会在**苏念·陪伴倾听模式**（请求 `mode="陪伴"`）下额外抽取 `[PROFILE_PSYCH]`——用户的情绪/困扰/压力源/安抚方式/内心感受/价值观，经 `profile.apply_extraction()` 以 merge 方式写入「心理与情绪」章节。工作助手模式不抽取心理画像（不分析用户心理）。基础特征不靠后台推断，由用户在设置页填写或对话中明确告知后由 agent 写入。
+
+用户可在 Web 设置页「我的画像」tab 查看/编辑整篇 `user_profile.md`。
 
 ---
 
