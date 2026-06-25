@@ -76,7 +76,6 @@ def create_agent(
     channel: str = "web",
     user_id: str = "",
     toolset: str = "full",
-    mode: str = "",
 ) -> Agent:
     """统一 Agent 创建入口。"""
     from ethan.core.paths import ensure_user_dirs
@@ -86,4 +85,4 @@ def create_agent(
     registry = build_tool_registry(user_id=user_id, toolset=toolset)
     skills = SkillRegistry(user_id=user_id)
     skills.load()
-    return Agent(tool_registry=registry, skill_registry=skills, model=model, channel=channel, user_id=user_id, mode=mode)
+    return Agent(tool_registry=registry, skill_registry=skills, model=model, channel=channel, user_id=user_id)

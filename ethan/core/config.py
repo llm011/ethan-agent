@@ -294,12 +294,12 @@ def _apply_env_overrides(raw: dict) -> None:
     mapping = {
         "anthropic":    ("ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "anthropic"),
         "openai_compat": ("OPENAI_API_KEY", None, "OPENAI_BASE_URL", "openai_compat"),
+        "glm":           ("GLM_API_KEY", "ZHIPU_API_KEY", None, "anthropic"),
     }
     for key, (env_key1, env_key2, env_base, default_type) in mapping.items():
         p = providers.setdefault(key, {})
         if "type" not in p:
             p["type"] = default_type
-        # api_key / base_url：仅当 config.yaml 没有显式配置时，才用环境变量兜底
         token = os.environ.get(env_key1, "") if env_key1 else ""
         fallback = os.environ.get(env_key2, "") if env_key2 else ""
         if (token or fallback) and not p.get("api_key"):
@@ -307,27 +307,10 @@ def _apply_env_overrides(raw: dict) -> None:
         base = os.environ.get(env_base, "") if env_base else ""
         if base and not p.get("base_url"):
             p["base_url"] = base
-
-    # 内置 provider 预设(glm 等):环境变量兜底填充 api_key/base_url/type/disable_prompt_cache
-    # 仅在 config.yaml 未显式配置该字段时填充,与上面的兜底原则一致。
-    try:
-        from ethan.core.provider_presets import PROVIDER_PRESETS
-    except Exception:
-        PROVIDER_PRESETS = {}
-    for pkey, preset in PROVIDER_PRESETS.items():
-        env_keys = preset.get("env_keys") or []
-        token = next((os.environ.get(k, "") for k in env_keys if os.environ.get(k)), "")
-        if not token:
-            continue
-        p = providers.setdefault(pkey, {})
-        if not p.get("api_key"):
-            p["api_key"] = token
-        if preset.get("type") and not p.get("type"):
-            p["type"] = preset["type"]
-        if preset.get("base_url") and not p.get("base_url"):
-            p["base_url"] = preset["base_url"]
-        if preset.get("disable_prompt_cache"):
-            p["disable_prompt_cache"] = True
+    # glm 兼容层需关闭 cache_control（BigModel 不支持）
+    if "glm" in providers and not providers["glm"].get("base_url"):
+        providers["glm"]["base_url"] = "https://open.bigmodel.cn/api/anthropic"
+        providers["glm"]["disable_prompt_cache"] = True
 
     # 代理：环境变量 ETHAN_PROXY 覆盖
     proxy_env = os.environ.get("ETHAN_PROXY", "")

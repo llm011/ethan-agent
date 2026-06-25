@@ -191,8 +191,7 @@ async def _background_consolidate(memory, consolidator, fact_store, session_id):
             summary = await consolidator.compress(batch, memory.warm_summary)
             memory.apply_summary(summary)
         if memory.needs_cold_extraction():
-            # REPL 是工作模式,不抽取心理画像(仅苏念·陪伴倾听模式才抽)
-            result = await consolidator.extract_cold(memory.warm_summary, memory.cold_facts, extract_psych=False)
+            result = await consolidator.extract_cold(memory.warm_summary, memory.cold_facts)
             for fact in result["key_facts"]:
                 fact_store.add(fact, confidence=0.8, source=session_id)
             from ethan.core.profile import apply_extraction

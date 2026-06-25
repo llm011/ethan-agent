@@ -294,9 +294,7 @@ function ProfileEditor() {
         </div>
       </div>
       <p className="text-sm text-muted-foreground mb-4">
-        关于你的长期画像。「基础特征」(名字/性格/兴趣等)请在这里填写或修正;「心理与情绪」会在你使用
-        <span className="text-pink-600 dark:text-pink-400"> 苏念·陪伴倾听 </span>
-        模式时由后台自动整理、可在此查看与编辑。注入到系统 prompt 的 &lt;user_profile&gt; 中,让 Agent 更懂你。
+        关于你的长期画像。填写姓名、性格、偏好等信息，Agent 会在回复时参考。后台记忆整理时会自动抽取并补充，也可在此直接查看与编辑。
       </p>
       {loading ? (
         <div className="text-sm text-muted-foreground">加载中…</div>
