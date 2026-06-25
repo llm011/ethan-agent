@@ -173,6 +173,17 @@ class SessionStore:
         await self._db.commit()
         return True
 
+    async def replace_messages(self, session_id: str, messages: list[Message]) -> None:
+        """用新消息集替换该 session 的全部消息（/compact 压缩历史用）。
+
+        保留 session 记录本身，只清空 messages 再重写，并 touch 更新时间。
+        """
+        await self._db.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
+        await self._db.commit()
+        for msg in messages:
+            await self.save_message(session_id, msg)
+        await self.touch(session_id)
+
     async def load(self, session_id: str) -> Session | None:
         import json
         from ethan.providers.base import ToolCall

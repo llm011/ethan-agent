@@ -7,8 +7,10 @@ import {
   createSession,
   fetchModels,
   fetchSession,
+  fetchSessions,
   fetchSchedules,
   streamChat,
+  compactSession,
   fetchOnboardingStatus,
   fetchAgentSettings,
   respondConsent,
@@ -163,6 +165,85 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const handleSend = async (text: string) => {
     if (!text.trim() && pendingFiles.length === 0) return;
     if (streaming) return;
+
+    // ── /command 拦截：以 / 开头按命令处理，不发给 Agent ──
+    const trimmed = text.trim();
+    if (trimmed.startsWith("/")) {
+      const [cmd, ...rest] = trimmed.slice(1).split(/\s+/);
+      const arg = rest.join(" ").trim();
+      const now = Date.now() / 1000;
+      const pushAssistant = (content: string) =>
+        setMessages((prev) => [...prev, { role: "assistant", content, created_at: now }]);
+
+      if (cmd === "new") {
+        const s = await createSession(selectedModel);
+        setActiveSession(s.id);
+        setSessionTitle("新对话");
+        setMessages([]);
+        setSessionUsage({ input: 0, output: 0, cache: 0 });
+        setPendingFiles([]);
+        setQuote(null);
+        window.history.replaceState(null, "", `/chat/${s.id}`);
+        return;
+      }
+      if (cmd === "help") {
+        pushAssistant(
+          "🛠 **可用命令**\n\n" +
+          "- `/new` — 新建对话，清空当前上下文\n" +
+          "- `/compact` — 压缩历史对话为摘要，释放上下文\n" +
+          "- `/sessions` — 列出最近的会话\n" +
+          "- `/help` — 显示本帮助\n\n" +
+          "（`/model` `/token` 请用顶部下拉和设置页；其它消息正常对话即可）"
+        );
+        return;
+      }
+      if (cmd === "compact") {
+        if (!activeSession) {
+          pushAssistant("⚠️ 当前没有会话，先聊几句再 `/compact` 吧~");
+          return;
+        }
+        setStreaming(true);
+        try {
+          const r = await compactSession(activeSession);
+          // 刷新会话内容（已被替换为摘要 + 最后一轮）
+          const detail = await fetchSession(activeSession);
+          setMessages(
+            detail.messages.map((m: any) => ({
+              role: m.role,
+              content: m.content,
+              created_at: m.created_at,
+              usage: m.usage || undefined,
+              toolsExpanded: false,
+            }))
+          );
+          pushAssistant(`🧠 **已压缩历史**\n\n> ${r.summary.slice(0, 300)}${r.summary.length > 300 ? "…" : ""}\n\n继续聊吧~`);
+        } catch (e) {
+          pushAssistant(`⚠️ 压缩失败：${e instanceof Error ? e.message : "未知错误"}`);
+        } finally {
+          setStreaming(false);
+        }
+        return;
+      }
+      if (cmd === "sessions") {
+        try {
+          const list = await fetchSessions(8, 0);
+          if (!list.length) {
+            pushAssistant("暂无会话。");
+          } else {
+            const body = list
+              .map((s) => `- \`${s.id.slice(-10)}\`  ${s.title || "（无标题）"}`)
+              .join("\n");
+            pushAssistant(`📋 **最近会话**\n\n${body}\n\n点击左侧侧栏可切换。`);
+          }
+        } catch {
+          pushAssistant("⚠️ 获取会话列表失败。");
+        }
+        return;
+      }
+      // 未知命令
+      pushAssistant(`未知命令：\`/${cmd}\`\n\n输入 \`/help\` 查看可用命令。`);
+      return;
+    }
 
     let sessionId = activeSession;
     if (!sessionId) {

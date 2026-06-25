@@ -81,6 +81,7 @@ _SLASH_COMMANDS = [
     ("/token", "Show or rotate Web login token"),
     ("/skills", "List installed skills"),
     ("/update", "Update Ethan Agent"),
+    ("/compact", "Summarize history to free context"),
     ("/help", "Show available commands"),
 ]
 
@@ -363,6 +364,7 @@ async def _handle_slash_command(cmd: str, store: SessionStore, session: Session,
   /sessions      List recent sessions
   /resume ID     Resume a session
   /new           Start new session
+  /compact       Summarize history to free context
   /model [ID]    Show or switch model
   /profile [ID]  Show or switch user profile
   /config        Edit settings interactively
@@ -371,6 +373,20 @@ async def _handle_slash_command(cmd: str, store: SessionStore, session: Session,
   /update        Update Ethan Agent
   /help          Show this help[/dim]""")
         return None
+
+    elif command == "/compact":
+        from ethan.core.session_ops import compact_session
+        with console.status("[dim]压缩历史中...[/dim]"):
+            summary = await compact_session(store, session.id, agent._provider.model)
+        if summary.startswith(("对话太短", "没有可压缩", "压缩失败", "会话不存在")):
+            console.print(f"[yellow]{summary}[/yellow]")
+            return None
+        preview = summary if len(summary) <= 120 else summary[:120] + "…"
+        console.print(f"[green]✓ 已压缩历史[/green] [dim]（保留最近一轮）[/dim]")
+        console.print(f"[dim]{preview}[/dim]")
+        # 重载 session，触发主循环重建 history/memory
+        reloaded = await store.load(session.id)
+        return reloaded
 
     elif command == "/config":
         from ethan.core.config import save_config, reload_config

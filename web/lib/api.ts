@@ -176,6 +176,15 @@ export async function deleteSession(id: string): Promise<void> {
   await fetch(`${API_URL}/sessions/${id}`, { method: "DELETE", headers: headers() });
 }
 
+export async function compactSession(id: string): Promise<{ ok: boolean; summary: string }> {
+  const res = await fetch(`${API_URL}/sessions/${id}/compact`, {
+    method: "POST",
+    headers: headers(),
+  });
+  if (!res.ok) throw new Error("Compact failed");
+  return res.json();
+}
+
 export async function uploadFile(file: File): Promise<{ path: string; filename: string }> {
   const form = new FormData();
   form.append("file", file);

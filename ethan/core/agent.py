@@ -157,6 +157,8 @@ class Agent:
         self.last_matched_skills: list[str] = []
         self._channel = channel
         self._system_files: dict[str, str] = {}
+        # 渠道运行时上下文（如飞书主人身份），每次请求前可设置，注入 system prompt 末尾
+        self.runtime_context: str = ""
         self._load_system_files()
 
     def _load_system_files(self) -> None:
@@ -271,6 +273,8 @@ class Agent:
                 skill_ctx = self._skills.build_context(last_user, channel=self._channel)
                 if skill_ctx:
                     parts.append(f"<relevant_skills>\n{skill_ctx}\n</relevant_skills>")
+            if self.runtime_context:
+                parts.append(f"<runtime_context>\n[CRITICAL — 当前会话上下文，结合 soul 的主人/授权准则判断]\n\n{self.runtime_context}\n</runtime_context>")
             return "\n\n".join(parts)
 
         # Full Path: 完整 Prompt（从缓存读取静态文件）
@@ -338,7 +342,22 @@ class Agent:
             if skill_ctx:
                 parts.append(f"<relevant_skills>\n{skill_ctx}\n</relevant_skills>")
 
+        if self.runtime_context:
+            parts.append(f"<runtime_context>\n[CRITICAL — 当前会话上下文，结合 soul 的主人/授权准则判断]\n\n{self.runtime_context}\n</runtime_context>")
+
         return "\n\n".join(parts)
+
+    def route_for(self, messages: list[Message]) -> str:
+        """返回路由档位 'fast' | 'medium' | 'full'，供渠道决定回复策略（如飞书 card vs post）。
+
+        只做路由判定，不构建 system prompt，开销低。
+        """
+        last_user = self._get_last_user_text(list(messages))
+        skill_triggers = [
+            kw for s in (self._skills.all() if self._skills else [])
+            if s.fast_path for kw in s.trigger
+        ]
+        return _get_route(last_user, skill_triggers=skill_triggers)
 
     def _select_route(self, messages: list[Message]) -> tuple[str, str, list, int]:
         """三档路由选择，返回 (route, system, tools_list, max_iters)。chat/stream_chat 共用。"""

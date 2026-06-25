@@ -127,3 +127,20 @@ async def rename_session(session_id: str, req: RenameSessionRequest, user_id: st
     await store.update_title(session_id, title)
     await store.close()
     return {"ok": True}
+
+
+@router.post("/sessions/{session_id}/compact")
+async def compact_session(session_id: str, user_id: str = Depends(verify_token)):
+    """压缩会话历史：用廉价模型把旧对话压成摘要替换存储，保留最近一轮，释放上下文。
+
+    供 Web 的 /compact 命令调用。返回 {ok, summary}，前端拿 summary 回显并刷新会话。
+    """
+    from ethan.core.paths import user_sessions_db_path
+    from ethan.core.session_ops import compact_session as _compact
+    store = SessionStore(db_path=user_sessions_db_path())
+    await store.init()
+    try:
+        summary = await _compact(store, session_id, get_config().defaults.model)
+    finally:
+        await store.close()
+    return {"ok": True, "summary": summary}

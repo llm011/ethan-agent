@@ -209,3 +209,40 @@ ethan/
 | 向量检索 | `sqlite-vec` | — | ✅ |
 | Web UI | `Next.js` + `shadcn/ui` | 16+ | ✅ |
 | 飞书 SDK | `lark-oapi` | — | ✅ |
+
+---
+
+## 微信接入（待实现）
+
+参考 https://cloud.tencent.com/developer/article/2651968 ，用腾讯 `@tencent-weixin/openclaw-weixin` 的 HTTP API 协议（`@tencent-weixin/openclaw-weixin-cli` 只是安装器，实际逻辑要自己用 Python 实现 HTTP 调用）。
+
+### 与飞书的关键区别
+- 收消息：HTTP 长轮询 `ilink/bot/getupdates`（游标 `get_updates_buf` 增量同步，hold 35s），不是 WebSocket/CLI
+- 发消息：HTTP POST `ilink/bot/sendmessage`
+- 鉴权：扫码登录（`get_bot_qrcode` → 长轮询 `get_qrcode_status` 状态机 wait/scaned/expired/confirmed → 拿 `bot_token` + `ilink_bot_id`），凭证存 `~/.ethan/.secrets/weixin_token.json`（0600）
+- 每次请求 Header：`AuthorizationType: ilink_bot_token`、`Authorization: Bearer <token>`、`X-WECHAT-UIN`: 随机 uint32 base64
+
+### ⚠️ 体验限制
+微信**不支持 patch/编辑已发送消息**（飞书的流式编辑效果做不到）。只能：
+- 等 agent 完整回复后一次性 `sendmessage`（推荐，干净）
+- 或发多条新消息追加（刷屏，不推荐）
+- `ilink/bot/sendtyping` 只能发"正在输入"状态，不能更新内容
+
+→ 微信渠道采用「sendtyping 指示 + 一次性发完整回复」策略，不做流式 patch。
+
+### 实现要点
+1. 新建 `ethan/interface/weixin_events.py`：长轮询收消息 + sendmessage 回复，结构对齐 `lark_events.py`
+2. 新建 `ethan/interface/weixin_auth.py`：扫码登录流程（CLI 引导 `ethan channel add weixin`）
+3. config 加 `weixin` 段（bot_token / ilink_bot_id / base_url）
+4. `ethan channel add weixin` 引导扫码登录（检测/安装 weixin-cli？或纯 HTTP 实现）
+5. api.py lifespan 启动 `start_weixin_listener()`
+6. 复用 Agent + WorkingMemory + session 机制（channel="weixin"）
+7. 支持 /command（与飞书共用一套命令逻辑）
+
+### 命令实现（飞书 + 微信共用）
+`/command` 在飞书/微信消息里识别，先于 agent 处理：
+- `/new` — 清当前会话上下文（新建 session，保留飞书 chat→session 映射指向新 session）
+- `/help` — 列出可用命令
+- `/model <id>` — 切模型
+- `/token` — 显示当前 web token
+后续可扩展。命令解析逻辑抽到 `ethan/interface/channel_commands.py`，飞书/微信共用。

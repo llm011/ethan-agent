@@ -82,6 +82,21 @@ schedule_create(
 
 任务触发时，系统以 `prompt` 为输入创建一个独立 Agent 实例执行，结果保存在专属的 `[定时] <job_id>` Session 中，可在 Web UI 的「定时任务」页查看历史执行记录。
 
+如果配置了飞书渠道且设置了主会话（`config.lark.main_chat_id`），可以在 prompt 里要求 Agent 把结果通知到飞书。Agent 通过 `shell` 工具调用 Python 脚本，或未来直接调用通知工具实现。
+
+**从代码直接推送飞书通知（适合定时任务回调）：**
+
+```python
+import asyncio
+from ethan.interface.lark_events import send_lark_notification, get_lark_main_chat_id
+
+chat_id = get_lark_main_chat_id()  # 读 config.lark.main_chat_id
+if chat_id:
+    asyncio.run(send_lark_notification(chat_id, result_text))
+```
+
+`send_lark_notification` 把 markdown 文本转为飞书 **post 气泡**（非卡片），支持加粗、斜体、行内代码、链接、无序列表、引用、分隔线。适合一次性发送完整结果，不需要流式编辑。
+
 ---
 
 ## 参数说明
