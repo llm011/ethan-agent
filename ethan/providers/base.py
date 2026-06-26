@@ -27,6 +27,7 @@ class Message:
     created_at: Optional[float] = None
     tool_steps: Optional[list] = field(default_factory=list)  # ToolEvent 执行摘要
     thought: Optional[str] = None  # 独立分离出来的思考过程
+    quote: Optional[dict] = None  # 用户引用的某条历史消息 {role, content}，持久化以便刷新后仍显示引用气泡
 
     @property
     def is_tool_call(self) -> bool:

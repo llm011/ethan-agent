@@ -102,8 +102,17 @@ class Consolidator:
         )
         return resp.content.strip()
 
-    async def extract_cold(self, warm_summary: str, existing_facts: str = "") -> dict:
+    async def extract_cold(self, warm_summary: str, existing_facts: str = "", extract_psych: bool = True) -> dict:
         """从温区 summary 中提取长期记忆，并精简 summary。
+
+        抽取（参考 Mem0 的 salient 抽取 + HiMem 的 ADD/UPDATE 思路）：
+          - key_facts:     关键事实（偏好/决定/关键信息）→ facts.json   （任何模式都抽）
+          - profile_psych: 心理与情绪（情绪/压力源/安抚方式/内心感受/价值观）→ user_profile.md「心理与情绪」
+                           仅当 extract_psych=True（由当前对话 mode 声明，见 core/modes.py）时抽
+          - condensed:     精简后的温区摘要
+
+        注意：基础特征（名字/年龄/职业等身份信息）不在此后台推断——由用户在「我的画像」设置，
+        或对话中明确告知时由 agent 通过 profile_update 写入，避免 LLM 把身份抽错。
 
         返回 dict: {"key_facts": [...], "profile_psych": [...], "condensed": str}
         """
@@ -113,21 +122,33 @@ class Consolidator:
         if existing_facts:
             prompt_parts.append(f"已有的长期记忆：\n{existing_facts}\n")
         prompt_parts.append(f"对话摘要：\n{warm_summary}")
-        prompt_parts.append("""请从对话摘要中抽取用户的长期记忆，严格按以下格式输出（每个块都要有，没有内容的块留空即可，不要编造）：
+
+        psych_block = """
+[PROFILE_PSYCH]
+用户的心理与情绪特征——仅当对话中明确表达才提取。包括：正在经历的情绪或困扰、压力源、什么样的话语或方式能安抚 ta、ta 表达的重要内心感受/价值观/信念：
+- 最近因为 XX 感到焦虑
+- 被肯定时会放松下来
+- ……
+
+""" if extract_psych else ""
+
+        prompt_parts.append(f"""请从对话摘要中抽取用户的长期记忆，严格按以下格式输出（每个块都要有，没有内容的块留空即可，不要编造）：
 
 [KEY_FACTS]
 值得长期记住的关键事实（用户偏好、重要决定、关键信息），每条一个简短要点：
 - 要点 1
 - 要点 2
-
-[SUMMARY]
+{psych_block}[SUMMARY]
 将剩余对话精简为 1-2 句话。
 
 抽取要求：每条要点要原子化、能脱离对话独立成立；若信息与已知的长期记忆冲突，输出最新的一条即可。""")
 
+        sys_role = ("你是一个用户认知与记忆管理助手，负责从对话中提取用户的关键事实和心理情绪特征，并精简对话摘要。"
+                    if extract_psych else
+                    "你是一个记忆管理助手，负责提取长期记忆和精简对话摘要。")
         resp = await provider.chat(
             [Message(role="user", content="\n".join(prompt_parts))],
-            system="你是一个记忆管理助手，负责提取长期记忆和精简对话摘要。",
+            system=sys_role,
         )
 
         text = resp.content.strip()

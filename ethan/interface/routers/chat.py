@@ -44,6 +44,7 @@ async def poll(user_id: str = Depends(verify_token)):
                 "model": s.model,
                 "updated_at": s.updated_at,
                 "source": getattr(s, "source", "web"),
+                "mode": getattr(s, "mode", "") or "",
             }
             for s in sessions
         ]
@@ -60,6 +61,7 @@ class ChatRequest(BaseModel):
     session_id: str | None = None
     channel: str = "web"
     quote: dict | None = None  # {role, content}：引用某条历史消息，注入给模型但不入库
+    mode: str = ""  # "" = 工作助手; "陪伴" = 苏念·陪伴倾听
 
 
 class ChatResponse(BaseModel):
@@ -71,7 +73,7 @@ class ChatResponse(BaseModel):
 @router.post("/chat")
 async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
     from ethan.core.paths import user_sessions_db_path, user_facts_path
-    agent = create_agent(req.model, channel=req.channel, user_id=user_id)
+    agent = create_agent(req.model, channel=req.channel, user_id=user_id, mode=req.mode)
     messages = [Message(role=m["role"], content=m.get("content", "")) for m in req.messages]
 
     store = SessionStore(db_path=user_sessions_db_path())
@@ -80,7 +82,13 @@ async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
     if req.session_id:
         for m in messages[-1:]:
             if m.role == "user":
+                # 把引用信息附到消息上一起持久化，刷新后仍能渲染引用气泡
+                if req.quote and req.quote.get("content"):
+                    m.quote = req.quote
                 await store.save_message(req.session_id, m)
+        # 持久化对话模式：退出再进入保持工作/苏念模式
+        if req.mode:
+            await store.update_mode(req.session_id, req.mode)
 
     if req.session_id:
         from ethan.memory.working import WorkingMemory
@@ -102,7 +110,7 @@ async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
         consent = WebConsentProvider()
         set_consent_provider(consent)
         return StreamingResponse(
-            _stream_response(agent, messages, store, req.session_id, user_id, consent),
+            _stream_response(agent, messages, store, req.session_id, user_id, consent, mode=req.mode),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
@@ -166,6 +174,7 @@ async def _stream_response(
     session_id: str | None,
     user_id: str = "",
     consent=None,
+    mode: str = "",
 ) -> AsyncGenerator[str, None]:
     from ethan.core.stream_collector import StreamCollector
     from ethan.core.consent import ConsentEvent
@@ -227,7 +236,7 @@ async def _stream_response(
         if agent._skills and agent.last_matched_skills:
             for _name in agent.last_matched_skills:
                 asyncio.create_task(asyncio.to_thread(agent._skills.record_hit, _name))
-        asyncio.create_task(_maybe_consolidate(session_id, agent._provider.model, user_id))
+        asyncio.create_task(_maybe_consolidate(session_id, agent._provider.model, user_id, mode=mode))
         asyncio.create_task(_maybe_regen_title(session_id, store))
         asyncio.create_task(_maybe_generate_skill(session_id, agent._provider.model, user_id))
 
@@ -251,12 +260,16 @@ async def _maybe_regen_title(session_id: str, store: SessionStore) -> None:
         pass
 
 
-async def _maybe_consolidate(session_id: str, model: str, user_id: str = "") -> None:
+async def _maybe_consolidate(session_id: str, model: str, user_id: str = "", mode: str = "") -> None:
     try:
         from ethan.memory.consolidator import Consolidator
         from ethan.memory.facts import FactStore
         from ethan.memory.working import MemoryConfig, WorkingMemory
         from ethan.core.paths import user_sessions_db_path, user_facts_path
+
+        # 心理画像是否额外抽取：由当前 mode 自身声明，不在此硬编码模式名
+        from ethan.core.modes import resolve_mode
+        extract_psych = resolve_mode(mode).extract_psych
 
         store = SessionStore(db_path=user_sessions_db_path())
         await store.init()

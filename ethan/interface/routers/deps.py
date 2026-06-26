@@ -28,7 +28,7 @@ async def verify_token(request: Request) -> str:
     return user_id
 
 
-def create_agent(model: str | None = None, channel: str = "web", user_id: str = ""):
+def create_agent(model: str | None = None, channel: str = "web", user_id: str = "", mode: str = ""):
     """Web 端 Agent 工厂，委托给 core.agent_factory。"""
     from ethan.core.agent_factory import create_agent as _create
-    return _create(model=model, channel=channel, user_id=user_id, toolset="full")
+    return _create(model=model, channel=channel, user_id=user_id, toolset="full", mode=mode)

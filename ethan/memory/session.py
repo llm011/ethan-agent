@@ -26,6 +26,7 @@ class Session:
     messages: list[Message] = field(default_factory=list)
     snippet: str | None = None
     source: str = "web"  # web | repl | lark | custom
+    mode: str = ""  # "" = 工作助手; "陪伴" = 苏念·陪伴倾听
 
 
 def _generate_id() -> str:
@@ -85,7 +86,8 @@ class SessionStore:
                 model TEXT NOT NULL,
                 created_at REAL NOT NULL,
                 updated_at REAL NOT NULL,
-                source TEXT NOT NULL DEFAULT 'web'
+                source TEXT NOT NULL DEFAULT 'web',
+                mode TEXT NOT NULL DEFAULT ''
             )
         """)
         await self._db.execute("""
@@ -103,18 +105,24 @@ class SessionStore:
         """)
         await self._db.commit()
         # Migration: add columns if they don't exist (for existing databases)
-        for col, definition in [("created_at", "REAL"), ("usage", "TEXT"), ("tool_steps", "TEXT"), ("thought", "TEXT")]:
+        for col, definition in [("created_at", "REAL"), ("usage", "TEXT"), ("tool_steps", "TEXT"), ("thought", "TEXT"), ("quote", "TEXT")]:
             try:
                 await self._db.execute(f"ALTER TABLE messages ADD COLUMN {col} {definition}")
                 await self._db.commit()
             except Exception:
                 pass  # Column already exists
+        # Migration: sessions.mode（对话模式持久化）
+        try:
+            await self._db.execute("ALTER TABLE sessions ADD COLUMN mode TEXT NOT NULL DEFAULT ''")
+            await self._db.commit()
+        except Exception:
+            pass  # Column already exists
 
     async def close(self) -> None:
         if self._db:
             await self._db.close()
 
-    async def create(self, model: str, source: str = "web") -> Session:
+    async def create(self, model: str, source: str = "web", mode: str = "") -> Session:
         now = time.time()
         session = Session(
             id=_generate_id(),
@@ -123,10 +131,11 @@ class SessionStore:
             created_at=now,
             updated_at=now,
             source=source,
+            mode=mode,
         )
         await self._db.execute(
-            "INSERT INTO sessions (id, title, model, created_at, updated_at, source) VALUES (?, ?, ?, ?, ?, ?)",
-            (session.id, session.title, session.model, session.created_at, session.updated_at, source),
+            "INSERT INTO sessions (id, title, model, created_at, updated_at, source, mode) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (session.id, session.title, session.model, session.created_at, session.updated_at, source, mode),
         )
         await self._db.commit()
         return session
@@ -141,10 +150,11 @@ class SessionStore:
         msg_created_at = msg.created_at if msg.created_at else time.time()
         usage_json = json.dumps(msg.usage) if msg.usage else None
         tool_steps_json = json.dumps(msg.tool_steps) if msg.tool_steps else None
+        quote_json = json.dumps(msg.quote, ensure_ascii=False) if msg.quote else None
 
         await self._db.execute(
-            "INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (session_id, msg.role, msg.content, tool_calls_json, msg.tool_call_id, msg_created_at, usage_json, tool_steps_json, msg.thought),
+            "INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (session_id, msg.role, msg.content, tool_calls_json, msg.tool_call_id, msg_created_at, usage_json, tool_steps_json, msg.thought, quote_json),
         )
         await self._db.commit()
 
@@ -152,6 +162,13 @@ class SessionStore:
         await self._db.execute(
             "UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?",
             (title, time.time(), session_id),
+        )
+        await self._db.commit()
+
+    async def update_mode(self, session_id: str, mode: str) -> None:
+        await self._db.execute(
+            "UPDATE sessions SET mode = ?, updated_at = ? WHERE id = ?",
+            (mode, time.time(), session_id),
         )
         await self._db.commit()
 
@@ -189,7 +206,7 @@ class SessionStore:
         from ethan.providers.base import ToolCall
 
         async with self._db.execute(
-            "SELECT id, title, model, created_at, updated_at, COALESCE(source, 'web') FROM sessions WHERE id = ?",
+            "SELECT id, title, model, created_at, updated_at, COALESCE(source, 'web'), COALESCE(mode, '') FROM sessions WHERE id = ?",
             (session_id,),
         ) as cursor:
             row = await cursor.fetchone()
@@ -199,11 +216,11 @@ class SessionStore:
         session = Session(
             id=row[0], title=row[1], model=row[2],
             created_at=row[3], updated_at=row[4],
-            source=row[5],
+            source=row[5], mode=row[6],
         )
 
         async with self._db.execute(
-            "SELECT role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought FROM messages WHERE session_id = ? ORDER BY id",
+            "SELECT role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote FROM messages WHERE session_id = ? ORDER BY id",
             (session_id,),
         ) as cursor:
             async for r in cursor:
@@ -213,6 +230,7 @@ class SessionStore:
                         tool_calls.append(ToolCall(id=tc["id"], name=tc["name"], arguments=tc["arguments"]))
                 usage = json.loads(r[5]) if r[5] else None
                 tool_steps = json.loads(r[6]) if r[6] else []
+                quote = json.loads(r[8]) if len(r) > 8 and r[8] else None
                 session.messages.append(Message(
                     role=r[0], content=r[1],
                     tool_calls=tool_calls,
@@ -221,6 +239,7 @@ class SessionStore:
                     usage=usage,
                     tool_steps=tool_steps,
                     thought=r[7],
+                    quote=quote,
                 ))
 
         return session
@@ -228,13 +247,15 @@ class SessionStore:
     async def list_recent(self, limit: int = 20, offset: int = 0) -> list[Session]:
         sessions = []
         async with self._db.execute(
-            "SELECT id, title, model, created_at, updated_at, COALESCE(source, 'web') as source FROM sessions ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+            "SELECT id, title, model, created_at, updated_at, COALESCE(source, 'web') as source, COALESCE(mode, '') as mode FROM sessions ORDER BY updated_at DESC LIMIT ? OFFSET ?",
             (limit, offset),
         ) as cursor:
             async for row in cursor:
                 sessions.append(Session(
                     id=row[0], title=row[1], model=row[2],
-                    created_at=row[3], updated_at=row[4], source=row[5] if len(row) > 5 else "web",
+                    created_at=row[3], updated_at=row[4],
+                    source=row[5] if len(row) > 5 else "web",
+                    mode=row[6] if len(row) > 6 else "",
                 ))
         return sessions
 
@@ -244,14 +265,14 @@ class SessionStore:
         sessions: dict[str, Session] = {}
         # 先搜标题
         async with self._db.execute(
-            "SELECT id, title, model, created_at, updated_at FROM sessions WHERE title LIKE ? ORDER BY updated_at DESC LIMIT ?",
+            "SELECT id, title, model, created_at, updated_at, COALESCE(mode, '') FROM sessions WHERE title LIKE ? ORDER BY updated_at DESC LIMIT ?",
             (q, limit),
         ) as cursor:
             async for row in cursor:
-                sessions[row[0]] = Session(id=row[0], title=row[1], model=row[2], created_at=row[3], updated_at=row[4])
+                sessions[row[0]] = Session(id=row[0], title=row[1], model=row[2], created_at=row[3], updated_at=row[4], mode=row[5])
         # 再搜消息内容，找到对应的 session
         async with self._db.execute(
-            """SELECT s.id, s.title, s.model, s.created_at, s.updated_at, m.content
+            """SELECT s.id, s.title, s.model, s.created_at, s.updated_at, m.content, COALESCE(s.mode, '')
                FROM sessions s
                JOIN messages m ON m.session_id = s.id
                WHERE m.content LIKE ? AND m.role IN ('user', 'assistant')
@@ -270,7 +291,7 @@ class SessionStore:
                     snippet = None
 
                 if sid not in sessions:
-                    sessions[sid] = Session(id=row[0], title=row[1], model=row[2], created_at=row[3], updated_at=row[4], snippet=snippet)
+                    sessions[sid] = Session(id=row[0], title=row[1], model=row[2], created_at=row[3], updated_at=row[4], snippet=snippet, mode=row[6])
                 elif snippet and not sessions[sid].snippet:
                     sessions[sid].snippet = snippet
         # 按 updated_at 倒序返回

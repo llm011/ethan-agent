@@ -58,6 +58,21 @@ export async function fetchModels(): Promise<ModelEntry[]> {
   return data.models;
 }
 
+export interface ModeEntry {
+  key: string;
+  label: string;
+  icon: string;
+  accent: string;
+  blurb: string;
+}
+
+export async function fetchModes(): Promise<ModeEntry[]> {
+  const res = await fetch(`${API_URL}/modes`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed to fetch modes");
+  const data = await res.json();
+  return data.modes;
+}
+
 export async function addModel(m: ModelEntry): Promise<{ ok: boolean; error?: string }> {
   const res = await fetch(`${API_URL}/models`, {
     method: "POST", headers: { ...headers(), "Content-Type": "application/json" },
@@ -109,6 +124,7 @@ export interface SessionInfo {
   updated_at: number;
   snippet?: string;
   source?: string;
+  mode?: string;
 }
 
 export interface SessionDetail {
@@ -116,10 +132,12 @@ export interface SessionDetail {
   title: string;
   model: string;
   source?: string;
+  mode?: string;
   messages: {
     role: string;
     content: string;
     created_at?: number;
+    quote?: { role: "user" | "assistant"; content: string } | null;
     usage?: { input: number; output: number; cache: number };
     tool_steps?: Array<{
       tool: string;
@@ -157,8 +175,12 @@ export async function renameSession(id: string, title: string): Promise<void> {
   });
 }
 
-export async function createSession(model?: string): Promise<{ id: string; title: string; model: string }> {
-  const res = await fetch(`${API_URL}/sessions${model ? `?model=${model}` : ""}`, {
+export async function createSession(model?: string, mode?: string): Promise<{ id: string; title: string; model: string; mode?: string }> {
+  const params = new URLSearchParams();
+  if (model) params.append("model", model);
+  if (mode) params.append("mode", mode);
+  const qs = params.toString();
+  const res = await fetch(`${API_URL}/sessions${qs ? `?${qs}` : ""}`, {
     method: "POST",
     headers: headers(),
   });
@@ -396,11 +418,12 @@ export async function* streamChat(
   model?: string,
   sessionId?: string,
   quote?: { role: "user" | "assistant"; content: string } | null,
+  mode?: string,
 ): AsyncGenerator<{ content?: string; done?: boolean; error?: string; model?: string; usage?: Record<string, number>; tool?: string; args?: string; state?: string; id?: string; duration_ms?: number; result_preview?: string; result_detail?: string; sub_steps?: Array<{ tool: string; args: string; state: string; duration_ms?: number | null; result_preview?: string }>; consent_request?: boolean; request_id?: string; description?: string; detail?: string }> {
   const res = await fetch(`${API_URL}/chat`, {
     method: "POST",
     headers: headers(),
-    body: JSON.stringify({ messages, model, stream: true, session_id: sessionId, quote: quote ?? undefined }),
+    body: JSON.stringify({ messages, model, stream: true, session_id: sessionId, quote: quote ?? undefined, mode: mode || undefined }),
   });
 
   if (!res.ok) {
@@ -483,7 +506,7 @@ export async function deleteKnowledge(source: string): Promise<void> {
 }
 
 export interface PollData {
-  sessions: Pick<SessionInfo, "id" | "title" | "model" | "updated_at" | "source">[];
+  sessions: Pick<SessionInfo, "id" | "title" | "model" | "updated_at" | "source" | "mode">[];
 }
 
 export async function fetchPoll(): Promise<PollData> {

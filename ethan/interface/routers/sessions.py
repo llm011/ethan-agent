@@ -38,6 +38,16 @@ async def auth(req: AuthRequest):
     }
 
 
+@router.get("/modes")
+async def list_modes(user_id: str = Depends(verify_token)):
+    """返回可用对话模式表，供前端渲染切换 UI（数据驱动，不在前端硬编码人格）。"""
+    from ethan.core.modes import MODES, DEFAULT_MODE
+    return {"modes": [
+        {"key": m.key, "label": m.label, "icon": m.icon, "accent": m.accent, "blurb": m.blurb}
+        for m in (DEFAULT_MODE, *MODES)
+    ]}
+
+
 @router.get("/sessions")
 async def list_sessions(limit: int = 50, offset: int = 0, q: str | None = None, user_id: str = Depends(verify_token)):
     from ethan.core.paths import user_sessions_db_path
@@ -57,20 +67,21 @@ async def list_sessions(limit: int = 50, offset: int = 0, q: str | None = None, 
             "updated_at": s.updated_at,
             "snippet": getattr(s, "snippet", None),
             "source": getattr(s, "source", "web"),
+            "mode": getattr(s, "mode", "") or "",
         }
         for s in sessions
     ]}
 
 
 @router.post("/sessions")
-async def create_session(model: str | None = None, user_id: str = Depends(verify_token)):
+async def create_session(model: str | None = None, mode: str | None = None, user_id: str = Depends(verify_token)):
     from ethan.core.paths import user_sessions_db_path
     config = get_config()
     store = SessionStore(db_path=user_sessions_db_path())
     await store.init()
-    session = await store.create(model or config.defaults.model)
+    session = await store.create(model or config.defaults.model, mode=mode or "")
     await store.close()
-    return {"id": session.id, "title": session.title, "model": session.model}
+    return {"id": session.id, "title": session.title, "model": session.model, "mode": session.mode}
 
 
 @router.get("/sessions/{session_id}")
@@ -87,6 +98,7 @@ async def get_session(session_id: str, user_id: str = Depends(verify_token)):
         "title": session.title,
         "model": session.model,
         "source": getattr(session, "source", "web"),
+        "mode": getattr(session, "mode", "") or "",
         "messages": [
             {
                 "role": m.role,
@@ -94,6 +106,7 @@ async def get_session(session_id: str, user_id: str = Depends(verify_token)):
                 "created_at": getattr(m, "created_at", None),
                 "usage": getattr(m, "usage", None),
                 "tool_steps": getattr(m, "tool_steps", None) or [],
+                "quote": getattr(m, "quote", None),
             }
             for m in session.messages if m.role in ("user", "assistant")
         ],
