@@ -57,20 +57,21 @@ async def list_sessions(limit: int = 50, offset: int = 0, q: str | None = None, 
             "updated_at": s.updated_at,
             "snippet": getattr(s, "snippet", None),
             "source": getattr(s, "source", "web"),
+            "mode": getattr(s, "mode", "") or "",
         }
         for s in sessions
     ]}
 
 
 @router.post("/sessions")
-async def create_session(model: str | None = None, user_id: str = Depends(verify_token)):
+async def create_session(model: str | None = None, mode: str | None = None, user_id: str = Depends(verify_token)):
     from ethan.core.paths import user_sessions_db_path
     config = get_config()
     store = SessionStore(db_path=user_sessions_db_path())
     await store.init()
-    session = await store.create(model or config.defaults.model)
+    session = await store.create(model or config.defaults.model, mode=mode or "")
     await store.close()
-    return {"id": session.id, "title": session.title, "model": session.model}
+    return {"id": session.id, "title": session.title, "model": session.model, "mode": session.mode}
 
 
 @router.get("/sessions/{session_id}")
@@ -87,6 +88,7 @@ async def get_session(session_id: str, user_id: str = Depends(verify_token)):
         "title": session.title,
         "model": session.model,
         "source": getattr(session, "source", "web"),
+        "mode": getattr(session, "mode", "") or "",
         "messages": [
             {
                 "role": m.role,

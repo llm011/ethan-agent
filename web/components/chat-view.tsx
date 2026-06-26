@@ -42,6 +42,9 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const [schedules, setSchedules] = useState<any[]>([]);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [consentRequest, setConsentRequest] = useState<ConsentRequest | null>(null);
+  // 对话模式:"" = 工作助手(Ethan); "陪伴" = 苏念·陪伴倾听(点击胶囊进入沉浸式)
+  const [mode, setMode] = useState<string>("");
+  const counselorOn = mode === "陪伴";
 
   const handleConsentRespond = async (requestId: string, allowed: boolean) => {
     setConsentRequest(null);
@@ -102,6 +105,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
             }))
           );
           setSelectedModel(detail.model);
+          // 恢复对话模式：之前用工作助手还是苏念，下次进入保持一致
+          setMode(detail.mode || "");
           const historicUsage = detail.messages
             .filter((m: any) => m.role === "assistant" && m.usage)
             .reduce((acc: any, m: any) => ({
@@ -122,6 +127,12 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       setMessages([]);
       setSessionUsage({ input: 0, output: 0, cache: 0 });
       setSessionSource("web");
+      // 新建对话页面默认工作助手模式
+      setMode("");
+      // 重置模型为配置的默认模型（从 .env 读取的 AGENT_DEFAULT_MODEL）
+      fetchAgentSettings().then((settings) => {
+        if (settings.default_model) setSelectedModel(settings.default_model);
+      }).catch(() => {});
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialSessionId]);
@@ -176,7 +187,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         setMessages((prev) => [...prev, { role: "assistant", content, created_at: now }]);
 
       if (cmd === "new") {
-        const s = await createSession(selectedModel);
+        const s = await createSession(selectedModel, mode);
         setActiveSession(s.id);
         setSessionTitle("新对话");
         setMessages([]);
@@ -247,7 +258,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
     let sessionId = activeSession;
     if (!sessionId) {
-      const s = await createSession(selectedModel);
+      const s = await createSession(selectedModel, mode);
       sessionId = s.id;
       setActiveSession(s.id);
       setSessionTitle(text.slice(0, 30) || "New chat");
@@ -285,7 +296,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     setMessages([...newMessages, { role: "assistant", content: "", created_at: Date.now() / 1000 }]);
 
     try {
-      for await (const chunk of streamChat(chatMessages, selectedModel, sessionId, sentQuote)) {
+      for await (const chunk of streamChat(chatMessages, selectedModel, sessionId, sentQuote, mode)) {
         if (ttft === undefined) ttft = Date.now() - sendTime;
 
         if (chunk.consent_request) {
@@ -416,6 +427,28 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       <div>
         <div className="max-w-3xl mx-auto px-4 pt-4">
           {showOnboarding && <OnboardingBanner onDismiss={() => setShowOnboarding(false)} />}
+          {/* 对话模式切换:工作助手(Ethan) ↔ 苏念·陪伴倾听(点击胶囊进入沉浸式) */}
+          <div className="flex items-center gap-2 mb-3">
+            <button
+              type="button"
+              onClick={() => setMode(counselorOn ? "" : "陪伴")}
+              className={
+                "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border transition-colors " +
+                (counselorOn
+                  ? "bg-pink-50 border-pink-300 text-pink-700 dark:bg-pink-950/40 dark:border-pink-700 dark:text-pink-300"
+                  : "bg-neutral-50 border-neutral-200 text-neutral-600 hover:bg-neutral-100 dark:bg-neutral-900 dark:border-neutral-700 dark:text-neutral-400")
+              }
+              title={counselorOn ? "当前:苏念·陪伴倾听模式,点击切回工作助手" : "当前:工作助手,点击切换到苏念·陪伴倾听"}
+            >
+              <span>{counselorOn ? "🌸" : "🛠️"}</span>
+              <span>{counselorOn ? "苏念 · 陪伴倾听" : "工作助手"}</span>
+            </button>
+            {counselorOn && (
+              <span className="text-[11px] text-pink-600/80 dark:text-pink-400/80">
+                正在以苏念的身份陪伴你,倾诉心事我会先看见你、接住你
+              </span>
+            )}
+          </div>
         </div>
         <ChatInput
           streaming={streaming}

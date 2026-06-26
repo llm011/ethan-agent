@@ -139,6 +139,7 @@ class Agent:
         system: str | None = None,
         channel: str = "",
         user_id: str = "",
+        mode: str = "",
     ):
         from ethan.core.paths import user_facts_path, user_procedures_path
         from ethan.core.context import set_user_id
@@ -156,6 +157,7 @@ class Agent:
         self.usage = UsageStats()
         self.last_matched_skills: list[str] = []
         self._channel = channel
+        self._mode = mode or ""
         self._system_files: dict[str, str] = {}
         # 渠道运行时上下文（如飞书主人身份），每次请求前可设置，注入 system prompt 末尾
         self.runtime_context: str = ""
@@ -228,6 +230,41 @@ class Agent:
                 return m.content
         return ""
 
+    def _is_counselor_mode(self) -> bool:
+        return self._mode in ("陪伴", "counselor", "苏念")
+
+    def _counselor_persona_text(self) -> str:
+        """读取「苏念·陪伴倾听」persona 正文（去掉 YAML frontmatter）。
+
+        每次都从磁盘读，使 Web UI 改完 SKILL.md 后下条消息即生效，无需重启。
+        优先用户 skills 目录（可被用户改写），回退包内默认。找不到返回空串。
+        候选名兼容英文 companion-listen 与中文 陪伴倾听 两种目录。
+        """
+        from pathlib import Path
+        candidates: list[Path] = []
+        names = ("companion-listen", "陪伴倾听")
+        try:
+            from ethan.core.paths import user_skills_dir
+            base = user_skills_dir()
+            for name in names:
+                candidates.append(base / name / "SKILL.md")
+                candidates.append(base / f"{name}.md")
+        except Exception:
+            pass
+        # 包内默认：ethan/defaults/skills/<name>/SKILL.md
+        pkg = Path(__file__).resolve().parent.parent / "defaults" / "skills"
+        for name in names:
+            candidates.append(pkg / name / "SKILL.md")
+        for p in candidates:
+            if p.exists():
+                text = p.read_text(encoding="utf-8")
+                if text.startswith("---"):
+                    seg = text.split("---", 2)
+                    if len(seg) >= 3:
+                        text = seg[2]
+                return text.strip()
+        return ""
+
     def _build_system(self, messages: list[Message], fast: bool = False) -> str:
         """构建 system prompt。fast=True 时使用极简版本减少 token。"""
         config = get_config()
@@ -249,6 +286,16 @@ class Agent:
             if soul_content:
                 parts.append(f"<soul>\n[CRITICAL — 以下准则必须严格遵守]\n\n{soul_content}\n</soul>")
             parts.append(f"<identity>\n{identity_content}\n</identity>")
+            if self._is_counselor_mode():
+                persona = self._counselor_persona_text()
+                if persona:
+                    parts.append(
+                        "<counselor_persona>\n"
+                        "[CRITICAL — 当前处于「陪伴倾听」模式。以下人格覆盖你的默认身份,完全化身苏念,"
+                        "用她的语气、温度和方式回应,严格遵守其中的说话方式要求。]\n\n"
+                        f"{persona}\n"
+                        "</counselor_persona>"
+                    )
             parts.append(f"Current time: {now}")
             parts.append(f"Your workspace directory is {workspace}.")
             parts.append(f"Current model: {self._provider.model}（用户问起你用的什么模型/是谁驱动时，如实回答这个 model id）")
@@ -288,6 +335,16 @@ class Agent:
                 f"</soul>"
             )
         parts.append(f"<identity>\n{identity_content}\n</identity>")
+        if self._is_counselor_mode():
+            persona = self._counselor_persona_text()
+            if persona:
+                parts.append(
+                    "<counselor_persona>\n"
+                    "[CRITICAL — 当前处于「陪伴倾听」模式。以下人格覆盖你的默认身份,完全化身苏念,"
+                    "用她的语气、温度和方式回应,严格遵守其中的说话方式要求。]\n\n"
+                    f"{persona}\n"
+                    "</counselor_persona>"
+                )
         if agent_content:
             parts.append(f"<agent_protocols>\n{agent_content}\n</agent_protocols>")
         if tools_content:
