@@ -14,6 +14,7 @@ from ethan.tools.base import BaseTool
 
 class ProfileUpdateTool(BaseTool):
     fast_path = False
+    side_effect = True
     name = "profile_update"
     description = (
         "Update the user's long-term profile document with narrative context that doesn't fit "

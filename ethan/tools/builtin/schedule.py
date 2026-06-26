@@ -70,6 +70,7 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
 
 class ScheduleCreateTool(BaseTool):
     fast_path = False
+    side_effect = True
     name = "schedule_create"
     description = "Create a scheduled task. Use for reminders, recurring checks, or timed automations."
     parameters = {
@@ -153,6 +154,7 @@ class ScheduleListTool(BaseTool):
 
 class ScheduleRemoveTool(BaseTool):
     fast_path = False
+    side_effect = True
     name = "schedule_remove"
     description = "Remove a scheduled task by its ID."
     parameters = {

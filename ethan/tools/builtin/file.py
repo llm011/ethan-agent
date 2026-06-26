@@ -68,6 +68,7 @@ class FileReadTool(BaseTool):
 
 class FileWriteTool(BaseTool):
     fast_path = False
+    side_effect = True
     name = "file_write"
     description = "Write content to a local file. Creates parent directories if needed."
     parameters = {

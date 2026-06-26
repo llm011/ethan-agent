@@ -5,6 +5,7 @@ from ethan.tools.base import BaseTool
 
 class MemoryWriteTool(BaseTool):
     fast_path = False
+    side_effect = True
     name = "memory_write"
     description = (
         "Proactively save a factual memory about the user (preference, personal info, decision) "

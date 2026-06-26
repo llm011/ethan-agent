@@ -1,3 +1,11 @@
+# 工具优先级（先看这里，避免绕路）
+
+找技能 / 读技能 / 列技能 → **直接用 `skill_list` + `skill_read`**，不要 `fd_find` → `file_list` → `file_read` 翻 `~/.ethan/skills` 目录。
+改运行时参数 → **直接用 `config_get` / `config_set`**，不要 `cat config.yaml`。
+读密钥 → **直接用 `get_secret` / `list_secrets`**，不要 `file_read` 读 `.secrets/`。
+
+> 这几个专用工具比通用文件工具快得多，且只加载你需要的部分。先想"有没有专用工具"，再用通用工具。
+
 # 主动记忆写入
 
 每次回复前判断：用户这句话里有没有值得跨对话保留的信息？有则**立刻**调用对应工具，无需用户说"记住"。

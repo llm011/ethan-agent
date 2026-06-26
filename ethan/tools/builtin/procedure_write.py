@@ -5,6 +5,7 @@ from ethan.tools.base import BaseTool
 
 class ProcedureWriteTool(BaseTool):
     fast_path = False
+    side_effect = True
     name = "procedure_write"
     description = (
         "Proactively save a behavioral rule or standing instruction to long-term procedural memory. "

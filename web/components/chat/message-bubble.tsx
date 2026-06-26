@@ -57,7 +57,7 @@ export function MessageBubble({ msg, isStreaming, isLast, onQuote }: MessageBubb
           </button>
         )}
         <div
-          className={`rounded-2xl px-4 py-3 ${
+          className={`rounded-2xl px-4 py-3 break-words ${
             msg.role === "user"
               ? "bg-primary text-primary-foreground"
               : "bg-muted prose prose-sm dark:prose-invert max-w-none"
@@ -112,7 +112,7 @@ export function MessageBubble({ msg, isStreaming, isLast, onQuote }: MessageBubb
                   if (raw.includes("\n")) {
                     return <PlainCodeBlock code={raw.replace(/\n$/, "")} />;
                   }
-                  return <code className="bg-background/50 px-1 py-0.5 rounded text-xs font-mono">{children}</code>;
+                  return <code className="bg-background/50 px-1 py-0.5 rounded text-xs font-mono break-all">{children}</code>;
                 },
                 pre: ({ children }) => <>{children}</>,
               }}

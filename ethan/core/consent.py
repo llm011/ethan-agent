@@ -38,6 +38,15 @@ class ConsentProvider:
         """请求授权，返回是否允许。streamed=True 时由 Agent 调 create() + await。"""
         return True
 
+    def policy_check(self, tool: str, side_effect: bool) -> str | None:
+        """渠道级硬策略：在 consent_check 之外，按工具自身属性决定是否直接拒绝。
+
+        返回非空字符串 → 直接拒绝（字符串是拒绝原因，回给模型当作工具结果）；
+        返回 None → 不拦截，交给后续 consent 流程。
+        默认不拦截。用于三方渠道（如飞书）认主人后，非主人不得执行 side_effect 工具。
+        """
+        return None
+
 
 class TuiConsentProvider(ConsentProvider):
     """REPL 模式：阻塞式 y/N 输入。"""
@@ -97,6 +106,38 @@ class WebConsentProvider(ConsentProvider):
             if not fut.done():
                 fut.cancel()
         self._pending.clear()
+
+
+class ChannelGuardProvider(ConsentProvider):
+    """三方渠道（飞书/微信等）的硬策略守卫。
+
+    与 TUI/Web 不同，三方渠道没有交互式确认 UI。一旦渠道已认主人（owner_claimed），
+    非主人发来的指令对 side_effect 工具一律【直接拒绝】，不放行也不询问——纯靠 prompt
+    约束不可靠，这里在 Agent 循环层做硬拦截。
+
+    - is_owner=True：放行（仍受 consent_check 里的密钥等单独保护）
+    - is_owner=False 且 owner_claimed=True：拒绝所有 side_effect 工具
+    - owner_claimed=False（还没认主人）：不装这个 provider（permissive），由 lark_events 决定
+    """
+    streamed = False
+
+    def __init__(self, is_owner: bool):
+        self._is_owner = is_owner
+
+    async def request(self, description: str, tool: str = "", detail: str = "") -> bool:
+        # consent_check 命中（如读密钥）：主人放行，非主人拒绝
+        return self._is_owner
+
+    def policy_check(self, tool: str, side_effect: bool) -> str | None:
+        if self._is_owner:
+            return None
+        if side_effect:
+            return (
+                f"[已拒绝] 工具 {tool} 会产生副作用（改数据/执行/对外操作），"
+                "当前会话的发起人不是主人，无权执行此类操作。"
+                "请告知用户：这类操作仅限主人，需主人在主会话中授权。"
+            )
+        return None
 
 
 # 全局注册表：request_id → WebConsentProvider，跨请求供 /consent 端点查找

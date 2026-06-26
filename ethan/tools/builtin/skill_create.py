@@ -6,6 +6,7 @@ from ethan.tools.base import BaseTool
 
 class SkillCreateTool(BaseTool):
     fast_path = False
+    side_effect = True
     name = "skill_create"
     description = (
         "Create a new personal skill (reusable prompt template) saved to ~/.ethan/skills/. "

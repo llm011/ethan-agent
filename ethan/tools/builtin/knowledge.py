@@ -36,6 +36,7 @@ class KnowledgeSearchTool(BaseTool):
 
 class KnowledgeAddTool(BaseTool):
     fast_path = False
+    side_effect = True
     name = "knowledge_add"
     description = "Save a note or piece of information to the personal knowledge base."
     parameters = {

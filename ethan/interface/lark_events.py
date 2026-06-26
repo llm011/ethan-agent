@@ -35,6 +35,19 @@ def _save_lark_map(mapping: dict):
     f.write_text(json.dumps(mapping, ensure_ascii=False))
 
 
+def _lark_welcomed() -> bool:
+    """是否已经向飞书发过首次配置欢迎语。每个部署只发一次，之后拉新群/清上下文都不再发。"""
+    from ethan.core.config import CONFIG_DIR
+    return (CONFIG_DIR / "memory" / ".lark_welcomed").exists()
+
+
+def _mark_lark_welcomed() -> None:
+    from ethan.core.config import CONFIG_DIR
+    f = CONFIG_DIR / "memory" / ".lark_welcomed"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.touch()
+
+
 async def _send_reaction(message_id: str) -> str | None:
     """给消息添加 THINKING 表情，返回 reaction_id 以便后续删除。"""
     try:
@@ -309,7 +322,7 @@ async def send_lark_image(chat_id: str, image_path: str, caption: str = "") -> b
 def _build_tool_elements(tool_text: str) -> list:
     """把工具进度文本直接构造成 post element 数组，不经过 markdown 解析。
 
-    - 工具名行：**⚡ name** + plain (args)
+    - 工具名行：**icon label** + plain (args)
     - 结果行（✓/✗ 开头）：code_block（灰色背景框，区分于正文）
     - thinking 行：plain 文字
     - 空行：空 element
@@ -318,13 +331,18 @@ def _build_tool_elements(tool_text: str) -> list:
     rows = []
     for line in tool_text.split("\n"):
         line = line.rstrip()
-        # 工具名行：**⚡ xxx**(args) 或 **⚡ xxx**`(args)`
-        m = re.match(r'\*\*⚡ ([^*]+)\*\*[`]?\(([^)]*)\)[`]?', line)
+        # 工具名行：**icon label**(args) 或 **icon label**`(args)`
+        m = re.match(r'\*\*(.+?)\*\*[`]?\(([^)]*)\)[`]?', line)
         if m:
             rows.append([
-                {"tag": "text", "text": f"⚡ {m.group(1)}", "style": ["bold"]},
+                {"tag": "text", "text": m.group(1), "style": ["bold"]},
                 {"tag": "text", "text": f"  ({m.group(2)})"},
             ])
+            continue
+        # 工具名行（无参数）：**icon label**
+        m2 = re.match(r'\*\*(.+?)\*\*\s*$', line)
+        if m2 and any(emoji in m2.group(1) for emoji in ("📖","💻","🔍","🌐","📁","✏️","🧠","💾","⏰","📋","✨","👤","📝","🔧")):
+            rows.append([{"tag": "text", "text": m2.group(1), "style": ["bold"]}])
             continue
         # 结果行（✓/✗ 或 _✓ 等前缀）
         stripped = line.lstrip().lstrip("`_").rstrip("`_")
@@ -471,6 +489,23 @@ async def _edit_message(message_id: str, text: str, use_card: bool) -> bool:
         return False
 
 
+async def _delete_message(message_id: str) -> bool:
+    """撤回/删除已发送消息。用于误发的卡片（如把 reasoning 误当答案发出后清理）。"""
+    from lark_oapi.api.im.v1 import DeleteMessageRequest
+    client = _lark_client()
+    if client is None or not message_id:
+        return False
+    try:
+        req = DeleteMessageRequest.builder().message_id(message_id).build()
+        resp = await asyncio.to_thread(client.im.v1.message.delete, req)
+        if not resp.success():
+            logger.debug("Lark delete failed: code=%s msg=%s", resp.code, resp.msg)
+        return resp.success()
+    except Exception:
+        logger.exception("Lark delete failed")
+        return False
+
+
 async def _send_reply(chat_id: str, text: str) -> str | None:
     """通过 lark-cli 回复消息，使用 --markdown 以正确渲染格式。
     返回发出的消息 message_id（从 JSON stdout 解析），失败时返回 None。
@@ -517,6 +552,7 @@ async def _handle_message(event_data: dict) -> None:
     from ethan.tools.builtin.schedule import ScheduleCreateTool, ScheduleListTool, ScheduleRemoveTool
     from ethan.tools.builtin.skill_create import SkillCreateTool
     from ethan.tools.builtin.skill_read import SkillReadTool, SkillListTool
+    from ethan.tools.builtin.secrets import SetSecretTool, GetSecretTool, ListSecretsTool
     from ethan.tools.builtin.shell import ShellTool
     from ethan.tools.builtin.web import WebFetchTool
     from ethan.tools.builtin.web_search import WebSearchTool
@@ -698,9 +734,11 @@ async def _handle_message(event_data: dict) -> None:
             session_id = session.id
             _lark_chat_map[chat_id] = session.id
             _save_lark_map(_lark_chat_map)
-            # New user first contact — send a welcome
-            welcome = "嘿！我是 Ethan，你的私人 AI 助手 👋\n\n我已经在这台 Mac mini 上常驻了，有任何事直接找我就行——写代码、查信息、控制设备、管理日程都行。\n\n你叫什么名字？让我记住你~"
-            await _send_reply(chat_id, welcome)
+            # 首次配置飞书时发一次欢迎语；之后拉新群、/new 清上下文都不再发（无用噪音）
+            if not _lark_welcomed():
+                welcome = "嘿！我是 Ethan，你的私人 AI 助手 👋\n\n我已经在这台 Mac mini 上常驻了，有任何事直接找我就行——写代码、查信息、控制设备、管理日程都行。\n\n你叫什么名字？让我记住你~"
+                await _send_reply(chat_id, welcome)
+                _mark_lark_welcomed()
             # Let reaction stay visible while user reads welcome, then process their actual message
 
         # 加载完整历史，用 WorkingMemory 重建热区（与 REPL/API 一致）
@@ -737,7 +775,8 @@ async def _handle_message(event_data: dict) -> None:
                      ScheduleCreateTool(), ScheduleListTool(), ScheduleRemoveTool(),
                      KnowledgeSearchTool(), KnowledgeAddTool(),
                      MemoryWriteTool(), ProcedureWriteTool(), ProfileUpdateTool(), SkillCreateTool(),
-                     SkillReadTool(), SkillListTool()]:
+                     SkillReadTool(), SkillListTool(),
+                     SetSecretTool(), GetSecretTool(), ListSecretsTool()]:
             registry.register(tool)
         skills = SkillRegistry()
         skills.load()
@@ -758,24 +797,34 @@ async def _handle_message(event_data: dict) -> None:
                 "说明需要主人授权。"
             )
 
+        # 硬策略守卫：一旦认了主人（owner_claimed），后续就要校验——非主人不得执行 side_effect 工具。
+        # 没认主人则不装守卫（permissive），仅靠上面的 runtime_context 软约束。
+        # 守卫通过 ContextVar 作用于本条消息的 Agent 循环（每条飞书消息在独立 task 中处理，互不影响）。
+        if owner_claimed:
+            from ethan.core.consent import ChannelGuardProvider, set_consent_provider
+            set_consent_provider(ChannelGuardProvider(is_owner=is_owner))
+
         # --- 两条消息策略 ---
-        # - 工具进度（post 气泡，编辑更新）：首个工具触发时发出，thinking 文字全部替换为 🤔 thinking...
-        # - 最终回答（卡片，流式编辑）：首个正文 chunk 触发时发出
-        # 没有工具时只发卡片回答。
+        # - 工具进度（post 富文本，编辑更新）：首个工具触发时发出
+        # - 最终回答（卡片，流式编辑）：首段缓冲到 ≥阈值再发，避免孤立 "I" 短卡片
+        #
+        # 关键防泄漏：工具调用前的 narration（如 "I will read..."）不能残留为最终答案。
+        # 渠道无法预判一段文字后面是否还跟工具调用，所以采用「先发、必要时撤回」：
+        # 一旦又出现工具调用（说明刚那段是工具前说明而非最终答案），撤回已发的答案卡片。
         import time as _lark_time
 
         tool_msg_id: str | None = None
         tool_text = ""          # 工具进度消息的内容
         answer_msg_id: str | None = None
-        answer_text = ""        # 正在累积的回答（卡片里展示）
-        clean_answer = ""       # 只保存最终正文，用于存库
-        pending = ""
+        answer_text = ""        # 已提交到答案卡片的最终答案文字
+        pending = ""            # 自上次工具事件以来缓冲的文字
         collected_tool_steps: list[dict] = []
         lark_tool_start_times: dict[str, float] = {}
         last_flush = _lark_time.time()
-        first_answer_flushed = False
+        answer_created = False  # 答案卡片是否已创建
         thinking_shown = False  # 是否已在工具消息里显示了 "🤔 thinking..."
         FLUSH_INTERVAL = 2.0
+        ANSWER_BUFFER_THRESHOLD = 50  # 纯对话首段缓冲字数，避免孤立短卡片
 
         async def _update_tool_msg() -> None:
             nonlocal tool_msg_id, reaction_id
@@ -784,7 +833,6 @@ async def _handle_message(event_data: dict) -> None:
             content = _render_tool_msg_content(tool_text)
             if tool_msg_id is None:
                 from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
-                import json as _j
                 client = _lark_client()
                 if client is None:
                     return
@@ -806,7 +854,6 @@ async def _handle_message(event_data: dict) -> None:
                 from lark_oapi.api.im.v1 import UpdateMessageRequest, UpdateMessageRequestBody
                 client = _lark_client()
                 if client:
-                    content = _render_tool_msg_content(tool_text)
                     req = (
                         UpdateMessageRequest.builder()
                         .message_id(tool_msg_id)
@@ -821,17 +868,20 @@ async def _handle_message(event_data: dict) -> None:
                     await asyncio.to_thread(client.im.v1.message.update, req)
 
         async def _flush_answer(force: bool = False) -> None:
-            nonlocal answer_msg_id, answer_text, pending, last_flush, first_answer_flushed, reaction_id
+            nonlocal answer_msg_id, answer_text, pending, last_flush, answer_created, reaction_id
             if not pending:
                 return
-            now = _lark_time.time()
-            if not force and first_answer_flushed and (now - last_flush) < FLUSH_INTERVAL:
+            # 首段缓冲到阈值再创建卡片，避免 "I" 这种孤立短卡片（force 时跳过该限制）
+            if not answer_created and not force and len(pending) < ANSWER_BUFFER_THRESHOLD:
+                return
+            # 已创建卡片且非 force：按 FLUSH_INTERVAL 节流流式编辑
+            if answer_created and not force and (_lark_time.time() - last_flush) < FLUSH_INTERVAL:
                 return
             answer_text += pending
             pending = ""
-            last_flush = now
-            first_answer_flushed = True
+            last_flush = _lark_time.time()
             if answer_msg_id is None:
+                answer_created = True
                 answer_msg_id, _ = await _send_message(chat_id, answer_text, use_card=True)
                 # 发出首条回答后移除 reaction（若工具进度消息没发出过）
                 if reaction_id and message_id:
@@ -851,10 +901,26 @@ async def _handle_message(event_data: dict) -> None:
                         "duration_ms": None,
                         "result_preview": "",
                     })
-                    # 工具开始：丢弃 pending 的 reasoning，追加工具行（加粗显示）
+                    # 工具开始：丢弃本轮在工具调用前累积的 pending 文字。
+                    # 这段文字是「工具前的 narration/思考」（如 "I will read...", 或流式残片 "}"），
+                    # 不是最终答案——最终答案在「最后一次工具调用之后」的那一轮，由流结束时的
+                    # force flush 提交。这样既不会把残片 "}" 发成卡片，也不会丢真正的回答。
                     pending = ""
                     thinking_shown = False
-                    tool_name_line = f"**⚡ {chunk.tool_name}**"
+                    # icon + 人性化显示名映射
+                    _TOOL_DISPLAY = {
+                        "shell": "💻 terminal", "rg_search": "🔍 search", "fd_find": "🔍 find",
+                        "file_read": "📖 read_file", "file_write": "✏️ write_file", "file_list": "📁 list_files",
+                        "web_search": "🔍 web_search", "web_fetch": "🌐 web_fetch",
+                        "knowledge_search": "🧠 knowledge_search", "knowledge_add": "💾 knowledge_add",
+                        "memory_write": "🧠 memory_write", "procedure_write": "📝 procedure_write",
+                        "profile_update": "👤 profile_update", "skill_create": "✨ skill_create",
+                        "skill_read": "📖 skill_read", "skill_list": "📋 skill_list",
+                        "schedule_create": "⏰ schedule_create", "schedule_list": "⏰ schedule_list",
+                        "schedule_remove": "⏰ schedule_remove",
+                    }
+                    display_name = _TOOL_DISPLAY.get(chunk.tool_name, f"🔧 {chunk.tool_name}")
+                    tool_name_line = f"**{display_name}**"
                     if chunk.args_summary:
                         tool_name_line += f"`({chunk.args_summary})`"
                     # 两个工具之间加空行
@@ -884,13 +950,12 @@ async def _handle_message(event_data: dict) -> None:
                         thinking_shown = False
                     await _update_tool_msg()
                 continue
-            # 正文 chunk：进入最终回答阶段，丢弃工具间 reasoning，只累积真实文字
+            # 正文 chunk：进入最终回答阶段
             # 首个正文到来时若工具消息里有 "thinking..."，在工具消息末尾补一个空行分隔
             if pending == "" and tool_msg_id is not None and thinking_shown:
                 tool_text = tool_text.rstrip() + "\n"
                 await _update_tool_msg()
                 thinking_shown = False
-            clean_answer += chunk
             pending += chunk
             await _flush_answer()
 
@@ -908,9 +973,23 @@ async def _handle_message(event_data: dict) -> None:
             final_answer = (answer_text or "（没有找到相关内容）").rstrip() + f"\n\n---\n_{stats_line}_"
             await _edit_message(answer_msg_id, final_answer, use_card=True)
         elif tool_msg_id:
-            # 只有工具调用没有正文（极少数情况），在工具消息末尾加 stats
+            # 只有工具调用没有正文（极少数情况），在工具消息末尾加 stats（保持 post 富文本样式）
             final_tool = tool_text.rstrip() + f"\n\n{stats_line}"
-            await _edit_message(tool_msg_id, final_tool, use_card=False)
+            from lark_oapi.api.im.v1 import UpdateMessageRequest, UpdateMessageRequestBody
+            _tclient = _lark_client()
+            if _tclient:
+                _treq = (
+                    UpdateMessageRequest.builder()
+                    .message_id(tool_msg_id)
+                    .request_body(
+                        UpdateMessageRequestBody.builder()
+                        .msg_type("post")
+                        .content(_render_tool_msg_content(final_tool))
+                        .build()
+                    )
+                    .build()
+                )
+                await asyncio.to_thread(_tclient.im.v1.message.update, _treq)
         else:
             # 没有任何输出（工具和正文都没有）
             await _send_message(chat_id, f"（没有找到相关内容）\n{stats_line}", use_card=False)
@@ -919,8 +998,8 @@ async def _handle_message(event_data: dict) -> None:
         if reaction_id and message_id:
             await _remove_reaction(message_id, reaction_id)
 
-        # 存库：只存干净正文，减少 context token
-        stored_content = (clean_answer.strip() or tool_text.strip()) + f"\n\n{stats_line}"
+        # 存库：只存最终答案正文（reasoning 已在工具阶段丢弃），减少 context token
+        stored_content = (answer_text.strip() or tool_text.strip()) + f"\n\n{stats_line}"
 
         # 保存完整 assistant 消息到 session（带 usage + tool_steps）
         usage_dict = {

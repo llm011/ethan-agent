@@ -6,6 +6,7 @@ class DelegateCodingTool(BaseTool):
     name = "delegate_coding"
     # 委派给外部 Coding Agent，有副作用（写文件、改代码），不可缓存
     cacheable = False
+    side_effect = True
     # 复杂编码任务通常需要全量工具上下文，不在 fast path 加载
     fast_path = False
     description = (

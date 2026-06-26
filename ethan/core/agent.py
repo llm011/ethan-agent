@@ -455,16 +455,29 @@ class Agent:
             if not response.is_tool_call:
                 return
 
-            # --- 授权检查：执行前对需要 consent 的工具请求用户确认 ---
+            # --- 授权检查：执行前对工具做（1）渠道硬策略 + （2）consent 确认 ---
             from ethan.core.consent import get_consent_provider
             import asyncio as _aio
             allowed_calls = []
             for tc in tool_calls:
                 tool = self._registry.get(tc.name)
+                provider = get_consent_provider()
+
+                # (1) 渠道硬策略：如三方渠道认主人后，非主人不得执行 side_effect 工具。
+                #     直接拒绝，不询问（三方渠道无交互确认 UI）。
+                if provider is not None:
+                    side_effect = bool(getattr(tool, "side_effect", False)) if tool else False
+                    deny = provider.policy_check(tc.name, side_effect)
+                    if deny:
+                        yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary="", state="error",
+                                        result_preview="无权限")
+                        working.append(Message(role="tool", content=deny, tool_call_id=tc.id))
+                        continue
+
+                # (2) consent 确认：工具自身声明需要授权时（如读密钥）走交互/拒绝流程。
                 desc = tool.consent_check(**tc.arguments) if tool else None
                 if desc:
                     detail = _format_args(tc.arguments)
-                    provider = get_consent_provider()
                     ok = True
                     if provider is None:
                         ok = True
@@ -502,5 +515,12 @@ class Agent:
                     tool_call_id=r.tool_call_id,
                 ))
 
-        # If we exhausted max_iters and the last message was still a tool call response
-        yield "\n\n*[System: Maximum tool iterations reached. Process terminated to prevent infinite loops.]*"
+        # 达到最大迭代次数：不直接截断，额外调一次（不带工具）让模型总结已做的事
+        summary_system = system + "\n\n[System: Tool iteration limit reached. Summarize in 2-3 sentences what was accomplished and what remains, without calling any tools.]"
+        summary_full = ""
+        async for chunk in self._provider.stream_chat(working, tools=None, system=summary_system):
+            if chunk.content:
+                summary_full += chunk.content
+                yield chunk.content
+            if chunk.is_final:
+                self.usage.add(chunk.usage)

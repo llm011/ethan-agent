@@ -36,6 +36,7 @@ def _safe_name(name: str) -> str:
 class SetSecretTool(BaseTool):
     fast_path = False
     cacheable = False
+    side_effect = True
     name = "set_secret"
     description = (
         "把一个密钥（API key、token、密码等）安全存到 ~/.ethan/.secrets/。"

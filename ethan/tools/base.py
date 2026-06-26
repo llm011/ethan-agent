@@ -16,6 +16,8 @@ class ToolResult:
 class BaseTool(ABC):
     fast_path: bool = True  # 是否在 Fast Path 时加载。设为 False 的工具只在 Full Path 使用
     cacheable: bool = True  # 同参数是否可缓存；副作用类工具（shell）应设为 False
+    side_effect: bool = False  # 是否有副作用（改文件/删数据/执行/花钱/对外发消息）。
+    # 三方渠道（如飞书）认主人后，非主人调用 side_effect=True 的工具会被守卫拦截。
 
     def consent_check(self, **kwargs) -> str | None:
         """检查此次调用是否需要用户授权。

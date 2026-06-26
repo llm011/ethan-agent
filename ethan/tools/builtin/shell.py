@@ -5,6 +5,7 @@ from ethan.tools.base import BaseTool
 
 class ShellTool(BaseTool):
     cacheable = False  # shell 命令有副作用，结果不可缓存
+    side_effect = True
     name = "shell"
     description = "Execute a shell command and return its output."
     parameters = {
