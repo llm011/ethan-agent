@@ -178,6 +178,12 @@ export function Sidebar() {
             }}
           />
         )}
+        {/* 对话模式标识：苏念 🌸 / 工作助手 🛠️ */}
+        {s.mode === "陪伴" ? (
+          <span title="苏念·陪伴倾听模式" className="shrink-0 text-xs">🌸</span>
+        ) : (
+          <span title="工作助手模式" className="shrink-0 text-xs opacity-60">🛠️</span>
+        )}
         {editingSessionId === s.id ? (
           <div className="flex gap-1">
             <button

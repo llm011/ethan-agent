@@ -98,6 +98,7 @@ export interface SessionInfo {
   updated_at: number;
   snippet?: string;
   source?: string;
+  mode?: string;
 }
 
 export interface SessionDetail {
@@ -105,6 +106,7 @@ export interface SessionDetail {
   title: string;
   model: string;
   source?: string;
+  mode?: string;
   messages: {
     role: string;
     content: string;
@@ -144,8 +146,11 @@ export async function renameSession(id: string, title: string): Promise<void> {
   });
 }
 
-export async function createSession(model?: string): Promise<{ id: string; title: string; model: string }> {
-  const res = await fetch(`${API_URL}/sessions${model ? `?model=${model}` : ""}`, {
+export async function createSession(model?: string, mode?: string): Promise<{ id: string; title: string; model: string; mode?: string }> {
+  const params = new URLSearchParams();
+  if (model) params.append("model", model);
+  if (mode) params.append("mode", mode);
+  const res = await fetch(`${API_URL}/sessions${params.toString() ? `?${params}` : ""}`, {
     method: "POST",
     headers: headers(),
   });

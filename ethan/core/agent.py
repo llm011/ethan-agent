@@ -227,7 +227,10 @@ class Agent:
         candidates: list[Path] = []
         try:
             from ethan.core.paths import user_skills_dir
-            candidates.append(user_skills_dir() / name / "SKILL.md")
+            ud = user_skills_dir()
+            # 用户目录优先:新格式 <name>/SKILL.md,旧格式 <name>.md 都认
+            candidates.append(ud / name / "SKILL.md")
+            candidates.append(ud / f"{name}.md")
         except Exception:
             pass
         # 包内默认:ethan/defaults/skills/<name>/SKILL.md

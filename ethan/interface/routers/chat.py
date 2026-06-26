@@ -83,6 +83,10 @@ async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
             if m.role == "user":
                 await store.save_message(req.session_id, m)
 
+    # 持久化对话模式到 session：用户切换工作助手/苏念后，下次进入该会话自动恢复
+    if req.session_id and req.mode:
+        await store.update_mode(req.session_id, req.mode)
+
     if req.session_id:
         from ethan.memory.working import WorkingMemory
 

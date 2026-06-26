@@ -1,0 +1,71 @@
+# new-api 网关 — NAS 自建（绿联 / 通用 Linux）
+#
+# new-api 是 one-api 的增强分支，一个 Web 网关，把 OpenAI / Anthropic / Gemini /
+# DeepSeek / 智谱 GLM / 火山 / Ollama 等"各家上游"统一聚合成 OpenAI / Anthropic
+# 兼容协议，对外发一个 sk-xxx 令牌即可按比例/优先级调度。
+#
+# 这里把 ethan-agent 的上游从第三方中转(yuntoken)换成自建 new-api。
+#
+# 用法：
+#   1. NAS 上建目录，放入本文件 + .env（参考 .env.new-api.example）
+#   2. docker compose -f docker-compose.new-api.yml pull
+#   3. docker compose -f docker-compose.new-api.yml up -d
+#   4. 浏览器开 http://<nas-ip>:3000 ，用 root / 123456 首次登录后立刻改密码
+#   5. 在 Web UI 里【渠道】添加各家上游、【令牌】生成一个 sk-xxx
+#   6. 把这个令牌 + base_url 填回 ethan-agent 的 .env（见 docs/new-api.md）
+#
+# 默认用 SQLite（文件落在 volume 里，单机够用）。数据量大再上 MySQL + Redis。
+
+services:
+  new-api:
+    image: calciumion/new-api:latest
+    container_name: new-api
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      # 数据库 / 日志 / 上传文件全部持久化
+      - new-api-data:/data
+    environment:
+      # ── 基础 ──────────────────────────────────────────
+      - TZ=${TZ:-Asia/Shanghai}
+      - ERROR_LOG_ENABLED=true          # 记录错误请求，方便排错
+      # ── 数据库（默认 SQLite，落在 /data；想用 MySQL 取消注释）──
+      # - SQL_DSN=root:newapi@tcp(mysql:3306)/new-api
+      # ── Redis（可选，多副本/限流才需要；单机可不开）─────────
+      # - REDIS_CONN_STRING=redis://redis:6379
+      # ── 全局出网代理（new-api 拉上游用；不需要则留空）────────
+      #   注意：容器内 127.0.0.1 是容器自己，要用宿主机 IP，例如 http://10.0.0.75:7890
+      - RELAY_PROXY=${RELAY_PROXY:-}
+      # ── 对外暴露地址（邮件/告警里会用，可选）────────────────
+      - SERVER_ADDRESS=${SERVER_ADDRESS:-http://localhost:3000}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # ── 可选：MySQL。小规模直接用上面内置 SQLite，删掉这段即可 ──
+  # mysql:
+  #   image: mysql:8.0
+  #   container_name: new-api-mysql
+  #   restart: unless-stopped
+  #   volumes:
+  #     - new-api-mysql:/var/lib/mysql
+  #   environment:
+  #     - MYSQL_ROOT_PASSWORD=newapi
+  #     - MYSQL_DATABASE=new-api
+  #   command: --default-authentication-plugin=mysql_native_password
+
+  # ── 可选：Redis ──
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: new-api-redis
+  #   restart: unless-stopped
+
+volumes:
+  new-api-data:
+    driver: local
+  # new-api-mysql:
+  #   driver: local

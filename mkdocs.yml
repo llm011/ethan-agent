@@ -57,6 +57,7 @@ nav:
   - 系统设计:
     - 系统架构: architecture.md
     - 模型 Provider: providers.md
+    - 自建 new-api 网关: new-api.md
   - 核心引擎:
     - 双轨推理引擎: routing.md
     - 记忆系统: memory.md

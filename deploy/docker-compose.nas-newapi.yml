@@ -1,0 +1,64 @@
+# Ethan Agent — NAS 部署（连接外部 new-api 网关）
+#
+# 用法（已有 new-api，只部署 ethan）：
+#   1. 复制 .env.nas-newapi.example 为 .env
+#   2. 填写：
+#      - NEW_API_TOKEN=sk-xxxx              # 你已有 new-api 的令牌
+#      - NEWAPI_BASE_URL=http://10.0.0.75:3000/v1  # 已有 new-api 的地址
+#   3. docker compose -f docker-compose.nas-newapi.yml pull
+#   4. docker compose -f docker-compose.nas-newapi.yml up -d
+#   5. 访问 http://<nas-ip>:8900
+#
+# 如果你想连同 new-api 一键部署（新环境），把下面 new-api 服务取消注释即可。
+#
+# 更新：
+#   docker compose -f docker-compose.nas-newapi.yml pull && docker compose -f docker-compose.nas-newapi.yml up -d
+
+services:
+  # ── 可选：new-api 网关（已有则注释掉这段，用下面的 ethan 连外部 new-api）──
+  # new-api:
+  #   image: calciumion/new-api:latest
+  #   container_name: new-api
+  #   restart: unless-stopped
+  #   ports:
+  #     - "3000:3000"
+  #   volumes:
+  #     - new-api-data:/data
+  #   environment:
+  #     - TZ=${TZ:-Asia/Shanghai}
+  #     - ERROR_LOG_ENABLED=true
+  #     - RELAY_PROXY=${RELAY_PROXY:-}
+  #     - SERVER_ADDRESS=${SERVER_ADDRESS:-http://localhost:3000}
+  #   healthcheck:
+  #     test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/status"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 20s
+
+  # ── Ethan Agent（从 Docker Hub 拉取）─────────────────────────────
+  ethan:
+    image: calvinlai0211/ethan-agent:multiuser-amd64
+    container_name: ethan-backend
+    restart: unless-stopped
+    ports:
+      - "8900:8900"
+    volumes:
+      - ./ethan-data:/root/.ethan
+    environment:
+      # ── OpenAI 兼容网关（yuntoken，模型仅支持 openai 端点）──
+      - OPENAI_API_KEY=${ANTHROPIC_AUTH_TOKEN:-}
+      - OPENAI_BASE_URL=${ANTHROPIC_BASE_URL:-https://yuntoken.vip/v1}
+      # ── 默认模型 ───────────────────────────────────────────────────
+      - AGENT_DEFAULT_MODEL=${AGENT_DEFAULT_MODEL:-claude-haiku-4.5}
+      # ── Web UI 鉴权 Token ───────────────────────────────────────
+      - ETHAN_AUTH_TOKEN=${ETHAN_AUTH_TOKEN:-}
+      # ── 出网代理 ───────────────────────────────────────────────────
+      - ETHAN_PROXY=${ETHAN_PROXY:-}
+      - TZ=Asia/Shanghai
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8900/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s

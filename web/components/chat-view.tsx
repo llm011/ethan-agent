@@ -101,6 +101,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
             }))
           );
           setSelectedModel(detail.model);
+          // 恢复对话模式：之前用工作助手还是苏念，下次进入保持一致
+          setMode(detail.mode || "");
           const historicUsage = detail.messages
             .filter((m: any) => m.role === "assistant" && m.usage)
             .reduce((acc: any, m: any) => ({
@@ -121,6 +123,12 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       setMessages([]);
       setSessionUsage({ input: 0, output: 0, cache: 0 });
       setSessionSource("web");
+      // 新建对话页面默认工作助手模式
+      setMode("");
+      // 重置模型为配置的默认模型（从 .env 读取的 AGENT_DEFAULT_MODEL）
+      fetchAgentSettings().then((settings) => {
+        if (settings.default_model) setSelectedModel(settings.default_model);
+      }).catch(() => {});
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialSessionId]);
@@ -167,7 +175,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
     let sessionId = activeSession;
     if (!sessionId) {
-      const s = await createSession(selectedModel);
+      const s = await createSession(selectedModel, mode);
       sessionId = s.id;
       setActiveSession(s.id);
       setSessionTitle(text.slice(0, 30) || "New chat");

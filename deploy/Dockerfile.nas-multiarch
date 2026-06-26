@@ -1,0 +1,40 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# 换阿里云 Debian 源（http 避免 403，trixie 支持好）
+RUN sed -i 's|http://deb.debian.org|http://mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
+    sed -i 's|http://deb.debian.org|http://mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null || true
+
+# apt 走清华源直连，必须绕过 buildx 注入的代理（clash 对国内源返回 403）
+ARG HTTP_PROXY=
+ARG HTTPS_PROXY=
+RUN env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY \
+    apt-get update && apt-get install -y --no-install-recommends \
+    gcc make \
+    ripgrep fd-find \
+    curl git ca-certificates \
+    && ln -s /usr/bin/fdfind /usr/local/bin/fd \
+    && rm -rf /var/lib/apt/lists/*
+
+# uv 安装走代理（astral.sh 在国外）
+ARG HTTP_PROXY=
+ARG HTTPS_PROXY=
+ENV http_proxy=${HTTP_PROXY} https_proxy=${HTTPS_PROXY} \
+    HTTP_PROXY=${HTTP_PROXY} HTTPS_PROXY=${HTTPS_PROXY}
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
+# pip 走清华 pypi 源（国内直连，不需要代理）
+ENV http_proxy= https_proxy= HTTP_PROXY= HTTPS_PROXY= \
+    UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project
+
+COPY ethan/ ./ethan/
+COPY README.md README_CN.md ./
+RUN uv sync --frozen --no-dev
+
+VOLUME /root/.ethan
+EXPOSE 8900
+CMD ["uv", "run", "python", "-m", "ethan.interface.cli", "serve"]
