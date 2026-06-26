@@ -108,7 +108,7 @@ class Consolidator:
         抽取（参考 Mem0 的 salient 抽取 + HiMem 的 ADD/UPDATE 思路）：
           - key_facts:     关键事实（偏好/决定/关键信息）→ facts.json   （任何模式都抽）
           - profile_psych: 心理与情绪（情绪/压力源/安抚方式/内心感受/价值观）→ user_profile.md「心理与情绪」
-                           仅当 extract_psych=True（苏念·陪伴倾听模式）时抽
+                           仅当 extract_psych=True（由当前对话 mode 声明，见 core/modes.py）时抽
           - condensed:     精简后的温区摘要
 
         注意：基础特征（名字/年龄/职业等身份信息）不在此后台推断——由用户在「我的画像」设置，

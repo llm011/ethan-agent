@@ -230,30 +230,26 @@ class Agent:
                 return m.content
         return ""
 
-    def _is_counselor_mode(self) -> bool:
-        return self._mode in ("陪伴", "counselor", "苏念")
-
-    def _counselor_persona_text(self) -> str:
-        """读取「苏念·陪伴倾听」persona 正文（去掉 YAML frontmatter）。
+    def _persona_text(self, skill_names: tuple[str, ...]) -> str:
+        """读取某个 persona 正文（去掉 YAML frontmatter）。
 
         每次都从磁盘读，使 Web UI 改完 SKILL.md 后下条消息即生效，无需重启。
         优先用户 skills 目录（可被用户改写），回退包内默认。找不到返回空串。
-        候选名兼容英文 companion-listen 与中文 陪伴倾听 两种目录。
+        skill_names 按序查找首个命中（兼容英文/中文目录名）。
         """
         from pathlib import Path
         candidates: list[Path] = []
-        names = ("companion-listen", "陪伴倾听")
         try:
             from ethan.core.paths import user_skills_dir
             base = user_skills_dir()
-            for name in names:
+            for name in skill_names:
                 candidates.append(base / name / "SKILL.md")
                 candidates.append(base / f"{name}.md")
         except Exception:
             pass
         # 包内默认：ethan/defaults/skills/<name>/SKILL.md
         pkg = Path(__file__).resolve().parent.parent / "defaults" / "skills"
-        for name in names:
+        for name in skill_names:
             candidates.append(pkg / name / "SKILL.md")
         for p in candidates:
             if p.exists():
@@ -264,6 +260,26 @@ class Agent:
                         text = seg[2]
                 return text.strip()
         return ""
+
+    def _persona_block(self) -> str | None:
+        """当前 mode 若绑定了 persona，返回注入用的人格覆盖块；否则返回 None。
+
+        措辞保持通用（不出现任何具体人格名），具体人格由 skill 正文自己声明。
+        """
+        from ethan.core.modes import resolve_mode
+        mode = resolve_mode(self._mode)
+        if not mode.persona_skills:
+            return None
+        persona = self._persona_text(mode.persona_skills)
+        if not persona:
+            return None
+        return (
+            "<persona_override>\n"
+            f"[CRITICAL — 当前处于「{mode.label}」模式。以下人格覆盖你的默认身份，"
+            "请完全化身该人格，用其语气、温度和方式回应，严格遵守其中的说话方式要求。]\n\n"
+            f"{persona}\n"
+            "</persona_override>"
+        )
 
     def _build_system(self, messages: list[Message], fast: bool = False) -> str:
         """构建 system prompt。fast=True 时使用极简版本减少 token。"""
@@ -286,16 +302,9 @@ class Agent:
             if soul_content:
                 parts.append(f"<soul>\n[CRITICAL — 以下准则必须严格遵守]\n\n{soul_content}\n</soul>")
             parts.append(f"<identity>\n{identity_content}\n</identity>")
-            if self._is_counselor_mode():
-                persona = self._counselor_persona_text()
-                if persona:
-                    parts.append(
-                        "<counselor_persona>\n"
-                        "[CRITICAL — 当前处于「陪伴倾听」模式。以下人格覆盖你的默认身份,完全化身苏念,"
-                        "用她的语气、温度和方式回应,严格遵守其中的说话方式要求。]\n\n"
-                        f"{persona}\n"
-                        "</counselor_persona>"
-                    )
+            persona_block = self._persona_block()
+            if persona_block:
+                parts.append(persona_block)
             parts.append(f"Current time: {now}")
             parts.append(f"Your workspace directory is {workspace}.")
             parts.append(f"Current model: {self._provider.model}（用户问起你用的什么模型/是谁驱动时，如实回答这个 model id）")
@@ -335,16 +344,9 @@ class Agent:
                 f"</soul>"
             )
         parts.append(f"<identity>\n{identity_content}\n</identity>")
-        if self._is_counselor_mode():
-            persona = self._counselor_persona_text()
-            if persona:
-                parts.append(
-                    "<counselor_persona>\n"
-                    "[CRITICAL — 当前处于「陪伴倾听」模式。以下人格覆盖你的默认身份,完全化身苏念,"
-                    "用她的语气、温度和方式回应,严格遵守其中的说话方式要求。]\n\n"
-                    f"{persona}\n"
-                    "</counselor_persona>"
-                )
+        persona_block = self._persona_block()
+        if persona_block:
+            parts.append(persona_block)
         if agent_content:
             parts.append(f"<agent_protocols>\n{agent_content}\n</agent_protocols>")
         if tools_content:

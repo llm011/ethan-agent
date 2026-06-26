@@ -264,8 +264,9 @@ async def _maybe_consolidate(session_id: str, model: str, user_id: str = "", mod
         from ethan.memory.working import MemoryConfig, WorkingMemory
         from ethan.core.paths import user_sessions_db_path, user_facts_path
 
-        # 心理画像仅在苏念·陪伴倾听模式下抽取
-        extract_psych = mode in ("陪伴", "counselor", "苏念")
+        # 心理画像是否额外抽取：由当前 mode 自身声明，不在此硬编码模式名
+        from ethan.core.modes import resolve_mode
+        extract_psych = resolve_mode(mode).extract_psych
 
         store = SessionStore(db_path=user_sessions_db_path())
         await store.init()

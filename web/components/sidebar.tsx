@@ -19,6 +19,8 @@ import {
   renameSession,
   createSession,
   fetchVersion,
+  fetchModes,
+  type ModeEntry,
 } from "@/lib/api";
 
 export function Sidebar() {
@@ -42,6 +44,7 @@ export function Sidebar() {
   const [scheduleExpanded, setScheduleExpanded] = useState(false);
   const [schedules, setSchedules] = useState<any[]>([]);
   const [version, setVersion] = useState<string | null>(null);
+  const [modes, setModes] = useState<ModeEntry[]>([]);
   const [lastSeenSchedule, setLastSeenSchedule] = useState(() => {
     if (typeof window !== "undefined") {
       return Number(localStorage.getItem("ethan_last_seen_schedule") || "0");
@@ -84,6 +87,11 @@ export function Sidebar() {
   // 获取版本号（挂载时一次）
   useEffect(() => {
     fetchVersion().then(setVersion);
+  }, []);
+
+  // 获取对话模式表（挂载时一次），用于左栏会话的模式标识
+  useEffect(() => {
+    fetchModes().then(setModes).catch(() => {});
   }, []);
 
   // Poll every 3s — skip if user is actively searching
@@ -159,14 +167,15 @@ export function Sidebar() {
       onClick={() => handleSelectSession(s.id)}
     >
       <div className="flex items-center gap-2">
-        {/* 对话模式标识：苏念 🌸 / 工作助手 🛠️ */}
-        {editingSessionId !== s.id && (
-          s.mode === "陪伴" ? (
-            <span title="苏念·陪伴倾听模式" className="shrink-0 text-xs">🌸</span>
+        {/* 对话模式标识：由 /modes 表驱动；匹配到非默认模式则显示其图标，否则工作助手 🛠️ */}
+        {editingSessionId !== s.id && (() => {
+          const m = s.mode ? modes.find((x) => x.key === s.mode) : null;
+          return m ? (
+            <span title={m.label} className="shrink-0 text-xs">{m.icon}</span>
           ) : (
             <span title="工作助手模式" className="shrink-0 text-xs opacity-60">🛠️</span>
-          )
-        )}
+          );
+        })()}
         {editingSessionId === s.id ? (
           <input
             autoFocus
