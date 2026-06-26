@@ -82,6 +82,9 @@ async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
     if req.session_id:
         for m in messages[-1:]:
             if m.role == "user":
+                # 把引用信息附到消息上一起持久化，刷新后仍能渲染引用气泡
+                if req.quote and req.quote.get("content"):
+                    m.quote = req.quote
                 await store.save_message(req.session_id, m)
         # 持久化对话模式：退出再进入保持工作/苏念模式
         if req.mode:

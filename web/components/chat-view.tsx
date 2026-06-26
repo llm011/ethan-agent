@@ -29,21 +29,6 @@ interface ChatViewProps {
   initialSessionId?: string;
 }
 
-// mode.accent → 完整 Tailwind 类（必须静态写全，Tailwind 不识别动态拼接的类名）。
-// 新增带新配色的模式时在此补一条；未知 accent 回退 neutral。
-const ACCENT_STYLES: Record<string, { on: string; off: string; blurb: string }> = {
-  neutral: {
-    on: "bg-neutral-100 border-neutral-300 text-neutral-700 dark:bg-neutral-800 dark:border-neutral-600 dark:text-neutral-200",
-    off: "bg-neutral-50 border-neutral-200 text-neutral-600 hover:bg-neutral-100 dark:bg-neutral-900 dark:border-neutral-700 dark:text-neutral-400",
-    blurb: "text-neutral-500 dark:text-neutral-400",
-  },
-  pink: {
-    on: "bg-pink-50 border-pink-300 text-pink-700 dark:bg-pink-950/40 dark:border-pink-700 dark:text-pink-300",
-    off: "bg-neutral-50 border-neutral-200 text-neutral-600 hover:bg-neutral-100 dark:bg-neutral-900 dark:border-neutral-700 dark:text-neutral-400",
-    blurb: "text-pink-600/80 dark:text-pink-400/80",
-  },
-};
-
 export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([]);
@@ -62,9 +47,6 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   // 对话模式：数据驱动，模式表由后端 /modes 提供（不在前端硬编码任何具体人格）
   const [mode, setMode] = useState<string>("");
   const [modes, setModes] = useState<ModeEntry[]>([]);
-  // 非默认模式（key 非空）视为「人格模式」，用于会话标识与样式切换
-  const personaModes = modes.filter((m) => m.key);
-  const activeMode = modes.find((m) => m.key === mode) || null;
 
   const handleConsentRespond = async (requestId: string, allowed: boolean) => {
     setConsentRequest(null);
@@ -103,6 +85,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
               content: m.content,
               created_at: m.created_at,
               usage: m.usage || undefined,
+              quote: m.quote || undefined,
               toolSteps: m.tool_steps && m.tool_steps.length > 0
                 ? m.tool_steps.map((s: any) => ({
                     tool: s.tool,
@@ -452,35 +435,6 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       <div>
         <div className="max-w-3xl mx-auto px-4 pt-4">
           {showOnboarding && <OnboardingBanner onDismiss={() => setShowOnboarding(false)} />}
-          {/* 对话模式切换：胶囊由后端 /modes 表驱动，前端不写死任何具体人格 */}
-          {personaModes.length > 0 && (
-            <div className="flex items-center gap-2 mb-3">
-              {personaModes.map((m) => {
-                const on = mode === m.key;
-                const accent = ACCENT_STYLES[m.accent] ?? ACCENT_STYLES.neutral;
-                return (
-                  <button
-                    key={m.key}
-                    type="button"
-                    onClick={() => setMode(on ? "" : m.key)}
-                    className={
-                      "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border transition-colors " +
-                      (on ? accent.on : ACCENT_STYLES.neutral.off)
-                    }
-                    title={on ? `当前：${m.label}，点击切回工作助手` : `点击切换到${m.label}`}
-                  >
-                    <span>{on ? m.icon : "🛠️"}</span>
-                    <span>{on ? m.label : "工作助手"}</span>
-                  </button>
-                );
-              })}
-              {activeMode?.blurb && (
-                <span className={"text-[11px] " + (ACCENT_STYLES[activeMode.accent] ?? ACCENT_STYLES.neutral).blurb}>
-                  {activeMode.blurb}
-                </span>
-              )}
-            </div>
-          )}
         </div>
         <ChatInput
           streaming={streaming}
@@ -493,6 +447,9 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           onSend={handleSend}
           onFilesChange={setPendingFiles}
           onQuoteCancel={() => setQuote(null)}
+          modes={modes}
+          mode={mode}
+          onModeChange={setMode}
         />
       </div>
       <ConsentDialog request={consentRequest} onRespond={handleConsentRespond} />

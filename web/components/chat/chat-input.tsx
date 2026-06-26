@@ -3,13 +3,27 @@
 import { useState, useRef, RefObject } from "react";
 import { Send, Paperclip, Loader2, X, Reply } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { uploadFile } from "@/lib/api";
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
+import { uploadFile, type ModeEntry } from "@/lib/api";
 import type { Quote } from "./types";
 
 interface PendingFile {
   name: string;
   path: string;
 }
+
+// mode.accent → 完整 Tailwind 类（必须静态写全，Tailwind 不识别动态拼接的类名）。
+// 新增带新配色的模式时在此补一条；未知 accent 回退 neutral。
+const ACCENT_STYLES: Record<string, { on: string }> = {
+  neutral: {
+    on: "bg-neutral-100 border-neutral-300 text-neutral-700 dark:bg-neutral-800 dark:border-neutral-600 dark:text-neutral-200",
+  },
+  pink: {
+    on: "bg-pink-50 border-pink-300 text-pink-700 dark:bg-pink-950/40 dark:border-pink-700 dark:text-pink-300",
+  },
+};
+const OFF_STYLE =
+  "bg-transparent border-transparent text-muted-foreground hover:text-foreground hover:bg-muted";
 
 interface ChatInputProps {
   streaming: boolean;
@@ -22,6 +36,9 @@ interface ChatInputProps {
   onSend: (text: string) => void;
   onFilesChange: (files: PendingFile[]) => void;
   onQuoteCancel: () => void;
+  modes?: ModeEntry[];
+  mode?: string;
+  onModeChange?: (mode: string) => void;
 }
 
 export function ChatInput({
@@ -35,6 +52,9 @@ export function ChatInput({
   onSend,
   onFilesChange,
   onQuoteCancel,
+  modes = [],
+  mode = "",
+  onModeChange,
 }: ChatInputProps) {
   const [input, setInput] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
@@ -131,6 +151,37 @@ export function ChatInput({
                 ))}
               </SelectContent>
             </Select>
+            {/* 对话模式胶囊：由 /modes 表驱动，紧挨模型选择；说明文字收进 hover tooltip */}
+            {modes.filter((m) => m.key).map((m) => {
+              const on = mode === m.key;
+              const accent = ACCENT_STYLES[m.accent] ?? ACCENT_STYLES.neutral;
+              const tip = on
+                ? (m.blurb || `当前：${m.label}，点击切回工作助手`)
+                : `切换到${m.label}`;
+              return (
+                <TooltipProvider key={m.key} delay={300}>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          onClick={() => onModeChange?.(on ? "" : m.key)}
+                          disabled={streaming}
+                          className={
+                            "h-7 inline-flex items-center gap-1 px-2.5 text-xs font-medium rounded-lg border transition-colors disabled:opacity-40 " +
+                            (on ? accent.on : OFF_STYLE)
+                          }
+                        >
+                          <span>{m.icon}</span>
+                          <span className="max-w-[88px] truncate">{m.label}</span>
+                        </button>
+                      }
+                    />
+                    <TooltipContent>{tip}</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              );
+            })}
             <div className="flex-1" />
             <button
               onClick={handleSend}

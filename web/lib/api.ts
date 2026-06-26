@@ -55,7 +55,8 @@ export async function fetchModels(): Promise<ModelEntry[]> {
   const res = await fetch(`${API_URL}/models`, { headers: headers() });
   if (!res.ok) throw new Error("Failed to fetch models");
   const data = await res.json();
-  return data.models;}
+  return data.models;
+}
 
 export interface ModeEntry {
   key: string;
@@ -136,6 +137,7 @@ export interface SessionDetail {
     role: string;
     content: string;
     created_at?: number;
+    quote?: { role: "user" | "assistant"; content: string } | null;
     usage?: { input: number; output: number; cache: number };
     tool_steps?: Array<{
       tool: string;
