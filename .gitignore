@@ -59,4 +59,11 @@ bin/
 # Local personal notes
 TODO.md
 
+# Editor / AI tool artifacts
+.trae/
+.trae-cn/
+.coco/
+.kiro/
+.hermes/
+
 pypi/
