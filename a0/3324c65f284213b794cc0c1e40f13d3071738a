@@ -1,0 +1,16 @@
+.gitignore
+  h_9c66f40a201f5d 62-65,67
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "a03324c65f284213b794cc0c1e40f13d3071738a",
+  "prompts": {},
+  "humans": {
+    "h_9c66f40a201f5d": {
+      "author": "jsongo <jsongo@qq.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
