@@ -142,6 +142,7 @@ class OpenAICompatProvider(BaseProvider):
             kwargs["tool_choice"] = "auto"
 
         tool_calls_acc: dict[int, dict] = {}
+        final_tool_calls: list[ToolCall] = []  # 累积已构建的 tool_calls，供后续独立 usage chunk 的 final yield 携带
         stream_usage = None
 
         async for chunk in await self._client.chat.completions.create(**kwargs):  # type: ignore
@@ -157,9 +158,12 @@ class OpenAICompatProvider(BaseProvider):
                 if hasattr(chunk.usage, "prompt_tokens_details") and chunk.usage.prompt_tokens_details:
                     stream_usage["cache"] = getattr(chunk.usage.prompt_tokens_details, "cached_tokens", 0) or 0
 
-                # If this is the standalone usage chunk (choices is empty), yield it and we're done
+                # If this is the standalone usage chunk (choices is empty), yield it and we're done.
+                # 必须携带累积的 tool_calls：部分网关（如 Gemini 经由 openai 兼容端点）在
+                # finish_reason chunk（非 final）里给出 tool_call，usage 在独立的 final chunk 里。
+                # 若此处不带 tool_calls，消费方只看 final chunk 就会丢掉工具调用 → 表现为"秒退"。
                 if not chunk.choices:
-                    yield StreamChunk(content="", is_final=True, usage=stream_usage)
+                    yield StreamChunk(content="", tool_calls=final_tool_calls, is_final=True, usage=stream_usage)
                     continue
 
             if delta is None:
@@ -201,4 +205,5 @@ class OpenAICompatProvider(BaseProvider):
                 # If usage is already present in this chunk, it's the true final chunk.
                 # If not, and stream_options is enabled, we expect a subsequent standalone usage chunk.
                 is_final_now = bool(stream_usage) or not kwargs.get("stream_options")
+                final_tool_calls = tool_calls  # 保存：若后续有独立 usage chunk，其 final yield 需要带上
                 yield StreamChunk(content="", tool_calls=tool_calls, is_final=is_final_now, usage=stream_usage if is_final_now else None)
