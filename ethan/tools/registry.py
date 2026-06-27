@@ -64,7 +64,8 @@ class ToolExecutor:
                 self._cache[cache_key] = result.content
 
             # 超长结果用廉价模型压缩（只压缩 content，保留 sub_steps）
-            if len(result.content) > _COMPRESS_THRESHOLD:
+            # no_compress 工具（技能文档/文件原文）必须逐字给模型，跳过压缩
+            if not getattr(tool, "no_compress", False) and len(result.content) > _COMPRESS_THRESHOLD:
                 from ethan.tools.result_compressor import maybe_compress
                 result.content = await maybe_compress(tc.name, result.content)
 

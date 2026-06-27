@@ -22,3 +22,31 @@ def set_user_id(uid: str) -> None:
 def get_user_id() -> str:
     """读取当前上下文的 user_id。default profile 返回 ""。"""
     return ETHAN_USER_ID.get()
+
+
+# ── 请求级"激活工具集" ──────────────────────────────────────────
+# Fast 档只广播 fast_path 工具白名单；模型用 find_tools 检索并激活长尾工具后，
+# 工具名进入此 set，agent 主循环下一轮把它们补进广播清单。
+# 与 user_id 一样用 ContextVar，保证 web 并发请求各自隔离。
+ACTIVE_TOOLS: ContextVar[frozenset] = ContextVar("ACTIVE_TOOLS", default=frozenset())
+
+
+def reset_active_tools() -> set:
+    """每个请求开头调一次，清空激活集并返回新的可变 set。"""
+    s: set = set()
+    ACTIVE_TOOLS.set(s)
+    return s
+
+
+def activate_tools(names: list[str]) -> None:
+    """把工具名加入当前请求的激活集（find_tools 调用）。"""
+    cur = ACTIVE_TOOLS.get()
+    if isinstance(cur, frozenset):  # 还没 reset 过，兜底成可变 set
+        cur = set()
+        ACTIVE_TOOLS.set(cur)
+    cur.update(names)
+
+
+def get_active_tools() -> set:
+    """读取当前请求已激活的工具名集合。"""
+    return set(ACTIVE_TOOLS.get())
