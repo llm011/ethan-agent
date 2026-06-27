@@ -286,6 +286,28 @@ class Agent:
             "</persona_override>"
         )
 
+    def _mode_install_hint(self) -> str | None:
+        """当前 mode 依赖某 skill 但尚未安装时，返回引导安装的系统提示；否则 None。
+
+        通用机制：mode 在 modes.py 里声明 requires_skill + install_source，
+        内核不认任何具体技能名。
+        """
+        from ethan.core.modes import resolve_mode
+        mode = resolve_mode(self._mode)
+        if not mode.requires_skill or not self._skills:
+            return None
+        if self._skills.get(mode.requires_skill) is not None:
+            return None
+        src = mode.install_source or mode.requires_skill
+        return (
+            "<mode_setup>\n"
+            f"[CRITICAL] 用户已切换到「{mode.label}」模式，但尚未安装依赖技能 "
+            f"`{mode.requires_skill}`。请先用一两句话告诉用户该模式需要安装此技能，"
+            f"征得同意后调用 install_skill(source=\"{src}\") 一键安装；"
+            "安装后无需重启，下次对话即生效。在安装完成前，不要假装已具备该模式的专业能力。\n"
+            "</mode_setup>"
+        )
+
     def _build_system(self, messages: list[Message], fast: bool = False) -> str:
         """构建 system prompt。fast=True 时使用极简版本减少 token。"""
         config = get_config()
@@ -335,9 +357,11 @@ class Agent:
                 )
             last_user = self._get_last_user_text(messages)
             if self._skills and last_user:
-                matched = self._skills.match(last_user, channel=self._channel)
+                from ethan.core.modes import resolve_mode
+                mode_key = resolve_mode(self._mode).key
+                matched = self._skills.match(last_user, channel=self._channel, mode=mode_key)
                 self.last_matched_skills = [s.name for s in matched]
-                skill_ctx = self._skills.build_context(last_user, channel=self._channel)
+                skill_ctx = self._skills.build_context(last_user, channel=self._channel, mode=mode_key)
                 if skill_ctx:
                     parts.append(f"<relevant_skills>\n{skill_ctx}\n</relevant_skills>")
                     # skill 内容里提到的非 fast 工具自动激活，避免 fast 档看不见 skill 依赖的工具、
@@ -347,6 +371,9 @@ class Agent:
                                   if not t.fast_path and t.name in skill_ctx]
                     if referenced:
                         activate_tools(referenced)
+            mode_hint = self._mode_install_hint()
+            if mode_hint:
+                parts.append(mode_hint)
             if self.runtime_context:
                 parts.append(f"<runtime_context>\n[CRITICAL — 当前会话上下文，结合 soul 的主人/授权准则判断]\n\n{self.runtime_context}\n</runtime_context>")
             return "\n\n".join(parts)
@@ -413,11 +440,17 @@ class Agent:
 
         last_user = self._get_last_user_text(messages)
         if self._skills and last_user:
-            matched = self._skills.match(last_user, channel=self._channel)
+            from ethan.core.modes import resolve_mode
+            mode_key = resolve_mode(self._mode).key
+            matched = self._skills.match(last_user, channel=self._channel, mode=mode_key)
             self.last_matched_skills = [s.name for s in matched]
-            skill_ctx = self._skills.build_context(last_user, channel=self._channel)
+            skill_ctx = self._skills.build_context(last_user, channel=self._channel, mode=mode_key)
             if skill_ctx:
                 parts.append(f"<relevant_skills>\n{skill_ctx}\n</relevant_skills>")
+
+        mode_hint = self._mode_install_hint()
+        if mode_hint:
+            parts.append(mode_hint)
 
         if self.runtime_context:
             parts.append(f"<runtime_context>\n[CRITICAL — 当前会话上下文，结合 soul 的主人/授权准则判断]\n\n{self.runtime_context}\n</runtime_context>")

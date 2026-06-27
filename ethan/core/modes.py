@@ -5,6 +5,7 @@
   - UI 展示用的 label / icon
   - persona 正文来自哪个 skill（按目录名查找，找不到则不注入）
   - 该模式是否需要记忆抽取时额外抽心理画像（extract_psych）
+  - 该模式依赖的技能（requires_skill）及缺失时的安装来源（install_source）
 
 内核（agent / consolidator）只认这张表，不认任何具体人格。
 新增一个垂类模式 = 往 MODES 里加一条数据，无需改动 agent.py / consolidator.py。
@@ -24,6 +25,8 @@ class Mode:
     persona_skills: tuple[str, ...] = ()  # persona 正文候选 skill 目录名，按序查找首个命中
     extract_psych: bool = False       # 记忆抽取时是否额外抽心理画像
     blurb: str = ""                   # 进入该模式时 UI 旁的一句话提示
+    requires_skill: str = ""          # 该模式依赖的技能目录名；未安装时引导安装
+    install_source: str = ""          # requires_skill 缺失时 install_skill 的来源（owner/repo/子目录）
 
 
 # 唯一真相源：所有内置对话模式。
@@ -37,6 +40,16 @@ MODES: tuple[Mode, ...] = (
         persona_skills=("companion-listen", "陪伴倾听"),
         extract_psych=True,
         blurb="正在以苏念的身份陪伴你，倾诉心事我会先看见你、接住你",
+    ),
+    Mode(
+        key="法律",
+        aliases=("法律", "legal", "法律专家", "法务"),
+        label="法律专家",
+        icon="⚖️",
+        accent="blue",
+        requires_skill="legal-assistant",
+        install_source="llm011/ethan-legal-skill/skills/legal-assistant",
+        blurb="已进入法律专家模式：可做案件研判、诉讼分析、合同审查、知产与法律文书",
     ),
 )
 

@@ -29,12 +29,18 @@ class SkillRegistry:
                 return s
         return None
 
-    def match(self, query: str, channel: str = "") -> list[Skill]:
-        """根据用户输入匹配相关 Skills（关键词匹配）。channel 非空时过滤渠道。"""
+    def match(self, query: str, channel: str = "", mode: str = "") -> list[Skill]:
+        """根据用户输入匹配相关 Skills（关键词匹配）。
+
+        channel 非空时过滤渠道；按 mode 过滤：skill.modes 非空时仅在所列 mode 生效，
+        空 modes = 所有模式可用（含默认工作助手模式 mode=""）。
+        """
         query_lower = query.lower()
         matched = []
         for skill in self._skills:
             if skill.channels and channel and channel not in skill.channels:
+                continue
+            if skill.modes and mode not in skill.modes:
                 continue
             for trigger in skill.trigger:
                 if trigger.lower() in query_lower:
@@ -51,13 +57,13 @@ class SkillRegistry:
     def skills_needing_update(self, threshold: int = 2) -> list[str]:
         return [n for n in self._stats.all() if self._stats.needs_update(n, threshold)]
 
-    def build_context(self, query: str, channel: str = "", max_skills: int = 3) -> str:
+    def build_context(self, query: str, channel: str = "", mode: str = "", max_skills: int = 3) -> str:
         """为 LLM 构建 Skill 上下文注入内容。
 
         只注入匹配的 skill，content 超长时截断，避免 token 膨胀。
-        未匹配时不注入任何内容。
+        未匹配时不注入任何内容。mode 透传给 match 做模式过滤。
         """
-        matched = self.match(query, channel=channel)[:max_skills]
+        matched = self.match(query, channel=channel, mode=mode)[:max_skills]
         if not matched:
             return ""
 

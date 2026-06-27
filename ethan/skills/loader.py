@@ -32,6 +32,7 @@ class Skill:
     source: Path
     fast_path: bool = False  # True = 命中 trigger 时走 Fast Path（不受长度限制）
     channels: list[str] = field(default_factory=list)  # 空列表 = 所有渠道
+    modes: list[str] = field(default_factory=list)  # 空列表 = 所有对话模式可用；非空 = 仅在这些 mode 生效
 
 
 def _parse_frontmatter(text: str) -> tuple[dict, str]:
@@ -66,10 +67,17 @@ def load_skill_from_file(path: Path) -> Optional[Skill]:
     fast_path = bool(meta.get("fast_path", False))
     channels_raw = meta.get("channels", [])
     channels = channels_raw if isinstance(channels_raw, list) else []
+    modes_raw = meta.get("modes", [])
+    if isinstance(modes_raw, str):
+        modes = [m.strip() for m in modes_raw.split("|") if m.strip()]
+    elif isinstance(modes_raw, list):
+        modes = [str(m).strip() for m in modes_raw if str(m).strip()]
+    else:
+        modes = []
 
     return Skill(name=name, description=description, trigger=triggers,
                  content=content, source=path, fast_path=fast_path,
-                 channels=channels)
+                 channels=channels, modes=modes)
 
 
 def load_skill_from_dir(skill_dir: Path) -> Optional[Skill]:

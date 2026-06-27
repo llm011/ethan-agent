@@ -64,6 +64,7 @@ version: "1.0"
 | `description` | 否 | 一句话描述 |
 | `fast_path` | 否 | `true` 表示命中 trigger 时直接走 fast 轨（默认 false） |
 | `channels` | 否 | 限定渠道白名单（如 `[lark, web]`）。空列表 = 所有渠道可用 |
+| `modes` | 否 | 限定对话模式白名单（如 `[法律]`）。空列表 = 所有模式可用。用于让垂类技能只在对应模式生效，不污染默认工作助手模式 |
 | `version` | 否 | skill 版本号，用于追踪更新 |
 | `metadata` | 否 | 任意 key-value 扩展字段 |
 
@@ -80,12 +81,15 @@ config.yaml 中可通过 `fast_skill_triggers` 手动指定额外的 fast 轨关
 ```
 用户输入 → 逐个检查每个 Skill 的 trigger 列表
          → 渠道过滤：skill.channels 非空 且 当前渠道不在其中 → 跳过
+         → 模式过滤：skill.modes 非空 且 当前对话模式不在其中 → 跳过
          → 如果某个 trigger 关键词出现在用户输入中（子串匹配）→ 命中
          → 最多注入 3 个 Skill 到 system prompt
 ```
 -->
 
 **渠道过滤**：`SkillRegistry.match(query, channel="")` 接收当前渠道标识（如 `"lark"`、`"web"` 或 `""`）。如果 Skill 的 `channels` 列表非空且当前渠道不在其中，该 Skill 不会被注入。这样可以为飞书、Web、CLI 分别准备专属 Skill，互不干扰。
+
+**模式过滤**：`SkillRegistry.match(query, channel="", mode="")` 还接收当前对话模式（见 [modes.py](../ethan/core/modes.py)，如 `"法律"`、`"陪伴"` 或默认 `""`）。如果 Skill 的 `modes` 列表非空且当前模式不在其中，该 Skill 不会被注入。这让垂类技能（如「法律专家模式」下的 `legal-assistant`）只在对应模式生效，正常工作模式下完全不进上下文，零污染。模式由 `Agent._mode` 经 `resolve_mode().key` 解析后传入。
 
 ---
 

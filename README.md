@@ -23,10 +23,16 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 - In this mode the agent affirms first, listens deeply, and accompanies rather than rushing to solve — speaking like a real person, no AI stiffness
 - While in companion mode, the consolidator auto-extracts 心理与情绪 (mood / stressors / what soothes you / inner feelings) into your profile; basic traits are set by you in the "我的画像" (My Profile) settings tab
 
+**Legal expert mode — legal-assistant (install on demand)**
+- Switch to "法律专家" (legal expert) mode and a single `legal-assistant` skill covers case analysis, litigation review, contract review, legal document/proposal generation, trademark & patent IP, case intake, legal search and visualization — routed by "task verb + practice area" to the matching playbook, instead of dozens of sub-skills
+- **Zero pollution**: legal skills are tagged `modes: [法律]` and only activate in legal mode; in normal work mode they never enter the context
+- **Install on demand**: the first time you enter legal mode without the skill installed, the agent prompts you and `install_skill` pulls it from the repo in one step (legal content is not bundled with the main repo, honoring the upstream CC-BY-NC non-commercial license)
+
 **Skill system**
 - Keyword trigger matching, auto-injected into system prompt
 - `fast_path: true` routes matched input to the millisecond fast track
 - `channels: [lark, web]` filters skills by channel so each surface gets only relevant skills
+- `modes: [法律]` filters skills by conversation mode so each mode gets only relevant skills (empty = all modes)
 - Hit tracking and correction collection; Heartbeat auto-updates skill content with a cheap model when corrections accumulate
 - Agent can create new skills mid-conversation via the `skill_create` tool
 
