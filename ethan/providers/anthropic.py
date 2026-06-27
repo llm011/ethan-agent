@@ -224,7 +224,15 @@ class AnthropicProvider(BaseProvider):
                     if event.delta.type == "text_delta":
                         yield StreamChunk(content=event.delta.text)
                     elif event.delta.type == "thinking_delta":
-                        # 原生扩展思考：分流到 reasoning，不当正文展示
+                        # 原生扩展思考：分流到 reasoning，不当正文展示。
+                        #
+                        # ⚠️ 前提：当前未在 kwargs 里传 `thinking` 参数，扩展思考实际未开启，
+                        # 故此分支休眠、不会触发。若将来开启扩展思考，必须同时解决：
+                        # Anthropic 要求在带 tool_use 的多轮里，把上一轮**带 signature 的
+                        # thinking 块**原样回传，否则续轮报错。而 Agent 层组装
+                        # Message(role="assistant", content=full_content, ...) 只留正文、
+                        # 丢弃了 thinking 块——届时多轮工具调用会断。开启前先让 Message
+                        # 能携带并回放 thinking 块（含 signature）。
                         yield StreamChunk(content="", reasoning=event.delta.thinking)
                     elif event.delta.type == "input_json_delta":
                         if event.index in tool_calls_acc:
