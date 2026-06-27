@@ -204,7 +204,7 @@ async def _background_consolidate(memory, consolidator, fact_store, session_id):
 
 async def run_once(agent: Agent, prompt: str) -> None:
     """单轮对话：发送一句，流式打印回复，退出。"""
-    from ethan.providers.base import ToolEvent
+    from ethan.providers.base import ToolEvent, ThinkingEvent
     messages = [Message(role="user", content=prompt)]
 
     spinner = Live(Spinner("dots", text="thinking...", style="dim"), console=console, transient=True)
@@ -217,6 +217,8 @@ async def run_once(agent: Agent, prompt: str) -> None:
     after_tool = False  # 上一条输出是工具调用行，后续文字前需加空行
 
     async for item in agent.stream_chat(messages):
+        if isinstance(item, ThinkingEvent):
+            continue  # 思考内容不打印（spinner 已显示 thinking...）
         if isinstance(item, ToolEvent):
             if item.state == "start":
                 if not spinner_stopped:
@@ -737,11 +739,13 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
         # Inner coroutine — captured by closure, can be awaited as a Task
         async def _consume_stream():
             nonlocal full, thought, first_chunk, first_item, ttft, last_was_tool
-            from ethan.providers.base import ToolEvent
+            from ethan.providers.base import ToolEvent, ThinkingEvent
             render_live = Live(console=console, refresh_per_second=8, vertical_overflow="visible")
             direct_mode = False  # 长文本超过阈值后直接增量打印，不再用 Live 重渲染（防 Rich 溢出重复刷屏）
             try:
                 async for item in agent.stream_chat(context):
+                    if isinstance(item, ThinkingEvent):
+                        continue  # 思考内容不打印
                     if isinstance(item, ToolEvent):
                         if first_item:
                             ttft = time.time() - send_time

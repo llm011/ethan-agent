@@ -210,16 +210,27 @@ lark:
 ```
 lark-cli event consume im.message.receive_v1（WebSocket 长连接）
    │
+   ├─ 按 message_id 幂等去重 → 命中重复事件直接丢弃
+   │
    ├─ 根据 chat_id 查找或创建 Session
    │
    ├─ 立即给原消息加 THINKING_FACE 表情 → 告知用户已收到
    │
-   ├─ 调用 Agent.chat() 处理消息
+   ├─ 调用 Agent.stream_chat() 流式处理消息
+   │     · 思考阶段（ThinkingEvent）只显示「🤔 thinking...」占位，不打印思考原文
+   │     · 工具调用过程实时更新进度卡片
    │
-   └─ 发送单条完整回复（非流式，飞书 IM 协议限制）
+   └─ 流式追加/编辑回复卡片，结束时附上 token 统计
 ```
 
 收到消息后第一步加 `THINKING_FACE` 表情是关键的用户体验设计：飞书消息处理可能需要数秒，及时反馈避免用户以为机器人离线。
+
+### 事件去重（幂等）
+
+飞书事件投递是 **at-least-once**：当 bot 未在超时窗口内 ack（长任务耗时、断线重连重放积压事件）时，飞书会重投同一条事件。若不去重，同一条消息会被处理多次，表现为重复回复、以及两份互不相同的 token 统计（每次处理都是独立的 Agent 运行）。
+
+入口处用 `message_id` 做幂等去重（内存 LRU，容量 2000）：命中已处理过的 `message_id` 直接丢弃并记日志。`message_id` 对每条用户消息唯一、重投时保持不变，正好充当幂等键。
+
 
 ### 飞书 Session 与普通 Session 的区别
 
@@ -240,7 +251,6 @@ lark-cli event consume im.message.receive_v1（WebSocket 长连接）
 ### 当前限制
 
 - 仅处理 `text` 类型消息，图片/文件等消息类型静默忽略。
-- 回复为单条完整消息，不支持流式增量输出。
 
 ---
 

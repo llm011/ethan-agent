@@ -223,6 +223,9 @@ class AnthropicProvider(BaseProvider):
                 elif event.type == "content_block_delta":
                     if event.delta.type == "text_delta":
                         yield StreamChunk(content=event.delta.text)
+                    elif event.delta.type == "thinking_delta":
+                        # 原生扩展思考：分流到 reasoning，不当正文展示
+                        yield StreamChunk(content="", reasoning=event.delta.thinking)
                     elif event.delta.type == "input_json_delta":
                         if event.index in tool_calls_acc:
                             tool_calls_acc[event.index]["input_raw"] += event.delta.partial_json

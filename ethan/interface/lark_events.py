@@ -7,11 +7,31 @@ import asyncio
 import json
 import logging
 import shutil
+from collections import deque
 
 logger = logging.getLogger(__name__)
 
 _listener_task: asyncio.Task | None = None
 _lark_chat_map: dict[str, str] = {}  # chat_id -> session_id, in-memory cache
+
+# 飞书事件投递是 at-least-once：bot 未在超时窗口内 ack（长任务、断线重连重放）会重投同一条事件。
+# 用 message_id 幂等去重，否则同一消息被处理多次（表现为重复回复 / 两份不同的 token 统计）。
+_seen_message_ids: set[str] = set()
+_seen_message_order: deque[str] = deque(maxlen=2000)
+
+
+def _already_handled(message_id: str) -> bool:
+    """命中返回 True（重复事件，应丢弃）；否则登记并返回 False。同事件循环内同步执行，无 await，天然原子。"""
+    if not message_id:
+        return False
+    if message_id in _seen_message_ids:
+        return True
+    if len(_seen_message_order) == _seen_message_order.maxlen:
+        _seen_message_ids.discard(_seen_message_order[0])  # deque 满，append 会丢最左，先同步移出 set
+    _seen_message_order.append(message_id)
+    _seen_message_ids.add(message_id)
+    return False
+
 
 def _lark_map_file():
     from pathlib import Path
@@ -542,7 +562,7 @@ async def _handle_message(event_data: dict) -> None:
     """
     from ethan.core.agent import Agent
     from ethan.memory.session import SessionStore
-    from ethan.providers.base import Message, ToolEvent
+    from ethan.providers.base import Message, ToolEvent, ThinkingEvent
     from ethan.skills.registry import SkillRegistry
     from ethan.tools.builtin.file import FileListTool, FileReadTool, FileWriteTool
     from ethan.tools.builtin.knowledge import KnowledgeAddTool, KnowledgeSearchTool
@@ -570,6 +590,12 @@ async def _handle_message(event_data: dict) -> None:
 
     chat_id = event_data.get("chat_id", "")
     message_id = event_data.get("message_id", "")
+
+    # 幂等去重：飞书 at-least-once 重投同一事件时直接丢弃，避免重复处理（重复回复 + 双份 token 统计）。
+    if _already_handled(message_id):
+        logger.info("[Lark] duplicate event dropped: message_id=%s", message_id)
+        return
+
     # 发消息者 open_id（飞书按 open_id 认主人）。lark-cli 展平后字段名可能是
     # sender_id / open_id / sender_open_id，挨个兜底。
     sender_open_id = (
@@ -891,6 +917,14 @@ async def _handle_message(event_data: dict) -> None:
                 await _edit_message(answer_msg_id, answer_text, use_card=True)
 
         async for chunk in agent.stream_chat(context_messages):
+            if isinstance(chunk, ThinkingEvent):
+                # 模型思考：不打印 delta 原文（避免泄漏 reasoning），只在工具消息里挂一个占位。
+                # 已有 reaction/工具进度时无需重复展示。
+                if tool_msg_id is None and answer_msg_id is None and not thinking_shown:
+                    tool_text = "🤔 thinking...\n"
+                    await _update_tool_msg()
+                    thinking_shown = True
+                continue
             if isinstance(chunk, ToolEvent):
                 if chunk.state == "start":
                     lark_tool_start_times[chunk.tool_name] = _lark_time.time()

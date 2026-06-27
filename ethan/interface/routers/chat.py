@@ -178,7 +178,7 @@ async def _stream_response(
 ) -> AsyncGenerator[str, None]:
     from ethan.core.stream_collector import StreamCollector
     from ethan.core.consent import ConsentEvent
-    from ethan.providers.base import ToolEvent
+    from ethan.providers.base import ToolEvent, ThinkingEvent
 
     collector = StreamCollector().bind(agent)
     try:
@@ -192,6 +192,9 @@ async def _stream_response(
                     "detail": item.detail,
                 }
                 yield f"data: {json.dumps(evt, ensure_ascii=False)}\n\n"
+            elif isinstance(item, ThinkingEvent):
+                # 思考内容不当正文；给前端一个轻量信号即可（原文不下发，避免泄漏 reasoning）
+                yield f"data: {json.dumps({'thinking': True}, ensure_ascii=False)}\n\n"
             elif isinstance(item, ToolEvent):
                 collector.feed(item)
                 # 即时把 ToolEvent 推给前端（SSE 不能等批处理）
