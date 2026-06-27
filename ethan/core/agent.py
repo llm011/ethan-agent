@@ -340,6 +340,13 @@ class Agent:
                 skill_ctx = self._skills.build_context(last_user, channel=self._channel)
                 if skill_ctx:
                     parts.append(f"<relevant_skills>\n{skill_ctx}\n</relevant_skills>")
+                    # skill 内容里提到的非 fast 工具自动激活，避免 fast 档看不见 skill 依赖的工具、
+                    # 逼模型多绕一步 find_tools。声明即可用，下一轮 _broadcast_tools 即纳入广播。
+                    from ethan.core.context import activate_tools
+                    referenced = [t.name for t in self._registry.all()
+                                  if not t.fast_path and t.name in skill_ctx]
+                    if referenced:
+                        activate_tools(referenced)
             if self.runtime_context:
                 parts.append(f"<runtime_context>\n[CRITICAL — 当前会话上下文，结合 soul 的主人/授权准则判断]\n\n{self.runtime_context}\n</runtime_context>")
             return "\n\n".join(parts)
