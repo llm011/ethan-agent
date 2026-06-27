@@ -530,6 +530,7 @@ Detailed design docs for each module are in [`docs/`](./docs/):
 - [Routing](docs/routing.md)
 - [Provider Layer](docs/providers.md)
 - [Tool System](docs/tools.md)
+- [Secrets Management](docs/secrets.md)
 - [Memory System](docs/memory.md)
 - [Skill System](docs/skills.md)
 - [Scheduler](docs/scheduler.md)

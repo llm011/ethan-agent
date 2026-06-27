@@ -165,6 +165,15 @@ class OpenAICompatProvider(BaseProvider):
             if delta is None:
                 continue
 
+            # 思考内容（reasoning_content）：deepseek-reasoner 等 reasoning 模型，以及部分中转把
+            # 思考放在 delta.reasoning_content（或 model_extra 里）。与正文分流，避免漏进最终回答。
+            rc = getattr(delta, "reasoning_content", None)
+            if rc is None:
+                me = getattr(delta, "model_extra", None) or {}
+                rc = me.get("reasoning_content")
+            if rc:
+                yield StreamChunk(content="", reasoning=rc)
+
             if delta.content:
                 yield StreamChunk(content=delta.content)
 

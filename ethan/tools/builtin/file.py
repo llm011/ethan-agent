@@ -17,6 +17,7 @@ def _is_inside_secrets(path: str) -> bool:
 
 
 class FileReadTool(BaseTool):
+    no_compress = True  # 文件原文必须逐字给模型，绝不压成摘要（否则模型反复重读拿不到真内容）
     name = "file_read"
     description = "Read the contents of a local file. Use when you need to see what's in a file."
     parameters = {
@@ -67,7 +68,7 @@ class FileReadTool(BaseTool):
 
 
 class FileWriteTool(BaseTool):
-    fast_path = False
+    fast_path = True  # fast 档也需要写文件（沉淀经验/改技能等），否则模型只能用 terminal python 硬写，绕路又危险
     side_effect = True
     name = "file_write"
     description = "Write content to a local file. Creates parent directories if needed."

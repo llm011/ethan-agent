@@ -18,6 +18,7 @@ class BaseTool(ABC):
     cacheable: bool = True  # 同参数是否可缓存；副作用类工具（shell）应设为 False
     side_effect: bool = False  # 是否有副作用（改文件/删数据/执行/花钱/对外发消息）。
     # 三方渠道（如飞书）认主人后，非主人调用 side_effect=True 的工具会被守卫拦截。
+    no_compress: bool = False  # 输出永不走 result_compressor 摘要（技能文档/文件原文等必须逐字给模型）。
 
     def consent_check(self, **kwargs) -> str | None:
         """检查此次调用是否需要用户授权。

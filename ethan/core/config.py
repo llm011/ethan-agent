@@ -60,6 +60,7 @@ class RoutingConfig(BaseModel):
     fast_max_length: int = 12  # 消息超过此长度不走 Fast Path（简单控制命令通常 ≤ 10 字）
     fast_skill_triggers: list[str] = Field(default_factory=list)  # 命中时强制走 Fast Path，不受长度限制（给 Skill 关联用）
     fast_max_iters: int = 10     # Fast Path 最多工具迭代次数
+    fast_use_lite_model: bool = True  # Fast Path 用 lite 模型（设备控制/状态查询等简单任务，省钱提速）
     medium_max_length: int = 80   # 超过 fast_max_length 且不超过此值走 Medium Path
     medium_max_iters: int = 30    # Medium Path 最多迭代次数，应对短文本但重搜索的任务
 

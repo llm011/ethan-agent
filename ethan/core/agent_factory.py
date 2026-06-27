@@ -13,6 +13,8 @@ from ethan.skills.registry import SkillRegistry
 from ethan.tools.builtin.acp import DelegateCodingTool
 from ethan.tools.builtin.config import ConfigGetTool, ConfigSetTool
 from ethan.tools.builtin.file import FileListTool, FileReadTool, FileWriteTool
+from ethan.tools.builtin.find_tools import FindToolsTool
+from ethan.tools.builtin.install_skill import InstallSkillTool
 from ethan.tools.builtin.knowledge import KnowledgeAddTool, KnowledgeSearchTool
 from ethan.tools.builtin.memory_write import MemoryWriteTool
 from ethan.tools.builtin.procedure_write import ProcedureWriteTool
@@ -68,6 +70,10 @@ def build_tool_registry(user_id: str = "", toolset: str = "full") -> ToolRegistr
     registry.register(SetSecretTool())
     registry.register(GetSecretTool())
     registry.register(ListSecretsTool())
+    registry.register(InstallSkillTool())
+    # 工具发现元工具：fast 档只广播常驻工具，模型需要长尾能力时用它检索并激活。
+    # 持有 registry 引用以便检索；放最后确保它能看到上面注册的全部工具。
+    registry.register(FindToolsTool(registry))
     return registry
 
 

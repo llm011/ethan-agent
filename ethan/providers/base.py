@@ -40,6 +40,13 @@ class StreamChunk:
     tool_calls: list[ToolCall] = field(default_factory=list)
     is_final: bool = False
     usage: Optional[dict] = None
+    reasoning: str = ""  # 模型思考内容（reasoning_content / thinking）；与 content 分流，不当正文展示
+
+
+@dataclass
+class ThinkingEvent:
+    """stream_chat 产出：模型正在思考。渠道收到后只显示占位（如「🤔 thinking...」），不打印 delta 原文。"""
+    delta: str = ""
 
 
 @dataclass

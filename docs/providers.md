@@ -25,8 +25,20 @@ ToolCall(id, name, arguments)                   # arguments 是 dict
 Message(role, content, tool_calls=[], tool_call_id=None)
 
 # 流式输出的一个 chunk
-StreamChunk(content, tool_calls=[], is_final=False, usage=None)
+StreamChunk(content, tool_calls=[], is_final=False, usage=None, reasoning="")
+#   reasoning：模型思考内容（reasoning_content / thinking）。与 content 分流，
+#   不当正文展示——避免思考过程泄漏进最终回答。
+
+# 模型正在思考的信号（Agent 层把 chunk.reasoning 转成此事件向上游产出）
+ThinkingEvent(delta="")
 ```
+
+> **思考与正文分流**：部分 reasoning 模型（如 deepseek-reasoner）和某些中转网关会把
+> 思考内容单独放在 `delta.reasoning_content` 字段，原生 Anthropic 扩展思考则走
+> `thinking_delta` 事件。Provider 层统一把这些内容收进 `StreamChunk.reasoning`，
+> 不混入 `content`；Agent 层据此产出 `ThinkingEvent`，各渠道收到后只显示占位
+> （如飞书的「🤔 thinking...」），不打印思考原文。
+
 
 ### BaseProvider 抽象接口
 
@@ -64,6 +76,7 @@ Anthropic 的 tool_use 格式与 OpenAI 不同，主要区别：
 | tool result 的 role | `user`（包在 content 数组里） | `tool` |
 | tool call 的字段名 | `tool_use`，input 是 dict | `function`，arguments 是 JSON 字符串 |
 | 流式 tool call | `input_json_delta` 事件 | `delta.tool_calls` |
+| 流式思考 | `thinking_delta` 事件（扩展思考） | `delta.reasoning_content` |
 | system prompt | 独立字段，支持 `cache_control` 分块 | 作为 `role: system` 消息 |
 
 ### 消息转换逻辑
@@ -244,6 +257,7 @@ providers:
 - tool call 的 `arguments` 是 JSON **字符串**（需要 `json.loads()`）
 - 流式结束条件：`finish_reason == "tool_calls"` 或 `"stop"`
 - tool result 的 role 就是 `"tool"`，不需要包在 user 消息里
+- reasoning 模型（如 deepseek-reasoner）把思考放在 `delta.reasoning_content`（部分中转放在 `model_extra` 里），Provider 会读出并收进 `StreamChunk.reasoning`，与正文 `content` 分流
 
 ---
 

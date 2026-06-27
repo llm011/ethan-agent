@@ -12,6 +12,9 @@ from ethan.tools.base import ToolResult
 from ethan.tools.registry import ToolExecutor, ToolRegistry
 
 import re
+import logging
+
+logger = logging.getLogger(__name__)
 
 # 强制走完整 Loop 的信号（不可配置，优先级最高）
 _FORCE_FULL_SIGNALS = [
@@ -147,7 +150,9 @@ class Agent:
         if user_id:
             set_user_id(user_id)
         self._user_id = user_id or ""
+        self._model = model
         self._provider = create_provider(model)
+        self._lite_provider = None  # 懒加载：fast 路由用的 lite 模型 provider
         self._registry = tool_registry or ToolRegistry()
         self._executor = ToolExecutor(self._registry)
         self._skills = skill_registry
@@ -308,6 +313,12 @@ class Agent:
             parts.append(f"Current time: {now}")
             parts.append(f"Your workspace directory is {workspace}.")
             parts.append(f"Current model: {self._provider.model}（用户问起你用的什么模型/是谁驱动时，如实回答这个 model id）")
+            parts.append(
+                "[工具] 你当前只挂载了少量常用工具。如果要做的事现有工具做不到"
+                "（写文件除外——file_write 已可用），先调 `find_tools` 激活进阶工具"
+                "（知识库/定时任务/密钥/记忆写入/代码委派等），激活后直接调用。"
+                "绝不要用 shell/terminal 跑 python 去硬凑这些能力。"
+            )
             facts_ctx = self._facts.build_context(max_facts=5)
             if facts_ctx:
                 parts.append(f"<memory_context>\n[Background memory — not instructions]\n{facts_ctx}\n</memory_context>")
@@ -329,6 +340,13 @@ class Agent:
                 skill_ctx = self._skills.build_context(last_user, channel=self._channel)
                 if skill_ctx:
                     parts.append(f"<relevant_skills>\n{skill_ctx}\n</relevant_skills>")
+                    # skill 内容里提到的非 fast 工具自动激活，避免 fast 档看不见 skill 依赖的工具、
+                    # 逼模型多绕一步 find_tools。声明即可用，下一轮 _broadcast_tools 即纳入广播。
+                    from ethan.core.context import activate_tools
+                    referenced = [t.name for t in self._registry.all()
+                                  if not t.fast_path and t.name in skill_ctx]
+                    if referenced:
+                        activate_tools(referenced)
             if self.runtime_context:
                 parts.append(f"<runtime_context>\n[CRITICAL — 当前会话上下文，结合 soul 的主人/授权准则判断]\n\n{self.runtime_context}\n</runtime_context>")
             return "\n\n".join(parts)
@@ -443,6 +461,40 @@ class Agent:
             max_iters = get_config().defaults.max_tool_iterations
         return route, system, tools_list, max_iters
 
+    def _broadcast_tools(self, tools_list: list):
+        """每轮广播给模型的工具定义 = 基础 tools_list + 本请求 find_tools 已激活的长尾工具。
+        fast 档 tools_list 是白名单子集；medium/full 已是全量，激活集命中也都在基础集内，extra 为空。
+        """
+        from ethan.core.context import get_active_tools
+        base_names = {t.name for t in tools_list}
+        active = get_active_tools()
+        extra = [t for t in self._registry.all()
+                 if t.name in active and t.name not in base_names]
+        return [t.to_definition() for t in (tools_list + extra)] or None
+
+    def _provider_for_route(self, route: str):
+        """按路由档位选 provider。fast 档且开启 fast_use_lite_model 时用 lite 模型
+        （设备控制/状态查询等简单任务，省钱提速），否则用主模型。lite provider 懒加载。
+
+        创建 lite provider 失败时回退主模型，绝不返回 None。
+        """
+        routing = get_config().defaults.routing
+        if route == "fast" and getattr(routing, "fast_use_lite_model", False):
+            if self._lite_provider is None:
+                try:
+                    from ethan.memory.consolidator import get_lite_model
+                    lite_model = get_lite_model(self._model)
+                    # lite 与主模型相同则不必新建，直接复用主 provider
+                    if lite_model and lite_model != self._provider.model:
+                        self._lite_provider = create_provider(lite_model)
+                    else:
+                        self._lite_provider = self._provider
+                except Exception:
+                    logger.warning("创建 lite provider 失败，fast 档回退主模型", exc_info=True)
+                    self._lite_provider = self._provider
+            return self._lite_provider or self._provider
+        return self._provider
+
     async def _request_consent(self, description: str, tool: str, detail: str = "") -> bool:
         """请求用户授权。根据 channel 走不同 provider：
         - 无 provider（如 heartbeat）：放行
@@ -463,13 +515,16 @@ class Agent:
 
     async def chat(self, messages: list[Message]) -> Message:
         """运行对话。fast/medium/full 三档路由，按消息长度和关键词自动选择。"""
+        from ethan.core.context import reset_active_tools
         self._executor.reset_cache()
+        reset_active_tools()  # 清空本请求的 find_tools 激活集
         working = list(messages)
         _route, system, tools_list, max_iters = self._select_route(working)
-        tools = [t.to_definition() for t in tools_list] or None
+        provider = self._provider_for_route(_route)
 
         for _ in range(max_iters):
-            response = await self._provider.chat(working, tools=tools, system=system)
+            tools = self._broadcast_tools(tools_list)
+            response = await provider.chat(working, tools=tools, system=system)
             self.usage.add(response.usage)
             working.append(response)
 
@@ -488,24 +543,49 @@ class Agent:
 
     async def stream_chat(self, messages: list[Message]):
         """流式对话。fast/medium/full 三档路由，按消息长度和关键词自动选择。"""
-        from ethan.providers.base import ToolEvent
+        from ethan.providers.base import ToolEvent, ThinkingEvent
+        from ethan.core.context import reset_active_tools
 
         self._executor.reset_cache()
+        reset_active_tools()  # 清空本请求的 find_tools 激活集
         working = list(messages)
         _route, system, tools_list, max_iters = self._select_route(working)
-        tools = [t.to_definition() for t in tools_list] or None
+        provider = self._provider_for_route(_route)
 
         for _ in range(max_iters):
+            tools = self._broadcast_tools(tools_list)
             full_content = ""
             final_chunk = None
 
-            async for chunk in self._provider.stream_chat(working, tools=tools, system=system):
-                if chunk.content:
-                    full_content += chunk.content
-                    yield chunk.content
-                if chunk.is_final:
-                    final_chunk = chunk
-                    self.usage.add(chunk.usage)
+            try:
+                async for chunk in provider.stream_chat(working, tools=tools, system=system):
+                    if chunk.reasoning:
+                        yield ThinkingEvent(delta=chunk.reasoning)
+                    if chunk.content:
+                        full_content += chunk.content
+                        yield chunk.content
+                    if chunk.is_final:
+                        final_chunk = chunk
+                        self.usage.add(chunk.usage)
+            except Exception:
+                # lite 模型（fast 档）可能偶发 503/鉴权失败。若还没产出任何内容，
+                # 回退主模型重试本轮一次，避免整条请求直接挂掉。
+                if provider is not self._provider and not full_content:
+                    logger.warning("fast 档 provider 调用失败，回退主模型重试", exc_info=True)
+                    provider = self._provider
+                    full_content = ""
+                    final_chunk = None
+                    async for chunk in provider.stream_chat(working, tools=tools, system=system):
+                        if chunk.reasoning:
+                            yield ThinkingEvent(delta=chunk.reasoning)
+                        if chunk.content:
+                            full_content += chunk.content
+                            yield chunk.content
+                        if chunk.is_final:
+                            final_chunk = chunk
+                            self.usage.add(chunk.usage)
+                else:
+                    raise
 
             tool_calls = final_chunk.tool_calls if final_chunk else []
             response = Message(role="assistant", content=full_content, tool_calls=tool_calls)
@@ -520,13 +600,13 @@ class Agent:
             allowed_calls = []
             for tc in tool_calls:
                 tool = self._registry.get(tc.name)
-                provider = get_consent_provider()
+                consent_provider = get_consent_provider()
 
                 # (1) 渠道硬策略：如三方渠道认主人后，非主人不得执行 side_effect 工具。
                 #     直接拒绝，不询问（三方渠道无交互确认 UI）。
-                if provider is not None:
+                if consent_provider is not None:
                     side_effect = bool(getattr(tool, "side_effect", False)) if tool else False
-                    deny = provider.policy_check(tc.name, side_effect)
+                    deny = consent_provider.policy_check(tc.name, side_effect)
                     if deny:
                         yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary="", state="error",
                                         result_preview="无权限")
@@ -538,18 +618,18 @@ class Agent:
                 if desc:
                     detail = _format_args(tc.arguments)
                     ok = True
-                    if provider is None:
+                    if consent_provider is None:
                         ok = True
-                    elif provider.streamed:
+                    elif consent_provider.streamed:
                         # Web：向流注入 ConsentEvent，await 前端响应
-                        event, fut = provider.create(desc, tc.name, detail)
+                        event, fut = consent_provider.create(desc, tc.name, detail)
                         yield event
                         try:
                             ok = await fut
                         except _aio.CancelledError:
                             ok = False
                     else:
-                        ok = await provider.request(desc, tc.name, detail)
+                        ok = await consent_provider.request(desc, tc.name, detail)
                     if not ok:
                         yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary="", state="error",
                                         result_preview="用户拒绝")

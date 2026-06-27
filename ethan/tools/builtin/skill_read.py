@@ -106,6 +106,7 @@ def _build_file_tree(skill_dir: Path, skill_name: str, cap: int = 40) -> str:
 class SkillReadTool(BaseTool):
     fast_path = True
     cacheable = True
+    no_compress = True  # 技能文档是给模型的指令，必须逐字，绝不压成摘要
     name = "skill_read"
     description = (
         "读取已安装技能的完整内容。用户让你执行/修改某个技能、或你要搞清楚某技能怎么用时调用——"
@@ -185,6 +186,7 @@ class SkillReadTool(BaseTool):
 class SkillListTool(BaseTool):
     fast_path = True
     cacheable = True
+    no_compress = True  # 技能清单要逐字，别被摘要吃掉名称/触发词
     name = "skill_list"
     description = (
         "列出所有已安装技能（名称 + 描述 + 触发词）。"

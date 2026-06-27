@@ -108,7 +108,7 @@ async def _run_heartbeat_md() -> None:
     prompt = f"[Heartbeat] 正在执行系统心跳任务：heartbeat.md\n\n{content.strip()}"
 
     try:
-        from ethan.providers.base import ToolEvent
+        from ethan.providers.base import ToolEvent, ThinkingEvent
         import time
 
         # 每次心跳创建一个全新的专属 session，便于在 Web 上独立查看
@@ -129,6 +129,8 @@ async def _run_heartbeat_md() -> None:
         thought = ""
 
         async for item in agent.stream_chat([user_msg]):
+            if isinstance(item, ThinkingEvent):
+                continue  # 思考内容不计入 heartbeat 正文
             if isinstance(item, ToolEvent):
                 if item.state == "start":
                     if full:

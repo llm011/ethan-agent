@@ -15,7 +15,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from ethan.providers.base import ToolEvent
+from ethan.providers.base import ThinkingEvent, ToolEvent
 
 
 class StreamCollector:
@@ -32,10 +32,12 @@ class StreamCollector:
         return self
 
     def feed(self, item: Any) -> str | None:
-        """处理一个 stream_chat 产出项。返回文本块（str）或 None（ToolEvent）。"""
+        """处理一个 stream_chat 产出项。返回文本块（str）或 None（ToolEvent / ThinkingEvent）。"""
         if isinstance(item, ToolEvent):
             self._handle_tool_event(item)
             return None
+        if isinstance(item, ThinkingEvent):
+            return None  # 思考内容不计入正文
         # 文本块
         text = item if isinstance(item, str) else getattr(item, "content", "")
         if not text:

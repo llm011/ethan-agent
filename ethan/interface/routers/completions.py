@@ -160,15 +160,15 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
 
 
 async def _stream_completions(agent, messages, store: SessionStore, session_id: str | None, model: str | None, user_id: str = ""):
-    from ethan.providers.base import ToolEvent
+    from ethan.providers.base import ToolEvent, ThinkingEvent
     from ethan.interface.routers.chat import _maybe_consolidate, _maybe_generate_skill
 
     full = ""
     try:
         try:
             async for item in agent.stream_chat(messages):
-                if isinstance(item, ToolEvent):
-                    continue  # completions 接口不暴露工具调用过程
+                if isinstance(item, (ToolEvent, ThinkingEvent)):
+                    continue  # completions 接口不暴露工具调用 / 思考过程
                 full += item
                 chunk = {
                     "id": f"chatcmpl-{(session_id or 'nosession')[:8]}",

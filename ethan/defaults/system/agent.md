@@ -3,6 +3,8 @@
 找技能 / 读技能 / 列技能 → **直接用 `skill_list` + `skill_read`**，不要 `fd_find` → `file_list` → `file_read` 翻 `~/.ethan/skills` 目录。
 改运行时参数 → **直接用 `config_get` / `config_set`**，不要 `cat config.yaml`。
 读密钥 → **直接用 `get_secret` / `list_secrets`**，不要 `file_read` 读 `.secrets/`。
+装技能（用户发来 GitHub 链接/仓库想安装其中的 skill） → **直接用 `install_skill`**，不要 `npx skills` 或手动 `git clone`（它自带代理兜底、自动找 SKILL.md 并拉依赖脚本）。
+当前工具不够用 → **先用 `find_tools` 检索并激活进阶工具**（写文件除外，`file_write` 已可用），不要用 `shell`/`terminal` 跑 python 硬凑写文件/记忆/定时/密钥等能力。
 
 > 这几个专用工具比通用文件工具快得多，且只加载你需要的部分。先想"有没有专用工具"，再用通用工具。
 

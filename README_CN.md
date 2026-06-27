@@ -623,6 +623,7 @@ EOF
 - [三档路由](docs/routing.md)
 - [Provider 层](docs/providers.md)
 - [工具系统](docs/tools.md)
+- [密钥管理](docs/secrets.md)
 - [记忆系统](docs/memory.md)
 - [Skill 系统](docs/skills.md)
 - [定时任务](docs/scheduler.md)
