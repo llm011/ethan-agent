@@ -30,14 +30,23 @@ https://openapi.biji.com
 - `Authorization: $GETNOTE_API_KEY`（格式：`gk_live_xxx`）
 - `X-Client-ID: $GETNOTE_CLIENT_ID`（格式：`cli_xxx`）
 
-凭证存放在 `~/.ethan/.secrets/getnote.env`（`KEY="value"` 形式），运行 shell 工具时会**自动注入子进程环境**，所以在 `shell` 里写 `curl` 时直接用 `$GETNOTE_API_KEY` / `$GETNOTE_CLIENT_ID` 即可，**无需 get_secret，也不要把 key 明文写进命令或回复**。
+凭证存放在 `~/.ethan/.secrets/getnote.env`（`KEY="value"` 形式），运行 shell 工具时会**自动注入子进程环境**，所以在 `shell` 里写 `curl` 时直接用 `$GETNOTE_API_KEY` / `$GETNOTE_CLIENT_ID` 即可，**无需 get_secret，也不要把 key 明文写进回复**。
 
-**首次使用前检查凭证是否已配**：`shell` 跑 `test -f ~/.ethan/.secrets/getnote.env && echo ok`。若不存在，引导用户提供 key（见 [references/oauth.md](references/oauth.md)），你用 `set_secret` 不便存多行，改为提示用户把下面两行写入 `~/.ethan/.secrets/getnote.env`：
+**每次调用 API 前先检测凭证是否齐全**：用 `shell` 跑
+
+```bash
+test -n "$GETNOTE_API_KEY" && test -n "$GETNOTE_CLIENT_ID" && echo READY || echo MISSING
 ```
-GETNOTE_API_KEY="gk_live_xxx"
-GETNOTE_CLIENT_ID="cli_xxx"
-```
-配置完成后再继续执行用户原本的请求。
+
+- 输出 `READY` → 凭证已配，直接继续。
+- 输出 `MISSING` → 凭证缺失，**引导用户提供** `GETNOTE_API_KEY` 和 `GETNOTE_CLIENT_ID`（怎么拿见 [references/oauth.md](references/oauth.md)）。拿到后**由你（agent）写入** `~/.ethan/.secrets/getnote.env`，不要让用户手动编辑文件，也不要把值回显到对话里。写入方式（用 `file_write` 工具，path=`~/.ethan/.secrets/getnote.env`，content 为下面两行）：
+  ```
+  GETNOTE_API_KEY="<用户给的 key>"
+  GETNOTE_CLIENT_ID="<用户给的 client id>"
+  ```
+  写完用 `shell` 跑 `chmod 600 ~/.ethan/.secrets/getnote.env` 收紧权限。然后**重新执行用户原本的请求**（新的 shell 调用会自动注入刚写入的变量）。
+
+> 说明：getnote 用的是 `.env`（多键、需注入 shell）形式，所以走 `file_write` 写文件，而不是 `set_secret`（`set_secret` 存的是单值文件，不会被 shell 注入）。
 
 Scope 权限：`note.content.read`（读取）、`note.content.write`（写入）、`note.recall.read`（搜索）。完整列表见 [references/api-details.md](references/api-details.md#scope-权限列表)。
 
