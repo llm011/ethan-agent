@@ -67,3 +67,8 @@ TODO.md
 .hermes/
 
 pypi/
+
+# Logs
+*.log
+logs/
+paper_work/
