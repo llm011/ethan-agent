@@ -72,3 +72,12 @@ pypi/
 *.log
 logs/
 paper_work/
+
+# Android
+app/android/.gradle/
+app/android/**/build/
+app/android/local.properties
+app/android/.idea/
+app/android/*.iml
+app/android/captures/
+app/android/.cxx/
