@@ -181,7 +181,7 @@ ethan serve restart             → 重启后台 serve 进程
 ethan model list/add/remove/default
 ethan provider list/set
 ethan session list/show/delete
-ethan skill list/show/create
+ethan skill list/show/add/create
 ethan schedule list/remove/pause/resume
 ethan knowledge list/add/search/delete
 ethan update [--channel dev] [--to v0.2.0] [--check] [--no-restart]

@@ -13,6 +13,7 @@ import {
   fetchSchedules,
   streamChat,
   compactSession,
+  updateSessionMode,
   fetchOnboardingStatus,
   fetchAgentSettings,
   respondConsent,
@@ -449,7 +450,13 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           onQuoteCancel={() => setQuote(null)}
           modes={modes}
           mode={mode}
-          onModeChange={setMode}
+          onModeChange={(m) => {
+            setMode(m);
+            // 已有会话：立即落库，刷新/重进保持该模式（无会话时仅置前端 state，建会话时带上）
+            if (activeSession) {
+              updateSessionMode(activeSession, m).catch(() => {});
+            }
+          }}
         />
       </div>
       <ConsentDialog request={consentRequest} onRespond={handleConsentRespond} />

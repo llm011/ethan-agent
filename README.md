@@ -141,6 +141,8 @@ docker compose pull && docker compose up -d  # update to latest version
 docker compose down                   # stop
 ```
 
+> **One-shot legal expert mode**: set `ETHAN_INSTALL_SKILLS=legal` before `docker compose up` (or run `docker compose exec ethan-agent ethan skill add legal` after the container is up) to install the `legal-assistant` skill; then pick "⚖️ 法律专家" in the Web mode dropdown to activate it.
+
 ### 6. Multi-user (optional)
 
 Ethan supports multiple isolated users sharing one instance. Each user has their own memory (facts / procedures / episodes / sessions), skills, and knowledge base — fully isolated per user. System prompts and provider config stay shared.
@@ -370,7 +372,7 @@ ethan serve restart                Restart background serve process
 ethan model list|add|remove|default
 ethan provider list|set
 ethan session list|show|delete
-ethan skill list|show|create
+ethan skill list|show|add|create
 ethan schedule list|remove|pause|resume
 ```
 

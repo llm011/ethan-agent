@@ -141,6 +141,8 @@ docker compose pull && docker compose up -d  # 更新到最新版本
 docker compose down                    # 停止
 ```
 
+> **一键装法律专家模式**：在 `docker compose up` 前设 `ETHAN_INSTALL_SKILLS=legal`（或起容器后 `docker compose exec ethan-agent ethan skill add legal`），即可装好 `legal-assistant` 技能；Web 端模式下拉切到「⚖️ 法律专家」即生效。
+
 ### 6. 多用户（可选）
 
 Ethan 支持多用户共享一个实例，记忆（facts / procedures / episodes / sessions）、skills、知识库按用户完全隔离，互不可见。System prompt 和 provider 配置全局共享。
@@ -359,7 +361,7 @@ ethan serve restart                重启后台 serve 进程
 ethan model list|add|remove|default
 ethan provider list|set
 ethan session list|show|delete
-ethan skill list|show|create
+ethan skill list|show|add|create
 ethan schedule list|remove|pause|resume
 ```
 

@@ -3,7 +3,8 @@
 命令：
   ethan skill list              列出所有已加载的 Skills
   ethan skill show <name>       查看某个 Skill 内容
-  ethan skill add               交互式创建新 Skill
+  ethan skill add <源>          从 GitHub 仓库/子目录安装 Skill（支持内置别名，如 legal）
+  ethan skill create <name>     创建一个新的空 Skill 文件
 """
 import typer
 import asyncio
@@ -14,6 +15,11 @@ from ethan.skills.loader import load_all_skills
 
 console = Console()
 app = typer.Typer(help="管理 Skills", invoke_without_command=True)
+
+# 内置 Skill 别名 → GitHub 安装来源。让 `ethan skill add legal` 一键装法律技能。
+SKILL_ALIASES: dict[str, str] = {
+    "legal": "llm011/ethan-legal-skill/skills/legal-assistant",
+}
 
 
 @app.callback(invoke_without_command=True)
@@ -57,6 +63,30 @@ def show_skill(
             return
     console.print(f"[red]Skill '{name}' not found.[/red]")
     raise typer.Exit(1)
+
+
+@app.command("add")
+def add_skill(
+    source: str = typer.Argument(
+        ...,
+        help="GitHub 来源（owner/repo 或带子目录、完整 URL），或内置别名（如 legal）",
+    ),
+    name: str = typer.Option("", "-n", "--name", help="装成的 skill 目录名（仓库含多个 skill 时指定）"),
+) -> None:
+    """从 GitHub 仓库/子目录安装 Skill 到 ~/.ethan/skills/。
+
+    内置别名一键装：
+      ethan skill add legal        # = llm011/ethan-legal-skill/skills/legal-assistant
+    """
+    from ethan.tools.builtin.install_skill import InstallSkillTool
+
+    resolved = SKILL_ALIASES.get(source.strip().lower(), source)
+    if resolved != source:
+        console.print(f"[dim]别名 '{source}' → {resolved}[/dim]")
+
+    with console.status(f"[dim]安装中：{resolved}…[/dim]"):
+        result = asyncio.run(InstallSkillTool().run(source=resolved, name=name))
+    console.print(result)
 
 
 @app.command("create")

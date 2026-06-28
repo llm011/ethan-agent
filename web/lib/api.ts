@@ -175,6 +175,14 @@ export async function renameSession(id: string, title: string): Promise<void> {
   });
 }
 
+export async function updateSessionMode(id: string, mode: string): Promise<void> {
+  await fetch(`${API_URL}/sessions/${id}`, {
+    method: "PATCH",
+    headers: headers(),
+    body: JSON.stringify({ mode }),
+  });
+}
+
 export async function createSession(model?: string, mode?: string): Promise<{ id: string; title: string; model: string; mode?: string }> {
   const params = new URLSearchParams();
   if (model) params.append("model", model);
