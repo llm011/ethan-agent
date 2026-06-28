@@ -713,6 +713,44 @@ async def _handle_message(event_data: dict) -> None:
                 "今后通知和定时任务结果会发到这里；非主人的高风险指令我会先确认。"
             )
 
+        async def _get_lark_mode(cid: str) -> str:
+            sid = _lark_chat_map.get(cid)
+            if not sid:
+                if not _lark_chat_map:
+                    _lark_chat_map.update(_load_lark_map())
+                sid = _lark_chat_map.get(cid)
+            if not sid:
+                return ""
+            from ethan.memory.session import SessionStore
+            from ethan.core.paths import user_sessions_db_path
+            store = SessionStore(db_path=user_sessions_db_path())
+            await store.init()
+            try:
+                s = await store.load(sid)
+                return getattr(s, "mode", "") or "" if s else ""
+            finally:
+                await store.close()
+
+        async def _set_lark_mode(cid: str, mode_key: str) -> None:
+            """切换当前飞书会话模式；无会话则新建一个带该模式的 session。"""
+            from ethan.memory.session import SessionStore
+            from ethan.core.paths import user_sessions_db_path
+            from ethan.core.config import get_config as _gc
+            if not _lark_chat_map:
+                _lark_chat_map.update(_load_lark_map())
+            sid = _lark_chat_map.get(cid)
+            store = SessionStore(db_path=user_sessions_db_path())
+            await store.init()
+            try:
+                if not sid:
+                    s = await store.create(_gc().defaults.model, source="lark", mode=mode_key)
+                    _lark_chat_map[cid] = s.id
+                    _save_lark_map(_lark_chat_map)
+                else:
+                    await store.update_mode(sid, mode_key)
+            finally:
+                await store.close()
+
         cmd_ctx = CommandContext(
             chat_id=chat_id,
             raw_text=text,
@@ -725,6 +763,8 @@ async def _handle_message(event_data: dict) -> None:
             set_owner=_set_lark_owner,
             get_token=_get_web_token,
             get_model=_get_model,
+            get_mode=_get_lark_mode,
+            set_mode=_set_lark_mode,
         )
         reply = await handle_command(cmd_ctx)
         if reply:
@@ -770,6 +810,7 @@ async def _handle_message(event_data: dict) -> None:
         # 加载完整历史，用 WorkingMemory 重建热区（与 REPL/API 一致）
         session_obj = await store.load(session_id)
         history = session_obj.messages if session_obj else []
+        session_mode = getattr(session_obj, "mode", "") or "" if session_obj else ""
 
         user_msg = Message(role="user", content=text)
         await store.save_message(session_id, user_msg)
@@ -806,7 +847,7 @@ async def _handle_message(event_data: dict) -> None:
             registry.register(tool)
         skills = SkillRegistry()
         skills.load()
-        agent = Agent(tool_registry=registry, skill_registry=skills, channel="lark")
+        agent = Agent(tool_registry=registry, skill_registry=skills, channel="lark", mode=session_mode)
 
         # 注入主人/授权运行时上下文，配合 soul.md 的主人准则判断是否执行有副作用操作
         if not owner_claimed:

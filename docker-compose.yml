@@ -18,12 +18,18 @@ services:
       - ETHAN_AUTH_TOKEN=${ETHAN_AUTH_TOKEN:-}
       # Optional: HTTP proxy if needed
       - ETHAN_PROXY=${ETHAN_PROXY:-}
+      # Optional: auto-install skills on startup (space-separated sources or aliases,
+      # e.g. "legal" → llm011/ethan-legal-skill/skills/legal-assistant).
+      # Lets `docker compose up` provision the legal expert mode with zero extra commands.
+      - ETHAN_INSTALL_SKILLS=${ETHAN_INSTALL_SKILLS:-}
     # Install the package and run the server
     command: >
       bash -c "
-        apt-get update -qq && apt-get install -y curl -qq >/dev/null 2>&1
+        apt-get update -qq && apt-get install -y curl git -qq >/dev/null 2>&1
         # Install the latest version from PyPI
         pip install --no-cache-dir --upgrade ethan-agent
+        # Optionally provision skills declared via ETHAN_INSTALL_SKILLS (e.g. legal)
+        for s in $$ETHAN_INSTALL_SKILLS; do ethan skill add \"$$s\" || true; done
         # Start the server (hosts both API and Web UI)
         ethan serve --port 8900
       "

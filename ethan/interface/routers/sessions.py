@@ -49,14 +49,17 @@ async def list_modes(user_id: str = Depends(verify_token)):
 
 
 @router.get("/sessions")
-async def list_sessions(limit: int = 50, offset: int = 0, q: str | None = None, user_id: str = Depends(verify_token)):
+async def list_sessions(limit: int = 50, offset: int = 0, q: str | None = None,
+                        source: str | None = None, mode: str | None = None,
+                        user_id: str = Depends(verify_token)):
     from ethan.core.paths import user_sessions_db_path
     store = SessionStore(db_path=user_sessions_db_path())
     await store.init()
     if q:
-        sessions = await store.search(q, limit, offset)
+        # 搜索路径不叠加渠道/模式过滤（保持全文检索语义）
+        sessions = await store.search(q, limit)
     else:
-        sessions = await store.list_recent(limit, offset)
+        sessions = await store.list_recent(limit, offset, source=source or "", mode=mode)
     await store.close()
     return {"sessions": [
         {
@@ -126,7 +129,8 @@ async def delete_session(session_id: str, user_id: str = Depends(verify_token)):
 
 
 class RenameSessionRequest(BaseModel):
-    title: str
+    title: str | None = None
+    mode: str | None = None
 
 
 @router.patch("/sessions/{session_id}")
@@ -134,11 +138,17 @@ async def rename_session(session_id: str, req: RenameSessionRequest, user_id: st
     from ethan.core.paths import user_sessions_db_path
     store = SessionStore(db_path=user_sessions_db_path())
     await store.init()
-    title = req.title.strip()
-    if not title:
-        raise HTTPException(status_code=400, detail="Title cannot be empty")
-    await store.update_title(session_id, title)
-    await store.close()
+    try:
+        if req.title is not None:
+            title = req.title.strip()
+            if not title:
+                raise HTTPException(status_code=400, detail="Title cannot be empty")
+            await store.update_title(session_id, title)
+        # mode 可为空字符串（切回默认模式），故用 is not None 判断
+        if req.mode is not None:
+            await store.update_mode(session_id, req.mode)
+    finally:
+        await store.close()
     return {"ok": True}
 
 

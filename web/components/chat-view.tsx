@@ -13,6 +13,7 @@ import {
   fetchSchedules,
   streamChat,
   compactSession,
+  updateSessionMode,
   fetchOnboardingStatus,
   fetchAgentSettings,
   respondConsent,
@@ -317,7 +318,11 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           continue;
         }
         if (chunk.error) {
-          assistantContent = `Error: ${chunk.error}`;
+          // 保留已流式输出的内容，把错误作为页脚追加，而不是整体替换覆盖掉用户正在读的回答
+          const errLine = `⚠️ ${chunk.error}`;
+          assistantContent = assistantContent.trim()
+            ? `${assistantContent}\n\n---\n${errLine}`
+            : errLine;
           break;
         }
         if (chunk.tool && chunk.state === "start") {
@@ -390,7 +395,10 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         }
       }
     } catch (err) {
-      assistantContent = `Error: ${err instanceof Error ? err.message : "Unknown error"}`;
+      const errLine = `⚠️ ${err instanceof Error ? err.message : "连接中断"}`;
+      assistantContent = assistantContent.trim()
+        ? `${assistantContent}\n\n---\n${errLine}`
+        : errLine;
     }
 
     setMessages(prev => {
@@ -449,7 +457,13 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           onQuoteCancel={() => setQuote(null)}
           modes={modes}
           mode={mode}
-          onModeChange={setMode}
+          onModeChange={(m) => {
+            setMode(m);
+            // 已有会话：立即落库，刷新/重进保持该模式（无会话时仅置前端 state，建会话时带上）
+            if (activeSession) {
+              updateSessionMode(activeSession, m).catch(() => {});
+            }
+          }}
         />
       </div>
       <ConsentDialog request={consentRequest} onRespond={handleConsentRespond} />

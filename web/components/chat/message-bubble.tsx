@@ -134,7 +134,19 @@ export function MessageBubble({ msg, isStreaming, isLast, onQuote }: MessageBubb
           </>
         )}
         {msg.role === "assistant" && isStreaming && isLast && (
-          <span className="inline-block w-2 h-4 bg-foreground/50 animate-pulse ml-0.5" />
+          !msg.content
+            ? (
+              // 尚未吐字：三点波浪 + 柔和呼吸，比单根闪条更生动
+              <span className="inline-flex items-center gap-1 py-1 align-middle">
+                <span className="h-1.5 w-1.5 rounded-full bg-primary/70 animate-bounce" style={{ animationDelay: "0ms", animationDuration: "0.9s" }} />
+                <span className="h-1.5 w-1.5 rounded-full bg-primary/70 animate-bounce" style={{ animationDelay: "150ms", animationDuration: "0.9s" }} />
+                <span className="h-1.5 w-1.5 rounded-full bg-primary/70 animate-bounce" style={{ animationDelay: "300ms", animationDuration: "0.9s" }} />
+              </span>
+            )
+            : (
+              // 已在吐字：贴在文末的平滑光标
+              <span className="inline-block w-1.5 h-4 rounded-full bg-primary/60 ml-0.5 align-text-bottom animate-pulse" />
+            )
         )}
         </div>
       </div>

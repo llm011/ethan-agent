@@ -3,7 +3,6 @@
 import { useState, useRef, RefObject } from "react";
 import { Send, Paperclip, Loader2, X, Reply } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
 import { uploadFile, type ModeEntry } from "@/lib/api";
 import type { Quote } from "./types";
 
@@ -20,6 +19,9 @@ const ACCENT_STYLES: Record<string, { on: string }> = {
   },
   pink: {
     on: "bg-pink-50 border-pink-300 text-pink-700 dark:bg-pink-950/40 dark:border-pink-700 dark:text-pink-300",
+  },
+  blue: {
+    on: "bg-blue-50 border-blue-300 text-blue-700 dark:bg-blue-950/40 dark:border-blue-700 dark:text-blue-300",
   },
 };
 const OFF_STYLE =
@@ -151,37 +153,44 @@ export function ChatInput({
                 ))}
               </SelectContent>
             </Select>
-            {/* 对话模式胶囊：由 /modes 表驱动，紧挨模型选择；说明文字收进 hover tooltip */}
-            {modes.filter((m) => m.key).map((m) => {
-              const on = mode === m.key;
-              const accent = ACCENT_STYLES[m.accent] ?? ACCENT_STYLES.neutral;
-              const tip = on
-                ? (m.blurb || `当前：${m.label}，点击切回工作助手`)
-                : `切换到${m.label}`;
-              return (
-                <TooltipProvider key={m.key} delay={300}>
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <button
-                          type="button"
-                          onClick={() => onModeChange?.(on ? "" : m.key)}
-                          disabled={streaming}
-                          className={
-                            "h-7 inline-flex items-center gap-1 px-2.5 text-xs font-medium rounded-lg border transition-colors disabled:opacity-40 " +
-                            (on ? accent.on : OFF_STYLE)
-                          }
-                        >
-                          <span>{m.icon}</span>
-                          <span className="max-w-[88px] truncate">{m.label}</span>
-                        </button>
-                      }
-                    />
-                    <TooltipContent>{tip}</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              );
-            })}
+            {/* 对话模式下拉：由 /modes 表驱动（含默认）；选中即切换，已有会话立即落库 */}
+            {modes.length > 0 && (
+              <Select
+                value={mode || "__default__"}
+                onValueChange={(v) => { if (v) onModeChange?.(v === "__default__" ? "" : v); }}
+                disabled={streaming}
+              >
+                <SelectTrigger
+                  className={
+                    "h-7 px-2.5 text-xs rounded-lg border shadow-none focus:ring-0 focus:ring-offset-0 gap-1 w-auto max-w-[160px] " +
+                    (mode ? (ACCENT_STYLES[modes.find((m) => m.key === mode)?.accent ?? "neutral"] ?? ACCENT_STYLES.neutral).on : OFF_STYLE)
+                  }
+                >
+                  <SelectValue placeholder="模式">
+                    {(value: string) => {
+                      const cur = modes.find((m) => (m.key || "__default__") === value);
+                      if (!cur) return "模式";
+                      return (
+                        <span className="inline-flex items-center gap-1">
+                          {cur.icon && <span>{cur.icon}</span>}
+                          <span className="truncate">{cur.label}</span>
+                        </span>
+                      );
+                    }}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {modes.map((m) => (
+                    <SelectItem key={m.key || "__default__"} value={m.key || "__default__"} className="text-xs">
+                      <span className="inline-flex items-center gap-1">
+                        {m.icon && <span>{m.icon}</span>}
+                        <span>{m.label}</span>
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
             <div className="flex-1" />
             <button
               onClick={handleSend}

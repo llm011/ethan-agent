@@ -61,7 +61,7 @@ class ChatRequest(BaseModel):
     session_id: str | None = None
     channel: str = "web"
     quote: dict | None = None  # {role, content}：引用某条历史消息，注入给模型但不入库
-    mode: str = ""  # "" = 工作助手; "陪伴" = 苏念·陪伴倾听
+    mode: str = ""  # "" = 工作助手; 规范英文 key，如 "legal"/"companion"（见 core/modes.py）
 
 
 class ChatResponse(BaseModel):
@@ -86,7 +86,7 @@ async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
                 if req.quote and req.quote.get("content"):
                     m.quote = req.quote
                 await store.save_message(req.session_id, m)
-        # 持久化对话模式：退出再进入保持工作/苏念模式
+        # 持久化对话模式：退出再进入保持当前模式
         if req.mode:
             await store.update_mode(req.session_id, req.mode)
 
@@ -151,6 +151,11 @@ def _friendly_error(e: Exception, agent) -> str:
     # 网络层 fetch failed（多见于第三方中转服务挂了）
     if "fetch failed" in lower or "connection" in lower or "timeout" in lower:
         return f"请求上游服务失败（可能中转服务不可达）：{msg[:120]}。建议在设置页切换 model 重试。"
+    # 流式输出中途断连（上游/中转在生成过程中关闭了连接）
+    if any(k in lower for k in ("unexpected eof", "peer closed", "incomplete chunked",
+                                "remoteprotocolerror", "connection reset",
+                                "stream ended", "incompleteread", "chunkedencodingerror")):
+        return "上游连接在生成中途断开（多见于中转服务不稳）。以上内容已保存，可直接发「继续」补全，或在设置页切换 model 重试。"
     return msg[:300]
 
 

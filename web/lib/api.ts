@@ -1,7 +1,7 @@
 export const API_URL = typeof window !== "undefined"
   ? (process.env.NEXT_PUBLIC_API_URL
     ? process.env.NEXT_PUBLIC_API_URL
-    : (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") && window.location.port !== "8900"
+    : window.location.port === "3000"
       ? `${window.location.protocol}//127.0.0.1:8900/api`
       : `${window.location.origin}/api`)
   : (process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8900/api");
@@ -158,9 +158,11 @@ export interface SessionDetail {
   }[];
 }
 
-export async function fetchSessions(limit = 50, offset = 0, q?: string): Promise<SessionInfo[]> {
+export async function fetchSessions(limit = 50, offset = 0, q?: string, source?: string, mode?: string): Promise<SessionInfo[]> {
   const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
   if (q) params.set("q", q);
+  if (source) params.set("source", source);
+  if (mode !== undefined) params.set("mode", mode);
   const res = await fetch(`${API_URL}/sessions?${params}`, { headers: headers() });
   if (!res.ok) throw new Error("Failed to fetch sessions");
   const data = await res.json();
@@ -172,6 +174,14 @@ export async function renameSession(id: string, title: string): Promise<void> {
     method: "PATCH",
     headers: headers(),
     body: JSON.stringify({ title }),
+  });
+}
+
+export async function updateSessionMode(id: string, mode: string): Promise<void> {
+  await fetch(`${API_URL}/sessions/${id}`, {
+    method: "PATCH",
+    headers: headers(),
+    body: JSON.stringify({ mode }),
   });
 }
 

@@ -34,6 +34,8 @@ class CommandContext:
     set_model: callable | None = None       # async (model_id) -> str
     compact_session: callable | None = None # async (chat_id) -> str：压缩当前会话历史，返回摘要/提示
     set_owner: callable | None = None       # async (chat_id, sender_id) -> str：认主人 + 设主会话
+    get_mode: callable | None = None        # async (chat_id) -> str：取当前会话 mode（"" = 默认）
+    set_mode: callable | None = None        # async (chat_id, mode_key) -> None：切换当前会话 mode
     extra_help: str = ""                    # 渠道额外的 help 行（如 web/REPL 专属命令提示）
 
 
@@ -44,6 +46,7 @@ COMMANDS = {
     "sessions": ("列出最近的会话", False),
     "resume": ("恢复指定会话（用法 /resume <id>）", True),
     "model": ("查看/切换模型（用法 /model [id]）", False),
+    "mode": ("查看/切换对话模式（用法 /mode [名称]，不带参数或 default 切回默认）", False),
     "token": ("显示 Web 访问 token（用于浏览器登录）", False),
     "owner": ("认主人：把你设为主人、当前会话设为主会话", False),
     "help": ("显示可用命令", False),
@@ -138,6 +141,47 @@ async def handle_command(ctx: CommandContext) -> str | None:
         if arg:
             return f"此渠道暂不支持直接切换模型，当前模型：{current}\n（可在 Web 设置页或 REPL /model 切换）"
         return f"当前模型：{current}"
+
+    if name == "mode":
+        from ethan.core.modes import MODES, DEFAULT_MODE, match_mode
+        if arg:
+            target = match_mode(arg)
+            if target is None:
+                avail = "、".join(
+                    f"{m.label or m.key}（{'/'.join(a for a in m.aliases if a)}）" for m in MODES
+                )
+                return (
+                    f"未识别的模式：{arg}\n当前模式保持不变。\n\n"
+                    f"可用模式：默认（default）、{avail}"
+                )
+            if ctx.set_mode is None:
+                return "此渠道暂不支持切换模式。"
+            try:
+                await ctx.set_mode(ctx.chat_id, target.key)
+            except Exception:
+                logger.exception("set_mode failed for chat %s", ctx.chat_id)
+                return "⚠️ 切换模式失败，请稍后再试。"
+            if not target.key:
+                return "🛠 已切回默认（工作助手）模式。"
+            tip = f"\n{target.blurb}" if target.blurb else ""
+            return f"{target.icon} 已切换到「{target.label or target.key}」模式。{tip}"
+        # 无参数：显示当前模式 + 可选项
+        current_key = ""
+        if ctx.get_mode is not None:
+            try:
+                current_key = await ctx.get_mode(ctx.chat_id) or ""
+            except Exception:
+                current_key = ""
+        from ethan.core.modes import resolve_mode
+        cur = resolve_mode(current_key)
+        avail = "、".join(
+            ["默认（default）"] + [f"{m.label or m.key}（{'/'.join(a for a in m.aliases if a)}）" for m in MODES]
+        )
+        return (
+            f"当前模式：{cur.label or '默认（工作助手）'}\n\n"
+            f"切换：/mode <名称>（如 /mode 法律）；/mode default 切回默认。\n"
+            f"可用模式：{avail}"
+        )
 
     if name == "owner":
         if ctx.set_owner is None:

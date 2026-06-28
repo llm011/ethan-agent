@@ -76,6 +76,7 @@ _SLASH_COMMANDS = [
     ("/resume", "Resume a session by ID"),
     ("/new", "Start new session"),
     ("/model", "Show or switch model"),
+    ("/mode", "Show or switch conversation mode"),
     ("/profile", "Show or switch user profile"),
     ("/config", "Edit settings interactively"),
     ("/token", "Show or rotate Web login token"),
@@ -312,7 +313,9 @@ async def _handle_slash_command(cmd: str, store: SessionStore, session: Session,
         return None
 
     elif command == "/new":
-        new_session = await store.create(agent._provider.model, source="repl")
+        # 新会话沿用当前模式（在法律/陪伴模式里 /new 通常想继续同模式）
+        cur_mode = getattr(agent, "_mode", "") or ""
+        new_session = await store.create(agent._provider.model, source="repl", mode=cur_mode)
         console.print(f"[green]New session created[/green]")
         return new_session
 
@@ -333,6 +336,36 @@ async def _handle_slash_command(cmd: str, store: SessionStore, session: Session,
                 console.print(f"[green]Switched to: {agent._provider.model}[/green]")
             except Exception as e:
                 console.print(f"[red]Failed: {e}[/red]")
+        return None
+
+    elif command == "/mode":
+        from ethan.core.modes import MODES, match_mode, resolve_mode
+        if len(parts) < 2:
+            cur = resolve_mode(getattr(agent, "_mode", "") or "")
+            avail = "，".join(
+                ["默认 (default)"] + [f"{m.label or m.key} ({'/'.join(a for a in m.aliases if a)})" for m in MODES]
+            )
+            console.print(f"[dim]当前模式：[cyan]{cur.label or '默认（工作助手）'}[/cyan][/dim]")
+            console.print(f"[dim]切换：/mode <名称>（如 /mode 法律）；/mode default 切回默认[/dim]")
+            console.print(f"[dim]可用：{avail}[/dim]")
+        else:
+            target = match_mode(parts[1].strip())
+            if target is None:
+                console.print(f"[yellow]未识别的模式：{parts[1].strip()}，当前模式保持不变。[/yellow]")
+            else:
+                agent._mode = target.key
+                session.mode = target.key
+                # 持久化；session 尚未入库时为 no-op，首条消息入库会带上 session.mode
+                try:
+                    await store.update_mode(session.id, target.key)
+                except Exception:
+                    pass
+                if not target.key:
+                    console.print("[green]🛠 已切回默认（工作助手）模式。[/green]")
+                else:
+                    console.print(f"[green]{target.icon} 已切换到「{target.label or target.key}」模式。[/green]")
+                    if target.blurb:
+                        console.print(f"[dim]{target.blurb}[/dim]")
         return None
 
     elif command in ("/profile", "/p"):
@@ -368,6 +401,7 @@ async def _handle_slash_command(cmd: str, store: SessionStore, session: Session,
   /new           Start new session
   /compact       Summarize history to free context
   /model [ID]    Show or switch model
+  /mode [NAME]   Show or switch conversation mode (e.g. /mode 法律, /mode default)
   /profile [ID]  Show or switch user profile
   /config        Edit settings interactively
   /token [rotate]  Show or rotate Web login token
@@ -495,7 +529,12 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
             session = await store.load(resume_id)
         if session:
             session_persisted = True
+            agent._mode = getattr(session, "mode", "") or ""
             console.print(f"[green]Session restored: {session.title}[/green] [dim]({len(session.messages)} messages)[/dim]")
+            if agent._mode:
+                from ethan.core.modes import resolve_mode
+                _m = resolve_mode(agent._mode)
+                console.print(f"[dim]{_m.icon} 模式：{_m.label or agent._mode}[/dim]")
             _print_history(session.messages, limit=30)
 
     if not session:
@@ -669,6 +708,7 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
             if result is not None:
                 session = result
                 session_persisted = True  # /resume 和 /new 返回的都是已持久化的 session
+                agent._mode = getattr(session, "mode", "") or ""  # 切会话同步模式
                 history = list(session.messages)
                 approx_tokens = sum(len(m.content) for m in history)
                 model_id = session.model
@@ -695,8 +735,8 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
         # 第一条消息时才真正持久化 session
         if not session_persisted:
             await store._db.execute(
-                "INSERT INTO sessions (id, title, model, created_at, updated_at, source) VALUES (?, ?, ?, ?, ?, ?)",
-                (session.id, session.title, session.model, session.created_at, session.updated_at, "repl"),
+                "INSERT INTO sessions (id, title, model, created_at, updated_at, source, mode) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (session.id, session.title, session.model, session.created_at, session.updated_at, "repl", getattr(session, "mode", "") or ""),
             )
             await store._db.commit()
             session_persisted = True
