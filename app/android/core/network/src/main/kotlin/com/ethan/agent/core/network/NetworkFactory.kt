@@ -62,8 +62,3 @@ object NetworkFactory {
         return ChatSseClient(createOkHttpClient(tokenProvider), json)
     }
 }
-
-// Debug flag for network logging
-object BuildConfig {
-    const val DEBUG = true
-}

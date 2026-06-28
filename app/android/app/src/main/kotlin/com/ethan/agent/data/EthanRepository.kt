@@ -41,8 +41,11 @@ import com.ethan.agent.core.network.ChatSseClient
 import com.ethan.agent.core.network.EthanApiService
 import com.ethan.agent.core.network.NetworkFactory
 import kotlinx.serialization.SerializationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
@@ -157,8 +160,8 @@ class EthanRepository @Inject constructor(
         sessionId: String?,
         quote: Quote?,
         mode: String?,
-    ): Flow<ChatStreamEvent> {
-        val cfg = kotlinx.coroutines.runBlocking { configStore.config.first() }
+    ): Flow<ChatStreamEvent> = flow {
+        val cfg = configStore.config.first()
         val request = ChatRequest(
             messages = messages,
             model = model,
@@ -167,8 +170,8 @@ class EthanRepository @Inject constructor(
             quote = quote,
             mode = mode?.ifBlank { null },
         )
-        return sseClient.streamChat(cfg.apiBaseUrl, cfg.authToken, request)
-    }
+        sseClient.streamChat(cfg.apiBaseUrl, cfg.authToken, request).collect { emit(it) }
+    }.flowOn(Dispatchers.IO)
 
     suspend fun respondConsent(requestId: String, allowed: Boolean) {
         refreshApi()
