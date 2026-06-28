@@ -27,6 +27,7 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 - Switch to "法律专家" (legal expert) mode and a single `legal-assistant` skill covers case analysis, litigation review, contract review, legal document/proposal generation, trademark & patent IP, case intake, legal search and visualization — routed by "task verb + practice area" to the matching playbook, instead of dozens of sub-skills
 - **Zero pollution**: legal skills are tagged `modes: [法律]` and only activate in legal mode; in normal work mode they never enter the context
 - **Install on demand**: the first time you enter legal mode without the skill installed, the agent prompts you and `install_skill` pulls it from the repo in one step (legal content is not bundled with the main repo, honoring the upstream CC-BY-NC non-commercial license)
+- **`/mode` switching**: both the CLI (REPL) and channels (Lark, etc.) support `/mode 法律` to enter and `/mode default` to return; an unrecognized name leaves the current mode unchanged. The mode is persisted per session and restored when you resume
 
 **Skill system**
 - Keyword trigger matching, auto-injected into system prompt

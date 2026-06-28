@@ -46,9 +46,12 @@ Ethan 提供三种交互方式，适应不同场景：
 |------|------|
 | `/sessions` | 列出最近会话 |
 | `/resume ID` | 恢复指定会话（支持短 ID 尾部匹配） |
-| `/new` | 新建会话 |
+| `/new` | 新建会话（沿用当前对话模式） |
 | `/model [ID]` | 查看或切换模型 |
+| `/mode [名称]` | 查看或切换对话模式（如 `/mode 法律`；不带参数或 `/mode default` 切回默认）。名称无法识别时保持当前模式不变 |
 | `/help` | 显示帮助 |
+
+> `/mode` 在 CLI（REPL）和消息渠道（飞书等）通用。模式持久化在 `sessions.mode`，`/resume` 恢复会话或切会话时自动同步到 `Agent._mode`，并经 `resolve_mode().key` 参与 Skill 的 `modes` 过滤。垂类技能（如「法律专家模式」的 `legal-assistant`）只在对应模式生效。模式注册表见 [modes.py](../ethan/core/modes.py)。
 
 ### Session 集成
 

@@ -61,8 +61,34 @@ _ALIAS_INDEX: dict[str, Mode] = {
 }
 
 
+_ALIAS_INDEX_LOWER: dict[str, Mode] = {
+    alias.lower(): m for m in MODES for alias in m.aliases
+}
+
+
 def resolve_mode(mode: str | None) -> Mode:
-    """把任意 mode 字符串解析为 Mode；无法解析时返回 DEFAULT_MODE。"""
+    """把任意 mode 字符串解析为 Mode；无法解析时返回 DEFAULT_MODE。
+
+    用于运行时把已持久化的 mode 字符串还原成 Mode（容错优先）。
+    """
     if not mode:
         return DEFAULT_MODE
     return _ALIAS_INDEX.get(mode.strip(), DEFAULT_MODE)
+
+
+def match_mode(mode: str | None) -> Mode | None:
+    """严格解析用户 /mode 切换意图：
+
+    - 空字符串 / "default" / "默认" → DEFAULT_MODE（切回默认工作助手）
+    - 命中某模式别名（大小写不敏感）→ 对应 Mode
+    - 其它无法识别 → None（调用方据此「保持当前 mode 不变」）
+
+    与 resolve_mode 的区别：未知输入不回退到默认，而是返回 None，
+    避免用户拼错模式名时被意外切回默认。
+    """
+    if mode is None:
+        return DEFAULT_MODE
+    key = mode.strip()
+    if not key or key.lower() in ("default", "默认"):
+        return DEFAULT_MODE
+    return _ALIAS_INDEX.get(key) or _ALIAS_INDEX_LOWER.get(key.lower())
