@@ -37,15 +37,23 @@ class SkillRegistry:
           就**无条件命中**——用户显式切到该模式即是最强意图信号，不再卡触发词。
           其它模式下完全不出现（零污染）。
         - 通用 skill（skill.modes 为空）：在所有模式可用，按触发词关键词匹配。
+
+        skill.modes 里的每一项都经 resolve_mode 归一化为规范 key 再比较，因此外部
+        技能作者写别名（如 `modes: legal` 而非 `法律`）也能匹配——消除跨仓库的隐式契约。
+        无法识别的 mode 名保持原样（失败安全，不会误落到默认模式造成泄漏）。
         """
+        from ethan.core.modes import resolve_mode
+
         query_lower = query.lower()
         matched = []
         for skill in self._skills:
             if skill.channels and channel and channel not in skill.channels:
                 continue
             if skill.modes:
-                # 模式专属：处于其模式即命中，否则跳过（不参与触发词匹配）
-                if mode in skill.modes:
+                # 归一化别名 → 规范 key；无法识别的（resolve 回退默认、key 为空）保留原值，
+                # 避免写错的 mode 名被归一成 "" 而误匹配默认模式。
+                normalized = {resolve_mode(m).key or m for m in skill.modes}
+                if mode in normalized:
                     matched.append(skill)
                 continue
             for trigger in skill.trigger:
