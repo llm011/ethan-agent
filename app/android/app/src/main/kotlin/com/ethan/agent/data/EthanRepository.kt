@@ -66,9 +66,13 @@ class EthanRepository @Inject constructor(
 
     val isLoggedIn: Flow<Boolean> = config.map { it.authToken.isNotBlank() }
 
+    private var cachedBaseUrl: String? = null
+
     private suspend fun refreshApi() {
-        val cfg = configStore.config.first()
-        api = NetworkFactory.createApiService(cfg.apiBaseUrl, tokenProvider)
+        val baseUrl = configStore.config.first().apiBaseUrl
+        if (baseUrl == cachedBaseUrl) return
+        cachedBaseUrl = baseUrl
+        api = NetworkFactory.createApiService(baseUrl, tokenProvider)
     }
 
     suspend fun repairStoredUrlIfNeeded() {
