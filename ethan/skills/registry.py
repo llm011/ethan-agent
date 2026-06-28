@@ -15,10 +15,25 @@ class SkillRegistry:
         # per-profile 技能统计；user_id 为空（default profile）时读顶层路径
         stats_path = user_skill_stats_path()
         self._stats = SkillStats(path=stats_path) if stats_path else SkillStats()
+        # embedding 路由器（可选）：模型/依赖缺失时不可用，match() 自动退回关键词
+        self._router = None
 
     def load(self) -> None:
         """从磁盘加载所有 Skills。"""
         self._skills = load_all_skills(self._user_id)
+        self._build_router()
+
+    def _build_router(self) -> None:
+        """构建 embedding 路由器索引；依赖或模型缺失时静默跳过。"""
+        try:
+            from ethan.skills.router import EmbeddingRouter
+            router = EmbeddingRouter()
+            if router.available and router.build(self._skills):
+                self._router = router
+            else:
+                self._router = None
+        except Exception:
+            self._router = None
 
     def all(self) -> list[Skill]:
         return list(self._skills)
@@ -30,16 +45,28 @@ class SkillRegistry:
         return None
 
     def match(self, query: str, channel: str = "") -> list[Skill]:
-        """根据用户输入匹配相关 Skills（关键词匹配）。channel 非空时过滤渠道。"""
+        """匹配相关 Skills。关键词子串匹配为基础（保 head 精度 + 强拒识），
+        若可用，再用 embedding 路由器补一个语义命中（补 tail 召回）。
+        channel 非空时过滤渠道。"""
         query_lower = query.lower()
         matched = []
+        seen = set()
         for skill in self._skills:
             if skill.channels and channel and channel not in skill.channels:
                 continue
             for trigger in skill.trigger:
                 if trigger.lower() in query_lower:
                     matched.append(skill)
+                    seen.add(skill.name)
                     break
+
+        # embedding 路由补召回：关键词漏掉的 tail 改写，FLOOR=0.55 宁可漏不可错
+        if self._router is not None:
+            name = self._router.route(query)
+            if name and name not in seen:
+                skill = self.get(name)
+                if skill and not (skill.channels and channel and channel not in skill.channels):
+                    matched.append(skill)
         return matched
 
     def record_hit(self, skill_name: str):

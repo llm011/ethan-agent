@@ -2,6 +2,7 @@
 name: lark-shared
 version: 1.0.0
 description: "Use when first setting up lark-cli, running auth login, switching user/bot identity (--as), handling permission denied or scope errors, needing to update lark-cli, or seeing _notice in JSON output."
+trigger: "lark-cli|lark 命令行|飞书命令行|飞书 cli|auth login|登录飞书工具|切换身份|机器人身份|bot 身份|user 身份|权限错误|权限不够|授权失败|更新 lark-cli|登录态|登录状态|凭证"
 ---
 
 # lark-cli 共享规则
