@@ -8,6 +8,7 @@ import { Loader2, Search, Calendar, MessageSquare, ChevronLeft, ChevronRight, Pe
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 
 interface AllSessionsViewProps {
@@ -24,17 +25,21 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
   const [editingTitle, setEditingTitle] = useState("");
   const [confirmState, setConfirmState] = useState<{ open: boolean; id: string }>({ open: false, id: "" });
   const [modes, setModes] = useState<ModeEntry[]>([]);
+  const [filterSource, setFilterSource] = useState<string>("");  // "" = 全部渠道
+  const [filterMode, setFilterMode] = useState<string>("__all__"); // "__all__" = 全部模式
   const limit = 20;
 
   useEffect(() => {
     fetchModes().then(setModes).catch(() => {});
   }, []);
 
-  const loadSessions = useCallback(async (pageNum: number, q: string) => {
+  const loadSessions = useCallback(async (pageNum: number, q: string, src: string, md: string) => {
     setLoading(true);
     try {
       const offset = (pageNum - 1) * limit;
-      const data = await fetchSessions(limit, offset, q || undefined);
+      // "__all__" = 不筛模式；"__default__" = 默认模式（DB 里存空串）；其余 = mode key
+      const modeParam = md === "__all__" ? undefined : (md === "__default__" ? "" : md);
+      const data = await fetchSessions(limit, offset, q || undefined, src || undefined, modeParam);
       if (data.length < limit) {
         setHasMore(false);
       } else {
@@ -52,21 +57,21 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
     const q = search.trim();
     const timer = setTimeout(() => {
       setPage(1);
-      loadSessions(1, q);
+      loadSessions(1, q, filterSource, filterMode);
     }, 300);
     return () => clearTimeout(timer);
-  }, [search, loadSessions]);
+  }, [search, filterSource, filterMode, loadSessions]);
 
   useEffect(() => {
     if (page > 1) {
-      loadSessions(page, search.trim());
+      loadSessions(page, search.trim(), filterSource, filterMode);
     }
-  }, [page, search, loadSessions]);
+  }, [page, search, filterSource, filterMode, loadSessions]);
 
-  // Poll for new sessions every 3s
+  // Poll for new sessions every 3s（搜索或筛选时暂停，避免轮询结果覆盖筛选视图）
   useEffect(() => {
     const interval = setInterval(async () => {
-      if (search.trim()) return;
+      if (search.trim() || filterSource || filterMode !== "__all__") return;
       try {
         const data = await fetchPoll();
         setSessions(prev => {
@@ -79,7 +84,7 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
     }, 3000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search]);
+  }, [search, filterSource, filterMode]);
 
   const commitRename = async (id: string) => {
     const title = editingTitle.trim();
@@ -111,16 +116,48 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
         onConfirm={doDelete}
         onCancel={() => setConfirmState({ open: false, id: "" })}
       />
-      <div className="p-4 border-b border-border flex items-center justify-between shrink-0">
-        <h1 className="text-lg font-semibold">全部历史对话</h1>
-        <div className="relative w-56">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="搜索对话..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-9 bg-background h-8 text-sm"
-          />
+      <div className="p-4 border-b border-border flex items-center justify-between gap-3 shrink-0 flex-wrap">
+        <h1 className="text-lg font-semibold shrink-0">全部历史对话</h1>
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* 渠道筛选 */}
+          <Select value={filterSource || "__all__"} onValueChange={(v) => { if (v) setFilterSource(v === "__all__" ? "" : v); }}>
+            <SelectTrigger className="h-8 text-xs w-auto min-w-[88px] gap-1">
+              <SelectValue placeholder="渠道" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__" className="text-xs">全部渠道</SelectItem>
+              <SelectItem value="web" className="text-xs">Web</SelectItem>
+              <SelectItem value="lark" className="text-xs">飞书</SelectItem>
+              <SelectItem value="repl" className="text-xs">命令行</SelectItem>
+              <SelectItem value="heartbeat" className="text-xs">心跳</SelectItem>
+            </SelectContent>
+          </Select>
+          {/* 模式筛选（数据驱动：默认 + 各对话模式） */}
+          <Select value={filterMode} onValueChange={(v) => { if (v) setFilterMode(v); }}>
+            <SelectTrigger className="h-8 text-xs w-auto min-w-[88px] gap-1">
+              <SelectValue placeholder="模式" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__" className="text-xs">全部模式</SelectItem>
+              {modes.map((m) => (
+                <SelectItem key={m.key || "__default__"} value={m.key || "__default__"} className="text-xs">
+                  <span className="inline-flex items-center gap-1">
+                    {m.icon && <span>{m.icon}</span>}
+                    <span>{m.label}</span>
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <div className="relative w-56">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="搜索对话..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-9 bg-background h-8 text-sm"
+            />
+          </div>
         </div>
       </div>
 

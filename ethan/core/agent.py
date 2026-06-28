@@ -303,11 +303,14 @@ class Agent:
             "</mode_identity>"
         )
 
-    def _mode_install_hint(self) -> str | None:
+    def _mode_install_hint(self, messages: list[Message] | None = None) -> str | None:
         """当前 mode 依赖某 skill 但尚未安装时，返回引导安装的系统提示；否则 None。
 
         通用机制：mode 在 modes.py 里声明 requires_skill + install_source，
         内核不认任何具体技能名。
+
+        只在该模式会话的**前 2 个用户回合**注入，避免用户切了模式却一直不装、
+        继续闲聊时每条消息都唠叨同一段提示、白占 token。前 2 轮足够把安装引导讲清楚。
         """
         from ethan.core.modes import resolve_mode
         mode = resolve_mode(self._mode)
@@ -315,6 +318,10 @@ class Agent:
             return None
         if self._skills.get(mode.requires_skill) is not None:
             return None
+        if messages is not None:
+            user_turns = sum(1 for m in messages if m.role == "user")
+            if user_turns > 2:
+                return None
         src = mode.install_source or mode.requires_skill
         return (
             "<mode_setup>\n"
@@ -391,7 +398,7 @@ class Agent:
                                   if not t.fast_path and t.name in skill_ctx]
                     if referenced:
                         activate_tools(referenced)
-            mode_hint = self._mode_install_hint()
+            mode_hint = self._mode_install_hint(messages)
             if mode_hint:
                 parts.append(mode_hint)
             if self.runtime_context:
@@ -471,7 +478,7 @@ class Agent:
             if skill_ctx:
                 parts.append(f"<relevant_skills>\n{skill_ctx}\n</relevant_skills>")
 
-        mode_hint = self._mode_install_hint()
+        mode_hint = self._mode_install_hint(messages)
         if mode_hint:
             parts.append(mode_hint)
 

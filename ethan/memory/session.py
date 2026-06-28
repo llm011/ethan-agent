@@ -244,11 +244,25 @@ class SessionStore:
 
         return session
 
-    async def list_recent(self, limit: int = 20, offset: int = 0) -> list[Session]:
+    async def list_recent(self, limit: int = 20, offset: int = 0,
+                          source: str = "", mode: str | None = None) -> list[Session]:
+        """最近会话列表。source 非空时按渠道过滤；mode 非 None 时按对话模式过滤
+        （传 "" 可筛“默认模式”会话）。过滤在 SQL 层做，分页对过滤后结果生效。"""
+        where = []
+        params: list = []
+        if source:
+            where.append("COALESCE(source, 'web') = ?")
+            params.append(source)
+        if mode is not None:
+            where.append("COALESCE(mode, '') = ?")
+            params.append(mode)
+        where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+        params.extend([limit, offset])
         sessions = []
         async with self._db.execute(
-            "SELECT id, title, model, created_at, updated_at, COALESCE(source, 'web') as source, COALESCE(mode, '') as mode FROM sessions ORDER BY updated_at DESC LIMIT ? OFFSET ?",
-            (limit, offset),
+            "SELECT id, title, model, created_at, updated_at, COALESCE(source, 'web') as source, COALESCE(mode, '') as mode "
+            f"FROM sessions{where_sql} ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+            tuple(params),
         ) as cursor:
             async for row in cursor:
                 sessions.append(Session(
