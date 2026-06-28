@@ -151,6 +151,11 @@ def _friendly_error(e: Exception, agent) -> str:
     # 网络层 fetch failed（多见于第三方中转服务挂了）
     if "fetch failed" in lower or "connection" in lower or "timeout" in lower:
         return f"请求上游服务失败（可能中转服务不可达）：{msg[:120]}。建议在设置页切换 model 重试。"
+    # 流式输出中途断连（上游/中转在生成过程中关闭了连接）
+    if any(k in lower for k in ("unexpected eof", "peer closed", "incomplete chunked",
+                                "remoteprotocolerror", "connection reset",
+                                "stream ended", "incompleteread", "chunkedencodingerror")):
+        return "上游连接在生成中途断开（多见于中转服务不稳）。以上内容已保存，可直接发「继续」补全，或在设置页切换 model 重试。"
     return msg[:300]
 
 

@@ -166,7 +166,18 @@ export function ChatInput({
                     (mode ? (ACCENT_STYLES[modes.find((m) => m.key === mode)?.accent ?? "neutral"] ?? ACCENT_STYLES.neutral).on : OFF_STYLE)
                   }
                 >
-                  <SelectValue placeholder="模式" />
+                  <SelectValue placeholder="模式">
+                    {(value: string) => {
+                      const cur = modes.find((m) => (m.key || "__default__") === value);
+                      if (!cur) return "模式";
+                      return (
+                        <span className="inline-flex items-center gap-1">
+                          {cur.icon && <span>{cur.icon}</span>}
+                          <span className="truncate">{cur.label}</span>
+                        </span>
+                      );
+                    }}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {modes.map((m) => (

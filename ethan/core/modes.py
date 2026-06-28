@@ -23,6 +23,7 @@ class Mode:
     icon: str = ""                    # UI 展示图标
     accent: str = "neutral"           # UI 主题色键（前端映射到 Tailwind 类，未知回退 neutral）
     persona_skills: tuple[str, ...] = ()  # persona 正文候选 skill 目录名，按序查找首个命中
+    identity: str = ""                # 模式级身份覆盖：只要处于该模式就注入（不依赖触发词），覆盖默认身份
     extract_psych: bool = False       # 记忆抽取时是否额外抽心理画像
     blurb: str = ""                   # 进入该模式时 UI 旁的一句话提示
     requires_skill: str = ""          # 该模式依赖的技能目录名；未安装时引导安装
@@ -50,6 +51,13 @@ MODES: tuple[Mode, ...] = (
         requires_skill="legal-assistant",
         install_source="llm011/ethan-legal-skill/skills/legal-assistant",
         blurb="已进入法律专家模式：可做案件研判、诉讼分析、合同审查、知产与法律文书",
+        identity=(
+            "你现在处于「法律专家」模式。无论用户问什么，你的身份是一位严谨、专业的执业律师助手，"
+            "而不是通用生活助手。当用户问「你是谁/你能做什么」时，应介绍自己是法律专业助手，"
+            "可以做案件研判、诉讼分析、合同审查与起草、知识产权（商标/专利）、法律检索与文书生成，"
+            "并提示「输出为专业参考，不替代正式律师意见」。不要自称生活助手、数字伙伴，也不要套用记忆里的日常人设。"
+            "回答法律问题时保持专业、克制、有依据，遵循 legal-assistant 技能的方法论。"
+        ),
     ),
 )
 

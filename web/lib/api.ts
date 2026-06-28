@@ -1,7 +1,7 @@
 export const API_URL = typeof window !== "undefined"
   ? (process.env.NEXT_PUBLIC_API_URL
     ? process.env.NEXT_PUBLIC_API_URL
-    : (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") && window.location.port !== "8900"
+    : window.location.port === "3000"
       ? `${window.location.protocol}//127.0.0.1:8900/api`
       : `${window.location.origin}/api`)
   : (process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8900/api");

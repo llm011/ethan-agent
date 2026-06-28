@@ -318,7 +318,11 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           continue;
         }
         if (chunk.error) {
-          assistantContent = `Error: ${chunk.error}`;
+          // 保留已流式输出的内容，把错误作为页脚追加，而不是整体替换覆盖掉用户正在读的回答
+          const errLine = `⚠️ ${chunk.error}`;
+          assistantContent = assistantContent.trim()
+            ? `${assistantContent}\n\n---\n${errLine}`
+            : errLine;
           break;
         }
         if (chunk.tool && chunk.state === "start") {
@@ -391,7 +395,10 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         }
       }
     } catch (err) {
-      assistantContent = `Error: ${err instanceof Error ? err.message : "Unknown error"}`;
+      const errLine = `⚠️ ${err instanceof Error ? err.message : "连接中断"}`;
+      assistantContent = assistantContent.trim()
+        ? `${assistantContent}\n\n---\n${errLine}`
+        : errLine;
     }
 
     setMessages(prev => {

@@ -30,17 +30,23 @@ class SkillRegistry:
         return None
 
     def match(self, query: str, channel: str = "", mode: str = "") -> list[Skill]:
-        """根据用户输入匹配相关 Skills（关键词匹配）。
+        """根据用户输入匹配相关 Skills。
 
-        channel 非空时过滤渠道；按 mode 过滤：skill.modes 非空时仅在所列 mode 生效，
-        空 modes = 所有模式可用（含默认工作助手模式 mode=""）。
+        channel 非空时过滤渠道。匹配分两类：
+        - 模式专属 skill（skill.modes 非空）：只在所列 mode 生效，且一旦处于该 mode
+          就**无条件命中**——用户显式切到该模式即是最强意图信号，不再卡触发词。
+          其它模式下完全不出现（零污染）。
+        - 通用 skill（skill.modes 为空）：在所有模式可用，按触发词关键词匹配。
         """
         query_lower = query.lower()
         matched = []
         for skill in self._skills:
             if skill.channels and channel and channel not in skill.channels:
                 continue
-            if skill.modes and mode not in skill.modes:
+            if skill.modes:
+                # 模式专属：处于其模式即命中，否则跳过（不参与触发词匹配）
+                if mode in skill.modes:
+                    matched.append(skill)
                 continue
             for trigger in skill.trigger:
                 if trigger.lower() in query_lower:

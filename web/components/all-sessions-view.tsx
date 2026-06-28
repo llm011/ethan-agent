@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { format } from "date-fns";
 import { zhCN } from "date-fns/locale";
-import { SessionInfo, fetchSessions, fetchPoll, renameSession, deleteSession } from "@/lib/api";
+import { SessionInfo, fetchSessions, fetchPoll, renameSession, deleteSession, fetchModes, type ModeEntry } from "@/lib/api";
 import { Loader2, Search, Calendar, MessageSquare, ChevronLeft, ChevronRight, Pencil, Trash2, Check, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -23,7 +23,12 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const [confirmState, setConfirmState] = useState<{ open: boolean; id: string }>({ open: false, id: "" });
+  const [modes, setModes] = useState<ModeEntry[]>([]);
   const limit = 20;
+
+  useEffect(() => {
+    fetchModes().then(setModes).catch(() => {});
+  }, []);
 
   const loadSessions = useCallback(async (pageNum: number, q: string) => {
     setLoading(true);
@@ -130,7 +135,7 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
             <p>未找到相关对话</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
             {sessions.map((session) => {
               const sourceLabel: Record<string, string> = { lark: "飞书", repl: "命令行", web: "Web", heartbeat: "心跳" };
               const sourceColor: Record<string, string> = {
@@ -140,13 +145,25 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
                 heartbeat: "bg-orange-500/15 text-orange-600 dark:text-orange-400",
               };
               const src = session.source || "web";
+              // mode 分类的图标/配色（默认模式不展示徽标）
+              const modeAccentRing: Record<string, string> = {
+                blue: "ring-blue-500/30 bg-blue-500/10 text-blue-600 dark:text-blue-400",
+                pink: "ring-pink-500/30 bg-pink-500/10 text-pink-600 dark:text-pink-400",
+                neutral: "ring-border bg-muted text-muted-foreground",
+              };
+              const curMode = session.mode ? modes.find((m) => m.key === session.mode) : undefined;
+              const modeRing = curMode ? (modeAccentRing[curMode.accent] ?? modeAccentRing.neutral) : "ring-border bg-muted/60 text-muted-foreground";
               return (
                 <div
                   key={session.id}
                   onClick={() => onSelectSession(session.id)}
-                  className="group p-3 rounded-xl border border-border bg-card hover:border-primary/50 hover:shadow-md transition-all cursor-pointer flex flex-col"
+                  className="group relative p-4 rounded-2xl border border-border bg-card hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5 hover:-translate-y-0.5 transition-all duration-200 cursor-pointer flex flex-col min-h-[112px]"
                 >
-                  <div className="flex items-start gap-1 mb-0.5">
+                  <div className="flex items-start gap-2.5 mb-1">
+                    {/* mode/会话 图标头像 */}
+                    <div className={`shrink-0 h-9 w-9 rounded-xl ring-1 flex items-center justify-center text-base ${modeRing}`}>
+                      {curMode?.icon || <MessageSquare className="h-4 w-4 opacity-60" />}
+                    </div>
                     {editingId === session.id ? (
                       <div className="flex items-center gap-1 flex-1 min-w-0" onClick={e => e.stopPropagation()}>
                         <input
@@ -159,12 +176,12 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
                           }}
                           className="flex-1 min-w-0 bg-transparent outline-none border-b border-primary text-sm font-medium"
                         />
-                        <button onClick={e => { e.stopPropagation(); commitRename(session.id); }} className="text-primary shrink-0"><Check className="h-3 w-3" /></button>
-                        <button onClick={e => { e.stopPropagation(); setEditingId(null); }} className="text-muted-foreground shrink-0"><X className="h-3 w-3" /></button>
+                        <button onClick={e => { e.stopPropagation(); commitRename(session.id); }} className="text-primary shrink-0"><Check className="h-3.5 w-3.5" /></button>
+                        <button onClick={e => { e.stopPropagation(); setEditingId(null); }} className="text-muted-foreground shrink-0"><X className="h-3.5 w-3.5" /></button>
                       </div>
                     ) : (
                       <h3
-                        className="font-semibold text-sm text-card-foreground line-clamp-2 leading-snug group-hover:text-primary transition-colors flex-1 min-w-0"
+                        className="font-semibold text-sm text-card-foreground line-clamp-2 leading-snug group-hover:text-primary transition-colors flex-1 min-w-0 pt-0.5"
                         dangerouslySetInnerHTML={{
                           __html: search.trim()
                             ? session.title.replace(new RegExp(search.trim(), 'gi'), match => `<span class="bg-yellow-500/30 text-yellow-500 rounded px-0.5">${match}</span>`)
@@ -175,22 +192,22 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
                     <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                       <button
                         onClick={e => { e.stopPropagation(); setEditingTitle(session.title); setEditingId(session.id); }}
-                        className="p-1 hover:text-foreground text-muted-foreground rounded"
+                        className="p-1.5 hover:text-foreground hover:bg-muted text-muted-foreground rounded-lg"
                       >
-                        <Pencil className="h-3 w-3" />
+                        <Pencil className="h-3.5 w-3.5" />
                       </button>
                       <button
                         onClick={e => { e.stopPropagation(); handleDelete(session.id); }}
-                        className="p-1 hover:text-destructive text-muted-foreground rounded"
+                        className="p-1.5 hover:text-destructive hover:bg-destructive/10 text-muted-foreground rounded-lg"
                       >
-                        <Trash2 className="h-3 w-3" />
+                        <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     </div>
                   </div>
 
                   {session.snippet && (
                     <p
-                      className="text-xs text-muted-foreground/70 line-clamp-1 mb-2"
+                      className="text-xs text-muted-foreground/70 line-clamp-1 mb-2 pl-[46px]"
                       dangerouslySetInnerHTML={{
                         __html: search.trim()
                           ? session.snippet.slice(0, 40).replace(new RegExp(search.trim(), 'gi'), match => `<span class="bg-yellow-500/30 text-yellow-500 rounded px-0.5">${match}</span>`)
@@ -199,10 +216,15 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
                     />
                   )}
 
-                  <div className="flex items-center gap-1.5 mt-auto flex-wrap">
+                  <div className="flex items-center gap-1.5 mt-auto flex-wrap pl-[46px]">
                     <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${sourceColor[src] || sourceColor.web}`}>
                       {sourceLabel[src] || src}
                     </span>
+                    {curMode && (
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium inline-flex items-center gap-0.5 ${modeAccentRing[curMode.accent] ?? modeAccentRing.neutral}`}>
+                        <span>{curMode.icon}</span>{curMode.label}
+                      </span>
+                    )}
                     <span className="text-[10px] text-muted-foreground">
                       {format(session.updated_at * 1000, "MM-dd HH:mm")}
                     </span>

@@ -286,6 +286,23 @@ class Agent:
             "</persona_override>"
         )
 
+    def _mode_identity_block(self) -> str | None:
+        """当前 mode 声明了 identity 时，返回身份覆盖块（不依赖触发词，进模式即生效）。
+
+        与 persona_skills 不同：identity 是轻量的、模式级的身份声明，直接写在 modes.py，
+        用于「法律专家」这类工具型模式——确保问「你是谁」时回答专业身份，而非默认日常人设。
+        """
+        from ethan.core.modes import resolve_mode
+        mode = resolve_mode(self._mode)
+        if not mode.identity:
+            return None
+        return (
+            "<mode_identity>\n"
+            f"[CRITICAL — 当前处于「{mode.label}」模式，以下身份覆盖默认身份与记忆里的日常人设]\n\n"
+            f"{mode.identity}\n"
+            "</mode_identity>"
+        )
+
     def _mode_install_hint(self) -> str | None:
         """当前 mode 依赖某 skill 但尚未安装时，返回引导安装的系统提示；否则 None。
 
@@ -332,6 +349,9 @@ class Agent:
             persona_block = self._persona_block()
             if persona_block:
                 parts.append(persona_block)
+            mode_identity = self._mode_identity_block()
+            if mode_identity:
+                parts.append(mode_identity)
             parts.append(f"Current time: {now}")
             parts.append(f"Your workspace directory is {workspace}.")
             parts.append(f"Current model: {self._provider.model}（用户问起你用的什么模型/是谁驱动时，如实回答这个 model id）")
@@ -392,6 +412,9 @@ class Agent:
         persona_block = self._persona_block()
         if persona_block:
             parts.append(persona_block)
+        mode_identity = self._mode_identity_block()
+        if mode_identity:
+            parts.append(mode_identity)
         if agent_content:
             parts.append(f"<agent_protocols>\n{agent_content}\n</agent_protocols>")
         if tools_content:
