@@ -28,9 +28,7 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideTokenProvider(configStore: AppConfigStore): () -> String = {
-        runBlocking { configStore.config.first().authToken }
-    }
+    fun provideTokenProvider(tokenCache: AuthTokenCache): () -> String = tokenCache::get
 
     @Provides
     @Singleton
