@@ -16,18 +16,21 @@ metadata:
 
 **必读** [`lark-shared/SKILL.md`](../lark-shared/SKILL.md) — 了解 lark-cli 认证和 `--as` 身份切换。
 
-## 基本用法
+## ⚠️ 必须用脚本导出，不能直接用 shell 调 lark-cli
+
+**不要**通过 shell 工具直接调 `lark-cli docs +fetch` 来导出文件——shell 工具有 8000 字符输出截断，大文档会丢失大量内容。
+
+**必须**用下面的脚本，脚本内部用 subprocess 调 lark-cli（绕开截断），stdout 只输出文件路径：
 
 ```bash
 python ~/.ethan/skills/lark-doc/scripts/fetch_doc.py "https://xxx.feishu.cn/docx/TOKEN" ./output.md
 ```
 
 脚本会：
-1. 用 `lark-cli docs +fetch --api-version v2 --doc-format markdown` 获取文档内容
-2. 扫描 markdown 中所有图片引用（`![](feishu_url)`）
-3. 如果检测到 `upload-cdn` 凭证（`CDN_ENDPOINT` 等环境变量），自动下载图片并上传 CDN，替换为公开 URL
-4. 如果没有 CDN 凭证，保留飞书原始 URL 并在文件末尾附上说明
-5. 写出 `.md` 文件
+1. 内部调 `lark-cli docs +fetch --api-version v2 --doc-format markdown` 获取完整文档（不受 shell 截断影响）
+2. 扫描图片，有 CDN 凭证则上传替换为公开 URL，无则保留飞书链接
+3. 检测视频/附件 Token，下载到 `./media/` 目录并替换为本地链接
+4. 写出完整 `.md` 文件，stdout 只打印文件路径
 
 ## 凭证依赖
 
