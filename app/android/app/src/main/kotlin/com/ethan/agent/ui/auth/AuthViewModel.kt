@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -51,7 +52,7 @@ class AuthViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             repository.repairStoredUrlIfNeeded()
-            val config = repository.config.stateIn(viewModelScope).value
+            val config = repository.config.first()
             if (config.authToken.isNotBlank()) {
                 verifyExistingToken()
             } else {
@@ -62,7 +63,7 @@ class AuthViewModel @Inject constructor(
 
     private suspend fun verifyExistingToken() {
         loading.value = true
-        val token = repository.config.stateIn(viewModelScope).value.authToken
+        val token = repository.config.first().authToken
         val result = repository.login(token)
         authenticated.value = result.isSuccess
         if (result.isFailure) {

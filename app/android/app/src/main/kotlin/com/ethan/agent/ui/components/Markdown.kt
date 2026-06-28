@@ -3,6 +3,7 @@ package com.ethan.agent.ui.components
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -12,8 +13,9 @@ import androidx.compose.ui.text.withStyle
 
 @Composable
 fun SimpleMarkdown(text: String, modifier: androidx.compose.ui.Modifier = androidx.compose.ui.Modifier) {
+    val annotated = remember(text) { parseSimpleMarkdown(text) }
     Text(
-        text = parseSimpleMarkdown(text),
+        text = annotated,
         style = MaterialTheme.typography.bodyMedium,
         modifier = modifier,
     )
