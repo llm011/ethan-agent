@@ -172,6 +172,20 @@ class ChatViewModel @Inject constructor(
                 try {
                     val toolSteps = mutableListOf<ToolStep>()
                     var usage: Usage? = null
+                    val contentBuilder = StringBuilder()
+                    var lastContentFlushMs = 0L
+
+                    fun flushStreamingContent(force: Boolean = false) {
+                        val now = System.currentTimeMillis()
+                        if (!force && now - lastContentFlushMs < 50L) return
+                        lastContentFlushMs = now
+                        val content = contentBuilder.toString()
+                        _state.update { s ->
+                            val msgs = s.messages.toMutableList()
+                            msgs[assistantIndex] = msgs[assistantIndex].copy(content = content)
+                            s.copy(messages = msgs)
+                        }
+                    }
 
                     repository.streamChat(
                         messages = history,
@@ -194,12 +208,8 @@ class ChatViewModel @Inject constructor(
                                 }
                             }
                             event.content != null -> {
-                                _state.update { s ->
-                                    val msgs = s.messages.toMutableList()
-                                    val last = msgs[assistantIndex]
-                                    msgs[assistantIndex] = last.copy(content = last.content + event.content)
-                                    s.copy(messages = msgs)
-                                }
+                                contentBuilder.append(event.content)
+                                flushStreamingContent()
                             }
                             event.tool != null -> {
                                 val toolName = event.tool ?: return@collect
@@ -231,6 +241,7 @@ class ChatViewModel @Inject constructor(
                         }
                     }
 
+                    flushStreamingContent(force = true)
                     _state.update { s ->
                         val msgs = s.messages.toMutableList()
                         val last = msgs[assistantIndex]
