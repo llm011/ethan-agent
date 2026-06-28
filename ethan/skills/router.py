@@ -12,10 +12,14 @@ query 编码后与所有锚点算 max cosine，最高分 skill 的分数 >= FLOO
 0.55，宁可漏不可错。heavy 路径（Map-Reduce）执行始终经 LLM 闸门，注入 skill ≠ 执行。
 
 依赖 onnxruntime + transformers + BGE ONNX 模型（pip install 'ethan-agent[router]'）。
-缺任一 → encoder 不可用，route() 返回 None，调用方回退关键词匹配，不影响主流程。
+模型 + tokenizer 首次使用时从 HF Hub（llm011/bge-small-zh-v1.5-onnx）自动下载到
+~/.ethan/models/bge-small-zh/，之后离线可用；也可用 `ethan router pull` 预拉（Docker/离线）。
+缺依赖、下载失败或离线无缓存 → encoder 不可用，route() 返回 None，调用方回退关键词匹配，
+不影响主流程。
 """
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -23,18 +27,62 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ethan.skills.loader import Skill
 
+logger = logging.getLogger(__name__)
+
 # BGE 中文：query 需加指令前缀，passage（锚点）不加
 _QUERY_PREFIX = "为这个句子生成表示以用于检索相关文章："
 _BASE_MODEL = "BAAI/bge-small-zh-v1.5"
 _DEFAULT_FLOOR = 0.55
 
-# 模型路径：环境变量优先，否则 ~/.ethan/models/bge-small-zh/model.onnx
+# 模型路径：环境变量优先，否则 ~/.ethan/models/bge-small-zh/
 _MODEL_ENV = "ETHAN_BGE_ONNX"
+# HF Hub 仓库：含 model.onnx + tokenizer 全套，首次自动下载到本地后离线可用
+_HF_REPO = "llm011/bge-small-zh-v1.5-onnx"
+_MODEL_FILENAME = "model.onnx"
+
+
+def _default_model_dir() -> Path:
+    from ethan.core.config import CONFIG_DIR
+    return CONFIG_DIR / "models" / "bge-small-zh"
 
 
 def _default_model_path() -> Path:
-    from ethan.core.config import CONFIG_DIR
-    return CONFIG_DIR / "models" / "bge-small-zh" / "model.onnx"
+    return _default_model_dir() / _MODEL_FILENAME
+
+
+def ensure_model(force: bool = False) -> Path | None:
+    """确保本地有 BGE ONNX 模型 + tokenizer，返回模型目录；缺依赖/下载失败返回 None。
+
+    顺序：环境变量指定的路径 > 本地已下载 > 从 HF Hub 自动下载。
+    供 `_Encoder` 和 `ethan router pull` 共用。
+    """
+    env_path = os.environ.get(_MODEL_ENV)
+    if env_path:
+        p = Path(env_path)
+        return p.parent if p.is_file() else (p if p.exists() else None)
+
+    model_dir = _default_model_dir()
+    if not force and (model_dir / _MODEL_FILENAME).exists():
+        return model_dir
+
+    try:
+        from huggingface_hub import snapshot_download
+    except Exception:
+        logger.debug("[router] huggingface_hub 不可用，跳过模型下载")
+        return None
+
+    try:
+        logger.info("[router] 正在下载语义路由模型 %s (~95MB，仅首次)...", _HF_REPO)
+        snapshot_download(
+            repo_id=_HF_REPO,
+            local_dir=str(model_dir),
+            allow_patterns=["*.onnx", "*.json", "*.txt", "tokenizer*", "vocab*"],
+        )
+    except Exception as e:
+        logger.warning("[router] 模型下载失败（将回退关键词匹配）：%s", e)
+        return None
+
+    return model_dir if (model_dir / _MODEL_FILENAME).exists() else None
 
 
 class _Encoder:
@@ -56,12 +104,17 @@ class _Encoder:
             import onnxruntime as ort
             from transformers import AutoTokenizer
 
-            model_path = os.environ.get(_MODEL_ENV) or str(_default_model_path())
-            if not Path(model_path).exists():
+            model_dir = ensure_model()
+            if model_dir is None:
                 self._sess = False  # 标记尝试过
                 return False
+            model_path = str(model_dir / _MODEL_FILENAME)
             self._sess = ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
-            self._tok = AutoTokenizer.from_pretrained(_BASE_MODEL)
+            # tokenizer 优先从本地下载目录加载（离线友好），缺失时回退基座 repo
+            try:
+                self._tok = AutoTokenizer.from_pretrained(str(model_dir))
+            except Exception:
+                self._tok = AutoTokenizer.from_pretrained(_BASE_MODEL)
             self._input_names = {i.name for i in self._sess.get_inputs()}
             self._ready = True
             return True

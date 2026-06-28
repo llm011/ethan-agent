@@ -40,9 +40,11 @@ dependencies = [
 [project.optional-dependencies]
 # embedding 路由器（可选）：BGE-small-zh ONNX 语义快筛，补关键词漏掉的 tail 召回。
 # 不装也能跑——router 不可用时 registry.match() 自动退回纯关键词匹配。
+# 模型 + tokenizer 首次使用时从 HF Hub 自动下载，无需手动准备文件。
 router = [
     "onnxruntime>=1.18.0",
     "transformers>=4.40.0",
+    "huggingface_hub>=0.23.0",
     "numpy>=1.26.0",
 ]
 
