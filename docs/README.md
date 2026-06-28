@@ -31,6 +31,7 @@
 | [工具系统](./tools.md) | Tool 抽象、注册表、执行器、内置工具（shell、web_search、web_fetch、file、rg、fd）、MCP 接入 |
 | [记忆系统](./memory.md) | Session 持久化、三层记忆（热/温/冷）、Facts、Episodic memory、压缩机制 |
 | [Skill 系统](./skills.md) | Skill 加载、关键词匹配注入、自动生成 |
+| [对话模式](./modes.md) | Mode 机制、身份覆盖、按对话模式过滤技能、法律专家模式按需安装 |
 | [调度器](./scheduler.md) | 定时任务、cron + interval、SQLite 持久化 |
 | [接口层](./interface.md) | CLI (REPL)、HTTP API (SSE)、命令行工具、Web UI 路由 |
 | [ACP 集成](./acp.md) | 外部 Coding Agent 委派协议、Claude Code / OpenCode / Codex 接入、多轮会话、sub_steps 解析 |

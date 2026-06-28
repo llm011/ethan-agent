@@ -304,13 +304,17 @@ class Agent:
         )
 
     def _mode_install_hint(self, messages: list[Message] | None = None) -> str | None:
-        """当前 mode 依赖某 skill 但尚未安装时，返回引导安装的系统提示；否则 None。
+        """当前 mode 依赖某 skill 但尚未安装时，返回「自动安装」指令；否则 None。
 
-        通用机制：mode 在 modes.py 里声明 requires_skill + install_source，
+        通用机制：mode 在 modes.py 里声明 requires_skill + install_source(+ install_alias)，
         内核不认任何具体技能名。
 
-        只在该模式会话的**前 2 个用户回合**注入，避免用户切了模式却一直不装、
-        继续闲聊时每条消息都唠叨同一段提示、白占 token。前 2 轮足够把安装引导讲清楚。
+        接入体验（友好默认，见记忆 feedback-mode-skill-onboarding）：
+        - 自动安装：用户切到该模式即强意图信号，直接装，不先问一轮。
+        - 可见反馈：安装前先说一句「正在为 X 模式安装技能…」，不静默联网。
+        - 失败兜底：装失败（离线/代理不通）时，降级提示用户手动 `ethan skill add <alias>`。
+
+        只在该模式会话的**前 2 个用户回合**注入，避免装好前/装不上时每条消息都唠叨。
         """
         from ethan.core.modes import resolve_mode
         mode = resolve_mode(self._mode)
@@ -323,12 +327,17 @@ class Agent:
             if user_turns > 2:
                 return None
         src = mode.install_source or mode.requires_skill
+        alias = mode.install_alias or mode.requires_skill
         return (
             "<mode_setup>\n"
-            f"[CRITICAL] 用户已切换到「{mode.label}」模式，但尚未安装依赖技能 "
-            f"`{mode.requires_skill}`。请先用一两句话告诉用户该模式需要安装此技能，"
-            f"征得同意后调用 install_skill(source=\"{src}\") 一键安装；"
-            "安装后无需重启，下次对话即生效。在安装完成前，不要假装已具备该模式的专业能力。\n"
+            f"[CRITICAL] 用户已切换到「{mode.label}」模式，但依赖技能 `{mode.requires_skill}` 尚未安装。"
+            "用户主动切到本模式即视为同意安装，请按以下步骤自动完成，不要再反问要不要装：\n"
+            f"1. 先用一句话告知：正在为「{mode.label}」模式安装依赖技能，请稍候。\n"
+            f"2. 立即调用 install_skill(source=\"{src}\") 安装（无需重启，安装后下次对话即生效）。\n"
+            f"3. 安装成功：简短告知已就绪，并继续回答用户当前的问题。\n"
+            f"4. 安装失败（如网络/代理不通）：明确说明原因，并提示用户可在命令行手动运行 "
+            f"`ethan skill add {alias}` 后重试。\n"
+            "在技能装好前，不要假装已具备该模式的完整专业能力。\n"
             "</mode_setup>"
         )
 

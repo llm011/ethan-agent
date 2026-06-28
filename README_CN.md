@@ -24,7 +24,8 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 **法律专家模式 · legal-assistant（按需安装）**
 - 切换到「法律专家」模式后，单个 `legal-assistant` 技能即覆盖案件研判、诉讼分析、合同审查、法律文书/方案生成、商标专利知产、案件流程管理、法律检索与可视化——按「任务动词 + 业务条线」路由到对应 playbook，不堆几十个子技能
 - **零污染**：法律技能用 `modes: [法律]` 标记，仅在法律模式生效；正常工作模式下完全不进上下文
-- **按需安装**：首次切到法律模式若未安装，Agent 会提示并一键 `install_skill` 从仓库拉取（法律内容不随主仓库分发，遵循上游 CC-BY-NC 非商用许可）
+- **自动安装（按需）**：首次切到法律模式若未安装，Agent 会**自动从仓库拉取并安装** `legal-assistant`（会先告知「正在安装」，不静默联网；装失败则提示手动 `ethan skill add legal`）。法律内容不随主仓库分发，遵循上游 CC-BY-NC 非商用许可
+- **手动安装**：命令行直接 `ethan skill add legal` 一键装（= `llm011/ethan-legal-skill/skills/legal-assistant`）
 - **`/mode` 切换**：CLI（REPL）和飞书等渠道均可用 `/mode 法律` 切入、`/mode default` 切回默认；模式名无法识别时保持当前模式不变。模式持久化在会话上，恢复会话自动还原
 
 **Skill 技能系统**

@@ -26,8 +26,9 @@ class Mode:
     identity: str = ""                # 模式级身份覆盖：只要处于该模式就注入（不依赖触发词），覆盖默认身份
     extract_psych: bool = False       # 记忆抽取时是否额外抽心理画像
     blurb: str = ""                   # 进入该模式时 UI 旁的一句话提示
-    requires_skill: str = ""          # 该模式依赖的技能目录名；未安装时引导安装
+    requires_skill: str = ""          # 该模式依赖的技能目录名；未安装时自动安装/引导安装
     install_source: str = ""          # requires_skill 缺失时 install_skill 的来源（owner/repo/子目录）
+    install_alias: str = ""           # 对应 `ethan skill add <alias>` 的友好别名（失败兜底时提示用户手动装）
 
 
 # 唯一真相源：所有内置对话模式。
@@ -50,6 +51,7 @@ MODES: tuple[Mode, ...] = (
         accent="blue",
         requires_skill="legal-assistant",
         install_source="llm011/ethan-legal-skill/skills/legal-assistant",
+        install_alias="legal",
         blurb="已进入法律专家模式：可做案件研判、诉讼分析、合同审查、知产与法律文书",
         identity=(
             "你现在处于「法律专家」模式。无论用户问什么，你的身份是一位严谨、专业的执业律师助手，"
