@@ -27,6 +27,12 @@ _FEISHU_IMG_RE = re.compile(
     r'!\[([^\]]*)\]\((https?://[^\s)]+(?:feishu\.cn|larksuite\.com)[^\s)]*)\)'
 )
 
+# ── 视频/附件 Token 识别：lark-cli 导出的媒体块格式 ─────────────────────────
+# 例：*视频素材 Token: PlKEbe0lwo68UexmkZTcpBHmnLd*
+_MEDIA_TOKEN_RE = re.compile(
+    r'\*(?:视频素材|附件|Video|File) Token: ([A-Za-z0-9_-]+)\*'
+)
+
 
 def _fetch_doc_markdown(doc: str) -> str:
     """调用 lark-cli 获取文档 markdown 内容，返回 content 字符串。"""
@@ -122,7 +128,7 @@ def _url_to_key(url: str, index: int) -> str:
     return f"feishu-docs/{digest}{ext}"
 
 
-def process_images(content: str) -> tuple[str, int, int]:
+def process_images(content: str, output_path: Path) -> tuple[str, int, int]:
     """扫描图片 URL，有 CDN 则上传替换，无则保留。返回 (新内容, 总图片数, 成功数)。"""
     matches = list(_FEISHU_IMG_RE.finditer(content))
     total = len(matches)
@@ -141,7 +147,6 @@ def process_images(content: str) -> tuple[str, int, int]:
             print(f"  上传图片 {i+1}/{total}: {key}", file=sys.stderr)
             url_to_cdn[url] = _upload_image(url, key)
 
-    # 替换所有匹配
     def replacer(m: re.Match) -> str:
         alt = m.group(1)
         url = m.group(2)
@@ -150,6 +155,62 @@ def process_images(content: str) -> tuple[str, int, int]:
 
     new_content = _FEISHU_IMG_RE.sub(replacer, content)
     succeeded = sum(1 for v in url_to_cdn.values() if v)
+    return new_content, total, succeeded
+
+
+def _download_media_token(token: str, media_dir: Path) -> str | None:
+    """用 lark-cli docs +media-download 下载媒体文件，返回本地路径（相对于 md 文件）或 None。"""
+    media_dir.mkdir(parents=True, exist_ok=True)
+    # 先用 token 为文件名（lark-cli 会自动加正确扩展名）
+    out_path = media_dir / token
+    result = subprocess.run(
+        [
+            "lark-cli", "docs", "+media-download",
+            "--token", token,
+            "--output", str(out_path),
+            "--as", "user",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    if result.returncode != 0:
+        print(f"  [warn] 视频下载失败 {token}: {result.stderr.strip() or result.stdout.strip()}", file=sys.stderr)
+        return None
+
+    # lark-cli 会自动加扩展名，找实际写出的文件
+    candidates = sorted(media_dir.glob(f"{token}*"))
+    if not candidates:
+        print(f"  [warn] 视频下载后找不到文件: {token}", file=sys.stderr)
+        return None
+    return candidates[0].name  # 只返回文件名，调用方拼相对路径
+
+
+def process_media_tokens(content: str, output_path: Path) -> tuple[str, int, int]:
+    """检测视频/附件 token，下载到 media/ 目录并替换为本地链接。返回 (新内容, 总数, 成功数)。"""
+    matches = list(_MEDIA_TOKEN_RE.finditer(content))
+    total = len(matches)
+    if total == 0:
+        return content, 0, 0
+
+    media_dir = output_path.parent / "media"
+    token_to_file: dict[str, str | None] = {}
+
+    for i, m in enumerate(matches):
+        token = m.group(1)
+        if token not in token_to_file:
+            print(f"  下载视频/附件 {i+1}/{total}: {token}", file=sys.stderr)
+            token_to_file[token] = _download_media_token(token, media_dir)
+
+    def replacer(m: re.Match) -> str:
+        token = m.group(1)
+        fname = token_to_file.get(token)
+        if fname:
+            return f"[📹 {fname}](./media/{fname})"
+        return m.group(0)  # 下载失败保留原样
+
+    new_content = _MEDIA_TOKEN_RE.sub(replacer, content)
+    succeeded = sum(1 for v in token_to_file.values() if v)
     return new_content, total, succeeded
 
 
@@ -169,19 +230,25 @@ def main() -> None:
         sys.exit(1)
 
     print(f"处理图片...", file=sys.stderr)
-    content, total, succeeded = process_images(content)
+    content, img_total, img_ok = process_images(content, output_path)
 
-    if total > 0:
+    print(f"处理视频/附件...", file=sys.stderr)
+    content, media_total, media_ok = process_media_tokens(content, output_path)
+
+    if img_total > 0:
         if not _cdn_available():
             content += (
                 "\n\n---\n"
-                "> **提示**：文档中有 " + str(total) + " 张图片，链接为飞书内部 URL，"
+                "> **提示**：文档中有 " + str(img_total) + " 张图片，链接为飞书内部 URL，"
                 "在本地 Markdown 编辑器中可能无法显示。\n"
                 "> 配置 `upload-cdn` 密钥后重新导出可自动上传图床获得公开链接。"
             )
-            print(f"  图片 {total} 张，未配置 CDN，保留飞书原始链接", file=sys.stderr)
+            print(f"  图片 {img_total} 张，未配置 CDN，保留飞书原始链接", file=sys.stderr)
         else:
-            print(f"  图片 {total} 张，上传成功 {succeeded} 张", file=sys.stderr)
+            print(f"  图片 {img_total} 张，上传成功 {img_ok} 张", file=sys.stderr)
+
+    if media_total > 0:
+        print(f"  视频/附件 {media_total} 个，下载成功 {media_ok} 个", file=sys.stderr)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(content, encoding="utf-8")
