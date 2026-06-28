@@ -46,7 +46,7 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 - system prompt 分稳定层/动态层，稳定层缓存 5 分钟，token 成本降至 0.1×
 
 **多渠道**
-- CLI REPL、Web UI（Next.js）、飞书（WebSocket 长连接，无需公网 IP）
+- CLI REPL、Web UI（Next.js）、**Android App**（Kotlin/Compose）、飞书（WebSocket 长连接，无需公网 IP）
 
 ---
 
@@ -220,6 +220,18 @@ cd web
 npm install
 npm run dev   # http://localhost:3000 (开发模式，API 仍在 8900 端口)
 ```
+
+### Android App
+
+原生移动端客户端，位于 `app/android/`。需要 Android SDK 35 和 JDK 17+。
+
+```bash
+cd app/android
+./gradlew assembleDebug
+# APK: app/build/outputs/apk/debug/app-debug.apk
+```
+
+首次启动时配置服务器地址（如 `http://<你的NAS>:8900`）和 Access Token（`~/.ethan/config.yaml` 中的 `network.auth_token`）。完整功能清单见 [app/android/PRD.md](./app/android/PRD.md)。
 
 ### macOS 开机自启（launchd）
 
@@ -585,6 +597,7 @@ EOF
 
 **渠道与 API**
 - [x] Web UI（Next.js）：对话时间轴、记忆管理、技能、定时、知识库、设置
+- [x] Android App（Kotlin/Compose）：移动端客户端，聊天 SSE、会话、记忆、设置等
 - [x] 飞书 WebSocket（无需公网 IP）
 - [x] OpenAI 兼容 Completions API（`/v1/chat/completions`）+ API Key 管理
 - [x] Docker 部署 + macOS launchd 自启

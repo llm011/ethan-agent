@@ -48,7 +48,7 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 - System prompt split into stable layer / dynamic layer; stable layer cached 5 min, token cost drops to 0.1×
 
 **Multi-channel**
-- CLI REPL, Web UI (Next.js), Lark/Feishu (WebSocket, no public IP required)
+- CLI REPL, Web UI (Next.js), **Android App** (Kotlin/Compose), Lark/Feishu (WebSocket, no public IP required)
 
 ---
 
@@ -220,6 +220,18 @@ cd web
 npm install
 npm run dev   # http://localhost:3000 (dev mode, API still on port 8900)
 ```
+
+### Android App
+
+Native mobile client in `app/android/`. Requires Android SDK 35 and JDK 17+.
+
+```bash
+cd app/android
+./gradlew assembleDebug
+# APK: app/build/outputs/apk/debug/app-debug.apk
+```
+
+On first launch, configure the server URL (e.g. `http://<your-nas>:8900`) and Access Token (`network.auth_token` in `~/.ethan/config.yaml`). See [app/android/PRD.md](./app/android/PRD.md) for the full feature list.
 
 ### macOS auto-start (launchd)
 
@@ -491,6 +503,7 @@ Environment variables in `.env` override config values (useful for secrets).
 
 **Channels & API**
 - [x] Web UI (Next.js): chat timeline, memory, skills, schedule, knowledge, settings
+- [x] Android App (Kotlin/Compose): mobile client with chat SSE, sessions, memory, settings
 - [x] Tool call timeline (collapsible, with icons + duration)
 - [x] Feishu/Lark WebSocket (no public IP required)
 - [x] OpenAI-compatible Completions API (`/v1/chat/completions`) + API key management
