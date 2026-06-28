@@ -89,7 +89,7 @@ config.yaml 中可通过 `fast_skill_triggers` 手动指定额外的 fast 轨关
 
 **渠道过滤**：`SkillRegistry.match(query, channel="")` 接收当前渠道标识（如 `"lark"`、`"web"` 或 `""`）。如果 Skill 的 `channels` 列表非空且当前渠道不在其中，该 Skill 不会被注入。这样可以为飞书、Web、CLI 分别准备专属 Skill，互不干扰。
 
-**模式过滤**：`SkillRegistry.match(query, channel="", mode="")` 还接收当前对话模式（见 [modes.py](../ethan/core/modes.py)，如 `"法律"`、`"陪伴"` 或默认 `""`）。如果 Skill 的 `modes` 列表非空且当前模式不在其中，该 Skill 不会被注入。这让垂类技能（如「法律专家模式」下的 `legal-assistant`）只在对应模式生效，正常工作模式下完全不进上下文，零污染。模式由 `Agent._mode` 经 `resolve_mode().key` 解析后传入。
+**模式过滤**：`SkillRegistry.match(query, channel="", mode="")` 还接收当前对话模式（见 [modes.py](../ethan/core/modes.py)，规范英文 key，如 `"legal"`、`"companion"` 或默认 `""`）。如果 Skill 的 `modes` 列表非空且当前模式不在其中，该 Skill 不会被注入；`modes` 里写 key（`legal`）或中文别名（`法律`）都行，匹配时会归一化。这让垂类技能（如「法律专家模式」下的 `legal-assistant`）只在对应模式生效，正常工作模式下完全不进上下文，零污染。模式由 `Agent._mode` 经 `resolve_mode().key` 解析后传入。
 
 ---
 

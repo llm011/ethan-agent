@@ -61,7 +61,7 @@ class ChatRequest(BaseModel):
     session_id: str | None = None
     channel: str = "web"
     quote: dict | None = None  # {role, content}：引用某条历史消息，注入给模型但不入库
-    mode: str = ""  # "" = 工作助手; "陪伴" = 苏念·陪伴倾听
+    mode: str = ""  # "" = 工作助手; 规范英文 key，如 "legal"/"companion"（见 core/modes.py）
 
 
 class ChatResponse(BaseModel):
@@ -86,7 +86,7 @@ async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
                 if req.quote and req.quote.get("content"):
                     m.quote = req.quote
                 await store.save_message(req.session_id, m)
-        # 持久化对话模式：退出再进入保持工作/苏念模式
+        # 持久化对话模式：退出再进入保持当前模式
         if req.mode:
             await store.update_mode(req.session_id, req.mode)
 

@@ -122,7 +122,9 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
           {/* 渠道筛选 */}
           <Select value={filterSource || "__all__"} onValueChange={(v) => { if (v) setFilterSource(v === "__all__" ? "" : v); }}>
             <SelectTrigger className="h-8 text-xs w-auto min-w-[88px] gap-1">
-              <SelectValue placeholder="渠道" />
+              <SelectValue placeholder="渠道">
+                {(v: string) => ({ __all__: "全部渠道", web: "Web", lark: "飞书", repl: "命令行", heartbeat: "心跳" }[v] ?? "渠道")}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="__all__" className="text-xs">全部渠道</SelectItem>
@@ -135,7 +137,19 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
           {/* 模式筛选（数据驱动：默认 + 各对话模式） */}
           <Select value={filterMode} onValueChange={(v) => { if (v) setFilterMode(v); }}>
             <SelectTrigger className="h-8 text-xs w-auto min-w-[88px] gap-1">
-              <SelectValue placeholder="模式" />
+              <SelectValue placeholder="模式">
+                {(v: string) => {
+                  if (v === "__all__") return "全部模式";
+                  const cur = modes.find((m) => (m.key || "__default__") === v);
+                  if (!cur) return "模式";
+                  return (
+                    <span className="inline-flex items-center gap-1">
+                      {cur.icon && <span>{cur.icon}</span>}
+                      <span>{cur.label}</span>
+                    </span>
+                  );
+                }}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="__all__" className="text-xs">全部模式</SelectItem>

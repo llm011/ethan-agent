@@ -34,8 +34,8 @@ class Mode:
 # 唯一真相源：所有内置对话模式。
 MODES: tuple[Mode, ...] = (
     Mode(
-        key="陪伴",
-        aliases=("陪伴", "counselor", "苏念"),
+        key="companion",
+        aliases=("companion", "陪伴", "counselor", "苏念"),
         label="苏念 · 陪伴倾听",
         icon="🌸",
         accent="pink",
@@ -44,8 +44,8 @@ MODES: tuple[Mode, ...] = (
         blurb="正在以苏念的身份陪伴你，倾诉心事我会先看见你、接住你",
     ),
     Mode(
-        key="法律",
-        aliases=("法律", "legal", "法律专家", "法务"),
+        key="legal",
+        aliases=("legal", "法律", "法律专家", "法务"),
         label="法律专家",
         icon="⚖️",
         accent="blue",
