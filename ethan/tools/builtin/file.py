@@ -92,6 +92,10 @@ class FileWriteTool(BaseTool):
         "required": ["path", "content"],
     }
 
+    def consent_check(self, path: str = "", **kwargs) -> str | None:
+        # 写文件有副作用，执行前请求授权（同一会话授权过不再弹，见 consent 的 session 记忆）
+        return f"写入文件 {path}"
+
     async def run(self, path: str, content: str, append: bool = False) -> str:
         p = Path(path).expanduser().resolve()
         try:

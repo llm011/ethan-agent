@@ -12,6 +12,8 @@ import {
   fetchSessions,
   fetchSchedules,
   streamChat,
+  streamResume,
+  type StreamChunk,
   compactSession,
   updateSessionMode,
   fetchOnboardingStatus,
@@ -24,7 +26,8 @@ import { ChatHeader } from "@/components/chat/chat-header";
 import { MessageList } from "@/components/chat/message-list";
 import { ChatInput } from "@/components/chat/chat-input";
 import { OnboardingBanner } from "@/components/chat/onboarding-banner";
-import { ConsentDialog, type ConsentRequest } from "@/components/consent-dialog";
+import { type ConsentRequest } from "@/components/consent-dialog";
+import { ConsentGate } from "@/components/chat/consent-card";
 
 interface ChatViewProps {
   initialSessionId?: string;
@@ -63,6 +66,163 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   // 让下面的 useEffect 跳过对它的重新 fetch，避免流式刚结束就刷新覆盖。
   const justFinishedRef = useRef<string | null>(null);
 
+  // SessionDetail.messages → 组件内 Message[]（fetchSession 初次加载 + 重连失败兜底共用）
+  const mapDetailMessages = (detail: { messages: any[] }): Message[] =>
+    detail.messages.map((m: any) => ({
+      role: m.role,
+      content: m.content,
+      created_at: m.created_at,
+      usage: m.usage || undefined,
+      quote: m.quote || undefined,
+      toolSteps: m.tool_steps && m.tool_steps.length > 0
+        ? m.tool_steps.map((s: any) => ({
+            tool: s.tool,
+            args: s.args,
+            state: s.state as "running" | "done" | "error",
+            duration_ms: s.duration_ms,
+            result_preview: s.result_preview,
+            result_detail: s.result_detail,
+            thought: s.thought,
+            sub_steps: s.sub_steps?.map((ss: any) => ({
+              tool: ss.tool,
+              args: ss.args,
+              state: ss.state as "running" | "done" | "error",
+              duration_ms: ss.duration_ms ?? undefined,
+              result_preview: ss.result_preview,
+            })),
+          }))
+        : undefined,
+      toolsExpanded: false,
+      a2ui: m.a2ui && m.a2ui.length > 0 ? m.a2ui : undefined,
+    }));
+
+  // 消费一条 SSE 事件流，增量更新最后一条 assistant 消息，结束后定稿。
+  // 首次发送（streamChat）与刷新重连（streamResume）共用此逻辑。
+  // baseMessages = assistant 之前的全部消息（含用户那句）；trackTtft 仅首发为 true。
+  const consumeStream = async (
+    stream: AsyncGenerator<StreamChunk>,
+    baseMessages: Message[],
+    trackTtft = false,
+  ) => {
+    let assistantContent = "";
+    const assistantThought = "";
+    const currentToolSteps: ToolStep[] = [];
+    const a2uiSurfaces: unknown[] = [];
+    const sendTime = Date.now();
+    let ttft: number | undefined;
+    let finalUsage: Usage | undefined;
+    setMessages([...baseMessages, { role: "assistant", content: "", created_at: Date.now() / 1000 }]);
+
+    try {
+      for await (const chunk of stream) {
+        if (trackTtft && ttft === undefined) ttft = Date.now() - sendTime;
+
+        if (chunk.consent_request) {
+          setConsentRequest({
+            request_id: chunk.request_id || "",
+            tool: chunk.tool || "",
+            description: chunk.description || "",
+            detail: chunk.detail,
+          });
+          continue;
+        }
+        if (chunk.error) {
+          // 保留已流式输出的内容，把错误作为页脚追加，而不是整体覆盖用户正在读的回答
+          const errLine = `⚠️ ${chunk.error}`;
+          assistantContent = assistantContent.trim()
+            ? `${assistantContent}\n\n---\n${errLine}`
+            : errLine;
+          break;
+        }
+        if (chunk.tool && chunk.state === "start") {
+          const preToolThought = assistantContent.trim();
+          assistantContent = "";
+          currentToolSteps.push({
+            tool: chunk.tool, args: chunk.args || "", state: "running", id: chunk.id,
+            thought: preToolThought || undefined,
+          });
+          setMessages([...baseMessages, {
+            role: "assistant", content: assistantContent, thought: assistantThought,
+            toolSteps: [...currentToolSteps], toolsExpanded: true, created_at: Date.now() / 1000,
+          }]);
+        }
+        if (chunk.tool && (chunk.state === "done" || chunk.state === "error")) {
+          let matchedIdx = -1;
+          if (chunk.id) {
+            for (let i = currentToolSteps.length - 1; i >= 0; i--) {
+              if (currentToolSteps[i].id === chunk.id && currentToolSteps[i].state === "running") {
+                matchedIdx = i; break;
+              }
+            }
+          }
+          if (matchedIdx < 0) {
+            for (let i = currentToolSteps.length - 1; i >= 0; i--) {
+              if (currentToolSteps[i].tool === chunk.tool && currentToolSteps[i].state === "running") {
+                matchedIdx = i; break;
+              }
+            }
+          }
+          if (matchedIdx >= 0) {
+            currentToolSteps[matchedIdx] = {
+              ...currentToolSteps[matchedIdx],
+              state: chunk.state as "done" | "error",
+              duration_ms: chunk.duration_ms,
+              result_preview: chunk.result_preview,
+              result_detail: chunk.result_detail,
+              sub_steps: chunk.sub_steps?.map((s) => ({
+                tool: s.tool,
+                args: s.args,
+                state: s.state as "running" | "done" | "error",
+                duration_ms: s.duration_ms ?? undefined,
+                result_preview: s.result_preview,
+              })),
+            };
+          }
+          setMessages([...baseMessages, {
+            role: "assistant", content: assistantContent, thought: assistantThought,
+            toolSteps: [...currentToolSteps], toolsExpanded: true, created_at: Date.now() / 1000,
+          }]);
+        }
+        if (chunk.tool && (chunk.state === "done" || chunk.state === "error") && chunk.ui && Array.isArray(chunk.ui)) {
+          a2uiSurfaces.push(...chunk.ui);
+        }
+        if (chunk.content) {
+          assistantContent += chunk.content;
+          setMessages([...baseMessages, {
+            role: "assistant", content: assistantContent, thought: assistantThought,
+            toolSteps: currentToolSteps.length > 0 ? [...currentToolSteps] : undefined,
+            toolsExpanded: currentToolSteps.length > 0 ? true : undefined,
+            created_at: Date.now() / 1000,
+          }]);
+        }
+        if (chunk.done && chunk.usage) {
+          finalUsage = { input: chunk.usage.input || 0, output: chunk.usage.output || 0, cache: chunk.usage.cache || 0 };
+          setSessionUsage(prev => ({
+            input: prev.input + finalUsage!.input,
+            output: prev.output + finalUsage!.output,
+            cache: prev.cache + finalUsage!.cache,
+          }));
+        }
+      }
+    } catch (err) {
+      const errLine = `⚠️ ${err instanceof Error ? err.message : "连接中断"}`;
+      assistantContent = assistantContent.trim()
+        ? `${assistantContent}\n\n---\n${errLine}`
+        : errLine;
+    }
+
+    setMessages(prev => {
+      const msgs = [...prev];
+      const last = msgs[msgs.length - 1];
+      if (last && last.role === "assistant") {
+        msgs[msgs.length - 1] = { ...last, content: assistantContent, thought: assistantThought, toolsExpanded: false, usage: finalUsage || last.usage, ttft: ttft ?? last.ttft, a2ui: a2uiSurfaces.length > 0 ? a2uiSurfaces : undefined };
+        return msgs;
+      }
+      return [...baseMessages, { role: "assistant", content: assistantContent, thought: assistantThought, created_at: Date.now() / 1000, usage: finalUsage, ttft, a2ui: a2uiSurfaces.length > 0 ? a2uiSurfaces : undefined }];
+    });
+    setStreaming(false);
+  };
+
   // Load session when route param changes
   useEffect(() => {
     if (initialSessionId) {
@@ -76,38 +236,12 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         return;
       }
       fetchSession(initialSessionId)
-        .then((detail) => {
+        .then(async (detail) => {
           setActiveSession(initialSessionId);
           setSessionTitle(detail.title || "");
           setSessionSource(detail.source || "web");
-          setMessages(
-            detail.messages.map((m: any) => ({
-              role: m.role,
-              content: m.content,
-              created_at: m.created_at,
-              usage: m.usage || undefined,
-              quote: m.quote || undefined,
-              toolSteps: m.tool_steps && m.tool_steps.length > 0
-                ? m.tool_steps.map((s: any) => ({
-                    tool: s.tool,
-                    args: s.args,
-                    state: s.state as "running" | "done" | "error",
-                    duration_ms: s.duration_ms,
-                    result_preview: s.result_preview,
-                    result_detail: s.result_detail,
-                    thought: s.thought,
-                    sub_steps: s.sub_steps?.map((ss: any) => ({
-                      tool: ss.tool,
-                      args: ss.args,
-                      state: ss.state as "running" | "done" | "error",
-                      duration_ms: ss.duration_ms ?? undefined,
-                      result_preview: ss.result_preview,
-                    })),
-                  }))
-                : undefined,
-              toolsExpanded: false,
-            }))
-          );
+          const loaded = mapDetailMessages(detail);
+          setMessages(loaded);
           setSelectedModel(detail.model);
           // 恢复对话模式：之前用工作助手还是苏念，下次进入保持一致
           setMode(detail.mode || "");
@@ -119,6 +253,20 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
               cache: acc.cache + (m.usage.cache || 0),
             }), { input: 0, output: 0, cache: 0 });
           setSessionUsage(historicUsage);
+
+          // 该会话仍有正在进行的生成（刷新前发起的）：重连流，回放缓冲 + 继续实时，
+          // 不丢失 assistant 回复。重连失败/已结束（204）则补一次 fetch 拿落库结果。
+          if (detail.active_run) {
+            setStreaming(true);
+            const stream = await streamResume(initialSessionId).catch(() => null);
+            if (stream) {
+              await consumeStream(stream, loaded);
+            } else {
+              setStreaming(false);
+              const fresh = await fetchSession(initialSessionId).catch(() => null);
+              if (fresh) setMessages(mapDetailMessages(fresh));
+            }
+          }
         })
         .catch(() => {
           setActiveSession(null);
@@ -296,121 +444,11 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
     const chatMessages: ChatMessage[] = newMessages.map((m) => ({ role: m.role, content: m.content }));
 
-    let assistantContent = "";
-    let assistantThought = "";
-    const currentToolSteps: ToolStep[] = [];
-    const sendTime = Date.now();
-    let ttft: number | undefined;
-    let finalUsage: Usage | undefined;
-    setMessages([...newMessages, { role: "assistant", content: "", created_at: Date.now() / 1000 }]);
-
-    try {
-      for await (const chunk of streamChat(chatMessages, selectedModel, sessionId, sentQuote, mode)) {
-        if (ttft === undefined) ttft = Date.now() - sendTime;
-
-        if (chunk.consent_request) {
-          setConsentRequest({
-            request_id: chunk.request_id || "",
-            tool: chunk.tool || "",
-            description: chunk.description || "",
-            detail: chunk.detail,
-          });
-          continue;
-        }
-        if (chunk.error) {
-          // 保留已流式输出的内容，把错误作为页脚追加，而不是整体替换覆盖掉用户正在读的回答
-          const errLine = `⚠️ ${chunk.error}`;
-          assistantContent = assistantContent.trim()
-            ? `${assistantContent}\n\n---\n${errLine}`
-            : errLine;
-          break;
-        }
-        if (chunk.tool && chunk.state === "start") {
-          // 工具调用前的叙述文字挂到这个工具下面（可折叠），不再全塞进顶部"思考过程"
-          const preToolThought = assistantContent.trim();
-          assistantContent = "";
-          currentToolSteps.push({
-            tool: chunk.tool, args: chunk.args || "", state: "running", id: chunk.id,
-            thought: preToolThought || undefined,
-          });
-          setMessages([...newMessages, {
-            role: "assistant", content: assistantContent, thought: assistantThought,
-            toolSteps: [...currentToolSteps], toolsExpanded: true, created_at: Date.now() / 1000,
-          }]);
-        }
-        if (chunk.tool && (chunk.state === "done" || chunk.state === "error")) {
-          // 优先按 id 精确匹配（同名工具并发不串），fallback 到 tool 名
-          let matchedIdx = -1;
-          if (chunk.id) {
-            for (let i = currentToolSteps.length - 1; i >= 0; i--) {
-              if (currentToolSteps[i].id === chunk.id && currentToolSteps[i].state === "running") {
-                matchedIdx = i; break;
-              }
-            }
-          }
-          if (matchedIdx < 0) {
-            for (let i = currentToolSteps.length - 1; i >= 0; i--) {
-              if (currentToolSteps[i].tool === chunk.tool && currentToolSteps[i].state === "running") {
-                matchedIdx = i; break;
-              }
-            }
-          }
-          if (matchedIdx >= 0) {
-            currentToolSteps[matchedIdx] = {
-              ...currentToolSteps[matchedIdx],
-              state: chunk.state as "done" | "error",
-              duration_ms: chunk.duration_ms,
-              result_preview: chunk.result_preview,
-              result_detail: chunk.result_detail,
-              sub_steps: chunk.sub_steps?.map((s) => ({
-                tool: s.tool,
-                args: s.args,
-                state: s.state as "running" | "done" | "error",
-                duration_ms: s.duration_ms ?? undefined,
-                result_preview: s.result_preview,
-              })),
-            };
-          }
-          setMessages([...newMessages, {
-            role: "assistant", content: assistantContent, thought: assistantThought,
-            toolSteps: [...currentToolSteps], toolsExpanded: true, created_at: Date.now() / 1000,
-          }]);
-        }
-        if (chunk.content) {
-          assistantContent += chunk.content;
-          setMessages([...newMessages, {
-            role: "assistant", content: assistantContent, thought: assistantThought,
-            toolSteps: currentToolSteps.length > 0 ? [...currentToolSteps] : undefined,
-            toolsExpanded: currentToolSteps.length > 0 ? true : undefined,
-            created_at: Date.now() / 1000,
-          }]);
-        }
-        if (chunk.done && chunk.usage) {
-          finalUsage = { input: chunk.usage.input || 0, output: chunk.usage.output || 0, cache: chunk.usage.cache || 0 };
-          setSessionUsage(prev => ({
-            input: prev.input + finalUsage!.input,
-            output: prev.output + finalUsage!.output,
-            cache: prev.cache + finalUsage!.cache,
-          }));
-        }
-      }
-    } catch (err) {
-      const errLine = `⚠️ ${err instanceof Error ? err.message : "连接中断"}`;
-      assistantContent = assistantContent.trim()
-        ? `${assistantContent}\n\n---\n${errLine}`
-        : errLine;
-    }
-
-    setMessages(prev => {
-      const msgs = [...prev];
-      const last = msgs[msgs.length - 1];
-      if (last && last.role === "assistant") {
-        msgs[msgs.length - 1] = { ...last, content: assistantContent, thought: assistantThought, toolsExpanded: false, usage: finalUsage || last.usage, ttft };
-        return msgs;
-      }
-      return [...newMessages, { role: "assistant", content: assistantContent, thought: assistantThought, created_at: Date.now() / 1000, usage: finalUsage, ttft }];
-    });
-    setStreaming(false);
+    await consumeStream(
+      streamChat(chatMessages, selectedModel, sessionId, sentQuote, mode),
+      newMessages,
+      true,
+    );
     // 新建会话流式结束后，改地址栏 URL 让用户能复制/刷新。
     // 用 window.history.replaceState 而非 router.replace：前者只改 URL 不触发
     // Next 路由导航，避免 /chat → /chat/[id] 跨路由导致 ChatView 卸载重建（state 丢失、刷新）。
@@ -438,12 +476,16 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           setQuote({ role: m.role, content: m.content });
           setTimeout(() => inputRef.current?.focus(), 30);
         }}
+        onCardAction={(text) => handleSend(text)}
       />
 
       <div>
-        <div className="max-w-3xl mx-auto px-4 pt-4">
-          {showOnboarding && <OnboardingBanner onDismiss={() => setShowOnboarding(false)} />}
-        </div>
+        {showOnboarding && (
+          <div className="max-w-3xl mx-auto px-4 pt-3">
+            <OnboardingBanner onDismiss={() => setShowOnboarding(false)} />
+          </div>
+        )}
+        <ConsentGate request={consentRequest} onRespond={handleConsentRespond} />
         <ChatInput
           streaming={streaming}
           models={models}
@@ -466,7 +508,6 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           }}
         />
       </div>
-      <ConsentDialog request={consentRequest} onRespond={handleConsentRespond} />
     </div>
   );
 }

@@ -10,6 +10,9 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@a2ui/markdown-it": "^0.0.4",
+    "@a2ui/react": "^0.10.1",
+    "@a2ui/web_core": "^0.10.3",
     "@base-ui/react": "^1.5.0",
     "@types/react-syntax-highlighter": "^15.5.13",
     "ai": "^6.0.201",
@@ -19,8 +22,8 @@
     "date-fns": "^4.4.0",
     "lucide-react": "^1.17.0",
     "next": "16.2.9",
-    "react": "19.2.4",
-    "react-dom": "19.2.4",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
     "react-markdown": "^10.1.0",
     "react-syntax-highlighter": "^16.1.1",
     "rehype-highlight": "^7.0.2",
@@ -33,11 +36,13 @@
   "devDependencies": {
     "@playwright/test": "^1.60.0",
     "@tailwindcss/postcss": "^4",
+    "@tailwindcss/typography": "^0.5.20",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
+    "js-yaml": "^5.2.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

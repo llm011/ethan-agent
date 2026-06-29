@@ -96,12 +96,15 @@ async def get_session(session_id: str, user_id: str = Depends(verify_token)):
     await store.close()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    from ethan.core.run_manager import RunManager
     return {
         "id": session.id,
         "title": session.title,
         "model": session.model,
         "source": getattr(session, "source", "web"),
         "mode": getattr(session, "mode", "") or "",
+        # 该会话是否有正在进行的生成（producer 未结束）。前端据此决定刷新后重连流。
+        "active_run": RunManager.instance().has_active(session_id),
         "messages": [
             {
                 "role": m.role,
@@ -110,6 +113,7 @@ async def get_session(session_id: str, user_id: str = Depends(verify_token)):
                 "usage": getattr(m, "usage", None),
                 "tool_steps": getattr(m, "tool_steps", None) or [],
                 "quote": getattr(m, "quote", None),
+                "a2ui": getattr(m, "a2ui", None),
             }
             for m in session.messages if m.role in ("user", "assistant")
         ],

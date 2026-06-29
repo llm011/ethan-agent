@@ -8,9 +8,10 @@ interface MessageListProps {
   messages: Message[];
   streaming: boolean;
   onQuote?: (msg: Message) => void;
+  onCardAction?: (text: string) => void;
 }
 
-export function MessageList({ messages, streaming, onQuote }: MessageListProps) {
+export function MessageList({ messages, streaming, onQuote, onCardAction }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = useCallback(() => {
@@ -36,6 +37,7 @@ export function MessageList({ messages, streaming, onQuote }: MessageListProps) 
             isStreaming={streaming}
             isLast={i === messages.length - 1}
             onQuote={onQuote}
+            onCardAction={onCardAction}
           />
         ))}
       </div>

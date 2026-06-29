@@ -10,6 +10,10 @@ class ShellTool(BaseTool):
     no_compress = True  # 脚本输出（如 query_devices 设备列表）需逐字给模型，压成摘要会丢 entity_id
     name = "shell"
     description = "Execute a shell command and return its output."
+
+    def consent_check(self, command: str = "", **kwargs) -> str | None:
+        # shell 可执行任意副作用操作，执行前一律请求授权（同一会话授权过不再弹，见 consent 的 session 记忆）
+        return "执行 shell 命令"
     parameters = {
         "type": "object",
         "properties": {

@@ -92,7 +92,7 @@ export function ChatInput({
   };
 
   return (
-    <div className="p-4">
+    <div className="px-4 pb-4 pt-1">
       <div className="max-w-3xl mx-auto">
         {quote && (
           <div className="flex items-center gap-2 mb-2 px-3 py-1.5 rounded-md bg-muted/60 border border-border/60 text-xs">

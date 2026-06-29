@@ -50,6 +50,7 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 
 **Tool system**
 - Shell execution, web search (DuckDuckGo by default, or Tavily via config), web fetch, file I/O, knowledge base
+- Sensitive/side-effecting ops (shell, file write, secret read) ask for consent before running; the web shows a consent card, the REPL prompts y/N, and once granted in a session the same tool won't ask again
 - Tool results over 4 000 chars are auto-summarized by a cheap model before going back to the main model
 - Identical calls within the same turn hit an in-memory cache — no duplicate execution
 
@@ -398,6 +399,8 @@ class MyTool(BaseTool):
 ```
 
 Register it in `cli.py` and the LLM will automatically use it when relevant.
+
+Built-in tools also include `ui_card`, which renders structured info (comparisons, status, stats, lists) as [A2UI](https://a2ui.org/) cards — shown via `@a2ui/react` on the web and text-degraded in the REPL. Format details live in the on-demand `ui-card` skill, so the system prompt stays lean.
 
 ---
 

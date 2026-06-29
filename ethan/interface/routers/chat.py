@@ -107,12 +107,20 @@ async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
         messages[-1] = _with_quote(messages[-1], req.quote)
 
     if req.stream:
-        # 注入 Web 授权 provider（敏感操作经 SSE 弹窗确认）
-        from ethan.core.consent import WebConsentProvider, set_consent_provider
-        consent = WebConsentProvider()
-        set_consent_provider(consent)
+        # 生成与连接解耦：把 agent.stream_chat 放进后台 producer 任务，事件写入
+        # ChatRun 缓冲并扇出给订阅者。SSE 响应只是一个订阅者，断开（刷新）只退订，
+        # 不影响 producer——生成照常跑完并入库。刷新后可经 GET /chat/{id}/stream 重连回放。
+        from ethan.core.consent import WebConsentProvider
+        from ethan.core.run_manager import RunManager
+
+        consent = WebConsentProvider(session_id=req.session_id or "")
+        manager = RunManager.instance()
+        run = manager.create(req.session_id or "", consent=consent)
+        run.task = asyncio.create_task(
+            _run_generation(run, agent, messages, store, req.session_id, user_id, consent, mode=req.mode)
+        )
         return StreamingResponse(
-            _stream_response(agent, messages, store, req.session_id, user_id, consent, mode=req.mode),
+            _sse_from_run(run),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
@@ -132,6 +140,24 @@ async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
             "output": agent.usage.output_tokens,
             "cache": agent.usage.cache_tokens,
         },
+    )
+
+
+@router.get("/chat/{session_id}/stream")
+async def reconnect_stream(session_id: str, user_id: str = Depends(verify_token)):
+    """重连一个仍在进行的生成：刷新页面后前端调此端点，回放缓冲 + 继续实时推送。
+
+    无活跃 run（已结束或从未开始）返回 204，前端据此走普通 fetchSession 拿落库结果。
+    """
+    from fastapi import Response
+    from ethan.core.run_manager import RunManager
+    run = RunManager.instance().get(session_id)
+    if run is None:
+        return Response(status_code=204)
+    return StreamingResponse(
+        _sse_from_run(run),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
@@ -174,7 +200,8 @@ def _with_quote(user_msg: Message, quote: dict | None) -> Message:
     return Message(role=user_msg.role, content=prefixed, created_at=user_msg.created_at)
 
 
-async def _stream_response(
+async def _run_generation(
+    run,
     agent,
     messages: list[Message],
     store: SessionStore,
@@ -182,34 +209,39 @@ async def _stream_response(
     user_id: str = "",
     consent=None,
     mode: str = "",
-) -> AsyncGenerator[str, None]:
+) -> None:
+    """Producer：后台任务跑 Agent 生成，把事件 emit 进 run 缓冲并扇出给订阅者。
+
+    与 HTTP 连接解耦——订阅者（SSE 响应）断开不会取消本任务，生成照常跑完并入库。
+    所有原先 `yield` 的地方改为 `run.emit(...)`。
+    """
     from ethan.core.stream_collector import StreamCollector
-    from ethan.core.consent import ConsentEvent
+    from ethan.core.consent import ConsentEvent, set_consent_provider
     from ethan.providers.base import ToolEvent, ThinkingEvent
+
+    # consent provider 经 ContextVar 注入；本任务有独立 context，需在任务内设置。
+    set_consent_provider(consent)
 
     collector = StreamCollector().bind(agent)
     try:
         async for item in agent.stream_chat(messages):
             if isinstance(item, ConsentEvent):
-                evt = {
+                run.emit({
                     "consent_request": True,
                     "request_id": item.request_id,
                     "tool": item.tool,
                     "description": item.description,
                     "detail": item.detail,
-                }
-                yield f"data: {json.dumps(evt, ensure_ascii=False)}\n\n"
+                })
             elif isinstance(item, ThinkingEvent):
-                # 思考内容不当正文；给前端一个轻量信号即可（原文不下发，避免泄漏 reasoning）
-                yield f"data: {json.dumps({'thinking': True}, ensure_ascii=False)}\n\n"
+                run.emit({"thinking": True})
             elif isinstance(item, ToolEvent):
                 collector.feed(item)
-                # 即时把 ToolEvent 推给前端（SSE 不能等批处理）
                 if item.state == "start":
-                    evt = {"tool": item.tool_name, "args": item.args_summary, "state": "start",
-                           "id": item.tool_call_id}
+                    run.emit({"tool": item.tool_name, "args": item.args_summary, "state": "start",
+                              "id": item.tool_call_id})
                 else:
-                    step = collector.tool_steps[-1]  # feed 刚追加/关闭的那个
+                    step = collector.tool_steps[-1]
                     evt = {
                         "tool": item.tool_name,
                         "args": item.args_summary,
@@ -220,14 +252,23 @@ async def _stream_response(
                         "result_detail": item.result_detail or "",
                         "sub_steps": item.sub_steps or [],
                     }
-                yield f"data: {json.dumps(evt, ensure_ascii=False)}\n\n"
+                    if item.ui:
+                        evt["ui"] = item.ui
+                    run.emit(evt)
             else:
                 collector.feed(item)
-                yield f"data: {json.dumps({'content': item}, ensure_ascii=False)}\n\n"
+                run.emit({"content": item})
+    except asyncio.CancelledError:
+        # 被显式取消（如新 run 替换旧 run）：不入库，直接收尾。
+        if consent is not None:
+            consent.cancel_all()
+        run.finish()
+        RunManager_schedule_removal(run.session_id)
+        raise
     except Exception as e:
-        yield f"data: {json.dumps({'error': _friendly_error(e, agent)}, ensure_ascii=False)}\n\n"
+        run.emit({"error": _friendly_error(e, agent)})
     finally:
-        # 流结束（正常或异常）时，取消所有未决的授权 Future，避免泄漏
+        # 流结束（正常/异常）时取消未决授权 Future，避免泄漏
         if consent is not None:
             consent.cancel_all()
 
@@ -240,6 +281,7 @@ async def _stream_response(
             thought=collector.thought,
             usage=usage_dict,
             tool_steps=collector.tool_steps or [],
+            a2ui=collector.a2ui or None,
         )
         await store.save_message(session_id, asst_msg)
         await store.touch(session_id)
@@ -250,22 +292,52 @@ async def _stream_response(
         asyncio.create_task(_maybe_regen_title(session_id, store))
         asyncio.create_task(_maybe_generate_skill(session_id, agent._provider.model, user_id))
 
-    # Always send final usage to frontend so it knows the stream is done
-    evt = {"done": True, "usage": usage_dict}
-    yield f"data: {json.dumps(evt)}\n\n"
+    await store.close()
+
+    # 通知所有订阅者「流结束」并附最终 usage
+    run.emit({"done": True, "usage": usage_dict})
+    run.finish()
+    RunManager_schedule_removal(run.session_id)
+
+
+def RunManager_schedule_removal(session_id: str) -> None:
+    from ethan.core.run_manager import RunManager
+    RunManager.instance().schedule_removal(session_id)
+
+
+async def _sse_from_run(run) -> AsyncGenerator[str, None]:
+    """Consumer：把一个 ChatRun 的事件流转成 SSE。
+
+    先回放缓冲（断线重连补齐已生成内容），再实时读队列直到收到结束哨兵。
+    本生成器被取消（客户端断开）只退订，不影响 producer。
+    """
+    from ethan.core.run_manager import SENTINEL
+
+    q, backlog = run.subscribe()
+    try:
+        for evt in backlog:
+            yield f"data: {json.dumps(evt, ensure_ascii=False)}\n\n"
+        # 缓冲已含结束事件且 producer 已完成：无需再等队列
+        if run.done:
+            return
+        while True:
+            item = await q.get()
+            if item is SENTINEL:
+                break
+            yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
+    finally:
+        run.unsubscribe(q)
 
 
 async def _maybe_regen_title(session_id: str, store: SessionStore) -> None:
     try:
-        from ethan.memory.session import _generate_smart_title
+        from ethan.memory.session import decide_title
         session = await store.load(session_id)
         if not session:
             return
-        user_turns = sum(1 for m in session.messages if m.role == "user")
-        if user_turns != 2:
-            return
-        title = await _generate_smart_title(session.messages)
-        await store.update_title(session_id, title)
+        title = await decide_title(session.messages)
+        if title and title != session.title:
+            await store.update_title(session_id, title)
     except Exception:
         pass
 

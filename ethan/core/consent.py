@@ -33,6 +33,7 @@ class ConsentEvent:
 class ConsentProvider:
     """授权提供者基类。"""
     streamed: bool = False  # True = 需要向流注入 ConsentEvent（Web）
+    session_id: str = ""    # 所属会话；用于 session 维度授权记忆（同会话同工具授权过不再弹）
 
     async def request(self, description: str, tool: str = "", detail: str = "") -> bool:
         """请求授权，返回是否允许。streamed=True 时由 Agent 调 create() + await。"""
@@ -80,8 +81,9 @@ class WebConsentProvider(ConsentProvider):
     """Web 模式：创建 Future，Agent yield ConsentEvent 后 await。前端 POST 解析。"""
     streamed = True
 
-    def __init__(self):
+    def __init__(self, session_id: str = ""):
         self._pending: dict[str, asyncio.Future] = {}
+        self.session_id = session_id
 
     def create(self, description: str, tool: str = "", detail: str = "") -> tuple[ConsentEvent, asyncio.Future]:
         req_id = _secrets.token_hex(8)
@@ -142,6 +144,26 @@ class ChannelGuardProvider(ConsentProvider):
 
 # 全局注册表：request_id → WebConsentProvider，跨请求供 /consent 端点查找
 _REGISTRY: dict[str, WebConsentProvider] = {}
+
+# session 维度授权记忆：{session_id: {tool_name, ...}}。同一会话内某工具授权过，
+# 后续同工具调用不再弹窗（用户诉求：读密钥刚授权过，同 session 里不再反复确认）。
+_SESSION_GRANTS: dict[str, set[str]] = {}
+
+
+def is_granted(session_id: str, tool: str) -> bool:
+    """该 session 是否已对此工具授权过。"""
+    return bool(session_id) and tool in _SESSION_GRANTS.get(session_id, set())
+
+
+def record_grant(session_id: str, tool: str) -> None:
+    """记录一次 session 维度授权。"""
+    if session_id:
+        _SESSION_GRANTS.setdefault(session_id, set()).add(tool)
+
+
+def clear_session_grants(session_id: str) -> None:
+    """清除某 session 的授权记忆（会话删除时调用）。"""
+    _SESSION_GRANTS.pop(session_id, None)
 
 
 def resolve_consent(request_id: str, allowed: bool) -> bool:
