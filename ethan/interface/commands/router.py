@@ -1,7 +1,7 @@
 """router 子命令组：管理 embedding 语义路由模型。
 
 命令：
-  ethan router pull             下载 BGE-small-zh ONNX 模型（Docker/离线预拉）
+  ethan router pull             下载 BGE-small-zh INT8 ONNX 模型（Docker/离线预拉）
   ethan router status           查看模型/依赖状态
 """
 import typer
@@ -20,14 +20,14 @@ def _default(ctx: typer.Context) -> None:
 
 @app.command("pull")
 def pull(force: bool = typer.Option(False, "--force", help="已存在也重新下载")) -> None:
-    """下载语义路由模型到 ~/.ethan/models/bge-small-zh/（约 95MB）。"""
+    """下载语义路由模型（INT8 ONNX）到包内 router_models/（约 24MB）。"""
     try:
         from ethan.skills.router import ensure_model
     except Exception as e:
         console.print(f"[red]router 模块不可用：{e}[/red]")
         raise typer.Exit(1)
 
-    console.print("[dim]正在下载语义路由模型（约 95MB，仅首次）...[/dim]")
+    console.print("[dim]正在下载语义路由模型（INT8，约 24MB，仅首次）...[/dim]")
     path = ensure_model(force=force)
     if path is None:
         console.print(

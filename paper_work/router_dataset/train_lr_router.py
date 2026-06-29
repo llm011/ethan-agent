@@ -30,6 +30,9 @@ BASE_MODEL = "BAAI/bge-small-zh-v1.5"
 # 分类用的是 query，BGE query 要加指令前缀
 QUERY_PREFIX = "为这个句子生成表示以用于检索相关文章："
 CACHE = ROOT / "_emb_cache.npz"
+# LR 头落盘到运行时包内（随包分发，~20KB）；ONNX 不落这里，运行时从 HF 下载
+MAX_LENGTH = 64  # 必须与运行时 router.py encode 的 max_length 一致
+LR_HEAD_OUT = ROOT.parents[1] / "ethan" / "skills" / "router_models" / "lr_head.npz"
 
 SKILLS = [
     "paper-analysis", "companion-listen", "deepwiki", "lark-im", "channels",
@@ -49,7 +52,7 @@ class Encoder:
         out = []
         for i in range(0, len(texts), batch_size):
             chunk = texts[i:i + batch_size]
-            batch = self.tok(chunk, padding=True, truncation=True, max_length=64, return_tensors="np")
+            batch = self.tok(chunk, padding=True, truncation=True, max_length=MAX_LENGTH, return_tensors="np")
             feeds = {k: v for k, v in batch.items() if k in self.input_names}
             o = self.sess.run(None, feeds)[0]
             emb = o[:, 0, :]
@@ -153,6 +156,30 @@ def main():
 
     # 目标判定
     print("\n" + ("✅ 达到 88% 目标" if f >= 0.88 else f"⚠️ macroF1={f:.3f} 未达 88%，需补样本/调参"))
+
+    # 落盘 LR 头到运行时包内（随包分发）
+    save_lr_head(clf, bfloor)
+
+
+def save_lr_head(clf, floor):
+    """把 LR 头序列化到 ethan/skills/router_models/lr_head.npz。
+
+    运行时只需 numpy 即可复现 predict_proba：softmax(emb·coefᵀ + intercept)。
+    labels 按 clf.classes_ 顺序映射回标签名，与 coef 行一一对应。
+    """
+    labels = [LABELS[c] for c in clf.classes_]
+    LR_HEAD_OUT.parent.mkdir(parents=True, exist_ok=True)
+    np.savez(
+        LR_HEAD_OUT,
+        coef=clf.coef_.astype(np.float32),
+        intercept=clf.intercept_.astype(np.float32),
+        labels=np.array(labels),
+        query_prefix=QUERY_PREFIX,
+        max_length=MAX_LENGTH,
+        floor=float(floor),
+        emb_dim=clf.coef_.shape[1],
+    )
+    print(f"\n✅ LR 头已落盘：{LR_HEAD_OUT}  (coef={clf.coef_.shape}, floor={floor:.2f}, labels={labels})")
 
 
 if __name__ == "__main__":

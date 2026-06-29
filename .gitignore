@@ -78,6 +78,9 @@ paper_work/*
 # router_dataset 内部：排除嵌入缓存等构建产物，只留样本+生成/训练脚本
 paper_work/router_dataset/_emb_cache.npz
 
+# 运行时路由模型：全部运行时从 GitHub（llm011/router-models）下载，包本身不携带
+ethan/skills/router_models/
+
 # Android
 app/android/.gradle/
 app/android/**/build/

@@ -339,7 +339,6 @@ dependencies = [
 
 [package.optional-dependencies]
 router = [
-    { name = "huggingface-hub" },
     { name = "numpy" },
     { name = "onnxruntime" },
     { name = "transformers" },
@@ -351,7 +350,6 @@ requires-dist = [
     { name = "anthropic", specifier = ">=0.109.1" },
     { name = "apscheduler", specifier = ">=3.11.2" },
     { name = "fastapi", specifier = ">=0.136.3" },
-    { name = "huggingface-hub", marker = "extra == 'router'", specifier = ">=0.23.0" },
     { name = "lark-oapi", specifier = ">=1.6.8" },
     { name = "mcp", specifier = ">=1.27.2" },
     { name = "numpy", marker = "extra == 'router'", specifier = ">=1.26.0" },
