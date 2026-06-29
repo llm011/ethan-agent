@@ -58,6 +58,13 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 **Multi-channel**
 - CLI REPL, Web UI (Next.js), **Android App** (Kotlin/Compose), Lark/Feishu (WebSocket, no public IP required)
 
+**Browser control (real Chrome)**
+- Drive the real Chrome on the machine where ethan runs, from any channel (Web / Lark / CLI) — install the bundled `browser-extension`, point it at your ethan WebSocket endpoint, and the agent gets `browser_session` / `browser_tab` / `browser_page` tools
+- agent-browser style: accessibility-tree snapshot + ref map, click/fill/type/press/select/scroll/hover, screenshot, keyboard/mouse, page `eval`, all over Chrome DevTools Protocol
+- Session is bound to the conversation (isolated per chat); page ops within a session are serialized, different sessions run in parallel; idle sessions are released (tabs kept) after 30 min
+- Session-level one-time consent: the first browser call in a chat asks once, then all browser ops (incl. `eval`) are allowed for that chat
+- Transport is WebSocket only (extension → ethan), no native messaging host; see [docs/browser-control-plan.md](docs/browser-control-plan.md)
+
 ---
 
 ## Install

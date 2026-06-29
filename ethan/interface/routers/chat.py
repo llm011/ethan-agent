@@ -73,6 +73,8 @@ class ChatResponse(BaseModel):
 @router.post("/chat")
 async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
     from ethan.core.paths import user_sessions_db_path, user_facts_path
+    from ethan.core.context import set_session_id
+    set_session_id(req.session_id or "")  # browser 工具按对话隔离/授权
     agent = create_agent(req.model, channel=req.channel, user_id=user_id, mode=req.mode)
     messages = [Message(role=m["role"], content=m.get("content", "")) for m in req.messages]
 

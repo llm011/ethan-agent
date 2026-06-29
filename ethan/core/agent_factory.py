@@ -27,6 +27,7 @@ from ethan.tools.builtin.skill_create import SkillCreateTool
 from ethan.tools.builtin.skill_read import SkillListTool, SkillReadTool
 from ethan.tools.builtin.web import WebFetchTool
 from ethan.tools.builtin.web_search import WebSearchTool
+from ethan.tools.builtin.browser import BrowserSessionTool, BrowserTabTool, BrowserPageTool
 from ethan.tools.registry import ToolRegistry
 
 
@@ -71,6 +72,9 @@ def build_tool_registry(user_id: str = "", toolset: str = "full") -> ToolRegistr
     registry.register(GetSecretTool())
     registry.register(ListSecretsTool())
     registry.register(InstallSkillTool())
+    registry.register(BrowserSessionTool())
+    registry.register(BrowserTabTool())
+    registry.register(BrowserPageTool())
     # 工具发现元工具：fast 档只广播常驻工具，模型需要长尾能力时用它检索并激活。
     # 持有 registry 引用以便检索；放最后确保它能看到上面注册的全部工具。
     registry.register(FindToolsTool(registry))

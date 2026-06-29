@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Ethan Browser",
+  "version": "0.1.0",
+  "description": "Bridge Ethan agent browser commands to Chrome tabs over WebSocket.",
+  "action": {
+    "default_title": "Ethan Browser"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "permissions": ["debugger", "storage", "tabGroups", "tabs", "alarms"],
+  "host_permissions": ["ws://localhost/*", "ws://127.0.0.1/*", "http://localhost/*", "http://127.0.0.1/*"]
+}

@@ -35,4 +35,5 @@
 | [调度器](./scheduler.md) | 定时任务、cron + interval、SQLite 持久化 |
 | [接口层](./interface.md) | CLI (REPL)、HTTP API (SSE)、命令行工具、Web UI 路由 |
 | [ACP 集成](./acp.md) | 外部 Coding Agent 委派协议、Claude Code / OpenCode / Codex 接入、多轮会话、sub_steps 解析 |
+| [浏览器控制](./browser-control-plan.md) | 经 WebSocket 驱动本机 Chrome 扩展、BrowserHub、session 绑对话、会话级授权、截图回传 |
 | Feishu/Lark 集成 | WebSocket 长连接、消息格式、onboarding 流程（见 `ethan/interface/lark_events.py`） |
