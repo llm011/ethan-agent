@@ -54,6 +54,14 @@ const HEADING_CLASS: Record<string, string> = {
 const Text = createComponentImplementation(BasicText, ({ props }: any) => {
   const text = typeof props.text === "string" ? props.text : String(props.text ?? "");
   const variant: string = props.variant || "body";
+  // 排行榜序号徽章：带底色的圆，和正文区分开
+  if (variant === "rankBadge") {
+    return (
+      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary tabular-nums">
+        {text}
+      </div>
+    );
+  }
   if (HEADING_CLASS[variant]) {
     return <div className={HEADING_CLASS[variant]} style={weightStyle(props.weight)}>{text}</div>;
   }
