@@ -587,6 +587,7 @@ Detailed design docs for each module are in [`docs/`](./docs/):
 - [Secrets Management](docs/secrets.md)
 - [Memory System](docs/memory.md)
 - [Skill System](docs/skills.md)
+- [Legal Expert Mode](docs/legal-mode.md)
 - [Scheduler](docs/scheduler.md)
 - [Interface Layer](docs/interface.md)
 

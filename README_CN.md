@@ -680,6 +680,7 @@ EOF
 - [密钥管理](docs/secrets.md)
 - [记忆系统](docs/memory.md)
 - [Skill 系统](docs/skills.md)
+- [法律专家模式](docs/legal-mode.md)
 - [定时任务](docs/scheduler.md)
 - [接口层](docs/interface.md)
 
