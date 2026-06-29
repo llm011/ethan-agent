@@ -101,17 +101,19 @@ git diff main...HEAD
 4. **去重合并**：同一文件相邻的问题合并成一条评论
 5. **输出**：先写一段总体评价（2-3句），再逐条列 P0 评论，最后一句话总结
 
-## 评论发布方式（GitHub PR）
+## 评论发布方式
 
-**评论必须以用户身份发出，不能以 Claude 身份发。** `gh` CLI 默认使用用户的 GitHub auth，直接调即可。
+**评论必须以用户身份发出。** 用平台对应的 CLI/API，默认都走用户的 auth。
 
-**用 inline 评论，不用 conversation 评论**（inline 能精确定位到代码行，体验好得多）：
+**优先用 inline 评论**（定位到具体代码行），不用 conversation 区域的笼统评论。
+
+### GitHub
 
 ```bash
-# 1. 先拿最新 commit sha（inline 评论必须绑定 commit）
+# 1. 拿最新 commit sha
 gh api repos/{owner}/{repo}/pulls/{N} --jq '.head.sha'
 
-# 2. 发 inline 评论（定位到具体行）
+# 2. 发 inline 评论
 gh api repos/{owner}/{repo}/pulls/{N}/comments \
   --method POST \
   --field commit_id="<sha>" \
@@ -119,13 +121,36 @@ gh api repos/{owner}/{repo}/pulls/{N}/comments \
   --field line=42 \
   --field side="RIGHT" \
   --field body="这里在并发场景下可能 race，考虑加个锁？"
+
+# 多行范围加 start_line + start_side=RIGHT
+# 验证：gh pr view {N} --comments
 ```
 
-- `line` = diff 里的行号（RIGHT side = 新文件的行）
-- 如果是多行范围：加 `start_line` + `start_side=RIGHT`
-- 发完用 `gh pr view {N} --comments` 确认评论已出现
+### GitLab
 
-**没有 GitHub PR（纯本地 diff）时**：直接在对话里按评论格式输出即可，不调 API。
+```bash
+# 1. 拿 MR 信息（base/head sha）
+glab api projects/{id}/merge_requests/{N}
+
+# 2. 发 inline 评论（Discussion API）
+glab api projects/{id}/merge_requests/{N}/discussions \
+  --method POST \
+  -f "body=这里有个边界情况值得确认下" \
+  -f "position[position_type]=text" \
+  -f "position[base_sha]=<base_sha>" \
+  -f "position[head_sha]=<head_sha>" \
+  -f "position[start_sha]=<base_sha>" \
+  -f "position[new_path]=src/foo.py" \
+  -f "position[new_line]=42"
+```
+
+### Gerrit / 内部平台
+
+用平台提供的 API 发 line comment，逻辑相同：绑定文件路径 + 行号 + 评论内容。如果不知道 API 格式，先问用户或查文档。
+
+### 纯本地 diff（无代码平台）
+
+直接在对话里按"📍 文件:行号"格式输出评论列表，不调任何 API。
 
 ## 注意事项
 
