@@ -368,7 +368,7 @@ async function getScopedBackendNodeIds(
 async function getCursorElements(
   client: CdpClient,
 ): Promise<Map<number, CursorElementInfo>> {
-  const token = `coze-browser-ci-${Date.now()}-${Math.random()
+  const token = `ethan-browser-ci-${Date.now()}-${Math.random()
     .toString(16)
     .slice(2)}`;
   const expression = `(() => {
@@ -400,7 +400,7 @@ async function getCursorElements(
         ? el.control
         : el.querySelector('input[type="radio"], input[type="checkbox"]');
       const marker = token + '-' + index;
-      el.setAttribute('data-coze-browser-ci', marker);
+      el.setAttribute('data-ethan-browser-ci', marker);
       index += 1;
       elements.push({
         marker,
@@ -442,7 +442,7 @@ async function getCursorElements(
       'DOM.querySelector',
       {
         nodeId: documentResult.root.nodeId,
-        selector: `[data-coze-browser-ci="${candidate.marker}"]`,
+        selector: `[data-ethan-browser-ci="${candidate.marker}"]`,
       },
     );
     if (!queryResult.nodeId) {
@@ -470,7 +470,7 @@ async function getCursorElements(
     });
   }
   void client.send('Runtime.evaluate', {
-    expression: `document.querySelectorAll('[data-coze-browser-ci]').forEach(el => el.removeAttribute('data-coze-browser-ci'))`,
+    expression: `document.querySelectorAll('[data-ethan-browser-ci]').forEach(el => el.removeAttribute('data-ethan-browser-ci'))`,
     returnByValue: true,
     awaitPromise: false,
   });
@@ -485,7 +485,7 @@ async function getHref(
     'DOM.resolveNode',
     {
       backendNodeId,
-      objectGroup: 'coze-browser',
+      objectGroup: 'ethan-browser',
     },
   );
   const objectId = resolved.object.objectId;

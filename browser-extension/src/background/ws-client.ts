@@ -7,7 +7,7 @@
 //   3. 断线指数退避重连，重连后重发 auth 帧。
 
 const PING_INTERVAL_MS = 20_000;
-const KEEPALIVE_ALARM = 'coze-browser-keepalive';
+const KEEPALIVE_ALARM = 'ethan-browser-keepalive';
 const MAX_BACKOFF_MS = 30_000;
 const BASE_BACKOFF_MS = 1_000;
 
@@ -64,7 +64,7 @@ export class BrowserWsClient {
     this.clearReconnect();
     const cfg = await this.getConfig();
     if (!cfg || !cfg.serverUrl || !cfg.token) {
-      console.warn('[CozeBrowser] missing server url/token, configure in options');
+      console.warn('[EthanBrowser] missing server url/token, configure in options');
       this.scheduleReconnect();
       return;
     }
@@ -73,7 +73,7 @@ export class BrowserWsClient {
     try {
       ws = new WebSocket(cfg.serverUrl);
     } catch (e) {
-      console.warn('[CozeBrowser] ws construct failed', e);
+      console.warn('[EthanBrowser] ws construct failed', e);
       this.scheduleReconnect();
       return;
     }

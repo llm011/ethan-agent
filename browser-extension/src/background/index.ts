@@ -2,7 +2,7 @@
 // Extension background entry —— 用 WS 取代原 Native Messaging。
 // 把扩展收到的 JSON-RPC 请求交给 handleNativeRequest 分发到 session-store/page-controller。
 
-import { COZE_BROWSER_RPC_VERSION } from '../shared';
+import { BROWSER_RPC_VERSION } from '../shared';
 
 import { BrowserSessionStore } from './session-store';
 import { handleNativeRequest } from './rpc';
@@ -91,4 +91,4 @@ chrome.tabs.onRemoved.addListener(tabId => {
   void releaseCdpClient(tabId);
 });
 
-console.log('[CozeBrowser] background started, rpc v' + COZE_BROWSER_RPC_VERSION);
+console.log('[EthanBrowser] background started, rpc v' + BROWSER_RPC_VERSION);

@@ -35,7 +35,7 @@ export interface DeviceCommandNotice {
   deviceId?: string;
 }
 
-export type CozeBrowserRpcClient = 'cli' | 'native-host';
+export type BrowserRpcClient = 'cli' | 'native-host';
 
 export type JsonRpcId = string | number | null;
 
@@ -70,14 +70,14 @@ export type JsonRpcResponse<TResult = unknown, TData = unknown> =
 
 export interface BrowserRpcAuthenticateParams {
   token: string;
-  client: CozeBrowserRpcClient;
+  client: BrowserRpcClient;
   origin?: string;
   pid?: number;
 }
 
 export interface BrowserRpcAuthenticateResult {
   authenticated: true;
-  client: CozeBrowserRpcClient;
+  client: BrowserRpcClient;
 }
 
 export interface BrowserSessionTab {

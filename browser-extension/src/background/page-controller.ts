@@ -19,7 +19,7 @@ import type {
   BrowserPageWaitResult,
   BrowserSessionTab,
 } from '../shared';
-import { COZE_BROWSER_RPC_ERROR_CODE } from '../shared';
+import { BROWSER_RPC_ERROR_CODE } from '../shared';
 
 import { BrowserExtensionRpcError } from './session-store';
 import type { BrowserSessionStore } from './session-store';
@@ -135,14 +135,14 @@ interface ResolvedRef {
 
 function createRefNotFoundError(ref: string): BrowserExtensionRpcError {
   return new BrowserExtensionRpcError(
-    COZE_BROWSER_RPC_ERROR_CODE.browserPageRefNotFound,
+    BROWSER_RPC_ERROR_CODE.browserPageRefNotFound,
     `Snapshot ref ${ref} not found. Run page snapshot again.`,
   );
 }
 
 function createPageOperationError(message: string): BrowserExtensionRpcError {
   return new BrowserExtensionRpcError(
-    COZE_BROWSER_RPC_ERROR_CODE.browserPageOperationFailed,
+    BROWSER_RPC_ERROR_CODE.browserPageOperationFailed,
     message,
   );
 }
@@ -700,7 +700,7 @@ export class BrowserPageController {
       }),
       client.send<DomResolveNodeResult>('DOM.resolveNode', {
         backendNodeId: entry.backendNodeId,
-        objectGroup: 'coze-browser',
+        objectGroup: 'ethan-browser',
       }),
     ]);
     const objectId = resolvedNode.object.objectId;

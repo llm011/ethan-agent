@@ -3,7 +3,7 @@ import type {
   BrowserPageScrollDirection,
 } from '../shared';
 
-const REF_MAP_KEY = '__COZE_BROWSER_REF_MAP__';
+const REF_MAP_KEY = '__ETHAN_BROWSER_REF_MAP__';
 
 function literal(value: unknown): string {
   return JSON.stringify(value);

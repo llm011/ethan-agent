@@ -1,4 +1,4 @@
-/* eslint-disable max-lines, max-len, @coze-arch/max-line-per-function, max-lines-per-function -- native request router keeps protocol methods in one place. */
+/* eslint-disable -- request router keeps all protocol methods in one place. */
 import type {
   BrowserPageActionResult,
   BrowserPageClickParams,
@@ -51,8 +51,8 @@ import type {
   JsonRpcResponse,
 } from '../shared';
 import {
-  COZE_BROWSER_RPC_ERROR_CODE,
-  COZE_BROWSER_RPC_METHODS,
+  BROWSER_RPC_ERROR_CODE,
+  BROWSER_RPC_METHODS,
 } from '../shared';
 
 import { BrowserExtensionRpcError } from './session-store';
@@ -122,33 +122,33 @@ export interface BrowserRequestDependencies {
 }
 
 const ALLOWED_METHODS = new Set<string>([
-  COZE_BROWSER_RPC_METHODS.sessionsCreate,
-  COZE_BROWSER_RPC_METHODS.sessionsAttachCurrent,
-  COZE_BROWSER_RPC_METHODS.sessionsList,
-  COZE_BROWSER_RPC_METHODS.sessionsRename,
-  COZE_BROWSER_RPC_METHODS.sessionsRelease,
-  COZE_BROWSER_RPC_METHODS.sessionsClose,
-  COZE_BROWSER_RPC_METHODS.tabsOpen,
-  COZE_BROWSER_RPC_METHODS.tabsList,
-  COZE_BROWSER_RPC_METHODS.tabsUserList,
-  COZE_BROWSER_RPC_METHODS.tabsAttach,
-  COZE_BROWSER_RPC_METHODS.tabsActive,
-  COZE_BROWSER_RPC_METHODS.tabsActivate,
-  COZE_BROWSER_RPC_METHODS.tabsClose,
-  COZE_BROWSER_RPC_METHODS.pagesSnapshot,
-  COZE_BROWSER_RPC_METHODS.pagesClick,
-  COZE_BROWSER_RPC_METHODS.pagesFill,
-  COZE_BROWSER_RPC_METHODS.pagesType,
-  COZE_BROWSER_RPC_METHODS.pagesPress,
-  COZE_BROWSER_RPC_METHODS.pagesHover,
-  COZE_BROWSER_RPC_METHODS.pagesSelect,
-  COZE_BROWSER_RPC_METHODS.pagesScroll,
-  COZE_BROWSER_RPC_METHODS.pagesScrollIntoView,
-  COZE_BROWSER_RPC_METHODS.pagesScreenshot,
-  COZE_BROWSER_RPC_METHODS.pagesGet,
-  COZE_BROWSER_RPC_METHODS.pagesMouse,
-  COZE_BROWSER_RPC_METHODS.pagesWait,
-  COZE_BROWSER_RPC_METHODS.pagesEval,
+  BROWSER_RPC_METHODS.sessionsCreate,
+  BROWSER_RPC_METHODS.sessionsAttachCurrent,
+  BROWSER_RPC_METHODS.sessionsList,
+  BROWSER_RPC_METHODS.sessionsRename,
+  BROWSER_RPC_METHODS.sessionsRelease,
+  BROWSER_RPC_METHODS.sessionsClose,
+  BROWSER_RPC_METHODS.tabsOpen,
+  BROWSER_RPC_METHODS.tabsList,
+  BROWSER_RPC_METHODS.tabsUserList,
+  BROWSER_RPC_METHODS.tabsAttach,
+  BROWSER_RPC_METHODS.tabsActive,
+  BROWSER_RPC_METHODS.tabsActivate,
+  BROWSER_RPC_METHODS.tabsClose,
+  BROWSER_RPC_METHODS.pagesSnapshot,
+  BROWSER_RPC_METHODS.pagesClick,
+  BROWSER_RPC_METHODS.pagesFill,
+  BROWSER_RPC_METHODS.pagesType,
+  BROWSER_RPC_METHODS.pagesPress,
+  BROWSER_RPC_METHODS.pagesHover,
+  BROWSER_RPC_METHODS.pagesSelect,
+  BROWSER_RPC_METHODS.pagesScroll,
+  BROWSER_RPC_METHODS.pagesScrollIntoView,
+  BROWSER_RPC_METHODS.pagesScreenshot,
+  BROWSER_RPC_METHODS.pagesGet,
+  BROWSER_RPC_METHODS.pagesMouse,
+  BROWSER_RPC_METHODS.pagesWait,
+  BROWSER_RPC_METHODS.pagesEval,
 ]);
 
 function createSuccessResponse<T>(
@@ -188,7 +188,7 @@ function isJsonRpcRequest(value: unknown): value is JsonRpcRequest {
 
 function createInvalidParamsError(message: string): BrowserExtensionRpcError {
   return new BrowserExtensionRpcError(
-    COZE_BROWSER_RPC_ERROR_CODE.invalidParams,
+    BROWSER_RPC_ERROR_CODE.invalidParams,
     message,
   );
 }
@@ -229,7 +229,7 @@ function normalizeSessionId(value: unknown): string {
   const sessionId = typeof value === 'string' ? value.trim() : '';
   if (!sessionId) {
     throw new BrowserExtensionRpcError(
-      COZE_BROWSER_RPC_ERROR_CODE.browserSessionRequired,
+      BROWSER_RPC_ERROR_CODE.browserSessionRequired,
       'Missing browser session id',
     );
   }
@@ -642,20 +642,20 @@ export async function handleNativeRequest(
   if (!ALLOWED_METHODS.has(message.method)) {
     return createErrorResponse(
       message,
-      COZE_BROWSER_RPC_ERROR_CODE.methodNotFound,
+      BROWSER_RPC_ERROR_CODE.methodNotFound,
       `Unknown method: ${message.method}`,
     );
   }
 
   try {
-    if (message.method === COZE_BROWSER_RPC_METHODS.sessionsCreate) {
+    if (message.method === BROWSER_RPC_METHODS.sessionsCreate) {
       return createSuccessResponse(
         message,
         await deps.createSession(normalizeSessionCreateParams(message.params)),
       );
     }
 
-    if (message.method === COZE_BROWSER_RPC_METHODS.sessionsAttachCurrent) {
+    if (message.method === BROWSER_RPC_METHODS.sessionsAttachCurrent) {
       return createSuccessResponse(
         message,
         await deps.attachCurrentSession(
@@ -664,18 +664,18 @@ export async function handleNativeRequest(
       );
     }
 
-    if (message.method === COZE_BROWSER_RPC_METHODS.sessionsList) {
+    if (message.method === BROWSER_RPC_METHODS.sessionsList) {
       return createSuccessResponse(message, await deps.listSessions());
     }
 
-    if (message.method === COZE_BROWSER_RPC_METHODS.sessionsRename) {
+    if (message.method === BROWSER_RPC_METHODS.sessionsRename) {
       return createSuccessResponse(
         message,
         await deps.renameSession(normalizeSessionRenameParams(message.params)),
       );
     }
 
-    if (message.method === COZE_BROWSER_RPC_METHODS.sessionsRelease) {
+    if (message.method === BROWSER_RPC_METHODS.sessionsRelease) {
       return createSuccessResponse(
         message,
         await deps.releaseSession(
@@ -684,7 +684,7 @@ export async function handleNativeRequest(
       );
     }
 
-    if (message.method === COZE_BROWSER_RPC_METHODS.sessionsClose) {
+    if (message.method === BROWSER_RPC_METHODS.sessionsClose) {
       return createSuccessResponse(
         message,
         await deps.closeSession(
@@ -693,14 +693,14 @@ export async function handleNativeRequest(
       );
     }
 
-    if (message.method === COZE_BROWSER_RPC_METHODS.tabsOpen) {
+    if (message.method === BROWSER_RPC_METHODS.tabsOpen) {
       return createSuccessResponse(
         message,
         await deps.openTab(normalizeTabOpenParams(message.params)),
       );
     }
 
-    if (message.method === COZE_BROWSER_RPC_METHODS.tabsList) {
+    if (message.method === BROWSER_RPC_METHODS.tabsList) {
       return createSuccessResponse(
         message,
         await deps.listTabs(
@@ -709,18 +709,18 @@ export async function handleNativeRequest(
       );
     }
 
-    if (message.method === COZE_BROWSER_RPC_METHODS.tabsUserList) {
+    if (message.method === BROWSER_RPC_METHODS.tabsUserList) {
       return createSuccessResponse(message, await deps.listUserTabs());
     }
 
-    if (message.method === COZE_BROWSER_RPC_METHODS.tabsAttach) {
+    if (message.method === BROWSER_RPC_METHODS.tabsAttach) {
       return createSuccessResponse(
         message,
         await deps.attachTab(normalizeTabAttachParams(message.params)),
       );
     }
 
-    if (message.method === COZE_BROWSER_RPC_METHODS.tabsActive) {
+    if (message.method === BROWSER_RPC_METHODS.tabsActive) {
       return createSuccessResponse(
         message,
         await deps.getActiveTab(
@@ -729,28 +729,28 @@ export async function handleNativeRequest(
       );
     }
 
-    if (message.method === COZE_BROWSER_RPC_METHODS.tabsActivate) {
+    if (message.method === BROWSER_RPC_METHODS.tabsActivate) {
       return createSuccessResponse(
         message,
         await deps.activateTab(normalizeTabActivateParams(message.params)),
       );
     }
 
-    if (message.method === COZE_BROWSER_RPC_METHODS.tabsClose) {
+    if (message.method === BROWSER_RPC_METHODS.tabsClose) {
       return createSuccessResponse(
         message,
         await deps.closeTab(normalizeTabCloseParams(message.params)),
       );
     }
 
-    if (message.method === COZE_BROWSER_RPC_METHODS.pagesSnapshot) {
+    if (message.method === BROWSER_RPC_METHODS.pagesSnapshot) {
       return createSuccessResponse(
         message,
         await deps.pageSnapshot(normalizePageSnapshotParams(message.params)),
       );
     }
 
-    if (message.method === COZE_BROWSER_RPC_METHODS.pagesClick) {
+    if (message.method === BROWSER_RPC_METHODS.pagesClick) {
       return createSuccessResponse(
         message,
         await deps.pageClick(
@@ -759,28 +759,28 @@ export async function handleNativeRequest(
       );
     }
 
-    if (message.method === COZE_BROWSER_RPC_METHODS.pagesFill) {
+    if (message.method === BROWSER_RPC_METHODS.pagesFill) {
       return createSuccessResponse(
         message,
         await deps.pageFill(normalizePageFillParams(message.params)),
       );
     }
 
-    if (message.method === COZE_BROWSER_RPC_METHODS.pagesType) {
+    if (message.method === BROWSER_RPC_METHODS.pagesType) {
       return createSuccessResponse(
         message,
         await deps.pageType(normalizePageTypeParams(message.params)),
       );
     }
 
-    if (message.method === COZE_BROWSER_RPC_METHODS.pagesPress) {
+    if (message.method === BROWSER_RPC_METHODS.pagesPress) {
       return createSuccessResponse(
         message,
         await deps.pagePress(normalizePagePressParams(message.params)),
       );
     }
 
-    if (message.method === COZE_BROWSER_RPC_METHODS.pagesHover) {
+    if (message.method === BROWSER_RPC_METHODS.pagesHover) {
       return createSuccessResponse(
         message,
         await deps.pageHover(
@@ -789,21 +789,21 @@ export async function handleNativeRequest(
       );
     }
 
-    if (message.method === COZE_BROWSER_RPC_METHODS.pagesSelect) {
+    if (message.method === BROWSER_RPC_METHODS.pagesSelect) {
       return createSuccessResponse(
         message,
         await deps.pageSelect(normalizePageSelectParams(message.params)),
       );
     }
 
-    if (message.method === COZE_BROWSER_RPC_METHODS.pagesScroll) {
+    if (message.method === BROWSER_RPC_METHODS.pagesScroll) {
       return createSuccessResponse(
         message,
         await deps.pageScroll(normalizePageScrollParams(message.params)),
       );
     }
 
-    if (message.method === COZE_BROWSER_RPC_METHODS.pagesScrollIntoView) {
+    if (message.method === BROWSER_RPC_METHODS.pagesScrollIntoView) {
       return createSuccessResponse(
         message,
         await deps.pageScrollIntoView(
@@ -812,7 +812,7 @@ export async function handleNativeRequest(
       );
     }
 
-    if (message.method === COZE_BROWSER_RPC_METHODS.pagesScreenshot) {
+    if (message.method === BROWSER_RPC_METHODS.pagesScreenshot) {
       return createSuccessResponse(
         message,
         await deps.pageScreenshot(
@@ -821,21 +821,21 @@ export async function handleNativeRequest(
       );
     }
 
-    if (message.method === COZE_BROWSER_RPC_METHODS.pagesGet) {
+    if (message.method === BROWSER_RPC_METHODS.pagesGet) {
       return createSuccessResponse(
         message,
         await deps.pageGet(normalizePageGetParams(message.params)),
       );
     }
 
-    if (message.method === COZE_BROWSER_RPC_METHODS.pagesMouse) {
+    if (message.method === BROWSER_RPC_METHODS.pagesMouse) {
       return createSuccessResponse(
         message,
         await deps.pageMouse(normalizePageMouseParams(message.params)),
       );
     }
 
-    if (message.method === COZE_BROWSER_RPC_METHODS.pagesWait) {
+    if (message.method === BROWSER_RPC_METHODS.pagesWait) {
       return createSuccessResponse(
         message,
         await deps.pageWait(normalizePageWaitParams(message.params)),
@@ -851,7 +851,7 @@ export async function handleNativeRequest(
     const code =
       error instanceof BrowserExtensionRpcError
         ? error.code
-        : COZE_BROWSER_RPC_ERROR_CODE.browserOperationFailed;
+        : BROWSER_RPC_ERROR_CODE.browserOperationFailed;
     return createErrorResponse(message, code, messageText);
   }
 }

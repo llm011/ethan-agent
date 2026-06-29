@@ -1,11 +1,11 @@
 /* eslint-disable */
-// 本地 vendored 协议常量(原 @coze-space/desktop-shared)。
-// ethan 只保留 sessions.* / tabs.* / pages.* 命名空间与扩展通信。
+// 本地内联的协议常量与类型,不依赖任何外部包。
+// 只保留 sessions.* / tabs.* / pages.* 命名空间,供扩展各模块共享。
 export type * from './types';
 
-export const COZE_BROWSER_RPC_VERSION = 1;
+export const BROWSER_RPC_VERSION = 1;
 
-export const COZE_BROWSER_RPC_METHODS = {
+export const BROWSER_RPC_METHODS = {
   authenticate: 'browser.authenticate',
   sessionsCreate: 'sessions.create',
   sessionsAttachCurrent: 'sessions.attachCurrent',
@@ -36,7 +36,7 @@ export const COZE_BROWSER_RPC_METHODS = {
   pagesEval: 'pages.eval',
 } as const;
 
-export const COZE_BROWSER_RPC_ERROR_CODE = {
+export const BROWSER_RPC_ERROR_CODE = {
   invalidRequest: -32600,
   methodNotFound: -32601,
   invalidParams: -32602,

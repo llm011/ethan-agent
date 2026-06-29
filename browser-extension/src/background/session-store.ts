@@ -27,12 +27,12 @@ import type {
   BrowserTabOpenResult,
   BrowserTabUserListResult,
 } from '../shared';
-import { COZE_BROWSER_RPC_ERROR_CODE } from '../shared';
+import { BROWSER_RPC_ERROR_CODE } from '../shared';
 
-const STORAGE_KEY = 'coze_browser_sessions_v2';
+const STORAGE_KEY = 'ethan_browser_sessions_v2';
 const TAB_GROUP_ID_NONE = -1;
 const DEFAULT_SESSION_URL = 'about:blank';
-const GROUP_TITLE_PREFIX = 'Coze · ';
+const GROUP_TITLE_PREFIX = 'Ethan · ';
 const SESSION_ID_RANDOM_LENGTH = 12;
 const SESSION_ID_FALLBACK_RADIX = 36;
 
@@ -93,7 +93,7 @@ function createSessionNotFoundError(
   sessionId: string,
 ): BrowserExtensionRpcError {
   return new BrowserExtensionRpcError(
-    COZE_BROWSER_RPC_ERROR_CODE.browserSessionNotFound,
+    BROWSER_RPC_ERROR_CODE.browserSessionNotFound,
     `Session ${sessionId} not found`,
   );
 }
@@ -117,7 +117,7 @@ function rejectWithRuntimeError(
 function getTabId(tab: chrome.tabs.Tab, fallback: string): number {
   if (typeof tab.id !== 'number') {
     throw new BrowserExtensionRpcError(
-      COZE_BROWSER_RPC_ERROR_CODE.browserTabNotFound,
+      BROWSER_RPC_ERROR_CODE.browserTabNotFound,
       fallback,
     );
   }
@@ -368,7 +368,7 @@ export class BrowserSessionStore {
     );
     if (existingSession && existingSession.sessionId !== params.sessionId) {
       throw new BrowserExtensionRpcError(
-        COZE_BROWSER_RPC_ERROR_CODE.browserTabClaimedByAnotherSession,
+        BROWSER_RPC_ERROR_CODE.browserTabClaimedByAnotherSession,
         `Tab ${params.tabId} is already managed by session ${existingSession.sessionId}`,
       );
     }
@@ -563,7 +563,7 @@ export class BrowserSessionStore {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new BrowserExtensionRpcError(
-        COZE_BROWSER_RPC_ERROR_CODE.browserOperationFailed,
+        BROWSER_RPC_ERROR_CODE.browserOperationFailed,
         message,
       );
     }
@@ -587,7 +587,7 @@ export class BrowserSessionStore {
     const tab = toSessionTab(await this.getTab(tabId));
     if (tab.windowId !== session.windowId || tab.groupId !== session.groupId) {
       throw new BrowserExtensionRpcError(
-        COZE_BROWSER_RPC_ERROR_CODE.browserTabNotInSession,
+        BROWSER_RPC_ERROR_CODE.browserTabNotInSession,
         `Tab ${tabId} is not in session ${session.sessionId}`,
       );
     }
@@ -643,7 +643,7 @@ export class BrowserSessionStore {
     }).catch(error => {
       const message = error instanceof Error ? error.message : String(error);
       throw new BrowserExtensionRpcError(
-        COZE_BROWSER_RPC_ERROR_CODE.browserTabNotFound,
+        BROWSER_RPC_ERROR_CODE.browserTabNotFound,
         message,
       );
     });
@@ -660,7 +660,7 @@ export class BrowserSessionStore {
         if (!tab) {
           reject(
             new BrowserExtensionRpcError(
-              COZE_BROWSER_RPC_ERROR_CODE.browserTabNotFound,
+              BROWSER_RPC_ERROR_CODE.browserTabNotFound,
               'Current active tab not found',
             ),
           );
@@ -718,7 +718,7 @@ export class BrowserSessionStore {
     }).catch(error => {
       const message = error instanceof Error ? error.message : String(error);
       throw new BrowserExtensionRpcError(
-        COZE_BROWSER_RPC_ERROR_CODE.browserTabGroupFailed,
+        BROWSER_RPC_ERROR_CODE.browserTabGroupFailed,
         message,
       );
     });
@@ -747,7 +747,7 @@ export class BrowserSessionStore {
         if (!tab) {
           reject(
             new BrowserExtensionRpcError(
-              COZE_BROWSER_RPC_ERROR_CODE.browserTabNotFound,
+              BROWSER_RPC_ERROR_CODE.browserTabNotFound,
               `Tab ${tabId} not found`,
             ),
           );

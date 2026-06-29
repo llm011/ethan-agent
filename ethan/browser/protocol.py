@@ -1,6 +1,6 @@
 """Browser control JSON-RPC 协议常量。
 
-method 命名空间对齐 Coze 扩展(sessions.* / tabs.* / pages.*),
+method 命名空间对齐 Ethan 扩展(sessions.* / tabs.* / pages.*),
 这样移植过来的扩展 rpc 分发逻辑几乎不用改。
 """
 from __future__ import annotations
@@ -39,7 +39,7 @@ METHODS = {
     "page_eval": "pages.eval",
 }
 
-# JSON-RPC error code(对齐 Coze COZE_BROWSER_RPC_ERROR_CODE)
+# JSON-RPC error code(对齐 Ethan BROWSER_RPC_ERROR_CODE)
 ERROR_CODE = {
     "invalid_request": -32600,
     "method_not_found": -32601,
