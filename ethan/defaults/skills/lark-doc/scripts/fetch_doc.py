@@ -23,8 +23,10 @@ from pathlib import Path
 
 
 # ── 图片 URL 识别：匹配飞书内部文件链接 ──────────────────────────────────────
+# host 段必须以 feishu.cn / larksuite.com 结尾（可带子域），避免 https://evil.com/x?u=feishu.cn
+# 这类把目标域名塞进路径/query 的伪装 URL 也被当成飞书链接下载。
 _FEISHU_IMG_RE = re.compile(
-    r'!\[([^\]]*)\]\((https?://[^\s)]+(?:feishu\.cn|larksuite\.com)[^\s)]*)\)'
+    r'!\[([^\]]*)\]\((https?://(?:[^\s/?#)]*\.)?(?:feishu\.cn|larksuite\.com)(?:[/?#:][^\s)]*)?)\)'
 )
 
 # ── 视频/附件 Token 识别：lark-cli 导出的媒体块格式 ─────────────────────────

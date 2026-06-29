@@ -690,10 +690,12 @@ class Agent:
                 if desc:
                     # session 维度授权记忆：按 consent_scope 粒度（工具名 或 目录路径）记忆，
                     # 同会话内此 scope 已授权过则直接放行（目录授权后子目录免问）。
+                    # 但 consent_always=True 的高危调用（如 rm -rf）绕过记忆，每次都问、且不记入放行。
                     from ethan.core.consent import is_granted, record_grant
                     sess_id = getattr(consent_provider, "session_id", "") if consent_provider else ""
                     scope = tool.consent_scope(**tc.arguments) if tool else tc.name
-                    if is_granted(sess_id, scope):
+                    always = tool.consent_always(**tc.arguments) if tool else False
+                    if not always and is_granted(sess_id, scope):
                         allowed_calls.append(tc)
                         yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary=_format_args(tc.arguments), state="start")
                         continue
@@ -721,8 +723,10 @@ class Agent:
                             tool_call_id=tc.id,
                         ))
                         continue
-                    # 授权通过：记录到 session 维度（按 scope），后续同 scope 不再弹
-                    record_grant(sess_id, scope)
+                    # 授权通过：记录到 session 维度（按 scope），后续同 scope 不再弹。
+                    # 高危调用（always）不记入放行，下次同类仍单独询问。
+                    if not always:
+                        record_grant(sess_id, scope)
                 allowed_calls.append(tc)
                 yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary=_format_args(tc.arguments), state="start")
 

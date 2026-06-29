@@ -37,6 +37,15 @@ class BaseTool(ABC):
         """
         return self.name
 
+    def consent_always(self, **kwargs) -> bool:
+        """本次调用是否【必须】重新询问授权——即使本会话已对该 scope 授权过也绕过记忆。
+        且这种一次性批准不计入会话放行（下次同类仍问）。
+
+        默认 False。用于高危操作（如 shell 的 rm -rf / 管道执行 / 提权），防止「一次授权
+        = 整个会话任意高危命令放行」。
+        """
+        return False
+
     @property
     @abstractmethod
     def name(self) -> str: ...

@@ -109,7 +109,7 @@ def upload(local_path: str, object_key: str) -> str:
     req.add_header("x-amz-content-sha256", payload_hash)
     req.add_header("x-amz-date", date_time)
 
-    with urllib.request.urlopen(req) as resp:
+    with urllib.request.urlopen(req, timeout=120) as resp:
         if resp.status not in (200, 204):
             raise RuntimeError(f"上传失败: HTTP {resp.status}")
 

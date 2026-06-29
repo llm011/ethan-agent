@@ -126,7 +126,9 @@ class FileWriteTool(BaseTool):
         # 同一会话内授权过该目录后，其子目录/同目录文件不再弹（见 consent_scope + is_granted）。
         if _is_safe_path(str(path)):
             return None
-        return f"写入文件 {path}"
+        # 文案显式告知 scope 是目录级，避免用户以为只授了单个文件
+        scope = _dir_scope(str(path))
+        return f"写入文件 {path}（授权后本会话对 {scope} 目录及其子目录的写入都不再询问）"
 
     def consent_scope(self, path: str = "", **kwargs) -> str:
         # 目录级授权：授权某目录后，该目录及子目录内的写入都免问
