@@ -345,7 +345,7 @@ Agent proactively writes to all layers mid-conversation via `memory_write`, `pro
 
 ## Skills
 
-Skills are Markdown files loaded from `~/.ethan/skills/`. On first run, default skills (channels, deepwiki, lark-im, lark-shared, skills-manager) are automatically copied there from the package.
+Skills are Markdown files loaded from `~/.ethan/skills/`. On first run, default skills (channels, deepwiki, lark-im, lark-shared, skills-manager, agent-browser, dev-browser) are automatically copied there from the package.
 
 Both directory format (`<name>/SKILL.md` + `references/`) and legacy single-file `.md` format are supported.
 

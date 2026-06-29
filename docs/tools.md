@@ -109,6 +109,8 @@ web_fetch(url="https://example.com/article")
 - 超过 8000 字符截断，防止 context 爆炸
 - 没用 BeautifulSoup 或 readability，保持零额外依赖
 
+> `web_fetch` 只抓静态 HTML 正文，不执行 JS、不能交互。需要操作页面（点击/填表/登录态）或抓 JS 渲染的内容时，走 Skill 系统的 `agent-browser` / `dev-browser`（见 [Skill 系统 · 浏览器自动化](./skills.md#浏览器自动化agent-browser-vs-dev-browser)）。
+
 ### FileReadTool — `ethan/tools/builtin/file.py`
 
 读取本地文件。
