@@ -854,13 +854,10 @@ async def _handle_message(event_data: dict) -> None:
         agent = Agent(tool_registry=registry, skill_registry=skills, channel="lark", mode=session_mode)
 
         # 注入主人/授权运行时上下文，配合 soul.md 的主人准则判断是否执行有副作用操作
-        # 环境前缀：让模型知道自己在飞书 IM 渠道，约束输出形态（否则 skill 里"在飞书渠道"的规则无从触发）
+        # 环境提示：让模型知道自己在飞书 IM 渠道（轻提示，不压制正常的工具过程/结果输出）。
+        # 具体场景的输出形态（如 code-review 在 IM 里只回简短总结）由对应 skill 自己约束。
         env_note = (
-            "【运行环境】你正在【飞书】（IM 即时通讯渠道）和用户对话。"
-            "回复要简短、口语化、直奔结论；"
-            "绝不要把大段推理过程、分析步骤、结构化长报告打印到聊天里——飞书会渲染成超长卡片，体验极差。"
-            "需要产出长内容（如代码审查的逐条意见）时，把详情写到目标系统（代码平台的评论、文档、文件），"
-            "聊天里只回一句话结论 + 指向。\n\n"
+            "【运行环境】你正在【飞书】（IM 即时通讯渠道）和用户对话，回复偏简洁口语化即可。\n\n"
         )
         if not owner_claimed:
             agent.runtime_context = env_note + (
