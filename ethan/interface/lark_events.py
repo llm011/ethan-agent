@@ -854,15 +854,23 @@ async def _handle_message(event_data: dict) -> None:
         agent = Agent(tool_registry=registry, skill_registry=skills, channel="lark", mode=session_mode)
 
         # 注入主人/授权运行时上下文，配合 soul.md 的主人准则判断是否执行有副作用操作
+        # 环境前缀：让模型知道自己在飞书 IM 渠道，约束输出形态（否则 skill 里"在飞书渠道"的规则无从触发）
+        env_note = (
+            "【运行环境】你正在【飞书】（IM 即时通讯渠道）和用户对话。"
+            "回复要简短、口语化、直奔结论；"
+            "绝不要把大段推理过程、分析步骤、结构化长报告打印到聊天里——飞书会渲染成超长卡片，体验极差。"
+            "需要产出长内容（如代码审查的逐条意见）时，把详情写到目标系统（代码平台的评论、文档、文件），"
+            "聊天里只回一句话结论 + 指向。\n\n"
+        )
         if not owner_claimed:
-            agent.runtime_context = (
+            agent.runtime_context = env_note + (
                 "本渠道（飞书）还没有认主人。当前发消息的人身份未确认。"
                 "对有副作用/高消耗的操作（改文件、删数据、执行 shell、花钱、对外发消息）要保守，先确认。"
             )
         elif is_owner:
-            agent.runtime_context = "当前发消息的人是【主人】，可执行有副作用的操作（但危险红线操作仍需拒绝/二次确认）。"
+            agent.runtime_context = env_note + "当前发消息的人是【主人】，可执行有副作用的操作（但危险红线操作仍需拒绝/二次确认）。"
         else:
-            agent.runtime_context = (
+            agent.runtime_context = env_note + (
                 f"当前发消息的人【不是主人】（主人 open_id={owner_open_id[:8]}…）。"
                 "默认只做只读/低风险/低消耗的事；涉及改文件、删数据、执行 shell、花钱、对外发消息等操作不要主动执行，"
                 "说明需要主人授权。"

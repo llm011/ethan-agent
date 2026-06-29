@@ -49,6 +49,8 @@ bytedcli --json codebase mr diff <N> -R "<owner/repo>" > /tmp/mr_<N>.diff
 3. 每批 review 完输出结论，再继续下一批
 4. 最后汇总所有批次的发现，给出整体总结
 
+> **改动量大时（diff > 几百行 / 文件 > 10 个）先读 [`references/large-diff.md`](references/large-diff.md)**：抓意图、跳噪音、机械改动只审一次、按依赖顺序读、查遗漏——大幅提效的核心方法。
+
 ## 审查维度与优先级
 
 ### P0 — 必须修复（在 review 评论里指出）
@@ -145,32 +147,33 @@ bytedcli --json codebase mr diff <N> -R "<owner/repo>" > /tmp/mr_<N>.diff
 
 ## 评论发布方式
 
-**评论必须以用户身份发出。** 平台 CLI 默认走用户 auth，直接调即可。
+**评论必须真的发到代码平台上，不要只在聊天里"口头"说哪里能优化。** 用户让你 review，默认就是要你把意见写成 MR/PR 评论。**只有用户明确说"先说给我听""别发评论"时才只在对话里讲。**
 
-**优先用 inline 评论**（定位到具体代码行），不用 conversation 区域的笼统评论。
+**评论以用户身份发出**（平台 CLI 默认走用户 auth）。**优先 inline 评论**（定位到具体代码行），不用笼统的整体评论。
 
-以 GitHub 为例：
+字节 Codebase（用 bytedcli，先 `skill_read(name="bytedance-codebase")` 确认参数）：
 
 ```bash
-# 1. 拿最新 commit sha
-gh api repos/{owner}/{repo}/pulls/{N} --jq '.head.sha'
-
-# 2. 发 inline 评论
-gh api repos/{owner}/{repo}/pulls/{N}/comments \
-  --method POST \
-  --field commit_id="<sha>" \
-  --field path="src/foo.py" \
-  --field line=42 \
-  --field side="RIGHT" \
-  --field body="这里在并发场景下可能 race，考虑加个锁？"
-
-# 多行范围：加 start_line + start_side=RIGHT
-# 验证：gh pr view {N} --comments
+# 行级评论：draft 带 --position-json 定位，再 publish 发布
+bytedcli codebase mr comment draft <N> -R "<owner/repo>" \
+  --body "这里并发写缺锁，高并发下可能丢更新，加个锁好些？" \
+  --position-json '{"new_path":"src/foo.go","new_line":42}'
+bytedcli codebase mr comment publish <N> -R "<owner/repo>"
 ```
 
-其他平台（GitLab `glab`、Gerrit、内部系统）原理相同：绑定文件路径 + 行号 + 评论正文。不熟悉 API 格式时先查 `--help` 或问用户，不要猜参数名。
+GitHub 为例：
 
-**纯本地 diff（无代码平台）**：直接在对话里按"📍 文件:行号"格式输出评论列表。
+```bash
+gh api repos/{owner}/{repo}/pulls/{N} --jq '.head.sha'   # 拿 commit sha
+gh api repos/{owner}/{repo}/pulls/{N}/comments --method POST \
+  --field commit_id="<sha>" --field path="src/foo.py" \
+  --field line=42 --field side="RIGHT" \
+  --field body="这里在并发场景下可能 race，考虑加个锁？"
+```
+
+其他平台（GitLab `glab`、Gerrit 等）原理相同：绑定文件路径 + 行号 + 评论正文。不熟悉参数时先查 `--help`，不要猜。
+
+**纯本地 diff（无代码平台）**：才在对话里按"📍 文件:行号"格式输出评论列表。
 
 ## 注意事项
 
