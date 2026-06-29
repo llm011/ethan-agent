@@ -13,6 +13,20 @@ from contextvars import ContextVar
 
 ETHAN_USER_ID: ContextVar[str] = ContextVar("ETHAN_USER_ID", default="")
 
+# 当前对话的 session_id（browser 工具用来把 browser session 绑到对话，做会话级隔离/授权）。
+# 与 user_id 一样用 ContextVar，保证并发请求各自隔离。
+ETHAN_SESSION_ID: ContextVar[str] = ContextVar("ETHAN_SESSION_ID", default="")
+
+
+def set_session_id(sid: str) -> None:
+    """设置当前上下文的对话 session_id。"""
+    ETHAN_SESSION_ID.set(sid or "")
+
+
+def get_session_id() -> str:
+    """读取当前上下文的对话 session_id。无会话返回 ""。"""
+    return ETHAN_SESSION_ID.get()
+
 
 def set_user_id(uid: str) -> None:
     """设置当前上下文的 user_id。空串或 None 都归一为 default profile。"""

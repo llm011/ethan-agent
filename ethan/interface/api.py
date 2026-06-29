@@ -12,6 +12,8 @@ from ethan.core.heartbeat import start_heartbeat, stop_heartbeat
 from ethan.memory.api_keys import APIKeyStore
 
 from ethan.interface.routers import chat, sessions, settings, memory, schedule, knowledge, skills, docs, completions, logs, models, consent
+from ethan.browser.ws_route import router as browser_ws_router
+from ethan.browser.http_route import router as browser_http_router
 
 try:
     from ethan.interface.lark import lark_router
@@ -39,6 +41,8 @@ async def lifespan(app: FastAPI):
     if _lark_available:
         start_lark_listener()
     start_heartbeat()
+    from ethan.browser.session_map import start_idle_sweep, stop_idle_sweep
+    start_idle_sweep()
     key_store = APIKeyStore()
     await key_store.init()
     app.state.api_key_store = key_store
@@ -46,6 +50,7 @@ async def lifespan(app: FastAPI):
     if _lark_available:
         stop_lark_listener()
     stop_heartbeat()
+    stop_idle_sweep()
     await app.state.api_key_store.close()
 
 
@@ -81,6 +86,8 @@ app.include_router(completions.router)  # /v1 OpenAI-compat, no /api prefix
 app.include_router(logs.router, prefix="/api")
 app.include_router(models.router, prefix="/api")
 app.include_router(consent.router, prefix="/api")
+app.include_router(browser_ws_router)  # /ws/browser, WebSocket, no prefix
+app.include_router(browser_http_router, prefix="/api")  # /api/browser/shot/{name}
 
 if _WEB_DIST.exists():
     app.mount("/_next", StaticFiles(directory=str(_WEB_DIST / "_next")), name="next-static")

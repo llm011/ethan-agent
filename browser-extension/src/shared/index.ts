@@ -1,0 +1,55 @@
+/* eslint-disable */
+// 本地内联的协议常量与类型,不依赖任何外部包。
+// 只保留 sessions.* / tabs.* / pages.* 命名空间,供扩展各模块共享。
+export type * from './types';
+
+export const BROWSER_RPC_VERSION = 1;
+
+export const BROWSER_RPC_METHODS = {
+  authenticate: 'browser.authenticate',
+  sessionsCreate: 'sessions.create',
+  sessionsAttachCurrent: 'sessions.attachCurrent',
+  sessionsList: 'sessions.list',
+  sessionsRename: 'sessions.rename',
+  sessionsRelease: 'sessions.release',
+  sessionsClose: 'sessions.close',
+  tabsOpen: 'tabs.open',
+  tabsList: 'tabs.list',
+  tabsUserList: 'tabs.userList',
+  tabsAttach: 'tabs.attach',
+  tabsActive: 'tabs.active',
+  tabsActivate: 'tabs.activate',
+  tabsClose: 'tabs.close',
+  pagesSnapshot: 'pages.snapshot',
+  pagesClick: 'pages.click',
+  pagesFill: 'pages.fill',
+  pagesType: 'pages.type',
+  pagesPress: 'pages.press',
+  pagesHover: 'pages.hover',
+  pagesSelect: 'pages.select',
+  pagesScroll: 'pages.scroll',
+  pagesScrollIntoView: 'pages.scrollIntoView',
+  pagesScreenshot: 'pages.screenshot',
+  pagesGet: 'pages.get',
+  pagesMouse: 'pages.mouse',
+  pagesWait: 'pages.wait',
+  pagesEval: 'pages.eval',
+} as const;
+
+export const BROWSER_RPC_ERROR_CODE = {
+  invalidRequest: -32600,
+  methodNotFound: -32601,
+  invalidParams: -32602,
+  internalError: -32603,
+  unauthorized: 4001,
+  browserExtensionNotConnected: 4101,
+  browserOperationFailed: 4102,
+  browserSessionRequired: 4103,
+  browserTabNotFound: 4104,
+  browserTabClaimedByAnotherSession: 4105,
+  browserTabGroupFailed: 4106,
+  browserSessionNotFound: 4107,
+  browserTabNotInSession: 4108,
+  browserPageRefNotFound: 4109,
+  browserPageOperationFailed: 4110,
+} as const;

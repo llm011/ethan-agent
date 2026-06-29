@@ -36,4 +36,9 @@
 | [调度器](./scheduler.md) | 定时任务、cron + interval、SQLite 持久化 |
 | [接口层](./interface.md) | CLI (REPL)、HTTP API (SSE)、命令行工具、Web UI 路由 |
 | [ACP 集成](./acp.md) | 外部 Coding Agent 委派协议、Claude Code / OpenCode / Codex 接入、多轮会话、sub_steps 解析 |
+| [浏览器控制 · 总览与架构](./browser/overview.md) | 调用链总览、三段链路职责、端到端时序、代码地图 |
+| [浏览器控制 · 传输层与协议](./browser/transport-protocol.md) | WebSocket 选型、JSON-RPC 信封、method/error 表、req-id 配对、超时/断连、last-wins |
+| [浏览器控制 · 扩展内核 (CDP/AX)](./browser/extension-internals.md) | SW 保活、CDP attach 缓存、AX 快照算法、ref 生命周期、各动作 CDP 实现 |
+| [浏览器控制 · 会话/并发/安全](./browser/session-security.md) | 会话绑定隔离、per-session 锁、idle release、鉴权/授权/归属、截图清理、eval 边界 |
+| [浏览器控制 · 设计决策记录](./browser-control-plan.md) | grill 阶段确定的 10 项关键决策(Q1–Q10)及其理由 |
 | Feishu/Lark 集成 | WebSocket 长连接、消息格式、onboarding 流程（见 `ethan/interface/lark_events.py`） |

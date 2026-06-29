@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ethan Browser</title>
+    <style>
+      :root { color-scheme: light dark; }
+      * { box-sizing: border-box; }
+      body {
+        font-family: -apple-system, system-ui, "PingFang SC", sans-serif;
+        width: 300px;
+        margin: 0;
+        padding: 16px;
+        background: #fff;
+        color: #1f2430;
+      }
+      @media (prefers-color-scheme: dark) {
+        body { background: #1c1f26; color: #e6e8ec; }
+        input { background: #2a2e37; color: #e6e8ec; border-color: #3a3f4a !important; }
+        .hint { color: #8b909a !important; }
+      }
+      header { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+      header img { width: 28px; height: 28px; border-radius: 6px; }
+      header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+      .status {
+        display: flex; align-items: center; gap: 8px;
+        font-size: 13px; padding: 8px 10px; border-radius: 8px;
+        background: rgba(127,127,127,0.1); margin-bottom: 14px;
+      }
+      .dot { width: 9px; height: 9px; border-radius: 50%; background: #c0c4cc; flex: none; }
+      .dot.on { background: #16a34a; box-shadow: 0 0 0 3px rgba(22,163,74,0.18); }
+      .dot.off { background: #dc2626; box-shadow: 0 0 0 3px rgba(220,38,38,0.15); }
+      label { display: block; margin: 12px 0 4px; font-size: 12px; font-weight: 500; }
+      input {
+        width: 100%; padding: 8px 10px; font-size: 13px;
+        border: 1px solid #d6d9e0; border-radius: 7px; background: #fff;
+      }
+      .hint { font-size: 11px; color: #9aa0aa; margin-top: 3px; }
+      .row { display: flex; gap: 8px; margin-top: 16px; }
+      button {
+        flex: 1; padding: 9px; border: 0; border-radius: 7px;
+        font-size: 13px; font-weight: 500; cursor: pointer;
+      }
+      #save { background: #4f46e5; color: #fff; }
+      #save:hover { background: #4338ca; }
+      #reconnect { background: rgba(127,127,127,0.14); color: inherit; }
+      #saved { font-size: 12px; color: #16a34a; min-height: 16px; margin-top: 8px; text-align: center; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <img id="logo" src="icons/icon-48.png" alt="" />
+      <h1>Ethan Browser</h1>
+    </header>
+
+    <div class="status">
+      <span id="dot" class="dot"></span>
+      <span id="statusText">检查连接中…</span>
+    </div>
+
+    <label>Ethan Server WebSocket 地址</label>
+    <input id="serverUrl" placeholder="ws://localhost:8900/ws/browser" />
+    <div class="hint">同机部署默认 ws://localhost:8900/ws/browser</div>
+
+    <label>Token</label>
+    <input id="token" type="password" placeholder="ethan web token" />
+    <div class="hint">与 ethan 的 web token 一致</div>
+
+    <div class="row">
+      <button id="reconnect">重新连接</button>
+      <button id="save">保存</button>
+    </div>
+    <div id="saved"></div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

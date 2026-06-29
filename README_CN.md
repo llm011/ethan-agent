@@ -57,6 +57,13 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 **多渠道**
 - CLI REPL、Web UI（Next.js）、**Android App**（Kotlin/Compose）、飞书（WebSocket 长连接，无需公网 IP）
 
+**浏览器控制（真实 Chrome）**
+- 在任意渠道（Web / 飞书 / CLI）对话中，操作 ethan 所在机器上的真实 Chrome —— 安装内置的 `browser-extension`，填上 ethan 的 WebSocket 地址，agent 即获得 `browser_session` / `browser_tab` / `browser_page` 三个工具
+- agent-browser 风格：可访问性树 snapshot + ref map，click/fill/type/press/select/scroll/hover、截图、键鼠事件、页面 `eval`，全部经 Chrome DevTools Protocol 执行
+- session 绑定对话（按对话隔离）；同一 session 内页面操作串行、不同 session 并行；闲置 30 分钟后 release（保留用户 tab）
+- 会话级一次性授权：本对话第一次调用 browser 工具询问一次，批准后该对话所有操作（含 `eval`）放行
+- 传输仅用 WebSocket（扩展 → ethan），无需 native messaging host；详见 [docs/browser-control-plan.md](docs/browser-control-plan.md)
+
 ---
 
 ## 安装

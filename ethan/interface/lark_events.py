@@ -836,6 +836,9 @@ async def _handle_message(event_data: dict) -> None:
         context_messages = memory.build_context() + [user_msg]
 
         registry = ToolRegistry()
+        from ethan.core.context import set_session_id
+        from ethan.tools.builtin.browser import BrowserSessionTool, BrowserTabTool, BrowserPageTool
+        set_session_id(session_id)  # browser 工具按对话隔离/授权
         for tool in [ShellTool(), WebSearchTool(), WebFetchTool(),
                      FileReadTool(), FileWriteTool(), FileListTool(),
                      RipgrepTool(), FdTool(),
@@ -843,7 +846,8 @@ async def _handle_message(event_data: dict) -> None:
                      KnowledgeSearchTool(), KnowledgeAddTool(),
                      MemoryWriteTool(), ProcedureWriteTool(), ProfileUpdateTool(), SkillCreateTool(),
                      SkillReadTool(), SkillListTool(),
-                     SetSecretTool(), GetSecretTool(), ListSecretsTool()]:
+                     SetSecretTool(), GetSecretTool(), ListSecretsTool(),
+                     BrowserSessionTool(), BrowserTabTool(), BrowserPageTool()]:
             registry.register(tool)
         skills = SkillRegistry()
         skills.load()
