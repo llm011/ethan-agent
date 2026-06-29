@@ -101,6 +101,32 @@ git diff main...HEAD
 4. **去重合并**：同一文件相邻的问题合并成一条评论
 5. **输出**：先写一段总体评价（2-3句），再逐条列 P0 评论，最后一句话总结
 
+## 评论发布方式（GitHub PR）
+
+**评论必须以用户身份发出，不能以 Claude 身份发。** `gh` CLI 默认使用用户的 GitHub auth，直接调即可。
+
+**用 inline 评论，不用 conversation 评论**（inline 能精确定位到代码行，体验好得多）：
+
+```bash
+# 1. 先拿最新 commit sha（inline 评论必须绑定 commit）
+gh api repos/{owner}/{repo}/pulls/{N} --jq '.head.sha'
+
+# 2. 发 inline 评论（定位到具体行）
+gh api repos/{owner}/{repo}/pulls/{N}/comments \
+  --method POST \
+  --field commit_id="<sha>" \
+  --field path="src/foo.py" \
+  --field line=42 \
+  --field side="RIGHT" \
+  --field body="这里在并发场景下可能 race，考虑加个锁？"
+```
+
+- `line` = diff 里的行号（RIGHT side = 新文件的行）
+- 如果是多行范围：加 `start_line` + `start_side=RIGHT`
+- 发完用 `gh pr view {N} --comments` 确认评论已出现
+
+**没有 GitHub PR（纯本地 diff）时**：直接在对话里按评论格式输出即可，不调 API。
+
 ## 注意事项
 
 - **不要改你没把握的东西**：看不懂业务背景时，用问句（"这里是不是假设了 X？"）而不是断言
