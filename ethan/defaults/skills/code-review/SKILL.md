@@ -2,7 +2,7 @@
 name: code-review
 version: 1.0.0
 trigger: "code review|代码审查|review代码|review一下|帮我看看代码|看下代码|审查代码|pr review|diff review|检查代码|代码质量"
-description: "对代码变更做系统性审查：识别 bug、安全漏洞、性能问题。只对 P0 级问题写评论，评论定位到具体行，语气友好协作。不依赖 GitHub/GitLab，直接读本地 diff 或文件。"
+description: "对代码变更做系统性审查：识别 bug、安全漏洞、性能问题。P0 必须修复写评论，P1 建议性评论，P2 只在总结里一句带过。评论定位到具体行，语气友好协作。支持 GitHub/GitLab/纯本地 diff。"
 ---
 
 # code-review
@@ -96,18 +96,28 @@ git diff main...HEAD
 ## 审查流程
 
 1. **读 diff**：先快速浏览所有改动，建立整体印象（新功能/修 bug/重构？）
-2. **读上下文**：对有疑问的地方用 `file_read` 读前后 30 行，不要仅凭 diff 下结论
+   - diff 超过 20 个文件时，按影响面排优先级：核心逻辑 > 接口层 > 工具函数 > 配置/文档
+2. **读上下文**：对有疑问的地方：
+   - `file_read` 读前后 30 行，不要仅凭 diff 下结论
+   - `git log --oneline -10 -- <file>` 了解历史背景和改动意图
+   - `git blame -L <start>,<end> <file>` 看某段代码是何时为何引入的
 3. **逐维度过**：按 P0 → P1 顺序检查，记录发现
 4. **去重合并**：同一文件相邻的问题合并成一条评论
-5. **输出**：先写一段总体评价（2-3句），再逐条列 P0 评论，最后一句话总结
+5. **输出**：先写一段总体评价（2-3句），再逐条列评论，最后一句话总结
+
+## 评论语言
+
+- 优先**跟仓库语言一致**：代码注释、commit message 用中文 → 评论用中文；用英文 → 用英文
+- 不确定时看 README 或已有 PR 评论的语言风格
+- 用户明确要求某种语言时以用户为准
 
 ## 评论发布方式
 
-**评论必须以用户身份发出。** 用平台对应的 CLI/API，默认都走用户的 auth。
+**评论必须以用户身份发出。** 平台 CLI 默认走用户 auth，直接调即可。
 
 **优先用 inline 评论**（定位到具体代码行），不用 conversation 区域的笼统评论。
 
-### GitHub
+以 GitHub 为例：
 
 ```bash
 # 1. 拿最新 commit sha
@@ -122,35 +132,13 @@ gh api repos/{owner}/{repo}/pulls/{N}/comments \
   --field side="RIGHT" \
   --field body="这里在并发场景下可能 race，考虑加个锁？"
 
-# 多行范围加 start_line + start_side=RIGHT
+# 多行范围：加 start_line + start_side=RIGHT
 # 验证：gh pr view {N} --comments
 ```
 
-### GitLab
+其他平台（GitLab `glab`、Gerrit、内部系统）原理相同：绑定文件路径 + 行号 + 评论正文。不熟悉 API 格式时先查 `--help` 或问用户，不要猜参数名。
 
-```bash
-# 1. 拿 MR 信息（base/head sha）
-glab api projects/{id}/merge_requests/{N}
-
-# 2. 发 inline 评论（Discussion API）
-glab api projects/{id}/merge_requests/{N}/discussions \
-  --method POST \
-  -f "body=这里有个边界情况值得确认下" \
-  -f "position[position_type]=text" \
-  -f "position[base_sha]=<base_sha>" \
-  -f "position[head_sha]=<head_sha>" \
-  -f "position[start_sha]=<base_sha>" \
-  -f "position[new_path]=src/foo.py" \
-  -f "position[new_line]=42"
-```
-
-### Gerrit / 内部平台
-
-用平台提供的 API 发 line comment，逻辑相同：绑定文件路径 + 行号 + 评论内容。如果不知道 API 格式，先问用户或查文档。
-
-### 纯本地 diff（无代码平台）
-
-直接在对话里按"📍 文件:行号"格式输出评论列表，不调任何 API。
+**纯本地 diff（无代码平台）**：直接在对话里按"📍 文件:行号"格式输出评论列表。
 
 ## 注意事项
 
