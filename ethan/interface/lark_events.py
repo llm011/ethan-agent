@@ -991,6 +991,14 @@ async def _handle_message(event_data: dict) -> None:
                     # force flush 提交。这样既不会把残片 "}" 发成卡片，也不会丢真正的回答。
                     pending = ""
                     thinking_shown = False
+                    # 关键撤回：如果之前已把某段 narration 提前 flush 成了答案卡片（超过阈值触发），
+                    # 现在又出现工具调用，证明那段是「工具前说明」而非最终答案——删掉它并重置答案状态。
+                    # 否则后续工具间的零碎片段（"I" "The" "Let's"…）会继续追加进这张卡片，拼成乱码。
+                    if answer_created and answer_msg_id:
+                        await _delete_message(answer_msg_id)
+                        answer_msg_id = None
+                        answer_text = ""
+                        answer_created = False
                     # icon + 人性化显示名映射
                     _TOOL_DISPLAY = {
                         "shell": "💻 terminal", "rg_search": "🔍 search", "fd_find": "🔍 find",
