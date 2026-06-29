@@ -16,6 +16,28 @@ def _is_inside_secrets(path: str) -> bool:
         return ".secrets" in Path(path).parts
 
 
+def _is_safe_path(path: str) -> bool:
+    """是否落在「默认豁免」目录内（写入无需授权）：系统临时目录 /tmp 等。
+    安全起见：密钥目录永不豁免。"""
+    if _is_inside_secrets(path):
+        return False
+    try:
+        import tempfile
+        p = Path(path).expanduser().resolve()
+        safe_roots = [Path("/tmp").resolve(), Path(tempfile.gettempdir()).resolve()]
+        return any(root == p or root in p.parents for root in safe_roots)
+    except Exception:
+        return False
+
+
+def _dir_scope(path: str) -> str:
+    """授权记忆作用域 = 文件所在目录的绝对路径（授权该目录后，子目录/同目录文件免问）。"""
+    try:
+        return str(Path(path).expanduser().resolve().parent)
+    except Exception:
+        return path
+
+
 class FileReadTool(BaseTool):
     no_compress = True  # 文件原文必须逐字给模型，绝不压成摘要（否则模型反复重读拿不到真内容）
     name = "file_read"
@@ -40,6 +62,13 @@ class FileReadTool(BaseTool):
         if _is_inside_secrets(str(path)):
             return f"读取密钥文件 {path}（密钥请改用 get_secret 工具）"
         return None
+
+    def consent_scope(self, path: str = "", **kwargs) -> str:
+        # 密钥文件按单文件授权（每个 secret 单独问一次），不做目录级放行
+        try:
+            return str(Path(path).expanduser().resolve())
+        except Exception:
+            return path or self.name
 
     async def run(self, path: str, max_lines: int = 0) -> str:
         p = Path(path).expanduser().resolve()
@@ -93,8 +122,15 @@ class FileWriteTool(BaseTool):
     }
 
     def consent_check(self, path: str = "", **kwargs) -> str | None:
-        # 写文件有副作用，执行前请求授权（同一会话授权过不再弹，见 consent 的 session 记忆）
+        # 写文件有副作用，执行前请求授权。/tmp 等临时目录默认豁免（无需授权）。
+        # 同一会话内授权过该目录后，其子目录/同目录文件不再弹（见 consent_scope + is_granted）。
+        if _is_safe_path(str(path)):
+            return None
         return f"写入文件 {path}"
+
+    def consent_scope(self, path: str = "", **kwargs) -> str:
+        # 目录级授权：授权某目录后，该目录及子目录内的写入都免问
+        return _dir_scope(str(path))
 
     async def run(self, path: str, content: str, append: bool = False) -> str:
         p = Path(path).expanduser().resolve()

@@ -140,8 +140,11 @@ def all_secret_values(min_len: int = _MIN_MASK_LEN) -> list[str]:
 
 
 def _mask_one(value: str) -> str:
-    """abcd1234 -> abcd****（保留前 4 字符，便于辨认是哪个 key，但不可用）。"""
+    """abcd1234efgh -> abcd****efgh（保留头尾各 4 字符，便于辨认是哪个 key，中间打码后不可用）。
+    值较短（< 12）时只留头部，避免头尾相接把整串都露出来。"""
     head = value[:4]
+    if len(value) >= 12:
+        return f"{head}****{value[-4:]}"
     return f"{head}****"
 
 

@@ -129,6 +129,9 @@ async def delete_session(session_id: str, user_id: str = Depends(verify_token)):
     await store.close()
     if not ok:
         raise HTTPException(status_code=404, detail="Session not found")
+    # 会话删除时清除其授权记忆，避免内存泄漏 + 同 id 复用时残留旧授权
+    from ethan.core.consent import clear_session_grants
+    clear_session_grants(session_id)
     return {"ok": True}
 
 

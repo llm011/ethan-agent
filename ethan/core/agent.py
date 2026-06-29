@@ -688,10 +688,12 @@ class Agent:
                 # (2) consent 确认：工具自身声明需要授权时（如读密钥）走交互/拒绝流程。
                 desc = tool.consent_check(**tc.arguments) if tool else None
                 if desc:
-                    # session 维度授权记忆：同会话内此工具已授权过则直接放行，不再弹窗。
+                    # session 维度授权记忆：按 consent_scope 粒度（工具名 或 目录路径）记忆，
+                    # 同会话内此 scope 已授权过则直接放行（目录授权后子目录免问）。
                     from ethan.core.consent import is_granted, record_grant
                     sess_id = getattr(consent_provider, "session_id", "") if consent_provider else ""
-                    if is_granted(sess_id, tc.name):
+                    scope = tool.consent_scope(**tc.arguments) if tool else tc.name
+                    if is_granted(sess_id, scope):
                         allowed_calls.append(tc)
                         yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary=_format_args(tc.arguments), state="start")
                         continue
@@ -719,8 +721,8 @@ class Agent:
                             tool_call_id=tc.id,
                         ))
                         continue
-                    # 授权通过：记录到 session 维度，后续同工具不再弹
-                    record_grant(sess_id, tc.name)
+                    # 授权通过：记录到 session 维度（按 scope），后续同 scope 不再弹
+                    record_grant(sess_id, scope)
                 allowed_calls.append(tc)
                 yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary=_format_args(tc.arguments), state="start")
 

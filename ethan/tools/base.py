@@ -29,6 +29,14 @@ class BaseTool(ABC):
         """
         return None
 
+    def consent_scope(self, **kwargs) -> str:
+        """本次授权的记忆作用域（key）。同一 session 内同 scope 授权过则不再询问。
+
+        默认返回工具名（整工具授权一次）。文件类工具可返回目录路径，使「授权某目录后，
+        其子目录/同目录文件免问」（见 is_granted 的路径子树覆盖逻辑）。
+        """
+        return self.name
+
     @property
     @abstractmethod
     def name(self) -> str: ...

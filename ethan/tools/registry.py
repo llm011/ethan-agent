@@ -62,7 +62,7 @@ class ToolExecutor:
 
             # 安全网：把工具输出里出现的任何已知 secret 真值替换成掩码，
             # 防止 `echo $KEY` 这类把注入的密钥回流进模型上下文。
-            # get_secret 是授权取值路径，放行原文（否则失去意义）。
+            # get_secret 是授权取值路径，放行原文（否则 Agent 取出来没法用）。
             if tc.name != "get_secret" and result.content:
                 from ethan.core.secrets_store import mask_text
                 result.content = mask_text(result.content)

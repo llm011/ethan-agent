@@ -145,20 +145,38 @@ class ChannelGuardProvider(ConsentProvider):
 # 全局注册表：request_id → WebConsentProvider，跨请求供 /consent 端点查找
 _REGISTRY: dict[str, WebConsentProvider] = {}
 
-# session 维度授权记忆：{session_id: {tool_name, ...}}。同一会话内某工具授权过，
-# 后续同工具调用不再弹窗（用户诉求：读密钥刚授权过，同 session 里不再反复确认）。
+# session 维度授权记忆：{session_id: {scope, ...}}。scope 由工具的 consent_scope() 决定——
+# 默认是工具名（整工具授权一次），文件类工具返回目录路径（目录授权后子目录免问）。
 _SESSION_GRANTS: dict[str, set[str]] = {}
 
 
-def is_granted(session_id: str, tool: str) -> bool:
-    """该 session 是否已对此工具授权过。"""
-    return bool(session_id) and tool in _SESSION_GRANTS.get(session_id, set())
+def is_granted(session_id: str, scope: str) -> bool:
+    """该 session 是否已对此 scope 授权过。
+
+    - 路径型 scope（以 / 开头）：被任一已授权的祖先目录覆盖即算授权
+      （授权 /a/b 后，/a/b 及 /a/b/c 等子目录都放行）。
+    - 非路径 scope（工具名、get_secret 等）：精确匹配。
+    """
+    if not session_id or not scope:
+        return False
+    granted = _SESSION_GRANTS.get(session_id, set())
+    if scope in granted:
+        return True
+    if scope.startswith("/"):
+        from pathlib import Path
+        sp = Path(scope)
+        for g in granted:
+            if g.startswith("/"):
+                gp = Path(g)
+                if gp == sp or gp in sp.parents:
+                    return True
+    return False
 
 
-def record_grant(session_id: str, tool: str) -> None:
-    """记录一次 session 维度授权。"""
-    if session_id:
-        _SESSION_GRANTS.setdefault(session_id, set()).add(tool)
+def record_grant(session_id: str, scope: str) -> None:
+    """记录一次 session 维度授权（scope = 工具名 或 目录路径）。"""
+    if session_id and scope:
+        _SESSION_GRANTS.setdefault(session_id, set()).add(scope)
 
 
 def clear_session_grants(session_id: str) -> None:
