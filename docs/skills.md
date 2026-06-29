@@ -87,6 +87,8 @@ config.yaml 中可通过 `fast_skill_triggers` 手动指定额外的 fast 轨关
 
 **渠道过滤**：`SkillRegistry.match(query, channel="")` 接收当前渠道标识（如 `"lark"`、`"web"` 或 `""`）。如果 Skill 的 `channels` 列表非空且当前渠道不在其中，该 Skill 不会被注入。这样可以为飞书、Web、CLI 分别准备专属 Skill，互不干扰。
 
+**语义补召回**：关键词子串匹配保证 head 精度与强拒识，但对换了说法的表达会漏召回。可选的语义路由器（`ethan/skills/router.py`）在关键词之上补一个语义命中：用 BGE-small-zh INT8 ONNX 把用户输入编码成向量，过一层训练好的 LogisticRegression 头分类到对应 Skill，预测为 `others` / 低于阈值 / 不在已加载 Skill 中则不补。独立手写评测集（规避近重复泄漏）macro F1=0.851（对照早期锚点 max-cosine≈0.60、纯关键词召回≈0.24）。模型缺失或依赖未装时静默退回纯关键词匹配，不影响主流程。装依赖 `pip install 'ethan-agent[router]'`，模型首次由 `ethan router pull` 或首条消息自动下载。
+
 ---
 
 ## 注入方式
