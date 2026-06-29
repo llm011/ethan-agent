@@ -179,6 +179,7 @@ ethan model list/add/remove/default
 ethan provider list/set
 ethan session list/show/delete
 ethan skill list/show/create
+ethan router pull/status        → 语义路由模型：下载 / 查看状态（需 [router] 可选依赖）
 ethan schedule list/remove/pause/resume
 ethan knowledge list/add/search/delete
 ethan update [--channel dev] [--to v0.2.0] [--check] [--no-restart]
