@@ -76,15 +76,34 @@ class SkillRegistry:
                 return s
         return None
 
-    def match(self, query: str, channel: str = "") -> list[Skill]:
-        """匹配相关 Skills。关键词子串匹配为基础（保 head 精度 + 强拒识），
-        若可用，再用 embedding 路由器补一个语义命中（补 tail 召回）。
-        channel 非空时过滤渠道。"""
+    def match(self, query: str, channel: str = "", mode: str = "") -> list[Skill]:
+        """根据用户输入匹配相关 Skills。
+
+        关键词子串匹配为基础（保 head 精度 + 强拒识）；若语义路由器可用，再补一个
+        语义命中（补 tail 召回）。channel 非空时过滤渠道。匹配分两类：
+        - 模式专属 skill（skill.modes 非空）：只在所列 mode 生效，且一旦处于该 mode
+          就**无条件命中**——用户显式切到该模式即是最强意图信号，不再卡触发词。
+          其它模式下完全不出现（零污染）。
+        - 通用 skill（skill.modes 为空）：在所有模式可用，按触发词关键词匹配 + 语义补召回。
+
+        skill.modes 里的每一项都经 resolve_mode 归一化为规范 key 再比较，因此外部
+        技能作者写别名（如 `modes: legal` 而非 `法律`）也能匹配——消除跨仓库的隐式契约。
+        无法识别的 mode 名保持原样（失败安全，不会误落到默认模式造成泄漏）。
+        """
+        from ethan.core.modes import resolve_mode
+
         query_lower = query.lower()
         matched = []
         seen = set()
         for skill in self._skills:
             if skill.channels and channel and channel not in skill.channels:
+                continue
+            if skill.modes:
+                # 归一化别名 → 规范 key；无法识别的（resolve 回退默认、key 为空）保留原值，
+                # 避免写错的 mode 名被归一成 "" 而误匹配默认模式。
+                normalized = {resolve_mode(m).key or m for m in skill.modes}
+                if mode in normalized:
+                    matched.append(skill)
                 continue
             for trigger in skill.trigger:
                 if trigger.lower() in query_lower:
@@ -92,12 +111,16 @@ class SkillRegistry:
                     seen.add(skill.name)
                     break
 
-        # embedding 路由补召回：关键词漏掉的 tail 改写，FLOOR=0.55 宁可漏不可错
+        # embedding 路由补召回：只补「通用 skill」（modes 为空）的 tail 召回。
+        # 模式专属 skill 已在上面的 mode 分支完整处理（模式内无条件命中、模式外绝不出现），
+        # 这里必须跳过它们——否则普通模式下语义路由可能命中如 legal-assistant，
+        # 击穿模式隔离的零污染保证。
         if self._router is not None:
             name = self._router.route(query)
             if name and name not in seen:
                 skill = self.get(name)
-                if skill and not (skill.channels and channel and channel not in skill.channels):
+                if (skill and not skill.modes
+                        and not (skill.channels and channel and channel not in skill.channels)):
                     matched.append(skill)
         return matched
 
@@ -110,13 +133,13 @@ class SkillRegistry:
     def skills_needing_update(self, threshold: int = 2) -> list[str]:
         return [n for n in self._stats.all() if self._stats.needs_update(n, threshold)]
 
-    def build_context(self, query: str, channel: str = "", max_skills: int = 3) -> str:
+    def build_context(self, query: str, channel: str = "", mode: str = "", max_skills: int = 3) -> str:
         """为 LLM 构建 Skill 上下文注入内容。
 
         只注入匹配的 skill，content 超长时截断，避免 token 膨胀。
-        未匹配时不注入任何内容。
+        未匹配时不注入任何内容。mode 透传给 match 做模式过滤。
         """
-        matched = self.match(query, channel=channel)[:max_skills]
+        matched = self.match(query, channel=channel, mode=mode)[:max_skills]
         if not matched:
             return ""
 

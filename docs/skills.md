@@ -64,6 +64,7 @@ version: "1.0"
 | `description` | 否 | 一句话描述 |
 | `fast_path` | 否 | `true` 表示命中 trigger 时直接走 fast 轨（默认 false） |
 | `channels` | 否 | 限定渠道白名单（如 `[lark, web]`）。空列表 = 所有渠道可用 |
+| `modes` | 否 | 限定对话模式白名单（如 `[法律]`）。空列表 = 所有模式可用。用于让垂类技能只在对应模式生效，不污染默认工作助手模式 |
 | `version` | 否 | skill 版本号，用于追踪更新 |
 | `metadata` | 否 | 任意 key-value 扩展字段 |
 
@@ -80,6 +81,7 @@ config.yaml 中可通过 `fast_skill_triggers` 手动指定额外的 fast 轨关
 ```
 用户输入 → 逐个检查每个 Skill 的 trigger 列表
          → 渠道过滤：skill.channels 非空 且 当前渠道不在其中 → 跳过
+         → 模式过滤：skill.modes 非空 且 当前对话模式不在其中 → 跳过
          → 如果某个 trigger 关键词出现在用户输入中（子串匹配）→ 命中
          → 最多注入 3 个 Skill 到 system prompt
 ```
@@ -87,7 +89,9 @@ config.yaml 中可通过 `fast_skill_triggers` 手动指定额外的 fast 轨关
 
 **渠道过滤**：`SkillRegistry.match(query, channel="")` 接收当前渠道标识（如 `"lark"`、`"web"` 或 `""`）。如果 Skill 的 `channels` 列表非空且当前渠道不在其中，该 Skill 不会被注入。这样可以为飞书、Web、CLI 分别准备专属 Skill，互不干扰。
 
-**语义补召回**：关键词子串匹配保证 head 精度与强拒识，但对换了说法的表达会漏召回。可选的语义路由器（`ethan/skills/router.py`）在关键词之上补一个语义命中：用 BGE-small-zh INT8 ONNX 把用户输入编码成向量，过一层训练好的 LogisticRegression 头分类到对应 Skill，预测为 `others` / 低于阈值 / 不在已加载 Skill 中则不补。独立手写评测集（规避近重复泄漏）macro F1=0.851（对照早期锚点 max-cosine≈0.60、纯关键词召回≈0.24）。模型缺失或依赖未装时静默退回纯关键词匹配，不影响主流程。装依赖 `pip install 'ethan-agent[router]'`，模型首次由 `ethan router pull` 或首条消息自动下载。
+**语义补召回**：关键词子串匹配保证 head 精度与强拒识，但对换了说法的表达会漏召回。可选的语义路由器（`ethan/skills/router.py`）在关键词之上补一个语义命中：用 BGE-small-zh INT8 ONNX 把用户输入编码成向量，过一层训练好的 LogisticRegression 头分类到对应 Skill，预测为 `others` / 低于阈值 / 不在已加载 Skill 中则不补。独立手写评测集（规避近重复泄漏）macro F1=0.851（对照早期锚点 max-cosine≈0.60、纯关键词召回≈0.24）。模型缺失或依赖未装时静默退回纯关键词匹配，不影响主流程。装依赖 `pip install 'ethan-agent[router]'`，模型首次由 `ethan router pull` 或首条消息自动下载。详见 [语义路由器深度剖析](semantic-router.md)。
+
+**模式过滤**：`SkillRegistry.match(query, channel="", mode="")` 还接收当前对话模式（见 [modes.py](../ethan/core/modes.py)，规范英文 key，如 `"legal"`、`"companion"` 或默认 `""`）。如果 Skill 的 `modes` 列表非空且当前模式不在其中，该 Skill 不会被注入；`modes` 里写 key（`legal`）或中文别名（`法律`）都行，匹配时会归一化。这让垂类技能（如「法律专家模式」下的 `legal-assistant`）只在对应模式生效，正常工作模式下完全不进上下文，零污染。模式由 `Agent._mode` 经 `resolve_mode().key` 解析后传入。
 
 ---
 

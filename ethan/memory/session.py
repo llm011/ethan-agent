@@ -26,7 +26,7 @@ class Session:
     messages: list[Message] = field(default_factory=list)
     snippet: str | None = None
     source: str = "web"  # web | repl | lark | custom
-    mode: str = ""  # "" = 工作助手; "陪伴" = 苏念·陪伴倾听
+    mode: str = ""  # "" = 工作助手; 规范英文 key，如 "legal"/"companion"（见 core/modes.py）
 
 
 def _generate_id() -> str:
@@ -117,6 +117,14 @@ class SessionStore:
             await self._db.commit()
         except Exception:
             pass  # Column already exists
+        # Migration: 历史 mode 值从中文 key 迁移到英文 slug（key 规范化，见 core/modes.py）。
+        # 幂等：已是新值或无此类行时 UPDATE 影响 0 行。
+        try:
+            for old, new in (("法律", "legal"), ("陪伴", "companion")):
+                await self._db.execute("UPDATE sessions SET mode = ? WHERE mode = ?", (new, old))
+            await self._db.commit()
+        except Exception:
+            pass
 
     async def close(self) -> None:
         if self._db:
@@ -244,11 +252,25 @@ class SessionStore:
 
         return session
 
-    async def list_recent(self, limit: int = 20, offset: int = 0) -> list[Session]:
+    async def list_recent(self, limit: int = 20, offset: int = 0,
+                          source: str = "", mode: str | None = None) -> list[Session]:
+        """最近会话列表。source 非空时按渠道过滤；mode 非 None 时按对话模式过滤
+        （传 "" 可筛“默认模式”会话）。过滤在 SQL 层做，分页对过滤后结果生效。"""
+        where = []
+        params: list = []
+        if source:
+            where.append("COALESCE(source, 'web') = ?")
+            params.append(source)
+        if mode is not None:
+            where.append("COALESCE(mode, '') = ?")
+            params.append(mode)
+        where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+        params.extend([limit, offset])
         sessions = []
         async with self._db.execute(
-            "SELECT id, title, model, created_at, updated_at, COALESCE(source, 'web') as source, COALESCE(mode, '') as mode FROM sessions ORDER BY updated_at DESC LIMIT ? OFFSET ?",
-            (limit, offset),
+            "SELECT id, title, model, created_at, updated_at, COALESCE(source, 'web') as source, COALESCE(mode, '') as mode "
+            f"FROM sessions{where_sql} ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+            tuple(params),
         ) as cursor:
             async for row in cursor:
                 sessions.append(Session(

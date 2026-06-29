@@ -21,11 +21,19 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 - 该模式下 Agent 先赞许安抚、深度倾听、陪伴而非急于解决问题——说话像真人、温柔口语，拒绝 AI 腔
 - 陪伴模式下，后台自动把「心理与情绪」（情绪/压力源/什么能安抚你/内心感受）整理进画像；基础特征由你在设置页「我的画像」里填写
 
+**法律专家模式 · legal-assistant（按需安装）**
+- 切换到「法律专家」模式后，单个 `legal-assistant` 技能即覆盖案件研判、诉讼分析、合同审查、法律文书/方案生成、商标专利知产、案件流程管理、法律检索与可视化——按「任务动词 + 业务条线」路由到对应 playbook，不堆几十个子技能
+- **零污染**：法律技能用 `modes: [法律]` 标记，仅在法律模式生效；正常工作模式下完全不进上下文
+- **自动安装（按需）**：首次切到法律模式若未安装，Agent 会**自动从仓库拉取并安装** `legal-assistant`（会先告知「正在安装」，不静默联网；装失败则提示手动 `ethan skill add legal`）。法律内容不随主仓库分发，遵循上游 CC-BY-NC 非商用许可
+- **手动安装**：命令行直接 `ethan skill add legal` 一键装（= `llm011/ethan-legal-skill/skills/legal-assistant`）
+- **`/mode` 切换**：CLI（REPL）和飞书等渠道均可用 `/mode 法律` 切入、`/mode default` 切回默认；模式名无法识别时保持当前模式不变。模式持久化在会话上，恢复会话自动还原
+
 **Skill 技能系统**
 - 触发词匹配，自动注入 system prompt 引导行为
 - 可选语义路由器（BGE INT8 + LR 头）在关键词之上补召回，换个说法也能命中（`pip install 'ethan-agent[router]'`，不装则纯关键词，详见安装段）
 - `fast_path: true` 触发后走毫秒级快速路径，适合全屋智能等高频控制
 - `channels: [lark, web]` 按渠道过滤，Skill 只在指定场景下生效
+- `modes: [法律]` 按对话模式过滤，Skill 只在指定模式下生效（空 = 所有模式）
 - Skill 命中统计与纠正收集，积累后 Heartbeat 自动用廉价模型更新 Skill 内容
 - Agent 可在对话中即时创建新 Skill（`skill_create` 工具）
 
@@ -134,6 +142,8 @@ docker compose restart ethan-backend   # 重启服务
 docker compose pull && docker compose up -d  # 更新到最新版本
 docker compose down                    # 停止
 ```
+
+> **一键装法律专家模式**：在 `docker compose up` 前设 `ETHAN_INSTALL_SKILLS=legal`（或起容器后 `docker compose exec ethan-agent ethan skill add legal`），即可装好 `legal-assistant` 技能；Web 端模式下拉切到「⚖️ 法律专家」即生效。
 
 ### 6. 多用户（可选）
 
@@ -387,7 +397,7 @@ ethan serve restart                重启后台 serve 进程
 ethan model list|add|remove|default
 ethan provider list|set
 ethan session list|show|delete
-ethan skill list|show|create
+ethan skill list|show|add|create
 ethan schedule list|remove|pause|resume
 ```
 

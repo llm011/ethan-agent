@@ -286,6 +286,61 @@ class Agent:
             "</persona_override>"
         )
 
+    def _mode_identity_block(self) -> str | None:
+        """当前 mode 声明了 identity 时，返回身份覆盖块（不依赖触发词，进模式即生效）。
+
+        与 persona_skills 不同：identity 是轻量的、模式级的身份声明，直接写在 modes.py，
+        用于「法律专家」这类工具型模式——确保问「你是谁」时回答专业身份，而非默认日常人设。
+        """
+        from ethan.core.modes import resolve_mode
+        mode = resolve_mode(self._mode)
+        if not mode.identity:
+            return None
+        return (
+            "<mode_identity>\n"
+            f"[CRITICAL — 当前处于「{mode.label}」模式，以下身份覆盖默认身份与记忆里的日常人设]\n\n"
+            f"{mode.identity}\n"
+            "</mode_identity>"
+        )
+
+    def _mode_install_hint(self, messages: list[Message] | None = None) -> str | None:
+        """当前 mode 依赖某 skill 但尚未安装时，返回「自动安装」指令；否则 None。
+
+        通用机制：mode 在 modes.py 里声明 requires_skill + install_source(+ install_alias)，
+        内核不认任何具体技能名。
+
+        接入体验（友好默认，见记忆 feedback-mode-skill-onboarding）：
+        - 自动安装：用户切到该模式即强意图信号，直接装，不先问一轮。
+        - 可见反馈：安装前先说一句「正在为 X 模式安装技能…」，不静默联网。
+        - 失败兜底：装失败（离线/代理不通）时，降级提示用户手动 `ethan skill add <alias>`。
+
+        只在该模式会话的**前 2 个用户回合**注入，避免装好前/装不上时每条消息都唠叨。
+        """
+        from ethan.core.modes import resolve_mode
+        mode = resolve_mode(self._mode)
+        if not mode.requires_skill or not self._skills:
+            return None
+        if self._skills.get(mode.requires_skill) is not None:
+            return None
+        if messages is not None:
+            user_turns = sum(1 for m in messages if m.role == "user")
+            if user_turns > 2:
+                return None
+        src = mode.install_source or mode.requires_skill
+        alias = mode.install_alias or mode.requires_skill
+        return (
+            "<mode_setup>\n"
+            f"[CRITICAL] 用户已切换到「{mode.label}」模式，但依赖技能 `{mode.requires_skill}` 尚未安装。"
+            "用户主动切到本模式即视为同意安装，请按以下步骤自动完成，不要再反问要不要装：\n"
+            f"1. 先用一句话告知：正在为「{mode.label}」模式安装依赖技能，请稍候。\n"
+            f"2. 立即调用 install_skill(source=\"{src}\") 安装（无需重启，安装后下次对话即生效）。\n"
+            f"3. 安装成功：简短告知已就绪，并继续回答用户当前的问题。\n"
+            f"4. 安装失败（如网络/代理不通）：明确说明原因，并提示用户可在命令行手动运行 "
+            f"`ethan skill add {alias}` 后重试。\n"
+            "在技能装好前，不要假装已具备该模式的完整专业能力。\n"
+            "</mode_setup>"
+        )
+
     def _build_system(self, messages: list[Message], fast: bool = False) -> str:
         """构建 system prompt。fast=True 时使用极简版本减少 token。"""
         config = get_config()
@@ -310,6 +365,9 @@ class Agent:
             persona_block = self._persona_block()
             if persona_block:
                 parts.append(persona_block)
+            mode_identity = self._mode_identity_block()
+            if mode_identity:
+                parts.append(mode_identity)
             parts.append(f"Current time: {now}")
             parts.append(f"Your workspace directory is {workspace}.")
             parts.append(f"Current model: {self._provider.model}（用户问起你用的什么模型/是谁驱动时，如实回答这个 model id）")
@@ -335,9 +393,11 @@ class Agent:
                 )
             last_user = self._get_last_user_text(messages)
             if self._skills and last_user:
-                matched = self._skills.match(last_user, channel=self._channel)
+                from ethan.core.modes import resolve_mode
+                mode_key = resolve_mode(self._mode).key
+                matched = self._skills.match(last_user, channel=self._channel, mode=mode_key)
                 self.last_matched_skills = [s.name for s in matched]
-                skill_ctx = self._skills.build_context(last_user, channel=self._channel)
+                skill_ctx = self._skills.build_context(last_user, channel=self._channel, mode=mode_key)
                 if skill_ctx:
                     parts.append(f"<relevant_skills>\n{skill_ctx}\n</relevant_skills>")
                     # skill 内容里提到的非 fast 工具自动激活，避免 fast 档看不见 skill 依赖的工具、
@@ -347,6 +407,9 @@ class Agent:
                                   if not t.fast_path and t.name in skill_ctx]
                     if referenced:
                         activate_tools(referenced)
+            mode_hint = self._mode_install_hint(messages)
+            if mode_hint:
+                parts.append(mode_hint)
             if self.runtime_context:
                 parts.append(f"<runtime_context>\n[CRITICAL — 当前会话上下文，结合 soul 的主人/授权准则判断]\n\n{self.runtime_context}\n</runtime_context>")
             return "\n\n".join(parts)
@@ -365,6 +428,9 @@ class Agent:
         persona_block = self._persona_block()
         if persona_block:
             parts.append(persona_block)
+        mode_identity = self._mode_identity_block()
+        if mode_identity:
+            parts.append(mode_identity)
         if agent_content:
             parts.append(f"<agent_protocols>\n{agent_content}\n</agent_protocols>")
         if tools_content:
@@ -413,11 +479,17 @@ class Agent:
 
         last_user = self._get_last_user_text(messages)
         if self._skills and last_user:
-            matched = self._skills.match(last_user, channel=self._channel)
+            from ethan.core.modes import resolve_mode
+            mode_key = resolve_mode(self._mode).key
+            matched = self._skills.match(last_user, channel=self._channel, mode=mode_key)
             self.last_matched_skills = [s.name for s in matched]
-            skill_ctx = self._skills.build_context(last_user, channel=self._channel)
+            skill_ctx = self._skills.build_context(last_user, channel=self._channel, mode=mode_key)
             if skill_ctx:
                 parts.append(f"<relevant_skills>\n{skill_ctx}\n</relevant_skills>")
+
+        mode_hint = self._mode_install_hint(messages)
+        if mode_hint:
+            parts.append(mode_hint)
 
         if self.runtime_context:
             parts.append(f"<runtime_context>\n[CRITICAL — 当前会话上下文，结合 soul 的主人/授权准则判断]\n\n{self.runtime_context}\n</runtime_context>")

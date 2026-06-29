@@ -23,11 +23,19 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 - In this mode the agent affirms first, listens deeply, and accompanies rather than rushing to solve — speaking like a real person, no AI stiffness
 - While in companion mode, the consolidator auto-extracts 心理与情绪 (mood / stressors / what soothes you / inner feelings) into your profile; basic traits are set by you in the "我的画像" (My Profile) settings tab
 
+**Legal expert mode — legal-assistant (install on demand)**
+- Switch to "法律专家" (legal expert) mode and a single `legal-assistant` skill covers case analysis, litigation review, contract review, legal document/proposal generation, trademark & patent IP, case intake, legal search and visualization — routed by "task verb + practice area" to the matching playbook, instead of dozens of sub-skills
+- **Zero pollution**: legal skills are tagged `modes: [法律]` and only activate in legal mode; in normal work mode they never enter the context
+- **Auto-install (on demand)**: the first time you enter legal mode without the skill installed, the agent **automatically pulls and installs** `legal-assistant` from the repo (it announces "installing…" first — no silent network access; on failure it tells you to run `ethan skill add legal` manually). Legal content is not bundled with the main repo, honoring the upstream CC-BY-NC non-commercial license
+- **Manual install**: run `ethan skill add legal` from the CLI (= `llm011/ethan-legal-skill/skills/legal-assistant`)
+- **`/mode` switching**: both the CLI (REPL) and channels (Lark, etc.) support `/mode 法律` to enter and `/mode default` to return; an unrecognized name leaves the current mode unchanged. The mode is persisted per session and restored when you resume
+
 **Skill system**
 - Keyword trigger matching, auto-injected into system prompt
 - Optional semantic router (BGE INT8 + LR head) adds recall on top of keywords so differently-phrased requests still match (`pip install 'ethan-agent[router]'`; keyword-only without it — see Install section)
 - `fast_path: true` routes matched input to the millisecond fast track
 - `channels: [lark, web]` filters skills by channel so each surface gets only relevant skills
+- `modes: [法律]` filters skills by conversation mode so each mode gets only relevant skills (empty = all modes)
 - Hit tracking and correction collection; Heartbeat auto-updates skill content with a cheap model when corrections accumulate
 - Agent can create new skills mid-conversation via the `skill_create` tool
 
@@ -134,6 +142,8 @@ docker compose restart ethan-backend  # restart backend
 docker compose pull && docker compose up -d  # update to latest version
 docker compose down                   # stop
 ```
+
+> **One-shot legal expert mode**: set `ETHAN_INSTALL_SKILLS=legal` before `docker compose up` (or run `docker compose exec ethan-agent ethan skill add legal` after the container is up) to install the `legal-assistant` skill; then pick "⚖️ 法律专家" in the Web mode dropdown to activate it.
 
 ### 6. Multi-user (optional)
 
@@ -398,7 +408,7 @@ ethan serve restart                Restart background serve process
 ethan model list|add|remove|default
 ethan provider list|set
 ethan session list|show|delete
-ethan skill list|show|create
+ethan skill list|show|add|create
 ethan schedule list|remove|pause|resume
 ```
 
