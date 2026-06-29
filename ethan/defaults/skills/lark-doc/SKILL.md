@@ -1,8 +1,8 @@
 ---
 name: lark-doc
-version: 1.0.0
-trigger: "飞书文档|读文档|解析飞书|lark doc|feishu doc|飞书云文档|docx|读取文档|下载文档|导出文档|文档转markdown"
-description: "读取飞书云文档并导出为标准 Markdown 文件，图片可选上传 CDN 转为公开外链。支持表格、代码块、列表等富文本格式。当用户要读取/解析/导出飞书文档时使用。"
+version: 1.1.0
+trigger: "飞书文档|读文档|解析飞书|lark doc|feishu doc|飞书云文档|docx|wiki|读取文档|下载文档|导出文档|文档转markdown|飞书wiki|知识库文档"
+description: "读取飞书云文档（docx 和 wiki 均支持）并导出为标准 Markdown 文件，图片可选上传 CDN 转为公开外链。支持表格、代码块、列表等富文本格式。当用户要读取/解析/导出飞书文档或 wiki 页面时使用。"
 metadata:
   requires:
     bins: ["lark-cli"]
@@ -15,6 +15,20 @@ metadata:
 ## 前置检查
 
 **必读** [`lark-shared/SKILL.md`](../lark-shared/SKILL.md) — 了解 lark-cli 认证和 `--as` 身份切换。
+
+## ⚠️ Wiki 链接也直接用本 skill，不要绕到 lark-wiki
+
+`lark-cli docs +fetch --api-version v2` 同时支持 `/docx/` 和 `/wiki/` URL，内部自动处理 wiki token 路由：
+
+```bash
+# docx 文档
+python ~/.ethan/skills/lark-doc/scripts/fetch_doc.py "https://xxx.feishu.cn/docx/TOKEN" ./out.md
+
+# wiki 页面 — 完全相同的命令，lark-cli 自动识别
+python ~/.ethan/skills/lark-doc/scripts/fetch_doc.py "https://xxx.feishu.cn/wiki/TOKEN" ./out.md
+```
+
+**不要**先用 `lark-wiki` skill 的 `wiki +node-get` / `wiki spaces get_node` 拿 docx token，那是手动路径，比这更繁琐且容易失败。
 
 ## ⚠️ 必须用脚本导出，不能直接用 shell 调 lark-cli
 
