@@ -37,6 +37,17 @@ dependencies = [
     "uvicorn>=0.49.0",
 ]
 
+[project.optional-dependencies]
+# embedding 路由器（可选）：BGE-small-zh INT8 ONNX + LR 头语义分类，补关键词漏掉的 tail 召回。
+# 不装也能跑——router 不可用时 registry.match() 自动退回纯关键词匹配。
+# INT8 模型 + tokenizer 首次使用时从 GitHub（llm011/router-models）按 raw URL 自动下载；
+# LR 头随包分发。无需手动准备文件，也无需 huggingface_hub。
+router = [
+    "onnxruntime>=1.18.0",
+    "transformers>=4.40.0",
+    "numpy>=1.26.0",
+]
+
 [project.urls]
 Homepage = "https://github.com/llm011/ethan-agent"
 Repository = "https://github.com/llm011/ethan-agent"

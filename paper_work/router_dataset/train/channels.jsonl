@@ -1,0 +1,518 @@
+{"text": "我在家用的网络能不能跑这个对接啊", "label": "channels", "subcat": "F-原理概念"}
+{"text": "想让多个聊天平台都连进来", "label": "channels", "subcat": "E-新平台"}
+{"text": "帮我把实时读取协作平台发言的监听底座配通呢", "label": "channels", "subcat": "G-收发底座"}
+{"text": "应用的 secret 配置在哪个设置项吗", "label": "channels", "subcat": "B-填凭据"}
+{"text": "帮我在后端把那套实时收发的底座搭起来呢", "label": "channels", "subcat": "G-收发底座"}
+{"text": "飞书那边的信息收不到了帮我查查吗", "label": "channels", "subcat": "C-状态排查"}
+{"text": "Slack 的信息怎么打通到这边", "label": "channels", "subcat": "E-新平台"}
+{"text": "帮我在设置里加上飞书的应用信息啊", "label": "channels", "subcat": "B-填凭据"}
+{"text": "帮我把飞书侧的事件订阅打通呢", "label": "channels", "subcat": "A-建连接"}
+{"text": "我想让 Ethan 收到飞书那边的事件啊", "label": "channels", "subcat": "A-建连接"}
+{"text": "想把短信也作为一个来源连进来呢", "label": "channels", "subcat": "E-新平台"}
+{"text": "能不能同时连飞书和企业微信吗", "label": "channels", "subcat": "E-新平台"}
+{"text": "QQ 能对接进来吗", "label": "channels", "subcat": "E-新平台"}
+{"text": "怎么知道飞书的长连有没有掉线？", "label": "channels", "subcat": "C-状态排查"}
+{"text": "我想让企业微信的信息也进来呢", "label": "channels", "subcat": "E-新平台"}
+{"text": "我在家用的网络能不能跑这个对接吗", "label": "channels", "subcat": "F-原理概念"}
+{"text": "我要让机器人持续监听飞书事件呢", "label": "channels", "subcat": "A-建连接"}
+{"text": "帮我把飞书机器人的凭据对上吗", "label": "channels", "subcat": "B-填凭据"}
+{"text": "没有固定 IP 会不会影响连接啊", "label": "channels", "subcat": "F-原理概念"}
+{"text": "帮我把承接实时推送的底层收发服务建起来", "label": "channels", "subcat": "G-收发底座"}
+{"text": "帮我把飞书企业应用的参数配好吗", "label": "channels", "subcat": "B-填凭据"}
+{"text": "飞书那边的动静怎么同步到本地呢", "label": "channels", "subcat": "A-建连接"}
+{"text": "飞书的实时推送怎么开通啊", "label": "channels", "subcat": "A-建连接"}
+{"text": "我要个一直在线的事件接收基座，把外部动静实时同步吗", "label": "channels", "subcat": "G-收发底座"}
+{"text": "重启服务的命令是啥", "label": "channels", "subcat": "D-重启生效"}
+{"text": "飞书事件偶尔丢，帮我查原因", "label": "channels", "subcat": "C-状态排查"}
+{"text": "帮我在后端把那套实时收发的底座搭起来", "label": "channels", "subcat": "G-收发底座"}
+{"text": "飞书的应用凭据怎么安全地存进去呢", "label": "channels", "subcat": "B-填凭据"}
+{"text": "以后能不能把微信也连进来呢", "label": "channels", "subcat": "E-新平台"}
+{"text": "帮我 restart 一下让改动生效？", "label": "channels", "subcat": "D-重启生效"}
+{"text": "在哪里填飞书自建应用的 key啊", "label": "channels", "subcat": "B-填凭据"}
+{"text": "能不能同时连飞书和企业微信呢", "label": "channels", "subcat": "E-新平台"}
+{"text": "我把飞书应用建好了，凭据填哪啊", "label": "channels", "subcat": "B-填凭据"}
+{"text": "帮我停一下再起来让配置刷新吗", "label": "channels", "subcat": "D-重启生效"}
+{"text": "飞书的事件流怎么连进来", "label": "channels", "subcat": "A-建连接"}
+{"text": "帮我让飞书事件源源不断推进来", "label": "channels", "subcat": "A-建连接"}
+{"text": "帮我配一下飞书的长链路呢", "label": "channels", "subcat": "A-建连接"}
+{"text": "飞书的实时推送怎么开通吗", "label": "channels", "subcat": "A-建连接"}
+{"text": "我在家用的网络能不能跑这个对接？", "label": "channels", "subcat": "F-原理概念"}
+{"text": "飞书企业应用的密钥怎么录进来？", "label": "channels", "subcat": "B-填凭据"}
+{"text": "想让多个聊天平台都连进来？", "label": "channels", "subcat": "E-新平台"}
+{"text": "帮我开通飞书的事件实时接收？", "label": "channels", "subcat": "A-建连接"}
+{"text": "飞书后台拿到的 key 填到系统哪里？", "label": "channels", "subcat": "B-填凭据"}
+{"text": "想搭那种支持实时收发、随时扩展新平台的事件底座", "label": "channels", "subcat": "G-收发底座"}
+{"text": "飞书那边的信息收不到了帮我查查呢", "label": "channels", "subcat": "C-状态排查"}
+{"text": "飞书应用的密钥要配到哪个地方啊", "label": "channels", "subcat": "B-填凭据"}
+{"text": "飞书的长连保持在线怎么弄啊", "label": "channels", "subcat": "A-建连接"}
+{"text": "想让飞书消息实时推到我这边啊", "label": "channels", "subcat": "A-建连接"}
+{"text": "连接断了能不能自动重连啊", "label": "channels", "subcat": "C-状态排查"}
+{"text": "搭一个能时刻在线、源源不断收事件的监听底座", "label": "channels", "subcat": "G-收发底座"}
+{"text": "重启之后飞书连接会自动恢复吗", "label": "channels", "subcat": "D-重启生效"}
+{"text": "帮我把实时读取协作平台发言的监听底座配通", "label": "channels", "subcat": "G-收发底座"}
+{"text": "帮我把长连接监听服务起起来，实时收外部消息流啊", "label": "channels", "subcat": "G-收发底座"}
+{"text": "飞书那边的信息收不到了帮我查查啊", "label": "channels", "subcat": "C-状态排查"}
+{"text": "帮我把实时监听外部协作平台发言的那层搭好？", "label": "channels", "subcat": "G-收发底座"}
+{"text": "搭个持续监听的底座，外部平台一有动静就推进来呢", "label": "channels", "subcat": "G-收发底座"}
+{"text": "帮我看下长连接的健康状态呢", "label": "channels", "subcat": "C-状态排查"}
+{"text": "帮我看下飞书那条长连接还在不在？", "label": "channels", "subcat": "C-状态排查"}
+{"text": "不暴露公网安全吗", "label": "channels", "subcat": "F-原理概念"}
+{"text": "未来能不能支持 Slack 的事件吗", "label": "channels", "subcat": "E-新平台"}
+{"text": "帮我排查下飞书连不上的问题呢", "label": "channels", "subcat": "C-状态排查"}
+{"text": "帮我把承接实时推送的底层收发服务建起来吗", "label": "channels", "subcat": "G-收发底座"}
+{"text": "怎么确认飞书事件监听是正常的呢", "label": "channels", "subcat": "C-状态排查"}
+{"text": "帮我在后端把那套实时收发的底座搭起来啊", "label": "channels", "subcat": "G-收发底座"}
+{"text": "飞书连接一会儿就断，怎么稳住啊", "label": "channels", "subcat": "C-状态排查"}
+{"text": "我要让机器人持续监听飞书事件？", "label": "channels", "subcat": "A-建连接"}
+{"text": "帮我把飞书应用的凭据配上啊", "label": "channels", "subcat": "B-填凭据"}
+{"text": "帮我看下飞书那条长连接还在不在", "label": "channels", "subcat": "C-状态排查"}
+{"text": "重启服务的命令是啥吗", "label": "channels", "subcat": "D-重启生效"}
+{"text": "Slack 的信息怎么打通到这边呢", "label": "channels", "subcat": "E-新平台"}
+{"text": "想用长连接的方式收飞书事件", "label": "channels", "subcat": "A-建连接"}
+{"text": "连接状态怎么查，老是不稳定吗", "label": "channels", "subcat": "C-状态排查"}
+{"text": "想让本地服务一直挂着等飞书事件", "label": "channels", "subcat": "A-建连接"}
+{"text": "想搭那种支持实时收发、随时扩展新平台的事件底座？", "label": "channels", "subcat": "G-收发底座"}
+{"text": "帮我在设置里加上飞书的应用信息？", "label": "channels", "subcat": "B-填凭据"}
+{"text": "想让飞书消息实时推到我这边？", "label": "channels", "subcat": "A-建连接"}
+{"text": "在哪里填飞书自建应用的 key吗", "label": "channels", "subcat": "B-填凭据"}
+{"text": "飞书那边的信息收不到了帮我查查", "label": "channels", "subcat": "C-状态排查"}
+{"text": "帮我把飞书企业应用的参数配好", "label": "channels", "subcat": "B-填凭据"}
+{"text": "帮我把飞书企业应用的参数配好呢", "label": "channels", "subcat": "B-填凭据"}
+{"text": "想把飞书的凭据保存到系统里吗", "label": "channels", "subcat": "B-填凭据"}
+{"text": "飞书应用的密钥要配到哪个地方", "label": "channels", "subcat": "B-填凭据"}
+{"text": "搭一条实时链路，让外部平台的事件不间断流进来", "label": "channels", "subcat": "G-收发底座"}
+{"text": "内网环境能不能正常连飞书？", "label": "channels", "subcat": "F-原理概念"}
+{"text": "支不支持微信公众号对接呢", "label": "channels", "subcat": "E-新平台"}
+{"text": "帮我 restart 一下让改动生效呢", "label": "channels", "subcat": "D-重启生效"}
+{"text": "帮我把飞书的长连接建起来呢", "label": "channels", "subcat": "A-建连接"}
+{"text": "我想把飞书的应用凭据录进去呢", "label": "channels", "subcat": "B-填凭据"}
+{"text": "为什么不用回调地址而用长连接啊", "label": "channels", "subcat": "F-原理概念"}
+{"text": "改完配置服务要不要重新拉起啊", "label": "channels", "subcat": "D-重启生效"}
+{"text": "想把 Telegram 连上 Ethan啊", "label": "channels", "subcat": "E-新平台"}
+{"text": "帮我诊断下飞书连接异常", "label": "channels", "subcat": "C-状态排查"}
+{"text": "飞书的 App ID 和密钥填在哪", "label": "channels", "subcat": "B-填凭据"}
+{"text": "除了飞书还能连哪些平台？", "label": "channels", "subcat": "E-新平台"}
+{"text": "我想让飞书的来信走长连接进来？", "label": "channels", "subcat": "A-建连接"}
+{"text": "把实时承接外部事件的那层基础链路给我搭好啊", "label": "channels", "subcat": "G-收发底座"}
+{"text": "想搭那种支持实时收发、随时扩展新平台的事件底座吗", "label": "channels", "subcat": "G-收发底座"}
+{"text": "搭个持续监听的底座，外部平台一有动静就推进来？", "label": "channels", "subcat": "G-收发底座"}
+{"text": "飞书那边的动静怎么同步到本地？", "label": "channels", "subcat": "A-建连接"}
+{"text": "Telegram 机器人怎么连进来", "label": "channels", "subcat": "E-新平台"}
+{"text": "未来支持小程序对接吗", "label": "channels", "subcat": "E-新平台"}
+{"text": "飞书的 App ID 和密钥填在哪？", "label": "channels", "subcat": "B-填凭据"}
+{"text": "帮我把飞书事件监听跑起来", "label": "channels", "subcat": "A-建连接"}
+{"text": "飞书应用的密钥要配到哪个地方吗", "label": "channels", "subcat": "B-填凭据"}
+{"text": "帮我重载下服务让设置生效吗", "label": "channels", "subcat": "D-重启生效"}
+{"text": "想知道飞书应用配置填哪些字段？", "label": "channels", "subcat": "B-填凭据"}
+{"text": "帮我配一下飞书的长链路", "label": "channels", "subcat": "A-建连接"}
+{"text": "帮我开通飞书的事件实时接收吗", "label": "channels", "subcat": "A-建连接"}
+{"text": "帮我配一下飞书的长链路吗", "label": "channels", "subcat": "A-建连接"}
+{"text": "长连接和回调有啥区别吗", "label": "channels", "subcat": "F-原理概念"}
+{"text": "长连接和回调有啥区别啊", "label": "channels", "subcat": "F-原理概念"}
+{"text": "这种连法对网络有啥要求", "label": "channels", "subcat": "F-原理概念"}
+{"text": "飞书事件延迟很大，帮我看看吗", "label": "channels", "subcat": "C-状态排查"}
+{"text": "飞书的事件流怎么连进来呢", "label": "channels", "subcat": "A-建连接"}
+{"text": "在哪里填飞书自建应用的 key？", "label": "channels", "subcat": "B-填凭据"}
+{"text": "飞书的监听进程是不是死了", "label": "channels", "subcat": "C-状态排查"}
+{"text": "改完配置要不要重启才生效？", "label": "channels", "subcat": "D-重启生效"}
+{"text": "怎么平滑重启不丢连接吗", "label": "channels", "subcat": "D-重启生效"}
+{"text": "帮我打通飞书和本地服务的通道？", "label": "channels", "subcat": "A-建连接"}
+{"text": "微信能不能像飞书那样连进来吗", "label": "channels", "subcat": "E-新平台"}
+{"text": "改完配置要不要重启才生效啊", "label": "channels", "subcat": "D-重启生效"}
+{"text": "想让飞书消息实时推到我这边呢", "label": "channels", "subcat": "A-建连接"}
+{"text": "飞书企业应用的密钥怎么录进来吗", "label": "channels", "subcat": "B-填凭据"}
+{"text": "飞书那边的动静怎么同步到本地啊", "label": "channels", "subcat": "A-建连接"}
+{"text": "想连上 WhatsApp 行不行呢", "label": "channels", "subcat": "E-新平台"}
+{"text": "飞书那边的凭据怎么对接进系统？", "label": "channels", "subcat": "B-填凭据"}
+{"text": "帮我把服务重启一下呢", "label": "channels", "subcat": "D-重启生效"}
+{"text": "想把 Telegram 连上 Ethan吗", "label": "channels", "subcat": "E-新平台"}
+{"text": "在哪改飞书应用的 ID 和密钥？", "label": "channels", "subcat": "B-填凭据"}
+{"text": "除了飞书还能连哪些平台吗", "label": "channels", "subcat": "E-新平台"}
+{"text": "帮我 restart 一下让改动生效啊", "label": "channels", "subcat": "D-重启生效"}
+{"text": "连接状态怎么查，老是不稳定", "label": "channels", "subcat": "C-状态排查"}
+{"text": "邮件能不能也对接进来啊", "label": "channels", "subcat": "E-新平台"}
+{"text": "帮我看看连接日志有没有报错？", "label": "channels", "subcat": "C-状态排查"}
+{"text": "怎么不停机让配置热更新吗", "label": "channels", "subcat": "D-重启生效"}
+{"text": "以后能不能把微信也连进来吗", "label": "channels", "subcat": "E-新平台"}
+{"text": "飞书的 app 凭据填错了怎么改吗", "label": "channels", "subcat": "B-填凭据"}
+{"text": "邮件能不能也对接进来吗", "label": "channels", "subcat": "E-新平台"}
+{"text": "帮我把飞书机器人的凭据对上啊", "label": "channels", "subcat": "B-填凭据"}
+{"text": "怎么不停机让配置热更新呢", "label": "channels", "subcat": "D-重启生效"}
+{"text": "在哪改飞书应用的 ID 和密钥", "label": "channels", "subcat": "B-填凭据"}
+{"text": "帮我让飞书事件源源不断推进来吗", "label": "channels", "subcat": "A-建连接"}
+{"text": "除了飞书还能连哪些平台啊", "label": "channels", "subcat": "E-新平台"}
+{"text": "帮我配置飞书应用的鉴权参数吗", "label": "channels", "subcat": "B-填凭据"}
+{"text": "我想让 Ethan 收到飞书那边的事件呢", "label": "channels", "subcat": "A-建连接"}
+{"text": "配好凭据后怎么让它生效啊", "label": "channels", "subcat": "D-重启生效"}
+{"text": "为什么不用回调地址而用长连接", "label": "channels", "subcat": "F-原理概念"}
+{"text": "飞书事件延迟很大，帮我看看呢", "label": "channels", "subcat": "C-状态排查"}
+{"text": "怎么知道飞书的长连有没有掉线", "label": "channels", "subcat": "C-状态排查"}
+{"text": "配好凭据后怎么让它生效吗", "label": "channels", "subcat": "D-重启生效"}
+{"text": "我想搭一条飞书到 Ethan 的实时链路啊", "label": "channels", "subcat": "A-建连接"}
+{"text": "想把飞书的凭据保存到系统里啊", "label": "channels", "subcat": "B-填凭据"}
+{"text": "帮我把承接实时推送的底层收发服务建起来呢", "label": "channels", "subcat": "G-收发底座"}
+{"text": "飞书事件延迟很大，帮我看看？", "label": "channels", "subcat": "C-状态排查"}
+{"text": "帮我建立飞书到本地的双向连接？", "label": "channels", "subcat": "A-建连接"}
+{"text": "想知道飞书应用配置填哪些字段", "label": "channels", "subcat": "B-填凭据"}
+{"text": "帮我打通飞书和本地服务的通道吗", "label": "channels", "subcat": "A-建连接"}
+{"text": "重启服务的命令是啥啊", "label": "channels", "subcat": "D-重启生效"}
+{"text": "长连接占资源多吗", "label": "channels", "subcat": "F-原理概念"}
+{"text": "我想让企业微信的信息也进来？", "label": "channels", "subcat": "E-新平台"}
+{"text": "我想搭一条飞书到 Ethan 的实时链路？", "label": "channels", "subcat": "A-建连接"}
+{"text": "帮我 restart 一下让改动生效", "label": "channels", "subcat": "D-重启生效"}
+{"text": "搭个持续监听的底座，外部平台一有动静就推进来", "label": "channels", "subcat": "G-收发底座"}
+{"text": "连接断了能不能自动重连吗", "label": "channels", "subcat": "C-状态排查"}
+{"text": "想让后端一直监听外部群组的实时发言并送进来呢", "label": "channels", "subcat": "G-收发底座"}
+{"text": "支持把多个平台统一管理吗", "label": "channels", "subcat": "E-新平台"}
+{"text": "怎么知道飞书的长连有没有掉线吗", "label": "channels", "subcat": "C-状态排查"}
+{"text": "这种长连接是怎么穿透内网的啊", "label": "channels", "subcat": "F-原理概念"}
+{"text": "搭一条实时链路，让外部平台的事件不间断流进来啊", "label": "channels", "subcat": "G-收发底座"}
+{"text": "没有固定 IP 会不会影响连接呢", "label": "channels", "subcat": "F-原理概念"}
+{"text": "公司内网防火墙严能用吗", "label": "channels", "subcat": "F-原理概念"}
+{"text": "帮我重启下服务让飞书设置生效吗", "label": "channels", "subcat": "D-重启生效"}
+{"text": "飞书连接一会儿就断，怎么稳住？", "label": "channels", "subcat": "C-状态排查"}
+{"text": "飞书的持久连接怎么搭？", "label": "channels", "subcat": "A-建连接"}
+{"text": "想用长连接的方式收飞书事件啊", "label": "channels", "subcat": "A-建连接"}
+{"text": "帮我把实时推送的收发基座先跑通吗", "label": "channels", "subcat": "G-收发底座"}
+{"text": "我要一条一直挂着的实时事件流，把来信推进系统", "label": "channels", "subcat": "G-收发底座"}
+{"text": "为什么推荐用长连接而不是公网回调", "label": "channels", "subcat": "F-原理概念"}
+{"text": "飞书应用的密钥要配到哪个地方？", "label": "channels", "subcat": "B-填凭据"}
+{"text": "帮我排查下飞书连不上的问题", "label": "channels", "subcat": "C-状态排查"}
+{"text": "飞书的实时推送好像挂了", "label": "channels", "subcat": "C-状态排查"}
+{"text": "帮我把飞书企业应用的参数配好？", "label": "channels", "subcat": "B-填凭据"}
+{"text": "想确认飞书事件流有没有正常工作呢", "label": "channels", "subcat": "C-状态排查"}
+{"text": "我把飞书应用建好了，凭据填哪？", "label": "channels", "subcat": "B-填凭据"}
+{"text": "帮我排查下飞书连不上的问题吗", "label": "channels", "subcat": "C-状态排查"}
+{"text": "帮我把服务重启一下？", "label": "channels", "subcat": "D-重启生效"}
+{"text": "帮我录入飞书应用的 ID 和 Secret呢", "label": "channels", "subcat": "B-填凭据"}
+{"text": "帮我排查下飞书连不上的问题？", "label": "channels", "subcat": "C-状态排查"}
+{"text": "想把 Telegram 连上 Ethan？", "label": "channels", "subcat": "E-新平台"}
+{"text": "飞书事件偶尔丢，帮我查原因吗", "label": "channels", "subcat": "C-状态排查"}
+{"text": "帮我把飞书的事件通道连通吗", "label": "channels", "subcat": "A-建连接"}
+{"text": "飞书连上又断，反复横跳怎么办吗", "label": "channels", "subcat": "C-状态排查"}
+{"text": "长连接断了会自动重连吗", "label": "channels", "subcat": "F-原理概念"}
+{"text": "能不能同时连飞书和企业微信啊", "label": "channels", "subcat": "E-新平台"}
+{"text": "这种连法对网络有啥要求？", "label": "channels", "subcat": "F-原理概念"}
+{"text": "帮我把服务重启一下吗", "label": "channels", "subcat": "D-重启生效"}
+{"text": "想让本地服务一直挂着等飞书事件呢", "label": "channels", "subcat": "A-建连接"}
+{"text": "帮我把飞书的应用密钥设进去", "label": "channels", "subcat": "B-填凭据"}
+{"text": "想把飞书的凭据保存到系统里？", "label": "channels", "subcat": "B-填凭据"}
+{"text": "想把短信也作为一个来源连进来", "label": "channels", "subcat": "E-新平台"}
+{"text": "怎么检查飞书连接的状态啊", "label": "channels", "subcat": "C-状态排查"}
+{"text": "怎么平滑重启不丢连接？", "label": "channels", "subcat": "D-重启生效"}
+{"text": "怎么平滑重启不丢连接呢", "label": "channels", "subcat": "D-重启生效"}
+{"text": "应用的 secret 配置在哪个设置项？", "label": "channels", "subcat": "B-填凭据"}
+{"text": "帮我排查下飞书连不上的问题啊", "label": "channels", "subcat": "C-状态排查"}
+{"text": "飞书来信延迟好几分钟正常吗", "label": "channels", "subcat": "C-状态排查"}
+{"text": "帮我把飞书的长连接建起来？", "label": "channels", "subcat": "A-建连接"}
+{"text": "帮我看看连接日志有没有报错", "label": "channels", "subcat": "C-状态排查"}
+{"text": "我要一条一直挂着的实时事件流，把来信推进系统吗", "label": "channels", "subcat": "G-收发底座"}
+{"text": "我想把飞书的应用凭据录进去？", "label": "channels", "subcat": "B-填凭据"}
+{"text": "帮我看下飞书那条长连接还在不在吗", "label": "channels", "subcat": "C-状态排查"}
+{"text": "配好凭据后怎么让它生效", "label": "channels", "subcat": "D-重启生效"}
+{"text": "帮我把实时读取协作平台发言的监听底座配通吗", "label": "channels", "subcat": "G-收发底座"}
+{"text": "帮我看下最近的连接断开记录吗", "label": "channels", "subcat": "C-状态排查"}
+{"text": "飞书的长连保持在线怎么弄？", "label": "channels", "subcat": "A-建连接"}
+{"text": "帮我录入飞书应用的 ID 和 Secret", "label": "channels", "subcat": "B-填凭据"}
+{"text": "支不支持微信公众号对接啊", "label": "channels", "subcat": "E-新平台"}
+{"text": "为什么不用回调地址而用长连接吗", "label": "channels", "subcat": "F-原理概念"}
+{"text": "怎么让新的飞书设置立即生效呢", "label": "channels", "subcat": "D-重启生效"}
+{"text": "怎么不停机让配置热更新", "label": "channels", "subcat": "D-重启生效"}
+{"text": "我想留一套实时事件流的底座，以后好接更多平台啊", "label": "channels", "subcat": "G-收发底座"}
+{"text": "我想把飞书的应用凭据录进去", "label": "channels", "subcat": "B-填凭据"}
+{"text": "我想留一套实时事件流的底座，以后好接更多平台呢", "label": "channels", "subcat": "G-收发底座"}
+{"text": "帮我重新启动服务应用新配置呢", "label": "channels", "subcat": "D-重启生效"}
+{"text": "改完配置要不要重启才生效", "label": "channels", "subcat": "D-重启生效"}
+{"text": "想让飞书来的东西自动进系统吗", "label": "channels", "subcat": "A-建连接"}
+{"text": "这个对接方式的原理是啥？", "label": "channels", "subcat": "F-原理概念"}
+{"text": "帮我重启下服务让飞书设置生效", "label": "channels", "subcat": "D-重启生效"}
+{"text": "搭一条实时链路，让外部平台的事件不间断流进来呢", "label": "channels", "subcat": "G-收发底座"}
+{"text": "没有服务器公网怎么对接飞书啊", "label": "channels", "subcat": "F-原理概念"}
+{"text": "想让多个聊天平台都连进来吗", "label": "channels", "subcat": "E-新平台"}
+{"text": "想让本地服务一直挂着等飞书事件？", "label": "channels", "subcat": "A-建连接"}
+{"text": "飞书的实时推送怎么开通？", "label": "channels", "subcat": "A-建连接"}
+{"text": "帮我重载下服务让设置生效啊", "label": "channels", "subcat": "D-重启生效"}
+{"text": "我要一条一直挂着的实时事件流，把来信推进系统啊", "label": "channels", "subcat": "G-收发底座"}
+{"text": "没有服务器公网怎么对接飞书吗", "label": "channels", "subcat": "F-原理概念"}
+{"text": "邮件能不能也对接进来？", "label": "channels", "subcat": "E-新平台"}
+{"text": "怎么平滑重启不丢连接啊", "label": "channels", "subcat": "D-重启生效"}
+{"text": "我在家用的网络能不能跑这个对接", "label": "channels", "subcat": "F-原理概念"}
+{"text": "想知道飞书应用配置填哪些字段呢", "label": "channels", "subcat": "B-填凭据"}
+{"text": "帮我把飞书应用的凭据配上呢", "label": "channels", "subcat": "B-填凭据"}
+{"text": "帮我把飞书机器人的凭据对上呢", "label": "channels", "subcat": "B-填凭据"}
+{"text": "我想让企业微信的信息也进来吗", "label": "channels", "subcat": "E-新平台"}
+{"text": "飞书的鉴权信息配在哪个面板啊", "label": "channels", "subcat": "B-填凭据"}
+{"text": "想让系统常驻在线，实时承接外部平台推来的事件呢", "label": "channels", "subcat": "G-收发底座"}
+{"text": "帮我把飞书侧的事件订阅打通吗", "label": "channels", "subcat": "A-建连接"}
+{"text": "帮我跑一个常驻进程，实时把外部平台来信收进系统吗", "label": "channels", "subcat": "G-收发底座"}
+{"text": "飞书那边的事件怎么订阅过来？", "label": "channels", "subcat": "A-建连接"}
+{"text": "连接断了能不能自动重连？", "label": "channels", "subcat": "C-状态排查"}
+{"text": "Slack 的信息怎么打通到这边吗", "label": "channels", "subcat": "E-新平台"}
+{"text": "想让系统常驻在线，实时承接外部平台推来的事件吗", "label": "channels", "subcat": "G-收发底座"}
+{"text": "帮我重新启动服务应用新配置？", "label": "channels", "subcat": "D-重启生效"}
+{"text": "飞书事件延迟很大，帮我看看啊", "label": "channels", "subcat": "C-状态排查"}
+{"text": "想让飞书来的东西自动进系统啊", "label": "channels", "subcat": "A-建连接"}
+{"text": "飞书的 app 凭据填错了怎么改啊", "label": "channels", "subcat": "B-填凭据"}
+{"text": "想把 Discord 也对接上", "label": "channels", "subcat": "E-新平台"}
+{"text": "帮我核对下填的飞书凭据对不对吗", "label": "channels", "subcat": "B-填凭据"}
+{"text": "微信能不能像飞书那样连进来呢", "label": "channels", "subcat": "E-新平台"}
+{"text": "帮我核对下填的飞书凭据对不对", "label": "channels", "subcat": "B-填凭据"}
+{"text": "帮我把飞书的事件通道连通？", "label": "channels", "subcat": "A-建连接"}
+{"text": "未来能不能支持 Slack 的事件？", "label": "channels", "subcat": "E-新平台"}
+{"text": "对接需不需要在路由器上开端口", "label": "channels", "subcat": "F-原理概念"}
+{"text": "为什么不用回调地址而用长连接？", "label": "channels", "subcat": "F-原理概念"}
+{"text": "想连上 WhatsApp 行不行？", "label": "channels", "subcat": "E-新平台"}
+{"text": "帮我在设置里加上飞书的应用信息呢", "label": "channels", "subcat": "B-填凭据"}
+{"text": "这个对接方式的原理是啥呢", "label": "channels", "subcat": "F-原理概念"}
+{"text": "飞书的 app 凭据填错了怎么改呢", "label": "channels", "subcat": "B-填凭据"}
+{"text": "飞书的应用凭据怎么安全地存进去", "label": "channels", "subcat": "B-填凭据"}
+{"text": "为什么不用回调地址而用长连接呢", "label": "channels", "subcat": "F-原理概念"}
+{"text": "怎么检查飞书连接的状态", "label": "channels", "subcat": "C-状态排查"}
+{"text": "我想搭一条飞书到 Ethan 的实时链路", "label": "channels", "subcat": "A-建连接"}
+{"text": "改完配置要不要重启才生效吗", "label": "channels", "subcat": "D-重启生效"}
+{"text": "飞书的 appid 和 secret 怎么设置呢", "label": "channels", "subcat": "B-填凭据"}
+{"text": "改完配置服务要不要重新拉起", "label": "channels", "subcat": "D-重启生效"}
+{"text": "帮我看下飞书那条长连接还在不在啊", "label": "channels", "subcat": "C-状态排查"}
+{"text": "没有固定 IP 会不会影响连接吗", "label": "channels", "subcat": "F-原理概念"}
+{"text": "想让飞书消息实时推到我这边", "label": "channels", "subcat": "A-建连接"}
+{"text": "帮我重启下服务让飞书设置生效呢", "label": "channels", "subcat": "D-重启生效"}
+{"text": "帮我配置飞书应用的鉴权参数呢", "label": "channels", "subcat": "B-填凭据"}
+{"text": "想让程序长连着，实时把外部平台的发言读进来吗", "label": "channels", "subcat": "G-收发底座"}
+{"text": "Telegram 机器人怎么连进来啊", "label": "channels", "subcat": "E-新平台"}
+{"text": "想把 Discord 也对接上啊", "label": "channels", "subcat": "E-新平台"}
+{"text": "飞书的事件流怎么连进来吗", "label": "channels", "subcat": "A-建连接"}
+{"text": "这个对接方式的原理是啥啊", "label": "channels", "subcat": "F-原理概念"}
+{"text": "帮我看看连接日志有没有报错啊", "label": "channels", "subcat": "C-状态排查"}
+{"text": "想用长连接的方式收飞书事件呢", "label": "channels", "subcat": "A-建连接"}
+{"text": "怎么让新的飞书设置立即生效？", "label": "channels", "subcat": "D-重启生效"}
+{"text": "飞书企业应用的密钥怎么录进来", "label": "channels", "subcat": "B-填凭据"}
+{"text": "怎么监控飞书连接是否在线", "label": "channels", "subcat": "C-状态排查"}
+{"text": "怎么确认飞书事件监听是正常的吗", "label": "channels", "subcat": "C-状态排查"}
+{"text": "怎么让飞书的事件推过来吗", "label": "channels", "subcat": "A-建连接"}
+{"text": "帮我停一下再起来让配置刷新呢", "label": "channels", "subcat": "D-重启生效"}
+{"text": "不开端口怎么接收外部事件吗", "label": "channels", "subcat": "F-原理概念"}
+{"text": "把实时承接外部事件的那层基础链路给我搭好吗", "label": "channels", "subcat": "G-收发底座"}
+{"text": "飞书的鉴权信息配在哪个面板呢", "label": "channels", "subcat": "B-填凭据"}
+{"text": "我想让 Ethan 收到飞书那边的事件？", "label": "channels", "subcat": "A-建连接"}
+{"text": "想让系统常驻在线，实时承接外部平台推来的事件啊", "label": "channels", "subcat": "G-收发底座"}
+{"text": "微信能不能像飞书那样连进来？", "label": "channels", "subcat": "E-新平台"}
+{"text": "怎么让新的飞书设置立即生效", "label": "channels", "subcat": "D-重启生效"}
+{"text": "帮我把飞书事件监听跑起来？", "label": "channels", "subcat": "A-建连接"}
+{"text": "我想让 Ethan 收到飞书那边的事件", "label": "channels", "subcat": "A-建连接"}
+{"text": "搭一个能时刻在线、源源不断收事件的监听底座呢", "label": "channels", "subcat": "G-收发底座"}
+{"text": "帮我把飞书应用的凭据配上", "label": "channels", "subcat": "B-填凭据"}
+{"text": "把实时承接外部事件的那层基础链路给我搭好", "label": "channels", "subcat": "G-收发底座"}
+{"text": "怎么知道飞书的长连有没有掉线啊", "label": "channels", "subcat": "C-状态排查"}
+{"text": "飞书事件延迟很大，帮我看看", "label": "channels", "subcat": "C-状态排查"}
+{"text": "帮我看下长连接的健康状态？", "label": "channels", "subcat": "C-状态排查"}
+{"text": "想连上 WhatsApp 行不行", "label": "channels", "subcat": "E-新平台"}
+{"text": "飞书的持久连接怎么搭吗", "label": "channels", "subcat": "A-建连接"}
+{"text": "我要个一直在线的事件接收基座，把外部动静实时同步呢", "label": "channels", "subcat": "G-收发底座"}
+{"text": "帮我重新启动服务应用新配置", "label": "channels", "subcat": "D-重启生效"}
+{"text": "帮我在设置里加上飞书的应用信息", "label": "channels", "subcat": "B-填凭据"}
+{"text": "飞书连接一会儿就断，怎么稳住", "label": "channels", "subcat": "C-状态排查"}
+{"text": "帮我停一下再起来让配置刷新", "label": "channels", "subcat": "D-重启生效"}
+{"text": "帮我看看连接日志有没有报错吗", "label": "channels", "subcat": "C-状态排查"}
+{"text": "想让系统常驻在线，实时承接外部平台推来的事件", "label": "channels", "subcat": "G-收发底座"}
+{"text": "怎么检查飞书连接的状态？", "label": "channels", "subcat": "C-状态排查"}
+{"text": "帮我把飞书的应用密钥设进去？", "label": "channels", "subcat": "B-填凭据"}
+{"text": "这种连进来的方式需要域名吗", "label": "channels", "subcat": "F-原理概念"}
+{"text": "应用的 secret 配置在哪个设置项啊", "label": "channels", "subcat": "B-填凭据"}
+{"text": "想让后端一直监听外部群组的实时发言并送进来", "label": "channels", "subcat": "G-收发底座"}
+{"text": "内网环境能不能正常连飞书呢", "label": "channels", "subcat": "F-原理概念"}
+{"text": "飞书的 appid 和 secret 怎么设置？", "label": "channels", "subcat": "B-填凭据"}
+{"text": "连接断了能不能自动重连呢", "label": "channels", "subcat": "C-状态排查"}
+{"text": "想用长连接的方式收飞书事件？", "label": "channels", "subcat": "A-建连接"}
+{"text": "想让程序长连着，实时把外部平台的发言读进来呢", "label": "channels", "subcat": "G-收发底座"}
+{"text": "帮我跑一个常驻进程，实时把外部平台来信收进系统啊", "label": "channels", "subcat": "G-收发底座"}
+{"text": "Slack 的信息怎么打通到这边？", "label": "channels", "subcat": "E-新平台"}
+{"text": "我想让飞书的来信走长连接进来", "label": "channels", "subcat": "A-建连接"}
+{"text": "飞书连接一会儿就断，怎么稳住吗", "label": "channels", "subcat": "C-状态排查"}
+{"text": "我改了设置，怎么让它跑起来啊", "label": "channels", "subcat": "D-重启生效"}
+{"text": "微信能不能像飞书那样连进来啊", "label": "channels", "subcat": "E-新平台"}
+{"text": "帮我把飞书的长连接建起来啊", "label": "channels", "subcat": "A-建连接"}
+{"text": "飞书的来往信息怎么实时同步进来", "label": "channels", "subcat": "A-建连接"}
+{"text": "帮我配置飞书应用的鉴权参数啊", "label": "channels", "subcat": "B-填凭据"}
+{"text": "想确认飞书事件流有没有正常工作啊", "label": "channels", "subcat": "C-状态排查"}
+{"text": "飞书事件突然收不到了，咋回事啊", "label": "channels", "subcat": "C-状态排查"}
+{"text": "帮我把飞书的事件通道连通啊", "label": "channels", "subcat": "A-建连接"}
+{"text": "帮我建立飞书到本地的双向连接吗", "label": "channels", "subcat": "A-建连接"}
+{"text": "配置改了得手动重启服务吧", "label": "channels", "subcat": "D-重启生效"}
+{"text": "怎么平滑重启不丢连接", "label": "channels", "subcat": "D-重启生效"}
+{"text": "把实时承接外部事件的那层基础链路给我搭好呢", "label": "channels", "subcat": "G-收发底座"}
+{"text": "支不支持微信公众号对接？", "label": "channels", "subcat": "E-新平台"}
+{"text": "帮我开通飞书的事件实时接收啊", "label": "channels", "subcat": "A-建连接"}
+{"text": "怎么检查飞书连接的状态呢", "label": "channels", "subcat": "C-状态排查"}
+{"text": "怎么监控飞书连接是否在线呢", "label": "channels", "subcat": "C-状态排查"}
+{"text": "支不支持微信公众号对接吗", "label": "channels", "subcat": "E-新平台"}
+{"text": "我改了设置，怎么让它跑起来", "label": "channels", "subcat": "D-重启生效"}
+{"text": "这种连法对网络有啥要求吗", "label": "channels", "subcat": "F-原理概念"}
+{"text": "飞书企业应用的密钥怎么录进来啊", "label": "channels", "subcat": "B-填凭据"}
+{"text": "飞书那边的动静怎么同步到本地吗", "label": "channels", "subcat": "A-建连接"}
+{"text": "想把 Discord 也对接上？", "label": "channels", "subcat": "E-新平台"}
+{"text": "飞书的 App ID 和密钥填在哪呢", "label": "channels", "subcat": "B-填凭据"}
+{"text": "飞书后台拿到的 key 填到系统哪里啊", "label": "channels", "subcat": "B-填凭据"}
+{"text": "想把飞书的凭据保存到系统里呢", "label": "channels", "subcat": "B-填凭据"}
+{"text": "这个对接方式的原理是啥吗", "label": "channels", "subcat": "F-原理概念"}
+{"text": "帮我打通飞书和本地服务的通道呢", "label": "channels", "subcat": "A-建连接"}
+{"text": "这种长连接是怎么穿透内网的呢", "label": "channels", "subcat": "F-原理概念"}
+{"text": "想连上 WhatsApp 行不行吗", "label": "channels", "subcat": "E-新平台"}
+{"text": "怎么监控飞书连接是否在线吗", "label": "channels", "subcat": "C-状态排查"}
+{"text": "连接状态怎么查，老是不稳定啊", "label": "channels", "subcat": "C-状态排查"}
+{"text": "帮我让飞书事件源源不断推进来啊", "label": "channels", "subcat": "A-建连接"}
+{"text": "想让后端一直监听外部群组的实时发言并送进来啊", "label": "channels", "subcat": "G-收发底座"}
+{"text": "飞书的持久连接怎么搭", "label": "channels", "subcat": "A-建连接"}
+{"text": "帮我确认下事件订阅还活着没", "label": "channels", "subcat": "C-状态排查"}
+{"text": "不开端口怎么接收外部事件", "label": "channels", "subcat": "F-原理概念"}
+{"text": "飞书企业应用的密钥怎么录进来呢", "label": "channels", "subcat": "B-填凭据"}
+{"text": "想让飞书来的东西自动进系统呢", "label": "channels", "subcat": "A-建连接"}
+{"text": "帮我把服务重启一下", "label": "channels", "subcat": "D-重启生效"}
+{"text": "帮我确认下事件订阅还活着没呢", "label": "channels", "subcat": "C-状态排查"}
+{"text": "飞书事件突然收不到了，咋回事？", "label": "channels", "subcat": "C-状态排查"}
+{"text": "帮我把长连接监听服务起起来，实时收外部消息流吗", "label": "channels", "subcat": "G-收发底座"}
+{"text": "搭一个能时刻在线、源源不断收事件的监听底座吗", "label": "channels", "subcat": "G-收发底座"}
+{"text": "帮我把实时推送的收发基座先跑通呢", "label": "channels", "subcat": "G-收发底座"}
+{"text": "不开端口怎么接收外部事件啊", "label": "channels", "subcat": "F-原理概念"}
+{"text": "我想让飞书的来信走长连接进来啊", "label": "channels", "subcat": "A-建连接"}
+{"text": "我想搭一条飞书到 Ethan 的实时链路呢", "label": "channels", "subcat": "A-建连接"}
+{"text": "帮我把飞书应用的凭据配上吗", "label": "channels", "subcat": "B-填凭据"}
+{"text": "想搭那种支持实时收发、随时扩展新平台的事件底座呢", "label": "channels", "subcat": "G-收发底座"}
+{"text": "飞书那边的凭据怎么对接进系统呢", "label": "channels", "subcat": "B-填凭据"}
+{"text": "想把飞书的凭据保存到系统里", "label": "channels", "subcat": "B-填凭据"}
+{"text": "想把短信也作为一个来源连进来吗", "label": "channels", "subcat": "E-新平台"}
+{"text": "帮我重载下服务让设置生效呢", "label": "channels", "subcat": "D-重启生效"}
+{"text": "想让多个聊天平台都连进来啊", "label": "channels", "subcat": "E-新平台"}
+{"text": "帮我确认下事件订阅还活着没？", "label": "channels", "subcat": "C-状态排查"}
+{"text": "飞书后台拿到的 key 填到系统哪里", "label": "channels", "subcat": "B-填凭据"}
+{"text": "没有固定 IP 会不会影响连接？", "label": "channels", "subcat": "F-原理概念"}
+{"text": "飞书的事件流怎么连进来？", "label": "channels", "subcat": "A-建连接"}
+{"text": "邮件能不能也对接进来", "label": "channels", "subcat": "E-新平台"}
+{"text": "为什么推荐用长连接而不是公网回调吗", "label": "channels", "subcat": "F-原理概念"}
+{"text": "应用的 secret 配置在哪个设置项", "label": "channels", "subcat": "B-填凭据"}
+{"text": "帮我录入飞书应用的 ID 和 Secret啊", "label": "channels", "subcat": "B-填凭据"}
+{"text": "帮我跑一个常驻进程，实时把外部平台来信收进系统？", "label": "channels", "subcat": "G-收发底座"}
+{"text": "飞书连上又断，反复横跳怎么办", "label": "channels", "subcat": "C-状态排查"}
+{"text": "飞书那边的凭据怎么对接进系统吗", "label": "channels", "subcat": "B-填凭据"}
+{"text": "不开端口怎么接收外部事件呢", "label": "channels", "subcat": "F-原理概念"}
+{"text": "帮我把实时推送的收发基座先跑通？", "label": "channels", "subcat": "G-收发底座"}
+{"text": "帮我把实时监听外部协作平台发言的那层搭好呢", "label": "channels", "subcat": "G-收发底座"}
+{"text": "飞书那边的动静怎么同步到本地", "label": "channels", "subcat": "A-建连接"}
+{"text": "我要让机器人持续监听飞书事件吗", "label": "channels", "subcat": "A-建连接"}
+{"text": "帮我核对下填的飞书凭据对不对啊", "label": "channels", "subcat": "B-填凭据"}
+{"text": "想让多个聊天平台都连进来呢", "label": "channels", "subcat": "E-新平台"}
+{"text": "飞书的来往信息怎么实时同步进来？", "label": "channels", "subcat": "A-建连接"}
+{"text": "帮我跑一个常驻进程，实时把外部平台来信收进系统呢", "label": "channels", "subcat": "G-收发底座"}
+{"text": "帮我开通飞书的事件实时接收", "label": "channels", "subcat": "A-建连接"}
+{"text": "想让本地服务一直挂着等飞书事件啊", "label": "channels", "subcat": "A-建连接"}
+{"text": "重启服务的命令是啥？", "label": "channels", "subcat": "D-重启生效"}
+{"text": "帮我让飞书事件源源不断推进来？", "label": "channels", "subcat": "A-建连接"}
+{"text": "帮我诊断下飞书连接异常吗", "label": "channels", "subcat": "C-状态排查"}
+{"text": "以后能不能把微信也连进来", "label": "channels", "subcat": "E-新平台"}
+{"text": "帮我看下最近的连接断开记录呢", "label": "channels", "subcat": "C-状态排查"}
+{"text": "帮我配一下飞书的长链路啊", "label": "channels", "subcat": "A-建连接"}
+{"text": "这种长连接是怎么穿透内网的？", "label": "channels", "subcat": "F-原理概念"}
+{"text": "飞书的 appid 和 secret 怎么设置", "label": "channels", "subcat": "B-填凭据"}
+{"text": "怎么让飞书的事件推过来？", "label": "channels", "subcat": "A-建连接"}
+{"text": "这种连法对网络有啥要求啊", "label": "channels", "subcat": "F-原理概念"}
+{"text": "帮我看下长连接的健康状态吗", "label": "channels", "subcat": "C-状态排查"}
+{"text": "搭一条实时链路，让外部平台的事件不间断流进来？", "label": "channels", "subcat": "G-收发底座"}
+{"text": "怎么让飞书的事件推过来呢", "label": "channels", "subcat": "A-建连接"}
+{"text": "帮我确认下事件订阅还活着没啊", "label": "channels", "subcat": "C-状态排查"}
+{"text": "帮我重载下服务让设置生效？", "label": "channels", "subcat": "D-重启生效"}
+{"text": "帮我看下最近的连接断开记录？", "label": "channels", "subcat": "C-状态排查"}
+{"text": "我要个一直在线的事件接收基座，把外部动静实时同步？", "label": "channels", "subcat": "G-收发底座"}
+{"text": "想用长连接的方式收飞书事件吗", "label": "channels", "subcat": "A-建连接"}
+{"text": "重启服务的命令是啥呢", "label": "channels", "subcat": "D-重启生效"}
+{"text": "帮我开通飞书的事件实时接收呢", "label": "channels", "subcat": "A-建连接"}
+{"text": "帮我打通飞书和本地服务的通道", "label": "channels", "subcat": "A-建连接"}
+{"text": "搭个持续监听的底座，外部平台一有动静就推进来啊", "label": "channels", "subcat": "G-收发底座"}
+{"text": "搭一条实时链路，让外部平台的事件不间断流进来吗", "label": "channels", "subcat": "G-收发底座"}
+{"text": "帮我让飞书事件源源不断推进来呢", "label": "channels", "subcat": "A-建连接"}
+{"text": "飞书连上又断，反复横跳怎么办呢", "label": "channels", "subcat": "C-状态排查"}
+{"text": "帮我在后端把那套实时收发的底座搭起来？", "label": "channels", "subcat": "G-收发底座"}
+{"text": "没有服务器公网怎么对接飞书？", "label": "channels", "subcat": "F-原理概念"}
+{"text": "我想让飞书的来信走长连接进来呢", "label": "channels", "subcat": "A-建连接"}
+{"text": "飞书那边的凭据怎么对接进系统啊", "label": "channels", "subcat": "B-填凭据"}
+{"text": "飞书的实时推送怎么开通呢", "label": "channels", "subcat": "A-建连接"}
+{"text": "帮我 restart 一下让改动生效吗", "label": "channels", "subcat": "D-重启生效"}
+{"text": "不开端口怎么接收外部事件？", "label": "channels", "subcat": "F-原理概念"}
+{"text": "帮我看下长连接的健康状态", "label": "channels", "subcat": "C-状态排查"}
+{"text": "帮我把飞书机器人的凭据对上？", "label": "channels", "subcat": "B-填凭据"}
+{"text": "Slack 的信息怎么打通到这边啊", "label": "channels", "subcat": "E-新平台"}
+{"text": "飞书的来往信息怎么实时同步进来吗", "label": "channels", "subcat": "A-建连接"}
+{"text": "想让飞书来的东西自动进系统？", "label": "channels", "subcat": "A-建连接"}
+{"text": "连接老是掉，帮我看看原因啊", "label": "channels", "subcat": "C-状态排查"}
+{"text": "飞书的 App ID 和密钥填在哪啊", "label": "channels", "subcat": "B-填凭据"}
+{"text": "想把短信也作为一个来源连进来？", "label": "channels", "subcat": "E-新平台"}
+{"text": "以后能不能把微信也连进来啊", "label": "channels", "subcat": "E-新平台"}
+{"text": "怎么确认飞书事件监听是正常的", "label": "channels", "subcat": "C-状态排查"}
+{"text": "飞书那边的凭据怎么对接进系统", "label": "channels", "subcat": "B-填凭据"}
+{"text": "帮我停一下再起来让配置刷新？", "label": "channels", "subcat": "D-重启生效"}
+{"text": "帮我在后端把那套实时收发的底座搭起来吗", "label": "channels", "subcat": "G-收发底座"}
+{"text": "帮我把实时监听外部协作平台发言的那层搭好", "label": "channels", "subcat": "G-收发底座"}
+{"text": "飞书那边的信息收不到了帮我查查？", "label": "channels", "subcat": "C-状态排查"}
+{"text": "搭一个能时刻在线、源源不断收事件的监听底座？", "label": "channels", "subcat": "G-收发底座"}
+{"text": "我要个一直在线的事件接收基座，把外部动静实时同步啊", "label": "channels", "subcat": "G-收发底座"}
+{"text": "我改了设置，怎么让它跑起来？", "label": "channels", "subcat": "D-重启生效"}
+{"text": "飞书的鉴权信息配在哪个面板吗", "label": "channels", "subcat": "B-填凭据"}
+{"text": "内网环境能不能正常连飞书啊", "label": "channels", "subcat": "F-原理概念"}
+{"text": "想把 Discord 也对接上吗", "label": "channels", "subcat": "E-新平台"}
+{"text": "帮我诊断下飞书连接异常？", "label": "channels", "subcat": "C-状态排查"}
+{"text": "Slack 能对接吗", "label": "channels", "subcat": "E-新平台"}
+{"text": "我把飞书应用建好了，凭据填哪呢", "label": "channels", "subcat": "B-填凭据"}
+{"text": "除了飞书还能连哪些平台", "label": "channels", "subcat": "E-新平台"}
+{"text": "帮我录入飞书应用的 ID 和 Secret？", "label": "channels", "subcat": "B-填凭据"}
+{"text": "想确认飞书事件流有没有正常工作？", "label": "channels", "subcat": "C-状态排查"}
+{"text": "飞书的长连保持在线怎么弄", "label": "channels", "subcat": "A-建连接"}
+{"text": "我改了设置，怎么让它跑起来吗", "label": "channels", "subcat": "D-重启生效"}
+{"text": "帮我把飞书的事件通道连通呢", "label": "channels", "subcat": "A-建连接"}
+{"text": "对接需不需要在路由器上开端口啊", "label": "channels", "subcat": "F-原理概念"}
+{"text": "帮我把承接实时推送的底层收发服务建起来啊", "label": "channels", "subcat": "G-收发底座"}
+{"text": "在哪改飞书应用的 ID 和密钥呢", "label": "channels", "subcat": "B-填凭据"}
+{"text": "我想让飞书的来信走长连接进来吗", "label": "channels", "subcat": "A-建连接"}
+{"text": "重启后之前的连接还在吗", "label": "channels", "subcat": "D-重启生效"}
+{"text": "想确认飞书事件流有没有正常工作", "label": "channels", "subcat": "C-状态排查"}
+{"text": "我在家用的网络能不能跑这个对接呢", "label": "channels", "subcat": "F-原理概念"}
+{"text": "想让系统常驻在线，实时承接外部平台推来的事件？", "label": "channels", "subcat": "G-收发底座"}
+{"text": "怎么监控飞书连接是否在线？", "label": "channels", "subcat": "C-状态排查"}
+{"text": "不用公网也能稳定收事件吗", "label": "channels", "subcat": "F-原理概念"}
+{"text": "我要让机器人持续监听飞书事件", "label": "channels", "subcat": "A-建连接"}
+{"text": "飞书那边的事件怎么订阅过来", "label": "channels", "subcat": "A-建连接"}
+{"text": "飞书的来往信息怎么实时同步进来呢", "label": "channels", "subcat": "A-建连接"}
+{"text": "飞书连上又断，反复横跳怎么办啊", "label": "channels", "subcat": "C-状态排查"}
+{"text": "怎么知道飞书的长连有没有掉线呢", "label": "channels", "subcat": "C-状态排查"}
+{"text": "我想留一套实时事件流的底座，以后好接更多平台吗", "label": "channels", "subcat": "G-收发底座"}
+{"text": "飞书事件偶尔丢，帮我查原因啊", "label": "channels", "subcat": "C-状态排查"}
+{"text": "帮我把飞书的应用密钥设进去啊", "label": "channels", "subcat": "B-填凭据"}
+{"text": "想把短信也作为一个来源连进来啊", "label": "channels", "subcat": "E-新平台"}
+{"text": "帮我把长连接监听服务起起来，实时收外部消息流呢", "label": "channels", "subcat": "G-收发底座"}
+{"text": "Telegram 机器人怎么连进来？", "label": "channels", "subcat": "E-新平台"}
+{"text": "帮我把飞书的应用密钥设进去吗", "label": "channels", "subcat": "B-填凭据"}
+{"text": "我要一条一直挂着的实时事件流，把来信推进系统？", "label": "channels", "subcat": "G-收发底座"}
+{"text": "帮我录入飞书应用的 ID 和 Secret吗", "label": "channels", "subcat": "B-填凭据"}
+{"text": "帮我核对下填的飞书凭据对不对呢", "label": "channels", "subcat": "B-填凭据"}
+{"text": "怎么让新的飞书设置立即生效吗", "label": "channels", "subcat": "D-重启生效"}
+{"text": "怎么让飞书的事件推过来", "label": "channels", "subcat": "A-建连接"}
+{"text": "我想把飞书的应用凭据录进去啊", "label": "channels", "subcat": "B-填凭据"}
+{"text": "帮我核对下填的飞书凭据对不对？", "label": "channels", "subcat": "B-填凭据"}
+{"text": "帮我看下最近的连接断开记录", "label": "channels", "subcat": "C-状态排查"}
+{"text": "没有固定 IP 会不会影响连接", "label": "channels", "subcat": "F-原理概念"}
+{"text": "想知道飞书应用配置填哪些字段啊", "label": "channels", "subcat": "B-填凭据"}
+{"text": "长连接和回调有啥区别", "label": "channels", "subcat": "F-原理概念"}
+{"text": "在哪里填飞书自建应用的 key呢", "label": "channels", "subcat": "B-填凭据"}
+{"text": "帮我把飞书企业应用的参数配好啊", "label": "channels", "subcat": "B-填凭据"}
+{"text": "这个对接方式的原理是啥", "label": "channels", "subcat": "F-原理概念"}
+{"text": "想让飞书消息实时推到我这边吗", "label": "channels", "subcat": "A-建连接"}
+{"text": "未来能不能支持 Slack 的事件", "label": "channels", "subcat": "E-新平台"}
+{"text": "帮我重载下服务让设置生效", "label": "channels", "subcat": "D-重启生效"}
+{"text": "新填的凭据要重启才认吗", "label": "channels", "subcat": "D-重启生效"}
+{"text": "我要个一直在线的事件接收基座，把外部动静实时同步", "label": "channels", "subcat": "G-收发底座"}
+{"text": "帮我诊断下飞书连接异常啊", "label": "channels", "subcat": "C-状态排查"}
+{"text": "帮我把实时推送的收发基座先跑通啊", "label": "channels", "subcat": "G-收发底座"}
+{"text": "我要一条一直挂着的实时事件流，把来信推进系统呢", "label": "channels", "subcat": "G-收发底座"}
+{"text": "为什么推荐用长连接而不是公网回调啊", "label": "channels", "subcat": "F-原理概念"}
+{"text": "帮我打通飞书和本地服务的通道啊", "label": "channels", "subcat": "A-建连接"}
+{"text": "飞书的鉴权信息配在哪个面板", "label": "channels", "subcat": "B-填凭据"}
+{"text": "连接状态怎么查，老是不稳定？", "label": "channels", "subcat": "C-状态排查"}
+{"text": "飞书那边的事件怎么订阅过来呢", "label": "channels", "subcat": "A-建连接"}
+{"text": "连接老是掉，帮我看看原因吗", "label": "channels", "subcat": "C-状态排查"}

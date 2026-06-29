@@ -174,7 +174,8 @@ ethan-ai/
 │   │   └── knowledge.py      # 知识库（sqlite-vec 向量检索）
 │   ├── skills/
 │   │   ├── loader.py         # 双来源加载（内置 + 用户）
-│   │   ├── registry.py       # 关键词匹配 + 注入
+│   │   ├── registry.py       # 关键词匹配 + 语义补召回 + 注入
+│   │   ├── router.py         # 可选语义路由器（BGE INT8 + LR 头）
 │   │   ├── generator.py      # 从经验自动生成 Skill
 │   │   ├── channels/         # 内置 Skill：渠道管理
 │   │   ├── lark-im/          # 内置 Skill：飞书 IM 操作

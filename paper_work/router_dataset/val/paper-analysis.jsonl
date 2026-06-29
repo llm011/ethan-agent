@@ -1,0 +1,76 @@
+{"text": "相比老方法新在哪吗", "label": "paper-analysis", "subcat": "F-创新点"}
+{"text": "attention 在这篇里是怎么用的啊", "label": "paper-analysis", "subcat": "B-方法"}
+{"text": "损失函数为什么这么定吗", "label": "paper-analysis", "subcat": "B-方法"}
+{"text": "对比的经典方法各啥缺陷啊", "label": "paper-analysis", "subcat": "G-对比"}
+{"text": "这篇跟那个热门方向啥关系啊", "label": "paper-analysis", "subcat": "A-概览"}
+{"text": "主结果提升多少个点吗", "label": "paper-analysis", "subcat": "C-实验"}
+{"text": "这篇跟那个热门方向啥关系", "label": "paper-analysis", "subcat": "A-概览"}
+{"text": "英文术语对应中文是啥啊", "label": "paper-analysis", "subcat": "I-转述"}
+{"text": "方法那块太硬核了，软化讲一下？", "label": "paper-analysis", "subcat": "B-方法"}
+{"text": "数学推导部分帮我看下对不对啊", "label": "paper-analysis", "subcat": "B-方法"}
+{"text": "那些缩写全称是啥啊", "label": "paper-analysis", "subcat": "I-转述"}
+{"text": "为啥用这个评测指标吗", "label": "paper-analysis", "subcat": "C-实验"}
+{"text": "不同模型规模的 scaling 趋势吗", "label": "paper-analysis", "subcat": "C-实验"}
+{"text": "对未来研究有啥启发", "label": "paper-analysis", "subcat": "D-结论"}
+{"text": "我贴个编号 2401.00001，扒下来？", "label": "paper-analysis", "subcat": "K-来源"}
+{"text": "这篇会不会开一个新的子方向啊", "label": "paper-analysis", "subcat": "D-结论"}
+{"text": "这个 novelty 是不是换个皮？", "label": "paper-analysis", "subcat": "F-创新点"}
+{"text": "这篇在讲哪个 benchmark 的事呢", "label": "paper-analysis", "subcat": "A-概览"}
+{"text": "case study 有啥启发", "label": "paper-analysis", "subcat": "C-实验"}
+{"text": "实验跑了几组超参呢", "label": "paper-analysis", "subcat": "C-实验"}
+{"text": "困难样本上表现如何吗", "label": "paper-analysis", "subcat": "C-实验"}
+{"text": "给个链接你帮我抓全文？", "label": "paper-analysis", "subcat": "K-来源"}
+{"text": "结论会不会过强？", "label": "paper-analysis", "subcat": "J-批判"}
+{"text": "一共几章，各章讲啥？", "label": "paper-analysis", "subcat": "E-结构"}
+{"text": "术语解释下，啥意思吗", "label": "paper-analysis", "subcat": "I-转述"}
+{"text": "创新是渐进式还是颠覆式啊", "label": "paper-analysis", "subcat": "F-创新点"}
+{"text": "实验有没有 cherry-picking", "label": "paper-analysis", "subcat": "J-批判"}
+{"text": "这篇的 abstract 啥意思，帮我提炼下啊", "label": "paper-analysis", "subcat": "A-概览"}
+{"text": "attention 在这篇里是怎么用的吗", "label": "paper-analysis", "subcat": "B-方法"}
+{"text": "在哪些数据集上跑的", "label": "paper-analysis", "subcat": "C-实验"}
+{"text": "第三方复现版本靠谱吗", "label": "paper-analysis", "subcat": "H-复现"}
+{"text": "数学推导部分帮我看下对不对？", "label": "paper-analysis", "subcat": "B-方法"}
+{"text": "这篇的 abstract 啥意思，帮我提炼下吗", "label": "paper-analysis", "subcat": "A-概览"}
+{"text": "在长尾样本上是不是就崩了", "label": "paper-analysis", "subcat": "C-实验"}
+{"text": "实验有没有做鲁棒性测试呢", "label": "paper-analysis", "subcat": "C-实验"}
+{"text": "作者是不是回避了反例？", "label": "paper-analysis", "subcat": "J-批判"}
+{"text": "related work 提到哪些流派", "label": "paper-analysis", "subcat": "G-对比"}
+{"text": "这个研究想回答的科学问题是啥啊", "label": "paper-analysis", "subcat": "A-概览"}
+{"text": "实际价值多大吗", "label": "paper-analysis", "subcat": "D-结论"}
+{"text": "这个 doi 对应的文章看下呢", "label": "paper-analysis", "subcat": "K-来源"}
+{"text": "这篇的核心主张是什么啊", "label": "paper-analysis", "subcat": "A-概览"}
+{"text": "那个核心公式啥意思，每个符号解释下呢", "label": "paper-analysis", "subcat": "B-方法"}
+{"text": "图表编号帮我列一下", "label": "paper-analysis", "subcat": "E-结构"}
+{"text": "快速浏览下，告诉我这篇讲啥的", "label": "paper-analysis", "subcat": "A-概览"}
+{"text": "这篇开头那段引入看不太明白？", "label": "paper-analysis", "subcat": "A-概览"}
+{"text": "给个链接你帮我抓全文啊", "label": "paper-analysis", "subcat": "K-来源"}
+{"text": "关键章节直接定位给我吗", "label": "paper-analysis", "subcat": "E-结构"}
+{"text": "图表现在第几页啊", "label": "paper-analysis", "subcat": "E-结构"}
+{"text": "inference 流程走一遍吗", "label": "paper-analysis", "subcat": "B-方法"}
+{"text": "这个 encoder decoder 怎么搭的啊", "label": "paper-analysis", "subcat": "B-方法"}
+{"text": "正文和补充材料咋对应呢", "label": "paper-analysis", "subcat": "E-结构"}
+{"text": "最后得出啥结论", "label": "paper-analysis", "subcat": "D-结论"}
+{"text": "对未来研究有啥启发啊", "label": "paper-analysis", "subcat": "D-结论"}
+{"text": "那个对比表里加粗的是不是最好的吗", "label": "paper-analysis", "subcat": "C-实验"}
+{"text": "给我个 take-home message 就行呢", "label": "paper-analysis", "subcat": "A-概览"}
+{"text": "和 Transformer 那条线啥关系", "label": "paper-analysis", "subcat": "G-对比"}
+{"text": "这个 novelty 是不是换个皮啊", "label": "paper-analysis", "subcat": "F-创新点"}
+{"text": "图表现在第几页呢", "label": "paper-analysis", "subcat": "E-结构"}
+{"text": "baseline 都有哪些呢", "label": "paper-analysis", "subcat": "C-实验"}
+{"text": "这篇的 problem statement 在哪吗", "label": "paper-analysis", "subcat": "A-概览"}
+{"text": "训练数据怎么喂进去的？", "label": "paper-analysis", "subcat": "B-方法"}
+{"text": "翻译成中文给我看", "label": "paper-analysis", "subcat": "I-转述"}
+{"text": "理论贡献和工程贡献分别啥", "label": "paper-analysis", "subcat": "D-结论"}
+{"text": "那个 mask 机制具体咋操作呢", "label": "paper-analysis", "subcat": "B-方法"}
+{"text": "翻译成中文给我看吗", "label": "paper-analysis", "subcat": "I-转述"}
+{"text": "把这份 PDF 喂进去，出个解读啊", "label": "paper-analysis", "subcat": "K-来源"}
+{"text": "实验环境啥配置", "label": "paper-analysis", "subcat": "C-实验"}
+{"text": "结论会不会过强", "label": "paper-analysis", "subcat": "J-批判"}
+{"text": "数学推导部分帮我看下对不对吗", "label": "paper-analysis", "subcat": "B-方法"}
+{"text": "这文章目录结构有点乱呢", "label": "paper-analysis", "subcat": "E-结构"}
+{"text": "方法工程上能落地吗", "label": "paper-analysis", "subcat": "H-复现"}
+{"text": "帮我把这篇拆成「问题—方案—结果」三段呢", "label": "paper-analysis", "subcat": "A-概览"}
+{"text": "官方 repo 维护得咋样？", "label": "paper-analysis", "subcat": "H-复现"}
+{"text": "这篇为什么要做这个事", "label": "paper-analysis", "subcat": "A-概览"}
+{"text": "这篇会不会开一个新的子方向吗", "label": "paper-analysis", "subcat": "D-结论"}
+{"text": "是在谁的工作上改的啊", "label": "paper-analysis", "subcat": "G-对比"}

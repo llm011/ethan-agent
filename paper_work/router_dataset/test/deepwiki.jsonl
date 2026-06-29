@@ -1,0 +1,75 @@
+{"text": "想搞清楚这个库的整体骨架", "label": "deepwiki", "subcat": "B-架构"}
+{"text": "帮我找这套代码的 getting started", "label": "deepwiki", "subcat": "D-上手"}
+{"text": "这个 repo有没有人提过这个 bug", "label": "deepwiki", "subcat": "H-讨论"}
+{"text": "这个 SDK这个钩子啥时候触发", "label": "deepwiki", "subcat": "C-用法"}
+{"text": "帮我看看这个轮子的 API 文档", "label": "deepwiki", "subcat": "A-查文档"}
+{"text": "帮我把这套代码的文档要点提炼下", "label": "deepwiki", "subcat": "A-查文档"}
+{"text": "帮我查下这套代码这个功能的讨论历史", "label": "deepwiki", "subcat": "H-讨论"}
+{"text": "帮我深挖下这个轮子的渲染流程", "label": "deepwiki", "subcat": "E-实现"}
+{"text": "帮我找这个 SDK里关于这个特性的争论", "label": "deepwiki", "subcat": "H-讨论"}
+{"text": "这个库里那套线程池是按什么策略回收空闲线程的", "label": "deepwiki", "subcat": "K-源码机制"}
+{"text": "这个轮子的状态管理怎么实现的", "label": "deepwiki", "subcat": "E-实现"}
+{"text": "这个 package为什么默认是这个配置", "label": "deepwiki", "subcat": "J-设计意图"}
+{"text": "这个框架跑起来要哪些前置条件", "label": "deepwiki", "subcat": "D-上手"}
+{"text": "这个项目的贡献者都讨论过啥", "label": "deepwiki", "subcat": "H-讨论"}
+{"text": "帮我对比这个项目两个版本的差异", "label": "deepwiki", "subcat": "I-版本"}
+{"text": "这套代码文档里有没有讲缓存的部分", "label": "deepwiki", "subcat": "A-查文档"}
+{"text": "帮我看下这个组件库的官方说明", "label": "deepwiki", "subcat": "A-查文档"}
+{"text": "想了解这个 package的长期可维护性", "label": "deepwiki", "subcat": "G-选型"}
+{"text": "这个 repo有没有中文文档", "label": "deepwiki", "subcat": "A-查文档"}
+{"text": "这个组件库的入门门槛高不高", "label": "deepwiki", "subcat": "D-上手"}
+{"text": "想搞清这个 SDK是怎么把限流阈值落到每个请求上的实现细节", "label": "deepwiki", "subcat": "K-源码机制"}
+{"text": "这个框架的连接池是怎么写的", "label": "deepwiki", "subcat": "E-实现"}
+{"text": "帮我读读这个 package的核心实现", "label": "deepwiki", "subcat": "E-实现"}
+{"text": "这个 package的 changelog 帮我提炼下", "label": "deepwiki", "subcat": "I-版本"}
+{"text": "想知道这套代码这个限制是出于啥考虑", "label": "deepwiki", "subcat": "J-设计意图"}
+{"text": "想搞懂这个框架这个设计的初衷", "label": "deepwiki", "subcat": "J-设计意图"}
+{"text": "这个 repo的迁移指南在哪", "label": "deepwiki", "subcat": "I-版本"}
+{"text": "这个项目有没有中文文档", "label": "deepwiki", "subcat": "A-查文档"}
+{"text": "想知道这个 package这个默认值怎么来的", "label": "deepwiki", "subcat": "J-设计意图"}
+{"text": "这个组件库有没有人提过这个 bug", "label": "deepwiki", "subcat": "H-讨论"}
+{"text": "想知道这个 SDK维护得勤不勤", "label": "deepwiki", "subcat": "G-选型"}
+{"text": "我这个需求用这个项目靠不靠谱", "label": "deepwiki", "subcat": "G-选型"}
+{"text": "这个轮子的链式调用怎么用", "label": "deepwiki", "subcat": "C-用法"}
+{"text": "这个 package的缓存到了上限按哪种淘汰规则把旧数据踢出去", "label": "deepwiki", "subcat": "K-源码机制"}
+{"text": "帮我查下这个 repo这个功能的讨论历史", "label": "deepwiki", "subcat": "H-讨论"}
+{"text": "帮我看这个工程的版本兼容性", "label": "deepwiki", "subcat": "I-版本"}
+{"text": "想搞清楚这个 SDK的整体骨架", "label": "deepwiki", "subcat": "B-架构"}
+{"text": "这个 SDK的这个方法参数都是啥意思", "label": "deepwiki", "subcat": "C-用法"}
+{"text": "帮我画一下这个组件库的架构图", "label": "deepwiki", "subcat": "B-架构"}
+{"text": "帮我理出上手这个项目的最短路径", "label": "deepwiki", "subcat": "D-上手"}
+{"text": "这个 SDK的错误处理是怎么设计的", "label": "deepwiki", "subcat": "E-实现"}
+{"text": "这个 SDK为什么不支持那个特性", "label": "deepwiki", "subcat": "J-设计意图"}
+{"text": "帮我深挖下这个库的渲染流程", "label": "deepwiki", "subcat": "E-实现"}
+{"text": "帮我看下这个 package相关的 issue 讨论", "label": "deepwiki", "subcat": "H-讨论"}
+{"text": "想了解这个库弃用了哪些 api", "label": "deepwiki", "subcat": "I-版本"}
+{"text": "这个项目的分层设计是怎样的", "label": "deepwiki", "subcat": "B-架构"}
+{"text": "这个框架的分层设计是怎样的", "label": "deepwiki", "subcat": "B-架构"}
+{"text": "帮我看看这个工程的接口怎么调", "label": "deepwiki", "subcat": "C-用法"}
+{"text": "这个 SDK相比同类有啥不一样", "label": "deepwiki", "subcat": "F-对比"}
+{"text": "这个框架的整体架构是怎样的", "label": "deepwiki", "subcat": "B-架构"}
+{"text": "我这场景这个组件库能撑得住吗", "label": "deepwiki", "subcat": "G-选型"}
+{"text": "想顺着源码看这个库的序列化和反序列化走的哪条分支", "label": "deepwiki", "subcat": "K-源码机制"}
+{"text": "这个框架的回调函数怎么写", "label": "deepwiki", "subcat": "C-用法"}
+{"text": "我这场景这个 SDK能撑得住吗", "label": "deepwiki", "subcat": "G-选型"}
+{"text": "这个轮子的说明文档太长了，帮我抓重点", "label": "deepwiki", "subcat": "A-查文档"}
+{"text": "这个工程的入门门槛高不高", "label": "deepwiki", "subcat": "D-上手"}
+{"text": "这个库我该从哪开始看", "label": "deepwiki", "subcat": "D-上手"}
+{"text": "这个组件库里那套线程池是按什么策略回收空闲线程的", "label": "deepwiki", "subcat": "K-源码机制"}
+{"text": "帮我理解这个项目这个怪异行为的原因", "label": "deepwiki", "subcat": "J-设计意图"}
+{"text": "这个库请求失败后重试和熔断的判定逻辑写在源码哪块", "label": "deepwiki", "subcat": "K-源码机制"}
+{"text": "这个 SDK新版本改了啥", "label": "deepwiki", "subcat": "I-版本"}
+{"text": "帮我看看这个项目的调度逻辑怎么写的", "label": "deepwiki", "subcat": "E-实现"}
+{"text": "这个 SDK里那套线程池是按什么策略回收空闲线程的", "label": "deepwiki", "subcat": "K-源码机制"}
+{"text": "这个 SDK的入门门槛高不高", "label": "deepwiki", "subcat": "D-上手"}
+{"text": "这个工程这个钩子啥时候触发", "label": "deepwiki", "subcat": "C-用法"}
+{"text": "这套代码还在更新吗，值不值得用", "label": "deepwiki", "subcat": "G-选型"}
+{"text": "这个项目新版本改了啥", "label": "deepwiki", "subcat": "I-版本"}
+{"text": "这个工程内部那个状态机是怎么从一个状态迁到下一个的", "label": "deepwiki", "subcat": "K-源码机制"}
+{"text": "帮我追到这个库路由分发那一层，看请求按什么规则被派到处理器", "label": "deepwiki", "subcat": "K-源码机制"}
+{"text": "想了解这个框架的模块划分", "label": "deepwiki", "subcat": "B-架构"}
+{"text": "这个 package的坑多不多，敢上生产吗", "label": "deepwiki", "subcat": "G-选型"}
+{"text": "这个工程相比同类有啥不一样", "label": "deepwiki", "subcat": "F-对比"}
+{"text": "这个框架怎么集成到我的项目里", "label": "deepwiki", "subcat": "C-用法"}
+{"text": "想了解这个框架这样取舍的理由", "label": "deepwiki", "subcat": "J-设计意图"}
+{"text": "想看下这个项目的 readme 讲了啥", "label": "deepwiki", "subcat": "A-查文档"}

@@ -32,6 +32,7 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 
 **Skill system**
 - Keyword trigger matching, auto-injected into system prompt
+- Optional semantic router (BGE INT8 + LR head) adds recall on top of keywords so differently-phrased requests still match (`pip install 'ethan-agent[router]'`; keyword-only without it — see Install section)
 - `fast_path: true` routes matched input to the millisecond fast track
 - `channels: [lark, web]` filters skills by channel so each surface gets only relevant skills
 - `modes: [法律]` filters skills by conversation mode so each mode gets only relevant skills (empty = all modes)
@@ -187,6 +188,28 @@ git clone https://github.com/llm011/ethan-agent.git
 cd ethan-agent
 uv sync
 ```
+
+### Optional: Semantic Router (smarter skill matching — beginners can skip)
+
+By default, Ethan uses keyword matching to decide which skill to activate. This is enough for most cases and **works without any extra setup**.
+
+If you want skills to match even when phrased differently (e.g. triggering the Feishu skill by saying "pass a message to the client" instead of literally "send Feishu"), enable the optional semantic router:
+
+```bash
+# 1. Install the optional dependency (a lightweight inference runtime, a few tens of MB)
+pip install 'ethan-agent[router]'      # from PyPI
+# from source: uv sync --extra router
+
+# 2. Pull the model (~24MB, first time only; skippable — the first message auto-downloads it)
+ethan router pull
+
+# 3. Check status
+ethan router status                    # "✓ router ready" means you're set
+```
+
+- **Fully optional**: with no dependency, no model, or offline, it silently falls back to keyword matching — nothing breaks.
+- The model is hosted on GitHub, downloaded and cached locally on first use, then works offline.
+- To disable: just uninstall the optional dependency, no config change needed.
 
 ### Configure
 
@@ -501,6 +524,7 @@ Environment variables in `.env` override config values (useful for secrets).
 - [x] Dual-source loading (built-in + user-defined) + channel filter (`channels` field)
 - [x] `fast_path` opt-in, hit stats, correction collection, auto-update (Updater)
 - [x] Session-end background Skill generation (Hermes-style)
+- [x] Optional semantic router (BGE INT8 + LR head, macro F1 0.851) for recall beyond keywords; silent keyword fallback
 - [x] Built-in skills: home-assistant, lark-im, channels, deepwiki
 
 **Tools**

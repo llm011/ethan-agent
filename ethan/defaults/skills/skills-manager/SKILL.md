@@ -1,7 +1,7 @@
 ---
 name: skills-manager
 description: "管理 Agent 技能包：搜索、安装、更新、卸载 Skills。使用 npx skills 工具，支持从 GitHub 或 npm 安装社区 skill。"
-trigger: "install skill|add skill|skills list|skills find|安装技能|添加技能|技能管理|npx skills|skill 包|search skills"
+trigger: "install skill|add skill|skills list|skills find|安装技能|添加技能|技能管理|npx skills|skill 包|search skills|装技能|装个技能|卸载技能|删除技能|升级技能|更新技能|技能包|能力包|找技能|搜技能|技能列表|装能力|加能力"
 ---
 
 # skills-manager
