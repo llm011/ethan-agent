@@ -115,7 +115,7 @@ async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
 
         consent = WebConsentProvider(session_id=req.session_id or "")
         manager = RunManager.instance()
-        run = manager.create(req.session_id or "", consent=consent)
+        run = manager.create(req.session_id or "", consent=consent, user_id=user_id)
         run.task = asyncio.create_task(
             _run_generation(run, agent, messages, store, req.session_id, user_id, consent, mode=req.mode)
         )
@@ -148,10 +148,12 @@ async def reconnect_stream(session_id: str, user_id: str = Depends(verify_token)
     """重连一个仍在进行的生成：刷新页面后前端调此端点，回放缓冲 + 继续实时推送。
 
     无活跃 run（已结束或从未开始）返回 204，前端据此走普通 fetchSession 拿落库结果。
+    传 user_id 校验会话归属——不属于当前用户的 session_id 一律当作不存在（204），
+    防止任意已登录用户凭 session_id attach 到他人正在生成的实时流（IDOR）。
     """
     from fastapi import Response
     from ethan.core.run_manager import RunManager
-    run = RunManager.instance().get(session_id)
+    run = RunManager.instance().get(session_id, user_id=user_id)
     if run is None:
         return Response(status_code=204)
     return StreamingResponse(

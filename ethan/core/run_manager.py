@@ -34,6 +34,7 @@ class ChatRun:
     """一次 Agent 生成的运行态。"""
 
     session_id: str
+    user_id: str = ""  # 会话归属用户。重连/查活跃时比对，防跨用户 attach（IDOR）
     events: list[dict] = field(default_factory=list)  # 回放缓冲：迄今所有 SSE 事件
     subscribers: set[asyncio.Queue] = field(default_factory=set)
     done: bool = False
@@ -81,21 +82,29 @@ class RunManager:
             cls._instance = RunManager()
         return cls._instance
 
-    def get(self, session_id: str) -> ChatRun | None:
-        return self._runs.get(session_id)
-
-    def has_active(self, session_id: str) -> bool:
-        """是否存在「未完成」的 run（done 后的宽限期不算活跃，DB 已落库）。"""
+    def get(self, session_id: str, user_id: str | None = None) -> ChatRun | None:
+        """取 run。传 user_id 时校验归属——不匹配返回 None（防跨用户 attach，IDOR）。
+        不传 user_id（None）仅供内部无归属语境使用，对外端点必须传。"""
         run = self._runs.get(session_id)
+        if run is None:
+            return None
+        if user_id is not None and run.user_id != user_id:
+            return None
+        return run
+
+    def has_active(self, session_id: str, user_id: str | None = None) -> bool:
+        """是否存在「未完成」的 run（done 后的宽限期不算活跃，DB 已落库）。
+        传 user_id 时校验归属，不匹配视为不存在。"""
+        run = self.get(session_id, user_id)
         return run is not None and not run.done
 
-    def create(self, session_id: str, consent: Any = None) -> ChatRun:
+    def create(self, session_id: str, consent: Any = None, user_id: str = "") -> ChatRun:
         """为 session 创建新 run。若已有未完成的 run，先取消它，避免两个 writer。"""
         old = self._runs.get(session_id)
         if old is not None and not old.done and old.task is not None:
             logger.warning("session %s 已有活跃 run，取消旧任务", session_id)
             old.task.cancel()
-        run = ChatRun(session_id=session_id, consent=consent)
+        run = ChatRun(session_id=session_id, user_id=user_id, consent=consent)
         self._runs[session_id] = run
         return run
 
