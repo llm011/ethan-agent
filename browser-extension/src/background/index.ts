@@ -71,6 +71,21 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
 });
 
+// popup 查询连接状态 / 手动重连。
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg && msg.type === 'getStatus') {
+    sendResponse({ connected: wsClient.isConnected });
+    return true;
+  }
+  if (msg && msg.type === 'reconnect') {
+    wsClient.stop();
+    wsClient.start();
+    sendResponse({ ok: true });
+    return true;
+  }
+  return undefined;
+});
+
 chrome.tabs.onRemoved.addListener(tabId => {
   void sessionStore.handleTabRemoved(tabId);
   void releaseCdpClient(tabId);

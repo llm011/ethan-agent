@@ -31,6 +31,11 @@ export class BrowserWsClient {
     private onRequest: RequestHandler,
   ) {}
 
+  /** 弹窗查询用：WS 已打开且鉴权通过。 */
+  get isConnected(): boolean {
+    return !!this.ws && this.ws.readyState === WebSocket.OPEN && this.authed;
+  }
+
   start(): void {
     this.stopped = false;
     void this.connect();

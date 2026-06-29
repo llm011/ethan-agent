@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { copyFileSync, mkdirSync } from 'node:fs';
+import { copyFileSync, mkdirSync, cpSync } from 'node:fs';
 
 import { defineConfig } from 'vite';
 
@@ -10,7 +10,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         background: resolve(__dirname, 'src/background/index.ts'),
-        options: resolve(__dirname, 'src/options/options.js'),
+        popup: resolve(__dirname, 'src/popup/popup.js'),
       },
       output: {
         entryFileNames: '[name].js',
@@ -23,9 +23,10 @@ export default defineConfig({
     {
       name: 'copy-extension-assets',
       writeBundle() {
-        mkdirSync('dist', { recursive: true });
+        mkdirSync('dist/icons', { recursive: true });
         copyFileSync('src/manifest.json', 'dist/manifest.json');
-        copyFileSync('src/options/options.html', 'dist/options.html');
+        copyFileSync('src/popup/popup.html', 'dist/popup.html');
+        cpSync('src/assets/icons', 'dist/icons', { recursive: true });
       },
     },
   ],

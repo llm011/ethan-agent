@@ -27,10 +27,16 @@ def shots_dir() -> Path:
 
 
 async def save_screenshot(result: dict | None) -> str:
-    """把 CDP 截图结果落盘,返回 JSON {path, format}。"""
+    """把 CDP 截图结果落盘,返回 JSON {path, format}。
+
+    扩展返回的是整个 page 结果,截图数据在嵌套的 result["screenshot"]["data"]。
+    同时兼容顶层直接给 data 的形式。
+    """
     result = result or {}
-    data_b64 = result.get("data") or result.get("base64") or result.get("dataUrl")
-    fmt = result.get("format", "png")
+    shot = result.get("screenshot")
+    src = shot if isinstance(shot, dict) else result
+    data_b64 = src.get("data") or src.get("base64") or src.get("dataUrl")
+    fmt = src.get("format") or result.get("format", "png")
     if not data_b64:
         return json.dumps({"error": "扩展未返回截图数据", "raw": result}, ensure_ascii=False)
     # 兼容 data:image/png;base64,xxx 形式
