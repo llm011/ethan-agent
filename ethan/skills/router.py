@@ -77,7 +77,7 @@ def ensure_model(force: bool = False) -> Path | None:
         return None
 
     try:
-        logger.info("[router] 正在下载语义路由模型 %s (~95MB，仅首次)...", _HF_REPO)
+        logger.info("[router] 正在下载语义路由模型 %s (~24MB，仅首次)...", _HF_REPO)
         snapshot_download(
             repo_id=_HF_REPO,
             local_dir=str(model_dir),
@@ -93,7 +93,7 @@ def ensure_model(force: bool = False) -> Path | None:
 def model_present() -> bool:
     """本地是否已有 BGE ONNX 模型文件（纯检查，不下载、不加载 session）。
 
-    供 `available` 轻量判定用 —— agent 创建时只问"能不能用"，不触发 94MB 加载。
+    供 `available` 轻量判定用 —— agent 创建时只问"能不能用"，不触发模型加载。
     """
     env_path = os.environ.get(_MODEL_ENV)
     if env_path:
@@ -164,7 +164,7 @@ class _Encoder:
         return emb
 
 
-# 进程级单例：模型 ~94MB，只加载一次
+# 进程级单例：模型 ~24MB（INT8），只加载一次
 _ENCODER = _Encoder()
 
 
