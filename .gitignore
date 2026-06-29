@@ -71,7 +71,12 @@ pypi/
 # Logs
 *.log
 logs/
-paper_work/
+
+# paper_work 本地实验产物（模型/评测脚本/临时数据）——仅放行训练样本资产
+paper_work/*
+!paper_work/router_dataset/
+# router_dataset 内部：排除嵌入缓存等构建产物，只留样本+生成/训练脚本
+paper_work/router_dataset/_emb_cache.npz
 
 # Android
 app/android/.gradle/

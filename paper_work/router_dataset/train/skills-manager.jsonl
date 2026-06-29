@@ -1,0 +1,623 @@
+{"text": "有没有能调用地图的扩展呢", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "帮我把这个扩展更到最新版吗", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "想把社区做的那个增强项接到我的 agent 上啊", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "帮我搜搜社区里有啥好用的扩展吗", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "把这个能力添加到 agent 上啊", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "插件装上了却调不出来", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "帮我把别人写好的那套增强逻辑挂载进系统吗", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "这个功能模块旧了，更新下吗", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "全局装和项目装有什么不一样吗", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "装完报错了，帮我看看？", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "我想装一个处理图片的插件呢", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "帮我看看有没有日程管理的扩展吗", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "把之前加的那个本事撤掉？", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "插件装上了却调不出来？", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "帮我装一个做思维导图的模块", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "明明装了怎么还是不能用啊", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "搜下有没有股票行情的插件啊", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "把之前加的那个本事撤掉吗", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "想找个能识别图片的模块啊", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "给 agent 装个画图的能力啊", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "把远程仓库里的功能套件部署进我的运行环境吗", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "把这个用不上的能力去掉呢", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "装的时候提示缺环境，怎么办啊", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "帮我把这个扩展更到最新版呢", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "插件冲突了，帮我排查吗", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "装好的扩展用起来报错啊", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "帮我查下都加了哪些扩展吗", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "帮我搜搜社区里有啥好用的扩展啊", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "全局装和项目装有什么不一样？", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "把这个工具装到全局所有项目都能用啊", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "把这个 OCR 插件装上试试？", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "想把那个开源的自动化逻辑引入到我的工作流里？", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "扩展装在用户目录还是项目目录？", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "帮我看看已经装上的功能有哪些？", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "把之前加的那个本事撤掉呢", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "那个本事装了但 agent 不认呢", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "把这个能发短信的插件装上吗", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "装了那个扩展但好像没生效？", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "想找个翻译用的插件呢", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "把当前的扩展清单给我看看", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "我想给当前这套工作流挂载一个外部的处理能力啊", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "有没有能操作数据库的现成模块？", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "把这个用不上的能力去掉", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "这个 npm 上的插件帮我加进来？", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "给我的 agent 加上爬虫的本事呢", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "这个 url 的扩展帮我加进项目吗", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "现在有几个扩展在用？", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "帮我装个能查文档的功能模块", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "不想要这个本事了，删掉吗", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "想找个能压缩文件的小工具", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "把已安装的扩展都列出来吗", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "用户装的和系统自带的怎么区分", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "想给这个扩展打个补丁更新呢", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "想把这个能力升到新版本", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "想给 agent 添个查快递的本事？", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "有没有能调用地图的扩展", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "有没有处理音频的现成扩展", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "帮我从 npm 装一个插件吗", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "把装的所有插件都拉新", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "帮我移除这个不需要的模块吗", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "给 agent 装个画图的能力", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "把这个能力添加到 agent 上", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "把这个本事装成全局的啊", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "帮我看下装了几个插件啊", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "想找个语音转文字的扩展吗", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "帮我把一个外部脚本工具集成进当前的任务序列？", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "把这个仓库里指定名字的扩展装上？", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "有没有能连接 notion 的现成功能吗", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "把这个旧的功能模块删除？", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "我想给当前这套工作流挂载一个外部的处理能力", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "这个插件有新版本，升一下啊", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "从社区那个仓库里挑个扩展装上吗", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "我想给它扩充一个新功能呢", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "装的时候提示缺环境，怎么办？", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "有没有能连接 notion 的现成功能啊", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "帮我搜搜跟 github 相关的插件吗", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "装的扩展放在哪个目录？", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "装的时候提示缺环境，怎么办吗", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "把已安装的扩展都列出来", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "把远程仓库里的功能套件部署进我的运行环境？", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "把当前的扩展清单给我看看呢", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "从这个 npm 包装个插件进来啊", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "帮我搜搜跟 github 相关的插件呢", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "把装的所有插件都拉新呢", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "帮我按这个地址把扩展拉下来装", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "想把那个开源的自动化逻辑引入到我的工作流里呢", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "我想装一个处理图片的插件啊", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "搜一下有没有处理 PDF 的插件？", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "有没有现成的本事能处理表格啊", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "用户装的和系统自带的怎么区分呢", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "想把这个第三方模块加进来？", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "想装个能操作 excel 的扩展吗", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "想给现在的对话逻辑添一个新的流程控制扩展", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "帮我看看有没有日程管理的扩展", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "把代码平台上那个分析组件封装成我助手的一项能力吗", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "想把那个开源的自动化逻辑引入到我的工作流里", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "帮我升级那个翻译扩展啊", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "帮我装个能查文档的功能模块？", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "想给它加个连数据库的能力", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "帮我列出全局和项目各装了啥", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "搜下有没有股票行情的插件？", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "这个 url 的扩展帮我加进项目啊", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "把那个没用的插件移除啊", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "这些扩展是从哪来的吗", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "帮我升级那个翻译扩展", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "不想要这个本事了，删掉", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "帮我看看有哪些现成的扩展能装啊", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "搜下有没有股票行情的插件呢", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "把过时的扩展都刷新一下", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "我有个扩展的包名，帮我装", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "这个插件有新版本，升一下呢", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "新加的能力没出现在列表里啊", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "把过时的扩展都刷新一下呢", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "把这个工具装到全局所有项目都能用？", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "有没有能连接 notion 的现成功能？", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "有没有现成的本事能读取网页", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "有没有能调用地图的扩展吗", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "有没有现成的本事可以加给 agent", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "我给你个仓库地址，装里面那个本事吗", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "把这个能发短信的插件装上", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "搜一下有没有处理 PDF 的插件", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "内置的本事和我自己装的有啥区别", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "把这个本事装成全局的呢", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "想让我的 agent 多一个外接的处理本事，帮我接上呢", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "插件冲突了，帮我排查啊", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "把托管在代码平台上的那个工具组件整合进我的助手？", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "重名的扩展谁优先生效啊", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "帮我从 npm 装一个插件", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "想把那个开源的自动化逻辑引入到我的工作流里啊", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "想找个能定时提醒的扩展吗", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "想找个语音转文字的扩展？", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "现在装了哪些第三方插件吗", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "给 agent 加一个新本事吗", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "把这个公开的组件库引入到我的开发环境里用呢", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "装好的扩展用起来报错呢", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "把过时的扩展都刷新一下吗", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "帮我从远端拉一套工具逻辑装载到本地的运行环境呢", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "全局装和项目装有什么不一样呢", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "给 agent 装个画图的能力吗", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "这个 npm 上的插件帮我加进来呢", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "想找个能定时提醒的扩展", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "想把这个扩展彻底删除", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "想给它添个发邮件的本事啊", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "这个 url 的扩展帮我加进项目呢", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "想找个能查天气的功能模块？", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "想给这个扩展打个补丁更新", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "装的时候提示缺环境，怎么办呢", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "把远程仓库里的功能套件部署进我的运行环境啊", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "扩展装在用户目录还是项目目录吗", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "重名的扩展谁优先生效吗", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "有没有能连接 notion 的现成功能", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "想确认下那个扩展装没装上啊", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "插件装上了却调不出来吗", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "这个扩展太占地方，卸载吧", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "帮我从 npm 装一个插件呢", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "帮我把网上公开的那个辅助程序加载到运行环境里呢", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "扩展装在用户目录还是项目目录", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "帮我给系统接一个能处理文档的外部组件啊", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "想找个能定时提醒的扩展啊", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "从这个 npm 包装个插件进来吗", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "我贴个 repo，装它提供的本事啊", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "把这个 OCR 插件装上试试吗", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "我有个扩展的包名，帮我装？", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "想找个语音转文字的扩展啊", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "想找个翻译用的插件啊", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "帮我把这个扩展更到最新版？", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "把网上看到的那个好用的能力挂到我的助手上？", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "装第三方扩展安全吗", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "有没有能调用地图的扩展？", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "帮我清掉那个出问题的插件吗", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "那个本事装了但 agent 不认", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "帮我按这个地址把扩展拉下来装呢", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "帮我移除这个不需要的模块？", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "把这个工具装到全局所有项目都能用吗", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "把这个仓库里指定名字的扩展装上呢", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "这个链接里有好几个扩展，装我要的那个吗", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "帮我查下都加了哪些扩展？", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "装扩展的时候失败了", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "装的插件提示找不到，咋回事？", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "把托管在代码平台上的那个工具组件整合进我的助手", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "装的扩展放在哪个目录啊", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "帮我把这个扩展更到最新版", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "想把这个能力升到新版本？", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "帮我搜搜跟 excel 处理相关的模块呢", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "想找个能管理待办的插件啊", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "想找个能压缩文件的小工具吗", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "把那个没用的插件移除", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "想找个语音转文字的扩展", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "从社区那个仓库里挑个扩展装上啊", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "帮我把这个扩展装上吗", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "现在有几个扩展在用啊", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "帮我更新一下那个画图模块？", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "帮我装个能跑定时任务的功能", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "我找到一个开源扩展，地址给你帮我装呢", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "把这个用不上的能力去掉？", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "帮我把一个外部脚本工具集成进当前的任务序列呢", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "把那个重复的扩展删掉一个啊", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "帮我把测试用的那个能力清掉啊", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "这个链接里有好几个扩展，装我要的那个啊", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "装完报错了，帮我看看", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "想确认下那个扩展装没装上呢", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "我有个扩展的包名，帮我装吗", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "那个本事装了但 agent 不认啊", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "装完之后老的功能也坏了", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "把网上看到的那个好用的能力挂到我的助手上啊", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "把这个仓库里指定名字的扩展装上吗", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "想找个能查天气的功能模块啊", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "帮我查下都加了哪些扩展呢", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "装的插件提示找不到，咋回事吗", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "把所有扩展统一升级呢", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "想知道现在有哪些能力可用", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "想把这个扩展彻底删除呢", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "想把一个外部来源的能力模块整合到当前助理啊", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "有没有现成的本事能读取网页呢", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "把已安装的扩展都列出来呢", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "我有个扩展的包名，帮我装呢", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "有没有现成的本事能读取网页吗", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "从这个地址装个全局的能力吗", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "帮我把一个外部脚本工具集成进当前的任务序列啊", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "这个插件能更新吗，帮我更一下吗", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "我想给当前这套工作流挂载一个外部的处理能力吗", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "想装个能操作 excel 的扩展", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "想把这个能力升到新版本呢", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "想知道现在有哪些能力可用呢", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "帮我搜搜跟 excel 处理相关的模块吗", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "列一下已经加进来的本事呢", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "帮我看看有没有 OCR 识别的功能？", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "扩展装好了重启也没用", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "想把这个扩展彻底删除啊", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "有没有现成的本事能处理表格吗", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "把所有扩展统一升级", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "列一下已经加进来的本事？", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "把代码平台上那个分析组件封装成我助手的一项能力", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "装完下次对话就能自动用上吗", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "想给它加个连数据库的能力啊", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "装完报错了，帮我看看呢", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "帮我按这个地址把扩展拉下来装？", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "想找个能查天气的功能模块呢", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "想给它添个发邮件的本事", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "装完要不要重启才能用呢", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "这个链接里有好几个扩展，装我要的那个？", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "帮我找个能画图的扩展吗", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "装完要不要重启才能用啊", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "帮我装一下这个社区做的扩展？", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "想给现在的对话逻辑添一个新的流程控制扩展吗", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "帮我把那个本事同步到最新版", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "帮我看看有没有 OCR 识别的功能呢", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "把这个语音合成的扩展装进来啊", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "把这个扩展拉到最新呢", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "帮我看看有哪些现成的扩展能装", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "把这个语音合成的扩展装进来？", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "市面上有哪些可以装的小工具吗", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "帮我移除这个不需要的模块呢", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "我找到一个好用的扩展，帮我装上呢", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "从这个 npm 包装个插件进来", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "把这个扩展拉到最新", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "插件冲突了，帮我排查？", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "把这个本事装成全局的？", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "装好的扩展用起来报错？", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "帮我检查下有没有可以更新的插件啊", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "帮我装个能读 PDF 的扩展吗", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "帮我看下装了几个插件？", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "我想给当前这套工作流挂载一个外部的处理能力呢", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "帮我升级那个翻译扩展吗", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "帮我查查有没有爬虫相关的扩展呢", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "帮我把之前装的那个功能模块删了", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "有没有能做数据可视化的模块呢", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "想给这个扩展打个补丁更新？", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "帮我找个能画图的扩展啊", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "想把这个第三方模块加进来呢", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "帮我看看有哪些热门的扩展可以加啊", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "用户装的和系统自带的怎么区分吗", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "想看看有没有发邮件的功能可以加？", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "帮我把网上公开的那个辅助程序加载到运行环境里", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "帮我盘点下装了哪些能力", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "我想给当前这套工作流挂载一个外部的处理能力？", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "把那个重复的扩展删掉一个呢", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "只在当前项目装这个扩展呢", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "从这个开源地址装个工具进来啊", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "给 agent 加一个新本事？", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "帮我查查有没有爬虫相关的扩展吗", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "把所有装的本事都更新一遍", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "把这个工具装到全局所有项目都能用", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "帮我把测试用的那个能力清掉呢", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "想把社区做的那个增强项接到我的 agent 上？", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "想给 agent 添个查快递的本事吗", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "想加个能抓股价的扩展吗", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "想看看有没有发邮件的功能可以加", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "那个本事装了但 agent 不认？", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "想给 agent 添个查快递的本事啊", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "只在当前项目装这个扩展？", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "从这个开源地址装个工具进来？", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "把网上看到的那个好用的能力挂到我的助手上吗", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "帮我更新一下那个画图模块呢", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "把代码平台上那个分析组件封装成我助手的一项能力呢", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "这些扩展是从哪来的", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "帮我把这个扩展装上", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "给 agent 加一个新本事啊", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "帮我把这个第三方处理模块装载到对话系统里用吗", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "帮我看看有哪些热门的扩展可以加呢", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "明明装了怎么还是不能用", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "帮我把那个本事同步到最新版吗", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "想给它加个连数据库的能力呢", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "帮我看看有哪些热门的扩展可以加？", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "有没有能操作数据库的现成模块", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "想给 agent 添个查快递的本事呢", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "帮我装一个做思维导图的模块呢", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "想把这个扩展彻底删除？", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "帮我清掉那个出问题的插件？", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "帮我把这个仓库里的扩展装进来？", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "我想给它扩充一个新功能吗", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "新加的能力没出现在列表里吗", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "把所有扩展统一升级啊", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "这个链接里有好几个扩展，装我要的那个", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "给我的 agent 加上爬虫的本事啊", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "想加个能抓股价的扩展呢", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "想给它添个发邮件的本事呢", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "装完报错了，帮我看看啊", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "帮我查查有没有爬虫相关的扩展", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "扩展装好了重启也没用呢", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "这个功能模块旧了，更新下？", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "把装的所有插件都拉新吗", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "有没有能调用地图的扩展啊", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "帮我把别人写好的那套增强逻辑挂载进系统", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "把之前加的那个本事撤掉", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "扩展装好了重启也没用啊", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "帮我装一下这个社区做的扩展呢", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "帮我装一个做思维导图的模块啊", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "我找到一个好用的扩展，帮我装上？", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "把当前的扩展清单给我看看啊", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "想加个能抓股价的扩展啊", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "重名的扩展谁优先生效", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "不用的扩展帮我都卸了", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "给 agent 装个画图的能力呢", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "帮我列出全局和项目各装了啥啊", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "把这个能发短信的插件装上呢", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "把代码平台上那个分析组件封装成我助手的一项能力？", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "插件冲突了，帮我排查呢", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "帮我升级那个翻译扩展呢", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "插件装上了却调不出来啊", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "帮我从远端拉一套工具逻辑装载到本地的运行环境吗", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "装好的扩展用起来报错吗", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "把这个语音合成的扩展装进来", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "想找个翻译用的插件吗", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "全局装和项目装有什么不一样", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "市面上有哪些可以装的小工具呢", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "帮我安装一下那个翻译插件啊", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "想把社区做的那个增强项接到我的 agent 上", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "想让我的 agent 多一个外接的处理本事，帮我接上？", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "帮我看看有哪些现成的扩展能装呢", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "我贴个 repo，装它提供的本事？", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "把这个用不上的能力去掉吗", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "列个清单看看 agent 的本事", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "把这个旧的功能模块删除", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "这个插件有新版本，升一下吗", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "我贴个 repo，装它提供的本事", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "有没有现成的本事能处理表格", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "把之前加的那个本事撤掉啊", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "这个插件有 bug，先卸了", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "把这个扩展拉到最新啊", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "把这个能发短信的插件装上？", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "想加个能抓股价的扩展", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "帮我看看现在都装了哪些扩展呢", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "帮我把这个第三方处理模块装载到对话系统里用？", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "帮我把这个扩展更到最新版啊", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "把这个 github 上的扩展装进来？", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "现在有几个扩展在用", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "从这个开源地址装个工具进来吗", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "帮我看看已经装上的功能有哪些吗", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "这个插件能更新吗，帮我更一下啊", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "帮我搜搜社区里有啥好用的扩展？", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "想装个能操作 excel 的扩展？", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "想知道现在有哪些能力可用吗", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "新加的能力没出现在列表里", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "我有个扩展的包名，帮我装啊", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "把那个重复的扩展删掉一个", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "把这个能发短信的插件装上啊", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "我找到一个开源扩展，地址给你帮我装吗", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "我给你个仓库地址，装里面那个本事啊", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "市面上有哪些可以装的小工具", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "扩展装了但功能不对", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "把这个能力添加到 agent 上吗", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "帮我装一个做思维导图的模块？", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "内置的本事和我自己装的有啥区别吗", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "帮我按这个地址把扩展拉下来装吗", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "列个清单看看 agent 的本事呢", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "装了那个扩展但好像没生效啊", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "现在装了哪些第三方插件啊", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "帮我把这个第三方处理模块装载到对话系统里用", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "把远程仓库里的功能套件部署进我的运行环境", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "把这个公开的组件库引入到我的开发环境里用吗", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "装扩展需要什么环境啊", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "这些扩展是从哪来的呢", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "帮我把这个扩展装上呢", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "帮我找个能画图的扩展？", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "把所有装的本事都更新一遍吗", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "这个插件有新版本，升一下", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "想给现在的对话逻辑添一个新的流程控制扩展啊", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "帮我清掉那个出问题的插件啊", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "帮我看看有哪些现成的扩展能装吗", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "帮我盘点下装了哪些能力啊", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "这个插件能更新吗，帮我更一下", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "只在当前项目装这个扩展啊", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "想把一个外部来源的能力模块整合到当前助理吗", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "我贴个 repo，装它提供的本事呢", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "扩展装了但功能不对吗", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "这个作者做的插件帮我装一下啊", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "帮我给系统接一个能处理文档的外部组件", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "帮我搜搜跟 github 相关的插件", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "把过时的扩展都刷新一下？", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "想把这个能力升到新版本吗", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "帮我把一个外部脚本工具集成进当前的任务序列", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "装完要不要重启才能用吗", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "想找个能压缩文件的小工具呢", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "从社区那个仓库里挑个扩展装上呢", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "装的插件提示找不到，咋回事啊", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "帮我搜搜跟 github 相关的插件？", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "这些扩展是从哪来的？", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "想找个能压缩文件的小工具？", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "能不能把代码仓库里那套功能逻辑集成到我的助理吗", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "帮我看下装了几个插件", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "把这个 github 上的扩展装进来啊", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "想找个能查天气的功能模块吗", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "给 agent 加一个新本事", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "从这个开源地址装个工具进来", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "搜一下有没有处理 PDF 的插件呢", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "帮我安装一下那个翻译插件？", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "装扩展需要什么环境", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "装完要不要重启才能用？", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "把已安装的扩展都列出来？", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "帮我看看已经装上的功能有哪些啊", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "能不能把代码仓库里那套功能逻辑集成到我的助理呢", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "这个功能模块旧了，更新下呢", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "想把一个外部来源的能力模块整合到当前助理？", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "把托管在代码平台上的那个工具组件整合进我的助手啊", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "想找个能压缩文件的小工具啊", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "帮我把测试用的那个能力清掉？", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "帮我搜搜跟 excel 处理相关的模块？", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "想把这个第三方模块加进来吗", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "把代码平台上那个分析组件封装成我助手的一项能力啊", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "内置的本事和我自己装的有啥区别呢", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "装的扩展放在哪个目录", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "不想要这个本事了，删掉？", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "帮我搜搜跟 excel 处理相关的模块啊", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "帮我查下都加了哪些扩展", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "我找到一个好用的扩展，帮我装上啊", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "把远程仓库里的功能套件部署进我的运行环境呢", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "从这个地址装个全局的能力啊", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "有没有处理音频的现成扩展吗", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "我找到一个好用的扩展，帮我装上吗", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "给 agent 加一个新本事呢", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "帮我装个能读 PDF 的扩展？", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "有没有现成的本事能处理表格？", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "把那个重复的扩展删掉一个吗", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "重名的扩展谁优先生效呢", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "有没有能做数据可视化的模块？", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "给我的 agent 加上爬虫的本事", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "帮我把测试用的那个能力清掉吗", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "帮我装个能读 PDF 的扩展", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "这个功能模块旧了，更新下", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "我贴个 repo，装它提供的本事吗", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "装的插件提示找不到，咋回事呢", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "把这个语音合成的扩展装进来呢", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "想加个能抓股价的扩展？", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "想找个翻译用的插件", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "明明装了怎么还是不能用呢", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "我自己装的会覆盖内置的吗", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "列一下已经加进来的本事吗", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "帮我把这个第三方处理模块装载到对话系统里用啊", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "我想给它扩充一个新功能？", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "帮我移除这个不需要的模块", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "有没有能连接 notion 的现成功能呢", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "帮我盘点下装了哪些能力吗", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "帮我看看已经装上的功能有哪些", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "有没有能操作数据库的现成模块呢", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "帮我装一下这个社区做的扩展", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "想给它加个连数据库的能力？", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "帮我把别人写好的那套增强逻辑挂载进系统呢", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "想给这个扩展打个补丁更新吗", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "我想给它扩充一个新功能", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "这个作者做的插件帮我装一下吗", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "从这个 npm 包装个插件进来呢", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "用户装的和系统自带的怎么区分啊", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "帮我移除这个不需要的模块啊", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "帮我看看现在都装了哪些扩展", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "有没有处理音频的现成扩展呢", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "帮我看看有没有日程管理的扩展呢", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "帮我找个能画图的扩展呢", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "内置的本事和我自己装的有啥区别？", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "帮我装一下这个社区做的扩展吗", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "把那个没用的插件移除呢", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "帮我把网上公开的那个辅助程序加载到运行环境里啊", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "这个链接里有好几个扩展，装我要的那个呢", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "想把一个外部来源的能力模块整合到当前助理呢", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "帮我安装一下那个翻译插件", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "列一下已经加进来的本事啊", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "帮我升级那个翻译扩展？", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "现在有几个扩展在用呢", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "帮我按这个地址把扩展拉下来装啊", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "有没有处理音频的现成扩展啊", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "插件冲突了，帮我排查", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "把这个 github 上的扩展装进来吗", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "这些扩展是从哪来的啊", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "把这个工具装到全局所有项目都能用呢", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "帮我把一个外部脚本工具集成进当前的任务序列吗", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "这个扩展机制是怎么工作的？", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "帮我装个能查文档的功能模块吗", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "有没有现成的本事可以加给 agent？", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "帮我看看有哪些热门的扩展可以加吗", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "帮我把那个本事同步到最新版啊", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "现在 agent 有哪些功能模块吗", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "帮我更新一下那个画图模块吗", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "帮我看看有哪些现成的扩展能装？", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "想让我的 agent 多一个外接的处理本事，帮我接上", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "新加的能力没出现在列表里呢", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "这个扩展机制是怎么工作的啊", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "想把社区做的那个增强项接到我的 agent 上吗", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "把这个 github 上的扩展装进来呢", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "这个 url 的扩展帮我加进项目", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "这个插件能更新吗，帮我更一下？", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "帮我更新一下那个画图模块啊", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "帮我看看现在都装了哪些扩展啊", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "想找个能识别图片的模块？", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "内置的本事和我自己装的有啥区别啊", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "装的时候提示缺环境，怎么办", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "帮我看看现在都装了哪些扩展吗", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "把托管在代码平台上的那个工具组件整合进我的助手吗", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "把这个用不上的能力去掉啊", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "想找个能定时提醒的扩展？", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "帮我给系统接一个能处理文档的外部组件吗", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "现在 agent 有哪些功能模块？", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "想知道现在有哪些能力可用啊", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "把所有装的本事都更新一遍啊", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "把过时的扩展都刷新一下啊", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "帮我从远端拉一套工具逻辑装载到本地的运行环境", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "把那个没用的插件移除？", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "我想装一个处理图片的插件？", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "有没有现成的本事可以加给 agent啊", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "扩展装了但功能不对？", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "只在当前项目装这个扩展", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "帮我搜搜跟 github 相关的插件啊", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "帮我列出全局和项目各装了啥呢", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "想找个能查天气的功能模块", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "从这个地址装个全局的能力？", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "把这个能力添加到 agent 上呢", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "帮我搜搜社区里有啥好用的扩展", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "帮我盘点下装了哪些能力？", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "帮我装个能查文档的功能模块啊", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "装完要不要重启才能用", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "我想装一个处理图片的插件", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "帮我把别人写好的那套增强逻辑挂载进系统啊", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "帮我看看有哪些热门的扩展可以加", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "把这个 OCR 插件装上试试呢", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "这个作者做的插件帮我装一下", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "把这个本事装成全局的", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "想把这个能力升到新版本啊", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "我给你个仓库地址，装里面那个本事呢", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "扩展装在用户目录还是项目目录呢", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "有没有处理音频的现成扩展？", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "把装的所有插件都拉新？", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "把这个 OCR 插件装上试试", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "帮我看看现在都装了哪些扩展？", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "把所有扩展统一升级吗", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "搜下有没有股票行情的插件吗", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "这个 github 链接的扩展帮我装上吗", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "从这个地址装个全局的能力", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "想把那个开源的自动化逻辑引入到我的工作流里吗", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "只在当前项目装这个扩展吗", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "帮我从 npm 装一个插件啊", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "帮我看看已经装上的功能有哪些呢", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "帮我清掉那个出问题的插件呢", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "帮我查下都加了哪些扩展啊", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "现在装了哪些第三方插件呢", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "把当前的扩展清单给我看看？", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "我给你个仓库地址，装里面那个本事？", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "把这个语音合成的扩展装进来吗", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "有没有现成的本事能读取网页啊", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "帮我把这个第三方处理模块装载到对话系统里用呢", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "现在 agent 有哪些功能模块啊", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "装的本事会同步到别的设备吗", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "帮我看看有没有 OCR 识别的功能", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "帮我盘点下装了哪些能力呢", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "给我的 agent 加上爬虫的本事？", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "扩展装了但功能不对呢", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "不想要这个本事了，删掉呢", "label": "skills-manager", "subcat": "C-卸载"}
+{"text": "现在 agent 有哪些功能模块", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "想确认下那个扩展装没装上", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "想把这个第三方模块加进来", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "这个 github 链接的扩展帮我装上啊", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "想确认下那个扩展装没装上吗", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "把这个仓库里指定名字的扩展装上啊", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "帮我搜搜社区里有啥好用的扩展呢", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "帮我检查下有没有可以更新的插件？", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "想找个语音转文字的扩展呢", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "扩展不用了会自动清理吗", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "市面上有哪些可以装的小工具？", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "我找到一个开源扩展，地址给你帮我装啊", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "想让我的 agent 多一个外接的处理本事，帮我接上啊", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "帮我搜搜跟 excel 处理相关的模块", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "有没有现成的本事能处理表格呢", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "帮我把这个扩展装上？", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "这个 github 链接的扩展帮我装上", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "装扩展需要什么环境？", "label": "skills-manager", "subcat": "F-概念"}
+{"text": "帮我看看有没有 OCR 识别的功能啊", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "把这个 OCR 插件装上试试啊", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "把这个公开的组件库引入到我的开发环境里用", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "列个清单看看 agent 的本事？", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "帮我给系统接一个能处理文档的外部组件呢", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "帮我装个能跑定时任务的功能呢", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "装了那个扩展但好像没生效", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "我找到一个开源扩展，地址给你帮我装", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "帮我把网上公开的那个辅助程序加载到运行环境里？", "label": "skills-manager", "subcat": "I-集成挂载"}
+{"text": "给 agent 装个画图的能力？", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "这个功能模块旧了，更新下啊", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "帮我装一下这个社区做的扩展啊", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "把这个扩展拉到最新吗", "label": "skills-manager", "subcat": "D-更新"}
+{"text": "想给它添个发邮件的本事？", "label": "skills-manager", "subcat": "B-安装"}
+{"text": "想知道现在有哪些能力可用？", "label": "skills-manager", "subcat": "E-列出"}
+{"text": "有没有现成的本事能读取网页？", "label": "skills-manager", "subcat": "A-搜找"}
+{"text": "明明装了怎么还是不能用？", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "这个作者做的插件帮我装一下呢", "label": "skills-manager", "subcat": "H-指定来源"}
+{"text": "装完报错了，帮我看看吗", "label": "skills-manager", "subcat": "G-排错"}
+{"text": "想找个能管理待办的插件？", "label": "skills-manager", "subcat": "A-搜找"}
