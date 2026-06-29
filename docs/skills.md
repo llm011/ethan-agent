@@ -118,6 +118,24 @@ Agent Loop 本身不感知 Skill 的存在 — 它只看到一个更丰富的 sy
 | `lark-im` | 飞书\|lark\|feishu\|发消息\|IM\|群消息 | 飞书 IM 操作（发消息、查群、管理会话等）。加载后先执行 `lark-cli skills read lark-im` 按需拉取完整文档，避免大量文档常驻 context |
 | `channels` | channel\|渠道\|频道\|通知 | 多渠道消息推送（与 `/channels` Web UI 页面联动） |
 | `home-assistant` | 家居\|智能家居\|HA\|home assistant\|灯\|空调 | Home Assistant 集成，控制智能家居设备（`fast_path: true`） |
+| `agent-browser` | 浏览器\|打开网页\|网页操作\|自动填表\|网页截图\|抓取网页\|browser\|screenshot | 默认浏览器能力。包装 `agent-browser`（零依赖 Rust CLI），`snapshot` 输出可交互元素的 `@ref` 引用，极省 token。适合「开页面→读紧凑结构→点/填」这类单步操作 |
+| `dev-browser` | 复杂网页流程\|网页脚本\|playwright\|批量抓取\|多步网页操作\|循环抓取 | 进阶浏览器能力。包装 `dev-browser`，在 QuickJS WASM 沙箱里跑 JS 脚本，拿到完整 Playwright Page API。适合需要循环/条件/多页聚合的复杂流程 |
+
+### 浏览器自动化：agent-browser vs dev-browser
+
+两者都是「Skill 文档教 agent 怎么 shell 调一个外部 CLI」的模式（与 `lark-cli`、`deepwiki` 同构），**不进 `pyproject.toml` 依赖**——`pip install` 体积和启动速度不受影响。CLI 二进制由用户按需 `brew`/`npm` 安装，内置浏览器首次用时才下载（懒加载）。两个 SKILL.md 都写了「前置检查 → 缺 CLI 才装 → 缺浏览器才下载」的兜底引导。
+
+选型分流（已写进各自 `description`，由匹配机制自动引导）：
+
+| 维度 | `agent-browser` | `dev-browser` |
+|------|-----------------|---------------|
+| 形态 | 离散子命令（`open`/`click @e2`/`get text`） | 沙箱 JS 脚本（heredoc 喂入） |
+| API | 自带精简语义命令 | 完整 Playwright Page API |
+| token | `snapshot` 自动精简（~300 vs 全 DOM ~4000） | 靠脚本 `console.log` 自控，只回需要的 |
+| 适用 | 简单单步操作（默认首选） | 复杂多步、循环、聚合成结构化结果 |
+| 复用登录态 | `--profile` / `--session-name` / `--auto-connect` | `--connect` 连用户在跑的 Chrome（CDP） |
+
+> 评估过 `browser-use/browser-harness`，因其内置 LLM agent loop（agent 套 agent、双倍模型成本、中间步骤黑盒、与 Ethan 自身 loop 重复），未采用——Ethan 需要的是「浏览器的手脚」，不是「另一个大脑」。
 
 ### 安装/使用其他 Lark 技能
 
