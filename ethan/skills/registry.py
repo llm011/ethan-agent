@@ -1,10 +1,32 @@
 """Skill 注册表 — 管理已加载的 Skills，支持按关键词匹配。"""
+import hashlib
+import json
+
 from ethan.skills.loader import Skill, load_all_skills
 from ethan.skills.stats import SkillStats
 
 # 超过此长度的 skill content 会截断，避免 token 膨胀
 # 复杂 Skill（如 HA 设备列表）需要更大空间；可在 config 里调整
 _MAX_SKILL_CONTENT = 3000
+
+# 进程级 router 缓存：skill 集合不变时复用已编码锚点，避免每请求重编码
+_ROUTER_CACHE: dict[str, "EmbeddingRouter"] = {}
+
+
+def _skill_fingerprint(skills: list[Skill]) -> str:
+    """计算 skill 集合的稳定指纹（名字 + trigger + description）。
+
+    用于判断是否需要重建 router：指纹相同 → 锚点不变 → 直接复用。
+    """
+    data = []
+    for s in sorted(skills, key=lambda x: x.name):
+        data.append({
+            "name": s.name,
+            "trigger": sorted(s.trigger),
+            "desc": s.description,
+        })
+    # json 确保跨进程稳定，hashlib 指纹短
+    return hashlib.sha256(json.dumps(data, ensure_ascii=False).encode()).hexdigest()
 
 
 class SkillRegistry:
@@ -24,12 +46,22 @@ class SkillRegistry:
         self._build_router()
 
     def _build_router(self) -> None:
-        """构建 embedding 路由器索引；依赖或模型缺失时静默跳过。"""
+        """构建 embedding 路由器索引；依赖或模型缺失时静默跳过。
+
+        按 skill 集合指纹缓存：同一进程内 skill 不变时直接复用已编码锚点，
+        避免每个请求都重新 ONNX 推理一遍静态锚点。
+        """
         try:
             from ethan.skills.router import EmbeddingRouter
+            fp = _skill_fingerprint(self._skills)
+            cached = _ROUTER_CACHE.get(fp)
+            if cached is not None:
+                self._router = cached
+                return
             router = EmbeddingRouter()
             if router.available and router.build(self._skills):
                 self._router = router
+                _ROUTER_CACHE[fp] = router
             else:
                 self._router = None
         except Exception:

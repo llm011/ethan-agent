@@ -4,18 +4,23 @@
 query 编码后与所有锚点算 max cosine，最高分 skill 的分数 >= FLOOR 才命中，
 否则返回 None —— 交给 LLM 兜底（agent 始终注入 available_skills，漏触发可自补）。
 
-设计依据（252 条手工评测集，BGE-small-zh ONNX，macro 口径）：
-    关键词硬匹配       P=0.76 R=0.24  拒识 90.8%
-    向量 FLOOR=0.50    P=0.89 R=0.64  拒识 67.8%
-    向量 FLOOR=0.55    P=0.94 R=0.47  拒识 80.5%
-误触发（污染 context，贵）比漏触发（LLM 能自补，便宜）代价高，故 FLOOR 取高位
-0.55，宁可漏不可错。heavy 路径（Map-Reduce）执行始终经 LLM 闸门，注入 skill ≠ 执行。
+设计依据（331 条手工评测集，含 legal-assistant 80 条，BGE-small-zh INT8 ONNX，macro 口径）：
+    关键词硬匹配          P=0.76 R=0.24  拒识 90.8%
+    INT8 向量 FLOOR=0.50  P=0.87 R=0.74  拒识 54.0%   ← 工作点
+    INT8 向量 FLOOR=0.55  P=0.90 R=0.57  拒识 71.3%
+    INT8 向量 FLOOR=0.60  P=0.94 R=0.36  拒识 83.9%
+    FP32  向量 FLOOR=0.50  P=0.88 R=0.63  拒识 64.4%   （INT8 召回更优，体积 1/4）
+FLOOR 取 0.50 的依据：skill 在本架构里是「软 prompt 注入」——注入 ≠ 执行，工具调用
+始终由 LLM 自主决定。others 误判的代价是 context 污染（可被强 LLM 在 medium/full 路径
+兜底），而非不可逆操作；高风险 skill（legal-assistant）经 modes=[法律] 隔离，不进 normal
+路由。故召回优先（R=0.74），把漏触发的兜底负担降到最低。fast 路径（fast_path skill）
+纠错窗口小，若主力为弱兜底模型可考虑上调到 0.55。
 
 依赖 onnxruntime + transformers + BGE ONNX 模型（pip install 'ethan-agent[router]'）。
-模型 + tokenizer 首次使用时从 HF Hub（llm011/bge-small-zh-v1.5-onnx）自动下载到
-~/.ethan/models/bge-small-zh/，之后离线可用；也可用 `ethan router pull` 预拉（Docker/离线）。
-缺依赖、下载失败或离线无缓存 → encoder 不可用，route() 返回 None，调用方回退关键词匹配，
-不影响主流程。
+默认分发 INT8 动态量化版（24MB，较 FP32 90MB 召回更高、体积 1/4）。模型 + tokenizer
+首次使用时从 HF Hub（llm011/bge-small-zh-v1.5-onnx）自动下载到 ~/.ethan/models/bge-small-zh/，
+之后离线可用；也可用 `ethan router pull` 预拉（Docker/离线）。缺依赖、下载失败或离线无缓存
+→ encoder 不可用，route() 返回 None，调用方回退关键词匹配，不影响主流程。
 """
 from __future__ import annotations
 
@@ -32,7 +37,7 @@ logger = logging.getLogger(__name__)
 # BGE 中文：query 需加指令前缀，passage（锚点）不加
 _QUERY_PREFIX = "为这个句子生成表示以用于检索相关文章："
 _BASE_MODEL = "BAAI/bge-small-zh-v1.5"
-_DEFAULT_FLOOR = 0.55
+_DEFAULT_FLOOR = 0.50  # INT8 工作点：召回优先，误判可被强 LLM 兜底
 
 # 模型路径：环境变量优先，否则 ~/.ethan/models/bge-small-zh/
 _MODEL_ENV = "ETHAN_BGE_ONNX"
@@ -85,6 +90,19 @@ def ensure_model(force: bool = False) -> Path | None:
     return model_dir if (model_dir / _MODEL_FILENAME).exists() else None
 
 
+def model_present() -> bool:
+    """本地是否已有 BGE ONNX 模型文件（纯检查，不下载、不加载 session）。
+
+    供 `available` 轻量判定用 —— agent 创建时只问"能不能用"，不触发 94MB 加载。
+    """
+    env_path = os.environ.get(_MODEL_ENV)
+    if env_path:
+        p = Path(env_path)
+        target = p if p.is_file() else p / _MODEL_FILENAME
+        return target.exists()
+    return (_default_model_dir() / _MODEL_FILENAME).exists()
+
+
 class _Encoder:
     """BGE-small-zh ONNX 编码器（CLS pooling，L2 归一化）。延迟加载，失败即不可用。"""
 
@@ -110,11 +128,19 @@ class _Encoder:
                 return False
             model_path = str(model_dir / _MODEL_FILENAME)
             self._sess = ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
-            # tokenizer 优先从本地下载目录加载（离线友好），缺失时回退基座 repo
+            # tokenizer 优先从本地模型目录加载（离线友好）；目录缺 tokenizer 文件时，
+            # AutoTokenizer 会回退到仅特殊 token 的残缺 tokenizer（vocab_size≈5），所有词变
+            # [UNK] → 所有 embedding 几乎相同 → 路由彻底失效。检测 vocab 过小则回退基座 repo。
+            tok = None
             try:
-                self._tok = AutoTokenizer.from_pretrained(str(model_dir))
+                cand = AutoTokenizer.from_pretrained(str(model_dir))
+                if len(cand) > 1000:  # 正常 BGE 词表 ~21k；残缺的只有 5
+                    tok = cand
             except Exception:
-                self._tok = AutoTokenizer.from_pretrained(_BASE_MODEL)
+                pass
+            if tok is None:
+                tok = AutoTokenizer.from_pretrained(_BASE_MODEL)
+            self._tok = tok
             self._input_names = {i.name for i in self._sess.get_inputs()}
             self._ready = True
             return True
@@ -158,8 +184,8 @@ class EmbeddingRouter:
 
     @property
     def available(self) -> bool:
-        """encoder 是否就绪（依赖 + 模型都在）。"""
-        return _ENCODER._ensure()
+        """模型文件是否存在（不加载 session，零冷启动开销）。"""
+        return model_present()
 
     def build(self, skills: list["Skill"]) -> bool:
         """为每个 skill 编码锚点（trigger 短语各一个 + description 一个）。
