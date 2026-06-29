@@ -15,7 +15,7 @@ import json
 
 from ethan.browser.auth import is_authorized, mark_authorized
 from ethan.browser.hub import BrowserError, get_hub
-from ethan.browser.protocol import METHODS
+from ethan.browser.protocol import ERROR_CODE, METHODS
 from ethan.browser.session_map import get_session_map
 from ethan.core.context import get_session_id
 from ethan.tools.base import BaseTool
@@ -25,10 +25,52 @@ _SNAPSHOT_MAX_CHARS = 30000
 
 
 async def _call(method_key: str, params: dict, browser_session_id: str | None = None):
+    # 会话隔离门禁:凡是操作既有 browser session 的调用,该 session 必须属于当前 ethan 会话。
+    # create/attach_current 不传 browser_session_id(新建后才 bind),session_list/user_list 同理,
+    # 所以这一处收口即可覆盖 rename/release/close + 全部 tab/page 操作,杜绝跨会话/跨用户操控。
+    if browser_session_id is not None:
+        _require_owned(browser_session_id)
     hub = get_hub()
     result = await hub.call(METHODS[method_key], params, browser_session_id=browser_session_id)
     if browser_session_id:
         get_session_map().touch(browser_session_id)
+    return result
+
+
+def _require_owned(browser_session_id: str) -> None:
+    """校验 browser session 归属当前 ethan 会话,不属于则拒绝。"""
+    owned = get_session_map().list_for(get_session_id())
+    if not browser_session_id or browser_session_id not in owned:
+        raise BrowserError(
+            "该 browser session 不属于当前对话,拒绝操作",
+            code=ERROR_CODE["session_not_found"],
+        )
+
+
+def _extract_session_id(result: dict | None) -> str | None:
+    """从 create/attach_current 结果里取 browser session id。
+
+    扩展返回 {created/attached: true, session: {sessionId: ...}};兼容顶层平铺写法。
+    """
+    if not result:
+        return None
+    sess = result.get("session")
+    if isinstance(sess, dict):
+        sid = sess.get("sessionId") or sess.get("session_id")
+        if sid:
+            return sid
+    return result.get("session_id") or result.get("sessionId")
+
+
+def _filter_owned_sessions(result: dict | None) -> dict:
+    """session_list 结果按当前 ethan 会话过滤,避免泄漏其他会话/用户的 session。"""
+    result = result or {}
+    owned = set(get_session_map().list_for(get_session_id()))
+    sessions = result.get("sessions")
+    if isinstance(sessions, list):
+        kept = [s for s in sessions if isinstance(s, dict)
+                and (s.get("sessionId") or s.get("session_id")) in owned]
+        return {**result, "sessions": kept}
     return result
 
 
@@ -78,19 +120,20 @@ class BrowserSessionTool(_BrowserToolBase):
                 if title:
                     params["title"] = title
                 result = await _call("session_create", params)
-                bsid = (result or {}).get("session_id") or (result or {}).get("sessionId")
+                bsid = _extract_session_id(result)
                 if bsid:
                     get_session_map().bind(bsid, get_session_id())
                 return json.dumps(result, ensure_ascii=False)
             if action == "attach_current":
                 params = {"title": title} if title else {}
                 result = await _call("session_attach_current", params)
-                bsid = (result or {}).get("session_id") or (result or {}).get("sessionId")
+                bsid = _extract_session_id(result)
                 if bsid:
                     get_session_map().bind(bsid, get_session_id())
                 return json.dumps(result, ensure_ascii=False)
             if action == "list":
-                return json.dumps(await _call("session_list", {}), ensure_ascii=False)
+                result = await _call("session_list", {})
+                return json.dumps(_filter_owned_sessions(result), ensure_ascii=False)
             if action == "rename":
                 return json.dumps(await _call("session_rename", {"sessionId": session, "title": title},
                                               browser_session_id=session), ensure_ascii=False)
