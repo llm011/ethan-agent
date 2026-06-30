@@ -483,7 +483,13 @@ def _codex_item_to_step(item: dict) -> Optional[dict]:
             "result_preview": _preview(str(item.get("result") or item.get("output") or "")),
         }
     if itype == "error":
-        return {"tool": "error", "args": _preview(str(item.get("message") or ""), 80),
+        msg = str(item.get("message") or "")
+        # 弃用/配置提示类「error」是警告而非真失败（turn 仍正常完成），不计入步骤，
+        # 以免在镜像会话/时间轴里显示成吓人的红色错误（如 codex_hooks deprecated）。
+        low = msg.lower()
+        if any(k in low for k in ("deprecated", "is no longer supported", "use `[features]")):
+            return None
+        return {"tool": "error", "args": _preview(msg, 80),
                 "state": "error", "duration_ms": None, "result_preview": ""}
     return None
 
