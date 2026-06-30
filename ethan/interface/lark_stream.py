@@ -31,9 +31,19 @@ logger = logging.getLogger(__name__)
 
 _lark_chat_map: dict[str, str] = {}  # chat_id -> session_id, in-memory cache
 
-# chat_id -> 当前正在处理该 chat 消息的 Agent task。供 /stop 取消进行中的生成。
-# 每条非命令消息开始处理时登记，结束（正常/取消/异常）时清除。
-_lark_running_tasks: dict[str, asyncio.Task] = {}
+# chat_id -> 正在处理该 chat 消息的 Agent task 集合。供 /stop 取消进行中的生成。
+# 事件分发是 fire-and-forget（lark_events 里 asyncio.create_task(_handle_message)），同一 chat
+# 连发多条会并发跑，故用 set 而非单值——否则后一条会覆盖前一条的登记，/stop 停不到前一个。
+_lark_running_tasks: dict[str, set[asyncio.Task]] = {}
+
+
+def _untrack_task(chat_id: str, task) -> None:
+    """从登记表摘掉某个 task（每条消息结束时调）。空集合顺手清掉，避免泄漏。"""
+    s = _lark_running_tasks.get(chat_id)
+    if s is not None:
+        s.discard(task)
+        if not s:
+            _lark_running_tasks.pop(chat_id, None)
 
 # 飞书事件投递是 at-least-once：bot 未在超时窗口内 ack（长任务、断线重连重放）会重投同一条事件。
 # 用 message_id 幂等去重，否则同一消息被处理多次（表现为重复回复 / 两份不同的 token 统计）。
@@ -295,12 +305,16 @@ async def _handle_message(event_data: dict) -> None:
                 await store.close()
 
         async def _stop_lark_task(cid: str) -> bool:
-            """取消该 chat 进行中的 Agent 生成任务。返回是否真的停了一个。"""
-            t = _lark_running_tasks.get(cid)
-            if t is not None and not t.done():
-                t.cancel()
-                return True
-            return False
+            """取消该 chat 所有进行中的 Agent 生成任务。返回是否真的停了至少一个。"""
+            tasks = _lark_running_tasks.get(cid)
+            if not tasks:
+                return False
+            stopped = False
+            for t in list(tasks):
+                if not t.done():
+                    t.cancel()
+                    stopped = True
+            return stopped
 
         cmd_ctx = CommandContext(
             chat_id=chat_id,
@@ -327,16 +341,13 @@ async def _handle_message(event_data: dict) -> None:
     reaction_id = await _send_reaction(message_id)
 
     # 查找或创建对应的 Session（lark 渠道归 admin）
-    from ethan.core.users import get_user_store
     from ethan.core.paths import user_sessions_db_path
-    lark_uid = get_user_store().get_admin_user_id()
     store = SessionStore(db_path=user_sessions_db_path())
     await store.init()
 
     try:
         from ethan.core.config import get_config
         cfg = get_config()
-        prefix = f"lark:{chat_id}:"
         # Fast lookup: in-memory cache first, then persistent file
         if not _lark_chat_map:
             _lark_chat_map.update(_load_lark_map())
@@ -570,11 +581,12 @@ async def _handle_message(event_data: dict) -> None:
                 if isinstance(entry, dict) and isinstance(entry.get("lark_card"), dict):
                     await _send_interactive_card(chat_id, entry["lark_card"], reply_to_msg_id=message_id)
 
-        # 登记当前生成任务，供 /stop 取消（按 chat_id；同 chat 串行处理，不会互相覆盖）
+        # 登记当前生成任务，供 /stop 取消。同 chat 可能并发多条（事件分发 fire-and-forget），
+        # 故加进 set 而非覆盖单值；结束时（正常/取消/异常）各自从 set 摘除（见 _untrack_task）。
         import asyncio as _aio
         _cur = _aio.current_task()
         if _cur is not None:
-            _lark_running_tasks[chat_id] = _cur
+            _lark_running_tasks.setdefault(chat_id, set()).add(_cur)
 
         async for chunk in agent.stream_chat(context_messages):
             if isinstance(chunk, ThinkingEvent):
@@ -743,7 +755,7 @@ async def _handle_message(event_data: dict) -> None:
             logger.exception("[Lark] error while saving stopped content for chat %s", chat_id)
         finally:
             await store.close()
-            _lark_running_tasks.pop(chat_id, None)
+            _untrack_task(chat_id, asyncio.current_task())
         return
 
     except Exception:
@@ -752,8 +764,8 @@ async def _handle_message(event_data: dict) -> None:
         if reaction_id and message_id:
             await _remove_reaction(message_id, reaction_id)
         await store.close()
-        _lark_running_tasks.pop(chat_id, None)
+        _untrack_task(chat_id, asyncio.current_task())
         return
 
     await store.close()
-    _lark_running_tasks.pop(chat_id, None)
+    _untrack_task(chat_id, asyncio.current_task())
