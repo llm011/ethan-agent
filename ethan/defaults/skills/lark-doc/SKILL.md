@@ -1,90 +1,96 @@
 ---
 name: lark-doc
-version: 1.1.0
-trigger: "飞书文档|读文档|解析飞书|lark doc|feishu doc|飞书云文档|docx|wiki|读取文档|下载文档|导出文档|文档转markdown|飞书wiki|知识库文档"
-description: "读取飞书云文档（docx 和 wiki 均支持）并导出为标准 Markdown 文件，图片可选上传 CDN 转为公开外链。支持表格、代码块、列表等富文本格式。当用户要读取/解析/导出飞书文档或 wiki 页面时使用。"
+version: 2.0.0
+description: "飞书云文档（Docx / Wiki 文档）：读取和编辑飞书文档内容。当用户给出文档 URL 或 token，或需要查看、创建、编辑文档、插入或下载文档图片附件时使用。文档中嵌入的电子表格、多维表格、画板，先用本 skill 提取 token 再切到对应 skill。当用户给出 doubao.com 的 /docx/ 或 /wiki/ URL/token 时，也应直接使用本 skill；路由依据是 URL 路径模式和 token，而不是域名。不负责文档评论管理，也不负责表格或 Base 的数据操作。"
 metadata:
   requires:
     bins: ["lark-cli"]
+  cliHelp: "lark-cli docs --help; lark-cli docs +create --help; lark-cli docs +fetch --help; lark-cli docs +update --help; lark-cli docs +resource-download --help; lark-cli docs +resource-update --help; lark-cli docs +resource-delete --help"
 ---
 
-# lark-doc
+# docs
 
-读取飞书云文档，导出为可在任意 Markdown 编辑器打开的 `.md` 文件。
-
-## 前置检查
-
-**必读** [`lark-shared/SKILL.md`](../lark-shared/SKILL.md) — 了解 lark-cli 认证和 `--as` 身份切换。
-
-## ⚠️ Wiki 链接也直接用本 skill，不要绕到 lark-wiki
-
-`lark-cli docs +fetch --api-version v2` 同时支持 `/docx/` 和 `/wiki/` URL，内部自动处理 wiki token 路由：
+**身份：文档操作默认使用 `--as user`。首次使用前执行 `lark-cli auth login`。**
 
 ```bash
-# docx 文档
-python ~/.ethan/skills/lark-doc/scripts/fetch_doc.py "https://xxx.feishu.cn/docx/TOKEN" ./out.md
-
-# wiki 页面 — 完全相同的命令，lark-cli 自动识别
-python ~/.ethan/skills/lark-doc/scripts/fetch_doc.py "https://xxx.feishu.cn/wiki/TOKEN" ./out.md
+# 常用示例
+lark-cli docs +fetch --doc "文档URL或token"
+lark-cli docs +create --content '<title>标题</title><p>内容</p>'
+lark-cli docs +update --doc "文档URL或token" --command append --content '<p>内容</p>'
 ```
 
-**不要**先用 `lark-wiki` skill 的 `wiki +node-get` / `wiki spaces get_node` 拿 docx token，那是手动路径，比这更繁琐且容易失败。
+## ⚠️ 导出整篇文档到 .md 文件：必须用脚本，不能直接 shell 调 lark-cli（Ethan 专属）
 
-## ⚠️ 必须用脚本导出，不能直接用 shell 调 lark-cli
+**只读/摘要/局部** 用 `docs +fetch`（配合 `--scope` 局部读取，见下方必读）即可。但当目标是**把整篇文档原样导出为本地 `.md` 文件**时：
 
-**不要**通过 shell 工具直接调 `lark-cli docs +fetch` 来导出文件——shell 工具有 8000 字符输出截断，大文档会丢失大量内容。
+**不要**通过 shell 工具直接跑 `lark-cli docs +fetch ... > out.md`——Ethan 的 shell 工具有 8000 字符输出截断，大文档会丢内容。
 
-**必须**用下面的脚本，脚本内部用 subprocess 调 lark-cli（绕开截断），stdout 只输出文件路径：
+**必须**用脚本，它内部用 subprocess 调 lark-cli（绕开截断），stdout 只输出文件路径：
 
 ```bash
 python ~/.ethan/skills/lark-doc/scripts/fetch_doc.py "https://xxx.feishu.cn/docx/TOKEN" ./output.md
+# wiki 页面完全相同的命令，lark-cli 自动识别 token 路由
+python ~/.ethan/skills/lark-doc/scripts/fetch_doc.py "https://xxx.feishu.cn/wiki/TOKEN" ./output.md
 ```
 
-脚本会：
-1. 内部调 `lark-cli docs +fetch --api-version v2 --doc-format markdown` 获取完整文档（不受 shell 截断影响）
-2. 扫描图片，有 CDN 凭证则上传替换为公开 URL，无则保留飞书链接
-3. 检测视频/附件 Token，下载到 `./media/` 目录并替换为本地链接
-4. 写出完整 `.md` 文件，stdout 只打印文件路径
+脚本会：拉取完整文档（不受截断影响）→ 有 CDN 凭证则把图片上传换成公开 URL（检测：`test -n "$CDN_ENDPOINT" && test -n "$CDN_ACCESS_KEY" && echo CDN_READY || echo CDN_MISSING`，无则保留飞书链接并提示用户配置 `upload-cdn` skill）→ 下载视频/附件到 `./media/` → 写出 `.md`，stdout 只打印路径。
 
-## 凭证依赖
+## 前置条件 — 执行操作前必读
 
-| 依赖 | 必须 | 说明 |
-|------|------|------|
-| `lark-cli` 用户登录 | 是 | `lark-cli auth login --scope "docx:document:readonly"` |
-| `upload-cdn` 密钥 | 否 | 有则图片自动上传 CDN；无则图片 URL 保留飞书原始链接（本地可能无法加载） |
+**CRITICAL — 执行对应操作前，MUST 先用 Read 工具读取以下文件，缺一不可：**
+1. [`../lark-shared/SKILL.md`](../lark-shared/SKILL.md) — 认证、权限处理、全局参数（所有操作通用）
+2. **读取文档（`docs +fetch`）** → 必读 [`lark-doc-fetch.md`](references/lark-doc-fetch.md)（`--scope` / `--detail` 选择、局部读取策略、`<fragment>` / `<excerpt>` 输出结构）
+3. **创建或编辑文档内容** → 必读 [`lark-doc-xml.md`](references/lark-doc-xml.md)（XML 语法规则，仅当用户明确要求 Markdown 时改读 [`lark-doc-md.md`](references/lark-doc-md.md)）和 [`lark-doc-style.md`](references/style/lark-doc-style.md)（元素选择、丰富度规则、颜色语义）；从零创建时加读 [`lark-doc-create-workflow.md`](references/style/lark-doc-create-workflow.md)；编辑已有文档时加读 [`lark-doc-update.md`](references/lark-doc-update.md) 和 [`lark-doc-update-workflow.md`](references/style/lark-doc-update-workflow.md)
 
-## 检测 CDN 是否可用
+**未读完以上文件就执行相应操作会导致参数选择错误或格式错误。**
 
-```bash
-test -n "$CDN_ENDPOINT" && test -n "$CDN_ACCESS_KEY" && echo CDN_READY || echo CDN_MISSING
-```
+> **格式选择规则（全局）：**
+> - **创建 / 导入场景**（`docs +create`，或 `docs +update --command append/overwrite` 的整段写入）：XML 和 Markdown 都可以。用户提供 `.md` 本地文件、或明确说"导入 Markdown"时，直接用 Markdown；否则默认 XML（可用 callout、grid、checkbox 等富 block）。
+> - **精准编辑场景**（`docs +update` 的 `str_replace` / `block_insert_after` / `block_replace` / `block_delete` / `block_move_after` 等局部精修指令）：优先使用 XML（`--doc-format xml`，即默认值）。XML 能稳定表达 block 结构和样式，局部精修更可控；不要因为 Markdown 更简单就自行切换。
 
-- `CDN_READY` → 图片自动上传，markdown 中为公开 URL
-- `CDN_MISSING` → 提示用户配置 `upload-cdn` skill 的密钥（参见 `upload-cdn` skill），或告知图片链接在本地编辑器中可能无法显示
+## 快速决策
+- 用户要**复制文档 / 创建文档副本 / 另存为副本**时，切到 [`lark-drive`](../lark-drive/SKILL.md)，按其中的复制指引使用 `lark-cli drive files copy`；不要用 `docs +fetch` + `docs +create` 重建正文，也不要走 `drive +export` / `drive +import`。
+- 先判定任务路径：找文档 / 导入导出走 [`lark-drive`](../lark-drive/SKILL.md)；只读 / 摘要用 `docs +fetch` 默认 `simple`；明确旧文本 → 新文本直接 `str_replace`；只有 block 链接、评论锚点、插入 / 替换 / 删除 / 移动才局部 fetch `with-ids`；保真改写已有内容才读 `full`
+- block 直达链接格式：`文档基础 URL#block_id`；没有 block_id 时局部 fetch `with-ids`
+- 连续执行多个文档写操作时，必须按 [`lark-doc-update.md`](references/lark-doc-update.md) 的「Block ID 生命周期」判断旧 block ID 是否还能复用；`overwrite` / `block_replace` / `block_delete` 后不要复用受影响的旧 ID，插入 / 复制后要重新 fetch 才能拿到新 block ID
+- 用户需要在文档内**创建、复制或移动**资源块（画板、电子表格、多维表格等）时，必须先读取 [`lark-doc-xml.md`](references/lark-doc-xml.md) 的「三、资源块」章节
+- 写文档时，由内容和用户意图决定表达形式；流程、架构、路线图、关键指标等信息可以使用画板，但不要默认把重要信息都画板化
+- 新增画板必须隔离到 SubAgent：简单图由 SubAgent 直接插入 `<whiteboard type="svg">完整 SVG</whiteboard>`，不读 `lark-whiteboard`；复杂图才由主 Agent 先建 `<whiteboard type="blank"></whiteboard>`，再启动 SubAgent 读取 `lark-whiteboard` 写入
+- 用户说"看一下文档里的图片/附件/素材""预览素材" → 用 `lark-cli docs +media-preview`
+- 用户明确说"下载素材" → 用 `lark-cli docs +media-download`
+- 用户明确说"下载/更新/删除文档封面图" → 用 `lark-cli docs +resource-download/+resource-update/+resource-delete --type cover`
+- `resource-*` 目前仅支持 Docx 封面资源；其他图片、附件或素材请走 `+media-*`
+- 如果目标是画板/whiteboard/画板缩略图 → 只能用 `lark-cli docs +media-download --type whiteboard`（不要用 `+media-preview`）
+- 拿到 spreadsheet URL/token 后 → 切到 `lark-sheets` 做对象内部操作
+- 用户说"给文档加评论""查看评论""回复评论""给评论加/删除表情 reaction" → 切到 `lark-drive` 处理
+- 文档内容中出现嵌入的 `<sheet>`、`<bitable>` 或 `<cite file-type="sheets|bitable">` 标签时 → **必须主动提取 token 并切到对应技能下钻读取内部数据**，不能只呈现标签本身
 
-## 决策流程
+| 标签 / 属性 | 提取字段 | 切到技能 |
+|-|-|-|
+| `<sheet token="..." sheet-id="...">` | `token` -> spreadsheet_token, `sheet-id` | [`lark-sheets`](../lark-sheets/SKILL.md) |
+| `<bitable token="..." table-id="...">` | `token` -> app_token, `table-id` | [`lark-base`](../lark-base/SKILL.md) |
+| `<cite type="doc" file-type="sheets" token="..." sheet-id="...">` | 同 `<sheet>` | [`lark-sheets`](../lark-sheets/SKILL.md) |
+| `<cite type="doc" file-type="bitable" token="..." table-id="...">` | 同 `<bitable>` | [`lark-base`](../lark-base/SKILL.md) |
+| `<vc-transcribe-tab vc-node-id="...">` | `vc-node-id` -> note_id | [`lark-note`](../lark-note/SKILL.md)：先 `note +detail --note-id <vc-node-id>` |
+| `<synced_reference src-token="..." src-block-id="...">` | `src-token` -> doc_token, `src-block-id` -> block_id | 用 `docs +fetch` 读取 src-token 文档，定位 block |
 
-1. 用户给出飞书文档 URL 或 token
-2. 检查 lark-cli 登录状态（`lark-cli docs +fetch --api-version v2 --doc "URL" --doc-format markdown`）
-3. 检测 CDN 凭证，告知用户图片处理方式
-4. 运行脚本，输出 `.md` 文件
-5. 告知用户文件位置及图片状态
+## Shortcuts（推荐优先使用）
 
-## 直接调用 lark-cli（不用脚本）
+Shortcut 是对常用操作的高级封装（`lark-cli docs +<verb> [flags]`）。有 Shortcut 的操作优先使用。
 
-只需要查看文档内容、不需要保存文件时：
+| Shortcut | 说明 |
+|----------|------|
+| [`+create`](references/lark-doc-create.md) | Create a Lark document (XML / Markdown) |
+| [`+fetch`](references/lark-doc-fetch.md) | Fetch Lark document content (XML / Markdown / im-markdown; `im-markdown` only after fetch for `lark-im`) |
+| [`+update`](references/lark-doc-update.md) | Update a Lark document (str_replace / block_insert_after / block_replace / ...) |
+| [`+media-insert`](references/lark-doc-media-insert.md) | Insert a local image or file at the end of a Lark document (4-step orchestration + auto-rollback). Prefer `--from-clipboard` when the image is already on the system clipboard (screenshots, copy from Feishu/browser); use `--file` only for on-disk sources. |
+| [`+media-download`](references/lark-doc-media-download.md) | Download document media or whiteboard thumbnail (auto-detects extension) |
+| [`+media-preview`](references/lark-doc-media-preview.md) | Preview document media file (auto-detects extension) |
+| [`+resource-download` / `+resource-update` / `+resource-delete`](references/lark-doc-resource-cover.md) | Download, update, or delete a Docx cover image resource with `--type cover` |
+| [`+whiteboard-update`](../lark-whiteboard/references/lark-whiteboard-update.md) | Alias of `whiteboard +update`. Update an existing whiteboard with DSL, Mermaid or PlantUML. Prefer `whiteboard +update`; refer to lark-whiteboard skill for details. |
 
-```bash
-# 查看内容
-lark-cli docs +fetch --api-version v2 --doc "URL" --doc-format markdown
+## 不在本 Skill 范围
 
-# 只看目录结构
-lark-cli docs +fetch --api-version v2 --doc "URL" --scope outline --max-depth 3
-
-# 按关键词查找
-lark-cli docs +fetch --api-version v2 --doc "URL" --scope keyword --keyword "关键词"
-```
-
-## 关于表格
-
-`--doc-format markdown` 会把飞书表格渲染为标准 Markdown 表格语法（GFM），在 Obsidian、Typora、VS Code 等编辑器中可正常显示。
+- 文档评论管理 → [`lark-drive`](../lark-drive/SKILL.md)
+- 电子表格或 Base 的数据操作 → [`lark-sheets`](../lark-sheets/SKILL.md) / [`lark-base`](../lark-base/SKILL.md)
+- 云空间文件上传、下载、权限管理 → [`lark-drive`](../lark-drive/SKILL.md)
