@@ -424,7 +424,7 @@ export async function deleteProcedure(id: string): Promise<void> {
   await fetch(`${API_URL}/memory/procedures/${id}`, { method: "DELETE", headers: headers() });
 }
 
-export type StreamChunk = { content?: string; done?: boolean; error?: string; model?: string; usage?: Record<string, number>; tool?: string; args?: string; state?: string; id?: string; duration_ms?: number; result_preview?: string; result_detail?: string; sub_steps?: Array<{ tool: string; args: string; state: string; duration_ms?: number | null; result_preview?: string }>; ui?: unknown[]; consent_request?: boolean; request_id?: string; description?: string; detail?: string; thinking?: boolean };
+export type StreamChunk = { content?: string; done?: boolean; stopped?: boolean; error?: string; model?: string; usage?: Record<string, number>; tool?: string; args?: string; state?: string; id?: string; duration_ms?: number; result_preview?: string; result_detail?: string; sub_steps?: Array<{ tool: string; args: string; state: string; duration_ms?: number | null; result_preview?: string }>; ui?: unknown[]; consent_request?: boolean; request_id?: string; description?: string; detail?: string; thinking?: boolean };
 
 /** 把一个 SSE Response body 解析成事件流（streamChat / streamResume 共用）。 */
 async function* parseSSE(res: Response): AsyncGenerator<StreamChunk> {
@@ -480,6 +480,16 @@ export async function streamResume(sessionId: string): Promise<AsyncGenerator<St
   });
   if (res.status === 204 || !res.ok) return null;
   return parseSSE(res);
+}
+
+/** 停止某 session 进行中的生成；已生成内容会被保存并标记 [已停止]。 */
+export async function stopGeneration(sessionId: string): Promise<{ ok: boolean; stopped: boolean }> {
+  const res = await fetch(`${API_URL}/chat/${encodeURIComponent(sessionId)}/stop`, {
+    method: "POST",
+    headers: headers(),
+  });
+  if (!res.ok) return { ok: false, stopped: false };
+  return res.json();
 }
 
 export interface KnowledgeItem {

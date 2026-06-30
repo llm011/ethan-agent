@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 from typing import AsyncGenerator
 
@@ -19,6 +20,8 @@ from ethan import __version__
 from .deps import verify_token, create_agent
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 
 # ── Health / Poll ────────────────────────────────────────────────
@@ -163,6 +166,18 @@ async def reconnect_stream(session_id: str, user_id: str = Depends(verify_token)
     )
 
 
+@router.post("/chat/{session_id}/stop")
+async def stop_generation(session_id: str, user_id: str = Depends(verify_token)):
+    """停止某 session 进行中的生成。已生成的部分内容会被保存并标记 [已停止]。
+
+    返回 {ok, stopped}：stopped=True 表示确实停了一个进行中的 run；
+    False 表示没有进行中的 run（可能刚好结束）。user_id 校验归属，防跨用户停别人的任务。
+    """
+    from ethan.core.run_manager import RunManager
+    stopped = RunManager.instance().stop(session_id, user_id=user_id)
+    return {"ok": True, "stopped": stopped}
+
+
 # ── SSE helpers ───────────────────────────────────────────────────
 
 
@@ -261,10 +276,31 @@ async def _run_generation(
                 collector.feed(item)
                 run.emit({"content": item})
     except asyncio.CancelledError:
-        # 被显式取消（如新 run 替换旧 run）：不入库，直接收尾。
+        # 被取消有两种情形：
+        # (1) 用户主动 /stop（run.stop_requested=True）：保存已生成的部分内容，标记 [已停止]
+        # (2) 新 run 替换旧 run：直接丢弃，不入库
         if consent is not None:
             consent.cancel_all()
+        if getattr(run, "stop_requested", False) and session_id and (collector.full or collector.thought):
+            try:
+                stopped_msg = Message(
+                    role="assistant",
+                    content=(collector.full or "") + "\n\n_（已停止）_",
+                    thought=collector.thought,
+                    usage=collector.usage_dict,
+                    tool_steps=collector.tool_steps or [],
+                    a2ui=collector.a2ui or None,
+                )
+                await store.save_message(session_id, stopped_msg)
+                await store.touch(session_id)
+            except Exception:
+                logger.exception("保存已停止生成的部分内容失败 session=%s", session_id)
+        run.emit({"stopped": True, "usage": collector.usage_dict})
         run.finish()
+        try:
+            await store.close()
+        except Exception:
+            pass
         RunManager_schedule_removal(run.session_id)
         raise
     except Exception as e:

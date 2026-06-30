@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, RefObject } from "react";
-import { Send, Paperclip, Loader2, X, Reply } from "lucide-react";
+import { Send, Paperclip, X, Reply, Square } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { uploadFile, type ModeEntry } from "@/lib/api";
 import type { Quote } from "./types";
@@ -36,6 +36,7 @@ interface ChatInputProps {
   inputRef: RefObject<HTMLTextAreaElement | null>;
   onModelChange: (model: string) => void;
   onSend: (text: string) => void;
+  onStop?: () => void;
   onFilesChange: (files: PendingFile[]) => void;
   onQuoteCancel: () => void;
   modes?: ModeEntry[];
@@ -52,6 +53,7 @@ export function ChatInput({
   inputRef,
   onModelChange,
   onSend,
+  onStop,
   onFilesChange,
   onQuoteCancel,
   modes = [],
@@ -192,13 +194,23 @@ export function ChatInput({
               </Select>
             )}
             <div className="flex-1" />
-            <button
-              onClick={handleSend}
-              disabled={streaming || (!input.trim() && pendingFiles.length === 0)}
-              className="h-7 w-7 flex items-center justify-center rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {streaming ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-            </button>
+            {streaming ? (
+              <button
+                onClick={() => onStop?.()}
+                className="h-7 w-7 flex items-center justify-center rounded-lg bg-foreground text-background hover:opacity-80 transition-opacity"
+                title="停止生成"
+              >
+                <Square className="h-3 w-3 fill-current" />
+              </button>
+            ) : (
+              <button
+                onClick={handleSend}
+                disabled={!input.trim() && pendingFiles.length === 0}
+                className="h-7 w-7 flex items-center justify-center rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Send className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
         </div>
       </div>

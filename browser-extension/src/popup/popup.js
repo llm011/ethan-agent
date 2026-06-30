@@ -1,9 +1,11 @@
 /* eslint-disable */
 const $ = id => document.getElementById(id);
 
+const DEFAULT_URL = 'ws://localhost:8900/ws/browser';
+
 async function load() {
   const { serverUrl, token } = await chrome.storage.local.get(['serverUrl', 'token']);
-  $('serverUrl').value = serverUrl || 'ws://localhost:8900/ws/browser';
+  $('serverUrl').value = serverUrl || DEFAULT_URL;
   $('token').value = token || '';
   refreshStatus();
 }
@@ -23,37 +25,62 @@ function setStatus(connected) {
   }
 }
 
-async function refreshStatus() {
-  setStatus(null);
+async function queryConnected() {
   try {
     const resp = await chrome.runtime.sendMessage({ type: 'getStatus' });
-    setStatus(!!(resp && resp.connected));
+    return !!(resp && resp.connected);
   } catch {
-    setStatus(false);
+    return false;
   }
 }
 
-async function save() {
-  const serverUrl = $('serverUrl').value.trim();
-  const token = $('token').value.trim();
-  await chrome.storage.local.set({ serverUrl, token });
-  $('saved').textContent = '已保存，正在重连…';
-  // 配置变更后 background 会自动重连；稍候刷新状态
-  setTimeout(() => {
-    $('saved').textContent = '';
-    refreshStatus();
-  }, 1200);
+async function refreshStatus() {
+  setStatus(null);
+  setStatus(await queryConnected());
 }
 
-async function reconnect() {
-  await chrome.runtime.sendMessage({ type: 'reconnect' });
-  $('saved').textContent = '已触发重连…';
-  setTimeout(() => {
-    $('saved').textContent = '';
-    refreshStatus();
-  }, 1200);
+/** 轮询状态：重连 + 握手需要一点时间，连查几次直到连上或超时。 */
+async function pollUntilConnected(tries = 12, intervalMs = 400) {
+  setStatus(null);
+  for (let i = 0; i < tries; i++) {
+    if (await queryConnected()) {
+      setStatus(true);
+      return;
+    }
+    await new Promise(r => setTimeout(r, intervalMs));
+  }
+  setStatus(false);
 }
 
-$('save').addEventListener('click', save);
-$('reconnect').addEventListener('click', reconnect);
+/** 当前输入值写入 storage。storage.onChanged 会触发 background 自动重连。 */
+async function persist() {
+  await chrome.storage.local.set({
+    serverUrl: $('serverUrl').value.trim() || DEFAULT_URL,
+    token: $('token').value.trim(),
+  });
+}
+
+// 输入即自动保存（防抖）——不用再点保存按钮。
+let saveTimer = null;
+function autoSave() {
+  if (saveTimer) clearTimeout(saveTimer);
+  $('hint').textContent = '';
+  saveTimer = setTimeout(async () => {
+    await persist();
+    $('hint').textContent = '已自动保存';
+    setTimeout(() => { $('hint').textContent = ''; }, 1500);
+  }, 500);
+}
+
+// 「测试连接」：立即落库 + 强制重连 + 轮询状态。
+async function testConnect() {
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+  await persist();
+  await chrome.runtime.sendMessage({ type: 'reconnect' }).catch(() => {});
+  await pollUntilConnected();
+}
+
+$('serverUrl').addEventListener('input', autoSave);
+$('token').addEventListener('input', autoSave);
+$('connect').addEventListener('click', testConnect);
 load();

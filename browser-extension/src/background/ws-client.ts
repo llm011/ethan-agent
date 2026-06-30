@@ -10,6 +10,10 @@ const PING_INTERVAL_MS = 20_000;
 const KEEPALIVE_ALARM = 'ethan-browser-keepalive';
 const MAX_BACKOFF_MS = 30_000;
 const BASE_BACKOFF_MS = 1_000;
+// 连接需稳定存活这么久，才认为「连成功了」并把退避重置回 base。
+// 防止多浏览器实例争抢单连接（server last-wins）时，被驱逐方刚 auth 就以 1s 疯狂重连，
+// 形成每秒一次的「驱逐风暴」。存活不足此阈值即断开 → 退避继续指数增长 → 风暴自动收敛。
+const STABLE_MS = 5_000;
 
 export interface WsClientConfig {
   serverUrl: string; // 如 ws://localhost:8900/ws/browser
@@ -22,6 +26,7 @@ export class BrowserWsClient {
   private ws: WebSocket | null = null;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private stableTimer: ReturnType<typeof setTimeout> | null = null;
   private backoff = BASE_BACKOFF_MS;
   private authed = false;
   private stopped = false;
@@ -91,6 +96,7 @@ export class BrowserWsClient {
     ws.onclose = () => {
       this.authed = false;
       this.clearPing();
+      this.clearStable();
       if (this.ws === ws) {
         this.ws = null;
       }
@@ -119,8 +125,13 @@ export class BrowserWsClient {
     // 鉴权结果
     if (msg.type === 'auth_ok') {
       this.authed = true;
-      this.backoff = BASE_BACKOFF_MS; // 连接成功，重置退避
       this.startPing();
+      // 不立即重置退避：等连接稳定存活 STABLE_MS 才算「真连上」再重置。
+      // 否则多实例争抢时，被驱逐方刚 auth 就把退避清零、1s 疯狂重连 → 驱逐风暴。
+      this.clearStable();
+      this.stableTimer = setTimeout(() => {
+        this.backoff = BASE_BACKOFF_MS;
+      }, STABLE_MS);
       return;
     }
     if (msg.type === 'pong') {
@@ -169,9 +180,17 @@ export class BrowserWsClient {
     }
   }
 
+  private clearStable(): void {
+    if (this.stableTimer) {
+      clearTimeout(this.stableTimer);
+      this.stableTimer = null;
+    }
+  }
+
   private clearTimers(): void {
     this.clearPing();
     this.clearReconnect();
+    this.clearStable();
   }
 }
 

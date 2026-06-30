@@ -14,6 +14,10 @@ logger = logging.getLogger(__name__)
 _listener_task: asyncio.Task | None = None
 _lark_chat_map: dict[str, str] = {}  # chat_id -> session_id, in-memory cache
 
+# chat_id -> 当前正在处理该 chat 消息的 Agent task。供 /stop 取消进行中的生成。
+# 每条非命令消息开始处理时登记，结束（正常/取消/异常）时清除。
+_lark_running_tasks: dict[str, asyncio.Task] = {}
+
 # 飞书事件投递是 at-least-once：bot 未在超时窗口内 ack（长任务、断线重连重放）会重投同一条事件。
 # 用 message_id 幂等去重，否则同一消息被处理多次（表现为重复回复 / 两份不同的 token 统计）。
 _seen_message_ids: set[str] = set()
@@ -430,35 +434,51 @@ def _lark_client():
     )
 
 
-async def _send_message(chat_id: str, text: str, use_card: bool) -> tuple[str | None, str]:
+async def _send_message(chat_id: str, text: str, use_card: bool, reply_to_msg_id: str = "") -> tuple[str | None, str]:
     """发一条消息（卡片或 post），返回 (message_id, msg_type)。msg_type 为 'interactive' 或 'post'。
 
     use_card=True 发卡片（markdown 渲染，适合复杂回复）；False 发 post（纯文本，适合简短回复）。
     两种类型都支持后续流式编辑（卡片用 patch，post 用 update）。
+    reply_to_msg_id 非空时用 message.reply 锚定到用户那条消息（飞书显示成"引用回复"），否则普通 create。
     """
-    from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
+    from lark_oapi.api.im.v1 import (
+        CreateMessageRequest, CreateMessageRequestBody,
+        ReplyMessageRequest, ReplyMessageRequestBody,
+    )
     client = _lark_client()
     if client is None:
         return None, ""
     msg_type = "interactive" if use_card else "post"
     content = _render_card_content(text) if use_card else _render_post_content(text)
-    req = (
-        CreateMessageRequest.builder()
-        .receive_id_type("chat_id")
-        .request_body(
-            CreateMessageRequestBody.builder()
-            .receive_id(chat_id)
-            .msg_type(msg_type)
-            .content(content)
-            .build()
-        )
-        .build()
-    )
     try:
-        resp = await asyncio.to_thread(client.im.v1.message.create, req)
+        if reply_to_msg_id:
+            req = (
+                ReplyMessageRequest.builder()
+                .message_id(reply_to_msg_id)
+                .request_body(
+                    ReplyMessageRequestBody.builder()
+                    .msg_type(msg_type).content(content).build()
+                )
+                .build()
+            )
+            resp = await asyncio.to_thread(client.im.v1.message.reply, req)
+        else:
+            req = (
+                CreateMessageRequest.builder()
+                .receive_id_type("chat_id")
+                .request_body(
+                    CreateMessageRequestBody.builder()
+                    .receive_id(chat_id)
+                    .msg_type(msg_type)
+                    .content(content)
+                    .build()
+                )
+                .build()
+            )
+            resp = await asyncio.to_thread(client.im.v1.message.create, req)
         if resp.success() and resp.data:
             return resp.data.message_id, msg_type
-        logger.warning("Lark create(%s) failed: code=%s msg=%s", msg_type, resp.code, resp.msg)
+        logger.warning("Lark send(%s) failed: code=%s msg=%s", msg_type, resp.code, resp.msg)
         return None, msg_type
     except Exception:
         logger.exception("Failed to send %s message to chat %s", msg_type, chat_id)
@@ -545,6 +565,70 @@ async def _send_reply(chat_id: str, text: str) -> str | None:
     except Exception:
         logger.exception("Failed to send Lark reply to chat %s", chat_id)
         return None
+
+
+async def _fetch_message_detail(message_id: str) -> dict | None:
+    """用 messages-mget 拉单条消息详情，返回 items[0]（dict）或 None。"""
+    if not message_id:
+        return None
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "lark-cli", "im", "+messages-mget",
+            "--message-ids", message_id,
+            "--as", "bot",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+        data = json.loads(stdout.decode(errors="replace"))
+        if not data.get("ok") and data.get("code") not in (0, None):
+            return None
+        d = data.get("data", {}) or {}
+        items = d.get("items") or (d.get("data", {}) or {}).get("items") or []
+        return items[0] if items else None
+    except Exception:
+        logger.debug("Failed to mget message %s", message_id, exc_info=True)
+        return None
+
+
+def _extract_msg_text(msg: dict) -> str:
+    """从消息详情里抽出可读文本。text 消息的 body.content 是 {"text": "..."} 的 JSON 串。"""
+    body = msg.get("body") or {}
+    raw = body.get("content") if isinstance(body, dict) else None
+    raw = raw or msg.get("content") or msg.get("text") or ""
+    if isinstance(raw, str) and raw.strip().startswith("{"):
+        try:
+            obj = json.loads(raw)
+            # text 类型 → {"text": "..."}；post 等富文本结构复杂，退化为原串
+            if isinstance(obj, dict) and "text" in obj:
+                return str(obj["text"]).strip()
+        except Exception:
+            pass
+    return str(raw).strip()
+
+
+async def _resolve_quoted_text(message_id: str) -> str:
+    """用户引用了某条消息时，返回被引用消息的文本。
+
+    lark-cli 压平的事件里没有 parent_id，需先 mget 当前消息详情，
+    从中找被引用消息 id（parent_id / upper_message_id / root_id），再 mget 那条取文本。
+    任何环节失败返回空串，不阻断主流程。
+    """
+    detail = await _fetch_message_detail(message_id)
+    if not detail:
+        return ""
+    parent_id = (
+        detail.get("parent_id")
+        or detail.get("upper_message_id")
+        or detail.get("root_id")
+        or ""
+    )
+    if not parent_id or parent_id == message_id:
+        return ""
+    parent = await _fetch_message_detail(parent_id)
+    if not parent:
+        return ""
+    return _extract_msg_text(parent)[:1000]
 
 
 async def _handle_message(event_data: dict) -> None:
@@ -751,6 +835,14 @@ async def _handle_message(event_data: dict) -> None:
             finally:
                 await store.close()
 
+        async def _stop_lark_task(cid: str) -> bool:
+            """取消该 chat 进行中的 Agent 生成任务。返回是否真的停了一个。"""
+            t = _lark_running_tasks.get(cid)
+            if t is not None and not t.done():
+                t.cancel()
+                return True
+            return False
+
         cmd_ctx = CommandContext(
             chat_id=chat_id,
             raw_text=text,
@@ -765,6 +857,7 @@ async def _handle_message(event_data: dict) -> None:
             get_model=_get_model,
             get_mode=_get_lark_mode,
             set_mode=_set_lark_mode,
+            stop_task=_stop_lark_task,
         )
         reply = await handle_command(cmd_ctx)
         if reply:
@@ -815,6 +908,15 @@ async def _handle_message(event_data: dict) -> None:
         user_msg = Message(role="user", content=text)
         await store.save_message(session_id, user_msg)
 
+        # 引用消息：lark-cli 压平的事件里没有 parent_id，需用 message_id 先 mget 当前消息详情，
+        # 从详情里找被引用消息 id 再取其文本，拼到本轮发给 agent 的消息里
+        # （只进 agent 上下文，不污染存库的原始 user_msg 和标题）。
+        agent_user_text = text
+        quoted = await _resolve_quoted_text(message_id)
+        if quoted:
+            agent_user_text = f"[用户引用了一条消息]\n> {quoted}\n\n{text}"
+        agent_user_msg = Message(role="user", content=agent_user_text)
+
         # 重建 WorkingMemory：热区最近 5 轮 + cold facts（per-user）
         # 飞书场景每条 assistant 消息体积较大（含工具/思考），5 轮够用且节省 token
         from ethan.memory.working import MemoryConfig, WorkingMemory
@@ -833,7 +935,7 @@ async def _handle_message(event_data: dict) -> None:
         for u, a in pairs[-memory.config.hot_size:]:
             memory.hot.append(u)
             memory.hot.append(a)
-        context_messages = memory.build_context() + [user_msg]
+        context_messages = memory.build_context() + [agent_user_msg]
 
         registry = ToolRegistry()
         from ethan.core.context import set_session_id
@@ -908,19 +1010,33 @@ async def _handle_message(event_data: dict) -> None:
                 return
             content = _render_tool_msg_content(tool_text)
             if tool_msg_id is None:
-                from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
+                from lark_oapi.api.im.v1 import ReplyMessageRequest, ReplyMessageRequestBody
                 client = _lark_client()
                 if client is None:
                     return
-                req = (
-                    CreateMessageRequest.builder()
-                    .receive_id_type("chat_id")
-                    .request_body(
-                        CreateMessageRequestBody.builder()
-                        .receive_id(chat_id).msg_type("post").content(content).build()
-                    ).build()
-                )
-                resp = await asyncio.to_thread(client.im.v1.message.create, req)
+                # 工具进度是首条可见消息时，用 reply 锚定到用户那条消息（引用回复），
+                # 让用户清楚机器人在响应哪条提问。message_id 缺失时退化为普通 create。
+                if message_id:
+                    req = (
+                        ReplyMessageRequest.builder()
+                        .message_id(message_id)
+                        .request_body(
+                            ReplyMessageRequestBody.builder()
+                            .msg_type("post").content(content).build()
+                        ).build()
+                    )
+                    resp = await asyncio.to_thread(client.im.v1.message.reply, req)
+                else:
+                    from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
+                    req = (
+                        CreateMessageRequest.builder()
+                        .receive_id_type("chat_id")
+                        .request_body(
+                            CreateMessageRequestBody.builder()
+                            .receive_id(chat_id).msg_type("post").content(content).build()
+                        ).build()
+                    )
+                    resp = await asyncio.to_thread(client.im.v1.message.create, req)
                 if resp.success() and resp.data:
                     tool_msg_id = resp.data.message_id
                 if reaction_id and message_id:
@@ -958,13 +1074,20 @@ async def _handle_message(event_data: dict) -> None:
             last_flush = _lark_time.time()
             if answer_msg_id is None:
                 answer_created = True
-                answer_msg_id, _ = await _send_message(chat_id, answer_text, use_card=True)
+                # 引用回复：把答案卡片锚定到用户那条消息，飞书显示成"引用回复"，让用户清楚在答哪条
+                answer_msg_id, _ = await _send_message(chat_id, answer_text, use_card=True, reply_to_msg_id=message_id)
                 # 发出首条回答后移除 reaction（若工具进度消息没发出过）
                 if reaction_id and message_id:
                     await _remove_reaction(message_id, reaction_id)
                     reaction_id = None
             else:
                 await _edit_message(answer_msg_id, answer_text, use_card=True)
+
+        # 登记当前生成任务，供 /stop 取消（按 chat_id；同 chat 串行处理，不会互相覆盖）
+        import asyncio as _aio
+        _cur = _aio.current_task()
+        if _cur is not None:
+            _lark_running_tasks[chat_id] = _cur
 
         async for chunk in agent.stream_chat(context_messages):
             if isinstance(chunk, ThinkingEvent):
@@ -1103,15 +1226,45 @@ async def _handle_message(event_data: dict) -> None:
         await store.save_message(session_id, response)
         await store.touch(session_id)
 
+    except asyncio.CancelledError:
+        # 用户 /stop 主动取消：把已生成的部分内容落库并标记「已停止」，清理表情。
+        logger.info("[Lark] generation stopped by user for chat %s", chat_id)
+        try:
+            if reaction_id and message_id:
+                await _remove_reaction(message_id, reaction_id)
+            partial = (answer_text.strip() or tool_text.strip())
+            if partial:
+                stopped_content = partial + "\n\n（已停止）"
+                if answer_msg_id:
+                    await _edit_message(answer_msg_id, stopped_content, use_card=True)
+                stopped_usage = {
+                    "input": agent.usage.input_tokens,
+                    "output": agent.usage.output_tokens,
+                    "cache": agent.usage.cache_tokens,
+                }
+                await store.save_message(session_id, Message(
+                    role="assistant", content=stopped_content,
+                    usage=stopped_usage, tool_steps=collected_tool_steps or [],
+                ))
+                await store.touch(session_id)
+        except Exception:
+            logger.exception("[Lark] error while saving stopped content for chat %s", chat_id)
+        finally:
+            await store.close()
+            _lark_running_tasks.pop(chat_id, None)
+        return
+
     except Exception:
         logger.exception("Agent error handling Lark message")
         # 确保表情被清理
         if reaction_id and message_id:
             await _remove_reaction(message_id, reaction_id)
         await store.close()
+        _lark_running_tasks.pop(chat_id, None)
         return
 
     await store.close()
+    _lark_running_tasks.pop(chat_id, None)
 
 
 async def _event_loop() -> None:
