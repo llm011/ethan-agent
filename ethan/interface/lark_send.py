@@ -383,7 +383,8 @@ async def _fetch_message_detail(message_id: str) -> dict | None:
         if not data.get("ok") and data.get("code") not in (0, None):
             return None
         d = data.get("data", {}) or {}
-        items = d.get("items") or (d.get("data", {}) or {}).get("items") or []
+        # 本版 lark-cli 返回 data.messages；旧结构用 items / data.items 兜底。
+        items = d.get("messages") or d.get("items") or (d.get("data", {}) or {}).get("items") or []
         return items[0] if items else None
     except Exception:
         logger.debug("Failed to mget message %s", message_id, exc_info=True)
@@ -409,15 +410,16 @@ def _extract_msg_text(msg: dict) -> str:
 async def _resolve_quoted_text(message_id: str) -> str:
     """用户引用了某条消息时，返回被引用消息的文本。
 
-    lark-cli 压平的事件里没有 parent_id，需先 mget 当前消息详情，
-    从中找被引用消息 id（parent_id / upper_message_id / root_id），再 mget 那条取文本。
-    任何环节失败返回空串，不阻断主流程。
+    lark-cli 压平的事件里没有引用关系，需先 mget 当前消息详情，从中找被引用消息 id，
+    再 mget 那条取文本。本版 lark-cli 用 reply_to 字段表示引用关系；
+    parent_id / upper_message_id / root_id 作旧结构兜底。任何环节失败返回空串，不阻断主流程。
     """
     detail = await _fetch_message_detail(message_id)
     if not detail:
         return ""
     parent_id = (
-        detail.get("parent_id")
+        detail.get("reply_to")
+        or detail.get("parent_id")
         or detail.get("upper_message_id")
         or detail.get("root_id")
         or ""
