@@ -470,6 +470,7 @@ async def _handle_message(event_data: dict) -> None:
         last_flush = _lark_time.time()
         answer_created = False  # 答案卡片是否已创建
         thinking_shown = False  # 是否已在工具消息里显示了 "🤔 thinking..."
+        tools_used = False      # 本条消息是否已调用过工具（决定正文是否还能乐观发卡片）
         FLUSH_INTERVAL = 2.0
         ANSWER_BUFFER_THRESHOLD = 50  # 纯对话首段缓冲字数，避免孤立短卡片
 
@@ -532,6 +533,11 @@ async def _handle_message(event_data: dict) -> None:
             nonlocal answer_msg_id, answer_text, pending, last_flush, answer_created, reaction_id
             if not pending:
                 return
+            # 工具流程中不乐观发卡片：工具间的零碎 narration 一旦发卡、下个工具 start 又撤回，
+            # 会刷出满屏「撤回了一条消息」。工具用过后只在流结束的 force flush 落最终答案卡片，
+            # 期间 pending 攒着、由工具 start 清掉（最终答案是「最后一次工具之后」那一轮的正文）。
+            if tools_used and not force:
+                return
             # 首段缓冲到阈值再创建卡片，避免 "I" 这种孤立短卡片（force 时跳过该限制）
             if not answer_created and not force and len(pending) < ANSWER_BUFFER_THRESHOLD:
                 return
@@ -589,15 +595,18 @@ async def _handle_message(event_data: dict) -> None:
                         "duration_ms": None,
                         "result_preview": "",
                     })
-                    # 工具开始：丢弃本轮在工具调用前累积的 pending 文字。
+                    # 工具开始：标记本条消息已用工具，并丢弃此前累积的 pending 文字。
                     # 这段文字是「工具前的 narration/思考」（如 "I will read...", 或流式残片 "}"），
                     # 不是最终答案——最终答案在「最后一次工具调用之后」的那一轮，由流结束时的
-                    # force flush 提交。这样既不会把残片 "}" 发成卡片，也不会丢真正的回答。
+                    # force flush 提交。一旦用过工具，_flush_answer 在 force 之前不再发卡片，
+                    # 因此工具流程中不会产生「发卡→撤回」的刷屏。
+                    tools_used = True
                     pending = ""
                     thinking_shown = False
-                    # 关键撤回：如果之前已把某段 narration 提前 flush 成了答案卡片（超过阈值触发），
-                    # 现在又出现工具调用，证明那段是「工具前说明」而非最终答案——删掉它并重置答案状态。
-                    # 否则后续工具间的零碎片段（"I" "The" "Let's"…）会继续追加进这张卡片，拼成乱码。
+                    # 一次性撤回：若在「第一个工具之前」纯对话起头已乐观发出过卡片，
+                    # 现在出现工具调用，说明那段是工具前 narration 而非最终答案——删掉并重置，
+                    # 否则它会和最终答案拼在同一张卡里。tools_used 已置位，之后 _flush_answer
+                    # 在 force 前不再发卡，所以此撤回每条消息最多触发一次，不会刷屏。
                     if answer_created and answer_msg_id:
                         await _delete_message(answer_msg_id)
                         answer_msg_id = None
