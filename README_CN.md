@@ -48,6 +48,7 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 
 **工具系统**
 - Shell 执行、Web 搜索（默认 DuckDuckGo，可配置切换 Tavily）、Web 抓取、文件读写、知识库检索
+- 敏感/副作用操作（shell、写文件、读密钥）执行前请求授权；Web 弹授权卡片、REPL 走 y/N，同一会话授权过一次后不再重复询问
 - 工具结果超 4000 字自动用廉价模型压缩摘要
 - 同参数重复调用自动命中轮次内缓存，不重复执行
 
@@ -388,6 +389,8 @@ class MyTool(BaseTool):
 
 在 `cli.py` 注册后，LLM 会在合适时机自动调用。
 
+内置工具还包括 `ui_card`：把结构化信息渲染成 [A2UI](https://a2ui.org/) 卡片，比纯文字更直观。高频类型（对比 / 排行 / 统计 / 时间轴）走后端固定模板——模型只填结构化数据，样式稳定一致；自定义卡片仍可手写。Web 端用 `@a2ui/react` 渲染，REPL 走文本降级。格式细节放在按需读取的 `ui-card` skill 里，system prompt 保持精简。
+
 ---
 
 ## CLI 命令
@@ -680,6 +683,7 @@ EOF
 - [密钥管理](docs/secrets.md)
 - [记忆系统](docs/memory.md)
 - [Skill 系统](docs/skills.md)
+- [法律专家模式](docs/legal-mode.md)
 - [定时任务](docs/scheduler.md)
 - [接口层](docs/interface.md)
 

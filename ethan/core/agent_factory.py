@@ -25,14 +25,19 @@ from ethan.tools.builtin.secrets import GetSecretTool, ListSecretsTool, SetSecre
 from ethan.tools.builtin.shell import ShellTool
 from ethan.tools.builtin.skill_create import SkillCreateTool
 from ethan.tools.builtin.skill_read import SkillListTool, SkillReadTool
+from ethan.tools.builtin.ui_card import UiCardTool
 from ethan.tools.builtin.web import WebFetchTool
 from ethan.tools.builtin.web_search import WebSearchTool
 from ethan.tools.builtin.browser import BrowserSessionTool, BrowserTabTool, BrowserPageTool
 from ethan.tools.registry import ToolRegistry
 
 
-def build_tool_registry(user_id: str = "", toolset: str = "full") -> ToolRegistry:
-    """构建工具注册表。user_id 透传给需要它的工具（Schedule/Knowledge/Memory 等）。"""
+def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str = "web") -> ToolRegistry:
+    """构建工具注册表。user_id 透传给需要它的工具（Schedule/Knowledge/Memory 等）。
+
+    channel 决定渠道相关工具是否注册：ui_card 仅在能渲染 A2UI 的渠道（web/repl）注册，
+    飞书/api 等无渲染器的渠道不暴露它，避免模型调了卡片却只能看到 ack 文字。
+    """
     registry = ToolRegistry()
     # 基础工具（所有 toolset 共有）
     registry.register(ShellTool())
@@ -75,6 +80,10 @@ def build_tool_registry(user_id: str = "", toolset: str = "full") -> ToolRegistr
     registry.register(BrowserSessionTool())
     registry.register(BrowserTabTool())
     registry.register(BrowserPageTool())
+    # ui_card 仅在能渲染 A2UI 的渠道注册（web/repl）。飞书/api 无渲染器，注册了模型也只会
+    # 拿到 ack 文字、卡片丢失，故不暴露——靠"工具不存在"自然杜绝误用，无需 prompt 约束。
+    if channel in ("web", "repl"):
+        registry.register(UiCardTool())
     # 工具发现元工具：fast 档只广播常驻工具，模型需要长尾能力时用它检索并激活。
     # 持有 registry 引用以便检索；放最后确保它能看到上面注册的全部工具。
     registry.register(FindToolsTool(registry))
@@ -93,7 +102,7 @@ def create_agent(
     if user_id:
         set_user_id(user_id)
     ensure_user_dirs()
-    registry = build_tool_registry(user_id=user_id, toolset=toolset)
+    registry = build_tool_registry(user_id=user_id, toolset=toolset, channel=channel)
     skills = SkillRegistry(user_id=user_id)
     skills.load()
     return Agent(tool_registry=registry, skill_registry=skills, model=model, channel=channel, user_id=user_id, mode=mode)

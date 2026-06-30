@@ -93,6 +93,7 @@ CLI 内部维护 `WorkingMemory` 实例：
 - 所有数据请求走 `ethan serve` 暴露的 FastAPI（默认 `http://localhost:8900`）
 - 流式回复使用 SSE（`/chat` 端点 `stream: true`）
 - 工具调用过程通过 SSE 事件分块推送，前端实时渲染调用详情
+- 生成与连接解耦：一次生成是一个后台 `ChatRun`（`ethan/core/run_manager.py`），SSE 响应只是订阅者。刷新页面断开连接不会中断生成——producer 照常跑完并入库。前端加载会话时若 `active_run` 为真，调 `GET /chat/{id}/stream` 重连，回放缓冲 + 继续实时
 
 ---
 
@@ -111,6 +112,7 @@ CLI 内部维护 `WorkingMemory` 实例：
 | GET | `/health` | 健康检查，返回版本号 |
 | GET | `/models` | 列出所有已配置模型 |
 | POST | `/chat` | 对话（支持 stream），使用 HOT_SIZE=20 滑动窗口截断历史 |
+| GET | `/chat/{session_id}/stream` | 重连仍在进行的生成：回放缓冲 + 继续实时推送；无活跃生成返回 204 |
 | POST | `/knowledge/search` | 语义检索知识库，返回最相关的条目 |
 | GET | `/channels` | 列出所有已配置渠道 |
 | PATCH | `/channels` | 更新渠道配置 |

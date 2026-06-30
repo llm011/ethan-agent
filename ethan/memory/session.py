@@ -44,6 +44,10 @@ def _auto_title(messages: list[Message]) -> str:
     return "新对话"
 
 
+# 首条问题少于该字数视为「太短」，推迟到第 2 轮再生成智能标题
+SHORT_QUESTION_CHARS = 7
+
+
 async def _generate_smart_title(messages: list[Message]) -> str:
     """第 3 轮对话后用廉价模型生成 ≤20 字的简洁标题。"""
     from ethan.providers.manager import create_provider
@@ -67,6 +71,27 @@ async def _generate_smart_title(messages: list[Message]) -> str:
         return title[:20] if title else "新对话"
     except Exception:
         return _auto_title(messages)
+
+
+async def decide_title(messages: list[Message]) -> str | None:
+    """统一的标题策略，返回应设置的标题；返回 None 表示本轮不改标题。
+
+    - 第 1 轮：首条问题 ≥7 字直接生成智能标题；否则先用原文占位。
+    - 第 2 轮：仅当首条问题太短（之前是占位）时补生成智能标题。
+    - 其余轮次：不变。
+    """
+    user_msgs = [m for m in messages if m.role == "user" and m.content]
+    n = len(user_msgs)
+    if n == 1:
+        first = user_msgs[0].content.strip()
+        if len(first) >= SHORT_QUESTION_CHARS:
+            return await _generate_smart_title(messages)
+        return _auto_title(messages)
+    if n == 2:
+        first = user_msgs[0].content.strip()
+        if len(first) < SHORT_QUESTION_CHARS:
+            return await _generate_smart_title(messages)
+    return None
 
 
 class SessionStore:
@@ -105,7 +130,7 @@ class SessionStore:
         """)
         await self._db.commit()
         # Migration: add columns if they don't exist (for existing databases)
-        for col, definition in [("created_at", "REAL"), ("usage", "TEXT"), ("tool_steps", "TEXT"), ("thought", "TEXT"), ("quote", "TEXT")]:
+        for col, definition in [("created_at", "REAL"), ("usage", "TEXT"), ("tool_steps", "TEXT"), ("thought", "TEXT"), ("quote", "TEXT"), ("a2ui", "TEXT")]:
             try:
                 await self._db.execute(f"ALTER TABLE messages ADD COLUMN {col} {definition}")
                 await self._db.commit()
@@ -159,10 +184,11 @@ class SessionStore:
         usage_json = json.dumps(msg.usage) if msg.usage else None
         tool_steps_json = json.dumps(msg.tool_steps) if msg.tool_steps else None
         quote_json = json.dumps(msg.quote, ensure_ascii=False) if msg.quote else None
+        a2ui_json = json.dumps(msg.a2ui, ensure_ascii=False) if msg.a2ui else None
 
         await self._db.execute(
-            "INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (session_id, msg.role, msg.content, tool_calls_json, msg.tool_call_id, msg_created_at, usage_json, tool_steps_json, msg.thought, quote_json),
+            "INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (session_id, msg.role, msg.content, tool_calls_json, msg.tool_call_id, msg_created_at, usage_json, tool_steps_json, msg.thought, quote_json, a2ui_json),
         )
         await self._db.commit()
 
@@ -228,7 +254,7 @@ class SessionStore:
         )
 
         async with self._db.execute(
-            "SELECT role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote FROM messages WHERE session_id = ? ORDER BY id",
+            "SELECT role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui FROM messages WHERE session_id = ? ORDER BY id",
             (session_id,),
         ) as cursor:
             async for r in cursor:
@@ -239,6 +265,7 @@ class SessionStore:
                 usage = json.loads(r[5]) if r[5] else None
                 tool_steps = json.loads(r[6]) if r[6] else []
                 quote = json.loads(r[8]) if len(r) > 8 and r[8] else None
+                a2ui = json.loads(r[9]) if len(r) > 9 and r[9] else None
                 session.messages.append(Message(
                     role=r[0], content=r[1],
                     tool_calls=tool_calls,
@@ -248,6 +275,7 @@ class SessionStore:
                     tool_steps=tool_steps,
                     thought=r[7],
                     quote=quote,
+                    a2ui=a2ui,
                 ))
 
         return session

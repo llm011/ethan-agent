@@ -1,0 +1,183 @@
+---
+name: code-review
+version: 1.0.0
+trigger: "code review|代码审查|review代码|review一下|帮我看看代码|看下代码|审查代码|pr review|diff review|检查代码|代码质量"
+description: "对代码变更做系统性审查：识别 bug、安全漏洞、性能问题。P0 必须修复写评论，P1 建议性评论，P2 只在总结里一句带过。评论定位到具体行，语气友好协作。支持 GitHub/GitLab/纯本地 diff。"
+---
+
+# code-review
+
+系统性代码审查方法论：评级、语气、评论格式。**本 skill 不绑定任何平台**——它教你"怎么审"，而"从哪拿 diff"按平台选对应工具。
+
+## ⚠️ 第一步：按平台拿 diff，不要 clone 整个仓库
+
+看到 PR/MR 链接，先识别平台，用对应 CLI **直接拉 diff 和文件列表**。**绝不要 `git clone` / 在本地找仓库 / 跑测试**——那既慢又跑错目录。
+
+| 平台 | 链接特征 | 用什么 |
+|------|---------|--------|
+| 字节内部 Codebase | `code.byted.org` | `bytedcli`（先 `skill_read(name="bytedance-codebase")` 看命令） |
+| GitHub | `github.com` | `gh pr diff <N>` / `gh api` |
+| GitLab | `*.gitlab.*` 或私有 GitLab | `glab mr diff <N>` |
+| 纯本地改动 | 无链接，说"review 当前改动" | `git diff` / `git diff main...HEAD` |
+
+字节 MR 示例（拿元信息 + 文件列表 + diff，都走 bytedcli，不碰本地仓库）：
+
+```bash
+bytedcli codebase mr get <N> -R "<owner/repo>"
+bytedcli --json codebase mr files <N> -R "<owner/repo>" > /tmp/mr_<N>_files.json
+bytedcli --json codebase mr diff <N> -R "<owner/repo>" > /tmp/mr_<N>.diff
+# 再 file_read 读临时文件（见下方"大 diff 处理"）
+```
+
+## ⚠️ 大型 MR / 大 diff 的处理方式
+
+**直接在 shell 里调 API 会被截断（shell 工具输出上限 8000 字符）。超过这个量的响应必须重定向写文件，再用 `file_read` 读。**
+
+```bash
+# 文件列表 / 完整 diff → 写临时文件 → file_read（offset + limit 分段读）
+<平台命令> > /tmp/mr_<N>_files.json
+<平台命令> > /tmp/mr_<N>.diff
+```
+
+**分批 review 策略**（文件超过 10 个时必须分批，不要一次性灌所有 diff）：
+
+1. 先读文件列表，按影响面排优先级：
+   - 第一批：核心逻辑（业务代码、接口层、数据模型）
+   - 第二批：基础设施（DB schema、配置、依赖变更）
+   - 第三批：其余（工具函数、测试、文档）
+2. 每批 **3-5 个文件**，用平台命令拉单文件 diff 或 `file_read` 临时文件
+3. 每批 review 完输出结论，再继续下一批
+4. 最后汇总所有批次的发现，给出整体总结
+
+> **改动量大时（diff > 几百行 / 文件 > 10 个）先读 [`references/large-diff.md`](references/large-diff.md)**：抓意图、跳噪音、机械改动只审一次、按依赖顺序读、查遗漏——大幅提效的核心方法。
+
+## 审查维度与优先级
+
+### P0 — 必须修复（在 review 评论里指出）
+
+| 维度 | 典型问题 |
+|------|---------|
+| **Correctness** | 逻辑 bug、off-by-one、并发竞态、空指针/nil 崩溃、类型错误 |
+| **Security** | SQL/命令注入、XSS、路径穿越、硬编码密钥、不安全的反序列化、权限绕过 |
+| **Data safety** | 静默丢数据、不可逆操作（无事务保护）、文件覆盖不检查 |
+| **Critical error handling** | 关键路径上异常被吞掉、错误码被忽略 |
+
+### P1 — 建议修复（review 评论里提出，但不阻塞）
+
+| 维度 | 典型问题 |
+|------|---------|
+| **Performance** | N+1 查询、在热路径里做重复 IO、不必要的全量加载 |
+| **Reliability** | 缺少超时/重试、资源未释放（fd、连接、锁） |
+| **API design** | 接口语义不清晰、breaking change 无向后兼容 |
+
+### P2 — 可选（不写 review 评论，最多在总结里一句话带过）
+
+- 命名不够清晰
+- 注释多余或过时
+- 代码风格、格式
+- 小的重构机会
+
+**原则：P2 不出现在评论列表里，避免噪音掩盖真正的问题。**
+
+## 评论格式
+
+每条评论包含：
+1. **定位**：`文件名:行号` 或 `文件名:起始行-结束行`
+2. **一句话问题描述**（语气友好，见下方）
+3. **为什么有风险**（简短说明后果）
+4. **建议修复**（给出具体改法，能给代码片段最好）
+
+示例：
+
+```
+📍 ethan/tools/builtin/shell.py:48
+
+`output[:8000]` 这里硬截断可能把多行内容在中间截断，
+导致 JSON 解析失败（如果调用方 parse stdout 的话）。
+
+建议在换行处截断：
+    if len(output) > 8000:
+        output = output[:8000].rsplit("\n", 1)[0] + "\n...(truncated)"
+```
+
+## 语气指南
+
+**目标**：协作式，而不是审判式。让对方觉得你是在帮他，不是在挑刺。
+
+| ❌ 避免 | ✅ 改用 |
+|--------|--------|
+| "这里有 bug" | "这里有个边界情况值得确认一下" |
+| "你应该用 X" | "可以考虑用 X，这样能避免 Y 问题" |
+| "这个实现是错的" | "这里在 Z 场景下可能会..." |
+| "必须改" | "建议改一下，因为..." |
+| 连续指出 10 个问题 | 只列 P0，P1 简短提一两条 |
+
+**开头**：先快速说一句整体印象（如"整体逻辑清晰，有几个点值得留意"），不要上来就列问题。
+
+**结尾**：如果没有 P0 问题，明确说"没发现阻塞性问题，可以合并"。
+
+## 审查流程
+
+1. **读 diff**：先快速浏览所有改动，建立整体印象（新功能/修 bug/重构？）
+   - diff 超过 20 个文件时，按影响面排优先级：核心逻辑 > 接口层 > 工具函数 > 配置/文档
+2. **读上下文**：对有疑问的地方，拉更多上下文再下结论，不要仅凭 diff 片段判断：
+   - 远程 MR/PR：用平台命令拉完整文件内容或更大范围的 diff
+   - 本地改动：`file_read` 读前后 30 行；必要时 `git log`/`git blame` 看历史背景
+   - 切记：远程 review 时仓库**不在本地**，不要 clone，用平台 API 取内容
+3. **逐维度过**：按 P0 → P1 顺序检查，记录发现
+4. **去重合并**：同一文件相邻的问题合并成一条评论
+5. **输出**：先写一段总体评价（2-3句），再逐条列评论，最后一句话总结
+
+## ⚠️ 渠道适配（重要）
+
+**在飞书 / 微信 / 聊天等即时通讯渠道里，绝不要把完整结构化报告吐进聊天框。** 那会变成一张超长卡片，又乱又难读。聊天渠道的正确做法：
+
+1. **审查过程不要碎碎念**：不要一步步播报"我先加载规范""我这就拉 diff""正在分析…"。安静地把活干完。
+2. **评论发到代码平台的具体行上**（见下方评论发布方式），不堆在聊天里。
+3. **聊天里只回一条简短总结**，例如：
+   > 看完了 MR 6353，发现 2 个 P0（已评论到对应代码行）：① 并发写缺锁 ② SQL 拼接有注入风险。其余没大问题，建议改完这俩再合。
+
+**只有在桌面端 / Web / 用户明确要"完整报告"时**，才输出"整体评价 + 逐条评论 + 总结"的完整结构。
+
+## 评论语言
+
+- 优先**跟仓库语言一致**：代码注释、commit message 用中文 → 评论用中文；用英文 → 用英文
+- 不确定时看 README 或已有 PR 评论的语言风格
+- 用户明确要求某种语言时以用户为准
+
+## 评论发布方式
+
+**评论必须真的发到代码平台上，不要只在聊天里"口头"说哪里能优化。** 用户让你 review，默认就是要你把意见写成 MR/PR 评论。**只有用户明确说"先说给我听""别发评论"时才只在对话里讲。**
+
+**评论以用户身份发出**（平台 CLI 默认走用户 auth）。**优先 inline 评论**（定位到具体代码行），不用笼统的整体评论。
+
+字节 Codebase（用 bytedcli，先 `skill_read(name="bytedance-codebase")` 确认参数）：
+
+```bash
+# 行级评论：draft 带 --position-json 定位，再 publish 发布
+bytedcli codebase mr comment draft <N> -R "<owner/repo>" \
+  --body "这里并发写缺锁，高并发下可能丢更新，加个锁好些？" \
+  --position-json '{"new_path":"src/foo.go","new_line":42}'
+bytedcli codebase mr comment publish <N> -R "<owner/repo>"
+```
+
+GitHub 为例：
+
+```bash
+gh api repos/{owner}/{repo}/pulls/{N} --jq '.head.sha'   # 拿 commit sha
+gh api repos/{owner}/{repo}/pulls/{N}/comments --method POST \
+  --field commit_id="<sha>" --field path="src/foo.py" \
+  --field line=42 --field side="RIGHT" \
+  --field body="这里在并发场景下可能 race，考虑加个锁？"
+```
+
+其他平台（GitLab `glab`、Gerrit 等）原理相同：绑定文件路径 + 行号 + 评论正文。不熟悉参数时先查 `--help`，不要猜。
+
+**纯本地 diff（无代码平台）**：才在对话里按"📍 文件:行号"格式输出评论列表。
+
+## 注意事项
+
+- **不要改你没把握的东西**：看不懂业务背景时，用问句（"这里是不是假设了 X？"）而不是断言
+- **不要重复 diff 已有内容**：不需要复述"这里改了 foo 函数"
+- **测试代码放宽要求**：测试里的 hardcode、简化的 error handling 一般不是 P0
+- **生成代码/迁移文件**：通常跳过，不做 review

@@ -11,6 +11,7 @@ class ToolResult:
     content: str
     is_error: bool = False
     sub_steps: list = field(default_factory=list)  # 委派类工具的子步骤（如 delegate_coding 的 Coding Agent 工具调用）
+    ui: list | None = None  # ui_card 工具产出的 A2UI envelope 列表，透传给前端/REPL 渲染卡片
 
 
 class BaseTool(ABC):
@@ -27,6 +28,23 @@ class BaseTool(ABC):
         返回 None → 放行。默认所有工具放行，子类按参数判定（如 file_read 命中 .secrets/）。
         """
         return None
+
+    def consent_scope(self, **kwargs) -> str:
+        """本次授权的记忆作用域（key）。同一 session 内同 scope 授权过则不再询问。
+
+        默认返回工具名（整工具授权一次）。文件类工具可返回目录路径，使「授权某目录后，
+        其子目录/同目录文件免问」（见 is_granted 的路径子树覆盖逻辑）。
+        """
+        return self.name
+
+    def consent_always(self, **kwargs) -> bool:
+        """本次调用是否【必须】重新询问授权——即使本会话已对该 scope 授权过也绕过记忆。
+        且这种一次性批准不计入会话放行（下次同类仍问）。
+
+        默认 False。用于高危操作（如 shell 的 rm -rf / 管道执行 / 提权），防止「一次授权
+        = 整个会话任意高危命令放行」。
+        """
+        return False
 
     @property
     @abstractmethod

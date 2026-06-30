@@ -133,6 +133,7 @@ export interface SessionDetail {
   model: string;
   source?: string;
   mode?: string;
+  active_run?: boolean;
   messages: {
     role: string;
     content: string;
@@ -423,23 +424,10 @@ export async function deleteProcedure(id: string): Promise<void> {
   await fetch(`${API_URL}/memory/procedures/${id}`, { method: "DELETE", headers: headers() });
 }
 
-export async function* streamChat(
-  messages: ChatMessage[],
-  model?: string,
-  sessionId?: string,
-  quote?: { role: "user" | "assistant"; content: string } | null,
-  mode?: string,
-): AsyncGenerator<{ content?: string; done?: boolean; error?: string; model?: string; usage?: Record<string, number>; tool?: string; args?: string; state?: string; id?: string; duration_ms?: number; result_preview?: string; result_detail?: string; sub_steps?: Array<{ tool: string; args: string; state: string; duration_ms?: number | null; result_preview?: string }>; consent_request?: boolean; request_id?: string; description?: string; detail?: string }> {
-  const res = await fetch(`${API_URL}/chat`, {
-    method: "POST",
-    headers: headers(),
-    body: JSON.stringify({ messages, model, stream: true, session_id: sessionId, quote: quote ?? undefined, mode: mode || undefined }),
-  });
+export type StreamChunk = { content?: string; done?: boolean; error?: string; model?: string; usage?: Record<string, number>; tool?: string; args?: string; state?: string; id?: string; duration_ms?: number; result_preview?: string; result_detail?: string; sub_steps?: Array<{ tool: string; args: string; state: string; duration_ms?: number | null; result_preview?: string }>; ui?: unknown[]; consent_request?: boolean; request_id?: string; description?: string; detail?: string; thinking?: boolean };
 
-  if (!res.ok) {
-    throw new Error(`Chat failed: ${res.status}`);
-  }
-
+/** 把一个 SSE Response body 解析成事件流（streamChat / streamResume 共用）。 */
+async function* parseSSE(res: Response): AsyncGenerator<StreamChunk> {
   const reader = res.body?.getReader();
   if (!reader) throw new Error("No response body");
 
@@ -462,6 +450,36 @@ export async function* streamChat(
       }
     }
   }
+}
+
+export async function* streamChat(
+  messages: ChatMessage[],
+  model?: string,
+  sessionId?: string,
+  quote?: { role: "user" | "assistant"; content: string } | null,
+  mode?: string,
+): AsyncGenerator<StreamChunk> {
+  const res = await fetch(`${API_URL}/chat`, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify({ messages, model, stream: true, session_id: sessionId, quote: quote ?? undefined, mode: mode || undefined }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Chat failed: ${res.status}`);
+  }
+
+  yield* parseSSE(res);
+}
+
+/** 重连一个仍在进行的生成：刷新页面后调此函数，回放缓冲 + 继续实时。
+ *  无活跃 run 时后端返回 204，这里返回 null，调用方走普通 fetchSession。 */
+export async function streamResume(sessionId: string): Promise<AsyncGenerator<StreamChunk> | null> {
+  const res = await fetch(`${API_URL}/chat/${encodeURIComponent(sessionId)}/stream`, {
+    headers: headers(),
+  });
+  if (res.status === 204 || !res.ok) return null;
+  return parseSSE(res);
 }
 
 export interface KnowledgeItem {

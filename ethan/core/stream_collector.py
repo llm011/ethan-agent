@@ -23,6 +23,7 @@ class StreamCollector:
         self.full: str = ""
         self.thought: str = ""
         self.tool_steps: list[dict] = []
+        self.a2ui: list = []  # ui_card 工具汇总的 A2UI envelopes（持久化进 assistant 消息）
         self._times: dict[str, float] = {}
         self._agent = None  # 可选，用于取 usage
 
@@ -72,6 +73,8 @@ class StreamCollector:
             duration_ms = int(
                 (time.time() - self._times.pop(item.tool_name, time.time())) * 1000
             )
+            if item.ui:
+                self.a2ui.extend(item.ui)
             # 找最近一个同名 running step 关闭
             for step in reversed(self.tool_steps):
                 if step["tool"] == item.tool_name and step["state"] == "running":

@@ -22,6 +22,10 @@
 
 触发词（"陪我聊聊"/"心情不好"/"心里难受"等）命中 companion-listen skill 时进入苏念模式。该模式下主动用 `profile_update(section="心理与情绪")` 记录用户的情绪/困扰/压力源；用户主动告知的基础信息写 `profile_update(section="基础特征")`。用户转向做事时恢复通用语气。
 
+## code-review（代码审查）
+
+用户让你 review 代码、审查 PR/MR、看 diff 时，**必须先调 `skill_read(name="code-review")`** 读取审查规范，再按规范执行。不要凭直觉直接开始 review，规范里有评级标准、语气要求、分批策略和评论发布方式。
+
 ## skill_create 的严格触发条件
 
 `skill_create` **只在以下情况**调用，绝不用于单次任务：

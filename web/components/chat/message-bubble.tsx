@@ -8,6 +8,7 @@ import { ToolTimeline } from "@/components/tool-timeline";
 import { fmtTokens } from "@/lib/utils";
 import { CodeBlock } from "@/components/code-block";
 import { PlainCodeBlock } from "@/components/plain-code-block";
+import { A2uiCard } from "./a2ui-card";
 import type { Message } from "./types";
 
 function formatTime(ts?: number) {
@@ -35,9 +36,10 @@ interface MessageBubbleProps {
   isStreaming: boolean;
   isLast: boolean;
   onQuote?: (msg: Message) => void;
+  onCardAction?: (text: string) => void;
 }
 
-export function MessageBubble({ msg, isStreaming, isLast, onQuote }: MessageBubbleProps) {
+export function MessageBubble({ msg, isStreaming, isLast, onQuote, onCardAction }: MessageBubbleProps) {
   return (
     <div className={`group flex ${msg.role === "user" ? "justify-end" : "justify-start"} gap-2`}>
       {msg.role === "assistant" && (
@@ -119,6 +121,9 @@ export function MessageBubble({ msg, isStreaming, isLast, onQuote }: MessageBubb
             >
               {fixBold(msg.content)}
             </ReactMarkdown>
+            {msg.a2ui && msg.a2ui.length > 0 && (
+              <A2uiCard surfaces={msg.a2ui} onAction={onCardAction} />
+            )}
             <div className="flex justify-end items-center mt-2 gap-1.5 text-[10px] text-muted-foreground/35 tabular-nums">
               {msg.created_at && <span>{formatTime(msg.created_at)}</span>}
               {msg.usage && (

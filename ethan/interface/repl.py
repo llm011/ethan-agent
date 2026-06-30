@@ -26,7 +26,7 @@ from ethan.core.config import get_config
 from ethan.memory.consolidator import Consolidator
 from ethan.memory.episodic import EpisodeStore
 from ethan.memory.facts import FactStore
-from ethan.memory.session import Session, SessionStore, _auto_title, _generate_smart_title
+from ethan.memory.session import Session, SessionStore, decide_title
 from ethan.memory.working import MemoryConfig, WorkingMemory
 from ethan.providers.base import Message
 
@@ -211,9 +211,8 @@ async def run_once(agent: Agent, prompt: str) -> None:
     spinner = Live(Spinner("dots", text="thinking...", style="dim"), console=console, transient=True)
     spinner.start()
     spinner_stopped = False
-    render_live = Live(console=console, refresh_per_second=8, vertical_overflow="visible")
+    render_live = Live(console=console, refresh_per_second=8, transient=True)
     render_started = False
-    direct_mode = False  # 长文本超过阈值后直接增量打印，不再用 Live 重渲染
     full = ""
     after_tool = False  # 上一条输出是工具调用行，后续文字前需加空行
 
@@ -227,6 +226,9 @@ async def run_once(agent: Agent, prompt: str) -> None:
                     spinner_stopped = True
                 if render_started:
                     render_live.stop()
+                    if full.strip():
+                        console.print(RichMarkdown(full))
+                    full = ""
                     render_started = False
                     console.print()
                 args = f"({item.args_summary})" if item.args_summary else ""
@@ -237,6 +239,17 @@ async def run_once(agent: Agent, prompt: str) -> None:
                     # 委派类工具（如 delegate_coding）的子步骤摘要
                     ok = sum(1 for s in item.sub_steps if s.get("state") == "done")
                     console.print(f"[dim]   ↳ {len(item.sub_steps)} 步工具调用（{ok} 成功）[/dim]")
+                # A2UI 卡片：ui_card 工具产出的 envelope，文本降级渲染
+                if getattr(item, "ui", None):
+                    try:
+                        from ethan.interface.a2ui_text import render_a2ui
+                        card = render_a2ui(item.ui)
+                        if card is not None:
+                            console.print(card)
+                            after_tool = True
+                            continue
+                    except Exception:
+                        pass
                 if item.result_preview:
                     prefix = "  → " if item.state == "done" else "  ✗ "
                     console.print(f"[dim]{prefix}{item.result_preview}[/dim]", soft_wrap=True)
@@ -246,25 +259,18 @@ async def run_once(agent: Agent, prompt: str) -> None:
             spinner.stop()
             spinner_stopped = True
         full += item
-        if direct_mode:
-            console.print(item, end="", highlight=False, soft_wrap=True)
-            continue
         if not render_started:
             if after_tool:
                 console.print()
+                after_tool = False
             render_live.start()
             render_started = True
         render_live.update(RichMarkdown(full))
-        # 超过阈值：提交 Live，切到直接打印（防 Rich Live 超长内容重复刷屏）
-        if full.count("\n") >= 12:
-            render_live.stop()
-            render_started = False
-            direct_mode = True
 
     if render_started:
         render_live.stop()
-    if direct_mode:
-        console.print()
+        if full.strip():
+            console.print(RichMarkdown(full))
     if not spinner_stopped:
         spinner.stop()
     if full:
@@ -509,9 +515,11 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
     start_time = time.time()
     uid = getattr(agent, "_user_id", "") or ""
 
-    # 注入 TUI 授权 provider（敏感操作时 y/N 确认）
+    # 注入 TUI 授权 provider（敏感操作时 y/N 确认）。持有引用以便随 session 切换更新
+    # session_id —— 同一会话内同工具授权过不再重复询问（与 Web 一致）。
     from ethan.core.consent import TuiConsentProvider, set_consent_provider
-    set_consent_provider(TuiConsentProvider(console=console))
+    consent_provider = TuiConsentProvider(console=console)
+    set_consent_provider(consent_provider)
 
     from ethan.core.paths import user_sessions_db_path
     store = SessionStore(db_path=user_sessions_db_path())
@@ -546,6 +554,9 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
         session_persisted = False
 
     _banner()
+
+    # 当前 session 确定后，绑定到 consent provider 做 session 维度授权记忆
+    consent_provider.session_id = session.id
 
     # ── Provider setup (runs any time no API key is configured) ──
     from ethan.core.onboarding import is_first_time, needs_provider_setup, ONBOARDING_MESSAGE
@@ -709,6 +720,7 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
                 session = result
                 session_persisted = True  # /resume 和 /new 返回的都是已持久化的 session
                 agent._mode = getattr(session, "mode", "") or ""  # 切会话同步模式
+                consent_provider.session_id = session.id  # 切换会话同步授权记忆作用域
                 history = list(session.messages)
                 approx_tokens = sum(len(m.content) for m in history)
                 model_id = session.model
@@ -744,18 +756,14 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
         await store.save_message(session.id, msg)
         approx_tokens += len(user_input)
 
-        # 第一条用户消息时用 _auto_title 占位；第 2 轮后改用智能标题
-        user_msgs = [m for m in history if m.role == "user"]
-        if len(user_msgs) == 1:
-            title = _auto_title(history)
-            await store.update_title(session.id, title)
-            session.title = title
-        elif len(user_msgs) == 2:
-            async def _regen_title():
-                t = await _generate_smart_title(history)
+        # 标题策略：见 ethan.memory.session.decide_title（短问题推迟到第 2 轮）
+        title_snapshot = list(history)
+        async def _set_title():
+            t = await decide_title(title_snapshot)
+            if t and t != session.title:
                 await store.update_title(session.id, t)
                 session.title = t
-            asyncio.create_task(_regen_title())
+        asyncio.create_task(_set_title())
 
         full = ""
         thought = ""
@@ -780,8 +788,9 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
         async def _consume_stream():
             nonlocal full, thought, first_chunk, first_item, ttft, last_was_tool
             from ethan.providers.base import ToolEvent, ThinkingEvent
-            render_live = Live(console=console, refresh_per_second=8, vertical_overflow="visible")
-            direct_mode = False  # 长文本超过阈值后直接增量打印，不再用 Live 重渲染（防 Rich 溢出重复刷屏）
+            # transient=True：流式中原地更新（只渲染可见窗口，超长不重复刷屏），
+            # 结束/切工具时擦除流式帧、再一次性 print 完整 markdown，保证层级稳定且不丢内容。
+            render_live = Live(console=console, refresh_per_second=8, transient=True)
             try:
                 async for item in agent.stream_chat(context):
                     if isinstance(item, ThinkingEvent):
@@ -810,6 +819,17 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
                             if item.sub_steps:
                                 ok = sum(1 for s in item.sub_steps if s.get("state") == "done")
                                 console.print(f"[dim]   ↳ {len(item.sub_steps)} 步工具调用（{ok} 成功）[/dim]")
+                            # A2UI 卡片：ui_card 工具产出的 envelope，用文本降级渲染器画成 Panel
+                            if getattr(item, "ui", None):
+                                try:
+                                    from ethan.interface.a2ui_text import render_a2ui
+                                    card = render_a2ui(item.ui)
+                                    if card is not None:
+                                        console.print(card)
+                                        last_was_tool = True
+                                        continue
+                                except Exception:
+                                    pass
                             # 展示结果预览（shell/file_read 等的输出摘要），让用户看到工具做了什么
                             if item.result_preview:
                                 prefix = "  → " if item.state == "done" else "  ✗ "
@@ -826,26 +846,20 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
                         live.stop()
                         first_chunk = False
                     full += item
-                    if direct_mode:
-                        # 长文本：直接增量打印，不再 Live 重渲染
-                        console.print(item, end="", highlight=False, soft_wrap=True)
-                    else:
-                        if not render_live.is_started:
-                            if last_was_tool:
-                                console.print()
-                                last_was_tool = False
-                            render_live.start()
-                        render_live.update(RichMarkdown(full))
-                        # 超过阈值：Live 内容提交（transient=False 会保留），切到直接打印
-                        # 避免 Rich Live 无法原地更新超长内容导致整块重复打印
-                        if full.count("\n") >= 12:
-                            render_live.stop()
-                            direct_mode = True
+                    # 全程用 markdown 渲染，保持标题/列表层级稳定，不再超长切纯文本
+                    # （切纯文本是之前输出"混在一起"的主因）。流式帧用 transient Live，
+                    # 结束/切工具时擦除并一次性 print 完整 markdown。
+                    if not render_live.is_started:
+                        if last_was_tool:
+                            console.print()
+                            last_was_tool = False
+                        render_live.start()
+                    render_live.update(RichMarkdown(full))
             finally:
                 if render_live.is_started:
-                    render_live.stop()
-                if direct_mode:
-                    console.print()  # 直接打印模式结尾补换行
+                    render_live.stop()  # transient：擦除流式帧
+                    if full.strip():
+                        console.print(RichMarkdown(full))  # 一次性提交最终 markdown，层级稳定且保留在屏
                 if first_chunk:
                     live.stop()
 

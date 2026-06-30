@@ -140,8 +140,11 @@ def all_secret_values(min_len: int = _MIN_MASK_LEN) -> list[str]:
 
 
 def _mask_one(value: str) -> str:
-    """abcd1234 -> abcd****（保留前 4 字符，便于辨认是哪个 key，但不可用）。"""
+    """脱敏显示。仅当值足够长（>= 20）才露头尾各 4 字符辅助辨认（中间至少藏 12 位，
+    不可暴力还原）；较短的值一律只留头部，避免头尾相接把大半串都露出来。"""
     head = value[:4]
+    if len(value) >= 20:
+        return f"{head}****{value[-4:]}"
     return f"{head}****"
 
 

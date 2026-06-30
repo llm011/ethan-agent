@@ -33,6 +33,7 @@ class ConsentEvent:
 class ConsentProvider:
     """授权提供者基类。"""
     streamed: bool = False  # True = 需要向流注入 ConsentEvent（Web）
+    session_id: str = ""    # 所属会话；用于 session 维度授权记忆（同会话同工具授权过不再弹）
 
     async def request(self, description: str, tool: str = "", detail: str = "") -> bool:
         """请求授权，返回是否允许。streamed=True 时由 Agent 调 create() + await。"""
@@ -80,8 +81,9 @@ class WebConsentProvider(ConsentProvider):
     """Web 模式：创建 Future，Agent yield ConsentEvent 后 await。前端 POST 解析。"""
     streamed = True
 
-    def __init__(self):
+    def __init__(self, session_id: str = ""):
         self._pending: dict[str, asyncio.Future] = {}
+        self.session_id = session_id
 
     def create(self, description: str, tool: str = "", detail: str = "") -> tuple[ConsentEvent, asyncio.Future]:
         req_id = _secrets.token_hex(8)
@@ -142,6 +144,44 @@ class ChannelGuardProvider(ConsentProvider):
 
 # 全局注册表：request_id → WebConsentProvider，跨请求供 /consent 端点查找
 _REGISTRY: dict[str, WebConsentProvider] = {}
+
+# session 维度授权记忆：{session_id: {scope, ...}}。scope 由工具的 consent_scope() 决定——
+# 默认是工具名（整工具授权一次），文件类工具返回目录路径（目录授权后子目录免问）。
+_SESSION_GRANTS: dict[str, set[str]] = {}
+
+
+def is_granted(session_id: str, scope: str) -> bool:
+    """该 session 是否已对此 scope 授权过。
+
+    - 路径型 scope（以 / 开头）：被任一已授权的祖先目录覆盖即算授权
+      （授权 /a/b 后，/a/b 及 /a/b/c 等子目录都放行）。
+    - 非路径 scope（工具名、get_secret 等）：精确匹配。
+    """
+    if not session_id or not scope:
+        return False
+    granted = _SESSION_GRANTS.get(session_id, set())
+    if scope in granted:
+        return True
+    if scope.startswith("/"):
+        from pathlib import Path
+        sp = Path(scope)
+        for g in granted:
+            if g.startswith("/"):
+                gp = Path(g)
+                if gp == sp or gp in sp.parents:
+                    return True
+    return False
+
+
+def record_grant(session_id: str, scope: str) -> None:
+    """记录一次 session 维度授权（scope = 工具名 或 目录路径）。"""
+    if session_id and scope:
+        _SESSION_GRANTS.setdefault(session_id, set()).add(scope)
+
+
+def clear_session_grants(session_id: str) -> None:
+    """清除某 session 的授权记忆（会话删除时调用）。"""
+    _SESSION_GRANTS.pop(session_id, None)
 
 
 def resolve_consent(request_id: str, allowed: bool) -> bool:

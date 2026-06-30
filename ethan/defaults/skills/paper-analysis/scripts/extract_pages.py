@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """把 PDF 拆成「逐页」素材，供 Map 阶段逐页精读。
 
-每页产出两样东西：
-  - page_NNN.png   渲染图（让多模态模型能看到图表/架构图/公式排版）
-  - 一份 manifest.json，含每页的 text（嵌入文字层）+ png 路径
+每页产出：
+  - page_NNN.png        渲染图（让多模态模型能看到图表/架构图/公式排版）
+  - text/page_NNN.txt   该页纯文字层（路径 B 直接 file_read，无需自己写 python 拼文本）
+  - 一份 manifest.json，含每页的 text（嵌入文字层）+ png + txt 路径
 
 依赖 PyMuPDF（fitz）。本仓库未把它列为运行时依赖，因此推荐用：
     uv run --with pymupdf python extract_pages.py <pdf> [--out-dir DIR] [--dpi 150]
@@ -88,6 +89,8 @@ def main() -> int:
 
     out_dir = Path(args.out_dir) if args.out_dir else pdf_path.with_suffix("").parent / f"{pdf_path.stem}_pages"
     out_dir.mkdir(parents=True, exist_ok=True)
+    text_dir = out_dir / "text"
+    text_dir.mkdir(parents=True, exist_ok=True)
 
     doc = fitz.open(str(pdf_path))
     total = doc.page_count
@@ -102,9 +105,14 @@ def main() -> int:
         png_path = out_dir / f"page_{i + 1:03d}.png"
         pix = page.get_pixmap(matrix=matrix)
         pix.save(str(png_path))
+        # 路径 B：把每页文字层单独落盘，模型直接 file_read 即可，
+        # 不必对着 manifest 的嵌套 JSON 即兴写 python 拼文本（易踩 f-string/grep- 等坑）。
+        txt_path = text_dir / f"page_{i + 1:03d}.txt"
+        txt_path.write_text(text, encoding="utf-8")
         pages.append({
             "page": i + 1,
             "png": str(png_path.resolve()),
+            "txt": str(txt_path.resolve()),
             "text": text,
             "char_count": len(text),
         })
@@ -130,6 +138,7 @@ def main() -> int:
         "references_start_page": refs_start,
         "max_pages": (args.max_pages if args.max_pages > 0 else total),
         "dpi": args.dpi,
+        "text_dir": str(text_dir.resolve()),
         "pages": pages,
     }
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -141,7 +150,8 @@ def main() -> int:
         "effective_pages": effective,
         "references_start_page": refs_start,
         "manifest": str(manifest_path.resolve()),
-        "pages": [{"page": p["page"], "png": p["png"], "char_count": p["char_count"]} for p in pages],
+        "text_dir": str(text_dir.resolve()),
+        "pages": [{"page": p["page"], "png": p["png"], "txt": p["txt"], "char_count": p["char_count"]} for p in pages],
     }
     print(json.dumps(summary, ensure_ascii=False))
     return 0

@@ -688,17 +688,29 @@ class Agent:
                 # (2) consent 确认：工具自身声明需要授权时（如读密钥）走交互/拒绝流程。
                 desc = tool.consent_check(**tc.arguments) if tool else None
                 if desc:
+                    # session 维度授权记忆：按 consent_scope 粒度（工具名 或 目录路径）记忆，
+                    # 同会话内此 scope 已授权过则直接放行（目录授权后子目录免问）。
+                    # 但 consent_always=True 的高危调用（如 rm -rf）绕过记忆，每次都问、且不记入放行。
+                    from ethan.core.consent import is_granted, record_grant
+                    sess_id = getattr(consent_provider, "session_id", "") if consent_provider else ""
+                    scope = tool.consent_scope(**tc.arguments) if tool else tc.name
+                    always = tool.consent_always(**tc.arguments) if tool else False
+                    if not always and is_granted(sess_id, scope):
+                        allowed_calls.append(tc)
+                        yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary=_format_args(tc.arguments), state="start")
+                        continue
                     detail = _format_args(tc.arguments)
                     ok = True
                     if consent_provider is None:
                         ok = True
                     elif consent_provider.streamed:
-                        # Web：向流注入 ConsentEvent，await 前端响应
+                        # Web：向流注入 ConsentEvent，await 前端响应（加超时兜底，
+                        # 避免用户一直不点导致 producer 永久挂起、run 不结束）
                         event, fut = consent_provider.create(desc, tc.name, detail)
                         yield event
                         try:
-                            ok = await fut
-                        except _aio.CancelledError:
+                            ok = await _aio.wait_for(fut, timeout=300)
+                        except (_aio.CancelledError, _aio.TimeoutError):
                             ok = False
                     else:
                         ok = await consent_provider.request(desc, tc.name, detail)
@@ -711,15 +723,22 @@ class Agent:
                             tool_call_id=tc.id,
                         ))
                         continue
+                    # 授权通过：记录到 session 维度（按 scope），后续同 scope 不再弹。
+                    # 高危调用（always）不记入放行，下次同类仍单独询问。
+                    if not always:
+                        record_grant(sess_id, scope)
                 allowed_calls.append(tc)
                 yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary=_format_args(tc.arguments), state="start")
 
             results: list[ToolResult] = await self._executor.execute(allowed_calls) if allowed_calls else []
 
             for r, tc in zip(results, allowed_calls):
-                preview = _preview(r.content) if r.content else ""
-                detail = _detail(r.content) if r.content else ""
-                yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary="", state="done" if not r.is_error else "error", result_preview=preview, result_detail=detail, sub_steps=getattr(r, "sub_steps", []) or [])
+                # content 原文进模型上下文（get_secret 取出的 key Agent 要能用）；
+                # 但展示用的 preview/detail 一律过掩码，避免明文 secret 在 UI 里露出。
+                from ethan.core.secrets_store import mask_text
+                preview = mask_text(_preview(r.content)) if r.content else ""
+                detail = mask_text(_detail(r.content)) if r.content else ""
+                yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary="", state="done" if not r.is_error else "error", result_preview=preview, result_detail=detail, sub_steps=getattr(r, "sub_steps", []) or [], ui=getattr(r, "ui", None))
                 working.append(Message(
                     role="tool",
                     content=r.content,
