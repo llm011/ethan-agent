@@ -110,13 +110,35 @@ async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
         messages[-1] = _with_quote(messages[-1], req.quote)
 
     if req.stream:
-        # 镜像会话续接：source=codex/claude/opencode 的会话，用户直接发消息时不走普通
-        # chat 模型，而是把消息当新 prompt 续接对应的 coding agent（resume），过程实时
-        # 推回这条会话。靠 acp 的 mirrorinfo 映射识别。
+        from ethan.core.run_manager import RunManager
+
+        # (1) 沉浸式工具模式：会话 mode 解析出 delegate_agent 时，整条会话的每句话都
+        #     直接续接该 coding agent（同一工具 session），不走 Ethan chat 模型。
+        #     工作目录按会话隔离（~/.ethan/agent-sessions/<会话id>）。
+        from ethan.core.modes import resolve_mode
+        from ethan.core.paths import user_agent_session_dir
+        _mode = resolve_mode(req.mode)
+        if _mode.delegate_agent and req.session_id:
+            import os as _os
+            cwd = str(user_agent_session_dir(req.session_id))
+            _os.makedirs(cwd, exist_ok=True)
+            prompt = (req.messages[-1].get("content", "") if req.messages else "").strip()
+            run = RunManager.instance().create(req.session_id, user_id=user_id)
+            run.task = asyncio.create_task(
+                _run_delegate_generation(run, prompt, _mode.delegate_agent, cwd,
+                                         store, req.session_id, user_id)
+            )
+            return StreamingResponse(
+                _sse_from_run(run),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
+
+        # (2) 镜像会话续接：source=codex/claude/opencode 的临时委派会话，用户直接发消息
+        #     时把消息当新 prompt 续接对应 coding agent（resume），过程实时推回该会话。
         from ethan.acp import get_mirror_info
         minfo = get_mirror_info(req.session_id or "", user_id=user_id)
         if minfo and req.session_id:
-            from ethan.core.run_manager import RunManager
             prompt = (req.messages[-1].get("content", "") if req.messages else "").strip()
             run = RunManager.instance().create(req.session_id, user_id=user_id)
             run.task = asyncio.create_task(
@@ -129,11 +151,10 @@ async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )
 
-        # 生成与连接解耦：把 agent.stream_chat 放进后台 producer 任务，事件写入
-        # ChatRun 缓冲并扇出给订阅者。SSE 响应只是一个订阅者，断开（刷新）只退订，
+        # (3) 普通 chat：生成与连接解耦——把 agent.stream_chat 放进后台 producer 任务，
+        # 事件写入 ChatRun 缓冲并扇出给订阅者。SSE 响应只是一个订阅者，断开（刷新）只退订，
         # 不影响 producer——生成照常跑完并入库。刷新后可经 GET /chat/{id}/stream 重连回放。
         from ethan.core.consent import WebConsentProvider
-        from ethan.core.run_manager import RunManager
 
         consent = WebConsentProvider(session_id=req.session_id or "")
         manager = RunManager.instance()

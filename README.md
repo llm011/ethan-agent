@@ -577,7 +577,8 @@ Environment variables in `.env` override config values (useful for secrets).
 
 **Coding Agent Integration**
 - [x] **ACP multi-turn optimization**: `delegate_coding` resumes coding-agent sessions per (agent × working_dir). All three backends (Claude Code / OpenCode / Codex) run as JSON event streams with session resume, parsed into collapsible sub-steps in the Web UI tool timeline with highlighted final result. Codex reuses Ethan's cliproxy provider; timeouts terminate gracefully and clear the session to avoid resuming a stuck thread
-- [x] **Mirror sessions**: each `delegate()` becomes a real Ethan session (`source="delegate"`) recording the dispatched query + coding-agent reply + steps, registered as a RunManager run so the delegated conversation can be watched live via SSE
+- [x] **Mirror sessions**: each `delegate()` becomes a real Ethan session (`source` = the actual tool: codex/claude/opencode) recording the dispatched query + coding-agent reply + steps, registered as a RunManager run so the delegated conversation can be watched live via SSE
+- [x] **Immersive tool modes**: switch the conversation mode to Codex / Claude Code / OpenCode; once switched, every message in that session continues the same tool (same tool session, per-session working dir). Supports both ad-hoc delegation and immersive continuous conversation. Messaging a mirror session also auto-resumes the matching tool
 - [ ] **MCP client**: connect external MCP servers, auto-register tools
 
 **Long-term**
