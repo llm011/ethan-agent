@@ -148,6 +148,45 @@ def clear_session(cwd: str, user_id: str = "", agent: str = "claude") -> None:
     _save_sessions(sessions, user_id)
 
 
+# ── 镜像会话映射：(agent, cwd) → Ethan 会话 id ──────────────────────────
+# 让同一个 (agent, cwd) 的连续多轮委派累加到同一条 Ethan 镜像 session（多轮对话），
+# 而不是每次新建一条。与 coding-agent 的 session_id 分开存（不同 key 前缀）。
+
+def _mirror_key(cwd: str, agent: str) -> str:
+    return f"mirror::{agent}::{os.path.abspath(cwd)}"
+
+
+def get_mirror_session(cwd: str, user_id: str = "", agent: str = "claude") -> Optional[str]:
+    return _load_sessions(user_id).get(_mirror_key(cwd, agent))
+
+
+def set_mirror_session(cwd: str, session_id: str, user_id: str = "", agent: str = "claude") -> None:
+    sessions = _load_sessions(user_id)
+    sessions[_mirror_key(cwd, agent)] = session_id
+    _save_sessions(sessions, user_id)
+
+
+def clear_mirror_session(cwd: str, user_id: str = "", agent: str = "claude") -> None:
+    sessions = _load_sessions(user_id)
+    sessions.pop(_mirror_key(cwd, agent), None)
+    _save_sessions(sessions, user_id)
+
+
+# 反向映射：Ethan 镜像会话 id → (agent, cwd)。
+# 用户直接在某条镜像会话里发消息时，据此查出该续接哪个 coding agent 的哪个 cwd。
+
+def set_mirror_info(session_id: str, agent: str, cwd: str, user_id: str = "") -> None:
+    sessions = _load_sessions(user_id)
+    sessions[f"mirrorinfo::{session_id}"] = {"agent": agent, "cwd": os.path.abspath(cwd)}
+    _save_sessions(sessions, user_id)
+
+
+def get_mirror_info(session_id: str, user_id: str = "") -> Optional[dict]:
+    """返回 {"agent", "cwd"}，非镜像会话返回 None。"""
+    info = _load_sessions(user_id).get(f"mirrorinfo::{session_id}")
+    return info if isinstance(info, dict) else None
+
+
 # ── 参数摘要 ──────────────────────────────────────────────────────────
 
 def _summarize_args(tool_input: dict) -> str:
@@ -661,6 +700,7 @@ async def delegate(
     reset_session: bool = False,
     user_id: str = "",
     mirror: bool = True,
+    on_event: Optional[callable] = None,
 ) -> ACPResult:
     """Delegate a task to the best available local coding agent.
 
@@ -668,6 +708,8 @@ async def delegate(
         resume: 是否续接该 cwd 上次的 Coding Agent 会话（多轮）。
         reset_session: 清除该 cwd 的会话记忆，从新会话开始。
         mirror: 是否把本次委派落成一条 Ethan 镜像 session（query+回复+步骤可在 web 回看）。
+        on_event: 可选的额外事件回调（step/text）。镜像会话里「直接发消息续接」时，
+                  路由传入它把过程实时推进那条会话的 ChatRun。
     """
     work_dir = cwd or str(Path.cwd())
 
@@ -686,14 +728,26 @@ async def delegate(
     mirror_session = None
     if mirror and agent_name != "none":
         from ethan.acp.mirror import MirrorSession
+        # reset_session 同样作用于镜像会话：新建一条，而不是续接到上一条多轮里。
         mirror_session = await MirrorSession.start(
             agent=agent_name, task=prompt, cwd=work_dir, user_id=user_id,
+            reuse=not reset_session,
         )
 
-    on_event = mirror_session.on_event if mirror_session is not None else None
+    # 事件回调：镜像会话自己的 + 调用方传入的（如「在镜像会话里直接发消息」走 chat 路由
+    # 时，由路由传入 on_event 把过程实时推进那条会话的 ChatRun）。两者都触发。
+    async def _combined_on_event(etype, data):
+        if mirror_session is not None:
+            await mirror_session.on_event(etype, data)
+        if on_event is not None:
+            r = on_event(etype, data)
+            if hasattr(r, "__await__"):
+                await r
+
+    dispatch_on_event = _combined_on_event if (mirror_session is not None or on_event is not None) else None
     result = await _dispatch(
         prompt, work_dir, prefer, timeout, resume, reset_session, user_id, agent_name,
-        on_event=on_event,
+        on_event=dispatch_on_event,
     )
 
     if mirror_session is not None:

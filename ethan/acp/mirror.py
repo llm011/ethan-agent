@@ -4,9 +4,11 @@
 希望在 Ethan 侧也有一条对应会话，能看到下发的 query、Coding Agent 的回复、以及中间
 工具步骤——而不只是主对话里一行 delegate_coding 工具结果。
 
-粒度：每次 delegate() 调用 = 一条镜像 session（source="delegate"）。
-- user 消息 = 下发给 Coding Agent 的 query
-- assistant 消息 = Coding Agent 的最终回复 + tool_steps（由 sub_steps 转来）
+粒度：同一 (agent, cwd) 的连续多轮委派累加到同一条 Ethan 镜像 session（多轮对话）；
+切换任务（reset_session）时新建一条。source 用真实 coding agent 名（codex/claude/
+opencode），web 侧边栏渠道徽标据此显示是哪个工具。
+- user 消息 = 每一轮下发给 Coding Agent 的 query
+- assistant 消息 = 每一轮 Coding Agent 的最终回复 + tool_steps（由 sub_steps 转来）
 
 持久化走 per-user 的 SessionStore（user_sessions_db_path），与普通 web 会话同库，
 因此 web 侧边栏天然能列出它（source 过滤可区分）。本模块只负责「写」，不依赖任何
@@ -22,9 +24,10 @@ logger = logging.getLogger(__name__)
 
 
 def _title_for(agent: str, task: str) -> str:
+    # source 徽标已显示是哪个 coding agent，标题不再重复前缀，直接用任务摘要。
     head = task.strip().replace("\n", " ")
-    head = head[:30] + ("…" if len(head) > 30 else "")
-    return f"[{agent}] {head}" if head else f"[{agent}] 委派任务"
+    head = head[:36] + ("…" if len(head) > 36 else "")
+    return head or f"{agent} 委派任务"
 
 
 class MirrorSession:
@@ -101,34 +104,71 @@ class MirrorSession:
         user_id: str = "",
         model: str = "",
         register_run: bool = True,
+        reuse: bool = True,
     ) -> Optional["MirrorSession"]:
-        """创建镜像 session。register_run=True 时同时在 RunManager 注册一个 ChatRun，
-        使委派过程可经 web `/chat/{session_id}/stream` 实时 attach（query 已落库，
-        assistant 文本/步骤经 on_event 实时 emit）。"""
+        """创建/续接镜像 session。
+
+        source 用真实的 coding agent 名（codex/claude/opencode），让 web 侧边栏
+        的渠道徽标直接显示是哪个工具，而不是笼统的 "delegate"。
+
+        reuse=True（默认）：同一 (agent, cwd) 的连续委派累加到同一条 Ethan 会话
+        （多轮对话）；只在该会话仍存在于库中时复用，否则新建。reuse=False（对应
+        reset_session）：强制新建一条，并刷新映射。
+
+        register_run=True 时同时在 RunManager 注册一个 ChatRun，使委派过程可经 web
+        `/chat/{session_id}/stream` 实时 attach（query 已落库，assistant 文本/步骤
+        经 on_event 实时 emit）。
+        """
         store = None
         try:
             from ethan.memory.session import SessionStore
             from ethan.core.paths import user_sessions_db_path
             from ethan.providers.base import Message
+            from ethan.acp import get_mirror_session, set_mirror_session, set_mirror_info
 
             store = SessionStore(db_path=user_sessions_db_path())
             await store.init()
-            session = await store.create(model=model or agent, source="delegate")
-            await store.update_title(session.id, _title_for(agent, task))
-            # 下发的 query 作为 user 消息落库
-            await store.save_message(session.id, Message(
+
+            session_id = None
+            if reuse:
+                prev = get_mirror_session(cwd, user_id=user_id, agent=agent)
+                if prev and await store.load(prev) is not None:
+                    session_id = prev  # 续接已有镜像会话（多轮）
+
+            if session_id is None:
+                # session.model 必须是一个「实在的、可用于 chat 的模型」。
+                # 不能用 agent 名（codex/claude/opencode）——那不是 ethan 的注册模型，
+                # 用户在镜像会话里直接发消息时会被当成 chat 模型，导致
+                # "unknown provider for model codex" 502。渠道归类已由 source=agent 表达。
+                real_model = model
+                if not real_model:
+                    try:
+                        from ethan.core.config import get_config
+                        real_model = get_config().defaults.model
+                    except Exception:
+                        real_model = ""
+                session = await store.create(model=real_model, source=agent)
+                session_id = session.id
+                await store.update_title(session_id, _title_for(agent, task))
+                set_mirror_session(cwd, session_id, user_id=user_id, agent=agent)
+
+            # 反向映射：让用户直接在这条镜像会话里发消息时，能查出续接哪个 agent/cwd
+            set_mirror_info(session_id, agent=agent, cwd=cwd, user_id=user_id)
+
+            # 下发的 query 作为 user 消息落库（每一轮都追加）
+            await store.save_message(session_id, Message(
                 role="user", content=task, created_at=time.time(),
             ))
-            await store.touch(session.id)
+            await store.touch(session_id)
 
             run = None
             if register_run:
                 try:
                     from ethan.core.run_manager import RunManager
-                    run = RunManager.instance().create(session.id, user_id=user_id)
+                    run = RunManager.instance().create(session_id, user_id=user_id)
                 except Exception:
                     logger.debug("MirrorSession run register failed", exc_info=True)
-            return cls(store, session.id, run=run)
+            return cls(store, session_id, run=run)
         except Exception:
             logger.debug("MirrorSession.start failed (agent=%s)", agent, exc_info=True)
             if store is not None:

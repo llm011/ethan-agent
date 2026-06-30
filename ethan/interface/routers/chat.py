@@ -110,6 +110,25 @@ async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
         messages[-1] = _with_quote(messages[-1], req.quote)
 
     if req.stream:
+        # 镜像会话续接：source=codex/claude/opencode 的会话，用户直接发消息时不走普通
+        # chat 模型，而是把消息当新 prompt 续接对应的 coding agent（resume），过程实时
+        # 推回这条会话。靠 acp 的 mirrorinfo 映射识别。
+        from ethan.acp import get_mirror_info
+        minfo = get_mirror_info(req.session_id or "", user_id=user_id)
+        if minfo and req.session_id:
+            from ethan.core.run_manager import RunManager
+            prompt = (req.messages[-1].get("content", "") if req.messages else "").strip()
+            run = RunManager.instance().create(req.session_id, user_id=user_id)
+            run.task = asyncio.create_task(
+                _run_delegate_generation(run, prompt, minfo["agent"], minfo["cwd"],
+                                         store, req.session_id, user_id)
+            )
+            return StreamingResponse(
+                _sse_from_run(run),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
+
         # 生成与连接解耦：把 agent.stream_chat 放进后台 producer 任务，事件写入
         # ChatRun 缓冲并扇出给订阅者。SSE 响应只是一个订阅者，断开（刷新）只退订，
         # 不影响 producer——生成照常跑完并入库。刷新后可经 GET /chat/{id}/stream 重连回放。
@@ -215,6 +234,74 @@ def _with_quote(user_msg: Message, quote: dict | None) -> Message:
     quote_text = str(quote["content"]).replace("\n", "\n> ")
     prefixed = f"> [引用 {role_label} 的消息]:\n> {quote_text}\n\n{user_msg.content}"
     return Message(role=user_msg.role, content=prefixed, created_at=user_msg.created_at)
+
+
+async def _run_delegate_generation(
+    run,
+    prompt: str,
+    agent_name: str,
+    cwd: str,
+    store: SessionStore,
+    session_id: str,
+    user_id: str = "",
+) -> None:
+    """Producer：在镜像会话里直接发消息时，把消息当新 prompt 续接对应 coding agent。
+
+    走 acp.delegate(prefer=agent, resume=True)，过程中的 step/text 经 on_event 实时
+    emit 进这条会话的 ChatRun；结束后把回复+步骤落成 assistant 消息。
+    mirror=False：避免 delegate 内部再为同一 session 注册一个 ChatRun（双 writer）。
+    """
+    from ethan.acp import delegate
+
+    def _emit(etype, data):
+        if etype == "text":
+            run.emit({"content": data})
+        elif etype == "step" and isinstance(data, dict):
+            run.emit({
+                "tool": data.get("tool", ""),
+                "args": data.get("args", ""),
+                "state": data.get("state", "done"),
+                "id": f"mirror-{id(data)}",
+                "duration_ms": data.get("duration_ms"),
+                "result_preview": data.get("result_preview", ""),
+            })
+
+    result = None
+    try:
+        result = await delegate(
+            prompt=prompt, cwd=cwd, prefer=agent_name, timeout=240,
+            resume=True, user_id=user_id, mirror=False, on_event=_emit,
+        )
+    except asyncio.CancelledError:
+        run.emit({"stopped": True, "usage": {}})
+        run.finish()
+        try:
+            await store.close()
+        except Exception:
+            pass
+        RunManager_schedule_removal(run.session_id)
+        raise
+    except Exception as e:
+        run.emit({"error": _friendly_error(e, None)})
+
+    try:
+        if result is not None:
+            content = result.output or ("(委派失败，无输出)" if not result.success else "(无输出)")
+            await store.save_message(session_id, Message(
+                role="assistant", content=content, tool_steps=result.sub_steps or [],
+            ))
+            await store.touch(session_id)
+    except Exception:
+        logger.exception("保存委派续接结果失败 session=%s", session_id)
+    finally:
+        try:
+            await store.close()
+        except Exception:
+            pass
+
+    run.emit({"done": True, "usage": {}})
+    run.finish()
+    RunManager_schedule_removal(run.session_id)
 
 
 async def _run_generation(
