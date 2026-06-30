@@ -38,13 +38,38 @@ class MirrorSession:
     任何一步失败都吞掉异常（best-effort），绝不影响主委派流程。
     """
 
-    def __init__(self, store, session_id: str):
+    def __init__(self, store, session_id: str, run=None):
         self._store = store
         self.session_id = session_id
         # 中间事件累积（步骤/文本），供实时推送或调试回看。
         self.events: list[tuple[str, object]] = []
         # 可选的实时发射器：上层（RunManager）注册后，每个中间事件实时转发给前端。
         self._emitter = None
+        # 关联的 ChatRun（注册到 RunManager 后，web 可经 /chat/{id}/stream attach）。
+        self._run = run
+        if run is not None:
+            self._emitter = self._emit_to_run
+
+    def _emit_to_run(self, event_type: str, data) -> None:
+        """默认发射器：把中间事件按 chat SSE 的事件词表 emit 进关联的 ChatRun。
+
+        - text → {"content": ...}
+        - step → 工具事件（用 id(step) 作稳定 id：claude 同一 step 对象 running→done
+          会配对，codex/opencode 各 step 是独立对象天然不串）。
+        """
+        if self._run is None:
+            return
+        if event_type == "text":
+            self._run.emit({"content": data})
+        elif event_type == "step" and isinstance(data, dict):
+            self._run.emit({
+                "tool": data.get("tool", ""),
+                "args": data.get("args", ""),
+                "state": data.get("state", "done"),
+                "id": f"mirror-{id(data)}",
+                "duration_ms": data.get("duration_ms"),
+                "result_preview": data.get("result_preview", ""),
+            })
 
     def bind_emitter(self, emitter) -> "MirrorSession":
         """注册实时发射器，签名 emitter(event_type:str, data) → 可同步或异步。
@@ -75,7 +100,12 @@ class MirrorSession:
         cwd: str,
         user_id: str = "",
         model: str = "",
+        register_run: bool = True,
     ) -> Optional["MirrorSession"]:
+        """创建镜像 session。register_run=True 时同时在 RunManager 注册一个 ChatRun，
+        使委派过程可经 web `/chat/{session_id}/stream` 实时 attach（query 已落库，
+        assistant 文本/步骤经 on_event 实时 emit）。"""
+        store = None
         try:
             from ethan.memory.session import SessionStore
             from ethan.core.paths import user_sessions_db_path
@@ -90,17 +120,26 @@ class MirrorSession:
                 role="user", content=task, created_at=time.time(),
             ))
             await store.touch(session.id)
-            return cls(store, session.id)
+
+            run = None
+            if register_run:
+                try:
+                    from ethan.core.run_manager import RunManager
+                    run = RunManager.instance().create(session.id, user_id=user_id)
+                except Exception:
+                    logger.debug("MirrorSession run register failed", exc_info=True)
+            return cls(store, session.id, run=run)
         except Exception:
             logger.debug("MirrorSession.start failed (agent=%s)", agent, exc_info=True)
-            try:
-                await store.close()  # type: ignore[possibly-undefined]
-            except Exception:
-                pass
+            if store is not None:
+                try:
+                    await store.close()
+                except Exception:
+                    pass
             return None
 
     async def finish(self, output: str, sub_steps: list | None, is_error: bool = False) -> None:
-        """把 Coding Agent 的回复 + 工具步骤落成 assistant 消息，并关库。"""
+        """把 Coding Agent 的回复 + 工具步骤落成 assistant 消息，关库，并收尾实时流。"""
         try:
             from ethan.providers.base import Message
             content = output or ("(委派失败，无输出)" if is_error else "(无输出)")
@@ -118,3 +157,13 @@ class MirrorSession:
                 await self._store.close()
             except Exception:
                 pass
+            # 收尾实时流：通知订阅者结束并安排清理（宽限期内仍可重连回放）。
+            if self._run is not None:
+                try:
+                    self._run.emit({"done": True, "usage": {}})
+                    self._run.finish()
+                    from ethan.core.run_manager import RunManager
+                    RunManager.instance().schedule_removal(self.session_id)
+                except Exception:
+                    logger.debug("MirrorSession run finish failed", exc_info=True)
+
