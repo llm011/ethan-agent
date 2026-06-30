@@ -80,10 +80,10 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
     registry.register(BrowserSessionTool())
     registry.register(BrowserTabTool())
     registry.register(BrowserPageTool())
-    # ui_card 仅在能渲染 A2UI 的渠道注册（web/repl）。飞书/api 无渲染器，注册了模型也只会
-    # 拿到 ack 文字、卡片丢失，故不暴露——靠"工具不存在"自然杜绝误用，无需 prompt 约束。
-    if channel in ("web", "repl"):
-        registry.register(UiCardTool())
+    # ui_card 在能渲染卡片的渠道注册：web/repl 走 A2UI，lark 走飞书 interactive 卡片。
+    # 同一套结构化 card 数据，按渠道选渲染目标（见 UiCardTool）。api 等无渲染器的渠道不暴露。
+    if channel in ("web", "repl", "lark"):
+        registry.register(UiCardTool(channel=channel))
     # 工具发现元工具：fast 档只广播常驻工具，模型需要长尾能力时用它检索并激活。
     # 持有 registry 引用以便检索；放最后确保它能看到上面注册的全部工具。
     registry.register(FindToolsTool(registry))
