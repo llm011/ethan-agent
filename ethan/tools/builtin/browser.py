@@ -84,6 +84,10 @@ def _consent_desc() -> str | None:
 class _BrowserToolBase(BaseTool):
     cacheable = False  # 浏览器操作有副作用,不缓存
     side_effect = True
+    # 浏览器工具输出是带 ID/ref 的结构化 JSON(tab_id、session_id、snapshot ref),
+    # 压缩会把这些 ID 揉成散文摘要 → 模型拿不到 ID 就无法 close/activate/click,
+    # 表现为「列出来了却不知道怎么操作」。必须逐字给模型,绝不压成摘要。
+    no_compress = True
 
     def consent_check(self, **kwargs) -> str | None:
         return _consent_desc()
@@ -205,8 +209,6 @@ class BrowserPageTool(_BrowserToolBase):
         "screenshot 截图;wait 等待;eval 执行页面 JS(高权限)。"
         "ref 仅对最近一次 snapshot 可靠,页面跳转/刷新后需重新 snapshot。"
     )
-    # snapshot/get 输出为结构化 ref 数据,压缩会毁掉 ref,必须逐字给模型
-    no_compress = True
     parameters = {
         "type": "object",
         "properties": {
