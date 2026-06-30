@@ -196,7 +196,8 @@ ethan-ai/
 │   ├── scheduler/
 │   │   └── cron.py           # APScheduler（SQLite 持久化）
 │   ├── acp/
-│   │   └── __init__.py       # ACP 复杂度判断 + 委托执行
+│   │   ├── __init__.py       # ACP 复杂度判断 + 委托执行（三套 Coding Agent JSON 流 + 多轮续接）
+│   │   └── mirror.py         # 委派镜像会话（落 Ethan session + 注册 RunManager run 实时推送）
 │   └── interface/
 │       ├── cli.py            # Typer CLI（含延迟导入优化）
 │       ├── repl.py           # 交互式 REPL（prompt_toolkit）

@@ -576,7 +576,8 @@ Environment variables in `.env` override config values (useful for secrets).
 - [ ] **Mobile UI**: bottom tab nav, touch gestures, keyboard inset handling
 
 **Coding Agent Integration**
-- [x] **ACP multi-turn optimization**: `delegate_coding` resumes Claude Code sessions per (user × working_dir) via `--resume`; stream-json parsed into collapsible sub-steps in the Web UI tool timeline with highlighted final result. OpenCode / Codex also wired in (single-turn)
+- [x] **ACP multi-turn optimization**: `delegate_coding` resumes coding-agent sessions per (agent × working_dir). All three backends (Claude Code / OpenCode / Codex) run as JSON event streams with session resume, parsed into collapsible sub-steps in the Web UI tool timeline with highlighted final result. Codex reuses Ethan's cliproxy provider; timeouts terminate gracefully and clear the session to avoid resuming a stuck thread
+- [x] **Mirror sessions**: each `delegate()` becomes a real Ethan session (`source="delegate"`) recording the dispatched query + coding-agent reply + steps, registered as a RunManager run so the delegated conversation can be watched live via SSE
 - [ ] **MCP client**: connect external MCP servers, auto-register tools
 
 **Long-term**
