@@ -72,17 +72,27 @@ await kb.semantic_search("异步编程最佳实践", limit=5)
 
 文件：`ethan/tools/builtin/knowledge.py`
 
-在知识库中搜索相关条目。Agent 会在使用 `web_search` 之前先查知识库，优先使用用户已记录的信息。
+在知识库中搜索相关条目（返回标题/摘要列表，含 source 路径）。Agent 会在使用 `web_search` 之前先查知识库，优先使用用户已记录的信息。
 
 ```python
 knowledge_search(query="HA REST API 地址", limit=3)
+```
+
+### `knowledge_read`
+
+文件：`ethan/tools/builtin/knowledge.py`
+
+按 source 读取某一条的完整内容（标题/标签/正文全文）。`knowledge_search` 只返回摘要列表，需要看某条全文（或在编辑前先读全文）时用它。
+
+```python
+knowledge_read(source="/Users/x/.ethan/knowledge/ha-rest-api.md")
 ```
 
 ### `knowledge_add`
 
 文件：`ethan/tools/builtin/knowledge.py`
 
-将笔记、参考资料保存到知识库。同时写入 Markdown 文件和向量索引。
+将笔记、参考资料**新建**到知识库。同时写入 Markdown 文件和向量索引。
 
 ```python
 knowledge_add(
@@ -90,6 +100,22 @@ knowledge_add(
     content="Home Assistant 的 REST API 地址是 http://192.168.1.x:8123，token 在长效 token 管理页生成。",
     tags=["home-assistant", "api", "地址"]
 )
+```
+
+### `knowledge_edit`
+
+文件：`ethan/tools/builtin/knowledge.py`
+
+编辑**已有**条目而非新建，解决「在同一条笔记/知识里追加或修改」每次都新建文档的问题：
+
+- `mode=append`（默认）：把 `content` 追加到原正文末尾（中间空行分隔），保留原标题/标签。适合「再记一条 / 补充一点」。
+- `mode=replace`：整篇替换正文；`title`/`tags` 不传则沿用原值。适合修订。
+
+`source` 用 `knowledge_search` 结果里的路径；不确定原文时先 `knowledge_read` 看全文。写入后会重建该条的向量索引。
+
+```python
+knowledge_edit(source="...ha-rest-api.md", content="补充：token 有效期 10 年", mode="append")
+knowledge_edit(source="...ha-rest-api.md", content="修订后的完整正文", mode="replace")
 ```
 
 ---

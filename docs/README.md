@@ -17,7 +17,7 @@
 - **浏览器自动化**：默认内置 `agent-browser`（零依赖 Rust CLI，`snapshot` 输出省 token，适合单步操作）与 `dev-browser`（沙箱 JS + 完整 Playwright API，适合复杂多步流程）两个浏览器技能，均按需安装、用户装完即有
 - **文件系统搜索**：rg（ripgrep）和 fd 作为内置工具，供 Agent 在本地文件系统中高效检索代码和文件
 - **ACP 集成**：`delegate_coding` 工具 / `ethan code` 命令将复杂编码任务委派给 Claude Code / OpenCode / Codex；Claude Code 支持按工作目录续接多轮会话，工具调用过程解析为 sub_steps 在 Web UI 折叠展示
-- **知识库**：本地 Markdown 知识库 + sqlite-vec 语义检索（embedding 索引），支持 add/search/delete
+- **知识库**：本地 Markdown 知识库 + sqlite-vec 语义检索（embedding 索引），支持 search/read/add/edit（追加+替换）/delete
 - **CLI (REPL)**：交互式会话管理，支持 `/sessions`、`/resume`、`/new` 等斜杠命令；会话来源标签（web/repl/lark）；自动生成标题；新用户 onboarding
 
 ---
