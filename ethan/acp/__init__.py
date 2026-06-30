@@ -19,6 +19,33 @@ from typing import Optional
 from ethan.core.paths import user_data_dir
 
 
+async def _terminate_proc(proc, grace: float = 8.0) -> None:
+    """优雅终止子进程：先 SIGTERM 给收尾机会，超过 grace 秒仍活着再 SIGKILL。
+
+    动机：codex/opencode 把「turn 是否进行中」记在自己的 session 文件里。直接 kill()
+    会让该 thread 停在 'turn in progress'，导致之后手动 `codex exec resume` /
+    交互式 `/resume` 被拒（'/resume is disabled while a task is in progress'）。
+    SIGTERM 给 CLI 一个把 turn 标记为中断、干净落盘的机会，降低污染概率。
+    """
+    if proc.returncode is not None:
+        return
+    try:
+        proc.terminate()  # SIGTERM
+    except Exception:
+        pass
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=grace)
+        return
+    except (asyncio.TimeoutError, Exception):
+        pass
+    try:
+        proc.kill()  # SIGKILL 兜底
+        await asyncio.wait_for(proc.wait(), timeout=3)
+    except Exception:
+        pass
+
+
+
 @dataclass
 class ACPResult:
     success: bool
@@ -255,6 +282,7 @@ async def _run_claude_code(
 
         await asyncio.wait_for(proc.wait(), timeout=5)
     except asyncio.TimeoutError:
+        await _terminate_proc(proc)
         return ACPResult(
             success=False,
             output=f"Timed out after {timeout}s",
@@ -397,10 +425,10 @@ async def _run_opencode(
         await asyncio.wait_for(_consume(), timeout=timeout)
         await asyncio.wait_for(proc.wait(), timeout=5)
     except asyncio.TimeoutError:
-        try:
-            proc.kill()
-        except Exception:
-            pass
+        await _terminate_proc(proc)
+        # 同 codex：超时可能让 opencode session 卡在进行中，清掉以免下次续接到坏会话。
+        if session_id:
+            clear_session(work_dir, user_id=user_id, agent="opencode")
         return ACPResult(success=False, output=f"Timed out after {timeout}s",
                          agent="opencode", session_id=session_id, sub_steps=sub_steps)
     except Exception as e:
@@ -588,10 +616,11 @@ async def _run_codex(
         await asyncio.wait_for(_consume(), timeout=timeout)
         await asyncio.wait_for(proc.wait(), timeout=5)
     except asyncio.TimeoutError:
-        try:
-            proc.kill()
-        except Exception:
-            pass
+        await _terminate_proc(proc)
+        # 超时即便优雅终止，该 thread 也可能停在「turn 进行中」而无法 resume；
+        # 清掉持久化的 session_id，下次该 (codex, cwd) 自动从新会话开始，避免续接到坏 thread。
+        if session_id:
+            clear_session(work_dir, user_id=user_id, agent="codex")
         return ACPResult(success=False, output=f"Timed out after {timeout}s",
                          agent="codex", session_id=session_id, sub_steps=sub_steps)
     except Exception as e:
