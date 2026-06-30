@@ -252,9 +252,14 @@ async def _run_delegate_generation(
     mirror=False：避免 delegate 内部再为同一 session 注册一个 ChatRun（双 writer）。
     """
     from ethan.acp import delegate
+    import os as _os
+
+    emitted_text = False
 
     def _emit(etype, data):
+        nonlocal emitted_text
         if etype == "text":
+            emitted_text = True
             run.emit({"content": data})
         elif etype == "step" and isinstance(data, dict):
             run.emit({
@@ -265,6 +270,26 @@ async def _run_delegate_generation(
                 "duration_ms": data.get("duration_ms"),
                 "result_preview": data.get("result_preview", ""),
             })
+
+    # cwd 可能已被删除（临时目录、项目移动等）。提前给出清晰提示，
+    # 避免 codex/claude 子进程抛出晦涩的 "[Errno 2] No such file or directory"。
+    if not cwd or not _os.path.isdir(cwd):
+        msg = f"该会话对应的工作目录已不存在：{cwd or '(空)'}\n无法继续在此目录续接 {agent_name}。"
+        run.emit({"content": msg})
+        try:
+            await store.save_message(session_id, Message(role="assistant", content=msg))
+            await store.touch(session_id)
+        except Exception:
+            pass
+        finally:
+            try:
+                await store.close()
+            except Exception:
+                pass
+        run.emit({"done": True, "usage": {}})
+        run.finish()
+        RunManager_schedule_removal(run.session_id)
+        return
 
     result = None
     try:
@@ -287,6 +312,10 @@ async def _run_delegate_generation(
     try:
         if result is not None:
             content = result.output or ("(委派失败，无输出)" if not result.success else "(无输出)")
+            # 子进程层失败时 on_event 不会触发，没有任何 text 推过；
+            # 把最终结果作为 content 补推一次，避免 live 流空返回（刷新才看到）。
+            if not emitted_text:
+                run.emit({"content": content})
             await store.save_message(session_id, Message(
                 role="assistant", content=content, tool_steps=result.sub_steps or [],
             ))
