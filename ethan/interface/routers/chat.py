@@ -291,7 +291,7 @@ async def _run_generation(
             for _name in agent.last_matched_skills:
                 asyncio.create_task(asyncio.to_thread(agent._skills.record_hit, _name))
         asyncio.create_task(_maybe_consolidate(session_id, agent._provider.model, user_id, mode=mode))
-        asyncio.create_task(_maybe_regen_title(session_id, store))
+        asyncio.create_task(_maybe_regen_title(session_id))
         asyncio.create_task(_maybe_generate_skill(session_id, agent._provider.model, user_id))
 
     await store.close()
@@ -331,15 +331,25 @@ async def _sse_from_run(run) -> AsyncGenerator[str, None]:
         run.unsubscribe(q)
 
 
-async def _maybe_regen_title(session_id: str, store: SessionStore) -> None:
+async def _maybe_regen_title(session_id: str) -> None:
+    # 自开 store：本函数经 create_task 异步执行，不能复用主流程的 store
+    # ——主流程紧接着 await store.close()，等本 task 跑到 load 时连接已关。
+    # 与 _maybe_consolidate/_maybe_generate_skill 同样的自开模式。user_id 经
+    # ContextVar 在 create_task 下继承，user_sessions_db_path 能解析到正确分库。
     try:
         from ethan.memory.session import decide_title
-        session = await store.load(session_id)
-        if not session:
-            return
-        title = await decide_title(session.messages)
-        if title and title != session.title:
-            await store.update_title(session_id, title)
+        from ethan.core.paths import user_sessions_db_path
+        store = SessionStore(db_path=user_sessions_db_path())
+        await store.init()
+        try:
+            session = await store.load(session_id)
+            if not session:
+                return
+            title = await decide_title(session.messages)
+            if title and title != session.title:
+                await store.update_title(session_id, title)
+        finally:
+            await store.close()
     except Exception:
         pass
 
