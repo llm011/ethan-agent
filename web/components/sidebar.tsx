@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Image from "next/image";
 import { Plus, Trash2, Search, Settings, Book, BookOpen, Pencil, Check, X, List, Wrench } from "lucide-react";
-import { Clock, Database } from "lucide-react";
+import { Clock, Database, Layers } from "lucide-react";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { useSidebar } from "@/app/layout-shell";
 import { Button } from "@/components/ui/button";
@@ -430,6 +430,17 @@ export function Sidebar() {
           onClick={() => navigate("/schedule")}
         >
           <Clock className="h-4 w-4 mr-2" /> 定时任务 (Schedule)
+        </Button>
+        <Button
+          variant="ghost"
+          className={`w-full justify-start h-9 px-3 ${
+            pathname === "/tool-tiers"
+              ? "bg-accent text-accent-foreground"
+              : "text-muted-foreground"
+          }`}
+          onClick={() => navigate("/tool-tiers")}
+        >
+          <Layers className="h-4 w-4 mr-2" /> 模式工具集 (Tool Tiers)
         </Button>
         <Button
           variant="ghost"

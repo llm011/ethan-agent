@@ -342,6 +342,36 @@ export async function fetchSystemPromptPreview(): Promise<SystemPromptPreview> {
 }
 
 
+export interface TierTool {
+  name: string;
+  description: string;
+  fast_path: boolean;
+  side_effect: boolean;
+  no_compress: boolean;
+}
+
+export interface ToolTier {
+  key: "fast" | "medium" | "full";
+  label: string;
+  desc: string;
+  tools: TierTool[];
+}
+
+export interface ToolTiers {
+  tiers: ToolTier[];
+  fast_count: number;
+  total_count: number;
+  fast_max_length: number;
+  medium_max_length: number;
+}
+
+export async function fetchToolTiers(): Promise<ToolTiers> {
+  const res = await fetch(`${API_URL}/tool-tiers`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed");
+  return res.json();
+}
+
+
 export interface Fact { id: string; content: string; confidence: number; category: string; source: string; created_at: number; superseded_by: string | null; }
 export interface Episode { id: string; session_id: string; timestamp: number; summary: string; turn_count: number; keywords: string[]; model: string; }
 
