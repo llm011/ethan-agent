@@ -75,8 +75,11 @@ class FilesystemKnowledgeBase(KnowledgeBase):
 
         tag_line = f"\ntags: {', '.join(tags)}" if tags else ""
         path.write_text(f"# {title}{tag_line}\n\n{content}", encoding="utf-8")
+        self._reindex(path, title, content, tags)
+        return str(path)
 
-        # Index embedding in background — best effort, never blocks callers
+    def _reindex(self, path: Path, title: str, content: str, tags: list[str] | None) -> None:
+        """重建该条目的向量索引。best-effort：嵌入不可用/失败时静默跳过，不阻断写入。"""
         try:
             from ethan.memory.embeddings import embed_sync
             text_for_embed = f"{title} {' '.join(tags or [])} {content}"
@@ -91,8 +94,6 @@ class FilesystemKnowledgeBase(KnowledgeBase):
         except Exception:
             pass  # vector indexing is optional
 
-        return str(path)
-
     def update(self, source: str, title: str, content: str, tags: list[str] | None = None) -> None:
         path = Path(source)
         if not path.exists():
@@ -101,6 +102,20 @@ class FilesystemKnowledgeBase(KnowledgeBase):
             raise FileNotFoundError(f"Knowledge item not found: {source}")
         tag_line = f"\ntags: {', '.join(tags)}" if tags else ""
         path.write_text(f"# {title}{tag_line}\n\n{content}", encoding="utf-8")
+        self._reindex(path, title, content, tags)
+
+    def append(self, source: str, content: str) -> str:
+        """把内容追加到已有条目正文末尾（保留原标题/标签）。返回文件路径。
+
+        与 update（整篇覆盖）互补：适合「再记一条 / 补充一点」的增量场景，不必让模型
+        先读全文再回写。中间用空行隔开，确保 markdown 段落分隔正确。
+        """
+        item = self.get(source)
+        if item is None:
+            raise FileNotFoundError(f"Knowledge item not found: {source}")
+        new_content = (item.content.rstrip() + "\n\n" + content.strip()).strip()
+        self.update(item.source, item.title, new_content, tags=item.tags)
+        return item.source
 
     # ── Keyword search (existing) ──────────────────────────────────────────
 

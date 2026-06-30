@@ -15,7 +15,7 @@ from ethan.tools.builtin.config import ConfigGetTool, ConfigSetTool
 from ethan.tools.builtin.file import FileListTool, FileReadTool, FileWriteTool
 from ethan.tools.builtin.find_tools import FindToolsTool
 from ethan.tools.builtin.install_skill import InstallSkillTool
-from ethan.tools.builtin.knowledge import KnowledgeAddTool, KnowledgeSearchTool
+from ethan.tools.builtin.knowledge import KnowledgeAddTool, KnowledgeEditTool, KnowledgeReadTool, KnowledgeSearchTool
 from ethan.tools.builtin.memory_write import MemoryWriteTool
 from ethan.tools.builtin.procedure_write import ProcedureWriteTool
 from ethan.tools.builtin.profile_update import ProfileUpdateTool
@@ -53,6 +53,7 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
         registry.register(ScheduleListTool())
         registry.register(ScheduleRemoveTool())
         registry.register(KnowledgeSearchTool(user_id=user_id))
+        registry.register(KnowledgeReadTool(user_id=user_id))
         registry.register(KnowledgeAddTool(user_id=user_id))
         return registry
 
@@ -63,7 +64,9 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
     registry.register(ScheduleListTool())
     registry.register(ScheduleRemoveTool())
     registry.register(KnowledgeSearchTool(user_id=user_id))
+    registry.register(KnowledgeReadTool(user_id=user_id))
     registry.register(KnowledgeAddTool(user_id=user_id))
+    registry.register(KnowledgeEditTool(user_id=user_id))
     registry.register(MemoryWriteTool(user_id=user_id))
     registry.register(ProcedureWriteTool(user_id=user_id))
     registry.register(ProfileUpdateTool(user_id=user_id))

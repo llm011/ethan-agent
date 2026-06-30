@@ -118,7 +118,7 @@ async def _handle_message(event_data: dict) -> None:
     from ethan.providers.base import Message, ToolEvent, ThinkingEvent
     from ethan.skills.registry import SkillRegistry
     from ethan.tools.builtin.file import FileListTool, FileReadTool, FileWriteTool
-    from ethan.tools.builtin.knowledge import KnowledgeAddTool, KnowledgeSearchTool
+    from ethan.tools.builtin.knowledge import KnowledgeAddTool, KnowledgeEditTool, KnowledgeReadTool, KnowledgeSearchTool
     from ethan.tools.builtin.memory_write import MemoryWriteTool
     from ethan.tools.builtin.procedure_write import ProcedureWriteTool
     from ethan.tools.builtin.profile_update import ProfileUpdateTool
@@ -416,7 +416,7 @@ async def _handle_message(event_data: dict) -> None:
                      FileReadTool(), FileWriteTool(), FileListTool(),
                      RipgrepTool(), FdTool(),
                      ScheduleCreateTool(), ScheduleListTool(), ScheduleRemoveTool(),
-                     KnowledgeSearchTool(), KnowledgeAddTool(),
+                     KnowledgeSearchTool(), KnowledgeReadTool(), KnowledgeAddTool(), KnowledgeEditTool(),
                      MemoryWriteTool(), ProcedureWriteTool(), ProfileUpdateTool(), SkillCreateTool(),
                      SkillReadTool(), SkillListTool(),
                      SetSecretTool(), GetSecretTool(), ListSecretsTool(),
