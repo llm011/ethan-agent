@@ -199,6 +199,19 @@ ethan code "query"              → ACP 委派 Coding Agent（详见 acp.md）
 
 允许用户通过飞书机器人与 Ethan 对话。采用 **WebSocket 长连接**方式：`ethan serve` 启动时自动调用 `lark-cli event consume im.message.receive_v1`，无需公网 IP，无需配置 Webhook URL。
 
+### 模块划分
+
+飞书逻辑按职责拆分到 `ethan/interface/` 下的几个平级模块（`lark.py` 已被占用，故用 `lark_*` 前缀而非包目录）：
+
+| 模块 | 职责 |
+|------|------|
+| `lark_render.py` | 纯渲染：把文本/markdown/工具进度转成 post 富文本或 interactive 卡片的 content JSON。无 IO。 |
+| `lark_send.py` | 收发 IO：client 构建、发送/编辑/删除/回复消息、通知/图片、消息详情拉取、引用解析。 |
+| `lark_stream.py` | 消息处理：会话状态（去重 / `chat_id`→`session_id` 映射 / 进行中任务登记）、`/命令` 路由、`_handle_message` 的 Agent 流式回复主循环。 |
+| `lark_events.py` | 入口：`lark-cli event consume` 事件循环 + `start/stop_lark_listener` 生命周期，并 re-export `send_lark_notification` / `send_lark_image` 等供外部（定时任务、browser 模块）使用。 |
+
+依赖方向单向无环：`lark_events → lark_stream → lark_send → lark_render`。`api.py` 仍从 `lark_events` 导入 `start/stop_lark_listener`，外部导入路径不变。
+
 ### 配置方式
 
 在 `~/.ethan/config.yaml` 中添加：
@@ -225,11 +238,18 @@ lark-cli event consume im.message.receive_v1（WebSocket 长连接）
    ├─ 调用 Agent.stream_chat() 流式处理消息
    │     · 思考阶段（ThinkingEvent）只显示「🤔 thinking...」占位，不打印思考原文
    │     · 工具调用过程实时更新进度卡片
+   │     · ui_card 工具产出的自定义卡片（lark_card）作为增量额外补发一条 interactive 卡片
    │
    └─ 流式追加/编辑回复卡片，结束时附上 token 统计
 ```
 
 收到消息后第一步加 `THINKING_FACE` 表情是关键的用户体验设计：飞书消息处理可能需要数秒，及时反馈避免用户以为机器人离线。
+
+### 输出形态（两条消息 + 增量卡片）
+
+- **工具进度**：post 富文本气泡，工具开始/结束时流式 `message.update`。
+- **最终回答**：interactive 卡片，流式 `message.patch`；首段缓冲到阈值再发，避免孤立短卡片，出现新工具调用时撤回已发的 narration 卡片。
+- **自定义卡片（增量）**：`ui_card` 工具（`channel="lark"`）走 `lark_card_templates` 生成飞书卡片 JSON，经 `ToolEvent.ui` 透传，工具完成时作为独立 interactive 卡片补发。这是「可有可无、有则更好看」的增量能力——基础的工具进度/答案输出不依赖它。Web 端同一套结构化 `card` 数据则渲染成 A2UI（见 [tools.md](./tools.md#ui_carda2ui-结构化卡片)）。
 
 ### 事件去重（幂等）
 

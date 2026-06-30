@@ -400,7 +400,7 @@ class MyTool(BaseTool):
 
 Register it in `cli.py` and the LLM will automatically use it when relevant.
 
-Built-in tools also include `ui_card`, which renders structured info as [A2UI](https://a2ui.org/) cards instead of plain text. High-frequency types (comparison / ranking / stats / timeline) use fixed backend templates — the model just fills in typed data, so styling stays clean and consistent; free-form cards can still be hand-authored. Shown via `@a2ui/react` on the web and text-degraded in the REPL. Format details live in the on-demand `ui-card` skill, so the system prompt stays lean.
+Built-in tools also include `ui_card`, which renders structured info as cards instead of plain text. High-frequency types (comparison / ranking / stats / timeline) use fixed backend templates — the model just fills in typed data, so styling stays clean and consistent; free-form cards can still be hand-authored. Rendering is channel-aware over the same structured `card` data: the web renders [A2UI](https://a2ui.org/) via `@a2ui/react`, the REPL degrades to text, and Feishu/Lark renders native interactive cards (an incremental nicety on top of the base text/post + streaming-card output). Format details live in the on-demand `ui-card` skill, so the system prompt stays lean.
 
 ---
 

@@ -88,9 +88,10 @@ schedule_create(
 
 ```python
 import asyncio
-from ethan.interface.lark_events import send_lark_notification, get_lark_main_chat_id
+from ethan.interface.lark_events import send_lark_notification
+from ethan.core.config import get_config
 
-chat_id = get_lark_main_chat_id()  # 读 config.lark.main_chat_id
+chat_id = getattr(getattr(get_config(), "lark", None), "main_chat_id", "") or ""
 if chat_id:
     asyncio.run(send_lark_notification(chat_id, result_text))
 ```

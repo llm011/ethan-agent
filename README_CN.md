@@ -389,7 +389,7 @@ class MyTool(BaseTool):
 
 在 `cli.py` 注册后，LLM 会在合适时机自动调用。
 
-内置工具还包括 `ui_card`：把结构化信息渲染成 [A2UI](https://a2ui.org/) 卡片，比纯文字更直观。高频类型（对比 / 排行 / 统计 / 时间轴）走后端固定模板——模型只填结构化数据，样式稳定一致；自定义卡片仍可手写。Web 端用 `@a2ui/react` 渲染，REPL 走文本降级。格式细节放在按需读取的 `ui-card` skill 里，system prompt 保持精简。
+内置工具还包括 `ui_card`：把结构化信息渲染成卡片，比纯文字更直观。高频类型（对比 / 排行 / 统计 / 时间轴）走后端固定模板——模型只填结构化数据，样式稳定一致；自定义卡片仍可手写。渲染按渠道分叉、共享同一套结构化 `card` 数据：Web 端用 `@a2ui/react` 渲染 [A2UI](https://a2ui.org/)、REPL 走文本降级、飞书则渲染成原生 interactive 卡片（在「工具用 post、结果用流式卡片」的基础输出之上的增量美化）。格式细节放在按需读取的 `ui-card` skill 里，system prompt 保持精简。
 
 ---
 
