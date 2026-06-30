@@ -26,6 +26,16 @@ SECTIONS = [
 SECTION_HEADER = "## "
 
 
+# ── 每日 consolidation 分组（A 方案：平铺 bullet + 分区差异化压缩）──────
+# 三组各用不同的压缩策略，制造层次感而不改解析器：
+#   身份事实组 — 相关事实聚类归纳、层次化，去重保留所有独立事实（沉淀感）
+#   情绪快照组 — 同类情绪事件聚类、高度压缩、归纳成稳定模式（快照感）
+#   约定保留组 — 仅合并表达相同的、每条指令都保留
+PROFILE_GROUP_IDENTITY = ["基础特征", "身份与背景", "目标与方向", "工作与沟通方式", "个人语言与激励"]
+PROFILE_GROUP_EMOTION = ["心理与情绪"]
+PROFILE_GROUP_AGREEMENT = ["与 Agent 的约定"]
+
+
 def ensure_profile(profile_path: Path) -> str:
     """确保 user_profile.md 存在且含全部 section header,返回内容。只在文件不存在时创建,不覆盖已有。"""
     if profile_path.exists():
@@ -173,6 +183,33 @@ def merge_section_entries(content: str, section: str, entries: list[str]) -> str
         if e and e.strip():
             content = update_profile_section(content, section, e, mode="merge")
     return content
+
+
+def section_bullets(content: str, section: str) -> list[str]:
+    """读取某 section 下的平铺 bullet 列表（公开封装，供每日 consolidation 用）。"""
+    return _section_bullets(content, section)
+
+
+def set_section_bullets(content: str, section: str, bullets: list[str]) -> str:
+    """用 bullets 整体替换某 section 的内容，返回新文本（不写盘）。
+
+    供每日 consolidation 写回压缩结果。bullets 为空时保持 section header 但清空条目；
+    section 不存在则新建追加到文末。
+    """
+    clean = [b.strip() for b in bullets if b and b.strip()]
+    header = f"{SECTION_HEADER}{section}"
+    lines = content.splitlines(keepends=True)
+    start_idx, end_idx = _locate_section(lines, section)
+
+    body = [lines[start_idx]] if start_idx >= 0 else [f"{header}\n"]
+    for b in clean:
+        body.append(f"- {b}\n")
+    if clean:
+        body.append("\n")
+
+    if start_idx < 0:
+        return content + "\n" + "".join(body)
+    return "".join(lines[:start_idx] + body + lines[end_idx:])
 
 
 def write_section(profile_path: Path, section: str, entry: str, mode: str = "merge") -> None:

@@ -381,7 +381,9 @@ async def _maybe_regen_title(session_id: str) -> None:
             session = await store.load(session_id)
             if not session:
                 return
-            title = await decide_title(session.messages)
+            # 传 current_title：decide_title 的第 3/6/9… 轮兜底分支据此判断标题
+            # 是否仍是占位，从而决定要不要再调一次 lite 自愈（内部已带重试）。
+            title = await decide_title(session.messages, session.title)
             if title and title != session.title:
                 await store.update_title(session_id, title)
         finally:

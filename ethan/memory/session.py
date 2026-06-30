@@ -48,15 +48,22 @@ def _auto_title(messages: list[Message]) -> str:
 SHORT_QUESTION_CHARS = 7
 
 
-async def _generate_smart_title(messages: list[Message]) -> str:
-    """第 3 轮对话后用廉价模型生成 ≤20 字的简洁标题。"""
+async def _generate_smart_title(messages: list[Message], retries: int = 3) -> str | None:
+    """用廉价模型生成 ≤20 字的简洁标题；lite 模型可用时失败重试 retries 次。
+
+    返回 None 表示「没生成出来」，调用方据此决定是否保留占位标题，绝不拿兜底值覆盖：
+    - 没有可用的 lite 模型（create_provider 抛错）→ 返回 None，不重试。
+    - lite 模型可用但调用全部失败（超时/限流/endpoint 抖动）→ 退避重试后返回 None。
+    """
+    import asyncio
+
     from ethan.providers.manager import create_provider
     from ethan.memory.consolidator import get_lite_model
     from ethan.core.config import get_config
 
     turns = [(m.role, m.content[:100]) for m in messages if m.role in ("user", "assistant") and m.content][:6]
     if not turns:
-        return "新对话"
+        return None
 
     conv = "\n".join(f"{'用户' if r == 'user' else 'AI'}: {c}" for r, c in turns)
     prompt = f"根据以下对话，用不超过15个汉字或30个英文字符生成一个简洁的标题，只输出标题本身：\n\n{conv}"
@@ -65,20 +72,30 @@ async def _generate_smart_title(messages: list[Message]) -> str:
         cfg = get_config()
         cheap_model = get_lite_model(cfg.defaults.model)
         provider = create_provider(cheap_model)
-        resp = await provider.chat([Message(role="user", content=prompt)],
-                                   system="你是一个标题生成助手，只输出标题，不加引号或标点。")
-        title = resp.content.strip().strip('"\'""').strip()
-        return title[:20] if title else "新对话"
     except Exception:
-        return _auto_title(messages)
+        return None
+
+    for attempt in range(retries):
+        try:
+            resp = await provider.chat([Message(role="user", content=prompt)],
+                                       system="你是一个标题生成助手，只输出标题，不加引号或标点。")
+            title = resp.content.strip().strip('"\'""').strip()
+            if title:
+                return title[:20]
+        except Exception:
+            pass
+        if attempt < retries - 1:
+            await asyncio.sleep(0.5 * (attempt + 1))
+    return None
 
 
-async def decide_title(messages: list[Message]) -> str | None:
+async def decide_title(messages: list[Message], current_title: str = "") -> str | None:
     """统一的标题策略，返回应设置的标题；返回 None 表示本轮不改标题。
 
     - 第 1 轮：首条问题 ≥7 字直接生成智能标题；否则先用原文占位。
     - 第 2 轮：仅当首条问题太短（之前是占位）时补生成智能标题。
-    - 其余轮次：不变。
+    - 第 3、6、9… 轮：仍是占位标题（lite 之前没成功）时再尝试一次，靠 _generate_smart_title
+      的内部重试 + 跨轮重试自愈；已有智能标题则跳过，不浪费 lite 调用。
     """
     user_msgs = [m for m in messages if m.role == "user" and m.content]
     n = len(user_msgs)
@@ -91,6 +108,10 @@ async def decide_title(messages: list[Message]) -> str | None:
         first = user_msgs[0].content.strip()
         if len(first) < SHORT_QUESTION_CHARS:
             return await _generate_smart_title(messages)
+        return None
+    # 第 3 轮起，每 3 轮兜底重试；当且仅当标题仍是占位（新对话/截断首句）
+    if n >= 3 and n % 3 == 0 and current_title in ("", "新对话", _auto_title(messages)):
+        return await _generate_smart_title(messages)
     return None
 
 

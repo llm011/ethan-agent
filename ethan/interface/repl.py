@@ -756,10 +756,12 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
         await store.save_message(session.id, msg)
         approx_tokens += len(user_input)
 
-        # 标题策略：见 ethan.memory.session.decide_title（短问题推迟到第 2 轮）
+        # 标题策略：见 ethan.memory.session.decide_title
+        # （短问题推迟到第 2 轮；第 3/6/9… 轮在仍是占位标题时兜底重试）
         title_snapshot = list(history)
+        title_current = session.title
         async def _set_title():
-            t = await decide_title(title_snapshot)
+            t = await decide_title(title_snapshot, title_current)
             if t and t != session.title:
                 await store.update_title(session.id, t)
                 session.title = t

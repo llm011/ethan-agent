@@ -68,6 +68,8 @@ class RoutingConfig(BaseModel):
 class HeartbeatConfig(BaseModel):
     enabled: bool = True
     interval_minutes: int = 10
+    # 画像每日压缩触发钟点（北京时间 0-23）。该点之后的首个心跳 tick 触发，每天一次。
+    profile_consolidate_hour: int = 2
 
 
 class DefaultsConfig(BaseModel):
