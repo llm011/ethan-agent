@@ -41,6 +41,31 @@ class MirrorSession:
     def __init__(self, store, session_id: str):
         self._store = store
         self.session_id = session_id
+        # 中间事件累积（步骤/文本），供实时推送或调试回看。
+        self.events: list[tuple[str, object]] = []
+        # 可选的实时发射器：上层（RunManager）注册后，每个中间事件实时转发给前端。
+        self._emitter = None
+
+    def bind_emitter(self, emitter) -> "MirrorSession":
+        """注册实时发射器，签名 emitter(event_type:str, data) → 可同步或异步。
+
+        不注册时 on_event 只把事件存进 self.events（结束时仍由 finish 落库）。
+        """
+        self._emitter = emitter
+        return self
+
+    async def on_event(self, event_type: str, data) -> None:
+        """Coding Agent 跑动过程中每个中间事件的回调（step / text）。best-effort。"""
+        self.events.append((event_type, data))
+        if self._emitter is None:
+            return
+        try:
+            import inspect
+            r = self._emitter(event_type, data)
+            if inspect.isawaitable(r):
+                await r
+        except Exception:
+            logger.debug("MirrorSession emitter failed", exc_info=True)
 
     @classmethod
     async def start(
