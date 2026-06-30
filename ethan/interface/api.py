@@ -120,5 +120,8 @@ if _WEB_DIST.exists():
 
 
 def run_server(host: str = "0.0.0.0", port: int = 8900):
+    import os
     import uvicorn
+    # 暴露端口给同进程内的后台任务回调（background_task 用它拼 base url，而非写死 8900）
+    os.environ["ETHAN_SERVER_PORT"] = str(port)
     uvicorn.run(app, host=host, port=port)

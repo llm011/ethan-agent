@@ -17,6 +17,7 @@ RunManager 持有一个可停止的 run——终止功能（background_task_stop
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 from contextvars import ContextVar
@@ -27,7 +28,12 @@ from ethan.tools.base import BaseTool
 # 发起任务时记录的飞书 chat_id（lark webhook 设置），用于完成后把结果推回原 chat。
 lark_chat_id_var: ContextVar[str] = ContextVar("bg_lark_chat_id", default="")
 
-_BASE_URL = "http://127.0.0.1:8900"
+
+def _base_url() -> str:
+    """后台任务回调本机 server 的 base url。端口从 run_server 设置的环境变量读取，
+    回退 8900——避免服务跑在非默认端口时后台任务连不上、静默失败。"""
+    port = os.environ.get("ETHAN_SERVER_PORT", "8900")
+    return f"http://127.0.0.1:{port}"
 
 
 @dataclass
@@ -89,17 +95,26 @@ def _auth_headers(user_id: str = "") -> dict:
 
 
 def _run_background(task: _BgTask, prompt: str, channel: str, channel_context: str, user_id: str) -> None:
-    """daemon 线程主体：流式跑任务、自动批准 consent、回灌结果、更新状态。"""
+    """daemon 线程主体：流式跑任务、自动批准低风险 consent（高危挂起）、回灌结果、更新状态。"""
     import requests
+    base = _base_url()
     headers = {**_auth_headers(user_id), "Content-Type": "application/json"}
 
     def _approve(request_id: str) -> None:
         try:
-            requests.post(f"{_BASE_URL}/api/consent/{request_id}",
+            requests.post(f"{base}/api/consent/{request_id}",
                           json={"allowed": True}, headers=headers, timeout=10)
         except Exception:
             pass
 
+    def _deny(request_id: str) -> None:
+        try:
+            requests.post(f"{base}/api/consent/{request_id}",
+                          json={"allowed": False}, headers=headers, timeout=10)
+        except Exception:
+            pass
+
+    pending_high_risk: list[str] = []  # 后台中被拒的高危操作描述，回灌时提示用户
     result_text = ""
     try:
         body = {
@@ -108,7 +123,7 @@ def _run_background(task: _BgTask, prompt: str, channel: str, channel_context: s
             "session_id": task.session_id,
             "channel": "web",  # 后台始终走 web 流式管线（lark 回灌另行处理）
         }
-        with requests.post(f"{_BASE_URL}/chat", json=body, headers=headers,
+        with requests.post(f"{base}/chat", json=body, headers=headers,
                            stream=True, timeout=3600) as res:
             res.raise_for_status()
             for raw in res.iter_lines(decode_unicode=True):
@@ -121,7 +136,14 @@ def _run_background(task: _BgTask, prompt: str, channel: str, channel_context: s
                 if evt.get("consent_request"):
                     rid = evt.get("request_id")
                     if rid:
-                        threading.Thread(target=_approve, args=(rid,), daemon=True).start()
+                        # 高危调用（always=True，如 rm -rf）：后台无人确认，一律拒绝、记录，
+                        # 回灌时提示用户去前台确认；低风险才自动批准。避免长任务里模型「自作主张」删东西。
+                        if evt.get("always"):
+                            desc = evt.get("description") or evt.get("tool") or "高风险操作"
+                            pending_high_risk.append(desc)
+                            threading.Thread(target=_deny, args=(rid,), daemon=True).start()
+                        else:
+                            threading.Thread(target=_approve, args=(rid,), daemon=True).start()
                 elif "content" in evt:
                     result_text += evt["content"]
                 elif evt.get("stopped"):
@@ -136,6 +158,12 @@ def _run_background(task: _BgTask, prompt: str, channel: str, channel_context: s
     except Exception as e:
         task.status = "error"
         result_text = result_text or f"⚠️ 后台任务执行失败: {e}"
+
+    # 后台中被拦下的高危操作：回灌时明确提示用户去前台确认，避免「静默没做」
+    if pending_high_risk:
+        note = "\n\n⚠️ 以下高风险操作在后台被跳过（需你在前台确认后手动执行）：\n" + \
+               "\n".join(f"- {d}" for d in pending_high_risk)
+        result_text += note
 
     # lark 渠道：把最终结果推回发起任务的 chat
     if channel == "lark" and result_text.strip():

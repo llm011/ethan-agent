@@ -780,7 +780,7 @@ class Agent:
                     elif consent_provider.streamed:
                         # Web：向流注入 ConsentEvent，await 前端响应（加超时兜底，
                         # 避免用户一直不点导致 producer 永久挂起、run 不结束）
-                        event, fut = consent_provider.create(desc, tc.name, detail)
+                        event, fut = consent_provider.create(desc, tc.name, detail, always=always)
                         yield event
                         try:
                             ok = await _aio.wait_for(fut, timeout=300)

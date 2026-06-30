@@ -37,7 +37,7 @@
 ## 执行流程
 
 1. **发起**（`background_task` 工具）：建一个独立 session「[后台] {标题}」，首条用户消息（任务描述）入库；起一个 daemon 线程对它跑 **streaming** `/chat`。工具立即返回「已在后台开始：{标题}（任务 ID：{session_id}）」。
-2. **后台跑**：线程 drain SSE——遇到 `consent_request` 自动批准（后台无交互 UI，发起即视为授权）、累计 `content`、记录 `stopped`/`error`/`done`。走流式管线是为了让 `RunManager` 持有一个可停止的 run（终止功能依赖它）。
+2. **后台跑**：线程 drain SSE——遇到 `consent_request` 时**分级处理**：低风险自动批准；高危调用（`always=True`，如 `rm -rf`）一律拒绝并记录，回灌时提示用户去前台确认。累计 `content`、记录 `stopped`/`error`/`done`。走流式管线是为了让 `RunManager` 持有一个可停止的 run（终止功能依赖它）。
 3. **回灌**：
    - **lark**：把最终结果经 `_send_lark_reply` 推回发起任务的 chat（前缀「【后台任务完成】」）。
    - **web**：结果落在后台 session，侧边栏经 `/poll` 浮现；`/background-tasks` 页可点「查看对话」查看。
@@ -66,4 +66,6 @@
 
 **复用 /chat 而非另起执行器**：后台任务走的就是完整 agent 循环（含三档路由、全量工具、卡死检测/收尾），与前台对话同一套能力，不需要单独维护一条执行路径。
 
-**发起即授权**：后台无交互 UI，无法逐次弹 consent，故线程内自动批准。这是有意的信任边界——用户主动发起后台任务即视为授权其中的工具调用。高危操作仍受渠道硬策略约束。
+**consent 分级**：后台无交互 UI，无法逐次弹 consent，故线程内**分级处理**：低风险操作自动批准（用户主动发起后台任务即视为授权这类操作）；高危调用（`consent_always=True`，如 `rm -rf`）一律拒绝、记录，回灌时提示用户去前台确认后手动执行。避免长任务里模型「自作主张」删文件/花钱。高危判定复用工具自身的 `consent_always`，与前台一致。
+
+**端口不写死**：回调本机 server 的 base url 从 `ETHAN_SERVER_PORT` 环境变量读取（`run_server` 启动时设置），回退 8900，避免服务跑在非默认端口时后台任务连不上、静默失败。

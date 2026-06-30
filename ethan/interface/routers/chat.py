@@ -249,6 +249,7 @@ async def _run_generation(
                     "tool": item.tool,
                     "description": item.description,
                     "detail": item.detail,
+                    "always": item.always,
                 })
             elif isinstance(item, ThinkingEvent):
                 run.emit({"thinking": True})
