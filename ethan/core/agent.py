@@ -77,17 +77,30 @@ def _detail(content: str, max_chars: int = 2000) -> str:
     return content
 
 
+def _match_fast_rule(text: str, routing=None):
+    """返回命中的 FastRule（按 fast_rules 顺序取第一条命中的），无命中返回 None。
+
+    规则的任一关键字（支持 * 通配）出现在 text 中即命中。纯关键字驱动，不看字数。
+    """
+    if routing is None:
+        routing = get_config().defaults.routing
+    for rule in routing.fast_rules:
+        for kw in rule.keywords:
+            if _match_keyword(kw, text):
+                return rule
+    return None
+
+
 def _get_route(text: str, skill_triggers: list[str] | None = None) -> str:
     """
     返回路由档位：'fast' | 'medium' | 'full'
 
     规则（按优先级）：
     1. 有 FORCE_FULL 信号 → full（最高优先）
-    2. 命中 fast_path Skill 的 trigger 关键词 → fast（不受长度限制）
-    3. 命中 config.routing.fast_skill_triggers → fast（不受长度限制）
-    4. 命中 config.routing.fast_keywords 且长度 ≤ fast_max_length → fast
-    5. 长度 ≤ medium_max_length → medium
-    6. 其余 → full
+    2. 命中 fast_path Skill 的 trigger 关键词 → fast
+    3. 命中任一 fast_rule 的关键字 → fast（纯关键字驱动，不看字数，避免字数误杀）
+    4. 长度 ≤ medium_max_length → medium
+    5. 其余 → full
     """
     lower = text.lower()
 
@@ -101,18 +114,10 @@ def _get_route(text: str, skill_triggers: list[str] | None = None) -> str:
             if _match_keyword(kw, text):
                 return "fast"
 
-    for kw in routing.fast_skill_triggers:
-        if _match_keyword(kw, text):
-            return "fast"
+    if _match_fast_rule(text, routing) is not None:
+        return "fast"
 
-    text_len = len(text.strip())
-
-    if text_len <= routing.fast_max_length:
-        for kw in routing.fast_keywords:
-            if _match_keyword(kw, text):
-                return "fast"
-
-    if text_len <= routing.medium_max_length:
+    if len(text.strip()) <= routing.medium_max_length:
         return "medium"
 
     return "full"
@@ -341,8 +346,12 @@ class Agent:
             "</mode_setup>"
         )
 
-    def _build_system(self, messages: list[Message], fast: bool = False) -> str:
-        """构建 system prompt。fast=True 时使用极简版本减少 token。"""
+    def _build_system(self, messages: list[Message], fast: bool = False, fast_rule=None) -> str:
+        """构建 system prompt。fast=True 时使用极简版本减少 token。
+
+        fast_rule（命中的 FastRule）非空时，把它声明的 skills 强制注入 prompt 并激活其 tools，
+        不依赖 skill 自身的触发词匹配——规则命中即视为用户意图已明确。
+        """
         config = get_config()
         workspace = config.defaults.workspace
 
@@ -396,8 +405,19 @@ class Agent:
                 from ethan.core.modes import resolve_mode
                 mode_key = resolve_mode(self._mode).key
                 matched = self._skills.match(last_user, channel=self._channel, mode=mode_key)
+                # 命中 fast_rule 时，把规则声明的 skills 也并入（去重），不靠触发词——规则命中即明确意图
+                if fast_rule and fast_rule.skills:
+                    have = {s.name for s in matched}
+                    for sname in fast_rule.skills:
+                        if sname not in have:
+                            sk = self._skills.get(sname)
+                            if sk:
+                                matched.append(sk)
+                                have.add(sname)
                 self.last_matched_skills = [s.name for s in matched]
-                skill_ctx = self._skills.build_context(last_user, channel=self._channel, mode=mode_key)
+                skill_ctx = "\n\n".join(
+                    f"[Skill: {s.name}]\n{s.content[:3000]}" for s in matched
+                ) if matched else ""
                 if skill_ctx:
                     parts.append(f"<relevant_skills>\n{skill_ctx}\n</relevant_skills>")
                     # skill 内容里提到的非 fast 工具自动激活，避免 fast 档看不见 skill 依赖的工具、
@@ -519,8 +539,12 @@ class Agent:
         route = _get_route(last_user, skill_triggers=skill_triggers)
         routing = get_config().defaults.routing
         if route == "fast":
-            system = self._build_system(working, fast=True)
-            tools_list = [t for t in self._registry.all() if t.fast_path]
+            # fast 档工具集 = 基础系统工具(fast_base_tools) + 命中规则声明的额外工具。
+            # 命中的规则同时把其 skills 强制注入 prompt（见 _build_system fast_rule 参数）。
+            rule = _match_fast_rule(last_user, routing)
+            wanted = set(routing.fast_base_tools) | (set(rule.tools) if rule else set())
+            tools_list = [t for t in self._registry.all() if t.name in wanted]
+            system = self._build_system(working, fast=True, fast_rule=rule)
             max_iters = routing.fast_max_iters
         elif route == "medium":
             system = self._build_system(working, fast=False)
@@ -594,9 +618,23 @@ class Agent:
         _route, system, tools_list, max_iters = self._select_route(working)
         provider = self._provider_for_route(_route)
 
-        for _ in range(max_iters):
-            tools = self._broadcast_tools(tools_list)
-            response = await provider.chat(working, tools=tools, system=system)
+        from ethan.core.loop_control import (
+            LoopMonitor, reflection_message, reflection_followup_message, finalize_system_suffix,
+        )
+        monitor = LoopMonitor()
+        pending_suffix = ""  # 反思提示，仅附加到「下一轮」的 system，附完即清
+
+        for i in range(max_iters):
+            finalize = (i == max_iters - 1)  # 留最后一轮做收尾：禁工具、强制总结
+            if finalize:
+                tools = None
+                sys = system + finalize_system_suffix("max_iters")
+            else:
+                tools = self._broadcast_tools(tools_list)
+                sys = system + pending_suffix if pending_suffix else system
+            pending_suffix = ""
+
+            response = await provider.chat(working, tools=tools, system=sys)
             self.usage.add(response.usage)
             working.append(response)
 
@@ -604,12 +642,32 @@ class Agent:
                 return response
 
             results: list[ToolResult] = await self._executor.execute(response.tool_calls)
+            had_error = any(getattr(r, "is_error", False) for r in results)
             for r in results:
                 working.append(Message(
                     role="tool",
                     content=r.content,
                     tool_call_id=r.tool_call_id,
                 ))
+            monitor.record(response.tool_calls, had_error)
+
+            # 反思后仍重复同一操作 → 二次强提醒，逼它换路
+            if monitor.awaiting_reflection_followup:
+                monitor.awaiting_reflection_followup = False
+                if monitor.repeated_after_reflection():
+                    pending_suffix = "\n\n[System: " + reflection_followup_message() + "]"
+                    continue
+
+            if monitor.is_stuck():
+                if monitor.exhausted():
+                    # 反思次数用尽仍卡住 → 收尾放弃：禁工具，让模型整理「已做/卡点/建议」
+                    sys = system + finalize_system_suffix("stuck")
+                    resp = await provider.chat(working, tools=None, system=sys)
+                    self.usage.add(resp.usage)
+                    return resp
+                last_result = results[-1].content if results else ""
+                pending_suffix = "\n\n[System: " + reflection_message(monitor, last_result) + "]"
+                monitor.mark_reflected()
 
         return Message(role="assistant", content="[max tool iterations reached]")
 
@@ -624,13 +682,26 @@ class Agent:
         _route, system, tools_list, max_iters = self._select_route(working)
         provider = self._provider_for_route(_route)
 
-        for _ in range(max_iters):
-            tools = self._broadcast_tools(tools_list)
+        from ethan.core.loop_control import (
+            LoopMonitor, reflection_message, reflection_followup_message, finalize_system_suffix,
+        )
+        monitor = LoopMonitor()
+        pending_suffix = ""  # 反思提示，仅附加到「下一轮」的 system，附完即清
+
+        for i in range(max_iters):
+            finalize = (i == max_iters - 1)  # 留最后一轮做收尾：禁工具、强制总结
+            if finalize:
+                tools = None
+                sys = system + finalize_system_suffix("max_iters")
+            else:
+                tools = self._broadcast_tools(tools_list)
+                sys = system + pending_suffix if pending_suffix else system
+            pending_suffix = ""
             full_content = ""
             final_chunk = None
 
             try:
-                async for chunk in provider.stream_chat(working, tools=tools, system=system):
+                async for chunk in provider.stream_chat(working, tools=tools, system=sys):
                     if chunk.reasoning:
                         yield ThinkingEvent(delta=chunk.reasoning)
                     if chunk.content:
@@ -647,7 +718,7 @@ class Agent:
                     provider = self._provider
                     full_content = ""
                     final_chunk = None
-                    async for chunk in provider.stream_chat(working, tools=tools, system=system):
+                    async for chunk in provider.stream_chat(working, tools=tools, system=sys):
                         if chunk.reasoning:
                             yield ThinkingEvent(delta=chunk.reasoning)
                         if chunk.content:
@@ -664,6 +735,9 @@ class Agent:
             working.append(response)
 
             if not response.is_tool_call:
+                return
+            if finalize:
+                # 收尾轮已禁工具并流式吐出总结；即便模型仍返回 tool_calls 也不执行，直接结束。
                 return
 
             # --- 授权检查：执行前对工具做（1）渠道硬策略 + （2）consent 确认 ---
@@ -706,7 +780,7 @@ class Agent:
                     elif consent_provider.streamed:
                         # Web：向流注入 ConsentEvent，await 前端响应（加超时兜底，
                         # 避免用户一直不点导致 producer 永久挂起、run 不结束）
-                        event, fut = consent_provider.create(desc, tc.name, detail)
+                        event, fut = consent_provider.create(desc, tc.name, detail, always=always)
                         yield event
                         try:
                             ok = await _aio.wait_for(fut, timeout=300)
@@ -731,6 +805,7 @@ class Agent:
                 yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary=_format_args(tc.arguments), state="start")
 
             results: list[ToolResult] = await self._executor.execute(allowed_calls) if allowed_calls else []
+            had_error = any(getattr(r, "is_error", False) for r in results)
 
             for r, tc in zip(results, allowed_calls):
                 # content 原文进模型上下文（get_secret 取出的 key Agent 要能用）；
@@ -745,12 +820,29 @@ class Agent:
                     tool_call_id=r.tool_call_id,
                 ))
 
-        # 达到最大迭代次数：不直接截断，额外调一次（不带工具）让模型总结已做的事
-        summary_system = system + "\n\n[System: Tool iteration limit reached. Summarize in 2-3 sentences what was accomplished and what remains, without calling any tools.]"
-        summary_full = ""
-        async for chunk in self._provider.stream_chat(working, tools=None, system=summary_system):
-            if chunk.content:
-                summary_full += chunk.content
-                yield chunk.content
-            if chunk.is_final:
-                self.usage.add(chunk.usage)
+            monitor.record(tool_calls, had_error)
+
+            # 反思后仍重复同一操作 → 二次强提醒，逼它换路
+            if monitor.awaiting_reflection_followup:
+                monitor.awaiting_reflection_followup = False
+                if monitor.repeated_after_reflection():
+                    pending_suffix = "\n\n[System: " + reflection_followup_message() + "]"
+                    continue
+
+            if monitor.is_stuck():
+                if monitor.exhausted():
+                    # 反思次数用尽仍卡住 → 收尾放弃：禁工具，让模型流式整理「已做/卡点/建议」
+                    sys = system + finalize_system_suffix("stuck")
+                    async for chunk in self._provider.stream_chat(working, tools=None, system=sys):
+                        if chunk.content:
+                            yield chunk.content
+                        if chunk.is_final:
+                            self.usage.add(chunk.usage)
+                    return
+                last_result = results[-1].content if results else ""
+                pending_suffix = "\n\n[System: " + reflection_message(monitor, last_result) + "]"
+                monitor.mark_reflected()
+
+        # 正常情况下最后一轮（finalize）已禁工具并流式吐出收尾总结后 return，
+        # 不会落到这里。保留一个兜底，极端竞态下也不至于静默结束。
+        return

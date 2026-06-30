@@ -75,7 +75,8 @@ def is_complex_coding_task(prompt: str) -> bool:
 # ── 会话持久化 ────────────────────────────────────────────────────────
 
 def _sessions_path(user_id: str = "") -> Path:
-    return user_data_dir(user_id) / "acp_sessions.json"
+    # user_data_dir() 已按当前 profile 解析目录，user_id 仅保留接口兼容。
+    return user_data_dir() / "acp_sessions.json"
 
 
 def _load_sessions(user_id: str = "") -> dict:
@@ -97,20 +98,26 @@ def _save_sessions(sessions: dict, user_id: str = "") -> None:
         pass
 
 
-def get_session(cwd: str, user_id: str = "") -> Optional[str]:
-    """返回该 cwd 上次 Coding Agent 会话的 session_id（用于 --resume）。"""
-    return _load_sessions(user_id).get(os.path.abspath(cwd))
+def _session_key(cwd: str, agent: str) -> str:
+    """会话键：按 agent + cwd 隔离，避免 claude/codex 在同一目录互相覆盖 session_id
+    （两者 id 格式不同，混用会导致 resume 失败）。"""
+    return f"{agent}::{os.path.abspath(cwd)}"
 
 
-def set_session(cwd: str, session_id: str, user_id: str = "") -> None:
+def get_session(cwd: str, user_id: str = "", agent: str = "claude") -> Optional[str]:
+    """返回该 (agent, cwd) 上次 Coding Agent 会话的 session_id（用于续接多轮）。"""
+    return _load_sessions(user_id).get(_session_key(cwd, agent))
+
+
+def set_session(cwd: str, session_id: str, user_id: str = "", agent: str = "claude") -> None:
     sessions = _load_sessions(user_id)
-    sessions[os.path.abspath(cwd)] = session_id
+    sessions[_session_key(cwd, agent)] = session_id
     _save_sessions(sessions, user_id)
 
 
-def clear_session(cwd: str, user_id: str = "") -> None:
+def clear_session(cwd: str, user_id: str = "", agent: str = "claude") -> None:
     sessions = _load_sessions(user_id)
-    sessions.pop(os.path.abspath(cwd), None)
+    sessions.pop(_session_key(cwd, agent), None)
     _save_sessions(sessions, user_id)
 
 
@@ -257,7 +264,7 @@ async def _run_claude_code(
 
     # 持久化 session_id 供下次续接
     if session_id:
-        set_session(work_dir, session_id, user_id=user_id)
+        set_session(work_dir, session_id, user_id=user_id, agent="claude")
 
     return ACPResult(
         success=not is_error and bool(final_result),
@@ -285,50 +292,296 @@ def _extract_tool_result_text(content) -> str:
 
 # ── OpenCode / Codex（轻量文本输出，无子步骤）─────────────────────────
 
-async def _run_opencode(prompt: str, cwd: Optional[str] = None, timeout: int = 120) -> ACPResult:
-    """Run OpenCode CLI and capture output."""
+async def _run_opencode(
+    prompt: str,
+    cwd: Optional[str] = None,
+    timeout: int = 180,
+    resume_session_id: Optional[str] = None,
+    user_id: str = "",
+) -> ACPResult:
+    """Run OpenCode with `--format json`，解析事件流，支持多轮续接。
+
+    首轮：opencode run --format json <prompt> → 从事件里拿 sessionID。
+    续轮：opencode run -s <sessionID> --format json <prompt>。
+    session 按 (opencode, cwd) 持久化，与 claude/codex 路径并存互不覆盖。
+    """
     opencode_bin = shutil.which("opencode")
     if not opencode_bin:
         return ACPResult(success=False, output="opencode command not found.", agent="opencode")
 
-    cmd = [opencode_bin, "run", "--prompt", prompt]
+    work_dir = cwd or str(Path.cwd())
+    base = [opencode_bin, "run", "--format", "json", "--dangerously-skip-permissions"]
+    if resume_session_id:
+        base += ["-s", resume_session_id]
+    cmd = base + [prompt]
+
+    sub_steps: list[dict] = []
+    session_id = resume_session_id or ""
+    text_parts: list[str] = []
+    is_error = False
+
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
+            stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            cwd=cwd or str(Path.cwd()),
+            stderr=asyncio.subprocess.DEVNULL,
+            cwd=work_dir,
         )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        output = stdout.decode(errors="replace").strip()
-        return ACPResult(success=proc.returncode == 0, output=output, agent="opencode")
+        assert proc.stdout is not None
+
+        async def _consume():
+            nonlocal session_id, is_error
+            while True:
+                line = await proc.stdout.readline()
+                if not line:
+                    break
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    evt = json.loads(line)
+                except Exception:
+                    continue
+                sid = evt.get("sessionID") or (evt.get("part") or {}).get("sessionID")
+                if sid:
+                    session_id = sid
+                etype = evt.get("type") or ""
+                part = evt.get("part") or {}
+                ptype = part.get("type") or ""
+                if etype == "text" or ptype == "text":
+                    t = part.get("text") or evt.get("text") or ""
+                    if t:
+                        text_parts.append(t)
+                elif etype == "tool" or ptype == "tool" or ptype.startswith("tool"):
+                    state = part.get("state") or {}
+                    status = state.get("status") if isinstance(state, dict) else ""
+                    name = part.get("tool") or part.get("name") or "tool"
+                    inp = (state.get("input") if isinstance(state, dict) else None) or part.get("input") or {}
+                    out = (state.get("output") if isinstance(state, dict) else None) or part.get("output") or ""
+                    sub_steps.append({
+                        "tool": name,
+                        "args": _summarize_args(inp if isinstance(inp, dict) else {"input": inp}),
+                        "state": "error" if status == "error" else "done",
+                        "duration_ms": None,
+                        "result_preview": _preview(str(out)),
+                    })
+                elif etype == "error" or ptype == "error":
+                    is_error = True
+                    msg = evt.get("message") or part.get("error") or ""
+                    if msg:
+                        sub_steps.append({"tool": "error", "args": _preview(str(msg), 80),
+                                          "state": "error", "duration_ms": None, "result_preview": ""})
+
+        await asyncio.wait_for(_consume(), timeout=timeout)
+        await asyncio.wait_for(proc.wait(), timeout=5)
     except asyncio.TimeoutError:
-        return ACPResult(success=False, output=f"Timed out after {timeout}s", agent="opencode")
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        return ACPResult(success=False, output=f"Timed out after {timeout}s",
+                         agent="opencode", session_id=session_id, sub_steps=sub_steps)
     except Exception as e:
-        return ACPResult(success=False, output=f"Error: {e}", agent="opencode")
+        return ACPResult(success=False, output=f"Error: {e}",
+                         agent="opencode", session_id=session_id, sub_steps=sub_steps)
+
+    final_result = "".join(text_parts).strip()
+    if not final_result and sub_steps:
+        final_result = "(OpenCode 未返回最终文本结果，可展开查看各步骤)"
+    if len(final_result) > 12000:
+        final_result = final_result[:12000] + "\n...(truncated)"
+
+    if session_id:
+        set_session(work_dir, session_id, user_id=user_id, agent="opencode")
+
+    return ACPResult(
+        success=not is_error and bool(final_result),
+        output=final_result or "(no output)",
+        agent="opencode",
+        session_id=session_id,
+        sub_steps=sub_steps,
+    )
 
 
-async def _run_codex(prompt: str, cwd: Optional[str] = None, timeout: int = 120) -> ACPResult:
-    """Run Codex CLI and capture output."""
+def _codex_item_to_step(item: dict) -> Optional[dict]:
+    """把 codex 的一条 item.completed 转成 sub_step（工具调用/命令/改文件）。
+
+    codex exec --json 的 item 形态随版本变化，这里按已知类型尽量提取，未知类型返回 None。
+    """
+    itype = item.get("type") or ""
+    if itype in ("agent_message", "reasoning", "thread.started"):
+        return None  # 文本/思考不算工具步骤
+    if itype == "command_execution":
+        cmd = item.get("command") or item.get("cmd") or ""
+        return {
+            "tool": "shell",
+            "args": _preview(cmd if isinstance(cmd, str) else " ".join(map(str, cmd)), 60),
+            "state": "error" if item.get("exit_code") not in (0, None) else "done",
+            "duration_ms": item.get("duration_ms"),
+            "result_preview": _preview(str(item.get("aggregated_output") or item.get("output") or "")),
+        }
+    if itype in ("file_change", "patch", "apply_patch"):
+        changes = item.get("changes") or item.get("files") or []
+        names = ", ".join(str(c.get("path") if isinstance(c, dict) else c) for c in changes) if isinstance(changes, list) else str(changes)
+        return {"tool": "edit", "args": _preview(names, 80), "state": "done", "duration_ms": None, "result_preview": ""}
+    if itype in ("mcp_tool_call", "tool_call", "function_call"):
+        return {
+            "tool": item.get("server") or item.get("name") or "tool",
+            "args": _preview(str(item.get("arguments") or item.get("input") or ""), 60),
+            "state": "error" if item.get("is_error") else "done",
+            "duration_ms": item.get("duration_ms"),
+            "result_preview": _preview(str(item.get("result") or item.get("output") or "")),
+        }
+    if itype == "error":
+        return {"tool": "error", "args": _preview(str(item.get("message") or ""), 80),
+                "state": "error", "duration_ms": None, "result_preview": ""}
+    return None
+
+
+def _codex_item_text(item: dict) -> str:
+    """从 agent_message item 里取最终文本。"""
+    if (item.get("type") or "") != "agent_message":
+        return ""
+    return str(item.get("text") or item.get("message") or "").strip()
+
+
+def _codex_provider_overrides() -> tuple[list[str], dict, str]:
+    """返回 (codex -c 覆盖参数, 额外环境变量, 模型名)。
+
+    复用 ethan 的 cliproxy provider（OpenAI 兼容，wire_api=responses），避开
+    ~/.codex/config.toml 里可能失效的默认 provider（ChatGPT 登录态过期等）。
+    无 cliproxy 配置时返回空 → 退回 codex 自身 config，不破坏既有行为。
+    模型默认 gpt-5.5，可用 ETHAN_CODEX_MODEL 覆盖。
+    """
+    try:
+        from ethan.core.config import get_config
+        p = get_config().providers.get("cliproxy")
+        if not p or not p.api_key or not p.base_url:
+            return [], {}, ""
+        base = p.base_url.rstrip("/")
+        env_key = "ETHAN_CODEX_KEY"
+        args = [
+            "-c", "model_provider=ethan_codex",
+            "-c", 'model_providers.ethan_codex.name="ethan_codex"',
+            "-c", f'model_providers.ethan_codex.base_url="{base}"',
+            "-c", f'model_providers.ethan_codex.env_key="{env_key}"',
+            "-c", 'model_providers.ethan_codex.wire_api="responses"',
+        ]
+        model = os.environ.get("ETHAN_CODEX_MODEL", "gpt-5.5")
+        return args, {env_key: p.api_key}, model
+    except Exception:
+        return [], {}, ""
+
+
+async def _run_codex(
+    prompt: str,
+    cwd: Optional[str] = None,
+    timeout: int = 180,
+    resume_session_id: Optional[str] = None,
+    user_id: str = "",
+) -> ACPResult:
+    """Run Codex with `codex exec --json`，解析事件流，支持多轮续接。
+
+    首轮：codex exec --json <prompt> → 从 thread.started 拿 thread_id 作 session_id。
+    续轮：codex exec resume <session_id> --json <prompt>。
+    session_id 按 (codex, cwd) 持久化，与 Claude Code 路径并存互不覆盖。
+    provider 经 _codex_provider_overrides 注入（复用 ethan cliproxy），避开失效的默认 provider。
+    """
     codex_bin = shutil.which("codex")
     if not codex_bin:
         return ACPResult(success=False, output="codex command not found.", agent="codex")
 
-    cmd = [codex_bin, "exec", prompt]
+    work_dir = cwd or str(Path.cwd())
+    prov_args, prov_env, model = _codex_provider_overrides()
+    model_args = ["-m", model] if model else []
+    base_flags = ["--json", "--dangerously-bypass-approvals-and-sandbox", *prov_args, *model_args]
+    # --dangerously-bypass-approvals-and-sandbox：非交互委派场景跳审批与沙箱
+    if resume_session_id:
+        cmd = [codex_bin, "exec", "resume", resume_session_id, *base_flags, prompt]
+    else:
+        cmd = [codex_bin, "exec", *base_flags, prompt]
+
+    sub_steps: list[dict] = []
+    session_id = resume_session_id or ""
+    final_result = ""
+    is_error = False
+
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
+            stdin=asyncio.subprocess.DEVNULL,  # 否则 codex 会阻塞等 stdin
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            cwd=cwd or str(Path.cwd()),
+            stderr=asyncio.subprocess.DEVNULL,
+            cwd=work_dir,
+            env={**os.environ, **prov_env} if prov_env else None,
         )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        output = stdout.decode(errors="replace").strip()
-        return ACPResult(success=proc.returncode == 0, output=output, agent="codex")
+        assert proc.stdout is not None
+
+        async def _consume():
+            nonlocal session_id, final_result, is_error
+            while True:
+                line = await proc.stdout.readline()
+                if not line:
+                    break
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    evt = json.loads(line)
+                except Exception:
+                    continue
+                t = evt.get("type") or ""
+                if t == "thread.started":
+                    sid = evt.get("thread_id")
+                    if sid:
+                        session_id = sid
+                elif t == "item.completed":
+                    item = evt.get("item") or {}
+                    text = _codex_item_text(item)
+                    if text:
+                        final_result = text  # 末个 agent_message 即最终答复
+                    step = _codex_item_to_step(item)
+                    if step:
+                        sub_steps.append(step)
+                elif t == "turn.failed":
+                    is_error = True
+                    err = (evt.get("error") or {}).get("message") or ""
+                    if err and not final_result:
+                        final_result = f"(codex turn failed) {err}"
+                elif t == "error":
+                    msg = evt.get("message") or ""
+                    if msg and not final_result:
+                        final_result = f"(codex error) {msg}"
+
+        await asyncio.wait_for(_consume(), timeout=timeout)
+        await asyncio.wait_for(proc.wait(), timeout=5)
     except asyncio.TimeoutError:
-        return ACPResult(success=False, output=f"Timed out after {timeout}s", agent="codex")
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        return ACPResult(success=False, output=f"Timed out after {timeout}s",
+                         agent="codex", session_id=session_id, sub_steps=sub_steps)
     except Exception as e:
-        return ACPResult(success=False, output=f"Error: {e}", agent="codex")
+        return ACPResult(success=False, output=f"Error: {e}",
+                         agent="codex", session_id=session_id, sub_steps=sub_steps)
+
+    if not final_result and sub_steps:
+        final_result = "(Codex 未返回最终文本结果，可展开查看各步骤)"
+    if len(final_result) > 12000:
+        final_result = final_result[:12000] + "\n...(truncated)"
+
+    if session_id:
+        set_session(work_dir, session_id, user_id=user_id, agent="codex")
+
+    return ACPResult(
+        success=not is_error and bool(final_result),
+        output=final_result or "(no output)",
+        agent="codex",
+        session_id=session_id,
+        sub_steps=sub_steps,
+    )
 
 
 # ── 主入口 ────────────────────────────────────────────────────────────
@@ -341,35 +594,94 @@ async def delegate(
     resume: bool = True,
     reset_session: bool = False,
     user_id: str = "",
+    mirror: bool = True,
 ) -> ACPResult:
     """Delegate a task to the best available local coding agent.
 
     Args:
-        resume: 是否续接该 cwd 上次的 Claude Code 会话（多轮）。
+        resume: 是否续接该 cwd 上次的 Coding Agent 会话（多轮）。
         reset_session: 清除该 cwd 的会话记忆，从新会话开始。
+        mirror: 是否把本次委派落成一条 Ethan 镜像 session（query+回复+步骤可在 web 回看）。
     """
     work_dir = cwd or str(Path.cwd())
 
-    if prefer == "opencode":
-        return await _run_opencode(prompt, cwd=work_dir, timeout=timeout)
-    if prefer == "codex":
-        return await _run_codex(prompt, cwd=work_dir, timeout=timeout)
+    # 解析本次实际使用的 agent 名（供镜像会话标题/归类），不改变下面的分派逻辑。
+    if prefer in ("opencode", "codex"):
+        agent_name = prefer
+    elif shutil.which("claude"):
+        agent_name = "claude"
+    elif shutil.which("opencode"):
+        agent_name = "opencode"
+    elif shutil.which("codex"):
+        agent_name = "codex"
+    else:
+        agent_name = "none"
 
-    # 默认优先 Claude Code（支持多轮 + 子步骤）
-    if shutil.which("claude"):
+    mirror_session = None
+    if mirror and agent_name != "none":
+        from ethan.acp.mirror import MirrorSession
+        mirror_session = await MirrorSession.start(
+            agent=agent_name, task=prompt, cwd=work_dir, user_id=user_id,
+        )
+
+    result = await _dispatch(
+        prompt, work_dir, prefer, timeout, resume, reset_session, user_id, agent_name,
+    )
+
+    if mirror_session is not None:
+        await mirror_session.finish(
+            result.output, result.sub_steps, is_error=not result.success,
+        )
+    return result
+
+
+async def _dispatch(
+    prompt: str,
+    work_dir: str,
+    prefer: str,
+    timeout: int,
+    resume: bool,
+    reset_session: bool,
+    user_id: str,
+    agent_name: str,
+) -> ACPResult:
+    """实际分派到具体 Coding Agent。镜像会话由 delegate() 在外层包裹。"""
+    if prefer == "opencode":
         resume_sid = None
         if reset_session:
-            clear_session(work_dir, user_id=user_id)
+            clear_session(work_dir, user_id=user_id, agent="opencode")
         elif resume:
-            resume_sid = get_session(work_dir, user_id=user_id)
+            resume_sid = get_session(work_dir, user_id=user_id, agent="opencode")
+        return await _run_opencode(
+            prompt, cwd=work_dir, timeout=timeout,
+            resume_session_id=resume_sid, user_id=user_id,
+        )
+    if prefer == "codex":
+        resume_sid = None
+        if reset_session:
+            clear_session(work_dir, user_id=user_id, agent="codex")
+        elif resume:
+            resume_sid = get_session(work_dir, user_id=user_id, agent="codex")
+        return await _run_codex(
+            prompt, cwd=work_dir, timeout=timeout,
+            resume_session_id=resume_sid, user_id=user_id,
+        )
+
+    # 默认优先 Claude Code（支持多轮 + 子步骤）
+    if agent_name == "claude":
+        resume_sid = None
+        if reset_session:
+            clear_session(work_dir, user_id=user_id, agent="claude")
+        elif resume:
+            resume_sid = get_session(work_dir, user_id=user_id, agent="claude")
         return await _run_claude_code(
             prompt, cwd=work_dir, timeout=timeout,
             resume_session_id=resume_sid, user_id=user_id,
         )
-    elif shutil.which("opencode"):
-        return await _run_opencode(prompt, cwd=work_dir, timeout=timeout)
-    elif shutil.which("codex"):
-        return await _run_codex(prompt, cwd=work_dir, timeout=timeout)
+    elif agent_name == "opencode":
+        return await _run_opencode(prompt, cwd=work_dir, timeout=timeout, user_id=user_id)
+    elif agent_name == "codex":
+        return await _run_codex(prompt, cwd=work_dir, timeout=timeout, user_id=user_id)
     else:
         return ACPResult(
             success=False,

@@ -28,6 +28,7 @@ class ConsentEvent:
     description: str
     tool: str = ""
     detail: str = ""
+    always: bool = False  # 高危调用（如 rm -rf）：每次都须确认，后台任务也绝不自动批准
 
 
 class ConsentProvider:
@@ -85,13 +86,13 @@ class WebConsentProvider(ConsentProvider):
         self._pending: dict[str, asyncio.Future] = {}
         self.session_id = session_id
 
-    def create(self, description: str, tool: str = "", detail: str = "") -> tuple[ConsentEvent, asyncio.Future]:
+    def create(self, description: str, tool: str = "", detail: str = "", always: bool = False) -> tuple[ConsentEvent, asyncio.Future]:
         req_id = _secrets.token_hex(8)
         loop = asyncio.get_event_loop()
         fut: asyncio.Future = loop.create_future()
         self._pending[req_id] = fut
         _REGISTRY[req_id] = self  # 全局注册，供 /consent 端点查找
-        return ConsentEvent(request_id=req_id, description=description, tool=tool, detail=detail), fut
+        return ConsentEvent(request_id=req_id, description=description, tool=tool, detail=detail, always=always), fut
 
     def resolve(self, request_id: str, allowed: bool) -> bool:
         fut = self._pending.pop(request_id, None)

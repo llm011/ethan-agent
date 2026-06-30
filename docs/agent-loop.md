@@ -30,15 +30,23 @@ _get_route() → 'fast' | 'medium' | 'full'
    └─ full   → 完整 system prompt + 全量工具 + 最多 max_tool_iterations 次迭代（默认 10）
    │
    ▼
-for _ in range(max_iters):
+for i in range(max_iters):
+    finalize = (i == max_iters - 1)        # 留最后一轮做收尾：禁工具、强制总结
     response = await provider.chat(working_messages, tools, system)
     if not response.is_tool_call → return response
     results = await executor.execute(response.tool_calls)  # asyncio.gather 并发
     working_messages.extend(tool_results)
+    monitor.record(tool_calls, had_error)   # 卡死检测：记录本轮调用签名
+    if monitor.is_stuck():
+        if monitor.exhausted() → 禁工具收尾「已做/卡点/建议」并 return
+        else → 注入反思 prompt（强制 <diagnosis> + 换路），下一轮生效
 
-return "[max tool iterations reached]"
+# 跑满迭代：最后一轮已禁工具、流式吐出收尾总结，不再吐死字符串
 ```
 -->
+
+> **卡死检测 + 优雅收尾**（`core/loop_control.py`）：主循环不再是裸 ReAct。
+> `LoopMonitor` 记录每轮工具调用的签名（工具名 + 参数 JSON）；连续 3 轮同签名（或连续 2 轮同签名且都报错）判定「原地打转」，注入一条强制反思 system 提示（要求模型用 `<diagnosis>` 标签诊断根因并换路，禁止原样重试）。反思后仍重复则追加二次强提醒；最多反思 2 次仍卡住，则禁用工具、让模型生成「已完成 / 卡点 / 需用户提供」的收尾报告。跑满 `max_iters` 时同样留最后一轮禁工具收尾，而不是返回 `[max tool iterations reached]` 死字符串。chat / stream_chat 两条路径共用这套逻辑。
 
 ---
 
@@ -127,6 +135,8 @@ result_compressor.maybe_compress(tool_name, result)
 
 **超长输出压缩**：shell 或 web 工具有时返回数万字符，不经处理直接塞回主模型既昂贵又低效，廉价模型先摘要再注入。
 
-**max_iterations 上限**：防止 LLM 陷入 tool call 死循环（工具持续报错时）。Fast 固定为 2，Medium 默认 4，Full 默认 10，可通过 config 调整。
+**max_iterations 上限**：防止 LLM 陷入 tool call 死循环（工具持续报错时）。Fast 固定为 2，Medium 默认 4，Full 默认 10，可通过 config 调整。跑满上限不再吐死字符串，而是留最后一轮禁用工具、让模型收尾总结（见上文「卡死检测 + 优雅收尾」）。
+
+**卡死检测优于纯靠迭代上限**：迭代上限只是兜底——它要等跑满所有轮次才止损，期间用户干等、token 照烧。`LoopMonitor` 在连续 3 轮（或 2 轮同错误）原地打转时就主动介入注入反思，让模型显式诊断换路，比被动等上限更省也更可控。签名按「工具名 + 全量参数」比对——递增分页（offset 变化）会产生不同签名，天然不被误判为卡住。
 
 **UsageStats**：`cache_tokens` 同时统计 `cache_read` 和 `cache_creation`，确保状态栏显示的缓存命中数准确。

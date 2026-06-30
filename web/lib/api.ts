@@ -245,9 +245,6 @@ export interface AgentSettings {
   proxy: string;
   max_tokens: number;
   max_tool_iterations: number;
-  fast_keywords: string[];
-  fast_max_length: number;
-  fast_skill_triggers: string[];
 }
 export async function fetchAgentSettings(): Promise<AgentSettings> {
   const res = await fetch(`${API_URL}/settings/agent`, { headers: headers() });
@@ -360,8 +357,8 @@ export interface ToolTier {
 export interface ToolTiers {
   tiers: ToolTier[];
   fast_count: number;
+  fast_rule_tool_count: number;
   total_count: number;
-  fast_max_length: number;
   medium_max_length: number;
 }
 
@@ -369,6 +366,44 @@ export async function fetchToolTiers(): Promise<ToolTiers> {
   const res = await fetch(`${API_URL}/tool-tiers`, { headers: headers() });
   if (!res.ok) throw new Error("Failed");
   return res.json();
+}
+
+export interface FastRule {
+  name: string;
+  keywords: string[];
+  tools: string[];
+  skills: string[];
+}
+
+export interface FastRules {
+  fast_base_tools: string[];
+  fast_rules: FastRule[];
+}
+
+export interface FastRuleOption { name: string; description: string; }
+export interface FastRuleOptions {
+  tools: FastRuleOption[];
+  skills: FastRuleOption[];
+}
+
+export async function fetchFastRules(): Promise<FastRules> {
+  const res = await fetch(`${API_URL}/fast-rules`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed");
+  return res.json();
+}
+
+export async function fetchFastRuleOptions(): Promise<FastRuleOptions> {
+  const res = await fetch(`${API_URL}/fast-rules/options`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed");
+  return res.json();
+}
+
+export async function updateFastRules(patch: Partial<FastRules>): Promise<void> {
+  await fetch(`${API_URL}/fast-rules`, {
+    method: "PATCH",
+    headers: headers(),
+    body: JSON.stringify(patch),
+  });
 }
 
 
@@ -389,6 +424,29 @@ export async function fetchSchedules(): Promise<ScheduleJob[]> {
   const res = await fetch(`${API_URL}/schedule`, { headers: headers() });
   if (!res.ok) throw new Error("Failed");
   return res.json().then(data => data.jobs);
+}
+
+export interface BackgroundTask {
+  id: string;
+  title: string;
+  status: "running" | "done" | "error" | "stopped";
+  channel: string;
+  started_at: number;
+  elapsed_seconds: number;
+}
+
+export async function fetchBackgroundTasks(): Promise<BackgroundTask[]> {
+  const res = await fetch(`${API_URL}/background-tasks`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed");
+  return res.json().then(data => data.tasks);
+}
+
+export async function stopBackgroundTask(taskId: string): Promise<void> {
+  const res = await fetch(`${API_URL}/background-tasks/${encodeURIComponent(taskId)}/stop`, {
+    method: "POST",
+    headers: headers(),
+  });
+  if (!res.ok) throw new Error("Failed");
 }
 
 export async function deleteSchedule(jobId: string): Promise<void> {

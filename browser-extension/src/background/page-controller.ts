@@ -295,7 +295,7 @@ export class BrowserPageController {
     ref: string;
     text: string;
   }): Promise<BrowserPageActionResult> {
-    return this.runDomAction(params.sessionId, params.ref, 'fill', params.text);
+    return this.runInsertText(params.sessionId, params.ref, 'fill', params.text);
   }
 
   async type(params: {
@@ -303,7 +303,7 @@ export class BrowserPageController {
     ref: string;
     text: string;
   }): Promise<BrowserPageActionResult> {
-    return this.runDomAction(params.sessionId, params.ref, 'type', params.text);
+    return this.runInsertText(params.sessionId, params.ref, 'type', params.text);
   }
 
   async select(params: {
@@ -618,6 +618,65 @@ export class BrowserPageController {
     }
 
     return response.result?.value as TResult;
+  }
+
+  private async runInsertText(
+    sessionId: string,
+    ref: string,
+    mode: 'fill' | 'type',
+    text: string,
+  ): Promise<BrowserPageActionResult> {
+    return this.withPage(sessionId, async ({ tab, client }) => {
+      const resolved = await this.resolveRef(client, tab, ref, false);
+      // 1) 聚焦元素并按 mode 设置选区：fill=全选(随后 insertText 替换)，type=光标移到末尾(追加)。
+      const prep = await this.callFunctionOn<RuntimeStatus>(
+        client,
+        resolved.objectId,
+        `function(mode) {
+          if (typeof this.focus === 'function') this.focus();
+          const isInput = ('value' in this) && typeof this.select === 'function';
+          if (mode === 'fill') {
+            if (isInput) {
+              this.select();
+            } else if (this.isContentEditable) {
+              const range = document.createRange();
+              range.selectNodeContents(this);
+              const sel = window.getSelection();
+              sel.removeAllRanges();
+              sel.addRange(range);
+            }
+          } else if (isInput) {
+            const len = (this.value || '').length;
+            try { this.setSelectionRange(len, len); } catch (e) {}
+          } else if (this.isContentEditable) {
+            const range = document.createRange();
+            range.selectNodeContents(this);
+            range.collapse(false);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+          }
+          return { ok: true };
+        }`,
+        [mode],
+      );
+      this.ensureRuntimeOk(prep, ref);
+      // 2) 经 CDP Input.insertText 注入文本——走真实输入管线，触发 beforeinput/input(InputEvent)，
+      //    CodeMirror/Lexical/React 受控组件都能识别；直接改 value/textContent 这些框架不认，
+      //    会出现「框里看着有字、内部 model 仍为空」的发送失败。
+      if (mode === 'fill' && text === '') {
+        // insertText('') 不保证清空已选内容，单独发一次 Delete 删除选区。
+        await client.send('Input.dispatchKeyEvent', {
+          type: 'keyDown', key: 'Delete', code: 'Delete', windowsVirtualKeyCode: 46,
+        });
+        await client.send('Input.dispatchKeyEvent', {
+          type: 'keyUp', key: 'Delete', code: 'Delete', windowsVirtualKeyCode: 46,
+        });
+      } else {
+        await client.send('Input.insertText', { text });
+      }
+      return this.createActionResult(sessionId, tab, ref);
+    });
   }
 
   private async runDomAction(

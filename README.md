@@ -44,9 +44,14 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 - **medium**: mid-length messages → full prompt + all tools + 4 iterations
 - **full**: complex tasks → full prompt + all tools + 10 iterations
 
-**Scheduler**
+**Loop control**
+- Stuck detection: when the agent repeats the same tool+args for 3 rounds (or 2 rounds of the same error), it injects a forced-reflection prompt (`<diagnosis>` + must switch strategy) instead of spinning to the iteration cap
+- Graceful finalize: on stuck-give-up (after 2 reflections) or hitting the iteration cap, the last round disables tools and the model writes a "done / blocker / what's needed from you" summary — never a raw `[max tool iterations reached]`
+
+**Scheduler & background tasks**
 - Create cron or interval jobs in conversation; SQLite-persisted, survives restarts
 - `heartbeat.md`: write natural-language tasks; the system runs them periodically
+- Background tasks: kick off a long-running task that runs async in its own session without blocking the current chat; result is fed back when done (Lark pushes to the originating chat, web surfaces the session). View/stop them on the `/background-tasks` page, with a running-count badge in the sidebar
 
 **Tool system**
 - Shell execution, web search (DuckDuckGo by default, or Tavily via config), web fetch, file I/O, knowledge base

@@ -25,7 +25,10 @@ async def get_knowledge(q: str = None, mode: str = "keyword", user_id: str = Dep
         items = await manager.semantic_search(q) if mode == "semantic" else manager.search(q)
     else:
         items = manager.list_all()
-    return {"items": [{"title": i.title, "content": i.snippet(), "source": i.source, "tags": i.tags} for i in items]}
+    # 返回完整 content（含换行）。web 详情面板按 markdown 渲染需要原始换行；
+    # 用 snippet() 会被 \s+→空格 压成一行，导致前端看不到任何换行。侧边栏只显示标题/标签，
+    # 不展示正文，故返回全文无副作用。
+    return {"items": [{"title": i.title, "content": i.content, "source": i.source, "tags": i.tags} for i in items]}
 
 
 @router.get("/search")

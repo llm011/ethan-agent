@@ -45,23 +45,47 @@ class LarkConfig(BaseModel):
     main_chat_id: str = ""
 
 
+class FastRule(BaseModel):
+    """一条快捷路由规则：命中任一关键字 → 走 Fast Path，并按需加载指定的工具/技能。
+
+    设计意图：fast 档默认只挂基础系统工具（见 RoutingConfig.fast_base_tools）。
+    某条规则命中时，在基础工具之上额外挂载本规则声明的 tools，并强制注入 skills。
+    若挂载的工具/技能仍不足以完成任务，模型可自行调 find_tools 激活全部进阶工具兜底。
+    """
+    name: str = ""                                   # 规则显示名（UI 展示用，可空）
+    keywords: list[str] = Field(default_factory=list)  # 命中任一即触发（支持 * 通配）
+    tools: list[str] = Field(default_factory=list)     # 额外挂载的工具名
+    skills: list[str] = Field(default_factory=list)    # 强制注入 prompt 的技能名
+
+
 class RoutingConfig(BaseModel):
-    """任务路由配置：匹配 fast_keywords 中任意关键词且消息长度 ≤ fast_max_length 时走 Fast Path。"""
-    fast_keywords: list[str] = Field(default_factory=lambda: [
-        "关*灯", "开*灯",
-        "关*窗帘", "开*窗帘",
-        "关*空调", "开*空调",
-        "关*电视", "开*电视",
-        "关*风扇", "开*风扇",
-        "调*亮度", "调*温度", "调*音量",
-        "播放音乐", "暂停", "下一首", "上一首",
-        "定时任务", "有哪些任务", "任务列表", "什么任务", "定时提醒",
+    """任务路由配置：命中某条 fast_rule 的关键字 → 走 Fast Path（极简 prompt + 该规则的工具/技能）。
+
+    不再按字数判定 fast——字数误杀严重。fast 现在完全由 fast_rules 关键字驱动；
+    未命中任何规则的请求按字数走 medium / full（medium_max_length 仅用于这一档划分）。
+    """
+    fast_base_tools: list[str] = Field(default_factory=lambda: [
+        "file_read", "file_write", "skill_read", "skill_list", "find_tools",
+    ])  # fast 档永远挂载的基础系统工具；find_tools 用于「规则工具不够时」兜底激活进阶工具
+    fast_rules: list[FastRule] = Field(default_factory=lambda: [
+        FastRule(
+            name="智能家居控制",
+            keywords=[
+                "关*灯", "开*灯",
+                "关*窗帘", "开*窗帘",
+                "关*空调", "开*空调",
+                "关*电视", "开*电视",
+                "关*风扇", "开*风扇",
+                "调*亮度", "调*温度", "调*音量",
+                "播放音乐", "暂停", "下一首", "上一首",
+            ],
+            tools=["shell"],
+            skills=["home-assistant-control"],
+        ),
     ])
-    fast_max_length: int = 12  # 消息超过此长度不走 Fast Path（简单控制命令通常 ≤ 10 字）
-    fast_skill_triggers: list[str] = Field(default_factory=list)  # 命中时强制走 Fast Path，不受长度限制（给 Skill 关联用）
     fast_max_iters: int = 10     # Fast Path 最多工具迭代次数
     fast_use_lite_model: bool = True  # Fast Path 用 lite 模型（设备控制/状态查询等简单任务，省钱提速）
-    medium_max_length: int = 80   # 超过 fast_max_length 且不超过此值走 Medium Path
+    medium_max_length: int = 80   # 未命中 fast_rule 时：≤ 此长度走 Medium，否则 Full
     medium_max_iters: int = 30    # Medium Path 最多迭代次数，应对短文本但重搜索的任务
 
 
