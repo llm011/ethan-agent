@@ -392,6 +392,7 @@ class MyTool(BaseTool):
     description = "Does something useful"
     fast_path = False   # set True to make available in fast-track mode
     cacheable = False   # set True to cache identical calls within a turn
+    no_compress = False # set True if output carries IDs/refs/structured data the model must reuse verbatim
     parameters = {"type": "object", "properties": {...}, "required": [...]}
 
     async def run(self, **kwargs) -> str:
@@ -400,7 +401,9 @@ class MyTool(BaseTool):
 
 Register it in `cli.py` and the LLM will automatically use it when relevant.
 
-Built-in tools also include `ui_card`, which renders structured info as [A2UI](https://a2ui.org/) cards instead of plain text. High-frequency types (comparison / ranking / stats / timeline) use fixed backend templates — the model just fills in typed data, so styling stays clean and consistent; free-form cards can still be hand-authored. Shown via `@a2ui/react` on the web and text-degraded in the REPL. Format details live in the on-demand `ui-card` skill, so the system prompt stays lean.
+> **`no_compress`**: tool output over 4000 chars is auto-summarized by a cheap model before reaching the main model. Leave it off when the output is prose to *read* (web pages, logs). Turn it on when the output contains data the model must pass back *verbatim* — IDs, refs, paths, structured JSON — otherwise the summary loses those tokens and the model can't act on the result.
+
+Built-in tools also include `ui_card`, which renders structured info as cards instead of plain text. High-frequency types (comparison / ranking / stats / timeline) use fixed backend templates — the model just fills in typed data, so styling stays clean and consistent; free-form cards can still be hand-authored. Rendering is channel-aware over the same structured `card` data: the web renders [A2UI](https://a2ui.org/) via `@a2ui/react`, the REPL degrades to text, and Feishu/Lark renders native interactive cards (an incremental nicety on top of the base text/post + streaming-card output). Format details live in the on-demand `ui-card` skill, so the system prompt stays lean.
 
 ---
 

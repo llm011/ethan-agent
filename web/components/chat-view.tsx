@@ -13,6 +13,7 @@ import {
   fetchSchedules,
   streamChat,
   streamResume,
+  stopGeneration,
   type StreamChunk,
   compactSession,
   updateSessionMode,
@@ -203,6 +204,18 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
             cache: prev.cache + finalUsage!.cache,
           }));
         }
+        if (chunk.stopped) {
+          // 用户主动停止：补一个「已停止」标记（后端也会落库同样标记，这里只为即时反馈）
+          if (!assistantContent.trimEnd().endsWith("（已停止）")) {
+            assistantContent = assistantContent.trim()
+              ? `${assistantContent}\n\n_（已停止）_`
+              : "_（已停止）_";
+          }
+          if (chunk.usage) {
+            finalUsage = { input: chunk.usage.input || 0, output: chunk.usage.output || 0, cache: chunk.usage.cache || 0 };
+          }
+          break;
+        }
       }
     } catch (err) {
       const errLine = `⚠️ ${err instanceof Error ? err.message : "连接中断"}`;
@@ -360,6 +373,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           "- `/new` — 新建对话，清空当前上下文\n" +
           "- `/compact` — 压缩历史对话为摘要，释放上下文\n" +
           "- `/sessions` — 列出最近的会话\n" +
+          "- `/stop` — 停止当前进行中的回复\n" +
           "- `/help` — 显示本帮助\n\n" +
           "（`/model` `/token` 请用顶部下拉和设置页；其它消息正常对话即可）"
         );
@@ -405,6 +419,12 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           }
         } catch {
           pushAssistant("⚠️ 获取会话列表失败。");
+        }
+        return;
+      }
+      if (cmd === "stop") {
+        if (activeSession) {
+          await stopGeneration(activeSession).catch(() => {});
         }
         return;
       }
@@ -495,6 +515,9 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           inputRef={inputRef}
           onModelChange={setSelectedModel}
           onSend={handleSend}
+          onStop={() => {
+            if (activeSession) stopGeneration(activeSession).catch(() => {});
+          }}
           onFilesChange={setPendingFiles}
           onQuoteCancel={() => setQuote(null)}
           modes={modes}

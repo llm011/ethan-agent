@@ -36,6 +36,7 @@ class CommandContext:
     set_owner: callable | None = None       # async (chat_id, sender_id) -> str：认主人 + 设主会话
     get_mode: callable | None = None        # async (chat_id) -> str：取当前会话 mode（"" = 默认）
     set_mode: callable | None = None        # async (chat_id, mode_key) -> None：切换当前会话 mode
+    stop_task: callable | None = None       # async (chat_id) -> bool：停止当前进行中的生成，返回是否真的停了
     extra_help: str = ""                    # 渠道额外的 help 行（如 web/REPL 专属命令提示）
 
 
@@ -44,6 +45,7 @@ COMMANDS = {
     "new": ("新建对话：清空当前上下文，下一条消息开始新会话", False),
     "compact": ("压缩历史：把之前的对话压成摘要，释放上下文", False),
     "sessions": ("列出最近的会话", False),
+    "stop": ("停止当前进行中的回复", False),
     "resume": ("恢复指定会话（用法 /resume <id>）", True),
     "model": ("查看/切换模型（用法 /model [id]）", False),
     "mode": ("查看/切换对话模式（用法 /mode [名称]，不带参数或 default 切回默认）", False),
@@ -102,6 +104,16 @@ async def handle_command(ctx: CommandContext) -> str | None:
             logger.exception("list_sessions failed for chat %s", ctx.chat_id)
             return "⚠️ 获取会话列表失败。"
         return listing or "暂无会话。"
+
+    if name == "stop":
+        if ctx.stop_task is None:
+            return "此渠道暂不支持停止。"
+        try:
+            stopped = await ctx.stop_task(ctx.chat_id)
+        except Exception:
+            logger.exception("stop_task failed for chat %s", ctx.chat_id)
+            return "⚠️ 停止失败，请稍后再试。"
+        return "🛑 已停止当前回复。" if stopped else "当前没有进行中的回复。"
 
     if name == "resume":
         if ctx.resume_session is None:

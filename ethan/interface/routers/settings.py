@@ -284,3 +284,62 @@ async def system_prompt_preview(model: str | None = None):
         "approx_total_tokens": approx_tokens + tool_count * 70,
         "chars": len(system),
     }
+
+
+# ── Tool tiers (路由档位 → 实时工具集) ─────────────────────────────
+
+
+@router.get("/tool-tiers", dependencies=[Depends(verify_token)])
+async def tool_tiers(model: str | None = None):
+    """实时计算三档路由各自广播给模型的工具集。
+
+    与 agent._select_route 的取值规则保持一致：
+      - fast 档：只广播 fast_path=True 的常驻工具；长尾工具靠模型调 find_tools 激活
+      - medium / full 档：全量工具直接可见
+    所以前端不写死任何清单，每次按当前注册表实时算。
+    """
+    agent = create_agent(model)
+    tools = sorted(agent._registry.all(), key=lambda t: t.name)
+
+    def info(t) -> dict:
+        return {
+            "name": t.name,
+            "description": t.description,
+            "fast_path": bool(t.fast_path),
+            "side_effect": bool(getattr(t, "side_effect", False)),
+            "no_compress": bool(getattr(t, "no_compress", False)),
+        }
+
+    fast_tools = [info(t) for t in tools if t.fast_path]
+    all_tools = [info(t) for t in tools]
+    routing = get_config().defaults.routing
+
+    return {
+        "tiers": [
+            {
+                "key": "fast",
+                "label": "Fast 档",
+                "desc": (
+                    "短消息、或命中常驻技能/关键词触发词时进入。只广播下列常驻工具，"
+                    "其余长尾能力需模型主动调 find_tools 激活后才可用。"
+                ),
+                "tools": fast_tools,
+            },
+            {
+                "key": "medium",
+                "label": "Medium 档",
+                "desc": "中等长度消息。全量工具直接可见，迭代上限较 fast 高。",
+                "tools": all_tools,
+            },
+            {
+                "key": "full",
+                "label": "Full 档",
+                "desc": "长消息、复杂任务、或命中 FORCE_FULL 信号时进入。全量工具直接可见。",
+                "tools": all_tools,
+            },
+        ],
+        "fast_count": len(fast_tools),
+        "total_count": len(all_tools),
+        "fast_max_length": routing.fast_max_length,
+        "medium_max_length": routing.medium_max_length,
+    }

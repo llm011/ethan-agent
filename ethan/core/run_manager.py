@@ -40,6 +40,7 @@ class ChatRun:
     done: bool = False
     task: asyncio.Task | None = None  # producer 任务引用
     consent: Any = None  # WebConsentProvider，收尾时 cancel_all
+    stop_requested: bool = False  # 用户主动停止（区别于「新 run 替换旧 run」的取消）：前者保存已生成的部分内容
 
     def emit(self, event: dict) -> None:
         """记录一个事件并扇出给所有当前订阅者（同步，无 await）。"""
@@ -97,6 +98,22 @@ class RunManager:
         传 user_id 时校验归属，不匹配视为不存在。"""
         run = self.get(session_id, user_id)
         return run is not None and not run.done
+
+    def stop(self, session_id: str, user_id: str | None = None) -> bool:
+        """用户主动停止某 session 的进行中生成：标记 stop_requested 并取消 producer 任务。
+
+        与 create() 里「新 run 取消旧 run」不同——那是丢弃，这里会保存已生成的部分内容
+        （由 _run_generation 的 CancelledError 分支根据 stop_requested 决定）。
+        传 user_id 时校验归属，不匹配返回 False（防跨用户停别人的任务）。
+        返回是否真的停了一个进行中的 run。"""
+        run = self.get(session_id, user_id)
+        if run is None or run.done:
+            return False
+        run.stop_requested = True
+        if run.task is not None:
+            run.task.cancel()
+        return True
+
 
     def create(self, session_id: str, consent: Any = None, user_id: str = "") -> ChatRun:
         """为 session 创建新 run。若已有未完成的 run，先取消它，避免两个 writer。"""

@@ -63,6 +63,12 @@ class UiCardTool(BaseTool):
     no_compress = True
     side_effect = False
     name = "ui_card"
+
+    def __init__(self, channel: str = "web"):
+        # 渠道决定 card 路径的渲染目标：web/repl → A2UI envelope；lark → 飞书 interactive 卡片。
+        # 二者共享同一套结构化 card 数据，只是末端协议不同（见 ui_card_templates / lark_card_templates）。
+        self._channel = channel
+
     description = (
         "把结构化信息渲染成 A2UI 卡片展示给用户，比纯文字分点更直观。\n"
         "优先用 card 参数（固定模板，样式稳定）：对比/排行/统计/时间轴这几类高频卡片，"
@@ -98,8 +104,24 @@ class UiCardTool(BaseTool):
     }
 
     async def run(self, card: dict | None = None, messages: list | None = None) -> ToolResult:
-        # 优先走固定模板（card）：样式稳定，模型只填结构化数据
+        # 优先走固定模板（card）：样式稳定，模型只填结构化数据。
+        # 按渠道选渲染目标：lark → 飞书卡片 JSON；web/repl → A2UI envelope。
         if card:
+            if self._channel == "lark":
+                from ethan.tools.builtin.lark_card_templates import build_lark_card
+                try:
+                    lark_card = build_lark_card(card)
+                except ValueError as e:
+                    return ToolResult(
+                        tool_call_id="",
+                        content=f"ui_card 模板失败：{e}",
+                        is_error=True,
+                    )
+                return ToolResult(
+                    tool_call_id="",
+                    content=f"已为用户渲染 {card.get('type')} 卡片。卡片已直接展示在界面上，无需再用文字复述卡片内容。",
+                    ui=[{"lark_card": lark_card}],
+                )
             from ethan.tools.builtin.ui_card_templates import build_card
             try:
                 envelopes = build_card(card)
@@ -113,6 +135,14 @@ class UiCardTool(BaseTool):
                 tool_call_id="",
                 content=f"已为用户渲染 {card.get('type')} 卡片。卡片已直接展示在界面上，无需再用文字复述卡片内容。",
                 ui=envelopes,
+            )
+
+        # messages（裸 A2UI）：飞书卡片体系与 A2UI 协议差异大，不做硬翻译，提示改用 card。
+        if self._channel == "lark":
+            return ToolResult(
+                tool_call_id="",
+                content="飞书渠道暂不支持自定义 A2UI（messages），请改用 card 参数（compare/rank/stats/timeline 固定模板）。",
+                is_error=True,
             )
 
         envelopes = messages or []
