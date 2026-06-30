@@ -11,7 +11,7 @@ from ethan import __version__
 from ethan.core.heartbeat import start_heartbeat, stop_heartbeat
 from ethan.memory.api_keys import APIKeyStore
 
-from ethan.interface.routers import chat, sessions, settings, memory, schedule, knowledge, skills, docs, completions, logs, models, consent
+from ethan.interface.routers import chat, sessions, settings, memory, schedule, knowledge, skills, docs, completions, logs, models, consent, background_tasks
 from ethan.browser.ws_route import router as browser_ws_router
 from ethan.browser.http_route import router as browser_http_router
 
@@ -86,6 +86,7 @@ app.include_router(completions.router)  # /v1 OpenAI-compat, no /api prefix
 app.include_router(logs.router, prefix="/api")
 app.include_router(models.router, prefix="/api")
 app.include_router(consent.router, prefix="/api")
+app.include_router(background_tasks.router, prefix="/api")
 app.include_router(browser_ws_router)  # /ws/browser, WebSocket, no prefix
 app.include_router(browser_http_router, prefix="/api")  # /api/browser/shot/{name}
 

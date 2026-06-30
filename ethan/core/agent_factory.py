@@ -11,6 +11,9 @@ from ethan.core.agent import Agent
 from ethan.core.context import set_user_id
 from ethan.skills.registry import SkillRegistry
 from ethan.tools.builtin.acp import DelegateCodingTool
+from ethan.tools.builtin.background_task import (
+    BackgroundTaskTool, BackgroundTaskListTool, BackgroundTaskStopTool,
+)
 from ethan.tools.builtin.config import ConfigGetTool, ConfigSetTool
 from ethan.tools.builtin.file import FileListTool, FileReadTool, FileWriteTool
 from ethan.tools.builtin.find_tools import FindToolsTool
@@ -63,6 +66,9 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
     registry.register(ScheduleCreateTool(user_id=user_id))
     registry.register(ScheduleListTool())
     registry.register(ScheduleRemoveTool())
+    registry.register(BackgroundTaskTool(user_id=user_id))
+    registry.register(BackgroundTaskListTool())
+    registry.register(BackgroundTaskStopTool(user_id=user_id))
     registry.register(KnowledgeSearchTool(user_id=user_id))
     registry.register(KnowledgeReadTool(user_id=user_id))
     registry.register(KnowledgeAddTool(user_id=user_id))

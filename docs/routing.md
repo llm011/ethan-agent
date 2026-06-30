@@ -33,23 +33,19 @@
     → Yes → fast + 关联 Skill
    │
    ▼
-[3] 是否命中 config.routing.fast_skill_triggers？（手动配置，不受长度限制）
-    → Yes → fast
+[3] 是否命中某条 fast_rule 的关键字？（config.routing.fast_rules，纯关键字驱动，不看字数）
+    → Yes → fast + 该规则声明的工具/技能
    │
    ▼
-[4] 消息长度 ≤ fast_max_length 且命中 fast_keywords？
-    → Yes → fast
-   │
-   ▼
-[5] 消息长度 ≤ medium_max_length？
+[4] 消息长度 ≤ medium_max_length？
     → Yes → medium
    │
    ▼
-[6] 默认 → full
+[5] 默认 → full
 ```
 -->
 
-[2] 和 [3] 的区别：[2] 是自动的，只要 Skill 的 frontmatter 写了 `fast_path: true`，它的所有 trigger 关键词就会在 `Agent.chat()` 中自动收集并注入路由判断，无需额外配置；[3] 是手动补充的备用列表。
+**为什么不再按字数判定 fast**：早期版本用「命中 `fast_keywords` 且长度 ≤ `fast_max_length`(12 字)」判 fast，字数阈值误杀严重——稍微完整一点的指令（如"客厅的灯帮我关一下"）就掉到 medium。现在 fast 完全由 `fast_rules` 的关键字驱动，不看字数；命中规则即视为用户意图明确，直接走快轨并按规则按需挂载工具/技能。
 
 ---
 
@@ -60,10 +56,10 @@
 | 维度 | 配置 |
 |------|------|
 | 系统提示词 | soul + identity + 当前时间 + top-5 facts + user_profile + behavioral_guidelines + 匹配到的 Skill |
-| 工具集 | 仅 `fast_path=True` 的工具（如 `shell`、`file_read`） |
+| 工具集 | 基础系统工具(`fast_base_tools`：file_read/file_write/skill_read/skill_list/find_tools) + 命中规则声明的额外工具 |
 | 记忆注入 | 轻量（高置信度 facts，top-5） |
 | Skill 注入 | 仅注入匹配的相关 Skill |
-| 推理轮次 | 最多 2 轮 |
+| 推理轮次 | 最多 `fast_max_iters`（默认 10） |
 | Prompt Caching | 稳定层命中率更高，边际成本极低 |
 
 **典型场景**：智能家居控制、快速发送飞书消息、读取配置文件、简单状态查询。
@@ -92,11 +88,11 @@ trigger: "开灯|关灯|开空调|关空调|关*灯|开*灯"
 | 系统提示词 | 完整版（与 full 相同） |
 | 工具集 | 全量工具 |
 | 记忆注入 | 深度（与 full 相同） |
-| 推理轮次 | 最多 `medium_max_iters`（默认 15） |
+| 推理轮次 | 最多 `medium_max_iters`（默认 30） |
 
 **适用场景**：消息长度超过 fast 阈值、但不触发强制 full 信号的短问答、轻量任务。通过限制迭代次数，比 full 路径更快结束，避免为简单问题跑完整个 10 轮 ReAct 循环。
 
-> **注意**：即使消息长度很短（如"帮我搜索最新 AI 新闻"），若未命中 fast 触发词也不会走 fast，而是 medium。这类短文本但搜索密集的任务可能会多次调用工具，默认 15 次上限已经对大多数情况足够。
+> **注意**：即使消息长度很短（如"帮我搜索最新 AI 新闻"），若未命中 fast 规则也不会走 fast，而是 medium。这类短文本但搜索密集的任务可能会多次调用工具，默认 30 次上限已经对大多数情况足够。
 
 ---
 
@@ -129,24 +125,31 @@ trigger: "开灯|关灯|开空调|关空调|关*灯|开*灯"
 
 ### 通过 Web 设置页
 
-设置 → 通用设置 → Fast-path 关键词 / Fast-path Skill 触发词
+设置 → 快捷路由：管理「关键字 → 工具/技能」规则。每条规则可填触发关键字（支持通配 *）、勾选额外挂载的工具、勾选命中时强制注入的技能；顶部统一管理 Fast 档始终挂载的基础系统工具。
 
 ### 通过 config.yaml
 
 ```yaml
 defaults:
   routing:
-    fast_max_length: 12          # 消息超过此字数不走 fast 轨
-    medium_max_length: 80        # 超过 fast、不超过此值走 medium 轨
-    medium_max_iters: 15         # medium 轨最多迭代次数（可按需调大）
-    fast_keywords:               # 命中后走 fast 轨（受长度限制）
-      - "关*灯"
-      - "开*灯"
-      - "播放音乐"
-    fast_skill_triggers:         # 命中后走 fast 轨（不受长度限制，关联 Skill）
-      - "home assistant"
-      - "发飞书消息"
+    medium_max_length: 80        # 未命中 fast_rule 时：≤ 此字数走 medium，更长走 full
+    medium_max_iters: 30         # medium 轨最多迭代次数（可按需调大）
+    fast_max_iters: 10           # fast 轨最多迭代次数
+    fast_use_lite_model: true    # fast 轨用 lite 模型（省钱提速）
+    fast_base_tools:             # fast 档始终挂载的基础系统工具
+      - file_read
+      - file_write
+      - skill_read
+      - skill_list
+      - find_tools
+    fast_rules:                  # 关键字 → 工具/技能；命中任一关键字即走 fast（不看字数）
+      - name: 智能家居控制
+        keywords: ["关*灯", "开*灯", "播放音乐"]
+        tools: ["shell"]                    # 在 fast_base_tools 之上额外挂载
+        skills: ["home-assistant-control"]  # 命中即强制注入 prompt
 ```
+
+> 规则未命中时，模型仍可在 fast 档内调 `find_tools` 激活全部进阶工具兜底——所以规则配置只需覆盖高频确定性场景，不必穷举。
 
 ### Skill 层配置
 

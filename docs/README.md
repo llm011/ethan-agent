@@ -35,6 +35,7 @@
 | [对话模式](./modes.md) | Mode 机制、身份覆盖、按对话模式过滤技能、法律专家模式按需安装 |
 | [法律专家模式](./legal-mode.md) | legal-assistant 技能详解：能力范围、架构链路、按需安装、来源许可 |
 | [调度器](./scheduler.md) | 定时任务、cron + interval、SQLite 持久化 |
+| [后台任务](./background-tasks.md) | 即时长任务异步执行、独立会话、按渠道回灌、终止、任务中心 Web 交互 |
 | [接口层](./interface.md) | CLI (REPL)、HTTP API (SSE)、命令行工具、Web UI 路由 |
 | [ACP 集成](./acp.md) | 外部 Coding Agent 委派协议、Claude Code / OpenCode / Codex 接入、多轮会话、sub_steps 解析 |
 | [浏览器控制 · 总览与架构](./browser/overview.md) | 调用链总览、三段链路职责、端到端时序、代码地图 |

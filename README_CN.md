@@ -42,9 +42,14 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 - **medium**：中等消息 → 完整 prompt + 全部工具 + 4 次迭代
 - **full**：复杂任务 → 完整 prompt + 全部工具 + 10 次迭代
 
-**定时任务**
+**Loop 控制**
+- 卡死检测：连续 3 轮调用相同工具+参数（或连续 2 轮同一报错）时，注入强制反思提示（要求 `<diagnosis>` 诊断并换路），而不是一路空转到迭代上限
+- 优雅收尾：反思 2 次仍卡住、或跑满迭代上限时，最后一轮禁用工具，让模型生成「已完成 / 卡点 / 需你提供什么」的收尾报告——不再返回 `[max tool iterations reached]` 死字符串
+
+**定时任务与后台任务**
 - 对话中创建 cron 或 interval 任务，SQLite 持久化，重启自动恢复
 - `heartbeat.md`：写入自然语言任务，系统定期自动执行
+- 后台任务：把耗时长任务丢到后台独立会话异步执行，不阻塞当前对话；完成后结果回灌（飞书推回原会话，web 在侧边栏会话浮现）。在 `/background-tasks` 页查看/终止，侧边栏带运行中数量角标
 
 **工具系统**
 - Shell 执行、Web 搜索（默认 DuckDuckGo，可配置切换 Tavily）、Web 抓取、文件读写、知识库检索

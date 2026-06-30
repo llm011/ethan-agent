@@ -83,12 +83,13 @@ export function ToolTiersView() {
         ) : (
           <div className="flex flex-col gap-6 max-w-4xl">
             <p className="text-sm text-muted-foreground leading-relaxed">
-              对话按消息长度与触发词实时路由到三档。<b className="text-foreground/80">Fast</b> 档只广播下面这些常驻工具，
-              其余长尾能力需模型主动调 <code className="text-xs font-mono">find_tools</code> 激活；
+              对话按「快捷路由」规则与消息长度实时路由到三档。<b className="text-foreground/80">Fast</b> 档命中规则关键字时进入，
+              固定挂载下列基础工具 + 命中规则的额外工具，其余长尾能力需模型调{" "}
+              <code className="text-xs font-mono">find_tools</code> 激活；
               <b className="text-foreground/80">Medium / Full</b> 档全量工具直接可见。当前共注册{" "}
-              <b className="text-foreground/80">{data.total_count}</b> 个工具，其中常驻{" "}
+              <b className="text-foreground/80">{data.total_count}</b> 个工具，其中 Fast 基础{" "}
               <b className="text-foreground/80">{data.fast_count}</b> 个。
-              <span className="ml-1">（fast ≤ {data.fast_max_length} 字 · medium ≤ {data.medium_max_length} 字 · 更长走 full）</span>
+              <span className="ml-1">（未命中规则时：≤ {data.medium_max_length} 字走 medium，更长走 full · 规则在「设置 → 快捷路由」配置）</span>
             </p>
 
             {data.tiers.map((tier) => (

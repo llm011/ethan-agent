@@ -78,9 +78,6 @@ class AgentSettingsPatch(BaseModel):
     proxy: str | None = None
     max_tokens: int | None = None
     max_tool_iterations: int | None = None
-    fast_keywords: list[str] | None = None
-    fast_max_length: int | None = None
-    fast_skill_triggers: list[str] | None = None
 
 
 @router.get("/settings/agent", dependencies=[Depends(verify_token)])
@@ -97,9 +94,6 @@ async def get_agent_settings():
         "proxy": config.network.proxy or "",
         "max_tokens": config.defaults.max_tokens,
         "max_tool_iterations": config.defaults.max_tool_iterations,
-        "fast_keywords": config.defaults.routing.fast_keywords,
-        "fast_max_length": config.defaults.routing.fast_max_length,
-        "fast_skill_triggers": config.defaults.routing.fast_skill_triggers,
     }
 
 
@@ -126,12 +120,61 @@ async def update_agent_settings(req: AgentSettingsPatch):
         config.defaults.max_tokens = req.max_tokens
     if req.max_tool_iterations is not None:
         config.defaults.max_tool_iterations = req.max_tool_iterations
-    if req.fast_keywords is not None:
-        config.defaults.routing.fast_keywords = req.fast_keywords
-    if req.fast_max_length is not None:
-        config.defaults.routing.fast_max_length = req.fast_max_length
-    if req.fast_skill_triggers is not None:
-        config.defaults.routing.fast_skill_triggers = req.fast_skill_triggers
+    save_config(config)
+    reload_config()
+    return {"ok": True}
+
+
+# ── Fast 路由规则（关键字 → 工具/技能） ────────────────────────────
+
+
+class FastRulePatch(BaseModel):
+    name: str = ""
+    keywords: list[str] = []
+    tools: list[str] = []
+    skills: list[str] = []
+
+
+class FastRulesPatch(BaseModel):
+    fast_base_tools: list[str] | None = None
+    fast_rules: list[FastRulePatch] | None = None
+
+
+@router.get("/fast-rules", dependencies=[Depends(verify_token)])
+async def get_fast_rules():
+    routing = get_config().defaults.routing
+    return {
+        "fast_base_tools": routing.fast_base_tools,
+        "fast_rules": [
+            {"name": r.name, "keywords": r.keywords, "tools": r.tools, "skills": r.skills}
+            for r in routing.fast_rules
+        ],
+    }
+
+
+@router.get("/fast-rules/options", dependencies=[Depends(verify_token)])
+async def get_fast_rules_options(model: str | None = None):
+    """供前端多选框用：所有可挂载的工具 + 所有已安装技能。"""
+    agent = create_agent(model)
+    tools = sorted(agent._registry.all(), key=lambda t: t.name)
+    skills = sorted(agent._skills.all(), key=lambda s: s.name) if agent._skills else []
+    return {
+        "tools": [{"name": t.name, "description": t.description} for t in tools],
+        "skills": [{"name": s.name, "description": s.description} for s in skills],
+    }
+
+
+@router.patch("/fast-rules", dependencies=[Depends(verify_token)])
+async def update_fast_rules(req: FastRulesPatch):
+    from ethan.core.config import FastRule
+    config = get_config()
+    if req.fast_base_tools is not None:
+        config.defaults.routing.fast_base_tools = req.fast_base_tools
+    if req.fast_rules is not None:
+        config.defaults.routing.fast_rules = [
+            FastRule(name=r.name, keywords=r.keywords, tools=r.tools, skills=r.skills)
+            for r in req.fast_rules
+        ]
     save_config(config)
     reload_config()
     return {"ok": True}
@@ -294,25 +337,28 @@ async def tool_tiers(model: str | None = None):
     """实时计算三档路由各自广播给模型的工具集。
 
     与 agent._select_route 的取值规则保持一致：
-      - fast 档：只广播 fast_path=True 的常驻工具；长尾工具靠模型调 find_tools 激活
+      - fast 档：基础系统工具(fast_base_tools) + 命中规则声明的额外工具；其余靠 find_tools 激活
       - medium / full 档：全量工具直接可见
-    所以前端不写死任何清单，每次按当前注册表实时算。
+    所以前端不写死任何清单，每次按当前注册表 + 配置实时算。
     """
     agent = create_agent(model)
     tools = sorted(agent._registry.all(), key=lambda t: t.name)
+    routing = get_config().defaults.routing
+    base_names = set(routing.fast_base_tools)
+    rule_tool_names = {n for r in routing.fast_rules for n in r.tools}
 
     def info(t) -> dict:
         return {
             "name": t.name,
             "description": t.description,
-            "fast_path": bool(t.fast_path),
+            "fast_path": t.name in base_names,
             "side_effect": bool(getattr(t, "side_effect", False)),
             "no_compress": bool(getattr(t, "no_compress", False)),
         }
 
-    fast_tools = [info(t) for t in tools if t.fast_path]
+    fast_tools = [info(t) for t in tools if t.name in base_names]
+    fast_rule_tools = [info(t) for t in tools if t.name in rule_tool_names and t.name not in base_names]
     all_tools = [info(t) for t in tools]
-    routing = get_config().defaults.routing
 
     return {
         "tiers": [
@@ -320,15 +366,15 @@ async def tool_tiers(model: str | None = None):
                 "key": "fast",
                 "label": "Fast 档",
                 "desc": (
-                    "短消息、或命中常驻技能/关键词触发词时进入。只广播下列常驻工具，"
-                    "其余长尾能力需模型主动调 find_tools 激活后才可用。"
+                    "命中「快捷路由」规则关键字时进入。固定挂载下列基础系统工具，"
+                    "并按命中的规则额外挂载工具/技能；其余长尾能力需模型调 find_tools 激活。"
                 ),
                 "tools": fast_tools,
             },
             {
                 "key": "medium",
                 "label": "Medium 档",
-                "desc": "中等长度消息。全量工具直接可见，迭代上限较 fast 高。",
+                "desc": f"未命中规则、长度 ≤ {routing.medium_max_length} 字的消息。全量工具直接可见。",
                 "tools": all_tools,
             },
             {
@@ -339,7 +385,7 @@ async def tool_tiers(model: str | None = None):
             },
         ],
         "fast_count": len(fast_tools),
+        "fast_rule_tool_count": len(fast_rule_tools),
         "total_count": len(all_tools),
-        "fast_max_length": routing.fast_max_length,
         "medium_max_length": routing.medium_max_length,
     }
