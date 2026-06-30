@@ -75,5 +75,6 @@ include = [
     "/README.md",
     "/README_CN.md",
     "/LICENSE",
+    "/THIRD_PARTY_NOTICES.md",
     "/pyproject.toml",
 ]
