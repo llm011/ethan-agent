@@ -3,15 +3,16 @@ name: getnote
 description: |
   Get笔记 - 保存、搜索、管理个人笔记和知识库。
 
-  **当以下情况时使用此 Skill**：
-  (1) 保存纯文本/图片笔记、说「记一下」「存到笔记」
-  (2) 查看笔记列表/详情、更新笔记、删除笔记
-  (3) 管理知识库或标签：「加到知识库」「建知识库」「加标签」「删标签」
+  **当以下情况时使用此 Skill**（仅限用户明确指向 Get笔记 / biji 这个外部笔记服务时）：
+  (1) 保存纯文本/图片笔记到 Get笔记、说「记到 Get笔记」「存到 biji」
+  (2) 查看 Get笔记的笔记列表/详情、更新、删除
+  (3) 管理 Get笔记 的知识库或标签：「加到 Get笔记 知识库」「建 Get笔记 知识库」「加标签」
   (4) 配置 Get笔记：「配置笔记」「连接 Get笔记」
 
-  **不归此 skill 管**（交给 `getnote-read-link`）：
-  - 保存网页/微信链接到笔记
-  - 从笔记中搜索已有内容（"找一下笔记里的 XX"）
+  **不归此 skill 管**：
+  - 泛指的「存到知识库 / 查知识库」（没点名 Get笔记）→ 用内置 `knowledge_add` / `knowledge_search` 工具，那是 ethan 本地知识库
+  - 保存网页/微信链接到笔记 → 交给 `getnote-read-link`
+  - 从笔记中搜索已有内容（"找一下笔记里的 XX"）→ 交给 `getnote-read-link`
 metadata: {"openclaw": {"requires": {}, "optionalEnv": ["GETNOTE_API_KEY", "GETNOTE_CLIENT_ID", "GETNOTE_OWNER_ID"], "baseUrl": "https://openapi.biji.com", "homepage": "https://biji.com"}}
 ---
 
