@@ -4,8 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { fetchToolTiers, ToolTiers, TierTool } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Loader2, RefreshCw, Zap, Layers, Maximize2, AlertTriangle, Lock } from "lucide-react";
+import { Loader2, RefreshCw, Zap, Layers, Maximize2 } from "lucide-react";
 
 const TIER_ICON: Record<string, React.ReactNode> = {
   fast: <Zap className="h-4 w-4 text-amber-500" />,
@@ -13,23 +12,35 @@ const TIER_ICON: Record<string, React.ReactNode> = {
   full: <Maximize2 className="h-4 w-4 text-violet-500" />,
 };
 
-function ToolRow({ t }: { t: TierTool }) {
+function TierTable({ tools }: { tools: TierTool[] }) {
   return (
-    <div className="flex items-start gap-2 py-1.5 border-b border-border/30 last:border-0">
-      <code className="text-xs font-mono text-foreground/90 shrink-0 mt-0.5">{t.name}</code>
-      <span className="text-xs text-muted-foreground flex-1 leading-relaxed">{t.description}</span>
-      <div className="flex gap-1 shrink-0">
-        {t.side_effect && (
-          <span title="有副作用（改文件/发消息/花钱等），非主人调用会被拦截">
-            <AlertTriangle className="h-3 w-3 text-orange-400/80" />
-          </span>
-        )}
-        {t.no_compress && (
-          <span title="输出不压缩：含 ID/ref/结构化数据，逐字给模型">
-            <Lock className="h-3 w-3 text-emerald-500/70" />
-          </span>
-        )}
-      </div>
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm border-collapse">
+        <thead>
+          <tr className="text-left text-xs text-muted-foreground border-b border-border/60">
+            <th className="py-2 pr-4 font-medium w-44">工具</th>
+            <th className="py-2 pr-4 font-medium">说明</th>
+            <th className="py-2 pr-3 font-medium w-16 text-center">副作用</th>
+            <th className="py-2 font-medium w-16 text-center">不压缩</th>
+          </tr>
+        </thead>
+        <tbody>
+          {tools.map((t) => (
+            <tr key={t.name} className="border-b border-border/30 align-top">
+              <td className="py-2 pr-4">
+                <code className="text-xs font-mono text-foreground/90">{t.name}</code>
+              </td>
+              <td className="py-2 pr-4 text-xs text-muted-foreground leading-relaxed">{t.description}</td>
+              <td className="py-2 pr-3 text-center">
+                {t.side_effect ? <span title="有副作用：改文件/发消息/花钱等，非主人调用会被拦截">⚠️</span> : <span className="text-muted-foreground/30">—</span>}
+              </td>
+              <td className="py-2 text-center">
+                {t.no_compress ? <span title="输出不压缩：含 ID/ref/结构化数据，逐字给模型">🔒</span> : <span className="text-muted-foreground/30">—</span>}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -62,7 +73,7 @@ export function ToolTiersView() {
         </Button>
       </header>
 
-      <ScrollArea className="flex-1 p-6">
+      <div className="flex-1 overflow-y-auto p-6">
         {loading && !data ? (
           <div className="flex items-center justify-center pt-10">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -70,7 +81,7 @@ export function ToolTiersView() {
         ) : !data ? (
           <div className="text-center text-muted-foreground pt-10">加载失败，点右上角刷新重试。</div>
         ) : (
-          <div className="flex flex-col gap-5 max-w-3xl">
+          <div className="flex flex-col gap-6 max-w-4xl">
             <p className="text-sm text-muted-foreground leading-relaxed">
               对话按消息长度与触发词实时路由到三档。<b className="text-foreground/80">Fast</b> 档只广播下面这些常驻工具，
               其余长尾能力需模型主动调 <code className="text-xs font-mono">find_tools</code> 激活；
@@ -80,35 +91,22 @@ export function ToolTiersView() {
               <span className="ml-1">（fast ≤ {data.fast_max_length} 字 · medium ≤ {data.medium_max_length} 字 · 更长走 full）</span>
             </p>
 
-            <div className="flex items-center gap-4 text-[11px] text-muted-foreground">
-              <span className="flex items-center gap-1">
-                <AlertTriangle className="h-3 w-3 text-orange-400/80" /> 有副作用
-              </span>
-              <span className="flex items-center gap-1">
-                <Lock className="h-3 w-3 text-emerald-500/70" /> 输出不压缩
-              </span>
-            </div>
-
             {data.tiers.map((tier) => (
-              <div key={tier.key} className="rounded-lg border border-border/60 bg-muted/10 overflow-hidden">
-                <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border/40 bg-muted/20">
+              <div key={tier.key} className="flex flex-col gap-2">
+                <div className="flex items-center gap-2">
                   {TIER_ICON[tier.key]}
                   <span className="font-semibold text-sm">{tier.label}</span>
                   <Badge variant="secondary" className="text-[10px]">
                     {tier.tools.length} 个工具
                   </Badge>
                 </div>
-                <p className="px-4 pt-2.5 text-xs text-muted-foreground leading-relaxed">{tier.desc}</p>
-                <div className="px-4 py-2">
-                  {tier.tools.map((t) => (
-                    <ToolRow key={t.name} t={t} />
-                  ))}
-                </div>
+                <p className="text-xs text-muted-foreground leading-relaxed">{tier.desc}</p>
+                <TierTable tools={tier.tools} />
               </div>
             ))}
           </div>
         )}
-      </ScrollArea>
+      </div>
     </div>
   );
 }
