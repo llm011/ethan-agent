@@ -56,37 +56,45 @@ else:
 
 ## 第二步：按平台执行（直接调工具，不读 skill）
 
-### 飞书文档（最快路径）
+### 飞书文档（最快路径 — 4 步完成）
 
-**直接调 lark-cli，不读 skill，不写 python 脚本**：
+**直接调 lark-cli，不检查凭证，不读 skill，不写 python 脚本**：
 
 ```bash
-# 1. 提取 token（从 URL 或用户直接给的 token）
+# 步骤 1（shell）：提取 token + lark-cli 导出 + 解析 JSON + 写 markdown（一条命令完成）
 # URL 格式（三种域名都支持）：
 #   https://xxx.feishu.cn/docx/OIXGdEBR2o2PrNxRUuVcSQaznEg
 #   https://xxx.larksuite.com/wiki/TbB6w6MlSiXZD5k3kwkc4PRpnxd
 #   https://bytedance.larkoffice.com/wiki/TbB6w6MlSiXZD5k3kwkc4PRpnxd
 # Token = 最后一段路径（去掉 /docx/ 或 /wiki/ 后的部分）
 
-# 2. 直接调 lark-cli 导出 markdown（输出是 JSON，包含 data.document.content 字段）
-lark-cli docs +fetch --doc "OIXGdEBR2o2PrNxRUuVcSQaznEg" --doc-format markdown --as user > /tmp/lark_doc.json
+lark-cli docs +fetch --doc "TOKEN" --doc-format markdown --as user | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['document']['content'])" > /tmp/lark_doc.md
 
-# 3. 从 JSON 里提取 markdown 内容并写入文件
-cat /tmp/lark_doc.json | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['data']['document']['content'])" > /tmp/lark_doc.md
-
-# 4. 读提取后的 markdown 文件
+# 步骤 2（file_read）：读 markdown → 内容进 agent context
 file_read(path="/tmp/lark_doc.md")
 
-# 5. 拿到内容后分支处理：
-#    - 用户说"存笔记/抽取" → 原样存 markdown（见「存到 Get笔记」章节）
-#    - 用户说"总结/核心观点" → 只输总结（见「总结流程」章节）
+# 步骤 3（file_write）：写 JSON payload（用户要存笔记时）
+file_write(path="/tmp/note_payload.json", content='{"type":"text","title":"文档标题","content":"完整markdown内容"}')
+
+# 步骤 4（shell）：curl 存笔记
+curl -s -X POST "https://openapi.biji.com/open/api/v1/resource/note/save" \
+  -H "Authorization: $GETNOTE_API_KEY" \
+  -H "X-Client-ID: $GETNOTE_CLIENT_ID" \
+  -H "Content-Type: application/json" \
+  -d @/tmp/note_payload.json
 ```
 
+**4 步，每步 2-3 秒，总耗时 ~10 秒。**
+
 **铁律**：
-- ❌ 不要 `skill_list`（浪费时间）
+- ❌ 不要 `test -n "$GETNOTE_API_KEY"`（shell 工具自动注入环境变量）
 - ❌ 不要 `skill_read(name="lark-doc")`（不用读整个 skill）
-- ❌ 不要 `python ~/.ethan/skills/lark-doc/scripts/fetch_doc.py`（python 命令常找不到，直接 lark-cli 更稳）
-- ✅ 直接 `lark-cli docs +fetch`（一步到位）
+- ❌ 不要 `skill_read(file="references/save.md", name="getnote")`（不用读 API 文档）
+- ❌ 不要写两步：`lark-cli > .json` + `cat | python3 > .md`（合并成一条）
+- ❌ 不要写 Python 脚本 `/tmp/save_note.py`（绕路）
+- ❌ 不要手拼 JSON `curl -d '{"type":...}'`（易出错）
+- ✅ 一条 shell 命令完成导出+解析+写文件
+- ✅ 用 `file_write` 写 JSON payload，再 `curl -d @文件`
 
 ### 微信公众号（最快路径）
 
@@ -304,12 +312,11 @@ https://xxx.feishu.cn/docx/OIXGdEBR2o2PrNxRUuVcSQaznEg 抽取成 markdown 存笔
 ```
 1. 识别平台：飞书文档 → lark-cli
 2. 提取 token: OIXGdEBR2o2PrNxRUuVcSQaznEg
-3. lark-cli docs +fetch --doc "OIXGdEBR2o2PrNxRUuVcSQaznEg" --doc-format markdown --as user > /tmp/lark_doc.json
-4. cat /tmp/lark_doc.json | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['data']['document']['content'])" > /tmp/lark_doc.md
-5. file_read(path="/tmp/lark_doc.md") → 拿到 markdown 内容
-6. file_write(path="/tmp/note_payload.json", content='{"type":"text","title":"文档标题","content":"...完整markdown内容..."}')
-7. curl -d @/tmp/note_payload.json → 保存成功
-8. 输出：✅ 已保存到 Get笔记（note_id: xxx）
+3. shell: lark-cli docs +fetch --doc "TOKEN" --doc-format markdown --as user | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['document']['content'])" > /tmp/lark_doc.md
+4. file_read(path="/tmp/lark_doc.md") → 拿到 markdown 内容
+5. file_write(path="/tmp/note_payload.json", content='{"type":"text","title":"文档标题","content":"...完整markdown内容..."}')
+6. shell: curl -d @/tmp/note_payload.json → 保存成功
+7. 输出：✅ 已保存到 Get笔记（note_id: xxx）
 ```
 
 ---
