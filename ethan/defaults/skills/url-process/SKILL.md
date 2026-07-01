@@ -68,13 +68,16 @@ else:
 #   https://bytedance.larkoffice.com/wiki/TbB6w6MlSiXZD5k3kwkc4PRpnxd
 # Token = 最后一段路径（去掉 /docx/ 或 /wiki/ 后的部分）
 
-# 2. 直接调 lark-cli 导出 markdown
-lark-cli docs +fetch --doc "OIXGdEBR2o2PrNxRUuVcSQaznEg" --doc-format markdown --as user > /tmp/lark_doc.md
+# 2. 直接调 lark-cli 导出 markdown（输出是 JSON，包含 data.document.content 字段）
+lark-cli docs +fetch --doc "OIXGdEBR2o2PrNxRUuVcSQaznEg" --doc-format markdown --as user > /tmp/lark_doc.json
 
-# 3. 读本地文件
+# 3. 从 JSON 里提取 markdown 内容并写入文件
+cat /tmp/lark_doc.json | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['data']['document']['content'])" > /tmp/lark_doc.md
+
+# 4. 读提取后的 markdown 文件
 file_read(path="/tmp/lark_doc.md")
 
-# 4. 拿到内容后分支处理：
+# 5. 拿到内容后分支处理：
 #    - 用户说"存笔记/抽取" → 原样存 markdown（见「存到 Get笔记」章节）
 #    - 用户说"总结/核心观点" → 只输总结（见「总结流程」章节）
 ```
@@ -131,35 +134,35 @@ web_fetch(url="https://example.com/article")
 
 ---
 
-## 第三步：存到 Get笔记（统一流程）
+## 第三步：存到 Get笔记（直接执行以下命令）
 
-**拿到内容后，不要再读 getnote skill，直接调 API**：
+**拿到 markdown 内容后，不要读 getnote skill，直接执行以下 3 步：**
 
 ```bash
-# 1. 检查凭证（一次就好）
-test -n "$GETNOTE_API_KEY" && test -n "$GETNOTE_CLIENT_ID" && echo READY || echo MISSING
+# 步骤 1：写 JSON payload（用 file_write，别手拼）
+# 注意：content 字段填入刚才读到的 markdown 内容（完整内容，不要截断）
+file_write(path="/tmp/note_payload.json", content='{"type":"text","title":"文档标题","content":"这里填入完整 markdown 内容"}')
 
-# 2. 如果 READY，写 JSON payload（用 file_write，别手拼）
-file_write(path="/tmp/note_payload.json", content='{"type":"text","title":"文章标题","content":"markdown 内容"}')
-
-# 3. curl 调 API
+# 步骤 2：curl 调 API（用 -d @文件，别手拼 JSON）
 curl -s -X POST "https://openapi.biji.com/open/api/v1/resource/note/save" \
   -H "Authorization: $GETNOTE_API_KEY" \
   -H "X-Client-ID: $GETNOTE_CLIENT_ID" \
   -H "Content-Type: application/json" \
   -d @/tmp/note_payload.json
 
-# 4. 解析响应，告诉用户结果
+# 步骤 3：解析响应，告诉用户结果
+# 成功：{"success":true,"result":{"note_id":"xxx"}}
+# 失败：{"success":false,"error":{"message":"content is required"}}
 ```
 
 **铁律**：
-- ❌ 不要 `skill_read(name="getnote")`（不用读整个 skill）
-- ❌ 不要 `skill_read(file="references/save.md", name="getnote")`（API 文档不需要每次读）
-- ❌ 不要手拼 JSON 字符串（换行/引号易出错）
-- ✅ 用 `file_write` 写 JSON payload，再 `curl -d @/tmp/note_payload.json`
+- ❌ 不要 `skill_read(name="getnote")`
+- ❌ 不要 `skill_read(file="references/save.md", name="getnote")`
+- ❌ 不要手拼 JSON 字符串（`curl -d '{"type":...}'` ❌ → `curl -d @/tmp/note_payload.json` ✅）
+- ✅ 用 `file_write` 写完整 JSON，再 `curl -d @文件`
 
 **失败常见原因**：
-- `"content is required"` → JSON 里 `content` 字段为空或缺失
+- `"content is required"` → JSON 里 content 字段为空或缺失
 - `"unauthorized"` → API Key / Client ID 错误
 - `"not_member"` → 需开通会员
 
@@ -301,11 +304,12 @@ https://xxx.feishu.cn/docx/OIXGdEBR2o2PrNxRUuVcSQaznEg 抽取成 markdown 存笔
 ```
 1. 识别平台：飞书文档 → lark-cli
 2. 提取 token: OIXGdEBR2o2PrNxRUuVcSQaznEg
-3. lark-cli docs +fetch --doc "OIXGdEBR2o2PrNxRUuVcSQaznEg" --doc-format markdown --as user > /tmp/lark_doc.md
-4. file_read(path="/tmp/lark_doc.md") → 拿到内容
-5. file_write(path="/tmp/note_payload.json", content='{"type":"text","title":"Loop engineering","content":"..."}')
-6. curl -d @/tmp/note_payload.json → 保存成功
-7. 输出：✅ 已保存到 Get笔记（note_id: xxx）
+3. lark-cli docs +fetch --doc "OIXGdEBR2o2PrNxRUuVcSQaznEg" --doc-format markdown --as user > /tmp/lark_doc.json
+4. cat /tmp/lark_doc.json | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['data']['document']['content'])" > /tmp/lark_doc.md
+5. file_read(path="/tmp/lark_doc.md") → 拿到 markdown 内容
+6. file_write(path="/tmp/note_payload.json", content='{"type":"text","title":"文档标题","content":"...完整markdown内容..."}')
+7. curl -d @/tmp/note_payload.json → 保存成功
+8. 输出：✅ 已保存到 Get笔记（note_id: xxx）
 ```
 
 ---
