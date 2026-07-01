@@ -20,6 +20,35 @@ metadata: {"openclaw": {"requires": {}, "optionalEnv": ["GETNOTE_API_KEY", "GETN
 
 # Get笔记 Skill
 
+## ⚠️ 快速路径（直接执行，不读 references）
+
+**保存文本笔记**：拿到内容后，直接执行以下 3 步（不要读 references，不要写脚本）：
+
+```bash
+# 步骤 1：用 file_write 写 JSON payload（别手拼，别写 Python 脚本）
+file_write(path="/tmp/note_payload.json", content='{"type":"text","title":"笔记标题","content":"笔记内容（完整内容，不要截断）"}')
+
+# 步骤 2：curl 调 API（用 -d @文件，别手拼 JSON）
+curl -s -X POST "https://openapi.biji.com/open/api/v1/resource/note/save" \
+  -H "Authorization: $GETNOTE_API_KEY" \
+  -H "X-Client-ID: $GETNOTE_CLIENT_ID" \
+  -H "Content-Type: application/json" \
+  -d @/tmp/note_payload.json
+
+# 步骤 3：解析响应
+# 成功：{"success":true,"result":{"note_id":"xxx"}}
+# 失败：{"success":false,"error":{"message":"content is required"}}
+```
+
+**铁律**：
+- ❌ 不要 `skill_read(file="references/save.md")`（不需要读 API 文档）
+- ❌ 不要检查凭证 `test -n "$GETNOTE_API_KEY"`（shell 工具自动注入）
+- ❌ 不要写 Python 脚本 `/tmp/save_note.py`（绕路）
+- ❌ 不要手拼 JSON `curl -d '{"type":...}'`（易出错）
+- ✅ 直接 `file_write` + `curl -d @/tmp/note_payload.json`
+
+---
+
 ## ⚠️ Agent 必读约束
 
 ### 🌐 Base URL
@@ -33,21 +62,20 @@ https://openapi.biji.com
 - `Authorization: $GETNOTE_API_KEY`（格式：`gk_live_xxx`）
 - `X-Client-ID: $GETNOTE_CLIENT_ID`（格式：`cli_xxx`）
 
-凭证存放在 `~/.ethan/.secrets/getnote.env`（`KEY="value"` 形式），运行 shell 工具时会**自动注入子进程环境**，所以在 `shell` 里写 `curl` 时直接用 `$GETNOTE_API_KEY` / `$GETNOTE_CLIENT_ID` 即可，**无需 get_secret，也不要把 key 明文写进回复**。
+**凭证状态**：
+- 凭证存放在 `~/.ethan/.secrets/getnote.env`（`KEY="value"` 形式）
+- shell 工具会**自动注入子进程环境**，所以在 `shell` 里写 `curl` 时直接用 `$GETNOTE_API_KEY` / `$GETNOTE_CLIENT_ID` 即可
+- **无需每次检查凭证**，直接调用 API；如果返回 `"unauthorized"` 才引导用户提供凭证
 
-**每次调用 API 前先检测凭证是否齐全**：用 `shell` 跑
-
-```bash
-test -n "$GETNOTE_API_KEY" && test -n "$GETNOTE_CLIENT_ID" && echo READY || echo MISSING
-```
-
-- 输出 `READY` → 凭证已配，直接继续。
-- 输出 `MISSING` → 凭证缺失，**引导用户提供** `GETNOTE_API_KEY` 和 `GETNOTE_CLIENT_ID`（怎么拿见 [references/oauth.md](references/oauth.md)）。拿到后**由你（agent）写入** `~/.ethan/.secrets/getnote.env`，不要让用户手动编辑文件，也不要把值回显到对话里。写入方式（用 `file_write` 工具，path=`~/.ethan/.secrets/getnote.env`，content 为下面两行）：
+**凭证缺失时的处理**：
+- API 返回 `"unauthorized"` → 引导用户提供 `GETNOTE_API_KEY` 和 `GETNOTE_CLIENT_ID`（怎么拿见 [references/oauth.md](references/oauth.md)）
+- 拿到后**由你（agent）用 file_write 写入** `~/.ethan/.secrets/getnote.env`（不要让用户手动编辑，不要回显值到对话）：
   ```
   GETNOTE_API_KEY="<用户给的 key>"
   GETNOTE_CLIENT_ID="<用户给的 client id>"
   ```
-  写完用 `shell` 跑 `chmod 600 ~/.ethan/.secrets/getnote.env` 收紧权限。然后**重新执行用户原本的请求**（新的 shell 调用会自动注入刚写入的变量）。
+- 写完用 `shell` 跑 `chmod 600 ~/.ethan/.secrets/getnote.env` 收紧权限
+- 然后**重新执行用户原本的请求**（新的 shell 调用会自动注入刚写入的变量）
 
 > 说明：getnote 用的是 `.env`（多键、需注入 shell）形式，所以走 `file_write` 写文件，而不是 `set_secret`（`set_secret` 存的是单值文件，不会被 shell 注入）。
 
