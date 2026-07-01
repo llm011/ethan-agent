@@ -26,50 +26,209 @@ async def _consolidate_facts_for_user(user_id: str) -> None:
     from ethan.providers.base import Message
     from ethan.core.config import get_config
     from ethan.core.paths import user_facts_path
+    from ethan.core.context import ETHAN_USER_ID
 
-    store = FactStore(path=user_facts_path())
-    active = store.get_active()
-    if len(active) < 10:
-        return
-
-    logger.info("[Heartbeat] Consolidating %d facts...", len(active))
-    facts_text = "\n".join(f"- {f.content}" for f in active)
-    prompt = (
-        f"以下是关于用户的 {len(active)} 条记忆：\n{facts_text}\n\n"
-        "请整理这些记忆：\n"
-        "1. 合并重复或表达相同信息的条目\n"
-        "2. 删除明显过时的（如果有更新版本）\n"
-        "3. 修正矛盾（保留更新的一条）\n"
-        "4. 保留所有独立有价值的信息\n\n"
-        "每行一条，以 '- ' 开头。只输出整理后的列表，不要解释。"
-    )
-
-    cfg = get_config()
-    from ethan.memory.consolidator import get_lite_model
-    cheap_model = get_lite_model(cfg.defaults.model)
+    # user_*_path() 走 ETHAN_USER_ID ContextVar 解析分库；心跳循环里必须显式 set，
+    # 否则所有用户都会落到 default profile（user_id 参数本身不参与路径解析）。
+    token = ETHAN_USER_ID.set(user_id)
     try:
-        provider = create_provider(cheap_model)
-        resp = await provider.chat(
-            [Message(role="user", content=prompt)],
-            system="你是一个记忆管理助手，负责整理和去重用户记忆。",
-        )
-        lines = [
-            line.strip().lstrip("- ").strip()
-            for line in resp.content.strip().split("\n")
-            if line.strip() and not line.strip().startswith("#")
-        ]
-        if not lines:
+        store = FactStore(path=user_facts_path())
+        active = store.get_active()
+        if len(active) < 10:
             return
 
-        # 重置 facts：先全部标为 superseded，再写入整理后的结果
-        for f in store._facts:
-            f.superseded = True
-        store._save()
-        for line in lines:
-            store.add(line, confidence=0.85, source="heartbeat_consolidation")
-        logger.info("[Heartbeat] Facts consolidated: %d → %d", len(active), len(lines))
+        logger.info("[Heartbeat] Consolidating %d facts...", len(active))
+        facts_text = "\n".join(f"- {f.content}" for f in active)
+        prompt = (
+            f"以下是关于用户的 {len(active)} 条记忆：\n{facts_text}\n\n"
+            "请整理这些记忆：\n"
+            "1. 合并重复或表达相同信息的条目\n"
+            "2. 删除明显过时的（如果有更新版本）\n"
+            "3. 修正矛盾（保留更新的一条）\n"
+            "4. 保留所有独立有价值的信息\n\n"
+            "每行一条，以 '- ' 开头。只输出整理后的列表，不要解释。"
+        )
+
+        cfg = get_config()
+        from ethan.memory.consolidator import get_lite_model
+        cheap_model = get_lite_model(cfg.defaults.model)
+        try:
+            provider = create_provider(cheap_model)
+            resp = await provider.chat(
+                [Message(role="user", content=prompt)],
+                system="你是一个记忆管理助手，负责整理和去重用户记忆。",
+            )
+            lines = [
+                line.strip().lstrip("- ").strip()
+                for line in resp.content.strip().split("\n")
+                if line.strip() and not line.strip().startswith("#")
+            ]
+            if not lines:
+                return
+
+            # 重置 facts：先全部标为 superseded，再写入整理后的结果
+            for f in store._facts:
+                f.superseded = True
+            store._save()
+            for line in lines:
+                store.add(line, confidence=0.85, source="heartbeat_consolidation")
+            logger.info("[Heartbeat] Facts consolidated: %d → %d", len(active), len(lines))
+        except Exception:
+            logger.exception("[Heartbeat] Facts consolidation failed")
+    finally:
+        ETHAN_USER_ID.reset(token)
+
+
+# ── 画像每日 consolidation（A 方案：平铺 bullet + 分区差异化压缩）──────
+PROFILE_SECTION_MIN_BULLETS = 4           # section bullet < 4 跳过（没东西可去重，强模型重写反增幻觉风险）
+
+# 三组各自的压缩策略（system role + 用户 prompt 取向），制造层次感
+_PROFILE_STRATEGIES = {
+    "identity": (
+        "你是一个用户画像整理助手，负责对身份与背景类信息去重、归纳、层次化，同时保留所有独立有价值的事实。",
+        "整理这些关于用户的画像条目，让它更有层次、更精炼：\n"
+        "1. 把相关的事实聚到一起、归纳成更概括的一条（例如多条具体技能/经历 → 一条概括的能力或背景描述）；\n"
+        "2. 合并重复或表达相同信息的条目、修正矛盾（保留更新的一条）、删除明显过时的；\n"
+        "3. 保留所有独立有价值的事实，不要丢信息也不要编造。\n"
+        "目标是从「零散罗列」升华为「有结构的概括」，但任何独特的事实都不能丢。",
+    ),
+    "emotion": (
+        "你是一个用户心理画像整理助手，负责把零散重复的情绪记录聚类、高度压缩、归纳成稳定的情绪模式。",
+        "把这些情绪与心理类条目整理成更有层次的心理画像：\n"
+        "1. 把指向同一问题/同一触发源的具体情绪事件聚到一起，高度压缩、归纳成一条概括性的模式"
+        "（例如多条「这次汇报很焦虑」「上次评审也紧张」→「在公开表达/被评审的场景下容易焦虑」）；\n"
+        "2. 保留稳定的情绪模式、压力源、什么能安抚 ta、重要价值观；\n"
+        "3. 偶发的、一次性的、已不再重复的具体情绪事件可以并入概括或删除。\n"
+        "目标是从「流水账式的具体事件」升华为「概括性的稳定心理特征」。不要编造。",
+    ),
+    "agreement": (
+        "你是一个用户偏好整理助手，负责整理用户与 AI 助手之间的约定，每条指令都要保留。",
+        "整理这些用户与助手的约定/指令：仅合并表达完全相同的条目，每条独立的指令或偏好都必须保留，不要删减、不要编造。",
+    ),
+}
+
+
+async def _compress_section(provider, section: str, bullets: list[str], strategy: str) -> list[str] | None:
+    """用主力模型压缩单个 section 的 bullet 列表。失败/空结果返回 None（调用方保留原内容）。"""
+    from ethan.providers.base import Message
+
+    sys_role, instruction = _PROFILE_STRATEGIES[strategy]
+    bullets_text = "\n".join(f"- {b}" for b in bullets)
+    prompt = (
+        f"以下是用户画像中「{section}」这一节的 {len(bullets)} 条记录：\n{bullets_text}\n\n"
+        f"{instruction}\n\n"
+        "每行一条，以 '- ' 开头。只输出整理后的列表，不要解释、不要加标题。"
+    )
+    try:
+        resp = await provider.chat([Message(role="user", content=prompt)], system=sys_role)
+        lines = [
+            ln.strip().lstrip("-").strip()
+            for ln in resp.content.strip().split("\n")
+            if ln.strip() and not ln.strip().startswith("#")
+        ]
+        return lines or None
     except Exception:
-        logger.exception("[Heartbeat] Facts consolidation failed")
+        logger.exception("[Heartbeat] Profile section '%s' compression failed", section)
+        return None
+
+
+async def _consolidate_profiles() -> None:
+    """对每个用户的 user_profile.md 做每日分区压缩。"""
+    from ethan.core.users import get_user_store
+    for uid in get_user_store().all_user_ids():
+        try:
+            await _consolidate_profile_for_user(uid)
+        except Exception:
+            logger.exception("[Heartbeat] Profile consolidation failed for user %s", uid)
+
+
+async def _consolidate_profile_for_user(user_id: str) -> None:
+    import time
+    from datetime import datetime, timezone, timedelta
+
+    from ethan.core.config import get_config
+    from ethan.core.context import ETHAN_USER_ID
+    from ethan.core.paths import user_profile_path, user_memory_dir
+    from ethan.core.profile import (
+        section_bullets, set_section_bullets,
+        PROFILE_GROUP_IDENTITY, PROFILE_GROUP_EMOTION, PROFILE_GROUP_AGREEMENT,
+    )
+    from ethan.providers.manager import create_provider
+
+    token = ETHAN_USER_ID.set(user_id)
+    try:
+        profile_path = user_profile_path()
+        if not profile_path.exists():
+            return
+
+        marker = user_memory_dir() / ".profile_consolidated_at"
+        now = time.time()
+        try:
+            last = float(marker.read_text(encoding="utf-8").strip()) if marker.exists() else 0.0
+        except Exception:
+            last = 0.0
+
+        # 触发钟点：北京时间（UTC+8）的配置小时之后、每天一次。
+        cfg = get_config()
+        bj = timezone(timedelta(hours=8))
+        now_bj = datetime.fromtimestamp(now, bj)
+        target_hour = cfg.defaults.heartbeat.profile_consolidate_hour
+        last_bj_date = datetime.fromtimestamp(last, bj).date() if last > 0 else None
+
+        # 闸门①：还没到当天触发钟点 → 等。
+        if now_bj.hour < target_hour:
+            return
+        # 闸门②：今天已经压过 → 跳过（每天一次）。
+        if last_bj_date is not None and last_bj_date >= now_bj.date():
+            return
+        # 闸门③：画像自上次压缩后没改动 → 跳过，不空烧 token。
+        if last > 0 and profile_path.stat().st_mtime <= last:
+            # 仍记一次时间戳，避免今天反复进这里重判
+            try:
+                marker.write_text(str(profile_path.stat().st_mtime), encoding="utf-8")
+            except Exception:
+                pass
+            return
+
+        content = profile_path.read_text(encoding="utf-8")
+        provider = create_provider(cfg.defaults.model)  # 用主力模型，一天一次成本可接受
+
+        groups = [
+            (PROFILE_GROUP_IDENTITY, "identity"),
+            (PROFILE_GROUP_EMOTION, "emotion"),
+            (PROFILE_GROUP_AGREEMENT, "agreement"),
+        ]
+        new_content = content
+        changed = False
+        for sections, strategy in groups:
+            for section in sections:
+                bullets = section_bullets(new_content, section)
+                if len(bullets) < PROFILE_SECTION_MIN_BULLETS:
+                    continue  # 逐 section 闸门：太少不压
+                compressed = await _compress_section(provider, section, bullets, strategy)
+                if compressed and compressed != bullets:
+                    new_content = set_section_bullets(new_content, section, compressed)
+                    changed = True
+
+        if changed:
+            # 覆盖前备份，lite/幻觉漏删可回溯
+            try:
+                profile_path.with_suffix(profile_path.suffix + ".bak").write_text(content, encoding="utf-8")
+            except Exception:
+                logger.exception("[Heartbeat] Profile backup failed for user %s", user_id)
+            profile_path.write_text(new_content, encoding="utf-8")
+            logger.info("[Heartbeat] Profile consolidated for user %s", user_id or "default")
+
+        # 不论是否改动都记时间戳：标记今天已处理，避免当天反复触发。
+        # 用文件实际 mtime（而非开头捕获的 now），避免 write_text 后 mtime 漂移导致
+        # 第二天闸门③误判"画像又变了"白烧 token。
+        try:
+            actual_mtime = profile_path.stat().st_mtime
+            marker.write_text(str(actual_mtime), encoding="utf-8")
+        except Exception:
+            logger.exception("[Heartbeat] Profile marker write failed for user %s", user_id)
+    finally:
+        ETHAN_USER_ID.reset(token)
 
 
 async def _run_heartbeat_md() -> None:
@@ -178,9 +337,10 @@ async def _run_heartbeat_md() -> None:
 
 
 async def _tick() -> None:
-    """执行一次心跳：facts 整理 + heartbeat.md 任务 + skill 进化。"""
+    """执行一次心跳：facts 整理 + 画像每日压缩 + heartbeat.md 任务 + skill 进化。"""
     logger.info("[Heartbeat] tick")
     await _consolidate_facts()
+    await _consolidate_profiles()
     await _run_heartbeat_md()
     await _update_skills()
 
