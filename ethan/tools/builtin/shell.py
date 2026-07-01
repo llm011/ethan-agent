@@ -73,9 +73,7 @@ class ShellTool(BaseTool):
             )
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             output = stdout.decode(errors="replace").strip()
-            # 截断过长输出
-            if len(output) > 8000:
-                output = output[:8000] + "\n...(truncated)"
+            # 不截断，让模型自己判断哪些有用（shell 有 no_compress=True，不会被压缩）
             return output or "(no output)"
         except asyncio.TimeoutError:
             return f"Command timed out after {timeout}s"

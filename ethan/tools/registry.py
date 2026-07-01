@@ -5,8 +5,6 @@ import json
 from ethan.providers.base import ToolCall
 from ethan.tools.base import BaseTool, ToolResult
 
-_COMPRESS_THRESHOLD = 4000
-
 
 class ToolRegistry:
     def __init__(self):
@@ -71,10 +69,12 @@ class ToolExecutor:
                 self._cache[cache_key] = result.content
 
             # 超长结果用廉价模型压缩（只压缩 content，保留 sub_steps）
-            # no_compress 工具（技能文档/文件原文）必须逐字给模型，跳过压缩
-            if not getattr(tool, "no_compress", False) and len(result.content) > _COMPRESS_THRESHOLD:
-                from ethan.tools.result_compressor import maybe_compress
-                result.content = await maybe_compress(tc.name, result.content)
+            # no_compress 工具（file_read/shell/web_fetch/skill_read）必须逐字给模型，跳过压缩
+            # 其他工具（web_search/grep/browser snapshot）由 compressor 根据阈值判断
+            if not getattr(tool, "no_compress", False):
+                from ethan.tools.result_compressor import maybe_compress, COMPRESS_THRESHOLD
+                if len(result.content) > COMPRESS_THRESHOLD:
+                    result.content = await maybe_compress(tc.name, result.content)
 
             return result
         except Exception as e:

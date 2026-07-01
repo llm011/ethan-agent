@@ -87,12 +87,8 @@ class FileReadTool(BaseTool):
         if max_lines > 0:
             lines = text.splitlines()[:max_lines]
             text = "\n".join(lines)
-            if len(text) > 8000:
-                text = text[:8000] + "\n...(truncated)"
 
-        if len(text) > 8000:
-            text = text[:8000] + "\n...(truncated)"
-
+        # 不截断，file_read 有 no_compress=True，原样进 context
         return text or "(empty file)"
 
 

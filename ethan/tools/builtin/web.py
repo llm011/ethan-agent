@@ -8,6 +8,7 @@ from ethan.tools.base import BaseTool
 
 class WebFetchTool(BaseTool):
     fast_path = False
+    no_compress = True  # 文章/文档原文必须逐字给模型，压成摘要会丢关键信息
     name = "web_fetch"
     description = "Fetch a webpage URL and extract its text content. Use for reading articles, documentation, or any web page."
     parameters = {
@@ -26,7 +27,7 @@ class WebFetchTool(BaseTool):
             headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"}
             async with httpx.AsyncClient(follow_redirects=True, timeout=15.0) as client:
                 resp = await client.get(url, headers=headers)
-                resp.raise_for_status()
+                resp.raise_for_status()  # status_code 有问题直接抛异常，不浪费 token
 
             content_type = resp.headers.get("content-type", "")
             if "text/html" in content_type:
@@ -34,10 +35,12 @@ class WebFetchTool(BaseTool):
             else:
                 text = resp.text
 
-            if len(text) > 8000:
-                text = text[:8000] + "\n...(truncated)"
+            # 不截断，让 registry 的 compressor（4000字阈值）决定是否压缩
 
             return text or "(empty page)"
+        except httpx.HTTPStatusError as e:
+            # status_code 错误，不返回页面内容（浪费 token）
+            return f"Fetch failed: HTTP {e.response.status_code} for {url}"
         except Exception as e:
             return f"Fetch failed: {e}"
 

@@ -13,15 +13,69 @@ Usage:
     CDN_REGION     - 区域（默认 auto）
 
 成功时 stdout 输出公开 URL，失败时 stderr 输出错误并以非0退出。
+缓存：~/.ethan/upload-cdn-cache.db，相同 file_hash+object_key 直接返回已有 URL。
 """
 import hashlib
 import hmac
 import os
+import sqlite3
 import sys
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+
+
+_CACHE_DB = Path.home() / ".ethan" / "upload-cdn-cache.db"
+
+
+def _open_cache() -> "sqlite3.Connection | None":
+    try:
+        _CACHE_DB.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(_CACHE_DB))
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS cache "
+            "(file_hash TEXT NOT NULL, object_key TEXT NOT NULL, "
+            "cdn_url TEXT NOT NULL, uploaded_at TEXT NOT NULL, "
+            "PRIMARY KEY (file_hash, object_key))"
+        )
+        conn.commit()
+        return conn
+    except Exception:
+        return None
+
+
+def _cache_get(file_hash: str, object_key: str) -> "str | None":
+    conn = _open_cache()
+    if not conn:
+        return None
+    try:
+        row = conn.execute(
+            "SELECT cdn_url FROM cache WHERE file_hash=? AND object_key=?",
+            (file_hash, object_key),
+        ).fetchone()
+        return row[0] if row else None
+    except Exception:
+        return None
+    finally:
+        conn.close()
+
+
+def _cache_set(file_hash: str, object_key: str, cdn_url: str) -> None:
+    conn = _open_cache()
+    if not conn:
+        return
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO cache (file_hash, object_key, cdn_url, uploaded_at) "
+            "VALUES (?,?,?,?)",
+            (file_hash, object_key, cdn_url, datetime.now(tz=timezone.utc).isoformat()),
+        )
+        conn.commit()
+    except Exception:
+        pass
+    finally:
+        conn.close()
 
 
 def _sign(key: bytes, msg: str) -> bytes:
@@ -53,8 +107,15 @@ def upload(local_path: str, object_key: str) -> str:
         raise EnvironmentError(f"缺少环境变量: {', '.join(missing)}\n请配置 ~/.ethan/.secrets/upload-cdn.env")
 
     data = Path(local_path).read_bytes()
-    content_type = _guess_content_type(local_path)
     payload_hash = hashlib.sha256(data).hexdigest()
+
+    # 命中缓存直接返回
+    cached = _cache_get(payload_hash, object_key)
+    if cached:
+        print(f"  [cache] {object_key} → {cached}", file=sys.stderr)
+        return cached
+
+    content_type = _guess_content_type(local_path)
 
     now = datetime.now(tz=timezone.utc)
     date_time = now.strftime("%Y%m%dT%H%M%SZ")
@@ -109,11 +170,13 @@ def upload(local_path: str, object_key: str) -> str:
     req.add_header("x-amz-content-sha256", payload_hash)
     req.add_header("x-amz-date", date_time)
 
-    with urllib.request.urlopen(req, timeout=120) as resp:
+    with urllib.request.urlopen(req) as resp:
         if resp.status not in (200, 204):
             raise RuntimeError(f"上传失败: HTTP {resp.status}")
 
-    return f"{public_url}/{object_key}"
+    cdn_url = f"{public_url}/{object_key}"
+    _cache_set(payload_hash, object_key, cdn_url)
+    return cdn_url
 
 
 def _guess_content_type(path: str) -> str:

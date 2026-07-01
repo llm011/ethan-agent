@@ -33,7 +33,7 @@ python ~/.ethan/skills/lark-doc/scripts/fetch_doc.py "https://xxx.feishu.cn/docx
 python ~/.ethan/skills/lark-doc/scripts/fetch_doc.py "https://xxx.feishu.cn/wiki/TOKEN" ./output.md
 ```
 
-脚本会：拉取完整文档（不受截断影响）→ 有 CDN 凭证则把图片上传换成公开 URL（检测：`test -n "$CDN_ENDPOINT" && test -n "$CDN_ACCESS_KEY" && echo CDN_READY || echo CDN_MISSING`，无则保留飞书链接并提示用户配置 `upload-cdn` skill）→ 下载视频/附件到 `./media/` → 写出 `.md`，stdout 只打印路径。
+脚本会：拉取完整文档（不受截断影响）→ 获取文档基本信息（作者、创建/修改时间、原文链接，插到标题下方；需 `drive:drive.metadata:readonly` 权限，缺失则跳过并提示）→ 有 CDN 凭证则把图片上传换成公开 URL（检测：`test -n "$CDN_ENDPOINT" && test -n "$CDN_ACCESS_KEY" && echo CDN_READY || echo CDN_MISSING`，无则保留飞书链接并提示用户配置 `upload-cdn` skill；图片走 `docs +media-download` 认证下载而非直连 URL）→ 下载视频/附件到 `./media/` → 清洗残留 DocxXML 标签（`<title>`/`<callout>`/`<cite>` 转等价 markdown，`<readonly-block type="isv">` 等无法导出的第三方交互块换成占位说明，其余组件标签转义避免 ProseMirror 吞标签）→ 写出 `.md`，stdout 只打印路径。
 
 ## 前置条件 — 执行操作前必读
 

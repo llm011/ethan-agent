@@ -8,13 +8,22 @@ from ethan.providers.manager import create_provider
 
 logger = logging.getLogger(__name__)
 
-MAX_RAW_LENGTH = 4000
-COMPRESS_TARGET = 1200
+# 压缩触发阈值：输出超过此长度才压缩
+COMPRESS_THRESHOLD = 10000
+# 压缩后目标长度
+COMPRESS_TARGET = 2500
 
 
 async def maybe_compress(tool_name: str, result: str, context: str = "") -> str:
-    """如果结果超长，用廉价模型压缩。否则原样返回。"""
-    if len(result) <= MAX_RAW_LENGTH:
+    """如果结果超长，用廉价模型压缩。否则原样返回。
+
+    注意：no_compress=True 的工具（file_read/shell/web_fetch/skill_read）
+    在 registry 层就被过滤掉了，不会走到这里。这里的压缩只针对：
+    - 搜索结果（web_search/grep）
+    - 浏览器 snapshot
+    - 其他"信息型"输出（模型只需理解，不需逐字使用）
+    """
+    if len(result) <= COMPRESS_THRESHOLD:
         return result
 
     cfg = get_config()
@@ -22,7 +31,7 @@ async def maybe_compress(tool_name: str, result: str, context: str = "") -> str:
 
     prompt = (
         f"以下是工具 `{tool_name}` 的执行结果：\n\n"
-        f"<tool_output>\n{result[:8000]}\n</tool_output>\n\n"
+        f"<tool_output>\n{result}\n</tool_output>\n\n"
         + (f"调用背景：{context}\n\n" if context else "")
         + f"请将以上内容提炼为不超过 {COMPRESS_TARGET} 字的摘要，"
         "保留所有关键信息、数据、错误信息。只输出摘要，不要解释。"
@@ -38,4 +47,5 @@ async def maybe_compress(tool_name: str, result: str, context: str = "") -> str:
         return f"[摘要，原始输出 {len(result)} 字]\n{compressed}"
     except Exception as e:
         logger.warning("[Compressor] Failed for %s: %s", tool_name, e)
-        return result[:MAX_RAW_LENGTH] + "\n...(truncated)"
+        # 压缩失败时，直接返回原文（不截断，让模型自己判断）
+        return result
