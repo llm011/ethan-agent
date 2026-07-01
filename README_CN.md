@@ -669,7 +669,9 @@ EOF
 - [ ] **移动端适配**：底部 Tab 导航、触摸手势、键盘弹起适配
 
 **Coding Agent 集成**
-- [x] **ACP 持续对话优化**：`delegate_coding` 按「用户×工作目录」持久化 session_id，用 `--resume` 续接 Claude Code 多轮会话；stream-json 解析为 sub_steps，Web UI 时间轴折叠展示、最终结果高亮。OpenCode / Codex 也已接入（单轮）
+- [x] **ACP 持续对话优化**：`delegate_coding` 按「Coding Agent × 工作目录」持久化 session_id。三套后端（Claude Code / OpenCode / Codex）现都走 JSON 事件流 + 会话续接，解析为 sub_steps，Web UI 时间轴折叠展示、最终结果高亮。Codex 复用 Ethan 的 cliproxy provider；超时优雅终止并清掉会话，避免续接到卡住的 thread
+- [x] **镜像会话**：每次 `delegate()` 落成一条真正的 Ethan 会话（`source` 用真实工具名 codex/claude/opencode），记录下发的 query + Coding Agent 回复 + 步骤，并注册为 RunManager run，委派过程可经 SSE 实时观看
+- [x] **沉浸式工具模式**：对话 mode 可切到 Codex / Claude Code / OpenCode；切入后整条会话每句话都直接续接该工具（同一工具 session、按会话隔离工作目录），既能临时 delegate，也能沉浸式持续对话。在镜像会话里直接发消息也会自动续接对应工具
 - [ ] **MCP client 完善**：连接外部 MCP server，自动注册工具
 
 **长期**

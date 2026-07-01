@@ -161,11 +161,11 @@ function StepRow({ step, isLast }: { step: ToolStep; isLast: boolean }) {
           </div>
         )}
 
-        {/* 委派工具的最终结果：高亮展示 */}
+        {/* 委派工具的最终结果：高亮展示（暖色，明暗两种模式都可读） */}
         {isDelegate && step.result_preview && step.state !== "running" && !detailOpen && (
-          <div className="mt-1.5 flex items-start gap-1.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 px-2 py-1">
-            <Sparkles className="h-3 w-3 text-emerald-400 shrink-0 mt-0.5" />
-            <p className="text-[10px] text-emerald-300/90 leading-relaxed line-clamp-3">
+          <div className="mt-1.5 flex items-start gap-1.5 rounded-md bg-amber-500/10 border border-amber-500/25 px-2 py-1">
+            <Sparkles className="h-3 w-3 text-amber-500 shrink-0 mt-0.5" />
+            <p className="text-[10px] text-amber-700 dark:text-amber-300 leading-relaxed line-clamp-3">
               {step.result_preview}
             </p>
           </div>

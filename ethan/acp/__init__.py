@@ -19,6 +19,33 @@ from typing import Optional
 from ethan.core.paths import user_data_dir
 
 
+async def _terminate_proc(proc, grace: float = 8.0) -> None:
+    """优雅终止子进程：先 SIGTERM 给收尾机会，超过 grace 秒仍活着再 SIGKILL。
+
+    动机：codex/opencode 把「turn 是否进行中」记在自己的 session 文件里。直接 kill()
+    会让该 thread 停在 'turn in progress'，导致之后手动 `codex exec resume` /
+    交互式 `/resume` 被拒（'/resume is disabled while a task is in progress'）。
+    SIGTERM 给 CLI 一个把 turn 标记为中断、干净落盘的机会，降低污染概率。
+    """
+    if proc.returncode is not None:
+        return
+    try:
+        proc.terminate()  # SIGTERM
+    except Exception:
+        pass
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=grace)
+        return
+    except (asyncio.TimeoutError, Exception):
+        pass
+    try:
+        proc.kill()  # SIGKILL 兜底
+        await asyncio.wait_for(proc.wait(), timeout=3)
+    except Exception:
+        pass
+
+
+
 @dataclass
 class ACPResult:
     success: bool
@@ -121,6 +148,45 @@ def clear_session(cwd: str, user_id: str = "", agent: str = "claude") -> None:
     _save_sessions(sessions, user_id)
 
 
+# ── 镜像会话映射：(agent, cwd) → Ethan 会话 id ──────────────────────────
+# 让同一个 (agent, cwd) 的连续多轮委派累加到同一条 Ethan 镜像 session（多轮对话），
+# 而不是每次新建一条。与 coding-agent 的 session_id 分开存（不同 key 前缀）。
+
+def _mirror_key(cwd: str, agent: str) -> str:
+    return f"mirror::{agent}::{os.path.abspath(cwd)}"
+
+
+def get_mirror_session(cwd: str, user_id: str = "", agent: str = "claude") -> Optional[str]:
+    return _load_sessions(user_id).get(_mirror_key(cwd, agent))
+
+
+def set_mirror_session(cwd: str, session_id: str, user_id: str = "", agent: str = "claude") -> None:
+    sessions = _load_sessions(user_id)
+    sessions[_mirror_key(cwd, agent)] = session_id
+    _save_sessions(sessions, user_id)
+
+
+def clear_mirror_session(cwd: str, user_id: str = "", agent: str = "claude") -> None:
+    sessions = _load_sessions(user_id)
+    sessions.pop(_mirror_key(cwd, agent), None)
+    _save_sessions(sessions, user_id)
+
+
+# 反向映射：Ethan 镜像会话 id → (agent, cwd)。
+# 用户直接在某条镜像会话里发消息时，据此查出该续接哪个 coding agent 的哪个 cwd。
+
+def set_mirror_info(session_id: str, agent: str, cwd: str, user_id: str = "") -> None:
+    sessions = _load_sessions(user_id)
+    sessions[f"mirrorinfo::{session_id}"] = {"agent": agent, "cwd": os.path.abspath(cwd)}
+    _save_sessions(sessions, user_id)
+
+
+def get_mirror_info(session_id: str, user_id: str = "") -> Optional[dict]:
+    """返回 {"agent", "cwd"}，非镜像会话返回 None。"""
+    info = _load_sessions(user_id).get(f"mirrorinfo::{session_id}")
+    return info if isinstance(info, dict) else None
+
+
 # ── 参数摘要 ──────────────────────────────────────────────────────────
 
 def _summarize_args(tool_input: dict) -> str:
@@ -151,8 +217,12 @@ async def _run_claude_code(
     timeout: int = 180,
     resume_session_id: Optional[str] = None,
     user_id: str = "",
+    on_event: Optional[callable] = None,
 ) -> ACPResult:
-    """Run Claude Code with stream-json output, parse sub-steps and final result."""
+    """Run Claude Code with stream-json output, parse sub-steps and final result.
+
+    on_event 可选：回调函数，每有中间事件调用一次，传 (event_type, data)。
+    """
     claude_bin = shutil.which("claude")
     if not claude_bin:
         return ACPResult(
@@ -188,63 +258,72 @@ async def _run_claude_code(
         )
         assert proc.stdout is not None
 
-        async def _read_lines():
+        async def _consume():
+            nonlocal session_id, final_result, is_error
             while True:
                 line = await proc.stdout.readline()
                 if not line:
                     break
-                yield line
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    evt = json.loads(line)
+                except Exception:
+                    continue
 
-        async for line in _read_lines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                evt = json.loads(line)
-            except Exception:
-                continue
+                t = evt.get("type")
+                if t == "system" and evt.get("subtype") == "init":
+                    sid = evt.get("session_id")
+                    if sid:
+                        session_id = sid
+                elif t == "assistant":
+                    for c in evt.get("message", {}).get("content", []):
+                        if c.get("type") == "tool_use":
+                            tool_name = c.get("name", "tool")
+                            tool_use_id = c.get("id", "")
+                            step = {
+                                "tool": tool_name,
+                                "args": _summarize_args(c.get("input", {})),
+                                "state": "running",
+                                "duration_ms": None,
+                                "result_preview": "",
+                            }
+                            sub_steps.append(step)
+                            if tool_use_id:
+                                pending[tool_use_id] = step
+                                start_times[tool_use_id] = asyncio.get_event_loop().time()
+                            if on_event:
+                                await on_event("step", step)
+                        elif c.get("type") == "text" and c.get("text") and on_event:
+                            await on_event("text", c.get("text"))
+                elif t == "user":
+                    for c in evt.get("message", {}).get("content", []):
+                        if c.get("type") == "tool_result":
+                            tool_use_id = c.get("tool_use_id", "")
+                            step = pending.get(tool_use_id)
+                            if step:
+                                elapsed = asyncio.get_event_loop().time() - start_times.get(tool_use_id, 0)
+                                step["duration_ms"] = int(elapsed * 1000)
+                                step["result_preview"] = _preview(_extract_tool_result_text(c.get("content", "")))
+                                step["state"] = "error" if c.get("is_error") else "done"
+                                if on_event:
+                                    await on_event("step", step)
+                elif t == "result":
+                    final_result = evt.get("result", "") or ""
+                    sid = evt.get("session_id")
+                    if sid:
+                        session_id = sid
+                    is_error = bool(evt.get("is_error"))
+                    # subtype=success/max_tokens/error 等
 
-            t = evt.get("type")
-            if t == "system" and evt.get("subtype") == "init":
-                sid = evt.get("session_id")
-                if sid:
-                    session_id = sid
-            elif t == "assistant":
-                for c in evt.get("message", {}).get("content", []):
-                    if c.get("type") == "tool_use":
-                        tool_name = c.get("name", "tool")
-                        tool_use_id = c.get("id", "")
-                        step = {
-                            "tool": tool_name,
-                            "args": _summarize_args(c.get("input", {})),
-                            "state": "running",
-                            "duration_ms": None,
-                            "result_preview": "",
-                        }
-                        sub_steps.append(step)
-                        if tool_use_id:
-                            pending[tool_use_id] = step
-                            start_times[tool_use_id] = asyncio.get_event_loop().time()
-            elif t == "user":
-                for c in evt.get("message", {}).get("content", []):
-                    if c.get("type") == "tool_result":
-                        tool_use_id = c.get("tool_use_id", "")
-                        step = pending.get(tool_use_id)
-                        if step:
-                            elapsed = asyncio.get_event_loop().time() - start_times.get(tool_use_id, 0)
-                            step["duration_ms"] = int(elapsed * 1000)
-                            step["result_preview"] = _preview(_extract_tool_result_text(c.get("content", "")))
-                            step["state"] = "error" if c.get("is_error") else "done"
-            elif t == "result":
-                final_result = evt.get("result", "") or ""
-                sid = evt.get("session_id")
-                if sid:
-                    session_id = sid
-                is_error = bool(evt.get("is_error"))
-                # subtype=success/max_tokens/error 等
-
+        await asyncio.wait_for(_consume(), timeout=timeout)
         await asyncio.wait_for(proc.wait(), timeout=5)
     except asyncio.TimeoutError:
+        await _terminate_proc(proc)
+        # 超时可能让 claude session 卡在进行中，清掉以免下次续接到坏会话。
+        if session_id:
+            clear_session(work_dir, user_id=user_id, agent="claude")
         return ACPResult(
             success=False,
             output=f"Timed out after {timeout}s",
@@ -298,12 +377,15 @@ async def _run_opencode(
     timeout: int = 180,
     resume_session_id: Optional[str] = None,
     user_id: str = "",
+    on_event: Optional[callable] = None,
 ) -> ACPResult:
     """Run OpenCode with `--format json`，解析事件流，支持多轮续接。
 
     首轮：opencode run --format json <prompt> → 从事件里拿 sessionID。
     续轮：opencode run -s <sessionID> --format json <prompt>。
     session 按 (opencode, cwd) 持久化，与 claude/codex 路径并存互不覆盖。
+
+    on_event 可选：回调函数，每有中间事件调用一次，传 (event_type, data)。
     """
     opencode_bin = shutil.which("opencode")
     if not opencode_bin:
@@ -353,33 +435,41 @@ async def _run_opencode(
                     t = part.get("text") or evt.get("text") or ""
                     if t:
                         text_parts.append(t)
+                        if on_event:
+                            await on_event("text", t)
                 elif etype == "tool" or ptype == "tool" or ptype.startswith("tool"):
                     state = part.get("state") or {}
                     status = state.get("status") if isinstance(state, dict) else ""
                     name = part.get("tool") or part.get("name") or "tool"
                     inp = (state.get("input") if isinstance(state, dict) else None) or part.get("input") or {}
                     out = (state.get("output") if isinstance(state, dict) else None) or part.get("output") or ""
-                    sub_steps.append({
+                    step = {
                         "tool": name,
                         "args": _summarize_args(inp if isinstance(inp, dict) else {"input": inp}),
                         "state": "error" if status == "error" else "done",
                         "duration_ms": None,
                         "result_preview": _preview(str(out)),
-                    })
+                    }
+                    sub_steps.append(step)
+                    if on_event:
+                        await on_event("step", step)
                 elif etype == "error" or ptype == "error":
                     is_error = True
                     msg = evt.get("message") or part.get("error") or ""
                     if msg:
-                        sub_steps.append({"tool": "error", "args": _preview(str(msg), 80),
-                                          "state": "error", "duration_ms": None, "result_preview": ""})
+                        step = {"tool": "error", "args": _preview(str(msg), 80),
+                                "state": "error", "duration_ms": None, "result_preview": ""}
+                        sub_steps.append(step)
+                        if on_event:
+                            await on_event("step", step)
 
         await asyncio.wait_for(_consume(), timeout=timeout)
         await asyncio.wait_for(proc.wait(), timeout=5)
     except asyncio.TimeoutError:
-        try:
-            proc.kill()
-        except Exception:
-            pass
+        await _terminate_proc(proc)
+        # 同 codex：超时可能让 opencode session 卡在进行中，清掉以免下次续接到坏会话。
+        if session_id:
+            clear_session(work_dir, user_id=user_id, agent="opencode")
         return ACPResult(success=False, output=f"Timed out after {timeout}s",
                          agent="opencode", session_id=session_id, sub_steps=sub_steps)
     except Exception as e:
@@ -434,7 +524,13 @@ def _codex_item_to_step(item: dict) -> Optional[dict]:
             "result_preview": _preview(str(item.get("result") or item.get("output") or "")),
         }
     if itype == "error":
-        return {"tool": "error", "args": _preview(str(item.get("message") or ""), 80),
+        msg = str(item.get("message") or "")
+        # 弃用/配置提示类「error」是警告而非真失败（turn 仍正常完成），不计入步骤，
+        # 以免在镜像会话/时间轴里显示成吓人的红色错误（如 codex_hooks deprecated）。
+        low = msg.lower()
+        if any(k in low for k in ("deprecated", "is no longer supported", "use `[features]")):
+            return None
+        return {"tool": "error", "args": _preview(msg, 80),
                 "state": "error", "duration_ms": None, "result_preview": ""}
     return None
 
@@ -480,6 +576,7 @@ async def _run_codex(
     timeout: int = 180,
     resume_session_id: Optional[str] = None,
     user_id: str = "",
+    on_event: Optional[callable] = None,
 ) -> ACPResult:
     """Run Codex with `codex exec --json`，解析事件流，支持多轮续接。
 
@@ -487,6 +584,8 @@ async def _run_codex(
     续轮：codex exec resume <session_id> --json <prompt>。
     session_id 按 (codex, cwd) 持久化，与 Claude Code 路径并存互不覆盖。
     provider 经 _codex_provider_overrides 注入（复用 ethan cliproxy），避开失效的默认 provider。
+
+    on_event 可选：回调函数，每有中间事件调用一次，传 (event_type, data)。
     """
     codex_bin = shutil.which("codex")
     if not codex_bin:
@@ -544,6 +643,8 @@ async def _run_codex(
                     step = _codex_item_to_step(item)
                     if step:
                         sub_steps.append(step)
+                        if on_event:
+                            await on_event("step", step)
                 elif t == "turn.failed":
                     is_error = True
                     err = (evt.get("error") or {}).get("message") or ""
@@ -553,14 +654,20 @@ async def _run_codex(
                     msg = evt.get("message") or ""
                     if msg and not final_result:
                         final_result = f"(codex error) {msg}"
+                # 把 agent_message 的增量文本也推出去，让流式展示完整
+                if t == "item.completed" and (evt.get("item") or {}).get("type") == "agent_message":
+                    text = _codex_item_text(evt.get("item"))
+                    if text and on_event:
+                        await on_event("text", text)
 
         await asyncio.wait_for(_consume(), timeout=timeout)
         await asyncio.wait_for(proc.wait(), timeout=5)
     except asyncio.TimeoutError:
-        try:
-            proc.kill()
-        except Exception:
-            pass
+        await _terminate_proc(proc)
+        # 超时即便优雅终止，该 thread 也可能停在「turn 进行中」而无法 resume；
+        # 清掉持久化的 session_id，下次该 (codex, cwd) 自动从新会话开始，避免续接到坏 thread。
+        if session_id:
+            clear_session(work_dir, user_id=user_id, agent="codex")
         return ACPResult(success=False, output=f"Timed out after {timeout}s",
                          agent="codex", session_id=session_id, sub_steps=sub_steps)
     except Exception as e:
@@ -595,6 +702,7 @@ async def delegate(
     reset_session: bool = False,
     user_id: str = "",
     mirror: bool = True,
+    on_event: Optional[callable] = None,
 ) -> ACPResult:
     """Delegate a task to the best available local coding agent.
 
@@ -602,6 +710,8 @@ async def delegate(
         resume: 是否续接该 cwd 上次的 Coding Agent 会话（多轮）。
         reset_session: 清除该 cwd 的会话记忆，从新会话开始。
         mirror: 是否把本次委派落成一条 Ethan 镜像 session（query+回复+步骤可在 web 回看）。
+        on_event: 可选的额外事件回调（step/text）。镜像会话里「直接发消息续接」时，
+                  路由传入它把过程实时推进那条会话的 ChatRun。
     """
     work_dir = cwd or str(Path.cwd())
 
@@ -620,12 +730,26 @@ async def delegate(
     mirror_session = None
     if mirror and agent_name != "none":
         from ethan.acp.mirror import MirrorSession
+        # reset_session 同样作用于镜像会话：新建一条，而不是续接到上一条多轮里。
         mirror_session = await MirrorSession.start(
             agent=agent_name, task=prompt, cwd=work_dir, user_id=user_id,
+            reuse=not reset_session,
         )
 
+    # 事件回调：镜像会话自己的 + 调用方传入的（如「在镜像会话里直接发消息」走 chat 路由
+    # 时，由路由传入 on_event 把过程实时推进那条会话的 ChatRun）。两者都触发。
+    async def _combined_on_event(etype, data):
+        if mirror_session is not None:
+            await mirror_session.on_event(etype, data)
+        if on_event is not None:
+            r = on_event(etype, data)
+            if hasattr(r, "__await__"):
+                await r
+
+    dispatch_on_event = _combined_on_event if (mirror_session is not None or on_event is not None) else None
     result = await _dispatch(
         prompt, work_dir, prefer, timeout, resume, reset_session, user_id, agent_name,
+        on_event=dispatch_on_event,
     )
 
     if mirror_session is not None:
@@ -644,6 +768,7 @@ async def _dispatch(
     reset_session: bool,
     user_id: str,
     agent_name: str,
+    on_event: Optional[callable] = None,
 ) -> ACPResult:
     """实际分派到具体 Coding Agent。镜像会话由 delegate() 在外层包裹。"""
     if prefer == "opencode":
@@ -654,7 +779,7 @@ async def _dispatch(
             resume_sid = get_session(work_dir, user_id=user_id, agent="opencode")
         return await _run_opencode(
             prompt, cwd=work_dir, timeout=timeout,
-            resume_session_id=resume_sid, user_id=user_id,
+            resume_session_id=resume_sid, user_id=user_id, on_event=on_event,
         )
     if prefer == "codex":
         resume_sid = None
@@ -664,7 +789,7 @@ async def _dispatch(
             resume_sid = get_session(work_dir, user_id=user_id, agent="codex")
         return await _run_codex(
             prompt, cwd=work_dir, timeout=timeout,
-            resume_session_id=resume_sid, user_id=user_id,
+            resume_session_id=resume_sid, user_id=user_id, on_event=on_event,
         )
 
     # 默认优先 Claude Code（支持多轮 + 子步骤）
@@ -676,12 +801,12 @@ async def _dispatch(
             resume_sid = get_session(work_dir, user_id=user_id, agent="claude")
         return await _run_claude_code(
             prompt, cwd=work_dir, timeout=timeout,
-            resume_session_id=resume_sid, user_id=user_id,
+            resume_session_id=resume_sid, user_id=user_id, on_event=on_event,
         )
     elif agent_name == "opencode":
-        return await _run_opencode(prompt, cwd=work_dir, timeout=timeout, user_id=user_id)
+        return await _run_opencode(prompt, cwd=work_dir, timeout=timeout, user_id=user_id, on_event=on_event)
     elif agent_name == "codex":
-        return await _run_codex(prompt, cwd=work_dir, timeout=timeout, user_id=user_id)
+        return await _run_codex(prompt, cwd=work_dir, timeout=timeout, user_id=user_id, on_event=on_event)
     else:
         return ACPResult(
             success=False,

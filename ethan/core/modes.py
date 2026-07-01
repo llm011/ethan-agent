@@ -29,6 +29,8 @@ class Mode:
     requires_skill: str = ""          # 该模式依赖的技能目录名；未安装时自动安装/引导安装
     install_source: str = ""          # requires_skill 缺失时 install_skill 的来源（owner/repo/子目录）
     install_alias: str = ""           # 对应 `ethan skill add <alias>` 的友好别名（失败兜底时提示用户手动装）
+    delegate_agent: str = ""          # 非空 = 「沉浸式工具模式」：整条会话的每句话都续接该 coding agent
+                                      # （codex/claude/opencode），而不是走 Ethan 的 chat 模型。
 
 
 # 唯一真相源：所有内置对话模式。
@@ -61,6 +63,36 @@ MODES: tuple[Mode, ...] = (
             "回答法律问题时保持专业、克制、有依据，遵循 legal-assistant 技能的方法论。"
             "若本模式依赖的技能尚未安装，应先引导用户安装，在装好前不要假装已具备完整专业深度。"
         ),
+    ),
+    # ── 沉浸式 Coding Agent 模式 ───────────────────────────────────
+    # 切到这些模式后，整条会话的每句话都续接同一个 coding agent（同一工具 session），
+    # 而不是走 Ethan 的 chat 模型。工作目录按会话隔离（~/.ethan/agent-sessions/<会话id>）。
+    Mode(
+        key="codex",
+        aliases=("codex", "Codex"),
+        label="Codex",
+        icon="🤖",
+        accent="amber",
+        delegate_agent="codex",
+        blurb="已进入 Codex 模式：每条消息都直接交给 Codex 在本会话工作目录里执行",
+    ),
+    Mode(
+        key="claude_code",
+        aliases=("claude_code", "claude-code", "claudecode", "Claude Code"),
+        label="Claude Code",
+        icon="🟧",
+        accent="amber",
+        delegate_agent="claude",
+        blurb="已进入 Claude Code 模式：每条消息都直接交给 Claude Code 在本会话工作目录里执行",
+    ),
+    Mode(
+        key="opencode",
+        aliases=("opencode", "OpenCode", "open_code"),
+        label="OpenCode",
+        icon="🟥",
+        accent="amber",
+        delegate_agent="opencode",
+        blurb="已进入 OpenCode 模式：每条消息都直接交给 OpenCode 在本会话工作目录里执行",
     ),
 )
 

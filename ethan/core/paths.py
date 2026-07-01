@@ -83,6 +83,15 @@ def user_knowledge_dir() -> Path:
     return user_data_dir() / "knowledge"
 
 
+def user_agent_session_dir(session_id: str) -> Path:
+    """沉浸式工具模式下，每条 Ethan 会话独立的 coding-agent 工作目录。
+
+    会话隔离：codex/claude/opencode 在各自目录里干活，互不干扰；
+    同一会话的连续消息复用同一目录 → 复用同一工具 session（多轮续接）。
+    """
+    return user_data_dir() / "agent-sessions" / session_id
+
+
 def ensure_user_dirs() -> None:
     """创建当前 profile 的目录结构（首次访问时调用）。"""
     for d in (user_memory_dir(), user_skills_dir(), user_knowledge_dir()):

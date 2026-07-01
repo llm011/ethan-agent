@@ -267,6 +267,8 @@ lark-cli event consume im.message.receive_v1（WebSocket 长连接）
 | 识别方式 | — | Session title 前缀 `lark:<chat_id>:` |
 | 可在 Web UI 查看 | 是 | 是（同一 SQLite 数据库） |
 
+> 此外还有**委派镜像会话**（`source="delegate"`）：每次 Ethan 委派给 Coding Agent（codex/claude/opencode）会落一条独立 session，记录下发的 query + Coding Agent 回复 + 工具步骤，并注册 RunManager run 支持实时 attach。详见 [acp.md](./acp.md)。
+
 ### 应用权限要求
 
 在飞书开放平台 → 权限管理中开通：
