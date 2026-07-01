@@ -183,9 +183,9 @@ async def _consolidate_profile_for_user(user_id: str) -> None:
             return
         # 闸门③：画像自上次压缩后没改动 → 跳过，不空烧 token。
         if last > 0 and profile_path.stat().st_mtime <= last:
-            # 仍记一次时间戳，避免今天反复进到这里重判
+            # 仍记一次时间戳，避免今天反复进这里重判
             try:
-                marker.write_text(str(now), encoding="utf-8")
+                marker.write_text(str(profile_path.stat().st_mtime), encoding="utf-8")
             except Exception:
                 pass
             return
@@ -219,9 +219,12 @@ async def _consolidate_profile_for_user(user_id: str) -> None:
             profile_path.write_text(new_content, encoding="utf-8")
             logger.info("[Heartbeat] Profile consolidated for user %s", user_id or "default")
 
-        # 不论是否改动都记时间戳：标记今天已处理，避免当天反复触发
+        # 不论是否改动都记时间戳：标记今天已处理，避免当天反复触发。
+        # 用文件实际 mtime（而非开头捕获的 now），避免 write_text 后 mtime 漂移导致
+        # 第二天闸门③误判"画像又变了"白烧 token。
         try:
-            marker.write_text(str(now), encoding="utf-8")
+            actual_mtime = profile_path.stat().st_mtime
+            marker.write_text(str(actual_mtime), encoding="utf-8")
         except Exception:
             logger.exception("[Heartbeat] Profile marker write failed for user %s", user_id)
     finally:
