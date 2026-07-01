@@ -258,70 +258,72 @@ async def _run_claude_code(
         )
         assert proc.stdout is not None
 
-        async def _read_lines():
+        async def _consume():
+            nonlocal session_id, final_result, is_error
             while True:
                 line = await proc.stdout.readline()
                 if not line:
                     break
-                yield line
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    evt = json.loads(line)
+                except Exception:
+                    continue
 
-        async for line in _read_lines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                evt = json.loads(line)
-            except Exception:
-                continue
-
-            t = evt.get("type")
-            if t == "system" and evt.get("subtype") == "init":
-                sid = evt.get("session_id")
-                if sid:
-                    session_id = sid
-            elif t == "assistant":
-                for c in evt.get("message", {}).get("content", []):
-                    if c.get("type") == "tool_use":
-                        tool_name = c.get("name", "tool")
-                        tool_use_id = c.get("id", "")
-                        step = {
-                            "tool": tool_name,
-                            "args": _summarize_args(c.get("input", {})),
-                            "state": "running",
-                            "duration_ms": None,
-                            "result_preview": "",
-                        }
-                        sub_steps.append(step)
-                        if tool_use_id:
-                            pending[tool_use_id] = step
-                            start_times[tool_use_id] = asyncio.get_event_loop().time()
-                        if on_event:
-                            await on_event("step", step)
-                    elif c.get("type") == "text" and c.get("text") and on_event:
-                        await on_event("text", c.get("text"))
-            elif t == "user":
-                for c in evt.get("message", {}).get("content", []):
-                    if c.get("type") == "tool_result":
-                        tool_use_id = c.get("tool_use_id", "")
-                        step = pending.get(tool_use_id)
-                        if step:
-                            elapsed = asyncio.get_event_loop().time() - start_times.get(tool_use_id, 0)
-                            step["duration_ms"] = int(elapsed * 1000)
-                            step["result_preview"] = _preview(_extract_tool_result_text(c.get("content", "")))
-                            step["state"] = "error" if c.get("is_error") else "done"
+                t = evt.get("type")
+                if t == "system" and evt.get("subtype") == "init":
+                    sid = evt.get("session_id")
+                    if sid:
+                        session_id = sid
+                elif t == "assistant":
+                    for c in evt.get("message", {}).get("content", []):
+                        if c.get("type") == "tool_use":
+                            tool_name = c.get("name", "tool")
+                            tool_use_id = c.get("id", "")
+                            step = {
+                                "tool": tool_name,
+                                "args": _summarize_args(c.get("input", {})),
+                                "state": "running",
+                                "duration_ms": None,
+                                "result_preview": "",
+                            }
+                            sub_steps.append(step)
+                            if tool_use_id:
+                                pending[tool_use_id] = step
+                                start_times[tool_use_id] = asyncio.get_event_loop().time()
                             if on_event:
                                 await on_event("step", step)
-            elif t == "result":
-                final_result = evt.get("result", "") or ""
-                sid = evt.get("session_id")
-                if sid:
-                    session_id = sid
-                is_error = bool(evt.get("is_error"))
-                # subtype=success/max_tokens/error 等
+                        elif c.get("type") == "text" and c.get("text") and on_event:
+                            await on_event("text", c.get("text"))
+                elif t == "user":
+                    for c in evt.get("message", {}).get("content", []):
+                        if c.get("type") == "tool_result":
+                            tool_use_id = c.get("tool_use_id", "")
+                            step = pending.get(tool_use_id)
+                            if step:
+                                elapsed = asyncio.get_event_loop().time() - start_times.get(tool_use_id, 0)
+                                step["duration_ms"] = int(elapsed * 1000)
+                                step["result_preview"] = _preview(_extract_tool_result_text(c.get("content", "")))
+                                step["state"] = "error" if c.get("is_error") else "done"
+                                if on_event:
+                                    await on_event("step", step)
+                elif t == "result":
+                    final_result = evt.get("result", "") or ""
+                    sid = evt.get("session_id")
+                    if sid:
+                        session_id = sid
+                    is_error = bool(evt.get("is_error"))
+                    # subtype=success/max_tokens/error 等
 
+        await asyncio.wait_for(_consume(), timeout=timeout)
         await asyncio.wait_for(proc.wait(), timeout=5)
     except asyncio.TimeoutError:
         await _terminate_proc(proc)
+        # 超时可能让 claude session 卡在进行中，清掉以免下次续接到坏会话。
+        if session_id:
+            clear_session(work_dir, user_id=user_id, agent="claude")
         return ACPResult(
             success=False,
             output=f"Timed out after {timeout}s",
