@@ -35,7 +35,7 @@ function TierTable({ tools }: { tools: TierTool[] }) {
                 {t.side_effect ? <span title="有副作用：改文件/发消息/花钱等，非主人调用会被拦截">⚠️</span> : <span className="text-muted-foreground/30">—</span>}
               </td>
               <td className="py-2 text-center">
-                {t.no_compress ? <span title="输出不压缩：含 ID/ref/结构化数据，逐字给模型">🔒</span> : <span className="text-muted-foreground/30">—</span>}
+                {t.no_compress ? <span title="输出不压缩：含关键数据（ID/ref/路径等），需原样传递，压缩会导致信息丢失">🔒</span> : <span className="text-muted-foreground/30">—</span>}
               </td>
             </tr>
           ))}

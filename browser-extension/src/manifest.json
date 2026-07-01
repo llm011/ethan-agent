@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Ethan Browser",
-  "version": "0.1.0",
-  "description": "Bridge Ethan agent browser commands to Chrome tabs over WebSocket.",
+  "version": "0.3.0",
+  "description": "Bridge Ethan agent browser commands to Chrome tabs over WebSocket. v0.3.0",
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",
