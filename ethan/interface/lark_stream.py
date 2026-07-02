@@ -198,8 +198,19 @@ async def _handle_message(event_data: dict) -> None:
     is_owner = bool(owner_open_id) and sender_open_id == owner_open_id
     owner_claimed = bool(owner_open_id)
 
+    # ── /btw：顺带一问——不带历史、不带 cold facts 的单轮轻量查询 ──
+    # 解析放在 /command 之前，因为 /btw 需要走完整 agent 流程（只是上下文为空）。
+    from ethan.interface.channel_commands import CommandContext, handle_command, is_command, is_btw, btw_question
+    btw_mode = False
+    if is_btw(text):
+        q = btw_question(text)
+        if not q:
+            await _send_reply(chat_id, "用法：/btw <问题>，例如：/btw 今天几号？")
+            return
+        btw_mode = True
+        text = q
+
     # ── /command：以 / 开头的命令先于 Agent 处理（不加思考表情，直接回复）──
-    from ethan.interface.channel_commands import CommandContext, handle_command, is_command
     if is_command(text):
         async def _reset_lark_session(cid: str) -> None:
             """清空该飞书 chat 的会话映射，下次消息新建 session。"""
@@ -443,20 +454,24 @@ async def _handle_message(event_data: dict) -> None:
         from ethan.memory.working import MemoryConfig, WorkingMemory
         from ethan.memory.facts import FactStore
         from ethan.core.paths import user_facts_path
-        memory = WorkingMemory(config=MemoryConfig(hot_size=5))
-        memory.cold_facts = FactStore(path=user_facts_path()).build_context()
-        hist_ua = [m for m in history if m.role in ("user", "assistant")]
-        pairs, i = [], 0
-        while i < len(hist_ua) - 1:
-            if hist_ua[i].role == "user" and hist_ua[i+1].role == "assistant":
-                pairs.append((hist_ua[i], hist_ua[i+1]))
-                i += 2
-            else:
-                i += 1
-        for u, a in pairs[-memory.config.hot_size:]:
-            memory.hot.append(u)
-            memory.hot.append(a)
-        context_messages = memory.build_context() + [agent_user_msg]
+        if btw_mode:
+            # /btw：不带任何历史，单轮轻量查询，上下文只有本条消息
+            context_messages = [agent_user_msg]
+        else:
+            memory = WorkingMemory(config=MemoryConfig(hot_size=5))
+            memory.cold_facts = FactStore(path=user_facts_path()).build_context()
+            hist_ua = [m for m in history if m.role in ("user", "assistant")]
+            pairs, i = [], 0
+            while i < len(hist_ua) - 1:
+                if hist_ua[i].role == "user" and hist_ua[i+1].role == "assistant":
+                    pairs.append((hist_ua[i], hist_ua[i+1]))
+                    i += 2
+                else:
+                    i += 1
+            for u, a in pairs[-memory.config.hot_size:]:
+                memory.hot.append(u)
+                memory.hot.append(a)
+            context_messages = memory.build_context() + [agent_user_msg]
 
         registry = ToolRegistry()
         from ethan.core.context import set_session_id

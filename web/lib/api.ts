@@ -547,11 +547,12 @@ export async function* streamChat(
   sessionId?: string,
   quote?: { role: "user" | "assistant"; content: string } | null,
   mode?: string,
+  btw?: boolean,
 ): AsyncGenerator<StreamChunk> {
   const res = await fetch(`${API_URL}/chat`, {
     method: "POST",
     headers: headers(),
-    body: JSON.stringify({ messages, model, stream: true, session_id: sessionId, quote: quote ?? undefined, mode: mode || undefined }),
+    body: JSON.stringify({ messages, model, stream: true, session_id: sessionId, quote: quote ?? undefined, mode: mode || undefined, btw: btw || undefined }),
   });
 
   if (!res.ok) {

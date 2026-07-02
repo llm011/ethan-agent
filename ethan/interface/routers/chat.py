@@ -65,6 +65,7 @@ class ChatRequest(BaseModel):
     channel: str = "web"
     quote: dict | None = None  # {role, content}：引用某条历史消息，注入给模型但不入库
     mode: str = ""  # "" = 工作助手; 规范英文 key，如 "legal"/"companion"（见 core/modes.py）
+    btw: bool = False  # /btw 顺带一问：不带历史，单轮轻量查询
 
 
 class ChatResponse(BaseModel):
@@ -95,7 +96,7 @@ async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
         if req.mode:
             await store.update_mode(req.session_id, req.mode)
 
-    if req.session_id:
+    if req.session_id and not req.btw:
         from ethan.memory.working import WorkingMemory
 
         session = await store.load(req.session_id)
@@ -106,6 +107,9 @@ async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
 
         current_user = _with_quote(messages[-1], req.quote)
         messages = memory.build_context() + [current_user]
+    elif req.btw and messages:
+        # /btw：只带本条消息，不带任何历史
+        messages = [_with_quote(messages[-1], req.quote)]
     elif req.quote and messages and messages[-1].role == "user":
         messages[-1] = _with_quote(messages[-1], req.quote)
 
