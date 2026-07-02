@@ -533,11 +533,13 @@ async def _handle_message(event_data: dict) -> None:
         answer_created = False  # 答案卡片是否已创建
         thinking_shown = False  # 是否已在工具消息里显示了 "🤔 thinking..."
         tools_used = False      # 本条消息是否已调用过工具（决定正文是否还能乐观发卡片）
+        reply_reaction_id: str | None = None   # 加在回复消息上的 THINKING 表情（打字中指示器）
+        reply_reaction_msg: str | None = None  # 哪条消息上有该表情
         FLUSH_INTERVAL = 2.0
         ANSWER_BUFFER_THRESHOLD = 50  # 纯对话首段缓冲字数，避免孤立短卡片
 
         async def _update_tool_msg() -> None:
-            nonlocal tool_msg_id, reaction_id
+            nonlocal tool_msg_id, reaction_id, reply_reaction_id, reply_reaction_msg
             if not tool_text:
                 return
             content = _render_tool_msg_content(tool_text)
@@ -571,9 +573,16 @@ async def _handle_message(event_data: dict) -> None:
                     resp = await asyncio.to_thread(client.im.v1.message.create, req)
                 if resp.success() and resp.data:
                     tool_msg_id = resp.data.message_id
-                if reaction_id and message_id:
-                    await _remove_reaction(message_id, reaction_id)
-                    reaction_id = None
+                    # 回复消息发出后：移除用户消息上的 THINKING，给回复消息加打字中表情
+                    if reaction_id and message_id:
+                        await _remove_reaction(message_id, reaction_id)
+                        reaction_id = None
+                    reply_reaction_id = await _send_reaction(tool_msg_id)
+                    reply_reaction_msg = tool_msg_id
+                else:
+                    if reaction_id and message_id:
+                        await _remove_reaction(message_id, reaction_id)
+                        reaction_id = None
             else:
                 from lark_oapi.api.im.v1 import UpdateMessageRequest, UpdateMessageRequestBody
                 client = _lark_client()
@@ -592,7 +601,7 @@ async def _handle_message(event_data: dict) -> None:
                     await asyncio.to_thread(client.im.v1.message.update, req)
 
         async def _flush_answer(force: bool = False) -> None:
-            nonlocal answer_msg_id, answer_text, pending, last_flush, answer_created, reaction_id
+            nonlocal answer_msg_id, answer_text, pending, last_flush, answer_created, reaction_id, reply_reaction_id, reply_reaction_msg
             if not pending:
                 return
             # 工具流程中不乐观发卡片：工具间的零碎 narration 一旦发卡、下个工具 start 又撤回，
@@ -613,10 +622,13 @@ async def _handle_message(event_data: dict) -> None:
                 answer_created = True
                 # 引用回复：把答案卡片锚定到用户那条消息，飞书显示成"引用回复"，让用户清楚在答哪条
                 answer_msg_id, _ = await _send_message(chat_id, answer_text, use_card=True, reply_to_msg_id=message_id)
-                # 发出首条回答后移除 reaction（若工具进度消息没发出过）
+                # 发出首条回答后移除用户消息上的 reaction（若工具进度消息没发出过）
                 if reaction_id and message_id:
                     await _remove_reaction(message_id, reaction_id)
                     reaction_id = None
+                # 给答案卡片加"打字中" THINKING 表情
+                reply_reaction_id = await _send_reaction(answer_msg_id)
+                reply_reaction_msg = answer_msg_id
             else:
                 await _edit_message(answer_msg_id, answer_text, use_card=True)
 
@@ -750,13 +762,14 @@ async def _handle_message(event_data: dict) -> None:
 
         if answer_msg_id:
             if _looks_like_tool_trace(answer_text):
-                # 模型把工具进度格式当正文输出了（多半读了被污染的历史）—— 不渲染成答案
-                # 卡片（否则就是「用卡片输出工具调用过程」），改为简短提示，工具过程已在上方
-                # post 气泡实时展示。同时存库时清空 content，断污染历史的反馈循环。
                 await _edit_message(answer_msg_id, "⚠️ 本轮未生成有效总结（输出像工具过程而非结论），工具过程已记录在上方。可重试或补充说明。", use_card=True)
             else:
                 final_answer = (answer_text or "（没有找到相关内容）").rstrip() + f"\n\n---\n_{stats_line}_"
                 await _edit_message(answer_msg_id, final_answer, use_card=True)
+            # 结果卡片已定稿，移除打字中表情
+            if reply_reaction_id and reply_reaction_msg:
+                await _remove_reaction(reply_reaction_msg, reply_reaction_id)
+                reply_reaction_id = None
         elif tool_msg_id:
             # 只有工具调用没有正文（极少数情况），在工具消息末尾加 stats（保持 post 富文本样式）
             final_tool = tool_text.rstrip() + f"\n\n{stats_line}"
@@ -775,13 +788,19 @@ async def _handle_message(event_data: dict) -> None:
                     .build()
                 )
                 await asyncio.to_thread(_tclient.im.v1.message.update, _treq)
+            # 工具进度消息已定稿，移除打字中表情
+            if reply_reaction_id and reply_reaction_msg:
+                await _remove_reaction(reply_reaction_msg, reply_reaction_id)
+                reply_reaction_id = None
         else:
             # 没有任何输出（工具和正文都没有）
             await _send_message(chat_id, f"（没有找到相关内容）\n{stats_line}", use_card=False)
 
-        # 确保 reaction 被清理（理论上前面已经清了）
+        # 确保两个 reaction 都被清理（理论上前面已经清了）
         if reaction_id and message_id:
             await _remove_reaction(message_id, reaction_id)
+        if reply_reaction_id and reply_reaction_msg:
+            await _remove_reaction(reply_reaction_msg, reply_reaction_id)
 
         # 存库：只存最终答案正文（reasoning 已在工具阶段丢弃），减少 context token。
         # ⚠️ 绝不把 tool_text 当 content 存（旧的 `answer_text or tool_text` fallback）——
@@ -808,6 +827,8 @@ async def _handle_message(event_data: dict) -> None:
         try:
             if reaction_id and message_id:
                 await _remove_reaction(message_id, reaction_id)
+            if reply_reaction_id and reply_reaction_msg:
+                await _remove_reaction(reply_reaction_msg, reply_reaction_id)
             # 取已生成的部分正文（不 fallback 到 tool_text——见存库处注释，防污染历史）
             partial = "" if _looks_like_tool_trace(answer_text) else answer_text.strip()
             if partial:
@@ -836,6 +857,8 @@ async def _handle_message(event_data: dict) -> None:
         # 确保表情被清理
         if reaction_id and message_id:
             await _remove_reaction(message_id, reaction_id)
+        if reply_reaction_id and reply_reaction_msg:
+            await _remove_reaction(reply_reaction_msg, reply_reaction_id)
         await store.close()
         _untrack_task(chat_id, asyncio.current_task())
         return
