@@ -257,6 +257,28 @@ def _with_quote(user_msg: Message, quote: dict | None) -> Message:
     return Message(role=user_msg.role, content=prefixed, created_at=user_msg.created_at)
 
 
+async def _save_progress(store: SessionStore, session_id: str,
+                         progress_msg_id: int | None,
+                         tool_steps: list, a2ui: list | None) -> int:
+    """工具过程实时落库：把当前 tool_steps 快照写进一条 assistant 消息。
+
+    首次（progress_msg_id is None）：INSERT 一条占位行（content 空、tool_steps 为当前步骤），
+    返回新行 id；后续：UPDATE 同一行覆盖 tool_steps/a2ui，复用 id 返回。
+
+    这样整轮只占一条 assistant 行，工具步骤随完成实时留存，进程崩溃/用户关页面也不丢过程。
+    """
+    msg = Message(
+        role="assistant",
+        content="",
+        tool_steps=tool_steps,
+        a2ui=a2ui,
+    )
+    if progress_msg_id is None:
+        return await store.save_message(session_id, msg)
+    await store.update_message(progress_msg_id, session_id, msg)
+    return progress_msg_id
+
+
 async def _run_delegate_generation(
     run,
     prompt: str,
@@ -377,6 +399,12 @@ async def _run_generation(
     set_consent_provider(consent)
 
     collector = StreamCollector().bind(agent)
+    # 工具过程实时持久化：每条工具事件 emit 给前端的同时，也把步骤快照落库。
+    # 这样即便后续 finalize 失败 / 进程崩溃 / 用户关页面，工具调用过程也留存，不会白干。
+    # 落的是一条 role=assistant、content 为占位、tool_steps 为当前全部步骤的「进度消息」，
+    # id 记在 progress_msg_id；每完成一个工具就 UPDATE 这条（覆盖式更新 tool_steps），
+    # 流结束后把同一条更新为最终内容（content/usage/a2ui），避免「占位行 + 最终行」重复两条。
+    progress_msg_id: int | None = None
     try:
         async for item in agent.stream_chat(messages):
             if isinstance(item, ConsentEvent):
@@ -410,6 +438,16 @@ async def _run_generation(
                     if item.ui:
                         evt["ui"] = item.ui
                     run.emit(evt)
+                # 工具事件（start/done/error）后实时落库进度：把当前全部 tool_steps
+                # 写到这条进度消息上。首次创建，后续 UPDATE 同一条（progress_msg_id 复用）。
+                if session_id and consent is not None:
+                    try:
+                        progress_msg_id = await _save_progress(
+                            store, session_id, progress_msg_id,
+                            collector.tool_steps or [], collector.a2ui or None,
+                        )
+                    except Exception:
+                        logger.exception("实时保存工具进度失败 session=%s", session_id)
             else:
                 collector.feed(item)
                 run.emit({"content": item})
@@ -419,7 +457,27 @@ async def _run_generation(
         # (2) 新 run 替换旧 run：直接丢弃，不入库
         if consent is not None:
             consent.cancel_all()
-        if getattr(run, "stop_requested", False) and session_id and (collector.full or collector.thought):
+        # 进度占位行：用户主动停止则就地更新成最终内容（含 tool_steps）+ [已停止] 标记，
+        # 复用同一行；新 run 替换则删除占位行，不残留空壳。
+        if progress_msg_id and session_id:
+            try:
+                if getattr(run, "stop_requested", False):
+                    stopped_content = (collector.full or "") + "\n\n_（已停止）_"
+                    await store.update_message(progress_msg_id, session_id, Message(
+                        role="assistant",
+                        content=stopped_content,
+                        thought=collector.thought,
+                        usage=collector.usage_dict,
+                        tool_steps=collector.tool_steps or [],
+                        a2ui=collector.a2ui or None,
+                    ))
+                    await store.touch(session_id)
+                else:
+                    await store.delete_message_by_id(progress_msg_id)
+            except Exception:
+                logger.exception("清理/定稿进度占位行失败 session=%s row=%s", session_id, progress_msg_id)
+        elif getattr(run, "stop_requested", False) and session_id and (collector.full or collector.thought):
+            # 没走过实时落库（如非 web 渠道）的兜底：直接新建一条
             try:
                 stopped_msg = Message(
                     role="assistant",
@@ -443,6 +501,21 @@ async def _run_generation(
         raise
     except Exception as e:
         run.emit({"error": _friendly_error(e, agent)})
+        # 异常中断（如 provider 报错）：若已有进度行，把已收集的 tool_steps 落到它上面，
+        # 至少保留工具过程，别白干。无进度行则跳过（避免凭空插空壳）。
+        if progress_msg_id and session_id and (collector.tool_steps or collector.full):
+            try:
+                await store.update_message(progress_msg_id, session_id, Message(
+                    role="assistant",
+                    content=collector.full or "",
+                    thought=collector.thought,
+                    usage=collector.usage_dict,
+                    tool_steps=collector.tool_steps or [],
+                    a2ui=collector.a2ui or None,
+                ))
+                await store.touch(session_id)
+            except Exception:
+                logger.exception("异常中断时定稿进度占位行失败 session=%s", session_id)
     finally:
         # 流结束（正常/异常）时取消未决授权 Future，避免泄漏
         if consent is not None:
@@ -459,7 +532,12 @@ async def _run_generation(
             tool_steps=collector.tool_steps or [],
             a2ui=collector.a2ui or None,
         )
-        await store.save_message(session_id, asst_msg)
+        # 正常结束：把实时进度行就地更新为最终回复（content/usage/tool_steps/a2ui 全写全），
+        # 复用同一行，避免「占位行 + 最终行」重复两条 assistant 消息。无进度行则照常新建。
+        if progress_msg_id:
+            await store.update_message(progress_msg_id, session_id, asst_msg)
+        else:
+            await store.save_message(session_id, asst_msg)
         await store.touch(session_id)
         if agent._skills and agent.last_matched_skills:
             for _name in agent.last_matched_skills:

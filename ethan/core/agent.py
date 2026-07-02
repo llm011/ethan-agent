@@ -638,6 +638,15 @@ class Agent:
             self.usage.add(response.usage)
             working.append(response)
 
+            # 空响应（既无正文也无工具调用）= 模型静默放弃。直接 return 会让整轮白干：
+            # 工具结果已在上下文里却不产出总结、不落库。强制走一次 finalize（禁工具 + 收尾指令），
+            # 逼模型基于已有上下文给出「已做/结果/卡点」总结后返回。
+            if not response.is_tool_call and not (response.content or "").strip():
+                sys = system + finalize_system_suffix("max_iters")
+                resp = await provider.chat(working, tools=None, system=sys)
+                self.usage.add(resp.usage)
+                return resp
+
             if not response.is_tool_call:
                 return response
 
@@ -733,6 +742,20 @@ class Agent:
             tool_calls = final_chunk.tool_calls if final_chunk else []
             response = Message(role="assistant", content=full_content, tool_calls=tool_calls)
             working.append(response)
+
+            # 空响应（既无正文也无工具调用）= 模型静默放弃。直接 return 会导致整轮白干：
+            # 工具结果已在 working 里却不产出任何总结，且不落库。此处强制走一次 finalize
+            # （禁工具 + 收尾指令），逼模型基于已有上下文给出「已做/结果/卡点」总结后返回。
+            if not response.is_tool_call and not full_content:
+                sys = system + finalize_system_suffix("max_iters")
+                async for chunk in self._provider.stream_chat(working, tools=None, system=sys):
+                    if chunk.reasoning:
+                        yield ThinkingEvent(delta=chunk.reasoning)
+                    if chunk.content:
+                        yield chunk.content
+                    if chunk.is_final:
+                        self.usage.add(chunk.usage)
+                return
 
             if not response.is_tool_call:
                 return
