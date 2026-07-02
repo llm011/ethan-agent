@@ -158,10 +158,14 @@ async def _handle_message(event_data: dict) -> None:
     from ethan.tools.registry import ToolRegistry
 
     # lark-cli 已经把 event 字段展平，直接从顶层读取
-    if event_data.get("message_type") != "text":
+    # post（图文混合）/ image / file / audio / video 的 content 也是 lark-cli 预渲染的可读文本：
+    # post → markdown（图片占位 ![Image](img_xxx) + 正文）
+    # image → ![Image](img_xxx)
+    # file/audio/video → <file key="file_xxx" .../> 等
+    _HANDLED_TYPES = {"text", "post", "image", "file", "audio", "video"}
+    if event_data.get("message_type") not in _HANDLED_TYPES:
         return
 
-    # lark-cli 对 text 消息的 content 是预渲染的可读文本，直接用
     text = event_data.get("content", "").strip()
     if not text:
         return
@@ -410,6 +414,16 @@ async def _handle_message(event_data: dict) -> None:
         quoted = await _resolve_quoted_text(message_id)
         if quoted:
             agent_user_text = f"[用户引用了一条消息]\n> {quoted}\n\n{text}"
+
+        # 非文本消息：注入 message_id，让 agent 能用 +messages-resources-download 下载资源
+        msg_type = event_data.get("message_type", "text")
+        if msg_type != "text" and message_id:
+            agent_user_text = (
+                f"[飞书消息，类型={msg_type}，message_id={message_id}]\n"
+                f"{agent_user_text}\n\n"
+                f"[如需下载图片/文件资源，使用: lark-cli im +messages-resources-download "
+                f"--message-id {message_id} --file-key <key> --type image|file]"
+            )
         agent_user_msg = Message(role="user", content=agent_user_text)
 
         # 重建 WorkingMemory：热区最近 5 轮 + cold facts（per-user）
