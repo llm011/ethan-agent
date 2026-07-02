@@ -114,16 +114,18 @@ def _build_tool_elements(tool_text: str) -> list:
     rows = []
     for line in tool_text.split("\n"):
         line = line.rstrip()
-        # 工具名行：**icon label**，其后可选「 · _intent_」（斜体说明）或「 · args 兜底文本」。
-        # intent 后若还跟着参数摘要，按设计不显示（lark_stream 已二选一，这里只取 · _intent_ 为止）。
-        m = re.match(r'\*\*(.+?)\*\*(?:\s*·\s*_(.+?)_)?(?:\s*·\s*(.+))?$', line)
+        # 工具名行：**icon label**，其后可选「 · _intent_ (args)」或「 · args 兜底文本」。
+        # group1=工具名, group2=intent(斜体), group3=args跟在intent后, group4=无intent时兜底args
+        m = re.match(r'\*\*(.+?)\*\*(?:\s*·\s*_(.+?)_(?:\s*\(([^)]*)\))?)?(?:\s*·\s*(.+))?$', line)
         if m and any(emoji in m.group(1) for emoji in ("📖","💻","🔍","🌐","📁","✏️","🧠","💾","⏰","📋","✨","👤","📝","🔧")):
             row = [{"tag": "text", "text": m.group(1), "style": ["bold"]}]
             if m.group(2):  # intent（斜体）
                 row.append({"tag": "text", "text": " · "})
                 row.append({"tag": "text", "text": m.group(2), "style": ["italic"]})
-            elif m.group(3):  # 无 intent 时兜底显示参数摘要（纯文本）
-                row.append({"tag": "text", "text": " · " + m.group(3)})
+                if m.group(3):  # args 跟在 intent 后面
+                    row.append({"tag": "text", "text": f" ({m.group(3)})"})
+            elif m.group(4):  # 无 intent 时兜底显示参数摘要（纯文本）
+                row.append({"tag": "text", "text": " · " + m.group(4)})
             rows.append(row)
             continue
         # 结果行（✓/✗ 或 _✓ 等前缀）

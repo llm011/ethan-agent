@@ -693,9 +693,11 @@ async def _handle_message(event_data: dict) -> None:
                     intent = (chunk.intent or "").strip()
                     if intent:
                         tool_name_line += f" · _{intent}_"
+                        if chunk.args_summary:
+                            brief = chunk.args_summary if len(chunk.args_summary) <= 60 else chunk.args_summary[:60] + "…"
+                            tool_name_line += f" ({brief})"
                     elif chunk.args_summary:
-                        # 模型没给 intent 时兜底显示参数摘要（截短；不用 markdown 反引号——
-                        # 工具进度走 _build_tool_elements 解析，反引号会破坏整行匹配退化成纯文本）
+                        # 模型没给 intent 时兜底显示参数摘要
                         brief = chunk.args_summary if len(chunk.args_summary) <= 60 else chunk.args_summary[:60] + "…"
                         tool_name_line += f" · {brief}"
                     # 两个工具之间加空行
