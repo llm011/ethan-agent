@@ -679,7 +679,10 @@ class Agent:
             # 空响应（既无正文也无工具调用）= 模型静默放弃。直接 return 会让整轮白干：
             # 工具结果已在上下文里却不产出总结、不落库。强制走一次 finalize（禁工具 + 收尾指令），
             # 逼模型基于已有上下文给出「已做/结果/卡点」总结后返回。
-            if not response.is_tool_call and not (response.content or "").strip():
+            # ⚠️ 但 finalize 轮本身不再重试：那轮模型已用同一 finalize suffix 调过一次仍空，
+            # 再调一次是超 max_iters 预算的冗余调用且大概率同样返空——直接落到下方
+            # `if not response.is_tool_call: return` 返回即可。
+            if not finalize and not response.is_tool_call and not (response.content or "").strip():
                 sys = system + finalize_system_suffix("max_iters")
                 resp = await provider.chat(working, tools=None, system=sys)
                 self.usage.add(resp.usage)
@@ -786,7 +789,8 @@ class Agent:
             # 空响应（既无正文也无工具调用）= 模型静默放弃。直接 return 会导致整轮白干：
             # 工具结果已在 working 里却不产出任何总结，且不落库。此处强制走一次 finalize
             # （禁工具 + 收尾指令），逼模型基于已有上下文给出「已做/结果/卡点」总结后返回。
-            if not response.is_tool_call and not full_content:
+            # ⚠️ finalize 轮本身不再重试（同 chat()，见上方注释）。
+            if not finalize and not response.is_tool_call and not full_content:
                 sys = system + finalize_system_suffix("max_iters")
                 async for chunk in self._provider.stream_chat(working, tools=None, system=sys):
                     if chunk.reasoning:
