@@ -40,10 +40,7 @@ git diff main...HEAD > /tmp/local.diff
 git diff --name-only main...HEAD > /tmp/local_files.txt
 ```
 
-**GitHub 账号分工（重要，别弄错身份）**：本机的 `gh` 登了两个账号，分工固定——
-- **`jsongo`**：用来**提新 PR / push**（owner 身份）。开 PR、推分支前先 `gh auth status` 确认 active 是它，不是就 `gh auth switch --user jsongo`。
-- **`ethanlyn011`**：用来 **review 和发评论**。要给别人的 PR 写评论时切到这个账号。
-- gh active 账号是全局状态，切过之后记得切回，别让下一步动作用错身份。详见 memory `feedback-github-account-roles`。
+**GitHub 多账号（若本机登了多个 gh 账号）**：先 `gh auth status` 确认当前 active 账号的身份（owner / reviewer），不对就 `gh auth switch --user <账号名>` 切换。gh active 是全局状态，用完记得切回，避免下一步动作用错身份。
 
 ## ⚠️ 大型 MR / 大 diff 的处理方式
 
