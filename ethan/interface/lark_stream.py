@@ -461,8 +461,9 @@ async def _handle_message(event_data: dict) -> None:
 
         # 拉最近 10 条群消息作为背景上下文，让 agent 感知 @mention 之间群里发生了什么。
         # 仅限群聊（chat_id 以 oc_ 开头）；私聊消息已全量在 session history 里，不重复拉。
+        # /btw 无历史模式也跳过：群消息可能很大（含代码/diff），违背 /btw 精简上下文的本意。
         # 失败时静默忽略，不阻断主流程。
-        if chat_id.startswith("oc_"):
+        if not btw_mode and chat_id.startswith("oc_"):
             recent_msgs = await _fetch_recent_chat_messages(chat_id, limit=10)
             if recent_msgs:
                 lines = ["[群聊近期消息（供背景参考，最近10条）]"]
