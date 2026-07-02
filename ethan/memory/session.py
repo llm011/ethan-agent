@@ -194,7 +194,7 @@ class SessionStore:
         await self._db.commit()
         return session
 
-    async def save_message(self, session_id: str, msg: Message) -> None:
+    async def save_message(self, session_id: str, msg: Message) -> int:
         import json
         tool_calls_json = json.dumps([
             {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
@@ -207,11 +207,42 @@ class SessionStore:
         quote_json = json.dumps(msg.quote, ensure_ascii=False) if msg.quote else None
         a2ui_json = json.dumps(msg.a2ui, ensure_ascii=False) if msg.a2ui else None
 
-        await self._db.execute(
+        cursor = await self._db.execute(
             "INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (session_id, msg.role, msg.content, tool_calls_json, msg.tool_call_id, msg_created_at, usage_json, tool_steps_json, msg.thought, quote_json, a2ui_json),
         )
         await self._db.commit()
+        return cursor.lastrowid  # 返回行 id，供「进度消息」复用同一条行做覆盖式 UPDATE
+
+    async def update_message(self, row_id: int, session_id: str, msg: Message) -> None:
+        """按主键 id 更新一条消息。
+
+        用于「工具进度实时落库」：流式过程中先 INSERT 一条占位 assistant 消息（content 空、
+        tool_steps 为当前步骤），每完成一个工具就 UPDATE 同一行覆盖 tool_steps；流结束后
+        再 UPDATE 写入最终正文/usage/a2ui。这样工具过程实时留存，且整轮只占一行。
+        """
+        import json
+        tool_calls_json = json.dumps([
+            {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
+            for tc in msg.tool_calls
+        ]) if msg.tool_calls else None
+        usage_json = json.dumps(msg.usage) if msg.usage else None
+        tool_steps_json = json.dumps(msg.tool_steps) if msg.tool_steps else None
+        a2ui_json = json.dumps(msg.a2ui, ensure_ascii=False) if msg.a2ui else None
+
+        await self._db.execute(
+            "UPDATE messages SET content=?, tool_calls=?, usage=?, tool_steps=?, thought=?, a2ui=?, created_at=? "
+            "WHERE id=? AND session_id=?",
+            (msg.content, tool_calls_json, usage_json, tool_steps_json, msg.thought, a2ui_json,
+             msg.created_at or time.time(), row_id, session_id),
+        )
+        await self._db.commit()
+
+    async def delete_message_by_id(self, row_id: int) -> None:
+        """按主键 id 删除单条消息（新 run 替换旧 run 时丢弃残留的进度占位行用）。"""
+        await self._db.execute("DELETE FROM messages WHERE id=?", (row_id,))
+        await self._db.commit()
+
 
     async def update_title(self, session_id: str, title: str) -> None:
         await self._db.execute(

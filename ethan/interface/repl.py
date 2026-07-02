@@ -679,6 +679,7 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
     total_tokens_in = 0
     total_tokens_out = 0
     total_tokens_cache = 0
+    btw_context_only = False  # /btw 单轮无历史模式，每轮用完即重置
 
     # prompt_toolkit session with slash command completion
     pt_session = PromptSession(style=_PT_STYLE, completer=SlashCompleter(), complete_while_typing=True)
@@ -715,31 +716,42 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
 
         # 斜杠命令
         if user_input.startswith("/"):
-            result = await _handle_slash_command(user_input, store, session, agent)
-            if result is not None:
-                session = result
-                session_persisted = True  # /resume 和 /new 返回的都是已持久化的 session
-                agent._mode = getattr(session, "mode", "") or ""  # 切会话同步模式
-                consent_provider.session_id = session.id  # 切换会话同步授权记忆作用域
-                history = list(session.messages)
-                approx_tokens = sum(len(m.content) for m in history)
-                model_id = session.model
-                memory = WorkingMemory(config=MemoryConfig(hot_size=10))
-                memory.cold_facts = fact_store.build_context()
-                # 恢复历史到热区
-                pairs = []
-                j = 0
-                while j < len(history) - 1:
-                    if history[j].role == "user" and history[j + 1].role == "assistant":
-                        pairs.append((history[j], history[j + 1]))
-                        j += 2
-                    else:
-                        j += 1
-                for u, a in pairs[-memory.config.hot_size:]:
-                    memory.hot.append(u)
-                    memory.hot.append(a)
-                _print_history(session.messages, limit=30)
-            continue
+            # /btw：顺带一问，不带历史，单轮轻量查询——不 continue，让它落到下面的 agent 流程
+            from ethan.interface.channel_commands import is_btw, btw_question
+            if is_btw(user_input):
+                q = btw_question(user_input)
+                if not q:
+                    console.print("[dim]/btw <问题>：不带历史的单轮查询[/dim]")
+                    continue
+                user_input = q
+                # 设 btw_context_only = True，让下方 context 构建跳过 memory，只带本条消息
+                btw_context_only = True
+            else:
+                result = await _handle_slash_command(user_input, store, session, agent)
+                if result is not None:
+                    session = result
+                    session_persisted = True  # /resume 和 /new 返回的都是已持久化的 session
+                    agent._mode = getattr(session, "mode", "") or ""  # 切会话同步模式
+                    consent_provider.session_id = session.id  # 切换会话同步授权记忆作用域
+                    history = list(session.messages)
+                    approx_tokens = sum(len(m.content) for m in history)
+                    model_id = session.model
+                    memory = WorkingMemory(config=MemoryConfig(hot_size=10))
+                    memory.cold_facts = fact_store.build_context()
+                    # 恢复历史到热区
+                    pairs = []
+                    j = 0
+                    while j < len(history) - 1:
+                        if history[j].role == "user" and history[j + 1].role == "assistant":
+                            pairs.append((history[j], history[j + 1]))
+                            j += 2
+                        else:
+                            j += 1
+                    for u, a in pairs[-memory.config.hot_size:]:
+                        memory.hot.append(u)
+                        memory.hot.append(a)
+                    _print_history(session.messages, limit=30)
+                continue
 
         msg = Message(role="user", content=user_input)
         history.append(msg)
@@ -783,8 +795,8 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
         prev_output = agent.usage.output_tokens
         prev_cache = agent.usage.cache_tokens
 
-        context = memory.build_context()
-        context.append(msg)
+        context = [msg] if btw_context_only else memory.build_context() + [msg]
+        btw_context_only = False  # 重置，不影响下一轮
 
         # Inner coroutine — captured by closure, can be awaited as a Task
         async def _consume_stream():

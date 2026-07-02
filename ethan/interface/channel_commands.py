@@ -43,6 +43,7 @@ class CommandContext:
 # 命令名 → (描述, 是否需要参数)
 COMMANDS = {
     "new": ("新建对话：清空当前上下文，下一条消息开始新会话", False),
+    "btw": ("顺带一问：不带历史直接问，单轮轻量查询（用法 /btw <问题>）", True),
     "compact": ("压缩历史：把之前的对话压成摘要，释放上下文", False),
     "sessions": ("列出最近的会话", False),
     "stop": ("停止当前进行中的回复", False),
@@ -225,3 +226,15 @@ async def handle_command(ctx: CommandContext) -> str | None:
 def is_command(text: str) -> bool:
     """快速判断一段文本是否是 / 命令（供渠道提前拦截，避免加 thinking 表情等开销）。"""
     return bool(text) and text.strip().startswith("/")
+
+
+def is_btw(text: str) -> bool:
+    """是否是 /btw 顺带一问命令。"""
+    t = text.strip().lower()
+    return t == "/btw" or t.startswith("/btw ") or t.startswith("/btw\t")
+
+
+def btw_question(text: str) -> str:
+    """从 /btw <问题> 里提取问题部分（去掉 /btw 前缀）。"""
+    t = text.strip()
+    return t[4:].strip()  # len("/btw") == 4

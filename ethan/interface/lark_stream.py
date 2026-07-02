@@ -12,12 +12,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections import deque
 
 from ethan.interface.lark_render import _render_tool_msg_content
 from ethan.interface.lark_send import (
     _delete_message,
     _edit_message,
+    _fetch_recent_chat_messages,
     _lark_client,
     _remove_reaction,
     _resolve_quoted_text,
@@ -28,6 +30,30 @@ from ethan.interface.lark_send import (
 )
 
 logger = logging.getLogger(__name__)
+
+# 工具进度行前缀图标（与下方 _TOOL_DISPLAY 的 display_name 对齐）。
+_TOOL_LINE_RE = re.compile(r'\*\*(?:📖|💻|🔍|🌐|📁|✏️|🧠|💾|⏰|📋|✨|👤|📝|🔧)')
+
+
+def _looks_like_tool_trace(text: str) -> bool:
+    """检测文本是否像「工具调用过程」而非正常答案。
+
+    正常的最终答案不该是多行 `**💻 terminal**(args)` `_✓ 结果_` 这种工具进度格式——那是
+    lark_stream 内部构造的工具进度文本。模型若在正文里照抄这种格式，几乎都是读了**被污染的
+    历史消息**后学到的错误模式（见存库处的 fallback 说明）：上一轮没出总结时把工具过程存进了
+    content，模型读到便以为「答案长这样」而在新轮正文里模仿，又被渲染成卡片 → 又污染历史 →
+    反馈循环。命中即视为无效总结，不渲染成卡片、不存进 content，从源头断循环。
+    """
+    if not text:
+        return False
+    lines = [l for l in text.split("\n") if l.strip()]
+    if len(lines) < 2:
+        return False
+    # 有 ≥2 行带工具进度图标前缀 → 判定模仿工具过程。
+    # 正常答案不会出现 `**💻 terminal**` 这种图标格式（这是 lark_stream 工具进度气泡的内部格式），
+    # 模型只在读到被污染的历史后才会照抄，故命中即可视为无效总结。
+    tool_lines = sum(1 for l in lines if _TOOL_LINE_RE.search(l))
+    return tool_lines >= 2
 
 _lark_chat_map: dict[str, str] = {}  # chat_id -> session_id, in-memory cache
 
@@ -133,10 +159,14 @@ async def _handle_message(event_data: dict) -> None:
     from ethan.tools.registry import ToolRegistry
 
     # lark-cli 已经把 event 字段展平，直接从顶层读取
-    if event_data.get("message_type") != "text":
+    # post（图文混合）/ image / file / audio / video 的 content 也是 lark-cli 预渲染的可读文本：
+    # post → markdown（图片占位 ![Image](img_xxx) + 正文）
+    # image → ![Image](img_xxx)
+    # file/audio/video → <file key="file_xxx" .../> 等
+    _HANDLED_TYPES = {"text", "post", "image", "file", "audio", "video"}
+    if event_data.get("message_type") not in _HANDLED_TYPES:
         return
 
-    # lark-cli 对 text 消息的 content 是预渲染的可读文本，直接用
     text = event_data.get("content", "").strip()
     if not text:
         return
@@ -168,8 +198,19 @@ async def _handle_message(event_data: dict) -> None:
     is_owner = bool(owner_open_id) and sender_open_id == owner_open_id
     owner_claimed = bool(owner_open_id)
 
+    # ── /btw：顺带一问——不带历史、不带 cold facts 的单轮轻量查询 ──
+    # 解析放在 /command 之前，因为 /btw 需要走完整 agent 流程（只是上下文为空）。
+    from ethan.interface.channel_commands import CommandContext, handle_command, is_command, is_btw, btw_question
+    btw_mode = False
+    if is_btw(text):
+        q = btw_question(text)
+        if not q:
+            await _send_reply(chat_id, "用法：/btw <问题>，例如：/btw 今天几号？")
+            return
+        btw_mode = True
+        text = q
+
     # ── /command：以 / 开头的命令先于 Agent 处理（不加思考表情，直接回复）──
-    from ethan.interface.channel_commands import CommandContext, handle_command, is_command
     if is_command(text):
         async def _reset_lark_session(cid: str) -> None:
             """清空该飞书 chat 的会话映射，下次消息新建 session。"""
@@ -382,30 +423,83 @@ async def _handle_message(event_data: dict) -> None:
         # 从详情里找被引用消息 id 再取其文本，拼到本轮发给 agent 的消息里
         # （只进 agent 上下文，不污染存库的原始 user_msg 和标题）。
         agent_user_text = text
-        quoted = await _resolve_quoted_text(message_id)
+        quoted, quoted_msg_id = await _resolve_quoted_text(message_id)
         if quoted:
             agent_user_text = f"[用户引用了一条消息]\n> {quoted}\n\n{text}"
+
+        # 非文本消息：解析资源 key，注入明确的下载指令
+        # 同时扫引用的原消息（quoted_msg_id），让 agent 能下载引用消息里的图片/文件
+        msg_type = event_data.get("message_type", "text")
+        import re as _re
+
+        def _build_resource_hints(content: str, src_msg_id: str) -> list[str]:
+            """从 lark-cli 预渲染的 content 里提取 img_/file_ key，生成下载命令。"""
+            hints = []
+            for k in _re.findall(r'\bimg_[A-Za-z0-9_\-]+', content):
+                hints.append(
+                    f"  # 下载图片 {k}（来自消息 {src_msg_id}）：\n"
+                    f"  lark-cli im +messages-resources-download "
+                    f"--message-id {src_msg_id} --file-key {k} --type image"
+                )
+            for k in _re.findall(r'\bfile_[A-Za-z0-9_\-]+', content):
+                hints.append(
+                    f"  # 下载文件 {k}（来自消息 {src_msg_id}）：\n"
+                    f"  lark-cli im +messages-resources-download "
+                    f"--message-id {src_msg_id} --file-key {k} --type file"
+                )
+            return hints
+
+        resource_hints = []
+        if msg_type != "text" and message_id:
+            resource_hints += _build_resource_hints(text, message_id)
+        if quoted_msg_id:
+            resource_hints += _build_resource_hints(quoted, quoted_msg_id)
+
+        if resource_hints:
+            hint = (
+                f"[飞书消息，类型={msg_type}，message_id={message_id}]\n"
+                f"{agent_user_text}"
+                "\n\n[资源已识别，下载命令如下——直接执行，无需再读 lark-im 技能]\n"
+                + "\n".join(resource_hints)
+            )
+            agent_user_text = hint
         agent_user_msg = Message(role="user", content=agent_user_text)
 
-        # 重建 WorkingMemory：热区最近 5 轮 + cold facts（per-user）
+        # 拉最近 10 条群消息作为背景上下文，让 agent 感知 @mention 之间群里发生了什么。
+        # 仅限群聊（chat_id 以 oc_ 开头）；私聊消息已全量在 session history 里，不重复拉。
+        # /btw 无历史模式也跳过：群消息可能很大（含代码/diff），违背 /btw 精简上下文的本意。
+        # 失败时静默忽略，不阻断主流程。
+        if not btw_mode and chat_id.startswith("oc_"):
+            recent_msgs = await _fetch_recent_chat_messages(chat_id, limit=10)
+            if recent_msgs:
+                lines = ["[群聊近期消息（供背景参考，最近10条）]"]
+                for m in recent_msgs:
+                    prefix = f"[{m['time']}] {m['sender']}: " if m['sender'] else f"[{m['time']}] "
+                    lines.append(prefix + m["text"])
+                agent_user_text = "\n".join(lines) + "\n\n---\n" + agent_user_text
+                agent_user_msg = Message(role="user", content=agent_user_text)
         # 飞书场景每条 assistant 消息体积较大（含工具/思考），5 轮够用且节省 token
         from ethan.memory.working import MemoryConfig, WorkingMemory
         from ethan.memory.facts import FactStore
         from ethan.core.paths import user_facts_path
-        memory = WorkingMemory(config=MemoryConfig(hot_size=5))
-        memory.cold_facts = FactStore(path=user_facts_path()).build_context()
-        hist_ua = [m for m in history if m.role in ("user", "assistant")]
-        pairs, i = [], 0
-        while i < len(hist_ua) - 1:
-            if hist_ua[i].role == "user" and hist_ua[i+1].role == "assistant":
-                pairs.append((hist_ua[i], hist_ua[i+1]))
-                i += 2
-            else:
-                i += 1
-        for u, a in pairs[-memory.config.hot_size:]:
-            memory.hot.append(u)
-            memory.hot.append(a)
-        context_messages = memory.build_context() + [agent_user_msg]
+        if btw_mode:
+            # /btw：不带任何历史，单轮轻量查询，上下文只有本条消息
+            context_messages = [agent_user_msg]
+        else:
+            memory = WorkingMemory(config=MemoryConfig(hot_size=5))
+            memory.cold_facts = FactStore(path=user_facts_path()).build_context()
+            hist_ua = [m for m in history if m.role in ("user", "assistant")]
+            pairs, i = [], 0
+            while i < len(hist_ua) - 1:
+                if hist_ua[i].role == "user" and hist_ua[i+1].role == "assistant":
+                    pairs.append((hist_ua[i], hist_ua[i+1]))
+                    i += 2
+                else:
+                    i += 1
+            for u, a in pairs[-memory.config.hot_size:]:
+                memory.hot.append(u)
+                memory.hot.append(a)
+            context_messages = memory.build_context() + [agent_user_msg]
 
         registry = ToolRegistry()
         from ethan.core.context import set_session_id
@@ -482,11 +576,13 @@ async def _handle_message(event_data: dict) -> None:
         answer_created = False  # 答案卡片是否已创建
         thinking_shown = False  # 是否已在工具消息里显示了 "🤔 thinking..."
         tools_used = False      # 本条消息是否已调用过工具（决定正文是否还能乐观发卡片）
+        reply_reaction_id: str | None = None   # 加在回复消息上的 THINKING 表情（打字中指示器）
+        reply_reaction_msg: str | None = None  # 哪条消息上有该表情
         FLUSH_INTERVAL = 2.0
         ANSWER_BUFFER_THRESHOLD = 50  # 纯对话首段缓冲字数，避免孤立短卡片
 
         async def _update_tool_msg() -> None:
-            nonlocal tool_msg_id, reaction_id
+            nonlocal tool_msg_id, reaction_id, reply_reaction_id, reply_reaction_msg
             if not tool_text:
                 return
             content = _render_tool_msg_content(tool_text)
@@ -520,9 +616,16 @@ async def _handle_message(event_data: dict) -> None:
                     resp = await asyncio.to_thread(client.im.v1.message.create, req)
                 if resp.success() and resp.data:
                     tool_msg_id = resp.data.message_id
-                if reaction_id and message_id:
-                    await _remove_reaction(message_id, reaction_id)
-                    reaction_id = None
+                    # 回复消息发出后：移除用户消息上的 THINKING，给回复消息加打字中表情
+                    if reaction_id and message_id:
+                        await _remove_reaction(message_id, reaction_id)
+                        reaction_id = None
+                    reply_reaction_id = await _send_reaction(tool_msg_id)
+                    reply_reaction_msg = tool_msg_id
+                else:
+                    if reaction_id and message_id:
+                        await _remove_reaction(message_id, reaction_id)
+                        reaction_id = None
             else:
                 from lark_oapi.api.im.v1 import UpdateMessageRequest, UpdateMessageRequestBody
                 client = _lark_client()
@@ -541,7 +644,7 @@ async def _handle_message(event_data: dict) -> None:
                     await asyncio.to_thread(client.im.v1.message.update, req)
 
         async def _flush_answer(force: bool = False) -> None:
-            nonlocal answer_msg_id, answer_text, pending, last_flush, answer_created, reaction_id
+            nonlocal answer_msg_id, answer_text, pending, last_flush, answer_created, reaction_id, reply_reaction_id, reply_reaction_msg
             if not pending:
                 return
             # 工具流程中不乐观发卡片：工具间的零碎 narration 一旦发卡、下个工具 start 又撤回，
@@ -562,10 +665,13 @@ async def _handle_message(event_data: dict) -> None:
                 answer_created = True
                 # 引用回复：把答案卡片锚定到用户那条消息，飞书显示成"引用回复"，让用户清楚在答哪条
                 answer_msg_id, _ = await _send_message(chat_id, answer_text, use_card=True, reply_to_msg_id=message_id)
-                # 发出首条回答后移除 reaction（若工具进度消息没发出过）
+                # 发出首条回答后移除用户消息上的 reaction（若工具进度消息没发出过）
                 if reaction_id and message_id:
                     await _remove_reaction(message_id, reaction_id)
                     reaction_id = None
+                # 给答案卡片加"打字中" THINKING 表情
+                reply_reaction_id = await _send_reaction(answer_msg_id)
+                reply_reaction_msg = answer_msg_id
             else:
                 await _edit_message(answer_msg_id, answer_text, use_card=True)
 
@@ -603,6 +709,7 @@ async def _handle_message(event_data: dict) -> None:
                     collected_tool_steps.append({
                         "tool": chunk.tool_name,
                         "args": chunk.args_summary,
+                        "intent": chunk.intent or "",
                         "state": "running",
                         "duration_ms": None,
                         "result_preview": "",
@@ -638,8 +745,16 @@ async def _handle_message(event_data: dict) -> None:
                     }
                     display_name = _TOOL_DISPLAY.get(chunk.tool_name, f"🔧 {chunk.tool_name}")
                     tool_name_line = f"**{display_name}**"
-                    if chunk.args_summary:
-                        tool_name_line += f"`({chunk.args_summary})`"
+                    intent = (chunk.intent or "").strip()
+                    if intent:
+                        tool_name_line += f" · _{intent}_"
+                        if chunk.args_summary:
+                            brief = chunk.args_summary if len(chunk.args_summary) <= 60 else chunk.args_summary[:60] + "…"
+                            tool_name_line += f" ({brief})"
+                    elif chunk.args_summary:
+                        # 模型没给 intent 时兜底显示参数摘要
+                        brief = chunk.args_summary if len(chunk.args_summary) <= 60 else chunk.args_summary[:60] + "…"
+                        tool_name_line += f" · {brief}"
                     # 两个工具之间加空行
                     tool_text = (tool_text.rstrip() + "\n\n" + tool_name_line + "\n") if tool_text else tool_name_line + "\n"
                     await _update_tool_msg()
@@ -689,8 +804,15 @@ async def _handle_message(event_data: dict) -> None:
         stats_line = "  ".join(stats_parts)
 
         if answer_msg_id:
-            final_answer = (answer_text or "（没有找到相关内容）").rstrip() + f"\n\n---\n_{stats_line}_"
-            await _edit_message(answer_msg_id, final_answer, use_card=True)
+            if _looks_like_tool_trace(answer_text):
+                await _edit_message(answer_msg_id, "⚠️ 本轮未生成有效总结（输出像工具过程而非结论），工具过程已记录在上方。可重试或补充说明。", use_card=True)
+            else:
+                final_answer = (answer_text or "（没有找到相关内容）").rstrip() + f"\n\n---\n_{stats_line}_"
+                await _edit_message(answer_msg_id, final_answer, use_card=True)
+            # 结果卡片已定稿，移除打字中表情
+            if reply_reaction_id and reply_reaction_msg:
+                await _remove_reaction(reply_reaction_msg, reply_reaction_id)
+                reply_reaction_id = None
         elif tool_msg_id:
             # 只有工具调用没有正文（极少数情况），在工具消息末尾加 stats（保持 post 富文本样式）
             final_tool = tool_text.rstrip() + f"\n\n{stats_line}"
@@ -709,16 +831,28 @@ async def _handle_message(event_data: dict) -> None:
                     .build()
                 )
                 await asyncio.to_thread(_tclient.im.v1.message.update, _treq)
+            # 工具进度消息已定稿，移除打字中表情
+            if reply_reaction_id and reply_reaction_msg:
+                await _remove_reaction(reply_reaction_msg, reply_reaction_id)
+                reply_reaction_id = None
         else:
             # 没有任何输出（工具和正文都没有）
             await _send_message(chat_id, f"（没有找到相关内容）\n{stats_line}", use_card=False)
 
-        # 确保 reaction 被清理（理论上前面已经清了）
+        # 确保两个 reaction 都被清理（理论上前面已经清了）
         if reaction_id and message_id:
             await _remove_reaction(message_id, reaction_id)
+        if reply_reaction_id and reply_reaction_msg:
+            await _remove_reaction(reply_reaction_msg, reply_reaction_id)
 
-        # 存库：只存最终答案正文（reasoning 已在工具阶段丢弃），减少 context token
-        stored_content = (answer_text.strip() or tool_text.strip()) + f"\n\n{stats_line}"
+        # 存库：只存最终答案正文（reasoning 已在工具阶段丢弃），减少 context token。
+        # ⚠️ 绝不把 tool_text 当 content 存（旧的 `answer_text or tool_text` fallback）——
+        # 工具过程一旦进了 content，历史就被污染，下一轮模型读到「答案=工具过程格式」
+        # 便在正文里模仿照抄，又被渲染成卡片、又污染历史，形成「用卡片输出工具过程」
+        # 的反馈循环。没总结就空 content；模型在正文模仿工具过程格式时也清空。
+        # 工具过程始终在 tool_steps 字段里，不在 content。
+        clean_answer = "" if _looks_like_tool_trace(answer_text) else answer_text.strip()
+        stored_content = (clean_answer + f"\n\n{stats_line}") if clean_answer else (stats_line or "")
 
         # 保存完整 assistant 消息到 session（带 usage + tool_steps）
         usage_dict = {
@@ -736,7 +870,10 @@ async def _handle_message(event_data: dict) -> None:
         try:
             if reaction_id and message_id:
                 await _remove_reaction(message_id, reaction_id)
-            partial = (answer_text.strip() or tool_text.strip())
+            if reply_reaction_id and reply_reaction_msg:
+                await _remove_reaction(reply_reaction_msg, reply_reaction_id)
+            # 取已生成的部分正文（不 fallback 到 tool_text——见存库处注释，防污染历史）
+            partial = "" if _looks_like_tool_trace(answer_text) else answer_text.strip()
             if partial:
                 stopped_content = partial + "\n\n（已停止）"
                 if answer_msg_id:
@@ -763,6 +900,8 @@ async def _handle_message(event_data: dict) -> None:
         # 确保表情被清理
         if reaction_id and message_id:
             await _remove_reaction(message_id, reaction_id)
+        if reply_reaction_id and reply_reaction_msg:
+            await _remove_reaction(reply_reaction_msg, reply_reaction_id)
         await store.close()
         _untrack_task(chat_id, asyncio.current_task())
         return

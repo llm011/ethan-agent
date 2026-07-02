@@ -61,6 +61,7 @@ class ToolEvent:
     sub_steps: list = field(default_factory=list)  # 委派类工具（如 delegate_coding）的子步骤
     tool_call_id: str = ""  # 唯一标识，前端用来精确配对 start/done（同名工具并发时不串）
     ui: Optional[list] = None  # ui_card 工具产出的 A2UI envelope 列表，透传给前端渲染卡片
+    intent: str = ""  # 模型在 intent 参数里填的「本次调用目的」，展示在工具调用旁
 
 
 class BaseProvider(ABC):
