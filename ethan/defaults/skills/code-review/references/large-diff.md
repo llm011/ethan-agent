@@ -65,7 +65,7 @@ src/baz.ts:120 | P1 | 这里的 ctx 是不是可能为 null？ | 待确认
 - **旧符号残留搜索**：重命名 / API 改名 / 函数签名变更后，搜一下旧名字还有没有被引用。
   - 本地：`grep -rn 'OldName' --include='*.go' .`（按语言改 `--include`）
   - GitHub：`gh api search/code -f q='OldName repo:owner/repo' --jq '.items[].path'`
-  - bytedcli Codebase：`bytedcli codebase search ...`（先 `skill_read(name="bytedance-codebase")` 看参数）
+  - GitLab / 内网代码平台：用各自的代码搜索命令（先查对应技能或 `--help`）
   - 残留命中 = 该改的调用方漏改了，记进清单。
 - **新分支有没有对应测试**：新增的入口函数 / 接口 / 新文件，旁边有没有同名 test。Go 看 `foo.go` 旁边有没有 `foo_test.go`；Python 看有没有 `test_foo.py`；TS 看有没有 `foo.test.ts`。没测的新逻辑，记进清单（P1 提醒，不算 P0）。
 
@@ -73,4 +73,4 @@ src/baz.ts:120 | P1 | 这里的 ctx 是不是可能为 null？ | 待确认
 
 不管 diff 多大，最终评论仍遵循主 SKILL 的分级（只发 P0、P1 简短、P2 不发）和语气要求。**改动大 ≠ 评论多**——抓住真正影响合并的几个点，不要因为看得多就堆一长串。
 
-多条评论走「批量 draft + 一次性 publish」：bytedcli 连续 `mr comment draft` N 次（每条带自己的 `--position-json`），最后只调一次 `mr comment publish`，把这 N 条一起发出去（`PublishDraftComments` 会发该 MR 全部草稿）；GitHub 等价做法是把所有行内评论写进一个 `comments[]` 数组，一次 `POST pulls/{N}/reviews` 提交。具体命令见主 SKILL「评论发布方式」。
+多条评论走批量发布：GitHub 把所有行内评论写进一个 `comments[]` 数组，一次 `POST pulls/{N}/reviews` 提交；GitLab / 内网代码平台同理，攒齐再一次提交，避免作者收到一堆零散通知。具体命令见主 SKILL「评论发布方式」。
