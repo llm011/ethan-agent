@@ -79,6 +79,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         ? m.tool_steps.map((s: any) => ({
             tool: s.tool,
             args: s.args,
+            intent: s.intent,
             state: s.state as "running" | "done" | "error",
             duration_ms: s.duration_ms,
             result_preview: s.result_preview,
@@ -139,7 +140,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           const preToolThought = assistantContent.trim();
           assistantContent = "";
           currentToolSteps.push({
-            tool: chunk.tool, args: chunk.args || "", state: "running", id: chunk.id,
+            tool: chunk.tool, args: chunk.args || "", intent: chunk.intent || undefined, state: "running", id: chunk.id,
             thought: preToolThought || undefined,
           });
           setMessages([...baseMessages, {

@@ -603,6 +603,7 @@ async def _handle_message(event_data: dict) -> None:
                     collected_tool_steps.append({
                         "tool": chunk.tool_name,
                         "args": chunk.args_summary,
+                        "intent": chunk.intent or "",
                         "state": "running",
                         "duration_ms": None,
                         "result_preview": "",
@@ -638,6 +639,9 @@ async def _handle_message(event_data: dict) -> None:
                     }
                     display_name = _TOOL_DISPLAY.get(chunk.tool_name, f"🔧 {chunk.tool_name}")
                     tool_name_line = f"**{display_name}**"
+                    intent = (chunk.intent or "").strip()
+                    if intent:
+                        tool_name_line += f" · _{intent}_"
                     if chunk.args_summary:
                         tool_name_line += f"`({chunk.args_summary})`"
                     # 两个工具之间加空行

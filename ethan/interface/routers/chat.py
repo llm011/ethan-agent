@@ -422,7 +422,7 @@ async def _run_generation(
                 collector.feed(item)
                 if item.state == "start":
                     run.emit({"tool": item.tool_name, "args": item.args_summary, "state": "start",
-                              "id": item.tool_call_id})
+                              "id": item.tool_call_id, "intent": item.intent or ""})
                 else:
                     step = collector.tool_steps[-1]
                     evt = {

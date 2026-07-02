@@ -62,6 +62,7 @@ class StreamCollector:
             self.tool_steps.append({
                 "tool": item.tool_name,
                 "args": item.args_summary,
+                "intent": item.intent or "",
                 "state": "running",
                 "duration_ms": None,
                 "result_preview": "",

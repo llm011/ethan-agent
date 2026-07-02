@@ -17,6 +17,8 @@ export interface SubStep {
 export interface ToolStep {
   tool: string;
   args: string;
+  /** 模型填的「本次调用目的」，显示在工具名旁（如 查 MR 状态） */
+  intent?: string;
   state: "running" | "done" | "error";
   duration_ms?: number;
   result_preview?: string;
@@ -91,6 +93,11 @@ function StepRow({ step, isLast }: { step: ToolStep; isLast: boolean }) {
           <span className="text-xs font-mono font-medium text-foreground/80">
             {step.tool}
           </span>
+          {step.intent && (
+            <span className="text-xs text-foreground/55 truncate max-w-[360px]">
+              · {step.intent}
+            </span>
+          )}
           {step.args && (
             <span className="text-xs text-muted-foreground truncate max-w-[800px]">
               ({step.args})
