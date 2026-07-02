@@ -105,7 +105,7 @@ def _markdown_to_post_elements(text: str) -> list:
 def _build_tool_elements(tool_text: str) -> list:
     """把工具进度文本直接构造成 post element 数组，不经过 markdown 解析。
 
-    - 工具名行：**icon label** + plain (args)
+    - 工具名行：**icon label**（后可跟「 · _intent_」斜体 或「 · 参数摘要」纯文本兜底）
     - 结果行（✓/✗ 开头）：code_block（灰色背景框，区分于正文）
     - thinking 行：plain 文字
     - 空行：空 element
@@ -114,18 +114,17 @@ def _build_tool_elements(tool_text: str) -> list:
     rows = []
     for line in tool_text.split("\n"):
         line = line.rstrip()
-        # 工具名行：**icon label**(args) 或 **icon label**`(args)`
-        m = re.match(r'\*\*(.+?)\*\*[`]?\(([^)]*)\)[`]?', line)
-        if m:
-            rows.append([
-                {"tag": "text", "text": m.group(1), "style": ["bold"]},
-                {"tag": "text", "text": f"  ({m.group(2)})"},
-            ])
-            continue
-        # 工具名行（无参数）：**icon label**
-        m2 = re.match(r'\*\*(.+?)\*\*\s*$', line)
-        if m2 and any(emoji in m2.group(1) for emoji in ("📖","💻","🔍","🌐","📁","✏️","🧠","💾","⏰","📋","✨","👤","📝","🔧")):
-            rows.append([{"tag": "text", "text": m2.group(1), "style": ["bold"]}])
+        # 工具名行：**icon label**，其后可选「 · _intent_」（斜体说明）或「 · args 兜底文本」。
+        # intent 后若还跟着参数摘要，按设计不显示（lark_stream 已二选一，这里只取 · _intent_ 为止）。
+        m = re.match(r'\*\*(.+?)\*\*(?:\s*·\s*_(.+?)_)?(?:\s*·\s*(.+))?$', line)
+        if m and any(emoji in m.group(1) for emoji in ("📖","💻","🔍","🌐","📁","✏️","🧠","💾","⏰","📋","✨","👤","📝","🔧")):
+            row = [{"tag": "text", "text": m.group(1), "style": ["bold"]}]
+            if m.group(2):  # intent（斜体）
+                row.append({"tag": "text", "text": " · "})
+                row.append({"tag": "text", "text": m.group(2), "style": ["italic"]})
+            elif m.group(3):  # 无 intent 时兜底显示参数摘要（纯文本）
+                row.append({"tag": "text", "text": " · " + m.group(3)})
+            rows.append(row)
             continue
         # 结果行（✓/✗ 或 _✓ 等前缀）
         stripped = line.lstrip().lstrip("`_").rstrip("`_")
