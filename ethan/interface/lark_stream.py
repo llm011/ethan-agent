@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections import deque
 
 from ethan.interface.lark_render import _render_tool_msg_content
@@ -28,6 +29,30 @@ from ethan.interface.lark_send import (
 )
 
 logger = logging.getLogger(__name__)
+
+# 工具进度行前缀图标（与下方 _TOOL_DISPLAY 的 display_name 对齐）。
+_TOOL_LINE_RE = re.compile(r'\*\*(?:📖|💻|🔍|🌐|📁|✏️|🧠|💾|⏰|📋|✨|👤|📝|🔧)')
+
+
+def _looks_like_tool_trace(text: str) -> bool:
+    """检测文本是否像「工具调用过程」而非正常答案。
+
+    正常的最终答案不该是多行 `**💻 terminal**(args)` `_✓ 结果_` 这种工具进度格式——那是
+    lark_stream 内部构造的工具进度文本。模型若在正文里照抄这种格式，几乎都是读了**被污染的
+    历史消息**后学到的错误模式（见存库处的 fallback 说明）：上一轮没出总结时把工具过程存进了
+    content，模型读到便以为「答案长这样」而在新轮正文里模仿，又被渲染成卡片 → 又污染历史 →
+    反馈循环。命中即视为无效总结，不渲染成卡片、不存进 content，从源头断循环。
+    """
+    if not text:
+        return False
+    lines = [l for l in text.split("\n") if l.strip()]
+    if len(lines) < 2:
+        return False
+    # 有 ≥2 行带工具进度图标前缀 → 判定模仿工具过程。
+    # 正常答案不会出现 `**💻 terminal**` 这种图标格式（这是 lark_stream 工具进度气泡的内部格式），
+    # 模型只在读到被污染的历史后才会照抄，故命中即可视为无效总结。
+    tool_lines = sum(1 for l in lines if _TOOL_LINE_RE.search(l))
+    return tool_lines >= 2
 
 _lark_chat_map: dict[str, str] = {}  # chat_id -> session_id, in-memory cache
 
@@ -693,8 +718,14 @@ async def _handle_message(event_data: dict) -> None:
         stats_line = "  ".join(stats_parts)
 
         if answer_msg_id:
-            final_answer = (answer_text or "（没有找到相关内容）").rstrip() + f"\n\n---\n_{stats_line}_"
-            await _edit_message(answer_msg_id, final_answer, use_card=True)
+            if _looks_like_tool_trace(answer_text):
+                # 模型把工具进度格式当正文输出了（多半读了被污染的历史）—— 不渲染成答案
+                # 卡片（否则就是「用卡片输出工具调用过程」），改为简短提示，工具过程已在上方
+                # post 气泡实时展示。同时存库时清空 content，断污染历史的反馈循环。
+                await _edit_message(answer_msg_id, "⚠️ 本轮未生成有效总结（输出像工具过程而非结论），工具过程已记录在上方。可重试或补充说明。", use_card=True)
+            else:
+                final_answer = (answer_text or "（没有找到相关内容）").rstrip() + f"\n\n---\n_{stats_line}_"
+                await _edit_message(answer_msg_id, final_answer, use_card=True)
         elif tool_msg_id:
             # 只有工具调用没有正文（极少数情况），在工具消息末尾加 stats（保持 post 富文本样式）
             final_tool = tool_text.rstrip() + f"\n\n{stats_line}"
@@ -721,8 +752,14 @@ async def _handle_message(event_data: dict) -> None:
         if reaction_id and message_id:
             await _remove_reaction(message_id, reaction_id)
 
-        # 存库：只存最终答案正文（reasoning 已在工具阶段丢弃），减少 context token
-        stored_content = (answer_text.strip() or tool_text.strip()) + f"\n\n{stats_line}"
+        # 存库：只存最终答案正文（reasoning 已在工具阶段丢弃），减少 context token。
+        # ⚠️ 绝不把 tool_text 当 content 存（旧的 `answer_text or tool_text` fallback）——
+        # 工具过程一旦进了 content，历史就被污染，下一轮模型读到「答案=工具过程格式」
+        # 便在正文里模仿照抄，又被渲染成卡片、又污染历史，形成「用卡片输出工具过程」
+        # 的反馈循环。没总结就空 content；模型在正文模仿工具过程格式时也清空。
+        # 工具过程始终在 tool_steps 字段里，不在 content。
+        clean_answer = "" if _looks_like_tool_trace(answer_text) else answer_text.strip()
+        stored_content = (clean_answer + f"\n\n{stats_line}") if clean_answer else (stats_line or "")
 
         # 保存完整 assistant 消息到 session（带 usage + tool_steps）
         usage_dict = {
@@ -740,7 +777,8 @@ async def _handle_message(event_data: dict) -> None:
         try:
             if reaction_id and message_id:
                 await _remove_reaction(message_id, reaction_id)
-            partial = (answer_text.strip() or tool_text.strip())
+            # 取已生成的部分正文（不 fallback 到 tool_text——见存库处注释，防污染历史）
+            partial = "" if _looks_like_tool_trace(answer_text) else answer_text.strip()
             if partial:
                 stopped_content = partial + "\n\n（已停止）"
                 if answer_msg_id:
