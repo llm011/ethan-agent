@@ -19,6 +19,7 @@ from ethan.interface.lark_render import _render_tool_msg_content
 from ethan.interface.lark_send import (
     _delete_message,
     _edit_message,
+    _fetch_recent_chat_messages,
     _lark_client,
     _remove_reaction,
     _resolve_quoted_text,
@@ -426,7 +427,16 @@ async def _handle_message(event_data: dict) -> None:
             )
         agent_user_msg = Message(role="user", content=agent_user_text)
 
-        # 重建 WorkingMemory：热区最近 5 轮 + cold facts（per-user）
+        # 拉最近 10 条群消息作为背景上下文，让 agent 感知 @mention 之间群里发生了什么。
+        # 失败时静默忽略，不阻断主流程。
+        recent_msgs = await _fetch_recent_chat_messages(chat_id, limit=10)
+        if recent_msgs:
+            lines = ["[群聊近期消息（供背景参考，最近10条）]"]
+            for m in recent_msgs:
+                prefix = f"[{m['time']}] {m['sender']}: " if m['sender'] else f"[{m['time']}] "
+                lines.append(prefix + m["text"])
+            agent_user_text = "\n".join(lines) + "\n\n---\n" + agent_user_text
+            agent_user_msg = Message(role="user", content=agent_user_text)
         # 飞书场景每条 assistant 消息体积较大（含工具/思考），5 轮够用且节省 token
         from ethan.memory.working import MemoryConfig, WorkingMemory
         from ethan.memory.facts import FactStore
