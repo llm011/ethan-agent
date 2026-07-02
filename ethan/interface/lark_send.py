@@ -407,16 +407,16 @@ def _extract_msg_text(msg: dict) -> str:
     return str(raw).strip()
 
 
-async def _resolve_quoted_text(message_id: str) -> str:
-    """用户引用了某条消息时，返回被引用消息的文本。
+async def _resolve_quoted_text(message_id: str) -> tuple[str, str]:
+    """用户引用了某条消息时，返回 (被引用消息的可读文本, 被引用消息 id)。
 
     lark-cli 压平的事件里没有引用关系，需先 mget 当前消息详情，从中找被引用消息 id，
     再 mget 那条取文本。本版 lark-cli 用 reply_to 字段表示引用关系；
-    parent_id / upper_message_id / root_id 作旧结构兜底。任何环节失败返回空串，不阻断主流程。
+    parent_id / upper_message_id / root_id 作旧结构兜底。任何环节失败返回 ("", "")，不阻断主流程。
     """
     detail = await _fetch_message_detail(message_id)
     if not detail:
-        return ""
+        return "", ""
     parent_id = (
         detail.get("reply_to")
         or detail.get("parent_id")
@@ -425,11 +425,11 @@ async def _resolve_quoted_text(message_id: str) -> str:
         or ""
     )
     if not parent_id or parent_id == message_id:
-        return ""
+        return "", ""
     parent = await _fetch_message_detail(parent_id)
     if not parent:
-        return ""
-    return _extract_msg_text(parent)[:1000]
+        return "", ""
+    return _extract_msg_text(parent)[:1000], parent_id
 
 
 async def _fetch_recent_chat_messages(chat_id: str, limit: int = 10) -> list[dict]:

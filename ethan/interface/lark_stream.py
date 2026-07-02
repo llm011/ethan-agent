@@ -423,39 +423,45 @@ async def _handle_message(event_data: dict) -> None:
         # 从详情里找被引用消息 id 再取其文本，拼到本轮发给 agent 的消息里
         # （只进 agent 上下文，不污染存库的原始 user_msg 和标题）。
         agent_user_text = text
-        quoted = await _resolve_quoted_text(message_id)
+        quoted, quoted_msg_id = await _resolve_quoted_text(message_id)
         if quoted:
             agent_user_text = f"[用户引用了一条消息]\n> {quoted}\n\n{text}"
 
         # 非文本消息：解析资源 key，注入明确的下载指令
+        # 同时扫引用的原消息（quoted_msg_id），让 agent 能下载引用消息里的图片/文件
         msg_type = event_data.get("message_type", "text")
+        import re as _re
+
+        def _build_resource_hints(content: str, src_msg_id: str) -> list[str]:
+            """从 lark-cli 预渲染的 content 里提取 img_/file_ key，生成下载命令。"""
+            hints = []
+            for k in _re.findall(r'\bimg_[A-Za-z0-9_\-]+', content):
+                hints.append(
+                    f"  # 下载图片 {k}（来自消息 {src_msg_id}）：\n"
+                    f"  lark-cli im +messages-resources-download "
+                    f"--message-id {src_msg_id} --file-key {k} --type image"
+                )
+            for k in _re.findall(r'\bfile_[A-Za-z0-9_\-]+', content):
+                hints.append(
+                    f"  # 下载文件 {k}（来自消息 {src_msg_id}）：\n"
+                    f"  lark-cli im +messages-resources-download "
+                    f"--message-id {src_msg_id} --file-key {k} --type file"
+                )
+            return hints
+
+        resource_hints = []
         if msg_type != "text" and message_id:
-            import re as _re
-            # 从 lark-cli 预渲染的 content 里提取 image key（img_xxx）和 file key（file_xxx）
-            img_keys = _re.findall(r'\bimg_[A-Za-z0-9_\-]+', text)
-            file_keys = _re.findall(r'\bfile_[A-Za-z0-9_\-]+', text)
-            resource_hints = []
-            for k in img_keys:
-                resource_hints.append(
-                    f"  # 下载图片 {k}：\n"
-                    f"  lark-cli im +messages-resources-download "
-                    f"--message-id {message_id} --file-key {k} --type image"
-                )
-            for k in file_keys:
-                resource_hints.append(
-                    f"  # 下载文件 {k}：\n"
-                    f"  lark-cli im +messages-resources-download "
-                    f"--message-id {message_id} --file-key {k} --type file"
-                )
+            resource_hints += _build_resource_hints(text, message_id)
+        if quoted_msg_id:
+            resource_hints += _build_resource_hints(quoted, quoted_msg_id)
+
+        if resource_hints:
             hint = (
                 f"[飞书消息，类型={msg_type}，message_id={message_id}]\n"
                 f"{agent_user_text}"
+                "\n\n[资源已识别，下载命令如下——直接执行，无需再读 lark-im 技能]\n"
+                + "\n".join(resource_hints)
             )
-            if resource_hints:
-                hint += (
-                    "\n\n[资源已识别，下载命令如下——直接执行，无需再读 lark-im 技能]\n"
-                    + "\n".join(resource_hints)
-                )
             agent_user_text = hint
         agent_user_msg = Message(role="user", content=agent_user_text)
 
