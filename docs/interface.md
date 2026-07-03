@@ -197,7 +197,7 @@ ethan code "query"              → ACP 委派 Coding Agent（详见 acp.md）
 
 ### 概述
 
-允许用户通过飞书机器人与 Ethan 对话。采用 **WebSocket 长连接**方式：`ethan serve` 启动时自动调用 `lark-cli event consume im.message.receive_v1`，无需公网 IP，无需配置 Webhook URL。
+允许用户通过飞书机器人与 Ethan 对话。采用 **WebSocket 长连接**方式：`ethan serve` 启动时为每个 EventKey 各起一个 `lark-cli event consume <EventKey>` 子进程，无需公网 IP，无需配置 Webhook URL。
 
 ### 模块划分
 
@@ -228,7 +228,7 @@ lark:
 ### 事件处理流程
 
 ```
-lark-cli event consume im.message.receive_v1（WebSocket 长连接）
+lark-cli event consume <EventKey>（每个 EventKey 一个子进程，WebSocket 长连接）
    │
    ├─ 按 message_id 幂等去重 → 命中重复事件直接丢弃
    │
@@ -260,6 +260,16 @@ lark-cli event consume im.message.receive_v1（WebSocket 长连接）
 - **最终回答**：interactive 卡片，流式 `message.patch`；首段缓冲到阈值再发，避免孤立短卡片，出现新工具调用时撤回已发的 narration 卡片。
 - **自定义卡片（增量）**：`ui_card` 工具（`channel="lark"`）走 `lark_card_templates` 生成飞书卡片 JSON，经 `ToolEvent.ui` 透传，工具完成时作为独立 interactive 卡片补发。这是「可有可无、有则更好看」的增量能力——基础的工具进度/答案输出不依赖它。Web 端同一套结构化 `card` 数据则渲染成 A2UI（见 [tools.md](./tools.md#ui_carda2ui-结构化卡片)）。
 
+### 卡片 markdown 表格渲染
+
+飞书卡片 markdown element 内嵌的 GFM pipe-table 触发上限：超过 3 张表格会报 `230099 / 11310`。`lark_render._render_card_content` 按表格数量分两路：
+
+- **≤3 张表格**：手拼 `{"tag":"markdown","content":...}` 单元素，前 3 张表格由飞书原生 markdown 解析渲染（样式与正文一致）。0 表格也走这条路——不付 `lark_oapi.channel.card` 的 lazy import 成本（~10s 首次）。
+- **>3 张表格**：走 `_render_card_content_rich`，lazy import `lark_oapi.channel.card.new_card`（CardBuilder fluent API）。前 3 张表格仍留在 markdown 元素里，超出部分用 `c.table(headers, rows, page_size=10)` 原生 table 元素（`page_size` 被 CardBuilder clamp 到飞书 Card 2.0 允许的 1-10 范围）。表格之间的文本继续走 `c.markdown()`，正文样式优化（标题降级 / 硬换行）与手拼路径一致。
+- **兜底**：CardBuilder import 失败或 build 异常时回退到手拼 markdown + `_sanitize_text_for_card`（超出表格降级成 ` ``` ` 代码块），保证渲染不崩。
+
+> CardBuilder 路径首次调用要付 ~10s 的 `lark_oapi.channel.card` 子树加载（之后 Python 模块缓存命中，~0ms）。冷启动后第一条 >3 表格的消息会感受到这个延迟——目前没在 lifespan 里预热，因为 (a) `_lark_ready()` 探测刻意不触发 lark_oapi 完整加载以保 serve 启动快；(b) >3 张表格的回答不常见。
+
 ### 事件去重（幂等）
 
 飞书事件投递是 **at-least-once**：当 bot 未在超时窗口内 ack（长任务耗时、断线重连重放积压事件）时，飞书会重投同一条事件。若不去重，同一条消息会被处理多次，表现为重复回复、以及两份互不相同的 token 统计（每次处理都是独立的 Agent 运行）。
@@ -287,6 +297,50 @@ lark-cli event consume im.message.receive_v1（WebSocket 长连接）
 - `im:message.group_msg:get_as_user`（读取群聊全部消息，用于背景上下文）
 
 > **权限说明：** Bot 身份只能读取 @ 它的消息，无法看到群内其他消息。为了给 Agent 提供群聊背景上下文（让它在回答时知道群里刚才发生了什么），需要用户身份的 `im:message.group_msg:get_as_user` 权限。配置 lark-cli 时按引导授权即可。
+
+### 鉴权失败自动引导
+
+lark-cli 调用用户身份接口（如 `_fetch_recent_chat_messages` 走 `--as user`）时，若 user token 缺失或过期，会触发授权引导卡片，避免群里「静默无回复」的尴尬体验。
+
+**触发条件**（`_is_lark_auth_error` 判定，任一命中即触发）：
+- stderr 含 `need_user_authorization` / `No user logged in`（用户未登录的常见 stderr）
+- stdout JSON 的 `error.type == "auth_error"`
+- stdout JSON 的 `error.code` 为 `99991663`（user auth missing）/ `99991661`（token invalid）
+- stdout JSON 的 `error.message` 含 `User token has expired` / `Token does not exist`
+
+**不触发场景**：网络错误、参数错误（`validation_error`）、`not found`、JSON parse 失败 —— 这些不是鉴权问题，发引导卡片反而误导。
+
+**节流**：模块级 `_auth_card_sent` dict 按 `chat_id` 记录上次发送时间戳，同一 chat 5 分钟内只发一次。避免群里多条用户身份调用连环失败时刷屏。
+
+**卡片内容**：红色 header「需要飞书用户授权」+ markdown body 指引用户在终端执行 `lark-cli auth login --domain im` 完成浏览器授权。复用现有 `_send_interactive_card` 通道发送，结构同 `lark_card_templates` 的 schema 2.0。
+
+**覆盖调用点**（`lark_send.py`）：
+- `_fetch_recent_chat_messages`：用户身份调用，最易触发 → 发卡片
+- `_send_reply`：bot 身份，理论上不会 user 鉴权失败，但保留检测 → 发卡片
+- `_fetch_message_detail`：bot 身份 mget，保留检测 → 仅日志不 发卡片（避免 bot 鉴权失败时刷屏）
+
+> 用户身份的鉴权失败是飞书渠道最常见的「群里突然不回我消息」原因——bot token 一般配在 `config.yaml` 里不会过期，user token 是 Device Flow 授权的，过期/重装机器都会丢。引导卡片把「为什么不回」可视化，用户照着跑一次 `lark-cli auth login` 即可恢复。
+
+### 多事件订阅与卡片回调
+
+`lark_events._EVENT_KEYS` 列出要订阅的 EventKey，`start_lark_listener` 为每个 key 各起一个 `_event_loop` task（独立子进程、独立断线重连、互不影响）。每个子进程把 NDJSON 行解析成 event dict 后交给 `lark_stream._dispatch` 路由：
+
+| EventKey | handler | 用途 |
+|----------|---------|------|
+| `im.message.receive_v1` | `_handle_message` | 收消息 → 完整 Agent 流式回复（fire-and-forget） |
+| `im.message.message_read_v1` | `_handle_message_read` | 用户已读 P2P 消息（仅日志，留「已读回执」扩展点） |
+| `im.message.reaction.created_v1` | `_handle_reaction` | 消息被加 reaction（仅日志，留「点赞触发动作」扩展点） |
+| `card.action.trigger` | `_handle_card_action` | 交互卡片按钮/表单回调（见下） |
+
+新事件类型只需在 `_EVENT_KEYS` 加一行 + 在 `_dispatch` 加一个 elif 分支，handler 实现保持轻量（先记日志留扩展点），重逻辑仍走 `_handle_message` 那条线。
+
+#### card.action.trigger（卡片按钮回调）
+
+需 lark-cli ≥ 1.0.58（PR #1528，本地已升到 1.0.65）且在飞书开发者后台开启该 Console Event。lark-cli 输出扁平结构，`_handle_card_action` 从顶层取 `action_tag`（button/select/input/checker）、`action_value`（JSON 字符串）、`action_name`、`form_value`、`card_content`（原卡片 userDSL）、`token`（30 分钟有效，最多 2 次卡片更新）、`chat_id`/`message_id`/`open_id`。
+
+当前实现：记日志 + 兜底回执（`action_value.cmd == "test"` 时回一张绿色确认卡，验证链路用）。后续可据 `action_value` 路由到具体工作流，用 `lark-cli api POST /open-apis/interactive/v1/card/update` 配合 `token` 更新原卡片（按钮审批/分步表单等场景）。
+
+调试：飞书里发 `/test-card` 命令，bot 回一张带「🔘 点我测试」按钮的蓝色卡片；点按钮后若后台已开启 Console Event，会收到绿色确认卡（链路打通）。若点按钮无反应，先去飞书开发者后台 → 事件订阅 → 开启 `card.action.trigger`。
 
 ### 当前限制
 

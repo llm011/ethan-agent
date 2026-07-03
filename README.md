@@ -64,6 +64,8 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 
 **Multi-channel**
 - CLI REPL, Web UI (Next.js), **Android App** (Kotlin/Compose), Lark/Feishu (WebSocket, no public IP required)
+- Lark auto-auth guidance: when a user-token-dependent call (e.g. reading group chat context via `--as user`) fails with an auth-class error (99991663 / 99991661 / `need_user_authorization`), the bot sends a red guidance card to that chat telling the user to run `lark-cli auth login --domain im`. Throttled to once per 5 min per chat; non-auth errors (network / param / not-found) do not trigger it.
+- Lark multi-event subscription + card action callbacks: each EventKey (message received / read receipts / reactions / `card.action.trigger`) runs in its own `lark-cli event consume` subprocess with independent reconnect; interactive card button clicks route back through `_handle_card_action` for button-driven workflows.
 
 **Browser control (real Chrome)**
 - Drive the real Chrome on the machine where ethan runs, from any channel (Web / Lark / CLI) — install the bundled `browser-extension`, point it at your ethan WebSocket endpoint, and the agent gets `browser_session` / `browser_tab` / `browser_page` tools
@@ -325,7 +327,8 @@ ethan/
 │       ├── memory_write.py    # Proactive fact write
 │       ├── procedure_write.py # Proactive procedure write
 │       ├── profile_update.py  # Update user profile
-│       └── skill_create.py    # Create skill mid-conversation
+│       ├── skill_create.py    # Create skill mid-conversation
+│       └── lark_tools.py      # Lark CLI wrappers (calendar / chat messages / message send)
 ├── scheduler/
 │   └── cron.py                # APScheduler with SQLite persistence
 └── interface/
@@ -360,7 +363,7 @@ Agent proactively writes to all layers mid-conversation via `memory_write`, `pro
 
 Skills are Markdown files loaded from `~/.ethan/skills/`. On first run, default skills (channels, deepwiki, lark-im, lark-shared, skills-manager, use-browser, agent-browser, dev-browser) are automatically copied there from the package.
 
-Both directory format (`<name>/SKILL.md` + `references/`) and legacy single-file `.md` format are supported.
+Both directory format (`<name>/SKILL.md` + `references/`) and legacy single-file `.md` format are supported. When a directory-format skill is matched, its `references/*.md` filenames plus a one-line summary are listed in the injected context so the model knows which detail docs exist — use `skill_read(name=..., file="references/<name>.md")` to pull the full content on demand (pull-based, not bulk-injected).
 
 ```markdown
 ---

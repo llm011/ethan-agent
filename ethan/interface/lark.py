@@ -102,24 +102,15 @@ async def _send_lark_reply(client: lark.Client, chat_id: str, text: str) -> None
 
 
 async def _add_reaction(client: lark.Client, message_id: str, emoji: str = "THINKING_FACE") -> None:
-    """Add a reaction emoji to a message to signal receipt."""
-    import asyncio
-    try:
-        from lark_oapi.api.im.v1 import CreateMessageReactionRequest, CreateMessageReactionRequestBody
-        from lark_oapi.api.im.v1.model import EmojiType
-        req = (
-            CreateMessageReactionRequest.builder()
-            .message_id(message_id)
-            .request_body(
-                CreateMessageReactionRequestBody.builder()
-                .reaction_type(EmojiType.builder().emoji_type(emoji).build())
-                .build()
-            )
-            .build()
-        )
-        await asyncio.to_thread(client.im.v1.message_reaction.create, req)
-    except Exception:
-        logger.debug("Failed to add reaction to message %s", message_id, exc_info=True)
+    """Add a reaction emoji to a message to signal receipt.
+
+    复用 lark_send._send_reaction 的 SDK 实现（统一 reaction 调用入口）。
+    lark_send._send_reaction 内部用 _lark_client() 拿 client，这里传入的 client 仅用于
+    webhook 路径下的早期添加（client 已构建好）；如果 lark_send 自己能拿到 client 就直接用，
+    否则退回到这里传入的 client。为避免双 client 不一致，这里直接调 _send_reaction。
+    """
+    from ethan.interface.lark_send import _send_reaction
+    await _send_reaction(message_id)
 
 
 @lark_router.post("/lark/webhook")

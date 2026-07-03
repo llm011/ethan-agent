@@ -106,8 +106,10 @@ def _build_tool_elements(tool_text: str) -> list:
     """把工具进度文本直接构造成 post element 数组，不经过 markdown 解析。
 
     - 工具名行：**icon label**（后可跟「 · _intent_」斜体 或「 · 参数摘要」纯文本兜底）
-    - 结果行（✓/✗ 开头）：code_block（灰色背景框，区分于正文）
-    - thinking 行：plain 文字
+    - 结果行（✓ 开头）：成功 → italic text（轻量、不抢眼，多数情况一行扫过）
+    - 结果行（✗ 开头）：失败 → code_block（灰底醒目，保留换行让错误堆栈可读）
+    - thinking 行：italic text（弱化视觉权重，不与 bold 工具名抢焦点）
+    - `---` 分隔行：hr（工具间分隔，比空行更明确）
     - 空行：空 element
     """
     import re
@@ -128,14 +130,28 @@ def _build_tool_elements(tool_text: str) -> list:
                 row.append({"tag": "text", "text": " · " + m.group(4)})
             rows.append(row)
             continue
-        # 结果行（✓/✗ 或 _✓ 等前缀）
-        stripped = line.lstrip().lstrip("`_").rstrip("`_")
-        if stripped.startswith(("✓", "✗")):
-            rows.append([{"tag": "code_block", "language": "plain", "text": stripped}])
+        # 分隔线（工具间）—— lark_oapi post 支持 hr tag（channel/outbound/markdown/to_post.py 与
+        # channel/normalize/converters/post.py 均处理 tag=="hr"）。比空行更明确地切分工具组。
+        if re.match(r'^[-=—]{3,}$', line):
+            rows.append([{"tag": "hr"}])
             continue
-        # thinking 行
+        # 结果行：剥掉可能的 _ 包装，按 ✓/✗ 区分成功/失败。
+        # 成功是多数、轻量不抢眼 → italic text；失败是少数、醒目有价值 → code_block 灰底，
+        # 保留换行让错误堆栈可读（多行 code_block 由 lark_stream 拼成单行后整体塞进来）。
+        stripped = line.lstrip().lstrip("`_").rstrip("`_")
+        if stripped.startswith("✓"):
+            rows.append([{"tag": "text", "text": stripped, "style": ["italic"]}])
+            continue
+        if stripped.startswith("✗"):
+            # 失败结果：lark_stream 把换行转成字面量 \n 占位（便于塞进单行 tool_text），
+            # 这里还原成真换行，让多行错误堆栈作为一个 code_block 整体渲染（灰底醒目）。
+            # lark_stream 在末尾产生的 \n 已被它的切片逻辑剥掉，无需再处理。
+            text = stripped.replace("\\n", "\n")
+            rows.append([{"tag": "code_block", "language": "plain", "text": text}])
+            continue
+        # thinking 行（italic 弱化，不抢 bold 工具名焦点）
         if "thinking..." in line:
-            rows.append([{"tag": "text", "text": "🤔 thinking..."}])
+            rows.append([{"tag": "text", "text": "🤔 thinking...", "style": ["italic"]}])
             continue
         # 空行或其他
         rows.append([{"tag": "text", "text": line}])
@@ -190,12 +206,20 @@ def _find_markdown_tables_outside_code_blocks(text: str) -> list:
 # 飞书卡片表格上限——4 张以上触发 230099/11310（实测）。前 N 张正常卡片渲染，超出降级。
 FEISHU_CARD_TABLE_LIMIT = 3
 
+# CardBuilder table 元素的默认分页大小。超出上限的 markdown 表格改用原生 table 元素后，
+# page_size=10 是飞书 Card 2.0 table 元素允许的最大值（CardBuilder 会 clamp 到 1-10）。
+# 更长表格由原生分页 UI 自动翻页。
+_RICH_TABLE_PAGE_SIZE = 10
+
 
 def _sanitize_text_for_card(text: str, table_limit: int = FEISHU_CARD_TABLE_LIMIT) -> str:
     """把超出 table_limit 的 markdown 表格降级为代码块，避免飞书卡片 230099/11310 错误。
 
     前 table_limit 张表格保持原样（可正常卡片渲染）；超出部分用 ``` 包裹，阻止飞书
     将其解析为卡片表格元素。代码块里的表格不计入。从后往前替换以保持前面的 index 不偏移。
+
+    保留作为 fallback：CardBuilder rich 路径（`_render_card_content_rich`）失败时回退到此，
+    保证不崩。rich 路径成功时不再走这里——超出表格改用原生 table 元素，不再降级成代码块。
     """
     matches = _find_markdown_tables_outside_code_blocks(text)
     if len(matches) <= table_limit:
@@ -252,8 +276,18 @@ def _render_card_content(text: str) -> str:
     - 行尾两个空格 + \n 是硬换行（无额外间距）
     - \n\n 是段落分隔（有额外间距）
     预处理：先表格兜底 + 样式优化，再把孤立的单 \n 转为 "  \n"（硬换行），保留 \n\n 作段落。
+
+    表格超 `FEISHU_CARD_TABLE_LIMIT` 张时走 `_render_card_content_rich`：超出部分改用
+    CardBuilder 原生 table 元素（不再降级成代码块）。rich 路径失败时回退到此处的手拼 markdown
+    + `_sanitize_text_for_card` 降级，保证不崩。
     """
     import json as _json, re as _re
+    # 代码块外 markdown 表格超过上限 → 走 CardBuilder 原生 table 元素路径
+    if len(_find_markdown_tables_outside_code_blocks(text)) > FEISHU_CARD_TABLE_LIMIT:
+        rich = _render_card_content_rich(text)
+        if rich is not None:
+            return rich
+        # rich 路径失败（import 失败 / build 失败）→ 回退到手拼 markdown + 降级
     text = _sanitize_text_for_card(text)
     text = _optimize_markdown_style(text)
     processed = _re.sub(r'(?<!\n)\n(?!\n)', '  \n', text)
@@ -261,6 +295,102 @@ def _render_card_content(text: str) -> str:
         "schema": "2.0",
         "body": {"elements": [{"tag": "markdown", "content": processed}]},
     }, ensure_ascii=False)
+
+
+def _parse_markdown_table(raw: str) -> tuple[list[str], list[list[str]]]:
+    """把单个 markdown 表格解析成 (headers, rows)。
+
+    - split 行，strip 空白
+    - 每行必须以 `|` 开头和结尾，否则跳过（不属于表格行）
+    - strip 首尾 `|` 后按 `|` 切分，每格 strip
+    - 跳过分隔符行（`|---|:--:|---:|` 等）
+    - 第一行非分隔符行 = headers，其余 = data rows
+    无有效行时返回 ([], [])。
+    """
+    import re
+    rows: list[list[str]] = []
+    for ln in raw.strip().split("\n"):
+        ln = ln.strip()
+        if not ln or not ln.startswith("|") or not ln.endswith("|"):
+            continue
+        cells = [c.strip() for c in ln.strip("|").split("|")]
+        # 分隔符行：每格都是 :-- / :-: / --: / --- 等纯装饰
+        if cells and all(re.match(r"^:?-+:?$", c) for c in cells):
+            continue
+        rows.append(cells)
+    if not rows:
+        return [], []
+    return rows[0], rows[1:]
+
+
+def _split_around_tables(
+    text: str, overflow: list[dict],
+) -> list[tuple[str, str, str]]:
+    """把 text 按 overflow 表格的位置切成有序片段。
+
+    返回 [(kind, chunk, raw)] 列表，kind ∈ {"md","table"}：
+    - "md"：表格之间的文本（chunk=文本，raw=""）
+    - "table"：超出上限的表格（chunk=""，raw=表格原文）
+    顺序按 text 中的位置。overflow 项含 {start, length, raw}，假设已按 start 排序且不重叠。
+    """
+    segments: list[tuple[str, str, str]] = []
+    cursor = 0
+    for m in overflow:
+        s, e = m["start"], m["start"] + m["length"]
+        if s > cursor:
+            segments.append(("md", text[cursor:s], ""))
+        segments.append(("table", "", m["raw"]))
+        cursor = e
+    if cursor < len(text):
+        segments.append(("md", text[cursor:], ""))
+    return segments
+
+
+def _render_card_content_rich(text: str) -> str | None:
+    """超 3 张表格时走 CardBuilder 原生 table 元素路径。失败返回 None（让调用方 fallback）。
+
+    策略：代码块外的 markdown 表格，前 `FEISHU_CARD_TABLE_LIMIT` 张保留在 markdown 元素里
+    （飞书原生渲染 markdown 表格，样式与正文一致），超出部分切出来用 `table()` 原生元素
+    （不再降级成代码块）。表格之间的文本继续走 `markdown()` 元素。
+
+    lazy import：`from lark_oapi.channel.card import new_card` 首次 ~10s（拉起 channel 子树），
+    之后 Python 缓存。任何 import / build 异常都返回 None，由调用方回退到手拼 markdown +
+    `_sanitize_text_for_card` 降级，保证渲染不崩。
+    """
+    import json as _json, re as _re
+    try:
+        from lark_oapi.channel.card import new_card
+    except Exception:
+        return None
+
+    matches = _find_markdown_tables_outside_code_blocks(text)
+    overflow = matches[FEISHU_CARD_TABLE_LIMIT:]
+    if not overflow:
+        return None  # 不该走 rich 路径，让调用方走手拼
+
+    segments = _split_around_tables(text, overflow)
+    try:
+        c = new_card()
+        for kind, chunk, raw in segments:
+            if kind == "table":
+                headers, rows = _parse_markdown_table(raw)
+                if not headers:
+                    # 解析失败：兜底降级成代码块，避免丢内容
+                    c.code_block(raw, language="text")
+                    continue
+                c.table(headers, rows, page_size=_RICH_TABLE_PAGE_SIZE)
+            else:
+                # chunk 是表格之间的 markdown 文本，走和手拼路径一样的预处理
+                # （样式优化 + 单 \n → 硬换行），保证前 3 张表格 + 正文渲染一致
+                md = _optimize_markdown_style(chunk)
+                md = _re.sub(r'(?<!\n)\n(?!\n)', '  \n', md)
+                if md.strip():
+                    c.markdown(md)
+                # 全是空白的片段跳过——CardBuilder 不需要空 markdown 元素
+        result = c.to_dict()
+        return _json.dumps(result, ensure_ascii=False)
+    except Exception:
+        return None
 
 
 def _render_post_content(text: str) -> str:
