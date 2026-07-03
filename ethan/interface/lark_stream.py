@@ -16,16 +16,19 @@ import re
 from collections import deque
 
 from ethan.interface.lark_render import _render_tool_msg_content
+from ethan.interface.lark_tool_trace import (
+    sanitize_args_summary,
+    sanitize_result_preview,
+)
 from ethan.interface.lark_send import (
+    TypingState,
     _delete_message,
     _edit_message,
     _fetch_recent_chat_messages,
     _lark_client,
-    _remove_reaction,
     _resolve_quoted_text,
     _send_interactive_card,
     _send_message,
-    _send_reaction,
     _send_reply,
 )
 
@@ -57,6 +60,20 @@ def _looks_like_tool_trace(text: str) -> bool:
 
 _lark_chat_map: dict[str, str] = {}  # chat_id -> session_id, in-memory cache
 
+# chat_id -> 串行锁。同一飞书 chat 连发多条消息时，Agent 处理必须排队（否则并发改同一
+# session、流式卡片互相覆盖、/stop 登记混乱）。命令路径（/new /stop 等）不经锁，保持即时响应。
+_lark_chat_locks: dict[str, asyncio.Lock] = {}
+
+
+def _get_chat_lock(chat_id: str) -> asyncio.Lock:
+    """取（或创建）该 chat 的串行锁。锁对象复用，跨消息持久。"""
+    lock = _lark_chat_locks.get(chat_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _lark_chat_locks[chat_id] = lock
+    return lock
+
+
 # chat_id -> 正在处理该 chat 消息的 Agent task 集合。供 /stop 取消进行中的生成。
 # 事件分发是 fire-and-forget（lark_events 里 asyncio.create_task(_handle_message)），同一 chat
 # 连发多条会并发跑，故用 set 而非单值——否则后一条会覆盖前一条的登记，/stop 停不到前一个。
@@ -70,6 +87,27 @@ def _untrack_task(chat_id: str, task) -> None:
         s.discard(task)
         if not s:
             _lark_running_tasks.pop(chat_id, None)
+
+
+async def _stop_lark_task(cid: str) -> bool:
+    """取消该 chat 所有进行中的 Agent 生成任务。返回是否真的停了至少一个。
+
+    命令路径（/stop）和自然语言中止快速路径（"停"/"不用了"/...）共用本函数。
+    """
+    tasks = _lark_running_tasks.get(cid)
+    if not tasks:
+        return False
+    stopped = False
+    for t in list(tasks):
+        if not t.done():
+            t.cancel()
+            stopped = True
+    return stopped
+
+
+# 自然语言中止关键词。用户在飞书里直接发这些词（非 /stop 命令）时，若当前有正在跑的
+# Agent 任务则中止之，否则不拦截、继续走正常 Agent 流程（避免误把空 chat 的"停"当命令）。
+_ABORT_KEYWORDS = {"停", "停下", "不用了", "取消", "stop", "中止", "停止"}
 
 # 飞书事件投递是 at-least-once：bot 未在超时窗口内 ack（长任务、断线重连重放）会重投同一条事件。
 # 用 message_id 幂等去重，否则同一消息被处理多次（表现为重复回复 / 两份不同的 token 统计）。
@@ -179,6 +217,14 @@ async def _handle_message(event_data: dict) -> None:
         logger.info("[Lark] duplicate event dropped: message_id=%s", message_id)
         return
 
+    # 过滤过期事件：进程重启后 _seen_message_ids 清空，lark-cli 重连会重放旧消息；
+    # 超过 60 秒的消息直接丢弃，避免 restart 后处理历史命令（如 /help）刷屏。
+    import time as _t
+    _create_ms = int(event_data.get("create_time", "0") or "0")
+    if _create_ms and (_t.time() * 1000 - _create_ms) > 60_000:
+        logger.info("[Lark] stale event dropped: message_id=%s age=%ds", message_id, int((_t.time() * 1000 - _create_ms) / 1000))
+        return
+
     # 发消息者 open_id（飞书按 open_id 认主人）。lark-cli 展平后字段名可能是
     # sender_id / open_id / sender_open_id，挨个兜底。
     sender_open_id = (
@@ -200,7 +246,7 @@ async def _handle_message(event_data: dict) -> None:
 
     # ── /btw：顺带一问——不带历史、不带 cold facts 的单轮轻量查询 ──
     # 解析放在 /command 之前，因为 /btw 需要走完整 agent 流程（只是上下文为空）。
-    from ethan.interface.channel_commands import CommandContext, handle_command, is_command, is_btw, btw_question, is_review, review_target
+    from ethan.interface.channel_commands import CommandContext, handle_command, is_command, is_btw, btw_question, is_review, review_target, resolve_custom_command
     btw_mode = False
     if is_btw(text):
         q = btw_question(text)
@@ -220,6 +266,10 @@ async def _handle_message(event_data: dict) -> None:
             return
         btw_mode = True  # 复用 btw_mode：不带历史、不拉群消息
         text = f"帮我 code review 这个 PR/MR：{target}"
+
+    # ── 自定义命令：展开后交 agent 处理（保留历史上下文）──
+    elif (expanded := resolve_custom_command(text)) is not None:
+        text = expanded
 
     # ── /command：以 / 开头的命令先于 Agent 处理（不加思考表情，直接回复）──
     if is_command(text):
@@ -356,18 +406,6 @@ async def _handle_message(event_data: dict) -> None:
             finally:
                 await store.close()
 
-        async def _stop_lark_task(cid: str) -> bool:
-            """取消该 chat 所有进行中的 Agent 生成任务。返回是否真的停了至少一个。"""
-            tasks = _lark_running_tasks.get(cid)
-            if not tasks:
-                return False
-            stopped = False
-            for t in list(tasks):
-                if not t.done():
-                    t.cancel()
-                    stopped = True
-            return stopped
-
         cmd_ctx = CommandContext(
             chat_id=chat_id,
             raw_text=text,
@@ -389,8 +427,56 @@ async def _handle_message(event_data: dict) -> None:
             await _send_reply(chat_id, reply)
         return
 
-    # 立刻加思考表情，保存 reaction_id 以便回复后删除
-    reaction_id = await _send_reaction(message_id)
+    # ── 自然语言中止快速路径 ──
+    # 用户在飞书里直接发"停"/"不用了"/"取消"等词（非 /stop 命令）时，若当前有正在跑的
+    # Agent 任务则中止之，并直接回复，不进 Agent 流程；若无任务在跑则不拦截，继续走正常
+    # Agent 流程（避免误把空 chat 的一句"停"当命令丢弃）。关键词用精确匹配防误伤。
+    if text.strip().lower() in _ABORT_KEYWORDS:
+        if await _stop_lark_task(chat_id):
+            await _send_reply(chat_id, "🛑 已停止当前回复。")
+            return
+
+    # ── 同 chat 串行：Agent 处理必须排队 ──
+    # 同一飞书 chat 连发多条消息时，若并发跑会互相踩：并发改同一 session、流式卡片
+    # 互相覆盖、/stop 登记混乱。命令路径不经锁（已 return），保持即时响应；这里只串行化
+    # 真正的 Agent 生成。锁按 chat_id 复用，跨消息持久；message_id 去重已在锁外完成，
+    # 重投事件不会进到这里两次。
+    async with _get_chat_lock(chat_id):
+        await _handle_agent_message(
+            event_data,
+            chat_id=chat_id,
+            message_id=message_id,
+            text=text,
+            sender_open_id=sender_open_id,
+            is_owner=is_owner,
+            owner_claimed=owner_claimed,
+            btw_mode=btw_mode,
+        )
+
+
+async def _handle_agent_message(
+    event_data: dict,
+    *,
+    chat_id: str,
+    message_id: str,
+    text: str,
+    sender_open_id: str,
+    is_owner: bool,
+    owner_claimed: bool,
+    btw_mode: bool,
+) -> None:
+    """真正的 Agent 流式处理（在持锁串行下运行）。_handle_message 完成去重/命令/主人判定后调本函数。"""
+    # THINKING 表情生命周期由 TypingState 统一管理（封装 add/move/remove + 异常兜底）。
+    # 这里手动 __aenter__ 进入加表情；流式中 ts.move_to 迁移到工具进度/答案卡片；
+    # 定稿时 ts.clear 尽早移除；except 里 ts.clear 清理。不用 async with 是因为本函数
+    # try/except 有多个 exit 点且各自还要做存库/收尾，整体包进 async with 要把 500+ 行重缩进，不值。
+    from ethan.core.agent import Agent
+    from ethan.memory.session import SessionStore
+    from ethan.providers.base import Message, ThinkingEvent, ToolEvent
+    from ethan.skills.registry import SkillRegistry
+    from ethan.tools.registry import ToolRegistry
+    ts = TypingState(message_id)
+    await ts.__aenter__()
 
     # 查找或创建对应的 Session（lark 渠道归 admin）
     from ethan.core.paths import user_sessions_db_path
@@ -515,7 +601,20 @@ async def _handle_message(event_data: dict) -> None:
         registry = ToolRegistry()
         from ethan.core.context import set_session_id
         from ethan.tools.builtin.browser import BrowserSessionTool, BrowserTabTool, BrowserPageTool
+        from ethan.tools.builtin.file import FileListTool, FileReadTool, FileWriteTool
+        from ethan.tools.builtin.knowledge import KnowledgeAddTool, KnowledgeEditTool, KnowledgeReadTool, KnowledgeSearchTool
+        from ethan.tools.builtin.memory_write import MemoryWriteTool
+        from ethan.tools.builtin.procedure_write import ProcedureWriteTool
+        from ethan.tools.builtin.profile_update import ProfileUpdateTool
+        from ethan.tools.builtin.schedule import ScheduleCreateTool, ScheduleListTool, ScheduleRemoveTool
+        from ethan.tools.builtin.search import RipgrepTool, FdTool
+        from ethan.tools.builtin.secrets import GetSecretTool, ListSecretsTool, SetSecretTool
+        from ethan.tools.builtin.shell import ShellTool
+        from ethan.tools.builtin.skill_create import SkillCreateTool
+        from ethan.tools.builtin.skill_read import SkillListTool, SkillReadTool
         from ethan.tools.builtin.ui_card import UiCardTool
+        from ethan.tools.builtin.web import WebFetchTool
+        from ethan.tools.builtin.web_search import WebSearchTool
         set_session_id(session_id)  # browser 工具按对话隔离/授权
         for tool in [ShellTool(), WebSearchTool(), WebFetchTool(),
                      FileReadTool(), FileWriteTool(), FileListTool(),
@@ -587,13 +686,12 @@ async def _handle_message(event_data: dict) -> None:
         answer_created = False  # 答案卡片是否已创建
         thinking_shown = False  # 是否已在工具消息里显示了 "🤔 thinking..."
         tools_used = False      # 本条消息是否已调用过工具（决定正文是否还能乐观发卡片）
-        reply_reaction_id: str | None = None   # 加在回复消息上的 THINKING 表情（打字中指示器）
-        reply_reaction_msg: str | None = None  # 哪条消息上有该表情
+        # THINKING 表情由外层 TypingState(ts) 统一管理，不再用 reply_reaction_id/msg 手工记账
         FLUSH_INTERVAL = 2.0
         ANSWER_BUFFER_THRESHOLD = 50  # 纯对话首段缓冲字数，避免孤立短卡片
 
         async def _update_tool_msg() -> None:
-            nonlocal tool_msg_id, reaction_id, reply_reaction_id, reply_reaction_msg
+            nonlocal tool_msg_id
             if not tool_text:
                 return
             content = _render_tool_msg_content(tool_text)
@@ -627,16 +725,11 @@ async def _handle_message(event_data: dict) -> None:
                     resp = await asyncio.to_thread(client.im.v1.message.create, req)
                 if resp.success() and resp.data:
                     tool_msg_id = resp.data.message_id
-                    # 回复消息发出后：移除用户消息上的 THINKING，给回复消息加打字中表情
-                    if reaction_id and message_id:
-                        await _remove_reaction(message_id, reaction_id)
-                        reaction_id = None
-                    reply_reaction_id = await _send_reaction(tool_msg_id)
-                    reply_reaction_msg = tool_msg_id
+                    # 回复消息发出后：把 THINKING 表情从用户消息迁移到工具进度消息
+                    await ts.move_to(tool_msg_id)
                 else:
-                    if reaction_id and message_id:
-                        await _remove_reaction(message_id, reaction_id)
-                        reaction_id = None
+                    # 发送失败：直接清掉用户消息上的表情
+                    await ts.clear()
             else:
                 from lark_oapi.api.im.v1 import UpdateMessageRequest, UpdateMessageRequestBody
                 client = _lark_client()
@@ -655,7 +748,7 @@ async def _handle_message(event_data: dict) -> None:
                     await asyncio.to_thread(client.im.v1.message.update, req)
 
         async def _flush_answer(force: bool = False) -> None:
-            nonlocal answer_msg_id, answer_text, pending, last_flush, answer_created, reaction_id, reply_reaction_id, reply_reaction_msg
+            nonlocal answer_msg_id, answer_text, pending, last_flush, answer_created
             if not pending:
                 return
             # 工具流程中不乐观发卡片：工具间的零碎 narration 一旦发卡、下个工具 start 又撤回，
@@ -676,13 +769,8 @@ async def _handle_message(event_data: dict) -> None:
                 answer_created = True
                 # 引用回复：把答案卡片锚定到用户那条消息，飞书显示成"引用回复"，让用户清楚在答哪条
                 answer_msg_id, _ = await _send_message(chat_id, answer_text, use_card=True, reply_to_msg_id=message_id)
-                # 发出首条回答后移除用户消息上的 reaction（若工具进度消息没发出过）
-                if reaction_id and message_id:
-                    await _remove_reaction(message_id, reaction_id)
-                    reaction_id = None
-                # 给答案卡片加"打字中" THINKING 表情
-                reply_reaction_id = await _send_reaction(answer_msg_id)
-                reply_reaction_msg = answer_msg_id
+                # 把 THINKING 表情迁移到答案卡片（无论之前在用户消息还是工具进度消息上）
+                await ts.move_to(answer_msg_id)
             else:
                 await _edit_message(answer_msg_id, answer_text, use_card=True)
 
@@ -757,14 +845,17 @@ async def _handle_message(event_data: dict) -> None:
                     display_name = _TOOL_DISPLAY.get(chunk.tool_name, f"🔧 {chunk.tool_name}")
                     tool_name_line = f"**{display_name}**"
                     intent = (chunk.intent or "").strip()
+                    # args_summary 可能含命令行里的 token/--secret=xxx，刷进飞书卡片会泄漏。
+                    # 先过 sanitize_args_summary 脱敏再展示（行内敏感赋值 → [redacted]）。
+                    safe_args = sanitize_args_summary(chunk.args_summary or "")
                     if intent:
                         tool_name_line += f" · _{intent}_"
-                        if chunk.args_summary:
-                            brief = chunk.args_summary if len(chunk.args_summary) <= 60 else chunk.args_summary[:60] + "…"
+                        if safe_args:
+                            brief = safe_args if len(safe_args) <= 60 else safe_args[:60] + "…"
                             tool_name_line += f" ({brief})"
-                    elif chunk.args_summary:
+                    elif safe_args:
                         # 模型没给 intent 时兜底显示参数摘要
-                        brief = chunk.args_summary if len(chunk.args_summary) <= 60 else chunk.args_summary[:60] + "…"
+                        brief = safe_args if len(safe_args) <= 60 else safe_args[:60] + "…"
                         tool_name_line += f" · {brief}"
                     # 两个工具之间加空行
                     tool_text = (tool_text.rstrip() + "\n\n" + tool_name_line + "\n") if tool_text else tool_name_line + "\n"
@@ -777,10 +868,11 @@ async def _handle_message(event_data: dict) -> None:
                         if step["tool"] == chunk.tool_name and step["state"] == "running":
                             step["state"] = chunk.state
                             step["duration_ms"] = duration_ms
-                            step["result_preview"] = chunk.result_preview or ""
+                            # result_preview 可能回显含 token 的命令/URL，脱敏后再存/展示
+                            step["result_preview"] = sanitize_result_preview(chunk.result_preview or "")
                             break
                     mark = "✓" if chunk.state == "done" else "✗"
-                    preview = (chunk.result_preview or "").replace("\n", " ").replace("`", "'")[:200]
+                    preview = sanitize_result_preview(chunk.result_preview or "").replace("\n", " ").replace("`", "'")[:200]
                     result_line = f"_{mark} {preview}_" if preview else f"_{mark} {duration_ms}ms_"
                     tool_text = tool_text.rstrip() + "\n" + result_line
                     # 有其它工具仍在运行，追加 thinking 占位
@@ -820,10 +912,8 @@ async def _handle_message(event_data: dict) -> None:
             else:
                 final_answer = (answer_text or "（没有找到相关内容）").rstrip() + f"\n\n---\n_{stats_line}_"
                 await _edit_message(answer_msg_id, final_answer, use_card=True)
-            # 结果卡片已定稿，移除打字中表情
-            if reply_reaction_id and reply_reaction_msg:
-                await _remove_reaction(reply_reaction_msg, reply_reaction_id)
-                reply_reaction_id = None
+            # 结果卡片已定稿，立刻移除打字中表情（不必等到 finally）
+            await ts.clear()
         elif tool_msg_id:
             # 只有工具调用没有正文（极少数情况），在工具消息末尾加 stats（保持 post 富文本样式）
             final_tool = tool_text.rstrip() + f"\n\n{stats_line}"
@@ -842,19 +932,13 @@ async def _handle_message(event_data: dict) -> None:
                     .build()
                 )
                 await asyncio.to_thread(_tclient.im.v1.message.update, _treq)
-            # 工具进度消息已定稿，移除打字中表情
-            if reply_reaction_id and reply_reaction_msg:
-                await _remove_reaction(reply_reaction_msg, reply_reaction_id)
-                reply_reaction_id = None
+            # 工具进度消息已定稿，立刻移除打字中表情
+            await ts.clear()
         else:
             # 没有任何输出（工具和正文都没有）
             await _send_message(chat_id, f"（没有找到相关内容）\n{stats_line}", use_card=False)
 
-        # 确保两个 reaction 都被清理（理论上前面已经清了）
-        if reaction_id and message_id:
-            await _remove_reaction(message_id, reaction_id)
-        if reply_reaction_id and reply_reaction_msg:
-            await _remove_reaction(reply_reaction_msg, reply_reaction_id)
+        # 表情已在前面对应分支定稿时清理（ts.clear）；这里无需再手动清。
 
         # 存库：只存最终答案正文（reasoning 已在工具阶段丢弃），减少 context token。
         # ⚠️ 绝不把 tool_text 当 content 存（旧的 `answer_text or tool_text` fallback）——
@@ -879,10 +963,8 @@ async def _handle_message(event_data: dict) -> None:
         # 用户 /stop 主动取消：把已生成的部分内容落库并标记「已停止」，清理表情。
         logger.info("[Lark] generation stopped by user for chat %s", chat_id)
         try:
-            if reaction_id and message_id:
-                await _remove_reaction(message_id, reaction_id)
-            if reply_reaction_id and reply_reaction_msg:
-                await _remove_reaction(reply_reaction_msg, reply_reaction_id)
+            # TypingState.clear 兜底清理可能残留的 THINKING 表情（异常路径下可能还没清）
+            await ts.clear()
             # 取已生成的部分正文（不 fallback 到 tool_text——见存库处注释，防污染历史）
             partial = "" if _looks_like_tool_trace(answer_text) else answer_text.strip()
             if partial:
@@ -908,11 +990,11 @@ async def _handle_message(event_data: dict) -> None:
 
     except Exception:
         logger.exception("Agent error handling Lark message")
-        # 确保表情被清理
-        if reaction_id and message_id:
-            await _remove_reaction(message_id, reaction_id)
-        if reply_reaction_id and reply_reaction_msg:
-            await _remove_reaction(reply_reaction_msg, reply_reaction_id)
+        # 兜底清理 THINKING 表情（TypingState 封装了异常吞咽，不会再次抛出）
+        try:
+            await ts.clear()
+        except Exception:
+            logger.debug("TypingState.clear on error path failed", exc_info=True)
         await store.close()
         _untrack_task(chat_id, asyncio.current_task())
         return

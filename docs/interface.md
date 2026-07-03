@@ -231,6 +231,12 @@ lark-cli event consume im.message.receive_v1（WebSocket 长连接）
    │
    ├─ 按 message_id 幂等去重 → 命中重复事件直接丢弃
    │
+   ├─ /命令 路由（/new /stop /help 等，免加 THINKING 表情，即时响应）
+   │
+   ├─ 自然语言中止快速路径：文本精确匹配「停 / 停下 / 不用了 / 取消 / stop / 中止 / 停止」
+   │    且当前 chat 有进行中的 Agent 任务时，直接 cancel 并回复「🛑 已停止当前回复。」
+   │    无进行中任务则不拦截，继续走 Agent 流程（避免误伤空 chat 的一句"停"）
+   │
    ├─ 根据 chat_id 查找或创建 Session
    │
    ├─ 立即给原消息加 THINKING_FACE 表情 → 告知用户已收到
@@ -244,6 +250,8 @@ lark-cli event consume im.message.receive_v1（WebSocket 长连接）
 ```
 
 收到消息后第一步加 `THINKING_FACE` 表情是关键的用户体验设计：飞书消息处理可能需要数秒，及时反馈避免用户以为机器人离线。
+
+> 自然语言中止是 `/stop` 命令的"温柔入口"：用户不必记命令，发个"停"就能中止当前生成。关键词用精确匹配（非包含）防误伤——"停下来一下"或"取消我的会议"不会被拦截。
 
 ### 输出形态（两条消息 + 增量卡片）
 
@@ -275,6 +283,9 @@ lark-cli event consume im.message.receive_v1（WebSocket 长连接）
 - `im:message`（读取消息内容）
 - `im:message:send_as_bot`（发送消息）
 - `im:message.reaction:write`（添加表情反应）
+- `im:message.group_msg:get_as_user`（读取群聊全部消息，用于背景上下文）
+
+> **权限说明：** Bot 身份只能读取 @ 它的消息，无法看到群内其他消息。为了给 Agent 提供群聊背景上下文（让它在回答时知道群里刚才发生了什么），需要用户身份的 `im:message.group_msg:get_as_user` 权限。配置 lark-cli 时按引导授权即可。
 
 ### 当前限制
 
