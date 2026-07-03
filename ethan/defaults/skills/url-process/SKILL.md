@@ -67,8 +67,20 @@ else:
 #   https://xxx.larksuite.com/wiki/TbB6w6MlSiXZD5k3kwkc4PRpnxd
 #   https://bytedance.larkoffice.com/wiki/TbB6w6MlSiXZD5k3kwkc4PRpnxd
 # Token = 最后一段路径（去掉 /docx/ 或 /wiki/ 后的部分）
-
-lark-cli docs +fetch --doc "TOKEN" --doc-format markdown --as user | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['document']['content'])" > /tmp/lark_doc.md
+# 导出后顺手把分栏 <grid><column> 转成 markdown 表格，否则分栏内容会挤成一坨。
+lark-cli docs +fetch --doc "TOKEN" --doc-format markdown --as user | python3 -c "
+import sys, json, re
+raw = json.load(sys.stdin)['data']['document']['content']
+def _grid(m):
+    cols = [c.strip() for c in re.findall(r'<column[^>]*>(.*?)</column>', m.group(1), re.S)]
+    if not cols: return ''
+    if len(cols) == 1: return cols[0]
+    h = '| ' + ' | '.join(' ' for _ in cols) + ' |'
+    s = '| ' + ' | '.join('---' for _ in cols) + ' |'
+    b = '| ' + ' | '.join(c.replace('\n', '<br>') for c in cols) + ' |'
+    return '\n' + h + '\n' + s + '\n' + b + '\n'
+print(re.sub(r'<grid>(.*?)</grid>', _grid, raw, flags=re.S), end='')
+" > /tmp/lark_doc.md
 
 # 步骤 2（file_read）：读 markdown → 内容进 agent context
 file_read(path="/tmp/lark_doc.md")
