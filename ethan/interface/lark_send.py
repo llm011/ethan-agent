@@ -407,16 +407,16 @@ def _extract_msg_text(msg: dict) -> str:
     return str(raw).strip()
 
 
-async def _resolve_quoted_text(message_id: str) -> str:
-    """用户引用了某条消息时，返回被引用消息的文本。
+async def _resolve_quoted_text(message_id: str) -> tuple[str, str]:
+    """用户引用了某条消息时，返回 (被引用消息的可读文本, 被引用消息 id)。
 
     lark-cli 压平的事件里没有引用关系，需先 mget 当前消息详情，从中找被引用消息 id，
     再 mget 那条取文本。本版 lark-cli 用 reply_to 字段表示引用关系；
-    parent_id / upper_message_id / root_id 作旧结构兜底。任何环节失败返回空串，不阻断主流程。
+    parent_id / upper_message_id / root_id 作旧结构兜底。任何环节失败返回 ("", "")，不阻断主流程。
     """
     detail = await _fetch_message_detail(message_id)
     if not detail:
-        return ""
+        return "", ""
     parent_id = (
         detail.get("reply_to")
         or detail.get("parent_id")
@@ -425,8 +425,61 @@ async def _resolve_quoted_text(message_id: str) -> str:
         or ""
     )
     if not parent_id or parent_id == message_id:
-        return ""
+        return "", ""
     parent = await _fetch_message_detail(parent_id)
     if not parent:
-        return ""
-    return _extract_msg_text(parent)[:1000]
+        return "", ""
+    return _extract_msg_text(parent)[:1000], parent_id
+
+
+async def _fetch_recent_chat_messages(chat_id: str, limit: int = 10) -> list[dict]:
+    """拉取群聊最近 limit 条消息，返回 [{"sender": str, "text": str, "time": str}, ...]（按时间正序）。
+
+    用于给 agent 注入群聊背景上下文，让它感知 @mention 之间群里发生的讨论。
+    任何步骤失败返回空列表，不阻断主流程。
+    """
+    try:
+        from lark_oapi.api.im.v1 import ListMessageRequest
+        client = _lark_client()
+        if not client:
+            return []
+        req = (
+            ListMessageRequest.builder()
+            .container_id_type("chat")
+            .container_id(chat_id)
+            .page_size(limit)
+            .sort_type("ByCreateTimeDesc")
+            .build()
+        )
+        resp = await asyncio.to_thread(client.im.v1.message.list, req)
+        if not resp.success() or not resp.data or not resp.data.items:
+            return []
+        results = []
+        for msg in resp.data.items:
+            if not msg or msg.deleted:
+                continue
+            if msg.msg_type != "text":
+                continue
+            try:
+                body_raw = msg.body.content if msg.body else "{}"
+                body = json.loads(body_raw) if isinstance(body_raw, str) else {}
+                text = body.get("text", "").strip()
+                if not text:
+                    continue
+                sender = ""
+                if msg.sender:
+                    sender = msg.sender.sender_name or msg.sender.id or ""
+                create_ms = int(msg.create_time or "0")
+                time_str = ""
+                if create_ms:
+                    import datetime
+                    dt = datetime.datetime.fromtimestamp(create_ms / 1000)
+                    time_str = dt.strftime("%m-%d %H:%M")
+                results.append({"sender": sender, "text": text, "time": time_str})
+            except Exception:
+                continue
+        results.reverse()  # 时间正序
+        return results
+    except Exception:
+        logger.exception("[Lark] _fetch_recent_chat_messages failed for chat_id=%s", chat_id)
+        return []

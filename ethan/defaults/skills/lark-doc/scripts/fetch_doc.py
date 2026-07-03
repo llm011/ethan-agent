@@ -37,15 +37,17 @@ _XML_IMG_RE = re.compile(r'<img\b[^>]*\btoken="([^"]+)"[^>]*\burl="([^"]+)"', re
 _XML_IMG_RE2 = re.compile(r'<img\b[^>]*\burl="([^"]+)"[^>]*\btoken="([^"]+)"', re.IGNORECASE)
 
 # ── 残留 DocxXML 标签清洗 ───────────────────────────────────────────────────
-# 飞书 markdown 导出会残留一些 DocxXML 片段，直接进 ProseMirror 会被吞标签、变换行、
-# 或把 <h1> 当真标题解析。这里统一处理：结构标签转成等价 markdown，其余组件标签转义。
 _TITLE_RE = re.compile(r'<title>(.*?)</title>', re.IGNORECASE | re.DOTALL)
-_CITE_TITLE_RE = re.compile(r'<cite\b[^>]*\btitle="([^"]*)"[^>]*>\s*</cite>', re.IGNORECASE)
-_CITE_BARE_RE = re.compile(r'<cite\b[^>]*>\s*</cite>', re.IGNORECASE)
+_CITE_RE = re.compile(r'<cite\b([^>]*)>\s*</cite>', re.IGNORECASE)
+# ISV 只读块：先在 process_isv_blocks 尝试下载，失败后由 clean_markdown 换成占位
+_READONLY_ISV_RE = re.compile(
+    r'<readonly-block\b[^>]*\bid="([^"]+)"[^>]*\btype="isv"[^>]*>\s*</readonly-block>',
+    re.IGNORECASE,
+)
 _READONLY_RE = re.compile(r'<readonly-block\b[^>]*>\s*</readonly-block>', re.IGNORECASE)
 _CALLOUT_RE = re.compile(r'<callout\b([^>]*)>(.*?)</callout>', re.IGNORECASE | re.DOTALL)
 _CALLOUT_EMOJI_RE = re.compile(r'\bemoji="([^"]*)"', re.IGNORECASE)
-# 匹配任意 HTML/组件开闭/自闭合标签（含 <UIResourceRenderer />、<ui-resource-renderer>、<h1> 等）
+# 匹配任意 HTML/组件开闭/自闭合标签（含 <UIResourceRenderer />、<h1> 等）
 _ANY_TAG_RE = re.compile(r'</?[a-zA-Z][a-zA-Z0-9-]*(?:\s[^<>]*?)?/?>')
 
 
@@ -82,15 +84,15 @@ def _fetch_doc_markdown(doc: str) -> tuple[str, str]:
 
 
 def _fetch_doc_xml(doc: str) -> str:
-    """获取 XML 格式文档内容，用于提取 img token。失败返回空串（不阻断主流程）。"""
+    """获取 XML 格式文档内容（含 block id），用于提取 img token 和 ISV block id。失败返回空串。"""
     try:
         data = _run_lark_cli(
             "docs", "+fetch", "--api-version", "v2",
-            "--doc", doc, "--doc-format", "xml", "--as", "user",
+            "--doc", doc, "--doc-format", "xml", "--detail", "with-ids", "--as", "user",
         )
         return data.get("data", {}).get("document", {}).get("content", "")
     except Exception as e:
-        print(f"  [warn] 获取 XML 格式失败，图片将无法通过 token 下载: {e}", file=sys.stderr)
+        print(f"  [warn] 获取 XML 格式失败，图片/ISV 块将无法处理: {e}", file=sys.stderr)
         return ""
 
 
@@ -104,6 +106,32 @@ def _build_url_token_map(xml_content: str) -> dict[str, str]:
         url, token = m.group(1), m.group(2)
         mapping[url] = token
     return mapping
+
+
+def _base_domain(doc: str) -> str:
+    """从文档 URL 提取 https://xxx.feishu.cn 域名，用于构造内部文档链接。"""
+    from urllib.parse import urlparse
+    p = urlparse(doc)
+    if p.scheme and p.netloc:
+        return f"{p.scheme}://{p.netloc}"
+    return "https://feishu.cn"
+
+
+def _cite_to_link(m: re.Match, base_domain: str) -> str:
+    """把 <cite doc-id="..." file-type="..." title="..."> 转成 [title](url)。"""
+    attrs = m.group(1)
+    doc_id = (re.search(r'\bdoc-id="([^"]+)"', attrs) or re.search(r'\bdoc-id=\'([^\']+)\'', attrs))
+    file_type = (re.search(r'\bfile-type="([^"]+)"', attrs) or re.search(r"\bfile-type='([^']+)'", attrs))
+    title_m = (re.search(r'\btitle="([^"]+)"', attrs) or re.search(r"\btitle='([^']+)'", attrs))
+
+    title = title_m.group(1) if title_m else ""
+    if not doc_id:
+        return title  # 没有 doc-id，只保留 title 文字
+
+    ftype = file_type.group(1) if file_type else "docx"
+    path = "wiki" if ftype == "wiki" else "docx"
+    url = f"{base_domain}/{path}/{doc_id.group(1)}"
+    return f"[{title}]({url})" if title else url
 
 
 def _resolve_user_name(open_id: str, cache: dict[str, str]) -> str:
@@ -334,19 +362,105 @@ def _callout_to_blockquote(m: re.Match) -> str:
     return "\n" + "\n".join(quoted) + "\n"
 
 
-def clean_markdown(content: str) -> str:
+def clean_markdown(content: str, base_domain: str = "https://feishu.cn") -> str:
     """清洗飞书 markdown 导出里残留的 DocxXML 标签，避免 ProseMirror 渲染丢内容/变换行。"""
     content = _TITLE_RE.sub(lambda m: f"# {m.group(1).strip()}\n", content)
     content = _CALLOUT_RE.sub(_callout_to_blockquote, content)
-    content = _CITE_TITLE_RE.sub(lambda m: m.group(1), content)
-    content = _CITE_BARE_RE.sub("", content)
+    content = _CITE_RE.sub(lambda m: _cite_to_link(m, base_domain), content)
+    # 剩余未被 process_isv_blocks 替换掉的 readonly-block 换占位
     content = _READONLY_RE.sub(
-        "> ⚠️ 此处为第三方交互嵌入块（ISV widget，如在线流程图/画板），"
-        "导出接口无法转成图片，已省略。",
+        "> ⚠️ 此处为第三方交互嵌入块（ISV widget），导出接口无法获取内容，已省略。",
         content,
     )
     content = _escape_tags_outside_code(content)
     return content
+
+
+def process_isv_blocks(content: str, output_path: Path, isv_block_ids: list) -> tuple[str, int, int]:
+    """尝试把 ISV 只读块（Mermaid/画板等）下载成图片并替换。
+    isv_block_ids 从 XML 中按顺序提取；markdown 里对应位置的 <readonly-block> 按顺序替换。
+    先试 whiteboard 类型，再试 media 类型；有 CDN 则上传，无则存到 media/。
+    返回 (新内容, 总数, 成功数)。"""
+    # 找 markdown 里所有 readonly-block（可能有 id 也可能没有）
+    md_blocks = list(re.finditer(r'<readonly-block\b[^>]*>\s*</readonly-block>', content, re.IGNORECASE))
+    total = len(md_blocks)
+    if total == 0 or not isv_block_ids:
+        return content, total, 0
+
+    media_dir = output_path.parent / "media"
+    upload_script = _upload_script_path()
+    succeeded = 0
+    # 替换时从后往前，避免位置偏移
+    pairs = list(zip(md_blocks, isv_block_ids))
+
+    for i, (md_match, block_id) in enumerate(reversed(pairs)):
+        print(f"  处理 ISV 块 {total - i}/{total}: {block_id}", file=sys.stderr)
+
+        local_path: "str | None" = None
+
+        for dl_type in ("whiteboard", "media"):
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
+                tmp_path = tmp.name
+            base_path = tmp_path[:-4]
+            try:
+                Path(tmp_path).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+            result = subprocess.run(
+                [
+                    "lark-cli", "docs", "+media-download",
+                    "--type", dl_type,
+                    "--token", block_id,
+                    "--output", base_path,
+                    "--as", "user",
+                ],
+                capture_output=True, text=True, timeout=60,
+            )
+            if result.returncode == 0:
+                candidates = sorted(Path(base_path).parent.glob(Path(base_path).name + "*"))
+                if candidates:
+                    local_path = str(candidates[0])
+                    break
+                if Path(base_path).is_file():
+                    local_path = base_path
+                    break
+            else:
+                err = result.stderr or result.stdout
+                if "missing_scope" in err or "missing required scope" in err:
+                    print(f"  [warn] ISV 块下载缺少权限，需运行: lark-cli auth login --scope \"docs:document.media:download\"", file=sys.stderr)
+                    return content, total, succeeded
+
+        if not local_path:
+            continue
+
+        cdn_url: "str | None" = None
+        if _cdn_available() and upload_script.is_file():
+            key = f"feishu-docs/isv-{hashlib.md5(block_id.encode()).hexdigest()[:10]}.png"
+            r = subprocess.run(
+                [sys.executable, str(upload_script), local_path, key],
+                capture_output=True, text=True, timeout=60,
+            )
+            if r.returncode == 0:
+                cdn_url = r.stdout.strip()
+        if not cdn_url:
+            media_dir.mkdir(parents=True, exist_ok=True)
+            fname = f"isv-{block_id[:12]}{Path(local_path).suffix}"
+            dest = media_dir / fname
+            Path(local_path).rename(dest)
+            cdn_url = f"./media/{fname}"
+        else:
+            try:
+                Path(local_path).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+        replacement = f"![]({cdn_url})"
+        content = content[:md_match.start()] + replacement + content[md_match.end():]
+        succeeded += 1
+        print(f"  ISV 块已转换: {cdn_url}", file=sys.stderr)
+
+    return content, total, succeeded
 
 
 def process_images(content: str, url_token_map: dict[str, str]) -> tuple[str, int, int]:
@@ -462,21 +576,30 @@ def main() -> None:
 
     # 提取 url→token 映射（需要额外一次 XML fetch）
     url_token_map: dict[str, str] = {}
-    if _cdn_available():
-        print("获取 XML 格式以提取图片 token...", file=sys.stderr)
-        xml_content = _fetch_doc_xml(doc)
-        if xml_content:
-            url_token_map = _build_url_token_map(xml_content)
-            print(f"  找到 {len(url_token_map)} 个图片 token", file=sys.stderr)
+    isv_block_ids: list[str] = []
+    # 总是获取 XML（含 block id），用于图片 token 和 ISV 块 id
+    print("获取 XML 格式以提取图片 token 和 ISV 块...", file=sys.stderr)
+    xml_content = _fetch_doc_xml(doc)
+    if xml_content:
+        url_token_map = _build_url_token_map(xml_content)
+        isv_block_ids = re.findall(
+            r'<readonly-block\s+id="([^"]+)"\s+type="isv"', xml_content
+        ) or re.findall(
+            r'<readonly-block[^>]+\btype="isv"[^>]+\bid="([^"]+)"', xml_content
+        )
+        print(f"  图片 token {len(url_token_map)} 个，ISV 块 {len(isv_block_ids)} 个", file=sys.stderr)
 
     print("处理图片...", file=sys.stderr)
     content, img_total, img_ok = process_images(content, url_token_map)
+
+    print("处理 ISV 块（Mermaid/画板）...", file=sys.stderr)
+    content, isv_total, isv_ok = process_isv_blocks(content, output_path, isv_block_ids)
 
     print("处理视频/附件...", file=sys.stderr)
     content, media_total, media_ok = process_media_tokens(content, output_path)
 
     print("清洗残留标签...", file=sys.stderr)
-    content = clean_markdown(content)
+    content = clean_markdown(content, base_domain=_base_domain(doc))
 
     # 在标题后插入元信息块
     meta_block = _render_meta_block(meta)

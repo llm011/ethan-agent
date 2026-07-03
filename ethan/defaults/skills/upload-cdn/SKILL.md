@@ -13,15 +13,19 @@ description: "上传本地文件到 S3 兼容对象存储（Cloudflare R2 等）
 
 凭证存放在 `~/.ethan/.secrets/upload-cdn.env`，由 shell 工具自动注入，**不要在对话中回显明文值**。
 
-**每次操作前先检测凭证：**
+**第 0 步：先用 `list_secrets` 检查凭证是否已存。**
+- 若输出包含 `upload-cdn.env` → 已配置，直接跳到「使用方法」。
+- 若没有 → **立即停止**，不要再 find / read config 探索——凭证就是没有。直接告知用户需要提供以下字段（不要绕圈子）：
+
+**第 1 步（凭证不存在时）：检测 shell 注入是否生效（可选快速确认）：**
 
 ```bash
 test -n "$CDN_ENDPOINT" && test -n "$CDN_ACCESS_KEY" && test -n "$CDN_SECRET_KEY" \
   && test -n "$CDN_BUCKET" && test -n "$CDN_PUBLIC_URL" && echo READY || echo MISSING
 ```
 
-- 输出 `READY` → 凭证已配，继续。
-- 输出 `MISSING` → **引导用户提供以下字段**（Cloudflare R2 示例）：
+- `READY` → 继续。
+- `MISSING` → 凭证缺失。**直接**向用户索要以下字段，不要再探索其他路径：
 
 | 字段 | 说明 | 示例 |
 |------|------|------|
@@ -47,14 +51,11 @@ CDN_REGION="auto"
 
 ## 使用方法
 
-**单文件上传（指定 object key）：**
-```bash
-python ~/.ethan/skills/upload-cdn/scripts/upload_cdn.py /path/to/image.png images/image.png
-```
+> **规则：所有上传统一使用 `ethan/upload/` 路径前缀，不要用裸文件名作为 key。**
 
-**单文件上传（自动 key = 文件名）：**
+**上传图片/文件：**
 ```bash
-python ~/.ethan/skills/upload-cdn/scripts/upload_cdn.py /path/to/report.pdf
+python ~/.ethan/skills/upload-cdn/scripts/upload_cdn.py /path/to/file.png "ethan/upload/$(basename /path/to/file.png)"
 ```
 
 **批量上传（shell 循环）：**

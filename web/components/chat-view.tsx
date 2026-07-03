@@ -79,6 +79,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         ? m.tool_steps.map((s: any) => ({
             tool: s.tool,
             args: s.args,
+            intent: s.intent,
             state: s.state as "running" | "done" | "error",
             duration_ms: s.duration_ms,
             result_preview: s.result_preview,
@@ -139,7 +140,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           const preToolThought = assistantContent.trim();
           assistantContent = "";
           currentToolSteps.push({
-            tool: chunk.tool, args: chunk.args || "", state: "running", id: chunk.id,
+            tool: chunk.tool, args: chunk.args || "", intent: chunk.intent || undefined, state: "running", id: chunk.id,
             thought: preToolThought || undefined,
           });
           setMessages([...baseMessages, {
@@ -433,6 +434,10 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       return;
     }
 
+    // /btw 顺带一问：不带历史，单轮轻量查询
+    const isBtw = text.trim().toLowerCase().startsWith("/btw ");
+    const btwQuestion = isBtw ? text.trim().slice(4).trim() : null;
+
     let sessionId = activeSession;
     if (!sessionId) {
       const s = await createSession(selectedModel, mode);
@@ -442,10 +447,10 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       // URL 延迟到流式结束后再更新，避免 Next.js App Router 在流式中途卸载组件
     }
 
-    let content = text;
+    let content = isBtw ? (btwQuestion ?? text) : text;
     if (pendingFiles.length > 0) {
       const fileContext = pendingFiles.map((f) => `[Uploaded file: ${f.name} at ${f.path}]`).join("\n");
-      content = `${fileContext}\n\n${text}`;
+      content = `${fileContext}\n\n${content}`;
     }
 
     const userMsg: Message = {
@@ -465,7 +470,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     const chatMessages: ChatMessage[] = newMessages.map((m) => ({ role: m.role, content: m.content }));
 
     await consumeStream(
-      streamChat(chatMessages, selectedModel, sessionId, sentQuote, mode),
+      streamChat(chatMessages, selectedModel, sessionId, sentQuote, mode, isBtw),
       newMessages,
       true,
     );

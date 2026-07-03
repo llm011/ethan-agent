@@ -42,15 +42,20 @@ class ToolExecutor:
                 is_error=True,
             )
 
-        # 可缓存的工具：命中缓存直接返回，避免重复调用
+        # 可缓存的工具：命中缓存直接返回，避免重复调用。
+        # intent 是展示用的注入参数，不影响工具语义，排除出缓存键（否则同实参不同 intent 会误判未命中）。
         if tool.cacheable:
-            args_hash = hashlib.md5(json.dumps(tc.arguments, sort_keys=True).encode()).hexdigest()
+            cache_args = {k: v for k, v in tc.arguments.items() if k != "intent"}
+            args_hash = hashlib.md5(json.dumps(cache_args, sort_keys=True).encode()).hexdigest()
             cache_key = f"{tc.name}:{args_hash}"
             if cache_key in self._cache:
                 return ToolResult(tool_call_id=tc.id, content=self._cache[cache_key])
 
         try:
-            out = await tool.run(**tc.arguments)
+            # intent 是展示用的「调用意图」参数（_with_intent_param 注入），工具本身不需要，
+            # 调 run 前剥掉，避免 unknown kwarg 报错。
+            run_args = {k: v for k, v in tc.arguments.items() if k != "intent"}
+            out = await tool.run(**run_args)
             # 工具可返回 str（普通）或 ToolResult（携带 sub_steps 等元信息）
             if isinstance(out, ToolResult):
                 result = out

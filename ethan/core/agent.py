@@ -3,9 +3,10 @@ from datetime import datetime
 from pathlib import Path
 
 from ethan.core.config import get_config
+from ethan.core.context_budget import enforce_context_budget
 from ethan.memory.facts import FactStore
 from ethan.memory.procedures import ProcedureStore
-from ethan.providers.base import Message
+from ethan.providers.base import Message, ToolDefinition
 from ethan.providers.manager import create_provider
 from ethan.skills.registry import SkillRegistry
 from ethan.tools.base import ToolResult
@@ -40,9 +41,13 @@ _TRUNCATE_ARGS = {"content", "text", "code", "prompt", "body", "description", "n
 
 
 def _format_args(arguments: dict, max_items: int = 3) -> str:
-    """格式化工具参数为单行摘要。路径/命令等不截断，content/text 等长文本截断。"""
+    """格式化工具参数为单行摘要。路径/命令等不截断，content/text 等长文本截断。
+
+    跳过 intent——它单独作为「调用意图」展示（见 _with_intent_param），不混进参数行。
+    """
     parts = []
-    for k, v in list(arguments.items())[:max_items]:
+    items = [(k, v) for k, v in arguments.items() if k != "intent"][:max_items]
+    for k, v in items:
         s = str(v).replace("\n", " ")
         if k in _TRUNCATE_ARGS:
             if len(s) > 80:
@@ -52,6 +57,34 @@ def _format_args(arguments: dict, max_items: int = 3) -> str:
             s = s[:100] + "…" + s[-40:]
         parts.append(f"{k}={s}")
     return ", ".join(parts)
+
+
+# 工具调用意图（intent）：注入一个可选 string 参数，让模型用几个字说明每次调用目的，
+# 供前端/飞书在工具调用旁显示（如「💻 terminal · 查 MR 状态」）。
+#
+# ⚠️ 这是标准 JSON Schema 参数（不是自定义顶层字段），所有 OpenAI 兼容 / Anthropic 模型都支持；
+# 不放进 required，弱模型/中转即便不填也只回退到旧的 args 摘要，绝不报错（切模型也安全）。
+_INTENT_DESC = "用不超过12个字说明本次调用目的（给用户看，会显示在工具调用旁）。例如：查 MR 状态 / 读配置文件 / 搜飞书文档"
+
+
+def _with_intent_param(td: ToolDefinition) -> ToolDefinition:
+    """给工具定义注入一个可选 intent 参数（模型填，用于展示调用意图）。
+
+    不改原对象：deep copy parameters、追加 description，避免污染 registry 里共享的工具定义。
+    """
+    import copy
+    params = copy.deepcopy(td.parameters) if isinstance(td.parameters, dict) else {}
+    params.setdefault("type", "object")
+    props = params.get("properties")
+    if not isinstance(props, dict):
+        props = {}
+        params["properties"] = props
+    props["intent"] = {"type": "string", "description": _INTENT_DESC}
+    return ToolDefinition(
+        name=td.name,
+        description=td.description + "\n\n调用前请在 intent 参数里用一句话说明本次目的。",
+        parameters=params,
+    )
 
 
 def _preview(content: str, max_lines: int = 3, max_chars: int = 200) -> str:
@@ -560,13 +593,17 @@ class Agent:
     def _broadcast_tools(self, tools_list: list):
         """每轮广播给模型的工具定义 = 基础 tools_list + 本请求 find_tools 已激活的长尾工具。
         fast 档 tools_list 是白名单子集；medium/full 已是全量，激活集命中也都在基础集内，extra 为空。
+
+        每个定义注入 intent 参数（_with_intent_param）：让模型用几个字说明每次调用目的，
+        供前端/飞书显示。标准 schema 参数，切模型安全；缺失时回退旧 args 摘要。
         """
         from ethan.core.context import get_active_tools
         base_names = {t.name for t in tools_list}
         active = get_active_tools()
         extra = [t for t in self._registry.all()
                  if t.name in active and t.name not in base_names]
-        return [t.to_definition() for t in (tools_list + extra)] or None
+        defs = [t.to_definition() for t in (tools_list + extra)]
+        return [_with_intent_param(d) for d in defs] or None
 
     def _provider_for_route(self, route: str):
         """按路由档位选 provider。fast 档且开启 fast_use_lite_model 时用 lite 模型
@@ -615,6 +652,7 @@ class Agent:
         self._executor.reset_cache()
         reset_active_tools()  # 清空本请求的 find_tools 激活集
         working = list(messages)
+        enforce_context_budget(working)  # 历史 tool result 也可能很大，进循环前先管控
         _route, system, tools_list, max_iters = self._select_route(working)
         provider = self._provider_for_route(_route)
 
@@ -638,6 +676,18 @@ class Agent:
             self.usage.add(response.usage)
             working.append(response)
 
+            # 空响应（既无正文也无工具调用）= 模型静默放弃。直接 return 会让整轮白干：
+            # 工具结果已在上下文里却不产出总结、不落库。强制走一次 finalize（禁工具 + 收尾指令），
+            # 逼模型基于已有上下文给出「已做/结果/卡点」总结后返回。
+            # ⚠️ 但 finalize 轮本身不再重试：那轮模型已用同一 finalize suffix 调过一次仍空，
+            # 再调一次是超 max_iters 预算的冗余调用且大概率同样返空——直接落到下方
+            # `if not response.is_tool_call: return` 返回即可。
+            if not finalize and not response.is_tool_call and not (response.content or "").strip():
+                sys = system + finalize_system_suffix("max_iters")
+                resp = await provider.chat(working, tools=None, system=sys)
+                self.usage.add(resp.usage)
+                return resp
+
             if not response.is_tool_call:
                 return response
 
@@ -649,6 +699,7 @@ class Agent:
                     content=r.content,
                     tool_call_id=r.tool_call_id,
                 ))
+            enforce_context_budget(working)  # 新 tool result 进上下文前管控体积，防撑爆
             monitor.record(response.tool_calls, had_error)
 
             # 反思后仍重复同一操作 → 二次强提醒，逼它换路
@@ -679,6 +730,7 @@ class Agent:
         self._executor.reset_cache()
         reset_active_tools()  # 清空本请求的 find_tools 激活集
         working = list(messages)
+        enforce_context_budget(working)  # 历史 tool result 也可能很大，进循环前先管控
         _route, system, tools_list, max_iters = self._select_route(working)
         provider = self._provider_for_route(_route)
 
@@ -734,6 +786,21 @@ class Agent:
             response = Message(role="assistant", content=full_content, tool_calls=tool_calls)
             working.append(response)
 
+            # 空响应（既无正文也无工具调用）= 模型静默放弃。直接 return 会导致整轮白干：
+            # 工具结果已在 working 里却不产出任何总结，且不落库。此处强制走一次 finalize
+            # （禁工具 + 收尾指令），逼模型基于已有上下文给出「已做/结果/卡点」总结后返回。
+            # ⚠️ finalize 轮本身不再重试（同 chat()，见上方注释）。
+            if not finalize and not response.is_tool_call and not full_content:
+                sys = system + finalize_system_suffix("max_iters")
+                async for chunk in self._provider.stream_chat(working, tools=None, system=sys):
+                    if chunk.reasoning:
+                        yield ThinkingEvent(delta=chunk.reasoning)
+                    if chunk.content:
+                        yield chunk.content
+                    if chunk.is_final:
+                        self.usage.add(chunk.usage)
+                return
+
             if not response.is_tool_call:
                 return
             if finalize:
@@ -771,7 +838,7 @@ class Agent:
                     always = tool.consent_always(**tc.arguments) if tool else False
                     if not always and is_granted(sess_id, scope):
                         allowed_calls.append(tc)
-                        yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary=_format_args(tc.arguments), state="start")
+                        yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary=_format_args(tc.arguments), intent=str(tc.arguments.get("intent", "") or ""), state="start")
                         continue
                     detail = _format_args(tc.arguments)
                     ok = True
@@ -802,7 +869,7 @@ class Agent:
                     if not always:
                         record_grant(sess_id, scope)
                 allowed_calls.append(tc)
-                yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary=_format_args(tc.arguments), state="start")
+                yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary=_format_args(tc.arguments), intent=str(tc.arguments.get("intent", "") or ""), state="start")
 
             results: list[ToolResult] = await self._executor.execute(allowed_calls) if allowed_calls else []
             had_error = any(getattr(r, "is_error", False) for r in results)
@@ -820,6 +887,7 @@ class Agent:
                     tool_call_id=r.tool_call_id,
                 ))
 
+            enforce_context_budget(working)  # 新 tool result 进上下文前管控体积，防撑爆
             monitor.record(tool_calls, had_error)
 
             # 反思后仍重复同一操作 → 二次强提醒，逼它换路

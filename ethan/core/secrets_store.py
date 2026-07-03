@@ -135,7 +135,8 @@ def all_secret_values(min_len: int = _MIN_MASK_LEN) -> list[str]:
         values = _scan_secret_values()
         _values_cache = (sig, values)
 
-    cleaned = {v for v in values if len(v) >= min_len}
+    cleaned = {v for v in values if len(v) >= min_len
+               and not v.startswith(("http://", "https://"))}  # 公开 URL 不是 secret
     return sorted(cleaned, key=len, reverse=True)
 
 
