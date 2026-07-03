@@ -51,9 +51,9 @@ CDN_REGION="auto"
 
 ## 使用方法
 
-**单文件上传（指定 object key）：**
+**飞书图片上传（标准路径 ethan/image/）：**
 ```bash
-python ~/.ethan/skills/upload-cdn/scripts/upload_cdn.py /path/to/image.png images/image.png
+python ~/.ethan/skills/upload-cdn/scripts/upload_cdn.py /path/to/image.png "ethan/image/$(basename /path/to/image.png)"
 ```
 
 **单文件上传（自动 key = 文件名）：**
