@@ -1,7 +1,7 @@
 ---
 name: agent-browser
-trigger: "浏览器|打开网页|网页操作|自动填表|网页截图|抓取网页|爬网页|登录网站|操作浏览器|web 自动化|browser|navigate|screenshot|scrape|fill form|automate web|点击页面|读网页"
-description: "用 agent-browser CLI 操控浏览器：打开网页、点击/填表、读取内容、截图、跑 JS。专为 AI agent 设计，snapshot 输出极省 token（~300 vs 全 DOM 的 ~4000）。支持持久 profile 复用登录态。当用户要操作网页、自动化浏览、抓取页面、登录某网站时使用。"
+trigger: "抓取网页|爬网页|网页自动化脚本|批量抓取|多步网页流程|遍历页面|agent-browser|browser script|scrape|automate web|登录网站|网页脚本"
+description: "兜底浏览器技能：用 agent-browser CLI 操控内置独立 Chrome（自带 profile，与用户本机 Chrome 隔离）。打开网页、点击/填表、读取内容、截图、跑 JS。snapshot 输出极省 token（~300 vs 全 DOM 的 ~4000）。当 use-browser 不可用（未装扩展/server 不在本机）、需要隔离 profile、或做批量抓取/多步脚本时使用。日常浏览器操作优先用 use-browser。"
 metadata:
   requires:
     bins: ["agent-browser"]
@@ -9,7 +9,14 @@ metadata:
 
 # agent-browser
 
-用 `agent-browser` 这个原生 CLI 操控真实 Chrome。守护进程在命令之间常驻，所以多条命令会复用同一个浏览器会话。
+**定位：兜底浏览器技能**。日常浏览器操作（点击、填表、截图、接管当前 tab）优先用 `use-browser`——它能复用用户本机 Chrome 的真实 cookie 和登录态。只有以下情况才用本技能：
+
+- 本机没装 Ethan Browser 扩展 / 扩展没连上
+- server 不在本机（远程跑、没法连本机扩展）
+- 需要一个**隔离的独立 profile**（不想动用户日常 Chrome、或要测干净登录流程）
+- 批量抓取 / 多步网页脚本（agent-browser CLI 更适合写循环）
+
+用 `agent-browser` 这个原生 CLI 操控内置独立 Chrome。守护进程在命令之间常驻，所以多条命令会复用同一个浏览器会话。
 
 ## 前置检查（第一次用先做）
 

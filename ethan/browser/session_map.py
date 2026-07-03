@@ -25,11 +25,12 @@ _SWEEP_INTERVAL = 5 * 60  # 每 5min 扫一次
 
 
 class _Entry:
-    __slots__ = ("ethan_session_id", "last_active")
+    __slots__ = ("ethan_session_id", "last_active", "step_count")
 
     def __init__(self, ethan_session_id: str):
         self.ethan_session_id = ethan_session_id
         self.last_active = time.monotonic()
+        self.step_count = 0
 
 
 class SessionMap:
@@ -46,6 +47,18 @@ class SessionMap:
         entry = self._entries.get(browser_session_id)
         if entry is not None:
             entry.last_active = time.monotonic()
+
+    def increment_step(self, browser_session_id: str) -> int:
+        """page 操作计步，返回当前总步数。"""
+        entry = self._entries.get(browser_session_id)
+        if entry is None:
+            return 0
+        entry.step_count += 1
+        return entry.step_count
+
+    def get_step_count(self, browser_session_id: str) -> int:
+        entry = self._entries.get(browser_session_id)
+        return entry.step_count if entry else 0
 
     def unbind(self, browser_session_id: str) -> None:
         self._entries.pop(browser_session_id, None)
