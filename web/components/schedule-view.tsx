@@ -27,6 +27,8 @@ export function ScheduleView() {
   const [confirmState, setConfirmState] = useState<{ open: boolean; id: string }>({ open: false, id: "" });
   const [scheduledSessions, setScheduledSessions] = useState<SessionInfo[]>([]);
   const [sessionsExpanded, setSessionsExpanded] = useState(false);
+  const [heartbeatSessions, setHeartbeatSessions] = useState<SessionInfo[]>([]);
+  const [heartbeatExpanded, setHeartbeatExpanded] = useState(false);
   const [renameDialog, setRenameDialog] = useState<{ open: boolean; id: string; currentName: string }>({ open: false, id: "", currentName: "" });
 
   const loadData = useCallback(async () => {
@@ -45,6 +47,7 @@ export function ScheduleView() {
     loadData();
     fetchSessions(100).then(all => {
       setScheduledSessions(all.filter(s => s.title.startsWith("[定时]")));
+      setHeartbeatSessions(all.filter(s => s.title.startsWith("[心跳]")));
     }).catch(e => console.error("Failed to load scheduled sessions", e));
   }, [loadData]);
 
@@ -239,7 +242,7 @@ export function ScheduleView() {
             ) : (
               <ChevronRight className="h-4 w-4 text-muted-foreground" />
             )}
-            历史对话记录 ({scheduledSessions.length})
+            定时任务对话记录 ({scheduledSessions.length})
           </button>
           {sessionsExpanded && (
             <div className="divide-y divide-border/30">
@@ -250,6 +253,48 @@ export function ScheduleView() {
                   const displayTitle = s.title.startsWith("[定时] ")
                     ? s.title.slice("[定时] ".length)
                     : s.title.slice("[定时]".length);
+                  const date = new Date(s.updated_at * 1000).toLocaleString("zh-CN", {
+                    year: "numeric", month: "2-digit", day: "2-digit",
+                    hour: "2-digit", minute: "2-digit",
+                  });
+                  return (
+                    <button
+                      key={s.id}
+                      className="w-full flex items-center justify-between px-4 py-2.5 text-sm hover:bg-muted/30 transition-colors text-left"
+                      onClick={() => router.push(`/chat/${s.id}`)}
+                    >
+                      <span className="truncate mr-4 text-foreground/90">{displayTitle}</span>
+                      <span className="shrink-0 text-xs text-muted-foreground">{date}</span>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Heartbeat sessions */}
+        <div className="mt-4 border border-border/40 rounded-lg overflow-hidden">
+          <button
+            className="w-full flex items-center gap-2 px-4 py-3 text-sm font-medium bg-muted/20 hover:bg-muted/40 transition-colors text-left"
+            onClick={() => setHeartbeatExpanded(v => !v)}
+          >
+            {heartbeatExpanded ? (
+              <ChevronDown className="h-4 w-4 text-muted-foreground" />
+            ) : (
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            )}
+            心跳对话记录 ({heartbeatSessions.length})
+          </button>
+          {heartbeatExpanded && (
+            <div className="divide-y divide-border/30">
+              {heartbeatSessions.length === 0 ? (
+                <div className="px-4 py-3 text-sm text-muted-foreground">暂无心跳对话记录</div>
+              ) : (
+                heartbeatSessions.map(s => {
+                  const displayTitle = s.title.startsWith("[心跳] ")
+                    ? s.title.slice("[心跳] ".length)
+                    : s.title.slice("[心跳]".length);
                   const date = new Date(s.updated_at * 1000).toLocaleString("zh-CN", {
                     year: "numeric", month: "2-digit", day: "2-digit",
                     hour: "2-digit", minute: "2-digit",
