@@ -67,6 +67,18 @@ class RoutingConfig(BaseModel):
     fast_base_tools: list[str] = Field(default_factory=lambda: [
         "file_read", "file_write", "skill_read", "skill_list", "find_tools",
     ])  # fast 档永远挂载的基础系统工具；find_tools 用于「规则工具不够时」兜底激活进阶工具
+    medium_base_tools: list[str] = Field(default_factory=lambda: [
+        # 常用核心工具：medium/full 档的初始广播集。罕用工具（browser/background_task/secrets/
+        # skill_create/config/install_skill/ui_card/knowledge_add/delegate_coding）不在初始集里，
+        # 模型按需调 find_tools 激活，避免每请求白白广播约 2600 tokens 的 schema。
+        "shell", "web_search", "web_fetch",
+        "file_read", "file_write", "file_list",
+        "skill_read", "skill_list", "find_tools",
+        "rg_search", "fd_find",
+        "knowledge_search", "knowledge_read",
+        "memory_write", "procedure_write", "profile_update",
+        "schedule_create", "schedule_list", "schedule_remove",
+    ])
     fast_rules: list[FastRule] = Field(default_factory=lambda: [
         FastRule(
             name="智能家居控制",
@@ -109,8 +121,9 @@ class DefaultsConfig(BaseModel):
 
 
 class WebSearchToolConfig(BaseModel):
-    provider: str = "duckduckgo"
-    api_key: str = ""
+    provider: str = "duckduckgo"  # "duckduckgo" | "tavily" | "searxng"
+    api_key: str = ""  # tavily 用
+    base_url: str = ""  # searxng 用，如 http://localhost:8888（自建）或第三方现成实例地址
 
 class ToolsConfig(BaseModel):
     web_search: WebSearchToolConfig = Field(default_factory=WebSearchToolConfig)
@@ -346,6 +359,16 @@ def _apply_env_overrides(raw: dict) -> None:
     if "glm" in providers and not providers["glm"].get("base_url"):
         providers["glm"]["base_url"] = "https://open.bigmodel.cn/api/anthropic"
         providers["glm"]["disable_prompt_cache"] = True
+
+    # SearXNG web_search 后端（可选）：docker-compose 常用环境变量配置，免得手改 config.yaml。
+    # 只在 config.yaml 未显式配置时填充；SEARXNG_BASE_URL 存在即视为想用 searxng，自动切 provider。
+    tools = raw.setdefault("tools", {})
+    ws = tools.setdefault("web_search", {})
+    searxng_url = os.environ.get("SEARXNG_BASE_URL", "")
+    if searxng_url and not ws.get("base_url"):
+        ws["base_url"] = searxng_url
+        if not ws.get("provider"):
+            ws["provider"] = "searxng"
 
     # 代理：环境变量 ETHAN_PROXY 覆盖
     proxy_env = os.environ.get("ETHAN_PROXY", "")
