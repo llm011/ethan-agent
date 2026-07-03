@@ -200,7 +200,7 @@ async def _handle_message(event_data: dict) -> None:
 
     # ── /btw：顺带一问——不带历史、不带 cold facts 的单轮轻量查询 ──
     # 解析放在 /command 之前，因为 /btw 需要走完整 agent 流程（只是上下文为空）。
-    from ethan.interface.channel_commands import CommandContext, handle_command, is_command, is_btw, btw_question
+    from ethan.interface.channel_commands import CommandContext, handle_command, is_command, is_btw, btw_question, is_review, review_target
     btw_mode = False
     if is_btw(text):
         q = btw_question(text)
@@ -209,6 +209,17 @@ async def _handle_message(event_data: dict) -> None:
             return
         btw_mode = True
         text = q
+
+    # ── /review：不带历史、强制触发 code-review 技能 ──
+    # 把文本改写成含 trigger 关键词的形式，让 skill matcher 自然命中 code-review 技能。
+    # 行为同 /btw：清空历史上下文，不拉群消息背景。
+    elif is_review(text):
+        target = review_target(text)
+        if not target:
+            await _send_reply(chat_id, "用法：/review <PR/MR 链接>，例如：/review https://github.com/foo/bar/pull/123")
+            return
+        btw_mode = True  # 复用 btw_mode：不带历史、不拉群消息
+        text = f"帮我 code review 这个 PR/MR：{target}"
 
     # ── /command：以 / 开头的命令先于 Agent 处理（不加思考表情，直接回复）──
     if is_command(text):
