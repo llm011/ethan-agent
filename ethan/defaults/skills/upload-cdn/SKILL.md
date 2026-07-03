@@ -51,14 +51,11 @@ CDN_REGION="auto"
 
 ## 使用方法
 
-**飞书图片上传（标准路径 ethan/image/）：**
-```bash
-python ~/.ethan/skills/upload-cdn/scripts/upload_cdn.py /path/to/image.png "ethan/image/$(basename /path/to/image.png)"
-```
+> **规则：所有上传统一使用 `ethan/upload/` 路径前缀，不要用裸文件名作为 key。**
 
-**单文件上传（自动 key = 文件名）：**
+**上传图片/文件：**
 ```bash
-python ~/.ethan/skills/upload-cdn/scripts/upload_cdn.py /path/to/report.pdf
+python ~/.ethan/skills/upload-cdn/scripts/upload_cdn.py /path/to/file.png "ethan/upload/$(basename /path/to/file.png)"
 ```
 
 **批量上传（shell 循环）：**
