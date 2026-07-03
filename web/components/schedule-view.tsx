@@ -1,16 +1,24 @@
-
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { ScheduleJob, fetchSchedules, deleteSchedule, patchSchedule, fetchSessions, SessionInfo } from "@/lib/api";
+import { ScheduleJob, fetchSchedules, deleteSchedule, patchSchedule, renameSchedule, fetchSessions, SessionInfo } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Loader2, RefreshCw, Play, Pause, Trash2, Clock, TerminalSquare, Hash, MessageSquare, ChevronDown, ChevronRight } from "lucide-react";
+import { Loader2, RefreshCw, Play, Pause, Trash2, Clock, TerminalSquare, Hash, MessageSquare, ChevronDown, ChevronRight, Pencil } from "lucide-react";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { formatTrigger, formatNextRun } from "@/lib/utils";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 
 export function ScheduleView() {
   const router = useRouter();
@@ -19,6 +27,7 @@ export function ScheduleView() {
   const [confirmState, setConfirmState] = useState<{ open: boolean; id: string }>({ open: false, id: "" });
   const [scheduledSessions, setScheduledSessions] = useState<SessionInfo[]>([]);
   const [sessionsExpanded, setSessionsExpanded] = useState(false);
+  const [renameDialog, setRenameDialog] = useState<{ open: boolean; id: string; currentName: string }>({ open: false, id: "", currentName: "" });
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -67,6 +76,53 @@ export function ScheduleView() {
     }
   };
 
+  const openRename = (job: ScheduleJob) => {
+    setRenameDialog({ open: true, id: job.id, currentName: job.name });
+  };
+
+  const doRename = async (newName: string) => {
+    const id = renameDialog.id;
+    setRenameDialog({ open: false, id: "", currentName: "" });
+    setJobs(prev => prev.map(j => j.id === id ? { ...j, name: newName } : j));
+    try {
+      await renameSchedule(id, newName);
+    } catch {
+      await loadData();
+    }
+  };
+
+  function RenameDialog({ open, currentName, onConfirm, onCancel }: {
+    open: boolean; currentName: string; onConfirm: (name: string) => void; onCancel: () => void
+  }) {
+    const [inputValue, setInputValue] = useState(currentName);
+    useEffect(() => {
+      if (open) setInputValue(currentName);
+    }, [open, currentName]);
+    return (
+      <Dialog open={open} onOpenChange={(o: boolean) => !o && onCancel()}>
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>重命名定时任务</DialogTitle>
+            <DialogDescription className="mt-1">将 &ldquo;{currentName}&rdquo; 改为：</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 py-2">
+            <Input
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              placeholder="输入新名称"
+              onKeyDown={(e) => e.key === "Enter" && inputValue.trim() && onConfirm(inputValue.trim())}
+              autoFocus
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={onCancel}>取消</Button>
+            <Button onClick={() => inputValue.trim() && onConfirm(inputValue.trim())} disabled={!inputValue.trim()}>确认</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
   return (
     <div className="flex flex-col h-full bg-background text-foreground">
       <ConfirmDialog
@@ -76,6 +132,12 @@ export function ScheduleView() {
         confirmLabel="删除"
         onConfirm={doRemoveJob}
         onCancel={() => setConfirmState({ open: false, id: "" })}
+      />
+      <RenameDialog
+        open={renameDialog.open}
+        currentName={renameDialog.currentName}
+        onConfirm={doRename}
+        onCancel={() => setRenameDialog({ open: false, id: "", currentName: "" })}
       />
       <header className="h-12 border-b border-border flex items-center px-4 justify-between shrink-0">
         <h1 className="font-semibold text-lg">定时任务 (Schedules)</h1>
@@ -102,9 +164,20 @@ export function ScheduleView() {
                     <CardTitle className="text-base font-semibold leading-tight line-clamp-2 pr-2">
                       {job.name}
                     </CardTitle>
-                    <Badge variant={job.status === "active" ? "default" : "secondary"} className="shrink-0 text-[10px]">
-                      {job.status === "active" ? "运行中" : "已暂停"}
-                    </Badge>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <Badge variant={job.status === "active" ? "default" : "secondary"} className="text-[10px]">
+                        {job.status === "active" ? "运行中" : "已暂停"}
+                      </Badge>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={() => openRename(job)}
+                        title="重命名"
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </Button>
+                    </div>
                   </div>
                   <CardDescription className="flex items-center gap-1.5 mt-2 text-xs">
                     <Clock className="h-3 w-3" />

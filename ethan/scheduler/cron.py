@@ -109,3 +109,11 @@ class Scheduler:
             return True
         except Exception:
             return False
+
+    def modify_name(self, job_id: str, new_name: str) -> bool:
+        """修改定时任务的显示名称（持久化到 SQLite）。"""
+        try:
+            self._scheduler.modify_job(job_id, name=new_name)
+            return True
+        except Exception:
+            return False

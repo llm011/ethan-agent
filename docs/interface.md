@@ -82,7 +82,7 @@ CLI 内部维护 `WorkingMemory` 实例：
 | `/chat/[id]` | 指定会话的对话界面，支持流式输出和工具调用可视化；消息气泡显示 TTFT 耗时 |
 | `/memory` | 查看/编辑持久记忆，三个 Tab：Facts / Episodes / Procedures；支持编辑、删除，内容 Markdown 渲染 |
 | `/knowledge` | 知识库管理（查询、上传、删除文档） |
-| `/schedule` | 定时任务列表，支持暂停/恢复/删除 |
+| `/schedule` | 定时任务列表，支持暂停/恢复/删除/重命名 |
 | `/skills` | Skill 列表及内容预览 |
 | `/sessions` | 历史会话列表，支持按标题搜索 |
 | `/settings` | 配置项：代理、max_tokens、max_tool_iterations、fast-path 关键词、心跳配置、System Prompt 预览 |
