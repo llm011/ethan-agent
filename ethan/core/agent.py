@@ -553,12 +553,12 @@ class Agent:
             max_iters = routing.fast_max_iters
         elif route == "medium":
             system = self._build_system(working, fast=False)
-            wanted = set(routing.medium_base_tools) if routing.medium_base_tools else None
+            wanted = set(routing.base_tools) if routing.base_tools else None
             tools_list = [t for t in self._registry.all() if t.name in wanted] if wanted else self._registry.all()
             max_iters = routing.medium_max_iters
         else:
             system = self._build_system(working, fast=False)
-            wanted = set(routing.medium_base_tools) if routing.medium_base_tools else None
+            wanted = set(routing.base_tools) if routing.base_tools else None
             tools_list = [t for t in self._registry.all() if t.name in wanted] if wanted else self._registry.all()
             # 实时读取，使 config_set 改的迭代上限立即生效（无需重建 Agent）
             max_iters = get_config().defaults.max_tool_iterations

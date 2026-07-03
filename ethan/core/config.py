@@ -67,10 +67,11 @@ class RoutingConfig(BaseModel):
     fast_base_tools: list[str] = Field(default_factory=lambda: [
         "file_read", "file_write", "skill_read", "skill_list", "find_tools",
     ])  # fast 档永远挂载的基础系统工具；find_tools 用于「规则工具不够时」兜底激活进阶工具
-    medium_base_tools: list[str] = Field(default_factory=lambda: [
-        # 常用核心工具：medium/full 档的初始广播集。罕用工具（browser/background_task/secrets/
-        # skill_create/config/install_skill/ui_card/knowledge_add/delegate_coding）不在初始集里，
-        # 模型按需调 find_tools 激活，避免每请求白白广播约 2600 tokens 的 schema。
+    base_tools: list[str] = Field(default_factory=lambda: [
+        # 常用核心工具：medium/full 档的初始广播集（两档共用同一份白名单）。
+        # 罕用工具（browser/background_task/secrets/skill_create/config/install_skill/
+        # ui_card/knowledge_add/delegate_coding）不在初始集里，模型按需调 find_tools 激活，
+        # 避免每请求白白广播约 2600 tokens 的 schema。
         "shell", "web_search", "web_fetch",
         "file_read", "file_write", "file_list",
         "skill_read", "skill_list", "find_tools",
