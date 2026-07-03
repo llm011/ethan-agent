@@ -16,6 +16,10 @@ import re
 from collections import deque
 
 from ethan.interface.lark_render import _render_tool_msg_content
+from ethan.interface.lark_tool_trace import (
+    sanitize_args_summary,
+    sanitize_result_preview,
+)
 from ethan.interface.lark_send import (
     _delete_message,
     _edit_message,
@@ -56,6 +60,20 @@ def _looks_like_tool_trace(text: str) -> bool:
     return tool_lines >= 2
 
 _lark_chat_map: dict[str, str] = {}  # chat_id -> session_id, in-memory cache
+
+# chat_id -> 串行锁。同一飞书 chat 连发多条消息时，Agent 处理必须排队（否则并发改同一
+# session、流式卡片互相覆盖、/stop 登记混乱）。命令路径（/new /stop 等）不经锁，保持即时响应。
+_lark_chat_locks: dict[str, asyncio.Lock] = {}
+
+
+def _get_chat_lock(chat_id: str) -> asyncio.Lock:
+    """取（或创建）该 chat 的串行锁。锁对象复用，跨消息持久。"""
+    lock = _lark_chat_locks.get(chat_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _lark_chat_locks[chat_id] = lock
+    return lock
+
 
 # chat_id -> 正在处理该 chat 消息的 Agent task 集合。供 /stop 取消进行中的生成。
 # 事件分发是 fire-and-forget（lark_events 里 asyncio.create_task(_handle_message)），同一 chat
@@ -177,6 +195,14 @@ async def _handle_message(event_data: dict) -> None:
     # 幂等去重：飞书 at-least-once 重投同一事件时直接丢弃，避免重复处理（重复回复 + 双份 token 统计）。
     if _already_handled(message_id):
         logger.info("[Lark] duplicate event dropped: message_id=%s", message_id)
+        return
+
+    # 过滤过期事件：进程重启后 _seen_message_ids 清空，lark-cli 重连会重放旧消息；
+    # 超过 60 秒的消息直接丢弃，避免 restart 后处理历史命令（如 /help）刷屏。
+    import time as _t
+    _create_ms = int(event_data.get("create_time", "0") or "0")
+    if _create_ms and (_t.time() * 1000 - _create_ms) > 60_000:
+        logger.info("[Lark] stale event dropped: message_id=%s age=%ds", message_id, int((_t.time() * 1000 - _create_ms) / 1000))
         return
 
     # 发消息者 open_id（飞书按 open_id 认主人）。lark-cli 展平后字段名可能是
@@ -389,6 +415,36 @@ async def _handle_message(event_data: dict) -> None:
             await _send_reply(chat_id, reply)
         return
 
+    # ── 同 chat 串行：Agent 处理必须排队 ──
+    # 同一飞书 chat 连发多条消息时，若并发跑会互相踩：并发改同一 session、流式卡片
+    # 互相覆盖、/stop 登记混乱。命令路径不经锁（已 return），保持即时响应；这里只串行化
+    # 真正的 Agent 生成。锁按 chat_id 复用，跨消息持久；message_id 去重已在锁外完成，
+    # 重投事件不会进到这里两次。
+    async with _get_chat_lock(chat_id):
+        await _handle_agent_message(
+            event_data,
+            chat_id=chat_id,
+            message_id=message_id,
+            text=text,
+            sender_open_id=sender_open_id,
+            is_owner=is_owner,
+            owner_claimed=owner_claimed,
+            btw_mode=btw_mode,
+        )
+
+
+async def _handle_agent_message(
+    event_data: dict,
+    *,
+    chat_id: str,
+    message_id: str,
+    text: str,
+    sender_open_id: str,
+    is_owner: bool,
+    owner_claimed: bool,
+    btw_mode: bool,
+) -> None:
+    """真正的 Agent 流式处理（在持锁串行下运行）。_handle_message 完成去重/命令/主人判定后调本函数。"""
     # 立刻加思考表情，保存 reaction_id 以便回复后删除
     reaction_id = await _send_reaction(message_id)
 
@@ -680,6 +736,11 @@ async def _handle_message(event_data: dict) -> None:
                 if reaction_id and message_id:
                     await _remove_reaction(message_id, reaction_id)
                     reaction_id = None
+                # 工具进度消息上若有旧 reaction，先移除再给答案卡片加新的
+                if reply_reaction_id and reply_reaction_msg:
+                    await _remove_reaction(reply_reaction_msg, reply_reaction_id)
+                    reply_reaction_id = None
+                    reply_reaction_msg = None
                 # 给答案卡片加"打字中" THINKING 表情
                 reply_reaction_id = await _send_reaction(answer_msg_id)
                 reply_reaction_msg = answer_msg_id
@@ -757,14 +818,17 @@ async def _handle_message(event_data: dict) -> None:
                     display_name = _TOOL_DISPLAY.get(chunk.tool_name, f"🔧 {chunk.tool_name}")
                     tool_name_line = f"**{display_name}**"
                     intent = (chunk.intent or "").strip()
+                    # args_summary 可能含命令行里的 token/--secret=xxx，刷进飞书卡片会泄漏。
+                    # 先过 sanitize_args_summary 脱敏再展示（行内敏感赋值 → [redacted]）。
+                    safe_args = sanitize_args_summary(chunk.args_summary or "")
                     if intent:
                         tool_name_line += f" · _{intent}_"
-                        if chunk.args_summary:
-                            brief = chunk.args_summary if len(chunk.args_summary) <= 60 else chunk.args_summary[:60] + "…"
+                        if safe_args:
+                            brief = safe_args if len(safe_args) <= 60 else safe_args[:60] + "…"
                             tool_name_line += f" ({brief})"
-                    elif chunk.args_summary:
+                    elif safe_args:
                         # 模型没给 intent 时兜底显示参数摘要
-                        brief = chunk.args_summary if len(chunk.args_summary) <= 60 else chunk.args_summary[:60] + "…"
+                        brief = safe_args if len(safe_args) <= 60 else safe_args[:60] + "…"
                         tool_name_line += f" · {brief}"
                     # 两个工具之间加空行
                     tool_text = (tool_text.rstrip() + "\n\n" + tool_name_line + "\n") if tool_text else tool_name_line + "\n"
@@ -777,10 +841,11 @@ async def _handle_message(event_data: dict) -> None:
                         if step["tool"] == chunk.tool_name and step["state"] == "running":
                             step["state"] = chunk.state
                             step["duration_ms"] = duration_ms
-                            step["result_preview"] = chunk.result_preview or ""
+                            # result_preview 可能回显含 token 的命令/URL，脱敏后再存/展示
+                            step["result_preview"] = sanitize_result_preview(chunk.result_preview or "")
                             break
                     mark = "✓" if chunk.state == "done" else "✗"
-                    preview = (chunk.result_preview or "").replace("\n", " ").replace("`", "'")[:200]
+                    preview = sanitize_result_preview(chunk.result_preview or "").replace("\n", " ").replace("`", "'")[:200]
                     result_line = f"_{mark} {preview}_" if preview else f"_{mark} {duration_ms}ms_"
                     tool_text = tool_text.rstrip() + "\n" + result_line
                     # 有其它工具仍在运行，追加 thinking 占位
