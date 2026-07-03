@@ -16,37 +16,142 @@ from ethan.interface.lark_render import (
 
 logger = logging.getLogger(__name__)
 
+# 授权引导卡片节流：同一 chat_id 5 分钟内只发一次
+_AUTH_CARD_THROTTLE_SECONDS = 300
+_auth_card_sent: dict[str, float] = {}  # chat_id -> last_sent_timestamp
+
+
+def _is_lark_auth_error(err_text: str, out_text: str, exit_code: int) -> bool:
+    """判断 lark-cli 输出是否为鉴权类错误（需发授权引导卡片）。
+
+    匹配场景：
+    1. stderr 含 "Error: need_user_authorization"（用户未登录）
+    2. stdout JSON 含 error.type == "auth_error"
+    3. stdout JSON 含 error.code 为 99991663/99991661 等鉴权码
+    4. stdout JSON 含 error.message 含 "User token has expired" / "Token does not exist"
+
+    不触发场景：
+    - 网络/参数错误（api_error / validation_error）
+    - not found
+    - JSON parse 错误
+    """
+    import re as _re
+
+    # 场景 1：用户未登录（stderr 直接报错）
+    if "need_user_authorization" in err_text or "No user logged in" in err_text:
+        return True
+
+    # 场景 2-4：解析 stdout JSON
+    if not out_text:
+        return False
+    try:
+        data = json.loads(out_text)
+        if data.get("ok"):
+            return False  # 成功响应，不是错误
+        err = data.get("error") or {}
+        # 场景 2：error.type
+        if err.get("type") == "auth_error":
+            return True
+        # 场景 3：error.code（99991663 user auth missing, 99991661 token invalid）
+        code = err.get("code")
+        if isinstance(code, int) and code in (99991663, 99991661):
+            return True
+        # 场景 4：error.message
+        msg = err.get("message", "") or ""
+        if "User token has expired" in msg or "Token does not exist" in msg:
+            return True
+        return False
+    except (json.JSONDecodeError, TypeError):
+        return False
+
+
+async def _send_auth_guidance_card(chat_id: str) -> bool:
+    """发送授权引导卡片。同一 chat_id 5 分钟内只发一次，返回是否真的发了。"""
+    import time as _time
+
+    now = _time.time()
+    last_sent = _auth_card_sent.get(chat_id, 0)
+    if now - last_sent < _AUTH_CARD_THROTTLE_SECONDS:
+        logger.debug("[Lark] auth guidance card throttled for chat_id=%s", chat_id)
+        return False
+
+    card = {
+        "schema": "2.0",
+        "header": {
+            "title": {"tag": "plain_text", "content": "需要飞书用户授权"},
+            "template": "red",
+        },
+        "body": {
+            "elements": [
+                {
+                    "tag": "markdown",
+                    "content": (
+                        "当前操作需要用户身份授权，但检测到用户未登录或授权已过期。\n\n"
+                        "**解决方法：** 在终端执行以下命令完成授权：\n"
+                        "```\nlark-cli auth login --domain im\n```\n"
+                        "按提示在浏览器中完成授权后，重新尝试即可。"
+                    ),
+                }
+            ]
+        },
+    }
+    msg_id = await _send_interactive_card(chat_id, card)
+    if msg_id:
+        _auth_card_sent[chat_id] = now
+        logger.info("[Lark] sent auth guidance card to chat_id=%s", chat_id)
+        return True
+    return False
+
 
 async def _send_reaction(message_id: str) -> str | None:
-    """给消息添加 THINKING 表情，返回 reaction_id 以便后续删除。"""
+    """给消息添加 THINKING_FACE 表情，返回 reaction_id 以便后续删除。"""
+    from lark_oapi.api.im.v1 import (
+        CreateMessageReactionRequest,
+        CreateMessageReactionRequestBody,
+    )
+    from lark_oapi.api.im.v1.model.emoji import Emoji
+
+    client = _lark_client()
+    if client is None:
+        return None
+
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "lark-cli", "im", "reactions", "create",
-            "--as", "bot",
-            "--params", json.dumps({"message_id": message_id}),
-            "--data", json.dumps({"reaction_type": {"emoji_type": "THINKING"}}),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
+        req = (
+            CreateMessageReactionRequest.builder()
+            .message_id(message_id)
+            .request_body(
+                CreateMessageReactionRequestBody.builder()
+                .reaction_type(Emoji.builder().emoji_type("THINKING_FACE").build())
+                .build()
+            )
+            .build()
         )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
-        data = json.loads(stdout.decode(errors="replace"))
-        return data.get("data", {}).get("reaction_id")
+        resp = await asyncio.to_thread(client.im.v1.message_reaction.create, req)
+        if resp.success() and resp.data:
+            return resp.data.reaction_id
+        logger.debug("Failed to add reaction to %s: code=%s msg=%s", message_id, resp.code, resp.msg)
+        return None
     except Exception:
         logger.debug("Failed to add reaction to %s", message_id, exc_info=True)
         return None
 
 
 async def _remove_reaction(message_id: str, reaction_id: str) -> None:
-    """删除之前添加的 THINKING 表情。"""
+    """删除之前添加的 THINKING_FACE 表情。"""
+    from lark_oapi.api.im.v1 import DeleteMessageReactionRequest
+
+    client = _lark_client()
+    if client is None:
+        return
+
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "lark-cli", "im", "reactions", "delete",
-            "--as", "bot",
-            "--params", json.dumps({"message_id": message_id, "reaction_id": reaction_id}),
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
+        req = (
+            DeleteMessageReactionRequest.builder()
+            .message_id(message_id)
+            .reaction_id(reaction_id)
+            .build()
         )
-        await asyncio.wait_for(proc.wait(), timeout=5)
+        await asyncio.to_thread(client.im.v1.message_reaction.delete, req)
     except Exception:
         pass
 
@@ -429,10 +534,16 @@ async def _send_reply(chat_id: str, text: str) -> str | None:
             "--markdown", text,
             "--as", "bot",
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
         )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
-        data = json.loads(stdout.decode(errors="replace"))
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=15)
+        out_text = stdout.decode(errors="replace")
+        err_text = stderr.decode(errors="replace")
+        # 鉴权失败 → 发授权引导卡片（节流）
+        if _is_lark_auth_error(err_text, out_text, proc.returncode or 0):
+            logger.warning("[Lark] _send_reply auth error, sending guidance card to chat %s", chat_id)
+            await _send_auth_guidance_card(chat_id)
+        data = json.loads(out_text)
         return data.get("data", {}).get("message_id")
     except Exception:
         logger.exception("Failed to send Lark reply to chat %s", chat_id)
@@ -449,10 +560,15 @@ async def _fetch_message_detail(message_id: str) -> dict | None:
             "--message-ids", message_id,
             "--as", "bot",
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
         )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
-        data = json.loads(stdout.decode(errors="replace"))
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
+        out_text = stdout.decode(errors="replace")
+        err_text = stderr.decode(errors="replace")
+        # mget 用 bot 身份，不会触发 user 鉴权失败；但保留检测以备未来切到 user 身份
+        if _is_lark_auth_error(err_text, out_text, proc.returncode or 0):
+            logger.warning("[Lark] _fetch_message_detail auth error for msg %s", message_id)
+        data = json.loads(out_text)
         if not data.get("ok") and data.get("code") not in (0, None):
             return None
         d = data.get("data", {}) or {}
@@ -528,10 +644,17 @@ async def _fetch_recent_chat_messages(chat_id: str, limit: int = 10) -> list[dic
             "--no-reactions",  # 跳过 reactions 批量查询，背景上下文用不到
             "--format", "json",
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
         )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
-        raw = json.loads(stdout.decode(errors="replace"))
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
+        out_text = stdout.decode(errors="replace")
+        err_text = stderr.decode(errors="replace")
+        # 用户身份调用最易触发鉴权失败（user token 缺失/过期）→ 发授权引导卡片
+        if _is_lark_auth_error(err_text, out_text, proc.returncode or 0):
+            logger.warning("[Lark] _fetch_recent_chat_messages auth error for chat_id=%s", chat_id)
+            await _send_auth_guidance_card(chat_id)
+            return []
+        raw = json.loads(out_text)
 
         # lark-cli 返回结构：{"ok": ..., "identity": ..., "data": {"messages": [...]}}
         data = raw.get("data", raw) if isinstance(raw, dict) else {}

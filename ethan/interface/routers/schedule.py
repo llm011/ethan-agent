@@ -78,18 +78,26 @@ async def delete_schedule(job_id: str):
 
 
 class SchedulePatchRequest(BaseModel):
-    state: str
+    state: str | None = None
+    name: str | None = None
 
 
 @router.patch("/{job_id}", dependencies=[Depends(verify_token)])
 async def patch_schedule(job_id: str, req: SchedulePatchRequest):
     scheduler = get_scheduler()
-    if req.state == "paused":
-        success = scheduler.pause(job_id)
-    elif req.state == "active":
-        success = scheduler.resume(job_id)
-    else:
-        raise HTTPException(400, "Invalid state. Use 'paused' or 'active'")
-    if not success:
-        raise HTTPException(404, "Job not found or could not be updated")
+    if req.state is not None:
+        if req.state == "paused":
+            success = scheduler.pause(job_id)
+        elif req.state == "active":
+            success = scheduler.resume(job_id)
+        else:
+            raise HTTPException(400, "Invalid state. Use 'paused' or 'active'")
+        if not success:
+            raise HTTPException(404, "Job not found or could not be updated")
+    if req.name is not None:
+        new_name = req.name.strip()
+        if not new_name:
+            raise HTTPException(400, "Name must not be empty")
+        if not scheduler.modify_name(job_id, new_name):
+            raise HTTPException(404, "Job not found or could not be renamed")
     return {"ok": True}

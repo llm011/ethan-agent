@@ -26,7 +26,7 @@ Skill 从 `~/.ethan/skills/` 加载。首次运行时，`config.py` 的 `_init_d
 
 两种来源都支持两种存储格式：
 
-- **目录格式**（推荐）：`<name>/SKILL.md` 主文件 + `<name>/references/` 子目录（存放参考文档）
+- **目录格式**（推荐）：`<name>/SKILL.md` 主文件 + `<name>/references/` 子目录（存放参考文档）。命中时 `build_context` 会把 `references/*.md` 的文件名 + 一行摘要附在正文之后（pull-based：只列目录，不全量灌入），模型再用 `skill_read` 按需拉具体内容。
 - **单文件格式**（兼容旧版）：`<name>.md`
 
 ---
@@ -227,7 +227,7 @@ ethan skill create my-skill -t "k1|k2" -d "desc"  # 创建空 Skill 文件
 SkillRegistry.match("北京天气怎么样", channel="web")
     │ 渠道过滤 + 触发词匹配 → 命中 "weather-query"
     ▼
-SkillRegistry.build_context() → Skill 正文（超长截断到 3000 字符）
+SkillRegistry.build_context() → Skill 正文（超长截断到 3000 字符）+ references 文件清单（pull-based，模型按需 skill_read 拉具体内容）
     │
     ▼
 Agent._build_system() → 拼入 system prompt

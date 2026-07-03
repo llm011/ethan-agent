@@ -25,6 +25,9 @@ from ethan.tools.builtin.profile_update import ProfileUpdateTool
 from ethan.tools.builtin.schedule import ScheduleCreateTool, ScheduleListTool, ScheduleRemoveTool
 from ethan.tools.builtin.search import FdTool, RipgrepTool
 from ethan.tools.builtin.secrets import GetSecretTool, ListSecretsTool, SetSecretTool
+from ethan.tools.builtin.lark_tools import (
+    LarkCalendarEventsTool, LarkChatMessagesTool, LarkMessageSendTool,
+)
 from ethan.tools.builtin.shell import ShellTool
 from ethan.tools.builtin.skill_create import SkillCreateTool
 from ethan.tools.builtin.skill_read import SkillListTool, SkillReadTool
@@ -89,6 +92,10 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
     registry.register(BrowserSessionTool())
     registry.register(BrowserTabTool())
     registry.register(BrowserPageTool())
+    # Lark CLI wrapper tools — 模型主动调高频 lark-cli 命令（日历/群消息/发消息）
+    registry.register(LarkCalendarEventsTool())
+    registry.register(LarkChatMessagesTool())
+    registry.register(LarkMessageSendTool())
     # ui_card 在能渲染卡片的渠道注册：web/repl 走 A2UI，lark 走飞书 interactive 卡片。
     # 同一套结构化 card 数据，按渠道选渲染目标（见 UiCardTool）。api 等无渲染器的渠道不暴露。
     if channel in ("web", "repl", "lark"):

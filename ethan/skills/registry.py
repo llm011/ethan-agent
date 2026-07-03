@@ -1,6 +1,7 @@
 """Skill 注册表 — 管理已加载的 Skills，支持按关键词匹配。"""
 import hashlib
 import json
+from pathlib import Path
 
 from ethan.skills.loader import Skill, load_all_skills
 from ethan.skills.stats import SkillStats
@@ -8,6 +9,9 @@ from ethan.skills.stats import SkillStats
 # 超过此长度的 skill content 会截断，避免 token 膨胀
 # 复杂 Skill（如 HA 设备列表）需要更大空间；可在 config 里调整
 _MAX_SKILL_CONTENT = 3000
+
+# references 清单上限：超过此数量只列前 N 个 + "...还有 M 个"
+_MAX_REFERENCES_LIST = 15
 
 # 进程级 router 缓存：skill 集合不变时复用已编码锚点，避免每请求重编码
 _ROUTER_CACHE: dict[str, "EmbeddingRouter"] = {}
@@ -27,6 +31,58 @@ def _skill_fingerprint(skills: list[Skill]) -> str:
         })
     # json 确保跨进程稳定，hashlib 指纹短
     return hashlib.sha256(json.dumps(data, ensure_ascii=False).encode()).hexdigest()
+
+
+def _reference_summary(path: Path, max_len: int = 80) -> str:
+    """读 references 文件取第一段非空文本（跳过 frontmatter / 标题 / 代码块），截到 max_len 字符。
+
+    用于 build_context 的 references 清单——只给模型看「有哪些细节文档可查」，
+    让模型用 skill_read 拉具体内容（pull-based，不全量灌入正文）。
+    """
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return ""
+    lines = text.splitlines()
+    in_front = False
+    for i, ln in enumerate(lines):
+        s = ln.strip()
+        if i == 0 and s == "---":
+            in_front = True
+            continue
+        if in_front:
+            if s == "---":
+                in_front = False
+            continue
+        if not s or s.startswith("#") or s.startswith("```") or s.startswith("|"):
+            continue
+        # 去掉 markdown 强调符号
+        clean = s.lstrip("-*").strip()
+        clean = clean.split("`")[0].strip()
+        if clean:
+            return clean[:max_len] + ("…" if len(clean) > max_len else "")
+    return ""
+
+
+def _build_references_block(skill: Skill) -> str:
+    """构造 references 清单块：文件名 + 一行摘要。
+
+    超过 _MAX_REFERENCES_LIST 个文件只列前 N 个 + "...还有 M 个"。
+    无 references 返回空串。
+    """
+    refs = skill.references
+    if not refs:
+        return ""
+    shown = refs[:_MAX_REFERENCES_LIST]
+    lines = ["## References（用 skill_read 查阅详情）"]
+    for p in shown:
+        summary = _reference_summary(p)
+        suffix = f": {summary}" if summary else ""
+        lines.append(f"- {p.name}{suffix}")
+    rest = len(refs) - len(shown)
+    if rest > 0:
+        lines.append(f"- …还有 {rest} 个（用 skill_read(name=\"{skill.name}\") 看完整目录）")
+    return "\n".join(lines)
 
 
 class SkillRegistry:
@@ -148,5 +204,10 @@ class SkillRegistry:
             content = skill.content
             if len(content) > _MAX_SKILL_CONTENT:
                 content = content[:_MAX_SKILL_CONTENT] + "\n…(truncated)"
-            parts.append(f"[Skill: {skill.name}]\n{content}")
+            # references 清单追加在截断后的 content 之后，本身不参与 _MAX_SKILL_CONTENT 截断
+            refs_block = _build_references_block(skill)
+            if refs_block:
+                parts.append(f"[Skill: {skill.name}]\n{content}\n\n{refs_block}")
+            else:
+                parts.append(f"[Skill: {skill.name}]\n{content}")
         return "\n\n".join(parts)

@@ -467,6 +467,15 @@ export async function patchSchedule(jobId: string, state: "paused" | "active"): 
   if (!res.ok) throw new Error("Failed");
 }
 
+export async function renameSchedule(jobId: string, name: string): Promise<void> {
+  const res = await fetch(`${API_URL}/schedule/${jobId}`, {
+    method: "PATCH",
+    headers: headers(),
+    body: JSON.stringify({ name })
+  });
+  if (!res.ok) throw new Error("Failed");
+}
+
 export async function fetchFacts(): Promise<Fact[]> {
   const res = await fetch(`${API_URL}/memory/facts`, { headers: headers() });
   if (!res.ok) throw new Error("Failed");

@@ -128,6 +128,51 @@ def _already_handled(message_id: str) -> bool:
     return False
 
 
+# ── 转发消息缓存：批量转发(merge_forward)等消息不立即进 agent，等用户紧跟的说明消息再一起处理 ──
+# 用户在飞书里「合并转发」一批消息给 bot 时，单看这批转发内容 agent 不知道要干嘛；但用户转完
+# 一般还会紧跟一条说明（"总结下"/"这个怎么处理"）。所以转发消息只缓存不处理，等同 chat 最近的
+# 后续消息来时把缓存内容拼进其上下文。带 TTL：转完很久才发说明，转发内容多半已不相关。
+_FORWARD_MSG_TYPES = {"merge_forward", "forward", "share_chat", "system_status", "complex"}
+_FORWARD_CONTENT_RE = re.compile(
+    r"^\s*(?:\[Merged forward|---------- Forwarded message|\[System message|\[Chat card)"
+)
+_forwarded_cache: dict[str, list[tuple[str, str, float]]] = {}  # chat_id -> [(message_id, content, ts)]
+_FORWARDED_TTL = 120.0  # 秒
+
+
+def _is_forwarded_message(msg_type: str, text: str) -> bool:
+    """是否是转发/系统类消息（应缓存而非直接进 agent）。
+
+    主判据是 message_type（merge_forward 等）；兜底看 content 前缀——lark-cli 偶尔会把转发
+    消息渲染成 post/text，靠 [Merged forward…]/---------- Forwarded message 等前缀识别。
+    """
+    if (msg_type or "") in _FORWARD_MSG_TYPES:
+        return True
+    return bool(_FORWARD_CONTENT_RE.match(text or ""))
+
+
+def _cache_forwarded(chat_id: str, message_id: str, content: str) -> None:
+    """缓存一条转发消息内容，等后续说明消息来时注入。"""
+    import time as _t
+    _forwarded_cache.setdefault(chat_id, []).append((message_id, content, _t.time()))
+    logger.debug("[Lark] cached forwarded msg chat=%s msg=%s len=%d", chat_id, message_id, len(content))
+
+
+def _pop_forwarded(chat_id: str) -> str:
+    """取出并清空该 chat 所有未过期缓存转发内容，按时间正序拼接；无则返回空串。"""
+    import time as _t
+    entries = _forwarded_cache.pop(chat_id, None)
+    if not entries:
+        return ""
+    now = _t.time()
+    fresh = [c for (_mid, c, ts) in entries if now - ts <= _FORWARDED_TTL]
+    if not fresh:
+        return ""
+    if len(fresh) == 1:
+        return fresh[0]
+    return "\n\n".join(f"--- 转发消息 {i + 1} ---\n{c}" for i, c in enumerate(fresh))
+
+
 def _lark_map_file():
     from ethan.core.config import CONFIG_DIR
     return CONFIG_DIR / "memory" / "lark_sessions.json"
@@ -202,7 +247,8 @@ async def _handle_message(event_data: dict) -> None:
     # image → ![Image](img_xxx)
     # file/audio/video → <file key="file_xxx" .../> 等
     _HANDLED_TYPES = {"text", "post", "image", "file", "audio", "video"}
-    if event_data.get("message_type") not in _HANDLED_TYPES:
+    msg_type = event_data.get("message_type", "")
+    if msg_type not in _HANDLED_TYPES:
         return
 
     text = event_data.get("content", "").strip()
@@ -213,8 +259,21 @@ async def _handle_message(event_data: dict) -> None:
     message_id = event_data.get("message_id", "")
 
     # 幂等去重：飞书 at-least-once 重投同一事件时直接丢弃，避免重复处理（重复回复 + 双份 token 统计）。
+    # 放在转发缓存之前——否则重投的转发消息会被重复缓存，注入时内容翻倍。
     if _already_handled(message_id):
         logger.info("[Lark] duplicate event dropped: message_id=%s", message_id)
+        return
+
+    # ── 批量转发消息：缓存但不进 agent ──
+    # 用户「合并转发」一批消息给 bot 时，单看转发内容 agent 不知道要干嘛；但用户转完一般还会
+    # 紧跟一条说明消息（"总结下"/"这个怎么处理"）。所以转发消息只缓存，等同 chat 后续消息来时
+    # 把缓存内容拼进其上下文一起处理。message_type 命中 merge_forward 等直接判；兜底看 content
+    # 前缀（lark-cli 偶尔把转发渲染成 post/text，靠 [Merged forward…]/---------- Forwarded 识别）。
+    # 注意：post 里的转发会被 lark-cli 渲染成以 [Merged forward] 开头的可读文本，仍属此列。
+    # 转发消息故意绕过下方的 60s 过期过滤：它是「待后续说明消息消费」的暂存上下文，重连重放时
+    # 应保留而非丢弃（自有 120s TTL 兜底，超时自动失效）。
+    if _is_forwarded_message(msg_type, text):
+        _cache_forwarded(chat_id, message_id, text)
         return
 
     # 过滤过期事件：进程重启后 _seen_message_ids 清空，lark-cli 重连会重放旧消息；
@@ -248,6 +307,47 @@ async def _handle_message(event_data: dict) -> None:
     # 解析放在 /command 之前，因为 /btw 需要走完整 agent 流程（只是上下文为空）。
     from ethan.interface.channel_commands import CommandContext, handle_command, is_command, is_btw, btw_question, is_review, review_target, resolve_custom_command
     btw_mode = False
+
+    # ── /test-card：发一张带按钮的测试卡片，用于验证 card.action.trigger 事件链路 ──
+    # 点按钮后飞书回调 card.action.trigger，_handle_card_action 会回一张绿色确认卡。
+    # 调试用：链路打通后可删。
+    if text.strip().lower() in ("/test-card", "/test-card "):
+        card = {
+            "schema": "2.0",
+            "header": {
+                "title": {"tag": "plain_text", "content": "card.action.trigger 测试"},
+                "template": "blue",
+            },
+            "body": {
+                "elements": [
+                    {
+                        "tag": "markdown",
+                        "content": (
+                            "点击下面的按钮，验证飞书卡片回调事件是否打通。\n"
+                            "点击后应自动收到一张绿色确认卡。"
+                        ),
+                    },
+                    {
+                        "tag": "action",
+                        "actions": [
+                            {
+                                "tag": "button",
+                                "text": {"tag": "plain_text", "content": "🔘 点我测试"},
+                                "type": "primary",
+                                "value": {"cmd": "test"},
+                            }
+                        ],
+                    }
+                ]
+            },
+        }
+        from ethan.interface.lark_send import _send_interactive_card
+        msg_id = await _send_interactive_card(chat_id, card)
+        if msg_id:
+            logger.info("[Lark] sent test card to chat=%s msg=%s", chat_id, msg_id)
+        else:
+            logger.warning("[Lark] failed to send test card to chat=%s", chat_id)
+        return
     if is_btw(text):
         q = btw_question(text)
         if not q:
@@ -523,6 +623,13 @@ async def _handle_agent_message(
         quoted, quoted_msg_id = await _resolve_quoted_text(message_id)
         if quoted:
             agent_user_text = f"[用户引用了一条消息]\n> {quoted}\n\n{text}"
+
+        # 注入此前缓存的转发消息内容：用户「合并转发」一批消息后紧跟这条说明消息，
+        # 把缓存的转发内容拼到本轮上下文最前面，让 agent 拿到转发原文 + 本条说明一起处理。
+        # 仅进 agent 上下文，不污染存库的原始 user_msg 和标题。
+        forwarded = _pop_forwarded(chat_id)
+        if forwarded:
+            agent_user_text = f"[用户此前转发来以下消息，请结合本条说明一起处理]\n{forwarded}\n\n---\n{agent_user_text}"
 
         # 非文本消息：解析资源 key，注入明确的下载指令
         # 同时扫引用的原消息（quoted_msg_id），让 agent 能下载引用消息里的图片/文件
@@ -857,8 +964,9 @@ async def _handle_agent_message(
                         # 模型没给 intent 时兜底显示参数摘要
                         brief = safe_args if len(safe_args) <= 60 else safe_args[:60] + "…"
                         tool_name_line += f" · {brief}"
-                    # 两个工具之间加空行
-                    tool_text = (tool_text.rstrip() + "\n\n" + tool_name_line + "\n") if tool_text else tool_name_line + "\n"
+                    # 两个工具之间用 --- 分隔（_build_tool_elements 渲染成 hr 横线），
+                    # 比空行更明确地切分工具组；首工具前不加。
+                    tool_text = (tool_text.rstrip() + "\n---\n" + tool_name_line + "\n") if tool_text else tool_name_line + "\n"
                     await _update_tool_msg()
                 else:  # done / error
                     duration_ms = int(
@@ -872,8 +980,21 @@ async def _handle_agent_message(
                             step["result_preview"] = sanitize_result_preview(chunk.result_preview or "")
                             break
                     mark = "✓" if chunk.state == "done" else "✗"
-                    preview = sanitize_result_preview(chunk.result_preview or "").replace("\n", " ").replace("`", "'")[:200]
-                    result_line = f"_{mark} {preview}_" if preview else f"_{mark} {duration_ms}ms_"
+                    # 耗时格式：<1s 用 ms，否则保留 1 位小数秒（始终带在结果行，不再只在没有 preview 时显示）
+                    dur_str = f"{duration_ms}ms" if duration_ms < 1000 else f"{duration_ms/1000:.1f}s"
+                    if chunk.state == "done":
+                        # 成功是多数、轻量不抢眼：preview 截短到 80 字、换行替成空格（单行扫过）
+                        preview = sanitize_result_preview(chunk.result_preview or "").replace("\n", " ").replace("`", "'")[:80]
+                    else:
+                        # 失败是少数、醒目有价值：preview 保留 200 字、换行用字面量 \n 占位（_build_tool_elements
+                        # 把字面量 \n 还原成真换行，让多行错误堆栈作为一个 code_block 整体渲染）。
+                        # 末尾的 \n 占位会被 tool_text 拼接逻辑误判成行分隔，这里剥掉（用切片避免
+                        # str.rstrip 字符集语义误伤 preview 末尾的 n/反斜杠等正常字符）。
+                        raw_preview = sanitize_result_preview(chunk.result_preview or "").replace("`", "'")[:200].replace("\n", "\\n")
+                        if raw_preview.endswith("\\n"):
+                            raw_preview = raw_preview[:-2]
+                        preview = raw_preview
+                    result_line = f"{mark} {dur_str} · {preview}" if preview else f"{mark} {dur_str}"
                     tool_text = tool_text.rstrip() + "\n" + result_line
                     # 有其它工具仍在运行，追加 thinking 占位
                     running = [s for s in collected_tool_steps if s["state"] == "running"]
@@ -1001,3 +1122,137 @@ async def _handle_agent_message(
 
     await store.close()
     _untrack_task(chat_id, asyncio.current_task())
+
+
+# ── 多 EventKey 路由 ──────────────────────────────────────────────────────────
+# lark_events.py 把每个 EventKey 的 lark-cli 子进程解析出的 event dict 喂给 _dispatch。
+# 路由到对应 handler；新事件类型在此添加分支即可。handler 实现保持轻量（先记日志留扩展点），
+# 重逻辑仍走 _handle_message 那条线，别在这里耦合。
+async def _dispatch(event_key: str, event_data: dict) -> None:
+    """按 event_key 路由到对应 handler。
+
+    lark-cli event consume 输出的是扁平结构（见 _handle_message 注释），event_data 顶层即可取字段。
+    未知 key 走 debug 跳过，不报错——避免新事件类型上线时旧版本直接崩。
+    """
+    if event_key == "im.message.receive_v1":
+        # 收消息：复用既有完整流程（去重/命令/Agent 流式回复）。fire-and-forget 起 task，
+        # 与原 lark_events 的 asyncio.create_task(_handle_message(event)) 行为一致。
+        asyncio.create_task(_handle_message(event_data))
+    elif event_key == "im.message.message_read_v1":
+        await _handle_message_read(event_data)
+    elif event_key == "im.message.reaction.created_v1":
+        await _handle_reaction(event_data)
+    elif event_key == "card.action.trigger":
+        await _handle_card_action(event_data)
+    else:
+        logger.debug("[Lark] unknown event_key=%s skipped", event_key)
+
+
+async def _handle_message_read(event_data: dict) -> None:
+    """用户已读 bot 发的 P2P 消息。当前只记日志，留扩展点（后续可做"已读回执"等）。
+
+    lark-cli 输出扁平结构，reader/open_id、message_id 等字段直接从顶层取。
+    字段名兜底常见变体（reader_id / open_id / reader_open_id），与 _handle_message 一致风格。
+    """
+    reader_id = (
+        event_data.get("reader_id")
+        or event_data.get("reader_open_id")
+        or event_data.get("open_id")
+        or ""
+    )
+    message_id = event_data.get("message_id", "")
+    chat_id = event_data.get("chat_id", "")
+    logger.info(
+        "[Lark] message read: chat=%s msg=%s by=%s",
+        chat_id, message_id, reader_id,
+    )
+
+
+async def _handle_reaction(event_data: dict) -> None:
+    """消息被加 reaction。当前只记日志，留扩展点（后续可做"被点赞→触发某动作"等）。
+
+    lark-cli 输出扁平结构，reaction_type / operator_id / message_id 等字段直接从顶层取。
+    字段名兜底常见变体（operator_open_id / open_id），与 _handle_message 一致风格。
+    """
+    reaction_type = event_data.get("reaction_type", "")
+    operator_id = (
+        event_data.get("operator_id")
+        or event_data.get("operator_open_id")
+        or event_data.get("open_id")
+        or ""
+    )
+    message_id = event_data.get("message_id", "")
+    chat_id = event_data.get("chat_id", "")
+    logger.info(
+        "[Lark] reaction created: chat=%s msg=%s emoji=%s by=%s",
+        chat_id, message_id, reaction_type, operator_id,
+    )
+
+
+async def _handle_card_action(event_data: dict) -> None:
+    """交互卡片按钮/表单回调（card.action.trigger）。
+
+    lark-cli 输出扁平结构，顶层即可取：
+    - action_tag：button / select / input / checker
+    - action_value：JSON 字符串，按钮携带的 value
+    - action_name / form_value：表单控件名 / 表单值
+    - card_content：原始卡片 userDSL 文本（lark-cli 自动拉取的）
+    - token：30 分钟有效，最多用于 2 次卡片更新
+    - chat_id / message_id / open_id：上下文
+
+    当前只记日志 + 简单回执，把整条链路打通。后续可据 action_value 路由到
+    不同工作流（例如 action_value.cmd == "approve" → 走审批分支 → 用
+    `lark-cli api POST /open-apis/interactive/v1/card/update` 更新原卡片）。
+    现在先留扩展点，别在这里堆重逻辑。
+    """
+    action_tag = event_data.get("action_tag", "")
+    action_value_raw = event_data.get("action_value", "")
+    action_name = event_data.get("action_name", "")
+    form_value = event_data.get("form_value", {})
+    message_id = event_data.get("message_id", "")
+    chat_id = event_data.get("chat_id", "")
+    open_id = event_data.get("open_id", "")
+    token = event_data.get("token", "")
+
+    import json as _json
+    try:
+        action_value = _json.loads(action_value_raw) if action_value_raw else {}
+    except (ValueError, TypeError):
+        action_value = {"_raw": action_value_raw}
+
+    logger.info(
+        "[Lark] card action: chat=%s msg=%s tag=%s name=%s value=%s form=%s by=%s",
+        chat_id, message_id, action_tag, action_name, action_value, form_value, open_id,
+    )
+
+    # 测试回执：若 action_value 带 cmd=test，回一张小卡片确认链路打通。
+    # 这是 #11 端到端验证用，确认后台 Console Event 已开后即可删掉这个兜底。
+    cmd = (action_value.get("cmd") if isinstance(action_value, dict) else "") or ""
+    if cmd == "test" and chat_id:
+        card = {
+            "schema": "2.0",
+            "header": {
+                "title": {"tag": "plain_text", "content": "✅ card.action.trigger 已打通"},
+                "template": "green",
+            },
+            "body": {
+                "elements": [
+                    {
+                        "tag": "markdown",
+                        "content": (
+                            f"收到按钮回调：`tag={action_tag}` `name={action_name}`\n"
+                            f"点击者：`{open_id}`\n"
+                            f"原消息：`{message_id}`\n"
+                            "事件链路 OK，后续可据 action_value 路由到具体工作流。"
+                        ),
+                    }
+                ]
+            },
+        }
+        # 延迟导入避免循环依赖
+        from ethan.interface.lark_send import _send_interactive_card
+        await _send_interactive_card(chat_id, card)
+        logger.debug(
+            "[Lark] card action test echo sent: chat=%s token_present=%s",
+            chat_id, bool(token),
+        )

@@ -33,6 +33,7 @@ class Skill:
     fast_path: bool = False  # True = 命中 trigger 时走 Fast Path（不受长度限制）
     channels: list[str] = field(default_factory=list)  # 空列表 = 所有渠道
     modes: list[str] = field(default_factory=list)  # 空列表 = 所有对话模式可用；非空 = 仅在这些 mode 生效
+    references: list[Path] = field(default_factory=list)  # skill_dir/references/*.md
 
 
 def _parse_frontmatter(text: str) -> tuple[dict, str]:
@@ -86,8 +87,14 @@ def load_skill_from_dir(skill_dir: Path) -> Optional[Skill]:
     if not skill_md.exists():
         return None
     skill = load_skill_from_file(skill_md)
-    if skill and (not skill.name or skill.name == "SKILL"):
-        skill.name = skill_dir.name
+    if skill:
+        if not skill.name or skill.name == "SKILL":
+            skill.name = skill_dir.name
+        # 扫 references/*.md（仅 .md，按文件名排序保证稳定），目录不存在就空列表。
+        # 不读内容——摘要留给 registry 按需生成。
+        refs_dir = skill_dir / "references"
+        if refs_dir.is_dir():
+            skill.references = sorted(refs_dir.glob("*.md"))
     return skill
 
 
