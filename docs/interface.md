@@ -209,6 +209,7 @@ ethan code "query"              → ACP 委派 Coding Agent（详见 acp.md）
 | `lark_send.py` | 收发 IO：client 构建、发送/编辑/删除/回复消息、通知/图片、消息详情拉取、引用解析。 |
 | `lark_stream.py` | 消息处理：会话状态（去重 / `chat_id`→`session_id` 映射 / 进行中任务登记）、`/命令` 路由、`_handle_message` 的 Agent 流式回复主循环。 |
 | `lark_events.py` | 入口：`lark-cli event consume` 事件循环 + `start/stop_lark_listener` 生命周期，并 re-export `send_lark_notification` / `send_lark_image` 等供外部（定时任务、browser 模块）使用。 |
+| `lark.py` | **遗留**：旧的 webhook 模式（`/lark/webhook` 端点），当前未挂载、未使用。保留是因为 `background_task` / `schedule` 仍 import 它的 `_get_lark_client` / `_send_lark_reply`（纯文本回复兜底）。注意：它在模块顶层 `import lark_oapi`，故 **不能** 被 `api.py` 在模块级 `include_router`——否则会触发 lark_oapi 的 ~40s 全量加载，拖垮 `ethan serve` 冷启动。 |
 
 依赖方向单向无环：`lark_events → lark_stream → lark_send → lark_render`。`api.py` 仍从 `lark_events` 导入 `start/stop_lark_listener`，外部导入路径不变。
 
@@ -296,3 +297,11 @@ lark-cli event consume im.message.receive_v1（WebSocket 长连接）
 ## 启动速度优化
 
 延迟导入重量级模块（`anthropic`、`openai` 只在实际发起对话时加载），加上 `uv` 的依赖缓存，`ethan` 命令冷启动到第一次响应已降至约 0.16s（相比优化前的 7.6s）。
+
+`ethan serve` 同样避免在模块加载阶段触发重型 import。飞书 SDK `lark_oapi` 因加载大量业务域 model 包（acs/corehr/hire/calendar/…）单次 import 约 40s，若在 `api.py` 模块级挂 `lark.py` 的 webhook 路由会直接卡死冷启动。对策：
+
+- `api.py` 不 `include_router` 任何 lark 路由；飞书接入走 `lark_events.py` 的 WebSocket 子进程模式，在 lifespan 里启动。
+- `lark_send.py` / `lark_stream.py` 里所有 `lark_oapi` 都是**函数内 lazy import**（首次用到才加载），模块级 import 不触发。
+- `api.py` 用 `importlib.util.find_spec("lark_oapi")` 轻量探测是否安装，不触发完整 import。
+
+这样 `from ethan.interface.api import app` 约 1.6s，`ethan serve restart` 端口探测在 15s 内通过，不再误报「端口未就绪」。

@@ -70,33 +70,36 @@ def serve_main(
 @serve_app.command("stop")
 def serve_stop() -> None:
     """停止后台运行的 serve 进程。"""
-    from ethan.interface.commands.update import _find_serve_pid
+    from ethan.interface.commands.update import _find_serve_pid, _wait_pid_gone
     import os
     import signal
-    import time
     from rich.console import Console
 
     console = Console()
     pid = _find_serve_pid()
-    if pid:
-        console.print(f"[dim]发送 SIGTERM 到 ethan serve (pid={pid})...[/dim]")
+    if not pid:
+        console.print("[yellow]未发现后台运行的 ethan serve 进程。[/yellow]")
+        return
+    console.print(f"[dim]发送 SIGTERM 到 ethan serve (pid={pid})...[/dim]")
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    if not _wait_pid_gone(pid, timeout=8):
+        console.print(f"[yellow]SIGTERM 超时，改发 SIGKILL (pid={pid})...[/yellow]")
         try:
-            os.kill(pid, signal.SIGTERM)
-            time.sleep(1)
-            # 再检查一次，如果还没死就发 SIGKILL
-            if _find_serve_pid() == pid:
-                os.kill(pid, signal.SIGKILL)
+            os.kill(pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
-        console.print("[green]✓ ethan serve 已停止[/green]")
-    else:
-        console.print("[yellow]未发现后台运行的 ethan serve 进程。[/yellow]")
+        _wait_pid_gone(pid, timeout=2)
+    console.print("[green]✓ ethan serve 已停止[/green]")
 
 @serve_app.command("restart")
 def serve_restart() -> None:
     """重启后台运行的 serve 进程。"""
     from ethan.interface.commands.update import _restart_serve
-    serve_stop()
+    # _restart_serve 内部已做：SIGTERM 旧进程 → 等退出 → 端口释放 → 拉新进程 → 确认端口就绪。
+    # 不再先调 serve_stop()——那会重复 kill 且其「已停止」提示与 restart 的进度提示重叠。
     _restart_serve(None)
 
 
