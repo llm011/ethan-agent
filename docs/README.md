@@ -14,7 +14,7 @@
 - **飞书/Lark 集成**：WebSocket 长连接接入（无需公网 IP），支持 Markdown post 格式渲染、流式占位回复（buffer 积累再 patch）、THINKING 表情、新用户 onboarding
 - **Fast Path 路由**：轻量意图检测，简单命令（智能家居控制等）走极简 Prompt + 最快模型，跳过完整 Agent Loop
 - **网络搜索工具**：内置 `web_search`（DuckDuckGo 搜索，免费无需 API Key）和 `web_fetch`（抓取网页正文），让 Agent 随时获取互联网实时信息
-- **浏览器自动化**：默认内置 `agent-browser`（零依赖 Rust CLI，`snapshot` 输出省 token，适合单步操作）与 `dev-browser`（沙箱 JS + 完整 Playwright API，适合复杂多步流程）两个浏览器技能，均按需安装、用户装完即有
+- **浏览器自动化**：三层能力——`use-browser`（主技能，经 Ethan Browser 扩展操作本机真实 Chrome，复用用户 cookie/登录态）、`agent-browser`（兜底，零依赖 Rust CLI + 内置独立 Chrome，`snapshot` 输出省 token，适合单步操作）、`dev-browser`（沙箱 JS + 完整 Playwright API，适合复杂多步流程），均按需安装、用户装完即有
 - **文件系统搜索**：rg（ripgrep）和 fd 作为内置工具，供 Agent 在本地文件系统中高效检索代码和文件
 - **ACP 集成**：`delegate_coding` 工具 / `ethan code` 命令将复杂编码任务委派给 Claude Code / OpenCode / Codex；Claude Code 支持按工作目录续接多轮会话，工具调用过程解析为 sub_steps 在 Web UI 折叠展示
 - **知识库**：本地 Markdown 知识库 + sqlite-vec 语义检索（embedding 索引），支持 search/read/add/edit（追加+替换）/delete

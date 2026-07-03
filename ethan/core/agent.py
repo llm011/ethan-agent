@@ -19,12 +19,12 @@ logger = logging.getLogger(__name__)
 
 # 强制走完整 Loop 的信号（不可配置，优先级最高）
 _FORCE_FULL_SIGNALS = [
-    "帮我写", "写一个", "写代码", "实现", "分析", "解释", "为什么",
-    "怎么", "如何", "总结", "生成", "创建", "建立", "搭建",
+    "帮我写", "写一个", "写代码", "实现", "分析", "解释",
+    "总结", "生成", "创建", "建立", "搭建",
     "重构", "优化代码", "调试", "debug", "修复", "定时任务",
     "提醒我", "设置一个", "schedule", "reminder",
     "write", "implement", "analyze", "explain", "generate", "create",
-    "why", "how to", "refactor", "summarize",
+    "refactor", "summarize",
 ]
 
 
@@ -489,11 +489,16 @@ class Agent:
         if tools_content:
             parts.append(f"<tools_reference>\n{tools_content}\n</tools_reference>")
 
-        # Inject skills list so Agent knows its own capabilities (stable, cacheable)
+        # Inject skills list so Agent knows its own capabilities (stable, cacheable).
+        # Only name + first line of description (≤80 chars) to keep token cost low;
+        # full descriptions are in skill content injected on match via relevant_skills.
         if self._skills:
             skills_list = self._skills.all()
             if skills_list:
-                skill_lines = [f"- {s.name}: {s.description}" for s in skills_list]
+                skill_lines = [
+                    f"- {s.name}: {s.description[:80]}{'…' if len(s.description) > 80 else ''}"
+                    for s in skills_list
+                ]
                 parts.append(f"<available_skills>\n" + "\n".join(skill_lines) + "\n</available_skills>")
 
         # --- 动态内容放后面，不命中缓存 ---
@@ -581,11 +586,13 @@ class Agent:
             max_iters = routing.fast_max_iters
         elif route == "medium":
             system = self._build_system(working, fast=False)
-            tools_list = self._registry.all()
+            wanted = set(routing.base_tools) if routing.base_tools else None
+            tools_list = [t for t in self._registry.all() if t.name in wanted] if wanted else self._registry.all()
             max_iters = routing.medium_max_iters
         else:
             system = self._build_system(working, fast=False)
-            tools_list = self._registry.all()
+            wanted = set(routing.base_tools) if routing.base_tools else None
+            tools_list = [t for t in self._registry.all() if t.name in wanted] if wanted else self._registry.all()
             # 实时读取，使 config_set 改的迭代上限立即生效（无需重建 Agent）
             max_iters = get_config().defaults.max_tool_iterations
         return route, system, tools_list, max_iters

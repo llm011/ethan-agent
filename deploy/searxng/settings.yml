@@ -1,0 +1,16 @@
+# SearXNG 配置 —— 为 ethan web_search 工具启用 JSON 输出。
+# 完整选项见 https://docs.searxng.org/admin/settings/
+#
+# 注意：SearXNG 镜像的 entrypoint 不支持 settings.yml 里用 ${VAR} 引用环境变量
+# （无 envsubst），secret_key 必须是明文。下面这个值仅用于本机/局域网自用场景；
+# 若要对公网开放，请换成自己生成的随机值（如 `openssl rand -hex 24`）。
+use_default_settings: true
+
+server:
+  secret_key: "please-change-this-searxng-secret-key"
+  limiter: false  # 单机自用场景关闭限流；对公网开放时请改为 true 并配置 limiter.toml
+
+search:
+  formats:
+    - html
+    - json  # ethan web_search 工具依赖 JSON 输出，默认关闭，必须显式开启

@@ -470,13 +470,16 @@ async def _handle_agent_message(
     # 这里手动 __aenter__ 进入加表情；流式中 ts.move_to 迁移到工具进度/答案卡片；
     # 定稿时 ts.clear 尽早移除；except 里 ts.clear 清理。不用 async with 是因为本函数
     # try/except 有多个 exit 点且各自还要做存库/收尾，整体包进 async with 要把 500+ 行重缩进，不值。
+    from ethan.core.agent import Agent
+    from ethan.memory.session import SessionStore
+    from ethan.providers.base import Message, ThinkingEvent, ToolEvent
+    from ethan.skills.registry import SkillRegistry
+    from ethan.tools.registry import ToolRegistry
     ts = TypingState(message_id)
     await ts.__aenter__()
 
     # 查找或创建对应的 Session（lark 渠道归 admin）
     from ethan.core.paths import user_sessions_db_path
-    from ethan.memory.session import SessionStore
-    from ethan.providers.base import Message
     store = SessionStore(db_path=user_sessions_db_path())
     await store.init()
 
@@ -598,7 +601,20 @@ async def _handle_agent_message(
         registry = ToolRegistry()
         from ethan.core.context import set_session_id
         from ethan.tools.builtin.browser import BrowserSessionTool, BrowserTabTool, BrowserPageTool
+        from ethan.tools.builtin.file import FileListTool, FileReadTool, FileWriteTool
+        from ethan.tools.builtin.knowledge import KnowledgeAddTool, KnowledgeEditTool, KnowledgeReadTool, KnowledgeSearchTool
+        from ethan.tools.builtin.memory_write import MemoryWriteTool
+        from ethan.tools.builtin.procedure_write import ProcedureWriteTool
+        from ethan.tools.builtin.profile_update import ProfileUpdateTool
+        from ethan.tools.builtin.schedule import ScheduleCreateTool, ScheduleListTool, ScheduleRemoveTool
+        from ethan.tools.builtin.search import RipgrepTool, FdTool
+        from ethan.tools.builtin.secrets import GetSecretTool, ListSecretsTool, SetSecretTool
+        from ethan.tools.builtin.shell import ShellTool
+        from ethan.tools.builtin.skill_create import SkillCreateTool
+        from ethan.tools.builtin.skill_read import SkillListTool, SkillReadTool
         from ethan.tools.builtin.ui_card import UiCardTool
+        from ethan.tools.builtin.web import WebFetchTool
+        from ethan.tools.builtin.web_search import WebSearchTool
         set_session_id(session_id)  # browser 工具按对话隔离/授权
         for tool in [ShellTool(), WebSearchTool(), WebFetchTool(),
                      FileReadTool(), FileWriteTool(), FileListTool(),

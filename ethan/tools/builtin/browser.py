@@ -244,6 +244,24 @@ class BrowserPageTool(_BrowserToolBase):
 
     async def run(self, action: str, session: str = "", **kw) -> str:
         self._authorize()
+        # 计步动作（交互/变更类）；snapshot/get/wait/screenshot 不计步
+        _STEP_ACTIONS = {"click", "fill", "type", "press", "hover", "select",
+                         "scroll", "scroll_into_view", "mouse", "eval"}
+
+        def _with_step(result_str: str) -> str:
+            """把当前步数追加到 JSON 响应里，让模型感知步数预算。"""
+            if action not in _STEP_ACTIONS or not session:
+                return result_str
+            steps = get_session_map().increment_step(session)
+            try:
+                obj = json.loads(result_str)
+                if isinstance(obj, dict):
+                    obj["_step"] = steps
+                    return json.dumps(obj, ensure_ascii=False)
+            except (json.JSONDecodeError, TypeError):
+                pass
+            return result_str + f'  <!-- step {steps} -->'
+
         try:
             if action == "snapshot":
                 params = {"sessionId": session}
@@ -258,31 +276,31 @@ class BrowserPageTool(_BrowserToolBase):
                               "或加 interactive=true/compact=true 后重试)")
                 return out
             if action == "click":
-                return json.dumps(await _call("page_click", {"sessionId": session, "ref": kw.get("ref")},
-                                              browser_session_id=session), ensure_ascii=False)
+                return _with_step(json.dumps(await _call("page_click", {"sessionId": session, "ref": kw.get("ref")},
+                                              browser_session_id=session), ensure_ascii=False))
             if action == "fill":
-                return json.dumps(await _call("page_fill", {"sessionId": session, "ref": kw.get("ref"), "text": kw.get("text", "")},
-                                              browser_session_id=session), ensure_ascii=False)
+                return _with_step(json.dumps(await _call("page_fill", {"sessionId": session, "ref": kw.get("ref"), "text": kw.get("text", "")},
+                                              browser_session_id=session), ensure_ascii=False))
             if action == "type":
-                return json.dumps(await _call("page_type", {"sessionId": session, "ref": kw.get("ref"), "text": kw.get("text", "")},
-                                              browser_session_id=session), ensure_ascii=False)
+                return _with_step(json.dumps(await _call("page_type", {"sessionId": session, "ref": kw.get("ref"), "text": kw.get("text", "")},
+                                              browser_session_id=session), ensure_ascii=False))
             if action == "press":
-                return json.dumps(await _call("page_press", {"sessionId": session, "key": kw.get("key")},
-                                              browser_session_id=session), ensure_ascii=False)
+                return _with_step(json.dumps(await _call("page_press", {"sessionId": session, "key": kw.get("key")},
+                                              browser_session_id=session), ensure_ascii=False))
             if action == "hover":
-                return json.dumps(await _call("page_hover", {"sessionId": session, "ref": kw.get("ref")},
-                                              browser_session_id=session), ensure_ascii=False)
+                return _with_step(json.dumps(await _call("page_hover", {"sessionId": session, "ref": kw.get("ref")},
+                                              browser_session_id=session), ensure_ascii=False))
             if action == "select":
-                return json.dumps(await _call("page_select", {"sessionId": session, "ref": kw.get("ref"), "value": kw.get("value")},
-                                              browser_session_id=session), ensure_ascii=False)
+                return _with_step(json.dumps(await _call("page_select", {"sessionId": session, "ref": kw.get("ref"), "value": kw.get("value")},
+                                              browser_session_id=session), ensure_ascii=False))
             if action == "scroll_into_view":
-                return json.dumps(await _call("page_scroll_into_view", {"sessionId": session, "ref": kw.get("ref")},
-                                              browser_session_id=session), ensure_ascii=False)
+                return _with_step(json.dumps(await _call("page_scroll_into_view", {"sessionId": session, "ref": kw.get("ref")},
+                                              browser_session_id=session), ensure_ascii=False))
             if action == "scroll":
                 params = {"sessionId": session, "direction": kw.get("direction", "down")}
                 if kw.get("pixels") is not None:
                     params["pixels"] = kw["pixels"]
-                return json.dumps(await _call("page_scroll", params, browser_session_id=session), ensure_ascii=False)
+                return _with_step(json.dumps(await _call("page_scroll", params, browser_session_id=session), ensure_ascii=False))
             if action == "get":
                 params = {"sessionId": session, "what": kw.get("what")}
                 if kw.get("ref"):
@@ -293,7 +311,7 @@ class BrowserPageTool(_BrowserToolBase):
                 for k in ("x", "y", "delta_x", "delta_y"):
                     if kw.get(k) is not None:
                         params[{"delta_x": "deltaX", "delta_y": "deltaY"}.get(k, k)] = kw[k]
-                return json.dumps(await _call("page_mouse", params, browser_session_id=session), ensure_ascii=False)
+                return _with_step(json.dumps(await _call("page_mouse", params, browser_session_id=session), ensure_ascii=False))
             if action == "wait":
                 params = {"sessionId": session}
                 if kw.get("ms") is not None:
@@ -306,8 +324,8 @@ class BrowserPageTool(_BrowserToolBase):
                 result = await _call("page_screenshot", {"sessionId": session}, browser_session_id=session)
                 return await save_screenshot(result)
             if action == "eval":
-                return json.dumps(await _call("page_eval", {"sessionId": session, "script": kw.get("script", "")},
-                                              browser_session_id=session), ensure_ascii=False)
+                return _with_step(json.dumps(await _call("page_eval", {"sessionId": session, "script": kw.get("script", "")},
+                                              browser_session_id=session), ensure_ascii=False))
             return f"未知 action: {action}"
         except BrowserError as e:
             return f"浏览器错误: {e}" + (" (可重新 snapshot 后重试)" if e.retryable else "")

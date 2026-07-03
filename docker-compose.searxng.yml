@@ -1,0 +1,32 @@
+# SearXNG add-on for Ethan Agent (optional)
+#
+# 给 web_search 工具接一个自建 SearXNG 实例：免费、无 API Key、隐私友好。
+# 独立启动，不依赖具体用哪个 ethan 变体的 compose 文件：
+#
+#   docker compose -f docker-compose.searxng.yml up -d
+#
+# 启动后在 ethan 的环境变量里加一行，让 web_search 切到它：
+#   - 与 ethan 同在一个 docker network（如都用本文件 + docker-compose.yml up）：
+#       SEARXNG_BASE_URL=http://searxng:8080
+#   - ethan 跑在宿主机 / 独立容器网络：
+#       SEARXNG_BASE_URL=http://localhost:8888   (Linux 宿主机直连)
+#       SEARXNG_BASE_URL=http://host.docker.internal:8888   (macOS/Windows 容器访问宿主机)
+#
+# 已有现成的 SearXNG 实例（自建别处或第三方）？不需要这个文件——
+# 直接把 SEARXNG_BASE_URL 指向该实例地址即可，见 deploy/.env.example。
+
+services:
+  searxng:
+    image: searxng/searxng:latest
+    container_name: ethan-searxng
+    restart: unless-stopped
+    ports:
+      - "8888:8080"
+    volumes:
+      - ./deploy/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
