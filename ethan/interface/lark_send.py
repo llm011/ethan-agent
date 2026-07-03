@@ -437,47 +437,66 @@ async def _fetch_recent_chat_messages(chat_id: str, limit: int = 10) -> list[dic
 
     用于给 agent 注入群聊背景上下文，让它感知 @mention 之间群里发生的讨论。
     任何步骤失败返回空列表，不阻断主流程。
+
+    权限说明：
+    - Bot 身份只能读被 @ 的消息，看不到群里其他没 @ 的消息
+    - 用户身份可读群内所有消息（需 im:message.group_msg:get_as_user 权限）
+    - 这里用 lark-cli --as user 调用，能拿到完整群消息历史
     """
     try:
-        from lark_oapi.api.im.v1 import ListMessageRequest
-        client = _lark_client()
-        if not client:
-            return []
-        req = (
-            ListMessageRequest.builder()
-            .container_id_type("chat")
-            .container_id(chat_id)
-            .page_size(limit)
-            .sort_type("ByCreateTimeDesc")
-            .build()
+        # 用 lark-cli 子进程调用（用户身份），而不是 lark_oapi client（bot 身份）
+        # 原因：bot 身份只能读被 @ 的消息，用户身份能读全部群消息
+        proc = await asyncio.create_subprocess_exec(
+            "lark-cli", "im", "+chat-messages-list",
+            "--as", "user",  # 用户身份，能读全部群消息
+            "--chat-id", chat_id,
+            "--page-size", str(limit),
+            "--order", "desc",
+            "--no-reactions",  # 跳过 reactions 批量查询，背景上下文用不到
+            "--format", "json",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
         )
-        resp = await asyncio.to_thread(client.im.v1.message.list, req)
-        if not resp.success() or not resp.data or not resp.data.items:
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+        raw = json.loads(stdout.decode(errors="replace"))
+
+        # lark-cli 返回结构：{"ok": ..., "identity": ..., "data": {"messages": [...]}}
+        data = raw.get("data", raw) if isinstance(raw, dict) else {}
+        messages = data.get("messages") if isinstance(data, dict) else None
+        if not messages:
             return []
+
         results = []
-        for msg in resp.data.items:
-            if not msg or msg.deleted:
+        for msg in messages:
+            if not msg or msg.get("deleted"):
                 continue
-            if msg.msg_type != "text":
+            # 支持 text / post / image / file / audio / video 等类型
+            # lark-cli 已预渲染 content 为可读文本（post → markdown，image → ![Image](img_xxx)）
+            # interactive（卡片）跳过：通常是 bot 自己发的工具进度/答案卡片，作为背景噪音大且无意义
+            msg_type = msg.get("msg_type", "text")
+            if msg_type not in ("text", "post", "image", "file", "audio", "video"):
                 continue
+
             try:
-                body_raw = msg.body.content if msg.body else "{}"
-                body = json.loads(body_raw) if isinstance(body_raw, str) else {}
-                text = body.get("text", "").strip()
+                # lark-cli +chat-messages-list 已渲染 content 为可读文本
+                text = msg.get("content", "").strip()
                 if not text:
                     continue
-                sender = ""
-                if msg.sender:
-                    sender = msg.sender.sender_name or msg.sender.id or ""
-                create_ms = int(msg.create_time or "0")
-                time_str = ""
-                if create_ms:
-                    import datetime
-                    dt = datetime.datetime.fromtimestamp(create_ms / 1000)
-                    time_str = dt.strftime("%m-%d %H:%M")
-                results.append({"sender": sender, "text": text, "time": time_str})
+
+                # sender.name 在用户身份下有值；bot 发的消息 name 为空，用 sender_type 区分
+                sender_info = msg.get("sender", {}) or {}
+                sender_name = sender_info.get("name", "")
+                if not sender_name:
+                    # bot/应用发的消息没有用户名，标个 "bot" 让 agent 知道是机器人发的
+                    sender_name = "bot" if sender_info.get("sender_type") == "app" else ""
+
+                # lark-cli 返回 create_time 形如 "2026-07-03 13:32"（已格式化），直接用
+                time_str = msg.get("create_time", "") or ""
+
+                results.append({"sender": sender_name, "text": text, "time": time_str})
             except Exception:
                 continue
+
         results.reverse()  # 时间正序
         return results
     except Exception:

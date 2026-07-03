@@ -275,6 +275,9 @@ lark-cli event consume im.message.receive_v1（WebSocket 长连接）
 - `im:message`（读取消息内容）
 - `im:message:send_as_bot`（发送消息）
 - `im:message.reaction:write`（添加表情反应）
+- `im:message.group_msg:get_as_user`（读取群聊全部消息，用于背景上下文）
+
+> **权限说明：** Bot 身份只能读取 @ 它的消息，无法看到群内其他消息。为了给 Agent 提供群聊背景上下文（让它在回答时知道群里刚才发生了什么），需要用户身份的 `im:message.group_msg:get_as_user` 权限。配置 lark-cli 时按引导授权即可。
 
 ### 当前限制
 
