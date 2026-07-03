@@ -150,6 +150,100 @@ def _render_tool_msg_content(tool_text: str) -> str:
     }, ensure_ascii=False)
 
 
+def _strip_invalid_image_keys(text: str) -> str:
+    """删掉不是飞书图片 key（img_ 开头）的 markdown 图片引用 ![alt](value)。
+
+    飞书卡片只能渲染 img_xxx 形式的图片 key；HTTP URL / 本地路径等会被 CardKit 拒绝
+    （200570）。HTTP URL 理论上应由上游换成 img_xxx，这里作兜底安全网，把任何未解析的图片引用整体剥掉。
+    """
+    import re
+    if "![" not in text:
+        return text
+
+    def _repl(m):
+        value = m.group(2)
+        return m.group(0) if value.startswith("img_") else ""
+
+    return re.sub(r'!\[([^\]]*)\]\(([^)\s]+)\)', _repl, text)
+
+
+def _find_markdown_tables_outside_code_blocks(text: str) -> list:
+    """返回正文里（代码块之外）的 markdown 表格列表，每项 {start, length, raw}。
+
+    代码块里的示例表格不会被飞书解析成卡片表格元素，故排除——让计数和降级用同一份结果。
+    表格定义：首行 |...|，紧跟一个分隔符行 |---|，后续为任意数据行。
+    """
+    import re
+    code_ranges = [(m.start(), m.end()) for m in re.finditer(r'```[\s\S]*?```', text)]
+
+    def _in_code(idx: int) -> bool:
+        return any(s <= idx < e for s, e in code_ranges)
+
+    table_re = re.compile(r'\|.+\|[\r\n]+\|[-:| ]+\|[\s\S]*?(?=\n\n|\n(?!\|)|$)')
+    matches = []
+    for m in table_re.finditer(text):
+        if not _in_code(m.start()):
+            matches.append({"start": m.start(), "length": m.end() - m.start(), "raw": m.group(0)})
+    return matches
+
+
+# 飞书卡片表格上限——4 张以上触发 230099/11310（实测）。前 N 张正常卡片渲染，超出降级。
+FEISHU_CARD_TABLE_LIMIT = 3
+
+
+def _sanitize_text_for_card(text: str, table_limit: int = FEISHU_CARD_TABLE_LIMIT) -> str:
+    """把超出 table_limit 的 markdown 表格降级为代码块，避免飞书卡片 230099/11310 错误。
+
+    前 table_limit 张表格保持原样（可正常卡片渲染）；超出部分用 ``` 包裹，阻止飞书
+    将其解析为卡片表格元素。代码块里的表格不计入。从后往前替换以保持前面的 index 不偏移。
+    """
+    matches = _find_markdown_tables_outside_code_blocks(text)
+    if len(matches) <= table_limit:
+        return text
+    result = text
+    for m in reversed(matches[table_limit:]):
+        start, length, raw = m["start"], m["length"], m["raw"]
+        replacement = "```\n" + raw + "```"
+        result = result[:start] + replacement + result[start + length:]
+    return result
+
+
+def _optimize_markdown_style(text: str) -> str:
+    """优化 markdown 样式以适配飞书卡片渲染（移植自 openclaw-lark markdown-style.ts）。
+
+    - 标题降级：仅当原文含 H1~H3 时——H1 → H4，H2~H6 → H5（飞书卡片 H1/H2 显示过大）
+    - 压缩 3+ 连续换行为 2 个
+    - 剥离非 img_ 的图片引用（防 CardKit 200570）
+    代码块内容不受影响（标题降级前先抽出代码块保护，处理完还原）。
+    顺序：H2~H6→H5 必须在 H1→H4 之前，否则 H4 会被 #{2,6} 再次匹配成 H5。
+    """
+    import re
+    try:
+        mark = "\x00CB\x00"
+        code_blocks: list[str] = []
+
+        def _stash(m):
+            idx = len(code_blocks)
+            code_blocks.append(m.group(0))
+            return f"{mark}{idx}{mark}"
+
+        r = re.sub(r'```[^\n]*\n[\s\S]*?```', _stash, text)
+        # 标题降级（仅当原文档含 h1~h3 时才执行）
+        if re.search(r'^#{1,3} ', r, re.MULTILINE):
+            r = re.sub(r'^#{2,6} (.+)$', r'##### \1', r, flags=re.MULTILINE)  # H2~H6 → H5
+            r = re.sub(r'^# (.+)$', r'#### \1', r, flags=re.MULTILINE)        # H1 → H4
+        # 还原代码块
+        for i, block in enumerate(code_blocks):
+            r = r.replace(f"{mark}{i}{mark}", block)
+        # 压缩多余空行
+        r = re.sub(r'\n{3,}', '\n\n', r)
+        # 剥离非 img_ 图片引用
+        r = _strip_invalid_image_keys(r)
+        return r
+    except Exception:
+        return text
+
+
 def _render_card_content(text: str) -> str:
     """把文本/markdown 渲染成飞书 interactive 卡片的 content JSON。
 
@@ -157,9 +251,11 @@ def _render_card_content(text: str) -> str:
     - 单 \n 被折叠成空格（显示不换行）
     - 行尾两个空格 + \n 是硬换行（无额外间距）
     - \n\n 是段落分隔（有额外间距）
-    预处理：把孤立的单 \n 转为 "  \n"（硬换行），保留 \n\n 作段落。
+    预处理：先表格兜底 + 样式优化，再把孤立的单 \n 转为 "  \n"（硬换行），保留 \n\n 作段落。
     """
     import json as _json, re as _re
+    text = _sanitize_text_for_card(text)
+    text = _optimize_markdown_style(text)
     processed = _re.sub(r'(?<!\n)\n(?!\n)', '  \n', text)
     return _json.dumps({
         "schema": "2.0",
