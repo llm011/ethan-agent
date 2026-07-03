@@ -7,6 +7,7 @@
   ethan update --check          只检查是否有更新，不执行
   ethan update --no-restart     更新后不自动重启 serve 进程
 """
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -137,27 +138,79 @@ def _pip_upgrade() -> bool:
 
 
 def _find_serve_pid() -> Optional[int]:
-    """找到正在运行的 ethan serve 进程 PID。"""
+    """找到正在运行的 ethan serve 进程 PID。
+
+    用 pgrep 按命令行匹配 `ethan...serve`，并排除当前进程自身——`ethan serve restart`
+    调用进程自己的命令行里也含 `ethan.interface.cli serve`，不排除会把自己算进去，
+    误判「已在运行」进而 SIGTERM 自己。
+    """
     try:
+        me = str(os.getpid())
         r = _run(["pgrep", "-f", "ethan.*serve"])
-        pids = [int(p) for p in r.stdout.strip().splitlines() if p.strip().isdigit()]
+        pids = [int(p) for p in r.stdout.strip().splitlines() if p.strip().isdigit() and p.strip() != me]
         return pids[0] if pids else None
     except Exception:
         return None
 
 
+def _is_port_listening(port: int = 8900, host: str = "127.0.0.1", timeout: float = 0.5) -> bool:
+    """探测端口是否已被监听（TCP connect 探测）。用于确认 serve 已真正起来。"""
+    import socket
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _wait_pid_gone(pid: int, timeout: float = 8.0) -> bool:
+    """等 pid 进程退出，超时返回 False。macOS 上 os.kill(pid, 0) 对僵尸/已退出进程会抛
+    ProcessLookupError，对仍在运行的进程返回 None。"""
+    import time
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            os.kill(pid, 0)  # 信号 0 = 探活，不实际发信号
+        except ProcessLookupError:
+            return True  # 进程已不在
+        except PermissionError:
+            return True  # 不是我们的进程，没法管，当作已 gone
+        time.sleep(0.2)
+    return False
+
+
 def _restart_serve(repo: Optional[Path]) -> None:
-    """重启 ethan serve 进程。"""
-    import os, signal, time
+    """重启 ethan serve 进程。
+
+    流程：SIGTERM 旧进程 → 等其真正退出（最多 8s，超时 SIGKILL）→ 确认端口已释放 →
+    Popen 拉新进程 → 轮询端口确认新进程已监听 → 据实回报成功/失败。
+
+    不再「Popen 完就打印成功」——新进程可能因端口未释放、import 错误等起不来，
+    那样会让用户以为重启成功实际没起来（lsof 看不到端口）。改成探测端口后才报成功。
+    """
+    import signal
+    import time
 
     pid = _find_serve_pid()
     if pid:
         console.print(f"[dim]发送 SIGTERM 到 ethan serve (pid={pid})...[/dim]")
         try:
             os.kill(pid, signal.SIGTERM)
-            time.sleep(1)
         except ProcessLookupError:
             pass
+        if not _wait_pid_gone(pid, timeout=8):
+            console.print(f"[yellow]SIGTERM 超时，改发 SIGKILL (pid={pid})...[/yellow]")
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            _wait_pid_gone(pid, timeout=2)
+
+    # 等端口释放（旧进程退出后内核可能还短暂持有 TIME_WAIT，但 LISTEN 会立即消失）
+    for _ in range(20):
+        if not _is_port_listening():
+            break
+        time.sleep(0.2)
 
     console.print("[dim]重启 ethan serve ...[/dim]")
     cwd = str(repo) if repo else None
@@ -169,7 +222,17 @@ def _restart_serve(repo: Optional[Path]) -> None:
         stderr=subprocess.DEVNULL,
         start_new_session=True,
     )
-    console.print("[green]✓ ethan serve 已重启（后台运行）[/green]")
+
+    # 轮询端口确认新进程真的起来了（uvicorn 启动 + lifespan init 需要一两秒）
+    for _ in range(30):  # 最多等 ~15s
+        if _is_port_listening():
+            console.print("[green]✓ ethan serve 已重启（后台运行）[/green]")
+            return
+        time.sleep(0.5)
+    console.print(
+        "[red]⚠ ethan serve 已拉起但端口 8900 未就绪，可能启动失败。[/red]\n"
+        "[dim]前台运行排查：ethan serve（看 stderr），或查 ~/.ethan/serve.log[/dim]"
+    )
 
 
 @app.callback(invoke_without_command=True)
