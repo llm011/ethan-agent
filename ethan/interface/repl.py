@@ -717,7 +717,7 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
         # 斜杠命令
         if user_input.startswith("/"):
             # /btw：顺带一问，不带历史，单轮轻量查询——不 continue，让它落到下面的 agent 流程
-            from ethan.interface.channel_commands import is_btw, btw_question
+            from ethan.interface.channel_commands import is_btw, btw_question, resolve_custom_command
             if is_btw(user_input):
                 q = btw_question(user_input)
                 if not q:
@@ -726,6 +726,9 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
                 user_input = q
                 # 设 btw_context_only = True，让下方 context 构建跳过 memory，只带本条消息
                 btw_context_only = True
+            elif (expanded := resolve_custom_command(user_input)) is not None:
+                # 自定义命令展开后直接交 agent 处理（保留历史上下文）
+                user_input = expanded
             else:
                 result = await _handle_slash_command(user_input, store, session, agent)
                 if result is not None:

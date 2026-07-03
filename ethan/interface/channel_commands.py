@@ -53,8 +53,31 @@ COMMANDS = {
     "mode": ("查看/切换对话模式（用法 /mode [名称]，不带参数或 default 切回默认）", False),
     "token": ("显示 Web 访问 token（用于浏览器登录）", False),
     "owner": ("认主人：把你设为主人、当前会话设为主会话", False),
+    "command": ("管理自定义命令（用法 /command add <名> <描述> | list | remove <名>）", True),
     "help": ("显示可用命令", False),
 }
+
+
+def resolve_custom_command(text: str) -> str | None:
+    """若 text 是自定义命令，返回展开后的 agent 输入；否则返回 None。
+
+    /my-cmd extra args  →  "{stored_prompt}\nextra args"
+    /my-cmd             →  "{stored_prompt}"
+    """
+    t = text.strip()
+    if not t.startswith("/"):
+        return None
+    from ethan.core.custom_commands import load_commands
+    parts = t[1:].split(None, 1)
+    if not parts:
+        return None
+    name = parts[0].lower()
+    cmds = load_commands()
+    if name not in cmds:
+        return None
+    prompt = cmds[name]
+    extra = parts[1].strip() if len(parts) > 1 else ""
+    return f"{prompt}\n{extra}" if extra else prompt
 
 
 async def handle_command(ctx: CommandContext) -> str | None:
@@ -206,10 +229,22 @@ async def handle_command(ctx: CommandContext) -> str | None:
             logger.exception("set_owner failed for chat %s", ctx.chat_id)
             return "⚠️ 认主人失败，请稍后再试。"
 
+    if name == "command":
+        return _handle_command_cmd(arg)
+
     if name == "help":
         lines = ["🛠 可用命令："]
         for cmd, (desc, _) in COMMANDS.items():
             lines.append(f"  /{cmd} — {desc}")
+        # 列出自定义命令
+        from ethan.core.custom_commands import load_commands
+        custom = load_commands()
+        if custom:
+            lines.append("")
+            lines.append("自定义命令：")
+            for cname, cprompt in custom.items():
+                preview = cprompt if len(cprompt) <= 50 else cprompt[:47] + "…"
+                lines.append(f"  /{cname} — {preview}")
         if ctx.extra_help:
             lines.append("")
             lines.append(ctx.extra_help)
@@ -222,6 +257,56 @@ async def handle_command(ctx: CommandContext) -> str | None:
         f"未知命令：/{name}\n\n"
         f"输入 /help 查看可用命令。"
     )
+
+
+def _handle_command_cmd(arg: str) -> str:
+    """/command add <name> [desc] | list | remove <name> 的渠道内处理。"""
+    from ethan.core.custom_commands import load_commands, save_command, remove_command
+
+    sub_parts = arg.strip().split(None, 2) if arg else []
+    if not sub_parts:
+        cmds = load_commands()
+        if not cmds:
+            return "暂无自定义命令。\n用法：/command add <名称> <描述>"
+        lines = ["自定义命令列表："]
+        for n, p in cmds.items():
+            preview = p if len(p) <= 60 else p[:57] + "…"
+            lines.append(f"  /{n} — {preview}")
+        return "\n".join(lines)
+
+    sub = sub_parts[0].lower()
+
+    if sub == "list":
+        cmds = load_commands()
+        if not cmds:
+            return "暂无自定义命令。"
+        lines = ["自定义命令列表："]
+        for n, p in cmds.items():
+            preview = p if len(p) <= 60 else p[:57] + "…"
+            lines.append(f"  /{n} — {preview}")
+        return "\n".join(lines)
+
+    if sub == "remove":
+        if len(sub_parts) < 2:
+            return "用法：/command remove <名称>"
+        target = sub_parts[1]
+        return f"✓ 已删除 /{target}" if remove_command(target) else f"命令 /{target} 不存在。"
+
+    if sub == "add":
+        if len(sub_parts) < 3:
+            return "用法：/command add <名称> <描述>\n示例：/command add review-cn 用中文做 code review，重点关注安全和性能"
+        cmd_name = sub_parts[1]
+        desc = sub_parts[2].strip()
+        _BUILTIN = {"new", "btw", "review", "compact", "sessions", "stop",
+                    "resume", "model", "mode", "token", "owner", "help", "command"}
+        if cmd_name.lower() in _BUILTIN:
+            return f"'{cmd_name}' 与内置命令冲突，请换一个名字。"
+        if not cmd_name.replace("-", "").replace("_", "").isalnum():
+            return "命令名只允许字母、数字、连字符和下划线。"
+        save_command(cmd_name, desc)
+        return f"✓ 已保存 /{cmd_name}\n使用方式：/{cmd_name} <内容>  →  模型收到：\"{desc}\\n<内容>\""
+
+    return "用法：/command add <名称> <描述> | /command list | /command remove <名称>"
 
 
 def is_command(text: str) -> bool:
