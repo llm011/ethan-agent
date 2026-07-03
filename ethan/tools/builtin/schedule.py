@@ -1,5 +1,6 @@
 """Schedule Tool — 让 agent 通过 tool call 创建和管理定时任务。"""
 import json
+import os
 import threading
 from contextvars import ContextVar
 from typing import Any
@@ -8,6 +9,12 @@ from ethan.tools.base import BaseTool
 
 # 存储当前请求的飞书 chat_id，在 lark webhook 里设置，ScheduleCreateTool 里读取
 lark_chat_id_var: ContextVar[str] = ContextVar("lark_chat_id", default="")
+
+
+def _base_url() -> str:
+    """返回本地 serve 的 base URL（读取 ETHAN_SERVER_PORT，默认 8900）。"""
+    port = os.environ.get("ETHAN_SERVER_PORT", "8900")
+    return f"http://127.0.0.1:{port}"
 
 
 def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channel_context: str = "{}", user_id: str = ""):
@@ -26,7 +33,7 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
             if not token:
                 token = get_config().network.auth_token
             headers = {"Authorization": f"Bearer {token}"} if token else {}
-            res = requests.post("http://127.0.0.1:8900/chat", json={
+            res = requests.post(f"{_base_url()}/chat", json={
                 "messages": [{"role": "user", "content": prompt}],
                 "session_id": session_id,
             }, headers=headers, timeout=120)
@@ -113,7 +120,7 @@ class ScheduleCreateTool(BaseTool):
         headers = {"Authorization": f"Bearer {token}"} if token else {}
         try:
             async with httpx.AsyncClient() as client:
-                res = await client.post("http://127.0.0.1:8900/schedule", json={
+                res = await client.post(f"{_base_url()}/api/schedule", json={
                     "job_id": job_id,
                     "prompt": prompt,
                     "cron": cron,
@@ -141,7 +148,7 @@ class ScheduleListTool(BaseTool):
         headers = {"Authorization": f"Bearer {token}"} if token else {}
         try:
             async with httpx.AsyncClient() as client:
-                res = await client.get("http://127.0.0.1:8900/schedule", headers=headers)
+                res = await client.get(f"{_base_url()}/api/schedule", headers=headers)
                 res.raise_for_status()
                 jobs = res.json().get("jobs", [])
                 if not jobs:
@@ -172,7 +179,7 @@ class ScheduleRemoveTool(BaseTool):
         headers = {"Authorization": f"Bearer {token}"} if token else {}
         try:
             async with httpx.AsyncClient() as client:
-                res = await client.delete(f"http://127.0.0.1:8900/schedule/{job_id}", headers=headers)
+                res = await client.delete(f"{_base_url()}/api/schedule/{job_id}", headers=headers)
                 res.raise_for_status()
                 return f"Removed '{job_id}'"
         except Exception as e:
