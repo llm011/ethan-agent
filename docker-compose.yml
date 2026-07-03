@@ -22,6 +22,10 @@ services:
       # e.g. "legal" → llm011/ethan-legal-skill/skills/legal-assistant).
       # Lets `docker compose up` provision the legal expert mode with zero extra commands.
       - ETHAN_INSTALL_SKILLS=${ETHAN_INSTALL_SKILLS:-}
+      # Optional: point web_search at a SearXNG instance instead of DuckDuckGo.
+      # Bring one up with `docker compose -f docker-compose.searxng.yml up -d`,
+      # then set this to http://searxng:8080 (same network) or your own instance URL.
+      - SEARXNG_BASE_URL=${SEARXNG_BASE_URL:-}
     # Install the package and run the server
     command: >
       bash -c "

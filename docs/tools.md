@@ -77,7 +77,7 @@ shell(command="ls -la", timeout=30)
 
 ### WebSearchTool — `ethan/tools/builtin/web_search.py`
 
-搜索互联网信息。默认使用 DuckDuckGo，无需 API Key；也支持切换到 Tavily 以获得更精准的结构化结果。
+搜索互联网信息。默认使用 DuckDuckGo，无需 API Key；也支持切换到 Tavily（更精准的结构化结果）或 SearXNG（自建/隐私友好）。
 
 ```
 web_search(query="今天科技新闻", max_results=5)
@@ -92,9 +92,28 @@ tools:
     api_key: tvly-xxxxxxxxxxxxxxxx
 ```
 
+**切换 SearXNG**（可选，免费、无需注册、可自建、隐私友好）：
+
+```yaml
+tools:
+  web_search:
+    provider: searxng
+    base_url: http://localhost:8888   # 自建实例或现成的第三方实例地址
+```
+
+也可以用环境变量 `SEARXNG_BASE_URL` 配置（`config.yaml` 未显式设置 `base_url` 时生效，设置了会自动把 `provider` 切到 `searxng`）——docker-compose 场景更方便，见根目录 `docker-compose.searxng.yml`：
+
+```bash
+docker compose -f docker-compose.searxng.yml up -d   # 起一个自建 SearXNG 实例（监听 8888）
+# 再给 ethan 容器/进程设置：SEARXNG_BASE_URL=http://searxng:8080（同网络容器间）
+```
+
+**必须开启 JSON 输出**：SearXNG 镜像默认只开 HTML 格式，直接调 `/search?format=json` 会 403。仓库自带的 `deploy/searxng/settings.yml` 已加上 `search.formats: [html, json]`，用 `docker-compose.searxng.yml` 起的实例会自动挂载这份配置；若你连接的是别处的现成实例，需要对方也开了 JSON 格式才能用。
+
 设计决策：
 - 默认 DuckDuckGo：免费、无需注册、无 rate limit
 - Tavily：需要 API Key，结果更精准，适合研究型搜索任务
+- SearXNG：自建可控、免 API Key、聚合多个搜索引擎，适合注重隐私或想摆脱第三方 API 限制的场景
 - 配置热切换，无需重启服务
 
 ### WebFetchTool — `ethan/tools/builtin/web.py`

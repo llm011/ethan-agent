@@ -54,7 +54,7 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 - Background tasks: kick off a long-running task that runs async in its own session without blocking the current chat; result is fed back when done (Lark pushes to the originating chat, web surfaces the session). View/stop them on the `/background-tasks` page, with a running-count badge in the sidebar
 
 **Tool system**
-- Shell execution, web search (DuckDuckGo by default, or Tavily via config), web fetch, file I/O, knowledge base
+- Shell execution, web search (DuckDuckGo by default, or Tavily / self-hosted SearXNG via config — see `docker-compose.searxng.yml`), web fetch, file I/O, knowledge base
 - Sensitive/side-effecting ops (shell, file write, secret read) ask for consent before running; the web shows a consent card, the REPL prompts y/N, and once granted in a session the same tool won't ask again
 - Tool results over 4 000 chars are auto-summarized by a cheap model before going back to the main model
 - Identical calls within the same turn hit an in-memory cache — no duplicate execution
@@ -358,7 +358,7 @@ Agent proactively writes to all layers mid-conversation via `memory_write`, `pro
 
 ## Skills
 
-Skills are Markdown files loaded from `~/.ethan/skills/`. On first run, default skills (channels, deepwiki, lark-im, lark-shared, skills-manager, agent-browser, dev-browser) are automatically copied there from the package.
+Skills are Markdown files loaded from `~/.ethan/skills/`. On first run, default skills (channels, deepwiki, lark-im, lark-shared, skills-manager, use-browser, agent-browser, dev-browser) are automatically copied there from the package.
 
 Both directory format (`<name>/SKILL.md` + `references/`) and legacy single-file `.md` format are supported.
 

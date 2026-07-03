@@ -39,6 +39,11 @@ EDITABLE_FIELDS: list[ConfigField] = [
                 desc="是否启用定时心跳（Agent 周期性自检/整理）"),
     ConfigField("defaults.heartbeat.interval_minutes", "心跳间隔（分钟）", "int",
                 desc="心跳触发的间隔（分钟）", min_val=1),
+    ConfigField("tools.web_search.provider", "Web 搜索提供方", "choice",
+                ["duckduckgo", "tavily", "searxng"],
+                desc="web_search 工具的搜索后端：duckduckgo（默认，免费）/ tavily（需 api_key）/ searxng（需 base_url，自建或现成实例）"),
+    ConfigField("tools.web_search.base_url", "SearXNG 地址", "str",
+                desc="provider=searxng 时使用，如 http://localhost:8888（自建 docker-compose）或现成 SearXNG 实例地址"),
 ]
 
 # 路径 → field 的索引，便于工具快速查找
