@@ -333,9 +333,11 @@ class SessionStore:
         return session
 
     async def list_recent(self, limit: int = 20, offset: int = 0,
-                          source: str = "", mode: str | None = None) -> list[Session]:
+                          source: str = "", mode: str | None = None,
+                          exclude_sources: list[str] | None = None,
+                          exclude_title_prefixes: list[str] | None = None) -> list[Session]:
         """最近会话列表。source 非空时按渠道过滤；mode 非 None 时按对话模式过滤
-        （传 "" 可筛“默认模式”会话）。过滤在 SQL 层做，分页对过滤后结果生效。"""
+        （传空串可筛默认模式会话）。exclude_sources 排除指定渠道。过滤在 SQL 层做，分页对过滤后结果生效。"""
         where = []
         params: list = []
         if source:
@@ -344,6 +346,14 @@ class SessionStore:
         if mode is not None:
             where.append("COALESCE(mode, '') = ?")
             params.append(mode)
+        if exclude_sources:
+            placeholders = ",".join("?" * len(exclude_sources))
+            where.append(f"COALESCE(source, 'web') NOT IN ({placeholders})")
+            params.extend(exclude_sources)
+        if exclude_title_prefixes:
+            for prefix in exclude_title_prefixes:
+                where.append("title NOT LIKE ?")
+                params.append(f"{prefix}%")
         where_sql = (" WHERE " + " AND ".join(where)) if where else ""
         params.extend([limit, offset])
         sessions = []

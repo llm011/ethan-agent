@@ -51,15 +51,21 @@ async def list_modes(user_id: str = Depends(verify_token)):
 @router.get("/sessions")
 async def list_sessions(limit: int = 50, offset: int = 0, q: str | None = None,
                         source: str | None = None, mode: str | None = None,
+                        hide_heartbeat: bool = False, hide_scheduled: bool = False,
                         user_id: str = Depends(verify_token)):
     from ethan.core.paths import user_sessions_db_path
     store = SessionStore(db_path=user_sessions_db_path())
     await store.init()
     if q:
-        # 搜索路径不叠加渠道/模式过滤（保持全文检索语义）
         sessions = await store.search(q, limit)
     else:
-        sessions = await store.list_recent(limit, offset, source=source or "", mode=mode)
+        exclude_prefixes = []
+        if hide_heartbeat:
+            exclude_prefixes.append("[心跳]")
+        if hide_scheduled:
+            exclude_prefixes.append("[定时]")
+        sessions = await store.list_recent(limit, offset, source=source or "", mode=mode,
+                                           exclude_title_prefixes=exclude_prefixes or None)
     await store.close()
     return {"sessions": [
         {
