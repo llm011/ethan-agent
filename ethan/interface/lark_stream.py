@@ -1,7 +1,6 @@
-"""飞书消息处理：会话状态 + 命令路由 + Agent 流式回复（_handle_message）。
+"""飞书消息处理：命令路由 + Agent 流式回复（_handle_message）。
 
-依赖 lark_send（收发 IO）/ lark_render（渲染）。事件去重、chat→session 映射、
-进行中任务登记等会话状态也在这里（被 lark_events 的事件循环复用）。
+依赖 lark_send（收发 IO）/ lark_render（渲染）/ lark_state（共享状态）。
 
 输出形态（基础能力，勿改坏）：
 - 工具进度 → post 富文本气泡（流式 update）
@@ -13,7 +12,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from collections import deque
 
 from ethan.interface.lark_render import _render_tool_msg_content
 from ethan.interface.lark_tool_trace import (
@@ -30,240 +28,25 @@ from ethan.interface.lark_send import (
     _send_message,
     _send_reply,
 )
+from ethan.interface.lark_state import (
+    _ABORT_KEYWORDS,
+    _already_handled,
+    _cache_forwarded,
+    _get_chat_lock,
+    _is_forwarded_message,
+    _lark_chat_map,
+    _lark_welcomed,
+    _lark_running_tasks,
+    _load_lark_map,
+    _looks_like_tool_trace,
+    _mark_lark_welcomed,
+    _pop_forwarded,
+    _save_lark_map,
+    _stop_lark_task,
+    _untrack_task,
+)
 
 logger = logging.getLogger(__name__)
-
-# 工具进度行前缀图标（与下方 _TOOL_DISPLAY 的 display_name 对齐）。
-_TOOL_LINE_RE = re.compile(r'\*\*(?:📖|💻|🔍|🌐|📁|✏️|🧠|💾|⏰|📋|✨|👤|📝|🔧)')
-
-
-def _looks_like_tool_trace(text: str) -> bool:
-    """检测文本是否像「工具调用过程」而非正常答案。
-
-    正常的最终答案不该是多行 `**💻 terminal**(args)` `_✓ 结果_` 这种工具进度格式——那是
-    lark_stream 内部构造的工具进度文本。模型若在正文里照抄这种格式，几乎都是读了**被污染的
-    历史消息**后学到的错误模式（见存库处的 fallback 说明）：上一轮没出总结时把工具过程存进了
-    content，模型读到便以为「答案长这样」而在新轮正文里模仿，又被渲染成卡片 → 又污染历史 →
-    反馈循环。命中即视为无效总结，不渲染成卡片、不存进 content，从源头断循环。
-    """
-    if not text:
-        return False
-    lines = [l for l in text.split("\n") if l.strip()]
-    if len(lines) < 2:
-        return False
-    # 有 ≥2 行带工具进度图标前缀 → 判定模仿工具过程。
-    # 正常答案不会出现 `**💻 terminal**` 这种图标格式（这是 lark_stream 工具进度气泡的内部格式），
-    # 模型只在读到被污染的历史后才会照抄，故命中即可视为无效总结。
-    tool_lines = sum(1 for l in lines if _TOOL_LINE_RE.search(l))
-    return tool_lines >= 2
-
-_lark_chat_map: dict[str, str] = {}  # chat_id -> session_id, in-memory cache
-
-# chat_id -> 串行锁。同一飞书 chat 连发多条消息时，Agent 处理必须排队（否则并发改同一
-# session、流式卡片互相覆盖、/stop 登记混乱）。命令路径（/new /stop 等）不经锁，保持即时响应。
-_lark_chat_locks: dict[str, asyncio.Lock] = {}
-
-
-def _get_chat_lock(chat_id: str) -> asyncio.Lock:
-    """取（或创建）该 chat 的串行锁。锁对象复用，跨消息持久。"""
-    lock = _lark_chat_locks.get(chat_id)
-    if lock is None:
-        lock = asyncio.Lock()
-        _lark_chat_locks[chat_id] = lock
-    return lock
-
-
-# chat_id -> 正在处理该 chat 消息的 Agent task 集合。供 /stop 取消进行中的生成。
-# 事件分发是 fire-and-forget（lark_events 里 asyncio.create_task(_handle_message)），同一 chat
-# 连发多条会并发跑，故用 set 而非单值——否则后一条会覆盖前一条的登记，/stop 停不到前一个。
-_lark_running_tasks: dict[str, set[asyncio.Task]] = {}
-
-
-def _untrack_task(chat_id: str, task) -> None:
-    """从登记表摘掉某个 task（每条消息结束时调）。空集合顺手清掉，避免泄漏。"""
-    s = _lark_running_tasks.get(chat_id)
-    if s is not None:
-        s.discard(task)
-        if not s:
-            _lark_running_tasks.pop(chat_id, None)
-
-
-async def _stop_lark_task(cid: str) -> bool:
-    """取消该 chat 所有进行中的 Agent 生成任务。返回是否真的停了至少一个。
-
-    命令路径（/stop）和自然语言中止快速路径（"停"/"不用了"/...）共用本函数。
-    """
-    tasks = _lark_running_tasks.get(cid)
-    if not tasks:
-        return False
-    stopped = False
-    for t in list(tasks):
-        if not t.done():
-            t.cancel()
-            stopped = True
-    return stopped
-
-
-# 自然语言中止关键词。用户在飞书里直接发这些词（非 /stop 命令）时，若当前有正在跑的
-# Agent 任务则中止之，否则不拦截、继续走正常 Agent 流程（避免误把空 chat 的"停"当命令）。
-_ABORT_KEYWORDS = {"停", "停下", "不用了", "取消", "stop", "中止", "停止"}
-
-# 飞书事件投递是 at-least-once：bot 未在超时窗口内 ack（长任务、断线重连重放）会重投同一条事件。
-# 用 message_id 幂等去重，否则同一消息被处理多次（表现为重复回复 / 两份不同的 token 统计）。
-_seen_message_ids: set[str] = set()
-_seen_message_order: deque[str] = deque(maxlen=2000)
-
-
-def _already_handled(message_id: str) -> bool:
-    """命中返回 True（重复事件，应丢弃）；否则登记并返回 False。同事件循环内同步执行，无 await，天然原子。"""
-    if not message_id:
-        return False
-    if message_id in _seen_message_ids:
-        return True
-    if len(_seen_message_order) == _seen_message_order.maxlen:
-        _seen_message_ids.discard(_seen_message_order[0])  # deque 满，append 会丢最左，先同步移出 set
-    _seen_message_order.append(message_id)
-    _seen_message_ids.add(message_id)
-    return False
-
-
-# ── 转发消息缓存：批量转发(merge_forward)等消息不立即进 agent，等用户紧跟的说明消息再一起处理 ──
-# 用户在飞书里「合并转发」一批消息给 bot 时，单看这批转发内容 agent 不知道要干嘛；但用户转完
-# 一般还会紧跟一条说明（"总结下"/"这个怎么处理"）。所以转发消息只缓存不处理，等同 chat 最近的
-# 后续消息来时把缓存内容拼进其上下文。带 TTL：转完很久才发说明，转发内容多半已不相关。
-_FORWARD_MSG_TYPES = {"merge_forward", "forward", "share_chat", "system_status", "complex"}
-_FORWARD_CONTENT_RE = re.compile(
-    r"^\s*(?:\[Merged forward|---------- Forwarded message|\[System message|\[Chat card)"
-)
-_forwarded_cache: dict[str, list[tuple[str, str, float]]] = {}  # chat_id -> [(message_id, content, ts)]
-_FORWARDED_TTL = 120.0  # 秒
-
-# ── 群聊消息本地缓存：代替每次拉 API，收到群消息立即写入，给 agent 提供背景上下文 ──
-# 仅群聊（oc_ 前缀），私聊不需要（session history 已有全量记录）。
-_GROUP_CACHE_SIZE = 30
-_group_chat_cache: dict[str, deque] = {}  # chat_id -> deque[{sender, text, time}]
-
-
-def _cache_group_message(chat_id: str, sender_id: str, text: str, time_str: str) -> None:
-    cache = _group_chat_cache.setdefault(chat_id, deque(maxlen=_GROUP_CACHE_SIZE))
-    cache.append({"sender": sender_id, "text": text, "time": time_str})
-
-
-def _get_group_context(chat_id: str, limit: int = 10) -> list[dict]:
-    """从本地缓存读取群聊最近消息，不含最后一条（当前正在处理的消息本身），时间正序。"""
-    cache = _group_chat_cache.get(chat_id)
-    if not cache:
-        return []
-    items = list(cache)
-    if items:
-        items = items[:-1]  # 去掉最后一条（当前消息已写入缓存，不重复注入上下文）
-    return items[-limit:]
-
-
-async def _should_respond_to_group_message(text: str, lark_cfg) -> bool:
-    """根据 group_response_mode 判断是否响应该群聊消息。P2P 消息不经此函数。"""
-    import fnmatch
-    mode = getattr(lark_cfg, "group_response_mode", "mention_only") or "mention_only"
-    if mode == "always":
-        return True
-    if mode == "mention_only":
-        bot_name = getattr(lark_cfg, "bot_name", "") or ""
-        if bot_name:
-            return f"@{bot_name}" in text
-        # bot_name 未配置：有 @ 即认为在 @ bot
-        return "@" in text
-    if mode == "keywords":
-        keywords = getattr(lark_cfg, "group_keywords", []) or []
-        tl = text.lower()
-        return any(fnmatch.fnmatch(tl, f"*{kw.lower()}*") or kw.lower() in tl for kw in keywords)
-    if mode == "llm_filter":
-        try:
-            from ethan.providers.manager import create_provider
-            from ethan.providers.base import Message as _Msg
-            from ethan.core.config import get_config
-            from ethan.memory.consolidator import get_lite_model
-            cfg = get_config()
-            provider = create_provider(get_lite_model(cfg.defaults.model), cfg)
-            hint = getattr(lark_cfg, "group_llm_filter_hint", "") or \
-                "这条群聊消息是否需要AI助手回复？只回答 yes 或 no，不要其他内容。"
-            resp = await provider.chat(
-                [_Msg(role="user", content=f"{hint}\n\n消息：{text}")],
-                system="你是一个判断器，只输出 yes 或 no。",
-            )
-            return "yes" in (resp.content or "").lower()
-        except Exception:
-            logger.warning("[Lark] llm_group_filter failed, defaulting to respond")
-            return True
-    return True  # 未知模式默认响应
-
-
-def _is_forwarded_message(msg_type: str, text: str) -> bool:
-    """是否是转发/系统类消息（应缓存而非直接进 agent）。
-
-    主判据是 message_type（merge_forward 等）；兜底看 content 前缀——lark-cli 偶尔会把转发
-    消息渲染成 post/text，靠 [Merged forward…]/---------- Forwarded message 等前缀识别。
-    """
-    if (msg_type or "") in _FORWARD_MSG_TYPES:
-        return True
-    return bool(_FORWARD_CONTENT_RE.match(text or ""))
-
-
-def _cache_forwarded(chat_id: str, message_id: str, content: str) -> None:
-    """缓存一条转发消息内容，等后续说明消息来时注入。"""
-    import time as _t
-    _forwarded_cache.setdefault(chat_id, []).append((message_id, content, _t.time()))
-    logger.debug("[Lark] cached forwarded msg chat=%s msg=%s len=%d", chat_id, message_id, len(content))
-
-
-def _pop_forwarded(chat_id: str) -> str:
-    """取出并清空该 chat 所有未过期缓存转发内容，按时间正序拼接；无则返回空串。"""
-    import time as _t
-    entries = _forwarded_cache.pop(chat_id, None)
-    if not entries:
-        return ""
-    now = _t.time()
-    fresh = [c for (_mid, c, ts) in entries if now - ts <= _FORWARDED_TTL]
-    if not fresh:
-        return ""
-    if len(fresh) == 1:
-        return fresh[0]
-    return "\n\n".join(f"--- 转发消息 {i + 1} ---\n{c}" for i, c in enumerate(fresh))
-
-
-def _lark_map_file():
-    from ethan.core.config import CONFIG_DIR
-    return CONFIG_DIR / "memory" / "lark_sessions.json"
-
-
-def _load_lark_map():
-    import json
-    f = _lark_map_file()
-    if f.exists():
-        try:
-            return json.loads(f.read_text())
-        except Exception:
-            pass
-    return {}
-
-
-def _save_lark_map(mapping: dict):
-    import json
-    f = _lark_map_file()
-    f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(json.dumps(mapping, ensure_ascii=False))
-
-
-def _lark_welcomed() -> bool:
-    """是否已经向飞书发过首次配置欢迎语。每个部署只发一次，之后拉新群/清上下文都不再发。"""
-    from ethan.core.config import CONFIG_DIR
-    return (CONFIG_DIR / "memory" / ".lark_welcomed").exists()
-
-
-def _mark_lark_welcomed() -> None:
-    from ethan.core.config import CONFIG_DIR
-    f = CONFIG_DIR / "memory" / ".lark_welcomed"
-    f.parent.mkdir(parents=True, exist_ok=True)
-    f.touch()
 
 
 async def _handle_message(event_data: dict) -> None:
@@ -413,7 +196,6 @@ async def _handle_message(event_data: dict) -> None:
                 ]
             },
         }
-        from ethan.interface.lark_send import _send_interactive_card
         msg_id = await _send_interactive_card(chat_id, card)
         if msg_id:
             logger.info("[Lark] sent test card to chat=%s msg=%s", chat_id, msg_id)
