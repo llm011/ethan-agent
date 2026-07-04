@@ -151,8 +151,12 @@ async def _handle_message(msg: dict[str, Any], creds: "WeChatCredentials") -> No
 
     logger.info("[WeChat] msg from=%s group=%s text=%r", sender[:20], group_id, text[:80])
 
-    # Send typing indicator
+    # 立即回一个"收到"确认，让用户知道 bot 收到消息了
     async with httpx.AsyncClient() as client:
+        try:
+            await send_text(client, creds, sender, context_token, "收到，处理中...")
+        except Exception:
+            logger.warning("[WeChat] Failed to send ack")
         await send_typing(client, creds, context_token, typing=True)
 
     # ── Session + Agent ───────────────────────────────────────────────────────
