@@ -24,7 +24,6 @@ from ethan.interface.lark_send import (
     TypingState,
     _delete_message,
     _edit_message,
-    _fetch_recent_chat_messages,
     _lark_client,
     _resolve_quoted_text,
     _send_interactive_card,
@@ -138,6 +137,63 @@ _FORWARD_CONTENT_RE = re.compile(
 )
 _forwarded_cache: dict[str, list[tuple[str, str, float]]] = {}  # chat_id -> [(message_id, content, ts)]
 _FORWARDED_TTL = 120.0  # 秒
+
+# ── 群聊消息本地缓存：代替每次拉 API，收到群消息立即写入，给 agent 提供背景上下文 ──
+# 仅群聊（oc_ 前缀），私聊不需要（session history 已有全量记录）。
+_GROUP_CACHE_SIZE = 30
+_group_chat_cache: dict[str, deque] = {}  # chat_id -> deque[{sender, text, time}]
+
+
+def _cache_group_message(chat_id: str, sender_id: str, text: str, time_str: str) -> None:
+    cache = _group_chat_cache.setdefault(chat_id, deque(maxlen=_GROUP_CACHE_SIZE))
+    cache.append({"sender": sender_id, "text": text, "time": time_str})
+
+
+def _get_group_context(chat_id: str, limit: int = 10) -> list[dict]:
+    """从本地缓存读取群聊最近消息，不含最后一条（当前正在处理的消息本身），时间正序。"""
+    cache = _group_chat_cache.get(chat_id)
+    if not cache:
+        return []
+    items = list(cache)
+    if len(items) > 1:
+        items = items[:-1]  # 去掉最后一条（当前消息已写入缓存，不重复注入上下文）
+    return items[-limit:]
+
+
+async def _should_respond_to_group_message(text: str, lark_cfg) -> bool:
+    """根据 group_response_mode 判断是否响应该群聊消息。P2P 消息不经此函数。"""
+    import fnmatch
+    mode = getattr(lark_cfg, "group_response_mode", "mention_only") or "mention_only"
+    if mode == "always":
+        return True
+    if mode == "mention_only":
+        bot_name = getattr(lark_cfg, "bot_name", "") or ""
+        if bot_name:
+            return f"@{bot_name}" in text
+        # bot_name 未配置：有 @ 即认为在 @ bot
+        return "@" in text
+    if mode == "keywords":
+        keywords = getattr(lark_cfg, "group_keywords", []) or []
+        tl = text.lower()
+        return any(fnmatch.fnmatch(tl, kw.lower()) or kw.lower() in tl for kw in keywords)
+    if mode == "llm_filter":
+        try:
+            from ethan.providers.manager import create_provider
+            from ethan.providers.base import Message as _Msg
+            from ethan.core.config import get_config
+            cfg = get_config()
+            provider = create_provider(cfg.defaults.model, cfg)
+            hint = getattr(lark_cfg, "group_llm_filter_hint", "") or \
+                "这条群聊消息是否需要AI助手回复？只回答 yes 或 no，不要其他内容。"
+            resp = await provider.chat(
+                [_Msg(role="user", content=f"{hint}\n\n消息：{text}")],
+                system="你是一个判断器，只输出 yes 或 no。",
+            )
+            return "yes" in (resp.content or "").lower()
+        except Exception:
+            logger.warning("[Lark] llm_group_filter failed, defaulting to respond")
+            return True
+    return True  # 未知模式默认响应
 
 
 def _is_forwarded_message(msg_type: str, text: str) -> bool:
@@ -296,12 +352,27 @@ async def _handle_message(event_data: dict) -> None:
     if not chat_id:
         return
 
+    # 群聊消息写入本地缓存（不论是否回复，供背景上下文使用）
+    if chat_id.startswith("oc_"):
+        from datetime import datetime as _dt
+        _time_str = _dt.fromtimestamp(int(_create_ms) / 1000).strftime("%Y-%m-%d %H:%M") if _create_ms else ""
+        _cache_group_message(chat_id, sender_open_id, text, _time_str)
+
     # 主人判定：config.lark.owner_open_id 为空 = 还没认主人。
     from ethan.core.config import get_config as _gc
     _lark_cfg = getattr(_gc(), "lark", None)
     owner_open_id = getattr(_lark_cfg, "owner_open_id", "") if _lark_cfg else ""
     is_owner = bool(owner_open_id) and sender_open_id == owner_open_id
     owner_claimed = bool(owner_open_id)
+
+    # 群聊响应过滤：按 group_response_mode 决定是否处理（私聊不过滤）
+    if chat_id.startswith("oc_") and _lark_cfg:
+        if not await _should_respond_to_group_message(text, _lark_cfg):
+            logger.debug(
+                "[Lark] group message skipped by mode=%s msg=%s",
+                getattr(_lark_cfg, "group_response_mode", "mention_only"), message_id,
+            )
+            return
 
     # ── /btw：顺带一问——不带历史、不带 cold facts 的单轮轻量查询 ──
     # 解析放在 /command 之前，因为 /btw 需要走完整 agent 流程（只是上下文为空）。
@@ -669,16 +740,14 @@ async def _handle_agent_message(
             agent_user_text = hint
         agent_user_msg = Message(role="user", content=agent_user_text)
 
-        # 拉最近 10 条群消息作为背景上下文，让 agent 感知 @mention 之间群里发生了什么。
-        # 仅限群聊（chat_id 以 oc_ 开头）；私聊消息已全量在 session history 里，不重复拉。
-        # /btw 无历史模式也跳过：群消息可能很大（含代码/diff），违背 /btw 精简上下文的本意。
-        # 失败时静默忽略，不阻断主流程。
+        # 从本地缓存读取群聊背景消息，替代每次拉 API（零延迟）
+        # 仅限群聊且非 /btw 模式
         if not btw_mode and chat_id.startswith("oc_"):
-            recent_msgs = await _fetch_recent_chat_messages(chat_id, limit=10)
+            recent_msgs = _get_group_context(chat_id, limit=10)
             if recent_msgs:
-                lines = ["[群聊近期消息（供背景参考，最近10条）]"]
+                lines = ["[群聊近期消息（供背景参考）]"]
                 for m in recent_msgs:
-                    prefix = f"[{m['time']}] {m['sender']}: " if m['sender'] else f"[{m['time']}] "
+                    prefix = f"[{m['time']}] {m['sender']}: " if m.get('sender') else f"[{m['time']}] "
                     lines.append(prefix + m["text"])
                 agent_user_text = "\n".join(lines) + "\n\n---\n" + agent_user_text
                 agent_user_msg = Message(role="user", content=agent_user_text)
