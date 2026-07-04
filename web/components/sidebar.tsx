@@ -43,6 +43,7 @@ export function Sidebar() {
   const [confirmState, setConfirmState] = useState<{ open: boolean; id: string }>({ open: false, id: "" });
   const [normalExpanded, setNormalExpanded] = useState(true);
   const [scheduleExpanded, setScheduleExpanded] = useState(false);
+  const [heartbeatExpanded, setHeartbeatExpanded] = useState(false);
   const [schedules, setSchedules] = useState<any[]>([]);
   const [runningTaskCount, setRunningTaskCount] = useState(0);
   const [version, setVersion] = useState<string | null>(null);
@@ -62,8 +63,9 @@ export function Sidebar() {
     ? "chat"
     : pathname.slice(1).replace(/\/$/, ""); // "memory", "knowledge", etc.
 
-  const normalSessions = sessions.filter((s) => !s.title.startsWith("[定时]"));
+  const normalSessions = sessions.filter((s) => !s.title.startsWith("[定时]") && !s.title.startsWith("[心跳]"));
   const scheduleSessions = sessions.filter((s) => s.title.startsWith("[定时]"));
+  const heartbeatSessions = sessions.filter((s) => s.title.startsWith("[心跳]"));
   const scheduleUnreadCount = scheduleSessions.filter(
     (s) => s.updated_at > lastSeenSchedule
   ).length;
@@ -392,6 +394,18 @@ export function Sidebar() {
                 </div>
                 {scheduleExpanded &&
                   scheduleSessions.slice(0, 5).map(renderSession)}
+
+                <div
+                  className="flex items-center justify-between py-1 mt-2 cursor-pointer text-muted-foreground hover:text-foreground"
+                  onClick={() => setHeartbeatExpanded(!heartbeatExpanded)}
+                >
+                  <span className="text-sm font-semibold">心跳(对话)</span>
+                  <span className="text-[10px]">
+                    {heartbeatExpanded ? "▼" : "▶"}
+                  </span>
+                </div>
+                {heartbeatExpanded &&
+                  heartbeatSessions.slice(0, 5).map(renderSession)}
               </>
             )}
             {sessionSearch && sessions.map(renderSession)}
