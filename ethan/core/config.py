@@ -72,6 +72,7 @@ class RoutingConfig(BaseModel):
     """
     fast_base_tools: list[str] = Field(default_factory=lambda: [
         "file_read", "file_write", "skill_read", "skill_list", "find_tools",
+        "schedule_create", "schedule_list", "schedule_remove",
     ])  # fast 档永远挂载的基础系统工具；find_tools 用于「规则工具不够时」兜底激活进阶工具
     base_tools: list[str] = Field(default_factory=lambda: [
         # 常用核心工具：medium/full 档的初始广播集（两档共用同一份白名单）。
