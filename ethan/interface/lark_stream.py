@@ -536,22 +536,35 @@ async def _handle_message(event_data: dict) -> None:
             await _send_reply(chat_id, "🛑 已停止当前回复。")
             return
 
+    # ── THINKING 表情：立刻添加，不等锁 ──
+    # 必须在 _get_chat_lock 之前就加表情——同 chat 连发多条时，后续消息会在锁队列里等待，
+    # 若表情在锁内加，用户发完消息后看不到任何反应，直到前一条处理完（可能几十秒）才出现表情。
+    # 把表情加到锁外，收到消息就立刻给用户反馈，再安静等锁。
+    ts = TypingState(message_id)
+    await ts.__aenter__()
+
     # ── 同 chat 串行：Agent 处理必须排队 ──
     # 同一飞书 chat 连发多条消息时，若并发跑会互相踩：并发改同一 session、流式卡片
     # 互相覆盖、/stop 登记混乱。命令路径不经锁（已 return），保持即时响应；这里只串行化
     # 真正的 Agent 生成。锁按 chat_id 复用，跨消息持久；message_id 去重已在锁外完成，
     # 重投事件不会进到这里两次。
-    async with _get_chat_lock(chat_id):
-        await _handle_agent_message(
-            event_data,
-            chat_id=chat_id,
-            message_id=message_id,
-            text=text,
-            sender_open_id=sender_open_id,
-            is_owner=is_owner,
-            owner_claimed=owner_claimed,
-            btw_mode=btw_mode,
-        )
+    try:
+        async with _get_chat_lock(chat_id):
+            await _handle_agent_message(
+                event_data,
+                chat_id=chat_id,
+                message_id=message_id,
+                text=text,
+                sender_open_id=sender_open_id,
+                is_owner=is_owner,
+                owner_claimed=owner_claimed,
+                btw_mode=btw_mode,
+                ts=ts,
+            )
+    except Exception:
+        # 锁本身或 _handle_agent_message 意外抛出时兜底清理表情，避免残留
+        await ts.clear()
+        raise
 
 
 async def _handle_agent_message(
@@ -564,19 +577,16 @@ async def _handle_agent_message(
     is_owner: bool,
     owner_claimed: bool,
     btw_mode: bool,
+    ts: TypingState,
 ) -> None:
     """真正的 Agent 流式处理（在持锁串行下运行）。_handle_message 完成去重/命令/主人判定后调本函数。"""
-    # THINKING 表情生命周期由 TypingState 统一管理（封装 add/move/remove + 异常兜底）。
-    # 这里手动 __aenter__ 进入加表情；流式中 ts.move_to 迁移到工具进度/答案卡片；
-    # 定稿时 ts.clear 尽早移除；except 里 ts.clear 清理。不用 async with 是因为本函数
-    # try/except 有多个 exit 点且各自还要做存库/收尾，整体包进 async with 要把 500+ 行重缩进，不值。
+    # THINKING 表情由调用方（_handle_message）在锁外提前创建，这里直接用传入的 ts。
+    # 流式中 ts.move_to 迁移到工具进度/答案卡片；定稿时 ts.clear 尽早移除；except 里 ts.clear 清理。
     from ethan.core.agent import Agent
     from ethan.memory.session import SessionStore
     from ethan.providers.base import Message, ThinkingEvent, ToolEvent
     from ethan.skills.registry import SkillRegistry
     from ethan.tools.registry import ToolRegistry
-    ts = TypingState(message_id)
-    await ts.__aenter__()
 
     # 查找或创建对应的 Session（lark 渠道归 admin）
     from ethan.core.paths import user_sessions_db_path
