@@ -280,6 +280,8 @@ class ChannelPatchRequest(BaseModel):
 @router.get("/channels", dependencies=[Depends(verify_token)])
 async def get_channels():
     config = get_config()
+    from ethan.interface.wechat_ilink import load_credentials as _load_wechat_creds
+    wechat_creds = _load_wechat_creds()
     return {
         "channels": [
             {
@@ -287,7 +289,17 @@ async def get_channels():
                 "name": "飞书 (Feishu/Lark)",
                 "enabled": bool(config.lark.app_id and config.lark.app_secret),
                 "config": {"app_id": config.lark.app_id, "app_secret": config.lark.app_secret},
-            }
+            },
+            {
+                "id": "wechat",
+                "name": "微信 (WeChat iLink)",
+                "enabled": bool(config.wechat.enabled and wechat_creds),
+                "config": {
+                    "enabled": config.wechat.enabled,
+                    "logged_in": bool(wechat_creds),
+                    "bot_id": wechat_creds.ilink_bot_id if wechat_creds else "",
+                },
+            },
         ]
     }
 
@@ -300,6 +312,12 @@ async def patch_channel(req: ChannelPatchRequest):
             config.lark.app_id = req.config["app_id"]
         if "app_secret" in req.config:
             config.lark.app_secret = req.config["app_secret"]
+        save_config(config)
+        reload_config()
+        return {"ok": True}
+    if req.channel_id == "wechat":
+        if "enabled" in req.config:
+            config.wechat.enabled = bool(req.config["enabled"])
         save_config(config)
         reload_config()
         return {"ok": True}

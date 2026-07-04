@@ -35,7 +35,24 @@ _CLIENT_VERSION = str(2 << 16 | 0 << 8 | 0)
 _QR_REFRESH_LIMIT = 3
 _LONGPOLL_TIMEOUT_S = 40  # slightly longer than server's 35s
 
-_CREDS_PATH = Path.home() / ".ethan" / "memory" / "wechat_credentials.json"
+_CREDS_PATH = Path.home() / ".ethan" / ".secrets" / "wechat_credentials.json"
+
+# 旧路径迁移（之前误放在 memory/ 下）
+_CREDS_PATH_LEGACY = Path.home() / ".ethan" / "memory" / "wechat_credentials.json"
+
+
+def _migrate_legacy_creds() -> None:
+    """把旧位置的凭证静默迁移到 .secrets/，幂等。"""
+    if _CREDS_PATH.exists() or not _CREDS_PATH_LEGACY.exists():
+        return
+    try:
+        _CREDS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _CREDS_PATH.write_bytes(_CREDS_PATH_LEGACY.read_bytes())
+        _CREDS_PATH.chmod(0o600)
+        _CREDS_PATH_LEGACY.unlink(missing_ok=True)
+        logger.info("[WeChat] 凭证已从 memory/ 迁移到 .secrets/")
+    except Exception as e:
+        logger.warning("[WeChat] 凭证迁移失败: %s", e)
 
 
 # ── Credentials ───────────────────────────────────────────────────────────────
@@ -55,6 +72,7 @@ class WeChatCredentials:
 
 
 def load_credentials() -> WeChatCredentials | None:
+    _migrate_legacy_creds()
     if not _CREDS_PATH.exists():
         return None
     try:
@@ -67,6 +85,11 @@ def save_credentials(creds: WeChatCredentials) -> None:
     _CREDS_PATH.parent.mkdir(parents=True, exist_ok=True)
     _CREDS_PATH.write_text(json.dumps(creds.to_dict(), ensure_ascii=False))
     _CREDS_PATH.chmod(0o600)
+
+
+def clear_credentials() -> None:
+    _CREDS_PATH.unlink(missing_ok=True)
+    _CREDS_PATH_LEGACY.unlink(missing_ok=True)
 
 
 def clear_credentials() -> None:
