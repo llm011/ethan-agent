@@ -1076,7 +1076,7 @@ async def _handle_agent_message(
                         preview = raw_preview
                     result_line = f"{mark} {dur_str} · {preview}" if preview else f"{mark} {dur_str}"
                     tool_text = tool_text.rstrip() + "\n" + result_line
-                    # 有其它工具仍在运行，追加 thinking 占位
+                    # 有其它工具仍在运行，追加 thinking 占位；否则末尾补空行
                     running = [s for s in collected_tool_steps if s["state"] == "running"]
                     if running and not thinking_shown:
                         tool_text = tool_text.rstrip() + "\n🤔 thinking...\n"
@@ -1084,7 +1084,11 @@ async def _handle_agent_message(
                     else:
                         tool_text += "\n"
                         thinking_shown = False
-                    await _update_tool_msg()
+                    # 只在没有其他工具等待时立即 update：
+                    # 若有工具在跑，下一个工具 start 会把结果行 + 分隔线 + 工具名一起发出，
+                    # 避免「无分隔线」→「有分隔线」两次紧邻 update 造成分隔线闪烁。
+                    if not running:
+                        await _update_tool_msg()
                     # ui_card 工具产出的自定义卡片：在工具完成时补发（增量，不影响上面的进度/答案流）
                     await _emit_lark_cards(getattr(chunk, "ui", None))
                 continue
@@ -1329,8 +1333,7 @@ async def _handle_card_action(event_data: dict) -> None:
                 ]
             },
         }
-        # 延迟导入避免循环依赖
-        from ethan.interface.lark_send import _send_interactive_card
+        # 延迟导入避免循环依赖（_send_interactive_card 已在模块顶部 import，这里直接用）
         await _send_interactive_card(chat_id, card)
         logger.debug(
             "[Lark] card action test echo sent: chat=%s token_present=%s",
