@@ -108,11 +108,12 @@ _seen_msg_ids: set[str] = set()
 
 
 async def _handle_message(msg: dict[str, Any], creds: "WeChatCredentials") -> None:  # noqa: F821
-    """Process a single message from getupdates, run Agent, reply."""
+    """Process a single iLink message, run Agent, reply."""
     from ethan.interface.wechat_ilink import send_text, send_typing
     import httpx
 
-    msg_id = msg.get("msg_id") or msg.get("message_id") or ""
+    # Deduplicate by message_id
+    msg_id = str(msg.get("message_id") or msg.get("msg_id") or "")
     if msg_id and msg_id in _seen_msg_ids:
         return
     if msg_id:
@@ -120,56 +121,35 @@ async def _handle_message(msg: dict[str, Any], creds: "WeChatCredentials") -> No
         if len(_seen_msg_ids) > 2000:
             _seen_msg_ids.clear()
 
-    # Extract message fields
-    # iLink message structure varies; cover known field names
-    context_token = (
-        msg.get("context_token")
-        or msg.get("contextToken")
-        or msg.get("ctx_token")
-        or ""
-    )
-    msg_type = (
-        msg.get("msg_type")
-        or msg.get("type")
-        or ""
-    )
-    content = msg.get("content") or ""
-
-    # Only handle text messages for now
-    if msg_type not in ("", "text", "TEXT", 1, "1"):
-        logger.debug("[WeChat] skipping non-text msg_type=%s", msg_type)
+    # iLink message_type: 1=user, 2=bot — skip our own outgoing messages
+    message_type = msg.get("message_type")
+    if message_type == 2:
         return
 
-    # content may be a JSON string with a text field
-    if isinstance(content, str) and content.startswith("{"):
-        try:
-            parsed = __import__("json").loads(content)
-            content = parsed.get("text") or parsed.get("content") or content
-        except Exception:
-            pass
+    # Extract text from item_list[0].text_item.text (actual iLink structure)
+    text = ""
+    item_list = msg.get("item_list") or []
+    for item in item_list:
+        if item.get("type") == 1:  # ITEM_TEXT
+            text_item = item.get("text_item") or {}
+            text = (text_item.get("text") or "").strip()
+            if text:
+                break
 
-    text = str(content).strip()
     if not text:
+        logger.debug("[WeChat] skipping non-text or empty message: msg_type=%s", message_type)
         return
 
-    # Derive a stable "chat_id" from context_token or sender info
-    # context_token is required for replies; we also use it as session key
-    sender = (
-        msg.get("from_wxid")
-        or msg.get("sender_wxid")
-        or msg.get("sender_id")
-        or msg.get("from")
-        or ""
-    )
-    room_wxid = msg.get("room_wxid") or msg.get("room_id") or ""
-    # For session keying: group chats use room_wxid, private chats use sender
-    chat_key = room_wxid or sender or context_token[:16]
+    sender = msg.get("from_user_id") or ""
+    group_id = msg.get("group_id") or ""
+    context_token = msg.get("context_token") or ""
+    chat_key = group_id or sender or msg_id[:16]
 
     if not context_token:
         logger.warning("[WeChat] message has no context_token — cannot reply: %s", msg)
         return
 
-    logger.info("[WeChat] msg from=%s room=%s text=%r", sender, room_wxid, text[:80])
+    logger.info("[WeChat] msg from=%s group=%s text=%r", sender[:20], group_id, text[:80])
 
     # Send typing indicator
     async with httpx.AsyncClient() as client:
@@ -209,7 +189,7 @@ async def _handle_message(msg: dict[str, Any], creds: "WeChatCredentials") -> No
     if reply_text:
         async with httpx.AsyncClient() as client:
             try:
-                await send_text(client, creds, context_token, reply_text)
+                await send_text(client, creds, sender, context_token, reply_text)
             except Exception:
                 logger.exception("[WeChat] Failed to send reply")
 

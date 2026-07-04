@@ -286,15 +286,14 @@ async def get_updates(
             raise PermissionError("iLink token expired or invalid") from e
         raise
 
-    ret = body.get("ret", -1)
-    if ret != 0:
-        logger.warning("[WeChat] getupdates ret=%s body=%s", ret, body)
-        if ret in (100, 401, 403):
-            raise PermissionError(f"iLink auth error: ret={ret}")
-        return [], buf
+    ret = body.get("ret")
+    # iLink returns ret=-1 (or omits ret) for normal responses with messages.
+    # Only treat explicit auth error codes as failures.
+    if ret is not None and ret not in (0, -1) and ret in (100, 401, 403):
+        raise PermissionError(f"iLink auth error: ret={ret}")
 
-    msgs = body.get("msgs") or body.get("messages") or []
-    new_buf = body.get("get_updates_buf", buf)
+    msgs = body.get("msgs") or []
+    new_buf = body.get("get_updates_buf") or buf
     return msgs, new_buf
 
 
@@ -303,24 +302,31 @@ async def get_updates(
 async def send_text(
     client: httpx.AsyncClient,
     creds: WeChatCredentials,
+    to_user_id: str,
     context_token: str,
     text: str,
 ) -> None:
-    """Send a plain-text reply using the context_token from the received message."""
+    """Send a plain-text reply. Uses Hermes-compatible iLink sendmessage format."""
+    import uuid
+    message = {
+        "from_user_id": "",
+        "to_user_id": to_user_id,
+        "client_id": str(uuid.uuid4()),
+        "message_type": 2,    # MSG_TYPE_BOT
+        "message_state": 2,   # MSG_STATE_FINISH
+        "item_list": [{"type": 1, "text_item": {"text": text}}],  # ITEM_TEXT
+    }
+    if context_token:
+        message["context_token"] = context_token
     r = await client.post(
         f"{creds.base_url}/ilink/bot/sendmessage",
         headers=_build_headers(creds.bot_token),
-        json={
-            "context_token": context_token,
-            "msg_type": "text",
-            "content": text,
-            "base_info": _base_info(),
-        },
+        json={"msg": message, "base_info": _base_info()},
         timeout=15,
     )
     r.raise_for_status()
     body = r.json()
-    if body.get("ret", -1) != 0:
+    if body.get("ret", -1) not in (0, -1):
         logger.warning("[WeChat] sendmessage failed: %s", body)
 
 
