@@ -3,9 +3,10 @@
 Architecture mirrors lark_events.py:
   - start_wechat_listener() / stop_wechat_listener() called from api.py lifespan
   - _bot_loop() long-polls iLink, dispatches to _handle_message()
-  - _handle_message() looks up / creates a session, runs Agent.chat(), sends reply
+  - _handle_message() loads session history, runs Agent.stream_chat(), sends tool
+    progress as individual messages, then sends final reply
 
-Credentials are persisted to ~/.ethan/memory/wechat_credentials.json by
+Credentials are persisted to ~/.ethan/.secrets/wechat_credentials.json by
 wechat_ilink.login_via_qrcode().  Re-login is triggered automatically when the
 token is rejected (HTTP 401/403 or iLink ret=100).
 """
@@ -22,10 +23,17 @@ _RETRY_DELAY_S = 2
 _MAX_CONSECUTIVE_ERRORS = 5
 _BACKOFF_S = 30
 
+# 工具名 → emoji（与飞书保持一致）
+_TOOL_EMOJI: dict[str, str] = {
+    "shell": "💻", "web_search": "🔍", "web_fetch": "🌐",
+    "file_read": "📖", "file_write": "✏️", "file_list": "📁",
+    "memory_write": "🧠", "knowledge_search": "📚", "knowledge_read": "📖",
+    "schedule_create": "⏰", "schedule_list": "📋", "schedule_remove": "📋",
+    "rg_search": "🔍", "fd_find": "📁",
+}
 
-def _wechat_configured() -> bool:
-    from ethan.interface.wechat_ilink import load_credentials
-    return load_credentials() is not None
+def _tool_icon(name: str) -> str:
+    return _TOOL_EMOJI.get(name, "🔧")
 
 
 def start_wechat_listener() -> None:
@@ -51,7 +59,6 @@ def stop_wechat_listener() -> None:
 async def _bot_loop() -> None:
     import httpx
     from ethan.interface.wechat_ilink import (
-        WeChatCredentials,
         get_updates,
         load_credentials,
         login_via_qrcode,
@@ -107,12 +114,13 @@ async def _bot_loop() -> None:
 _seen_msg_ids: set[str] = set()
 
 
-async def _handle_message(msg: dict[str, Any], creds: "WeChatCredentials") -> None:  # noqa: F821
-    """Process a single iLink message, run Agent, reply."""
-    from ethan.interface.wechat_ilink import send_text, send_typing
+async def _handle_message(msg: dict[str, Any], creds: Any) -> None:
+    """Process a single iLink message: load history, stream Agent, send tool progress + reply."""
     import httpx
+    from ethan.interface.wechat_ilink import send_text, send_typing
+    from ethan.providers.base import Message, ToolEvent
 
-    # Deduplicate by message_id
+    # ── Deduplicate ──────────────────────────────────────────────────────────
     msg_id = str(msg.get("message_id") or msg.get("msg_id") or "")
     if msg_id and msg_id in _seen_msg_ids:
         return
@@ -121,23 +129,19 @@ async def _handle_message(msg: dict[str, Any], creds: "WeChatCredentials") -> No
         if len(_seen_msg_ids) > 2000:
             _seen_msg_ids.clear()
 
-    # iLink message_type: 1=user, 2=bot — skip our own outgoing messages
-    message_type = msg.get("message_type")
-    if message_type == 2:
+    # Skip bot's own outgoing messages (message_type=2)
+    if msg.get("message_type") == 2:
         return
 
-    # Extract text from item_list[0].text_item.text (actual iLink structure)
+    # ── Extract text ─────────────────────────────────────────────────────────
     text = ""
-    item_list = msg.get("item_list") or []
-    for item in item_list:
-        if item.get("type") == 1:  # ITEM_TEXT
-            text_item = item.get("text_item") or {}
-            text = (text_item.get("text") or "").strip()
+    for item in (msg.get("item_list") or []):
+        if item.get("type") == 1:
+            text = ((item.get("text_item") or {}).get("text") or "").strip()
             if text:
                 break
 
     if not text:
-        logger.debug("[WeChat] skipping non-text or empty message: msg_type=%s", message_type)
         return
 
     sender = msg.get("from_user_id") or ""
@@ -146,61 +150,129 @@ async def _handle_message(msg: dict[str, Any], creds: "WeChatCredentials") -> No
     chat_key = group_id or sender or msg_id[:16]
 
     if not context_token:
-        logger.warning("[WeChat] message has no context_token — cannot reply: %s", msg)
+        logger.warning("[WeChat] no context_token, cannot reply")
         return
 
-    logger.info("[WeChat] msg from=%s group=%s text=%r", sender[:20], group_id, text[:80])
+    logger.info("[WeChat] msg from=%s text=%r", sender[:20], text[:80])
 
-    # 立即回一个"收到"确认，让用户知道 bot 收到消息了
+    # ── Ack immediately ───────────────────────────────────────────────────────
     async with httpx.AsyncClient() as client:
         try:
             await send_text(client, creds, sender, context_token, "收到，处理中...")
         except Exception:
-            logger.warning("[WeChat] Failed to send ack")
+            pass
         await send_typing(client, creds, context_token, typing=True)
 
-    # ── Session + Agent ───────────────────────────────────────────────────────
-    from ethan.core.agent_factory import create_agent
+    # ── Session + history ─────────────────────────────────────────────────────
     from ethan.core.config import get_config
-    from ethan.core.paths import user_sessions_db_path
+    from ethan.core.paths import user_sessions_db_path, user_facts_path
     from ethan.core.users import get_user_store
     from ethan.memory.session import SessionStore
-    from ethan.providers.base import Message
+    from ethan.memory.working import MemoryConfig, WorkingMemory
+    from ethan.memory.facts import FactStore
 
     user_id = get_user_store().get_admin_user_id()
     store = SessionStore(db_path=user_sessions_db_path())
     await store.init()
 
+    session_id = await _get_or_create_session(store, chat_key)
+    session_obj = await store.load(session_id)
+    history = session_obj.messages if session_obj else []
+
+    # Build context: last 5 turns (same as lark)
+    memory = WorkingMemory(config=MemoryConfig(hot_size=5))
+    memory.cold_facts = FactStore(path=user_facts_path()).build_context()
+    hist_ua = [m for m in history if m.role in ("user", "assistant")]
+    pairs, i = [], 0
+    while i < len(hist_ua) - 1:
+        if hist_ua[i].role == "user" and hist_ua[i + 1].role == "assistant":
+            pairs.append((hist_ua[i], hist_ua[i + 1]))
+            i += 2
+        else:
+            i += 1
+    for u, a in pairs[-memory.config.hot_size:]:
+        memory.hot.extend([u, a])
+
+    # Inject channel context so Agent doesn't try Lark tools
+    agent_text = f"[当前渠道：微信]\n{text}"
+    user_msg = Message(role="user", content=text)
+    agent_user_msg = Message(role="user", content=agent_text)
+    await store.save_message(session_id, user_msg)
+
+    context_messages = memory.build_context() + [agent_user_msg]
+
+    # ── Stream Agent ──────────────────────────────────────────────────────────
+    from ethan.core.agent_factory import create_agent
+    from ethan.interface.lark_tool_trace import sanitize_args_summary, sanitize_result_preview
+
+    agent = create_agent(channel="wechat", user_id=user_id, toolset="full")
+    final_response: Message | None = None
+
     try:
-        session_id = await _get_or_create_session(store, chat_key)
-        user_msg = Message(role="user", content=text)
-        await store.save_message(session_id, user_msg)
+        async for chunk in agent.stream_chat(context_messages):
+            if isinstance(chunk, ToolEvent):
+                if chunk.state == "start":
+                    icon = _tool_icon(chunk.tool_name)
+                    args = sanitize_args_summary(chunk.args_summary or "")
+                    intent = chunk.intent or ""
+                    line = f"{icon} {chunk.tool_name}"
+                    if intent:
+                        line += f" · {intent}"
+                    elif args:
+                        line += f" · {args}"
+                    async with httpx.AsyncClient() as client:
+                        try:
+                            await send_text(client, creds, sender, context_token, line)
+                        except Exception:
+                            pass
+                elif chunk.state == "done":
+                    preview = sanitize_result_preview(chunk.result_preview or "")
+                    if preview:
+                        async with httpx.AsyncClient() as client:
+                            try:
+                                await send_text(client, creds, sender, context_token, f"✓ {preview[:300]}")
+                            except Exception:
+                                pass
+                elif chunk.state == "error":
+                    async with httpx.AsyncClient() as client:
+                        try:
+                            await send_text(client, creds, sender, context_token, f"✗ {chunk.result_preview or '工具调用失败'}")
+                        except Exception:
+                            pass
+            elif isinstance(chunk, Message):
+                final_response = chunk
 
-        agent = create_agent(channel="wechat", user_id=user_id, toolset="full")
-        response = await agent.chat([user_msg])
-
-        await store.save_message(session_id, response)
-        await store.touch(session_id)
     except Exception:
-        logger.exception("[WeChat] Agent error for chat_key=%s", chat_key)
+        logger.exception("[WeChat] Agent stream error for chat_key=%s", chat_key)
         await store.close()
         return
 
+    if final_response is None:
+        # Fallback: use non-streaming chat
+        try:
+            final_response = await agent.chat(context_messages)
+        except Exception:
+            logger.exception("[WeChat] Agent fallback chat error")
+            await store.close()
+            return
+
+    await store.save_message(session_id, final_response)
+    await store.touch(session_id)
     await store.close()
 
-    # ── Reply ─────────────────────────────────────────────────────────────────
-    reply_text = response.content or ""
-    if reply_text:
+    # ── Send final reply ──────────────────────────────────────────────────────
+    reply = (final_response.content or "").strip()
+    if reply:
         async with httpx.AsyncClient() as client:
             try:
-                await send_text(client, creds, sender, context_token, reply_text)
+                await send_text(client, creds, sender, context_token, reply)
             except Exception:
                 logger.exception("[WeChat] Failed to send reply")
 
 
-async def _get_or_create_session(store: "SessionStore", chat_key: str) -> str:  # noqa: F821
+async def _get_or_create_session(store: Any, chat_key: str) -> str:
     from ethan.core.config import get_config
-    prefix = f"wechat:{chat_key}:"
+    prefix = f"微信:{chat_key}:"
     sessions = await store.list_recent(limit=100)
     for s in sessions:
         if s.title and s.title.startswith(prefix):
