@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import deque
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -112,6 +113,7 @@ async def _bot_loop() -> None:
 # ── Message handler ───────────────────────────────────────────────────────────
 
 _seen_msg_ids: set[str] = set()
+_seen_msg_order: deque[str] = deque(maxlen=2000)
 
 
 async def _handle_message(msg: dict[str, Any], creds: Any) -> None:
@@ -125,9 +127,10 @@ async def _handle_message(msg: dict[str, Any], creds: Any) -> None:
     if msg_id and msg_id in _seen_msg_ids:
         return
     if msg_id:
+        if len(_seen_msg_order) == _seen_msg_order.maxlen:
+            _seen_msg_ids.discard(_seen_msg_order[0])
+        _seen_msg_order.append(msg_id)
         _seen_msg_ids.add(msg_id)
-        if len(_seen_msg_ids) > 2000:
-            _seen_msg_ids.clear()
 
     # Skip bot's own outgoing messages (message_type=2)
     if msg.get("message_type") == 2:
@@ -206,7 +209,7 @@ async def _handle_message(msg: dict[str, Any], creds: Any) -> None:
     from ethan.interface.lark_tool_trace import sanitize_args_summary, sanitize_result_preview
 
     agent = create_agent(channel="wechat", user_id=user_id, toolset="full")
-    final_response: Message | None = None
+    final_answer = ""
 
     try:
         async for chunk in agent.stream_chat(context_messages):
@@ -239,22 +242,15 @@ async def _handle_message(msg: dict[str, Any], creds: Any) -> None:
                             await send_text(client, creds, sender, context_token, f"✗ {chunk.result_preview or '工具调用失败'}")
                         except Exception:
                             pass
-            elif isinstance(chunk, Message):
-                final_response = chunk
+            elif isinstance(chunk, str):
+                final_answer += chunk
 
     except Exception:
         logger.exception("[WeChat] Agent stream error for chat_key=%s", chat_key)
         await store.close()
         return
 
-    if final_response is None:
-        # Fallback: use non-streaming chat
-        try:
-            final_response = await agent.chat(context_messages)
-        except Exception:
-            logger.exception("[WeChat] Agent fallback chat error")
-            await store.close()
-            return
+    final_response = Message(role="assistant", content=final_answer) if final_answer else None
 
     await store.save_message(session_id, final_response)
     await store.touch(session_id)

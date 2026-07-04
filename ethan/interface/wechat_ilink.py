@@ -92,10 +92,6 @@ def clear_credentials() -> None:
     _CREDS_PATH_LEGACY.unlink(missing_ok=True)
 
 
-def clear_credentials() -> None:
-    _CREDS_PATH.unlink(missing_ok=True)
-
-
 # ── HTTP helpers ───────────────────────────────────────────────────────────────
 
 def _random_wechat_uin() -> str:
