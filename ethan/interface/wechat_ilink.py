@@ -150,22 +150,30 @@ async def login_via_qrcode() -> WeChatCredentials:
                 raise RuntimeError(f"get_bot_qrcode failed: ret={ret} body={body}")
 
             qrcode_key = body.get("qrcode") or body.get("qrcode_key") or ""
-            qr_image = body.get("qrcode_image") or body.get("qrcode_img") or qrcode_key
+            # 实际字段名是 qrcode_img_content（URL 形式）
+            qr_url = (
+                body.get("qrcode_img_content")
+                or body.get("qrcode_image")
+                or body.get("qrcode_img")
+                or ""
+            )
 
-            if qr_image:
+            if qr_url:
+                print(f"\n[WeChat] 请用微信扫以下二维码登录:\n  {qr_url}\n")
+                # 用系统浏览器打开二维码页面（页面内含二维码，可直接扫）
                 try:
-                    qr_path = await _save_qr_image(qr_image)
-                    print(f"\n[WeChat] 请用微信扫码登录: {qr_path}")
-                    # Try to open the image for the user
                     import subprocess, sys
                     if sys.platform == "darwin":
-                        subprocess.Popen(["open", str(qr_path)])
+                        subprocess.Popen(["open", qr_url])
                     elif sys.platform == "linux":
-                        subprocess.Popen(["xdg-open", str(qr_path)])
-                except Exception as e:
-                    logger.warning("[WeChat] 无法保存二维码: %s", e)
+                        subprocess.Popen(["xdg-open", qr_url])
+                    print("[WeChat] 已在浏览器打开二维码页面，请用微信扫码...")
+                except Exception:
+                    print("[WeChat] 请手动在浏览器打开上方链接后扫码")
+            elif qrcode_key:
+                print(f"\n[WeChat] 二维码 key={qrcode_key}（未收到图片 URL，请联系开发者）")
             else:
-                logger.warning("[WeChat] 未收到二维码图像，原始响应: %s", body)
+                logger.warning("[WeChat] 未收到二维码，原始响应: %s", body)
 
             # 2. Poll for scan status
             poll_url = f"{_ILINK_LOGIN_BASE}/ilink/bot/get_qrcode_status"
