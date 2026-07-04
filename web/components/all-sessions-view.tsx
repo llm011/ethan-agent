@@ -3,8 +3,8 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { format } from "date-fns";
 import { zhCN } from "date-fns/locale";
-import { SessionInfo, fetchSessions, renameSession, deleteSession, fetchModes, type ModeEntry } from "@/lib/api";
-import { Loader2, Search, Calendar, MessageSquare, ChevronLeft, ChevronRight, Pencil, Trash2, Check, X } from "lucide-react";
+import { SessionInfo, fetchSessions, fetchPoll, renameSession, deleteSession, fetchModes, type ModeEntry } from "@/lib/api";
+import { Loader2, Search, Calendar, MessageSquare, ChevronLeft, ChevronRight, Pencil, Trash2, Check, X, HeartPulse } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -123,9 +123,11 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
           <Button
             variant={showHeartbeat ? "default" : "outline"}
             size="sm"
-            className="h-8 text-xs px-2.5"
+            className="h-8 text-xs px-2.5 gap-1"
             onClick={() => setShowHeartbeat(v => !v)}
+            title="心跳对话"
           >
+            <HeartPulse className="h-3.5 w-3.5" />
             心跳
           </Button>
           <Button
@@ -207,7 +209,7 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
-            {sessions.map((session) => {
+            {sessions.filter(s => showHeartbeat || !s.title.startsWith("[心跳]")).map((session) => {
               const sourceLabel: Record<string, string> = { lark: "飞书", repl: "命令行", web: "Web", heartbeat: "心跳", codex: "Codex", claude: "Claude Code", opencode: "OpenCode" };
               const sourceColor: Record<string, string> = {
                 lark: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
