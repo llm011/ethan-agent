@@ -255,6 +255,7 @@ async def _handle_message(event_data: dict) -> None:
                 message_id=message_id,
                 text=text,
                 sender_open_id=sender_open_id,
+                owner_open_id=owner_open_id,
                 is_owner=is_owner,
                 owner_claimed=owner_claimed,
                 btw_mode=btw_mode,
