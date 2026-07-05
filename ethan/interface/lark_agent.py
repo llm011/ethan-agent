@@ -32,6 +32,7 @@ async def _handle_agent_message(
     is_owner: bool,
     owner_claimed: bool,
     btw_mode: bool,
+    ts: "TypingState",
 ) -> None:
     """真正的 Agent 流式处理（在持锁串行下运行）。_handle_message 完成去重/命令/主人判定后调本函数。"""
     # shared state from lark_stream (lazy import avoids circular dep)
@@ -40,17 +41,11 @@ async def _handle_agent_message(
         _lark_welcomed, _mark_lark_welcomed, _pop_forwarded,
         _looks_like_tool_trace, _untrack_task, _lark_running_tasks,
     )
-    # THINKING 表情生命周期由 TypingState 统一管理（封装 add/move/remove + 异常兜底）。
-    # 这里手动 __aenter__ 进入加表情；流式中 ts.move_to 迁移到工具进度/答案卡片；
-    # 定稿时 ts.clear 尽早移除；except 里 ts.clear 清理。不用 async with 是因为本函数
-    # try/except 有多个 exit 点且各自还要做存库/收尾，整体包进 async with 要把 500+ 行重缩进，不值。
     from ethan.core.agent import Agent
     from ethan.memory.session import SessionStore
     from ethan.providers.base import Message, ThinkingEvent, ToolEvent
     from ethan.skills.registry import SkillRegistry
     from ethan.tools.registry import ToolRegistry
-    ts = TypingState(message_id)
-    await ts.__aenter__()
 
     # 查找或创建对应的 Session（lark 渠道归 admin）
     from ethan.core.paths import user_sessions_db_path
