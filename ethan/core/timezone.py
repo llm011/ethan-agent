@@ -1,5 +1,4 @@
 """时区工具：解析系统时区 / 配置时区，供调度器、心跳等全链路使用。"""
-from datetime import timezone, timedelta
 
 
 def _resolve_tz(tz_str: str = ""):
@@ -36,7 +35,10 @@ def get_local_timezone():
         tz_str = get_config().defaults.timezone
     except Exception:
         tz_str = ""
-    return _resolve_tz(tz_str)
+    try:
+        return _resolve_tz(tz_str)
+    except Exception:
+        return _resolve_tz("")
 
 
 def local_tz_name() -> str:
