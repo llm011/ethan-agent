@@ -79,13 +79,13 @@ class ScheduleCreateTool(BaseTool):
     fast_path = False
     side_effect = True
     name = "schedule_create"
-    description = "Create a scheduled task. Use for reminders, recurring checks, or timed automations."
+    description = "Create a scheduled task. Use for reminders, recurring checks, or timed automations. Cron expressions are interpreted in the user's local timezone."
     parameters = {
         "type": "object",
         "properties": {
             "job_id": {"type": "string", "description": "Unique job ID (e.g. 'morning-reminder')"},
             "prompt": {"type": "string", "description": "What to do when the task fires (a prompt or description)"},
-            "cron": {"type": "string", "description": "Cron expression (5-part: min hour day month weekday). E.g. '0 9 * * *' for 9am daily."},
+            "cron": {"type": "string", "description": "Cron expression (5-part: min hour day month weekday). E.g. '0 9 * * *' for 9am daily. IMPORTANT: for weekday, always use names (mon-fri, sat, sun) not numbers — APScheduler's numeric weekday convention differs from standard cron (1-5 means Tue-Sat, not Mon-Fri)."},
             "interval_minutes": {"type": "integer", "description": "Alternative: run every N minutes."},
         },
         "required": ["job_id", "prompt"],

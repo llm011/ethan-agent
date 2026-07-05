@@ -112,7 +112,8 @@ class Agent:
                 next_run = "paused"
                 if next_run_ts:
                     try:
-                        next_run = dt.datetime.fromtimestamp(next_run_ts).strftime("%Y-%m-%d %H:%M")
+                        from ethan.core.timezone import get_local_timezone
+                        next_run = dt.datetime.fromtimestamp(next_run_ts, get_local_timezone()).strftime("%Y-%m-%d %H:%M")
                     except Exception:
                         pass
                 # Extract prompt from kwargs if available
@@ -253,7 +254,8 @@ class Agent:
 
         # 从缓存读取，避免每次对话都做磁盘 I/O
         identity_content = self._system_files.get("identity", "You are a helpful assistant.")
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S %A")
+        from ethan.core.timezone import get_local_timezone
+        now = datetime.now(get_local_timezone()).strftime("%Y-%m-%d %H:%M:%S %A")
 
         self.last_matched_skills = []
 
