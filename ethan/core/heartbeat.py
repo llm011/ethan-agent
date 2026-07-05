@@ -144,7 +144,7 @@ async def _consolidate_profiles() -> None:
 
 async def _consolidate_profile_for_user(user_id: str) -> None:
     import time
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime
 
     from ethan.core.config import get_config
     from ethan.core.context import ETHAN_USER_ID
@@ -168,18 +168,19 @@ async def _consolidate_profile_for_user(user_id: str) -> None:
         except Exception:
             last = 0.0
 
-        # 触发钟点：北京时间（UTC+8）的配置小时之后、每天一次。
+        # 触发钟点：按用户本地时区的配置小时之后、每天一次。
         cfg = get_config()
-        bj = timezone(timedelta(hours=8))
-        now_bj = datetime.fromtimestamp(now, bj)
+        from ethan.core.timezone import get_local_timezone
+        local_tz = get_local_timezone()
+        now_local = datetime.fromtimestamp(now, local_tz)
         target_hour = cfg.defaults.heartbeat.profile_consolidate_hour
-        last_bj_date = datetime.fromtimestamp(last, bj).date() if last > 0 else None
+        last_bj_date = datetime.fromtimestamp(last, local_tz).date() if last > 0 else None
 
         # 闸门①：还没到当天触发钟点 → 等。
-        if now_bj.hour < target_hour:
+        if now_local.hour < target_hour:
             return
         # 闸门②：今天已经压过 → 跳过（每天一次）。
-        if last_bj_date is not None and last_bj_date >= now_bj.date():
+        if last_bj_date is not None and last_bj_date >= now_local.date():
             return
         # 闸门③：画像自上次压缩后没改动 → 跳过，不空烧 token。
         if last > 0 and profile_path.stat().st_mtime <= last:

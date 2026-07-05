@@ -123,6 +123,7 @@ class DefaultsConfig(BaseModel):
     lite_model: str = ""  # 轻量模型，用于记忆压缩/标题生成/skill 生成等（空则按主模型推断）
     agent_name: str = "Ethan"
     language: str = "zh"
+    timezone: str = ""  # IANA 时区名（如 "Asia/Shanghai"）。空 = 自动探测系统时区。
     max_tokens: int = 4096
     max_tool_iterations: int = 100
     routing: RoutingConfig = Field(default_factory=RoutingConfig)

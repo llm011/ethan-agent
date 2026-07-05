@@ -18,10 +18,12 @@ DB_PATH = CONFIG_DIR / "scheduler.db"
 class Scheduler:
     def __init__(self):
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        from ethan.core.timezone import get_local_timezone
         jobstores = {
             "default": SQLAlchemyJobStore(url=f"sqlite:///{DB_PATH}"),
         }
-        self._scheduler = BackgroundScheduler(jobstores=jobstores)
+        self._scheduler = BackgroundScheduler(jobstores=jobstores, timezone=get_local_timezone())
+        self._tz = get_local_timezone()
 
     def start(self) -> None:
         if not self._scheduler.running:
@@ -38,18 +40,13 @@ class Scheduler:
         cron_expr: str,
         **kwargs,
     ) -> None:
-        """添加 cron 定时任务。cron_expr 格式：'分 时 日 月 周' 或标准 cron。"""
-        parts = cron_expr.strip().split()
-        if len(parts) == 5:
-            trigger = CronTrigger(
-                minute=parts[0],
-                hour=parts[1],
-                day=parts[2],
-                month=parts[3],
-                day_of_week=parts[4],
-            )
-        else:
-            trigger = CronTrigger.from_crontab(cron_expr)
+        """添加 cron 定时任务。cron_expr 格式：'分 时 日 月 周' 或标准 cron。
+
+        统一走 from_crontab 解析，使用标准 cron 数字约定（0/7=周日，1=周一 … 5=周五，6=周六），
+        而非 APScheduler 原生 CronTrigger 构造器（0=周一）——两者 day_of_week 含义不同，
+        手动拆分传入会导致 '1-5' 被解释为 周二~周六。
+        """
+        trigger = CronTrigger.from_crontab(cron_expr, timezone=self._tz)
 
         self._scheduler.add_job(
             func,
