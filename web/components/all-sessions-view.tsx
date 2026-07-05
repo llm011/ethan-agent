@@ -68,10 +68,9 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
     }
   }, [page, search, filterSource, filterMode, loadSessions]);
 
-  // Poll for new sessions every 3s（搜索/筛选/非第一页时暂停，避免轮询结果覆盖当前视图）
+  // Poll for new sessions every 3s（搜索或筛选时暂停，避免轮询结果覆盖筛选视图）
   useEffect(() => {
     const interval = setInterval(async () => {
-      if (page !== 1) return;
       if (search.trim() || filterSource || filterMode !== "__all__") return;
       try {
         const data = await fetchPoll();
@@ -85,7 +84,7 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
     }, 3000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, search, filterSource, filterMode]);
+  }, [search, filterSource, filterMode]);
 
   const commitRename = async (id: string) => {
     const title = editingTitle.trim();

@@ -123,7 +123,7 @@ def _run_background(task: _BgTask, prompt: str, channel: str, channel_context: s
             "session_id": task.session_id,
             "channel": "web",  # 后台始终走 web 流式管线（lark 回灌另行处理）
         }
-        with requests.post(f"{base}/api/chat", json=body, headers=headers,
+        with requests.post(f"{base}/chat", json=body, headers=headers,
                            stream=True, timeout=3600) as res:
             res.raise_for_status()
             for raw in res.iter_lines(decode_unicode=True):

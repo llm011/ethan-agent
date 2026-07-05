@@ -49,18 +49,6 @@ class LarkConfig(BaseModel):
     owner_open_id: str = ""
     # 主会话：用于发通知 / 定时任务结果的 chat_id。空 = 未设。
     main_chat_id: str = ""
-    # 群聊响应模式（开通 im:message.group_msg:readonly 后生效，bot 可收到全量群消息）：
-    # mention_only - 只回复 @mention（默认；未开通全量权限时也能工作）
-    # always       - 所有群消息都回复
-    # keywords     - 消息含任一 group_keywords 才回复（支持 * 通配）
-    # llm_filter   - 调小模型判断是否需要处理（额外延迟约 0.5-1s，但可过滤无关闲聊）
-    group_response_mode: str = "mention_only"
-    # keywords 模式的关键词列表，例如 ["ethan", "帮我*", "查一下*"]
-    group_keywords: list[str] = Field(default_factory=list)
-    # llm_filter 模式的自定义过滤提示词（空则用内置默认提示）
-    group_llm_filter_hint: str = ""
-    # bot 在飞书群里的显示名（mention_only 模式用于识别 @bot），空则任意 @ 都触发
-    bot_name: str = ""
 
 
 class FastRule(BaseModel):
