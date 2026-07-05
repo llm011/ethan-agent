@@ -160,11 +160,13 @@ export interface SessionDetail {
   }[];
 }
 
-export async function fetchSessions(limit = 50, offset = 0, q?: string, source?: string, mode?: string): Promise<SessionInfo[]> {
+export async function fetchSessions(limit = 50, offset = 0, q?: string, source?: string, mode?: string, hideHeartbeat?: boolean, hideScheduled?: boolean): Promise<SessionInfo[]> {
   const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
   if (q) params.set("q", q);
   if (source) params.set("source", source);
   if (mode !== undefined) params.set("mode", mode);
+  if (hideHeartbeat) params.set("hide_heartbeat", "true");
+  if (hideScheduled) params.set("hide_scheduled", "true");
   const res = await fetch(`${API_URL}/sessions?${params}`, { headers: headers() });
   if (!res.ok) throw new Error("Failed to fetch sessions");
   const data = await res.json();

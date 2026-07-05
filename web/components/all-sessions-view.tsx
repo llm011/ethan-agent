@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { format } from "date-fns";
 import { zhCN } from "date-fns/locale";
-import { SessionInfo, fetchSessions, fetchPoll, renameSession, deleteSession, fetchModes, type ModeEntry } from "@/lib/api";
+import { SessionInfo, fetchSessions, renameSession, deleteSession, fetchModes, type ModeEntry } from "@/lib/api";
 import { Loader2, Search, Calendar, MessageSquare, ChevronLeft, ChevronRight, Pencil, Trash2, Check, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -25,21 +25,22 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
   const [editingTitle, setEditingTitle] = useState("");
   const [confirmState, setConfirmState] = useState<{ open: boolean; id: string }>({ open: false, id: "" });
   const [modes, setModes] = useState<ModeEntry[]>([]);
-  const [filterSource, setFilterSource] = useState<string>("");  // "" = 全部渠道
-  const [filterMode, setFilterMode] = useState<string>("__all__"); // "__all__" = 全部模式
+  const [filterSource, setFilterSource] = useState<string>("");
+  const [filterMode, setFilterMode] = useState<string>("__all__");
+  const [showHeartbeat, setShowHeartbeat] = useState(false);
+  const [showScheduled, setShowScheduled] = useState(false);
   const limit = 20;
 
   useEffect(() => {
     fetchModes().then(setModes).catch(() => {});
   }, []);
 
-  const loadSessions = useCallback(async (pageNum: number, q: string, src: string, md: string) => {
+  const loadSessions = useCallback(async (pageNum: number, q: string, src: string, md: string, hb: boolean, sched: boolean) => {
     setLoading(true);
     try {
       const offset = (pageNum - 1) * limit;
-      // "__all__" = 不筛模式；"__default__" = 默认模式（DB 里存空串）；其余 = mode key
       const modeParam = md === "__all__" ? undefined : (md === "__default__" ? "" : md);
-      const data = await fetchSessions(limit, offset, q || undefined, src || undefined, modeParam);
+      const data = await fetchSessions(limit, offset, q || undefined, src || undefined, modeParam, !hb, !sched);
       if (data.length < limit) {
         setHasMore(false);
       } else {
@@ -57,34 +58,33 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
     const q = search.trim();
     const timer = setTimeout(() => {
       setPage(1);
-      loadSessions(1, q, filterSource, filterMode);
+      loadSessions(1, q, filterSource, filterMode, showHeartbeat, showScheduled);
     }, 300);
     return () => clearTimeout(timer);
-  }, [search, filterSource, filterMode, loadSessions]);
+  }, [search, filterSource, filterMode, showHeartbeat, showScheduled, loadSessions]);
 
   useEffect(() => {
     if (page > 1) {
-      loadSessions(page, search.trim(), filterSource, filterMode);
+      loadSessions(page, search.trim(), filterSource, filterMode, showHeartbeat, showScheduled);
     }
-  }, [page, search, filterSource, filterMode, loadSessions]);
+  }, [page, search, filterSource, filterMode, showHeartbeat, showScheduled, loadSessions]);
 
   // Poll for new sessions every 3s（搜索或筛选时暂停，避免轮询结果覆盖筛选视图）
   useEffect(() => {
     const interval = setInterval(async () => {
       if (search.trim() || filterSource || filterMode !== "__all__") return;
       try {
-        const data = await fetchPoll();
+        const data = await fetchSessions(20, 0, undefined, undefined, undefined, !showHeartbeat, !showScheduled);
         setSessions(prev => {
-          const incoming = data.sessions as SessionInfo[];
-          const changed = incoming.length !== prev.length ||
-            incoming.some((s, i) => s.updated_at !== prev[i]?.updated_at || s.title !== prev[i]?.title);
-          return changed ? incoming : prev;
+          const changed = data.length !== prev.length ||
+            data.some((s, i) => s.updated_at !== prev[i]?.updated_at || s.title !== prev[i]?.title);
+          return changed ? data : prev;
         });
       } catch {}
     }, 3000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, filterSource, filterMode]);
+  }, [search, filterSource, filterMode, showHeartbeat, showScheduled]);
 
   const commitRename = async (id: string) => {
     const title = editingTitle.trim();
@@ -119,6 +119,23 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
       <div className="p-4 border-b border-border flex items-center justify-between gap-3 shrink-0 flex-wrap">
         <h1 className="text-lg font-semibold shrink-0">全部历史对话</h1>
         <div className="flex items-center gap-2 flex-wrap">
+          {/* 心跳/定时 开关 */}
+          <Button
+            variant={showHeartbeat ? "default" : "outline"}
+            size="sm"
+            className="h-8 text-xs px-2.5"
+            onClick={() => setShowHeartbeat(v => !v)}
+          >
+            心跳
+          </Button>
+          <Button
+            variant={showScheduled ? "default" : "outline"}
+            size="sm"
+            className="h-8 text-xs px-2.5"
+            onClick={() => setShowScheduled(v => !v)}
+          >
+            定时
+          </Button>
           {/* 渠道筛选 */}
           <Select value={filterSource || "__all__"} onValueChange={(v) => { if (v) setFilterSource(v === "__all__" ? "" : v); }}>
             <SelectTrigger className="h-8 text-xs w-auto min-w-[88px] gap-1">

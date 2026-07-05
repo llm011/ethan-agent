@@ -253,7 +253,9 @@ async def _run_heartbeat_md() -> None:
         return
 
     content = hb_path.read_text(encoding="utf-8")
-    if not content.strip():
+    # 过滤掉纯注释行（# 开头）和空行，没有实质任务就不执行
+    effective_lines = [l for l in content.splitlines() if l.strip() and not l.strip().startswith("#")]
+    if not effective_lines:
         return
 
     # 心跳 MVP 归到 admin 用户

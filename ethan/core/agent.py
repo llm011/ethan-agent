@@ -4,156 +4,19 @@ from pathlib import Path
 
 from ethan.core.config import get_config
 from ethan.core.context_budget import enforce_context_budget
+from ethan.core.routing import _get_route, _match_fast_rule
+from ethan.core.tool_format import _format_args, _with_intent_param, _preview, _detail
 from ethan.memory.facts import FactStore
 from ethan.memory.procedures import ProcedureStore
-from ethan.providers.base import Message, ToolDefinition
+from ethan.providers.base import Message
 from ethan.providers.manager import create_provider
 from ethan.skills.registry import SkillRegistry
 from ethan.tools.base import ToolResult
 from ethan.tools.registry import ToolExecutor, ToolRegistry
 
-import re
 import logging
 
 logger = logging.getLogger(__name__)
-
-# 强制走完整 Loop 的信号（不可配置，优先级最高）
-_FORCE_FULL_SIGNALS = [
-    "帮我写", "写一个", "写代码", "实现", "分析", "解释",
-    "总结", "生成", "创建", "建立", "搭建",
-    "重构", "优化代码", "调试", "debug", "修复", "定时任务",
-    "提醒我", "设置一个", "schedule", "reminder",
-    "write", "implement", "analyze", "explain", "generate", "create",
-    "refactor", "summarize",
-]
-
-
-def _match_keyword(kw: str, text: str) -> bool:
-    """关键词匹配，支持通配符 *。"""
-    if "*" in kw:
-        pattern = re.compile(kw.replace("*", ".*"))
-        return bool(pattern.search(text))
-    return kw in text
-
-
-# 这些参数值可能很长（用户输入/代码），需要截断避免刷屏
-_TRUNCATE_ARGS = {"content", "text", "code", "prompt", "body", "description", "new_content", "value"}
-
-
-def _format_args(arguments: dict, max_items: int = 3) -> str:
-    """格式化工具参数为单行摘要。路径/命令等不截断，content/text 等长文本截断。
-
-    跳过 intent——它单独作为「调用意图」展示（见 _with_intent_param），不混进参数行。
-    """
-    parts = []
-    items = [(k, v) for k, v in arguments.items() if k != "intent"][:max_items]
-    for k, v in items:
-        s = str(v).replace("\n", " ")
-        if k in _TRUNCATE_ARGS:
-            if len(s) > 80:
-                s = s[:80] + "…"
-        elif len(s) > 150:
-            # 超长路径/命令：保留头尾
-            s = s[:100] + "…" + s[-40:]
-        parts.append(f"{k}={s}")
-    return ", ".join(parts)
-
-
-# 工具调用意图（intent）：注入一个可选 string 参数，让模型用几个字说明每次调用目的，
-# 供前端/飞书在工具调用旁显示（如「💻 terminal · 查 MR 状态」）。
-#
-# ⚠️ 这是标准 JSON Schema 参数（不是自定义顶层字段），所有 OpenAI 兼容 / Anthropic 模型都支持；
-# 不放进 required，弱模型/中转即便不填也只回退到旧的 args 摘要，绝不报错（切模型也安全）。
-_INTENT_DESC = "用不超过12个字说明本次调用目的（给用户看，会显示在工具调用旁）。例如：查 MR 状态 / 读配置文件 / 搜飞书文档"
-
-
-def _with_intent_param(td: ToolDefinition) -> ToolDefinition:
-    """给工具定义注入一个可选 intent 参数（模型填，用于展示调用意图）。
-
-    不改原对象：deep copy parameters、追加 description，避免污染 registry 里共享的工具定义。
-    """
-    import copy
-    params = copy.deepcopy(td.parameters) if isinstance(td.parameters, dict) else {}
-    params.setdefault("type", "object")
-    props = params.get("properties")
-    if not isinstance(props, dict):
-        props = {}
-        params["properties"] = props
-    props["intent"] = {"type": "string", "description": _INTENT_DESC}
-    return ToolDefinition(
-        name=td.name,
-        description=td.description + "\n\n调用前请在 intent 参数里用一句话说明本次目的。",
-        parameters=params,
-    )
-
-
-def _preview(content: str, max_lines: int = 3, max_chars: int = 200) -> str:
-    """工具结果的紧凑预览：取前几行、总长度封顶，单行化。"""
-    if not content:
-        return ""
-    lines = [ln.strip() for ln in content.splitlines() if ln.strip()][:max_lines]
-    text = " ⏎ ".join(lines)
-    if len(text) > max_chars:
-        text = text[:max_chars] + "…"
-    return text
-
-
-def _detail(content: str, max_chars: int = 2000) -> str:
-    """工具结果的详细版本（前端展开看），保留多行，封顶避免 SSE 过大。
-
-    工具结果超过 4000 字会被 result_compressor 压缩，所以这里 2000 字够用。
-    """
-    if not content:
-        return ""
-    if len(content) > max_chars:
-        return content[:max_chars] + f"\n…(共 {len(content)} 字，已截断)"
-    return content
-
-
-def _match_fast_rule(text: str, routing=None):
-    """返回命中的 FastRule（按 fast_rules 顺序取第一条命中的），无命中返回 None。
-
-    规则的任一关键字（支持 * 通配）出现在 text 中即命中。纯关键字驱动，不看字数。
-    """
-    if routing is None:
-        routing = get_config().defaults.routing
-    for rule in routing.fast_rules:
-        for kw in rule.keywords:
-            if _match_keyword(kw, text):
-                return rule
-    return None
-
-
-def _get_route(text: str, skill_triggers: list[str] | None = None) -> str:
-    """
-    返回路由档位：'fast' | 'medium' | 'full'
-
-    规则（按优先级）：
-    1. 有 FORCE_FULL 信号 → full（最高优先）
-    2. 命中 fast_path Skill 的 trigger 关键词 → fast
-    3. 命中任一 fast_rule 的关键字 → fast（纯关键字驱动，不看字数，避免字数误杀）
-    4. 长度 ≤ medium_max_length → medium
-    5. 其余 → full
-    """
-    lower = text.lower()
-
-    if any(sig in lower for sig in _FORCE_FULL_SIGNALS):
-        return "full"
-
-    routing = get_config().defaults.routing
-
-    if skill_triggers:
-        for kw in skill_triggers:
-            if _match_keyword(kw, text):
-                return "fast"
-
-    if _match_fast_rule(text, routing) is not None:
-        return "fast"
-
-    if len(text.strip()) <= routing.medium_max_length:
-        return "medium"
-
-    return "full"
 
 
 @dataclass

@@ -1,11 +1,15 @@
-"""飞书消息收发 IO：client 构建 + 发送/编辑/删除/回复 + 通知/图片 + 消息详情拉取。
+"""飞书消息收发 IO：发送/编辑/删除 + 通知/图片。
 
-依赖 lark_render 做 content 渲染。所有网络调用经 lark_oapi 或 lark-cli 子进程。
+依赖 lark_render 做 content 渲染。所有网络调用经 lark_oapi。
+子模块分工：
+- lark_client：_lark_client() 构建
+- lark_auth：鉴权检测 + 授权引导卡片
+- lark_typing：_send_reaction / _remove_reaction / TypingState
+- lark_fetch：CLI 子进程操作（_send_reply / _fetch_* / _resolve_* etc.）
 """
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 
 from ethan.interface.lark_render import (
@@ -16,217 +20,28 @@ from ethan.interface.lark_render import (
 
 logger = logging.getLogger(__name__)
 
-# 授权引导卡片节流：同一 chat_id 5 分钟内只发一次
-_AUTH_CARD_THROTTLE_SECONDS = 300
-_auth_card_sent: dict[str, float] = {}  # chat_id -> last_sent_timestamp
+# ── re-exports：保持原有 import 路径可用 ──────────────────────────────────────
+from ethan.interface.lark_client import _lark_client  # noqa: E402
+from ethan.interface.lark_typing import TypingState  # noqa: E402
+from ethan.interface.lark_fetch import (  # noqa: E402
+    _send_reply,
+    _resolve_quoted_text,
+    _fetch_recent_chat_messages,
+)
 
-
-def _is_lark_auth_error(err_text: str, out_text: str, exit_code: int) -> bool:
-    """判断 lark-cli 输出是否为鉴权类错误（需发授权引导卡片）。
-
-    匹配场景：
-    1. stderr 含 "Error: need_user_authorization"（用户未登录）
-    2. stdout JSON 含 error.type == "auth_error"
-    3. stdout JSON 含 error.code 为 99991663/99991661 等鉴权码
-    4. stdout JSON 含 error.message 含 "User token has expired" / "Token does not exist"
-
-    不触发场景：
-    - 网络/参数错误（api_error / validation_error）
-    - not found
-    - JSON parse 错误
-    """
-    import re as _re
-
-    # 场景 1：用户未登录（stderr 直接报错）
-    if "need_user_authorization" in err_text or "No user logged in" in err_text:
-        return True
-
-    # 场景 2-4：解析 stdout JSON
-    if not out_text:
-        return False
-    try:
-        data = json.loads(out_text)
-        if data.get("ok"):
-            return False  # 成功响应，不是错误
-        err = data.get("error") or {}
-        # 场景 2：error.type
-        if err.get("type") == "auth_error":
-            return True
-        # 场景 3：error.code（99991663 user auth missing, 99991661 token invalid）
-        code = err.get("code")
-        if isinstance(code, int) and code in (99991663, 99991661):
-            return True
-        # 场景 4：error.message
-        msg = err.get("message", "") or ""
-        if "User token has expired" in msg or "Token does not exist" in msg:
-            return True
-        return False
-    except (json.JSONDecodeError, TypeError):
-        return False
-
-
-async def _send_auth_guidance_card(chat_id: str) -> bool:
-    """发送授权引导卡片。同一 chat_id 5 分钟内只发一次，返回是否真的发了。"""
-    import time as _time
-
-    now = _time.time()
-    last_sent = _auth_card_sent.get(chat_id, 0)
-    if now - last_sent < _AUTH_CARD_THROTTLE_SECONDS:
-        logger.debug("[Lark] auth guidance card throttled for chat_id=%s", chat_id)
-        return False
-
-    card = {
-        "schema": "2.0",
-        "header": {
-            "title": {"tag": "plain_text", "content": "需要飞书用户授权"},
-            "template": "red",
-        },
-        "body": {
-            "elements": [
-                {
-                    "tag": "markdown",
-                    "content": (
-                        "当前操作需要用户身份授权，但检测到用户未登录或授权已过期。\n\n"
-                        "**解决方法：** 在终端执行以下命令完成授权：\n"
-                        "```\nlark-cli auth login --domain im\n```\n"
-                        "按提示在浏览器中完成授权后，重新尝试即可。"
-                    ),
-                }
-            ]
-        },
-    }
-    msg_id = await _send_interactive_card(chat_id, card)
-    if msg_id:
-        _auth_card_sent[chat_id] = now
-        logger.info("[Lark] sent auth guidance card to chat_id=%s", chat_id)
-        return True
-    return False
-
-
-async def _send_reaction(message_id: str) -> str | None:
-    """给消息添加 THINKING_FACE 表情，返回 reaction_id 以便后续删除。"""
-    from lark_oapi.api.im.v1 import (
-        CreateMessageReactionRequest,
-        CreateMessageReactionRequestBody,
-    )
-    from lark_oapi.api.im.v1.model.emoji import Emoji
-
-    client = _lark_client()
-    if client is None:
-        return None
-
-    try:
-        req = (
-            CreateMessageReactionRequest.builder()
-            .message_id(message_id)
-            .request_body(
-                CreateMessageReactionRequestBody.builder()
-                .reaction_type(Emoji.builder().emoji_type("THINKING_FACE").build())
-                .build()
-            )
-            .build()
-        )
-        resp = await asyncio.to_thread(client.im.v1.message_reaction.create, req)
-        if resp.success() and resp.data:
-            return resp.data.reaction_id
-        logger.debug("Failed to add reaction to %s: code=%s msg=%s", message_id, resp.code, resp.msg)
-        return None
-    except Exception:
-        logger.debug("Failed to add reaction to %s", message_id, exc_info=True)
-        return None
-
-
-async def _remove_reaction(message_id: str, reaction_id: str) -> None:
-    """删除之前添加的 THINKING_FACE 表情。"""
-    from lark_oapi.api.im.v1 import DeleteMessageReactionRequest
-
-    client = _lark_client()
-    if client is None:
-        return
-
-    try:
-        req = (
-            DeleteMessageReactionRequest.builder()
-            .message_id(message_id)
-            .reaction_id(reaction_id)
-            .build()
-        )
-        await asyncio.to_thread(client.im.v1.message_reaction.delete, req)
-    except Exception:
-        pass
-
-
-class TypingState:
-    """管理飞书 THINKING 表情的生命周期（上下文管理器）。
-
-    用法：
-        async with TypingState(message_id) as ts:
-            # 进入时自动加 THINKING 表情
-            await do_work()
-            # 可选：移到另一条消息
-            await ts.move_to(new_message_id)
-            # 可选：提前清理（如答案定稿后立刻移除，不必等退出）
-            await ts.clear()
-        # 退出时自动清理（如果还有表情）
-
-    TypingState 封装了对 THINKING 表情的添加、移动和删除，确保在异常场景下也能正确清理。
-    一个 TypingState 实例只跟踪一条消息上的一个表情；move_to 把表情从当前消息迁移到新消息。
-    """
-
-    def __init__(self, message_id: str):
-        self.message_id = message_id
-        self.reaction_id: str | None = None
-
-    async def __aenter__(self) -> "TypingState":
-        """进入上下文时添加 THINKING 表情。"""
-        self.reaction_id = await _send_reaction(self.message_id)
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
-        """退出上下文时自动移除 THINKING 表情（如果还有）。
-
-        异常情况下也会被调用，确保表情不会残留。捕获并吞掉清理过程中的异常，
-        避免掩盖原本的异常。
-        """
-        if self.reaction_id:
-            try:
-                await _remove_reaction(self.message_id, self.reaction_id)
-            except Exception:
-                logger.debug("TypingState.__aexit__ cleanup failed", exc_info=True)
-            finally:
-                self.reaction_id = None
-
-    async def move_to(self, new_message_id: str) -> None:
-        """把 THINKING 表情从当前消息移到新消息。
-
-        先移除旧消息的表情（如果有），再给新消息添加表情。任何环节失败都不抛异常——
-        旧表情删除失败不会阻断新表情的添加；新表情添加失败只是没有指示器，不影响主流程。
-        """
-        old_msg_id = self.message_id
-        old_reaction_id = self.reaction_id
-        self.message_id = new_message_id
-        self.reaction_id = None
-
-        # 移除旧表情（若有）
-        if old_reaction_id:
-            await _remove_reaction(old_msg_id, old_reaction_id)
-
-        # 给新消息加表情
-        self.reaction_id = await _send_reaction(new_message_id)
-
-    async def clear(self) -> None:
-        """立刻移除当前消息上的表情（如果还有）。
-
-        用于在退出上下文之前提前清理——例如答案卡片定稿后立刻移除 THINKING，
-        不必等到函数返回。清理后 reaction_id 置 None，后续 __aexit__ 不会重复清理。
-        """
-        if self.reaction_id:
-            try:
-                await _remove_reaction(self.message_id, self.reaction_id)
-            except Exception:
-                logger.debug("TypingState.clear failed", exc_info=True)
-            finally:
-                self.reaction_id = None
+__all__ = [
+    "_lark_client",
+    "TypingState",
+    "_send_reply",
+    "_resolve_quoted_text",
+    "_fetch_recent_chat_messages",
+    "_send_message",
+    "_send_interactive_card",
+    "_edit_message",
+    "_delete_message",
+    "send_lark_notification",
+    "send_lark_image",
+]
 
 
 async def send_lark_notification(chat_id: str, text: str) -> bool:
@@ -347,21 +162,6 @@ async def send_lark_image(chat_id: str, image_path: str, caption: str = "") -> b
     except Exception:
         logger.exception("send_lark_image failed for %s", chat_id)
         return False
-
-
-def _lark_client():
-    """构建 lark_oapi client，未配置返回 None。"""
-    import lark_oapi as lark
-    from ethan.core.config import get_config
-    lark_cfg = getattr(get_config(), "lark", None)
-    if not lark_cfg or not lark_cfg.app_id:
-        return None
-    return (
-        lark.Client.builder()
-        .app_id(lark_cfg.app_id)
-        .app_secret(lark_cfg.app_secret)
-        .build()
-    )
 
 
 async def _send_message(chat_id: str, text: str, use_card: bool, reply_to_msg_id: str = "") -> tuple[str | None, str]:
@@ -523,178 +323,3 @@ async def _delete_message(message_id: str) -> bool:
         return False
 
 
-async def _send_reply(chat_id: str, text: str) -> str | None:
-    """通过 lark-cli 回复消息，使用 --markdown 以正确渲染格式。
-    返回发出的消息 message_id（从 JSON stdout 解析），失败时返回 None。
-    """
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "lark-cli", "im", "+messages-send",
-            "--chat-id", chat_id,
-            "--markdown", text,
-            "--as", "bot",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=15)
-        out_text = stdout.decode(errors="replace")
-        err_text = stderr.decode(errors="replace")
-        # 鉴权失败 → 发授权引导卡片（节流）
-        if _is_lark_auth_error(err_text, out_text, proc.returncode or 0):
-            logger.warning("[Lark] _send_reply auth error, sending guidance card to chat %s", chat_id)
-            await _send_auth_guidance_card(chat_id)
-        data = json.loads(out_text)
-        return data.get("data", {}).get("message_id")
-    except Exception:
-        logger.exception("Failed to send Lark reply to chat %s", chat_id)
-        return None
-
-
-async def _fetch_message_detail(message_id: str) -> dict | None:
-    """用 messages-mget 拉单条消息详情，返回 items[0]（dict）或 None。"""
-    if not message_id:
-        return None
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "lark-cli", "im", "+messages-mget",
-            "--message-ids", message_id,
-            "--as", "bot",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
-        out_text = stdout.decode(errors="replace")
-        err_text = stderr.decode(errors="replace")
-        # mget 用 bot 身份，不会触发 user 鉴权失败；但保留检测以备未来切到 user 身份
-        if _is_lark_auth_error(err_text, out_text, proc.returncode or 0):
-            logger.warning("[Lark] _fetch_message_detail auth error for msg %s", message_id)
-        data = json.loads(out_text)
-        if not data.get("ok") and data.get("code") not in (0, None):
-            return None
-        d = data.get("data", {}) or {}
-        # 本版 lark-cli 返回 data.messages；旧结构用 items / data.items 兜底。
-        items = d.get("messages") or d.get("items") or (d.get("data", {}) or {}).get("items") or []
-        return items[0] if items else None
-    except Exception:
-        logger.debug("Failed to mget message %s", message_id, exc_info=True)
-        return None
-
-
-def _extract_msg_text(msg: dict) -> str:
-    """从消息详情里抽出可读文本。text 消息的 body.content 是 {"text": "..."} 的 JSON 串。"""
-    body = msg.get("body") or {}
-    raw = body.get("content") if isinstance(body, dict) else None
-    raw = raw or msg.get("content") or msg.get("text") or ""
-    if isinstance(raw, str) and raw.strip().startswith("{"):
-        try:
-            obj = json.loads(raw)
-            # text 类型 → {"text": "..."}；post 等富文本结构复杂，退化为原串
-            if isinstance(obj, dict) and "text" in obj:
-                return str(obj["text"]).strip()
-        except Exception:
-            pass
-    return str(raw).strip()
-
-
-async def _resolve_quoted_text(message_id: str) -> tuple[str, str]:
-    """用户引用了某条消息时，返回 (被引用消息的可读文本, 被引用消息 id)。
-
-    lark-cli 压平的事件里没有引用关系，需先 mget 当前消息详情，从中找被引用消息 id，
-    再 mget 那条取文本。本版 lark-cli 用 reply_to 字段表示引用关系；
-    parent_id / upper_message_id / root_id 作旧结构兜底。任何环节失败返回 ("", "")，不阻断主流程。
-    """
-    detail = await _fetch_message_detail(message_id)
-    if not detail:
-        return "", ""
-    parent_id = (
-        detail.get("reply_to")
-        or detail.get("parent_id")
-        or detail.get("upper_message_id")
-        or detail.get("root_id")
-        or ""
-    )
-    if not parent_id or parent_id == message_id:
-        return "", ""
-    parent = await _fetch_message_detail(parent_id)
-    if not parent:
-        return "", ""
-    return _extract_msg_text(parent)[:1000], parent_id
-
-
-async def _fetch_recent_chat_messages(chat_id: str, limit: int = 10) -> list[dict]:
-    """拉取群聊最近 limit 条消息，返回 [{"sender": str, "text": str, "time": str}, ...]（按时间正序）。
-
-    用于给 agent 注入群聊背景上下文，让它感知 @mention 之间群里发生的讨论。
-    任何步骤失败返回空列表，不阻断主流程。
-
-    权限说明：
-    - Bot 身份只能读被 @ 的消息，看不到群里其他没 @ 的消息
-    - 用户身份可读群内所有消息（需 im:message.group_msg:get_as_user 权限）
-    - 这里用 lark-cli --as user 调用，能拿到完整群消息历史
-    """
-    try:
-        # 用 lark-cli 子进程调用（用户身份），而不是 lark_oapi client（bot 身份）
-        # 原因：bot 身份只能读被 @ 的消息，用户身份能读全部群消息
-        proc = await asyncio.create_subprocess_exec(
-            "lark-cli", "im", "+chat-messages-list",
-            "--as", "user",  # 用户身份，能读全部群消息
-            "--chat-id", chat_id,
-            "--page-size", str(limit),
-            "--order", "desc",
-            "--no-reactions",  # 跳过 reactions 批量查询，背景上下文用不到
-            "--format", "json",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
-        out_text = stdout.decode(errors="replace")
-        err_text = stderr.decode(errors="replace")
-        # 用户身份调用最易触发鉴权失败（user token 缺失/过期）→ 发授权引导卡片
-        if _is_lark_auth_error(err_text, out_text, proc.returncode or 0):
-            logger.warning("[Lark] _fetch_recent_chat_messages auth error for chat_id=%s", chat_id)
-            await _send_auth_guidance_card(chat_id)
-            return []
-        raw = json.loads(out_text)
-
-        # lark-cli 返回结构：{"ok": ..., "identity": ..., "data": {"messages": [...]}}
-        data = raw.get("data", raw) if isinstance(raw, dict) else {}
-        messages = data.get("messages") if isinstance(data, dict) else None
-        if not messages:
-            return []
-
-        results = []
-        for msg in messages:
-            if not msg or msg.get("deleted"):
-                continue
-            # 支持 text / post / image / file / audio / video 等类型
-            # lark-cli 已预渲染 content 为可读文本（post → markdown，image → ![Image](img_xxx)）
-            # interactive（卡片）跳过：通常是 bot 自己发的工具进度/答案卡片，作为背景噪音大且无意义
-            msg_type = msg.get("msg_type", "text")
-            if msg_type not in ("text", "post", "image", "file", "audio", "video"):
-                continue
-
-            try:
-                # lark-cli +chat-messages-list 已渲染 content 为可读文本
-                text = msg.get("content", "").strip()
-                if not text:
-                    continue
-
-                # sender.name 在用户身份下有值；bot 发的消息 name 为空，用 sender_type 区分
-                sender_info = msg.get("sender", {}) or {}
-                sender_name = sender_info.get("name", "")
-                if not sender_name:
-                    # bot/应用发的消息没有用户名，标个 "bot" 让 agent 知道是机器人发的
-                    sender_name = "bot" if sender_info.get("sender_type") == "app" else ""
-
-                # lark-cli 返回 create_time 形如 "2026-07-03 13:32"（已格式化），直接用
-                time_str = msg.get("create_time", "") or ""
-
-                results.append({"sender": sender_name, "text": text, "time": time_str})
-            except Exception:
-                continue
-
-        results.reverse()  # 时间正序
-        return results
-    except Exception:
-        logger.exception("[Lark] _fetch_recent_chat_messages failed for chat_id=%s", chat_id)
-        return []

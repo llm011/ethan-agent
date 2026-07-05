@@ -52,9 +52,10 @@ class ToolExecutor:
                 return ToolResult(tool_call_id=tc.id, content=self._cache[cache_key])
 
         try:
-            # intent 是展示用的「调用意图」参数（_with_intent_param 注入），工具本身不需要，
-            # 调 run 前剥掉，避免 unknown kwarg 报错。
-            run_args = {k: v for k, v in tc.arguments.items() if k != "intent"}
+            # 只传工具 schema 里声明的参数：剥掉 intent（展示用）以及模型偶尔幻觉出的
+            # 多余字段（如 description=），防止 run() 报 unexpected keyword argument。
+            valid_params = set(tool.parameters.get("properties", {}).keys())
+            run_args = {k: v for k, v in tc.arguments.items() if k in valid_params}
             out = await tool.run(**run_args)
             # 工具可返回 str（普通）或 ToolResult（携带 sub_steps 等元信息）
             if isinstance(out, ToolResult):
