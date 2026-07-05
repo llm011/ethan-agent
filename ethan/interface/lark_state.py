@@ -193,10 +193,10 @@ async def _should_respond_to_group_message(text: str, lark_cfg) -> bool:
         return any(fnmatch.fnmatch(tl, f"*{kw.lower()}*") or kw.lower() in tl for kw in keywords)
     if mode == "llm_filter":
         try:
-            from ethan.providers.manager import create_provider
-            from ethan.providers.base import Message as _Msg
             from ethan.core.config import get_config
             from ethan.memory.consolidator import get_lite_model
+            from ethan.providers.base import Message as _Msg
+            from ethan.providers.manager import create_provider
             cfg = get_config()
             provider = create_provider(get_lite_model(cfg.defaults.model), cfg)
             hint = getattr(lark_cfg, "group_llm_filter_hint", "") or \

@@ -23,7 +23,8 @@ from ethan.memory.session import Session, SessionStore, decide_title
 from ethan.memory.working import MemoryConfig, WorkingMemory
 from ethan.providers.base import Message
 
-from .repl_commands import SlashCompleter, _handle_slash_command
+from .repl_commands import ProfileSwitchException, SlashCompleter, _handle_slash_command  # noqa: F401
+from .repl_stream import run_once  # noqa: F401
 from .repl_ui import _PT_STYLE, _banner, _fmt_tokens, _format_duration, _make_toolbar, _print_history, console
 
 

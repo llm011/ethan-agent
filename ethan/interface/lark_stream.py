@@ -20,10 +20,6 @@ from ethan.interface.lark_event_handlers import (
 )
 from ethan.interface.lark_send import (
     TypingState,
-    _delete_message,
-    _edit_message,
-    _lark_client,
-    _resolve_quoted_text,
     _send_interactive_card,
     _send_reply,
 )
@@ -34,16 +30,17 @@ from ethan.interface.lark_state import (
     _cache_group_message,
     _get_chat_lock,
     _is_forwarded_message,
-    _lark_chat_map,
-    _lark_welcomed,
-    _lark_running_tasks,
-    _load_lark_map,
-    _looks_like_tool_trace,
-    _mark_lark_welcomed,
-    _pop_forwarded,
-    _save_lark_map,
+    _lark_chat_map,  # noqa: F401 — re-exported; lark_agent lazy-imports from here
+    _lark_running_tasks,  # noqa: F401
+    _lark_welcomed,  # noqa: F401
+    _load_lark_map,  # noqa: F401
+    _looks_like_tool_trace,  # noqa: F401
+    _mark_lark_welcomed,  # noqa: F401
+    _pop_forwarded,  # noqa: F401
+    _save_lark_map,  # noqa: F401
     _should_respond_to_group_message,
     _stop_lark_task,
+    _untrack_task,  # noqa: F401
 )
 
 logger = logging.getLogger(__name__)
