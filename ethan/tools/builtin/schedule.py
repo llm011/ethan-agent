@@ -33,7 +33,7 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
             if not token:
                 token = get_config().network.auth_token
             headers = {"Authorization": f"Bearer {token}"} if token else {}
-            res = requests.post(f"{_base_url()}/chat", json={
+            res = requests.post(f"{_base_url()}/api/chat", json={
                 "messages": [{"role": "user", "content": prompt}],
                 "session_id": session_id,
             }, headers=headers, timeout=120)
