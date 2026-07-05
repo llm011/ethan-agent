@@ -250,20 +250,25 @@ async def _handle_message(msg: dict[str, Any], creds: Any) -> None:
         await store.close()
         return
 
-    final_response = Message(role="assistant", content=final_answer) if final_answer else None
+    if not final_answer:
+        logger.warning("[WeChat] stream_chat produced no text for chat_key=%s", chat_key)
 
-    await store.save_message(session_id, final_response)
+    # ── Persist + reply ───────────────────────────────────────────────────────
+    reply = final_answer.strip()
+    if reply:
+        final_response = Message(role="assistant", content=reply)
+        await store.save_message(session_id, final_response)
     await store.touch(session_id)
     await store.close()
 
-    # ── Send final reply ──────────────────────────────────────────────────────
-    reply = (final_response.content or "").strip()
     if reply:
         async with httpx.AsyncClient() as client:
             try:
                 await send_text(client, creds, sender, context_token, reply)
             except Exception:
                 logger.exception("[WeChat] Failed to send reply")
+    else:
+        logger.warning("[WeChat] no reply to send for chat_key=%s", chat_key)
 
 
 async def _get_or_create_session(store: Any, chat_key: str) -> str:
