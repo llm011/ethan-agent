@@ -155,7 +155,7 @@ def _get_group_context(chat_id: str, limit: int = 10) -> list[dict]:
     if not cache:
         return []
     items = list(cache)
-    if len(items) > 1:
+    if items:
         items = items[:-1]  # 去掉最后一条（当前消息已写入缓存，不重复注入上下文）
     return items[-limit:]
 
@@ -175,14 +175,15 @@ async def _should_respond_to_group_message(text: str, lark_cfg) -> bool:
     if mode == "keywords":
         keywords = getattr(lark_cfg, "group_keywords", []) or []
         tl = text.lower()
-        return any(fnmatch.fnmatch(tl, kw.lower()) or kw.lower() in tl for kw in keywords)
+        return any(fnmatch.fnmatch(tl, f"*{kw.lower()}*") or kw.lower() in tl for kw in keywords)
     if mode == "llm_filter":
         try:
             from ethan.providers.manager import create_provider
             from ethan.providers.base import Message as _Msg
             from ethan.core.config import get_config
+            from ethan.memory.consolidator import get_lite_model
             cfg = get_config()
-            provider = create_provider(cfg.defaults.model, cfg)
+            provider = create_provider(get_lite_model(cfg.defaults.model), cfg)
             hint = getattr(lark_cfg, "group_llm_filter_hint", "") or \
                 "这条群聊消息是否需要AI助手回复？只回答 yes 或 no，不要其他内容。"
             resp = await provider.chat(
