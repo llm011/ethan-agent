@@ -151,19 +151,22 @@ async def _handle_message(msg: dict[str, Any], creds: Any) -> None:
     group_id = msg.get("group_id") or ""
     context_token = msg.get("context_token") or ""
     chat_key = group_id or sender or msg_id[:16]
+    # 群消息回复目标是群，私信回复目标是发信人
+    reply_to = group_id or sender
 
     if not context_token:
         logger.warning("[WeChat] no context_token, cannot reply")
         return
 
-    logger.info("[WeChat] msg from=%s text=%r", sender[:20], text[:80])
+    logger.info("[WeChat] msg from=%s group=%s text=%r", sender[:20], group_id[:20], text[:80])
 
     # ── Ack immediately ───────────────────────────────────────────────────────
     async with httpx.AsyncClient() as client:
         try:
-            await send_text(client, creds, sender, context_token, "收到，处理中...")
-        except Exception:
-            pass
+            await send_text(client, creds, reply_to, context_token, "收到，处理中...")
+            logger.debug("[WeChat] ack sent to %s", reply_to[:20])
+        except Exception as e:
+            logger.warning("[WeChat] Failed to send ack: %s", e)
         await send_typing(client, creds, context_token, typing=True)
 
     # ── Session + history ─────────────────────────────────────────────────────
@@ -225,7 +228,7 @@ async def _handle_message(msg: dict[str, Any], creds: Any) -> None:
                         line += f" · {args}"
                     async with httpx.AsyncClient() as client:
                         try:
-                            await send_text(client, creds, sender, context_token, line)
+                            await send_text(client, creds, reply_to, context_token, line)
                         except Exception:
                             pass
                 elif chunk.state == "done":
@@ -233,13 +236,13 @@ async def _handle_message(msg: dict[str, Any], creds: Any) -> None:
                     if preview:
                         async with httpx.AsyncClient() as client:
                             try:
-                                await send_text(client, creds, sender, context_token, f"✓ {preview[:300]}")
+                                await send_text(client, creds, reply_to, context_token, f"✓ {preview[:300]}")
                             except Exception:
                                 pass
                 elif chunk.state == "error":
                     async with httpx.AsyncClient() as client:
                         try:
-                            await send_text(client, creds, sender, context_token, f"✗ {chunk.result_preview or '工具调用失败'}")
+                            await send_text(client, creds, reply_to, context_token, f"✗ {chunk.result_preview or '工具调用失败'}")
                         except Exception:
                             pass
             elif isinstance(chunk, str):
@@ -264,7 +267,7 @@ async def _handle_message(msg: dict[str, Any], creds: Any) -> None:
     if reply:
         async with httpx.AsyncClient() as client:
             try:
-                await send_text(client, creds, sender, context_token, reply)
+                await send_text(client, creds, reply_to, context_token, reply)
             except Exception:
                 logger.exception("[WeChat] Failed to send reply")
     else:
@@ -279,6 +282,6 @@ async def _get_or_create_session(store: Any, chat_key: str) -> str:
         if s.title and s.title.startswith(prefix):
             return s.id
     cfg = get_config()
-    session = await store.create(cfg.defaults.model)
+    session = await store.create(cfg.defaults.model, source="wechat")
     await store.update_title(session.id, f"{prefix}{session.id[:8]}")
     return session.id

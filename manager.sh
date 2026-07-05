@@ -142,22 +142,6 @@ start_frontend() {
     fi
 }
 
-# ── 构建 web 静态产物 ────────────────────────────────────────────
-
-build_web() {
-    echo "[build-web] 编译 web 静态产物..."
-    cd "$PROJECT_ROOT/web"
-    NEXT_OUTPUT=export pnpm build
-    echo "[build-web] 同步到 ethan/web_dist/ ..."
-    rsync -a --delete "$PROJECT_ROOT/web/out/" "$PROJECT_ROOT/ethan/web_dist/"
-    echo "[build-web] 完成。如需立即生效请重启后端: $0 restart-backend"
-}
-
-restart_backend() {
-    stop_by_pid_and_port "后端" "$BACKEND_PID_FILE" "$BACKEND_PORT"
-    start_backend
-}
-
 # ── 公共命令 ────────────────────────────────────────────────────
 
 start() {
@@ -221,15 +205,13 @@ logs() {
 # ── 入口 ────────────────────────────────────────────────────────
 
 case "${1:-}" in
-    start)            start ;;
-    stop)             stop ;;
-    restart)          restart ;;
-    restart-backend)  restart_backend ;;
-    build-web)        build_web ;;
-    status)           status ;;
-    logs)             logs "$@" ;;
+    start)   start ;;
+    stop)    stop ;;
+    restart) restart ;;
+    status)  status ;;
+    logs)    logs "$@" ;;
     *)
-        echo "用法: $0 {start|stop|restart|restart-backend|build-web|status|logs [backend|frontend]}"
+        echo "用法: $0 {start|stop|restart|status|logs [backend|frontend]}"
         exit 1
         ;;
 esac

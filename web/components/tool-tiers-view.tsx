@@ -1,166 +1,47 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { fetchToolTiers, ToolTiers, TierTool, ToolTier } from "@/lib/api";
+import { fetchToolTiers, ToolTiers, TierTool } from "@/lib/api";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Tooltip,
-  TooltipTrigger,
-  TooltipContent,
-  TooltipProvider,
-} from "@/components/ui/tooltip";
 import { Loader2, RefreshCw, Zap, Layers, Maximize2 } from "lucide-react";
 
-const TIER_META: Record<string, { icon: React.ReactNode; color: string; check: string }> = {
-  fast: {
-    icon: <Zap className="h-3.5 w-3.5" />,
-    color: "text-amber-500",
-    check: "text-amber-500",
-  },
-  medium: {
-    icon: <Layers className="h-3.5 w-3.5" />,
-    color: "text-sky-500",
-    check: "text-sky-500",
-  },
-  full: {
-    icon: <Maximize2 className="h-3.5 w-3.5" />,
-    color: "text-violet-500",
-    check: "text-violet-500",
-  },
+const TIER_ICON: Record<string, React.ReactNode> = {
+  fast: <Zap className="h-4 w-4 text-amber-500" />,
+  medium: <Layers className="h-4 w-4 text-sky-500" />,
+  full: <Maximize2 className="h-4 w-4 text-violet-500" />,
 };
 
-function calcChars(tools: TierTool[]): number {
-  return tools.reduce((sum, t) => sum + t.name.length + t.description.length, 0);
-}
-
-function fmtChars(n: number): string {
-  return n >= 1000 ? `~${Math.round(n / 100) / 10}k` : `${n}`;
-}
-
-function ComparisonTable({ tiers }: { tiers: ToolTier[] }) {
-  // Use medium/full as the canonical full tool list
-  const allTools =
-    tiers.find((t) => t.key === "medium")?.tools ??
-    tiers.find((t) => t.key === "full")?.tools ??
-    [];
-
-  const memberSets = Object.fromEntries(
-    tiers.map((tier) => [tier.key, new Set(tier.tools.map((t) => t.name))])
-  );
-
-  // fast tools first, then alphabetical
-  const sorted = [...allTools].sort((a, b) => {
-    const af = memberSets["fast"]?.has(a.name) ? 0 : 1;
-    const bf = memberSets["fast"]?.has(b.name) ? 0 : 1;
-    if (af !== bf) return af - bf;
-    return a.name.localeCompare(b.name);
-  });
-
-  const fastCount = sorted.filter((t) => memberSets["fast"]?.has(t.name)).length;
-
+function TierTable({ tools }: { tools: TierTool[] }) {
   return (
-    <TooltipProvider delay={200}>
-      <div className="overflow-x-auto rounded-md border border-border/60">
-        <table className="w-full text-sm border-collapse">
-          <thead>
-            <tr className="border-b border-border/60 bg-muted/30">
-              <th className="py-3 px-4 text-left text-xs font-medium text-muted-foreground w-56">
-                工具
-              </th>
-              {tiers.map((tier) => {
-                const meta = TIER_META[tier.key];
-                return (
-                  <th key={tier.key} className="py-3 px-4 text-center w-28">
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <div className="flex flex-col items-center gap-0.5 cursor-default select-none">
-                          <div className={`flex items-center gap-1 font-semibold text-xs ${meta.color}`}>
-                            {meta.icon}
-                            {tier.label}
-                          </div>
-                          <div className="text-[10px] text-muted-foreground font-normal">
-                            {tier.tools.length} 个工具
-                          </div>
-                          <div className="text-[10px] text-muted-foreground/50 font-normal">
-                            {fmtChars(calcChars(tier.tools))} 字符
-                          </div>
-                        </div>
-                      </TooltipTrigger>
-                      <TooltipContent side="top" className="max-w-56 text-center">
-                        {tier.desc}
-                      </TooltipContent>
-                    </Tooltip>
-                  </th>
-                );
-              })}
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm border-collapse">
+        <thead>
+          <tr className="text-left text-xs text-muted-foreground border-b border-border/60">
+            <th className="py-2 pr-4 font-medium w-44">工具</th>
+            <th className="py-2 pr-4 font-medium">说明</th>
+            <th className="py-2 pr-3 font-medium w-16 text-center">副作用</th>
+            <th className="py-2 font-medium w-16 text-center">不压缩</th>
+          </tr>
+        </thead>
+        <tbody>
+          {tools.map((t) => (
+            <tr key={t.name} className="border-b border-border/30 align-top">
+              <td className="py-2 pr-4">
+                <code className="text-xs font-mono text-foreground/90">{t.name}</code>
+              </td>
+              <td className="py-2 pr-4 text-xs text-muted-foreground leading-relaxed">{t.description}</td>
+              <td className="py-2 pr-3 text-center">
+                {t.side_effect ? <span title="有副作用：改文件/发消息/花钱等，非主人调用会被拦截">⚠️</span> : <span className="text-muted-foreground/30">—</span>}
+              </td>
+              <td className="py-2 text-center">
+                {t.no_compress ? <span title="输出不压缩：含关键数据（ID/ref/路径等），需原样传递，压缩会导致信息丢失">🔒</span> : <span className="text-muted-foreground/30">—</span>}
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {sorted.map((tool, i) => {
-              const isLastFast = i === fastCount - 1 && fastCount < sorted.length;
-              return (
-                <tr
-                  key={tool.name}
-                  className={`align-middle hover:bg-muted/20 transition-colors ${
-                    isLastFast
-                      ? "border-b-2 border-b-amber-500/40"
-                      : "border-b border-border/30"
-                  }`}
-                >
-                  <td className="py-2 px-4">
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="inline-flex items-center gap-1.5 cursor-default">
-                          <code className="text-xs font-mono text-foreground/90">
-                            {tool.name}
-                          </code>
-                          {tool.side_effect && (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <span className="text-[11px] leading-none cursor-default">⚠️</span>
-                              </TooltipTrigger>
-                              <TooltipContent side="right" className="max-w-48">
-                                有副作用：会改状态/发消息/花钱，非主人调用被拦截
-                              </TooltipContent>
-                            </Tooltip>
-                          )}
-                          {tool.no_compress && (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <span className="text-[11px] leading-none cursor-default">🔒</span>
-                              </TooltipTrigger>
-                              <TooltipContent side="right" className="max-w-48">
-                                不压缩：输出含关键 ID/ref，必须原样传回
-                              </TooltipContent>
-                            </Tooltip>
-                          )}
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent side="right" className="max-w-64">
-                        {tool.description}
-                      </TooltipContent>
-                    </Tooltip>
-                  </td>
-                  {tiers.map((tier) => {
-                    const has = memberSets[tier.key]?.has(tool.name);
-                    const meta = TIER_META[tier.key];
-                    return (
-                      <td key={tier.key} className="py-2 px-4 text-center">
-                        {has ? (
-                          <span className={`text-sm font-bold ${meta.check}`}>✓</span>
-                        ) : (
-                          <span className="text-xs text-muted-foreground/20">✗</span>
-                        )}
-                      </td>
-                    );
-                  })}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </TooltipProvider>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -198,25 +79,32 @@ export function ToolTiersView() {
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
           </div>
         ) : !data ? (
-          <div className="text-center text-muted-foreground pt-10">
-            加载失败，点右上角刷新重试。
-          </div>
+          <div className="text-center text-muted-foreground pt-10">加载失败，点右上角刷新重试。</div>
         ) : (
-          <div className="flex flex-col gap-3 max-w-2xl">
+          <div className="flex flex-col gap-6 max-w-4xl">
             <p className="text-sm text-muted-foreground leading-relaxed">
-              对话按规则与消息长度路由到三档。
-              <b className="text-foreground/80">Fast</b> 档仅含基础工具 + 规则额外工具，长尾能力靠{" "}
+              对话按「快捷路由」规则与消息长度实时路由到三档。<b className="text-foreground/80">Fast</b> 档命中规则关键字时进入，
+              固定挂载下列基础工具 + 命中规则的额外工具，其余长尾能力需模型调{" "}
               <code className="text-xs font-mono">find_tools</code> 激活；
-              <b className="text-foreground/80">Medium / Full</b> 档全量可见。
-              共注册 <b className="text-foreground/80">{data.total_count}</b> 个工具。
-              <span className="ml-1 text-muted-foreground/60 text-xs">
-                （≤ {data.medium_max_length} 字走 medium，更长走 full）
-              </span>
+              <b className="text-foreground/80">Medium / Full</b> 档全量工具直接可见。当前共注册{" "}
+              <b className="text-foreground/80">{data.total_count}</b> 个工具，其中 Fast 基础{" "}
+              <b className="text-foreground/80">{data.fast_count}</b> 个。
+              <span className="ml-1">（未命中规则时：≤ {data.medium_max_length} 字走 medium，更长走 full · 规则在「设置 → 快捷路由」配置）</span>
             </p>
-            <p className="text-xs text-muted-foreground/50">
-              hover 工具名查看说明 · ⚠️ 有副作用 · 🔒 输出不压缩 · 橙色分隔线以上为 Fast 档工具
-            </p>
-            <ComparisonTable tiers={data.tiers} />
+
+            {data.tiers.map((tier) => (
+              <div key={tier.key} className="flex flex-col gap-2">
+                <div className="flex items-center gap-2">
+                  {TIER_ICON[tier.key]}
+                  <span className="font-semibold text-sm">{tier.label}</span>
+                  <Badge variant="secondary" className="text-[10px]">
+                    {tier.tools.length} 个工具
+                  </Badge>
+                </div>
+                <p className="text-xs text-muted-foreground leading-relaxed">{tier.desc}</p>
+                <TierTable tools={tier.tools} />
+              </div>
+            ))}
           </div>
         )}
       </div>
