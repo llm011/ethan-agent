@@ -22,7 +22,6 @@ from ethan.interface.lark_send import (
     TypingState,
     _delete_message,
     _edit_message,
-    _fetch_recent_chat_messages,
     _lark_client,
     _resolve_quoted_text,
     _send_interactive_card,
@@ -33,6 +32,7 @@ from ethan.interface.lark_state import (
     _ABORT_KEYWORDS,
     _already_handled,
     _cache_forwarded,
+    _cache_group_message,
     _get_chat_lock,
     _is_forwarded_message,
     _lark_chat_map,
@@ -43,6 +43,7 @@ from ethan.interface.lark_state import (
     _mark_lark_welcomed,
     _pop_forwarded,
     _save_lark_map,
+    _should_respond_to_group_message,
     _stop_lark_task,
     _untrack_task,
 )
@@ -143,12 +144,27 @@ async def _handle_message(event_data: dict) -> None:
     if not chat_id:
         return
 
+    # 群聊消息写入本地缓存（不论是否回复，供背景上下文使用）
+    if chat_id.startswith("oc_"):
+        from datetime import datetime as _dt
+        _time_str = _dt.fromtimestamp(int(_create_ms) / 1000).strftime("%Y-%m-%d %H:%M") if _create_ms else ""
+        _cache_group_message(chat_id, sender_open_id, text, _time_str)
+
     # 主人判定：config.lark.owner_open_id 为空 = 还没认主人。
     from ethan.core.config import get_config as _gc
     _lark_cfg = getattr(_gc(), "lark", None)
     owner_open_id = getattr(_lark_cfg, "owner_open_id", "") if _lark_cfg else ""
     is_owner = bool(owner_open_id) and sender_open_id == owner_open_id
     owner_claimed = bool(owner_open_id)
+
+    # 群聊响应过滤：按 group_response_mode 决定是否处理（私聊不过滤）
+    if chat_id.startswith("oc_") and _lark_cfg:
+        if not await _should_respond_to_group_message(text, _lark_cfg):
+            logger.debug(
+                "[Lark] group message skipped by mode=%s msg=%s",
+                getattr(_lark_cfg, "group_response_mode", "mention_only"), message_id,
+            )
+            return
 
     # ── /btw：顺带一问——不带历史、不带 cold facts 的单轮轻量查询 ──
     # 解析放在 /command 之前，因为 /btw 需要走完整 agent 流程（只是上下文为空）。
