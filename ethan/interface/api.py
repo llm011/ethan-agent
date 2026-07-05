@@ -8,12 +8,25 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from ethan import __version__
-from ethan.core.heartbeat import start_heartbeat, stop_heartbeat
-from ethan.memory.api_keys import APIKeyStore
-
-from ethan.interface.routers import chat, sessions, settings, memory, schedule, knowledge, skills, docs, completions, logs, models, consent, background_tasks
-from ethan.browser.ws_route import router as browser_ws_router
 from ethan.browser.http_route import router as browser_http_router
+from ethan.browser.ws_route import router as browser_ws_router
+from ethan.core.heartbeat import start_heartbeat, stop_heartbeat
+from ethan.interface.routers import (
+    background_tasks,
+    chat,
+    completions,
+    consent,
+    docs,
+    knowledge,
+    logs,
+    memory,
+    models,
+    schedule,
+    sessions,
+    settings,
+    skills,
+)
+from ethan.memory.api_keys import APIKeyStore
 
 # 飞书接入走 WebSocket 长连接（lark_events.py，由 lifespan 里 start_lark_listener 启动），
 # 不挂任何 lark 路由。lark.py 里的 /lark/webhook 是旧的 webhook 模式遗留代码——
@@ -65,6 +78,10 @@ async def lifespan(app: FastAPI):
         from ethan.interface.wechat_events import start_wechat_listener
         start_wechat_listener()
     start_heartbeat()
+    # 主动启动调度器，确保持久化的定时任务在服务重启后自动恢复运行。
+    # 不能依赖懒加载（首次 GET /api/schedule 才 start），否则服务空跑时 job 永远不触发。
+    from ethan.interface.routers.schedule import get_scheduler
+    get_scheduler()
     from ethan.browser.session_map import start_idle_sweep, stop_idle_sweep
     start_idle_sweep()
     key_store = APIKeyStore()
@@ -151,6 +168,7 @@ if _WEB_DIST.exists():
 
 def run_server(host: str = "0.0.0.0", port: int = 8900):
     import os
+
     import uvicorn
     # 暴露端口给同进程内的后台任务回调（background_task 用它拼 base url，而非写死 8900）
     os.environ["ETHAN_SERVER_PORT"] = str(port)
