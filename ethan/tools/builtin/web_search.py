@@ -34,6 +34,8 @@ class WebSearchTool(BaseTool):
 
             if cfg.provider == "searxng" and cfg.base_url:
                 results = await self._searxng_search(query, max_results, cfg.base_url)
+                if not results:
+                    results = await self._ddg_search(query, max_results)
             elif cfg.provider == "tavily" and cfg.api_key:
                 results = await self._tavily_search(query, max_results, cfg.api_key)
             else:

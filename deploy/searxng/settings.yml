@@ -14,3 +14,12 @@ search:
   formats:
     - html
     - json  # ethan web_search 工具依赖 JSON 输出，默认关闭，必须显式开启
+
+outgoing:
+  request_timeout: 12.0      # 默认 3.0s 太短，Google/DDG 等在部分网络环境容易 timeout
+  max_request_timeout: 20.0
+  proxies:
+    http:
+      - http://host.docker.internal:7890
+    https:
+      - http://host.docker.internal:7890
