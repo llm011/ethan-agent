@@ -6,7 +6,8 @@ provider 发现：调 provider 的 /models 接口（OpenAI 兼容）拉候选，
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from ethan.core.config import get_config, save_config, reload_config
+from ethan.core.config import get_config, reload_config, save_config
+
 from .deps import verify_token
 
 router = APIRouter()

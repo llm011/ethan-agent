@@ -1,6 +1,8 @@
 """logs 路由：读取后端/前端日志。"""
 from pathlib import Path
+
 from fastapi import APIRouter, Depends
+
 from .deps import verify_token
 
 router = APIRouter()
@@ -16,7 +18,7 @@ async def get_logs(type: str = "backend", lines: int = 500, q: str | None = None
     try:
         all_lines = log_file.read_text(encoding="utf-8").splitlines(keepends=True)
         if q:
-            all_lines = [l for l in all_lines if q.lower() in l.lower()]
+            all_lines = [line for line in all_lines if q.lower() in line.lower()]
         return {"content": "".join(all_lines[-lines:] if lines > 0 else all_lines)}
     except Exception as e:
         return {"content": f"Error reading log: {e}"}

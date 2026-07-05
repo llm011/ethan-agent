@@ -7,6 +7,7 @@
 """
 import asyncio
 from datetime import datetime
+from pathlib import Path
 
 import typer
 from rich.console import Console
@@ -20,8 +21,8 @@ app = typer.Typer(help="管理对话会话", invoke_without_command=True)
 
 def _user_session_db_path() -> "Path":
     """CLI session 命令默认操作 admin 用户的会话库。"""
-    from ethan.core.users import get_user_store
     from ethan.core.paths import user_sessions_db_path
+    from ethan.core.users import get_user_store
     return user_sessions_db_path(get_user_store().get_admin_user_id())
 
 

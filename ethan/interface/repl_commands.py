@@ -7,6 +7,7 @@ from rich.table import Table
 from ethan.core.agent import Agent
 from ethan.core.config import get_config
 from ethan.memory.session import Session, SessionStore
+
 from .repl_ui import console
 
 
@@ -95,7 +96,7 @@ async def _handle_slash_command(cmd: str, store: SessionStore, session: Session,
         # 新会话沿用当前模式（在法律/陪伴模式里 /new 通常想继续同模式）
         cur_mode = getattr(agent, "_mode", "") or ""
         new_session = await store.create(agent._provider.model, source="repl", mode=cur_mode)
-        console.print(f"[green]New session created[/green]")
+        console.print("[green]New session created[/green]")
         return new_session
 
     elif command in ("/model", "/m"):
@@ -105,7 +106,7 @@ async def _handle_slash_command(cmd: str, store: SessionStore, session: Session,
             models_str = ", ".join(f"[{i}] {m.id}" for i, m in enumerate(config.models, start=1))
             console.print(f"[dim]Current: [cyan]{current}[/cyan][/dim]")
             console.print(f"[dim]Available: {models_str}[/dim]")
-            console.print(f"[dim]Switch: /model <id_or_index>[/dim]")
+            console.print("[dim]Switch: /model <id_or_index>[/dim]")
         else:
             # Return special signal — caller handles model switch
             from ethan.providers.manager import create_provider
@@ -125,7 +126,7 @@ async def _handle_slash_command(cmd: str, store: SessionStore, session: Session,
                 ["默认 (default)"] + [f"{m.label or m.key} ({'/'.join(a for a in m.aliases if a)})" for m in MODES]
             )
             console.print(f"[dim]当前模式：[cyan]{cur.label or '默认（工作助手）'}[/cyan][/dim]")
-            console.print(f"[dim]切换：/mode <名称>（如 /mode 法律）；/mode default 切回默认[/dim]")
+            console.print("[dim]切换：/mode <名称>（如 /mode 法律）；/mode default 切回默认[/dim]")
             console.print(f"[dim]可用：{avail}[/dim]")
         else:
             target = match_mode(parts[1].strip())
@@ -159,7 +160,7 @@ async def _handle_slash_command(cmd: str, store: SessionStore, session: Session,
                 for uid in all_uids
             )
             console.print(f"[dim]Available profiles: {profiles_str}[/dim]")
-            console.print(f"[dim]Switch: /profile <profile_id>[/dim]")
+            console.print("[dim]Switch: /profile <profile_id>[/dim]")
         else:
             target_uid = parts[1].strip()
             if target_uid not in all_uids:
@@ -197,14 +198,14 @@ async def _handle_slash_command(cmd: str, store: SessionStore, session: Session,
             console.print(f"[yellow]{summary}[/yellow]")
             return None
         preview = summary if len(summary) <= 120 else summary[:120] + "…"
-        console.print(f"[green]✓ 已压缩历史[/green] [dim]（保留最近一轮）[/dim]")
+        console.print("[green]✓ 已压缩历史[/green] [dim]（保留最近一轮）[/dim]")
         console.print(f"[dim]{preview}[/dim]")
         # 重载 session，触发主循环重建 history/memory
         reloaded = await store.load(session.id)
         return reloaded
 
     elif command == "/config":
-        from ethan.core.config import save_config, reload_config
+        from ethan.core.config import reload_config, save_config
         from ethan.interface.config_editor import run_config_editor
         config = get_config()
         old_model = config.defaults.model
@@ -268,8 +269,8 @@ async def _handle_slash_command(cmd: str, store: SessionStore, session: Session,
         return None
 
     elif command == "/update":
-        import sys
         import subprocess
+        import sys
         console.print("[dim]Starting update process...[/dim]")
         # Execute the update command directly
         subprocess.run([sys.executable, "-m", "ethan.interface.cli", "update"])

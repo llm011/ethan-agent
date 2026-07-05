@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -180,7 +180,7 @@ async def handle_command(ctx: CommandContext) -> str | None:
         return f"当前模型：{current}"
 
     if name == "mode":
-        from ethan.core.modes import MODES, DEFAULT_MODE, match_mode
+        from ethan.core.modes import MODES, match_mode
         if arg:
             target = match_mode(arg)
             if target is None:
@@ -261,7 +261,7 @@ async def handle_command(ctx: CommandContext) -> str | None:
 
 def _handle_command_cmd(arg: str) -> str:
     """/command add <name> [desc] | list | remove <name> 的渠道内处理。"""
-    from ethan.core.custom_commands import load_commands, save_command, remove_command
+    from ethan.core.custom_commands import load_commands, remove_command, save_command
 
     sub_parts = arg.strip().split(None, 2) if arg else []
     if not sub_parts:

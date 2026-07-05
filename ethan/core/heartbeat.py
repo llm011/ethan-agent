@@ -21,12 +21,12 @@ async def _consolidate_facts() -> None:
 
 
 async def _consolidate_facts_for_user(user_id: str) -> None:
-    from ethan.memory.facts import FactStore
-    from ethan.providers.manager import create_provider
-    from ethan.providers.base import Message
     from ethan.core.config import get_config
-    from ethan.core.paths import user_facts_path
     from ethan.core.context import ETHAN_USER_ID
+    from ethan.core.paths import user_facts_path
+    from ethan.memory.facts import FactStore
+    from ethan.providers.base import Message
+    from ethan.providers.manager import create_provider
 
     # user_*_path() 走 ETHAN_USER_ID ContextVar 解析分库；心跳循环里必须显式 set，
     # 否则所有用户都会落到 default profile（user_id 参数本身不参与路径解析）。
@@ -148,10 +148,13 @@ async def _consolidate_profile_for_user(user_id: str) -> None:
 
     from ethan.core.config import get_config
     from ethan.core.context import ETHAN_USER_ID
-    from ethan.core.paths import user_profile_path, user_memory_dir
+    from ethan.core.paths import user_memory_dir, user_profile_path
     from ethan.core.profile import (
-        section_bullets, set_section_bullets,
-        PROFILE_GROUP_IDENTITY, PROFILE_GROUP_EMOTION, PROFILE_GROUP_AGREEMENT,
+        PROFILE_GROUP_AGREEMENT,
+        PROFILE_GROUP_EMOTION,
+        PROFILE_GROUP_IDENTITY,
+        section_bullets,
+        set_section_bullets,
     )
     from ethan.providers.manager import create_provider
 
@@ -235,17 +238,8 @@ async def _consolidate_profile_for_user(user_id: str) -> None:
 async def _run_heartbeat_md() -> None:
     """读取 heartbeat.md，若有内容则作为 agent 任务执行，结果保存到专属 session。"""
     from ethan.core.config import get_config
-    from ethan.core.agent import Agent
     from ethan.memory.session import SessionStore
     from ethan.providers.base import Message
-    from ethan.skills.registry import SkillRegistry
-    from ethan.tools.builtin.file import FileListTool, FileReadTool, FileWriteTool
-    from ethan.tools.builtin.knowledge import KnowledgeAddTool, KnowledgeSearchTool
-    from ethan.tools.builtin.schedule import ScheduleCreateTool, ScheduleListTool, ScheduleRemoveTool
-    from ethan.tools.builtin.shell import ShellTool
-    from ethan.tools.builtin.web import WebFetchTool
-    from ethan.tools.builtin.web_search import WebSearchTool
-    from ethan.tools.registry import ToolRegistry
 
     cfg = get_config()
     workspace = cfg.defaults.workspace
@@ -255,13 +249,13 @@ async def _run_heartbeat_md() -> None:
 
     content = hb_path.read_text(encoding="utf-8")
     # 过滤掉纯注释行（# 开头）和空行，没有实质任务就不执行
-    effective_lines = [l for l in content.splitlines() if l.strip() and not l.strip().startswith("#")]
+    effective_lines = [line for line in content.splitlines() if line.strip() and not line.strip().startswith("#")]
     if not effective_lines:
         return
 
     # 心跳 MVP 归到 admin 用户
+    from ethan.core.paths import user_sessions_db_path
     from ethan.core.users import get_user_store
-    from ethan.core.paths import ensure_user_dirs, user_sessions_db_path
     hb_user_id = get_user_store().get_admin_user_id()
     from ethan.core.agent_factory import create_agent as _create_agent
     agent = _create_agent(user_id=hb_user_id, toolset="heartbeat")
@@ -270,8 +264,9 @@ async def _run_heartbeat_md() -> None:
     prompt = f"[Heartbeat] 正在执行系统心跳任务：heartbeat.md\n\n{content.strip()}"
 
     try:
-        from ethan.providers.base import ToolEvent, ThinkingEvent
         import time
+
+        from ethan.providers.base import ThinkingEvent, ToolEvent
 
         # 每次心跳创建一个全新的专属 session，便于在 Web 上独立查看
         store = SessionStore(db_path=user_sessions_db_path())

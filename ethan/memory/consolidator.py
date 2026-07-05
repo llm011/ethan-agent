@@ -6,10 +6,9 @@
 
 Phase 2c: 重要性评分 — 决策/偏好/纠正的轮次得到更高权重。
 """
+from ethan.core.config import get_config
 from ethan.providers.base import BaseProvider, Message
 from ethan.providers.manager import create_provider
-from ethan.core.config import get_config
-
 
 _CHEAP_MODEL_MAP = {
     "claude-opus": "claude-haiku-4.5",
@@ -54,7 +53,6 @@ def _infer_cheap_model(main_model: str) -> str:
 
 def get_lite_model(main_model: str | None = None) -> str:
     """获取轻量模型：优先 config.defaults.lite_model，空则按主模型推断。"""
-    from ethan.core.config import get_config
     cfg = get_config()
     if cfg.defaults.lite_model:
         return cfg.defaults.lite_model

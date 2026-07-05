@@ -220,8 +220,8 @@ def _looks_like_tool_trace(text: str) -> bool:
     """检测文本是否像工具调用过程格式（模型污染历史后在正文里模仿的格式）。"""
     if not text:
         return False
-    lines = [l for l in text.split("\n") if l.strip()]
+    lines = [ln for ln in text.split("\n") if ln.strip()]
     if len(lines) < 2:
         return False
-    tool_lines = sum(1 for l in lines if _TOOL_LINE_RE.search(l))
+    tool_lines = sum(1 for ln in lines if _TOOL_LINE_RE.search(ln))
     return tool_lines >= 2

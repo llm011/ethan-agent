@@ -1,6 +1,7 @@
 """schedule 路由：定时任务 CRUD。"""
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+
 from .deps import verify_token
 
 router = APIRouter(prefix="/schedule")

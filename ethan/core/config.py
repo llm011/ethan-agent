@@ -4,7 +4,6 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-
 CONFIG_DIR = Path.home() / ".ethan"
 CONFIG_FILE = CONFIG_DIR / "config.yaml"
 
@@ -193,6 +192,7 @@ class Config(BaseModel):
 
 # 多用户体系：UserConfig 前向引用在此解析（users.py 仅在函数内 import config，无循环）
 from ethan.core.users import UserConfig  # noqa: E402
+
 Config.model_rebuild()
 
 
@@ -233,7 +233,6 @@ def _default_config() -> dict:
 
 def _init_system_files(agent_name: str) -> None:
     """首次安装时将默认系统文件释放到 ~/.ethan/system/。只在目标文件不存在时创建，不覆盖用户已有配置。"""
-    import shutil
 
     defaults_dir = Path(__file__).parent.parent / "defaults" / "system"
     if not defaults_dir.exists():

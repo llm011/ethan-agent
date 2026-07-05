@@ -5,8 +5,6 @@
   ethan wechat status  显示当前登录状态
 """
 import asyncio
-import os
-import signal
 
 import typer
 from rich.console import Console
@@ -16,7 +14,7 @@ console = Console()
 
 
 def _set_wechat_enabled(enabled: bool) -> None:
-    from ethan.core.config import get_config, save_config, reload_config
+    from ethan.core.config import get_config, reload_config, save_config
     cfg = get_config()
     cfg.wechat.enabled = enabled
     save_config(cfg)
@@ -67,7 +65,7 @@ def wechat_login() -> None:
 @app.command("logout")
 def wechat_logout() -> None:
     """清除微信登录凭证并关闭监听。"""
-    from ethan.interface.wechat_ilink import clear_credentials, _CREDS_PATH
+    from ethan.interface.wechat_ilink import _CREDS_PATH, clear_credentials
     if _CREDS_PATH.exists():
         clear_credentials()
         console.print("[green]✓ 微信凭证已清除。[/green]")
@@ -90,8 +88,8 @@ def wechat_logout() -> None:
 @app.command("status")
 def wechat_status() -> None:
     """显示当前微信登录状态。"""
-    from ethan.interface.wechat_ilink import load_credentials
     from ethan.core.config import get_config
+    from ethan.interface.wechat_ilink import load_credentials
 
     creds = load_credentials()
     cfg = get_config()

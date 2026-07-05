@@ -8,7 +8,6 @@ import asyncio
 import hashlib
 import math
 import re
-from typing import Callable
 
 EMBEDDING_DIM = 384  # matches all-MiniLM-L6-v2; fallback uses same dim
 

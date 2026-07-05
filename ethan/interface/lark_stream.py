@@ -11,12 +11,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 
-from ethan.interface.lark_render import _render_tool_msg_content
-from ethan.interface.lark_tool_trace import (
-    sanitize_args_summary,
-    sanitize_result_preview,
+from ethan.interface.lark_agent import _handle_agent_message
+from ethan.interface.lark_event_handlers import (
+    _handle_card_action,
+    _handle_message_read,
+    _handle_reaction,
 )
 from ethan.interface.lark_send import (
     TypingState,
@@ -25,7 +25,6 @@ from ethan.interface.lark_send import (
     _lark_client,
     _resolve_quoted_text,
     _send_interactive_card,
-    _send_message,
     _send_reply,
 )
 from ethan.interface.lark_state import (
@@ -45,13 +44,6 @@ from ethan.interface.lark_state import (
     _save_lark_map,
     _should_respond_to_group_message,
     _stop_lark_task,
-    _untrack_task,
-)
-from ethan.interface.lark_agent import _handle_agent_message
-from ethan.interface.lark_event_handlers import (
-    _handle_message_read,
-    _handle_reaction,
-    _handle_card_action,
 )
 
 logger = logging.getLogger(__name__)
@@ -70,24 +62,6 @@ async def _handle_message(event_data: dict) -> None:
     - 后续 flush：lark-cli 不支持 patch，直接追加新消息
     - 最终确保完整内容已发出
     """
-    from ethan.core.agent import Agent
-    from ethan.memory.session import SessionStore
-    from ethan.providers.base import Message, ToolEvent, ThinkingEvent
-    from ethan.skills.registry import SkillRegistry
-    from ethan.tools.builtin.file import FileListTool, FileReadTool, FileWriteTool
-    from ethan.tools.builtin.knowledge import KnowledgeAddTool, KnowledgeEditTool, KnowledgeReadTool, KnowledgeSearchTool
-    from ethan.tools.builtin.memory_write import MemoryWriteTool
-    from ethan.tools.builtin.procedure_write import ProcedureWriteTool
-    from ethan.tools.builtin.profile_update import ProfileUpdateTool
-    from ethan.tools.builtin.schedule import ScheduleCreateTool, ScheduleListTool, ScheduleRemoveTool
-    from ethan.tools.builtin.skill_create import SkillCreateTool
-    from ethan.tools.builtin.skill_read import SkillReadTool, SkillListTool
-    from ethan.tools.builtin.secrets import SetSecretTool, GetSecretTool, ListSecretsTool
-    from ethan.tools.builtin.shell import ShellTool
-    from ethan.tools.builtin.web import WebFetchTool
-    from ethan.tools.builtin.web_search import WebSearchTool
-    from ethan.tools.builtin.search import RipgrepTool, FdTool
-    from ethan.tools.registry import ToolRegistry
 
     # lark-cli 已经把 event 字段展平，直接从顶层读取
     # post（图文混合）/ image / file / audio / video 的 content 也是 lark-cli 预渲染的可读文本：
@@ -168,7 +142,15 @@ async def _handle_message(event_data: dict) -> None:
 
     # ── /btw：顺带一问——不带历史、不带 cold facts 的单轮轻量查询 ──
     # 解析放在 /command 之前，因为 /btw 需要走完整 agent 流程（只是上下文为空）。
-    from ethan.interface.channel_commands import CommandContext, handle_command, is_command, is_btw, btw_question, is_review, review_target, resolve_custom_command
+    from ethan.interface.channel_commands import (
+        btw_question,
+        handle_command,
+        is_btw,
+        is_command,
+        is_review,
+        resolve_custom_command,
+        review_target,
+    )
     btw_mode = False
 
     # ── /test-card：发一张带按钮的测试卡片，用于验证 card.action.trigger 事件链路 ──

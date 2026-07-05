@@ -2,6 +2,7 @@
 import yaml
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+
 from .deps import verify_token
 
 router = APIRouter(prefix="/skills")

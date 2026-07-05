@@ -1,8 +1,8 @@
 """API Key 存储与管理（用于 /v1/chat/completions 鉴权）。"""
 import secrets
 import time
+
 import aiosqlite
-from pathlib import Path
 
 from ethan.core.config import CONFIG_DIR
 

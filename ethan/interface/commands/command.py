@@ -22,8 +22,9 @@ def _default(ctx: typer.Context) -> None:
 @app.command("list")
 def list_commands() -> None:
     """列出所有自定义命令。"""
-    from ethan.core.custom_commands import load_commands
     from rich.table import Table
+
+    from ethan.core.custom_commands import load_commands
 
     cmds = load_commands()
     if not cmds:
@@ -54,7 +55,7 @@ def add_command(
 
     # 校验命令名
     if not name.replace("-", "").replace("_", "").isalnum():
-        console.print(f"[red]命令名只允许字母、数字、连字符和下划线。[/red]")
+        console.print("[red]命令名只允许字母、数字、连字符和下划线。[/red]")
         raise typer.Exit(1)
 
     # 保留名与内置命令冲突检测

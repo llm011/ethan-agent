@@ -5,8 +5,9 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from ethan.core.config import get_config, save_config, reload_config
-from .deps import verify_token, create_agent
+from ethan.core.config import get_config, reload_config, save_config
+
+from .deps import create_agent, verify_token
 
 router = APIRouter()
 
@@ -21,7 +22,7 @@ class OnboardingCompleteRequest(BaseModel):
 
 @router.get("/onboarding/status")
 async def onboarding_status(user_id: str = Depends(verify_token)):
-    from ethan.core.onboarding import is_first_time, ONBOARDING_MESSAGE
+    from ethan.core.onboarding import ONBOARDING_MESSAGE, is_first_time
     first_time = is_first_time(user_id)
     return {"first_time": first_time, "message": ONBOARDING_MESSAGE if first_time else ""}
 
@@ -30,8 +31,8 @@ async def onboarding_status(user_id: str = Depends(verify_token)):
 async def onboarding_complete(req: OnboardingCompleteRequest, user_id: str = Depends(verify_token)):
     from ethan.core.config import CONFIG_DIR
     from ethan.core.onboarding import mark_onboarded
-    from ethan.memory.facts import FactStore
     from ethan.core.paths import user_facts_path
+    from ethan.memory.facts import FactStore
 
     agent_name = req.agent_name.strip() or "Ethan"
     user_info = req.user_info.strip()

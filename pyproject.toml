@@ -56,6 +56,27 @@ Issues = "https://github.com/llm011/ethan-agent/issues"
 [project.scripts]
 ethan = "ethan.interface.cli:app"
 
+[dependency-groups]
+dev = [
+    "ruff>=0.11.0",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+# E: pycodestyle errors, F: pyflakes (F401=unused imports), I: isort
+select = ["E", "F", "I"]
+ignore = [
+    "E501",   # line too long — handled by formatter
+]
+fixable = ["ALL"]
+
+[tool.ruff.lint.per-file-ignores]
+# Allow unused imports in __init__.py (re-exports)
+"__init__.py" = ["F401"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

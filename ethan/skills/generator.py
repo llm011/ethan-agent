@@ -3,7 +3,6 @@ import re
 from pathlib import Path
 
 from ethan.providers.base import BaseProvider, Message
-from ethan.skills.loader import USER_SKILLS_DIR
 
 MIN_TURNS = 3        # 至少 N 轮用户消息才分析
 MIN_CONV_LEN = 300   # 对话内容至少 N 字才分析
@@ -57,8 +56,8 @@ class SkillGenerator:
         # 用廉价模型分析
         provider = self._provider
         try:
-            from ethan.memory.consolidator import get_lite_model
             from ethan.core.config import get_config
+            from ethan.memory.consolidator import get_lite_model
             from ethan.providers.manager import create_provider
             cfg = get_config()
             cheap_model = get_lite_model(cfg.defaults.model)

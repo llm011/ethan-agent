@@ -59,6 +59,7 @@ def stop_wechat_listener() -> None:
 
 async def _bot_loop() -> None:
     import httpx
+
     from ethan.interface.wechat_ilink import (
         get_updates,
         load_credentials,
@@ -119,6 +120,7 @@ _seen_msg_order: deque[str] = deque(maxlen=2000)
 async def _handle_message(msg: dict[str, Any], creds: Any) -> None:
     """Process a single iLink message: load history, stream Agent, send tool progress + reply."""
     import httpx
+
     from ethan.interface.wechat_ilink import send_text, send_typing
     from ethan.providers.base import Message, ToolEvent
 
@@ -170,12 +172,11 @@ async def _handle_message(msg: dict[str, Any], creds: Any) -> None:
         await send_typing(client, creds, context_token, typing=True)
 
     # ── Session + history ─────────────────────────────────────────────────────
-    from ethan.core.config import get_config
-    from ethan.core.paths import user_sessions_db_path, user_facts_path
+    from ethan.core.paths import user_facts_path, user_sessions_db_path
     from ethan.core.users import get_user_store
+    from ethan.memory.facts import FactStore
     from ethan.memory.session import SessionStore
     from ethan.memory.working import MemoryConfig, WorkingMemory
-    from ethan.memory.facts import FactStore
 
     user_id = get_user_store().get_admin_user_id()
     store = SessionStore(db_path=user_sessions_db_path())

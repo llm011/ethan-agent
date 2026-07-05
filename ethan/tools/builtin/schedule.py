@@ -3,7 +3,6 @@ import json
 import os
 import threading
 from contextvars import ContextVar
-from typing import Any
 
 from ethan.tools.base import BaseTool
 
@@ -20,6 +19,7 @@ def _base_url() -> str:
 def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channel_context: str = "{}", user_id: str = ""):
     def _do_fire():
         import requests
+
         from ethan.core.config import get_config
         result_text = ""
         try:
@@ -43,13 +43,14 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
             print(f"Schedule fire error: {e}")
             result_text = f"⚠️ 定时任务执行失败: {e}"
             import asyncio
+
+            from ethan.core.paths import user_sessions_db_path
             from ethan.memory.session import SessionStore
             from ethan.providers.base import Message
-            from ethan.core.paths import user_sessions_db_path
             async def log_error():
                 store = SessionStore(db_path=user_sessions_db_path())
                 await store.init()
-                err_msg = Message(role="assistant", content=f"⚠️ 定时任务后台执行失败:\n```text\n{e}\n```")
+                err_msg = Message(role="assistant", content=f"⚠️ 定时任务后台执行失败:\n```text\n{e}\n```")  # noqa: F821 — closure over except-var
                 await store.save_message(session_id, err_msg)
                 await store.touch(session_id)
                 await store.close()
@@ -64,8 +65,9 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
                 ctx = json.loads(channel_context)
                 chat_id = ctx.get("chat_id", "")
                 if chat_id:
-                    from ethan.interface.lark import _get_lark_client, _send_lark_reply
                     import asyncio
+
+                    from ethan.interface.lark import _get_lark_client, _send_lark_reply
                     client = _get_lark_client()
                     if client:
                         asyncio.run(_send_lark_reply(client, chat_id, result_text))
@@ -95,10 +97,11 @@ class ScheduleCreateTool(BaseTool):
         self._user_id = user_id
 
     async def run(self, job_id: str, prompt: str, cron: str = "", interval_minutes: int = 0) -> str:
-        from ethan.memory.session import SessionStore
+        import httpx
+
         from ethan.core.config import get_config
         from ethan.core.paths import user_sessions_db_path
-        import httpx
+        from ethan.memory.session import SessionStore
 
         if not cron and interval_minutes <= 0:
             return "Error: provide either 'cron' or 'interval_minutes'"
@@ -142,8 +145,9 @@ class ScheduleListTool(BaseTool):
     parameters = {"type": "object", "properties": {}, "required": []}
 
     async def run(self) -> str:
-        from ethan.core.config import get_config
         import httpx
+
+        from ethan.core.config import get_config
         token = get_config().network.auth_token
         headers = {"Authorization": f"Bearer {token}"} if token else {}
         try:
@@ -173,8 +177,9 @@ class ScheduleRemoveTool(BaseTool):
     }
 
     async def run(self, job_id: str) -> str:
-        from ethan.core.config import get_config
         import httpx
+
+        from ethan.core.config import get_config
         token = get_config().network.auth_token
         headers = {"Authorization": f"Bearer {token}"} if token else {}
         try:

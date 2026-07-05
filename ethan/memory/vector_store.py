@@ -10,7 +10,7 @@ from typing import Any
 
 import sqlite_vec
 
-from ethan.memory.embeddings import EMBEDDING_DIM, embed_sync
+from ethan.memory.embeddings import EMBEDDING_DIM
 
 _DB_PATH = Path.home() / ".ethan" / "memory" / "vectors.db"
 

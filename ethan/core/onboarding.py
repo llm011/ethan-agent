@@ -1,5 +1,5 @@
 """First-time user onboarding detection and messaging."""
-from ethan.core.config import get_config, CONFIG_DIR
+from ethan.core.config import get_config
 
 
 def is_first_time(user_id: str = "") -> bool:

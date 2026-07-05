@@ -317,7 +317,7 @@ class EmbeddingRouter:
         if not _LR_HEAD.load():
             return False
         names = {s.name for s in skills}
-        self._routable = {l for l in _LR_HEAD.labels if l != "others" and l in names}
+        self._routable = {label for label in _LR_HEAD.labels if label != "others" and label in names}
         self._built = bool(self._routable)
         return self._built
 

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -15,7 +14,7 @@ from ethan.memory.facts import FactStore
 from ethan.memory.session import SessionStore
 from ethan.providers.base import Message
 
-from .deps import create_agent
+from .deps import create_agent, verify_token
 
 router = APIRouter()
 
@@ -43,8 +42,6 @@ async def _verify_api_key(request: Request) -> str:
 
 
 # ── API Key 管理 ──────────────────────────────────────────────────
-
-from .deps import verify_token
 
 
 class APIKeyCreateRequest(BaseModel):
@@ -92,7 +89,7 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
     效果与 Web UI 完全一致（WorkingMemory + cold facts）。
     返回体中 `ethan.session_id` 可用于下次继续对话。
     """
-    from ethan.core.paths import user_sessions_db_path, user_facts_path
+    from ethan.core.paths import user_facts_path, user_sessions_db_path
     agent = create_agent(req.model, channel="api", user_id=user_id)
 
     store = SessionStore(db_path=user_sessions_db_path())
@@ -160,8 +157,8 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
 
 
 async def _stream_completions(agent, messages, store: SessionStore, session_id: str | None, model: str | None, user_id: str = ""):
-    from ethan.providers.base import ToolEvent, ThinkingEvent
     from ethan.interface.routers.chat import _maybe_consolidate, _maybe_generate_skill
+    from ethan.providers.base import ThinkingEvent, ToolEvent
 
     full = ""
     try:

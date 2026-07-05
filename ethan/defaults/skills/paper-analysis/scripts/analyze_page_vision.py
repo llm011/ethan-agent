@@ -97,7 +97,6 @@ def _repair_escapes(s: str) -> str:
     仅在 JSON 字符串值内部生效（遇 " 配对跳过键名/结构）。合法转义：
     "  \\  /  b  f  n  r  t  uXXXX。其余 \\X 一律把反斜杠翻倍。
     """
-    valid = set('"\\/bfnrtu')
     out = []
     in_str = False
     escape = False
@@ -203,8 +202,11 @@ def main() -> int:
     # 并不是模型名错，而是请求被路由到一个当下没加载该模型的后端节点。瞬时性、可重试。
     # 策略：指数退避（2,4,8,15,25s），只对"可重试"错误退避；认证/参数类 4xx 立即失败。
     from openai import (
-        APIConnectionError, APITimeoutError, RateLimitError,
-        APIStatusError, InternalServerError,
+        APIConnectionError,
+        APIStatusError,
+        APITimeoutError,
+        InternalServerError,
+        RateLimitError,
     )
 
     def _retryable(e: Exception) -> tuple[bool, str]:

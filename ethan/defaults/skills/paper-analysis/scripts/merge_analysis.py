@@ -56,13 +56,17 @@ def _repair_escapes(s: str) -> str:
             continue
         if ch == "\\":
             if i + 1 < n and (s[i + 1] in valid or s[i + 1] == "u"):
-                out.append(ch); out.append(s[i + 1]); i += 2
+                out.append(ch)
+                out.append(s[i + 1])
+                i += 2
             else:
-                out.append("\\\\"); i += 1
+                out.append("\\\\")
+                i += 1
             continue
         if ch == '"':
             in_str = False
-        out.append(ch); i += 1
+        out.append(ch)
+        i += 1
     return "".join(out)
 
 

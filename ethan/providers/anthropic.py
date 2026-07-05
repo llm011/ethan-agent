@@ -128,7 +128,7 @@ class AnthropicProvider(BaseProvider):
             for t in tools
         ]
 
-    def _parse_response(self, response: anthropic.types.Message) -> Message:
+    def _parse_response(self, response: anthropic.types.Message) -> Message:  # noqa: F821 — lazy-imported in __init__
         tool_calls = []
         text_content = ""
         for block in response.content:

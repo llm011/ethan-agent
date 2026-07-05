@@ -53,7 +53,7 @@ class FilesystemKnowledgeBase(KnowledgeBase):
     def __init__(self, directory: Path):
         self._dir = directory
         self._dir.mkdir(parents=True, exist_ok=True)
-        self._vector_store: "VectorStore | None" = None  # lazy init
+        self._vector_store: "VectorStore | None" = None  # noqa: F821 — lazy import, forward ref
 
     # ── Vector store (lazy) ────────────────────────────────────────────────
 

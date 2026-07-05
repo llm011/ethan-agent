@@ -6,9 +6,9 @@ CORRECTION_THRESHOLD = 2
 
 
 async def update_skills_from_corrections(user_id: str = "") -> int:
-    from ethan.skills.stats import SkillStats
-    from ethan.skills.loader import load_skill_from_file
     from ethan.core.paths import user_skill_stats_path
+    from ethan.skills.loader import load_skill_from_file
+    from ethan.skills.stats import SkillStats
     stats_path = user_skill_stats_path()
     stats = SkillStats(path=stats_path) if stats_path else SkillStats()
     updated = 0

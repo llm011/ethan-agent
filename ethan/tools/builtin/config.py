@@ -80,7 +80,7 @@ class ConfigSetTool(BaseTool):
     }
 
     async def run(self, key: str, value) -> str:
-        from ethan.core.config import get_config, save_config, reload_config
+        from ethan.core.config import get_config, reload_config, save_config
 
         field = get_field(key)
         if not field:

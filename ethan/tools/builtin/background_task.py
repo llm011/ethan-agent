@@ -172,6 +172,7 @@ def _run_background(task: _BgTask, prompt: str, channel: str, channel_context: s
             chat_id = ctx.get("chat_id", "")
             if chat_id:
                 import asyncio
+
                 from ethan.interface.lark import _get_lark_client, _send_lark_reply
                 client = _get_lark_client()
                 if client:
@@ -205,9 +206,9 @@ class BackgroundTaskTool(BaseTool):
         self._user_id = user_id
 
     async def run(self, title: str, prompt: str) -> str:
-        from ethan.memory.session import SessionStore
         from ethan.core.config import get_config
         from ethan.core.paths import user_sessions_db_path
+        from ethan.memory.session import SessionStore
 
         chat_id = lark_chat_id_var.get("")
         channel = "lark" if chat_id else "web"

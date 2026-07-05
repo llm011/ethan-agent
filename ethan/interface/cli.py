@@ -28,17 +28,17 @@ app = typer.Typer(
 
 
 def _register_subcommands():
+    from ethan.interface.commands import channel as channel_cmd
+    from ethan.interface.commands import code as code_cmd
+    from ethan.interface.commands import command as command_cmd
+    from ethan.interface.commands import knowledge as knowledge_cmd
     from ethan.interface.commands import model as model_cmd
     from ethan.interface.commands import provider as provider_cmd
+    from ethan.interface.commands import router as router_cmd
+    from ethan.interface.commands import schedule as schedule_cmd
     from ethan.interface.commands import session as session_cmd
     from ethan.interface.commands import skill as skill_cmd
-    from ethan.interface.commands import schedule as schedule_cmd
-    from ethan.interface.commands import knowledge as knowledge_cmd
-    from ethan.interface.commands import code as code_cmd
     from ethan.interface.commands import update as update_cmd
-    from ethan.interface.commands import channel as channel_cmd
-    from ethan.interface.commands import router as router_cmd
-    from ethan.interface.commands import command as command_cmd
     from ethan.interface.commands import wechat as wechat_cmd
 
     app.add_typer(model_cmd.app, name="model")
@@ -72,10 +72,12 @@ def serve_main(
 @serve_app.command("stop")
 def serve_stop() -> None:
     """停止后台运行的 serve 进程。"""
-    from ethan.interface.commands.update import _find_serve_pid, _wait_pid_gone
     import os
     import signal
+
     from rich.console import Console
+
+    from ethan.interface.commands.update import _find_serve_pid, _wait_pid_gone
 
     console = Console()
     pid = _find_serve_pid()
@@ -106,9 +108,15 @@ def serve_restart() -> None:
 
 
 def _launch_web(port: int = 8900, url: Optional[str] = None) -> None:
-    import os, socket, subprocess, sys, time, webbrowser
+    import os
+    import socket
+    import subprocess
+    import sys
+    import time
     import urllib.request
+    import webbrowser
     from pathlib import Path
+
     from rich.console import Console
     console = Console()
 
@@ -224,9 +232,10 @@ def _build_agent(model: str | None = None, user_id: str = ""):
 
 def version_callback(value: bool):
     if value:
-        from ethan import __version__
         import typer
         from rich.console import Console
+
+        from ethan import __version__
         console = Console()
         console.print(f"ethan-agent version [cyan]{__version__}[/cyan]")
         raise typer.Exit()
@@ -253,7 +262,8 @@ def chat(
     # ─────────────────────────────────────────────────────────────────
 
     import asyncio
-    from ethan.interface.repl import run_repl, run_once, ProfileSwitchException
+
+    from ethan.interface.repl import ProfileSwitchException, run_once, run_repl
 
     if prompt and not resume:
         agent = _build_agent(model, user_id=profile or "")

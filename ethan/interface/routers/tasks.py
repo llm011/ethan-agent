@@ -10,8 +10,8 @@ async def _maybe_regen_title(session_id: str) -> None:
     # 与 _maybe_consolidate/_maybe_generate_skill 同样的自开模式。user_id 经
     # ContextVar 在 create_task 下继承，user_sessions_db_path 能解析到正确分库。
     try:
-        from ethan.memory.session import decide_title
         from ethan.core.paths import user_sessions_db_path
+        from ethan.memory.session import decide_title
         store = SessionStore(db_path=user_sessions_db_path())
         await store.init()
         try:
@@ -31,14 +31,13 @@ async def _maybe_regen_title(session_id: str) -> None:
 
 async def _maybe_consolidate(session_id: str, model: str, user_id: str = "", mode: str = "") -> None:
     try:
+        # 心理画像是否额外抽取：由当前 mode 自身声明，不在此硬编码模式名
+        from ethan.core.modes import resolve_mode
+        from ethan.core.paths import user_facts_path, user_sessions_db_path
         from ethan.memory.consolidator import Consolidator
         from ethan.memory.facts import FactStore
         from ethan.memory.working import MemoryConfig, WorkingMemory
-        from ethan.core.paths import user_sessions_db_path, user_facts_path
-
-        # 心理画像是否额外抽取：由当前 mode 自身声明，不在此硬编码模式名
-        from ethan.core.modes import resolve_mode
-        extract_psych = resolve_mode(mode).extract_psych
+        resolve_mode(mode)  # validate mode exists
 
         store = SessionStore(db_path=user_sessions_db_path())
         await store.init()
@@ -88,8 +87,8 @@ async def _maybe_consolidate(session_id: str, model: str, user_id: str = "", mod
 
 async def _maybe_generate_skill(session_id: str, model: str, user_id: str = "") -> None:
     try:
-        from ethan.skills.generator import SkillGenerator, MIN_TURNS
         from ethan.core.paths import user_sessions_db_path
+        from ethan.skills.generator import MIN_TURNS, SkillGenerator
         store = SessionStore(db_path=user_sessions_db_path())
         await store.init()
         session = await store.load(session_id)

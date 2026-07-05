@@ -2,7 +2,6 @@
 
 简单的文件存储，保存在 ~/.ethan/memory/persistent.md。
 """
-from pathlib import Path
 
 from ethan.core.config import CONFIG_DIR
 
