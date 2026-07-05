@@ -13,7 +13,6 @@ from ethan.interface.lark_send import (
     TypingState,
     _delete_message,
     _edit_message,
-    _fetch_recent_chat_messages,
     _lark_client,
     _resolve_quoted_text,
     _send_interactive_card,
@@ -140,16 +139,15 @@ async def _handle_agent_message(
             agent_user_text = hint
         agent_user_msg = Message(role="user", content=agent_user_text)
 
-        # 拉最近 10 条群消息作为背景上下文，让 agent 感知 @mention 之间群里发生了什么。
-        # 仅限群聊（chat_id 以 oc_ 开头）；私聊消息已全量在 session history 里，不重复拉。
-        # /btw 无历史模式也跳过：群消息可能很大（含代码/diff），违背 /btw 精简上下文的本意。
-        # 失败时静默忽略，不阻断主流程。
+        # 从本地缓存读取群聊背景消息，替代每次拉 API（零延迟）
+        # 仅限群聊且非 /btw 模式
         if not btw_mode and chat_id.startswith("oc_"):
-            recent_msgs = await _fetch_recent_chat_messages(chat_id, limit=10)
+            from ethan.interface.lark_state import _get_group_context
+            recent_msgs = _get_group_context(chat_id, limit=10)
             if recent_msgs:
-                lines = ["[群聊近期消息（供背景参考，最近10条）]"]
+                lines = ["[群聊近期消息（供背景参考）]"]
                 for m in recent_msgs:
-                    prefix = f"[{m['time']}] {m['sender']}: " if m['sender'] else f"[{m['time']}] "
+                    prefix = f"[{m['time']}] {m['sender']}: " if m.get('sender') else f"[{m['time']}] "
                     lines.append(prefix + m["text"])
                 agent_user_text = "\n".join(lines) + "\n\n---\n" + agent_user_text
                 agent_user_msg = Message(role="user", content=agent_user_text)

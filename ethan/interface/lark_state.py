@@ -154,6 +154,64 @@ def _mark_lark_welcomed() -> None:
     f.touch()
 
 
+# ── 群聊消息本地缓存 ───────────────────────────────────────────────────────────
+# 仅群聊（oc_ 前缀），私聊不需要（session history 已有全量记录）。
+_GROUP_CACHE_SIZE = 30
+_group_chat_cache: dict[str, deque] = {}  # chat_id -> deque[{sender, text, time}]
+
+
+def _cache_group_message(chat_id: str, sender_id: str, text: str, time_str: str) -> None:
+    cache = _group_chat_cache.setdefault(chat_id, deque(maxlen=_GROUP_CACHE_SIZE))
+    cache.append({"sender": sender_id, "text": text, "time": time_str})
+
+
+def _get_group_context(chat_id: str, limit: int = 10) -> list[dict]:
+    """从本地缓存读取群聊最近消息，不含最后一条（当前正在处理的消息本身），时间正序。"""
+    cache = _group_chat_cache.get(chat_id)
+    if not cache:
+        return []
+    items = list(cache)
+    if items:
+        items = items[:-1]
+    return items[-limit:]
+
+
+async def _should_respond_to_group_message(text: str, lark_cfg) -> bool:
+    """根据 group_response_mode 判断是否响应该群聊消息。P2P 消息不经此函数。"""
+    import fnmatch
+    mode = getattr(lark_cfg, "group_response_mode", "mention_only") or "mention_only"
+    if mode == "always":
+        return True
+    if mode == "mention_only":
+        bot_name = getattr(lark_cfg, "bot_name", "") or ""
+        if bot_name:
+            return f"@{bot_name}" in text
+        return "@" in text
+    if mode == "keywords":
+        keywords = getattr(lark_cfg, "group_keywords", []) or []
+        tl = text.lower()
+        return any(fnmatch.fnmatch(tl, f"*{kw.lower()}*") or kw.lower() in tl for kw in keywords)
+    if mode == "llm_filter":
+        try:
+            from ethan.providers.manager import create_provider
+            from ethan.providers.base import Message as _Msg
+            from ethan.core.config import get_config
+            from ethan.memory.consolidator import get_lite_model
+            cfg = get_config()
+            provider = create_provider(get_lite_model(cfg.defaults.model), cfg)
+            hint = getattr(lark_cfg, "group_llm_filter_hint", "") or \
+                "这条群聊消息是否需要AI助手回复？只回答 yes 或 no，不要其他内容。"
+            resp = await provider.chat(
+                [_Msg(role="user", content=f"{hint}\n\n消息：{text}")],
+                system="你是一个判断器，只输出 yes 或 no。",
+            )
+            return "yes" in (resp.content or "").lower()
+        except Exception:
+            logger.warning("[Lark] llm_group_filter failed, defaulting to respond")
+            return True
+    return True
+
+
 # ── 工具进度污染检测 ───────────────────────────────────────────────────────────
 _TOOL_LINE_RE = re.compile(r'\*\*(?:📖|💻|🔍|🌐|📁|✏️|🧠|💾|⏰|📋|✨|👤|📝|🔧)')
 
