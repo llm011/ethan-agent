@@ -30,6 +30,12 @@ class NetworkConfig(BaseModel):
     api_keys: list[str] = Field(default_factory=list)  # /v1/chat/completions API keys（default profile）
 
 
+class WeChatConfig(BaseModel):
+    enabled: bool = False  # 设为 true 后 ethan serve 自动启动 iLink 长轮询
+    # 登录凭证由 ethan wechat login（或首次启动时扫码）自动写入
+    # ~/.ethan/memory/wechat_credentials.json，无需手动填写。
+
+
 class LarkConfig(BaseModel):
     app_id: str = ""
     app_secret: str = ""
@@ -136,6 +142,7 @@ class Config(BaseModel):
     network: NetworkConfig = Field(default_factory=NetworkConfig)
     defaults: DefaultsConfig = Field(default_factory=DefaultsConfig)
     lark: LarkConfig = Field(default_factory=LarkConfig)
+    wechat: WeChatConfig = Field(default_factory=WeChatConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     users: list["UserConfig"] = Field(default_factory=list)  # 多用户体系；为空时自动生成 admin
 

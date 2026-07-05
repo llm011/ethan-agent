@@ -60,6 +60,10 @@ async def lifespan(app: FastAPI):
         # lark_events 内部走 lark-cli 子进程收事件，lark_oapi 的重量级加载在子进程里，不挡本进程。
         from ethan.interface.lark_events import start_lark_listener, stop_lark_listener
         start_lark_listener()
+    from ethan.core.config import get_config as _gcfg
+    if getattr(_gcfg().wechat, "enabled", False):
+        from ethan.interface.wechat_events import start_wechat_listener
+        start_wechat_listener()
     start_heartbeat()
     from ethan.browser.session_map import start_idle_sweep, stop_idle_sweep
     start_idle_sweep()
@@ -70,6 +74,8 @@ async def lifespan(app: FastAPI):
     if _lark_ready():
         from ethan.interface.lark_events import stop_lark_listener
         stop_lark_listener()
+    from ethan.interface.wechat_events import stop_wechat_listener
+    stop_wechat_listener()
     stop_heartbeat()
     stop_idle_sweep()
     await app.state.api_key_store.close()

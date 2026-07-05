@@ -61,6 +61,24 @@ def list_channels(ctx: typer.Context):
         ", ".join(lark_fields) or "—",
     )
 
+    # wechat
+    from ethan.interface.wechat_ilink import load_credentials as _wechat_creds
+    wechat_cred = _wechat_creds()
+    wechat_enabled = bool(config.wechat.enabled)
+    wechat_fields = []
+    if wechat_cred:
+        wechat_fields.append(f"bot_id={wechat_cred.ilink_bot_id[:16]}...")
+    if wechat_enabled:
+        wechat_fields.append("enabled")
+    wechat_ok = bool(wechat_cred and wechat_enabled)
+    table.add_row(
+        "wechat (微信)",
+        "[green]✓ 已启用[/green]" if wechat_ok else (
+            "[yellow]已登录，未启用[/yellow]" if wechat_cred else "[dim]✗ 未登录[/dim]"
+        ),
+        ", ".join(wechat_fields) or "—",
+    )
+
     # lark-cli 依赖检查
     lark_cli = shutil.which("lark-cli")
     console.print(table)
