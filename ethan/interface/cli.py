@@ -36,6 +36,7 @@ def _register_subcommands():
     from ethan.interface.commands import provider as provider_cmd
     from ethan.interface.commands import router as router_cmd
     from ethan.interface.commands import schedule as schedule_cmd
+    from ethan.interface.commands import server as server_cmd
     from ethan.interface.commands import session as session_cmd
     from ethan.interface.commands import skill as skill_cmd
     from ethan.interface.commands import update as update_cmd
@@ -53,6 +54,7 @@ def _register_subcommands():
     app.add_typer(router_cmd.app, name="router")
     app.add_typer(command_cmd.app, name="command")
     app.add_typer(wechat_cmd.app, name="wechat")
+    app.add_typer(server_cmd.app, name="server")
 
 
 serve_app = typer.Typer(help="管理 API 服务")
@@ -97,14 +99,6 @@ def serve_stop() -> None:
             pass
         _wait_pid_gone(pid, timeout=2)
     console.print("[green]✓ ethan serve 已停止[/green]")
-
-@serve_app.command("restart")
-def serve_restart() -> None:
-    """重启后台运行的 serve 进程。"""
-    from ethan.interface.commands.update import _restart_serve
-    # _restart_serve 内部已做：SIGTERM 旧进程 → 等退出 → 端口释放 → 拉新进程 → 确认端口就绪。
-    # 不再先调 serve_stop()——那会重复 kill 且其「已停止」提示与 restart 的进度提示重叠。
-    _restart_serve(None)
 
 
 def _launch_web(port: int = 8900, url: Optional[str] = None) -> None:
