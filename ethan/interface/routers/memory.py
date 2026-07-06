@@ -1,25 +1,26 @@
 """memory 路由：facts / episodes / procedures（per-user 隔离）。"""
 from fastapi import APIRouter, Depends, HTTPException
+
 from .deps import verify_token
 
 router = APIRouter(prefix="/memory")
 
 
 def _fact_store(user_id: str):
-    from ethan.memory.facts import FactStore
     from ethan.core.paths import user_facts_path
+    from ethan.memory.facts import FactStore
     return FactStore(path=user_facts_path())
 
 
 def _episode_store(user_id: str):
-    from ethan.memory.episodic import EpisodeStore
     from ethan.core.paths import user_episodes_path
+    from ethan.memory.episodic import EpisodeStore
     return EpisodeStore(path=user_episodes_path())
 
 
 def _procedure_store(user_id: str):
-    from ethan.memory.procedures import ProcedureStore
     from ethan.core.paths import user_procedures_path
+    from ethan.memory.procedures import ProcedureStore
     return ProcedureStore(path=user_procedures_path())
 
 

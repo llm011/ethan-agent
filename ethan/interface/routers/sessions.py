@@ -4,6 +4,7 @@ from pydantic import BaseModel
 
 from ethan.core.config import get_config
 from ethan.memory.session import SessionStore
+
 from .deps import verify_token
 
 router = APIRouter()
@@ -41,7 +42,7 @@ async def auth(req: AuthRequest):
 @router.get("/modes")
 async def list_modes(user_id: str = Depends(verify_token)):
     """返回可用对话模式表，供前端渲染切换 UI（数据驱动，不在前端硬编码人格）。"""
-    from ethan.core.modes import MODES, DEFAULT_MODE
+    from ethan.core.modes import DEFAULT_MODE, MODES
     return {"modes": [
         {"key": m.key, "label": m.label, "icon": m.icon, "accent": m.accent, "blurb": m.blurb}
         for m in (DEFAULT_MODE, *MODES)

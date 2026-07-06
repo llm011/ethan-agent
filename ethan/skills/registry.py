@@ -14,7 +14,7 @@ _MAX_SKILL_CONTENT = 3000
 _MAX_REFERENCES_LIST = 15
 
 # 进程级 router 缓存：skill 集合不变时复用已编码锚点，避免每请求重编码
-_ROUTER_CACHE: dict[str, "EmbeddingRouter"] = {}
+_ROUTER_CACHE: dict[str, "EmbeddingRouter"] = {}  # noqa: F821 — optional dep, forward ref
 
 
 def _skill_fingerprint(skills: list[Skill]) -> str:

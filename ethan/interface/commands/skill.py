@@ -6,8 +6,9 @@
   ethan skill add <源>          从 GitHub 仓库/子目录安装 Skill（支持内置别名，如 legal）
   ethan skill create <name>     创建一个新的空 Skill 文件
 """
-import typer
 import asyncio
+
+import typer
 from rich.console import Console
 from rich.table import Table
 
@@ -118,4 +119,4 @@ description: {description}
 """
     path.write_text(content, encoding="utf-8")
     console.print(f"[green]✓ Created: {path}[/green]")
-    console.print(f"[dim]Edit this file to add your skill content.[/dim]")
+    console.print("[dim]Edit this file to add your skill content.[/dim]")

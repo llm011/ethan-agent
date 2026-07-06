@@ -5,12 +5,13 @@ from rich.spinner import Spinner
 
 from ethan.core.agent import Agent
 from ethan.providers.base import Message
+
 from .repl_ui import console
 
 
 async def run_once(agent: Agent, prompt: str) -> None:
     """单轮对话：发送一句，流式打印回复，退出。"""
-    from ethan.providers.base import ToolEvent, ThinkingEvent
+    from ethan.providers.base import ThinkingEvent, ToolEvent
     messages = [Message(role="user", content=prompt)]
 
     spinner = Live(Spinner("dots", text="thinking...", style="dim"), console=console, transient=True)

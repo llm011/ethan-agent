@@ -25,7 +25,6 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-
 _CACHE_DB = Path.home() / ".ethan" / "upload-cdn-cache.db"
 
 

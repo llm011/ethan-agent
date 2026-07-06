@@ -57,9 +57,9 @@ async def _generate_smart_title(messages: list[Message], retries: int = 3) -> st
     """
     import asyncio
 
-    from ethan.providers.manager import create_provider
-    from ethan.memory.consolidator import get_lite_model
     from ethan.core.config import get_config
+    from ethan.memory.consolidator import get_lite_model
+    from ethan.providers.manager import create_provider
 
     turns = [(m.role, m.content[:100]) for m in messages if m.role in ("user", "assistant") and m.content][:6]
     if not turns:
@@ -289,6 +289,7 @@ class SessionStore:
 
     async def load(self, session_id: str) -> Session | None:
         import json
+
         from ethan.providers.base import ToolCall
 
         async with self._db.execute(

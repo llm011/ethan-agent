@@ -4,11 +4,11 @@
   ethan code "query"            Dispatch task to an ACP agent
   ethan code --list             List supported ACP agents
 """
-import typer
 import shutil
 import sys
-import os
 from typing import Optional
+
+import typer
 from rich.console import Console
 
 try:

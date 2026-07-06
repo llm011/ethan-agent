@@ -8,7 +8,7 @@ from ethan.memory.session import SessionStore
 from ethan.providers.base import Message
 
 from .helpers import _friendly_error
-from .tasks import _maybe_regen_title, _maybe_consolidate, _maybe_generate_skill
+from .tasks import _maybe_consolidate, _maybe_generate_skill, _maybe_regen_title
 
 logger = logging.getLogger(__name__)
 
@@ -55,8 +55,9 @@ async def _run_delegate_generation(
     emit 进这条会话的 ChatRun；结束后把回复+步骤落成 assistant 消息。
     mirror=False：避免 delegate 内部再为同一 session 注册一个 ChatRun（双 writer）。
     """
-    from ethan.acp import delegate
     import os as _os
+
+    from ethan.acp import delegate
 
     emitted_text = False
 
@@ -152,9 +153,9 @@ async def _run_generation(
     与 HTTP 连接解耦——订阅者（SSE 响应）断开不会取消本任务，生成照常跑完并入库。
     所有原先 `yield` 的地方改为 `run.emit(...)`。
     """
-    from ethan.core.stream_collector import StreamCollector
     from ethan.core.consent import ConsentEvent, set_consent_provider
-    from ethan.providers.base import ToolEvent, ThinkingEvent
+    from ethan.core.stream_collector import StreamCollector
+    from ethan.providers.base import ThinkingEvent, ToolEvent
 
     # consent provider 经 ContextVar 注入；本任务有独立 context，需在任务内设置。
     set_consent_provider(consent)

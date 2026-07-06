@@ -121,10 +121,10 @@ class MirrorSession:
         """
         store = None
         try:
-            from ethan.memory.session import SessionStore
+            from ethan.acp import get_mirror_session, set_mirror_info, set_mirror_session
             from ethan.core.paths import user_sessions_db_path
+            from ethan.memory.session import SessionStore
             from ethan.providers.base import Message
-            from ethan.acp import get_mirror_session, set_mirror_session, set_mirror_info
 
             store = SessionStore(db_path=user_sessions_db_path())
             await store.init()

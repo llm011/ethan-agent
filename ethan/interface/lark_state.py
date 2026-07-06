@@ -193,10 +193,10 @@ async def _should_respond_to_group_message(text: str, lark_cfg) -> bool:
         return any(fnmatch.fnmatch(tl, f"*{kw.lower()}*") or kw.lower() in tl for kw in keywords)
     if mode == "llm_filter":
         try:
-            from ethan.providers.manager import create_provider
-            from ethan.providers.base import Message as _Msg
             from ethan.core.config import get_config
             from ethan.memory.consolidator import get_lite_model
+            from ethan.providers.base import Message as _Msg
+            from ethan.providers.manager import create_provider
             cfg = get_config()
             provider = create_provider(get_lite_model(cfg.defaults.model), cfg)
             hint = getattr(lark_cfg, "group_llm_filter_hint", "") or \
@@ -220,8 +220,8 @@ def _looks_like_tool_trace(text: str) -> bool:
     """检测文本是否像工具调用过程格式（模型污染历史后在正文里模仿的格式）。"""
     if not text:
         return False
-    lines = [l for l in text.split("\n") if l.strip()]
+    lines = [ln for ln in text.split("\n") if ln.strip()]
     if len(lines) < 2:
         return False
-    tool_lines = sum(1 for l in lines if _TOOL_LINE_RE.search(l))
+    tool_lines = sum(1 for ln in lines if _TOOL_LINE_RE.search(ln))
     return tool_lines >= 2

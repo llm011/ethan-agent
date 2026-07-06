@@ -90,8 +90,7 @@ def _print_history(messages: list[Message], limit: int = 30) -> None:
 
     # 打印一条提示
     from ethan.core.config import get_config
-    config = get_config()
-    agent_name = config.defaults.agent_name
+    get_config()
 
     console.print(f"[dim]Showing last {len(display_messages)} messages of history...[/dim]\n")
 

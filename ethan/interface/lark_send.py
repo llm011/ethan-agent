@@ -22,12 +22,12 @@ logger = logging.getLogger(__name__)
 
 # ── re-exports：保持原有 import 路径可用 ──────────────────────────────────────
 from ethan.interface.lark_client import _lark_client  # noqa: E402
-from ethan.interface.lark_typing import TypingState  # noqa: E402
 from ethan.interface.lark_fetch import (  # noqa: E402
-    _send_reply,
-    _resolve_quoted_text,
     _fetch_recent_chat_messages,
+    _resolve_quoted_text,
+    _send_reply,
 )
+from ethan.interface.lark_typing import TypingState  # noqa: E402
 
 __all__ = [
     "_lark_client",
@@ -50,9 +50,11 @@ async def send_lark_notification(chat_id: str, text: str) -> bool:
     适合定时任务结果、心跳通知等不需要流式编辑的场景。
     用 post 而不是卡片，外观是普通气泡，支持加粗/斜体/代码/链接格式。
     """
+    import json as _json
+
     import lark_oapi as lark
     from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
-    import json as _json
+
     from ethan.core.config import get_config
 
     cfg = get_config()
@@ -97,12 +99,17 @@ async def send_lark_image(chat_id: str, image_path: str, caption: str = "") -> b
     如果有 caption，额外发一条 post 气泡跟在图片后面。
     适合定时任务发图表/截图等场景。
     """
+    import json as _json
+    import os as _os
+
     import lark_oapi as lark
     from lark_oapi.api.im.v1 import (
-        CreateMessageRequest, CreateMessageRequestBody,
-        CreateImageRequest, CreateImageRequestBody,
+        CreateImageRequest,
+        CreateImageRequestBody,
+        CreateMessageRequest,
+        CreateMessageRequestBody,
     )
-    import json as _json, os as _os
+
     from ethan.core.config import get_config
 
     cfg = get_config()
@@ -172,8 +179,10 @@ async def _send_message(chat_id: str, text: str, use_card: bool, reply_to_msg_id
     reply_to_msg_id 非空时用 message.reply 锚定到用户那条消息（飞书显示成"引用回复"），否则普通 create。
     """
     from lark_oapi.api.im.v1 import (
-        CreateMessageRequest, CreateMessageRequestBody,
-        ReplyMessageRequest, ReplyMessageRequestBody,
+        CreateMessageRequest,
+        CreateMessageRequestBody,
+        ReplyMessageRequest,
+        ReplyMessageRequestBody,
     )
     client = _lark_client()
     if client is None:
@@ -222,9 +231,12 @@ async def _send_interactive_card(chat_id: str, card: dict, reply_to_msg_id: str 
     不做后续编辑。reply_to_msg_id 非空时锚定到用户那条消息。失败返回 None。
     """
     import json as _json
+
     from lark_oapi.api.im.v1 import (
-        CreateMessageRequest, CreateMessageRequestBody,
-        ReplyMessageRequest, ReplyMessageRequestBody,
+        CreateMessageRequest,
+        CreateMessageRequestBody,
+        ReplyMessageRequest,
+        ReplyMessageRequestBody,
     )
     client = _lark_client()
     if client is None:
@@ -269,8 +281,10 @@ async def _edit_message(message_id: str, text: str, use_card: bool) -> bool:
     两者整体替换 content。失败返回 False（调用方决定是否重试/兜底）。
     """
     from lark_oapi.api.im.v1 import (
-        PatchMessageRequest, PatchMessageRequestBody,
-        UpdateMessageRequest, UpdateMessageRequestBody,
+        PatchMessageRequest,
+        PatchMessageRequestBody,
+        UpdateMessageRequest,
+        UpdateMessageRequestBody,
     )
     client = _lark_client()
     if client is None:

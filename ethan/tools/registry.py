@@ -78,7 +78,7 @@ class ToolExecutor:
             # no_compress 工具（file_read/shell/web_fetch/skill_read）必须逐字给模型，跳过压缩
             # 其他工具（web_search/grep/browser snapshot）由 compressor 根据阈值判断
             if not getattr(tool, "no_compress", False):
-                from ethan.tools.result_compressor import maybe_compress, COMPRESS_THRESHOLD
+                from ethan.tools.result_compressor import COMPRESS_THRESHOLD, maybe_compress
                 if len(result.content) > COMPRESS_THRESHOLD:
                     result.content = await maybe_compress(tc.name, result.content)
 

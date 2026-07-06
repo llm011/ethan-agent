@@ -12,23 +12,17 @@ import json
 import logging
 
 import lark_oapi as lark
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
 from lark_oapi.api.im.v1 import (
     CreateMessageRequest,
     CreateMessageRequestBody,
 )
-from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
 
-from ethan.core.config import get_config
 from ethan.core.agent import Agent
+from ethan.core.config import get_config
 from ethan.memory.session import SessionStore
 from ethan.providers.base import Message
-from ethan.skills.registry import SkillRegistry
-from ethan.tools.registry import ToolRegistry
-from ethan.tools.builtin.file import FileListTool, FileReadTool, FileWriteTool
-from ethan.tools.builtin.shell import ShellTool
-from ethan.tools.builtin.web import WebFetchTool
-from ethan.tools.builtin.web_search import WebSearchTool
 from ethan.tools.builtin.schedule import lark_chat_id_var
 
 logger = logging.getLogger(__name__)

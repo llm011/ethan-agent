@@ -28,7 +28,6 @@ from pathlib import Path
 from ethan.core.config import CONFIG_DIR
 from ethan.core.context import get_user_id
 
-
 # ── per-profile 路径 ─────────────────────────────────────────────
 
 def user_data_dir() -> Path:
@@ -152,7 +151,6 @@ def _migrate_admin_config_to_network(config) -> None:
 
 def _merge_admin_to_default(admin_dir: Path) -> None:
     """把 admin 目录的数据 merge 回 ~/.ethan 顶层（default profile）。"""
-    import json
 
     top = CONFIG_DIR
     top_memory = top / "memory"
@@ -195,7 +193,6 @@ def _merge_admin_to_default(admin_dir: Path) -> None:
 
 def _merge_json_file(admin_memory: Path, top_memory: Path, name: str) -> None:
     """JSON 文件 merge：admin 侧非空用 admin，否则保留顶层。"""
-    import json
     src = admin_memory / name
     dst = top_memory / name
     if not src.exists() or src.stat().st_size == 0:

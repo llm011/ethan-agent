@@ -7,6 +7,7 @@
   ethan channel unset lark            清除飞书配置
 """
 import shutil
+
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -159,7 +160,7 @@ def set_channel(
         console.print(f"[red]不支持的渠道: {channel}[/red]")
         raise typer.Exit(1)
 
-    from ethan.core.config import get_config, save_config, reload_config
+    from ethan.core.config import get_config, reload_config, save_config
     config = get_config()
     if app_id:
         config.lark.app_id = app_id
@@ -187,7 +188,7 @@ def unset_channel(
         console.print(f"[red]不支持的渠道: {channel}[/red]")
         raise typer.Exit(1)
 
-    from ethan.core.config import get_config, save_config, reload_config
+    from ethan.core.config import get_config, reload_config, save_config
     config = get_config()
     config.lark.app_id = ""
     config.lark.app_secret = ""
@@ -199,7 +200,7 @@ def unset_channel(
 
 
 def _save_lark(values: dict) -> None:
-    from ethan.core.config import get_config, save_config, reload_config
+    from ethan.core.config import get_config, reload_config, save_config
     config = get_config()
     for k, v in values.items():
         if hasattr(config.lark, k):
@@ -291,6 +292,6 @@ def _ensure_lark_cli_sync(app_id: str, app_secret: str) -> None:
         console.print(f"[green]✓ 已同步应用到 lark-cli（{app_id}）[/green]")
         console.print("[dim]若需要用户身份能力（如以本人身份发消息），再跑：lark-cli auth login --domain im[/dim]")
     else:
-        console.print(f"[red]lark-cli config init 失败[/red]")
+        console.print("[red]lark-cli config init 失败[/red]")
         console.print(f"[dim]{proc.stderr.decode(errors='replace').strip()[-400:]}[/dim]")
         console.print("  可手动执行：lark-cli config init --app-id <id> --app-secret-stdin")

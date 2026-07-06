@@ -117,8 +117,8 @@ def _sync_deps(repo: Path) -> bool:
 
 
 def _get_pypi_latest_version() -> Optional[str]:
-    import urllib.request
     import json
+    import urllib.request
     try:
         req = urllib.request.Request("https://pypi.org/pypi/ethan-agent/json")
         with urllib.request.urlopen(req, timeout=5) as res:

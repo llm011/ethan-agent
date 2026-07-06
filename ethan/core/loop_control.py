@@ -94,7 +94,6 @@ class LoopMonitor:
 
 def reflection_message(monitor: LoopMonitor, last_result: str = "") -> str:
     """卡住时注入的强制反思提示（作为一条 system 消息插入下一轮上下文最前）。"""
-    n = STUCK_WINDOW
     result_hint = f"\n- 最近一次工具返回（节选）：{last_result[:200]}" if last_result else ""
     return (
         "⚠️ 执行停滞警告 ⚠️\n"

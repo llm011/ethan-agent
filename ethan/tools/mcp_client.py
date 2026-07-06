@@ -1,6 +1,4 @@
 """MCP Client — 连接外部 MCP Server，自动注册其工具到 ToolRegistry。"""
-import asyncio
-import json
 from typing import Any
 
 try:

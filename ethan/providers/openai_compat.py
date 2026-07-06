@@ -4,6 +4,7 @@ import json
 from typing import AsyncIterator, Optional
 
 import httpx
+
 from ethan.core.config import ProviderConfig
 from ethan.providers.base import (
     BaseProvider,

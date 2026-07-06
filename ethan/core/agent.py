@@ -1,11 +1,12 @@
-from dataclasses import dataclass, field
+import logging
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
 from ethan.core.config import get_config
 from ethan.core.context_budget import enforce_context_budget
 from ethan.core.routing import _get_route, _match_fast_rule
-from ethan.core.tool_format import _format_args, _with_intent_param, _preview, _detail
+from ethan.core.tool_format import _detail, _format_args, _preview, _with_intent_param
 from ethan.memory.facts import FactStore
 from ethan.memory.procedures import ProcedureStore
 from ethan.providers.base import Message
@@ -13,8 +14,6 @@ from ethan.providers.manager import create_provider
 from ethan.skills.registry import SkillRegistry
 from ethan.tools.base import ToolResult
 from ethan.tools.registry import ToolExecutor, ToolRegistry
-
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +44,8 @@ class Agent:
         user_id: str = "",
         mode: str = "",
     ):
-        from ethan.core.paths import user_facts_path, user_procedures_path
         from ethan.core.context import set_user_id
+        from ethan.core.paths import user_facts_path, user_procedures_path
         config = get_config()
         if user_id:
             set_user_id(user_id)
@@ -71,7 +70,6 @@ class Agent:
 
     def _load_system_files(self) -> None:
         """启动时一次性读入 system 目录下的 md 文件，避免每次对话都做磁盘 I/O。"""
-        from pathlib import Path
         from ethan.core.paths import user_profile_path
         cfg = get_config()
         workspace = cfg.defaults.workspace
@@ -94,8 +92,8 @@ class Agent:
 
     def _build_schedule_context(self, workspace: str) -> str:
         """读取 APScheduler SQLite 数据库，返回当前活跃定时任务摘要（不需要启动 scheduler）。"""
-        from pathlib import Path
-        import sqlite3, json, datetime as dt
+        import datetime as dt
+        import sqlite3
         db_path = Path(workspace) / "scheduler.db"
         if not db_path.exists():
             return ""
@@ -144,7 +142,6 @@ class Agent:
         优先用户 skills 目录（可被用户改写），回退包内默认。找不到返回空串。
         skill_names 按序查找首个命中（兼容英文/中文目录名）。
         """
-        from pathlib import Path
         candidates: list[Path] = []
         try:
             from ethan.core.paths import user_skills_dir
@@ -364,7 +361,7 @@ class Agent:
                     f"- {s.name}: {s.description[:80]}{'…' if len(s.description) > 80 else ''}"
                     for s in skills_list
                 ]
-                parts.append(f"<available_skills>\n" + "\n".join(skill_lines) + "\n</available_skills>")
+                parts.append("<available_skills>\n" + "\n".join(skill_lines) + "\n</available_skills>")
 
         # --- 动态内容放后面，不命中缓存 ---
         parts.append(f"Current time: {now}")
@@ -383,8 +380,8 @@ class Agent:
         profile_content = self._system_files.get("user_profile", "")
         # 只有实质内容（非空行/标题）才注入，避免把空模板塞进 system prompt
         _profile_text = "\n".join(
-            l for l in profile_content.splitlines()
-            if l.strip() and not l.strip().startswith("#")
+            line for line in profile_content.splitlines()
+            if line.strip() and not line.strip().startswith("#")
         )
         if _profile_text:
             parts.append(
@@ -508,8 +505,7 @@ class Agent:
         Web 的流式注入在 stream_chat 内联处理（因为只有 generator 能 yield），
         这里只兜底处理非流式 chat() 的情况。
         """
-        import asyncio
-        from ethan.core.consent import get_consent_provider, ConsentEvent
+        from ethan.core.consent import get_consent_provider
         provider = get_consent_provider()
         if provider is None:
             return True
@@ -529,7 +525,10 @@ class Agent:
         provider = self._provider_for_route(_route)
 
         from ethan.core.loop_control import (
-            LoopMonitor, reflection_message, reflection_followup_message, finalize_system_suffix,
+            LoopMonitor,
+            finalize_system_suffix,
+            reflection_followup_message,
+            reflection_message,
         )
         monitor = LoopMonitor()
         pending_suffix = ""  # 反思提示，仅附加到「下一轮」的 system，附完即清
@@ -596,8 +595,8 @@ class Agent:
 
     async def stream_chat(self, messages: list[Message]):
         """流式对话。fast/medium/full 三档路由，按消息长度和关键词自动选择。"""
-        from ethan.providers.base import ToolEvent, ThinkingEvent
         from ethan.core.context import reset_active_tools
+        from ethan.providers.base import ThinkingEvent, ToolEvent
 
         self._executor.reset_cache()
         reset_active_tools()  # 清空本请求的 find_tools 激活集
@@ -607,7 +606,10 @@ class Agent:
         provider = self._provider_for_route(_route)
 
         from ethan.core.loop_control import (
-            LoopMonitor, reflection_message, reflection_followup_message, finalize_system_suffix,
+            LoopMonitor,
+            finalize_system_suffix,
+            reflection_followup_message,
+            reflection_message,
         )
         monitor = LoopMonitor()
         pending_suffix = ""  # 反思提示，仅附加到「下一轮」的 system，附完即清
@@ -680,8 +682,9 @@ class Agent:
                 return
 
             # --- 授权检查：执行前对工具做（1）渠道硬策略 + （2）consent 确认 ---
-            from ethan.core.consent import get_consent_provider
             import asyncio as _aio
+
+            from ethan.core.consent import get_consent_provider
             allowed_calls = []
             for tc in tool_calls:
                 tool = self._registry.get(tc.name)

@@ -20,7 +20,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-
 # ── 图片 URL 识别：匹配飞书内部文件链接 ──────────────────────────────────────
 _FEISHU_IMG_RE = re.compile(
     r'!\[([^\]]*)\]\((https?://(?:[^\s/?#)]*\.)?(?:feishu\.cn|larksuite\.com)(?:[/?#:][^\s)]*)?)\)'
@@ -156,7 +155,7 @@ def _resolve_user_name(open_id: str, cache: dict[str, str]) -> str:
 
 def _fmt_ts(ts: str) -> str:
     """unix 秒字符串 → 'YYYY-MM-DD HH:MM'，失败返回原值。"""
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timedelta, timezone
     try:
         dt = datetime.fromtimestamp(int(ts), tz=timezone(timedelta(hours=8)))
         return dt.strftime("%Y-%m-%d %H:%M")
@@ -428,7 +427,7 @@ def process_isv_blocks(content: str, output_path: Path, isv_block_ids: list) -> 
             else:
                 err = result.stderr or result.stdout
                 if "missing_scope" in err or "missing required scope" in err:
-                    print(f"  [warn] ISV 块下载缺少权限，需运行: lark-cli auth login --scope \"docs:document.media:download\"", file=sys.stderr)
+                    print("  [warn] ISV 块下载缺少权限，需运行: lark-cli auth login --scope \"docs:document.media:download\"", file=sys.stderr)
                     return content, total, succeeded
 
         if not local_path:

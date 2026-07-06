@@ -281,7 +281,8 @@ def _render_card_content(text: str) -> str:
     CardBuilder 原生 table 元素（不再降级成代码块）。rich 路径失败时回退到此处的手拼 markdown
     + `_sanitize_text_for_card` 降级，保证不崩。
     """
-    import json as _json, re as _re
+    import json as _json
+    import re as _re
     # 代码块外 markdown 表格超过上限 → 走 CardBuilder 原生 table 元素路径
     if len(_find_markdown_tables_outside_code_blocks(text)) > FEISHU_CARD_TABLE_LIMIT:
         rich = _render_card_content_rich(text)
@@ -357,7 +358,8 @@ def _render_card_content_rich(text: str) -> str | None:
     之后 Python 缓存。任何 import / build 异常都返回 None，由调用方回退到手拼 markdown +
     `_sanitize_text_for_card` 降级，保证渲染不崩。
     """
-    import json as _json, re as _re
+    import json as _json
+    import re as _re
     try:
         from lark_oapi.channel.card import new_card
     except Exception:

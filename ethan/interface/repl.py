@@ -23,9 +23,9 @@ from ethan.memory.session import Session, SessionStore, decide_title
 from ethan.memory.working import MemoryConfig, WorkingMemory
 from ethan.providers.base import Message
 
-from .repl_ui import console, _PT_STYLE, _make_toolbar, _print_history, _banner, _format_duration, _fmt_tokens
-from .repl_commands import ProfileSwitchException, SlashCompleter, _handle_slash_command
-from .repl_stream import run_once
+from .repl_commands import ProfileSwitchException, SlashCompleter, _handle_slash_command  # noqa: F401
+from .repl_stream import run_once  # noqa: F401
+from .repl_ui import _PT_STYLE, _banner, _fmt_tokens, _format_duration, _make_toolbar, _print_history, console
 
 
 async def _background_consolidate(memory, consolidator, fact_store, session_id):
@@ -50,7 +50,6 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
     config = get_config()
     model_id = agent._provider.model
     start_time = time.time()
-    uid = getattr(agent, "_user_id", "") or ""
 
     # 注入 TUI 授权 provider（敏感操作时 y/N 确认）。持有引用以便随 session 切换更新
     # session_id —— 同一会话内同工具授权过不再重复询问（与 Web 一致）。
@@ -96,7 +95,7 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
     consent_provider.session_id = session.id
 
     # ── Provider setup (runs any time no API key is configured) ──
-    from ethan.core.onboarding import is_first_time, needs_provider_setup, ONBOARDING_MESSAGE
+    from ethan.core.onboarding import ONBOARDING_MESSAGE, is_first_time, needs_provider_setup
     if needs_provider_setup():
         console.print()
         console.print(Panel(
@@ -109,7 +108,8 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
         ))
         console.print()
 
-        from ethan.core.config import save_config, reload_config as _reload, CONFIG_DIR, ProviderConfig
+        from ethan.core.config import CONFIG_DIR, ProviderConfig, save_config
+        from ethan.core.config import reload_config as _reload
         _cfg = get_config()
 
         raw_choice = await asyncio.to_thread(input, "  Provider [1/2] (default: 1): ")
@@ -163,7 +163,7 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
         user_info = raw_info.strip()
 
         # Persist agent name to config
-        from ethan.core.config import save_config, reload_config, CONFIG_DIR
+        from ethan.core.config import CONFIG_DIR, reload_config, save_config
         _cfg = get_config()
         _cfg.defaults.agent_name = agent_name
         save_config(_cfg)
@@ -189,7 +189,7 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
         console.print()
 
     # 初始化分层记忆（per-user）
-    from ethan.core.paths import user_facts_path, user_episodes_path
+    from ethan.core.paths import user_episodes_path, user_facts_path
     fact_store = FactStore(path=user_facts_path())
     episode_store = EpisodeStore(path=user_episodes_path())
     memory = WorkingMemory(config=MemoryConfig(hot_size=10))
@@ -254,7 +254,7 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
         # 斜杠命令
         if user_input.startswith("/"):
             # /btw：顺带一问，不带历史，单轮轻量查询——不 continue，让它落到下面的 agent 流程
-            from ethan.interface.channel_commands import is_btw, btw_question, resolve_custom_command
+            from ethan.interface.channel_commands import btw_question, is_btw, resolve_custom_command
             if is_btw(user_input):
                 q = btw_question(user_input)
                 if not q:
@@ -324,7 +324,6 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
         first_chunk = True
         first_item = True  # for TTFT: fire on any first item (tool or text)
         last_was_tool = False  # 上一条输出是工具调用行，后续文字前加空行
-        current_activity = ""
         console.print()
         live = Live(Spinner("dots", text="thinking...", style="dim"), console=console, transient=True)
         live.start()
@@ -341,7 +340,7 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
         # Inner coroutine — captured by closure, can be awaited as a Task
         async def _consume_stream():
             nonlocal full, thought, first_chunk, first_item, ttft, last_was_tool
-            from ethan.providers.base import ToolEvent, ThinkingEvent
+            from ethan.providers.base import ThinkingEvent, ToolEvent
             # transient=True：流式中原地更新（只渲染可见窗口，超长不重复刷屏），
             # 结束/切工具时擦除流式帧、再一次性 print 完整 markdown，保证层级稳定且不丢内容。
             render_live = Live(console=console, refresh_per_second=8, transient=True)

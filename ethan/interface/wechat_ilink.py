@@ -18,9 +18,7 @@ import base64
 import json
 import logging
 import random
-import struct
-import time
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -181,7 +179,8 @@ async def login_via_qrcode() -> WeChatCredentials:
                 print(f"\n[WeChat] 请用微信扫以下二维码登录:\n  {qr_url}\n")
                 # 用系统浏览器打开二维码页面（页面内含二维码，可直接扫）
                 try:
-                    import subprocess, sys
+                    import subprocess
+                    import sys
                     if sys.platform == "darwin":
                         subprocess.Popen(["open", qr_url])
                     elif sys.platform == "linux":

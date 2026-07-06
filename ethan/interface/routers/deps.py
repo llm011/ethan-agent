@@ -1,5 +1,5 @@
 """共享依赖：鉴权、Agent 工厂。"""
-from fastapi import Depends, HTTPException, Request
+from fastapi import HTTPException, Request
 
 from ethan.core.context import set_user_id
 

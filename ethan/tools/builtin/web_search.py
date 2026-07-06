@@ -1,6 +1,4 @@
 """Web Search Tool — DuckDuckGo 免费搜索，无需 API Key。"""
-import json
-from urllib.parse import quote_plus
 
 import httpx
 

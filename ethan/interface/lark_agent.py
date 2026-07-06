@@ -8,7 +8,6 @@ import asyncio
 import logging
 
 from ethan.interface.lark_render import _render_tool_msg_content
-from ethan.interface.lark_tool_trace import sanitize_args_summary, sanitize_result_preview
 from ethan.interface.lark_send import (
     TypingState,
     _delete_message,
@@ -19,6 +18,7 @@ from ethan.interface.lark_send import (
     _send_message,
     _send_reply,
 )
+from ethan.interface.lark_tool_trace import sanitize_args_summary, sanitize_result_preview
 
 logger = logging.getLogger(__name__)
 
@@ -37,19 +37,25 @@ async def _handle_agent_message(
 ) -> None:
     """真正的 Agent 流式处理（在持锁串行下运行）。_handle_message 完成去重/命令/主人判定后调本函数。"""
     # shared state from lark_stream (lazy import avoids circular dep)
-    from ethan.interface.lark_stream import (
-        _lark_chat_map, _load_lark_map, _save_lark_map,
-        _lark_welcomed, _mark_lark_welcomed, _pop_forwarded,
-        _looks_like_tool_trace, _untrack_task, _lark_running_tasks,
-    )
     from ethan.core.agent import Agent
+
+    # 查找或创建对应的 Session（lark 渠道归 admin）
+    from ethan.core.paths import user_sessions_db_path
+    from ethan.interface.lark_stream import (
+        _lark_chat_map,
+        _lark_running_tasks,
+        _lark_welcomed,
+        _load_lark_map,
+        _looks_like_tool_trace,
+        _mark_lark_welcomed,
+        _pop_forwarded,
+        _save_lark_map,
+        _untrack_task,
+    )
     from ethan.memory.session import SessionStore
     from ethan.providers.base import Message, ThinkingEvent, ToolEvent
     from ethan.skills.registry import SkillRegistry
     from ethan.tools.registry import ToolRegistry
-
-    # 查找或创建对应的 Session（lark 渠道归 admin）
-    from ethan.core.paths import user_sessions_db_path
     store = SessionStore(db_path=user_sessions_db_path())
     await store.init()
 
@@ -152,9 +158,9 @@ async def _handle_agent_message(
                 agent_user_text = "\n".join(lines) + "\n\n---\n" + agent_user_text
                 agent_user_msg = Message(role="user", content=agent_user_text)
         # 飞书场景每条 assistant 消息体积较大（含工具/思考），5 轮够用且节省 token
-        from ethan.memory.working import MemoryConfig, WorkingMemory
-        from ethan.memory.facts import FactStore
         from ethan.core.paths import user_facts_path
+        from ethan.memory.facts import FactStore
+        from ethan.memory.working import MemoryConfig, WorkingMemory
         if btw_mode:
             # /btw：不带任何历史，单轮轻量查询，上下文只有本条消息
             context_messages = [agent_user_msg]
@@ -176,14 +182,19 @@ async def _handle_agent_message(
 
         registry = ToolRegistry()
         from ethan.core.context import set_session_id
-        from ethan.tools.builtin.browser import BrowserSessionTool, BrowserTabTool, BrowserPageTool
+        from ethan.tools.builtin.browser import BrowserPageTool, BrowserSessionTool, BrowserTabTool
         from ethan.tools.builtin.file import FileListTool, FileReadTool, FileWriteTool
-        from ethan.tools.builtin.knowledge import KnowledgeAddTool, KnowledgeEditTool, KnowledgeReadTool, KnowledgeSearchTool
+        from ethan.tools.builtin.knowledge import (
+            KnowledgeAddTool,
+            KnowledgeEditTool,
+            KnowledgeReadTool,
+            KnowledgeSearchTool,
+        )
         from ethan.tools.builtin.memory_write import MemoryWriteTool
         from ethan.tools.builtin.procedure_write import ProcedureWriteTool
         from ethan.tools.builtin.profile_update import ProfileUpdateTool
         from ethan.tools.builtin.schedule import ScheduleCreateTool, ScheduleListTool, ScheduleRemoveTool
-        from ethan.tools.builtin.search import RipgrepTool, FdTool
+        from ethan.tools.builtin.search import FdTool, RipgrepTool
         from ethan.tools.builtin.secrets import GetSecretTool, ListSecretsTool, SetSecretTool
         from ethan.tools.builtin.shell import ShellTool
         from ethan.tools.builtin.skill_create import SkillCreateTool

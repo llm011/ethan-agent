@@ -2,11 +2,10 @@
 
 支持 cron 表达式和 interval 两种模式，Job 持久化到 SQLite，重启后自动恢复。
 """
-from pathlib import Path
 from typing import Callable
 
-from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
+from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 

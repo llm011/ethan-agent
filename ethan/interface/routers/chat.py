@@ -7,15 +7,15 @@ import logging
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
+from ethan import __version__
 from ethan.memory.facts import FactStore
 from ethan.memory.session import SessionStore
 from ethan.providers.base import Message
-from ethan import __version__
 
-from .deps import verify_token, create_agent
+from .deps import create_agent, verify_token
+from .producers import _run_delegate_generation, _run_generation
 from .schemas import ChatRequest, ChatResponse
 from .sse import _sse_from_run
-from .producers import _run_generation, _run_delegate_generation
 
 router = APIRouter()
 
@@ -57,8 +57,9 @@ async def poll(user_id: str = Depends(verify_token)):
 
 @router.post("/chat")
 async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
-    from ethan.core.paths import user_sessions_db_path, user_facts_path
     from ethan.core.context import set_session_id
+    from ethan.core.paths import user_facts_path, user_sessions_db_path
+
     from .helpers import _with_quote
     set_session_id(req.session_id or "")  # browser 工具按对话隔离/授权
     agent = create_agent(req.model, channel=req.channel, user_id=user_id, mode=req.mode)
@@ -96,13 +97,12 @@ async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
         messages[-1] = _with_quote(messages[-1], req.quote)
 
     if req.stream:
-        from ethan.core.run_manager import RunManager
-
         # (1) 沉浸式工具模式：会话 mode 解析出 delegate_agent 时，整条会话的每句话都
         #     直接续接该 coding agent（同一工具 session），不走 Ethan chat 模型。
         #     工作目录按会话隔离（~/.ethan/agent-sessions/<会话id>）。
         from ethan.core.modes import resolve_mode
         from ethan.core.paths import user_agent_session_dir
+        from ethan.core.run_manager import RunManager
         _mode = resolve_mode(req.mode)
         if _mode.delegate_agent and req.session_id:
             import os as _os
@@ -181,6 +181,7 @@ async def reconnect_stream(session_id: str, user_id: str = Depends(verify_token)
     防止任意已登录用户凭 session_id attach 到他人正在生成的实时流（IDOR）。
     """
     from fastapi import Response
+
     from ethan.core.run_manager import RunManager
     run = RunManager.instance().get(session_id, user_id=user_id)
     if run is None:

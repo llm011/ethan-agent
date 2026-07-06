@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 # 全部 section(顺序即 user_profile.md 中的出现顺序)
 SECTIONS = [
     "基础特征",        # 名字/年龄/性格/兴趣等稳定信息

@@ -1,5 +1,4 @@
 """File Tool — 读取和写入本地文件。"""
-import os
 from pathlib import Path
 
 from ethan.tools.base import BaseTool

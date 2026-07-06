@@ -1,7 +1,9 @@
 """knowledge 路由：知识库 CRUD（per-user 隔离）。"""
 from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+
 from .deps import verify_token
 
 router = APIRouter(prefix="/knowledge")

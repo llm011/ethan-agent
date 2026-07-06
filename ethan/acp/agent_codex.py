@@ -8,7 +8,7 @@ from typing import Optional
 
 from .models import ACPResult
 from .session import clear_session, set_session
-from .utils import _preview, _summarize_args, _terminate_proc
+from .utils import _preview, _terminate_proc
 
 
 def _codex_item_to_step(item: dict) -> Optional[dict]:
