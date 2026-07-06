@@ -1,0 +1,174 @@
+"""ethan server — macOS launchd service management."""
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import typer
+from rich.console import Console
+
+app = typer.Typer(help="管理 Ethan 后台服务（macOS launchd）", no_args_is_help=True)
+
+PLIST_NAME = "com.ethan.agent"
+PLIST_PATH = Path.home() / "Library" / "LaunchAgents" / f"{PLIST_NAME}.plist"
+
+_PLIST_TEMPLATE = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.ethan.agent</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{ethan_exe}</string>
+        <string>serve</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>{ethan_home}/logs/api.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>{ethan_home}/logs/api.err.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>{bin_dir}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+</dict>
+</plist>"""
+
+
+def _ethan_exe() -> Path:
+    bin_dir = Path(sys.executable).parent
+    exe = bin_dir / "ethan"
+    if exe.exists():
+        return exe
+    import shutil
+    found = shutil.which("ethan")
+    if found:
+        return Path(found)
+    raise typer.BadParameter("找不到 ethan 可执行文件，请确认已正确安装。")
+
+
+def _is_installed() -> bool:
+    return PLIST_PATH.exists()
+
+
+def _launchctl(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["launchctl", *args], capture_output=True, text=True)
+
+
+@app.command("install")
+def install() -> None:
+    """安装 Ethan 为 macOS 开机自启服务（launchd）。"""
+    console = Console()
+
+    if sys.platform != "darwin":
+        console.print("[red]此命令仅支持 macOS。[/red]")
+        raise typer.Exit(1)
+
+    exe = _ethan_exe()
+    ethan_home = Path.home() / ".ethan"
+    log_dir = ethan_home / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    PLIST_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    plist_content = _PLIST_TEMPLATE.format(
+        ethan_exe=str(exe),
+        bin_dir=str(exe.parent),
+        ethan_home=str(ethan_home),
+    )
+
+    _launchctl("unload", str(PLIST_PATH))  # 忽略未加载时的错误
+    PLIST_PATH.write_text(plist_content)
+
+    result = _launchctl("load", str(PLIST_PATH))
+    if result.returncode != 0:
+        console.print(f"[red]launchctl load 失败：{result.stderr.strip()}[/red]")
+        raise typer.Exit(1)
+
+    console.print("[green]✓ 服务已安装并启动，下次开机将自动运行。[/green]")
+    console.print(f"  可执行文件：{exe}")
+    console.print(f"  日志目录：  {log_dir}/")
+    console.print()
+    console.print("  [dim]ethan server status[/dim]   — 查看运行状态")
+    console.print("  [dim]ethan server restart[/dim]  — 重启服务")
+    console.print("  [dim]ethan server stop[/dim]     — 停止服务")
+    console.print("  [dim]ethan server uninstall[/dim]— 卸载服务")
+
+
+@app.command("uninstall")
+def uninstall() -> None:
+    """卸载 Ethan 开机自启服务。"""
+    console = Console()
+    if not _is_installed():
+        console.print("[yellow]服务未安装。[/yellow]")
+        return
+    _launchctl("unload", str(PLIST_PATH))
+    PLIST_PATH.unlink(missing_ok=True)
+    console.print("[green]✓ 服务已卸载。[/green]")
+
+
+@app.command("restart")
+def restart() -> None:
+    """重启 Ethan 后台服务。"""
+    console = Console()
+    if _is_installed():
+        _launchctl("unload", str(PLIST_PATH))
+        result = _launchctl("load", str(PLIST_PATH))
+        if result.returncode != 0:
+            console.print(f"[red]重启失败：{result.stderr.strip()}[/red]")
+            raise typer.Exit(1)
+        console.print("[green]✓ 服务已重启。[/green]")
+    else:
+        from ethan.interface.commands.update import _restart_serve
+        _restart_serve(None)
+
+
+@app.command("stop")
+def stop() -> None:
+    """停止 Ethan 后台服务。"""
+    console = Console()
+    if _is_installed():
+        _launchctl("unload", str(PLIST_PATH))
+        console.print("[green]✓ 服务已停止。[/green]")
+    else:
+        import signal
+
+        from ethan.interface.commands.update import _find_serve_pid, _wait_pid_gone
+        pid = _find_serve_pid()
+        if not pid:
+            console.print("[yellow]未发现后台运行的 ethan serve 进程。[/yellow]")
+            return
+        console.print(f"[dim]发送 SIGTERM 到 ethan serve (pid={pid})...[/dim]")
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        if not _wait_pid_gone(pid, timeout=8):
+            console.print(f"[yellow]SIGTERM 超时，改发 SIGKILL (pid={pid})...[/yellow]")
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            _wait_pid_gone(pid, timeout=2)
+        console.print("[green]✓ ethan serve 已停止。[/green]")
+
+
+@app.command("status")
+def status() -> None:
+    """查看 Ethan 服务运行状态。"""
+    console = Console()
+    if not _is_installed():
+        console.print("[yellow]服务未安装。运行 [bold]ethan server install[/bold] 可安装开机自启服务。[/yellow]")
+        return
+    result = _launchctl("list", PLIST_NAME)
+    if result.returncode != 0 or not result.stdout.strip() or result.stdout.strip() == "-":
+        console.print("[yellow]服务已安装但当前未在运行。[/yellow]")
+        console.print(f"  plist: {PLIST_PATH}")
+    else:
+        console.print("[green]服务运行中。[/green]")
+        console.print(result.stdout)
