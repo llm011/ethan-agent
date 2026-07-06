@@ -72,8 +72,7 @@ function ComparisonTable({ tiers }: { tiers: ToolTier[] }) {
                 return (
                   <th key={tier.key} className="py-3 px-4 text-center w-28">
                     <Tooltip>
-                      <TooltipTrigger asChild>
-                        <div className="flex flex-col items-center gap-0.5 cursor-default select-none">
+                      <TooltipTrigger render={<div className="flex flex-col items-center gap-0.5 cursor-default select-none" />}>
                           <div className={`flex items-center gap-1 font-semibold text-xs ${meta.color}`}>
                             {meta.icon}
                             {tier.label}
@@ -84,7 +83,6 @@ function ComparisonTable({ tiers }: { tiers: ToolTier[] }) {
                           <div className="text-[10px] text-muted-foreground/50 font-normal">
                             {fmtChars(calcChars(tier.tools))} 字符
                           </div>
-                        </div>
                       </TooltipTrigger>
                       <TooltipContent side="top" className="max-w-56 text-center">
                         {tier.desc}
@@ -109,15 +107,14 @@ function ComparisonTable({ tiers }: { tiers: ToolTier[] }) {
                 >
                   <td className="py-2 px-4">
                     <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="inline-flex items-center gap-1.5 cursor-default">
+                      <TooltipTrigger render={<span className="inline-flex items-center gap-1.5 cursor-default" />}>
                           <code className="text-xs font-mono text-foreground/90">
                             {tool.name}
                           </code>
                           {tool.side_effect && (
                             <Tooltip>
-                              <TooltipTrigger asChild>
-                                <span className="text-[11px] leading-none cursor-default">⚠️</span>
+                              <TooltipTrigger render={<span className="text-[11px] leading-none cursor-default" />}>
+                                ⚠️
                               </TooltipTrigger>
                               <TooltipContent side="right" className="max-w-48">
                                 有副作用：会改状态/发消息/花钱，非主人调用被拦截
@@ -126,15 +123,14 @@ function ComparisonTable({ tiers }: { tiers: ToolTier[] }) {
                           )}
                           {tool.no_compress && (
                             <Tooltip>
-                              <TooltipTrigger asChild>
-                                <span className="text-[11px] leading-none cursor-default">🔒</span>
+                              <TooltipTrigger render={<span className="text-[11px] leading-none cursor-default" />}>
+                                🔒
                               </TooltipTrigger>
                               <TooltipContent side="right" className="max-w-48">
                                 不压缩：输出含关键 ID/ref，必须原样传回
                               </TooltipContent>
                             </Tooltip>
                           )}
-                        </span>
                       </TooltipTrigger>
                       <TooltipContent side="right" className="max-w-64">
                         {tool.description}
