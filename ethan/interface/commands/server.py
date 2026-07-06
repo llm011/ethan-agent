@@ -7,7 +7,7 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
-app = typer.Typer(help="管理 Ethan 后台服务（macOS launchd）")
+app = typer.Typer(help="管理 Ethan 后台服务（macOS launchd）", no_args_is_help=True)
 
 PLIST_NAME = "com.ethan.agent"
 PLIST_PATH = Path.home() / "Library" / "LaunchAgents" / f"{PLIST_NAME}.plist"
