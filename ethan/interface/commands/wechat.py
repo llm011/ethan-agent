@@ -57,7 +57,7 @@ def wechat_login() -> None:
             _restart_serve()
             console.print("[green]✓ ethan serve 已重启，微信消息监听已开启。[/green]")
         except Exception as e:
-            console.print(f"[yellow]自动重启失败（{e}），请手动运行：ethan serve restart[/yellow]")
+            console.print(f"[yellow]自动重启失败（{e}），请手动运行：ethan server restart[/yellow]")
     else:
         console.print("[dim]ethan serve 未运行，启动后将自动监听微信消息：ethan serve[/dim]")
 
@@ -82,7 +82,7 @@ def wechat_logout() -> None:
             _restart_serve()
             console.print("[green]✓ ethan serve 已重启。[/green]")
         except Exception as e:
-            console.print(f"[yellow]自动重启失败（{e}），请手动运行：ethan serve restart[/yellow]")
+            console.print(f"[yellow]自动重启失败（{e}），请手动运行：ethan server restart[/yellow]")
 
 
 @app.command("status")

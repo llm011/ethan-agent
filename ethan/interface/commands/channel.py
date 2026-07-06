@@ -140,7 +140,7 @@ def _add_lark_interactive():
     _ensure_lark_cli_sync(values.get("app_id", ""), values.get("app_secret", ""))
 
     console.print("[dim]重启 ethan serve 后生效（自动建立长连接）。[/dim]")
-    console.print("  重启：ethan serve restart")
+    console.print("  重启：ethan server restart")
 
 
 @app.command("set")
