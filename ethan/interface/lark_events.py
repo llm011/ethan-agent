@@ -70,7 +70,7 @@ async def _event_loop(event_key: str) -> None:
             proc = await asyncio.create_subprocess_exec(
                 lark_cli, "event", "consume", event_key,
                 "--as", "bot", "--quiet",
-                stdin=asyncio.subprocess.PIPE,  # keep stdin open so lark-cli doesn't exit on EOF
+                stdin=asyncio.subprocess.DEVNULL,  # never close stdin so lark-cli doesn't exit on EOF
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
             )
