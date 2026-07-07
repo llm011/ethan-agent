@@ -89,6 +89,9 @@ async def _generate_smart_title(messages: list[Message], retries: int = 3) -> st
     return None
 
 
+_PROTECTED_PREFIXES = ("[定时]", "[后台]", "[心跳]")
+
+
 async def decide_title(messages: list[Message], current_title: str = "") -> str | None:
     """统一的标题策略，返回应设置的标题；返回 None 表示本轮不改标题。
 
@@ -97,6 +100,10 @@ async def decide_title(messages: list[Message], current_title: str = "") -> str 
     - 第 3、6、9… 轮：仍是占位标题（lite 之前没成功）时再尝试一次，靠 _generate_smart_title
       的内部重试 + 跨轮重试自愈；已有智能标题则跳过，不浪费 lite 调用。
     """
+    # 保护特殊标题（定时/后台/心跳等），不被自动标题覆盖
+    if any(current_title.startswith(p) for p in _PROTECTED_PREFIXES):
+        return None
+
     user_msgs = [m for m in messages if m.role == "user" and m.content]
     n = len(user_msgs)
     if n == 1:

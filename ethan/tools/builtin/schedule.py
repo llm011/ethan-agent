@@ -114,7 +114,7 @@ class ScheduleCreateTool(BaseTool):
         # Create a dedicated session for this task (per-user)
         store = SessionStore(db_path=user_sessions_db_path())
         await store.init()
-        session = await store.create(get_config().defaults.model)
+        session = await store.create(get_config().defaults.model, source="schedule")
         await store.update_title(session.id, f"[定时] {job_id}")
         await store.close()
 
