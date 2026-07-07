@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -27,6 +28,11 @@ _GRACE_SECONDS = 90
 
 # 订阅队列收到此哨兵表示「流结束」，消费者据此关闭 SSE。
 _SENTINEL = object()
+
+# Watchdog 参数
+_WATCHDOG_INTERVAL = 180   # 每次检查间隔（秒），3 分钟
+_WATCHDOG_MAX_CHECKS = 2   # 最多检查次数（超过则放弃）
+_WATCHDOG_STALL_SECS = 180 # 超过此时间无新事件视为卡住（秒）
 
 
 @dataclass
@@ -41,10 +47,14 @@ class ChatRun:
     task: asyncio.Task | None = None  # producer 任务引用
     consent: Any = None  # WebConsentProvider，收尾时 cancel_all
     stop_requested: bool = False  # 用户主动停止（区别于「新 run 替换旧 run」的取消）：前者保存已生成的部分内容
+    start_time: float = field(default_factory=time.monotonic)
+    last_event_time: float = field(default_factory=time.monotonic)
+    watchdog_checks: int = 0  # 已执行的 watchdog 检查次数
 
     def emit(self, event: dict) -> None:
         """记录一个事件并扇出给所有当前订阅者（同步，无 await）。"""
         self.events.append(event)
+        self.last_event_time = time.monotonic()
         for q in self.subscribers:
             q.put_nowait(event)
 
@@ -67,6 +77,71 @@ class ChatRun:
         self.done = True
         for q in self.subscribers:
             q.put_nowait(_SENTINEL)
+
+
+async def _run_watchdog(run: ChatRun, manager: "RunManager") -> None:
+    """轻量看门狗：任务启动后定期检查是否正常，最多检查 _WATCHDOG_MAX_CHECKS 次。
+
+    检查逻辑：
+    1. run.done → 任务已正常结束，直接退出
+    2. run 被替换（manager 里已是新 run）→ 直接退出
+    3. producer task 已结束但 run.done=False → 任务崩溃未 finish，补发 error 并 finish
+    4. producer task 在跑但超过 _WATCHDOG_STALL_SECS 无新事件 → emit heartbeat 通知用户
+    5. 检查次数超上限 → 放弃监控
+    """
+    try:
+        await asyncio.sleep(_WATCHDOG_INTERVAL)
+    except asyncio.CancelledError:
+        return
+
+    while True:
+        # 是否还是同一个 run（没被新请求替换）
+        current = manager._runs.get(run.session_id)
+        if current is not run or run.done:
+            return
+
+        run.watchdog_checks += 1
+
+        # producer task 已结束但没走到 finish()（崩溃路径遗漏）
+        task = run.task
+        if task is not None and task.done():
+            exc = task.exception() if not task.cancelled() else None
+            if not run.done:
+                logger.warning(
+                    "[Watchdog] producer for %s ended without finish() (exc=%s), patching",
+                    run.session_id, exc,
+                )
+                err_msg = "任务意外终止（内部错误）。如需继续请重新发送消息。"
+                if exc:
+                    from ethan.interface.routers.helpers import _friendly_error
+                    try:
+                        err_msg = _friendly_error(exc, None)
+                    except Exception:
+                        err_msg = str(exc)[:200]
+                run.emit({"error": err_msg})
+                run.finish()
+                manager.schedule_removal(run.session_id)
+            return
+
+        # task 仍在运行，检查是否卡住
+        stall_secs = time.monotonic() - run.last_event_time
+        if stall_secs >= _WATCHDOG_STALL_SECS:
+            elapsed = int(time.monotonic() - run.start_time)
+            run.emit({"heartbeat": True, "elapsed": elapsed})
+            logger.info(
+                "[Watchdog] %s stalled %.0fs, emitted heartbeat (check %d/%d)",
+                run.session_id, stall_secs, run.watchdog_checks, _WATCHDOG_MAX_CHECKS,
+            )
+
+        if run.watchdog_checks >= _WATCHDOG_MAX_CHECKS:
+            logger.info("[Watchdog] %s reached max checks, giving up", run.session_id)
+            return
+
+        # 下一轮
+        try:
+            await asyncio.sleep(_WATCHDOG_INTERVAL)
+        except asyncio.CancelledError:
+            return
 
 
 class RunManager:
@@ -123,6 +198,8 @@ class RunManager:
             old.task.cancel()
         run = ChatRun(session_id=session_id, user_id=user_id, consent=consent)
         self._runs[session_id] = run
+        # 启动 watchdog 任务
+        asyncio.create_task(_run_watchdog(run, self))
         return run
 
     def schedule_removal(self, session_id: str) -> None:
@@ -138,3 +215,4 @@ class RunManager:
 
 
 SENTINEL = _SENTINEL
+

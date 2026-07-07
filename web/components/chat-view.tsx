@@ -129,6 +129,23 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           });
           continue;
         }
+        if (chunk.heartbeat) {
+          // watchdog 心跳：任务仍在运行但超过 3 分钟无新内容
+          const elapsed = chunk.elapsed || 0;
+          const mins = Math.floor(elapsed / 60);
+          const secs = elapsed % 60;
+          const timeStr = mins > 0 ? `${mins} 分 ${secs} 秒` : `${secs} 秒`;
+          const statusNote = `_⏳ 任务仍在运行中，已用时 ${timeStr}，请稍候…_`;
+          setMessages([...baseMessages, {
+            role: "assistant",
+            content: assistantContent || statusNote,
+            thought: assistantThought,
+            toolSteps: currentToolSteps.length > 0 ? [...currentToolSteps] : undefined,
+            toolsExpanded: currentToolSteps.length > 0 ? true : undefined,
+            created_at: Date.now() / 1000,
+          }]);
+          continue;
+        }
         if (chunk.error) {
           // 保留已流式输出的内容，把错误作为页脚追加，而不是整体覆盖用户正在读的回答
           const errLine = `⚠️ ${chunk.error}`;
