@@ -102,16 +102,16 @@ async def decide_title(messages: list[Message], current_title: str = "") -> str 
     if n == 1:
         first = user_msgs[0].content.strip()
         if len(first) >= SHORT_QUESTION_CHARS:
-            return await _generate_smart_title(messages)
+            return await _generate_smart_title(messages) or _auto_title(messages)
         return _auto_title(messages)
     if n == 2:
         first = user_msgs[0].content.strip()
         if len(first) < SHORT_QUESTION_CHARS:
-            return await _generate_smart_title(messages)
+            return await _generate_smart_title(messages) or _auto_title(messages)
         return None
     # 第 3 轮起，每 3 轮兜底重试；当且仅当标题仍是占位（新对话/截断首句）
     if n >= 3 and n % 3 == 0 and current_title in ("", "新对话", _auto_title(messages)):
-        return await _generate_smart_title(messages)
+        return await _generate_smart_title(messages) or _auto_title(messages)
     return None
 
 
