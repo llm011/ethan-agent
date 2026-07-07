@@ -29,6 +29,7 @@ const OFF_STYLE =
 
 interface ChatInputProps {
   streaming: boolean;
+  stopping?: boolean;
   models: { id: string; description: string }[];
   selectedModel: string;
   pendingFiles: PendingFile[];
@@ -46,6 +47,7 @@ interface ChatInputProps {
 
 export function ChatInput({
   streaming,
+  stopping = false,
   models,
   selectedModel,
   pendingFiles,
@@ -196,11 +198,15 @@ export function ChatInput({
             <div className="flex-1" />
             {streaming ? (
               <button
-                onClick={() => onStop?.()}
-                className="h-7 w-7 flex items-center justify-center rounded-lg bg-foreground text-background hover:opacity-80 transition-opacity"
-                title="停止生成"
+                onClick={() => { if (!stopping) onStop?.(); }}
+                disabled={stopping}
+                className={`h-7 w-7 flex items-center justify-center rounded-lg transition-opacity ${stopping ? "bg-muted opacity-60 cursor-not-allowed" : "bg-foreground text-background hover:opacity-80"}`}
+                title={stopping ? "正在停止..." : "停止生成"}
               >
-                <Square className="h-3 w-3 fill-current" />
+                {stopping
+                  ? <span className="h-3 w-3 rounded-full border-2 border-foreground/50 border-t-transparent animate-spin" />
+                  : <Square className="h-3 w-3 fill-current" />
+                }
               </button>
             ) : (
               <button

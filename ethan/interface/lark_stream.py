@@ -115,8 +115,12 @@ async def _handle_message(event_data: dict) -> None:
     if not chat_id:
         return
 
+    # lark-cli 新格式：所有 chat_id 统一用 oc_ 前缀，P2P / 群聊靠 chat_type 区分。
+    # 旧格式：P2P chat_id 以 p2p_ 开头，但新版 lark-cli 已不再使用该前缀。
+    is_group_chat = event_data.get("chat_type", "") == "group"
+
     # 群聊消息写入本地缓存（不论是否回复，供背景上下文使用）
-    if chat_id.startswith("oc_"):
+    if is_group_chat:
         from datetime import datetime as _dt
         _time_str = _dt.fromtimestamp(int(_create_ms) / 1000).strftime("%Y-%m-%d %H:%M") if _create_ms else ""
         _cache_group_message(chat_id, sender_open_id, text, _time_str)
@@ -129,7 +133,7 @@ async def _handle_message(event_data: dict) -> None:
     owner_claimed = bool(owner_open_id)
 
     # 群聊响应过滤：按 group_response_mode 决定是否处理（私聊不过滤）
-    if chat_id.startswith("oc_") and _lark_cfg:
+    if is_group_chat and _lark_cfg:
         if not await _should_respond_to_group_message(text, _lark_cfg):
             logger.debug(
                 "[Lark] group message skipped by mode=%s msg=%s",

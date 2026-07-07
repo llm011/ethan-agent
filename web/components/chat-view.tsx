@@ -38,6 +38,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([]);
   const [streaming, setStreaming] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [activeSession, setActiveSession] = useState<string | null>(null);
   const [sessionTitle, setSessionTitle] = useState("");
   const [sessionSource, setSessionSource] = useState("web");
@@ -234,6 +235,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       }
       return [...baseMessages, { role: "assistant", content: assistantContent, thought: assistantThought, created_at: Date.now() / 1000, usage: finalUsage, ttft, a2ui: a2uiSurfaces.length > 0 ? a2uiSurfaces : undefined }];
     });
+    setStopping(false);
     setStreaming(false);
   };
 
@@ -274,7 +276,13 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
             setStreaming(true);
             const stream = await streamResume(initialSessionId).catch(() => null);
             if (stream) {
-              await consumeStream(stream, loaded);
+              // loaded 末尾可能已有部分 assistant 消息（后端实时落库的进度行）。
+              // consumeStream 会从 stream replay 重建 assistant 消息，先把它剥掉，
+              // 否则刷新后会出现两条 assistant 消息（DB 一条 + replay 一条）。
+              const base = loaded.length > 0 && loaded[loaded.length - 1].role === "assistant"
+                ? loaded.slice(0, -1)
+                : loaded;
+              await consumeStream(stream, base);
             } else {
               setStreaming(false);
               const fresh = await fetchSession(initialSessionId).catch(() => null);
@@ -521,8 +529,12 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           onModelChange={setSelectedModel}
           onSend={handleSend}
           onStop={() => {
-            if (activeSession) stopGeneration(activeSession).catch(() => {});
+            if (activeSession && !stopping) {
+              setStopping(true);
+              stopGeneration(activeSession).catch(() => { setStopping(false); });
+            }
           }}
+          stopping={stopping}
           onFilesChange={setPendingFiles}
           onQuoteCancel={() => setQuote(null)}
           modes={modes}
