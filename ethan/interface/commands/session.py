@@ -3,6 +3,7 @@
 命令：
   ethan session list              列出最近的会话
   ethan session show <id>         查看某个会话摘要
+  ethan session rename <id> <标题> 重命名会话
   ethan session delete <id>       删除会话
 """
 import asyncio
@@ -85,6 +86,27 @@ def show_session(
             elif msg.role == "assistant" and msg.content:
                 preview = msg.content[:100].replace("\n", " ")
                 console.print(f"  {preview}{'…' if len(msg.content) > 100 else ''}")
+
+    asyncio.run(_run())
+
+
+@app.command("rename")
+def rename_session(
+    session_id: str = typer.Argument(..., help="会话 ID"),
+    title: str = typer.Argument(..., help="新标题"),
+) -> None:
+    """重命名一个会话。"""
+    async def _run():
+        store = SessionStore(db_path=_user_session_db_path())
+        await store.init()
+        session = await store.load(session_id)
+        if not session:
+            console.print(f"[red]会话 {session_id!r} 不存在。[/red]")
+            await store.close()
+            raise typer.Exit(1)
+        await store.update_title(session_id, title)
+        await store.close()
+        console.print(f"[green]✓ 已重命名：{session_id} → {title!r}[/green]")
 
     asyncio.run(_run())
 

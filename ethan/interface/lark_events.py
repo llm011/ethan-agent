@@ -47,6 +47,8 @@ async def _event_loop(event_key: str) -> None:
 
     每个 EventKey 各跑一个本函数（在独立的 task 里），子进程挂了只重启自己，不影响其他 key。
     """
+    import os
+
     lark_cli = shutil.which("lark-cli")
     if not lark_cli:
         logger.warning("[Lark] lark-cli not found — event listener not started")
@@ -66,14 +68,19 @@ async def _event_loop(event_key: str) -> None:
 
     backoff = 5
     while True:
+        # lark-cli 把 stdin EOF 当退出信号。DEVNULL=/dev/null 立即 EOF；PIPE 在父端关闭时 EOF。
+        # 正确做法：用 os.pipe()，把读端给子进程，写端留在父进程不关，子进程永远拿不到 EOF。
+        r_fd, w_fd = os.pipe()
         try:
             proc = await asyncio.create_subprocess_exec(
                 lark_cli, "event", "consume", event_key,
                 "--as", "bot", "--quiet",
-                stdin=asyncio.subprocess.DEVNULL,  # never close stdin so lark-cli doesn't exit on EOF
+                stdin=r_fd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
             )
+            os.close(r_fd)  # 子进程已继承读端，父进程关掉自己的副本
+            r_fd = -1
             logger.info("[Lark] Connected to Feishu event bus for %s (pid=%s)", event_key, proc.pid)
             backoff = 5  # reset backoff on successful connect
 
@@ -110,6 +117,17 @@ async def _event_loop(event_key: str) -> None:
             return
         except Exception:
             logger.exception("[Lark] Event listener for %s crashed, reconnecting in %ss...", event_key, backoff)
+        finally:
+            # 关闭写端（向子进程发 EOF），确保子进程能退出
+            if r_fd != -1:
+                try:
+                    os.close(r_fd)
+                except OSError:
+                    pass
+            try:
+                os.close(w_fd)
+            except OSError:
+                pass
 
         await asyncio.sleep(backoff)
         backoff = min(backoff * 2, 60)
