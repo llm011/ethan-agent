@@ -158,6 +158,21 @@ def stop() -> None:
         console.print("[green]✓ ethan serve 已停止。[/green]")
 
 
+def _parse_launchctl_output(text: str) -> dict:
+    """Extract key fields from launchctl list output."""
+    import re
+    fields = {}
+    for key, pattern in [
+        ("pid", r'"PID"\s*=\s*(\d+)'),
+        ("exit", r'"LastExitStatus"\s*=\s*(\d+)'),
+        ("exe", r'"Program"\s*=\s*"([^"]+)"'),
+    ]:
+        m = re.search(pattern, text)
+        if m:
+            fields[key] = m.group(1)
+    return fields
+
+
 @app.command("status")
 def status() -> None:
     """查看 Ethan 服务运行状态。"""
@@ -167,8 +182,14 @@ def status() -> None:
         return
     result = _launchctl("list", PLIST_NAME)
     if result.returncode != 0 or not result.stdout.strip() or result.stdout.strip() == "-":
-        console.print("[yellow]服务已安装但当前未在运行。[/yellow]")
-        console.print(f"  plist: {PLIST_PATH}")
+        console.print("[yellow]● 服务已安装但当前未在运行[/yellow]")
+        console.print(f"  plist:  {PLIST_PATH}")
     else:
-        console.print("[green]服务运行中。[/green]")
-        console.print(result.stdout)
+        fields = _parse_launchctl_output(result.stdout)
+        console.print("[green]● 服务运行中[/green]")
+        if "pid" in fields:
+            console.print(f"  PID:    {fields['pid']}")
+        if "exe" in fields:
+            console.print(f"  程序:   {fields['exe']}")
+        console.print(f"  日志:   {Path.home() / '.ethan' / 'logs' / 'api.out.log'}")
+        console.print(f"  plist:  {PLIST_PATH}")
