@@ -514,6 +514,15 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       justFinishedRef.current = sessionId;
       window.history.replaceState(null, "", `/chat/${sessionId}`);
     }
+    // 流结束后后端会异步 regen title，延迟 1.5s 取最新标题同步到顶部 header
+    if (sessionId) {
+      setTimeout(async () => {
+        try {
+          const detail = await fetchSession(sessionId);
+          if (detail?.title) setSessionTitle(detail.title);
+        } catch { /* ignore */ }
+      }, 1500);
+    }
   };
 
   return (
