@@ -11,6 +11,13 @@ export interface Quote {
   content: string;
 }
 
+export interface PendingFile {
+  name: string;
+  path: string;
+  isImage?: boolean;
+  dataUrl?: string;  // base64 预览，仅图片有效
+}
+
 export interface Message {
   role: "user" | "assistant";
   content: string;
@@ -23,4 +30,5 @@ export interface Message {
   thought?: string;
   quote?: Quote;
   a2ui?: unknown[];  // ui_card 工具产出的 A2UI envelope 列表，渲染成卡片
+  images?: PendingFile[];  // 发送时附带的图片
 }

@@ -1,15 +1,10 @@
 "use client";
 
-import { useState, useRef, RefObject } from "react";
-import { Send, Paperclip, X, Reply, Square } from "lucide-react";
+import { useState, useRef, RefObject, useCallback } from "react";
+import { Send, Paperclip, X, Reply, Square, ImageIcon } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { uploadFile, type ModeEntry } from "@/lib/api";
-import type { Quote } from "./types";
-
-interface PendingFile {
-  name: string;
-  path: string;
-}
+import type { Quote, PendingFile } from "./types";
 
 // mode.accent → 完整 Tailwind 类（必须静态写全，Tailwind 不识别动态拼接的类名）。
 // 新增带新配色的模式时在此补一条；未知 accent 回退 neutral。
@@ -63,19 +58,69 @@ export function ChatInput({
   onModeChange,
 }: ChatInputProps) {
   const [input, setInput] = useState("");
+  const [dragging, setDragging] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // 读图片文件为 base64 dataUrl，返回 PendingFile
+  const readImageFile = (file: File): Promise<PendingFile> =>
+    new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        resolve({
+          name: file.name,
+          path: "",  // 图片不走 server upload
+          isImage: true,
+          dataUrl: reader.result as string,
+        });
+      };
+      reader.readAsDataURL(file);
+    });
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files) return;
-    const uploaded: PendingFile[] = [];
+    const added: PendingFile[] = [];
     for (const file of Array.from(files)) {
-      const result = await uploadFile(file);
-      uploaded.push({ name: result.filename, path: result.path });
+      if (file.type.startsWith("image/")) {
+        added.push(await readImageFile(file));
+      } else {
+        const result = await uploadFile(file);
+        added.push({ name: result.filename, path: result.path });
+      }
     }
-    onFilesChange([...pendingFiles, ...uploaded]);
+    onFilesChange([...pendingFiles, ...added]);
     e.target.value = "";
   };
+
+  const handlePaste = useCallback(async (e: React.ClipboardEvent) => {
+    const items = Array.from(e.clipboardData.items);
+    const imageItems = items.filter((item) => item.type.startsWith("image/"));
+    if (!imageItems.length) return;
+    e.preventDefault();
+    const added: PendingFile[] = [];
+    for (const item of imageItems) {
+      const file = item.getAsFile();
+      if (file) added.push(await readImageFile(file));
+    }
+    if (added.length) onFilesChange([...pendingFiles, ...added]);
+  }, [pendingFiles, onFilesChange]);
+
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragging(false);
+    const files = Array.from(e.dataTransfer.files);
+    if (!files.length) return;
+    const added: PendingFile[] = [];
+    for (const file of files) {
+      if (file.type.startsWith("image/")) {
+        added.push(await readImageFile(file));
+      } else {
+        const result = await uploadFile(file);
+        added.push({ name: result.filename, path: result.path });
+      }
+    }
+    onFilesChange([...pendingFiles, ...added]);
+  }, [pendingFiles, onFilesChange]);
 
   const handleSend = () => {
     if (!input.trim() && pendingFiles.length === 0) return;
@@ -94,6 +139,9 @@ export function ChatInput({
   const removeFile = (index: number) => {
     onFilesChange(pendingFiles.filter((_, i) => i !== index));
   };
+
+  const images = pendingFiles.filter((f) => f.isImage);
+  const nonImages = pendingFiles.filter((f) => !f.isImage);
 
   return (
     <div className="px-4 pb-4 pt-1">
@@ -116,37 +164,81 @@ export function ChatInput({
             </button>
           </div>
         )}
-        {pendingFiles.length > 0 && (
+
+        {/* 图片缩略图预览 */}
+        {images.length > 0 && (
           <div className="flex gap-2 mb-2 flex-wrap">
-            {pendingFiles.map((f, i) => (
-              <span key={i} className="text-xs bg-muted px-2 py-1 rounded-md flex items-center gap-1">
-                📎 {f.name}
-                <button onClick={() => removeFile(i)} className="text-muted-foreground hover:text-foreground">×</button>
-              </span>
-            ))}
+            {images.map((f, i) => {
+              const realIndex = pendingFiles.indexOf(f);
+              return (
+                <div key={i} className="relative group">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={f.dataUrl}
+                    alt={f.name}
+                    className="h-16 w-16 object-cover rounded-md border border-border"
+                  />
+                  <button
+                    onClick={() => removeFile(realIndex)}
+                    className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-background border border-border flex items-center justify-center text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <X className="h-2.5 w-2.5" />
+                  </button>
+                </div>
+              );
+            })}
           </div>
         )}
-        <div className="rounded-2xl border border-border bg-muted/40 focus-within:border-ring/50 focus-within:bg-background transition-colors">
-          <textarea
-            ref={inputRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="输入消息… (Enter 发送，Shift+Enter 换行)"
-            className="w-full resize-none bg-transparent px-4 pt-3 pb-2 text-sm outline-none min-h-[52px] max-h-[200px] leading-relaxed"
-            rows={1}
-            disabled={streaming}
-          />
+
+        {/* 非图片附件 */}
+        {nonImages.length > 0 && (
+          <div className="flex gap-2 mb-2 flex-wrap">
+            {nonImages.map((f, i) => {
+              const realIndex = pendingFiles.indexOf(f);
+              return (
+                <span key={i} className="text-xs bg-muted px-2 py-1 rounded-md flex items-center gap-1">
+                  📎 {f.name}
+                  <button onClick={() => removeFile(realIndex)} className="text-muted-foreground hover:text-foreground">×</button>
+                </span>
+              );
+            })}
+          </div>
+        )}
+
+        <div
+          className={`rounded-2xl border bg-muted/40 focus-within:border-ring/50 focus-within:bg-background transition-colors ${dragging ? "border-ring/70 bg-primary/5" : "border-border"}`}
+          onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={handleDrop}
+        >
+          {dragging && (
+            <div className="flex items-center justify-center gap-2 py-4 text-sm text-muted-foreground pointer-events-none">
+              <ImageIcon className="h-4 w-4" />
+              松开以添加图片
+            </div>
+          )}
+          {!dragging && (
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
+              placeholder="输入消息… (Enter 发送，Shift+Enter 换行，可直接粘贴图片)"
+              className="w-full resize-none bg-transparent px-4 pt-3 pb-2 text-sm outline-none min-h-[52px] max-h-[200px] leading-relaxed"
+              rows={1}
+            />
+          )}
           <div className="flex items-center gap-1 px-3 pb-2.5">
             <button
               onClick={() => fileRef.current?.click()}
               disabled={streaming}
               className="h-7 w-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40"
-              title="附件"
+              title="附件 / 图片"
             >
               <Paperclip className="h-4 w-4" />
             </button>
-            <input ref={fileRef} type="file" className="hidden" multiple onChange={handleFileUpload} />
+            <input ref={fileRef} type="file" className="hidden" multiple accept="*/*" onChange={handleFileUpload} />
             <Select value={selectedModel} onValueChange={(v) => v && onModelChange(v)} disabled={streaming}>
               <SelectTrigger className="h-7 px-2.5 text-xs bg-transparent border-0 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg shadow-none focus:ring-0 focus:ring-offset-0 gap-1 w-auto max-w-[160px]">
                 <SelectValue placeholder="模型" />

@@ -29,6 +29,7 @@ class Message:
     thought: Optional[str] = None  # 独立分离出来的思考过程
     quote: Optional[dict] = None  # 用户引用的某条历史消息 {role, content}，持久化以便刷新后仍显示引用气泡
     a2ui: Optional[list] = None  # ui_card 工具产出的 A2UI envelope 列表，持久化以便刷新后仍渲染卡片
+    images: list[dict] = field(default_factory=list)  # [{"data": "base64...", "media_type": "image/png"}]
 
     @property
     def is_tool_call(self) -> bool:

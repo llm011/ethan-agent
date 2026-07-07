@@ -80,6 +80,19 @@ export function MessageBubble({ msg, isStreaming, isLast, onQuote, onCardAction 
                   {msg.files.map((f, j) => <span key={j} className="mr-2">📎 {f}</span>)}
                 </div>
               )}
+              {msg.images && msg.images.length > 0 && (
+                <div className="flex gap-1.5 flex-wrap mb-1.5">
+                  {msg.images.map((img, j) => (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      key={j}
+                      src={img.dataUrl}
+                      alt=""
+                      className="max-h-48 max-w-xs rounded-lg object-contain border border-primary-foreground/20"
+                    />
+                  ))}
+                </div>
+              )}
               <p className="whitespace-pre-wrap">{msg.content.replace(/^(\[Uploaded file: [^\]]+\]\n)+\n?/, '')}</p>
               {msg.created_at && (
                 <div className="text-[10px] opacity-40 mt-1 text-right">

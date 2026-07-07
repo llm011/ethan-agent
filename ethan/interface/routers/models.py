@@ -18,6 +18,7 @@ class ModelEntry(BaseModel):
     provider: str
     description: str = ""
     alias: list[str] = []
+    vision: bool = True  # 是否支持图片输入
 
 
 @router.get("/models", dependencies=[Depends(verify_token)])
