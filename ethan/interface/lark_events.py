@@ -33,12 +33,11 @@ _listeners: list[asyncio.Task] = []
 
 # EventKey 常量：通过 lark-cli event list 获取
 # 注意：card.action.trigger 需 lark-cli ≥ 1.0.58（PR #1528）且在飞书开发者后台开启该 Console Event。
-# 本地 lark-cli 已升级到 1.0.65，若后台未开启则该子进程会静默无事件——后台开启后即生效。
 _EVENT_KEYS = [
-    "im.message.receive_v1",          # 收消息（已有）
-    "im.message.message_read_v1",     # 用户已读 bot 发的 P2P 消息
+    "im.message.receive_v1",          # 收消息
     "im.message.reaction.created_v1", # 消息被加 reaction
     "card.action.trigger",            # 交互卡片按钮/表单回调（lark-cli ≥ 1.0.58）
+    # "im.message.message_read_v1",   # 需在飞书开发者后台订阅后才能启用
     # "im.message.reaction.deleted_v1", # reaction 被删（可后续添加）
 ]
 
@@ -86,6 +85,15 @@ async def _event_loop(event_key: str) -> None:
                     data = json.loads(raw)
                 except json.JSONDecodeError:
                     continue
+
+                # lark-cli 报 validation 错误（未在后台订阅该事件）→ 停止重连
+                if data.get("ok") is False and data.get("error", {}).get("type") == "validation":
+                    logger.warning(
+                        "[Lark] EventKey %s not subscribed in Feishu console, stopping listener. "
+                        "Error: %s", event_key, data["error"].get("message", "")
+                    )
+                    proc.terminate()
+                    return
 
                 # Events have nested structure: data.event.message
                 event = data.get("event", data)
