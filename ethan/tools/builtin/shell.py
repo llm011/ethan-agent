@@ -70,6 +70,7 @@ class ShellTool(BaseTool):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
                 env=env,
+                cwd=os.path.expanduser("~"),  # 默认 home 目录，避免 launchd 下 cwd 为 /
             )
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             output = stdout.decode(errors="replace").strip()
