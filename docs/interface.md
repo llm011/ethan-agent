@@ -151,6 +151,16 @@ data: {"content": "！"}
 data: {"done": true, "model": "...", "usage": {...}}
 ```
 
+SSE chunk 类型汇总：
+
+| 字段 | 说明 |
+|------|------|
+| `content` | 文本片段（流式输出） |
+| `done` | 生成结束，附带 `model` / `usage` |
+| `error` | 生成出错，附带错误描述字符串 |
+| `heartbeat` | 任务卡住超 3 分钟无新事件时由 watchdog 发出，附带 `elapsed`（已用秒数），前端渲染等待提示 |
+| `tool_*` | 工具调用进度（见下方工具调用事件） |
+
 ### 启动方式
 
 ```bash

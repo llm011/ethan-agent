@@ -192,7 +192,6 @@ class RunManager:
             run.task.cancel()
         return True
 
-
     def create(self, session_id: str, consent: Any = None, user_id: str = "") -> ChatRun:
         """为 session 创建新 run。若已有未完成的 run，先取消它，避免两个 writer。"""
         old = self._runs.get(session_id)
