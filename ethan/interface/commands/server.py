@@ -99,8 +99,59 @@ def install() -> None:
     console.print("  [dim]ethan server stop[/dim]     — 停止服务")
     console.print("  [dim]ethan server uninstall[/dim]— 卸载服务")
 
+    # 顺带安装 cua-driver（桌面控制后台服务）
+    _install_cua_driver(console)
 
-@app.command("uninstall")
+
+def _install_cua_driver(console: Console) -> None:
+    """安装 cua-driver 桌面控制后台服务（可选依赖，失败不影响主流程）。"""
+    import shutil
+
+    console.print()
+    console.print("[dim]检查 cua-driver（桌面控制插件）...[/dim]")
+
+    # 已安装则直接跳过
+    if shutil.which("cua-driver"):
+        result = subprocess.run(["cua-driver", "status"], capture_output=True, text=True)
+        if result.returncode == 0:
+            console.print("[dim]  cua-driver 已安装且在运行，跳过。[/dim]")
+            return
+        # 已装但未注册服务，补注册
+        reg = subprocess.run(["cua-driver", "install"], capture_output=True, text=True)
+        if reg.returncode == 0:
+            console.print("[green]  ✓ cua-driver 已注册为开机自启服务。[/green]")
+        return
+
+    # 未安装，下载安装脚本
+    console.print("[dim]  正在安装 cua-driver...[/dim]")
+    try:
+        install_result = subprocess.run(
+            ["bash", "-c",
+             "curl -fsSL https://raw.githubusercontent.com/trycua/cua/main/libs/cua-driver/scripts/install.sh | bash"],
+            capture_output=True, text=True, timeout=120,
+        )
+        if install_result.returncode != 0:
+            console.print(f"[yellow]  cua-driver 安装失败（可手动安装后再运行 cua-driver install）：{install_result.stderr.strip()[:200]}[/yellow]")
+            return
+    except subprocess.TimeoutExpired:
+        console.print("[yellow]  cua-driver 安装超时，可稍后手动执行：curl -fsSL .../install.sh | bash[/yellow]")
+        return
+    except Exception as e:
+        console.print(f"[yellow]  cua-driver 安装异常：{e}[/yellow]")
+        return
+
+    # 注册为 launchd 服务
+    if shutil.which("cua-driver"):
+        reg = subprocess.run(["cua-driver", "install"], capture_output=True, text=True)
+        if reg.returncode == 0:
+            console.print("[green]  ✓ cua-driver 已安装并注册为开机自启服务。[/green]")
+        else:
+            console.print("[green]  ✓ cua-driver 已安装（launchd 注册失败，可手动运行 cua-driver install）。[/green]")
+    else:
+        console.print("[yellow]  cua-driver 安装完成，但未找到可执行文件，请检查 PATH。[/yellow]")
+
+
+
 def uninstall() -> None:
     """卸载 Ethan 开机自启服务。"""
     console = Console()
