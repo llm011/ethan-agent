@@ -85,12 +85,22 @@ class TestCircuitBreaker:
         assert cb.is_available("p1") is True
         assert cb._providers["p1"].state == ProviderState.HALF_OPEN
 
+    def test_half_open_only_one_probe(self, monkeypatch):
+        import time as _time
+        cb = CircuitBreaker()
+        for _ in range(_FAILURE_THRESHOLD):
+            cb.record_failure("p1")
+        monkeypatch.setattr(_time, "monotonic", lambda: 10_000_000.0)
+        # First call → probe allowed
+        assert cb.is_available("p1") is True
+        # Second concurrent call → blocked
+        assert cb.is_available("p1") is False
+
     def test_backoff_doubles(self):
         cb = CircuitBreaker()
         for _ in range(_FAILURE_THRESHOLD):
             cb.record_failure("p1")
-        first_backoff = _BACKOFF_BASE
-        assert cb._providers["p1"].backoff == first_backoff * 2
+        assert cb._providers["p1"].backoff == _BACKOFF_BASE * 2
 
     def test_reset_clears_state(self):
         cb = CircuitBreaker()
@@ -105,17 +115,25 @@ class TestCircuitBreaker:
 # ---------------------------------------------------------------------------
 
 class TestIsRetriable:
-    def test_connection_keyword(self):
-        assert _is_retriable(RuntimeError("connection refused"))
+    def test_connection_error_keyword(self):
+        assert _is_retriable(RuntimeError("connection error: refused"))
 
     def test_timeout_keyword(self):
         assert _is_retriable(RuntimeError("timeout waiting for server"))
 
-    def test_502_keyword(self):
-        assert _is_retriable(RuntimeError("upstream returned 502"))
+    def test_502_bad_gateway_keyword(self):
+        assert _is_retriable(RuntimeError("502 bad gateway from upstream"))
 
     def test_non_retriable(self):
         assert not _is_retriable(ValueError("invalid request"))
+
+    def test_database_connection_not_retriable(self):
+        # bare "connection" without "error" suffix should NOT match
+        assert not _is_retriable(RuntimeError("database connection pool exhausted"))
+
+    def test_plain_502_number_not_retriable(self):
+        # "502" alone in a business error message should NOT match
+        assert not _is_retriable(RuntimeError("error code 502 from payment processor"))
 
     def test_httpx_connect_error(self):
         import httpx
@@ -147,7 +165,7 @@ class TestFallbackProviderChat:
         primary.chat.assert_awaited_once()
 
     def test_falls_back_on_retriable_error(self):
-        primary = _make_failing_provider(RuntimeError("connection failed"))
+        primary = _make_failing_provider(RuntimeError("connection error: refused"))
         backup = _make_provider("m2")
         fp = FallbackProvider([("p1", primary), ("p2", backup)])
         result = asyncio.run(fp.chat([Message(role="user", content="hi")]))
@@ -163,18 +181,18 @@ class TestFallbackProviderChat:
         backup.chat.assert_not_awaited()
 
     def test_all_providers_fail_raises_last(self):
-        e1 = RuntimeError("connection p1")
-        e2 = RuntimeError("connection p2")
+        e1 = RuntimeError("connection error p1")
+        e2 = RuntimeError("connection error p2")
         fp = FallbackProvider([
             ("p1", _make_failing_provider(e1)),
             ("p2", _make_failing_provider(e2)),
         ])
         with pytest.raises(RuntimeError) as exc_info:
             asyncio.run(fp.chat([Message(role="user", content="hi")]))
-        assert "connection p2" in str(exc_info.value)
+        assert "connection error p2" in str(exc_info.value)
 
     def test_skips_open_circuit(self):
-        primary = _make_failing_provider(RuntimeError("connection p1"))
+        primary = _make_failing_provider(RuntimeError("connection error p1"))
         backup = _make_provider("m2")
         fp = FallbackProvider([("p1", primary), ("p2", backup)])
         from ethan.providers.circuit_breaker import get_circuit_breaker
@@ -216,7 +234,7 @@ class TestFallbackProviderStream:
         assert chunks[0].content == "hello"
 
     def test_stream_falls_back_before_first_chunk(self):
-        primary = _make_failing_provider(RuntimeError("connection failed"))
+        primary = _make_failing_provider(RuntimeError("connection error: refused"))
         backup = _make_provider()
         fp = FallbackProvider([("p1", primary), ("p2", backup)])
         chunks = asyncio.run(self._collect(fp, [Message(role="user", content="hi")]))

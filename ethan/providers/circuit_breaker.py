@@ -33,6 +33,7 @@ class _ProviderHealth:
     failures: int = 0
     next_retry: float = 0.0          # monotonic time
     backoff: float = _BACKOFF_BASE   # current backoff duration (seconds)
+    probe_issued: bool = False       # HALF_OPEN: only one probe allowed at a time
 
 
 class CircuitBreaker:
@@ -48,16 +49,19 @@ class CircuitBreaker:
 
     def is_available(self, key: str) -> bool:
         h = self._get(key)
-        if h.state == ProviderState.CLOSED:
-            return True
         if h.state == ProviderState.OPEN:
             if time.monotonic() >= h.next_retry:
                 h.state = ProviderState.HALF_OPEN
+                h.probe_issued = False
                 logger.info("circuit_breaker: %s → HALF_OPEN (probing)", key)
-                return True
-            return False
-        # HALF_OPEN: let the probe through
-        return True
+            else:
+                return False
+        if h.state == ProviderState.HALF_OPEN:
+            if h.probe_issued:
+                return False   # another probe is already in flight
+            h.probe_issued = True
+            return True
+        return True  # CLOSED
 
     def record_success(self, key: str) -> None:
         h = self._get(key)
@@ -66,6 +70,7 @@ class CircuitBreaker:
         h.state = ProviderState.CLOSED
         h.failures = 0
         h.backoff = _BACKOFF_BASE
+        h.probe_issued = False
 
     def record_failure(self, key: str) -> None:
         h = self._get(key)
@@ -78,6 +83,7 @@ class CircuitBreaker:
                 key, h.failures, h.next_retry - time.monotonic(),
             )
             h.state = ProviderState.OPEN
+            h.probe_issued = False
 
     def status(self) -> dict[str, dict]:
         now = time.monotonic()

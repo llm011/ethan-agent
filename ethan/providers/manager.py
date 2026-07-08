@@ -15,11 +15,28 @@ def _build_single_provider(provider_key: str, model_id: str,
         return OpenAICompatProvider(provider_cfg=provider_cfg, model=model_id, proxy=proxy)
 
 
+def _parse_fallback_entry(entry: str) -> tuple[str, str | None]:
+    """Parse a fallback_providers entry.
+
+    Supported formats:
+      "openai_compat"             → (provider_key="openai_compat", model=None)  reuse primary model id
+      "openai_compat/gpt-4o-mini" → (provider_key="openai_compat", model="gpt-4o-mini")
+    """
+    if "/" in entry:
+        key, model = entry.split("/", 1)
+        return key.strip(), model.strip()
+    return entry.strip(), None
+
+
 def create_provider(model: str | None = None) -> BaseProvider:
     """根据 model id 或 alias 从配置中查找对应 provider，创建并返回。
 
     如果模型配置了 fallback_providers，返回 FallbackProvider（依次尝试主 provider
     和各 fallback；主 provider 断路时自动跳过，按指数退避恢复探测）。
+
+    fallback_providers 支持两种写法：
+      - "openai_compat"             — 用同一个 model id 打备选 provider
+      - "openai_compat/gpt-4o-mini" — 用指定的 model id 打备选 provider
     """
     config = get_config()
     model_id = model or config.defaults.model
@@ -50,7 +67,9 @@ def create_provider(model: str | None = None) -> BaseProvider:
         return primary
 
     pairs: list[tuple[str, BaseProvider]] = [(provider_key, primary)]
-    for fb_key in fallback_keys:
+    for fb_entry in fallback_keys:
+        fb_key, fb_model_id = _parse_fallback_entry(fb_entry)
+        fb_model = fb_model_id or model_id  # default: same model id as primary
         fb_cfg = config.get_provider_config(fb_key)
         if fb_cfg is None:
             import logging
@@ -59,9 +78,8 @@ def create_provider(model: str | None = None) -> BaseProvider:
             )
             continue
         fb_proxy = fb_cfg.proxy or proxy
-        # Use the same model id; fallback provider must serve the same or equivalent model
         try:
-            fb_provider = _build_single_provider(fb_key, model_id, fb_cfg, fb_proxy)
+            fb_provider = _build_single_provider(fb_key, fb_model, fb_cfg, fb_proxy)
             pairs.append((fb_key, fb_provider))
         except Exception as exc:
             import logging

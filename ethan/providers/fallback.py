@@ -51,11 +51,15 @@ def _is_retriable(e: Exception) -> bool:
     except ImportError:
         pass
 
+    # Keyword fallback: must be a known transient pattern, not arbitrary business errors.
+    # Intentionally narrow — "connection" alone matches too many non-network strings.
     msg = str(e).lower()
     return any(k in msg for k in (
-        "connection", "timeout", "fetch failed",
-        "502", "503", "504",
-        "network", "remote end closed", "eof",
+        "connection error", "connectionerror", "connection reset",
+        "timeout", "timed out",
+        "fetch failed",
+        "502 bad gateway", "503 service", "504 gateway",
+        "remote end closed", "unexpected eof",
     ))
 
 
