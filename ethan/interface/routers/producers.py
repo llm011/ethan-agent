@@ -262,22 +262,29 @@ async def _run_generation(
         _RunManager_schedule_removal(run.session_id)
         raise
     except Exception as e:
-        run.emit({"error": _friendly_error(e, agent)})
-        # 异常中断（如 provider 报错）：若已有进度行，把已收集的 tool_steps 落到它上面，
-        # 至少保留工具过程，别白干。无进度行则跳过（避免凭空插空壳）。
-        if progress_msg_id and session_id and (collector.tool_steps or collector.full):
+        err_text = _friendly_error(e, agent)
+        run.emit({"error": err_text})
+        # 异常中断：把错误信息持久化，保证刷新后用户仍能看到出了什么问题。
+        # 已有进度行（有 tool_steps）则 UPDATE；否则新建一条 assistant 消息。
+        # 两种情形都覆盖：(1) 工具调用中途报错 (2) provider 直接失败、无任何工具步骤。
+        if session_id:
+            error_content = (collector.full + "\n\n" if collector.full else "") + f"_{err_text}_"
+            err_msg = Message(
+                role="assistant",
+                content=error_content,
+                thought=collector.thought,
+                usage=collector.usage_dict,
+                tool_steps=collector.tool_steps or [],
+                a2ui=collector.a2ui or None,
+            )
             try:
-                await store.update_message(progress_msg_id, session_id, Message(
-                    role="assistant",
-                    content=collector.full or "",
-                    thought=collector.thought,
-                    usage=collector.usage_dict,
-                    tool_steps=collector.tool_steps or [],
-                    a2ui=collector.a2ui or None,
-                ))
+                if progress_msg_id:
+                    await store.update_message(progress_msg_id, session_id, err_msg)
+                else:
+                    await store.save_message(session_id, err_msg)
                 await store.touch(session_id)
             except Exception:
-                logger.exception("异常中断时定稿进度占位行失败 session=%s", session_id)
+                logger.exception("保存错误消息失败 session=%s", session_id)
     finally:
         # 流结束（正常/异常）时取消未决授权 Future，避免泄漏
         if consent is not None:
