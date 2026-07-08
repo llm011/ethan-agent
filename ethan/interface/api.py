@@ -89,8 +89,9 @@ async def lifespan(app: FastAPI):
     app.state.api_key_store = key_store
     yield
     if _lark_ready():
-        from ethan.interface.lark_events import stop_lark_listener
+        from ethan.interface.lark_events import _wait_lark_listener_stopped, stop_lark_listener
         stop_lark_listener()
+        await _wait_lark_listener_stopped()
     from ethan.interface.wechat_events import stop_wechat_listener
     stop_wechat_listener()
     stop_heartbeat()

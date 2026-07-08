@@ -71,6 +71,7 @@ async def _event_loop(event_key: str) -> None:
         # lark-cli 把 stdin EOF 当退出信号。DEVNULL=/dev/null 立即 EOF；PIPE 在父端关闭时 EOF。
         # 正确做法：用 os.pipe()，把读端给子进程，写端留在父进程不关，子进程永远拿不到 EOF。
         r_fd, w_fd = os.pipe()
+        proc = None
         try:
             proc = await asyncio.create_subprocess_exec(
                 lark_cli, "event", "consume", event_key,
@@ -114,6 +115,14 @@ async def _event_loop(event_key: str) -> None:
 
         except asyncio.CancelledError:
             logger.info("[Lark] Event listener for %s cancelled.", event_key)
+            # 必须等子进程真正退出，否则 lark-cli 孤儿进程继续占着飞书 WebSocket 连接，
+            # 重启后新进程无法连接（或被飞书踢掉）。
+            if proc is not None and proc.returncode is None:
+                try:
+                    proc.terminate()
+                    await proc.wait()
+                except Exception:
+                    pass
             return
         except Exception:
             logger.exception("[Lark] Event listener for %s crashed, reconnecting in %ss...", event_key, backoff)
@@ -147,9 +156,18 @@ def start_lark_listener() -> None:
 
 
 def stop_lark_listener() -> None:
-    """停止飞书事件监听器（FastAPI shutdown 时调用）。取消所有子 task。"""
+    """停止飞书事件监听器（FastAPI shutdown 时调用）。取消所有子 task。
+    注意：此函数只发取消信号。调用方须 await _wait_lark_listener_stopped() 等子进程真正退出，
+    否则 lark-cli 孤儿进程会继续占着飞书 WebSocket，重启后新进程无法连接。"""
     global _listeners
     for t in _listeners:
         if not t.done():
             t.cancel()
+
+
+async def _wait_lark_listener_stopped() -> None:
+    """等待所有 _event_loop task 完成（含子进程退出）。在 stop_lark_listener 之后调用。"""
+    global _listeners
+    if _listeners:
+        await asyncio.gather(*_listeners, return_exceptions=True)
     _listeners = []
