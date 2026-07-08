@@ -94,12 +94,28 @@ class AnthropicProvider(BaseProvider):
         result = []
         for msg in messages:
             if msg.role == "tool":
+                tool_content: list[dict] | str = msg.content
+                if msg.images:
+                    # 工具返回截图时，把图片和文字一起放进 tool_result content 数组
+                    parts: list[dict] = []
+                    for img in msg.images:
+                        parts.append({
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": img.get("media_type", "image/png"),
+                                "data": img["data"],
+                            },
+                        })
+                    if msg.content:
+                        parts.append({"type": "text", "text": msg.content})
+                    tool_content = parts
                 result.append({
                     "role": "user",
                     "content": [{
                         "type": "tool_result",
                         "tool_use_id": msg.tool_call_id,
-                        "content": msg.content,
+                        "content": tool_content,
                     }],
                 })
             elif msg.is_tool_call:

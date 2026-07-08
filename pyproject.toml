@@ -48,6 +48,14 @@ router = [
     "numpy>=1.26.0",
 ]
 
+# computer-use（可选）：通过 cua-computer SDK 控制本机桌面截图/鼠标/键盘。
+# 还需安装 cua-driver 后台服务：
+#   curl -fsSL https://raw.githubusercontent.com/trycua/cua/main/libs/cua-driver/scripts/install.sh | bash
+#   cua-driver install   # 注册为 macOS launchd 服务（开机自启）
+computer = [
+    "cua-computer>=0.3.0",
+]
+
 [project.urls]
 Homepage = "https://github.com/llm011/ethan-agent"
 Repository = "https://github.com/llm011/ethan-agent"

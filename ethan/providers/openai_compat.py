@@ -36,11 +36,30 @@ class OpenAICompatProvider(BaseProvider):
         result = []
         for msg in messages:
             if msg.role == "tool":
-                result.append({
-                    "role": "tool",
-                    "tool_call_id": msg.tool_call_id,
-                    "content": msg.content,
-                })
+                if msg.images:
+                    # OpenAI 的 tool result 不支持 image_url content，
+                    # 把截图转成紧跟其后的一条独立 user 消息
+                    result.append({
+                        "role": "tool",
+                        "tool_call_id": msg.tool_call_id,
+                        "content": msg.content or "Screenshot taken.",
+                    })
+                    img_parts: list[dict] = []
+                    for img in msg.images:
+                        media_type = img.get("media_type", "image/png")
+                        data = img["data"]
+                        img_parts.append({
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{media_type};base64,{data}"},
+                        })
+                    img_parts.append({"type": "text", "text": "Above is the screenshot result."})
+                    result.append({"role": "user", "content": img_parts})
+                else:
+                    result.append({
+                        "role": "tool",
+                        "tool_call_id": msg.tool_call_id,
+                        "content": msg.content,
+                    })
             elif msg.is_tool_call:
                 oai_tool_calls = [
                     {

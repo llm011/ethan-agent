@@ -569,6 +569,7 @@ class Agent:
                     role="tool",
                     content=r.content,
                     tool_call_id=r.tool_call_id,
+                    images=r.images or [],
                 ))
             enforce_context_budget(working)  # 新 tool result 进上下文前管控体积，防撑爆
             monitor.record(response.tool_calls, had_error)
@@ -760,6 +761,7 @@ class Agent:
                     role="tool",
                     content=r.content,
                     tool_call_id=r.tool_call_id,
+                    images=r.images or [],
                 ))
 
             enforce_context_budget(working)  # 新 tool result 进上下文前管控体积，防撑爆

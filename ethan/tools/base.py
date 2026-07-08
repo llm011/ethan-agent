@@ -12,6 +12,7 @@ class ToolResult:
     is_error: bool = False
     sub_steps: list = field(default_factory=list)  # 委派类工具的子步骤（如 delegate_coding 的 Coding Agent 工具调用）
     ui: list | None = None  # ui_card 工具产出的 A2UI envelope 列表，透传给前端/REPL 渲染卡片
+    images: list[dict] | None = None  # 截图等图片，格式 [{"data": "base64...", "media_type": "image/png"}]
 
 
 class BaseTool(ABC):
