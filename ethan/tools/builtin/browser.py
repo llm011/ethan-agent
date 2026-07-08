@@ -232,7 +232,7 @@ class BrowserPageTool(_BrowserToolBase):
         "properties": {
             "action": {"type": "string", "enum": [
                 "snapshot", "click", "fill", "type", "press", "hover", "select",
-                "scroll", "scroll_into_view", "screenshot", "upload", "get", "mouse", "wait", "eval",
+                "scroll", "scroll_into_view", "screenshot", "upload", "save_pdf", "get", "mouse", "wait", "eval",
             ]},
             "session": {"type": "string", "description": "目标 session_id"},
             "ref": {"type": "string", "description": "snapshot 返回的元素 ref(click/fill/type/hover/select/get/scroll_into_view/upload)"},
@@ -240,6 +240,9 @@ class BrowserPageTool(_BrowserToolBase):
             "key": {"type": "string", "description": "press 的按键,如 Enter"},
             "value": {"type": "string", "description": "select 的选项值"},
             "files": {"type": "array", "items": {"type": "string"}, "description": "upload 时的本地文件路径列表"},
+            "pdf_path": {"type": "string", "description": "save_pdf 输出路径(可选,不填自动生成)"},
+            "pdf_format": {"type": "string", "enum": ["a4", "letter", "legal", "a3", "tabloid"], "description": "save_pdf 纸张规格,默认 a4"},
+            "landscape": {"type": "boolean", "description": "save_pdf 横向纸张"},
             "what": {"type": "string", "enum": ["title", "url", "text", "value", "html", "box"], "description": "get 读取的内容"},
             "direction": {"type": "string", "enum": ["up", "down", "left", "right"], "description": "scroll 方向"},
             "pixels": {"type": "integer", "description": "scroll 像素"},
@@ -348,6 +351,23 @@ class BrowserPageTool(_BrowserToolBase):
                     {"sessionId": session, "ref": kw.get("ref"), "files": kw.get("files", [])},
                     browser_session_id=session,
                 ), ensure_ascii=False))
+            if action == "save_pdf":
+                import time as _time
+
+                from ethan.browser.screenshot import shots_dir
+                params: dict = {"sessionId": session}
+                if kw.get("pdf_format"):
+                    params["paperFormat"] = kw["pdf_format"]
+                if kw.get("landscape") is not None:
+                    params["landscape"] = kw["landscape"]
+                out_path = kw.get("pdf_path")
+                if not out_path:
+                    d = shots_dir().parent / "browser-pdfs"
+                    d.mkdir(parents=True, exist_ok=True)
+                    out_path = str(d / f"page-{int(_time.time() * 1000)}.pdf")
+                params["path"] = out_path
+                result = await _call("page_save_pdf", params, browser_session_id=session)
+                return json.dumps({**(result or {}), "path": out_path}, ensure_ascii=False)
             if action == "eval":
                 return _with_step(json.dumps(await _call("page_eval", {"sessionId": session, "script": kw.get("script", "")},
                                               browser_session_id=session), ensure_ascii=False))

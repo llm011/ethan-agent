@@ -38,6 +38,7 @@ METHODS = {
     "page_wait": "pages.wait",
     "page_eval": "pages.eval",
     "page_upload": "pages.upload",
+    "page_save_pdf": "pages.savePdf",
 }
 
 # JSON-RPC error code(对齐 Ethan BROWSER_RPC_ERROR_CODE)
