@@ -22,6 +22,7 @@ class ModelEntry(BaseModel):
     description: str = ""
     alias: list[str] = Field(default_factory=list)  # 短名，如 ["flash", "gemini"]
     vision: bool = True  # 是否支持图片输入（大多数现代模型支持，旧文本模型可手动设为 False）
+    fallback_providers: list[str] = Field(default_factory=list)  # 主 provider 不可用时依次尝试的备选 provider key 列表
 
 
 class NetworkConfig(BaseModel):
