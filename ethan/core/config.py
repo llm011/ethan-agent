@@ -92,7 +92,7 @@ class RoutingConfig(BaseModel):
         # 罕用工具（browser/background_task/secrets/skill_create/config/install_skill/
         # ui_card/knowledge_add/delegate_coding）不在初始集里，模型按需调 find_tools 激活，
         # 避免每请求白白广播约 2600 tokens 的 schema。
-        "shell", "web_search", "web_fetch",
+        "shell", "web_search", "web_fetch", "get_weather",
         "file_read", "file_write", "file_list",
         "skill_read", "skill_list", "find_tools",
         "rg_search", "fd_find",

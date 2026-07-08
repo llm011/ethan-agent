@@ -89,6 +89,7 @@ class ScheduleCreateTool(BaseTool):
             "prompt": {"type": "string", "description": "What to do when the task fires (a prompt or description)"},
             "cron": {"type": "string", "description": "Cron expression (5-part: min hour day month weekday). E.g. '0 9 * * *' for 9am daily. IMPORTANT: for weekday, always use names (mon-fri, sat, sun) not numbers — APScheduler's numeric weekday convention differs from standard cron (1-5 means Tue-Sat, not Mon-Fri)."},
             "interval_minutes": {"type": "integer", "description": "Alternative: run every N minutes."},
+            "end_date": {"type": "string", "description": "Optional: date (YYYY-MM-DD) or datetime (YYYY-MM-DD HH:MM) when the job should stop firing. After this date the job is automatically removed."},
         },
         "required": ["job_id", "prompt"],
     }
@@ -96,7 +97,7 @@ class ScheduleCreateTool(BaseTool):
     def __init__(self, user_id: str = ""):
         self._user_id = user_id
 
-    async def run(self, job_id: str, prompt: str, cron: str = "", interval_minutes: int = 0) -> str:
+    async def run(self, job_id: str, prompt: str, cron: str = "", interval_minutes: int = 0, end_date: str = "") -> str:
         import httpx
 
         from ethan.core.config import get_config
@@ -128,15 +129,20 @@ class ScheduleCreateTool(BaseTool):
                     "prompt": prompt,
                     "cron": cron,
                     "interval_minutes": interval_minutes,
+                    "end_date": end_date,
                     "session_id": session.id,
                     "channel": channel,
                     "channel_context": channel_context,
                     "user_id": self._user_id,
                 }, headers=headers)
                 res.raise_for_status()
-                return f"Scheduled '{job_id}' successfully. (Session: {session.id})"
+                msg = f"Scheduled '{job_id}' successfully."
+                if end_date:
+                    msg += f" Auto-expires on {end_date}."
+                return msg + f" (Session: {session.id})"
         except Exception as e:
             return f"Failed to create job '{job_id}' via API: {e}"
+
 
 class ScheduleListTool(BaseTool):
     fast_path = False
