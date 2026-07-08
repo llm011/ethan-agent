@@ -72,6 +72,13 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 - 会话级一次性授权：本对话第一次调用 browser 工具询问一次，批准后该对话所有操作（含 `eval`）放行
 - 传输仅用 WebSocket（扩展 → ethan），无需 native messaging host；详见 [docs/browser-control-plan.md](docs/browser-control-plan.md)
 
+**桌面控制（macOS，基于 cua-driver）**
+- 在任意渠道（Web / 飞书 / CLI）控制本机 macOS 桌面——截图、点击、输入、拖拽、滚动、启动应用、打开 URL
+- 基于 [trycua/cua](https://github.com/trycua/cua)；连接本地后台服务 `cua-driver`（监听 `localhost:8000`），无需虚拟机
+- 截图结果直接传给视觉模型，agent 看到屏幕后决定下一步操作
+- `ethan server install` 自动安装并注册 `cua-driver` 为 launchd 服务；也可手动安装：`curl -fsSL .../install.sh | bash && cua-driver install`
+- 可选 Python SDK：`pip install 'ethan-agent[computer]'`（cua-computer）；未安装时工具自动不可见，不影响其他功能
+
 ---
 
 ## 安装

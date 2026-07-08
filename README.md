@@ -74,6 +74,13 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 - Session-level one-time consent: the first browser call in a chat asks once, then all browser ops (incl. `eval`) are allowed for that chat
 - Transport is WebSocket only (extension → ethan), no native messaging host; see [docs/browser-control-plan.md](docs/browser-control-plan.md)
 
+**Desktop control (macOS, via cua-driver)**
+- Control the local macOS desktop from any channel — take screenshots, click, type, drag, scroll, launch apps, open URLs
+- Powered by [trycua/cua](https://github.com/trycua/cua); connects to `cua-driver` (a native background daemon at `localhost:8000`) — no VM required
+- Screenshot results are passed directly to vision models; the agent sees the screen and decides the next action
+- `ethan server install` automatically installs and registers `cua-driver` as a launchd service; or install manually: `curl -fsSL .../install.sh | bash && cua-driver install`
+- Optional Python SDK: `pip install 'ethan-agent[computer]'` (cua-computer); gracefully absent when not installed
+
 ---
 
 ## Install
