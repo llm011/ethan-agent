@@ -34,6 +34,12 @@ export const BROWSER_RPC_METHODS = {
   pagesMouse: 'pages.mouse',
   pagesWait: 'pages.wait',
   pagesEval: 'pages.eval',
+  pagesUpload: 'pages.upload',
+  pagesSavePdf: 'pages.savePdf',
+  networkStart: 'network.start',
+  networkStop: 'network.stop',
+  networkList: 'network.list',
+  networkDetail: 'network.detail',
 } as const;
 
 export const BROWSER_RPC_ERROR_CODE = {

@@ -7,11 +7,13 @@ import { BROWSER_RPC_VERSION } from '../shared';
 import { BrowserSessionStore } from './session-store';
 import { handleNativeRequest } from './rpc';
 import { BrowserPageController } from './page-controller';
+import { NetworkMonitor } from './network-monitor';
 import { releaseCdpClient } from './cdp-client';
 import { BrowserWsClient, KEEPALIVE_ALARM, type WsClientConfig } from './ws-client';
 
 const sessionStore = new BrowserSessionStore();
 const pageController = new BrowserPageController(sessionStore);
+const networkMonitor = new NetworkMonitor(sessionStore);
 
 async function dispatch(message: unknown): Promise<unknown | null> {
   return handleNativeRequest(message, {
@@ -42,6 +44,12 @@ async function dispatch(message: unknown): Promise<unknown | null> {
     pageMouse: params => pageController.mouse(params),
     pageWait: params => pageController.wait(params),
     pageEval: params => pageController.eval(params),
+    pageUpload: params => pageController.upload(params),
+    pageSavePdf: params => pageController.savePdf(params),
+    networkStart: params => networkMonitor.start(params),
+    networkStop: params => networkMonitor.stop(params),
+    networkList: params => networkMonitor.list(params),
+    networkDetail: params => networkMonitor.detail(params),
   });
 }
 

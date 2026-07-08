@@ -15,6 +15,9 @@ import type {
   BrowserPageScreenshotResult,
   BrowserPageSnapshotParams,
   BrowserPageSnapshotResult,
+  BrowserPageUploadParams,
+  BrowserPageSavePdfParams,
+  BrowserPageSavePdfResult,
   BrowserPageWaitParams,
   BrowserPageWaitResult,
   BrowserSessionTab,
@@ -497,6 +500,59 @@ export class BrowserPageController {
           typeof response.result?.value !== 'undefined'
             ? response.result.value
             : (response.result?.description ?? null),
+      };
+    });
+  }
+
+  async upload(params: BrowserPageUploadParams): Promise<BrowserPageActionResult> {
+    return this.withPage(params.sessionId, async ({ tab, client }) => {
+      const resolved = await this.resolveRef(client, tab, params.ref, false);
+      const result = await this.callFunctionOn<{ ok: boolean; error?: string }>(
+        client,
+        resolved.objectId,
+        `function(files) {
+          if (!(this instanceof HTMLInputElement) || this.type !== 'file') {
+            return { ok: false, error: 'NOT_FILE_INPUT' };
+          }
+          const dt = new DataTransfer();
+          files.forEach(name => {
+            dt.items.add(new File([''], name));
+          });
+          Object.defineProperty(this, 'files', { value: dt.files, configurable: true });
+          this.dispatchEvent(new Event('change', { bubbles: true }));
+          this.dispatchEvent(new Event('input', { bubbles: true }));
+          return { ok: true };
+        }`,
+        [params.files],
+      );
+      this.ensureRuntimeOk(result, params.ref);
+      return this.createActionResult(params.sessionId, tab, params.ref);
+    });
+  }
+
+  async savePdf(params: BrowserPageSavePdfParams): Promise<BrowserPageSavePdfResult> {
+    return this.withPage(params.sessionId, async ({ tab, client }) => {
+      await client.send('Page.enable');
+      const paperFormats: Record<string, { width: number; height: number }> = {
+        a4: { width: 8.27, height: 11.69 },
+        letter: { width: 8.5, height: 11 },
+        legal: { width: 8.5, height: 14 },
+        a3: { width: 11.69, height: 16.54 },
+        tabloid: { width: 11, height: 17 },
+      };
+      const fmt = paperFormats[params.paperFormat || 'a4'] || paperFormats.a4;
+      const pdfResult = await client.send<{ data: string }>('Page.printToPDF', {
+        landscape: params.landscape ?? false,
+        paperWidth: fmt.width,
+        paperHeight: fmt.height,
+        printBackground: true,
+        preferCSSPageSize: false,
+      });
+      return {
+        ...this.createBaseResult(params.sessionId, tab),
+        data: pdfResult.data,
+        path: params.path || '',
+        mimeType: 'application/pdf' as const,
       };
     });
   }

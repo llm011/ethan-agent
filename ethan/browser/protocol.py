@@ -39,6 +39,11 @@ METHODS = {
     "page_eval": "pages.eval",
     "page_upload": "pages.upload",
     "page_save_pdf": "pages.savePdf",
+    # network
+    "network_start": "network.start",
+    "network_stop": "network.stop",
+    "network_list": "network.list",
+    "network_detail": "network.detail",
 }
 
 # JSON-RPC error code(对齐 Ethan BROWSER_RPC_ERROR_CODE)

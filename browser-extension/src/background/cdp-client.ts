@@ -8,6 +8,57 @@ function getRuntimeErrorMessage(): string | undefined {
   return chrome.runtime.lastError?.message;
 }
 
+// ── CDP 事件订阅（全局，按 tabId + eventName 路由）──────────────────────────────
+type CdpEventCallback = (params: unknown) => void;
+
+const eventListeners = new Map<number, Map<string, Set<CdpEventCallback>>>();
+let cdpEventListenerRegistered = false;
+
+function ensureCdpEventListener(): void {
+  if (cdpEventListenerRegistered) return;
+  chrome.debugger.onEvent.addListener((source, method, params) => {
+    const tabId = source.tabId;
+    if (typeof tabId !== 'number') return;
+    const byEvent = eventListeners.get(tabId);
+    if (!byEvent) return;
+    const cbs = byEvent.get(method);
+    if (!cbs) return;
+    cbs.forEach(cb => cb(params));
+  });
+  cdpEventListenerRegistered = true;
+}
+
+export function addCdpEventListener(
+  tabId: number,
+  eventName: string,
+  callback: CdpEventCallback,
+): void {
+  ensureCdpEventListener();
+  let byEvent = eventListeners.get(tabId);
+  if (!byEvent) {
+    byEvent = new Map();
+    eventListeners.set(tabId, byEvent);
+  }
+  let cbs = byEvent.get(eventName);
+  if (!cbs) {
+    cbs = new Set();
+    byEvent.set(eventName, cbs);
+  }
+  cbs.add(callback);
+}
+
+export function removeCdpEventListeners(tabId: number, eventName?: string): void {
+  const byEvent = eventListeners.get(tabId);
+  if (!byEvent) return;
+  if (eventName) {
+    byEvent.delete(eventName);
+  } else {
+    eventListeners.delete(tabId);
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+
 export class CdpClient {
   private attached = false;
 
@@ -137,12 +188,14 @@ function getCdpClient(tabId: number): CdpClient {
 export async function releaseCdpClient(tabId: number): Promise<void> {
   const client = clientsByTabId.get(tabId);
   clientsByTabId.delete(tabId);
+  removeCdpEventListeners(tabId);
   await client?.detach();
 }
 
 export async function releaseAllCdpClients(): Promise<void> {
   const clients = Array.from(clientsByTabId.values());
   clientsByTabId.clear();
+  eventListeners.clear();
   await Promise.all(clients.map(client => client.detach()));
 }
 

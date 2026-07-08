@@ -405,9 +405,76 @@ export interface BrowserPageWaitResult extends BrowserPageBaseResult {
   load?: BrowserPageLoadState;
 }
 
+export interface BrowserPageUploadParams extends BrowserPageBaseParams {
+  ref: string;
+  files: string[];
+}
+
 export interface BrowserPageEvalParams extends BrowserPageBaseParams {
   script: string;
   awaitPromise?: boolean;
+}
+
+export interface BrowserPageSavePdfParams extends BrowserPageBaseParams {
+  paperFormat?: 'a4' | 'letter' | 'legal' | 'a3' | 'tabloid';
+  landscape?: boolean;
+  path?: string;
+}
+
+export interface BrowserPageSavePdfResult extends BrowserPageBaseResult {
+  path: string;
+  mimeType: 'application/pdf';
+}
+
+// ── Network monitoring ──────────────────────────────────────────────────────
+
+export interface BrowserNetworkBaseParams {
+  sessionId: string;
+}
+
+export interface BrowserNetworkDetailParams extends BrowserNetworkBaseParams {
+  requestId: string;
+}
+
+export interface BrowserNetworkEntry {
+  requestId: string;
+  url: string;
+  method: string;
+  resourceType?: string;
+  status?: number;
+  mimeType?: string;
+  requestTime?: number;
+  responseTime?: number;
+  encodedDataLength?: number;
+  requestHeaders?: Record<string, string>;
+  postData?: string;
+  responseHeaders?: Record<string, string>;
+  responseBody?: string;
+  failed?: boolean;
+  errorText?: string;
+}
+
+export interface BrowserNetworkStartResult {
+  ok: true;
+  sessionId: string;
+}
+
+export interface BrowserNetworkStopResult {
+  ok: true;
+  sessionId: string;
+  count: number;
+}
+
+export interface BrowserNetworkListResult {
+  ok: true;
+  sessionId: string;
+  requests: Omit<BrowserNetworkEntry, 'responseBody' | 'postData'>[];
+}
+
+export interface BrowserNetworkDetailResult {
+  ok: true;
+  sessionId: string;
+  request: BrowserNetworkEntry | null;
 }
 
 export interface BrowserPageEvalResult extends BrowserPageBaseResult {

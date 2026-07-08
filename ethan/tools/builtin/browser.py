@@ -1,9 +1,10 @@
-"""Browser 工具 —— agent 通过这三个工具操作本机 Chrome(经 BrowserHub → 扩展 → CDP)。
+"""Browser 工具 —— agent 通过这四个工具操作本机 Chrome(经 BrowserHub → 扩展 → CDP)。
 
   browser_session : create / attach_current / list / rename / release / close
-  browser_tab     : open / list / user_list / attach / active / activate / close
+  browser_tab     : open / list / user_list / find_tab / attach / active / activate / close
   browser_page    : snapshot / click / fill / type / press / hover / select /
-                    scroll / scroll_into_view / screenshot / get / mouse / wait / eval
+                    scroll / scroll_into_view / screenshot / upload / save_pdf / get / mouse / wait / eval
+  browser_network : start / stop / list / detail
 
 授权(方案 Q6):会话级一次性。某 ethan 会话首次调用任意 browser 工具触发一次 consent,
 批准后该会话内全部 browser 操作(含 eval)放行。consent_check 读当前会话授权态;
@@ -371,6 +372,43 @@ class BrowserPageTool(_BrowserToolBase):
             if action == "eval":
                 return _with_step(json.dumps(await _call("page_eval", {"sessionId": session, "script": kw.get("script", "")},
                                               browser_session_id=session), ensure_ascii=False))
+            return f"未知 action: {action}"
+        except BrowserError as e:
+            return f"浏览器错误: {e}" + (" (可重新 snapshot 后重试)" if e.retryable else "")
+
+
+class BrowserNetworkTool(_BrowserToolBase):
+    name = "browser_network"
+    description = (
+        "监控 session 的网络请求。start 开始抓包;stop 停止并清空;list 列出已捕获请求(可按 URL/类型过滤);"
+        "detail 查看指定请求的详情(含响应体,最多 10000 字符)。"
+        "常用场景:抓 API 响应数据代替从 DOM 里抠,排查请求失败原因。"
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "action": {"type": "string", "enum": ["start", "stop", "list", "detail"]},
+            "session": {"type": "string", "description": "目标 session_id"},
+            "filter": {"type": "string", "description": "list 时按 URL 或资源类型过滤(字符串包含匹配)"},
+            "request_id": {"type": "string", "description": "detail 时的 requestId"},
+        },
+        "required": ["action", "session"],
+    }
+
+    async def run(self, action: str, session: str = "", filter: str = "", request_id: str = "") -> str:  # noqa: A002
+        self._authorize()
+        try:
+            if action == "start":
+                return json.dumps(await _call("network_start", {"sessionId": session}), ensure_ascii=False)
+            if action == "stop":
+                return json.dumps(await _call("network_stop", {"sessionId": session}), ensure_ascii=False)
+            if action == "list":
+                params: dict = {"sessionId": session}
+                if filter:
+                    params["filter"] = filter
+                return json.dumps(await _call("network_list", params), ensure_ascii=False)
+            if action == "detail":
+                return json.dumps(await _call("network_detail", {"sessionId": session, "requestId": request_id}), ensure_ascii=False)
             return f"未知 action: {action}"
         except BrowserError as e:
             return f"浏览器错误: {e}" + (" (可重新 snapshot 后重试)" if e.retryable else "")
