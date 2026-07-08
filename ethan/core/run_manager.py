@@ -50,6 +50,7 @@ class ChatRun:
     start_time: float = field(default_factory=time.monotonic)
     last_event_time: float = field(default_factory=time.monotonic)
     watchdog_checks: int = 0  # 已执行的 watchdog 检查次数
+    watchdog_task: asyncio.Task | None = None  # watchdog 强引用，finish() 时取消
 
     def emit(self, event: dict) -> None:
         """记录一个事件并扇出给所有当前订阅者（同步，无 await）。"""
@@ -75,6 +76,8 @@ class ChatRun:
     def finish(self) -> None:
         """producer 结束时调用：标记完成并给所有订阅者推哨兵。"""
         self.done = True
+        if self.watchdog_task is not None and not self.watchdog_task.done():
+            self.watchdog_task.cancel()
         for q in self.subscribers:
             q.put_nowait(_SENTINEL)
 
@@ -189,7 +192,6 @@ class RunManager:
             run.task.cancel()
         return True
 
-
     def create(self, session_id: str, consent: Any = None, user_id: str = "") -> ChatRun:
         """为 session 创建新 run。若已有未完成的 run，先取消它，避免两个 writer。"""
         old = self._runs.get(session_id)
@@ -198,8 +200,7 @@ class RunManager:
             old.task.cancel()
         run = ChatRun(session_id=session_id, user_id=user_id, consent=consent)
         self._runs[session_id] = run
-        # 启动 watchdog 任务
-        asyncio.create_task(_run_watchdog(run, self))
+        run.watchdog_task = asyncio.create_task(_run_watchdog(run, self))
         return run
 
     def schedule_removal(self, session_id: str) -> None:
@@ -215,4 +216,3 @@ class RunManager:
 
 
 SENTINEL = _SENTINEL
-
