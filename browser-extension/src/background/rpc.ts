@@ -21,8 +21,15 @@ import type {
   BrowserPageSnapshotParams,
   BrowserPageSnapshotResult,
   BrowserPageTypeParams,
+  BrowserPageUploadParams,
+  BrowserPageSavePdfParams,
+  BrowserPageSavePdfResult,
   BrowserPageWaitParams,
   BrowserPageWaitResult,
+  BrowserNetworkStartResult,
+  BrowserNetworkStopResult,
+  BrowserNetworkListResult,
+  BrowserNetworkDetailResult,
   BrowserSessionAttachCurrentParams,
   BrowserSessionAttachCurrentResult,
   BrowserSessionCloseParams,
@@ -119,6 +126,12 @@ export interface BrowserRequestDependencies {
   ) => Promise<BrowserPageActionResult>;
   pageWait: (params: BrowserPageWaitParams) => Promise<BrowserPageWaitResult>;
   pageEval: (params: BrowserPageEvalParams) => Promise<BrowserPageEvalResult>;
+  pageUpload: (params: BrowserPageUploadParams) => Promise<BrowserPageActionResult>;
+  pageSavePdf: (params: BrowserPageSavePdfParams) => Promise<BrowserPageSavePdfResult>;
+  networkStart: (params: { sessionId: string }) => Promise<BrowserNetworkStartResult>;
+  networkStop: (params: { sessionId: string }) => Promise<BrowserNetworkStopResult>;
+  networkList: (params: { sessionId: string; filter?: string }) => Promise<BrowserNetworkListResult>;
+  networkDetail: (params: { sessionId: string; requestId: string }) => Promise<BrowserNetworkDetailResult>;
 }
 
 const ALLOWED_METHODS = new Set<string>([
@@ -149,6 +162,12 @@ const ALLOWED_METHODS = new Set<string>([
   BROWSER_RPC_METHODS.pagesMouse,
   BROWSER_RPC_METHODS.pagesWait,
   BROWSER_RPC_METHODS.pagesEval,
+  BROWSER_RPC_METHODS.pagesUpload,
+  BROWSER_RPC_METHODS.pagesSavePdf,
+  BROWSER_RPC_METHODS.networkStart,
+  BROWSER_RPC_METHODS.networkStop,
+  BROWSER_RPC_METHODS.networkList,
+  BROWSER_RPC_METHODS.networkDetail,
 ]);
 
 function createSuccessResponse<T>(
@@ -842,9 +861,62 @@ export async function handleNativeRequest(
       );
     }
 
-    return createSuccessResponse(
+    if (message.method === BROWSER_RPC_METHODS.pagesEval) {
+      return createSuccessResponse(
+        message,
+        await deps.pageEval(normalizePageEvalParams(message.params)),
+      );
+    }
+
+    if (message.method === BROWSER_RPC_METHODS.pagesUpload) {
+      const p = ensureObjectParams(message.params, 'Invalid pages.upload params');
+      return createSuccessResponse(message, await deps.pageUpload({
+        sessionId: normalizeSessionId(p.sessionId),
+        ref: normalizeRequiredString(p.ref, 'ref', 'pages.upload'),
+        files: Array.isArray(p.files) ? p.files.map(f => String(f)) : [],
+      }));
+    }
+
+    if (message.method === BROWSER_RPC_METHODS.pagesSavePdf) {
+      const p = ensureObjectParams(message.params, 'Invalid pages.savePdf params');
+      return createSuccessResponse(message, await deps.pageSavePdf({
+        sessionId: normalizeSessionId(p.sessionId),
+        ...(typeof p.paperFormat === 'string' ? { paperFormat: p.paperFormat as 'a4' } : {}),
+        ...(typeof p.landscape === 'boolean' ? { landscape: p.landscape } : {}),
+        ...(typeof p.path === 'string' ? { path: p.path } : {}),
+      }));
+    }
+
+    if (message.method === BROWSER_RPC_METHODS.networkStart) {
+      const p = ensureObjectParams(message.params, 'Invalid network.start params');
+      return createSuccessResponse(message, await deps.networkStart({ sessionId: normalizeSessionId(p.sessionId) }));
+    }
+
+    if (message.method === BROWSER_RPC_METHODS.networkStop) {
+      const p = ensureObjectParams(message.params, 'Invalid network.stop params');
+      return createSuccessResponse(message, await deps.networkStop({ sessionId: normalizeSessionId(p.sessionId) }));
+    }
+
+    if (message.method === BROWSER_RPC_METHODS.networkList) {
+      const p = ensureObjectParams(message.params, 'Invalid network.list params');
+      return createSuccessResponse(message, await deps.networkList({
+        sessionId: normalizeSessionId(p.sessionId),
+        ...(typeof p.filter === 'string' ? { filter: p.filter } : {}),
+      }));
+    }
+
+    if (message.method === BROWSER_RPC_METHODS.networkDetail) {
+      const p = ensureObjectParams(message.params, 'Invalid network.detail params');
+      return createSuccessResponse(message, await deps.networkDetail({
+        sessionId: normalizeSessionId(p.sessionId),
+        requestId: normalizeRequiredString(p.requestId, 'requestId', 'network.detail'),
+      }));
+    }
+
+    return createErrorResponse(
       message,
-      await deps.pageEval(normalizePageEvalParams(message.params)),
+      BROWSER_RPC_ERROR_CODE.methodNotFound,
+      `Unhandled method: ${message.method}`,
     );
   } catch (error) {
     const messageText = error instanceof Error ? error.message : String(error);

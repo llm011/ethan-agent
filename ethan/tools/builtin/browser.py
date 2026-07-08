@@ -1,9 +1,10 @@
-"""Browser 工具 —— agent 通过这三个工具操作本机 Chrome(经 BrowserHub → 扩展 → CDP)。
+"""Browser 工具 —— agent 通过这四个工具操作本机 Chrome(经 BrowserHub → 扩展 → CDP)。
 
   browser_session : create / attach_current / list / rename / release / close
-  browser_tab     : open / list / user_list / attach / active / activate / close
+  browser_tab     : open / list / user_list / find_tab / attach / active / activate / close
   browser_page    : snapshot / click / fill / type / press / hover / select /
-                    scroll / scroll_into_view / screenshot / get / mouse / wait / eval
+                    scroll / scroll_into_view / screenshot / upload / save_pdf / get / mouse / wait / eval
+  browser_network : start / stop / list / detail
 
 授权(方案 Q6):会话级一次性。某 ethan 会话首次调用任意 browser 工具触发一次 consent,
 批准后该会话内全部 browser 操作(含 eval)放行。consent_check 读当前会话授权态;
@@ -158,21 +159,22 @@ class BrowserTabTool(_BrowserToolBase):
     name = "browser_tab"
     description = (
         "管理 session 内的 tab。open 新开 tab;list 列出 session 内 tab;"
-        "user_list 列出用户所有 tab;attach 把已有 tab 纳入 session;"
-        "active 取当前活动 tab;activate 切换活动 tab;close 关闭 tab。"
+        "user_list 列出用户所有 tab;find_tab 按 URL/域名查找已开 tab(active_only=true 取用户当前活动 tab);"
+        "attach 把已有 tab 纳入 session;active 取当前活动 tab;activate 切换活动 tab;close 关闭 tab。"
     )
     parameters = {
         "type": "object",
         "properties": {
-            "action": {"type": "string", "enum": ["open", "list", "user_list", "attach", "active", "activate", "close"]},
+            "action": {"type": "string", "enum": ["open", "list", "user_list", "find_tab", "attach", "active", "activate", "close"]},
             "session": {"type": "string", "description": "目标 session_id"},
             "tab": {"type": "string", "description": "目标 tab_id(attach/activate/close)"},
-            "url": {"type": "string", "description": "open 时打开的 URL"},
+            "url": {"type": "string", "description": "open 时打开的 URL;find_tab 时按域名或 URL 前缀匹配"},
+            "active_only": {"type": "boolean", "description": "find_tab 专用:true=只返回用户当前活动的 tab,忽略 url"},
         },
         "required": ["action"],
     }
 
-    async def run(self, action: str, session: str = "", tab: str = "", url: str = "") -> str:
+    async def run(self, action: str, session: str = "", tab: str = "", url: str = "", active_only: bool = False) -> str:
         self._authorize()
         try:
             if action == "open":
@@ -183,6 +185,23 @@ class BrowserTabTool(_BrowserToolBase):
                                               browser_session_id=session), ensure_ascii=False)
             if action == "user_list":
                 return json.dumps(await _call("tab_user_list", {}), ensure_ascii=False)
+            if action == "find_tab":
+                result = await _call("tab_user_list", {})
+                tabs = result.get("tabs", []) if isinstance(result, dict) else []
+                if active_only:
+                    matched = [t for t in tabs if t.get("active")]
+                elif url:
+                    from urllib.parse import urlparse
+                    try:
+                        target = urlparse(url).netloc or url
+                    except Exception:
+                        target = url
+                    matched = [t for t in tabs if target in (t.get("url") or "")]
+                else:
+                    matched = tabs
+                if not matched:
+                    return json.dumps({"found": False, "tab": None}, ensure_ascii=False)
+                return json.dumps({"found": True, "tab": matched[0]}, ensure_ascii=False)
             if action == "attach":
                 return json.dumps(await _call("tab_attach", {"sessionId": session, "tabId": tab},
                                               browser_session_id=session), ensure_ascii=False)
@@ -206,7 +225,7 @@ class BrowserPageTool(_BrowserToolBase):
         "操作 session 的 active tab。snapshot 取页面 AX 树+ref(默认 interactive+compact);"
         "click/fill/type/press/hover/select/scroll_into_view 用 ref 交互;"
         "scroll 滚动;mouse 发坐标级鼠标事件;get 读 title/url/text/value/html/box;"
-        "screenshot 截图;wait 等待;eval 执行页面 JS(高权限)。"
+        "screenshot 截图;upload 上传文件;wait 等待;eval 执行页面 JS(高权限)。"
         "ref 仅对最近一次 snapshot 可靠,页面跳转/刷新后需重新 snapshot。"
     )
     parameters = {
@@ -214,13 +233,17 @@ class BrowserPageTool(_BrowserToolBase):
         "properties": {
             "action": {"type": "string", "enum": [
                 "snapshot", "click", "fill", "type", "press", "hover", "select",
-                "scroll", "scroll_into_view", "screenshot", "get", "mouse", "wait", "eval",
+                "scroll", "scroll_into_view", "screenshot", "upload", "save_pdf", "get", "mouse", "wait", "eval",
             ]},
             "session": {"type": "string", "description": "目标 session_id"},
-            "ref": {"type": "string", "description": "snapshot 返回的元素 ref(click/fill/type/hover/select/get/scroll_into_view)"},
+            "ref": {"type": "string", "description": "snapshot 返回的元素 ref(click/fill/type/hover/select/get/scroll_into_view/upload)"},
             "text": {"type": "string", "description": "fill/type 输入的文本"},
             "key": {"type": "string", "description": "press 的按键,如 Enter"},
             "value": {"type": "string", "description": "select 的选项值"},
+            "files": {"type": "array", "items": {"type": "string"}, "description": "upload 时的本地文件路径列表"},
+            "pdf_path": {"type": "string", "description": "save_pdf 输出路径(可选,不填自动生成)"},
+            "pdf_format": {"type": "string", "enum": ["a4", "letter", "legal", "a3", "tabloid"], "description": "save_pdf 纸张规格,默认 a4"},
+            "landscape": {"type": "boolean", "description": "save_pdf 横向纸张"},
             "what": {"type": "string", "enum": ["title", "url", "text", "value", "html", "box"], "description": "get 读取的内容"},
             "direction": {"type": "string", "enum": ["up", "down", "left", "right"], "description": "scroll 方向"},
             "pixels": {"type": "integer", "description": "scroll 像素"},
@@ -323,9 +346,69 @@ class BrowserPageTool(_BrowserToolBase):
                 from ethan.browser.screenshot import save_screenshot
                 result = await _call("page_screenshot", {"sessionId": session}, browser_session_id=session)
                 return await save_screenshot(result)
+            if action == "upload":
+                return _with_step(json.dumps(await _call(
+                    "page_upload",
+                    {"sessionId": session, "ref": kw.get("ref"), "files": kw.get("files", [])},
+                    browser_session_id=session,
+                ), ensure_ascii=False))
+            if action == "save_pdf":
+                import time as _time
+
+                from ethan.browser.screenshot import shots_dir
+                params: dict = {"sessionId": session}
+                if kw.get("pdf_format"):
+                    params["paperFormat"] = kw["pdf_format"]
+                if kw.get("landscape") is not None:
+                    params["landscape"] = kw["landscape"]
+                out_path = kw.get("pdf_path")
+                if not out_path:
+                    d = shots_dir().parent / "browser-pdfs"
+                    d.mkdir(parents=True, exist_ok=True)
+                    out_path = str(d / f"page-{int(_time.time() * 1000)}.pdf")
+                params["path"] = out_path
+                result = await _call("page_save_pdf", params, browser_session_id=session)
+                return json.dumps({**(result or {}), "path": out_path}, ensure_ascii=False)
             if action == "eval":
                 return _with_step(json.dumps(await _call("page_eval", {"sessionId": session, "script": kw.get("script", "")},
                                               browser_session_id=session), ensure_ascii=False))
+            return f"未知 action: {action}"
+        except BrowserError as e:
+            return f"浏览器错误: {e}" + (" (可重新 snapshot 后重试)" if e.retryable else "")
+
+
+class BrowserNetworkTool(_BrowserToolBase):
+    name = "browser_network"
+    description = (
+        "监控 session 的网络请求。start 开始抓包;stop 停止并清空;list 列出已捕获请求(可按 URL/类型过滤);"
+        "detail 查看指定请求的详情(含响应体,最多 10000 字符)。"
+        "常用场景:抓 API 响应数据代替从 DOM 里抠,排查请求失败原因。"
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "action": {"type": "string", "enum": ["start", "stop", "list", "detail"]},
+            "session": {"type": "string", "description": "目标 session_id"},
+            "filter": {"type": "string", "description": "list 时按 URL 或资源类型过滤(字符串包含匹配)"},
+            "request_id": {"type": "string", "description": "detail 时的 requestId"},
+        },
+        "required": ["action", "session"],
+    }
+
+    async def run(self, action: str, session: str = "", filter: str = "", request_id: str = "") -> str:  # noqa: A002
+        self._authorize()
+        try:
+            if action == "start":
+                return json.dumps(await _call("network_start", {"sessionId": session}), ensure_ascii=False)
+            if action == "stop":
+                return json.dumps(await _call("network_stop", {"sessionId": session}), ensure_ascii=False)
+            if action == "list":
+                params: dict = {"sessionId": session}
+                if filter:
+                    params["filter"] = filter
+                return json.dumps(await _call("network_list", params), ensure_ascii=False)
+            if action == "detail":
+                return json.dumps(await _call("network_detail", {"sessionId": session, "requestId": request_id}), ensure_ascii=False)
             return f"未知 action: {action}"
         except BrowserError as e:
             return f"浏览器错误: {e}" + (" (可重新 snapshot 后重试)" if e.retryable else "")
