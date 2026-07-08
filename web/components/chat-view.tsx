@@ -375,7 +375,9 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
     // ── /command 拦截：以 / 开头按命令处理，不发给 Agent ──
     const trimmed = text.trim();
-    if (trimmed.startsWith("/")) {
+    // /btw 先判断，避免被当作未知命令拦截
+    const isBtw = trimmed.toLowerCase().startsWith("/btw ");
+    if (trimmed.startsWith("/") && !isBtw) {
       const [cmd, ...rest] = trimmed.slice(1).split(/\s+/);
       const arg = rest.join(" ").trim();
       const now = Date.now() / 1000;
@@ -400,6 +402,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           "- `/compact` — 压缩历史对话为摘要，释放上下文\n" +
           "- `/sessions` — 列出最近的会话\n" +
           "- `/stop` — 停止当前进行中的回复\n" +
+          "- `/btw <问题>` — 不带历史的单轮轻量查询\n" +
           "- `/help` — 显示本帮助\n\n" +
           "（`/model` `/token` 请用顶部下拉和设置页；其它消息正常对话即可）"
         );
@@ -460,8 +463,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     }
 
     // /btw 顺带一问：不带历史，单轮轻量查询
-    const isBtw = text.trim().toLowerCase().startsWith("/btw ");
-    const btwQuestion = isBtw ? text.trim().slice(4).trim() : null;
+    const btwQuestion = isBtw ? trimmed.slice(4).trim() : null;
 
     let sessionId = activeSession;
     if (!sessionId) {
