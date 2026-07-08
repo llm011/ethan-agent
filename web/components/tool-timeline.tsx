@@ -199,7 +199,7 @@ function StepRow({ step, isLast }: { step: ToolStep; isLast: boolean }) {
             {step.result_detail && (
               <div className="px-3 py-2">
                 <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">输出</div>
-                <pre className="text-sm text-foreground/85 whitespace-pre-wrap break-all font-mono leading-relaxed max-h-80 overflow-y-auto">
+                <pre className="text-sm text-slate-100 bg-slate-900 whitespace-pre-wrap break-all font-mono leading-relaxed max-h-80 overflow-y-auto rounded p-2">
                   {step.result_detail}
                 </pre>
               </div>
