@@ -16,6 +16,14 @@ def _friendly_error(e: Exception, agent) -> str:
             f"当前模型 {model_id} 的 provider 未配置 api_key 或鉴权失败。"
             "请在设置页切换到已配置的模型，或在 ~/.ethan/config.yaml 的 providers 段补上对应 api_key。"
         )
+    # Gemini 地区限制（大陆 IP 直接请求 Google API）
+    if "user location is not supported" in lower or "failed_precondition" in lower:
+        model = getattr(agent, "_provider", None)
+        model_id = getattr(model, "model", "") if model else ""
+        return (
+            f"当前模型 {model_id} 的 API 不支持当前所在地区（Error 400 FAILED_PRECONDITION）。"
+            "请在设置页切换到其他模型（如 Claude / OpenAI），或为服务端配置代理后重试。"
+        )
     # 网络层 fetch failed（多见于第三方中转服务挂了）
     if "fetch failed" in lower or "connection" in lower or "timeout" in lower:
         return f"请求上游服务失败（可能中转服务不可达）：{msg[:120]}。建议在设置页切换 model 重试。"
