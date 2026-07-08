@@ -1,20 +1,52 @@
-from ethan.core.config import get_config
+from ethan.core.config import ProviderConfig, get_config
 from ethan.providers.base import BaseProvider
 
 
+def _build_single_provider(provider_key: str, model_id: str,
+                            provider_cfg: ProviderConfig, proxy: str | None) -> BaseProvider:
+    provider_type = getattr(provider_cfg, "type", None) or (
+        "anthropic" if provider_key == "anthropic" else "openai_compat"
+    )
+    if provider_type == "anthropic":
+        from ethan.providers.anthropic import AnthropicProvider
+        return AnthropicProvider(provider_cfg=provider_cfg, model=model_id, proxy=proxy)
+    else:
+        from ethan.providers.openai_compat import OpenAICompatProvider
+        return OpenAICompatProvider(provider_cfg=provider_cfg, model=model_id, proxy=proxy)
+
+
+def _parse_fallback_entry(entry: str) -> tuple[str, str | None]:
+    """Parse a fallback_providers entry.
+
+    Supported formats:
+      "openai_compat"             → (provider_key="openai_compat", model=None)  reuse primary model id
+      "openai_compat/gpt-4o-mini" → (provider_key="openai_compat", model="gpt-4o-mini")
+    """
+    if "/" in entry:
+        key, model = entry.split("/", 1)
+        return key.strip(), model.strip()
+    return entry.strip(), None
+
+
 def create_provider(model: str | None = None) -> BaseProvider:
-    """根据 model id 或 alias 从配置中查找对应 provider，创建并返回。"""
+    """根据 model id 或 alias 从配置中查找对应 provider，创建并返回。
+
+    如果模型配置了 fallback_providers，返回 FallbackProvider（依次尝试主 provider
+    和各 fallback；主 provider 断路时自动跳过，按指数退避恢复探测）。
+
+    fallback_providers 支持两种写法：
+      - "openai_compat"             — 用同一个 model id 打备选 provider
+      - "openai_compat/gpt-4o-mini" — 用指定的 model id 打备选 provider
+    """
     config = get_config()
     model_id = model or config.defaults.model
     proxy = config.network.proxy
 
     entry = config.get_model(model_id)
     if entry is not None:
-        # alias 命中时，用真实的 model id 去调 API
         model_id = entry.id
         provider_key = entry.provider
     else:
-        # 兜底：如果用户输入的带有 provider_name/model_id 格式，我们在回传给 SDK 前剥离 provider 名字
         if "/" in model_id:
             provider_key, model_id = model_id.split("/", 1)
         elif model_id.startswith("claude"):
@@ -26,15 +58,37 @@ def create_provider(model: str | None = None) -> BaseProvider:
     if provider_cfg is None:
         raise ValueError(f"Provider '{provider_key}' not found in config. Run: ethan model add")
 
-    # provider 级别代理优先，全局兜底
     effective_proxy = provider_cfg.proxy or proxy
+    primary = _build_single_provider(provider_key, model_id, provider_cfg, effective_proxy)
 
-    # 判断具体的 Provider 类型
-    provider_type = getattr(provider_cfg, "type", None) or ("anthropic" if provider_key == "anthropic" else "openai_compat")
+    # Build fallback chain if configured
+    fallback_keys: list[str] = getattr(entry, "fallback_providers", []) if entry else []
+    if not fallback_keys:
+        return primary
 
-    if provider_type == "anthropic":
-        from ethan.providers.anthropic import AnthropicProvider  # lazy: avoids top-level SDK import
-        return AnthropicProvider(provider_cfg=provider_cfg, model=model_id, proxy=effective_proxy)
-    else:
-        from ethan.providers.openai_compat import OpenAICompatProvider  # lazy: avoids top-level SDK import
-        return OpenAICompatProvider(provider_cfg=provider_cfg, model=model_id, proxy=effective_proxy)
+    pairs: list[tuple[str, BaseProvider]] = [(provider_key, primary)]
+    for fb_entry in fallback_keys:
+        fb_key, fb_model_id = _parse_fallback_entry(fb_entry)
+        fb_model = fb_model_id or model_id  # default: same model id as primary
+        fb_cfg = config.get_provider_config(fb_key)
+        if fb_cfg is None:
+            import logging
+            logging.getLogger(__name__).warning(
+                "fallback provider '%s' not found in config, skipping", fb_key
+            )
+            continue
+        fb_proxy = fb_cfg.proxy or proxy
+        try:
+            fb_provider = _build_single_provider(fb_key, fb_model, fb_cfg, fb_proxy)
+            pairs.append((fb_key, fb_provider))
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning(
+                "failed to create fallback provider '%s': %s", fb_key, exc
+            )
+
+    if len(pairs) == 1:
+        return primary
+
+    from ethan.providers.fallback import FallbackProvider
+    return FallbackProvider(pairs)
