@@ -268,7 +268,7 @@ async def _run_generation(
         # 已有进度行（有 tool_steps）则 UPDATE；否则新建一条 assistant 消息。
         # 两种情形都覆盖：(1) 工具调用中途报错 (2) provider 直接失败、无任何工具步骤。
         if session_id:
-            error_content = (collector.full + "\n\n" if collector.full else "") + f"_{err_text}_"
+            error_content = (collector.full + "\n\n" if collector.full else "") + err_text
             err_msg = Message(
                 role="assistant",
                 content=error_content,
