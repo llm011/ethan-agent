@@ -158,21 +158,22 @@ class BrowserTabTool(_BrowserToolBase):
     name = "browser_tab"
     description = (
         "管理 session 内的 tab。open 新开 tab;list 列出 session 内 tab;"
-        "user_list 列出用户所有 tab;attach 把已有 tab 纳入 session;"
-        "active 取当前活动 tab;activate 切换活动 tab;close 关闭 tab。"
+        "user_list 列出用户所有 tab;find_tab 按 URL/域名查找已开 tab(active_only=true 取用户当前活动 tab);"
+        "attach 把已有 tab 纳入 session;active 取当前活动 tab;activate 切换活动 tab;close 关闭 tab。"
     )
     parameters = {
         "type": "object",
         "properties": {
-            "action": {"type": "string", "enum": ["open", "list", "user_list", "attach", "active", "activate", "close"]},
+            "action": {"type": "string", "enum": ["open", "list", "user_list", "find_tab", "attach", "active", "activate", "close"]},
             "session": {"type": "string", "description": "目标 session_id"},
             "tab": {"type": "string", "description": "目标 tab_id(attach/activate/close)"},
-            "url": {"type": "string", "description": "open 时打开的 URL"},
+            "url": {"type": "string", "description": "open 时打开的 URL;find_tab 时按域名或 URL 前缀匹配"},
+            "active_only": {"type": "boolean", "description": "find_tab 专用:true=只返回用户当前活动的 tab,忽略 url"},
         },
         "required": ["action"],
     }
 
-    async def run(self, action: str, session: str = "", tab: str = "", url: str = "") -> str:
+    async def run(self, action: str, session: str = "", tab: str = "", url: str = "", active_only: bool = False) -> str:
         self._authorize()
         try:
             if action == "open":
@@ -183,6 +184,23 @@ class BrowserTabTool(_BrowserToolBase):
                                               browser_session_id=session), ensure_ascii=False)
             if action == "user_list":
                 return json.dumps(await _call("tab_user_list", {}), ensure_ascii=False)
+            if action == "find_tab":
+                result = await _call("tab_user_list", {})
+                tabs = result.get("tabs", []) if isinstance(result, dict) else []
+                if active_only:
+                    matched = [t for t in tabs if t.get("active")]
+                elif url:
+                    from urllib.parse import urlparse
+                    try:
+                        target = urlparse(url).netloc or url
+                    except Exception:
+                        target = url
+                    matched = [t for t in tabs if target in (t.get("url") or "")]
+                else:
+                    matched = tabs
+                if not matched:
+                    return json.dumps({"found": False, "tab": None}, ensure_ascii=False)
+                return json.dumps({"found": True, "tab": matched[0]}, ensure_ascii=False)
             if action == "attach":
                 return json.dumps(await _call("tab_attach", {"sessionId": session, "tabId": tab},
                                               browser_session_id=session), ensure_ascii=False)
@@ -206,7 +224,7 @@ class BrowserPageTool(_BrowserToolBase):
         "操作 session 的 active tab。snapshot 取页面 AX 树+ref(默认 interactive+compact);"
         "click/fill/type/press/hover/select/scroll_into_view 用 ref 交互;"
         "scroll 滚动;mouse 发坐标级鼠标事件;get 读 title/url/text/value/html/box;"
-        "screenshot 截图;wait 等待;eval 执行页面 JS(高权限)。"
+        "screenshot 截图;upload 上传文件;wait 等待;eval 执行页面 JS(高权限)。"
         "ref 仅对最近一次 snapshot 可靠,页面跳转/刷新后需重新 snapshot。"
     )
     parameters = {
@@ -214,13 +232,14 @@ class BrowserPageTool(_BrowserToolBase):
         "properties": {
             "action": {"type": "string", "enum": [
                 "snapshot", "click", "fill", "type", "press", "hover", "select",
-                "scroll", "scroll_into_view", "screenshot", "get", "mouse", "wait", "eval",
+                "scroll", "scroll_into_view", "screenshot", "upload", "get", "mouse", "wait", "eval",
             ]},
             "session": {"type": "string", "description": "目标 session_id"},
-            "ref": {"type": "string", "description": "snapshot 返回的元素 ref(click/fill/type/hover/select/get/scroll_into_view)"},
+            "ref": {"type": "string", "description": "snapshot 返回的元素 ref(click/fill/type/hover/select/get/scroll_into_view/upload)"},
             "text": {"type": "string", "description": "fill/type 输入的文本"},
             "key": {"type": "string", "description": "press 的按键,如 Enter"},
             "value": {"type": "string", "description": "select 的选项值"},
+            "files": {"type": "array", "items": {"type": "string"}, "description": "upload 时的本地文件路径列表"},
             "what": {"type": "string", "enum": ["title", "url", "text", "value", "html", "box"], "description": "get 读取的内容"},
             "direction": {"type": "string", "enum": ["up", "down", "left", "right"], "description": "scroll 方向"},
             "pixels": {"type": "integer", "description": "scroll 像素"},
@@ -323,6 +342,12 @@ class BrowserPageTool(_BrowserToolBase):
                 from ethan.browser.screenshot import save_screenshot
                 result = await _call("page_screenshot", {"sessionId": session}, browser_session_id=session)
                 return await save_screenshot(result)
+            if action == "upload":
+                return _with_step(json.dumps(await _call(
+                    "page_upload",
+                    {"sessionId": session, "ref": kw.get("ref"), "files": kw.get("files", [])},
+                    browser_session_id=session,
+                ), ensure_ascii=False))
             if action == "eval":
                 return _with_step(json.dumps(await _call("page_eval", {"sessionId": session, "script": kw.get("script", "")},
                                               browser_session_id=session), ensure_ascii=False))

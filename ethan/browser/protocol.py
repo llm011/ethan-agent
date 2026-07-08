@@ -37,6 +37,7 @@ METHODS = {
     "page_mouse": "pages.mouse",
     "page_wait": "pages.wait",
     "page_eval": "pages.eval",
+    "page_upload": "pages.upload",
 }
 
 # JSON-RPC error code(对齐 Ethan BROWSER_RPC_ERROR_CODE)
