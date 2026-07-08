@@ -63,7 +63,7 @@ export function ChatInput({
 
   // 读图片文件为 base64 dataUrl，返回 PendingFile
   const readImageFile = (file: File): Promise<PendingFile> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => {
         resolve({
@@ -73,6 +73,7 @@ export function ChatInput({
           dataUrl: reader.result as string,
         });
       };
+      reader.onerror = () => reject(new Error(`Failed to read file: ${file.name}`));
       reader.readAsDataURL(file);
     });
 

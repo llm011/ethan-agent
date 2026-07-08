@@ -50,7 +50,12 @@ def _get_cached_skill_registry(user_id: str) -> SkillRegistry:
     from ethan.core.paths import user_skills_dir
     skills_dir = user_skills_dir()
     try:
-        mtime = skills_dir.stat().st_mtime if skills_dir.exists() else 0.0
+        if skills_dir.exists():
+            mtimes = [skills_dir.stat().st_mtime]
+            mtimes.extend(p.stat().st_mtime for p in skills_dir.rglob("*") if p.is_file())
+            mtime = max(mtimes)
+        else:
+            mtime = 0.0
     except OSError:
         mtime = 0.0
 
