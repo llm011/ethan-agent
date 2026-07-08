@@ -507,25 +507,11 @@ export class BrowserPageController {
   async upload(params: BrowserPageUploadParams): Promise<BrowserPageActionResult> {
     return this.withPage(params.sessionId, async ({ tab, client }) => {
       const resolved = await this.resolveRef(client, tab, params.ref, false);
-      const result = await this.callFunctionOn<{ ok: boolean; error?: string }>(
-        client,
-        resolved.objectId,
-        `function(files) {
-          if (!(this instanceof HTMLInputElement) || this.type !== 'file') {
-            return { ok: false, error: 'NOT_FILE_INPUT' };
-          }
-          const dt = new DataTransfer();
-          files.forEach(name => {
-            dt.items.add(new File([''], name));
-          });
-          Object.defineProperty(this, 'files', { value: dt.files, configurable: true });
-          this.dispatchEvent(new Event('change', { bubbles: true }));
-          this.dispatchEvent(new Event('input', { bubbles: true }));
-          return { ok: true };
-        }`,
-        [params.files],
-      );
-      this.ensureRuntimeOk(result, params.ref);
+      // DOM.setFileInputFiles 从本地路径读取真实文件内容，效果等同用户手动选文件。
+      await client.send('DOM.setFileInputFiles', {
+        backendNodeId: resolved.entry.backendNodeId,
+        files: params.files,
+      });
       return this.createActionResult(params.sessionId, tab, params.ref);
     });
   }
