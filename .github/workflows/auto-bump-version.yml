@@ -1,0 +1,43 @@
+name: Auto bump version on merge to main
+
+# 前置条件：在仓库 Settings → Secrets 里添加名为 PAT 的 Personal Access Token
+# （需要 contents: write 权限）。用 PAT 推送的 tag 才能触发 publish-pypi.yml，
+# 用默认 GITHUB_TOKEN 推送的 tag 不会触发其他 workflow（GitHub 限制）。
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  bump:
+    # 跳过 version bump 自身产生的 push，防止无限循环
+    if: "!startsWith(github.event.head_commit.message, 'chore: bump version')"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.PAT }}
+
+      - name: Bump patch version
+        id: bump
+        run: |
+          OLD=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$OLD"
+          NEW="$MAJOR.$MINOR.$((PATCH + 1))"
+          sed -i "s/^version = \"$OLD\"/version = \"$NEW\"/" pyproject.toml
+          echo "version=$NEW" >> $GITHUB_OUTPUT
+
+      - name: Commit and push tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml
+          git commit -m "chore: bump version to v${{ steps.bump.outputs.version }}"
+          git tag "v${{ steps.bump.outputs.version }}"
+          git push origin main
+          git push origin "v${{ steps.bump.outputs.version }}"
