@@ -34,16 +34,17 @@ class OpenAICompatProvider(BaseProvider):
 
     def _to_openai_messages(self, messages: list[Message]) -> list[dict]:
         result = []
+        # 第一遍：按原顺序转换所有消息，图片 user 消息先暂存
+        pending_img_messages: list[dict] = []
+
         for msg in messages:
             if msg.role == "tool":
+                result.append({
+                    "role": "tool",
+                    "tool_call_id": msg.tool_call_id,
+                    "content": msg.content or "Screenshot taken.",
+                })
                 if msg.images:
-                    # OpenAI 的 tool result 不支持 image_url content，
-                    # 把截图转成紧跟其后的一条独立 user 消息
-                    result.append({
-                        "role": "tool",
-                        "tool_call_id": msg.tool_call_id,
-                        "content": msg.content or "Screenshot taken.",
-                    })
                     img_parts: list[dict] = []
                     for img in msg.images:
                         media_type = img.get("media_type", "image/png")
@@ -53,14 +54,12 @@ class OpenAICompatProvider(BaseProvider):
                             "image_url": {"url": f"data:{media_type};base64,{data}"},
                         })
                     img_parts.append({"type": "text", "text": "Above is the screenshot result."})
-                    result.append({"role": "user", "content": img_parts})
-                else:
-                    result.append({
-                        "role": "tool",
-                        "tool_call_id": msg.tool_call_id,
-                        "content": msg.content,
-                    })
+                    pending_img_messages.append({"role": "user", "content": img_parts})
             elif msg.is_tool_call:
+                # 遇到新的 assistant tool_call 消息前，先把积压的图片 user 消息刷出
+                # （说明上一组 tool 消息已全部到齐）
+                result.extend(pending_img_messages)
+                pending_img_messages = []
                 oai_tool_calls = [
                     {
                         "id": tc.id,
@@ -78,6 +77,9 @@ class OpenAICompatProvider(BaseProvider):
                     "tool_calls": oai_tool_calls,
                 })
             elif msg.role == "user" and msg.images:
+                # 普通用户图片消息（发送时粘贴的图），同样先刷积压图片
+                result.extend(pending_img_messages)
+                pending_img_messages = []
                 content = []
                 for img in msg.images:
                     media_type = img.get("media_type", "image/png")
@@ -90,7 +92,13 @@ class OpenAICompatProvider(BaseProvider):
                     content.append({"type": "text", "text": msg.content})
                 result.append({"role": "user", "content": content})
             else:
+                # 非 tool 消息：刷积压图片后追加
+                result.extend(pending_img_messages)
+                pending_img_messages = []
                 result.append({"role": msg.role, "content": msg.content})
+
+        # 末尾剩余的图片消息（最后一组 tool messages 后面没有后续消息时）
+        result.extend(pending_img_messages)
         return result
 
     def _to_openai_tools(self, tools: list[ToolDefinition]) -> list[dict]:

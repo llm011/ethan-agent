@@ -26,7 +26,11 @@ _computer_init_failed: bool = False
 
 
 async def _get_interface():
-    """获取 cua Computer 接口（懒连接，失败后不重试）。"""
+    """获取 cua Computer 接口（懒连接）。
+
+    ImportError（包未安装）→ 永久标记，不重试。
+    连接失败（cua-driver 没起）→ 每次调用都重试，方便用户启动 driver 后立即可用。
+    """
     global _computer, _computer_lock, _computer_init_failed
 
     if _computer_lock is None:
@@ -35,9 +39,7 @@ async def _get_interface():
     async with _computer_lock:
         if _computer_init_failed:
             raise RuntimeError(
-                "cua-driver 连接失败。请先安装并启动 cua-driver：\n"
-                "  curl -fsSL https://raw.githubusercontent.com/trycua/cua/main/libs/cua-driver/scripts/install.sh | bash\n"
-                "  cua-driver serve"
+                "cua-computer 包未安装。请运行：uv add cua-computer"
             )
         if _computer is not None:
             return _computer.interface
@@ -45,7 +47,7 @@ async def _get_interface():
         try:
             from computer import Computer  # noqa: PLC0415
         except ImportError:
-            _computer_init_failed = True
+            _computer_init_failed = True  # 包不存在，永久标记
             raise RuntimeError(
                 "cua-computer 包未安装。请运行：uv add cua-computer"
             )
@@ -57,8 +59,14 @@ async def _get_interface():
             logger.info("[ComputerUse] 已连接 cua-driver (localhost:8000)")
             return _computer.interface
         except Exception as e:
-            _computer_init_failed = True
-            raise RuntimeError(f"无法连接 cua-driver (localhost:8000)：{e}") from e
+            # 连接失败不永久标记——driver 没起时 _computer 保持 None，
+            # 下次调用会重新尝试，用户启动 driver 后无需重启 ethan。
+            raise RuntimeError(
+                f"无法连接 cua-driver (localhost:8000)：{e}\n"
+                "请先安装并启动 cua-driver：\n"
+                "  curl -fsSL https://raw.githubusercontent.com/trycua/cua/main/libs/cua-driver/scripts/install.sh | bash\n"
+                "  cua-driver serve"
+            ) from e
 
 
 class ComputerUseTool(BaseTool):
@@ -204,12 +212,18 @@ class ComputerUseTool(BaseTool):
             elif action == "scroll":
                 if x is None or y is None:
                     return ToolResult(tool_call_id="", content="scroll requires x and y", is_error=True)
+                await iface.move_cursor(x, y)
                 if direction == "up":
                     await iface.scroll_up(clicks)
                 elif direction == "down":
                     await iface.scroll_down(clicks)
                 else:
-                    await iface.scroll(x, y)
+                    # left/right 不被 cua GenericInterface 原生支持，退化为通知
+                    return ToolResult(
+                        tool_call_id="",
+                        content=f"Horizontal scroll ({direction}) is not supported by cua-driver. Use keyboard shortcuts instead (e.g. shift+scroll).",
+                        is_error=True,
+                    )
                 return f"Scrolled {direction} {clicks} clicks at ({x}, {y})"
 
             elif action == "open":

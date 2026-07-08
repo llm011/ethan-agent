@@ -131,12 +131,12 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
     # 同一套结构化 card 数据，按渠道选渲染目标（见 UiCardTool）。api 等无渲染器的渠道不暴露。
     if channel in ("web", "repl", "lark"):
         registry.register(UiCardTool(channel=channel))
-    # computer_use：依赖 cua-computer 包 + cua-driver 后台服务（可选，缺失时静默跳过）
+    # computer_use：依赖 cua-computer 包 + cua-driver 后台服务（可选，包未安装时静默跳过）
     try:
         from ethan.tools.builtin.computer_use import ComputerUseTool  # noqa: PLC0415
         registry.register(ComputerUseTool())
-    except (ImportError, Exception):
-        pass
+    except ImportError:
+        pass  # cua-computer 未安装，工具不可用
     # 工具发现元工具：fast 档只广播常驻工具，模型需要长尾能力时用它检索并激活。
     # 持有 registry 引用以便检索；放最后确保它能看到上面注册的全部工具。
     registry.register(FindToolsTool(registry))
