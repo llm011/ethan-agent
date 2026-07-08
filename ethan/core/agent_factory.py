@@ -41,6 +41,33 @@ from ethan.tools.builtin.web import WebFetchTool
 from ethan.tools.builtin.web_search import WebSearchTool
 from ethan.tools.registry import ToolRegistry
 
+# 进程级 SkillRegistry 缓存：{user_id: (skills_dir_mtime, registry)}
+# skills_dir mtime 变了（安装/删除 skill）才重建，避免每请求读 100+ 文件。
+_SKILL_CACHE: dict[str, tuple[float, SkillRegistry]] = {}
+
+
+def _get_cached_skill_registry(user_id: str) -> SkillRegistry:
+    from ethan.core.paths import user_skills_dir
+    skills_dir = user_skills_dir()
+    try:
+        if skills_dir.exists():
+            mtimes = [skills_dir.stat().st_mtime]
+            mtimes.extend(p.stat().st_mtime for p in skills_dir.rglob("*") if p.is_file())
+            mtime = max(mtimes)
+        else:
+            mtime = 0.0
+    except OSError:
+        mtime = 0.0
+
+    cached = _SKILL_CACHE.get(user_id)
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
+
+    registry = SkillRegistry(user_id=user_id)
+    registry.load()
+    _SKILL_CACHE[user_id] = (mtime, registry)
+    return registry
+
 
 def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str = "web") -> ToolRegistry:
     """构建工具注册表。user_id 透传给需要它的工具（Schedule/Knowledge/Memory 等）。
@@ -123,6 +150,5 @@ def create_agent(
         set_user_id(user_id)
     ensure_user_dirs()
     registry = build_tool_registry(user_id=user_id, toolset=toolset, channel=channel)
-    skills = SkillRegistry(user_id=user_id)
-    skills.load()
+    skills = _get_cached_skill_registry(user_id)
     return Agent(tool_registry=registry, skill_registry=skills, model=model, channel=channel, user_id=user_id, mode=mode)

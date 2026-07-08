@@ -58,6 +58,18 @@ class OpenAICompatProvider(BaseProvider):
                     "content": msg.content or None,
                     "tool_calls": oai_tool_calls,
                 })
+            elif msg.role == "user" and msg.images:
+                content = []
+                for img in msg.images:
+                    media_type = img.get("media_type", "image/png")
+                    data = img["data"]
+                    content.append({
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{media_type};base64,{data}"},
+                    })
+                if msg.content:
+                    content.append({"type": "text", "text": msg.content})
+                result.append({"role": "user", "content": content})
             else:
                 result.append({"role": msg.role, "content": msg.content})
         return result

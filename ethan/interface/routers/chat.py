@@ -63,7 +63,10 @@ async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
     from .helpers import _with_quote
     set_session_id(req.session_id or "")  # browser 工具按对话隔离/授权
     agent = create_agent(req.model, channel=req.channel, user_id=user_id, mode=req.mode)
-    messages = [Message(role=m["role"], content=m.get("content", "")) for m in req.messages]
+    messages = [
+        Message(role=m["role"], content=m.get("content", ""), images=m.get("images") or [])
+        for m in req.messages
+    ]
 
     store = SessionStore(db_path=user_sessions_db_path())
     await store.init()

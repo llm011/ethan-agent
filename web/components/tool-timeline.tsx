@@ -180,26 +180,26 @@ function StepRow({ step, isLast }: { step: ToolStep; isLast: boolean }) {
 
         {/* 普通工具的结果预览（未展开时显示） */}
         {!isDelegate && step.result_preview && step.state !== "running" && !detailOpen && (
-          <p className="text-xs text-muted-foreground/60 mt-0.5 leading-relaxed line-clamp-3 font-mono whitespace-pre-wrap break-all">
+          <p className="text-xs text-muted-foreground/60 mt-0.5 leading-relaxed line-clamp-2 font-mono whitespace-pre-wrap break-all">
             {step.result_preview}
           </p>
         )}
 
         {/* 展开的详情：工具前的叙述 + 完整结果 */}
         {detailOpen && (
-          <div className="mt-1.5 rounded-md border border-border/60 bg-muted/20 dark:bg-muted/10 overflow-hidden">
+          <div className="mt-1.5 rounded-md border border-border bg-background overflow-hidden">
             {step.thought && (
-              <div className="px-3 py-2 border-b border-border/40">
-                <div className="text-[10px] uppercase tracking-wide text-muted-foreground/60 mb-1">思考</div>
-                <p className="text-xs text-foreground/70 whitespace-pre-wrap leading-relaxed">
+              <div className="px-3 py-2 border-b border-border/50">
+                <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">思考</div>
+                <p className="text-sm text-foreground/80 whitespace-pre-wrap leading-relaxed">
                   {step.thought}
                 </p>
               </div>
             )}
             {step.result_detail && (
               <div className="px-3 py-2">
-                <div className="text-[10px] uppercase tracking-wide text-muted-foreground/60 mb-1">输出</div>
-                <pre className="text-xs text-foreground/75 whitespace-pre-wrap break-all font-mono leading-relaxed max-h-80 overflow-y-auto">
+                <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">输出</div>
+                <pre className="text-sm text-foreground/85 whitespace-pre-wrap break-all font-mono leading-relaxed max-h-80 overflow-y-auto">
                   {step.result_detail}
                 </pre>
               </div>

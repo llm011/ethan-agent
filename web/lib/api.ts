@@ -49,6 +49,7 @@ export interface ModelEntry {
   provider: string;
   description: string;
   alias: string[];
+  vision: boolean;
 }
 
 export async function fetchModels(): Promise<ModelEntry[]> {
@@ -234,7 +235,9 @@ export async function uploadFile(file: File): Promise<{ path: string; filename: 
 
 export interface ChatMessage {
   role: "user" | "assistant";
-  content: string; created_at?: number;
+  content: string;
+  created_at?: number;
+  images?: { data: string; media_type: string }[];  // base64 raw (no data: prefix)
 }
 
 export interface AgentSettings {

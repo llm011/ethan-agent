@@ -114,6 +114,20 @@ class AnthropicProvider(BaseProvider):
                         "input": tc.arguments,
                     })
                 result.append({"role": "assistant", "content": content})
+            elif msg.role == "user" and msg.images:
+                content = []
+                for img in msg.images:
+                    content.append({
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": img.get("media_type", "image/png"),
+                            "data": img["data"],
+                        },
+                    })
+                if msg.content:
+                    content.append({"type": "text", "text": msg.content})
+                result.append({"role": "user", "content": content})
             else:
                 result.append({"role": msg.role, "content": msg.content})
         return result

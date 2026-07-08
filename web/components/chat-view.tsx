@@ -8,6 +8,7 @@ import {
   fetchModels,
   fetchModes,
   type ModeEntry,
+  type ModelEntry,
   fetchSession,
   fetchSessions,
   fetchSchedules,
@@ -22,7 +23,7 @@ import {
   respondConsent,
 } from "@/lib/api";
 import type { ToolStep } from "@/components/tool-timeline";
-import type { Message, Usage, Quote } from "@/components/chat/types";
+import type { Message, Usage, Quote, PendingFile } from "@/components/chat/types";
 import { ChatHeader } from "@/components/chat/chat-header";
 import { MessageList } from "@/components/chat/message-list";
 import { ChatInput } from "@/components/chat/chat-input";
@@ -43,9 +44,9 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const [sessionTitle, setSessionTitle] = useState("");
   const [sessionSource, setSessionSource] = useState("web");
   const [sessionUsage, setSessionUsage] = useState<Usage>({ input: 0, output: 0, cache: 0 });
-  const [models, setModels] = useState<{ id: string; description: string }[]>([]);
+  const [models, setModels] = useState<ModelEntry[]>([]);
   const [selectedModel, setSelectedModel] = useState("");
-  const [pendingFiles, setPendingFiles] = useState<{ name: string; path: string }[]>([]);
+  const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [schedules, setSchedules] = useState<any[]>([]);
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -456,15 +457,31 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     }
 
     let content = isBtw ? (btwQuestion ?? text) : text;
-    if (pendingFiles.length > 0) {
-      const fileContext = pendingFiles.map((f) => `[Uploaded file: ${f.name} at ${f.path}]`).join("\n");
+    const imageFiles = pendingFiles.filter((f) => f.isImage);
+    const nonImageFiles = pendingFiles.filter((f) => !f.isImage);
+
+    if (nonImageFiles.length > 0) {
+      const fileContext = nonImageFiles.map((f) => `[Uploaded file: ${f.name} at ${f.path}]`).join("\n");
       content = `${fileContext}\n\n${content}`;
+    }
+
+    // 模型不支持图片时弹确认，用户选择后再继续
+    const modelInfo = models.find((m) => m.id === selectedModel);
+    const visionSupported = modelInfo?.vision !== false;  // 默认 true（新模型大多支持）
+    let imagesToSend = imageFiles;
+    if (imageFiles.length > 0 && !visionSupported) {
+      const ok = window.confirm(
+        `当前模型「${selectedModel}」不支持图片输入，图片将被忽略，只发送文字。\n\n是否继续？`
+      );
+      if (!ok) return;
+      imagesToSend = [];
     }
 
     const userMsg: Message = {
       role: "user",
       content,
-      files: pendingFiles.map((f) => f.name),
+      files: nonImageFiles.map((f) => f.name),
+      images: imagesToSend.length > 0 ? imagesToSend : undefined,
       created_at: Date.now() / 1000,
       quote: quote ?? undefined,
     };
@@ -475,7 +492,15 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     setQuote(null);
     setStreaming(true);
 
-    const chatMessages: ChatMessage[] = newMessages.map((m) => ({ role: m.role, content: m.content }));
+    const chatMessages: ChatMessage[] = newMessages.map((m) => ({
+      role: m.role,
+      content: m.content,
+      images: m.images?.map((img) => ({
+        // dataUrl 格式 "data:image/png;base64,xxx"，只取后面的 base64 部分
+        data: img.dataUrl?.split(",")[1] ?? "",
+        media_type: img.dataUrl?.split(";")[0].replace("data:", "") ?? "image/png",
+      })),
+    }));
 
     await consumeStream(
       streamChat(chatMessages, selectedModel, sessionId, sentQuote, mode, isBtw),
@@ -488,6 +513,15 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     if (!initialSessionId && sessionId) {
       justFinishedRef.current = sessionId;
       window.history.replaceState(null, "", `/chat/${sessionId}`);
+    }
+    // 流结束后后端会异步 regen title，延迟 1.5s 取最新标题同步到顶部 header
+    if (sessionId) {
+      setTimeout(async () => {
+        try {
+          const detail = await fetchSession(sessionId);
+          if (detail?.title) setSessionTitle(detail.title);
+        } catch { /* ignore */ }
+      }, 1500);
     }
   };
 

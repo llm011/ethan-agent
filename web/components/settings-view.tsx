@@ -501,7 +501,7 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
   const [discoverOpen, setDiscoverOpen] = useState(false); // 拉取弹窗开关
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set()); // 弹窗里勾选的 model id
   const [discoverSearch, setDiscoverSearch] = useState(""); // 弹窗搜索词
-  const [newModel, setNewModel] = useState<ModelEntry>({ id: "", provider: "openai_compat", description: "", alias: [] });
+  const [newModel, setNewModel] = useState<ModelEntry>({ id: "", provider: "openai_compat", description: "", alias: [], vision: true });
   const [channelExpanded, setChannelExpanded] = useState<string | null>("lark");
   const [channelForms, setChannelForms] = useState<Record<string, Record<string, string>>>({});
   const [channelSaving, setChannelSaving] = useState<string | null>(null);
@@ -844,7 +844,7 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
                                 let added = 0;
                                 for (const m of discovered) {
                                   if (selectedIds.has(m.id) && !m.exists) {
-                                    const r = await addModel({ id: m.id, provider: m.provider, description: m.description, alias: [] });
+                                    const r = await addModel({ id: m.id, provider: m.provider, description: m.description, alias: [], vision: true });
                                     if (r.ok) added++;
                                   }
                                 }
