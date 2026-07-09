@@ -10,6 +10,15 @@ from ethan.tools.base import BaseTool
 lark_chat_id_var: ContextVar[str] = ContextVar("lark_chat_id", default="")
 
 
+def _try_strptime(s: str, fmt: str) -> bool:
+    from datetime import datetime
+    try:
+        datetime.strptime(s, fmt)
+        return True
+    except ValueError:
+        return False
+
+
 def _base_url() -> str:
     """返回本地 serve 的 base URL（读取 ETHAN_SERVER_PORT，默认 8900）。"""
     port = os.environ.get("ETHAN_SERVER_PORT", "8900")
@@ -106,6 +115,10 @@ class ScheduleCreateTool(BaseTool):
 
         if not cron and interval_minutes <= 0:
             return "Error: provide either 'cron' or 'interval_minutes'"
+
+        # 验证 end_date 格式（早于实际创建 session 前拦截，避免 job 创建成功但日期无效）
+        if end_date and not any(_try_strptime(end_date, fmt) for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d")):
+            return f"Error: invalid end_date '{end_date}'. Use YYYY-MM-DD or YYYY-MM-DD HH:MM format."
 
         # 读取当前请求上下文中的飞书 chat_id（非飞书渠道时为空字符串）
         chat_id = lark_chat_id_var.get("")
