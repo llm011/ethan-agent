@@ -6,6 +6,7 @@ Provider 优先级（可在 config.tools.web_search 中配置）：
 """
 from __future__ import annotations
 
+import html as _html
 import re
 import urllib.parse
 
@@ -286,13 +287,13 @@ class WebSearchTool(BaseTool):
             html, re.DOTALL,
         )
         for url, title, snippet in snippets[:max_results]:
-            t = re.sub(r"<[^>]+>", "", title).strip()
-            s = re.sub(r"<[^>]+>", "", snippet).strip()
+            t = _html.unescape(re.sub(r"<[^>]+>", "", title).strip())
+            s = _html.unescape(re.sub(r"<[^>]+>", "", snippet).strip())
             if t:
                 results.append(f"**{t}**\n{s}\n{url}")
         if not results:
             for t in re.findall(r'class="result__a"[^>]*>(.*?)</a>', html)[:max_results]:
-                clean = re.sub(r"<[^>]+>", "", t).strip()
+                clean = _html.unescape(re.sub(r"<[^>]+>", "", t).strip())
                 if clean:
                     results.append(clean)
         return results

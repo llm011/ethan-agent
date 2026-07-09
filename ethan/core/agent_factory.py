@@ -17,6 +17,7 @@ from ethan.tools.builtin.background_task import (
     BackgroundTaskTool,
 )
 from ethan.tools.builtin.browser import BrowserPageTool, BrowserSessionTool, BrowserTabTool
+from ethan.tools.builtin.chart import ChartTool
 from ethan.tools.builtin.config import ConfigGetTool, ConfigSetTool
 from ethan.tools.builtin.file import FileListTool, FileReadTool, FileWriteTool
 from ethan.tools.builtin.find_tools import FindToolsTool
@@ -82,6 +83,7 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
     registry.register(WebSearchTool())
     registry.register(WebFetchTool())
     registry.register(WeatherTool())
+    registry.register(ChartTool())
     registry.register(FileReadTool())
     registry.register(FileWriteTool())
     registry.register(FileListTool())
