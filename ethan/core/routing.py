@@ -7,6 +7,7 @@ _FORCE_FULL_SIGNALS = [
     "帮我写", "写一个", "写代码", "实现", "分析", "解释",
     "总结", "生成", "创建", "建立", "搭建",
     "重构", "优化代码", "调试", "debug", "修复",
+    "review", "审查", "代码审查",
     "write", "implement", "analyze", "explain", "generate", "create",
     "refactor", "summarize",
 ]

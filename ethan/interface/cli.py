@@ -242,6 +242,7 @@ def chat(
     prompt: Optional[str] = typer.Option(None, "-p", "--prompt", help="Single-turn prompt"),
     resume: Optional[str] = typer.Option(None, "-r", "--resume", help="Resume session (ID or 'last')"),
     profile: Optional[str] = typer.Option(None, "--profile", help="User ID/Profile to use"),
+    yes: bool = typer.Option(False, "-y", "--yes", "--auto-consent", help="Auto-approve all tool authorizations"),
     version: Optional[bool] = typer.Option(
         None, "--version", "-v", callback=version_callback, is_eager=True, help="Show the version and exit."
     ),
@@ -261,13 +262,16 @@ def chat(
 
     if prompt and not resume:
         agent = _build_agent(model, user_id=profile or "")
+        if yes:
+            from ethan.core.consent import AutoConsentProvider, set_consent_provider
+            set_consent_provider(AutoConsentProvider())
         asyncio.run(run_once(agent, prompt))
     else:
         current_uid = profile or ""
         while True:
             agent = _build_agent(model, user_id=current_uid)
             try:
-                asyncio.run(run_repl(agent, resume_id=resume))
+                asyncio.run(run_repl(agent, resume_id=resume, auto_consent=yes))
                 break  # Normal exit (e.g., EOF/exit command)
             except ProfileSwitchException as e:
                 current_uid = e.new_uid

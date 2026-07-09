@@ -111,6 +111,20 @@ class WebConsentProvider(ConsentProvider):
         self._pending.clear()
 
 
+class AutoConsentProvider(ConsentProvider):
+    """自动批准所有授权请求（自动化/测试/API 调用场景）。"""
+    streamed = False
+
+    def __init__(self, session_id: str = ""):
+        self.session_id = session_id
+
+    async def request(self, description: str, tool: str = "", detail: str = "") -> bool:
+        return True
+
+    def cancel_all(self) -> None:
+        """No-op：AutoConsent 无 pending futures。"""
+
+
 class ChannelGuardProvider(ConsentProvider):
     """三方渠道（飞书/微信等）的硬策略守卫。
 

@@ -45,7 +45,7 @@ async def _background_consolidate(memory, consolidator, fact_store, session_id):
         pass
 
 
-async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
+async def run_repl(agent: Agent, resume_id: str | None = None, auto_consent: bool = False) -> None:
     """交互 REPL：Hermes 风格界面。"""
     config = get_config()
     model_id = agent._provider.model
@@ -53,8 +53,11 @@ async def run_repl(agent: Agent, resume_id: str | None = None) -> None:
 
     # 注入 TUI 授权 provider（敏感操作时 y/N 确认）。持有引用以便随 session 切换更新
     # session_id —— 同一会话内同工具授权过不再重复询问（与 Web 一致）。
-    from ethan.core.consent import TuiConsentProvider, set_consent_provider
-    consent_provider = TuiConsentProvider(console=console)
+    from ethan.core.consent import AutoConsentProvider, TuiConsentProvider, set_consent_provider
+    if auto_consent:
+        consent_provider = AutoConsentProvider()
+    else:
+        consent_provider = TuiConsentProvider(console=console)
     set_consent_provider(consent_provider)
 
     from ethan.core.paths import user_sessions_db_path
