@@ -189,7 +189,8 @@ class WebSearchTool(BaseTool):
             pub_m = re.search(r"<pubDate[^>]*>(.*?)</pubDate>", item, re.DOTALL)
             desc_m = re.search(r"<description[^>]*>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</description>", item, re.DOTALL)
 
-            title = title_m.group(1).strip() if title_m else ""
+            title_raw = title_m.group(1).strip() if title_m else ""
+            title = re.sub(r"<[^>]+>", "", title_raw).strip()
             link_raw = link_m.group(1) or link_m.group(2) or ""
             link = link_raw.strip() if link_raw else ""
             pub = pub_m.group(1).strip()[:16] if pub_m else ""
