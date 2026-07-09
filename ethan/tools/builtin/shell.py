@@ -77,4 +77,10 @@ class ShellTool(BaseTool):
             # 不截断，让模型自己判断哪些有用（shell 有 no_compress=True，不会被压缩）
             return output or "(no output)"
         except asyncio.TimeoutError:
+            # 超时后必须 kill 子进程，避免僵尸进程（如 osascript 弹权限框一直挂起）
+            try:
+                proc.kill()
+                await proc.wait()
+            except Exception:
+                pass
             return f"Command timed out after {timeout}s"

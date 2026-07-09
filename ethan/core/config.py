@@ -138,6 +138,15 @@ class RoutingConfig(BaseModel):
             tools=["web_search"],
             skills=[],
         ),
+        FastRule(
+            name="金融行情",
+            keywords=[
+                "A股", "股票", "上证", "深证", "指数", "行情",
+                "大盘", "涨跌", "收盘", "开盘", "基金净值",
+            ],
+            tools=["shell", "web_search", "generate_chart"],
+            skills=["finance-query"],
+        ),
     ])
     fast_max_iters: int = 10     # Fast Path 最多工具迭代次数
     fast_use_lite_model: bool = True  # Fast Path 用 lite 模型（设备控制/状态查询等简单任务，省钱提速）
