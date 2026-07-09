@@ -32,11 +32,26 @@ class Scheduler:
         if self._scheduler.running:
             self._scheduler.shutdown(wait=False)
 
+    def _parse_end_date(self, end_date: str | None):
+        """将 'YYYY-MM-DD' 或 'YYYY-MM-DD HH:MM' 解析为 tz-aware datetime，解析失败返回 None。"""
+        if not end_date:
+            return None
+        from datetime import datetime
+        for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d"):
+            try:
+                dt = datetime.strptime(end_date, fmt)
+                # APScheduler 要求 tz-aware datetime；用 scheduler 自身的 timezone 本地化
+                return self._tz.localize(dt) if hasattr(self._tz, "localize") else dt.replace(tzinfo=self._tz)
+            except ValueError:
+                continue
+        return None
+
     def add_cron(
         self,
         job_id: str,
         func: Callable,
         cron_expr: str,
+        end_date: str | None = None,
         **kwargs,
     ) -> None:
         """添加 cron 定时任务。cron_expr 格式：'分 时 日 月 周' 或标准 cron。
@@ -44,8 +59,9 @@ class Scheduler:
         统一走 from_crontab 解析，使用标准 cron 数字约定（0/7=周日，1=周一 … 5=周五，6=周六），
         而非 APScheduler 原生 CronTrigger 构造器（0=周一）——两者 day_of_week 含义不同，
         手动拆分传入会导致 '1-5' 被解释为 周二~周六。
+        end_date：到期后 APScheduler 自动不再触发并删除 job。
         """
-        trigger = CronTrigger.from_crontab(cron_expr, timezone=self._tz)
+        trigger = CronTrigger.from_crontab(cron_expr, timezone=self._tz, end_date=self._parse_end_date(end_date))
 
         self._scheduler.add_job(
             func,
@@ -62,12 +78,13 @@ class Scheduler:
         seconds: int = 0,
         minutes: int = 0,
         hours: int = 0,
+        end_date: str | None = None,
         **kwargs,
     ) -> None:
-        """添加 interval 定时任务。"""
+        """添加 interval 定时任务。end_date 到期后自动删除 job。"""
         self._scheduler.add_job(
             func,
-            trigger=IntervalTrigger(seconds=seconds, minutes=minutes, hours=hours),
+            trigger=IntervalTrigger(seconds=seconds, minutes=minutes, hours=hours, end_date=self._parse_end_date(end_date)),
             id=job_id,
             replace_existing=True,
             kwargs=kwargs,

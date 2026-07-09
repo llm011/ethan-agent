@@ -10,6 +10,15 @@ from ethan.tools.base import BaseTool
 lark_chat_id_var: ContextVar[str] = ContextVar("lark_chat_id", default="")
 
 
+def _try_strptime(s: str, fmt: str) -> bool:
+    from datetime import datetime
+    try:
+        datetime.strptime(s, fmt)
+        return True
+    except ValueError:
+        return False
+
+
 def _base_url() -> str:
     """返回本地 serve 的 base URL（读取 ETHAN_SERVER_PORT，默认 8900）。"""
     port = os.environ.get("ETHAN_SERVER_PORT", "8900")
@@ -89,6 +98,7 @@ class ScheduleCreateTool(BaseTool):
             "prompt": {"type": "string", "description": "What to do when the task fires (a prompt or description)"},
             "cron": {"type": "string", "description": "Cron expression (5-part: min hour day month weekday). E.g. '0 9 * * *' for 9am daily. IMPORTANT: for weekday, always use names (mon-fri, sat, sun) not numbers — APScheduler's numeric weekday convention differs from standard cron (1-5 means Tue-Sat, not Mon-Fri)."},
             "interval_minutes": {"type": "integer", "description": "Alternative: run every N minutes."},
+            "end_date": {"type": "string", "description": "Optional: date (YYYY-MM-DD) or datetime (YYYY-MM-DD HH:MM) when the job should stop firing. After this date the job is automatically removed."},
         },
         "required": ["job_id", "prompt"],
     }
@@ -96,7 +106,7 @@ class ScheduleCreateTool(BaseTool):
     def __init__(self, user_id: str = ""):
         self._user_id = user_id
 
-    async def run(self, job_id: str, prompt: str, cron: str = "", interval_minutes: int = 0) -> str:
+    async def run(self, job_id: str, prompt: str, cron: str = "", interval_minutes: int = 0, end_date: str = "") -> str:
         import httpx
 
         from ethan.core.config import get_config
@@ -105,6 +115,10 @@ class ScheduleCreateTool(BaseTool):
 
         if not cron and interval_minutes <= 0:
             return "Error: provide either 'cron' or 'interval_minutes'"
+
+        # 验证 end_date 格式（早于实际创建 session 前拦截，避免 job 创建成功但日期无效）
+        if end_date and not any(_try_strptime(end_date, fmt) for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d")):
+            return f"Error: invalid end_date '{end_date}'. Use YYYY-MM-DD or YYYY-MM-DD HH:MM format."
 
         # 读取当前请求上下文中的飞书 chat_id（非飞书渠道时为空字符串）
         chat_id = lark_chat_id_var.get("")
@@ -128,15 +142,20 @@ class ScheduleCreateTool(BaseTool):
                     "prompt": prompt,
                     "cron": cron,
                     "interval_minutes": interval_minutes,
+                    "end_date": end_date,
                     "session_id": session.id,
                     "channel": channel,
                     "channel_context": channel_context,
                     "user_id": self._user_id,
                 }, headers=headers)
                 res.raise_for_status()
-                return f"Scheduled '{job_id}' successfully. (Session: {session.id})"
+                msg = f"Scheduled '{job_id}' successfully."
+                if end_date:
+                    msg += f" Auto-expires on {end_date}."
+                return msg + f" (Session: {session.id})"
         except Exception as e:
             return f"Failed to create job '{job_id}' via API: {e}"
+
 
 class ScheduleListTool(BaseTool):
     fast_path = False

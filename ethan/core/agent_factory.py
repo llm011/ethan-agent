@@ -37,6 +37,7 @@ from ethan.tools.builtin.shell import ShellTool
 from ethan.tools.builtin.skill_create import SkillCreateTool
 from ethan.tools.builtin.skill_read import SkillListTool, SkillReadTool
 from ethan.tools.builtin.ui_card import UiCardTool
+from ethan.tools.builtin.weather import WeatherTool
 from ethan.tools.builtin.web import WebFetchTool
 from ethan.tools.builtin.web_search import WebSearchTool
 from ethan.tools.registry import ToolRegistry
@@ -80,6 +81,7 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
     registry.register(ShellTool())
     registry.register(WebSearchTool())
     registry.register(WebFetchTool())
+    registry.register(WeatherTool())
     registry.register(FileReadTool())
     registry.register(FileWriteTool())
     registry.register(FileListTool())

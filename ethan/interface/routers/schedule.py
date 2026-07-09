@@ -42,6 +42,7 @@ class ScheduleCreateRequest(BaseModel):
     prompt: str
     cron: str = ""
     interval_minutes: int = 0
+    end_date: str = ""  # YYYY-MM-DD or YYYY-MM-DD HH:MM; job auto-removed after this date
     session_id: str
     channel: str = "web"
     channel_context: str = "{}"
@@ -62,9 +63,9 @@ async def create_schedule(req: ScheduleCreateRequest, user_id: str = Depends(ver
         user_id=job_user_id,
     )
     if req.cron:
-        scheduler.add_cron(req.job_id, fire_schedule_job, req.cron, **kwargs)
+        scheduler.add_cron(req.job_id, fire_schedule_job, req.cron, end_date=req.end_date or None, **kwargs)
     elif req.interval_minutes > 0:
-        scheduler.add_interval(req.job_id, fire_schedule_job, minutes=req.interval_minutes, **kwargs)
+        scheduler.add_interval(req.job_id, fire_schedule_job, minutes=req.interval_minutes, end_date=req.end_date or None, **kwargs)
     else:
         raise HTTPException(400, "Need cron or interval_minutes")
     return {"ok": True}
