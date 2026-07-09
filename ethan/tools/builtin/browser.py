@@ -83,6 +83,7 @@ def _consent_desc() -> str | None:
 
 
 class _BrowserToolBase(BaseTool):
+    fast_path: bool = False
     cacheable = False  # 浏览器操作有副作用,不缓存
     side_effect = True
     # 浏览器工具输出是带 ID/ref 的结构化 JSON(tab_id、session_id、snapshot ref),
