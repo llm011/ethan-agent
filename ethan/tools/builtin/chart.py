@@ -137,13 +137,17 @@ class ChartTool(BaseTool):
         options: dict = {"plugins": {}, "scales": {}}
         if title:
             options["plugins"]["title"] = {"display": True, "text": title, "font": {"size": 14}}
-        options["plugins"]["legend"] = {"display": len(datasets) > 1}
+        options["plugins"]["legend"] = {
+            # pie/doughnut 靠 legend 区分分类，始终显示；line/bar 多系列时才需要
+            "display": chart_type in ("pie", "doughnut") or len(datasets) > 1
+        }
 
         if chart_type in ("line", "bar", "horizontalBar"):
             options["scales"] = {
                 "x": {"ticks": {"maxRotation": 45}},
                 "y": {"beginAtZero": False},
             }
+        # pie/doughnut 不需要 scales，保持空 dict 即可
 
         cfg["options"] = options
         return cfg
