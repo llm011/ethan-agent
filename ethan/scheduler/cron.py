@@ -32,15 +32,16 @@ class Scheduler:
         if self._scheduler.running:
             self._scheduler.shutdown(wait=False)
 
-    @staticmethod
-    def _parse_end_date(end_date: str | None):
-        """将 'YYYY-MM-DD' 或 'YYYY-MM-DD HH:MM' 解析为 datetime，解析失败返回 None。"""
+    def _parse_end_date(self, end_date: str | None):
+        """将 'YYYY-MM-DD' 或 'YYYY-MM-DD HH:MM' 解析为 tz-aware datetime，解析失败返回 None。"""
         if not end_date:
             return None
         from datetime import datetime
         for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d"):
             try:
-                return datetime.strptime(end_date, fmt)
+                dt = datetime.strptime(end_date, fmt)
+                # APScheduler 要求 tz-aware datetime；用 scheduler 自身的 timezone 本地化
+                return self._tz.localize(dt) if hasattr(self._tz, "localize") else dt.replace(tzinfo=self._tz)
             except ValueError:
                 continue
         return None

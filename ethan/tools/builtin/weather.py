@@ -1,4 +1,6 @@
 """Weather Tool — 基于 wttr.in，无需 API Key。"""
+import urllib.parse
+
 import httpx
 
 from ethan.tools.base import BaseTool
@@ -30,7 +32,8 @@ class WeatherTool(BaseTool):
 
     async def run(self, city: str, days: int = 2) -> str:
         try:
-            url = f"https://wttr.in/{city}?format=j1"
+            encoded_city = urllib.parse.quote(city)
+            url = f"https://wttr.in/{encoded_city}?format=j1"
             async with httpx.AsyncClient(
                 timeout=10.0,
                 follow_redirects=True,
@@ -38,7 +41,7 @@ class WeatherTool(BaseTool):
             ) as client:
                 resp = await client.get(url)
                 resp.raise_for_status()
-            data = resp.json()
+                data = resp.json()
             return self._format(data, city, days)
         except httpx.HTTPStatusError as e:
             return f"Weather query failed: HTTP {e.response.status_code}"

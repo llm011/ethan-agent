@@ -110,8 +110,8 @@ class WebSearchTool(BaseTool):
         # 3. 百度新闻 RSS — 中文补充
         if language.startswith("zh"):
             results = await self._baidu_news_rss(query, max_results)
-        if results:
-            return results
+            if results:
+                return results
 
         # 4. DDG fallback
         return await self._ddg_search(f"{query} site:news", max_results)
@@ -190,7 +190,8 @@ class WebSearchTool(BaseTool):
             desc_m = re.search(r"<description[^>]*>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</description>", item, re.DOTALL)
 
             title = title_m.group(1).strip() if title_m else ""
-            link = (link_m.group(1) or link_m.group(2)).strip() if link_m else ""
+            link_raw = link_m.group(1) or link_m.group(2) or ""
+            link = link_raw.strip() if link_raw else ""
             pub = pub_m.group(1).strip()[:16] if pub_m else ""
             desc_raw = desc_m.group(1).strip() if desc_m else ""
             desc = re.sub(r"<[^>]+>", "", desc_raw)[:200].strip()
