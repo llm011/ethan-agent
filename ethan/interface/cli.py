@@ -264,9 +264,10 @@ def chat(
 
     if prompt and not resume:
         agent = _build_agent(model, user_id=profile or "")
-        if yes:
-            from ethan.core.consent import AutoConsentProvider, set_consent_provider
-            set_consent_provider(AutoConsentProvider())
+        # -p 模式是非交互的单轮执行，必须用 AutoConsentProvider
+        # 否则 browser/shell 等需 consent 的工具会挂起或崩溃
+        from ethan.core.consent import AutoConsentProvider, set_consent_provider
+        set_consent_provider(AutoConsentProvider())
         asyncio.run(run_once(agent, prompt))
     else:
         current_uid = profile or ""
