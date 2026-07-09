@@ -156,6 +156,37 @@ Ref 操作：click / fill / type / hover / select / scroll_into_view（都用 `r
 
 screenshot 返回本地文件路径，可直接在飞书发图或在 Web 渲染。
 
+## 绝对禁止的做法（Anti-Patterns）
+
+以下做法**绝不允许**，违反会导致任务超时或死循环：
+
+1. **❌ 不要用 `delegate_coding` 写 Playwright/Puppeteer/Selenium 脚本来操作浏览器**
+   - delegate_coding 有 180s 硬超时，Playwright 安装 Chromium 就要超过这个时间
+   - 你已经有 browser_session/browser_tab/browser_page，这就是你的浏览器工具，直接用
+
+2. **❌ 不要用 `shell` 跑 Python 脚本做网页自动化**
+   - shell 授权可能被拒绝，即使通过了也不如直接调 browser 工具高效
+   - 用户给你的 browser 工具已经能做一切网页操作
+
+3. **❌ 不要在 browser 工具可用时还去找其他路径**
+   - 不要尝试 AppleScript 控制浏览器
+   - 不要写临时脚本让用户手动跑
+   - 不要用 computer_use 截图+点击来操作网页（那是 GUI 桌面工具，不是浏览器工具）
+
+4. **❌ 同一操作失败超过 3 次后不要继续尝试相同方法**
+   - 上报 blocker，说明情况，让用户决定
+
+**正确做法**：需要操作网页 → 直接调 `browser_session` 创建会话 → `browser_page` 操作页面。就这么简单。
+
+## 降级路径（扩展未连接时）
+
+如果 browser_session 返回"扩展未连接"错误：
+
+1. 告诉用户：浏览器扩展未连接，请检查 Chrome 是否打开、扩展是否启用
+2. 如果用户表示无法连接，尝试 `agent-browser`（兜底浏览器，独立 Chrome）
+3. 如果 agent-browser 也不可用，用 `web_fetch` 获取网页内容（只能读，不能交互）
+4. 对于必须交互的操作（如登录、填表），明确告知用户当前无法完成，建议先修复扩展连接
+
 ## 常见错误处理
 
 - 浏览器扩展未连接：提示用户安装并启用 Ethan Browser 扩展，在扩展 options 里填好 server 地址和 token。

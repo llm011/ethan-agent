@@ -478,10 +478,18 @@ class Agent:
         """按路由档位选 provider。fast 档且开启 fast_use_lite_model 时用 lite 模型
         （设备控制/状态查询等简单任务，省钱提速），否则用主模型。lite provider 懒加载。
 
+        例外：浏览器操作类 skill 触发了 fast 路由时，仍用主模型——
+        lite 模型（如 gemini-flash）对复杂工具编排的指令遵循能力不足，
+        会导致绕路（delegate_coding → Playwright → 超时）。
+
         创建 lite provider 失败时回退主模型，绝不返回 None。
         """
         routing = get_config().defaults.routing
         if route == "fast" and getattr(routing, "fast_use_lite_model", False):
+            # 浏览器/桌面控制等复杂 skill 命中时，用主模型保证指令遵循
+            _complex_skills = {"use-browser", "agent-browser", "computer-use"}
+            if _complex_skills & set(self.last_matched_skills):
+                return self._provider
             if self._lite_provider is None:
                 try:
                     from ethan.memory.consolidator import get_lite_model

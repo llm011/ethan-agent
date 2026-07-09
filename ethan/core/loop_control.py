@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 STUCK_WINDOW = 3          # 连续 N 轮同一签名 → 判定卡住
 ERROR_WINDOW = 2          # 连续 N 轮同一签名且都报错 → 提前判定卡住（错误重试不必等满 3 轮）
 MAX_REFLECTIONS = 2       # 最多反思几次；仍卡住则收尾放弃
+TOOL_FREQ_LIMIT = 5       # 同一工具名连续调用超过此次数 → 判定卡住（即使参数不同）
 
 
 def _round_signature(tool_calls) -> str:
@@ -48,6 +49,7 @@ class LoopMonitor:
 
     _signatures: list[str] = field(default_factory=list)
     _errored: list[bool] = field(default_factory=list)
+    _tool_names: list[str] = field(default_factory=list)  # 每轮主工具名（取第一个）
     reflections_used: int = 0
     awaiting_reflection_followup: bool = False  # 上一轮注入过反思，本轮需校验是否真换路
     _last_reflected_sig: str = ""
@@ -55,9 +57,15 @@ class LoopMonitor:
     def record(self, tool_calls, had_error: bool) -> None:
         self._signatures.append(_round_signature(tool_calls))
         self._errored.append(had_error)
+        # 记录主工具名（取第一个调用的工具名）
+        self._tool_names.append(tool_calls[0].name if tool_calls else "")
 
     def is_stuck(self) -> bool:
-        """是否陷入无效循环。两种触发：连续 STUCK_WINDOW 轮同签名；或连续 ERROR_WINDOW 轮同签名且都报错。"""
+        """是否陷入无效循环。三种触发：
+        1. 连续 STUCK_WINDOW 轮同签名（精确重复）
+        2. 连续 ERROR_WINDOW 轮同签名且都报错
+        3. 连续 TOOL_FREQ_LIMIT 轮使用同一工具（即使参数不同，搜同一主题换不同词也算）
+        """
         sigs = self._signatures
         if len(sigs) >= ERROR_WINDOW:
             tail = sigs[-ERROR_WINDOW:]
@@ -66,6 +74,11 @@ class LoopMonitor:
         if len(sigs) >= STUCK_WINDOW:
             tail = sigs[-STUCK_WINDOW:]
             if len(set(tail)) == 1:
+                return True
+        # 工具频率限制：同一工具名连续调用超过阈值
+        if len(self._tool_names) >= TOOL_FREQ_LIMIT:
+            tail = self._tool_names[-TOOL_FREQ_LIMIT:]
+            if len(set(tail)) == 1 and tail[0]:
                 return True
         return False
 

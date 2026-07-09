@@ -6,8 +6,7 @@ from ethan.core.config import get_config
 _FORCE_FULL_SIGNALS = [
     "帮我写", "写一个", "写代码", "实现", "分析", "解释",
     "总结", "生成", "创建", "建立", "搭建",
-    "重构", "优化代码", "调试", "debug", "修复", "定时任务",
-    "提醒我", "设置一个", "schedule", "reminder",
+    "重构", "优化代码", "调试", "debug", "修复",
     "write", "implement", "analyze", "explain", "generate", "create",
     "refactor", "summarize",
 ]
