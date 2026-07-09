@@ -99,6 +99,7 @@ class RoutingConfig(BaseModel):
         "knowledge_search", "knowledge_read",
         "memory_write", "procedure_write", "profile_update",
         "schedule_create", "schedule_list", "schedule_remove",
+        "browser_session", "browser_tab", "browser_page",  # 浏览器工具常驻，避免 find_tools 发现循环
         "ui_card",  # 飞书/web 渠道核心卡片能力，应在初始集里对模型可见
     ])
     fast_rules: list[FastRule] = Field(default_factory=lambda: [
