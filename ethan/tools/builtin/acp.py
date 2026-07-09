@@ -13,6 +13,8 @@ class DelegateCodingTool(BaseTool):
         "Delegate a complex coding task to a local coding agent (Claude Code / OpenCode / Codex). "
         "Use this when asked to implement, create, refactor, or debug substantial code in a project. "
         "Do NOT use for simple code questions or short snippets you can answer directly. "
+        "Do NOT use for browser automation — use browser_session/browser_page instead. "
+        "Do NOT use to run shell commands that were denied — respect user's authorization decisions. "
         "Consecutive calls in the same working_dir automatically resume the same coding session (multi-turn). "
         "Set reset_session=true to start a fresh session instead of resuming."
     )

@@ -143,9 +143,12 @@ async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
         # (3) 普通 chat：生成与连接解耦——把 agent.stream_chat 放进后台 producer 任务，
         # 事件写入 ChatRun 缓冲并扇出给订阅者。SSE 响应只是一个订阅者，断开（刷新）只退订，
         # 不影响 producer——生成照常跑完并入库。刷新后可经 GET /chat/{id}/stream 重连回放。
-        from ethan.core.consent import WebConsentProvider
+        from ethan.core.consent import AutoConsentProvider, WebConsentProvider
 
-        consent = WebConsentProvider(session_id=req.session_id or "")
+        if req.auto_consent:
+            consent = AutoConsentProvider(session_id=req.session_id or "")
+        else:
+            consent = WebConsentProvider(session_id=req.session_id or "")
         manager = RunManager.instance()
         run = manager.create(req.session_id or "", consent=consent, user_id=user_id)
         run.task = asyncio.create_task(
