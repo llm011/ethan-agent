@@ -143,6 +143,9 @@ class RoutingConfig(BaseModel):
             keywords=[
                 "A股", "股票", "上证", "深证", "指数", "行情",
                 "大盘", "涨跌", "收盘", "开盘", "基金净值",
+                "港股", "美股", "K线", "PE", "PB", "估值",
+                "市值", "财报", "ROE", "市盈率", "板块",
+                "茅台", "腾讯", "苹果", "AAPL", "TSLA",
             ],
             tools=["shell", "web_search", "generate_chart"],
             skills=["finance-query"],
