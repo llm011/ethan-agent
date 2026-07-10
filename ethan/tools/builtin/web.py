@@ -10,7 +10,12 @@ class WebFetchTool(BaseTool):
     fast_path = False
     no_compress = True  # 文章/文档原文必须逐字给模型，压成摘要会丢关键信息
     name = "web_fetch"
-    description = "Fetch a webpage URL and extract its text content. Use for reading articles, documentation, or any web page."
+    description = (
+        "Fetch a URL and return its content. Supports GET (default) and POST methods. "
+        "Use for reading web pages, calling REST APIs, or fetching structured data (JSON/XML). "
+        "For APIs that require POST body (e.g., Overpass API), set method='POST' and provide body. "
+        "This runs server-side, bypassing browser CSP restrictions."
+    )
     parameters = {
         "type": "object",
         "properties": {
@@ -18,11 +23,24 @@ class WebFetchTool(BaseTool):
                 "type": "string",
                 "description": "The URL to fetch.",
             },
+            "method": {
+                "type": "string",
+                "enum": ["GET", "POST"],
+                "description": "HTTP method. Default GET.",
+            },
+            "body": {
+                "type": "string",
+                "description": "Request body for POST requests (form data or JSON string).",
+            },
+            "content_type": {
+                "type": "string",
+                "description": "Content-Type header for POST (e.g., 'application/json', 'application/x-www-form-urlencoded'). Default: auto-detect.",
+            },
         },
         "required": ["url"],
     }
 
-    async def run(self, url: str) -> str:
+    async def run(self, url: str, method: str = "GET", body: str = "", content_type: str = "") -> str:
         try:
             headers = {
                 "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -31,12 +49,24 @@ class WebFetchTool(BaseTool):
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                 "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
             }
-            async with httpx.AsyncClient(follow_redirects=True, timeout=15.0) as client:
-                resp = await client.get(url, headers=headers)
+            if content_type:
+                headers["Content-Type"] = content_type
+            # 从 ethan config 读取网络代理（支持需要翻墙的站点）
+            proxy_url = None
+            try:
+                from ethan.core.config import load_config
+                proxy_url = load_config().network.proxy or None
+            except Exception:
+                pass
+            async with httpx.AsyncClient(follow_redirects=True, timeout=30.0, proxy=proxy_url) as client:
+                if method.upper() == "POST":
+                    resp = await client.post(url, headers=headers, content=body.encode() if body else None)
+                else:
+                    resp = await client.get(url, headers=headers)
                 resp.raise_for_status()  # status_code 有问题直接抛异常，不浪费 token
 
-            content_type = resp.headers.get("content-type", "")
-            if "text/html" in content_type:
+            resp_ct = resp.headers.get("content-type", "")
+            if "text/html" in resp_ct:
                 text = self._extract_text(resp.text)
             else:
                 text = resp.text

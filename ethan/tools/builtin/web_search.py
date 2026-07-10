@@ -1,7 +1,7 @@
 """Web Search Tool — 多 provider 搜索，支持通用和新闻模式。
 
 Provider 优先级（可在 config.tools.web_search 中配置）：
-  general: searxng → tavily → duckduckgo
+  general: searxng → tavily → duckduckgo → bing
   news:    searxng(categories=news) → google_news_rss → baidu_news_rss → duckduckgo
 
 容错机制（retry + fallback + circuit breaker）：
@@ -76,6 +76,7 @@ _breaker = _CircuitBreaker()
 
 class WebSearchTool(BaseTool):
     fast_path = False
+    cacheable = False  # 搜索结果不缓存——空结果不应被复用
     name = "web_search"
     description = (
         "Search the web for current information. "
@@ -149,33 +150,43 @@ class WebSearchTool(BaseTool):
         if cfg.api_key:
             candidates.append(("tavily", lambda: self._tavily_search(query, max_results, cfg.api_key)))
         candidates.append(("duckduckgo", lambda: self._ddg_search(query, max_results)))
+        candidates.append(("bing", lambda: self._bing_general_search(query, max_results)))
 
         for name, factory in candidates:
             if not _breaker.is_available(name):
                 logger.debug("[WebSearch] skipping %s (circuit open)", name)
                 continue
-            results = await self._call_with_retry(name, factory)
+            results, had_error = await self._call_with_retry(name, factory)
             if results:
                 _breaker.record_success(name)
                 return results
-            # 空结果视为失败（可能是网络问题或 provider 本身不可用）
-            _breaker.record_failure(name)
-            logger.info("[WebSearch] %s failed for query=%r, trying next provider", name, query[:50])
+            if had_error:
+                # 只有实际的网络/provider 错误才计入熔断
+                _breaker.record_failure(name)
+                logger.info("[WebSearch] %s error for query=%r, trying next provider", name, query[:50])
+            else:
+                # 空结果但 provider 正常响应 → 不熔断，继续尝试下一个
+                logger.debug("[WebSearch] %s returned empty for query=%r, trying next", name, query[:50])
 
         return []
 
-    async def _call_with_retry(self, provider_name: str, factory) -> list[str]:
-        """对单个 provider 调用，失败重试 _RETRY_COUNT 次。"""
+    async def _call_with_retry(self, provider_name: str, factory) -> tuple[list[str], bool]:
+        """对单个 provider 调用，失败重试 _RETRY_COUNT 次。
+        返回 (results, had_error)：had_error=True 表示遇到异常（provider 可能不可用）。
+        """
+        had_error = False
         for attempt in range(_RETRY_COUNT + 1):
             try:
                 results = await factory()
                 if results:
-                    return results
+                    return results, False
+                # provider 正常响应但无结果 → 不算 error
             except Exception as e:
+                had_error = True
                 logger.debug("[WebSearch] %s attempt %d error: %s", provider_name, attempt + 1, e)
             if attempt < _RETRY_COUNT:
                 await asyncio.sleep(0.5)  # 重试前短暂等待
-        return []
+        return [], had_error
 
     # ── News search（同样带 retry + fallback + circuit breaker）──────────────
 
@@ -192,12 +203,13 @@ class WebSearchTool(BaseTool):
             if not _breaker.is_available(name):
                 logger.debug("[WebSearch] skipping %s (circuit open)", name)
                 continue
-            results = await self._call_with_retry(name, factory)
+            results, had_error = await self._call_with_retry(name, factory)
             if results:
                 _breaker.record_success(name)
                 return results
-            _breaker.record_failure(name)
-            logger.info("[WebSearch] %s failed for query=%r, trying next", name, query[:50])
+            if had_error:
+                _breaker.record_failure(name)
+                logger.info("[WebSearch] %s error for query=%r, trying next", name, query[:50])
 
         return []
 
@@ -384,4 +396,50 @@ class WebSearchTool(BaseTool):
                 clean = _html.unescape(re.sub(r"<[^>]+>", "", t).strip())
                 if clean:
                     results.append(clean)
+        return results
+
+    # ── Bing General Search ──────────────────────────────────────────────────
+
+    async def _bing_general_search(self, query: str, max_results: int) -> list[str]:
+        """Bing 中国版通用搜索（HTML 解析）。作为 DuckDuckGo 不可用时的兜底。"""
+        encoded = urllib.parse.quote(query)
+        url = f"https://cn.bing.com/search?q={encoded}&count={max_results}"
+        async with httpx.AsyncClient(
+            timeout=12.0,
+            follow_redirects=True,
+            headers={
+                "User-Agent": _DDG_UA,
+                "Accept": "text/html,application/xhtml+xml",
+                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            },
+        ) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+        return self._parse_bing_html(resp.text, max_results)
+
+    def _parse_bing_html(self, html: str, max_results: int) -> list[str]:
+        """从 Bing 搜索结果 HTML 提取标题、摘要、URL。"""
+        results = []
+        # Bing 结果块：<li class="b_algo">
+        algo_positions = [m.start() for m in re.finditer(r'class="b_algo"', html)]
+        for pos in algo_positions[:max_results]:
+            li_start = html.rfind("<li", max(0, pos - 100), pos)
+            li_end = html.find("</li>", pos)
+            if li_start < 0 or li_end < 0:
+                continue
+            block = html[li_start:li_end]
+            # Title: <h2><a href="...">title</a></h2>
+            title_m = re.search(r'<h2[^>]*><a[^>]*href="([^"]+)"[^>]*>(.*?)</a>', block, re.DOTALL)
+            if not title_m:
+                continue
+            href = title_m.group(1)
+            title = _html.unescape(re.sub(r"<[^>]+>", "", title_m.group(2)).strip())
+            # Description: first <p> in block
+            desc_m = re.search(r"<p[^>]*>(.*?)</p>", block, re.DOTALL)
+            desc = ""
+            if desc_m:
+                desc = _html.unescape(re.sub(r"<[^>]+>", "", desc_m.group(1)).strip())[:200]
+            if title:
+                snippet = f"\n{desc}" if desc else ""
+                results.append(f"**{title}**{snippet}\n{href}")
         return results

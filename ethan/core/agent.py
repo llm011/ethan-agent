@@ -555,17 +555,30 @@ class Agent:
             self.usage.add(response.usage)
             working.append(response)
 
-            # 空响应（既无正文也无工具调用）= 模型静默放弃。直接 return 会让整轮白干：
-            # 工具结果已在上下文里却不产出总结、不落库。强制走一次 finalize（禁工具 + 收尾指令），
-            # 逼模型基于已有上下文给出「已做/结果/卡点」总结后返回。
-            # ⚠️ 但 finalize 轮本身不再重试：那轮模型已用同一 finalize suffix 调过一次仍空，
-            # 再调一次是超 max_iters 预算的冗余调用且大概率同样返空——直接落到下方
-            # `if not response.is_tool_call: return` 返回即可。
+            # 空响应（既无正文也无工具调用）= 模型静默放弃。
+            # 移除空 assistant 消息，注入 nudge 重试一次（带工具）；仍空才 finalize 兜底。
             if not finalize and not response.is_tool_call and not (response.content or "").strip():
-                sys = system + finalize_system_suffix("max_iters")
-                resp = await provider.chat(working, tools=None, system=sys)
+                working.pop()  # 移除空 assistant 消息
+                logger.warning("chat() 空响应，注入 nudge 重试")
+                nudge = Message(role="user", content="[继续。请根据已有信息回答问题，或继续使用工具完成任务。]")
+                working.append(nudge)
+                resp = await provider.chat(working, tools=tools, system=system)
                 self.usage.add(resp.usage)
-                return resp
+                working.pop()  # 移除 nudge
+                if (resp.content or "").strip() or resp.is_tool_call:
+                    working.append(resp)
+                    if not resp.is_tool_call:
+                        return resp
+                    # 有工具调用 → 继续正常流程
+                    response = resp
+                    # fall through to tool execution below
+                else:
+                    # 重试仍空 → finalize 兜底
+                    logger.warning("空响应重试仍无输出，执行 finalize 兜底")
+                    sys = system + finalize_system_suffix("max_iters")
+                    resp = await provider.chat(working, tools=None, system=sys)
+                    self.usage.add(resp.usage)
+                    return resp
 
             if not response.is_tool_call:
                 return response
@@ -669,20 +682,51 @@ class Agent:
             response = Message(role="assistant", content=full_content, tool_calls=tool_calls)
             working.append(response)
 
-            # 空响应（既无正文也无工具调用）= 模型静默放弃。直接 return 会导致整轮白干：
-            # 工具结果已在 working 里却不产出任何总结，且不落库。此处强制走一次 finalize
-            # （禁工具 + 收尾指令），逼模型基于已有上下文给出「已做/结果/卡点」总结后返回。
-            # ⚠️ finalize 轮本身不再重试（同 chat()，见上方注释）。
+            # 空响应（既无正文也无工具调用）= 模型静默放弃。
+            # 修复：移除空 assistant 消息，注入 nudge 唤醒模型再重试一轮（带工具）。
+            # 这样模型可以继续工具调用（SWE-bench 场景）或直接回答（GAIA 场景）。
+            # 仍空则走 finalize 兜底。
             if not finalize and not response.is_tool_call and not full_content:
-                sys = system + finalize_system_suffix("max_iters")
-                async for chunk in self._provider.stream_chat(working, tools=None, system=sys):
+                working.pop()  # 移除空 assistant 消息
+                logger.warning("模型返回空响应（iter=%d），注入 nudge 重试", i)
+                nudge = Message(role="user", content="[继续。请根据已有信息回答问题，或继续使用工具完成任务。]")
+                working.append(nudge)
+                # 带工具重试：让模型可以选择继续调用工具或直接回答
+                retry_content = ""
+                retry_final = None
+                async for chunk in self._provider.stream_chat(working, tools=tools, system=system):
                     if chunk.reasoning:
                         yield ThinkingEvent(delta=chunk.reasoning)
                     if chunk.content:
+                        retry_content += chunk.content
                         yield chunk.content
                     if chunk.is_final:
+                        retry_final = chunk
                         self.usage.add(chunk.usage)
-                return
+                working.pop()  # 移除 nudge
+                retry_tool_calls = retry_final.tool_calls if retry_final else []
+                if retry_content or retry_tool_calls:
+                    # 重试成功：把响应放回 working 继续正常流程
+                    retry_resp = Message(role="assistant", content=retry_content, tool_calls=retry_tool_calls)
+                    working.append(retry_resp)
+                    if not retry_resp.is_tool_call:
+                        return
+                    # 有工具调用 → 正常执行（跳到下一轮循环开头处理不太方便，直接 continue）
+                    tool_calls = retry_tool_calls
+                    response = retry_resp
+                    # fall through to tool execution below
+                else:
+                    # 重试仍空 → finalize 兜底
+                    logger.warning("空响应重试仍无输出，执行 finalize 兜底")
+                    sys = system + finalize_system_suffix("max_iters")
+                    async for chunk in self._provider.stream_chat(working, tools=None, system=sys):
+                        if chunk.reasoning:
+                            yield ThinkingEvent(delta=chunk.reasoning)
+                        if chunk.content:
+                            yield chunk.content
+                        if chunk.is_final:
+                            self.usage.add(chunk.usage)
+                    return
 
             if not response.is_tool_call:
                 return
