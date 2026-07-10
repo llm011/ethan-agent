@@ -64,6 +64,25 @@ def setup_main(ctx: typer.Context) -> None:
     """交互式引导菜单：设置、插件、渠道。"""
     if ctx.invoked_subcommand is not None:
         return
+
+    from ethan.core.config import CONFIG_DIR, get_config
+
+    first_run = not (CONFIG_DIR / "config.yaml").exists()
+
+    # 初始化（首次运行时创建目录、config、默认技能等）
+    get_config()
+
+    if first_run:
+        console.print()
+        console.print("[bold green]✓ 初始化完成[/bold green]")
+        console.print()
+        console.print(f"  数据目录  {CONFIG_DIR}")
+        console.print(f"  配置文件  {CONFIG_DIR / 'config.yaml'}")
+        console.print(f"  系统文件  {CONFIG_DIR / 'system/'}")
+        console.print(f"  默认技能  {CONFIG_DIR / 'skills/'}")
+        console.print()
+        return
+
     _run_interactive_menu()
 
 

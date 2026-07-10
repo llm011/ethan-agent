@@ -84,7 +84,7 @@ class RoutingConfig(BaseModel):
     未命中任何规则的请求按字数走 medium / full（medium_max_length 仅用于这一档划分）。
     """
     fast_base_tools: list[str] = Field(default_factory=lambda: [
-        "file_read", "file_write", "skill_read", "skill_list", "find_tools",
+        "shell", "file_read", "file_write", "skill_read", "skill_list", "find_tools",
         "schedule_create", "schedule_list", "schedule_remove",
     ])  # fast 档永远挂载的基础系统工具；find_tools 用于「规则工具不够时」兜底激活进阶工具
     base_tools: list[str] = Field(default_factory=lambda: [
@@ -101,6 +101,7 @@ class RoutingConfig(BaseModel):
         "knowledge_search", "knowledge_read",
         "memory_write", "procedure_write", "profile_update",
         "schedule_create", "schedule_list", "schedule_remove",
+        "lark_calendar_events", "lark_chat_messages", "lark_message_send",  # 飞书高频工具
         "browser_session", "browser_tab", "browser_page",  # 常驻：避免 find_tools 发现死循环
         "ui_card",  # 飞书/web 渠道核心卡片能力，应在初始集里对模型可见
     ])
@@ -282,7 +283,7 @@ def _default_config() -> dict:
         },
         "defaults": {
             "model": os.environ.get("AGENT_DEFAULT_MODEL", "claude-sonnet-4.6"),
-            "lite_model": "",  # 轻量模型（记忆压缩/标题生成等后台任务用）；空则按主模型推断或与主模型相同
+            "lite_model": os.environ.get("AGENT_LITE_MODEL", ""),  # 轻量模型（记忆压缩/标题生成等后台任务用）；空则按主模型推断或与主模型相同
             "max_tokens": 4096,
             "max_tool_iterations": 100,
         },
