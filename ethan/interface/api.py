@@ -1,4 +1,5 @@
 """FastAPI 入口 — 挂载所有路由模块。"""
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -37,7 +38,7 @@ _lark_available: bool | None = None
 
 
 def _lark_ready() -> bool:
-    """是否可用飞书渠道。用 find_spec 轻量探测，不触发 lark_oapi 完整 import。
+    """是否可用飞书渠道。检测 lark_oapi 包已安装且飞书已配置。
 
     lifespan 据此决定是否 start_lark_listener；start_lark_listener 内部走 lark-cli
     子进程，lark_send/lark_stream 里的 lark_oapi 都是函数内 lazy import，所以探测本身
@@ -46,7 +47,16 @@ def _lark_ready() -> bool:
     global _lark_available
     if _lark_available is None:
         import importlib.util
-        _lark_available = importlib.util.find_spec("lark_oapi") is not None
+        if importlib.util.find_spec("lark_oapi") is None:
+            _lark_available = False
+            logging.getLogger(__name__).info(
+                "lark-oapi 未安装，飞书渠道不可用。"
+                "如需启用，运行 ethan setup → 渠道 → 飞书"
+            )
+        else:
+            from ethan.core.config import get_config
+            lark_cfg = getattr(get_config(), "lark", None)
+            _lark_available = bool(lark_cfg and lark_cfg.app_id)
     return _lark_available
 
 
@@ -78,6 +88,10 @@ async def lifespan(app: FastAPI):
         from ethan.interface.wechat_events import start_wechat_listener
         start_wechat_listener()
     start_heartbeat()
+    # 进程互相监控：写 server PID + 拉起 watchdog（独立进程，server 挂了它会重启）
+    from ethan.watchdog import ensure_watchdog_running, write_server_pid
+    write_server_pid()
+    ensure_watchdog_running()
     # 主动启动调度器，确保持久化的定时任务在服务重启后自动恢复运行。
     # 不能依赖懒加载（首次 GET /api/schedule 才 start），否则服务空跑时 job 永远不触发。
     from ethan.interface.routers.schedule import get_scheduler
@@ -97,6 +111,9 @@ async def lifespan(app: FastAPI):
     stop_heartbeat()
     stop_idle_sweep()
     await app.state.api_key_store.close()
+    # 清理 server PID 文件
+    from ethan.watchdog import SERVER_PID_FILE, _remove_pid
+    _remove_pid(SERVER_PID_FILE)
 
 
 app = FastAPI(

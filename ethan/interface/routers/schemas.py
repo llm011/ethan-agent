@@ -20,3 +20,4 @@ class ChatResponse(BaseModel):
     content: str
     model: str
     usage: dict
+    session_id: str | None = None
