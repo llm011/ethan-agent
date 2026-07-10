@@ -147,6 +147,15 @@ class RoutingConfig(BaseModel):
             tools=["shell", "web_search", "generate_chart"],
             skills=["finance-query"],
         ),
+        FastRule(
+            name="macOS App自动化",
+            keywords=[
+                "备忘录", "提醒事项", "日历*会议", "日历*日程",
+                "滴答清单", "osascript", "AppleScript",
+            ],
+            tools=["shell"],
+            skills=["macos-automation"],
+        ),
     ])
     fast_max_iters: int = 10     # Fast Path 最多工具迭代次数
     fast_use_lite_model: bool = True  # Fast Path 用 lite 模型（设备控制/状态查询等简单任务，省钱提速）
