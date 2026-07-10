@@ -4,7 +4,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-CONFIG_DIR = Path.home() / ".ethan"
+CONFIG_DIR = Path(os.environ.get("ETHAN_DATA_DIR", "")) if os.environ.get("ETHAN_DATA_DIR") else Path.home() / ".ethan"
 CONFIG_FILE = CONFIG_DIR / "config.yaml"
 
 
@@ -135,7 +135,7 @@ class RoutingConfig(BaseModel):
                 "今天天气", "明天天气", "天气怎么样",
                 "*多少钱", "*什么价",
             ],
-            tools=["web_search"],
+            tools=["web_search", "get_weather"],
             skills=[],
         ),
         FastRule(
@@ -176,7 +176,7 @@ class RoutingConfig(BaseModel):
     fast_max_iters: int = 10     # Fast Path 最多工具迭代次数
     fast_use_lite_model: bool = True  # Fast Path 用 lite 模型（设备控制/状态查询等简单任务，省钱提速）
     medium_max_length: int = 80   # 未命中 fast_rule 时：≤ 此长度走 Medium，否则 Full
-    medium_max_iters: int = 15    # Medium Path 最多迭代次数（从 30 降至 15，避免过度搜索浪费 tokens）
+    medium_max_iters: int = 50    # Medium Path 最多迭代次数（browser 任务需要更多步骤）
 
 
 class HeartbeatConfig(BaseModel):
