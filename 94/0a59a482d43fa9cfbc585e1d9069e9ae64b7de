@@ -1,0 +1,38 @@
+ethan/tools/builtin/web.py
+  s_0dd82ce53c479e::t_db4f5e8bf53b3b 13-18,26-38,43,52-53,62-65
+  s_0dd82ce53c479e::t_b1d5e80d5840a4 68-69
+  s_0dd82ce53c479e::t_814a64d13ec02c 54-61
+ethan/tools/builtin/web_search.py
+  s_0dd82ce53c479e::t_d563231b80cc64 153
+  s_0dd82ce53c479e::t_0741416b820f45 400,402,405,407,409-417,419,422
+  s_0dd82ce53c479e::t_1316f9d90d9bb7 79
+  s_0dd82ce53c479e::t_67263b42b18dae 4
+  s_0dd82ce53c479e::t_8e6f02eec3cf2e 159,163-169,173-177,182-183,185,189
+  s_0dd82ce53c479e::t_75dd7f1c28eaf0 206,210-212
+  s_0dd82ce53c479e::t_3fc78c0ef8c86f 401
+  s_0dd82ce53c479e::t_f1ffd1480407f1 403-404,406,408,418,420-421,423-444
+  s_0dd82ce53c479e::t_da6334254ab623 445
+ethan/core/agent.py
+  s_0dd82ce53c479e::t_70542259032b4d 558,561,564,567,581
+  s_0dd82ce53c479e::t_593bab8c11575a 685,690,693,695,701,729
+  s_0dd82ce53c479e::t_248eb0d978d94d 686-688,691-692,694,696-697,704,706-728
+  s_0dd82ce53c479e::t_53cf91b086e2eb 559,562-563,565,568-580
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "940a59a482d43fa9cfbc585e1d9069e9ae64b7de",
+  "prompts": {},
+  "sessions": {
+    "s_0dd82ce53c479e": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a4f5bb5ac8f8e64f3a7c663",
+        "model": "c_o_new_thinking__dev"
+      },
+      "human_author": "jsongo <jsongo@qq.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
