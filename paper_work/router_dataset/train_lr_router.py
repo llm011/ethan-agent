@@ -35,8 +35,13 @@ MAX_LENGTH = 64  # 必须与运行时 router.py encode 的 max_length 一致
 LR_HEAD_OUT = ROOT.parents[1] / "ethan" / "skills" / "router_models" / "lr_head.npz"
 
 SKILLS = [
+    # 原有 8 类
     "paper-analysis", "companion-listen", "deepwiki", "lark-im", "channels",
     "skills-manager", "lark-shared", "legal-assistant",
+    # 新扩 9 类
+    "code-review", "computer-use", "getnote", "lark-doc",
+    "upload-cdn", "use-browser",
+    "finance-query", "travel-query", "ui-card",
 ]
 LABELS = SKILLS + ["others"]
 LABEL2ID = {l: i for i, l in enumerate(LABELS)}
@@ -139,6 +144,16 @@ def main():
     _, bfloor, bf, brej = best
     print(f"\n推荐工作点：FLOOR={bfloor:.2f}  val macroF1={bf:.2f}  拒识={brej*100:.1f}%")
 
+    # val per-skill 明细（最优 FLOOR 下，用于诊断哪类需要补样本）
+    print(f"\n=== val per-skill @ FLOOR={bfloor:.2f} ===")
+    pred_va = predict_with_floor(Xva, bfloor)
+    pv, rv, fv, rejv, (pvs, rvs, fvs) = macro_prf(yva, pred_va, reject_id)
+    print(f"macro  P={pv:.3f}  R={rv:.3f}  F1={fv:.3f}   others 拒识={rejv*100:.1f}%")
+    print(f"\n{'skill':<18}{'P':>7}{'R':>7}{'F1':>7}")
+    for i, s in enumerate(SKILLS):
+        flag = "  ⚠️" if fvs[i] < 0.85 else ""
+        print(f"{s:<18}{pvs[i]:>7.2f}{rvs[i]:>7.2f}{fvs[i]:>7.2f}{flag}")
+
     # test 只跑一次
     print("\n=== test 最终评测 @ FLOOR={:.2f} ===".format(bfloor))
     pred = predict_with_floor(Xte, bfloor)
@@ -146,10 +161,34 @@ def main():
     print(f"macro  P={p:.3f}  R={r:.3f}  F1={f:.3f}   others 拒识={rej*100:.1f}%")
     print(f"\n{'skill':<18}{'P':>7}{'R':>7}{'F1':>7}")
     for i, s in enumerate(SKILLS):
-        print(f"{s:<18}{ps[i]:>7.2f}{rs[i]:>7.2f}{fs[i]:>7.2f}")
+        flag = "  ⚠️" if fs[i] < 0.85 else ""
+        print(f"{s:<18}{ps[i]:>7.2f}{rs[i]:>7.2f}{fs[i]:>7.2f}{flag}")
+
+    # test 混淆矩阵（仅显示有错误的格子，用于定位串档对）
+    print("\n=== test 混淆矩阵（非对角线 > 0 的串档格子）===")
+    cm = np.zeros((len(LABELS), len(LABELS)), dtype=int)
+    for true_id, pred_id in zip(yte, pred):
+        cm[true_id][pred_id] += 1
+    all_labels = LABELS  # skill + others
+    print(f"{'真\\预':<20}", end="")
+    for lbl in all_labels:
+        print(f"{lbl[:10]:>12}", end="")
+    print()
+    has_confusion = False
+    for i, true_lbl in enumerate(all_labels):
+        row_errors = [(j, cm[i][j]) for j in range(len(all_labels)) if i != j and cm[i][j] > 0]
+        if row_errors:
+            has_confusion = True
+            print(f"{true_lbl:<20}", end="")
+            for j in range(len(all_labels)):
+                v = cm[i][j]
+                print(f"{'·' if v == 0 else v:>12}", end="")
+            print()
+    if not has_confusion:
+        print("  （无串档，对角线完美）")
 
     # 也报 FLOOR=0（纯分类，others 当一类）的 test 结果做对照
-    print("\n=== 对照：FLOOR=0（纯 9 类分类，无额外拒识）===")
+    print("\n=== 对照：FLOOR=0（纯分类，无额外拒识）===")
     pred0 = predict_with_floor(Xte, 0.0)
     p0, r0, f0, rej0, _ = macro_prf(yte, pred0, reject_id)
     print(f"macro  P={p0:.3f}  R={r0:.3f}  F1={f0:.3f}   others 拒识={rej0*100:.1f}%")

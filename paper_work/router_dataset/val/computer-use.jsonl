@@ -1,0 +1,75 @@
+{"text": "在提醒那个 app 里帮我建个明早的提醒呢", "label": "computer-use", "subcat": "F-原生脚本"}
+{"text": "去系统设置里把亮度帮我调高？", "label": "computer-use", "subcat": "G-桌面边界"}
+{"text": "帮我切换到另一个已经开着的软件？", "label": "computer-use", "subcat": "D-启动"}
+{"text": "按撤销的快捷键帮我退回上一步呢", "label": "computer-use", "subcat": "C-键盘"}
+{"text": "把终端那个程序给我叫出来", "label": "computer-use", "subcat": "D-启动"}
+{"text": "让我那个记日程 app 帮我腾个明天下午的空档排事", "label": "computer-use", "subcat": "F-原生脚本"}
+{"text": "把邮件那个程序唤到前台？", "label": "computer-use", "subcat": "D-启动"}
+{"text": "把现在这个界面存成一张图片啊", "label": "computer-use", "subcat": "A-拍图"}
+{"text": "把这个不用的程序帮我关掉？", "label": "computer-use", "subcat": "D-启动"}
+{"text": "帮我把桌面现在的画面记录一张吗", "label": "computer-use", "subcat": "A-拍图"}
+{"text": "帮我把当前画面拍下来发我", "label": "computer-use", "subcat": "A-拍图"}
+{"text": "让系统自带记事那个新建一条待记的东西", "label": "computer-use", "subcat": "F-原生脚本"}
+{"text": "帮我切换到另一个已经开着的软件啊", "label": "computer-use", "subcat": "D-启动"}
+{"text": "在这个界面里往下翻到设置那栏吗", "label": "computer-use", "subcat": "E-滚动"}
+{"text": "帮我把这个图标拽到程序坞上呢", "label": "computer-use", "subcat": "B-鼠标"}
+{"text": "用鼠标戳中屏幕上那个红点", "label": "computer-use", "subcat": "B-鼠标"}
+{"text": "帮我敲一串数字进这个格子", "label": "computer-use", "subcat": "C-键盘"}
+{"text": "用鼠标戳中屏幕上那个红点？", "label": "computer-use", "subcat": "B-鼠标"}
+{"text": "把那个看图的软件调到最前面", "label": "computer-use", "subcat": "D-启动"}
+{"text": "帮我在访达里找到那个文件夹展开看看？", "label": "computer-use", "subcat": "G-桌面边界"}
+{"text": "现在屏上有个弹窗，帮我拍下来？", "label": "computer-use", "subcat": "A-拍图"}
+{"text": "帮我切换到另一个已经开着的软件", "label": "computer-use", "subcat": "D-启动"}
+{"text": "帮我在标题栏敲上今天的日期呢", "label": "computer-use", "subcat": "C-键盘"}
+{"text": "在那个复选框上帮我戳一下勾上？", "label": "computer-use", "subcat": "B-鼠标"}
+{"text": "把最上面那个窗口的样子拍给我啊", "label": "computer-use", "subcat": "A-拍图"}
+{"text": "帮我把内容滚到中间那部分？", "label": "computer-use", "subcat": "E-滚动"}
+{"text": "把这个窗口内容往下带到结尾？", "label": "computer-use", "subcat": "E-滚动"}
+{"text": "帮我戳一下屏幕正中央那个开始啊", "label": "computer-use", "subcat": "B-鼠标"}
+{"text": "帮我用键盘把光标挪到行尾吗", "label": "computer-use", "subcat": "C-键盘"}
+{"text": "在这个位置敲几个字母进去吗", "label": "computer-use", "subcat": "C-键盘"}
+{"text": "在我那个记事程序里把这段话保存进去呢", "label": "computer-use", "subcat": "F-原生脚本"}
+{"text": "在这个位置敲几个字母进去呢", "label": "computer-use", "subcat": "C-键盘"}
+{"text": "在访达窗口里帮我切到列表视图呢", "label": "computer-use", "subcat": "G-桌面边界"}
+{"text": "切到我刚才开的那个表格程序？", "label": "computer-use", "subcat": "D-启动"}
+{"text": "把音乐那个软件给我唤起来？", "label": "computer-use", "subcat": "D-启动"}
+{"text": "帮我看看屏幕现在长啥样，拍一张吗", "label": "computer-use", "subcat": "A-拍图"}
+{"text": "帮我一屏一屏往下过一遍", "label": "computer-use", "subcat": "E-滚动"}
+{"text": "在我那个提醒 app 里加个晚上八点的事项吗", "label": "computer-use", "subcat": "F-原生脚本"}
+{"text": "给屏幕拍一张我看看现在是什么样啊", "label": "computer-use", "subcat": "A-拍图"}
+{"text": "帮我往这个多行框里敲一段话", "label": "computer-use", "subcat": "C-键盘"}
+{"text": "帮我往下滚看看后面还有啥", "label": "computer-use", "subcat": "E-滚动"}
+{"text": "去访达里帮我把这个文件夹里的东西按大小排", "label": "computer-use", "subcat": "G-桌面边界"}
+{"text": "给屏幕拍一张我看看现在是什么样？", "label": "computer-use", "subcat": "A-拍图"}
+{"text": "在屏幕中间那个位置帮我戳一下", "label": "computer-use", "subcat": "B-鼠标"}
+{"text": "帮我往这个多行框里敲一段话吗", "label": "computer-use", "subcat": "C-键盘"}
+{"text": "敲个保存的快捷键帮我存一下吗", "label": "computer-use", "subcat": "C-键盘"}
+{"text": "把这个页面翻到最上面去？", "label": "computer-use", "subcat": "E-滚动"}
+{"text": "在系统设置里帮我把音量调低一点？", "label": "computer-use", "subcat": "G-桌面边界"}
+{"text": "帮我往下滚看看后面还有啥啊", "label": "computer-use", "subcat": "E-滚动"}
+{"text": "在我记日程那个软件里安排明天上午一个事项呢", "label": "computer-use", "subcat": "F-原生脚本"}
+{"text": "在这个框里替我敲一段文字呢", "label": "computer-use", "subcat": "C-键盘"}
+{"text": "帮我在定闹钟提醒那个 app 里加一项？", "label": "computer-use", "subcat": "F-原生脚本"}
+{"text": "帮我在访达里把这个文件夹重命名？", "label": "computer-use", "subcat": "G-桌面边界"}
+{"text": "用鼠标戳中屏幕上那个红点啊", "label": "computer-use", "subcat": "B-鼠标"}
+{"text": "用鼠标把进度条拖到一半的位置吗", "label": "computer-use", "subcat": "B-鼠标"}
+{"text": "帮我在系统记事里新开一页写会议纪要呢", "label": "computer-use", "subcat": "F-原生脚本"}
+{"text": "在这个页面里往下多滚一点啊", "label": "computer-use", "subcat": "E-滚动"}
+{"text": "当前这个页面的样子帮我抓一张图", "label": "computer-use", "subcat": "A-拍图"}
+{"text": "帮我在系统自带的记事里开一条新的写点东西？", "label": "computer-use", "subcat": "F-原生脚本"}
+{"text": "在定闹钟提醒那个 app 里加条买菜的提醒", "label": "computer-use", "subcat": "F-原生脚本"}
+{"text": "帮我把访达里那个下载文件夹打开？", "label": "computer-use", "subcat": "G-桌面边界"}
+{"text": "切到我刚才开的那个表格程序", "label": "computer-use", "subcat": "D-启动"}
+{"text": "帮我把这个图标拽到程序坞上？", "label": "computer-use", "subcat": "B-鼠标"}
+{"text": "把这条内容用鼠标选中拖走吗", "label": "computer-use", "subcat": "B-鼠标"}
+{"text": "现在屏上有个弹窗，帮我拍下来啊", "label": "computer-use", "subcat": "A-拍图"}
+{"text": "让记日程那个 app 帮我把周四那个时间段标上？", "label": "computer-use", "subcat": "F-原生脚本"}
+{"text": "拍一下现在活动的那个窗口啊", "label": "computer-use", "subcat": "A-拍图"}
+{"text": "帮我一直滚到最底下呢", "label": "computer-use", "subcat": "E-滚动"}
+{"text": "帮我唤起系统设置那个界面啊", "label": "computer-use", "subcat": "D-启动"}
+{"text": "帮我把长图往下滑看完整个吗", "label": "computer-use", "subcat": "E-滚动"}
+{"text": "帮我在访达里找到那个文件夹展开看看", "label": "computer-use", "subcat": "G-桌面边界"}
+{"text": "帮我在本机的文件管理器里新建个文件夹啊", "label": "computer-use", "subcat": "G-桌面边界"}
+{"text": "帮我戳一下屏幕正中央那个开始", "label": "computer-use", "subcat": "B-鼠标"}
+{"text": "帮我在访达里把这个文件夹重命名", "label": "computer-use", "subcat": "G-桌面边界"}
+{"text": "让记事程序帮我记下这几条要点啊", "label": "computer-use", "subcat": "F-原生脚本"}

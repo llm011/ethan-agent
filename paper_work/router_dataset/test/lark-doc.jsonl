@@ -1,0 +1,75 @@
+{"text": "帮我把这篇 docx 内容读出来做个摘要啊", "label": "lark-doc", "subcat": "A-读取"}
+{"text": "帮我把 wiki 页里的图片全都下下来吗", "label": "lark-doc", "subcat": "D-图片"}
+{"text": "把云文档从头到尾导出成 markdown呢", "label": "lark-doc", "subcat": "E-导出"}
+{"text": "把这个链接文档里那段帮我扩充一下呢", "label": "lark-doc", "subcat": "C-编辑"}
+{"text": "这个文档链接打开后写了啥，帮我看下？", "label": "lark-doc", "subcat": "A-读取"}
+{"text": "把这个 token 对应的文档转成 md", "label": "lark-doc", "subcat": "E-导出"}
+{"text": "帮我看看这个 token 对应的文档说了什么吗", "label": "lark-doc", "subcat": "A-读取"}
+{"text": "只读云文档里那个表格所在的小节？", "label": "lark-doc", "subcat": "F-局部"}
+{"text": "只在这篇在线文档里读写内容就好？", "label": "lark-doc", "subcat": "G-文档边界"}
+{"text": "新建个在线文档帮我把框架搭起来吗", "label": "lark-doc", "subcat": "B-新建"}
+{"text": "往这份文档里插入我给你的这张图", "label": "lark-doc", "subcat": "D-图片"}
+{"text": "起一份空白 docx 我马上要写东西进去", "label": "lark-doc", "subcat": "B-新建"}
+{"text": "这个链接指向一篇文档，帮我导出它内容呢", "label": "lark-doc", "subcat": "G-文档边界"}
+{"text": "把这个云文档里的正文全部取出来啊", "label": "lark-doc", "subcat": "A-读取"}
+{"text": "帮我把这篇文档存成 md 放到本地目录？", "label": "lark-doc", "subcat": "E-导出"}
+{"text": "往这个云文档末尾插一张流程图吗", "label": "lark-doc", "subcat": "D-图片"}
+{"text": "在这篇文档后面帮我追加一段内容呢", "label": "lark-doc", "subcat": "C-编辑"}
+{"text": "帮我把 docx 那段内容重新组织下语言吗", "label": "lark-doc", "subcat": "C-编辑"}
+{"text": "帮我围绕这个 docx 的正文做增删改？", "label": "lark-doc", "subcat": "G-文档边界"}
+{"text": "帮我改一下文档里那个小标题的措辞吗", "label": "lark-doc", "subcat": "C-编辑"}
+{"text": "帮我把这个链接文档的文字内容拿出来呢", "label": "lark-doc", "subcat": "G-文档边界"}
+{"text": "只要在线文档开头那一节的正文呢", "label": "lark-doc", "subcat": "F-局部"}
+{"text": "把这篇 docx 里的图都抠出来给我？", "label": "lark-doc", "subcat": "D-图片"}
+{"text": "帮我把云文档里附录那节单独读出吗", "label": "lark-doc", "subcat": "F-局部"}
+{"text": "把这份在线文档整篇下成 md 格式给我", "label": "lark-doc", "subcat": "E-导出"}
+{"text": "这篇在线协作文档帮我加个小标题？", "label": "lark-doc", "subcat": "G-文档边界"}
+{"text": "帮我读这个协作文档的正文汇报给我呢", "label": "lark-doc", "subcat": "G-文档边界"}
+{"text": "帮我起一个 wiki 页面存这次讨论吗", "label": "lark-doc", "subcat": "B-新建"}
+{"text": "帮我建个 wiki 页面记录这个项目？", "label": "lark-doc", "subcat": "B-新建"}
+{"text": "这个 wiki 页帮我转 markdown 存起来", "label": "lark-doc", "subcat": "E-导出"}
+{"text": "帮我读完这篇云文档告诉我结论", "label": "lark-doc", "subcat": "A-读取"}
+{"text": "把这个链接文档中间那部分截取给我呢", "label": "lark-doc", "subcat": "F-局部"}
+{"text": "这个链接的文档内容帮我抓下来读读", "label": "lark-doc", "subcat": "A-读取"}
+{"text": "把这篇文档里的图片帮我下载下来吗", "label": "lark-doc", "subcat": "D-图片"}
+{"text": "把这个链接文档里那段帮我扩充一下", "label": "lark-doc", "subcat": "C-编辑"}
+{"text": "帮我建一份新的在线协作文档呢", "label": "lark-doc", "subcat": "B-新建"}
+{"text": "在这份在线文档里插入一段代码说明啊", "label": "lark-doc", "subcat": "C-编辑"}
+{"text": "把云文档全文转成 markdown 给我吗", "label": "lark-doc", "subcat": "E-导出"}
+{"text": "往这篇 docx 里插一个新的段落呢", "label": "lark-doc", "subcat": "C-编辑"}
+{"text": "帮我在文档开头加一段引言呢", "label": "lark-doc", "subcat": "C-编辑"}
+{"text": "帮我在 docx 开头插一张 logo 图片？", "label": "lark-doc", "subcat": "D-图片"}
+{"text": "给我这个 wiki 页的正文，不要别的操作啊", "label": "lark-doc", "subcat": "G-文档边界"}
+{"text": "帮我在协作文档里补上遗漏的那一条？", "label": "lark-doc", "subcat": "C-编辑"}
+{"text": "帮我给在线文档里补一张封面图？", "label": "lark-doc", "subcat": "D-图片"}
+{"text": "这个 token 的文档内容帮我调出来看呢", "label": "lark-doc", "subcat": "A-读取"}
+{"text": "帮我新建一篇云文档准备写点东西？", "label": "lark-doc", "subcat": "B-新建"}
+{"text": "在这篇文档中间帮我插入一段说明啊", "label": "lark-doc", "subcat": "C-编辑"}
+{"text": "帮我把这个链接文档的文字内容拿出来啊", "label": "lark-doc", "subcat": "G-文档边界"}
+{"text": "帮我在 docx 指定位置放一张截图吗", "label": "lark-doc", "subcat": "D-图片"}
+{"text": "帮我在知识库里创建一个新页面啊", "label": "lark-doc", "subcat": "B-新建"}
+{"text": "帮我抓在线文档里那个子标题下的段落？", "label": "lark-doc", "subcat": "F-局部"}
+{"text": "整篇 docx 帮我导出成 markdown 文本", "label": "lark-doc", "subcat": "E-导出"}
+{"text": "新开一篇云文档命名为测试记录呢", "label": "lark-doc", "subcat": "B-新建"}
+{"text": "这个链接的文档帮我导成 md 存到本地啊", "label": "lark-doc", "subcat": "E-导出"}
+{"text": "帮我在知识库里创建一个新页面吗", "label": "lark-doc", "subcat": "B-新建"}
+{"text": "帮我取这篇文档里概述那一段就好？", "label": "lark-doc", "subcat": "F-局部"}
+{"text": "帮我获取这个链接文档的正文文本", "label": "lark-doc", "subcat": "A-读取"}
+{"text": "这个链接是篇云文档，帮我把内容拉出来读？", "label": "lark-doc", "subcat": "G-文档边界"}
+{"text": "往这篇云文档里插一段话进去吗", "label": "lark-doc", "subcat": "C-编辑"}
+{"text": "帮我把这个云文档存成本地的 md 文件啊", "label": "lark-doc", "subcat": "E-导出"}
+{"text": "这篇知识库文档帮我拉全文看看", "label": "lark-doc", "subcat": "A-读取"}
+{"text": "往这个云文档末尾插一张流程图", "label": "lark-doc", "subcat": "D-图片"}
+{"text": "帮我读这个 wiki 里那一页的内容", "label": "lark-doc", "subcat": "A-读取"}
+{"text": "帮我抓文档里关于方案那一章的内容啊", "label": "lark-doc", "subcat": "F-局部"}
+{"text": "帮我取这篇文档里概述那一段就好啊", "label": "lark-doc", "subcat": "F-局部"}
+{"text": "只要这篇文档某个章节的内容不用全篇", "label": "lark-doc", "subcat": "F-局部"}
+{"text": "帮我把知识库里那页导出成 markdown吗", "label": "lark-doc", "subcat": "E-导出"}
+{"text": "帮我围绕这个 docx 的正文做增删改呢", "label": "lark-doc", "subcat": "G-文档边界"}
+{"text": "帮我把这篇 docx 的正文整理出来吗", "label": "lark-doc", "subcat": "A-读取"}
+{"text": "起一份新的在线文档我要开始记吗", "label": "lark-doc", "subcat": "B-新建"}
+{"text": "把 wiki 页面里的图片保存成文件呢", "label": "lark-doc", "subcat": "D-图片"}
+{"text": "新开一篇在线文档取名叫周报呢", "label": "lark-doc", "subcat": "B-新建"}
+{"text": "只要这个 docx 里第三部分的内容？", "label": "lark-doc", "subcat": "F-局部"}
+{"text": "在这份在线文档里插入一段代码说明呢", "label": "lark-doc", "subcat": "C-编辑"}
+{"text": "往这份文档里插入我给你的这张图呢", "label": "lark-doc", "subcat": "D-图片"}
