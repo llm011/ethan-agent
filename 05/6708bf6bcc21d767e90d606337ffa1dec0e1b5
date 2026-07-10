@@ -1,0 +1,140 @@
+ethan/interface/commands/setup.py
+  s_bfbf81f18ba7ab::t_0940e4b6ddd636 133
+  s_bfbf81f18ba7ab::t_886343fc1f421e 422,428-430,432-453,474-480,482-484
+  s_bfbf81f18ba7ab::t_d499b2aa2017ef 716-719,726-730
+  s_bfbf81f18ba7ab::t_8d6a70a5c25a75 546,548-550,555,565,573-575,582,584,586-588,590-591,593-594,596-618
+  s_bfbf81f18ba7ab::t_d57095f175376b 402-407
+  s_bfbf81f18ba7ab::t_fade44844acead 503-534
+  s_bfbf81f18ba7ab::t_416ae38ee99e91 136,140,144-147,150-153,175,391,399,408,411-412,414
+  s_bfbf81f18ba7ab::t_09db8a43e577a2 78-81
+  s_bfbf81f18ba7ab::t_5597023d877e3c 547,551-554,556-564,566-572,589,592,595
+  s_bfbf81f18ba7ab::t_de97092558a66d 25-31
+  s_bfbf81f18ba7ab::t_ba394baaef16e6 19-20,33,40,47-48,50
+  s_bfbf81f18ba7ab::t_30565e4d0ce939 4,70-77,82-132,134-135,137-139,141-143,172,203-204,207,413
+  s_bfbf81f18ba7ab::t_40a788daad837c 647-648,652-664
+  s_bfbf81f18ba7ab::t_b510cf5b801d41 149,156-165
+  s_bfbf81f18ba7ab::t_e32ee859ebb65d 171,173,176-202,205-206,208-389
+  s_bfbf81f18ba7ab::t_55eab9bdd0e212 409-410
+  s_bfbf81f18ba7ab::t_1c00229f085ad5 459-463,481
+  s_bfbf81f18ba7ab::t_e55dceca330097 45-46,49,51-58
+  s_bfbf81f18ba7ab::t_925bdc827c78ff 576-581,583,585
+  s_bfbf81f18ba7ab::t_91e15afe2031e3 622,624-642
+  s_bfbf81f18ba7ab::t_bc17281873de98 464-468
+  s_bfbf81f18ba7ab::t_3badd0ff999855 646,649-651,665-711,761
+  s_bfbf81f18ba7ab::t_bf2d7cb75a4766 1-3,5-18,21-24,32,34-39,41-44,59-69,148,154-155,166-170,174,390,392-398,400-401,415-421,423-427,431,454-458,469-473,485-502,535-545,619-621,623,643-645,712-715,720-725,731-760
+  s_bfbf81f18ba7ab::t_887fc4dbcfd206 762-764
+ethan/tools/builtin/shell.py
+  s_0dd82ce53c479e::t_259286d7c3d7be 51-52
+  s_0dd82ce53c479e::t_fc58fd2ec8d2cd 58
+ethan/interface/routers/schemas.py
+  s_0dd82ce53c479e::t_50db03464ebffe 23
+ethan/interface/cli.py
+  s_bfbf81f18ba7ab::t_541c91755dcba4 42,61
+ethan/watchdog.py
+  s_c68177da224f36::t_81e2fc0daf4004 26-28
+  s_c68177da224f36::t_ed4def55dbeb90 164-182,184-185,192
+  s_c68177da224f36::t_93fff16053f4aa 1-25,29-163,183,186-191,193-231,235-285
+  s_c68177da224f36::t_5fb91d9676b502 232-234
+  s_c68177da224f36::t_3ab6014a65e405 286
+ethan/interface/api.py
+  s_bfbf81f18ba7ab::t_e8c2419e83515d 41,50-59
+  s_c68177da224f36::t_b425ede9174170 114,116
+  s_c68177da224f36::t_7fcce88cd11f9e 2,115 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a5132b3b37e239934999e9b","tool_type":"agent","tool_id":"Edit","line_ranges":[{"Single":2},{"Single":115}]}]}
+  s_c68177da224f36::t_d95717f9015591 91-94
+ethan/core/heartbeat.py
+  s_c68177da224f36::t_536dccc2d5649f 338,340-345
+ethan/interface/routers/chat.py
+  s_0dd82ce53c479e::t_e019de162c5ce7 192
+  s_0dd82ce53c479e::t_d9237177fdf549 64-70
+  s_0dd82ce53c479e::t_e6abc870624251 179-181
+  s_0dd82ce53c479e::t_adf2c18289a8a2 166-170
+  s_0dd82ce53c479e::t_049a5d0953a13e 182
+ethan/interface/routers/producers.py
+  s_0dd82ce53c479e::t_63cb822ca237b0 319-321
+  s_0dd82ce53c479e::t_f8d206e8babfa5 43-69
+pyproject.toml
+  s_bfbf81f18ba7ab::t_eedab6b08bf155 59-61
+  s_bfbf81f18ba7ab::t_45a008caba3772 62-63
+ethan/interface/config_editor.py
+  s_bfbf81f18ba7ab::t_92bba4244ffe9c 63
+  s_bfbf81f18ba7ab::t_60059007e559f7 173
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "056708bf6bcc21d767e90d606337ffa1dec0e1b5",
+  "prompts": {},
+  "sessions": {
+    "s_0dd82ce53c479e": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a4f5bb5ac8f8e64f3a7c663",
+        "model": "c_o_new_thinking__dev"
+      },
+      "human_author": "jsongo <jsongo@qq.com>"
+    },
+    "s_bfbf81f18ba7ab": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a51232bb37e2399349998d2",
+        "model": "c_o_new_thinking__dev"
+      },
+      "human_author": "jsongo <jsongo@qq.com>"
+    },
+    "s_c68177da224f36": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a4fbfb3ac8f8e64f3a7cc1f",
+        "model": "c_o_new_thinking__dev"
+      },
+      "human_author": "jsongo <jsongo@qq.com>"
+    }
+  },
+  "attestation_metadata": {
+    "ethan/interface/api.py": [
+      {
+        "hash": "s_c68177da224f36::t_7fcce88cd11f9e",
+        "line_ranges": [
+          {
+            "Single": 2
+          },
+          {
+            "Single": 115
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a5132b3b37e239934999e9b",
+            "tool_type": "agent",
+            "tool_id": "Edit",
+            "line_ranges": [
+              {
+                "Single": 2
+              },
+              {
+                "Single": 115
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "remote_transcripts": {
+    "s_c68177da224f36": {
+      "tool": "trae",
+      "conversation_id": "6a4fbfb3ac8f8e64f3a7cc1f",
+      "session_id": "6a4fbfb3ac8f8e64f3a7cc1f",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_c68177da224f36::t_7fcce88cd11f9e": {
+      "tool": "trae",
+      "conversation_id": "6a4fbfb3ac8f8e64f3a7cc1f",
+      "session_id": "6a4fbfb3ac8f8e64f3a7cc1f",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    }
+  }
+}
