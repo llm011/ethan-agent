@@ -158,7 +158,7 @@ class SessionStore:
         """)
         await self._db.commit()
         # Migration: add columns if they don't exist (for existing databases)
-        for col, definition in [("created_at", "REAL"), ("usage", "TEXT"), ("tool_steps", "TEXT"), ("thought", "TEXT"), ("quote", "TEXT"), ("a2ui", "TEXT")]:
+        for col, definition in [("created_at", "REAL"), ("usage", "TEXT"), ("tool_steps", "TEXT"), ("thought", "TEXT"), ("quote", "TEXT"), ("a2ui", "TEXT"), ("images", "TEXT")]:
             try:
                 await self._db.execute(f"ALTER TABLE messages ADD COLUMN {col} {definition}")
                 await self._db.commit()
@@ -213,10 +213,11 @@ class SessionStore:
         tool_steps_json = json.dumps(msg.tool_steps) if msg.tool_steps else None
         quote_json = json.dumps(msg.quote, ensure_ascii=False) if msg.quote else None
         a2ui_json = json.dumps(msg.a2ui, ensure_ascii=False) if msg.a2ui else None
+        images_json = json.dumps(msg.images, ensure_ascii=False) if msg.images else None
 
         cursor = await self._db.execute(
-            "INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (session_id, msg.role, msg.content, tool_calls_json, msg.tool_call_id, msg_created_at, usage_json, tool_steps_json, msg.thought, quote_json, a2ui_json),
+            "INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui, images) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (session_id, msg.role, msg.content, tool_calls_json, msg.tool_call_id, msg_created_at, usage_json, tool_steps_json, msg.thought, quote_json, a2ui_json, images_json),
         )
         await self._db.commit()
         return cursor.lastrowid  # 返回行 id，供「进度消息」复用同一条行做覆盖式 UPDATE
@@ -314,7 +315,7 @@ class SessionStore:
         )
 
         async with self._db.execute(
-            "SELECT role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui FROM messages WHERE session_id = ? ORDER BY id",
+            "SELECT role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui, images FROM messages WHERE session_id = ? ORDER BY id",
             (session_id,),
         ) as cursor:
             async for r in cursor:
@@ -326,6 +327,7 @@ class SessionStore:
                 tool_steps = json.loads(r[6]) if r[6] else []
                 quote = json.loads(r[8]) if len(r) > 8 and r[8] else None
                 a2ui = json.loads(r[9]) if len(r) > 9 and r[9] else None
+                images = json.loads(r[10]) if len(r) > 10 and r[10] else []
                 session.messages.append(Message(
                     role=r[0], content=r[1],
                     tool_calls=tool_calls,
@@ -336,6 +338,7 @@ class SessionStore:
                     thought=r[7],
                     quote=quote,
                     a2ui=a2ui,
+                    images=images,
                 ))
 
         return session

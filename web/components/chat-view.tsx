@@ -77,6 +77,14 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       created_at: m.created_at,
       usage: m.usage || undefined,
       quote: m.quote || undefined,
+      images: m.images && m.images.length > 0
+        ? m.images.map((img: any) => ({
+            name: "",
+            path: "",
+            isImage: true,
+            dataUrl: img.data ? `data:${img.media_type || "image/png"};base64,${img.data}` : img.dataUrl,
+          }))
+        : undefined,
       toolSteps: m.tool_steps && m.tool_steps.length > 0
         ? m.tool_steps.map((s: any) => ({
             tool: s.tool,
