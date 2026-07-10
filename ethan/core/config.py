@@ -162,6 +162,16 @@ class RoutingConfig(BaseModel):
             tools=["shell"],
             skills=["macos-automation"],
         ),
+        FastRule(
+            name="出行查询",
+            keywords=[
+                "12306", "高铁", "火车", "动车", "车次", "列车",
+                "北京到", "上海到", "广州到", "深圳到", "杭州到",
+                "车票", "时刻表", "最早", "最晚",
+            ],
+            tools=["shell"],
+            skills=["travel-query"],
+        ),
     ])
     fast_max_iters: int = 10     # Fast Path 最多工具迭代次数
     fast_use_lite_model: bool = True  # Fast Path 用 lite 模型（设备控制/状态查询等简单任务，省钱提速）

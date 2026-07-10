@@ -21,6 +21,7 @@ dependencies = [
     "aiosqlite>=0.22.1",
     "anthropic>=0.109.1",
     "apscheduler>=3.11.2",
+    "curl-cffi>=0.15.0",
     "fastapi>=0.136.3",
     "lark-oapi>=1.6.8",
     "mcp>=1.27.2",

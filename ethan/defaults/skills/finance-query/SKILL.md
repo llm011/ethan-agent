@@ -20,15 +20,75 @@ curl -s "http://qt.gtimg.cn/q={代码}" -H "User-Agent: Mozilla/5.0" | iconv -f 
 
 批量：`q=sh600519,hk00700,usAAPL`
 
-### 查K线（东财，全市场）
+### 查K线/历史走势（东财 + curl_cffi TLS 指纹，首选 ⭐）
+
+东财 K 线数据最全（A/港/美全覆盖），但需要 Chrome TLS 指纹模拟，**普通 curl 会被 RST**。用 python3 + curl_cffi：
 
 ```bash
-curl -s "https://push2his.eastmoney.com/api/qt/stock/kline/get?secid={SECID}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56&klt=101&fqt=1&beg=0&end=20500000&lmt=60" \
-  -H "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36" \
-  -H "Referer: https://quote.eastmoney.com/"
+python3 -c "
+from curl_cffi import requests as curl_requests
+import json
+
+with curl_requests.Session(impersonate='chrome120') as s:
+    resp = s.get('https://push2his.eastmoney.com/api/qt/stock/kline/get', params={
+        'secid': '{SECID}', 'fields1': 'f1,f2,f3,f4,f5,f6',
+        'fields2': 'f51,f52,f53,f54,f55,f56',
+        'klt': '101', 'fqt': '1', 'beg': '0', 'end': '20500000', 'lmt': {条数}
+    }, headers={'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36', 'Referer': 'https://quote.eastmoney.com/'}, timeout=10)
+    data = resp.json()
+    klines = data.get('data', {}).get('klines', [])
+    for k in klines[-{条数}:]:
+        print(k)  # 格式: 日期,开,收,高,低,量
+"
 ```
 
-SECID：`1.600519`(沪) / `0.000001`(深) / `105.AAPL`(美) / `116.00700`(港)
+SECID：`1.600519`(A股沪) / `0.000001`(A股深) / `105.AAPL`(美股) / `116.00700`(港股)
+`klt`：`101`(日K) / `102`(周K) / `103`(月K) / `60`(60分) / `15`(15分) / `5`(5分)
+`fqt`：`1`(前复权) / `2`(后复权)
+
+> **为什么用 curl_cffi**：东财服务器检测 TLS 指纹，普通 curl/requests 会被 RST（返回 Empty reply）。curl_cffi 模拟 Chrome 浏览器指纹绕过检测。
+
+### 查K线（新浪财经，兜底——curl_cffi 不可用时）
+
+```bash
+curl -s "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol={代码}&scale=240&ma=no&datalen={条数}" \
+  -H "User-Agent: Mozilla/5.0" -H "Referer: https://finance.sina.com.cn"
+```
+
+代码格式同腾讯行情：`sh000001`(上证) / `sz399001`(深证) / `sh600519`(茅台) / `sz000001`(平安银行)
+`scale`：`240`(日K) / `60`(60分) / `30`(30分) / `15`(15分) / `5`(5分)
+返回 JSON 数组：`[{"day":"2026-07-09","open":"4031","high":"4073","low":"4027","close":"4043","volume":"60200973800"}, ...]`
+
+> 新浪 K 线无需 TLS 指纹，plain curl 直接可用，但**仅支持 A 股**。港股/美股 K 线必须走东财 curl_cffi。
+
+### 查K线（腾讯日K，curl_cffi 备选）
+
+```bash
+python3 -c "
+from curl_cffi import requests as curl_requests
+import json
+
+with curl_requests.Session(impersonate='chrome120') as s:
+    resp = s.get('http://ifzq.gtimg.cn/appstock/app/kline/kline', params={'param': '{代码},day,,,{条数},'}, timeout=8)
+    text = resp.text
+    if '=' in text:
+        text = text.split('=', 1)[-1].rstrip(';').strip()
+    data = json.loads(text)
+    code_data = data.get('data', {}).get('{代码}', {})
+    klines = code_data.get('qfqday', code_data.get('day', []))
+    # 腾讯可能按年份嵌套: {'2025': [], '2026': []} → 展平
+    if isinstance(klines, dict):
+        flat = []
+        for _, v in sorted(klines.items()):
+            flat.extend(v)
+        klines = flat
+    for k in klines[-{条数}:]:
+        print(','.join(k[:6]))  # 日期,开,收,高,低,量
+"
+```
+
+代码同腾讯行情前缀：`sh600519` / `sz000001` / `usAAPL`
+> 美股通过腾讯接口可能只返回少量数据（<10条），此时自动切东财。
 
 ### 查估值 PE/PB（东财）
 
@@ -90,7 +150,7 @@ curl -s "https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=
 |---------|---------|--------|
 | 查某股票现价/涨跌 | 腾讯行情（1 次 curl） | qt.gtimg.cn |
 | 查 PE/PB/市盈率 | 先试腾讯行情（字段39=PE, 43=PB），不够再用东财估值 | qt.gtimg.cn → datacenter.eastmoney |
-| 查 K线/走势/历史 | 东财 K线 + generate_chart | push2his.eastmoney |
+| 查 K线/走势/历史 | 东财K线(curl_cffi首选) + generate_chart；新浪兜底(仅A股) | push2his.eastmoney → sina |
 | 查 A股财报/ROE/利润 | 东财主财务 | datacenter.eastmoney |
 | 查 A股资产负债/净资产 | 东财资产负债表 | datacenter.eastmoney |
 | 查 美股利润/净利 | 东财美股利润表 | datacenter.eastmoney |
@@ -98,7 +158,7 @@ curl -s "https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=
 | 查 美股现金流 | 东财美股现金流量表 | datacenter.eastmoney |
 | 查涨幅榜/板块 | 东财全市场排名 | 82.push2.eastmoney |
 | 查板块成分股 | 东财板块成分 | 82.push2.eastmoney |
-| 查技术指标(MA/RSI/MACD) | 先拉K线，再计算（见技术指标章节） | push2his → 计算 |
+| 查技术指标(MA/RSI/MACD) | 先拉K线（东财curl_cffi首选），再计算（见技术指标章节） | push2his.eastmoney → 计算 |
 | 查美股板块ETF动量 | shell python yfinance | Yahoo Finance |
 | 不确定代码 | 东财代码搜索 → 再查 | searchapi.eastmoney |
 
@@ -258,26 +318,27 @@ for sym,name in etfs.items():
 
 ## 技术指标（基于 K 线数据计算）
 
-用户问 MA/RSI/KDJ/MACD 等技术指标时，**先拉 K 线数据，再用 python 计算**：
+用户问 MA/RSI/KDJ/MACD 等技术指标时，**先拉 K 线数据（东财 curl_cffi 首选），再用 python 计算**：
 
 ```bash
-# 步骤 1：拉取 K 线（至少 60 条用于计算 MA60）
-curl -s "https://push2his.eastmoney.com/api/qt/stock/kline/get?secid={SECID}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56&klt=101&fqt=1&beg=0&end=20500000&lmt=120" \
-  -H "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36" \
-  -H "Referer: https://quote.eastmoney.com/"
-
-# 步骤 2：python 计算（一次性输出所有指标）
 python3 -c "
-import json, sys
+from curl_cffi import requests as curl_requests
+import json
 
-# 假设 klines 是上面 curl 拿到的 JSON 解析后的 data.klines 数组
-# 每条格式: '日期,开,收,高,低,量'
-data = json.loads(sys.stdin.read())
-klines = [k.split(',') for k in data['data']['klines']]
-closes = [float(k[2]) for k in klines]
-highs = [float(k[3]) for k in klines]
-lows = [float(k[4]) for k in klines]
-volumes = [float(k[5]) for k in klines]
+# 步骤 1：拉取 K 线（东财，至少 120 条用于计算 MA60/MACD）
+with curl_requests.Session(impersonate='chrome120') as s:
+    resp = s.get('https://push2his.eastmoney.com/api/qt/stock/kline/get', params={
+        'secid': '{SECID}', 'fields1': 'f1,f2,f3,f4,f5,f6',
+        'fields2': 'f51,f52,f53,f54,f55,f56',
+        'klt': '101', 'fqt': '1', 'beg': '0', 'end': '20500000', 'lmt': 120
+    }, headers={'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36', 'Referer': 'https://quote.eastmoney.com/'}, timeout=10)
+    klines = resp.json().get('data', {}).get('klines', [])
+
+# 步骤 2：解析并计算指标
+closes = [float(k.split(',')[2]) for k in klines]  # 收盘价在第3列
+highs = [float(k.split(',')[3]) for k in klines]
+lows = [float(k.split(',')[4]) for k in klines]
+volumes = [float(k.split(',')[5]) for k in klines]
 
 # MA（移动平均线）
 def ma(arr, n): return sum(arr[-n:])/n if len(arr)>=n else None
@@ -352,10 +413,15 @@ curl -s "https://searchapi.eastmoney.com/api/suggest/get?input={关键词}&type=
 }
 ```
 
-### 新浪财经（A股行情备选）
+### 新浪财经（A股行情备选 + A股 K 线兜底）
 
 ```bash
+# 实时行情（备选）
 curl -s -H "Referer: http://finance.sina.com.cn" "http://hq.sinajs.cn/list=sh000001" | iconv -f GBK -t UTF-8
+
+# K 线（仅 A 股，curl_cffi 不可用时的兜底）
+curl -s "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol=sh000001&scale=240&ma=no&datalen=30" \
+  -H "User-Agent: Mozilla/5.0" -H "Referer: https://finance.sina.com.cn"
 ```
 
 ---
@@ -366,7 +432,7 @@ curl -s -H "Referer: http://finance.sina.com.cn" "http://hq.sinajs.cn/list=sh000
 ✅ 正确流程：
 1. 判断用户要什么（行情/K线/估值/财务/板块/技术指标）
 2. 按「路由逻辑」表选对应 API
-3. 一次 shell(curl) 搞定（技术指标额外加一步 python 计算）
+3. 一次 shell(python3/curl) 搞定（技术指标额外加一步计算）
 4. 解析响应，直接回答
 
 ❌ 绕路（禁止）：
@@ -374,17 +440,20 @@ curl -s -H "Referer: http://finance.sina.com.cn" "http://hq.sinajs.cn/list=sh000
 2. web_fetch("https://finance.sina.com.cn/...")（网页需 JS 渲染）
 3. 多次 curl 同一个 API（批量查询用逗号拼接一次搞定）
 4. 忘记 iconv 导致乱码后再重试（第一次就要带）
-5. 安装大型库来查数据（能 curl 的就不要 pip install）
+5. 用普通 curl 请求东财 K 线（会被 TLS 指纹检测 RST，必须用 curl_cffi）
 ```
 
 **铁律**：
 - 实时行情 → 腾讯（一个接口覆盖 A/港/美，含 PE/PB/市值）
-- K线/估值/财务/板块 → 东财（全免费，无需 key）
-- 技术指标 → 拉K线 + python 计算（不要调第三方库）
+- K线/走势 → **东财 curl_cffi 首选**（数据最全，A/港/美均覆盖）；新浪 plain curl 兜底（仅A股）
+- 估值/财务/板块 → 东财（全免费，无需 key）
+- 技术指标 → 拉K线（东财 curl_cffi） + python 计算（不要调第三方库）
 - 美股板块 → yfinance 或东财 K 线查 ETF
 - 腾讯行情已含 PE/PB（字段 39、43），**简单估值查询不用单独调东财**
 - 东财 `ut` 和 `token` 是公开固定值，直接用
 - 非交易时段返回最近一个交易日收盘数据，正常返回即可
 - 美股交易所后缀不确定时先 `.O`(纳斯达克)，无数据再试 `.N`(纽交所)
+- **curl_cffi import 失败时降级到新浪 plain curl（仅A股有效）**
+- **港股/美股 K 线只能走东财 curl_cffi，无 plain curl 替代**
 
 activate_tools: shell, generate_chart
