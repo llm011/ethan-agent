@@ -159,6 +159,8 @@ class OpenAICompatProvider(BaseProvider):
             kwargs["tool_choice"] = "auto"
 
         response = await self._client.chat.completions.create(**kwargs)
+        if not response.choices:
+            raise RuntimeError("模型返回空 choices（可能触发内容过滤、配额用尽或服务异常）")
         return self._parse_choice(response.choices[0], response.usage)
 
     async def stream_chat(

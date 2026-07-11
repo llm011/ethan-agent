@@ -194,7 +194,7 @@ class DefaultsConfig(BaseModel):
     agent_name: str = "Ethan"
     language: str = "zh"
     timezone: str = ""  # IANA 时区名（如 "Asia/Shanghai"）。空 = 自动探测系统时区。
-    max_tokens: int = 4096
+    max_tokens: int = 16384
     max_tool_iterations: int = 100
     routing: RoutingConfig = Field(default_factory=RoutingConfig)
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
@@ -284,7 +284,7 @@ def _default_config() -> dict:
         "defaults": {
             "model": os.environ.get("AGENT_DEFAULT_MODEL", "claude-sonnet-4.6"),
             "lite_model": os.environ.get("AGENT_LITE_MODEL", ""),  # 轻量模型（记忆压缩/标题生成等后台任务用）；空则按主模型推断或与主模型相同
-            "max_tokens": 4096,
+            "max_tokens": 16384,
             "max_tool_iterations": 100,
         },
     }
@@ -324,7 +324,19 @@ def _init_default_skills() -> None:
             continue
         dst = skills_dir / src.name
         if not dst.exists():
-            shutil.copytree(src, dst)
+            try:
+                shutil.copytree(src, dst)
+            except PermissionError:
+                # macOS extended attributes may block copytree; fallback to manual copy
+                dst.mkdir(parents=True, exist_ok=True)
+                for f in src.rglob("*"):
+                    rel = f.relative_to(src)
+                    target = dst / rel
+                    if f.is_dir():
+                        target.mkdir(parents=True, exist_ok=True)
+                    else:
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(f, target)
 
 
 def load_config() -> Config:
