@@ -125,6 +125,16 @@ class OpenAICompatProvider(BaseProvider):
                     args = {}
                 tool_calls.append(ToolCall(id=tc.id, name=tc.function.name, arguments=args))
 
+        # Fallback：某些模型/中转（如 Gemini 经 cliproxy）偶尔不返回标准 tool_calls，
+        # 而是把工具调用写成文本：`call:default_api:shell{command:...,intent:...}`
+        # 此时从 content 里解析出工具调用，避免 agent 循环中断。
+        content_text = msg.content or ""
+        if not tool_calls and content_text:
+            parsed = self._parse_text_tool_calls(content_text)
+            if parsed:
+                tool_calls = parsed
+                content_text = ""  # 解析成功则清空文本，避免把工具调用指令当回复返回
+
         usage_dict = None
         if usage:
             usage_dict = {
@@ -135,10 +145,60 @@ class OpenAICompatProvider(BaseProvider):
 
         return Message(
             role="assistant",
-            content=msg.content or "",
+            content=content_text,
             tool_calls=tool_calls,
             usage=usage_dict,
         )
+
+    def _parse_text_tool_calls(self, content: str) -> list[ToolCall]:
+        """从文本中解析 `call:<tool_name>{<args>}` 格式的工具调用。
+
+        某些中转 API（如 cliproxy 转发 Gemini）在 function calling 退化时，
+        会把工具调用序列化成文本而非标准 tool_calls 字段。格式示例：
+            call:default_api:shell{command:gh auth status,intent:检查权限}
+
+        其中 default_api 是 provider 前缀，实际工具名是冒号后的部分。
+        args 不是标准 JSON（key 不带引号），需要宽松解析。
+        """
+        import re
+        import uuid
+
+        # 匹配 call:<prefix>:<tool_name>{<args>} 或 call:<tool_name>{<args>}
+        pattern = re.compile(
+            r'call:\w+:(?P<tool>\w+)\{(?P<args>[^}]*)\}'
+            r'|call:(?P<tool2>\w+)\{(?P<args2>[^}]*)\}'
+        )
+        results = []
+        for m in pattern.finditer(content):
+            tool_name = m.group("tool") or m.group("tool2") or ""
+            args_str = m.group("args") or m.group("args2") or ""
+            if not tool_name:
+                continue
+
+            # 宽松解析 args：key:value,key:value 格式
+            # value 可能包含逗号（如 shell 命令），用贪心匹配到最后一个 value
+            args = {}
+            # 尝试按 key:value 拆分，但 value 里可能含逗号
+            # 策略：找到所有 key: 模式，然后取到下一个 key: 之前的内容作为 value
+            key_pattern = re.compile(r'(\w+):')
+            key_positions = [(km.start(), km.group(1)) for km in key_pattern.finditer(args_str)]
+            for i, (pos, key) in enumerate(key_positions):
+                val_start = pos + len(key) + 1  # 跳过 "key:"
+                if i + 1 < len(key_positions):
+                    val_end = key_positions[i + 1][0]
+                else:
+                    val_end = len(args_str)
+                val = args_str[val_start:val_end].rstrip(',').strip()
+                args[key] = val
+
+            if args:
+                results.append(ToolCall(
+                    id=f"call_{uuid.uuid4().hex[:8]}",
+                    name=tool_name,
+                    arguments=args,
+                ))
+
+        return results
 
     async def chat(
         self,

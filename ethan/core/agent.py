@@ -6,10 +6,10 @@ from pathlib import Path
 from ethan.core.config import get_config
 from ethan.core.context_budget import enforce_context_budget
 from ethan.core.routing import _get_route, _match_fast_rule
-from ethan.core.tool_format import _detail, _format_args, _preview, _with_intent_param
+from ethan.core.tool_format import _detail, _format_args, _preview, _with_intent_param, classify_tool, extract_entity_id
 from ethan.memory.facts import FactStore
 from ethan.memory.procedures import ProcedureStore
-from ethan.providers.base import Message
+from ethan.providers.base import Message, ToolCall
 from ethan.providers.manager import create_provider
 from ethan.skills.registry import SkillRegistry
 from ethan.tools.base import ToolResult
@@ -507,6 +507,63 @@ class Agent:
 
         return Message(role="assistant", content=fallback)
 
+    def _build_stream_fallback(self, working: list[Message], reason: str) -> str:
+        """stream_chat 空回复兜底：从工具调用历史合成结构化总结。"""
+        logger.warning("stream_chat() 返回空回复 (reason=%s)，合成兜底", reason)
+        tool_calls = [m for m in working if m.role == "assistant" and m.tool_calls]
+        if tool_calls:
+            summary_lines = []
+            for m in tool_calls[-10:]:
+                for tc in (m.tool_calls or []):
+                    summary_lines.append(f"- {tc.name}({_format_args(tc.arguments)})")
+            fallback = (
+                f"任务执行了 {len(tool_calls)} 轮工具调用但未能生成最终总结。"
+                f"最近操作：\n" + "\n".join(summary_lines[:10])
+            )
+            if reason == "finalize":
+                fallback = f"已接近最大执行步数限制。\n{fallback}"
+        else:
+            fallback = "任务执行完毕但模型未生成回复内容。可能原因：上下文过大或模型异常。"
+        return fallback
+
+    def _parse_stream_text_tool_calls(self, content: str) -> list:
+        """stream_chat 中从文本解析工具调用（与 openai_compat._parse_text_tool_calls 同逻辑）。
+
+        流式模式下，如果模型把工具调用写成文本（call:xxx{args}），它会作为 delta.content
+        流式返回，不会出现在 delta.tool_calls 里。此方法在 final chunk 后做一次检测。
+        """
+        import re
+        import uuid
+
+        pattern = re.compile(
+            r'call:\w+:(?P<tool>\w+)\{(?P<args>[^}]*)\}'
+            r'|call:(?P<tool2>\w+)\{(?P<args2>[^}]*)\}'
+        )
+        results = []
+        for m in pattern.finditer(content):
+            tool_name = m.group("tool") or m.group("tool2") or ""
+            args_str = m.group("args") or m.group("args2") or ""
+            if not tool_name:
+                continue
+            args = {}
+            key_pattern = re.compile(r'(\w+):')
+            key_positions = [(km.start(), km.group(1)) for km in key_pattern.finditer(args_str)]
+            for i, (pos, key) in enumerate(key_positions):
+                val_start = pos + len(key) + 1
+                if i + 1 < len(key_positions):
+                    val_end = key_positions[i + 1][0]
+                else:
+                    val_end = len(args_str)
+                val = args_str[val_start:val_end].rstrip(',').strip()
+                args[key] = val
+            if args:
+                results.append(ToolCall(
+                    id=f"call_{uuid.uuid4().hex[:8]}",
+                    name=tool_name,
+                    arguments=args,
+                ))
+        return results
+
     def _broadcast_tools(self, tools_list: list):
         """每轮广播给模型的工具定义 = 基础 tools_list + 本请求 find_tools 已激活的长尾工具。
         fast 档 tools_list 是白名单子集；medium/full 已是全量，激活集命中也都在基础集内，extra 为空。
@@ -680,7 +737,7 @@ class Agent:
     async def stream_chat(self, messages: list[Message]):
         """流式对话。fast/medium/full 三档路由，按消息长度和关键词自动选择。"""
         from ethan.core.context import reset_active_tools
-        from ethan.providers.base import ThinkingEvent, ToolEvent
+        from ethan.providers.base import SkillsMatchedEvent, ThinkingEvent, ToolEvent
 
         self._executor.reset_cache()
         reset_active_tools()  # 清空本请求的 find_tools 激活集
@@ -688,6 +745,14 @@ class Agent:
         enforce_context_budget(working)  # 历史 tool result 也可能很大，进循环前先管控
         _route, system, tools_list, max_iters = self._select_route(working)
         provider = self._provider_for_route(_route)
+
+        # _select_route 内部已完成 Skill 匹配，yield 一次让消费者记录命中的 Skill 上下文
+        if self.last_matched_skills:
+            skills_info = []
+            for name in self.last_matched_skills:
+                sk = self._skills.get(name) if self._skills else None
+                skills_info.append({"name": name, "is_default": getattr(sk, "is_default", False)})
+            yield SkillsMatchedEvent(skills=skills_info)
 
         from ethan.core.loop_control import (
             LoopMonitor,
@@ -741,7 +806,17 @@ class Agent:
                     raise
 
             tool_calls = final_chunk.tool_calls if final_chunk else []
-            response = Message(role="assistant", content=full_content, tool_calls=tool_calls)
+            # Fallback：模型把工具调用写成文本（call:xxx{args}）时，从 content 解析
+            if not tool_calls and full_content:
+                parsed = self._parse_stream_text_tool_calls(full_content)
+                if parsed:
+                    tool_calls = parsed
+                    full_content = ""  # 清空，避免把工具调用指令当回复 yield
+                    response = Message(role="assistant", content=full_content, tool_calls=tool_calls)
+                else:
+                    response = Message(role="assistant", content=full_content, tool_calls=tool_calls)
+            else:
+                response = Message(role="assistant", content=full_content, tool_calls=tool_calls)
             working.append(response)
 
             # 空响应（既无正文也无工具调用）= 模型静默放弃。
@@ -781,19 +856,31 @@ class Agent:
                     # 重试仍空 → finalize 兜底
                     logger.warning("空响应重试仍无输出，执行 finalize 兜底")
                     sys = system + finalize_system_suffix("max_iters")
+                    fin_content = ""
                     async for chunk in self._provider.stream_chat(working, tools=None, system=sys):
                         if chunk.reasoning:
                             yield ThinkingEvent(delta=chunk.reasoning)
                         if chunk.content:
+                            fin_content += chunk.content
                             yield chunk.content
                         if chunk.is_final:
                             self.usage.add(chunk.usage)
+                    if not fin_content:
+                        yield self._build_stream_fallback(working, "nudge_exhausted")
                     return
 
             if not response.is_tool_call:
+                # finalize 轮可能因上下文过大模型返回空 → 兜底
+                if finalize and not full_content:
+                    fallback = self._build_stream_fallback(working, "finalize")
+                    yield fallback
                 return
             if finalize:
                 # 收尾轮已禁工具并流式吐出总结；即便模型仍返回 tool_calls 也不执行，直接结束。
+                # 但如果 finalize 轮没有任何内容产出，也需要兜底
+                if not full_content:
+                    fallback = self._build_stream_fallback(working, "finalize")
+                    yield fallback
                 return
 
             # --- 授权检查：执行前对工具做（1）渠道硬策略 + （2）consent 确认 ---
@@ -828,7 +915,7 @@ class Agent:
                     always = tool.consent_always(**tc.arguments) if tool else False
                     if not always and is_granted(sess_id, scope):
                         allowed_calls.append(tc)
-                        yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary=_format_args(tc.arguments), intent=str(tc.arguments.get("intent", "") or ""), state="start")
+                        yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary=_format_args(tc.arguments), intent=str(tc.arguments.get("intent", "") or ""), state="start", entity_type=classify_tool(tc.name), entity_id=extract_entity_id(tc.name, tc.arguments))
                         continue
                     detail = _format_args(tc.arguments)
                     ok = True
@@ -859,10 +946,24 @@ class Agent:
                     if not always:
                         record_grant(sess_id, scope)
                 allowed_calls.append(tc)
-                yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary=_format_args(tc.arguments), intent=str(tc.arguments.get("intent", "") or ""), state="start")
+                yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary=_format_args(tc.arguments), intent=str(tc.arguments.get("intent", "") or ""), state="start", entity_type=classify_tool(tc.name), entity_id=extract_entity_id(tc.name, tc.arguments))
 
             results: list[ToolResult] = await self._executor.execute(allowed_calls) if allowed_calls else []
             had_error = any(getattr(r, "is_error", False) for r in results)
+
+            # 工具调用日志
+            tool_summary = ", ".join(
+                f"{tc.name}({_format_args(tc.arguments)})" for tc in allowed_calls
+            )
+            logger.info("stream_chat() iter=%d/%d tools=[%s]", i + 1, max_iters, tool_summary)
+            for idx, r in enumerate(results):
+                rlen = len(r.content or "")
+                if r.is_error:
+                    logger.warning("  └─ tool[%d] %s ERROR len=%d: %s",
+                                   idx, allowed_calls[idx].name if idx < len(allowed_calls) else "?",
+                                   rlen, (r.content or "")[:200])
+                else:
+                    logger.info("  └─ tool[%d] ok len=%d", idx, rlen)
 
             for r, tc in zip(results, allowed_calls):
                 # content 原文进模型上下文（get_secret 取出的 key Agent 要能用）；
@@ -870,7 +971,7 @@ class Agent:
                 from ethan.core.secrets_store import mask_text
                 preview = mask_text(_preview(r.content)) if r.content else ""
                 detail = mask_text(_detail(r.content)) if r.content else ""
-                yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary="", state="done" if not r.is_error else "error", result_preview=preview, result_detail=detail, sub_steps=getattr(r, "sub_steps", []) or [], ui=getattr(r, "ui", None))
+                yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary="", state="done" if not r.is_error else "error", result_preview=preview, result_detail=detail, sub_steps=getattr(r, "sub_steps", []) or [], ui=getattr(r, "ui", None), entity_type=classify_tool(tc.name), entity_id=extract_entity_id(tc.name, tc.arguments))
                 working.append(Message(
                     role="tool",
                     content=r.content,
@@ -892,11 +993,15 @@ class Agent:
                 if monitor.exhausted():
                     # 反思次数用尽仍卡住 → 收尾放弃：禁工具，让模型流式整理「已做/卡点/建议」
                     sys = system + finalize_system_suffix("stuck")
+                    stuck_content = ""
                     async for chunk in self._provider.stream_chat(working, tools=None, system=sys):
                         if chunk.content:
+                            stuck_content += chunk.content
                             yield chunk.content
                         if chunk.is_final:
                             self.usage.add(chunk.usage)
+                    if not stuck_content:
+                        yield self._build_stream_fallback(working, "stuck")
                     return
                 last_result = results[-1].content if results else ""
                 pending_suffix = "\n\n[System: " + reflection_message(monitor, last_result) + "]"

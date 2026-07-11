@@ -184,11 +184,14 @@ def _start_server() -> None:
     ]
     env["PATH"] = ":".join(extra_paths) + ":" + env.get("PATH", "")
 
+    # 重定向到日志文件（非 DEVNULL），方便排查 server 启动/运行期错误
+    log_path = _PID_DIR / "server_subprocess.log"
+    log_f = open(log_path, "a", buffering=1)  # 行缓冲，实时写
     proc = subprocess.Popen(
         cmd,
         cwd=str(project_root),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=log_f,
+        stderr=subprocess.STDOUT,
         start_new_session=True,
         env=env,
     )

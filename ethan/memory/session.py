@@ -158,7 +158,7 @@ class SessionStore:
         """)
         await self._db.commit()
         # Migration: add columns if they don't exist (for existing databases)
-        for col, definition in [("created_at", "REAL"), ("usage", "TEXT"), ("tool_steps", "TEXT"), ("thought", "TEXT"), ("quote", "TEXT"), ("a2ui", "TEXT"), ("images", "TEXT")]:
+        for col, definition in [("created_at", "REAL"), ("usage", "TEXT"), ("tool_steps", "TEXT"), ("thought", "TEXT"), ("quote", "TEXT"), ("a2ui", "TEXT"), ("images", "TEXT"), ("matched_skills", "TEXT")]:
             try:
                 await self._db.execute(f"ALTER TABLE messages ADD COLUMN {col} {definition}")
                 await self._db.commit()
@@ -233,10 +233,11 @@ class SessionStore:
         quote_json = json.dumps(msg.quote, ensure_ascii=False) if msg.quote else None
         a2ui_json = json.dumps(msg.a2ui, ensure_ascii=False) if msg.a2ui else None
         images_json = json.dumps(msg.images, ensure_ascii=False) if msg.images else None
+        matched_skills_json = json.dumps(msg.matched_skills, ensure_ascii=False) if msg.matched_skills else None
 
         cursor = await self._db.execute(
-            "INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui, images) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (session_id, msg.role, msg.content, tool_calls_json, msg.tool_call_id, msg_created_at, usage_json, tool_steps_json, msg.thought, quote_json, a2ui_json, images_json),
+            "INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui, images, matched_skills) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (session_id, msg.role, msg.content, tool_calls_json, msg.tool_call_id, msg_created_at, usage_json, tool_steps_json, msg.thought, quote_json, a2ui_json, images_json, matched_skills_json),
         )
         await self._db.commit()
         return cursor.lastrowid  # 返回行 id，供「进度消息」复用同一条行做覆盖式 UPDATE
@@ -256,12 +257,13 @@ class SessionStore:
         usage_json = json.dumps(msg.usage) if msg.usage else None
         tool_steps_json = json.dumps(msg.tool_steps) if msg.tool_steps else None
         a2ui_json = json.dumps(msg.a2ui, ensure_ascii=False) if msg.a2ui else None
+        matched_skills_json = json.dumps(msg.matched_skills, ensure_ascii=False) if msg.matched_skills else None
 
         await self._db.execute(
-            "UPDATE messages SET content=?, tool_calls=?, usage=?, tool_steps=?, thought=?, a2ui=?, created_at=? "
+            "UPDATE messages SET content=?, tool_calls=?, usage=?, tool_steps=?, thought=?, a2ui=?, matched_skills=?, created_at=? "
             "WHERE id=? AND session_id=?",
             (msg.content, tool_calls_json, usage_json, tool_steps_json, msg.thought, a2ui_json,
-             msg.created_at or time.time(), row_id, session_id),
+             matched_skills_json, msg.created_at or time.time(), row_id, session_id),
         )
         await self._db.commit()
 
@@ -334,7 +336,7 @@ class SessionStore:
         )
 
         async with self._db.execute(
-            "SELECT role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui, images FROM messages WHERE session_id = ? ORDER BY id",
+            "SELECT role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui, images, matched_skills FROM messages WHERE session_id = ? ORDER BY id",
             (session_id,),
         ) as cursor:
             async for r in cursor:
@@ -347,6 +349,7 @@ class SessionStore:
                 quote = json.loads(r[8]) if len(r) > 8 and r[8] else None
                 a2ui = json.loads(r[9]) if len(r) > 9 and r[9] else None
                 images = json.loads(r[10]) if len(r) > 10 and r[10] else []
+                matched_skills = json.loads(r[11]) if len(r) > 11 and r[11] else None
                 session.messages.append(Message(
                     role=r[0], content=r[1],
                     tool_calls=tool_calls,
@@ -358,6 +361,7 @@ class SessionStore:
                     quote=quote,
                     a2ui=a2ui,
                     images=images,
+                    matched_skills=matched_skills,
                 ))
 
         return session

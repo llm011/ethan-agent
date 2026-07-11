@@ -72,3 +72,64 @@ def _detail(content: str, max_chars: int = 2000) -> str:
     if len(content) > max_chars:
         return content[:max_chars] + f"\n…(共 {len(content)} 字，已截断)"
     return content
+
+
+# ── 实体分类（用于调用链路可视化） ────────────────────────────────
+
+def classify_tool(name: str) -> str:
+    """按工具名分类实体类型，用于可视化时区分不同调用实体。
+
+    返回值对应前端的不同颜色/图标标识：
+      builtin       - 通用内置工具
+      file          - 文件操作（file_read/write/list）
+      search        - 搜索类（web_search/web_fetch/ripgrep/fd）
+      system        - 系统操作（shell）
+      browser       - 浏览器实体（browser_session/tab/page）
+      delegate      - 委派 Agent（delegate_coding）
+      computer_use  - 屏幕级 GUI 自动化
+      communication - 通信类（lark_*）
+      knowledge     - 知识/技能管理（knowledge_*/skill_*）
+      memory        - 记忆/档案（memory_*/procedure_*/profile_*）
+      task          - 任务调度（schedule_*/background_*）
+      config        - 配置/密钥（config_*/set_secret/get_secret/list_secrets）
+      ui            - UI 卡片（ui_card）
+      meta          - 元工具（find_tools/install_skill）
+    """
+    if name.startswith("browser_"):
+        return "browser"
+    if name == "delegate_coding":
+        return "delegate"
+    if name == "computer_use":
+        return "computer_use"
+    if name.startswith("lark_"):
+        return "communication"
+    if name.startswith("file_"):
+        return "file"
+    if name in ("web_search", "web_fetch", "ripgrep", "fd"):
+        return "search"
+    if name == "shell":
+        return "system"
+    if name.startswith("knowledge_") or name.startswith("skill_"):
+        return "knowledge"
+    if name.startswith("memory_") or name.startswith("procedure_") or name.startswith("profile_"):
+        return "memory"
+    if name.startswith("schedule_") or name.startswith("background_"):
+        return "task"
+    if name.startswith("config_") or name.endswith("_secret"):
+        return "config"
+    if name == "ui_card":
+        return "ui"
+    if name in ("find_tools", "install_skill"):
+        return "meta"
+    return "builtin"
+
+
+def extract_entity_id(tool_name: str, arguments: dict) -> str:
+    """从工具调用参数中提取关联实体 ID（如 browser session_id）。
+
+    用于可视化时把同一 browser session 的多次操作聚合到一个浏览器实体节点上。
+    """
+    if tool_name.startswith("browser_"):
+        sid = arguments.get("session") or arguments.get("session_id")
+        return str(sid) if sid else ""
+    return ""

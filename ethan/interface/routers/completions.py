@@ -146,14 +146,14 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
     # 非流式：走 stream_chat + StreamCollector 收集工具步骤并实时落库，
     # 这样中断/异常时 Web UI 仍能看到已执行的工具调用过程（与 Web stream 路径行为一致）。
     from ethan.core.stream_collector import StreamCollector
-    from ethan.providers.base import ThinkingEvent, ToolEvent
+    from ethan.providers.base import SkillsMatchedEvent, ThinkingEvent, ToolEvent
 
     collector = StreamCollector().bind(agent)
     progress_msg_id: int | None = None
     try:
         try:
             async for item in agent.stream_chat(messages):
-                if isinstance(item, (ToolEvent, ThinkingEvent)):
+                if isinstance(item, (ToolEvent, ThinkingEvent, SkillsMatchedEvent)):
                     collector.feed(item)
                     # 工具事件实时落库进度，中断也不丢过程
                     if isinstance(item, ToolEvent) and session_id:
@@ -175,6 +175,7 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
                         role="assistant", content=stopped_content,
                         thought=collector.thought, usage=collector.usage_dict,
                         tool_steps=collector.tool_steps or [], a2ui=collector.a2ui or None,
+                        matched_skills=collector.matched_skills or None,
                     )
                     if progress_msg_id:
                         await store.update_message(progress_msg_id, session_id, stopped_msg)
@@ -192,6 +193,7 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
                 role="assistant", content=error_content,
                 thought=collector.thought, usage=collector.usage_dict,
                 tool_steps=collector.tool_steps or [], a2ui=collector.a2ui or None,
+                matched_skills=collector.matched_skills or None,
             )
             try:
                 if progress_msg_id:
@@ -212,6 +214,7 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
             role="assistant", content=content, thought=collector.thought,
             usage=usage_dict, tool_steps=collector.tool_steps or [],
             a2ui=collector.a2ui or None,
+            matched_skills=collector.matched_skills or None,
         )
         # 正常结束：把实时进度行更新为最终回复，复用同一行避免重复两条 assistant 消息
         if progress_msg_id:
@@ -239,14 +242,14 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
 async def _stream_completions(agent, messages, store: SessionStore, session_id: str, model: str | None, user_id: str = ""):
     from ethan.core.stream_collector import StreamCollector
     from ethan.interface.routers.chat import _maybe_consolidate, _maybe_generate_skill
-    from ethan.providers.base import ThinkingEvent, ToolEvent
+    from ethan.providers.base import SkillsMatchedEvent, ThinkingEvent, ToolEvent
 
     collector = StreamCollector().bind(agent)
     progress_msg_id: int | None = None
     try:
         try:
             async for item in agent.stream_chat(messages):
-                if isinstance(item, (ToolEvent, ThinkingEvent)):
+                if isinstance(item, (ToolEvent, ThinkingEvent, SkillsMatchedEvent)):
                     collector.feed(item)
                     # 工具事件实时落库进度，连接中断也不丢工具调用过程
                     if isinstance(item, ToolEvent) and session_id:
@@ -278,6 +281,7 @@ async def _stream_completions(agent, messages, store: SessionStore, session_id: 
                         role="assistant", content=stopped_content,
                         thought=collector.thought, usage=collector.usage_dict,
                         tool_steps=collector.tool_steps or [], a2ui=collector.a2ui or None,
+                        matched_skills=collector.matched_skills or None,
                     )
                     if progress_msg_id:
                         await store.update_message(progress_msg_id, session_id, stopped_msg)
@@ -295,6 +299,7 @@ async def _stream_completions(agent, messages, store: SessionStore, session_id: 
                 role="assistant", content=error_content,
                 thought=collector.thought, usage=collector.usage_dict,
                 tool_steps=collector.tool_steps or [], a2ui=collector.a2ui or None,
+                matched_skills=collector.matched_skills or None,
             )
             try:
                 if progress_msg_id:
@@ -316,6 +321,7 @@ async def _stream_completions(agent, messages, store: SessionStore, session_id: 
                 role="assistant", content=collector.full,
                 thought=collector.thought, usage=usage_dict,
                 tool_steps=collector.tool_steps or [], a2ui=collector.a2ui or None,
+                matched_skills=collector.matched_skills or None,
             )
             # 正常结束：把实时进度行更新为最终回复，复用同一行避免重复两条 assistant 消息
             if progress_msg_id:
