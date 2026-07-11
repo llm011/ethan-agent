@@ -459,6 +459,54 @@ class Agent:
             max_iters = get_config().defaults.max_tool_iterations
         return route, system, tools_list, max_iters
 
+    async def _ensure_non_empty(self, response: Message, working: list[Message],
+                                monitor, reason: str) -> Message:
+        """确保返回给用户的回复非空。
+
+        当模型在 finalize / stuck / nudge_exhausted 轮返回空内容时（常见于超大上下文
+        导致模型静默放弃），用极简 prompt 再试一次；仍空则从工具调用历史中合成结构化兜底。
+
+        reason: 触发原因，写入日志便于排查。
+        """
+        content = (response.content or "").strip()
+        if content:
+            return response
+
+        logger.warning("chat() 返回空回复 (reason=%s)，尝试极简 prompt 重试", reason)
+
+        # 极简重试：只给最后一条 user 消息 + 禁工具，逼模型至少说一句话
+        try:
+            last_user = next((m for m in reversed(working) if m.role == "user"), None)
+            mini_msgs = [last_user] if last_user else []
+            mini_sys = "请用中文简洁回答用户的问题。如果任务已完成，请总结你做了什么。如果遇到问题，请说明卡在哪里。"
+            resp = await self._provider.chat(mini_msgs, tools=None, system=mini_sys)
+            self.usage.add(resp.usage)
+            if (resp.content or "").strip():
+                return resp
+        except Exception:
+            logger.warning("极简 prompt 重试也失败", exc_info=True)
+
+        # 仍空 → 从工具调用历史合成兜底
+        logger.warning("极简重试仍空，从工具历史合成兜底 (reason=%s)", reason)
+        tool_calls = [m for m in working if m.role == "assistant" and m.tool_calls]
+        if tool_calls:
+            summary_lines = []
+            for m in tool_calls[-10:]:  # 最后 10 轮工具调用
+                for tc in (m.tool_calls or []):
+                    summary_lines.append(f"- {tc.name}")
+            fallback = (
+                f"任务执行了 {len(tool_calls)} 轮工具调用但未能生成最终总结。"
+                f"最近操作：\n" + "\n".join(summary_lines[:10])
+            )
+            if reason == "stuck":
+                fallback = f"在当前任务上尝试了多种策略仍未突破。\n{fallback}\n\n建议：检查工具调用是否有权限/网络问题，或提供更多信息。"
+            elif reason == "finalize":
+                fallback = f"已接近最大执行步数限制。\n{fallback}"
+        else:
+            fallback = "任务执行完毕但模型未生成回复内容。可能原因：上下文过大或模型异常。"
+
+        return Message(role="assistant", content=fallback)
+
     def _broadcast_tools(self, tools_list: list):
         """每轮广播给模型的工具定义 = 基础 tools_list + 本请求 find_tools 已激活的长尾工具。
         fast 档 tools_list 是白名单子集；medium/full 已是全量，激活集命中也都在基础集内，extra 为空。
@@ -578,13 +626,27 @@ class Agent:
                     sys = system + finalize_system_suffix("max_iters")
                     resp = await provider.chat(working, tools=None, system=sys)
                     self.usage.add(resp.usage)
-                    return resp
+                    return await self._ensure_non_empty(resp, working, monitor, "nudge_exhausted")
 
             if not response.is_tool_call:
-                return response
+                return await self._ensure_non_empty(response, working, monitor, "finalize")
+
+            # 工具调用日志：记录每轮工具执行情况，便于 debug
+            tool_summary = ", ".join(
+                f"{tc.name}({_format_args(tc.arguments)})" for tc in response.tool_calls
+            )
+            logger.info("chat() iter=%d/%d tools=[%s]", i + 1, max_iters, tool_summary)
 
             results: list[ToolResult] = await self._executor.execute(response.tool_calls)
             had_error = any(getattr(r, "is_error", False) for r in results)
+            for idx, r in enumerate(results):
+                rlen = len(r.content or "")
+                if r.is_error:
+                    logger.warning("  └─ tool[%d] %s ERROR len=%d: %s",
+                                   idx, response.tool_calls[idx].name if idx < len(response.tool_calls) else "?",
+                                   rlen, (r.content or "")[:200])
+                else:
+                    logger.info("  └─ tool[%d] ok len=%d", idx, rlen)
             for r in results:
                 working.append(Message(
                     role="tool",
@@ -608,7 +670,7 @@ class Agent:
                     sys = system + finalize_system_suffix("stuck")
                     resp = await provider.chat(working, tools=None, system=sys)
                     self.usage.add(resp.usage)
-                    return resp
+                    return await self._ensure_non_empty(resp, working, monitor, "stuck")
                 last_result = results[-1].content if results else ""
                 pending_suffix = "\n\n[System: " + reflection_message(monitor, last_result) + "]"
                 monitor.mark_reflected()
