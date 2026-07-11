@@ -76,10 +76,20 @@ def list_plugins() -> None:
     table.add_column("说明")
     table.add_column("状态", style="green")
 
+    # 配置型插件
     for name, plugin in PLUGIN_REGISTRY.items():
         enabled = _is_enabled(config, plugin)
         status = "[green]已启用[/green]" if enabled else "[dim]未配置[/dim]"
         table.add_row(name, plugin.description, status)
+
+    # 预设插件（setup.py 中定义）
+    from ethan.interface.commands.setup import PRESET_PLUGINS, _check_plugin_installed
+    for p in PRESET_PLUGINS:
+        if p["name"] in PLUGIN_REGISTRY:
+            continue  # 避免重复
+        installed = _check_plugin_installed(p)
+        status = "[green]已安装[/green]" if installed else "[dim]未安装[/dim]"
+        table.add_row(p["name"], p["description"], status)
 
     # duckduckgo 作为内置兜底
     table.add_row("duckduckgo", "DuckDuckGo 搜索（内置，零配置兜底）", "[green]始终可用[/green]")
@@ -88,25 +98,38 @@ def list_plugins() -> None:
 
 @app.command("add")
 def add_plugin(
-    name: str = typer.Argument(..., help="插件名称，如 tavily / searxng"),
+    name: str = typer.Argument(..., help="插件名称，如 tavily / searxng / computer-use"),
 ) -> None:
     """添加/启用插件，交互式输入所需配置。"""
+    # 先查配置型插件注册表
     plugin = PLUGIN_REGISTRY.get(name)
-    if not plugin:
-        console.print(f"[red]未知插件: {name}[/red]")
-        console.print(f"可用插件: {', '.join(PLUGIN_REGISTRY.keys())}")
-        raise typer.Exit(1)
+    if plugin:
+        _add_config_plugin(plugin)
+        return
 
-    console.print(f"\n[bold]配置插件: {name}[/bold]")
+    # 再查预设插件列表（setup.py 中定义的 optional_dep / skill / builtin_skill）
+    from ethan.interface.commands.setup import PRESET_PLUGINS, _do_install
+    preset = next((p for p in PRESET_PLUGINS if p["name"] == name), None)
+    if preset:
+        from ethan.core.config import get_config
+        get_config()  # 确保初始化
+        _do_install(preset)
+        return
+
+    console.print(f"[red]未知插件: {name}[/red]")
+    all_names = list(PLUGIN_REGISTRY.keys()) + [p["name"] for p in PRESET_PLUGINS]
+    console.print(f"可用插件: {', '.join(all_names)}")
+    raise typer.Exit(1)
+
+
+def _add_config_plugin(plugin: _PluginDef) -> None:
+    """配置型插件的交互式安装。"""
+    console.print(f"\n[bold]配置插件: {plugin.name}[/bold]")
     console.print(f"  {plugin.description}\n")
 
     # 交互式收集配置
     values: dict[str, str] = {}
     for field in plugin.fields:
-        prompt = f"  {field.label}"
-        if field.hint:
-            prompt += f" [dim]({field.hint})[/dim]"
-        prompt += ": "
         if field.secret:
             value = typer.prompt(f"  {field.label}", hide_input=True, default=field.default or "")
         else:
@@ -121,7 +144,7 @@ def add_plugin(
     _apply_plugin_config(config, plugin, values)
     save_config(config)
 
-    console.print(f"\n[green]✓ 插件 {name} 配置已写入。[/green]")
+    console.print(f"\n[green]✓ 插件 {plugin.name} 配置已写入。[/green]")
     console.print("[yellow]⚠ 需要重启 server 生效：ethan server restart[/yellow]")
 
 

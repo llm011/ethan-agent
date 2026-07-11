@@ -67,7 +67,11 @@ def user_vectors_db_path() -> Path:
 
 
 def user_sessions_db_path() -> Path:
-    return user_data_dir() / "sessions.db"
+    # macOS com.apple.provenance xattr 导致 ~/.ethan/ 下的 db 在 aiosqlite worker thread
+    # 中只读。使用 /tmp/ethan/ 作为运行时数据库路径（启动时从原 db 同步）。
+    runtime_dir = Path("/tmp/ethan")
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    return runtime_dir / "sessions.db"
 
 
 def user_skills_dir() -> Path:
