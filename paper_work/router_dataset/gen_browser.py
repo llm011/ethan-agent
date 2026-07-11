@@ -25,6 +25,13 @@ use-browser = 用浏览器完成网页上的实际操作：
 （用同义绕开：用「Chrome / 那个站点 / 这个页面 / 这个网站 / 帮我在网上 / 在页面上」，
   动词「打开/跳转/填一下/点一下/截个图/读一下/翻页/自动跑一遍」，
   避开被禁连用子串——"网页操作""点击页面"不能连用，拆成"在这个站点上点一下那个按钮"）
+
+★ 三池独立（防近邻泄漏，这是本文件与旧版最大区别）：
+  POOL_TRAIN：覆盖广、多变体，主训练用（原 POOL）。
+  POOL_VAL  ：换一批说法（中等难度），不与 train 的模板骨架重叠。
+  POOL_TEST ：最口语、最贴近真实用户——刻意加背景/上下文/省略/隐式意图，
+              句子长短不一，部分故意写长，但仍是「让 agent 替我操作网页」而非浏览器软件冷知识。
+  三池分别手写，split() 不再从同一池切片，从根上消除「同模板换说法」的泄漏。
 """
 from __future__ import annotations
 import json
@@ -40,7 +47,7 @@ TRIGGERS = [
     "多步网页操作", "循环抓取", "browser script", "scrape", "automate web",
 ]
 
-POOL: dict[str, list[str]] = {
+POOL_TRAIN: dict[str, list[str]] = {
     # ===== A. nav 打开/跳转/导航到某站点某页 =====
     "nav": [
         "帮我用 Chrome 打开一下那个站点的首页",
@@ -232,6 +239,129 @@ POOL: dict[str, list[str]] = {
     ],
 }
 
+# ===================== POOL_VAL：换一批说法、中等难度（不与 train 模板重叠）=====================
+POOL_VAL: dict[str, list[str]] = {
+    "nav": [
+        "麻烦用 Chrome 切到那个站点结算那一步的界面",
+        "帮我在 Chrome 里挪到这个网站的优惠券那栏页面",
+        "把那个站点里客服对话那页帮我调出来",
+        "帮我进到这个网站会员权益那一屏",
+        "在 Chrome 里帮我翻到那个站点物流跟踪那页",
+        "帮我落到这个网站积分兑换那一页看看",
+    ],
+    "interact": [
+        "在那个站点里帮我把优惠券那个勾选框点上",
+        "帮我把这个表单里的公司名称那格补进去",
+        "在这个网站上帮我把排序那个下拉换成按销量",
+        "帮我在那个页面里把预约时段挑成上午十点",
+        "在这个站点上帮我把那个折叠面板展开再点确认",
+        "帮我把这个表单里的发票抬头那栏填好交上去",
+    ],
+    "screenshot": [
+        "帮我把那个站点会员到期提示那块拍下来给我",
+        "在这个网站上帮我截一下优惠明细那一段",
+        "把这个页面物流轨迹那部分帮我截张图",
+        "帮我给那个站点账单汇总那一屏截个图",
+        "在这个页面里帮我截一下退款进度那一块",
+    ],
+    "read": [
+        "帮我把那个站点会员到期日那行字读出来",
+        "在这个网站上帮我看看运费栏里写了多少",
+        "帮我读一下那个页面优惠规则那段说明",
+        "把这个站点账单里的总金额读给我听",
+        "帮我读出那个网站物流状态现在到哪一步了",
+        "在这个页面里帮我把发票抬头那格已填的内容读出来",
+    ],
+    "session": [
+        "拿我这个已经登进去的 Chrome 帮我在那个站点改收货地址",
+        "顺着我眼下开着的这个标签页帮我把优惠券领了",
+        "带着我的登录态去那个网站把待付款的单子结掉",
+        "用我现在登着的这个会话帮我在页面上改个昵称",
+        "接着我这个已登录的页面帮我把消息全标成已读",
+    ],
+    "batch": [
+        "帮我把这几个网址顺次点开各把标价抄下来汇给我",
+        "这一组页面帮我一条条进去把发货地都收拢齐",
+        "帮我挨着把这些链接翻完各截一屏拼给我看",
+        "把这几页里的联系方式帮我逐页扒下来凑成一份",
+        "帮我顺着这批网址一个个走完把优惠信息汇总出来",
+    ],
+    "script": [
+        "帮我攒段代码让它自己在那个站点里一页页把价钱记下来",
+        "拿代码帮我盯着这个页面某个数字一变就停下截屏",
+        "帮我写个自动的在那个网站里遇到验证就等我再继续",
+        "用代码帮我把那个站点从挑货到下单这一串动作跑顺",
+        "帮我搞段代码让这个页面加载好就照规则把选项挑齐",
+    ],
+    "boundary": [
+        "别帮我概括内容，帮我在那个站点里把地址换成新的存下",
+        "不用讲这仓库怎么用，帮我在这个页面上把预约按钮点了",
+        "别只念给我听，帮我在这个网站里把那个开关拨到开",
+        "不是要文章要点，是帮我在这个页面把优惠券勾上再结算",
+        "别做摘要，帮我在那个站点里把那三样加进购物车结掉",
+    ],
+}
+
+# ===================== POOL_TEST：最口语、含背景/省略/隐式意图，部分故意写长 =====================
+POOL_TEST: dict[str, list[str]] = {
+    "nav": [
+        "我刚收到条短信让我去看物流，你直接用 Chrome 帮我落到那个站点查快递那一页就行，我懒得找了",
+        "诶你帮我跳到那个网站里能改密码的那一屏呗，翻半天没找着",
+        "老板催我看后台数据，你帮我在 Chrome 里直接进到那个站点数据看板那页",
+        "我想退个货，你先帮我在那个网站上挪到售后申请那页",
+        "刚才那个页面我关了，你重新帮我进到结算那一步的界面",
+    ],
+    "interact": [
+        "我这手机号换了，你在那个站点上帮我把资料里的电话那格改成新的再点保存，别让我一步步操作了",
+        "购物车里那几样我想要了，你帮我在这个页面上把数量都调成二再点结算呗",
+        "诶那个同意条款的框你帮我勾一下，然后把下一步给点了",
+        "我要报名那个活动，你直接在这个网站上把我的名字和邮箱填进去交了就行",
+        "那个下拉里挑城市的，你帮我选成我常去的那个再点确定",
+    ],
+    "screenshot": [
+        "我怕待会儿页面刷新没了，你赶紧把这个站点上显示优惠到手价那块给我截个图存着",
+        "这报错我看不懂，你把页面上弹出来那个提示框拍下来我发群里问问",
+        "帮我把这一屏账单明细整个截下来，回头报销要用",
+        "诶你把那个网站里我的订单号那行给我截个图呗，等下要填",
+        "这个页面挺长的，你从头到尾帮我截一张完整的留个底",
+    ],
+    "read": [
+        "我眼神不好看不清，你帮我把那个站点上运费到底写的多少念出来",
+        "这页字太小了，你直接把优惠规则那段读给我听，别让我自己找",
+        "诶那个表格里每一行的价格你帮我挨个读出来我记一下",
+        "我想知道现在退款到哪步了，你把那个网站上进度那栏写的啥告诉我",
+        "页面上那个联系电话你帮我读出来我抄下来打过去",
+    ],
+    "session": [
+        "反正我这 Chrome 都登好了，你就顺着现在这个已经登进去的会话，帮我在那个站点把待付款的单子直接结了",
+        "别让我重新登了，就接着我眼下开着的这个标签页帮我把地址改一下",
+        "我这边登录态是好的，你带着它去那个网站把我收藏的那几样加到购物车",
+        "接着当前这个页面往下走就行，帮我把优惠券领了顺手把单下了",
+        "用我这个已经登着的账号，帮我在那个站点上把消息全点成已读",
+    ],
+    "batch": [
+        "我收藏夹里存了七八个商品链接，你帮我一个个点进去把现价都抄下来最后汇成一张表给我比比",
+        "这几页搜索结果你顺着挨个进去，把每家的发货地和价钱都收拢一下拼给我",
+        "诶这一串网址你逐个翻一遍，各截一张图我留着对比",
+        "把这十来个页面里的联系方式帮我一页页扒下来凑成一份通讯录",
+        "这批链接你一条接一条走完，把里头的优惠信息都攒起来最后给我个总结",
+    ],
+    "script": [
+        "我懒得守着，你帮我攒段代码让它自己在那个站点上盯着，价钱一降到我说的那个数就自动把单下了",
+        "这活动老是抢不到，你写点代码让它在那个网站里循环点下一步,一有货就提交",
+        "帮我搞个自动的，让它每隔一会儿去那个页面刷一下,内容一变就截个屏发我",
+        "那套填表提交的动作我天天干，你用代码帮我录下来以后一键重放就行",
+        "你写段能自己判断的，让它在那个站点上该勾的勾该选的选一条龙走完",
+    ],
+    "boundary": [
+        "我不是让你给我讲这篇文章说了啥，是让你实打实在那个站点上把那个购买按钮给我点了下单",
+        "别老想着帮我总结，我要的是你在这个页面上把地址换成新的然后保存生效",
+        "不用给我解释这仓库怎么回事，你就帮我在那个网站里把预约那栏挑成明天上午再点确定",
+        "别光念内容给我听，你在这个站点上把该勾的三项勾上一起提交掉才是我要的",
+        "我不要文章要点，我就想让你在这个网站上真的把那单钱付了",
+    ],
+}
+
 SUBCAT = {
     "nav": ("A", "导航"),
     "interact": ("B", "交互"),
@@ -251,10 +381,10 @@ def check_no_trigger(text: str) -> None:
             raise AssertionError(f"含 trigger 子串 [{t}]！→ {text}")
 
 
-def expand() -> list[tuple[str, str]]:
+def expand_pool(pool) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
     mood = set("吧呢嘛啊吗了呀哦呐")
-    for cat, sents in POOL.items():
+    for cat, sents in pool.items():
         for s in sents:
             out.append((s, cat))
             tail = s.rstrip()[-1] if s.strip() else ""
@@ -264,8 +394,11 @@ def expand() -> list[tuple[str, str]]:
     return out
 
 
-def dedupe(items):
-    seen, out = set(), []
+def dedupe(items, seen=None):
+    """去重 + trigger 校验；seen 用于跨池去重（test/val 优先占位，train 让路）。"""
+    if seen is None:
+        seen = set()
+    out = []
     for text, cat in items:
         t = text.strip()
         if not t or t in seen:
@@ -276,36 +409,27 @@ def dedupe(items):
     return out
 
 
-def stratified_split(items, train_n, val_n, test_n, seed):
+def cap_per_split(items, target_n, seed):
+    """打散后截断到目标量，按子语义配额轮转取，避免某类被砍光。"""
     rng = random.Random(seed)
     by_cat = {}
     for text, cat in items:
         by_cat.setdefault(cat, []).append((text, cat))
     for cat in by_cat:
         rng.shuffle(by_cat[cat])
-    train, val, test = [], [], []
-    total = len(items)
-    for cat, texts in by_cat.items():
-        n = len(texts)
-        cval = min(max(1, round(n * val_n / total)), n // 3)
-        ctest = min(max(1, round(n * test_n / total)), n // 3)
-        i = 0
-        test.extend(texts[i:i + ctest]); i += ctest
-        val.extend(texts[i:i + cval]); i += cval
-        train.extend(texts[i:])
-    rng.shuffle(train); rng.shuffle(val); rng.shuffle(test)
-    used = set(t for t, _ in val) | set(t for t, _ in test)
-    pool_extra = [it for it in train if it[0] not in used]
-    placed = set()
-    for need, bucket in [(val_n, val), (test_n, test)]:
-        i = 0
-        while len(bucket) < need and i < len(pool_extra):
-            if pool_extra[i][0] not in placed:
-                bucket.append(pool_extra[i]); placed.add(pool_extra[i][0])
-            i += 1
-    used = set(t for t, _ in val) | set(t for t, _ in test)
-    train = [it for it in train if it[0] not in used][:train_n]
-    return train, val, test
+    if len(items) <= target_n:
+        out = list(items); rng.shuffle(out); return out
+    out, cats = [], list(by_cat.keys())
+    idx = {c: 0 for c in cats}
+    while len(out) < target_n:
+        progressed = False
+        for c in cats:
+            if idx[c] < len(by_cat[c]) and len(out) < target_n:
+                out.append(by_cat[c][idx[c]]); idx[c] += 1; progressed = True
+        if not progressed:
+            break
+    rng.shuffle(out)
+    return out
 
 
 def write_jsonl(path, items):
@@ -318,9 +442,17 @@ def write_jsonl(path, items):
 
 def main():
     base = Path(__file__).resolve().parent
-    items = dedupe(expand())
-    print(f"手写池展开+去重后：{len(items)} 条")
-    train, val, test = stratified_split(items, 500, 75, 75, seed=20260711)
+    # 先建 test/val（优先占位），再建 train（让路，避免任何跨池重复）
+    seen: set = set()
+    test_raw = dedupe(expand_pool(POOL_TEST), seen)
+    val_raw = dedupe(expand_pool(POOL_VAL), seen)
+    train_raw = dedupe(expand_pool(POOL_TRAIN), seen)
+    print(f"手写池展开+去重后：test={len(test_raw)} val={len(val_raw)} train={len(train_raw)}")
+
+    test = cap_per_split(test_raw, 75, seed=20260711)
+    val = cap_per_split(val_raw, 75, seed=20260712)
+    train = cap_per_split(train_raw, 500, seed=20260713)
+
     write_jsonl(base / "train" / "use-browser.jsonl", train)
     write_jsonl(base / "val" / "use-browser.jsonl", val)
     write_jsonl(base / "test" / "use-browser.jsonl", test)

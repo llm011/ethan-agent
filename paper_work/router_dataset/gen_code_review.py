@@ -1,29 +1,7 @@
 #!/usr/bin/env python3
-"""生成 code-review 训练样本（jsonl）。
-
-code-review = 对一段代码变更 / PR / MR / diff 做系统性审查：
-  把这次改动通读一遍、找里面有没有 bug/边界漏洞、有没有安全隐患、
-  性能上有没有坑，最后给一份修改建议或评审意见。
-  对象是「已有的一处变更」，不是「读懂整个开源仓库」，也不是「从零写一段新代码」。
-
-子语义：
-  A pr        帮我把这个 PR / 合并请求通读一遍、这个 MR 能不能合
-  B diff      看看这次改动/这个补丁/这段提交改得对不对
-  C bug       这段改动有没有埋 bug、逻辑对不对、有没有边界没考虑
-  D security  这次变更有没有安全隐患、注入风险、越权
-  E perf      这段新代码性能怎么样、有没有 N+1、会不会内存泄漏
-  F suggest   帮我提点修改建议、哪里能优化、给个评审意见
-  G boundary  强调「审查已有变更」而非「理解整个仓库」或「从零写代码」
-
-铁律：绝不含 code-review 的任一 trigger 原词子串：
-  code review | 代码审查 | review代码 | review一下 | 帮我看看代码 | 看下代码
-  | 审查代码 | pr review | diff review | 检查代码 | 代码质量
-（用同义替换：代码审查/审查代码→把这个改动过一遍；帮我看看代码→瞅瞅这段提交有没有问题；
-  代码质量→这个 patch 靠不靠谱；合并请求帮我把把关）
-"""
+"""生成 code-review 训练样本（jsonl）。★三池独立版。"""
 from __future__ import annotations
-import json
-import random
+import json, random
 from pathlib import Path
 from collections import Counter
 
@@ -32,8 +10,7 @@ TRIGGERS = [
     "看下代码", "审查代码", "pr review", "diff review", "检查代码", "代码质量",
 ]
 
-POOL: dict[str, list[str]] = {
-    # ===== A. pr 把 PR / 合并请求过一遍、能不能合 =====
+POOL_TRAIN: dict[str, list[str]] = {
     "pr": [
         "帮我把这个 PR 通读一遍看能不能合",
         "这个合并请求你帮我把把关再放行",
@@ -59,7 +36,6 @@ POOL: dict[str, list[str]] = {
         "帮我把这次这个合并请求整体捋一遍给意见",
         "这个 PR 里的改动帮我确认下能不能上",
     ],
-    # ===== B. diff 这次改动/补丁/提交改得对不对 =====
     "diff": [
         "帮我把这个改动过一遍看改得对不对",
         "瞅瞅这段提交有没有问题",
@@ -84,7 +60,6 @@ POOL: dict[str, list[str]] = {
         "帮我把这个补丁通读评一遍",
         "这次变更帮我逐条过一遍看有没有改歪",
     ],
-    # ===== C. bug 有没有埋 bug、逻辑对不对、边界 =====
     "bug": [
         "这段改动有没有埋 bug，帮我找找",
         "帮我看看这次改的逻辑对不对",
@@ -109,7 +84,6 @@ POOL: dict[str, list[str]] = {
         "这段改动会不会在边界上多算或少算一次",
         "帮我看看这个改法有没有把原来的判断改错",
     ],
-    # ===== D. security 安全隐患、注入、越权 =====
     "security": [
         "这次变更有没有安全隐患，帮我看看",
         "帮我瞧瞧这段改动会不会有注入风险",
@@ -134,7 +108,6 @@ POOL: dict[str, list[str]] = {
         "这里对外部请求的改动有没有 SSRF 风险，帮我想想",
         "帮我确认这次变更没有把内部接口无意暴露出去",
     ],
-    # ===== E. perf 性能、N+1、内存泄漏 =====
     "perf": [
         "这段新代码性能怎么样，帮我看看",
         "帮我瞧瞧这次改动会不会有 N+1 查询",
@@ -148,7 +121,7 @@ POOL: dict[str, list[str]] = {
         "帮我看看这里改完之后有没有大对象没释放",
         "这次变更会不会拖慢接口响应，帮我判断",
         "帮我核一下这段改动的数据库调用是不是太多",
-        "这个改法在数据量大的时候扛不扛得住，帮我想想",
+        "这个改法在数据量大的时候扛不扛得住，我想想",
         "帮我瞧瞧这次改动有没有不必要的全表扫描",
         "这段新写的会不会频繁触发 GC，帮我看看",
         "帮我看看这里改完之后连接有没有及时关掉",
@@ -159,7 +132,6 @@ POOL: dict[str, list[str]] = {
         "这段改动会不会导致重复加载同一份数据，帮我看看",
         "帮我看看这次改的地方能不能少几次网络往返",
     ],
-    # ===== F. suggest 提修改建议、哪里能优化、评审意见 =====
     "suggest": [
         "帮我给这次改动提点修改建议",
         "这段提交哪里还能优化，帮我说说",
@@ -184,7 +156,6 @@ POOL: dict[str, list[str]] = {
         "帮我给这个改动列几条上线前该改的点",
         "这段新代码的可维护性帮我提点改进思路",
     ],
-    # ===== G. boundary 审查已有变更（区别于读懂仓库/从零写码）=====
     "boundary": [
         "这个同事提的改动我不放心，帮我挑挑毛病",
         "这次上线的变更帮我评审下风险点",
@@ -209,6 +180,96 @@ POOL: dict[str, list[str]] = {
     ],
 }
 
+POOL_VAL: dict[str, list[str]] = {
+    "pr": [
+        "这个 PR 能不能合，帮我评估一下",
+        "合并请求发过来了，帮我过一遍",
+        "这个 MR 帮我把关下有没有问题",
+        "这次提 PR 之前帮我核一核",
+    ],
+    "diff": [
+        "这次的变更帮我确认一下改得对不对",
+        "这个补丁帮我通读一遍",
+        "这段改动有没有漏改或改错，帮我看",
+        "diff 帮我过一遍有没有坑",
+    ],
+    "bug": [
+        "这段改法有没有逻辑漏洞，帮我找",
+        "边界情况有没有考虑到，帮我核一下",
+        "这次改动会不会有空指针或越界",
+        "改完之后并发安不安全，帮我看",
+    ],
+    "security": [
+        "这次改动有没有引入安全漏洞",
+        "帮我看看有没有注入或越权风险",
+        "鉴权那块改完还在不在，帮我确认",
+        "敏感信息有没有被暴露出去",
+    ],
+    "perf": [
+        "这次改动性能上有没有坑",
+        "会不会有 N+1 或者内存泄漏",
+        "循环里有没有不必要的数据库调用",
+        "这段改动在大数据量下扛不扛得住",
+    ],
+    "suggest": [
+        "帮我对这次改动提几条改进建议",
+        "有没有更好的写法，帮我说说",
+        "这个 patch 哪里能再优化一下",
+        "给我几条上线前值得改的点",
+    ],
+    "boundary": [
+        "不是重写，就这次改动帮我把关",
+        "只看这次 diff，不用读整个项目",
+        "这段已有的变更帮我评审一下",
+        "只针对这次改的地方给意见就行",
+    ],
+}
+
+POOL_TEST: dict[str, list[str]] = {
+    "pr": [
+        "同事提了个 PR 要合，我没仔细看，帮我过一遍有没有雷",
+        "这个 MR 我想尽快合进去，你先帮我确认没大问题",
+        "新人提的合并请求，帮我仔细看下有没有坑，别出事",
+        "发版前最后这个 PR，帮我快速评审一下能不能放行",
+    ],
+    "diff": [
+        "刚改完这块，不太确定改对没，帮我过一眼",
+        "这次提交改了好几处，帮我逐个确认下有没有改歪",
+        "补丁打进去之前帮我确认下这几行改得对不对",
+        "这次 diff 内容比较多，帮我捋一遍有没有遗漏",
+    ],
+    "bug": [
+        "这段逻辑我改完感觉不太对，帮我找找有没有 bug",
+        "这里边界情况感觉没处理好，帮我看看会不会崩",
+        "并发那块我改了，帮我想想有没有竞态条件",
+        "空值情况感觉没考虑周全，帮我核一下这次改动",
+    ],
+    "security": [
+        "这个接口改了接收外部参数，帮我看看有没有注入风险",
+        "鉴权逻辑挪位置了，帮我确认下没有漏掉校验",
+        "这次改动涉及用户数据，帮我看看有没有安全隐患",
+        "密钥那块我改了，帮我确认没有不小心写进代码里",
+    ],
+    "perf": [
+        "这段循环里加了数据库查询，帮我想想会不会变慢",
+        "改完后压测跑不动了，帮我看看这次改动性能上哪里有坑",
+        "数据量大的时候会不会撑不住，帮我评估下这次改动",
+        "这段改法感觉可能内存泄漏，帮我确认一下",
+    ],
+    "suggest": [
+        "这次改动能跑但感觉写得不够好，帮我提几条改进意见",
+        "代码能过但可读性差，帮我说说哪里可以再打磨",
+        "帮我看看这次提交有没有可以简化的地方再给意见",
+        "上线前帮我把这次改动的痛点点出来，我好在改改",
+    ],
+    "boundary": [
+        "不需要你理解整个系统，就这次改动的几个文件帮我把关",
+        "别帮我重写，就把这段已有的变更评审一遍就行",
+        "紧急上线，帮我快速过这次 diff 有没有拦路的问题",
+        "同事临时加的改动，帮我盯一遍别出事，不用读其他代码",
+    ],
+}
+
 SUBCAT = {
     "pr": ("A", "合并请求"),
     "diff": ("B", "改动"),
@@ -227,10 +288,10 @@ def check_no_trigger(text: str) -> None:
             raise AssertionError(f"含 trigger 子串 [{t}]！→ {text}")
 
 
-def expand() -> list[tuple[str, str]]:
+def expand_pool(pool: dict) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
     mood = set("吧呢嘛啊吗了呀哦呐")
-    for cat, sents in POOL.items():
+    for cat, sents in pool.items():
         for s in sents:
             out.append((s, cat))
             tail = s.rstrip()[-1] if s.strip() else ""
@@ -240,8 +301,10 @@ def expand() -> list[tuple[str, str]]:
     return out
 
 
-def dedupe(items):
-    seen, out = set(), []
+def dedupe(items, seen=None):
+    if seen is None:
+        seen = set()
+    out = []
     for text, cat in items:
         t = text.strip()
         if not t or t in seen:
@@ -252,36 +315,26 @@ def dedupe(items):
     return out
 
 
-def stratified_split(items, train_n, val_n, test_n, seed):
+def cap_per_split(items, target_n, seed):
     rng = random.Random(seed)
-    by_cat = {}
+    by_cat: dict[str, list] = {}
     for text, cat in items:
         by_cat.setdefault(cat, []).append((text, cat))
     for cat in by_cat:
         rng.shuffle(by_cat[cat])
-    train, val, test = [], [], []
-    total = len(items)
-    for cat, texts in by_cat.items():
-        n = len(texts)
-        cval = min(max(1, round(n * val_n / total)), n // 3)
-        ctest = min(max(1, round(n * test_n / total)), n // 3)
-        i = 0
-        test.extend(texts[i:i + ctest]); i += ctest
-        val.extend(texts[i:i + cval]); i += cval
-        train.extend(texts[i:])
-    rng.shuffle(train); rng.shuffle(val); rng.shuffle(test)
-    used = set(t for t, _ in val) | set(t for t, _ in test)
-    pool_extra = [it for it in train if it[0] not in used]
-    placed = set()
-    for need, bucket in [(val_n, val), (test_n, test)]:
-        i = 0
-        while len(bucket) < need and i < len(pool_extra):
-            if pool_extra[i][0] not in placed:
-                bucket.append(pool_extra[i]); placed.add(pool_extra[i][0])
-            i += 1
-    used = set(t for t, _ in val) | set(t for t, _ in test)
-    train = [it for it in train if it[0] not in used][:train_n]
-    return train, val, test
+    if len(items) <= target_n:
+        out = list(items); rng.shuffle(out); return out
+    out, cats = [], list(by_cat.keys())
+    idx = {c: 0 for c in cats}
+    while len(out) < target_n:
+        progressed = False
+        for c in cats:
+            if idx[c] < len(by_cat[c]) and len(out) < target_n:
+                out.append(by_cat[c][idx[c]]); idx[c] += 1; progressed = True
+        if not progressed:
+            break
+    rng.shuffle(out)
+    return out
 
 
 def write_jsonl(path, items):
@@ -294,19 +347,25 @@ def write_jsonl(path, items):
 
 def main():
     base = Path(__file__).resolve().parent
-    items = dedupe(expand())
-    print(f"手写池展开+去重后：{len(items)} 条")
-    train, val, test = stratified_split(items, 500, 75, 75, seed=20260711)
+    seen: set = set()
+    test_raw = dedupe(expand_pool(POOL_TEST), seen)
+    val_raw = dedupe(expand_pool(POOL_VAL), seen)
+    train_raw = dedupe(expand_pool(POOL_TRAIN), seen)
+
+    test = cap_per_split(test_raw, 75, seed=20260711)
+    val = cap_per_split(val_raw, 75, seed=20260712)
+    train = cap_per_split(train_raw, 500, seed=20260713)
+
     write_jsonl(base / "train" / "code-review.jsonl", train)
     write_jsonl(base / "val" / "code-review.jsonl", val)
     write_jsonl(base / "test" / "code-review.jsonl", test)
     print(f"train={len(train)} val={len(val)} test={len(test)}")
-    for name, split in [("train", train), ("val", val), ("test", test)]:
+    for split_name, split in [("train", train), ("val", val), ("test", test)]:
         c = Counter(SUBCAT[cat][0] for _, cat in split)
-        print(f"\n{name} 子语义分布（共 {len(split)}）：")
+        print(f"\n{split_name} 子语义分布（共 {len(split)}）：")
         for cat in SUBCAT:
             code = SUBCAT[cat][0]
-            print(f"  {code}-{SUBCAT[cat][1]:<6} {c.get(code, 0):>3}")
+            print(f"  {code}-{SUBCAT[cat][1]:<8} {c.get(code, 0):>3}")
 
 
 if __name__ == "__main__":

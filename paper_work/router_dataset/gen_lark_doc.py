@@ -6,6 +6,14 @@ lark-doc = 飞书云文档（Docx / Wiki）的内容读写：
   改写某段、下载/插入文档里的图片、把整篇导出成 markdown 存本地、只读文档
   的某一节。对象始终是「云文档内容」，不是「发消息」也不是「登录配置」。
 
+★ 三池独立（防近邻泄漏，这是本文件与旧版最大区别）：
+  POOL_TRAIN：覆盖广、多变体，主训练用（沿用旧 POOL 模板）。
+  POOL_VAL  ：换一批说法（中等难度），不与 train 的模板骨架重叠。
+  POOL_TEST ：最口语、最贴近真实用户——刻意加背景/上下文/省略/隐式意图，
+              句子长短不一，部分故意写长。绝不与 train 共用模板。
+  三池分别手写，split() 不再从同一池切片，从根上消除「同模板换说法」的泄漏。
+  main() 先建 test/val（共享 seen 优先占位），再建 train（让路）→ 跨池零重复。
+
 子语义：
   read     帮我读一下这篇云文档/这个 wiki 讲了啥/把在线文档内容拉出来
   create   新建一篇文档/起一个 docx/建个 wiki 页
@@ -31,7 +39,8 @@ TRIGGERS = [
     "飞书", "lark", "发消息", "群聊", "im消息", "消息", "群成员", "飞书群",
 ]
 
-POOL: dict[str, list[str]] = {
+# ===================== POOL_TRAIN：覆盖广、多变体 =====================
+POOL_TRAIN: dict[str, list[str]] = {
     # ===== read 读取云文档正文 =====
     "read": [
         "帮我读一下这篇云文档到底讲了啥",
@@ -176,6 +185,30 @@ POOL: dict[str, list[str]] = {
         "只要这篇文档某个章节的内容不用全篇",
         "帮我抓在线文档里那个子标题下的段落",
     ],
+    # ===== long 长口语正样本（带背景铺垫/省略，抬高长句置信）=====
+    # 目的：test 里「文档里那段写得早了现在不对了，帮我更新成现在的进度」「等下要开会先帮我
+    # 支一篇空白文档出来」这类长口语被低置信打到 others。train 补同风格长句把置信抬上来。
+    # 内核仍是云文档内容的：新建 / 追加改写 / 局部取节 / 图片，不是发消息也不是配置。
+    "long": [
+        "等下要开个会，先帮我支一篇空白文档出来，标题就写会议纪要，内容我等会自己敲",
+        "临时要记点东西，你快帮我建个空的在线文档，取名叫需求清单就成",
+        "手头这个新项目啥都没有，你先帮我在知识库里新建一页出来我好开始记",
+        "面试要用来记录，你帮我起个新的在线文档页面，命名成候选人评估",
+        "文档里那段写得早了现在不对了，你帮我把它更新成现在的进度，别的别动",
+        "结尾还差个总结，你帮我在这篇在线文档最后接一段把要点收一下",
+        "这段话领导说要改口径，你帮我按新的说法在这篇文档原地重写一下",
+        "刚才聊的那几条结论，你帮我追加到这篇在线文档末尾去，前面段落保持原样",
+        "文档中间那张图糊了，我重新做了张新的，你帮我在原位置换上去",
+        "开头缺张示意图撑场面，你帮我在这篇文档最上面补一张进去",
+        "这篇里有好几张配图我都想留着，你帮我一张张从在线文档里下下来存本地",
+        "文档里那张表格截图我要拿去汇报，你帮我把原图从文档里存下来",
+        "这篇在线文档老长了我只关心结论，你帮我把结论那一节单独拉出来就行",
+        "别整篇了，我就想看方案那一章，你帮我把那节内容从文档里摘给我",
+        "开头背景那段我已经知道了，你就帮我取这篇文档中间那个步骤清单",
+        "我只想核对下预算那段，你把这篇在线文档那个小节的内容拉给我就成",
+        "这份材料我想留个离线的底，你帮我把整篇在线文档转成 markdown 存本地",
+        "怕以后链接失效，你帮我把这个在线文档全文导成 md 归档一份",
+    ],
     # ===== boundary 强调文档内容读写（区别于发消息/登录配置）=====
     "boundary": [
         "给我这个 docx 链接里的正文整理出来",
@@ -201,6 +234,161 @@ POOL: dict[str, list[str]] = {
     ],
 }
 
+# ===================== POOL_VAL：换说法、中等难度 =====================
+POOL_VAL: dict[str, list[str]] = {
+    "read": [
+        "把这份协作文档的正文帮我通读并讲讲主旨",
+        "这页知识库文档大致说了什么，帮我捋一遍",
+        "帮我把这个文档链接里的文字都取出来看看",
+        "这篇 docx 讲的啥，帮我提炼几条要点",
+        "把在线文档里写的东西帮我概述给我听",
+        "帮我调出这个 token 文档的全文瞧瞧",
+    ],
+    "create": [
+        "帮我开一篇空文档准备记调研笔记",
+        "起一页新的知识库文档标题写迭代计划",
+        "帮我建个空白 docx 待会往里贴东西",
+        "新拉一篇在线文档命名成客户访谈",
+        "帮我在知识库里起一页记录排期",
+        "创建一份空文档我要开始写方案了",
+    ],
+    "edit": [
+        "帮我在这篇文档尾部续上一段小结",
+        "把这份 docx 里那段过时的说明帮我更新掉",
+        "往这页知识库文档中间补一个小节标题",
+        "帮我把在线文档开头那句话措辞改顺一点",
+        "在这篇文档里替我插进去一段补充说明",
+        "帮我把 docx 那段内容重新组织下顺序",
+    ],
+    "image": [
+        "把这篇文档里那几张配图帮我逐张存下来",
+        "帮我往这页 docx 指定位置嵌一张示意图",
+        "把在线文档里的插图批量提取到本地",
+        "帮我给这份文档末尾补一张流程示意图",
+        "把知识库文档里那张表格图帮我抠出来",
+        "帮我把文档正文中的图片附件都保存好",
+    ],
+    "export": [
+        "把整篇协作文档帮我转成 markdown 收好",
+        "帮我将这个 docx 全文落成本地 md 文件",
+        "这页知识库文档帮我导成 md 备份一下",
+        "把在线文档从头到尾转成 markdown 给我",
+        "帮我把这个链接文档整篇存成 md 归档",
+        "把这份文档导出为 markdown 放到本地目录",
+    ],
+    "scope": [
+        "只帮我把这篇文档开头那一节抽出来",
+        "把在线文档里方案那一章单独取给我",
+        "帮我读这份 docx 里概述那段就够了",
+        "只要知识库文档里风险那一节的内容",
+        "帮我把文档中间那个步骤清单摘出来",
+        "只局部读一下这篇文档附录那部分",
+    ],
+    "boundary": [
+        "我给的是文档地址，帮我读它正文别碰别的",
+        "这个 token 是篇云文档，帮我改里头的段落",
+        "只针对这份在线文档的文字做读取和修改",
+        "帮我围绕这个 docx 正文增删，不去动配置",
+        "我要处理的是文档内容本身，别管其它操作",
+        "把这页文档的正文整理清楚就好，别的不用",
+    ],
+}
+
+# ===================== POOL_TEST：最口语、含背景/省略/隐式意图，部分故意写长 =====================
+POOL_TEST: dict[str, list[str]] = {
+    "read": [
+        "同事甩了个文档链接过来说让我先看看，你帮我把里头写的正文拉出来我瞄一眼呗",
+        "这份在线文档我懒得一行行翻，你直接帮我把内容捞出来讲讲讲了啥",
+        "老板发我一页知识库的东西，说开会前过一遍，你帮我念念重点",
+        "这链接点开半天加载，你直接帮我把正文抓出来我看内容就行",
+        "刚拉的协作文档，你先给我通读一遍说说大意，我一会儿要汇报",
+        "手机上打开这个链接排版全乱了，你在电脑这边帮我把正文规规整整读出来",
+        "群里传的那份文档说是这次需求，你帮我看看到底写了啥我心里有个数",
+        "我眼睛有点累，这篇文档你帮我看完拣重点跟我说说得了",
+        "这个 token 是别人分享给我的一篇文档，你能帮我把里面内容调出来不",
+        "领导让我熟悉下这份材料，你先把它正文整理整理讲给我听吧",
+        "这篇写得老长了，你帮我从头到尾捋一遍抓几个核心点出来",
+    ],
+    "create": [
+        "等下要开个会，先帮我支一篇空白文档出来，标题就写今天的会议纪要，内容我等会自己敲",
+        "手头这个新项目啥都没有，你先给我拉一页知识库文档我好开始记东西",
+        "帮我起个空的 docx 呗，名字先叫周报，我等下往里补",
+        "我想把这次调研的东西存个地方，你先帮我新开一篇在线文档",
+        "临时要记点东西，快帮我建个空文档取名叫需求清单就成",
+        "脑子里冒出个点子怕忘了，你赶紧帮我开一页新文档我记下来",
+        "这周复盘得有个地方写，你先帮我建篇文档标题叫本周复盘",
+        "客户信息想单独归拢一下，帮我新拉一份空白在线文档吧",
+        "面试要记录用，你帮我起个新页面命名成候选人评估",
+        "先给我拉个空文档占个位，名字随便叫草稿就行，我一会填",
+        "打算写个设计方案，麻烦先帮我在知识库里新建一页出来",
+    ],
+    "edit": [
+        "刚才聊的那几条结论你帮我加到这篇文档最后头去，别的段落别动",
+        "这份文档开头那句话读着有点别扭，你帮我把措辞顺一顺",
+        "文档里那段写得早了现在不对了，你帮我把它更新成现在的进度",
+        "开完会有几个新点子，你往这篇在线文档中间给我插一段说明呗",
+        "这个 docx 里漏了一条，你帮我在对应位置补上去，其它保持原样",
+        "刚定下来的排期你帮我追到这篇文档末尾，前面的都别碰",
+        "这段话领导说要改口径，你帮我按新的说法在原地重写一下",
+        "文档里那个小标题起得太随意，你帮我换个正式点的措辞",
+        "我口述你记，往这份在线文档里给我补一段今天的进展",
+        "这篇里有句话说反了，你帮我在那个位置改正过来就行",
+        "结尾还差个总结，你帮我在最后接一段把要点收一下",
+    ],
+    "image": [
+        "这篇文档里有好几张图我都想留着，你帮我一张张下下来存本地呗",
+        "刚截了张流程图，你帮我塞到这份 docx 末尾那块去",
+        "文档里那张架构图挺关键的，你帮我单独抠出来发我",
+        "这页知识库文档配的那些图，你帮我批量导到本地一个文件夹",
+        "我这有张 logo，你帮我放到这篇在线文档开头当封面",
+        "文档里那张表格截图我要拿去汇报，你帮我原图存下来",
+        "手机拍的现场照片，你帮我插到这份文档对应那段下面",
+        "这篇里图有点多，你帮我把它们都提出来我挑几张用",
+        "开头缺张示意图撑场面，你帮我在最上面补一张进去",
+        "文档中间那张图糊了我重新做了张，你帮我在原位置换上",
+        "这几张配图我想归档，你把在线文档里的图都给我导出来",
+    ],
+    "export": [
+        "这份在线文档我想留个离线的底，你帮我整篇转成 markdown 存到本地",
+        "怕以后链接失效，你帮我把这个 docx 全文导成 md 归档一份",
+        "这页知识库的东西我想搬进自己仓库，你先帮我导成 markdown",
+        "帮我把这篇协作文档从头到尾落成一个本地 md 文件收着",
+        "这链接文档你直接给我转成 md，我要放进项目目录里",
+        "领导要离线版，你把这篇在线文档整篇导成 markdown 发我",
+        "我准备把内容贴到博客，你先帮我把这个文档转成 md 格式",
+        "这份材料我想存档，你帮我整篇下成 markdown 放桌面就行",
+        "换个工具继续写，你先帮我把这篇文档导成本地 md 文件",
+        "这个 token 的文档你帮我转成 markdown，我拿去做二次编辑",
+        "怕改乱了先备份，你把整篇在线文档导成 md 存一份到本地",
+    ],
+    "scope": [
+        "这篇文档老长了我只关心结论，你帮我把结论那一节单独拉出来就行",
+        "别整篇了，我就想看方案那一章，你帮我把那节内容摘给我",
+        "文档里风险那部分我领导让重点看，你单独把那一节读给我",
+        "开头背景那段我已经知道了，你就帮我取中间那个步骤清单",
+        "这份 docx 里附录那节有我要的数据，你只把那一小节抽出来",
+        "全篇太多了，我就要目标那一节的文字，你单独给我拎出来",
+        "时间紧，你别读全篇，把结论和建议那两小节挑给我就行",
+        "文档里排期那块我最关心，你帮我把那一节单独取出来看",
+        "我只想核对下预算那段，你把那个小节的内容拉给我就成",
+        "这篇里方案二那部分我要单看，你别管其它章节只给我那节",
+        "概述我扫过了，你帮我把详细设计那一章单独抓出来读读",
+    ],
+    "boundary": [
+        "我发你的是一篇文档的地址，你就帮我读它正文、要改我说的那几段，别去碰登录那一摊事",
+        "这个 token 对应的是篇云文档不是别的，你就围着里头的文字内容帮我读和改就行",
+        "别搞混了啊，我要的是这份在线文档的正文，你帮我整理清楚，其它操作一概不用",
+        "就针对这篇文档的段落文字，你帮我该读读该补补，别扯到什么设置配置上去",
+        "我这链接指向一篇协作文档，你帮我把内容拉全整理好，别的东西都别动",
+        "咱就说这一篇文档的正文哈，你帮我读帮我改，别的功能先都放一边",
+        "我要的不是发东西也不是配置，就是把这份在线文档的内容弄好",
+        "这个链接是篇文档，你专心处理里面的文字就行，其它一律别插手",
+        "别理解偏了，我让你做的只是这篇 docx 正文的读和写而已",
+        "就守着这份云文档的段落内容帮我增删改，其余的事都不归你管",
+        "我给的是文档不是别的入口，你只把它正文捣鼓明白就够了",
+    ],
+}
+
 SUBCAT = {
     "read": ("A", "读取"),
     "create": ("B", "新建"),
@@ -209,6 +397,7 @@ SUBCAT = {
     "export": ("E", "导出"),
     "scope": ("F", "局部"),
     "boundary": ("G", "文档边界"),
+    "long": ("H", "长口语"),
 }
 
 
@@ -219,12 +408,15 @@ def check_no_trigger(text: str) -> None:
             raise AssertionError(f"含 trigger 子串 [{t}]！→ {text}")
 
 
-def expand() -> list[tuple[str, str]]:
+def expand_pool(pool, add_suffix: bool) -> list[tuple[str, str]]:
+    """展开某个池。add_suffix=True 时对合适句尾追加语气词变体（train 用，扩量）。"""
     out: list[tuple[str, str]] = []
     mood = set("吧呢嘛啊吗了呀哦呐")
-    for cat, sents in POOL.items():
+    for cat, sents in pool.items():
         for s in sents:
             out.append((s, cat))
+            if not add_suffix:
+                continue
             tail = s.rstrip()[-1] if s.strip() else ""
             if tail and tail not in mood and tail not in "？。！，；":
                 for suf in ["呢", "啊", "吗", "？"]:
@@ -232,8 +424,11 @@ def expand() -> list[tuple[str, str]]:
     return out
 
 
-def dedupe(items):
-    seen, out = set(), []
+def dedupe(items, seen=None):
+    """去重 + trigger 校验；seen 用于跨池去重（test/val 优先占位，train 让路）。"""
+    if seen is None:
+        seen = set()
+    out = []
     for text, cat in items:
         t = text.strip()
         if not t or t in seen:
@@ -244,36 +439,27 @@ def dedupe(items):
     return out
 
 
-def stratified_split(items, train_n, val_n, test_n, seed):
+def cap_per_split(items, target_n, seed):
+    """打散后截断到目标量，尽量保持子语义均衡。"""
     rng = random.Random(seed)
     by_cat = {}
     for text, cat in items:
         by_cat.setdefault(cat, []).append((text, cat))
     for cat in by_cat:
         rng.shuffle(by_cat[cat])
-    train, val, test = [], [], []
-    total = len(items)
-    for cat, texts in by_cat.items():
-        n = len(texts)
-        cval = min(max(1, round(n * val_n / total)), n // 3)
-        ctest = min(max(1, round(n * test_n / total)), n // 3)
-        i = 0
-        test.extend(texts[i:i + ctest]); i += ctest
-        val.extend(texts[i:i + cval]); i += cval
-        train.extend(texts[i:])
-    rng.shuffle(train); rng.shuffle(val); rng.shuffle(test)
-    used = set(t for t, _ in val) | set(t for t, _ in test)
-    pool_extra = [it for it in train if it[0] not in used]
-    placed = set()
-    for need, bucket in [(val_n, val), (test_n, test)]:
-        i = 0
-        while len(bucket) < need and i < len(pool_extra):
-            if pool_extra[i][0] not in placed:
-                bucket.append(pool_extra[i]); placed.add(pool_extra[i][0])
-            i += 1
-    used = set(t for t, _ in val) | set(t for t, _ in test)
-    train = [it for it in train if it[0] not in used][:train_n]
-    return train, val, test
+    if len(items) <= target_n:
+        out = list(items); rng.shuffle(out); return out
+    out, cats = [], list(by_cat.keys())
+    idx = {c: 0 for c in cats}
+    while len(out) < target_n:
+        progressed = False
+        for c in cats:
+            if idx[c] < len(by_cat[c]) and len(out) < target_n:
+                out.append(by_cat[c][idx[c]]); idx[c] += 1; progressed = True
+        if not progressed:
+            break
+    rng.shuffle(out)
+    return out
 
 
 def write_jsonl(path, items):
@@ -286,9 +472,16 @@ def write_jsonl(path, items):
 
 def main():
     base = Path(__file__).resolve().parent
-    items = dedupe(expand())
-    print(f"手写池展开+去重后：{len(items)} 条")
-    train, val, test = stratified_split(items, 500, 75, 75, seed=20260711)
+    # 先建 test/val（优先占位），再建 train（让路，避免任何跨池重复）
+    seen: set = set()
+    test_raw = dedupe(expand_pool(POOL_TEST, add_suffix=False), seen)
+    val_raw = dedupe(expand_pool(POOL_VAL, add_suffix=True), seen)
+    train_raw = dedupe(expand_pool(POOL_TRAIN, add_suffix=True), seen)
+
+    test = cap_per_split(test_raw, 75, seed=20260711)
+    val = cap_per_split(val_raw, 75, seed=20260712)
+    train = cap_per_split(train_raw, 500, seed=20260713)
+
     write_jsonl(base / "train" / "lark-doc.jsonl", train)
     write_jsonl(base / "val" / "lark-doc.jsonl", val)
     write_jsonl(base / "test" / "lark-doc.jsonl", test)

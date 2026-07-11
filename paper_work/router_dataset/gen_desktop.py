@@ -1,31 +1,7 @@
 #!/usr/bin/env python3
-"""生成 computer-use 训练样本（jsonl）。
-
-computer-use = 控制本机 macOS 桌面 GUI + 原生 App 自动化：
-  给屏幕拍图看现状、用鼠标戳/拖、往输入框敲字/按快捷键、把某程序调出来、
-  滚动窗口、让系统自带的记事/记日程那类原生 app 干活。
-
-子语义：
-  A capture   给当前屏幕/某窗口拍张图看看现在什么样
-  B mouse     用鼠标戳某个位置/拖动某个东西/双击那个图标
-  C keyboard  往输入框里敲字/按快捷键/回车确认
-  D launch    把某个程序调出来/切到某个已开软件/退出某 app
-  E scroll    往下滚一屏/滚到底/翻到某处
-  F appscript 让系统自带的记事那个新建一条/记日程软件里排个会（原生 app 自动化）
-  G boundary  区别于浏览器操作：对象是桌面原生程序/系统窗口而非网页
-
-铁律：绝不含 computer-use + macos-automation 两个 skill 的任一 trigger 原词子串：
-  截图 | 操作电脑 | 控制桌面 | 鼠标点击 | 键盘输入 | 打开应用 | 打开软件 | GUI
-  | 桌面自动化 | computer use | take screenshot | click | type on screen
-  | open app | desktop | scroll screen | drag | 滴答清单 | 提醒事项 | 日历
-  | 备忘录 | 待办 | 创建会议 | 新建笔记 | AppleScript | osascript | 自动化
-（用同义替换：截图→给屏幕拍一张；打开应用→把某某程序调出来；鼠标点击→用鼠标戳一下；
-  键盘输入→敲几个字进去；日历/提醒事项/备忘录→我那个记日程的 app / 系统自带的记事那个 /
-  定闹钟提醒那个）
-"""
+"""生成 computer-use 训练样本（jsonl）。★三池独立版。"""
 from __future__ import annotations
-import json
-import random
+import json, random
 from pathlib import Path
 from collections import Counter
 
@@ -36,8 +12,7 @@ TRIGGERS = [
     "备忘录", "待办", "创建会议", "新建笔记", "applescript", "osascript", "自动化",
 ]
 
-POOL: dict[str, list[str]] = {
-    # ===== A. capture 给屏幕/窗口拍张图看现状 =====
+POOL_TRAIN: dict[str, list[str]] = {
     "capture": [
         "给屏幕拍一张我看看现在是什么样",
         "帮我把当前画面拍下来发我",
@@ -62,7 +37,6 @@ POOL: dict[str, list[str]] = {
         "帮我抓一张现在屏幕的实时画面",
         "拍下当前这个程序停在的那一屏",
     ],
-    # ===== B. mouse 鼠标戳/拖/双击 =====
     "mouse": [
         "用鼠标帮我戳一下右上角那个按钮",
         "帮我在那个图标上戳两下把它点开",
@@ -87,7 +61,6 @@ POOL: dict[str, list[str]] = {
         "把这个窗口边缘用鼠标拉大一点",
         "在那个链接位置帮我用鼠标戳一下",
     ],
-    # ===== C. keyboard 敲字/快捷键/回车 =====
     "keyboard": [
         "往那个输入框里帮我敲几个字进去",
         "帮我在搜索栏敲上我要找的关键词",
@@ -112,7 +85,6 @@ POOL: dict[str, list[str]] = {
         "帮我用键盘按方向键往下挪一格",
         "敲个刷新的快捷键帮我重载一下",
     ],
-    # ===== D. launch 调出程序/切换/退出 =====
     "launch": [
         "帮我把那个记事的程序调出来",
         "把音乐那个软件给我唤起来",
@@ -137,7 +109,6 @@ POOL: dict[str, list[str]] = {
         "帮我把这个程序彻底关掉重开",
         "把系统偏好那个面板调出来给我",
     ],
-    # ===== E. scroll 滚动窗口/翻页 =====
     "scroll": [
         "帮我把这个窗口往下滚一屏",
         "在这个页面里往下多滚一点",
@@ -160,7 +131,6 @@ POOL: dict[str, list[str]] = {
         "在这个界面里往下翻到设置那栏",
         "帮我把长图往下滑看完整个",
     ],
-    # ===== F. appscript 原生 app 自动化（避开禁词）=====
     "appscript": [
         "让系统自带的记事那个新建一条内容记下来",
         "在我那个记日程的 app 里帮我排个会",
@@ -185,7 +155,34 @@ POOL: dict[str, list[str]] = {
         "帮我在提醒那个程序里设一条每天早上的提醒",
         "让我那个记日程 app 帮我腾个明天下午的空档排事",
     ],
-    # ===== G. boundary 桌面原生对象（区别于网页/浏览器）=====
+    # ===== H. 跨界边界（防串 use-browser / lark-im / getnote）=====
+    # 内核是「操控当前桌面应用/本地 GUI 界面」，不是「用浏览器上网」也不是「收藏内容」。
+    "cross_bdry": [
+        # 截图→发给别人：动作是截图，不是 lark-im 发消息
+        "帮我抓一张当前这个窗口的图，我要发给同事确认下界面",
+        "拍一下现在这个画面留底，回头我自己去发",
+        "帮我把当前状态截成一张图，同事要看进展",
+        "先截下当前这一屏，我自己用来汇报",
+        # 弹出菜单/对话框的点击：明确是桌面 GUI 弹窗
+        "弹出来的那个菜单帮我戳第二项",
+        "弹出的对话框帮我选第一个选项",
+        "右键出来的菜单帮我点「粘贴」那一条",
+        "弹出的确认框帮我点「确定」就行",
+        "系统弹了个权限申请窗口，帮我点允许",
+        # 键盘全选删除：明确是当前应用内文字操作
+        "帮我全选这段内容然后一键删掉",
+        "把这个文本框里的内容全选删干净",
+        "帮我先全选这段再按删除清空",
+        "用快捷键帮我把这一段文字全部选中然后删掉",
+        # 窗口内滚动：强调"这个程序/窗口"，非浏览器网页
+        "这个程序里帮我往下滚，看到提交按钮停下",
+        "当前这个应用的窗口帮我一直滚到底部",
+        "帮我把这个软件界面往下翻，找到保存按钮",
+        "帮我在这个本地程序里往下滚几屏",
+        # 敲字后回车：明确在本地程序输入框操作
+        "这个输入框里帮我敲上「确认提交」然后回车",
+        "帮我在那个本地程序的输入框里打几个字然后确认",
+    ],
     "boundary": [
         "帮我把访达里那个下载文件夹打开",
         "在系统设置里帮我把音量调低一点",
@@ -210,14 +207,105 @@ POOL: dict[str, list[str]] = {
     ],
 }
 
+POOL_VAL: dict[str, list[str]] = {
+    "capture": [
+        "帮我拍一下现在这个窗口的样子",
+        "屏幕现在啥情况，帮我存一张图",
+        "把当前这个弹窗拍给我看看",
+        "帮我抓一下现在这个界面的状态",
+    ],
+    "mouse": [
+        "帮我在那个按钮上戳一下",
+        "用鼠标把这个东西拖到那边去",
+        "帮我双击那个图标把它打开",
+        "在右键菜单那里帮我戳一下",
+    ],
+    "keyboard": [
+        "帮我在这个框里敲几个字",
+        "按保存快捷键帮我存一下",
+        "帮我把光标移到那个输入框",
+        "在那里敲完回车帮我确认",
+    ],
+    "launch": [
+        "帮我把那个程序切到前面来",
+        "把这个软件唤起来",
+        "帮我关掉那个没响应的程序",
+        "切到我上一个用的窗口",
+    ],
+    "scroll": [
+        "帮我把这个往下翻一屏",
+        "滚到底部帮我看看有啥",
+        "往上翻回到顶部",
+        "帮我一直滚到那个按钮出现",
+    ],
+    "appscript": [
+        "在记事那个程序里帮我新建一条",
+        "帮我在记日程软件里加个事项",
+        "让提醒那个 app 设个明天的提醒",
+        "帮我在记事里把这段存进去",
+    ],
+    "boundary": [
+        "在访达里帮我找到那个文件夹",
+        "帮我在系统设置里调一下音量",
+        "去访达里把那个文件夹重命名",
+        "帮我在系统偏好里改一下设置",
+    ],
+}
+
+POOL_TEST: dict[str, list[str]] = {
+    "capture": [
+        "我不知道现在程序跑到哪了，帮我拍一张屏幕看看",
+        "报错了但我看不清，帮我把这个窗口拍下来发我",
+        "帮我抓一张当前的画面，我要发给同事看现在的状态",
+        "屏幕上有个弹窗我没看清，帮我把它拍下来",
+    ],
+    "mouse": [
+        "右上角有个按钮我点不到，帮我用鼠标戳一下",
+        "这个文件要拖到那个文件夹里，帮我拖过去",
+        "帮我把那个图标双击打开，我鼠标不好使",
+        "弹出来的菜单帮我戳第二项",
+    ],
+    "keyboard": [
+        "这个输入框里帮我敲上「确认提交」然后回车",
+        "帮我按保存快捷键，我这边按不了",
+        "在搜索框里帮我打上那个关键词搜一下",
+        "帮我全选这段内容然后删掉",
+    ],
+    "launch": [
+        "终端没开，帮我把它调出来",
+        "我那个表格软件还在后台，帮我切过去",
+        "那个程序卡住了，帮我强制退出再重开",
+        "帮我把系统设置那个面板打开",
+    ],
+    "scroll": [
+        "这个文档很长，帮我一直滚到最底下",
+        "聊天记录要往上翻找一条旧的，帮我翻",
+        "帮我把这个页面往下滚，找到提交按钮停下",
+        "往下滚几屏，我想看后面的内容",
+    ],
+    "appscript": [
+        "帮我在系统记事里新建一条，把这个要点存进去",
+        "我那个记日程 app 里帮我排个明天下午三点的会",
+        "帮我在提醒那个程序里加一条明早九点的提醒",
+        "让记事程序新建一条，把这几个字存进去留着",
+    ],
+    "boundary": [
+        "访达里找不到那个文件夹，帮我进去找一下",
+        "系统设置里帮我把蓝牙打开，我找不到在哪",
+        "帮我在访达里把这个文件夹改个名字",
+        "去系统偏好里帮我把深色模式开起来",
+    ],
+}
+
 SUBCAT = {
-    "capture": ("A", "拍图"),
-    "mouse": ("B", "鼠标"),
-    "keyboard": ("C", "键盘"),
-    "launch": ("D", "启动"),
-    "scroll": ("E", "滚动"),
+    "capture":   ("A", "拍图"),
+    "mouse":     ("B", "鼠标"),
+    "keyboard":  ("C", "键盘"),
+    "launch":    ("D", "启动"),
+    "scroll":    ("E", "滚动"),
     "appscript": ("F", "原生脚本"),
-    "boundary": ("G", "桌面边界"),
+    "cross_bdry":("G", "跨界边界"),
+    "boundary":  ("H", "桌面边界"),
 }
 
 
@@ -228,10 +316,10 @@ def check_no_trigger(text: str) -> None:
             raise AssertionError(f"含 trigger 子串 [{t}]！→ {text}")
 
 
-def expand() -> list[tuple[str, str]]:
+def expand_pool(pool: dict) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
     mood = set("吧呢嘛啊吗了呀哦呐")
-    for cat, sents in POOL.items():
+    for cat, sents in pool.items():
         for s in sents:
             out.append((s, cat))
             tail = s.rstrip()[-1] if s.strip() else ""
@@ -241,8 +329,10 @@ def expand() -> list[tuple[str, str]]:
     return out
 
 
-def dedupe(items):
-    seen, out = set(), []
+def dedupe(items, seen=None):
+    if seen is None:
+        seen = set()
+    out = []
     for text, cat in items:
         t = text.strip()
         if not t or t in seen:
@@ -253,36 +343,26 @@ def dedupe(items):
     return out
 
 
-def stratified_split(items, train_n, val_n, test_n, seed):
+def cap_per_split(items, target_n, seed):
     rng = random.Random(seed)
-    by_cat = {}
+    by_cat: dict[str, list] = {}
     for text, cat in items:
         by_cat.setdefault(cat, []).append((text, cat))
     for cat in by_cat:
         rng.shuffle(by_cat[cat])
-    train, val, test = [], [], []
-    total = len(items)
-    for cat, texts in by_cat.items():
-        n = len(texts)
-        cval = min(max(1, round(n * val_n / total)), n // 3)
-        ctest = min(max(1, round(n * test_n / total)), n // 3)
-        i = 0
-        test.extend(texts[i:i + ctest]); i += ctest
-        val.extend(texts[i:i + cval]); i += cval
-        train.extend(texts[i:])
-    rng.shuffle(train); rng.shuffle(val); rng.shuffle(test)
-    used = set(t for t, _ in val) | set(t for t, _ in test)
-    pool_extra = [it for it in train if it[0] not in used]
-    placed = set()
-    for need, bucket in [(val_n, val), (test_n, test)]:
-        i = 0
-        while len(bucket) < need and i < len(pool_extra):
-            if pool_extra[i][0] not in placed:
-                bucket.append(pool_extra[i]); placed.add(pool_extra[i][0])
-            i += 1
-    used = set(t for t, _ in val) | set(t for t, _ in test)
-    train = [it for it in train if it[0] not in used][:train_n]
-    return train, val, test
+    if len(items) <= target_n:
+        out = list(items); rng.shuffle(out); return out
+    out, cats = [], list(by_cat.keys())
+    idx = {c: 0 for c in cats}
+    while len(out) < target_n:
+        progressed = False
+        for c in cats:
+            if idx[c] < len(by_cat[c]) and len(out) < target_n:
+                out.append(by_cat[c][idx[c]]); idx[c] += 1; progressed = True
+        if not progressed:
+            break
+    rng.shuffle(out)
+    return out
 
 
 def write_jsonl(path, items):
@@ -295,19 +375,25 @@ def write_jsonl(path, items):
 
 def main():
     base = Path(__file__).resolve().parent
-    items = dedupe(expand())
-    print(f"手写池展开+去重后：{len(items)} 条")
-    train, val, test = stratified_split(items, 500, 75, 75, seed=20260711)
+    seen: set = set()
+    test_raw = dedupe(expand_pool(POOL_TEST), seen)
+    val_raw  = dedupe(expand_pool(POOL_VAL), seen)
+    train_raw = dedupe(expand_pool(POOL_TRAIN), seen)
+
+    test  = cap_per_split(test_raw,  75,  seed=20260711)
+    val   = cap_per_split(val_raw,   75,  seed=20260712)
+    train = cap_per_split(train_raw, 500, seed=20260713)
+
     write_jsonl(base / "train" / "computer-use.jsonl", train)
-    write_jsonl(base / "val" / "computer-use.jsonl", val)
-    write_jsonl(base / "test" / "computer-use.jsonl", test)
+    write_jsonl(base / "val"   / "computer-use.jsonl", val)
+    write_jsonl(base / "test"  / "computer-use.jsonl", test)
     print(f"train={len(train)} val={len(val)} test={len(test)}")
-    for name, split in [("train", train), ("val", val), ("test", test)]:
+    for sp, split in [("train", train), ("val", val), ("test", test)]:
         c = Counter(SUBCAT[cat][0] for _, cat in split)
-        print(f"\n{name} 子语义分布（共 {len(split)}）：")
+        print(f"\n{sp} 子语义分布（共 {len(split)}）：")
         for cat in SUBCAT:
             code = SUBCAT[cat][0]
-            print(f"  {code}-{SUBCAT[cat][1]:<6} {c.get(code, 0):>3}")
+            print(f"  {code}-{SUBCAT[cat][1]:<8} {c.get(code, 0):>3}")
 
 
 if __name__ == "__main__":

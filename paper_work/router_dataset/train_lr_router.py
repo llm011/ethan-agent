@@ -136,7 +136,7 @@ def main():
     for floor in [x / 100 for x in range(0, 95, 5)]:
         pred = predict_with_floor(Xva, floor)
         p, r, f, rej, _ = macro_prf(yva, pred, reject_id)
-        combo = f * 0.7 + rej * 0.3
+        combo = f * 0.85 + rej * 0.15
         if best is None or combo > best[0]:
             best = (combo, floor, f, rej)
         if floor % 0.1 < 1e-9 or floor in (0.45, 0.55, 0.65):

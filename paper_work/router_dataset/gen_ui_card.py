@@ -7,6 +7,8 @@ ui-card = 用 ui_card 工具生成结构化 UI 卡片（对比/排行/统计/时
   A 对比展示    B 排名展示    C 数据统计    D 时间顺序可视化
   E 要点列举    F 进度/状态   G 边界（区别查数据本身）
 
+★ 三池独立（防近邻泄漏）：POOL_TRAIN 广覆盖，POOL_VAL 换说法，POOL_TEST 最口语。
+
 铁律：绝不含任一 trigger 原词子串：
   卡片 | 对比卡 | 状态卡 | 统计卡 | 时间轴 | 时间线 | timeline |
   旅游攻略 | 行程 | 攻略 | 进度 | 排行 | 榜单 | 清单 | 列一下
@@ -30,8 +32,8 @@ def check_no_trigger(text: str) -> None:
             raise AssertionError(f"含 trigger 子串 [{t}]！→ {text}")
 
 
-POOL: dict[str, list[str]] = {
-    # ===== A. 对比展示 =====
+# ===================== POOL_TRAIN =====================
+POOL_TRAIN: dict[str, list[str]] = {
     "compare": [
         "把这几个方案的优缺点做成一张对比图",
         "帮我把这两个产品并排对比一下做成展示",
@@ -54,7 +56,6 @@ POOL: dict[str, list[str]] = {
         "帮我整理几个方向的差异做成对比看",
         "这两种做法的区别帮我做成对比样式",
     ],
-    # ===== B. 排名展示 =====
     "rank": [
         "帮我把这些按评分排个名次做成展示图",
         "把这几个按热度排个先后做成可视化",
@@ -77,7 +78,6 @@ POOL: dict[str, list[str]] = {
         "帮我把这几个选手的得分做成排名图",
         "把这几个策略从最推荐到最不推荐排列展示",
     ],
-    # ===== C. 数据统计展示 =====
     "stat": [
         "把这几个数字帮我做成数据展示图",
         "帮我把这些指标整理成统计展示",
@@ -100,7 +100,6 @@ POOL: dict[str, list[str]] = {
         "把这几个核心数字用图表方式展示",
         "帮我整理这些统计数字做成展示图",
     ],
-    # ===== D. 时间顺序可视化（避开时间轴/时间线/timeline）=====
     "timeline_view": [
         "把这几件事按发生顺序做成可视化",
         "帮我把这些事件的先后顺序做成图示",
@@ -123,7 +122,6 @@ POOL: dict[str, list[str]] = {
         "把这些重要时间节点按序展示出来",
         "帮我把事情发展的各个阶段做成图示",
     ],
-    # ===== E. 要点列举展示（避开清单/列一下）=====
     "list_view": [
         "把这些要点帮我做成结构化展示",
         "帮我把这几条信息整理成图表样式",
@@ -146,7 +144,6 @@ POOL: dict[str, list[str]] = {
         "把这几条内容整理成展示图形式",
         "帮我把这些项目做成结构清晰的图表",
     ],
-    # ===== F. 进度/状态展示（避开进度/状态卡）=====
     "progress_view": [
         "把项目各阶段的完成情况做成展示",
         "帮我把这几项任务的完成度可视化",
@@ -169,7 +166,6 @@ POOL: dict[str, list[str]] = {
         "把这几个目标达成了多少做成展示图",
         "帮我把各模块的推进情况可视化展示",
     ],
-    # ===== G. 边界（区别「查数据」vs「展示数据」）=====
     "boundary": [
         "这几个方案的优缺点帮我摆成一张对比图给我看",
         "我有这些数字了，帮我做成一张好看的展示",
@@ -189,6 +185,98 @@ POOL: dict[str, list[str]] = {
     ],
 }
 
+# ===================== POOL_VAL：换说法，中等难度 =====================
+POOL_VAL: dict[str, list[str]] = {
+    "compare": [
+        "把这几个选项的差异摆出来让我一眼看清",
+        "帮我把这几套方案并排放，说清各自强弱",
+        "这两个产品的核心区别帮我做成图形化展示",
+        "几个备选方案的优劣帮我整理成视觉对照",
+    ],
+    "rank": [
+        "这几项按权重高低帮我排个先后顺序展示",
+        "把这些选项从最合适到最不合适依次展示",
+        "帮我按综合得分把这几个方案排出来",
+        "这些候选项按优先级给我做个图形化排序",
+    ],
+    "stat": [
+        "这几组数值帮我整合成一个数据看板",
+        "把这些指标集中到一张图里展示出来",
+        "帮我把这几个数字做成比较直观的汇总图",
+        "这些统计值帮我做成一眼能看出来的展示",
+    ],
+    "timeline_view": [
+        "这几个事件按时间先后帮我整理成图形展示",
+        "把这个项目的阶段发展做成顺序可视化",
+        "帮我把这几个节点的发生顺序展示出来",
+        "这件事怎么一步步发展来的，帮我做成图示",
+    ],
+    "list_view": [
+        "把这些内容帮我归纳成几个条目的图表展示",
+        "帮我把这几点信息做成有层次感的展示图",
+        "这些要点帮我整理成整洁的结构化图示",
+        "把这几项分门别类做成可视化给我看",
+    ],
+    "progress_view": [
+        "帮我把各项任务做到哪了做成一张展示图",
+        "把这几件事的推进阶段可视化给我瞧瞧",
+        "这些目标完成了多少帮我整理成展示样式",
+        "帮我把各模块当前状态做成一目了然的图",
+    ],
+    "boundary": [
+        "信息我都整理好了，帮我做成图表展示就行",
+        "这些是我已有的数据，帮我转成可视化样式",
+        "不用你查了，就把这些内容做成展示图",
+        "数据都给你了，帮我做成有条理的展示",
+    ],
+}
+
+# ===================== POOL_TEST：最口语，含背景/隐式意图 =====================
+POOL_TEST: dict[str, list[str]] = {
+    "compare": [
+        "这几个方案我选哪个好啊，帮我做个对比我好对比着看",
+        "跟老板汇报要用，帮我把这两个选项做成并排对比那种图",
+        "我列了几个备选供应商，帮我整成一目了然的对比，今天要给leader看",
+        "有三个技术路线，我自己没法判断，帮我并排摆一下优劣",
+    ],
+    "rank": [
+        "这堆候选人我要筛一遍，帮我按评分高低整成图形排序",
+        "功能优先级我理不清，帮我做个从高到低的排序图出来",
+        "几个方向各有利弊，帮我做个从最推荐到最次的排名给我",
+        "要开周会了，帮我把这些需求按紧急程度排个可视化出来",
+    ],
+    "stat": [
+        "月报要用，帮我把这几个核心数字做成一张好看的数据展示",
+        "数字都在这了，帮我整成一个数据大盘的样子，给老板看的",
+        "这几项 KPI 帮我做成图表，等会儿汇报用",
+        "把这几组数据帮我汇在一张图里，让人一眼看清重点",
+    ],
+    "timeline_view": [
+        "这个项目从立项到上线的过程，帮我做成顺序展示，汇报要用",
+        "把这件事怎么一步步走到今天的，做成图形化展示给我",
+        "几个关键里程碑帮我按先后顺序摆出来，领导要看整个过程",
+        "这个问题的来龙去脉帮我做成顺序图，好跟人说清楚",
+    ],
+    "list_view": [
+        "把这几个注意事项帮我做成看起来整洁的展示，发给新同学",
+        "这些要点我口述的，帮我整理成图表样式发到群里",
+        "几条结论帮我做成结构化的图，PPT 里要插进去",
+        "这些规则帮我做成有层次的展示，让大家看一眼就懂",
+    ],
+    "progress_view": [
+        "开项目周会要用，帮我把各项任务完成到哪了做成图展示",
+        "老板问各模块推进情况，帮我快速做个完成度可视化",
+        "这几个目标达成了多少，帮我做成图给汇报用",
+        "帮我把这几件事各到第几步了整理成展示，下午要同步",
+    ],
+    "boundary": [
+        "数据我已经跑好了，就是需要你帮我做成一张好看的展示图",
+        "内容都列出来了，你别去查，直接帮我做成可视化的图表样式",
+        "不用查了，我把信息给你，帮我整理成整洁的展示就行",
+        "这些数字都是现成的，帮我做成能发给领导看的展示图",
+    ],
+}
+
 SUBCAT = {
     "compare":       ("A", "对比展示"),
     "rank":          ("B", "排名展示"),
@@ -200,10 +288,10 @@ SUBCAT = {
 }
 
 
-def expand() -> list[tuple[str, str]]:
+def expand_pool(pool: dict) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
     mood = set("吧呢嘛啊吗了呀哦呐")
-    for cat, sents in POOL.items():
+    for cat, sents in pool.items():
         for s in sents:
             out.append((s, cat))
             tail = s.rstrip()[-1] if s.strip() else ""
@@ -213,8 +301,10 @@ def expand() -> list[tuple[str, str]]:
     return out
 
 
-def dedupe(items):
-    seen, out = set(), []
+def dedupe(items, seen=None):
+    if seen is None:
+        seen = set()
+    out = []
     for text, cat in items:
         t = text.strip()
         if not t or t in seen:
@@ -225,36 +315,26 @@ def dedupe(items):
     return out
 
 
-def stratified_split(items, train_n, val_n, test_n, seed):
+def cap_per_split(items, target_n, seed):
     rng = random.Random(seed)
-    by_cat = {}
+    by_cat: dict[str, list] = {}
     for text, cat in items:
         by_cat.setdefault(cat, []).append((text, cat))
     for cat in by_cat:
         rng.shuffle(by_cat[cat])
-    train, val, test = [], [], []
-    total = len(items)
-    for cat, texts in by_cat.items():
-        n = len(texts)
-        cval = min(max(1, round(n * val_n / total)), n // 3)
-        ctest = min(max(1, round(n * test_n / total)), n // 3)
-        i = 0
-        test.extend(texts[i:i + ctest]); i += ctest
-        val.extend(texts[i:i + cval]); i += cval
-        train.extend(texts[i:])
-    rng.shuffle(train); rng.shuffle(val); rng.shuffle(test)
-    used = set(t for t, _ in val) | set(t for t, _ in test)
-    pool_extra = [it for it in train if it[0] not in used]
-    placed = set()
-    for need, bucket in [(val_n, val), (test_n, test)]:
-        i = 0
-        while len(bucket) < need and i < len(pool_extra):
-            if pool_extra[i][0] not in placed:
-                bucket.append(pool_extra[i]); placed.add(pool_extra[i][0])
-            i += 1
-    used = set(t for t, _ in val) | set(t for t, _ in test)
-    train = [it for it in train if it[0] not in used][:train_n]
-    return train, val, test
+    if len(items) <= target_n:
+        out = list(items); rng.shuffle(out); return out
+    out, cats = [], list(by_cat.keys())
+    idx = {c: 0 for c in cats}
+    while len(out) < target_n:
+        progressed = False
+        for c in cats:
+            if idx[c] < len(by_cat[c]) and len(out) < target_n:
+                out.append(by_cat[c][idx[c]]); idx[c] += 1; progressed = True
+        if not progressed:
+            break
+    rng.shuffle(out)
+    return out
 
 
 def write_jsonl(path, items):
@@ -267,10 +347,15 @@ def write_jsonl(path, items):
 
 def main():
     base = Path(__file__).resolve().parent
-    items = dedupe(expand())
-    assert len(items) >= 650, f"样本不足: {len(items)} < 650"
-    print(f"手写池展开+去重后：{len(items)} 条")
-    train, val, test = stratified_split(items, 650, 75, 75, seed=20260711)
+    seen: set = set()
+    test_raw = dedupe(expand_pool(POOL_TEST), seen)
+    val_raw = dedupe(expand_pool(POOL_VAL), seen)
+    train_raw = dedupe(expand_pool(POOL_TRAIN), seen)
+
+    test = cap_per_split(test_raw, 75, seed=20260711)
+    val = cap_per_split(val_raw, 75, seed=20260712)
+    train = cap_per_split(train_raw, 650, seed=20260713)
+
     write_jsonl(base / "train" / "ui-card.jsonl", train)
     write_jsonl(base / "val" / "ui-card.jsonl", val)
     write_jsonl(base / "test" / "ui-card.jsonl", test)

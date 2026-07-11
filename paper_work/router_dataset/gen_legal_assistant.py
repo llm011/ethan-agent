@@ -30,7 +30,7 @@ TRIGGERS = [
     "尽职调查", "股权架构", "常年法律顾问",
 ]
 
-POOL: dict[str, list[str]] = {
+POOL_TRAIN: dict[str, list[str]] = {
     # ===== A. 案件研判/纠纷分析 =====
     "analyze": [
         "对方违约了，我这边该怎么维权",
@@ -266,6 +266,30 @@ POOL: dict[str, list[str]] = {
         "帮我把关键材料之间的逻辑画出来",
         "把这个纠纷的争点用图表展示下",
     ],
+    # ===== L. 情绪口吻包裹法律意图（防串 companion-listen / others）=====
+    # 关键：外壳是情绪/焦虑/口语，但内核是明确的法律诉求：
+    # 胜算/维权/追款/赔偿/合同审查/商标/期权/归档。
+    # 让模型学会「情绪+法律行动=legal-assistant」而非 companion。
+    "emo": [
+        "我心里直打鼓，你说对方放话要收拾我，我这边到底站不站得住脚",
+        "这事把我搞得焦头烂额，帮我看看我这边有几成胜算",
+        "气死我了，对方明明违约了就是死不认，我该从哪儿下手",
+        "我被坑惨了，帮我分析还有没有机会把钱弄回来",
+        "有没有人碰上过跟我差不离的事，最后是怎么了断的，给我找几个判例参照",
+        "这种情况别人一般怎么了结的，给我找几个相近的裁定看看",
+        "心里一点底都没有，帮我查查这种纠纷一般支持多少赔偿",
+        "我压根不懂这些，帮我查下类似情况法院通常怎么判",
+        "想给员工发期权但怕埋雷，帮我看看怎么设计才合规稳妥",
+        "我开小公司，股份设计搞得我头大，帮我看看怎么分才不踩坑",
+        "折腾半天发现想用的牌子被人抢先注册了，我这还有没有救",
+        "气得要死，我的品牌被抢注了，帮我看看还能不能把它争回来",
+        "这堆材料看着就头大，帮我把这些往来文件按时间先后码整齐",
+        "一大堆扫描件全是图根本搜不了字，帮我转成能检索的格式好归档",
+        "这批文件乱成一锅粥，帮我整理出一个有时间顺序的目录来",
+        "公家发来的通知我一个字看不懂，帮我拆解下它要我干啥",
+        "我怕弄不好埋雷，帮我看看给核心员工分期权这块有没有合规隐患",
+        "心里没底，想知道我这个情形追讨的时效到底还剩多久",
+    ],
     # ===== K. 具体领域咨询（劳动/婚姻/交通/借贷/房产）=====
     "domain": [
         "公司把我辞了没给补偿，合理吗",
@@ -296,6 +320,158 @@ POOL: dict[str, list[str]] = {
     ],
 }
 
+# ===================== POOL_VAL：换说法、中等难度（不与 train 模板骨架重叠）=====================
+POOL_VAL: dict[str, list[str]] = {
+    "analyze": [
+        "这摊子事我到底占不占理，帮我掂量掂量",
+        "被人摆了一道，我这边有多大把握扳回来",
+        "帮我理理这场纠葛里我的软肋在哪",
+        "对方死不认账，我这边的胜面还剩多少",
+        "这事僵住了，我想听听我这边的处境",
+    ],
+    "litigation": [
+        "想把这事捅到公家那儿去，头一步该干啥",
+        "对方在千里之外，我在本地能不能把他拽过来对簿",
+        "这场官司要是想打得漂亮，得攥住哪几张牌",
+        "赢了之后钱迟迟拿不到手，有啥硬办法逼他掏",
+        "小数目的口角值不值得走公家程序折腾",
+    ],
+    "contract": [
+        "这份协议签之前，帮我把里头的雷都挑出来",
+        "对方塞给我一份格式稿，哪几条是坑我的",
+        "帮我攒一份借钱的白纸黑字约定",
+        "这份合伙的字据怎么落笔对我最保险",
+        "签字前把这份文件的软肋给我圈一圈",
+    ],
+    "document": [
+        "帮我拟一封语气硬一点的催钱信",
+        "想给对方递一份限期改正的正式函件",
+        "帮我攒一份不上公堂的了结方案",
+        "需要一份写给上头的合规提醒稿子",
+        "帮我起一份退钱的书面申请",
+    ],
+    "trademark": [
+        "我想给自家牌子占个坑，这名能落地不",
+        "这个店名想圈起来护住，该走哪步",
+        "有人抢先把我这牌子占了，还救得回来不",
+        "想查查对家都把哪些名头占下了",
+        "牌子想往海外铺，那边怎么护",
+    ],
+    "patent": [
+        "我捣鼓出个新玩意儿，想圈起来独占咋弄",
+        "同行把我的技术照搬了，我能不能找他算账",
+        "帮我掂量下这套方案圈起来稳不稳",
+        "想从我们代码里刨出几个能护住的技术点",
+        "这个巧思在海外也想护住，该怎么铺",
+    ],
+    "counsel": [
+        "刚支起个小摊子，几个合伙人的份子怎么切才稳",
+        "想给干活的兄弟们发点期权，怎么弄不踩线",
+        "公司想拉投资，哪些红线我得先摸清",
+        "老伙计要退伙，他手里那份怎么了结",
+        "想找个人长期替公司把把关",
+    ],
+    "intake": [
+        "帮我把这一摞往来文件按先后码整齐",
+        "手上好几摊子事，帮我各建个卷宗目录",
+        "公家发来的这条提醒，帮我拆解下要干啥",
+        "把这批扫描件转成能搜的字",
+        "帮我给这摊纠葛的关键节点排个序",
+    ],
+    "research": [
+        "我这情形套哪条规矩，帮我扒一扒",
+        "有没有判过差不多的事，给我找几个参照",
+        "这种口角一般公家怎么裁，赔多少算行情",
+        "帮我核对下这条规矩现在还作不作数",
+        "这个追讨的年限到底卡在几年",
+    ],
+    "visual": [
+        "帮我把这摊纠葛里几方的牵扯画成一张图",
+        "把整件事的前因后果拉成一条时间线",
+        "想看看各份材料和待证事实怎么对上，画出来",
+        "帮我把钱款的来往捋成一张关系图",
+        "把这摊事的进度做成一眼能看懂的看板",
+    ],
+    "domain": [
+        "单位把我劝退了一分钱没给，这说得过去吗",
+        "娃跟谁一般是怎么定的",
+        "路上被撞了，对方全责这误工的损失能张口要不",
+        "押金房东死活不退，我这边能怎么使劲",
+        "买的期房烂尾了，掏出去的钱还能抠回来不",
+    ],
+}
+
+# ===================== POOL_TEST：最口语、含背景/省略/隐式意图，部分故意写长 =====================
+POOL_TEST: dict[str, list[str]] = {
+    "analyze": [
+        "事情是这样，去年我借了个朋友三万块钱他一直说手头紧，现在人躲着我不接电话，我这种情况到底还有没有戏能把钱弄回来，你帮我掂量掂量",
+        "跟合作方闹掰了，白纸黑字当初也没签几行，现在互相扯皮，我这边到底站不站得住脚",
+        "邻居老说我家漏水泡了他家，可我压根没看出来是我这边的问题，这责任真能全赖我头上吗",
+        "我这人比较怂，对方放话说要收拾我，我心里直打鼓，你说我这边到底虚不虚",
+    ],
+    "litigation": [
+        "对方欠钱两年多了一直拖，我实在忍不了想走正规路子解决，可我一点门道都没有，头一步到底该干啥你给我说说",
+        "人在外地把我给告了，我这边收到通知一脑门子懵，接下来我该怎么接招",
+        "赢是赢了，可对方装死就是不掏钱，我手里这纸结果是不是就成废纸了，还有啥招",
+        "这种就几千块的小事，走一趟公家程序又费时又搭钱，到底值不值当",
+    ],
+    "contract": [
+        "房东发来一份租房的约定让我明天就签，我看着密密麻麻有点慌，你能不能帮我瞅瞅哪几条是给我下套的",
+        "马上要跟供货的那边签字了，稿子是他们出的，我总觉得哪儿不对劲，帮我过一遍",
+        "朋友借我钱让我写个字据，我不知道该咋落笔才既让他放心又不坑自己",
+        "手里这份合伙的东西，我就怕以后闹掰了吃亏，怎么改能护住我",
+    ],
+    "document": [
+        "有个客户拖着尾款大半年了好话说尽都不管用，我想板起脸来发一封正经的催钱信，你帮我拟一份",
+        "跟对方谈得差不多了，想把和解的条件落成一份两边都签字的东西，帮我起个稿",
+        "老板让我给他弄一份公司合规方面的提醒报告，我实在没头绪，帮我攒一份",
+        "想给对方递个限期改正的正式通知，语气要硬但不能太难看，帮我写写",
+    ],
+    "trademark": [
+        "我开了家小奶茶店生意还行，想着把这个招牌保护起来免得被人抄了去，这名字能不能占下来啊",
+        "折腾半天才发现有人早把我想用的牌子抢先占了，我这还有救没",
+        "新出的一款产品想起个响亮又能占下来的名，你帮我合计合计",
+        "自家牌子想往东南亚那边铺货，那边我得怎么护住不被人钻空子",
+    ],
+    "patent": [
+        "我们几个工程师捣鼓了大半年弄出一套挺巧的算法，我想着得赶紧圈起来别让同行白嫖了，这事该从哪儿下手",
+        "眼看着竞品出的东西跟我们这套思路几乎一模一样，我怀疑他们照搬了，这我能不能找他们说道说道",
+        "手里攒了一堆技术上的巧思，想扒拉出几个值钱能护住的，你帮我瞅瞅",
+        "对方反过来咬我用了他家的东西，我心里有底不是这么回事，怎么怼回去",
+    ],
+    "counsel": [
+        "跟两个哥们儿刚凑钱开了个公司，钱大家出得不一样多出力也不一样，这份子到底怎么切以后才不至于扯皮",
+        "公司眼看要谈一笔融资了，我第一次干这个，哪些坑我得提前躲开",
+        "想给几个核心员工发点期权拴住他们，可我怕弄不好埋雷，怎么搞才稳妥",
+        "有个老伙计想撂挑子退出去，他手上那份股怎么处理才对大家都公道",
+    ],
+    "intake": [
+        "手头攒了一大堆乱七八糟的往来文件、通知、收据，看着就头大，你能不能帮我按时间先后码整齐建个目录",
+        "公家那边发来一条挺正式的提醒，我一个字看不懂它到底要我干嘛，帮我拆解下",
+        "手上同时有好几摊子扯皮的事，材料全混一块了，帮我一摊一摊分开归置好",
+        "这一堆扫描件全是图看不了字，能不能给我转成能搜的",
+    ],
+    "research": [
+        "我这情况说来话长，反正就是想知道现在的规矩对这种事到底怎么界定的，你帮我扒一扒条条框框",
+        "有没有人碰上过跟我差不离的事，最后是怎么了断的，给我找几个参照心里好有底",
+        "这种被拖欠的事一般能追多久，超过多少年是不是就白瞎了",
+        "同样的情形别人一般判赔多少，我心里想有个大概的谱",
+    ],
+    "visual": [
+        "这摊子破事牵扯了好几个人，钱来钱往绕得我自己都晕，你能不能帮我画成一张一眼能看明白的关系图",
+        "整件事拖了快三年了发生的事情一大堆，帮我拉成一条时间线好让我理清楚",
+        "手里的材料和我要证的那些点对不上号，帮我画出来看看哪儿缺",
+        "这几方谁欠谁的债谁又拿了谁的好处，乱成一锅粥，帮我理成图",
+    ],
+    "domain": [
+        "我在这家干了五年，前几天突然被单位一句话就劝退了补偿一分没提，我这找谁说理去，能要点啥不",
+        "跟老婆过不下去想散了，就是家里那套房还有点存款不知道怎么分，孩子也不知道能不能归我",
+        "上礼拜过马路被一辆车撞了对方全责，我在家躺了半个月没法上班，这误工的钱我能张口要不",
+        "去年借出去五万块，对方现在翻脸不认还拉黑了我，这钱我还有指望要回来吗",
+        "租的房子退了房东揪着墙上几个钉子眼死活扣着押金不给，我这两千块还能要回来不",
+    ],
+}
+
 SUBCAT = {
     "analyze": ("A", "研判"),
     "litigation": ("B", "诉讼"),
@@ -308,6 +484,7 @@ SUBCAT = {
     "research": ("I", "检索"),
     "visual": ("J", "可视化"),
     "domain": ("K", "领域咨询"),
+    "emo": ("L", "情绪法律"),
 }
 
 
@@ -318,10 +495,10 @@ def check_no_trigger(text: str) -> None:
             raise AssertionError(f"含 trigger 子串 [{t}]！→ {text}")
 
 
-def expand() -> list[tuple[str, str]]:
+def expand_pool(pool) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
     mood = set("吧呢嘛啊吗了呀哦呐")
-    for cat, sents in POOL.items():
+    for cat, sents in pool.items():
         for s in sents:
             out.append((s, cat))
             tail = s.rstrip()[-1] if s.strip() else ""
@@ -331,8 +508,11 @@ def expand() -> list[tuple[str, str]]:
     return out
 
 
-def dedupe(items):
-    seen, out = set(), []
+def dedupe(items, seen=None):
+    """去重 + trigger 校验；seen 用于跨池去重（test/val 优先占位，train 让路）。"""
+    if seen is None:
+        seen = set()
+    out = []
     for text, cat in items:
         t = text.strip()
         if not t or t in seen:
@@ -343,36 +523,27 @@ def dedupe(items):
     return out
 
 
-def stratified_split(items, train_n, val_n, test_n, seed):
+def cap_per_split(items, target_n, seed):
+    """打散后截断到目标量，尽量保持子语义均衡。"""
     rng = random.Random(seed)
     by_cat = {}
     for text, cat in items:
         by_cat.setdefault(cat, []).append((text, cat))
     for cat in by_cat:
         rng.shuffle(by_cat[cat])
-    train, val, test = [], [], []
-    total = len(items)
-    for cat, texts in by_cat.items():
-        n = len(texts)
-        cval = min(max(1, round(n * val_n / total)), n // 3)
-        ctest = min(max(1, round(n * test_n / total)), n // 3)
-        i = 0
-        test.extend(texts[i:i + ctest]); i += ctest
-        val.extend(texts[i:i + cval]); i += cval
-        train.extend(texts[i:])
-    rng.shuffle(train); rng.shuffle(val); rng.shuffle(test)
-    used = set(t for t, _ in val) | set(t for t, _ in test)
-    pool_extra = [it for it in train if it[0] not in used]
-    placed = set()
-    for need, bucket in [(val_n, val), (test_n, test)]:
-        i = 0
-        while len(bucket) < need and i < len(pool_extra):
-            if pool_extra[i][0] not in placed:
-                bucket.append(pool_extra[i]); placed.add(pool_extra[i][0])
-            i += 1
-    used = set(t for t, _ in val) | set(t for t, _ in test)
-    train = [it for it in train if it[0] not in used][:train_n]
-    return train, val, test
+    if len(items) <= target_n:
+        out = list(items); rng.shuffle(out); return out
+    out, cats = [], list(by_cat.keys())
+    idx = {c: 0 for c in cats}
+    while len(out) < target_n:
+        progressed = False
+        for c in cats:
+            if idx[c] < len(by_cat[c]) and len(out) < target_n:
+                out.append(by_cat[c][idx[c]]); idx[c] += 1; progressed = True
+        if not progressed:
+            break
+    rng.shuffle(out)
+    return out
 
 
 def write_jsonl(path, items):
@@ -385,9 +556,15 @@ def write_jsonl(path, items):
 
 def main():
     base = Path(__file__).resolve().parent
-    items = dedupe(expand())
-    print(f"手写池展开+去重后：{len(items)} 条")
-    train, val, test = stratified_split(items, 600, 75, 75, seed=20260629)
+    # 先建 test/val（优先占位），再建 train（让路，避免任何跨池重复）
+    seen: set = set()
+    test_raw = dedupe(expand_pool(POOL_TEST), seen)
+    val_raw = dedupe(expand_pool(POOL_VAL), seen)
+    train_raw = dedupe(expand_pool(POOL_TRAIN), seen)
+
+    test = cap_per_split(test_raw, 75, seed=20260711)
+    val = cap_per_split(val_raw, 75, seed=20260712)
+    train = cap_per_split(train_raw, 600, seed=20260713)
     write_jsonl(base / "train" / "legal-assistant.jsonl", train)
     write_jsonl(base / "val" / "legal-assistant.jsonl", val)
     write_jsonl(base / "test" / "legal-assistant.jsonl", test)
