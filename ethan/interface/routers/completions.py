@@ -15,6 +15,7 @@ from ethan.memory.session import SessionStore
 from ethan.providers.base import Message
 
 from .deps import create_agent, verify_token
+from .tasks import _maybe_regen_title
 
 router = APIRouter()
 
@@ -95,37 +96,40 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
     store = SessionStore(db_path=user_sessions_db_path())
     await store.init()
 
-    if req.session_id:
-        session_id = req.session_id
-        user_msg = Message(role=req.messages[-1].role, content=req.messages[-1].content)
-        await store.save_message(session_id, user_msg)
+    # 未传 session_id 时自动创建 session，确保所有 API 调用都持久化到会话列表
+    if not req.session_id:
+        from ethan.memory.session import _generate_id
+        req.session_id = _generate_id()
+        model_id = req.model or get_config().defaults.model
+        await store.create_with_id(req.session_id, model_id, source="api")
 
-        from ethan.memory.working import MemoryConfig, WorkingMemory
+    session_id = req.session_id
+    user_msg = Message(role=req.messages[-1].role, content=req.messages[-1].content)
+    await store.save_message(session_id, user_msg)
 
-        session_obj = await store.load(session_id)
-        history = session_obj.messages if session_obj else []
+    # 加载历史上下文（首轮对话时 history 为空，等同于无状态）
+    from ethan.memory.working import MemoryConfig, WorkingMemory
 
-        memory = WorkingMemory(config=MemoryConfig(hot_size=10))
-        memory.cold_facts = FactStore(path=user_facts_path()).build_context()
+    session_obj = await store.load(session_id)
+    history = session_obj.messages if session_obj else []
 
-        pairs: list[tuple[Message, Message]] = []
-        hist_ua = [m for m in history if m.role in ("user", "assistant")]
-        i = 0
-        while i < len(hist_ua) - 1:
-            if hist_ua[i].role == "user" and hist_ua[i + 1].role == "assistant":
-                pairs.append((hist_ua[i], hist_ua[i + 1]))
-                i += 2
-            else:
-                i += 1
-        for u, a in pairs[-memory.config.hot_size:]:
-            memory.hot.append(u)
-            memory.hot.append(a)
+    memory = WorkingMemory(config=MemoryConfig(hot_size=10))
+    memory.cold_facts = FactStore(path=user_facts_path()).build_context()
 
-        messages = memory.build_context() + [user_msg]
-    else:
-        # 无 session_id：直接用请求里的完整消息列表，不走 WorkingMemory 重建
-        session_id = None
-        messages = [Message(role=m.role, content=m.content) for m in req.messages]
+    pairs: list[tuple[Message, Message]] = []
+    hist_ua = [m for m in history if m.role in ("user", "assistant")]
+    i = 0
+    while i < len(hist_ua) - 1:
+        if hist_ua[i].role == "user" and hist_ua[i + 1].role == "assistant":
+            pairs.append((hist_ua[i], hist_ua[i + 1]))
+            i += 2
+        else:
+            i += 1
+    for u, a in pairs[-memory.config.hot_size:]:
+        memory.hot.append(u)
+        memory.hot.append(a)
+
+    messages = memory.build_context() + [user_msg]
 
     if req.stream:
         return StreamingResponse(
@@ -137,11 +141,11 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
     try:
         response = await agent.chat(messages)
         usage_dict = {"input": agent.usage.input_tokens, "output": agent.usage.output_tokens, "cache": agent.usage.cache_tokens}
-        if session_id:
-            await store.save_message(session_id, Message(role="assistant", content=response.content, usage=usage_dict))
-            await store.touch(session_id)
+        await store.save_message(session_id, Message(role="assistant", content=response.content, usage=usage_dict))
+        await store.touch(session_id)
+        asyncio.create_task(_maybe_regen_title(session_id))
         return {
-            "id": f"chatcmpl-{(session_id or 'nosession')[:8]}",
+            "id": f"chatcmpl-{session_id[:8]}",
             "object": "chat.completion",
             "model": req.model or get_config().defaults.model,
             "choices": [{"index": 0, "message": {"role": "assistant", "content": response.content}, "finish_reason": "stop"}],
@@ -156,7 +160,7 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
         await store.close()
 
 
-async def _stream_completions(agent, messages, store: SessionStore, session_id: str | None, model: str | None, user_id: str = ""):
+async def _stream_completions(agent, messages, store: SessionStore, session_id: str, model: str | None, user_id: str = ""):
     from ethan.interface.routers.chat import _maybe_consolidate, _maybe_generate_skill
     from ethan.providers.base import ThinkingEvent, ToolEvent
 
@@ -168,7 +172,7 @@ async def _stream_completions(agent, messages, store: SessionStore, session_id: 
                     continue  # completions 接口不暴露工具调用 / 思考过程
                 full += item
                 chunk = {
-                    "id": f"chatcmpl-{(session_id or 'nosession')[:8]}",
+                    "id": f"chatcmpl-{session_id[:8]}",
                     "object": "chat.completion.chunk",
                     "model": model or get_config().defaults.model,
                     "choices": [{"delta": {"content": item}, "index": 0, "finish_reason": None}],
@@ -182,10 +186,11 @@ async def _stream_completions(agent, messages, store: SessionStore, session_id: 
         yield f"data: {json.dumps({'choices': [{'delta': {}, 'finish_reason': 'stop'}]})}\n\n"
         yield "data: [DONE]\n\n"
 
-        if full and session_id:
+        if full:
             usage_dict = {"input": agent.usage.input_tokens, "output": agent.usage.output_tokens, "cache": agent.usage.cache_tokens}
             await store.save_message(session_id, Message(role="assistant", content=full, usage=usage_dict))
             await store.touch(session_id)
+            asyncio.create_task(_maybe_regen_title(session_id))
             asyncio.create_task(_maybe_consolidate(session_id, agent._provider.model, user_id))
             asyncio.create_task(_maybe_generate_skill(session_id, agent._provider.model, user_id))
     finally:

@@ -10,9 +10,24 @@ from .repl_ui import console
 
 
 async def run_once(agent: Agent, prompt: str) -> None:
-    """单轮对话：发送一句，流式打印回复，退出。"""
+    """单轮对话：发送一句，流式打印回复，退出。同时持久化到 session 列表。"""
+    from ethan.core.config import get_config
+    from ethan.core.paths import user_sessions_db_path
+    from ethan.memory.session import SessionStore, _generate_id
     from ethan.providers.base import ThinkingEvent, ToolEvent
-    messages = [Message(role="user", content=prompt)]
+
+    # 创建 session
+    session_id = _generate_id()
+    store = SessionStore(db_path=user_sessions_db_path())
+    await store.init()
+    model_id = agent._provider.model or get_config().defaults.model
+    await store.create_with_id(session_id, model_id, source="cli")
+
+    # 保存用户消息
+    user_msg = Message(role="user", content=prompt)
+    await store.save_message(session_id, user_msg)
+
+    messages = [user_msg]
 
     spinner = Live(Spinner("dots", text="thinking...", style="dim"), console=console, transient=True)
     spinner.start()
@@ -79,5 +94,15 @@ async def run_once(agent: Agent, prompt: str) -> None:
             console.print(RichMarkdown(full))
     if not spinner_stopped:
         spinner.stop()
+
+    # 保存 assistant 回复并更新 session
     if full:
-        console.print()
+        usage_dict = {"input": agent.usage.input_tokens, "output": agent.usage.output_tokens, "cache": agent.usage.cache_tokens}
+        await store.save_message(session_id, Message(role="assistant", content=full, usage=usage_dict))
+        await store.touch(session_id)
+
+    await store.close()
+
+    # 打印 session_id 供用户后续引用
+    console.print()
+    console.print(f"[dim]session: {session_id}[/dim]")

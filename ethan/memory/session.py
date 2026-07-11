@@ -201,6 +201,25 @@ class SessionStore:
         await self._db.commit()
         return session
 
+    async def create_with_id(self, session_id: str, model: str, source: str = "web", mode: str = "") -> Session:
+        """使用指定的 session_id 创建 session（用于 CLI/API 预生成 id 的场景）。"""
+        now = time.time()
+        session = Session(
+            id=session_id,
+            title="新对话",
+            model=model,
+            created_at=now,
+            updated_at=now,
+            source=source,
+            mode=mode,
+        )
+        await self._db.execute(
+            "INSERT INTO sessions (id, title, model, created_at, updated_at, source, mode) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (session.id, session.title, session.model, session.created_at, session.updated_at, source, mode),
+        )
+        await self._db.commit()
+        return session
+
     async def save_message(self, session_id: str, msg: Message) -> int:
         import json
         tool_calls_json = json.dumps([
