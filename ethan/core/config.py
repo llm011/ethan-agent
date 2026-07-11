@@ -194,7 +194,7 @@ class DefaultsConfig(BaseModel):
     agent_name: str = "Ethan"
     language: str = "zh"
     timezone: str = ""  # IANA 时区名（如 "Asia/Shanghai"）。空 = 自动探测系统时区。
-    max_tokens: int = 16384
+    max_tokens: int = 8192
     max_tool_iterations: int = 100
     routing: RoutingConfig = Field(default_factory=RoutingConfig)
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
@@ -284,7 +284,7 @@ def _default_config() -> dict:
         "defaults": {
             "model": os.environ.get("AGENT_DEFAULT_MODEL", "claude-sonnet-4.6"),
             "lite_model": os.environ.get("AGENT_LITE_MODEL", ""),  # 轻量模型（记忆压缩/标题生成等后台任务用）；空则按主模型推断或与主模型相同
-            "max_tokens": 16384,
+            "max_tokens": 8192,
             "max_tool_iterations": 100,
         },
     }
