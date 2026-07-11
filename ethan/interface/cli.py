@@ -39,6 +39,7 @@ def _register_subcommands():
     from ethan.interface.commands import schedule as schedule_cmd
     from ethan.interface.commands import server as server_cmd
     from ethan.interface.commands import session as session_cmd
+    from ethan.interface.commands import setup as setup_cmd
     from ethan.interface.commands import skill as skill_cmd
     from ethan.interface.commands import update as update_cmd
     from ethan.interface.commands import wechat as wechat_cmd
@@ -57,6 +58,7 @@ def _register_subcommands():
     app.add_typer(command_cmd.app, name="command")
     app.add_typer(wechat_cmd.app, name="wechat")
     app.add_typer(server_cmd.app, name="server")
+    app.add_typer(setup_cmd.app, name="setup")
 
 
 serve_app = typer.Typer(help="管理 API 服务")

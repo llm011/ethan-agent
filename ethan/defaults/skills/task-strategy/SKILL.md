@@ -84,10 +84,11 @@ delegate_coding 失败后：
 
 ```
 cua-driver 未连接：
-├── 告知用户：桌面控制服务未启动
 ├── 不要反复尝试 screenshot
 ├── 如果目标是操作浏览器 → 用 browser 工具替代
-├── 如果目标是操作 GUI 应用 → 告知用户需要先启动 cua-driver
+├── 如果目标是执行命令/查进程/管理文件 → 用 shell 工具（shell 完全独立于 cua-driver，始终可用）
+├── 如果目标是操作 GUI 应用（非浏览器）→ 告知用户需要先启动 cua-driver
+├── 重要：cua-driver 未连接不影响 shell、file_read/write、web_search 等工具的使用
 ```
 
 ## 响应模板

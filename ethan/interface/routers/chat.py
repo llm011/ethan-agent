@@ -61,7 +61,13 @@ async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
     from ethan.core.paths import user_facts_path, user_sessions_db_path
 
     from .helpers import _with_quote
-    set_session_id(req.session_id or "")  # browser 工具按对话隔离/授权
+
+    # 未传 session_id 时自动生成，确保所有对话都持久化到会话列表
+    if not req.session_id:
+        from ethan.memory.session import _generate_id
+        req.session_id = _generate_id()
+
+    set_session_id(req.session_id)  # browser 工具按对话隔离/授权
     agent = create_agent(req.model, channel=req.channel, user_id=user_id, mode=req.mode)
     messages = [
         Message(role=m["role"], content=m.get("content", ""), images=m.get("images") or [])
@@ -157,7 +163,11 @@ async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
         return StreamingResponse(
             _sse_from_run(run),
             media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "X-Session-Id": req.session_id or "",
+            },
         )
 
     response = await agent.chat(messages)
@@ -165,6 +175,10 @@ async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
     if req.session_id:
         await store.save_message(req.session_id, response)
         await store.touch(req.session_id)
+
+    # 浏览器 session 清理：关闭本次对话创建的所有 browser tab group
+    from .producers import _close_browser_sessions
+    await _close_browser_sessions(req.session_id)
 
     await store.close()
     return ChatResponse(
@@ -175,6 +189,7 @@ async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
             "output": agent.usage.output_tokens,
             "cache": agent.usage.cache_tokens,
         },
+        session_id=req.session_id,
     )
 
 

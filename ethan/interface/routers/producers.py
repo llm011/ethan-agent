@@ -40,6 +40,33 @@ async def _save_progress(store: SessionStore, session_id: str,
     return progress_msg_id
 
 
+async def _close_browser_sessions(session_id: str | None) -> None:
+    """关闭当前 ethan 会话创建的所有 browser session（tab group）。
+
+    对话结束后自动调用，避免用完的 tab 残留在浏览器中。
+    """
+    if not session_id:
+        return
+    try:
+        from ethan.browser.hub import get_hub
+        from ethan.browser.protocol import METHODS
+        from ethan.browser.session_map import get_session_map
+
+        smap = get_session_map()
+        hub = get_hub()
+        if not hub.connected:
+            return
+        for bsid in smap.list_for(session_id):
+            try:
+                await hub.call(METHODS["session_close"], {"sessionId": bsid}, browser_session_id=bsid)
+            except Exception:
+                logger.warning("browser: auto-close failed for %s", bsid)
+            finally:
+                smap.unbind(bsid)
+    except Exception:
+        logger.debug("browser cleanup skipped: %s", session_id)
+
+
 async def _run_delegate_generation(
     run,
     prompt: str,
@@ -289,6 +316,9 @@ async def _run_generation(
         # 流结束（正常/异常）时取消未决授权 Future，避免泄漏
         if consent is not None:
             consent.cancel_all()
+        # 浏览器 session 清理：关闭本次对话创建的所有 browser tab group，
+        # 避免用完的 tab 残留在浏览器中（用户要求：用完即关）。
+        await _close_browser_sessions(session_id)
 
     usage_dict = collector.usage_dict
 

@@ -48,14 +48,14 @@ class ShellTool(BaseTool):
             },
             "timeout": {
                 "type": "integer",
-                "description": "Timeout in seconds (default 30).",
-                "default": 30,
+                "description": "Timeout in seconds (default 120). Use higher values (300-600) for package installs (brew/pip/apt).",
+                "default": 120,
             },
         },
         "required": ["command"],
     }
 
-    async def run(self, command: str, timeout: int = 30) -> str:
+    async def run(self, command: str, timeout: int = 120) -> str:
         try:
             # 把 .secrets/*.env 的 KEY=value 注入子进程环境，脚本里可直接用 $KEY，
             # 模型上下文里从不出现明文。注入失败不影响命令执行。

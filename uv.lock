@@ -517,7 +517,6 @@ dependencies = [
     { name = "apscheduler" },
     { name = "curl-cffi" },
     { name = "fastapi" },
-    { name = "lark-oapi" },
     { name = "mcp" },
     { name = "openai" },
     { name = "pexpect" },
@@ -535,6 +534,9 @@ dependencies = [
 [package.optional-dependencies]
 computer = [
     { name = "cua-computer" },
+]
+lark = [
+    { name = "lark-oapi" },
 ]
 router = [
     { name = "numpy" },
@@ -555,7 +557,7 @@ requires-dist = [
     { name = "cua-computer", marker = "extra == 'computer'", specifier = ">=0.3.0" },
     { name = "curl-cffi", specifier = ">=0.15.0" },
     { name = "fastapi", specifier = ">=0.136.3" },
-    { name = "lark-oapi", specifier = ">=1.6.8" },
+    { name = "lark-oapi", marker = "extra == 'lark'", specifier = ">=1.6.8" },
     { name = "mcp", specifier = ">=1.27.2" },
     { name = "numpy", marker = "extra == 'router'", specifier = ">=1.26.0" },
     { name = "onnxruntime", marker = "extra == 'router'", specifier = ">=1.18.0" },
@@ -572,7 +574,7 @@ requires-dist = [
     { name = "typer", specifier = ">=0.26.7" },
     { name = "uvicorn", specifier = ">=0.49.0" },
 ]
-provides-extras = ["router", "computer"]
+provides-extras = ["router", "computer", "lark"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "ruff", specifier = ">=0.11.0" }]

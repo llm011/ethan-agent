@@ -60,7 +60,7 @@ async def run_config_editor(config) -> bool:
     # ---- 编辑模式的 buffer ----
     edit_kb = KeyBindings()
 
-    edit_buffer = Buffer(key_bindings=edit_kb, multiline=False)
+    edit_buffer = Buffer(multiline=False)
 
     @edit_kb.add("enter")
     def _confirm(event):
@@ -170,7 +170,7 @@ async def run_config_editor(config) -> bool:
         return FormattedText(toks)
 
     list_control = FormattedTextControl(text=_render_list, focusable=True)
-    edit_control = BufferControl(buffer=edit_buffer)
+    edit_control = BufferControl(buffer=edit_buffer, key_bindings=edit_kb)
 
     def _edit_label():
         if editing[0] and edit_path[0]:
