@@ -141,7 +141,7 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
           <Select value={filterSource || "__all__"} onValueChange={(v) => { if (v) setFilterSource(v === "__all__" ? "" : v); }}>
             <SelectTrigger className="h-8 text-xs w-auto min-w-[88px] gap-1">
               <SelectValue placeholder="渠道">
-                {(v: string) => ({ __all__: "全部渠道", web: "Web", lark: "飞书", repl: "命令行", heartbeat: "心跳", codex: "Codex", claude: "Claude Code", opencode: "OpenCode" }[v] ?? "渠道")}
+                {(v: string) => ({ __all__: "全部渠道", web: "Web", lark: "飞书", repl: "命令行", cli: "CLI", api: "API", heartbeat: "心跳", codex: "Codex", claude: "Claude Code", opencode: "OpenCode" }[v] ?? "渠道")}
               </SelectValue>
             </SelectTrigger>
             <SelectContent>
@@ -149,6 +149,8 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
               <SelectItem value="web" className="text-xs">Web</SelectItem>
               <SelectItem value="lark" className="text-xs">飞书</SelectItem>
               <SelectItem value="repl" className="text-xs">命令行</SelectItem>
+              <SelectItem value="cli" className="text-xs">CLI</SelectItem>
+              <SelectItem value="api" className="text-xs">API</SelectItem>
               <SelectItem value="heartbeat" className="text-xs">心跳</SelectItem>
               <SelectItem value="codex" className="text-xs">Codex</SelectItem>
               <SelectItem value="claude" className="text-xs">Claude Code</SelectItem>
@@ -209,10 +211,12 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
             {sessions.map((session) => {
-              const sourceLabel: Record<string, string> = { lark: "飞书", repl: "命令行", web: "Web", heartbeat: "心跳", codex: "Codex", claude: "Claude Code", opencode: "OpenCode" };
+              const sourceLabel: Record<string, string> = { lark: "飞书", repl: "命令行", cli: "CLI", api: "API", web: "Web", heartbeat: "心跳", codex: "Codex", claude: "Claude Code", opencode: "OpenCode" };
               const sourceColor: Record<string, string> = {
                 lark: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
                 repl: "bg-purple-500/15 text-purple-600 dark:text-purple-400",
+                cli: "bg-purple-500/15 text-purple-600 dark:text-purple-400",
+                api: "bg-indigo-500/15 text-indigo-600 dark:text-indigo-400",
                 web: "bg-green-500/15 text-green-600 dark:text-green-400",
                 heartbeat: "bg-orange-500/15 text-orange-600 dark:text-orange-400",
                 codex: "bg-teal-500/15 text-teal-600 dark:text-teal-400",

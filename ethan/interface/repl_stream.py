@@ -101,6 +101,17 @@ async def run_once(agent: Agent, prompt: str) -> None:
         await store.save_message(session_id, Message(role="assistant", content=full, usage=usage_dict))
         await store.touch(session_id)
 
+    # 生成标题（CLI 模式下同步执行，因为 asyncio.run 结束后 create_task 没机会跑）
+    try:
+        from ethan.memory.session import decide_title
+        session_obj = await store.load(session_id)
+        if session_obj:
+            title = await decide_title(session_obj.messages, session_obj.title)
+            if title and title != session_obj.title:
+                await store.update_title(session_id, title)
+    except Exception:
+        pass  # 标题生成失败不影响主流程
+
     await store.close()
 
     # 打印 session_id 供用户后续引用
