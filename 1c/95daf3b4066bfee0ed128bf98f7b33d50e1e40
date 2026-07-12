@@ -1,0 +1,25 @@
+ethan/interface/repl_stream.py
+  s_3c0fe3fada65eb::t_fd8c58a1500408 26-30
+ethan/interface/routers/tasks.py
+  s_3c0fe3fada65eb::t_1238a3f059c2be 4-5,8-9,20,25,29
+ethan/memory/session.py
+  s_3c0fe3fada65eb::t_f38d4a9d59efae 118-121
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1c95daf3b4066bfee0ed128bf98f7b33d50e1e40",
+  "prompts": {},
+  "sessions": {
+    "s_3c0fe3fada65eb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5f56ab23-1bfa-4ae0-873c-f87346f52574",
+        "model": "unknown"
+      },
+      "human_author": "jsongo <jsongo@qq.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
