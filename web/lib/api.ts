@@ -225,6 +225,15 @@ export async function compactSession(id: string): Promise<{ ok: boolean; summary
   return res.json();
 }
 
+export async function cleanupTrivialSessions(): Promise<{ deleted: number; deleted_ids: string[] }> {
+  const res = await fetch(`${API_URL}/sessions/cleanup-trivial`, {
+    method: "POST",
+    headers: headers(),
+  });
+  if (!res.ok) throw new Error("Cleanup failed");
+  return res.json();
+}
+
 export async function uploadFile(file: File): Promise<{ path: string; filename: string }> {
   const form = new FormData();
   form.append("file", file);
