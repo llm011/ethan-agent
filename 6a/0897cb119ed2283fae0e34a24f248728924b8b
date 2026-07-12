@@ -1,0 +1,23 @@
+paper_work/router_dataset/gen_finance_query.py
+  s_84a11c2f7b88bd::t_4d095413caf871 27,31,361-367,417-421,490-492,499-501
+paper_work/router_dataset/gen_getnote.py
+  s_84a11c2f7b88bd::t_e19bfad4d72922 26,30,323-332,429-436,510-512,519-521
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "6a0897cb119ed2283fae0e34a24f248728924b8b",
+  "prompts": {},
+  "sessions": {
+    "s_84a11c2f7b88bd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "680aae63-2101-4afe-a945-7504cf83fa3d",
+        "model": "unknown"
+      },
+      "human_author": "jsongo <jsongo@qq.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
