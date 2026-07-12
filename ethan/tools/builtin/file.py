@@ -48,9 +48,14 @@ class FileReadTool(BaseTool):
                 "type": "string",
                 "description": "Absolute or relative file path.",
             },
+            "offset": {
+                "type": "integer",
+                "description": "Start reading from this line number (1-based). Use for paginated reading of large files.",
+                "default": 0,
+            },
             "max_lines": {
                 "type": "integer",
-                "description": "Maximum lines to read (default: all).",
+                "description": "Maximum lines to read (default: all). Combined with offset for pagination.",
                 "default": 0,
             },
         },
@@ -69,23 +74,27 @@ class FileReadTool(BaseTool):
         except Exception:
             return path or self.name
 
-    async def run(self, path: str, max_lines: int = 0) -> str:
+    async def run(self, path: str, max_lines: int = 0, offset: int = 0) -> str:
         p = Path(path).expanduser().resolve()
         if not p.exists():
             return f"File not found: {p}"
         if not p.is_file():
             return f"Not a file: {p}"
-        if p.stat().st_size > 1_000_000:
-            return f"File too large ({p.stat().st_size} bytes). Use max_lines to read partially."
+        if p.stat().st_size > 1_000_000 and max_lines == 0:
+            return f"File too large ({p.stat().st_size} bytes). Use offset + max_lines to read partially."
 
         try:
             text = p.read_text(encoding="utf-8", errors="replace")
         except Exception as e:
             return f"Read error: {e}"
 
+        lines = text.splitlines()
+        start = max(offset - 1, 0) if offset > 0 else 0
         if max_lines > 0:
-            lines = text.splitlines()[:max_lines]
-            text = "\n".join(lines)
+            lines = lines[start:start + max_lines]
+        elif start > 0:
+            lines = lines[start:]
+        text = "\n".join(lines)
 
         # 不截断，file_read 有 no_compress=True，原样进 context
         return text or "(empty file)"

@@ -24,7 +24,8 @@ from dataclasses import dataclass, field
 STUCK_WINDOW = 3          # 连续 N 轮同一签名 → 判定卡住
 ERROR_WINDOW = 2          # 连续 N 轮同一签名且都报错 → 提前判定卡住（错误重试不必等满 3 轮）
 MAX_REFLECTIONS = 2       # 最多反思几次；仍卡住则收尾放弃
-TOOL_FREQ_LIMIT = 5       # 同一工具名连续调用超过此次数 → 判定卡住（即使参数不同）
+TOOL_FREQ_LIMIT = 8       # 同一工具名连续调用超过此次数 → 判定卡住（即使参数不同）
+_FREQ_LIMIT_EXEMPT = {"file_read", "rg_search", "fd_find", "skill_read"}
 
 
 def _round_signature(tool_calls) -> str:
@@ -75,10 +76,10 @@ class LoopMonitor:
             tail = sigs[-STUCK_WINDOW:]
             if len(set(tail)) == 1:
                 return True
-        # 工具频率限制：同一工具名连续调用超过阈值
+        # 工具频率限制：同一工具名连续调用超过阈值（但豁免高频读写工具）
         if len(self._tool_names) >= TOOL_FREQ_LIMIT:
             tail = self._tool_names[-TOOL_FREQ_LIMIT:]
-            if len(set(tail)) == 1 and tail[0]:
+            if len(set(tail)) == 1 and tail[0] and tail[0] not in _FREQ_LIMIT_EXEMPT:
                 return True
         return False
 

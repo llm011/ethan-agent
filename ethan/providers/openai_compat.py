@@ -20,11 +20,12 @@ class OpenAICompatProvider(BaseProvider):
         from openai import AsyncOpenAI  # lazy: SDK is heavy; only load when a provider instance is created
         http_client = None
         if proxy:
-            http_client = httpx.AsyncClient(proxy=proxy)
+            http_client = httpx.AsyncClient(proxy=proxy, timeout=httpx.Timeout(120.0, connect=10.0))
         self._client = AsyncOpenAI(
             api_key=provider_cfg.api_key or "none",
             base_url=provider_cfg.base_url,
             http_client=http_client,
+            timeout=120.0,  # 2 分钟超时，防止 LLM 不响应导致无限挂起
         )
         self._model = model
 
