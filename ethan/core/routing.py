@@ -22,10 +22,7 @@ def _match_keyword(kw: str, text: str) -> bool:
 
 
 def _match_fast_rule(text: str, routing=None):
-    """返回命中的 FastRule（按 fast_rules 顺序取第一条命中的），无命中返回 None。
-
-    规则的任一关键字（支持 * 通配）出现在 text 中即命中。纯关键字驱动，不看字数。
-    """
+    """返回命中的 FastRule（按 fast_rules 顺序取第一条命中的），无命中返回 None。"""
     if routing is None:
         routing = get_config().defaults.routing
     for rule in routing.fast_rules:
@@ -37,14 +34,16 @@ def _match_fast_rule(text: str, routing=None):
 
 def _get_route(text: str, skill_triggers: list[str] | None = None) -> str:
     """
-    返回路由档位：'fast' | 'medium' | 'full'
+    返回路由档位：'fast' | 'full'
 
     规则（按优先级）：
     1. 有 FORCE_FULL 信号 → full（最高优先）
     2. 命中 fast_path Skill 的 trigger 关键词 → fast
-    3. 命中任一 fast_rule 的关键字 → fast（纯关键字驱动，不看字数，避免字数误杀）
-    4. 长度 ≤ medium_max_length → medium
-    5. 其余 → full
+    3. 命中任一 fast_rule 的关键字 → fast
+    4. 其余 → full
+
+    不再按字数分档——迭代上限统一为 defaults.max_tool_iterations。
+    Fast Path 仅影响工具集和模型选择，不影响迭代次数。
     """
     lower = text.lower()
 
@@ -60,8 +59,5 @@ def _get_route(text: str, skill_triggers: list[str] | None = None) -> str:
 
     if _match_fast_rule(text, routing) is not None:
         return "fast"
-
-    if len(text.strip()) <= routing.medium_max_length:
-        return "medium"
 
     return "full"

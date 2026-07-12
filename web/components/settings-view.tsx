@@ -528,7 +528,7 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
     heartbeat_interval_minutes: 10,
     proxy: "",
     max_tokens: 4096,
-    max_tool_iterations: 10,
+    max_tool_iterations: 100,
   });
   
   const [sysForm, setSysForm] = useState<SystemSettings>({
