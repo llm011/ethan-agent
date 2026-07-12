@@ -1,0 +1,23 @@
+paper_work/router_dataset/README.md
+  s_3c0fe3fada65eb::t_c29eb00200f6aa 5-24
+paper_work/router_dataset/train_lr_router.py
+  s_3c0fe3fada65eb::t_3b7d5707e30634 10-14,51,109-111
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3dfc93cab9a22658e6dda18c76228999f86b0780",
+  "prompts": {},
+  "sessions": {
+    "s_3c0fe3fada65eb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5f56ab23-1bfa-4ae0-873c-f87346f52574",
+        "model": "unknown"
+      },
+      "human_author": "jsongo <jsongo@qq.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
