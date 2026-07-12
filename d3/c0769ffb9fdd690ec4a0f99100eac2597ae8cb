@@ -1,0 +1,21 @@
+uv.lock
+  s_3c0fe3fada65eb::t_84fe84f612368c 512
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d3c0769ffb9fdd690ec4a0f99100eac2597ae8cb",
+  "prompts": {},
+  "sessions": {
+    "s_3c0fe3fada65eb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5f56ab23-1bfa-4ae0-873c-f87346f52574",
+        "model": "unknown"
+      },
+      "human_author": "jsongo <jsongo@qq.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
