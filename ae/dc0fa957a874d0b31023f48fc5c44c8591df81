@@ -1,0 +1,25 @@
+ethan/core/agent.py
+  s_3c0fe3fada65eb::t_d7cd72882bb3d6 432-435,444
+ethan/interface/routers/settings.py
+  s_3c0fe3fada65eb::t_c7d689f7b010fc 396
+web/components/settings-view.tsx
+  s_3c0fe3fada65eb::t_e4ea8c6d7a3ee2 531
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "aedc0fa957a874d0b31023f48fc5c44c8591df81",
+  "prompts": {},
+  "sessions": {
+    "s_3c0fe3fada65eb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5f56ab23-1bfa-4ae0-873c-f87346f52574",
+        "model": "unknown"
+      },
+      "human_author": "jsongo <jsongo@qq.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
