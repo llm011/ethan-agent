@@ -34,6 +34,25 @@ class Skill:
     channels: list[str] = field(default_factory=list)  # 空列表 = 所有渠道
     modes: list[str] = field(default_factory=list)  # 空列表 = 所有对话模式可用；非空 = 仅在这些 mode 生效
     references: list[Path] = field(default_factory=list)  # skill_dir/references/*.md
+    is_default: bool = False  # 是否为打包自带的默认 Skill（vs 用户安装的）
+
+
+def _default_skill_names() -> set[str]:
+    """读取打包的默认 Skill 名集合（ethan/defaults/skills/ 下的目录名）。
+
+    运行时默认 Skill 已被复制到 ~/.ethan/skills/，无法通过路径区分；
+    用这个集合判断某个 Skill 是否属于默认自带。
+    """
+    try:
+        defaults_dir = Path(__file__).parent.parent / "defaults" / "skills"
+        if not defaults_dir.is_dir():
+            return set()
+        return {
+            p.name for p in defaults_dir.iterdir()
+            if p.is_dir() and (p / "SKILL.md").exists()
+        }
+    except Exception:
+        return set()
 
 
 def _parse_frontmatter(text: str) -> tuple[dict, str]:
@@ -106,6 +125,7 @@ def load_all_skills(user_id: str = "") -> list[Skill]:
     """
     from ethan.core.paths import user_skills_dir
     skills: dict[str, Skill] = {}
+    default_names = _default_skill_names()
 
     skills_dir = user_skills_dir()
     if skills_dir.exists():
@@ -116,6 +136,7 @@ def load_all_skills(user_id: str = "") -> list[Skill]:
             elif entry.suffix == ".md":
                 skill = load_skill_from_file(entry)
             if skill:
+                skill.is_default = skill.name in default_names
                 skills[skill.name] = skill
 
     return list(skills.values())

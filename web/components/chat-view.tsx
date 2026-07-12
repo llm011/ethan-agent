@@ -95,6 +95,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
             result_preview: s.result_preview,
             result_detail: s.result_detail,
             thought: s.thought,
+            entity_type: s.entity_type,
+            entity_id: s.entity_id,
             sub_steps: s.sub_steps?.map((ss: any) => ({
               tool: ss.tool,
               args: ss.args,
@@ -106,6 +108,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         : undefined,
       toolsExpanded: false,
       a2ui: m.a2ui && m.a2ui.length > 0 ? m.a2ui : undefined,
+      matchedSkills: m.matched_skills || undefined,
     }));
 
   // 消费一条 SSE 事件流，增量更新最后一条 assistant 消息，结束后定稿。
@@ -119,6 +122,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     let assistantContent = "";
     const assistantThought = "";
     const currentToolSteps: ToolStep[] = [];
+    let currentMatchedSkills: { name: string; is_default?: boolean }[] | undefined;
     const a2uiSurfaces: unknown[] = [];
     const sendTime = Date.now();
     let ttft: number | undefined;
@@ -136,6 +140,10 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
             description: chunk.description || "",
             detail: chunk.detail,
           });
+          continue;
+        }
+        if (chunk.skills_matched) {
+          currentMatchedSkills = chunk.skills_matched;
           continue;
         }
         if (chunk.heartbeat) {
@@ -169,6 +177,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           currentToolSteps.push({
             tool: chunk.tool, args: chunk.args || "", intent: chunk.intent || undefined, state: "running", id: chunk.id,
             thought: preToolThought || undefined,
+            entity_type: chunk.entity_type || undefined,
+            entity_id: chunk.entity_id || undefined,
           });
           setMessages([...baseMessages, {
             role: "assistant", content: assistantContent, thought: assistantThought,
@@ -198,6 +208,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
               duration_ms: chunk.duration_ms,
               result_preview: chunk.result_preview,
               result_detail: chunk.result_detail,
+              entity_type: chunk.entity_type || currentToolSteps[matchedIdx].entity_type,
+              entity_id: chunk.entity_id || currentToolSteps[matchedIdx].entity_id,
               sub_steps: chunk.sub_steps?.map((s) => ({
                 tool: s.tool,
                 args: s.args,
@@ -256,10 +268,10 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       const msgs = [...prev];
       const last = msgs[msgs.length - 1];
       if (last && last.role === "assistant") {
-        msgs[msgs.length - 1] = { ...last, content: assistantContent, thought: assistantThought, toolsExpanded: false, usage: finalUsage || last.usage, ttft: ttft ?? last.ttft, a2ui: a2uiSurfaces.length > 0 ? a2uiSurfaces : undefined };
+        msgs[msgs.length - 1] = { ...last, content: assistantContent, thought: assistantThought, toolsExpanded: false, usage: finalUsage || last.usage, ttft: ttft ?? last.ttft, a2ui: a2uiSurfaces.length > 0 ? a2uiSurfaces : undefined, matchedSkills: currentMatchedSkills };
         return msgs;
       }
-      return [...baseMessages, { role: "assistant", content: assistantContent, thought: assistantThought, created_at: Date.now() / 1000, usage: finalUsage, ttft, a2ui: a2uiSurfaces.length > 0 ? a2uiSurfaces : undefined }];
+      return [...baseMessages, { role: "assistant", content: assistantContent, thought: assistantThought, created_at: Date.now() / 1000, usage: finalUsage, ttft, a2ui: a2uiSurfaces.length > 0 ? a2uiSurfaces : undefined, matchedSkills: currentMatchedSkills }];
     });
     setStopping(false);
     setStreaming(false);

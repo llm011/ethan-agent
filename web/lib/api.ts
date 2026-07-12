@@ -141,6 +141,7 @@ export interface SessionDetail {
     created_at?: number;
     quote?: { role: "user" | "assistant"; content: string } | null;
     usage?: { input: number; output: number; cache: number };
+    matched_skills?: Array<{ name: string; is_default?: boolean }>;
     tool_steps?: Array<{
       tool: string;
       args: string;
@@ -150,6 +151,8 @@ export interface SessionDetail {
       result_preview?: string;
       result_detail?: string;
       thought?: string;
+      entity_type?: string;
+      entity_id?: string;
       sub_steps?: Array<{
         tool: string;
         args: string;
@@ -527,7 +530,7 @@ export async function deleteProcedure(id: string): Promise<void> {
   await fetch(`${API_URL}/memory/procedures/${id}`, { method: "DELETE", headers: headers() });
 }
 
-export type StreamChunk = { content?: string; done?: boolean; stopped?: boolean; error?: string; model?: string; usage?: Record<string, number>; tool?: string; args?: string; intent?: string; state?: string; id?: string; duration_ms?: number; result_preview?: string; result_detail?: string; sub_steps?: Array<{ tool: string; args: string; state: string; duration_ms?: number | null; result_preview?: string }>; ui?: unknown[]; consent_request?: boolean; request_id?: string; description?: string; detail?: string; thinking?: boolean; heartbeat?: boolean; elapsed?: number };
+export type StreamChunk = { content?: string; done?: boolean; stopped?: boolean; error?: string; model?: string; usage?: Record<string, number>; tool?: string; args?: string; intent?: string; state?: string; id?: string; duration_ms?: number; result_preview?: string; result_detail?: string; entity_type?: string; entity_id?: string; sub_steps?: Array<{ tool: string; args: string; state: string; duration_ms?: number | null; result_preview?: string }>; ui?: unknown[]; consent_request?: boolean; request_id?: string; description?: string; detail?: string; thinking?: boolean; heartbeat?: boolean; elapsed?: number; skills_matched?: Array<{ name: string; is_default?: boolean }> };
 
 /** 把一个 SSE Response body 解析成事件流（streamChat / streamResume 共用）。 */
 async function* parseSSE(res: Response): AsyncGenerator<StreamChunk> {
@@ -706,6 +709,49 @@ export async function deleteSkill(name: string): Promise<{ ok: boolean; removed?
     return { ok: false, error: err.detail || `Failed (${res.status})` };
   }
   return res.json();
+}
+
+// ── Skill 上下文管理 ──────────────────────────────────────────────
+
+export interface SkillContextItem {
+  name: string;
+  description: string;
+  trigger: string[];
+  category: string;  // "default" | "discoverable" | "plugin" | "disabled"
+  is_default: boolean;
+  full_tokens: number;
+  brief_tokens: number;
+  has_references: boolean;
+  reference_count: number;
+}
+
+export interface SkillContextSummary {
+  default_count: number;
+  discoverable_count: number;
+  plugin_count: number;
+  total_default_tokens: number;
+  total_discoverable_tokens: number;
+  total_tokens: number;
+}
+
+export interface SkillContextResult {
+  skills: SkillContextItem[];
+  summary: SkillContextSummary;
+}
+
+export async function fetchSkillContext(): Promise<SkillContextResult> {
+  const res = await fetch(`${API_URL}/skill-context`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed to fetch skill context");
+  return res.json();
+}
+
+export async function updateSkillCategory(skillName: string, category: string): Promise<void> {
+  const res = await fetch(`${API_URL}/skill-context`, {
+    method: "PATCH",
+    headers: headers(),
+    body: JSON.stringify({ skill_name: skillName, category }),
+  });
+  if (!res.ok) throw new Error("Failed to update skill category");
 }
 
 export interface OnboardingStatus {

@@ -17,7 +17,6 @@ def _format_args(arguments: dict, max_items: int = 3) -> str:
             if len(s) > 80:
                 s = s[:80] + "…"
         elif len(s) > 150:
-            # 超长路径/命令：保留头尾
             s = s[:100] + "…" + s[-40:]
         parts.append(f"{k}={s}")
     return ", ".join(parts)
@@ -72,3 +71,61 @@ def _detail(content: str, max_chars: int = 2000) -> str:
     if len(content) > max_chars:
         return content[:max_chars] + f"\n…(共 {len(content)} 字，已截断)"
     return content
+
+
+# ── 实体分类（用于调用链路可视化） ────────────────────────────────
+
+def classify_tool(name: str) -> str:
+    """按工具名分类实体类型，用于可视化时区分不同调用实体。
+
+    5 类用户视角分类（从原来的 14 类合并），不易混淆：
+      file      - 文件操作（file_read/write/list）
+      system    - 终端命令（shell）
+      knowledge - 知识技能（skill_*, knowledge_*, memory_*, procedure_*, profile_*）
+      search    - 搜索查寻（web_search, web_fetch, rg_search, fd_find）
+      connect   - 外部互联（browser_*, lark_*, schedule_*, ui_card, config, delegate, meta 等）
+    """
+    if name.startswith("file_"):
+        return "file"
+    if name == "shell":
+        return "system"
+    if name.startswith("knowledge_") or name.startswith("skill_"):
+        return "knowledge"
+    if name.startswith("memory_") or name.startswith("procedure_") or name.startswith("profile_"):
+        return "knowledge"
+    if name in ("web_search", "web_fetch", "rg_search", "ripgrep", "fd", "fd_find"):
+        return "search"
+    return "connect"
+
+
+def resolve_skill_category(tool_name: str, arguments: dict) -> str:
+    """当工具调用是 skill_read/skill_list 时，解析目标 skill 的加载层级。
+
+    返回 "default" | "discoverable" | "plugin" | ""（非 skill 工具或解析失败）。
+    用于前端在卡片上展示「常驻/按需/插件」角标。
+    """
+    if tool_name not in ("skill_read", "skill_list"):
+        return ""
+    name = arguments.get("name", "")
+    if not name:
+        return ""
+    try:
+        from ethan.skills.loader import load_all_skills
+        skills = load_all_skills()
+        for s in skills:
+            if s.name == name:
+                return getattr(s, "category", "default")
+    except Exception:
+        pass
+    return ""
+
+
+def extract_entity_id(tool_name: str, arguments: dict) -> str:
+    """从工具调用参数中提取关联实体 ID（如 browser session_id）。
+
+    用于可视化时把同一 browser session 的多次操作聚合到一个浏览器实体节点上。
+    """
+    if tool_name.startswith("browser_"):
+        sid = arguments.get("session") or arguments.get("session_id")
+        return str(sid) if sid else ""
+    return ""

@@ -23,6 +23,11 @@ async def run_once(agent: Agent, prompt: str) -> None:
     model_id = agent._provider.model or get_config().defaults.model
     await store.create_with_id(session_id, model_id, source="cli")
 
+    # 直接用命令行参数作初始标题（_auto_title 在后面 decide_title 时可能被智能标题覆盖）
+    init_title = prompt.strip().replace("\n", " ")[:40]
+    if init_title:
+        await store.update_title(session_id, init_title)
+
     # 保存用户消息
     user_msg = Message(role="user", content=prompt)
     await store.save_message(session_id, user_msg)

@@ -123,6 +123,7 @@ async def get_session(session_id: str, user_id: str = Depends(verify_token)):
                 "quote": getattr(m, "quote", None),
                 "a2ui": getattr(m, "a2ui", None),
                 "images": getattr(m, "images", None) or [],
+                "matched_skills": getattr(m, "matched_skills", None),
             }
             for m in session.messages if m.role in ("user", "assistant")
         ],

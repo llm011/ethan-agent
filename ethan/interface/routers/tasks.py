@@ -1,14 +1,14 @@
 """Background tasks fired after a generation completes: title, memory consolidation, skill gen."""
 from __future__ import annotations
 
+import logging
+
 from ethan.memory.session import SessionStore
+
+logger = logging.getLogger("ethan.tasks")
 
 
 async def _maybe_regen_title(session_id: str) -> None:
-    # 自开 store：本函数经 create_task 异步执行，不能复用主流程的 store
-    # ——主流程紧接着 await store.close()，等本 task 跑到 load 时连接已关。
-    # 与 _maybe_consolidate/_maybe_generate_skill 同样的自开模式。user_id 经
-    # ContextVar 在 create_task 下继承，user_sessions_db_path 能解析到正确分库。
     try:
         from ethan.core.paths import user_sessions_db_path
         from ethan.memory.session import decide_title
@@ -17,16 +17,16 @@ async def _maybe_regen_title(session_id: str) -> None:
         try:
             session = await store.load(session_id)
             if not session:
+                logger.warning("_maybe_regen_title: session %s not found", session_id)
                 return
-            # 传 current_title：decide_title 的第 3/6/9… 轮兜底分支据此判断标题
-            # 是否仍是占位，从而决定要不要再调一次 lite 自愈（内部已带重试）。
             title = await decide_title(session.messages, session.title)
             if title and title != session.title:
                 await store.update_title(session_id, title)
+                logger.debug("_maybe_regen_title: updated %s -> %s", session_id, title)
         finally:
             await store.close()
     except Exception:
-        pass
+        logger.exception("_maybe_regen_title failed for session=%s", session_id)
 
 
 async def _maybe_consolidate(session_id: str, model: str, user_id: str = "", mode: str = "") -> None:

@@ -182,7 +182,7 @@ async def _run_generation(
     """
     from ethan.core.consent import ConsentEvent, set_consent_provider
     from ethan.core.stream_collector import StreamCollector
-    from ethan.providers.base import ThinkingEvent, ToolEvent
+    from ethan.providers.base import SkillsMatchedEvent, ThinkingEvent, ToolEvent
 
     # consent provider 经 ContextVar 注入；本任务有独立 context，需在任务内设置。
     set_consent_provider(consent)
@@ -205,13 +205,18 @@ async def _run_generation(
                     "detail": item.detail,
                     "always": item.always,
                 })
+            elif isinstance(item, SkillsMatchedEvent):
+                collector.feed(item)
+                run.emit({"skills_matched": item.skills})
             elif isinstance(item, ThinkingEvent):
                 run.emit({"thinking": True})
             elif isinstance(item, ToolEvent):
                 collector.feed(item)
                 if item.state == "start":
                     run.emit({"tool": item.tool_name, "args": item.args_summary, "state": "start",
-                              "id": item.tool_call_id, "intent": item.intent or ""})
+                              "id": item.tool_call_id, "intent": item.intent or "",
+                              "entity_type": item.entity_type or "",
+                              "entity_id": item.entity_id or ""})
                 else:
                     step = collector.tool_steps[-1]
                     evt = {
@@ -223,6 +228,8 @@ async def _run_generation(
                         "result_preview": item.result_preview or "",
                         "result_detail": item.result_detail or "",
                         "sub_steps": item.sub_steps or [],
+                        "entity_type": item.entity_type or "",
+                        "entity_id": item.entity_id or "",
                     }
                     if item.ui:
                         evt["ui"] = item.ui
@@ -259,6 +266,7 @@ async def _run_generation(
                         usage=collector.usage_dict,
                         tool_steps=collector.tool_steps or [],
                         a2ui=collector.a2ui or None,
+                        matched_skills=collector.matched_skills or None,
                     ))
                     await store.touch(session_id)
                 else:
@@ -275,6 +283,7 @@ async def _run_generation(
                     usage=collector.usage_dict,
                     tool_steps=collector.tool_steps or [],
                     a2ui=collector.a2ui or None,
+                    matched_skills=collector.matched_skills or None,
                 )
                 await store.save_message(session_id, stopped_msg)
                 await store.touch(session_id)
@@ -303,6 +312,7 @@ async def _run_generation(
                 usage=collector.usage_dict,
                 tool_steps=collector.tool_steps or [],
                 a2ui=collector.a2ui or None,
+                matched_skills=collector.matched_skills or None,
             )
             try:
                 if progress_msg_id:
@@ -330,6 +340,7 @@ async def _run_generation(
             usage=usage_dict,
             tool_steps=collector.tool_steps or [],
             a2ui=collector.a2ui or None,
+            matched_skills=collector.matched_skills or None,
         )
         # 正常结束：把实时进度行就地更新为最终回复（content/usage/tool_steps/a2ui 全写全），
         # 复用同一行，避免「占位行 + 最终行」重复两条 assistant 消息。无进度行则照常新建。

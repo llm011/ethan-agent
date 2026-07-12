@@ -301,6 +301,9 @@ async def run_repl(agent: Agent, resume_id: str | None = None, auto_consent: boo
 
         # 第一条消息时才真正持久化 session
         if not session_persisted:
+            # 用首条消息作初始标题，保障即使 decide_title 失败也不留"新对话"
+            if session.title == "新对话":
+                session.title = user_input.strip().replace("\n", " ")[:40]
             await store._db.execute(
                 "INSERT INTO sessions (id, title, model, created_at, updated_at, source, mode) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (session.id, session.title, session.model, session.created_at, session.updated_at, "repl", getattr(session, "mode", "") or ""),

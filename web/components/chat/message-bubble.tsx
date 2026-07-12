@@ -1,10 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import Image from "next/image";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Quote as QuoteIcon } from "lucide-react";
 import { ToolTimeline } from "@/components/tool-timeline";
+import { SwimlaneDiagram } from "@/components/swimlane-diagram";
 import { fmtTokens } from "@/lib/utils";
 import { CodeBlock } from "@/components/code-block";
 import { PlainCodeBlock } from "@/components/plain-code-block";
@@ -40,6 +42,7 @@ interface MessageBubbleProps {
 }
 
 export function MessageBubble({ msg, isStreaming, isLast, onQuote, onCardAction }: MessageBubbleProps) {
+  const [highlightedStep, setHighlightedStep] = useState<number | undefined>(undefined);
   return (
     <div className={`group flex ${msg.role === "user" ? "justify-end" : "justify-start"} gap-2`}>
       {msg.role === "assistant" && (
@@ -113,7 +116,10 @@ export function MessageBubble({ msg, isStreaming, isLast, onQuote, onCardAction 
               </details>
             )}
             {msg.toolSteps && msg.toolSteps.length > 0 && (
-              <ToolTimeline steps={msg.toolSteps} defaultExpanded={msg.toolsExpanded ?? false} />
+              <ToolTimeline steps={msg.toolSteps} defaultExpanded={msg.toolsExpanded ?? false} highlightIndex={highlightedStep} />
+            )}
+            {msg.toolSteps && msg.toolSteps.length > 0 && msg.toolSteps.some(s => s.entity_type) && (
+              <SwimlaneDiagram steps={msg.toolSteps} matchedSkills={msg.matchedSkills} onStepClick={setHighlightedStep} />
             )}
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}

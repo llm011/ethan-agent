@@ -6,10 +6,18 @@ from pathlib import Path
 from ethan.core.config import get_config
 from ethan.core.context_budget import enforce_context_budget
 from ethan.core.routing import _get_route, _match_fast_rule
-from ethan.core.tool_format import _detail, _format_args, _preview, _with_intent_param
+from ethan.core.tool_format import (
+    _detail,
+    _format_args,
+    _preview,
+    _with_intent_param,
+    classify_tool,
+    extract_entity_id,
+    resolve_skill_category,
+)
 from ethan.memory.facts import FactStore
 from ethan.memory.procedures import ProcedureStore
-from ethan.providers.base import Message
+from ethan.providers.base import Message, ToolCall
 from ethan.providers.manager import create_provider
 from ethan.skills.registry import SkillRegistry
 from ethan.tools.base import ToolResult
@@ -310,9 +318,17 @@ class Agent:
                                 matched.append(sk)
                                 have.add(sname)
                 self.last_matched_skills = [s.name for s in matched]
-                skill_ctx = "\n\n".join(
-                    f"[Skill: {s.name}]\n{s.content[:3000]}" for s in matched
-                ) if matched else ""
+                # 按 category 分流注入：
+                # - default: 完整 content（截断到 3000 字）
+                # - discoverable: 命中 trigger 时只注入 name + description（精简），模型用 skill_read 拉取全文
+                full_parts = []
+                brief_parts = []
+                for s in matched:
+                    if getattr(s, "category", "default") == "discoverable":
+                        brief_parts.append(f"- {s.name}: {' | '.join(s.trigger[:5])} — {s.description[:80]}")
+                    else:
+                        full_parts.append(f"[Skill: {s.name}]\n{s.content[:3000]}")
+                skill_ctx = "\n\n".join(full_parts) if full_parts else ""
                 if skill_ctx:
                     parts.append(f"<relevant_skills>\n{skill_ctx}\n</relevant_skills>")
                     # skill 内容里提到的非 fast 工具自动激活，避免 fast 档看不见 skill 依赖的工具、
@@ -322,6 +338,11 @@ class Agent:
                                   if not t.fast_path and t.name in skill_ctx]
                     if referenced:
                         activate_tools(referenced)
+                if brief_parts:
+                    parts.append(
+                        "<matched_skills_brief>\n[以下技能命中触发词，但未注入完整内容。"
+                        "用 skill_read 工具按需拉取详情：]\n" + "\n".join(brief_parts) + "\n</matched_skills_brief>"
+                    )
             mode_hint = self._mode_install_hint(messages)
             if mode_hint:
                 parts.append(mode_hint)
@@ -351,17 +372,22 @@ class Agent:
         if tools_content:
             parts.append(f"<tools_reference>\n{tools_content}\n</tools_reference>")
 
-        # Inject skills list so Agent knows its own capabilities (stable, cacheable).
-        # Only name + first line of description (≤80 chars) to keep token cost low;
-        # full descriptions are in skill content injected on match via relevant_skills.
+        # Inject default 类 skill 清单（全量注入的稳定能力集），让 Agent 知道自己的核心能力。
+        # 只列 name + description 首行（≤80 字符），discoverable 类在下方单独列（name+trigger），
+        # plugin 类不在 _skills 中（未安装）。这样保持 prompt 稳定可缓存，且不重复注入。
         if self._skills:
-            skills_list = self._skills.all()
-            if skills_list:
+            default_list = [s for s in self._skills.all()
+                            if getattr(s, "category", "default") == "default"]
+            if default_list:
                 skill_lines = [
                     f"- {s.name}: {s.description[:80]}{'…' if len(s.description) > 80 else ''}"
-                    for s in skills_list
+                    for s in default_list
                 ]
-                parts.append("<available_skills>\n" + "\n".join(skill_lines) + "\n</available_skills>")
+                parts.append(
+                    "<available_skills>\n"
+                    "[默认技能简表 — 完整清单、分类和描述请调 skill_list 工具，不要直接念本块回答用户「你有哪些技能」]\n"
+                    + "\n".join(skill_lines) + "\n</available_skills>"
+                )
 
         # --- 动态内容放后面，不命中缓存 ---
         parts.append(f"Current time: {now}")
@@ -406,6 +432,23 @@ class Agent:
             skill_ctx = self._skills.build_context(last_user, channel=self._channel, mode=mode_key)
             if skill_ctx:
                 parts.append(f"<relevant_skills>\n{skill_ctx}\n</relevant_skills>")
+
+        # 可发现型 skill 目录：列出有 trigger 的 discoverable skill（模型可按触发词判断是否 skill_read），
+        # 无 trigger 的只给数量统计（多为 bytedance-*/lark-* 工具型技能，逐行列空 trigger 占 token 且无信息量）。
+        # 元查询（"你有哪些技能"）时模型应调 skill_list 拿完整清单，不念本块。
+        if self._skills:
+            discoverable = [s for s in self._skills.all() if getattr(s, "category", "default") == "discoverable"]
+            if discoverable:
+                with_trig = [s for s in discoverable if s.trigger]
+                no_trig = [s for s in discoverable if not s.trigger]
+                lines = [f"- {s.name}: {' | '.join(s.trigger[:5])}" for s in with_trig]
+                if no_trig:
+                    lines.append(f"- （另有 {len(no_trig)} 个工具型技能无触发词，如 bytedance-*/lark-*，调 skill_list 查看完整清单）")
+                parts.append(
+                    "<available_skills>\n"
+                    "[按需技能简表 — 命中触发词时用 skill_read 拉全文；完整清单和分类请调 skill_list，不要念本块回答「你有哪些技能」]\n"
+                    + "\n".join(lines) + "\n</available_skills>"
+                )
 
         mode_hint = self._mode_install_hint(messages)
         if mode_hint:
@@ -458,6 +501,97 @@ class Agent:
             # 实时读取，使 config_set 改的迭代上限立即生效（无需重建 Agent）
             max_iters = get_config().defaults.max_tool_iterations
         return route, system, tools_list, max_iters
+
+    async def _ensure_non_empty(self, response: Message, working: list[Message],
+                                monitor, reason: str) -> Message:
+        """确保返回给用户的回复非空。
+
+        当模型在 finalize / stuck / nudge_exhausted 轮返回空内容时（常见于超大上下文
+        导致模型静默放弃），用极简 prompt 再试一次；仍空则从工具调用历史中合成结构化兜底。
+
+        reason: 触发原因，写入日志便于排查。
+        """
+        content = (response.content or "").strip()
+        if content:
+            return response
+
+        logger.warning("chat() 返回空回复 (reason=%s)，尝试极简 prompt 重试", reason)
+
+        # 极简重试：只给最后一条 user 消息 + 禁工具，逼模型至少说一句话
+        try:
+            last_user = next((m for m in reversed(working) if m.role == "user"), None)
+            mini_msgs = [last_user] if last_user else []
+            mini_sys = "请用中文简洁回答用户的问题。如果任务已完成，请总结你做了什么。如果遇到问题，请说明卡在哪里。"
+            resp = await self._provider.chat(mini_msgs, tools=None, system=mini_sys)
+            self.usage.add(resp.usage)
+            if (resp.content or "").strip():
+                return resp
+        except Exception:
+            logger.warning("极简 prompt 重试也失败", exc_info=True)
+
+        # 仍空 → 简洁兜底提示（工具调用详情已在前端可视化中展示，无需重复罗列）
+        logger.warning("极简重试仍空，合成兜底 (reason=%s)", reason)
+        tool_calls = [m for m in working if m.role == "assistant" and m.tool_calls]
+        if tool_calls:
+            fallback = f"任务执行了 {len(tool_calls)} 轮工具调用，超出当前步数限制，未能生成最终回复。"
+            if reason == "stuck":
+                fallback = f"在当前任务上尝试了多种策略仍未突破。\n{fallback}\n\n建议：检查工具调用是否有权限/网络问题，或拆分任务重试。"
+            elif reason == "finalize":
+                fallback = f"已达到最大执行步数限制。\n{fallback}"
+        else:
+            fallback = "任务执行完毕但未生成回复。可能上下文过大或模型异常，请重试。"
+
+        return Message(role="assistant", content=fallback)
+
+    def _build_stream_fallback(self, working: list[Message], reason: str) -> str:
+        """stream_chat 空回复兜底：简洁提示，工具调用详情已在前端可视化中展示。"""
+        logger.warning("stream_chat() 返回空回复 (reason=%s)，合成兜底", reason)
+        tool_calls = [m for m in working if m.role == "assistant" and m.tool_calls]
+        if tool_calls:
+            fallback = f"任务执行了 {len(tool_calls)} 轮工具调用，超出当前步数限制，未能生成最终回复。"
+            if reason == "finalize":
+                fallback = f"已达到最大执行步数限制。\n{fallback}"
+        else:
+            fallback = "任务执行完毕但未生成回复。可能上下文过大或模型异常，请重试。"
+        return fallback
+
+    def _parse_stream_text_tool_calls(self, content: str) -> list:
+        """stream_chat 中从文本解析工具调用（与 openai_compat._parse_text_tool_calls 同逻辑）。
+
+        流式模式下，如果模型把工具调用写成文本（call:xxx{args}），它会作为 delta.content
+        流式返回，不会出现在 delta.tool_calls 里。此方法在 final chunk 后做一次检测。
+        """
+        import re
+        import uuid
+
+        pattern = re.compile(
+            r'call:\w+:(?P<tool>\w+)\{(?P<args>[^}]*)\}'
+            r'|call:(?P<tool2>\w+)\{(?P<args2>[^}]*)\}'
+        )
+        results = []
+        for m in pattern.finditer(content):
+            tool_name = m.group("tool") or m.group("tool2") or ""
+            args_str = m.group("args") or m.group("args2") or ""
+            if not tool_name:
+                continue
+            args = {}
+            key_pattern = re.compile(r'(\w+):')
+            key_positions = [(km.start(), km.group(1)) for km in key_pattern.finditer(args_str)]
+            for i, (pos, key) in enumerate(key_positions):
+                val_start = pos + len(key) + 1
+                if i + 1 < len(key_positions):
+                    val_end = key_positions[i + 1][0]
+                else:
+                    val_end = len(args_str)
+                val = args_str[val_start:val_end].rstrip(',').strip()
+                args[key] = val
+            if args:
+                results.append(ToolCall(
+                    id=f"call_{uuid.uuid4().hex[:8]}",
+                    name=tool_name,
+                    arguments=args,
+                ))
+        return results
 
     def _broadcast_tools(self, tools_list: list):
         """每轮广播给模型的工具定义 = 基础 tools_list + 本请求 find_tools 已激活的长尾工具。
@@ -578,13 +712,27 @@ class Agent:
                     sys = system + finalize_system_suffix("max_iters")
                     resp = await provider.chat(working, tools=None, system=sys)
                     self.usage.add(resp.usage)
-                    return resp
+                    return await self._ensure_non_empty(resp, working, monitor, "nudge_exhausted")
 
             if not response.is_tool_call:
-                return response
+                return await self._ensure_non_empty(response, working, monitor, "finalize")
+
+            # 工具调用日志：记录每轮工具执行情况，便于 debug
+            tool_summary = ", ".join(
+                f"{tc.name}({_format_args(tc.arguments)})" for tc in response.tool_calls
+            )
+            logger.info("chat() iter=%d/%d tools=[%s]", i + 1, max_iters, tool_summary)
 
             results: list[ToolResult] = await self._executor.execute(response.tool_calls)
             had_error = any(getattr(r, "is_error", False) for r in results)
+            for idx, r in enumerate(results):
+                rlen = len(r.content or "")
+                if r.is_error:
+                    logger.warning("  └─ tool[%d] %s ERROR len=%d: %s",
+                                   idx, response.tool_calls[idx].name if idx < len(response.tool_calls) else "?",
+                                   rlen, (r.content or "")[:200])
+                else:
+                    logger.info("  └─ tool[%d] ok len=%d", idx, rlen)
             for r in results:
                 working.append(Message(
                     role="tool",
@@ -608,7 +756,7 @@ class Agent:
                     sys = system + finalize_system_suffix("stuck")
                     resp = await provider.chat(working, tools=None, system=sys)
                     self.usage.add(resp.usage)
-                    return resp
+                    return await self._ensure_non_empty(resp, working, monitor, "stuck")
                 last_result = results[-1].content if results else ""
                 pending_suffix = "\n\n[System: " + reflection_message(monitor, last_result) + "]"
                 monitor.mark_reflected()
@@ -618,7 +766,7 @@ class Agent:
     async def stream_chat(self, messages: list[Message]):
         """流式对话。fast/medium/full 三档路由，按消息长度和关键词自动选择。"""
         from ethan.core.context import reset_active_tools
-        from ethan.providers.base import ThinkingEvent, ToolEvent
+        from ethan.providers.base import SkillsMatchedEvent, ThinkingEvent, ToolEvent
 
         self._executor.reset_cache()
         reset_active_tools()  # 清空本请求的 find_tools 激活集
@@ -626,6 +774,18 @@ class Agent:
         enforce_context_budget(working)  # 历史 tool result 也可能很大，进循环前先管控
         _route, system, tools_list, max_iters = self._select_route(working)
         provider = self._provider_for_route(_route)
+
+        # _select_route 内部已完成 Skill 匹配，yield 一次让消费者记录命中的 Skill 上下文
+        if self.last_matched_skills:
+            skills_info = []
+            for name in self.last_matched_skills:
+                sk = self._skills.get(name) if self._skills else None
+                skills_info.append({
+                    "name": name,
+                    "is_default": getattr(sk, "is_default", False),
+                    "category": getattr(sk, "category", "default"),
+                })
+            yield SkillsMatchedEvent(skills=skills_info)
 
         from ethan.core.loop_control import (
             LoopMonitor,
@@ -679,7 +839,17 @@ class Agent:
                     raise
 
             tool_calls = final_chunk.tool_calls if final_chunk else []
-            response = Message(role="assistant", content=full_content, tool_calls=tool_calls)
+            # Fallback：模型把工具调用写成文本（call:xxx{args}）时，从 content 解析
+            if not tool_calls and full_content:
+                parsed = self._parse_stream_text_tool_calls(full_content)
+                if parsed:
+                    tool_calls = parsed
+                    full_content = ""  # 清空，避免把工具调用指令当回复 yield
+                    response = Message(role="assistant", content=full_content, tool_calls=tool_calls)
+                else:
+                    response = Message(role="assistant", content=full_content, tool_calls=tool_calls)
+            else:
+                response = Message(role="assistant", content=full_content, tool_calls=tool_calls)
             working.append(response)
 
             # 空响应（既无正文也无工具调用）= 模型静默放弃。
@@ -719,19 +889,31 @@ class Agent:
                     # 重试仍空 → finalize 兜底
                     logger.warning("空响应重试仍无输出，执行 finalize 兜底")
                     sys = system + finalize_system_suffix("max_iters")
+                    fin_content = ""
                     async for chunk in self._provider.stream_chat(working, tools=None, system=sys):
                         if chunk.reasoning:
                             yield ThinkingEvent(delta=chunk.reasoning)
                         if chunk.content:
+                            fin_content += chunk.content
                             yield chunk.content
                         if chunk.is_final:
                             self.usage.add(chunk.usage)
+                    if not fin_content:
+                        yield self._build_stream_fallback(working, "nudge_exhausted")
                     return
 
             if not response.is_tool_call:
+                # finalize 轮可能因上下文过大模型返回空 → 兜底
+                if finalize and not full_content:
+                    fallback = self._build_stream_fallback(working, "finalize")
+                    yield fallback
                 return
             if finalize:
                 # 收尾轮已禁工具并流式吐出总结；即便模型仍返回 tool_calls 也不执行，直接结束。
+                # 但如果 finalize 轮没有任何内容产出，也需要兜底
+                if not full_content:
+                    fallback = self._build_stream_fallback(working, "finalize")
+                    yield fallback
                 return
 
             # --- 授权检查：执行前对工具做（1）渠道硬策略 + （2）consent 确认 ---
@@ -750,7 +932,8 @@ class Agent:
                     deny = consent_provider.policy_check(tc.name, side_effect)
                     if deny:
                         yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary="", state="error",
-                                        result_preview="无权限")
+                                        result_preview="无权限",
+                                        skill_category=resolve_skill_category(tc.name, tc.arguments))
                         working.append(Message(role="tool", content=deny, tool_call_id=tc.id))
                         continue
 
@@ -766,7 +949,7 @@ class Agent:
                     always = tool.consent_always(**tc.arguments) if tool else False
                     if not always and is_granted(sess_id, scope):
                         allowed_calls.append(tc)
-                        yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary=_format_args(tc.arguments), intent=str(tc.arguments.get("intent", "") or ""), state="start")
+                        yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary=_format_args(tc.arguments), intent=str(tc.arguments.get("intent", "") or ""), state="start", entity_type=classify_tool(tc.name), entity_id=extract_entity_id(tc.name, tc.arguments), skill_category=resolve_skill_category(tc.name, tc.arguments))
                         continue
                     detail = _format_args(tc.arguments)
                     ok = True
@@ -785,7 +968,8 @@ class Agent:
                         ok = await consent_provider.request(desc, tc.name, detail)
                     if not ok:
                         yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary="", state="error",
-                                        result_preview="用户拒绝")
+                                        result_preview="用户拒绝",
+                                        skill_category=resolve_skill_category(tc.name, tc.arguments))
                         working.append(Message(
                             role="tool",
                             content="[用户拒绝此操作]",
@@ -797,10 +981,24 @@ class Agent:
                     if not always:
                         record_grant(sess_id, scope)
                 allowed_calls.append(tc)
-                yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary=_format_args(tc.arguments), intent=str(tc.arguments.get("intent", "") or ""), state="start")
+                yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary=_format_args(tc.arguments), intent=str(tc.arguments.get("intent", "") or ""), state="start", entity_type=classify_tool(tc.name), entity_id=extract_entity_id(tc.name, tc.arguments), skill_category=resolve_skill_category(tc.name, tc.arguments))
 
             results: list[ToolResult] = await self._executor.execute(allowed_calls) if allowed_calls else []
             had_error = any(getattr(r, "is_error", False) for r in results)
+
+            # 工具调用日志
+            tool_summary = ", ".join(
+                f"{tc.name}({_format_args(tc.arguments)})" for tc in allowed_calls
+            )
+            logger.info("stream_chat() iter=%d/%d tools=[%s]", i + 1, max_iters, tool_summary)
+            for idx, r in enumerate(results):
+                rlen = len(r.content or "")
+                if r.is_error:
+                    logger.warning("  └─ tool[%d] %s ERROR len=%d: %s",
+                                   idx, allowed_calls[idx].name if idx < len(allowed_calls) else "?",
+                                   rlen, (r.content or "")[:200])
+                else:
+                    logger.info("  └─ tool[%d] ok len=%d", idx, rlen)
 
             for r, tc in zip(results, allowed_calls):
                 # content 原文进模型上下文（get_secret 取出的 key Agent 要能用）；
@@ -808,7 +1006,7 @@ class Agent:
                 from ethan.core.secrets_store import mask_text
                 preview = mask_text(_preview(r.content)) if r.content else ""
                 detail = mask_text(_detail(r.content)) if r.content else ""
-                yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary="", state="done" if not r.is_error else "error", result_preview=preview, result_detail=detail, sub_steps=getattr(r, "sub_steps", []) or [], ui=getattr(r, "ui", None))
+                yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary="", state="done" if not r.is_error else "error", result_preview=preview, result_detail=detail, sub_steps=getattr(r, "sub_steps", []) or [], ui=getattr(r, "ui", None), entity_type=classify_tool(tc.name), entity_id=extract_entity_id(tc.name, tc.arguments), skill_category=resolve_skill_category(tc.name, tc.arguments))
                 working.append(Message(
                     role="tool",
                     content=r.content,
@@ -830,11 +1028,15 @@ class Agent:
                 if monitor.exhausted():
                     # 反思次数用尽仍卡住 → 收尾放弃：禁工具，让模型流式整理「已做/卡点/建议」
                     sys = system + finalize_system_suffix("stuck")
+                    stuck_content = ""
                     async for chunk in self._provider.stream_chat(working, tools=None, system=sys):
                         if chunk.content:
+                            stuck_content += chunk.content
                             yield chunk.content
                         if chunk.is_final:
                             self.usage.add(chunk.usage)
+                    if not stuck_content:
+                        yield self._build_stream_fallback(working, "stuck")
                     return
                 last_result = results[-1].content if results else ""
                 pending_suffix = "\n\n[System: " + reflection_message(monitor, last_result) + "]"

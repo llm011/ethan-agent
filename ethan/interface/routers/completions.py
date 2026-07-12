@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -15,7 +16,11 @@ from ethan.memory.session import SessionStore
 from ethan.providers.base import Message
 
 from .deps import create_agent, verify_token
+from .helpers import _friendly_error
+from .producers import _save_progress
 from .tasks import _maybe_regen_title
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -103,6 +108,13 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
         model_id = req.model or get_config().defaults.model
         await store.create_with_id(req.session_id, model_id, source="api")
 
+        # 直接用首条消息作初始标题，保障 session 创建时就有可读标题
+        # （_maybe_regen_title 后续会用智能标题覆盖，但即便它失败也不留"新对话"）
+        first_user = next((m for m in req.messages if m.role == "user" and m.content), None)
+        if first_user:
+            init_title = first_user.content.strip().replace("\n", " ")[:40]
+            await store.update_title(req.session_id, init_title)
+
     session_id = req.session_id
     user_msg = Message(role=req.messages[-1].role, content=req.messages[-1].content)
     await store.save_message(session_id, user_msg)
@@ -138,17 +150,91 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
+    # 非流式：走 stream_chat + StreamCollector 收集工具步骤并实时落库，
+    # 这样中断/异常时 Web UI 仍能看到已执行的工具调用过程（与 Web stream 路径行为一致）。
+    from ethan.core.stream_collector import StreamCollector
+    from ethan.providers.base import SkillsMatchedEvent, ThinkingEvent, ToolEvent
+
+    collector = StreamCollector().bind(agent)
+    progress_msg_id: int | None = None
     try:
-        response = await agent.chat(messages)
-        usage_dict = {"input": agent.usage.input_tokens, "output": agent.usage.output_tokens, "cache": agent.usage.cache_tokens}
-        await store.save_message(session_id, Message(role="assistant", content=response.content, usage=usage_dict))
+        try:
+            async for item in agent.stream_chat(messages):
+                if isinstance(item, (ToolEvent, ThinkingEvent, SkillsMatchedEvent)):
+                    collector.feed(item)
+                    # 工具事件实时落库进度，中断也不丢过程
+                    if isinstance(item, ToolEvent) and session_id:
+                        try:
+                            progress_msg_id = await _save_progress(
+                                store, session_id, progress_msg_id,
+                                collector.tool_steps or [], collector.a2ui or None,
+                            )
+                        except Exception:
+                            logger.exception("实时保存工具进度失败 session=%s", session_id)
+                    continue
+                collector.feed(item)
+        except asyncio.CancelledError:
+            # 调用被取消：保存已生成的部分内容 + tool_steps，标记 [已停止]
+            if session_id:
+                try:
+                    stopped_content = (collector.full or "") + "\n\n_（已停止）_"
+                    stopped_msg = Message(
+                        role="assistant", content=stopped_content,
+                        thought=collector.thought, usage=collector.usage_dict,
+                        tool_steps=collector.tool_steps or [], a2ui=collector.a2ui or None,
+                        matched_skills=collector.matched_skills or None,
+                    )
+                    if progress_msg_id:
+                        await store.update_message(progress_msg_id, session_id, stopped_msg)
+                    else:
+                        await store.save_message(session_id, stopped_msg)
+                    await store.touch(session_id)
+                except Exception:
+                    logger.exception("保存已停止内容失败 session=%s", session_id)
+            raise
+        except Exception as e:
+            # 异常中断：把错误信息 + 已执行 tool_steps 持久化，刷新后仍可见
+            err_text = _friendly_error(e, agent)
+            error_content = (collector.full + "\n\n" if collector.full else "") + err_text
+            err_msg = Message(
+                role="assistant", content=error_content,
+                thought=collector.thought, usage=collector.usage_dict,
+                tool_steps=collector.tool_steps or [], a2ui=collector.a2ui or None,
+                matched_skills=collector.matched_skills or None,
+            )
+            try:
+                if progress_msg_id:
+                    await store.update_message(progress_msg_id, session_id, err_msg)
+                else:
+                    await store.save_message(session_id, err_msg)
+                await store.touch(session_id)
+            except Exception:
+                logger.exception("保存错误消息失败 session=%s", session_id)
+            raise
+
+        usage_dict = collector.usage_dict
+        content = collector.full or ""
+        if not content.strip():
+            logger.warning("completions() session=%s 返回空回复，usage=%s", session_id, usage_dict)
+            content = "[Agent 返回了空回复。可能原因：上下文过大、模型异常或工具执行卡住。请重试或简化任务。]"
+        asst_msg = Message(
+            role="assistant", content=content, thought=collector.thought,
+            usage=usage_dict, tool_steps=collector.tool_steps or [],
+            a2ui=collector.a2ui or None,
+            matched_skills=collector.matched_skills or None,
+        )
+        # 正常结束：把实时进度行更新为最终回复，复用同一行避免重复两条 assistant 消息
+        if progress_msg_id:
+            await store.update_message(progress_msg_id, session_id, asst_msg)
+        else:
+            await store.save_message(session_id, asst_msg)
         await store.touch(session_id)
         asyncio.create_task(_maybe_regen_title(session_id))
         return {
             "id": f"chatcmpl-{session_id[:8]}",
             "object": "chat.completion",
             "model": req.model or get_config().defaults.model,
-            "choices": [{"index": 0, "message": {"role": "assistant", "content": response.content}, "finish_reason": "stop"}],
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": content}, "finish_reason": "stop"}],
             "usage": {
                 "prompt_tokens": agent.usage.input_tokens,
                 "completion_tokens": agent.usage.output_tokens,
@@ -161,34 +247,94 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
 
 
 async def _stream_completions(agent, messages, store: SessionStore, session_id: str, model: str | None, user_id: str = ""):
+    from ethan.core.stream_collector import StreamCollector
     from ethan.interface.routers.chat import _maybe_consolidate, _maybe_generate_skill
-    from ethan.providers.base import ThinkingEvent, ToolEvent
+    from ethan.providers.base import SkillsMatchedEvent, ThinkingEvent, ToolEvent
 
-    full = ""
+    collector = StreamCollector().bind(agent)
+    progress_msg_id: int | None = None
     try:
         try:
             async for item in agent.stream_chat(messages):
-                if isinstance(item, (ToolEvent, ThinkingEvent)):
-                    continue  # completions 接口不暴露工具调用 / 思考过程
-                full += item
+                if isinstance(item, (ToolEvent, ThinkingEvent, SkillsMatchedEvent)):
+                    collector.feed(item)
+                    # 工具事件实时落库进度，连接中断也不丢工具调用过程
+                    if isinstance(item, ToolEvent) and session_id:
+                        try:
+                            progress_msg_id = await _save_progress(
+                                store, session_id, progress_msg_id,
+                                collector.tool_steps or [], collector.a2ui or None,
+                            )
+                        except Exception:
+                            logger.exception("实时保存工具进度失败 session=%s", session_id)
+                    continue  # completions 接口不暴露工具调用 / 思考过程给客户端
+                text = collector.feed(item)
+                if not text:
+                    continue
                 chunk = {
                     "id": f"chatcmpl-{session_id[:8]}",
                     "object": "chat.completion.chunk",
                     "model": model or get_config().defaults.model,
-                    "choices": [{"delta": {"content": item}, "index": 0, "finish_reason": None}],
+                    "choices": [{"delta": {"content": text}, "index": 0, "finish_reason": None}],
                     "ethan": {"session_id": session_id},
                 }
                 yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+        except asyncio.CancelledError:
+            # 客户端断开 / 超时：保存已生成部分 + tool_steps，标记 [已停止]
+            if session_id:
+                try:
+                    stopped_content = (collector.full or "") + "\n\n_（已停止）_"
+                    stopped_msg = Message(
+                        role="assistant", content=stopped_content,
+                        thought=collector.thought, usage=collector.usage_dict,
+                        tool_steps=collector.tool_steps or [], a2ui=collector.a2ui or None,
+                        matched_skills=collector.matched_skills or None,
+                    )
+                    if progress_msg_id:
+                        await store.update_message(progress_msg_id, session_id, stopped_msg)
+                    else:
+                        await store.save_message(session_id, stopped_msg)
+                    await store.touch(session_id)
+                except Exception:
+                    logger.exception("保存已停止内容失败 session=%s", session_id)
+            raise
         except Exception as e:
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            # 异常中断：持久化错误信息 + 已执行 tool_steps，刷新后仍可见
+            err_text = _friendly_error(e, agent)
+            error_content = (collector.full + "\n\n" if collector.full else "") + err_text
+            err_msg = Message(
+                role="assistant", content=error_content,
+                thought=collector.thought, usage=collector.usage_dict,
+                tool_steps=collector.tool_steps or [], a2ui=collector.a2ui or None,
+                matched_skills=collector.matched_skills or None,
+            )
+            try:
+                if progress_msg_id:
+                    await store.update_message(progress_msg_id, session_id, err_msg)
+                else:
+                    await store.save_message(session_id, err_msg)
+                await store.touch(session_id)
+            except Exception:
+                logger.exception("保存错误消息失败 session=%s", session_id)
+            yield f"data: {json.dumps({'error': err_text})}\n\n"
             return
 
         yield f"data: {json.dumps({'choices': [{'delta': {}, 'finish_reason': 'stop'}]})}\n\n"
         yield "data: [DONE]\n\n"
 
-        if full:
-            usage_dict = {"input": agent.usage.input_tokens, "output": agent.usage.output_tokens, "cache": agent.usage.cache_tokens}
-            await store.save_message(session_id, Message(role="assistant", content=full, usage=usage_dict))
+        if collector.full or collector.tool_steps:
+            usage_dict = collector.usage_dict
+            asst_msg = Message(
+                role="assistant", content=collector.full,
+                thought=collector.thought, usage=usage_dict,
+                tool_steps=collector.tool_steps or [], a2ui=collector.a2ui or None,
+                matched_skills=collector.matched_skills or None,
+            )
+            # 正常结束：把实时进度行更新为最终回复，复用同一行避免重复两条 assistant 消息
+            if progress_msg_id:
+                await store.update_message(progress_msg_id, session_id, asst_msg)
+            else:
+                await store.save_message(session_id, asst_msg)
             await store.touch(session_id)
             asyncio.create_task(_maybe_regen_title(session_id))
             asyncio.create_task(_maybe_consolidate(session_id, agent._provider.model, user_id))

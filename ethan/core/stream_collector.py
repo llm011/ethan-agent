@@ -15,7 +15,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from ethan.providers.base import ThinkingEvent, ToolEvent
+from ethan.providers.base import SkillsMatchedEvent, ThinkingEvent, ToolEvent
 
 
 class StreamCollector:
@@ -24,6 +24,7 @@ class StreamCollector:
         self.thought: str = ""
         self.tool_steps: list[dict] = []
         self.a2ui: list = []  # ui_card 工具汇总的 A2UI envelopes（持久化进 assistant 消息）
+        self.matched_skills: list = []  # 本次对话命中的 Skill 列表 [{name, is_default}]
         self._times: dict[str, float] = {}
         self._agent = None  # 可选，用于取 usage
 
@@ -33,12 +34,15 @@ class StreamCollector:
         return self
 
     def feed(self, item: Any) -> str | None:
-        """处理一个 stream_chat 产出项。返回文本块（str）或 None（ToolEvent / ThinkingEvent）。"""
+        """处理一个 stream_chat 产出项。返回文本块（str）或 None（ToolEvent / ThinkingEvent / SkillsMatchedEvent）。"""
         if isinstance(item, ToolEvent):
             self._handle_tool_event(item)
             return None
         if isinstance(item, ThinkingEvent):
             return None  # 思考内容不计入正文
+        if isinstance(item, SkillsMatchedEvent):
+            self.matched_skills = item.skills
+            return None
         # 文本块
         text = item if isinstance(item, str) else getattr(item, "content", "")
         if not text:
@@ -69,6 +73,8 @@ class StreamCollector:
                 "result_detail": "",
                 "thought": pre_thought,
                 "sub_steps": [],
+                "entity_type": item.entity_type or "",
+                "entity_id": item.entity_id or "",
             })
         else:  # done / error
             duration_ms = int(
@@ -84,6 +90,11 @@ class StreamCollector:
                     step["result_preview"] = item.result_preview or ""
                     step["result_detail"] = item.result_detail or ""
                     step["sub_steps"] = item.sub_steps or []
+                    # done/error 时补全 entity_type/entity_id（start 时已设，但兜底）
+                    if not step.get("entity_type") and item.entity_type:
+                        step["entity_type"] = item.entity_type
+                    if not step.get("entity_id") and item.entity_id:
+                        step["entity_id"] = item.entity_id
                     break
 
     @property
