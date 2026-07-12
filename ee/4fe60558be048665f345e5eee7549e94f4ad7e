@@ -1,0 +1,25 @@
+docker-compose.pip.yml
+  s_3c0fe3fada65eb::t_c041627c7dcc40 12
+local-docker.sh
+  s_3c0fe3fada65eb::t_22a3fbb0e9a07a 53,105
+dev-ethan.sh
+  s_3c0fe3fada65eb::t_53343116c4ee12 8,11,14-15,40-45,98,101-107,112,114
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ee4fe60558be048665f345e5eee7549e94f4ad7e",
+  "prompts": {},
+  "sessions": {
+    "s_3c0fe3fada65eb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5f56ab23-1bfa-4ae0-873c-f87346f52574",
+        "model": "unknown"
+      },
+      "human_author": "jsongo <jsongo@qq.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
