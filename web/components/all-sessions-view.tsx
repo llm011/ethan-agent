@@ -3,8 +3,8 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { format } from "date-fns";
 import { zhCN } from "date-fns/locale";
-import { SessionInfo, fetchSessions, renameSession, deleteSession, fetchModes, type ModeEntry } from "@/lib/api";
-import { Loader2, Search, Calendar, MessageSquare, ChevronLeft, ChevronRight, Pencil, Trash2, Check, X } from "lucide-react";
+import { SessionInfo, fetchSessions, renameSession, deleteSession, cleanupTrivialSessions, fetchModes, type ModeEntry } from "@/lib/api";
+import { Loader2, Search, Calendar, MessageSquare, ChevronLeft, ChevronRight, Pencil, Trash2, Check, X, Eraser } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -29,6 +29,8 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
   const [filterMode, setFilterMode] = useState<string>("__all__");
   const [showHeartbeat, setShowHeartbeat] = useState(false);
   const [showScheduled, setShowScheduled] = useState(false);
+  const [cleanupLoading, setCleanupLoading] = useState(false);
+  const [cleanupMsg, setCleanupMsg] = useState("");
   const limit = 20;
 
   useEffect(() => {
@@ -107,6 +109,25 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
     setSessions(prev => prev.filter(s => s.id !== id));
   };
 
+  const doCleanup = async () => {
+    setCleanupLoading(true);
+    setCleanupMsg("");
+    try {
+      const result = await cleanupTrivialSessions();
+      if (result.deleted > 0) {
+        setCleanupMsg(`已清理 ${result.deleted} 个无意义对话`);
+        loadSessions(1, search.trim(), filterSource, filterMode, showHeartbeat, showScheduled);
+      } else {
+        setCleanupMsg("没有需要清理的对话");
+      }
+    } catch {
+      setCleanupMsg("清理失败");
+    } finally {
+      setCleanupLoading(false);
+      setTimeout(() => setCleanupMsg(""), 4000);
+    }
+  };
+
   return (
     <div className="flex-1 flex flex-col h-full bg-background overflow-hidden">
       <ConfirmDialog
@@ -120,6 +141,20 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
       <div className="p-4 border-b border-border flex items-center justify-between gap-3 shrink-0 flex-wrap">
         <h1 className="text-lg font-semibold shrink-0">全部历史对话</h1>
         <div className="flex items-center gap-2 flex-wrap">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 text-xs px-2.5 text-muted-foreground hover:text-foreground"
+            disabled={cleanupLoading}
+            onClick={doCleanup}
+            title="清理试探性对话（hi/hello/你是谁/测试等）"
+          >
+            <Eraser className="h-3.5 w-3.5 mr-1" />
+            {cleanupLoading ? "清理中…" : "清理无意义对话"}
+          </Button>
+          {cleanupMsg && (
+            <span className="text-xs text-muted-foreground">{cleanupMsg}</span>
+          )}
           {/* 心跳/定时 开关 */}
           <Button
             variant={showHeartbeat ? "default" : "outline"}

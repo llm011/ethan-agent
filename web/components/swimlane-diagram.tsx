@@ -5,25 +5,16 @@ import { ArrowRight, ChevronDown, ChevronUp, Loader2, CheckCircle2, XCircle } fr
 import type { ToolStep } from "@/components/tool-timeline";
 
 const ENTITY_CONFIG: Record<string, { label: string; color: string }> = {
-  builtin:       { label: "内置工具",   color: "#6b7280" },
-  file:          { label: "文件操作",   color: "#22c55e" },
-  search:        { label: "搜索",       color: "#3b82f6" },
-  system:        { label: "系统命令",   color: "#a855f7" },
-  browser:       { label: "浏览器",     color: "#f97316" },
-  delegate:      { label: "委派 Agent", color: "#eab308" },
-  computer_use:  { label: "GUI 自动化", color: "#ec4899" },
-  communication: { label: "通信",       color: "#06b6d4" },
-  knowledge:     { label: "知识技能",   color: "#6366f1" },
-  memory:        { label: "记忆",       color: "#14b8a6" },
-  task:          { label: "任务调度",   color: "#f43f5e" },
-  config:        { label: "配置",       color: "#64748b" },
-  ui:            { label: "UI 卡片",    color: "#8b5cf6" },
-  meta:          { label: "元工具",     color: "#71717a" },
+  file:      { label: "文件", color: "#22c55e" },
+  system:    { label: "终端", color: "#a855f7" },
+  knowledge: { label: "知识", color: "#6366f1" },
+  search:    { label: "搜索", color: "#3b82f6" },
+  connect:   { label: "互联", color: "#f97316" },
 };
 
 function getColor(entityType: string | undefined) {
-  if (!entityType) return ENTITY_CONFIG.builtin.color;
-  return ENTITY_CONFIG[entityType]?.color ?? ENTITY_CONFIG.builtin.color;
+  if (!entityType) return ENTITY_CONFIG.connect.color;
+  return ENTITY_CONFIG[entityType]?.color ?? ENTITY_CONFIG.connect.color;
 }
 
 function formatDuration(ms?: number) {
@@ -42,7 +33,7 @@ const PREVIEW_ROWS = 2;
 
 interface SwimlaneDiagramProps {
   steps: ToolStep[];
-  matchedSkills?: { name: string; is_default?: boolean }[];
+  matchedSkills?: { name: string; is_default?: boolean; category?: string }[];
   onStepClick?: (index: number) => void;
 }
 
@@ -51,7 +42,7 @@ export function SwimlaneDiagram({ steps, matchedSkills, onStepClick }: SwimlaneD
   const doneCount = steps.filter((s) => s.state !== "running").length;
   const runCount = steps.filter((s) => s.state === "running").length;
   const hasRunning = runCount > 0;
-  const usedEntities = [...new Set(steps.map((s) => s.entity_type || "builtin"))];
+  const usedEntities = [...new Set(steps.map((s) => s.entity_type || "connect"))];
   const rows: ToolStep[][] = [];
   for (let i = 0; i < steps.length; i += ROW_SIZE) {
     rows.push(steps.slice(i, i + ROW_SIZE));
@@ -101,18 +92,23 @@ export function SwimlaneDiagram({ steps, matchedSkills, onStepClick }: SwimlaneD
       {matchedSkills && matchedSkills.length > 0 && (
         <div className="px-3 pb-1 flex items-center gap-1.5 flex-wrap">
           <span className="text-[10px] text-muted-foreground/60 shrink-0">技能:</span>
-          {matchedSkills.map((s) => (
-            <span
-              key={s.name}
-              className="text-[10px] px-1.5 py-0.5 rounded-full font-medium"
-              style={{
-                backgroundColor: s.is_default ? "#6366f120" : "#f9731620",
-                color: s.is_default ? "#6366f1" : "#f97316",
-              }}
-            >
-              {s.is_default ? "📦 " : "🔌 "}{s.name}
-            </span>
-          ))}
+          {matchedSkills.map((s) => {
+            const cat = s.category || (s.is_default ? "default" : "discoverable");
+            const tierLabel = cat === "default" ? "常驻" : cat === "discoverable" ? "按需" : "插件";
+            const tierColor = cat === "default" ? "#22c55e" : cat === "discoverable" ? "#f59e0b" : "#9ca3af";
+            return (
+              <span
+                key={s.name}
+                className="text-[10px] px-1.5 py-0.5 rounded-full font-medium"
+                style={{
+                  backgroundColor: `${tierColor}18`,
+                  color: tierColor,
+                }}
+              >
+                {tierLabel} · {s.name}
+              </span>
+            );
+          })}
         </div>
       )}
 

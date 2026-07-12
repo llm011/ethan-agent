@@ -398,7 +398,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     const trimmed = text.trim();
     // /btw 先判断，避免被当作未知命令拦截
     const isBtw = trimmed.toLowerCase().startsWith("/btw ");
-    if (trimmed.startsWith("/") && !isBtw) {
+    const isReview = trimmed === "/review" || trimmed.startsWith("/review ") || trimmed.startsWith("/review\t");
+    if (trimmed.startsWith("/") && !isBtw && !isReview) {
       const [cmd, ...rest] = trimmed.slice(1).split(/\s+/);
       const arg = rest.join(" ").trim();
       const now = Date.now() / 1000;
@@ -424,6 +425,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           "- `/sessions` — 列出最近的会话\n" +
           "- `/stop` — 停止当前进行中的回复\n" +
           "- `/btw <问题>` — 不带历史的单轮轻量查询\n" +
+          "- `/review <链接>` — Code review：加载 review 技能分析代码\n" +
           "- `/help` — 显示本帮助\n\n" +
           "（`/model` `/token` 请用顶部下拉和设置页；其它消息正常对话即可）"
         );
@@ -496,6 +498,18 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     }
 
     let content = isBtw ? (btwQuestion ?? text) : text;
+    if (isReview) {
+      const target = trimmed.slice(7).trim();
+      if (!target) {
+        setMessages((prev) => [...prev, {
+          role: "assistant",
+          content: "用法：`/review <PR/MR 链接或描述>`，例如：`/review https://github.com/foo/bar/pull/123`",
+          created_at: Date.now() / 1000,
+        }]);
+        return;
+      }
+      content = `帮我 code review：${target}`;
+    }
     const imageFiles = pendingFiles.filter((f) => f.isImage);
     const nonImageFiles = pendingFiles.filter((f) => !f.isImage);
 
