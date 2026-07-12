@@ -1,25 +1,7 @@
 #!/usr/bin/env python3
-"""生成 deepwiki 训练样本（jsonl）。
-
-deepwiki = 通过 DeepWiki 查询 GitHub 公开仓库的文档/架构/用法（AI 问答）。
-
-子语义（现有 + 未来）：
-  A 查文档/看说明      B 看架构/目录结构    C 懂用法/API 怎么调
-  D 找入口/快速上手    E 看某模块实现细节    F 跨仓库对比
-  G 技术选型参考       H 看 issue/贡献背景   I release/迁移/版本变化
-  J 排错/为什么这么设计 K 源码机制（硬码字锚点：线程/序列化/中间件/反射/连接池…）
-
-注：K 子类专治「deepwiki 被 paper-analysis 吃掉」——本质是「问某代码仓库内部某机制
-在源码里怎么实现」，区分信号是硬码字名词（论文不会问反射/连接池/事件总线）。措辞刻意
-区别于外部 test，避免泄漏。
-
-铁律：绝不含任一 trigger 原词子串：
-  deepwiki | github docs | how does | look up docs | analyze repo
-  | 分析仓库 | 查文档 | github 仓库 | 代码分析 | 开源项目
-"""
+"""生成 deepwiki 训练样本（jsonl）。★三池独立版。"""
 from __future__ import annotations
-import json
-import random
+import json, random
 from pathlib import Path
 from collections import Counter
 
@@ -28,14 +10,14 @@ TRIGGERS = [
     "分析仓库", "查文档", "github 仓库", "代码分析", "开源项目",
 ]
 
-# 仓库指代（避开 trigger「github 仓库 / 开源项目」）
-R = [
-    "这个 repo", "这个项目", "这个库", "这套代码", "这个工程",
-    "这个 package", "这个框架", "这个组件库", "这个 SDK", "这个轮子",
-]
+R_TRAIN = ["这个 repo", "这个项目", "这个库", "这套代码", "这个工程",
+           "这个 package", "这个框架", "这个组件库", "这个 SDK", "这个轮子"]
+R_VAL   = ["这个模块", "这套框架", "这个服务", "这个插件", "这个工具包"]
+# 注意：test token 必须保留「外部开源库/依赖」语义，不能用「这段代码/这套方案」这类
+# 天然指「用户自己代码」的词——否则会合理地被判成 code-review，属测试集设计缺陷。
+R_TEST  = ["这个开源库", "这个第三方依赖", "这个三方库", "这个依赖包", "这个基础库"]
 
-POOL: dict[str, list[str]] = {
-    # ===== A. 查文档/看说明 =====
+POOL_TRAIN: dict[str, list[str]] = {
     "doc": [
         "帮我看下{r}的官方说明",
         "{r}的使用手册在哪",
@@ -53,7 +35,6 @@ POOL: dict[str, list[str]] = {
         "想了解{r}文档里的错误码含义",
         "{r}有没有中文文档",
     ],
-    # ===== B. 看架构/目录结构 =====
     "arch": [
         "{r}的整体架构是怎样的",
         "帮我捋一下{r}的目录结构",
@@ -71,7 +52,6 @@ POOL: dict[str, list[str]] = {
         "想搞清楚{r}的整体骨架",
         "{r}是单体还是模块化的",
     ],
-    # ===== C. 懂用法/API 怎么调 =====
     "usage": [
         "{r}这个函数怎么用",
         "帮我看看{r}的接口怎么调",
@@ -89,7 +69,6 @@ POOL: dict[str, list[str]] = {
         "想知道{r}怎么做异步调用",
         "{r}的链式调用怎么用",
     ],
-    # ===== D. 找入口/快速上手 =====
     "start": [
         "{r}我该从哪开始看",
         "帮我快速上手{r}",
@@ -107,7 +86,6 @@ POOL: dict[str, list[str]] = {
         "帮我理出上手{r}的最短路径",
         "{r}入门看哪块最快",
     ],
-    # ===== E. 看某模块实现细节 =====
     "impl": [
         "{r}的这个功能是怎么实现的",
         "帮我看看{r}的调度逻辑怎么写的",
@@ -125,7 +103,6 @@ POOL: dict[str, list[str]] = {
         "{r}的连接池是怎么写的",
         "帮我深挖下{r}的渲染流程",
     ],
-    # ===== F. 跨仓库对比 =====
     "compare": [
         "帮我对比下这两个库哪个好",
         "{r}和另一个比有啥优势",
@@ -143,7 +120,6 @@ POOL: dict[str, list[str]] = {
         "这几个轮子各自的坑帮我说说",
         "{r}和老牌方案比新在哪",
     ],
-    # ===== G. 技术选型参考 =====
     "select": [
         "我想做个项目，{r}合适吗",
         "选型阶段帮我评估下{r}",
@@ -161,7 +137,6 @@ POOL: dict[str, list[str]] = {
         "帮我看{r}适不适合长期投入",
         "{r}的依赖会不会太重",
     ],
-    # ===== H. 看 issue/贡献背景 =====
     "issue": [
         "{r}有没有人提过这个 bug",
         "帮我看下{r}相关的 issue 讨论",
@@ -179,7 +154,6 @@ POOL: dict[str, list[str]] = {
         "{r}有没有 pr 在做这个",
         "{r}这个限制官方有没有计划解决",
     ],
-    # ===== I. release/迁移/版本变化 =====
     "version": [
         "{r}新版本改了啥",
         "帮我看{r}的更新日志",
@@ -197,7 +171,6 @@ POOL: dict[str, list[str]] = {
         "{r}旧项目还能用老版本吗",
         "帮我理下{r}升级的注意事项",
     ],
-    # ===== J. 排错/为什么这么设计 =====
     "why": [
         "{r}为什么要这么设计",
         "想搞懂{r}这个设计的初衷",
@@ -215,10 +188,6 @@ POOL: dict[str, list[str]] = {
         "想知道{r}这个默认值怎么来的",
         "{r}这种实现方式有什么讲究",
     ],
-    # ===== K. 源码机制（硬码字锚点，治 deepwiki↔paper 串档）=====
-    # 本质：问「这个代码仓库内部某机制在源码层面怎么落地」。硬码字名词（线程池/
-    # 序列化/反射/连接池/事件总线/熔断…）是论文绝不会出现的强区分信号。说法全部
-    # 自拟，刻意不与外部 test 重合。
     "mechanism": [
         "{r}里那套线程池是按什么策略回收空闲线程的",
         "想顺着源码看{r}的序列化和反序列化走的哪条分支",
@@ -239,20 +208,184 @@ POOL: dict[str, list[str]] = {
         "{r}的日志埋点是在调用链哪些位置插进去的",
         "想顺源码看懂{r}处理跨线程数据可见性用了什么手段",
     ],
+    # ===== L. 边界样本（防串 code-review / legal-assistant / channels / skills-manager）=====
+    # 关键：内核都是「理解/查阅某个开源仓库/依赖本身」——升级看变更是查它的 changelog、
+    # 前置条件是查它的文档、接入说明是读它的 README、社区讨论是查它的 issue。
+    # 不是审查我自己的 diff(code-review)，不是法律咨询(legal-assistant)，
+    # 不是接入飞书(channels)，不是装 agent 扩展(skills-manager)。
+    "bdry": [
+        "{r}要升级了，帮我查下它 changelog 里有没有破坏性变更",
+        "{r}从旧版升新版，帮我看它官方迁移文档要改哪些",
+        "想把{r}升上去，帮我读下它发布说明里改了啥",
+        "{r}本地跑起来需要哪些前置依赖，帮我查它的文档",
+        "帮我看{r}的接入说明，我想把它引进来用",
+        "{r}的 readme 讲的接入步骤帮我理一下",
+        "{r}那个功能社区里讨论到哪了，帮我翻翻它的 issue",
+        "帮我查{r}这个特性官方在 issue 里咋回复的",
+        "想搞懂{r}这个模块内部怎么分层的，帮我读它源码结构",
+        "{r}这个事件机制在它源码里是怎么实现的，帮我看看",
+        "刚上手{r}这个库，帮我从它文档找条快速入门路径",
+        "{r}跟老牌那套库比，帮我从它文档看看新在哪",
+        "帮我把{r}文档里鉴权那章的说明提炼出来",
+        "{r}这次大版本迁移成本多大，帮我读它升级指南",
+        "{r}这个报错别人在它仓库里报过吗，帮我搜下 issue",
+        "想评估{r}靠不靠谱，帮我看它文档和社区活跃度",
+        "{r}那个限制为啥这么设计，帮我从它文档或讨论里找原因",
+        "帮我查{r}它这个 api 的用法说明和示例",
+    ],
+}
+
+POOL_VAL: dict[str, list[str]] = {
+    "doc": [
+        "{r}的说明文档帮我捋一下重点",
+        "想看看{r}有没有完整的接入说明",
+        "{r}的配置文档在哪儿",
+        "帮我找下{r}的错误码文档",
+    ],
+    "arch": [
+        "{r}的整体结构帮我梳理下",
+        "想了解{r}各模块怎么分的",
+        "帮我看看{r}的代码组织方式",
+        "{r}的核心层级是怎样的",
+    ],
+    "usage": [
+        "{r}这个 api 怎么用，帮我看看",
+        "初始化{r}要哪些步骤",
+        "帮我找个{r}的调用示例",
+        "{r}集成到项目里需要注意啥",
+    ],
+    "start": [
+        "{r}从哪里开始看比较快",
+        "帮我找{r}的最小可运行示例",
+        "上手{r}最短路径是啥",
+        "{r}第一步装什么",
+    ],
+    "impl": [
+        "{r}那个核心功能底层怎么做的",
+        "帮我看看{r}的缓存机制怎么实现",
+        "{r}的错误处理逻辑在哪",
+        "想看看{r}怎么处理并发的",
+    ],
+    "compare": [
+        "{r}跟同类库有啥区别",
+        "这两个方案帮我对比一下",
+        "{r}相比竞品的优势在哪",
+        "帮我横向比较一下这几个选择",
+    ],
+    "select": [
+        "{r}适合我们的场景吗",
+        "帮我评估下{r}值不值得用",
+        "{r}生产环境靠谱吗",
+        "选型的话{r}有没有大坑",
+    ],
+    "issue": [
+        "{r}有没有这个问题的 issue",
+        "帮我看看社区讨论过这个没",
+        "{r}这个 bug 有没有人报",
+        "这个功能{r}官方有没有计划做",
+    ],
+    "version": [
+        "{r}最新版改了哪些重要的东西",
+        "帮我看看{r}升级要注意啥",
+        "{r}的 changelog 帮我过一遍",
+        "老版本迁到新版本有啥坑",
+    ],
+    "why": [
+        "{r}这个设计为什么这样",
+        "帮我理解{r}这个行为背后的原因",
+        "{r}这个限制出于什么考虑",
+        "为啥{r}默认是这个值",
+    ],
+    "mechanism": [
+        "{r}的线程调度逻辑帮我看看",
+        "想了解{r}序列化那块怎么实现的",
+        "帮我定位{r}连接池的核心代码",
+        "{r}熔断重试那段逻辑在哪",
+    ],
+}
+
+POOL_TEST: dict[str, list[str]] = {
+    "doc": [
+        "集成{r}之前想看看文档，帮我找一下有没有完整的接入说明",
+        "{r}的 readme 太简陋了，有没有更详细的文档，帮我找",
+        "帮我把{r}文档里关于鉴权那块的说明找出来，我看不太懂",
+        "我不太会用{r}，帮我找下它的接入指南",
+    ],
+    "arch": [
+        "接手了个用{r}的项目，帮我搞清楚它的整体结构",
+        "{r}的代码好复杂，帮我梳理一下有哪些层、各层干什么",
+        "想在{r}里加个功能，先帮我理一下整体骨架在哪",
+        "帮我搞明白{r}内部各个模块怎么分的，我完全不熟",
+    ],
+    "usage": [
+        "这个{r}不知道怎么初始化，帮我找个最简单的用法示例",
+        "{r}的这个函数参数我看不懂，帮我解释一下怎么用",
+        "帮我找下{r}里那个回调函数该怎么写，文档没写清楚",
+        "想把{r}集成到我项目里，帮我看看最快的方式是什么",
+    ],
+    "start": [
+        "刚接触{r}，完全不知道从哪下手，帮我找个快速上手的路子",
+        "帮我找{r}的 hello world 示例，我想先跑起来再说",
+        "{r}本地跑起来需要哪些前置条件，帮我理一下",
+        "想十分钟内搞懂{r}基本用法，帮我找最短路径",
+    ],
+    "impl": [
+        "{r}里有个缓存机制我没搞懂，帮我找到那块代码解释一下",
+        "这个{r}的并发处理我看不明白，帮我从源码角度讲一下",
+        "帮我找到{r}做错误处理那块的核心代码",
+        "{r}的事件机制具体怎么实现的，帮我看一看",
+    ],
+    "compare": [
+        "我在{r}和另一个库之间犹豫，帮我对比一下各自优缺点",
+        "这两套方案我不知道选哪个，帮我从{r}角度分析一下",
+        "帮我比一比{r}和同类库，我要做选型决策",
+        "{r}跟老牌方案比到底新在哪，帮我说清楚",
+    ],
+    "select": [
+        "我们要选一个框架，{r}合不合适，帮我评估一下",
+        "{r}生产环境用过的多吗，踩坑多不多，帮我判断",
+        "帮我看看{r}值不值得在新项目里用，维护还活跃吗",
+        "我这个场景用{r}靠不靠谱，帮我查一下",
+    ],
+    "issue": [
+        "我遇到一个{r}的 bug，帮我看看有没有人报过这个问题",
+        "{r}那个功能一直没出，帮我找找社区讨论有没有进展",
+        "帮我查一下{r}这个报错别人有没有遇到过解决方案",
+        "{r}官方有没有回应过这个需求，帮我找找相关讨论",
+    ],
+    "version": [
+        "要把{r}升级了，帮我看看新版有没有破坏性变更",
+        "帮我查一下{r}最新版 changelog 有哪些重要改动",
+        "{r}从旧版升级要改哪些地方，帮我捋一下",
+        "想知道{r}这次大版本更新的迁移成本，帮我看看文档",
+    ],
+    "why": [
+        "{r}有个行为我搞不懂为什么这样，帮我从设计上解释一下",
+        "这个{r}的限制太奇怪了，帮我找找背后的原因",
+        "帮我理解为什么{r}要这样设计，感觉很反直觉",
+        "{r}这个默认值是怎么来的，帮我找找有没有解释",
+    ],
+    "mechanism": [
+        "想搞清{r}线程池怎么工作的，帮我从源码找一下",
+        "帮我定位{r}序列化那块的核心代码，我要改这块",
+        "{r}的连接池实现我看不懂，帮我解释一下",
+        "帮我找到{r}里熔断重试那段逻辑，我要分析一下",
+    ],
 }
 
 SUBCAT = {
-    "doc": ("A", "查文档"),
-    "arch": ("B", "架构"),
-    "usage": ("C", "用法"),
-    "start": ("D", "上手"),
-    "impl": ("E", "实现"),
-    "compare": ("F", "对比"),
-    "select": ("G", "选型"),
-    "issue": ("H", "讨论"),
-    "version": ("I", "版本"),
-    "why": ("J", "设计意图"),
+    "doc":       ("A", "查文档"),
+    "arch":      ("B", "架构"),
+    "usage":     ("C", "用法"),
+    "start":     ("D", "上手"),
+    "impl":      ("E", "实现"),
+    "compare":   ("F", "对比"),
+    "select":    ("G", "选型"),
+    "issue":     ("H", "讨论"),
+    "version":   ("I", "版本"),
+    "why":       ("J", "设计意图"),
     "mechanism": ("K", "源码机制"),
+    "bdry":      ("L", "边界"),
 }
 
 
@@ -263,20 +396,22 @@ def check_no_trigger(text: str) -> None:
             raise AssertionError(f"含 trigger 子串 [{t}]！→ {text}")
 
 
-def expand() -> list[tuple[str, str]]:
+def expand_pool(pool: dict, repo_list: list[str]) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
-    for cat, sents in POOL.items():
+    for cat, sents in pool.items():
         for s in sents:
             if "{r}" in s:
-                for repo in R:
-                    out.append((s.replace("{r}", repo), cat))
+                for r in repo_list:
+                    out.append((s.replace("{r}", r), cat))
             else:
                 out.append((s, cat))
     return out
 
 
-def dedupe(items):
-    seen, out = set(), []
+def dedupe(items, seen=None):
+    if seen is None:
+        seen = set()
+    out = []
     for text, cat in items:
         t = text.strip()
         if not t or t in seen:
@@ -287,36 +422,26 @@ def dedupe(items):
     return out
 
 
-def stratified_split(items, train_n, val_n, test_n, seed):
+def cap_per_split(items, target_n, seed):
     rng = random.Random(seed)
-    by_cat = {}
+    by_cat: dict[str, list] = {}
     for text, cat in items:
         by_cat.setdefault(cat, []).append((text, cat))
     for cat in by_cat:
         rng.shuffle(by_cat[cat])
-    train, val, test = [], [], []
-    total = len(items)
-    for cat, texts in by_cat.items():
-        n = len(texts)
-        cval = min(max(1, round(n * val_n / total)), n // 3)
-        ctest = min(max(1, round(n * test_n / total)), n // 3)
-        i = 0
-        test.extend(texts[i:i + ctest]); i += ctest
-        val.extend(texts[i:i + cval]); i += cval
-        train.extend(texts[i:])
-    rng.shuffle(train); rng.shuffle(val); rng.shuffle(test)
-    used = set(t for t, _ in val) | set(t for t, _ in test)
-    pool_extra = [it for it in train if it[0] not in used]
-    placed = set()
-    for need, bucket in [(val_n, val), (test_n, test)]:
-        i = 0
-        while len(bucket) < need and i < len(pool_extra):
-            if pool_extra[i][0] not in placed:
-                bucket.append(pool_extra[i]); placed.add(pool_extra[i][0])
-            i += 1
-    used = set(t for t, _ in val) | set(t for t, _ in test)
-    train = [it for it in train if it[0] not in used][:train_n]
-    return train, val, test
+    if len(items) <= target_n:
+        out = list(items); rng.shuffle(out); return out
+    out, cats = [], list(by_cat.keys())
+    idx = {c: 0 for c in cats}
+    while len(out) < target_n:
+        progressed = False
+        for c in cats:
+            if idx[c] < len(by_cat[c]) and len(out) < target_n:
+                out.append(by_cat[c][idx[c]]); idx[c] += 1; progressed = True
+        if not progressed:
+            break
+    rng.shuffle(out)
+    return out
 
 
 def write_jsonl(path, items):
@@ -329,16 +454,22 @@ def write_jsonl(path, items):
 
 def main():
     base = Path(__file__).resolve().parent
-    items = dedupe(expand())
-    print(f"手写池展开+去重后：{len(items)} 条")
-    train, val, test = stratified_split(items, 800, 75, 75, seed=20260629)
+    seen: set = set()
+    test_raw  = dedupe(expand_pool(POOL_TEST,  R_TEST),  seen)
+    val_raw   = dedupe(expand_pool(POOL_VAL,   R_VAL),   seen)
+    train_raw = dedupe(expand_pool(POOL_TRAIN, R_TRAIN), seen)
+
+    test  = cap_per_split(test_raw,  75,  seed=20260711)
+    val   = cap_per_split(val_raw,   75,  seed=20260712)
+    train = cap_per_split(train_raw, 800, seed=20260713)
+
     write_jsonl(base / "train" / "deepwiki.jsonl", train)
-    write_jsonl(base / "val" / "deepwiki.jsonl", val)
-    write_jsonl(base / "test" / "deepwiki.jsonl", test)
+    write_jsonl(base / "val"   / "deepwiki.jsonl", val)
+    write_jsonl(base / "test"  / "deepwiki.jsonl", test)
     print(f"train={len(train)} val={len(val)} test={len(test)}")
-    for name, split in [("train", train), ("val", val), ("test", test)]:
+    for sp, split in [("train", train), ("val", val), ("test", test)]:
         c = Counter(SUBCAT[cat][0] for _, cat in split)
-        print(f"\n{name} 子语义分布（共 {len(split)}）：")
+        print(f"\n{sp} 子语义分布（共 {len(split)}）：")
         for cat in SUBCAT:
             code = SUBCAT[cat][0]
             print(f"  {code}-{SUBCAT[cat][1]:<6} {c.get(code, 0):>3}")

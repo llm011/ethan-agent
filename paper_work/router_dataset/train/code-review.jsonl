@@ -1,0 +1,500 @@
+{"text": "这次热修的改动帮我快速过一遍看有没有雷？", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这次改的地方帮我说说哪里能更稳妥些呢", "label": "code-review", "subcat": "F-建议"}
+{"text": "只看这次动过的地方就行，帮我评一评稳不稳？", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这里改完之后 token 校验还在不在，帮我确认呢", "label": "code-review", "subcat": "D-安全"}
+{"text": "帮我看看这次改的地方能不能少几次网络往返吗", "label": "code-review", "subcat": "E-性能"}
+{"text": "这段改动在空列表的时候会不会报错，帮我想想啊", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "不是让你重写，就把这次的改动帮我把把关啊", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "帮我评一评这次改动，顺便说说哪能更好？", "label": "code-review", "subcat": "F-建议"}
+{"text": "帮我把这个补丁通读评一遍啊", "label": "code-review", "subcat": "B-改动"}
+{"text": "帮我核一下这段改动的数据库调用是不是太多？", "label": "code-review", "subcat": "E-性能"}
+{"text": "这次热修的改动帮我快速过一遍看有没有雷吗", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "帮我把这段变更前后对比着看看改得妥不妥？", "label": "code-review", "subcat": "B-改动"}
+{"text": "这个补丁里有没有一眼能看出来的 bug呢", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "帮我看看这段循环会不会越界啊", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "帮我核一下这段改动的数据库调用是不是太多吗", "label": "code-review", "subcat": "E-性能"}
+{"text": "就这段刚提交的变更，帮我判断下能不能放行啊", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这段提交哪里还能优化，帮我说说？", "label": "code-review", "subcat": "F-建议"}
+{"text": "别帮我写新功能，先把这次已有的变更评审掉？", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "帮我看看这次改动有没有越权的口子？", "label": "code-review", "subcat": "D-安全"}
+{"text": "这个同事提的改动我不放心，帮我挑挑毛病吗", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这段新代码的可维护性帮我提点改进思路呢", "label": "code-review", "subcat": "F-建议"}
+{"text": "这段改动的错误处理帮我提点建议怎么补啊", "label": "code-review", "subcat": "F-建议"}
+{"text": "这个 MR 你觉得能直接合还是得先改改？", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "帮我看看这次改动有没有把别的地方带坏啊", "label": "code-review", "subcat": "B-改动"}
+{"text": "帮我核对下这次改动有没有反序列化的隐患啊", "label": "code-review", "subcat": "D-安全"}
+{"text": "这次改动里哪些可以顺手重构，帮我点一点呢", "label": "code-review", "subcat": "F-建议"}
+{"text": "这段改动把权限判断挪了位置，会不会出漏洞呢", "label": "code-review", "subcat": "D-安全"}
+{"text": "帮我评一评这次改动，顺便说说哪能更好啊", "label": "code-review", "subcat": "F-建议"}
+{"text": "这个改动合不合理，你帮我掂量下吗", "label": "code-review", "subcat": "B-改动"}
+{"text": "帮我核一下这次改的地方有没有路径穿越的风险呢", "label": "code-review", "subcat": "D-安全"}
+{"text": "帮我看看这次改动有没有越权的口子呢", "label": "code-review", "subcat": "D-安全"}
+{"text": "这次改的分支判断齐不齐，有没有落下的情况啊", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "帮我瞅瞅这次提交有没有把 IO 放进了循环里啊", "label": "code-review", "subcat": "E-性能"}
+{"text": "帮我把这段变更前后对比着看看改得妥不妥啊", "label": "code-review", "subcat": "B-改动"}
+{"text": "这里改完会不会内存泄漏，帮我核一下啊", "label": "code-review", "subcat": "E-性能"}
+{"text": "这个改动帮我核一核是不是符合预期", "label": "code-review", "subcat": "B-改动"}
+{"text": "不是让你读懂全仓库，就评这次改的这几个文件吗", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这个 patch 靠谱吗，帮我看看？", "label": "code-review", "subcat": "B-改动"}
+{"text": "这段改动有没有埋 bug，帮我找找啊", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "帮我把这次变更的每个文件都过一遍呢", "label": "code-review", "subcat": "B-改动"}
+{"text": "这次改的地方帮我说说哪里能更稳妥些啊", "label": "code-review", "subcat": "F-建议"}
+{"text": "这段改动的错误处理帮我提点建议怎么补吗", "label": "code-review", "subcat": "F-建议"}
+{"text": "这次改动风险大不大，帮我单独评估下再放行啊", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这个改法在数据量大的时候扛不扛得住，我想想？", "label": "code-review", "subcat": "E-性能"}
+{"text": "不用理解整个项目，就这次 diff 帮我把关呢", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这段改动会不会导致重复加载同一份数据，帮我看看呢", "label": "code-review", "subcat": "E-性能"}
+{"text": "帮我把这次这个合并请求整体捋一遍给意见呢", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "帮我确认下这次改动在极端输入下会不会挂呢", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "这次改动帮我从头到尾捋一遍呢", "label": "code-review", "subcat": "B-改动"}
+{"text": "这次上线的变更帮我评审下风险点吗", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这次回滚补丁帮我审一审改得对不对再合？", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "帮我把这次这个合并请求整体捋一遍给意见？", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "这个同事提的改动我不放心，帮我挑挑毛病？", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这段改动把权限判断挪了位置，会不会出漏洞吗", "label": "code-review", "subcat": "D-安全"}
+{"text": "这次的修改帮我通读一遍有没有漏改的啊", "label": "code-review", "subcat": "B-改动"}
+{"text": "就这段刚提交的变更，帮我判断下能不能放行？", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这次提交动了不少地方，帮我逐处确认下呢", "label": "code-review", "subcat": "B-改动"}
+{"text": "帮我看看这段循环里的查询是不是太频繁了", "label": "code-review", "subcat": "E-性能"}
+{"text": "这次热修的改动帮我快速过一遍看有没有雷啊", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "帮我瞧瞧这次提交会不会引入 XSS 那类问题呢", "label": "code-review", "subcat": "D-安全"}
+{"text": "这段新写的会不会频繁触发 GC，帮我看看啊", "label": "code-review", "subcat": "E-性能"}
+{"text": "这个 PR 我想合了，你先帮我确认没问题吗", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "这个 MR 你觉得能直接合还是得先改改吗", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "我提了个 PR，麻烦你过一遍给个意见？", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "这个 PR 我想合了，你先帮我确认没问题", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "帮我看看这里改完之后有没有大对象没释放啊", "label": "code-review", "subcat": "E-性能"}
+{"text": "这个改动合不合理，你帮我掂量下？", "label": "code-review", "subcat": "B-改动"}
+{"text": "帮我评审下这个合并请求，看有没有拦路的问题", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "帮我瞅瞅这次改动有没有该加缓存没加的地方呢", "label": "code-review", "subcat": "E-性能"}
+{"text": "这个 PR 提交上去之前你先帮我把关一下呢", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "帮我确认下这段改动没在热点路径上做重活呢", "label": "code-review", "subcat": "E-性能"}
+{"text": "帮我瞅瞅这段改动的鉴权是不是漏了一环？", "label": "code-review", "subcat": "D-安全"}
+{"text": "帮我看看这里改完之后有没有大对象没释放吗", "label": "code-review", "subcat": "E-性能"}
+{"text": "这里拼 SQL 的改法会不会被注入，帮我核一下", "label": "code-review", "subcat": "D-安全"}
+{"text": "这里拼 SQL 的改法会不会被注入，帮我核一下？", "label": "code-review", "subcat": "D-安全"}
+{"text": "帮我看看这次改的地方能不能少几次网络往返？", "label": "code-review", "subcat": "E-性能"}
+{"text": "这个改动的接口设计帮我给点评审意见吗", "label": "code-review", "subcat": "F-建议"}
+{"text": "只看这次动过的地方就行，帮我评一评稳不稳呢", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "帮我把这次变更的每个文件都过一遍", "label": "code-review", "subcat": "B-改动"}
+{"text": "帮我把这次提交的内容整体捋顺看有没有坑吗", "label": "code-review", "subcat": "B-改动"}
+{"text": "这个 patch 里的每处改动帮我都过一下呢", "label": "code-review", "subcat": "B-改动"}
+{"text": "帮我把这次的 diff 逐行看看有没有改错啊", "label": "code-review", "subcat": "B-改动"}
+{"text": "这里改完之后 token 校验还在不在，帮我确认吗", "label": "code-review", "subcat": "D-安全"}
+{"text": "帮我核对下这次改动的返回值对不对", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "帮我给这次改动提点修改建议", "label": "code-review", "subcat": "F-建议"}
+{"text": "这个 MR 里改了不少东西，帮我逐个看下靠不靠谱？", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "这个改动接收外部参数，帮我看看有没有过滤干净吗", "label": "code-review", "subcat": "D-安全"}
+{"text": "帮我看看这次变更有没有可以抽成函数的重复块吗", "label": "code-review", "subcat": "F-建议"}
+{"text": "这段新写的有没有边界情况没考虑到啊", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "帮我把这个 PR 通读一遍看能不能合啊", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "帮我看看这里改完之后连接有没有及时关掉？", "label": "code-review", "subcat": "E-性能"}
+{"text": "这段改动会不会在边界上多算或少算一次啊", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "这个 PR 里的几处改动帮我逐条过一遍吗", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "这个改法在数据量大的时候扛不扛得住，我想想啊", "label": "code-review", "subcat": "E-性能"}
+{"text": "帮我把这次提交的内容整体捋顺看有没有坑呢", "label": "code-review", "subcat": "B-改动"}
+{"text": "这个改动接收外部参数，帮我看看有没有过滤干净？", "label": "code-review", "subcat": "D-安全"}
+{"text": "帮我看看这次改的地方有没有竞态问题啊", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "这次发版前的改动帮我逐条评审下有没有隐患吗", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这段提交改得干不干净，帮我瞄一眼？", "label": "code-review", "subcat": "B-改动"}
+{"text": "帮我瞧瞧这次提交会不会引入 XSS 那类问题", "label": "code-review", "subcat": "D-安全"}
+{"text": "这次变更帮我逐条过一遍看有没有改歪吗", "label": "code-review", "subcat": "B-改动"}
+{"text": "这段提交把用户输入直接用了，安不安全帮我判断", "label": "code-review", "subcat": "D-安全"}
+{"text": "这段改动在空列表的时候会不会报错，帮我想想", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "这个补丁改得对不对，你帮我确认下啊", "label": "code-review", "subcat": "B-改动"}
+{"text": "帮我确认下这次改动没把密钥写进代码里", "label": "code-review", "subcat": "D-安全"}
+{"text": "帮我瞅瞅这段改动的鉴权是不是漏了一环", "label": "code-review", "subcat": "D-安全"}
+{"text": "这次变更会不会拖慢接口响应，帮我判断呢", "label": "code-review", "subcat": "E-性能"}
+{"text": "帮我看看这次变更有没有可以抽成函数的重复块啊", "label": "code-review", "subcat": "F-建议"}
+{"text": "这段提交我不确定改对了没，帮我过一眼呢", "label": "code-review", "subcat": "B-改动"}
+{"text": "帮我确认下这次改动在极端输入下会不会挂？", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "这个 PR 我不太放心，你帮我盯一盯啊", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "帮我核一下这次改的地方有没有路径穿越的风险", "label": "code-review", "subcat": "D-安全"}
+{"text": "帮我给这次变更挑几条值得改的地方啊", "label": "code-review", "subcat": "F-建议"}
+{"text": "这次回滚补丁帮我审一审改得对不对再合", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "不是让你读懂全仓库，就评这次改的这几个文件呢", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "帮我看看这次改的逻辑对不对", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "帮我核一下这段改动的数据库调用是不是太多啊", "label": "code-review", "subcat": "E-性能"}
+{"text": "帮我瞅瞅这次改的登录逻辑会不会被绕过？", "label": "code-review", "subcat": "D-安全"}
+{"text": "这段改动会不会在边界上多算或少算一次呢", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "帮我评审下这个合并请求，看有没有拦路的问题啊", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "帮我瞧瞧这里会不会有空指针的坑", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "这个 MR 里改了不少东西，帮我逐个看下靠不靠谱呢", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "这个改法会不会泄露敏感信息，帮我看看吗", "label": "code-review", "subcat": "D-安全"}
+{"text": "别去啃整个仓库，就盯这次提交的这几处变化？", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "帮我确认下这段改动没在锁里做耗时操作吗", "label": "code-review", "subcat": "E-性能"}
+{"text": "帮我看看这个改法有没有把原来的判断改错？", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "不是让你读懂全仓库，就评这次改的这几个文件？", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这次改动风险大不大，帮我单独评估下再放行呢", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "帮我给这次改动提点修改建议啊", "label": "code-review", "subcat": "F-建议"}
+{"text": "不用理解整个项目，就这次 diff 帮我把关吗", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "我不用你从头写，就这段已有的改动帮我过一遍啊", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这次改的地方有没有更好的写法，帮我出出主意", "label": "code-review", "subcat": "F-建议"}
+{"text": "帮我找找这次提交里逻辑上站不住脚的地方", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "这次改动的判断条件写反了没，帮我核一下吗", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "帮我把这次提交的内容整体捋顺看有没有坑", "label": "code-review", "subcat": "B-改动"}
+{"text": "这个 MR 里改了不少东西，帮我逐个看下靠不靠谱吗", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "帮我瞅瞅这次改动有没有该加缓存没加的地方？", "label": "code-review", "subcat": "E-性能"}
+{"text": "帮我把这个 PR 通读一遍看能不能合", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "这次变更对文件上传的处理安不安全，帮我判断啊", "label": "code-review", "subcat": "D-安全"}
+{"text": "这次改的这块你帮我确认改法对不对", "label": "code-review", "subcat": "B-改动"}
+{"text": "这次变更帮我逐条过一遍看有没有改歪呢", "label": "code-review", "subcat": "B-改动"}
+{"text": "帮我确认下这段改动没在锁里做耗时操作？", "label": "code-review", "subcat": "E-性能"}
+{"text": "帮我找找这次提交里逻辑上站不住脚的地方呢", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "这段改动有没有埋 bug，帮我找找呢", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "别去啃整个仓库，就盯这次提交的这几处变化啊", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这次改动的判断条件写反了没，帮我核一下啊", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "这个 PR 我不太放心，你帮我盯一盯吗", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "这次改动帮我从头到尾捋一遍吗", "label": "code-review", "subcat": "B-改动"}
+{"text": "这个改法在数据量大的时候扛不扛得住，我想想吗", "label": "code-review", "subcat": "E-性能"}
+{"text": "帮我把这个 PR 通读一遍看能不能合吗", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "帮我瞅瞅这次改动有没有该加缓存没加的地方", "label": "code-review", "subcat": "E-性能"}
+{"text": "这个改动帮我核一核是不是符合预期呢", "label": "code-review", "subcat": "B-改动"}
+{"text": "这个改动的接口设计帮我给点评审意见？", "label": "code-review", "subcat": "F-建议"}
+{"text": "帮我看看这里改完之后连接有没有及时关掉呢", "label": "code-review", "subcat": "E-性能"}
+{"text": "这个 PR 我不太放心，你帮我盯一盯呢", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "这段提交我不确定改对了没，帮我过一眼", "label": "code-review", "subcat": "B-改动"}
+{"text": "这次改的地方帮我说说哪里能更稳妥些", "label": "code-review", "subcat": "F-建议"}
+{"text": "这次改动里有没有能提前退出省一轮循环的地方吗", "label": "code-review", "subcat": "E-性能"}
+{"text": "帮我核对下这次改动有没有反序列化的隐患呢", "label": "code-review", "subcat": "D-安全"}
+{"text": "这段新代码的可维护性帮我提点改进思路", "label": "code-review", "subcat": "F-建议"}
+{"text": "这次改动的复杂度会不会一下子高上去啊", "label": "code-review", "subcat": "E-性能"}
+{"text": "帮我看看这段改动会不会有除零那类的坑吗", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "别去啃整个仓库，就盯这次提交的这几处变化呢", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "就这次提交里改的这块，帮我确认能不能上线", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这个改动合不合理，你帮我掂量下呢", "label": "code-review", "subcat": "B-改动"}
+{"text": "帮我看看这次改的逻辑对不对吗", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "帮我给这段提交写几句评审反馈啊", "label": "code-review", "subcat": "F-建议"}
+{"text": "帮我确认这次变更没有把内部接口无意暴露出去", "label": "code-review", "subcat": "D-安全"}
+{"text": "这次改的分支判断齐不齐，有没有落下的情况？", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "帮我看看这次改动有没有把别的地方带坏吗", "label": "code-review", "subcat": "B-改动"}
+{"text": "帮我给这次变更挑几条值得改的地方", "label": "code-review", "subcat": "F-建议"}
+{"text": "帮我把这个待合并的分支改动通读评一遍吗", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "这段新代码的可维护性帮我提点改进思路吗", "label": "code-review", "subcat": "F-建议"}
+{"text": "这里改完会不会内存泄漏，帮我核一下", "label": "code-review", "subcat": "E-性能"}
+{"text": "这段改动在空列表的时候会不会报错，帮我想想吗", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "这次改动的判断条件写反了没，帮我核一下", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "这次改的这几行你帮我瞧瞧有没有毛病呢", "label": "code-review", "subcat": "B-改动"}
+{"text": "帮我把这个改动过一遍看改得对不对吗", "label": "code-review", "subcat": "B-改动"}
+{"text": "帮我确认下这段改动没在锁里做耗时操作呢", "label": "code-review", "subcat": "E-性能"}
+{"text": "帮我给这个改动列几条上线前该改的点", "label": "code-review", "subcat": "F-建议"}
+{"text": "帮我看看这段循环会不会越界？", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "这次变更对文件上传的处理安不安全，帮我判断吗", "label": "code-review", "subcat": "D-安全"}
+{"text": "帮我看看这个改法有没有把原来的判断改错吗", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "帮我看看这次改的能不能拆得更清楚些呢", "label": "code-review", "subcat": "F-建议"}
+{"text": "我提了个 PR，麻烦你过一遍给个意见吗", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "我不用你从头写，就这段已有的改动帮我过一遍", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这段改动的命名和结构帮我提点意见？", "label": "code-review", "subcat": "F-建议"}
+{"text": "帮我瞅瞅这次改的登录逻辑会不会被绕过啊", "label": "code-review", "subcat": "D-安全"}
+{"text": "别帮我写新功能，先把这次已有的变更评审掉啊", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这次变更帮我逐条过一遍看有没有改歪？", "label": "code-review", "subcat": "B-改动"}
+{"text": "帮我看看这段改动有没有把敏感字段直接返回出去吗", "label": "code-review", "subcat": "D-安全"}
+{"text": "帮我把这个改动过一遍看改得对不对呢", "label": "code-review", "subcat": "B-改动"}
+{"text": "这里改完会不会内存泄漏，帮我核一下呢", "label": "code-review", "subcat": "E-性能"}
+{"text": "这个 MR 能不能合，你帮我掂量掂量？", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "帮我核对下这次改动的返回值对不对呢", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "这段新代码的可维护性帮我提点改进思路啊", "label": "code-review", "subcat": "F-建议"}
+{"text": "这个 PR 提交人是新来的，帮我盯细一点吗", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "帮我把这次的 diff 逐行看看有没有改错吗", "label": "code-review", "subcat": "B-改动"}
+{"text": "麻烦帮我把这个合并请求评审下给个结论吗", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "这段提交把用户输入直接用了，安不安全帮我判断？", "label": "code-review", "subcat": "D-安全"}
+{"text": "帮我找找这次改动里潜在的逻辑漏洞吗", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "同事那个合并请求，帮我评一评能不能进主干", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "帮我看看这次改动有没有越权的口子啊", "label": "code-review", "subcat": "D-安全"}
+{"text": "这次热修的改动帮我快速过一遍看有没有雷呢", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "帮我看看这次变更有没有可以抽成函数的重复块？", "label": "code-review", "subcat": "F-建议"}
+{"text": "这次改动风险大不大，帮我单独评估下再放行？", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这里改完之后并发下会不会出问题，帮我看看吗", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "这个 MR 合进去会不会有风险，帮我看看？", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "这段改动有没有埋 bug，帮我找找？", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "这里的循环终止条件对不对，帮我确认啊", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "帮我确认这次变更没有把内部接口无意暴露出去？", "label": "code-review", "subcat": "D-安全"}
+{"text": "这个补丁你觉得还有哪里能改进，帮我列列", "label": "code-review", "subcat": "F-建议"}
+{"text": "这次上线的变更帮我评审下风险点？", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这次发版前的改动帮我逐条评审下有没有隐患呢", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这个改法会不会每次都重复算一遍，帮我看看", "label": "code-review", "subcat": "E-性能"}
+{"text": "这个改动是别人写的，帮我审一审再决定合不合？", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "帮我把这次改动单独拎出来评审，别扯别的模块", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这次变更会不会拖慢接口响应，帮我判断", "label": "code-review", "subcat": "E-性能"}
+{"text": "帮我把这段变更前后对比着看看改得妥不妥呢", "label": "code-review", "subcat": "B-改动"}
+{"text": "帮我瞧瞧这次改动有没有不必要的全表扫描", "label": "code-review", "subcat": "E-性能"}
+{"text": "帮我找找这次提交里逻辑上站不住脚的地方？", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "这段提交哪里还能优化，帮我说说啊", "label": "code-review", "subcat": "F-建议"}
+{"text": "这个合并请求你帮我把把关再放行呢", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "这个 MR 里改了不少东西，帮我逐个看下靠不靠谱", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "这里改完之后并发下会不会出问题，帮我看看", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "这段提交哪里还能优化，帮我说说", "label": "code-review", "subcat": "F-建议"}
+{"text": "帮我把这个 PR 通读一遍看能不能合呢", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "帮我看看这个改法有没有把原来的判断改错呢", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "这个改动是别人写的，帮我审一审再决定合不合呢", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这个 MR 里改了不少东西，帮我逐个看下靠不靠谱啊", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "我提了个 PR，麻烦你过一遍给个意见", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "帮我评审下这个合并请求，看有没有拦路的问题？", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "这段提交里有没有可以合并的重复请求，帮我找找呢", "label": "code-review", "subcat": "E-性能"}
+{"text": "这个改动接收外部参数，帮我看看有没有过滤干净呢", "label": "code-review", "subcat": "D-安全"}
+{"text": "帮我瞧瞧这次改动会不会有 N+1 查询？", "label": "code-review", "subcat": "E-性能"}
+{"text": "这里的循环终止条件对不对，帮我确认？", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "这次变更有没有安全隐患，帮我看看", "label": "code-review", "subcat": "D-安全"}
+{"text": "帮我把这次改动单独拎出来评审，别扯别的模块啊", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这个改动的接口设计帮我给点评审意见啊", "label": "code-review", "subcat": "F-建议"}
+{"text": "这个改法会不会每次都重复算一遍，帮我看看？", "label": "code-review", "subcat": "E-性能"}
+{"text": "帮我给这次改动提点修改建议呢", "label": "code-review", "subcat": "F-建议"}
+{"text": "这里改完之后 token 校验还在不在，帮我确认啊", "label": "code-review", "subcat": "D-安全"}
+{"text": "麻烦帮我把这个合并请求评审下给个结论呢", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "这次变更帮我逐条过一遍看有没有改歪啊", "label": "code-review", "subcat": "B-改动"}
+{"text": "这段改动会不会导致重复加载同一份数据，帮我看看", "label": "code-review", "subcat": "E-性能"}
+{"text": "这个改法有没有更简洁的方式，帮我建议下", "label": "code-review", "subcat": "F-建议"}
+{"text": "我这个 PR 想请你把把关再点同意", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "帮我确认这次变更没有把内部接口无意暴露出去啊", "label": "code-review", "subcat": "D-安全"}
+{"text": "这次改动帮我从头到尾捋一遍？", "label": "code-review", "subcat": "B-改动"}
+{"text": "帮我核一下这次改的地方有没有路径穿越的风险？", "label": "code-review", "subcat": "D-安全"}
+{"text": "帮我瞅瞅这次改的登录逻辑会不会被绕过", "label": "code-review", "subcat": "D-安全"}
+{"text": "这个改动要紧急上，帮我评审下有没有拦路问题？", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这个改法有没有漏掉异常没处理呢", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "麻烦帮我把这个合并请求评审下给个结论", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "这个改动帮我核一核是不是符合预期？", "label": "code-review", "subcat": "B-改动"}
+{"text": "这段改动把权限判断挪了位置，会不会出漏洞", "label": "code-review", "subcat": "D-安全"}
+{"text": "这段改动会不会导致重复加载同一份数据，帮我看看？", "label": "code-review", "subcat": "E-性能"}
+{"text": "帮我给这次变更挑几条值得改的地方？", "label": "code-review", "subcat": "F-建议"}
+{"text": "这次的修改帮我通读一遍有没有漏改的呢", "label": "code-review", "subcat": "B-改动"}
+{"text": "帮我看看这次改的地方能不能少几次网络往返呢", "label": "code-review", "subcat": "E-性能"}
+{"text": "这个改动接收外部参数，帮我看看有没有过滤干净啊", "label": "code-review", "subcat": "D-安全"}
+{"text": "这个补丁里有没有一眼能看出来的 bug吗", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "不用理解整个项目，就这次 diff 帮我把关？", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "同事临时塞的这个改动，帮我盯一盯别出事吗", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这次变更有没有可能被绕过校验，帮我想想？", "label": "code-review", "subcat": "D-安全"}
+{"text": "帮我核一下这段改动的数据库调用是不是太多呢", "label": "code-review", "subcat": "E-性能"}
+{"text": "只针对这次的变更给意见，其他历史代码先别动", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "别去啃整个仓库，就盯这次提交的这几处变化", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "帮我把这个补丁里改动的地方都过一遍？", "label": "code-review", "subcat": "B-改动"}
+{"text": "这次变更有没有可能被绕过校验，帮我想想啊", "label": "code-review", "subcat": "D-安全"}
+{"text": "帮我挑挑这段提交里值得打磨的细节啊", "label": "code-review", "subcat": "F-建议"}
+{"text": "帮我挑挑这段提交里值得打磨的细节呢", "label": "code-review", "subcat": "F-建议"}
+{"text": "帮我确认下这次改动没把密钥写进代码里啊", "label": "code-review", "subcat": "D-安全"}
+{"text": "帮我看看这段改动会不会有除零那类的坑？", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "这次改的这块你帮我确认改法对不对？", "label": "code-review", "subcat": "B-改动"}
+{"text": "这次改的地方有没有更好的写法，帮我出出主意吗", "label": "code-review", "subcat": "F-建议"}
+{"text": "这个 PR 提交上去之前你先帮我把关一下", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "这段新代码性能怎么样，帮我看看吗", "label": "code-review", "subcat": "E-性能"}
+{"text": "帮我把这个待合并的分支改动通读评一遍呢", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "这个改法有没有更简洁的方式，帮我建议下呢", "label": "code-review", "subcat": "F-建议"}
+{"text": "这个改动要紧急上，帮我评审下有没有拦路问题呢", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "帮我瞧瞧这段改动会不会有注入风险吗", "label": "code-review", "subcat": "D-安全"}
+{"text": "这个 patch 靠谱吗，帮我看看呢", "label": "code-review", "subcat": "B-改动"}
+{"text": "这个 PR 提交人是新来的，帮我盯细一点呢", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "这次改动的复杂度会不会一下子高上去呢", "label": "code-review", "subcat": "E-性能"}
+{"text": "帮我看看这段循环会不会越界吗", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "帮我看看这段改动会不会有除零那类的坑呢", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "这段改动有没有埋 bug，帮我找找吗", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "帮我核对下这次改动有没有反序列化的隐患？", "label": "code-review", "subcat": "D-安全"}
+{"text": "这次改动里有没有能提前退出省一轮循环的地方啊", "label": "code-review", "subcat": "E-性能"}
+{"text": "帮我把这个改动过一遍看改得对不对啊", "label": "code-review", "subcat": "B-改动"}
+{"text": "这个改法会不会泄露敏感信息，帮我看看啊", "label": "code-review", "subcat": "D-安全"}
+{"text": "帮我看看这段改动的注释和可读性还能怎么提啊", "label": "code-review", "subcat": "F-建议"}
+{"text": "帮我把这个合并请求里所有文件的变化都过一遍呢", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "这次改动里哪些可以顺手重构，帮我点一点吗", "label": "code-review", "subcat": "F-建议"}
+{"text": "帮我看看这里对外接口的改动有没有暴露风险吗", "label": "code-review", "subcat": "D-安全"}
+{"text": "瞅瞅这段提交有没有问题？", "label": "code-review", "subcat": "B-改动"}
+{"text": "这个合并请求你帮我把把关再放行啊", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "这个补丁你觉得还有哪里能改进，帮我列列吗", "label": "code-review", "subcat": "F-建议"}
+{"text": "帮我给这段提交写几句评审反馈吗", "label": "code-review", "subcat": "F-建议"}
+{"text": "这个同事提的改动我不放心，帮我挑挑毛病", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "帮我评审下这个合并请求，看有没有拦路的问题吗", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "帮我看看这段改动哪块可以再收拾收拾呢", "label": "code-review", "subcat": "F-建议"}
+{"text": "帮我把这次改动单独拎出来评审，别扯别的模块？", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "瞅瞅这段提交有没有问题", "label": "code-review", "subcat": "B-改动"}
+{"text": "帮我看看这段改动有没有把敏感字段直接返回出去", "label": "code-review", "subcat": "D-安全"}
+{"text": "帮我挑挑这段提交里值得打磨的细节", "label": "code-review", "subcat": "F-建议"}
+{"text": "不是让你重写，就把这次的改动帮我把把关？", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这个 patch 里的每处改动帮我都过一下啊", "label": "code-review", "subcat": "B-改动"}
+{"text": "这个 PR 提交人是新来的，帮我盯细一点？", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "帮我把这段变更前后对比着看看改得妥不妥", "label": "code-review", "subcat": "B-改动"}
+{"text": "这段提交我不确定改对了没，帮我过一眼吗", "label": "code-review", "subcat": "B-改动"}
+{"text": "帮我瞅瞅这次改的登录逻辑会不会被绕过吗", "label": "code-review", "subcat": "D-安全"}
+{"text": "帮我把这个改动过一遍看改得对不对", "label": "code-review", "subcat": "B-改动"}
+{"text": "帮我确认下这次改动在极端输入下会不会挂吗", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "帮我确认下这次改动在极端输入下会不会挂", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "这里拼 SQL 的改法会不会被注入，帮我核一下吗", "label": "code-review", "subcat": "D-安全"}
+{"text": "合并请求发你了，帮我挑挑里面的毛病吗", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "这次改的这几行你帮我瞧瞧有没有毛病吗", "label": "code-review", "subcat": "B-改动"}
+{"text": "帮我看看这段改动会不会有除零那类的坑啊", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "帮我瞅瞅这次提交有没有把 IO 放进了循环里吗", "label": "code-review", "subcat": "E-性能"}
+{"text": "帮我瞧瞧这次改动有没有不必要的全表扫描啊", "label": "code-review", "subcat": "E-性能"}
+{"text": "这里对外部请求的改动有没有 SSRF 风险，帮我想想？", "label": "code-review", "subcat": "D-安全"}
+{"text": "这里对外部请求的改动有没有 SSRF 风险，帮我想想", "label": "code-review", "subcat": "D-安全"}
+{"text": "这个 PR 里的改动帮我确认下能不能上？", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "帮我把这个合并请求里的改动都过一遍？", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "帮我看看这次改的逻辑对不对？", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "帮我瞧瞧这里会不会有空指针的坑吗", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "这次改动里哪些可以顺手重构，帮我点一点啊", "label": "code-review", "subcat": "F-建议"}
+{"text": "我不用你从头写，就这段已有的改动帮我过一遍吗", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "帮我把这个待合并的分支改动通读评一遍？", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "帮我看看这段改动的注释和可读性还能怎么提吗", "label": "code-review", "subcat": "F-建议"}
+{"text": "帮我瞧瞧这段改动会不会有注入风险？", "label": "code-review", "subcat": "D-安全"}
+{"text": "不用理解整个项目，就这次 diff 帮我把关啊", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "帮我把这次的 diff 逐行看看有没有改错呢", "label": "code-review", "subcat": "B-改动"}
+{"text": "麻烦帮我把这个合并请求评审下给个结论啊", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "这段新写的会不会频繁触发 GC，帮我看看", "label": "code-review", "subcat": "E-性能"}
+{"text": "这段改动有没有埋 bug，帮我找找", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "帮我把这次提交的内容整体捋顺看有没有坑？", "label": "code-review", "subcat": "B-改动"}
+{"text": "帮我把这个补丁通读评一遍呢", "label": "code-review", "subcat": "B-改动"}
+{"text": "这次改动帮我从头到尾捋一遍啊", "label": "code-review", "subcat": "B-改动"}
+{"text": "这个 PR 我不太放心，你帮我盯一盯？", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "帮我把这个待合并的分支改动通读评一遍啊", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "这个 patch 靠谱吗，帮我看看", "label": "code-review", "subcat": "B-改动"}
+{"text": "这个改法有没有更简洁的方式，帮我建议下？", "label": "code-review", "subcat": "F-建议"}
+{"text": "这里改完之后 token 校验还在不在，帮我确认", "label": "code-review", "subcat": "D-安全"}
+{"text": "帮我看看这次改动有没有把别的地方带坏呢", "label": "code-review", "subcat": "B-改动"}
+{"text": "这次改动的复杂度会不会一下子高上去吗", "label": "code-review", "subcat": "E-性能"}
+{"text": "帮我确认下这段改动没在热点路径上做重活？", "label": "code-review", "subcat": "E-性能"}
+{"text": "这里改完之后并发下会不会出问题，帮我看看呢", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "同事临时塞的这个改动，帮我盯一盯别出事？", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "同事临时塞的这个改动，帮我盯一盯别出事", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这个 MR 能不能合，你帮我掂量掂量吗", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "这里的循环终止条件对不对，帮我确认吗", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "帮我瞧瞧这次改动会不会有 N+1 查询啊", "label": "code-review", "subcat": "E-性能"}
+{"text": "这个 PR 里的几处改动帮我逐条过一遍呢", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "这里对外部请求的改动有没有 SSRF 风险，帮我想想呢", "label": "code-review", "subcat": "D-安全"}
+{"text": "这段新写的会不会频繁触发 GC，帮我看看呢", "label": "code-review", "subcat": "E-性能"}
+{"text": "这个 PR 里的几处改动帮我逐条过一遍", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "帮我给这个改动列几条上线前该改的点啊", "label": "code-review", "subcat": "F-建议"}
+{"text": "这次变更会不会拖慢接口响应，帮我判断？", "label": "code-review", "subcat": "E-性能"}
+{"text": "这次提交动了不少地方，帮我逐处确认下啊", "label": "code-review", "subcat": "B-改动"}
+{"text": "这次上线的变更帮我评审下风险点啊", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这个改动是别人写的，帮我审一审再决定合不合", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这里改完之后并发下会不会出问题，帮我看看啊", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "这段新代码性能怎么样，帮我看看呢", "label": "code-review", "subcat": "E-性能"}
+{"text": "这段新代码性能怎么样，帮我看看", "label": "code-review", "subcat": "E-性能"}
+{"text": "这段提交里的边界值处理得对不对啊", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "这段改动在空列表的时候会不会报错，帮我想想？", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "这段改动会不会在边界上多算或少算一次", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "我这个 PR 想请你把把关再点同意吗", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "这段提交改得干不干净，帮我瞄一眼啊", "label": "code-review", "subcat": "B-改动"}
+{"text": "这次改的分支判断齐不齐，有没有落下的情况吗", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "这个补丁改得对不对，你帮我确认下吗", "label": "code-review", "subcat": "B-改动"}
+{"text": "这个 PR 里的改动帮我确认下能不能上呢", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "帮我把这次改动单独拎出来评审，别扯别的模块呢", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "帮我给这个改动列几条上线前该改的点呢", "label": "code-review", "subcat": "F-建议"}
+{"text": "这个合并请求你帮我把把关再放行？", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "这里的批处理改法效率高不高，帮我掂量下呢", "label": "code-review", "subcat": "E-性能"}
+{"text": "这个改法会不会每次都重复算一遍，帮我看看吗", "label": "code-review", "subcat": "E-性能"}
+{"text": "这个 PR 里的改动帮我确认下能不能上吗", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "帮我挑挑这段提交里值得打磨的细节？", "label": "code-review", "subcat": "F-建议"}
+{"text": "帮我把这次提交的内容整体捋顺看有没有坑啊", "label": "code-review", "subcat": "B-改动"}
+{"text": "这次提交动了不少地方，帮我逐处确认下", "label": "code-review", "subcat": "B-改动"}
+{"text": "合并请求发你了，帮我挑挑里面的毛病呢", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "帮我对这个改动给份评审意见啊", "label": "code-review", "subcat": "F-建议"}
+{"text": "这次改动风险大不大，帮我单独评估下再放行", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "帮我把这个合并请求里的改动都过一遍", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "帮我瞧瞧这次改动有没有不必要的全表扫描呢", "label": "code-review", "subcat": "E-性能"}
+{"text": "帮我找找这次改动里潜在的逻辑漏洞", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "帮我看看这个改法有没有把原来的判断改错啊", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "这个改动要紧急上，帮我评审下有没有拦路问题", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "帮我确认这次变更没有把内部接口无意暴露出去吗", "label": "code-review", "subcat": "D-安全"}
+{"text": "这个补丁改得对不对，你帮我确认下？", "label": "code-review", "subcat": "B-改动"}
+{"text": "帮我看看这里改完之后连接有没有及时关掉啊", "label": "code-review", "subcat": "E-性能"}
+{"text": "帮我看看这次改的地方能不能少几次网络往返", "label": "code-review", "subcat": "E-性能"}
+{"text": "帮我看看这次改的逻辑对不对啊", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "帮我给这个改动列几条上线前该改的点？", "label": "code-review", "subcat": "F-建议"}
+{"text": "这里的批处理改法效率高不高，帮我掂量下啊", "label": "code-review", "subcat": "E-性能"}
+{"text": "我提了个 PR，麻烦你过一遍给个意见啊", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "帮我把这次这个合并请求整体捋一遍给意见", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "帮我把这个待合并的分支改动通读评一遍", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "这次改动的复杂度会不会一下子高上去", "label": "code-review", "subcat": "E-性能"}
+{"text": "帮我确认下这次改动没把密钥写进代码里呢", "label": "code-review", "subcat": "D-安全"}
+{"text": "这次变更有没有安全隐患，帮我看看？", "label": "code-review", "subcat": "D-安全"}
+{"text": "就这次提交里改的这块，帮我确认能不能上线？", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这次发版前的改动帮我逐条评审下有没有隐患", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这里的批处理改法效率高不高，帮我掂量下", "label": "code-review", "subcat": "E-性能"}
+{"text": "这个 MR 能不能合，你帮我掂量掂量", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "这个 PR 里的改动帮我确认下能不能上", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "帮我瞅瞅这段改动的鉴权是不是漏了一环吗", "label": "code-review", "subcat": "D-安全"}
+{"text": "这个 patch 里的每处改动帮我都过一下？", "label": "code-review", "subcat": "B-改动"}
+{"text": "这段改动的命名和结构帮我提点意见吗", "label": "code-review", "subcat": "F-建议"}
+{"text": "这段改动的错误处理帮我提点建议怎么补呢", "label": "code-review", "subcat": "F-建议"}
+{"text": "这个 MR 合进去会不会有风险，帮我看看呢", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "这个改动接收外部参数，帮我看看有没有过滤干净", "label": "code-review", "subcat": "D-安全"}
+{"text": "这个 patch 靠谱吗，帮我看看啊", "label": "code-review", "subcat": "B-改动"}
+{"text": "这次改的这几行你帮我瞧瞧有没有毛病？", "label": "code-review", "subcat": "B-改动"}
+{"text": "帮我看看这次变更有没有可以抽成函数的重复块呢", "label": "code-review", "subcat": "F-建议"}
+{"text": "帮我核对下这次改动的返回值对不对啊", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "这段改动会不会导致重复加载同一份数据，帮我看看啊", "label": "code-review", "subcat": "E-性能"}
+{"text": "我不用你从头写，就这段已有的改动帮我过一遍？", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这段新写的有没有边界情况没考虑到呢", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "这个改法有没有更简洁的方式，帮我建议下啊", "label": "code-review", "subcat": "F-建议"}
+{"text": "这次回滚补丁帮我审一审改得对不对再合呢", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "麻烦把这个合并请求从头到尾捋一遍", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "帮我确认下这段改动没在热点路径上做重活啊", "label": "code-review", "subcat": "E-性能"}
+{"text": "就这次提交里改的这块，帮我确认能不能上线啊", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这段新写的有没有边界情况没考虑到吗", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "这段提交把用户输入直接用了，安不安全帮我判断啊", "label": "code-review", "subcat": "D-安全"}
+{"text": "帮我瞅瞅这段改动的鉴权是不是漏了一环呢", "label": "code-review", "subcat": "D-安全"}
+{"text": "别帮我写新功能，先把这次已有的变更评审掉呢", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "帮我瞧瞧这次改动有没有不必要的全表扫描吗", "label": "code-review", "subcat": "E-性能"}
+{"text": "这段提交改得干不干净，帮我瞄一眼吗", "label": "code-review", "subcat": "B-改动"}
+{"text": "帮我看看这段改动哪块可以再收拾收拾啊", "label": "code-review", "subcat": "F-建议"}
+{"text": "这个改动合不合理，你帮我掂量下", "label": "code-review", "subcat": "B-改动"}
+{"text": "这个改法在数据量大的时候扛不扛得住，我想想", "label": "code-review", "subcat": "E-性能"}
+{"text": "这里改完会不会内存泄漏，帮我核一下吗", "label": "code-review", "subcat": "E-性能"}
+{"text": "这次改动的判断条件写反了没，帮我核一下？", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "帮我瞧瞧这次改动会不会有 N+1 查询", "label": "code-review", "subcat": "E-性能"}
+{"text": "这次改的分支判断齐不齐，有没有落下的情况", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "瞅瞅这段提交有没有问题啊", "label": "code-review", "subcat": "B-改动"}
+{"text": "这段提交把用户输入直接用了，安不安全帮我判断呢", "label": "code-review", "subcat": "D-安全"}
+{"text": "这个 MR 能不能合，你帮我掂量掂量啊", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "帮我看看这里对外接口的改动有没有暴露风险啊", "label": "code-review", "subcat": "D-安全"}
+{"text": "不是让你重写，就把这次的改动帮我把把关呢", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这次改的地方有没有更好的写法，帮我出出主意啊", "label": "code-review", "subcat": "F-建议"}
+{"text": "这个 patch 里的每处改动帮我都过一下", "label": "code-review", "subcat": "B-改动"}
+{"text": "这次发版前的改动帮我逐条评审下有没有隐患？", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这次改动里哪些可以顺手重构，帮我点一点", "label": "code-review", "subcat": "F-建议"}
+{"text": "这个改法有没有漏掉异常没处理吗", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "这次热修的改动帮我快速过一遍看有没有雷", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这段改动的命名和结构帮我提点意见呢", "label": "code-review", "subcat": "F-建议"}
+{"text": "帮我确认下这段改动没在锁里做耗时操作啊", "label": "code-review", "subcat": "E-性能"}
+{"text": "帮我看看这次改的地方有没有竞态问题呢", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "这次改的这几行你帮我瞧瞧有没有毛病", "label": "code-review", "subcat": "B-改动"}
+{"text": "这个改法会不会泄露敏感信息，帮我看看？", "label": "code-review", "subcat": "D-安全"}
+{"text": "帮我给这段提交写几句评审反馈", "label": "code-review", "subcat": "F-建议"}
+{"text": "这段提交里的边界值处理得对不对？", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "帮我看看这段改动的注释和可读性还能怎么提呢", "label": "code-review", "subcat": "F-建议"}
+{"text": "帮我瞧瞧这次改动会不会有 N+1 查询呢", "label": "code-review", "subcat": "E-性能"}
+{"text": "这个同事提的改动我不放心，帮我挑挑毛病呢", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "帮我给这次改动提点修改建议？", "label": "code-review", "subcat": "F-建议"}
+{"text": "这次变更有没有可能被绕过校验，帮我想想呢", "label": "code-review", "subcat": "D-安全"}
+{"text": "这个 PR 我想合了，你先帮我确认没问题啊", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "这个 patch 你给我几条改进建议吧", "label": "code-review", "subcat": "F-建议"}
+{"text": "只针对这次的变更给意见，其他历史代码先别动吗", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "帮我把这次改动单独拎出来评审，别扯别的模块吗", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这次变更有没有安全隐患，帮我看看吗", "label": "code-review", "subcat": "D-安全"}
+{"text": "这个 MR 你觉得能直接合还是得先改改", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "帮我确认下这段改动没在热点路径上做重活吗", "label": "code-review", "subcat": "E-性能"}
+{"text": "帮我把这个补丁里改动的地方都过一遍呢", "label": "code-review", "subcat": "B-改动"}
+{"text": "这段提交里的边界值处理得对不对呢", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "帮我看看这段改动有没有把敏感字段直接返回出去呢", "label": "code-review", "subcat": "D-安全"}
+{"text": "这段新写的会不会频繁触发 GC，帮我看看？", "label": "code-review", "subcat": "E-性能"}
+{"text": "帮我给这个改动列几条上线前该改的点吗", "label": "code-review", "subcat": "F-建议"}
+{"text": "帮我挑挑这段提交里值得打磨的细节吗", "label": "code-review", "subcat": "F-建议"}
+{"text": "帮我瞧瞧这段改动会不会有注入风险啊", "label": "code-review", "subcat": "D-安全"}
+{"text": "这个 MR 合进去会不会有风险，帮我看看", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "只看这次动过的地方就行，帮我评一评稳不稳", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这里的循环终止条件对不对，帮我确认呢", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "帮我找找这次提交里逻辑上站不住脚的地方啊", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "帮我评一评这次改动，顺便说说哪能更好呢", "label": "code-review", "subcat": "F-建议"}
+{"text": "帮我评一评这次改动，顺便说说哪能更好吗", "label": "code-review", "subcat": "F-建议"}
+{"text": "这个 PR 我想合了，你先帮我确认没问题呢", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "这次改的分支判断齐不齐，有没有落下的情况呢", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "帮我把这次的 diff 逐行看看有没有改错？", "label": "code-review", "subcat": "B-改动"}
+{"text": "就这段刚提交的变更，帮我判断下能不能放行吗", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "帮我确认下这次改动没把密钥写进代码里吗", "label": "code-review", "subcat": "D-安全"}
+{"text": "我不用你从头写，就这段已有的改动帮我过一遍呢", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这次变更会不会拖慢接口响应，帮我判断吗", "label": "code-review", "subcat": "E-性能"}
+{"text": "就这次提交里改的这块，帮我确认能不能上线呢", "label": "code-review", "subcat": "G-审查边界"}
+{"text": "这段改动的命名和结构帮我提点意见啊", "label": "code-review", "subcat": "F-建议"}
+{"text": "这个改法会不会泄露敏感信息，帮我看看呢", "label": "code-review", "subcat": "D-安全"}
+{"text": "这里改完之后并发下会不会出问题，帮我看看？", "label": "code-review", "subcat": "C-缺陷"}
+{"text": "这个改动的接口设计帮我给点评审意见呢", "label": "code-review", "subcat": "F-建议"}
+{"text": "帮我把这个合并请求里所有文件的变化都过一遍？", "label": "code-review", "subcat": "A-合并请求"}
+{"text": "这次变更对文件上传的处理安不安全，帮我判断？", "label": "code-review", "subcat": "D-安全"}
+{"text": "这次改的地方帮我说说哪里能更稳妥些吗", "label": "code-review", "subcat": "F-建议"}
+{"text": "帮我看看这次改动有没有越权的口子吗", "label": "code-review", "subcat": "D-安全"}

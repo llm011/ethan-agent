@@ -1,0 +1,75 @@
+{"text": "帮我进到这个网站会员权益那一屏啊", "label": "use-browser", "subcat": "A-导航"}
+{"text": "帮我顺着这批网址一个个走完把优惠信息汇总出来", "label": "use-browser", "subcat": "F-批量"}
+{"text": "在那个站点里帮我把优惠券那个勾选框点上", "label": "use-browser", "subcat": "B-交互"}
+{"text": "在这个页面里帮我截一下退款进度那一块？", "label": "use-browser", "subcat": "C-截图"}
+{"text": "别做摘要，帮我在那个站点里把那三样加进购物车结掉呢", "label": "use-browser", "subcat": "H-浏览边界"}
+{"text": "帮我挨着把这些链接翻完各截一屏拼给我看吗", "label": "use-browser", "subcat": "F-批量"}
+{"text": "帮我把那个站点会员到期日那行字读出来啊", "label": "use-browser", "subcat": "D-读取"}
+{"text": "帮我攒段代码让它自己在那个站点里一页页把价钱记下来", "label": "use-browser", "subcat": "G-脚本"}
+{"text": "把这个页面物流轨迹那部分帮我截张图啊", "label": "use-browser", "subcat": "C-截图"}
+{"text": "帮我把那个站点会员到期日那行字读出来吗", "label": "use-browser", "subcat": "D-读取"}
+{"text": "在那个站点里帮我把优惠券那个勾选框点上呢", "label": "use-browser", "subcat": "B-交互"}
+{"text": "帮我落到这个网站积分兑换那一页看看呢", "label": "use-browser", "subcat": "A-导航"}
+{"text": "别做摘要，帮我在那个站点里把那三样加进购物车结掉", "label": "use-browser", "subcat": "H-浏览边界"}
+{"text": "帮我搞段代码让这个页面加载好就照规则把选项挑齐呢", "label": "use-browser", "subcat": "G-脚本"}
+{"text": "帮我在那个页面里把预约时段挑成上午十点呢", "label": "use-browser", "subcat": "B-交互"}
+{"text": "帮我攒段代码让它自己在那个站点里一页页把价钱记下来？", "label": "use-browser", "subcat": "G-脚本"}
+{"text": "别帮我概括内容，帮我在那个站点里把地址换成新的存下？", "label": "use-browser", "subcat": "H-浏览边界"}
+{"text": "别只念给我听，帮我在这个网站里把那个开关拨到开吗", "label": "use-browser", "subcat": "H-浏览边界"}
+{"text": "不是要文章要点，是帮我在这个页面把优惠券勾上再结算吗", "label": "use-browser", "subcat": "H-浏览边界"}
+{"text": "在这个网站上帮我截一下优惠明细那一段？", "label": "use-browser", "subcat": "C-截图"}
+{"text": "把这几页里的联系方式帮我逐页扒下来凑成一份", "label": "use-browser", "subcat": "F-批量"}
+{"text": "帮我在 Chrome 里挪到这个网站的优惠券那栏页面呢", "label": "use-browser", "subcat": "A-导航"}
+{"text": "帮我顺着这批网址一个个走完把优惠信息汇总出来吗", "label": "use-browser", "subcat": "F-批量"}
+{"text": "帮我把那个站点会员到期日那行字读出来？", "label": "use-browser", "subcat": "D-读取"}
+{"text": "接着我这个已登录的页面帮我把消息全标成已读啊", "label": "use-browser", "subcat": "E-登录态"}
+{"text": "帮我给那个站点账单汇总那一屏截个图", "label": "use-browser", "subcat": "C-截图"}
+{"text": "带着我的登录态去那个网站把待付款的单子结掉吗", "label": "use-browser", "subcat": "E-登录态"}
+{"text": "用我现在登着的这个会话帮我在页面上改个昵称吗", "label": "use-browser", "subcat": "E-登录态"}
+{"text": "帮我落到这个网站积分兑换那一页看看", "label": "use-browser", "subcat": "A-导航"}
+{"text": "帮我给那个站点账单汇总那一屏截个图啊", "label": "use-browser", "subcat": "C-截图"}
+{"text": "帮我把那个站点会员到期提示那块拍下来给我呢", "label": "use-browser", "subcat": "C-截图"}
+{"text": "帮我读一下那个页面优惠规则那段说明", "label": "use-browser", "subcat": "D-读取"}
+{"text": "帮我把这几个网址顺次点开各把标价抄下来汇给我呢", "label": "use-browser", "subcat": "F-批量"}
+{"text": "在这个网站上帮我截一下优惠明细那一段", "label": "use-browser", "subcat": "C-截图"}
+{"text": "帮我写个自动的在那个网站里遇到验证就等我再继续吗", "label": "use-browser", "subcat": "G-脚本"}
+{"text": "帮我落到这个网站积分兑换那一页看看？", "label": "use-browser", "subcat": "A-导航"}
+{"text": "带着我的登录态去那个网站把待付款的单子结掉", "label": "use-browser", "subcat": "E-登录态"}
+{"text": "在这个网站上帮我看看运费栏里写了多少？", "label": "use-browser", "subcat": "D-读取"}
+{"text": "用我现在登着的这个会话帮我在页面上改个昵称", "label": "use-browser", "subcat": "E-登录态"}
+{"text": "这一组页面帮我一条条进去把发货地都收拢齐", "label": "use-browser", "subcat": "F-批量"}
+{"text": "帮我把这个表单里的公司名称那格补进去呢", "label": "use-browser", "subcat": "B-交互"}
+{"text": "帮我把这几个网址顺次点开各把标价抄下来汇给我吗", "label": "use-browser", "subcat": "F-批量"}
+{"text": "帮我给那个站点账单汇总那一屏截个图吗", "label": "use-browser", "subcat": "C-截图"}
+{"text": "接着我这个已登录的页面帮我把消息全标成已读", "label": "use-browser", "subcat": "E-登录态"}
+{"text": "拿代码帮我盯着这个页面某个数字一变就停下截屏呢", "label": "use-browser", "subcat": "G-脚本"}
+{"text": "帮我把那个站点会员到期提示那块拍下来给我？", "label": "use-browser", "subcat": "C-截图"}
+{"text": "用代码帮我把那个站点从挑货到下单这一串动作跑顺啊", "label": "use-browser", "subcat": "G-脚本"}
+{"text": "拿我这个已经登进去的 Chrome 帮我在那个站点改收货地址", "label": "use-browser", "subcat": "E-登录态"}
+{"text": "帮我在 Chrome 里挪到这个网站的优惠券那栏页面？", "label": "use-browser", "subcat": "A-导航"}
+{"text": "帮我在那个页面里把预约时段挑成上午十点吗", "label": "use-browser", "subcat": "B-交互"}
+{"text": "把这几页里的联系方式帮我逐页扒下来凑成一份啊", "label": "use-browser", "subcat": "F-批量"}
+{"text": "拿代码帮我盯着这个页面某个数字一变就停下截屏啊", "label": "use-browser", "subcat": "G-脚本"}
+{"text": "把那个站点里客服对话那页帮我调出来？", "label": "use-browser", "subcat": "A-导航"}
+{"text": "在这个网站上帮我把排序那个下拉换成按销量啊", "label": "use-browser", "subcat": "B-交互"}
+{"text": "在这个站点上帮我把那个折叠面板展开再点确认呢", "label": "use-browser", "subcat": "B-交互"}
+{"text": "带着我的登录态去那个网站把待付款的单子结掉呢", "label": "use-browser", "subcat": "E-登录态"}
+{"text": "把那个站点里客服对话那页帮我调出来吗", "label": "use-browser", "subcat": "A-导航"}
+{"text": "拿我这个已经登进去的 Chrome 帮我在那个站点改收货地址吗", "label": "use-browser", "subcat": "E-登录态"}
+{"text": "在这个页面里帮我把发票抬头那格已填的内容读出来呢", "label": "use-browser", "subcat": "D-读取"}
+{"text": "在这个页面里帮我截一下退款进度那一块呢", "label": "use-browser", "subcat": "C-截图"}
+{"text": "别只念给我听，帮我在这个网站里把那个开关拨到开呢", "label": "use-browser", "subcat": "H-浏览边界"}
+{"text": "麻烦用 Chrome 切到那个站点结算那一步的界面", "label": "use-browser", "subcat": "A-导航"}
+{"text": "别做摘要，帮我在那个站点里把那三样加进购物车结掉吗", "label": "use-browser", "subcat": "H-浏览边界"}
+{"text": "把这个站点账单里的总金额读给我听啊", "label": "use-browser", "subcat": "D-读取"}
+{"text": "在这个网站上帮我看看运费栏里写了多少吗", "label": "use-browser", "subcat": "D-读取"}
+{"text": "拿代码帮我盯着这个页面某个数字一变就停下截屏？", "label": "use-browser", "subcat": "G-脚本"}
+{"text": "在这个页面里帮我把发票抬头那格已填的内容读出来？", "label": "use-browser", "subcat": "D-读取"}
+{"text": "麻烦用 Chrome 切到那个站点结算那一步的界面呢", "label": "use-browser", "subcat": "A-导航"}
+{"text": "帮我把这个表单里的发票抬头那栏填好交上去", "label": "use-browser", "subcat": "B-交互"}
+{"text": "用代码帮我把那个站点从挑货到下单这一串动作跑顺呢", "label": "use-browser", "subcat": "G-脚本"}
+{"text": "在那个站点里帮我把优惠券那个勾选框点上啊", "label": "use-browser", "subcat": "B-交互"}
+{"text": "别做摘要，帮我在那个站点里把那三样加进购物车结掉啊", "label": "use-browser", "subcat": "H-浏览边界"}
+{"text": "别只念给我听，帮我在这个网站里把那个开关拨到开啊", "label": "use-browser", "subcat": "H-浏览边界"}
+{"text": "帮我把这几个网址顺次点开各把标价抄下来汇给我？", "label": "use-browser", "subcat": "F-批量"}
+{"text": "帮我把这个表单里的发票抬头那栏填好交上去吗", "label": "use-browser", "subcat": "B-交互"}

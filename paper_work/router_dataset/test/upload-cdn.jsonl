@@ -1,0 +1,75 @@
+{"text": "拍了张报销凭证，传上去我再从链接下载", "label": "upload-cdn", "subcat": "A-传图片"}
+{"text": "这个材料要发到客户那边，传上去给我个对外可访问的链接就行啊", "label": "upload-cdn", "subcat": "F-边界"}
+{"text": "合同要发给对方律师，传上去给个别人能打开的地址，别存成我的备忘条目？", "label": "upload-cdn", "subcat": "F-边界"}
+{"text": "拍了张报销凭证，传上去我再从链接下载？", "label": "upload-cdn", "subcat": "A-传图片"}
+{"text": "视频渲染完了挺大，直接发消息传不了，帮我传到云上吗", "label": "upload-cdn", "subcat": "B-传文件"}
+{"text": "想把静态资源都放到 bucket 里，帮我上传这批", "label": "upload-cdn", "subcat": "E-对象存储"}
+{"text": "这个包要给外包同学下，帮我搞个别人能点开的地址？", "label": "upload-cdn", "subcat": "D-分享链接"}
+{"text": "有份 pdf 材料要在微信群里共享，传上去给个能下载的链接", "label": "upload-cdn", "subcat": "B-传文件"}
+{"text": "要挂到公告邮件里，传上去给个人家能访问的地址吗", "label": "upload-cdn", "subcat": "D-分享链接"}
+{"text": "这个归档文件推到 S3 里存着就行", "label": "upload-cdn", "subcat": "E-对象存储"}
+{"text": "合同要发给对方律师，传上去给个别人能打开的地址，别存成我的备忘条目吗", "label": "upload-cdn", "subcat": "F-边界"}
+{"text": "同事让我把设计稿共享给他，传上去给个他能直接下载的链接就行呢", "label": "upload-cdn", "subcat": "D-分享链接"}
+{"text": "同事让我把设计稿共享给他，传上去给个他能直接下载的链接就行？", "label": "upload-cdn", "subcat": "D-分享链接"}
+{"text": "传上去之后把生成的访问地址告诉我一下啊", "label": "upload-cdn", "subcat": "C-要网址"}
+{"text": "备份文件想存云上，帮我传到存储桶保存一份啊", "label": "upload-cdn", "subcat": "B-传文件"}
+{"text": "这个归档文件推到 S3 里存着就行呢", "label": "upload-cdn", "subcat": "E-对象存储"}
+{"text": "这是要对外发布的设计稿，帮我传上去生成个能分享的链接，不是存我自己笔记的那种吗", "label": "upload-cdn", "subcat": "F-边界"}
+{"text": "这批备份文件放 S3 就行，帮我传过去吗", "label": "upload-cdn", "subcat": "E-对象存储"}
+{"text": "刚截了个图，帮我传上去，等下要发群里的啊", "label": "upload-cdn", "subcat": "A-传图片"}
+{"text": "我要把这个放到外部文档里引用，需要个能远程访问的地址", "label": "upload-cdn", "subcat": "F-边界"}
+{"text": "帮我把这个丢到 R2 存储桶里，不用给我网址", "label": "upload-cdn", "subcat": "E-对象存储"}
+{"text": "我就要那个 url，传完复制过来", "label": "upload-cdn", "subcat": "C-要网址"}
+{"text": "刚截了个图，帮我传上去，等下要发群里的", "label": "upload-cdn", "subcat": "A-传图片"}
+{"text": "我就要那个 url，传完复制过来？", "label": "upload-cdn", "subcat": "C-要网址"}
+{"text": "文件传好后把那个可以访问的地址返回给我，我要粘贴到文档里啊", "label": "upload-cdn", "subcat": "C-要网址"}
+{"text": "往对象存储同步一份留底，帮我传过去啊", "label": "upload-cdn", "subcat": "E-对象存储"}
+{"text": "同事让我把设计稿共享给他，传上去给个他能直接下载的链接就行", "label": "upload-cdn", "subcat": "D-分享链接"}
+{"text": "这个 apk 打包好了，要给测试同学下，帮我传一下拿个地址", "label": "upload-cdn", "subcat": "B-传文件"}
+{"text": "刚截了个图，帮我传上去，等下要发群里的？", "label": "upload-cdn", "subcat": "A-传图片"}
+{"text": "设计同学给了张图，我得放到邮件里，先传上去拿个链接啊", "label": "upload-cdn", "subcat": "A-传图片"}
+{"text": "这个 apk 打包好了，要给测试同学下，帮我传一下拿个地址啊", "label": "upload-cdn", "subcat": "B-传文件"}
+{"text": "这张示意图要贴进 wiki，所以需要个能在外部访问的 url，不是本地收藏那种？", "label": "upload-cdn", "subcat": "F-边界"}
+{"text": "这份合同要发给外部律师，帮我传上去弄个谁都能打开的链接啊", "label": "upload-cdn", "subcat": "D-分享链接"}
+{"text": "不用说别的，传好给个 http 链接就完事了", "label": "upload-cdn", "subcat": "C-要网址"}
+{"text": "设计同学给了张图，我得放到邮件里，先传上去拿个链接？", "label": "upload-cdn", "subcat": "A-传图片"}
+{"text": "传上去之后把生成的访问地址告诉我一下？", "label": "upload-cdn", "subcat": "C-要网址"}
+{"text": "我就要那个 url，传完复制过来呢", "label": "upload-cdn", "subcat": "C-要网址"}
+{"text": "这个归档文件推到 S3 里存着就行啊", "label": "upload-cdn", "subcat": "E-对象存储"}
+{"text": "这批备份文件放 S3 就行，帮我传过去啊", "label": "upload-cdn", "subcat": "E-对象存储"}
+{"text": "备份文件想存云上，帮我传到存储桶保存一份吗", "label": "upload-cdn", "subcat": "B-传文件"}
+{"text": "这个 apk 打包好了，要给测试同学下，帮我传一下拿个地址呢", "label": "upload-cdn", "subcat": "B-传文件"}
+{"text": "帮我把这个丢到 R2 存储桶里，不用给我网址吗", "label": "upload-cdn", "subcat": "E-对象存储"}
+{"text": "传完把那个地址直接甩给我就行，我知道怎么用吗", "label": "upload-cdn", "subcat": "C-要网址"}
+{"text": "这份合同要发给外部律师，帮我传上去弄个谁都能打开的链接？", "label": "upload-cdn", "subcat": "D-分享链接"}
+{"text": "刚导出了一份报告，需要发给客户，帮我传上去生成个链接？", "label": "upload-cdn", "subcat": "B-传文件"}
+{"text": "这个归档文件推到 S3 里存着就行吗", "label": "upload-cdn", "subcat": "E-对象存储"}
+{"text": "我要把这个放到外部文档里引用，需要个能远程访问的地址吗", "label": "upload-cdn", "subcat": "F-边界"}
+{"text": "拍了张报销凭证，传上去我再从链接下载啊", "label": "upload-cdn", "subcat": "A-传图片"}
+{"text": "文件传好后把那个可以访问的地址返回给我，我要粘贴到文档里吗", "label": "upload-cdn", "subcat": "C-要网址"}
+{"text": "这张示意图要贴进 wiki，所以需要个能在外部访问的 url，不是本地收藏那种吗", "label": "upload-cdn", "subcat": "F-边界"}
+{"text": "我要把这个放到外部文档里引用，需要个能远程访问的地址呢", "label": "upload-cdn", "subcat": "F-边界"}
+{"text": "我就要那个 url，传完复制过来吗", "label": "upload-cdn", "subcat": "C-要网址"}
+{"text": "合同要发给对方律师，传上去给个别人能打开的地址，别存成我的备忘条目啊", "label": "upload-cdn", "subcat": "F-边界"}
+{"text": "设计同学给了张图，我得放到邮件里，先传上去拿个链接", "label": "upload-cdn", "subcat": "A-传图片"}
+{"text": "手里有张产品图，要嵌到官网里，帮我传一下啊", "label": "upload-cdn", "subcat": "A-传图片"}
+{"text": "文件传好后把那个可以访问的地址返回给我，我要粘贴到文档里？", "label": "upload-cdn", "subcat": "C-要网址"}
+{"text": "产品录屏要发到社群里，帮我传上去生成个可以转发的地址呢", "label": "upload-cdn", "subcat": "D-分享链接"}
+{"text": "有份 pdf 材料要在微信群里共享，传上去给个能下载的链接呢", "label": "upload-cdn", "subcat": "B-传文件"}
+{"text": "产品录屏要发到社群里，帮我传上去生成个可以转发的地址啊", "label": "upload-cdn", "subcat": "D-分享链接"}
+{"text": "产品录屏要发到社群里，帮我传上去生成个可以转发的地址", "label": "upload-cdn", "subcat": "D-分享链接"}
+{"text": "传完把那个地址直接甩给我就行，我知道怎么用呢", "label": "upload-cdn", "subcat": "C-要网址"}
+{"text": "有份 pdf 材料要在微信群里共享，传上去给个能下载的链接吗", "label": "upload-cdn", "subcat": "B-传文件"}
+{"text": "设计同学给了张图，我得放到邮件里，先传上去拿个链接吗", "label": "upload-cdn", "subcat": "A-传图片"}
+{"text": "这份合同要发给外部律师，帮我传上去弄个谁都能打开的链接吗", "label": "upload-cdn", "subcat": "D-分享链接"}
+{"text": "这批备份文件放 S3 就行，帮我传过去", "label": "upload-cdn", "subcat": "E-对象存储"}
+{"text": "我要把这个放到外部文档里引用，需要个能远程访问的地址啊", "label": "upload-cdn", "subcat": "F-边界"}
+{"text": "往对象存储同步一份留底，帮我传过去？", "label": "upload-cdn", "subcat": "E-对象存储"}
+{"text": "这个 apk 打包好了，要给测试同学下，帮我传一下拿个地址？", "label": "upload-cdn", "subcat": "B-传文件"}
+{"text": "这张截图发微信图片质量太差，帮我传到云上引用好一点？", "label": "upload-cdn", "subcat": "A-传图片"}
+{"text": "这是要对外发布的设计稿，帮我传上去生成个能分享的链接，不是存我自己笔记的那种？", "label": "upload-cdn", "subcat": "F-边界"}
+{"text": "这份合同要发给外部律师，帮我传上去弄个谁都能打开的链接呢", "label": "upload-cdn", "subcat": "D-分享链接"}
+{"text": "这张截图发微信图片质量太差，帮我传到云上引用好一点啊", "label": "upload-cdn", "subcat": "A-传图片"}
+{"text": "视频渲染完了挺大，直接发消息传不了，帮我传到云上啊", "label": "upload-cdn", "subcat": "B-传文件"}
+{"text": "传完把那个地址直接甩给我就行，我知道怎么用啊", "label": "upload-cdn", "subcat": "C-要网址"}
+{"text": "备份文件想存云上，帮我传到存储桶保存一份？", "label": "upload-cdn", "subcat": "B-传文件"}
