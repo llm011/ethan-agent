@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { ChannelInfo, fetchChannels, patchChannel } from "@/lib/api";
+import { useEffect, useState, useRef } from "react";
+import { ChannelInfo, fetchChannels, patchChannel, LarkDepsStatus, fetchLarkDepsStatus, installLarkDeps } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, CheckCircle2, XCircle, Loader2 } from "lucide-react";
 
 // 每个渠道的字段定义（用于渲染表单）
 const CHANNEL_FIELDS: Record<string, { key: string; label: string; secret?: boolean; placeholder?: string }[]> = {
@@ -23,6 +23,26 @@ export function ChannelsView() {
   const [forms, setForms] = useState<Record<string, Record<string, string>>>({});
   const [saving, setSaving] = useState<string | null>(null);
   const [messages, setMessages] = useState<Record<string, { type: "success" | "error"; text: string }>>({});
+  const [depsStatus, setDepsStatus] = useState<LarkDepsStatus | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopPolling = () => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  };
+
+  const startPolling = () => {
+    stopPolling();
+    pollRef.current = setInterval(async () => {
+      try {
+        const s = await fetchLarkDepsStatus();
+        setDepsStatus(s);
+        if (!s.installing) stopPolling();
+      } catch { /* ignore */ }
+    }, 2000);
+  };
 
   useEffect(() => {
     fetchChannels().then(data => {
@@ -31,6 +51,9 @@ export function ChannelsView() {
       for (const ch of data) initial[ch.id] = { ...ch.config };
       setForms(initial);
     }).catch(() => {});
+    // 首次加载也拉一次依赖状态
+    fetchLarkDepsStatus().then(setDepsStatus).catch(() => {});
+    return () => stopPolling();
   }, []);
 
   const handleSave = async (channelId: string) => {
@@ -39,12 +62,23 @@ export function ChannelsView() {
       await patchChannel(channelId, forms[channelId] || {});
       const updated = await fetchChannels();
       setChannels(updated);
-      setMessages(prev => ({ ...prev, [channelId]: { type: "success", text: "已保存" } }));
-      setTimeout(() => setMessages(prev => { const n = { ...prev }; delete n[channelId]; return n; }), 3000);
+      setMessages(prev => ({ ...prev, [channelId]: { type: "success", text: "已保存，依赖正在后台安装…" } }));
+      // 启动轮询依赖状态
+      if (channelId === "lark") startPolling();
+      setTimeout(() => setMessages(prev => { const n = { ...prev }; delete n[channelId]; return n; }), 4000);
     } catch {
       setMessages(prev => ({ ...prev, [channelId]: { type: "error", text: "保存失败" } }));
     } finally {
       setSaving(null);
+    }
+  };
+
+  const handleRetryInstall = async () => {
+    try {
+      await installLarkDeps();
+      startPolling();
+    } catch {
+      setMessages(prev => ({ ...prev, lark: { type: "error", text: "触发安装失败" } }));
     }
   };
 
@@ -106,6 +140,54 @@ export function ChannelsView() {
                           {saving === ch.id ? "保存中..." : "保存"}
                         </Button>
                       </div>
+
+                      {/* 飞书依赖状态展示 */}
+                      {ch.id === "lark" && depsStatus && (
+                        <div className="mt-3 pt-3 border-t border-border/40 space-y-2">
+                          <div className="text-xs font-medium text-muted-foreground">依赖就绪状态</div>
+                          <div className="space-y-1.5 text-xs">
+                            <DepsRow
+                              label="lark-oapi (Python 包)"
+                              ok={depsStatus.lark_oapi_installed}
+                              installing={depsStatus.installing && !depsStatus.lark_oapi_installed}
+                            />
+                            <DepsRow
+                              label="lark-cli (二进制)"
+                              ok={depsStatus.lark_cli_installed}
+                              installing={depsStatus.installing && !depsStatus.lark_cli_installed}
+                            />
+                            <DepsRow
+                              label="lark-cli app 同步"
+                              ok={depsStatus.lark_cli_app_matches}
+                              installing={depsStatus.installing && !depsStatus.lark_cli_app_matches}
+                            />
+                          </div>
+                          {depsStatus.installing && (
+                            <div className="flex items-center gap-2 text-xs text-yellow-600">
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                              正在后台安装…（brew / pip 可能需要 1-3 分钟）
+                            </div>
+                          )}
+                          {!depsStatus.installing && depsStatus.last_error && (
+                            <div className="text-xs text-red-500">
+                              <div className="font-medium">部分依赖未就绪：</div>
+                              <pre className="mt-1 whitespace-pre-wrap text-[10px] text-red-400 max-h-24 overflow-auto">
+                                {depsStatus.last_error}
+                              </pre>
+                              <Button size="sm" variant="outline" className="mt-2 h-6 text-xs" onClick={handleRetryInstall}>
+                                重试安装
+                              </Button>
+                            </div>
+                          )}
+                          {!depsStatus.installing && !depsStatus.last_error
+                           && depsStatus.lark_oapi_installed && depsStatus.lark_cli_installed
+                           && depsStatus.lark_cli_app_matches && (
+                            <div className="text-xs text-green-500">
+                              ✓ 全部就绪，重启 ethan serve 后将自动建立飞书长连接
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </CardContent>
                 )}
@@ -124,6 +206,21 @@ export function ChannelsView() {
           </Card>
         </div>
       </ScrollArea>
+    </div>
+  );
+}
+
+function DepsRow({ label, ok, installing }: { label: string; ok: boolean; installing: boolean }) {
+  return (
+    <div className="flex items-center gap-2">
+      {installing ? (
+        <Loader2 className="h-3 w-3 animate-spin text-yellow-600" />
+      ) : ok ? (
+        <CheckCircle2 className="h-3 w-3 text-green-500" />
+      ) : (
+        <XCircle className="h-3 w-3 text-red-500" />
+      )}
+      <span className={ok ? "text-foreground" : "text-muted-foreground"}>{label}</span>
     </div>
   );
 }

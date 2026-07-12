@@ -806,6 +806,31 @@ export async function patchChannel(channelId: string, config: Record<string, str
   if (!res.ok) throw new Error("Failed");
 }
 
+export interface LarkDepsStatus {
+  lark_oapi_installed: boolean;
+  lark_cli_installed: boolean;
+  lark_cli_app_synced: boolean;
+  lark_cli_app_matches: boolean;
+  installing: boolean;
+  last_error: string;
+  last_run_at: string;
+  installed_by: string;
+}
+
+export async function fetchLarkDepsStatus(): Promise<LarkDepsStatus> {
+  const res = await fetch(`${API_URL}/channels/lark/deps-status`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed");
+  return res.json();
+}
+
+export async function installLarkDeps(): Promise<void> {
+  const res = await fetch(`${API_URL}/channels/lark/install-deps`, {
+    method: "POST",
+    headers: headers(),
+  });
+  if (!res.ok) throw new Error("Failed");
+}
+
 export interface DocMeta { slug: string; title: string; filename: string; }
 
 export async function fetchDocsList(): Promise<DocMeta[]> {
