@@ -539,7 +539,7 @@ export async function deleteProcedure(id: string): Promise<void> {
   await fetch(`${API_URL}/memory/procedures/${id}`, { method: "DELETE", headers: headers() });
 }
 
-export type StreamChunk = { content?: string; done?: boolean; stopped?: boolean; error?: string; model?: string; usage?: Record<string, number>; tool?: string; args?: string; intent?: string; state?: string; id?: string; duration_ms?: number; result_preview?: string; result_detail?: string; entity_type?: string; entity_id?: string; sub_steps?: Array<{ tool: string; args: string; state: string; duration_ms?: number | null; result_preview?: string }>; ui?: unknown[]; consent_request?: boolean; request_id?: string; description?: string; detail?: string; thinking?: boolean; heartbeat?: boolean; elapsed?: number; skills_matched?: Array<{ name: string; is_default?: boolean }> };
+export type StreamChunk = { content?: string; done?: boolean; stopped?: boolean; error?: string; model?: string; usage?: Record<string, number>; ttfb_ms?: number; total_ms?: number; tool?: string; args?: string; intent?: string; state?: string; id?: string; duration_ms?: number; result_preview?: string; result_detail?: string; entity_type?: string; entity_id?: string; sub_steps?: Array<{ tool: string; args: string; state: string; duration_ms?: number | null; result_preview?: string }>; ui?: unknown[]; consent_request?: boolean; request_id?: string; description?: string; detail?: string; thinking?: boolean; heartbeat?: boolean; elapsed?: number; skills_matched?: Array<{ name: string; is_default?: boolean }> };
 
 /** 把一个 SSE Response body 解析成事件流（streamChat / streamResume 共用）。 */
 async function* parseSSE(res: Response): AsyncGenerator<StreamChunk> {
@@ -802,6 +802,31 @@ export async function patchChannel(channelId: string, config: Record<string, str
     method: "PATCH",
     headers: headers(),
     body: JSON.stringify({ channel_id: channelId, config }),
+  });
+  if (!res.ok) throw new Error("Failed");
+}
+
+export interface LarkDepsStatus {
+  lark_oapi_installed: boolean;
+  lark_cli_installed: boolean;
+  lark_cli_app_synced: boolean;
+  lark_cli_app_matches: boolean;
+  installing: boolean;
+  last_error: string;
+  last_run_at: string;
+  installed_by: string;
+}
+
+export async function fetchLarkDepsStatus(): Promise<LarkDepsStatus> {
+  const res = await fetch(`${API_URL}/channels/lark/deps-status`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed");
+  return res.json();
+}
+
+export async function installLarkDeps(): Promise<void> {
+  const res = await fetch(`${API_URL}/channels/lark/install-deps`, {
+    method: "POST",
+    headers: headers(),
   });
   if (!res.ok) throw new Error("Failed");
 }

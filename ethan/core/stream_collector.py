@@ -27,10 +27,13 @@ class StreamCollector:
         self.matched_skills: list = []  # 本次对话命中的 Skill 列表 [{name, is_default}]
         self._times: dict[str, float] = {}
         self._agent = None  # 可选，用于取 usage
+        self._started_at: float | None = None
+        self._first_text_at: float | None = None
 
     def bind(self, agent) -> "StreamCollector":
         """绑定 agent，结束时从 agent.usage 取 token。"""
         self._agent = agent
+        self._started_at = time.time()
         return self
 
     def feed(self, item: Any) -> str | None:
@@ -47,6 +50,8 @@ class StreamCollector:
         text = item if isinstance(item, str) else getattr(item, "content", "")
         if not text:
             return None
+        if self._first_text_at is None:
+            self._first_text_at = time.time()
         # 工具开始前累积的文本算作 thought（思考过程）
         if self.tool_steps and any(s["state"] == "running" for s in self.tool_steps):
             # 工具执行中收到的文本：暂归 full，工具结束后由调用方决定
@@ -103,3 +108,15 @@ class StreamCollector:
             u = self._agent.usage
             return {"input": u.input_tokens, "output": u.output_tokens, "cache": u.cache_tokens}
         return {"input": 0, "output": 0, "cache": 0}
+
+    @property
+    def ttfb_ms(self) -> int | None:
+        if self._first_text_at and self._started_at:
+            return int((self._first_text_at - self._started_at) * 1000)
+        return None
+
+    @property
+    def total_ms(self) -> int | None:
+        if self._started_at:
+            return int((time.time() - self._started_at) * 1000)
+        return None

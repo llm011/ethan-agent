@@ -86,7 +86,8 @@ def list_channels(ctx: typer.Context):
     console.print()
     if lark_ok and not lark_cli:
         console.print("[yellow]⚠ 已配置飞书但未检测到 lark-cli，事件监听不会启动。[/yellow]")
-        console.print("  安装：参考 https://github.com/larksuite/lark-cli 或 brew/tap 文档")
+        console.print("  自动安装：[cyan]ethan channel set lark --app-id <id> --app-secret <secret>[/cyan]")
+        console.print("  或仅装依赖：[cyan]ethan plugin add lark-channel[/cyan]")
     console.print("[dim]提示：ethan serve 启动时若有 app_id+app_secret 会自动建立飞书长连接。[/dim]")
 
 
@@ -118,7 +119,7 @@ def _add_lark_interactive():
     console.print("  2. [事件与回调] → 选择 [长连接] 模式（无需公网 IP / Webhook）")
     console.print("  3. 订阅事件：im.message.receive_v1（接收消息）")
     console.print("  4. [权限管理] 开通：im:message、im:message.group_at_msg、im:chat（按需）")
-    console.print("  5. 安装 lark-cli（事件监听依赖）：参考 lark-cli 文档")
+    console.print("  5. lark-cli 与 lark-oapi 会在保存配置后自动安装")
     console.print()
 
     values = {}
@@ -136,8 +137,23 @@ def _add_lark_interactive():
     console.print()
     console.print("[green]✓ 飞书配置已保存[/green]")
 
-    # 同步到 lark-cli（事件监听依赖它，且必须用同一个 app 才能收到消息）
-    _ensure_lark_cli_sync(values.get("app_id", ""), values.get("app_secret", ""))
+    # 自动安装依赖 + 同步 lark-cli app（lark-oapi 包 / lark-cli 二进制 / app sync）
+    from ethan.interface.lark_deps import ensure_lark_deps
+    console.print()
+    console.print("[bold]依赖就绪检查与安装[/bold]")
+    status = ensure_lark_deps(
+        values.get("app_id", ""),
+        values.get("app_secret", ""),
+        interactive=True,
+        triggered_by="cli",
+    )
+    console.print()
+    if status.lark_oapi_installed and status.lark_cli_installed and status.lark_cli_app_matches:
+        console.print("[green]✓ 飞书依赖全部就绪[/green]")
+    else:
+        console.print("[yellow]⚠ 部分依赖未就绪，详见上方输出[/yellow]")
+        if status.last_error:
+            console.print(f"[dim]{status.last_error}[/dim]")
 
     console.print("[dim]重启 ethan serve 后生效（自动建立长连接）。[/dim]")
     console.print("  重启：ethan server restart")
@@ -151,8 +167,9 @@ def set_channel(
     app_secret: str = typer.Option("", "--app-secret", help="App Secret"),
     verification_token: str = typer.Option("", "--verification-token", help="Verification Token"),
     encrypt_key: str = typer.Option("", "--encrypt-key", help="Encrypt Key"),
+    skip_deps: bool = typer.Option(False, "--skip-deps", help="跳过自动安装 lark-oapi / lark-cli 依赖"),
 ):
-    """直接设置渠道字段（非交互，适合脚本）。"""
+    """直接设置渠道字段（非交互，适合脚本）。保存后会自动安装 lark-oapi / lark-cli 并同步 app。"""
     if not channel:
         console.print(ctx.get_help())
         raise typer.Exit()
@@ -173,6 +190,18 @@ def set_channel(
     save_config(config)
     reload_config()
     console.print(f"[green]✓ {channel} 已更新[/green]")
+
+    # 脚本化配置也触发依赖安装（除非显式 --skip-deps）
+    if not skip_deps and (config.lark.app_id or config.lark.app_secret):
+        from ethan.interface.lark_deps import ensure_lark_deps
+        console.print()
+        console.print("[bold]依赖就绪检查与安装[/bold]")
+        ensure_lark_deps(
+            config.lark.app_id or "",
+            config.lark.app_secret or "",
+            interactive=True,
+            triggered_by="cli",
+        )
 
 
 @app.command("unset")
@@ -209,89 +238,5 @@ def _save_lark(values: dict) -> None:
     reload_config()
 
 
-# ── lark-cli 检测 / 安装 / app 同步 ──────────────────────────────
-
-_LARK_CLI_INSTALL_HINT = (
-    "  macOS:  brew install larksuite/tap/lark-cli\n"
-    "  或参考: https://github.com/larksuite/lark-cli"
-)
-
-
-def _lark_cli_current_app() -> str | None:
-    """读取 lark-cli 当前配置的第一个 app_id，没有返回 None。"""
-    import json
-    from pathlib import Path
-    cfg = Path.home() / ".lark-cli" / "config.json"
-    if not cfg.exists():
-        return None
-    try:
-        data = json.loads(cfg.read_text(encoding="utf-8"))
-        apps = data.get("apps") or []
-        return apps[0].get("appId") if apps else None
-    except Exception:
-        return None
-
-
-def _ensure_lark_cli_sync(app_id: str, app_secret: str) -> None:
-    """检测 lark-cli 是否安装、app 是否与 config 一致；不一致则引导同步。
-
-    ethan 收飞书消息靠 lark-cli 的长连接，lark-cli 必须用同一个 app
-    才能收到事件。这里在配置后自动检查并引导同步，避免「配了却收不到消息」。
-    """
-    import subprocess
-
-    console.print()
-    lark_cli = shutil.which("lark-cli")
-
-    # 1. 没装 → 提示安装
-    if not lark_cli:
-        console.print("[yellow]⚠ 未检测到 lark-cli，飞书事件监听无法启动[/yellow]")
-        console.print("  ethan 收飞书消息依赖 lark-cli 的长连接，请先安装：")
-        console.print(_LARK_CLI_INSTALL_HINT)
-        console.print("  安装后重新运行 [cyan]ethan channel add lark[/cyan] 完成同步。")
-        return
-
-    # 2. 装了 → 检查 app 是否一致
-    current = _lark_cli_current_app()
-    if current == app_id:
-        console.print(f"[green]✓ lark-cli 已绑定同一应用（{app_id}）[/green]")
-        return
-
-    # 3. 不一致（或 lark-cli 还没配 app）→ 引导同步
-    if current:
-        console.print(
-            f"[yellow]⚠ lark-cli 当前绑定的是另一个应用：{current}[/yellow]\n"
-            f"  你刚配置的是 {app_id}，两者不一致会导致收不到消息。"
-        )
-    else:
-        console.print("[yellow]⚠ lark-cli 还没绑定任何应用[/yellow]")
-
-    console.print("  需要把 app 同步到 lark-cli（用 app secret 初始化）。")
-    ans = input("  现在同步？[Y/n]: ").strip().lower()
-    if ans in ("n", "no"):
-        console.print("[dim]已跳过。手动同步：lark-cli config init --app-id <id> --app-secret-stdin[/dim]")
-        return
-
-    if not app_secret:
-        console.print("[red]缺少 app_secret，无法同步。请用 `ethan channel set lark --app-secret ...` 补上。[/red]")
-        return
-
-    # lark-cli config init --app-id <id> --app-secret-stdin（secret 走 stdin 防泄露）
-    try:
-        proc = subprocess.run(
-            [lark_cli, "config", "init", "--app-id", app_id, "--app-secret-stdin", "--brand", "feishu"],
-            input=app_secret.encode("utf-8"),
-            capture_output=True,
-            timeout=30,
-        )
-    except Exception as e:
-        console.print(f"[red]同步失败：{e}[/red]")
-        return
-
-    if proc.returncode == 0:
-        console.print(f"[green]✓ 已同步应用到 lark-cli（{app_id}）[/green]")
-        console.print("[dim]若需要用户身份能力（如以本人身份发消息），再跑：lark-cli auth login --domain im[/dim]")
-    else:
-        console.print("[red]lark-cli config init 失败[/red]")
-        console.print(f"[dim]{proc.stderr.decode(errors='replace').strip()[-400:]}[/dim]")
-        console.print("  可手动执行：lark-cli config init --app-id <id> --app-secret-stdin")
+# 注：lark-cli 检测 / 安装 / app 同步逻辑已迁移到 ethan/interface/lark_deps.py，
+# 三条入口（Web API / channel add|set / plugin add lark-channel）统一调用 ensure_lark_deps。

@@ -1,5 +1,6 @@
 ---
 name: channels
+channels: [lark]
 description: "消息渠道接入配置：飞书 WebSocket 长连接配置与使用说明。未来支持微信、Telegram 等渠道。"
 trigger: "渠道|channel|飞书配置|lark配置|接入|webhook|websocket|消息渠道"
 fast_path: true

@@ -56,6 +56,13 @@ PRESET_PLUGINS: list[dict] = [
             "  cua-driver serve     # 或手动启动"
         ),
     },
+    {
+        "name": "lark-channel",
+        "label": "飞书渠道依赖",
+        "description": "安装 lark-oapi + lark-cli 并同步已配置的飞书应用（无需重新填 app 凭证）",
+        "install_type": "lark_channel",
+        "install_source": "lark-channel",
+    },
 ]
 
 
@@ -491,6 +498,11 @@ def _do_install(plugin: dict) -> None:
         console.print(f"[dim]{plugin['description']}[/dim]")
         console.print()
         _install_optional_dep(plugin)
+    elif plugin["install_type"] == "lark_channel":
+        console.print(f"[bold]安装飞书渠道依赖: {name}[/bold]")
+        console.print(f"[dim]{plugin['description']}[/dim]")
+        console.print()
+        _install_lark_channel_deps()
     else:
         console.print(f"[bold]配置插件: {name}[/bold]")
         console.print(f"[dim]{plugin['description']}[/dim]")
@@ -503,10 +515,57 @@ def _check_plugin_installed(plugin: dict) -> bool:
     name = plugin["name"]
     if plugin["install_type"] == "optional_dep":
         return _is_optional_dep_installed(plugin)
+    elif plugin["install_type"] == "lark_channel":
+        return _is_lark_channel_ready()
     elif plugin["install_type"] in ("skill", "builtin_skill"):
         return name in _get_installed_skill_names()
     else:
         return name in _get_enabled_plugin_names()
+
+
+def _is_lark_channel_ready() -> bool:
+    """飞书渠道依赖是否就绪：lark-oapi + lark-cli 都装好。"""
+    from ethan.interface.lark_deps import get_lark_deps_status
+    s = get_lark_deps_status()
+    return s.lark_oapi_installed and s.lark_cli_installed
+
+
+def _install_lark_channel_deps() -> None:
+    """安装飞书渠道依赖（lark-oapi + lark-cli + app sync）。
+
+    从已保存的 config 读 app 凭证；若未配置则提示用户先跑渠道配置。
+    """
+    from ethan.core.config import get_config
+    from ethan.interface.lark_deps import ensure_lark_deps
+
+    cfg = get_config()
+    app_id = cfg.lark.app_id or ""
+    app_secret = cfg.lark.app_secret or ""
+
+    if not app_id or not app_secret:
+        console.print("[yellow]⚠ 未检测到飞书应用配置（app_id / app_secret）[/yellow]")
+        console.print("  先运行 [cyan]ethan channel add lark[/cyan] 配置应用凭证，")
+        console.print("  或在 Web 端「渠道」页面填入后，再回来安装依赖。")
+        console.print("  依赖仍会尝试安装（仅 lark-oapi + lark-cli），但无法自动 sync app。")
+        console.print()
+
+    status = ensure_lark_deps(
+        app_id, app_secret,
+        interactive=True,
+        triggered_by="plugin",
+    )
+    console.print()
+    if status.lark_oapi_installed and status.lark_cli_installed and status.lark_cli_app_matches:
+        console.print("[green]✓ 飞书渠道依赖全部就绪[/green]")
+    elif status.lark_oapi_installed and status.lark_cli_installed:
+        console.print("[green]✓ lark-oapi 与 lark-cli 已安装[/green]")
+        if not app_id:
+            console.print("[dim]app 未配置，跳过 sync。配好 app 后重跑本命令完成同步。[/dim]")
+    else:
+        console.print("[yellow]⚠ 部分依赖未就绪，详见上方输出[/yellow]")
+        if status.last_error:
+            console.print(f"[dim]{status.last_error}[/dim]")
+    console.print()
 
 
 def _install_skill(alias_or_source: str) -> None:
@@ -669,7 +728,6 @@ def _menu_channels() -> None:
 
 def _setup_lark() -> None:
     """引导配置飞书 — 使用 setup 自有交互，支持 Esc 取消。"""
-    import importlib.util
     import os
 
     from prompt_toolkit import prompt as pt_prompt
@@ -677,19 +735,6 @@ def _setup_lark() -> None:
     from ethan.core.config import get_config, save_config
 
     os.system("clear" if os.name != "nt" else "cls")
-
-    # 检测 lark-oapi 是否已安装，未安装则自动安装
-    if importlib.util.find_spec("lark_oapi") is None:
-        console.print("[yellow]飞书渠道需要 lark-oapi 包，正在安装…[/yellow]")
-        console.print()
-        if not _pip_install(["lark-oapi"]):
-            console.print("[red]lark-oapi 安装失败，无法配置飞书渠道[/red]")
-            try:
-                pt_prompt("[dim]按 Enter 返回...[/dim]")
-            except (EOFError, KeyboardInterrupt):
-                pass
-            return
-        console.print()
 
     config = get_config()
     console.print("[bold cyan]📡 飞书（Lark）渠道配置[/bold cyan]")
@@ -699,6 +744,7 @@ def _setup_lark() -> None:
     console.print("  2. [事件与回调] → 选择 [长连接] 模式")
     console.print("  3. 订阅事件：im.message.receive_v1")
     console.print("  4. [权限管理] 开通：im:message 等")
+    console.print("  5. lark-oapi 与 lark-cli 会在保存配置后自动安装")
     console.print()
     console.print("[dim]Ctrl+C 或留空回车可取消[/dim]")
     console.print()
@@ -731,6 +777,24 @@ def _setup_lark() -> None:
     save_config(config)
     console.print()
     console.print("[green]✓ 飞书配置已保存[/green]")
+
+    # 统一调用 ensure_lark_deps：装 lark-oapi + 装 lark-cli + sync app
+    from ethan.interface.lark_deps import ensure_lark_deps
+    console.print()
+    console.print("[bold]依赖就绪检查与安装[/bold]")
+    status = ensure_lark_deps(
+        values.get("app_id", ""),
+        values.get("app_secret", ""),
+        interactive=True,
+        triggered_by="setup",
+    )
+    console.print()
+    if status.lark_oapi_installed and status.lark_cli_installed and status.lark_cli_app_matches:
+        console.print("[green]✓ 飞书依赖全部就绪[/green]")
+    else:
+        console.print("[yellow]⚠ 部分依赖未就绪，详见上方输出[/yellow]")
+        if status.last_error:
+            console.print(f"[dim]{status.last_error}[/dim]")
     console.print("[dim]重启 ethan serve 后生效。[/dim]")
     console.print()
     try:

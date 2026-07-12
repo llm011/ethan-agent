@@ -315,7 +315,23 @@ async def patch_channel(req: ChannelPatchRequest):
             config.lark.app_secret = req.config["app_secret"]
         save_config(config)
         reload_config()
-        return {"ok": True}
+        # 后台触发依赖安装（lark-oapi + lark-cli + app sync），不阻塞 API 响应。
+        # 状态通过 GET /api/channels/lark/deps-status 轮询。
+        app_id = config.lark.app_id or ""
+        app_secret = config.lark.app_secret or ""
+        if app_id and app_secret:
+            import asyncio
+
+            from ethan.interface.lark_deps import ensure_lark_deps
+            asyncio.create_task(
+                asyncio.to_thread(
+                    ensure_lark_deps,
+                    app_id, app_secret,
+                    interactive=False,
+                    triggered_by="web",
+                )
+            )
+        return {"ok": True, "deps_installing": bool(app_id and app_secret)}
     if req.channel_id == "wechat":
         if "enabled" in req.config:
             config.wechat.enabled = bool(req.config["enabled"])
@@ -323,6 +339,37 @@ async def patch_channel(req: ChannelPatchRequest):
         reload_config()
         return {"ok": True}
     raise HTTPException(400, f"Unknown channel: {req.channel_id}")
+
+
+@router.get("/channels/lark/deps-status", dependencies=[Depends(verify_token)])
+async def get_lark_deps_status():
+    """查询飞书依赖就绪状态（lark-oapi / lark-cli / app sync）。
+
+    前端在 PATCH /api/channels 后轮询此端点，直到 installing=False。
+    """
+    from ethan.interface.lark_deps import get_lark_deps_status as _status
+    return _status().to_dict()
+
+
+@router.post("/channels/lark/install-deps", dependencies=[Depends(verify_token)])
+async def install_lark_deps():
+    """手动触发飞书依赖安装（用于「重试安装」按钮或初始化时强制触发）。"""
+    import asyncio
+
+    from ethan.core.config import get_config as _cfg
+    from ethan.interface.lark_deps import ensure_lark_deps
+    cfg = _cfg()
+    app_id = cfg.lark.app_id or ""
+    app_secret = cfg.lark.app_secret or ""
+    asyncio.create_task(
+        asyncio.to_thread(
+            ensure_lark_deps,
+            app_id, app_secret,
+            interactive=False,
+            triggered_by="web",
+        )
+    )
+    return {"ok": True, "deps_installing": True}
 
 
 # ── System prompt preview ─────────────────────────────────────────

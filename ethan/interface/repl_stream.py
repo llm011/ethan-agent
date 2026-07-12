@@ -1,4 +1,6 @@
 """Single-turn streaming: run_once."""
+import time
+
 from rich.live import Live
 from rich.markdown import Markdown as RichMarkdown
 from rich.spinner import Spinner
@@ -40,7 +42,9 @@ async def run_once(agent: Agent, prompt: str) -> None:
     render_live = Live(console=console, refresh_per_second=8, transient=True)
     render_started = False
     full = ""
-    after_tool = False  # 上一条输出是工具调用行，后续文字前需加空行
+    after_tool = False
+    send_time = time.time()
+    ttfb: float | None = None
 
     async for item in agent.stream_chat(messages):
         if isinstance(item, ThinkingEvent):
@@ -84,6 +88,8 @@ async def run_once(agent: Agent, prompt: str) -> None:
         if not spinner_stopped:
             spinner.stop()
             spinner_stopped = True
+        if ttfb is None:
+            ttfb = time.time() - send_time
         full += item
         if not render_started:
             if after_tool:
@@ -100,10 +106,20 @@ async def run_once(agent: Agent, prompt: str) -> None:
     if not spinner_stopped:
         spinner.stop()
 
+    # 耗时统计
+    total_sec = time.time() - send_time
+    parts = []
+    if ttfb is not None:
+        parts.append(f"TTFB {ttfb*1000:.0f}ms" if ttfb < 1 else f"TTFB {ttfb:.1f}s")
+    parts.append(f"{total_sec:.1f}s" if total_sec < 60 else f"{int(total_sec//60)}m{int(total_sec%60)}s")
+    console.print(f"[dim]  {' · '.join(parts)}[/dim]")
+
     # 保存 assistant 回复并更新 session
     if full:
         usage_dict = {"input": agent.usage.input_tokens, "output": agent.usage.output_tokens, "cache": agent.usage.cache_tokens}
-        await store.save_message(session_id, Message(role="assistant", content=full, usage=usage_dict))
+        ttfb_ms_val = int(ttfb * 1000) if ttfb else None
+        total_ms_val = int(total_sec * 1000)
+        await store.save_message(session_id, Message(role="assistant", content=full, usage=usage_dict, ttfb_ms=ttfb_ms_val, total_ms=total_ms_val))
         await store.touch(session_id)
 
     # 生成标题（CLI 模式下同步执行，因为 asyncio.run 结束后 create_task 没机会跑）

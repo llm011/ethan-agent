@@ -267,6 +267,8 @@ async def _run_generation(
                         tool_steps=collector.tool_steps or [],
                         a2ui=collector.a2ui or None,
                         matched_skills=collector.matched_skills or None,
+                        ttfb_ms=collector.ttfb_ms,
+                        total_ms=collector.total_ms,
                     ))
                     await store.touch(session_id)
                 else:
@@ -284,6 +286,8 @@ async def _run_generation(
                     tool_steps=collector.tool_steps or [],
                     a2ui=collector.a2ui or None,
                     matched_skills=collector.matched_skills or None,
+                    ttfb_ms=collector.ttfb_ms,
+                    total_ms=collector.total_ms,
                 )
                 await store.save_message(session_id, stopped_msg)
                 await store.touch(session_id)
@@ -313,6 +317,8 @@ async def _run_generation(
                 tool_steps=collector.tool_steps or [],
                 a2ui=collector.a2ui or None,
                 matched_skills=collector.matched_skills or None,
+                ttfb_ms=collector.ttfb_ms,
+                total_ms=collector.total_ms,
             )
             try:
                 if progress_msg_id:
@@ -341,6 +347,8 @@ async def _run_generation(
             tool_steps=collector.tool_steps or [],
             a2ui=collector.a2ui or None,
             matched_skills=collector.matched_skills or None,
+            ttfb_ms=collector.ttfb_ms,
+            total_ms=collector.total_ms,
         )
         # 正常结束：把实时进度行就地更新为最终回复（content/usage/tool_steps/a2ui 全写全），
         # 复用同一行，避免「占位行 + 最终行」重复两条 assistant 消息。无进度行则照常新建。
@@ -359,6 +367,6 @@ async def _run_generation(
     await store.close()
 
     # 通知所有订阅者「流结束」并附最终 usage
-    run.emit({"done": True, "usage": usage_dict})
+    run.emit({"done": True, "usage": usage_dict, "ttfb_ms": collector.ttfb_ms, "total_ms": collector.total_ms})
     run.finish()
     _RunManager_schedule_removal(run.session_id)

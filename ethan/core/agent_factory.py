@@ -127,10 +127,11 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
     registry.register(BrowserSessionTool())
     registry.register(BrowserTabTool())
     registry.register(BrowserPageTool())
-    # Lark CLI wrapper tools — 模型主动调高频 lark-cli 命令（日历/群消息/发消息）
-    registry.register(LarkCalendarEventsTool())
-    registry.register(LarkChatMessagesTool())
-    registry.register(LarkMessageSendTool())
+    # Lark CLI wrapper tools — 仅飞书渠道注册，非飞书渠道不暴露给模型
+    if channel == "lark":
+        registry.register(LarkCalendarEventsTool())
+        registry.register(LarkChatMessagesTool())
+        registry.register(LarkMessageSendTool())
     # ui_card 在能渲染卡片的渠道注册：web/repl 走 A2UI，lark 走飞书 interactive 卡片。
     # 同一套结构化 card 数据，按渠道选渲染目标（见 UiCardTool）。api 等无渲染器的渠道不暴露。
     if channel in ("web", "repl", "lark"):
