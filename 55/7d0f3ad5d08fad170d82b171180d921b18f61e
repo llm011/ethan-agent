@@ -1,0 +1,25 @@
+web/components/all-sessions-view.tsx
+  s_3c0fe3fada65eb::t_63b886856076e2 6-7,32-33,112-130,144-157
+web/components/swimlane-diagram.tsx
+  s_3c0fe3fada65eb::t_07a79459416eba 8-12,16-17,36,45,95-111
+web/lib/api.ts
+  s_3c0fe3fada65eb::t_b591e6d3e5ffb5 228-236
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "557d0f3ad5d08fad170d82b171180d921b18f61e",
+  "prompts": {},
+  "sessions": {
+    "s_3c0fe3fada65eb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5f56ab23-1bfa-4ae0-873c-f87346f52574",
+        "model": "unknown"
+      },
+      "human_author": "jsongo <jsongo@qq.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
