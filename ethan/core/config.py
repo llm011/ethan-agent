@@ -306,7 +306,12 @@ def _init_system_files(agent_name: str) -> None:
 
 
 def _init_default_skills() -> None:
-    """首次安装时将默认技能释放到 ~/.ethan/skills/。只在目标不存在时创建，不覆盖用户已有技能。"""
+    """释放内置默认技能到 ~/.ethan/skills/。
+
+    目标目录不存在时首次拷贝；已存在时，仅同步单个 SKILL.md 文件——若源文件比目标新
+    （即升级后有了新字段如 channels），则覆盖更新。不覆盖 references/ 等用户可能修改的
+    附属文件，也不删除用户从技能目录里新增的文件。
+    """
     import shutil
 
     defaults_dir = Path(__file__).parent.parent / "defaults" / "skills"
@@ -334,6 +339,13 @@ def _init_default_skills() -> None:
                     else:
                         target.parent.mkdir(parents=True, exist_ok=True)
                         shutil.copy2(f, target)
+        else:
+            # 目标已存在，仅同步更新的 SKILL.md
+            src_md = src / "SKILL.md"
+            dst_md = dst / "SKILL.md"
+            if src_md.exists() and dst_md.exists():
+                if src_md.stat().st_mtime > dst_md.stat().st_mtime:
+                    shutil.copy2(str(src_md), str(dst_md))
 
 
 def load_config() -> Config:
