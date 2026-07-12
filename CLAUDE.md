@@ -1,5 +1,35 @@
 # Ethan Agent - Project Instructions
 
+## Worktree 工作流（必须遵守）
+
+**禁止在主仓库 `/Users/jsongo/code/life/ethan-ai` 直接开发 feature。** 主仓库始终保持在 `main` 分支，只用于：
+- 拉取最新 main：`git pull`
+- 查看 main 上的文件
+- 创建/删除 worktree
+- 合并 PR 后清理 worktree
+
+所有 feature 开发必须在 worktree 中进行：
+
+```bash
+# 创建 worktree（从最新 main 切出新分支）
+git pull
+git worktree add ../ethan-ai-<feature-name> -b feature/<feature-name>
+
+# 进入 worktree 开发
+cd ../ethan-ai-<feature-name>
+# ... 编码、提交、推送、创建 PR ...
+
+# PR 合并后清理
+git worktree remove ../ethan-ai-<feature-name>
+git branch -d feature/<feature-name>
+```
+
+**命名约定**：
+- worktree 目录：`ethan-ai-<kebab-case-name>`（放在主仓库同级目录）
+- 分支名：`feature/<kebab-case-name>`
+
+**已有 worktree 列表**：`git worktree list`
+
 ## Agent Behaviors & Rules
 - **ALWAYS run the code and verify it passes after modifying it.** Never stop after just modifying code without running a local test to catch IndentationError, SyntaxError, or logic errors. Use `uv run ...` or node scripts to verify.
 
