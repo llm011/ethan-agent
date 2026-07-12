@@ -9,7 +9,7 @@ services:
     container_name: ethan-agent-standalone
     restart: unless-stopped
     ports:
-      - "8900:8900"
+      - "${ETHAN_PORT:-8900}:8900"
     volumes:
       # Persist agent memory, skills, and configuration
       - ethan-standalone-data:/root/.ethan

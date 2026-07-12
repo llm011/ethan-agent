@@ -5,12 +5,14 @@ set -e
 IMAGE="ethan-dev"
 DOCKERFILE="deploy/Dockerfile.dev"
 WITH_CONFIG=false
+SHELL_MODE=false
 
 # 解析选项
-while getopts "c" opt; do
+while getopts "cs" opt; do
   case $opt in
     c) WITH_CONFIG=true ;;
-    *) echo "用法: $0 [-c] [command...]"; echo "  -c  纯净模式，不映射本地 ~/.ethan/config.yaml"; exit 1 ;;
+    s) SHELL_MODE=true ;;
+    *) echo "用法: $0 [-c] [-s] [command...]"; echo "  -c  纯净模式，不映射本地 ~/.ethan/config.yaml"; echo "  -s  进入 bash（默认启动 ethan serve）"; exit 1 ;;
   esac
 done
 shift $((OPTIND - 1))
@@ -35,8 +37,12 @@ else
   echo "✓ 镜像已是最新，跳过 build"
 fi
 
-# 构造 docker run 参数
-DOCKER_ARGS=(-it --rm -v "$(pwd)/ethan:/app/ethan")
+# 构造 docker run 参数（serve 模式不需要 TTY，shell 模式需要 -it）
+if [ "$SHELL_MODE" = true ]; then
+  DOCKER_ARGS=(-it --rm -v "$(pwd)/ethan:/app/ethan" -p "${ETHAN_PORT:-8911}:8900")
+else
+  DOCKER_ARGS=(--rm -v "$(pwd)/ethan:/app/ethan" -p "${ETHAN_PORT:-8911}:8900")
+fi
 
 # 从本地 ~/.ethan/config.yaml 提取模型配置和对应 provider key 传入容器
 if [ "$WITH_CONFIG" = true ]; then
@@ -89,15 +95,21 @@ for pname, pcfg in providers.items():
   fi
 fi
 
-# 默认命令：setup 初始化 + 跳过 onboarding + 进入 bash；传参则初始化后执行指定命令
+# 默认命令：setup 初始化
 INIT_CMD='uv run ethan setup && mkdir -p ~/.ethan/memory && echo "[{\"text\":\"dev environment\",\"confidence\":1.0,\"source\":\"dev-script\",\"category\":\"preference\"}]" > ~/.ethan/memory/facts.json'
 
-if [ $# -eq 0 ]; then
+HOST_PORT="${ETHAN_PORT:-8911}"
+
+if [ $# -gt 0 ]; then
+  echo "🚀 docker run → $*"
+  exec docker run "${DOCKER_ARGS[@]}" "$IMAGE" \
+    bash -c "$INIT_CMD && uv run $*"
+elif [ "$SHELL_MODE" = true ]; then
   echo "🚀 docker run → ethan setup && bash"
   exec docker run "${DOCKER_ARGS[@]}" "$IMAGE" \
     bash -c "$INIT_CMD && echo 'alias ethan=\"uv run ethan\"' >> ~/.bashrc && exec bash"
 else
-  echo "🚀 docker run → $*"
+  echo "🚀 ethan serve 启动中，访问 http://localhost:${HOST_PORT}/"
   exec docker run "${DOCKER_ARGS[@]}" "$IMAGE" \
-    bash -c "$INIT_CMD && uv run $*"
+    bash -c "$INIT_CMD && uv run ethan serve --port 8900"
 fi

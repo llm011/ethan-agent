@@ -50,7 +50,7 @@ case "$mode" in
     echo "📦 PyPI 模式：从 PyPI 安装最新 ethan-agent"
     docker compose -f "$COMPOSE_FILE" down
     docker compose -f "$COMPOSE_FILE" up -d --build
-    echo "✓ 已启动，访问 http://localhost:8900"
+    echo "✓ 已启动，访问 http://localhost:${ETHAN_PORT:-8900}"
     docker compose -f "$COMPOSE_FILE" logs -f --tail=50
     ;;
 
@@ -102,7 +102,7 @@ services:
 EOF
 
     docker compose -f "$COMPOSE_FILE" -f /tmp/ethan-local-override.yml up -d --build
-    echo "✓ 已启动，访问 http://localhost:8900"
+    echo "✓ 已启动，访问 http://localhost:${ETHAN_PORT:-8900}"
     echo "   日志: ./local-docker.sh logs"
     echo "   停止: ./local-docker.sh down"
     ;;
