@@ -30,6 +30,28 @@ git branch -d feature/<feature-name>
 
 **已有 worktree 列表**：`git worktree list`
 
+## 多 worktree 开发的服务启动规范
+
+**问题**：ethan 的 watchdog 机制通过 `/tmp/ethan/server.pid` 管理服务进程。多个 worktree 同时启动 `ethan serve` 会互相冲突——watchdog 会杀掉 PID 文件指向的进程，导致非主实例被误杀。
+
+**规则**：
+1. **默认端口 8900 同一时间只能有一个实例**。watchdog 只监控 8900 端口，非 8900 端口的实例会被 watchdog 视为"server 死亡"并触发重启，可能杀掉其他实例。
+2. **开发测试时使用随机端口**（8901-8999 之间），但要意识到：
+   - 启动的实例**不要写入 `/tmp/ethan/server.pid`**（否则会被 watchdog 杀）
+   - 实例可能被 watchdog 的端口扫描误杀（`_kill_server` 会扫描 8900 端口占用）
+   - 优先用 `ethan -p "prompt" --yes` 单轮模式测试，不启动常驻服务
+3. **浏览器插件测试**：浏览器插件通过 `ws://localhost:<port>/ws/browser` 连接 ethan。测试前确认：
+   - ethan 服务在监听目标端口
+   - 系统代理（如 `127.0.0.1:7890`）会拦截 ws 连接，浏览器插件需绕过代理或配置 no_proxy
+   - 可用 `NO_PROXY=localhost,127.0.0.1` 验证连接是否正常
+4. **启动命令示例**（worktree 开发测试）：
+   ```bash
+   # 随机端口 8901-8999，避开 8900（watchdog 占用）和已用端口
+   PORT=$((RANDOM % 98 + 8902))
+   .venv/bin/ethan serve --host 127.0.0.1 --port $PORT
+   ```
+5. **不要 `pkill -f "ethan serve"`**：会误杀其他 worktree 的实例。只 kill 自己启动的 PID。
+
 ## Agent Behaviors & Rules
 - **ALWAYS run the code and verify it passes after modifying it.** Never stop after just modifying code without running a local test to catch IndentationError, SyntaxError, or logic errors. Use `uv run ...` or node scripts to verify.
 
