@@ -5,11 +5,20 @@ import { ArrowRight, ChevronDown, ChevronUp, Loader2, CheckCircle2, XCircle } fr
 import type { ToolStep } from "@/components/tool-timeline";
 
 const ENTITY_CONFIG: Record<string, { label: string; color: string }> = {
-  file:      { label: "文件", color: "#22c55e" },
-  system:    { label: "终端", color: "#a855f7" },
-  knowledge: { label: "知识", color: "#6366f1" },
-  search:    { label: "搜索", color: "#3b82f6" },
-  connect:   { label: "互联", color: "#f97316" },
+  builtin:       { label: "内置工具",   color: "#6b7280" },
+  file:          { label: "文件操作",   color: "#22c55e" },
+  search:        { label: "搜索",       color: "#3b82f6" },
+  system:        { label: "系统命令",   color: "#a855f7" },
+  browser:       { label: "浏览器",     color: "#f97316" },
+  delegate:      { label: "委派 Agent", color: "#eab308" },
+  computer_use:  { label: "GUI 自动化", color: "#ec4899" },
+  communication: { label: "通信",       color: "#06b6d4" },
+  knowledge:     { label: "知识技能",   color: "#6366f1" },
+  memory:        { label: "记忆",       color: "#14b8a6" },
+  task:          { label: "任务调度",   color: "#f43f5e" },
+  config:        { label: "配置",       color: "#64748b" },
+  ui:            { label: "UI 卡片",    color: "#8b5cf6" },
+  meta:          { label: "元工具",     color: "#71717a" },
 };
 
 function getColor(entityType: string | undefined) {
@@ -107,7 +116,6 @@ export function SwimlaneDiagram({ steps, matchedSkills, onStepClick }: SwimlaneD
         </div>
       )}
 
-      {/* 内容区：可横滚 */}
       <div className="relative">
         <div className="px-3 pb-2 pt-1 overflow-x-auto">
           {visibleRows.map((row, ri) => (
@@ -161,7 +169,6 @@ export function SwimlaneDiagram({ steps, matchedSkills, onStepClick }: SwimlaneD
           ))}
         </div>
 
-        {/* 折叠遮罩 + 展开按钮 */}
         {!expanded && needsFold && (
           <div className="absolute bottom-0 left-0 right-0 flex flex-col items-center pointer-events-none">
             <div className="absolute bottom-0 left-0 right-0 h-[60px] bg-gradient-to-t from-muted/95 via-muted/60 to-transparent pointer-events-none" />
@@ -176,7 +183,6 @@ export function SwimlaneDiagram({ steps, matchedSkills, onStepClick }: SwimlaneD
         )}
       </div>
 
-      {/* 展开后的收起按钮：在横滚容器外面，不跟随横滚，居中 */}
       {expanded && needsFold && (
         <div className="flex justify-center pb-2">
           <button
