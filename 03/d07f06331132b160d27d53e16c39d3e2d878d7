@@ -1,0 +1,31 @@
+ethan/core/agent.py
+  s_3c0fe3fada65eb::t_8b874ed6eb8bf2 9-17,20,321-331,341-345,375-377,379-381,384,386-390,436-452,463,502-592,595,689-690,692-696,698-712,715-721,725-732,756,766,775-786,839-849,852-855,857-864,868,871,873-900,903-906,910-913,932-933,949,968-969,981,986-999,1006,1028,1031,1035-1036
+ethan/core/loop_control.py
+  s_3c0fe3fada65eb::t_65a75fb4e474ab 27-28,79,82
+ethan/defaults/skills/code-review/SKILL.md
+  s_3c0fe3fada65eb::t_383dfddbb77e43 3,5,10,12,14-18,20,22,24,26,28,30,32,34,37-39,42,44,47-48,51-52,54,56,58-60,62-64,66,68-72,74-76,78,80,82,84,86,88,90-91,93-95,97,99-103,105-108,110,112-115,118-121,123-124,126,128,130,134,137,139,143,145,147
+ethan/providers/openai_compat.py
+  s_3c0fe3fada65eb::t_6d2f8b9f59402b 23,28
+ethan/tools/builtin/file.py
+  s_3c0fe3fada65eb::t_191f2687ccb7dc 51-55,58,77,83-84,91-92,94-97
+ethan/tools/builtin/search.py
+  s_3c0fe3fada65eb::t_bcceba3d8ccf5d 3,9-29,50-55,110-115
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "03d07f06331132b160d27d53e16c39d3e2d878d7",
+  "prompts": {},
+  "sessions": {
+    "s_3c0fe3fada65eb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5f56ab23-1bfa-4ae0-873c-f87346f52574",
+        "model": "unknown"
+      },
+      "human_author": "jsongo <jsongo@qq.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
