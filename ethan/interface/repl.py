@@ -454,7 +454,10 @@ async def run_repl(agent: Agent, resume_id: str | None = None, auto_consent: boo
                 "output": agent.usage.output_tokens,
                 "cache": agent.usage.cache_tokens,
             }
-            resp = Message(role="assistant", content=full, thought=thought, usage=usage_dict)
+            total_sec = time.time() - send_time
+            ttfb_ms = int(ttft * 1000) if ttft else None
+            total_ms = int(total_sec * 1000)
+            resp = Message(role="assistant", content=full, thought=thought, usage=usage_dict, ttfb_ms=ttfb_ms, total_ms=total_ms)
             history.append(resp)
             await store.save_message(session.id, resp)
             await store.touch(session.id)
@@ -468,12 +471,12 @@ async def run_repl(agent: Agent, resume_id: str | None = None, auto_consent: boo
             turn_out = agent.usage.output_tokens - prev_output
             turn_cache = agent.usage.cache_tokens - prev_cache
 
-            # Print per-turn stats in dim color
             stats_parts = [f"↑{_fmt_tokens(turn_in)} ↓{_fmt_tokens(turn_out)}"]
             if turn_cache:
                 stats_parts.append(f"⚡{_fmt_tokens(turn_cache)}")
             if ttft is not None:
                 stats_parts.append(f"TTFT {ttft*1000:.0f}ms" if ttft < 1 else f"TTFT {ttft:.1f}s")
+            stats_parts.append(f"{total_sec:.1f}s" if total_sec < 60 else f"{int(total_sec//60)}m{int(total_sec%60)}s")
             console.print(f"[dim]  {' · '.join(stats_parts)}[/dim]")
 
             memory.add_turn(msg, resp)

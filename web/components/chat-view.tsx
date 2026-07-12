@@ -109,6 +109,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       toolsExpanded: false,
       a2ui: m.a2ui && m.a2ui.length > 0 ? m.a2ui : undefined,
       matchedSkills: m.matched_skills || undefined,
+      ttfb_ms: m.ttfb_ms ?? undefined,
+      total_ms: m.total_ms ?? undefined,
     }));
 
   // 消费一条 SSE 事件流，增量更新最后一条 assistant 消息，结束后定稿。
@@ -126,6 +128,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     const a2uiSurfaces: unknown[] = [];
     const sendTime = Date.now();
     let ttft: number | undefined;
+    let ttfbMs: number | undefined;
+    let totalMs: number | undefined;
     let finalUsage: Usage | undefined;
     setMessages([...baseMessages, { role: "assistant", content: "", created_at: Date.now() / 1000 }]);
 
@@ -238,6 +242,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         }
         if (chunk.done && chunk.usage) {
           finalUsage = { input: chunk.usage.input || 0, output: chunk.usage.output || 0, cache: chunk.usage.cache || 0 };
+          if (chunk.ttfb_ms != null) ttfbMs = chunk.ttfb_ms;
+          if (chunk.total_ms != null) totalMs = chunk.total_ms;
           setSessionUsage(prev => ({
             input: prev.input + finalUsage!.input,
             output: prev.output + finalUsage!.output,
@@ -268,10 +274,10 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       const msgs = [...prev];
       const last = msgs[msgs.length - 1];
       if (last && last.role === "assistant") {
-        msgs[msgs.length - 1] = { ...last, content: assistantContent, thought: assistantThought, toolsExpanded: false, usage: finalUsage || last.usage, ttft: ttft ?? last.ttft, a2ui: a2uiSurfaces.length > 0 ? a2uiSurfaces : undefined, matchedSkills: currentMatchedSkills };
+        msgs[msgs.length - 1] = { ...last, content: assistantContent, thought: assistantThought, toolsExpanded: false, usage: finalUsage || last.usage, ttft: ttft ?? last.ttft, ttfb_ms: ttfbMs ?? last.ttfb_ms, total_ms: totalMs ?? last.total_ms, a2ui: a2uiSurfaces.length > 0 ? a2uiSurfaces : undefined, matchedSkills: currentMatchedSkills };
         return msgs;
       }
-      return [...baseMessages, { role: "assistant", content: assistantContent, thought: assistantThought, created_at: Date.now() / 1000, usage: finalUsage, ttft, a2ui: a2uiSurfaces.length > 0 ? a2uiSurfaces : undefined, matchedSkills: currentMatchedSkills }];
+      return [...baseMessages, { role: "assistant", content: assistantContent, thought: assistantThought, created_at: Date.now() / 1000, usage: finalUsage, ttft, ttfb_ms: ttfbMs, total_ms: totalMs, a2ui: a2uiSurfaces.length > 0 ? a2uiSurfaces : undefined, matchedSkills: currentMatchedSkills }];
     });
     setStopping(false);
     setStreaming(false);

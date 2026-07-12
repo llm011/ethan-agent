@@ -32,6 +32,8 @@ export interface Message {
   created_at?: number;
   usage?: Usage;
   ttft?: number;
+  ttfb_ms?: number;
+  total_ms?: number;
   thought?: string;
   quote?: Quote;
   a2ui?: unknown[];  // ui_card 工具产出的 A2UI envelope 列表，渲染成卡片

@@ -183,6 +183,8 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
                         thought=collector.thought, usage=collector.usage_dict,
                         tool_steps=collector.tool_steps or [], a2ui=collector.a2ui or None,
                         matched_skills=collector.matched_skills or None,
+                        ttfb_ms=collector.ttfb_ms,
+                        total_ms=collector.total_ms,
                     )
                     if progress_msg_id:
                         await store.update_message(progress_msg_id, session_id, stopped_msg)
@@ -201,6 +203,8 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
                 thought=collector.thought, usage=collector.usage_dict,
                 tool_steps=collector.tool_steps or [], a2ui=collector.a2ui or None,
                 matched_skills=collector.matched_skills or None,
+                ttfb_ms=collector.ttfb_ms,
+                total_ms=collector.total_ms,
             )
             try:
                 if progress_msg_id:
@@ -222,6 +226,8 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
             usage=usage_dict, tool_steps=collector.tool_steps or [],
             a2ui=collector.a2ui or None,
             matched_skills=collector.matched_skills or None,
+            ttfb_ms=collector.ttfb_ms,
+            total_ms=collector.total_ms,
         )
         # 正常结束：把实时进度行更新为最终回复，复用同一行避免重复两条 assistant 消息
         if progress_msg_id:

@@ -88,10 +88,8 @@ class RoutingConfig(BaseModel):
         "schedule_create", "schedule_list", "schedule_remove",
     ])  # fast 档永远挂载的基础系统工具；find_tools 用于「规则工具不够时」兜底激活进阶工具
     base_tools: list[str] = Field(default_factory=lambda: [
-        # 常用核心工具：medium/full 档的初始广播集（两档共用同一份白名单）。
-        # 罕用工具（background_task/secrets/skill_create/config/install_skill/
-        # knowledge_add/delegate_coding）不在初始集里，模型按需调 find_tools 激活，
-        # 避免每请求白白广播约 2600 tokens 的 schema。
+        # 常用核心工具：full 档的初始广播集。
+        # 长尾工具不在初始集里，模型按需调 find_tools 激活，避免白白广播 headers 和 schema。
         # browser 工具已移入初始集：扩展连上时直接可用；未连时模型调用后会得到
         # "扩展未连接"的明确报错，优于因 find_tools 激活失败陷入发现死循环超时。
         "shell", "web_search", "web_fetch", "get_weather", "generate_chart",
@@ -101,9 +99,11 @@ class RoutingConfig(BaseModel):
         "knowledge_search", "knowledge_read",
         "memory_write", "procedure_write", "profile_update",
         "schedule_create", "schedule_list", "schedule_remove",
-        "lark_calendar_events", "lark_chat_messages", "lark_message_send",  # 飞书高频工具
-        "browser_session", "browser_tab", "browser_page",  # 常驻：避免 find_tools 发现死循环
-        "ui_card",  # 飞书/web 渠道核心卡片能力，应在初始集里对模型可见
+        "set_secret", "get_secret", "list_secrets",
+        "skill_create", "install_skill",
+        "browser_session", "browser_tab", "browser_page",
+        "ui_card",
+        # 飞书工具不再放在 base_tools：仅飞书渠道注册时才暴露（agent_factory.py）。
     ])
     fast_rules: list[FastRule] = Field(default_factory=lambda: [
         FastRule(
