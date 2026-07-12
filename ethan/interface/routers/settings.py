@@ -391,20 +391,13 @@ async def tool_tiers(model: str | None = None):
                 "tools": fast_tools,
             },
             {
-                "key": "medium",
-                "label": "Medium 档",
-                "desc": f"未命中规则、长度 ≤ {routing.medium_max_length} 字的消息。全量工具直接可见。",
-                "tools": all_tools,
-            },
-            {
                 "key": "full",
                 "label": "Full 档",
-                "desc": "长消息、复杂任务、或命中 FORCE_FULL 信号时进入。全量工具直接可见。",
+                "desc": "未命中 fast 规则时进入。全量工具直接可见。",
                 "tools": all_tools,
             },
         ],
         "fast_count": len(fast_tools),
         "fast_rule_tool_count": len(fast_rule_tools),
         "total_count": len(all_tools),
-        "medium_max_length": routing.medium_max_length,
     }

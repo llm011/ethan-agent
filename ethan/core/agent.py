@@ -469,7 +469,10 @@ class Agent:
         return _get_route(last_user, skill_triggers=skill_triggers)
 
     def _select_route(self, messages: list[Message]) -> tuple[str, str, list, int]:
-        """三档路由选择，返回 (route, system, tools_list, max_iters)。chat/stream_chat 共用。"""
+        """路由选择，返回 (route, system, tools_list, max_iters)。chat/stream_chat 共用。
+
+        路由仅影响工具集和模型选择；迭代上限统一用 defaults.max_tool_iterations。
+        """
         working = list(messages)
         last_user = self._get_last_user_text(working)
         skill_triggers = [
@@ -478,25 +481,16 @@ class Agent:
         ]
         route = _get_route(last_user, skill_triggers=skill_triggers)
         routing = get_config().defaults.routing
+        max_iters = get_config().defaults.max_tool_iterations
         if route == "fast":
-            # fast 档工具集 = 基础系统工具(fast_base_tools) + 命中规则声明的额外工具。
-            # 命中的规则同时把其 skills 强制注入 prompt（见 _build_system fast_rule 参数）。
             rule = _match_fast_rule(last_user, routing)
             wanted = set(routing.fast_base_tools) | (set(rule.tools) if rule else set())
             tools_list = [t for t in self._registry.all() if t.name in wanted]
             system = self._build_system(working, fast=True, fast_rule=rule)
-            max_iters = routing.fast_max_iters
-        elif route == "medium":
-            system = self._build_system(working, fast=False)
-            wanted = set(routing.base_tools) if routing.base_tools else None
-            tools_list = [t for t in self._registry.all() if t.name in wanted] if wanted else self._registry.all()
-            max_iters = routing.medium_max_iters
         else:
             system = self._build_system(working, fast=False)
             wanted = set(routing.base_tools) if routing.base_tools else None
             tools_list = [t for t in self._registry.all() if t.name in wanted] if wanted else self._registry.all()
-            # 实时读取，使 config_set 改的迭代上限立即生效（无需重建 Agent）
-            max_iters = get_config().defaults.max_tool_iterations
         return route, system, tools_list, max_iters
 
     async def _ensure_non_empty(self, response: Message, working: list[Message],
@@ -592,7 +586,6 @@ class Agent:
 
     def _broadcast_tools(self, tools_list: list):
         """每轮广播给模型的工具定义 = 基础 tools_list + 本请求 find_tools 已激活的长尾工具。
-        fast 档 tools_list 是白名单子集；medium/full 已是全量，激活集命中也都在基础集内，extra 为空。
 
         每个定义注入 intent 参数（_with_intent_param）：让模型用几个字说明每次调用目的，
         供前端/飞书显示。标准 schema 参数，切模型安全；缺失时回退旧 args 摘要。

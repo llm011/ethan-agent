@@ -78,10 +78,10 @@ class FastRule(BaseModel):
 
 
 class RoutingConfig(BaseModel):
-    """任务路由配置：命中某条 fast_rule 的关键字 → 走 Fast Path（极简 prompt + 该规则的工具/技能）。
+    """任务路由配置：命中某条 fast_rule 的关键字 → 走 Fast Path（受限工具集 + 可选 lite 模型）。
 
-    不再按字数判定 fast——字数误杀严重。fast 现在完全由 fast_rules 关键字驱动；
-    未命中任何规则的请求按字数走 medium / full（medium_max_length 仅用于这一档划分）。
+    Fast 路由由 fast_rules 关键字驱动；未命中则走 Full Path。
+    迭代上限统一用 defaults.max_tool_iterations，不分档——stuck detection 才是真正的兜底。
     """
     fast_base_tools: list[str] = Field(default_factory=lambda: [
         "shell", "file_read", "file_write", "skill_read", "skill_list", "find_tools",
@@ -174,10 +174,7 @@ class RoutingConfig(BaseModel):
             skills=["travel-query"],
         ),
     ])
-    fast_max_iters: int = 10     # Fast Path 最多工具迭代次数
     fast_use_lite_model: bool = True  # Fast Path 用 lite 模型（设备控制/状态查询等简单任务，省钱提速）
-    medium_max_length: int = 80   # 未命中 fast_rule 时：≤ 此长度走 Medium，否则 Full
-    medium_max_iters: int = 50    # Medium Path 最多迭代次数（browser 任务需要更多步骤）
 
 
 class HeartbeatConfig(BaseModel):
