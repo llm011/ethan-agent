@@ -460,10 +460,7 @@ class Agent:
         return "\n\n".join(parts)
 
     def route_for(self, messages: list[Message]) -> str:
-        """返回路由档位 'fast' | 'medium' | 'full'，供渠道决定回复策略（如飞书 card vs post）。
-
-        只做路由判定，不构建 system prompt，开销低。
-        """
+        """返回路由档位 'fast' | 'full'，供渠道决定回复策略（如飞书 card vs post）。"""
         last_user = self._get_last_user_text(list(messages))
         skill_triggers = [
             kw for s in (self._skills.all() if self._skills else [])

@@ -66,6 +66,7 @@ class ToolEvent:
     intent: str = ""  # 模型在 intent 参数里填的「本次调用目的」，展示在工具调用旁
     entity_type: str = ""  # 实体类型（builtin/browser/delegate/computer_use/...），用于可视化分类
     entity_id: str = ""  # 关联实体 ID（如 browser session_id），用于可视化实体聚合
+    skill_category: str = ""  # 工具所属 skill 分类，前端按类别展示工具调用
 
 
 @dataclass

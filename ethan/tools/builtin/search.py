@@ -1,8 +1,30 @@
 """File search tools — 基于 ripgrep 和 fd 的高性能文件搜索。"""
 import asyncio
+import re
 import shutil
 
 from ethan.tools.base import BaseTool
+
+
+def _extract_pattern(pattern: str = "", **kwargs) -> str:
+    """从参数中提取搜索 pattern。
+
+    某些模型（如 Gemini 经 cliproxy）偶尔会把参数名搞混，
+    例如把 pattern 写成 description="pattern: xxx" 或 query="xxx"。
+    这里做容错：依次从 pattern、description、query、search 中提取。
+    """
+    if pattern:
+        return pattern
+    for alias in ("description", "query", "search", "text", "regex"):
+        val = kwargs.get(alias, "")
+        if not val:
+            continue
+        m = re.match(r'^\s*pattern\s*[:=]\s*(.+)', val, re.IGNORECASE)
+        if m:
+            return m.group(1).strip()
+        if not re.match(r'^(Search|Directory|Limit|Case|Maximum|File)', val, re.IGNORECASE):
+            return val.strip()
+    return ""
 
 
 class RipgrepTool(BaseTool):
@@ -25,8 +47,12 @@ class RipgrepTool(BaseTool):
         "required": ["pattern"],
     }
 
-    async def run(self, pattern: str, path: str = ".", case_sensitive: bool = False,
-                  file_type: str = "", max_results: int = 50) -> str:
+    async def run(self, pattern: str = "", path: str = ".", case_sensitive: bool = False,
+                  file_type: str = "", max_results: int = 50, **kwargs) -> str:
+        pattern = _extract_pattern(pattern, **kwargs)
+        if not pattern:
+            return "Error: 'pattern' parameter is required. Example: rg_search(pattern=\"def main\", path=\".\")"
+
         rg = shutil.which("rg")
         if not rg:
             return "rg (ripgrep) not found. Install with: brew install ripgrep"
@@ -81,8 +107,12 @@ class FdTool(BaseTool):
         "required": ["pattern"],
     }
 
-    async def run(self, pattern: str, path: str = ".", file_type: str = "",
-                  extension: str = "", max_results: int = 50) -> str:
+    async def run(self, pattern: str = "", path: str = ".", file_type: str = "",
+                  extension: str = "", max_results: int = 50, **kwargs) -> str:
+        pattern = _extract_pattern(pattern, **kwargs)
+        if not pattern:
+            return "Error: 'pattern' parameter is required. Example: fd_find(pattern=\"config\", path=\".\")"
+
         fd = shutil.which("fd")
         if not fd:
             return "fd not found. Install with: brew install fd"

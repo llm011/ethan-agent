@@ -1,0 +1,7 @@
+# 训练数据是核心资产，放私有 repo：https://github.com/llm011/ethan-router-train-data
+# 本仓库只保留生成/训练脚本，不提交 jsonl 数据
+train/
+val/
+test/
+_data/
+_emb_cache.npz
