@@ -1,115 +1,117 @@
 ---
 name: wechat-reading
-trigger: 微信读书|读书|书架|阅读|划线|书城|书籍|看书|阅读统计|阅读时长|读书笔记|书单|推荐书|weread
-description: |
-  微信读书个人数据查询与书城浏览。用户提到「读书」「书架」「阅读统计」「笔记划线」时优先用本 Skill。
-
-  当以下情况时使用本 Skill：
-  (1) 查看书架：我的书架、最近在读、读完的书
-  (2) 阅读统计：阅读时长、天数、偏好分析
-  (3) 笔记和划线：查看/导出个人划线和想法
-  (4) 搜索书籍：在书城搜索任意书籍（书名、作者、评分）
-  (5) 书籍详情：章节目录、阅读进度、评分
-  (6) 推荐好书：个性化推荐、相似书籍推荐
-  (7) 首次配置：用户说「配置微信读书」「连微信读书」
-fast_path: true
+trigger: 微信读书|读书|书架|阅读|划线|书城|书籍|看书|阅读统计|阅读时长|读书笔记|书单|推荐书|weread|搜书|找书|热门划线|有声书
+description: 微信读书助手 — 搜索书籍、管理书架、查看笔记划线、阅读统计、发现推荐好书。
 ---
 
 # 微信读书 Skill
 
-## 概述
+通过 Agent API Gateway 调用微信读书接口，支持搜书、书架、笔记、阅读统计、推荐等能力。
 
-通过微信读书开放平台查询个人阅读数据和书城信息。数据来源于用户的微信读书账号，需要 API Key 授权。
+## 调用规范
 
-## 功能列表
+### 统一入口
+```
+POST https://i.weread.qq.com/api/agent/gateway
+```
 
-| 功能 | 说明 | 典型问法 |
-|------|------|----------|
-| 查阅书架 | 浏览个人书架，查看最近在读、收藏、读完的书 | 「看看我的书架」「我在读什么」 |
-| 阅读统计 | 阅读时长、天数、偏好类型深度分析 | 「我这周读了多久」「阅读统计」 |
-| 笔记划线 | 查看个人划线和想法，导出笔记 | 「导出我的划线」「看看我的笔记」 |
-| 搜索书籍 | 在书城搜索任意书籍，获取书名、作者、评分 | 「搜一下三体」「找本时间管理的书」 |
-| 书籍详情 | 章节目录、阅读进度、书籍评分 | 「三体的目录」「看到哪了」 |
-| 推荐好书 | 基于阅读偏好个性化推荐 | 「推荐些好书」「有什么类似的书」 |
+### 鉴权
+- Header：`Authorization: Bearer $WEREAD_API_KEY`
+- API Key 绑定用户身份，自动注入，无需手动传用户标识
 
-## 环境要求
-
-此技能依赖微信读书 MCP CLI 工具。首次使用前需安装：
+### 请求格式
+所有参数平铺在 body 顶层（不要包在 `params` 里），每次必须带 `skill_version`：
 
 ```bash
-npx skills add Tencent/WeChatReading -g
+curl -s -X POST 'https://i.weread.qq.com/api/agent/gateway' \
+  -H "Authorization: Bearer $WEREAD_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"api_name":"/store/search","keyword":"三体","scope":10,"skill_version":"1.0.4"}'
 ```
 
-## 密钥配置
-
-密钥存放在 `~/.ethan/.secrets/wechat-reading.env`，shell 自动注入子进程环境。
-
-### 首次使用
-
-如果调用返回「未授权」或「密钥无效」，引导用户：
-
-1. 打开 https://weread.qq.com/r/weread-skills 生成 API Key
-2. 拿到 key 格式为 `wrk_...`（以 `wrk_` 开头）
-3. 由 agent 用 `file_write` 写入 `~/.ethan/.secrets/wechat-reading.env`（不要让用户手写）：
-
-```env
-WEREAD_API_KEY="用户给的 key"
+### 业务参数平铺，不要嵌套
+```json
+{"api_name":"/user/notebooks","count":100,"skill_version":"1.0.4"}
 ```
+错误：`{"api_name":"...","params":{...}}` 会导致参数未转发、分页失效。
 
-4. 用 `shell` 跑 `chmod 600 ~/.ethan/.secrets/wechat-reading.env` 收紧权限
-5. 重新执行用户原本的请求
+### API Key 配置
 
-### 预置密钥
+密钥存 `~/.ethan/.secrets/wechat-reading.env`，shell 自动注入成 `$WEREAD_API_KEY`。
 
-如用户尚未生成自己的 key，可先用以下预置 key 体验：
+**首次使用**：如果调用返回 `errcode` 且提示未授权，引导用户：
+1. 打开 https://weread.qq.com/r/weread-skills 生成 key
+2. Agent 用 `file_write` 写入（不要让用户手动编辑）：
+```bash
+file_write(path="$HOME/.ethan/.secrets/wechat-reading.env", content='WEREAD_API_KEY="wrk-xxxx"')
+chmod 600 ~/.ethan/.secrets/wechat-reading.env
+```
+3. 重新执行用户请求。写入后 shell 环境变量自动注入，后续 curl 无需手动设 header。
 
+**预置体验 key**（共享，有频率限制）：
 ```bash
 file_write(path="$HOME/.ethan/.secrets/wechat-reading.env", content='WEREAD_API_KEY="wrk-CjwxNd85TU0QHbCT9cRXNwAA"')
 chmod 600 ~/.ethan/.secrets/wechat-reading.env
 ```
 
-预置 key 是共享的，有调用频率限制。建议提醒用户去 https://weread.qq.com/r/weread-skills 生成自己的 key 以获得最佳体验。
+---
 
-## 调用方式
+## 能力索引
 
-安装并配置密钥后，通过 shell 调用 MCP 工具。工具命名规律：以 `wr_` 或 `weread_` 开头。
+| 能力 | api_name | 说明 |
+|------|----------|------|
+| 搜索书籍 | `/store/search` | 书城搜索，keyword 必填；scope=0(综合)/10(电子书)/14(有声书)/6(作者) |
+| 书籍详情 | `/book/info` | bookId 必填；返回书名/作者/评分/简介/出版信息 |
+| 章节目录 | `/book/chapterinfo` | bookId 必填；返回章节树含 chapterUid |
+| 阅读进度 | `/book/getprogress` | bookId 必填；progress 是 0-100 整数(带%号展示)，100=读完 |
+| 书架 | `/shelf/sync` | 无参数；返回 books[] + albums[]（专辑/有声书）+ mp(文章收藏入口) |
+| 阅读统计 | `/readdata/detail` | mode=weekly/monthly/annually/overall(默认monthly)；totalReadTime 单位秒 |
+| 笔记本概览 | `/user/notebooks` | count=20，翻页用 lastSort 游标；总笔记=reviewCount+noteCount+bookmarkCount |
+| 划线内容 | `/book/bookmarklist` | bookId 必填；返回划线原文，已过滤书签 |
+| 想法点评 | `/review/list/mine` | bookid 必填；返回个人想法/点评内容 |
+| 热门划线 | `/book/bestbookmarks` | bookId 必填，chapterUid=0 查全部；返回 top20 热门划线原文 |
+| 个性化推荐 | `/book/recommend` | 无参数；返回为你推荐书单 |
+| 相似推荐 | `/book/similar` | bookId + count + maxIdx 必填；首次传 count=12 maxIdx=0 |
+| 获取所有接口 | `/_list` | 返回全部可用接口及参数定义 |
 
-**常用工具速查**（具体参数用 `npx wr --help` 查看）：
-
-| 功能 | 工具 | 示例 |
-|------|------|------|
-| 书架 | `wr_bookshelf` 或 `weread_shelf` | `npx wr bookshelf` |
-| 阅读统计 | `wr_stats` 或 `weread_stats` | `npx wr stats --days 7` |
-| 笔记划线 | `wr_notes` 或 `weread_notes` | `npx wr notes --book "三体"` |
-| 搜索书籍 | `wr_search` 或 `weread_search` | `npx wr search --q "时间管理"` |
-| 书籍详情 | `wr_detail` 或 `weread_detail` | `npx wr detail --book "三体"` |
-| 推荐 | `wr_recommend` 或 `weread_recommend` | `npx wr recommend` |
-
-工具名和参数以上述 MCP 工具实际注册名为准；首次调用时可先用 `find_tools` 搜索 `wr` / `weread` 确认当前可用的工具和参数。
+---
 
 ## 快速调用示例
 
 ```bash
-# 查看我的书架
-npx wr bookshelf
+# 搜书
+curl -s -X POST 'https://i.weread.qq.com/api/agent/gateway' \
+  -H "Authorization: Bearer $WEREAD_API_KEY" -H "Content-Type: application/json" \
+  -d '{"api_name":"/store/search","keyword":"三体","scope":10,"skill_version":"1.0.4"}'
 
-# 本周阅读统计
-npx wr stats --days 7
+# 书架
+curl -s -X POST 'https://i.weread.qq.com/api/agent/gateway' \
+  -H "Authorization: Bearer $WEREAD_API_KEY" -H "Content-Type: application/json" \
+  -d '{"api_name":"/shelf/sync","skill_version":"1.0.4"}'
 
-# 搜一本书
-npx wr search --q "三体"
+# 本月阅读统计
+curl -s -X POST 'https://i.weread.qq.com/api/agent/gateway' \
+  -H "Authorization: Bearer $WEREAD_API_KEY" -H "Content-Type: application/json" \
+  -d '{"api_name":"/readdata/detail","mode":"monthly","skill_version":"1.0.4"}'
 
-# 查看某本书的详情和笔记
-npx wr detail --book "三体"
-npx wr notes --book "三体"
+# 书籍详情
+curl -s -X POST 'https://i.weread.qq.com/api/agent/gateway' \
+  -H "Authorization: Bearer $WEREAD_API_KEY" -H "Content-Type: application/json" \
+  -d '{"api_name":"/book/info","bookId":"695233","skill_version":"1.0.4"}'
+
+# 书架数量 = books.length + albums.length + (mp非空?1:0)
+# 有声书=albums.length，电子书=books.length
+# progress 0-100，只有100才表示读完；时长字段都是秒，展示转小时分钟
 ```
 
 ## 关键纪律
 
-- 不要要求用户手动编辑密钥文件——由 agent 用 `file_write` 处理
-- 不要在对话中回显密钥原文
-- 不要用 `set_secret`（这个是 MCP 工具，需要 shell 环境变量注入）
-- 调用失败时先检查密钥是否已配置（`test -f ~/.ethan/.secrets/wechat-reading.env`）
-- 返回数据量大时（如完整书架、大量笔记）只展示摘要，询问用户是否需要详情
+- API Key 从 shell 环境变量 `$WEREAD_API_KEY` 获取，别手动写在请求 body 里
+- 所有参数平铺在 body 顶层，和 `api_name`/`skill_version` 同级，不要包在 `params` 里
+- 书架总数必须 = `books.length + albums.length + (mp非空?1:0)`，专辑/有声书也属于书架
+- 用户说书名时先调 `/store/search` 获取 bookId
+- 时长字段单位是秒，展示时转为 X小时Y分钟
+- 回包有 `deepLink` 时展示为 `[打开阅读]({deepLink})`
+- 返回数据量大时只展示摘要，询问用户是否需要详情
 
-activate_tools: shell, file_write, find_tools
+activate_tools: shell, file_write
