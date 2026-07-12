@@ -7,6 +7,11 @@
   3. val 扫 FLOOR：max_prob < FLOOR 的预测改判 others（额外拒识），选最优工作点。
   4. test 只跑一次，出 macro P/R/F1（8 个 skill 口径）+ others 拒识率。
 
+数据位置（核心资产，不在本仓库）：
+  train/ val/ test/ 的 *.jsonl 放在私有 repo
+  https://github.com/llm011/ethan-router-train-data
+  跑之前先把三个 split 目录拷到本目录下（或软链）。详见同目录 README.md。
+
 跑法：
   uv run --with scikit-learn --with onnxruntime --with transformers --with numpy \
     python paper_work/router_dataset/train_lr_router.py
@@ -15,7 +20,6 @@ from __future__ import annotations
 
 import glob
 import json
-import os
 from pathlib import Path
 
 import numpy as np
@@ -44,7 +48,7 @@ SKILLS = [
     "finance-query", "travel-query", "ui-card",
 ]
 LABELS = SKILLS + ["others"]
-LABEL2ID = {l: i for i, l in enumerate(LABELS)}
+LABEL2ID = {lbl: i for i, lbl in enumerate(LABELS)}
 
 
 class Encoder:
@@ -102,7 +106,9 @@ def macro_prf(y_true, y_pred, reject_id):
         p = tp / (tp + fp) if (tp + fp) else 0.0
         r = tp / (tp + fn) if (tp + fn) else 0.0
         f = 2 * p * r / (p + r) if (p + r) else 0.0
-        ps.append(p); rs.append(r); fs.append(f)
+        ps.append(p)
+        rs.append(r)
+        fs.append(f)
     oth_mask = y_true == reject_id
     oth_total = int(np.sum(oth_mask))
     oth_reject = int(np.sum((y_pred == reject_id) & oth_mask))

@@ -2,6 +2,26 @@
 
 BGE embedding → LR 分类头的训练/验证/测试集。用于替换/对比现行的 multi-prototype 向量快筛。
 
+## ⚠️ 训练数据位置（核心资产，不在本仓库）
+
+`train/` `val/` `test/` 下的 `*.jsonl` 是核心资产，**不进公开仓库**，
+统一放在私有 repo：**https://github.com/llm011/ethan-router-train-data**
+
+本目录只保留生成脚本（`gen_*.py`）、训练/评测脚本和本文档。跑训练前先把数据拉下来：
+
+```bash
+# 在 paper_work/router_dataset/ 下
+git clone git@github.com:llm011/ethan-router-train-data.git _data
+ln -s _data/train train
+ln -s _data/val   val
+ln -s _data/test  test
+```
+
+或直接把私有 repo 的 `train/ val/ test/` 三个目录拷到本目录下。
+（`train_lr_router.py` 用 `glob(ROOT/<split>/*.jsonl)` 读取，软链或拷贝都行。）
+
+生成脚本重新造数据后，把新的 jsonl 推回私有 repo，别提交到本仓库。
+
 ## 结构
 
 ```
