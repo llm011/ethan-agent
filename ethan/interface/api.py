@@ -1,5 +1,6 @@
 """FastAPI 入口 — 挂载所有路由模块。"""
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -89,9 +90,11 @@ async def lifespan(app: FastAPI):
         start_wechat_listener()
     start_heartbeat()
     # 进程互相监控：写 server PID + 拉起 watchdog（独立进程，server 挂了它会重启）
-    from ethan.watchdog import ensure_watchdog_running, write_server_pid
-    write_server_pid()
-    ensure_watchdog_running()
+    # worktree/开发场景设 ETHAN_NO_WATCHDOG=1 跳过，避免覆盖主 worktree 的 PID 文件被误杀
+    if os.environ.get("ETHAN_NO_WATCHDOG") != "1":
+        from ethan.watchdog import ensure_watchdog_running, write_server_pid
+        write_server_pid()
+        ensure_watchdog_running()
     # 主动启动调度器，确保持久化的定时任务在服务重启后自动恢复运行。
     # 不能依赖懒加载（首次 GET /api/schedule 才 start），否则服务空跑时 job 永远不触发。
     from ethan.interface.routers.schedule import get_scheduler
