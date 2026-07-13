@@ -137,18 +137,17 @@ flomo 首页 DOM 极重（侧边栏 400+ 标签），`browser_page snapshot` 或
 ## 写入笔记（Webhook，备选 · 需 key）
 
 ```
-POST https://flomoapp.com/iwh/$FLOMO_WEBHOOK_KEY/
+POST https://flomoapp.com/iwh/<key 取自 get_secret("flomo_webhook_key") 的返回值>/
 Content-Type: application/json
 {"content": "笔记内容 #标签"}
 ```
 
 **获取 key**：flomo App → 设置 → 「API 及第三方工具」→ Webhook URL 里提取 `<key>`。
 
-**首次配置**：
-```bash
-file_write(path="$HOME/.ethan/.secrets/flomo.env", content='FLOMO_WEBHOOK_KEY="<webhook-key>"')
-chmod 600 ~/.ethan/.secrets/flomo.env
-```
+**首次配置（存入密钥）**：用户给你 webhook key 时，用内置 `set_secret` 存（**不要**用 `file_write` 写明文 `.env` 文件——密钥统一走 Ethan 密钥管理，不落明文、不进 config/skills/memory）：
+> set_secret(name="flomo_webhook_key", value="<webhook-key>")
+
+**取密钥发请求**：用 `get_secret(name="flomo_webhook_key")` 取出（需用户授权确认），返回值即 key 原文，直接拼进上方 URL，再用 shell/curl 发送。
 
 **响应**：`{"code":0}` 成功；`{"code":-1}` key 失效或频率限制（引导用户重新获取 key）；其他 code 原样反馈。
 
@@ -228,11 +227,16 @@ chmod 600 ~/.ethan/.secrets/flomo.env
 
 ---
 
-## 本地标签索引
+## 本地标签缓存（浏览器不可用时的回退）
 
-路径：`~/.ethan/.cache/flomo-tags.txt`，每行一个标签 + 简短说明。
+用户问标签时**优先走浏览器读取**（见「读取标签列表」，最权威）。浏览器不可用时，回退到本地缓存：
 
-维护：写入前 `file_read` 确认标签是否已存在；用到新标签后追加（去重）；用户问标签时优先走浏览器读取，浏览器不可用时回退本地索引。
+**首选：Ethan 内置知识库**（结构化存储、`knowledge_search` 可直接检索，比手维护 txt 可靠）：
+- 写入：`knowledge_add(title="flomo 标签索引", content="<标签列表，每行一个>", tags=["flomo","tags"])`
+- 读取：`knowledge_search(query="flomo 标签")` 找到条目后，按返回的 source 取全文。
+
+**备选：纯文本文件** `~/.ethan/.cache/flomo-tags.txt`（可靠性较低，仅当知识库不可用）：
+- 维护：写入前 `file_read` 确认标签是否已存在；用到新标签后追加（去重）。
 
 ---
 
@@ -244,4 +248,4 @@ chmod 600 ~/.ethan/.secrets/flomo.env
 
 结论：**所有操作走浏览器自动化**，不要从服务端 `curl` flomo API。
 
-activate_tools: shell, file_write, file_read, browser_page, browser_tab, browser_session
+activate_tools: shell, file_write, file_read, browser_page, browser_tab, browser_session, set_secret, get_secret, knowledge_add, knowledge_search

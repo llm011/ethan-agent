@@ -44,11 +44,11 @@ git branch -d feature/<feature-name>
    - ethan 服务在监听目标端口
    - 系统代理（如 `127.0.0.1:7890`）会拦截 ws 连接，浏览器插件需绕过代理或配置 no_proxy
    - 可用 `NO_PROXY=localhost,127.0.0.1` 验证连接是否正常
-4. **启动命令示例**（worktree 开发测试）：
+   4. **启动命令示例**（worktree 开发测试）：
    ```bash
    # 随机端口 8901-8999，避开 8900（watchdog 占用）和已用端口
    # ETHAN_NO_WATCHDOG=1 跳过 PID 写入和 watchdog，避免与其他实例冲突
-   PORT=$((RANDOM % 98 + 8902))
+   PORT=$((RANDOM % 99 + 8901))
    ETHAN_NO_WATCHDOG=1 .venv/bin/ethan serve --host 127.0.0.1 --port $PORT
    ```
 5. **不要 `pkill -f "ethan serve"`**：会误杀其他 worktree 的实例。只 kill 自己启动的 PID。
@@ -57,6 +57,8 @@ git branch -d feature/<feature-name>
    - 不拉起 watchdog 进程（避免接管其他实例）
    - heartbeat 不检查 watchdog 存活（避免互相拉起）
    开发测试时必须带这个环境变量。
+
+   > 注意：`ethan serve` 默认（不设该变量）**会**写入 `/tmp/ethan/server.pid` 并自动拉起 watchdog。目前**没有** `--no-pid` 之类的独立命令行参数，唯一的开关就是这个环境变量。上面的启动示例（第 4 条）已带 `ETHAN_NO_WATCHDOG=1`，正是为了跳过 PID 写入——**请勿删除该变量**，否则仍会写 PID、被 watchdog 误杀。
 
 ## Agent Behaviors & Rules
 - **ALWAYS run the code and verify it passes after modifying it.** Never stop after just modifying code without running a local test to catch IndentationError, SyntaxError, or logic errors. Use `uv run ...` or node scripts to verify.
