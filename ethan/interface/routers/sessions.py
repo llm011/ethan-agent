@@ -115,6 +115,7 @@ async def get_session(session_id: str, user_id: str = Depends(verify_token)):
         "active_run": RunManager.instance().has_active(session_id, user_id=user_id),
         "messages": [
             {
+                "id": getattr(m, "id", None),
                 "role": m.role,
                 "content": m.content,
                 "created_at": getattr(m, "created_at", None),

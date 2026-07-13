@@ -338,6 +338,7 @@ async def _run_generation(
 
     usage_dict = collector.usage_dict
 
+    msg_id = None
     if session_id and (collector.full or collector.thought):
         asst_msg = Message(
             role="assistant",
@@ -354,8 +355,9 @@ async def _run_generation(
         # 复用同一行，避免「占位行 + 最终行」重复两条 assistant 消息。无进度行则照常新建。
         if progress_msg_id:
             await store.update_message(progress_msg_id, session_id, asst_msg)
+            msg_id = progress_msg_id
         else:
-            await store.save_message(session_id, asst_msg)
+            msg_id = await store.save_message(session_id, asst_msg)
         await store.touch(session_id)
         if agent._skills and agent.last_matched_skills:
             for _name in agent.last_matched_skills:
@@ -367,6 +369,6 @@ async def _run_generation(
     await store.close()
 
     # 通知所有订阅者「流结束」并附最终 usage
-    run.emit({"done": True, "usage": usage_dict, "ttfb_ms": collector.ttfb_ms, "total_ms": collector.total_ms})
+    run.emit({"done": True, "usage": usage_dict, "ttfb_ms": collector.ttfb_ms, "total_ms": collector.total_ms, "message_id": msg_id})
     run.finish()
     _RunManager_schedule_removal(run.session_id)
