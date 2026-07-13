@@ -286,16 +286,16 @@ export function Sidebar() {
       onCancel={() => setConfirmState({ open: false, id: "" })}
     />
     <aside className="w-full h-full border-r border-border flex flex-col bg-muted/30">
-      <div className="p-4 flex items-center justify-between">
+      <div className="p-4 flex items-center justify-between gap-2">
         <h1
-          className="text-lg font-semibold flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity"
+          className="text-lg font-semibold flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity min-w-0 flex-1"
           onClick={() => { navigate("/chat"); if (window.innerWidth < 768) setSidebarOpen(false); }}
         >
-          <Image src="/logo-sidebar.png" alt="Ethan Agent" width={28} height={28} className="rounded-full" />
-          Ethan Agent
+          <Image src="/logo-sidebar.png" alt="Ethan Agent" width={28} height={28} className="rounded-full shrink-0" />
+          <span className="whitespace-nowrap">Ethan Agent</span>
           {version && (
             <span
-              className="text-[9px] font-mono text-muted-foreground/60 bg-muted border border-border/60 rounded-full px-1.5 py-0.5 leading-none"
+              className="text-[9px] font-mono text-muted-foreground/60 bg-muted border border-border/60 rounded-full px-1.5 py-0.5 leading-none shrink-0"
               title={`ethan-agent v${version}`}
             >
               v{version}
