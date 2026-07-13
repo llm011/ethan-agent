@@ -47,10 +47,16 @@ git branch -d feature/<feature-name>
 4. **启动命令示例**（worktree 开发测试）：
    ```bash
    # 随机端口 8901-8999，避开 8900（watchdog 占用）和已用端口
+   # ETHAN_NO_WATCHDOG=1 跳过 PID 写入和 watchdog，避免与其他实例冲突
    PORT=$((RANDOM % 98 + 8902))
-   .venv/bin/ethan serve --host 127.0.0.1 --port $PORT
+   ETHAN_NO_WATCHDOG=1 .venv/bin/ethan serve --host 127.0.0.1 --port $PORT
    ```
 5. **不要 `pkill -f "ethan serve"`**：会误杀其他 worktree 的实例。只 kill 自己启动的 PID。
+6. **`ETHAN_NO_WATCHDOG=1` 环境变量**：代码级开关（`api.py` + `heartbeat.py`），设为 1 时：
+   - 不写 `/tmp/ethan/server.pid`（避免被 watchdog 杀）
+   - 不拉起 watchdog 进程（避免接管其他实例）
+   - heartbeat 不检查 watchdog 存活（避免互相拉起）
+   开发测试时必须带这个环境变量。
 
 ## Agent Behaviors & Rules
 - **ALWAYS run the code and verify it passes after modifying it.** Never stop after just modifying code without running a local test to catch IndentationError, SyntaxError, or logic errors. Use `uv run ...` or node scripts to verify.

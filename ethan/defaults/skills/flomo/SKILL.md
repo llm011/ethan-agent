@@ -1,306 +1,247 @@
 ---
 name: flomo
 trigger: flomo|浮墨|浮墨笔记|flomoapp|记灵感|灵感记录|卡片笔记|碎片笔记|快速记一下|随手记|闪念|闪念笔记
-description: flomo 浮墨笔记助手 — 写入短笔记/灵感/卡片（Webhook）+ 读取最近笔记（api_key）。适合碎片化快速记录；长笔记/知识管理用 getnote。
+description: flomo 浮墨笔记助手 — 读取/搜索/写入/删除短笔记与灵感（浏览器 UI 自动化，无需 key）+ 写入备选 Webhook。适合碎片化快速记录；长笔记/知识管理用 getnote。
 ---
+
+> **多副本同步提醒**：本文件改完后，必须同步到以下两份，否则线上 agent 读到的仍是旧版：
+> - host：`~/.ethan/skills/flomo/SKILL.md`
+> - 容器内 volume（运行中 agent 实际读取）：`/root/.ethan/skills/flomo/SKILL.md`，用 `docker cp` 推送
+> 三份不一致会导致「改了不生效 / 重建镜像后和 volume 对不上」。
 
 # flomo Skill
 
-通过 flomo API 写入和读取笔记，支持标签、Markdown、续写卡片。
-**纯 HTTP 调用，不依赖浏览器自动化**。
-
 ## 适用边界
 
-**flomo（本技能）**：短笔记、灵感、闪念、碎片化快速记录。一句话到几段话，标签化归档。
-**getnote**：长笔记、知识管理、笔记列表/详情/搜索/删除、知识库维护。
+**flomo（本技能）**：短笔记、灵感、闪念、碎片化快速记录。
+**getnote**：长笔记、知识管理、笔记列表/详情/搜索/删除。
 
-- 用户只说"记笔记/存笔记/我的笔记"等泛化词 → **走 getnote**（getnote 已声明"笔记"优先）
+- 用户只说"记笔记/存笔记/我的笔记"等泛化词 → **走 getnote**
 - 用户明确提到 flomo / 浮墨，或语境是"记个灵感/闪念/卡片" → **走本技能**
-- 不确定时优先 getnote（它功能更全，且支持搜索历史）
 
-## 两套凭据
+---
 
-flomo 有两套独立的凭据，用途不同：
+## 全局注意事项
 
-| 凭据 | 用途 | 获取方式 | 环境变量 |
-|------|------|----------|----------|
-| Webhook key | **写入**笔记 | flomo App → 设置 → 「API 及第三方工具」→ Webhook URL 里的 key | `$FLOMO_WEBHOOK_KEY` |
-| api_key | **读取**笔记列表/标签 | flomo Web 端登录后从 DevTools 获取（见下方） | `$FLOMO_API_KEY` |
+### 浏览器前置条件（读取/写入/删除/搜索均需）
+- Chrome 已安装 ethan 扩展，用 **Web UI Token**（`dev-ethan.sh` 启动日志里打印）连上服务（默认 8910）。连上后日志显示 `browser ws: extension connected`。
+- 本机浏览器已登录 flomo —— 扩展复用你的登录会话，**所有浏览器操作均无需任何 api_key / token**。
+- 若页面跳转到登录页：告知用户在浏览器重新登录 `https://v.flomoapp.com/mine/`，不要用 api_key 兜底。
 
-两套 key 互不通用：webhook key 不能用于读取，api_key 不能用于写入。
+### ⚠️ OOM 红线（所有 flomo 操作必须遵守）
+flomo 首页 DOM 极重（侧边栏 400+ 标签），`browser_page snapshot` 或框架整页截图会把上下文/响应撑爆被 SIGKILL。**所有操作一律用 `browser_page eval` 跑紧凑 JS、只回传小 JSON，绝不 snapshot / 整页截图**。若单次调用仍 OOM，缩小返回内容后重试。
 
-## 凭据配置
+---
 
-### 1. Webhook key（写入用）
+## 读取笔记
 
-**获取地址**：flomo App → 设置 → 「API 及第三方工具」
-- Webhook URL 格式：`https://flomoapp.com/iwh/<key>/`
-- 提取 `<key>` 部分
+1. `browser_tab` 打开 `https://v.flomoapp.com/mine/`。
+2. 用 `browser_page eval` 跑下面的脚本，取最新 N 条：
 
-**配置**：
+```javascript
+(async () => {
+  const N = 5;
+  const cards = [...document.querySelectorAll('.display.showMemoInsight')];
+  const data = cards.slice(0, N).map(card => ({
+    text: (card.innerText || '').trim().slice(0, 2000),
+    images: [...card.querySelectorAll('img[src*="static.flomoapp.com"]')].map(i => i.src)
+  }));
+  return JSON.stringify(data);
+})()
+```
+
+返回数组，每项含 `text`（正文含时间/标签）与 `images`（OSS 预签名直链，可直接 `curl` 下载，无需鉴权）。
+
+> **首页折叠提醒**：flomo 首页卡片默认折叠长文，DOM 拿到的 `innerText` 常是**片段而非全文**（验证时多次踩到）。若 `text` 明显被截断、或用户要的是某条笔记完整内容，需先点开该卡片展开全文，再取完整 `innerText`，不要自信地当成全文返回。
+
+---
+
+## 搜索笔记
+
+1. `browser_tab` 打开/聚焦 `https://v.flomoapp.com/mine/`。
+2. 定位搜索框 `INPUT.el-input__inner[placeholder="⌘+K"]`，用 `fill` 写入关键词，等 ~500ms 或 `press Enter`。
+3. 搜索结果页 DOM 很轻（通常只有几条），用 `browser_page eval` 抽取：
+
+```javascript
+(() => {
+  const cards = [...document.querySelectorAll('.display.showMemoInsight')];
+  const data = cards.map(card => ({
+    text: (card.innerText || '').trim().slice(0, 2000),
+    images: [...card.querySelectorAll('img[src*="static.flomoapp.com"]')].map(i => i.src),
+    tags: [...card.querySelectorAll('[tag]')].map(e => e.getAttribute('tag'))
+  }));
+  return JSON.stringify({ count: data.length, notes: data });
+})()
+```
+
+> 比扫首页快很多；绝不 snapshot 整页（见全局 OOM 红线）。
+
+---
+
+## 读取标签列表
+
+用户问「我有哪些标签 / 某标签下有哪些子标签」时走这里。
+
+用 `browser_page eval` 跑下面脚本（先读 Vuex store 取速，取不到回退 DOM 扫描）：
+
+> **实测注意**：`window.__INITIAL_STATE__` 在 flomo 根本不存在（`undefined`）。真实 store 是 `window.__flomoVuexStore`，但全量标签字段默认为空（需先开「标签管理」面板才填充）。**最稳路径是 DOM 扫描**（已验证可拿全量 417 个）。
+
+```javascript
+(async () => {
+  const collectDOM = () => { const s = new Set(); document.querySelectorAll('[tag]').forEach(el => { const t = el.getAttribute('tag'); if (t) s.add(t); }); return s; };
+  try {
+    const st = window.__flomoVuexStore && window.__flomoVuexStore.state;
+    const tm = st && st.tagManager && st.tagManager.tags;
+    if (Array.isArray(tm) && tm.length) {
+      const paths = tm.map(x => typeof x === 'string' ? x : (x.name || x.tag || x.path || '')).filter(Boolean);
+      if (paths.length) return JSON.stringify({ route: 'store', tags: paths });
+    }
+  } catch (e) {}
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const sb = document.querySelector('.sidebar') || document.querySelector('#sidebar');
+  const seen = collectDOM();
+  let last = -1, stable = 0;
+  for (let i = 0; i < 80; i++) {
+    const closed = Array.from(document.querySelectorAll('.tag-expand-button:not(.expanded), button[aria-expanded="false"]'));
+    if (closed.length) closed.forEach(b => b.click());
+    await sleep(120);
+    collectDOM().forEach(t => seen.add(t));
+    const atBottom = sb ? (sb.scrollTop + sb.clientHeight >= sb.scrollHeight - 5) : true;
+    if (seen.size === last && closed.length === 0 && atBottom) { if (++stable >= 4) break; } else stable = 0;
+    last = seen.size;
+    if (sb) sb.scrollTop += 800; else window.scrollBy(0, 800);
+    await sleep(120);
+  }
+  collectDOM().forEach(t => seen.add(t));
+  return JSON.stringify({ route: 'dom', tags: Array.from(seen) });
+})()
+```
+
+返回 `{"route":"store"|"dom","tags":[...]}` —— `tags` 是完整路径字符串数组（如 `["领域/财富","work","mac",...]`）。
+
+汇报：总数 + 顶层标签（不含 `/`）+ 用户问到的子树（按前缀 + `/` 层级匹配）。
+
+---
+
+## 写入笔记（浏览器 UI）⭐ 推荐
+
+1. `browser_tab` 打开 `https://v.flomoapp.com/mine/`。
+2. `browser_page fill` 把整段内容（含末尾 `#标签`）一次性写入 `div.tiptap.ProseMirror`（占位提示「现在的想法是...」）。
+3. `browser_page click` 点提交按钮 `svg.saveBtn`（输入为空时是 `svg.disableSave`，不可点）。
+4. 等 1~2 秒，确认内容已出现在首页列表顶部。
+
+写入前务必遵守下方「标签规范」，**优先复用存量标签**。
+
+---
+
+## 写入笔记（Webhook，备选 · 需 key）
+
+```
+POST https://flomoapp.com/iwh/$FLOMO_WEBHOOK_KEY/
+Content-Type: application/json
+{"content": "笔记内容 #标签"}
+```
+
+**获取 key**：flomo App → 设置 → 「API 及第三方工具」→ Webhook URL 里提取 `<key>`。
+
+**首次配置**：
 ```bash
 file_write(path="$HOME/.ethan/.secrets/flomo.env", content='FLOMO_WEBHOOK_KEY="<webhook-key>"')
 chmod 600 ~/.ethan/.secrets/flomo.env
 ```
 
-### 2. api_key（读取用）
+**响应**：`{"code":0}` 成功；`{"code":-1}` key 失效或频率限制（引导用户重新获取 key）；其他 code 原样反馈。
 
-**获取地址**：在浏览器打开 `https://v.flomoapp.com/mine/` 登录后获取。
+写入频率：约 10 条/分钟，批量时间隔 ≥100ms。
 
-**获取步骤**：
-1. 用浏览器打开 `https://v.flomoapp.com/mine/`
-2. 如果跳转到登录页，用微信扫码或手机号登录
-3. 登录后，按 F12 打开 DevTools → Console，执行：
+---
+
+## 删除笔记（浏览器 UI）
+
+### 关键策略：先搜后删
+首页 DOM 极重，直接在首页操作极易耗尽步数。**先在搜索框搜目标笔记唯一关键词，跳到搜索结果页再删**，结果页 DOM 很轻。
+
+### 步骤
+1. 搜索定位目标笔记（参见「搜索笔记」）。
+2. 用 `browser_page eval` 跑下面脚本（把 `__目标文本__` 换成唯一片段）：
+
 ```javascript
-// 从 cookie 中查找
-document.cookie.match(/flomo_token=([^;]+)/)?.[1] || 
-// 或从 localStorage 查找
-Object.keys(localStorage).filter(k => k.toLowerCase().includes('token') || k.toLowerCase().includes('key'))
-  .map(k => k + '=' + localStorage.getItem(k))
+(async () => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const vis = el => el && el.offsetParent !== null;
+  const KEY = '__目标文本__';
+  const cards = [...document.querySelectorAll('.display.showMemoInsight')];
+  const target = cards.find(c => (c.innerText || '').includes(KEY));
+  if (!target) return JSON.stringify({ok:false, step:'locate', msg:'未找到目标笔记'});
+  const trigger = [...target.querySelectorAll('*')].find(b => {
+    if (!vis(b)) return false;
+    return /dropdown|more|operation|menu|ellipsis/i.test('' + b.className);
+  });
+  if (!trigger) return JSON.stringify({ok:false, step:'menu', msg:'没找到「...」菜单按钮'});
+  trigger.click();
+  await sleep(400);
+  const items = [...document.querySelectorAll('li,div,[role=menuitem],.el-dropdown-menu__item')].filter(vis);
+  const del = items.find(b => /删除/.test(b.innerText || ''));
+  if (del) del.click();
+  await sleep(500);
+  const cfrms = [...document.querySelectorAll('button,.el-button')].filter(vis).filter(b => /确定|删除/.test(b.innerText || ''));
+  const ok = cfrms.find(b => /确定/.test(b.innerText || '')) || cfrms[0];
+  if (ok) ok.click();
+  await sleep(800);
+  const after = [...document.querySelectorAll('.display.showMemoInsight')];
+  const gone = !after.some(c => (c.innerText || '').includes(KEY));
+  return JSON.stringify({ok:true, deleted: gone});
+})()
 ```
-4. 把获取到的 token/key 值告诉 Agent
 
-**配置**：
-```bash
-file_write(path="$HOME/.ethan/.secrets/flomo.env", content='FLOMO_WEBHOOK_KEY="<webhook-key>"\nFLOMO_API_KEY="<api-key>"')
-chmod 600 ~/.ethan/.secrets/flomo.env
-```
-
-### 登录态过期检测
-
-读取接口返回以下信号时，说明 api_key 已过期，需重新登录获取：
-- `{"code":-1,"message":"请登录"}` 或类似登录失效提示
-- HTTP 401/403
-- 返回 HTML 登录页面（而非 JSON）
-
-**处理**：引导用户重新打开 `https://v.flomoapp.com/mine/` 登录，按上述步骤重新获取 api_key。
+> **安全护栏**：
+> 1. KEY 必须足够唯一（优先用完整标签如 `领域/思维模型`），绝不用宽泛词。
+> 2. **删除前先只读 eval 找出笔记，把原文念给用户确认，用户明确确认后再点删除**。误删不可逆。
 
 ---
 
-## 写入笔记（Webhook）
+## 标签规范（重要）
 
-### 入口
-```
-POST https://flomoapp.com/iwh/$FLOMO_WEBHOOK_KEY/
-```
+> 用户 flomo 现有 417 个标签，加笔记时**优先复用存量标签**。
 
-### 请求格式
-`Content-Type: application/json`，body 只有一个字段 `content`：
+### 五大主框架类目
 
-```bash
-curl -s -X POST 'https://flomoapp.com/iwh/$FLOMO_WEBHOOK_KEY/' \
-  -H "Content-Type: application/json" \
-  -d '{"content":"今天读完了《认知觉醒》第一章 #阅读/认知觉醒"}'
-```
+| 类目 | 含义 | 常见子标签 |
+|------|------|-----------|
+| `#领域` | 知识 / 认知领域 | 领域/财富、领域/成长、领域/思维模型、领域/心理学、领域/写作 |
+| `#项目` | 进行中的项目 | 项目/AI、项目/写作、项目/时间管理、项目/如何阅读 |
+| `#输入` | 外部输入源 / 素材 | 输入/书、输入/电影、输入/得到、输入/帆书、输入/网络 |
+| `#闪念` | 突发灵感、临时收集 | 闪念/思考、闪念/收集、闪念/生活、闪念/微信文章 |
+| `#永久` | 长期沉淀的精华笔记 | 永久/思考、永久/素材、永久/名词、永久/沟通 |
 
-### 响应格式
-成功：`{"code": 0, "msg": "success", "data": {...}}`
-失败：`{"code": <非0>, "msg": "<错误原因>", "data": null}`
+### 上下文 / 来源 / 状态标签（可与框架类目叠加）
+- 来源/设备：`work`、`mac`、`code`
+- 状态/动作：`todo`、`fix`、`checklist`、`daily`、`archived`
+- 生活场景：`旅游`、`日记`、`权益`、`小创新`、`资源`、`临时`、`试试`
 
-| code | 含义 | 处理 |
-|------|------|------|
-| 0 | 成功 | 笔记已写入，展示给用户确认 |
-| -1 | key 失效 / 频率限制 | 引导用户检查 key 或稍后重试 |
-| 其他 | 服务异常 | 把 raw response 原样反馈给用户 |
-
----
-
-## 读取笔记（api_key）
-
-### 入口
-```
-GET https://flomoapp.com/api/v1/memo/list?timestamp=<unix时间戳>&api_key=$FLOMO_API_KEY
-```
-
-### 请求参数
-| 参数 | 必填 | 说明 |
-|------|------|------|
-| timestamp | 是 | Unix 时间戳（秒），`$(date +%s)` |
-| api_key | 是 | 从 flomo Web 端获取的 api_key |
-| page | 否 | 页码，从 1 开始，默认 1 |
-| size | 否 | 每页条数，默认 20，建议设 5-20 |
-
-### 请求示例
-```bash
-curl -s "https://flomoapp.com/api/v1/memo/list?timestamp=$(date +%s)&api_key=$FLOMO_API_KEY&size=5"
-```
-
-### 响应格式
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "memos": [
-      {
-        "id": "xxx",
-        "content": "笔记正文（含 Markdown 和标签）",
-        "created_at": 1783879000,
-        "tags": ["#阅读/认知觉醒"],
-        "files": []
-      }
-    ],
-    "total": 100,
-    "page": 1,
-    "size": 5
-  }
-}
-```
-
-### 读取时的登录态检测
-如果返回以下任一情况，说明 api_key 过期，需引导用户重新登录：
-- `{"code":-1,"message":"请登录"}` 或类似
-- 返回 HTML 页面（非 JSON）
-- `code` 非 0 且 message 含"登录"/"授权"/"token"
-
-**处理流程**：
-1. 告诉用户："flomo 登录态已过期，需要重新登录获取 api_key"
-2. 引导用户在浏览器打开 `https://v.flomoapp.com/mine/`
-3. 登录后按「凭据配置」章节重新获取 api_key
-4. 用 `file_write` 更新 `~/.ethan/.secrets/flomo.env`
-5. 重新执行读取请求
-
----
-
-## 能力索引
-
-| 能力 | 实现方式 | 说明 |
-|------|----------|------|
-| 写入笔记 | Webhook POST | body 只含 `content` 字段 |
-| 带标签写入 | content 内嵌 `#tag` | 标签写在内容末尾，多级用 `/` 分隔 |
-| Markdown 富文本 | content 支持 MD | 标题、列表、引用、代码块、链接、图片 `![](url)` |
-| 读取最近笔记 | GET `/api/v1/memo/list` | 需要 api_key，返回最近 N 条 |
-| 读取标签列表 | GET `/api/v1/tag/list` | 需要 api_key，返回所有标签 |
-| 续写卡片 | 同标签新笔记 | Webhook 无法编辑旧笔记；"续写"用相同标签 + 引用关键词 |
-| 标签索引维护 | file_read/write 本地缓存 | `~/.ethan/.cache/flomo-tags.txt` 记录常用标签 |
-| 批量导入 | 循环 curl | 多条笔记分多次 POST，每条间隔 ≥100ms |
-
----
-
-## 标签规范
-
-### 格式
-- 单级：`#工作` `#阅读` `#灵感`
-- 多级：`#阅读/认知觉醒` `#工作/项目A/会议`
-- 标签必须以 `#` 开头，后面紧跟文字（不要空格）
-- 标签内不要有空格，多词用 `-` 或 `_` 连接：`#读书笔记-认知觉醒`
-
-### 位置
-- **标签置底**：标签统一放在笔记内容末尾，不要放在开头
-- 多个标签用空格分隔：`内容... #阅读 #灵感`
-- 多级标签作为分类时，单级标签作为状态：`内容... #阅读/认知觉醒 #未完成`
-
-### 示例
-```
-今天读完《认知觉醒》第一章，核心观点：元认知是改变的起点。
-
-- 元认知 = 知道自己在想什么
-- 改变的第一步是"看见"自己的思维过程
-
-#阅读/认知觉醒 #未完成
-```
+### 格式纪律
+- 标签以 `#` 开头、紧跟文字、无空格（`#阅读` ✓，`# 阅读` ✗）
+- 中文为主；标签内无空格，多词用 `-` 连接（如 `读书笔记-认知觉醒`）
+- 多级用 `/`（`#阅读/认知觉醒`），深度以 2-3 层为主
+- **标签置底**：统一放在 content 末尾，多标签空格分隔
+- **不确定时先读取标签列表确认**，仅有真正新领域/新项目时才新建
 
 ---
 
 ## 本地标签索引
 
-路径：`~/.ethan/.cache/flomo-tags.txt`
+路径：`~/.ethan/.cache/flomo-tags.txt`，每行一个标签 + 简短说明。
 
-格式：每行一个标签 + 简短说明，`#` 开头的行为注释：
-```
-# flomo 标签索引 — 由 Agent 自动维护，请勿手动编辑
-# 格式：<标签> <Tab> <说明>
-
-#阅读/认知觉醒    认知觉醒相关读书笔记
-#阅读            通用阅读笔记
-#工作/项目A       项目A 相关记录
-#灵感            突发的灵感想法
-```
-
-### 维护规则
-1. **写入前**：先 `file_read` 读取索引，确认标签是否已存在
-2. **写入笔记后**：如果用到了新标签，`file_write` 追加到索引末尾（去重）
-3. **用户问"我有哪些标签"**：优先尝试 API 读取标签列表；api_key 不可用时回退到本地索引
-4. **索引不存在时**：首次使用自动创建空索引文件
+维护：写入前 `file_read` 确认标签是否已存在；用到新标签后追加（去重）；用户问标签时优先走浏览器读取，浏览器不可用时回退本地索引。
 
 ---
 
-## 快速调用示例
+## 后端接口（为何不用）
 
-```bash
-# 1. 写一条简单笔记
-curl -s -X POST 'https://flomoapp.com/iwh/$FLOMO_WEBHOOK_KEY/' \
-  -H "Content-Type: application/json" \
-  -d '{"content":"刚冒出来的想法：把 Agent 的工作流做成可分享的技能包 #灵感"}'
+接口根 `https://flomoapp.com/api/v1` 存在，但：
+1. 未对 `v.flomoapp.com` 开放 CORS，外部 `fetch` 直接失败；
+2. 登录态 token 在 httpOnly cookie / 运行时内存中，外部脚本无法读取。
 
-# 2. 带 Markdown 格式的读书笔记
-curl -s -X POST 'https://flomoapp.com/iwh/$FLOMO_WEBHOOK_KEY/' \
-  -H "Content-Type: application/json" \
-  -d '{"content":"## 《认知觉醒》第一章\n\n核心观点：元认知是改变的起点。\n\n- 元认知 = 知道自己在想什么\n\n#阅读/认知觉醒"}'
+结论：**所有操作走浏览器自动化**，不要从服务端 `curl` flomo API。
 
-# 3. 读取最近 5 条笔记
-curl -s "https://flomoapp.com/api/v1/memo/list?timestamp=$(date +%s)&api_key=$FLOMO_API_KEY&size=5"
-
-# 4. 续写：在同标签下追加新思考
-curl -s -X POST 'https://flomoapp.com/iwh/$FLOMO_WEBHOOK_KEY/' \
-  -H "Content-Type: application/json" \
-  -d '{"content":"续「元认知」思考：写日记本身就是元认知训练。\n\n#阅读/认知觉醒 #延伸思考"}'
-
-# 5. 读取标签列表
-curl -s "https://flomoapp.com/api/v1/tag/list?timestamp=$(date +%s)&api_key=$FLOMO_API_KEY"
-```
-
----
-
-## 避坑指南
-
-### 1. Webhook key vs api_key 混淆
-- **写入**用 Webhook key（URL path 里）
-- **读取**用 api_key（query 参数里）
-- 两者不通用，分别配置到 `$FLOMO_WEBHOOK_KEY` 和 `$FLOMO_API_KEY`
-
-### 2. api_key 过期
-- **症状**：读取接口返回"请登录"或 HTML 页面
-- **原因**：flomo Web 端登录态有过期时间
-- **处理**：引导用户重新打开 `https://v.flomoapp.com/mine/` 登录，重新获取 api_key
-
-### 3. Webhook key 失效
-- **症状**：写入返回 `{"code":-1,"msg":"..."}`
-- **原因**：用户在 App 内重置了 key
-- **处理**：引导用户重新获取 Webhook key
-
-### 4. 频率限制
-- **写入**：约 10 条/分钟，批量写入间隔 ≥100ms
-- **读取**：未公开限制，但不要频繁轮询
-
-### 5. 标签格式错误
-- **错误**：`# 阅读`（# 后有空格）、`#阅读 认知`（标签内空格会被截断）
-- **正确**：`#阅读/认知觉醒`、`#读书笔记-认知觉醒`
-
-### 6. 内容为空或超长
-- **空内容**：`{"content":""}` 会被拒绝
-- **超长**：单条建议 < 5000 字，超长时拆分为多条续写
-
-### 7. 读取接口缺 timestamp
-- **错误**：`{"code":-1,"message":"请传入 timestamp"}`
-- **正确**：必须带 `timestamp=$(date +%s)` 参数
-
-### 8. 图片上传
-- **限制**：Webhook 不支持直接上传图片文件
-- **方案**：图片需先上传到图床，得到公网 URL 后用 `![](url)` 嵌入
-
----
-
-## 关键纪律
-
-- **写入用 `$FLOMO_WEBHOOK_KEY`**：URL `https://flomoapp.com/iwh/$FLOMO_WEBHOOK_KEY/`，key 只在 path，不放 body
-- **读取用 `$FLOMO_API_KEY`**：URL `https://flomoapp.com/api/v1/memo/list?timestamp=$(date +%s)&api_key=$FLOMO_API_KEY`
-- **登录态过期时主动提示**：读取返回登录失效信号时，立即引导用户重新登录 `https://v.flomoapp.com/mine/`
-- **标签置底**：标签统一放在 content 末尾
-- **多级标签用 `/`**：`#阅读/认知觉醒`
-- **写入前查本地索引**：避免重复造标签
-- **批量写入间隔 ≥100ms**：避免触发频率限制
-- **失败时展示 raw response**：不要编造成功
-- **续写而非编辑**：Webhook 无法编辑旧笔记，"续写"用同标签新笔记
-
-activate_tools: shell, file_write, file_read
+activate_tools: shell, file_write, file_read, browser_page, browser_tab, browser_session
