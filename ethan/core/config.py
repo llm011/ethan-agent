@@ -38,6 +38,7 @@ class WeChatConfig(BaseModel):
 
 
 class LarkConfig(BaseModel):
+    enabled: bool = False  # 设为 true 后 ethan serve 自动启动飞书事件监听
     app_id: str = ""
     app_secret: str = ""
     verification_token: str = ""  # for event subscription verification

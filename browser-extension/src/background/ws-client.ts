@@ -44,8 +44,13 @@ export class BrowserWsClient {
   start(): void {
     this.stopped = false;
     void this.connect();
-    // chrome.alarms 兜底唤醒：SW 被回收后，alarm 触发会重新拉起 SW 并执行 listener。
-    chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: 0.4 });
+    // chrome.alarms 兜底唤醒。offscreen document 中也可安全调用。
+    // Chrome MV3 最小 alarm 周期为 0.5 分钟（30s），低于此值会被强制调整。
+    try {
+      chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: 0.5 });
+    } catch {
+      // offscreen 或其他不支持 alarms 的上下文中静默忽略
+    }
   }
 
   stop(): void {

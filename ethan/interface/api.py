@@ -57,7 +57,7 @@ def _lark_ready() -> bool:
         else:
             from ethan.core.config import get_config
             lark_cfg = getattr(get_config(), "lark", None)
-            _lark_available = bool(lark_cfg and lark_cfg.app_id)
+            _lark_available = bool(lark_cfg and lark_cfg.enabled and lark_cfg.app_id)
     return _lark_available
 
 
