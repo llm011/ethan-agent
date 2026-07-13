@@ -29,6 +29,9 @@ class StreamCollector:
         self._agent = None  # 可选，用于取 usage
         self._started_at: float | None = None
         self._first_text_at: float | None = None
+        # 用户「看到第一个东西」的时刻：第一次工具调用开始 或 首段文本，取较早者。
+        # TTFB 以此为基准（而非仅首字），这样先跑工具再出正文的场景也能正确反映「首响应」。
+        self._first_visible_at: float | None = None
 
     def bind(self, agent) -> "StreamCollector":
         """绑定 agent，结束时从 agent.usage 取 token。"""
@@ -52,6 +55,8 @@ class StreamCollector:
             return None
         if self._first_text_at is None:
             self._first_text_at = time.time()
+        if self._first_visible_at is None:
+            self._first_visible_at = time.time()
         # 工具开始前累积的文本算作 thought（思考过程）
         if self.tool_steps and any(s["state"] == "running" for s in self.tool_steps):
             # 工具执行中收到的文本：暂归 full，工具结束后由调用方决定
@@ -67,6 +72,9 @@ class StreamCollector:
             if self.full:
                 pre_thought = self.full
                 self.full = ""
+            # 第一次工具调用开始 = 用户看到第一个东西，记为 TTFB 起点
+            if self._first_visible_at is None:
+                self._first_visible_at = time.time()
             self._times[item.tool_name] = time.time()
             self.tool_steps.append({
                 "tool": item.tool_name,
@@ -111,8 +119,8 @@ class StreamCollector:
 
     @property
     def ttfb_ms(self) -> int | None:
-        if self._first_text_at and self._started_at:
-            return int((self._first_text_at - self._started_at) * 1000)
+        if self._first_visible_at and self._started_at:
+            return int((self._first_visible_at - self._started_at) * 1000)
         return None
 
     @property
