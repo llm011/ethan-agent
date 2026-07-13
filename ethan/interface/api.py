@@ -91,7 +91,7 @@ async def lifespan(app: FastAPI):
     start_heartbeat()
     # 进程互相监控：写 server PID + 拉起 watchdog（独立进程，server 挂了它会重启）
     # worktree/开发场景设 ETHAN_NO_WATCHDOG=1 跳过，避免覆盖主 worktree 的 PID 文件被误杀
-    if not os.environ.get("ETHAN_NO_WATCHDOG"):
+    if os.environ.get("ETHAN_NO_WATCHDOG") != "1":
         from ethan.watchdog import ensure_watchdog_running, write_server_pid
         write_server_pid()
         ensure_watchdog_running()

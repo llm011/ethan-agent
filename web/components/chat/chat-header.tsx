@@ -29,7 +29,7 @@ const SOURCE_COLOR: Record<string, string> = {
 
 export function ChatHeader({ sessionId, title, source, usage, schedules, onTitleChange }: ChatHeaderProps) {
   const [isEditing, setIsEditing] = useState(false);
-  const [regening, setRegening] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
   const [editingTitle, setEditingTitle] = useState("");
   const { theme, toggle: toggleTheme } = useTheme();
 
@@ -92,14 +92,18 @@ export function ChatHeader({ sessionId, title, source, usage, schedules, onTitle
                 onClick={async (e) => {
                   e.stopPropagation();
                   if (!sessionId) return;
-                  setRegening(true);
+                  setRegenerating(true);
                   const newTitle = await regenSessionTitle(sessionId);
-                  setRegening(false);
-                  if (newTitle) onTitleChange(newTitle);
+                  setRegenerating(false);
+                  if (newTitle) {
+                    onTitleChange(newTitle);
+                  } else {
+                    alert("标题重新生成失败");
+                  }
                 }}
                 title="AI 重新生成标题"
               >
-                <RefreshCw className={`h-3 w-3 ${regening ? "animate-spin" : ""}`} />
+                <RefreshCw className={`h-3 w-3 ${regenerating ? "animate-spin" : ""}`} />
               </button>
             </div>
           )

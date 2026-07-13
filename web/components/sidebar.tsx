@@ -41,7 +41,7 @@ export function Sidebar() {
   const [searchLoading, setSearchLoading] = useState(false);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
-  const [regeningId, setRegeningId] = useState<string | null>(null);
+  const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
   const [confirmState, setConfirmState] = useState<{ open: boolean; id: string }>({ open: false, id: "" });
   const [normalExpanded, setNormalExpanded] = useState(true);
   const [scheduleExpanded, setScheduleExpanded] = useState(false);
@@ -176,13 +176,15 @@ export function Sidebar() {
 
   const handleRegenTitle = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    setRegeningId(id);
+    setRegeneratingId(id);
     const newTitle = await regenSessionTitle(id);
-    setRegeningId(null);
+    setRegeneratingId(null);
     if (newTitle) {
       setSessions((prev) =>
         prev.map((s) => (s.id === id ? { ...s, title: newTitle } : s))
       );
+    } else {
+      alert("标题重新生成失败");
     }
   };
 
@@ -262,7 +264,7 @@ export function Sidebar() {
               onClick={(e) => handleRegenTitle(s.id, e)}
               title="AI 重新生成标题"
             >
-              <RefreshCw className={`h-3 w-3 ${regeningId === s.id ? "animate-spin" : ""}`} />
+              <RefreshCw className={`h-3 w-3 ${regeneratingId === s.id ? "animate-spin" : ""}`} />
             </Button>
             <Button
               variant="ghost"

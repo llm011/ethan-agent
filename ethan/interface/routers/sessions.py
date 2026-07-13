@@ -176,13 +176,17 @@ async def rename_session(session_id: str, req: RenameSessionRequest, user_id: st
 async def regen_title(session_id: str, user_id: str = Depends(verify_token)):
     """用廉价模型重新生成标题（用户手动触发，force 跳过已有标题保护）。"""
     from ethan.core.paths import user_sessions_db_path
-    from ethan.memory.session import _generate_smart_title
+    from ethan.memory.session import _PROTECTED_PREFIXES, _generate_smart_title
     store = SessionStore(db_path=user_sessions_db_path())
     await store.init()
     try:
         session = await store.load(session_id)
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
+        # 受保护标题（定时/后台/心跳）前缀承载结构含义，不可被覆盖
+        if any(session.title.startswith(p) for p in _PROTECTED_PREFIXES):
+            return {"ok": False, "title": session.title,
+                    "error": "受保护标题（定时/后台/心跳）不可重新生成"}
         title = await _generate_smart_title(session.messages)
         if title:
             await store.update_title(session_id, title)
