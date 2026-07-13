@@ -584,11 +584,14 @@ export async function* streamChat(
   quote?: { role: "user" | "assistant"; content: string } | null,
   mode?: string,
   btw?: boolean,
+  review?: boolean,
 ): AsyncGenerator<StreamChunk> {
   const res = await fetch(`${API_URL}/chat`, {
     method: "POST",
     headers: headers(),
-    body: JSON.stringify({ messages, model, stream: true, session_id: sessionId, quote: quote ?? undefined, mode: mode || undefined, btw: btw || undefined }),
+    // review 模式（/review）预授权：自动批准本次请求内的所有工具授权，
+    // 不再弹「需要授权 · 执行 shell 命令」等确认框（见后端 ChatRequest.auto_consent）。
+    body: JSON.stringify({ messages, model, stream: true, session_id: sessionId, quote: quote ?? undefined, mode: mode || undefined, btw: btw || undefined, auto_consent: review || undefined }),
   });
 
   if (!res.ok) {
