@@ -58,9 +58,7 @@ fi
 if [ -n "${ETHAN_PORT:-}" ]; then
   DATA_DIR="$HOME/.ethan-dev/${ETHAN_PORT}"
   mkdir -p "$DATA_DIR"
-  # /tmp/ethan 是运行时 session DB 路径（见 paths.py: user_sessions_db_path），
-  # 容器 --rm 停止后数据会丢失，映射到宿主机持久化
-  DOCKER_ARGS=(--rm -e "TERM=xterm-256color" -v "$(pwd)/ethan:/app/ethan" -v "${DATA_DIR}:/root/.ethan" -v "${DATA_DIR}/tmp-ethan:/tmp/ethan" -p "${ETHAN_PORT}:8900")
+  DOCKER_ARGS=(--rm -e "TERM=xterm-256color" -v "$(pwd)/ethan:/app/ethan" -v "${DATA_DIR}:/root/.ethan" -p "${ETHAN_PORT}:8900")
 else
   DOCKER_ARGS=(-it --rm -v "$(pwd)/ethan:/app/ethan")
 fi

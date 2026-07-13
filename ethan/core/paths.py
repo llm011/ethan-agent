@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import shutil
+import sys
 from pathlib import Path
 
 from ethan.core.config import CONFIG_DIR
@@ -68,10 +69,13 @@ def user_vectors_db_path() -> Path:
 
 def user_sessions_db_path() -> Path:
     # macOS com.apple.provenance xattr 导致 ~/.ethan/ 下的 db 在 aiosqlite worker thread
-    # 中只读。使用 /tmp/ethan/ 作为运行时数据库路径（启动时从原 db 同步）。
-    runtime_dir = Path("/tmp/ethan")
-    runtime_dir.mkdir(parents=True, exist_ok=True)
-    return runtime_dir / "sessions.db"
+    # 中只读。使用 /tmp/ethan/ 作为运行时数据库路径。
+    if sys.platform == "darwin":
+        runtime_dir = Path("/tmp/ethan")
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        return runtime_dir / "sessions.db"
+    # Linux（含 Docker 容器）：直接放在数据目录，随 volume 持久化
+    return user_data_dir() / "sessions.db"
 
 
 def user_skills_dir() -> Path:
