@@ -63,6 +63,19 @@ PRESET_PLUGINS: list[dict] = [
         "install_type": "lark_channel",
         "install_source": "lark-channel",
     },
+    {
+        "name": "embedding-router",
+        "label": "嵌入路由",
+        "description": "语义 skill 路由（BGE 向量 + LR 头），提升泛化召回、减少漏触发",
+        "install_type": "optional_dep",
+        "pip_packages": [
+            "onnxruntime>=1.18.0",
+            "transformers>=4.40.0",
+            "numpy>=1.26.0",
+        ],
+        # 装完依赖后自动拉取 BGE 模型（~24MB），一步到位可用
+        "post_install": "router_pull",
+    },
 ]
 
 
@@ -515,18 +528,54 @@ def _do_install(plugin: dict) -> None:
         console.print()
         _install_config_plugin(plugin["install_source"])
 
+    # post_install 钩子：主步骤装完后执行（如拉取模型）
+    hook = plugin.get("post_install")
+    if hook == "router_pull":
+        _post_install_router_pull()
+
 
 def _check_plugin_installed(plugin: dict) -> bool:
     """统一检测插件是否已安装。"""
     name = plugin["name"]
     if plugin["install_type"] == "optional_dep":
-        return _is_optional_dep_installed(plugin)
+        deps_ok = _is_optional_dep_installed(plugin)
+        # 嵌入路由类：依赖 + 模型文件都就位才算"已安装"
+        if plugin.get("post_install") == "router_pull":
+            try:
+                from ethan.skills.router import model_present
+                return deps_ok and model_present()
+            except Exception:
+                return deps_ok
+        return deps_ok
     elif plugin["install_type"] == "lark_channel":
         return _is_lark_channel_ready()
     elif plugin["install_type"] in ("skill", "builtin_skill"):
         return name in _get_installed_skill_names()
     else:
         return name in _get_enabled_plugin_names()
+
+
+def _post_install_router_pull() -> None:
+    """嵌入路由插件：依赖装完后拉取 BGE 模型（~24MB，首次）。"""
+    try:
+        from ethan.skills.router import ensure_model
+    except Exception as e:
+        console.print(f"[yellow]⚠ 无法导入路由模块（跳过模型拉取）：{e}[/yellow]")
+        return
+    console.print()
+    console.print("[bold]拉取嵌入路由模型（~24MB，首次）…[/bold]")
+    try:
+        with console.status("[dim]下载 BGE 模型…[/dim]"):
+            path = ensure_model(force=False)
+    except Exception as e:  # 离线/网络失败等
+        path = None
+        console.print(f"[dim]拉取异常：{e}[/dim]")
+    if path:
+        console.print("[green]✓ 嵌入路由模型已就绪[/green]")
+    else:
+        console.print("[yellow]⚠ 模型自动拉取失败[/yellow]")
+        console.print("  可稍后手动运行 [cyan]ethan router pull[/cyan] 重试（需联网）。")
+    console.print()
 
 
 def _is_lark_channel_ready() -> bool:
@@ -699,11 +748,13 @@ def _is_optional_dep_installed(plugin: dict) -> bool:
 
 
 def _pip_to_import(pip_name: str) -> str:
-    """将 pip 包名映射为 import 名。"""
+    """将 pip 包名映射为 import 名（先剥离版本限定符如 >=1.18.0）。"""
+    import re
+    bare = re.split(r"[<>=!~ ]", pip_name.strip(), maxsplit=1)[0].strip()
     mapping = {
         "cua-computer": "computer",
     }
-    return mapping.get(pip_name, pip_name.replace("-", "_"))
+    return mapping.get(bare, bare.replace("-", "_"))
 
 
 # ── 渠道 ──────────────────────────────────────────────────────────────────────
