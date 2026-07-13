@@ -137,6 +137,25 @@ async def get_annotations(message_id: int, user_id: str = Depends(verify_token))
     return {"annotations": items}
 
 
+@router.get("/annotations/batch")
+async def batch_get_annotations(ids: str = "", user_id: str = Depends(verify_token)):
+    """一次取多个 message 的标注，避免逐条请求。
+
+    ids 为逗号分隔的 message_id 列表；返回 { "<message_id>": [ {...}, ... ] }。
+    """
+    result: dict[str, list[dict]] = {}
+    for raw in ids.split(","):
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            mid = int(raw)
+        except ValueError:
+            continue
+        result[str(mid)] = await _store.list_for_message(mid, user_id)
+    return result
+
+
 @router.post("/annotations")
 async def create_annotation(body: AnnotationCreate, user_id: str = Depends(verify_token)):
     if body.type not in ANNOTATION_TYPES:

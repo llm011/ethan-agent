@@ -136,6 +136,7 @@ export interface SessionDetail {
   mode?: string;
   active_run?: boolean;
   messages: {
+    id?: number;
     role: string;
     content: string;
     created_at?: number;
@@ -549,7 +550,7 @@ export async function deleteProcedure(id: string): Promise<void> {
   await fetch(`${API_URL}/memory/procedures/${id}`, { method: "DELETE", headers: headers() });
 }
 
-export type StreamChunk = { content?: string; done?: boolean; stopped?: boolean; error?: string; model?: string; usage?: Record<string, number>; ttfb_ms?: number; total_ms?: number; tool?: string; args?: string; intent?: string; state?: string; id?: string; duration_ms?: number; result_preview?: string; result_detail?: string; entity_type?: string; entity_id?: string; sub_steps?: Array<{ tool: string; args: string; state: string; duration_ms?: number | null; result_preview?: string }>; ui?: unknown[]; consent_request?: boolean; request_id?: string; description?: string; detail?: string; thinking?: boolean; heartbeat?: boolean; elapsed?: number; skills_matched?: Array<{ name: string; is_default?: boolean }> };
+export type StreamChunk = { content?: string; done?: boolean; stopped?: boolean; error?: string; model?: string; usage?: Record<string, number>; ttfb_ms?: number; total_ms?: number; message_id?: number; tool?: string; args?: string; intent?: string; state?: string; id?: string; duration_ms?: number; result_preview?: string; result_detail?: string; entity_type?: string; entity_id?: string; sub_steps?: Array<{ tool: string; args: string; state: string; duration_ms?: number | null; result_preview?: string }>; ui?: unknown[]; consent_request?: boolean; request_id?: string; description?: string; detail?: string; thinking?: boolean; heartbeat?: boolean; elapsed?: number; skills_matched?: Array<{ name: string; is_default?: boolean }> };
 
 /** 把一个 SSE Response body 解析成事件流（streamChat / streamResume 共用）。 */
 async function* parseSSE(res: Response): AsyncGenerator<StreamChunk> {
@@ -898,5 +899,64 @@ export async function deleteAPIKey(keyId: string): Promise<void> {
     headers: headers(),
   });
   if (!res.ok) throw new Error("Failed");
+}
+
+
+// ── 消息标注（阅读模式高亮/划线/批注） ──────────────────────────────
+
+export type AnnotationType = "highlight" | "underline" | "strike" | "comment" | "bookmark";
+export type AnnotationColor = "yellow" | "blue" | "green" | "pink" | null;
+
+export interface Annotation {
+  id: number;
+  type: AnnotationType;
+  color: AnnotationColor;
+  start: number;
+  end: number;
+  quote: string | null;
+  note: string | null;
+  created_at: number;
+}
+
+export interface AnnotationCreatePayload {
+  message_id: number;
+  type: AnnotationType;
+  color?: AnnotationColor;
+  start: number;
+  end: number;
+  quote?: string | null;
+  note?: string | null;
+}
+
+export async function getAnnotations(messageId: number): Promise<Annotation[]> {
+  const res = await fetch(`${API_URL}/annotations/${messageId}`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed to fetch annotations");
+  return (await res.json()).annotations;
+}
+
+/** 一次取多个 message 的标注，返回 { "<messageId>": Annotation[] }。 */
+export async function getAnnotationsBatch(messageIds: number[]): Promise<Record<string, Annotation[]>> {
+  if (messageIds.length === 0) return {};
+  const res = await fetch(`${API_URL}/annotations/batch?ids=${messageIds.join(",")}`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed to fetch annotations");
+  return res.json();
+}
+
+export async function createAnnotation(payload: AnnotationCreatePayload): Promise<number> {
+  const res = await fetch(`${API_URL}/annotations`, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error("Failed to create annotation");
+  return (await res.json()).id;
+}
+
+export async function deleteAnnotation(annoId: number): Promise<void> {
+  const res = await fetch(`${API_URL}/annotations/${annoId}`, {
+    method: "DELETE",
+    headers: headers(),
+  });
+  if (!res.ok) throw new Error("Failed to delete annotation");
 }
 

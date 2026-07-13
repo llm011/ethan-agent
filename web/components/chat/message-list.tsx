@@ -3,15 +3,18 @@
 import { useRef, useEffect, useCallback } from "react";
 import { MessageBubble } from "./message-bubble";
 import type { Message } from "./types";
+import type { Annotation } from "@/lib/api";
 
 interface MessageListProps {
   messages: Message[];
   streaming: boolean;
   onQuote?: (msg: Message) => void;
   onCardAction?: (text: string) => void;
+  onRead?: (msg: Message) => void;
+  annotationsByMessage?: Record<number, Annotation[]>;
 }
 
-export function MessageList({ messages, streaming, onQuote, onCardAction }: MessageListProps) {
+export function MessageList({ messages, streaming, onQuote, onCardAction, onRead, annotationsByMessage }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = useCallback(() => {
@@ -38,6 +41,8 @@ export function MessageList({ messages, streaming, onQuote, onCardAction }: Mess
             isLast={i === messages.length - 1}
             onQuote={onQuote}
             onCardAction={onCardAction}
+            onRead={onRead}
+            annotations={msg.id != null ? annotationsByMessage?.[msg.id] : undefined}
           />
         ))}
       </div>

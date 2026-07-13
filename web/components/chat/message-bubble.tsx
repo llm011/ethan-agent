@@ -1,17 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Quote as QuoteIcon, Zap, Flag, Activity } from "lucide-react";
+import { Quote as QuoteIcon, Zap, Flag, Activity, BookOpen as BookOpenIcon } from "lucide-react";
 import { ToolTimeline } from "@/components/tool-timeline";
 import { SwimlaneDiagram } from "@/components/swimlane-diagram";
 import { fmtTokens } from "@/lib/utils";
-import { CodeBlock } from "@/components/code-block";
-import { PlainCodeBlock } from "@/components/plain-code-block";
 import { A2uiCard } from "./a2ui-card";
+import { MarkdownContent } from "./markdown";
+import { applyHighlights } from "@/lib/highlight";
 import type { Message } from "./types";
+import type { Annotation } from "@/lib/api";
 
 function formatTime(ts?: number) {
   if (!ts) return "";
@@ -40,16 +41,30 @@ function fixBold(text: string): string {
   });
 }
 
+
 interface MessageBubbleProps {
   msg: Message;
   isStreaming: boolean;
   isLast: boolean;
   onQuote?: (msg: Message) => void;
   onCardAction?: (text: string) => void;
+  onRead?: (msg: Message) => void;
+  annotations?: Annotation[];
 }
 
-export function MessageBubble({ msg, isStreaming, isLast, onQuote, onCardAction }: MessageBubbleProps) {
+export function MessageBubble({ msg, isStreaming, isLast, onQuote, onCardAction, onRead, annotations }: MessageBubbleProps) {
   const [highlightedStep, setHighlightedStep] = useState<number | undefined>(undefined);
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  // 把已保存的标注以「淡显」方式画回气泡正文（阅读模式是完整强度）。
+  useEffect(() => {
+    if (msg.role !== "assistant" || !contentRef.current) return;
+    const spans = !isStreaming && annotations && annotations.length > 0
+      ? annotations.map((a) => ({ id: a.id, type: a.type, color: a.color, start: a.start, end: a.end, note: a.note }))
+      : [];
+    applyHighlights(contentRef.current, spans, true);
+  }, [annotations, msg.content, isStreaming, msg.role]);
+
   return (
     <div className={`group flex ${msg.role === "user" ? "justify-end" : "justify-start"} gap-2`}>
       {msg.role === "assistant" && (
@@ -66,6 +81,16 @@ export function MessageBubble({ msg, isStreaming, isLast, onQuote, onCardAction 
             title="引用此消息"
           >
             <QuoteIcon className="h-3 w-3" />
+          </button>
+        )}
+        {/* 悬浮阅读按钮（仅 assistant 且已有稳定 id） */}
+        {msg.role === "assistant" && onRead && !isStreaming && msg.id != null && (
+          <button
+            onClick={() => onRead(msg)}
+            className={`absolute -top-2 -right-12 opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 flex items-center justify-center rounded-md bg-muted border border-border text-muted-foreground hover:text-foreground hover:bg-accent`}
+            title="阅读模式（可标注）"
+          >
+            <BookOpenIcon className="h-3 w-3" />
           </button>
         )}
         <div
@@ -128,25 +153,7 @@ export function MessageBubble({ msg, isStreaming, isLast, onQuote, onCardAction 
             {msg.toolSteps && msg.toolSteps.length > 0 && msg.toolSteps.some(s => s.entity_type) && (
               <SwimlaneDiagram steps={msg.toolSteps} matchedSkills={msg.matchedSkills} onStepClick={setHighlightedStep} />
             )}
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={{
-                code: ({ className, children }) => {
-                  const match = /language-(\w+)/.exec(className || "");
-                  const raw = String(children);
-                  if (match) {
-                    return <CodeBlock language={match[1]} code={raw.replace(/\n$/, "")} />;
-                  }
-                  if (raw.includes("\n")) {
-                    return <PlainCodeBlock code={raw.replace(/\n$/, "")} />;
-                  }
-                  return <code className="bg-background/50 px-1 py-0.5 rounded text-xs font-mono break-all">{children}</code>;
-                },
-                pre: ({ children }) => <>{children}</>,
-              }}
-            >
-              {fixBold(msg.content)}
-            </ReactMarkdown>
+            <MarkdownContent ref={contentRef} content={msg.content} />
             {msg.a2ui && msg.a2ui.length > 0 && (
               <A2uiCard surfaces={msg.a2ui} onAction={onCardAction} />
             )}

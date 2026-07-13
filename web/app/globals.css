@@ -307,3 +307,77 @@
   .prose th { background: var(--muted); font-weight: 600; }
   .prose a { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
 }
+
+/* ── 阅读模式标注（高亮/划线/批注/书签）──
+   偏移基于「渲染后纯文本」，气泡与阅读模式共用 MarkdownContent 渲染，
+   所以同一套 anno-mark 在两端都能精确回显。 */
+.anno-mark {
+  border-radius: 0.2em;
+  padding: 0.04em 0.02em;
+  cursor: pointer;
+  transition: filter 0.12s ease;
+}
+.anno-mark:hover { filter: brightness(0.95); }
+
+.anno-yellow { background: oklch(0.95 0.13 105 / 0.55); }
+.anno-blue   { background: oklch(0.92 0.10 230 / 0.45); }
+.anno-green  { background: oklch(0.94 0.12 150 / 0.45); }
+.anno-pink   { background: oklch(0.93 0.11 350 / 0.45); }
+
+.anno-underline {
+  background: transparent !important;
+  text-decoration: underline;
+  text-decoration-color: oklch(0.6 0.15 30 / 0.85);
+  text-underline-offset: 3px;
+  text-decoration-thickness: 2px;
+}
+.anno-bookmark {
+  background: transparent !important;
+  border-left: 3px solid oklch(0.7 0.15 350 / 0.85);
+  padding-left: 0.15em;
+  margin-left: -0.2em;
+}
+.anno-comment {
+  border-bottom: 2px dotted oklch(0.7 0.12 230 / 0.9);
+}
+
+/* 气泡内联预览：降低存在感，不抢正文 */
+.anno-faint .anno-mark { opacity: 0.5; }
+.anno-faint .anno-mark:hover { opacity: 0.85; }
+
+/* dark 模式下高亮更亮一点，保证可读 */
+.dark .anno-yellow { background: oklch(0.85 0.14 105 / 0.5); }
+.dark .anno-blue   { background: oklch(0.6 0.14 230 / 0.5); }
+.dark .anno-green  { background: oklch(0.7 0.14 150 / 0.5); }
+.dark .anno-pink   { background: oklch(0.7 0.15 350 / 0.5); }
+
+/* ── 阅读模式排版（比气泡更舒展，利于长文阅读）── */
+.reading-prose {
+  --tw-prose-body: var(--foreground);
+  --tw-prose-headings: var(--foreground);
+  --tw-prose-bold: var(--foreground);
+  --tw-prose-quotes: var(--muted-foreground);
+  --tw-prose-quote-borders: var(--border);
+  --tw-prose-code: var(--foreground);
+  color: var(--foreground);
+  font-size: 1.02rem;
+}
+.reading-prose p { line-height: 1.85; margin-top: 0.85em; margin-bottom: 0.85em; }
+.reading-prose h1, .reading-prose h2, .reading-prose h3, .reading-prose h4 {
+  line-height: 1.4;
+  margin-top: 1.4em;
+  margin-bottom: 0.5em;
+}
+.reading-prose h1 { font-size: 1.5em; }
+.reading-prose h2 { font-size: 1.3em; }
+.reading-prose h3 { font-size: 1.15em; }
+.reading-prose ul, .reading-prose ol { line-height: 1.85; }
+.reading-prose li { line-height: 1.85; }
+.reading-prose blockquote {
+  font-size: 1rem;
+  border-left: 3px solid var(--border);
+  color: var(--muted-foreground);
+  padding-left: 1em;
+}
+.reading-prose pre { font-size: 0.85rem; }
+.reading-prose a { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
