@@ -7,7 +7,7 @@
 ## 当前能力
 
 - **多模型支持**：Claude、Gemini、OpenAI 兼容协议（OpenRouter、Ollama 等），通过配置文件按 model id 路由，支持流式输出与 tool_use
-- **三层记忆系统**：热/温/冷滑动窗口 + 结构化 Facts（含 confidence/category/timestamp）+ 用户画像 + Episodic memory（会话摘要，按时间和相关性检索）
+- **四层记忆系统**：Session 持久化 + 热/温/冷滑动窗口 + 用户画像 + Episodic memory，核心是**确定性与概率性分离**——规则驱动的信号检测器保证记忆写入/召回 100% 命中（不依赖 LLM 自觉），LLM 只负责判断"记什么内容"；Facts 带 tags 支持按当前对话关键词语义召回；心跳任务自动抽取成功路径（正反馈）和挖掘重复需求（FDE 主动建议）
 - **Skill 系统**：从 `~/.ethan/skills/*.md` 加载，YAML frontmatter 声明触发关键词，自动注入 system prompt；内置 lark-cli 系列技能
 - **定时任务**：APScheduler（cron + interval），SQLite 持久化，支持通过对话创建任务，Web/CLI 均可管理
 - **Web UI**：基于 Next.js App Router 的路径路由（`/chat`、`/memory`、`/knowledge`、`/schedule`、`/skills`、`/settings`），流式渲染、Markdown 高亮、深色/浅橙主题切换、移动端适配
@@ -30,7 +30,7 @@
 | [Agent Loop](./agent-loop.md) | 核心循环设计、参考来源、ReAct 模式详解 |
 | [Provider 层](./providers.md) | 多模型接入、Anthropic / OpenAI 协议适配 |
 | [工具系统](./tools.md) | Tool 抽象、注册表、执行器、内置工具（shell、web_search、web_fetch、file、rg、fd）、MCP 接入 |
-| [记忆系统](./memory.md) | Session 持久化、三层记忆（热/温/冷）、Facts、Episodic memory、压缩机制 |
+| [记忆系统](./memory.md) | 四层记忆（Session/工作记忆/画像/情节）、信号检测器、语义召回、成功路径、FDE 需求挖掘 |
 | [Skill 系统](./skills.md) | Skill 加载、关键词匹配注入、自动生成 |
 | [对话模式](./modes.md) | Mode 机制、身份覆盖、按对话模式过滤技能、法律专家模式按需安装 |
 | [法律专家模式](./legal-mode.md) | legal-assistant 技能详解：能力范围、架构链路、按需安装、来源许可 |
