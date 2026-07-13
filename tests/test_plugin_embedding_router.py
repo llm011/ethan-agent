@@ -4,8 +4,15 @@
 """
 from __future__ import annotations
 
+import pytest
+
 import ethan.interface.commands.setup as setup
-from ethan.skills.router import EmbeddingRouter
+
+# 注：EmbeddingRouter 的导入刻意不放在模块级，而是移到用到它的测试函数内部，
+# 并在函数内用 pytest.importorskip 保护——避免干净 CI 容器（缺
+# onnxruntime / transformers / numpy）在用例收集阶段就因 import 失败而崩溃。
+# （本环境的 pytest 不会把「模块级 importorskip」当 skip，会直接抛 Skipped，
+#  故采用函数内导入 + 函数内 importorskip 的写法。）
 
 ROUTER_ENTRY = {
     "name": "embedding-router",
@@ -68,6 +75,11 @@ def test_check_installed_requires_deps_and_model(monkeypatch):
 
 
 def test_embedding_router_available_falls_back_without_model(monkeypatch):
+    # 可选依赖缺失时跳过整条用例（干净 CI 环境），不崩溃收集
+    pytest.importorskip("onnxruntime")
+    pytest.importorskip("transformers")
+    pytest.importorskip("numpy")
     # 模型文件缺失时 available 必须为 False（路由静默回退关键词匹配）
+    from ethan.skills.router import EmbeddingRouter
     monkeypatch.setattr("ethan.skills.router.model_present", lambda: False)
     assert EmbeddingRouter().available is False

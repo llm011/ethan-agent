@@ -750,7 +750,9 @@ def _is_optional_dep_installed(plugin: dict) -> bool:
 def _pip_to_import(pip_name: str) -> str:
     """将 pip 包名映射为 import 名（先剥离版本限定符如 >=1.18.0）。"""
     import re
-    bare = re.split(r"[<>=!~ ]", pip_name.strip(), maxsplit=1)[0].strip()
+    # 字符集含 [ ：剥离版本限定的同时，也切掉 extras 语法 package[extra]，
+    # 避免 importlib.import_module("rich[markup]") 抛 ModuleNotFoundError。
+    bare = re.split(r"[\[<>=!~ ]", pip_name.strip(), maxsplit=1)[0].strip()
     mapping = {
         "cua-computer": "computer",
     }

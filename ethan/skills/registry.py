@@ -132,7 +132,7 @@ class SkillRegistry:
             if avail and built:
                 # 主动探测运行时依赖（available/build 不覆盖此步）；用 find_spec 不触发实际 import
                 import importlib.util
-                missing = [mod for mod in ("onnxruntime", "transformers")
+                missing = [mod for mod in ("onnxruntime", "transformers", "numpy")
                            if importlib.util.find_spec(mod) is None]
                 if missing:
                     # 模型就绪但依赖缺失 → route() 会始终返回 None，实为不可用

@@ -3,7 +3,7 @@
 验证三道门槛：
   1) router.available  (模型文件就绪)
   2) router.build()     (LR 头可加载 + 有可路由 skill)
-  3) 运行时依赖 onnxruntime/transformers 已安装（find_spec 探测）
+  3) 运行时依赖 onnxruntime/transformers/numpy 已安装（find_spec 探测）
 只有三者同时满足，self._router 才非 None，并打出 [router] 已激活 日志。
 """
 import importlib.util
@@ -70,11 +70,11 @@ def logs():
 
 
 def _patch_deps(monkeypatch, missing=()):
-    """控制 onnxruntime/transformers 的 find_spec 返回，模拟依赖在/不在。"""
+    """控制 onnxruntime/transformers/numpy 的 find_spec 返回，模拟依赖在/不在。"""
     _orig = importlib.util.find_spec
 
     def _fake(name, *a, **k):
-        if name in ("onnxruntime", "transformers"):
+        if name in ("onnxruntime", "transformers", "numpy"):
             # None=未安装；非 None（object()）=已安装
             return None if name in missing else object()
         return _orig(name, *a, **k)
