@@ -336,7 +336,7 @@ async def _run_heartbeat_md() -> None:
 
 
 async def _tick() -> None:
-    """执行一次心跳：facts 整理 + 画像每日压缩 + heartbeat.md 任务 + skill 进化 + watchdog 检查。"""
+    """执行一次心跳：facts 整理 + 画像每日压缩 + heartbeat.md 任务 + skill 进化 + 决策模式抽取 + 需求挖掘 + watchdog 检查。"""
     logger.info("[Heartbeat] tick")
     # 确保 watchdog 进程存活（互相拉起的 server 侧逻辑）
     # 多 worktree 开发时跳过（ETHAN_NO_WATCHDOG=1）
@@ -350,6 +350,8 @@ async def _tick() -> None:
     await _consolidate_profiles()
     await _run_heartbeat_md()
     await _update_skills()
+    await _extract_decision_patterns()
+    await _mine_recurring_needs()
 
 
 async def _update_skills() -> None:
@@ -360,6 +362,231 @@ async def _update_skills() -> None:
             logger.info("[Heartbeat] Updated %d skill(s)", n)
     except Exception:
         logger.exception("[Heartbeat] Skill update failed")
+
+
+async def _extract_decision_patterns() -> None:
+    """B1: 从近期 session 的 tool_steps 中提取高频成功路径，存入 success_patterns。
+
+    借鉴 Palantir Action Layer 的决策记录与反馈闭环。
+    只提取成功完成（有 assistant 回复）的工具调用序列，用 lite 模型归纳场景。
+    """
+    try:
+        # 每个用户独立处理
+        from ethan.core.context import set_user_id
+        from ethan.core.paths import user_procedures_path, user_sessions_db_path
+        from ethan.memory.consolidator import Consolidator, get_lite_model
+        from ethan.memory.procedures import ProcedureStore
+        from ethan.memory.session import SessionStore
+        set_user_id("")  # 先处理 default profile
+
+        store = SessionStore(db_path=user_sessions_db_path())
+        await store.init()
+        try:
+            # 取近 7 天 top-20 活跃 session
+            sessions = await store.list_recent(limit=20)
+        finally:
+            await store.close()
+
+        if not sessions:
+            return
+
+        # 加载已有 patterns，避免重复
+        proc_store = ProcedureStore(path=user_procedures_path())
+        existing_scenarios = {p.scenario for p in proc_store.all_success_patterns()}
+
+        # 收集所有 session 的 tool_steps
+        all_tool_sequences: list[tuple[str, list[str]]] = []  # (session_title, tool_sequence)
+        for si in sessions:
+            # list_recent 不返回 messages/snippet，需要 load 拿 tool_steps
+            # snippet 可能为 None，跳过过滤直接 load
+            try:
+                store2 = SessionStore(db_path=user_sessions_db_path())
+                await store2.init()
+                session = await store2.load(si.id)
+                await store2.close()
+                if not session:
+                    continue
+                tool_names = []
+                for m in session.messages:
+                    if m.tool_steps:
+                        for step in m.tool_steps:
+                            if step.get("tool"):
+                                tool_names.append(step["tool"])
+                if tool_names:
+                    all_tool_sequences.append((si.title or si.id, tool_names))
+            except Exception:
+                continue
+
+        if not all_tool_sequences:
+            return
+
+        # 用 lite 模型归纳场景（批量，一次调用）
+        config = None
+        try:
+            from ethan.core.config import get_config
+            config = get_config()
+            main_model = config.defaults.model
+        except Exception:
+            main_model = "gpt-4o"
+
+        lite_model = get_lite_model(main_model)
+        consolidator = Consolidator(main_model=main_model)
+
+        # 构造 prompt：让 lite 模型把 tool_sequences 归类成场景
+        sequences_text = "\n".join(
+            f"[Session {i+1}] title={title}\n  tools: {' → '.join(tqs)}"
+            for i, (title, tqs) in enumerate(all_tool_sequences[:20])
+        )
+        prompt = (
+            f"以下是用户近期 {len(all_tool_sequences)} 个会话的工具调用序列。"
+            "请归纳出高频出现的成功路径（≥2 次的相同模式），按场景分类。\n\n"
+            f"{sequences_text}\n\n"
+            "输出格式（每行一条，空行分隔）：\n"
+            "场景描述 | tool1 → tool2 → tool3\n"
+            "只输出重复出现的模式，不要输出只出现一次的。如果没有重复模式，输出空。"
+        )
+
+        try:
+            provider = consolidator._get_provider(lite_model)
+            from ethan.providers.base import Message
+            resp = await provider.chat(
+                [Message(role="user", content=prompt)],
+                tools=None,
+                system="你是一个工具调用模式分析助手，负责从历史数据中归纳重复出现的成功路径。"
+            )
+            result = (resp.content or "").strip()
+        except Exception:
+            logger.debug("[Heartbeat] decision pattern extraction LLM call failed", exc_info=True)
+            return
+
+        if not result:
+            return
+
+        # 解析输出，写入 success_patterns
+        added = 0
+        for line in result.split("\n"):
+            line = line.strip()
+            if not line or "|" not in line:
+                continue
+            parts = line.split("|", 1)
+            scenario = parts[0].strip()
+            tool_seq = [t.strip() for t in parts[1].split("→") if t.strip()]
+            if scenario and tool_seq and scenario not in existing_scenarios:
+                proc_store.add_success_pattern(scenario, tool_seq)
+                existing_scenarios.add(scenario)
+                added += 1
+
+        if added:
+            logger.info("[Heartbeat] Extracted %d new success pattern(s)", added)
+    except Exception:
+        logger.exception("[Heartbeat] Decision pattern extraction failed")
+
+
+async def _mine_recurring_needs() -> None:
+    """C1: 从近期 episodes 中识别重复模式，生成建议。
+
+    借鉴 Palantir FDE 模式：主动挖掘无法言明的真实需求。
+    只挖掘 ≥3 次的重复模式，建议写入 suggestions.json，下次对话时由 Agent 自然提起。
+    """
+    try:
+        from ethan.core.paths import user_episodes_path
+        from ethan.memory.episodic import EpisodeStore
+
+        store = EpisodeStore(path=user_episodes_path())
+        recent = store.recent(limit=30)
+
+        if len(recent) < 3:
+            return
+
+        # 用 lite 模型识别重复模式
+        from ethan.core.config import get_config
+        from ethan.memory.consolidator import Consolidator, get_lite_model
+        config = get_config()
+        main_model = config.defaults.model
+        lite_model = get_lite_model(main_model)
+
+        episodes_text = "\n".join(
+            f"- [{e.timestamp:.0f}] {e.summary} (keywords: {', '.join(e.keywords)})"
+            for e in recent
+        )
+        prompt = (
+            f"以下是用户近 {len(recent)} 个对话的摘要。请识别出现≥3次的重复模式（相同主题/相同需求），"
+            "并给出是否可以固化为定时任务或 Skill 的建议。\n\n"
+            f"{episodes_text}\n\n"
+            "输出格式（每行一条，没有重复模式则输出空）：\n"
+            "PATTERN: <模式描述> | COUNT: <次数> | SUGGESTION: <建议>\n"
+            "只输出真正重复的模式，不要把不相关的归为一类。"
+        )
+
+        consolidator = Consolidator(main_model=main_model)
+        try:
+            provider = consolidator._get_provider(lite_model)
+            from ethan.providers.base import Message
+            resp = await provider.chat(
+                [Message(role="user", content=prompt)],
+                tools=None,
+                system="你是一个用户行为分析助手，负责识别重复模式并给出可执行的建议。"
+            )
+            result = (resp.content or "").strip()
+        except Exception:
+            logger.debug("[Heartbeat] need mining LLM call failed", exc_info=True)
+            return
+
+        if not result:
+            return
+
+        # 解析并写入 suggestions.json
+        import json
+
+        from ethan.core.config import CONFIG_DIR
+        suggestions_path = CONFIG_DIR / "memory" / "suggestions.json"
+
+        existing_suggestions = []
+        if suggestions_path.exists():
+            try:
+                existing_suggestions = json.loads(suggestions_path.read_text(encoding="utf-8"))
+            except Exception:
+                existing_suggestions = []
+
+        rejected = {s.get("pattern", "") for s in existing_suggestions if s.get("rejected")}
+
+        added = 0
+        for line in result.split("\n"):
+            line = line.strip()
+            if not line.startswith("PATTERN:"):
+                continue
+            parts = line.split("|")
+            pattern = parts[0].replace("PATTERN:", "").strip() if len(parts) > 0 else ""
+            count = 0
+            suggestion = ""
+            if len(parts) > 1:
+                count_str = parts[1].replace("COUNT:", "").strip()
+                try:
+                    count = int(count_str)
+                except ValueError:
+                    pass
+            if len(parts) > 2:
+                suggestion = parts[2].replace("SUGGESTION:", "").strip()
+
+            if pattern and count >= 3 and pattern not in rejected:
+                # 检查是否已存在未拒绝的建议
+                already = any(s.get("pattern") == pattern and not s.get("rejected") for s in existing_suggestions)
+                if not already:
+                    existing_suggestions.append({
+                        "pattern": pattern,
+                        "count": count,
+                        "suggestion": suggestion,
+                        "rejected": False,
+                        "created_at": __import__("time").time(),
+                    })
+                    added += 1
+
+        if added:
+            suggestions_path.parent.mkdir(parents=True, exist_ok=True)
+            suggestions_path.write_text(json.dumps(existing_suggestions, ensure_ascii=False, indent=2), encoding="utf-8")
+            logger.info("[Heartbeat] Mined %d new recurring need(s)", added)
+    except Exception:
+        logger.exception("[Heartbeat] Recurring need mining failed")
 
 
 _heartbeat_task: asyncio.Task | None = None

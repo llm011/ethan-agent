@@ -50,7 +50,7 @@ async def _maybe_consolidate(session_id: str, model: str, user_id: str = "", mod
             return
 
         user_turns = sum(1 for m in session.messages if m.role == "user")
-        if user_turns == 0 or user_turns % 10 != 0:
+        if user_turns == 0 or user_turns % 5 != 0:
             return
 
         memory = WorkingMemory(config=MemoryConfig(hot_size=10))

@@ -7,6 +7,7 @@
 - created_at: 创建时间
 - last_accessed: 最后访问时间
 - category: 分类 (preference/decision/knowledge/correction)
+- tags: 关键词标签列表，用于语义召回（A1）
 """
 import json
 import time
@@ -28,6 +29,7 @@ class Fact:
     created_at: float = field(default_factory=time.time)
     last_accessed: float = field(default_factory=time.time)
     superseded: bool = False
+    tags: list[str] = field(default_factory=list)
 
 
 class FactStore:
@@ -49,23 +51,33 @@ class FactStore:
         data = [asdict(f) for f in self._facts]
         self._path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    def add(self, content: str, confidence: float = 0.8, source: str = "", category: str = "knowledge") -> None:
+    def add(self, content: str, confidence: float = 0.8, source: str = "", category: str = "knowledge", tags: list[str] | None = None) -> None:
         # Check for contradiction against all active facts
         for f in self._facts:
             if not f.superseded and self._is_contradiction(f.content, content):
                 f.superseded = True
+
+        # 自动提取 tags（A1：系统确定性保证，不依赖调用方）
+        if tags is None:
+            from ethan.memory.signals import extract_keywords
+            tags = extract_keywords(content, max_keywords=6)
 
         existing = self._find_similar(content)
         if existing and not existing.superseded:
             existing.content = content
             existing.confidence = max(existing.confidence, confidence)
             existing.last_accessed = time.time()
+            # 合并 tags（去重）
+            if tags:
+                existing_tags = set(existing.tags)
+                existing.tags = list(existing_tags | set(tags))
         else:
             self._facts.append(Fact(
                 content=content,
                 confidence=confidence,
                 source=source,
                 category=category,
+                tags=tags,
             ))
         self._save()
 
@@ -121,6 +133,57 @@ class FactStore:
 
         lines = []
         for f in top:
+            lines.append(f"- {f.content}")
+        return "\n".join(lines)
+
+    def build_context_with_recall(self, query: str = "", max_facts: int = 15) -> str:
+        """按当前对话关键词召回相关 facts（A1）。
+
+        策略：
+        1. 提取 query 关键词
+        2. 有 tags 的 fact 按 relevance 分数排序，无 tags 的按原 confidence 排序
+        3. 相关 facts 优先注入，不足时用 confidence 补齐
+        4. 命中的 fact 更新 last_accessed（touch）
+        """
+        from ethan.memory.signals import extract_keywords, score_relevance
+
+        active = self.get_active()
+        if not active:
+            return ""
+
+        query_keywords = extract_keywords(query, max_keywords=8) if query else []
+
+        # 打分
+        scored = []
+        for f in active:
+            rel = score_relevance(query_keywords, f.tags) if query_keywords else 0.0
+            # 综合分：relevance 权重 0.6，confidence 权重 0.4
+            composite = rel * 0.6 + f.confidence * 0.4
+            scored.append((composite, rel, f))
+
+        # 先按 relevance 分组：有相关性的优先，无相关性的按 confidence 排
+        relevant = [(s, r, f) for s, r, f in scored if r > 0]
+        fallback = [(s, r, f) for s, r, f in scored if r == 0]
+
+        relevant.sort(key=lambda x: (-x[0], -x[2].last_accessed))
+        fallback.sort(key=lambda x: (-x[2].confidence, -x[2].last_accessed))
+
+        top = (relevant + fallback)[:max_facts]
+
+        if not top:
+            return ""
+
+        # touch 命中的 fact（更新 last_accessed）
+        touched = False
+        for _, _, f in top:
+            if query_keywords and f.tags:
+                f.last_accessed = time.time()
+                touched = True
+        if touched:
+            self._save()
+
+        lines = []
+        for _, _, f in top:
             lines.append(f"- {f.content}")
         return "\n".join(lines)
 

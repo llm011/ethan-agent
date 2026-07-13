@@ -603,3 +603,10 @@ async def _handle_agent_message(
     await store.close()
     _untrack_task(chat_id, asyncio.current_task())
 
+    # A3: 飞书渠道也触发后台记忆抽取（原来只有 Web/REPL 触发）
+    try:
+        from ethan.interface.routers.tasks import _maybe_consolidate
+        asyncio.create_task(_maybe_consolidate(session_id, agent._provider.model, owner_open_id))
+    except Exception:
+        pass
+

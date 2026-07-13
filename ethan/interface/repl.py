@@ -490,13 +490,15 @@ async def run_repl(agent: Agent, resume_id: str | None = None, auto_consent: boo
     user_turns = sum(1 for m in history if m.role == "user")
     if user_turns >= 2 and session.id:
         try:
+            # C1: 修复 episodic summary — 原来按空格分词对中文无效
+            # 用 extract_keywords 提取中文关键词，summary 保持拼接但用关键词增强检索
+            from ethan.memory.signals import extract_keywords
             summary = " ".join(
                 m.content[:50] for m in history if m.role == "user" and m.content
             )[:200]
-            keywords = list(set(
-                w for m in history if m.role == "user" and m.content
-                for w in m.content.split()[:5]
-            ))[:10]
+            # 用 signals.extract_keywords 替代无效的 split()，支持中文
+            all_text = " ".join(m.content for m in history if m.role == "user" and m.content)
+            keywords = extract_keywords(all_text, max_keywords=10)
             episode_store.add(
                 session_id=session.id,
                 summary=summary,
