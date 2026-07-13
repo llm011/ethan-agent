@@ -23,7 +23,6 @@
 from __future__ import annotations
 
 import shutil
-import sys
 from pathlib import Path
 
 from ethan.core.config import CONFIG_DIR
@@ -67,15 +66,57 @@ def user_vectors_db_path() -> Path:
     return user_memory_dir() / "vectors.db"
 
 
+_session_db_migrated = False
+
+
 def user_sessions_db_path() -> Path:
-    # macOS com.apple.provenance xattr 导致 ~/.ethan/ 下的 db 在 aiosqlite worker thread
-    # 中只读。使用 /tmp/ethan/ 作为运行时数据库路径。
-    if sys.platform == "darwin":
-        runtime_dir = Path("/tmp/ethan")
-        runtime_dir.mkdir(parents=True, exist_ok=True)
-        return runtime_dir / "sessions.db"
-    # Linux（含 Docker 容器）：直接放在数据目录，随 volume 持久化
-    return user_data_dir() / "sessions.db"
+    """session DB 路径。直接放在数据目录，随 volume 映射持久化。"""
+    global _session_db_migrated
+    target = user_data_dir() / "sessions.db"
+    if not _session_db_migrated:
+        _session_db_migrated = True
+        _migrate_tmp_session_db(target)
+    return target
+
+
+def _migrate_tmp_session_db(target: Path) -> None:
+    """一次性迁移：把 /tmp/ethan/sessions.db 合并到 target。
+
+    历史：曾因误判 macOS com.apple.provenance xattr 导致只读而改用 /tmp/ethan，
+    但实测 aiosqlite 写入正常。撤回 workaround，把 /tmp/ethan 的数据合并回来。
+    幂等：已合并的数据不会重复插入。
+    """
+    import sqlite3
+    tmp_db = Path("/tmp/ethan/sessions.db")
+    if not tmp_db.exists() or tmp_db.stat().st_size == 0:
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if not target.exists() or target.stat().st_size == 0:
+        shutil.copy2(str(tmp_db), str(target))
+        try:
+            tmp_db.unlink()
+        except OSError:
+            pass
+        return
+    try:
+        con = sqlite3.connect(str(target), timeout=5)
+        con.execute("ATTACH DATABASE ? AS src", (str(tmp_db),))
+        con.execute("INSERT OR IGNORE INTO sessions SELECT * FROM src.sessions")
+        # messages 不保留 id（避免 AUTOINCREMENT 冲突），只插入 target 中不存在的 session
+        con.execute("""
+            INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui, images, matched_skills, ttfb_ms, total_ms)
+            SELECT session_id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui, images, matched_skills, ttfb_ms, total_ms
+            FROM src.messages
+            WHERE session_id NOT IN (SELECT DISTINCT session_id FROM messages)
+        """)
+        con.commit()
+        con.close()
+    except Exception:
+        pass
+    try:
+        tmp_db.unlink()
+    except OSError:
+        pass
 
 
 def user_skills_dir() -> Path:

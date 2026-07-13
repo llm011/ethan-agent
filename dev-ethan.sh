@@ -59,6 +59,8 @@ if [ -n "${ETHAN_PORT:-}" ]; then
   DATA_DIR="$HOME/.ethan-dev/${ETHAN_PORT}"
   mkdir -p "$DATA_DIR"
   DOCKER_ARGS=(--rm -e "TERM=xterm-256color" -v "$(pwd)/ethan:/app/ethan" -v "${DATA_DIR}:/root/.ethan" -p "${ETHAN_PORT}:8900")
+  # 共享宿主机 ~/.ethan/.secrets 到容器（密钥文件，不随 DATA_DIR 隔离）
+  [ -d "$HOME/.ethan/.secrets" ] && DOCKER_ARGS+=(-v "$HOME/.ethan/.secrets:/root/.ethan/.secrets")
 else
   DOCKER_ARGS=(-it --rm -v "$(pwd)/ethan:/app/ethan")
 fi
