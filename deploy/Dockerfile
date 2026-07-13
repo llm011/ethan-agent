@@ -1,5 +1,21 @@
-# Ethan Agent — Backend
-# Python 3.12 + uv，适合 x86_64 和 arm64（Apple Silicon / NAS）
+# Ethan Agent — Backend + Web UI (单容器模式)
+# 多阶段构建：Node 编译前端 → Python 运行时
+# 适合 x86_64 和 arm64（Apple Silicon / NAS）
+
+# ── Stage 1: 构建 Web UI（静态导出） ──────────────────────────
+FROM node:20-alpine AS web-builder
+
+WORKDIR /web
+COPY web/package.json web/pnpm-lock.yaml ./
+RUN npm install -g pnpm && pnpm install --frozen-lockfile
+
+COPY web/ .
+ENV NEXT_TELEMETRY_DISABLED=1
+# export 模式：产出纯静态文件，由 FastAPI 直接 serve
+ENV NEXT_OUTPUT=export
+RUN pnpm run build
+
+# ── Stage 2: Python 运行时 ────────────────────────────────────
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -30,7 +46,10 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY ethan/ ./ethan/
 COPY README.md README_CN.md ./
 
-# 安装项目本身（editable install）
+# 从 Stage 1 拷入 Web UI 静态产物
+COPY --from=web-builder /web/out ./ethan/web_dist
+
+# 安装项目本身
 RUN uv sync --frozen --no-dev
 
 # 数据目录挂载点（记忆、会话、Skills、配置）

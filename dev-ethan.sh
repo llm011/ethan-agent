@@ -35,10 +35,30 @@ else
   echo "✓ 镜像已是最新，跳过 build"
 fi
 
+# 确保本地 ethan/web_dist 存在（volume 挂载会覆盖镜像内产物）
+if [ -n "${ETHAN_PORT:-}" ] && [ ! -d "$(pwd)/ethan/web_dist" ]; then
+  echo "📦 本地缺少 ethan/web_dist，从镜像中提取..."
+  docker run --rm -v "$(pwd)/ethan/web_dist_tmp:/out" "$IMAGE"     bash -c "cp -r /app/ethan/web_dist/* /out/ 2>/dev/null || echo 'web_dist not in image'"
+  if [ -d "$(pwd)/ethan/web_dist_tmp" ] && [ "$(ls -A "$(pwd)/ethan/web_dist_tmp" 2>/dev/null)" ]; then
+    mv "$(pwd)/ethan/web_dist_tmp" "$(pwd)/ethan/web_dist"
+  else
+    rm -rf "$(pwd)/ethan/web_dist_tmp"
+    echo "⚠  镜像内无 web_dist，尝试本地构建..."
+    if [ -d "$(pwd)/web" ] && [ -f "$(pwd)/web/package.json" ]; then
+      (cd "$(pwd)/web" && pnpm install --frozen-lockfile 2>/dev/null && NEXT_OUTPUT=export pnpm run build && cp -r out ../ethan/web_dist)
+      echo "✓ web_dist 构建完成"
+    else
+      echo "⚠  无法构建 web_dist（web/ 目录不存在），页面可能不可用"
+    fi
+  fi
+fi
+
 # 构造 docker run 参数
 # 指定了 ETHAN_PORT → serve 模式（不需要 TTY）；否则 → 交互 bash 模式
 if [ -n "${ETHAN_PORT:-}" ]; then
-  DOCKER_ARGS=(--rm -v "$(pwd)/ethan:/app/ethan" -p "${ETHAN_PORT}:8900")
+  DATA_DIR="$HOME/.ethan-dev/${ETHAN_PORT}"
+  mkdir -p "$DATA_DIR"
+  DOCKER_ARGS=(--rm -v "$(pwd)/ethan:/app/ethan" -v "${DATA_DIR}:/root/.ethan" -p "${ETHAN_PORT}:8900")
 else
   DOCKER_ARGS=(-it --rm -v "$(pwd)/ethan:/app/ethan")
 fi

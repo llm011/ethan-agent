@@ -1,5 +1,19 @@
-# Ethan Agent — 开发/调试镜像
+# Ethan Agent — 开发/调试镜像（含 Web UI）
 # 在正式镜像基础上增加常用工具（vim、less、ll 等）
+
+# ── Stage 1: 构建 Web UI ──────────────────────────────────────
+FROM node:20-alpine AS web-builder
+
+WORKDIR /web
+COPY web/package.json web/pnpm-lock.yaml ./
+RUN npm install -g pnpm && pnpm install --frozen-lockfile
+
+COPY web/ .
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV NEXT_OUTPUT=export
+RUN pnpm run build
+
+# ── Stage 2: Python + 调试工具 ────────────────────────────────
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -35,6 +49,9 @@ RUN uv sync --frozen --no-dev --no-install-project
 # 复制源码和元数据文件
 COPY ethan/ ./ethan/
 COPY README.md README_CN.md ./
+
+# 从 Stage 1 拷入 Web UI 静态产物
+COPY --from=web-builder /web/out ./ethan/web_dist
 
 # 安装项目本身
 RUN uv sync --frozen --no-dev
