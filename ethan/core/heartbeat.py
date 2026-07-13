@@ -4,6 +4,7 @@
 """
 import asyncio
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -338,11 +339,13 @@ async def _tick() -> None:
     """执行一次心跳：facts 整理 + 画像每日压缩 + heartbeat.md 任务 + skill 进化 + watchdog 检查。"""
     logger.info("[Heartbeat] tick")
     # 确保 watchdog 进程存活（互相拉起的 server 侧逻辑）
-    try:
-        from ethan.watchdog import check_watchdog_health
-        check_watchdog_health()
-    except Exception:
-        logger.exception("[Heartbeat] Watchdog health check failed")
+    # 多 worktree 开发时跳过（ETHAN_NO_WATCHDOG=1）
+    if not os.environ.get("ETHAN_NO_WATCHDOG"):
+        try:
+            from ethan.watchdog import check_watchdog_health
+            check_watchdog_health()
+        except Exception:
+            logger.exception("[Heartbeat] Watchdog health check failed")
     await _consolidate_facts()
     await _consolidate_profiles()
     await _run_heartbeat_md()

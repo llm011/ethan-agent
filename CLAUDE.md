@@ -1,5 +1,65 @@
 # Ethan Agent - Project Instructions
 
+## Worktree 工作流（必须遵守）
+
+**禁止在主仓库 `/Users/jsongo/code/life/ethan-ai` 直接开发 feature。** 主仓库始终保持在 `main` 分支，只用于：
+- 拉取最新 main：`git pull`
+- 查看 main 上的文件
+- 创建/删除 worktree
+- 合并 PR 后清理 worktree
+
+所有 feature 开发必须在 worktree 中进行：
+
+```bash
+# 创建 worktree（从最新 main 切出新分支）
+git pull
+git worktree add ../ethan-ai-<feature-name> -b feature/<feature-name>
+
+# 进入 worktree 开发
+cd ../ethan-ai-<feature-name>
+# ... 编码、提交、推送、创建 PR ...
+
+# PR 合并后清理
+git worktree remove ../ethan-ai-<feature-name>
+git branch -d feature/<feature-name>
+```
+
+**命名约定**：
+- worktree 目录：`ethan-ai-<kebab-case-name>`（放在主仓库同级目录）
+- 分支名：`feature/<kebab-case-name>`
+
+**已有 worktree 列表**：`git worktree list`
+
+## 多 worktree 开发的服务启动规范
+
+**问题**：ethan 的 watchdog 机制通过 `/tmp/ethan/server.pid` 管理服务进程。多个 worktree 同时启动 `ethan serve` 会互相冲突——watchdog 会杀掉 PID 文件指向的进程，导致非主实例被误杀。
+
+**规则**：
+1. **默认端口 8900 同一时间只能有一个实例**。watchdog 只监控 8900 端口，非 8900 端口的实例会被 watchdog 视为"server 死亡"并触发重启，可能杀掉其他实例。
+2. **开发测试时使用随机端口**（8901-8999 之间），但要意识到：
+   - 启动的实例**不要写入 `/tmp/ethan/server.pid`**（否则会被 watchdog 杀）
+   - 实例可能被 watchdog 的端口扫描误杀（`_kill_server` 会扫描 8900 端口占用）
+   - 优先用 `ethan -p "prompt" --yes` 单轮模式测试，不启动常驻服务
+3. **浏览器插件测试**：浏览器插件通过 `ws://localhost:<port>/ws/browser` 连接 ethan。测试前确认：
+   - ethan 服务在监听目标端口
+   - 系统代理（如 `127.0.0.1:7890`）会拦截 ws 连接，浏览器插件需绕过代理或配置 no_proxy
+   - 可用 `NO_PROXY=localhost,127.0.0.1` 验证连接是否正常
+   4. **启动命令示例**（worktree 开发测试）：
+   ```bash
+   # 随机端口 8901-8999，避开 8900（watchdog 占用）和已用端口
+   # ETHAN_NO_WATCHDOG=1 跳过 PID 写入和 watchdog，避免与其他实例冲突
+   PORT=$((RANDOM % 99 + 8901))
+   ETHAN_NO_WATCHDOG=1 .venv/bin/ethan serve --host 127.0.0.1 --port $PORT
+   ```
+5. **不要 `pkill -f "ethan serve"`**：会误杀其他 worktree 的实例。只 kill 自己启动的 PID。
+6. **`ETHAN_NO_WATCHDOG=1` 环境变量**：代码级开关（`api.py` + `heartbeat.py`），设为 1 时：
+   - 不写 `/tmp/ethan/server.pid`（避免被 watchdog 杀）
+   - 不拉起 watchdog 进程（避免接管其他实例）
+   - heartbeat 不检查 watchdog 存活（避免互相拉起）
+   开发测试时必须带这个环境变量。
+
+   > 注意：`ethan serve` 默认（不设该变量）**会**写入 `/tmp/ethan/server.pid` 并自动拉起 watchdog。目前**没有** `--no-pid` 之类的独立命令行参数，唯一的开关就是这个环境变量。上面的启动示例（第 4 条）已带 `ETHAN_NO_WATCHDOG=1`，正是为了跳过 PID 写入——**请勿删除该变量**，否则仍会写 PID、被 watchdog 误杀。
+
 ## Agent Behaviors & Rules
 - **ALWAYS run the code and verify it passes after modifying it.** Never stop after just modifying code without running a local test to catch IndentationError, SyntaxError, or logic errors. Use `uv run ...` or node scripts to verify.
 

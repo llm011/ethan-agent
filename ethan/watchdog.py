@@ -4,9 +4,9 @@
 - Server（web + lark listener）：单进程，启动时自动拉起 watchdog
 - Watchdog：独立进程，定期 ping server /api/health，死了就重启
 
-互相感知通过 PID 文件：
-- ~/.ethan/server.pid  — server 写入自己的 PID
-- ~/.ethan/watchdog.pid — watchdog 写入自己的 PID
+互相感知通过 PID 文件（位于 _PID_DIR = /tmp/ethan）：
+- /tmp/ethan/server.pid  — server 写入自己的 PID
+- /tmp/ethan/watchdog.pid — watchdog 写入自己的 PID
 
 Server 的 heartbeat 里检查 watchdog 是否存活，如不在则重新拉起。
 Watchdog 循环检查 server health，如不通则 kill + 重启。

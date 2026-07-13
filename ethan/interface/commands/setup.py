@@ -72,6 +72,8 @@ def setup_main(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is not None:
         return
 
+    import sys
+
     from ethan.core.config import CONFIG_DIR, get_config
 
     first_run = not (CONFIG_DIR / "config.yaml").exists()
@@ -88,9 +90,13 @@ def setup_main(ctx: typer.Context) -> None:
         console.print(f"  系统文件  {CONFIG_DIR / 'system/'}")
         console.print(f"  默认技能  {CONFIG_DIR / 'skills/'}")
         console.print()
+
+    # 非交互环境（无 TTY：docker / CI / 管道）不打开交互菜单，仅做幂等初始化
+    if not sys.stdin.isatty():
         return
 
-    _run_interactive_menu()
+    if not first_run:
+        _run_interactive_menu()
 
 
 # ── 箭头键选择器（基于 prompt_toolkit）──────────────────────────────────────

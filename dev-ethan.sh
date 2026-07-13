@@ -58,7 +58,7 @@ fi
 if [ -n "${ETHAN_PORT:-}" ]; then
   DATA_DIR="$HOME/.ethan-dev/${ETHAN_PORT}"
   mkdir -p "$DATA_DIR"
-  DOCKER_ARGS=(--rm -v "$(pwd)/ethan:/app/ethan" -v "${DATA_DIR}:/root/.ethan" -p "${ETHAN_PORT}:8900")
+  DOCKER_ARGS=(--rm -e "TERM=xterm-256color" -v "$(pwd)/ethan:/app/ethan" -v "${DATA_DIR}:/root/.ethan" -p "${ETHAN_PORT}:8900")
 else
   DOCKER_ARGS=(-it --rm -v "$(pwd)/ethan:/app/ethan")
 fi
