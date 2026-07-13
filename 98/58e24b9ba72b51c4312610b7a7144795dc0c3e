@@ -1,0 +1,23 @@
+pyproject.toml
+  s_3c0fe3fada65eb::t_ba485e09779c28 37
+uv.lock
+  s_3c0fe3fada65eb::t_d540b5fd734912 512
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9858e24b9ba72b51c4312610b7a7144795dc0c3e",
+  "prompts": {},
+  "sessions": {
+    "s_3c0fe3fada65eb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5f56ab23-1bfa-4ae0-873c-f87346f52574",
+        "model": "unknown"
+      },
+      "human_author": "jsongo <jsongo@qq.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
