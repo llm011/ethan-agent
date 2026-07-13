@@ -1,10 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Pencil, Check, X, Sun, Moon } from "lucide-react";
+import { Pencil, Check, X, Sun, Moon, RefreshCw } from "lucide-react";
 import { Clock, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { renameSession } from "@/lib/api";
+import { renameSession, regenSessionTitle } from "@/lib/api";
 import { fmtTokens } from "@/lib/utils";
 import { formatTrigger, formatNextRun } from "@/lib/utils";
 import { useTheme } from "./use-theme";
@@ -29,6 +29,7 @@ const SOURCE_COLOR: Record<string, string> = {
 
 export function ChatHeader({ sessionId, title, source, usage, schedules, onTitleChange }: ChatHeaderProps) {
   const [isEditing, setIsEditing] = useState(false);
+  const [regening, setRegening] = useState(false);
   const [editingTitle, setEditingTitle] = useState("");
   const { theme, toggle: toggleTheme } = useTheme();
 
@@ -77,14 +78,30 @@ export function ChatHeader({ sessionId, title, source, usage, schedules, onTitle
               <button onClick={cancelEdit} className="text-muted-foreground hover:opacity-70"><X className="h-4 w-4" /></button>
             </div>
           ) : (
-            <button
-              className="flex items-center gap-1.5 text-lg font-semibold truncate hover:text-primary group"
-              onClick={startEdit}
-              title="Click to rename"
-            >
-              <span className="truncate">{title}</span>
-              <Pencil className="h-3 w-3 opacity-0 group-hover:opacity-50 shrink-0" />
-            </button>
+            <div className="flex items-center gap-1 group min-w-0 flex-1">
+              <button
+                className="flex items-center gap-1.5 text-lg font-semibold truncate hover:text-primary"
+                onClick={startEdit}
+                title="Click to rename"
+              >
+                <span className="truncate">{title}</span>
+                <Pencil className="h-3 w-3 opacity-0 group-hover:opacity-50 shrink-0" />
+              </button>
+              <button
+                className="opacity-0 group-hover:opacity-50 hover:!opacity-100 shrink-0 text-muted-foreground hover:text-primary"
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  if (!sessionId) return;
+                  setRegening(true);
+                  const newTitle = await regenSessionTitle(sessionId);
+                  setRegening(false);
+                  if (newTitle) onTitleChange(newTitle);
+                }}
+                title="AI 重新生成标题"
+              >
+                <RefreshCw className={`h-3 w-3 ${regening ? "animate-spin" : ""}`} />
+              </button>
+            </div>
           )
         )}
 

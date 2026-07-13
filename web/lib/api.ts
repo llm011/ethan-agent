@@ -185,6 +185,16 @@ export async function renameSession(id: string, title: string): Promise<void> {
   });
 }
 
+
+export async function regenSessionTitle(id: string): Promise<string | null> {
+  const res = await fetch(`${API_URL}/sessions/${id}/regen-title`, {
+    method: "POST",
+    headers: headers(),
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.ok ? data.title : null;
+}
 export async function updateSessionMode(id: string, mode: string): Promise<void> {
   await fetch(`${API_URL}/sessions/${id}`, {
     method: "PATCH",

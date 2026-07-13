@@ -171,6 +171,25 @@ async def rename_session(session_id: str, req: RenameSessionRequest, user_id: st
     return {"ok": True}
 
 
+
+@router.post("/sessions/{session_id}/regen-title")
+async def regen_title(session_id: str, user_id: str = Depends(verify_token)):
+    """用廉价模型重新生成标题（用户手动触发，force 跳过已有标题保护）。"""
+    from ethan.core.paths import user_sessions_db_path
+    from ethan.memory.session import _generate_smart_title
+    store = SessionStore(db_path=user_sessions_db_path())
+    await store.init()
+    try:
+        session = await store.load(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        title = await _generate_smart_title(session.messages)
+        if title:
+            await store.update_title(session_id, title)
+            return {"ok": True, "title": title}
+        return {"ok": False, "title": session.title, "error": "标题生成失败"}
+    finally:
+        await store.close()
 @router.post("/sessions/{session_id}/compact")
 async def compact_session(session_id: str, user_id: str = Depends(verify_token)):
     """压缩会话历史：用廉价模型把旧对话压成摘要替换存储，保留最近一轮，释放上下文。
