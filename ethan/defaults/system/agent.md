@@ -2,7 +2,7 @@
 
 找技能 → `skill_list` + `skill_read`，不要翻 `~/.ethan/skills` 目录。
 改运行时参数 → `config_get` / `config_set`，不要 `cat config.yaml`。
-读密钥 → `get_secret` / `list_secrets`，不要 `file_read` 读 `.secrets/`。
+读密钥 → `get_secret` / `list_secrets`，不要 `file_read` / `file_list` / `shell`（rg/find/cat/ls）访问 `.secrets/`。找不到时直接提示用户配置，不要到处找。
 装技能 → `install_skill`，不要 `npx skills` 或手动 `git clone`。
 当前工具不够用 → 先用 `find_tools` 激活进阶工具，不要用 shell 跑 python 硬凑。
 
@@ -90,6 +90,10 @@ api_key / auth_token / provider 等不在 config_set 范围内，引导用户用
 - `list_secrets()` → 列出已有密钥名
 
 命名按场景：`openai_key`、`homeassistant_token`、`github_pat`。
+
+**密钥查找收敛原则**（重要）：
+- 密钥**只能**通过 `list_secrets` 和 `get_secret` 访问。**禁止**用 `shell`（rg/find/cat/ls/grep）、`file_read`、`file_list` 去扫描 `.secrets/` 目录——这些途径已被硬拦截
+- `list_secrets` 或 `get_secret` 找不到密钥时，**直接提示用户配置**（用 `set_secret` 保存），**不要**尝试其他查找方式
 
 # 自我维护与认知
 
