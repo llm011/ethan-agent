@@ -25,6 +25,7 @@ fast_path: true
 9. **流行度分析 + 同款兜底**——搜索后从 snapshot 的 link 节点统计品牌/型号反复出现频次，频次高的优先选为 top 候选。若某款详情页信息太少（如参数缺失），在列表中找同品牌/同系列另一款点进去补充
 10. **过程透明 + 断连降级**——每步工具调用都要说明在做什么、为什么（让用户知道 agent 的思路）。浏览器断连时不要死等，用 `web_search` + `web_fetch` 补充参数信息作为降级路径，并告知用户数据来源
 11. **并行打开详情页**——提取多个商品参数时，不要串行"导航→wait→提取"逐个来（5 个商品 = 5×(3s wait + 提取) ≈ 30s+）。应该用 `browser_tab(action="open", url=...)` 一次性打开多个 tab，并行 `eval` 提取，最后聚合。**但单次工具调用只能操作一个 tab**，所以并行是指"先批量 open 所有 tab（不用 wait），再用一个 eval 脚本遍历所有 tab 提取"
+12. **详情页有多个 tab，要主动点击切换**——京东详情页默认只显示"规格参数"精简表。"商品详情"tab 有图文详细规格，"大家评"tab 有用户评价。信息不足时**主动点击对应 tab**（用 eval 找文本节点 click），点击后必须 wait 2 秒等 AJAX 加载
 
 ---
 
@@ -227,6 +228,38 @@ browser_page(action="eval", session=SID, script="""
 > **京东详情页已改版**（2025+）：旧选择器 `.sku-name`/`.itemInfo-wrap`/`.p-price`/`.Ptable-item` 全部失效。
 > 新 DOM 用 CSS Modules hash 类名，商品名在 `<title>` 标签，参数在 `[class*=parameter]` 容器中。
 
+### ⚠️ 重要：详情页有多个 tab，要主动点击切换
+
+京东详情页顶部有 tab 导航条，默认显示"规格参数"（只显示精简参数），完整信息在其它 tab：
+
+| Tab 名称 | 内容 | 何时点击 |
+|---------|------|---------|
+| **规格参数** | 精简参数表（材质/重量/磅数等），默认展示 | 先读这个拿基础参数 |
+| **商品详情** | 图文详情、产品故事、技术图解、详细规格对比 | 规格参数信息不足时点这个补充 |
+| **大家评** | 用户评价、好评率、晒图、问答 | 用户问评价/口碑时点这个 |
+| **售后保障** | 退换货政策 | 一般不用点 |
+
+**点击 tab 的方法**（tab 是可点击的文本节点，用 eval 找到并点击）：
+
+```
+browser_page(action="eval", session=SID, script="""
+(function(){
+  // 找到目标 tab 文本节点并点击
+  const target = "商品详情";  // 或 "大家评"
+  const tabs = Array.from(document.querySelectorAll("*"))
+    .filter(e => e.children.length === 0 && e.textContent.trim() === target);
+  if (tabs.length > 0) {
+    tabs[0].click();
+    return "clicked: " + target;
+  }
+  return "tab not found: " + target;
+})()
+""")
+browser_page(action="wait", session=SID, ms=2000)
+```
+
+> 点击 tab 后内容是 AJAX 加载的，**必须 wait 2 秒**再提取。
+
 ### 导航 + 验证
 
 ```
@@ -395,9 +428,51 @@ browser_tab(action="close", tab_id=TAB_ID)
 
 **最后**：`browser_session(action="release")`
 
-### 提取商品评价
+### 提取"商品详情"tab 的图文详情
+
+规格参数 tab 信息不足时，点击"商品详情"tab 提取更详细的规格对比和产品说明：
 
 ```
+// 1. 点击"商品详情"tab
+browser_page(action="eval", session=SID, script="""
+(function(){
+  const tabs = Array.from(document.querySelectorAll("*"))
+    .filter(e => e.children.length === 0 && e.textContent.trim() === "商品详情");
+  if (tabs.length > 0) { tabs[0].click(); return "clicked"; }
+  return "not found";
+})()
+""")
+browser_page(action="wait", session=SID, ms=2000)
+
+// 2. 提取详情区的文本（通常是图文混排，提取叶子节点的文本）
+browser_page(action="eval", session=SID, script="""
+(function(){
+  const detail = document.querySelector("[class*=detail-content], [class*=product-detail], [class*=intro]");
+  if (!detail) return JSON.stringify({error: "detail container not found"});
+  const texts = Array.from(detail.querySelectorAll("*"))
+    .filter(e => e.children.length === 0)
+    .map(e => e.textContent.trim())
+    .filter(t => t && t.length > 2 && t.length < 100);
+  return JSON.stringify({detail_texts: texts.slice(0, 30)});
+})()
+""")
+```
+
+### 提取"大家评"tab 的用户评价
+
+```
+// 1. 点击"大家评"tab
+browser_page(action="eval", session=SID, script="""
+(function(){
+  const tabs = Array.from(document.querySelectorAll("*"))
+    .filter(e => e.children.length === 0 && e.textContent.trim() === "大家评");
+  if (tabs.length > 0) { tabs[0].click(); return "clicked"; }
+  return "not found";
+})()
+""")
+browser_page(action="wait", session=SID, ms=2000)
+
+// 2. 滚动到评价区 + 提取评价
 browser_page(action="eval", session=SID, script="document.querySelector('[class*=comment]')?.scrollIntoView()")
 browser_page(action="wait", session=SID, ms=2000)
 ```
