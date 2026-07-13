@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Quote as QuoteIcon, Zap, Flag, Activity, BookOpen as BookOpenIcon } from "lucide-react";
+import { Quote as QuoteIcon, Zap, Flag, Activity, BookOpen as BookOpenIcon, Share2 as ShareIcon } from "lucide-react";
 import { ToolTimeline } from "@/components/tool-timeline";
 import { SwimlaneDiagram } from "@/components/swimlane-diagram";
 import { fmtTokens } from "@/lib/utils";
@@ -49,10 +49,11 @@ interface MessageBubbleProps {
   onQuote?: (msg: Message) => void;
   onCardAction?: (text: string) => void;
   onRead?: (msg: Message) => void;
+  onShare?: (msg: Message) => void;
   annotations?: Annotation[];
 }
 
-export function MessageBubble({ msg, isStreaming, isLast, onQuote, onCardAction, onRead, annotations }: MessageBubbleProps) {
+export function MessageBubble({ msg, isStreaming, isLast, onQuote, onCardAction, onRead, onShare, annotations }: MessageBubbleProps) {
   const [highlightedStep, setHighlightedStep] = useState<number | undefined>(undefined);
   const contentRef = useRef<HTMLDivElement>(null);
 
@@ -192,6 +193,18 @@ export function MessageBubble({ msg, isStreaming, isLast, onQuote, onCardAction,
             )
         )}
         </div>
+        {/* 气泡操作行：分享按钮（两个角色都有） */}
+        {!isStreaming && onShare && (
+          <div className={`flex items-center mt-1 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+            <button
+              onClick={() => onShare(msg)}
+              className="inline-flex items-center gap-1 text-[11px] text-muted-foreground/60 hover:text-foreground px-1.5 py-0.5 rounded hover:bg-accent transition-colors"
+              title="分享这条消息"
+            >
+              <ShareIcon className="h-3 w-3" /> 分享
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

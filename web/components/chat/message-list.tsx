@@ -11,10 +11,11 @@ interface MessageListProps {
   onQuote?: (msg: Message) => void;
   onCardAction?: (text: string) => void;
   onRead?: (msg: Message) => void;
+  onShare?: (msg: Message) => void;
   annotationsByMessage?: Record<number, Annotation[]>;
 }
 
-export function MessageList({ messages, streaming, onQuote, onCardAction, onRead, annotationsByMessage }: MessageListProps) {
+export function MessageList({ messages, streaming, onQuote, onCardAction, onRead, onShare, annotationsByMessage }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = useCallback(() => {
@@ -42,6 +43,7 @@ export function MessageList({ messages, streaming, onQuote, onCardAction, onRead
             onQuote={onQuote}
             onCardAction={onCardAction}
             onRead={onRead}
+            onShare={onShare}
             annotations={msg.id != null ? annotationsByMessage?.[msg.id] : undefined}
           />
         ))}

@@ -35,13 +35,21 @@ export const markdownComponents: Components = {
 
 // 气泡与阅读模式共用同一个渲染入口，确保 DOM 文本节点序列完全一致，
 // 标注偏移（基于渲染后纯文本）在两边才能对齐。
-export const MarkdownContent = forwardRef<HTMLDivElement, { content: string; className?: string }>(
-  ({ content, className }, ref) => (
-    <div ref={ref} className={className}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-        {fixBold(content)}
-      </ReactMarkdown>
-    </div>
-  ),
-);
+export const MarkdownContent = forwardRef<
+  HTMLDivElement,
+  { content: string; className?: string; variant?: "bubble" | "share" }
+>(({ content, className, variant = "bubble" }, ref) => (
+  <div
+    ref={ref}
+    className={
+      variant === "share"
+        ? `share-prose ${className ?? ""}`
+        : `prose prose-sm dark:prose-invert max-w-none ${className ?? ""}`
+    }
+  >
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+      {fixBold(content)}
+    </ReactMarkdown>
+  </div>
+));
 MarkdownContent.displayName = "MarkdownContent";

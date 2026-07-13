@@ -25,6 +25,7 @@ import {
   type Annotation,
 } from "@/lib/api";
 import { ReadingMode } from "@/components/chat/reading-mode";
+import { ShareMode } from "@/components/chat/share-mode";
 import type { ToolStep } from "@/components/tool-timeline";
 import type { Message, Usage, Quote, PendingFile } from "@/components/chat/types";
 import { ChatHeader } from "@/components/chat/chat-header";
@@ -62,6 +63,9 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const [annotationsByMessage, setAnnotationsByMessage] = useState<Record<number, Annotation[]>>({});
   // 阅读模式：打开时记录正在阅读的 assistant 消息
   const [readingMessage, setReadingMessage] = useState<Message | null>(null);
+  // 分享模式：记录被点开的消息及其默认选中的 key（用 key 触发重挂载以重置选择）
+  const [shareMessage, setShareMessage] = useState<Message | null>(null);
+  const [shareDefaultKey, setShareDefaultKey] = useState<string | null>(null);
 
   // 取一批 assistant 消息的标注，合并进缓存
   const fetchAnnotationsFor = async (msgs: Message[]) => {
@@ -95,6 +99,13 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     if (readingMessage?.id == null) return;
     const mid = readingMessage.id;
     setAnnotationsByMessage((prev) => ({ ...prev, [mid]: next }));
+  };
+
+  // 进入分享模式：默认只选中被点开的这条气泡
+  const handleShare = (msg: Message) => {
+    const key = msg.id != null ? `id:${msg.id}` : `idx:${messages.indexOf(msg)}`;
+    setShareDefaultKey(key);
+    setShareMessage(msg);
   };
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -645,6 +656,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         }}
         onCardAction={(text) => handleSend(text)}
         onRead={handleRead}
+        onShare={handleShare}
         annotationsByMessage={annotationsByMessage}
       />
 
@@ -655,6 +667,14 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         annotations={readingMessage?.id != null ? (annotationsByMessage[readingMessage.id] ?? []) : []}
         onClose={() => setReadingMessage(null)}
         onChange={handleAnnotationsChange}
+      />
+
+      <ShareMode
+        key={shareDefaultKey ?? "share-closed"}
+        open={shareMessage != null}
+        messages={messages}
+        defaultSelectedKey={shareDefaultKey}
+        onClose={() => setShareMessage(null)}
       />
 
       <div>
