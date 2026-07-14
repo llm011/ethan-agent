@@ -98,6 +98,7 @@ def _migrate_tmp_session_db(target: Path) -> None:
         except OSError:
             pass
         return
+    success = False
     try:
         con = sqlite3.connect(str(target), timeout=5)
         con.execute("ATTACH DATABASE ? AS src", (str(tmp_db),))
@@ -111,12 +112,14 @@ def _migrate_tmp_session_db(target: Path) -> None:
         """)
         con.commit()
         con.close()
+        success = True
     except Exception:
         pass
-    try:
-        tmp_db.unlink()
-    except OSError:
-        pass
+    if success:
+        try:
+            tmp_db.unlink()
+        except OSError:
+            pass
 
 
 def user_skills_dir() -> Path:
