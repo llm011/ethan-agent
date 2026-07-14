@@ -24,6 +24,7 @@ class BrowserWsClient {
   private backoff = BASE_BACKOFF_MS;
   private authed = false;
   private stopped = false;
+  private connecting = false;
 
   constructor(
     private getConfig: () => Promise<WsClientConfig | null>,
@@ -47,8 +48,19 @@ class BrowserWsClient {
   }
 
   private async connect(): Promise<void> {
+    if (this.connecting) return;
+    this.connecting = true;
+    try {
+      await this._doConnect();
+    } finally {
+      this.connecting = false;
+    }
+  }
+
+  private async _doConnect(): Promise<void> {
     this.clearReconnect();
     const cfg = await this.getConfig();
+    if (this.stopped) return;  // stop() called during await
     console.log('[EthanBrowser:offscreen] connect called, cfg=', cfg ? { url: cfg.serverUrl, hasToken: !!cfg.token } : null);
     if (!cfg || !cfg.serverUrl || !cfg.token) {
       console.warn('[EthanBrowser:offscreen] missing server url/token');
@@ -82,6 +94,7 @@ class BrowserWsClient {
       this.authed = false;
       this.clearPing();
       this.clearStable();
+      this.clearPong();
       if (this.ws === ws) {
         this.ws = null;
       }

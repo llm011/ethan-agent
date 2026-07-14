@@ -92,11 +92,21 @@ async function ensureOffscreenDocument(): Promise<void> {
     url: OFFSCREEN_URL,
     reasons: ['WEB_RTC' as chrome.offscreen.Reason],
     justification: 'Maintain persistent WebSocket connection to Ethan agent server',
-  }).then(() => {
+  }).then(async () => {
     console.log('[EthanBrowser] offscreen document created');
     offscreenCreated = true;
     configPushed = false;  // 新 offscreen，需要重新推送
-    void ensureOffscreenAndPushConfig();
+    // 直接推送配置，避免绕回 ensureOffscreenAndPushConfig 产生循环调用
+    const cfg = await readWsConfig();
+    if (cfg) {
+      try {
+        await chrome.runtime.sendMessage({ target: 'offscreen', type: 'config', config: cfg });
+        configPushed = true;
+        console.log('[EthanBrowser] config pushed to offscreen');
+      } catch (e) {
+        console.warn('[EthanBrowser] push config to offscreen failed', e);
+      }
+    }
   }).catch((e: any) => {
     if (!String(e?.message || '').includes('Only a single offscreen')) {
       console.warn('[EthanBrowser] create offscreen document failed', e);
@@ -117,7 +127,10 @@ void ensureOffscreenAndPushConfig();
 async function sendToOffscreen(message: unknown, timeoutMs = 3000): Promise<any> {
   await ensureOffscreenDocument();
   return Promise.race([
-    chrome.runtime.sendMessage(message),
+    chrome.runtime.sendMessage(message).catch(e => {
+      console.warn('[EthanBrowser] sendMessage to offscreen failed:', e);
+      return null;
+    }),
     new Promise<null>(resolve => setTimeout(() => resolve(null), timeoutMs)),
   ]);
 }

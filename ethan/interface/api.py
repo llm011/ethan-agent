@@ -57,7 +57,18 @@ def _lark_ready() -> bool:
         else:
             from ethan.core.config import get_config
             lark_cfg = getattr(get_config(), "lark", None)
-            _lark_available = bool(lark_cfg and lark_cfg.enabled and lark_cfg.app_id)
+            if lark_cfg and lark_cfg.app_id:
+                if not lark_cfg.enabled:
+                    # 向下兼容：老用户配了 app_id 但没有 enabled 字段，
+                    # 不静默失效，而是提示并仍然启用。
+                    logging.getLogger(__name__).warning(
+                        "飞书已配置 app_id 但 enabled 未设为 true，"
+                        "为向下兼容仍启动飞书渠道。"
+                        "建议在 config.yaml 的 lark 段添加 enabled: true"
+                    )
+                _lark_available = True
+            else:
+                _lark_available = False
     return _lark_available
 
 
