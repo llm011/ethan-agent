@@ -18,6 +18,13 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 - User Profile: narrative document storing personal phrases, goals, and agent agreements (`user_profile.md`); sections include 基础特征 (basic traits) and 心理与情绪 (emotional/psychological traits)
 - **Proactive memory write**: Agent calls tools mid-conversation to instantly persist anything worth remembering — no waiting for batch processing
 
+**Dream — nightly memory consolidation ("做梦")**
+- Every night at 0:00, Ethan "dreams": it distills the day's cross-session signals (recurring needs ≥3×, errors, success paths) into permanent insights via a cheap model, then dedups against existing memories with sqlite-vec (L2 < 1.1) before writing to `memory.db`
+- **Reflect-back**: consolidated insights are written back to `facts.json` (repetition/error) and `playbook.json` (success_path) so they surface naturally in future recall — no separate read path needed
+- **fact_sync mirror**: before each dream, active facts/playbook entries are mirrored into `memory.db` (type=`fact_sync`) so insight dedup naturally covers already-known facts; the mirror is fully rebuilt each cycle
+- **Permanent by design**: the fifth layer is true long-term memory — insights are never auto-deleted; `last_accessed` is tracked for observability but not used as an eviction basis (memory.db stays tiny, ~15KB per insight)
+- **Sessions.db rotation**: full message history grows fast, so sessions.db is auto-archived via `VACUUM INTO` to `~/.ethan/archive/sessions.{start}~{end}.db` (filename carries the date span) once it exceeds 10 MB, keeping the active db small while old chats remain queryable by date
+
 **Companion mode — 苏念 (Surrender Experiment counselor)**
 - A loadable plugin: toggle "苏念 · 陪伴倾听" in the chat UI to switch from the work assistant into a young, gentle female listener grounded in *The Surrender Experiment* (道法自然)
 - In this mode the agent affirms first, listens deeply, and accompanies rather than rushing to solve — speaking like a real person, no AI stiffness

@@ -121,7 +121,7 @@ async def collect_signals() -> list[dict]:
 
             messages_parts: list[str] = []
             for sess in sessions:
-                full_sess = await store.get(sess.id)
+                full_sess = await store.load(sess.id)
                 if not full_sess:
                     continue
                 user_msgs = [

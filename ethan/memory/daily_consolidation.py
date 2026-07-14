@@ -180,9 +180,9 @@ async def _embed_and_store(items: list[dict], d: date) -> int:
             # 已同步进 memory.db（type=fact_sync），insight 的 L2 去重天然覆盖
             try:
                 if _reflect_to_memory_files(text, insight_type, d, item.get("metadata", {})):
-                    # 更新 memory.db 标记
+                    # 更新 memory.db 标记（用 update_metadata 避免 vec_index REPLACE 冲突）
                     metadata["reflected"] = True
-                    store.add(id=item_id, text=text, embedding=emb, metadata=metadata)
+                    store.update_metadata(id=item_id, metadata=metadata)
                     reflected += 1
             except Exception:
                 logger.warning("[DailyConsolidation] Reflect failed for: %s", text[:50], exc_info=True)
@@ -212,22 +212,10 @@ async def _sync_facts_to_memory_db() -> int:
     synced = 0
 
     try:
-        conn = store._get_conn()
-
-        # Step 1: 删旧的 fact_sync 条目（全量重建）
-        old_ids = [
-            row[0] for row in
-            conn.execute(
-                "SELECT id FROM vec_items WHERE json_extract(metadata, '$.type') = ?",
-                ("fact_sync",),
-            ).fetchall()
-        ]
-        if old_ids:
-            placeholders = ",".join("?" * len(old_ids))
-            conn.execute(f"DELETE FROM vec_items WHERE id IN ({placeholders})", old_ids)
-            conn.execute(f"DELETE FROM vec_index WHERE id IN ({placeholders})", old_ids)
-            conn.commit()
-            logger.debug("[DailyConsolidation] Cleared %d old fact_sync entries", len(old_ids))
+        # Step 1: 删旧的 fact_sync 条目（全量重建）—— 走公开 API，不触碰 _get_conn
+        deleted = store.delete_by_type("fact_sync")
+        if deleted:
+            logger.debug("[DailyConsolidation] Cleared %d old fact_sync entries", deleted)
 
         # Step 2: 同步 facts.json 的 active fact
         fact_store = FactStore(path=user_facts_path())
@@ -325,28 +313,8 @@ async def get_all_memories(limit: int = 20, offset: int = 0) -> dict:
 
     store = VectorStore(db_path=_memory_db_path())
     try:
-        conn = store._get_conn()
-        # 过滤 type=fact_sync（这些是 JSON 文件同步过来的镜像，不是 insight）
-        total = conn.execute(
-            "SELECT COUNT(*) FROM vec_items WHERE json_extract(metadata, '$.type') != ?",
-            ("fact_sync",),
-        ).fetchone()[0]
-        rows = conn.execute(
-            """SELECT id, text, metadata FROM vec_items
-               WHERE json_extract(metadata, '$.type') != ?
-               ORDER BY rowid DESC LIMIT ? OFFSET ?""",
-            ("fact_sync", limit, offset),
-        ).fetchall()
-
-        items = []
-        for row in rows:
-            meta = json.loads(row["metadata"]) if row["metadata"] else {}
-            items.append({
-                "id": row["id"],
-                "text": row["text"],
-                "metadata": meta,
-            })
-
+        total = store.count_items(exclude_types=["fact_sync"])
+        items = store.list_items(exclude_types=["fact_sync"], limit=limit, offset=offset)
         return {"total": total, "items": items, "limit": limit, "offset": offset}
     finally:
         store.close()
@@ -358,23 +326,11 @@ async def get_memories_by_date(d: date) -> list[dict]:
 
     store = VectorStore(db_path=_memory_db_path())
     try:
-        conn = store._get_conn()
-        date_str = d.isoformat()
-        rows = conn.execute(
-            """SELECT id, text, metadata FROM vec_items
-               WHERE json_extract(metadata, '$.date') = ?
-                 AND json_extract(metadata, '$.type') != ?""",
-            (date_str, "fact_sync"),
-        ).fetchall()
-
-        items = []
-        for row in rows:
-            meta = json.loads(row["metadata"]) if row["metadata"] else {}
-            items.append({
-                "id": row["id"],
-                "text": row["text"],
-                "metadata": meta,
-            })
-        return items
+        return store.list_items(
+            exclude_types=["fact_sync"],
+            date=d.isoformat(),
+            limit=100,
+            offset=0,
+        )
     finally:
         store.close()

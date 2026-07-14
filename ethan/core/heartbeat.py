@@ -337,7 +337,7 @@ async def _run_heartbeat_md() -> None:
 
 
 async def _tick() -> None:
-    """执行一次心跳：facts 整理 + 画像每日压缩 + heartbeat.md 任务 + skill 进化 + 决策模式抽取 + 需求挖掘 + watchdog 检查 + memory.db LRU 清理 + sessions.db 轮转检查。"""
+    """执行一次心跳：facts 整理 + 画像每日压缩 + heartbeat.md 任务 + skill 进化 + 决策模式抽取 + 需求挖掘 + watchdog 检查 + memory.db 孤儿清理 + sessions.db 轮转检查。"""
     logger.info("[Heartbeat] tick")
     # 确保 watchdog 进程存活（互相拉起的 server 侧逻辑）
     # 多 worktree 开发时跳过（ETHAN_NO_WATCHDOG=1）
@@ -419,22 +419,17 @@ async def _extract_decision_patterns_for_user(user_id: str) -> None:
         await store.init()
         try:
             sessions = await store.list_recent(limit=20)
-        finally:
-            await store.close()
+            if not sessions:
+                return
 
-        if not sessions:
-            return
+            proc_store = ProcedureStore(path=user_procedures_path())
+            existing_scenarios = {p.scenario for p in proc_store.all_success_patterns()}
 
-        proc_store = ProcedureStore(path=user_procedures_path())
-        existing_scenarios = {p.scenario for p in proc_store.all_success_patterns()}
-
-        all_tool_sequences: list[tuple[str, list[str]]] = []
-        store2 = SessionStore(db_path=user_sessions_db_path())
-        await store2.init()
-        try:
+            # 复用同一个 store 实例 load 所有 session，避免重复建连接
+            all_tool_sequences: list[tuple[str, list[str]]] = []
             for si in sessions:
                 try:
-                    session = await store2.load(si.id)
+                    session = await store.load(si.id)
                     if not session:
                         continue
                     tool_names = []
@@ -448,7 +443,7 @@ async def _extract_decision_patterns_for_user(user_id: str) -> None:
                 except Exception:
                     continue
         finally:
-            await store2.close()
+            await store.close()
 
         if not all_tool_sequences:
             return
@@ -629,7 +624,10 @@ _midnight_task: asyncio.Task | None = None
 
 
 async def _cleanup_memory_db() -> None:
-    """遍历所有用户，清理 memory.db 中 3 个月未访问的条目（LRU 过期）。"""
+    """遍历所有用户，清理 memory.db 中的孤儿条目（安全阀）。
+
+    第五层是"永久记忆"，insight_* 与 fact_sync 均豁免；这里只清理类型未知的孤儿条目。
+    """
     try:
         from ethan.core.context import ETHAN_USER_ID, get_user_store
         from ethan.memory.vector_store import VectorStore
@@ -665,7 +663,7 @@ async def _loop() -> None:
 
 
 async def _midnight_loop() -> None:
-    """每天 0 点执行记忆沉淀。"""
+    """每天 0 点执行"做梦"（记忆沉淀）—— 遍历所有用户，各自沉淀昨日信号。"""
     while True:
         try:
             now = datetime.now()
@@ -678,10 +676,18 @@ async def _midnight_loop() -> None:
             logger.info("[Heartbeat] Midnight consolidation scheduled in %.0f seconds", wait_seconds)
             await asyncio.sleep(wait_seconds)
 
-            # 执行每日记忆沉淀
+            # 遍历所有用户，各自执行记忆沉淀（与其它心跳任务一致的 per-user 模式）
+            from ethan.core.context import ETHAN_USER_ID, get_user_store
             from ethan.memory.daily_consolidation import run_daily_consolidation
-            added = await run_daily_consolidation()
-            logger.info("[Heartbeat] Midnight consolidation done, stored %d new memories", added)
+            total_added = 0
+            for uid in get_user_store().all_user_ids():
+                token = ETHAN_USER_ID.set(uid)
+                try:
+                    added = await run_daily_consolidation()
+                    total_added += added
+                finally:
+                    ETHAN_USER_ID.reset(token)
+            logger.info("[Heartbeat] Midnight consolidation done, stored %d new memories across all users", total_added)
         except asyncio.CancelledError:
             raise
         except Exception:

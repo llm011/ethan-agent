@@ -19,6 +19,12 @@ logger = logging.getLogger(__name__)
 # LRU 过期：3 个月未被访问的条目在 cleanup 时清除
 EXPIRE_SECONDS = 90 * 86400  # 90 天
 
+# 永久保留的类型——不参与 LRU 清理。
+# 第五层定位是"永久记忆"：insight_*（repetition/error/success_path）是"做梦"沉淀下来的洞察，
+# fact_sync 是 facts.json/playbook.json 的镜像（每次"做梦"前全量重建）。
+# 两类均豁免 LRU。cleanup_expired 仅作为安全阀清理未知类型的孤儿条目。
+PERMANENT_TYPES = frozenset({"repetition", "error", "success_path", "fact_sync"})
+
 
 class VectorStore:
     """Persistent vector store backed by sqlite-vec."""
@@ -126,6 +132,22 @@ class VectorStore:
         conn.execute("DELETE FROM vec_index WHERE id = ?", (id,))
         conn.commit()
 
+    def update_metadata(self, id: str, metadata: dict[str, Any]) -> bool:
+        """只更新 metadata JSON（不动 embedding/vec_index）。
+
+        用于 daily_consolidation 标记 reflected=True 等场景——避免对 vec_index
+        虚拟表做 INSERT OR REPLACE（sqlite-vec 的 vec0 不支持 REPLACE 语义）。
+        返回是否找到并更新了条目。
+        """
+        conn = self._get_conn()
+        meta_json = json.dumps(metadata, ensure_ascii=False)
+        cursor = conn.execute(
+            "UPDATE vec_items SET metadata = ? WHERE id = ?",
+            (meta_json, id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
     # ── Read ───────────────────────────────────────────────────────────────
 
     def search(
@@ -196,23 +218,25 @@ class VectorStore:
         return results
 
     def cleanup_expired(self, expire_seconds: int = EXPIRE_SECONDS) -> int:
-        """删除超过 expire_seconds 未访问的条目，返回删除数量。
+        """删除超过 expire_seconds 未访问的**未知类型**孤儿条目，返回删除数量。
 
-        在心跳任务中定期调用，防止 memory.db 无限膨胀。
-        type=fact_sync 的条目不参与 LRU（由 _sync_facts_to_memory_db 全量重建）。
+        第五层是"永久记忆"，insight_*（repetition/error/success_path）和 fact_sync
+        两类已知类型均豁免清理。本方法仅作为安全阀，清理类型不在 PERMANENT_TYPES 中
+        的孤儿条目，防止历史脏数据/未来未知类型堆积。
         """
         conn = self._get_conn()
         cutoff = time.time() - expire_seconds
 
         # 先查出要删的 id（用于删 vec_index）
-        # 跳过 type=fact_sync（由 daily_consolidation 的同步逻辑管理）
+        # 只删类型不在 PERMANENT_TYPES 中的孤儿条目
+        not_in = ",".join("?" * len(PERMANENT_TYPES))
         expired_ids = [
             row[0] for row in
             conn.execute(
-                """SELECT id FROM vec_items
+                f"""SELECT id FROM vec_items
                    WHERE last_accessed < ?
-                     AND json_extract(metadata, '$.type') != ?""",
-                (cutoff, "fact_sync"),
+                     AND json_extract(metadata, '$.type') NOT IN ({not_in})""",
+                (cutoff, *PERMANENT_TYPES),
             ).fetchall()
         ]
         if not expired_ids:
@@ -223,10 +247,79 @@ class VectorStore:
         conn.execute(f"DELETE FROM vec_index WHERE id IN ({placeholders})", expired_ids)
         conn.commit()
 
-        logger.info("[VectorStore] Cleaned up %d expired entries (older than %ds)", len(expired_ids), expire_seconds)
+        logger.info("[VectorStore] Cleaned up %d orphan entries (older than %ds)", len(expired_ids), expire_seconds)
         return len(expired_ids)
 
     def count(self) -> int:
         conn = self._get_conn()
         row = conn.execute("SELECT COUNT(*) FROM vec_items").fetchone()
         return row[0] if row else 0
+
+    # ── Metadata-based queries（公开 API，替代外部直接访问 _get_conn） ──────
+
+    def delete_by_type(self, type: str) -> int:
+        """删除 metadata.type == type 的所有条目。返回删除数量。
+
+        用于 daily_consolidation 的 fact_sync 全量重建：先删旧的同 type 条目再写入。
+        """
+        conn = self._get_conn()
+        ids = [
+            row[0] for row in
+            conn.execute(
+                "SELECT id FROM vec_items WHERE json_extract(metadata, '$.type') = ?",
+                (type,),
+            ).fetchall()
+        ]
+        if not ids:
+            return 0
+        placeholders = ",".join("?" * len(ids))
+        conn.execute(f"DELETE FROM vec_items WHERE id IN ({placeholders})", ids)
+        conn.execute(f"DELETE FROM vec_index WHERE id IN ({placeholders})", ids)
+        conn.commit()
+        return len(ids)
+
+    def count_items(self, exclude_types: list[str] | None = None) -> int:
+        """计数条目，可排除指定 type（如排除 fact_sync 镜像条目）。"""
+        conn = self._get_conn()
+        if not exclude_types:
+            return conn.execute("SELECT COUNT(*) FROM vec_items").fetchone()[0]
+        placeholders = ",".join("?" * len(exclude_types))
+        return conn.execute(
+            f"""SELECT COUNT(*) FROM vec_items
+               WHERE json_extract(metadata, '$.type') NOT IN ({placeholders})""",
+            exclude_types,
+        ).fetchone()[0]
+
+    def list_items(
+        self,
+        exclude_types: list[str] | None = None,
+        date: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """分页列出条目（按 rowid 倒序），可按 type 排除、按 metadata.date 过滤。
+
+        用于 daily_consolidation 的 get_all_memories / get_memories_by_date。
+        """
+        conn = self._get_conn()
+        where = []
+        params: list = []
+        if exclude_types:
+            placeholders = ",".join("?" * len(exclude_types))
+            where.append(f"json_extract(metadata, '$.type') NOT IN ({placeholders})")
+            params.extend(exclude_types)
+        if date:
+            where.append("json_extract(metadata, '$.date') = ?")
+            params.append(date)
+        where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+        params.extend([limit, offset])
+        rows = conn.execute(
+            f"""SELECT id, text, metadata FROM vec_items{where_sql}
+               ORDER BY rowid DESC LIMIT ? OFFSET ?""",
+            params,
+        ).fetchall()
+        items = []
+        for row in rows:
+            meta = json.loads(row["metadata"]) if row["metadata"] else {}
+            items.append({"id": row["id"], "text": row["text"], "metadata": meta})
+        return items

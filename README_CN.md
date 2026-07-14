@@ -16,6 +16,13 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 - 用户画像 Profile：叙事型文档，按章节存储个人语言、目标、约定等（`user_profile.md`）；含「基础特征」「心理与情绪」等章节
 - **主动写记忆**：Agent 在对话中识别到可记忆信息时，主动调用工具即时写入，无需批量处理
 
+**做梦——夜间记忆沉淀（"做梦" / dream）**
+- 每晚 0 点 Ethan 会"做梦"：用廉价模型把白天跨 session 采集的信号（重复需求 ≥3 次、错误、成功路径）精炼成永久洞察，再用 sqlite-vec 做 L2 去重（阈值 1.1）后写入 `memory.db`
+- **反写机制**：沉淀的洞察按类型分流反写到 `facts.json`（repetition/error）和 `playbook.json`（success_path），让洞察在未来对话召回时自然生效，无需单独的读取链路
+- **fact_sync 镜像**：每次做梦前，把 facts.json/playbook.json 的 active 内容全量镜像到 `memory.db`（type=`fact_sync`），让 insight 的 L2 去重天然覆盖已有 fact，无需手动遍历；镜像每次全量重建
+- **永久保留**：第五层是真正的长期记忆——洞察不会被自动删除；`last_accessed` 仅作活跃度观察，不作为淘汰依据（memory.db 体量天然可控，每条洞察约 15KB）
+- **sessions.db 轮转**：完整消息历史增长快，sessions.db 超 10 MB 时用 `VACUUM INTO` 原子快照到 `~/.ethan/archive/sessions.{start}~{end}.db`（文件名带日期跨度），保持 active db 轻量，旧会话仍可按日期查归档
+
 **陪伴倾听模式 · 苏念（《臣服实验》心理咨询师）**
 - 可加载插件：在聊天界面一键切换「苏念 · 陪伴倾听」，从工作助手变成一位年轻温柔的女性陪伴者，熟读《臣服实验》、深谙道法自然
 - 该模式下 Agent 先赞许安抚、深度倾听、陪伴而非急于解决问题——说话像真人、温柔口语，拒绝 AI 腔
@@ -349,10 +356,13 @@ ethan/
 | 冷区（Facts） | 跨 session 提炼的关键事实 | `~/.ethan/memory/facts.json` |
 | 行为准则 | 从用户纠正中学习的规则 | `~/.ethan/memory/playbook.json` |
 | 用户画像 | 叙事型个人信息（目标、短语、约定） | `~/.ethan/memory/user_profile.md` |
+| 永久记忆（第五层） | "做梦"沉淀的跨 session 洞察（重复/错误/成功路径） | `~/.ethan/memory/memory.db`（sqlite-vec） |
 
 压缩是**批量触发**的（而非逐轮），使用自动推断的廉价模型（Claude 用户用 Haiku，Gemini 用户用 Flash Lite）。
 
 Agent 通过 `memory_write`、`procedure_write`、`profile_update` 工具在对话中主动写入各层，无需等待下一个压缩周期。
+
+第五层"做梦"（dream）在每晚 0 点自动运行：采集白天跨 session 信号 → 廉价模型精炼 → sqlite-vec L2 去重 → 写入 `memory.db`，并反写到 `facts.json`/`playbook.json` 让洞察在召回时自然生效。详见 [记忆系统设计文档](docs/memory.md)。
 
 ---
 
