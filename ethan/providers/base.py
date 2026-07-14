@@ -21,6 +21,7 @@ class ToolCall:
 class Message:
     role: str
     content: str
+    id: Optional[int] = None  # DB primary key (messages.id)
     tool_calls: list[ToolCall] = field(default_factory=list)
     tool_call_id: Optional[str] = None
     usage: Optional[dict] = None  # {"input": N, "output": N, "cache": N}

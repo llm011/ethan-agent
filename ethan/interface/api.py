@@ -14,6 +14,7 @@ from ethan.browser.http_route import router as browser_http_router
 from ethan.browser.ws_route import router as browser_ws_router
 from ethan.core.heartbeat import start_heartbeat, stop_heartbeat
 from ethan.interface.routers import (
+    annotations,
     background_tasks,
     chat,
     completions,
@@ -165,6 +166,7 @@ app.include_router(completions.router)  # /v1 OpenAI-compat, no /api prefix
 app.include_router(logs.router, prefix="/api")
 app.include_router(models.router, prefix="/api")
 app.include_router(consent.router, prefix="/api")
+app.include_router(annotations.router, prefix="/api")
 app.include_router(background_tasks.router, prefix="/api")
 app.include_router(browser_ws_router)  # /ws/browser, WebSocket, no prefix
 app.include_router(browser_http_router, prefix="/api")  # /api/browser/shot/{name}

@@ -99,6 +99,13 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
                 if req.quote and req.quote.get("content"):
                     m.quote = req.quote
                 await store.save_message(req.session_id, m)
+        # /review 命令：立即从 URL 解析出 PR 标题并更新，不等 review 跑完
+        user_text = (req.messages[-1].get("content", "") if req.messages else "").strip()
+        if user_text:
+            from ethan.memory.session import _review_title
+            early_title = _review_title(user_text)
+            if early_title:
+                await store.update_title(req.session_id, early_title)
         # 持久化对话模式：退出再进入保持当前模式
         if req.mode:
             await store.update_mode(req.session_id, req.mode)

@@ -21,7 +21,11 @@ import {
   fetchOnboardingStatus,
   fetchAgentSettings,
   respondConsent,
+  getAnnotationsBatch,
+  type Annotation,
 } from "@/lib/api";
+import { ReadingMode } from "@/components/chat/reading-mode";
+import { ShareMode } from "@/components/chat/share-mode";
 import type { ToolStep } from "@/components/tool-timeline";
 import type { Message, Usage, Quote, PendingFile } from "@/components/chat/types";
 import { ChatHeader } from "@/components/chat/chat-header";
@@ -55,6 +59,26 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const [mode, setMode] = useState<string>("");
   const [modes, setModes] = useState<ModeEntry[]>([]);
 
+  // 标注缓存：messageId -> Annotation[]（按 message id 缓存，避免每气泡重复请求）
+  const [annotationsByMessage, setAnnotationsByMessage] = useState<Record<number, Annotation[]>>({});
+  // 阅读模式：打开时记录正在阅读的 assistant 消息
+  const [readingMessage, setReadingMessage] = useState<Message | null>(null);
+  // 分享模式：记录被点开的消息及其默认选中的 key（用 key 触发重挂载以重置选择）
+  const [shareMessage, setShareMessage] = useState<Message | null>(null);
+  const [shareDefaultKey, setShareDefaultKey] = useState<string | null>(null);
+
+  // 取一批 assistant 消息的标注，合并进缓存
+  const fetchAnnotationsFor = async (msgs: Message[]) => {
+    const ids = msgs.filter((m) => m.role === "assistant" && m.id != null).map((m) => m.id as number);
+    if (ids.length === 0) return;
+    try {
+      const map = await getAnnotationsBatch(ids);
+      setAnnotationsByMessage((prev) => ({ ...prev, ...map }));
+    } catch {
+      // 标注读取失败不阻断阅读
+    }
+  };
+
   const handleConsentRespond = async (requestId: string, allowed: boolean) => {
     setConsentRequest(null);
     try {
@@ -62,6 +86,26 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     } catch {
       // 网络错误时按拒绝处理，避免 Agent 卡死
     }
+  };
+
+  // 进入阅读模式（仅 assistant 消息，且已有稳定 id 才能存标注）
+  const handleRead = (msg: Message) => {
+    if (msg.id == null) return;
+    setReadingMessage(msg);
+  };
+
+  // 阅读模式里新建/删除标注后，把最新列表写回缓存（气泡据此淡显回显）
+  const handleAnnotationsChange = (next: Annotation[]) => {
+    if (readingMessage?.id == null) return;
+    const mid = readingMessage.id;
+    setAnnotationsByMessage((prev) => ({ ...prev, [mid]: next }));
+  };
+
+  // 进入分享模式：默认只选中被点开的这条气泡
+  const handleShare = (msg: Message) => {
+    const key = msg.id != null ? `id:${msg.id}` : `idx:${messages.indexOf(msg)}`;
+    setShareDefaultKey(key);
+    setShareMessage(msg);
   };
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -73,6 +117,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const mapDetailMessages = (detail: { messages: any[] }): Message[] =>
     detail.messages.map((m: any) => ({
       role: m.role,
+      id: m.id ?? undefined,
       content: m.content,
       created_at: m.created_at,
       usage: m.usage || undefined,
@@ -130,6 +175,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     let ttft: number | undefined;
     let ttfbMs: number | undefined;
     let totalMs: number | undefined;
+    let messageId: number | undefined;
     let finalUsage: Usage | undefined;
     setMessages([...baseMessages, { role: "assistant", content: "", created_at: Date.now() / 1000 }]);
 
@@ -244,6 +290,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           finalUsage = { input: chunk.usage.input || 0, output: chunk.usage.output || 0, cache: chunk.usage.cache || 0 };
           if (chunk.ttfb_ms != null) ttfbMs = chunk.ttfb_ms;
           if (chunk.total_ms != null) totalMs = chunk.total_ms;
+          if (chunk.message_id != null) messageId = chunk.message_id;
+          if (chunk.title) setSessionTitle(chunk.title);
           setSessionUsage(prev => ({
             input: prev.input + finalUsage!.input,
             output: prev.output + finalUsage!.output,
@@ -274,10 +322,10 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       const msgs = [...prev];
       const last = msgs[msgs.length - 1];
       if (last && last.role === "assistant") {
-        msgs[msgs.length - 1] = { ...last, content: assistantContent, thought: assistantThought, toolsExpanded: false, usage: finalUsage || last.usage, ttft: ttft ?? last.ttft, ttfb_ms: ttfbMs ?? last.ttfb_ms, total_ms: totalMs ?? last.total_ms, a2ui: a2uiSurfaces.length > 0 ? a2uiSurfaces : undefined, matchedSkills: currentMatchedSkills };
+        msgs[msgs.length - 1] = { ...last, content: assistantContent, thought: assistantThought, toolsExpanded: false, usage: finalUsage || last.usage, ttft: ttft ?? last.ttft, ttfb_ms: ttfbMs ?? last.ttfb_ms, total_ms: totalMs ?? last.total_ms, a2ui: a2uiSurfaces.length > 0 ? a2uiSurfaces : undefined, matchedSkills: currentMatchedSkills, id: messageId ?? last.id };
         return msgs;
       }
-      return [...baseMessages, { role: "assistant", content: assistantContent, thought: assistantThought, created_at: Date.now() / 1000, usage: finalUsage, ttft, ttfb_ms: ttfbMs, total_ms: totalMs, a2ui: a2uiSurfaces.length > 0 ? a2uiSurfaces : undefined, matchedSkills: currentMatchedSkills }];
+      return [...baseMessages, { role: "assistant", content: assistantContent, thought: assistantThought, created_at: Date.now() / 1000, usage: finalUsage, ttft, ttfb_ms: ttfbMs, total_ms: totalMs, a2ui: a2uiSurfaces.length > 0 ? a2uiSurfaces : undefined, matchedSkills: currentMatchedSkills, id: messageId }];
     });
     setStopping(false);
     setStreaming(false);
@@ -302,6 +350,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           setSessionSource(detail.source || "web");
           const loaded = mapDetailMessages(detail);
           setMessages(loaded);
+          fetchAnnotationsFor(loaded);
           setSelectedModel(detail.model);
           // 恢复对话模式：之前用工作助手还是苏念，下次进入保持一致
           setMode(detail.mode || "");
@@ -330,7 +379,11 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
             } else {
               setStreaming(false);
               const fresh = await fetchSession(initialSessionId).catch(() => null);
-              if (fresh) setMessages(mapDetailMessages(fresh));
+              if (fresh) {
+                const freshMsgs = mapDetailMessages(fresh);
+                setMessages(freshMsgs);
+                fetchAnnotationsFor(freshMsgs);
+              }
             }
           }
         })
@@ -515,6 +568,11 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         return;
       }
       content = `帮我 code review：${target}`;
+      // 立即从 URL 解析 PR 标题并更新（不等 review 跑完）
+      const ghMatch = target.match(/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/);
+      const glMatch = target.match(/gitlab\.com\/([^/]+\/[^/]+)\/-\/merge_requests\/(\d+)/);
+      if (ghMatch) setSessionTitle(`PR #${ghMatch[2]} ${ghMatch[1]}`);
+      else if (glMatch) setSessionTitle(`MR !${glMatch[2]} ${glMatch[1]}`);
     }
     const imageFiles = pendingFiles.filter((f) => f.isImage);
     const nonImageFiles = pendingFiles.filter((f) => !f.isImage);
@@ -573,15 +631,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       justFinishedRef.current = sessionId;
       window.history.replaceState(null, "", `/chat/${sessionId}`);
     }
-    // 流结束后后端会异步 regen title，延迟 1.5s 取最新标题同步到顶部 header
-    if (sessionId) {
-      setTimeout(async () => {
-        try {
-          const detail = await fetchSession(sessionId);
-          if (detail?.title) setSessionTitle(detail.title);
-        } catch { /* ignore */ }
-      }, 1500);
-    }
+    // 标题已在 done 事件中实时更新（chunk.title），无需额外 poll
   };
 
   return (
@@ -603,6 +653,26 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           setTimeout(() => inputRef.current?.focus(), 30);
         }}
         onCardAction={(text) => handleSend(text)}
+        onRead={handleRead}
+        onShare={handleShare}
+        annotationsByMessage={annotationsByMessage}
+      />
+
+      <ReadingMode
+        key={readingMessage?.id ?? "closed"}
+        open={readingMessage != null}
+        message={readingMessage}
+        annotations={readingMessage?.id != null ? (annotationsByMessage[readingMessage.id] ?? []) : []}
+        onClose={() => setReadingMessage(null)}
+        onChange={handleAnnotationsChange}
+      />
+
+      <ShareMode
+        key={shareDefaultKey ?? "share-closed"}
+        open={shareMessage != null}
+        messages={messages}
+        defaultSelectedKey={shareDefaultKey}
+        onClose={() => setShareMessage(null)}
       />
 
       <div>

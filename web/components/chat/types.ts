@@ -25,6 +25,7 @@ export interface SkillMatch {
 
 export interface Message {
   role: "user" | "assistant";
+  id?: number;            // 后端消息行 id（assistant 落库后才有），标注按此持久化
   content: string;
   files?: string[];
   toolSteps?: ToolStep[];

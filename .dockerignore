@@ -1,0 +1,23 @@
+# ── 依赖与构建产物（关键） ──────────────────────────────────────
+# 镜像内由 `pnpm install` / `pnpm run build` 重新生成。
+# 若把宿主机的 node_modules 带进 build context，会和第 9 行 install
+# 生成的真实 node_modules 冲突，报：
+#   cannot copy to non-directory: .../web/node_modules/@a2ui/markdown-it
+web/node_modules
+web/.next
+node_modules
+
+# ── Python 构建垃圾 ─────────────────────────────────────────────
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+.venv
+dist
+build
+
+# ── 本地 / 无关目录（减小 context） ─────────────────────────────
+.git
+.workbuddy
+research
+*.log
