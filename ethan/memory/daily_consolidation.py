@@ -13,6 +13,7 @@ import logging
 import time
 import uuid
 from datetime import date
+from pathlib import Path
 
 from ethan.core.paths import user_memory_dir
 
@@ -22,7 +23,11 @@ DEDUP_THRESHOLD = 0.85  # cosine similarity 阈值（供参考）
 # sqlite-vec 返回 L2 距离；对归一化 384-dim 向量，同义句 L2 通常 0.8~1.1
 # 使用 L2 < 1.1 作为去重门槛（对应 cosine_sim ≈ 0.4，但实际效果更好）
 L2_DEDUP_THRESHOLD = 1.1
-MEMORY_DB_PATH = user_memory_dir() / "memory.db"
+
+
+def _memory_db_path() -> Path:
+    """每次调用时按当前 user contextvar 求值，避免模块级缓存击穿 per-user 隔离。"""
+    return user_memory_dir() / "memory.db"
 
 _CONSOLIDATION_PROMPT = """\
 以下是今天记录的行为模式信号（可能有重复或噪音）。请整理为最终要永久保留的记忆条目。
@@ -106,7 +111,7 @@ async def _llm_refine(signals: list[dict]) -> list[dict]:
         return valid[:10]
 
     except Exception:
-        logger.debug("[DailyConsolidation] LLM refinement failed", exc_info=True)
+        logger.warning("[DailyConsolidation] LLM refinement failed", exc_info=True)
         return []
 
 
@@ -115,7 +120,7 @@ async def _embed_and_store(items: list[dict], d: date) -> int:
     from ethan.memory.embeddings import embed
     from ethan.memory.vector_store import VectorStore
 
-    store = VectorStore(db_path=MEMORY_DB_PATH)
+    store = VectorStore(db_path=_memory_db_path())
     added = 0
 
     try:
@@ -155,7 +160,7 @@ async def get_all_memories(limit: int = 20, offset: int = 0) -> dict:
     """分页获取所有永久记忆（从 memory.db）。"""
     from ethan.memory.vector_store import VectorStore
 
-    store = VectorStore(db_path=MEMORY_DB_PATH)
+    store = VectorStore(db_path=_memory_db_path())
     try:
         conn = store._get_conn()
         total = conn.execute("SELECT COUNT(*) FROM vec_items").fetchone()[0]
@@ -182,7 +187,7 @@ async def get_memories_by_date(d: date) -> list[dict]:
     """获取某日沉淀的记忆。"""
     from ethan.memory.vector_store import VectorStore
 
-    store = VectorStore(db_path=MEMORY_DB_PATH)
+    store = VectorStore(db_path=_memory_db_path())
     try:
         conn = store._get_conn()
         date_str = d.isoformat()

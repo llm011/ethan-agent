@@ -368,22 +368,30 @@ async def _update_skills() -> None:
 async def _extract_decision_patterns() -> None:
     """B1: 从近期 session 的 tool_steps 中提取高频成功路径，存入 success_patterns。
 
+    遍历所有用户 profile，每个用户独立处理。
     借鉴 Palantir Action Layer 的决策记录与反馈闭环。
-    只提取成功完成（有 assistant 回复）的工具调用序列，用 lite 模型归纳场景。
     """
-    try:
-        # 每个用户独立处理
-        from ethan.core.context import set_user_id
-        from ethan.core.paths import user_procedures_path, user_sessions_db_path
-        from ethan.memory.consolidator import Consolidator, get_lite_model
-        from ethan.memory.procedures import ProcedureStore
-        from ethan.memory.session import SessionStore
-        set_user_id("")  # 先处理 default profile
+    from ethan.core.users import get_user_store
+    for uid in get_user_store().all_user_ids():
+        try:
+            await _extract_decision_patterns_for_user(uid)
+        except Exception:
+            logger.exception("[Heartbeat] Decision pattern extraction failed for user %s", uid or "default")
 
+
+async def _extract_decision_patterns_for_user(user_id: str) -> None:
+    """单个用户的决策模式抽取。"""
+    from ethan.core.context import ETHAN_USER_ID
+    from ethan.core.paths import user_procedures_path, user_sessions_db_path
+    from ethan.memory.consolidator import Consolidator, get_lite_model
+    from ethan.memory.procedures import ProcedureStore
+    from ethan.memory.session import SessionStore
+
+    token = ETHAN_USER_ID.set(user_id)
+    try:
         store = SessionStore(db_path=user_sessions_db_path())
         await store.init()
         try:
-            # 取近 7 天 top-20 活跃 session
             sessions = await store.list_recent(limit=20)
         finally:
             await store.close()
@@ -391,12 +399,10 @@ async def _extract_decision_patterns() -> None:
         if not sessions:
             return
 
-        # 加载已有 patterns，避免重复
         proc_store = ProcedureStore(path=user_procedures_path())
         existing_scenarios = {p.scenario for p in proc_store.all_success_patterns()}
 
-        # 收集所有 session 的 tool_steps
-        all_tool_sequences: list[tuple[str, list[str]]] = []  # (session_title, tool_sequence)
+        all_tool_sequences: list[tuple[str, list[str]]] = []
         store2 = SessionStore(db_path=user_sessions_db_path())
         await store2.init()
         try:
@@ -421,19 +427,15 @@ async def _extract_decision_patterns() -> None:
         if not all_tool_sequences:
             return
 
-        # 用 lite 模型归纳场景（批量，一次调用）
-        config = None
         try:
             from ethan.core.config import get_config
-            config = get_config()
-            main_model = config.defaults.model
+            main_model = get_config().defaults.model
         except Exception:
             main_model = "gpt-4o"
 
         lite_model = get_lite_model(main_model)
         consolidator = Consolidator(main_model=main_model)
 
-        # 构造 prompt：让 lite 模型把 tool_sequences 归类成场景
         sequences_text = "\n".join(
             f"[Session {i+1}] title={title}\n  tools: {' → '.join(tqs)}"
             for i, (title, tqs) in enumerate(all_tool_sequences[:20])
@@ -457,13 +459,12 @@ async def _extract_decision_patterns() -> None:
             )
             result = (resp.content or "").strip()
         except Exception:
-            logger.debug("[Heartbeat] decision pattern extraction LLM call failed", exc_info=True)
+            logger.warning("[Heartbeat] decision pattern extraction LLM call failed for user %s", user_id or "default", exc_info=True)
             return
 
         if not result:
             return
 
-        # 解析输出，写入 success_patterns
         added = 0
         for line in result.split("\n"):
             line = line.strip()
@@ -478,32 +479,44 @@ async def _extract_decision_patterns() -> None:
                 added += 1
 
         if added:
-            logger.info("[Heartbeat] Extracted %d new success pattern(s)", added)
-    except Exception:
-        logger.exception("[Heartbeat] Decision pattern extraction failed")
+            logger.info("[Heartbeat] Extracted %d new success pattern(s) for user %s", added, user_id or "default")
+    finally:
+        ETHAN_USER_ID.reset(token)
 
 
 async def _mine_recurring_needs() -> None:
     """C1: 从近期 episodes 中识别重复模式，生成建议。
 
+    遍历所有用户 profile，每个用户独立处理。
     借鉴 Palantir FDE 模式：主动挖掘无法言明的真实需求。
-    只挖掘 ≥3 次的重复模式，建议写入 suggestions.json，下次对话时由 Agent 自然提起。
     """
-    try:
-        from ethan.core.paths import user_episodes_path
-        from ethan.memory.episodic import EpisodeStore
+    from ethan.core.users import get_user_store
+    for uid in get_user_store().all_user_ids():
+        try:
+            await _mine_recurring_needs_for_user(uid)
+        except Exception:
+            logger.exception("[Heartbeat] Recurring need mining failed for user %s", uid or "default")
 
+
+async def _mine_recurring_needs_for_user(user_id: str) -> None:
+    """单个用户的重复需求挖掘。"""
+    import json
+
+    from ethan.core.context import ETHAN_USER_ID
+    from ethan.core.paths import user_episodes_path, user_suggestions_path
+    from ethan.memory.episodic import EpisodeStore
+
+    token = ETHAN_USER_ID.set(user_id)
+    try:
         store = EpisodeStore(path=user_episodes_path())
         recent = store.recent(limit=30)
 
         if len(recent) < 3:
             return
 
-        # 用 lite 模型识别重复模式
         from ethan.core.config import get_config
         from ethan.memory.consolidator import Consolidator, get_lite_model
-        config = get_config()
-        main_model = config.defaults.model
+        main_model = get_config().defaults.model
         lite_model = get_lite_model(main_model)
 
         episodes_text = "\n".join(
@@ -530,17 +543,13 @@ async def _mine_recurring_needs() -> None:
             )
             result = (resp.content or "").strip()
         except Exception:
-            logger.debug("[Heartbeat] need mining LLM call failed", exc_info=True)
+            logger.warning("[Heartbeat] need mining LLM call failed for user %s", user_id or "default", exc_info=True)
             return
 
         if not result:
             return
 
-        # 解析并写入 suggestions.json
-        import json
-
-        from ethan.core.config import CONFIG_DIR
-        suggestions_path = CONFIG_DIR / "memory" / "suggestions.json"
+        suggestions_path = user_suggestions_path()
 
         existing_suggestions = []
         if suggestions_path.exists():
@@ -570,7 +579,6 @@ async def _mine_recurring_needs() -> None:
                 suggestion = parts[2].replace("SUGGESTION:", "").strip()
 
             if pattern and count >= 3 and pattern not in rejected:
-                # 检查是否已存在未拒绝的建议
                 already = any(s.get("pattern") == pattern and not s.get("rejected") for s in existing_suggestions)
                 if not already:
                     existing_suggestions.append({
@@ -585,9 +593,9 @@ async def _mine_recurring_needs() -> None:
         if added:
             suggestions_path.parent.mkdir(parents=True, exist_ok=True)
             suggestions_path.write_text(json.dumps(existing_suggestions, ensure_ascii=False, indent=2), encoding="utf-8")
-            logger.info("[Heartbeat] Mined %d new recurring need(s)", added)
-    except Exception:
-        logger.exception("[Heartbeat] Recurring need mining failed")
+            logger.info("[Heartbeat] Mined %d new recurring need(s) for user %s", added, user_id or "default")
+    finally:
+        ETHAN_USER_ID.reset(token)
 
 
 _heartbeat_task: asyncio.Task | None = None

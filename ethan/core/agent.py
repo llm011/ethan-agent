@@ -257,8 +257,8 @@ class Agent:
             import json
             import time
 
-            from ethan.core.config import CONFIG_DIR
-            suggestions_path = CONFIG_DIR / "memory" / "suggestions.json"
+            from ethan.core.paths import user_suggestions_path
+            suggestions_path = user_suggestions_path()
             if not suggestions_path.exists():
                 return None
             data = json.loads(suggestions_path.read_text(encoding="utf-8"))

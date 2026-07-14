@@ -15,7 +15,10 @@ from ethan.core.paths import user_memory_dir
 
 logger = logging.getLogger(__name__)
 
-DAILY_DIR = user_memory_dir() / "daily"
+
+def _daily_dir() -> Path:
+    """每次调用时按当前 user contextvar 求值，避免模块级缓存击穿 per-user 隔离。"""
+    return user_memory_dir() / "daily"
 
 _ANALYSIS_PROMPT = """\
 以下是用户近期跨多个对话的消息摘要（按时间倒序）。请分析是否存在以下模式：
@@ -49,7 +52,7 @@ _ANALYSIS_PROMPT = """\
 
 def _daily_path(d: date | None = None) -> Path:
     d = d or date.today()
-    return DAILY_DIR / f"{d.strftime('%Y%m%d')}.jsonl"
+    return _daily_dir() / f"{d.strftime('%Y%m%d')}.jsonl"
 
 
 def read_today_signals() -> list[dict]:
@@ -176,8 +179,8 @@ async def collect_signals() -> list[dict]:
         return valid
 
     except json.JSONDecodeError:
-        logger.debug("[DailySignals] LLM output not valid JSON")
+        logger.warning("[DailySignals] LLM output not valid JSON")
         return []
     except Exception:
-        logger.debug("[DailySignals] Signal collection failed", exc_info=True)
+        logger.warning("[DailySignals] Signal collection failed", exc_info=True)
         return []

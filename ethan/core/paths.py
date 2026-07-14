@@ -54,6 +54,10 @@ def user_episodes_path() -> Path:
     return user_memory_dir() / "episodes.json"
 
 
+def user_suggestions_path() -> Path:
+    return user_memory_dir() / "suggestions.json"
+
+
 def user_profile_path() -> Path:
     return user_memory_dir() / "user_profile.md"
 

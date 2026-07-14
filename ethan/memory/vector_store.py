@@ -12,14 +12,16 @@ import sqlite_vec
 
 from ethan.memory.embeddings import EMBEDDING_DIM
 
-_DB_PATH = Path.home() / ".ethan" / "memory" / "vectors.db"
-
 
 class VectorStore:
     """Persistent vector store backed by sqlite-vec."""
 
     def __init__(self, db_path: Path | None = None):
-        self._db_path = db_path or _DB_PATH
+        # 每次按当前 user contextvar 求值，避免模块级缓存击穿 per-user 隔离
+        if db_path is None:
+            from ethan.core.paths import user_vectors_db_path
+            db_path = user_vectors_db_path()
+        self._db_path = db_path
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: sqlite3.Connection | None = None
 
@@ -110,7 +112,7 @@ class VectorStore:
         limit: int = 5,
         filter: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        """Return up to *limit* closest items (cosine distance via sqlite-vec).
+        """Return up to *limit* closest items (L2 distance via sqlite-vec).
 
         *filter* is matched against the stored JSON metadata.  Only simple
         equality filters on top-level keys are supported (post-filter step).
