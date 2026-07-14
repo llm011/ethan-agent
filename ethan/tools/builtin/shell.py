@@ -56,6 +56,13 @@ class ShellTool(BaseTool):
     }
 
     async def run(self, command: str, timeout: int = 120) -> str:
+        # 拦截直接访问 .secrets 目录的命令——密钥只能通过 list_secrets / get_secret 访问
+        if ".secrets" in command:
+            return (
+                "Error: 禁止通过 shell 访问 .secrets 目录。"
+                "密钥只能通过 list_secrets / get_secret 工具访问。"
+                "如果密钥不存在，请提示用户用 set_secret 配置。"
+            )
         try:
             # 把 .secrets/*.env 的 KEY=value 注入子进程环境，脚本里可直接用 $KEY，
             # 模型上下文里从不出现明文。注入失败不影响命令执行。

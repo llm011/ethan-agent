@@ -103,7 +103,12 @@ class GetSecretTool(BaseTool):
             return f"Error: {e}"
         path = _secrets_dir() / safe
         if not path.exists() or not path.is_file():
-            return f"Error: 密钥不存在: {safe}（用 list_secrets 查看已有密钥）"
+            return (
+                f"Error: 密钥不存在: {safe}。用 list_secrets 查看已有密钥；"
+                "如果没有，请提示用户配置该密钥（用 set_secret 保存）。"
+                "密钥只能通过 list_secrets / get_secret 访问，"
+                "不要用 shell（rg/find/cat/ls）、file_read、file_list 扫描 .secrets 目录。"
+            )
         return path.read_text(encoding="utf-8", errors="replace").strip()
 
 
@@ -124,5 +129,9 @@ class ListSecretsTool(BaseTool):
         d = _secrets_dir()
         names = sorted(p.relative_to(d).as_posix() for p in d.rglob("*") if p.is_file())
         if not names:
-            return "（暂无密钥。用 set_secret 保存。）"
+            return (
+                "（暂无已保存的密钥。如果用户需要配置某服务的密钥，请用 set_secret 保存。"
+                "密钥只能通过 list_secrets / get_secret 访问，"
+                "不要用 shell（rg/find/cat/ls）、file_read、file_list 扫描 .secrets 目录。）"
+            )
         return "已保存的密钥:\n" + "\n".join(f"- {n}" for n in names)

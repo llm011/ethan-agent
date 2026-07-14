@@ -167,6 +167,12 @@ class FileListTool(BaseTool):
 
     async def run(self, path: str = ".") -> str:
         p = Path(path).expanduser().resolve()
+        if _is_inside_secrets(str(p)):
+            return (
+                "Error: 禁止列出 .secrets 目录。"
+                "密钥只能通过 list_secrets / get_secret 工具访问。"
+                "如果密钥不存在，请提示用户用 set_secret 配置。"
+            )
         if not p.exists():
             return f"Path not found: {p}"
         if not p.is_dir():
