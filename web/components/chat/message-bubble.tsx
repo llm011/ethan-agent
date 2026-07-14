@@ -11,6 +11,7 @@ import { fmtTokens } from "@/lib/utils";
 import { A2uiCard } from "./a2ui-card";
 import { MarkdownContent } from "./markdown";
 import { applyHighlights } from "@/lib/highlight";
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
 import type { Message } from "./types";
 import type { Annotation } from "@/lib/api";
 
@@ -67,6 +68,7 @@ export function MessageBubble({ msg, isStreaming, isLast, onQuote, onCardAction,
   }, [annotations, msg.content, isStreaming, msg.role]);
 
   return (
+    <TooltipProvider delay={0}>
     <div className={`group flex ${msg.role === "user" ? "justify-end" : "justify-start"} gap-2`}>
       {msg.role === "assistant" && (
         <div className="flex-shrink-0 mt-1">
@@ -76,23 +78,31 @@ export function MessageBubble({ msg, isStreaming, isLast, onQuote, onCardAction,
       <div className="relative max-w-[90%] md:max-w-[80%]">
         {/* 悬浮引用按钮 */}
         {onQuote && !isStreaming && (
-          <button
-            onClick={() => onQuote(msg)}
-            className={`absolute -top-2 ${msg.role === "user" ? "-left-7" : "-right-7"} opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 flex items-center justify-center rounded-md bg-muted border border-border text-muted-foreground hover:text-foreground hover:bg-accent`}
-            title="引用此消息"
-          >
-            <QuoteIcon className="h-3 w-3" />
-          </button>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  onClick={() => onQuote(msg)}
+                  className={`absolute -top-2 ${msg.role === "user" ? "-left-7" : "-right-7"} opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 flex items-center justify-center rounded-md bg-muted border border-border text-muted-foreground hover:text-foreground hover:bg-accent`}
+                />
+              }
+            />
+            <TooltipContent side={msg.role === "user" ? "left" : "right"}>引用此消息</TooltipContent>
+          </Tooltip>
         )}
         {/* 悬浮阅读按钮（仅 assistant 且已有稳定 id） */}
         {msg.role === "assistant" && onRead && !isStreaming && msg.id != null && (
-          <button
-            onClick={() => onRead(msg)}
-            className={`absolute -top-2 -right-12 opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 flex items-center justify-center rounded-md bg-muted border border-border text-muted-foreground hover:text-foreground hover:bg-accent`}
-            title="阅读模式（可标注）"
-          >
-            <BookOpenIcon className="h-3 w-3" />
-          </button>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  onClick={() => onRead(msg)}
+                  className="absolute -top-2 -right-14 opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 flex items-center justify-center rounded-md bg-muted border border-border text-muted-foreground hover:text-foreground hover:bg-accent"
+                />
+              }
+            />
+            <TooltipContent side="right">阅读模式（可标注 / 划线 / 批注）</TooltipContent>
+          </Tooltip>
         )}
         <div
           className={`rounded-2xl px-4 py-3 break-words ${
@@ -196,16 +206,21 @@ export function MessageBubble({ msg, isStreaming, isLast, onQuote, onCardAction,
         {/* 气泡操作行：分享按钮（两个角色都有） */}
         {!isStreaming && onShare && (
           <div className={`flex items-center mt-1 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-            <button
-              onClick={() => onShare(msg)}
-              className="inline-flex items-center gap-1 text-[11px] text-muted-foreground/60 hover:text-foreground px-1.5 py-0.5 rounded hover:bg-accent transition-colors"
-              title="分享这条消息"
-            >
-              <ShareIcon className="h-3 w-3" /> 分享
-            </button>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    onClick={() => onShare(msg)}
+                    className="inline-flex items-center gap-1 text-[11px] text-muted-foreground/60 hover:text-foreground px-1.5 py-0.5 rounded hover:bg-accent transition-colors"
+                  />
+                }
+              />
+              <TooltipContent side="bottom">分享这条消息</TooltipContent>
+            </Tooltip>
           </div>
         )}
       </div>
     </div>
+    </TooltipProvider>
   );
 }

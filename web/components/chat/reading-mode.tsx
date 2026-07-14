@@ -13,6 +13,7 @@ import type { Annotation, AnnotationColor, AnnotationType } from "@/lib/api";
 import { createAnnotation, deleteAnnotation } from "@/lib/api";
 import { MarkdownContent } from "./markdown";
 import { applyHighlights, getSelectionOffsets, type HighlightSpan } from "@/lib/highlight";
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
 
 interface ReadingModeProps {
   open: boolean;
@@ -58,7 +59,10 @@ export function ReadingMode({ open, message, annotations, onClose, onChange }: R
   const [noteMode, setNoteMode] = useState(false);
   const [noteText, setNoteText] = useState("");
   const [activeId, setActiveId] = useState<number | null>(null);
+  const [filter, setFilter] = useState<"all" | "bookmark">("all");
   const contentRef = useRef<HTMLDivElement>(null);
+  const bookmarks = local.filter((a) => a.type === "bookmark");
+  const shown = filter === "bookmark" ? bookmarks : local;
 
   // 把标注画进正文（阅读模式用全强度）。
   // 注意：local 的初始值即打开时传入的 annotations；切换不同消息由父组件用
@@ -170,22 +174,34 @@ export function ReadingMode({ open, message, annotations, onClose, onChange }: R
   };
 
   return (
+    <TooltipProvider delay={0}>
     <div className="fixed inset-0 z-[60] flex flex-col bg-background">
       {/* 顶部条 */}
       <div className="flex items-center gap-3 border-b border-border px-4 py-2.5">
-        <button
-          onClick={onClose}
-          className="flex h-8 w-8 items-center justify-center rounded-md hover:bg-muted text-muted-foreground"
-          title="退出阅读模式 (Esc)"
-        >
-          <X className="h-4 w-4" />
-        </button>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                onClick={onClose}
+                className="flex h-8 w-8 items-center justify-center rounded-md hover:bg-muted text-muted-foreground"
+              />
+            }
+          />
+          <TooltipContent side="bottom">退出阅读模式 (Esc)</TooltipContent>
+        </Tooltip>
         <div className="text-sm font-medium">阅读模式</div>
         {message.created_at && (
           <div className="text-xs text-muted-foreground">{formatTime(message.created_at)}</div>
         )}
-        <div className="ml-auto rounded-full bg-muted px-2.5 py-0.5 text-xs text-muted-foreground">
-          {local.length} 处标注
+        <div className="ml-auto flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-0.5 text-xs text-muted-foreground">
+          <span>{local.length} 处标注</span>
+          {bookmarks.length > 0 && (
+            <>
+              <span className="inline-block h-3 w-px bg-muted-foreground/30" />
+              <BookmarkIcon className="h-3 w-3 text-pink-500" />
+              <span>{bookmarks.length}</span>
+            </>
+          )}
         </div>
       </div>
 
@@ -207,8 +223,20 @@ export function ReadingMode({ open, message, annotations, onClose, onChange }: R
 
         {/* 右侧标注面板（md 及以上） */}
         <aside className="hidden w-72 shrink-0 flex-col border-l border-border md:flex">
-          <div className="border-b border-border px-3 py-2 text-xs font-medium text-muted-foreground">
-            标注 ({local.length})
+          <div className="flex items-center justify-between border-b border-border px-3 py-2">
+            <span className="text-xs font-medium text-muted-foreground">标注 ({local.length})</span>
+            {bookmarks.length > 0 && (
+              <div className="flex items-center gap-0.5 text-[11px]">
+                <button
+                  onClick={() => setFilter("all")}
+                  className={`rounded px-1.5 py-0.5 ${filter === "all" ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:bg-muted/60"}`}
+                >全部</button>
+                <button
+                  onClick={() => setFilter("bookmark")}
+                  className={`flex items-center gap-0.5 rounded px-1.5 py-0.5 ${filter === "bookmark" ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:bg-muted/60"}`}
+                ><BookmarkIcon className="h-3 w-3 text-pink-500" />书签</button>
+              </div>
+            )}
           </div>
           <div className="flex-1 space-y-1 overflow-y-auto p-2">
             {local.length === 0 && (
@@ -216,7 +244,10 @@ export function ReadingMode({ open, message, annotations, onClose, onChange }: R
                 在正文中选中文字，即可高亮、划线或批注。
               </p>
             )}
-            {local.map((a) => (
+            {shown.length === 0 && local.length > 0 && filter === "bookmark" && (
+              <p className="px-2 py-4 text-xs text-muted-foreground">还没有书签，选中文字后点工具条上的 🔖 即可添加。</p>
+            )}
+            {shown.map((a) => (
               <button
                 key={a.id}
                 onClick={() => jumpTo(a.id)}
@@ -225,10 +256,14 @@ export function ReadingMode({ open, message, annotations, onClose, onChange }: R
                 }`}
               >
                 <div className="flex items-center gap-1.5">
-                  <span
-                    className="h-2.5 w-2.5 rounded-full"
-                    style={{ background: colorBg(a.color) }}
-                  />
+                  {a.type === "bookmark" ? (
+                    <BookmarkIcon className="h-3 w-3 shrink-0 text-pink-500" />
+                  ) : (
+                    <span
+                      className="h-2.5 w-2.5 rounded-full shrink-0"
+                      style={{ background: colorBg(a.color) }}
+                    />
+                  )}
                   <span className="text-muted-foreground">{typeLabel(a.type)}</span>
                 </div>
                 <p className="mt-1 line-clamp-2 text-foreground/80">{a.quote}</p>
@@ -264,36 +299,53 @@ export function ReadingMode({ open, message, annotations, onClose, onChange }: R
           {!noteMode ? (
             <>
               {HL_COLORS.map((c) => (
-                <button
-                  key={c.key as string}
-                  title={c.label}
-                  onClick={() => doCreate("highlight", c.key)}
-                  className="h-6 w-6 rounded"
-                  style={{ background: c.bg }}
-                />
+                <Tooltip key={c.key as string}>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        onClick={() => doCreate("highlight", c.key)}
+                        className="h-6 w-6 rounded"
+                        style={{ background: c.bg }}
+                      />
+                    }
+                  />
+                  <TooltipContent side="top">{c.label}</TooltipContent>
+                </Tooltip>
               ))}
               <span className="mx-0.5 h-5 w-px bg-border" />
-              <button
-                title="划线"
-                onClick={() => doCreate("underline")}
-                className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-muted"
-              >
-                <UnderlineIcon className="h-4 w-4" />
-              </button>
-              <button
-                title="书签"
-                onClick={() => doCreate("bookmark")}
-                className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-muted"
-              >
-                <BookmarkIcon className="h-4 w-4" />
-              </button>
-              <button
-                title="批注"
-                onClick={() => setNoteMode(true)}
-                className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-muted"
-              >
-                <MessageSquareText className="h-4 w-4" />
-              </button>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <button
+                      onClick={() => doCreate("underline")}
+                      className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-muted"
+                    />
+                  }
+                />
+                <TooltipContent side="top">划线</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <button
+                      onClick={() => doCreate("bookmark")}
+                      className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-muted"
+                    />
+                  }
+                />
+                <TooltipContent side="top">书签（右侧面板「书签」里可查找）</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <button
+                      onClick={() => setNoteMode(true)}
+                      className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-muted"
+                    />
+                  }
+                />
+                <TooltipContent side="top">批注</TooltipContent>
+              </Tooltip>
             </>
           ) : (
             <div className="flex items-center gap-1">
@@ -327,5 +379,6 @@ export function ReadingMode({ open, message, annotations, onClose, onChange }: R
         </div>
       )}
     </div>
+    </TooltipProvider>
   );
 }

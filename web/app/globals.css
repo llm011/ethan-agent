@@ -319,10 +319,11 @@
 }
 .anno-mark:hover { filter: brightness(0.95); }
 
-.anno-yellow { background: oklch(0.95 0.13 105 / 0.55); }
-.anno-blue   { background: oklch(0.92 0.10 230 / 0.45); }
-.anno-green  { background: oklch(0.94 0.12 150 / 0.45); }
-.anno-pink   { background: oklch(0.93 0.11 350 / 0.45); }
+/* 高亮：底色更实、文字加粗「突显」出来（而非变灰） */
+.anno-yellow { background: oklch(0.92 0.16 105 / 0.85); font-weight: 600; }
+.anno-blue   { background: oklch(0.90 0.13 230 / 0.75); font-weight: 600; }
+.anno-green  { background: oklch(0.92 0.14 150 / 0.70); font-weight: 600; }
+.anno-pink   { background: oklch(0.92 0.14 350 / 0.70); font-weight: 600; }
 
 .anno-underline {
   background: transparent !important;
@@ -332,24 +333,30 @@
   text-decoration-thickness: 2px;
 }
 .anno-bookmark {
-  background: transparent !important;
-  border-left: 3px solid oklch(0.7 0.15 350 / 0.85);
+  background: oklch(0.7 0.15 350 / 0.14) !important;
+  border-left: 3px solid oklch(0.7 0.15 350 / 0.9);
   padding-left: 0.15em;
   margin-left: -0.2em;
+  border-radius: 0;
 }
 .anno-comment {
   border-bottom: 2px dotted oklch(0.7 0.12 230 / 0.9);
 }
 
-/* 气泡内联预览：降低存在感，不抢正文 */
-.anno-faint .anno-mark { opacity: 0.5; }
-.anno-faint .anno-mark:hover { opacity: 0.85; }
+/* 气泡内联预览：保持文字清晰，只弱化背景，绝不把高亮文字变灰 */
+.anno-faint .anno-mark { opacity: 1; }
+.anno-faint .anno-yellow { background: oklch(0.95 0.13 105 / 0.22); font-weight: 500; }
+.anno-faint .anno-blue   { background: oklch(0.92 0.10 230 / 0.18); font-weight: 500; }
+.anno-faint .anno-green  { background: oklch(0.94 0.12 150 / 0.18); font-weight: 500; }
+.anno-faint .anno-pink   { background: oklch(0.93 0.11 350 / 0.18); font-weight: 500; }
+.anno-faint .anno-mark:hover { filter: brightness(0.95); }
 
 /* dark 模式下高亮更亮一点，保证可读 */
-.dark .anno-yellow { background: oklch(0.85 0.14 105 / 0.5); }
-.dark .anno-blue   { background: oklch(0.6 0.14 230 / 0.5); }
-.dark .anno-green  { background: oklch(0.7 0.14 150 / 0.5); }
-.dark .anno-pink   { background: oklch(0.7 0.15 350 / 0.5); }
+.dark .anno-yellow { background: oklch(0.85 0.16 105 / 0.80); }
+.dark .anno-blue   { background: oklch(0.6 0.16 230 / 0.70); }
+.dark .anno-green  { background: oklch(0.7 0.16 150 / 0.70); }
+.dark .anno-pink   { background: oklch(0.7 0.17 350 / 0.70); }
+.dark .anno-bookmark { background: oklch(0.7 0.15 350 / 0.22) !important; }
 
 /* ── 阅读模式排版（比气泡更舒展，利于长文阅读）── */
 .reading-prose {
@@ -459,7 +466,9 @@
   border: 1px solid #eaecef;
   border-radius: 10px;
   padding: 14px 16px;
-  overflow-x: auto;
+  overflow-x: hidden;
+  white-space: pre-wrap;
+  word-break: break-all;
   margin: 0.8em 0;
 }
 .share-prose pre code { background: none; padding: 0; font-size: 13px; color: #1f2328; }
