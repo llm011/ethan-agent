@@ -45,7 +45,7 @@ def _auto_title(messages: list[Message]) -> str:
 
 
 # 首条问题少于该字数视为「太短」，推迟到第 2 轮再生成智能标题
-SHORT_QUESTION_CHARS = 10
+SHORT_QUESTION_CHARS = 7
 
 
 async def _generate_smart_title(messages: list[Message], retries: int = 3) -> str | None:
