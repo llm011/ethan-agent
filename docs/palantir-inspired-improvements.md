@@ -31,7 +31,7 @@
 - **状态**：已完成
 - **做法**：
   1. 心跳任务 `_extract_decision_patterns()` 扫描近 20 个 session 的 tool_steps，用 lite 模型提取 `(场景 → 工具序列 → 结果)` 三元组
-  2. 去重后存入 procedures.json 的 `success_patterns` 字段（相同 scenario 合并、count 累加）
+  2. 去重后存入 playbook.json 的 `success_patterns` 字段（相同 scenario 合并、count 累加）
   3. `build_context()` 注入时，除了"纠正准则"还注入"Success patterns"作为正反馈
 - **借鉴 Palantir**：Action Layer 的决策记录与反馈闭环
 - **Ethan 改造前**：procedures.py 只记"不要做什么"（纠正），没有记"这么做效果好"（正反馈）

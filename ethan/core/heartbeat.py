@@ -353,6 +353,7 @@ async def _tick() -> None:
     await _update_skills()
     await _extract_decision_patterns()
     await _mine_recurring_needs()
+    await _cleanup_memory_db()
 
 
 async def _update_skills() -> None:
@@ -600,6 +601,26 @@ async def _mine_recurring_needs_for_user(user_id: str) -> None:
 
 _heartbeat_task: asyncio.Task | None = None
 _midnight_task: asyncio.Task | None = None
+
+
+async def _cleanup_memory_db() -> None:
+    """遍历所有用户，清理 memory.db 中 3 个月未访问的条目（LRU 过期）。"""
+    try:
+        from ethan.core.context import ETHAN_USER_ID, get_user_store
+        from ethan.memory.vector_store import VectorStore
+
+        for uid in get_user_store().all_user_ids():
+            token = ETHAN_USER_ID.set(uid)
+            try:
+                vs = VectorStore()
+                deleted = vs.cleanup_expired()
+                if deleted:
+                    logger.info("[Heartbeat] memory.db cleanup: user=%s deleted=%d", uid, deleted)
+                vs.close()
+            finally:
+                ETHAN_USER_ID.reset(token)
+    except Exception:
+        logger.warning("[Heartbeat] memory.db cleanup failed", exc_info=True)
 
 
 async def _loop() -> None:

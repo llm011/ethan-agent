@@ -338,7 +338,7 @@ Agent 通过 `profile_update` 工具主动更新，支持三种模式：
 ## 过程记忆（ProcedureStore）
 
 文件：`ethan/memory/procedures.py`
-数据文件：per-user `memory/procedures.json`
+数据文件：per-user `memory/playbook.json`
 
 ### 作用
 
@@ -399,7 +399,7 @@ await memory_write.run(
 
 文件：`ethan/tools/builtin/procedure_write.py`
 
-将一条行为规则写入 `ProcedureStore`（`procedures.json`），通过 `<behavioral_guidelines>` 注入 system prompt，每轮对话都生效。
+将一条行为规则写入 `ProcedureStore`（`playbook.json`），通过 `<behavioral_guidelines>` 注入 system prompt，每轮对话都生效。
 
 ```python
 # 触发场景：信号检测器命中 correction，或 LLM 主动判断
@@ -436,7 +436,7 @@ await procedure_write.run(
 2. 用 `build_context_with_recall(query=当前消息)` 召回相关 facts（按 relevance + confidence 排序）
 3. 取 top-15 注入 `<memory_context>`（fast 路径取 top-5）
 4. `user_profile.md` 全量注入 `<user_profile>`（仅 full 路径）
-5. `procedures.json` 注入 `<behavioral_guidelines>`（含纠正准则 + 成功路径）
+5. `playbook.json` 注入 `<behavioral_guidelines>`（含纠正准则 + 成功路径）
 6. 信号命中时注入 `<memory_signal>` hint + 激活 memory_write 工具
 7. 有未拒绝的 FDE 建议时，首轮注入 `<proactive_suggestion>`
 
@@ -485,7 +485,7 @@ Agent.stream_chat(context) → LLM
     │
     │  LLM 调用工具（信号命中或主动判断）：
     │   ├─ memory_write    → 立即写入 facts.json（带 tags）
-    │   ├─ procedure_write → 立即写入 procedures.json
+    │   ├─ procedure_write → 立即写入 playbook.json
     │   └─ profile_update  → 立即写入 user_profile.md
     ▼
 每轮对话结束 → _maybe_consolidate()（所有渠道触发）
@@ -551,7 +551,10 @@ CLI 退出 → SessionStore.cleanup_empty()
     ├─ 读取当日 JSONL 信号
     ├─ LLM 整理去重（合并相似、排除噪音、限 ≤10 条）
     ├─ embedding 去重：在 memory.db 中查 L2 < 1.1 的跳过
-    └─ 通过去重的条目永久写入 memory.db
+    ├─ 通过去重的条目写入 memory.db
+    └─ 按 type 反写到 facts.json / playbook.json（被召回时自然生效）
+    │
+LRU 过期：心跳任务清理 90 天未被召回的 memory.db 条目
 ```
 
 ### 信号采集 (daily_signals.py)
@@ -585,19 +588,31 @@ CLI 退出 → SessionStore.cleanup_empty()
    - 在 `memory.db` (sqlite-vec) 中做 ANN 查询
    - sqlite-vec 返回 L2 距离；L2 < 1.1 视为重复，跳过
    - 实测：同义不同措辞的句子 L2 通常在 0.8~1.08，完全无关的 > 1.3
-4. **写入 memory.db**：通过去重的条目永久存储
+4. **写入 memory.db**：通过去重的条目写入，metadata 标记 `reflected: false`
+5. **反写到 JSON 文件**：按 type 分流，让洞察在对话召回时自然生效
+   - `repetition` / `error` → `facts.json`（confidence=0.75, source=`insight_<date>`）
+   - `success_path` → `playbook.json` 的 `success_patterns`
+   - 反写成功后更新 memory.db metadata 为 `reflected: true`，避免重复反写
 
 **memory.db 结构**（基于 sqlite-vec）：
 
 ```sql
 -- vec_items 表
-id        TEXT PRIMARY KEY    -- "insight_20260714_a1b2c3d4"
-text      TEXT               -- 精炼后的记忆描述
-embedding FLOAT[384]         -- 384 维向量
-metadata  TEXT (JSON)        -- {"type": "repetition", "date": "2026-07-14", "created_at": ...}
+id            TEXT PRIMARY KEY    -- "insight_20260714_a1b2c3d4"
+text          TEXT               -- 精炼后的记忆描述
+embedding     FLOAT[384]         -- 384 维向量
+metadata      TEXT (JSON)        -- {"type": "repetition", "date": "2026-07-14", "reflected": true, ...}
+last_accessed REAL               -- 最后被 search 命中的时间（LRU 依据）
 ```
 
 **去重阈值**：`L2_DEDUP_THRESHOLD = 1.1`（L2 距离，对归一化向量）。实测该值能准确拦截同义重复，同时放行真正的新洞察。
+
+**LRU 过期**：心跳任务每次 tick 调用 `VectorStore.cleanup_expired()`，删除 90 天未被 search 命中的条目（`EXPIRE_SECONDS = 90 * 86400`）。被召回时 `last_accessed` 自动刷新，热门洞察永不过期。
+
+**反写去重**：三层保障防止重复反写：
+1. memory.db 内部 L2 < 1.1 去重（写入时）——不会有两条语义相同的 insight
+2. memory.db metadata `reflected` 标记——同一条 insight 只反写一次
+3. 目标文件的 `add` 方法兜底（FactStore `_find_similar` + ProcedureStore 完全匹配）
 
 ### API 端点
 
@@ -670,7 +685,7 @@ async def _midnight_loop():
 |------|------|------|
 | Session DB | `~/.ethan/sessions.db` | 所有对话历史（SQLite，per-user） |
 | Cold Facts | `~/.ethan/memory/facts.json` | 结构化长期 facts（含 tags） |
-| Procedures | `~/.ethan/memory/procedures.json` | 行为准则 + 成功路径 |
+| Procedures | `~/.ethan/memory/playbook.json` | 行为准则 + 成功路径 |
 | User Profile | `~/.ethan/memory/user_profile.md` | 用户画像（叙述性） |
 | Episodes | `~/.ethan/memory/episodes.json` | 历次 session 情节摘要 |
 | Suggestions | `~/.ethan/memory/suggestions.json` | FDE 主动建议（per-user，心跳写入） |

@@ -12,7 +12,7 @@ from pathlib import Path
 
 from ethan.core.config import CONFIG_DIR
 
-PROCEDURES_FILE = CONFIG_DIR / "memory" / "procedures.json"
+PROCEDURES_FILE = CONFIG_DIR / "memory" / "playbook.json"
 
 
 @dataclass
@@ -40,9 +40,15 @@ class ProcedureStore:
         self._load()
 
     def _load(self) -> None:
-        if self._path.exists():
+        path = self._path
+        if not path.exists():
+            # 向后兼容：playbook.json 不存在时回退读旧的 procedures.json
+            legacy = path.parent / "procedures.json"
+            if legacy.exists() and legacy != path:
+                path = legacy
+        if path.exists():
             try:
-                data = json.loads(self._path.read_text(encoding="utf-8"))
+                data = json.loads(path.read_text(encoding="utf-8"))
                 # 兼容旧格式：纯 list[dict] → procedures；新格式：{"procedures": [...], "success_patterns": [...]}
                 if isinstance(data, list):
                     self._procedures = [Procedure(**p) for p in data]

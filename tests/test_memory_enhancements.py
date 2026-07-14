@@ -241,7 +241,7 @@ class TestBuildContextWithRecall:
 class TestSuccessPatterns:
     def test_add_new_pattern(self, tmp_path):
         from ethan.memory.procedures import ProcedureStore
-        store = ProcedureStore(path=tmp_path / "procedures.json")
+        store = ProcedureStore(path=tmp_path / "playbook.json")
         store.add_success_pattern("查京东订单", ["shell:jd_query", "file_write:save"])
         patterns = store.all_success_patterns()
         assert len(patterns) == 1
@@ -252,7 +252,7 @@ class TestSuccessPatterns:
     def test_merge_same_scenario(self, tmp_path):
         """相同 scenario 的 pattern 应合并，count 累加。"""
         from ethan.memory.procedures import ProcedureStore
-        store = ProcedureStore(path=tmp_path / "procedures.json")
+        store = ProcedureStore(path=tmp_path / "playbook.json")
         store.add_success_pattern("查京东订单", ["shell:jd_query"])
         store.add_success_pattern("查京东订单", ["file_write:save"])
         patterns = store.all_success_patterns()
@@ -264,14 +264,14 @@ class TestSuccessPatterns:
 
     def test_different_scenarios_separate(self, tmp_path):
         from ethan.memory.procedures import ProcedureStore
-        store = ProcedureStore(path=tmp_path / "procedures.json")
+        store = ProcedureStore(path=tmp_path / "playbook.json")
         store.add_success_pattern("查京东订单", ["shell:jd_query"])
         store.add_success_pattern("查淘宝订单", ["shell:tb_query"])
         assert len(store.all_success_patterns()) == 2
 
     def test_build_context_includes_success_patterns(self, tmp_path):
         from ethan.memory.procedures import ProcedureStore
-        store = ProcedureStore(path=tmp_path / "procedures.json")
+        store = ProcedureStore(path=tmp_path / "playbook.json")
         store.add("不要用浏览器模拟登录")
         store.add_success_pattern("查京东订单", ["shell:jd_query", "file_write:save"])
         ctx = store.build_context()
@@ -283,7 +283,7 @@ class TestSuccessPatterns:
 
     def test_build_context_empty(self, tmp_path):
         from ethan.memory.procedures import ProcedureStore
-        store = ProcedureStore(path=tmp_path / "procedures.json")
+        store = ProcedureStore(path=tmp_path / "playbook.json")
         assert store.build_context() == ""
 
 
@@ -299,7 +299,7 @@ class TestProcedureStoreCompat:
             {"rule": "不要用浏览器模拟登录", "context": "", "created_at": 0, "hit_count": 1},
             {"rule": "文件路径用绝对路径", "context": "", "created_at": 0, "hit_count": 2},
         ]
-        p = tmp_path / "procedures.json"
+        p = tmp_path / "playbook.json"
         p.write_text(json.dumps(old_data), encoding="utf-8")
 
         store = ProcedureStore(path=p)
@@ -311,7 +311,7 @@ class TestProcedureStoreCompat:
     def test_new_format_roundtrip(self, tmp_path):
         """新格式（dict 含 procedures + success_patterns）应完整往返。"""
         from ethan.memory.procedures import ProcedureStore
-        p = tmp_path / "procedures.json"
+        p = tmp_path / "playbook.json"
         store = ProcedureStore(path=p)
         store.add("测试准则")
         store.add_success_pattern("场景A", ["tool1"])
@@ -328,7 +328,7 @@ class TestProcedureStoreCompat:
         """旧格式文件加载后，添加 success_pattern 应正常保存为新格式。"""
         from ethan.memory.procedures import ProcedureStore
         old_data = [{"rule": "旧准则", "context": "", "created_at": 0, "hit_count": 1}]
-        p = tmp_path / "procedures.json"
+        p = tmp_path / "playbook.json"
         p.write_text(json.dumps(old_data), encoding="utf-8")
 
         store = ProcedureStore(path=p)

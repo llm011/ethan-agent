@@ -13,7 +13,7 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 **Memory system (five layers)**
 - Hot/warm/cold three-tier sliding window for long-conversation context; older content auto-compressed by a cheap model
 - Structured Facts: confidence-scored entries with conflict detection and deduplication (`~/.ethan/memory/facts.json`)
-- Behavioral Procedures: learned from user corrections, loaded every conversation (`procedures.json`)
+- Behavioral Procedures: learned from user corrections, loaded every conversation (`playbook.json`)
 - Session Episodes: auto-summarized on exit, supports keyword search (`episodes.json`)
 - User Profile: narrative document storing personal phrases, goals, and agent agreements (`user_profile.md`); sections include 基础特征 (basic traits) and 心理与情绪 (emotional/psychological traits)
 - **Proactive memory write**: Agent calls tools mid-conversation to instantly persist anything worth remembering — no waiting for batch processing
@@ -357,7 +357,7 @@ Ethan uses a five-layer memory architecture:
 | Hot | Last N turns (full messages) | In-memory |
 | Warm | Rolling summary of older turns | In-memory |
 | Cold (Facts) | Key facts extracted across sessions | `~/.ethan/memory/facts.json` |
-| Procedures | Behavioral rules learned from corrections | `~/.ethan/memory/procedures.json` |
+| Procedures | Behavioral rules learned from corrections | `~/.ethan/memory/playbook.json` |
 | User Profile | Narrative personal context (goals, phrases, agreements) | `~/.ethan/memory/user_profile.md` |
 
 Compression is **batched** (not per-turn) and uses an automatically inferred cheap model (e.g. Haiku for Claude users, Flash Lite for Gemini users).
@@ -518,7 +518,7 @@ Environment variables in `.env` override config values (useful for secrets).
 │   └── heartbeat.md     # Heartbeat tasks (natural language)
 ├── memory/
 │   ├── facts.json       # Structured facts
-│   ├── procedures.json  # Behavioral rules
+│   ├── playbook.json  # Behavioral rules
 │   ├── episodes.json    # Session episode archive
 │   └── user_profile.md  # User profile (narrative)
 ├── skills/              # User-defined skills

@@ -47,7 +47,7 @@ def user_facts_path() -> Path:
 
 
 def user_procedures_path() -> Path:
-    return user_memory_dir() / "procedures.json"
+    return user_memory_dir() / "playbook.json"
 
 
 def user_episodes_path() -> Path:
@@ -217,7 +217,13 @@ def _merge_admin_to_default(admin_dir: Path) -> None:
     _merge_sessions_db(admin_dir, top)
 
     # 2. JSON 记忆文件
-    _merge_json_file(admin_memory, top_memory, "procedures.json")
+    # 向后兼容：procedures.json → playbook.json（原地复制，保留原文件不删）
+    for d in (admin_memory, top_memory):
+        legacy = d / "procedures.json"
+        new = d / "playbook.json"
+        if legacy.exists() and legacy.stat().st_size > 0 and not new.exists():
+            shutil.copy2(str(legacy), str(new))
+    _merge_json_file(admin_memory, top_memory, "playbook.json")
     _merge_json_file(admin_memory, top_memory, "episodes.json")
     _merge_json_file(admin_memory, top_memory, "lark_sessions.json")
     _merge_facts_json(admin_memory, top_memory)  # facts 按条目 merge

@@ -11,7 +11,7 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 **记忆体系（五层）**
 - 热区/温区/冷区三层滑动窗口维持长对话上下文，廉价模型自动压缩较早内容
 - 结构化 Facts：带置信度的条目，有矛盾检测和自动去重（`~/.ethan/memory/facts.json`）
-- 行为准则 Procedures：从用户纠正中自动学习，每次对话加载（`procedures.json`）
+- 行为准则 Procedures：从用户纠正中自动学习，每次对话加载（`playbook.json`）
 - 会话 Episodes：对话结束后自动生成摘要存档，支持关键词检索（`episodes.json`）
 - 用户画像 Profile：叙事型文档，按章节存储个人语言、目标、约定等（`user_profile.md`）；含「基础特征」「心理与情绪」等章节
 - **主动写记忆**：Agent 在对话中识别到可记忆信息时，主动调用工具即时写入，无需批量处理
@@ -347,7 +347,7 @@ ethan/
 | 热区 | 最近 N 轮完整消息 | 内存 |
 | 温区 | 较早对话的滚动摘要 | 内存 |
 | 冷区（Facts） | 跨 session 提炼的关键事实 | `~/.ethan/memory/facts.json` |
-| 行为准则 | 从用户纠正中学习的规则 | `~/.ethan/memory/procedures.json` |
+| 行为准则 | 从用户纠正中学习的规则 | `~/.ethan/memory/playbook.json` |
 | 用户画像 | 叙事型个人信息（目标、短语、约定） | `~/.ethan/memory/user_profile.md` |
 
 压缩是**批量触发**的（而非逐轮），使用自动推断的廉价模型（Claude 用户用 Haiku，Gemini 用户用 Flash Lite）。
@@ -509,7 +509,7 @@ defaults:
 │   └── heartbeat.md     # 心跳任务（自然语言定义）
 ├── memory/
 │   ├── facts.json       # 结构化 Facts
-│   ├── procedures.json  # 行为准则
+│   ├── playbook.json  # 行为准则
 │   ├── episodes.json    # 会话摘要存档
 │   └── user_profile.md  # 用户画像（叙事型）
 ├── skills/              # 用户自定义 Skill
@@ -533,7 +533,7 @@ defaults:
 
 # 2. 主动写行为准则
 发送："以后你回复我，请用简短的语气，不要废话"
-验证：cat ~/.ethan/memory/procedures.json | python3 -m json.tool
+验证：cat ~/.ethan/memory/playbook.json | python3 -m json.tool
 
 # 3. 用户画像
 发送："你可以用 Roots run deep 这个短语来激励我坚持"
@@ -541,7 +541,7 @@ defaults:
 
 # 4. 纠正学习
 发送一段回复 → "不对，应该用 XXX 方式"
-验证：cat ~/.ethan/memory/procedures.json
+验证：cat ~/.ethan/memory/playbook.json
 
 # 5. 跨会话记忆（Facts 是否被加载）
 重启 Agent，询问："你还记得我叫什么名字吗？"
