@@ -88,16 +88,47 @@ class AnnotationStore:
             for r in rows
         ]
 
+    async def list_for_messages(
+        self, message_ids: list[int], user_id: str
+    ) -> dict[str, list[dict]]:
+        """一次取多个 message 的标注，按 message_id 分组返回（避免 N+1 查询）。"""
+        if not message_ids:
+            return {}
+        await self.init()
+        placeholders = ",".join("?" * len(message_ids))
+        sql = (
+            "SELECT id, message_id, type, color, start, end, quote, note, created_at "
+            f"FROM annotations WHERE message_id IN ({placeholders}) AND user_id=? "
+            "ORDER BY message_id, start ASC"
+        )
+        async with self._db.execute(sql, [*message_ids, user_id]) as cur:
+            rows = await cur.fetchall()
+        result: dict[str, list[dict]] = {str(mid): [] for mid in message_ids}
+        for r in rows:
+            result.setdefault(str(r[1]), []).append(
+                {
+                    "id": r[0],
+                    "type": r[2],
+                    "color": r[3],
+                    "start": r[4],
+                    "end": r[5],
+                    "quote": r[6],
+                    "note": r[7],
+                    "created_at": r[8],
+                }
+            )
+        return result
+
     async def create(
         self,
         message_id: int,
         user_id: str,
         type_: str,
-        color,
+        color: str | None,
         start: int,
         end: int,
-        quote,
-        note,
+        quote: str | None,
+        note: str | None,
     ) -> int:
         await self.init()
         now = time.time()
@@ -131,29 +162,29 @@ class AnnotationCreate(BaseModel):
     note: str | None = None
 
 
-@router.get("/annotations/{message_id}")
-async def get_annotations(message_id: int, user_id: str = Depends(verify_token)):
-    items = await _store.list_for_message(message_id, user_id)
-    return {"annotations": items}
-
-
 @router.get("/annotations/batch")
 async def batch_get_annotations(ids: str = "", user_id: str = Depends(verify_token)):
-    """一次取多个 message 的标注，避免逐条请求。
+    """一次取多个 message 的标注，避免逐条请求（IN 查询，无 N+1）。
 
     ids 为逗号分隔的 message_id 列表；返回 { "<message_id>": [ {...}, ... ] }。
+    必须声明在 /annotations/{message_id} 之前，否则会被路径参数路由截胡。
     """
-    result: dict[str, list[dict]] = {}
+    mids: list[int] = []
     for raw in ids.split(","):
         raw = raw.strip()
         if not raw:
             continue
         try:
-            mid = int(raw)
+            mids.append(int(raw))
         except ValueError:
             continue
-        result[str(mid)] = await _store.list_for_message(mid, user_id)
-    return result
+    return await _store.list_for_messages(mids, user_id)
+
+
+@router.get("/annotations/{message_id}")
+async def get_annotations(message_id: int, user_id: str = Depends(verify_token)):
+    items = await _store.list_for_message(message_id, user_id)
+    return {"annotations": items}
 
 
 @router.post("/annotations")
