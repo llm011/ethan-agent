@@ -340,30 +340,31 @@ class SessionStore:
         )
 
         async with self._db.execute(
-            "SELECT role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui, images, matched_skills, ttfb_ms, total_ms FROM messages WHERE session_id = ? ORDER BY id",
+            "SELECT id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui, images, matched_skills, ttfb_ms, total_ms FROM messages WHERE session_id = ? ORDER BY id",
             (session_id,),
         ) as cursor:
             async for r in cursor:
                 tool_calls = []
-                if r[2]:
-                    for tc in json.loads(r[2]):
+                if r[3]:
+                    for tc in json.loads(r[3]):
                         tool_calls.append(ToolCall(id=tc["id"], name=tc["name"], arguments=tc["arguments"]))
-                usage = json.loads(r[5]) if r[5] else None
-                tool_steps = json.loads(r[6]) if r[6] else []
-                quote = json.loads(r[8]) if len(r) > 8 and r[8] else None
-                a2ui = json.loads(r[9]) if len(r) > 9 and r[9] else None
-                images = json.loads(r[10]) if len(r) > 10 and r[10] else []
-                matched_skills = json.loads(r[11]) if len(r) > 11 and r[11] else None
-                ttfb_ms = r[12] if len(r) > 12 and r[12] is not None else None
-                total_ms = r[13] if len(r) > 13 and r[13] is not None else None
+                usage = json.loads(r[6]) if r[6] else None
+                tool_steps = json.loads(r[7]) if r[7] else []
+                quote = json.loads(r[9]) if len(r) > 9 and r[9] else None
+                a2ui = json.loads(r[10]) if len(r) > 10 and r[10] else None
+                images = json.loads(r[11]) if len(r) > 11 and r[11] else []
+                matched_skills = json.loads(r[12]) if len(r) > 12 and r[12] else None
+                ttfb_ms = r[13] if len(r) > 13 and r[13] is not None else None
+                total_ms = r[14] if len(r) > 14 and r[14] is not None else None
                 session.messages.append(Message(
-                    role=r[0], content=r[1],
+                    role=r[1], content=r[2],
+                    id=r[0],
                     tool_calls=tool_calls,
-                    tool_call_id=r[3],
-                    created_at=r[4],
+                    tool_call_id=r[4],
+                    created_at=r[5],
                     usage=usage,
                     tool_steps=tool_steps,
-                    thought=r[7],
+                    thought=r[8],
                     quote=quote,
                     a2ui=a2ui,
                     images=images,

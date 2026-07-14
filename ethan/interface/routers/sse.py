@@ -16,6 +16,12 @@ async def _sse_from_run(run) -> AsyncGenerator[str, None]:
     q, backlog = run.subscribe()
     try:
         for evt in backlog:
+            # 跳过已解决的 consent 事件：刷新重连时不要再弹已回应过的授权弹窗
+            if evt.get("consent_request") and run.consent is not None:
+                req_id = evt.get("request_id", "")
+                # 仍在 pending 中说明还没回应，需要重新展示
+                if req_id and req_id not in getattr(run.consent, "_pending", {}):
+                    continue
             yield f"data: {json.dumps(evt, ensure_ascii=False)}\n\n"
         # 缓冲已含结束事件且 producer 已完成：无需再等队列
         if run.done:
