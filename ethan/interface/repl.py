@@ -17,7 +17,6 @@ from rich.text import Text
 from ethan.core.agent import Agent
 from ethan.core.config import get_config
 from ethan.memory.consolidator import Consolidator
-from ethan.memory.episodic import EpisodeStore
 from ethan.memory.facts import FactStore
 from ethan.memory.session import Session, SessionStore, decide_title
 from ethan.memory.working import MemoryConfig, WorkingMemory
@@ -192,9 +191,8 @@ async def run_repl(agent: Agent, resume_id: str | None = None, auto_consent: boo
         console.print()
 
     # 初始化分层记忆（per-user）
-    from ethan.core.paths import user_episodes_path, user_facts_path
+    from ethan.core.paths import user_facts_path
     fact_store = FactStore(path=user_facts_path())
-    episode_store = EpisodeStore(path=user_episodes_path())
     memory = WorkingMemory(config=MemoryConfig(hot_size=10))
     memory.cold_facts = fact_store.build_context()
     consolidator = Consolidator(main_model=model_id)
@@ -483,31 +481,15 @@ async def run_repl(agent: Agent, resume_id: str | None = None, auto_consent: boo
 
             if memory.needs_compression() or memory.needs_cold_extraction():
                 asyncio.create_task(_background_consolidate(memory, consolidator, fact_store, session.id))
+
+            # 与 Web/Lark/WeChat 一致：每轮结束后后台写 episode + 记忆抽取
+            from ethan.interface.routers.tasks import _maybe_consolidate
+            asyncio.create_task(_maybe_consolidate(session.id, agent._provider.model, getattr(agent, "_user_id", "") or ""))
         else:
             history.pop()
 
-    # Save episode summary on exit (if enough turns)
+    # Episode 写入已挪到 _maybe_consolidate（所有渠道统一），CLI 退出时不再单独写。
     user_turns = sum(1 for m in history if m.role == "user")
-    if user_turns >= 2 and session.id:
-        try:
-            # C1: 修复 episodic summary — 原来按空格分词对中文无效
-            # 用 extract_keywords 提取中文关键词，summary 保持拼接但用关键词增强检索
-            from ethan.memory.signals import extract_keywords
-            summary = " ".join(
-                m.content[:50] for m in history if m.role == "user" and m.content
-            )[:200]
-            # 用 signals.extract_keywords 替代无效的 split()，支持中文
-            all_text = " ".join(m.content for m in history if m.role == "user" and m.content)
-            keywords = extract_keywords(all_text, max_keywords=10)
-            episode_store.add(
-                session_id=session.id,
-                summary=summary,
-                model=model_id,
-                turn_count=user_turns,
-                keywords=keywords,
-            )
-        except Exception:
-            pass
 
     # 后台尝试提炼 Skill（fire-and-forget）
     if user_turns >= 3:
