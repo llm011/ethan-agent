@@ -70,12 +70,11 @@ def detect_memory_signal(text: str) -> tuple[str, str] | None:
     return None
 
 
-def extract_keywords(text: str, max_keywords: int = 8) -> list[str]:
-    """从文本中提取关键词（用于 fact tags 和 episodic 召回）。
+def extract_keywords(text: str, max_keywords: int = 6) -> list[str]:
+    """从文本中提取关键词 — 简易 fallback（LLM 不可用时兜底）。
 
-    策略：
-    1. CJK：按 2-4 字滑窗提取（对中文友好，不依赖分词库）
-    2. Latin：按空格/标点分词，过滤停用词和短词
+    策略：按标点/空格切分，保留有意义的片段。
+    对 CJK 只做粗粒度切分（按标点断句后整段保留），不做无意义滑窗。
     """
     if not text or not text.strip():
         return []
@@ -83,8 +82,9 @@ def extract_keywords(text: str, max_keywords: int = 8) -> list[str]:
     keywords: list[str] = []
     seen: set[str] = set()
 
-    # Latin 分词
-    latin_words = re.findall(r"[a-zA-Z]{3,}", text.lower())
+    # 按标点/空格切分
+    segments = re.split(r"[,，。！？!?\s;；：:、\n]+", text.strip())
+
     _stopwords = {
         "the", "and", "for", "are", "but", "not", "you", "all", "can", "had",
         "her", "was", "one", "our", "out", "has", "have", "from", "this", "that",
@@ -92,39 +92,78 @@ def extract_keywords(text: str, max_keywords: int = 8) -> list[str]:
         "like", "into", "them", "some", "than", "then", "been", "want", "just",
         "over", "such", "here", "there", "where", "would", "could", "should",
     }
-    for w in latin_words:
-        if w not in _stopwords and w not in seen:
-            keywords.append(w)
-            seen.add(w)
+    _cjk_stop_words = {"我", "你", "他", "她", "们", "的", "了", "是", "在", "也", "都", "就", "这", "那", "有", "不", "没"}
+
+    for seg in segments:
+        seg = seg.strip()
+        if not seg or len(seg) < 2:
+            continue
+        # 去掉纯停用词片段
+        low = seg.lower()
+        if low in _stopwords:
+            continue
+        # CJK 片段：去掉首尾停用字
+        if re.search(r"[\u4e00-\u9fff]", seg):
+            cleaned = seg
+            while cleaned and cleaned[0] in _cjk_stop_words:
+                cleaned = cleaned[1:]
+            while cleaned and cleaned[-1] in _cjk_stop_words:
+                cleaned = cleaned[:-1]
+            if len(cleaned) >= 2 and cleaned not in seen:
+                keywords.append(cleaned)
+                seen.add(cleaned)
+        else:
+            # Latin: 按空格分词过滤
+            words = [w for w in low.split() if w not in _stopwords and len(w) >= 3]
+            for w in words:
+                if w not in seen:
+                    keywords.append(w)
+                    seen.add(w)
         if len(keywords) >= max_keywords:
-            return keywords
+            break
 
-    # CJK 滑窗：提取 2-4 字的 CJK 子串（跳过含停用字的 bigram）
-    cjk_chunks = re.findall(r"[\u4e00-\u9fff]{2,}", text)
-    _cjk_stop_chars = {"的", "了", "是", "在", "我", "你", "他", "她", "它", "们", "和", "与", "或", "也", "都", "就", "这", "那", "有", "不", "没", "对", "错"}
-    for chunk in cjk_chunks:
-        # 2-字滑窗：两个字都不是停用字才保留
-        for i in range(len(chunk) - 1):
-            piece = chunk[i:i + 2]
-            if piece[0] in _cjk_stop_chars or piece[1] in _cjk_stop_chars:
-                continue
-            if piece not in seen:
-                keywords.append(piece)
-                seen.add(piece)
-            if len(keywords) >= max_keywords:
-                return keywords
-        # 如果 chunk 较长，也取 3-4 字片段
-        if len(chunk) >= 4:
-            for length in (3, 4):
-                for i in range(len(chunk) - length + 1):
-                    piece = chunk[i:i + length]
-                    if piece not in seen:
-                        keywords.append(piece)
-                        seen.add(piece)
-                    if len(keywords) >= max_keywords:
-                        return keywords
+    return keywords[:max_keywords]
 
-    return keywords
+
+async def extract_keywords_llm(text: str, max_keywords: int = 6) -> list[str]:
+    """用 lite 模型提取关键词 — 质量远优于规则切分。
+
+    失败时 fallback 到 extract_keywords()。
+    """
+    if not text or not text.strip():
+        return []
+
+    try:
+        from ethan.memory.consolidator import get_lite_model
+        from ethan.providers.base import Message
+        from ethan.providers.manager import create_provider
+
+        model = get_lite_model()
+        provider = create_provider(model)
+
+        prompt = (
+            f"从以下文本中提取 3-{max_keywords} 个关键词/短语，用于语义检索。\n"
+            "要求：\n"
+            "- 每个关键词 2-6 字，是有独立语义的词或短语\n"
+            "- 不要拆成单字或无意义的字符组合\n"
+            "- 用逗号分隔，只输出关键词列表，不要其他内容\n\n"
+            f"文本：{text}"
+        )
+
+        resp = await provider.chat(
+            [Message(role="user", content=prompt)],
+            system="你是关键词提取工具。只输出逗号分隔的关键词列表。",
+        )
+
+        raw = resp.content.strip().strip("。.，,")
+        # 解析逗号分隔的结果
+        tags = [t.strip() for t in re.split(r"[,，、\n]+", raw) if t.strip()]
+        # 过滤太短或太长的
+        tags = [t for t in tags if 2 <= len(t) <= 20]
+        return tags[:max_keywords]
+
+    except Exception:
+        return extract_keywords(text, max_keywords)
 
 
 def score_relevance(query_keywords: list[str], tags: list[str]) -> float:

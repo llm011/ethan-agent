@@ -1,5 +1,7 @@
-"""memory 路由：facts / episodes / procedures（per-user 隔离）。"""
-from fastapi import APIRouter, Depends, HTTPException
+"""memory 路由：facts / episodes / procedures / insights（per-user 隔离）。"""
+from datetime import date
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from .deps import verify_token
 
@@ -90,3 +92,54 @@ async def delete_procedure(proc_id: str, user_id: str = Depends(verify_token)):
     store._procedures.pop(idx)
     store._save()
     return {"ok": True}
+
+
+# ── Insights (永久记忆 from vectors.db) ──────────────────────────────────
+
+@router.get("/insights")
+async def list_insights(
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    user_id: str = Depends(verify_token),
+):
+    """分页获取所有永久记忆。"""
+    from ethan.memory.daily_consolidation import get_all_memories
+    return await get_all_memories(limit=limit, offset=offset)
+
+
+@router.get("/insights/date/{date_str}")
+async def get_insights_by_date(date_str: str, user_id: str = Depends(verify_token)):
+    """获取指定日期沉淀的记忆。"""
+    from ethan.memory.daily_consolidation import get_memories_by_date
+    try:
+        d = date.fromisoformat(date_str)
+    except ValueError:
+        raise HTTPException(400, "Invalid date format, use YYYY-MM-DD")
+    items = await get_memories_by_date(d)
+    return {"date": date_str, "items": items}
+
+
+@router.get("/signals/today")
+async def get_today_signals(user_id: str = Depends(verify_token)):
+    """获取今日采集的原始信号。"""
+    from ethan.memory.daily_signals import read_today_signals
+    return {"signals": read_today_signals()}
+
+
+@router.get("/signals/date/{date_str}")
+async def get_signals_by_date(date_str: str, user_id: str = Depends(verify_token)):
+    """获取指定日期的原始信号。"""
+    from ethan.memory.daily_signals import read_signals_by_date
+    try:
+        d = date.fromisoformat(date_str)
+    except ValueError:
+        raise HTTPException(400, "Invalid date format, use YYYY-MM-DD")
+    return {"date": date_str, "signals": read_signals_by_date(d)}
+
+
+@router.post("/consolidate")
+async def trigger_consolidation(user_id: str = Depends(verify_token)):
+    """手动触发今日记忆沉淀（测试用）。"""
+    from ethan.memory.daily_consolidation import run_daily_consolidation
+    added = await run_daily_consolidation()
+    return {"ok": True, "added": added}

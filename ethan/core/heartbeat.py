@@ -73,7 +73,7 @@ async def _consolidate_facts_for_user(user_id: str) -> None:
                 f.superseded = True
             store._save()
             for line in lines:
-                store.add(line, confidence=0.85, source="heartbeat_consolidation")
+                await store.add_async(line, confidence=0.85, source="heartbeat_consolidation")
             logger.info("[Heartbeat] Facts consolidated: %d → %d", len(active), len(lines))
         except Exception:
             logger.exception("[Heartbeat] Facts consolidation failed")
@@ -591,6 +591,7 @@ async def _mine_recurring_needs() -> None:
 
 
 _heartbeat_task: asyncio.Task | None = None
+_midnight_task: asyncio.Task | None = None
 
 
 async def _loop() -> None:
@@ -609,8 +610,33 @@ async def _loop() -> None:
         await asyncio.sleep(interval)
 
 
+async def _midnight_loop() -> None:
+    """每天 0 点执行记忆沉淀。"""
+    while True:
+        try:
+            now = datetime.now()
+            # 计算到下一个 0 点的秒数
+            tomorrow = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            if tomorrow <= now:
+                from datetime import timedelta
+                tomorrow += timedelta(days=1)
+            wait_seconds = (tomorrow - now).total_seconds()
+            logger.info("[Heartbeat] Midnight consolidation scheduled in %.0f seconds", wait_seconds)
+            await asyncio.sleep(wait_seconds)
+
+            # 执行每日记忆沉淀
+            from ethan.memory.daily_consolidation import run_daily_consolidation
+            added = await run_daily_consolidation()
+            logger.info("[Heartbeat] Midnight consolidation done, stored %d new memories", added)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("[Heartbeat] Midnight consolidation failed")
+            await asyncio.sleep(3600)  # 失败后等 1 小时重试
+
+
 def start_heartbeat() -> None:
-    global _heartbeat_task
+    global _heartbeat_task, _midnight_task
     from ethan.core.config import get_config
     if not get_config().defaults.heartbeat.enabled:
         logger.info("[Heartbeat] Disabled by config")
@@ -618,10 +644,13 @@ def start_heartbeat() -> None:
     if _heartbeat_task and not _heartbeat_task.done():
         return
     _heartbeat_task = asyncio.create_task(_loop())
+    _midnight_task = asyncio.create_task(_midnight_loop())
     logger.info("[Heartbeat] Started (interval=%dm)", get_config().defaults.heartbeat.interval_minutes)
 
 
 def stop_heartbeat() -> None:
-    global _heartbeat_task
+    global _heartbeat_task, _midnight_task
     if _heartbeat_task and not _heartbeat_task.done():
         _heartbeat_task.cancel()
+    if _midnight_task and not _midnight_task.done():
+        _midnight_task.cancel()

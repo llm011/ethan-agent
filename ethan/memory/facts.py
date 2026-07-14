@@ -57,7 +57,7 @@ class FactStore:
             if not f.superseded and self._is_contradiction(f.content, content):
                 f.superseded = True
 
-        # 自动提取 tags（A1：系统确定性保证，不依赖调用方）
+        # 自动提取 tags（sync fallback，优先用 add_async 走 LLM）
         if tags is None:
             from ethan.memory.signals import extract_keywords
             tags = extract_keywords(content, max_keywords=6)
@@ -80,6 +80,13 @@ class FactStore:
                 tags=tags,
             ))
         self._save()
+
+    async def add_async(self, content: str, confidence: float = 0.8, source: str = "", category: str = "knowledge", tags: list[str] | None = None) -> None:
+        """异步版 add — 用 lite 模型提取高质量 tags。"""
+        if tags is None:
+            from ethan.memory.signals import extract_keywords_llm
+            tags = await extract_keywords_llm(content, max_keywords=6)
+        self.add(content, confidence=confidence, source=source, category=category, tags=tags)
 
     def _is_contradiction(self, old: str, new: str) -> bool:
         """Detect if new content contradicts old (heuristic for both CJK and Latin)."""

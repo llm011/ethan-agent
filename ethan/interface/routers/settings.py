@@ -46,7 +46,7 @@ async def onboarding_complete(req: OnboardingCompleteRequest, user_id: str = Dep
 
     if user_info:
         store = FactStore(path=user_facts_path())
-        store.add(user_info, confidence=1.0, source="onboarding", category="preference")
+        await store.add_async(user_info, confidence=1.0, source="onboarding", category="preference")
 
     return {"ok": True, "agent_name": agent_name}
 

@@ -80,10 +80,15 @@ async def _maybe_consolidate(session_id: str, model: str, user_id: str = "", mod
                 memory.warm_summary, memory.cold_facts
             )
             for fact in result["key_facts"]:
-                fact_store.add(fact, confidence=0.8, source=session_id)
+                await fact_store.add_async(fact, confidence=0.8, source=session_id)
             from ethan.core.profile import apply_extraction
             apply_extraction(result)
             memory.apply_cold_extraction(fact_store.build_context(), result["condensed"])
+
+        # 跨 session 信号采集（每 10 轮触发一次，避免太频繁）
+        if user_turns % 10 == 0:
+            from ethan.memory.daily_signals import collect_signals
+            await collect_signals()
     except Exception:
         pass
 

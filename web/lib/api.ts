@@ -550,6 +550,65 @@ export async function deleteProcedure(id: string): Promise<void> {
   await fetch(`${API_URL}/memory/procedures/${id}`, { method: "DELETE", headers: headers() });
 }
 
+// ── Insights (永久记忆) ───────────────────────────────────────────────────────
+
+export interface Insight {
+  id: string;
+  text: string;
+  metadata: { type?: string; date?: string; created_at?: number; [key: string]: unknown };
+}
+
+export interface InsightsResponse {
+  total: number;
+  items: Insight[];
+  limit: number;
+  offset: number;
+}
+
+export async function fetchInsights(limit = 20, offset = 0): Promise<InsightsResponse> {
+  const res = await fetch(`${API_URL}/memory/insights?limit=${limit}&offset=${offset}`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed to fetch insights");
+  return res.json();
+}
+
+export async function fetchInsightsByDate(dateStr: string): Promise<Insight[]> {
+  const res = await fetch(`${API_URL}/memory/insights/date/${dateStr}`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed to fetch insights by date");
+  return res.json().then(d => d.items);
+}
+
+// ── Signals (每日信号) ────────────────────────────────────────────────────────
+
+export interface Signal {
+  type: string;
+  ts?: number;
+  pattern?: string;
+  count?: number;
+  suggestion?: string;
+  context?: string;
+  resolution?: string;
+  scenario?: string;
+  method?: string;
+}
+
+export async function fetchTodaySignals(): Promise<Signal[]> {
+  const res = await fetch(`${API_URL}/memory/signals/today`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed to fetch today signals");
+  return res.json().then(d => d.signals);
+}
+
+export async function fetchSignalsByDate(dateStr: string): Promise<Signal[]> {
+  const res = await fetch(`${API_URL}/memory/signals/date/${dateStr}`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed to fetch signals by date");
+  return res.json().then(d => d.signals);
+}
+
+export async function triggerConsolidation(): Promise<{ ok: boolean; added: number }> {
+  const res = await fetch(`${API_URL}/memory/consolidate`, { method: "POST", headers: headers() });
+  if (!res.ok) throw new Error("Failed to trigger consolidation");
+  return res.json();
+}
+
 export type StreamChunk = { content?: string; done?: boolean; stopped?: boolean; error?: string; model?: string; usage?: Record<string, number>; ttfb_ms?: number; total_ms?: number; message_id?: number; tool?: string; args?: string; intent?: string; state?: string; id?: string; duration_ms?: number; result_preview?: string; result_detail?: string; entity_type?: string; entity_id?: string; sub_steps?: Array<{ tool: string; args: string; state: string; duration_ms?: number | null; result_preview?: string }>; ui?: unknown[]; consent_request?: boolean; request_id?: string; description?: string; detail?: string; thinking?: boolean; heartbeat?: boolean; elapsed?: number; skills_matched?: Array<{ name: string; is_default?: boolean }>; title?: string };
 
 /** 把一个 SSE Response body 解析成事件流（streamChat / streamResume 共用）。 */

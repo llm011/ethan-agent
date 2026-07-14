@@ -498,8 +498,134 @@ CLI 退出 → EpisodeStore.add() → episodes.json
   ├─ _consolidate_profiles()           # 画像分区压缩
   ├─ _extract_decision_patterns()      # 从 tool_steps 抽取成功路径 → success_patterns
   └─ _mine_recurring_needs()           # 从 episodes 挖掘重复模式 → suggestions.json
+
+每 10 轮用户消息（跨 session 信号采集）：
+  collect_signals()
+    ├─ 读最近 5 个 session 的 user 消息
+    ├─ lite 模型一次分析（重复/错误/成功）
+    └─ 有效信号 → daily/<YYYYMMDD>.jsonl
+
+每晚 0 点（_midnight_loop）：
+  run_daily_consolidation()
+    ├─ 读当日 JSONL
+    ├─ LLM 精炼去重（≤10 条）
+    ├─ embedding 去重（distance < 0.15 跳过）
+    └─ 写入 memory.db（永久）
 ```
 -->
+
+---
+
+## 第五层：跨 Session 信号采集 + 每日记忆沉淀
+
+文件：`ethan/memory/daily_signals.py`、`ethan/memory/daily_consolidation.py`
+数据文件：`~/.ethan/memory/daily/<YYYYMMDD>.jsonl`（信号）、`~/.ethan/memory/memory.db`（永久记忆）
+
+### 设计目标
+
+从多个 session 的对话模式中提取有价值的长期洞察：
+- **重复模式**：用户反复提出相似需求（≥3 次），可能值得固化为快捷方式
+- **错误总结**：对话中出现的失败/用户不满，总结错误原因和改进方式
+- **成功路径**：用户明确表示满意的场景，记录成功方法
+
+### 核心原则
+
+- **宁缺勿滥**：大部分情况下不应有输出，只记录非常确定的模式
+- **跨 session**：至少需要 2 个 session 才有分析意义
+- **lite 模型**：所有分析调用使用廉价模型（haiku-4.5/flash-lite/4o-mini）
+
+### 两级流程
+
+```
+第一级：实时信号采集（每 10 轮用户消息触发）
+    │
+    ├─ 读取最近 5 个 session 的 user 消息
+    ├─ 一次 lite 模型调用分析模式
+    └─ 有效信号追加写入 daily/<YYYYMMDD>.jsonl
+    │
+第二级：每晚 0 点记忆沉淀
+    │
+    ├─ 读取当日 JSONL 信号
+    ├─ LLM 整理去重（合并相似、排除噪音、限 ≤10 条）
+    ├─ embedding 去重：在 memory.db 中查 distance < 0.15 的跳过
+    └─ 通过去重的条目永久写入 memory.db
+```
+
+### 信号采集 (daily_signals.py)
+
+**触发条件**：`_maybe_consolidate()` 中，当 `user_turns % 10 == 0` 时调用 `collect_signals()`
+
+**流程**：
+1. 从 `sessions.db` 读取最近 5 个 session
+2. 提取每个 session 最后 8 条 user 消息（截取前 200 字）
+3. 构造 prompt 让 lite 模型分析跨 session 模式
+4. 有效信号（带 `type` 字段）追加到 `daily/<YYYYMMDD>.jsonl`
+
+**信号格式**：
+
+```json
+{"type": "repetition", "pattern": "模式描述", "count": 3, "suggestion": "可执行建议", "ts": 1720000000}
+{"type": "error", "context": "错误场景", "resolution": "改进建议", "ts": 1720000000}
+{"type": "success_path", "scenario": "成功场景", "method": "方法描述", "ts": 1720000000}
+```
+
+### 每日沉淀 (daily_consolidation.py)
+
+**触发**：heartbeat 的 `_midnight_loop()` 每晚 0 点执行 `run_daily_consolidation()`
+
+**流程**：
+
+1. **读取信号**：加载当日 `daily/<YYYYMMDD>.jsonl`
+2. **LLM 精炼**：lite 模型整理去重，合并相似条目，排除噪音，输出 ≤10 条
+3. **Embedding 去重**：
+   - 对每条精炼结果生成 384-dim embedding（已归一化）
+   - 在 `memory.db` (sqlite-vec) 中做 ANN 查询
+   - sqlite-vec 返回 L2 距离；L2 < 1.1 视为重复，跳过
+   - 实测：同义不同措辞的句子 L2 通常在 0.8~1.08，完全无关的 > 1.3
+4. **写入 memory.db**：通过去重的条目永久存储
+
+**memory.db 结构**（基于 sqlite-vec）：
+
+```sql
+-- vec_items 表
+id        TEXT PRIMARY KEY    -- "insight_20260714_a1b2c3d4"
+text      TEXT               -- 精炼后的记忆描述
+embedding FLOAT[384]         -- 384 维向量
+metadata  TEXT (JSON)        -- {"type": "repetition", "date": "2026-07-14", "created_at": ...}
+```
+
+**去重阈值**：`L2_DEDUP_THRESHOLD = 1.1`（L2 距离，对归一化向量）。实测该值能准确拦截同义重复，同时放行真正的新洞察。
+
+### API 端点
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/memory/insights` | GET | 分页获取所有永久记忆（支持 limit/offset） |
+| `/memory/insights/date/{YYYY-MM-DD}` | GET | 按日期查询沉淀记忆 |
+| `/memory/signals/today` | GET | 获取今日采集的原始信号 |
+| `/memory/signals/date/{YYYY-MM-DD}` | GET | 按日期查询原始信号 |
+| `/memory/consolidate` | POST | 手动触发今日记忆沉淀（测试用） |
+
+### 与心跳系统的集成
+
+```python
+# heartbeat.py 新增 _midnight_loop()
+async def _midnight_loop():
+    while True:
+        # 计算到下一个 0 点的等待时间
+        now = datetime.now()
+        tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0)
+        await asyncio.sleep((tomorrow - now).total_seconds())
+        await run_daily_consolidation()
+```
+
+`start_heartbeat()` 同时启动常规心跳循环和 midnight 循环。
+
+### 关键词提取优化
+
+`extract_keywords_llm()`（`signals.py`）使用 lite 模型提取 3-6 个高质量关键词，替代原来的 CJK 2-字滑窗方案：
+- 每个关键词 2-6 字，有独立语义
+- 失败时 fallback 到 `extract_keywords()`（按标点/空格切分 + 去停用字）
 
 ---
 
@@ -513,5 +639,9 @@ CLI 退出 → EpisodeStore.add() → episodes.json
 | User Profile | `~/.ethan/memory/user_profile.md` | 用户画像（叙述性） |
 | Episodes | `~/.ethan/memory/episodes.json` | 历次 session 情节摘要 |
 | Suggestions | `~/.ethan/memory/suggestions.json` | FDE 主动建议 |
+| Daily Signals | `~/.ethan/memory/daily/<YYYYMMDD>.jsonl` | 每日采集的原始信号 |
+| Memory DB | `~/.ethan/memory/memory.db` | 永久记忆（sqlite-vec 向量库） |
 | Signals | `ethan/memory/signals.py` | 信号检测器 + 关键词提取 + 相关性评分 |
+| Daily Signals | `ethan/memory/daily_signals.py` | 跨 session 信号采集 |
+| Daily Consolidation | `ethan/memory/daily_consolidation.py` | 每日记忆沉淀逻辑 |
 | Config | `~/.ethan/config.yaml` | 全局配置 |
