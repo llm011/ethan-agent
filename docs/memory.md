@@ -509,7 +509,7 @@ CLI 退出 → EpisodeStore.add() → episodes.json
   run_daily_consolidation()
     ├─ 读当日 JSONL
     ├─ LLM 精炼去重（≤10 条）
-    ├─ embedding 去重（distance < 0.15 跳过）
+    ├─ embedding 去重（L2 < 1.1 跳过）
     └─ 写入 memory.db（永久）
 ```
 -->
@@ -547,7 +547,7 @@ CLI 退出 → EpisodeStore.add() → episodes.json
     │
     ├─ 读取当日 JSONL 信号
     ├─ LLM 整理去重（合并相似、排除噪音、限 ≤10 条）
-    ├─ embedding 去重：在 memory.db 中查 distance < 0.15 的跳过
+    ├─ embedding 去重：在 memory.db 中查 L2 < 1.1 的跳过
     └─ 通过去重的条目永久写入 memory.db
 ```
 
@@ -605,6 +605,36 @@ metadata  TEXT (JSON)        -- {"type": "repetition", "date": "2026-07-14", "cr
 | `/memory/signals/today` | GET | 获取今日采集的原始信号 |
 | `/memory/signals/date/{YYYY-MM-DD}` | GET | 按日期查询原始信号 |
 | `/memory/consolidate` | POST | 手动触发今日记忆沉淀（测试用） |
+
+### 测试验证
+
+手动触发完整沉淀流程（不必等到 0 点）：
+
+```bash
+# 1. 写入模拟信号（模拟 collect_signals 的输出）
+mkdir -p ~/.ethan/memory/daily
+DATE=$(date +%Y%m%d)
+cat >> ~/.ethan/memory/daily/${DATE}.jsonl << 'EOF'
+{"type":"repetition","pattern":"用户经常要求以表格形式对比方案","count":4,"suggestion":"默认用表格对比","ts":1720000000}
+{"type":"success_path","scenario":"代码审查","method":"先给结论再展开细节","ts":1720000001}
+EOF
+
+# 2. 通过 API 触发沉淀（需要先启动 web 服务）
+curl -X POST http://127.0.0.1:8900/api/memory/consolidate \
+  -H "Authorization: Bearer <token>"
+# 返回 {"ok": true, "added": 2}
+
+# 3. 再次触发，验证去重生效
+curl -X POST http://127.0.0.1:8900/api/memory/consolidate \
+  -H "Authorization: Bearer <token>"
+# 返回 {"ok": true, "added": 0}  ← 同义内容被 L2 去重拦截
+
+# 4. 查看已沉淀的记忆
+curl http://127.0.0.1:8900/api/memory/insights \
+  -H "Authorization: Bearer <token>"
+```
+
+**关键验证点**：第二次 `added: 0` 证明 embedding 去重生效。如果 `added` 不为 0，说明阈值过低或 embedding 模型输出未归一化。
 
 ### 与心跳系统的集成
 
