@@ -1,10 +1,13 @@
 """Skill 注册表 — 管理已加载的 Skills，支持按关键词匹配。"""
 import hashlib
 import json
+import logging
 from pathlib import Path
 
 from ethan.skills.loader import Skill, load_all_skills
 from ethan.skills.stats import SkillStats
+
+logger = logging.getLogger(__name__)
 
 # 超过此长度的 skill content 会截断，避免 token 膨胀
 # 复杂 Skill（如 HA 设备列表）需要更大空间；可在 config 里调整
@@ -104,24 +107,59 @@ class SkillRegistry:
     def _build_router(self) -> None:
         """构建 embedding 路由器索引；依赖或模型缺失时静默跳过。
 
-        按 skill 集合指纹缓存：同一进程内 skill 不变时直接复用已编码锚点，
-        避免每个请求都重新 ONNX 推理一遍静态锚点。
+        判定链（缺一不可才进入 match() 的语义补召回）：
+          1) router.available  → 模型文件(LR 头 + ONNX)是否在磁盘就绪
+          2) router.build()     → LR 头能否加载 + 是否存在可路由 skill
+          3) 运行时依赖(onnxruntime/transformers)是否在当前环境可导入
+             —— 这步在 available/build 里不检查，会在首次 route() 时惰性失败，
+                因此这里主动探一下，避免「显示已激活却永远不命中」的假象。
+        仅当三者同时满足，self._router 才被设为非 None。
         """
         try:
             from ethan.skills.router import EmbeddingRouter
+
             fp = _skill_fingerprint(self._skills)
             cached = _ROUTER_CACHE.get(fp)
             if cached is not None:
                 self._router = cached
+                logger.info("[router] embedding 路由已激活（复用进程内缓存，指纹=%s）", fp[:8])
                 return
+
             router = EmbeddingRouter()
-            if router.available and router.build(self._skills):
+            avail = router.available
+            built = router.build(self._skills) if avail else False
+
+            if avail and built:
+                # 主动探测运行时依赖（available/build 不覆盖此步）；用 find_spec 不触发实际 import
+                import importlib.util
+                missing = [mod for mod in ("onnxruntime", "transformers", "numpy")
+                           if importlib.util.find_spec(mod) is None]
+                if missing:
+                    # 模型就绪但依赖缺失 → route() 会始终返回 None，实为不可用
+                    self._router = None
+                    logger.warning(
+                        "[router] embedding 路由显示就绪，但依赖缺失 %s，实际不可用"
+                        "（route() 将始终返回 None）。请运行 `ethan plugin add embedding-router`"
+                        " 安装依赖。", missing,
+                    )
+                    return
                 self._router = router
                 _ROUTER_CACHE[fp] = router
+                logger.info(
+                    "[router] embedding 路由已激活：模型就绪，可路由 skill %d 个 → %s",
+                    len(router._routable), sorted(router._routable),
+                )
             else:
                 self._router = None
-        except Exception:
+                reason = "模型文件缺失" if not avail else "LR 头不可用或可路由 skill 为空"
+                logger.info(
+                    "[router] embedding 路由未激活（%s）。available=%s, build=%s。"
+                    " 运行 `ethan plugin add embedding-router` 安装依赖并拉取模型后可启用。",
+                    reason, avail, built,
+                )
+        except Exception as e:
             self._router = None
+            logger.warning("[router] embedding 路由构建异常，已回退关键词匹配：%s", e)
 
     def all(self) -> list[Skill]:
         return list(self._skills)
@@ -178,6 +216,7 @@ class SkillRegistry:
                 if (skill and not skill.modes
                         and not (skill.channels and channel and channel not in skill.channels)):
                     matched.append(skill)
+                    logger.info("[router] 语义补召回命中 skill=%s (query=%r)", name, query[:60])
         return matched
 
     def record_hit(self, skill_name: str):

@@ -1,6 +1,6 @@
 """调度器 — 基于 APScheduler 的定时任务系统。
 
-支持 cron 表达式和 interval 两种模式，Job 持久化到 SQLite，重启后自动恢复。
+支持 cron 表达式 and interval 两种模式，Job 持久化到 SQLite，重启后自动恢复。
 """
 from typing import Callable
 
@@ -61,7 +61,16 @@ class Scheduler:
         手动拆分传入会导致 '1-5' 被解释为 周二~周六。
         end_date：到期后 APScheduler 自动不再触发并删除 job。
         """
-        trigger = CronTrigger.from_crontab(cron_expr, timezone=self._tz, end_date=self._parse_end_date(end_date))
+        # APScheduler 的 CronTrigger.from_crontab 在某些老版本或特定实现中可能不支持 end_date 关键字参数，
+        # 我们需要在实例化 CronTrigger 之后手动或通过其他方式设置，或者在 add_job 时直接传，
+        # 更好的做法是在实例化后，直接作为 CronTrigger 的属性或者通过 add_job 参数传递。
+        # 事实上，CronTrigger 对象的属性有 end_date。
+        # 为了兼容性，我们可以实例化之后单独赋值。
+        trigger = CronTrigger.from_crontab(cron_expr, timezone=self._tz)
+        if end_date:
+            parsed_end_date = self._parse_end_date(end_date)
+            if parsed_end_date:
+                trigger.end_date = parsed_end_date
 
         self._scheduler.add_job(
             func,
