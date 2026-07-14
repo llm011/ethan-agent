@@ -199,14 +199,21 @@ class VectorStore:
         """删除超过 expire_seconds 未访问的条目，返回删除数量。
 
         在心跳任务中定期调用，防止 memory.db 无限膨胀。
+        type=fact_sync 的条目不参与 LRU（由 _sync_facts_to_memory_db 全量重建）。
         """
         conn = self._get_conn()
         cutoff = time.time() - expire_seconds
 
         # 先查出要删的 id（用于删 vec_index）
+        # 跳过 type=fact_sync（由 daily_consolidation 的同步逻辑管理）
         expired_ids = [
             row[0] for row in
-            conn.execute("SELECT id FROM vec_items WHERE last_accessed < ?", (cutoff,)).fetchall()
+            conn.execute(
+                """SELECT id FROM vec_items
+                   WHERE last_accessed < ?
+                     AND json_extract(metadata, '$.type') != ?""",
+                (cutoff, "fact_sync"),
+            ).fetchall()
         ]
         if not expired_ids:
             return 0

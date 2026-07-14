@@ -548,14 +548,19 @@ CLI 退出 → SessionStore.cleanup_empty()
     │
 第二级：每晚 0 点记忆沉淀
     │
-    ├─ 读取当日 JSONL 信号
+    ├─ Step 0: 同步 facts.json/playbook.json 到 memory.db（type=fact_sync）
+    │   让 insight 的 L2 去重天然覆盖已有 fact，不需要手动遍历
+    ├─ 读取昨日 JSONL 信号（0 点触发时今天的信号还没产生）
     ├─ LLM 整理去重（合并相似、排除噪音、限 ≤10 条）
-    ├─ embedding 去重：在 memory.db 中查 L2 < 1.1 的跳过
+    ├─ embedding 去重：在 memory.db 中查 L2 < 1.1 的跳过（含 fact_sync 镜像）
     ├─ 通过去重的条目写入 memory.db
     └─ 按 type 反写到 facts.json / playbook.json（被召回时自然生效）
     │
-LRU 过期：心跳任务清理 90 天未被召回的 memory.db 条目
+LRU 过期：心跳任务清理 90 天未被召回的 memory.db 条目（fact_sync 不参与，由同步逻辑全量重建）
 ```
+
+> **时间错位说明**：0 点触发时 `date.today()` 已是新的一天，但信号是在"昨天"白天产生的。
+> 所以 `run_daily_consolidation()` 默认处理 `date.today() - 1 天`。
 
 ### 信号采集 (daily_signals.py)
 
@@ -598,19 +603,23 @@ LRU 过期：心跳任务清理 90 天未被召回的 memory.db 条目
 
 ```sql
 -- vec_items 表
-id            TEXT PRIMARY KEY    -- "insight_20260714_a1b2c3d4"
-text          TEXT               -- 精炼后的记忆描述
+id            TEXT PRIMARY KEY    -- "insight_20260714_a1b2c3d4" 或 "fact_sync_xxxx"
+text          TEXT               -- 精炼后的记忆描述 / fact 内容
 embedding     FLOAT[384]         -- 384 维向量
-metadata      TEXT (JSON)        -- {"type": "repetition", "date": "2026-07-14", "reflected": true, ...}
+metadata      TEXT (JSON)        -- {"type": "repetition"|"fact_sync"|..., "date": "...", "reflected": true, ...}
 last_accessed REAL               -- 最后被 search 命中的时间（LRU 依据）
 ```
 
+**条目类型**：
+- `insight_*`：每晚沉淀的洞察（type=repetition/error/success_path），参与 LRU 过期
+- `fact_sync_*` / `playbook_sync_*`：facts.json/playbook.json 的镜像（type=fact_sync），每次沉淀前全量重建，不参与 LRU
+
 **去重阈值**：`L2_DEDUP_THRESHOLD = 1.1`（L2 距离，对归一化向量）。实测该值能准确拦截同义重复，同时放行真正的新洞察。
 
-**LRU 过期**：心跳任务每次 tick 调用 `VectorStore.cleanup_expired()`，删除 90 天未被 search 命中的条目（`EXPIRE_SECONDS = 90 * 86400`）。被召回时 `last_accessed` 自动刷新，热门洞察永不过期。
+**LRU 过期**：心跳任务每次 tick 调用 `VectorStore.cleanup_expired()`，删除 90 天未被 search 命中的条目（`EXPIRE_SECONDS = 90 * 86400`）。被召回时 `last_accessed` 自动刷新，热门洞察永不过期。`type=fact_sync` 的条目不参与 LRU，由 `_sync_facts_to_memory_db` 全量重建。
 
-**反写去重**：三层保障防止重复反写：
-1. memory.db 内部 L2 < 1.1 去重（写入时）——不会有两条语义相同的 insight
+**反写去重**（三层保障）：
+1. **fact_sync 同步**：沉淀前先把 facts.json/playbook.json 的 active 内容写入 memory.db（type=fact_sync），insight 的 L2 去重天然覆盖已有 fact——不需要手动遍历算 embedding
 2. memory.db metadata `reflected` 标记——同一条 insight 只反写一次
 3. 目标文件的 `add` 方法兜底（FactStore `_find_similar` + ProcedureStore 完全匹配）
 

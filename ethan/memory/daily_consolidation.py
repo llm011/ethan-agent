@@ -17,12 +17,8 @@ import time
 import uuid
 from datetime import date
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from ethan.core.paths import user_memory_dir
-
-if TYPE_CHECKING:
-    from ethan.memory.facts import FactStore
 
 logger = logging.getLogger(__name__)
 
@@ -69,15 +65,23 @@ _CONSOLIDATION_PROMPT = """\
 
 
 async def run_daily_consolidation(target_date: date | None = None) -> int:
-    """执行每日记忆沉淀。返回新写入 memory.db 的条目数。"""
-    from ethan.memory.daily_signals import read_signals_by_date, read_today_signals
+    """执行每日记忆沉淀。返回新写入 memory.db 的条目数。
 
-    d = target_date or date.today()
-    signals = read_signals_by_date(d) if target_date else read_today_signals()
+    target_date: 指定处理哪天的信号。不传时默认处理"昨天"——因为 0 点触发时
+    date.today() 已是今天，而信号是在"昨天"白天产生的。
+    """
+    from datetime import timedelta
+
+    from ethan.memory.daily_signals import read_signals_by_date
+    d = target_date or (date.today() - timedelta(days=1))
+    signals = read_signals_by_date(d)
 
     if not signals:
         logger.info("[DailyConsolidation] No signals for %s, skipping", d)
         return 0
+
+    # Step 0: 同步 facts.json/playbook.json 到 memory.db（让 insight 去重时覆盖已有 fact）
+    await _sync_facts_to_memory_db()
 
     # Step 1: LLM 整理去重
     refined = await _llm_refine(signals)
@@ -85,7 +89,7 @@ async def run_daily_consolidation(target_date: date | None = None) -> int:
         logger.info("[DailyConsolidation] LLM refined to 0 items, skipping")
         return 0
 
-    # Step 2: Embedding 去重 + 写入
+    # Step 2: Embedding 去重 + 写入 + 反写
     added = await _embed_and_store(refined, d)
     logger.info("[DailyConsolidation] Date=%s, raw=%d, refined=%d, stored=%d",
                 d, len(signals), len(refined), added)
@@ -171,9 +175,11 @@ async def _embed_and_store(items: list[dict], d: date) -> int:
             store.add(id=item_id, text=text, embedding=emb, metadata=metadata)
             added += 1
 
-            # 反写到 facts.json / playbook.json（带 embedding 语义去重）
+            # 反写到 facts.json / playbook.json
+            # 去重已由 _sync_facts_to_memory_db 保证：facts.json 的 active fact
+            # 已同步进 memory.db（type=fact_sync），insight 的 L2 去重天然覆盖
             try:
-                if await _reflect_to_memory_files(text, emb, insight_type, d, item.get("metadata", {})):
+                if _reflect_to_memory_files(text, insight_type, d, item.get("metadata", {})):
                     # 更新 memory.db 标记
                     metadata["reflected"] = True
                     store.add(id=item_id, text=text, embedding=emb, metadata=metadata)
@@ -188,16 +194,94 @@ async def _embed_and_store(items: list[dict], d: date) -> int:
     return added
 
 
-async def _reflect_to_memory_files(
+async def _sync_facts_to_memory_db() -> int:
+    """把 facts.json / playbook.json 的 active 内容同步到 memory.db。
+
+    同步后，insight 的 L2 去重天然覆盖已有 fact——不需要手动遍历算 embedding。
+
+    策略：先删旧的 fact_sync 条目，再全量写入。保证 memory.db 跟 JSON 文件一致。
+    fact_sync 条目不参与 LRU 过期（由本函数全量重建）。
+    """
+    from ethan.core.paths import user_facts_path, user_procedures_path
+    from ethan.memory.embeddings import embed
+    from ethan.memory.facts import FactStore
+    from ethan.memory.procedures import ProcedureStore
+    from ethan.memory.vector_store import VectorStore
+
+    store = VectorStore(db_path=_memory_db_path())
+    synced = 0
+
+    try:
+        conn = store._get_conn()
+
+        # Step 1: 删旧的 fact_sync 条目（全量重建）
+        old_ids = [
+            row[0] for row in
+            conn.execute(
+                "SELECT id FROM vec_items WHERE json_extract(metadata, '$.type') = ?",
+                ("fact_sync",),
+            ).fetchall()
+        ]
+        if old_ids:
+            placeholders = ",".join("?" * len(old_ids))
+            conn.execute(f"DELETE FROM vec_items WHERE id IN ({placeholders})", old_ids)
+            conn.execute(f"DELETE FROM vec_index WHERE id IN ({placeholders})", old_ids)
+            conn.commit()
+            logger.debug("[DailyConsolidation] Cleared %d old fact_sync entries", len(old_ids))
+
+        # Step 2: 同步 facts.json 的 active fact
+        fact_store = FactStore(path=user_facts_path())
+        for fact in fact_store.get_active(min_confidence=0.0):
+            try:
+                emb = await embed(fact.content)
+                item_id = f"fact_sync_{uuid.uuid4().hex[:12]}"
+                metadata = {
+                    "type": "fact_sync",
+                    "source": fact.source,
+                    "category": fact.category,
+                    "confidence": fact.confidence,
+                    "synced_at": time.time(),
+                }
+                store.add(id=item_id, text=fact.content, embedding=emb, metadata=metadata)
+                synced += 1
+            except Exception:
+                logger.warning("[DailyConsolidation] Sync fact failed: %s", fact.content[:50], exc_info=True)
+
+        # Step 3: 同步 playbook.json 的 success_pattern
+        proc_store = ProcedureStore(path=user_procedures_path())
+        for sp in proc_store.all_success_patterns():
+            try:
+                emb = await embed(sp.scenario)
+                item_id = f"playbook_sync_{uuid.uuid4().hex[:12]}"
+                metadata = {
+                    "type": "fact_sync",
+                    "source": "playbook",
+                    "scenario": sp.scenario,
+                    "success_count": sp.success_count,
+                    "synced_at": time.time(),
+                }
+                store.add(id=item_id, text=sp.scenario, embedding=emb, metadata=metadata)
+                synced += 1
+            except Exception:
+                logger.warning("[DailyConsolidation] Sync playbook failed: %s", sp.scenario[:50], exc_info=True)
+
+    finally:
+        store.close()
+
+    logger.info("[DailyConsolidation] Synced %d fact/playbook entries to memory.db", synced)
+    return synced
+
+
+def _reflect_to_memory_files(
     text: str,
-    insight_emb: list[float],
     insight_type: str,
     d: date,
     raw_meta: dict,
 ) -> bool:
     """将 insight 反写到 facts.json 或 playbook.json。返回是否成功写入。
 
-    反写前用 embedding 做语义去重，弥补 FactStore 中文 _find_similar 失效的问题。
+    去重已由 _sync_facts_to_memory_db 保证：facts.json 的 active fact 已同步进
+    memory.db（type=fact_sync），insight 的 L2 去重天然覆盖已有 fact。
 
     - repetition / error → facts.json（confidence=0.75, source=insight_<date>）
     - success_path → playbook.json 的 success_patterns
@@ -213,12 +297,6 @@ async def _reflect_to_memory_files(
         # 反写到 facts.json
         category = TYPE_CATEGORY_MAP[insight_type]
         fact_store = FactStore(path=user_facts_path())
-
-        # 语义去重：用 embedding 检查 facts.json 中是否已有同义 fact
-        if await _is_semantic_duplicate_in_facts(insight_emb, fact_store):
-            logger.debug("[DailyConsolidation] Skip reflect (semantic dup in facts): %s", text[:50])
-            return False
-
         fact_store.add(
             content=text,
             confidence=INSIGHT_CONFIDENCE,
@@ -241,45 +319,23 @@ async def _reflect_to_memory_files(
     return False
 
 
-async def _is_semantic_duplicate_in_facts(
-    insight_emb: list[float],
-    fact_store: "FactStore",
-) -> bool:
-    """检查 facts.json 中是否已有与 insight 语义相同的 fact。
-
-    FactStore._find_similar 对中文几乎失效（中文无空格，split 返回整句），
-    所以这里用 embedding 做 L2 查重作为补充。
-
-    遍历 active facts，对每条算 embedding 后比较 L2 距离。
-    因为反写是低频操作（每晚 0 点一次），且 facts 通常只有几十条，成本可接受。
-    """
-    from ethan.memory.embeddings import embed
-
-    active_facts = fact_store.get_active(min_confidence=0.0)
-    for fact in active_facts:
-        try:
-            fact_emb = await embed(fact.content)
-            # 算 L2 距离
-            dist = sum((a - b) ** 2 for a, b in zip(insight_emb, fact_emb)) ** 0.5
-            if dist < L2_DEDUP_THRESHOLD:
-                return True
-        except Exception:
-            logger.warning("[DailyConsolidation] embed failed for fact: %s", fact.content[:50], exc_info=True)
-            continue
-    return False
-
-
 async def get_all_memories(limit: int = 20, offset: int = 0) -> dict:
-    """分页获取所有永久记忆（从 memory.db）。"""
+    """分页获取所有永久记忆（从 memory.db），过滤掉 fact_sync 同步条目。"""
     from ethan.memory.vector_store import VectorStore
 
     store = VectorStore(db_path=_memory_db_path())
     try:
         conn = store._get_conn()
-        total = conn.execute("SELECT COUNT(*) FROM vec_items").fetchone()[0]
+        # 过滤 type=fact_sync（这些是 JSON 文件同步过来的镜像，不是 insight）
+        total = conn.execute(
+            "SELECT COUNT(*) FROM vec_items WHERE json_extract(metadata, '$.type') != ?",
+            ("fact_sync",),
+        ).fetchone()[0]
         rows = conn.execute(
-            "SELECT id, text, metadata FROM vec_items ORDER BY rowid DESC LIMIT ? OFFSET ?",
-            (limit, offset),
+            """SELECT id, text, metadata FROM vec_items
+               WHERE json_extract(metadata, '$.type') != ?
+               ORDER BY rowid DESC LIMIT ? OFFSET ?""",
+            ("fact_sync", limit, offset),
         ).fetchall()
 
         items = []
@@ -297,7 +353,7 @@ async def get_all_memories(limit: int = 20, offset: int = 0) -> dict:
 
 
 async def get_memories_by_date(d: date) -> list[dict]:
-    """获取某日沉淀的记忆。"""
+    """获取某日沉淀的记忆，过滤掉 fact_sync 同步条目。"""
     from ethan.memory.vector_store import VectorStore
 
     store = VectorStore(db_path=_memory_db_path())
@@ -305,8 +361,10 @@ async def get_memories_by_date(d: date) -> list[dict]:
         conn = store._get_conn()
         date_str = d.isoformat()
         rows = conn.execute(
-            "SELECT id, text, metadata FROM vec_items WHERE json_extract(metadata, '$.date') = ?",
-            (date_str,),
+            """SELECT id, text, metadata FROM vec_items
+               WHERE json_extract(metadata, '$.date') = ?
+                 AND json_extract(metadata, '$.type') != ?""",
+            (date_str, "fact_sync"),
         ).fetchall()
 
         items = []
