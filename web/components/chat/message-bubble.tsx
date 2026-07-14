@@ -4,7 +4,7 @@ import { useState } from "react";
 import Image from "next/image";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Quote as QuoteIcon } from "lucide-react";
+import { Quote as QuoteIcon, Zap, Flag, Activity } from "lucide-react";
 import { ToolTimeline } from "@/components/tool-timeline";
 import { SwimlaneDiagram } from "@/components/swimlane-diagram";
 import { fmtTokens } from "@/lib/utils";
@@ -22,6 +22,13 @@ function formatTime(ts?: number) {
   const HH = String(d.getHours()).padStart(2, "0");
   const mm = String(d.getMinutes()).padStart(2, "0");
   return `${yyyy}-${MM}-${dd} ${HH}:${mm}`;
+}
+
+// 毫秒 → 紧凑时长：999ms 以下显示 ms，1 分钟内显示 1 位小数秒，超过则 XmYs
+function fmtDur(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${Math.floor(ms / 60000)}m${Math.round((ms % 60000) / 1000)}s`;
 }
 
 // CommonMark 规定 ** 紧内侧不能有空格，否则不渲染加粗。

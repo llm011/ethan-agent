@@ -65,6 +65,8 @@ TODO.md
 .coco/
 .kiro/
 .hermes/
+# WorkBuddy 本地工作记忆（含项目记忆/日志，含内部细节，切勿提交）
+.workbuddy/
 
 pypi/
 

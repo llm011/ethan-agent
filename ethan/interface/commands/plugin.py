@@ -1,9 +1,9 @@
-"""plugin 子命令组：管理工具插件（搜索后端等可插拔组件）。
+"""plugin 子命令组：管理工具插件（搜索后端、语义路由等可插拔组件）。
 
 命令：
-  ethan plugin list                    列出所有可用插件及启用状态
-  ethan plugin add <name>              添加/启用插件（交互式配置）
-  ethan plugin remove <name>           移除/禁用插件
+  ethan plugin list                    列出所有可用插件及安装/启用状态
+  ethan plugin add <name>              添加/安装插件（含预设技能与可选依赖）
+  ethan plugin remove <name>           移除/禁用配置型插件
 """
 from __future__ import annotations
 
@@ -98,9 +98,9 @@ def list_plugins() -> None:
 
 @app.command("add")
 def add_plugin(
-    name: str = typer.Argument(..., help="插件名称，如 tavily / searxng / computer-use"),
+    name: str = typer.Argument(..., help="插件名称，如 tavily / searxng / computer-use / embedding-router"),
 ) -> None:
-    """添加/启用插件，交互式输入所需配置。"""
+    """添加/安装插件（配置型交互式填写；预设型复用 ethan setup 的安装逻辑）。"""
     # 先查配置型插件注册表
     plugin = PLUGIN_REGISTRY.get(name)
     if plugin:
@@ -113,6 +113,8 @@ def add_plugin(
     if preset:
         from ethan.core.config import get_config
         get_config()  # 确保初始化
+        console.print(f"\n[bold]安装预设插件: {preset.get('label', name)} ({name})[/bold]")
+        console.print(f"  {preset['description']}\n")
         _do_install(preset)
         return
 
