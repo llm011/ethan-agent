@@ -59,6 +59,9 @@ if [ -n "${ETHAN_PORT:-}" ]; then
   DATA_DIR="$HOME/.ethan-dev/${ETHAN_PORT}"
   mkdir -p "$DATA_DIR"
   DOCKER_ARGS=(--rm -e "TERM=xterm-256color" -v "$(pwd)/ethan:/app/ethan" -v "${DATA_DIR}:/root/.ethan" -p "${ETHAN_PORT}:8900")
+  # 共享宿主机 ~/.ethan/.secrets 到容器（密钥文件，不随 DATA_DIR 隔离）
+  # ⚠️ Linux 宿主机注意：容器内 root 写入可能导致宿主文件 owner 变为 root（macOS Docker Desktop 自动映射 UID 无此问题）
+  [ -d "$HOME/.ethan/.secrets" ] && DOCKER_ARGS+=(-v "$HOME/.ethan/.secrets:/root/.ethan/.secrets:ro")
 else
   DOCKER_ARGS=(-it --rm -v "$(pwd)/ethan:/app/ethan")
 fi
