@@ -705,7 +705,7 @@ class Agent:
         return await provider.request(description, tool, detail)
 
     async def chat(self, messages: list[Message]) -> Message:
-        """运行对话。fast/medium/full 三档路由，按消息长度和关键词自动选择。"""
+        """运行对话。fast/full 两档路由，按关键词规则自动选择。"""
         from ethan.core.context import reset_active_tools
         self._executor.reset_cache()
         reset_active_tools()  # 清空本请求的 find_tools 激活集
@@ -812,7 +812,7 @@ class Agent:
         return Message(role="assistant", content="[max tool iterations reached]")
 
     async def stream_chat(self, messages: list[Message]):
-        """流式对话。fast/medium/full 三档路由，按消息长度和关键词自动选择。"""
+        """流式对话。fast/full 两档路由，按关键词规则自动选择。"""
         from ethan.core.context import reset_active_tools
         from ethan.providers.base import SkillsMatchedEvent, ThinkingEvent, ToolEvent
 

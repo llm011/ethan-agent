@@ -44,7 +44,7 @@ class LarkConfig(BaseModel):
     verification_token: str = ""  # for event subscription verification
     encrypt_key: str = ""  # optional, for encrypted events
     # 复杂(high/full)回复是否用卡片(interactive)发送以支持流式编辑。
-    # True：full 档用卡片流式 patch；fast/medium 档始终用 post markdown 一次性发。
+    # True：full 档用卡片流式 patch；fast 档始终用 post markdown 一次性发。
     # False：所有档位都用 post markdown 一次性发（无流式编辑，但有 thinking 表情指示）。
     use_card: bool = True
     # 主人识别（飞书按发消息者 open_id 认主人）。空 = 还没认主人，首条消息后会询问。

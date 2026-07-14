@@ -125,7 +125,7 @@ export interface TierTool {
 }
 
 export interface ToolTier {
-  key: "fast" | "medium" | "full";
+  key: "fast" | "full";
   label: string;
   desc: string;
   tools: TierTool[];
@@ -136,7 +136,6 @@ export interface ToolTiers {
   fast_count: number;
   fast_rule_tool_count: number;
   total_count: number;
-  medium_max_length: number;
 }
 
 export async function fetchToolTiers(): Promise<ToolTiers> {
