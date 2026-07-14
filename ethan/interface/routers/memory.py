@@ -94,7 +94,7 @@ async def delete_procedure(proc_id: str, user_id: str = Depends(verify_token)):
     return {"ok": True}
 
 
-# ── Insights (永久记忆 from vectors.db) ──────────────────────────────────
+# ── Insights (永久记忆 from memory.db) ───────────────────────────────────
 
 @router.get("/insights")
 async def list_insights(

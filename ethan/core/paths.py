@@ -67,7 +67,16 @@ def user_persistent_path() -> Path:
 
 
 def user_vectors_db_path() -> Path:
-    return user_memory_dir() / "vectors.db"
+    """向量库路径。统一用 memory.db（有语义），向后兼容旧的 vectors.db。
+
+    如果 memory.db 不存在但 vectors.db 存在，自动迁移。
+    """
+    mem_db = user_memory_dir() / "memory.db"
+    old_vectors = user_memory_dir() / "vectors.db"
+    if not mem_db.exists() and old_vectors.exists():
+        import shutil
+        shutil.copy2(str(old_vectors), str(mem_db))
+    return mem_db
 
 
 _session_db_migrated = False
@@ -235,10 +244,13 @@ def _merge_admin_to_default(admin_dir: Path) -> None:
         if src.exists() and src.stat().st_size > 0:
             shutil.copy2(str(src), str(dst))
 
-    # 4. vectors.db：admin 侧存在则覆盖顶层（向量库不合并）
-    vec_src = admin_memory / "vectors.db"
-    if vec_src.exists() and vec_src.stat().st_size > 0:
-        shutil.copy2(str(vec_src), str(top_memory / "vectors.db"))
+    # 4. memory.db（向量库）：admin 侧存在则覆盖顶层（向量库不合并）
+    #    兼容旧名 vectors.db
+    for db_name in ("memory.db", "vectors.db"):
+        vec_src = admin_memory / db_name
+        if vec_src.exists() and vec_src.stat().st_size > 0:
+            shutil.copy2(str(vec_src), str(top_memory / "memory.db"))
+            break  # 只取第一个存在的
 
     # 5. skills/ + knowledge/：dirs_exist_ok 合并，admin 侧覆盖同名，顶层独有保留
     for sub in ("skills", "knowledge"):

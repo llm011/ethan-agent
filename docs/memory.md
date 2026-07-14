@@ -699,8 +699,7 @@ async def _midnight_loop():
 | Episodes | `~/.ethan/memory/episodes.json` | 历次 session 情节摘要 |
 | Suggestions | `~/.ethan/memory/suggestions.json` | FDE 主动建议（per-user，心跳写入） |
 | Daily Signals | `~/.ethan/memory/daily/<YYYYMMDD>.jsonl` | 每日采集的原始信号 |
-| Memory DB | `~/.ethan/memory/memory.db` | 永久记忆（sqlite-vec 向量库） |
-| Vectors DB | `~/.ethan/memory/vectors.db` | 向量存储（sqlite-vec，per-user） |
+| Memory DB | `~/.ethan/memory/memory.db` | 永久记忆（sqlite-vec 向量库，per-user；旧名 vectors.db 自动迁移） |
 | Signals | `ethan/memory/signals.py` | 信号检测器 + 关键词提取 + 相关性评分 |
 | Daily Signals | `ethan/memory/daily_signals.py` | 跨 session 信号采集 |
 | Daily Consolidation | `ethan/memory/daily_consolidation.py` | 每日记忆沉淀逻辑 |

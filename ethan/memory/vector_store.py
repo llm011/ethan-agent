@@ -1,7 +1,7 @@
 """sqlite-vec backed vector store for semantic search.
 
-Stores float32 embeddings alongside JSON metadata.  One shared DB lives at
-~/.ethan/memory/vectors.db.
+Stores float32 embeddings alongside JSON metadata.  Per-user DB lives at
+~/.ethan/memory/memory.db (旧名 vectors.db，自动迁移)。
 """
 import json
 import logging
