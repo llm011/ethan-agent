@@ -8,7 +8,8 @@ from ethan.memory.session import SessionStore
 logger = logging.getLogger("ethan.tasks")
 
 
-async def _maybe_regen_title(session_id: str) -> None:
+async def _maybe_regen_title(session_id: str) -> str | None:
+    """尝试生成/更新标题，返回新标题或 None（无变化/失败）。"""
     try:
         from ethan.core.paths import user_sessions_db_path
         from ethan.memory.session import decide_title
@@ -18,15 +19,17 @@ async def _maybe_regen_title(session_id: str) -> None:
             session = await store.load(session_id)
             if not session:
                 logger.warning("_maybe_regen_title: session %s not found", session_id)
-                return
+                return None
             title = await decide_title(session.messages, session.title)
             if title and title != session.title:
                 await store.update_title(session_id, title)
                 logger.debug("_maybe_regen_title: updated %s -> %s", session_id, title)
+                return title
         finally:
             await store.close()
     except Exception:
         logger.exception("_maybe_regen_title failed for session=%s", session_id)
+    return None
 
 
 async def _maybe_consolidate(session_id: str, model: str, user_id: str = "", mode: str = "") -> None:

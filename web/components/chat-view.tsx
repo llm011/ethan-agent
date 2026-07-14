@@ -291,6 +291,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           if (chunk.ttfb_ms != null) ttfbMs = chunk.ttfb_ms;
           if (chunk.total_ms != null) totalMs = chunk.total_ms;
           if (chunk.message_id != null) messageId = chunk.message_id;
+          if (chunk.title) setSessionTitle(chunk.title);
           setSessionUsage(prev => ({
             input: prev.input + finalUsage!.input,
             output: prev.output + finalUsage!.output,
@@ -625,15 +626,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       justFinishedRef.current = sessionId;
       window.history.replaceState(null, "", `/chat/${sessionId}`);
     }
-    // 流结束后后端会异步 regen title，延迟 1.5s 取最新标题同步到顶部 header
-    if (sessionId) {
-      setTimeout(async () => {
-        try {
-          const detail = await fetchSession(sessionId);
-          if (detail?.title) setSessionTitle(detail.title);
-        } catch { /* ignore */ }
-      }, 1500);
-    }
+    // 标题已在 done 事件中实时更新（chunk.title），无需额外 poll
   };
 
   return (

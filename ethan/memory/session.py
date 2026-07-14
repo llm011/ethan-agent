@@ -45,7 +45,7 @@ def _auto_title(messages: list[Message]) -> str:
 
 
 # 首条问题少于该字数视为「太短」，推迟到第 2 轮再生成智能标题
-SHORT_QUESTION_CHARS = 7
+SHORT_QUESTION_CHARS = 10
 
 
 async def _generate_smart_title(messages: list[Message], retries: int = 3) -> str | None:
@@ -92,6 +92,26 @@ async def _generate_smart_title(messages: list[Message], retries: int = 3) -> st
 _PROTECTED_PREFIXES = ("[定时]", "[后台]", "[心跳]")
 
 
+def _review_title(text: str) -> str | None:
+    """从 /review 命令中解析 PR 标题，格式如 'PR #70 llm011/ethan-agent'。"""
+    import re as _re
+    t = text.strip()
+    if not (t.lower().startswith("/review ") or t.lower() == "/review"):
+        return None
+    target = t[7:].strip()
+    if not target:
+        return None
+    # 匹配 GitHub PR URL: github.com/owner/repo/pull/123
+    m = _re.search(r"github\.com/([^/]+/[^/]+)/pull/(\d+)", target)
+    if m:
+        return f"PR #{m.group(2)} {m.group(1)}"
+    # 匹配 GitLab MR URL: gitlab.com/owner/repo/-/merge_requests/123
+    m = _re.search(r"gitlab\.com/([^/]+/[^/]+)/-/merge_requests/(\d+)", target)
+    if m:
+        return f"MR !{m.group(2)} {m.group(1)}"
+    return None
+
+
 async def decide_title(messages: list[Message], current_title: str = "") -> str | None:
     """统一的标题策略，返回应设置的标题；返回 None 表示本轮不改标题。
 
@@ -108,6 +128,10 @@ async def decide_title(messages: list[Message], current_title: str = "") -> str 
     n = len(user_msgs)
     if n == 1:
         first = user_msgs[0].content.strip()
+        # /review 命令：直接从 URL 解析出 "PR #xx owner/repo" 格式标题
+        review = _review_title(first)
+        if review:
+            return review
         if len(first) >= SHORT_QUESTION_CHARS:
             return await _generate_smart_title(messages) or _auto_title(messages)
         return _auto_title(messages)
