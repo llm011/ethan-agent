@@ -10,10 +10,7 @@ from pathlib import Path
 
 import aiosqlite
 
-from ethan.core.config import CONFIG_DIR
 from ethan.providers.base import Message
-
-DB_PATH = CONFIG_DIR / "sessions.db"
 
 
 @dataclass
@@ -153,7 +150,11 @@ async def decide_title(messages: list[Message], current_title: str = "") -> str 
 class SessionStore:
     """SQLite-backed session 存储。"""
 
-    def __init__(self, db_path: Path = DB_PATH):
+    def __init__(self, db_path: Path | None = None):
+        # 不传时按当前 user context 求值，避免模块级缓存击穿 per-user 隔离
+        if db_path is None:
+            from ethan.core.paths import user_sessions_db_path
+            db_path = user_sessions_db_path()
         self._db_path = db_path
         self._db: aiosqlite.Connection | None = None
 
@@ -483,4 +484,96 @@ class SessionStore:
         )
         await self._db.commit()
         return cursor.rowcount
+
+    # ── sessions.db 轮转（防止无限膨胀） ──────────────────────────
+
+    SESSION_DB_SIZE_THRESHOLD = 10 * 1024 * 1024  # 10 MB
+
+    async def rotate_if_needed(self, threshold: int = SESSION_DB_SIZE_THRESHOLD) -> bool:
+        """如果 sessions.db 超过 threshold，快照归档 + 清空 active db。
+
+        归档文件名按日期跨度命名：sessions.2026-01-01~2026-02-10.db
+        使用 VACUUM INTO 做原子快照（不受并发连接影响），然后 DELETE + VACUUM 回收空间。
+        返回 True 表示执行了轮转。
+        """
+        if not self._db_path.exists():
+            return False
+        size = self._db_path.stat().st_size
+        if size < threshold:
+            return False
+
+        # 查日期跨度
+        async with self._db.execute(
+            "SELECT MIN(created_at), MAX(created_at) FROM sessions"
+        ) as cursor:
+            row = await cursor.fetchone()
+        if not row or row[0] is None:
+            return False  # 空库不轮转
+
+        from datetime import datetime
+        start_date = datetime.fromtimestamp(row[0]).strftime("%Y-%m-%d")
+        end_date = datetime.fromtimestamp(row[1]).strftime("%Y-%m-%d")
+
+        from ethan.core.paths import user_session_archive_dir
+        archive_dir = user_session_archive_dir()
+        archive_dir.mkdir(parents=True, exist_ok=True)
+
+        # 文件名：sessions.{start}~{end}.db，重名加序号
+        base_name = f"sessions.{start_date}~{end_date}.db"
+        archive_path = archive_dir / base_name
+        counter = 1
+        while archive_path.exists():
+            archive_path = archive_dir / f"sessions.{start_date}~{end_date}.{counter}.db"
+            counter += 1
+
+        # VACUUM INTO：原子快照，不受并发连接影响（SQLite ≥ 3.27）
+        try:
+            await self._db.execute(f"VACUUM INTO '{archive_path}'")
+        except Exception:
+            # VACUUM INTO 不可用时 fallback：文件级复制
+            import shutil
+            shutil.copy2(str(self._db_path), str(archive_path))
+
+        # 清空 active db
+        await self._db.execute("DELETE FROM messages")
+        await self._db.execute("DELETE FROM sessions")
+        await self._db.commit()
+
+        # 回收空间（VACUUM 需要无事务，可能因并发连接失败 — 失败也无妨，空页会被复用）
+        try:
+            await self._db.execute("VACUUM")
+        except Exception:
+            pass
+
+        import logging
+        logging.getLogger(__name__).info(
+            "[SessionStore] Rotated sessions.db (%.1f MB → %s), archive: %s",
+            size / 1024 / 1024,
+            archive_path.name,
+            archive_path,
+        )
+        return True
+
+
+def list_archived_dbs() -> list[tuple[Path, str, str]]:
+    """列出当前用户的所有归档 session DB，按起始日期排序。
+
+    返回 [(path, start_date, end_date), ...]
+    如 [(archive/sessions.2026-01-01~2026-02-10.db, '2026-01-01', '2026-02-10'), ...]
+    """
+    import re
+
+    from ethan.core.paths import user_session_archive_dir
+
+    archive_dir = user_session_archive_dir()
+    if not archive_dir.exists():
+        return []
+    pattern = re.compile(r"sessions\.(\d{4}-\d{2}-\d{2})~(\d{4}-\d{2}-\d{2})(?:\.\d+)?\.db")
+    result = []
+    for f in archive_dir.glob("sessions.*~*.db"):
+        m = pattern.match(f.name)
+        if m:
+            result.append((f, m.group(1), m.group(2)))
+    result.sort(key=lambda x: x[1])
+    return result
 

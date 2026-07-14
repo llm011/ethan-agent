@@ -134,6 +134,22 @@ CLI 斜杠命令：
 /new               新建会话
 ```
 
+### sessions.db 轮转（防止无限膨胀）
+
+sessions.db 随对话累积会持续增长。心跳每次 tick 检查文件大小，**超过 10 MB** 时自动轮转：
+
+1. **快照归档**：用 `VACUUM INTO` 原子快照当前 db 到 `~/.ethan/archive/sessions.{start}~{end}.db`（文件名含日期跨度，如 `sessions.2026-01-01~2026-02-10.db`）
+2. **清空 active db**：`DELETE FROM messages; DELETE FROM sessions; VACUUM`
+3. **后续访问**：新对话照常写入已清空的 sessions.db
+
+归档文件按日期跨度命名，未来 agent 可按日期定位历史会话：
+
+```python
+from ethan.memory.session import list_archived_dbs
+archives = list_archived_dbs()
+# [(Path('archive/sessions.2026-01-01~2026-02-10.db'), '2026-01-01', '2026-02-10'), ...]
+```
+
 ---
 
 ## 第二层：分层工作记忆（Working Memory）
@@ -692,7 +708,10 @@ async def _midnight_loop():
 
 | 文件 | 路径（default profile） | 说明 |
 |------|------|------|
-| Session DB | `~/.ethan/sessions.db` | 所有对话历史（SQLite，per-user） |
+| Session DB | `~/.ethan/sessions.db` | 所有对话历史（SQLite，per-user；超 10 MB 自动轮转归档） |
+| Session Archive | `~/.ethan/archive/sessions.{start}~{end}.db` | 轮转归档的旧 session DB（按日期跨度命名） |
+| Lark Sessions | `~/.ethan/lark_sessions.json` | 飞书 chat_id → session_id 映射（运行时状态） |
+| Lark Welcomed | `~/.ethan/.lark_welcomed` | 飞书首次欢迎标记（运行时状态） |
 | Cold Facts | `~/.ethan/memory/facts.json` | 结构化长期 facts（含 tags） |
 | Procedures | `~/.ethan/memory/playbook.json` | 行为准则 + 成功路径 |
 | User Profile | `~/.ethan/memory/user_profile.md` | 用户画像（叙述性） |

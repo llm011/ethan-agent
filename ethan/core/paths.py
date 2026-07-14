@@ -62,6 +62,16 @@ def user_profile_path() -> Path:
     return user_memory_dir() / "user_profile.md"
 
 
+def user_lark_sessions_path() -> Path:
+    """飞书 session 映射。放在数据根目录（非 memory/），因为它是运行时状态不是记忆。"""
+    return user_data_dir() / "lark_sessions.json"
+
+
+def user_lark_welcomed_path() -> Path:
+    """飞书欢迎标记。同上，运行时状态。"""
+    return user_data_dir() / ".lark_welcomed"
+
+
 def user_persistent_path() -> Path:
     return user_memory_dir() / "persistent.md"
 
@@ -90,6 +100,14 @@ def user_sessions_db_path() -> Path:
         _session_db_migrated = True
         _migrate_tmp_session_db(target)
     return target
+
+
+def user_session_archive_dir() -> Path:
+    """归档 session DB 目录。sessions.db 超过阈值时轮转到此，按日期跨度命名。
+
+    如 archive/sessions.2026-01-01~2026-02-10.db
+    """
+    return user_data_dir() / "archive"
 
 
 def _migrate_tmp_session_db(target: Path) -> None:
@@ -234,8 +252,16 @@ def _merge_admin_to_default(admin_dir: Path) -> None:
             shutil.copy2(str(legacy), str(new))
     _merge_json_file(admin_memory, top_memory, "playbook.json")
     _merge_json_file(admin_memory, top_memory, "episodes.json")
-    _merge_json_file(admin_memory, top_memory, "lark_sessions.json")
     _merge_facts_json(admin_memory, top_memory)  # facts 按条目 merge
+
+    # 2b. lark_sessions.json：运行时状态，放在数据根目录（非 memory/）
+    #      兼容旧路径 memory/lark_sessions.json
+    for d in (admin_dir, top):
+        legacy = d / "memory" / "lark_sessions.json"
+        new = d / "lark_sessions.json"
+        if legacy.exists() and legacy.stat().st_size > 0 and not new.exists():
+            shutil.copy2(str(legacy), str(new))
+    _merge_json_file(admin_dir, top, "lark_sessions.json")
 
     # 3. Markdown 文件：admin 侧非空则用 admin
     for md in ("user_profile.md", "persistent.md"):

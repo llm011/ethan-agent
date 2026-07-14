@@ -337,7 +337,7 @@ async def _run_heartbeat_md() -> None:
 
 
 async def _tick() -> None:
-    """执行一次心跳：facts 整理 + 画像每日压缩 + heartbeat.md 任务 + skill 进化 + 决策模式抽取 + 需求挖掘 + watchdog 检查。"""
+    """执行一次心跳：facts 整理 + 画像每日压缩 + heartbeat.md 任务 + skill 进化 + 决策模式抽取 + 需求挖掘 + watchdog 检查 + memory.db LRU 清理 + sessions.db 轮转检查。"""
     logger.info("[Heartbeat] tick")
     # 确保 watchdog 进程存活（互相拉起的 server 侧逻辑）
     # 多 worktree 开发时跳过（ETHAN_NO_WATCHDOG=1）
@@ -354,6 +354,31 @@ async def _tick() -> None:
     await _extract_decision_patterns()
     await _mine_recurring_needs()
     await _cleanup_memory_db()
+    await _rotate_session_dbs()
+
+
+async def _rotate_session_dbs() -> None:
+    """遍历所有用户，检查 sessions.db 是否超过 10 MB，超过则归档轮转。"""
+    try:
+        from ethan.core.context import ETHAN_USER_ID, get_user_store
+        from ethan.core.paths import user_sessions_db_path
+        from ethan.memory.session import SessionStore
+
+        for uid in get_user_store().all_user_ids():
+            token = ETHAN_USER_ID.set(uid)
+            try:
+                store = SessionStore(db_path=user_sessions_db_path())
+                await store.init()
+                try:
+                    rotated = await store.rotate_if_needed()
+                finally:
+                    await store.close()
+                if rotated:
+                    logger.info("[Heartbeat] sessions.db rotated: user=%s", uid or "default")
+            finally:
+                ETHAN_USER_ID.reset(token)
+    except Exception:
+        logger.warning("[Heartbeat] sessions.db rotation check failed", exc_info=True)
 
 
 async def _update_skills() -> None:
