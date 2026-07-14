@@ -5,6 +5,7 @@
 import asyncio
 import logging
 import os
+import time as _time
 from datetime import datetime
 from pathlib import Path
 
@@ -396,26 +397,26 @@ async def _extract_decision_patterns() -> None:
 
         # 收集所有 session 的 tool_steps
         all_tool_sequences: list[tuple[str, list[str]]] = []  # (session_title, tool_sequence)
-        for si in sessions:
-            # list_recent 不返回 messages/snippet，需要 load 拿 tool_steps
-            # snippet 可能为 None，跳过过滤直接 load
-            try:
-                store2 = SessionStore(db_path=user_sessions_db_path())
-                await store2.init()
-                session = await store2.load(si.id)
-                await store2.close()
-                if not session:
+        store2 = SessionStore(db_path=user_sessions_db_path())
+        await store2.init()
+        try:
+            for si in sessions:
+                try:
+                    session = await store2.load(si.id)
+                    if not session:
+                        continue
+                    tool_names = []
+                    for m in session.messages:
+                        if m.tool_steps:
+                            for step in m.tool_steps:
+                                if step.get("tool"):
+                                    tool_names.append(step["tool"])
+                    if tool_names:
+                        all_tool_sequences.append((si.title or si.id, tool_names))
+                except Exception:
                     continue
-                tool_names = []
-                for m in session.messages:
-                    if m.tool_steps:
-                        for step in m.tool_steps:
-                            if step.get("tool"):
-                                tool_names.append(step["tool"])
-                if tool_names:
-                    all_tool_sequences.append((si.title or si.id, tool_names))
-            except Exception:
-                continue
+        finally:
+            await store2.close()
 
         if not all_tool_sequences:
             return
@@ -577,7 +578,7 @@ async def _mine_recurring_needs() -> None:
                         "count": count,
                         "suggestion": suggestion,
                         "rejected": False,
-                        "created_at": __import__("time").time(),
+                        "created_at": _time.time(),
                     })
                     added += 1
 

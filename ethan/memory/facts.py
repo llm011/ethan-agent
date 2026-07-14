@@ -173,11 +173,12 @@ class FactStore:
         if not top:
             return ""
 
-        # touch 命中的 fact（更新 last_accessed）
+        # touch 命中的 fact（更新 last_accessed），但限制写频率避免高频 I/O
+        now = time.time()
         touched = False
         for _, _, f in top:
-            if query_keywords and f.tags:
-                f.last_accessed = time.time()
+            if query_keywords and f.tags and (now - f.last_accessed > 60):
+                f.last_accessed = now
                 touched = True
         if touched:
             self._save()

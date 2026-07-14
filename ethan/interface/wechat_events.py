@@ -268,7 +268,8 @@ async def _handle_message(msg: dict[str, Any], creds: Any) -> None:
     # A3: 微信渠道也触发后台记忆抽取（原来只有 Web/REPL 触发）
     try:
         from ethan.interface.routers.tasks import _maybe_consolidate
-        asyncio.create_task(_maybe_consolidate(session_id, agent._provider.model, user_id))
+        task = asyncio.create_task(_maybe_consolidate(session_id, agent._provider.model, user_id))
+        task.add_done_callback(lambda t: logger.error("consolidate failed", exc_info=t.exception()) if not t.cancelled() and t.exception() else None)
     except Exception:
         pass
 

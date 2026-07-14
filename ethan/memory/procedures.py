@@ -115,7 +115,7 @@ class ProcedureStore:
             lines.append("Success patterns (similar scenarios worked well before):")
             for p in sorted(self._success_patterns, key=lambda x: -x.success_count):
                 seq = " → ".join(p.tool_sequence)
-                lines.append(f"- {p.scenario}: {seq} ({p.success_count}/{p.success_count} 成功)")
+                lines.append(f"- {p.scenario}: {seq} ({p.success_count}次成功)")
         return "\n".join(lines)
 
     def count(self) -> int:

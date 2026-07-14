@@ -33,8 +33,8 @@ _MEMORY_SIGNALS: list[tuple[str, list[str], str]] = [
     (
         "fact",
         [
-            "我叫", "我在", "我的", "我是", "我在做", "我的工作",
-            "i am", "i work", "my name", "i'm from", "i live",
+            "我叫", "我在做", "我的工作", "我的名字", "我住在",
+            "i am a", "i work", "my name", "i'm from", "i live in",
         ],
         "用户刚才的话里包含个人事实信号，如果是值得记住的个人信息，请调 memory_write(category=\"knowledge\")。",
     ),
@@ -99,14 +99,16 @@ def extract_keywords(text: str, max_keywords: int = 8) -> list[str]:
         if len(keywords) >= max_keywords:
             return keywords
 
-    # CJK 滑窗：提取 2-4 字的 CJK 子串
+    # CJK 滑窗：提取 2-4 字的 CJK 子串（跳过含停用字的 bigram）
     cjk_chunks = re.findall(r"[\u4e00-\u9fff]{2,}", text)
-    _cjk_stop = {"的", "了", "是", "在", "我", "你", "他", "她", "它", "们", "和", "与", "或", "也", "都", "就", "这", "那", "有", "不", "没", "对", "错"}
+    _cjk_stop_chars = {"的", "了", "是", "在", "我", "你", "他", "她", "它", "们", "和", "与", "或", "也", "都", "就", "这", "那", "有", "不", "没", "对", "错"}
     for chunk in cjk_chunks:
-        # 2-字滑窗
+        # 2-字滑窗：两个字都不是停用字才保留
         for i in range(len(chunk) - 1):
             piece = chunk[i:i + 2]
-            if piece not in _cjk_stop and piece not in seen:
+            if piece[0] in _cjk_stop_chars or piece[1] in _cjk_stop_chars:
+                continue
+            if piece not in seen:
                 keywords.append(piece)
                 seen.add(piece)
             if len(keywords) >= max_keywords:
