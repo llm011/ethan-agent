@@ -562,7 +562,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     }));
 
     await consumeStream(
-      streamChat(chatMessages, selectedModel, sessionId, sentQuote, mode, isBtw, isReview),
+      streamChat(chatMessages, selectedModel, sessionId, { quote: sentQuote, mode, btw: isBtw, review: isReview }),
       newMessages,
       true,
     );

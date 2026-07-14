@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 
 from ethan import __version__
@@ -20,6 +20,21 @@ from .sse import _sse_from_run
 router = APIRouter()
 
 logger = logging.getLogger(__name__)
+
+# 本地回环地址集合：auto_consent 仅允许来自这些地址的请求生效。
+_LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
+
+
+def _is_loopback(request: Request) -> bool:
+    """请求是否来自本地回环地址。
+
+    用 TCP 直连地址（request.client.host），不信任 X-Forwarded-For —— 后者可被
+    客户端伪造。client 为 None（异常情况）时按非本地处理（更安全）。
+    """
+    client = request.client
+    if client is None:
+        return False
+    return client.host in _LOOPBACK_HOSTS
 
 
 # ── Health / Poll ────────────────────────────────────────────────
@@ -56,7 +71,7 @@ async def poll(user_id: str = Depends(verify_token)):
 
 
 @router.post("/chat")
-async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
+async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify_token)):
     from ethan.core.context import set_session_id
     from ethan.core.paths import user_facts_path, user_sessions_db_path
 
@@ -151,7 +166,14 @@ async def chat(req: ChatRequest, user_id: str = Depends(verify_token)):
         # 不影响 producer——生成照常跑完并入库。刷新后可经 GET /chat/{id}/stream 重连回放。
         from ethan.core.consent import AutoConsentProvider, WebConsentProvider
 
-        if req.auto_consent:
+        # 安全约束：auto_consent 会自动批准所有工具授权（含 shell 执行），相当于在
+        # 用户主机上放开任意命令执行。绝不能单方面信任请求体里的 auto_consent 字段——
+        # 否则 token 一旦泄露（XSS / 日志 / 配置文件），远程攻击者即可构造请求静默
+        # 执行任意脚本（RCE）。因此强制限定：仅当请求来自本地回环地址时才允许生效，
+        # 非本地来源一律降级为 WebConsentProvider（逐项弹窗确认）。
+        # 注：服务默认绑 0.0.0.0，局域网/公网均可直连，此处来源校验是必要防线。
+        consent = None
+        if req.auto_consent and _is_loopback(request):
             consent = AutoConsentProvider(session_id=req.session_id or "")
         else:
             consent = WebConsentProvider(session_id=req.session_id or "")
