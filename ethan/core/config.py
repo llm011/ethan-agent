@@ -87,7 +87,10 @@ class RoutingConfig(BaseModel):
     fast_base_tools: list[str] = Field(default_factory=lambda: [
         "shell", "file_read", "file_write", "skill_read", "skill_list", "find_tools",
         "schedule_create", "schedule_list", "schedule_remove",
+        "ui_card",
     ])  # fast 档永远挂载的基础系统工具；find_tools 用于「规则工具不够时」兜底激活进阶工具
+    # ui_card 纳入 fast 档：短的结构化请求（对比/排行/统计/时间轴等）通常走 fast 档，
+    # 若不在此广播，模型连工具都不可见 → A2UI 卡片几乎不触发。纳入后两档都能渲染卡片。
     base_tools: list[str] = Field(default_factory=lambda: [
         # 常用核心工具：full 档的初始广播集。
         # 长尾工具不在初始集里，模型按需调 find_tools 激活，避免白白广播 headers 和 schema。
