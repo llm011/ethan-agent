@@ -8,4 +8,5 @@ export * from "./api-sessions";
 export * from "./api-chat";
 export * from "./api-settings";
 export * from "./api-memory";
+export * from "./api-annotations";
 export * from "./api-misc";
