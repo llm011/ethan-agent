@@ -10,6 +10,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         background: resolve(__dirname, 'src/background/index.ts'),
+        offscreen: resolve(__dirname, 'src/offscreen/offscreen.ts'),
         popup: resolve(__dirname, 'src/popup/popup.js'),
       },
       output: {
@@ -26,6 +27,7 @@ export default defineConfig({
         mkdirSync('dist/icons', { recursive: true });
         copyFileSync('src/manifest.json', 'dist/manifest.json');
         copyFileSync('src/popup/popup.html', 'dist/popup.html');
+        copyFileSync('src/offscreen/offscreen.html', 'dist/offscreen.html');
         cpSync('src/assets/icons', 'dist/icons', { recursive: true });
       },
     },

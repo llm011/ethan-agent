@@ -28,15 +28,41 @@ function setStatus(connected) {
 async function queryConnected() {
   try {
     const resp = await chrome.runtime.sendMessage({ type: 'getStatus' });
+    if (resp && resp.error) {
+      $('hint').textContent = '错误: ' + resp.error;
+    }
     return !!(resp && resp.connected);
-  } catch {
+  } catch (e) {
+    $('hint').textContent = '查询失败: ' + (e?.message || e);
     return false;
+  }
+}
+
+// 检查 offscreen document 是否存在
+async function checkOffscreen() {
+  try {
+    const contexts = await chrome.runtime.getContexts({
+      contextTypes: ['OFFSCREEN_DOCUMENT'],
+    });
+    return contexts.length > 0;
+  } catch (e) {
+    return 'error: ' + (e?.message || e);
   }
 }
 
 async function refreshStatus() {
   setStatus(null);
-  setStatus(await queryConnected());
+  const offscreenExists = await checkOffscreen();
+  if (offscreenExists !== true) {
+    $('hint').textContent = 'offscreen 未创建: ' + offscreenExists;
+    setStatus(false);
+    return;
+  }
+  const connected = await queryConnected();
+  if (connected) {
+    $('hint').textContent = '';
+  }
+  setStatus(connected);
 }
 
 /** 轮询状态：重连 + 握手需要一点时间，连查几次直到连上或超时。 */
