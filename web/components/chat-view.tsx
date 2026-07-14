@@ -568,6 +568,11 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         return;
       }
       content = `帮我 code review：${target}`;
+      // 立即从 URL 解析 PR 标题并更新（不等 review 跑完）
+      const ghMatch = target.match(/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/);
+      const glMatch = target.match(/gitlab\.com\/([^/]+\/[^/]+)\/-\/merge_requests\/(\d+)/);
+      if (ghMatch) setSessionTitle(`PR #${ghMatch[2]} ${ghMatch[1]}`);
+      else if (glMatch) setSessionTitle(`MR !${glMatch[2]} ${glMatch[1]}`);
     }
     const imageFiles = pendingFiles.filter((f) => f.isImage);
     const nonImageFiles = pendingFiles.filter((f) => !f.isImage);

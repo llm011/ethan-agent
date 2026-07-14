@@ -76,7 +76,7 @@ function wrapRange(root: HTMLElement, start: number, end: number, span: Highligh
     const mark = document.createElement("mark");
     mark.dataset.annoId = String(span.id);
     mark.className = annoClass(span);
-    if (span.note) mark.title = span.note;
+    if (span.note) mark.dataset.note = span.note;
     after.parentNode?.insertBefore(mark, after);
     mark.appendChild(after);
   }

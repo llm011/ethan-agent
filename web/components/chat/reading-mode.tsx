@@ -61,6 +61,7 @@ export function ReadingMode({ open, message, annotations, onClose, onChange }: R
   const [activeId, setActiveId] = useState<number | null>(null);
   const [filter, setFilter] = useState<"all" | "bookmark">("all");
   const contentRef = useRef<HTMLDivElement>(null);
+  const [hoverNote, setHoverNote] = useState<{text: string; top: number; left: number} | null>(null);
   const bookmarks = local.filter((a) => a.type === "bookmark");
   const shown = filter === "bookmark" ? bookmarks : local;
 
@@ -79,6 +80,31 @@ export function ReadingMode({ open, message, annotations, onClose, onChange }: R
       }));
       applyHighlights(contentRef.current, spans, false);
     }
+  }, [open, local, message?.content]);
+
+  // 批注 hover tooltip：mark[data-note] 上悬浮即时展示
+  useEffect(() => {
+    const root = contentRef.current;
+    if (!open || !root) return;
+    const onEnter = (e: Event) => {
+      const mark = e.currentTarget as HTMLElement;
+      const note = mark.dataset.note;
+      if (!note) return;
+      const rect = mark.getBoundingClientRect();
+      setHoverNote({ text: note, top: rect.bottom + 6, left: rect.left + rect.width / 2 });
+    };
+    const onLeave = () => setHoverNote(null);
+    const marks = root.querySelectorAll("mark[data-note]");
+    marks.forEach((m) => {
+      m.addEventListener("mouseenter", onEnter);
+      m.addEventListener("mouseleave", onLeave);
+    });
+    return () => {
+      marks.forEach((m) => {
+        m.removeEventListener("mouseenter", onEnter);
+        m.removeEventListener("mouseleave", onLeave);
+      });
+    };
   }, [open, local, message?.content]);
 
   // Esc 关闭
@@ -379,6 +405,15 @@ export function ReadingMode({ open, message, annotations, onClose, onChange }: R
         </div>
       )}
     </div>
+      {/* 批注悬浮提示 */}
+      {hoverNote && (
+        <div
+          className="fixed z-[80] max-w-xs -translate-x-1/2 rounded-md bg-foreground px-3 py-1.5 text-xs text-background shadow-lg"
+          style={{ top: hoverNote.top, left: hoverNote.left }}
+        >
+          {hoverNote.text}
+        </div>
+      )}
     </TooltipProvider>
   );
 }
