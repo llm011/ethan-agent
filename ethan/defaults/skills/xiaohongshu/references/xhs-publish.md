@@ -79,15 +79,12 @@ browser_page action=wait, ms=3000
 **必须先让用户确认内容**，确认后：
 ```javascript
 (() => {
-  const btn = document.querySelector('button[class*="publish"], .publishBtn, button:has(span:contains("发布"))');
-  if (!btn) {
-    const buttons = Array.from(document.querySelectorAll('button'));
-    const publishBtn = buttons.find(b => b.textContent.includes('发布'));
-    if (publishBtn) { publishBtn.click(); return { clicked: true }; }
-    return { clicked: false };
-  }
-  btn.click();
-  return { clicked: true };
+  const buttons = Array.from(document.querySelectorAll('button'));
+  const publishBtn = buttons.find(b => b.textContent.includes('发布'));
+  if (publishBtn) { publishBtn.click(); return { clicked: true }; }
+  const btn = document.querySelector('button[class*="publish"], .publishBtn');
+  if (btn) { btn.click(); return { clicked: true }; }
+  return { clicked: false };
 })()
 ```
 

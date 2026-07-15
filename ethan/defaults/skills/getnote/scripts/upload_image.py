@@ -176,7 +176,7 @@ def main():
         print('   curl -X POST "https://openapi.biji.com/open/api/v1/resource/note/save?task_id=..."')
         print('     -H "Authorization: $GETNOTE_API_KEY"')
         print('     -H "Content-Type: application/json"')
-        print(f'     -d \'{{"type":"img_text","image_urls":["{image_url}"]}}\'')
+        print(f'     -d \'{{"note_type":"img_text","image_urls":["{image_url}"]}}\'')
         
     except Exception as e:
         print(f"错误: {e}")

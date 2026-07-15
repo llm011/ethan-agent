@@ -80,11 +80,11 @@ async function searchPOI(params) {
   const url = 'https://restapi.amap.com/v5/place/text';
 
   const requestParams = {
-    key: key,
+    ...params,
+    key,
     keywords: params.keywords || '',
     region: params.city || '',
     city_limit: params.cityLimit !== false,
-    ...params
   };
 
   try {
@@ -271,7 +271,9 @@ async function travelPlanner(params) {
       poiResults.push(...result.pois);
 
       result.pois.forEach(poi => {
+        if (!poi.location) return;
         const [lng, lat] = poi.location.split(',').map(Number);
+        if (isNaN(lng) || isNaN(lat)) return;
         mapTaskData.push({
           type: 'poi',
           lnglat: [lng, lat],
