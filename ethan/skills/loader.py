@@ -10,6 +10,7 @@
 
 也支持旧格式：~/.ethan/skills/<name>.md（单文件）
 """
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,6 +22,10 @@ from ethan.core.config import CONFIG_DIR
 
 # 用户技能目录（~/.ethan/skills/）
 USER_SKILLS_DIR = CONFIG_DIR / "skills"
+
+# category 合法值：default=全量注入简表+命中注入全文；
+# discoverable=列 trigger+命中只注入简表；plugin=插件式（按需加载）。
+_VALID_CATEGORIES = {"default", "discoverable", "plugin"}
 
 
 @dataclass
@@ -35,6 +40,7 @@ class Skill:
     modes: list[str] = field(default_factory=list)  # 空列表 = 所有对话模式可用；非空 = 仅在这些 mode 生效
     references: list[Path] = field(default_factory=list)  # skill_dir/references/*.md
     is_default: bool = False  # 是否为打包自带的默认 Skill（vs 用户安装的）
+    category: str = "default"  # default = 全量注入简表+命中注入全文；discoverable = 列 trigger+命中只注入简表
 
 
 def _default_skill_names() -> set[str]:
@@ -95,9 +101,17 @@ def load_skill_from_file(path: Path) -> Optional[Skill]:
     else:
         modes = []
 
+    raw_category = str(meta.get("category", "default")).strip() or "default"
+    if raw_category not in _VALID_CATEGORIES:
+        logging.getLogger(__name__).warning(
+            "skill %r 的 category=%r 不合法，回退为 default（合法值：%s）",
+            name, raw_category, _VALID_CATEGORIES)
+        raw_category = "default"
+    category = raw_category
+
     return Skill(name=name, description=description, trigger=triggers,
                  content=content, source=path, fast_path=fast_path,
-                 channels=channels, modes=modes)
+                 channels=channels, modes=modes, category=category)
 
 
 def load_skill_from_dir(skill_dir: Path) -> Optional[Skill]:

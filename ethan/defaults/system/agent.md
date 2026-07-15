@@ -54,7 +54,7 @@
 
 ## code-review（代码审查）
 
-review 代码时，**必须先调 `skill_read(name="code-review")`** 读取审查规范再执行，不要凭直觉开始。
+review 代码、审查 PR、发评论、把评论打上去、提交 PR 评论时，**必须先调 `skill_read(name="code-review")`** 读取审查规范再执行，不要凭直觉开始，不要直接用 https/web_fetch 调 GitHub API。
 
 ## skill_create 的触发条件
 
