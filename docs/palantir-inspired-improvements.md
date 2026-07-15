@@ -4,54 +4,15 @@
 
 ## 已实施（本 PR：feat/memory-recall-enhancement）
 
-### ✅ A1. 记忆自动召回（Context Layer 借鉴）
-- **价值**：记忆命中率从"等 LLM 调 memory_write"提升到"系统确定性召回"
-- **成本**：~150 行
-- **状态**：已完成
-- **做法**：FactStore 增加 `tags` 字段，写入时自动提取关键词；`build_context_with_recall(query)` 按当前对话关键词召回相关 facts
-- **文件**：[ethan/memory/facts.py](file:///Users/jsongo/code/life/ethan-ai/.claude/worktrees/feat-memory-recall/ethan/memory/facts.py)、[ethan/memory/signals.py](file:///Users/jsongo/code/life/ethan-ai/.claude/worktrees/feat-memory-recall/ethan/memory/signals.py)
+| # | 改进项 | 核心变化 | 详见 |
+|---|--------|----------|------|
+| A1 | 记忆自动召回 | FactStore 增加 `tags`，`build_context_with_recall(query)` 按关键词语义召回 | [memory.md · 信号检测与语义召回](./memory.md#信号检测与语义召回) |
+| A2 | 记忆信号检测器 | `detect_memory_signal()` 确定性规则检测 → 注入 hint + 激活工具 | [memory.md · 信号检测](./memory.md#信号检测与语义召回) |
+| A3 | 降低门槛 + 多渠道 | 触发从 `%10` → `%5`，warm_capacity 20→10，微信/飞书也触发抽取 | [memory.md · 后台抽取触发](./memory.md#后台抽取触发) |
+| B1 | 决策记录结构化 | 心跳从 tool_steps 抽取成功路径 → `playbook.json` 正反馈 | [memory.md · 过程记忆](./memory.md#过程记忆procedurestore) |
+| B2 | FDE 需求挖掘 | episodes ≥3 次重复 → `suggestions.json` → 首轮注入建议 | [memory.md · Episode](./memory.md#第四层情节记忆episodic-memory) |
 
-### ✅ A2. 记忆信号检测器（确定性与概率性分离）
-- **价值**：规则命中即触发记忆写入，不依赖 LLM 自觉
-- **成本**：~80 行
-- **状态**：已完成
-- **做法**：`detect_memory_signal(text)` 用确定性规则检测偏好/决定/事实/纠正信号，命中时注入 `<memory_signal>` hint 并激活 memory_write 工具
-- **文件**：[ethan/memory/signals.py](file:///Users/jsongo/code/life/ethan-ai/.claude/worktrees/feat-memory-recall/ethan/memory/signals.py)、[ethan/core/agent.py](file:///Users/jsongo/code/life/ethan-ai/.claude/worktrees/feat-memory-recall/ethan/core/agent.py)
-
-### ✅ A3. 降低后台抽取门槛 + 多渠道触发
-- **价值**：短对话（<10 轮）的记忆不再丢失；微信/飞书渠道也触发后台抽取
-- **成本**：~30 行
-- **状态**：已完成
-- **做法**：Web 路径触发条件从 `user_turns % 10` 改为 `% 5`；warm_capacity 从 20 降到 10；微信/飞书渠道在 `store.close()` 后调用 `_maybe_consolidate`
-- **文件**：[ethan/interface/routers/tasks.py](file:///Users/jsongo/code/life/ethan-ai/.claude/worktrees/feat-memory-recall/ethan/interface/routers/tasks.py)、[ethan/memory/working.py](file:///Users/jsongo/code/life/ethan-ai/.claude/worktrees/feat-memory-recall/ethan/memory/working.py)、[ethan/interface/wechat_events.py](file:///Users/jsongo/code/life/ethan-ai/.claude/worktrees/feat-memory-recall/ethan/interface/wechat_events.py)、[ethan/interface/lark_agent.py](file:///Users/jsongo/code/life/ethan-ai/.claude/worktrees/feat-memory-recall/ethan/interface/lark_agent.py)
-
-### ✅ B1. 决策记录结构化 + 闭环学习（原 P0-1）
-- **价值**：Agent 越用越聪明，高频操作路径自动固化
-- **成本**：~100 行
-- **状态**：已完成
-- **做法**：
-  1. 心跳任务 `_extract_decision_patterns()` 扫描近 20 个 session 的 tool_steps，用 lite 模型提取 `(场景 → 工具序列 → 结果)` 三元组
-  2. 去重后存入 playbook.json 的 `success_patterns` 字段（相同 scenario 合并、count 累加）
-  3. `build_context()` 注入时，除了"纠正准则"还注入"Success patterns"作为正反馈
-- **借鉴 Palantir**：Action Layer 的决策记录与反馈闭环
-- **Ethan 改造前**：procedures.py 只记"不要做什么"（纠正），没有记"这么做效果好"（正反馈）
-- **文件**：[ethan/core/heartbeat.py](file:///Users/jsongo/code/life/ethan-ai/.claude/worktrees/feat-memory-recall/ethan/core/heartbeat.py)、[ethan/memory/procedures.py](file:///Users/jsongo/code/life/ethan-ai/.claude/worktrees/feat-memory-recall/ethan/memory/procedures.py)
-
-### ✅ B2. FDE 模式：主动挖掘未言明需求（原 P0-2）
-- **价值**：从"等指令"变成"主动发现问题"，这是个人助理和工具的本质区别
-- **成本**：~80 行（+ episodic summary 修复 ~40 行）
-- **状态**：已完成
-- **做法**：
-  1. **修复 episodic summary**：原来按空格 `split()` 分词对中文无效，改用 `extract_keywords` 提取中文关键词
-  2. 心跳任务 `_mine_recurring_needs()` 扫描近 30 个 episodes，用 lite 模型识别"≥3 次的重复模式"
-  3. 建议写入 `~/.ethan/memory/suggestions.json`
-  4. 下次对话首轮注入 `<proactive_suggestion>` 提醒 Agent 自然提起
-  5. 用户拒绝后记入 `rejected`，不再重复
-- **借鉴 Palantir**：FDE（前沿部署工程师）模式——挖掘无法言明的真实需求
-- **关键约束**：不主动发消息打扰，只在下次对话时提起
-- **文件**：[ethan/core/heartbeat.py](file:///Users/jsongo/code/life/ethan-ai/.claude/worktrees/feat-memory-recall/ethan/core/heartbeat.py)、[ethan/core/agent.py](file:///Users/jsongo/code/life/ethan-ai/.claude/worktrees/feat-memory-recall/ethan/core/agent.py)、[ethan/interface/repl.py](file:///Users/jsongo/code/life/ethan-ai/.claude/worktrees/feat-memory-recall/ethan/interface/repl.py)
-
-> **B1 与 B2 为何一起设计**：两者共享同一套基础设施——心跳任务调度、lite 模型调用、procedures/episodes 存储层。B1 从 tool_steps 抽取"成功路径"，B2 从 episodes 抽取"重复需求"，输入源不同但闭环结构一致（抽取 → 去重存储 → 下次注入）。合并设计避免了重复造轮子，也让"正反馈"和"主动建议"在同一个 system prompt 里协同出现。
+> B1 与 B2 共享基础设施（心跳调度 + lite 模型 + 存储层），输入源不同（tool_steps vs episodes）但闭环结构一致。
 
 ---
 

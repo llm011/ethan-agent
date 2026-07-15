@@ -63,9 +63,11 @@ Full / Medium Path 按以下顺序拼接，`Current time:` 是稳定层与动态
 ─── Current time: ───   ← 缓存分割线
 workspace 路径
 定时任务摘要
-<memory_context>        ← FactStore top-15 facts
-<user_profile>          ← ~/.ethan/memory/user_profile.md（用户画像）
-<behavioral_guidelines> ← ProcedureStore（行为规则）
+<memory_signal>         ← 信号检测命中时注入 hint + 激活 memory_write
+<memory_context>        ← FactStore.build_context_with_recall(query) 按 tags 语义召回 top-15 facts
+<user_profile>          ← ~/.ethan/memory/user_profile.md（用户画像，仅 full path）
+<behavioral_guidelines> ← ProcedureStore（纠正准则 + 成功路径）
+<proactive_suggestion>  ← FDE 建议（首轮、未拒绝的）
 <relevant_skills>       ← 关键词匹配的 Skill 正文
 ```
 
