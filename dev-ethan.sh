@@ -90,18 +90,25 @@ models = c.get('models', [])
 # defaults
 model = defaults.get('model', '')
 lite_model = defaults.get('lite_model', '')
+fallback_model = defaults.get('fallback_model', '')
 if model:
     print(f'AGENT_DEFAULT_MODEL={model}')
 if lite_model:
     print(f'AGENT_LITE_MODEL={lite_model}')
+if fallback_model:
+    print(f'AGENT_FALLBACK_MODEL={fallback_model}')
 
-# 找出 default model 和 lite_model 用到的 provider
+# 找出 default model、lite_model、fallback_model 用到的 provider
 needed_providers = set()
+model_ids = {model, lite_model, fallback_model}
 for m in models:
-    if m.get('id') in (model, lite_model):
+    if m.get('id') in model_ids:
         needed_providers.add(m.get('provider', ''))
         for fp in m.get('fallback_providers', []):
             needed_providers.add(fp)
+# fallback_model 若写成 provider/model 格式，直接取 provider 部分
+if fallback_model and '/' in fallback_model:
+    needed_providers.add(fallback_model.split('/', 1)[0])
 
 # 提取对应 provider 的 key
 for pname, pcfg in providers.items():
