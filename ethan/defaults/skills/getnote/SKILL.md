@@ -117,12 +117,13 @@ Python / Go 等语言原生支持大整数，无此问题。
 
 ### 第一步：用户发来视频链接（首次）
 
-**识别视频平台**：
-| URL 模式 | 平台 |
-|---------|------|
-| `youtube.com/watch?v=` `youtu.be/` | YouTube |
-| `bilibili.com/video/` `b23.tv/` | Bilibili |
-| `douyin.com/video/` `iesdouyin.com/share/video/` | 抖音 |
+**识别视频平台**（实测均兼容）：
+| URL 模式 | 平台 | 实测结果 |
+|---------|------|---------|
+| `youtube.com/watch?v=` `youtu.be/` | YouTube | ⚠️ 部分视频可能提取失败（无字幕/反爬），需降级 |
+| `bilibili.com/video/` `b23.tv/` | Bilibili | 未实测 |
+| `douyin.com/video/` `iesdouyin.com/share/video/` | 抖音 | ✅ 实测成功，30-44s 完成 |
+| `douyin.com/jingxuan?modal_id=` | 抖音（精选页） | ✅ 实测成功，~120s 完成 |
 
 **直接调 save API（note_type=link），不读 references**：
 
@@ -175,12 +176,19 @@ curl -s -X POST "https://openapi.biji.com/open/api/v1/resource/note/task/progres
   -d '{"task_id":"TASK_ID"}'
 ```
 
-3. 解析响应：
-   - `status: "success"` → 任务完成，`note_id` 字段有值（注意进行中时 note_id 为 `"0"`，需过滤）
-   - `status: "pending" / "processing"` → 还在处理，告诉用户「还在处理，再等一会儿」
+3. 解析响应（实测经验）：
+   - `status: "success"` → 任务完成，`note_id` 字段有值
+   - `status: "processing"` → 还在处理中，note_id 可能已有值但 content 为空
    - `status: "failed"` → 失败，报告 error_msg
+   - ⚠️ **不要只看 error_msg**：success 状态下 error_msg 可能有残留值（如"生成笔记失败，请手动重试"），必须以 `status` 字段为准
 
-4. 任务成功后，用 `note_id` 调 detail API 查笔记内容：
+4. **轮询策略**（实测：抖音 30-120s，YouTube 可能失败）：
+   - 首次轮询：保存后等 30 秒
+   - 后续轮询：每 30 秒一次，最多轮询 5 次（共 ~150s）
+   - 超过 150s 仍 processing → 告诉用户「还在处理，稍后再来问」
+   - status=failed → 告诉用户提取失败，**降级到 web_search/web_fetch** 抓取视频信息
+
+5. 任务成功后，用 `note_id` 调 detail API 查笔记内容：
 
 ```bash
 curl -s -X GET "https://openapi.biji.com/open/api/v1/resource/note/detail?id=NOTE_ID" \
@@ -188,8 +196,8 @@ curl -s -X GET "https://openapi.biji.com/open/api/v1/resource/note/detail?id=NOT
   -H "X-Client-ID: $GETNOTE_CLIENT_ID"
 ```
 
-5. 解析响应：内容在 `data.note.content` 字段，链接原文在 `data.note.web_page.content`
-6. 总结或原样返回给用户
+6. 解析响应：内容在 `data.note.content` 字段，链接原文在 `data.note.web_page.content`
+7. 总结或原样返回给用户
 
 **⚠️ 查询时的决策逻辑**：
 - 对话历史中有 task_id → 先轮询 `/task/progress`，成功后用 note_id 调 `detail API`
@@ -203,8 +211,10 @@ curl -s -X GET "https://openapi.biji.com/open/api/v1/resource/note/detail?id=NOT
 - ✅ 直接用 `save API (note_type=link, link_url=URL)` 交给 Get笔记服务端提取
 - ✅ 存完后告诉用户「过几分钟再来问」
 - ✅ 用户回来问时，先用 `task_id` 轮询 `/task/progress`，成功后用 `note_id` 调 `detail API`（参数 `id`）
-- ✅ detail API 参数名是 `id`（不是 `note_id`），响应内容在 `data.note.content`
+- ✅ detail API 参数名是 `id`（不是 `note_id`），响应内容在 `data.note.content`，原文在 `data.note.web_page.content`
 - ✅ 如果对话历史中找不到 task_id，用 `recall` 搜索
+- ✅ **降级策略**：task 失败（status=failed）时，允许 fallback 到 `web_search`/`web_fetch` 抓取视频信息，并告知用户「Get笔记提取失败，改用网页抓取」
+- ✅ **轮询策略**：首次等 30s，之后每 30s 一次，最多 5 次
 
 ---
 

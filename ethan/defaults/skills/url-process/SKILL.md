@@ -31,15 +31,16 @@ trigger: "文章总结|总结文章|解读文章|深度总结|这篇文章核心
 | `*.notion.so/*` `notion.site/*` | Notion | **agent-browser**（JS 渲染） | 中 |
 | `zhuanlan.zhihu.com/*` | 知乎专栏 | **agent-browser**（JS 渲染） | 中 |
 | `medium.com/*` | Medium | **agent-browser**（JS 渲染） | 中 |
-| `youtube.com/watch?v=` `youtu.be/*` | YouTube 视频 | **getnote link 存笔记**（异步提取） | 最高 |
+| `youtube.com/watch?v=` `youtu.be/*` | YouTube 视频 | **getnote link 存笔记**（异步提取）⚠️ 可能失败需降级 | 最高 |
 | `bilibili.com/video/*` `b23.tv/*` | Bilibili 视频 | **getnote link 存笔记**（异步提取） | 最高 |
-| `douyin.com/video/*` `iesdouyin.com/share/video/*` | 抖音视频 | **getnote link 存笔记**（异步提取） | 最高 |
+| `douyin.com/video/*` `douyin.com/jingxuan?modal_id=` `iesdouyin.com/share/video/*` | 抖音视频 | **getnote link 存笔记**（异步提取）✅ 实测成功 | 最高 |
 | 其他 URL | 通用网页 | **web_fetch 先试**，失败降级 agent-browser | 先高后中 |
 
 **判断逻辑**：
 ```python
 # ⚠️ 视频链接必须最先判断，走 getnote 异步提取，禁止 web_search/web_fetch
-video_patterns = ["youtube.com/watch", "youtu.be/", "bilibili.com/video", "b23.tv/", "douyin.com/video", "iesdouyin.com/share/video"]
+# 实测：douyin.com/video/ 和 douyin.com/jingxuan?modal_id= 均兼容
+video_patterns = ["youtube.com/watch", "youtu.be/", "bilibili.com/video", "b23.tv/", "douyin.com/video", "douyin.com/jingxuan", "iesdouyin.com/share/video"]
 if any(p in url for p in video_patterns):
     return "getnote-link"  # → 调 Get笔记 save API (type=link)，绝不走 web_search
 
