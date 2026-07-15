@@ -14,6 +14,7 @@ trigger: "文章总结|总结文章|解读文章|深度总结|这篇文章核心
 3. **能一步到位就别绕路**
 4. **用户说"存笔记"/"抽取" → 原样存 markdown，不总结**
 5. **用户说"总结"/"核心观点" → 只输总结（按「总结流程」格式），不存笔记**
+6. **🚫 视频链接（YouTube/Bilibili/抖音）禁止 web_search / web_fetch** → 必须走 getnote link 存笔记（见「视频链接」章节）
 
 ---
 
@@ -37,6 +38,11 @@ trigger: "文章总结|总结文章|解读文章|深度总结|这篇文章核心
 
 **判断逻辑**：
 ```python
+# ⚠️ 视频链接必须最先判断，走 getnote 异步提取，禁止 web_search/web_fetch
+video_patterns = ["youtube.com/watch", "youtu.be/", "bilibili.com/video", "b23.tv/", "douyin.com/video", "iesdouyin.com/share/video"]
+if any(p in url for p in video_patterns):
+    return "getnote-link"  # → 调 Get笔记 save API (type=link)，绝不走 web_search
+
 # 飞书文档域名：feishu.cn / larksuite.com / larkoffice.com
 # 路径：/docx/ 或 /wiki/
 feishu_domains = ["feishu.cn", "larksuite.com", "larkoffice.com"]
@@ -51,8 +57,6 @@ elif "zhuanlan.zhihu.com" in url:
     return "agent-browser"
 elif "medium.com" in url:
     return "agent-browser"
-elif any(d in url for d in ["youtube.com/watch", "youtu.be/", "bilibili.com/video", "b23.tv/", "douyin.com/video", "iesdouyin.com/share/video"]):
-    return "getnote-link"
 else:
     return "web-fetch-first"
 ```
@@ -189,7 +193,7 @@ web_fetch(url="https://example.com/article")
 
 ```bash
 # 步骤 1：写 JSON payload
-file_write(path="/tmp/note_payload.json", content='{"type":"link","url":"视频URL"}')
+file_write(path="/tmp/note_payload.json", content='{"note_type":"link","link_url":"视频URL"}')
 
 # 步骤 2：curl 调 Get笔记 save API（link 模式）
 curl -s -X POST "https://openapi.biji.com/open/api/v1/resource/note/save" \
@@ -198,14 +202,14 @@ curl -s -X POST "https://openapi.biji.com/open/api/v1/resource/note/save" \
   -H "Content-Type: application/json" \
   -d @/tmp/note_payload.json
 
-# 步骤 3：解析响应
-# 成功（同步）→ {"success":true,"result":{"note_id":"xxx"}}
-# 成功（异步）→ {"success":true,"result":{"task_id":"xxx"}}
-# 失败 → {"success":false,"error":{"message":"unauthorized"}}
+# 步骤 3：解析响应（普通链接是异步的）
+# 成功 → {"success":true,"data":{"tasks":[{"task_id":"xxx","url":"..."}],"created_count":1}}
+# 失败 → {"success":false,"error":{"code":10001,"message":"unauthorized"}}
+# ⚠️ task_id 在 data.tasks[0].task_id，需要轮询 /task/progress
 ```
 
 **回复用户**：
-> 已把这个视频存到 Get笔记了（note_id: `xxx`），服务端正在提取内容。
+> ✅ 已把这个视频存到 Get笔记了，服务端正在提取内容（task_id: `xxx`）。
 > 过几分钟你再来问我「那个视频讲了什么」，我就能查到笔记内容了。
 
 **⚠️ 不要用 web_fetch 或 agent-browser 抓视频页面**，直接走 getnote link 存笔记。
