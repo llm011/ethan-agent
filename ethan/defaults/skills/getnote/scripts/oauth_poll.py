@@ -26,11 +26,11 @@ Get笔记 OAuth 授权轮询脚本
     api_key=$(echo "$result" | jq -r '.api_key')
 """
 
+import json
 import sys
 import time
-import json
-import urllib.request
 import urllib.error
+import urllib.request
 
 API_URL = "https://openapi.biji.com/open/api/v1/oauth/token"
 DEFAULT_CLIENT_ID = "cli_a1b2c3d4e5f6789012345678abcdef90"

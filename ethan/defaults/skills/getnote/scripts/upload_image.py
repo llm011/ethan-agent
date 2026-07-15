@@ -14,11 +14,10 @@ Get笔记图片上传脚本
     GETNOTE_CLIENT_ID - Client ID（可选）
 """
 
-import os
-import sys
 import argparse
 import mimetypes
-from pathlib import Path
+import os
+import sys
 
 try:
     import requests
@@ -122,7 +121,7 @@ def upload_image(image_path: str, api_key: str, client_id: str = DEFAULT_CLIENT_
             print(f"限流: {rate_limit}", file=sys.stderr)
         except:
             pass
-        raise Exception(f"上传失败: 限流 (HTTP 429)，请稍后重试")
+        raise Exception("上传失败: 限流 (HTTP 429)，请稍后重试")
     
     if resp.status_code not in (200, 204):
         raise Exception(f"上传失败: HTTP {resp.status_code}")
@@ -174,9 +173,9 @@ def main():
         print(f"访问 URL: {image_url}")
         print()
         print("💡 创建图片笔记:")
-        print(f'   curl -X POST "https://openapi.biji.com/open/api/v1/resource/note/save?task_id=..."')
-        print(f'     -H "Authorization: $GETNOTE_API_KEY"')
-        print(f'     -H "Content-Type: application/json"')
+        print('   curl -X POST "https://openapi.biji.com/open/api/v1/resource/note/save?task_id=..."')
+        print('     -H "Authorization: $GETNOTE_API_KEY"')
+        print('     -H "Content-Type: application/json"')
         print(f'     -d \'{{"type":"img_text","image_urls":["{image_url}"]}}\'')
         
     except Exception as e:
