@@ -30,6 +30,9 @@ trigger: "文章总结|总结文章|解读文章|深度总结|这篇文章核心
 | `*.notion.so/*` `notion.site/*` | Notion | **agent-browser**（JS 渲染） | 中 |
 | `zhuanlan.zhihu.com/*` | 知乎专栏 | **agent-browser**（JS 渲染） | 中 |
 | `medium.com/*` | Medium | **agent-browser**（JS 渲染） | 中 |
+| `youtube.com/watch?v=` `youtu.be/*` | YouTube 视频 | **getnote link 存笔记**（异步提取） | 最高 |
+| `bilibili.com/video/*` `b23.tv/*` | Bilibili 视频 | **getnote link 存笔记**（异步提取） | 最高 |
+| `douyin.com/video/*` `iesdouyin.com/share/video/*` | 抖音视频 | **getnote link 存笔记**（异步提取） | 最高 |
 | 其他 URL | 通用网页 | **web_fetch 先试**，失败降级 agent-browser | 先高后中 |
 
 **判断逻辑**：
@@ -48,6 +51,8 @@ elif "zhuanlan.zhihu.com" in url:
     return "agent-browser"
 elif "medium.com" in url:
     return "agent-browser"
+elif any(d in url for d in ["youtube.com/watch", "youtu.be/", "bilibili.com/video", "b23.tv/", "douyin.com/video", "iesdouyin.com/share/video"]):
+    return "getnote-link"
 else:
     return "web-fetch-first"
 ```
@@ -177,6 +182,34 @@ web_fetch(url="https://example.com/article")
 # 2. 如果成功 → 拿到内容后分支处理（同上）
 # 3. 如果失败（status_code 错误 / 内容过短）→ 降级 agent-browser
 ```
+
+### 视频链接（YouTube / Bilibili / 抖音）— getnote 异步提取
+
+**视频页面 JS 渲染重、反爬强，web_fetch / agent-browser 都拿不到有用内容。交给 Get笔记服务端异步提取。**
+
+```bash
+# 步骤 1：写 JSON payload
+file_write(path="/tmp/note_payload.json", content='{"type":"link","url":"视频URL"}')
+
+# 步骤 2：curl 调 Get笔记 save API（link 模式）
+curl -s -X POST "https://openapi.biji.com/open/api/v1/resource/note/save" \
+  -H "Authorization: $GETNOTE_API_KEY" \
+  -H "X-Client-ID: $GETNOTE_CLIENT_ID" \
+  -H "Content-Type: application/json" \
+  -d @/tmp/note_payload.json
+
+# 步骤 3：解析响应
+# 成功（同步）→ {"success":true,"result":{"note_id":"xxx"}}
+# 成功（异步）→ {"success":true,"result":{"task_id":"xxx"}}
+# 失败 → {"success":false,"error":{"message":"unauthorized"}}
+```
+
+**回复用户**：
+> 已把这个视频存到 Get笔记了（note_id: `xxx`），服务端正在提取内容。
+> 过几分钟你再来问我「那个视频讲了什么」，我就能查到笔记内容了。
+
+**⚠️ 不要用 web_fetch 或 agent-browser 抓视频页面**，直接走 getnote link 存笔记。
+**⚠️ 用户回来问视频内容时** → 调 `GET /open/api/v1/resource/note/detail?note_id=xxx` 查详情。
 
 ---
 

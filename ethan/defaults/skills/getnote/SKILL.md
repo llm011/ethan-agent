@@ -1,8 +1,9 @@
 ---
 name: getnote
-trigger: 笔记|记笔记|笔记本|我的笔记|记到笔记|存到笔记|biji|get笔记
+trigger: "笔记|记笔记|笔记本|我的笔记|记到笔记|存到笔记|biji|get笔记|youtube.com|youtu.be|bilibili.com|b23.tv|douyin.com|iesdouyin|抖音|B站|b站|视频笔记|视频链接|这个视频|那个视频|视频讲了|视频内容"
 description: |
   Get笔记 - 保存、搜索、管理个人笔记和知识库。**用户提到「笔记」时优先用本 skill。**
+  **视频链接（YouTube/Bilibili/抖音）也用本 skill 处理**：存链接 → 异步提取 → 稍后查详情。
 
   **当以下情况时使用此 Skill**：
   (1) 用户提到「笔记」相关的任何操作：记笔记、存到笔记、查笔记、看我的笔记、改/删笔记等
@@ -10,10 +11,11 @@ description: |
   (3) 查看笔记列表/详情、更新、删除
   (4) 管理知识库或标签：「加到笔记知识库」「建知识库」「加标签」
   (5) 配置 Get笔记：「配置笔记」「连接 Get笔记」
+  (6) **视频链接处理**：用户发来 YouTube/Bilibili/抖音链接，或问「这个视频讲了什么」「视频笔记好了吗」
 
   **不归此 skill 管**：
   - 用户明确说「知识库」且没提「笔记」（如「存到知识库 / 查知识库」）→ 用内置 `knowledge_add` / `knowledge_search` / `knowledge_read` / `knowledge_edit` 工具，那是 ethan 本地知识库
-  - 保存网页/微信链接到笔记 → 交给 `getnote-read-link`
+  - 保存网页/微信链接到笔记 → 交给 `url-process`（先抓内容再存）
   - 从笔记中搜索已有内容（"找一下笔记里的 XX"）→ 交给 `getnote-read-link`
 metadata: {"openclaw": {"requires": {}, "optionalEnv": ["GETNOTE_API_KEY", "GETNOTE_CLIENT_ID", "GETNOTE_OWNER_ID"], "baseUrl": "https://openapi.biji.com", "homepage": "https://biji.com"}}
 ---
@@ -130,6 +132,80 @@ const data = JSON.parse(safe);
 ```
 
 **决策原则**：优先匹配最具体的意图。有 URL 就是 `/save link`，有图片就是 `/save image`，不确定时询问用户。
+
+---
+
+## 🎬 视频链接处理流程（YouTube / Bilibili / 抖音）
+
+**核心思路**：视频链接不适合 web_fetch 抓取（JS 渲染、反爬），交给 Get笔记服务端异步提取内容。流程分两步：先存链接拿 ID，稍后用 ID 查详情。
+
+### 第一步：用户发来视频链接（首次）
+
+**识别视频平台**：
+| URL 模式 | 平台 |
+|---------|------|
+| `youtube.com/watch?v=` `youtu.be/` | YouTube |
+| `bilibili.com/video/` `b23.tv/` | Bilibili |
+| `douyin.com/video/` `iesdouyin.com/share/video/` | 抖音 |
+
+**直接调 save API（link 模式），不读 references**：
+
+```bash
+# 步骤 1：写 JSON payload
+file_write(path="/tmp/note_payload.json", content='{"type":"link","url":"视频URL","title":"可选标题"}')
+
+# 步骤 2：curl 调 API
+curl -s -X POST "https://openapi.biji.com/open/api/v1/resource/note/save" \
+  -H "Authorization: $GETNOTE_API_KEY" \
+  -H "X-Client-ID: $GETNOTE_CLIENT_ID" \
+  -H "Content-Type: application/json" \
+  -d @/tmp/note_payload.json
+```
+
+**解析响应**：
+- **同步成功**（返回 `note_id`）→ Get笔记已开始处理，内容提取中
+- **异步成功**（返回 `task_id`）→ 同上，用 task_id 轮询进度
+- **失败**（`unauthorized`）→ 凭证缺失，引导用户配置（见「凭证缺失时的处理」）
+
+**回复用户（关键！）**：
+
+> 已把这个视频存到 Get笔记了（note_id: `xxx`），服务端正在提取内容。
+> 过几分钟你再来问我「那个视频讲了什么」，我就能查到笔记内容了。
+
+**⚠️ 必须在回复中埋下「下次查询」的说明**：
+1. 明确告诉用户 note_id（或说「我记住了」）
+2. 告诉用户过几分钟再来问
+3. 告诉用户怎么问（示例：「那个视频的内容好了吗」「视频笔记查一下」）
+
+### 第二步：用户回来问视频内容（后续）
+
+**当用户回来问「那个视频」「视频笔记好了吗」「视频讲了什么」时**：
+
+1. 从对话历史中找到之前保存的 `note_id`
+2. 直接调 detail API 查询笔记内容：
+
+```bash
+curl -s -X GET "https://openapi.biji.com/open/api/v1/resource/note/detail?note_id=NOTE_ID" \
+  -H "Authorization: $GETNOTE_API_KEY" \
+  -H "X-Client-ID: $GETNOTE_CLIENT_ID"
+```
+
+3. 如果笔记内容已提取完成（content 非空）→ 总结或原样返回给用户
+4. 如果内容仍为空（还在处理中）→ 告诉用户「还在处理，再等一会儿」
+
+**⚠️ 查询时的决策逻辑**：
+- 对话历史中有 note_id → 直接用 `GET /note/detail?note_id=xxx` 查
+- 对话历史中没有 note_id → 用 `POST /resource/recall` 搜索关键词（如视频标题/平台名）
+- 搜索结果中 `note_type: "link"` 的就是之前存的视频笔记
+
+### 视频链接处理铁律
+
+- ❌ 不要用 `web_fetch` 抓视频页面（JS 渲染，拿不到内容）
+- ❌ 不要用 `agent-browser` 打开视频页面（慢且不必要）
+- ✅ 直接用 `save API (type=link)` 交给 Get笔记服务端提取
+- ✅ 存完后告诉用户「过几分钟再来问」
+- ✅ 用户回来问时，用 `note_id` 调 `detail API` 查内容
+- ✅ 如果对话历史中找不到 note_id，用 `recall` 搜索
 
 ---
 
