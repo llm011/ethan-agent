@@ -192,6 +192,7 @@ class DefaultsConfig(BaseModel):
     workspace: str = str(Path.home() / ".ethan")
     model: str = "claude-sonnet-4.6"
     lite_model: str = ""  # 轻量模型，用于记忆压缩/标题生成/skill 生成等（空则按主模型推断）
+    fallback_model: str = ""  # 主模型不可用时的兜底模型（模型 id，支持 provider/model 格式）；空=不兜底
     agent_name: str = "Ethan"
     language: str = "zh"
     timezone: str = ""  # IANA 时区名（如 "Asia/Shanghai"）。空 = 自动探测系统时区。
@@ -285,6 +286,7 @@ def _default_config() -> dict:
         "defaults": {
             "model": os.environ.get("AGENT_DEFAULT_MODEL", "claude-sonnet-4.6"),
             "lite_model": os.environ.get("AGENT_LITE_MODEL", ""),  # 轻量模型（记忆压缩/标题生成等后台任务用）；空则按主模型推断或与主模型相同
+            "fallback_model": os.environ.get("AGENT_FALLBACK_MODEL", ""),  # 主模型不可用时的兜底模型（模型 id，支持 provider/model）；空=不兜底
             "max_tokens": 8192,
             "max_tool_iterations": 100,
         },

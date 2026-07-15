@@ -62,7 +62,21 @@ def create_provider(model: str | None = None) -> BaseProvider:
     primary = _build_single_provider(provider_key, model_id, provider_cfg, effective_proxy)
 
     # Build fallback chain if configured
-    fallback_keys: list[str] = getattr(entry, "fallback_providers", []) if entry else []
+    fallback_keys: list[str] = list(getattr(entry, "fallback_providers", []) or []) if entry else []
+    # 顶层 defaults.fallback_model：用户友好的单模型兜底入口，追加到 fallback_providers 之后
+    fb_model = config.defaults.fallback_model
+    if fb_model:
+        if "/" in fb_model:
+            fallback_keys.append(fb_model)
+        else:
+            fb_entry = config.get_model(fb_model)
+            if fb_entry is not None:
+                fallback_keys.append(f"{fb_entry.provider}/{fb_entry.id}")
+            else:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "defaults.fallback_model '%s' not found in models list; ignored", fb_model
+                )
     if not fallback_keys:
         return primary
 

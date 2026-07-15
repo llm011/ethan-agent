@@ -297,7 +297,25 @@ models:
 
 defaults:
   model: gemini-2.5-flash
+  fallback_model: claude-sonnet-4-6   # 可选：主模型（gemini）不可用时自动切到 claude
 ```
+
+### 主模型兜底（fallback_model）
+
+当主模型（`defaults.model`）对应的 provider 不可用（网络错误、限流、宕机）时，ethan 会自动切换到 `fallback_model` 指定的模型，无需人工干预。底层带熔断 + 指数退避，主 provider 恢复后会自动切回。
+
+```yaml
+defaults:
+  model: gemini-2.5-flash
+  fallback_model: claude-sonnet-4-6   # 主模型挂了自动切 claude
+```
+
+- `fallback_model` 填**模型 id**（需在 `models` 列表注册），也支持 `provider/model` 格式（如 `anthropic/claude-sonnet-4-6`）。
+- 若同时配置了模型级 `fallback_providers`（在 `models` 条目的旧写法），`fallback_model` 会追加在它之后作为最终兜底。
+- 留空 = 不做兜底。
+- 也可通过环境变量 `AGENT_FALLBACK_MODEL` 设置。
+
+注意：`fallback_model` 与 `lite_model` 是两个独立维度——`lite_model` 是后台便宜任务（记忆压缩/标题生成等）专用模型，`fallback_model` 是主对话模型的故障兜底。
 
 ### 环境变量覆盖
 
