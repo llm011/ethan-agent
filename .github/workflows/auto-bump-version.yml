@@ -36,6 +36,8 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          # 显式用 PAT 配置 remote URL，避免 push 时找不到凭证
+          git remote set-url origin "https://x-access-token:${{ secrets.PAT }}@github.com/${{ github.repository }}.git"
           git add pyproject.toml
           git commit -m "chore: bump version to v${{ steps.bump.outputs.version }}"
           git tag "v${{ steps.bump.outputs.version }}"
