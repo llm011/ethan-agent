@@ -188,7 +188,7 @@ Ethan 的记忆系统由五个层次构成：
     ├─ Step 0: fact_sync — 同步 facts.json/playbook.json 到 memory.db
     ├─ 读取昨日 JSONL 信号
     ├─ LLM 精炼去重（合并相似、排除噪音、≤10 条）
-    ├─ embedding 去重：384-dim 向量 L2 < 1.1 视为重复跳过
+    ├─ embedding 去重：BGE-small-zh 512-dim 向量 L2 < 0.7 视为重复跳过
     ├─ 通过去重 → 写入 memory.db
     └─ 按 type 反写到 facts.json / playbook.json
         ├─ repetition/error → facts.json（confidence=0.75）
@@ -213,7 +213,7 @@ Ethan 的记忆系统由五个层次构成：
 -- vec_items 表
 id            TEXT PRIMARY KEY    -- "insight_20260714_a1b2c3d4" 或 "fact_sync_xxxx"
 text          TEXT               -- 精炼后的记忆描述
-embedding     FLOAT[384]         -- 384 维归一化向量
+embedding     FLOAT[512]         -- BGE-small-zh 512 维归一化向量
 metadata      TEXT (JSON)        -- {"type": ..., "date": ..., "reflected": true/false}
 last_accessed REAL               -- 最后被 search 命中的时间
 ```
@@ -222,7 +222,9 @@ last_accessed REAL               -- 最后被 search 命中的时间
 - `insight_*`：做梦沉淀的洞察，永久保留
 - `fact_sync_*` / `playbook_sync_*`：JSON 文件镜像，每次做梦前全量重建
 
-**去重阈值**：`L2_DEDUP_THRESHOLD = 1.1`（归一化向量 L2 距离）。同义句通常 0.8~1.08，无关 > 1.3。
+**Embedding 引擎**：BGE-small-zh-v1.5 INT8 ONNX（24MB，中文专项优化）。不可用时回退 char n-gram hash（同 512 维，保证 schema 不变）。装依赖：`pip install 'ethan-agent[embedding]'`。
+
+**去重阈值**：`L2_DEDUP_THRESHOLD = 0.7`（cos ≈ 0.755）。实测分布：同义改写 L2 均值 0.69，相似但不同主题 L2 均值 0.78，完全无关 L2 均值 1.16。阈值取在两者之间偏保守一侧——漏判代价低（多存几条），误判代价高（丢独特 insight 不可恢复）。
 
 **永久保留策略**：insight 和 fact_sync 均豁免 LRU（每条 ≈ 1.5KB，万条仅 ~15MB）。sessions.db 膨胀由独立轮转机制处理。
 
@@ -314,7 +316,7 @@ CLI 退出 → SessionStore.cleanup_empty()
 每晚 0 点"做梦"（_midnight_loop → run_daily_consolidation）：
     ├─ 读当日 JSONL
     ├─ LLM 精炼去重（≤10 条）
-    ├─ embedding 去重（L2 < 1.1 跳过）
+    ├─ embedding 去重（BGE L2 < 0.7 跳过）
     └─ 写入 memory.db（永久）
 ```
 -->

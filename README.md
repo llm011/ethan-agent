@@ -39,7 +39,7 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 
 **Skill system**
 - Keyword trigger matching, auto-injected into system prompt
-- Optional semantic router (BGE INT8 + LR head) adds recall on top of keywords so differently-phrased requests still match (`pip install 'ethan-agent[router]'`; keyword-only without it — see Install section)
+- Optional semantic router (BGE INT8 + LR head) adds recall on top of keywords so differently-phrased requests still match (`pip install 'ethan-agent[embedding]'`; keyword-only without it — see Install section)
 - `fast_path: true` routes matched input to the millisecond fast track
 - `channels: [lark, web]` filters skills by channel so each surface gets only relevant skills
 - `modes: [法律]` filters skills by conversation mode so each mode gets only relevant skills (empty = all modes)
@@ -226,8 +226,8 @@ If you want skills to match even when phrased differently (e.g. triggering the F
 
 ```bash
 # 1. Install the optional dependency (a lightweight inference runtime, a few tens of MB)
-pip install 'ethan-agent[router]'      # from PyPI
-# from source: uv sync --extra router
+pip install 'ethan-agent[embedding]'      # from PyPI
+# from source: uv sync --extra embedding
 
 # 2. Pull the model (~24MB, first time only; skippable — the first message auto-downloads it)
 ethan router pull
@@ -559,7 +559,7 @@ Environment variables in `.env` override config values (useful for secrets).
 - [x] Dual-source loading (built-in + user-defined) + channel filter (`channels` field)
 - [x] `fast_path` opt-in, hit stats, correction collection, auto-update (Updater)
 - [x] Session-end background Skill generation (Hermes-style)
-- [x] Optional semantic router (BGE INT8 + LR head, macro F1 0.851) for recall beyond keywords; silent keyword fallback
+- [x] Optional semantic router (BGE INT8 + LR head, macro F1 0.851) for recall beyond keywords; silent keyword fallback. The same `[embedding]` optional dependency also powers semantic dedup in memory.db
 - [x] Built-in skills: home-assistant, lark-im, channels, deepwiki
 
 **Tools**

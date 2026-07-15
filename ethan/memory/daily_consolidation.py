@@ -23,9 +23,13 @@ from ethan.core.paths import user_memory_dir
 logger = logging.getLogger(__name__)
 
 DEDUP_THRESHOLD = 0.85  # cosine similarity 阈值（供参考）
-# sqlite-vec 返回 L2 距离；对归一化 384-dim 向量，同义句 L2 通常 0.8~1.1
-# 使用 L2 < 1.1 作为去重门槛（对应 cosine_sim ≈ 0.4，但实际效果更好）
-L2_DEDUP_THRESHOLD = 1.1
+# sqlite-vec 返回 L2 距离；对 BGE-small-zh INT8 归一化 512-dim 向量：
+#   同义改写 L2 通常 0.56~0.81（均值 0.69）
+#   相似但不同主题 L2 通常 0.65~0.95（均值 0.78）
+#   完全无关 L2 通常 > 1.1
+# 取 0.7 作为去重门槛（cos ≈ 0.755）：能去掉明显的同义重复，同时保留大部分独特内容。
+# 漏判代价低（多存几条），误判代价高（丢独特 insight 不可恢复），偏保守。
+L2_DEDUP_THRESHOLD = 0.7
 
 # 反写到 facts.json 的 confidence：低于后台抽取(0.8)和主动写入(0.95)
 # 因为是跨 session 统计推断，不是确定性事实

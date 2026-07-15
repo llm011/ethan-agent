@@ -54,15 +54,15 @@ kb.search("Python asyncio", limit=5)
 
 ### 语义检索（semantic）
 
-基于 `sqlite-vec` 向量相似度（余弦距离）。写入时自动生成 384 维 embedding，查询时向量化后做 ANN 检索。
+基于 `sqlite-vec` 向量相似度（余弦距离）。写入时自动生成 512 维 embedding，查询时向量化后做 ANN 检索。
 
 ```python
 await kb.semantic_search("异步编程最佳实践", limit=5)
 ```
 
-**Embedding 策略**：
-- 优先使用 `sentence-transformers`（`all-MiniLM-L6-v2`，384 维，质量高）
-- 未安装时自动退化到内置 n-gram 特征哈希 embedding（同为 384 维，schema 不变）
+**Embedding 引擎**：BGE-small-zh-v1.5 INT8 ONNX（24MB，中文专项优化，512 维）。
+- 优先使用 BGE（装 `pip install 'ethan-agent[embedding]'` 后自动启用）
+- 未安装时回退到内置 char n-gram 特征哈希 embedding（同为 512 维，schema 不变）
 
 ---
 
@@ -176,6 +176,6 @@ curl "http://localhost:8900/knowledge/search?q=部署流程&limit=5&semantic=tru
 | `ethan/knowledge/base.py` | FilesystemKnowledgeBase 核心逻辑 |
 | `ethan/tools/builtin/knowledge.py` | LLM 工具（search / add） |
 | `ethan/memory/vector_store.py` | sqlite-vec 向量存储 |
-| `ethan/memory/embeddings.py` | Embedding 生成（sentence-transformers / n-gram 回退） |
+| `ethan/memory/embeddings.py` | Embedding 生成（BGE-small-zh INT8 / n-gram 回退） |
 | `~/.ethan/knowledge/` | 条目 Markdown 文件 |
 | `~/.ethan/memory/memory.db` | 向量索引（SQLite） |

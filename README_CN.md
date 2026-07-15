@@ -37,7 +37,7 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 
 **Skill 技能系统**
 - 触发词匹配，自动注入 system prompt 引导行为
-- 可选语义路由器（BGE INT8 + LR 头）在关键词之上补召回，换个说法也能命中（`pip install 'ethan-agent[router]'`，不装则纯关键词，详见安装段）
+- 可选语义路由器（BGE INT8 + LR 头）在关键词之上补召回，换个说法也能命中（`pip install 'ethan-agent[embedding]'`，不装则纯关键词，详见安装段）
 - `fast_path: true` 触发后走毫秒级快速路径，适合全屋智能等高频控制
 - `channels: [lark, web]` 按渠道过滤，Skill 只在指定场景下生效
 - `modes: [法律]` 按对话模式过滤，Skill 只在指定模式下生效（空 = 所有模式）
@@ -226,8 +226,8 @@ uv sync
 
 ```bash
 # 1. 装可选依赖（一个轻量推理运行时，约几十 MB）
-pip install 'ethan-agent[router]'      # PyPI 安装
-# 从源码则： uv sync --extra router
+pip install 'ethan-agent[embedding]'      # PyPI 安装
+# 从源码则： uv sync --extra embedding
 
 # 2. 拉模型（约 24MB，仅首次；不手动跑也行，首条消息会自动下载）
 ethan router pull
@@ -656,7 +656,7 @@ EOF
 - [x] 双来源加载（内置 + 用户自定义）+ 渠道过滤（channels 字段）
 - [x] fast_path 标记、Skill 命中统计、纠正收集、自动更新（Updater）
 - [x] 会话结束后后台自动生成 Skill（Hermes 风格）
-- [x] 可选语义路由器（BGE INT8 + LR 头，macro F1 0.851）在关键词之上补召回；缺失时静默退回关键词
+- [x] 可选语义路由器（BGE INT8 + LR 头，macro F1 0.851）在关键词之上补召回；缺失时静默退回关键词。同一套 `[embedding]` 依赖也驱动 memory.db 的语义去重
 - [x] 内置技能：home-assistant、lark-im、channels、deepwiki
 
 **工具**

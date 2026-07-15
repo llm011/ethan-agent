@@ -176,10 +176,10 @@ match(query):
 
 - **运行时模型托管在 GitHub**（`llm011/router-models`），首次用到时按 raw URL 下载（ONNX + LR 头 + tokenizer 全套），缓存到本地后离线可用。也可 `ethan router pull` 预拉（Docker / 离线场景）。**包本身不携带模型文件**。
 - **下载落点**：优先包内 `router_models/`，只读安装（site-packages 不可写）时回退 `~/.ethan/models/bge-small-zh/`。
-- **静默降级**：缺 `[router]` 依赖、模型没下、离线无缓存——任一不满足，`route()` 返回 `None`，`match()` 退回纯关键词。**零行为变化默认**，不抛异常。
+- **静默降级**：缺 `[embedding]` 依赖、模型没下、离线无缓存——任一不满足，`route()` 返回 `None`，`match()` 退回纯关键词。**零行为变化默认**，不抛异常。
 - **零冷启动探测**：`available` 只检查模型文件是否存在（`model_present()`），不触发模型加载——建 Agent 时只问"能不能用"，不为一句"在吗"白白 load 模型。
 - **进程级单例**：编码器和 LR 头各只加载一次；锚点不再每请求重算（LR 头与技能集合无关，只用技能名做命中过滤）。
-- **tokenizer 鲁棒性**：本地 tokenizer 文件缺失时，`AutoTokenizer` 会退化成只有特殊 token 的残缺词表（所有词变 `[UNK]` → 路由失效）。代码检测词表过小（`< 1000`）则回退基座 repo，避免这个隐蔽的失效模式。
+- **与 memory 共享依赖**：router 和 memory 都用 BGE-small-zh INT8 ONNX + 轻量 `tokenizers` 库，一套依赖 `pip install 'ethan-agent[embedding]'` 同时启用两个功能。不再依赖 `transformers`。
 
 ---
 
