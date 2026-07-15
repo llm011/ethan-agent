@@ -56,6 +56,9 @@ plan/
 # Local bin scripts
 bin/
 
+# Local dev environment (docker-compose, .env, etc.)
+.local/
+
 # Local personal notes
 TODO.md
 
