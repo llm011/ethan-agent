@@ -43,6 +43,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([]);
   const [streaming, setStreaming] = useState(false);
+  const [bgPolling, setBgPolling] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
   const [activeSession, setActiveSession] = useState<string | null>(null);
   const [sessionTitle, setSessionTitle] = useState("");
@@ -197,6 +198,10 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           currentMatchedSkills = chunk.skills_matched;
           continue;
         }
+        if (chunk.background_polling) {
+          setBgPolling(chunk.polling_message || "\U0001f4e1 后台任务运行中...");
+          continue;
+        }
         if (chunk.heartbeat) {
           // watchdog 心跳：任务仍在运行但超过 3 分钟无新内容
           const elapsed = chunk.elapsed || 0;
@@ -306,6 +311,9 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
             cache: prev.cache + finalUsage!.cache,
           }));
         }
+        if (chunk.done) {
+          setBgPolling(null);
+        }
         if (chunk.stopped) {
           // 用户主动停止：补一个「已停止」标记（后端也会落库同样标记，这里只为即时反馈）
           if (!assistantContent.trimEnd().endsWith("（已停止）")) {
@@ -361,6 +369,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         intermediateOutput: intermediateOutput || undefined,
       }];
     });
+    setBgPolling(null);
     setStopping(false);
     setStreaming(false);
   };
@@ -687,6 +696,15 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         onShare={handleShare}
         annotationsByMessage={annotationsByMessage}
       />
+
+      {bgPolling && (
+        <div className="max-w-3xl mx-auto w-full px-4 py-2">
+          <div className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-300">
+            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-blue-500" />
+            <span>{bgPolling}</span>
+          </div>
+        </div>
+      )}
 
       <ReadingMode
         key={readingMessage?.id ?? "closed"}
