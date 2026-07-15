@@ -50,6 +50,12 @@ async def _maybe_consolidate(session_id: str, model: str, user_id: str = "", mod
         if not session:
             return
 
+        # 脱敏：在喂给 consolidator/episode 前，把消息正文里的 secret 真值替换为引用
+        from ethan.core.secrets_store import mask_text
+        for m in session.messages:
+            if m.content:
+                m.content = mask_text(m.content)
+
         user_turns = sum(1 for m in session.messages if m.role == "user")
         if user_turns == 0:
             return

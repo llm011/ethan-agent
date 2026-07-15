@@ -4,7 +4,7 @@
 - load_secret_env(): 把 .secrets/ 下所有 *.env 的 KEY=value 解析成 dict，
   由 shell 工具注入子进程环境，脚本里直接用 $KEY，模型上下文里从不出现明文。
 - all_secret_values() / mask_text(): 安全网。shell 可被诱导 `echo $KEY`，值会回流进
-  上下文，故在工具输出咽喉处把任何已知 secret 真值替换成 <前4字符>**** 掩码。
+  上下文，故在工具输出咽喉处把任何已知 secret 真值替换成 <secret:name> 引用。
 
 所有函数容错：读不到 / 解析失败一律返回空或原文，绝不抛异常阻断主流程。
 """
@@ -24,7 +24,7 @@ _MIN_MASK_LEN = 8
 
 # mask_text 在每次工具输出回流时都会调一次（热路径）。读+正则解析 .secrets/ 下所有文件
 # 太贵，故按文件 (路径, mtime, size) 签名缓存解析结果；签名变了才重扫。
-_values_cache: tuple[tuple, frozenset] | None = None  # (signature, all_values)
+_values_cache: tuple[tuple, dict[str, str]] | None = None  # (signature, {value: name})
 
 
 def _secrets_dir() -> Path:
@@ -89,35 +89,43 @@ def _dir_signature(d: Path) -> tuple:
     return tuple(sig)
 
 
-def _scan_secret_values() -> frozenset:
-    """实际扫描 .secrets/ 收集所有 secret 原始真值（未按 min_len 过滤）。"""
-    values: set[str] = set()
+def _scan_secret_values() -> dict[str, str]:
+    """实际扫描 .secrets/ 收集所有 secret 真值及其对应 key 名。
+
+    返回 {value: name} 映射：
+    - 单值文件：name = 文件名（如 github_pat）
+    - .env 文件：name = "文件名:KEY"（如 openai.env:OPENAI_API_KEY）
+    """
+    items: dict[str, str] = {}
     d = _secrets_dir()
     if not d.is_dir():
-        return frozenset()
+        return items
     try:
         for p in d.rglob("*"):
             if not p.is_file():
                 continue
             if p.suffix == ".env":
-                values.update(_parse_env_file(p).values())
+                for k, v in _parse_env_file(p).items():
+                    if v:
+                        items[v] = f"{p.name}:{k}"
             else:
-                # 单值文件：整体内容当作一个 secret
+                # 单值文件：整体内容当作一个 secret，文件名即 key
                 try:
                     content = p.read_text(encoding="utf-8", errors="replace").strip()
                 except OSError:
                     continue
                 if content:
-                    values.add(content)
+                    items[content] = p.name
     except OSError:
         pass
-    return frozenset(values)
+    return items
 
 
-def all_secret_values(min_len: int = _MIN_MASK_LEN) -> list[str]:
-    """收集所有需脱敏的真值，按长度降序（先替长的，防子串残留）。
+def all_secret_values(min_len: int = _MIN_MASK_LEN) -> list[tuple[str, str]]:
+    """收集所有需脱敏的真值及其 key 名，按长度降序（先替长的，防子串残留）。
 
-    来源：① *.env 的 value；② 非 .env 的单值文件（如 image_generate_token）整体内容。
+    返回 [(value, name), ...]，name 用于 mask_text 替换为 <secret:name>。
+    来源：① *.env 的 value；② 非 .env 的单值文件（如 github_pat）整体内容。
 
     mask_text 在每次工具输出回流时都会调用，是热路径。按 .secrets/ 文件签名缓存
     解析结果：签名未变直接复用，避免每次重读+正则解析所有文件。
@@ -130,37 +138,29 @@ def all_secret_values(min_len: int = _MIN_MASK_LEN) -> list[str]:
 
     sig = _dir_signature(d)
     if _values_cache is not None and _values_cache[0] == sig:
-        values = _values_cache[1]
+        items = _values_cache[1]
     else:
-        values = _scan_secret_values()
-        _values_cache = (sig, values)
+        items = _scan_secret_values()
+        _values_cache = (sig, items)
 
-    cleaned = {v for v in values if len(v) >= min_len
-               and not v.startswith(("http://", "https://"))}  # 公开 URL 不是 secret
-    return sorted(cleaned, key=len, reverse=True)
-
-
-def _mask_one(value: str) -> str:
-    """脱敏显示。仅当值足够长（>= 20）才露头尾各 4 字符辅助辨认（中间至少藏 12 位，
-    不可暴力还原）；较短的值一律只留头部，避免头尾相接把大半串都露出来。"""
-    head = value[:4]
-    if len(value) >= 20:
-        return f"{head}****{value[-4:]}"
-    return f"{head}****"
+    cleaned = [(v, n) for v, n in items.items() if len(v) >= min_len
+               and not v.startswith(("http://", "https://"))]  # 公开 URL 不是 secret
+    return sorted(cleaned, key=lambda x: len(x[0]), reverse=True)
 
 
 def mask_text(text: str) -> str:
-    """把 text 里出现的任何已知 secret 真值替换成掩码。无 secret / 出错时返回原文。
+    """把 text 里出现的任何已知 secret 真值替换为 <secret:name> 引用。
 
-    这是一道安全网，内层只是 str.replace，正常不该抛异常。一旦抛了，说明脱敏失效，
-    必须记日志告警——否则安全控件静默失败、明文照样回流，难以察觉。
+    例如 token 值 ghp_xxx 替换为 <secret:github_pat>，让 memory/LLM 只保留引用而非真值。
+    无 secret / 出错时返回原文。这是一道安全网，内层只是 str.replace，正常不该抛异常。
+    一旦抛了，说明脱敏失效，必须记日志告警——否则安全控件静默失败、明文照样回流，难以察觉。
     """
     if not text:
         return text
     try:
-        for val in all_secret_values():
+        for val, name in all_secret_values():
             if val and val in text:
-                text = text.replace(val, _mask_one(val))
+                text = text.replace(val, f"<secret:{name}>")
     except Exception:
         logger.warning("mask_text 脱敏失败，原文未脱敏放行（安全网失效）", exc_info=True)
         return text

@@ -52,6 +52,9 @@ class FactStore:
         self._path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def add(self, content: str, confidence: float = 0.8, source: str = "", category: str = "knowledge", tags: list[str] | None = None) -> None:
+        # 脱敏：防止 secret 真值落入 facts.json
+        from ethan.core.secrets_store import mask_text
+        content = mask_text(content)
         # Check for contradiction against all active facts
         for f in self._facts:
             if not f.superseded and self._is_contradiction(f.content, content):

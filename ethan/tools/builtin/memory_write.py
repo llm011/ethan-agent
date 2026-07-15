@@ -10,7 +10,9 @@ class MemoryWriteTool(BaseTool):
     description = (
         "Proactively save a factual memory about the user (preference, personal info, decision) "
         "to long-term memory. Call this when the user shares something worth remembering across "
-        "conversations — e.g. their name, job, preferences, or a one-off decision."
+        "conversations — e.g. their name, job, preferences, or a one-off decision. "
+        "Never include raw secrets/tokens/API keys in the content; reference them by key name only "
+        "(e.g., 'token is in secrets with key=github_pat')."
     )
     parameters = {
         "type": "object",

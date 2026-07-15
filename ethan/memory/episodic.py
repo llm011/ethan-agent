@@ -43,6 +43,8 @@ class EpisodeStore:
         self._path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def add(self, session_id: str, summary: str, model: str = "", turn_count: int = 0, keywords: list[str] | None = None) -> None:
+        from ethan.core.secrets_store import mask_text
+        summary = mask_text(summary)
         for e in self._episodes:
             if e.session_id == session_id:
                 e.summary = summary

@@ -10,7 +10,8 @@ class ProcedureWriteTool(BaseTool):
     description = (
         "Proactively save a behavioral rule or standing instruction to long-term procedural memory. "
         "Call this when the user tells you how to behave going forward — e.g. 'always reply in English', "
-        "'don't use Korean', 'use X phrase to motivate me', or any persistent behavioral directive."
+        "'don't use Korean', 'use X phrase to motivate me', or any persistent behavioral directive. "
+        "Never include raw secrets/tokens/API keys in the rule; reference them by key name only."
     )
     parameters = {
         "type": "object",
