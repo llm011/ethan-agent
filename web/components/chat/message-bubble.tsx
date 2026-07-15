@@ -56,6 +56,8 @@ interface MessageBubbleProps {
 
 export function MessageBubble({ msg, isStreaming, isLast, onQuote, onCardAction, onRead, onShare, annotations }: MessageBubbleProps) {
   const [highlightedStep, setHighlightedStep] = useState<number | undefined>(undefined);
+  // 过程记录默认展开（流式结束后仍可见），用户可手动折叠
+  const [intermediateOpen, setIntermediateOpen] = useState(true);
   const contentRef = useRef<HTMLDivElement>(null);
 
   // 把已保存的标注以「淡显」方式画回气泡正文（阅读模式是完整强度）。
@@ -165,7 +167,11 @@ export function MessageBubble({ msg, isStreaming, isLast, onQuote, onCardAction,
                   <MarkdownContent content={msg.intermediateOutput} />
                 </div>
               ) : (
-                <details className="mb-2 border border-border/50 bg-background/50 rounded-lg overflow-hidden group">
+                <details
+                  className="mb-2 border border-border/50 bg-background/50 rounded-lg overflow-hidden group"
+                  open={intermediateOpen}
+                  onToggle={(e) => setIntermediateOpen(e.currentTarget.open)}
+                >
                   <summary className="px-3 py-1.5 text-xs text-muted-foreground font-medium cursor-pointer hover:bg-background/80 flex items-center transition-colors list-none select-none">
                     <span className="opacity-70 group-open:opacity-100 transition-opacity">📝 过程记录</span>
                   </summary>

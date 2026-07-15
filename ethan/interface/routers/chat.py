@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 
 from fastapi import APIRouter, Depends, Request
@@ -21,20 +22,37 @@ router = APIRouter()
 
 logger = logging.getLogger(__name__)
 
-# 本地回环地址集合：auto_consent 仅允许来自这些地址的请求生效。
+# 本地/私有网络来源：auto_consent 仅允许来自这些地址的请求生效。
+# 回环：直连宿主机（127.0.0.1）；私有网段：docker 网桥（172.16/12）、局域网（192.168/16、10/8）。
 _LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
+# 仅放行 RFC1918 三段，不用 ip.is_private（后者还含 CGNAT 100.64/10、链路本地 169.254/16 等）
+_PRIVATE_NETWORKS = [
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+]
 
-def _is_loopback(request: Request) -> bool:
-    """请求是否来自本地回环地址。
 
+def _is_local(request: Request) -> bool:
+    """请求是否来自本地回环或 RFC1918 私有网段。
+
+    docker 部署下容器看到的 client.host 是网桥 IP（如 172.17.0.1），不是 127.0.0.1，
+    单纯检查回环会误伤合法的本地访问。加入三段私有网段后，公网来源仍被挡住。
     用 TCP 直连地址（request.client.host），不信任 X-Forwarded-For —— 后者可被
     客户端伪造。client 为 None（异常情况）时按非本地处理（更安全）。
     """
     client = request.client
     if client is None:
         return False
-    return client.host in _LOOPBACK_HOSTS
+    host = client.host
+    if host in _LOOPBACK_HOSTS:
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return ip.is_loopback or any(ip in net for net in _PRIVATE_NETWORKS)
 
 
 # ── Health / Poll ────────────────────────────────────────────────
@@ -176,11 +194,11 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
         # 安全约束：auto_consent 会自动批准所有工具授权（含 shell 执行），相当于在
         # 用户主机上放开任意命令执行。绝不能单方面信任请求体里的 auto_consent 字段——
         # 否则 token 一旦泄露（XSS / 日志 / 配置文件），远程攻击者即可构造请求静默
-        # 执行任意脚本（RCE）。因此强制限定：仅当请求来自本地回环地址时才允许生效，
-        # 非本地来源一律降级为 WebConsentProvider（逐项弹窗确认）。
-        # 注：服务默认绑 0.0.0.0，局域网/公网均可直连，此处来源校验是必要防线。
+        # 执行任意脚本（RCE）。因此强制限定：仅当请求来自本地回环或 RFC1918 私有网段
+        # 时才允许生效，公网来源一律降级为 WebConsentProvider（逐项弹窗确认）。
+        # 注：私有网段放行是为了支持 docker 部署（容器内看到的 client 是网桥 IP）。
         consent = None
-        if req.auto_consent and _is_loopback(request):
+        if req.auto_consent and _is_local(request):
             consent = AutoConsentProvider(session_id=req.session_id or "")
         else:
             consent = WebConsentProvider(session_id=req.session_id or "")
