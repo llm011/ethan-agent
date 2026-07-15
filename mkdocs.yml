@@ -64,17 +64,21 @@ nav:
   - 系统设计:
     - 系统架构: architecture.md
     - 模型 Provider: providers.md
+    - 双轨路由: routing.md
+    - Palantir 启发改进: palantir-inspired-improvements.md
   - 核心引擎:
-    - 双轨推理引擎: routing.md
-    - 记忆系统: memory.md
-    - Prompt Caching: caching.md
-    - 心跳机制: heartbeat.md
     - Agent Loop: agent-loop.md
+    - 记忆系统: memory.md
+    - 心跳机制: heartbeat.md
+    - Prompt Caching: caching.md
+    - 后台任务: background-tasks.md
+    - 语义路由器: semantic-router.md
   - 功能模块:
     - 技能系统: skills.md
     - 工具系统: tools.md
     - 调度器: scheduler.md
     - 知识库: knowledge.md
+    - 模式: modes.md
   - 浏览器控制:
     - 总览与架构: browser/overview.md
     - 传输层与协议: browser/transport-protocol.md
@@ -84,3 +88,7 @@ nav:
   - 接口层:
     - API & Web UI: interface.md
     - ACP 集成: acp.md
+  - 其他:
+    - 法律模式: legal-mode.md
+    - 隐私政策: privacy-policy.md
+    - Secrets 管理: secrets.md

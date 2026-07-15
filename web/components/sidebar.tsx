@@ -513,12 +513,8 @@ export function Sidebar() {
         </Button>
         <Button
           variant="ghost"
-          className={`w-full justify-start h-9 px-3 ${
-            pathname.startsWith("/docs")
-              ? "bg-accent text-accent-foreground"
-              : "text-muted-foreground"
-          }`}
-          onClick={() => navigate("/docs")}
+          className="w-full justify-start h-9 px-3 text-muted-foreground"
+          onClick={() => window.open("https://llm011.github.io/ethan-agent/", "_blank")}
         >
           <BookOpen className="h-4 w-4 mr-2" /> 文档 (Docs)
         </Button>
