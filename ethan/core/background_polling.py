@@ -89,6 +89,8 @@ async def poll_getnote_task(
 
     Returns:
         {"note_id", "content", "title"} 或 None（失败/超时）
+        detail 拉取失败时返回 {"note_id", "content": "", "title": "",
+                              "detail_failed": True, "task_id": ...}
     """
     api_key, client_id = _load_credentials()
     if not api_key or not client_id:
@@ -141,7 +143,7 @@ async def poll_getnote_task(
                     }
             except Exception as e:
                 logger.exception("getnote detail 请求失败: %s", e)
-            return {"note_id": str(note_id), "content": "", "title": "", "detail_failed": True}
+            return {"note_id": str(note_id), "content": "", "title": "", "detail_failed": True, "task_id": task_id}
 
         if status in ("failed", "error"):
             logger.warning("getnote 任务失败: %s", result)
