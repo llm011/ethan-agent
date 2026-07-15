@@ -151,7 +151,7 @@ export function MessageBubble({ msg, isStreaming, isLast, onQuote, onCardAction,
           ) : (
           <>
             {msg.thought && (
-              <details className="mb-2 border border-border/50 bg-background/50 rounded-lg overflow-hidden group">
+              <details className="mb-2 border border-border/50 bg-background/50 rounded-lg overflow-hidden group" open={intermediateOpen}>
                 <summary className="px-3 py-1.5 text-xs text-muted-foreground font-medium cursor-pointer hover:bg-background/80 flex items-center transition-colors list-none select-none">
                   <span className="opacity-70 group-open:opacity-100 transition-opacity">🤔 思考过程</span>
                 </summary>
