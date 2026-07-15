@@ -387,9 +387,8 @@ async def _run_generation(
             note_title = result.get("title", "")
             header = f"\U0001f4dd Get笔记提取完成" + (f"：{note_title}" if note_title else "")
             bg_msg = f"{header}\n\n{note_content}"
-            # 推送给前端
-            run.emit({"content": bg_msg})
-            # 落库为新的 assistant 消息
+            # 用 new_message 事件推送独立消息（不拼到当前消息末尾）
+            run.emit({"new_message": True, "content": bg_msg})
             try:
                 await store.save_message(session_id, Message(
                     role="assistant", content=bg_msg,
@@ -397,9 +396,20 @@ async def _run_generation(
                 await store.touch(session_id)
             except Exception:
                 logger.exception("保存 getnote 后台结果失败 session=%s", session_id)
+        elif result and result.get("detail_failed"):
+            # 任务成功但 detail 拉取失败
+            detail_msg = f"\u2705 Get笔记任务已完成（note_id: {result.get('note_id', '?')}），但内容拉取失败，请用「查一下笔记」重试。"
+            run.emit({"new_message": True, "content": detail_msg})
+            try:
+                await store.save_message(session_id, Message(
+                    role="assistant", content=detail_msg,
+                ))
+                await store.touch(session_id)
+            except Exception:
+                logger.exception("保存 getnote detail 失败提示失败 session=%s", session_id)
         else:
             timeout_msg = "\u23f3 Get笔记提取超时，请稍后用「查一下笔记」重试。"
-            run.emit({"content": timeout_msg})
+            run.emit({"new_message": True, "content": timeout_msg})
             try:
                 await store.save_message(session_id, Message(
                     role="assistant", content=timeout_msg,

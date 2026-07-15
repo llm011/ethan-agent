@@ -141,7 +141,7 @@ async def poll_getnote_task(
                     }
             except Exception as e:
                 logger.exception("getnote detail 请求失败: %s", e)
-            return {"note_id": str(note_id), "content": "", "title": ""}
+            return {"note_id": str(note_id), "content": "", "title": "", "detail_failed": True}
 
         if status in ("failed", "error"):
             logger.warning("getnote 任务失败: %s", result)

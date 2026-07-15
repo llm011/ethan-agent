@@ -202,6 +202,16 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           setBgPolling(chunk.polling_message || "\U0001f4e1 后台任务运行中...");
           continue;
         }
+        if (chunk.new_message) {
+          // 后台任务结果作为独立消息推送（不拼到当前消息末尾）
+          setBgPolling(null);
+          setMessages(prev => [...prev, {
+            role: "assistant",
+            content: chunk.content || "",
+            created_at: Date.now() / 1000,
+          }]);
+          continue;
+        }
         if (chunk.heartbeat) {
           // watchdog 心跳：任务仍在运行但超过 3 分钟无新内容
           const elapsed = chunk.elapsed || 0;
@@ -290,6 +300,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           a2uiSurfaces.push(...chunk.ui);
         }
         if (chunk.content) {
+          setBgPolling(null);
           assistantContent += chunk.content;
           setMessages([...baseMessages, {
             role: "assistant", content: assistantContent, thought: assistantThought,
