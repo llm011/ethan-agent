@@ -133,8 +133,8 @@ KB_SEARCH_CASES = [
 # ── 场景 3：fact_sync 镜像 vs 新 insight 去重判定 ─────────────────
 # 这是 daily_consolidation 的关键场景：先把 facts.json 同步进 memory.db（fact_sync），
 # 然后新 insight 通过 L2 距离判断是否重复。
-# 阈值 L2_DEDUP_THRESHOLD = 1.1（对应 cosine ≈ 0.4）
-# 期望：重复 fact 的 L2 < 1.1，新 fact 的 L2 > 1.1
+# 阈值 L2_DEDUP_THRESHOLD = 0.7（对应 cosine ≈ 0.4）
+# 期望：重复 fact 的 L2 < 0.7，新 fact 的 L2 > 0.7
 
 FACT_SYNC_CASES = [
     # (label, existing_fact, new_insight, should_dedup: True/False, reason)
@@ -285,7 +285,7 @@ def main() -> None:
     print("判读指南：")
     print("  - 场景 1（核心）：同义句能否识别为重复，避免重复存储 insight")
     print("  - 场景 2：用户查询能否语义匹配到相关文档（召回率）")
-    print("  - 场景 3：fact_sync 镜像去重，L2 < 1.1 判为重复跳过")
+    print("  - 场景 3：fact_sync 镜像去重，L2 < 0.7 判为重复跳过")
     print("  - 'medium' 在所有场景都算误判（保守口径）")
     print("=" * 100)
 

@@ -86,7 +86,7 @@ def try_bge_base_zh():
 def try_hash_fallback():
     """当前 Ethan 使用的兜底 hash embedding，作为基线。"""
     from ethan.memory.embeddings import _hash_embed
-    print("  → hash_fallback (当前生产): dim=384, size=0")
+    print("  → hash_fallback (当前生产): dim=512, size=0")
     return _hash_embed
 
 

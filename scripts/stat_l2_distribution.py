@@ -97,7 +97,7 @@ async def main():
     print("  L2=0.5 → cos=0.875")
     print("  L2=0.7 → cos=0.755")
     print("  L2=0.9 → cos=0.595")
-    print("  L2=1.1 → cos=0.395  ← 当前阈值")
+    print("  L2=1.1 → cos=0.395  ← 旧阈值")
     print("  L2=1.414 → cos=0.0")
 
     bge_enc = _try_get_encoder()
@@ -167,8 +167,8 @@ async def main():
 
     print("\n" + "=" * 80)
     print("结论:")
-    print("  当前阈值 L2 < 1.1（cos ≈ 0.4）太宽松")
-    print("  推荐阈值: L2 < 0.7（cos ≈ 0.755）")
+    print("  旧阈值 L2 < 1.1（cos ≈ 0.4）太宽松")
+    print("  当前阈值: L2 < 0.7（cos ≈ 0.755）")
     print("  依据: 同义改写 L2 通常 < 0.7，不同主题 L2 通常 > 0.7")
     print("=" * 80)
 

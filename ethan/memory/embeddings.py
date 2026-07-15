@@ -6,10 +6,13 @@
 """
 import asyncio
 import hashlib
+import logging
 import math
 import os
 import re
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 EMBEDDING_DIM = 512  # BGE-small-zh-v1.5；fallback hash 用同维度保证 schema 一致
 
@@ -119,6 +122,7 @@ class _BGEEncoder:
                 providers=["CPUExecutionProvider"],
             )
             self._tok = Tokenizer.from_file(str(tok_path))
+            self._tok.enable_truncation(max_length=512)
             self._input_names = {i.name for i in self._sess.get_inputs()}
             self._ready = True
             return True
@@ -146,10 +150,14 @@ class _BGEEncoder:
             feeds["token_type_ids"] = np.zeros_like(input_ids)
 
         feeds = {k: v for k, v in feeds.items() if k in self._input_names}
-        out = self._sess.run(None, feeds)[0]
-        emb = out[0, 0, :]  # CLS token
-        emb = emb / (np.linalg.norm(emb) + 1e-8)
-        return emb.tolist()
+        try:
+            out = self._sess.run(None, feeds)[0]
+            emb = out[0, 0, :]  # CLS token
+            emb = emb / (np.linalg.norm(emb) + 1e-8)
+            return emb.tolist()
+        except Exception:
+            logger.warning("BGE ONNX 推理失败，回退 hash embedding", exc_info=True)
+            return None
 
 
 def _try_get_encoder():
