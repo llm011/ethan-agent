@@ -167,6 +167,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     trackTtft = false,
   ) => {
     let assistantContent = "";
+    let intermediateOutput = "";
     const assistantThought = "";
     const currentToolSteps: ToolStep[] = [];
     let currentMatchedSkills: { name: string; is_default?: boolean }[] | undefined;
@@ -210,6 +211,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
             toolSteps: currentToolSteps.length > 0 ? [...currentToolSteps] : undefined,
             toolsExpanded: currentToolSteps.length > 0 ? true : undefined,
             created_at: Date.now() / 1000,
+            intermediateOutput: intermediateOutput || undefined, intermediateExpanded: true,
           }]);
           continue;
         }
@@ -223,6 +225,9 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         }
         if (chunk.tool && chunk.state === "start") {
           const preToolThought = assistantContent.trim();
+          if (preToolThought) {
+            intermediateOutput += (intermediateOutput ? "\n\n" : "") + preToolThought;
+          }
           assistantContent = "";
           currentToolSteps.push({
             tool: chunk.tool, args: chunk.args || "", intent: chunk.intent || undefined, state: "running", id: chunk.id,
@@ -233,6 +238,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           setMessages([...baseMessages, {
             role: "assistant", content: assistantContent, thought: assistantThought,
             toolSteps: [...currentToolSteps], toolsExpanded: true, created_at: Date.now() / 1000,
+            intermediateOutput: intermediateOutput || undefined, intermediateExpanded: true,
           }]);
         }
         if (chunk.tool && (chunk.state === "done" || chunk.state === "error")) {
@@ -272,6 +278,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           setMessages([...baseMessages, {
             role: "assistant", content: assistantContent, thought: assistantThought,
             toolSteps: [...currentToolSteps], toolsExpanded: true, created_at: Date.now() / 1000,
+            intermediateOutput: intermediateOutput || undefined, intermediateExpanded: true,
           }]);
         }
         if (chunk.tool && (chunk.state === "done" || chunk.state === "error") && chunk.ui && Array.isArray(chunk.ui)) {
@@ -284,6 +291,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
             toolSteps: currentToolSteps.length > 0 ? [...currentToolSteps] : undefined,
             toolsExpanded: currentToolSteps.length > 0 ? true : undefined,
             created_at: Date.now() / 1000,
+            intermediateOutput: intermediateOutput || undefined, intermediateExpanded: true,
           }]);
         }
         if (chunk.done && chunk.usage) {
@@ -322,10 +330,10 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       const msgs = [...prev];
       const last = msgs[msgs.length - 1];
       if (last && last.role === "assistant") {
-        msgs[msgs.length - 1] = { ...last, content: assistantContent, thought: assistantThought, toolsExpanded: false, usage: finalUsage || last.usage, ttft: ttft ?? last.ttft, ttfb_ms: ttfbMs ?? last.ttfb_ms, total_ms: totalMs ?? last.total_ms, a2ui: a2uiSurfaces.length > 0 ? a2uiSurfaces : undefined, matchedSkills: currentMatchedSkills, id: messageId ?? last.id };
+        msgs[msgs.length - 1] = { ...last, content: assistantContent, thought: assistantThought, toolsExpanded: false, usage: finalUsage || last.usage, ttft: ttft ?? last.ttft, ttfb_ms: ttfbMs ?? last.ttfb_ms, total_ms: totalMs ?? last.total_ms, a2ui: a2uiSurfaces.length > 0 ? a2uiSurfaces : undefined, matchedSkills: currentMatchedSkills, id: messageId ?? last.id, intermediateOutput: intermediateOutput || undefined, intermediateExpanded: false };
         return msgs;
       }
-      return [...baseMessages, { role: "assistant", content: assistantContent, thought: assistantThought, created_at: Date.now() / 1000, usage: finalUsage, ttft, ttfb_ms: ttfbMs, total_ms: totalMs, a2ui: a2uiSurfaces.length > 0 ? a2uiSurfaces : undefined, matchedSkills: currentMatchedSkills, id: messageId }];
+      return [...baseMessages, { role: "assistant", content: assistantContent, thought: assistantThought, created_at: Date.now() / 1000, usage: finalUsage, ttft, ttfb_ms: ttfbMs, total_ms: totalMs, a2ui: a2uiSurfaces.length > 0 ? a2uiSurfaces : undefined, matchedSkills: currentMatchedSkills, id: messageId, intermediateOutput: intermediateOutput || undefined, intermediateExpanded: false }];
     });
     setStopping(false);
     setStreaming(false);
