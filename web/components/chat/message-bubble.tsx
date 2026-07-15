@@ -158,6 +158,23 @@ export function MessageBubble({ msg, isStreaming, isLast, onQuote, onCardAction,
                 </div>
               </details>
             )}
+            {msg.intermediateOutput && (
+              isStreaming && isLast ? (
+                <div className="mb-2 rounded-lg border border-border/50 bg-background/30 px-3 py-2 text-sm text-muted-foreground/80 leading-relaxed">
+                  <div className="text-xs font-medium text-muted-foreground mb-1.5">📝 过程记录</div>
+                  <MarkdownContent content={msg.intermediateOutput} />
+                </div>
+              ) : (
+                <details className="mb-2 border border-border/50 bg-background/50 rounded-lg overflow-hidden group">
+                  <summary className="px-3 py-1.5 text-xs text-muted-foreground font-medium cursor-pointer hover:bg-background/80 flex items-center transition-colors list-none select-none">
+                    <span className="opacity-70 group-open:opacity-100 transition-opacity">📝 过程记录</span>
+                  </summary>
+                  <div className="px-3 py-2 text-sm text-muted-foreground/80 border-t border-border/50 bg-background/30 leading-relaxed">
+                    <MarkdownContent content={msg.intermediateOutput} />
+                  </div>
+                </details>
+              )
+            )}
             {msg.toolSteps && msg.toolSteps.length > 0 && (
               <ToolTimeline steps={msg.toolSteps} defaultExpanded={msg.toolsExpanded ?? false} highlightIndex={highlightedStep} />
             )}

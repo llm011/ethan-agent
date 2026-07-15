@@ -31,6 +31,11 @@ export const markdownComponents: Components = {
     return <code className="bg-background/50 px-1 py-0.5 rounded text-xs font-mono break-all">{children}</code>;
   },
   pre: ({ children }) => <>{children}</>,
+  table: ({ children }) => (
+    <div className="table-wrapper">
+      <table>{children}</table>
+    </div>
+  ),
 };
 
 // 气泡与阅读模式共用同一个渲染入口，确保 DOM 文本节点序列完全一致，
