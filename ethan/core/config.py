@@ -346,12 +346,22 @@ def _init_default_skills() -> None:
                         target.parent.mkdir(parents=True, exist_ok=True)
                         shutil.copy2(f, target)
         else:
-            # 目标已存在，仅同步更新的 SKILL.md
+            # 目标已存在，同步 SKILL.md 和 references/ 中的文件
             src_md = src / "SKILL.md"
             dst_md = dst / "SKILL.md"
-            if src_md.exists() and dst_md.exists():
-                if src_md.stat().st_mtime > dst_md.stat().st_mtime:
+            if src_md.exists():
+                if not dst_md.exists() or src_md.stat().st_mtime > dst_md.stat().st_mtime:
                     shutil.copy2(str(src_md), str(dst_md))
+            # 同步 references/：仅添加或更新，不删除用户自建文件
+            src_refs = src / "references"
+            if src_refs.is_dir():
+                dst_refs = dst / "references"
+                dst_refs.mkdir(parents=True, exist_ok=True)
+                for ref_file in src_refs.iterdir():
+                    if ref_file.is_file():
+                        dst_file = dst_refs / ref_file.name
+                        if not dst_file.exists() or ref_file.stat().st_mtime > dst_file.stat().st_mtime:
+                            shutil.copy2(str(ref_file), str(dst_file))
 
 
 def load_config() -> Config:
