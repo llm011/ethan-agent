@@ -5,6 +5,7 @@
 import asyncio
 import logging
 import os
+import time as _time
 from datetime import datetime
 from pathlib import Path
 
@@ -72,7 +73,7 @@ async def _consolidate_facts_for_user(user_id: str) -> None:
                 f.superseded = True
             store._save()
             for line in lines:
-                store.add(line, confidence=0.85, source="heartbeat_consolidation")
+                await store.add_async(line, confidence=0.85, source="heartbeat_consolidation")
             logger.info("[Heartbeat] Facts consolidated: %d → %d", len(active), len(lines))
         except Exception:
             logger.exception("[Heartbeat] Facts consolidation failed")
@@ -336,7 +337,7 @@ async def _run_heartbeat_md() -> None:
 
 
 async def _tick() -> None:
-    """执行一次心跳：facts 整理 + 画像每日压缩 + heartbeat.md 任务 + skill 进化 + watchdog 检查。"""
+    """执行一次心跳：facts 整理 + 画像每日压缩 + heartbeat.md 任务 + skill 进化 + 决策模式抽取 + 需求挖掘 + watchdog 检查 + memory.db 孤儿清理 + sessions.db 轮转检查。"""
     logger.info("[Heartbeat] tick")
     # 确保 watchdog 进程存活（互相拉起的 server 侧逻辑）
     # 多 worktree 开发时跳过（ETHAN_NO_WATCHDOG=1）
@@ -350,6 +351,34 @@ async def _tick() -> None:
     await _consolidate_profiles()
     await _run_heartbeat_md()
     await _update_skills()
+    await _extract_decision_patterns()
+    await _mine_recurring_needs()
+    await _cleanup_memory_db()
+    await _rotate_session_dbs()
+
+
+async def _rotate_session_dbs() -> None:
+    """遍历所有用户，检查 sessions.db 是否超过 10 MB，超过则归档轮转。"""
+    try:
+        from ethan.core.context import ETHAN_USER_ID, get_user_store
+        from ethan.core.paths import user_sessions_db_path
+        from ethan.memory.session import SessionStore
+
+        for uid in get_user_store().all_user_ids():
+            token = ETHAN_USER_ID.set(uid)
+            try:
+                store = SessionStore(db_path=user_sessions_db_path())
+                await store.init()
+                try:
+                    rotated = await store.rotate_if_needed()
+                finally:
+                    await store.close()
+                if rotated:
+                    logger.info("[Heartbeat] sessions.db rotated: user=%s", uid or "default")
+            finally:
+                ETHAN_USER_ID.reset(token)
+    except Exception:
+        logger.warning("[Heartbeat] sessions.db rotation check failed", exc_info=True)
 
 
 async def _update_skills() -> None:
@@ -362,7 +391,259 @@ async def _update_skills() -> None:
         logger.exception("[Heartbeat] Skill update failed")
 
 
+async def _extract_decision_patterns() -> None:
+    """B1: 从近期 session 的 tool_steps 中提取高频成功路径，存入 success_patterns。
+
+    遍历所有用户 profile，每个用户独立处理。
+    借鉴 Palantir Action Layer 的决策记录与反馈闭环。
+    """
+    from ethan.core.users import get_user_store
+    for uid in get_user_store().all_user_ids():
+        try:
+            await _extract_decision_patterns_for_user(uid)
+        except Exception:
+            logger.exception("[Heartbeat] Decision pattern extraction failed for user %s", uid or "default")
+
+
+async def _extract_decision_patterns_for_user(user_id: str) -> None:
+    """单个用户的决策模式抽取。"""
+    from ethan.core.context import ETHAN_USER_ID
+    from ethan.core.paths import user_procedures_path, user_sessions_db_path
+    from ethan.memory.consolidator import Consolidator, get_lite_model
+    from ethan.memory.procedures import ProcedureStore
+    from ethan.memory.session import SessionStore
+
+    token = ETHAN_USER_ID.set(user_id)
+    try:
+        store = SessionStore(db_path=user_sessions_db_path())
+        await store.init()
+        try:
+            sessions = await store.list_recent(limit=20)
+            if not sessions:
+                return
+
+            proc_store = ProcedureStore(path=user_procedures_path())
+            existing_scenarios = {p.scenario for p in proc_store.all_success_patterns()}
+
+            # 复用同一个 store 实例 load 所有 session，避免重复建连接
+            all_tool_sequences: list[tuple[str, list[str]]] = []
+            for si in sessions:
+                try:
+                    session = await store.load(si.id)
+                    if not session:
+                        continue
+                    tool_names = []
+                    for m in session.messages:
+                        if m.tool_steps:
+                            for step in m.tool_steps:
+                                if step.get("tool"):
+                                    tool_names.append(step["tool"])
+                    if tool_names:
+                        all_tool_sequences.append((si.title or si.id, tool_names))
+                except Exception:
+                    continue
+        finally:
+            await store.close()
+
+        if not all_tool_sequences:
+            return
+
+        try:
+            from ethan.core.config import get_config
+            main_model = get_config().defaults.model
+        except Exception:
+            main_model = "gpt-4o"
+
+        lite_model = get_lite_model(main_model)
+        consolidator = Consolidator(main_model=main_model)
+
+        sequences_text = "\n".join(
+            f"[Session {i+1}] title={title}\n  tools: {' → '.join(tqs)}"
+            for i, (title, tqs) in enumerate(all_tool_sequences[:20])
+        )
+        prompt = (
+            f"以下是用户近期 {len(all_tool_sequences)} 个会话的工具调用序列。"
+            "请归纳出高频出现的成功路径（≥2 次的相同模式），按场景分类。\n\n"
+            f"{sequences_text}\n\n"
+            "输出格式（每行一条，空行分隔）：\n"
+            "场景描述 | tool1 → tool2 → tool3\n"
+            "只输出重复出现的模式，不要输出只出现一次的。如果没有重复模式，输出空。"
+        )
+
+        try:
+            provider = consolidator._get_provider(lite_model)
+            from ethan.providers.base import Message
+            resp = await provider.chat(
+                [Message(role="user", content=prompt)],
+                tools=None,
+                system="你是一个工具调用模式分析助手，负责从历史数据中归纳重复出现的成功路径。"
+            )
+            result = (resp.content or "").strip()
+        except Exception:
+            logger.warning("[Heartbeat] decision pattern extraction LLM call failed for user %s", user_id or "default", exc_info=True)
+            return
+
+        if not result:
+            return
+
+        added = 0
+        for line in result.split("\n"):
+            line = line.strip()
+            if not line or "|" not in line:
+                continue
+            parts = line.split("|", 1)
+            scenario = parts[0].strip()
+            tool_seq = [t.strip() for t in parts[1].split("→") if t.strip()]
+            if scenario and tool_seq and scenario not in existing_scenarios:
+                proc_store.add_success_pattern(scenario, tool_seq)
+                existing_scenarios.add(scenario)
+                added += 1
+
+        if added:
+            logger.info("[Heartbeat] Extracted %d new success pattern(s) for user %s", added, user_id or "default")
+    finally:
+        ETHAN_USER_ID.reset(token)
+
+
+async def _mine_recurring_needs() -> None:
+    """C1: 从近期 episodes 中识别重复模式，生成建议。
+
+    遍历所有用户 profile，每个用户独立处理。
+    借鉴 Palantir FDE 模式：主动挖掘无法言明的真实需求。
+    """
+    from ethan.core.users import get_user_store
+    for uid in get_user_store().all_user_ids():
+        try:
+            await _mine_recurring_needs_for_user(uid)
+        except Exception:
+            logger.exception("[Heartbeat] Recurring need mining failed for user %s", uid or "default")
+
+
+async def _mine_recurring_needs_for_user(user_id: str) -> None:
+    """单个用户的重复需求挖掘。"""
+    import json
+
+    from ethan.core.context import ETHAN_USER_ID
+    from ethan.core.paths import user_episodes_path, user_suggestions_path
+    from ethan.memory.episodic import EpisodeStore
+
+    token = ETHAN_USER_ID.set(user_id)
+    try:
+        store = EpisodeStore(path=user_episodes_path())
+        recent = store.recent(limit=30)
+
+        if len(recent) < 3:
+            return
+
+        from ethan.core.config import get_config
+        from ethan.memory.consolidator import Consolidator, get_lite_model
+        main_model = get_config().defaults.model
+        lite_model = get_lite_model(main_model)
+
+        episodes_text = "\n".join(
+            f"- [{e.timestamp:.0f}] {e.summary} (keywords: {', '.join(e.keywords)})"
+            for e in recent
+        )
+        prompt = (
+            f"以下是用户近 {len(recent)} 个对话的摘要。请识别出现≥3次的重复模式（相同主题/相同需求），"
+            "并给出是否可以固化为定时任务或 Skill 的建议。\n\n"
+            f"{episodes_text}\n\n"
+            "输出格式（每行一条，没有重复模式则输出空）：\n"
+            "PATTERN: <模式描述> | COUNT: <次数> | SUGGESTION: <建议>\n"
+            "只输出真正重复的模式，不要把不相关的归为一类。"
+        )
+
+        consolidator = Consolidator(main_model=main_model)
+        try:
+            provider = consolidator._get_provider(lite_model)
+            from ethan.providers.base import Message
+            resp = await provider.chat(
+                [Message(role="user", content=prompt)],
+                tools=None,
+                system="你是一个用户行为分析助手，负责识别重复模式并给出可执行的建议。"
+            )
+            result = (resp.content or "").strip()
+        except Exception:
+            logger.warning("[Heartbeat] need mining LLM call failed for user %s", user_id or "default", exc_info=True)
+            return
+
+        if not result:
+            return
+
+        suggestions_path = user_suggestions_path()
+
+        existing_suggestions = []
+        if suggestions_path.exists():
+            try:
+                existing_suggestions = json.loads(suggestions_path.read_text(encoding="utf-8"))
+            except Exception:
+                existing_suggestions = []
+
+        rejected = {s.get("pattern", "") for s in existing_suggestions if s.get("rejected")}
+
+        added = 0
+        for line in result.split("\n"):
+            line = line.strip()
+            if not line.startswith("PATTERN:"):
+                continue
+            parts = line.split("|")
+            pattern = parts[0].replace("PATTERN:", "").strip() if len(parts) > 0 else ""
+            count = 0
+            suggestion = ""
+            if len(parts) > 1:
+                count_str = parts[1].replace("COUNT:", "").strip()
+                try:
+                    count = int(count_str)
+                except ValueError:
+                    pass
+            if len(parts) > 2:
+                suggestion = parts[2].replace("SUGGESTION:", "").strip()
+
+            if pattern and count >= 3 and pattern not in rejected:
+                already = any(s.get("pattern") == pattern and not s.get("rejected") for s in existing_suggestions)
+                if not already:
+                    existing_suggestions.append({
+                        "pattern": pattern,
+                        "count": count,
+                        "suggestion": suggestion,
+                        "rejected": False,
+                        "created_at": _time.time(),
+                    })
+                    added += 1
+
+        if added:
+            suggestions_path.parent.mkdir(parents=True, exist_ok=True)
+            suggestions_path.write_text(json.dumps(existing_suggestions, ensure_ascii=False, indent=2), encoding="utf-8")
+            logger.info("[Heartbeat] Mined %d new recurring need(s) for user %s", added, user_id or "default")
+    finally:
+        ETHAN_USER_ID.reset(token)
+
+
 _heartbeat_task: asyncio.Task | None = None
+_midnight_task: asyncio.Task | None = None
+
+
+async def _cleanup_memory_db() -> None:
+    """遍历所有用户，清理 memory.db 中的孤儿条目（安全阀）。
+
+    第五层是"永久记忆"，insight_* 与 fact_sync 均豁免；这里只清理类型未知的孤儿条目。
+    """
+    try:
+        from ethan.core.context import ETHAN_USER_ID, get_user_store
+        from ethan.memory.vector_store import VectorStore
+
+        for uid in get_user_store().all_user_ids():
+            token = ETHAN_USER_ID.set(uid)
+            try:
+                vs = VectorStore()
+                deleted = vs.cleanup_expired()
+                if deleted:
+                    logger.info("[Heartbeat] memory.db cleanup: user=%s deleted=%d", uid, deleted)
+                vs.close()
+            finally:
+                ETHAN_USER_ID.reset(token)
+    except Exception:
+        logger.warning("[Heartbeat] memory.db cleanup failed", exc_info=True)
 
 
 async def _loop() -> None:
@@ -381,8 +662,41 @@ async def _loop() -> None:
         await asyncio.sleep(interval)
 
 
+async def _midnight_loop() -> None:
+    """每天 0 点执行"做梦"（记忆沉淀）—— 遍历所有用户，各自沉淀昨日信号。"""
+    while True:
+        try:
+            now = datetime.now()
+            # 计算到下一个 0 点的秒数
+            tomorrow = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            if tomorrow <= now:
+                from datetime import timedelta
+                tomorrow += timedelta(days=1)
+            wait_seconds = (tomorrow - now).total_seconds()
+            logger.info("[Heartbeat] Midnight consolidation scheduled in %.0f seconds", wait_seconds)
+            await asyncio.sleep(wait_seconds)
+
+            # 遍历所有用户，各自执行记忆沉淀（与其它心跳任务一致的 per-user 模式）
+            from ethan.core.context import ETHAN_USER_ID, get_user_store
+            from ethan.memory.daily_consolidation import run_daily_consolidation
+            total_added = 0
+            for uid in get_user_store().all_user_ids():
+                token = ETHAN_USER_ID.set(uid)
+                try:
+                    added = await run_daily_consolidation()
+                    total_added += added
+                finally:
+                    ETHAN_USER_ID.reset(token)
+            logger.info("[Heartbeat] Midnight consolidation done, stored %d new memories across all users", total_added)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("[Heartbeat] Midnight consolidation failed")
+            await asyncio.sleep(3600)  # 失败后等 1 小时重试
+
+
 def start_heartbeat() -> None:
-    global _heartbeat_task
+    global _heartbeat_task, _midnight_task
     from ethan.core.config import get_config
     if not get_config().defaults.heartbeat.enabled:
         logger.info("[Heartbeat] Disabled by config")
@@ -390,10 +704,13 @@ def start_heartbeat() -> None:
     if _heartbeat_task and not _heartbeat_task.done():
         return
     _heartbeat_task = asyncio.create_task(_loop())
+    _midnight_task = asyncio.create_task(_midnight_loop())
     logger.info("[Heartbeat] Started (interval=%dm)", get_config().defaults.heartbeat.interval_minutes)
 
 
 def stop_heartbeat() -> None:
-    global _heartbeat_task
+    global _heartbeat_task, _midnight_task
     if _heartbeat_task and not _heartbeat_task.done():
         _heartbeat_task.cancel()
+    if _midnight_task and not _midnight_task.done():
+        _midnight_task.cancel()

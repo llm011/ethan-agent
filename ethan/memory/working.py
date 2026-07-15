@@ -16,7 +16,7 @@ from ethan.providers.base import Message
 class MemoryConfig:
     hot_size: int = 5          # 热区保留轮数（1轮 = user + assistant）
     compress_batch: int = 5    # 攒够多少轮再触发一次压缩
-    warm_capacity: int = 20    # 温区累积多少轮后触发冷区提取
+    warm_capacity: int = 10    # 温区累积多少轮后触发冷区提取（A3: 从 20 降到 10，短对话也能触发抽取）
 
 
 @dataclass

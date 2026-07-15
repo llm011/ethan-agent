@@ -108,7 +108,9 @@ def setup_main(ctx: typer.Context) -> None:
     if not sys.stdin.isatty():
         return
 
-    if not first_run:
+    if first_run:
+        console.print("[dim]运行 [bold]ethan setup[/bold] 可随时进入配置菜单。[/dim]")
+    else:
         _run_interactive_menu()
 
 

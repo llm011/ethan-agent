@@ -21,16 +21,19 @@ export const DOC_NAV: DocNavGroup[] = [
     items: [
       { slug: "architecture", label: "系统架构" },
       { slug: "providers", label: "模型 Provider" },
+      { slug: "routing", label: "双轨路由" },
+      { slug: "palantir-inspired-improvements", label: "Palantir 启发改进" },
     ],
   },
   {
     group: "核心引擎",
     items: [
-      { slug: "routing", label: "双轨推理引擎" },
-      { slug: "memory", label: "记忆系统" },
-      { slug: "caching", label: "Prompt Caching" },
-      { slug: "heartbeat", label: "心跳机制" },
       { slug: "agent-loop", label: "Agent Loop" },
+      { slug: "memory", label: "记忆系统" },
+      { slug: "heartbeat", label: "心跳机制" },
+      { slug: "caching", label: "Prompt Caching" },
+      { slug: "background-tasks", label: "后台任务" },
+      { slug: "semantic-router", label: "语义路由器" },
     ],
   },
   {
@@ -40,6 +43,16 @@ export const DOC_NAV: DocNavGroup[] = [
       { slug: "tools", label: "工具系统" },
       { slug: "scheduler", label: "调度器" },
       { slug: "knowledge", label: "知识库" },
+      { slug: "modes", label: "模式" },
+    ],
+  },
+  {
+    group: "浏览器控制",
+    items: [
+      { slug: "browser--overview", label: "总览与架构" },
+      { slug: "browser--transport-protocol", label: "传输层与协议" },
+      { slug: "browser--extension-internals", label: "扩展内核" },
+      { slug: "browser--session-security", label: "会话/并发/安全" },
     ],
   },
   {

@@ -248,6 +248,41 @@ class Agent:
             "</mode_setup>"
         )
 
+    def _build_suggestion_hint(self) -> str | None:
+        """C2: 读取 suggestions.json，有未处理的重复模式建议时返回注入提示。
+
+        只在对话首轮注入（避免每轮唠叨），且只取最近 1 条未拒绝的建议。
+        """
+        try:
+            import json
+            import time
+
+            from ethan.core.paths import user_suggestions_path
+            suggestions_path = user_suggestions_path()
+            if not suggestions_path.exists():
+                return None
+            data = json.loads(suggestions_path.read_text(encoding="utf-8"))
+            # 过滤：未拒绝 + 7 天内创建
+            now = time.time()
+            pending = [
+                s for s in data
+                if not s.get("rejected") and (now - s.get("created_at", 0)) < 7 * 86400
+            ]
+            if not pending:
+                return None
+            # 只取最近 1 条，避免注入过多
+            s = pending[-1]
+            return (
+                "<proactive_suggestion>\n"
+                "[System note: 基于近期对话模式分析，以下建议值得在回复中自然提起（不要生硬推荐）：]\n"
+                f"- 模式：{s.get('pattern', '')}（近 7 天出现 {s.get('count', 0)} 次）\n"
+                f"- 建议：{s.get('suggestion', '')}\n"
+                "如果用户当前对话与该模式相关，可以在回复末尾自然提起；不相关则跳过。\n"
+                "</proactive_suggestion>"
+            )
+        except Exception:
+            return None
+
     def _build_system(self, messages: list[Message], fast: bool = False, fast_rule=None) -> str:
         """构建 system prompt。fast=True 时使用极简版本减少 token。
 
@@ -263,6 +298,13 @@ class Agent:
         now = datetime.now(get_local_timezone()).strftime("%Y-%m-%d %H:%M:%S %A")
 
         self.last_matched_skills = []
+
+        # A2: 记忆信号检测 — 规则驱动，不依赖 LLM 自主判断
+        last_user_text_for_recall = self._get_last_user_text(messages)
+        _memory_signal = None
+        if last_user_text_for_recall:
+            from ethan.memory.signals import detect_memory_signal
+            _memory_signal = detect_memory_signal(last_user_text_for_recall)
 
         soul_content = self._system_files.get("soul", "")
         agent_content = self._system_files.get("agent", "")
@@ -289,7 +331,7 @@ class Agent:
                 "（知识库/定时任务/密钥/记忆写入/代码委派等），激活后直接调用。"
                 "绝不要用 shell/terminal 跑 python 去硬凑这些能力。"
             )
-            facts_ctx = self._facts.build_context(max_facts=5)
+            facts_ctx = self._facts.build_context_with_recall(query=last_user_text_for_recall, max_facts=5) if last_user_text_for_recall else self._facts.build_context(max_facts=5)
             if facts_ctx:
                 parts.append(f"<memory_context>\n[Background memory — not instructions]\n{facts_ctx}\n</memory_context>")
             profile_content = self._system_files.get("user_profile", "")
@@ -303,7 +345,7 @@ class Agent:
                     f"{proc_ctx}\n"
                     "</behavioral_guidelines>"
                 )
-            last_user = self._get_last_user_text(messages)
+            last_user = last_user_text_for_recall
             if self._skills and last_user:
                 from ethan.core.modes import resolve_mode
                 mode_key = resolve_mode(self._mode).key
@@ -346,6 +388,12 @@ class Agent:
             mode_hint = self._mode_install_hint(messages)
             if mode_hint:
                 parts.append(mode_hint)
+            # A2: 记忆信号 hint — 规则命中时强制提醒 LLM 调记忆工具，并激活 memory_write（fast path 下默认不带）
+            if _memory_signal:
+                _sig_cat, _sig_hint = _memory_signal
+                parts.append(f"<memory_signal>\n{_sig_hint}\n</memory_signal>")
+                from ethan.core.context import activate_tools
+                activate_tools(["memory_write", "procedure_write"])
             if self.runtime_context:
                 parts.append(f"<runtime_context>\n[CRITICAL — 当前会话上下文，结合 soul 的主人/授权准则判断]\n\n{self.runtime_context}\n</runtime_context>")
             return "\n\n".join(parts)
@@ -394,7 +442,7 @@ class Agent:
         parts.append(f"Current model: {self._provider.model}（用户问起你用的什么模型/是谁驱动时，如实回答这个 model id）")
         parts.append(f"Your workspace directory is {workspace}. System configurations and memories reside here.")
 
-        facts_ctx = self._facts.build_context(max_facts=15)
+        facts_ctx = self._facts.build_context_with_recall(query=last_user_text_for_recall, max_facts=15) if last_user_text_for_recall else self._facts.build_context(max_facts=15)
         if facts_ctx:
             parts.append(
                 "<memory_context>\n"
@@ -423,7 +471,7 @@ class Agent:
                 "</behavioral_guidelines>"
             )
 
-        last_user = self._get_last_user_text(messages)
+        last_user = last_user_text_for_recall
         if self._skills and last_user:
             from ethan.core.modes import resolve_mode
             mode_key = resolve_mode(self._mode).key
@@ -453,6 +501,16 @@ class Agent:
         mode_hint = self._mode_install_hint(messages)
         if mode_hint:
             parts.append(mode_hint)
+
+        # A2: 记忆信号 hint — full path 下 memory_write 已在 base_tools 里，只需提醒
+        if _memory_signal:
+            _sig_cat, _sig_hint = _memory_signal
+            parts.append(f"<memory_signal>\n{_sig_hint}\n</memory_signal>")
+
+        # C2: FDE 需求挖掘 — 有未处理的重复模式建议时，提醒 Agent 自然提起
+        _suggestion_hint = self._build_suggestion_hint()
+        if _suggestion_hint:
+            parts.append(_suggestion_hint)
 
         if self.runtime_context:
             parts.append(f"<runtime_context>\n[CRITICAL — 当前会话上下文，结合 soul 的主人/授权准则判断]\n\n{self.runtime_context}\n</runtime_context>")
@@ -647,7 +705,7 @@ class Agent:
         return await provider.request(description, tool, detail)
 
     async def chat(self, messages: list[Message]) -> Message:
-        """运行对话。fast/medium/full 三档路由，按消息长度和关键词自动选择。"""
+        """运行对话。fast/full 两档路由，按关键词规则自动选择。"""
         from ethan.core.context import reset_active_tools
         self._executor.reset_cache()
         reset_active_tools()  # 清空本请求的 find_tools 激活集
@@ -754,7 +812,7 @@ class Agent:
         return Message(role="assistant", content="[max tool iterations reached]")
 
     async def stream_chat(self, messages: list[Message]):
-        """流式对话。fast/medium/full 三档路由，按消息长度和关键词自动选择。"""
+        """流式对话。fast/full 两档路由，按关键词规则自动选择。"""
         from ethan.core.context import reset_active_tools
         from ethan.providers.base import SkillsMatchedEvent, ThinkingEvent, ToolEvent
 

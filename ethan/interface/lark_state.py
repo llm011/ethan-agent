@@ -120,8 +120,17 @@ def _pop_forwarded(chat_id: str) -> str:
 
 # ── 持久化辅助 ────────────────────────────────────────────────────────────────
 def _lark_map_file():
-    from ethan.core.config import CONFIG_DIR
-    return CONFIG_DIR / "memory" / "lark_sessions.json"
+    from ethan.core.paths import user_lark_sessions_path
+    target = user_lark_sessions_path()
+    # 迁移：旧路径 memory/lark_sessions.json → 新路径 lark_sessions.json
+    if not target.exists():
+        from ethan.core.paths import user_memory_dir
+        old = user_memory_dir() / "lark_sessions.json"
+        if old.exists():
+            import shutil
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(old), str(target))
+    return target
 
 
 def _load_lark_map():
@@ -143,13 +152,22 @@ def _save_lark_map(mapping: dict):
 
 
 def _lark_welcomed() -> bool:
-    from ethan.core.config import CONFIG_DIR
-    return (CONFIG_DIR / "memory" / ".lark_welcomed").exists()
+    from ethan.core.paths import user_lark_welcomed_path
+    target = user_lark_welcomed_path()
+    if not target.exists():
+        # 迁移：旧路径 memory/.lark_welcomed
+        from ethan.core.paths import user_memory_dir
+        old = user_memory_dir() / ".lark_welcomed"
+        if old.exists():
+            import shutil
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(old), str(target))
+    return target.exists()
 
 
 def _mark_lark_welcomed() -> None:
-    from ethan.core.config import CONFIG_DIR
-    f = CONFIG_DIR / "memory" / ".lark_welcomed"
+    from ethan.core.paths import user_lark_welcomed_path
+    f = user_lark_welcomed_path()
     f.parent.mkdir(parents=True, exist_ok=True)
     f.touch()
 

@@ -37,5 +37,5 @@ class MemoryWriteTool(BaseTool):
     async def run(self, content: str, category: str = "preference") -> str:
         from ethan.core.paths import user_facts_path
         store = FactStore(path=user_facts_path())
-        store.add(content, confidence=0.95, source="agent_proactive", category=category)
+        await store.add_async(content, confidence=0.95, source="agent_proactive", category=category)
         return f"Remembered: {content}"

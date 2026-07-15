@@ -46,7 +46,7 @@ async def onboarding_complete(req: OnboardingCompleteRequest, user_id: str = Dep
 
     if user_info:
         store = FactStore(path=user_facts_path())
-        store.add(user_info, confidence=1.0, source="onboarding", category="preference")
+        await store.add_async(user_info, confidence=1.0, source="onboarding", category="preference")
 
     return {"ok": True, "agent_name": agent_name}
 
@@ -400,11 +400,11 @@ async def system_prompt_preview(model: str | None = None):
 
 @router.get("/tool-tiers", dependencies=[Depends(verify_token)])
 async def tool_tiers(model: str | None = None):
-    """实时计算三档路由各自广播给模型的工具集。
+    """实时计算两档路由各自广播给模型的工具集。
 
     与 agent._select_route 的取值规则保持一致：
       - fast 档：基础系统工具(fast_base_tools) + 命中规则声明的额外工具；其余靠 find_tools 激活
-      - medium / full 档：全量工具直接可见
+      - full 档：全量工具直接可见
     所以前端不写死任何清单，每次按当前注册表 + 配置实时算。
     """
     agent = create_agent(model)

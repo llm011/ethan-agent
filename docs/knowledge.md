@@ -178,4 +178,4 @@ curl "http://localhost:8900/knowledge/search?q=部署流程&limit=5&semantic=tru
 | `ethan/memory/vector_store.py` | sqlite-vec 向量存储 |
 | `ethan/memory/embeddings.py` | Embedding 生成（sentence-transformers / n-gram 回退） |
 | `~/.ethan/knowledge/` | 条目 Markdown 文件 |
-| `~/.ethan/memory/vectors.db` | 向量索引（SQLite） |
+| `~/.ethan/memory/memory.db` | 向量索引（SQLite） |

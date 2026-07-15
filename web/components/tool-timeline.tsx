@@ -309,8 +309,10 @@ export function ToolTimeline({ steps, defaultExpanded = false, highlightIndex }:
   useEffect(() => {
     if (hasHighlight) {
       setExpanded(true);
+    } else if (!defaultExpanded) {
+      setExpanded(false);
     }
-  }, [hasHighlight]);
+  }, [hasHighlight, defaultExpanded]);
 
   return (
     <div className="mb-3 rounded-lg border border-border/50 bg-muted/30 overflow-hidden">

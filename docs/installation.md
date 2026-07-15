@@ -179,7 +179,7 @@ npm run dev
 │   └── heartbeat.md     # 心跳任务（自然语言描述的定期任务）
 ├── memory/
 │   ├── facts.json       # 结构化事实记忆
-│   ├── procedures.json  # 行为规则（从纠正中学习）
+│   ├── playbook.json  # 行为规则（从纠正中学习）
 │   ├── episodes.json    # 会话摘要归档
 │   └── user_profile.md  # 用户画像（叙述式文档）
 ├── skills/              # 用户自定义技能（首次运行自动写入默认技能）

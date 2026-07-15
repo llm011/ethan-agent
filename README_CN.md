@@ -11,10 +11,17 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 **记忆体系（五层）**
 - 热区/温区/冷区三层滑动窗口维持长对话上下文，廉价模型自动压缩较早内容
 - 结构化 Facts：带置信度的条目，有矛盾检测和自动去重（`~/.ethan/memory/facts.json`）
-- 行为准则 Procedures：从用户纠正中自动学习，每次对话加载（`procedures.json`）
+- 行为准则 Procedures：从用户纠正中自动学习，每次对话加载（`playbook.json`）
 - 会话 Episodes：对话结束后自动生成摘要存档，支持关键词检索（`episodes.json`）
 - 用户画像 Profile：叙事型文档，按章节存储个人语言、目标、约定等（`user_profile.md`）；含「基础特征」「心理与情绪」等章节
 - **主动写记忆**：Agent 在对话中识别到可记忆信息时，主动调用工具即时写入，无需批量处理
+
+**做梦——夜间记忆沉淀（"做梦" / dream）**
+- 每晚 0 点 Ethan 会"做梦"：用廉价模型把白天跨 session 采集的信号（重复需求 ≥3 次、错误、成功路径）精炼成永久洞察，再用 sqlite-vec 做 L2 去重（阈值 1.1）后写入 `memory.db`
+- **反写机制**：沉淀的洞察按类型分流反写到 `facts.json`（repetition/error）和 `playbook.json`（success_path），让洞察在未来对话召回时自然生效，无需单独的读取链路
+- **fact_sync 镜像**：每次做梦前，把 facts.json/playbook.json 的 active 内容全量镜像到 `memory.db`（type=`fact_sync`），让 insight 的 L2 去重天然覆盖已有 fact，无需手动遍历；镜像每次全量重建
+- **永久保留**：第五层是真正的长期记忆——洞察不会被自动删除；`last_accessed` 仅作活跃度观察，不作为淘汰依据（memory.db 体量天然可控，每条洞察约 15KB）
+- **sessions.db 轮转**：完整消息历史增长快，sessions.db 超 10 MB 时用 `VACUUM INTO` 原子快照到 `~/.ethan/archive/sessions.{start}~{end}.db`（文件名带日期跨度），保持 active db 轻量，旧会话仍可按日期查归档
 
 **陪伴倾听模式 · 苏念（《臣服实验》心理咨询师）**
 - 可加载插件：在聊天界面一键切换「苏念 · 陪伴倾听」，从工作助手变成一位年轻温柔的女性陪伴者，熟读《臣服实验》、深谙道法自然
@@ -347,12 +354,15 @@ ethan/
 | 热区 | 最近 N 轮完整消息 | 内存 |
 | 温区 | 较早对话的滚动摘要 | 内存 |
 | 冷区（Facts） | 跨 session 提炼的关键事实 | `~/.ethan/memory/facts.json` |
-| 行为准则 | 从用户纠正中学习的规则 | `~/.ethan/memory/procedures.json` |
+| 行为准则 | 从用户纠正中学习的规则 | `~/.ethan/memory/playbook.json` |
 | 用户画像 | 叙事型个人信息（目标、短语、约定） | `~/.ethan/memory/user_profile.md` |
+| 永久记忆（第五层） | "做梦"沉淀的跨 session 洞察（重复/错误/成功路径） | `~/.ethan/memory/memory.db`（sqlite-vec） |
 
 压缩是**批量触发**的（而非逐轮），使用自动推断的廉价模型（Claude 用户用 Haiku，Gemini 用户用 Flash Lite）。
 
 Agent 通过 `memory_write`、`procedure_write`、`profile_update` 工具在对话中主动写入各层，无需等待下一个压缩周期。
+
+第五层"做梦"（dream）在每晚 0 点自动运行：采集白天跨 session 信号 → 廉价模型精炼 → sqlite-vec L2 去重 → 写入 `memory.db`，并反写到 `facts.json`/`playbook.json` 让洞察在召回时自然生效。详见 [记忆系统设计文档](docs/memory.md)。
 
 ---
 
@@ -509,7 +519,7 @@ defaults:
 │   └── heartbeat.md     # 心跳任务（自然语言定义）
 ├── memory/
 │   ├── facts.json       # 结构化 Facts
-│   ├── procedures.json  # 行为准则
+│   ├── playbook.json  # 行为准则
 │   ├── episodes.json    # 会话摘要存档
 │   └── user_profile.md  # 用户画像（叙事型）
 ├── skills/              # 用户自定义 Skill
@@ -533,7 +543,7 @@ defaults:
 
 # 2. 主动写行为准则
 发送："以后你回复我，请用简短的语气，不要废话"
-验证：cat ~/.ethan/memory/procedures.json | python3 -m json.tool
+验证：cat ~/.ethan/memory/playbook.json | python3 -m json.tool
 
 # 3. 用户画像
 发送："你可以用 Roots run deep 这个短语来激励我坚持"
@@ -541,7 +551,7 @@ defaults:
 
 # 4. 纠正学习
 发送一段回复 → "不对，应该用 XXX 方式"
-验证：cat ~/.ethan/memory/procedures.json
+验证：cat ~/.ethan/memory/playbook.json
 
 # 5. 跨会话记忆（Facts 是否被加载）
 重启 Agent，询问："你还记得我叫什么名字吗？"
@@ -693,19 +703,27 @@ EOF
 
 ## 文档
 
-详细设计文档在 [`docs/`](./docs/) 目录下：
+完整文档站：**[llm011.github.io/ethan-agent](https://llm011.github.io/ethan-agent/)**（与 Ethan Web UI 内置"文档"页面一致）
 
-- [架构总览](docs/architecture.md)
-- [Agent Loop](docs/agent-loop.md)
-- [三档路由](docs/routing.md)
-- [Provider 层](docs/providers.md)
-- [工具系统](docs/tools.md)
-- [密钥管理](docs/secrets.md)
-- [记忆系统](docs/memory.md)
-- [Skill 系统](docs/skills.md)
-- [法律专家模式](docs/legal-mode.md)
-- [定时任务](docs/scheduler.md)
-- [接口层](docs/interface.md)
+核心文档：
+- [记忆系统](docs/memory.md) — 五层架构、做梦沉淀、fact_sync
+- [Agent Loop](docs/agent-loop.md) — 双轨路由、记忆注入
+- [架构总览](docs/architecture.md) — 系统组件、数据流
+- [心跳机制](docs/heartbeat.md) — 后台维护、午夜循环
+
+所有文档源文件在 [`docs/`](./docs/) 目录，push 到 main 后自动部署。
+
+---
+
+## 贡献者
+
+<!-- ALL-CONTRIBUTORS-LIST:START -->
+<a href="https://github.com/llm011/ethan-agent/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=llm011/ethan-agent" />
+</a>
+<!-- ALL-CONTRIBUTORS-LIST:END -->
+
+---
 
 ## 许可证
 

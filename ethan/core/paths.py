@@ -47,15 +47,29 @@ def user_facts_path() -> Path:
 
 
 def user_procedures_path() -> Path:
-    return user_memory_dir() / "procedures.json"
+    return user_memory_dir() / "playbook.json"
 
 
 def user_episodes_path() -> Path:
     return user_memory_dir() / "episodes.json"
 
 
+def user_suggestions_path() -> Path:
+    return user_memory_dir() / "suggestions.json"
+
+
 def user_profile_path() -> Path:
     return user_memory_dir() / "user_profile.md"
+
+
+def user_lark_sessions_path() -> Path:
+    """飞书 session 映射。放在数据根目录（非 memory/），因为它是运行时状态不是记忆。"""
+    return user_data_dir() / "lark_sessions.json"
+
+
+def user_lark_welcomed_path() -> Path:
+    """飞书欢迎标记。同上，运行时状态。"""
+    return user_data_dir() / ".lark_welcomed"
 
 
 def user_persistent_path() -> Path:
@@ -63,7 +77,16 @@ def user_persistent_path() -> Path:
 
 
 def user_vectors_db_path() -> Path:
-    return user_memory_dir() / "vectors.db"
+    """向量库路径。统一用 memory.db（有语义），向后兼容旧的 vectors.db。
+
+    如果 memory.db 不存在但 vectors.db 存在，自动迁移。
+    """
+    mem_db = user_memory_dir() / "memory.db"
+    old_vectors = user_memory_dir() / "vectors.db"
+    if not mem_db.exists() and old_vectors.exists():
+        import shutil
+        shutil.copy2(str(old_vectors), str(mem_db))
+    return mem_db
 
 
 _session_db_migrated = False
@@ -77,6 +100,14 @@ def user_sessions_db_path() -> Path:
         _session_db_migrated = True
         _migrate_tmp_session_db(target)
     return target
+
+
+def user_session_archive_dir() -> Path:
+    """归档 session DB 目录。sessions.db 超过阈值时轮转到此，按日期跨度命名。
+
+    如 archive/sessions.2026-01-01~2026-02-10.db
+    """
+    return user_data_dir() / "archive"
 
 
 def _migrate_tmp_session_db(target: Path) -> None:
@@ -213,10 +244,24 @@ def _merge_admin_to_default(admin_dir: Path) -> None:
     _merge_sessions_db(admin_dir, top)
 
     # 2. JSON 记忆文件
-    _merge_json_file(admin_memory, top_memory, "procedures.json")
+    # 向后兼容：procedures.json → playbook.json（原地复制，保留原文件不删）
+    for d in (admin_memory, top_memory):
+        legacy = d / "procedures.json"
+        new = d / "playbook.json"
+        if legacy.exists() and legacy.stat().st_size > 0 and not new.exists():
+            shutil.copy2(str(legacy), str(new))
+    _merge_json_file(admin_memory, top_memory, "playbook.json")
     _merge_json_file(admin_memory, top_memory, "episodes.json")
-    _merge_json_file(admin_memory, top_memory, "lark_sessions.json")
     _merge_facts_json(admin_memory, top_memory)  # facts 按条目 merge
+
+    # 2b. lark_sessions.json：运行时状态，放在数据根目录（非 memory/）
+    #      兼容旧路径 memory/lark_sessions.json
+    for d in (admin_dir, top):
+        legacy = d / "memory" / "lark_sessions.json"
+        new = d / "lark_sessions.json"
+        if legacy.exists() and legacy.stat().st_size > 0 and not new.exists():
+            shutil.copy2(str(legacy), str(new))
+    _merge_json_file(admin_dir, top, "lark_sessions.json")
 
     # 3. Markdown 文件：admin 侧非空则用 admin
     for md in ("user_profile.md", "persistent.md"):
@@ -225,10 +270,13 @@ def _merge_admin_to_default(admin_dir: Path) -> None:
         if src.exists() and src.stat().st_size > 0:
             shutil.copy2(str(src), str(dst))
 
-    # 4. vectors.db：admin 侧存在则覆盖顶层（向量库不合并）
-    vec_src = admin_memory / "vectors.db"
-    if vec_src.exists() and vec_src.stat().st_size > 0:
-        shutil.copy2(str(vec_src), str(top_memory / "vectors.db"))
+    # 4. memory.db（向量库）：admin 侧存在则覆盖顶层（向量库不合并）
+    #    兼容旧名 vectors.db
+    for db_name in ("memory.db", "vectors.db"):
+        vec_src = admin_memory / db_name
+        if vec_src.exists() and vec_src.stat().st_size > 0:
+            shutil.copy2(str(vec_src), str(top_memory / "memory.db"))
+            break  # 只取第一个存在的
 
     # 5. skills/ + knowledge/：dirs_exist_ok 合并，admin 侧覆盖同名，顶层独有保留
     for sub in ("skills", "knowledge"):

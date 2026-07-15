@@ -13,10 +13,17 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 **Memory system (five layers)**
 - Hot/warm/cold three-tier sliding window for long-conversation context; older content auto-compressed by a cheap model
 - Structured Facts: confidence-scored entries with conflict detection and deduplication (`~/.ethan/memory/facts.json`)
-- Behavioral Procedures: learned from user corrections, loaded every conversation (`procedures.json`)
+- Behavioral Procedures: learned from user corrections, loaded every conversation (`playbook.json`)
 - Session Episodes: auto-summarized on exit, supports keyword search (`episodes.json`)
 - User Profile: narrative document storing personal phrases, goals, and agent agreements (`user_profile.md`); sections include 基础特征 (basic traits) and 心理与情绪 (emotional/psychological traits)
 - **Proactive memory write**: Agent calls tools mid-conversation to instantly persist anything worth remembering — no waiting for batch processing
+
+**Dream — nightly memory consolidation ("做梦")**
+- Every night at 0:00, Ethan "dreams": it distills the day's cross-session signals (recurring needs ≥3×, errors, success paths) into permanent insights via a cheap model, then dedups against existing memories with sqlite-vec (L2 < 1.1) before writing to `memory.db`
+- **Reflect-back**: consolidated insights are written back to `facts.json` (repetition/error) and `playbook.json` (success_path) so they surface naturally in future recall — no separate read path needed
+- **fact_sync mirror**: before each dream, active facts/playbook entries are mirrored into `memory.db` (type=`fact_sync`) so insight dedup naturally covers already-known facts; the mirror is fully rebuilt each cycle
+- **Permanent by design**: the fifth layer is true long-term memory — insights are never auto-deleted; `last_accessed` is tracked for observability but not used as an eviction basis (memory.db stays tiny, ~15KB per insight)
+- **Sessions.db rotation**: full message history grows fast, so sessions.db is auto-archived via `VACUUM INTO` to `~/.ethan/archive/sessions.{start}~{end}.db` (filename carries the date span) once it exceeds 10 MB, keeping the active db small while old chats remain queryable by date
 
 **Companion mode — 苏念 (Surrender Experiment counselor)**
 - A loadable plugin: toggle "苏念 · 陪伴倾听" in the chat UI to switch from the work assistant into a young, gentle female listener grounded in *The Surrender Experiment* (道法自然)
@@ -357,7 +364,7 @@ Ethan uses a five-layer memory architecture:
 | Hot | Last N turns (full messages) | In-memory |
 | Warm | Rolling summary of older turns | In-memory |
 | Cold (Facts) | Key facts extracted across sessions | `~/.ethan/memory/facts.json` |
-| Procedures | Behavioral rules learned from corrections | `~/.ethan/memory/procedures.json` |
+| Procedures | Behavioral rules learned from corrections | `~/.ethan/memory/playbook.json` |
 | User Profile | Narrative personal context (goals, phrases, agreements) | `~/.ethan/memory/user_profile.md` |
 
 Compression is **batched** (not per-turn) and uses an automatically inferred cheap model (e.g. Haiku for Claude users, Flash Lite for Gemini users).
@@ -518,7 +525,7 @@ Environment variables in `.env` override config values (useful for secrets).
 │   └── heartbeat.md     # Heartbeat tasks (natural language)
 ├── memory/
 │   ├── facts.json       # Structured facts
-│   ├── procedures.json  # Behavioral rules
+│   ├── playbook.json  # Behavioral rules
 │   ├── episodes.json    # Session episode archive
 │   └── user_profile.md  # User profile (narrative)
 ├── skills/              # User-defined skills
@@ -600,19 +607,27 @@ Environment variables in `.env` override config values (useful for secrets).
 
 ## Documentation
 
-Detailed design docs for each module are in [`docs/`](./docs/):
+Full documentation is available at **[llm011.github.io/ethan-agent](https://llm011.github.io/ethan-agent/)** — the same docs site you see in Ethan's built-in "Docs" tab.
 
-- [Architecture Overview](docs/architecture.md)
-- [Agent Loop](docs/agent-loop.md)
-- [Routing](docs/routing.md)
-- [Provider Layer](docs/providers.md)
-- [Tool System](docs/tools.md)
-- [Secrets Management](docs/secrets.md)
-- [Memory System](docs/memory.md)
-- [Skill System](docs/skills.md)
-- [Legal Expert Mode](docs/legal-mode.md)
-- [Scheduler](docs/scheduler.md)
-- [Interface Layer](docs/interface.md)
+Key docs:
+- [Memory System](docs/memory.md) — five-layer architecture, dream consolidation, fact_sync
+- [Agent Loop](docs/agent-loop.md) — dual-track routing, memory injection
+- [Architecture Overview](docs/architecture.md) — system components, data flow
+- [Heartbeat](docs/heartbeat.md) — background maintenance, midnight loop
+
+All source markdown lives in [`docs/`](./docs/); changes to `main` auto-deploy via GitHub Actions.
+
+---
+
+## Contributors
+
+<!-- ALL-CONTRIBUTORS-LIST:START -->
+<a href="https://github.com/llm011/ethan-agent/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=llm011/ethan-agent" />
+</a>
+<!-- ALL-CONTRIBUTORS-LIST:END -->
+
+---
 
 ## License
 

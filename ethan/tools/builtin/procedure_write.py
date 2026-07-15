@@ -1,4 +1,4 @@
-"""主动写入行为规则工具 — 让 agent 即时将用户指令持久化到 procedures.json。"""
+"""主动写入行为规则工具 — 让 agent 即时将用户指令持久化到 playbook.json。"""
 from ethan.memory.procedures import ProcedureStore
 from ethan.tools.base import BaseTool
 

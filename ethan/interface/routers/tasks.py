@@ -36,8 +36,9 @@ async def _maybe_consolidate(session_id: str, model: str, user_id: str = "", mod
     try:
         # 心理画像是否额外抽取：由当前 mode 自身声明，不在此硬编码模式名
         from ethan.core.modes import resolve_mode
-        from ethan.core.paths import user_facts_path, user_sessions_db_path
+        from ethan.core.paths import user_episodes_path, user_facts_path, user_sessions_db_path
         from ethan.memory.consolidator import Consolidator
+        from ethan.memory.episodic import EpisodeStore
         from ethan.memory.facts import FactStore
         from ethan.memory.working import MemoryConfig, WorkingMemory
         resolve_mode(mode)  # validate mode exists
@@ -50,7 +51,32 @@ async def _maybe_consolidate(session_id: str, model: str, user_id: str = "", mod
             return
 
         user_turns = sum(1 for m in session.messages if m.role == "user")
-        if user_turns == 0 or user_turns % 10 != 0:
+        if user_turns == 0:
+            return
+
+        # ── Episode 写入（每次对话都记，不等门槛）──────────────────────
+        # 原 repl.py 退出时才写 episode，Web/Lark/WeChat 渠道完全没写。
+        # 挪到这里让所有渠道自动生效，新渠道接入 _maybe_consolidate 即可获得 episode。
+        if user_turns >= 2:
+            try:
+                from ethan.memory.signals import extract_keywords
+                all_text = " ".join(m.content for m in session.messages if m.role == "user" and m.content)
+                summary = " ".join(
+                    m.content[:50] for m in session.messages if m.role == "user" and m.content
+                )[:200]
+                keywords = extract_keywords(all_text, max_keywords=10)
+                ep_store = EpisodeStore(path=user_episodes_path())
+                ep_store.add(
+                    session_id=session_id,
+                    summary=summary,
+                    model=model,
+                    turn_count=user_turns,
+                    keywords=keywords,
+                )
+            except Exception:
+                logger.warning("episode write failed for session %s", session_id, exc_info=True)
+
+        if user_turns % 5 != 0:
             return
 
         memory = WorkingMemory(config=MemoryConfig(hot_size=10))
@@ -80,10 +106,15 @@ async def _maybe_consolidate(session_id: str, model: str, user_id: str = "", mod
                 memory.warm_summary, memory.cold_facts
             )
             for fact in result["key_facts"]:
-                fact_store.add(fact, confidence=0.8, source=session_id)
+                await fact_store.add_async(fact, confidence=0.8, source=session_id)
             from ethan.core.profile import apply_extraction
             apply_extraction(result)
             memory.apply_cold_extraction(fact_store.build_context(), result["condensed"])
+
+        # 跨 session 信号采集（每 10 轮触发一次，避免太频繁）
+        if user_turns % 10 == 0:
+            from ethan.memory.daily_signals import collect_signals
+            await collect_signals()
     except Exception:
         pass
 

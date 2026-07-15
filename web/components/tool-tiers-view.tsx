@@ -9,18 +9,13 @@ import {
   TooltipContent,
   TooltipProvider,
 } from "@/components/ui/tooltip";
-import { Loader2, RefreshCw, Zap, Layers, Maximize2 } from "lucide-react";
+import { Loader2, RefreshCw, Zap, Maximize2 } from "lucide-react";
 
 const TIER_META: Record<string, { icon: React.ReactNode; color: string; check: string }> = {
   fast: {
     icon: <Zap className="h-3.5 w-3.5" />,
     color: "text-amber-500",
     check: "text-amber-500",
-  },
-  medium: {
-    icon: <Layers className="h-3.5 w-3.5" />,
-    color: "text-sky-500",
-    check: "text-sky-500",
   },
   full: {
     icon: <Maximize2 className="h-3.5 w-3.5" />,
@@ -38,11 +33,8 @@ function fmtChars(n: number): string {
 }
 
 function ComparisonTable({ tiers }: { tiers: ToolTier[] }) {
-  // Use medium/full as the canonical full tool list
-  const allTools =
-    tiers.find((t) => t.key === "medium")?.tools ??
-    tiers.find((t) => t.key === "full")?.tools ??
-    [];
+  // Full 档作为工具全集
+  const allTools = tiers.find((t) => t.key === "full")?.tools ?? [];
 
   const memberSets = Object.fromEntries(
     tiers.map((tier) => [tier.key, new Set(tier.tools.map((t) => t.name))])
@@ -200,14 +192,11 @@ export function ToolTiersView() {
         ) : (
           <div className="flex flex-col gap-3 max-w-2xl">
             <p className="text-sm text-muted-foreground leading-relaxed">
-              对话按规则与消息长度路由到三档。
+              对话按规则路由到两档。
               <b className="text-foreground/80">Fast</b> 档仅含基础工具 + 规则额外工具，长尾能力靠{" "}
               <code className="text-xs font-mono">find_tools</code> 激活；
-              <b className="text-foreground/80">Medium / Full</b> 档全量可见。
+              <b className="text-foreground/80">Full</b> 档全量可见。
               共注册 <b className="text-foreground/80">{data.total_count}</b> 个工具。
-              <span className="ml-1 text-muted-foreground/60 text-xs">
-                （≤ {data.medium_max_length} 字走 medium，更长走 full）
-              </span>
             </p>
             <p className="text-xs text-muted-foreground/50">
               hover 工具名查看说明 · ⚠️ 有副作用 · 🔒 输出不压缩 · 橙色分隔线以上为 Fast 档工具
