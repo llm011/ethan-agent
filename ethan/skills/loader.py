@@ -10,6 +10,7 @@
 
 也支持旧格式：~/.ethan/skills/<name>.md（单文件）
 """
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,6 +22,10 @@ from ethan.core.config import CONFIG_DIR
 
 # 用户技能目录（~/.ethan/skills/）
 USER_SKILLS_DIR = CONFIG_DIR / "skills"
+
+# category 合法值：default=全量注入简表+命中注入全文；
+# discoverable=列 trigger+命中只注入简表；plugin=插件式（按需加载）。
+_VALID_CATEGORIES = {"default", "discoverable", "plugin"}
 
 
 @dataclass
@@ -96,7 +101,13 @@ def load_skill_from_file(path: Path) -> Optional[Skill]:
     else:
         modes = []
 
-    category = str(meta.get("category", "default")).strip() or "default"
+    raw_category = str(meta.get("category", "default")).strip() or "default"
+    if raw_category not in _VALID_CATEGORIES:
+        logging.getLogger(__name__).warning(
+            "skill %r 的 category=%r 不合法，回退为 default（合法值：%s）",
+            name, raw_category, _VALID_CATEGORIES)
+        raw_category = "default"
+    category = raw_category
 
     return Skill(name=name, description=description, trigger=triggers,
                  content=content, source=path, fast_path=fast_path,
