@@ -35,6 +35,7 @@ class Skill:
     modes: list[str] = field(default_factory=list)  # 空列表 = 所有对话模式可用；非空 = 仅在这些 mode 生效
     references: list[Path] = field(default_factory=list)  # skill_dir/references/*.md
     is_default: bool = False  # 是否为打包自带的默认 Skill（vs 用户安装的）
+    category: str = "default"  # default = 全量注入简表+命中注入全文；discoverable = 列 trigger+命中只注入简表
 
 
 def _default_skill_names() -> set[str]:
@@ -95,9 +96,11 @@ def load_skill_from_file(path: Path) -> Optional[Skill]:
     else:
         modes = []
 
+    category = str(meta.get("category", "default")).strip() or "default"
+
     return Skill(name=name, description=description, trigger=triggers,
                  content=content, source=path, fast_path=fast_path,
-                 channels=channels, modes=modes)
+                 channels=channels, modes=modes, category=category)
 
 
 def load_skill_from_dir(skill_dir: Path) -> Optional[Skill]:
