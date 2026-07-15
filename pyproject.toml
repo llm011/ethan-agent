@@ -1,6 +1,6 @@
 [project]
 name = "ethan-agent"
-version = "0.4.44"
+version = "0.4.45"
 description = "Ethan — Lightweight personal AI agent with memory, skills, and multi-model support"
 readme = "README.md"
 license = { text = "MIT" }
