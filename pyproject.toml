@@ -38,13 +38,22 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# embedding 路由器（可选）：BGE-small-zh INT8 ONNX + LR 头语义分类，补关键词漏掉的 tail 召回。
-# 不装也能跑——router 不可用时 registry.match() 自动退回纯关键词匹配。
+# 语义 embedding（可选）：BGE-small-zh INT8 ONNX（24MB，512 维，中文优化）。
+# 同时服务于 memory.db 的 embedding 生成和 skill 路由器的语义匹配。
+# 不装也能跑——memory 回退 char n-gram hash，router 回退纯关键词匹配。
 # INT8 模型 + tokenizer 首次使用时从 GitHub（llm011/router-models）按 raw URL 自动下载；
-# LR 头随包分发。无需手动准备文件，也无需 huggingface_hub。
+# LR 头随包分发。无需手动准备文件，也无需 huggingface_hub/transformers。
+embedding = [
+    "onnxruntime>=1.18.0",
+    "tokenizers>=0.19.0",
+    "numpy>=1.26.0",
+]
+
+# router 是 embedding 的别名（向后兼容），实际依赖相同。
+# 沿用旧名让 `pip install 'ethan-agent[router]'` 仍能工作。
 router = [
     "onnxruntime>=1.18.0",
-    "transformers>=4.40.0",
+    "tokenizers>=0.19.0",
     "numpy>=1.26.0",
 ]
 

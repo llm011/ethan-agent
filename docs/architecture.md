@@ -175,7 +175,7 @@ ethan-ai/
 │   │   ├── daily_signals.py  # 跨 session 信号采集
 │   │   ├── daily_consolidation.py  # "做梦"沉淀（fact_sync + LLM 精炼 + embedding 去重 + 反写）
 │   │   ├── vector_store.py   # sqlite-vec 向量存储
-│   │   ├── embeddings.py     # Embedding 生成（384-dim）
+│   │   ├── embeddings.py     # Embedding 生成（BGE-small-zh 512-dim / hash 回退）
 │   │   └── knowledge.py      # 知识库（sqlite-vec 向量检索）
 │   ├── skills/
 │   │   ├── loader.py         # 双来源加载（内置 + 用户）
