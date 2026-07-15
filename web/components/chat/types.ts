@@ -37,7 +37,6 @@ export interface Message {
   total_ms?: number;
   thought?: string;
   intermediateOutput?: string;
-  intermediateExpanded?: boolean;
   quote?: Quote;
   a2ui?: unknown[];  // ui_card 工具产出的 A2UI envelope 列表，渲染成卡片
   images?: PendingFile[];  // 发送时附带的图片
