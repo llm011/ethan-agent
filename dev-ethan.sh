@@ -5,12 +5,14 @@ set -e
 IMAGE="ethan-dev"
 DOCKERFILE="deploy/Dockerfile.dev"
 WITH_CONFIG=false
+VERBOSE=false
 
 # 解析选项
-while getopts "c" opt; do
+while getopts "cv" opt; do
   case $opt in
     c) WITH_CONFIG=true ;;
-    *) echo "用法: $0 [-c] [command...]"; echo "  -c  纯净模式，不映射本地 ~/.ethan/config.yaml"; exit 1 ;;
+    v) VERBOSE=true ;;
+    *) echo "用法: $0 [-c] [-v] [command...]"; echo "  -c  纯净模式，不映射本地 ~/.ethan/config.yaml"; echo "  -v  显示 docker build 详细输出"; exit 1 ;;
   esac
 done
 shift $((OPTIND - 1))
@@ -30,7 +32,11 @@ needs_build() {
 
 if needs_build; then
   echo "🔨 Building $IMAGE ..."
-  docker build -t "$IMAGE" -f "$DOCKERFILE" . -q
+  if [ "$VERBOSE" = true ]; then
+    docker build -t "$IMAGE" -f "$DOCKERFILE" . --progress=plain
+  else
+    docker build -t "$IMAGE" -f "$DOCKERFILE" . -q
+  fi
 else
   echo "✓ 镜像已是最新，跳过 build"
 fi

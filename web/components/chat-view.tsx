@@ -553,9 +553,12 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       sessionId = s.id;
       setActiveSession(s.id);
       setSessionTitle(text.slice(0, 30) || "New chat");
-      // URL 延迟到流式结束后再更新，避免 Next.js App Router 在流式中途卸载组件
+      // 立即更新 URL，让用户点「新建会话」时路由能正确切换。
+      // 用 replaceState 而非 router.replace：只改地址栏不触发 Next 路由导航，
+      // 避免跨路由卸载组件丢失 state。
+      justFinishedRef.current = s.id;
+      window.history.replaceState(null, "", `/chat/${s.id}`);
     }
-
     let content = isBtw ? (btwQuestion ?? text) : text;
     if (isReview) {
       const target = trimmed.slice(7).trim();
@@ -624,13 +627,6 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       newMessages,
       true,
     );
-    // 新建会话流式结束后，改地址栏 URL 让用户能复制/刷新。
-    // 用 window.history.replaceState 而非 router.replace：前者只改 URL 不触发
-    // Next 路由导航，避免 /chat → /chat/[id] 跨路由导致 ChatView 卸载重建（state 丢失、刷新）。
-    if (!initialSessionId && sessionId) {
-      justFinishedRef.current = sessionId;
-      window.history.replaceState(null, "", `/chat/${sessionId}`);
-    }
     // 标题已在 done 事件中实时更新（chunk.title），无需额外 poll
   };
 
