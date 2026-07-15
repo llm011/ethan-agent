@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Image from "next/image";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { fetchDoc, API_URL } from "@/lib/api";
+import { fetchDoc, resolveDocsImageUrl } from "@/lib/api";
 import { DOC_NAV } from "@/lib/docs-nav";
 import { CodeBlock } from "@/components/code-block";
 import { PlainCodeBlock } from "@/components/plain-code-block";
@@ -244,9 +244,7 @@ export function DocsView({ initialSlug }: DocsViewProps = {}) {
                 ),
                 img: ({ src, alt }) => {
                   const srcStr = typeof src === "string" ? src : "";
-                  const resolved = srcStr.startsWith("./images/")
-                    ? `${API_URL}/docs/images/${srcStr.slice("./images/".length)}`
-                    : srcStr;
+                  const resolved = resolveDocsImageUrl(srcStr);
                   return (
                     <img
                       src={resolved}

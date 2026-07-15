@@ -308,6 +308,9 @@ export async function installLarkDeps(): Promise<void> {
 
 // ── Docs ──────────────────────────────────────────────────────────
 
+/** 静态文档基路径（GitHub Pages 部署时由 CI 注入）。未设置时走后端 API。 */
+const STATIC_DOCS_BASE = process.env.NEXT_PUBLIC_DOCS_BASE || "";
+
 export interface DocMeta { slug: string; title: string; filename: string; }
 
 export async function fetchDocsList(): Promise<DocMeta[]> {
@@ -317,9 +320,25 @@ export async function fetchDocsList(): Promise<DocMeta[]> {
 }
 
 export async function fetchDoc(slug: string): Promise<{ slug: string; content: string }> {
+  if (STATIC_DOCS_BASE) {
+    const res = await fetch(`${STATIC_DOCS_BASE}/${slug}.json`);
+    if (!res.ok) throw new Error("Failed");
+    return res.json();
+  }
   const res = await fetch(`${API_URL}/docs/${slug}`, { headers: headers() });
   if (!res.ok) throw new Error("Failed");
   return res.json();
+}
+
+/** 解析文档中的图片路径（静态模式用 STATIC_DOCS_BASE，否则用 API_URL） */
+export function resolveDocsImageUrl(src: string): string {
+  if (src.startsWith("./images/")) {
+    const filename = src.slice("./images/".length);
+    return STATIC_DOCS_BASE
+      ? `${STATIC_DOCS_BASE}/images/${filename}`
+      : `${API_URL}/docs/images/${filename}`;
+  }
+  return src;
 }
 
 // ── API Keys ──────────────────────────────────────────────────────

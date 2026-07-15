@@ -17,6 +17,9 @@
 /.next/
 /out/
 
+# generated docs data (built by scripts/prepare-docs-static.sh)
+/public/docs-data/
+
 # production
 /build
 

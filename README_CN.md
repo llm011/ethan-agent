@@ -703,19 +703,27 @@ EOF
 
 ## 文档
 
-详细设计文档在 [`docs/`](./docs/) 目录下：
+完整文档站：**[llm011.github.io/ethan-agent](https://llm011.github.io/ethan-agent/)**（与 Ethan Web UI 内置"文档"页面一致）
 
-- [架构总览](docs/architecture.md)
-- [Agent Loop](docs/agent-loop.md)
-- [三档路由](docs/routing.md)
-- [Provider 层](docs/providers.md)
-- [工具系统](docs/tools.md)
-- [密钥管理](docs/secrets.md)
-- [记忆系统](docs/memory.md)
-- [Skill 系统](docs/skills.md)
-- [法律专家模式](docs/legal-mode.md)
-- [定时任务](docs/scheduler.md)
-- [接口层](docs/interface.md)
+核心文档：
+- [记忆系统](docs/memory.md) — 五层架构、做梦沉淀、fact_sync
+- [Agent Loop](docs/agent-loop.md) — 双轨路由、记忆注入
+- [架构总览](docs/architecture.md) — 系统组件、数据流
+- [心跳机制](docs/heartbeat.md) — 后台维护、午夜循环
+
+所有文档源文件在 [`docs/`](./docs/) 目录，push 到 main 后自动部署。
+
+---
+
+## 贡献者
+
+<!-- ALL-CONTRIBUTORS-LIST:START -->
+<a href="https://github.com/llm011/ethan-agent/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=llm011/ethan-agent" />
+</a>
+<!-- ALL-CONTRIBUTORS-LIST:END -->
+
+---
 
 ## 许可证
 

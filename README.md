@@ -607,19 +607,27 @@ Environment variables in `.env` override config values (useful for secrets).
 
 ## Documentation
 
-Detailed design docs for each module are in [`docs/`](./docs/):
+Full documentation is available at **[llm011.github.io/ethan-agent](https://llm011.github.io/ethan-agent/)** — the same docs site you see in Ethan's built-in "Docs" tab.
 
-- [Architecture Overview](docs/architecture.md)
-- [Agent Loop](docs/agent-loop.md)
-- [Routing](docs/routing.md)
-- [Provider Layer](docs/providers.md)
-- [Tool System](docs/tools.md)
-- [Secrets Management](docs/secrets.md)
-- [Memory System](docs/memory.md)
-- [Skill System](docs/skills.md)
-- [Legal Expert Mode](docs/legal-mode.md)
-- [Scheduler](docs/scheduler.md)
-- [Interface Layer](docs/interface.md)
+Key docs:
+- [Memory System](docs/memory.md) — five-layer architecture, dream consolidation, fact_sync
+- [Agent Loop](docs/agent-loop.md) — dual-track routing, memory injection
+- [Architecture Overview](docs/architecture.md) — system components, data flow
+- [Heartbeat](docs/heartbeat.md) — background maintenance, midnight loop
+
+All source markdown lives in [`docs/`](./docs/); changes to `main` auto-deploy via GitHub Actions.
+
+---
+
+## Contributors
+
+<!-- ALL-CONTRIBUTORS-LIST:START -->
+<a href="https://github.com/llm011/ethan-agent/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=llm011/ethan-agent" />
+</a>
+<!-- ALL-CONTRIBUTORS-LIST:END -->
+
+---
 
 ## License
 
