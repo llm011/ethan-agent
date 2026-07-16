@@ -16,7 +16,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 ROOT="$(pwd)"
-COMPOSE_FILE="docker-compose.pip.yml"
+COMPOSE_FILE="deploy/docker-compose.pip.yml"
 DIST_DIR="$ROOT/dist"
 DATA_VOLUME="ethan-standalone-data"
 

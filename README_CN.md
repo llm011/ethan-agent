@@ -59,7 +59,7 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 - 后台任务：把耗时长任务丢到后台独立会话异步执行，不阻塞当前对话；完成后结果回灌（飞书推回原会话，web 在侧边栏会话浮现）。在 `/background-tasks` 页查看/终止，侧边栏带运行中数量角标
 
 **工具系统**
-- Shell 执行、Web 搜索（默认 DuckDuckGo，可配置切换 Tavily 或自建 SearXNG，见 `docker-compose.searxng.yml`）、Web 抓取、文件读写、知识库检索
+- Shell 执行、Web 搜索（默认 DuckDuckGo，可配置切换 Tavily 或自建 SearXNG，见 `deploy/docker-compose.searxng.yml`）、Web 抓取、文件读写、知识库检索
 - 敏感/副作用操作（shell、写文件、读密钥）执行前请求授权；Web 弹授权卡片、REPL 走 y/N，同一会话授权过一次后不再重复询问
 - 工具结果超 4000 字自动用廉价模型压缩摘要
 - 同参数重复调用自动命中轮次内缓存，不重复执行

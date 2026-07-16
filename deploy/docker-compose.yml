@@ -1,17 +1,20 @@
-# Ethan Agent — 部署用 docker-compose（单容器模式）
+# Ethan Agent — 部署用 docker-compose（CI 单容器镜像）
+#
+# 镜像由 GitHub Actions 构建发布（ghcr.io/llm011/ethan-agent），
+# 内含 API + Web UI（同端口 8900）与 SearXNG 搜索实例。
 #
 # 用法：
 #   cp .env.example .env   # 填入 API Key 等配置
+#   docker compose pull
 #   docker compose up -d
-#   docker compose logs -f ethan
+#   docker compose logs -f ethan        # 首行有 Web UI token
+#
+# 更新：docker compose pull && docker compose up -d
 
 services:
   ethan:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
-    image: ethan-agent:latest
-    container_name: ethan
+    image: ghcr.io/llm011/ethan-agent:latest
+    container_name: ethan-agent
     restart: unless-stopped
     ports:
       - "${ETHAN_PORT:-8900}:8900"
@@ -30,19 +33,13 @@ services:
     depends_on:
       searxng:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8900/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 15s
 
   searxng:
     image: searxng/searxng:latest
     container_name: ethan-searxng
     restart: unless-stopped
     ports:
-      - "8888:8080"
+      - "${SEARXNG_PORT:-8888}:8080"
     volumes:
       - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
     healthcheck:
@@ -54,4 +51,4 @@ services:
 
 volumes:
   ethan-data:
-    driver: local
+    name: ethan-data
