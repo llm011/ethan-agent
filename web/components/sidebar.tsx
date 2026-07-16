@@ -316,7 +316,7 @@ export function Sidebar() {
           className="text-lg font-semibold flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity min-w-0 flex-1"
           onClick={() => { navigate("/chat"); if (window.innerWidth < 768) setSidebarOpen(false); }}
         >
-          <Image src="/logo-sidebar.png" alt="Ethan Agent" width={28} height={28} className="rounded-full shrink-0" />
+          <Image src={`${process.env.NEXT_PUBLIC_BASE_PATH || ''}/logo-sidebar.png`} alt="Ethan Agent" width={28} height={28} className="rounded-full shrink-0" />
           <span className="whitespace-nowrap">Ethan Agent</span>
           {version && (
             <span
