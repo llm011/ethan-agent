@@ -46,8 +46,8 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY ethan/ ./ethan/
 COPY README.md README_CN.md ./
 
-# 从 Stage 1 拷入 Web UI 静态产物
-COPY --from=web-builder /web/out ./ethan/web_dist
+# 从 Stage 1 拷入 Web UI 静态产物（放在 ethan/ 之外，避免 volume mount 覆盖）
+COPY --from=web-builder /web/out ./web_dist
 
 # 安装项目本身
 RUN uv sync --frozen --no-dev
@@ -56,6 +56,7 @@ RUN uv sync --frozen --no-dev
 # 代码使用 Path.home() / ".ethan"，容器内 root home = /root
 VOLUME /root/.ethan
 
+ENV WEB_DIST_PATH=/app/web_dist
 EXPOSE 8900
 
 CMD ["uv", "run", "python", "-m", "ethan.interface.cli", "serve"]
