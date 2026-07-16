@@ -682,12 +682,14 @@ async def _midnight_loop() -> None:
             from ethan.core.context import ETHAN_USER_ID
             from ethan.core.users import get_user_store
             from ethan.memory.daily_consolidation import run_daily_consolidation
+            from ethan.memory.structured_consolidation import run_structured_consolidation
             total_added = 0
             for uid in get_user_store().all_user_ids():
                 token = ETHAN_USER_ID.set(uid)
                 try:
                     added = await run_daily_consolidation()
                     total_added += added
+                    await run_structured_consolidation()
                 finally:
                     ETHAN_USER_ID.reset(token)
             logger.info("[Heartbeat] Midnight consolidation done, stored %d new memories across all users", total_added)

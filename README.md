@@ -20,6 +20,7 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 
 **Dream — nightly memory consolidation ("做梦")**
 - Every night at 0:00, Ethan "dreams": it distills the day's cross-session signals (recurring needs ≥3×, errors, success paths) into permanent insights via a cheap model, then dedups against existing memories with sqlite-vec (L2 < 1.1) before writing to `memory.db`
+- **Structured memory layer**: on top of the five-layer model, a typed `MemoryRecord` system (person / preference / methodology / activity / decision / relationship / companion) extracts source-backed candidates every 5 turns, admits them deterministically (explicit → active; observed → promoted only after ≥2 independent sessions), recalls them into the prompt, and runs a daily consolidation pass with separate general/companion domains. Companion (苏念) emotional memory is isolated to companion mode and never recalled elsewhere.
 - **Reflect-back**: consolidated insights are written back to `facts.json` (repetition/error) and `playbook.json` (success_path) so they surface naturally in future recall — no separate read path needed
 - **fact_sync mirror**: before each dream, active facts/playbook entries are mirrored into `memory.db` (type=`fact_sync`) so insight dedup naturally covers already-known facts; the mirror is fully rebuilt each cycle
 - **Permanent by design**: the fifth layer is true long-term memory — insights are never auto-deleted; `last_accessed` is tracked for observability but not used as an eviction basis (memory.db stays tiny, ~15KB per insight)

@@ -1,0 +1,408 @@
+"""Structured memory extractors — propose typed candidates from conversation.
+
+Design: the LLM only *proposes* candidates as strict JSON. Deterministic code
+in :mod:`ethan.memory.admission` decides whether a candidate becomes an active
+memory. Every proposal must cite an exact quote that exists in the source
+messages, or it is rejected.
+"""
+from __future__ import annotations
+
+import json
+import logging
+from dataclasses import dataclass
+from typing import Any
+
+from ethan.memory.records import (
+    EvidenceLevel,
+    MemoryCandidate,
+    MemoryDomain,
+    MemoryType,
+    Sensitivity,
+)
+
+logger = logging.getLogger(__name__)
+
+EXTRACTOR_VERSION = "v1"
+
+# Dimensions allowed per memory_type. Anything outside these sets is rejected.
+_PERSONAL_DIMENSIONS = {
+    "identity.preferred_name", "identity.pronouns", "identity.language",
+    "identity.location", "identity.timezone", "identity.occupation",
+    "identity.role", "identity.organization", "identity.education",
+    "identity.professional_background", "identity.expertise",
+    "identity.relationship", "identity.accessibility", "identity.long_term_goal",
+}
+_PREFERENCE_DIMENSIONS = {
+    "preference.communication", "preference.language", "preference.tone",
+    "preference.tools", "preference.work_habits", "preference.schedule",
+    "preference.content", "preference.decision_tradeoff", "preference.boundary",
+    "preference.negative", "preference.response_verbosity",
+}
+_ACTIVITY_DIMENSIONS = {
+    "activity.project", "activity.responsibility", "activity.goal",
+    "activity.blocker", "activity.deadline", "activity.waiting",
+    "activity.recent_completion",
+}
+_DECISION_DIMENSIONS = {
+    "decision.chosen", "decision.rejected", "decision.rationale",
+    "decision.constraint", "decision.commitment", "decision.agreement",
+    "decision.deadline", "decision.correction",
+}
+_RELATIONSHIP_DIMENSIONS = {
+    "relationship.role", "relationship.coordination", "relationship.relevance",
+}
+_METHODOLOGY_DIMENSIONS = {
+    "methodology.goal_framing", "methodology.problem_decomposition",
+    "methodology.information_gathering", "methodology.analysis_reasoning",
+    "methodology.evaluation_criteria", "methodology.decision_style",
+    "methodology.execution_workflow", "methodology.tool_usage",
+    "methodology.communication_collaboration", "methodology.quality_control",
+    "methodology.reflection_improvement",
+}
+_COMPANION_DIMENSIONS = {
+    "companion.current_emotion", "companion.current_stressor",
+    "companion.soothing_preference", "companion.support_boundary",
+    "companion.important_inner_experience", "companion.explicit_value",
+    "companion.relationship_context", "companion.requested_follow_up",
+}
+
+# Companion safety: reject diagnostic / personality / clinical labels.
+_COMPANION_DENIED_TERMS = {
+    "抑郁", "抑郁症", "焦虑症", "人格", "依恋", "创伤", "创伤后", "心理疾病",
+    "双相", "强迫症", "分裂", "心理障碍", "诊断", "病理",
+    "depression", "anxiety disorder", "personality disorder", "attachment style",
+    "trauma", "ptsd", "bipolar", "ocd", "diagnosis", "clinical", "pathological",
+}
+
+_VALID_EVIDENCE = {"observed", "inferred", "explicit", "corrected"}
+_VALID_SCOPE_TYPES = {"user", "user_domain", "user_skill", "project", "mode"}
+
+
+@dataclass
+class SourceMessage:
+    session_id: str
+    message_id: int | str
+    role: str
+    content: str
+    created_at: float | None = None
+
+    @classmethod
+    def from_message(cls, msg, session_id: str) -> "SourceMessage":
+        return cls(
+            session_id=session_id,
+            message_id=getattr(msg, "id", None) or "",
+            role=getattr(msg, "role", ""),
+            content=getattr(msg, "content", "") or "",
+            created_at=getattr(msg, "created_at", None),
+        )
+
+
+def _strip_fence(text: str) -> str:
+    """Return raw text; reject markdown code fences wrapping JSON."""
+    if "```" in text:
+        raise ValueError("extractor returned markdown-fenced JSON; rejecting")
+    return text.strip()
+
+
+def _safe_json_load(text: str) -> Any:
+    cleaned = _strip_fence(text)
+    return json.loads(cleaned)
+
+
+def _validate_dimension(memory_type: str, dimension: str) -> None:
+    table = {
+        MemoryType.PERSONAL_INFORMATION.value: _PERSONAL_DIMENSIONS,
+        MemoryType.PREFERENCE.value: _PREFERENCE_DIMENSIONS,
+        MemoryType.ACTIVITY.value: _ACTIVITY_DIMENSIONS,
+        MemoryType.DECISION.value: _DECISION_DIMENSIONS,
+        MemoryType.RELATIONSHIP.value: _RELATIONSHIP_DIMENSIONS,
+        MemoryType.METHODOLOGY.value: _METHODOLOGY_DIMENSIONS,
+        MemoryType.COMPANION.value: _COMPANION_DIMENSIONS,
+    }
+    allowed = table.get(memory_type)
+    if allowed is None:
+        raise ValueError(f"unsupported memory_type: {memory_type}")
+    if dimension not in allowed:
+        raise ValueError(f"{memory_type} does not allow dimension: {dimension}")
+
+
+def _validate_methodology_structured(structured: dict[str, Any]) -> None:
+    for key in ("scenario", "trigger"):
+        if not str(structured.get(key, "")).strip():
+            raise ValueError("methodology requires scenario and trigger")
+    for key in ("steps", "heuristics", "preferred_tools", "evaluation_criteria", "anti_patterns", "exceptions"):
+        val = structured.get(key, [])
+        if not isinstance(val, list):
+            raise ValueError(f"methodology.{key} must be a list")
+
+
+def _contains_denied_term(text: str) -> str | None:
+    lowered = text.lower()
+    for term in _COMPANION_DENIED_TERMS:
+        if term.lower() in lowered:
+            return term
+    return None
+
+
+class StructuredMemoryExtractor:
+    """Proposes MemoryCandidate records from a batch of conversation messages."""
+
+    def __init__(self, model: str | None = None, provider=None):
+        self._model = model
+        self._provider = provider
+
+    async def _get_provider(self):
+        if self._provider is not None:
+            return self._provider
+        from ethan.memory.consolidator import get_lite_model
+        from ethan.providers.manager import create_provider
+        model = self._model or get_lite_model()
+        self._provider = create_provider(model)
+        return self._provider
+
+    async def extract(
+        self,
+        messages: list[SourceMessage],
+        *,
+        session_id: str,
+        user_id: str = "",
+        mode: str = "",
+        job_key: str = "",
+    ) -> list[MemoryCandidate]:
+        if not messages:
+            return []
+        provider = await self._get_provider()
+        from ethan.providers.base import Message
+
+        is_companion = self._is_companion_mode(mode)
+        prompt = self._build_prompt(messages, is_companion=is_companion)
+        try:
+            resp = await provider.chat(
+                [Message(role="user", content=prompt)],
+                system=self._system_prompt(is_companion=is_companion),
+            )
+        except Exception:
+            logger.exception("structured extraction LLM call failed (session=%s)", session_id)
+            return []
+
+        raw = (resp.content or "").strip()
+        if not raw:
+            return []
+        try:
+            payload = _safe_json_load(raw)
+        except (json.JSONDecodeError, ValueError):
+            logger.warning("structured extraction returned non-JSON (session=%s): %r", session_id, raw[:200])
+            return []
+        if not isinstance(payload, dict):
+            logger.warning("structured extraction top-level not object (session=%s)", session_id)
+            return []
+
+        return self._build_candidates(
+            payload, messages=messages, session_id=session_id, user_id=user_id,
+            job_key=job_key, is_companion=is_companion,
+        )
+
+    @staticmethod
+    def _is_companion_mode(mode: str) -> bool:
+        try:
+            from ethan.core.modes import resolve_mode
+            return resolve_mode(mode).key == "companion"
+        except Exception:
+            return mode in {"companion", "苏念", "陪伴"}
+
+    @staticmethod
+    def _system_prompt(*, is_companion: bool) -> str:
+        base = (
+            "你是结构化记忆提取器。只输出严格 JSON，不要 markdown 代码块、不要解释文字。\n"
+            "你只负责提议候选记忆，最终是否写入由系统代码决定。\n"
+            "每条候选必须引用用户消息里的原文 quote，且 quote 必须是用户消息的精确子串；"
+            "无法找到原文支撑就省略该条。\n"
+            "assistant 的发言不能作为用户事实的证据。\n"
+            "一次性行为标 observed；用户明确陈述标 explicit；用户明确纠正标 corrected。\n"
+            "不要把单次行为泛化为稳定人格特征。\n"
+            "scope_type 只能是 user/user_domain/user_skill/project/mode 之一。"
+        )
+        if is_companion:
+            base += (
+                "\n本会话是苏念陪伴模式。情感类记忆走 companion 维度，"
+                "禁止输出诊断、人格类型、依恋类型、创伤解读或心理疾病标签。"
+                "当前情绪默认 observed 并尽量给 valid_until。"
+            )
+        else:
+            base += "\n本会话不是陪伴模式，禁止输出 companion 维度的情感类记忆。"
+        return base
+
+    @staticmethod
+    def _build_prompt(messages: list[SourceMessage], *, is_companion: bool) -> str:
+        lines = []
+        for m in messages:
+            role = "用户" if m.role == "user" else "助手" if m.role == "assistant" else m.role
+            lines.append(f"[msg_id={m.message_id} role={role}] {m.content[:1200]}")
+        transcript = "\n".join(lines)
+
+        companion_block = (
+            "\n- companion: 仅在陪伴模式输出。dimension 限: "
+            "current_emotion/current_stressor/soothing_preference/support_boundary/"
+            "important_inner_experience/explicit_value/relationship_context/requested_follow_up"
+        ) if is_companion else ""
+
+        return (
+            "从以下对话中提取值得长期记住的结构化记忆候选。严格按 JSON 输出：\n"
+            '{"candidates":[{'
+            '"memory_type":"personal_information|preference|activity|decision|relationship|methodology|companion",'
+            '"dimension":"...","memory_key":"稳定标识","content":"自包含描述",'
+            '"evidence_level":"observed|inferred|explicit|corrected",'
+            '"scope_type":"user|user_domain|user_skill|project|mode","scope_id":"...",'
+            '"message_id":<引用的 msg_id>,"quote":"用户原文精确子串",'
+            '"confidence":0~1,"importance":0~1,"valid_until":<unix秒或null>,'
+            '"structured":{...}'
+            "}]}\n\n"
+            "person 维度示例: identity.preferred_name / identity.occupation / identity.expertise / "
+            "preference.communication / preference.negative / activity.project / activity.current_focus / "
+            "decision.chosen / decision.rationale\n"
+            "methodology 维度限: goal_framing/problem_decomposition/information_gathering/"
+            "analysis_reasoning/evaluation_criteria/decision_style/execution_workflow/tool_usage/"
+            "communication_collaboration/quality_control/reflection_improvement；"
+            "structured 必含 scenario,trigger,steps,heuristics,evaluation_criteria,anti_patterns。"
+            f"{companion_block}\n\n"
+            f"对话：\n{transcript}"
+        )
+
+    def _build_candidates(
+        self, payload: dict[str, Any], *, messages: list[SourceMessage],
+        session_id: str, user_id: str, job_key: str, is_companion: bool,
+    ) -> list[MemoryCandidate]:
+        items = payload.get("candidates", [])
+        if not isinstance(items, list):
+            return []
+        by_id = {str(m.message_id): m for m in messages if m.message_id != ""}
+        candidates: list[MemoryCandidate] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            try:
+                cand = self._build_one(
+                    item, by_id=by_id, session_id=session_id, user_id=user_id,
+                    job_key=job_key, is_companion=is_companion,
+                )
+            except ValueError as exc:
+                logger.info("rejecting candidate (%s): %r", exc, item)
+                continue
+            if cand is not None:
+                candidates.append(cand)
+        return candidates
+
+    def _build_one(
+        self, item: dict[str, Any], *, by_id: dict[str, SourceMessage],
+        session_id: str, user_id: str, job_key: str, is_companion: bool,
+    ) -> MemoryCandidate | None:
+        memory_type = str(item.get("memory_type", "")).strip()
+        dimension = str(item.get("dimension", "")).strip()
+        memory_key = str(item.get("memory_key", "")).strip()
+        content = str(item.get("content", "")).strip()
+        evidence_level = str(item.get("evidence_level", "observed")).strip()
+        scope_type = str(item.get("scope_type", "user")).strip()
+        scope_id = str(item.get("scope_id", "self")).strip()
+        quote = str(item.get("quote", "")).strip()
+        message_id = str(item.get("message_id", "")).strip()
+
+        if not (memory_type and dimension and memory_key and content and quote):
+            raise ValueError("missing required field")
+        if evidence_level not in _VALID_EVIDENCE:
+            raise ValueError(f"invalid evidence_level: {evidence_level}")
+        if scope_type not in _VALID_SCOPE_TYPES:
+            raise ValueError(f"invalid scope_type: {scope_type}")
+        if scope_type == "user":
+            scope_id = "self"
+        elif not scope_id:
+            raise ValueError(f"scope_id required for {scope_type}")
+
+        # Companion domain/type coupling.
+        is_companion_type = memory_type == MemoryType.COMPANION.value
+        if is_companion_type and not is_companion:
+            raise ValueError("companion memory_type outside companion mode")
+        if is_companion_type:
+            memory_domain = MemoryDomain.COMPANION.value
+            sensitivity = Sensitivity.SENSITIVE.value
+        else:
+            memory_domain = MemoryDomain.GENERAL.value
+            sensitivity = Sensitivity.NORMAL.value
+            if memory_type == MemoryType.COMPANION.value:
+                raise ValueError("companion type requires companion mode")
+
+        _validate_dimension(memory_type, dimension)
+
+        structured = item.get("structured", {})
+        if not isinstance(structured, dict):
+            raise ValueError("structured must be an object")
+        if memory_type == MemoryType.METHODOLOGY.value:
+            _validate_methodology_structured(structured)
+
+        # Companion safety: reject diagnostic / personality labels anywhere in content.
+        if is_companion_type:
+            denied = _contains_denied_term(content) or _contains_denied_term(json.dumps(structured, ensure_ascii=False))
+            if denied:
+                raise ValueError(f"companion content contains denied term: {denied}")
+
+        # Provenance + quote verification.
+        source = by_id.get(message_id)
+        if source is None:
+            raise ValueError(f"message_id {message_id} not found in source batch")
+        if quote not in source.content:
+            raise ValueError("quote is not an exact substring of the source message")
+
+        # Only user messages can evidence personal facts; corrections must come from user too.
+        if source.role != "user" and memory_type in {
+            MemoryType.PERSONAL_INFORMATION.value, MemoryType.PREFERENCE.value,
+            MemoryType.ACTIVITY.value, MemoryType.DECISION.value,
+            MemoryType.RELATIONSHIP.value, MemoryType.METHODOLOGY.value,
+            MemoryType.COMPANION.value,
+        }:
+            raise ValueError(f"{memory_type} evidence must come from a user message")
+
+        confidence = self._clamp(float(item.get("confidence", 0.6)))
+        importance = self._clamp(float(item.get("importance", 0.5)))
+        # Single behavioural observation must stay a low-confidence candidate.
+        if evidence_level == EvidenceLevel.OBSERVED.value:
+            confidence = min(confidence, 0.6)
+
+        valid_until = item.get("valid_until")
+        if valid_until not in (None, "", 0):
+            try:
+                valid_until = float(valid_until)
+            except (TypeError, ValueError):
+                valid_until = None
+        else:
+            valid_until = None
+
+        return MemoryCandidate(
+            memory_type=memory_type,
+            dimension=dimension,
+            memory_key=memory_key,
+            content=content,
+            structured_data=structured,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            memory_domain=memory_domain,
+            evidence_level=evidence_level,
+            source_session_id=session_id,
+            source_message_id=message_id,
+            source_role=source.role,
+            source_quote=quote,
+            confidence=confidence,
+            importance=importance,
+            sensitivity=sensitivity,
+            valid_until=valid_until,
+            extractor_name="structured_memory",
+            extractor_version=EXTRACTOR_VERSION,
+            extraction_job_key=job_key,
+            user_id=user_id,
+        )
+
+    @staticmethod
+    def _clamp(value: float) -> float:
+        if value < 0:
+            return 0.0
+        if value > 1:
+            return 1.0
+        return value

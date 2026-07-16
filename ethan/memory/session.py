@@ -449,6 +449,48 @@ class SessionStore:
                 ))
         return sessions
 
+    async def list_in_range(
+        self,
+        start_ts: float,
+        end_ts: float,
+        *,
+        exclude_sources: list[str] | None = None,
+        exclude_title_prefixes: list[str] | None = None,
+    ) -> list[Session]:
+        """List sessions created in ``[start_ts, end_ts)``.
+
+        Daily memory consolidation needs a precise local-day window.  Keeping
+        the filtering in SQL avoids scanning an arbitrary ``list_recent`` cap
+        and missing sessions on high-volume days.
+        """
+        if end_ts <= start_ts:
+            raise ValueError("end_ts must be greater than start_ts")
+        where = ["created_at >= ?", "created_at < ?"]
+        params: list = [float(start_ts), float(end_ts)]
+        if exclude_sources:
+            placeholders = ",".join("?" * len(exclude_sources))
+            where.append(f"COALESCE(source, 'web') NOT IN ({placeholders})")
+            params.extend(exclude_sources)
+        if exclude_title_prefixes:
+            for prefix in exclude_title_prefixes:
+                where.append("title NOT LIKE ?")
+                params.append(f"{prefix}%")
+        sessions: list[Session] = []
+        async with self._db.execute(
+            "SELECT id, title, model, created_at, updated_at, "
+            "COALESCE(source, 'web') as source, COALESCE(mode, '') as mode "
+            f"FROM sessions WHERE {' AND '.join(where)} ORDER BY created_at ASC",
+            tuple(params),
+        ) as cursor:
+            async for row in cursor:
+                sessions.append(Session(
+                    id=row[0], title=row[1], model=row[2],
+                    created_at=row[3], updated_at=row[4],
+                    source=row[5] if len(row) > 5 else "web",
+                    mode=row[6] if len(row) > 6 else "",
+                ))
+        return sessions
+
     async def search(self, query: str, limit: int = 50) -> list[Session]:
         """全文搜索：匹配 session 标题或消息内容。返回去重后的 session 列表。"""
         q = f"%{query}%"
