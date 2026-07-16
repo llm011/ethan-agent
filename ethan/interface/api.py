@@ -73,7 +73,8 @@ def _lark_ready() -> bool:
     return _lark_available
 
 
-_WEB_DIST = Path(__file__).parent.parent / "web_dist"
+import os as _os
+_WEB_DIST = Path(_os.environ.get("WEB_DIST_PATH") or (Path(__file__).parent.parent / "web_dist"))
 
 
 @asynccontextmanager
