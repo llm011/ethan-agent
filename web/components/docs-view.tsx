@@ -131,7 +131,7 @@ export function DocsView({ initialSlug }: DocsViewProps = {}) {
       <div className="w-56 border-r bg-muted/20 flex flex-col shrink-0 overflow-y-auto">
         <div className="p-4 border-b">
           <h2 className="font-semibold text-sm flex items-center gap-2">
-            <Image src="/logo-sidebar.png" alt="Ethan Agent" width={20} height={20} className="rounded-full" />
+            <Image src={`${process.env.NEXT_PUBLIC_BASE_PATH || ''}/logo-sidebar.png`} alt="Ethan Agent" width={20} height={20} className="rounded-full" />
             Ethan Agent
           </h2>
         </div>

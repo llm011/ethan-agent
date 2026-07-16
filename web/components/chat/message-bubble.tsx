@@ -74,7 +74,7 @@ export function MessageBubble({ msg, isStreaming, isLast, onQuote, onCardAction,
     <div className={`group flex ${msg.role === "user" ? "justify-end" : "justify-start"} gap-2`}>
       {msg.role === "assistant" && (
         <div className="flex-shrink-0 mt-1">
-          <Image src="/logo-avatar.png" alt="Ethan" width={28} height={28} className="rounded-full" />
+          <Image src={`${process.env.NEXT_PUBLIC_BASE_PATH || ''}/logo-avatar.png`} alt="Ethan" width={28} height={28} className="rounded-full" />
         </div>
       )}
       <div className="relative max-w-[90%] md:max-w-[80%]">
