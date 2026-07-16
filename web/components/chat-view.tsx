@@ -527,7 +527,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         setSessionUsage({ input: 0, output: 0, cache: 0 });
         setPendingFiles([]);
         setQuote(null);
-        window.history.replaceState(null, "", `/chat/${s.id}`);
+        window.history.replaceState(null, "", `/chat/${s.id}/`);
         return;
       }
       if (cmd === "help") {
@@ -611,7 +611,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       // 用 replaceState 而非 router.replace：只改地址栏不触发 Next 路由导航，
       // 避免跨路由卸载组件丢失 state。
       justFinishedRef.current = s.id;
-      window.history.replaceState(null, "", `/chat/${s.id}`);
+      window.history.replaceState(null, "", `/chat/${s.id}/`);
     }
     let content = isBtw ? (btwQuestion ?? text) : text;
     if (isReview) {
