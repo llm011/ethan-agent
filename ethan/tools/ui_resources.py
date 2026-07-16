@@ -1,9 +1,9 @@
-"""MCP Apps UI Resource 注册与管理。
+"""Tool UI Resource 注册与管理。
 
-遵循 SEP-1865 规范：
+工具可在执行结果里携带 UI 资源引用，由前端负责渲染：
 - 每个 UI 资源通过 ui:// URI 标识
-- 关联到具体 Tool 的 _meta.ui.resourceUri
-- 提供 HTML 内容读取（text/html;profile=mcp-app）
+- 工具结果只携带 {uri, data}，HTML 模板由前端按 URI 拉取并缓存
+- 模板 HTML 通过 /api/ui-resources/read?uri= 读取
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ _TEMPLATES_DIR = Path(__file__).parent.parent / "defaults" / "ui-templates"
 
 @dataclass
 class UIResourceMeta:
-    """SEP-1865 UIResourceMeta: CSP + permissions + visual config."""
+    """UI 资源元信息：CSP + permissions + visual config。"""
     csp: dict[str, list[str]] = field(default_factory=dict)
     permissions: dict[str, dict] = field(default_factory=dict)
     prefers_border: bool = True
@@ -25,11 +25,11 @@ class UIResourceMeta:
 
 @dataclass
 class UIResource:
-    """SEP-1865 UI Resource 声明。"""
+    """工具 UI 资源声明：uri + HTML 模板 + 元信息。"""
     uri: str  # e.g. "ui://ethan/chart"
     name: str  # human-readable
     description: str = ""
-    mime_type: str = "text/html;profile=mcp-app"
+    mime_type: str = "text/html"
     # HTML 内容来源：template_file 从 defaults/ui-templates/ 加载，或 html 直接指定
     template_file: str = ""  # 相对于 ui-templates/ 的文件名
     html: str = ""  # 直接指定 HTML 内容（优先级低于 template_file）
@@ -44,7 +44,7 @@ class UIResource:
         return self.html
 
     def to_mcp_resource(self) -> dict[str, Any]:
-        """输出 SEP-1865 resources/list 格式。"""
+        """输出 resources/list 格式（uri + name + description + mimeType）。"""
         return {
             "uri": self.uri,
             "name": self.name,
@@ -53,7 +53,7 @@ class UIResource:
         }
 
     def to_mcp_content(self) -> dict[str, Any]:
-        """输出 SEP-1865 resources/read 格式（含 HTML 内容和 _meta）。"""
+        """输出 resources/read 格式（含 HTML 内容和 _meta CSP 信息）。"""
         meta: dict[str, Any] = {}
         if self.meta.csp:
             meta["csp"] = self.meta.csp
@@ -85,7 +85,7 @@ class UIResourceRegistry:
         return list(self._resources.values())
 
     def read(self, uri: str) -> dict[str, Any] | None:
-        """SEP-1865 resources/read — 返回资源内容或 None。"""
+        """resources/read — 返回资源内容或 None（uri 未注册时）。"""
         res = self.get(uri)
         if res is None:
             return None

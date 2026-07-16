@@ -1,11 +1,14 @@
-"""UI Resources 路由：MCP Apps (SEP-1865) 资源发现与读取。
+"""UI Resources 路由：工具 UI 模板的发现与读取。
 
-前端作为 MCP host，通过这两个端点获取 UI 模板：
-- GET /api/ui-resources            → resources/list：列出所有已注册 ui:// 资源
-- GET /api/ui-resources/read?uri=  → resources/read：读取单个资源的 HTML 内容 + _meta
+工具执行后，结果里只携带 uri + data；HTML 模板由前端按 uri 从这里拉取并缓存。
+模板与数据分离，让模板只传输一次而数据随每条消息走。
 
-工具执行结果里只携带 uri + data（见 ChartTool.mcp_app），HTML 模板由前端按 uri
-拉取并缓存。模板与数据分离，正是 MCP Apps 的核心约定。
+端点：
+- GET /api/ui-resources            → 列出所有已注册 ui:// 资源的元信息
+- GET /api/ui-resources/read?uri=  → 读取单个资源的 HTML 内容 + _meta (CSP 等)
+
+注：字段命名（uri/mimeType/text/_meta）与 MCP Resources 规范保持兼容，
+    方便将来接入真正的 MCP Server 时无缝迁移，但当前走普通 REST，不是 MCP 协议。
 """
 from fastapi import APIRouter, HTTPException, Query
 
@@ -20,14 +23,14 @@ router = APIRouter(prefix="/ui-resources")
 
 @router.get("")
 async def list_ui_resources():
-    """SEP-1865 resources/list：返回所有已注册 UI 资源的元信息（不含 HTML）。"""
+    """列出所有已注册 UI 资源的元信息（不含 HTML）。"""
     registry = get_ui_registry()
     return {"resources": [r.to_mcp_resource() for r in registry.list_all()]}
 
 
 @router.get("/read")
 async def read_ui_resource(uri: str = Query(..., description="ui:// 资源 URI")):
-    """SEP-1865 resources/read：返回单个资源的 HTML 内容 + _meta（CSP/permissions）。"""
+    """读取单个资源的 HTML 内容 + _meta（CSP/permissions）。"""
     content = get_ui_registry().read(uri)
     if content is None:
         raise HTTPException(404, f"UI resource not found: {uri}")

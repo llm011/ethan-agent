@@ -38,7 +38,7 @@ def test_registry_register_list_read():
         "uri": "ui://test/foo",
         "name": "Foo",
         "description": "a foo",
-        "mimeType": "text/html;profile=mcp-app",
+        "mimeType": "text/html",
     }
 
     content = reg.read("ui://test/foo")

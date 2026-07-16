@@ -9,11 +9,11 @@ interface McpAppViewProps {
 }
 
 /**
- * MCP Apps (SEP-1865) 渲染组件：将 UI 资源模板在 sandbox iframe 中渲染，
+ * 工具 UI 资源渲染组件：将工具返回的 UI 模板在 sandbox iframe 中渲染，
  * 通过 postMessage 传入数据（JSON-RPC init）。
  *
  * 模板 HTML 按 ui:// URI 从 /api/ui-resources/read 拉取（而非内联在每条消息里），
- * 同一 URI 只请求一次，之后走模块级缓存。这正是 MCP Apps「模板与数据分离」的落地。
+ * 同一 URI 只请求一次，之后走模块级缓存。模板与数据分离，让带宽消耗最小化。
  */
 export function McpAppView({ apps }: McpAppViewProps) {
   return (

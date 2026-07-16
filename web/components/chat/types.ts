@@ -46,7 +46,7 @@ export interface Message {
   intermediateOutput?: string;
   quote?: Quote;
   a2ui?: unknown[];  // ui_card 工具产出的 A2UI envelope 列表，渲染成卡片
-  mcpApps?: McpApp[];  // MCP Apps UI 资源，前端用 iframe 沙箱渲染
+  mcpApps?: McpApp[];  // 工具 UI 资源，前端按 uri 拉取模板后在 iframe 沙箱渲染
   images?: PendingFile[];  // 发送时附带的图片
   matchedSkills?: SkillMatch[];  // 本次对话命中的 Skill 列表，用于可视化
 }

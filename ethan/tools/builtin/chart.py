@@ -15,7 +15,7 @@ from ethan.tools.ui_resources import UIResource, UIResourceMeta, register_ui_res
 
 _QUICKCHART = "https://quickchart.io/chart"
 
-# 注册 chart UI 资源（MCP Apps SEP-1865）
+# 注册 chart UI 资源（工具 UI 模板，按 uri 拉取）
 _CHART_RESOURCE = UIResource(
     uri="ui://ethan/chart",
     name="Interactive Chart",
@@ -105,9 +105,8 @@ class ChartTool(BaseTool):
     ) -> ToolResult:
         config = self._build_config(chart_type, labels, datasets, title)
 
-        # MCP App 数据（SEP-1865）：只带 UI 资源 URI + 数据，不内联 HTML。
-        # 前端（MCP host）按 uri 调 /api/ui-resources/read 拉模板（按 uri 缓存一次），
-        # 再通过 postMessage init 把 data 打进 iframe。模板与数据分离是 MCP Apps 的核心。
+        # 工具 UI 资源：只带 uri + data，不内联 HTML。
+        # 前端按 uri 拉取模板（/api/ui-resources/read），缓存后通过 postMessage init 注入数据。
         mcp_app = {
             "uri": _CHART_RESOURCE.uri,
             "data": {"chartConfig": config},
