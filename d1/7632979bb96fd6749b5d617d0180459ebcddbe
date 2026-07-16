@@ -1,0 +1,57 @@
+ethan/core/context_budget.py
+  s_ba5d3b5d02716c::t_031632d695a0ec 54
+ethan/defaults/ui-templates/chart.html
+  s_ba5d3b5d02716c::t_c0f472591f5bbc 143-144
+ethan/interface/api.py
+  s_ba5d3b5d02716c::t_77eaf9e16f9c63 31,172
+ethan/interface/routers/completions.py
+  s_ba5d3b5d02716c::t_ca5059c58eafa8 171,186,207,231,277,302,321,344
+ethan/interface/routers/producers.py
+  s_ba5d3b5d02716c::t_6c532134669f5a 23-24,28,37,248,274,294,326,358
+ethan/interface/routers/sessions.py
+  s_ba5d3b5d02716c::t_7fc63a48436486 126
+ethan/memory/session.py
+  s_ba5d3b5d02716c::t_169b9be8cd9987 190,264,269-270,290,294,297,370,386,402
+ethan/providers/base.py
+  s_ba5d3b5d02716c::t_26e95bb8bde43c 33
+ethan/tools/builtin/chart.py
+  s_ba5d3b5d02716c::t_eddc93191517d7 108-110
+tests/test_mcp_apps.py
+  s_ba5d3b5d02716c::t_a64eb4472bfccc 1-139
+web/components/chat-view.tsx
+  s_ba5d3b5d02716c::t_64456733d95299 157,177
+web/components/chat/mcp-app-view.tsx
+  s_ba5d3b5d02716c::t_8ff9e88fbf3750 3-4,12-16,28-45,48-60,64,67,77-78,80-96,98,102
+web/components/chat/types.ts
+  s_ba5d3b5d02716c::t_585a2641fe1937 27-29
+web/lib/api-base.ts
+  s_ba5d3b5d02716c::t_d7d524ce6b821e 111-120
+web/lib/api-chat.ts
+  s_ba5d3b5d02716c::t_9cfcf6932ed9fd 12
+web/lib/api-sessions.ts
+  s_ba5d3b5d02716c::t_d6d4c9ee0c8470 29-31,33-34
+README.md
+  s_ba5d3b5d02716c::t_9ce2f3dcd19fb6 430-439,479-480
+README_CN.md
+  s_ba5d3b5d02716c::t_efe0e1544bbda4 422-431,471-472
+ethan/interface/routers/ui_resources.py
+  s_ba5d3b5d02716c::t_67704490309c64 1-34
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d17632979bb96fd6749b5d617d0180459ebcddbe",
+  "prompts": {},
+  "sessions": {
+    "s_ba5d3b5d02716c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0acd4ebb-e0bb-4e45-b621-196f857a53c8",
+        "model": "unknown"
+      },
+      "human_author": "jsongo <jsongo@qq.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
