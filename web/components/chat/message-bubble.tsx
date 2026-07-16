@@ -9,6 +9,7 @@ import { ToolTimeline } from "@/components/tool-timeline";
 import { SwimlaneDiagram } from "@/components/swimlane-diagram";
 import { fmtTokens } from "@/lib/utils";
 import { A2uiCard } from "./a2ui-card";
+import { McpAppView } from "./mcp-app-view";
 import { MarkdownContent } from "./markdown";
 import { applyHighlights } from "@/lib/highlight";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
@@ -190,6 +191,9 @@ export function MessageBubble({ msg, isStreaming, isLast, onQuote, onCardAction,
             <MarkdownContent ref={contentRef} content={msg.content} />
             {msg.a2ui && msg.a2ui.length > 0 && (
               <A2uiCard surfaces={msg.a2ui} onAction={onCardAction} />
+            )}
+            {msg.mcpApps && msg.mcpApps.length > 0 && (
+              <McpAppView apps={msg.mcpApps} />
             )}
             <div className="flex justify-end items-center mt-2 gap-1.5 text-[10px] text-muted-foreground/35 tabular-nums">
               {msg.created_at && <span>{formatTime(msg.created_at)}</span>}

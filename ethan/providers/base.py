@@ -66,6 +66,7 @@ class ToolEvent:
     sub_steps: list = field(default_factory=list)  # 委派类工具（如 delegate_coding）的子步骤
     tool_call_id: str = ""  # 唯一标识，前端用来精确配对 start/done（同名工具并发时不串）
     ui: Optional[list] = None  # ui_card 工具产出的 A2UI envelope 列表，透传给前端渲染卡片
+    mcp_app: Optional[dict] = None  # MCP Apps UI 资源数据，前端用 iframe 渲染
     intent: str = ""  # 模型在 intent 参数里填的「本次调用目的」，展示在工具调用旁
     entity_type: str = ""  # 实体类型（builtin/browser/delegate/computer_use/...），用于可视化分类
     entity_id: str = ""  # 关联实体 ID（如 browser session_id），用于可视化实体聚合

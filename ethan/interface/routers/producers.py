@@ -233,6 +233,8 @@ async def _run_generation(
                     }
                     if item.ui:
                         evt["ui"] = item.ui
+                    if item.mcp_app:
+                        evt["mcp_app"] = item.mcp_app
                     run.emit(evt)
                 # 工具事件（start/done/error）后实时落库进度：把当前全部 tool_steps
                 # 写到这条进度消息上。首次创建，后续 UPDATE 同一条（progress_msg_id 复用）。
