@@ -63,6 +63,17 @@ async def _event_loop(event_key: str) -> None:
 
     logger.info("[Lark] Starting WebSocket event listener for %s via lark-cli...", event_key)
 
+    # 确保 lark-cli 已绑定正确的 app（容器重启后 ~/.lark-cli/ 丢失时自动重建）
+    from ethan.interface.lark_deps import _lark_cli_current_app, _sync_lark_cli_app
+    current_app = _lark_cli_current_app()
+    if current_app != lark_cfg.app_id:
+        logger.info("[Lark] Syncing lark-cli app config (current=%s, expected=%s)...",
+                    current_app, lark_cfg.app_id)
+        ok, err = _sync_lark_cli_app(lark_cfg.app_id, lark_cfg.app_secret)
+        if not ok:
+            logger.error("[Lark] Failed to sync lark-cli app: %s — event listener not started", err)
+            return
+
     # 延迟导入 _dispatch，避免模块加载时拉起 lark_oapi（与原实现一致：lark_oapi 留给子进程）。
     from ethan.interface.lark_stream import _dispatch
 
@@ -78,7 +89,7 @@ async def _event_loop(event_key: str) -> None:
                 "--as", "bot",
                 stdin=r_fd,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
             )
             os.close(r_fd)  # 子进程已继承读端，父进程关掉自己的副本
             r_fd = -1
@@ -111,7 +122,17 @@ async def _event_loop(event_key: str) -> None:
                     logger.exception("[Lark] _dispatch failed for %s", event_key)
 
             await proc.wait()
-            logger.warning("[Lark] Event stream for %s ended, reconnecting in %ss...", event_key, backoff)
+            # 读取 stderr 帮助诊断 lark-cli 退出原因
+            stderr_out = ""
+            if proc.stderr:
+                stderr_bytes = await proc.stderr.read()
+                stderr_out = stderr_bytes.decode(errors="replace").strip()
+            if stderr_out:
+                logger.warning("[Lark] Event stream for %s ended (exit=%s), stderr: %s",
+                               event_key, proc.returncode, stderr_out[:500])
+            else:
+                logger.warning("[Lark] Event stream for %s ended (exit=%s), reconnecting in %ss...",
+                               event_key, proc.returncode, backoff)
 
         except asyncio.CancelledError:
             logger.info("[Lark] Event listener for %s cancelled.", event_key)
