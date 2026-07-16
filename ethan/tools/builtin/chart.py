@@ -10,9 +10,22 @@ import time
 
 import httpx
 
-from ethan.tools.base import BaseTool
+from ethan.tools.base import BaseTool, ToolResult
+from ethan.tools.ui_resources import UIResource, UIResourceMeta, register_ui_resource
 
 _QUICKCHART = "https://quickchart.io/chart"
+
+# 注册 chart UI 资源（工具 UI 模板，按 uri 拉取）
+_CHART_RESOURCE = UIResource(
+    uri="ui://ethan/chart",
+    name="Interactive Chart",
+    description="Interactive Chart.js chart rendered in iframe sandbox",
+    template_file="chart.html",
+    meta=UIResourceMeta(
+        csp={"script-src": ["https://cdn.jsdelivr.net"]},
+    ),
+)
+register_ui_resource(_CHART_RESOURCE)
 
 
 class ChartTool(BaseTool):
@@ -89,18 +102,37 @@ class ChartTool(BaseTool):
         width: int = 700,
         height: int = 350,
         output_path: str = "",
-    ) -> str:
+    ) -> ToolResult:
+        config = self._build_config(chart_type, labels, datasets, title)
+
+        # 工具 UI 资源：只带 uri + data，不内联 HTML。
+        # 前端按 uri 拉取模板（/api/ui-resources/read），缓存后通过 postMessage init 注入数据。
+        mcp_app = {
+            "uri": _CHART_RESOURCE.uri,
+            "data": {"chartConfig": config},
+        }
+
+        # 同时保留 quickchart.io PNG 作为降级（飞书等渠道用）
         try:
-            config = self._build_config(chart_type, labels, datasets, title)
             png = await self._render(config, width, height)
             path = output_path or f"/tmp/chart_{int(time.time())}.png"
             with open(path, "wb") as f:
                 f.write(png)
-            return f"Chart saved to {path} ({len(png):,} bytes). Use Read tool to display it."
+            content = f"Chart saved to {path} ({len(png):,} bytes). Use Read tool to display it."
         except httpx.HTTPStatusError as e:
-            return f"Chart generation failed: HTTP {e.response.status_code} — {e.response.text[:200]}"
+            content = (
+                f"PNG fallback failed (HTTP {e.response.status_code}). "
+                "The interactive chart is only visible in the Web UI; on REPL/Lark the user sees no image. "
+                "Do not assume the user has seen the chart — retry later or describe the data in text instead."
+            )
         except Exception as e:
-            return f"Chart generation failed: {e}"
+            content = (
+                f"PNG fallback failed ({e}). "
+                "The interactive chart is only visible in the Web UI; on REPL/Lark the user sees no image. "
+                "Do not assume the user has seen the chart — retry later or describe the data in text instead."
+            )
+
+        return ToolResult(tool_call_id="", content=content, mcp_app=mcp_app)
 
     def _build_config(self, chart_type: str, labels: list, datasets: list, title: str) -> dict:
         built_datasets = []

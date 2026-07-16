@@ -108,6 +108,15 @@ export async function respondConsent(requestId: string, allowed: boolean): Promi
   return res.json();
 }
 
+/** Tool UI resources: 按 ui:// URI 获取工具 UI 模板 HTML（前端缓存，模板只拉一次）。 */
+export async function fetchUiResource(uri: string): Promise<{ text: string; _meta?: unknown }> {
+  const res = await fetch(`${API_URL}/ui-resources/read?uri=${encodeURIComponent(uri)}`, {
+    headers: headers(),
+  });
+  if (!res.ok) throw new Error(`Failed to fetch UI resource: ${uri}`);
+  return res.json();
+}
+
 /** 获取后端版本号（与 PyPI 版本一致，来自 ethan.__version__） */
 export async function fetchVersion(): Promise<string | null> {
   try {

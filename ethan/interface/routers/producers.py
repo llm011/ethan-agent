@@ -20,11 +20,12 @@ def _RunManager_schedule_removal(session_id: str) -> None:
 
 async def _save_progress(store: SessionStore, session_id: str,
                          progress_msg_id: int | None,
-                         tool_steps: list, a2ui: list | None) -> int:
+                         tool_steps: list, a2ui: list | None,
+                         mcp_apps: list | None = None) -> int:
     """工具过程实时落库：把当前 tool_steps 快照写进一条 assistant 消息。
 
     首次（progress_msg_id is None）：INSERT 一条占位行（content 空、tool_steps 为当前步骤），
-    返回新行 id；后续：UPDATE 同一行覆盖 tool_steps/a2ui，复用 id 返回。
+    返回新行 id；后续：UPDATE 同一行覆盖 tool_steps/a2ui/mcp_apps，复用 id 返回。
 
     这样整轮只占一条 assistant 行，工具步骤随完成实时留存，进程崩溃/用户关页面也不丢过程。
     """
@@ -33,6 +34,7 @@ async def _save_progress(store: SessionStore, session_id: str,
         content="",
         tool_steps=tool_steps,
         a2ui=a2ui,
+        mcp_apps=mcp_apps,
     )
     if progress_msg_id is None:
         return await store.save_message(session_id, msg)
@@ -233,6 +235,8 @@ async def _run_generation(
                     }
                     if item.ui:
                         evt["ui"] = item.ui
+                    if item.mcp_app:
+                        evt["mcp_app"] = item.mcp_app
                     run.emit(evt)
                 # 工具事件（start/done/error）后实时落库进度：把当前全部 tool_steps
                 # 写到这条进度消息上。首次创建，后续 UPDATE 同一条（progress_msg_id 复用）。
@@ -241,6 +245,7 @@ async def _run_generation(
                         progress_msg_id = await _save_progress(
                             store, session_id, progress_msg_id,
                             collector.tool_steps or [], collector.a2ui or None,
+                            collector.mcp_apps or None,
                         )
                     except Exception:
                         logger.exception("实时保存工具进度失败 session=%s", session_id)
@@ -266,6 +271,7 @@ async def _run_generation(
                         usage=collector.usage_dict,
                         tool_steps=collector.tool_steps or [],
                         a2ui=collector.a2ui or None,
+                        mcp_apps=collector.mcp_apps or None,
                         matched_skills=collector.matched_skills or None,
                         ttfb_ms=collector.ttfb_ms,
                         total_ms=collector.total_ms,
@@ -285,6 +291,7 @@ async def _run_generation(
                     usage=collector.usage_dict,
                     tool_steps=collector.tool_steps or [],
                     a2ui=collector.a2ui or None,
+                    mcp_apps=collector.mcp_apps or None,
                     matched_skills=collector.matched_skills or None,
                     ttfb_ms=collector.ttfb_ms,
                     total_ms=collector.total_ms,
@@ -316,6 +323,7 @@ async def _run_generation(
                 usage=collector.usage_dict,
                 tool_steps=collector.tool_steps or [],
                 a2ui=collector.a2ui or None,
+                mcp_apps=collector.mcp_apps or None,
                 matched_skills=collector.matched_skills or None,
                 ttfb_ms=collector.ttfb_ms,
                 total_ms=collector.total_ms,
@@ -347,6 +355,7 @@ async def _run_generation(
             usage=usage_dict,
             tool_steps=collector.tool_steps or [],
             a2ui=collector.a2ui or None,
+            mcp_apps=collector.mcp_apps or None,
             matched_skills=collector.matched_skills or None,
             ttfb_ms=collector.ttfb_ms,
             total_ms=collector.total_ms,

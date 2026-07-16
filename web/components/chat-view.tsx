@@ -154,6 +154,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         : undefined,
       toolsExpanded: false,
       a2ui: m.a2ui && m.a2ui.length > 0 ? m.a2ui : undefined,
+      mcpApps: m.mcp_apps && m.mcp_apps.length > 0 ? m.mcp_apps : undefined,
       matchedSkills: m.matched_skills || undefined,
       ttfb_ms: m.ttfb_ms ?? undefined,
       total_ms: m.total_ms ?? undefined,
@@ -173,6 +174,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     const currentToolSteps: ToolStep[] = [];
     let currentMatchedSkills: { name: string; is_default?: boolean }[] | undefined;
     const a2uiSurfaces: unknown[] = [];
+    const mcpAppsCollected: Array<{ uri: string; data?: Record<string, unknown>; html?: string; csp?: Record<string, string[]> }> = [];
     const sendTime = Date.now();
     let ttft: number | undefined;
     let ttfbMs: number | undefined;
@@ -299,6 +301,9 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         if (chunk.tool && (chunk.state === "done" || chunk.state === "error") && chunk.ui && Array.isArray(chunk.ui)) {
           a2uiSurfaces.push(...chunk.ui);
         }
+        if (chunk.tool && (chunk.state === "done" || chunk.state === "error") && chunk.mcp_app) {
+          mcpAppsCollected.push(chunk.mcp_app);
+        }
         if (chunk.content) {
           setBgPolling(null);
           assistantContent += chunk.content;
@@ -359,6 +364,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           ttfb_ms: ttfbMs ?? last.ttfb_ms,
           total_ms: totalMs ?? last.total_ms,
           a2ui: a2uiSurfaces.length > 0 ? a2uiSurfaces : undefined,
+          mcpApps: mcpAppsCollected.length > 0 ? mcpAppsCollected : undefined,
           matchedSkills: currentMatchedSkills,
           id: messageId ?? last.id,
           intermediateOutput: intermediateOutput || undefined,
@@ -375,6 +381,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         ttfb_ms: ttfbMs,
         total_ms: totalMs,
         a2ui: a2uiSurfaces.length > 0 ? a2uiSurfaces : undefined,
+        mcpApps: mcpAppsCollected.length > 0 ? mcpAppsCollected : undefined,
         matchedSkills: currentMatchedSkills,
         id: messageId,
         intermediateOutput: intermediateOutput || undefined,

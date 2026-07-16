@@ -24,6 +24,7 @@ class StreamCollector:
         self.thought: str = ""
         self.tool_steps: list[dict] = []
         self.a2ui: list = []  # ui_card 工具汇总的 A2UI envelopes（持久化进 assistant 消息）
+        self.mcp_apps: list = []  # 工具 UI 资源数据列表 [{uri, data}]，透传给前端 iframe 渲染
         self.matched_skills: list = []  # 本次对话命中的 Skill 列表 [{name, is_default}]
         self._times: dict[str, float] = {}
         self._agent = None  # 可选，用于取 usage
@@ -95,6 +96,8 @@ class StreamCollector:
             )
             if item.ui:
                 self.a2ui.extend(item.ui)
+            if item.mcp_app:
+                self.mcp_apps.append(item.mcp_app)
             # 找最近一个同名 running step 关闭
             for step in reversed(self.tool_steps):
                 if step["tool"] == item.tool_name and step["state"] == "running":

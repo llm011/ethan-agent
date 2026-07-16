@@ -26,7 +26,12 @@ export interface SessionDetail {
     created_at?: number;
     quote?: { role: "user" | "assistant"; content: string } | null;
     usage?: { input: number; output: number; cache: number };
+    a2ui?: unknown[];
+    mcp_apps?: Array<{ uri: string; data?: Record<string, unknown>; html?: string; csp?: Record<string, string[]> }>;
+    images?: Array<{ data?: string; media_type?: string; dataUrl?: string }>;
     matched_skills?: Array<{ name: string; is_default?: boolean }>;
+    ttfb_ms?: number;
+    total_ms?: number;
     tool_steps?: Array<{
       tool: string;
       args: string;

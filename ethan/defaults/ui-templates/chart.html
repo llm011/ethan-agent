@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Type" content="text/html;profile=mcp-app">
+<title>MCP Chart</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 16px;
+}
+#container {
+  width: 100%;
+  max-width: 900px;
+  position: relative;
+}
+#placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 300px;
+  color: #9ca3af;
+  font-size: 14px;
+}
+canvas {
+  width: 100% !important;
+  max-height: 480px;
+}
+</style>
+</head>
+<body>
+<div id="container">
+  <div id="placeholder">waiting for data...</div>
+  <canvas id="chart" style="display:none;"></canvas>
+</div>
+<script>
+(function() {
+  const DEFAULT_COLORS = [
+    'rgb(59,130,246)',
+    'rgb(16,185,129)',
+    'rgb(245,158,11)',
+    'rgb(239,68,68)',
+    'rgb(139,92,246)',
+    'rgb(20,184,166)'
+  ];
+
+  let chartInstance = null;
+
+  function getColor(index) {
+    return DEFAULT_COLORS[index % DEFAULT_COLORS.length];
+  }
+
+  function buildChartJsConfig(config) {
+    // If it's already a full Chart.js config object (has type + data)
+    if (config.type && config.data) {
+      // Ensure tooltips are enabled
+      config.options = config.options || {};
+      config.options.plugins = config.options.plugins || {};
+      config.options.plugins.tooltip = config.options.plugins.tooltip || { enabled: true };
+      config.options.responsive = true;
+      config.options.maintainAspectRatio = false;
+      return config;
+    }
+
+    // Build from simplified format: { chartType, labels, datasets, title }
+    let chartType = config.chartType || 'bar';
+    const labels = config.labels || [];
+    const datasets = (config.datasets || []).map(function(ds, i) {
+      const color = ds.color || getColor(i);
+      return {
+        label: ds.label || ('Dataset ' + (i + 1)),
+        data: ds.data || [],
+        backgroundColor: color,
+        borderColor: color,
+        borderWidth: chartType === 'line' || chartType === 'radar' ? 2 : 1,
+        fill: chartType === 'radar' ? true : false,
+        tension: 0.3
+      };
+    });
+
+    // Handle horizontalBar -> bar with indexAxis
+    let indexAxis;
+    if (chartType === 'horizontalBar') {
+      chartType = 'bar';
+      indexAxis = 'y';
+    }
+
+    const options = {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        tooltip: { enabled: true },
+        title: {
+          display: !!config.title,
+          text: config.title || ''
+        }
+      }
+    };
+
+    if (indexAxis) {
+      options.indexAxis = indexAxis;
+    }
+
+    return {
+      type: chartType,
+      data: { labels: labels, datasets: datasets },
+      options: options
+    };
+  }
+
+  function renderChart(config) {
+    const chartConfig = buildChartJsConfig(config);
+
+    document.getElementById('placeholder').style.display = 'none';
+    const canvas = document.getElementById('chart');
+    canvas.style.display = 'block';
+
+    if (chartInstance) {
+      chartInstance.destroy();
+    }
+
+    canvas.parentElement.style.height = '420px';
+    chartInstance = new Chart(canvas.getContext('2d'), chartConfig);
+  }
+
+  function handleMessage(event) {
+    let msg;
+    try {
+      msg = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+    } catch (e) {
+      return;
+    }
+    if (!msg || typeof msg !== 'object') return;
+
+    // MCP host 通过 postMessage 发 JSON-RPC init，params 即工具结果里的 data。
+    // data 形如 { chartConfig: {...} }，也兼容直接传 Chart.js config。
+    if (msg.method === 'init' && msg.params) {
+      const params = msg.params;
+      const config = params.chartConfig || params;
+      renderChart(config);
+    }
+  }
+
+  window.addEventListener('message', handleMessage);
+})();
+</script>
+</body>
+</html>

@@ -51,7 +51,7 @@ def _truncated_copy(msg: Message, keep: int, *, evicted: bool = False) -> Messag
         tool_calls=msg.tool_calls, tool_call_id=msg.tool_call_id,
         usage=msg.usage, created_at=msg.created_at,
         tool_steps=msg.tool_steps, thought=msg.thought,
-        quote=msg.quote, a2ui=msg.a2ui,
+        quote=msg.quote, a2ui=msg.a2ui, mcp_apps=msg.mcp_apps,
     )
 
 
