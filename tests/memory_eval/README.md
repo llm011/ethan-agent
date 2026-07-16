@@ -1,6 +1,8 @@
 # Memory Eval — 结构化记忆评测设计
 
-> 状态：设计 + 样本生成器已就位。评测对象 = `feat/structured-memory-pipeline` 的提取（extractors）→ 准入（admission）→ 召回（recall）链路。
+> 状态:golden extraction 集已就位(**6 域 × 200 = 1200 条**,手写 210 + `gen/` 生成 990),dry 评测全绿(4853 断言 0 失败)。评测对象 = `feat/structured-memory-pipeline` 的提取(extractors)→ 准入(admission)→ 召回(recall)链路。recall 集与 live 模式待做。
+>
+> golden 增量样本用 `gen/gen_all.py` 重新生成(幂等,保留手写部分);各域生成器可单独跑自校验:`python3 gen/gen_<domain>.py`。
 
 ## 一、评测两大类
 
