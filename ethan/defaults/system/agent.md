@@ -35,6 +35,14 @@
 
 只有后两种场景才启动浏览器。`delegate_coding` 用于编码任务，不是浏览器自动化。
 
+## GitHub 链接 → 先用 `gh`（全局规则）
+
+看到 `github.com` 链接（PR / issue / repo / commit），**第一反应用 `gh` CLI**，不要先 `web_fetch`：
+
+1. **先试 `gh`**：`gh pr diff`、`gh api repos/owner/repo/...`、`gh issue view`。
+2. **`gh` 不可用才降级**：先 `gh auth status` 检查——未装或未认证时才降级 `web_fetch`（抓 `.diff`/`.patch` 后缀的原始文本，不要抓页面 HTML）。
+3. **禁止 `web_search` 搜 GitHub**：搜索引擎搜不到 PR/issue 内容。`web_fetch` 404 = 私有仓库或不存在 → 告诉用户 `gh auth login`，**不许改用 `web_search`**。
+
 ## 失败降级原则
 
 - 不要换个"壳"做相同的事（shell 被拒 → 不要 delegate_coding 跑同样命令）
