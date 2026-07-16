@@ -61,10 +61,52 @@ _METHODOLOGY_DIMENSIONS = {
 }
 _COMPANION_DIMENSIONS = {
     "companion.current_emotion", "companion.current_stressor",
+    "companion.emotional_event", "companion.support_need",
     "companion.soothing_preference", "companion.support_boundary",
     "companion.important_inner_experience", "companion.explicit_value",
     "companion.relationship_context", "companion.requested_follow_up",
 }
+
+# 苏念陪伴模式情感提取的完整 system prompt(职责/边界/禁止项/状态机)。
+# 维度详解与示例在 _build_prompt 的 companion_block;此处只放约束与规则。
+_COMPANION_SYSTEM_PROMPT = (
+    "你是苏念陪伴模式的情感记忆提取器。只输出严格 JSON,不要 markdown 代码块、不要解释文字。\n"
+    "你只负责提议候选记忆,最终是否写入由系统代码决定。\n"
+    "\n"
+    "【职责】\n"
+    "从陪伴对话中提取用户明确表达的情绪经历、压力源、支持需求和安抚偏好,让后续陪伴更连续。\n"
+    "\n"
+    "【提取边界】\n"
+    "- 本会话是苏念陪伴(companion)模式,情感类记忆走 companion 维度。\n"
+    "- 只从用户消息提取;assistant 的发言不能作为用户事实的证据。\n"
+    "- 每条候选必须引用用户消息里的原文 quote,且 quote 必须是用户消息的精确子串;无法找到原文支撑就省略该条。\n"
+    "- 不从措辞、语气或行为推断人格、心理疾病、依恋类型等标签。\n"
+    "- 不把一次短暂情绪固化为稳定个人特征;当前情绪默认标 observed 并尽量给 valid_until。\n"
+    "- 情感记忆独立存储、独立召回、独立授权、独立遗忘:memory_domain 一律为 companion,"
+    "scope_type=mode,scope_id=companion,sensitivity=high。\n"
+    "\n"
+    "【禁止提取】\n"
+    "- 心理疾病诊断、人格类型、依恋类型(抑郁/抑郁症/焦虑症/双相/强迫症/PTSD/创伤/回避型依恋等):"
+    "不允许根据对话推断或贴标签。\n"
+    "- 「用户是容易焦虑的人」等稳定人格概括:一次状态不能泛化为长期特征。\n"
+    "- 非陪伴模式中的情绪猜测:没有相应用途和用户预期。\n"
+    "- 助手提出、用户没有确认的内心动机:助手推测不能成为用户事实。\n"
+    "- 与陪伴无关的第三方敏感信息:数据最小化,避免为他人建立不必要档案。\n"
+    "- 全量保存陪伴原话:长期记忆只留必要摘要和证据引用。\n"
+    "\n"
+    "【evidence_level 标级】\n"
+    "- observed:一次性情绪或行为(当前情绪默认)。\n"
+    "- explicit:用户明确陈述。\n"
+    "- corrected:用户明确纠正。\n"
+    "- inferred:多个独立陪伴对话重复出现的同一模式。\n"
+    "\n"
+    "【情感记忆状态机】\n"
+    "explicit 当前状态 → episode_emotion(带 valid_until);\n"
+    "explicit 支持偏好/边界 → confirmed companion memory;\n"
+    "单次 observed pattern → candidate(不默认召回);\n"
+    "多个陪伴对话+一致证据 → inferred pattern;\n"
+    "用户确认 → confirmed。"
+)
 
 # Companion safety: reject diagnostic / personality / clinical labels.
 _COMPANION_DENIED_TERMS = {
@@ -212,7 +254,9 @@ class StructuredMemoryExtractor:
 
     @staticmethod
     def _system_prompt(*, is_companion: bool) -> str:
-        base = (
+        if is_companion:
+            return _COMPANION_SYSTEM_PROMPT
+        return (
             "你是结构化记忆提取器。只输出严格 JSON，不要 markdown 代码块、不要解释文字。\n"
             "你只负责提议候选记忆，最终是否写入由系统代码决定。\n"
             "每条候选必须引用用户消息里的原文 quote，且 quote 必须是用户消息的精确子串；"
@@ -221,16 +265,8 @@ class StructuredMemoryExtractor:
             "一次性行为标 observed；用户明确陈述标 explicit；用户明确纠正标 corrected。\n"
             "不要把单次行为泛化为稳定人格特征。\n"
             "scope_type 只能是 user/user_domain/user_skill/project/mode 之一。"
+            "\n本会话不是陪伴模式，禁止输出 companion 维度的情感类记忆。"
         )
-        if is_companion:
-            base += (
-                "\n本会话是苏念陪伴模式。情感类记忆走 companion 维度，"
-                "禁止输出诊断、人格类型、依恋类型、创伤解读或心理疾病标签。"
-                "当前情绪默认 observed 并尽量给 valid_until。"
-            )
-        else:
-            base += "\n本会话不是陪伴模式，禁止输出 companion 维度的情感类记忆。"
-        return base
 
     @staticmethod
     def _build_prompt(messages: list[SourceMessage], *, is_companion: bool) -> str:
@@ -241,9 +277,27 @@ class StructuredMemoryExtractor:
         transcript = "\n".join(lines)
 
         companion_block = (
-            "\n- companion: 仅在陪伴模式输出。dimension 限: "
-            "current_emotion/current_stressor/soothing_preference/support_boundary/"
-            "important_inner_experience/explicit_value/relationship_context/requested_follow_up"
+            "\n【companion 维度(仅陪伴模式提取,共 10 类)】\n"
+            "- companion.current_emotion 当前情绪:用户明确说出的当前感受、强度和时间。"
+            "In-episode/带 TTL,默认不晋升稳定特征。示例:「最近因为发布延期感到焦虑」。\n"
+            "- companion.emotional_event 情绪事件:引发感受的具体事件及必要上下文,"
+            "作为历史情节保留、不泛化人格。示例:「评审中的否定让用户感到挫败」。\n"
+            "- companion.current_stressor 压力源/困扰:明确、重复出现的压力源或担忧;"
+            "用户明确说明长期存在或多次重复才晋升。示例:「不确定的截止时间会持续带来压力」。\n"
+            "- companion.support_need 当下支持需求:用户当前希望被倾听、澄清、陪伴还是获得建议;"
+            "仅用户明确说「以后这种情况……」才晋升。示例:「这次只想说说,不需要方案」。\n"
+            "- companion.soothing_preference 安抚偏好:哪些回应方式确实有帮助或令人不适;"
+            "用户明确评价或纠正才确认。示例:「先确认感受再讨论方案会更舒服」。\n"
+            "- companion.support_boundary 情感边界:用户不希望讨论、追问或使用的表达方式;"
+            "用户明确设定边界。示例:「不希望被追问家庭细节」。\n"
+            "- companion.explicit_value 价值/意义:用户明确表达的重要价值、信念或内心意义;"
+            "必须用户直接陈述,高敏感可要求确认。示例:「用户很看重自主选择」。\n"
+            "- companion.important_inner_experience 重要内心经历:对用户有长期影响的内心经历或体验。"
+            "示例:「第一次被裁让用户很久不敢放松」。\n"
+            "- companion.relationship_context 关系上下文:与当前困扰长期相关的人和关系,"
+            "仅保存服务所需最小信息。示例:「某位同事是当前项目合作方」。\n"
+            "- companion.requested_follow_up 后续跟进请求:用户明确拜托后续记挂/回访的事。"
+            "示例:「下周问问我发版顺不顺利」。\n"
         ) if is_companion else ""
 
         return (
