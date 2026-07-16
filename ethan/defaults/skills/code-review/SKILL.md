@@ -1,6 +1,6 @@
 ---
 name: code-review
-version: 2.8.0
+version: 2.8.1
 category: discoverable
 trigger: "code review|代码审查|review代码|review一下|帮我看看代码|看下代码|审查代码|pr review|diff review|检查代码|代码质量|代码评审|代码走查|review pr|审查pr|把评论打上去|发评论|打评论|提交评论|发布评论|pr评论"
 description: "对代码变更做审查：识别 bug、安全漏洞、性能问题。P0 必须修复写评论，P1 建议性评论，P2 只在总结里一句带过。用户要求 review、审查、发评论、打评论时都必须先用 skill_read 读全文。"
@@ -121,6 +121,7 @@ gh api repos/<owner/repo>/pulls/<N> --jq '.head.sha' > /tmp/pr_<N>_sha.txt
 
 ```bash
 # 值得 review 的文件（排除 deleted + 噪音扩展名）
+# 注意：此正则需与下方「跳过这些文件」章节保持同步，改一处别忘了改另一处
 jq -r '.[] | select(.status != "removed") | select(.filename | test("\\.(pkl|pickle|jsonl|csv|json|lock|snap|md|rst|yaml|yml|toml|ini|cfg|conf|env|svg|png|jpg|jpeg|gif|ico|webp|mp4|mp3|wav|pdf|zip|tar|gz|bz2|7z|bin|dat|db|sqlite|parquet|arrow|npy|npz|h5|pt|pth|onnx|model|so|o|a|dll|dylib|exe|class|jar|war|pyc|pyo|wasm|min\\.js|min\\.css|map)$") | not) | "\(.status)\t\(.additions)+\(.deletions)-\t\(.filename)"' /tmp/pr_<N>_files.json
 
 # 被删除的文件（不读 diff，但删了函数/类要查残留引用）
