@@ -216,7 +216,7 @@ async def _maybe_consolidate(session_id: str, model: str, user_id: str = "", mod
             from ethan.memory.daily_signals import collect_signals
             await collect_signals()
     except Exception:
-        pass
+        logger.exception("_maybe_consolidate failed for session=%s", session_id)
 
 
 async def _maybe_generate_skill(session_id: str, model: str, user_id: str = "") -> None:
@@ -233,6 +233,6 @@ async def _maybe_generate_skill(session_id: str, model: str, user_id: str = "") 
         if user_turns < MIN_TURNS or user_turns % 5 != 0:
             return
         generator = SkillGenerator(model=model, user_id=user_id)
-        await generator.maybe_generate(session)
+        await generator.maybe_generate(session.messages)
     except Exception:
-        pass
+        logger.exception("_maybe_generate_skill failed for session=%s", session_id)

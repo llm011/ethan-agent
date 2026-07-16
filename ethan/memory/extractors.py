@@ -312,12 +312,13 @@ class StructuredMemoryExtractor:
             '"structured":{...}'
             "}]}\n\n"
             "person 维度示例: identity.preferred_name / identity.occupation / identity.expertise / "
-            "preference.communication / preference.negative / activity.project / activity.current_focus / "
+            "preference.communication / preference.negative / activity.project / activity.blocker / "
             "decision.chosen / decision.rationale\n"
-            "methodology 维度限: goal_framing/problem_decomposition/information_gathering/"
-            "analysis_reasoning/evaluation_criteria/decision_style/execution_workflow/tool_usage/"
-            "communication_collaboration/quality_control/reflection_improvement；"
+            "methodology 维度限: methodology.goal_framing/methodology.problem_decomposition/methodology.information_gathering/"
+            "methodology.analysis_reasoning/methodology.evaluation_criteria/methodology.decision_style/methodology.execution_workflow/methodology.tool_usage/"
+            "methodology.communication_collaboration/methodology.quality_control/methodology.reflection_improvement；"
             "structured 必含 scenario,trigger,steps,heuristics,evaluation_criteria,anti_patterns。"
+            "dimension 必须完整照抄上述维度名(含 memory_type 前缀),不得省略前缀、不得自造。\n"
             f"{companion_block}\n\n"
             f"对话：\n{transcript}"
         )
