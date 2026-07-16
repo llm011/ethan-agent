@@ -10,7 +10,7 @@
 注：字段命名（uri/mimeType/text/_meta）与 MCP Resources 规范保持兼容，
     方便将来接入真正的 MCP Server 时无缝迁移，但当前走普通 REST，不是 MCP 协议。
 """
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 # 工具模块在导入时于顶层 register_ui_resource（如 chart.py）。显式导入这些模块，
 # 确保 registry 在首个请求前已填充，不依赖 agent_factory 的加载顺序。
@@ -18,7 +18,9 @@ from fastapi import APIRouter, HTTPException, Query
 import ethan.tools.builtin.chart  # noqa: F401
 from ethan.tools.ui_resources import get_ui_registry
 
-router = APIRouter(prefix="/ui-resources")
+from .deps import verify_token
+
+router = APIRouter(prefix="/ui-resources", dependencies=[Depends(verify_token)])
 
 
 @router.get("")

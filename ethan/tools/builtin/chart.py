@@ -120,9 +120,17 @@ class ChartTool(BaseTool):
                 f.write(png)
             content = f"Chart saved to {path} ({len(png):,} bytes). Use Read tool to display it."
         except httpx.HTTPStatusError as e:
-            content = f"Chart rendered interactively. PNG fallback failed: HTTP {e.response.status_code}"
+            content = (
+                f"PNG fallback failed (HTTP {e.response.status_code}). "
+                "The interactive chart is only visible in the Web UI; on REPL/Lark the user sees no image. "
+                "Do not assume the user has seen the chart — retry later or describe the data in text instead."
+            )
         except Exception as e:
-            content = f"Chart rendered interactively. PNG fallback failed: {e}"
+            content = (
+                f"PNG fallback failed ({e}). "
+                "The interactive chart is only visible in the Web UI; on REPL/Lark the user sees no image. "
+                "Do not assume the user has seen the chart — retry later or describe the data in text instead."
+            )
 
         return ToolResult(tool_call_id="", content=content, mcp_app=mcp_app)
 
