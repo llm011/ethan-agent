@@ -1,0 +1,14 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e4d403061e3e07b8ba14e344c79db2c3f1b6075a",
+  "prompts": {},
+  "humans": {
+    "h_9c66f40a201f5d": {
+      "author": "jsongo <jsongo@qq.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
