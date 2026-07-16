@@ -13,7 +13,8 @@
 
 阈值取自工程经验（与扣子等公开实践一致）：窗口 3 轮、错误快速通道 2 轮、最多 2 次反思。
 v1 的卡住判定按「工具名 + 参数精确签名」匹配——便宜且能覆盖绝大多数原地打转；
-语义相似但不完全相同的重复（如搜索词换了大小写/空格）属已知漏判，后续可叠加相似度判定。
+语义相似但不完全相同的重复（如搜索词换了大小写/空格）属已知漏判，
+对此用黑名单式的工具频率限制补充（仅对 web_search 等窄功能搜索工具生效）。
 """
 from __future__ import annotations
 
@@ -25,7 +26,8 @@ STUCK_WINDOW = 3          # 连续 N 轮同一签名 → 判定卡住
 ERROR_WINDOW = 2          # 连续 N 轮同一签名且都报错 → 提前判定卡住（错误重试不必等满 3 轮）
 MAX_REFLECTIONS = 2       # 最多反思几次；仍卡住则收尾放弃
 TOOL_FREQ_LIMIT = 8       # 同一工具名连续调用超过此次数 → 判定卡住（即使参数不同）
-_FREQ_LIMIT_EXEMPT = {"file_read", "rg_search", "fd_find", "skill_read"}
+# 黑名单：只有这些工具受频率限制（容易"换词搜同一主题"式打转的窄功能工具）
+_FREQ_LIMIT_TARGETS = {"web_search", "web_fetch"}
 
 
 def _round_signature(tool_calls) -> str:
@@ -65,7 +67,7 @@ class LoopMonitor:
         """是否陷入无效循环。三种触发：
         1. 连续 STUCK_WINDOW 轮同签名（精确重复）
         2. 连续 ERROR_WINDOW 轮同签名且都报错
-        3. 连续 TOOL_FREQ_LIMIT 轮使用同一工具（即使参数不同，搜同一主题换不同词也算）
+        3. 黑名单工具（_FREQ_LIMIT_TARGETS）连续调用超过 TOOL_FREQ_LIMIT 轮（即使参数不同）
         """
         sigs = self._signatures
         if len(sigs) >= ERROR_WINDOW:
@@ -76,10 +78,10 @@ class LoopMonitor:
             tail = sigs[-STUCK_WINDOW:]
             if len(set(tail)) == 1:
                 return True
-        # 工具频率限制：同一工具名连续调用超过阈值（但豁免高频读写工具）
+        # 工具频率限制：黑名单内的工具连续调用超过阈值 → 判定卡住
         if len(self._tool_names) >= TOOL_FREQ_LIMIT:
             tail = self._tool_names[-TOOL_FREQ_LIMIT:]
-            if len(set(tail)) == 1 and tail[0] and tail[0] not in _FREQ_LIMIT_EXEMPT:
+            if len(set(tail)) == 1 and tail[0] and tail[0] in _FREQ_LIMIT_TARGETS:
                 return True
         return False
 
