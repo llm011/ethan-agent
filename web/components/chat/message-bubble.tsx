@@ -193,19 +193,23 @@ export function MessageBubble({ msg, isStreaming, isLast, onQuote, onCardAction,
             )}
             <div className="flex justify-end items-center mt-2 gap-1.5 text-[10px] text-muted-foreground/35 tabular-nums">
               {msg.created_at && <span>{formatTime(msg.created_at)}</span>}
+              {msg.created_at && (msg.usage || msg.ttfb_ms != null || msg.total_ms != null) && <span className="inline-block w-px h-2.5 bg-muted-foreground/20" />}
               {msg.usage && (
-                <>
-                  {msg.created_at && <span className="inline-block w-px h-2.5 bg-muted-foreground/20" />}
-                  <span title={`${msg.usage.input.toLocaleString()} tokens`}>↑{fmtTokens(msg.usage.input)}</span>
-                  <span title={`${msg.usage.output.toLocaleString()} tokens`}>↓{fmtTokens(msg.usage.output)}</span>
-                  {msg.usage.cache > 0 && <span title={`${msg.usage.cache.toLocaleString()} tokens`}>⚡{fmtTokens(msg.usage.cache)}</span>}
-                </>
+                <span title={`${msg.usage.input.toLocaleString()} in / ${msg.usage.output.toLocaleString()} out${msg.usage.cache > 0 ? ` / ${msg.usage.cache.toLocaleString()} cache` : ""}`} className="inline-flex items-center gap-0.5 rounded bg-muted/50 px-1 py-px">
+                  <span>↑{fmtTokens(msg.usage.input)}</span>
+                  <span>↓{fmtTokens(msg.usage.output)}</span>
+                  {msg.usage.cache > 0 && <span>⚡{fmtTokens(msg.usage.cache)}</span>}
+                </span>
               )}
               {msg.ttfb_ms != null && (
-                <span title={`首字耗时 ${msg.ttfb_ms}ms`}>⌛{msg.ttfb_ms < 1000 ? `${msg.ttfb_ms}ms` : `${(msg.ttfb_ms / 1000).toFixed(1)}s`}</span>
+                <span title={`首字耗时 ${msg.ttfb_ms}ms`} className="inline-flex items-center rounded bg-muted/50 px-1 py-px">
+                  TTFB {msg.ttfb_ms < 1000 ? `${msg.ttfb_ms}ms` : `${(msg.ttfb_ms / 1000).toFixed(1)}s`}
+                </span>
               )}
               {msg.total_ms != null && (
-                <span title={`总耗时 ${msg.total_ms}ms`}>⏱{msg.total_ms < 1000 ? `${msg.total_ms}ms` : msg.total_ms < 60000 ? `${(msg.total_ms / 1000).toFixed(1)}s` : `${Math.floor(msg.total_ms / 60000)}m${Math.round((msg.total_ms % 60000) / 1000)}s`}</span>
+                <span title={`总耗时 ${msg.total_ms}ms`} className="inline-flex items-center rounded bg-muted/50 px-1 py-px">
+                  总 {msg.total_ms < 1000 ? `${msg.total_ms}ms` : msg.total_ms < 60000 ? `${(msg.total_ms / 1000).toFixed(1)}s` : `${Math.floor(msg.total_ms / 60000)}m${Math.round((msg.total_ms % 60000) / 1000)}s`}
+                </span>
               )}
             </div>
           </>
