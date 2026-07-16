@@ -43,6 +43,15 @@
 2. **`gh` 不可用才降级**：先 `gh auth status` 检查——未装或未认证时才降级 `web_fetch`（抓 `.diff`/`.patch` 后缀的原始文本，不要抓页面 HTML）。
 3. **禁止 `web_search` 搜 GitHub**：搜索引擎搜不到 PR/issue 内容。`web_fetch` 404 = 私有仓库或不存在 → 告诉用户 `gh auth login`，**不许改用 `web_search`**。
 
+## code-review 禁止 clone（全局规则）
+
+review PR 时**绝不 clone 仓库**、**绝不 `git checkout` PR 分支**、**绝不读 diff 之外的源文件**。这是 code-review 技能的硬约束第 1 条。
+
+- diff 已经包含所有判断所需的信息（`@@ +start,len @@` 行号、`diff --git a/PATH b/PATH` 文件路径）。
+- 上下文不够 → **跳过这个 finding**，不是 clone 的理由。
+- 想确认调用方残留 → `gh api search/code`（搜索，不是 clone）。
+- 违反这条 = review 失败，即使最终发了评论也不算数。
+
 ## 失败降级原则
 
 - 不要换个"壳"做相同的事（shell 被拒 → 不要 delegate_coding 跑同样命令）
