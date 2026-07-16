@@ -1,0 +1,23 @@
+ethan/interface/lark_events.py
+  s_cde9107bf7fea6::t_42d462f151a0e7 92
+  s_cde9107bf7fea6::t_0df4c61fe329f5 66-76
+  s_cde9107bf7fea6::t_5610cc25cd09ba 125-135
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "6643b0934ab8a8b2fcfc9e6fb242945d44b2392f",
+  "prompts": {},
+  "sessions": {
+    "s_cde9107bf7fea6": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a58c09e167cbfc7569028c7",
+        "model": "c_o_new_thinking__dev"
+      },
+      "human_author": "jsongo <jsongo@qq.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
