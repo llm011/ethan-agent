@@ -419,6 +419,16 @@ class MyTool(BaseTool):
 
 内置工具还包括 `ui_card`：把结构化信息渲染成卡片，比纯文字更直观。高频类型（对比 / 排行 / 统计 / 时间轴）走后端固定模板——模型只填结构化数据，样式稳定一致；自定义卡片仍可手写。渲染按渠道分叉、共享同一套结构化 `card` 数据：Web 端用 `@a2ui/react` 渲染 [A2UI](https://a2ui.org/)、REPL 走文本降级、飞书则渲染成原生 interactive 卡片（在「工具用 post、结果用流式卡片」的基础输出之上的增量美化）。格式细节放在按需读取的 `ui-card` skill 里，system prompt 保持精简。
 
+### 交互式图表（MCP Apps / SEP-1865）
+
+`generate_chart` 工具在 Web 端渲染**可交互**的 Chart.js 图表（bar / line / pie / doughnut / horizontalBar / radar），遵循 [MCP Apps](https://modelcontextprotocol.io/) 的 UI 资源约定（SEP-1865）：
+
+- UI 模板注册为 `ui://` 资源（`ethan/tools/ui_resources.py`），通过 `GET /api/ui-resources`（列出）和 `GET /api/ui-resources/read?uri=…`（读取 HTML + `_meta` CSP）对外暴露。
+- 工具结果只携带 `{uri, data}`——**不内联 HTML**。Web 前端（即 MCP host）按 URI 拉取模板一次并缓存，在 sandbox iframe 中渲染，再通过 `postMessage`（JSON-RPC `init`）把图表数据打进去。模板与数据分离，正是 MCP Apps 的核心。
+- 同时保留 [quickchart.io](https://quickchart.io/) 的 PNG 作为降级，非 Web 渠道（如飞书）拿到静态图片。
+
+图表持久化在 assistant 消息上（`mcp_apps` 列），刷新页面后仍能重新渲染。
+
 ---
 
 ## CLI 命令
@@ -458,6 +468,8 @@ GET  /schedule                  # 定时任务列表
 GET  /system-prompt-preview     # 当前 system prompt 预览
 GET  /channels                  # 渠道列表
 GET  /knowledge/search          # 语义检索
+GET  /ui-resources              # MCP Apps UI 资源（SEP-1865）：列出
+GET  /ui-resources/read?uri=    # MCP Apps UI 资源：读取 HTML + _meta
 ```
 
 ---

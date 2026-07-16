@@ -24,9 +24,9 @@ export interface SkillMatch {
 }
 
 export interface McpApp {
-  uri: string;
-  html: string;
-  data?: Record<string, unknown>;
+  uri: string;               // ui:// 资源 URI，前端按此拉取 HTML 模板（/api/ui-resources/read）
+  data?: Record<string, unknown>;  // 传给 iframe 的数据（postMessage init）
+  html?: string;             // 兼容字段：旧数据可能内联 html；新链路留空，按 uri 拉取
   csp?: Record<string, string[]>;
 }
 

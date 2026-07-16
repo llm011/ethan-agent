@@ -68,13 +68,6 @@ class UIResource:
             "_meta": {"ui": meta},
         }
 
-    def to_tool_meta(self) -> dict[str, Any]:
-        """输出 tool._meta.ui 格式，用于 Tool 定义关联 UI 资源。"""
-        return {
-            "resourceUri": self.uri,
-            "visibility": ["model", "app"],
-        }
-
 
 class UIResourceRegistry:
     """管理所有 UI 资源。"""

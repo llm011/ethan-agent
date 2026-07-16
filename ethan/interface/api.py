@@ -28,6 +28,7 @@ from ethan.interface.routers import (
     sessions,
     settings,
     skills,
+    ui_resources,
 )
 from ethan.memory.api_keys import APIKeyStore
 
@@ -168,6 +169,7 @@ app.include_router(models.router, prefix="/api")
 app.include_router(consent.router, prefix="/api")
 app.include_router(annotations.router, prefix="/api")
 app.include_router(background_tasks.router, prefix="/api")
+app.include_router(ui_resources.router, prefix="/api")  # /api/ui-resources, MCP Apps UI 资源
 app.include_router(browser_ws_router)  # /ws/browser, WebSocket, no prefix
 app.include_router(browser_http_router, prefix="/api")  # /api/browser/shot/{name}
 

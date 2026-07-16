@@ -140,30 +140,12 @@ canvas {
     }
     if (!msg || typeof msg !== 'object') return;
 
-    // Pattern 1: init message with chart config directly in params
+    // MCP host 通过 postMessage 发 JSON-RPC init，params 即工具结果里的 data。
+    // data 形如 { chartConfig: {...} }，也兼容直接传 Chart.js config。
     if (msg.method === 'init' && msg.params) {
       const params = msg.params;
-      // params could be the chart config itself or wrapped in chartConfig
       const config = params.chartConfig || params;
       renderChart(config);
-      return;
-    }
-
-    // Pattern 2: notifications/tools/update with nested data
-    if (msg.method === 'notifications/tools/update' && msg.params) {
-      const params = msg.params;
-      let config;
-      if (params.data && params.data.chartConfig) {
-        config = params.data.chartConfig;
-      } else if (params.chartType || (params.type && params.data)) {
-        config = params;
-      } else if (params.data && (params.data.chartType || (params.data.type && params.data.data))) {
-        config = params.data;
-      }
-      if (config) {
-        renderChart(config);
-      }
-      return;
     }
   }
 

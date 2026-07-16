@@ -123,6 +123,7 @@ async def get_session(session_id: str, user_id: str = Depends(verify_token)):
                 "tool_steps": getattr(m, "tool_steps", None) or [],
                 "quote": getattr(m, "quote", None),
                 "a2ui": getattr(m, "a2ui", None),
+                "mcp_apps": getattr(m, "mcp_apps", None),
                 "images": getattr(m, "images", None) or [],
                 "matched_skills": getattr(m, "matched_skills", None),
                 "ttfb_ms": getattr(m, "ttfb_ms", None),

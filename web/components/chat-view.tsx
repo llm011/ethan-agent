@@ -154,6 +154,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         : undefined,
       toolsExpanded: false,
       a2ui: m.a2ui && m.a2ui.length > 0 ? m.a2ui : undefined,
+      mcpApps: m.mcp_apps && m.mcp_apps.length > 0 ? m.mcp_apps : undefined,
       matchedSkills: m.matched_skills || undefined,
       ttfb_ms: m.ttfb_ms ?? undefined,
       total_ms: m.total_ms ?? undefined,
@@ -173,7 +174,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     const currentToolSteps: ToolStep[] = [];
     let currentMatchedSkills: { name: string; is_default?: boolean }[] | undefined;
     const a2uiSurfaces: unknown[] = [];
-    const mcpAppsCollected: Array<{ uri: string; html: string; data?: Record<string, unknown>; csp?: Record<string, string[]> }> = [];
+    const mcpAppsCollected: Array<{ uri: string; data?: Record<string, unknown>; html?: string; csp?: Record<string, string[]> }> = [];
     const sendTime = Date.now();
     let ttft: number | undefined;
     let ttfbMs: number | undefined;

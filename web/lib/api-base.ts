@@ -108,6 +108,16 @@ export async function respondConsent(requestId: string, allowed: boolean): Promi
   return res.json();
 }
 
+/** MCP Apps (SEP-1865) resources/read：按 ui:// URI 获取 UI 模板 HTML。
+ *  模板与工具结果数据分离，前端按 uri 拉一次、由 McpAppView 模块级缓存复用。 */
+export async function fetchUiResource(uri: string): Promise<{ text: string; _meta?: unknown }> {
+  const res = await fetch(`${API_URL}/ui-resources/read?uri=${encodeURIComponent(uri)}`, {
+    headers: headers(),
+  });
+  if (!res.ok) throw new Error(`Failed to fetch UI resource: ${uri}`);
+  return res.json();
+}
+
 /** 获取后端版本号（与 PyPI 版本一致，来自 ethan.__version__） */
 export async function fetchVersion(): Promise<string | null> {
   try {

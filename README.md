@@ -427,6 +427,16 @@ Register it in `cli.py` and the LLM will automatically use it when relevant.
 
 Built-in tools also include `ui_card`, which renders structured info as cards instead of plain text. High-frequency types (comparison / ranking / stats / timeline) use fixed backend templates — the model just fills in typed data, so styling stays clean and consistent; free-form cards can still be hand-authored. Rendering is channel-aware over the same structured `card` data: the web renders [A2UI](https://a2ui.org/) via `@a2ui/react`, the REPL degrades to text, and Feishu/Lark renders native interactive cards (an incremental nicety on top of the base text/post + streaming-card output). Format details live in the on-demand `ui-card` skill, so the system prompt stays lean.
 
+### Interactive Charts (MCP Apps / SEP-1865)
+
+The `generate_chart` tool renders **interactive** Chart.js charts (bar / line / pie / doughnut / horizontalBar / radar) in the web UI, following the [MCP Apps](https://modelcontextprotocol.io/) UI-resource convention (SEP-1865):
+
+- UI templates are registered as `ui://` resources (`ethan/tools/ui_resources.py`) and served over `GET /api/ui-resources` (list) and `GET /api/ui-resources/read?uri=…` (read HTML + `_meta` CSP).
+- The tool result carries only `{uri, data}` — **no inline HTML**. The web frontend (the MCP host) fetches the template once per URI, caches it, renders it in a sandboxed iframe, and pushes the chart data in via `postMessage` (JSON-RPC `init`). Template and data stay separated, which is the core of the MCP Apps model.
+- A [quickchart.io](https://quickchart.io/) PNG is still saved as a fallback, so non-web channels (e.g. Feishu/Lark) get a static image.
+
+Charts persist on the assistant message (`mcp_apps` column), so they re-render after a page refresh.
+
 ---
 
 ## CLI Commands
@@ -466,6 +476,8 @@ GET  /schedule                  # Scheduled jobs
 GET  /system-prompt-preview     # Current system prompt preview
 GET  /channels                  # Channel list
 GET  /knowledge/search          # Semantic search
+GET  /ui-resources              # MCP Apps UI resources (SEP-1865): list
+GET  /ui-resources/read?uri=    # MCP Apps UI resource: read HTML + _meta
 ```
 
 ---

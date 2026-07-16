@@ -105,10 +105,11 @@ class ChartTool(BaseTool):
     ) -> ToolResult:
         config = self._build_config(chart_type, labels, datasets, title)
 
-        # MCP App 数据：前端用 iframe 渲染交互式图表
+        # MCP App 数据（SEP-1865）：只带 UI 资源 URI + 数据，不内联 HTML。
+        # 前端（MCP host）按 uri 调 /api/ui-resources/read 拉模板（按 uri 缓存一次），
+        # 再通过 postMessage init 把 data 打进 iframe。模板与数据分离是 MCP Apps 的核心。
         mcp_app = {
             "uri": _CHART_RESOURCE.uri,
-            "html": _CHART_RESOURCE.read_html(),
             "data": {"chartConfig": config},
         }
 
