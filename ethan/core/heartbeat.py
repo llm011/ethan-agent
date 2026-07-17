@@ -456,7 +456,7 @@ async def _extract_decision_patterns_for_user(user_id: str) -> None:
             main_model = "gpt-4o"
 
         lite_model = get_lite_model(main_model)
-        consolidator = Consolidator(main_model=main_model)
+        consolidator = Consolidator(main_model=main_model, summary_model=lite_model)
 
         sequences_text = "\n".join(
             f"[Session {i+1}] title={title}\n  tools: {' → '.join(tqs)}"
@@ -472,7 +472,7 @@ async def _extract_decision_patterns_for_user(user_id: str) -> None:
         )
 
         try:
-            provider = consolidator._get_provider(lite_model)
+            provider = await consolidator._get_provider()
             from ethan.providers.base import Message
             resp = await provider.chat(
                 [Message(role="user", content=prompt)],
@@ -554,9 +554,9 @@ async def _mine_recurring_needs_for_user(user_id: str) -> None:
             "只输出真正重复的模式，不要把不相关的归为一类。"
         )
 
-        consolidator = Consolidator(main_model=main_model)
+        consolidator = Consolidator(main_model=main_model, summary_model=lite_model)
         try:
-            provider = consolidator._get_provider(lite_model)
+            provider = await consolidator._get_provider()
             from ethan.providers.base import Message
             resp = await provider.chat(
                 [Message(role="user", content=prompt)],
