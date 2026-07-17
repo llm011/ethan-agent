@@ -32,8 +32,12 @@ async def _maybe_regen_title(session_id: str) -> str | None:
     return None
 
 
-async def _run_structured_extraction(session, model: str, user_id: str, user_turns: int) -> None:
-    """Every five turns, extract source-backed Person/Methodology/Companion memories."""
+async def _run_structured_extraction(session, model: str, user_id: str, user_turns: int,
+                                     store=None) -> None:
+    """Every five turns, extract source-backed Person/Methodology/Companion memories.
+
+    store 可注入(测试/评测用);不传则按当前用户路径创建 MemoryStore。
+    """
     if user_turns % 5 != 0:
         return
 
@@ -57,7 +61,7 @@ async def _run_structured_extraction(session, model: str, user_id: str, user_tur
 
     last_message = source_messages[-1]
     job_key = incremental_job_key(user_id, session.id, last_message.message_id)
-    memory_store = MemoryStore()
+    memory_store = store or MemoryStore()
     try:
         boundary = memory_store.last_completed_incremental_boundary(session.id)
         pending_messages = [
