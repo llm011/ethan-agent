@@ -141,7 +141,11 @@ async def run_case(extractor, case: dict) -> dict:
             msgs, session_id=case["id"], user_id="eval_user",
             mode=case.get("mode", ""), job_key=f"live-{case['id']}",
         )
-        error = ""
+        if cands is None:  # LLM 调用失败(瞬时错误)
+            cands = []
+            error = "llm_call_failed"
+        else:
+            error = ""
     except Exception as exc:  # provider 错误等
         cands = []
         error = f"{type(exc).__name__}: {exc}"

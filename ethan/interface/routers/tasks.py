@@ -85,6 +85,10 @@ async def _run_structured_extraction(session, model: str, user_id: str, user_tur
             mode=session.mode,
             job_key=job_key,
         )
+        if candidates is None:
+            # LLM 调用失败(瞬时):标 failed 让下轮重试,不能让 boundary 前进,
+            # 否则这批消息的提取永久丢失。
+            raise RuntimeError("structured extraction LLM call failed")
         inserted_ids = {candidate_id for candidate_id in memory_store.create_candidate_batch(candidates)}
         inserted = [candidate for candidate in candidates if candidate.id in inserted_ids]
         result = run_incremental_admission(memory_store, inserted)

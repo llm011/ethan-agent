@@ -28,6 +28,7 @@ jobs:
         run: >
           uv run pytest
           tests/test_structured_memory.py
+          tests/test_extraction_wiring.py
           tests/test_memory_enhancements.py
           tests/test_dream_e2e.py
           tests/test_provider_fallback.py

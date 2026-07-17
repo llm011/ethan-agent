@@ -239,6 +239,10 @@ async def run_structured_consolidation(target_date: date | None = None) -> dict[
                 mode=session.mode,
                 job_key=job_key,
             )
+            if candidates is None:
+                # LLM 调用失败:跳过该 session,不阻塞当日其它 session 的批处理
+                logger.warning("structured consolidation: extraction failed, skip session=%s", session.id)
+                continue
             inserted_ids = set(memory_store.create_candidate_batch(candidates))
             inserted = [candidate for candidate in candidates if candidate.id in inserted_ids]
             day_candidates.extend(inserted)

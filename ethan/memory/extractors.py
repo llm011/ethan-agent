@@ -228,7 +228,9 @@ class StructuredMemoryExtractor:
         user_id: str = "",
         mode: str = "",
         job_key: str = "",
-    ) -> list[MemoryCandidate]:
+    ) -> list[MemoryCandidate] | None:
+        """提取候选。返回 None 表示 LLM 调用失败(瞬时错误,调用方应标记 job
+        failed 以便重试);返回 [] 表示调用成功但无候选/输出非法(不重试)。"""
         if not messages:
             return []
         provider = await self._get_provider()
@@ -243,7 +245,7 @@ class StructuredMemoryExtractor:
             )
         except Exception:
             logger.exception("structured extraction LLM call failed (session=%s)", session_id)
-            return []
+            return None
 
         raw = (resp.content or "").strip()
         if not raw:
