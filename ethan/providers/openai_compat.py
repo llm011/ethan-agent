@@ -206,6 +206,7 @@ class OpenAICompatProvider(BaseProvider):
         messages: list[Message],
         tools: list[ToolDefinition] | None = None,
         system: str | None = None,
+        max_tokens: int | None = None,
     ) -> Message:
         oai_messages = self._to_openai_messages(messages)
         if system:
@@ -215,6 +216,8 @@ class OpenAICompatProvider(BaseProvider):
             "model": self._model,
             "messages": oai_messages,
         }
+        if max_tokens:
+            kwargs["max_tokens"] = max_tokens
         if tools:
             kwargs["tools"] = self._to_openai_tools(tools)
             kwargs["tool_choice"] = "auto"

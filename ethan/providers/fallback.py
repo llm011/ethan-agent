@@ -79,6 +79,7 @@ class FallbackProvider(BaseProvider):
         messages: list[Message],
         tools: list[ToolDefinition] | None = None,
         system: str | None = None,
+        max_tokens: int | None = None,
     ) -> Message:
         breaker = get_circuit_breaker()
         last_err: Exception | None = None
@@ -87,7 +88,7 @@ class FallbackProvider(BaseProvider):
                 logger.info("fallback: skipping %s (circuit open)", key)
                 continue
             try:
-                result = await provider.chat(messages, tools, system)
+                result = await provider.chat(messages, tools, system, max_tokens=max_tokens)
                 breaker.record_success(key)
                 if key != self._providers[0][0]:
                     logger.info("fallback: %s succeeded (primary was unavailable)", key)

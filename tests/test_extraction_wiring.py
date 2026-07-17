@@ -69,13 +69,13 @@ class FakeProvider:
         self.payload = payload
         self.calls = 0
 
-    async def chat(self, messages, tools=None, system=""):
+    async def chat(self, messages, tools=None, system="", max_tokens=None):
         self.calls += 1
         return _FakeResp(self.payload)
 
 
 class BoomProvider:
-    async def chat(self, messages, tools=None, system=""):
+    async def chat(self, messages, tools=None, system="", max_tokens=None):
         raise RuntimeError("provider boom")
 
 

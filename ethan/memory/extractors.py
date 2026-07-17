@@ -24,6 +24,10 @@ logger = logging.getLogger(__name__)
 
 EXTRACTOR_VERSION = "v1"
 
+# 提取调用的输出上限:批量候选(JSON 数组,methodology 带 structured)很容易
+# 超过全局默认 8192 被截断成非法 JSON,修复重试也救不回。单独放宽。
+_EXTRACTION_MAX_TOKENS = 16384
+
 # Dimensions allowed per memory_type. Anything outside these sets is rejected.
 _PERSONAL_DIMENSIONS = {
     "identity.preferred_name", "identity.pronouns", "identity.language",
@@ -242,6 +246,7 @@ class StructuredMemoryExtractor:
             resp = await provider.chat(
                 [Message(role="user", content=prompt)],
                 system=self._system_prompt(is_companion=is_companion),
+                max_tokens=_EXTRACTION_MAX_TOKENS,
             )
         except Exception:
             logger.exception("structured extraction LLM call failed (session=%s)", session_id)
@@ -263,6 +268,7 @@ class StructuredMemoryExtractor:
                         f"{raw[:6000]}"
                     ))],
                     system="你是 JSON 修复器。只输出合法 JSON,不要输出任何其他内容。",
+                    max_tokens=_EXTRACTION_MAX_TOKENS,
                 )
                 payload = _try_parse((repair.content or "").strip(), session_id)
             except Exception:

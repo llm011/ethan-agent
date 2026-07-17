@@ -168,7 +168,7 @@ class FakeProvider:
     def __init__(self, payload: dict):
         self.payload = payload
 
-    async def chat(self, messages, tools=None, system=None):
+    async def chat(self, messages, tools=None, system=None, max_tokens=None):
         from ethan.providers.base import Message
         return Message(role="assistant", content=json.dumps(self.payload, ensure_ascii=False))
 
