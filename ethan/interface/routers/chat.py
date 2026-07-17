@@ -64,11 +64,17 @@ async def health():
 
 
 @router.get("/poll")
-async def poll(user_id: str = Depends(verify_token)):
+async def poll(hide_heartbeat: bool = False, hide_scheduled: bool = False,
+               user_id: str = Depends(verify_token)):
     from ethan.core.paths import user_sessions_db_path
     store = SessionStore(db_path=user_sessions_db_path())
     await store.init()
-    sessions = await store.list_recent(50)
+    exclude_prefixes = []
+    if hide_heartbeat:
+        exclude_prefixes.append("[心跳]")
+    if hide_scheduled:
+        exclude_prefixes.append("[定时]")
+    sessions = await store.list_recent(50, exclude_title_prefixes=exclude_prefixes or None)
     await store.close()
     return {
         "sessions": [

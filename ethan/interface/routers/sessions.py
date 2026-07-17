@@ -53,6 +53,7 @@ async def list_modes(user_id: str = Depends(verify_token)):
 async def list_sessions(limit: int = 50, offset: int = 0, q: str | None = None,
                         source: str | None = None, mode: str | None = None,
                         hide_heartbeat: bool = False, hide_scheduled: bool = False,
+                        title_prefixes: str | None = None,
                         user_id: str = Depends(verify_token)):
     from ethan.core.paths import user_sessions_db_path
     store = SessionStore(db_path=user_sessions_db_path())
@@ -65,8 +66,10 @@ async def list_sessions(limit: int = 50, offset: int = 0, q: str | None = None,
             exclude_prefixes.append("[心跳]")
         if hide_scheduled:
             exclude_prefixes.append("[定时]")
+        include_prefixes = [p for p in (title_prefixes or "").split(",") if p] or None
         sessions = await store.list_recent(limit, offset, source=source or "", mode=mode,
-                                           exclude_title_prefixes=exclude_prefixes or None)
+                                           exclude_title_prefixes=exclude_prefixes or None,
+                                           include_title_prefixes=include_prefixes)
     await store.close()
     return {"sessions": [
         {

@@ -407,9 +407,11 @@ class SessionStore:
     async def list_recent(self, limit: int = 20, offset: int = 0,
                           source: str = "", mode: str | None = None,
                           exclude_sources: list[str] | None = None,
-                          exclude_title_prefixes: list[str] | None = None) -> list[Session]:
+                          exclude_title_prefixes: list[str] | None = None,
+                          include_title_prefixes: list[str] | None = None) -> list[Session]:
         """最近会话列表。source 非空时按渠道过滤；mode 非 None 时按对话模式过滤
-        （传空串可筛默认模式会话）。exclude_sources 排除指定渠道。过滤在 SQL 层做，分页对过滤后结果生效。"""
+        （传空串可筛默认模式会话）。exclude_sources 排除指定渠道。过滤在 SQL 层做，分页对过滤后结果生效。
+        include_title_prefixes 非空时只保留标题以任一前缀开头的会话（OR 关系）。"""
         where = []
         params: list = []
         if source:
@@ -426,6 +428,10 @@ class SessionStore:
             for prefix in exclude_title_prefixes:
                 where.append("title NOT LIKE ?")
                 params.append(f"{prefix}%")
+        if include_title_prefixes:
+            ors = " OR ".join("title LIKE ?" for _ in include_title_prefixes)
+            where.append(f"({ors})")
+            params.extend(f"{prefix}%" for prefix in include_title_prefixes)
         where_sql = (" WHERE " + " AND ".join(where)) if where else ""
         params.extend([limit, offset])
         sessions = []
