@@ -238,6 +238,33 @@ class StructuredMemoryExtractor:
             logger.warning("structured extraction top-level not object (session=%s)", session_id)
             return []
 
+        if not payload.get("candidates") and not is_companion:
+            # 空结果复核一次：实测发现极短 transcript 下模型偶发弃权
+            # （单句「我在腾讯工作。」返回空）。复核措辞明确允许再次为空，
+            # 避免在真负样本（噪声/泄漏/诊断拒绝 case）上诱导幻觉。
+            # companion 模式不复核：该域 golden 有一半是泄漏/诊断"拒绝" case，
+            # 空候选本来就是正确答案，复核等于施压模型泄漏。
+            try:
+                recheck = await provider.chat(
+                    [
+                        Message(role="user", content=prompt),
+                        Message(role="assistant", content=raw),
+                        Message(role="user", content=(
+                            "请再逐句检查一遍对话：每条用户消息里是否还有遗漏的事实、"
+                            "偏好（包括「别/不要/不喜欢」类负面偏好）、决定或方法？"
+                            "如有遗漏请补充并输出完整 JSON；如确实没有值得记住的内容，"
+                            "原样返回空 candidates 即可。"
+                        )),
+                    ],
+                    system=self._system_prompt(is_companion=is_companion),
+                    max_tokens=_EXTRACTION_MAX_TOKENS,
+                )
+                reparsed = _try_parse((recheck.content or "").strip(), session_id)
+                if isinstance(reparsed, dict) and reparsed.get("candidates"):
+                    payload = reparsed
+            except Exception:
+                logger.debug("structured extraction recheck failed (session=%s)", session_id, exc_info=True)
+
         return self._build_candidates(
             payload, messages=messages, session_id=session_id, user_id=user_id,
             job_key=job_key, is_companion=is_companion,
@@ -261,9 +288,12 @@ class StructuredMemoryExtractor:
             "每条候选必须引用用户消息里的原文 quote，且 quote 必须是用户消息的精确子串；"
             "无法找到原文支撑就省略该条。\n"
             "assistant 的发言不能作为用户事实的证据。\n"
-            "一次性行为标 observed；用户明确陈述标 explicit；用户明确纠正标 corrected。\n"
+            "一次性行为标 observed；用户明确陈述标 explicit（口语化、一句话的简短陈述也算 explicit）；"
+            "用户明确纠正标 corrected。\n"
             "不要把单次行为泛化为稳定人格特征。\n"
-            "scope_type 只能是 user/user_domain/user_skill/project/mode 之一。"
+            "scope_type 只能是 user/user_domain/user_skill/project/mode 之一。\n"
+            "一段对话可能包含多个值得记住的事实：请逐句检查每条用户消息，不要遗漏。\n"
+            "用户说「别/不要/不喜欢/别再用」也是明确的负面偏好（preference.negative），同样值得提取。"
             "\n本会话不是陪伴模式，禁止输出 companion 维度的情感类记忆。"
         )
 
@@ -369,7 +399,9 @@ class StructuredMemoryExtractor:
             _validate_methodology_structured(structured)
 
         # Companion safety: reject diagnostic / personality labels anywhere in content.
-        if is_companion_type:
+        # companion 模式下对全部类型生效——诊断标签不管被标成什么 memory_type
+        # 都不该从陪伴会话入库（模型可能把情绪内容标成 general 维度绕过检查）。
+        if is_companion_type or is_companion:
             denied = _contains_denied_term(content) or _contains_denied_term(json.dumps(structured, ensure_ascii=False))
             if denied:
                 raise ValueError(f"companion content contains denied term: {denied}")
