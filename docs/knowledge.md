@@ -164,7 +164,7 @@ curl "http://localhost:8900/knowledge/search?q=部署流程&limit=5&semantic=tru
 | 写入方式 | 用户/Agent 主动调用工具 | 后台压缩自动提炼 |
 | 内容类型 | 任意长度笔记、参考资料、文档 | 简短的事实条目（一句话） |
 | 检索方式 | 关键词 + 语义向量检索 | 置信度排序后注入 prompt |
-| 存储位置 | `~/.ethan/knowledge/*.md` | `~/.ethan/memory/facts.json` |
+| 存储位置 | `~/.ethan/knowledge/*.md` | `~/.ethan/memory/memory.db` |
 | 是否注入 prompt | 不自动注入，由 Agent 主动检索 | 自动注入 top-15 |
 
 ---

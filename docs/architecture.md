@@ -90,7 +90,7 @@ Next.js 16 App Router 构建的浏览器界面，通过 FastAPI SSE 与后端通
 → 详见 [routing.md](./routing.md)
 
 ### 心跳系统 (`ethan/core/heartbeat.py`)
-系统内部维护任务，启动时作为后台 asyncio 任务运行，每 N 分钟执行一次：对 `facts.json` 做 LLM 去重合并，并执行 `~/.ethan/system/heartbeat.md` 中定义的周期性任务。与用户管理的 Scheduler（APScheduler）独立运行。
+系统内部维护任务，启动时作为后台 asyncio 任务运行，每 N 分钟执行一次：画像分区压缩、执行 `~/.ethan/system/heartbeat.md` 中定义的周期性任务、决策模式抽取与需求挖掘。与用户管理的 Scheduler（APScheduler）独立运行。（长期记忆的去重与复评由结构化记忆管道的准入与夜间统一沉淀负责，见 memory.md）
 → 详见 [heartbeat.md](./heartbeat.md)
 
 ### 知识库 (`ethan/memory/knowledge.py`)

@@ -117,8 +117,39 @@
 ## 9. 对外部评审意见的逐条回应
 
 1. **"8 类型 4 证据 6 状态过重"** → 不砍类型体系（DB 里只是 TEXT 列，真正复杂度在 prompt）；prompt 注册表化后大幅缩短；删除死代码 skill_experience。
-2. **"observed ≥2 武断"** → 部分误解（explicit 单次即准入）；硬门槛 vs confidence 累积做成 flag 用 golden 集 A/B，数据说话。
+2. **"observed ≥2 武断"** → 部分误解（explicit 单次即准入）；硬门槛 vs confidence 累积做成 flag（`ETHAN_ADMISSION_OBSERVED_MODE=gate|accrual`，默认 gate），A/B 由 golden 评测决定默认值。
 3. **"白名单僵硬"** → 采纳：PR-4 维度注册表 + custom.* 兜底。
 4. **"成本翻倍"** → 采纳：这是并行动态，融合的本质就是消灭它。
 5. **"无语义匹配"** → 采纳：PR-4 用现有 BGE embedding 做归并配对，但**决策规则保持确定性**（embedding 只提建议，不违反"确定性与概率性分离"原则）。
 6. **"prompt 脆弱"** → 采纳：注册表生成 prompt + golden 评测守门模型换代。
+
+---
+
+## 10. 实施结果（2026-07-17 全部完成）
+
+五个 PR 全部落地，`feat/structured-memory-pipeline` 分支：
+
+| PR | 内容 | 关键提交 |
+|---|---|---|
+| 1 止血 | tasks.py 删 compress/extract_cold；四渠道删 cold_facts 伪消息注入；heartbeat 停 facts 去重 | `808e814` |
+| 2 存储统一 | facts.json 退役（迁移脚本+启动自动迁移）；memory_write 改道；召回单块化；Web API 兼容适配（UI 零改动）；FactStore 删除 | `7b14351` |
+| 3 夜间合并 | run_nightly_consolidation 统一编排（结构化先跑，做梦的去重底库含当日新记忆） | `03b3393` |
+| 4 能力升级 | 维度注册表 + 语义配对准入 + 混合召回 + observed flag | `ecd5725` |
+| 5 文档 | memory.md 重写、README 双语言、heartbeat/architecture 等同步 | 见分支 |
+
+**实测数据**：
+
+- **提取质量 A/B（120 条 golden live，同 runner 同模型）**：注册表 prompt 前后
+  P 0.94→**0.99**、R 0.56→**0.74**、F1 0.70→**0.84**。
+  分域 R：activity 0.35→0.95、decision 0.29→0.96、preference 0.25→0.58、
+  methodology 0.41→0.52、personal 0.40→0.58、companion 0.88 持平——
+  因果验证了"prompt 维度说明完整度 ≈ 召回率"（此前 prompt 只列 ~19/64 维）。
+- **召回**：2100/2100 命中、0/1400 泄漏（混合召回改造后不回退）。
+- **单测**：140 passed（含语义配对/混合召回/迁移幂等/编排顺序等新覆盖）。
+- **成本**：每 10 轮后台 LLM 调用从 ~4+N 次降至 2-3 次；夜间两个 job 合一。
+
+**遗留**（后续按需）：
+- observed gate vs accrual 的 live A/B（2×96 条，flag 已就位，默认 gate）
+- preference/methodology/personal 域 R 仍在 0.5~0.6 区间，prompt 可继续调优
+- 做梦 prompt 的 supporting_signals 证据链与 type 判别边界
+- collect_signals 与 extractor 两条蒸馏链的源头合并（大改）
