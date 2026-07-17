@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Quote as QuoteIcon, Zap, Flag, Activity, BookOpen as BookOpenIcon, Share2 as ShareIcon } from "lucide-react";
+import { Quote as QuoteIcon, BookOpen as BookOpenIcon, Share2 as ShareIcon } from "lucide-react";
 import { ToolTimeline } from "@/components/tool-timeline";
 import { SwimlaneDiagram } from "@/components/swimlane-diagram";
 import { fmtTokens } from "@/lib/utils";
@@ -91,7 +91,9 @@ export function MessageBubble({ msg, isStreaming, isLast, onQuote, onCardAction,
                   className={`absolute -top-2 ${msg.role === "user" ? "-left-7" : "-right-7"} opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 flex items-center justify-center rounded-md bg-muted border border-border text-muted-foreground hover:text-foreground hover:bg-accent`}
                 />
               }
-            />
+            >
+              <QuoteIcon className="h-3 w-3" />
+            </TooltipTrigger>
             <TooltipContent side={msg.role === "user" ? "left" : "right"}>引用此消息</TooltipContent>
           </Tooltip>
         )}
@@ -105,8 +107,32 @@ export function MessageBubble({ msg, isStreaming, isLast, onQuote, onCardAction,
                   className="absolute -top-2 -right-14 opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 flex items-center justify-center rounded-md bg-muted border border-border text-muted-foreground hover:text-foreground hover:bg-accent"
                 />
               }
-            />
+            >
+              <BookOpenIcon className="h-3 w-3" />
+            </TooltipTrigger>
             <TooltipContent side="right">阅读模式（可标注 / 划线 / 批注）</TooltipContent>
+          </Tooltip>
+        )}
+        {/* 悬浮分享按钮（两个角色都有）：user 侧排在引用左边，assistant 侧排在阅读左边 */}
+        {onShare && !isStreaming && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  onClick={() => onShare(msg)}
+                  className={`absolute -top-2 ${
+                    msg.role === "user"
+                      ? "-left-14"
+                      : onRead && msg.id != null
+                        ? "-right-21"
+                        : "-right-14"
+                  } opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 flex items-center justify-center rounded-md bg-muted border border-border text-muted-foreground hover:text-foreground hover:bg-accent`}
+                />
+              }
+            >
+              <ShareIcon className="h-3 w-3" />
+            </TooltipTrigger>
+            <TooltipContent side={msg.role === "user" ? "left" : "right"}>分享这条消息</TooltipContent>
           </Tooltip>
         )}
         <div
@@ -236,22 +262,6 @@ export function MessageBubble({ msg, isStreaming, isLast, onQuote, onCardAction,
             )
         )}
         </div>
-        {/* 气泡操作行：分享按钮（两个角色都有） */}
-        {!isStreaming && onShare && (
-          <div className={`flex items-center mt-1 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <button
-                    onClick={() => onShare(msg)}
-                    className="inline-flex items-center gap-1 text-[11px] text-muted-foreground/60 hover:text-foreground px-1.5 py-0.5 rounded hover:bg-accent transition-colors"
-                  />
-                }
-              />
-              <TooltipContent side="bottom">分享这条消息</TooltipContent>
-            </Tooltip>
-          </div>
-        )}
       </div>
     </div>
     </TooltipProvider>

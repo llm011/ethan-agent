@@ -212,7 +212,9 @@ export function ReadingMode({ open, message, annotations, onClose, onChange }: R
                 className="flex h-8 w-8 items-center justify-center rounded-md hover:bg-muted text-muted-foreground"
               />
             }
-          />
+          >
+            <X className="h-4 w-4" />
+          </TooltipTrigger>
           <TooltipContent side="bottom">退出阅读模式 (Esc)</TooltipContent>
         </Tooltip>
         <div className="text-sm font-medium">阅读模式</div>
@@ -347,7 +349,9 @@ export function ReadingMode({ open, message, annotations, onClose, onChange }: R
                       className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-muted"
                     />
                   }
-                />
+                >
+                  <UnderlineIcon className="h-3.5 w-3.5" />
+                </TooltipTrigger>
                 <TooltipContent side="top">划线</TooltipContent>
               </Tooltip>
               <Tooltip>
@@ -358,7 +362,9 @@ export function ReadingMode({ open, message, annotations, onClose, onChange }: R
                       className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-muted"
                     />
                   }
-                />
+                >
+                  <BookmarkIcon className="h-3.5 w-3.5" />
+                </TooltipTrigger>
                 <TooltipContent side="top">书签（右侧面板「书签」里可查找）</TooltipContent>
               </Tooltip>
               <Tooltip>
@@ -369,7 +375,9 @@ export function ReadingMode({ open, message, annotations, onClose, onChange }: R
                       className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-muted"
                     />
                   }
-                />
+                >
+                  <MessageSquareText className="h-3.5 w-3.5" />
+                </TooltipTrigger>
                 <TooltipContent side="top">批注</TooltipContent>
               </Tooltip>
             </>
