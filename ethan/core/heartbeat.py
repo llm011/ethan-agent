@@ -360,8 +360,9 @@ async def _tick() -> None:
 async def _rotate_session_dbs() -> None:
     """遍历所有用户，检查 sessions.db 是否超过 10 MB，超过则归档轮转。"""
     try:
-        from ethan.core.context import ETHAN_USER_ID, get_user_store
+        from ethan.core.context import ETHAN_USER_ID
         from ethan.core.paths import user_sessions_db_path
+        from ethan.core.users import get_user_store
         from ethan.memory.session import SessionStore
 
         for uid in get_user_store().all_user_ids():
@@ -629,7 +630,8 @@ async def _cleanup_memory_db() -> None:
     第五层是"永久记忆"，insight_* 与 fact_sync 均豁免；这里只清理类型未知的孤儿条目。
     """
     try:
-        from ethan.core.context import ETHAN_USER_ID, get_user_store
+        from ethan.core.context import ETHAN_USER_ID
+        from ethan.core.users import get_user_store
         from ethan.memory.vector_store import VectorStore
 
         for uid in get_user_store().all_user_ids():
@@ -677,7 +679,8 @@ async def _midnight_loop() -> None:
             await asyncio.sleep(wait_seconds)
 
             # 遍历所有用户，各自执行记忆沉淀（与其它心跳任务一致的 per-user 模式）
-            from ethan.core.context import ETHAN_USER_ID, get_user_store
+            from ethan.core.context import ETHAN_USER_ID
+            from ethan.core.users import get_user_store
             from ethan.memory.daily_consolidation import run_daily_consolidation
             total_added = 0
             for uid in get_user_store().all_user_ids():
