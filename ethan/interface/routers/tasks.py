@@ -128,11 +128,8 @@ async def _maybe_consolidate(session_id: str, model: str, user_id: str = "", mod
     try:
         # 心理画像是否额外抽取：由当前 mode 自身声明，不在此硬编码模式名
         from ethan.core.modes import resolve_mode
-        from ethan.core.paths import user_episodes_path, user_facts_path, user_sessions_db_path
-        from ethan.memory.consolidator import Consolidator
+        from ethan.core.paths import user_episodes_path, user_sessions_db_path
         from ethan.memory.episodic import EpisodeStore
-        from ethan.memory.facts import FactStore
-        from ethan.memory.working import MemoryConfig, WorkingMemory
         resolve_mode(mode)  # validate mode exists
 
         store = SessionStore(db_path=user_sessions_db_path())
@@ -183,41 +180,11 @@ async def _maybe_consolidate(session_id: str, model: str, user_id: str = "", mod
             except Exception:
                 logger.warning("episode write failed for session %s", session_id, exc_info=True)
 
-        if user_turns % 5 != 0:
-            return
-
-        memory = WorkingMemory(config=MemoryConfig(hot_size=10))
-        fact_store = FactStore(path=user_facts_path())
-        memory.cold_facts = fact_store.build_context()
-
-        history = list(session.messages)
-        pairs = []
-        i = 0
-        while i < len(history) - 1:
-            if history[i].role == "user" and history[i + 1].role == "assistant":
-                pairs.append((history[i], history[i + 1]))
-                i += 2
-            else:
-                i += 1
-        for u, a in pairs:
-            memory.add_turn(u, a)
-
-        consolidator = Consolidator(main_model=model)
-        while memory.needs_compression():
-            batch = memory.get_compress_batch()
-            summary = await consolidator.compress(batch, memory.warm_summary)
-            memory.apply_summary(summary)
-
-        if memory.needs_cold_extraction():
-            # Emotional memory is handled by the companion-only structured
-            # extractor. Legacy cold extraction must never write psychological
-            # inference into the shared user_profile.md.
-            result = await consolidator.extract_cold(
-                memory.warm_summary, memory.cold_facts, extract_psych=False
-            )
-            for fact in result["key_facts"]:
-                await fact_store.add_async(fact, confidence=0.8, source=session_id)
-            memory.apply_cold_extraction(fact_store.build_context(), result["condensed"])
+        # ── 旧 flat-facts 链路（compress/extract_cold）已退役 ────────────
+        # 长期事实提取由上方 _run_structured_extraction 统一负责（每 5 轮，
+        # 带证据溯源与准入）；原先这里的 compress 产物从不落盘，extract_cold
+        # 的 key_facts 与新链路完全重复，删除后每 5 轮省 1 次 lite LLM、
+        # 每 10 轮省 2+N 次（extract_cold + 每条 fact 提 tags）。
 
         # 跨 session 信号采集（每 10 轮触发一次，避免太频繁）
         if user_turns % 10 == 0:

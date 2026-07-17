@@ -347,7 +347,8 @@ async def _tick() -> None:
             check_watchdog_health()
         except Exception:
             logger.exception("[Heartbeat] Watchdog health check failed")
-    await _consolidate_facts()
+    # facts.json 定期去重已停用：长期事实写入已统一到结构化 pipeline
+    # （准入 merge + 午夜复评取代），facts.json 迁移退役后本函数随 FactStore 一并删除
     await _consolidate_profiles()
     await _run_heartbeat_md()
     await _update_skills()

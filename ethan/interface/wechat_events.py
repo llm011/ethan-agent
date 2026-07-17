@@ -172,9 +172,8 @@ async def _handle_message(msg: dict[str, Any], creds: Any) -> None:
         await send_typing(client, creds, context_token, typing=True)
 
     # ── Session + history ─────────────────────────────────────────────────────
-    from ethan.core.paths import user_facts_path, user_sessions_db_path
+    from ethan.core.paths import user_sessions_db_path
     from ethan.core.users import get_user_store
-    from ethan.memory.facts import FactStore
     from ethan.memory.session import SessionStore
     from ethan.memory.working import MemoryConfig, WorkingMemory
 
@@ -186,9 +185,8 @@ async def _handle_message(msg: dict[str, Any], creds: Any) -> None:
     session_obj = await store.load(session_id)
     history = session_obj.messages if session_obj else []
 
-    # Build context: last 5 turns (same as lark)
+    # Build context: last 5 turns (same as lark)；长期记忆由 system prompt 统一注入
     memory = WorkingMemory(config=MemoryConfig(hot_size=5))
-    memory.cold_facts = FactStore(path=user_facts_path()).build_context()
     hist_ua = [m for m in history if m.role in ("user", "assistant")]
     pairs, i = [], 0
     while i < len(hist_ua) - 1:
