@@ -139,16 +139,34 @@ class SourceMessage:
         )
 
 
-def _strip_fence(text: str) -> str:
-    """Return raw text; reject markdown code fences wrapping JSON."""
-    if "```" in text:
-        raise ValueError("extractor returned markdown-fenced JSON; rejecting")
-    return text.strip()
+def _extract_json(text: str) -> str:
+    """从模型输出里定位 JSON 载荷:容忍 markdown 代码围栏和前后散文。
+
+    模型(尤其经代理转发时)经常无视「不要代码块」指令,用 ```json 包裹输出。
+    硬拒绝会让整批候选丢失,所以这里宽松提取。
+    """
+    t = text.strip()
+    if t.startswith("```"):
+        lines = [line for line in t.splitlines() if not line.strip().startswith("```")]
+        t = "\n".join(lines).strip()
+    if t.startswith("{"):
+        return t
+    start, end = t.find("{"), t.rfind("}")
+    if 0 <= start < end:
+        return t[start:end + 1]
+    return t
 
 
 def _safe_json_load(text: str) -> Any:
-    cleaned = _strip_fence(text)
-    return json.loads(cleaned)
+    return json.loads(_extract_json(text))
+
+
+def _try_parse(raw: str, session_id: str) -> dict | list | None:
+    """尝试解析模型输出为 JSON,失败返回 None(由调用方决定是否修复重试)。"""
+    try:
+        return _safe_json_load(raw)
+    except (json.JSONDecodeError, ValueError):
+        return None
 
 
 def _validate_dimension(memory_type: str, dimension: str) -> None:
@@ -230,10 +248,26 @@ class StructuredMemoryExtractor:
         raw = (resp.content or "").strip()
         if not raw:
             return []
-        try:
-            payload = _safe_json_load(raw)
-        except (json.JSONDecodeError, ValueError):
-            logger.warning("structured extraction returned non-JSON (session=%s): %r", session_id, raw[:200])
+        payload = _try_parse(raw, session_id)
+        if payload is None:
+            # 修复重试一次:模型偶发输出非法 JSON(未转义引号/尾逗号等),
+            # 让它原样保留内容、只修语法。仍失败才放弃,避免整批静默丢失。
+            logger.info("structured extraction non-JSON, attempting repair (session=%s)", session_id)
+            try:
+                repair = await provider.chat(
+                    [Message(role="user", content=(
+                        "以下文本不是合法 JSON。请原样保留其中全部内容和字段,"
+                        "只把语法修正为合法 JSON 输出,不要 markdown 代码块、不要解释:\n\n"
+                        f"{raw[:6000]}"
+                    ))],
+                    system="你是 JSON 修复器。只输出合法 JSON,不要输出任何其他内容。",
+                )
+                payload = _try_parse((repair.content or "").strip(), session_id)
+            except Exception:
+                logger.exception("structured extraction repair call failed (session=%s)", session_id)
+        if payload is None:
+            logger.warning("structured extraction returned non-JSON after repair (session=%s): %r",
+                           session_id, raw[:200])
             return []
         if not isinstance(payload, dict):
             logger.warning("structured extraction top-level not object (session=%s)", session_id)

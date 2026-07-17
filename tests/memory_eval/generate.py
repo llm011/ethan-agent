@@ -66,7 +66,7 @@ METHODOLOGY = [
     ("methodology.evidence_standard", "技术主张必须用固定评测集验证，理论分析只算候选"),
     ("methodology.decision_process", "比较方案要先列淘汰依据再推荐"),
     ("methodology.information_source", "优先看一手源码和论文，二手博客只做线索"),
-    ("methodology.complexity_management", "默认最小可验证方案，复杂度要有收益证明"),
+    ("methodology.decision_style", "默认最小可验证方案，复杂度要有收益证明"),
     ("methodology.execution_strategy", "按 P0/P1 分阶段推进，每阶段有验收"),
 ]
 
@@ -251,7 +251,7 @@ def ext_activity(rng, idx):
         messages.append({"id": 1, "role": "user", "content": c})
         expected += [
             _activity_expected("activity.project", f"用户在做{project}", "explicit", f"做{project}", 1),
-            _activity_expected("activity.current_focus", f"用户当前焦点：{focus}", "explicit", f"重点是{focus}", 1),
+            _activity_expected("activity.project", f"用户当前焦点：{focus}", "explicit", f"重点是{focus}", 1),
             _activity_expected("activity.deadline", f"用户截止：{deadline}", "explicit", f"{deadline}得到个里程碑", 1),
             _activity_expected("activity.blocker", f"用户阻塞：{blocker}", "explicit", f"卡在{blocker}", 1),
             _activity_expected("activity.recent_completion", f"用户近期完成：{completion}", "explicit", f"刚{completion}", 1),
@@ -259,7 +259,7 @@ def ext_activity(rng, idx):
     else:
         c = f"今天主要在搞{focus}。"
         messages.append({"id": 1, "role": "user", "content": c})
-        expected.append(_activity_expected("activity.current_focus", f"用户当前焦点：{focus}", "observed", _q(focus), 1,
+        expected.append(_activity_expected("activity.project", f"用户当前焦点：{focus}", "observed", _q(focus), 1,
                                            note="observed 单 session"))
     return _ext_case("ext_activity", idx, kind, "", messages, expected)
 
@@ -393,7 +393,7 @@ def rec_personal(rng, idx):
          "memory_key": "identity.expertise", "content": f"研究方向{research}",
          "status": "active", "memory_domain": "general", "sensitivity": "normal"},
     ]
-    return _rec_case("rec_personal", idx, "", seed, "你还记得我是谁吗，做什么的？",
+    return _rec_case("rec_personal_information", idx, "", seed, "你还记得我是谁吗，做什么的？",
                      ["identity.preferred_name", "identity.occupation", "identity.expertise"],
                      ["焦虑", "抑郁"])
 
@@ -407,7 +407,7 @@ def rec_preference(rng, idx):
          "memory_key": "preference.negative", "content": f"不接受：{neg}",
          "status": "active", "memory_domain": "general", "sensitivity": "normal"},
     ]
-    return _rec_case("rec_pref", idx, "", seed, "回答的时候要注意什么",
+    return _rec_case("rec_preference", idx, "", seed, "回答的时候要注意什么",
                      ["preference.communication", "preference.negative"], ["焦虑"])
 
 def rec_methodology(rng, idx):
@@ -416,21 +416,21 @@ def rec_methodology(rng, idx):
         {"memory_type": "methodology", "dimension": dim, "memory_key": dim,
          "content": content, "status": "active", "memory_domain": "general", "sensitivity": "normal"},
     ]
-    return _rec_case("rec_method", idx, "", seed, "技术方案该怎么比较",
+    return _rec_case("rec_methodology", idx, "", seed, "技术方案该怎么比较",
                      [dim], ["焦虑"])
 
 def rec_activity(rng, idx):
     focus = rng.choice(FOCUSES); project = rng.choice(PROJECTS)
     seed = [
-        {"memory_type": "activity", "dimension": "activity.current_focus",
-         "memory_key": "activity.current_focus", "content": f"当前焦点{focus}",
+        {"memory_type": "activity", "dimension": "activity.project",
+         "memory_key": "activity.project", "content": f"当前焦点{focus}",
          "status": "active", "memory_domain": "general", "sensitivity": "normal"},
         {"memory_type": "activity", "dimension": "activity.project",
          "memory_key": "activity.project", "content": f"在做{project}",
          "status": "active", "memory_domain": "general", "sensitivity": "normal"},
     ]
     return _rec_case("rec_activity", idx, "", seed, "我最近在忙什么",
-                     ["activity.current_focus", "activity.project"], ["焦虑"])
+                     ["activity.project", "activity.project"], ["焦虑"])
 
 def rec_decision(rng, idx):
     chosen = rng.choice(DECISIONS_CHOSEN)
