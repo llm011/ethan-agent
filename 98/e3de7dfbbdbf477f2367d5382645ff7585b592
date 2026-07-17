@@ -1,0 +1,63 @@
+ethan/core/heartbeat.py
+  s_08a1d7e06f3398::t_0dde4e6bbc539d 364-367,417,544 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a59a2d8167cbfc756903138","tool_type":"agent","tool_id":"Edit","line_ranges":[{"Range":[364,367]},{"Single":417},{"Single":544}]}]}
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "98e3de7dfbbdbf477f2367d5382645ff7585b592",
+  "prompts": {},
+  "sessions": {
+    "s_08a1d7e06f3398": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a59a24e167cbfc7569030fa",
+        "model": "c_o_new_thinking__dev"
+      },
+      "human_author": "jsongo <jsongo@qq.com>"
+    }
+  },
+  "attestation_metadata": {
+    "ethan/core/heartbeat.py": [
+      {
+        "hash": "s_08a1d7e06f3398::t_0dde4e6bbc539d",
+        "line_ranges": [
+          {
+            "Range": [
+              364,
+              367
+            ]
+          },
+          {
+            "Single": 417
+          },
+          {
+            "Single": 544
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a59a2d8167cbfc756903138",
+            "tool_type": "agent",
+            "tool_id": "Edit",
+            "line_ranges": [
+              {
+                "Range": [
+                  364,
+                  367
+                ]
+              },
+              {
+                "Single": 417
+              },
+              {
+                "Single": 544
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "remote_transcripts": {}
+}
