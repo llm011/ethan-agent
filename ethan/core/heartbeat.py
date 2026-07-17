@@ -599,7 +599,7 @@ async def _loop() -> None:
 
 
 async def _midnight_loop() -> None:
-    """每天 0 点执行"做梦"（记忆沉淀）—— 遍历所有用户，各自沉淀昨日信号。"""
+    """每天 0 点执行夜间统一沉淀（做梦）—— 遍历所有用户，各自沉淀昨日数据。"""
     while True:
         try:
             now = datetime.now()
@@ -612,18 +612,16 @@ async def _midnight_loop() -> None:
             logger.info("[Heartbeat] Midnight consolidation scheduled in %.0f seconds", wait_seconds)
             await asyncio.sleep(wait_seconds)
 
-            # 遍历所有用户，各自执行记忆沉淀（与其它心跳任务一致的 per-user 模式）
+            # 遍历所有用户，各自执行夜间统一沉淀（与其它心跳任务一致的 per-user 模式）
             from ethan.core.context import ETHAN_USER_ID
             from ethan.core.users import get_user_store
-            from ethan.memory.daily_consolidation import run_daily_consolidation
-            from ethan.memory.structured_consolidation import run_structured_consolidation
+            from ethan.memory.nightly_consolidation import run_nightly_consolidation
             total_added = 0
             for uid in get_user_store().all_user_ids():
                 token = ETHAN_USER_ID.set(uid)
                 try:
-                    added = await run_daily_consolidation()
-                    total_added += added
-                    await run_structured_consolidation()
+                    result = await run_nightly_consolidation()
+                    total_added += result.get("insights_added", 0)
                 finally:
                     ETHAN_USER_ID.reset(token)
             logger.info("[Heartbeat] Midnight consolidation done, stored %d new memories across all users", total_added)

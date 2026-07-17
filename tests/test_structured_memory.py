@@ -280,3 +280,50 @@ async def test_structured_consolidation_is_idempotent(isolated_paths):
 
     again = await run_structured_consolidation(date(2026, 7, 15))
     assert again["skipped"] is True
+
+
+@pytest.mark.anyio
+async def test_nightly_consolidation_orchestrates_in_order(isolated_paths):
+    """夜间统一沉淀：结构化先跑（新准入记忆进入做梦的去重底库），做梦后跑。"""
+    from datetime import date as _date
+
+    import ethan.memory.nightly_consolidation as nightly
+
+    calls = []
+
+    async def fake_structured(d):
+        calls.append(("structured", d))
+        return {"date": d.isoformat(), "candidates": 3, "admitted": 2, "skipped": False}
+
+    async def fake_daily(d):
+        calls.append(("daily", d))
+        return 1
+
+    with patch("ethan.memory.structured_consolidation.run_structured_consolidation", fake_structured), \
+         patch("ethan.memory.daily_consolidation.run_daily_consolidation", fake_daily):
+        result = await nightly.run_nightly_consolidation(_date(2026, 7, 15))
+
+    assert [name for name, _ in calls] == ["structured", "daily"]
+    assert result["structured"]["admitted"] == 2
+    assert result["insights_added"] == 1
+
+
+@pytest.mark.anyio
+async def test_nightly_consolidation_tolerates_step_failure(isolated_paths):
+    """单步失败不影响另一步执行（各自保留 job 记录，下一夜独立重试）。"""
+    from datetime import date as _date
+
+    import ethan.memory.nightly_consolidation as nightly
+
+    async def boom(d):
+        raise RuntimeError("llm down")
+
+    async def fake_daily(d):
+        return 2
+
+    with patch("ethan.memory.structured_consolidation.run_structured_consolidation", boom), \
+         patch("ethan.memory.daily_consolidation.run_daily_consolidation", fake_daily):
+        result = await nightly.run_nightly_consolidation(_date(2026, 7, 15))
+
+    assert result["structured"] == {"error": True}
+    assert result["insights_added"] == 2

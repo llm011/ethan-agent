@@ -173,10 +173,10 @@ async def get_signals_by_date(date_str: str, user_id: str = Depends(verify_token
 
 @router.post("/consolidate")
 async def trigger_consolidation(user_id: str = Depends(verify_token)):
-    """手动触发今日记忆沉淀（测试用）。"""
-    from ethan.memory.daily_consolidation import run_daily_consolidation
-    added = await run_daily_consolidation()
-    return {"ok": True, "added": added}
+    """手动触发夜间统一沉淀（结构化复评 + 做梦 insight，测试用）。"""
+    from ethan.memory.nightly_consolidation import run_nightly_consolidation
+    result = await run_nightly_consolidation()
+    return {"ok": True, "result": result}
 
 
 # ── Structured records ──────────────────────────────────────────────────────
