@@ -1,54 +1,30 @@
 import { useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import Sidebar from "./components/Sidebar";
+import ChatView from "./components/ChatView";
+import Settings from "./components/Settings";
+import "./styles.css";
 
 function App() {
-  const [messages, setMessages] = useState<
-    { role: "user" | "assistant"; content: string }[]
-  >([]);
-  const [input, setInput] = useState("");
-
-  async function handleSend() {
-    if (!input.trim()) return;
-    const userMsg = input.trim();
-    setInput("");
-    setMessages((prev) => [...prev, { role: "user", content: userMsg }]);
-
-    // TODO: connect to Ethan Agent backend
-    const reply: string = await invoke("greet", { name: userMsg });
-    setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
-  }
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   return (
     <div className="app">
-      <header className="titlebar">
-        <h1>Ethan Agent</h1>
-      </header>
+      <div className="titlebar" data-tauri-drag-region>
+        <span className="titlebar-title">Ethan Agent</span>
+      </div>
 
-      <main className="chat-container">
-        {messages.length === 0 && (
-          <div className="empty-state">
-            <div className="logo">E</div>
-            <p>How can I help you today?</p>
-          </div>
-        )}
-        {messages.map((msg, i) => (
-          <div key={i} className={`message ${msg.role}`}>
-            <div className="bubble">{msg.content}</div>
-          </div>
-        ))}
-      </main>
-
-      <footer className="input-area">
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleSend()}
-          placeholder="Type a message..."
-          autoFocus
+      <div className="app-body">
+        <Sidebar
+          currentSession={sessionId}
+          onSelectSession={setSessionId}
+          onNewChat={(id) => setSessionId(id || null)}
+          onOpenSettings={() => setSettingsOpen(true)}
         />
-        <button onClick={handleSend}>Send</button>
-      </footer>
+        <ChatView sessionId={sessionId} />
+      </div>
+
+      <Settings open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   );
 }
