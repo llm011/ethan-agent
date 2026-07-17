@@ -361,10 +361,6 @@ async def _rotate_session_dbs() -> None:
     """遍历所有用户，检查 sessions.db 是否超过 10 MB，超过则归档轮转。"""
     try:
         from ethan.core.context import ETHAN_USER_ID
-<<<<<<< HEAD
-=======
-        from ethan.core.users import get_user_store
->>>>>>> a970a5e (fix(memory): 提取链路三处静默失效 + prompt 维度前缀修正)
         from ethan.core.paths import user_sessions_db_path
         from ethan.core.users import get_user_store
         from ethan.memory.session import SessionStore
