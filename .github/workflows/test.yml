@@ -1,0 +1,39 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      # 0-LLM 单元测试:全部走 mock/fake provider/临时 SQLite,无网络依赖。
+      # 不含 router 测试(test_routing_real_queries 等在 main 上既有 4 个失败,
+      # 与 memory 无关,修复后另行纳入);不含 test_cross_session_memory.py
+      # (脚本式,无 pytest 收集入口)。
+      - name: Run unit tests (0-LLM subset)
+        run: >
+          uv run pytest
+          tests/test_structured_memory.py
+          tests/test_memory_enhancements.py
+          tests/test_dream_e2e.py
+          tests/test_provider_fallback.py
+          tests/test_is_local.py
+          -q
+
+      # golden dry 评测(0 LLM):1200 case 喂 admission+store 验证确定性链路
+      - name: Run memory dry eval (0 LLM)
+        run: uv run python tests/memory_eval/eval_runner_dry.py

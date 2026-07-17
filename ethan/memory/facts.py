@@ -183,13 +183,15 @@ class FactStore:
         if not top:
             return ""
 
-        # touch 命中的 fact（更新 last_accessed），但限制写频率避免高频 I/O
+        # touch 命中的 fact:内存里的 last_accessed 总是更新(排序要用),
+        # 只有距上次更新超过 60s 才落盘(避免高频 I/O)。
         now = time.time()
         touched = False
         for _, _, f in top:
-            if query_keywords and f.tags and (now - f.last_accessed > 60):
+            if query_keywords and f.tags:
+                if now - f.last_accessed > 60:
+                    touched = True
                 f.last_accessed = now
-                touched = True
         if touched:
             self._save()
 
