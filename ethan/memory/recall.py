@@ -1,9 +1,8 @@
 """Recall structured memories into the agent's system prompt.
 
-Mirrors :meth:`ethan.memory.facts.FactStore.build_context_with_recall` but
-operates on the structured ``memories`` table. Companion-domain memories are
-recalled only in companion mode so emotional data never leaks into other
-sessions. Restricted memories are never injected.
+这是对话时长期记忆的唯一召回入口（flat-facts 系统已退役）。Companion-domain
+memories are recalled only in companion mode so emotional data never leaks into
+other sessions. Restricted memories are never injected.
 """
 from __future__ import annotations
 

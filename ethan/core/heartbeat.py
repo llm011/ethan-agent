@@ -1,6 +1,9 @@
-"""系统级心跳 — 定期执行系统维护任务（facts 整理、heartbeat.md 任务）。
+"""系统级心跳 — 定期执行系统维护任务（画像压缩、heartbeat.md 任务）。
 
 不暴露给用户管理，通过 config.defaults.heartbeat 配置。
+
+注：facts.json 定期去重（_consolidate_facts）已随 flat-facts 系统退役删除——
+长期事实由结构化 pipeline 的准入 merge + 午夜复评负责。
 """
 import asyncio
 import logging
@@ -10,75 +13,6 @@ from datetime import datetime
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
-
-
-async def _consolidate_facts() -> None:
-    """用 LLM 对每个用户的 facts.json 做去重合并，只在 facts >= 10 条时触发。"""
-    from ethan.core.users import get_user_store
-    for uid in get_user_store().all_user_ids():
-        try:
-            await _consolidate_facts_for_user(uid)
-        except Exception:
-            logger.exception("[Heartbeat] Facts consolidation failed for user %s", uid)
-
-
-async def _consolidate_facts_for_user(user_id: str) -> None:
-    from ethan.core.config import get_config
-    from ethan.core.context import ETHAN_USER_ID
-    from ethan.core.paths import user_facts_path
-    from ethan.memory.facts import FactStore
-    from ethan.providers.base import Message
-    from ethan.providers.manager import create_provider
-
-    # user_*_path() 走 ETHAN_USER_ID ContextVar 解析分库；心跳循环里必须显式 set，
-    # 否则所有用户都会落到 default profile（user_id 参数本身不参与路径解析）。
-    token = ETHAN_USER_ID.set(user_id)
-    try:
-        store = FactStore(path=user_facts_path())
-        active = store.get_active()
-        if len(active) < 10:
-            return
-
-        logger.info("[Heartbeat] Consolidating %d facts...", len(active))
-        facts_text = "\n".join(f"- {f.content}" for f in active)
-        prompt = (
-            f"以下是关于用户的 {len(active)} 条记忆：\n{facts_text}\n\n"
-            "请整理这些记忆：\n"
-            "1. 合并重复或表达相同信息的条目\n"
-            "2. 删除明显过时的（如果有更新版本）\n"
-            "3. 修正矛盾（保留更新的一条）\n"
-            "4. 保留所有独立有价值的信息\n\n"
-            "每行一条，以 '- ' 开头。只输出整理后的列表，不要解释。"
-        )
-
-        cfg = get_config()
-        from ethan.memory.consolidator import get_lite_model
-        cheap_model = get_lite_model(cfg.defaults.model)
-        try:
-            provider = create_provider(cheap_model)
-            resp = await provider.chat(
-                [Message(role="user", content=prompt)],
-                system="你是一个记忆管理助手，负责整理和去重用户记忆。",
-            )
-            lines = [
-                line.strip().lstrip("- ").strip()
-                for line in resp.content.strip().split("\n")
-                if line.strip() and not line.strip().startswith("#")
-            ]
-            if not lines:
-                return
-
-            # 重置 facts：先全部标为 superseded，再写入整理后的结果
-            for f in store._facts:
-                f.superseded = True
-            store._save()
-            for line in lines:
-                await store.add_async(line, confidence=0.85, source="heartbeat_consolidation")
-            logger.info("[Heartbeat] Facts consolidated: %d → %d", len(active), len(lines))
-        except Exception:
-            logger.exception("[Heartbeat] Facts consolidation failed")
-    finally:
-        ETHAN_USER_ID.reset(token)
 
 
 # ── 画像每日 consolidation（A 方案：平铺 bullet + 分区差异化压缩）──────
@@ -347,8 +281,8 @@ async def _tick() -> None:
             check_watchdog_health()
         except Exception:
             logger.exception("[Heartbeat] Watchdog health check failed")
-    # facts.json 定期去重已停用：长期事实写入已统一到结构化 pipeline
-    # （准入 merge + 午夜复评取代），facts.json 迁移退役后本函数随 FactStore 一并删除
+    # facts.json 定期去重已随 flat-facts 系统退役删除：
+    # 长期事实由结构化 pipeline 的准入 merge + 午夜复评负责
     await _consolidate_profiles()
     await _run_heartbeat_md()
     await _update_skills()

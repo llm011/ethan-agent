@@ -589,7 +589,10 @@ class MemoryStore:
                              m.updated_at DESC, m.id LIMIT ?
                 """
                 rows = conn.execute(sql, [query.strip(), *params, limit]).fetchall()
-                return [self._record_from_row(r) for r in rows]
+                if rows:
+                    return [self._record_from_row(r) for r in rows]
+                # FTS 零命中时落到 LIKE：unicode61 对 CJK 无分词，"用户偏好用中文交流"
+                # 是单个 token，查询"中文" MATCH 成功但 0 行，必须给 LIKE 兜底机会
             except sqlite3.DatabaseError:
                 pass
         if query.strip():
@@ -763,6 +766,20 @@ class MemoryStore:
               AND job_key LIKE ? ORDER BY source_until DESC LIMIT 1
         """, (f"incremental:%:{session_id}:%",)).fetchone()
         return row["source_until"] if row else None
+
+    def get_meta(self, key: str) -> str | None:
+        row = self._get_conn().execute(
+            "SELECT value FROM structured_memory_meta WHERE key=?", (key,)
+        ).fetchone()
+        return row["value"] if row else None
+
+    def set_meta(self, key: str, value: str) -> None:
+        conn = self._get_conn()
+        conn.execute(
+            "INSERT OR REPLACE INTO structured_memory_meta(key, value) VALUES (?, ?)",
+            (key, value),
+        )
+        conn.commit()
 
     def mark_candidate_processed(
         self, candidate_id: str, status: str, reason: str = "", memory_id: str | None = None

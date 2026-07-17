@@ -17,7 +17,6 @@ from rich.text import Text
 from ethan.core.agent import Agent
 from ethan.core.config import get_config
 from ethan.memory.consolidator import Consolidator
-from ethan.memory.facts import FactStore
 from ethan.memory.session import Session, SessionStore, decide_title
 from ethan.memory.working import MemoryConfig, WorkingMemory
 from ethan.providers.base import Message
@@ -27,19 +26,29 @@ from .repl_stream import run_once  # noqa: F401
 from .repl_ui import _PT_STYLE, _banner, _fmt_tokens, _format_duration, _make_toolbar, _print_history, console
 
 
-async def _background_consolidate(memory, consolidator, fact_store, session_id):
+async def _background_consolidate(memory, consolidator, session_id):
+    """REPL 进程内会话压缩：滚动摘要 + 字符预算截断。
+
+    长期事实提取已由结构化 pipeline 统一负责（tasks._run_structured_extraction），
+    这里只做会话内上下文管理，不再写 facts.json / user_profile.md。
+    """
     try:
         if memory.needs_compression():
             batch = memory.get_compress_batch()
             summary = await consolidator.compress(batch, memory.warm_summary)
             memory.apply_summary(summary)
-        if memory.needs_cold_extraction():
-            result = await consolidator.extract_cold(memory.warm_summary, memory.cold_facts)
-            for fact in result["key_facts"]:
-                await fact_store.add_async(fact, confidence=0.8, source=session_id)
-            from ethan.core.profile import apply_extraction
-            apply_extraction(result)
-            memory.apply_cold_extraction(fact_store.build_context(), result["condensed"])
+        # 温区字符预算：超出时按段落从尾部保留，避免长会话 warm_summary 无限增长
+        budget = 4000
+        if len(memory.warm_summary) > budget:
+            paragraphs = memory.warm_summary.split("\n\n")
+            kept: list[str] = []
+            total = 0
+            for para in reversed(paragraphs):
+                if total + len(para) > budget // 2 and kept:
+                    break
+                kept.append(para)
+                total += len(para)
+            memory.warm_summary = "\n\n".join(reversed(kept))
     except Exception:
         pass
 
@@ -178,11 +187,10 @@ async def run_repl(agent: Agent, resume_id: str | None = None, auto_consent: boo
                 _id_content = identity_path.read_text(encoding="utf-8")
                 identity_path.write_text(_id_content.replace("Ethan", agent_name), encoding="utf-8")
 
-        # Persist user info to FactStore
+        # Persist user info → 结构化记忆（与 memory_write 工具同路径）
         if user_info:
-            from ethan.core.paths import user_facts_path
-            _fs = FactStore(path=user_facts_path())
-            _fs.add(user_info, confidence=1.0, source="onboarding", category="preference")
+            from ethan.tools.builtin.memory_write import MemoryWriteTool
+            await MemoryWriteTool().run(user_info, category="preference")
 
         console.print()
         console.print(f"[green]Great! I'll go by [bold]{agent_name}[/bold] from now on.[/green]")
@@ -190,11 +198,8 @@ async def run_repl(agent: Agent, resume_id: str | None = None, auto_consent: boo
             console.print(f"[dim]I'll remember: {user_info}[/dim]")
         console.print()
 
-    # 初始化分层记忆（per-user）
-    from ethan.core.paths import user_facts_path
-    fact_store = FactStore(path=user_facts_path())
+    # 初始化分层记忆（长期记忆由 system prompt 统一注入，此处只管会话内压缩）
     memory = WorkingMemory(config=MemoryConfig(hot_size=10))
-    memory.cold_facts = fact_store.build_context()
     consolidator = Consolidator(main_model=model_id)
 
     # 从 session 恢复历史到记忆系统，最多恢复 hot_size 轮到热区
@@ -278,7 +283,6 @@ async def run_repl(agent: Agent, resume_id: str | None = None, auto_consent: boo
                     approx_tokens = sum(len(m.content) for m in history)
                     model_id = session.model
                     memory = WorkingMemory(config=MemoryConfig(hot_size=10))
-                    memory.cold_facts = fact_store.build_context()
                     # 恢复历史到热区
                     pairs = []
                     j = 0
@@ -479,8 +483,8 @@ async def run_repl(agent: Agent, resume_id: str | None = None, auto_consent: boo
 
             memory.add_turn(msg, resp)
 
-            if memory.needs_compression() or memory.needs_cold_extraction():
-                asyncio.create_task(_background_consolidate(memory, consolidator, fact_store, session.id))
+            if memory.needs_compression():
+                asyncio.create_task(_background_consolidate(memory, consolidator, session.id))
 
             # 与 Web/Lark/WeChat 一致：每轮结束后后台写 episode + 记忆抽取
             from ethan.interface.routers.tasks import _maybe_consolidate

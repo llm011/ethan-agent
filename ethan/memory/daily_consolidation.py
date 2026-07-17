@@ -3,9 +3,9 @@
 每晚 0 点由 heartbeat 触发。流程：
 1. 读取当日 daily/<YYYYMMDD>.jsonl
 2. LLM 整理去重（合并相似、排除噪音，限 ≤10 条）
-3. 对精炼结果做 embedding → 在 memory.db 里查 L2 < 1.1 的 → skip 已存在
-4. 通过去重的条目写入 memory.db，并按 type 反写到 facts.json / playbook.json
-   - repetition / error → facts.json（confidence=0.75, source=insight_<date>）
+3. 对精炼结果做 embedding → 在 memory.db 里查 L2 < 阈值的 → skip 已存在
+4. 通过去重的条目写入 memory.db（insight_* 向量条目），并按 type 反写：
+   - repetition / error → 结构化候选（inferred）走准入进 memories 表
    - success_path → playbook.json 的 success_patterns
 5. memory.db 的 metadata 标记 reflected=True，避免重复反写
 """
@@ -31,14 +31,15 @@ DEDUP_THRESHOLD = 0.85  # cosine similarity 阈值（供参考）
 # 漏判代价低（多存几条），误判代价高（丢独特 insight 不可恢复），偏保守。
 L2_DEDUP_THRESHOLD = 0.7
 
-# 反写到 facts.json 的 confidence：低于后台抽取(0.8)和主动写入(0.95)
+# 反写为结构化候选的 confidence：低于主动写入(0.95)
 # 因为是跨 session 统计推断，不是确定性事实
 INSIGHT_CONFIDENCE = 0.75
 
-# type → category 映射（反写到 facts.json 时用）
-TYPE_CATEGORY_MAP = {
-    "repetition": "preference",   # 重复行为模式 → 偏好
-    "error": "correction",        # 错误纠正 → correction
+# type → (memory_type, dimension) 映射（反写为结构化候选时用）
+# insight 本身就是跨 session 复证后的蒸馏产物，故 evidence_level=inferred（直进 active）
+TYPE_MEMORY_MAP = {
+    "repetition": ("preference", "preference.work_habits"),  # 重复行为模式 → 偏好
+    "error": ("decision", "decision.correction"),            # 失败教训 → 纠正
 }
 
 
@@ -84,8 +85,8 @@ async def run_daily_consolidation(target_date: date | None = None) -> int:
         logger.info("[DailyConsolidation] No signals for %s, skipping", d)
         return 0
 
-    # Step 0: 同步 facts.json/playbook.json 到 memory.db（让 insight 去重时覆盖已有 fact）
-    await _sync_facts_to_memory_db()
+    # Step 0: 同步 memories 表/playbook.json 内容到向量库（让 insight 去重覆盖已有记忆）
+    await _sync_corpus_to_memory_db()
 
     # Step 1: LLM 整理去重
     refined = await _llm_refine(signals)
@@ -179,11 +180,11 @@ async def _embed_and_store(items: list[dict], d: date) -> int:
             store.add(id=item_id, text=text, embedding=emb, metadata=metadata)
             added += 1
 
-            # 反写到 facts.json / playbook.json
-            # 去重已由 _sync_facts_to_memory_db 保证：facts.json 的 active fact
-            # 已同步进 memory.db（type=fact_sync），insight 的 L2 去重天然覆盖
+            # 反写（结构化候选 / playbook）
+            # 去重已由 _sync_corpus_to_memory_db 保证：memories 的 active 记忆
+            # 已同步进向量库（type=fact_sync），insight 的 L2 去重天然覆盖
             try:
-                if _reflect_to_memory_files(text, insight_type, d, item.get("metadata", {})):
+                if _reflect_insight(text, insight_type, d, item.get("metadata", {})):
                     # 更新 memory.db 标记（用 update_metadata 避免 vec_index REPLACE 冲突）
                     metadata["reflected"] = True
                     store.update_metadata(id=item_id, metadata=metadata)
@@ -194,22 +195,23 @@ async def _embed_and_store(items: list[dict], d: date) -> int:
     finally:
         store.close()
 
-    logger.info("[DailyConsolidation] Reflected %d/%d insights to facts/playbook", reflected, added)
+    logger.info("[DailyConsolidation] Reflected %d/%d insights to memories/playbook", reflected, added)
     return added
 
 
-async def _sync_facts_to_memory_db() -> int:
-    """把 facts.json / playbook.json 的 active 内容同步到 memory.db。
+async def _sync_corpus_to_memory_db() -> int:
+    """把 memories 表 active 记忆 / playbook.json 的内容同步到向量库（type=fact_sync）。
 
-    同步后，insight 的 L2 去重天然覆盖已有 fact——不需要手动遍历算 embedding。
+    同步后，insight 的 L2 去重天然覆盖已有记忆——不需要手动遍历算 embedding。
 
-    策略：先删旧的 fact_sync 条目，再全量写入。保证 memory.db 跟 JSON 文件一致。
+    策略：先删旧的 fact_sync 条目，再全量重建。保证向量库跟源数据一致。
     fact_sync 条目不参与 LRU 过期（由本函数全量重建）。
     """
-    from ethan.core.paths import user_facts_path, user_procedures_path
+    from ethan.core.paths import user_procedures_path
     from ethan.memory.embeddings import embed
-    from ethan.memory.facts import FactStore
     from ethan.memory.procedures import ProcedureStore
+    from ethan.memory.records import MemoryDomain, MemoryStatus
+    from ethan.memory.store import MemoryStore
     from ethan.memory.vector_store import VectorStore
 
     store = VectorStore(db_path=_memory_db_path())
@@ -221,23 +223,31 @@ async def _sync_facts_to_memory_db() -> int:
         if deleted:
             logger.debug("[DailyConsolidation] Cleared %d old fact_sync entries", deleted)
 
-        # Step 2: 同步 facts.json 的 active fact
-        fact_store = FactStore(path=user_facts_path())
-        for fact in fact_store.get_active(min_confidence=0.0):
+        # Step 2: 同步 memories 表的 active 记忆（general 域；companion 域不参与 insight 去重）
+        mem_store = MemoryStore(db_path=_memory_db_path())
+        try:
+            active_memories = mem_store.list_memories(
+                memory_domain=MemoryDomain.GENERAL.value,
+                status=MemoryStatus.ACTIVE.value,
+                limit=5000,
+            )
+        finally:
+            mem_store.close()
+        for mem in active_memories:
             try:
-                emb = await embed(fact.content)
+                emb = await embed(mem.content)
                 item_id = f"fact_sync_{uuid.uuid4().hex[:12]}"
                 metadata = {
                     "type": "fact_sync",
-                    "source": fact.source,
-                    "category": fact.category,
-                    "confidence": fact.confidence,
+                    "source": mem.id,
+                    "category": mem.memory_type,
+                    "confidence": mem.confidence,
                     "synced_at": time.time(),
                 }
-                store.add(id=item_id, text=fact.content, embedding=emb, metadata=metadata)
+                store.add(id=item_id, text=mem.content, embedding=emb, metadata=metadata)
                 synced += 1
             except Exception:
-                logger.warning("[DailyConsolidation] Sync fact failed: %s", fact.content[:50], exc_info=True)
+                logger.warning("[DailyConsolidation] Sync memory failed: %s", mem.content[:50], exc_info=True)
 
         # Step 3: 同步 playbook.json 的 success_pattern
         proc_store = ProcedureStore(path=user_procedures_path())
@@ -260,42 +270,69 @@ async def _sync_facts_to_memory_db() -> int:
     finally:
         store.close()
 
-    logger.info("[DailyConsolidation] Synced %d fact/playbook entries to memory.db", synced)
+    logger.info("[DailyConsolidation] Synced %d memory/playbook entries to vector store", synced)
     return synced
 
 
-def _reflect_to_memory_files(
+def _reflect_insight(
     text: str,
     insight_type: str,
     d: date,
     raw_meta: dict,
 ) -> bool:
-    """将 insight 反写到 facts.json 或 playbook.json。返回是否成功写入。
+    """将 insight 反写到结构化记忆管道或 playbook.json。返回是否成功写入。
 
-    去重已由 _sync_facts_to_memory_db 保证：facts.json 的 active fact 已同步进
-    memory.db（type=fact_sync），insight 的 L2 去重天然覆盖已有 fact。
+    去重已由 _sync_corpus_to_memory_db 保证：memories 表的 active 记忆已同步进
+    向量库（type=fact_sync），insight 的 L2 去重天然覆盖已有记忆。
 
-    - repetition / error → facts.json（confidence=0.75, source=insight_<date>）
+    - repetition / error → 结构化候选（inferred）走准入进 memories 表；
+      memory_key 由文本 hash 决定，同一 insight 反复出现时准入自动 merge
     - success_path → playbook.json 的 success_patterns
     - 其它类型不反写
     """
-    from ethan.core.paths import user_facts_path, user_procedures_path
-    from ethan.memory.facts import FactStore
+    import hashlib
+
+    from ethan.core.paths import user_procedures_path
+    from ethan.memory.admission import run_incremental_admission
     from ethan.memory.procedures import ProcedureStore
+    from ethan.memory.records import (
+        EvidenceLevel,
+        MemoryCandidate,
+        MemoryDomain,
+        ScopeType,
+    )
+    from ethan.memory.store import MemoryStore
 
     source_tag = f"insight_{d.isoformat()}"
 
-    if insight_type in TYPE_CATEGORY_MAP:
-        # 反写到 facts.json
-        category = TYPE_CATEGORY_MAP[insight_type]
-        fact_store = FactStore(path=user_facts_path())
-        fact_store.add(
+    if insight_type in TYPE_MEMORY_MAP:
+        memory_type, dimension = TYPE_MEMORY_MAP[insight_type]
+        candidate = MemoryCandidate(
+            memory_type=memory_type,
+            dimension=dimension,
+            memory_key="insight_" + hashlib.sha1(text.strip().encode()).hexdigest()[:16],
             content=text,
+            scope_type=ScopeType.USER.value,
+            scope_id="self",
+            memory_domain=MemoryDomain.GENERAL.value,
+            evidence_level=EvidenceLevel.INFERRED.value,
             confidence=INSIGHT_CONFIDENCE,
-            source=source_tag,
-            category=category,
+            importance=0.6,
+            source_session_id=source_tag,
+            source_message_id="",
+            source_role="api",
+            source_quote=text[:1000],
+            extractor_name="daily_insight",
+            extractor_version="v1",
         )
-        logger.debug("[DailyConsolidation] Reflected to facts.json: %s", text[:50])
+        store = MemoryStore(db_path=_memory_db_path())
+        try:
+            inserted = set(store.create_candidate_batch([candidate]))
+            if inserted:
+                run_incremental_admission(store, [candidate])
+        finally:
+            store.close()
+        logger.debug("[DailyConsolidation] Reflected to memories: %s", text[:50])
         return True
 
     if insight_type == "success_path":

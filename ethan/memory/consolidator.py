@@ -1,8 +1,8 @@
-"""记忆压缩器 — 用廉价模型做对话摘要和 key facts 提取。
+"""记忆压缩器 — 用廉价模型做对话摘要（REPL 会话内 rolling summary）。
 
-两个触发点：
-  1. 热区溢出攒够一批 → compress(): 生成温区 rolling summary
-  2. 温区累积够了 → extract_cold(): 提取 key facts 并精简 summary
+触发点：热区溢出攒够一批 → compress() 生成温区 rolling summary。
+长期事实提取已由结构化 pipeline（extractors/admission）统一负责，
+原 extract_cold 已随 flat-facts 系统退役删除。
 
 Phase 2c: 重要性评分 — 决策/偏好/纠正的轮次得到更高权重。
 """
@@ -99,91 +99,3 @@ class Consolidator:
             system="你是一个对话摘要助手，负责将对话压缩成简洁的摘要。",
         )
         return resp.content.strip()
-
-    async def extract_cold(self, warm_summary: str, existing_facts: str = "", extract_psych: bool = True) -> dict:
-        """从温区 summary 中提取长期记忆，并精简 summary。
-
-        抽取（参考 Mem0 的 salient 抽取 + HiMem 的 ADD/UPDATE 思路）：
-          - key_facts:     关键事实（偏好/决定/关键信息）→ facts.json   （任何模式都抽）
-          - profile_psych: 心理与情绪（情绪/压力源/安抚方式/内心感受/价值观）→ user_profile.md「心理与情绪」
-                           仅当 extract_psych=True（由当前对话 mode 声明，见 core/modes.py）时抽
-          - condensed:     精简后的温区摘要
-
-        注意：基础特征（名字/年龄/职业等身份信息）不在此后台推断——由用户在「我的画像」设置，
-        或对话中明确告知时由 agent 通过 profile_update 写入，避免 LLM 把身份抽错。
-
-        返回 dict: {"key_facts": [...], "profile_psych": [...], "condensed": str}
-        """
-        provider = await self._get_provider()
-
-        prompt_parts = []
-        if existing_facts:
-            prompt_parts.append(f"已有的长期记忆：\n{existing_facts}\n")
-        prompt_parts.append(f"对话摘要：\n{warm_summary}")
-
-        psych_block = """
-[PROFILE_PSYCH]
-用户的心理与情绪特征——仅当对话中明确表达才提取。包括：正在经历的情绪或困扰、压力源、什么样的话语或方式能安抚 ta、ta 表达的重要内心感受/价值观/信念：
-- 最近因为 XX 感到焦虑
-- 被肯定时会放松下来
-- ……
-
-""" if extract_psych else ""
-
-        prompt_parts.append(f"""请从对话摘要中抽取用户的长期记忆，严格按以下格式输出（每个块都要有，没有内容的块留空即可，不要编造）：
-
-[KEY_FACTS]
-值得长期记住的关键事实（用户偏好、重要决定、关键信息），每条一个简短要点：
-- 要点 1
-- 要点 2
-{psych_block}[SUMMARY]
-将剩余对话精简为 1-2 句话。
-
-抽取要求：
-- 每条要点要原子化、能脱离对话独立成立
-- 若信息与已知的长期记忆冲突，输出最新的一条即可
-- 绝不保留任何 token / API key / 密码明文，遇到时改写为引用形式（如 "token is in secrets with key=<name>"）""")
-
-        sys_role = ("你是一个用户认知与记忆管理助手，负责从对话中提取用户的关键事实和心理情绪特征，并精简对话摘要。"
-                    if extract_psych else
-                    "你是一个记忆管理助手，负责提取长期记忆和精简对话摘要。")
-        resp = await provider.chat(
-            [Message(role="user", content="\n".join(prompt_parts))],
-            system=sys_role,
-        )
-
-        text = resp.content.strip()
-        return _parse_extraction(text)
-
-
-def _parse_block(text: str, marker: str) -> list[str]:
-    """从 text 中抽取某个 [MARKER] 块下的 bullet 列表。块边界 = 下一个 [开头的标记或文末。"""
-    if marker not in text:
-        return []
-    after = text.split(marker, 1)[1]
-    # 块到下一个 [MARKER] 为止
-    rest = after
-    for i, ch in enumerate(after):
-        if ch == "[" and i > 0 and after[i - 1] in ("\n", " "):
-            rest = after[:i]
-            break
-    lines = [ln.strip().lstrip("- ").lstrip("•").strip() for ln in rest.split("\n")]
-    return [ln for ln in lines if ln]
-
-
-def _parse_extraction(text: str) -> dict:
-    """解析 extract_cold 的输出。容错：标记缺失时对应字段为空。"""
-    key_facts = _parse_block(text, "[KEY_FACTS]")
-    profile_psych = _parse_block(text, "[PROFILE_PSYCH]")
-
-    condensed = ""
-    if "[SUMMARY]" in text:
-        condensed = text.split("[SUMMARY]", 1)[1].strip()
-    elif not (key_facts or profile_psych):
-        # 完全没按格式，fallback 取前 200 字当摘要
-        condensed = text[:200]
-    return {
-        "key_facts": key_facts,
-        "profile_psych": profile_psych,
-        "condensed": condensed,
-    }

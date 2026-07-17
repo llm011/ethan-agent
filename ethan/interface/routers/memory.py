@@ -10,10 +10,31 @@ from .deps import verify_token
 router = APIRouter(prefix="/memory")
 
 
-def _fact_store(user_id: str):
-    from ethan.core.paths import user_facts_path
-    from ethan.memory.facts import FactStore
-    return FactStore(path=user_facts_path())
+def _memory_store():
+    from ethan.memory.store import MemoryStore
+    return MemoryStore()
+
+
+def _record_to_fact(m) -> dict:
+    """MemoryRecord → legacy Fact 响应 shape（Web UI facts 页兼容）。
+
+    数据源已切换到 memories 表；companion 域不进 facts 页（情感数据有独立的
+    /records?domain=companion 入口）。删除语义升级为 forget_memory（证据脱敏）。
+    """
+    category = {"preference": "preference", "decision": "decision"}.get(m.memory_type, "knowledge")
+    if m.evidence_level == "corrected":
+        category = "correction"
+    return {
+        "id": m.id,
+        "content": m.content,
+        "confidence": m.confidence,
+        "source": m.source_session_id,
+        "category": category,
+        "created_at": m.created_at,
+        "last_accessed": m.last_recalled_at or 0,
+        "superseded": m.status == "superseded",
+        "tags": [m.dimension] if m.dimension else [],
+    }
 
 
 def _episode_store(user_id: str):
@@ -30,8 +51,14 @@ def _procedure_store(user_id: str):
 
 @router.get("/facts")
 async def get_facts(user_id: str = Depends(verify_token)):
-    store = _fact_store(user_id)
-    return {"facts": [f.__dict__ for f in store._facts]}
+    store = _memory_store()
+    try:
+        records = store.list_memories(memory_domain="general", limit=1000)
+        # forgotten/expired 不在 facts 页展示（旧语义里删除即消失）
+        visible = [m for m in records if m.status in ("active", "superseded")]
+        return {"facts": [_record_to_fact(m) for m in visible]}
+    finally:
+        store.close()
 
 
 @router.get("/episodes")
@@ -42,27 +69,32 @@ async def get_episodes(user_id: str = Depends(verify_token)):
 
 @router.patch("/facts/{fact_id}")
 async def update_fact(fact_id: str, req: dict, user_id: str = Depends(verify_token)):
-    store = _fact_store(user_id)
-    for i, f in enumerate(store._facts):
-        if str(i) == fact_id or f.id == fact_id:
-            if "content" in req:
-                f.content = req["content"]
-            if "confidence" in req:
-                f.confidence = req["confidence"]
-            store._save()
-            return {"ok": True}
-    raise HTTPException(404, "Fact not found")
+    store = _memory_store()
+    try:
+        try:
+            store.update_memory(
+                fact_id,
+                content=req.get("content"),
+                confidence=req.get("confidence"),
+            )
+        except KeyError:
+            raise HTTPException(404, "Fact not found")
+        return {"ok": True}
+    finally:
+        store.close()
 
 
 @router.delete("/facts/{fact_id}")
 async def delete_fact(fact_id: str, user_id: str = Depends(verify_token)):
-    store = _fact_store(user_id)
-    before = len(store._facts)
-    store._facts = [f for f in store._facts if f.id != fact_id and str(store._facts.index(f)) != fact_id]
-    if len(store._facts) == before:
-        raise HTTPException(404, "Fact not found")
-    store._save()
-    return {"ok": True}
+    store = _memory_store()
+    try:
+        try:
+            store.forget_memory(fact_id)
+        except KeyError:
+            raise HTTPException(404, "Fact not found")
+        return {"ok": True}
+    finally:
+        store.close()
 
 
 @router.delete("/episodes/{episode_id}")
