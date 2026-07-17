@@ -61,3 +61,54 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # 创建/更新该 tag 的 GitHub Release：--generate-notes 自动生成 changelog，
+      # 下方 notes 追加 Docker 部署说明（镜像地址 + compose 一键部署）。
+      # 附件打包 deploy/ 的 compose + searxng 配置，下载解压即可启动，无需 clone 仓库。
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          mkdir -p /tmp/release-assets/searxng
+          cp deploy/docker-compose.yml deploy/.env.example /tmp/release-assets/
+          cp deploy/searxng/settings.yml /tmp/release-assets/searxng/settings.yml
+
+          cat > /tmp/release-notes.md << 'EOF'
+          ## 🐳 Docker 部署
+
+          镜像（linux/amd64 + linux/arm64）：
+
+          ```bash
+          docker pull ghcr.io/REPO_PLACEHOLDER:TAG_PLACEHOLDER   # 固定版本
+          docker pull ghcr.io/REPO_PLACEHOLDER:latest            # 最新版
+          ```
+
+          一键部署（下载本 Release 的 `docker-compose.yml` 与 `.env.example`，或直接用仓库 `deploy/` 目录）：
+
+          ```bash
+          cp .env.example .env    # 填入 API Key 等配置
+          docker compose pull
+          docker compose up -d
+          docker compose logs ethan | grep 'Web UI Token'   # 查看 Web UI 登录 token
+          ```
+
+          升级：`docker compose pull && docker compose up -d`
+          EOF
+
+          sed -i "s|REPO_PLACEHOLDER|${REPO}|g; s|TAG_PLACEHOLDER|${TAG}|g" /tmp/release-notes.md
+
+          gh release create "$TAG" \
+            --repo "$REPO" \
+            --generate-notes \
+            --notes-file /tmp/release-notes.md \
+            /tmp/release-assets/docker-compose.yml \
+            /tmp/release-assets/.env.example \
+            "/tmp/release-assets/searxng/settings.yml#searxng-settings.yml" \
+          || gh release upload "$TAG" \
+            --repo "$REPO" \
+            --clobber \
+            /tmp/release-assets/docker-compose.yml \
+            /tmp/release-assets/.env.example \
+            "/tmp/release-assets/searxng/settings.yml#searxng-settings.yml"
