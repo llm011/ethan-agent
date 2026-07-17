@@ -354,8 +354,8 @@ async def get_all_memories(limit: int = 20, offset: int = 0) -> dict:
 
     store = VectorStore(db_path=_memory_db_path())
     try:
-        total = store.count_items(exclude_types=["fact_sync"])
-        items = store.list_items(exclude_types=["fact_sync"], limit=limit, offset=offset)
+        total = store.count_items(exclude_types=["fact_sync", "memory"])
+        items = store.list_items(exclude_types=["fact_sync", "memory"], limit=limit, offset=offset)
         return {"total": total, "items": items, "limit": limit, "offset": offset}
     finally:
         store.close()
@@ -368,7 +368,7 @@ async def get_memories_by_date(d: date) -> list[dict]:
     store = VectorStore(db_path=_memory_db_path())
     try:
         return store.list_items(
-            exclude_types=["fact_sync"],
+            exclude_types=["fact_sync", "memory"],
             date=d.isoformat(),
             limit=100,
             offset=0,

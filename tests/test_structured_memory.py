@@ -327,3 +327,180 @@ async def test_nightly_consolidation_tolerates_step_failure(isolated_paths):
 
     assert result["structured"] == {"error": True}
     assert result["insights_added"] == 2
+
+
+# ── PR-4b: 语义配对准入 + 混合召回 ─────────────────────────────────────────
+
+@pytest.fixture
+def hash_embed():
+    """强制 hash embedding（离线、确定性），与 test_dream_e2e 同一手法。"""
+    import ethan.memory.embeddings as emb
+    old_checked, old_encoder = emb._encoder_checked, emb._encoder
+    emb._encoder = None
+    emb._encoder_checked = True
+    yield
+    emb._encoder_checked, emb._encoder = old_checked, old_encoder
+
+
+def _pair_candidate(*, content, key, level="inferred", session="s1", dimension="identity.location"):
+    return MemoryCandidate(
+        memory_type="personal_information",
+        dimension=dimension,
+        memory_key=key,
+        content=content,
+        scope_type="user",
+        scope_id="self",
+        memory_domain="general",
+        evidence_level=level,
+        source_session_id=session,
+        source_message_id="1",
+        source_role="user",
+        source_quote=content,
+        confidence=0.9,
+        importance=0.8,
+    )
+
+
+def test_semantic_pair_merges_inferred(tmp_path, hash_embed, monkeypatch):
+    """推断候选与既有 active 语义相近(不同 key) → 补证据合并,不新建。
+
+    注:hash embedding 语义弱于 BGE,测试放宽阈值验证的是配对→决策的接线,
+    阈值标定本身以 BGE 为准(live 评测守门)。
+    """
+    monkeypatch.setattr("ethan.memory.memory_vectors.MERGE_L2_THRESHOLD", 1.2)
+    store = MemoryStore(tmp_path / "memory.db")
+    first = _pair_candidate(content="用户住在深圳", key="loc_a", level="explicit")
+    store.create_candidate_batch([first])
+    r1 = run_incremental_admission(store, [first])
+    assert len(r1.admitted) == 1
+
+    second = _pair_candidate(content="用户家在深圳", key="loc_b", session="s2")
+    store.create_candidate_batch([second])
+    r2 = run_incremental_admission(store, [second])
+
+    assert r2.merged == r1.admitted, f"应语义合并进既有记忆: {r2}"
+    assert len(store.list_memories(status="active")) == 1
+    reason = store.get_candidate(second.id).processing_reason
+    assert reason.startswith("semantic_merged:"), reason
+    store.close()
+
+
+def test_semantic_pair_supersedes_explicit_same_dimension(tmp_path, hash_embed, monkeypatch):
+    """explicit + 同维度 + 内容发散 → 语义 supersede(用户更新了该方面事实)。"""
+    monkeypatch.setattr("ethan.memory.memory_vectors.MERGE_L2_THRESHOLD", 1.2)
+    store = MemoryStore(tmp_path / "memory.db")
+    first = _pair_candidate(content="用户住在深圳", key="loc_a", level="explicit")
+    store.create_candidate_batch([first])
+    r1 = run_incremental_admission(store, [first])
+
+    second = _pair_candidate(content="用户住在深圳南山区", key="loc_b", level="explicit", session="s2")
+    store.create_candidate_batch([second])
+    r2 = run_incremental_admission(store, [second])
+
+    assert len(r2.admitted) == 1 and r2.admitted != r1.admitted
+    old = store.get_memory(r1.admitted[0])
+    assert old.status == MemoryStatus.SUPERSEDED.value
+    assert old.superseded_by == r2.admitted[0]
+    assert store.get_candidate(second.id).processing_reason.startswith("semantic_superseded:")
+    store.close()
+
+
+def test_semantic_pair_observed_gate_preserved(tmp_path, hash_embed, monkeypatch):
+    """observed 候选即使语义命中,也必须先凑齐 ≥2 session 才并入近邻。"""
+    monkeypatch.setattr("ethan.memory.memory_vectors.MERGE_L2_THRESHOLD", 1.2)
+    store = MemoryStore(tmp_path / "memory.db")
+    first = _pair_candidate(content="用户住在深圳", key="loc_a", level="explicit")
+    store.create_candidate_batch([first])
+    run_incremental_admission(store, [first])
+
+    obs = _pair_candidate(content="用户家在深圳", key="loc_b", level="observed", session="s2")
+    store.create_candidate_batch([obs])
+    r = run_incremental_admission(store, [obs])
+    assert not r.admitted and not r.merged, "单 session observed 不得并入"
+    assert store.get_candidate(obs.id).processing_status == "pending"
+
+    obs2 = _pair_candidate(content="用户家在深圳", key="loc_b", level="observed", session="s3")
+    store.create_candidate_batch([obs2])
+    r2 = run_incremental_admission(store, [obs2])
+    assert len(r2.merged) == 1, "凑齐 2 session 后应并入语义近邻"
+    assert len(store.list_memories(status="active")) == 1
+    store.close()
+
+
+def test_no_pair_for_unrelated_content(tmp_path, hash_embed, monkeypatch):
+    """语义无关的候选正常新建,不误配对(阈值 1.2 下 L2=1.354 仍不配对)。"""
+    monkeypatch.setattr("ethan.memory.memory_vectors.MERGE_L2_THRESHOLD", 1.2)
+    store = MemoryStore(tmp_path / "memory.db")
+    first = _pair_candidate(content="用户住在深圳", key="loc_a", level="explicit")
+    store.create_candidate_batch([first])
+    run_incremental_admission(store, [first])
+
+    other = _pair_candidate(content="用户喜欢爬山", key="hobby_a", dimension="identity.expertise")
+    store.create_candidate_batch([other])
+    r = run_incremental_admission(store, [other])
+    assert len(r.admitted) == 1
+    assert len(store.list_memories(status="active")) == 2
+    store.close()
+
+
+def test_hybrid_recall_vector_channel(tmp_path, hash_embed, monkeypatch):
+    """FTS/LIKE 都命不中的查询,向量通道应召回(且不是 importance fallback)。"""
+    from ethan.memory.recall import _collect
+    monkeypatch.setattr("ethan.memory.memory_vectors.RECALL_L2_MAX", 1.2)
+    store = MemoryStore(tmp_path / "memory.db")
+    cand = _pair_candidate(content="用户家在深圳南山", key="loc_a", level="explicit")
+    store.create_candidate_batch([cand])
+    run_incremental_admission(store, [cand])
+    # 高重要性无关记忆:若向量通道失效,fallback 只会返回它
+    import dataclasses
+    noise = _pair_candidate(content="用户喜欢爬山", key="hobby_a", dimension="identity.expertise")
+    noise = dataclasses.replace(noise, importance=0.99)
+    store.create_candidate_batch([noise])
+    run_incremental_admission(store, [noise])
+
+    # "深圳南山公园"不是正文子串(LIKE miss);hash embed 下目标 L2=1.088、
+    # 噪音 L2=1.414 —— 阈值 1.2 时只有目标能过向量通道。
+    # 若向量通道失效:fallback 按 importance 会先返回噪音(0.99),断言即失败。
+    hits = _collect(store, "深圳南山公园", domain="general", max_items=8)
+    contents = [h.content for h in hits]
+    assert any("深圳" in c for c in contents), f"向量通道应召回语义近邻: {contents}"
+    assert all("爬山" not in c for c in contents), f"fallback 不应混入高重要性噪音: {contents}"
+    store.close()
+
+
+def test_forget_removes_vector_index(tmp_path, hash_embed):
+    """forget 脱敏必须连向量索引一起删,否则 vec_items.text 泄漏原文。"""
+    from ethan.memory.memory_vectors import semantic_neighbors
+    store = MemoryStore(tmp_path / "memory.db")
+    cand = _pair_candidate(content="用户住在深圳", key="loc_a", level="explicit")
+    store.create_candidate_batch([cand])
+    r = run_incremental_admission(store, [cand])
+    mem_id = r.admitted[0]
+
+    before = semantic_neighbors(
+        content="用户住在深圳", scope_type="user", scope_id="self",
+        memory_domain="general", db_path=store.db_path,
+    )
+    assert any(h["id"] == mem_id for h in before)
+
+    store.forget_memory(mem_id)
+    after = semantic_neighbors(
+        content="用户住在深圳", scope_type="user", scope_id="self",
+        memory_domain="general", db_path=store.db_path,
+    )
+    assert all(h["id"] != mem_id for h in after)
+    store.close()
+
+
+def test_observed_accrual_mode_admits_low_confidence(tmp_path, monkeypatch):
+    """accrual 模式:单 session observed 即建 active(confidence 封 0.5)。"""
+    monkeypatch.setattr("ethan.memory.admission.OBSERVED_MODE", "accrual")
+    store = MemoryStore(tmp_path / "memory.db")
+    cand = candidate(level="observed")
+    store.create_candidate_batch([cand])
+    result = run_incremental_admission(store, [cand])
+    assert len(result.admitted) == 1
+    memory = store.get_memory(result.admitted[0])
+    assert memory.confidence <= 0.5
+    assert store.get_candidate(cand.id).processing_reason == "accrual_low_confidence"
+    store.close()

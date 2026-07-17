@@ -45,6 +45,13 @@ async def run_nightly_consolidation(target_date: date | None = None) -> dict[str
         result["structured"] = {"error": True}
 
     # ② 做梦：insight 挖掘（去重底库含 ① 刚准入的记忆）
+    #     先全量重建 memory 向量索引（自愈迁移/手工编辑/forget 漂移），
+    #     保证准入语义配对与混合召回的索引新鲜
+    try:
+        from ethan.memory.memory_vectors import reindex_all
+        reindex_all()
+    except Exception:
+        logger.exception("[Nightly] memory vector reindex failed for %s", d)
     try:
         result["insights_added"] = await run_daily_consolidation(d)
     except Exception:

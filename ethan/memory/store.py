@@ -40,6 +40,10 @@ class MemoryStore:
         self._conn: sqlite3.Connection | None = None
         self._fts_available = False
 
+    @property
+    def db_path(self) -> Path:
+        return self._db_path
+
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
             conn = sqlite3.connect(str(self._db_path), timeout=5.0)
@@ -643,12 +647,17 @@ class MemoryStore:
             )
             if self._fts_available:
                 conn.execute("DELETE FROM memory_fts WHERE memory_id=?", (memory_id,))
+        # 向量索引同步删除:vec_items.text 留有原文,不删等于没脱敏
+        from ethan.memory.memory_vectors import remove_memory_index
+        remove_memory_index(memory_id, db_path=self._db_path)
 
     def delete_memory(self, memory_id: str) -> bool:
         with self.transaction() as conn:
             if self._fts_available:
                 conn.execute("DELETE FROM memory_fts WHERE memory_id=?", (memory_id,))
             cursor = conn.execute("DELETE FROM memories WHERE id=?", (memory_id,))
+        from ethan.memory.memory_vectors import remove_memory_index
+        remove_memory_index(memory_id, db_path=self._db_path)
         return cursor.rowcount > 0
 
     def touch_recalled(self, memory_ids: list[str]) -> None:

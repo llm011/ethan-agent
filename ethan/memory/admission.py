@@ -1,9 +1,10 @@
 """Deterministic admission policy for structured memory candidates.
 
 The LLM proposes candidates; this module decides what becomes an active
-memory. Admission never relies on embedding similarity to resolve conflicts —
-supersession requires an exact match on (memory_key, scope_type, scope_id,
-memory_domain).
+memory. Embedding similarity is used only to *suggest* pairs (semantic
+near-neighbors); every merge/supersede decision follows deterministic rules
+(same-dimension + content divergence for supersession, exact key/scope/domain
+matching otherwise) and is recorded in ``processing_reason`` for audit.
 """
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ from ethan.memory.records import (
     ConsolidationJob,
     EvidenceLevel,
     MemoryCandidate,
+    MemoryDomain,
     MemoryEvidence,
     MemoryRecord,
     MemoryStatus,
@@ -26,6 +28,14 @@ from ethan.memory.store import MemoryStore
 logger = logging.getLogger(__name__)
 
 PIPELINE_VERSION = "v1"
+
+# observed 准入模式(环境变量 ETHAN_ADMISSION_OBSERVED_MODE 切换):
+# - gate(默认):单 session observed 留 pending,≥2 独立 session 才晋升(噪声闸)
+# - accrual:单 session observed 即建 active 但 confidence 封 0.5(召回排序自然靠后),
+#   再次出现按晋升处理。A/B 由 golden live 评测决定默认值,当前默认 gate。
+import os as _os
+
+OBSERVED_MODE = _os.environ.get("ETHAN_ADMISSION_OBSERVED_MODE", "gate")
 
 # Minimum number of independent sessions of consistent evidence to promote an
 # observed candidate to an active inferred memory.
@@ -66,6 +76,14 @@ class AdmissionPolicy:
         outcome; pending candidates are left untouched so the next sweep can
         re-evaluate them.
         """
+        # 语义配对（embedding 只做建议，决策规则保持确定性）:
+        # 同 scope+domain 的最近邻 active 命中阈值时,按 evidence_level 走
+        # 确定性的 merge/supersede,避免"住在深圳"和"家在深圳南山"各存一条。
+        # companion 域不参与(情感记忆的语义合并风险高于收益)。
+        if candidate.memory_domain == MemoryDomain.GENERAL.value:
+            pair = self._semantic_pair(candidate)
+            if pair is not None:
+                return self._admit_with_pair(candidate, *pair)
         level = candidate.evidence_level
         if level in (EvidenceLevel.EXPLICIT.value, EvidenceLevel.CORRECTED.value):
             return self._admit_explicit(candidate)
@@ -73,6 +91,91 @@ class AdmissionPolicy:
             return self._admit_inferred(candidate)
         # observed: stays a candidate unless repeated evidence already satisfies promotion.
         return self._maybe_promote_observed(candidate)
+
+    # ------------------------------------------------------------------
+    # 语义配对(向量索引只做配对建议;所有决策规则确定、reason 留痕)
+    # ------------------------------------------------------------------
+
+    def _semantic_pair(self, candidate: MemoryCandidate) -> tuple[MemoryRecord, float] | None:
+        from ethan.memory.memory_vectors import MERGE_L2_THRESHOLD, semantic_neighbors
+
+        hits = semantic_neighbors(
+            content=candidate.content,
+            scope_type=candidate.scope_type,
+            scope_id=candidate.scope_id,
+            memory_domain=candidate.memory_domain,
+            db_path=self._store.db_path,
+        )
+        for hit in hits:
+            if hit["distance"] > MERGE_L2_THRESHOLD:
+                continue
+            existing = self._store.get_memory(hit["id"])
+            if existing and existing.status == MemoryStatus.ACTIVE.value:
+                return existing, hit["distance"]
+        return None
+
+    def _admit_with_pair(
+        self, candidate: MemoryCandidate, existing: MemoryRecord, distance: float
+    ) -> tuple[str | None, str]:
+        """语义配对命中后的确定性决策。
+
+        - explicit/corrected + 同 dimension + 内容发散 → supersede(用户更新了
+          该方面的事实,与同 key 发散规则一致);corrected 无视内容是否发散
+        - explicit/corrected 跨 dimension 或内容一致 → 只补证据(reinforce)
+        - inferred → 只补证据(模型猜测无权替换既有记忆)
+        - observed → 仍须过 ≥2 session 门;晋升时并入近邻而非新建(去重)
+        """
+        level = candidate.evidence_level
+        tag = f"semantic_pair:l2={distance:.3f}"
+        if level in (EvidenceLevel.EXPLICIT.value, EvidenceLevel.CORRECTED.value):
+            divergent = level == EvidenceLevel.CORRECTED.value or _content_diverges(existing, candidate)
+            if divergent and existing.dimension == candidate.dimension:
+                confidence = 1.0 if level == EvidenceLevel.CORRECTED.value else max(candidate.confidence, 0.95)
+                record = self._record_from_candidate(candidate, status=MemoryStatus.ACTIVE.value, confidence=confidence)
+                # 同一事实的新旧表述应收敛到同一身份:继承既有记忆的 key 四元组,
+                # supersede_and_create 要求 identity 一致(语义配对正是跨 key 场景)
+                record.memory_key = existing.memory_key
+                record.scope_type = existing.scope_type
+                record.scope_id = existing.scope_id
+                record.memory_domain = existing.memory_domain
+                evidence = self._evidence_from_candidate(candidate, record.id)
+                try:
+                    self._store.supersede_and_create(existing.id, record, [evidence])
+                except (ValueError, KeyError) as exc:
+                    logger.info("semantic supersession rejected (%s): %s", exc, candidate.memory_key)
+                    self._store.mark_candidate_processed(candidate.id, CandidateStatus.REJECTED.value, str(exc))
+                    return None, OUTCOME_REJECTED
+                self._deindex(existing.id)
+                self._index_new(record)
+                self._store.mark_candidate_processed(
+                    candidate.id, CandidateStatus.ADMITTED.value, f"semantic_superseded:{tag}", record.id)
+                return record.id, OUTCOME_ADMITTED
+            self._store.add_evidence(self._evidence_from_candidate(candidate, existing.id))
+            self._store.mark_candidate_processed(
+                candidate.id, CandidateStatus.MERGED.value, f"semantic_reinforced:{tag}", existing.id)
+            return existing.id, OUTCOME_MERGED
+        if level == EvidenceLevel.INFERRED.value:
+            self._store.add_evidence(self._evidence_from_candidate(candidate, existing.id))
+            self._store.mark_candidate_processed(
+                candidate.id, CandidateStatus.MERGED.value, f"semantic_merged:{tag}", existing.id)
+            return existing.id, OUTCOME_MERGED
+        # observed: 门槛不放松——先凑齐 ≥2 独立 session,晋升时并入近邻而非新建
+        sessions = self._distinct_consistent_sessions(candidate)
+        if len(sessions) < PROMOTION_SESSION_THRESHOLD:
+            return None, OUTCOME_PENDING
+        self._store.add_evidence(
+            self._evidence_from_candidate(candidate, existing.id, EvidenceLevel.INFERRED.value))
+        self._store.mark_candidate_processed(
+            candidate.id, CandidateStatus.MERGED.value, f"semantic_promoted_merge:{tag}", existing.id)
+        return existing.id, OUTCOME_MERGED
+
+    def _index_new(self, record: MemoryRecord) -> None:
+        from ethan.memory.memory_vectors import index_memory
+        index_memory(record, db_path=self._store.db_path)
+
+    def _deindex(self, memory_id: str) -> None:
+        from ethan.memory.memory_vectors import remove_memory_index
+        remove_memory_index(memory_id, db_path=self._store.db_path)
 
     # ------------------------------------------------------------------
     def _admit_explicit(self, candidate: MemoryCandidate) -> tuple[str | None, str]:
@@ -89,6 +192,7 @@ class AdmissionPolicy:
                 logger.info("explicit admission rejected (%s): %s", exc, candidate.memory_key)
                 self._store.mark_candidate_processed(candidate.id, CandidateStatus.REJECTED.value, str(exc))
                 return None, OUTCOME_REJECTED
+            self._index_new(record)
             self._store.mark_candidate_processed(candidate.id, CandidateStatus.ADMITTED.value, "", record.id)
             return record.id, OUTCOME_ADMITTED
         if candidate.evidence_level == EvidenceLevel.CORRECTED.value or _content_diverges(existing, candidate):
@@ -98,6 +202,8 @@ class AdmissionPolicy:
                 logger.info("supersession rejected (%s): %s", exc, candidate.memory_key)
                 self._store.mark_candidate_processed(candidate.id, CandidateStatus.REJECTED.value, str(exc))
                 return None, OUTCOME_REJECTED
+            self._deindex(existing.id)
+            self._index_new(record)
             self._store.mark_candidate_processed(candidate.id, CandidateStatus.ADMITTED.value, "superseded", record.id)
             return record.id, OUTCOME_ADMITTED
         # Same explicit content already active — reinforce with additional evidence.
@@ -118,6 +224,7 @@ class AdmissionPolicy:
                 logger.info("inferred admission rejected (%s): %s", exc, candidate.memory_key)
                 self._store.mark_candidate_processed(candidate.id, CandidateStatus.REJECTED.value, str(exc))
                 return None, OUTCOME_REJECTED
+            self._index_new(record)
             self._store.mark_candidate_processed(candidate.id, CandidateStatus.ADMITTED.value, "", record.id)
             return record.id, OUTCOME_ADMITTED
         # Reinforce existing active record.
@@ -126,10 +233,35 @@ class AdmissionPolicy:
         return existing.id, OUTCOME_MERGED
 
     def _maybe_promote_observed(self, candidate: MemoryCandidate) -> tuple[str | None, str]:
-        """Promote an observed candidate only when >=2 independent sessions agree."""
+        """Promote an observed candidate only when >=2 independent sessions agree.
+
+        accrual 模式(ETHAN_ADMISSION_OBSERVED_MODE=accrual):单 session 即建
+        active 但 confidence 封 0.5,召回排序自然靠后;再次出现走正常晋升。
+        """
         sessions = self._distinct_consistent_sessions(candidate)
         if len(sessions) < PROMOTION_SESSION_THRESHOLD:
-            # Stays pending — do NOT mark processed; daily sweep may promote it later.
+            if OBSERVED_MODE == "accrual":
+                record = self._record_from_candidate(
+                    candidate, status=MemoryStatus.ACTIVE.value,
+                    confidence=min(candidate.confidence, 0.5),
+                )
+                evidence = self._evidence_from_candidate(candidate, record.id)
+                try:
+                    self._store.create_memory_with_evidence(record, [evidence])
+                except ValueError:
+                    existing = self._store.find_current_by_key_scope(
+                        candidate.memory_key, candidate.scope_type, candidate.scope_id, candidate.memory_domain
+                    )
+                    if existing:
+                        self._store.add_evidence(self._evidence_from_candidate(candidate, existing.id))
+                        self._store.mark_candidate_processed(candidate.id, CandidateStatus.MERGED.value, "reinforced", existing.id)
+                        return existing.id, OUTCOME_MERGED
+                    self._store.mark_candidate_processed(candidate.id, CandidateStatus.REJECTED.value, "race")
+                    return None, OUTCOME_REJECTED
+                self._index_new(record)
+                self._store.mark_candidate_processed(candidate.id, CandidateStatus.ADMITTED.value, "accrual_low_confidence", record.id)
+                return record.id, OUTCOME_ADMITTED
+            # gate: stays pending — do NOT mark processed; daily sweep may promote it later.
             return None, OUTCOME_PENDING
         record = self._record_from_candidate(
             candidate, status=MemoryStatus.ACTIVE.value,
@@ -148,6 +280,7 @@ class AdmissionPolicy:
                 return existing.id, OUTCOME_MERGED
             self._store.mark_candidate_processed(candidate.id, CandidateStatus.REJECTED.value, "race")
             return None, OUTCOME_REJECTED
+        self._index_new(record)
         self._store.mark_candidate_processed(candidate.id, CandidateStatus.ADMITTED.value, "promoted", record.id)
         return record.id, OUTCOME_ADMITTED
 

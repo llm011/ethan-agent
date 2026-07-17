@@ -127,7 +127,7 @@ async def test_dream_e2e_repetition_reflects_to_memories(isolated_fs):
         # 总数 ≥ 1（可能还有 fact_sync 镜像）
         assert store.count() >= 1
         # 按 type 查 insight 条目
-        items = store.list_items(exclude_types=["fact_sync"], limit=10)
+        items = store.list_items(exclude_types=["fact_sync", "memory"], limit=10)
         assert len(items) == 1
         assert items[0]["metadata"]["type"] == "repetition"
         assert items[0]["metadata"]["reflected"] is True
