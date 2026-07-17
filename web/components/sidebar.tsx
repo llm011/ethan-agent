@@ -37,6 +37,8 @@ export function Sidebar() {
   };
 
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [scheduleGroupSessions, setScheduleGroupSessions] = useState<SessionInfo[]>([]);
+  const [heartbeatGroupSessions, setHeartbeatGroupSessions] = useState<SessionInfo[]>([]);
   const [sessionSearch, setSessionSearch] = useState("");
   const [searchLoading, setSearchLoading] = useState(false);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
@@ -65,9 +67,11 @@ export function Sidebar() {
     ? "chat"
     : pathname.slice(1).replace(/\/$/, ""); // "memory", "knowledge", etc.
 
+  // 主列表请求已 hide 心跳/定时（否则高频心跳会话会挤爆前 50，把普通会话顶出去）；
+  // 定时/心跳两个分组改用 title_prefixes 独立拉取，互不影响。
   const normalSessions = sessions.filter((s) => !s.title.startsWith("[定时]") && !s.title.startsWith("[心跳]"));
-  const scheduleSessions = sessions.filter((s) => s.title.startsWith("[定时]"));
-  const heartbeatSessions = sessions.filter((s) => s.title.startsWith("[心跳]"));
+  const scheduleSessions = scheduleGroupSessions;
+  const heartbeatSessions = heartbeatGroupSessions;
   const scheduleUnreadCount = scheduleSessions.filter(
     (s) => s.updated_at > lastSeenSchedule
   ).length;
@@ -77,7 +81,7 @@ export function Sidebar() {
     const q = sessionSearch.trim();
     const timer = setTimeout(() => {
       setSearchLoading(true);
-      fetchSessions(50, 0, q || undefined)
+      fetchSessions(50, 0, q || undefined, undefined, undefined, true, true)
         .then(setSessions)
         .catch(() => {})
         .finally(() => setSearchLoading(false));
@@ -85,6 +89,21 @@ export function Sidebar() {
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionSearch, pathname]);
+
+  // 定时/心跳两个分组：按标题前缀各拉前 5 条，30s 低频轮询（不参与 3s 主 poll）
+  useEffect(() => {
+    const fetchGroups = () => {
+      fetchSessions(5, 0, undefined, undefined, undefined, false, false, "[定时]")
+        .then(setScheduleGroupSessions)
+        .catch(() => {});
+      fetchSessions(5, 0, undefined, undefined, undefined, false, false, "[心跳]")
+        .then(setHeartbeatGroupSessions)
+        .catch(() => {});
+    };
+    fetchGroups();
+    const interval = setInterval(fetchGroups, 30000);
+    return () => clearInterval(interval);
+  }, [pathname]);
 
   useEffect(() => {
     fetchSchedules().then(setSchedules).catch(() => {});
@@ -105,7 +124,7 @@ export function Sidebar() {
     const interval = setInterval(async () => {
       if (sessionSearch.trim()) return; // don't interfere while searching
       try {
-        const data = await fetchPoll();
+        const data = await fetchPoll(true, true);
         setSessions(prev => {
           const incoming = data.sessions as SessionInfo[];
           const changed = incoming.length !== prev.length ||

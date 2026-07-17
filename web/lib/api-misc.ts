@@ -131,8 +131,12 @@ export interface PollData {
   sessions: Pick<SessionInfo, "id" | "title" | "model" | "updated_at" | "source" | "mode">[];
 }
 
-export async function fetchPoll(): Promise<PollData> {
-  const res = await fetch(`${API_URL}/poll`, { headers: headers() });
+export async function fetchPoll(hideHeartbeat?: boolean, hideScheduled?: boolean): Promise<PollData> {
+  const params = new URLSearchParams();
+  if (hideHeartbeat) params.set("hide_heartbeat", "true");
+  if (hideScheduled) params.set("hide_scheduled", "true");
+  const qs = params.toString();
+  const res = await fetch(`${API_URL}/poll${qs ? `?${qs}` : ""}`, { headers: headers() });
   if (!res.ok) throw new Error("Failed");
   return res.json();
 }
