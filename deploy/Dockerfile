@@ -36,10 +36,13 @@ RUN if [ -n "$APT_MIRROR" ]; then \
 # - ripgrep：rg 搜索工具
 # - fd-find：fd 文件搜索工具（ln -s 为 fd）
 # - curl/git：uv 安装 + 依赖获取 + healthcheck
+# - nodejs/npm：lark-cli 运行时（飞书事件流 WebSocket 长连接依赖）
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc make \
     ripgrep fd-find \
     curl git ca-certificates \
+    nodejs npm \
+    && npm install -g @larksuite/cli \
     && ln -s /usr/bin/fdfind /usr/local/bin/fd \
     && rm -rf /var/lib/apt/lists/*
 
@@ -51,7 +54,8 @@ ENV PATH="/root/.local/bin:$PATH"
 COPY pyproject.toml uv.lock ./
 
 # 安装 Python 依赖（不安装项目本身）
-RUN uv sync --frozen --no-dev --no-install-project
+# --extra lark：飞书渠道依赖 lark-oapi（可选 extra），事件监听/消息发送都需要
+RUN uv sync --frozen --no-dev --no-install-project --extra lark
 
 # 复制源码和元数据文件（打包需要 README）
 COPY ethan/ ./ethan/
@@ -62,8 +66,8 @@ COPY README.md README_CN.md ./
 # 二是避免本地开发 mount ethan/ 源码时把前端产物覆盖掉。配合 WEB_DIST_PATH 指过来。
 COPY --from=web-builder /web/out ./web_dist
 
-# 安装项目本身
-RUN uv sync --frozen --no-dev
+# 安装项目本身（同上，带 lark extra）
+RUN uv sync --frozen --no-dev --extra lark
 
 # venv bin 入 PATH：ethan 命令直接可用
 ENV PATH="/app/.venv/bin:$PATH"
