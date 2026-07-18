@@ -1,11 +1,10 @@
-"""每日记忆沉淀 — 整理当日信号、LLM 去重、embedding 去重后写入 memory.db。
+"""每日记忆沉淀 — 从当日结构化记忆挖掘 insight、LLM 精炼、embedding 去重后写入 memory.db。
 
 每晚 0 点由 heartbeat 触发。流程：
-1. 读取当日 daily/<YYYYMMDD>.jsonl
-2. LLM 整理去重（合并相似、排除噪音，限 ≤10 条）
+1. 从 memory.db 读取当日准入的结构化记忆（最多 15 条），替代旧的 daily/*.jsonl 信号
+2. LLM 模式挖掘（从多条记忆归纳行为模式/成功路径，限 ≤10 条）
 3. 对精炼结果做 embedding → 在 memory.db 里查 L2 < 阈值的 → skip 已存在
 4. 通过去重的条目写入 memory.db（insight_* 向量条目），并按 type 反写：
-   - repetition / error → 结构化候选（inferred）走准入进 memories 表
    - success_path → playbook.json 的 success_patterns
 5. memory.db 的 metadata 标记 reflected=True，避免重复反写
 """
@@ -48,14 +47,15 @@ def _memory_db_path() -> Path:
     return user_memory_dir() / "memory.db"
 
 _CONSOLIDATION_PROMPT = """\
-以下是今天记录的行为模式信号（可能有重复或噪音）。请整理为最终要永久保留的记忆条目。
+以下是今天提取并准入的结构化记忆（已通过 5 轮实时抽取 + 准入策略筛选）。请从中挖掘跨记忆的行为模式和成功路径，生成可复用的 playbook 经验。
 
 要求：
+- 从多条记忆中归纳出反复出现的成功模式（场景 + 方法）
 - 合并语义相似的条目
-- 排除噪音（过于泛泛的、一次性的、不值得长期记住的）
+- 排除噪音（过于泛泛的、一次性的、不值得固化为 playbook 的）
 - 最终输出不超过 10 条
 - 每条是一句完整的、自包含的描述（未来召回时能独立理解）
-- 宁缺勿滥，如果今天的信号都不值得保留，输出空数组 []
+- 宁缺勿滥，如果今天的记忆没有值得提炼的成功路径，输出空数组 []
 
 输出格式（严格 JSON 数组）：
 ```json
@@ -64,25 +64,65 @@ _CONSOLIDATION_PROMPT = """\
 ]
 ```
 
-今日原始信号：
+今日结构化记忆：
 {signals_text}
 """
+
+
+async def _read_day_memories(d: date) -> list[dict]:
+    """从 memory.db 读取当日准入的结构化记忆（最多 15 条），作为做梦的输入。
+
+    替代旧的 read_signals_by_date（读 daily/*.jsonl）。输入源从文件改为 DB，
+    消除存储分裂：5 轮实时抽取写 memory.db → 12 点做梦直接读 memory.db。
+    """
+    from datetime import datetime, timedelta
+
+    from ethan.core.timezone import get_local_timezone
+    from ethan.memory.records import MemoryStatus
+    from ethan.memory.store import MemoryStore
+
+    tz = get_local_timezone()
+    start = datetime(d.year, d.month, d.day, tzinfo=tz)
+    end = start + timedelta(days=1)
+    start_ts, end_ts = start.timestamp(), end.timestamp()
+
+    store = MemoryStore(db_path=_memory_db_path())
+    try:
+        rows = store._get_conn().execute(
+            "SELECT * FROM memories WHERE status=? AND created_at >= ? AND created_at < ? "
+            "ORDER BY created_at DESC LIMIT 15",
+            (MemoryStatus.ACTIVE.value, start_ts, end_ts),
+        ).fetchall()
+        memories = [store._record_from_row(r) for r in rows]
+        return [
+            {
+                "type": "memory",
+                "text": m.content,
+                "metadata": {
+                    "memory_type": m.memory_type,
+                    "dimension": m.dimension,
+                    "source_session_id": m.source_session_id,
+                },
+            }
+            for m in memories
+        ]
+    finally:
+        store.close()
 
 
 async def run_daily_consolidation(target_date: date | None = None) -> int:
     """执行每日记忆沉淀。返回新写入 memory.db 的条目数。
 
-    target_date: 指定处理哪天的信号。不传时默认处理"昨天"——因为 0 点触发时
-    date.today() 已是今天，而信号是在"昨天"白天产生的。
+    target_date: 指定处理哪天。不传时默认处理"昨天"——因为 0 点触发时
+    date.today() 已是今天，而记忆是在"昨天"白天产生的。
     """
     from datetime import timedelta
 
-    from ethan.memory.daily_signals import read_signals_by_date
     d = target_date or (date.today() - timedelta(days=1))
-    signals = read_signals_by_date(d)
+    signals = await _read_day_memories(d)
 
     if not signals:
-        logger.info("[DailyConsolidation] No signals for %s, skipping", d)
+        logger.info("[DailyConsolidation] No memories for %s, skipping", d)
         return 0
 
     # Step 0: 同步 memories 表/playbook.json 内容到向量库（让 insight 去重覆盖已有记忆）

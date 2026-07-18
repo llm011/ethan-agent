@@ -1,4 +1,4 @@
-"""端到端测试：模拟用户对话 → 写入 daily 信号 → 手动触发"做梦"→ 验证记忆沉淀。
+"""端到端测试：mock 当日 memories → 手动触发"做梦"→ 验证记忆沉淀。
 
 "做梦" = nightly dream = run_daily_consolidation，是 ethan 在每晚 0 点整理
 当日信号、去重、反写到结构化 memories 表 / playbook.json 的过程，模拟人做梦时
@@ -94,26 +94,19 @@ def _list_active_memories():
 async def test_dream_e2e_repetition_reflects_to_memories(isolated_fs):
     """repetition 信号 → 做梦 → 反写为结构化记忆（preference.work_habits, inferred）。"""
     from ethan.memory.daily_consolidation import run_daily_consolidation
-    from ethan.memory.daily_signals import _append_signals
 
     today = date.today()
 
-    # 1. 模拟信号采集（绕过 collect_signals 的 LLM 调用）
-    _append_signals([
-        {"type": "repetition", "pattern": "每天早上问天气", "count": 3,
-         "suggestion": "可设定定时播报"},
-    ])
-    # 验证信号文件落盘
-    signal_file = isolated_fs / "memory" / "daily" / f"{today.strftime('%Y%m%d')}.jsonl"
-    assert signal_file.exists(), f"信号文件未落盘: {signal_file}"
-
-    # 2. mock _llm_refine 返回精炼后的 insight
+    # mock _read_day_memories 返回当日 memories（替代旧的 daily/*.jsonl 信号）
+    day_memories = [{"type": "memory", "text": "每天早上问天气"}]
     refined = [
         {"type": "repetition", "text": "用户每天早上都会询问当天天气",
          "metadata": {"count": 3}},
     ]
 
-    with patch("ethan.memory.daily_consolidation._llm_refine",
+    with patch("ethan.memory.daily_consolidation._read_day_memories",
+               return_value=day_memories), \
+         patch("ethan.memory.daily_consolidation._llm_refine",
                return_value=refined):
         added = await run_daily_consolidation(target_date=today)
 
@@ -149,21 +142,18 @@ async def test_dream_e2e_repetition_reflects_to_memories(isolated_fs):
 async def test_dream_e2e_success_path_reflects_to_playbook(isolated_fs):
     """success_path 信号 → 做梦 → 反写到 playbook.json 的 success_patterns。"""
     from ethan.memory.daily_consolidation import run_daily_consolidation
-    from ethan.memory.daily_signals import _append_signals
 
     today = date.today()
 
-    _append_signals([
-        {"type": "success_path", "scenario": "查京东订单",
-         "method": "shell:jd_query → file_write:save"},
-    ])
-
+    day_memories = [{"type": "memory", "text": "查京东订单"}]
     refined = [
         {"type": "success_path", "text": "查京东订单走 shell:jd_query",
          "metadata": {"tool_sequence": ["shell:jd_query"]}},
     ]
 
-    with patch("ethan.memory.daily_consolidation._llm_refine",
+    with patch("ethan.memory.daily_consolidation._read_day_memories",
+               return_value=day_memories), \
+         patch("ethan.memory.daily_consolidation._llm_refine",
                return_value=refined):
         added = await run_daily_consolidation(target_date=today)
 
@@ -183,25 +173,26 @@ async def test_dream_e2e_success_path_reflects_to_playbook(isolated_fs):
 async def test_dream_e2e_dedup_skips_existing_insight(isolated_fs):
     """相同 insight 二次做梦时被 L2 去重跳过（不重复写入 memory.db）。"""
     from ethan.memory.daily_consolidation import run_daily_consolidation
-    from ethan.memory.daily_signals import _append_signals
 
     today = date.today()
 
-    _append_signals([
-        {"type": "repetition", "pattern": "每天早上问天气", "count": 3},
-    ])
+    day_memories = [{"type": "memory", "text": "每天早上问天气"}]
     refined = [
         {"type": "repetition", "text": "用户每天早上都会询问当天天气"},
     ]
 
     # 第一次做梦
-    with patch("ethan.memory.daily_consolidation._llm_refine",
+    with patch("ethan.memory.daily_consolidation._read_day_memories",
+               return_value=list(day_memories)), \
+         patch("ethan.memory.daily_consolidation._llm_refine",
                return_value=list(refined)):
         added1 = await run_daily_consolidation(target_date=today)
     assert added1 == 1
 
     # 第二次做梦（相同 text）—— 应被 L2 去重跳过
-    with patch("ethan.memory.daily_consolidation._llm_refine",
+    with patch("ethan.memory.daily_consolidation._read_day_memories",
+               return_value=list(day_memories)), \
+         patch("ethan.memory.daily_consolidation._llm_refine",
                return_value=list(refined)):
         added2 = await run_daily_consolidation(target_date=today)
     assert added2 == 0, f"重复 insight 应被去重，实际写入 {added2}"
@@ -215,7 +206,6 @@ async def test_dream_e2e_fact_sync_enables_dedup(isolated_fs):
     同步进向量库，L2=0 必然去重跳过。
     """
     from ethan.memory.daily_consolidation import run_daily_consolidation
-    from ethan.memory.daily_signals import _append_signals
 
     today = date.today()
     fact_text = "用户喜欢深色模式"
@@ -223,12 +213,15 @@ async def test_dream_e2e_fact_sync_enables_dedup(isolated_fs):
     # 预置结构化记忆
     _seed_memory(fact_text)
 
-    _append_signals([{"type": "repetition", "pattern": fact_text, "count": 3}])
+    # mock _read_day_memories 返回当日 memories
+    day_memories = [{"type": "memory", "text": fact_text}]
 
     # insight 用完全相同的文本 —— L2=0，必然被 fact_sync 去重
     refined = [{"type": "repetition", "text": fact_text}]
 
-    with patch("ethan.memory.daily_consolidation._llm_refine",
+    with patch("ethan.memory.daily_consolidation._read_day_memories",
+               return_value=day_memories), \
+         patch("ethan.memory.daily_consolidation._llm_refine",
                return_value=refined):
         added = await run_daily_consolidation(target_date=today)
 
@@ -245,8 +238,10 @@ async def test_dream_e2e_no_signals_returns_zero(isolated_fs):
     """无信号时做梦返回 0，不报错。"""
     from ethan.memory.daily_consolidation import run_daily_consolidation
 
-    # 不写任何信号
-    added = await run_daily_consolidation(target_date=date.today())
+    # 不写任何 memories，mock _read_day_memories 返回空
+    with patch("ethan.memory.daily_consolidation._read_day_memories",
+               return_value=[]):
+        added = await run_daily_consolidation(target_date=date.today())
     assert added == 0
 
 
@@ -257,18 +252,19 @@ async def test_dream_e2e_get_all_memories_filters_fact_sync(isolated_fs):
         get_memories_by_date,
         run_daily_consolidation,
     )
-    from ethan.memory.daily_signals import _append_signals
 
     today = date.today()
 
     # 预置 1 条结构化记忆（会产生 1 条 fact_sync 镜像）
     _seed_memory("用户喜欢 Python")
 
-    # 写信号 + 做梦产生 1 条 insight
-    _append_signals([{"type": "error", "context": "忘了 commit", "resolution": "养成习惯"}])
+    # mock _read_day_memories + 做梦产生 1 条 insight
+    day_memories = [{"type": "memory", "text": "忘了 commit"}]
     refined = [{"type": "error", "text": "用户曾因忘记 git commit 丢失工作"}]
 
-    with patch("ethan.memory.daily_consolidation._llm_refine",
+    with patch("ethan.memory.daily_consolidation._read_day_memories",
+               return_value=day_memories), \
+         patch("ethan.memory.daily_consolidation._llm_refine",
                return_value=refined):
         await run_daily_consolidation(target_date=today)
 
@@ -288,16 +284,14 @@ async def test_dream_e2e_multiple_insights_mixed_reflection(isolated_fs):
     分别反写到 memories 表（2 条）+ playbook.json（1 条）。"""
     from ethan.core.paths import user_procedures_path
     from ethan.memory.daily_consolidation import run_daily_consolidation
-    from ethan.memory.daily_signals import _append_signals
 
     today = date.today()
 
-    _append_signals([
-        {"type": "repetition", "pattern": "每晚查邮件", "count": 3},
-        {"type": "error", "context": "误删文件", "resolution": "先备份"},
-        {"type": "success_path", "scenario": "部署前跑测试", "method": "shell:pytest"},
-    ])
-
+    day_memories = [
+        {"type": "memory", "text": "每晚查邮件"},
+        {"type": "memory", "text": "误删文件"},
+        {"type": "memory", "text": "部署前跑测试"},
+    ]
     refined = [
         {"type": "repetition", "text": "用户每晚都会检查邮件", "metadata": {}},
         {"type": "error", "text": "用户曾误删文件，建议先做备份", "metadata": {}},
@@ -305,7 +299,9 @@ async def test_dream_e2e_multiple_insights_mixed_reflection(isolated_fs):
          "metadata": {"tool_sequence": ["shell:pytest"]}},
     ]
 
-    with patch("ethan.memory.daily_consolidation._llm_refine",
+    with patch("ethan.memory.daily_consolidation._read_day_memories",
+               return_value=day_memories), \
+         patch("ethan.memory.daily_consolidation._llm_refine",
                return_value=refined):
         added = await run_daily_consolidation(target_date=today)
 
@@ -327,15 +323,16 @@ async def test_dream_e2e_insight_exempt_from_lru_cleanup(isolated_fs):
     """P2.2：第五层是"永久记忆"，insight 条目即使 90 天未访问也不被 cleanup_expired 删除。"""
     from ethan.core.paths import user_vectors_db_path
     from ethan.memory.daily_consolidation import run_daily_consolidation
-    from ethan.memory.daily_signals import _append_signals
     from ethan.memory.vector_store import VectorStore
 
     today = date.today()
 
-    _append_signals([{"type": "repetition", "pattern": "反复问汇率", "count": 3}])
+    day_memories = [{"type": "memory", "text": "反复问汇率"}]
     refined = [{"type": "repetition", "text": "用户反复询问汇率换算"}]
 
-    with patch("ethan.memory.daily_consolidation._llm_refine",
+    with patch("ethan.memory.daily_consolidation._read_day_memories",
+               return_value=day_memories), \
+         patch("ethan.memory.daily_consolidation._llm_refine",
                return_value=refined):
         added = await run_daily_consolidation(target_date=today)
     assert added == 1

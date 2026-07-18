@@ -32,13 +32,32 @@ async def _maybe_regen_title(session_id: str) -> str | None:
     return None
 
 
+_CORRECTION_KEYWORDS = (
+    "不是", "其实", "纠正", "不对", "更正", "应该是", "说错了",
+    "更准确地说", "不是这样", "错了", "搞错了", "不对，",
+)
+
+
+def _has_correction_keyword(session) -> bool:
+    """检查最近一条 user 消息是否包含否定/修正类关键词。
+
+    用于在 5 轮基线之外提前触发抽取，及时修正已有记忆。
+    """
+    for msg in reversed(session.messages):
+        if msg.role == "user" and msg.content:
+            return any(kw in msg.content for kw in _CORRECTION_KEYWORDS)
+    return False
+
+
 async def _run_structured_extraction(session, model: str, user_id: str, user_turns: int,
                                      store=None) -> None:
-    """Every five turns, extract source-backed Person/Methodology/Companion memories.
+    """Every five turns (or on correction keywords), extract source-backed memories.
 
+    5 轮基线触发 + 关键词触发：检测到否定/修正类关键词时立即触发，
+    避免跨轮次修正无法及时更新记忆。job_key 基于 message_id 保证幂等。
     store 可注入(测试/评测用);不传则按当前用户路径创建 MemoryStore。
     """
-    if user_turns % 5 != 0:
+    if user_turns % 5 != 0 and not _has_correction_keyword(session):
         return
 
     from ethan.memory.admission import (
@@ -186,10 +205,8 @@ async def _maybe_consolidate(session_id: str, model: str, user_id: str = "", mod
         # 的 key_facts 与新链路完全重复，删除后每 5 轮省 1 次 lite LLM、
         # 每 10 轮省 2+N 次（extract_cold + 每条 fact 提 tags）。
 
-        # 跨 session 信号采集（每 10 轮触发一次，避免太频繁）
-        if user_turns % 10 == 0:
-            from ethan.memory.daily_signals import collect_signals
-            await collect_signals()
+        # 跨 session 信号采集已退役：collect_signals + daily/*.jsonl 链路已删除。
+        # 12 点做梦任务改为直接从 memory.db 读取当日实时抽取准入的结构化记忆作为输入。
     except Exception:
         logger.exception("_maybe_consolidate failed for session=%s", session_id)
 

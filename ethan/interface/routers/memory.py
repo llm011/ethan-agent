@@ -153,24 +153,6 @@ async def get_insights_by_date(date_str: str, user_id: str = Depends(verify_toke
     return {"date": date_str, "items": items}
 
 
-@router.get("/signals/today")
-async def get_today_signals(user_id: str = Depends(verify_token)):
-    """获取今日采集的原始信号。"""
-    from ethan.memory.daily_signals import read_today_signals
-    return {"signals": read_today_signals()}
-
-
-@router.get("/signals/date/{date_str}")
-async def get_signals_by_date(date_str: str, user_id: str = Depends(verify_token)):
-    """获取指定日期的原始信号。"""
-    from ethan.memory.daily_signals import read_signals_by_date
-    try:
-        d = date.fromisoformat(date_str)
-    except ValueError:
-        raise HTTPException(400, "Invalid date format, use YYYY-MM-DD")
-    return {"date": date_str, "signals": read_signals_by_date(d)}
-
-
 @router.post("/consolidate")
 async def trigger_consolidation(user_id: str = Depends(verify_token)):
     """手动触发夜间统一沉淀（结构化复评 + 做梦 insight，测试用）。"""
