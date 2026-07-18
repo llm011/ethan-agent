@@ -18,8 +18,6 @@ import uuid
 from datetime import date
 from pathlib import Path
 
-from ethan.core.paths import user_memory_dir
-
 logger = logging.getLogger(__name__)
 
 DEDUP_THRESHOLD = 0.85  # cosine similarity 阈值（供参考）
@@ -44,7 +42,9 @@ TYPE_CATEGORY_MAP = {
 
 def _memory_db_path() -> Path:
     """每次调用时按当前 user contextvar 求值，避免模块级缓存击穿 per-user 隔离。"""
-    return user_memory_dir() / "memory.db"
+    # 必须用 user_vectors_db_path()，与 MemoryStore/memory_vectors 同库（db/memory.db）
+    from ethan.core.paths import user_vectors_db_path
+    return user_vectors_db_path()
 
 _CONSOLIDATION_PROMPT = """\
 以下是今天记录的行为模式信号（可能有重复或噪音）。请整理为最终要永久保留的记忆条目。

@@ -42,8 +42,16 @@ class VectorStore:
 
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
-            conn = sqlite3.connect(str(self._db_path))
+            # timeout/busy_timeout/WAL 对齐 MemoryStore：两者写同一 db 文件，
+            # 共享 WAL；busy_timeout 是 per-connection，VectorStore 也要设，
+            # 否则夜间 reindex 与召回/心跳并发时会踩 "database is locked"。
+            conn = sqlite3.connect(str(self._db_path), timeout=5.0)
             conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA busy_timeout=5000")
+            try:
+                conn.execute("PRAGMA journal_mode=WAL")
+            except sqlite3.DatabaseError:
+                pass
             conn.enable_load_extension(True)
             sqlite_vec.load(conn)
             conn.enable_load_extension(False)

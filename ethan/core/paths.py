@@ -76,17 +76,40 @@ def user_persistent_path() -> Path:
     return user_memory_dir() / "persistent.md"
 
 
-def user_vectors_db_path() -> Path:
-    """向量库路径。统一用 memory.db（有语义），向后兼容旧的 vectors.db。
+_vectors_db_migrated = False
 
-    如果 memory.db 不存在但 vectors.db 存在，自动迁移。
+
+def user_vectors_db_path() -> Path:
+    """向量库路径。放在 db/ 子目录（nosync 保护，与 sessions.db 同目录）。
+
+    向后兼容自动迁移（幂等）：
+    - 旧 memory.db（user_memory_dir/memory.db）→ db/memory.db
+    - 旧 vectors.db（user_memory_dir/vectors.db）→ db/memory.db
+    - 仅当目标不存在且源有实质数据时迁移；0 字节空文件直接删除
+    - WAL/SHM 附属文件一并迁移，避免冷迁移丢未 checkpoint 数据
     """
-    mem_db = user_memory_dir() / "memory.db"
-    old_vectors = user_memory_dir() / "vectors.db"
-    if not mem_db.exists() and old_vectors.exists():
-        import shutil
-        shutil.copy2(str(old_vectors), str(mem_db))
-    return mem_db
+    global _vectors_db_migrated
+    db_dir = user_data_dir() / "db"
+    db_dir.mkdir(parents=True, exist_ok=True)
+    target = db_dir / "memory.db"
+    if not _vectors_db_migrated:
+        _vectors_db_migrated = True
+        # 优先 memory.db（更新命名），其次 vectors.db（更老）
+        for src_name in ("memory.db", "vectors.db"):
+            src = user_memory_dir() / src_name
+            if not src.exists() or target.exists():
+                continue
+            import shutil
+            if src.stat().st_size > 0:
+                shutil.copy2(str(src), str(target))
+                # 迁移 WAL/SHM 附属文件（如存在），避免冷迁移丢未 checkpoint 数据
+                for suffix in ("-wal", "-shm"):
+                    side = src.with_name(src.name + suffix)
+                    if side.exists() and side.stat().st_size > 0:
+                        shutil.copy2(str(side), target.with_name(target.name + suffix))
+            else:
+                src.unlink(missing_ok=True)
+    return target
 
 
 _session_db_migrated = False
@@ -271,11 +294,13 @@ def _merge_admin_to_default(admin_dir: Path) -> None:
             shutil.copy2(str(src), str(dst))
 
     # 4. memory.db（向量库）：admin 侧存在则覆盖顶层（向量库不合并）
-    #    兼容旧名 vectors.db
+    #    兼容旧名 vectors.db；目标为 db/memory.db（nosync 保护，见 user_vectors_db_path）
+    top_db_dir = top / "db"
+    top_db_dir.mkdir(parents=True, exist_ok=True)
     for db_name in ("memory.db", "vectors.db"):
         vec_src = admin_memory / db_name
         if vec_src.exists() and vec_src.stat().st_size > 0:
-            shutil.copy2(str(vec_src), str(top_memory / "memory.db"))
+            shutil.copy2(str(vec_src), str(top_db_dir / "memory.db"))
             break  # 只取第一个存在的
 
     # 5. skills/ + knowledge/：dirs_exist_ok 合并，admin 侧覆盖同名，顶层独有保留
