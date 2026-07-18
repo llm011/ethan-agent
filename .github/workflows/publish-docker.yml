@@ -20,7 +20,7 @@ jobs:
   build-and-push:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write   # 建 GitHub Release 需要 write（read 会导致 releases API 403）
       packages: write
 
     steps:
