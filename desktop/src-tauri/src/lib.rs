@@ -4,16 +4,11 @@ use tauri::{
     Manager, WindowEvent,
 };
 
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! Ethan Agent is ready.", name)
-}
-
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![greet])
         .setup(|app| {
+    let _ = app.get_webview_window("main").map(|w| w.set_title(""));
             // Build tray menu
             let show_item = MenuItem::with_id(app, "show", "Show Window", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
