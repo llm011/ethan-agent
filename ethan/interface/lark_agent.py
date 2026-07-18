@@ -53,7 +53,7 @@ async def _handle_agent_message(
         _untrack_task,
     )
     from ethan.memory.session import SessionStore
-    from ethan.providers.base import Message, ThinkingEvent, ToolEvent
+    from ethan.providers.base import Message, SkillsMatchedEvent, ThinkingEvent, ToolEvent
     from ethan.skills.registry import SkillRegistry
     from ethan.tools.registry import ToolRegistry
     store = SessionStore(db_path=user_sessions_db_path())
@@ -381,6 +381,10 @@ async def _handle_agent_message(
             _lark_running_tasks.setdefault(chat_id, set()).add(_cur)
 
         async for chunk in agent.stream_chat(context_messages):
+            if isinstance(chunk, SkillsMatchedEvent):
+                # skill 匹配事件（stream_chat 开头 yield 一次）：记录命中的 skill 上下文，不进正文
+                logger.debug("[Lark] matched skills: %s", [s.get("name") for s in chunk.skills])
+                continue
             if isinstance(chunk, ThinkingEvent):
                 # 模型思考：不打印 delta 原文（避免泄漏 reasoning），只在工具消息里挂一个占位。
                 # 已有 reaction/工具进度时无需重复展示。
