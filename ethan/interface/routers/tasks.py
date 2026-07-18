@@ -32,9 +32,32 @@ async def _maybe_regen_title(session_id: str) -> str | None:
     return None
 
 
-async def _run_structured_extraction(session, model: str, user_id: str, user_turns: int) -> None:
-    """Every five turns, extract source-backed Person/Methodology/Companion memories."""
-    if user_turns % 5 != 0:
+_CORRECTION_KEYWORDS = (
+    "不是", "其实", "纠正", "不对", "更正", "应该是", "说错了",
+    "更准确地说", "不是这样", "错了", "搞错了", "不对，",
+)
+
+
+def _has_correction_keyword(session) -> bool:
+    """检查最近一条 user 消息是否包含否定/修正类关键词。
+
+    用于在 5 轮基线之外提前触发抽取，及时修正已有记忆。
+    """
+    for msg in reversed(session.messages):
+        if msg.role == "user" and msg.content:
+            return any(kw in msg.content for kw in _CORRECTION_KEYWORDS)
+    return False
+
+
+async def _run_structured_extraction(session, model: str, user_id: str, user_turns: int,
+                                     store=None) -> None:
+    """Every five turns (or on correction keywords), extract source-backed memories.
+
+    5 轮基线触发 + 关键词触发：检测到否定/修正类关键词时立即触发，
+    避免跨轮次修正无法及时更新记忆。job_key 基于 message_id 保证幂等。
+    store 可注入(测试/评测用);不传则按当前用户路径创建 MemoryStore。
+    """
+    if user_turns % 5 != 0 and not _has_correction_keyword(session):
         return
 
     from ethan.memory.admission import (
@@ -124,11 +147,8 @@ async def _maybe_consolidate(session_id: str, model: str, user_id: str = "", mod
     try:
         # 心理画像是否额外抽取：由当前 mode 自身声明，不在此硬编码模式名
         from ethan.core.modes import resolve_mode
-        from ethan.core.paths import user_episodes_path, user_facts_path, user_sessions_db_path
-        from ethan.memory.consolidator import Consolidator
+        from ethan.core.paths import user_episodes_path, user_sessions_db_path
         from ethan.memory.episodic import EpisodeStore
-        from ethan.memory.facts import FactStore
-        from ethan.memory.working import MemoryConfig, WorkingMemory
         resolve_mode(mode)  # validate mode exists
 
         store = SessionStore(db_path=user_sessions_db_path())
@@ -182,43 +202,11 @@ async def _maybe_consolidate(session_id: str, model: str, user_id: str = "", mod
         if user_turns % 5 != 0:
             return
 
-        memory = WorkingMemory(config=MemoryConfig(hot_size=10))
-        fact_store = FactStore(path=user_facts_path())
-        memory.cold_facts = fact_store.build_context()
-
-        history = list(session.messages)
-        pairs = []
-        i = 0
-        while i < len(history) - 1:
-            if history[i].role == "user" and history[i + 1].role == "assistant":
-                pairs.append((history[i], history[i + 1]))
-                i += 2
-            else:
-                i += 1
-        for u, a in pairs:
-            memory.add_turn(u, a)
-
-        consolidator = Consolidator(main_model=model)
-        while memory.needs_compression():
-            batch = memory.get_compress_batch()
-            summary = await consolidator.compress(batch, memory.warm_summary)
-            memory.apply_summary(summary)
-
-        if memory.needs_cold_extraction():
-            # Emotional memory is handled by the companion-only structured
-            # extractor. Legacy cold extraction must never write psychological
-            # inference into the shared user_profile.md.
-            result = await consolidator.extract_cold(
-                memory.warm_summary, memory.cold_facts, extract_psych=False
-            )
-            for fact in result["key_facts"]:
-                await fact_store.add_async(fact, confidence=0.8, source=session_id)
-            memory.apply_cold_extraction(fact_store.build_context(), result["condensed"])
-
-        # 跨 session 信号采集（每 10 轮触发一次，避免太频繁）
-        if user_turns % 10 == 0:
-            from ethan.memory.daily_signals import collect_signals
-            await collect_signals()
+        # 老 Consolidator.extract_cold + collect_signals 链路已退役：
+        # - extract_cold 写 facts.json，与 StructuredMemoryExtractor 重复且 LLM 调用更多
+        # - collect_signals 写 daily/*.jsonl，已被 _run_structured_extraction + 12 点
+        #   _read_day_memories（直接读 memory.db）替代
+        # 12 点做梦任务改为直接从 memory.db 读取当日实时抽取准入的结构化记忆作为输入。
     except Exception:
         logger.exception("_maybe_consolidate failed for session=%s", session_id)
 
