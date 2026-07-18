@@ -161,6 +161,13 @@ class SessionStore:
     async def init(self) -> None:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._db = await aiosqlite.connect(str(self._db_path))
+        # WAL + busy_timeout：sessions.db 需支持主 chat 流程写 + 后台 _maybe_consolidate
+        # / collect_signals / 12 点夜间任务并发读。非 WAL 模式下读会阻塞写，
+        # 且没有 busy_timeout 兜底会立即抛 database is locked，异常被 try/except
+        # 吞掉后可能留下 -shm/-wal 残留文件破坏一致性。
+        await self._db.execute("PRAGMA journal_mode=WAL")
+        await self._db.execute("PRAGMA busy_timeout=5000")
+        await self._db.execute("PRAGMA foreign_keys=ON")
         await self._db.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
                 id TEXT PRIMARY KEY,
