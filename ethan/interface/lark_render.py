@@ -291,7 +291,26 @@ def _render_card_content(text: str) -> str:
         # rich 路径失败（import 失败 / build 失败）→ 回退到手拼 markdown + 降级
     text = _sanitize_text_for_card(text)
     text = _optimize_markdown_style(text)
-    processed = _re.sub(r'(?<!\n)\n(?!\n)', '  \n', text)
+    # 对非表格区域执行单 \n → "  \n" 硬换行转换；表格区域保持原始 \n（否则飞书解析列错位）
+    tables = _find_markdown_tables_outside_code_blocks(text)
+    if not tables:
+        processed = _re.sub(r'(?<!\n)\n(?!\n)', '  \n', text)
+    else:
+        # 按表格位置把 text 切成 [非表格, 表格, 非表格, ...] 段，只对非表格段转换
+        parts = []
+        prev_end = 0
+        for t in tables:
+            start, length = t["start"], t["length"]
+            # 非表格段：应用硬换行
+            non_table = text[prev_end:start]
+            parts.append(_re.sub(r'(?<!\n)\n(?!\n)', '  \n', non_table))
+            # 表格段：保持原样
+            parts.append(text[start:start + length])
+            prev_end = start + length
+        # 尾部非表格段
+        tail = text[prev_end:]
+        parts.append(_re.sub(r'(?<!\n)\n(?!\n)', '  \n', tail))
+        processed = "".join(parts)
     return _json.dumps({
         "schema": "2.0",
         "body": {"elements": [{"tag": "markdown", "content": processed}]},
@@ -385,7 +404,20 @@ def _render_card_content_rich(text: str) -> str | None:
                 # chunk 是表格之间的 markdown 文本，走和手拼路径一样的预处理
                 # （样式优化 + 单 \n → 硬换行），保证前 3 张表格 + 正文渲染一致
                 md = _optimize_markdown_style(chunk)
-                md = _re.sub(r'(?<!\n)\n(?!\n)', '  \n', md)
+                # 表格区域保持原始 \n，只对非表格段做硬换行
+                inner_tables = _find_markdown_tables_outside_code_blocks(md)
+                if not inner_tables:
+                    md = _re.sub(r'(?<!\n)\n(?!\n)', '  \n', md)
+                else:
+                    _parts = []
+                    _prev = 0
+                    for _t in inner_tables:
+                        _s, _l = _t["start"], _t["length"]
+                        _parts.append(_re.sub(r'(?<!\n)\n(?!\n)', '  \n', md[_prev:_s]))
+                        _parts.append(md[_s:_s + _l])
+                        _prev = _s + _l
+                    _parts.append(_re.sub(r'(?<!\n)\n(?!\n)', '  \n', md[_prev:]))
+                    md = "".join(_parts)
                 if md.strip():
                     c.markdown(md)
                 # 全是空白的片段跳过——CardBuilder 不需要空 markdown 元素

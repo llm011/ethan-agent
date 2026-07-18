@@ -11,12 +11,20 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from ethan.core.config import CONFIG_DIR
 
-DB_PATH = CONFIG_DIR / "scheduler.db"
+_DB_DIR = CONFIG_DIR / "db"
+_DB_DIR.mkdir(parents=True, exist_ok=True)
+DB_PATH = _DB_DIR / "scheduler.db"
+
+# 一次性迁移：旧位置 → 新位置
+_OLD_DB = CONFIG_DIR / "scheduler.db"
+if _OLD_DB.exists() and not DB_PATH.exists():
+    import shutil
+    shutil.move(str(_OLD_DB), str(DB_PATH))
 
 
 class Scheduler:
     def __init__(self):
-        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        _DB_DIR.mkdir(parents=True, exist_ok=True)
         from ethan.core.timezone import get_local_timezone
         jobstores = {
             "default": SQLAlchemyJobStore(url=f"sqlite:///{DB_PATH}"),

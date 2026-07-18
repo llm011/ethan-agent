@@ -25,7 +25,15 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-_CACHE_DB = Path.home() / ".ethan" / "upload-cdn-cache.db"
+_CACHE_DIR = Path.home() / ".ethan" / "db"
+_CACHE_DB = _CACHE_DIR / "upload-cdn-cache.db"
+
+# 一次性迁移：旧位置 → 新位置
+_OLD_CACHE_DB = Path.home() / ".ethan" / "upload-cdn-cache.db"
+if _OLD_CACHE_DB.exists() and not _CACHE_DB.exists():
+    import shutil
+    _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(_OLD_CACHE_DB), str(_CACHE_DB))
 
 
 def _open_cache() -> "sqlite3.Connection | None":

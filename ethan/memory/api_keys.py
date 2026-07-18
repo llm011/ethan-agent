@@ -6,7 +6,15 @@ import aiosqlite
 
 from ethan.core.config import CONFIG_DIR
 
-_DB_PATH = CONFIG_DIR / "api_keys.db"
+_DB_DIR = CONFIG_DIR / "db"
+_DB_PATH = _DB_DIR / "api_keys.db"
+
+# 一次性迁移：旧位置 → 新位置
+_OLD_PATH = CONFIG_DIR / "api_keys.db"
+if _OLD_PATH.exists() and not _DB_PATH.exists():
+    import shutil
+    _DB_DIR.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(_OLD_PATH), str(_DB_PATH))
 
 
 class APIKeyStore:

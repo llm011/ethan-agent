@@ -150,7 +150,7 @@ export function Sidebar() {
   }, []);
 
   const handleNewSession = () => {
-    router.push("/chat");
+    router.push("/chat/new");
   };
 
   const handleSelectSession = (id: string) => {

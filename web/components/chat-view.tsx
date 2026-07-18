@@ -390,6 +390,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     setBgPolling(null);
     setStopping(false);
     setStreaming(false);
+    setConsentRequest(null); // 流结束后确保弹窗关闭
   };
 
   // Load session when route param changes
@@ -760,6 +761,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           onStop={() => {
             if (activeSession && !stopping) {
               setStopping(true);
+              setConsentRequest(null); // 终止时立即关闭授权弹窗
               stopGeneration(activeSession).catch(() => { setStopping(false); });
             }
           }}

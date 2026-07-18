@@ -93,9 +93,19 @@ _session_db_migrated = False
 
 
 def user_sessions_db_path() -> Path:
-    """session DB 路径。直接放在数据目录，随 volume 映射持久化。"""
+    """session DB 路径。放在 db/ 子目录，确保 -wal/-shm 附属文件同在，Docker 挂载安全。"""
     global _session_db_migrated
-    target = user_data_dir() / "sessions.db"
+    db_dir = user_data_dir() / "db"
+    db_dir.mkdir(parents=True, exist_ok=True)
+    target = db_dir / "sessions.db"
+    # 一次性迁移：旧位置 → 新位置（仅当旧文件有实质数据时才迁移，0 字节空文件直接删除）
+    old = user_data_dir() / "sessions.db"
+    if old.exists() and not target.exists():
+        import shutil
+        if old.stat().st_size > 0:
+            shutil.move(str(old), str(target))
+        else:
+            old.unlink(missing_ok=True)
     if not _session_db_migrated:
         _session_db_migrated = True
         _migrate_tmp_session_db(target)

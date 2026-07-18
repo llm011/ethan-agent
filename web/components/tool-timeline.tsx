@@ -140,6 +140,47 @@ function DetailOutput({ detail }: { detail: string }) {
   );
 }
 
+/** 工具参数：截断显示 + hover 弹出完整内容 + 复制按钮 */
+function ArgsPopover({ text, maxW = "max-w-[800px]" }: { text: string; maxW?: string }) {
+  const [copied, setCopied] = useState(false);
+  const [show, setShow] = useState(false);
+  const hideTimer = useRef<ReturnType<typeof setTimeout>>(null);
+
+  const handleCopy = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  const enter = () => { if (hideTimer.current) clearTimeout(hideTimer.current); setShow(true); };
+  const leave = () => { hideTimer.current = setTimeout(() => setShow(false), 150); };
+
+  return (
+    <span className="relative inline-flex items-center group/args" onMouseEnter={enter} onMouseLeave={leave}>
+      <span className={`text-sm text-muted-foreground truncate ${maxW}`}>
+        ({text})
+      </span>
+      <button
+        onClick={handleCopy}
+        className="ml-1 shrink-0 opacity-0 group-hover/args:opacity-100 transition-opacity text-muted-foreground/60 hover:text-foreground"
+        title="复制参数"
+      >
+        {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+      </button>
+      {show && text.length > 60 && (
+        <span
+          className="absolute left-0 top-full mt-1 z-50 max-w-[min(90vw,700px)] max-h-[200px] overflow-auto rounded-md border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-md font-mono whitespace-pre-wrap break-all"
+          onMouseEnter={enter}
+          onMouseLeave={leave}
+        >
+          {text}
+        </span>
+      )}
+    </span>
+  );
+}
+
 function StepRow({ step, isLast, highlight }: { step: ToolStep; isLast: boolean; highlight: boolean }) {
   const hasSubs = step.sub_steps && step.sub_steps.length > 0;
   const [subOpen, setSubOpen] = useState(false);
@@ -194,9 +235,7 @@ function StepRow({ step, isLast, highlight }: { step: ToolStep; isLast: boolean;
             </span>
           )}
           {step.args && (
-            <span className="text-sm text-muted-foreground truncate max-w-[800px]">
-              ({step.args})
-            </span>
+            <ArgsPopover text={step.args} />
           )}
           {hasSubs && (
             <button
@@ -241,9 +280,7 @@ function StepRow({ step, isLast, highlight }: { step: ToolStep; isLast: boolean;
                       {sub.tool}
                     </span>
                     {sub.args && (
-                      <span className="text-xs text-muted-foreground/60 truncate max-w-[550px]">
-                        {sub.args}
-                      </span>
+                      <ArgsPopover text={sub.args} maxW="max-w-[550px]" />
                     )}
                     {sub.duration_ms !== undefined && sub.state !== "running" && (
                       <span className="ml-auto text-xs text-muted-foreground/50 shrink-0">
