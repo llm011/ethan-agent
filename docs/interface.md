@@ -2,15 +2,74 @@
 
 ## 概述
 
-Ethan 提供三种交互方式，适应不同场景：
+Ethan 提供多种交互方式，适应不同场景：
 
 | 模式 | 入口 | 适用场景 |
 |------|------|---------|
+| 桌面端 | `Ethan Agent.app` / `Ethan Agent.exe` | 原生桌面应用，独立窗口，内嵌 Web UI |
 | CLI | `ethan` | 日常对话，快速启动 |
 | 单轮 | `ethan -p "..."` | 脚本集成，一问一答 |
 | HTTP API | `ethan serve` | Web UI 对接，远程调用 |
 | Web UI | `http://localhost:3000` | 浏览器访问，多页面管理 |
 | 飞书 Bot | `lark-cli event consume` | 手机/飞书消息接入，无需公网 IP |
+
+---
+
+## 桌面端（`desktop/`）
+
+### 技术栈
+
+- **Tauri 2** —— Rust + WebView 的轻量桌面框架，比 Electron 体积小一个数量级
+- **React 19 + Vite**（与 Web UI 共享组件，但用 Vite 而非 Next.js，因为桌面端不需要 SSR）
+- **Rust 后端**（`src-tauri/src/lib.rs`）：窗口管理、文件系统访问、shell 调用等原生能力
+
+### 与 Web UI 的关系
+
+桌面端**复用 Web UI 的全部页面和组件**（chat / memory / knowledge / schedule / skills / sessions / settings / channels），但通过 Tauri 的 WebView 加载而非浏览器。区别：
+
+| 维度 | Web UI | 桌面端 |
+|------|--------|--------|
+| 容器 | 浏览器 | Tauri WebView（系统原生） |
+| 构建 | Next.js 16 App Router | Vite + React 19 |
+| 后端 | `ethan serve`（FastAPI） | 内嵌后端或外接 `ethan serve` |
+| 窗口 | 浏览器标签 | 独立窗口，应用图标，标题栏 |
+| 启动 | 浏览器输入 URL | 双击应用图标 |
+| 自动启动 | 需配置 launchd | 系统登录项 |
+
+### 构建产物
+
+| 平台 | 文件 | 说明 |
+|------|------|------|
+| macOS Apple Silicon | `Ethan.Agent_<ver>_aarch64.dmg` | M1/M2/M3/M4 |
+| macOS Intel | `Ethan.Agent_<ver>_x64.dmg` | Intel Mac |
+| Windows | `Ethan.Agent_<ver>_x64-setup.exe` / `.msi` | Windows 10/11 x64 |
+
+CI 通过 `publish-desktop.yml` 在打 `v*` tag 时自动构建并上传到 GitHub Release。
+
+### macOS 未签名提示
+
+桌面端目前未做 Apple Developer 签名公证，首次打开会被 Gatekeeper 拦截提示"已损坏"。这是误导文案，需执行：
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Ethan Agent.app"
+```
+
+详见 [安装指南](./installation.md#macos-首次打开)。
+
+### 配置目录
+
+桌面端与 CLI / Docker 共用 `~/.ethan/` 目录，配置互通。首次启动自动初始化，进入 Onboarding 流程。
+
+### 本地开发
+
+```bash
+cd desktop
+pnpm install
+pnpm tauri dev    # 开发模式（热重载）
+pnpm tauri build  # 产出 dmg/exe
+```
+
+需要预装 Rust（stable）、Node.js 20+、pnpm。
 
 ---
 

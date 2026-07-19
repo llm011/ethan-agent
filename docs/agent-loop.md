@@ -64,14 +64,14 @@ Full / Medium Path 按以下顺序拼接，`Current time:` 是稳定层与动态
 workspace 路径
 定时任务摘要
 <memory_signal>         ← 信号检测命中时注入 hint + 激活 memory_write
-<memory_context>        ← FactStore.build_context_with_recall(query) 按 tags 语义召回 top-15 facts
+<memory_context>        ← build_structured_recall(query)（FTS5 + BGE 向量混合召回，RRF 融合，无命中回退 importance）
 <user_profile>          ← ~/.ethan/memory/user_profile.md（用户画像，仅 full path）
 <behavioral_guidelines> ← ProcedureStore（纠正准则 + 成功路径）
 <proactive_suggestion>  ← FDE 建议（首轮、未拒绝的）
 <relevant_skills>       ← 关键词匹配的 Skill 正文
 ```
 
-Fast Path 保留：`soul + identity + 当前时间 + workspace 路径 + top-5 facts + user_profile + behavioral_guidelines + 匹配到的 Skill`。
+Fast Path 保留：`soul + identity + 当前时间 + workspace 路径 + user_profile + behavioral_guidelines + 匹配到的 Skill`（不带结构化记忆召回，省成本）。
 
 ---
 

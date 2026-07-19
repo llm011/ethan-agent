@@ -5,10 +5,11 @@
 Ethan 是一个运行在 Mac mini 上的个人 AI Agent，全程异步（`asyncio` + `uvloop`），长期常驻。核心目标：
 
 - **多模型**：同时支持 Claude（Anthropic 原生协议）和 GPT/本地模型（OpenAI 兼容协议）
-- **记忆**：跨会话的持久记忆 + 自动压缩
+- **记忆**：跨会话的持久记忆 + 自动压缩 + 结构化记忆管道
 - **Skill**：可手写、可从经验自动生成的知识模块
 - **调度**：定时任务、心跳机制
 - **工具**：Shell、文件、Web、MCP 协议扩展
+- **多端**：CLI / Web UI / 飞书 / 桌面端（Tauri，macOS + Windows）
 
 ---
 
@@ -19,8 +20,8 @@ Ethan 是一个运行在 Mac mini 上的个人 AI Agent，全程异步（`asynci
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │                          Interface 层                             │
-│  CLI (REPL)  │  FastAPI (HTTP/SSE)  │  Web UI (Next.js 16)  │ Lark │
-└────────────┴──────────┬──────────┴──────────────────────── ┴──────┘
+│ CLI (REPL) │ FastAPI (HTTP/SSE) │ Web UI (Next.js 16) │ Desktop │ Lark │
+└───────────┴────────────────────┴─────────────────────┴─────────┴─────┘
                         │ 用户输入 / 定时触发
                         ▼
              ┌──────────────────────┐
@@ -67,8 +68,8 @@ Ethan 是一个运行在 Mac mini 上的个人 AI Agent，全程异步（`asynci
 → 详见 [tools.md](./tools.md)
 
 ### 记忆系统 (`ethan/memory/`)
-五层结构：Session（对话持久化）→ Working Memory（滑动压缩）→ Profile（用户画像）→ Episode（情节摘要）→ Dream（跨 session 信号沉淀）。
-→ 详见 [memory.md](./memory.md)
+核心是结构化记忆管道（`memory.db` 是唯一事实源），周围保留 5 个卫星组件：Session / Working Memory / User Profile / Playbook / Episode。
+ 详见 [memory.md](./memory.md) 与新旧对比 [memory/unification.md](./memory/unification.md)
 
 ### Skill 系统 (`ethan/skills/`)
 从 Markdown 文件加载 Skill，注入 system prompt。支持从经验自动生成新 Skill（Hermes 风格）。
@@ -80,6 +81,9 @@ Ethan 是一个运行在 Mac mini 上的个人 AI Agent，全程异步（`asynci
 
 ### Web UI (`web/`)
 Next.js 16 App Router 构建的浏览器界面，通过 FastAPI SSE 与后端通信。路由包括 `/chat`、`/chat/[id]`、`/memory`、`/knowledge`、`/schedule`、`/skills`、`/sessions`、`/settings`、`/channels`。消息气泡显示 TTFT 耗时，流式工具调用过程实时渲染。
+
+### 桌面端 (`desktop/`)
+基于 Tauri 2 的原生桌面应用，内嵌 Web UI（React 19 + Vite 构建），支持 macOS（aarch64 + x86_64）和 Windows。CI 在打 `v*` tag 时通过 `publish-desktop.yml` 自动构建并发布到 GitHub Release。详见 [interface.md](./interface.md)。
 
 ### 飞书 / Lark 集成 (`ethan/interface/lark_events.py`)
 基于 **WebSocket 长连接**方案：`ethan serve` 启动时自动调用 `lark-cli event consume im.message.receive_v1` 建立长连接，无需公网 IP。收到消息后先加 THINKING 表情确认收到，随后流式回复——工具进度走 post 富文本气泡、最终回答走 interactive 卡片（流式编辑）；`ui_card` 工具产出的自定义卡片（对比/排行/统计/时间轴）作为增量额外补发一条 interactive 卡片。`chat_id` → `session_id` 映射持久化到 JSON 文件。实现按职责拆分到同目录子模块：`lark_render`（消息渲染）、`lark_send`（收发 IO）、`lark_stream`（消息处理 + Agent 流式回复），`lark_events` 仅保留事件消费循环与 start/stop 生命周期并 re-export 公共符号。
@@ -168,14 +172,24 @@ ethan-ai/
 │   │   ├── session.py        # Session 持久化（SQLite + 轮转归档）
 │   │   ├── working.py        # 三层工作记忆（hot/warm/cold）
 │   │   ├── consolidator.py   # 记忆压缩（廉价模型）
-│   │   ├── facts.py          # FactStore（跨 session 长期 facts，含 tags 语义召回）
-│   │   ├── procedures.py     # ProcedureStore（行为准则 + 成功路径）
+│   │   ├── store.py          # MemoryStore（结构化记忆唯一事实源，替代已退役的 FactStore）
+│   │   ├── extractors.py     # StructuredMemoryExtractor（每 5 轮主模型增量提取 JSON 候选）
+│   │   ├── admission.py      # AdmissionPolicy（确定性准入：explicit/observed/corrected 决策）
+│   │   ├── recall.py         # build_structured_recall（FTS5 + BGE 向量混合召回，RRF 融合）
+│   │   ├── records.py        # 维度注册表 + prompt 生成（声明式扩展，custom.* 兜底）
+│   │   ├── dimensions.py     # 64 维度白名单与场景结构体
+│   │   ├── nightly_consolidation.py  # 夜间统一沉淀（结构化复评 + 做梦合并为单一编排）
+│   │   ├── structured_consolidation.py  # 结构化每日沉淀（重提取 / pending 复评 / TTL / 日摘要）
+│   │   ├── daily_consolidation.py  # 做梦：信号精炼 → insight → embedding 去重 → 反写候选
+│   │   ├── memory_vectors.py # memory 向量索引重建（自愈漂移）+ 准入语义配对
+│   │   ├── legacy_migration.py # 旧 facts.json → memories 一次性幂等迁移
+│   │   ├── procedures.py     # ProcedureStore（行为准则 + 成功路径 playbook）
 │   │   ├── episodic.py       # EpisodicStore（历史 session 摘要）
 │   │   ├── signals.py        # 信号检测 + 关键词提取
-│   │   ├── daily_signals.py  # 跨 session 信号采集
-│   │   ├── daily_consolidation.py  # "做梦"沉淀（fact_sync + LLM 精炼 + embedding 去重 + 反写）
+│   │   ├── persistent.py     # 持久化基类
+│   │   ├── api_keys.py       # memory API 鉴权
 │   │   ├── vector_store.py   # sqlite-vec 向量存储
-│   │   ├── embeddings.py     # Embedding 生成（BGE-small-zh 512-dim / hash 回退）
+│   │   ├── embeddings.py     # Embedding 生成（BGE-small-zh INT8 512-dim）
 │   │   └── knowledge.py      # 知识库（sqlite-vec 向量检索）
 │   ├── skills/
 │   │   ├── loader.py         # 双来源加载（内置 + 用户）
@@ -210,6 +224,10 @@ ethan-ai/
 │       ├── lark.py           # 飞书 Bot（WebSocket 长连接）
 │       └── commands/         # 子命令（model/provider/session/skill/schedule）
 ├── web/                      # Next.js 16 Web UI
+├── desktop/                  # Tauri 2 桌面应用（React 19 + Vite + Rust）
+│   ├── src/                  # 前端源码（复用 web/ 组件）
+│   ├── src-tauri/            # Rust 后端 + tauri.conf.json + Cargo.toml
+│   └── package.json
 ├── docs/                     # 本文档体系
 ├── .env                      # API Key 配置（不入 git）
 └── PLAN.md                   # 开发计划

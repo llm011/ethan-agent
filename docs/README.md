@@ -19,6 +19,7 @@
 - **ACP 集成**：`delegate_coding` 工具 / `ethan code` 命令将复杂编码任务委派给 Claude Code / OpenCode / Codex；Claude Code 支持按工作目录续接多轮会话，工具调用过程解析为 sub_steps 在 Web UI 折叠展示
 - **知识库**：本地 Markdown 知识库 + sqlite-vec 语义检索（embedding 索引），支持 search/read/add/edit（追加+替换）/delete
 - **CLI (REPL)**：交互式会话管理，支持 `/sessions`、`/resume`、`/new` 等斜杠命令；会话来源标签（web/repl/lark）；自动生成标题；新用户 onboarding
+- **桌面端**：基于 Tauri 的原生桌面应用，支持 macOS（aarch64 + x86_64）和 Windows，内嵌 Web UI、独立窗口、应用图标；CI 自动构建并发布到 GitHub Release
 
 ---
 
@@ -36,8 +37,9 @@
 | [法律专家模式](./legal-mode.md) | legal-assistant 技能详解：能力范围、架构链路、按需安装、来源许可 |
 | [调度器](./scheduler.md) | 定时任务、cron + interval、SQLite 持久化 |
 | [后台任务](./background-tasks.md) | 即时长任务异步执行、独立会话、按渠道回灌、终止、任务中心 Web 交互 |
-| [接口层](./interface.md) | CLI (REPL)、HTTP API (SSE)、命令行工具、Web UI 路由 |
+| [接口层](./interface.md) | CLI (REPL)、HTTP API (SSE)、命令行工具、Web UI 路由、桌面端（Tauri） |
 | [ACP 集成](./acp.md) | 外部 Coding Agent 委派协议、Claude Code / OpenCode / Codex 接入、多轮会话、sub_steps 解析 |
+| [安装指南](./installation.md) | pip / Docker / 源码 / 桌面端（macOS + Windows）四种安装方式 |
 | [浏览器控制 · 总览与架构](./browser/overview.md) | 调用链总览、三段链路职责、端到端时序、代码地图 |
 | [浏览器控制 · 传输层与协议](./browser/transport-protocol.md) | WebSocket 选型、JSON-RPC 信封、method/error 表、req-id 配对、超时/断连、last-wins |
 | [浏览器控制 · 扩展内核 (CDP/AX)](./browser/extension-internals.md) | SW 保活、CDP attach 缓存、AX 快照算法、ref 生命周期、各动作 CDP 实现 |

@@ -1,6 +1,36 @@
 # 安装指南
 
-## 方式一：pip 安装（推荐）
+## 方式一：桌面端安装（最适合普通用户）
+
+到 [GitHub Releases](https://github.com/llm011/ethan-agent/releases) 下载对应平台的安装包：
+
+| 平台 | 文件 | 说明 |
+|------|------|------|
+| macOS Apple Silicon | `Ethan.Agent_<ver>_aarch64.dmg` | M1/M2/M3/M4 系列 |
+| macOS Intel | `Ethan.Agent_<ver>_x64.dmg` | Intel Mac |
+| Windows | `Ethan.Agent_<ver>_x64-setup.exe` 或 `.msi` | Windows 10/11 x64 |
+
+桌面端内嵌完整的 Web UI，启动后自动打开窗口，无需额外配置 Python 环境。
+
+### macOS 首次打开
+
+由于目前未做 Apple Developer 签名公证，双击 dmg 安装后首次打开会被 Gatekeeper 拦截，提示"已损坏，无法打开"。这是误导文案，应用本身没有损坏。打开终端执行：
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Ethan Agent.app"
+```
+
+执行后再双击应用图标即可打开。之后不再需要重复此操作。
+
+> 如果"隐私与安全性"里没有"仍要打开"按钮，说明就是这个问题——按钮只给有签名但未公证的应用，未签名应用需要用上面的 xattr 命令解除隔离。
+
+### 配置
+
+桌面端启动后会在 `~/.ethan/` 自动初始化配置目录。首次启动进入 Onboarding 流程，引导填写 API Key 和选择默认模型。
+
+---
+
+## 方式二：pip 安装
 
 仅需 Python 3.12+，无需克隆仓库：
 
@@ -32,7 +62,7 @@ ethan web token
 
 ---
 
-## 方式二：Docker（推荐用于服务器）
+## 方式三：Docker（推荐用于服务器）
 
 Docker 方式最省事，Backend 和 Web UI 各自独立容器，数据持久化到本地卷。
 
@@ -104,7 +134,7 @@ docker compose pull && docker compose up -d  # 更新到最新版本
 
 ---
 
-## 方式三：从源码安装（开发者）
+## 方式四：从源码安装（开发者）
 
 适合需要修改代码或调试的场景。
 
@@ -157,6 +187,19 @@ npm run dev
 ```
 
 访问 http://localhost:3000。
+
+### 6. 构建桌面端（可选）
+
+如需本地构建桌面 app（开发调试用），见 `desktop/` 目录：
+
+```bash
+cd desktop
+pnpm install
+pnpm tauri dev    # 开发模式
+pnpm tauri build  # 产出 dmg/exe
+```
+
+需要预装 Rust、Node.js 20+ 和 pnpm。CI 产出的官方包见 [Releases](https://github.com/llm011/ethan-agent/releases)。
 
 ### macOS 自动启动（launchd）
 
