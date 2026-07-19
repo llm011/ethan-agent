@@ -199,14 +199,10 @@ async def _maybe_consolidate(session_id: str, model: str, user_id: str = "", mod
             except Exception:
                 logger.warning("episode write failed for session %s", session_id, exc_info=True)
 
-        if user_turns % 5 != 0:
-            return
-
-        # 老 Consolidator.extract_cold + collect_signals 链路已退役：
-        # - extract_cold 写 facts.json，与 StructuredMemoryExtractor 重复且 LLM 调用更多
-        # - collect_signals 写 daily/*.jsonl，已被 _run_structured_extraction + 12 点
-        #   _read_day_memories（直接读 memory.db）替代
-        # 12 点做梦任务改为直接从 memory.db 读取当日实时抽取准入的结构化记忆作为输入。
+        # 注：老 Consolidator.extract_cold + collect_signals 链路已退役。
+        # extract_cold 写 facts.json、collect_signals 写 daily/*.jsonl 都已被
+        # _run_structured_extraction（5 轮实时抽取写 memory.db）+ 12 点做梦
+        # （_read_day_memories 直接读 memory.db）替代，此处不再有沉淀逻辑。
     except Exception:
         logger.exception("_maybe_consolidate failed for session=%s", session_id)
 

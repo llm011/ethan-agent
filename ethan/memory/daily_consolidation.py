@@ -47,20 +47,24 @@ def _memory_db_path() -> Path:
     return user_vectors_db_path()
 
 _CONSOLIDATION_PROMPT = """\
-以下是今天提取并准入的结构化记忆（已通过 5 轮实时抽取 + 准入策略筛选）。请从中挖掘跨记忆的行为模式和成功路径，生成可复用的 playbook 经验。
+以下是今天提取并准入的结构化记忆（已通过 5 轮实时抽取 + 准入策略筛选）。请从多条记忆中归纳跨记忆的行为模式，产出可长期保留的记忆条目。
+
+请归纳以下三类模式（都是跨 session 的统计推断，不是单条记忆的复述）：
+1. **repetition**（重复行为模式）：多条记忆反映出反复出现的偏好/习惯，归纳为一条偏好描述。
+2. **error**（失败教训）：多条记忆反映出反复踩坑或纠正，归纳为一条可复用的教训。
+3. **success_path**（成功路径）：反复奏效的场景 + 方法/工具链，可固化为 playbook 经验。
 
 要求：
-- 从多条记忆中归纳出反复出现的成功模式（场景 + 方法）
 - 合并语义相似的条目
-- 排除噪音（过于泛泛的、一次性的、不值得固化为 playbook 的）
+- 排除噪音（过于泛泛的、一次性的、不值得长期记住的）
 - 最终输出不超过 10 条
 - 每条是一句完整的、自包含的描述（未来召回时能独立理解）
-- 宁缺勿滥，如果今天的记忆没有值得提炼的成功路径，输出空数组 []
+- 宁缺勿滥，如果今天的记忆没有值得提炼的跨记忆模式，输出空数组 []
 
 输出格式（严格 JSON 数组）：
 ```json
 [
-  {{"type": "success_path", "text": "成功场景描述", "metadata": {{...原始关键信息...}}}}
+  {{"type": "repetition|error|success_path", "text": "精炼后的记忆描述", "metadata": {{...原始关键信息...}}}}
 ]
 ```
 
@@ -78,7 +82,7 @@ async def _read_day_memories(d: date) -> list[dict]:
     from datetime import datetime, timedelta
 
     from ethan.core.timezone import get_local_timezone
-    from ethan.memory.records import MemoryStatus
+    from ethan.memory.records import MemoryDomain, MemoryStatus
     from ethan.memory.store import MemoryStore
 
     tz = get_local_timezone()
@@ -88,12 +92,16 @@ async def _read_day_memories(d: date) -> list[dict]:
 
     store = MemoryStore(db_path=_memory_db_path())
     try:
-        rows = store._get_conn().execute(
-            "SELECT * FROM memories WHERE status=? AND created_at >= ? AND created_at < ? "
-            "ORDER BY created_at DESC LIMIT 15",
-            (MemoryStatus.ACTIVE.value, start_ts, end_ts),
-        ).fetchall()
-        memories = [store._record_from_row(r) for r in rows]
+        # 只读 general 域：companion 情感记忆独立存储/召回/授权/遗忘，
+        # 绝不能进做梦链路被蒸馏成 general insight（与 _sync_corpus_to_memory_db 同口径）。
+        memories = store.list_memories(
+            memory_domain=MemoryDomain.GENERAL.value,
+            status=MemoryStatus.ACTIVE.value,
+            created_after=start_ts,
+            created_before=end_ts,
+            order_by="created_at",
+            limit=15,
+        )
         return [
             {
                 "type": "memory",

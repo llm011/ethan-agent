@@ -452,8 +452,11 @@ class MemoryStore:
         self, *, memory_type: str | None = None, dimension: str | None = None,
         scope_type: str | None = None, scope_id: str | None = None,
         memory_domain: str | None = None, status: str | None = None,
-        limit: int = 100, offset: int = 0,
+        created_after: float | None = None, created_before: float | None = None,
+        order_by: str = "updated_at", limit: int = 100, offset: int = 0,
     ) -> list[MemoryRecord]:
+        """列出 memories。created_after/created_before 为 created_at 的半开区间
+        [after, before)；order_by 限 updated_at / created_at 两列（防注入）。"""
         clauses: list[str] = []
         params: list[Any] = []
         for column, value in (
@@ -464,10 +467,17 @@ class MemoryStore:
             if value is not None:
                 clauses.append(f"{column}=?")
                 params.append(value)
+        if created_after is not None:
+            clauses.append("created_at >= ?")
+            params.append(created_after)
+        if created_before is not None:
+            clauses.append("created_at < ?")
+            params.append(created_before)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        sort_col = order_by if order_by in ("updated_at", "created_at") else "updated_at"
         params.extend([limit, offset])
         rows = self._get_conn().execute(
-            f"SELECT * FROM memories {where} ORDER BY updated_at DESC, id LIMIT ? OFFSET ?", params
+            f"SELECT * FROM memories {where} ORDER BY {sort_col} DESC, id LIMIT ? OFFSET ?", params
         ).fetchall()
         return [self._record_from_row(r) for r in rows]
 
