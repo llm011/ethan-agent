@@ -9,8 +9,8 @@ from ethan.interface.lark_client import _lark_client
 logger = logging.getLogger(__name__)
 
 
-async def _send_reaction(message_id: str) -> str | None:
-    """给消息添加 THINKING_FACE 表情，返回 reaction_id 以便后续删除。"""
+async def _send_reaction(message_id: str, emoji_type: str = "THINKING") -> str | None:
+    """给消息添加表情，返回 reaction_id 以便后续删除。"""
     from lark_oapi.api.im.v1 import (
         CreateMessageReactionRequest,
         CreateMessageReactionRequestBody,
@@ -27,7 +27,7 @@ async def _send_reaction(message_id: str) -> str | None:
             .message_id(message_id)
             .request_body(
                 CreateMessageReactionRequestBody.builder()
-                .reaction_type(Emoji.builder().emoji_type("THINKING_FACE").build())
+                .reaction_type(Emoji.builder().emoji_type(emoji_type).build())
                 .build()
             )
             .build()
@@ -35,10 +35,10 @@ async def _send_reaction(message_id: str) -> str | None:
         resp = await asyncio.to_thread(client.im.v1.message_reaction.create, req)
         if resp.success() and resp.data:
             return resp.data.reaction_id
-        logger.debug("Failed to add reaction to %s: code=%s msg=%s", message_id, resp.code, resp.msg)
+        logger.warning("Failed to add reaction to %s: code=%s msg=%s", message_id, resp.code, resp.msg)
         return None
     except Exception:
-        logger.debug("Failed to add reaction to %s", message_id, exc_info=True)
+        logger.warning("Failed to add reaction to %s", message_id, exc_info=True)
         return None
 
 
@@ -117,8 +117,8 @@ class TypingState:
         if old_reaction_id:
             await _remove_reaction(old_msg_id, old_reaction_id)
 
-        # 给新消息加表情
-        self.reaction_id = await _send_reaction(new_message_id)
+        # 给新消息加表情（回复中用 STRIVE 区分）
+        self.reaction_id = await _send_reaction(new_message_id, "STRIVE")
 
     async def clear(self) -> None:
         """立刻移除当前消息上的表情（如果还有）。

@@ -223,24 +223,29 @@ export function MessageBubble({ msg, isStreaming, isLast, onQuote, onCardAction,
             {msg.mcpApps && msg.mcpApps.length > 0 && (
               <McpAppView apps={msg.mcpApps} />
             )}
-            <div className="flex justify-end items-center mt-2 gap-1.5 text-[10px] text-muted-foreground/35 tabular-nums">
+            <div className="flex justify-end items-center mt-2 gap-1.5 text-[10px] text-muted-foreground/40 tabular-nums flex-wrap">
               {msg.created_at && <span>{formatTime(msg.created_at)}</span>}
-              {msg.created_at && (msg.usage || msg.ttfb_ms != null || msg.total_ms != null) && <span className="inline-block w-px h-2.5 bg-muted-foreground/20" />}
+              {msg.created_at && (msg.usage || msg.ttfb_ms != null || msg.total_ms != null) && <span className="inline-block w-px h-2.5 bg-muted-foreground/15" />}
               {msg.usage && (
-                <span title={`${msg.usage.input.toLocaleString()} in / ${msg.usage.output.toLocaleString()} out${msg.usage.cache > 0 ? ` / ${msg.usage.cache.toLocaleString()} cache` : ""}`} className="inline-flex items-center gap-0.5 rounded bg-muted/50 px-1 py-px">
+                <span title={`${msg.usage.input.toLocaleString()} in / ${msg.usage.output.toLocaleString()} out${msg.usage.cache > 0 ? ` / ${msg.usage.cache.toLocaleString()} cache` : ""}`} className="inline-flex items-center gap-0.5 rounded-full bg-blue-500/8 text-blue-600/50 dark:text-blue-400/50 px-1.5 py-px">
                   <span>↑{fmtTokens(msg.usage.input)}</span>
                   <span>↓{fmtTokens(msg.usage.output)}</span>
                   {msg.usage.cache > 0 && <span>⚡{fmtTokens(msg.usage.cache)}</span>}
                 </span>
               )}
               {msg.ttfb_ms != null && (
-                <span title={`首字耗时 ${msg.ttfb_ms}ms`} className="inline-flex items-center rounded bg-muted/50 px-1 py-px">
+                <span title={`首字耗时 ${msg.ttfb_ms}ms`} className="inline-flex items-center rounded-full bg-amber-500/8 text-amber-600/50 dark:text-amber-400/50 px-1.5 py-px">
                   TTFB {msg.ttfb_ms < 1000 ? `${msg.ttfb_ms}ms` : `${(msg.ttfb_ms / 1000).toFixed(1)}s`}
                 </span>
               )}
               {msg.total_ms != null && (
-                <span title={`总耗时 ${msg.total_ms}ms`} className="inline-flex items-center rounded bg-muted/50 px-1 py-px">
+                <span title={`总耗时 ${msg.total_ms}ms`} className="inline-flex items-center rounded-full bg-purple-500/8 text-purple-600/50 dark:text-purple-400/50 px-1.5 py-px">
                   总 {msg.total_ms < 1000 ? `${msg.total_ms}ms` : msg.total_ms < 60000 ? `${(msg.total_ms / 1000).toFixed(1)}s` : `${Math.floor(msg.total_ms / 60000)}m${Math.round((msg.total_ms % 60000) / 1000)}s`}
+                </span>
+              )}
+              {msg.ttfb_ms != null && msg.total_ms != null && msg.total_ms > msg.ttfb_ms && (
+                <span title={`实际生成耗时 ${msg.total_ms - msg.ttfb_ms}ms`} className="inline-flex items-center rounded-full bg-green-500/8 text-green-600/50 dark:text-green-400/50 px-1.5 py-px">
+                  生成 {(msg.total_ms - msg.ttfb_ms) < 1000 ? `${msg.total_ms - msg.ttfb_ms}ms` : (msg.total_ms - msg.ttfb_ms) < 60000 ? `${((msg.total_ms - msg.ttfb_ms) / 1000).toFixed(1)}s` : `${Math.floor((msg.total_ms - msg.ttfb_ms) / 60000)}m${Math.round(((msg.total_ms - msg.ttfb_ms) % 60000) / 1000)}s`}
                 </span>
               )}
             </div>

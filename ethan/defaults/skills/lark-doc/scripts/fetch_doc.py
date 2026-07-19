@@ -2,7 +2,10 @@
 """从飞书云文档导出标准 Markdown 文件，图片可选上传 CDN。
 
 Usage:
-    python fetch_doc.py <doc_url_or_token> [output_path]
+    python fetch_doc.py <doc_url_or_token> [output_path] [--cache]
+
+    --cache  使用 /tmp/feishu-doc-cache/<token>/ 下的缓存，跳过 API 调用。
+             首次运行会自动写入缓存，后续对话可直接加 --cache 复用。
 
 依赖：
 - lark-cli（必须，已完成 auth login）
@@ -96,13 +99,14 @@ def _fetch_doc_xml(doc: str) -> str:
 
 
 def _build_url_token_map(xml_content: str) -> dict[str, str]:
-    """从 XML 内容提取 url→token 映射。"""
+    """从 XML 内容提取 url→token 映射。XML 属性中的 URL 可能含 HTML entity（&amp; 等），统一解码。"""
+    from html import unescape
     mapping: dict[str, str] = {}
     for m in _XML_IMG_RE.finditer(xml_content):
-        token, url = m.group(1), m.group(2)
+        token, url = m.group(1), unescape(m.group(2))
         mapping[url] = token
     for m in _XML_IMG_RE2.finditer(xml_content):
-        url, token = m.group(1), m.group(2)
+        url, token = unescape(m.group(1)), m.group(2)
         mapping[url] = token
     return mapping
 
@@ -476,12 +480,21 @@ def process_images(content: str, url_token_map: dict[str, str]) -> tuple[str, in
         print("  [warn] 未能提取 img token，图片将保留飞书原始链接", file=sys.stderr)
         return content, total, 0
 
+    # 构建 path→token 辅助索引，用于精确匹配失败时的 fallback
+    from urllib.parse import urlparse
+    path_token_map: dict[str, str] = {}
+    for map_url, map_token in url_token_map.items():
+        path_token_map[urlparse(map_url).path] = map_token
+
     # 去重：同一 URL 只处理一次
     url_to_cdn: dict[str, "str | None"] = {}
     unique_urls = list(dict.fromkeys(m.group(2) for m in matches))
 
     for i, url in enumerate(unique_urls):
         token = url_token_map.get(url)
+        if not token:
+            # fallback：按 URL path 部分匹配（忽略 query 参数差异）
+            token = path_token_map.get(urlparse(url).path)
         if not token:
             print(f"  [warn] 找不到 token for URL: {url[:80]}", file=sys.stderr)
             url_to_cdn[url] = None
@@ -555,6 +568,25 @@ def process_media_tokens(content: str, output_path: Path) -> tuple[str, int, int
     return new_content, total, succeeded
 
 
+def _doc_token_from_input(doc: str) -> str:
+    """从 URL 或纯 token 提取 document token（用作缓存 key）。"""
+    from urllib.parse import urlparse
+    p = urlparse(doc)
+    if p.path:
+        # URL 形如 https://xxx.feishu.cn/docx/TOKEN 或 /wiki/TOKEN
+        parts = [s for s in p.path.split("/") if s]
+        if parts:
+            return parts[-1]
+    return doc
+
+
+def _cache_dir(doc_token: str) -> Path:
+    """返回 /tmp/feishu-doc-cache/<token>/ 目录（自动创建）。"""
+    d = Path("/tmp/feishu-doc-cache") / doc_token
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         print("Usage: fetch_doc.py <doc_url_or_token> [output_path]", file=sys.stderr)
@@ -563,12 +595,37 @@ def main() -> None:
     doc = sys.argv[1]
     output_path = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("document.md")
 
+    # 缓存目录：/tmp/feishu-doc-cache/<doc_token>/
+    doc_token = _doc_token_from_input(doc)
+    cache = _cache_dir(doc_token)
+    cache_md = cache / "raw_markdown.md"
+    cache_xml = cache / "raw_xml.xml"
+    cache_meta = cache / "meta.json"
+
+    # --cache 参数：强制使用缓存（跳过 API 调用）
+    use_cache = "--cache" in sys.argv
+
     print(f"获取文档内容: {doc}", file=sys.stderr)
-    try:
-        content, document_id = _fetch_doc_markdown(doc)
-    except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+    if use_cache and cache_md.is_file():
+        print(f"  使用缓存: {cache_md}", file=sys.stderr)
+        content = cache_md.read_text(encoding="utf-8")
+        # 从缓存的 meta 里读 document_id
+        document_id = ""
+        if cache_meta.is_file():
+            try:
+                document_id = json.loads(cache_meta.read_text())["document_id"]
+            except (json.JSONDecodeError, KeyError):
+                pass
+    else:
+        try:
+            content, document_id = _fetch_doc_markdown(doc)
+        except Exception as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+        # 写入缓存
+        cache_md.write_text(content, encoding="utf-8")
+        cache_meta.write_text(json.dumps({"document_id": document_id}), encoding="utf-8")
+        print(f"  原始 Markdown 已缓存: {cache_md}", file=sys.stderr)
 
     print("获取文档基本信息...", file=sys.stderr)
     meta = _fetch_doc_meta(document_id)
@@ -578,7 +635,14 @@ def main() -> None:
     isv_block_ids: list[str] = []
     # 总是获取 XML（含 block id），用于图片 token 和 ISV 块 id
     print("获取 XML 格式以提取图片 token 和 ISV 块...", file=sys.stderr)
-    xml_content = _fetch_doc_xml(doc)
+    if use_cache and cache_xml.is_file():
+        print(f"  使用缓存: {cache_xml}", file=sys.stderr)
+        xml_content = cache_xml.read_text(encoding="utf-8")
+    else:
+        xml_content = _fetch_doc_xml(doc)
+        if xml_content:
+            cache_xml.write_text(xml_content, encoding="utf-8")
+            print(f"  原始 XML 已缓存: {cache_xml}", file=sys.stderr)
     if xml_content:
         url_token_map = _build_url_token_map(xml_content)
         isv_block_ids = re.findall(
@@ -627,7 +691,10 @@ def main() -> None:
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(content, encoding="utf-8")
+    # stdout 输出：文件路径 + 缓存信息（供调用方/下轮对话使用）
     print(str(output_path))
+    print(f"cache_dir={cache}", file=sys.stderr)
+    print(f"提示：下次可加 --cache 参数复用缓存，跳过 API 调用: python fetch_doc.py {doc} {output_path} --cache", file=sys.stderr)
 
 
 if __name__ == "__main__":

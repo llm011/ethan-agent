@@ -322,6 +322,8 @@ class Agent:
             mode_identity = self._mode_identity_block()
             if mode_identity:
                 parts.append(mode_identity)
+            if agent_content:
+                parts.append(f"<agent_protocols>\n{agent_content}\n</agent_protocols>")
             parts.append(f"Current time: {now}")
             parts.append(f"Your workspace directory is {workspace}.")
             parts.append(f"Current model: {self._provider.model}（用户问起你用的什么模型/是谁驱动时，如实回答这个 model id）")

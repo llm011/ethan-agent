@@ -96,6 +96,10 @@ class OpenAICompatProvider(BaseProvider):
                 # 非 tool 消息：刷积压图片后追加
                 result.extend(pending_img_messages)
                 pending_img_messages = []
+                # 跳过空 assistant 消息（带 tool_calls 的已在上方 elif is_tool_call 分支处理，
+                # 能到这里的 assistant 必然无 tool_calls），Gemini 不接受纯空 assistant 消息
+                if msg.role == "assistant" and not msg.content:
+                    continue
                 result.append({"role": msg.role, "content": msg.content})
 
         # 末尾剩余的图片消息（最后一组 tool messages 后面没有后续消息时）
@@ -109,11 +113,33 @@ class OpenAICompatProvider(BaseProvider):
                 "function": {
                     "name": t.name,
                     "description": t.description,
-                    "parameters": t.parameters,
+                    "parameters": self._strip_unsupported_schema_fields(t.parameters),
                 },
             }
             for t in tools
         ]
+
+    @staticmethod
+    def _strip_unsupported_schema_fields(schema: dict | None) -> dict:
+        """递归移除 JSON Schema 中 Gemini 等模型不支持的字段（如 default、additionalProperties）。"""
+        if not schema or not isinstance(schema, dict):
+            return schema or {}
+        import copy
+        s = copy.deepcopy(schema)
+        _UNSUPPORTED = {"default", "additionalProperties"}
+
+        def _clean(obj):
+            if isinstance(obj, dict):
+                for key in list(obj.keys()):
+                    if key in _UNSUPPORTED:
+                        del obj[key]
+                    else:
+                        _clean(obj[key])
+            elif isinstance(obj, list):
+                for item in obj:
+                    _clean(item)
+        _clean(s)
+        return s
 
     def _parse_choice(self, choice, usage=None) -> Message:
         msg = choice.message
@@ -251,7 +277,29 @@ class OpenAICompatProvider(BaseProvider):
         final_tool_calls: list[ToolCall] = []  # 累积已构建的 tool_calls，供后续独立 usage chunk 的 final yield 携带
         stream_usage = None
 
-        async for chunk in await self._client.chat.completions.create(**kwargs):  # type: ignore
+        try:
+            resp_iter = await self._client.chat.completions.create(**kwargs)  # type: ignore
+        except Exception as e:
+            # 打印请求摘要帮助排查
+            import logging as _log
+            _lg = _log.getLogger("ethan.providers.openai_compat")
+            _lg.error("[stream_chat] API error: %s", e)
+            _lg.error("[stream_chat] model=%s, messages=%d, tools=%d",
+                      kwargs.get("model"), len(kwargs.get("messages", [])), len(kwargs.get("tools", [])))
+            if kwargs.get("tools"):
+                _lg.error("[stream_chat] tool_names=%s", [t["function"]["name"] for t in kwargs["tools"]])
+            # dump 第一个 tool schema 帮助定位
+            if kwargs.get("tools"):
+                _lg.error("[stream_chat] first_tool_params=%s", json.dumps(kwargs["tools"][0]["function"].get("parameters", {}), ensure_ascii=False)[:500])
+            # dump messages 摘要
+            for i, m in enumerate(kwargs.get("messages", [])):
+                role = m.get("role", "?")
+                content = m.get("content")
+                content_preview = str(content)[:100] if content else "(None)"
+                _lg.error("[stream_chat] msg[%d] role=%s content=%s", i, role, content_preview)
+            raise
+
+        async for chunk in resp_iter:
             delta = chunk.choices[0].delta if chunk.choices else None
 
             # Usage comes in the final chunk (with empty choices or after finish)
