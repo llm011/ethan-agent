@@ -91,13 +91,13 @@ def _list_active_memories():
 
 # ── 端到端测试 ────────────────────────────────────────────────────────────
 
-async def test_dream_e2e_repetition_reflects_to_memories(isolated_fs):
-    """repetition 信号 → 做梦 → 反写为结构化记忆（preference.work_habits, inferred）。"""
+async def test_dream_e2e_non_success_path_not_reflected(isolated_fs):
+    """非 success_path 类型（如 repetition）只进向量库，不反写到 memories 表。"""
     from ethan.memory.daily_consolidation import run_daily_consolidation
 
     today = date.today()
 
-    # mock _read_day_memories 返回当日 memories（替代旧的 daily/*.jsonl 信号）
+    # mock _read_day_memories 返回当日 memories
     day_memories = [{"type": "memory", "text": "每天早上问天气"}]
     refined = [
         {"type": "repetition", "text": "用户每天早上都会询问当天天气",
@@ -110,33 +110,23 @@ async def test_dream_e2e_repetition_reflects_to_memories(isolated_fs):
                return_value=refined):
         added = await run_daily_consolidation(target_date=today)
 
-    # 3. 验证向量库 insight 条目
+    # 向量库应有 1 条 insight 条目
     assert added == 1, f"应写入 1 条 insight，实际 {added}"
 
     from ethan.core.paths import user_vectors_db_path
     from ethan.memory.vector_store import VectorStore
     store = VectorStore(db_path=user_vectors_db_path())
     try:
-        # 总数 ≥ 1（可能还有 fact_sync 镜像）
-        assert store.count() >= 1
-        # 按 type 查 insight 条目
         items = store.list_items(exclude_types=["fact_sync", "memory"], limit=10)
         assert len(items) == 1
         assert items[0]["metadata"]["type"] == "repetition"
-        assert items[0]["metadata"]["reflected"] is True
+        assert items[0]["metadata"]["reflected"] is False
     finally:
         store.close()
 
-    # 4. 验证结构化记忆反写（inferred 直进 active）
+    # memories 表不应有反写条目（repetition 不再反写）
     memories = _list_active_memories()
-    assert len(memories) == 1
-    mem = memories[0]
-    assert "天气" in mem.content
-    assert mem.memory_type == "preference"
-    assert mem.dimension == "preference.work_habits"
-    assert mem.evidence_level == "inferred"
-    assert mem.source_session_id == f"insight_{today.isoformat()}"
-    assert mem.confidence == 0.75
+    assert len(memories) == 0, f"repetition 不应反写，实际 {len(memories)} 条"
 
 
 async def test_dream_e2e_success_path_reflects_to_playbook(isolated_fs):
@@ -281,7 +271,7 @@ async def test_dream_e2e_get_all_memories_filters_fact_sync(isolated_fs):
 
 async def test_dream_e2e_multiple_insights_mixed_reflection(isolated_fs):
     """混合信号：repetition + error + success_path 同时做梦，
-    分别反写到 memories 表（2 条）+ playbook.json（1 条）。"""
+    只有 success_path 反写到 playbook.json，其余仅入向量库。"""
     from ethan.core.paths import user_procedures_path
     from ethan.memory.daily_consolidation import run_daily_consolidation
 
@@ -307,11 +297,9 @@ async def test_dream_e2e_multiple_insights_mixed_reflection(isolated_fs):
 
     assert added == 3
 
-    # memories 表应有 2 条（repetition→preference.work_habits, error→decision.correction）
+    # memories 表不应有反写条目（repetition/error 不再反写）
     memories = _list_active_memories()
-    assert len(memories) == 2
-    dims = {m.dimension for m in memories}
-    assert dims == {"preference.work_habits", "decision.correction"}
+    assert len(memories) == 0, f"repetition/error 不应反写，实际 {len(memories)} 条"
 
     # playbook.json 应有 1 条 success_pattern
     pb = json.loads(user_procedures_path().read_text(encoding="utf-8"))

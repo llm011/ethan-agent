@@ -5,7 +5,7 @@
 2. LLM 模式挖掘（从多条记忆归纳行为模式/成功路径，限 ≤10 条）
 3. 对精炼结果做 embedding → 在 memory.db 里查 L2 < 阈值的 → skip 已存在
 4. 通过去重的条目写入 memory.db（insight_* 向量条目），并按 type 反写：
-   - success_path → playbook.json 的 success_patterns
+   - success_path → playbook.json 的 success_patterns（其它类型不反写）
 5. memory.db 的 metadata 标记 reflected=True，避免重复反写
 """
 from __future__ import annotations
@@ -31,14 +31,6 @@ L2_DEDUP_THRESHOLD = 0.7
 # 反写为结构化候选的 confidence：低于主动写入(0.95)
 # 因为是跨 session 统计推断，不是确定性事实
 INSIGHT_CONFIDENCE = 0.75
-
-# type → (memory_type, dimension) 映射（反写为结构化候选时用）
-# insight 本身就是跨 session 复证后的蒸馏产物，故 evidence_level=inferred（直进 active）
-TYPE_MEMORY_MAP = {
-    "repetition": ("preference", "preference.work_habits"),  # 重复行为模式 → 偏好
-    "error": ("decision", "decision.correction"),            # 失败教训 → 纠正
-}
-
 
 def _memory_db_path() -> Path:
     """每次调用时按当前 user contextvar 求值，避免模块级缓存击穿 per-user 隔离。"""
@@ -88,6 +80,8 @@ async def _read_day_memories(d: date) -> list[dict]:
 
     store = MemoryStore(db_path=_memory_db_path())
     try:
+        # MemoryStore.list_memories() 暂不支持按 created_at 时间范围过滤，故走底层 SQL；
+        # 待 MemoryStore 扩展时间范围参数后可改回封装接口。
         rows = store._get_conn().execute(
             "SELECT * FROM memories WHERE status=? AND created_at >= ? AND created_at < ? "
             "ORDER BY created_at DESC LIMIT 15",
@@ -182,10 +176,9 @@ async def _llm_refine(signals: list[dict]) -> list[dict]:
 
 
 async def _embed_and_store(items: list[dict], d: date) -> int:
-    """对每条做 embedding，去重后写入 memory.db，并反写到 memories 表 / playbook.json。
+    """对每条做 embedding，去重后写入 memory.db，并按 type 反写。
 
-    repetition/error → 走准入进 memories 表（facts.json 已退役）；
-    success_path → playbook.json 的 success_patterns。
+    success_path → playbook.json 的 success_patterns；其它类型仅入库不反写。
     """
     from ethan.memory.embeddings import embed
     from ethan.memory.vector_store import VectorStore
@@ -329,55 +322,11 @@ def _reflect_insight(
     去重已由 _sync_corpus_to_memory_db 保证：memories 表的 active 记忆已同步进
     向量库（type=fact_sync），insight 的 L2 去重天然覆盖已有记忆。
 
-    - repetition / error → 结构化候选（inferred）走准入进 memories 表；
-      memory_key 由文本 hash 决定，同一 insight 反复出现时准入自动 merge
     - success_path → playbook.json 的 success_patterns
     - 其它类型不反写
     """
-    import hashlib
-
     from ethan.core.paths import user_procedures_path
-    from ethan.memory.admission import run_incremental_admission
     from ethan.memory.procedures import ProcedureStore
-    from ethan.memory.records import (
-        EvidenceLevel,
-        MemoryCandidate,
-        MemoryDomain,
-        ScopeType,
-    )
-    from ethan.memory.store import MemoryStore
-
-    source_tag = f"insight_{d.isoformat()}"
-
-    if insight_type in TYPE_MEMORY_MAP:
-        memory_type, dimension = TYPE_MEMORY_MAP[insight_type]
-        candidate = MemoryCandidate(
-            memory_type=memory_type,
-            dimension=dimension,
-            memory_key="insight_" + hashlib.sha1(text.strip().encode()).hexdigest()[:16],
-            content=text,
-            scope_type=ScopeType.USER.value,
-            scope_id="self",
-            memory_domain=MemoryDomain.GENERAL.value,
-            evidence_level=EvidenceLevel.INFERRED.value,
-            confidence=INSIGHT_CONFIDENCE,
-            importance=0.6,
-            source_session_id=source_tag,
-            source_message_id="",
-            source_role="api",
-            source_quote=text[:1000],
-            extractor_name="daily_insight",
-            extractor_version="v1",
-        )
-        store = MemoryStore(db_path=_memory_db_path())
-        try:
-            inserted = set(store.create_candidate_batch([candidate]))
-            if inserted:
-                run_incremental_admission(store, [candidate])
-        finally:
-            store.close()
-        logger.debug("[DailyConsolidation] Reflected to memories: %s", text[:50])
-        return True
 
     if insight_type == "success_path":
         # 反写到 playbook.json 的 success_patterns

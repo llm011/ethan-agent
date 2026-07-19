@@ -199,14 +199,6 @@ async def _maybe_consolidate(session_id: str, model: str, user_id: str = "", mod
             except Exception:
                 logger.warning("episode write failed for session %s", session_id, exc_info=True)
 
-        # ── 旧 flat-facts 链路（compress/extract_cold）已退役 ────────────
-        # 长期事实提取由上方 _run_structured_extraction 统一负责（每 5 轮，
-        # 带证据溯源与准入）；原先这里的 compress 产物从不落盘，extract_cold
-        # 的 key_facts 与新链路完全重复，删除后每 5 轮省 1 次 lite LLM、
-        # 每 10 轮省 2+N 次（extract_cold + 每条 fact 提 tags）。
-
-        # 跨 session 信号采集已退役：collect_signals + daily/*.jsonl 链路已删除。
-        # 12 点做梦任务改为直接从 memory.db 读取当日实时抽取准入的结构化记忆作为输入。
     except Exception:
         logger.exception("_maybe_consolidate failed for session=%s", session_id)
 

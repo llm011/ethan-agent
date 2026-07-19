@@ -3,6 +3,9 @@ name: Publish Desktop App
 # 打 tag (v*) 时触发，与 publish-pypi.yml 并行。
 # 构建 macOS (aarch64 + x86_64) 和 Windows 的 Tauri 桌面应用，
 # 打包后上传到 GitHub Release。
+#
+# 跳过条件：自上一个 tag 以来 desktop/ 或 pyproject.toml 没有改动时，
+# 跳过 3 平台构建（用 check-changes job 输出 desktop-changed 控制 build）。
 
 on:
   push:
@@ -10,7 +13,43 @@ on:
       - 'v*'
 
 jobs:
+  # 检查自上一个 tag 以来 desktop 相关文件是否变化
+  check-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      desktop-changed: ${{ steps.diff.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect desktop changes since previous tag
+        id: diff
+        run: |
+          # 找当前 tag 之前最近的 v* tag
+          CURRENT="${GITHUB_REF_NAME}"
+          PREVIOUS=$(git tag --list 'v*' --sort=-creatordate | grep -v "^${CURRENT}$" | head -1)
+          if [ -z "$PREVIOUS" ]; then
+            # 没有前一个 tag（首次 release），必须构建
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "No previous tag found, will build"
+            exit 0
+          fi
+          echo "Comparing $PREVIOUS → $CURRENT"
+          # desktop/ 整个目录 + pyproject.toml（版本号需要同步进 bundle）
+          DIFF=$(git diff --name-only "$PREVIOUS".."$CURRENT" -- desktop/ pyproject.toml)
+          if [ -z "$DIFF" ]; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "No desktop-related changes, will skip build"
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "Desktop changes detected:"
+            echo "$DIFF"
+          fi
+
   build:
+    needs: check-changes
+    if: needs.check-changes.outputs.desktop-changed == 'true'
     strategy:
       fail-fast: false
       matrix:
