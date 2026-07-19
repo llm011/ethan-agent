@@ -206,6 +206,8 @@ export function MemoryView() {
   const [consolidating, setConsolidating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [error, setError] = useState("");
+  // 操作提示（成功/失败），3 秒后自动清除
+  const [notice, setNotice] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [confirmState, setConfirmState] = useState<{
     open: boolean;
     description: string;
@@ -268,11 +270,11 @@ export function MemoryView() {
     try {
       const result = await triggerStructuredConsolidation(dateFilter || undefined);
       const data = result.result;
-      alert(`结构化沉淀完成：${String(data.candidates ?? 0)} 个候选，${String(data.admitted ?? 0)} 条生效记忆`);
+      setNotice({ type: "success", text: `结构化沉淀完成：${String(data.candidates ?? 0)} 个候选，${String(data.admitted ?? 0)} 条生效记忆` });
       await loadData();
     } catch (err) {
       console.error(err);
-      alert("结构化沉淀失败");
+      setNotice({ type: "error", text: "结构化沉淀失败" });
     } finally {
       setConsolidating(false);
     }
@@ -333,6 +335,11 @@ export function MemoryView() {
           {loading && memories.length === 0 && summaries.length === 0 && (
             <div className="flex justify-center py-12">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          )}
+          {notice && (
+            <div className={`text-center text-sm py-2 rounded-md ${notice.type === "success" ? "bg-green-500/10 text-green-600" : "bg-destructive/10 text-destructive"}`}>
+              {notice.text}
             </div>
           )}
           {error && <div className="text-center text-destructive py-8 text-sm">{error}</div>}

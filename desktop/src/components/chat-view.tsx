@@ -620,7 +620,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     }
     let content = isBtw ? (btwQuestion ?? text) : text;
     if (isReview) {
-      const target = trimmed.slice(7).trim();
+      const target = trimmed.replace(/^\/review\s*/, "").trim();
       if (!target) {
         setMessages((prev) => [...prev, {
           role: "assistant",

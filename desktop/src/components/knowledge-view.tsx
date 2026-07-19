@@ -77,7 +77,7 @@ export function KnowledgeView() {
   }
 
   function handleCancelEdit() {
-    setPanelMode(selected ? "view" : "view");
+    setPanelMode("view");
   }
 
   const handleSave = async () => {
