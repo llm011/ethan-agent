@@ -29,7 +29,7 @@ from pathlib import Path
 
 import httpx
 
-from ethan.tools.base import BaseTool
+from ethan.tools.base import BaseTool, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +91,7 @@ class ImageSearchTool(BaseTool):
         max_results: int = 5,
         download: bool = False,
         language: str = "zh-CN",
-    ) -> str:
+    ) -> str | ToolResult:
         try:
             from ethan.core.config import get_config
             cfg = get_config().tools.web_search
@@ -115,13 +115,61 @@ class ImageSearchTool(BaseTool):
                 downloaded = await self._download_images(raw_results, max_results)
                 if not downloaded:
                     return f"Found {len(raw_results)} images but all downloads failed. Try download=false for URLs only."
-                return "\n\n".join(downloaded)
+                return self._build_result(query, downloaded, download=True)
             else:
                 # URL 模式：只返回元数据
-                return "\n\n".join(self._format_url(r) for r in raw_results[:max_results])
+                return self._build_result(query, raw_results[:max_results], download=False)
 
         except Exception as e:
             return f"Image search failed: {e}"
+
+    def _build_result(self, query: str, results: list[dict], download: bool) -> ToolResult:
+        """把结构化图片结果转成 ToolResult。
+
+        - content: 给 LLM 的纯文本摘要（兼容旧格式），让模型知道搜到了什么
+        - cards: 结构化卡片数据，前端按 type=image 渲染横向滚动图片画廊
+
+        download=True 时 cards 里含 local_path 字段，前端优先用本地路径展示；
+        download=False 时只有 url 字段，前端直接用远程 URL（可能受防盗链限制）。
+        """
+        content_parts: list[str] = []
+        for r in results:
+            title = r.get("title", "") or "(无标题)"
+            source = r.get("source", "")
+            w = r.get("width")
+            h = r.get("height")
+            size_str = f" | 尺寸: {w}x{h}" if w and h else ""
+            if download and r.get("local_path"):
+                size_kb = r.get("size_kb", 0)
+                content_parts.append(
+                    f"**{title}**\n本地路径: {r['local_path']}\n来源: {source}{size_str} | 大小: {size_kb}KB | 原始 URL: {r.get('url', '')}"
+                )
+            else:
+                content_parts.append(
+                    f"**{title}**\nURL: {r.get('url', '')}\n来源: {source}{size_str}"
+                )
+        content = "\n\n".join(content_parts)
+
+        cards = [
+            {
+                "type": "image",
+                "title": r.get("title", "") or "(无标题)",
+                "url": r.get("url", ""),
+                "local_path": r.get("local_path", ""),
+                "source": r.get("source", ""),
+                "page_url": r.get("page_url", ""),
+                "width": r.get("width"),
+                "height": r.get("height"),
+                "size_kb": r.get("size_kb"),
+            }
+            for r in results
+        ]
+
+        return ToolResult(
+            tool_call_id="",  # 由 registry 回填
+            content=content,
+            cards=cards,
+        )
 
     async def _searxng_images(
         self, query: str, max_results: int, base_url: str, language: str
@@ -140,7 +188,7 @@ class ImageSearchTool(BaseTool):
                 continue
             results.append({
                 "title": (item.get("title", "") or "")[:80],
-                "img_url": img_url,
+                "url": img_url,  # 图片直接 URL
                 "source": item.get("engine", ""),
                 "page_url": item.get("url", ""),
                 "width": item.get("img_format_src", {}).get("width") if isinstance(item.get("img_format_src"), dict) else None,
@@ -148,25 +196,16 @@ class ImageSearchTool(BaseTool):
             })
         return results
 
-    def _format_url(self, item: dict) -> str:
-        """格式化单条结果（URL 模式）。"""
-        title = item["title"] or "(无标题)"
-        url = item["img_url"]
-        source = item.get("source", "")
-        w = item.get("width")
-        h = item.get("height")
-        size_str = f" | 尺寸: {w}x{h}" if w and h else ""
-        return f"**{title}**\nURL: {url}\n来源: {source}{size_str}"
-
-    async def _download_images(self, items: list[dict], max_results: int) -> list[str]:
-        """并发下载图片到 /tmp/ethan_images/，返回格式化的结果列表。
+    async def _download_images(self, items: list[dict], max_results: int) -> list[dict]:
+        """并发下载图片到 /tmp/ethan_images/，返回结构化结果列表。
 
         失败的图片自动过滤。只返回下载成功的前 max_results 张。
+        每条 dict 在原 item 基础上补充 local_path / size_kb 字段。
         """
         _IMAGE_DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-        async def download_one(client: httpx.AsyncClient, item: dict) -> str | None:
-            url = item["img_url"]
+        async def download_one(client: httpx.AsyncClient, item: dict) -> dict | None:
+            url = item["url"]
             try:
                 # 用真实浏览器 UA + Referer 绕过部分防盗链
                 headers = {
@@ -211,13 +250,13 @@ class ImageSearchTool(BaseTool):
                 if not filepath.exists():
                     filepath.write_bytes(resp.content)
 
-                title = item["title"] or "(无标题)"
-                source = item.get("source", "")
-                return (
-                    f"**{title}**\n"
-                    f"本地路径: {filepath}\n"
-                    f"来源: {source} | 大小: {content_length // 1024}KB | 原始 URL: {url}"
-                )
+                # 返回结构化 dict：保留原 item 字段，补充本地路径和大小
+                return {
+                    **item,
+                    "url": url,  # 原始远程 URL
+                    "local_path": str(filepath),
+                    "size_kb": content_length // 1024,
+                }
             except Exception as e:
                 logger.debug("[ImageSearch] download failed url=%s err=%s", url[:80], e)
                 return None
