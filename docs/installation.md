@@ -178,7 +178,7 @@ npm run dev
 │   ├── soul.md          # 行为原则
 │   └── heartbeat.md     # 心跳任务（自然语言描述的定期任务）
 ├── memory/
-│   ├── facts.json       # 结构化事实记忆
+│   ├── memory.db        # 结构化记忆 + 证据链 + 洞察 + 向量索引
 │   ├── playbook.json  # 行为规则（从纠正中学习）
 │   ├── episodes.json    # 会话摘要归档
 │   └── user_profile.md  # 用户画像（叙述式文档）

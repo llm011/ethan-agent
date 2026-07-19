@@ -11,7 +11,6 @@ from pydantic import BaseModel
 
 from ethan.core.config import get_config
 from ethan.memory.api_keys import APIKeyStore
-from ethan.memory.facts import FactStore
 from ethan.memory.session import SessionStore
 from ethan.providers.base import Message
 
@@ -92,10 +91,10 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
     """OpenAI 兼容的 completions 接口。
 
     扩展字段 `session_id`：绑定到已有 Session 实现上下文持续对话，
-    效果与 Web UI 完全一致（WorkingMemory + cold facts）。
+    效果与 Web UI 完全一致（WorkingMemory hot 滑窗）。
     返回体中 `ethan.session_id` 可用于下次继续对话。
     """
-    from ethan.core.paths import user_facts_path, user_sessions_db_path
+    from ethan.core.paths import user_sessions_db_path
     agent = create_agent(req.model, channel="api", user_id=user_id)
 
     store = SessionStore(db_path=user_sessions_db_path())
@@ -126,7 +125,7 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
     history = session_obj.messages if session_obj else []
 
     memory = WorkingMemory(config=MemoryConfig(hot_size=10))
-    memory.cold_facts = FactStore(path=user_facts_path()).build_context()
+    # 长期记忆由 system prompt 统一注入，messages 只带 hot 滑窗
 
     pairs: list[tuple[Message, Message]] = []
     hist_ua = [m for m in history if m.role in ("user", "assistant")]

@@ -158,15 +158,13 @@ async def _handle_agent_message(
                 agent_user_text = "\n".join(lines) + "\n\n---\n" + agent_user_text
                 agent_user_msg = Message(role="user", content=agent_user_text)
         # 飞书场景每条 assistant 消息体积较大（含工具/思考），5 轮够用且节省 token
-        from ethan.core.paths import user_facts_path
-        from ethan.memory.facts import FactStore
         from ethan.memory.working import MemoryConfig, WorkingMemory
         if btw_mode:
             # /btw：不带任何历史，单轮轻量查询，上下文只有本条消息
             context_messages = [agent_user_msg]
         else:
+            # 长期记忆由 system prompt 统一注入，messages 只带 hot 滑窗
             memory = WorkingMemory(config=MemoryConfig(hot_size=5))
-            memory.cold_facts = FactStore(path=user_facts_path()).build_context()
             hist_ua = [m for m in history if m.role in ("user", "assistant")]
             pairs, i = [], 0
             while i < len(hist_ua) - 1:

@@ -6,6 +6,7 @@
 B1 扩展：同时存储 success_patterns（成功路径），从心跳任务的决策模式抽取中沉淀。
 """
 import json
+import logging
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -13,6 +14,14 @@ from pathlib import Path
 from ethan.core.config import CONFIG_DIR
 
 PROCEDURES_FILE = CONFIG_DIR / "memory" / "playbook.json"
+
+logger = logging.getLogger(__name__)
+
+# BGE 语义去重阈值：组合文本（scenario + tool_sequence）的 L2 距离门槛。
+# 实测：同义改写 L2≈0.34，不同平台相同动作 L2≈0.83，完全无关 L2>1.2。
+# 取 0.9 能识别同义改写且保留不同平台/不同动作的独立条目。
+# BGE 不可用时回退到精确字符串去重（原逻辑）。
+SUCCESS_PATTERN_L2_THRESHOLD = 0.9
 
 
 @dataclass
@@ -78,12 +87,60 @@ class ProcedureStore:
         self._save()
 
     def add_success_pattern(self, scenario: str, tool_sequence: list[str]) -> None:
-        """B1: 添加或更新成功路径。相同 scenario 合并，success_count 累加。"""
+        """B1: 添加或更新成功路径。同一经验合并，success_count 累加。
+
+        去重策略（两层）：
+        1. BGE 语义去重（首选）：把 scenario + tool_sequence 组合成文本做 embedding，
+           L2 < SUCCESS_PATTERN_L2_THRESHOLD 视为同一经验（合并 success_count，
+           tool_sequence 取并集）。
+        2. 精确字符串去重（fallback）：BGE 不可用时回退到 scenario 精确匹配。
+
+        组合文本而非纯 scenario 的原因：实测 BGE 对 5-10 字短文本区分度差
+        （"查京东订单" vs "查询京东订单" L2=0.92，被判为新条目），加上
+        tool_sequence 后区分度提升（L2=0.34），且能区分"同场景不同工具序列"。
+        """
+        from ethan.memory.embeddings import embed_sync
+
+        new_text = f"场景：{scenario}；工具序列：{', '.join(tool_sequence)}"
+        new_emb = embed_sync(new_text)
+
+        if new_emb is not None:
+            # BGE 可用：语义去重
+            import numpy as np
+            new_emb_arr = np.array(new_emb, dtype=np.float32)
+            for p in self._success_patterns:
+                old_text = f"场景：{p.scenario}；工具序列：{', '.join(p.tool_sequence)}"
+                old_emb = embed_sync(old_text)
+                if old_emb is None:
+                    continue
+                old_emb_arr = np.array(old_emb, dtype=np.float32)
+                l2 = float(np.linalg.norm(new_emb_arr - old_emb_arr))
+                if l2 < SUCCESS_PATTERN_L2_THRESHOLD:
+                    # 视为同一经验：合并 success_count 和 tool_sequence
+                    p.success_count += 1
+                    p.last_used = time.time()
+                    seen = set(p.tool_sequence)
+                    for t in tool_sequence:
+                        if t not in seen:
+                            p.tool_sequence.append(t)
+                            seen.add(t)
+                    self._save()
+                    logger.debug("[Procedure] Merged success_pattern (L2=%.3f): %s",
+                                 l2, scenario[:50])
+                    return
+            # 无重复：新增
+            self._success_patterns.append(SuccessPattern(
+                scenario=scenario,
+                tool_sequence=tool_sequence,
+            ))
+            self._save()
+            return
+
+        # BGE 不可用：回退精确字符串去重（原逻辑）
         for p in self._success_patterns:
             if p.scenario.lower().strip() == scenario.lower().strip():
                 p.success_count += 1
                 p.last_used = time.time()
-                # 合并 tool_sequence（去重保序）
                 seen = set(p.tool_sequence)
                 for t in tool_sequence:
                     if t not in seen:

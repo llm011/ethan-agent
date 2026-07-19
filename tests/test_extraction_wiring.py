@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -91,9 +91,8 @@ def _patch_provider(monkeypatch, provider):
 
 @pytest.mark.anyio
 async def test_extraction_wires_end_to_end_and_dedups(isolated_env, monkeypatch):
-    from ethan.interface.routers.tasks import _run_structured_extraction
-    from ethan.memory.extractors import StructuredMemoryExtractor
     from ethan.core.paths import user_sessions_db_path, user_vectors_db_path
+    from ethan.interface.routers.tasks import _run_structured_extraction
 
     await _seed_session(user_sessions_db_path(), "sess-e2e")
 
@@ -135,9 +134,8 @@ async def test_extraction_wires_end_to_end_and_dedups(isolated_env, monkeypatch)
 
 @pytest.mark.anyio
 async def test_extraction_failure_marks_job_failed(isolated_env, monkeypatch):
-    from ethan.interface.routers.tasks import _run_structured_extraction
-    from ethan.memory.extractors import StructuredMemoryExtractor
     from ethan.core.paths import user_sessions_db_path, user_vectors_db_path
+    from ethan.interface.routers.tasks import _run_structured_extraction
 
     await _seed_session(user_sessions_db_path(), "sess-fail")
     _patch_provider(monkeypatch, BoomProvider())
@@ -188,6 +186,7 @@ async def test_generate_skill_passes_messages_not_session(isolated_env, monkeypa
 def test_nonstream_chat_triggers_consolidation(isolated_env, monkeypatch):
     """回归: 非流式 /api/chat 曾完全不触发 _maybe_consolidate。"""
     from fastapi.testclient import TestClient
+
     from ethan.interface.api import app
     from ethan.interface.routers import chat as chat_mod
     from ethan.interface.routers import deps

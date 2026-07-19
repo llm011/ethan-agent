@@ -8,20 +8,22 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 
 ## 特性
 
-**记忆体系（五层）**
-- 热区/温区/冷区三层滑动窗口维持长对话上下文，廉价模型自动压缩较早内容
-- 结构化 Facts：带置信度的条目，有矛盾检测和自动去重（`~/.ethan/memory/facts.json`）
+**记忆体系**
+- **结构化长期记忆**（`memory.db`，用户事实的唯一事实源）：每 5 轮对话提取带原文 quote 佐证的候选（quote 必须是用户消息精确子串），确定性准入——explicit 立即生效，observed 需 ≥2 个独立 session 复证才晋升。64 个维度 × 7 大类（个人信息/偏好/活动/决定/关系/方法论/陪伴），支持 TTL 过期、supersede 纠正链、遗忘脱敏
+- **语义召回与去重**：FTS5 + BGE 向量双通道（RRF 融合）供给唯一的 `<memory_context>` 注入块；准入时向量近邻配对，按确定性规则 merge/supersede（"住在深圳"和"家在深圳南山"不会各存一条）
+- **维度注册表**：提取 prompt 的维度说明与校验白名单由同一份声明式注册表生成——扩展维度不再需要手写 prompt
+- 热区/温区滑动窗口维持长对话上下文（REPL），廉价模型自动压缩较早内容
 - 行为准则 Procedures：从用户纠正中自动学习，每次对话加载（`playbook.json`）
-- 会话 Episodes：对话结束后自动生成摘要存档，支持关键词检索（`episodes.json`）
+- 会话 Episodes：每个 session 自动生成摘要存档，支持关键词检索（`episodes.json`）
 - 用户画像 Profile：叙事型文档，按章节存储个人语言、目标、约定等（`user_profile.md`）；含「基础特征」「心理与情绪」等章节
-- **主动写记忆**：Agent 在对话中识别到可记忆信息时，主动调用工具即时写入，无需批量处理
+- **主动写记忆**：Agent 在对话中识别到可记忆信息时调用 `memory_write`——写入走同一条候选→准入管道（同一个库、同样的证据语义）
 
 **做梦——夜间记忆沉淀（"做梦" / dream）**
-- 每晚 0 点 Ethan 会"做梦"：用廉价模型把白天跨 session 采集的信号（重复需求 ≥3 次、错误、成功路径）精炼成永久洞察，再用 sqlite-vec 做 L2 去重（阈值 1.1）后写入 `memory.db`
-- **结构化记忆层**：在五层模型之上，新增一套 typed `MemoryRecord` 体系（person / preference / methodology / activity / decision / relationship / companion），每 5 轮对话提取有原文佐证的候选，确定性准入（explicit 直接生效；observed 需 ≥2 个独立 session 才晋升），召回注入 prompt，并每日跑一次压缩（general/companion 分域）。苏念（companion）情感记忆隔离在苏念模式，其他模式绝不召回。
-- **反写机制**：沉淀的洞察按类型分流反写到 `facts.json`（repetition/error）和 `playbook.json`（success_path），让洞察在未来对话召回时自然生效，无需单独的读取链路
-- **fact_sync 镜像**：每次做梦前，把 facts.json/playbook.json 的 active 内容全量镜像到 `memory.db`（type=`fact_sync`），让 insight 的 L2 去重天然覆盖已有 fact，无需手动遍历；镜像每次全量重建
-- **永久保留**：第五层是真正的长期记忆——洞察不会被自动删除；`last_accessed` 仅作活跃度观察，不作为淘汰依据（memory.db 体量天然可控，每条洞察约 15KB）
+- 每晚 0 点跑一次统一沉淀（`run_nightly_consolidation`）：重提取当日 session、跨 session 复评 pending 候选、过期清理、分域日摘要、重建记忆向量索引——然后"做梦"：把白天跨 session 的信号（重复需求 ≥3 次、错误、成功路径）精炼成永久洞察，与刚准入的记忆做 sqlite-vec 去重
+- 苏念（companion）情感记忆隔离在苏念模式（独立域，其他模式绝不召回）；诊断/临床标签用词表硬拒绝
+- **反写机制**：洞察按类型分流——repetition/error 反写为结构化候选走准入管道，success_path 进 `playbook.json`，无需单独的读取链路
+- **fact_sync 镜像**：每次做梦前，把 active 记忆/playbook 内容全量镜像到向量库（type=`fact_sync`），让 insight 的 L2 去重天然覆盖已有记忆；镜像每次全量重建
+- **永久保留**：洞察不会被自动删除；`last_accessed` 仅作活跃度观察，不作为淘汰依据（memory.db 体量天然可控，每条洞察约 15KB）
 - **sessions.db 轮转**：完整消息历史增长快，sessions.db 超 10 MB 时用 `VACUUM INTO` 原子快照到 `~/.ethan/archive/sessions.{start}~{end}.db`（文件名带日期跨度），保持 active db 轻量，旧会话仍可按日期查归档
 
 **陪伴倾听模式 · 苏念（《臣服实验》心理咨询师）**
@@ -177,7 +179,7 @@ docker compose down                    # 停止
 
 ### 6. 多用户（可选）
 
-Ethan 支持多用户共享一个实例，记忆（facts / procedures / episodes / sessions）、skills、知识库按用户完全隔离，互不可见。System prompt 和 provider 配置全局共享。
+Ethan 支持多用户共享一个实例，记忆（结构化记忆 / procedures / episodes / sessions）、skills、知识库按用户完全隔离，互不可见。System prompt 和 provider 配置全局共享。
 
 在 `config.yaml` 中预置用户（每个用户绑定一个 `web_token` 用于浏览器登录，和 `api_keys` 用于 `/v1/chat/completions` API 调用 —— 两者都解析到同一个 `user_id`）：
 
@@ -316,8 +318,14 @@ ethan/
 │   ├── anthropic.py      # Claude 原生协议 + Prompt Caching
 │   └── openai_compat.py  # OpenAI 兼容协议
 ├── memory/
-│   ├── working.py        # 热/温/冷三层滑动窗口
-│   ├── facts.py          # 结构化 Facts（矛盾检测 + 置信度）
+│   ├── working.py        # 热/温滑动窗口（会话内压缩）
+│   ├── store.py          # 结构化记忆存储（memories/evidence/candidates/jobs/FTS）
+│   ├── extractors.py     # LLM 候选提取（quote 溯源）
+│   ├── admission.py      # 确定性准入 + 语义配对
+│   ├── dimensions.py     # 维度注册表（白名单 + prompt 生成）
+│   ├── recall.py         # 混合召回（FTS + 向量,RRF）
+│   ├── memory_vectors.py # memories 的 BGE 向量索引
+│   ├── nightly_consolidation.py # 夜间统一沉淀（结构化 + 做梦）
 │   ├── procedures.py     # 行为准则（从纠正中学习）
 │   ├── episodic.py       # 会话 Episode 摘要存档
 │   └── consolidator.py   # 廉价模型压缩器
@@ -348,22 +356,21 @@ ethan/
 
 ## 记忆体系
 
-五层架构：
+结构化记忆管道（提取 → 准入 → 召回 → 夜间沉淀）+ 若干卫星存储：
 
-| 层 | 内容 | 存储 |
+| 组件 | 内容 | 存储 |
 |----|------|------|
-| 热区 | 最近 N 轮完整消息 | 内存 |
-| 温区 | 较早对话的滚动摘要 | 内存 |
-| 冷区（Facts） | 跨 session 提炼的关键事实 | `~/.ethan/memory/facts.json` |
+| 结构化记忆 | 带原文佐证、确定性准入的用户事实 | `~/.ethan/memory/memory.db` |
+| 洞察（做梦） | 跨 session 模式（重复需求/错误/成功路径） | `~/.ethan/memory/memory.db`（向量库） |
 | 行为准则 | 从用户纠正中学习的规则 | `~/.ethan/memory/playbook.json` |
 | 用户画像 | 叙事型个人信息（目标、短语、约定） | `~/.ethan/memory/user_profile.md` |
-| 永久记忆（第五层） | "做梦"沉淀的跨 session 洞察（重复/错误/成功路径） | `~/.ethan/memory/memory.db`（sqlite-vec） |
+| 热区/温区 | 最近 N 轮 + 滚动摘要（会话内压缩） | 内存 |
 
-压缩是**批量触发**的（而非逐轮），使用自动推断的廉价模型（Claude 用户用 Haiku，Gemini 用户用 Flash Lite）。
+提取每 5 轮一次（主模型）；会话内压缩**批量触发**（而非逐轮），使用自动推断的廉价模型（Claude 用户用 Haiku，Gemini 用户用 Flash Lite）。
 
 Agent 通过 `memory_write`、`procedure_write`、`profile_update` 工具在对话中主动写入各层，无需等待下一个压缩周期。
 
-第五层"做梦"（dream）在每晚 0 点自动运行：采集白天跨 session 信号 → 廉价模型精炼 → sqlite-vec L2 去重 → 写入 `memory.db`，并反写到 `facts.json`/`playbook.json` 让洞察在召回时自然生效。详见 [记忆系统设计文档](docs/memory.md)。
+夜间统一沉淀（做梦）在每晚 0 点自动运行：当日 session 重提取复评 → 过期清理 → 分域日摘要 → 采集的跨 session 信号经廉价模型精炼 → sqlite-vec L2 去重 → 写入 `memory.db`，repetition/error 反写为结构化候选走准入、success_path 进 `playbook.json`。详见 [记忆系统设计文档](docs/memory.md)。
 
 ---
 
@@ -460,7 +467,9 @@ GET  /models                    # 可用模型列表
 POST /chat                      # 对话（stream: true 开启 SSE 流式）
 GET  /sessions                  # 会话列表
 GET  /sessions/{id}             # 会话详情（含消息历史）
-GET  /memory/facts              # Facts 列表
+GET  /memory/facts              # 记忆列表（兼容旧格式的视图）
+GET  /memory/records            # 结构化记忆（可按 type/domain/status 过滤）
+GET  /memory/records/{id}       # 记忆详情 + 证据链
 GET  /memory/episodes           # Episode 摘要列表
 GET  /skills                    # Skill 列表
 POST /skills                    # 创建 Skill
@@ -531,7 +540,7 @@ defaults:
 │   ├── soul.md          # 行为原则（主动写记忆的指令在这里）
 │   └── heartbeat.md     # 心跳任务（自然语言定义）
 ├── memory/
-│   ├── facts.json       # 结构化 Facts
+│   ├── memory.db        # 结构化记忆 + 证据链 + 洞察 + 向量索引
 │   ├── playbook.json  # 行为准则
 │   ├── episodes.json    # 会话摘要存档
 │   └── user_profile.md  # 用户画像（叙事型）
@@ -550,9 +559,9 @@ defaults:
 ### 记忆体系
 
 ```bash
-# 1. 主动写 Fact：Agent 自动识别并记录
+# 1. 主动写记忆：Agent 自动识别并记录（走候选→准入管道）
 发送："我叫 Alex，是一名 iOS 工程师"
-验证：cat ~/.ethan/memory/facts.json | python3 -m json.tool | grep -A3 "Alex"
+验证：sqlite3 ~/.ethan/memory/memory.db "SELECT memory_type,dimension,content FROM memories WHERE status='active'" | grep Alex
 
 # 2. 主动写行为准则
 发送："以后你回复我，请用简短的语气，不要废话"

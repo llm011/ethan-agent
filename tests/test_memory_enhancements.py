@@ -149,89 +149,160 @@ class TestScoreRelevance:
 
 
 # ---------------------------------------------------------------------------
-# A1: FactStore tags auto-extraction
+# A1: legacy 迁移的维度分类（facts.json 时代的 tags 角色由 dimension 继承）
 # ---------------------------------------------------------------------------
 
-class TestFactStoreTags:
-    def test_auto_extract_tags_on_add(self, tmp_path):
-        from ethan.memory.facts import FactStore
-        store = FactStore(path=tmp_path / "facts.json")
-        store.add("用户喜欢深色模式", confidence=0.9)
-        assert len(store._facts) == 1
-        # tags 应自动提取，非空
-        assert len(store._facts[0].tags) > 0
+class TestLegacyClassify:
+    def test_keyword_rules_hit(self):
+        from ethan.memory.legacy_migration import _classify
+        assert _classify("用户偏好用中文交流", "preference") == ("preference", "preference.language")
+        assert _classify("用户住在深圳", "knowledge") == ("personal_information", "identity.location")
+        assert _classify("用户在腾讯工作", "knowledge") == ("personal_information", "identity.organization")
 
-    def test_explicit_tags_preserved(self, tmp_path):
-        from ethan.memory.facts import FactStore
-        store = FactStore(path=tmp_path / "facts.json")
-        store.add("custom fact", tags=["manual_tag", "explicit"])
-        assert "manual_tag" in store._facts[0].tags
-        assert "explicit" in store._facts[0].tags
-
-    def test_tags_merged_on_similar(self, tmp_path):
-        from ethan.memory.facts import FactStore
-        store = FactStore(path=tmp_path / "facts.json")
-        store.add("用户喜欢深色模式", tags=["dark"])
-        # 再次添加相似内容（会命中 _find_similar）
-        store.add("用户喜欢深色模式", tags=["theme"])
-        assert len(store._facts) == 1
-        assert "dark" in store._facts[0].tags
-        assert "theme" in store._facts[0].tags
+    def test_fallback_by_category(self):
+        from ethan.memory.legacy_migration import _classify
+        assert _classify("一些普通偏好", "preference") == ("preference", "preference.communication")
+        assert _classify("随便一个决定", "decision") == ("decision", "decision.chosen")
+        assert _classify("普通事实", "knowledge")[0] == "personal_information"
 
 
 # ---------------------------------------------------------------------------
-# A1: FactStore.build_context_with_recall
+# A1: 结构化召回（替代 FactStore.build_context_with_recall）
 # ---------------------------------------------------------------------------
 
-class TestBuildContextWithRecall:
+def _seed_memory(store, content, *, importance=0.5, confidence=0.8):
+    import hashlib
+
+    from ethan.memory.records import (
+        EvidenceLevel,
+        MemoryEvidence,
+        MemoryRecord,
+        MemoryStatus,
+    )
+    record = MemoryRecord(
+        memory_type="preference",
+        dimension="preference.content",
+        memory_key="seed_" + hashlib.sha1(content.encode()).hexdigest()[:12],
+        content=content,
+        status=MemoryStatus.ACTIVE.value,
+        evidence_level=EvidenceLevel.EXPLICIT.value,
+        confidence=confidence,
+        importance=importance,
+    )
+    evidence = MemoryEvidence(
+        memory_id=record.id,
+        evidence_level=EvidenceLevel.EXPLICIT.value,
+        source_session_id="s1",
+        source_message_id="",
+        source_role="user",
+        source_quote=content,
+    )
+    store.create_memory_with_evidence(record, [evidence])
+    return record.id
+
+
+class TestStructuredRecall:
+    def _store(self, tmp_path):
+        from ethan.memory.store import MemoryStore
+        return MemoryStore(db_path=tmp_path / "memory.db")
+
     def test_relevant_facts_prioritized(self, tmp_path):
-        """有 tag 交集的 fact 应排在无交集的之前。"""
-        from ethan.memory.facts import FactStore
-        store = FactStore(path=tmp_path / "facts.json")
-        store.add("用户在字节跳动工作", tags=["字节", "跳动", "工作"])
-        store.add("用户喜欢深色模式", tags=["深色", "模式", "喜欢"])
+        """query 命中的记忆优先返回（FTS/LIKE），未命中不进结果。"""
+        from ethan.memory.recall import _collect
+        store = self._store(tmp_path)
+        _seed_memory(store, "用户在字节跳动工作", importance=0.5)
+        _seed_memory(store, "用户喜欢深色模式", importance=0.9)
+        hits = _collect(store, "字节跳动", domain="general", max_items=8)
+        assert hits and "字节跳动" in hits[0].content
+        assert all("深色模式" not in h.content for h in hits)
+        store.close()
 
-        ctx = store.build_context_with_recall(query="字节跳动", max_facts=5)
-        lines = ctx.strip().split("\n")
-        # "字节跳动工作" 应排在 "深色模式" 前面
-        assert lines[0] == "- 用户在字节跳动工作"
+    def test_cjk_substring_recall(self, tmp_path):
+        """CJK 子串查询（FTS 无分词零命中）必须落到 LIKE 兜底。"""
+        from ethan.memory.recall import _collect
+        store = self._store(tmp_path)
+        _seed_memory(store, "用户偏好用中文交流")
+        hits = _collect(store, "中文", domain="general", max_items=8)
+        assert any("中文" in h.content for h in hits)
+        store.close()
 
     def test_fallback_when_no_relevance(self, tmp_path):
-        """无任何相关 fact 时，按 confidence 降序补齐。"""
-        from ethan.memory.facts import FactStore
-        store = FactStore(path=tmp_path / "facts.json")
-        store.add("fact A", confidence=0.5, tags=["aaa"])
-        store.add("fact B", confidence=0.9, tags=["bbb"])
-
-        ctx = store.build_context_with_recall(query="完全不相关", max_facts=5)
-        lines = ctx.strip().split("\n")
-        # confidence 高的排前面
-        assert lines[0] == "- fact B"
+        """无命中时按 importance 兜底，保证身份类事实可用。"""
+        from ethan.memory.recall import _collect
+        store = self._store(tmp_path)
+        _seed_memory(store, "fact A", importance=0.4)
+        _seed_memory(store, "fact B", importance=0.9)
+        hits = _collect(store, "完全不相关zzzz", domain="general", max_items=8)
+        assert hits and hits[0].content == "fact B"
+        store.close()
 
     def test_empty_store(self, tmp_path):
-        from ethan.memory.facts import FactStore
-        store = FactStore(path=tmp_path / "facts.json")
-        assert store.build_context_with_recall(query="anything") == ""
+        from ethan.memory.recall import _collect
+        store = self._store(tmp_path)
+        assert _collect(store, "anything", domain="general", max_items=8) == []
+        store.close()
 
     def test_empty_query(self, tmp_path):
-        """空 query 时退化为 confidence 排序（与原 build_context 一致）。"""
-        from ethan.memory.facts import FactStore
-        store = FactStore(path=tmp_path / "facts.json")
-        store.add("low confidence fact", confidence=0.3)
-        store.add("high confidence fact", confidence=0.95)
-        ctx = store.build_context_with_recall(query="", max_facts=5)
-        lines = ctx.strip().split("\n")
-        assert lines[0] == "- high confidence fact"
+        """空 query 退化为 importance 排序兜底。"""
+        from ethan.memory.recall import _collect
+        store = self._store(tmp_path)
+        _seed_memory(store, "low importance", importance=0.3)
+        _seed_memory(store, "high importance", importance=0.95)
+        hits = _collect(store, "", domain="general", max_items=8)
+        assert hits[0].content == "high importance"
+        store.close()
 
-    def test_touch_updates_last_accessed(self, tmp_path):
-        """命中的 fact 的 last_accessed 应被更新。"""
-        from ethan.memory.facts import FactStore
-        store = FactStore(path=tmp_path / "facts.json")
-        store.add("用户喜欢深色模式", tags=["深色", "模式"])
-        old_accessed = store._facts[0].last_accessed
-        time.sleep(0.01)
-        store.build_context_with_recall(query="深色模式", max_facts=5)
-        assert store._facts[0].last_accessed > old_accessed
+    def test_touch_updates_last_recalled(self, tmp_path):
+        """召回命中后 last_recalled_at 应被更新。"""
+        import time
+
+        store = self._store(tmp_path)
+        mem_id = _seed_memory(store, "用户喜欢深色模式")
+        assert store.get_memory(mem_id).last_recalled_at is None
+        store.touch_recalled([mem_id])
+        recalled = store.get_memory(mem_id).last_recalled_at
+        assert recalled is not None and recalled <= time.time()
+        store.close()
+
+
+# ---------------------------------------------------------------------------
+# A1: memory_write 工具（替代 FactStore 主动写入）
+# ---------------------------------------------------------------------------
+
+class TestMemoryWriteTool:
+    def test_write_admits_and_dedups(self, tmp_path, monkeypatch):
+        import asyncio
+
+        monkeypatch.setattr("ethan.core.paths.CONFIG_DIR", tmp_path)
+
+        async def run():
+            from ethan.tools.builtin.memory_write import MemoryWriteTool
+            tool = MemoryWriteTool()
+            r1 = await tool.run("用户喜欢深色模式", "preference")
+            r2 = await tool.run("用户喜欢深色模式", "preference")
+            return r1, r2
+
+        r1, r2 = asyncio.run(run())
+        assert "Remembered" in r1
+        assert "Already remembered" in r2
+
+    def test_correction_category_marks_corrected(self, tmp_path, monkeypatch):
+        import asyncio
+
+        monkeypatch.setattr("ethan.core.paths.CONFIG_DIR", tmp_path)
+
+        async def run():
+            from ethan.tools.builtin.memory_write import MemoryWriteTool
+            await MemoryWriteTool().run("用户不住北京了，改住上海", "correction")
+
+        asyncio.run(run())
+
+        from ethan.memory.store import MemoryStore
+        store = MemoryStore(db_path=tmp_path / "memory" / "memory.db")
+        memories = store.list_memories(status="active", limit=10)
+        store.close()
+        assert len(memories) == 1
+        assert memories[0].evidence_level == "corrected"
 
 
 # ---------------------------------------------------------------------------
@@ -450,7 +521,7 @@ class TestConsolidationThreshold:
         assert cfg.warm_capacity <= 10, "warm_capacity 应 ≤ 10（原值 20）"
 
     def test_web_consolidate_interval(self):
-        """Web 路径的 _maybe_consolidate 触发条件是 user_turns % 5。"""
+        """结构化提取的触发门槛是 user_turns % 5（_run_structured_extraction 内）。"""
         import inspect
 
         from ethan.interface.routers import tasks
@@ -459,3 +530,13 @@ class TestConsolidationThreshold:
         # (源码里 daily_signals 的 % 10 是合法的,不做全文件断言)
         assert "user_turns % 5 != 0" in source
         assert "user_turns % 10 != 0" not in source
+
+    def test_legacy_compress_extraction_removed(self):
+        """旧 flat-facts 链路（compress/extract_cold）已从 _maybe_consolidate 退役。"""
+        import inspect
+
+        from ethan.interface.routers import tasks
+        source = inspect.getsource(tasks._maybe_consolidate)
+        assert ".extract_cold(" not in source
+        assert "WorkingMemory(" not in source
+        assert "FactStore(" not in source

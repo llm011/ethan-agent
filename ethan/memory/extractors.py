@@ -28,48 +28,10 @@ EXTRACTOR_VERSION = "v1"
 # 超过全局默认 8192 被截断成非法 JSON,修复重试也救不回。单独放宽。
 _EXTRACTION_MAX_TOKENS = 16384
 
-# Dimensions allowed per memory_type. Anything outside these sets is rejected.
-_PERSONAL_DIMENSIONS = {
-    "identity.preferred_name", "identity.pronouns", "identity.language",
-    "identity.location", "identity.timezone", "identity.occupation",
-    "identity.role", "identity.organization", "identity.education",
-    "identity.professional_background", "identity.expertise",
-    "identity.relationship", "identity.accessibility", "identity.long_term_goal",
-}
-_PREFERENCE_DIMENSIONS = {
-    "preference.communication", "preference.language", "preference.tone",
-    "preference.tools", "preference.work_habits", "preference.schedule",
-    "preference.content", "preference.decision_tradeoff", "preference.boundary",
-    "preference.negative", "preference.response_verbosity",
-}
-_ACTIVITY_DIMENSIONS = {
-    "activity.project", "activity.responsibility", "activity.goal",
-    "activity.blocker", "activity.deadline", "activity.waiting",
-    "activity.recent_completion",
-}
-_DECISION_DIMENSIONS = {
-    "decision.chosen", "decision.rejected", "decision.rationale",
-    "decision.constraint", "decision.commitment", "decision.agreement",
-    "decision.deadline", "decision.correction",
-}
-_RELATIONSHIP_DIMENSIONS = {
-    "relationship.role", "relationship.coordination", "relationship.relevance",
-}
-_METHODOLOGY_DIMENSIONS = {
-    "methodology.goal_framing", "methodology.problem_decomposition",
-    "methodology.information_gathering", "methodology.analysis_reasoning",
-    "methodology.evaluation_criteria", "methodology.decision_style",
-    "methodology.execution_workflow", "methodology.tool_usage",
-    "methodology.communication_collaboration", "methodology.quality_control",
-    "methodology.reflection_improvement",
-}
-_COMPANION_DIMENSIONS = {
-    "companion.current_emotion", "companion.current_stressor",
-    "companion.emotional_event", "companion.support_need",
-    "companion.soothing_preference", "companion.support_boundary",
-    "companion.important_inner_experience", "companion.explicit_value",
-    "companion.relationship_context", "companion.requested_follow_up",
-}
+# Dimensions allowed per memory_type are defined in the registry
+# (ethan/memory/dimensions.py) — 白名单校验与 prompt 维度段落都由注册表生成，
+# 保证模型看到的维度与校验集合严格一致。custom.* 前缀维度放行但强制 observed。
+from ethan.memory.dimensions import CUSTOM_PREFIX, build_dimension_prompt, valid_dimensions  # noqa: E402
 
 # 苏念陪伴模式情感提取的完整 system prompt(职责/边界/禁止项/状态机)。
 # 维度详解与示例在 _build_prompt 的 companion_block;此处只放约束与规则。
@@ -174,18 +136,13 @@ def _try_parse(raw: str, session_id: str) -> dict | list | None:
 
 
 def _validate_dimension(memory_type: str, dimension: str) -> None:
-    table = {
-        MemoryType.PERSONAL_INFORMATION.value: _PERSONAL_DIMENSIONS,
-        MemoryType.PREFERENCE.value: _PREFERENCE_DIMENSIONS,
-        MemoryType.ACTIVITY.value: _ACTIVITY_DIMENSIONS,
-        MemoryType.DECISION.value: _DECISION_DIMENSIONS,
-        MemoryType.RELATIONSHIP.value: _RELATIONSHIP_DIMENSIONS,
-        MemoryType.METHODOLOGY.value: _METHODOLOGY_DIMENSIONS,
-        MemoryType.COMPANION.value: _COMPANION_DIMENSIONS,
-    }
-    allowed = table.get(memory_type)
-    if allowed is None:
+    allowed = valid_dimensions(memory_type)
+    if not allowed:
         raise ValueError(f"unsupported memory_type: {memory_type}")
+    # custom.* 前缀维度放行（模型遇到白名单覆盖不到的稳定事实时兜底），
+    # 在 _build_one 里强制 observed 门槛，永不直进 active
+    if dimension.startswith(CUSTOM_PREFIX):
+        return
     if dimension not in allowed:
         raise ValueError(f"{memory_type} does not allow dimension: {dimension}")
 
@@ -281,6 +238,33 @@ class StructuredMemoryExtractor:
             logger.warning("structured extraction top-level not object (session=%s)", session_id)
             return []
 
+        if not payload.get("candidates") and not is_companion:
+            # 空结果复核一次：实测发现极短 transcript 下模型偶发弃权
+            # （单句「我在腾讯工作。」返回空）。复核措辞明确允许再次为空，
+            # 避免在真负样本（噪声/泄漏/诊断拒绝 case）上诱导幻觉。
+            # companion 模式不复核：该域 golden 有一半是泄漏/诊断"拒绝" case，
+            # 空候选本来就是正确答案，复核等于施压模型泄漏。
+            try:
+                recheck = await provider.chat(
+                    [
+                        Message(role="user", content=prompt),
+                        Message(role="assistant", content=raw),
+                        Message(role="user", content=(
+                            "请再逐句检查一遍对话：每条用户消息里是否还有遗漏的事实、"
+                            "偏好（包括「别/不要/不喜欢」类负面偏好）、决定或方法？"
+                            "如有遗漏请补充并输出完整 JSON；如确实没有值得记住的内容，"
+                            "原样返回空 candidates 即可。"
+                        )),
+                    ],
+                    system=self._system_prompt(is_companion=is_companion),
+                    max_tokens=_EXTRACTION_MAX_TOKENS,
+                )
+                reparsed = _try_parse((recheck.content or "").strip(), session_id)
+                if isinstance(reparsed, dict) and reparsed.get("candidates"):
+                    payload = reparsed
+            except Exception:
+                logger.debug("structured extraction recheck failed (session=%s)", session_id, exc_info=True)
+
         return self._build_candidates(
             payload, messages=messages, session_id=session_id, user_id=user_id,
             job_key=job_key, is_companion=is_companion,
@@ -304,9 +288,12 @@ class StructuredMemoryExtractor:
             "每条候选必须引用用户消息里的原文 quote，且 quote 必须是用户消息的精确子串；"
             "无法找到原文支撑就省略该条。\n"
             "assistant 的发言不能作为用户事实的证据。\n"
-            "一次性行为标 observed；用户明确陈述标 explicit；用户明确纠正标 corrected。\n"
+            "一次性行为标 observed；用户明确陈述标 explicit（口语化、一句话的简短陈述也算 explicit）；"
+            "用户明确纠正标 corrected。\n"
             "不要把单次行为泛化为稳定人格特征。\n"
-            "scope_type 只能是 user/user_domain/user_skill/project/mode 之一。"
+            "scope_type 只能是 user/user_domain/user_skill/project/mode 之一。\n"
+            "一段对话可能包含多个值得记住的事实：请逐句检查每条用户消息，不要遗漏。\n"
+            "用户说「别/不要/不喜欢/别再用」也是明确的负面偏好（preference.negative），同样值得提取。"
             "\n本会话不是陪伴模式，禁止输出 companion 维度的情感类记忆。"
         )
 
@@ -318,29 +305,8 @@ class StructuredMemoryExtractor:
             lines.append(f"[msg_id={m.message_id} role={role}] {m.content[:1200]}")
         transcript = "\n".join(lines)
 
-        companion_block = (
-            "\n【companion 维度(仅陪伴模式提取,共 10 类)】\n"
-            "- companion.current_emotion 当前情绪:用户明确说出的当前感受、强度和时间。"
-            "In-episode/带 TTL,默认不晋升稳定特征。示例:「最近因为发布延期感到焦虑」。\n"
-            "- companion.emotional_event 情绪事件:引发感受的具体事件及必要上下文,"
-            "作为历史情节保留、不泛化人格。示例:「评审中的否定让用户感到挫败」。\n"
-            "- companion.current_stressor 压力源/困扰:明确、重复出现的压力源或担忧;"
-            "用户明确说明长期存在或多次重复才晋升。示例:「不确定的截止时间会持续带来压力」。\n"
-            "- companion.support_need 当下支持需求:用户当前希望被倾听、澄清、陪伴还是获得建议;"
-            "仅用户明确说「以后这种情况……」才晋升。示例:「这次只想说说,不需要方案」。\n"
-            "- companion.soothing_preference 安抚偏好:哪些回应方式确实有帮助或令人不适;"
-            "用户明确评价或纠正才确认。示例:「先确认感受再讨论方案会更舒服」。\n"
-            "- companion.support_boundary 情感边界:用户不希望讨论、追问或使用的表达方式;"
-            "用户明确设定边界。示例:「不希望被追问家庭细节」。\n"
-            "- companion.explicit_value 价值/意义:用户明确表达的重要价值、信念或内心意义;"
-            "必须用户直接陈述,高敏感可要求确认。示例:「用户很看重自主选择」。\n"
-            "- companion.important_inner_experience 重要内心经历:对用户有长期影响的内心经历或体验。"
-            "示例:「第一次被裁让用户很久不敢放松」。\n"
-            "- companion.relationship_context 关系上下文:与当前困扰长期相关的人和关系,"
-            "仅保存服务所需最小信息。示例:「某位同事是当前项目合作方」。\n"
-            "- companion.requested_follow_up 后续跟进请求:用户明确拜托后续记挂/回访的事。"
-            "示例:「下周问问我发版顺不顺利」。\n"
-        ) if is_companion else ""
+        # 维度段落由注册表生成：模型看到的维度与校验白名单严格一致
+        dimension_block = build_dimension_prompt(is_companion=is_companion)
 
         return (
             "从以下对话中提取值得长期记住的结构化记忆候选。严格按 JSON 输出：\n"
@@ -353,15 +319,9 @@ class StructuredMemoryExtractor:
             '"confidence":0~1,"importance":0~1,"valid_until":<unix秒或null>,'
             '"structured":{...}'
             "}]}\n\n"
-            "person 维度示例: identity.preferred_name / identity.occupation / identity.expertise / "
-            "preference.communication / preference.negative / activity.project / activity.blocker / "
-            "decision.chosen / decision.rationale\n"
-            "methodology 维度限: methodology.goal_framing/methodology.problem_decomposition/methodology.information_gathering/"
-            "methodology.analysis_reasoning/methodology.evaluation_criteria/methodology.decision_style/methodology.execution_workflow/methodology.tool_usage/"
-            "methodology.communication_collaboration/methodology.quality_control/methodology.reflection_improvement；"
-            "structured 必含 scenario,trigger,steps,heuristics,evaluation_criteria,anti_patterns。"
-            "dimension 必须完整照抄上述维度名(含 memory_type 前缀),不得省略前缀、不得自造。\n"
-            f"{companion_block}\n\n"
+            "dimension 必须完整照抄下列维度名(含 memory_type 前缀),不得省略前缀、不得自造;"
+            "确有白名单覆盖不到的稳定事实,可用 custom.<名称> 维度兜底(只会进入人工复评)。\n\n"
+            f"{dimension_block}\n\n"
             f"对话：\n{transcript}"
         )
 
@@ -428,6 +388,9 @@ class StructuredMemoryExtractor:
                 raise ValueError("companion type requires companion mode")
 
         _validate_dimension(memory_type, dimension)
+        # custom.* 兜底维度：永不直进 active，强制 observed 留给复评
+        if dimension.startswith(CUSTOM_PREFIX):
+            evidence_level = EvidenceLevel.OBSERVED.value
 
         structured = item.get("structured", {})
         if not isinstance(structured, dict):
@@ -436,7 +399,9 @@ class StructuredMemoryExtractor:
             _validate_methodology_structured(structured)
 
         # Companion safety: reject diagnostic / personality labels anywhere in content.
-        if is_companion_type:
+        # companion 模式下对全部类型生效——诊断标签不管被标成什么 memory_type
+        # 都不该从陪伴会话入库（模型可能把情绪内容标成 general 维度绕过检查）。
+        if is_companion_type or is_companion:
             denied = _contains_denied_term(content) or _contains_denied_term(json.dumps(structured, ensure_ascii=False))
             if denied:
                 raise ValueError(f"companion content contains denied term: {denied}")
