@@ -8,10 +8,25 @@ import { fmtTokens } from "@/lib/utils";
 import { A2uiCard } from "./a2ui-card";
 import { McpAppView } from "./mcp-app-view";
 import { MarkdownContent } from "./markdown";
+import { Lightbox, type LightboxImage } from "./lightbox";
+import { SearchCardCarousel, type SearchResultCard } from "./search-card-carousel";
+import { ImageGallery, type ImageCard } from "./image-gallery";
 import { applyHighlights } from "@/lib/highlight";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
-import type { Message } from "./types";
+import type { CardData, Message } from "./types";
 import type { Annotation } from "@/lib/api";
+
+// 按 card.type 分发到 SearchCardCarousel 或 ImageGallery
+function CardRenderer({ cards }: { cards: CardData[] }) {
+  const searchResults = cards.filter((c): c is SearchResultCard => c.type === "search_result");
+  const images = cards.filter((c): c is ImageCard => c.type === "image");
+  return (
+    <div className="mt-2 mb-2 space-y-2">
+      {searchResults.length > 0 && <SearchCardCarousel cards={searchResults} />}
+      {images.length > 0 && <ImageGallery cards={images} />}
+    </div>
+  );
+}
 
 function formatTime(ts?: number) {
   if (!ts) return "";
@@ -59,6 +74,10 @@ function MessageBubbleInner({ msg, isStreaming, isLast, onQuote, onCardAction, o
   // 过程记录（intermediateOutput）默认折叠：流式中展开显示，出结果后自动折叠
   const [processOpen, setProcessOpen] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
+  // 用户附带的图片点击放大用的 Lightbox 状态
+  const [userImages, setUserImages] = useState<LightboxImage[]>([]);
+  const [userImageIndex, setUserImageIndex] = useState(0);
+  const [userLightboxOpen, setUserLightboxOpen] = useState(false);
 
   // 把已保存的标注以「淡显」方式画回气泡正文（阅读模式是完整强度）。
   useEffect(() => {
@@ -162,7 +181,12 @@ function MessageBubbleInner({ msg, isStreaming, isLast, onQuote, onCardAction, o
                       key={j}
                       src={img.dataUrl}
                       alt=""
-                      className="max-h-48 max-w-xs rounded-lg object-contain border border-primary-foreground/20"
+                      className="max-h-48 max-w-xs rounded-lg object-contain border border-primary-foreground/20 cursor-zoom-in"
+                      onClick={() => {
+                        setUserImages(msg.images!.map((im) => ({ url: im.dataUrl || "", title: im.name })));
+                        setUserImageIndex(j);
+                        setUserLightboxOpen(true);
+                      }}
                     />
                   ))}
                 </div>
@@ -214,6 +238,9 @@ function MessageBubbleInner({ msg, isStreaming, isLast, onQuote, onCardAction, o
               )
             )}
             <MarkdownContent ref={contentRef} content={msg.content} />
+            {msg.cards && msg.cards.length > 0 && (
+              <CardRenderer cards={msg.cards} />
+            )}
             {msg.a2ui && msg.a2ui.length > 0 && (
               <A2uiCard surfaces={msg.a2ui} onAction={onCardAction} />
             )}
@@ -261,6 +288,13 @@ function MessageBubbleInner({ msg, isStreaming, isLast, onQuote, onCardAction, o
         </div>
       </div>
     </div>
+    <Lightbox
+      images={userImages}
+      index={userImageIndex}
+      open={userLightboxOpen}
+      onOpenChange={setUserLightboxOpen}
+      onIndexChange={setUserImageIndex}
+    />
     </TooltipProvider>
   );
 }
