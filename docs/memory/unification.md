@@ -58,7 +58,7 @@
 
 | 组件 | 价值 | 去向 |
 |---|---|---|
-| episodes.json | 0 LLM 成本；heartbeat 需求挖掘 + Web API 的唯一数据源 | 保留 |
+| episodes.json | 0 LLM 成本；heartbeat 需求挖掘 + Web API 的唯一数据源 | 已退役（2026-07） |
 | user_profile.md | 用户可见可编辑（Web 编辑页），信任级别高于自动提取 | 保留，独立手写层 |
 | playbook.json | agent 自身行为规范，不是用户事实 | 保留 |
 | daily signals → insight | 跨 session 重复需求/失败模式/成功路径挖掘 | 保留，写入目标改道 |
@@ -75,20 +75,20 @@
   messages: 仅会话内 hot 滑窗（REPL 保留压缩），不再注入 cold facts 伪消息对
 
 写路径:
-  每 5 轮: structured extraction → candidates → admission → memories   【唯一事实提取】
-  每 轮:  episodes（0 LLM）
+  每 3 轮: structured extraction → candidates → admission → memories   【唯一事实提取】
   每10轮: collect_signals → daily/*.jsonl
   agent主动: memory_write → candidate(explicit) → 立即准入
   每  夜: run_nightly_consolidation（做梦与每日沉淀合并，见下）
-          ① 当日 session 重提取 + 准入 + pending 跨 session 复评
+          ① 兜底扫描短会话 + pending 跨 session 复评
           ② insight 挖掘（重复需求/失败/成功路径），embedding 去重
           ③ insight → candidates 走准入；success_path → playbook
           ④ TTL 过期 + 按域日摘要
 
 存储:
   memory.db ← 唯一长期事实库（含 FTS5 + 向量索引）
-  user_profile.md / playbook.json / episodes.json / suggestions.json / daily/*.jsonl ← 各有消费者，保留
+  user_profile.md / playbook.json / daily/*.jsonl ← 各有消费者，保留
   facts.json → 一次性迁移后归档删除
+  episodes.json / suggestions.json → 已退役删除
 ```
 
 **做梦与每日沉淀的合并**：现在 0 点跑两个独立 job（`run_daily_consolidation` 精炼信号产 insight、`run_structured_consolidation` 重提取复评产日摘要）——扫同一批 session、调各自的 LLM、写同一个库。合并为 `run_nightly_consolidation` 单一编排：一次扫当日数据，结构化复评与 insight 挖掘共享上下文与去重底库，统一 LLM 预算，失败一起重试（内部仍分两条 job 记录保持幂等粒度）。

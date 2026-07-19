@@ -5,13 +5,11 @@ Covers differential changes vs. the original agent:
 - A2: detect_memory_signal (rule-driven memory trigger)
 - A3: lowered consolidation threshold (unit-tested via constant check)
 - B1: ProcedureStore success_patterns + old-format compat
-- B2: _build_suggestion_hint (FDE proactive suggestion injection)
 """
 from __future__ import annotations
 
 import json
 import time
-from unittest.mock import patch
 
 # ---------------------------------------------------------------------------
 # A2: detect_memory_signal
@@ -254,7 +252,6 @@ class TestStructuredRecall:
 
     def test_touch_updates_last_recalled(self, tmp_path):
         """召回命中后 last_recalled_at 应被更新。"""
-        import time
 
         store = self._store(tmp_path)
         mem_id = _seed_memory(store, "用户喜欢深色模式")
@@ -440,99 +437,6 @@ class TestProcedureStoreCompat:
 
 
 # ---------------------------------------------------------------------------
-# B2: _build_suggestion_hint
-# ---------------------------------------------------------------------------
-
-class TestSuggestionHint:
-    """测试 Agent._build_suggestion_hint 的过滤逻辑。"""
-
-    def _make_agent(self):
-        from ethan.core.agent import Agent
-        with patch.object(Agent, "__init__", lambda self, *a, **kw: None):
-            agent = Agent()
-        return agent
-
-    def test_no_suggestions_file(self, tmp_path):
-        agent = self._make_agent()
-        with patch("ethan.core.paths.CONFIG_DIR", tmp_path):
-            assert agent._build_suggestion_hint() is None
-
-    def test_pending_suggestion_returned(self, tmp_path):
-        agent = self._make_agent()
-        mem_dir = tmp_path / "memory"
-        mem_dir.mkdir()
-        suggestions = [{
-            "pattern": "每天早上问天气",
-            "count": 4,
-            "suggestion": "可以设置定时天气播报",
-            "created_at": time.time(),
-            "rejected": False,
-        }]
-        (mem_dir / "suggestions.json").write_text(
-            json.dumps(suggestions, ensure_ascii=False), encoding="utf-8"
-        )
-        with patch("ethan.core.paths.CONFIG_DIR", tmp_path):
-            hint = agent._build_suggestion_hint()
-        assert hint is not None
-        assert "每天早上问天气" in hint
-        assert "proactive_suggestion" in hint
-
-    def test_rejected_suggestion_filtered(self, tmp_path):
-        agent = self._make_agent()
-        mem_dir = tmp_path / "memory"
-        mem_dir.mkdir()
-        suggestions = [{
-            "pattern": "已拒绝的建议",
-            "count": 5,
-            "suggestion": "不应出现",
-            "created_at": time.time(),
-            "rejected": True,
-        }]
-        (mem_dir / "suggestions.json").write_text(
-            json.dumps(suggestions, ensure_ascii=False), encoding="utf-8"
-        )
-        with patch("ethan.core.paths.CONFIG_DIR", tmp_path):
-            assert agent._build_suggestion_hint() is None
-
-    def test_expired_suggestion_filtered(self, tmp_path):
-        """超过 7 天的建议应被过滤。"""
-        agent = self._make_agent()
-        mem_dir = tmp_path / "memory"
-        mem_dir.mkdir()
-        suggestions = [{
-            "pattern": "过期建议",
-            "count": 3,
-            "suggestion": "不应出现",
-            "created_at": time.time() - 8 * 86400,  # 8 天前
-            "rejected": False,
-        }]
-        (mem_dir / "suggestions.json").write_text(
-            json.dumps(suggestions, ensure_ascii=False), encoding="utf-8"
-        )
-        with patch("ethan.core.paths.CONFIG_DIR", tmp_path):
-            assert agent._build_suggestion_hint() is None
-
-    def test_only_most_recent_returned(self, tmp_path):
-        """多条 pending 建议时，只返回最近 1 条。"""
-        agent = self._make_agent()
-        mem_dir = tmp_path / "memory"
-        mem_dir.mkdir()
-        now = time.time()
-        suggestions = [
-            {"pattern": "旧建议", "count": 3, "suggestion": "旧的", "created_at": now - 100, "rejected": False},
-            {"pattern": "新建议", "count": 5, "suggestion": "新的", "created_at": now, "rejected": False},
-        ]
-        (mem_dir / "suggestions.json").write_text(
-            json.dumps(suggestions, ensure_ascii=False), encoding="utf-8"
-        )
-        with patch("ethan.core.paths.CONFIG_DIR", tmp_path):
-            hint = agent._build_suggestion_hint()
-        assert hint is not None
-        assert "新建议" in hint
-        assert "旧建议" not in hint
-
-
-# ---------------------------------------------------------------------------
 # A3: consolidation threshold constants (regression guard)
 # ---------------------------------------------------------------------------
 
@@ -545,14 +449,15 @@ class TestConsolidationThreshold:
         assert cfg.warm_capacity <= 10, "warm_capacity 应 ≤ 10（原值 20）"
 
     def test_web_consolidate_interval(self):
-        """结构化提取的触发门槛是 user_turns % 5（_run_structured_extraction 内）。"""
+        """结构化提取的触发门槛是 user_turns % 3（_run_structured_extraction 内）。"""
         import inspect
 
         from ethan.interface.routers import tasks
         source = inspect.getsource(tasks)
-        # 确保 consolidation 门槛用的是 % 5 而不是 % 10
+        # 确保 consolidation 门槛用的是 % 3（从 % 5 降级到 % 3 以更及时捕获用户事实）
         # (源码里 daily_signals 的 % 10 是合法的,不做全文件断言)
-        assert "user_turns % 5 != 0" in source
+        assert "user_turns % 3 != 0" in source
+        assert "user_turns % 5 != 0" not in source
         assert "user_turns % 10 != 0" not in source
 
     def test_legacy_compress_extraction_removed(self):

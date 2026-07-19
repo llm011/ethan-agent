@@ -10,9 +10,9 @@
 | A2 | 记忆信号检测器 | `detect_memory_signal()` 确定性规则检测 → 注入 hint + 激活工具 | [memory.md · 信号检测](./memory.md#信号检测与语义召回) |
 | A3 | 降低门槛 + 多渠道 | 触发从 `%10` → `%5`，warm_capacity 20→10，微信/飞书也触发抽取 | [memory.md · 后台抽取触发](./memory.md#后台抽取触发) |
 | B1 | 决策记录结构化 | 心跳从 tool_steps 抽取成功路径 → `playbook.json` 正反馈 | [memory.md · 过程记忆](./memory.md#过程记忆procedurestore) |
-| B2 | FDE 需求挖掘 | episodes ≥3 次重复 → `suggestions.json` → 首轮注入建议 | [memory.md · Episode](./memory.md#第四层情节记忆episodic-memory) |
 
-> B1 与 B2 共享基础设施（心跳调度 + lite 模型 + 存储层），输入源不同（tool_steps vs episodes）但闭环结构一致。
+> B2（FDE 需求挖掘）已随 Episode 链路退役（2026-07）。重复模式挖掘由结构化记忆管道的跨 session 复评负责。
+> B1 与原 B2 共享心跳调度基础设施，但输入源不同（tool_steps vs episodes）。
 
 ---
 

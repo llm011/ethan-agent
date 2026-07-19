@@ -68,7 +68,7 @@ Ethan 是一个运行在 Mac mini 上的个人 AI Agent，全程异步（`asynci
 → 详见 [tools.md](./tools.md)
 
 ### 记忆系统 (`ethan/memory/`)
-核心是结构化记忆管道（`memory.db` 是唯一事实源），周围保留 5 个卫星组件：Session / Working Memory / User Profile / Playbook / Episode。
+核心是结构化记忆管道（`memory.db` 是唯一事实源），周围保留 4 个卫星组件：Session / Working Memory / User Profile / Playbook。
  详见 [memory.md](./memory.md) 与新旧对比 [memory/unification.md](./memory/unification.md)
 
 ### Skill 系统 (`ethan/skills/`)
