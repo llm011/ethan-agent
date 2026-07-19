@@ -30,6 +30,33 @@ export interface McpApp {
   csp?: Record<string, string[]>;
 }
 
+// 搜索结果卡片（web_search 工具产出）
+export interface SearchResultCard {
+  type: "search_result";
+  title: string;
+  url: string;
+  snippet: string;
+  engine: string;        // google/bing/duckduckgo/searxng/tavily/rss
+  published: string;     // 新闻才有，如 "2024-01-01"
+  source: string;        // RSS 来源（Google News/百度新闻）
+}
+
+// 图片卡片（image_search 工具产出）
+export interface ImageCard {
+  type: "image";
+  title: string;
+  url: string;          // 图片远程 URL
+  local_path: string;   // 下载模式才有，如 "/tmp/ethan_images/img_xxx.jpg"
+  source: string;       // bing images/flickr/openverse 等
+  page_url: string;     // 来源页面 URL
+  width: number | null;
+  height: number | null;
+  size_kb: number | null;
+}
+
+// 结构化卡片数据（web_search/image_search 工具产出）
+export type CardData = SearchResultCard | ImageCard;
+
 export interface Message {
   role: "user" | "assistant";
   id?: number;            // 后端消息行 id（assistant 落库后才有），标注按此持久化
@@ -49,4 +76,5 @@ export interface Message {
   mcpApps?: McpApp[];  // 工具 UI 资源，前端按 uri 拉取模板后在 iframe 沙箱渲染
   images?: PendingFile[];  // 发送时附带的图片
   matchedSkills?: SkillMatch[];  // 本次对话命中的 Skill 列表，用于可视化
+  cards?: CardData[];  // 结构化卡片数据（web_search/image_search 产出）
 }

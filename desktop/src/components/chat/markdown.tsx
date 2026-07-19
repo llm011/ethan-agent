@@ -3,7 +3,8 @@ import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { CodeBlock } from "@/components/code-block";
 import { PlainCodeBlock } from "@/components/plain-code-block";
-import { forwardRef, useMemo } from "react";
+import { forwardRef, useMemo, useState } from "react";
+import { Lightbox, type LightboxImage } from "./lightbox";
 
 // CommonMark 规定 ** 紧内侧不能有空格，否则不渲染加粗。
 // 此函数去掉 AI 生成文本中 ** 内侧的多余空白，修复渲染。
@@ -42,15 +43,42 @@ export const MarkdownContent = forwardRef<
   HTMLDivElement,
   { content: string; className?: string; variant?: "bubble" | "share" }
 >(({ content, className, variant = "bubble" }, ref) => {
+  // markdown 中 <img> 点击放大所需的内部状态
+  const [lightboxImages, setLightboxImages] = useState<LightboxImage[]>([]);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+
+  // 合并默认 components 与 img 处理；img 点击打开 Lightbox 显示大图
+  const components = useMemo<Components>(() => ({
+    ...markdownComponents,
+    img: ({ src, alt }) => {
+      const url = String(src || "");
+      return (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={url}
+          alt={alt || ""}
+          className="cursor-zoom-in max-h-96 rounded-lg"
+          onClick={() => {
+            setLightboxImages([{ url, title: alt || "" }]);
+            setLightboxIndex(0);
+            setLightboxOpen(true);
+          }}
+        />
+      );
+    },
+  }), []);
+
   // 缓存 markdown 解析结果：content 不变时不重新解析（react-markdown 解析是同步阻塞主线程的昂贵操作）
   const parsed = useMemo(
     () => (
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
         {fixBold(content)}
       </ReactMarkdown>
     ),
-    [content],
+    [content, components],
   );
+
   return (
     <div
       ref={ref}
@@ -61,6 +89,13 @@ export const MarkdownContent = forwardRef<
       }
     >
       {parsed}
+      <Lightbox
+        images={lightboxImages}
+        index={lightboxIndex}
+        open={lightboxOpen}
+        onOpenChange={setLightboxOpen}
+        onIndexChange={setLightboxIndex}
+      />
     </div>
   );
 });
