@@ -9,10 +9,12 @@
 | A1 | 记忆自动召回 | FactStore 增加 `tags`，`build_context_with_recall(query)` 按关键词语义召回 | [memory.md · 信号检测与语义召回](./memory.md#信号检测与语义召回) |
 | A2 | 记忆信号检测器 | `detect_memory_signal()` 确定性规则检测 → 注入 hint + 激活工具 | [memory.md · 信号检测](./memory.md#信号检测与语义召回) |
 | A3 | 降低门槛 + 多渠道 | 触发从 `%10` → `%5`，warm_capacity 20→10，微信/飞书也触发抽取 | [memory.md · 后台抽取触发](./memory.md#后台抽取触发) |
-| B1 | 决策记录结构化 | 心跳从 tool_steps 抽取成功路径 → `playbook.json` 正反馈 | [memory.md · 过程记忆](./memory.md#过程记忆procedurestore) |
 
-> B2（FDE 需求挖掘）已随 Episode 链路退役（2026-07）。重复模式挖掘由结构化记忆管道的跨 session 复评负责。
-> B1 与原 B2 共享心跳调度基础设施，但输入源不同（tool_steps vs episodes）。
+> B1（决策记录结构化 / success_patterns）与 B2（FDE 需求挖掘）已于 2026-07 退役。
+> 退役原因：从 tool_steps 共现统计抽取的"模式"99.4% 是只出现一次的噪声，且 scenario 字段被 LLM
+> 自身的 meta 污染，注入 system prompt 信息增益为 0。真正有价值的"行为准则"由 procedure_write
+> 工具 / Consolidator 显式写入 playbook.json 的 procedures 字段。
+> 跨 session 重复模式挖掘由结构化记忆管道的跨 session 复评负责。
 
 ---
 
@@ -125,7 +127,9 @@
 ```
 已实施（本 PR：feat/memory-recall-enhancement）
   A1 自动召回 → A2 信号检测器 → A3 降低门槛 + 多渠道触发
-  B1 决策记录结构化（成功路径正反馈）→ B2 FDE 需求挖掘（主动建议）
+
+已退役（2026-07）
+  B1 决策记录结构化（success_patterns）→ B2 FDE 需求挖掘（proactive_suggestion）
 
 P1（近期）
   3. Action 前置校验 → 4. 知识模型三层 → 5. Context Layer 语义增强

@@ -4,7 +4,7 @@ Covers differential changes vs. the original agent:
 - A1: FactStore tags + build_context_with_recall (semantic recall)
 - A2: detect_memory_signal (rule-driven memory trigger)
 - A3: lowered consolidation threshold (unit-tested via constant check)
-- B1: ProcedureStore success_patterns + old-format compat
+- B1: ProcedureStore procedures + old-format compat (success_patterns 已退役)
 """
 from __future__ import annotations
 
@@ -327,56 +327,15 @@ class TestMemoryWriteTool:
 
 
 # ---------------------------------------------------------------------------
-# B1: ProcedureStore success_patterns
+# B1: ProcedureStore success_patterns（已退役，保留空注释作为分隔）
 # ---------------------------------------------------------------------------
 
-class TestSuccessPatterns:
-    def test_add_new_pattern(self, tmp_path):
-        from ethan.memory.procedures import ProcedureStore
-        store = ProcedureStore(path=tmp_path / "playbook.json")
-        store.add_success_pattern("查京东订单", ["shell:jd_query", "file_write:save"])
-        patterns = store.all_success_patterns()
-        assert len(patterns) == 1
-        assert patterns[0].scenario == "查京东订单"
-        assert patterns[0].success_count == 1
-        assert "shell:jd_query" in patterns[0].tool_sequence
-
-    def test_merge_same_scenario(self, tmp_path):
-        """相同 scenario 的 pattern 应合并，count 累加。"""
-        from ethan.memory.procedures import ProcedureStore
-        store = ProcedureStore(path=tmp_path / "playbook.json")
-        store.add_success_pattern("查京东订单", ["shell:jd_query"])
-        store.add_success_pattern("查京东订单", ["file_write:save"])
-        patterns = store.all_success_patterns()
-        assert len(patterns) == 1
-        assert patterns[0].success_count == 2
-        # 两个 tool 都应保留
-        assert "shell:jd_query" in patterns[0].tool_sequence
-        assert "file_write:save" in patterns[0].tool_sequence
-
-    def test_different_scenarios_separate(self, tmp_path):
-        from ethan.memory.procedures import ProcedureStore
-        store = ProcedureStore(path=tmp_path / "playbook.json")
-        store.add_success_pattern("查京东订单", ["shell:jd_query"])
-        store.add_success_pattern("查淘宝订单", ["shell:tb_query"])
-        assert len(store.all_success_patterns()) == 2
-
-    def test_build_context_includes_success_patterns(self, tmp_path):
-        from ethan.memory.procedures import ProcedureStore
-        store = ProcedureStore(path=tmp_path / "playbook.json")
-        store.add("不要用浏览器模拟登录")
-        store.add_success_pattern("查京东订单", ["shell:jd_query", "file_write:save"])
-        ctx = store.build_context()
-        # 应同时包含纠正准则和成功路径
-        assert "不要用浏览器模拟登录" in ctx
-        assert "Success patterns" in ctx
-        assert "查京东订单" in ctx
-        assert "shell:jd_query" in ctx
-
-    def test_build_context_empty(self, tmp_path):
-        from ethan.memory.procedures import ProcedureStore
-        store = ProcedureStore(path=tmp_path / "playbook.json")
-        assert store.build_context() == ""
+# success_patterns 容器已于 2026-07 退役：
+# - 从 tool_steps 共现统计抽取的"模式"99.4% 是只出现一次的噪声
+# - scenario 字段被 LLM 自身的 meta 污染
+# - 注入 system prompt 信息增益为 0（~27k tokens 浪费）
+# 真正有价值的"行为准则"由 procedure_write 工具 / Consolidator 显式写入 procedures。
+# 相关测试已删除，保留 TestProcedureStoreCompat 验证旧格式加载兼容性。
 
 
 # ---------------------------------------------------------------------------
@@ -385,7 +344,10 @@ class TestSuccessPatterns:
 
 class TestProcedureStoreCompat:
     def test_old_list_format_loads(self, tmp_path):
-        """旧的纯 list 格式应正常加载为 procedures，不丢失数据。"""
+        """旧的纯 list 格式应正常加载为 procedures，不丢失数据。
+
+        注：旧文件中即使有 success_patterns 字段也会被主动丢弃（已退役）。
+        """
         from ethan.memory.procedures import ProcedureStore
         old_data = [
             {"rule": "不要用浏览器模拟登录", "context": "", "created_at": 0, "hit_count": 1},
@@ -397,43 +359,46 @@ class TestProcedureStoreCompat:
         store = ProcedureStore(path=p)
         assert len(store.all()) == 2
         assert store.all()[0].rule == "不要用浏览器模拟登录"
-        # success_patterns 应为空（旧格式没有）
-        assert store.all_success_patterns() == []
 
     def test_new_format_roundtrip(self, tmp_path):
-        """新格式（dict 含 procedures + success_patterns）应完整往返。"""
+        """新格式（dict 含 procedures + 空 success_patterns）应完整往返。"""
         from ethan.memory.procedures import ProcedureStore
         p = tmp_path / "playbook.json"
         store = ProcedureStore(path=p)
         store.add("测试准则")
-        store.add_success_pattern("场景A", ["tool1"])
         store._save()
 
         # 重新加载
         store2 = ProcedureStore(path=p)
         assert len(store2.all()) == 1
         assert store2.all()[0].rule == "测试准则"
-        assert len(store2.all_success_patterns()) == 1
-        assert store2.all_success_patterns()[0].scenario == "场景A"
 
-    def test_old_format_then_add_success_pattern(self, tmp_path):
-        """旧格式文件加载后，添加 success_pattern 应正常保存为新格式。"""
+        # 文件应为新格式（dict），success_patterns 为空数组（向后兼容）
+        data = json.loads(p.read_text(encoding="utf-8"))
+        assert isinstance(data, dict)
+        assert "procedures" in data
+        assert data["success_patterns"] == []
+
+    def test_old_format_with_success_patterns_dropped(self, tmp_path):
+        """旧格式文件含已退役的 success_patterns 字段，加载时应主动丢弃。"""
         from ethan.memory.procedures import ProcedureStore
-        old_data = [{"rule": "旧准则", "context": "", "created_at": 0, "hit_count": 1}]
+        old_data = {
+            "procedures": [{"rule": "旧准则", "context": "", "created_at": 0, "hit_count": 1}],
+            "success_patterns": [
+                {"scenario": "应被丢弃", "tool_sequence": ["tool1"], "success_count": 5}
+            ],
+        }
         p = tmp_path / "playbook.json"
         p.write_text(json.dumps(old_data), encoding="utf-8")
 
         store = ProcedureStore(path=p)
-        store.add_success_pattern("新场景", ["tool1"])
-        store._save()
+        store._save()  # 触发重写
 
-        # 文件应为新格式（dict）
+        # 重读文件 —— success_patterns 应被清空
         data = json.loads(p.read_text(encoding="utf-8"))
-        assert isinstance(data, dict)
-        assert "procedures" in data
-        assert "success_patterns" in data
+        assert data["success_patterns"] == []
         assert len(data["procedures"]) == 1
-        assert len(data["success_patterns"]) == 1
+        assert data["procedures"][0]["rule"] == "旧准则"
 
 
 # ---------------------------------------------------------------------------

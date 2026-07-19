@@ -1,8 +1,10 @@
 """端到端测试：mock 当日 memories → 手动触发"做梦"→ 验证记忆沉淀。
 
 "做梦" = nightly dream = run_daily_consolidation，是 ethan 在每晚 0 点整理
-当日信号、去重、反写到结构化 memories 表 / playbook.json 的过程，模拟人做梦时
-大脑整理记忆的机制。
+当日信号、去重、写入 memory.db 向量库的过程，模拟人做梦时大脑整理记忆的机制。
+
+注：success_path → playbook.json 反写链路已于 2026-07 退役。
+insight 现仅作为向量条目入库，不反写 memories 表或 playbook。
 
 本测试不调真实 LLM（mock _llm_refine 返回固定结果），embedding 走 _hash_embed
 （纯本地 sha256 字符 n-gram，确定性，相同文本向量相同）。
@@ -91,8 +93,12 @@ def _list_active_memories():
 
 # ── 端到端测试 ────────────────────────────────────────────────────────────
 
-async def test_dream_e2e_non_success_path_not_reflected(isolated_fs):
-    """非 success_path 类型（如 repetition）只进向量库，不反写到 memories 表。"""
+async def test_dream_e2e_insight_stored_as_vector_only(isolated_fs):
+    """insight（任意类型）只进向量库，不反写到 memories 表。
+
+    注：success_path → playbook.json 反写链路已于 2026-07 退役，
+    所有类型（repetition/error/success_path/...）均仅作为向量条目入库。
+    """
     from ethan.memory.daily_consolidation import run_daily_consolidation
 
     today = date.today()
@@ -120,44 +126,12 @@ async def test_dream_e2e_non_success_path_not_reflected(isolated_fs):
         items = store.list_items(exclude_types=["fact_sync", "memory"], limit=10)
         assert len(items) == 1
         assert items[0]["metadata"]["type"] == "repetition"
-        assert items[0]["metadata"]["reflected"] is False
     finally:
         store.close()
 
-    # memories 表不应有反写条目（repetition 不再反写）
+    # memories 表不应有反写条目（所有 insight 类型都不再反写）
     memories = _list_active_memories()
-    assert len(memories) == 0, f"repetition 不应反写，实际 {len(memories)} 条"
-
-
-async def test_dream_e2e_success_path_reflects_to_playbook(isolated_fs):
-    """success_path 信号 → 做梦 → 反写到 playbook.json 的 success_patterns。"""
-    from ethan.memory.daily_consolidation import run_daily_consolidation
-
-    today = date.today()
-
-    day_memories = [{"type": "memory", "text": "查京东订单"}]
-    refined = [
-        {"type": "success_path", "text": "查京东订单走 shell:jd_query",
-         "metadata": {"tool_sequence": ["shell:jd_query"]}},
-    ]
-
-    with patch("ethan.memory.daily_consolidation._read_day_memories",
-               return_value=day_memories), \
-         patch("ethan.memory.daily_consolidation._llm_refine",
-               return_value=refined):
-        added = await run_daily_consolidation(target_date=today)
-
-    assert added == 1
-
-    # 验证 playbook.json
-    playbook_file = isolated_fs / "memory" / "playbook.json"
-    assert playbook_file.exists(), "playbook.json 未生成"
-    pb = json.loads(playbook_file.read_text(encoding="utf-8"))
-    assert "success_patterns" in pb
-    assert any("京东" in sp["scenario"] for sp in pb["success_patterns"])
-    # 验证 tool_sequence 被保留
-    sp = next(sp for sp in pb["success_patterns"] if "京东" in sp["scenario"])
-    assert "shell:jd_query" in sp["tool_sequence"]
+    assert len(memories) == 0, f"insight 不应反写到 memories 表，实际 {len(memories)} 条"
 
 
 async def test_dream_e2e_dedup_skips_existing_insight(isolated_fs):
@@ -269,10 +243,12 @@ async def test_dream_e2e_get_all_memories_filters_fact_sync(isolated_fs):
     assert by_date[0]["metadata"]["type"] == "error"
 
 
-async def test_dream_e2e_multiple_insights_mixed_reflection(isolated_fs):
-    """混合信号：repetition + error + success_path 同时做梦，
-    只有 success_path 反写到 playbook.json，其余仅入向量库。"""
-    from ethan.core.paths import user_procedures_path
+async def test_dream_e2e_multiple_insights_all_vector_only(isolated_fs):
+    """混合信号：repetition + error + success_path 同时做梦，全部仅入向量库。
+
+    注：success_path → playbook.json 反写链路已于 2026-07 退役，
+    所有类型一视同仁，仅作为向量条目入库。
+    """
     from ethan.memory.daily_consolidation import run_daily_consolidation
 
     today = date.today()
@@ -297,14 +273,16 @@ async def test_dream_e2e_multiple_insights_mixed_reflection(isolated_fs):
 
     assert added == 3
 
-    # memories 表不应有反写条目（repetition/error 不再反写）
+    # memories 表不应有反写条目（所有类型都不再反写）
     memories = _list_active_memories()
-    assert len(memories) == 0, f"repetition/error 不应反写，实际 {len(memories)} 条"
+    assert len(memories) == 0, f"所有 insight 都不应反写，实际 {len(memories)} 条"
 
-    # playbook.json 应有 1 条 success_pattern
-    pb = json.loads(user_procedures_path().read_text(encoding="utf-8"))
-    assert len(pb.get("success_patterns", [])) == 1
-    assert "pytest" in pb["success_patterns"][0]["scenario"]
+    # playbook.json 不应有 success_patterns（已退役）
+    from ethan.core.paths import user_procedures_path
+    pb_path = user_procedures_path()
+    if pb_path.exists():
+        pb = json.loads(pb_path.read_text(encoding="utf-8"))
+        assert pb.get("success_patterns", []) == [], "success_patterns 应为空（已退役）"
 
 
 async def test_dream_e2e_insight_exempt_from_lru_cleanup(isolated_fs):
