@@ -1,0 +1,556 @@
+import { useState, useEffect, useCallback } from "react";
+import { useNavigate, useLocation } from "react-router-dom"
+import { Plus, Trash2, Search, Settings, Book, BookOpen, Pencil, Check, X, List, Wrench, RefreshCw } from "lucide-react";
+import { Clock, Database, Layers, Activity } from "lucide-react";
+import { ConfirmDialog } from "@/components/confirm-dialog";
+import { useSidebar } from "@/components/layout-shell";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Separator } from "@/components/ui/separator";
+import {
+  SessionInfo,
+  fetchSessions,
+  fetchSchedules,
+  fetchPoll,
+  fetchBackgroundTasks,
+  deleteSession,
+  renameSession,
+  regenSessionTitle,
+  createSession,
+  fetchVersion,
+  fetchModes,
+  type ModeEntry,
+} from "@/lib/api";
+
+export function Sidebar() {
+  const navigate = useNavigate();
+  const { pathname: pathname } = useLocation();
+  const { setSidebarOpen } = useSidebar();
+
+  // Close sidebar on mobile after navigating
+  const goTo = (path: string) => {
+    navigate(path);
+    if (window.innerWidth < 768) setSidebarOpen(false);
+  };
+
+  const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [scheduleGroupSessions, setScheduleGroupSessions] = useState<SessionInfo[]>([]);
+  const [heartbeatGroupSessions, setHeartbeatGroupSessions] = useState<SessionInfo[]>([]);
+  const [sessionSearch, setSessionSearch] = useState("");
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState("");
+  const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
+  const [confirmState, setConfirmState] = useState<{ open: boolean; id: string }>({ open: false, id: "" });
+  const [normalExpanded, setNormalExpanded] = useState(true);
+  const [scheduleExpanded, setScheduleExpanded] = useState(false);
+  const [heartbeatExpanded, setHeartbeatExpanded] = useState(false);
+  const [schedules, setSchedules] = useState<any[]>([]);
+  const [runningTaskCount, setRunningTaskCount] = useState(0);
+  const [version, setVersion] = useState<string | null>(null);
+  const [modes, setModes] = useState<ModeEntry[]>([]);
+  const [lastSeenSchedule, setLastSeenSchedule] = useState(() => {
+    if (typeof window !== "undefined") {
+      return Number(localStorage.getItem("ethan_last_seen_schedule") || "0");
+    }
+    return 0;
+  });
+
+  // Derive active session id from pathname: /chat/[id]
+  const activeSessionId = pathname.match(/^\/chat\/(.+)$/)?.[1] ?? null;
+
+  // Derive active view from pathname
+  const activeView = pathname === "/" || pathname.startsWith("/chat")
+    ? "chat"
+    : pathname.slice(1).replace(/\/$/, ""); // "memory", "knowledge", etc.
+
+  // 主列表请求已 hide 心跳/定时（否则高频心跳会话会挤爆前 50，把普通会话顶出去）；
+  // 定时/心跳两个分组改用 title_prefixes 独立拉取，互不影响。
+  const normalSessions = sessions.filter((s) => !s.title.startsWith("[定时]") && !s.title.startsWith("[心跳]"));
+  const scheduleSessions = scheduleGroupSessions;
+  const heartbeatSessions = heartbeatGroupSessions;
+  const scheduleUnreadCount = scheduleSessions.filter(
+    (s) => s.updated_at > lastSeenSchedule
+  ).length;
+
+  // Re-fetch sessions on pathname change
+  useEffect(() => {
+    const q = sessionSearch.trim();
+    const timer = setTimeout(() => {
+      setSearchLoading(true);
+      fetchSessions(50, 0, q || undefined, undefined, undefined, true, true)
+        .then(setSessions)
+        .catch(() => {})
+        .finally(() => setSearchLoading(false));
+    }, 300);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionSearch, pathname]);
+
+  // 定时/心跳两个分组：按标题前缀各拉前 5 条，30s 低频轮询（不参与 3s 主 poll）
+  useEffect(() => {
+    const fetchGroups = () => {
+      fetchSessions(5, 0, undefined, undefined, undefined, false, false, "[定时]")
+        .then(setScheduleGroupSessions)
+        .catch(() => {});
+      fetchSessions(5, 0, undefined, undefined, undefined, false, false, "[心跳]")
+        .then(setHeartbeatGroupSessions)
+        .catch(() => {});
+    };
+    fetchGroups();
+    const interval = setInterval(fetchGroups, 30000);
+    return () => clearInterval(interval);
+  }, [pathname]);
+
+  useEffect(() => {
+    fetchSchedules().then(setSchedules).catch(() => {});
+  }, [pathname]);
+
+  // 获取版本号（挂载时一次）
+  useEffect(() => {
+    fetchVersion().then(setVersion);
+  }, []);
+
+  // 获取对话模式表（挂载时一次），用于左栏会话的模式标识
+  useEffect(() => {
+    fetchModes().then(setModes).catch(() => {});
+  }, []);
+
+  // Poll every 3s — skip if user is actively searching
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      if (sessionSearch.trim()) return; // don't interfere while searching
+      try {
+        const data = await fetchPoll(true, true);
+        setSessions(prev => {
+          const incoming = data.sessions as SessionInfo[];
+          const changed = incoming.length !== prev.length ||
+            incoming.some((s, i) => s.updated_at !== prev[i]?.updated_at || s.title !== prev[i]?.title);
+          return changed ? incoming : prev;
+        });
+      } catch {}
+    }, 3000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionSearch]);
+
+  // 后台任务运行数：菜单角标。每 5s 轮询（ethan 无 WS 推送）
+  useEffect(() => {
+    const tick = () => {
+      fetchBackgroundTasks()
+        .then(ts => setRunningTaskCount(ts.filter(t => t.status === "running").length))
+        .catch(() => {});
+    };
+    tick();
+    const interval = setInterval(tick, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleNewSession = () => {
+    navigate("/chat");
+  };
+
+  const handleSelectSession = (id: string) => {
+    if (editingSessionId !== id) {
+      navigate(`/chat/${id}`);
+    }
+  };
+
+  const handleDeleteSession = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setConfirmState({ open: true, id });
+  };
+
+  const doDeleteSession = async () => {
+    const id = confirmState.id;
+    setConfirmState({ open: false, id: "" });
+    await deleteSession(id);
+    setSessions((prev) => prev.filter((s) => s.id !== id));
+    if (activeSessionId === id) {
+      navigate("/chat");
+    }
+  };
+
+  const startEdit = (id: string, title: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingSessionId(id);
+    setEditingTitle(title);
+  };
+
+  const commitRename = async (id: string) => {
+    const title = editingTitle.trim();
+    if (title) {
+      await renameSession(id, title);
+      setSessions((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, title } : s))
+      );
+    }
+    setEditingSessionId(null);
+  };
+
+  const cancelEdit = () => setEditingSessionId(null);
+
+  const handleRegenTitle = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setRegeneratingId(id);
+    const newTitle = await regenSessionTitle(id);
+    setRegeneratingId(null);
+    if (newTitle) {
+      setSessions((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, title: newTitle } : s))
+      );
+    } else {
+      alert("标题重新生成失败");
+    }
+  };
+
+  const renderSession = (s: SessionInfo) => (
+    <div
+      key={s.id}
+      className={`group flex flex-col px-3 py-2 rounded-lg cursor-pointer text-sm transition-colors ${
+        activeSessionId === s.id
+          ? "bg-sidebar-accent text-sidebar-accent-foreground"
+          : "hover:bg-muted"
+      }`}
+      onClick={() => handleSelectSession(s.id)}
+    >
+      <div className="flex items-center gap-2">
+        {/* 对话模式标识：由 /modes 表驱动；匹配到非默认模式则显示其图标，否则工作助手 🛠️ */}
+        {editingSessionId !== s.id && (() => {
+          const m = s.mode ? modes.find((x) => x.key === s.mode) : null;
+          return m ? (
+            <span title={m.label} className="shrink-0 text-xs">{m.icon}</span>
+          ) : (
+            <span title="工作助手模式" className="shrink-0 text-xs opacity-60">🛠️</span>
+          );
+        })()}
+        {editingSessionId === s.id ? (
+          <input
+            autoFocus
+            value={editingTitle}
+            onChange={(e) => setEditingTitle(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commitRename(s.id);
+              if (e.key === "Escape") cancelEdit();
+            }}
+            onClick={(e) => e.stopPropagation()}
+            className="flex-1 bg-transparent outline-none border-b border-primary"
+          />
+        ) : (
+          <span
+            className="truncate flex-1 font-medium"
+            dangerouslySetInnerHTML={{
+              __html: sessionSearch
+                ? s.title.replace(
+                    new RegExp(sessionSearch, "gi"),
+                    (match) =>
+                      `<span class="bg-yellow-500/30 text-yellow-500 rounded px-0.5">${match}</span>`
+                  )
+                : s.title,
+            }}
+          />
+        )}
+        {editingSessionId === s.id ? (
+          <div className="flex gap-1">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                commitRename(s.id);
+              }}
+              className="text-primary hover:opacity-70"
+            >
+              <Check className="h-3 w-3" />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                cancelEdit();
+              }}
+              className="text-muted-foreground hover:opacity-70"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        ) : (
+          <div className="flex opacity-0 group-hover:opacity-100 transition-opacity">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-5 w-5"
+              onClick={(e) => handleRegenTitle(s.id, e)}
+              title="AI 重新生成标题"
+            >
+              <RefreshCw className={`h-3 w-3 ${regeneratingId === s.id ? "animate-spin" : ""}`} />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-5 w-5"
+              onClick={(e) => startEdit(s.id, s.title, e)}
+            >
+              <Pencil className="h-3 w-3" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-5 w-5"
+              onClick={(e) => handleDeleteSession(s.id, e)}
+            >
+              <Trash2 className="h-3 w-3" />
+            </Button>
+          </div>
+        )}
+      </div>
+      {sessionSearch && s.snippet && (
+        <div
+          className="mt-1 text-muted-foreground line-clamp-2 leading-relaxed"
+          dangerouslySetInnerHTML={{
+            __html: s.snippet.replace(
+              new RegExp(sessionSearch, "gi"),
+              (match) =>
+                `<span class="bg-yellow-500/30 text-yellow-500 rounded px-0.5">${match}</span>`
+            ),
+          }}
+        />
+      )}
+    </div>
+  );
+
+  return (
+    <>
+    <ConfirmDialog
+      open={confirmState.open}
+      title="删除对话"
+      description="确定要删除这个对话吗？此操作无法撤销。"
+      confirmLabel="删除"
+      onConfirm={doDeleteSession}
+      onCancel={() => setConfirmState({ open: false, id: "" })}
+    />
+    <aside className="w-full h-full flex flex-col bg-sidebar text-sidebar-foreground">
+      <div className="p-4 pt-[28px] flex items-center justify-between gap-2" data-tauri-drag-region>
+        <h1
+          className="text-lg font-semibold flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity min-w-0 flex-1"
+          onClick={() => { navigate("/chat"); if (window.innerWidth < 768) setSidebarOpen(false); }}
+        >
+          <img src={`${''}/logo-sidebar.png`} alt="Ethan Agent" className="rounded-full shrink-0" />
+          <span className="whitespace-nowrap">Ethan Agent</span>
+          {version && (
+            <span
+              className="text-[9px] font-mono text-muted-foreground/60 bg-muted border border-border/60 rounded-full px-1.5 py-0.5 leading-none shrink-0"
+              title={`ethan-agent v${version}`}
+            >
+              v{version}
+            </span>
+          )}
+        </h1>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6 hover:bg-background"
+          onClick={() => { handleNewSession(); if (window.innerWidth < 768) setSidebarOpen(false); }}
+          title="New chat"
+        >
+          <Plus className="h-4 w-4" />
+        </Button>
+      </div>
+
+      <div className="flex-1 p-2 flex flex-col gap-2 overflow-y-auto">
+        <div className="flex flex-col">
+          {/* Search */}
+          <div className="px-3 py-2">
+            <div className="relative">
+              <Search
+                className={`absolute left-2.5 top-2.5 h-3.5 w-3.5 ${
+                  searchLoading
+                    ? "text-primary animate-pulse"
+                    : "text-muted-foreground"
+                }`}
+              />
+              <Input
+                placeholder="搜索历史..."
+                value={sessionSearch}
+                onChange={(e) => setSessionSearch(e.target.value)}
+                className="h-8 pl-8 text-xs bg-background"
+              />
+            </div>
+          </div>
+
+          {/* All Sessions button */}
+          <Button
+            variant="ghost"
+            className={`w-full justify-start h-9 px-3 ${
+              pathname === "/sessions"
+                ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                : "text-muted-foreground"
+            }`}
+            onClick={() => goTo("/sessions")}
+          >
+            <List className="h-4 w-4 mr-2" /> 全部对话 (All Sessions)
+          </Button>
+
+          {/* Session list */}
+          <div className="pl-6 pr-1 flex flex-col gap-1">
+            {!sessionSearch && (
+              <>
+                <div
+                  className="flex items-center justify-between py-1 mt-1 cursor-pointer text-muted-foreground hover:text-foreground"
+                  onClick={() => setNormalExpanded(!normalExpanded)}
+                >
+                  <span className="text-sm font-semibold">最新对话</span>
+                  <span className="text-[10px]">
+                    {normalExpanded ? "▼" : "▶"}
+                  </span>
+                </div>
+                {normalExpanded && normalSessions.slice(0, 5).map(renderSession)}
+
+                <div
+                  className="flex items-center justify-between py-1 mt-2 cursor-pointer text-muted-foreground hover:text-foreground"
+                  onClick={() => {
+                    setScheduleExpanded(!scheduleExpanded);
+                    if (!scheduleExpanded && scheduleSessions.length > 0) {
+                      const maxUpdated = Math.max(
+                        ...scheduleSessions.map((s) => s.updated_at)
+                      );
+                      if (maxUpdated > lastSeenSchedule) {
+                        setLastSeenSchedule(maxUpdated);
+                        localStorage.setItem(
+                          "ethan_last_seen_schedule",
+                          String(maxUpdated)
+                        );
+                      }
+                    }
+                  }}
+                >
+                  <span className="text-sm font-semibold flex items-center gap-1">
+                    定时任务(对话)
+                    {scheduleUnreadCount > 0 && !scheduleExpanded && (
+                      <span className="bg-red-500 text-white text-[9px] px-1.5 py-0.2 rounded-full">
+                        {scheduleUnreadCount}
+                      </span>
+                    )}
+                  </span>
+                  <span className="text-[10px]">
+                    {scheduleExpanded ? "▼" : "▶"}
+                  </span>
+                </div>
+                {scheduleExpanded &&
+                  scheduleSessions.slice(0, 5).map(renderSession)}
+
+                <div
+                  className="flex items-center justify-between py-1 mt-2 cursor-pointer text-muted-foreground hover:text-foreground"
+                  onClick={() => setHeartbeatExpanded(!heartbeatExpanded)}
+                >
+                  <span className="text-sm font-semibold">心跳(对话)</span>
+                  <span className="text-[10px]">
+                    {heartbeatExpanded ? "▼" : "▶"}
+                  </span>
+                </div>
+                {heartbeatExpanded &&
+                  heartbeatSessions.slice(0, 5).map(renderSession)}
+              </>
+            )}
+            {sessionSearch && sessions.map(renderSession)}
+          </div>
+        </div>
+
+        <Separator className="my-2 opacity-40" />
+
+        {/* Other nav items */}
+        <Button
+          variant="ghost"
+          className={`w-full justify-start h-9 px-3 ${
+            pathname === "/memory"
+              ? "bg-sidebar-accent text-sidebar-accent-foreground"
+              : "text-muted-foreground"
+          }`}
+          onClick={() => goTo("/memory")}
+        >
+          <Database className="h-4 w-4 mr-2" /> 记忆 (Memory)
+        </Button>
+        <Button
+          variant="ghost"
+          className={`w-full justify-start h-9 px-3 ${
+            pathname === "/knowledge"
+              ? "bg-sidebar-accent text-sidebar-accent-foreground"
+              : "text-muted-foreground"
+          }`}
+          onClick={() => goTo("/knowledge")}
+        >
+          <Book className="h-4 w-4 mr-2" /> 知识库 (Knowledge)
+        </Button>
+        <Button
+          variant="ghost"
+          className={`w-full justify-start h-9 px-3 ${
+            pathname === "/skills"
+              ? "bg-sidebar-accent text-sidebar-accent-foreground"
+              : "text-muted-foreground"
+          }`}
+          onClick={() => goTo("/skills")}
+        >
+          <Wrench className="h-4 w-4 mr-2" /> 技能 (Skills)
+        </Button>
+        <Button
+          variant="ghost"
+          className={`w-full justify-start h-9 px-3 ${
+            pathname === "/schedule"
+              ? "bg-sidebar-accent text-sidebar-accent-foreground"
+              : "text-muted-foreground"
+          }`}
+          onClick={() => goTo("/schedule")}
+        >
+          <Clock className="h-4 w-4 mr-2" /> 定时任务 (Schedule)
+        </Button>
+        <Button
+          variant="ghost"
+          className={`w-full justify-start h-9 px-3 ${
+            pathname === "/background-tasks"
+              ? "bg-sidebar-accent text-sidebar-accent-foreground"
+              : "text-muted-foreground"
+          }`}
+          onClick={() => goTo("/background-tasks")}
+        >
+          <Activity className="h-4 w-4 mr-2" /> 后台任务 (Tasks)
+          {runningTaskCount > 0 && (
+            <span className="ml-auto flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-medium">
+              {runningTaskCount}
+            </span>
+          )}
+        </Button>
+        <Button
+          variant="ghost"
+          className={`w-full justify-start h-9 px-3 ${
+            pathname === "/tool-tiers"
+              ? "bg-sidebar-accent text-sidebar-accent-foreground"
+              : "text-muted-foreground"
+          }`}
+          onClick={() => goTo("/tool-tiers")}
+        >
+          <Layers className="h-4 w-4 mr-2" /> 模式工具集 (Tool Tiers)
+        </Button>
+        <Button
+          variant="ghost"
+          className="w-full justify-start h-9 px-3 text-muted-foreground"
+          onClick={() => window.open("https://llm011.github.io/ethan-agent/", "_blank")}
+        >
+          <BookOpen className="h-4 w-4 mr-2" /> 文档 (Docs)
+        </Button>
+      </div>
+
+      {/* Bottom: Settings */}
+      <div className="p-2 border-t border-border">
+        <Button
+          variant="ghost"
+          className={`w-full justify-start h-9 px-3 ${
+            pathname === "/settings"
+              ? "bg-sidebar-accent text-sidebar-accent-foreground"
+              : "text-muted-foreground"
+          }`}
+          onClick={() => goTo("/settings")}
+        >
+          <Settings className="h-4 w-4 mr-2" /> 设置 (Settings)
+        </Button>
+      </div>
+    </aside>
+    </>
+  );
+}

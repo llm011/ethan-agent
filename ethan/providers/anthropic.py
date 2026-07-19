@@ -195,11 +195,12 @@ class AnthropicProvider(BaseProvider):
         messages: list[Message],
         tools: list[ToolDefinition] | None = None,
         system: str | None = None,
+        max_tokens: int | None = None,
     ) -> Message:
         self._check_auth()
         kwargs: dict = {
             "model": self._model,
-            "max_tokens": get_config().defaults.max_tokens,
+            "max_tokens": max_tokens or get_config().defaults.max_tokens,
             "messages": self._to_anthropic_messages(messages),
         }
         if system:

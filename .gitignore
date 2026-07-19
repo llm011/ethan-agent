@@ -94,3 +94,7 @@ app/android/.idea/
 app/android/*.iml
 app/android/captures/
 app/android/.cxx/
+
+# memory eval 生成物
+tests/memory_eval/data/
+tests/memory_eval/report_live.json

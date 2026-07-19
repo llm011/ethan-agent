@@ -34,25 +34,25 @@ test.describe('Ethan Web UI E2E Tests', () => {
 
   // ── Test 2: Memory view ──────────────────────────────────────────────────
 
-  test('Test 2: Memory view - Facts tab loads', async ({ page }) => {
+  test('Test 2: Memory view - 个人信息 tab loads', async ({ page }) => {
     // Click the Memory button in the sidebar navigation.
     await page.getByRole('button', { name: /记忆.*Memory/ }).click();
 
-    // The Facts tab label is rendered in the memory view header.
-    await expect(page.getByText('长期记忆 (Facts)')).toBeVisible();
+    // The default tab (个人信息) is rendered in the memory view header.
+    await expect(page.getByRole('button', { name: '个人信息' })).toBeVisible();
   });
 
-  test('Test 3: Memory view - Episodes tab loads', async ({ page }) => {
+  test('Test 3: Memory view - 苏念记忆 tab loads', async ({ page }) => {
     await page.getByRole('button', { name: /记忆.*Memory/ }).click();
 
-    // Confirm the Facts tab is active first.
-    await expect(page.getByText('长期记忆 (Facts)')).toBeVisible();
+    // Confirm the default tab is active first.
+    await expect(page.getByRole('button', { name: '个人信息' })).toBeVisible();
 
-    // Click the Episodes tab.
-    await page.getByText('历史片段 (Episodes)').click();
+    // Click the companion tab.
+    await page.getByRole('button', { name: '苏念记忆' }).click();
 
-    // The Episodes tab should now be highlighted (visible in header).
-    await expect(page.getByText('历史片段 (Episodes)')).toBeVisible();
+    // The companion tab should now be visible in the header.
+    await expect(page.getByRole('button', { name: '苏念记忆' })).toBeVisible();
   });
 
   // ── Test 3: Schedule view ────────────────────────────────────────────────

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en" class="h-full antialiased">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/icon-32.png" sizes="32x32" />
+    <link rel="icon" type="image/png" href="/icon-64.png" sizes="64x64" />
+    <link rel="icon" type="image/png" href="/icon-192.png" sizes="192x192" />
+    <link rel="apple-touch-icon" href="/apple-icon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+    <title></title>
+    <script>
+      // 默认浅橙暖色主题，dark 模式切为暗色
+      (function(){var t=localStorage.getItem('ethan-theme');if(t==='dark'){document.documentElement.classList.add('dark');}})();
+    </script>
+  </head>
+  <body class="h-full">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

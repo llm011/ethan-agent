@@ -175,5 +175,10 @@ def score_relevance(query_keywords: list[str], tags: list[str]) -> float:
         return 0.0
     qset = {k.lower() for k in query_keywords}
     tset = {t.lower() for t in tags}
+    # 精确集合交集之外,再算子串命中:CJK 关键词常是长 tag 的子串
+    # (query「字节跳动」 vs tag「用户在字节跳动工作」),精确匹配会漏。
     overlap = len(qset & tset)
+    for q in qset:
+        if q not in tset and any(q in t or t in q for t in tset):
+            overlap += 1
     return min(overlap / max(len(qset), 1), 1.0)

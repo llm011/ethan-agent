@@ -107,6 +107,15 @@ defaults:
 
 CLI 模式下不启动心跳（心跳更适合长期运行的服务端场景）。
 
+### 每日 0 点记忆沉淀（`_midnight_loop`）
+
+`start_heartbeat()` 还会启动一条独立的 midnight loop。到达服务器本地 0 点后，它遍历所有用户，并在对应 `ETHAN_USER_ID` 上下文中依次执行：
+
+1. `run_daily_consolidation()`：旧版「做梦」流程，精炼 repetition/error/success_path 信号，embedding 去重后写 `vec_items`，并反写 facts/playbook；
+2. `run_structured_consolidation()`：结构化记忆流程，按用户本地自然日补提短 session、重跑 pending 候选准入、生成 general/companion 分域 DailySummary、标记过期记录。
+
+结构化沉淀用 `user_id + local_date + pipeline_version` 作为 `consolidation_jobs.job_key`：已完成或正在运行时跳过；失败状态可重试，失败不推进处理边界。单用户上下文用 `ContextVar.set/reset` 包裹，确保不同 profile 的 `memory.db` 物理隔离。
+
 ---
 
 ## 数据流

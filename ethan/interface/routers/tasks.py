@@ -32,6 +32,94 @@ async def _maybe_regen_title(session_id: str) -> str | None:
     return None
 
 
+async def _run_structured_extraction(session, model: str, user_id: str, user_turns: int) -> None:
+    """Every five turns, extract source-backed Person/Methodology/Companion memories."""
+    if user_turns % 5 != 0:
+        return
+
+    from ethan.memory.admission import (
+        complete_incremental,
+        fail_incremental,
+        incremental_job_key,
+        run_incremental_admission,
+    )
+    from ethan.memory.extractors import SourceMessage, StructuredMemoryExtractor
+    from ethan.memory.records import ConsolidationJob
+    from ethan.memory.store import MemoryStore
+
+    source_messages = [
+        SourceMessage.from_message(message, session.id)
+        for message in session.messages
+        if message.role in ("user", "assistant") and message.content and message.id is not None
+    ]
+    if not source_messages:
+        return
+
+    last_message = source_messages[-1]
+    job_key = incremental_job_key(user_id, session.id, last_message.message_id)
+    memory_store = MemoryStore()
+    try:
+        boundary = memory_store.last_completed_incremental_boundary(session.id)
+        pending_messages = [
+            message for message in source_messages
+            if boundary is None or (message.created_at or 0) > boundary
+        ]
+        if not pending_messages:
+            return
+        job = ConsolidationJob(
+            user_id=user_id,
+            job_type="incremental_extraction",
+            job_key=job_key,
+            pipeline_version="v1",
+            source_from=boundary,
+            source_until=last_message.created_at or 0,
+        )
+        if not memory_store.claim_job(job):
+            return
+
+        extractor = StructuredMemoryExtractor(model=model)
+        candidates = await extractor.extract(
+            pending_messages,
+            session_id=session.id,
+            user_id=user_id,
+            mode=session.mode,
+            job_key=job_key,
+        )
+        if candidates is None:
+            # LLM 调用失败(瞬时):标 failed 让下轮重试,不能让 boundary 前进,
+            # 否则这批消息的提取永久丢失。
+            raise RuntimeError("structured extraction LLM call failed")
+        inserted_ids = {candidate_id for candidate_id in memory_store.create_candidate_batch(candidates)}
+        inserted = [candidate for candidate in candidates if candidate.id in inserted_ids]
+        result = run_incremental_admission(memory_store, inserted)
+        complete_incremental(
+            memory_store,
+            user_id=user_id,
+            session_id=session.id,
+            message_id=last_message.message_id,
+            result={
+                "candidates": len(inserted),
+                "admitted": len(result.admitted),
+                "merged": len(result.merged),
+                "rejected": len(result.rejected),
+            },
+        )
+    except Exception as exc:
+        logger.exception("structured memory extraction failed for session=%s", session.id)
+        try:
+            fail_incremental(
+                memory_store,
+                user_id=user_id,
+                session_id=session.id,
+                message_id=last_message.message_id,
+                error=str(exc),
+            )
+        except Exception:
+            logger.exception("failed to record extraction error for session=%s", session.id)
+    finally:
+        memory_store.close()
+
+
 async def _maybe_consolidate(session_id: str, model: str, user_id: str = "", mode: str = "") -> None:
     try:
         # 心理画像是否额外抽取：由当前 mode 自身声明，不在此硬编码模式名
@@ -56,9 +144,18 @@ async def _maybe_consolidate(session_id: str, model: str, user_id: str = "", mod
             if m.content:
                 m.content = mask_text(m.content)
 
+        # Persisted session mode is authoritative. Older sessions may have no mode;
+        # only then fall back to the caller-provided value.
+        session.mode = session.mode or mode
+        resolve_mode(session.mode)
+
         user_turns = sum(1 for m in session.messages if m.role == "user")
         if user_turns == 0:
             return
+
+        # Structured Person/Methodology extraction is independent from the legacy
+        # rolling-summary path and runs at the approved five-turn cadence.
+        await _run_structured_extraction(session, model, user_id, user_turns)
 
         # ── Episode 写入（每次对话都记，不等门槛）──────────────────────
         # 原 repl.py 退出时才写 episode，Web/Lark/WeChat 渠道完全没写。
@@ -108,13 +205,14 @@ async def _maybe_consolidate(session_id: str, model: str, user_id: str = "", mod
             memory.apply_summary(summary)
 
         if memory.needs_cold_extraction():
+            # Emotional memory is handled by the companion-only structured
+            # extractor. Legacy cold extraction must never write psychological
+            # inference into the shared user_profile.md.
             result = await consolidator.extract_cold(
-                memory.warm_summary, memory.cold_facts
+                memory.warm_summary, memory.cold_facts, extract_psych=False
             )
             for fact in result["key_facts"]:
                 await fact_store.add_async(fact, confidence=0.8, source=session_id)
-            from ethan.core.profile import apply_extraction
-            apply_extraction(result)
             memory.apply_cold_extraction(fact_store.build_context(), result["condensed"])
 
         # 跨 session 信号采集（每 10 轮触发一次，避免太频繁）
@@ -122,7 +220,7 @@ async def _maybe_consolidate(session_id: str, model: str, user_id: str = "", mod
             from ethan.memory.daily_signals import collect_signals
             await collect_signals()
     except Exception:
-        pass
+        logger.exception("_maybe_consolidate failed for session=%s", session_id)
 
 
 async def _maybe_generate_skill(session_id: str, model: str, user_id: str = "") -> None:
@@ -139,6 +237,6 @@ async def _maybe_generate_skill(session_id: str, model: str, user_id: str = "") 
         if user_turns < MIN_TURNS or user_turns % 5 != 0:
             return
         generator = SkillGenerator(model=model, user_id=user_id)
-        await generator.maybe_generate(session)
+        await generator.maybe_generate(session.messages)
     except Exception:
-        pass
+        logger.exception("_maybe_generate_skill failed for session=%s", session_id)

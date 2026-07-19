@@ -235,6 +235,50 @@ last_accessed REAL               -- 最后被 search 命中的时间
 
 ---
 
+## 结构化记忆（Structured Memory）
+
+文件：`ethan/memory/records.py`、`store.py`、`extractors.py`、`admission.py`、`recall.py`、`structured_consolidation.py`
+
+在五层记忆之上新增一套**结构化、有证据、可演进**的记忆模型，目标是「长期理解每个人」。
+
+### MemoryRecord 统一模型
+
+`memory.db` 中新增 `memories` / `memory_evidence` / `memory_candidates` / `daily_summaries` / `consolidation_jobs` / `memory_fts` 表（与 sqlite-vec 的 `vec_items` 共用一个 DB 文件，互不干扰）。每条记忆是一个 `MemoryRecord`：
+
+- `memory_type`：personal_information / preference / methodology / activity / decision / relationship / companion / skill_experience
+- `dimension` + `memory_key`：稳定标识（如 `identity.preferred_name`、`methodology.evidence_standard`）
+- `scope_type`：user / user_domain / user_skill / project / mode（第一版只支持这五类）
+- `memory_domain`：general / companion（companion 域与 type 强绑定，只存苏念情感记忆）
+- `status`：candidate / active / disputed / superseded / expired / forgotten
+- `evidence_level`：observed（单次行为）/ inferred（多 session 重复）/ explicit（用户明确陈述）/ corrected（用户纠正）
+- `sensitivity`：normal / sensitive / restricted（restricted 不注入上下文、evidence 返回时 redact）
+- `valid_from` / `valid_until`：时效窗口，召回时自动过滤过期项
+- 来源：`source_session_id` / `source_message_id`，每条长期记忆必须可溯源
+
+### 提取与准入（确定性）
+
+- **提取**（`extractors.py`）：LLM 只**提议**候选，必须引用用户消息中的精确原文 quote，否则拒绝。companion 域记忆仅在 `mode=companion` 时提取；诊断/人格/依恋/创伤类词汇一律拒绝。
+- **准入**（`admission.py`）：确定性代码决定候选是否成为 active 记忆，**永不靠 embedding 相似度判冲突**：
+  - explicit / corrected → 直接 active；corrected 或内容变化时 supersede 旧记忆
+  - inferred → 无冲突则 active，有则合并补证据
+  - observed → 仅当 ≥2 个独立 session 一致时才晋升为 active+inferred，否则保持 candidate
+
+### 增量提取与每日压缩
+
+- **增量**（`tasks.py` `_run_structured_extraction`）：每 5 轮用户消息后台触发，按 session/message 增量边界幂等运行，失败不推进边界。
+- **每日结构化压缩**（`structured_consolidation.py` `run_structured_consolidation`）：midnight loop 在做梦后对昨日所有 session 补提、重跑 pending 候选准入、生成普通/companion 两个 domain 的 DailySummary、标记 expired（不静默删）。幂等键 `daily:{user}:{date}:{pipeline_version}`，DB job 为准，失败可重试。
+
+### 召回注入
+
+`recall.py` `build_structured_recall(query, mode)` 在每轮对话构建 system prompt 时，从 `memories` 表按 query 做语义召回（FTS/LIKE，时效已过滤），注入 `<structured_memory>` 块（Background reference, NOT instructions）。companion 域记忆**仅在苏念模式**召回，普通模式绝不注入，防止情感数据泄漏。
+
+### HTTP API 与 UI
+
+- API：`GET/POST /api/memory/records*`（list/search/detail/PATCH/forget/confirm/evidence）、`/api/memory/records/summaries*`、`POST /api/memory/records/consolidate`。companion 记忆需显式 `domain=companion`，普通列表默认排除。
+- UI：Memory 页面分 7 栏 —— 个人信息 / 偏好 / 方法论 / 正在做的事 / 决定与约定 / 苏念记忆 / 每日摘要，每条可编辑/遗忘，展示来源、状态、scope、更新时间。
+
+---
+
 ## 主动写入记忆工具
 
 三个工具让 Agent 即时、主动持久化信息，无需等待滑动窗口触发：

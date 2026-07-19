@@ -91,6 +91,7 @@ class BaseProvider(ABC):
         messages: list[Message],
         tools: list[ToolDefinition] | None = None,
         system: str | None = None,
+        max_tokens: int | None = None,
     ) -> Message: ...
 
     @abstractmethod

@@ -233,6 +233,13 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
     from .producers import _close_browser_sessions
     await _close_browser_sessions(req.session_id)
 
+    # 非流式路径也要触发记忆沉淀/技能生成，与 stream 分支(producers)行为对齐——
+    # 否则走非流式 API 的客户端永远不会产生记忆和 episode。
+    if req.session_id:
+        from .tasks import _maybe_consolidate, _maybe_generate_skill
+        asyncio.create_task(_maybe_consolidate(req.session_id, agent._provider.model, user_id, mode=req.mode))
+        asyncio.create_task(_maybe_generate_skill(req.session_id, agent._provider.model, user_id))
+
     await store.close()
     return ChatResponse(
         content=response.content,

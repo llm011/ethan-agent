@@ -18,6 +18,7 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 
 **做梦——夜间记忆沉淀（"做梦" / dream）**
 - 每晚 0 点 Ethan 会"做梦"：用廉价模型把白天跨 session 采集的信号（重复需求 ≥3 次、错误、成功路径）精炼成永久洞察，再用 sqlite-vec 做 L2 去重（阈值 1.1）后写入 `memory.db`
+- **结构化记忆层**：在五层模型之上，新增一套 typed `MemoryRecord` 体系（person / preference / methodology / activity / decision / relationship / companion），每 5 轮对话提取有原文佐证的候选，确定性准入（explicit 直接生效；observed 需 ≥2 个独立 session 才晋升），召回注入 prompt，并每日跑一次压缩（general/companion 分域）。苏念（companion）情感记忆隔离在苏念模式，其他模式绝不召回。
 - **反写机制**：沉淀的洞察按类型分流反写到 `facts.json`（repetition/error）和 `playbook.json`（success_path），让洞察在未来对话召回时自然生效，无需单独的读取链路
 - **fact_sync 镜像**：每次做梦前，把 facts.json/playbook.json 的 active 内容全量镜像到 `memory.db`（type=`fact_sync`），让 insight 的 L2 去重天然覆盖已有 fact，无需手动遍历；镜像每次全量重建
 - **永久保留**：第五层是真正的长期记忆——洞察不会被自动删除；`last_accessed` 仅作活跃度观察，不作为淘汰依据（memory.db 体量天然可控，每条洞察约 15KB）

@@ -1,0 +1,90 @@
+name: Publish Desktop App
+
+# 打 tag (v*) 时触发，与 publish-pypi.yml 并行。
+# 构建 macOS (aarch64 + x86_64) 和 Windows 的 Tauri 桌面应用，
+# 打包后上传到 GitHub Release。
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-14
+            target: aarch64-apple-darwin
+            args: '--target aarch64-apple-darwin'
+          - platform: macos-13
+            target: x86_64-apple-darwin
+            args: '--target x86_64-apple-darwin'
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            args: ''
+
+    runs-on: ${{ matrix.platform }}
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './desktop/src-tauri -> target'
+
+      - name: Install desktop dependencies
+        working-directory: ./desktop
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: ./desktop
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Ethan Agent ${{ github.ref_name }}'
+          releaseBody: '桌面端应用，下载对应平台的安装包即可使用。'
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
+
+      - name: Upload artifacts (macOS)
+        if: matrix.platform != 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ethan-desktop-${{ matrix.target }}
+          path: |
+            desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.app
+            desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.dmg
+
+      - name: Upload artifacts (Windows)
+        if: matrix.platform == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ethan-desktop-${{ matrix.target }}
+          path: |
+            desktop/src-tauri/target/release/bundle/**/*.msi
+            desktop/src-tauri/target/release/bundle/**/*.exe

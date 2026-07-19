@@ -44,7 +44,7 @@ class TestDetectMemorySignal:
 
     def test_fact_signal(self):
         from ethan.memory.signals import detect_memory_signal
-        result = detect_memory_signal("我在字节跳动工作")
+        result = detect_memory_signal("我的工作是后端开发")
         assert result is not None
         assert result[0] == "fact"
 
@@ -359,7 +359,7 @@ class TestSuggestionHint:
 
     def test_no_suggestions_file(self, tmp_path):
         agent = self._make_agent()
-        with patch("ethan.core.config.CONFIG_DIR", tmp_path):
+        with patch("ethan.core.paths.CONFIG_DIR", tmp_path):
             assert agent._build_suggestion_hint() is None
 
     def test_pending_suggestion_returned(self, tmp_path):
@@ -376,7 +376,7 @@ class TestSuggestionHint:
         (mem_dir / "suggestions.json").write_text(
             json.dumps(suggestions, ensure_ascii=False), encoding="utf-8"
         )
-        with patch("ethan.core.config.CONFIG_DIR", tmp_path):
+        with patch("ethan.core.paths.CONFIG_DIR", tmp_path):
             hint = agent._build_suggestion_hint()
         assert hint is not None
         assert "每天早上问天气" in hint
@@ -396,7 +396,7 @@ class TestSuggestionHint:
         (mem_dir / "suggestions.json").write_text(
             json.dumps(suggestions, ensure_ascii=False), encoding="utf-8"
         )
-        with patch("ethan.core.config.CONFIG_DIR", tmp_path):
+        with patch("ethan.core.paths.CONFIG_DIR", tmp_path):
             assert agent._build_suggestion_hint() is None
 
     def test_expired_suggestion_filtered(self, tmp_path):
@@ -414,7 +414,7 @@ class TestSuggestionHint:
         (mem_dir / "suggestions.json").write_text(
             json.dumps(suggestions, ensure_ascii=False), encoding="utf-8"
         )
-        with patch("ethan.core.config.CONFIG_DIR", tmp_path):
+        with patch("ethan.core.paths.CONFIG_DIR", tmp_path):
             assert agent._build_suggestion_hint() is None
 
     def test_only_most_recent_returned(self, tmp_path):
@@ -430,7 +430,7 @@ class TestSuggestionHint:
         (mem_dir / "suggestions.json").write_text(
             json.dumps(suggestions, ensure_ascii=False), encoding="utf-8"
         )
-        with patch("ethan.core.config.CONFIG_DIR", tmp_path):
+        with patch("ethan.core.paths.CONFIG_DIR", tmp_path):
             hint = agent._build_suggestion_hint()
         assert hint is not None
         assert "新建议" in hint
@@ -455,6 +455,7 @@ class TestConsolidationThreshold:
 
         from ethan.interface.routers import tasks
         source = inspect.getsource(tasks)
-        # 确保源码里用的是 % 5 而不是 % 10
-        assert "% 5" in source
-        assert "% 10" not in source
+        # 确保 consolidation 门槛用的是 % 5 而不是 % 10
+        # (源码里 daily_signals 的 % 10 是合法的,不做全文件断言)
+        assert "user_turns % 5 != 0" in source
+        assert "user_turns % 10 != 0" not in source
