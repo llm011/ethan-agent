@@ -35,6 +35,8 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
   const [generating, setGenerating] = useState(false);
   const [resultImage, setResultImage] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [justSaved, setJustSaved] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
   const previewRef = useRef<HTMLDivElement>(null);
 
   // Esc 关闭
@@ -79,6 +81,8 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
       a.href = dataUrl;
       a.download = `ethan-share-${Date.now()}.png`;
       a.click();
+      setJustSaved(true);
+      setTimeout(() => setJustSaved(false), 2000);
     } catch (err) {
       console.error("生成分享图片失败", err);
       alert("生成图片失败，请重试");
@@ -89,16 +93,25 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
 
   const copyImage = async () => {
     if (!resultImage) return;
+    setCopyFailed(false);
     try {
       const blob = await (await fetch(resultImage)).blob();
       if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
         await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
         setCopied(true);
         setTimeout(() => setCopied(false), 1500);
+        return;
       }
     } catch {
-      // 剪贴板不可用时忽略
+      // 落到下方 fallback
     }
+    // 剪贴板不可用或写入失败：提示 + fallback 再次触发下载
+    setCopyFailed(true);
+    setTimeout(() => setCopyFailed(false), 2000);
+    const a = document.createElement("a");
+    a.href = resultImage;
+    a.download = `ethan-share-${Date.now()}.png`;
+    a.click();
   };
 
   return (
@@ -222,17 +235,21 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
 
         {/* 底部操作条 */}
         <div className="flex items-center justify-between gap-3 border-t border-border px-5 py-3">
-          <span className="text-xs text-muted-foreground">
-            图片会直接下载；localhost 也能分享，因为导出的是图片而非链接。
+          <span className={`text-xs ${justSaved ? "text-green-600" : "text-muted-foreground"}`}>
+            {justSaved ? "已保存到 Downloads" : "图片会直接下载；localhost 也能分享，因为导出的是图片而非链接。"}
           </span>
           <div className="flex items-center gap-2">
             {resultImage && (
               <button
                 onClick={copyImage}
-                className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm hover:bg-accent"
+                className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm ${
+                  copyFailed
+                    ? "border-red-400 text-red-600"
+                    : "border-border hover:bg-accent"
+                }`}
               >
                 {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                {copied ? "已复制" : "复制图片"}
+                {copied ? "已复制" : copyFailed ? "复制失败，已重新下载" : "复制图片"}
               </button>
             )}
             <button
