@@ -297,8 +297,9 @@ class TestMemoryWriteTool:
 
         asyncio.run(run())
 
+        from ethan.core.paths import user_vectors_db_path
         from ethan.memory.store import MemoryStore
-        store = MemoryStore(db_path=tmp_path / "memory" / "memory.db")
+        store = MemoryStore(db_path=user_vectors_db_path())
         memories = store.list_memories(status="active", limit=10)
         store.close()
         assert len(memories) == 1
