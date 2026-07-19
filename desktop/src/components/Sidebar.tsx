@@ -4,6 +4,7 @@ import { Plus, Trash2, Search, Settings, Book, BookOpen, Pencil, Check, X, List,
 import { Clock, Database, Layers, Activity } from "lucide-react";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { useSidebar } from "@/components/layout-shell";
+import { open as openExternal } from "@tauri-apps/plugin-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
@@ -332,7 +333,7 @@ export function Sidebar() {
           className="text-lg font-semibold flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity min-w-0 flex-1"
           onClick={() => { navigate("/chat"); if (window.innerWidth < 768) setSidebarOpen(false); }}
         >
-          <img src={`${''}/logo-sidebar.png`} alt="Ethan Agent" className="rounded-full shrink-0" />
+          <img src={`${''}/logo-sidebar.png`} alt="Ethan Agent" className="rounded-full shrink-0 h-7 w-7" />
           <span className="whitespace-nowrap">Ethan Agent</span>
           {version && (
             <span
@@ -530,7 +531,7 @@ export function Sidebar() {
         <Button
           variant="ghost"
           className="w-full justify-start h-9 px-3 text-muted-foreground"
-          onClick={() => window.open("https://llm011.github.io/ethan-agent/", "_blank")}
+          onClick={() => openExternal("https://llm011.github.io/ethan-agent/")}
         >
           <BookOpen className="h-4 w-4 mr-2" /> 文档 (Docs)
         </Button>
