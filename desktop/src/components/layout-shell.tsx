@@ -1,6 +1,6 @@
 import { useAuth } from "@/lib/auth-context";
 import { LoginView } from "@/components/login-view";
-import { Sidebar } from "@/components/sidebar";
+import { Sidebar } from "@/components/Sidebar";
 import { useState, useEffect, createContext, useContext } from "react";
 import { ChevronLeft, ChevronRight, Menu } from "lucide-react";
 import { Outlet } from "react-router-dom";
