@@ -390,7 +390,9 @@ async def _extract_decision_patterns_for_user(user_id: str) -> None:
         except Exception:
             main_model = "gpt-4o"
 
-        consolidator = Consolidator(main_model=main_model)
+        from ethan.memory.consolidator import get_lite_model
+        lite_model = get_lite_model(main_model)
+        consolidator = Consolidator(main_model=main_model, summary_model=lite_model)
 
         sequences_text = "\n".join(
             f"[Session {i+1}] title={title}\n  tools: {' → '.join(tqs)}"
@@ -471,8 +473,9 @@ async def _mine_recurring_needs_for_user(user_id: str) -> None:
             return
 
         from ethan.core.config import get_config
-        from ethan.memory.consolidator import Consolidator
+        from ethan.memory.consolidator import Consolidator, get_lite_model
         main_model = get_config().defaults.model
+        lite_model = get_lite_model(main_model)
 
         episodes_text = "\n".join(
             f"- [{e.timestamp:.0f}] {e.summary} (keywords: {', '.join(e.keywords)})"
@@ -487,7 +490,7 @@ async def _mine_recurring_needs_for_user(user_id: str) -> None:
             "只输出真正重复的模式，不要把不相关的归为一类。"
         )
 
-        consolidator = Consolidator(main_model=main_model)
+        consolidator = Consolidator(main_model=main_model, summary_model=lite_model)
         try:
             provider = await consolidator._get_provider()
             from ethan.providers.base import Message
