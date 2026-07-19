@@ -18,13 +18,10 @@ from ethan.memory.admission import (
     PIPELINE_VERSION,
     claim_daily,
     complete_daily,
-    daily_job_key,
     fail_daily,
     run_daily_admission,
 )
-from ethan.memory.extractors import SourceMessage, StructuredMemoryExtractor
 from ethan.memory.records import DailySummary, MemoryDomain, MemoryStatus
-from ethan.memory.session import SessionStore
 from ethan.memory.store import MemoryStore
 
 logger = logging.getLogger(__name__)
@@ -174,9 +171,8 @@ def _expire_memories(store: MemoryStore, now: float) -> int:
 async def run_structured_consolidation(target_date: date | None = None) -> dict[str, Any]:
     """Consolidate structured memories for one local day and current user.
 
-    The current user is resolved from ``ETHAN_USER_ID`` through the per-user
-    path helpers. A DB job keyed by user/date/pipeline provides idempotency;
-    failed jobs remain retryable and completed/running jobs are skipped.
+    5 轮实时抽取已覆盖当日 session 的提取职责，12 点任务不再重提取。
+    本函数只做：pending 跨 session 复评 + TTL 过期 + 按域日摘要。
     """
     d = target_date or (date.today() - timedelta(days=1))
     local_date = d.isoformat()
@@ -196,7 +192,6 @@ async def run_structured_consolidation(target_date: date | None = None) -> dict[
     }
 
     memory_store = MemoryStore()
-    session_store = SessionStore()
     claimed = False
     try:
         claimed = claim_daily(
@@ -209,52 +204,11 @@ async def run_structured_consolidation(target_date: date | None = None) -> dict[
             result["skipped"] = True
             return result
 
-        await session_store.init()
-        sessions = await session_store.list_in_range(
-            start_ts,
-            end_ts,
-            exclude_sources=["heartbeat"],
-            exclude_title_prefixes=["[心跳]", "[定时]", "[后台]"],
-        )
-        result["sessions"] = len(sessions)
-        extractor = StructuredMemoryExtractor()
-        day_candidates = []
-        job_key = daily_job_key(user_id, local_date)
+        # 当日 session 重提取已删除：5 轮实时抽取（_run_structured_extraction）
+        # 已在对话过程中完成提取+准入，12 点不再重复处理当日 session。
 
-        for session_meta in sessions:
-            session = await session_store.load(session_meta.id)
-            if not session:
-                continue
-            source_messages = [
-                SourceMessage.from_message(message, session.id)
-                for message in session.messages
-                if message.role in {"user", "assistant"} and message.content and message.id is not None
-            ]
-            if not source_messages:
-                continue
-            candidates = await extractor.extract(
-                source_messages,
-                session_id=session.id,
-                user_id=user_id,
-                mode=session.mode,
-                job_key=job_key,
-            )
-            if candidates is None:
-                # LLM 调用失败:跳过该 session,不阻塞当日其它 session 的批处理
-                logger.warning("structured consolidation: extraction failed, skip session=%s", session.id)
-                continue
-            inserted_ids = set(memory_store.create_candidate_batch(candidates))
-            inserted = [candidate for candidate in candidates if candidate.id in inserted_ids]
-            day_candidates.extend(inserted)
-            result["candidates"] += len(inserted)
-            admitted = run_daily_admission(memory_store, inserted)
-            result["admitted"] += len(admitted.admitted)
-            result["merged"] += len(admitted.merged)
-            result["rejected"] += len(admitted.rejected)
-            result["disputed"] += len(admitted.disputed)
-
-        # Re-evaluate observations from multiple sessions. Newly admitted ones
-        # are already processed, so only genuinely pending candidates remain.
+        # Re-evaluate observations from multiple sessions. 5 轮抽取产生的
+        # pending candidates 在这里做跨 session 复评，observed → inferred。
         pending = memory_store.list_pending_candidates(limit=2000)
         if pending:
             admitted = run_daily_admission(memory_store, pending)
@@ -265,11 +219,20 @@ async def run_structured_consolidation(target_date: date | None = None) -> dict[
 
         result["expired"] = _expire_memories(memory_store, time.time())
 
+        # 日摘要：基于当日准入的 memories（而非重提取的 candidates）
         for domain in (MemoryDomain.GENERAL.value, MemoryDomain.COMPANION.value):
-            domain_candidates = [c for c in day_candidates if c.memory_domain == domain]
-            if not domain_candidates:
+            domain_memories = memory_store.list_memories(
+                memory_domain=domain,
+                status=MemoryStatus.ACTIVE.value,
+                limit=5000,
+            )
+            day_memories = [
+                m for m in domain_memories
+                if start_ts <= (m.created_at or 0) < end_ts
+            ]
+            if not day_memories:
                 continue
-            data = await _summarize_candidates(domain_candidates, domain=domain)
+            data = await _summarize_candidates(day_memories, domain=domain)
             summary = DailySummary(
                 user_id=user_id,
                 local_date=local_date,
@@ -298,8 +261,4 @@ async def run_structured_consolidation(target_date: date | None = None) -> dict[
                 logger.exception("[StructuredConsolidation] failed to record job failure")
         raise
     finally:
-        try:
-            await session_store.close()
-        except Exception:
-            pass
         memory_store.close()

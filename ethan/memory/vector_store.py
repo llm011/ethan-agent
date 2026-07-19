@@ -21,7 +21,7 @@ EXPIRE_SECONDS = 90 * 86400  # 90 天
 
 # 永久保留的类型——不参与 LRU 清理。
 # 第五层定位是"永久记忆"：insight_*（repetition/error/success_path）是"做梦"沉淀下来的洞察，
-# fact_sync 是 facts.json/playbook.json 的镜像（每次"做梦"前全量重建）。
+# fact_sync 是 playbook.json 的镜像（每次"做梦"前全量重建；facts.json 已退役）。
 # 两类均豁免 LRU。cleanup_expired 仅作为安全阀清理未知类型的孤儿条目。
 PERMANENT_TYPES = frozenset({"repetition", "error", "success_path", "fact_sync"})
 

@@ -31,8 +31,6 @@ async def onboarding_status(user_id: str = Depends(verify_token)):
 async def onboarding_complete(req: OnboardingCompleteRequest, user_id: str = Depends(verify_token)):
     from ethan.core.config import CONFIG_DIR
     from ethan.core.onboarding import mark_onboarded
-    from ethan.core.paths import user_facts_path
-    from ethan.memory.facts import FactStore
 
     agent_name = req.agent_name.strip() or "Ethan"
     user_info = req.user_info.strip()
@@ -45,8 +43,9 @@ async def onboarding_complete(req: OnboardingCompleteRequest, user_id: str = Dep
             identity_path.write_text(content.replace("Ethan", agent_name), encoding="utf-8")
 
     if user_info:
-        store = FactStore(path=user_facts_path())
-        await store.add_async(user_info, confidence=1.0, source="onboarding", category="preference")
+        # 与 memory_write 工具同路径：结构化候选 → 准入进 memories 表
+        from ethan.tools.builtin.memory_write import MemoryWriteTool
+        await MemoryWriteTool(user_id=user_id).run(user_info, category="preference")
 
     return {"ok": True, "agent_name": agent_name}
 

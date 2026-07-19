@@ -10,20 +10,22 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 
 ## Features
 
-**Memory system (five layers)**
-- Hot/warm/cold three-tier sliding window for long-conversation context; older content auto-compressed by a cheap model
-- Structured Facts: confidence-scored entries with conflict detection and deduplication (`~/.ethan/memory/facts.json`)
+**Memory system**
+- **Structured long-term memory** (`memory.db`, the single source of truth for user facts): every 5 turns, source-backed candidates are extracted (each must carry an exact quote from a user message) and deterministically admitted — explicit → active immediately, observed → promoted only after ≥2 independent sessions. 64 typed dimensions across 7 categories (personal info / preference / activity / decision / relationship / methodology / companion), with TTL expiry, supersede chains, and redaction-on-forget
+- **Semantic recall & dedup**: hybrid FTS5 + BGE vector retrieval (RRF-fused) feeds a single `<memory_context>` prompt block; at admission, embedding near-neighbors are paired and merged/superseded by deterministic rules ("住在深圳" ≈ "家在深圳南山" never stored twice)
+- **Dimension registry**: the extraction prompt's dimension guide and the validation whitelist are both generated from one declarative registry — extending memory types never touches prompt text by hand
+- Hot/warm sliding window for long-conversation context (REPL); older content auto-compressed by a cheap model
 - Behavioral Procedures: learned from user corrections, loaded every conversation (`playbook.json`)
-- Session Episodes: auto-summarized on exit, supports keyword search (`episodes.json`)
+- Session Episodes: auto-summarized per session, supports keyword search (`episodes.json`)
 - User Profile: narrative document storing personal phrases, goals, and agent agreements (`user_profile.md`); sections include 基础特征 (basic traits) and 心理与情绪 (emotional/psychological traits)
-- **Proactive memory write**: Agent calls tools mid-conversation to instantly persist anything worth remembering — no waiting for batch processing
+- **Proactive memory write**: Agent calls `memory_write` mid-conversation — the write flows through the same candidate→admission pipeline (no separate store, same evidence semantics)
 
 **Dream — nightly memory consolidation ("做梦")**
-- Every night at 0:00, Ethan "dreams": it distills the day's cross-session signals (recurring needs ≥3×, errors, success paths) into permanent insights via a cheap model, then dedups against existing memories with sqlite-vec (L2 < 1.1) before writing to `memory.db`
-- **Structured memory layer**: on top of the five-layer model, a typed `MemoryRecord` system (person / preference / methodology / activity / decision / relationship / companion) extracts source-backed candidates every 5 turns, admits them deterministically (explicit → active; observed → promoted only after ≥2 independent sessions), recalls them into the prompt, and runs a daily consolidation pass with separate general/companion domains. Companion (苏念) emotional memory is isolated to companion mode and never recalled elsewhere.
-- **Reflect-back**: consolidated insights are written back to `facts.json` (repetition/error) and `playbook.json` (success_path) so they surface naturally in future recall — no separate read path needed
-- **fact_sync mirror**: before each dream, active facts/playbook entries are mirrored into `memory.db` (type=`fact_sync`) so insight dedup naturally covers already-known facts; the mirror is fully rebuilt each cycle
-- **Permanent by design**: the fifth layer is true long-term memory — insights are never auto-deleted; `last_accessed` is tracked for observability but not used as an eviction basis (memory.db stays tiny, ~15KB per insight)
+- Every night at 0:00, one unified pass (`run_nightly_consolidation`): re-extract the day's sessions, re-evaluate pending observations across sessions, expire TTL memories, write per-domain daily summaries, rebuild the memory vector index — then "dream": distill cross-session signals (recurring needs ≥3×, errors, success paths) into permanent insights, deduped via sqlite-vec against the freshly-admitted memories
+- Companion (苏念) emotional memory is isolated to companion mode (separate domain, never recalled elsewhere); diagnostic/clinical labels are hard-rejected by a denied-term list
+- **Reflect-back**: insights flow back as structured candidates (repetition/error → admission pipeline) and `playbook.json` (success_path) — no separate read path needed
+- **fact_sync mirror**: before each dream, active memories/playbook entries are mirrored into the vector store (type=`fact_sync`) so insight dedup naturally covers already-known facts; the mirror is fully rebuilt each cycle
+- **Permanent by design**: insights are never auto-deleted; `last_accessed` is tracked for observability but not used as an eviction basis (memory.db stays tiny, ~15KB per insight)
 - **Sessions.db rotation**: full message history grows fast, so sessions.db is auto-archived via `VACUUM INTO` to `~/.ethan/archive/sessions.{start}~{end}.db` (filename carries the date span) once it exceeds 10 MB, keeping the active db small while old chats remain queryable by date
 
 **Companion mode — 苏念 (Surrender Experiment counselor)**
@@ -177,7 +179,7 @@ docker compose down                   # stop
 
 ### 6. Multi-user (optional)
 
-Ethan supports multiple isolated users sharing one instance. Each user has their own memory (facts / procedures / episodes / sessions), skills, and knowledge base — fully isolated per user. System prompts and provider config stay shared.
+Ethan supports multiple isolated users sharing one instance. Each user has their own memory (structured memories / procedures / episodes / sessions), skills, and knowledge base — fully isolated per user. System prompts and provider config stay shared.
 
 Define users in `config.yaml` (each user binds a `web_token` for browser login and `api_keys` for the `/v1/chat/completions` API — both resolve to the same `user_id`):
 
@@ -320,7 +322,13 @@ ethan/
 ├── memory/
 │   ├── session.py             # Session persistence (SQLite)
 │   ├── working.py             # Three-tier sliding window memory
-│   ├── facts.py               # Structured Facts (conflict detection + confidence)
+│   ├── store.py               # Structured memory store (memories/evidence/candidates/jobs/FTS)
+│   ├── extractors.py          # LLM candidate extraction (quote-backed)
+│   ├── admission.py           # Deterministic admission + semantic pairing
+│   ├── dimensions.py          # Dimension registry (whitelist + prompt generation)
+│   ├── recall.py              # Hybrid recall (FTS + vector, RRF)
+│   ├── memory_vectors.py      # BGE vector index for memories
+│   ├── nightly_consolidation.py # Unified nightly pass (structured + dream)
 │   ├── procedures.py          # Behavioral rules (learned from corrections)
 │   ├── episodic.py            # Session episode archive
 │   └── consolidator.py        # Compress with cheap model
@@ -358,17 +366,17 @@ ethan/
 
 ## Memory System
 
-Ethan uses a five-layer memory architecture:
+Ethan's long-term memory is a structured pipeline (extract → admit → recall → nightly consolidation) with several satellite stores:
 
-| Layer | Content | Storage |
+| Component | Content | Storage |
 |-------|---------|---------|
-| Hot | Last N turns (full messages) | In-memory |
-| Warm | Rolling summary of older turns | In-memory |
-| Cold (Facts) | Key facts extracted across sessions | `~/.ethan/memory/facts.json` |
+| Structured memories | Source-backed user facts, deterministically admitted | `~/.ethan/memory/memory.db` |
+| Insights (dream) | Cross-session patterns (recurring needs, errors, success paths) | `~/.ethan/memory/memory.db` (vector store) |
 | Procedures | Behavioral rules learned from corrections | `~/.ethan/memory/playbook.json` |
 | User Profile | Narrative personal context (goals, phrases, agreements) | `~/.ethan/memory/user_profile.md` |
+| Hot/Warm | Last N turns + rolling summary (in-session compression) | In-memory |
 
-Compression is **batched** (not per-turn) and uses an automatically inferred cheap model (e.g. Haiku for Claude users, Flash Lite for Gemini users).
+Extraction runs every 5 turns on the main chat model; in-session compression is **batched** (not per-turn) and uses an automatically inferred cheap model (e.g. Haiku for Claude users, Flash Lite for Gemini users).
 
 Agent proactively writes to all layers mid-conversation via `memory_write`, `procedure_write`, and `profile_update` tools — no waiting for the next compression cycle.
 
@@ -468,7 +476,9 @@ GET  /models                    # Available models
 POST /chat                      # Chat (stream: true for SSE)
 GET  /sessions                  # Session list
 GET  /sessions/{id}             # Session detail + messages
-GET  /memory/facts              # Facts list
+GET  /memory/facts              # Memories list (legacy-compatible view)
+GET  /memory/records            # Structured memories (filter: type/domain/status)
+GET  /memory/records/{id}       # Memory detail + evidence chain
 GET  /memory/episodes           # Episode summaries
 GET  /skills                    # Skill list
 POST /skills                    # Create skill
@@ -537,7 +547,7 @@ Environment variables in `.env` override config values (useful for secrets).
 │   ├── soul.md          # Behavioral principles
 │   └── heartbeat.md     # Heartbeat tasks (natural language)
 ├── memory/
-│   ├── facts.json       # Structured facts
+│   ├── memory.db        # Structured memories + evidence + insights + vector index
 │   ├── playbook.json  # Behavioral rules
 │   ├── episodes.json    # Session episode archive
 │   └── user_profile.md  # User profile (narrative)

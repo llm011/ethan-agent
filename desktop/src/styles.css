@@ -432,14 +432,6 @@
 .share-time { font-size: 11px; color: #8b949e; }
 .share-user-text { font-size: 15px; line-height: 1.7; white-space: pre-wrap; word-break: break-word; }
 .share-divider { height: 1px; background: #eaecef; margin: 16px 0; }
-.share-foot {
-  margin-top: 18px;
-  padding-top: 12px;
-  border-top: 1px solid #eaecef;
-  text-align: center;
-  font-size: 11px;
-  color: #8b949e;
-}
 
 /* 分享卡片内的 markdown 排版（浅色，独立于应用主题） */
 .share-prose { font-size: 15px; line-height: 1.7; color: #1f2328; word-break: break-word; }

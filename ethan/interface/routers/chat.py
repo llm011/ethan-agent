@@ -9,7 +9,6 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 
 from ethan import __version__
-from ethan.memory.facts import FactStore
 from ethan.memory.session import SessionStore
 from ethan.providers.base import Message
 
@@ -97,7 +96,7 @@ async def poll(hide_heartbeat: bool = False, hide_scheduled: bool = False,
 @router.post("/chat")
 async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify_token)):
     from ethan.core.context import set_session_id
-    from ethan.core.paths import user_facts_path, user_sessions_db_path
+    from ethan.core.paths import user_sessions_db_path
 
     from .helpers import _with_quote
 
@@ -140,8 +139,9 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
         session = await store.load(req.session_id)
         history = session.messages if session else []
 
-        fact_store = FactStore(path=user_facts_path())
-        memory = WorkingMemory.from_history(history, cold_facts=fact_store.build_context(), hot_size=10)
+        # 长期记忆由 agent system prompt 的 <memory_context> 统一注入，
+        # 这里只保留会话内 hot 滑窗，不再重复注入 cold facts 伪消息对
+        memory = WorkingMemory.from_history(history, hot_size=10)
 
         current_user = _with_quote(messages[-1], req.quote)
         messages = memory.build_context() + [current_user]

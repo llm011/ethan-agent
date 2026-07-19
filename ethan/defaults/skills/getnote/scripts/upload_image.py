@@ -119,7 +119,7 @@ def upload_image(image_path: str, api_key: str, client_id: str = DEFAULT_CLIENT_
             error_data = resp.json()
             rate_limit = error_data.get("error", {}).get("rate_limit", {})
             print(f"限流: {rate_limit}", file=sys.stderr)
-        except:
+        except Exception:
             pass
         raise Exception("上传失败: 限流 (HTTP 429)，请稍后重试")
     

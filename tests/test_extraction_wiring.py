@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -91,9 +91,8 @@ def _patch_provider(monkeypatch, provider):
 
 @pytest.mark.anyio
 async def test_extraction_wires_end_to_end_and_dedups(isolated_env, monkeypatch):
-    from ethan.interface.routers.tasks import _run_structured_extraction
-    from ethan.memory.extractors import StructuredMemoryExtractor
     from ethan.core.paths import user_sessions_db_path, user_vectors_db_path
+    from ethan.interface.routers.tasks import _run_structured_extraction
 
     await _seed_session(user_sessions_db_path(), "sess-e2e")
 
@@ -135,9 +134,8 @@ async def test_extraction_wires_end_to_end_and_dedups(isolated_env, monkeypatch)
 
 @pytest.mark.anyio
 async def test_extraction_failure_marks_job_failed(isolated_env, monkeypatch):
-    from ethan.interface.routers.tasks import _run_structured_extraction
-    from ethan.memory.extractors import StructuredMemoryExtractor
     from ethan.core.paths import user_sessions_db_path, user_vectors_db_path
+    from ethan.interface.routers.tasks import _run_structured_extraction
 
     await _seed_session(user_sessions_db_path(), "sess-fail")
     _patch_provider(monkeypatch, BoomProvider())
@@ -164,9 +162,9 @@ async def test_extraction_failure_marks_job_failed(isolated_env, monkeypatch):
 @pytest.mark.anyio
 async def test_generate_skill_passes_messages_not_session(isolated_env, monkeypatch):
     """回归: 曾把 Session 对象当 list 传给 maybe_generate(TypeError 被静默)。"""
+    from ethan.core.paths import user_sessions_db_path
     from ethan.interface.routers import tasks
-
-    await _seed_session(isolated_env / "sessions.db", "sess-skill", pairs=5)
+    await _seed_session(user_sessions_db_path(), "sess-skill", pairs=5)
     captured = {}
 
     class FakeGen:
@@ -188,6 +186,7 @@ async def test_generate_skill_passes_messages_not_session(isolated_env, monkeypa
 def test_nonstream_chat_triggers_consolidation(isolated_env, monkeypatch):
     """回归: 非流式 /api/chat 曾完全不触发 _maybe_consolidate。"""
     from fastapi.testclient import TestClient
+
     from ethan.interface.api import app
     from ethan.interface.routers import chat as chat_mod
     from ethan.interface.routers import deps
@@ -208,6 +207,18 @@ def test_nonstream_chat_triggers_consolidation(isolated_env, monkeypatch):
     monkeypatch.setattr(chat_mod, "create_agent", lambda *a, **k: FakeAgent())
     monkeypatch.setattr("ethan.interface.routers.tasks._maybe_consolidate", consolidate)
     monkeypatch.setattr("ethan.interface.routers.tasks._maybe_generate_skill", gen_skill)
+
+    # 测试传了不存在的 session_id，需先 create，否则 save_message 撞 FK 约束
+    import asyncio as _asyncio
+
+    from ethan.core.paths import user_sessions_db_path
+
+    async def _seed():
+        _seed_store = SessionStore(db_path=user_sessions_db_path())
+        await _seed_store.init()
+        await _seed_store.create_with_id("sess-nonstream", "fake-model")
+        await _seed_store.close()
+    _asyncio.run(_seed())
 
     client = TestClient(app)
     resp = client.post("/api/chat", json={

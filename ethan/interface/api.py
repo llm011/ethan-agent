@@ -74,7 +74,8 @@ def _lark_ready() -> bool:
     return _lark_available
 
 
-import os as _os
+import os as _os  # noqa: E402
+
 _WEB_DIST = Path(_os.environ.get("WEB_DIST_PATH") or (Path(__file__).parent.parent / "web_dist"))
 
 
@@ -103,6 +104,29 @@ async def lifespan(app: FastAPI):
         from ethan.interface.wechat_events import start_wechat_listener
         start_wechat_listener()
     start_heartbeat()
+    # facts.json → memories 一次性迁移（结构化记忆统一）：本地 SQLite+文件操作，
+    # 量小秒级完成，但仍放后台线程，不挡 lifespan 完成后的端口绑定。
+    # 迁移后顺带重建 memory 向量索引（准入语义配对/混合召回的底层）。
+    import asyncio as _asyncio
+
+    async def _migrate_and_reindex() -> None:
+        from ethan.core.context import ETHAN_USER_ID
+        from ethan.core.users import get_user_store
+        from ethan.memory.legacy_migration import migrate_all_users
+        from ethan.memory.memory_vectors import reindex_all
+
+        await _asyncio.to_thread(migrate_all_users)
+        for uid in get_user_store().all_user_ids():
+            token = ETHAN_USER_ID.set(uid)
+            try:
+                await _asyncio.to_thread(reindex_all)
+            except Exception:
+                import logging
+                logging.getLogger(__name__).exception("[Startup] memory reindex failed for %s", uid)
+            finally:
+                ETHAN_USER_ID.reset(token)
+
+    _asyncio.create_task(_migrate_and_reindex())
     # 进程互相监控：写 server PID + 拉起 watchdog（独立进程，server 挂了它会重启）
     # worktree/开发场景设 ETHAN_NO_WATCHDOG=1 跳过，避免覆盖主 worktree 的 PID 文件被误杀
     if os.environ.get("ETHAN_NO_WATCHDOG") != "1":

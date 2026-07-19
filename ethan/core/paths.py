@@ -43,6 +43,10 @@ def user_memory_dir() -> Path:
 
 
 def user_facts_path() -> Path:
+    """[已退役] 旧 facts.json 路径。仅供 legacy_migration 读取迁移源 + onboarding 判定老用户使用。
+
+    新代码请用 MemoryStore（user_vectors_db_path()）读写长期事实。
+    """
     return user_memory_dir() / "facts.json"
 
 
@@ -289,7 +293,6 @@ def _merge_admin_to_default(admin_dir: Path) -> None:
             shutil.copy2(str(legacy), str(new))
     _merge_json_file(admin_memory, top_memory, "playbook.json")
     _merge_json_file(admin_memory, top_memory, "episodes.json")
-    _merge_facts_json(admin_memory, top_memory)  # facts 按条目 merge
 
     # 2b. lark_sessions.json：运行时状态，放在数据根目录（非 memory/）
     #      兼容旧路径 memory/lark_sessions.json
@@ -341,40 +344,6 @@ def _merge_json_file(admin_memory: Path, top_memory: Path, name: str) -> None:
         return
     # 两边都有：admin 侧是活跃库，用它
     shutil.copy2(str(src), str(dst))
-
-
-def _merge_facts_json(admin_memory: Path, top_memory: Path) -> None:
-    """facts.json 按条目 merge：去重，保留 confidence 高的。"""
-    import json
-    src = admin_memory / "facts.json"
-    dst = top_memory / "facts.json"
-    if not src.exists() or src.stat().st_size == 0:
-        return
-    if not dst.exists() or dst.stat().st_size == 0:
-        shutil.copy2(str(src), str(dst))
-        return
-    try:
-        admin_data = json.loads(src.read_text(encoding="utf-8"))
-        top_data = json.loads(dst.read_text(encoding="utf-8"))
-    except Exception:
-        # 解析失败，admin 侧覆盖
-        shutil.copy2(str(src), str(dst))
-        return
-    admin_facts = admin_data.get("facts", []) if isinstance(admin_data, dict) else []
-    top_facts = top_data.get("facts", []) if isinstance(top_data, dict) else []
-    # 按 content 去重，admin 侧优先（活跃库）
-    seen = {}
-    for f in admin_facts:
-        key = f.get("content", "")
-        if key:
-            seen[key] = f
-    for f in top_facts:
-        key = f.get("content", "")
-        if key and key not in seen:
-            seen[key] = f
-    merged = list(seen.values())
-    out = {"facts": merged}
-    dst.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _merge_sessions_db(admin_dir: Path, top: Path) -> None:

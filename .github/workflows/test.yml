@@ -24,6 +24,8 @@ jobs:
       # 不含 router 测试(test_routing_real_queries 等在 main 上既有 4 个失败,
       # 与 memory 无关,修复后另行纳入);不含 test_cross_session_memory.py
       # (脚本式,无 pytest 收集入口)。
+      # golden dry/live/recall 评测已迁至独立仓库 llm011/ethan-memory-train-data
+      # (减少主仓库体积),不在此处运行。
       - name: Run unit tests (0-LLM subset)
         run: >
           uv run pytest
@@ -33,8 +35,5 @@ jobs:
           tests/test_dream_e2e.py
           tests/test_provider_fallback.py
           tests/test_is_local.py
+          tests/test_mcp_apps.py
           -q
-
-      # golden dry 评测(0 LLM):1200 case 喂 admission+store 验证确定性链路
-      - name: Run memory dry eval (0 LLM)
-        run: uv run python tests/memory_eval/eval_runner_dry.py

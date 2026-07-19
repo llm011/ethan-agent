@@ -1,39 +1,36 @@
 """跨会话记忆验证脚本。
 
 测试流程：
-1. 备份现有 facts.json，避免污染真实记忆
+1. 备份现有 memory.db，避免污染真实记忆
 2. 会话 1：告诉 Agent "我最喜欢的颜色是霓虹绿"，让它用 memory_write 记住
-3. 验证 facts.json 是否写入
+3. 验证 memories 表是否写入（结构化记忆，带证据行）
 4. 会话 2（全新 Agent，无历史）：问 "我最喜欢什么颜色"，看是否能跨会话回忆
 5. 恢复备份
 
 运行：uv run python tests/test_cross_session_memory.py
 """
 import asyncio
-import json
 import shutil
 
 from ethan.core.agent import Agent
+from ethan.core.paths import user_vectors_db_path
 from ethan.providers.base import Message
-from ethan.tools.registry import ToolRegistry
 from ethan.skills.registry import SkillRegistry
 from ethan.tools.builtin.memory_write import MemoryWriteTool
-from ethan.memory.facts import FACTS_FILE
+from ethan.tools.registry import ToolRegistry
 
 
 async def main():
     print("=" * 50)
-    print("跨会话记忆验证")
+    print("跨会话记忆验证（结构化记忆）")
     print("=" * 50)
 
-    backup = FACTS_FILE.with_suffix(".json.bak")
+    db_path = user_vectors_db_path()
+    backup = db_path.with_suffix(".db.bak")
     backed_up = False
-    if FACTS_FILE.exists():
-        shutil.copy2(FACTS_FILE, backup)
+    if db_path.exists():
+        shutil.copy2(db_path, backup)
         backed_up = True
-        FACTS_FILE.unlink()
-    else:
-        FACTS_FILE.parent.mkdir(parents=True, exist_ok=True)
 
     try:
         registry = ToolRegistry()
@@ -47,15 +44,24 @@ async def main():
             content="我最喜欢的颜色是霓虹绿。请用 memory_write 工具记住这个偏好。",
         )])
 
-        if not FACTS_FILE.exists():
-            print("❌ FAIL: facts.json 未被写入")
+        from ethan.memory.store import MemoryStore
+        store = MemoryStore()
+        try:
+            memories = store.list_memories(status="active", limit=200)
+        finally:
+            store.close()
+        hit = [m for m in memories if "霓虹绿" in m.content or "neon" in m.content.lower()]
+        if not hit:
+            print("❌ FAIL: memories 表未包含霓虹绿")
             return
-        facts = json.loads(FACTS_FILE.read_text(encoding="utf-8"))
-        print("facts.json 内容:", json.dumps(facts, ensure_ascii=False))
-        if not any("霓虹绿" in f.get("content", "") or "neon" in f.get("content", "").lower() for f in facts):
-            print("❌ FAIL: facts.json 未包含霓虹绿")
-            return
-        print("✅ 偏好已写入 facts.json")
+        mem = hit[0]
+        print(f"✅ 偏好已写入 memories 表: [{mem.memory_type}/{mem.dimension}] {mem.content}")
+        store = MemoryStore()
+        try:
+            evidence = store.list_evidence(mem.id)
+        finally:
+            store.close()
+        print(f"   证据行 {len(evidence)} 条，evidence_level={mem.evidence_level}")
 
         print("\n--- 会话 2：全新 Agent，验证跨会话回忆 ---")
         agent2 = Agent(tool_registry=registry, skill_registry=skills, channel="test")
@@ -66,11 +72,9 @@ async def main():
         else:
             print("❌ FAIL: 未能回忆出颜色偏好")
     finally:
-        if FACTS_FILE.exists():
-            FACTS_FILE.unlink()
         if backed_up and backup.exists():
-            shutil.move(str(backup), str(FACTS_FILE))
-            print("\n已恢复原 facts.json")
+            shutil.move(str(backup), str(db_path))
+            print("\n已恢复原 memory.db")
         print("=" * 50)
 
 
