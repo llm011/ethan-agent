@@ -1,0 +1,33 @@
+ethan/core/loop_control.py
+  s_94e5efe8d080dc::t_ad127514a051d2 21,32-38,45-49,57-60,62,65-67
+ethan/core/paths.py
+  s_94e5efe8d080dc::t_74c109c04413cf 103-114
+ethan/defaults/skills/upload-cdn/scripts/upload_cdn.py
+  s_94e5efe8d080dc::t_5a9dd5dde63ef1 31-32,37-40
+ethan/interface/lark_render.py
+  s_94e5efe8d080dc::t_b619a69874f18e 271-291,315,406-407
+ethan/memory/api_keys.py
+  s_94e5efe8d080dc::t_bd422167b17347 12-13,18-21
+ethan/providers/openai_compat.py
+  s_94e5efe8d080dc::t_1992c714c0ead1 99-100
+ethan/scheduler/cron.py
+  s_94e5efe8d080dc::t_65560855415f7b 18,22-25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5a4474afbb66fcee5d4eb4bec849d20155a64980",
+  "prompts": {},
+  "sessions": {
+    "s_94e5efe8d080dc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_94e5efe8d080dc",
+        "model": "unknown"
+      },
+      "human_author": "ethan <jsongo@qq.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
