@@ -162,9 +162,9 @@ async def test_extraction_failure_marks_job_failed(isolated_env, monkeypatch):
 @pytest.mark.anyio
 async def test_generate_skill_passes_messages_not_session(isolated_env, monkeypatch):
     """回归: 曾把 Session 对象当 list 传给 maybe_generate(TypeError 被静默)。"""
+    from ethan.core.paths import user_sessions_db_path
     from ethan.interface.routers import tasks
-
-    await _seed_session(isolated_env / "sessions.db", "sess-skill", pairs=5)
+    await _seed_session(user_sessions_db_path(), "sess-skill", pairs=5)
     captured = {}
 
     class FakeGen:
@@ -207,6 +207,18 @@ def test_nonstream_chat_triggers_consolidation(isolated_env, monkeypatch):
     monkeypatch.setattr(chat_mod, "create_agent", lambda *a, **k: FakeAgent())
     monkeypatch.setattr("ethan.interface.routers.tasks._maybe_consolidate", consolidate)
     monkeypatch.setattr("ethan.interface.routers.tasks._maybe_generate_skill", gen_skill)
+
+    # 测试传了不存在的 session_id，需先 create，否则 save_message 撞 FK 约束
+    import asyncio as _asyncio
+
+    from ethan.core.paths import user_sessions_db_path
+
+    async def _seed():
+        _seed_store = SessionStore(db_path=user_sessions_db_path())
+        await _seed_store.init()
+        await _seed_store.create_with_id("sess-nonstream", "fake-model")
+        await _seed_store.close()
+    _asyncio.run(_seed())
 
     client = TestClient(app)
     resp = client.post("/api/chat", json={
