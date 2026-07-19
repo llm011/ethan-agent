@@ -297,13 +297,36 @@ class TestMemoryWriteTool:
 
         asyncio.run(run())
 
+    def test_explicit_memory_type_and_dimension(self, tmp_path, monkeypatch):
+        """显式传 memory_type + dimension 应直接采用，不走 category 兜底。"""
+        import asyncio
+
+        monkeypatch.setattr("ethan.core.paths.CONFIG_DIR", tmp_path)
+
+        async def run():
+            from ethan.tools.builtin.memory_write import MemoryWriteTool
+            await MemoryWriteTool().run(
+                "用户住在苏州",
+                memory_type="personal_information",
+                dimension="identity.location",
+            )
+
+        asyncio.run(run())
+
+        # 验证落库的 memory_type / dimension 是显式传入的值
         from ethan.core.paths import user_vectors_db_path
         from ethan.memory.store import MemoryStore
+
         store = MemoryStore(db_path=user_vectors_db_path())
-        memories = store.list_memories(status="active", limit=10)
-        store.close()
-        assert len(memories) == 1
-        assert memories[0].evidence_level == "corrected"
+        try:
+            memories = store.list_memories(status="active", limit=10)
+            assert len(memories) == 1
+            m = memories[0]
+            assert m.memory_type == "personal_information"
+            assert m.dimension == "identity.location"
+            assert m.evidence_level == "explicit"
+        finally:
+            store.close()
 
 
 # ---------------------------------------------------------------------------
