@@ -21,6 +21,7 @@ from ethan.tools.builtin.chart import ChartTool
 from ethan.tools.builtin.config import ConfigGetTool, ConfigSetTool
 from ethan.tools.builtin.file import FileListTool, FileReadTool, FileWriteTool
 from ethan.tools.builtin.find_tools import FindToolsTool
+from ethan.tools.builtin.image_search import ImageSearchTool
 from ethan.tools.builtin.install_skill import InstallSkillTool
 from ethan.tools.builtin.knowledge import KnowledgeAddTool, KnowledgeEditTool, KnowledgeReadTool, KnowledgeSearchTool
 from ethan.tools.builtin.lark_tools import (
@@ -81,6 +82,14 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
     # 基础工具（所有 toolset 共有）
     registry.register(ShellTool())
     registry.register(WebSearchTool())
+    # image_search：仅在配置了 SearXNG 且开启时注册
+    try:
+        from ethan.core.config import get_config as _get_cfg
+        _ws_cfg = _get_cfg().tools.web_search
+        if _ws_cfg.base_url and _ws_cfg.image_search_enabled:
+            registry.register(ImageSearchTool())
+    except Exception:
+        pass  # 配置未加载时不阻塞工具注册
     registry.register(WebFetchTool())
     registry.register(WeatherTool())
     registry.register(ChartTool())

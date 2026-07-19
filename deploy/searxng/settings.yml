@@ -11,6 +11,10 @@ server:
   limiter: false  # 单机自用场景关闭限流；对公网开放时请改为 true 并配置 limiter.toml
 
 search:
+  # 默认语言设为中文 —— Bing 国际版页面结构已改（无 b_algo class），
+  # SearXNG 的 XPath 解析器解析不到结果；中文 region (mkt=zh-CN) 下页面结构正常。
+  # 同时 baidu 等国内引擎也需要中文 locale 才能正确返回结果。
+  default_lang: zh-CN
   formats:
     - html
     - json  # ethan web_search 工具依赖 JSON 输出，默认关闭，必须显式开启
@@ -18,8 +22,98 @@ search:
 outgoing:
   request_timeout: 12.0      # 默认 3.0s 太短，Google/DDG 等在部分网络环境容易 timeout
   max_request_timeout: 20.0
-  proxies:
-    http:
-      - http://host.docker.internal:7890
-    https:
-      - http://host.docker.internal:7890
+  # 代理配置已关闭 —— 宿主机 7890 未监听时强制走代理会导致所有引擎 init 失败。
+  # 需要时再取消注释（确保代理客户端已启动并监听 7890）：
+  # proxies:
+  #   http:
+  #     - http://host.docker.internal:7890
+  #   https:
+  #     - http://host.docker.internal:7890
+
+engines:
+  # === 显式启用国内可直连的引擎 ===
+  - name: bing
+    disabled: false
+  - name: baidu
+    disabled: false
+
+  # === 直连模式下禁用国外引擎（代理开启时 wrapper 会自动放开）===
+  # 通用搜索
+  - name: brave
+    disabled: true
+  - name: duckduckgo
+    disabled: true
+  - name: google cse
+    disabled: true
+  - name: startpage
+    disabled: true
+  - name: wikipedia
+    disabled: true
+  - name: lingva  # Google Translate 代理
+    disabled: true
+  # 图片/视频/新闻分类中的国外引擎
+  - name: brave.images
+    disabled: true
+  - name: brave.videos
+    disabled: true
+  - name: brave.news
+    disabled: true
+  - name: duckduckgo images
+    disabled: true
+  - name: duckduckgo news
+    disabled: true
+  - name: duckduckgo videos
+    disabled: true
+  - name: google cse images
+    disabled: true
+  - name: startpage images
+    disabled: true
+  - name: startpage news
+    disabled: true
+  - name: wikinews
+    disabled: true
+  - name: wiktionary
+    disabled: true
+  # wikimedia 系列共用 *.wikimedia.org，国内 IP 层阻断
+  - name: wikicommons.files
+    disabled: true
+  - name: wikicommons.images
+    disabled: true
+  - name: wikicommons.audio
+    disabled: true
+  - name: wikicommons.videos
+    disabled: true
+
+  # === 其他国内无法直连的引擎 ===
+  # news
+  - name: google news
+    disabled: true
+  - name: reuters
+    disabled: true
+  # videos / music
+  - name: youtube
+    disabled: true
+  - name: dailymotion
+    disabled: true
+  - name: sepiasearch
+    disabled: true
+  - name: vimeo
+    disabled: true
+  # science
+  - name: google scholar
+    disabled: true
+  - name: openairedatasets
+    disabled: true
+  - name: semantic scholar
+    disabled: true
+  # map
+  - name: openstreetmap
+    disabled: true
+
+  # === init 必然失败的引擎（代理模式也禁用）===
+  - name: wikidata
+    disabled: true
+  - name: ahmia
+    disabled: true
+  - name: torch
+    disabled: true
