@@ -361,10 +361,6 @@ async def _rotate_session_dbs() -> None:
     """遍历所有用户，检查 sessions.db 是否超过 10 MB，超过则归档轮转。"""
     try:
         from ethan.core.context import ETHAN_USER_ID
-<<<<<<< HEAD
-=======
-        from ethan.core.users import get_user_store
->>>>>>> a970a5e (fix(memory): 提取链路三处静默失效 + prompt 维度前缀修正)
         from ethan.core.paths import user_sessions_db_path
         from ethan.core.users import get_user_store
         from ethan.memory.session import SessionStore
@@ -459,6 +455,7 @@ async def _extract_decision_patterns_for_user(user_id: str) -> None:
         except Exception:
             main_model = "gpt-4o"
 
+        from ethan.memory.consolidator import get_lite_model
         lite_model = get_lite_model(main_model)
         consolidator = Consolidator(main_model=main_model, summary_model=lite_model)
 
@@ -541,8 +538,9 @@ async def _mine_recurring_needs_for_user(user_id: str) -> None:
             return
 
         from ethan.core.config import get_config
-        from ethan.memory.consolidator import Consolidator
+        from ethan.memory.consolidator import Consolidator, get_lite_model
         main_model = get_config().defaults.model
+        lite_model = get_lite_model(main_model)
 
         episodes_text = "\n".join(
             f"- [{e.timestamp:.0f}] {e.summary} (keywords: {', '.join(e.keywords)})"
