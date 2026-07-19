@@ -105,36 +105,40 @@ class ProcedureStore:
         new_emb = embed_sync(new_text)
 
         if new_emb is not None:
-            # BGE 可用：语义去重
-            import numpy as np
-            new_emb_arr = np.array(new_emb, dtype=np.float32)
-            for p in self._success_patterns:
-                old_text = f"场景：{p.scenario}；工具序列：{', '.join(p.tool_sequence)}"
-                old_emb = embed_sync(old_text)
-                if old_emb is None:
-                    continue
-                old_emb_arr = np.array(old_emb, dtype=np.float32)
-                l2 = float(np.linalg.norm(new_emb_arr - old_emb_arr))
-                if l2 < SUCCESS_PATTERN_L2_THRESHOLD:
-                    # 视为同一经验：合并 success_count 和 tool_sequence
-                    p.success_count += 1
-                    p.last_used = time.time()
-                    seen = set(p.tool_sequence)
-                    for t in tool_sequence:
-                        if t not in seen:
-                            p.tool_sequence.append(t)
-                            seen.add(t)
-                    self._save()
-                    logger.debug("[Procedure] Merged success_pattern (L2=%.3f): %s",
-                                 l2, scenario[:50])
-                    return
-            # 无重复：新增
-            self._success_patterns.append(SuccessPattern(
-                scenario=scenario,
-                tool_sequence=tool_sequence,
-            ))
-            self._save()
-            return
+            # BGE 可用：语义去重（numpy 缺失时 fallback 到精确字符串去重）
+            try:
+                import numpy as np
+            except ImportError:
+                new_emb = None  # 走下方 fallback
+            else:
+                new_emb_arr = np.array(new_emb, dtype=np.float32)
+                for p in self._success_patterns:
+                    old_text = f"场景：{p.scenario}；工具序列：{', '.join(p.tool_sequence)}"
+                    old_emb = embed_sync(old_text)
+                    if old_emb is None:
+                        continue
+                    old_emb_arr = np.array(old_emb, dtype=np.float32)
+                    l2 = float(np.linalg.norm(new_emb_arr - old_emb_arr))
+                    if l2 < SUCCESS_PATTERN_L2_THRESHOLD:
+                        # 视为同一经验：合并 success_count 和 tool_sequence
+                        p.success_count += 1
+                        p.last_used = time.time()
+                        seen = set(p.tool_sequence)
+                        for t in tool_sequence:
+                            if t not in seen:
+                                p.tool_sequence.append(t)
+                                seen.add(t)
+                        self._save()
+                        logger.debug("[Procedure] Merged success_pattern (L2=%.3f): %s",
+                                    l2, scenario[:50])
+                        return
+                # 无重复：新增
+                self._success_patterns.append(SuccessPattern(
+                    scenario=scenario,
+                    tool_sequence=tool_sequence,
+                ))
+                self._save()
+                return
 
         # BGE 不可用：回退精确字符串去重（原逻辑）
         for p in self._success_patterns:
