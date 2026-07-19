@@ -14,6 +14,7 @@ class ToolResult:
     ui: list | None = None  # ui_card 工具产出的 A2UI envelope 列表，透传给前端/REPL 渲染卡片
     images: list[dict] | None = None  # 截图等图片，格式 [{"data": "base64...", "media_type": "image/png"}]
     mcp_app: dict | None = None  # 工具 UI 资源：{uri, data}，前端按 uri 拉 HTML 模板后在 iframe 渲染
+    cards: list[dict] | None = None  # 结构化卡片数据，前端按 type 渲染横向滚动卡片。每条: {"type": "search_result"|"image", ...}
 
 
 class BaseTool(ABC):
