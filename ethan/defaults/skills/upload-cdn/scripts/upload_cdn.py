@@ -28,12 +28,16 @@ from pathlib import Path
 _CACHE_DIR = Path.home() / ".ethan" / "db"
 _CACHE_DB = _CACHE_DIR / "upload-cdn-cache.db"
 
-# 一次性迁移：旧位置 → 新位置
+# 一次性迁移：旧位置 → 新位置。try/except 兜底并发调用的竞态
+# （skill 脚本可能被多进程并发拉起，后到者 move 会 FileNotFoundError）。
 _OLD_CACHE_DB = Path.home() / ".ethan" / "upload-cdn-cache.db"
 if _OLD_CACHE_DB.exists() and not _CACHE_DB.exists():
     import shutil
     _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(_OLD_CACHE_DB), str(_CACHE_DB))
+    try:
+        shutil.move(str(_OLD_CACHE_DB), str(_CACHE_DB))
+    except (FileNotFoundError, OSError):
+        pass  # 另一进程已迁移/正在迁移，忽略
 
 
 def _open_cache() -> "sqlite3.Connection | None":

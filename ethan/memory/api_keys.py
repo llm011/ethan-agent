@@ -9,12 +9,16 @@ from ethan.core.config import CONFIG_DIR
 _DB_DIR = CONFIG_DIR / "db"
 _DB_PATH = _DB_DIR / "api_keys.db"
 
-# 一次性迁移：旧位置 → 新位置
+# 一次性迁移：旧位置 → 新位置。try/except 兜底并发首次启动的竞态
+# （多进程同时通过 not exists 检查后都去 move，后到者会 FileNotFoundError 崩 import）。
 _OLD_PATH = CONFIG_DIR / "api_keys.db"
 if _OLD_PATH.exists() and not _DB_PATH.exists():
     import shutil
     _DB_DIR.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(_OLD_PATH), str(_DB_PATH))
+    try:
+        shutil.move(str(_OLD_PATH), str(_DB_PATH))
+    except (FileNotFoundError, OSError):
+        pass  # 另一进程已迁移/正在迁移，忽略
 
 
 class APIKeyStore:

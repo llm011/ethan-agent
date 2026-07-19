@@ -96,7 +96,8 @@ class OpenAICompatProvider(BaseProvider):
                 # 非 tool 消息：刷积压图片后追加
                 result.extend(pending_img_messages)
                 pending_img_messages = []
-                # 跳过空 assistant 消息（无 content 且无 tool_calls），Gemini 不接受
+                # 跳过空 assistant 消息（带 tool_calls 的已在上方 elif is_tool_call 分支处理，
+                # 能到这里的 assistant 必然无 tool_calls），Gemini 不接受纯空 assistant 消息
                 if msg.role == "assistant" and not msg.content:
                     continue
                 result.append({"role": msg.role, "content": msg.content})

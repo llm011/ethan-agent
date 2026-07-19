@@ -98,16 +98,20 @@ def user_sessions_db_path() -> Path:
     db_dir = user_data_dir() / "db"
     db_dir.mkdir(parents=True, exist_ok=True)
     target = db_dir / "sessions.db"
-    # 一次性迁移：旧位置 → 新位置（仅当旧文件有实质数据时才迁移，0 字节空文件直接删除）
-    old = user_data_dir() / "sessions.db"
-    if old.exists() and not target.exists():
-        import shutil
-        if old.stat().st_size > 0:
-            shutil.move(str(old), str(target))
-        else:
-            old.unlink(missing_ok=True)
     if not _session_db_migrated:
         _session_db_migrated = True
+        # 一次性迁移：旧位置 → 新位置（仅当旧文件有实质数据时才迁移，0 字节空文件直接删除）。
+        # try/except 兜底并发首次调用的竞态（后到者 move 会 FileNotFoundError）。
+        old = user_data_dir() / "sessions.db"
+        if old.exists() and not target.exists():
+            import shutil
+            try:
+                if old.stat().st_size > 0:
+                    shutil.move(str(old), str(target))
+                else:
+                    old.unlink(missing_ok=True)
+            except (FileNotFoundError, OSError):
+                pass  # 另一进程已迁移/正在迁移，忽略
         _migrate_tmp_session_db(target)
     return target
 

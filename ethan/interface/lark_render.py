@@ -268,6 +268,27 @@ def _optimize_markdown_style(text: str) -> str:
         return text
 
 
+def _hard_wrap_outside_tables(text: str) -> str:
+    """把孤立的单 \\n 转为 "  \\n"（飞书硬换行），但表格区域保持原始 \\n。
+
+    飞书卡片 markdown 里表格必须保留原始换行，否则列会错位；正文则需要硬换行。
+    按代码块外表格的位置把 text 切成 [非表格, 表格, 非表格, ...]，只对非表格段做转换。
+    """
+    import re as _re
+    tables = _find_markdown_tables_outside_code_blocks(text)
+    if not tables:
+        return _re.sub(r'(?<!\n)\n(?!\n)', '  \n', text)
+    parts = []
+    prev_end = 0
+    for t in tables:
+        start, length = t["start"], t["length"]
+        parts.append(_re.sub(r'(?<!\n)\n(?!\n)', '  \n', text[prev_end:start]))
+        parts.append(text[start:start + length])  # 表格段保持原样
+        prev_end = start + length
+    parts.append(_re.sub(r'(?<!\n)\n(?!\n)', '  \n', text[prev_end:]))
+    return "".join(parts)
+
+
 def _render_card_content(text: str) -> str:
     """把文本/markdown 渲染成飞书 interactive 卡片的 content JSON。
 
@@ -282,7 +303,6 @@ def _render_card_content(text: str) -> str:
     + `_sanitize_text_for_card` 降级，保证不崩。
     """
     import json as _json
-    import re as _re
     # 代码块外 markdown 表格超过上限 → 走 CardBuilder 原生 table 元素路径
     if len(_find_markdown_tables_outside_code_blocks(text)) > FEISHU_CARD_TABLE_LIMIT:
         rich = _render_card_content_rich(text)
@@ -292,25 +312,7 @@ def _render_card_content(text: str) -> str:
     text = _sanitize_text_for_card(text)
     text = _optimize_markdown_style(text)
     # 对非表格区域执行单 \n → "  \n" 硬换行转换；表格区域保持原始 \n（否则飞书解析列错位）
-    tables = _find_markdown_tables_outside_code_blocks(text)
-    if not tables:
-        processed = _re.sub(r'(?<!\n)\n(?!\n)', '  \n', text)
-    else:
-        # 按表格位置把 text 切成 [非表格, 表格, 非表格, ...] 段，只对非表格段转换
-        parts = []
-        prev_end = 0
-        for t in tables:
-            start, length = t["start"], t["length"]
-            # 非表格段：应用硬换行
-            non_table = text[prev_end:start]
-            parts.append(_re.sub(r'(?<!\n)\n(?!\n)', '  \n', non_table))
-            # 表格段：保持原样
-            parts.append(text[start:start + length])
-            prev_end = start + length
-        # 尾部非表格段
-        tail = text[prev_end:]
-        parts.append(_re.sub(r'(?<!\n)\n(?!\n)', '  \n', tail))
-        processed = "".join(parts)
+    processed = _hard_wrap_outside_tables(text)
     return _json.dumps({
         "schema": "2.0",
         "body": {"elements": [{"tag": "markdown", "content": processed}]},
@@ -378,7 +380,6 @@ def _render_card_content_rich(text: str) -> str | None:
     `_sanitize_text_for_card` 降级，保证渲染不崩。
     """
     import json as _json
-    import re as _re
     try:
         from lark_oapi.channel.card import new_card
     except Exception:
@@ -402,22 +403,8 @@ def _render_card_content_rich(text: str) -> str | None:
                 c.table(headers, rows, page_size=_RICH_TABLE_PAGE_SIZE)
             else:
                 # chunk 是表格之间的 markdown 文本，走和手拼路径一样的预处理
-                # （样式优化 + 单 \n → 硬换行），保证前 3 张表格 + 正文渲染一致
-                md = _optimize_markdown_style(chunk)
-                # 表格区域保持原始 \n，只对非表格段做硬换行
-                inner_tables = _find_markdown_tables_outside_code_blocks(md)
-                if not inner_tables:
-                    md = _re.sub(r'(?<!\n)\n(?!\n)', '  \n', md)
-                else:
-                    _parts = []
-                    _prev = 0
-                    for _t in inner_tables:
-                        _s, _l = _t["start"], _t["length"]
-                        _parts.append(_re.sub(r'(?<!\n)\n(?!\n)', '  \n', md[_prev:_s]))
-                        _parts.append(md[_s:_s + _l])
-                        _prev = _s + _l
-                    _parts.append(_re.sub(r'(?<!\n)\n(?!\n)', '  \n', md[_prev:]))
-                    md = "".join(_parts)
+                # （样式优化 + 单 \n → 硬换行，表格段保持原样），保证前 3 张表格 + 正文渲染一致
+                md = _hard_wrap_outside_tables(_optimize_markdown_style(chunk))
                 if md.strip():
                     c.markdown(md)
                 # 全是空白的片段跳过——CardBuilder 不需要空 markdown 元素

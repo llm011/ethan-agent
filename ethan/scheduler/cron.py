@@ -15,11 +15,14 @@ _DB_DIR = CONFIG_DIR / "db"
 _DB_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = _DB_DIR / "scheduler.db"
 
-# 一次性迁移：旧位置 → 新位置
+# 一次性迁移：旧位置 → 新位置。try/except 兜底并发首次启动的竞态。
 _OLD_DB = CONFIG_DIR / "scheduler.db"
 if _OLD_DB.exists() and not DB_PATH.exists():
     import shutil
-    shutil.move(str(_OLD_DB), str(DB_PATH))
+    try:
+        shutil.move(str(_OLD_DB), str(DB_PATH))
+    except (FileNotFoundError, OSError):
+        pass  # 另一进程已迁移/正在迁移，忽略
 
 
 class Scheduler:
