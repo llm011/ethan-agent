@@ -213,7 +213,6 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
                         {idx < selectedMessages.length - 1 && <div className="share-divider" />}
                       </div>
                     ))}
-                    <div className="share-foot">Ethan · 本地对话导出</div>
                   </div>
                 </div>
               )}
