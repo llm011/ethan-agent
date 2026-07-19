@@ -1,0 +1,25 @@
+ethan/interface/routers/tasks.py
+  s_338d4c2e9b3ce3::t_614970adffdfe3 202-205
+ethan/memory/daily_consolidation.py
+  s_338d4c2e9b3ce3::t_30857c71c88882 50-55,59,62,67,85,95-104
+ethan/memory/store.py
+  s_338d4c2e9b3ce3::t_9df5d9c98b0cb0 455-456,458-459,470-475,477,480
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c2d52b96eea4931c621875b50f74975c469201eb",
+  "prompts": {},
+  "sessions": {
+    "s_338d4c2e9b3ce3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_338d4c2e9b3ce3",
+        "model": "unknown"
+      },
+      "human_author": "ethan <jsongo@qq.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
