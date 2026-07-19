@@ -206,6 +206,7 @@ class WebSearchToolConfig(BaseModel):
     provider: str = "duckduckgo"  # "duckduckgo" | "tavily" | "searxng"
     api_key: str = ""  # tavily 用
     base_url: str = ""  # searxng 用，如 http://localhost:8888（自建）或第三方现成实例地址
+    image_search_enabled: bool = True  # 图片搜索工具开关；仅在 base_url 配置时生效
 
 class ToolsConfig(BaseModel):
     web_search: WebSearchToolConfig = Field(default_factory=WebSearchToolConfig)
