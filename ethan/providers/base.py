@@ -35,6 +35,7 @@ class Message:
     matched_skills: Optional[list] = None  # 本次对话命中的 Skill 列表 [{name, is_default}]，用于可视化
     ttfb_ms: Optional[int] = None  # 收到第一个文本块的耗时（毫秒）
     total_ms: Optional[int] = None  # 从请求到完成的总耗时（毫秒）
+    cards: Optional[list] = None  # 结构化卡片数据（web_search/image_search 产出），前端按 type 渲染横向滚动卡片
 
     @property
     def is_tool_call(self) -> bool:
@@ -72,6 +73,7 @@ class ToolEvent:
     entity_type: str = ""  # 实体类型（builtin/browser/delegate/computer_use/...），用于可视化分类
     entity_id: str = ""  # 关联实体 ID（如 browser session_id），用于可视化实体聚合
     skill_category: str = ""  # 工具所属 skill 分类，前端按类别展示工具调用
+    cards: Optional[list] = None  # 结构化卡片数据（web_search/image_search 产出），透传给前端渲染横向滚动卡片
 
 
 @dataclass

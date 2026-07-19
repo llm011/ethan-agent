@@ -246,41 +246,6 @@ class Agent:
             "</mode_setup>"
         )
 
-    def _build_suggestion_hint(self) -> str | None:
-        """C2: 读取 suggestions.json，有未处理的重复模式建议时返回注入提示。
-
-        只在对话首轮注入（避免每轮唠叨），且只取最近 1 条未拒绝的建议。
-        """
-        try:
-            import json
-            import time
-
-            from ethan.core.paths import user_suggestions_path
-            suggestions_path = user_suggestions_path()
-            if not suggestions_path.exists():
-                return None
-            data = json.loads(suggestions_path.read_text(encoding="utf-8"))
-            # 过滤：未拒绝 + 7 天内创建
-            now = time.time()
-            pending = [
-                s for s in data
-                if not s.get("rejected") and (now - s.get("created_at", 0)) < 7 * 86400
-            ]
-            if not pending:
-                return None
-            # 只取最近 1 条，避免注入过多
-            s = pending[-1]
-            return (
-                "<proactive_suggestion>\n"
-                "[System note: 基于近期对话模式分析，以下建议值得在回复中自然提起（不要生硬推荐）：]\n"
-                f"- 模式：{s.get('pattern', '')}（近 7 天出现 {s.get('count', 0)} 次）\n"
-                f"- 建议：{s.get('suggestion', '')}\n"
-                "如果用户当前对话与该模式相关，可以在回复末尾自然提起；不相关则跳过。\n"
-                "</proactive_suggestion>"
-            )
-        except Exception:
-            return None
-
     def _build_system(self, messages: list[Message], fast: bool = False, fast_rule=None) -> str:
         """构建 system prompt。fast=True 时使用极简版本减少 token。
 
@@ -1067,7 +1032,7 @@ class Agent:
                 from ethan.core.secrets_store import mask_text
                 preview = mask_text(_preview(r.content)) if r.content else ""
                 detail = mask_text(_detail(r.content)) if r.content else ""
-                yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary="", state="done" if not r.is_error else "error", result_preview=preview, result_detail=detail, sub_steps=getattr(r, "sub_steps", []) or [], ui=getattr(r, "ui", None), mcp_app=getattr(r, "mcp_app", None), entity_type=classify_tool(tc.name), entity_id=extract_entity_id(tc.name, tc.arguments), skill_category=resolve_skill_category(tc.name, tc.arguments))
+                yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary="", state="done" if not r.is_error else "error", result_preview=preview, result_detail=detail, sub_steps=getattr(r, "sub_steps", []) or [], ui=getattr(r, "ui", None), mcp_app=getattr(r, "mcp_app", None), cards=getattr(r, "cards", None), entity_type=classify_tool(tc.name), entity_id=extract_entity_id(tc.name, tc.arguments), skill_category=resolve_skill_category(tc.name, tc.arguments))
                 working.append(Message(
                     role="tool",
                     content=r.content,
