@@ -3,7 +3,7 @@ import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { CodeBlock } from "@/components/code-block";
 import { PlainCodeBlock } from "@/components/plain-code-block";
-import { forwardRef } from "react";
+import { forwardRef, useMemo } from "react";
 
 // CommonMark 规定 ** 紧内侧不能有空格，否则不渲染加粗。
 // 此函数去掉 AI 生成文本中 ** 内侧的多余空白，修复渲染。
@@ -41,18 +41,27 @@ export const markdownComponents: Components = {
 export const MarkdownContent = forwardRef<
   HTMLDivElement,
   { content: string; className?: string; variant?: "bubble" | "share" }
->(({ content, className, variant = "bubble" }, ref) => (
-  <div
-    ref={ref}
-    className={
-      variant === "share"
-        ? `share-prose ${className ?? ""}`
-        : `prose prose-sm dark:prose-invert max-w-none ${className ?? ""}`
-    }
-  >
-    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-      {fixBold(content)}
-    </ReactMarkdown>
-  </div>
-));
+>(({ content, className, variant = "bubble" }, ref) => {
+  // 缓存 markdown 解析结果：content 不变时不重新解析（react-markdown 解析是同步阻塞主线程的昂贵操作）
+  const parsed = useMemo(
+    () => (
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+        {fixBold(content)}
+      </ReactMarkdown>
+    ),
+    [content],
+  );
+  return (
+    <div
+      ref={ref}
+      className={
+        variant === "share"
+          ? `share-prose ${className ?? ""}`
+          : `prose prose-sm dark:prose-invert max-w-none ${className ?? ""}`
+      }
+    >
+      {parsed}
+    </div>
+  );
+});
 MarkdownContent.displayName = "MarkdownContent";

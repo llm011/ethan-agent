@@ -34,7 +34,7 @@ export function MessageList({ messages, streaming, onQuote, onCardAction, onRead
         )}
         {messages.map((msg, i) => (
           <MessageBubble
-            key={i}
+            key={msg.id ?? `idx-${i}`}
             msg={msg}
             isStreaming={streaming}
             isLast={i === messages.length - 1}

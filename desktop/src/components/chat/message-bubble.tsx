@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, memo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Quote as QuoteIcon, BookOpen as BookOpenIcon, Share2 as ShareIcon } from "lucide-react";
@@ -52,7 +52,7 @@ interface MessageBubbleProps {
   annotations?: Annotation[];
 }
 
-export function MessageBubble({ msg, isStreaming, isLast, onQuote, onCardAction, onRead, onShare, annotations }: MessageBubbleProps) {
+function MessageBubbleInner({ msg, isStreaming, isLast, onQuote, onCardAction, onRead, onShare, annotations }: MessageBubbleProps) {
   const [highlightedStep, setHighlightedStep] = useState<number | undefined>(undefined);
   // 思考过程（thought）默认展开，用户可手动折叠
   const [thoughtOpen, setThoughtOpen] = useState(true);
@@ -264,3 +264,8 @@ export function MessageBubble({ msg, isStreaming, isLast, onQuote, onCardAction,
     </TooltipProvider>
   );
 }
+
+// memo：会话切换时 setMessages 会触发整个列表重渲染，包裹后未变化的气泡跳过渲染。
+// 自定义比较：onQuote/onRead/onShare 是稳定引用（来自 ChatView 的 handler），
+// annotations 是按 messageId 缓存的数组，引用稳定，可直接浅比较。
+export const MessageBubble = memo(MessageBubbleInner);
