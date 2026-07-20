@@ -105,11 +105,15 @@ async def _event_loop(event_key: str) -> None:
                 except json.JSONDecodeError:
                     continue
 
-                # lark-cli 报 validation 错误（未在后台订阅该事件）→ 停止重连
+                # lark-cli 报 validation 错误（未在后台订阅该事件）→ 停止重连并给出可操作指引
                 if data.get("ok") is False and data.get("error", {}).get("type") == "validation":
-                    logger.warning(
-                        "[Lark] EventKey %s not subscribed in Feishu console, stopping listener. "
-                        "Error: %s", event_key, data["error"].get("message", "")
+                    logger.error(
+                        "[Lark] EventKey '%s' not subscribed in Feishu console — listener stopped.\n"
+                        "  → 前往 https://open.feishu.cn → 你的应用 → [事件与回调] → [长连接] \n"
+                        "    勾选事件：%s\n"
+                        "  → 保存后无需重启，下次 ethan serve 启动时自动恢复监听。\n"
+                        "  → 原始错误：%s",
+                        event_key, event_key, data["error"].get("message", "")
                     )
                     proc.terminate()
                     return
