@@ -192,7 +192,11 @@ async def _maybe_generate_skill(session_id: str, model: str, user_id: str = "") 
         if not session:
             return
         user_turns = sum(1 for m in session.messages if m.role == "user")
-        if user_turns < MIN_TURNS:
+        # skill 生成走完整 LLM prompt（比记忆提取重），保持 5 轮节流——
+        # 比记忆提取 3 轮更克制（见 generator.py MIN_TURNS 注释）。
+        # maybe_generate 内部对已存在的 skill 文件有去重，但 NO_SKILL 的判断
+        # 每次都会重跑 LLM，故仍需外层节流。
+        if user_turns < MIN_TURNS or user_turns % 5 != 0:
             return
         generator = SkillGenerator(model=model, user_id=user_id)
         await generator.maybe_generate(session.messages)
