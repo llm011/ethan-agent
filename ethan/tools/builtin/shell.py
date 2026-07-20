@@ -1,8 +1,20 @@
 import asyncio
 import os
 import re
+import shutil
 
 from ethan.tools.base import BaseTool
+
+# 依赖外部 CLI 的命令 → 缺失时的友好安装引导。命中后不执行命令，直接返回引导文案，
+# 避免首次使用者只拿到一句晦涩的 "command not found"。key 用词边界匹配命令串。
+_MISSING_BIN_HINTS = {
+    "lark-cli": (
+        "飞书功能依赖 lark-cli，但当前环境未安装。\n"
+        "安装（macOS）：`brew install larksuite/tap/lark-cli`\n"
+        "安装后首次使用需登录授权：`lark-cli auth login`\n"
+        "（其他平台请参考 lark-cli 文档自行安装。）"
+    ),
+}
 
 # 高危命令模式：命中则每次都重新询问授权，且不计入会话放行（即使本会话已授权过 shell）。
 # 目标是拦住「一次授权 = 整个会话任意高危命令」最坏情况，日常命令仍走会话记忆免问。
@@ -55,6 +67,18 @@ class ShellTool(BaseTool):
         "required": ["command"],
     }
 
+    @staticmethod
+    def _missing_bin_hint(command: str) -> str | None:
+        """命令引用了已知的外部 CLI 但系统未安装时，返回友好安装引导；否则 None。
+
+        只在该 CLI 作为独立 token 出现（首尾为空白/串边界）时才判定，避免误伤
+        路径 / 参数里的子串。命中后由 run() 直接返回引导，不执行命令。
+        """
+        for bin_name, hint in _MISSING_BIN_HINTS.items():
+            if re.search(rf"(?<!\S){re.escape(bin_name)}(?!\S)", command) and shutil.which(bin_name) is None:
+                return hint
+        return None
+
     async def run(self, command: str, timeout: int = 120) -> str:
         # 拦截直接访问 .secrets 目录的命令——密钥只能通过 list_secrets / get_secret 访问
         if ".secrets" in command:
@@ -63,6 +87,10 @@ class ShellTool(BaseTool):
                 "密钥只能通过 list_secrets / get_secret 工具访问。"
                 "如果密钥不存在，请提示用户用 set_secret 配置。"
             )
+        # 缺失外部 CLI 依赖时给出安装引导，而不是让用户拿到晦涩的 "command not found"
+        missing_hint = self._missing_bin_hint(command)
+        if missing_hint:
+            return missing_hint
         try:
             # 把 .secrets/*.env 的 KEY=value 注入子进程环境，脚本里可直接用 $KEY，
             # 模型上下文里从不出现明文。注入失败不影响命令执行。

@@ -1,7 +1,20 @@
 """Small pure helpers used across the chat router."""
 from __future__ import annotations
 
+import json
+from typing import AsyncGenerator
+
 from ethan.providers.base import Message
+
+
+async def _setup_error_stream(message: str, session_id: str) -> AsyncGenerator[str, None]:
+    """请求建立阶段就失败时，构造一个只含 error + done 的最小 SSE 流。
+
+    让 stream 模式下的建立期错误走与生成期错误一致的前端渲染路径（error 气泡），
+    而不是抛 500 让前端显示生硬的 "Chat failed: 500"。
+    """
+    yield f"data: {json.dumps({'error': message, 'session_id': session_id}, ensure_ascii=False)}\n\n"
+    yield f"data: {json.dumps({'done': True, 'usage': {}}, ensure_ascii=False)}\n\n"
 
 
 def _friendly_error(e: Exception, agent) -> str:
@@ -33,6 +46,31 @@ def _friendly_error(e: Exception, agent) -> str:
                                 "stream ended", "incompleteread", "chunkedencodingerror")):
         return "上游连接在生成中途断开（多见于中转服务不稳）。以上内容已保存，可直接发「继续」补全，或在设置页切换 model 重试。"
     return msg[:300]
+
+
+def _status_for_setup_error(e: Exception) -> int:
+    """请求建立期异常 → HTTP 状态码。客户端可修正的错误映射为 4xx，其余 500。
+
+    - 请求体结构非法（缺字段 / 类型不对）→ 422 Unprocessable Entity
+    - 参数值非法 / provider 未配置或鉴权缺失（用户侧可修）→ 400 Bad Request
+    - 其余（DB 初始化失败等服务端问题）→ 500 Internal Server Error
+
+    保守起见只对明确的客户端类错误降级为 4xx，无法归类的一律 500，避免把真正的
+    服务端故障误报成 client 错误。
+    """
+    # 请求体语义错误：解析 messages 时字段缺失 / 类型不对
+    if isinstance(e, (KeyError, TypeError)):
+        return 422
+    if isinstance(e, ValueError):
+        return 400
+    # provider 未配置 / 鉴权缺失：用户侧配置问题，client 无需当作服务故障重试
+    msg = str(e)
+    lower = msg.lower()
+    if ("could not resolve authentication method" in lower
+            or "未配置" in msg
+            or ("api_key" in lower and "not" in lower)):
+        return 400
+    return 500
 
 
 def _with_quote(user_msg: Message, quote: dict | None) -> Message:
