@@ -3,7 +3,7 @@
 # 给 web_search 工具接一个自建 SearXNG 实例：免费、无 API Key、隐私友好。
 # 独立启动，不依赖具体用哪个 ethan 变体的 compose 文件：
 #
-#   docker compose -f docker-compose.searxng.yml up -d
+#   docker compose -f deploy/docker-compose.searxng.yml up -d
 #
 # 启动后在 ethan 的环境变量里加一行，让 web_search 切到它：
 #   - 与 ethan 同在一个 docker network（如都用本文件 + docker-compose.yml up）：
@@ -14,6 +14,12 @@
 #
 # 已有现成的 SearXNG 实例（自建别处或第三方）？不需要这个文件——
 # 直接把 SEARXNG_BASE_URL 指向该实例地址即可，见 deploy/.env.example。
+#
+# 出站代理开关（可选）：
+#   不设 SEARXNG_PROXY_URL  → 直连模式（国内只可用 bing/baidu 等国内引擎）
+#   SEARXNG_PROXY_URL=http://host.docker.internal:7890 → 代理模式（自动放开国外引擎）
+#   可在运行目录的 .env 文件或命令行设置：
+#     SEARXNG_PROXY_URL=http://host.docker.internal:7890 docker compose -f deploy/docker-compose.searxng.yml up -d
 
 services:
   searxng:
@@ -23,7 +29,19 @@ services:
     ports:
       - "8888:8080"
     volumes:
-      - ./deploy/searxng/settings.yml:/etc/searxng/settings.yml:ro
+      # settings.yml 以只读模板挂载，entrypoint-wrapper 每次启动复制可写副本
+      - ./deploy/searxng/settings.yml:/etc/searxng/settings.template.yml:ro
+      - ./deploy/searxng/entrypoint-wrapper.sh:/usr/local/searxng/entrypoint-wrapper.sh:ro
+    environment:
+      - SEARXNG_PROXY_URL=${SEARXNG_PROXY_URL:-}
+    # 让容器能解析 host.docker.internal（macOS/Windows 自带，Linux 需显式声明）
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    entrypoint: /usr/local/searxng/entrypoint-wrapper.sh
+    # 公共 DNS 避免路由器 DNS 污染
+    dns:
+      - 223.5.5.5
+      - 1.1.1.1
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
       interval: 30s

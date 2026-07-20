@@ -87,14 +87,14 @@ async def list_sessions(limit: int = 50, offset: int = 0, q: str | None = None,
 
 
 @router.post("/sessions")
-async def create_session(model: str | None = None, mode: str | None = None, user_id: str = Depends(verify_token)):
+async def create_session(model: str | None = None, mode: str | None = None, source: str | None = None, user_id: str = Depends(verify_token)):
     from ethan.core.paths import user_sessions_db_path
     config = get_config()
     store = SessionStore(db_path=user_sessions_db_path())
     await store.init()
-    session = await store.create(model or config.defaults.model, mode=mode or "")
+    session = await store.create(model or config.defaults.model, source=source or "web", mode=mode or "")
     await store.close()
-    return {"id": session.id, "title": session.title, "model": session.model, "mode": session.mode}
+    return {"id": session.id, "title": session.title, "model": session.model, "mode": session.mode, "source": session.source}
 
 
 @router.get("/sessions/{session_id}")
@@ -127,6 +127,7 @@ async def get_session(session_id: str, user_id: str = Depends(verify_token)):
                 "quote": getattr(m, "quote", None),
                 "a2ui": getattr(m, "a2ui", None),
                 "mcp_apps": getattr(m, "mcp_apps", None),
+                "cards": getattr(m, "cards", None),
                 "images": getattr(m, "images", None) or [],
                 "matched_skills": getattr(m, "matched_skills", None),
                 "ttfb_ms": getattr(m, "ttfb_ms", None),
