@@ -27,6 +27,7 @@ ls ./ethan/defaults/skills/paper-analysis/scripts/ 2>/dev/null && echo USE_PKG |
 | `extract_pages.py` | PDF → 逐页 PNG + `text/page_NNN.txt` + manifest.json(`uv run --with pymupdf`) |
 | `analyze_page_vision.py` | 【路径A】单页 vision → 5维 JSON(脚本内调多模态 API,`uv run --with openai`) |
 | `merge_analysis.py` | 收拢逐页 JSON → Reduce 输入 |
+| `extract_paper_content.py` | 【路径C】PDF → 章节文本 + 图片(含语义命名) + 表格标题 + 公式行(`uv run --with pypdf,pillow`) |
 
 脚本 **stdout 末行打印一行 JSON**,解析它拿路径,不要解析中间日志。
 
@@ -34,6 +35,17 @@ ls ./ethan/defaults/skills/paper-analysis/scripts/ 2>/dev/null && echo USE_PKG |
 
 - **路径 A(vision,精度高)**:环境变量 `VISION_API_KEY`(或 `OPENAI_API_KEY`)+ `VISION_BASE_URL` 存在 → 走这条。脚本把 PNG 喂多模态模型,能看清图表/公式/表格。先用 `shell: echo $VISION_API_KEY` 确认。
 - **路径 B(text,通用)**:无 vision 配置 → 直接 `file_read` 脚本已落盘的每页文字 `text/page_NNN.txt`(见下),逐页分析。图表/公式精度有限(文字层常把表格拍平、公式变乱码),失真处诚实标注。
+- **路径 C(结构化提取,辅助)**:可选预处理,与 A/B 不冲突。`extract_paper_content.py` 用 pypdf 把 PDF 拆成「章节文本 + 图片清单(含语义命名) + 表格标题 + 公式行」,适合需要快速定位「这张图在第几页」「这篇有几个公式」或单独抽图给用户看的场景。**注意**:pypdf 抽的公式是文字层片段,会丢上下标/特殊符号;表格只检测标题不含内容——要原貌仍需走路径 A 看 page_NNN.png。
+
+## 路径 C 用法(可选,结构化提取)
+```bash
+uv run --with pypdf,pillow python $SCRIPTS/extract_paper_content.py "<pdf>"   # 解析末行 result_file / useful_images_dir / formulas_dir 等
+```
+末行 JSON 字段速查:`result_file`(完整汇总)、`useful_images`(有价值图片数,尺寸≥20×20)、`useful_images_dir`(语义命名,如 `Figure1_attention_useful.png`)、`tables`(检测到的 Table N 标题)、`formulas`(Equation N / 数学符号 / 等式行)、`sections`(按章节切分的全文)。
+- 典型场景 1:用户问"这篇论文有哪些图" → 跑路径 C,`ls` useful_images_dir 给用户看。
+- 典型场景 2:Reduce 阶段需要核对某公式原文 → `file_read` formulas_dir 下的 `pageN_formulaM.txt`。
+- 典型场景 3:想快速读章节而不是逐页 → `file_read` result_file 的 `text.sections` 数组。
+- **不要把路径 C 当 vision 的替代**——它给不出图表的视觉结构、表格的行列对应、公式的真实排版。需要看图必走路径 A。
 
 ## 工作流程
 

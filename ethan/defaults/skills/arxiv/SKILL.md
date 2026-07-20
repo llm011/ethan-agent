@@ -15,7 +15,7 @@ platforms: [linux, macos, windows]
 metadata:
   hermes:
     tags: [Research, Arxiv, Papers, Academic, Science, API]
-    related_skills: [ocr-and-documents]
+    related_skills: [ocr-and-documents, paper-analysis]
 ---
 # arXiv Research
 Search and retrieve academic papers from arXiv via their free REST API. No API key, no dependencies — just curl.
@@ -217,3 +217,11 @@ Papers can be withdrawn after submission. When this happens:
 - The `<summary>` field contains a withdrawal notice (look for "withdrawn" or "retracted")
 - Metadata fields may be incomplete
 - Always check the summary before treating a result as a valid paper
+
+## 精读论文 / 深度解读（走 paper-analysis 技能）
+本 skill 只做检索（curl + XML 解析）。当用户出现以下意图时，**转用 `paper-analysis` 技能**——它有 vision + Map-Reduce 流水线，逐页精读再汇总：
+- "精读论文" / "深度解读论文" / "解读这篇论文" / "详细分析论文"
+- "paper analysis" / "map reduce 论文" / "论文精读"
+- 给出 arXiv ID 或 PDF 链接并要求"读懂"、"讲清楚"、"拆解"的
+
+`paper-analysis` 会自动调本 skill 的搜索能力做前置检索，无需先在此搜完再切。

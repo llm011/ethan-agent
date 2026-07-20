@@ -1,0 +1,206 @@
+[
+    {
+        "name": "OpenAI Blog",
+        "url": "https://openai.com/news/rss.xml",
+        "category": "AI Research & News"
+    },
+    {
+        "name": "Anthropic News",
+        "url": "https://www.anthropic.com/news/rss.xml",
+        "category": "AI Research & News"
+    },
+    {
+        "name": "Hugging Face Blog",
+        "url": "https://huggingface.co/blog/feed.xml",
+        "category": "AI Research & News"
+    },
+    {
+        "name": "Google DeepMind Blog",
+        "url": "https://deepmind.google/blog/rss.xml",
+        "category": "AI Research & News"
+    },
+    {
+        "name": "The Batch (DeepLearning.AI)",
+        "url": "https://www.deeplearning.ai/the-batch/rss",
+        "category": "AI Education & Insights"
+    },
+    {
+        "name": "Andrej Karpathy's Blog",
+        "url": "https://karpathy.github.io/feed.xml",
+        "category": "AI Thought Leaders"
+    },
+    {
+        "name": "Simon Willison's Weblog (AI & Agentic Focus)",
+        "url": "https://simonwillison.net/atom/everything/",
+        "category": "AI Thought Leaders"
+    },
+    {
+        "name": "Lilian Weng's Log",
+        "url": "https://lilianweng.github.io/index.xml",
+        "category": "AI Research Deep Dives"
+    },
+    {
+        "name": "OpenHands (GitHub Releases/Tags)",
+        "url": "https://github.com/All-Hands-AI/OpenHands/releases.atom",
+        "category": "Agentic Coding & Tooling"
+    },
+    {
+        "name": "OpenClaw GitHub Releases",
+        "url": "https://github.com/openclaw/openclaw/releases.atom",
+        "category": "Agentic Coding & Tooling"
+    },
+    {
+        "name": "LangChain Blog",
+        "url": "https://blog.langchain.dev/rss/",
+        "category": "Agentic Coding & Tooling"
+    },
+    {
+        "name": "LlamaIndex Blog",
+        "url": "https://blog.llamaindex.ai/feed",
+        "category": "Agentic Coding & Tooling"
+    },
+    {
+        "name": "Matthew Berman (YouTube via RSS)",
+        "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCtSVS0F6P5K5A4yR5-R_Xiw",
+        "category": "AI Tech Media & Demos"
+    },
+    {
+        "name": "Wes Roth (YouTube via RSS)",
+        "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCe853X4iN203q88B6-h4dKQ",
+        "category": "AI Tech Media & Demos"
+    },
+    {
+        "name": "Lex Fridman Podcast",
+        "url": "https://lexfridman.com/feed/podcast/",
+        "category": "AI Tech Media & Demos"
+    },
+    {
+        "name": "@gdb",
+        "url": "https://nitter.net/gdb/rss",
+        "category": "AI Thought Leaders (X)"
+    },
+    {
+        "name": "@aakashgupta",
+        "url": "https://nitter.net/aakashg0/rss",
+        "category": "AI Thought Leaders (X)"
+    },
+    {
+        "name": "@xinranma_",
+        "url": "https://nitter.net/xinranma_/rss",
+        "category": "AI Thought Leaders (X)"
+    },
+    {
+        "name": "@azeem",
+        "url": "https://nitter.net/azeem/rss",
+        "category": "AI Thought Leaders (X)"
+    },
+    {
+        "name": "@burkov",
+        "url": "https://nitter.net/burkov/rss",
+        "category": "AI Thought Leaders (X)"
+    },
+    {
+        "name": "@zephyr_z9",
+        "url": "https://nitter.net/zephyr_z9/rss",
+        "category": "AI Thought Leaders (X)"
+    },
+    {
+        "name": "@nrqa__",
+        "url": "https://nitter.net/nrqa__/rss",
+        "category": "AI Thought Leaders (X)"
+    },
+    {
+        "name": "@LinusEkenstam",
+        "url": "https://nitter.net/LinusEkenstam/rss",
+        "category": "AI Thought Leaders (X)"
+    },
+    {
+        "name": "@SpaceX",
+        "url": "https://nitter.net/SpaceX/rss",
+        "category": "AI Thought Leaders (X)"
+    },
+    {
+        "name": "@mariogabriele",
+        "url": "https://nitter.net/mariogabriele/rss",
+        "category": "AI Thought Leaders (X)"
+    },
+    {
+        "name": "@ScottNolan",
+        "url": "https://nitter.net/ScottNolan/rss",
+        "category": "AI Thought Leaders (X)"
+    },
+    {
+        "name": "@lennysan",
+        "url": "https://nitter.net/lennysan/rss",
+        "category": "AI Thought Leaders (X)"
+    },
+    {
+        "name": "@AlexFinn",
+        "url": "https://nitter.net/AlexFinnX/rss",
+        "category": "AI Thought Leaders (X)"
+    },
+    {
+        "name": "@deanwball",
+        "url": "https://nitter.net/deanwball/rss",
+        "category": "AI Thought Leaders (X)"
+    },
+    {
+        "name": "@petergyang",
+        "url": "https://nitter.net/petergyang/rss",
+        "category": "AI Thought Leaders (X)"
+    },
+    {
+        "name": "@Cathwu",
+        "url": "https://nitter.net/Cathwu/rss",
+        "category": "AI Thought Leaders (X)"
+    },
+    {
+        "name": "@Logankilpatrick",
+        "url": "https://nitter.net/Logankilpatrick/rss",
+        "category": "AI Thought Leaders (X)"
+    },
+    {
+        "name": "@bilawalsidhu",
+        "url": "https://nitter.net/bilawalsidhu/rss",
+        "category": "AI Thought Leaders (X)"
+    },
+    {
+        "name": "@tibor_mx",
+        "url": "https://nitter.net/tibor_mx/rss",
+        "category": "AI Thought Leaders (X)"
+    },
+    {
+        "name": "@AmanJha",
+        "url": "https://nitter.net/Aman_Jha/rss",
+        "category": "AI Thought Leaders (X)"
+    },
+    {
+        "name": "@ShaoZhou",
+        "url": "https://nitter.net/ShaoZhou_AI/rss",
+        "category": "AI Thought Leaders (X)"
+    },
+    {
+        "name": "@Dante",
+        "url": "https://nitter.net/Dante_AI/rss",
+        "category": "AI Thought Leaders (X)"
+    },
+    {
+        "name": "@AndrewYNg",
+        "url": "https://nitter.net/AndrewYNg/rss",
+        "category": "AI Thought Leaders (X)"
+    },
+    {
+        "name": "@GavrielCohen",
+        "url": "https://nitter.net/Gavriel_Cohen/rss",
+        "category": "AI Thought Leaders (X)"
+    },
+    {
+        "name": "chaofa用代码打点酱油",
+        "url": "https://yuanchaofa.com/rss.xml"
+    },
+    {
+        "name": "@trq212",
+        "url": "https://nitter.net/trq212/rss",
+        "category": "AI Thought Leaders (X)"
+    }
+]
