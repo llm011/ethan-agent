@@ -95,11 +95,11 @@ class StreamCollector:
             duration_ms = int(
                 (time.time() - self._times.pop(item.tool_name, time.time())) * 1000
             )
-            if item.ui:
+            if getattr(item, "ui", None):
                 self.a2ui.extend(item.ui)
-            if item.mcp_app:
+            if getattr(item, "mcp_app", None):
                 self.mcp_apps.append(item.mcp_app)
-            if item.cards:
+            if getattr(item, "cards", None):
                 self.cards.extend(item.cards)
             # 找最近一个同名 running step 关闭
             for step in reversed(self.tool_steps):
