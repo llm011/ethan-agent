@@ -27,8 +27,8 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 - **Permanent by design**: insights are never auto-deleted; `last_accessed` is tracked for observability but not used as an eviction basis (memory.db stays tiny, ~15KB per insight)
 - **Sessions.db rotation**: full message history grows fast, so sessions.db is auto-archived via `VACUUM INTO` to `~/.ethan/archive/sessions.{start}~{end}.db` (filename carries the date span) once it exceeds 10 MB, keeping the active db small while old chats remain queryable by date
 
-**Companion mode — 苏念 (Surrender Experiment counselor)**
-- A loadable plugin: toggle "苏念 · 陪伴倾听" in the chat UI to switch from the work assistant into a young, gentle female listener grounded in *The Surrender Experiment* (道法自然)
+**Companion mode — 苏念 (Surrender Experiment counselor)**  *(built-in skill, no install needed)*
+- Toggle "苏念 · 陪伴倾听" in the chat UI (or `/mode 苏念` in the CLI) to switch from the work assistant into a young, gentle female listener grounded in *The Surrender Experiment* (道法自然)
 - In this mode the agent affirms first, listens deeply, and accompanies rather than rushing to solve — speaking like a real person, no AI stiffness
 - While in companion mode, the consolidator auto-extracts 心理与情绪 (mood / stressors / what soothes you / inner feelings) into your profile; basic traits are set by you in the "我的画像" (My Profile) settings tab
 
@@ -47,6 +47,19 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 - `modes: [法律]` filters skills by conversation mode so each mode gets only relevant skills (empty = all modes)
 - Hit tracking and correction collection; Heartbeat auto-updates skill content with a cheap model when corrections accumulate
 - Agent can create new skills mid-conversation via the `skill_create` tool
+
+**Feature installation matrix** — what works out of the box vs. what needs an extra install step:
+
+| Feature | Status | How to enable |
+|---|---|---|
+| 苏念 companion mode | built-in | `/mode 苏念` or toggle in chat UI — nothing to install |
+| Default skills (channels, lark-im, deepwiki, use-browser, agent-browser, dev-browser, …) | built-in | auto-copied on first run |
+| Memory system, scheduler, tools, web UI | built-in | works after `ethan serve` starts |
+| Semantic router (smarter skill matching) | optional | `pip install 'ethan-agent[embedding]'` |
+| Tavily web search | optional plugin | `ethan plugin add tavily` (needs API key) |
+| Self-hosted SearXNG | optional plugin | `ethan plugin add searxng` (or use the bundled `deploy/docker-compose.searxng.yml`) |
+| Legal expert mode (legal-assistant) | optional skill | `ethan skill add legal` (or auto-installs on first `/mode 法律`) |
+| Other community skills | optional skill | `ethan skill add <repo>` — see [Skill Hub](https://github.com/llm011/ethan-agent/tree/main/ethan/defaults/skills) |
 
 **Two-track routing**
 - **fast**: keyword / skill-trigger match → minimal prompt + fast_path tools only + lite model (optional)

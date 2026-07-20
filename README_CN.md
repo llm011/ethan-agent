@@ -25,8 +25,8 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 - **永久保留**：洞察不会被自动删除；`last_accessed` 仅作活跃度观察，不作为淘汰依据（memory.db 体量天然可控，每条洞察约 15KB）
 - **sessions.db 轮转**：完整消息历史增长快，sessions.db 超 10 MB 时用 `VACUUM INTO` 原子快照到 `~/.ethan/archive/sessions.{start}~{end}.db`（文件名带日期跨度），保持 active db 轻量，旧会话仍可按日期查归档
 
-**陪伴倾听模式 · 苏念（《臣服实验》心理咨询师）**
-- 可加载插件：在聊天界面一键切换「苏念 · 陪伴倾听」，从工作助手变成一位年轻温柔的女性陪伴者，熟读《臣服实验》、深谙道法自然
+**陪伴倾听模式 · 苏念（《臣服实验》心理咨询师）**  *（内置技能，无需安装）*
+- 在聊天界面一键切换「苏念 · 陪伴倾听」（或 CLI 里 `/mode 苏念`），从工作助手变成一位年轻温柔的女性陪伴者，熟读《臣服实验》、深谙道法自然
 - 该模式下 Agent 先赞许安抚、深度倾听、陪伴而非急于解决问题——说话像真人、温柔口语，拒绝 AI 腔
 - 陪伴模式下，后台自动把「心理与情绪」（情绪/压力源/什么能安抚你/内心感受）整理进画像；基础特征由你在设置页「我的画像」里填写
 
@@ -45,6 +45,19 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 - `modes: [法律]` 按对话模式过滤，Skill 只在指定模式下生效（空 = 所有模式）
 - Skill 命中统计与纠正收集，积累后 Heartbeat 自动用廉价模型更新 Skill 内容
 - Agent 可在对话中即时创建新 Skill（`skill_create` 工具）
+
+**功能安装对照表** —— 哪些开箱即用、哪些需要额外安装：
+
+| 功能 | 状态 | 启用方式 |
+|---|---|---|
+| 苏念陪伴模式 | 内置 | `/mode 苏念` 或聊天界面切换——无需安装 |
+| 默认技能（channels、lark-im、deepwiki、use-browser、agent-browser、dev-browser 等） | 内置 | 首次运行自动复制 |
+| 记忆系统、定时任务、工具、Web UI | 内置 | `ethan serve` 启动后即用 |
+| 语义路由器（更聪明的技能匹配） | 可选 | `pip install 'ethan-agent[embedding]'` |
+| Tavily 网页搜索 | 可选插件 | `ethan plugin add tavily`（需要 API Key） |
+| 自建 SearXNG | 可选插件 | `ethan plugin add searxng`（或用 `deploy/docker-compose.searxng.yml`） |
+| 法律专家模式（legal-assistant） | 可选技能 | `ethan skill add legal`（或首次 `/mode 法律` 时自动安装） |
+| 其他社区技能 | 可选技能 | `ethan skill add <repo>`——见 [Skill Hub](https://github.com/llm011/ethan-agent/tree/main/ethan/defaults/skills) |
 
 **两档智能路由**
 - **fast**：命中关键词 / Skill 触发词 → 极简 prompt + 仅 fast_path 工具 + 可选 lite 模型
