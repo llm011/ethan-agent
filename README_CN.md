@@ -46,10 +46,9 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 - Skill 命中统计与纠正收集，积累后 Heartbeat 自动用廉价模型更新 Skill 内容
 - Agent 可在对话中即时创建新 Skill（`skill_create` 工具）
 
-**三档智能路由**
-- **fast**：短命令 + 关键词匹配 → 极简 prompt + 仅限 fast_path 工具 + 2 次迭代
-- **medium**：中等消息 → 完整 prompt + 全部工具 + 4 次迭代
-- **full**：复杂任务 → 完整 prompt + 全部工具 + 10 次迭代
+**两档智能路由**
+- **fast**：命中关键词 / Skill 触发词 → 极简 prompt + 仅 fast_path 工具 + 可选 lite 模型
+- **full**：其余全部（含「写 / 分析 / 重构」等强制 full 信号）→ 完整 prompt + 全部工具
 
 **Loop 控制**
 - 卡死检测：连续 3 轮调用相同工具+参数（或连续 2 轮同一报错）时，注入强制反思提示（要求 `<diagnosis>` 诊断并换路），而不是一路空转到迭代上限
@@ -165,15 +164,31 @@ docker compose up -d
 
 ### 4. 访问
 
-- **Web UI**：http://localhost:3000
-- **API**：http://localhost:8900
+Web UI、API、健康检查都由同一个 8900 端口提供：
+
+- **Web UI / API**：http://localhost:8900
 - **健康检查**：http://localhost:8900/health
+
+首次打开 Web UI 时需要输入登录 Token。获取方式：
+
+```bash
+# 本地安装
+ethan web token                       # 打印当前 Web 登录 Token
+# 或直接读配置文件
+grep auth_token ~/.ethan/config.yaml
+
+# Docker（服务名因 compose 文件而异）
+docker compose exec ethan ethan web token          # docker-compose.yml
+docker compose exec ethan-agent ethan web token    # docker-compose.pip.yml
+# 或从挂载的配置文件读取
+grep auth_token ~/.ethan/config.yaml
+```
 
 ### 5. 常用命令
 
 ```bash
-docker compose logs -f ethan-backend   # 查看日志
-docker compose restart ethan-backend   # 重启服务
+docker compose logs -f ethan          # 查看日志
+docker compose restart ethan          # 重启服务
 docker compose pull && docker compose up -d  # 更新到最新版本
 docker compose down                    # 停止
 ```
@@ -316,7 +331,7 @@ cd app/android
 ```
 ethan/
 ├── core/
-│   ├── agent.py          # ReAct loop，三档路由（fast/medium/full）
+│   ├── agent.py          # ReAct loop，两档路由（fast/full）
 │   ├── config.py         # YAML 配置（~/.ethan/config.yaml）
 │   └── heartbeat.py      # 心跳系统，定期维护任务
 ├── providers/
@@ -519,16 +534,11 @@ defaults:
   max_tokens: 4096
   max_tool_iterations: 10
   routing:
-    fast_max_length: 12        # 超过此字数不走 fast 轨
-    medium_max_length: 80      # 超过 fast 阈值、不超过此值走 medium 轨
-    medium_max_iters: 15       # medium 轨最多迭代次数（可按需调大）
-    fast_keywords:
-      - "关*灯"
-      - "开*灯"
-      - "播放音乐"
-    fast_skill_triggers:       # 命中后走 fast 轨（不受长度限制）
-      - "home assistant"
-      - "发飞书消息"
+    fast_rules:
+      - name: 智能家居控制
+        keywords: ["关*灯", "开*灯", "播放音乐"]
+        tools: ["shell"]
+        skills: ["home-assistant-control"]
 ```
 
 `.env` 中的环境变量会覆盖 config 文件中的值（适合管理密钥）。
@@ -664,7 +674,7 @@ EOF
 **核心 Agent**
 - [x] 多模型 Provider（Anthropic + OpenAI 兼容：Gemini、GPT、Ollama 等）
 - [x] ReAct agent loop + 流式输出
-- [x] 三档路由：fast / medium / full，工具结果压缩，轮次内去重缓存
+- [x] 两档路由：fast / full，工具结果压缩，轮次内去重缓存
 - [x] Prompt Caching（Anthropic 稳定层 cache_control，成本降至 0.1×）
 
 **记忆体系（五层）**

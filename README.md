@@ -48,10 +48,9 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 - Hit tracking and correction collection; Heartbeat auto-updates skill content with a cheap model when corrections accumulate
 - Agent can create new skills mid-conversation via the `skill_create` tool
 
-**Three-track routing**
-- **fast**: short commands + keyword match → minimal prompt + fast_path tools only + 2 iterations
-- **medium**: mid-length messages → full prompt + all tools + 4 iterations
-- **full**: complex tasks → full prompt + all tools + 10 iterations
+**Two-track routing**
+- **fast**: keyword / skill-trigger match → minimal prompt + fast_path tools only + lite model (optional)
+- **full**: everything else (including forced-full signals like "write / analyze / refactor") → full prompt + all tools
 
 **Loop control**
 - Stuck detection: when the agent repeats the same tool+args for 3 rounds (or 2 rounds of the same error), it injects a forced-reflection prompt (`<diagnosis>` + must switch strategy) instead of spinning to the iteration cap
@@ -165,15 +164,31 @@ docker compose up -d
 
 ### 4. Access
 
-- **Web UI**: http://localhost:3000
-- **API**: http://localhost:8900
+Web UI, API, and health check are all served from the single port 8900:
+
+- **Web UI / API**: http://localhost:8900
 - **Health check**: http://localhost:8900/health
+
+On first launch the Web UI asks for a login token. Retrieve it with any of:
+
+```bash
+# Local install
+ethan web token                       # prints the current Web login token
+# or read it directly from the config file
+grep auth_token ~/.ethan/config.yaml
+
+# Docker (service name differs per compose file)
+docker compose exec ethan ethan web token          # docker-compose.yml
+docker compose exec ethan-agent ethan web token    # docker-compose.pip.yml
+# or read from the mounted config file
+grep auth_token ~/.ethan/config.yaml
+```
 
 ### 5. Common commands
 
 ```bash
-docker compose logs -f ethan-backend  # tail logs
-docker compose restart ethan-backend  # restart backend
+docker compose logs -f ethan        # tail logs
+docker compose restart ethan        # restart service
 docker compose pull && docker compose up -d  # update to latest version
 docker compose down                   # stop
 ```
@@ -316,7 +331,7 @@ On first launch, configure the server URL (e.g. `http://<your-nas>:8900`) and Ac
 ```
 ethan/
 ├── core/
-│   ├── agent.py               # ReAct loop, three-track router (fast/medium/full)
+│   ├── agent.py               # ReAct loop, two-track router (fast/full)
 │   ├── config.py              # YAML config (~/.ethan/config.yaml)
 │   └── heartbeat.py           # Heartbeat system, periodic maintenance
 ├── providers/
@@ -528,14 +543,11 @@ defaults:
   max_tokens: 4096
   max_tool_iterations: 10
   routing:
-    fast_max_length: 12
-    medium_max_length: 80
-    medium_max_iters: 15
-    fast_keywords:
-      - "turn off*light"
-      - "play music"
-    fast_skill_triggers:
-      - "home assistant"
+    fast_rules:
+      - name: Home automation
+        keywords: ["turn off*light", "play music"]
+        tools: ["shell"]
+        skills: ["home-assistant-control"]
 ```
 
 Environment variables in `.env` override config values (useful for secrets).
@@ -568,7 +580,7 @@ Environment variables in `.env` override config values (useful for secrets).
 **Core Agent**
 - [x] Multi-model provider (Anthropic + OpenAI-compatible: Gemini, GPT, Ollama, etc.)
 - [x] ReAct agent loop with streaming output
-- [x] Three-track router: fast / medium / full, tool result compression, per-turn dedup cache
+- [x] Two-track router: fast / full, tool result compression, per-turn dedup cache
 - [x] Prompt Caching (Anthropic stable-prefix cache_control, ~0.1× input cost)
 
 **Five-Layer Memory**
