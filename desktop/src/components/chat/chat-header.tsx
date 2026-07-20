@@ -4,6 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Clock, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { renameSession, regenSessionTitle } from "@/lib/api";
+import { getApiUrl } from "@/lib/api-base";
 import { fmtTokens } from "@/lib/utils";
 import { formatTrigger, formatNextRun } from "@/lib/utils";
 import { useTheme } from "./use-theme";
@@ -148,7 +149,7 @@ export function ChatHeader({ sessionId, title, source, usage, schedules, onTitle
               className={usage.input > 0 ? "ml-2" : "ml-auto"}
               onClick={async () => {
                 try {
-                  const url = `${window.location.origin}/chat/${sessionId}/`;
+                  const url = `${getApiUrl().replace(/\/api\/?$/, "")}/chat/${sessionId}/`;
                   await navigator.clipboard.writeText(url);
                   setCopied(true);
                   setTimeout(() => setCopied(false), 1500);

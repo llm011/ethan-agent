@@ -82,11 +82,20 @@ export function onBust(cb: (key: string) => void): () => void {
     const ev = e as CustomEvent<{ key: string }>;
     cb(ev.detail?.key ?? "");
   };
+  const storageHandler = (e: StorageEvent) => {
+    // 只关注我们自己的缓存 key 变更（被删除或修改）
+    if (e.key && e.key.startsWith(CACHE_PREFIX)) {
+      cb(e.key.slice(CACHE_PREFIX.length));
+    }
+    // key 为 null 表示 clear()，触发全部失效
+    if (e.key === null) {
+      cb("");
+    }
+  };
   window.addEventListener(BUST_EVENT, handler);
-  // 跨 tab 同步：storage 事件触发时也调一下 cb（key 为空表示全部失效）
-  window.addEventListener("storage", handler as EventListener);
+  window.addEventListener("storage", storageHandler);
   return () => {
     window.removeEventListener(BUST_EVENT, handler);
-    window.removeEventListener("storage", handler as EventListener);
+    window.removeEventListener("storage", storageHandler);
   };
 }
