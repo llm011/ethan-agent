@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { ArrowRight, ChevronDown, ChevronUp, Loader2, CheckCircle2, XCircle } from "lucide-react";
-import type { ToolStep } from "@/components/tool-timeline";
+import type { ToolStep } from "@ethan/shared/components/tool-timeline";
 
 const ENTITY_CONFIG: Record<string, { label: string; color: string }> = {
   file:      { label: "文件", color: "#22c55e" },

@@ -5,8 +5,8 @@ import Image from "next/image";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Quote as QuoteIcon, BookOpen as BookOpenIcon, Share2 as ShareIcon } from "lucide-react";
-import { ToolTimeline } from "@/components/tool-timeline";
-import { SwimlaneDiagram } from "@/components/swimlane-diagram";
+import { ToolTimeline } from "@ethan/shared/components/tool-timeline";
+import { SwimlaneDiagram } from "@ethan/shared/components/swimlane-diagram";
 import { fmtTokens } from "@/lib/utils";
 import { A2uiCard } from "./a2ui-card";
 import { McpAppView } from "./mcp-app-view";
@@ -15,8 +15,8 @@ import { Lightbox, type LightboxImage } from "./lightbox";
 import { ImageGallery, type ImageCard } from "./image-gallery";
 import { SearchCardCarousel, type SearchResultCard } from "./search-card-carousel";
 import { applyHighlights } from "@/lib/highlight";
-import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
-import type { CardData, Message } from "./types";
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@ethan/shared/ui/tooltip";
+import type { CardData, Message } from "@ethan/shared/chat/types";
 import type { Annotation } from "@/lib/api";
 
 // 按 card.type 分发到 SearchCardCarousel 或 ImageGallery

@@ -11,11 +11,11 @@ import {
   triggerStructuredConsolidation,
   updateStructuredMemory,
 } from "@/lib/api";
-import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { ConfirmDialog } from "@/components/confirm-dialog";
+import { Card, CardContent, CardDescription, CardHeader } from "@ethan/shared/ui/card";
+import { ScrollArea } from "@ethan/shared/ui/scroll-area";
+import { Button } from "@ethan/shared/ui/button";
+import { Badge } from "@ethan/shared/ui/badge";
+import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
 import { Calendar, Check, Loader2, Pencil, RefreshCw, Trash2, X, Zap } from "lucide-react";
 
 const CJK = /[一-鿿㐀-䶿　-〿＀-￯⺀-⻿]/;

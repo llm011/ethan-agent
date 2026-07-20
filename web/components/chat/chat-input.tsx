@@ -2,9 +2,9 @@
 
 import { useState, useRef, RefObject, useCallback } from "react";
 import { Send, Paperclip, X, Reply, Square, ImageIcon } from "lucide-react";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@ethan/shared/ui/select";
 import { uploadFile, type ModeEntry } from "@/lib/api";
-import type { Quote, PendingFile } from "./types";
+import type { Quote, PendingFile } from "@ethan/shared/chat/types";
 
 // mode.accent → 完整 Tailwind 类（必须静态写全，Tailwind 不识别动态拼接的类名）。
 // 新增带新配色的模式时在此补一条；未知 accent 回退 neutral。

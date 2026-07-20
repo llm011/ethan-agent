@@ -5,8 +5,8 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
+} from "@ethan/shared/ui/dialog";
+import { Button } from "@ethan/shared/ui/button";
 import { ShieldCheck } from "lucide-react";
 
 export interface ConsentRequest {

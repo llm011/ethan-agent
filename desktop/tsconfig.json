@@ -29,6 +29,18 @@
     "paths": {
       "@/*": [
         "./src/*"
+      ],
+      "@ethan/shared/ui/*": [
+        "../packages/shared/src/ui/*"
+      ],
+      "@ethan/shared/chat/*": [
+        "../packages/shared/src/chat/*"
+      ],
+      "@ethan/shared/lib/*": [
+        "../packages/shared/src/lib/*"
+      ],
+      "@ethan/shared/components/*": [
+        "../packages/shared/src/components/*"
       ]
     },
     "ignoreDeprecations": "6.0"

@@ -4,8 +4,8 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { fetchDoc, resolveDocsImageUrl } from "@/lib/api";
 import { DOC_NAV } from "@/lib/docs-nav";
-import { CodeBlock } from "@/components/code-block";
-import { PlainCodeBlock } from "@/components/plain-code-block";
+import { CodeBlock } from "@ethan/shared/components/code-block";
+import { PlainCodeBlock } from "@ethan/shared/components/plain-code-block";
 import { Loader2, ChevronDown, ChevronRight } from "lucide-react";
 
 interface TocItem {

@@ -3,8 +3,8 @@
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { CodeBlock } from "@/components/code-block";
-import { PlainCodeBlock } from "@/components/plain-code-block";
+import { CodeBlock } from "@ethan/shared/components/code-block";
+import { PlainCodeBlock } from "@ethan/shared/components/plain-code-block";
 import { forwardRef } from "react";
 
 // CommonMark 规定 ** 紧内侧不能有空格，否则不渲染加粗。

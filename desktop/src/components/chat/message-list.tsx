@@ -1,6 +1,6 @@
 import { useRef, useEffect, useCallback, useState } from "react";
 import { MessageBubble } from "./message-bubble";
-import type { Message } from "./types";
+import type { Message } from "@ethan/shared/chat/types";
 import type { Annotation } from "@/lib/api";
 
 // 首屏显示的消息数量（约 5 轮对话 = 10 条消息）

@@ -2,7 +2,7 @@
 
 import { useEffect, useCallback } from "react";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent } from "@ethan/shared/ui/dialog";
 
 // Lightbox 单张图片的描述信息
 export interface LightboxImage {

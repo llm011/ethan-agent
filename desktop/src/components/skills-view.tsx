@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { SkillInfo, fetchSkills, saveSkill, deleteSkill } from "@/lib/api";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { MdEditor } from "@/components/md-editor";
-import { ConfirmDialog } from "@/components/confirm-dialog";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@ethan/shared/ui/card";
+import { Button } from "@ethan/shared/ui/button";
+import { Input } from "@ethan/shared/ui/input";
+import { ScrollArea } from "@ethan/shared/ui/scroll-area";
+import { MdEditor } from "@ethan/shared/components/md-editor";
+import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
 import { Plus, Save, Search, Wrench, Trash2 } from "lucide-react";
 
 export function SkillsView() {

@@ -10,6 +10,7 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@ethan/shared": "workspace:*",
     "@a2ui/markdown-it": "^0.1.0",
     "@a2ui/react": "^0.10.1",
     "@a2ui/web_core": "^0.10.4",

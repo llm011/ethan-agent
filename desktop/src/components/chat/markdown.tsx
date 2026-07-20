@@ -1,8 +1,8 @@
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { CodeBlock } from "@/components/code-block";
-import { PlainCodeBlock } from "@/components/plain-code-block";
+import { CodeBlock } from "@ethan/shared/components/code-block";
+import { PlainCodeBlock } from "@ethan/shared/components/plain-code-block";
 import { forwardRef, useMemo, useState } from "react";
 import { Lightbox, type LightboxImage } from "./lightbox";
 import { openUrl } from "@/lib/external-link";

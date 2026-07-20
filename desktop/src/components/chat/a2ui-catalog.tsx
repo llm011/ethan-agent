@@ -21,9 +21,9 @@ import {
   basicCatalog,
   type ReactComponentImplementation,
 } from "@a2ui/react/v0_9";
-import { Card } from "@/components/ui/card";
-import { Button as ShadButton } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
+import { Card } from "@ethan/shared/ui/card";
+import { Button as ShadButton } from "@ethan/shared/ui/button";
+import { Separator } from "@ethan/shared/ui/separator";
 
 type ChildRef = string | { id: string; basePath?: string };
 type BuildChild = (id: string, basePath?: string) => ReactNode;
