@@ -49,17 +49,39 @@ export async function* streamChat(
   },
 ): AsyncGenerator<StreamChunk> {
   const { quote = null, mode = "", btw = false, review = false } = options ?? {};
-  const res = await fetch(`${API_URL}/chat`, {
-    method: "POST",
-    headers: headers(),
-    body: JSON.stringify({ messages, model, stream: true, session_id: sessionId, quote: quote ?? undefined, mode: mode || undefined, btw: btw || undefined, auto_consent: review || undefined }),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}/chat`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({ messages, model, stream: true, session_id: sessionId, quote: quote ?? undefined, mode: mode || undefined, btw: btw || undefined, auto_consent: review || undefined }),
+    });
+  } catch {
+    // fetch 直接抛错 = 连不上后端（服务没起 / 端口不通）
+    throw new Error("连接不上 Ethan 服务，请确认后端已启动（ethan serve）后重试。");
+  }
 
   if (!res.ok) {
-    throw new Error(`Chat failed: ${res.status}`);
+    throw new Error(await friendlyHttpError(res));
   }
 
   yield* parseSSE(res);
+}
+
+/** 把非 2xx 响应转成给用户看的中文提示。优先读后端返回的 detail，再按状态码兜底。 */
+async function friendlyHttpError(res: Response): Promise<string> {
+  let detail = "";
+  try {
+    const body = await res.clone().json();
+    detail = typeof body?.detail === "string" ? body.detail : "";
+  } catch {
+    // 非 JSON 响应，忽略
+  }
+  if (detail) return detail;
+  if (res.status === 401) return "登录已失效或未授权，请重新登录后重试。";
+  if (res.status === 404) return "接口不存在，可能是前后端版本不匹配，建议重启服务。";
+  if (res.status >= 500) return `Ethan 服务内部错误（${res.status}）。请稍后重试，或查看服务端日志 ~/.ethan/logs/api.err.log 排查。`;
+  return `请求失败（${res.status}）。`;
 }
 
 /** 重连一个仍在进行的生成：刷新页面后调此函数，回放缓冲 + 继续实时。

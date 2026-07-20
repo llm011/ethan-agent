@@ -1,7 +1,20 @@
 """Small pure helpers used across the chat router."""
 from __future__ import annotations
 
+import json
+from typing import AsyncGenerator
+
 from ethan.providers.base import Message
+
+
+async def _setup_error_stream(message: str, session_id: str) -> AsyncGenerator[str, None]:
+    """请求建立阶段就失败时，构造一个只含 error + done 的最小 SSE 流。
+
+    让 stream 模式下的建立期错误走与生成期错误一致的前端渲染路径（error 气泡），
+    而不是抛 500 让前端显示生硬的 "Chat failed: 500"。
+    """
+    yield f"data: {json.dumps({'error': message, 'session_id': session_id}, ensure_ascii=False)}\n\n"
+    yield f"data: {json.dumps({'done': True, 'usage': {}}, ensure_ascii=False)}\n\n"
 
 
 def _friendly_error(e: Exception, agent) -> str:

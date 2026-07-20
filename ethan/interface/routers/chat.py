@@ -106,50 +106,71 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
         req.session_id = _generate_id()
 
     set_session_id(req.session_id)  # browser 工具按对话隔离/授权
-    agent = create_agent(req.model, channel=req.channel, user_id=user_id, mode=req.mode)
-    messages = [
-        Message(role=m["role"], content=m.get("content", ""), images=m.get("images") or [])
-        for m in req.messages
-    ]
 
-    store = SessionStore(db_path=user_sessions_db_path())
-    await store.init()
+    # 请求建立阶段（建 agent / 开会话库 / 持久化用户消息 / 拼历史上下文）整体兜底。
+    # 这段过去裸奔，任一步抛错都会冒泡成 FastAPI 默认 500，前端只显示生硬的
+    # "Chat failed: 500"。首次使用时最容易在这里踩坑（如 ~/.ethan 目录/DB 初始化、
+    # provider 未配置导致 create_agent 失败等）。这里统一转成友好错误：
+    #   stream 模式 → 返回一个只含 error 事件的 SSE 流，前端按普通错误气泡渲染；
+    #   非 stream 模式 → 返回带 friendly detail 的 500。
+    try:
+        agent = create_agent(req.model, channel=req.channel, user_id=user_id, mode=req.mode)
+        messages = [
+            Message(role=m["role"], content=m.get("content", ""), images=m.get("images") or [])
+            for m in req.messages
+        ]
 
-    if req.session_id:
-        for m in messages[-1:]:
-            if m.role == "user":
-                # 把引用信息附到消息上一起持久化，刷新后仍能渲染引用气泡
-                if req.quote and req.quote.get("content"):
-                    m.quote = req.quote
-                await store.save_message(req.session_id, m)
-        # /review 命令：立即从 URL 解析出 PR 标题并更新，不等 review 跑完
-        user_text = (req.messages[-1].get("content", "") if req.messages else "").strip()
-        if user_text:
-            from ethan.memory.session import _review_title
-            early_title = _review_title(user_text)
-            if early_title:
-                await store.update_title(req.session_id, early_title)
-        # 持久化对话模式：退出再进入保持当前模式
-        if req.mode:
-            await store.update_mode(req.session_id, req.mode)
+        store = SessionStore(db_path=user_sessions_db_path())
+        await store.init()
 
-    if req.session_id and not req.btw:
-        from ethan.memory.working import WorkingMemory
+        if req.session_id:
+            for m in messages[-1:]:
+                if m.role == "user":
+                    # 把引用信息附到消息上一起持久化，刷新后仍能渲染引用气泡
+                    if req.quote and req.quote.get("content"):
+                        m.quote = req.quote
+                    await store.save_message(req.session_id, m)
+            # /review 命令：立即从 URL 解析出 PR 标题并更新，不等 review 跑完
+            user_text = (req.messages[-1].get("content", "") if req.messages else "").strip()
+            if user_text:
+                from ethan.memory.session import _review_title
+                early_title = _review_title(user_text)
+                if early_title:
+                    await store.update_title(req.session_id, early_title)
+            # 持久化对话模式：退出再进入保持当前模式
+            if req.mode:
+                await store.update_mode(req.session_id, req.mode)
 
-        session = await store.load(req.session_id)
-        history = session.messages if session else []
+        if req.session_id and not req.btw:
+            from ethan.memory.working import WorkingMemory
 
-        # 长期记忆由 agent system prompt 的 <memory_context> 统一注入，
-        # 这里只保留会话内 hot 滑窗，不再重复注入 cold facts 伪消息对
-        memory = WorkingMemory.from_history(history, hot_size=10)
+            session = await store.load(req.session_id)
+            history = session.messages if session else []
 
-        current_user = _with_quote(messages[-1], req.quote)
-        messages = memory.build_context() + [current_user]
-    elif req.btw and messages:
-        # /btw：只带本条消息，不带任何历史
-        messages = [_with_quote(messages[-1], req.quote)]
-    elif req.quote and messages and messages[-1].role == "user":
-        messages[-1] = _with_quote(messages[-1], req.quote)
+            # 长期记忆由 agent system prompt 的 <memory_context> 统一注入，
+            # 这里只保留会话内 hot 滑窗，不再重复注入 cold facts 伪消息对
+            memory = WorkingMemory.from_history(history, hot_size=10)
+
+            current_user = _with_quote(messages[-1], req.quote)
+            messages = memory.build_context() + [current_user]
+        elif req.btw and messages:
+            # /btw：只带本条消息，不带任何历史
+            messages = [_with_quote(messages[-1], req.quote)]
+        elif req.quote and messages and messages[-1].role == "user":
+            messages[-1] = _with_quote(messages[-1], req.quote)
+    except Exception as e:
+        from fastapi import HTTPException
+
+        from .helpers import _friendly_error, _setup_error_stream
+        friendly = _friendly_error(e, None)
+        logger.exception("chat 请求建立失败 session=%s: %s", req.session_id, e)
+        if req.stream:
+            return StreamingResponse(
+                _setup_error_stream(friendly, req.session_id or ""),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
+        raise HTTPException(status_code=500, detail=friendly)
 
     if req.stream:
         # (1) 沉浸式工具模式：会话 mode 解析出 delegate_agent 时，整条会话的每句话都
