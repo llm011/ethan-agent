@@ -39,6 +39,17 @@ export function Sidebar() {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [scheduleGroupSessions, setScheduleGroupSessions] = useState<SessionInfo[]>([]);
   const [heartbeatGroupSessions, setHeartbeatGroupSessions] = useState<SessionInfo[]>([]);
+
+  // 监听 ChatView 广播的标题更新事件，立即同步左侧列表（不等下次轮询）
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { sessionId, title } = (e as CustomEvent).detail || {};
+      if (!sessionId || !title) return;
+      setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, title } : s));
+    };
+    window.addEventListener("session:title-updated", handler);
+    return () => window.removeEventListener("session:title-updated", handler);
+  }, []);
   const [sessionSearch, setSessionSearch] = useState("");
   const [searchLoading, setSearchLoading] = useState(false);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
