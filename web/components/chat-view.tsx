@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
   ChatMessage,
@@ -53,6 +53,10 @@ function placeholderTitle(text: string): string {
 export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([]);
+  // 传给 MessageBubble(memo) 的回调需保持引用稳定，否则浅比较每次判定 props 变化、
+  // memo 跳不过重渲染。依赖会变的值（messages / handleSend）走 ref 读取，回调本身 deps 为空。
+  const messagesRef = useRef<Message[]>(messages);
+  messagesRef.current = messages;
   const [streaming, setStreaming] = useState(false);
   const [bgPolling, setBgPolling] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
@@ -103,10 +107,10 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   };
 
   // 进入阅读模式（仅 assistant 消息，且已有稳定 id 才能存标注）
-  const handleRead = (msg: Message) => {
+  const handleRead = useCallback((msg: Message) => {
     if (msg.id == null) return;
     setReadingMessage(msg);
-  };
+  }, []);
 
   // 阅读模式里新建/删除标注后，把最新列表写回缓存（气泡据此淡显回显）
   const handleAnnotationsChange = (next: Annotation[]) => {
@@ -116,11 +120,24 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   };
 
   // 进入分享模式：默认只选中被点开的这条气泡
-  const handleShare = (msg: Message) => {
-    const key = msg.id != null ? `id:${msg.id}` : `idx:${messages.indexOf(msg)}`;
+  const handleShare = useCallback((msg: Message) => {
+    const key = msg.id != null ? `id:${msg.id}` : `idx:${messagesRef.current.indexOf(msg)}`;
     setShareDefaultKey(key);
     setShareMessage(msg);
-  };
+  }, []);
+
+  // 点击引用某条消息：回填引用区并聚焦输入框
+  const handleQuote = useCallback((m: Message) => {
+    setQuote({ role: m.role, content: m.content });
+    setTimeout(() => inputRef.current?.focus(), 30);
+  }, []);
+
+  // 卡片动作（如点击建议追问）：转成一次发送。handleSend 每次渲染重建，
+  // 走 ref 读取以保持本回调引用稳定，不破坏 MessageBubble 的 memo。
+  const handleSendRef = useRef<(text: string) => void>(() => {});
+  const handleCardAction = useCallback((text: string) => {
+    handleSendRef.current(text);
+  }, []);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   // 记录「刚由本组件流式完成并 router.replace 进来的 session id」，
@@ -731,6 +748,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     );
     // 标题已在 done 事件中实时更新（chunk.title），无需额外 poll
   };
+  // handleCardAction 通过 ref 调用最新的 handleSend，保持自身引用稳定
+  handleSendRef.current = handleSend;
 
   return (
     <div className="flex flex-col flex-1 h-full">
@@ -761,11 +780,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       <MessageList
         messages={messages}
         streaming={streaming}
-        onQuote={(m) => {
-          setQuote({ role: m.role, content: m.content });
-          setTimeout(() => inputRef.current?.focus(), 30);
-        }}
-        onCardAction={(text) => handleSend(text)}
+        onQuote={handleQuote}
+        onCardAction={handleCardAction}
         onRead={handleRead}
         onShare={handleShare}
         annotationsByMessage={annotationsByMessage}
