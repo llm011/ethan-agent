@@ -11,7 +11,7 @@ import type { Annotation, AnnotationColor, AnnotationType } from "@/lib/api";
 import { createAnnotation, deleteAnnotation } from "@/lib/api";
 import { MarkdownContent } from "./markdown";
 import { applyHighlights, getSelectionOffsets, type HighlightSpan } from "@/lib/highlight";
-import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@ethan/shared/ui/tooltip";
 
 interface ReadingModeProps {
   open: boolean;

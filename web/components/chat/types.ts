@@ -1,4 +1,4 @@
-import type { ToolStep } from "@/components/tool-timeline";
+import type { ToolStep } from "@ethan/shared/components/tool-timeline";
 
 export interface Usage {
   input: number;

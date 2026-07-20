@@ -7,12 +7,12 @@ import {
   fetchSessions,
   SessionInfo,
 } from "@/lib/api";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@ethan/shared/ui/card";
+import { Badge } from "@ethan/shared/ui/badge";
+import { Button } from "@ethan/shared/ui/button";
+import { ScrollArea } from "@ethan/shared/ui/scroll-area";
 import { Loader2, RefreshCw, Square, MessageSquare, ChevronDown, ChevronRight, CheckCircle2, XCircle, CircleSlash, Loader } from "lucide-react";
-import { ConfirmDialog } from "@/components/confirm-dialog";
+import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
 
 const STATUS_META: Record<BackgroundTask["status"], { label: string; variant: "default" | "secondary" | "destructive"; icon: React.ReactNode }> = {
   running: { label: "运行中", variant: "default", icon: <Loader className="h-3 w-3 animate-spin" /> },

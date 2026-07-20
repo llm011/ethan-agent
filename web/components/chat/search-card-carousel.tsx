@@ -8,7 +8,7 @@ import {
   SheetHeader,
   SheetTitle,
   SheetDescription,
-} from "@/components/ui/sheet";
+} from "@ethan/shared/ui/sheet";
 
 // 搜索结果卡片数据结构（web_search 工具产出）
 export interface SearchResultCard {

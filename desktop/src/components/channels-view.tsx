@@ -1,10 +1,10 @@
 import { useEffect, useState, useRef } from "react";
 import { ChannelInfo, fetchChannels, patchChannel, LarkDepsStatus, fetchLarkDepsStatus, installLarkDeps } from "@/lib/api";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@ethan/shared/ui/card";
+import { Badge } from "@ethan/shared/ui/badge";
+import { Button } from "@ethan/shared/ui/button";
+import { Input } from "@ethan/shared/ui/input";
+import { ScrollArea } from "@ethan/shared/ui/scroll-area";
 import { ChevronDown, ChevronRight, CheckCircle2, XCircle, Loader2 } from "lucide-react";
 
 // 每个渠道的字段定义（用于渲染表单）

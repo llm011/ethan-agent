@@ -3,12 +3,12 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { ScheduleJob, fetchSchedules, deleteSchedule, patchSchedule, renameSchedule, fetchSessions, SessionInfo } from "@/lib/api";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@ethan/shared/ui/card";
+import { Badge } from "@ethan/shared/ui/badge";
+import { Button } from "@ethan/shared/ui/button";
+import { ScrollArea } from "@ethan/shared/ui/scroll-area";
 import { Loader2, RefreshCw, Play, Pause, Trash2, Clock, TerminalSquare, Hash, MessageSquare, ChevronDown, ChevronRight, Pencil } from "lucide-react";
-import { ConfirmDialog } from "@/components/confirm-dialog";
+import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
 import { formatTrigger, formatNextRun } from "@/lib/utils";
 import {
   Dialog,
@@ -17,8 +17,8 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+} from "@ethan/shared/ui/dialog";
+import { Input } from "@ethan/shared/ui/input";
 
 export function ScheduleView() {
   const router = useRouter();

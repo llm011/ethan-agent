@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Pencil, Check, X, Sun, Moon, RefreshCw } from "lucide-react";
 import { Clock, Calendar } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@ethan/shared/ui/button";
 import { renameSession, regenSessionTitle } from "@/lib/api";
 import { fmtTokens } from "@/lib/utils";
 import { formatTrigger, formatNextRun } from "@/lib/utils";

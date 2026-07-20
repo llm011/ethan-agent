@@ -2,10 +2,10 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Loader2, Plus, Trash2, Search, Book, Save, Pencil, X } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { MdEditor } from "@/components/md-editor";
+import { Button } from "@ethan/shared/ui/button";
+import { Input } from "@ethan/shared/ui/input";
+import { ScrollArea } from "@ethan/shared/ui/scroll-area";
+import { MdEditor } from "@ethan/shared/components/md-editor";
 import {
   KnowledgeItem,
   fetchKnowledge,
@@ -14,7 +14,7 @@ import {
   deleteKnowledge,
   searchKnowledge,
 } from "@/lib/api";
-import { ConfirmDialog } from "@/components/confirm-dialog";
+import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
 
 type PanelMode = "view" | "edit" | "add";
 

@@ -1,0 +1,11 @@
+{
+  "name": "ethan-ai",
+  "private": true,
+  "scripts": {
+    "dev:web": "pnpm --filter web dev",
+    "dev:desktop": "pnpm --filter ethan-desktop dev",
+    "build:web": "pnpm --filter web build",
+    "build:desktop": "pnpm --filter ethan-desktop build",
+    "build": "pnpm -r build"
+  }
+}

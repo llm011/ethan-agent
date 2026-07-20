@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Pencil, Check, X, Sun, Moon, RefreshCw, Link2 } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Clock, Calendar } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@ethan/shared/ui/button";
 import { renameSession, regenSessionTitle } from "@/lib/api";
 import { getApiUrl } from "@/lib/api-base";
 import { fmtTokens } from "@/lib/utils";

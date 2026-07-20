@@ -3,9 +3,9 @@
 
 import { Component, type ReactNode } from "react";
 import { ShieldCheck } from "lucide-react";
-import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { ConsentDialog, type ConsentRequest } from "@/components/consent-dialog";
+import { Card } from "@ethan/shared/ui/card";
+import { Button } from "@ethan/shared/ui/button";
+import { ConsentDialog, type ConsentRequest } from "@ethan/shared/components/consent-dialog";
 
 const TOOL_LABELS: Record<string, string> = {
   get_secret: "读取密钥",

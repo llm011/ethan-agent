@@ -1,6 +1,6 @@
 import { useState, useRef, RefObject, useCallback } from "react";
 import { Send, Paperclip, X, Reply, Square, ImageIcon } from "lucide-react";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@ethan/shared/ui/select";
 import { uploadFile, type ModeEntry } from "@/lib/api";
 import type { Quote, PendingFile } from "./types";
 

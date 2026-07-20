@@ -2,12 +2,12 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom"
 import { Plus, Trash2, Search, Settings, Book, BookOpen, Pencil, Check, X, List, Wrench, RefreshCw } from "lucide-react";
 import { Clock, Database, Layers, Activity } from "lucide-react";
-import { ConfirmDialog } from "@/components/confirm-dialog";
+import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
 import { useSidebar } from "@/components/layout-shell";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Separator } from "@/components/ui/separator";
+import { Button } from "@ethan/shared/ui/button";
+import { Input } from "@ethan/shared/ui/input";
+import { Separator } from "@ethan/shared/ui/separator";
 import {
   SessionInfo,
   fetchSessions,

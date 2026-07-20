@@ -6,13 +6,10 @@ import {
   type ModeEntry,
   type ModelEntry,
   fetchSession,
-  fetchSessions,
   fetchSchedules,
   streamChat,
   streamResume,
   stopGeneration,
-  type StreamChunk,
-  compactSession,
   updateSessionMode,
   respondConsent,
   getAnnotationsBatch,
@@ -25,35 +22,24 @@ import { fetchOnboardingStatus, type OnboardingStatus } from "@/lib/api-misc";
 import { useCachedResource } from "@/lib/use-cached-resource";
 import { ReadingMode } from "@/components/chat/reading-mode";
 import { ShareMode } from "@/components/chat/share-mode";
-import type { ToolStep } from "@/components/tool-timeline";
-import type { Message, Usage, Quote, PendingFile } from "@/components/chat/types";
+import type { Message, Usage, Quote, PendingFile } from "@ethan/shared/chat/types";
 import { ChatHeader } from "@/components/chat/chat-header";
 import { MessageList } from "@/components/chat/message-list";
 import { ChatInput } from "@/components/chat/chat-input";
 import { OnboardingBanner } from "@/components/chat/onboarding-banner";
-import { type ConsentRequest } from "@/components/consent-dialog";
-import { ConsentGate } from "@/components/chat/consent-card";
+import { type ConsentRequest } from "@ethan/shared/components/consent-dialog";
+import { ConsentGate } from "@ethan/shared/chat/consent-card";
+import { placeholderTitle, mapDetailMessages } from "@/components/chat/chat-helpers";
+import { consumeStream, type ConsumeStreamActions } from "@/components/chat/use-chat-stream";
+import { handleCommand } from "@/components/chat/chat-commands";
 
 interface ChatViewProps {
   initialSessionId?: string;
 }
 
-// 清洗后的占位标题：去 markdown 标记 / 命令前缀，截断 40 字
-// 与后端 _auto_title 逻辑对齐，让前端 0ms 显示可读标题
-function placeholderTitle(text: string): string {
-  let t = text.trim();
-  t = t.replace(/[*#`_~]/g, '');
-  t = t.replace(/^\/(?:help|new|model|token|btw|stop)\s+/, '');
-  t = t.replace(/\n/g, ' ').trim();
-  if (!t) t = text.trim().replace(/\n/g, ' ');
-  return t.slice(0, 40) + (t.length > 40 ? '…' : '');
-}
-
 export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const navigate = useNavigate();
   const [messages, setMessages] = useState<Message[]>([]);
-  // 传给 MessageBubble(memo) 的回调需保持引用稳定，否则浅比较每次判定 props 变化、
-  // memo 跳不过重渲染。依赖会变的值（messages / handleSend）走 ref 读取，回调本身 deps 为空。
   const messagesRef = useRef<Message[]>(messages);
   messagesRef.current = messages;
   const [streaming, setStreaming] = useState(false);
@@ -70,55 +56,42 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const [schedules, setSchedules] = useState<any[]>([]);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [consentRequest, setConsentRequest] = useState<ConsentRequest | null>(null);
-  // 对话模式：数据驱动，模式表由后端 /modes 提供（不在前端硬编码任何具体人格）
   const [mode, setMode] = useState<string>("");
-  // 会话首次加载：路由进入 /chat/:id 时，fetchSession 完成前置 true，期间显示骨架占位
   const [loadingSession, setLoadingSession] = useState(false);
   const [modes, setModes] = useState<ModeEntry[]>([]);
 
-  // 标注缓存：messageId -> Annotation[]（按 message id 缓存，避免每气泡重复请求）
   const [annotationsByMessage, setAnnotationsByMessage] = useState<Record<number, Annotation[]>>({});
-  // 阅读模式：打开时记录正在阅读的 assistant 消息
   const [readingMessage, setReadingMessage] = useState<Message | null>(null);
-  // 分享模式：记录被点开的消息及其默认选中的 key（用 key 触发重挂载以重置选择）
   const [shareMessage, setShareMessage] = useState<Message | null>(null);
   const [shareDefaultKey, setShareDefaultKey] = useState<string | null>(null);
 
-  // 取一批 assistant 消息的标注，合并进缓存
   const fetchAnnotationsFor = async (msgs: Message[]) => {
     const ids = msgs.filter((m) => m.role === "assistant" && m.id != null).map((m) => m.id as number);
     if (ids.length === 0) return;
     try {
       const map = await getAnnotationsBatch(ids);
       setAnnotationsByMessage((prev) => ({ ...prev, ...map }));
-    } catch {
-      // 标注读取失败不阻断阅读
-    }
+    } catch {}
   };
 
   const handleConsentRespond = async (requestId: string, allowed: boolean) => {
     setConsentRequest(null);
     try {
       await respondConsent(requestId, allowed);
-    } catch {
-      // 网络错误时按拒绝处理，避免 Agent 卡死
-    }
+    } catch {}
   };
 
-  // 进入阅读模式（仅 assistant 消息，且已有稳定 id 才能存标注）
   const handleRead = useCallback((msg: Message) => {
     if (msg.id == null) return;
     setReadingMessage(msg);
   }, []);
 
-  // 阅读模式里新建/删除标注后，把最新列表写回缓存（气泡据此淡显回显）
   const handleAnnotationsChange = (next: Annotation[]) => {
     if (readingMessage?.id == null) return;
     const mid = readingMessage.id;
     setAnnotationsByMessage((prev) => ({ ...prev, [mid]: next }));
   };
 
-  // 进入分享模式：默认只选中被点开的这条气泡
   const handleShare = useCallback((msg: Message) => {
     const key = msg.id != null ? `id:${msg.id}` : `idx:${messagesRef.current.indexOf(msg)}`;
     setShareDefaultKey(key);
@@ -127,313 +100,20 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // 点击引用某条消息：回填引用区并聚焦输入框
   const handleQuote = useCallback((m: Message) => {
     setQuote({ role: m.role, content: m.content });
     setTimeout(() => inputRef.current?.focus(), 30);
   }, []);
 
-  // 卡片动作（如点击建议追问）：转成一次发送。handleSend 每次渲染重建，
-  // 走 ref 读取以保持本回调引用稳定，不破坏 MessageBubble 的 memo。
   const handleSendRef = useRef<(text: string) => void>(() => {});
   const handleCardAction = useCallback((text: string) => {
     handleSendRef.current(text);
   }, []);
-  // 记录「刚由本组件流式完成并 router.replace 进来的 session id」，
-  // 让下面的 useEffect 跳过对它的重新 fetch，避免流式刚结束就刷新覆盖。
   const justFinishedRef = useRef<string | null>(null);
 
-  // SessionDetail.messages → 组件内 Message[]（fetchSession 初次加载 + 重连失败兜底共用）
-  const mapDetailMessages = (detail: { messages: any[] }): Message[] =>
-    detail.messages.map((m: any) => ({
-      role: m.role,
-      id: m.id ?? undefined,
-      content: m.content,
-      created_at: m.created_at,
-      usage: m.usage || undefined,
-      quote: m.quote || undefined,
-      images: m.images && m.images.length > 0
-        ? m.images.map((img: any) => ({
-            name: "",
-            path: "",
-            isImage: true,
-            dataUrl: img.data ? `data:${img.media_type || "image/png"};base64,${img.data}` : img.dataUrl,
-          }))
-        : undefined,
-      toolSteps: m.tool_steps && m.tool_steps.length > 0
-        ? m.tool_steps.map((s: any) => ({
-            tool: s.tool,
-            args: s.args,
-            intent: s.intent,
-            state: s.state as "running" | "done" | "error",
-            duration_ms: s.duration_ms,
-            result_preview: s.result_preview,
-            result_detail: s.result_detail,
-            thought: s.thought,
-            entity_type: s.entity_type,
-            entity_id: s.entity_id,
-            sub_steps: s.sub_steps?.map((ss: any) => ({
-              tool: ss.tool,
-              args: ss.args,
-              state: ss.state as "running" | "done" | "error",
-              duration_ms: ss.duration_ms ?? undefined,
-              result_preview: ss.result_preview,
-            })),
-          }))
-        : undefined,
-      toolsExpanded: false,
-      a2ui: m.a2ui && m.a2ui.length > 0 ? m.a2ui : undefined,
-      mcpApps: m.mcp_apps && m.mcp_apps.length > 0 ? m.mcp_apps : undefined,
-      matchedSkills: m.matched_skills || undefined,
-      ttfb_ms: m.ttfb_ms ?? undefined,
-      total_ms: m.total_ms ?? undefined,
-    }));
-
-  // 消费一条 SSE 事件流，增量更新最后一条 assistant 消息，结束后定稿。
-  // 首次发送（streamChat）与刷新重连（streamResume）共用此逻辑。
-  // baseMessages = assistant 之前的全部消息（含用户那句）；trackTtft 仅首发为 true。
-  const consumeStream = async (
-    stream: AsyncGenerator<StreamChunk>,
-    baseMessages: Message[],
-    trackTtft = false,
-  ) => {
-    let assistantContent = "";
-    let intermediateOutput = "";
-    const assistantThought = "";
-    const currentToolSteps: ToolStep[] = [];
-    let currentMatchedSkills: { name: string; is_default?: boolean }[] | undefined;
-    const a2uiSurfaces: unknown[] = [];
-    const mcpAppsCollected: Array<{ uri: string; data?: Record<string, unknown>; html?: string; csp?: Record<string, string[]> }> = [];
-    const sendTime = Date.now();
-    let ttft: number | undefined;
-    let ttfbMs: number | undefined;
-    let totalMs: number | undefined;
-    let messageId: number | undefined;
-    let finalUsage: Usage | undefined;
-    setMessages([...baseMessages, { role: "assistant", content: "", created_at: Date.now() / 1000 }]);
-
-    try {
-      for await (const chunk of stream) {
-        if (trackTtft && ttft === undefined) ttft = Date.now() - sendTime;
-
-        if (chunk.consent_request) {
-          setConsentRequest({
-            request_id: chunk.request_id || "",
-            tool: chunk.tool || "",
-            description: chunk.description || "",
-            detail: chunk.detail,
-          });
-          continue;
-        }
-        if (chunk.skills_matched) {
-          currentMatchedSkills = chunk.skills_matched;
-          continue;
-        }
-        if (chunk.background_polling) {
-          setBgPolling(chunk.polling_message || "\U0001f4e1 后台任务运行中...");
-          continue;
-        }
-        if (chunk.new_message) {
-          // 后台任务结果作为独立消息推送（不拼到当前消息末尾）
-          setBgPolling(null);
-          setMessages(prev => [...prev, {
-            role: "assistant",
-            content: chunk.content || "",
-            created_at: Date.now() / 1000,
-          }]);
-          continue;
-        }
-        if (chunk.heartbeat) {
-          // watchdog 心跳：任务仍在运行但超过 3 分钟无新内容
-          const elapsed = chunk.elapsed || 0;
-          const mins = Math.floor(elapsed / 60);
-          const secs = elapsed % 60;
-          const timeStr = mins > 0 ? `${mins} 分 ${secs} 秒` : `${secs} 秒`;
-          const statusNote = `_⏳ 任务仍在运行中，已用时 ${timeStr}，请稍候…_`;
-          setMessages([...baseMessages, {
-            role: "assistant",
-            content: assistantContent || statusNote,
-            thought: assistantThought,
-            toolSteps: currentToolSteps.length > 0 ? [...currentToolSteps] : undefined,
-            toolsExpanded: currentToolSteps.length > 0 ? true : undefined,
-            created_at: Date.now() / 1000,
-            intermediateOutput: intermediateOutput || undefined,
-          }]);
-          continue;
-        }
-        if (chunk.error) {
-          // 保留已流式输出的内容，把错误作为页脚追加，而不是整体覆盖用户正在读的回答
-          const errLine = `⚠️ ${chunk.error}`;
-          assistantContent = assistantContent.trim()
-            ? `${assistantContent}\n\n---\n${errLine}`
-            : errLine;
-          break;
-        }
-        if (chunk.tool && chunk.state === "start") {
-          const preToolThought = assistantContent.trim();
-          if (preToolThought) {
-            intermediateOutput += (intermediateOutput ? "\n\n" : "") + preToolThought;
-          }
-          assistantContent = "";
-          currentToolSteps.push({
-            tool: chunk.tool, args: chunk.args || "", intent: chunk.intent || undefined, state: "running", id: chunk.id,
-            thought: preToolThought || undefined,
-            entity_type: chunk.entity_type || undefined,
-            entity_id: chunk.entity_id || undefined,
-          });
-          setMessages([...baseMessages, {
-            role: "assistant", content: assistantContent, thought: assistantThought,
-            toolSteps: [...currentToolSteps], toolsExpanded: true, created_at: Date.now() / 1000,
-            intermediateOutput: intermediateOutput || undefined,
-          }]);
-        }
-        if (chunk.tool && (chunk.state === "done" || chunk.state === "error")) {
-          let matchedIdx = -1;
-          if (chunk.id) {
-            for (let i = currentToolSteps.length - 1; i >= 0; i--) {
-              if (currentToolSteps[i].id === chunk.id && currentToolSteps[i].state === "running") {
-                matchedIdx = i; break;
-              }
-            }
-          }
-          if (matchedIdx < 0) {
-            for (let i = currentToolSteps.length - 1; i >= 0; i--) {
-              if (currentToolSteps[i].tool === chunk.tool && currentToolSteps[i].state === "running") {
-                matchedIdx = i; break;
-              }
-            }
-          }
-          if (matchedIdx >= 0) {
-            currentToolSteps[matchedIdx] = {
-              ...currentToolSteps[matchedIdx],
-              state: chunk.state as "done" | "error",
-              duration_ms: chunk.duration_ms,
-              result_preview: chunk.result_preview,
-              result_detail: chunk.result_detail,
-              entity_type: chunk.entity_type || currentToolSteps[matchedIdx].entity_type,
-              entity_id: chunk.entity_id || currentToolSteps[matchedIdx].entity_id,
-              sub_steps: chunk.sub_steps?.map((s) => ({
-                tool: s.tool,
-                args: s.args,
-                state: s.state as "running" | "done" | "error",
-                duration_ms: s.duration_ms ?? undefined,
-                result_preview: s.result_preview,
-              })),
-            };
-          }
-          setMessages([...baseMessages, {
-            role: "assistant", content: assistantContent, thought: assistantThought,
-            toolSteps: [...currentToolSteps], toolsExpanded: true, created_at: Date.now() / 1000,
-            intermediateOutput: intermediateOutput || undefined,
-          }]);
-        }
-        if (chunk.tool && (chunk.state === "done" || chunk.state === "error") && chunk.ui && Array.isArray(chunk.ui)) {
-          a2uiSurfaces.push(...chunk.ui);
-        }
-        if (chunk.tool && (chunk.state === "done" || chunk.state === "error") && chunk.mcp_app) {
-          mcpAppsCollected.push(chunk.mcp_app);
-        }
-        if (chunk.content) {
-          setBgPolling(null);
-          assistantContent += chunk.content;
-          setMessages([...baseMessages, {
-            role: "assistant", content: assistantContent, thought: assistantThought,
-            toolSteps: currentToolSteps.length > 0 ? [...currentToolSteps] : undefined,
-            toolsExpanded: currentToolSteps.length > 0 ? true : undefined,
-            created_at: Date.now() / 1000,
-            intermediateOutput: intermediateOutput || undefined,
-          }]);
-        }
-        if (chunk.done && chunk.usage) {
-          finalUsage = { input: chunk.usage.input || 0, output: chunk.usage.output || 0, cache: chunk.usage.cache || 0 };
-          if (chunk.ttfb_ms != null) ttfbMs = chunk.ttfb_ms;
-          if (chunk.total_ms != null) totalMs = chunk.total_ms;
-          if (chunk.message_id != null) messageId = chunk.message_id;
-          if (chunk.title) {
-            setSessionTitle(chunk.title);
-            // 广播标题更新事件，让 Sidebar 同步更新左侧列表
-            window.dispatchEvent(new CustomEvent("session:title-updated", {
-              detail: { sessionId: activeSession, title: chunk.title }
-            }));
-          }
-          setSessionUsage(prev => ({
-            input: prev.input + finalUsage!.input,
-            output: prev.output + finalUsage!.output,
-            cache: prev.cache + finalUsage!.cache,
-          }));
-        }
-        if (chunk.done) {
-          setBgPolling(null);
-        }
-        if (chunk.stopped) {
-          // 用户主动停止：补一个「已停止」标记（后端也会落库同样标记，这里只为即时反馈）
-          if (!assistantContent.trimEnd().endsWith("（已停止）")) {
-            assistantContent = assistantContent.trim()
-              ? `${assistantContent}\n\n_（已停止）_`
-              : "_（已停止）_";
-          }
-          if (chunk.usage) {
-            finalUsage = { input: chunk.usage.input || 0, output: chunk.usage.output || 0, cache: chunk.usage.cache || 0 };
-          }
-          break;
-        }
-      }
-    } catch (err) {
-      const errLine = `⚠️ ${err instanceof Error ? err.message : "连接中断"}`;
-      assistantContent = assistantContent.trim()
-        ? `${assistantContent}\n\n---\n${errLine}`
-        : errLine;
-    }
-
-    setMessages(prev => {
-      const msgs = [...prev];
-      const last = msgs[msgs.length - 1];
-      if (last && last.role === "assistant") {
-        msgs[msgs.length - 1] = {
-          ...last,
-          content: assistantContent,
-          thought: assistantThought,
-          toolsExpanded: false,
-          usage: finalUsage || last.usage,
-          ttft: ttft ?? last.ttft,
-          ttfb_ms: ttfbMs ?? last.ttfb_ms,
-          total_ms: totalMs ?? last.total_ms,
-          a2ui: a2uiSurfaces.length > 0 ? a2uiSurfaces : undefined,
-          mcpApps: mcpAppsCollected.length > 0 ? mcpAppsCollected : undefined,
-          matchedSkills: currentMatchedSkills,
-          id: messageId ?? last.id,
-          intermediateOutput: intermediateOutput || undefined,
-        };
-        return msgs;
-      }
-      return [...baseMessages, {
-        role: "assistant",
-        content: assistantContent,
-        thought: assistantThought,
-        created_at: Date.now() / 1000,
-        usage: finalUsage,
-        ttft,
-        ttfb_ms: ttfbMs,
-        total_ms: totalMs,
-        a2ui: a2uiSurfaces.length > 0 ? a2uiSurfaces : undefined,
-        mcpApps: mcpAppsCollected.length > 0 ? mcpAppsCollected : undefined,
-        matchedSkills: currentMatchedSkills,
-        id: messageId,
-        intermediateOutput: intermediateOutput || undefined,
-      }];
-    });
-    setBgPolling(null);
-    setConsentRequest(null);
-    setStopping(false);
-    setStreaming(false);
-  };
-
   // Load session when route param changes
-  // 竞态保护：快速切换会话时，旧的 fetchSession 完成不覆盖新的
-  // state 重置：切换会话时立即清空旧内容，显示 loading，避免看到上一个会话的内容
   useEffect(() => {
     if (!initialSessionId) {
-      // 新建对话页：清空所有会话相关 state
       setActiveSession(null);
       setSessionTitle("");
       setMessages([]);
@@ -444,27 +124,19 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       return;
     }
 
-    // 如果正在流式输出中（刚新建会话并发送消息），不重新加载
     if (initialSessionId === activeSession && streaming) return;
 
-    // 流式刚结束、本组件自己 router.replace 进来的 session：消息已是最新，
-    // 跳过 fetch 避免覆盖（否则会闪烁、丢失 ttft/toolsExpanded 状态）
     if (justFinishedRef.current === initialSessionId) {
       justFinishedRef.current = null;
       return;
     }
 
-    // 立即清空旧会话内容 + 显示 loading
-    // 这一步是关键：不清空的话，用户会看到上一个会话的内容直到新会话加载完
     setLoadingSession(true);
     setActiveSession(null);
     setMessages([]);
     setSessionTitle("");
     setSessionUsage({ input: 0, output: 0, cache: 0 });
 
-    // 竞态保护 flag：如果用户在 fetchSession 进行中又切换到另一个会话，
-    // cleanup 函数会把 cancelled 置 true，旧的 fetchSession 完成时直接 return，
-    // 不会用旧会话的数据覆盖新会话的内容
     let cancelled = false;
 
     fetchSession(initialSessionId)
@@ -478,7 +150,6 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         setMessages(loaded);
         fetchAnnotationsFor(loaded);
         setSelectedModel(detail.model);
-        // 恢复对话模式：之前用工作助手还是苏念，下次进入保持一致
         setMode(detail.mode || "");
         const historicUsage = detail.messages
           .filter((m: any) => m.role === "assistant" && m.usage)
@@ -489,8 +160,6 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           }), { input: 0, output: 0, cache: 0 });
         setSessionUsage(historicUsage);
 
-        // 该会话仍有正在进行的生成（刷新前发起的）：重连流，回放缓冲 + 继续实时，
-        // 不丢失 assistant 回复。重连失败/已结束（204）则补一次 fetch 拿落库结果。
         if (detail.active_run) {
           setStreaming(true);
           const stream = await streamResume(initialSessionId).catch(() => null);
@@ -499,7 +168,11 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
             const base = loaded.length > 0 && loaded[loaded.length - 1].role === "assistant"
               ? loaded.slice(0, -1)
               : loaded;
-            await consumeStream(stream, base);
+            await consumeStream(stream, base, {
+              setMessages, setConsentRequest, setBgPolling,
+              setSessionTitle, setSessionUsage, setStopping, setStreaming,
+              activeSession: initialSessionId,
+            });
           } else {
             setStreaming(false);
             const fresh = await fetchSession(initialSessionId).catch(() => null);
@@ -524,20 +197,16 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialSessionId]);
 
-  // A 类准静态数据：用 useCachedResource 走 SWR，首屏 0ms 渲染（命中缓存）
-  // 后台静默 refetch，用户无感知刷新。写操作（addModel/updateAgentSettings）会 bust。
+  // A 类准静态数据：用 useCachedResource 走 SWR
   const modelsResource = useCachedResource<ModelEntry[]>("models", fetchModels, { ttlMs: 60 * 60_000 });
   const modesResource = useCachedResource<ModeEntry[]>("modes", fetchModes, { ttlMs: 24 * 60 * 60_000 });
   const settingsResource = useCachedResource<AgentSettings>("agentSettings", fetchAgentSettings, { ttlMs: 60 * 60_000 });
   const onboardingResource = useCachedResource<OnboardingStatus>("onboarding", fetchOnboardingStatus, { ttlMs: 24 * 60 * 60_000 });
 
-  // models / modes / settings / onboarding 变化时同步到本地 state
-  // （保留 state 是因为后续 setSelectedModel 等逻辑需要可变，不能直接用 resource.data）
   useEffect(() => {
     const models = modelsResource.data;
     if (models) {
       setModels(models);
-      // 仅当当前没选中模型时初始化：优先用 default_model，否则列表第一个
       const def = settingsResource.data?.default_model;
       setSelectedModel((prev) => prev || def || (models.length > 0 ? models[0].id : ""));
     }
@@ -547,13 +216,10 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     if (modesResource.data) setModes(modesResource.data);
   }, [modesResource.data]);
 
-  // 首次 onboarding 检测：first_time=true 时显示引导 banner
   useEffect(() => {
     if (onboardingResource.data?.first_time) setShowOnboarding(true);
   }, [onboardingResource.data]);
 
-  // 新建对话页：从 settings 取 default_model 作为默认选中
-  // （上面的 useEffect 已处理首次加载，这里只覆盖 initialSessionId 切换到"新建"的场景）
   useEffect(() => {
     if (settingsResource.data?.default_model && !activeSession) {
       setSelectedModel((prev) => prev || settingsResource.data!.default_model);
@@ -561,14 +227,12 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settingsResource.data, activeSession]);
 
-  // Only fetch schedules for scheduled-task sessions
   useEffect(() => {
     if (sessionTitle.startsWith("[定时]")) {
       fetchSchedules().then(setSchedules).catch(() => {});
     }
   }, [sessionTitle]);
 
-  // Focus input when entering a session or after streaming ends
   useEffect(() => {
     if (!streaming) {
       setTimeout(() => inputRef.current?.focus(), 50);
@@ -579,98 +243,18 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     if (!text.trim() && pendingFiles.length === 0) return;
     if (streaming) return;
 
-    // ── /command 拦截：以 / 开头按命令处理，不发给 Agent ──
     const trimmed = text.trim();
-    // /btw 先判断，避免被当作未知命令拦截
     const isBtw = trimmed.toLowerCase().startsWith("/btw ");
     const isReview = trimmed === "/review" || trimmed.startsWith("/review ") || trimmed.startsWith("/review\t");
     if (trimmed.startsWith("/") && !isBtw && !isReview) {
-      const [cmd, ...rest] = trimmed.slice(1).split(/\s+/);
-      const arg = rest.join(" ").trim();
-      const now = Date.now() / 1000;
-      const pushAssistant = (content: string) =>
-        setMessages((prev) => [...prev, { role: "assistant", content, created_at: now }]);
-
-      if (cmd === "new") {
-        const s = await createSession(selectedModel, mode, "desktop");
-        setActiveSession(s.id);
-        setSessionTitle("新对话");
-        setMessages([]);
-        setSessionUsage({ input: 0, output: 0, cache: 0 });
-        setPendingFiles([]);
-        setQuote(null);
-        window.history.replaceState(null, "", `/chat/${s.id}/`);
-        return;
-      }
-      if (cmd === "help") {
-        pushAssistant(
-          "🛠 **可用命令**\n\n" +
-          "- `/new` — 新建对话，清空当前上下文\n" +
-          "- `/compact` — 压缩历史对话为摘要，释放上下文\n" +
-          "- `/sessions` — 列出最近的会话\n" +
-          "- `/stop` — 停止当前进行中的回复\n" +
-          "- `/btw <问题>` — 不带历史的单轮轻量查询\n" +
-          "- `/review <链接>` — Code review：加载 review 技能分析代码\n" +
-          "- `/help` — 显示本帮助\n\n" +
-          "（`/model` `/token` 请用顶部下拉和设置页；其它消息正常对话即可）"
-        );
-        return;
-      }
-      if (cmd === "compact") {
-        if (!activeSession) {
-          pushAssistant("⚠️ 当前没有会话，先聊几句再 `/compact` 吧~");
-          return;
-        }
-        setStreaming(true);
-        try {
-          const r = await compactSession(activeSession);
-          // 刷新会话内容（已被替换为摘要 + 最后一轮）
-          const detail = await fetchSession(activeSession);
-          setMessages(
-            detail.messages.map((m: any) => ({
-              role: m.role,
-              content: m.content,
-              created_at: m.created_at,
-              usage: m.usage || undefined,
-              toolsExpanded: false,
-            }))
-          );
-          pushAssistant(`🧠 **已压缩历史**\n\n> ${r.summary.slice(0, 300)}${r.summary.length > 300 ? "…" : ""}\n\n继续聊吧~`);
-        } catch (e) {
-          pushAssistant(`⚠️ 压缩失败：${e instanceof Error ? e.message : "未知错误"}`);
-        } finally {
-          setStreaming(false);
-        }
-        return;
-      }
-      if (cmd === "sessions") {
-        try {
-          const list = await fetchSessions(8, 0);
-          if (!list.length) {
-            pushAssistant("暂无会话。");
-          } else {
-            const body = list
-              .map((s) => `- \`${s.id.slice(-10)}\`  ${s.title || "（无标题）"}`)
-              .join("\n");
-            pushAssistant(`📋 **最近会话**\n\n${body}\n\n点击左侧侧栏可切换。`);
-          }
-        } catch {
-          pushAssistant("⚠️ 获取会话列表失败。");
-        }
-        return;
-      }
-      if (cmd === "stop") {
-        if (activeSession) {
-          await stopGeneration(activeSession).catch(() => {});
-        }
-        return;
-      }
-      // 未知命令
-      pushAssistant(`未知命令：\`/${cmd}\`\n\n输入 \`/help\` 查看可用命令。`);
+      await handleCommand(trimmed, {
+        setMessages, setActiveSession, setSessionTitle,
+        setSessionUsage, setPendingFiles, setQuote, setStreaming,
+        selectedModel, mode, activeSession,
+      });
       return;
     }
 
-    // /btw 顺带一问：不带历史，单轮轻量查询
     const btwQuestion = isBtw ? trimmed.slice(4).trim() : null;
 
     let sessionId = activeSession;
@@ -679,13 +263,9 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       sessionId = s.id;
       setActiveSession(s.id);
       setSessionTitle(placeholderTitle(text));
-      // 广播占位标题，让 Sidebar 立刻显示新会话
       window.dispatchEvent(new CustomEvent("session:title-updated", {
         detail: { sessionId: s.id, title: placeholderTitle(text) }
       }));
-      // 立即更新 URL，让用户点「新建会话」时路由能正确切换。
-      // 用 replaceState 而非 router.replace：只改地址栏不触发 Next 路由导航，
-      // 避免跨路由卸载组件丢失 state。
       justFinishedRef.current = s.id;
       window.history.replaceState(null, "", `/chat/${s.id}/`);
     }
@@ -701,7 +281,6 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         return;
       }
       content = `帮我 code review：${target}`;
-      // 立即从 URL 解析 PR 标题并更新（不等 review 跑完）
       const ghMatch = target.match(/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/);
       const glMatch = target.match(/gitlab\.com\/([^/]+\/[^/]+)\/-\/merge_requests\/(\d+)/);
       if (ghMatch) setSessionTitle(`PR #${ghMatch[2]} ${ghMatch[1]}`);
@@ -715,9 +294,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       content = `${fileContext}\n\n${content}`;
     }
 
-    // 模型不支持图片时弹确认，用户选择后再继续
     const modelInfo = models.find((m) => m.id === selectedModel);
-    const visionSupported = modelInfo?.vision !== false;  // 默认 true（新模型大多支持）
+    const visionSupported = modelInfo?.vision !== false;
     let imagesToSend = imageFiles;
     if (imageFiles.length > 0 && !visionSupported) {
       const ok = window.confirm(
@@ -746,7 +324,6 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       role: m.role,
       content: m.content,
       images: m.images?.map((img) => ({
-        // dataUrl 格式 "data:image/png;base64,xxx"，只取后面的 base64 部分
         data: img.dataUrl?.split(",")[1] ?? "",
         media_type: img.dataUrl?.split(";")[0].replace("data:", "") ?? "image/png",
       })),
@@ -755,11 +332,10 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     await consumeStream(
       streamChat(chatMessages, selectedModel, sessionId, { quote: sentQuote, mode, btw: isBtw, review: isReview }),
       newMessages,
+      { setMessages, setConsentRequest, setBgPolling, setSessionTitle, setSessionUsage, setStopping, setStreaming, activeSession: sessionId },
       true,
     );
-    // 标题已在 done 事件中实时更新（chunk.title），无需额外 poll
   };
-  // handleCardAction 通过 ref 调用最新的 handleSend，保持自身引用稳定
   handleSendRef.current = handleSend;
 
   return (
@@ -864,7 +440,6 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           mode={mode}
           onModeChange={(m) => {
             setMode(m);
-            // 已有会话：立即落库，刷新/重进保持该模式（无会话时仅置前端 state，建会话时带上）
             if (activeSession) {
               updateSessionMode(activeSession, m).catch(() => {});
             }

@@ -5,11 +5,11 @@ import { useRouter, usePathname } from "next/navigation";
 import Image from "next/image";
 import { Plus, Trash2, Search, Settings, Book, BookOpen, Pencil, Check, X, List, Wrench, RefreshCw } from "lucide-react";
 import { Clock, Database, Layers, Activity } from "lucide-react";
-import { ConfirmDialog } from "@/components/confirm-dialog";
+import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
 import { useSidebar } from "@/app/layout-shell";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Separator } from "@/components/ui/separator";
+import { Button } from "@ethan/shared/ui/button";
+import { Input } from "@ethan/shared/ui/input";
+import { Separator } from "@ethan/shared/ui/separator";
 import {
   SessionInfo,
   fetchSessions,

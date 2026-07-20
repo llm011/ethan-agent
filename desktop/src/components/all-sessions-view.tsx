@@ -3,11 +3,11 @@ import { format } from "date-fns";
 import { zhCN } from "date-fns/locale";
 import { SessionInfo, fetchSessions, renameSession, deleteSession, cleanupTrivialSessions, fetchModes, type ModeEntry } from "@/lib/api";
 import { Loader2, Search, Calendar, MessageSquare, ChevronLeft, ChevronRight, Pencil, Trash2, Check, X, Eraser } from "lucide-react";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ConfirmDialog } from "@/components/confirm-dialog";
+import { Input } from "@ethan/shared/ui/input";
+import { Button } from "@ethan/shared/ui/button";
+import { Badge } from "@ethan/shared/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@ethan/shared/ui/select";
+import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
 
 
 // 转义正则元字符，避免用户输入 ( [ * \ 等导致 new RegExp 抛 SyntaxError

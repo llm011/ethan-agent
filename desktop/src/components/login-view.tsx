@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useAuth } from "@/lib/auth-context";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Button } from "@ethan/shared/ui/button";
+import { Input } from "@ethan/shared/ui/input";
 import { getApiUrl, setApiUrl } from "@/lib/api-base";
 import { ChevronDown, ChevronUp, Server } from "lucide-react";
 
