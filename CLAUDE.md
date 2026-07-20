@@ -60,6 +60,28 @@ git branch -d feature/<feature-name>
 
    > 注意：`ethan serve` 默认（不设该变量）**会**写入 `/tmp/ethan/server.pid` 并自动拉起 watchdog。目前**没有** `--no-pid` 之类的独立命令行参数，唯一的开关就是这个环境变量。上面的启动示例（第 4 条）已带 `ETHAN_NO_WATCHDOG=1`，正是为了跳过 PID 写入——**请勿删除该变量**，否则仍会写 PID、被 watchdog 误杀。
 
+## Web / Desktop 双端同步规范（必须遵守）
+
+本项目同时维护两个前端：
+- **Web**：`/web`（Next.js App Router）
+- **Desktop**：`/desktop`（Vite + React + Tauri）
+
+两端共享相同的业务逻辑和组件集，**任何新功能必须同时在两端实现**，不允许只加一端。
+
+**规则**：
+1. **新增组件/Hook**：在一端实现后，必须同步到另一端。注意适配差异：
+   - Web 文件需要 `"use client"` 指令
+   - Web 用 `API_URL` 常量（`process.env.NEXT_PUBLIC_API_URL`），Desktop 用 `getApiUrl()` 函数
+   - Web 用 `useRouter()`/`usePathname()`（next/navigation），Desktop 用 `useNavigate()`/`useLocation()`（react-router-dom）
+2. **新增 API 函数**：同步到两端的 `lib/api*.ts`，保持函数签名一致。
+3. **新增路由/页面**：两端路由需对应（Web: `app/<name>/page.tsx`，Desktop: `pages/<Name>Page.tsx` + App.tsx 路由注册）。
+4. **PR 检查**：提交前确认改动是否只涉及一端，如是则需补齐另一端。
+
+**已知允许的差异**：
+- Desktop 独有 `lib/external-link.ts`（Tauri shell 打开外链）
+- Desktop 独有 Tauri 窗口拖拽相关 CSS（`-webkit-app-region`）
+- Web 独有 `app/a2ui-test/page.tsx`（纯开发调试页，无需同步）
+
 ## Agent Behaviors & Rules
 - **ALWAYS run the code and verify it passes after modifying it.** Never stop after just modifying code without running a local test to catch IndentationError, SyntaxError, or logic errors. Use `uv run ...` or node scripts to verify.
 

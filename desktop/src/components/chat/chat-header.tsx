@@ -37,11 +37,15 @@ export function ChatHeader({ sessionId, title, source, usage, schedules, onTitle
   const { theme, toggle: toggleTheme } = useTheme();
 
   // 窗口拖拽：整个 header 区域可拖拽移动窗口（用 Tauri JS API，不依赖 data-tauri-drag-region）
+  // 注意：必须排除交互元素，否则 startDragging() 会抢占 mousedown 导致按钮 click 永不触发
   const headerRef = useRef<HTMLElement>(null);
   useEffect(() => {
     const el = headerRef.current;
     if (!el) return;
     const onMouseDown = (e: MouseEvent) => {
+      // 点击在交互元素上时不发起拖拽，让按钮/输入框正常响应
+      const target = e.target as HTMLElement;
+      if (target.closest('button, a, input, select, textarea, [role="button"], [data-slot="button"]')) return;
       if (e.buttons === 1) {
         // 双击最大化，单击拖拽
         e.detail === 2

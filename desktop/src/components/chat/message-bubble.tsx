@@ -267,6 +267,11 @@ function MessageBubbleInner({ msg, isStreaming, isLast, onQuote, onCardAction, o
                   总 {msg.total_ms < 1000 ? `${msg.total_ms}ms` : msg.total_ms < 60000 ? `${(msg.total_ms / 1000).toFixed(1)}s` : `${Math.floor(msg.total_ms / 60000)}m${Math.round((msg.total_ms % 60000) / 1000)}s`}
                 </span>
               )}
+              {msg.ttfb_ms != null && msg.total_ms != null && msg.total_ms > msg.ttfb_ms && (
+                <span title={`生成耗时 ${msg.total_ms - msg.ttfb_ms}ms`} className="inline-flex items-center rounded bg-green-500/10 text-green-600 dark:text-green-400 px-1 py-px">
+                  生成 {(msg.total_ms - msg.ttfb_ms) < 1000 ? `${msg.total_ms - msg.ttfb_ms}ms` : `${((msg.total_ms - msg.ttfb_ms) / 1000).toFixed(1)}s`}
+                </span>
+              )}
             </div>
           </>
         )}

@@ -406,6 +406,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       }];
     });
     setBgPolling(null);
+    setConsentRequest(null);
     setStopping(false);
     setStreaming(false);
   };
@@ -836,6 +837,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           onStop={() => {
             if (activeSession && !stopping) {
               setStopping(true);
+              setConsentRequest(null);
               stopGeneration(activeSession).catch(() => { setStopping(false); });
             }
           }}

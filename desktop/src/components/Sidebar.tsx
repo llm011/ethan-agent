@@ -22,7 +22,6 @@ import {
   type ModeEntry,
 } from "@/lib/api";
 import { useServerHealth } from "@/lib/use-server-health";
-import { ServerStatusBadge } from "@/components/server-status-badge";
 
 export function Sidebar() {
   const navigate = useNavigate();
@@ -340,11 +339,11 @@ export function Sidebar() {
       <div className="p-4 pt-[28px] flex items-center justify-between gap-2" data-tauri-drag-region>
         <h1
           className="text-lg font-semibold flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity min-w-0 flex-1"
+          role="button"
           onClick={() => { navigate("/chat"); if (window.innerWidth < 768) setSidebarOpen(false); }}
         >
           <img src={`${''}/logo-sidebar.png`} alt="Ethan Agent" className="rounded-full shrink-0 h-7 w-7" />
           <span className="whitespace-nowrap">Ethan Agent</span>
-          <ServerStatusBadge variant="compact" />
           {health.version && (
             <span
               className="text-[9px] font-mono text-muted-foreground/60 bg-muted border border-border/60 rounded-full px-1.5 py-0.5 leading-none shrink-0"
