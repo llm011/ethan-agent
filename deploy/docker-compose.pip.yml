@@ -11,8 +11,8 @@ services:
     ports:
       - "${ETHAN_PORT:-8900}:8900"
     volumes:
-      # Persist agent memory, skills, and configuration
-      - ethan-standalone-data:/root/.ethan
+      # 挂载宿主机 ~/.ethan 目录（直接持久化到本机，方便查看/备份/迁移）
+      - ~/.ethan:/root/.ethan
     environment:
       # Optional: set an initial token for the Web UI
       - ETHAN_AUTH_TOKEN=${ETHAN_AUTH_TOKEN:-}
@@ -27,7 +27,3 @@ services:
         # Start the server (hosts both API and Web UI)
         ethan serve --port 8900
       "
-
-volumes:
-  ethan-standalone-data:
-    name: ethan-standalone-data

@@ -117,13 +117,19 @@ export async function fetchUiResource(uri: string): Promise<{ text: string; _met
   return res.json();
 }
 
-/** 获取后端版本号（与 PyPI 版本一致，来自 ethan.__version__） */
-export async function fetchVersion(): Promise<string | null> {
+/** 获取后端 health 信息（版本号 + agent_name，来自 /health 端点）。
+ * 左上角标题用 agent_name 显示用户设置的 agent 名（见 config.defaults.agent_name）。
+ */
+export interface ServerHealthInfo {
+  version: string | null;
+  agent_name: string | null;
+}
+export async function fetchHealth(): Promise<ServerHealthInfo> {
   try {
     const res = await fetch(`${API_URL}/health`);
     const data = await res.json();
-    return data.version ?? null;
+    return { version: data.version ?? null, agent_name: data.agent_name ?? null };
   } catch {
-    return null;
+    return { version: null, agent_name: null };
   }
 }

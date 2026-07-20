@@ -103,12 +103,12 @@ pip3 install ethan-agent
 Set an API key and start:
 
 ```bash
-# Anthropic Claude
-ethan provider set anthropic --api-key sk-ant-xxx
+# Any OpenAI-compatible API (OpenAI / Gemini / OpenRouter / DeepSeek / Ollama / etc.)
+ethan provider set openai_compat --api-key sk-xxx --base-url https://api.openai.com/v1
+ethan model default gpt-5.4   # or gemini-2.5-flash, etc.
 
-# OR any OpenAI-compatible API (Gemini, OpenRouter, DeepSeek, Ollama, etc.)
-ethan provider set openai_compat --api-key sk-xxx --base-url https://api.example.com/v1
-ethan model default <model-id>
+# OR Anthropic Claude
+ethan provider set anthropic --api-key sk-ant-xxx
 
 # OR Zhipu GLM (built-in preset — fills base_url/type/anti-cache + registers glm-5.2 etc.)
 ethan provider set glm --api-key <your-glm-key>
@@ -117,6 +117,8 @@ ethan model default glm-5.2
 
 ethan
 ```
+
+> 💡 **First-run wizard**: if you just run `ethan` without configuring a provider first, an interactive prompt will guide you through choosing a provider (default: OpenAI-compatible), entering Base URL, then API Key, and finally a default model ID.
 
 > ⚠️ **Already running?** If `ethan serve`, the desktop app, or `ethan web` is already up, **restart it** after any `ethan provider set` / `ethan model default` change. The running server caches config in memory and won't pick up edits to `~/.ethan/config.yaml` until it restarts.
 

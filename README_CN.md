@@ -101,12 +101,12 @@ pip3 install ethan-agent
 设置 API Key 后直接启动：
 
 ```bash
-# Anthropic 官方接口
-ethan provider set anthropic --api-key sk-ant-xxx
+# 任意 OpenAI 兼容接口（OpenAI / DeepSeek / OpenRouter / Gemini / Ollama 等）
+ethan provider set openai_compat --api-key sk-xxx --base-url https://api.openai.com/v1
+ethan model default gpt-5.4   # 或 gemini-2.5-flash 等
 
-# 或者任意 OpenAI 兼容接口（如 DeepSeek、OpenRouter、Gemini、Ollama）
-ethan provider set openai_compat --api-key sk-xxx --base-url https://api.example.com/v1
-ethan model default <model-id>
+# 或者 Anthropic 官方接口
+ethan provider set anthropic --api-key sk-ant-xxx
 
 # 或者智谱 GLM（内置预设，自动填好 base_url/type/抗缓存 + 注册 glm-5.2 等）
 ethan provider set glm --api-key <你的GLM key>
@@ -115,6 +115,8 @@ ethan model default glm-5.2
 
 ethan
 ```
+
+> 💡 **首次运行向导**：如果直接运行 `ethan` 而没先配置 provider，会启动交互式引导，依次让你选 provider（默认 OpenAI 兼容）、填 Base URL、填 API Key，最后填默认模型 ID。
 
 > ⚠️ **已经在运行？** 如果 `ethan serve`、桌面端或 `ethan web` 已经启动，改完 `ethan provider set` / `ethan model default` 后要**重启**它。运行中的服务会把配置缓存在内存里，不重启不会读取 `~/.ethan/config.yaml` 的新改动。
 
