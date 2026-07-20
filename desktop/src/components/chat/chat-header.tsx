@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Pencil, Check, X, Sun, Moon, RefreshCw, Link2 } from "lucide-react";
+import { Pencil, Check, X, RefreshCw, Link2 } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Clock, Calendar } from "lucide-react";
 import { Button } from "@ethan/shared/ui/button";
@@ -7,7 +7,7 @@ import { renameSession, regenSessionTitle } from "@/lib/api";
 import { getApiUrl } from "@/lib/api-base";
 import { fmtTokens } from "@/lib/utils";
 import { formatTrigger, formatNextRun } from "@/lib/utils";
-import { useTheme } from "./use-theme";
+import { ThemePicker } from "./theme-picker";
 import type { Usage } from "@ethan/shared/chat/types";
 import { ServerStatusBadge } from "@/components/server-status-badge";
 
@@ -34,7 +34,6 @@ export function ChatHeader({ sessionId, title, source, usage, schedules, onTitle
   const [regenerating, setRegenerating] = useState(false);
   const [editingTitle, setEditingTitle] = useState("");
   const [copied, setCopied] = useState(false);
-  const { theme, toggle: toggleTheme } = useTheme();
 
   // 窗口拖拽：整个 header 区域可拖拽移动窗口（用 Tauri JS API，不依赖 data-tauri-drag-region）
   // 注意：必须排除交互元素，否则 startDragging() 会抢占 mousedown 导致按钮 click 永不触发
@@ -176,15 +175,7 @@ export function ChatHeader({ sessionId, title, source, usage, schedules, onTitle
           variant="full"
           className={usage.input > 0 ? "ml-2" : (sessionId ? "ml-2" : "ml-auto")}
         />
-        <Button
-          variant="ghost"
-          size="icon"
-          className="ml-2"
-          onClick={toggleTheme}
-          title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-        >
-          {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-        </Button>
+        <ThemePicker className="ml-2" />
       </div>
 
       {scheduleBanner}

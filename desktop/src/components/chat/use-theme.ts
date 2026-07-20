@@ -1,33 +1,30 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
+import { type ThemeId, normalizeThemeId, applyThemeClass } from "./themes";
+
+const STORAGE_KEY = "ethan-theme";
 
 export function useTheme() {
-  const [theme, setTheme] = useState<"dark" | "light">(() => {
+  const [theme, setThemeState] = useState<ThemeId>(() => {
     if (typeof window !== "undefined") {
-      return (localStorage.getItem("ethan-theme") as "dark" | "light") || "dark";
+      return normalizeThemeId(localStorage.getItem(STORAGE_KEY));
     }
-    return "dark";
+    return normalizeThemeId(null);
   });
 
-  // mount 时把 localStorage 里的 theme 同步到 <html> classList，
-  // 避免 main.tsx 未同步时初次加载走 :root 默认值，toggle 一次后又走 .light/.dark
-  // 造成主题切换前后颜色漂移。
+  // mount 时把当前主题 class 同步到 <html>，避免 main.tsx 未同步时初次加载走 :root 默认值，
+  // 切换一次后又走 .theme-* 造成主题漂移。
   useEffect(() => {
-    document.documentElement.classList.toggle("dark", theme === "dark");
-    document.documentElement.classList.toggle("light", theme === "light");
+    applyThemeClass(theme);
   }, [theme]);
 
-  const toggle = useCallback(() => {
-    setTheme((prev) => {
-      const next = prev === "dark" ? "light" : "dark";
-      localStorage.setItem("ethan-theme", next);
-      // 同步更新 DOM，不依赖 useEffect 异步生效（避免 toggle 后到 paint 之间有闪）
-      document.documentElement.classList.toggle("dark", next === "dark");
-      document.documentElement.classList.toggle("light", next === "light");
-      return next;
-    });
+  const setTheme = useCallback((next: ThemeId) => {
+    localStorage.setItem(STORAGE_KEY, next);
+    // 同步更新 DOM，不依赖 useEffect 异步生效（避免切换后到 paint 之间有闪）
+    applyThemeClass(next);
+    setThemeState(next);
   }, []);
 
-  return { theme, toggle };
+  return { theme, setTheme };
 }

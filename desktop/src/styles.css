@@ -49,75 +49,137 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/* ── 主题系统 ──
+   多套可切换的浅色主题 + 深色。每套是一整组 CSS 变量，通过挂在 <html> 上的
+   .theme-* class 生效（见 components/chat/themes.ts 注册表 + use-theme.ts）。
+   :root 兜底 = 默认「青瓦」主题，保证首帧 paint 在 class 挂上前也不漂移。
+   共享的、与主题无关的量（radius / chart / destructive）只在 :root 定义一次。 */
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.18 0.02 80);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.18 0.02 80);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.18 0.02 80);
-  --primary: oklch(0.55 0.15 45);
-  --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.95 0.015 78);
-  --secondary-foreground: oklch(0.25 0.03 72);
-  --muted: oklch(0.95 0.01 78);
-  --muted-foreground: oklch(0.50 0.04 75);
-  --accent: oklch(0.93 0.03 75);
-  --accent-foreground: oklch(0.28 0.05 70);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.91 0.01 80);
-  --input: oklch(0.93 0.01 80);
-  --ring: oklch(0.60 0.15 45);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
   --radius: 0.625rem;
-  --sidebar: oklch(0.97 0.01 75);
-  --sidebar-foreground: oklch(0.22 0.03 70);
-  --sidebar-primary: oklch(0.60 0.15 45);
-  --sidebar-primary-foreground: oklch(0.99 0 0);
-  --sidebar-accent: oklch(0.93 0.03 72);
-  --sidebar-accent-foreground: oklch(0.28 0.05 65);
-  --sidebar-border: transparent;
-  --sidebar-ring: oklch(0.65 0.15 45);
+  --destructive: oklch(0.577 0.245 27.325);
+  --chart-1: oklch(0.62 0.09 158);
+  --chart-2: oklch(0.60 0.07 200);
+  --chart-3: oklch(0.556 0 0);
+  --chart-4: oklch(0.439 0 0);
+  --chart-5: oklch(0.371 0 0);
 }
 
-/* 浅橙暖色日间主题 */
-.light {
-  /* 背景保持纯白，与 :root 一致，避免主题切换前后背景色漂移 */
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.22 0.02 50);
-  --card: oklch(0.995 0.005 60);
-  --card-foreground: oklch(0.22 0.02 50);
-  --popover: oklch(0.995 0.005 60);
-  --popover-foreground: oklch(0.22 0.02 50);
-  --primary: oklch(0.62 0.12 45);
+/* 青瓦（默认）：取自吉卜力水彩——粉墙、青瓦、林荫绿、天空蓝。
+   清爽、有质感，顶栏走冷调青灰而非发黄。 */
+:root,
+.theme-qingwa {
+  --background: oklch(0.988 0.007 150);
+  --foreground: oklch(0.30 0.025 165);
+  --card: oklch(0.995 0.005 150);
+  --card-foreground: oklch(0.30 0.025 165);
+  --popover: oklch(0.996 0.004 150);
+  --popover-foreground: oklch(0.30 0.025 165);
+  --primary: oklch(0.57 0.075 158);
+  --primary-foreground: oklch(0.99 0.005 150);
+  --secondary: oklch(0.93 0.022 190);
+  --secondary-foreground: oklch(0.33 0.03 200);
+  --muted: oklch(0.95 0.014 160);
+  --muted-foreground: oklch(0.48 0.03 165);
+  --accent: oklch(0.91 0.035 200);
+  --accent-foreground: oklch(0.32 0.045 205);
+  --border: oklch(0.90 0.015 165);
+  --input: oklch(0.92 0.014 165);
+  --ring: oklch(0.60 0.07 160);
+  --sidebar: oklch(0.955 0.016 168);
+  --sidebar-foreground: oklch(0.32 0.025 165);
+  --sidebar-primary: oklch(0.57 0.075 158);
+  --sidebar-primary-foreground: oklch(0.99 0.005 150);
+  --sidebar-accent: oklch(0.90 0.032 192);
+  --sidebar-accent-foreground: oklch(0.30 0.045 200);
+  --sidebar-border: oklch(0.90 0.015 168);
+  --sidebar-ring: oklch(0.60 0.07 160);
+}
+
+/* 暖橙：原橙色主题整体调浅、降饱和，顶栏由发黄的 hue75 收到暖褐 hue52。 */
+.theme-warm {
+  --background: oklch(0.995 0.004 60);
+  --foreground: oklch(0.26 0.018 55);
+  --card: oklch(0.998 0.003 60);
+  --card-foreground: oklch(0.26 0.018 55);
+  --popover: oklch(0.998 0.003 60);
+  --popover-foreground: oklch(0.26 0.018 55);
+  --primary: oklch(0.66 0.098 50);
   --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.94 0.015 55);
-  --secondary-foreground: oklch(0.30 0.03 50);
-  --muted: oklch(0.93 0.012 58);
-  --muted-foreground: oklch(0.50 0.04 50);
-  --accent: oklch(0.90 0.025 55);
-  --accent-foreground: oklch(0.30 0.05 45);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.88 0.02 55);
-  --input: oklch(0.90 0.018 55);
-  --ring: oklch(0.62 0.12 45);
-  --chart-1: oklch(0.62 0.12 45);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.98 0.008 60);
-  --sidebar-foreground: oklch(0.22 0.02 50);
-  --sidebar-primary: oklch(0.62 0.12 45);
+  --secondary: oklch(0.95 0.016 58);
+  --secondary-foreground: oklch(0.34 0.03 52);
+  --muted: oklch(0.955 0.012 58);
+  --muted-foreground: oklch(0.53 0.035 52);
+  --accent: oklch(0.93 0.03 55);
+  --accent-foreground: oklch(0.34 0.05 48);
+  --border: oklch(0.91 0.014 56);
+  --input: oklch(0.93 0.012 56);
+  --ring: oklch(0.66 0.098 50);
+  --sidebar: oklch(0.975 0.012 58);
+  --sidebar-foreground: oklch(0.28 0.02 52);
+  --sidebar-primary: oklch(0.66 0.098 50);
   --sidebar-primary-foreground: oklch(0.99 0 0);
-  --sidebar-accent: oklch(0.90 0.025 55);
-  --sidebar-accent-foreground: oklch(0.30 0.05 45);
-  --sidebar-border: oklch(0.88 0.02 55);
-  --sidebar-ring: oklch(0.62 0.12 45);
+  --sidebar-accent: oklch(0.92 0.03 55);
+  --sidebar-accent-foreground: oklch(0.34 0.05 48);
+  --sidebar-border: oklch(0.91 0.014 56);
+  --sidebar-ring: oklch(0.66 0.098 50);
+}
+
+/* 素纸：暖白 / 米色 / 淡棕，极低饱和，安静朴素。 */
+.theme-paper {
+  --background: oklch(0.994 0.004 85);
+  --foreground: oklch(0.28 0.01 80);
+  --card: oklch(0.997 0.003 85);
+  --card-foreground: oklch(0.28 0.01 80);
+  --popover: oklch(0.997 0.003 85);
+  --popover-foreground: oklch(0.28 0.01 80);
+  --primary: oklch(0.52 0.022 80);
+  --primary-foreground: oklch(0.99 0.003 85);
+  --secondary: oklch(0.95 0.008 84);
+  --secondary-foreground: oklch(0.34 0.014 80);
+  --muted: oklch(0.955 0.007 84);
+  --muted-foreground: oklch(0.52 0.014 80);
+  --accent: oklch(0.93 0.012 82);
+  --accent-foreground: oklch(0.32 0.018 78);
+  --border: oklch(0.905 0.008 84);
+  --input: oklch(0.925 0.007 84);
+  --ring: oklch(0.52 0.022 80);
+  --sidebar: oklch(0.968 0.008 84);
+  --sidebar-foreground: oklch(0.30 0.012 80);
+  --sidebar-primary: oklch(0.52 0.022 80);
+  --sidebar-primary-foreground: oklch(0.99 0.003 85);
+  --sidebar-accent: oklch(0.925 0.012 82);
+  --sidebar-accent-foreground: oklch(0.32 0.018 78);
+  --sidebar-border: oklch(0.905 0.008 84);
+  --sidebar-ring: oklch(0.52 0.022 80);
+}
+
+/* 微雾：冷调白 / 灰 / 蓝灰，克制干净，适合久看。 */
+.theme-mist {
+  --background: oklch(0.994 0.002 240);
+  --foreground: oklch(0.28 0.012 250);
+  --card: oklch(0.997 0.002 240);
+  --card-foreground: oklch(0.28 0.012 250);
+  --popover: oklch(0.997 0.002 240);
+  --popover-foreground: oklch(0.28 0.012 250);
+  --primary: oklch(0.53 0.032 250);
+  --primary-foreground: oklch(0.99 0.002 240);
+  --secondary: oklch(0.945 0.008 240);
+  --secondary-foreground: oklch(0.34 0.018 250);
+  --muted: oklch(0.95 0.006 240);
+  --muted-foreground: oklch(0.53 0.02 250);
+  --accent: oklch(0.925 0.014 238);
+  --accent-foreground: oklch(0.33 0.024 250);
+  --border: oklch(0.905 0.008 240);
+  --input: oklch(0.925 0.007 240);
+  --ring: oklch(0.53 0.032 250);
+  --sidebar: oklch(0.966 0.006 240);
+  --sidebar-foreground: oklch(0.30 0.014 250);
+  --sidebar-primary: oklch(0.53 0.032 250);
+  --sidebar-primary-foreground: oklch(0.99 0.002 240);
+  --sidebar-accent: oklch(0.92 0.014 238);
+  --sidebar-accent-foreground: oklch(0.33 0.024 250);
+  --sidebar-border: oklch(0.905 0.008 240);
+  --sidebar-ring: oklch(0.53 0.032 250);
 }
 
 .dark {
