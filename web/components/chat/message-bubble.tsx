@@ -138,14 +138,14 @@ export function MessageBubble({ msg, isStreaming, isLast, onQuote, onCardAction,
         <div
           className={`rounded-2xl px-4 py-3 break-words ${
             msg.role === "user"
-              ? "bg-primary text-primary-foreground"
+              ? "bg-primary/10 text-foreground"
               : "bg-muted prose prose-sm dark:prose-invert max-w-none"
           }`}
         >
           {msg.role === "user" ? (
             <>
               {msg.quote && (
-                <div className="mb-1.5 pl-2 border-l-2 border-primary-foreground/40 text-xs opacity-80">
+                <div className="mb-1.5 pl-2 border-l-2 border-foreground/30 text-xs opacity-80">
                   <div className="font-medium opacity-70">
                     {msg.quote.role === "user" ? "引用 我" : "引用 Ethan"}
                   </div>
@@ -165,7 +165,7 @@ export function MessageBubble({ msg, isStreaming, isLast, onQuote, onCardAction,
                       key={j}
                       src={img.dataUrl}
                       alt=""
-                      className="max-h-48 max-w-xs rounded-lg object-contain border border-primary-foreground/20"
+                      className="max-h-48 max-w-xs rounded-lg object-contain border border-foreground/15"
                     />
                   ))}
                 </div>

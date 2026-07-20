@@ -16,6 +16,9 @@ const ACCENT_STYLES: Record<string, { on: string }> = {
   blue: {
     on: "bg-blue-50 border-blue-300 text-blue-700 dark:bg-blue-950/40 dark:border-blue-700 dark:text-blue-300",
   },
+  amber: {
+    on: "bg-amber-50 border-amber-300 text-amber-700 dark:bg-amber-950/40 dark:border-amber-700 dark:text-amber-300",
+  },
 };
 const OFF_STYLE =
   "bg-transparent border-transparent text-muted-foreground hover:text-foreground hover:bg-muted";
