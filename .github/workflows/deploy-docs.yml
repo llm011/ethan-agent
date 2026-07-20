@@ -48,11 +48,8 @@ jobs:
         run: bash scripts/prepare-docs-static.sh
 
       - name: Install web dependencies
-        working-directory: web
+        # Workspace 模式：根目录 pnpm install 自动链接 packages/shared 到 web 的 node_modules
         run: pnpm install --frozen-lockfile
-
-      - name: Link node_modules for shared/
-        run: ln -s "${{ github.workspace }}/web/node_modules" "${{ github.workspace }}/node_modules"
 
       - name: Build static site
         working-directory: web

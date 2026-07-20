@@ -36,8 +36,8 @@ jobs:
             exit 0
           fi
           echo "Comparing $PREVIOUS → $CURRENT"
-          # desktop/ 整个目录 + shared/（共享组件）+ pyproject.toml（版本号需要同步进 bundle）
-          DIFF=$(git diff --name-only "$PREVIOUS".."$CURRENT" -- desktop/ shared/ pyproject.toml)
+          # desktop/ 整个目录 + packages/shared/（共享组件）+ pyproject.toml（版本号需要同步进 bundle）
+          DIFF=$(git diff --name-only "$PREVIOUS".."$CURRENT" -- desktop/ packages/shared/ pyproject.toml)
           if [ -z "$DIFF" ]; then
             echo "changed=false" >> $GITHUB_OUTPUT
             echo "No desktop-related changes, will skip build"
@@ -96,9 +96,6 @@ jobs:
       - name: Install desktop dependencies
         working-directory: ./desktop
         run: pnpm install --frozen-lockfile
-
-      - name: Link shared node_modules
-        run: ln -s ../desktop/node_modules shared/node_modules
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0

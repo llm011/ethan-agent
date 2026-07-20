@@ -29,10 +29,9 @@ jobs:
 
       - name: Build Web UI
         run: |
-          cd web
+          # Workspace 模式：根目录 pnpm install 自动链接 packages/shared 到 web 的 node_modules
           pnpm install --frozen-lockfile
-          # shared/ 引用 web/node_modules 中的依赖，顶层 symlink 让 Node 解析到
-          ln -s "$(pwd)/node_modules" ../node_modules
+          cd web
           npm run build
           cp -r out ../ethan/web_dist
           cd ..
