@@ -37,6 +37,7 @@ def _register_subcommands():
     from ethan.interface.commands import provider as provider_cmd
     from ethan.interface.commands import router as router_cmd
     from ethan.interface.commands import schedule as schedule_cmd
+    from ethan.interface.commands import secret as secret_cmd
     from ethan.interface.commands import server as server_cmd
     from ethan.interface.commands import session as session_cmd
     from ethan.interface.commands import setup as setup_cmd
@@ -50,6 +51,7 @@ def _register_subcommands():
     app.add_typer(session_cmd.app, name="session")
     app.add_typer(skill_cmd.app, name="skill")
     app.add_typer(schedule_cmd.app, name="schedule")
+    app.add_typer(secret_cmd.app, name="secret")
     app.add_typer(knowledge_cmd.app, name="knowledge")
     app.add_typer(code_cmd.app, name="code")
     app.add_typer(update_cmd.app, name="update")

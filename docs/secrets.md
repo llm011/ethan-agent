@@ -64,6 +64,31 @@ curl https://openapi.biji.com/open/api/v1/note/list \
 
 实现见 `ethan/tools/builtin/secrets.py`。
 
+### 方式三：`ethan secret` CLI（用户在终端直接配置）
+
+用户无需手写文件，直接用 CLI 管理密钥：
+
+```bash
+# 单值密钥（最常用）—— 整个文件内容就是值，文件名即密钥名
+ethan secret set getnote gk_xxxx
+# → ~/.ethan/.secrets/getnote
+# agent: get_secret("getnote")  shell: $getnote
+
+# 多 key 的 .env 文件
+ethan secret set-env openai OPENAI_API_KEY=sk-xxx OPENAI_BASE_URL=https://api.openai.com/v1
+# → ~/.ethan/.secrets/openai.env
+# agent: get_secret("openai.env:OPENAI_API_KEY")
+
+# 列出所有密钥（不显示值，.env 文件会显示 KEY 列表）
+ethan secret list
+
+# 读取密钥值（明文打印）
+ethan secret get getnote
+ethan secret get openai.env:OPENAI_API_KEY
+```
+
+实现见 `ethan/interface/commands/secret.py`。
+
 ---
 
 ## 防泄漏机制
