@@ -6,6 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sun, Moon } from "lucide-react";
+import { useTheme } from "@/components/chat/use-theme";
 import { MdEditor } from "@/components/md-editor";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -24,27 +25,6 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { ChevronDown, ChevronRight } from "lucide-react";
-
-function useTheme() {
-  const [theme, setTheme] = useState<"dark" | "light">(() => {
-    if (typeof window !== "undefined") {
-      return (localStorage.getItem("ethan-theme") as "dark" | "light") || "dark";
-    }
-    return "dark";
-  });
-
-  const toggle = useCallback(() => {
-    setTheme((prev) => {
-      const next = prev === "dark" ? "light" : "dark";
-      localStorage.setItem("ethan-theme", next);
-      document.documentElement.classList.toggle("dark", next === "dark");
-      document.documentElement.classList.toggle("light", next === "light");
-      return next;
-    });
-  }, []);
-
-  return { theme, toggle };
-}
 
 interface SettingsViewProps {
   models: { id: string; description: string }[];
