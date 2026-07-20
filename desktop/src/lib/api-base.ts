@@ -1,5 +1,7 @@
 /** 基础设施：API URL、认证、headers、通用接口（Models/Modes/Version）。 */
 
+import { bustCache } from "./local-cache";
+
 const STORAGE_KEY_API_URL = "ethan_api_url";
 // 与后端 ethan.interface.api.run_server 默认端口 8900 对齐。
 // 8989 是早期 Docker 部署的遗留端口，本地 `ethan serve` 不使用。
@@ -96,14 +98,19 @@ export async function addModel(m: ModelEntry): Promise<{ ok: boolean; error?: st
     method: "POST", headers: { ...headers(), "Content-Type": "application/json" },
     body: JSON.stringify(m),
   });
-  return res.json();
+  const data = await res.json();
+  // 写操作成功后失效缓存，所有 useCachedResource("models") 自动 refetch
+  if (data.ok) bustCache("models");
+  return data;
 }
 
 export async function deleteModel(provider: string, modelId: string): Promise<{ ok: boolean; error?: string }> {
   const res = await fetch(`${API_URL}/models/${encodeURIComponent(provider)}/${encodeURIComponent(modelId)}`, {
     method: "DELETE", headers: headers(),
   });
-  return res.json();
+  const data = await res.json();
+  if (data.ok) bustCache("models");
+  return data;
 }
 
 export async function discoverModels(provider: string): Promise<{ ok: boolean; models?: (ModelEntry & { exists?: boolean })[]; error?: string; url?: string }> {

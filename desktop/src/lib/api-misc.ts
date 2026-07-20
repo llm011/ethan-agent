@@ -1,6 +1,7 @@
 /** 杂项 API（Schedule/BackgroundTasks/Knowledge/Poll/Logs/Skills/Onboarding/Channels/Docs/APIKeys）。 */
 
 import { getApiUrl, headers  } from "./api-base";
+import { bustCache } from "./local-cache";
 import type { SessionInfo } from "./api-sessions";
 
 // ── Schedule ──────────────────────────────────────────────────────
@@ -258,7 +259,10 @@ export async function completeOnboarding(agent_name: string, user_info: string):
     body: JSON.stringify({ agent_name, user_info }),
   });
   if (!res.ok) throw new Error("Failed to complete onboarding");
-  return res.json();
+  const data = await res.json();
+  // 完成后失效 onboarding 缓存（first_time 变 false）
+  bustCache("onboarding");
+  return data;
 }
 
 // ── Channels ──────────────────────────────────────────────────────

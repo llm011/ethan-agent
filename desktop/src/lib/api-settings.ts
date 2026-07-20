@@ -1,6 +1,7 @@
 /** Settings 相关类型和 API（Agent/Provider/System/Profile/ToolTiers/FastRules）。 */
 
 import { getApiUrl, headers  } from "./api-base";
+import { bustCache } from "./local-cache";
 
 // ── Agent Settings ────────────────────────────────────────────────
 
@@ -29,6 +30,8 @@ export async function updateAgentSettings(patch: Partial<AgentSettings>): Promis
     headers: headers(),
     body: JSON.stringify(patch),
   });
+  // 写操作成功后失效缓存，所有 useCachedResource("agentSettings") 自动 refetch
+  bustCache("agentSettings");
 }
 
 // ── Provider Settings ─────────────────────────────────────────────

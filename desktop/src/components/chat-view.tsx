@@ -3,8 +3,6 @@ import { useNavigate } from "react-router-dom"
 import {
   ChatMessage,
   createSession,
-  fetchModels,
-  fetchModes,
   type ModeEntry,
   type ModelEntry,
   fetchSession,
@@ -16,12 +14,15 @@ import {
   type StreamChunk,
   compactSession,
   updateSessionMode,
-  fetchOnboardingStatus,
-  fetchAgentSettings,
   respondConsent,
   getAnnotationsBatch,
   type Annotation,
 } from "@/lib/api";
+import { fetchModels } from "@/lib/api-base";
+import { fetchModes } from "@/lib/api-base";
+import { fetchAgentSettings, type AgentSettings } from "@/lib/api-settings";
+import { fetchOnboardingStatus, type OnboardingStatus } from "@/lib/api-misc";
+import { useCachedResource } from "@/lib/use-cached-resource";
 import { ReadingMode } from "@/components/chat/reading-mode";
 import { ShareMode } from "@/components/chat/share-mode";
 import type { ToolStep } from "@/components/tool-timeline";
@@ -35,6 +36,17 @@ import { ConsentGate } from "@/components/chat/consent-card";
 
 interface ChatViewProps {
   initialSessionId?: string;
+}
+
+// 清洗后的占位标题：去 markdown 标记 / 命令前缀，截断 40 字
+// 与后端 _auto_title 逻辑对齐，让前端 0ms 显示可读标题
+function placeholderTitle(text: string): string {
+  let t = text.trim();
+  t = t.replace(/[*#`_~]/g, '');
+  t = t.replace(/^\/(?:help|new|model|token|btw|stop)\s+/, '');
+  t = t.replace(/\n/g, ' ').trim();
+  if (!t) t = text.trim().replace(/\n/g, ' ');
+  return t.slice(0, 40) + (t.length > 40 ? '…' : '');
 }
 
 export function ChatView({ initialSessionId }: ChatViewProps = {}) {
@@ -56,6 +68,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const [consentRequest, setConsentRequest] = useState<ConsentRequest | null>(null);
   // 对话模式：数据驱动，模式表由后端 /modes 提供（不在前端硬编码任何具体人格）
   const [mode, setMode] = useState<string>("");
+  // 会话首次加载：路由进入 /chat/:id 时，fetchSession 完成前置 true，期间显示骨架占位
+  const [loadingSession, setLoadingSession] = useState(false);
   const [modes, setModes] = useState<ModeEntry[]>([]);
 
   // 标注缓存：messageId -> Annotation[]（按 message id 缓存，避免每气泡重复请求）
@@ -318,7 +332,13 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           if (chunk.ttfb_ms != null) ttfbMs = chunk.ttfb_ms;
           if (chunk.total_ms != null) totalMs = chunk.total_ms;
           if (chunk.message_id != null) messageId = chunk.message_id;
-          if (chunk.title) setSessionTitle(chunk.title);
+          if (chunk.title) {
+            setSessionTitle(chunk.title);
+            // 广播标题更新事件，让 Sidebar 同步更新左侧列表
+            window.dispatchEvent(new CustomEvent("session:title-updated", {
+              detail: { sessionId: activeSession, title: chunk.title }
+            }));
+          }
           setSessionUsage(prev => ({
             input: prev.input + finalUsage!.input,
             output: prev.output + finalUsage!.output,
@@ -391,100 +411,137 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   };
 
   // Load session when route param changes
+  // 竞态保护：快速切换会话时，旧的 fetchSession 完成不覆盖新的
+  // state 重置：切换会话时立即清空旧内容，显示 loading，避免看到上一个会话的内容
   useEffect(() => {
-    if (initialSessionId) {
-      // 如果正在流式输出中（刚新建会话并发送消息），不重新加载
-      // 因为此时 session 刚创建，DB 里还没有消息，fetchSession 会返回空数组
-      if (initialSessionId === activeSession && streaming) return;
-      // 流式刚结束、本组件自己 router.replace 进来的 session：消息已是最新，
-      // 跳过 fetch 避免覆盖（否则会闪烁、丢失 ttft/toolsExpanded 状态）
-      if (justFinishedRef.current === initialSessionId) {
-        justFinishedRef.current = null;
-        return;
-      }
-      fetchSession(initialSessionId)
-        .then(async (detail) => {
-          setActiveSession(initialSessionId);
-          setSessionTitle(detail.title || "");
-          setSessionSource(detail.source || "web");
-          const loaded = mapDetailMessages(detail);
-          setMessages(loaded);
-          fetchAnnotationsFor(loaded);
-          setSelectedModel(detail.model);
-          // 恢复对话模式：之前用工作助手还是苏念，下次进入保持一致
-          setMode(detail.mode || "");
-          const historicUsage = detail.messages
-            .filter((m: any) => m.role === "assistant" && m.usage)
-            .reduce((acc: any, m: any) => ({
-              input: acc.input + (m.usage.input || 0),
-              output: acc.output + (m.usage.output || 0),
-              cache: acc.cache + (m.usage.cache || 0),
-            }), { input: 0, output: 0, cache: 0 });
-          setSessionUsage(historicUsage);
-
-          // 该会话仍有正在进行的生成（刷新前发起的）：重连流，回放缓冲 + 继续实时，
-          // 不丢失 assistant 回复。重连失败/已结束（204）则补一次 fetch 拿落库结果。
-          if (detail.active_run) {
-            setStreaming(true);
-            const stream = await streamResume(initialSessionId).catch(() => null);
-            if (stream) {
-              // loaded 末尾可能已有部分 assistant 消息（后端实时落库的进度行）。
-              // consumeStream 会从 stream replay 重建 assistant 消息，先把它剥掉，
-              // 否则刷新后会出现两条 assistant 消息（DB 一条 + replay 一条）。
-              const base = loaded.length > 0 && loaded[loaded.length - 1].role === "assistant"
-                ? loaded.slice(0, -1)
-                : loaded;
-              await consumeStream(stream, base);
-            } else {
-              setStreaming(false);
-              const fresh = await fetchSession(initialSessionId).catch(() => null);
-              if (fresh) {
-                const freshMsgs = mapDetailMessages(fresh);
-                setMessages(freshMsgs);
-                fetchAnnotationsFor(freshMsgs);
-              }
-            }
-          }
-        })
-        .catch(() => {
-          setActiveSession(null);
-          setSessionTitle("");
-          setMessages([]);
-        });
-    } else {
+    if (!initialSessionId) {
+      // 新建对话页：清空所有会话相关 state
       setActiveSession(null);
       setSessionTitle("");
       setMessages([]);
       setSessionUsage({ input: 0, output: 0, cache: 0 });
       setSessionSource("web");
-      // 新建对话页面默认工作助手模式
       setMode("");
-      // 重置模型为配置的默认模型（从 .env 读取的 AGENT_DEFAULT_MODEL）
-      fetchAgentSettings().then((settings) => {
-        if (settings.default_model) setSelectedModel(settings.default_model);
-      }).catch(() => {});
+      setLoadingSession(false);
+      return;
     }
+
+    // 如果正在流式输出中（刚新建会话并发送消息），不重新加载
+    if (initialSessionId === activeSession && streaming) return;
+
+    // 流式刚结束、本组件自己 router.replace 进来的 session：消息已是最新，
+    // 跳过 fetch 避免覆盖（否则会闪烁、丢失 ttft/toolsExpanded 状态）
+    if (justFinishedRef.current === initialSessionId) {
+      justFinishedRef.current = null;
+      return;
+    }
+
+    // 立即清空旧会话内容 + 显示 loading
+    // 这一步是关键：不清空的话，用户会看到上一个会话的内容直到新会话加载完
+    setLoadingSession(true);
+    setActiveSession(null);
+    setMessages([]);
+    setSessionTitle("");
+    setSessionUsage({ input: 0, output: 0, cache: 0 });
+
+    // 竞态保护 flag：如果用户在 fetchSession 进行中又切换到另一个会话，
+    // cleanup 函数会把 cancelled 置 true，旧的 fetchSession 完成时直接 return，
+    // 不会用旧会话的数据覆盖新会话的内容
+    let cancelled = false;
+
+    fetchSession(initialSessionId)
+      .then(async (detail) => {
+        if (cancelled) return;
+        setLoadingSession(false);
+        setActiveSession(initialSessionId);
+        setSessionTitle(detail.title || "");
+        setSessionSource(detail.source || "web");
+        const loaded = mapDetailMessages(detail);
+        setMessages(loaded);
+        fetchAnnotationsFor(loaded);
+        setSelectedModel(detail.model);
+        // 恢复对话模式：之前用工作助手还是苏念，下次进入保持一致
+        setMode(detail.mode || "");
+        const historicUsage = detail.messages
+          .filter((m: any) => m.role === "assistant" && m.usage)
+          .reduce((acc: any, m: any) => ({
+            input: acc.input + (m.usage.input || 0),
+            output: acc.output + (m.usage.output || 0),
+            cache: acc.cache + (m.usage.cache || 0),
+          }), { input: 0, output: 0, cache: 0 });
+        setSessionUsage(historicUsage);
+
+        // 该会话仍有正在进行的生成（刷新前发起的）：重连流，回放缓冲 + 继续实时，
+        // 不丢失 assistant 回复。重连失败/已结束（204）则补一次 fetch 拿落库结果。
+        if (detail.active_run) {
+          setStreaming(true);
+          const stream = await streamResume(initialSessionId).catch(() => null);
+          if (cancelled) return;
+          if (stream) {
+            const base = loaded.length > 0 && loaded[loaded.length - 1].role === "assistant"
+              ? loaded.slice(0, -1)
+              : loaded;
+            await consumeStream(stream, base);
+          } else {
+            setStreaming(false);
+            const fresh = await fetchSession(initialSessionId).catch(() => null);
+            if (cancelled) return;
+            if (fresh) {
+              const freshMsgs = mapDetailMessages(fresh);
+              setMessages(freshMsgs);
+              fetchAnnotationsFor(freshMsgs);
+            }
+          }
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setLoadingSession(false);
+        setActiveSession(null);
+        setSessionTitle("");
+        setMessages([]);
+      });
+
+    return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialSessionId]);
 
+  // A 类准静态数据：用 useCachedResource 走 SWR，首屏 0ms 渲染（命中缓存）
+  // 后台静默 refetch，用户无感知刷新。写操作（addModel/updateAgentSettings）会 bust。
+  const modelsResource = useCachedResource<ModelEntry[]>("models", fetchModels, { ttlMs: 60 * 60_000 });
+  const modesResource = useCachedResource<ModeEntry[]>("modes", fetchModes, { ttlMs: 24 * 60 * 60_000 });
+  const settingsResource = useCachedResource<AgentSettings>("agentSettings", fetchAgentSettings, { ttlMs: 60 * 60_000 });
+  const onboardingResource = useCachedResource<OnboardingStatus>("onboarding", fetchOnboardingStatus, { ttlMs: 24 * 60 * 60_000 });
+
+  // models / modes / settings / onboarding 变化时同步到本地 state
+  // （保留 state 是因为后续 setSelectedModel 等逻辑需要可变，不能直接用 resource.data）
   useEffect(() => {
-    // 加载模型列表 + agent 设置（取 default_model 作为新建对话的默认选中）
-    Promise.all([fetchModels(), fetchAgentSettings()]).then(([m, settings]) => {
-      setModels(m);
+    const models = modelsResource.data;
+    if (models) {
+      setModels(models);
       // 仅当当前没选中模型时初始化：优先用 default_model，否则列表第一个
-      setSelectedModel((prev) => prev || settings.default_model || (m.length > 0 ? m[0].id : ""));
-    }).catch(() => {
-      fetchModels().then((m) => {
-        setModels(m);
-        if (m.length > 0) setSelectedModel((prev) => prev || m[0].id);
-      }).catch(() => {});
-    });
-  }, []);
+      const def = settingsResource.data?.default_model;
+      setSelectedModel((prev) => prev || def || (models.length > 0 ? models[0].id : ""));
+    }
+  }, [modelsResource.data, settingsResource.data]);
 
   useEffect(() => {
-    // 加载对话模式表（数据驱动 UI）
-    fetchModes().then(setModes).catch(() => {});
-  }, []);
+    if (modesResource.data) setModes(modesResource.data);
+  }, [modesResource.data]);
+
+  // 首次 onboarding 检测：first_time=true 时显示引导 banner
+  useEffect(() => {
+    if (onboardingResource.data?.first_time) setShowOnboarding(true);
+  }, [onboardingResource.data]);
+
+  // 新建对话页：从 settings 取 default_model 作为默认选中
+  // （上面的 useEffect 已处理首次加载，这里只覆盖 initialSessionId 切换到"新建"的场景）
+  useEffect(() => {
+    if (settingsResource.data?.default_model && !activeSession) {
+      setSelectedModel((prev) => prev || settingsResource.data!.default_model);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsResource.data, activeSession]);
 
   // Only fetch schedules for scheduled-task sessions
   useEffect(() => {
@@ -499,14 +556,6 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [initialSessionId, streaming]);
-
-  // Check first-time onboarding on mount
-  useEffect(() => {
-    fetchOnboardingStatus().then((status) => {
-      if (status.first_time) setShowOnboarding(true);
-    }).catch(() => {});
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const handleSend = async (text: string) => {
     if (!text.trim() && pendingFiles.length === 0) return;
@@ -525,7 +574,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         setMessages((prev) => [...prev, { role: "assistant", content, created_at: now }]);
 
       if (cmd === "new") {
-        const s = await createSession(selectedModel, mode);
+        const s = await createSession(selectedModel, mode, "desktop");
         setActiveSession(s.id);
         setSessionTitle("新对话");
         setMessages([]);
@@ -608,10 +657,14 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
     let sessionId = activeSession;
     if (!sessionId) {
-      const s = await createSession(selectedModel, mode);
+      const s = await createSession(selectedModel, mode, "desktop");
       sessionId = s.id;
       setActiveSession(s.id);
-      setSessionTitle(text.slice(0, 30) || "New chat");
+      setSessionTitle(placeholderTitle(text));
+      // 广播占位标题，让 Sidebar 立刻显示新会话
+      window.dispatchEvent(new CustomEvent("session:title-updated", {
+        detail: { sessionId: s.id, title: placeholderTitle(text) }
+      }));
       // 立即更新 URL，让用户点「新建会话」时路由能正确切换。
       // 用 replaceState 而非 router.replace：只改地址栏不触发 Next 路由导航，
       // 避免跨路由卸载组件丢失 state。
@@ -700,6 +753,30 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         onTitleChange={setSessionTitle}
       />
 
+      {loadingSession && messages.length === 0 ? (
+        <div className='flex-1 overflow-y-auto p-4'>
+          <div className='max-w-3xl mx-auto space-y-6'>
+            <div className='flex justify-start gap-2'>
+              <div className='h-7 w-7 rounded-full bg-muted animate-pulse' />
+              <div className='max-w-[80%] space-y-2'>
+                <div className='h-4 w-64 rounded bg-muted animate-pulse' />
+                <div className='h-4 w-48 rounded bg-muted animate-pulse' />
+              </div>
+            </div>
+            <div className='flex justify-end'>
+              <div className='h-20 w-72 rounded-2xl bg-muted animate-pulse' />
+            </div>
+            <div className='flex justify-start gap-2'>
+              <div className='h-7 w-7 rounded-full bg-muted animate-pulse' />
+              <div className='max-w-[80%] space-y-2'>
+                <div className='h-4 w-56 rounded bg-muted animate-pulse' />
+                <div className='h-4 w-40 rounded bg-muted animate-pulse' />
+                <div className='h-4 w-52 rounded bg-muted animate-pulse' />
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : (
       <MessageList
         messages={messages}
         streaming={streaming}
@@ -712,6 +789,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         onShare={handleShare}
         annotationsByMessage={annotationsByMessage}
       />
+      )}
 
       {bgPolling && (
         <div className="max-w-3xl mx-auto w-full px-4 py-2">
