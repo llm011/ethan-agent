@@ -116,6 +116,8 @@ ethan model default glm-5.2
 ethan
 ```
 
+> ⚠️ **已经在运行？** 如果 `ethan serve`、桌面端或 `ethan web` 已经启动，改完 `ethan provider set` / `ethan model default` 后要**重启**它。运行中的服务会把配置缓存在内存里，不重启不会读取 `~/.ethan/config.yaml` 的新改动。
+
 > 💡 **提示**: 运行 `ethan` 命令将在终端中启动交互式对话 REPL。当 `ethan serve` 运行时，Web UI 会内置托管在 `8900` 端口，运行 `ethan` 时会自动在浏览器中打开。你也可以随时运行 `ethan web` 来单独打开 Web 界面。
 
 首次运行会自动初始化 `~/.ethan/`，写入默认技能和系统文件。
@@ -249,6 +251,8 @@ ethan provider set anthropic --api-key sk-ant-xxx
 # 或者 OpenAI 兼容 API
 ethan provider set openai_compat --api-key sk-xxx --base-url https://api.example.com/v1
 ```
+
+> ⚠️ 改完 provider / model 配置后，记得重启正在运行的 `ethan serve` / 桌面端 / `ethan web`——服务会把配置缓存在内存里，不重启不会生效。
 
 ### 运行
 
