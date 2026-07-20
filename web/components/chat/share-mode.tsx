@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toPng } from "html-to-image";
-import { Share2, Check, Copy, Loader2, X } from "lucide-react";
+import { Share2, Check, Copy, Loader2, X, AlertCircle } from "lucide-react";
 import { MarkdownContent } from "./markdown";
 import type { Message } from "@ethan/shared/chat/types";
 
@@ -37,6 +37,8 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
   const [generating, setGenerating] = useState(false);
   const [resultImage, setResultImage] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
+  const [saveInfo, setSaveInfo] = useState<{ filename: string } | null>(null);
   const previewRef = useRef<HTMLDivElement>(null);
 
   // Esc 关闭
@@ -69,6 +71,7 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
     if (!previewRef.current || generating) return;
     setGenerating(true);
     setCopied(false);
+    setSaveInfo(null);
     try {
       if (document.fonts?.ready) await document.fonts.ready;
       const dataUrl = await toPng(previewRef.current, {
@@ -77,10 +80,12 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
         backgroundColor: "#ffffff",
       });
       setResultImage(dataUrl);
+      const filename = `ethan-share-${Date.now()}.png`;
       const a = document.createElement("a");
       a.href = dataUrl;
-      a.download = `ethan-share-${Date.now()}.png`;
+      a.download = filename;
       a.click();
+      setSaveInfo({ filename });
     } catch (err) {
       console.error("生成分享图片失败", err);
       alert("生成图片失败，请重试");
@@ -91,16 +96,21 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
 
   const copyImage = async () => {
     if (!resultImage) return;
+    setCopyFailed(false);
     try {
       const blob = await (await fetch(resultImage)).blob();
       if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
         await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
         setCopied(true);
         setTimeout(() => setCopied(false), 1500);
+        return;
       }
     } catch {
-      // 剪贴板不可用时忽略
+      // 落到下方 fallback
     }
+    // 剪贴板不可用或写入失败：提示用户
+    setCopyFailed(true);
+    setTimeout(() => setCopyFailed(false), 2500);
   };
 
   return (
@@ -191,10 +201,6 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
               ) : (
                 <div className="share-card mx-auto" ref={previewRef}>
                   <div className="share-card-inner">
-                    <div className="share-head">
-                      <span className="share-logo">Ethan</span>
-                      <span className="share-sub">{selectedMessages.length} 条对话 · 由 Ethan 整理</span>
-                    </div>
                     {selectedMessages.map((m, idx) => (
                       <div key={keyOf(m, idx)} className="share-msg">
                         <div className="share-msg-head">
@@ -215,7 +221,12 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
                         {idx < selectedMessages.length - 1 && <div className="share-divider" />}
                       </div>
                     ))}
-                    <div className="share-foot">Ethan · 本地对话导出</div>
+                    <div className="share-foot">
+                      <span className="share-logo">Ethan</span>
+                      <span className="share-sub">
+                        {selectedMessages.length} 条对话 · 由 Ethan 整理
+                      </span>
+                    </div>
                   </div>
                 </div>
               )}
@@ -225,17 +236,39 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
 
         {/* 底部操作条 */}
         <div className="flex items-center justify-between gap-3 border-t border-border px-5 py-3">
-          <span className="text-xs text-muted-foreground">
-            图片会直接下载；localhost 也能分享，因为导出的是图片而非链接。
-          </span>
-          <div className="flex items-center gap-2">
+          <div className="min-w-0 flex-1 text-xs">
+            {saveInfo ? (
+              <div className="flex items-center gap-2">
+                <Check className="h-3.5 w-3.5 shrink-0 text-green-600" />
+                <span className="truncate text-muted-foreground">
+                  图片已下载到浏览器默认下载目录（{saveInfo.filename}）
+                </span>
+              </div>
+            ) : copyFailed ? (
+              <div className="flex items-center gap-1.5 text-red-600">
+                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                <span>
+                  复制到剪贴板失败。浏览器可能限制了图片剪贴板权限，请使用「生成图片」直接下载。
+                </span>
+              </div>
+            ) : (
+              <span className="text-muted-foreground">
+                生成后图片会下载到浏览器默认下载目录。
+              </span>
+            )}
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
             {resultImage && (
               <button
                 onClick={copyImage}
-                className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm hover:bg-accent"
+                className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm ${
+                  copyFailed
+                    ? "border-red-400 text-red-600"
+                    : "border-border hover:bg-accent"
+                }`}
               >
                 {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                {copied ? "已复制" : "复制图片"}
+                {copied ? "已复制" : copyFailed ? "复制失败" : "复制图片"}
               </button>
             )}
             <button
