@@ -741,6 +741,7 @@ dependencies = [
 name = "ethan-desktop"
 version = "0.5.15"
 dependencies = [
+ "base64 0.22.1",
  "serde",
  "serde_json",
  "tauri",

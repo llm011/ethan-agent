@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toPng } from "html-to-image";
-import { Share2, Check, Copy, Loader2, X } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
+import { Share2, Check, Copy, Loader2, X, FolderOpen, AlertCircle } from "lucide-react";
 import { MarkdownContent } from "./markdown";
 import type { Message } from "@ethan/shared/chat/types";
 
@@ -35,8 +36,9 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
   const [generating, setGenerating] = useState(false);
   const [resultImage, setResultImage] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [justSaved, setJustSaved] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
+  // 保存结果：path 为 null 表示仅完成浏览器下载（无法定位文件夹）
+  const [saveInfo, setSaveInfo] = useState<{ path: string | null; filename: string } | null>(null);
   const previewRef = useRef<HTMLDivElement>(null);
 
   // Esc 关闭
@@ -69,6 +71,7 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
     if (!previewRef.current || generating) return;
     setGenerating(true);
     setCopied(false);
+    setSaveInfo(null);
     try {
       if (document.fonts?.ready) await document.fonts.ready;
       const dataUrl = await toPng(previewRef.current, {
@@ -77,17 +80,34 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
         backgroundColor: "#ffffff",
       });
       setResultImage(dataUrl);
-      const a = document.createElement("a");
-      a.href = dataUrl;
-      a.download = `ethan-share-${Date.now()}.png`;
-      a.click();
-      setJustSaved(true);
-      setTimeout(() => setJustSaved(false), 2000);
+      const filename = `ethan-share-${Date.now()}.png`;
+      // 优先走 Tauri 保存到 ~/Pictures/Ethan/，失败则降级浏览器下载
+      try {
+        const savedPath = await invoke<string>("save_share_image", { dataUrl, filename });
+        setSaveInfo({ path: savedPath, filename });
+      } catch (err) {
+        console.warn("Tauri 保存失败，降级为浏览器下载", err);
+        const a = document.createElement("a");
+        a.href = dataUrl;
+        a.download = filename;
+        a.click();
+        setSaveInfo({ path: null, filename });
+      }
     } catch (err) {
       console.error("生成分享图片失败", err);
       alert("生成图片失败，请重试");
     } finally {
       setGenerating(false);
+    }
+  };
+
+  const openFolder = async () => {
+    if (!saveInfo?.path) return;
+    try {
+      await invoke("reveal_item_in_dir", { path: saveInfo.path });
+    } catch (err) {
+      console.error("打开文件夹失败", err);
+      alert("打开文件夹失败：" + err);
     }
   };
 
@@ -105,13 +125,9 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
     } catch {
       // 落到下方 fallback
     }
-    // 剪贴板不可用或写入失败：提示 + fallback 再次触发下载
+    // 剪贴板不可用或写入失败：提示用户图片已保存到磁盘
     setCopyFailed(true);
-    setTimeout(() => setCopyFailed(false), 2000);
-    const a = document.createElement("a");
-    a.href = resultImage;
-    a.download = `ethan-share-${Date.now()}.png`;
-    a.click();
+    setTimeout(() => setCopyFailed(false), 2500);
   };
 
   return (
@@ -202,10 +218,6 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
               ) : (
                 <div className="share-card mx-auto" ref={previewRef}>
                   <div className="share-card-inner">
-                    <div className="share-head">
-                      <span className="share-logo">Ethan</span>
-                      <span className="share-sub">{selectedMessages.length} 条对话 · 由 Ethan 整理</span>
-                    </div>
                     {selectedMessages.map((m, idx) => (
                       <div key={keyOf(m, idx)} className="share-msg">
                         <div className="share-msg-head">
@@ -226,6 +238,12 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
                         {idx < selectedMessages.length - 1 && <div className="share-divider" />}
                       </div>
                     ))}
+                    <div className="share-foot">
+                      <span className="share-logo">Ethan</span>
+                      <span className="share-sub">
+                        {selectedMessages.length} 条对话 · 由 Ethan 整理
+                      </span>
+                    </div>
                   </div>
                 </div>
               )}
@@ -235,10 +253,38 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
 
         {/* 底部操作条 */}
         <div className="flex items-center justify-between gap-3 border-t border-border px-5 py-3">
-          <span className={`text-xs ${justSaved ? "text-green-600" : "text-muted-foreground"}`}>
-            {justSaved ? "已保存到 Downloads" : "图片会直接下载；localhost 也能分享，因为导出的是图片而非链接。"}
-          </span>
-          <div className="flex items-center gap-2">
+          <div className="min-w-0 flex-1 text-xs">
+            {saveInfo ? (
+              <div className="flex items-center gap-2">
+                <Check className="h-3.5 w-3.5 shrink-0 text-green-600" />
+                <span className="truncate text-muted-foreground">
+                  {saveInfo.path
+                    ? `已保存到 ${saveInfo.path}`
+                    : `已下载到浏览器默认下载目录（${saveInfo.filename}）`}
+                </span>
+                {saveInfo.path && (
+                  <button
+                    onClick={openFolder}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:bg-accent"
+                    title="在文件夹中显示"
+                  >
+                    <FolderOpen className="h-3 w-3" />
+                    打开文件夹
+                  </button>
+                )}
+              </div>
+            ) : copyFailed ? (
+              <div className="flex items-center gap-1.5 text-red-600">
+                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                <span>复制到剪贴板失败。点击「生成图片」会同时保存到本地，可直接在文件夹中找到。</span>
+              </div>
+            ) : (
+              <span className="text-muted-foreground">
+                生成后图片会保存到「图片/Ethan」目录，并可直接打开文件夹定位。
+              </span>
+            )}
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
             {resultImage && (
               <button
                 onClick={copyImage}
@@ -249,7 +295,7 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
                 }`}
               >
                 {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                {copied ? "已复制" : copyFailed ? "复制失败，已重新下载" : "复制图片"}
+                {copied ? "已复制" : copyFailed ? "复制失败" : "复制图片"}
               </button>
             )}
             <button
