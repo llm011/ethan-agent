@@ -31,6 +31,8 @@ jobs:
         run: |
           cd web
           pnpm install --frozen-lockfile
+          # shared/ 引用 web/node_modules 中的依赖，顶层 symlink 让 Node 解析到
+          ln -s "$(pwd)/node_modules" ../node_modules
           npm run build
           cp -r out ../ethan/web_dist
           cd ..

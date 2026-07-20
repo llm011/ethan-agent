@@ -51,6 +51,9 @@ jobs:
         working-directory: web
         run: pnpm install --frozen-lockfile
 
+      - name: Link node_modules for shared/
+        run: ln -s "${{ github.workspace }}/web/node_modules" "${{ github.workspace }}/node_modules"
+
       - name: Build static site
         working-directory: web
         run: npx next build

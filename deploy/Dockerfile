@@ -14,6 +14,9 @@ RUN cd web && npm install -g pnpm && pnpm install --frozen-lockfile
 
 COPY web/ ./web/
 COPY shared/ ./shared/
+# shared/ 的依赖（lucide-react 等）在 web/node_modules，
+# 创建顶层 symlink 让 Node 模块解析能从 /build/shared/ 向上找到
+RUN ln -s /build/web/node_modules /build/node_modules
 ENV NEXT_TELEMETRY_DISABLED=1
 # export 模式：产出纯静态文件，由 FastAPI 直接 serve
 ENV NEXT_OUTPUT=export
