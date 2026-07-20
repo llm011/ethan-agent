@@ -2,6 +2,9 @@
 name: paper-analysis
 description: 学术论文深度精读与 Map-Reduce 分析。当用户要求"精读论文"、"深度解读论文"、"分析论文"、"paper analysis"、"详细解读 arxiv 论文"时触发。脚本把 PDF 逐页拆成图+文(Map)，按 5 维度逐页精读(每页实时反馈进度)，再汇总整合(Reduce)输出完整解读。支持 PDF 链接、arXiv ID 或本地文件路径。
 trigger: "精读论文|深度解读论文|解读论文|分析论文|paper analysis|论文精读|arxiv|arXiv|读这篇论文|map reduce 论文"
+license: MIT
+version: 1.0.0
+source: internal (hermes agent)
 ---
 
 # Paper Analysis — 论文精读 Skill
@@ -27,6 +30,7 @@ ls ./ethan/defaults/skills/paper-analysis/scripts/ 2>/dev/null && echo USE_PKG |
 | `extract_pages.py` | PDF → 逐页 PNG + `text/page_NNN.txt` + manifest.json(`uv run --with pymupdf`) |
 | `analyze_page_vision.py` | 【路径A】单页 vision → 5维 JSON(脚本内调多模态 API,`uv run --with openai`) |
 | `merge_analysis.py` | 收拢逐页 JSON → Reduce 输入 |
+| `extract_paper_content.py` | 【路径C】PDF → 章节文本 + 图片(含语义命名) + 表格标题 + 公式行(`uv run --with pypdf,pillow`) |
 
 脚本 **stdout 末行打印一行 JSON**,解析它拿路径,不要解析中间日志。
 
@@ -34,6 +38,17 @@ ls ./ethan/defaults/skills/paper-analysis/scripts/ 2>/dev/null && echo USE_PKG |
 
 - **路径 A(vision,精度高)**:环境变量 `VISION_API_KEY`(或 `OPENAI_API_KEY`)+ `VISION_BASE_URL` 存在 → 走这条。脚本把 PNG 喂多模态模型,能看清图表/公式/表格。先用 `shell: echo $VISION_API_KEY` 确认。
 - **路径 B(text,通用)**:无 vision 配置 → 直接 `file_read` 脚本已落盘的每页文字 `text/page_NNN.txt`(见下),逐页分析。图表/公式精度有限(文字层常把表格拍平、公式变乱码),失真处诚实标注。
+- **路径 C(结构化提取,辅助)**:可选预处理,与 A/B 不冲突。`extract_paper_content.py` 用 pypdf 把 PDF 拆成「章节文本 + 图片清单(含语义命名) + 表格标题 + 公式行」,适合需要快速定位「这张图在第几页」「这篇有几个公式」或单独抽图给用户看的场景。**注意**:pypdf 抽的公式是文字层片段,会丢上下标/特殊符号;表格只检测标题不含内容——要原貌仍需走路径 A 看 page_NNN.png。
+
+## 路径 C 用法(可选,结构化提取)
+```bash
+uv run --with pypdf,pillow python $SCRIPTS/extract_paper_content.py "<pdf>"   # 解析末行 result_file / useful_images_dir / formulas_dir 等
+```
+末行 JSON 字段速查:`result_file`(完整汇总)、`useful_images`(有价值图片数,尺寸≥20×20)、`useful_images_dir`(语义命名,如 `Figure1_attention_useful.png`)、`tables`(检测到的 Table N 标题)、`formulas`(Equation N / 数学符号 / 等式行)、`sections`(按章节切分的全文)。
+- 典型场景 1:用户问"这篇论文有哪些图" → 跑路径 C,`ls` useful_images_dir 给用户看。
+- 典型场景 2:Reduce 阶段需要核对某公式原文 → `file_read` formulas_dir 下的 `pageN_formulaM.txt`。
+- 典型场景 3:想快速读章节而不是逐页 → `file_read` result_file 的 `text.sections` 数组。
+- **不要把路径 C 当 vision 的替代**——它给不出图表的视觉结构、表格的行列对应、公式的真实排版。需要看图必走路径 A。
 
 ## 工作流程
 
@@ -42,11 +57,13 @@ ls ./ethan/defaults/skills/paper-analysis/scripts/ 2>/dev/null && echo USE_PKG |
 python $SCRIPTS/fetch_paper.py "<源>" --out-dir ./paper_work        # 解析末行 pdf_path
 uv run --with pymupdf python $SCRIPTS/extract_pages.py "<pdf>" --dpi 150  # 解析末行 manifest、effective_pages、references_start_page、text_dir
 ```
-脚本默认最多 15 页(`--max-pages N` 调),自动检测 References 起始页。末行 JSON 的 **`effective_pages`** = 实际该精读的页数(含 References 起始页、封顶 15)。每页文字层已落盘到 **`text_dir/page_NNN.txt`**(路径 B 直接读)。
+脚本默认最多 30 页,自动检测 References 起始页。末行 JSON 的 **`effective_pages`** = 实际该精读的页数(含 References 起始页、封顶 30)。每页文字层已落盘到 **`text_dir/page_NNN.txt`**(路径 B 直接读)。
+
+> **页数上限可调,不是写死的**:默认 30 只是速度与覆盖度的折中(逐页精读每页都要发请求、耗工具轮数)。读长综述/长论文时按需放宽:`--max-pages 60` 抬高上限,`--max-pages 0` 完全不封顶(处理全部正文页)。正文本身不足上限时,`effective_pages` 会自动取正文实际页数,不会硬凑。
 
 ### Phase 1 — MAP(逐页精读,**并行批处理**)
 
-[CRITICAL — **只处理第 1 到 `effective_pages` 页**。`effective_pages` 已自动扣除 References 及之后、并封顶 15。**绝不要处理 `effective_pages` 之后的页**(那是参考文献/附录,精读无意义且会耗光工具迭代轮数导致没机会输出报告)。**总精读页数 = `effective_pages`,不是 `num_pages`!**]
+[CRITICAL — **只处理第 1 到 `effective_pages` 页**。`effective_pages` 已自动扣除 References 及之后、并封顶 `--max-pages`(默认 30)。**绝不要处理 `effective_pages` 之后的页**(那是参考文献/附录,精读无意义且会耗光工具迭代轮数导致没机会输出报告)。**总精读页数 = `effective_pages`,不是 `num_pages`!**]
 
 **必须逐页,每页产出独立结果。** 每完成一批输出 `✓ 第 N1-N2 页完成(共 effective_pages 页)`。
 
