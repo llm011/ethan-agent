@@ -223,7 +223,6 @@ pnpm tauri build  # 产出 dmg/exe
 ├── memory/
 │   ├── memory.db        # 结构化记忆 + 证据链 + 洞察 + 向量索引
 │   ├── playbook.json  # 行为规则（从纠正中学习）
-│   ├── episodes.json    # 会话摘要归档
 │   └── user_profile.md  # 用户画像（叙述式文档）
 ├── skills/              # 用户自定义技能（首次运行自动写入默认技能）
 │   └── <name>/

@@ -485,11 +485,6 @@ class Agent:
             _sig_cat, _sig_hint = _memory_signal
             parts.append(f"<memory_signal>\n{_sig_hint}\n</memory_signal>")
 
-        # C2: FDE 需求挖掘 — 有未处理的重复模式建议时，提醒 Agent 自然提起
-        _suggestion_hint = self._build_suggestion_hint()
-        if _suggestion_hint:
-            parts.append(_suggestion_hint)
-
         if self.runtime_context:
             parts.append(f"<runtime_context>\n[CRITICAL — 当前会话上下文，结合 soul 的主人/授权准则判断]\n\n{self.runtime_context}\n</runtime_context>")
 

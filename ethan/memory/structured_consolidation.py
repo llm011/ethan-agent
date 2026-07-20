@@ -51,6 +51,71 @@ def _day_bounds(d: date) -> tuple[float, float]:
     return start.timestamp(), end.timestamp()
 
 
+# 兜底扫描门槛：3 轮实时提取漏掉的短会话，在 12 点补一次
+_BACKFILL_MIN_CHARS = 500          # user 消息累计字符数（≈125 token）门槛，过滤 hi/hello/天气类短问答
+_BACKFILL_MAX_USER_TURNS = 2       # 只补 user_turns <= 2 的 session（3 轮已能实时触发）
+
+
+async def _backfill_short_sessions(
+    target_date: date,
+    start_ts: float,
+    end_ts: float,
+    model: str,
+    user_id: str,
+) -> int:
+    """12 点兜底扫描：对当日 user_turns < 3 但内容有价值的 session 补一次提取。
+
+    解决场景：用户每个 session 只问 1-2 次但跨多天问了同一主题——
+    实时链路的 % 3 门槛永远无法触发，这些 session 会被漏掉。
+
+    过滤：
+    - 跳过 heartbeat / midnight 等 system session
+    - user_turns >= 3 的 session 已经实时触发过，跳过
+    - user 消息累计字符 < _BACKFILL_MIN_CHARS 视为闲聊，跳过（避免浪费 LLM token）
+    - _run_structured_extraction 内部还有 claim_job + 水位线检查，已提取过的会自动 return
+
+    返回本次兜底扫描尝试提取的 session 数。
+    """
+    from ethan.core.paths import user_sessions_db_path
+    from ethan.interface.routers.tasks import _run_structured_extraction
+    from ethan.memory.session import SessionStore
+
+    sess_store = SessionStore(db_path=user_sessions_db_path())
+    await sess_store.init()
+    tried = 0
+    try:
+        sessions = await sess_store.list_in_range(
+            start_ts, end_ts,
+            exclude_sources=["heartbeat"],
+            exclude_title_prefixes=["[心跳]", "[午夜]"],
+        )
+        for sess_meta in sessions:
+            full_sess = await sess_store.load(sess_meta.id)
+            if not full_sess:
+                continue
+            user_msgs = [m for m in full_sess.messages if m.role == "user" and m.content]
+            if len(user_msgs) >= 3:
+                continue  # 已能被实时链路触发
+            if len(user_msgs) > _BACKFILL_MAX_USER_TURNS:
+                continue
+            total_chars = sum(len(m.content) for m in user_msgs)
+            if total_chars < _BACKFILL_MIN_CHARS:
+                continue  # 闲聊过滤
+            try:
+                await _run_structured_extraction(
+                    full_sess, model, user_id, len(user_msgs), force=True,
+                )
+                tried += 1
+            except Exception:
+                logger.warning(
+                    "[StructuredConsolidation] backfill failed for session=%s",
+                    sess_meta.id, exc_info=True,
+                )
+        return tried
+    finally:
+        await sess_store.close()
+
+
 def _candidate_payload(candidates: list) -> list[dict[str, Any]]:
     payload: list[dict[str, Any]] = []
     for candidate in candidates:
@@ -188,6 +253,7 @@ async def run_structured_consolidation(target_date: date | None = None) -> dict[
         "disputed": 0,
         "expired": 0,
         "summaries": 0,
+        "backfilled": 0,
         "skipped": False,
     }
 
@@ -204,11 +270,28 @@ async def run_structured_consolidation(target_date: date | None = None) -> dict[
             result["skipped"] = True
             return result
 
-        # 当日 session 重提取已删除：5 轮实时抽取（_run_structured_extraction）
+        # 当日 session 重提取已删除：3 轮实时抽取（_run_structured_extraction）
         # 已在对话过程中完成提取+准入，12 点不再重复处理当日 session。
 
-        # Re-evaluate observations from multiple sessions. 5 轮抽取产生的
-        # pending candidates 在这里做跨 session 复评，observed → inferred。
+        # 兜底扫描：补一次 user_turns < 3 的短会话（3 轮实时门槛漏掉的场景）
+        # 在跨 session 复评之前跑——这样兜底产生的 pending 候选能被下面的复评处理
+        try:
+            from ethan.core.config import get_config
+            backfill_model = get_config().defaults.model
+            backfilled = await _backfill_short_sessions(
+                d, start_ts, end_ts, backfill_model, user_id,
+            )
+            result["backfilled"] = backfilled
+            if backfilled:
+                logger.info("[StructuredConsolidation] backfilled %d short sessions for %s",
+                            backfilled, local_date)
+        except Exception:
+            logger.warning("[StructuredConsolidation] backfill scan failed for %s",
+                           local_date, exc_info=True)
+            result["backfilled"] = 0
+
+        # Re-evaluate observations from multiple sessions. 3 轮抽取产生的
+        # pending candidates 在这里做跨 session 复评，observed → inferred.
         pending = memory_store.list_pending_candidates(limit=2000)
         if pending:
             admitted = run_daily_admission(memory_store, pending)

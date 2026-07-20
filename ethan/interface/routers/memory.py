@@ -37,12 +37,6 @@ def _record_to_fact(m) -> dict:
     }
 
 
-def _episode_store(user_id: str):
-    from ethan.core.paths import user_episodes_path
-    from ethan.memory.episodic import EpisodeStore
-    return EpisodeStore(path=user_episodes_path())
-
-
 def _procedure_store(user_id: str):
     from ethan.core.paths import user_procedures_path
     from ethan.memory.procedures import ProcedureStore
@@ -63,8 +57,8 @@ async def get_facts(user_id: str = Depends(verify_token)):
 
 @router.get("/episodes")
 async def get_episodes(user_id: str = Depends(verify_token)):
-    store = _episode_store(user_id)
-    return {"episodes": [e.__dict__ for e in store._episodes]}
+    """[已退役] Episode 链路已删除，返回空列表保持 API 兼容。"""
+    return {"episodes": []}
 
 
 @router.patch("/facts/{fact_id}")
@@ -99,12 +93,7 @@ async def delete_fact(fact_id: str, user_id: str = Depends(verify_token)):
 
 @router.delete("/episodes/{episode_id}")
 async def delete_episode(episode_id: str, user_id: str = Depends(verify_token)):
-    store = _episode_store(user_id)
-    before = len(store._episodes)
-    store._episodes = [e for e in store._episodes if e.id != episode_id]
-    if len(store._episodes) == before:
-        raise HTTPException(404, "Episode not found")
-    store._save()
+    """[已退役] Episode 链路已删除，静默返回 ok 保持 API 兼容。"""
     return {"ok": True}
 
 

@@ -14,7 +14,6 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 - **维度注册表**：提取 prompt 的维度说明与校验白名单由同一份声明式注册表生成——扩展维度不再需要手写 prompt
 - 热区/温区滑动窗口维持长对话上下文（REPL），廉价模型自动压缩较早内容
 - 行为准则 Procedures：从用户纠正中自动学习，每次对话加载（`playbook.json`）
-- 会话 Episodes：每个 session 自动生成摘要存档，支持关键词检索（`episodes.json`）
 - 用户画像 Profile：叙事型文档，按章节存储个人语言、目标、约定等（`user_profile.md`）；含「基础特征」「心理与情绪」等章节
 - **主动写记忆**：Agent 在对话中识别到可记忆信息时调用 `memory_write`——写入走同一条候选→准入管道（同一个库、同样的证据语义）
 
@@ -179,7 +178,7 @@ docker compose down                    # 停止
 
 ### 6. 多用户（可选）
 
-Ethan 支持多用户共享一个实例，记忆（结构化记忆 / procedures / episodes / sessions）、skills、知识库按用户完全隔离，互不可见。System prompt 和 provider 配置全局共享。
+Ethan 支持多用户共享一个实例，记忆（结构化记忆 / procedures / sessions）、skills、知识库按用户完全隔离，互不可见。System prompt 和 provider 配置全局共享。
 
 在 `config.yaml` 中预置用户（每个用户绑定一个 `web_token` 用于浏览器登录，和 `api_keys` 用于 `/v1/chat/completions` API 调用 —— 两者都解析到同一个 `user_id`）：
 
@@ -327,7 +326,6 @@ ethan/
 │   ├── memory_vectors.py # memories 的 BGE 向量索引
 │   ├── nightly_consolidation.py # 夜间统一沉淀（结构化 + 做梦）
 │   ├── procedures.py     # 行为准则（从纠正中学习）
-│   ├── episodic.py       # 会话 Episode 摘要存档
 │   └── consolidator.py   # 廉价模型压缩器
 ├── skills/
 │   ├── loader.py         # 加载（目录格式 + 旧格式兼容）
@@ -470,7 +468,6 @@ GET  /sessions/{id}             # 会话详情（含消息历史）
 GET  /memory/facts              # 记忆列表（兼容旧格式的视图）
 GET  /memory/records            # 结构化记忆（可按 type/domain/status 过滤）
 GET  /memory/records/{id}       # 记忆详情 + 证据链
-GET  /memory/episodes           # Episode 摘要列表
 GET  /skills                    # Skill 列表
 POST /skills                    # 创建 Skill
 POST /skills/evolve             # 手动触发 Skill 自动更新
@@ -542,7 +539,6 @@ defaults:
 ├── memory/
 │   ├── memory.db        # 结构化记忆 + 证据链 + 洞察 + 向量索引
 │   ├── playbook.json  # 行为准则
-│   ├── episodes.json    # 会话摘要存档
 │   └── user_profile.md  # 用户画像（叙事型）
 ├── skills/              # 用户自定义 Skill
 │   └── <name>/
@@ -669,7 +665,6 @@ EOF
 - [x] 热/温/冷三层滑动窗口 + 廉价模型批量压缩
 - [x] 结构化 Facts（置信度 + 矛盾检测）
 - [x] 行为准则 Procedures（从用户纠正中学习）
-- [x] 会话 Episode 存档（自动摘要，关键词检索）
 - [x] 用户画像 UserProfile（叙事型，五章节文档）
 - [x] 主动写记忆（`memory_write`、`procedure_write`、`profile_update`、`skill_create`）
 - [x] Memory context 隔离（防污染标签）

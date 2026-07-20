@@ -50,14 +50,15 @@ def _has_correction_keyword(session) -> bool:
 
 
 async def _run_structured_extraction(session, model: str, user_id: str, user_turns: int,
-                                     store=None) -> None:
-    """Every five turns (or on correction keywords), extract source-backed memories.
+                                     store=None, force: bool = False) -> None:
+    """Every three turns (or on correction keywords), extract source-backed memories.
 
-    5 轮基线触发 + 关键词触发：检测到否定/修正类关键词时立即触发，
+    3 轮基线触发 + 关键词触发：检测到否定/修正类关键词时立即触发，
     避免跨轮次修正无法及时更新记忆。job_key 基于 message_id 保证幂等。
     store 可注入(测试/评测用);不传则按当前用户路径创建 MemoryStore。
+    force=True 时跳过门槛检查（12 点兜底扫描用，已在外层过滤过短会话）。
     """
-    if user_turns % 5 != 0 and not _has_correction_keyword(session):
+    if not force and user_turns % 3 != 0 and not _has_correction_keyword(session):
         return
 
     from ethan.memory.admission import (
@@ -147,8 +148,7 @@ async def _maybe_consolidate(session_id: str, model: str, user_id: str = "", mod
     try:
         # 心理画像是否额外抽取：由当前 mode 自身声明，不在此硬编码模式名
         from ethan.core.modes import resolve_mode
-        from ethan.core.paths import user_episodes_path, user_sessions_db_path
-        from ethan.memory.episodic import EpisodeStore
+        from ethan.core.paths import user_sessions_db_path
         resolve_mode(mode)  # validate mode exists
 
         store = SessionStore(db_path=user_sessions_db_path())
@@ -158,7 +158,7 @@ async def _maybe_consolidate(session_id: str, model: str, user_id: str = "", mod
         if not session:
             return
 
-        # 脱敏：在喂给 consolidator/episode 前，把消息正文里的 secret 真值替换为引用
+        # 脱敏：在喂给 consolidator 前，把消息正文里的 secret 真值替换为引用
         from ethan.core.secrets_store import mask_text
         for m in session.messages:
             if m.content:
@@ -174,30 +174,8 @@ async def _maybe_consolidate(session_id: str, model: str, user_id: str = "", mod
             return
 
         # Structured Person/Methodology extraction is independent from the legacy
-        # rolling-summary path and runs at the approved five-turn cadence.
+        # rolling-summary path and runs at the approved three-turn cadence.
         await _run_structured_extraction(session, model, user_id, user_turns)
-
-        # ── Episode 写入（每次对话都记，不等门槛）──────────────────────
-        # 原 repl.py 退出时才写 episode，Web/Lark/WeChat 渠道完全没写。
-        # 挪到这里让所有渠道自动生效，新渠道接入 _maybe_consolidate 即可获得 episode。
-        if user_turns >= 2:
-            try:
-                from ethan.memory.signals import extract_keywords
-                all_text = " ".join(m.content for m in session.messages if m.role == "user" and m.content)
-                summary = " ".join(
-                    m.content[:50] for m in session.messages if m.role == "user" and m.content
-                )[:200]
-                keywords = extract_keywords(all_text, max_keywords=10)
-                ep_store = EpisodeStore(path=user_episodes_path())
-                ep_store.add(
-                    session_id=session_id,
-                    summary=summary,
-                    model=model,
-                    turn_count=user_turns,
-                    keywords=keywords,
-                )
-            except Exception:
-                logger.warning("episode write failed for session %s", session_id, exc_info=True)
 
     except Exception:
         logger.exception("_maybe_consolidate failed for session=%s", session_id)
@@ -214,6 +192,10 @@ async def _maybe_generate_skill(session_id: str, model: str, user_id: str = "") 
         if not session:
             return
         user_turns = sum(1 for m in session.messages if m.role == "user")
+        # skill 生成走完整 LLM prompt（比记忆提取重），保持 5 轮节流——
+        # 比记忆提取 3 轮更克制（见 generator.py MIN_TURNS 注释）。
+        # maybe_generate 内部对已存在的 skill 文件有去重，但 NO_SKILL 的判断
+        # 每次都会重跑 LLM，故仍需外层节流。
         if user_turns < MIN_TURNS or user_turns % 5 != 0:
             return
         generator = SkillGenerator(model=model, user_id=user_id)

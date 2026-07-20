@@ -2,11 +2,12 @@
 
 每晚 0 点由 heartbeat 触发。流程：
 1. 从 memory.db 读取当日准入的结构化记忆（最多 15 条），替代旧的 daily/*.jsonl 信号
-2. LLM 模式挖掘（从多条记忆归纳行为模式/成功路径，限 ≤10 条）
+2. LLM 模式挖掘（从多条记忆归纳行为模式，限 ≤10 条）
 3. 对精炼结果做 embedding → 在 memory.db 里查 L2 < 阈值的 → skip 已存在
-4. 通过去重的条目写入 memory.db（insight_* 向量条目），并按 type 反写：
-   - success_path → playbook.json 的 success_patterns（其它类型不反写）
-5. memory.db 的 metadata 标记 reflected=True，避免重复反写
+4. 通过去重的条目写入 memory.db（insight_* 向量条目），供未来召回
+
+注：success_path → playbook.json 的反写链路已于 2026-07 退役。
+success_patterns 容器已删除，insight 仅作为向量条目存在。
 """
 from __future__ import annotations
 
@@ -39,20 +40,20 @@ def _memory_db_path() -> Path:
     return user_vectors_db_path()
 
 _CONSOLIDATION_PROMPT = """\
-以下是今天提取并准入的结构化记忆（已通过 5 轮实时抽取 + 准入策略筛选）。请从中挖掘跨记忆的行为模式和成功路径，生成可复用的 playbook 经验。
+以下是今天提取并准入的结构化记忆（已通过 3 轮实时抽取 + 准入策略筛选）。请从中挖掘跨记忆的行为模式，生成可复用的 insight。
 
 要求：
-- 从多条记忆中归纳出反复出现的成功模式（场景 + 方法）
+- 从多条记忆中归纳出反复出现的模式（场景 + 方法）
 - 合并语义相似的条目
-- 排除噪音（过于泛泛的、一次性的、不值得固化为 playbook 的）
+- 排除噪音（过于泛泛的、一次性的、不值得固化的）
 - 最终输出不超过 10 条
 - 每条是一句完整的、自包含的描述（未来召回时能独立理解）
-- 宁缺勿滥，如果今天的记忆没有值得提炼的成功路径，输出空数组 []
+- 宁缺勿滥，如果今天的记忆没有值得提炼的模式，输出空数组 []
 
 输出格式（严格 JSON 数组）：
 ```json
 [
-  {{"type": "success_path", "text": "成功场景描述", "metadata": {{...原始关键信息...}}}}
+  {{"type": "insight", "text": "模式描述", "metadata": {{...原始关键信息...}}}}
 ]
 ```
 
@@ -176,16 +177,16 @@ async def _llm_refine(signals: list[dict]) -> list[dict]:
 
 
 async def _embed_and_store(items: list[dict], d: date) -> int:
-    """对每条做 embedding，去重后写入 memory.db，并按 type 反写。
+    """对每条做 embedding，去重后写入 memory.db（insight_* 向量条目）。
 
-    success_path → playbook.json 的 success_patterns；其它类型仅入库不反写。
+    退役 success_path → playbook.json 反写后，insight 仅作为向量条目存在，
+    供未来召回使用（在 _collect 中按 type=insight_* 过滤）。
     """
     from ethan.memory.embeddings import embed
     from ethan.memory.vector_store import VectorStore
 
     store = VectorStore(db_path=_memory_db_path())
     added = 0
-    reflected = 0
 
     try:
         for item in items:
@@ -207,7 +208,6 @@ async def _embed_and_store(items: list[dict], d: date) -> int:
                 "type": insight_type,
                 "date": d.isoformat(),
                 "created_at": time.time(),
-                "reflected": False,  # 标记是否已反写到 memories 表/playbook.json
             }
             # 保留原始 metadata
             if "metadata" in item and isinstance(item["metadata"], dict):
@@ -217,36 +217,22 @@ async def _embed_and_store(items: list[dict], d: date) -> int:
             store.add(id=item_id, text=text, embedding=emb, metadata=metadata)
             added += 1
 
-            # 反写（结构化候选 / playbook）
-            # 去重已由 _sync_corpus_to_memory_db 保证：memories 的 active 记忆
-            # 已同步进向量库（type=fact_sync），insight 的 L2 去重天然覆盖
-            try:
-                if _reflect_insight(text, insight_type, d, item.get("metadata", {})):
-                    # 更新 memory.db 标记（用 update_metadata 避免 vec_index REPLACE 冲突）
-                    metadata["reflected"] = True
-                    store.update_metadata(id=item_id, metadata=metadata)
-                    reflected += 1
-            except Exception:
-                logger.warning("[DailyConsolidation] Reflect failed for: %s", text[:50], exc_info=True)
-
     finally:
         store.close()
 
-    logger.info("[DailyConsolidation] Reflected %d/%d insights to memories/playbook", reflected, added)
+    logger.info("[DailyConsolidation] Stored %d insights", added)
     return added
 
 
 async def _sync_corpus_to_memory_db() -> int:
-    """把 memories 表 active 记忆 / playbook.json 的内容同步到向量库（type=fact_sync）。
+    """把 memories 表 active 记忆同步到向量库（type=fact_sync），作为 insight 去重底库。
 
     同步后，insight 的 L2 去重天然覆盖已有记忆——不需要手动遍历算 embedding。
 
     策略：先删旧的 fact_sync 条目，再全量重建。保证向量库跟源数据一致。
     fact_sync 条目不参与 LRU 过期（由本函数全量重建）。
     """
-    from ethan.core.paths import user_procedures_path
     from ethan.memory.embeddings import embed
-    from ethan.memory.procedures import ProcedureStore
     from ethan.memory.records import MemoryDomain, MemoryStatus
     from ethan.memory.store import MemoryStore
     from ethan.memory.vector_store import VectorStore
@@ -286,59 +272,11 @@ async def _sync_corpus_to_memory_db() -> int:
             except Exception:
                 logger.warning("[DailyConsolidation] Sync memory failed: %s", mem.content[:50], exc_info=True)
 
-        # Step 3: 同步 playbook.json 的 success_pattern
-        proc_store = ProcedureStore(path=user_procedures_path())
-        for sp in proc_store.all_success_patterns():
-            try:
-                emb = await embed(sp.scenario)
-                item_id = f"playbook_sync_{uuid.uuid4().hex[:12]}"
-                metadata = {
-                    "type": "fact_sync",
-                    "source": "playbook",
-                    "scenario": sp.scenario,
-                    "success_count": sp.success_count,
-                    "synced_at": time.time(),
-                }
-                store.add(id=item_id, text=sp.scenario, embedding=emb, metadata=metadata)
-                synced += 1
-            except Exception:
-                logger.warning("[DailyConsolidation] Sync playbook failed: %s", sp.scenario[:50], exc_info=True)
-
     finally:
         store.close()
 
-    logger.info("[DailyConsolidation] Synced %d memory/playbook entries to vector store", synced)
+    logger.info("[DailyConsolidation] Synced %d memory entries to vector store", synced)
     return synced
-
-
-def _reflect_insight(
-    text: str,
-    insight_type: str,
-    d: date,
-    raw_meta: dict,
-) -> bool:
-    """将 insight 反写到结构化记忆管道或 playbook.json。返回是否成功写入。
-
-    去重已由 _sync_corpus_to_memory_db 保证：memories 表的 active 记忆已同步进
-    向量库（type=fact_sync），insight 的 L2 去重天然覆盖已有记忆。
-
-    - success_path → playbook.json 的 success_patterns
-    - 其它类型不反写
-    """
-    from ethan.core.paths import user_procedures_path
-    from ethan.memory.procedures import ProcedureStore
-
-    if insight_type == "success_path":
-        # 反写到 playbook.json 的 success_patterns
-        proc_store = ProcedureStore(path=user_procedures_path())
-        # 从 raw_meta 提取 tool_sequence，没有则空列表
-        tool_sequence = raw_meta.get("tool_sequence", []) if isinstance(raw_meta, dict) else []
-        scenario = text  # insight text 本身作为 scenario 描述
-        proc_store.add_success_pattern(scenario=scenario, tool_sequence=tool_sequence)
-        logger.debug("[DailyConsolidation] Reflected to playbook.json: %s", text[:50])
-        return True
-
-    return False
 
 
 async def get_all_memories(limit: int = 20, offset: int = 0) -> dict:

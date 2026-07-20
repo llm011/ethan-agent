@@ -2,7 +2,7 @@
 """tasks.py 提取链路接线集成测试(fake provider,0 LLM)。
 
 覆盖手工实测发现过的回归点(见 df313ec 前的 live 实测):
-1. 5 轮会话触发 _run_structured_extraction → 候选入库 + job completed
+1. 3 轮会话触发 _run_structured_extraction → 候选入库 + job completed
 2. 增量去重: 二次运行不再提取(boundary 短路,0 次 LLM 调用)
 3. 提取抛异常: job 标记 failed 并记录错误(不再静默吞掉)
 4. _maybe_generate_skill 传 session.messages(Session 不可迭代的回归)
@@ -94,7 +94,7 @@ async def test_extraction_wires_end_to_end_and_dedups(isolated_env, monkeypatch)
     from ethan.core.paths import user_sessions_db_path, user_vectors_db_path
     from ethan.interface.routers.tasks import _run_structured_extraction
 
-    await _seed_session(user_sessions_db_path(), "sess-e2e")
+    await _seed_session(user_sessions_db_path(), "sess-e2e", pairs=3)
 
     # fake provider:返回围栏包裹的 JSON,顺带验证宽松解析
     provider = FakeProvider("```json\n" + _fake_payload(1) + "\n```")
@@ -105,7 +105,7 @@ async def test_extraction_wires_end_to_end_and_dedups(isolated_env, monkeypatch)
     session = await store.load("sess-e2e")
     await store.close()
     turns = sum(1 for m in session.messages if m.role == "user")
-    assert turns == 5
+    assert turns == 3  # 门槛从 %5 改为 %3，3 turns 即触发
 
     # 真实 quote 校验:message_id 必须是真实消息 id,quote 是其子串。
     # fake payload 里 message_id=1 可能不对,先拿真实 user 消息 id 替换。
@@ -137,7 +137,7 @@ async def test_extraction_failure_marks_job_failed(isolated_env, monkeypatch):
     from ethan.core.paths import user_sessions_db_path, user_vectors_db_path
     from ethan.interface.routers.tasks import _run_structured_extraction
 
-    await _seed_session(user_sessions_db_path(), "sess-fail")
+    await _seed_session(user_sessions_db_path(), "sess-fail", pairs=3)
     _patch_provider(monkeypatch, BoomProvider())
 
     store = SessionStore(db_path=user_sessions_db_path())

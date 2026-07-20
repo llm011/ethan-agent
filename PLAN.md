@@ -6,7 +6,7 @@
 ethan/
 ├── core/          # Agent Loop（ReAct，三档路由 fast/medium/full）+ config + heartbeat
 ├── providers/     # Claude 原生 + OpenAI 兼容（Gemini/GPT/Ollama），Prompt Caching
-├── memory/        # 五层记忆：WorkingMemory + Facts + Episodes + Procedures + UserProfile
+├── memory/        # 四层记忆：WorkingMemory + Facts + Procedures + UserProfile
 ├── skills/        # 双来源加载、channel 过滤、stats 统计、自进化（updater + generator）
 ├── tools/         # 插件化工具 + 结果压缩 + 轮次去重
 ├── scheduler/     # APScheduler + SQLite 持久化定时任务
@@ -35,7 +35,6 @@ ethan/
 ### 记忆系统（五层）
 - [x] WorkingMemory：热/温/冷三层滑动窗口，廉价模型批量压缩
 - [x] Facts：结构化条目，置信度 + 矛盾检测 + 自动去重
-- [x] Episodes：会话结束后自动生成摘要存档，关键词检索
 - [x] Procedures：从用户纠正中学习行为准则
 - [x] UserProfile：叙事型用户画像，分章节存储（`~/.ethan/memory/user_profile.md`）
 - [x] 主动写记忆：`memory_write` / `procedure_write` / `profile_update` 工具，对话中即时写入
@@ -82,7 +81,7 @@ ethan/
 - [x] 对话页：流式渲染、工具调用时间轴（可折叠）、TTFT 展示
 - [x] 工具调用时间轴：icon + 名称 + 参数 + 状态（running/done/error）+ 耗时，完成后自动折叠
 - [x] Session 管理：侧边栏历史、全文搜索、会话重命名
-- [x] Memory 页：Facts/Episodes/Procedures 三 Tab，Markdown 渲染、编辑、删除
+- [x] Memory 页：Facts/Procedures 两 Tab，Markdown 渲染、编辑、删除
 - [x] Skills 页：列表 + 内容预览 + 创建
 - [x] Schedule 页：任务列表 + pause/resume/delete
 - [x] Knowledge 页：列表 + 语义搜索 + 添加 + 删除

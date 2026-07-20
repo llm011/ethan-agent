@@ -58,10 +58,10 @@
 
 | 组件 | 价值 | 去向 |
 |---|---|---|
-| episodes.json | 0 LLM 成本；heartbeat 需求挖掘 + Web API 的唯一数据源 | 保留 |
+| episodes.json | 0 LLM 成本；heartbeat 需求挖掘 + Web API 的唯一数据源 | 已退役（2026-07） |
 | user_profile.md | 用户可见可编辑（Web 编辑页），信任级别高于自动提取 | 保留，独立手写层 |
-| playbook.json | agent 自身行为规范，不是用户事实 | 保留 |
-| daily signals → insight | 跨 session 重复需求/失败模式/成功路径挖掘 | 保留，写入目标改道 |
+| playbook.json | agent 自身行为准则（procedures），不是用户事实 | 保留（success_patterns 已退役） |
+| daily signals → insight | 跨 session 重复需求/失败模式挖掘 | 保留（success_path 反写已退役，仅入向量库） |
 | REPL 进程内 WorkingMemory | 长会话内上下文压缩（web 渠道没有的的真实能力） | 保留，职责收缩为纯上下文管理 |
 | memory_write / profile_update / procedure_write 工具 | agent 主动记忆能力 | 保留，后端改道结构化存储 |
 
@@ -75,21 +75,28 @@
   messages: 仅会话内 hot 滑窗（REPL 保留压缩），不再注入 cold facts 伪消息对
 
 写路径:
-  每 5 轮: structured extraction → candidates → admission → memories   【唯一事实提取】
-  每 轮:  episodes（0 LLM）
-  每10轮: collect_signals → daily/*.jsonl
+  每 3 轮: structured extraction → candidates → admission → memories   【唯一事实提取】
   agent主动: memory_write → candidate(explicit) → 立即准入
   每  夜: run_nightly_consolidation（做梦与每日沉淀合并，见下）
-          ① 当日 session 重提取 + 准入 + pending 跨 session 复评
-          ② insight 挖掘（重复需求/失败/成功路径），embedding 去重
-          ③ insight → candidates 走准入；success_path → playbook
-          ④ TTL 过期 + 按域日摘要
+          ① 兜底扫描短会话 + pending 跨 session 复评
+          ② insight 挖掘（重复需求/失败模式），embedding 去重 → 入向量库（不反写）
+          ③ TTL 过期 + 按域日摘要
 
 存储:
   memory.db ← 唯一长期事实库（含 FTS5 + 向量索引）
-  user_profile.md / playbook.json / episodes.json / suggestions.json / daily/*.jsonl ← 各有消费者，保留
+  user_profile.md ← 手写画像层，独立保留
+  playbook.json ← 仅 procedures（行为准则），success_patterns 已退役
   facts.json → 一次性迁移后归档删除
+  episodes.json / suggestions.json → 已退役删除
+  daily/*.jsonl → 已退役（做梦输入源直接从 memory.db 读取）
 ```
+
+> 2026-07 后续退役（在五 PR 落地之后）：
+> - `collect_signals` / `daily/*.jsonl` 信号链路已退役，做梦输入源直接从 `memory.db` 读取当日 active 记忆
+> - `TYPE_MEMORY_MAP` 与 `success_path → playbook.json` 反写链路已退役，insight 仅作为向量条目入库
+> - `success_patterns` 容器（B1）已退役，`playbook.json` 只保留 `procedures` 字段
+> - Episode 链路（`episodic.py` / `_mine_recurring_needs` / `_build_suggestion_hint`）已退役
+> - 心跳 `_extract_decision_patterns` 已退役（同 success_patterns 一并清理）
 
 **做梦与每日沉淀的合并**：现在 0 点跑两个独立 job（`run_daily_consolidation` 精炼信号产 insight、`run_structured_consolidation` 重提取复评产日摘要）——扫同一批 session、调各自的 LLM、写同一个库。合并为 `run_nightly_consolidation` 单一编排：一次扫当日数据，结构化复评与 insight 挖掘共享上下文与去重底库，统一 LLM 预算，失败一起重试（内部仍分两条 job 记录保持幂等粒度）。
 
@@ -152,4 +159,11 @@
 - observed gate vs accrual 的 live A/B（2×96 条，flag 已就位，默认 gate）
 - preference/methodology/personal 域 R 仍在 0.5~0.6 区间，prompt 可继续调优
 - 做梦 prompt 的 supporting_signals 证据链与 type 判别边界
-- collect_signals 与 extractor 两条蒸馏链的源头合并（大改）
+
+> **2026-07 后续退役**（五 PR 落地之后清理的过度工程）：
+> - `collect_signals` / `daily/*.jsonl` 信号链路退役，做梦输入源直接从 `memory.db` 读取
+> - `success_path → playbook.json` 反写链路退役（`TYPE_MEMORY_MAP` 删除）
+> - `success_patterns` 容器（B1）退役——99.4% 噪声、注入 system prompt 信息增益为 0
+> - Episode 链路（`episodic.py` / `_mine_recurring_needs` / `_build_suggestion_hint`）退役
+> - 心跳 `_extract_decision_patterns` 退役（同 success_patterns 一并清理）
+> - 提取门槛从 5 轮降为 3 轮；新增短会话兜底扫描（user_turns<3 但内容有价值）

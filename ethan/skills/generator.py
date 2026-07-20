@@ -4,7 +4,7 @@ from pathlib import Path
 
 from ethan.providers.base import BaseProvider, Message
 
-MIN_TURNS = 3        # 至少 N 轮用户消息才分析
+MIN_TURNS = 5        # 至少 N 轮用户消息才分析（比记忆提取 3 轮更克制——skill 是更重的产物）
 MIN_CONV_LEN = 300   # 对话内容至少 N 字才分析
 
 GENERATE_PROMPT = """分析以下对话，判断是否包含一个值得提炼成可复用 Skill 的模式或流程。
