@@ -18,7 +18,6 @@ cd "$(dirname "$0")"
 ROOT="$(pwd)"
 COMPOSE_FILE="deploy/docker-compose.pip.yml"
 DIST_DIR="$ROOT/dist"
-DATA_VOLUME="ethan-standalone-data"
 
 # ── 辅助 ──────────────────────────────────────────────────────
 check_docker() {

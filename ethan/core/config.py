@@ -318,6 +318,9 @@ def _init_default_skills() -> None:
     目标目录不存在时首次拷贝；已存在时，仅同步单个 SKILL.md 文件——若源文件比目标新
     （即升级后有了新字段如 channels），则覆盖更新。不覆盖 references/ 等用户可能修改的
     附属文件，也不删除用户从技能目录里新增的文件。
+
+    注意：dst 可能是用户主动建的符号链接（如指向 .agents/skills/<name> 开发挂载），
+    此时跳过——既不 copytree 也不 sync，完全保留用户自定义的链接。
     """
     import shutil
 
@@ -332,6 +335,9 @@ def _init_default_skills() -> None:
         if not src.is_dir():
             continue
         dst = skills_dir / src.name
+        # 用户主动符号链接的 skill：完全跳过（即使是断链也不动它）
+        if dst.is_symlink():
+            continue
         if not dst.exists():
             try:
                 shutil.copytree(src, dst)
