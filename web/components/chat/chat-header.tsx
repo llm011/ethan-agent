@@ -8,7 +8,7 @@ import { renameSession, regenSessionTitle } from "@/lib/api";
 import { fmtTokens } from "@/lib/utils";
 import { formatTrigger, formatNextRun } from "@/lib/utils";
 import { useTheme } from "./use-theme";
-import type { Usage } from "./types";
+import type { Usage } from "@ethan/shared/chat/types";
 
 interface ChatHeaderProps {
   sessionId: string | null;

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { fetchUiResource } from "@/lib/api-base";
-import type { McpApp } from "./types";
+import type { McpApp } from "@ethan/shared/chat/types";
 
 interface McpAppViewProps {
   apps: McpApp[];

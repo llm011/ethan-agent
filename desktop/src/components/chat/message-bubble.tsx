@@ -13,7 +13,7 @@ import { SearchCardCarousel, type SearchResultCard } from "./search-card-carouse
 import { ImageGallery, type ImageCard } from "./image-gallery";
 import { applyHighlights } from "@/lib/highlight";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@ethan/shared/ui/tooltip";
-import type { CardData, Message } from "./types";
+import type { CardData, Message } from "@ethan/shared/chat/types";
 import type { Annotation } from "@/lib/api";
 
 // 按 card.type 分发到 SearchCardCarousel 或 ImageGallery

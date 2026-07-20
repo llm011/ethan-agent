@@ -8,7 +8,7 @@ import { getApiUrl } from "@/lib/api-base";
 import { fmtTokens } from "@/lib/utils";
 import { formatTrigger, formatNextRun } from "@/lib/utils";
 import { useTheme } from "./use-theme";
-import type { Usage } from "./types";
+import type { Usage } from "@ethan/shared/chat/types";
 import { ServerStatusBadge } from "@/components/server-status-badge";
 
 interface ChatHeaderProps {

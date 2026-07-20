@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { toPng } from "html-to-image";
 import { Share2, Check, Copy, Loader2, X } from "lucide-react";
 import { MarkdownContent } from "./markdown";
-import type { Message } from "./types";
+import type { Message } from "@ethan/shared/chat/types";
 
 function formatTime(ts?: number): string {
   if (!ts) return "";
