@@ -342,8 +342,8 @@ export function Sidebar() {
           role="button"
           onClick={() => { navigate("/chat"); if (window.innerWidth < 768) setSidebarOpen(false); }}
         >
-          <img src={`${''}/logo-sidebar.png`} alt="Ethan Agent" className="rounded-full shrink-0 h-7 w-7" />
-          <span className="whitespace-nowrap">Ethan Agent</span>
+          <img src={`${''}/logo-sidebar.png`} alt={health.agent_name || "Ethan"} className="rounded-full shrink-0 h-7 w-7" />
+          <span className="whitespace-nowrap">{health.agent_name || "Ethan"}</span>
           {health.version && (
             <span
               className="text-[9px] font-mono text-muted-foreground/60 bg-muted border border-border/60 rounded-full px-1.5 py-0.5 leading-none shrink-0"

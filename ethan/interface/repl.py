@@ -112,8 +112,8 @@ async def run_repl(agent: Agent, resume_id: str | None = None, auto_consent: boo
         console.print(Panel(
             "[bold yellow]No API key configured.[/bold yellow]\n\n"
             "Choose a provider:\n"
-            "  [cyan]1[/cyan]  Anthropic (Claude)       — api.anthropic.com\n"
-            "  [cyan]2[/cyan]  OpenAI-compatible        — OpenAI / Gemini / OpenRouter / Ollama\n\n"
+            "  [cyan]1[/cyan]  OpenAI-compatible  — OpenAI / Gemini / OpenRouter / Ollama / 智谱 GLM 等\n"
+            "  [cyan]2[/cyan]  Anthropic (Claude) — api.anthropic.com\n\n"
             "You can also run [dim]ethan provider set[/dim] later to change this.",
             border_style="yellow", padding=(0, 2)
         ))
@@ -127,25 +127,29 @@ async def run_repl(agent: Agent, resume_id: str | None = None, auto_consent: boo
         choice = raw_choice.strip() or "1"
 
         if choice == "2":
-            raw_key = await asyncio.to_thread(input, "  API Key: ")
-            api_key = raw_key.strip()
-            raw_url = await asyncio.to_thread(input, "  Base URL (e.g. https://generativelanguage.googleapis.com/v1beta/openai): ")
-            base_url = raw_url.strip() or None
-            _cfg.providers.setdefault("openai_compat", ProviderConfig())
-            _cfg.providers["openai_compat"].api_key = api_key
-            if base_url:
-                _cfg.providers["openai_compat"].base_url = base_url
-            # default model
-            raw_model = await asyncio.to_thread(input, "  Default model ID (e.g. gemini-2.5-flash): ")
-            default_model = raw_model.strip()
-            if default_model:
-                _cfg.defaults.model = default_model
-        else:
             raw_key = await asyncio.to_thread(input, "  Anthropic API Key (sk-ant-...): ")
             api_key = raw_key.strip()
             _cfg.providers.setdefault("anthropic", ProviderConfig())
             _cfg.providers["anthropic"].api_key = api_key
             _cfg.defaults.model = "claude-sonnet-4.6"
+        else:
+            # 1) base_url 先于 api_key：用户通常先知道网关地址，再去找对应平台的 key
+            raw_url = await asyncio.to_thread(
+                input,
+                "  Base URL (e.g. https://api.openai.com/v1, or https://generativelanguage.googleapis.com/v1beta/openai): ",
+            )
+            base_url = raw_url.strip() or None
+            raw_key = await asyncio.to_thread(input, "  API Key: ")
+            api_key = raw_key.strip()
+            _cfg.providers.setdefault("openai_compat", ProviderConfig())
+            _cfg.providers["openai_compat"].api_key = api_key
+            if base_url:
+                _cfg.providers["openai_compat"].base_url = base_url
+            # 2) default model：OpenAI 官方默认 gpt-5.4，兼容网关按用户实际填的填
+            raw_model = await asyncio.to_thread(input, "  Default model ID (e.g. gpt-5.4): ")
+            default_model = raw_model.strip()
+            if default_model:
+                _cfg.defaults.model = default_model
 
         save_config(_cfg)
         _reload()

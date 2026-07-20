@@ -8,54 +8,91 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 
 ---
 
-## Features at a Glance
+## Features
 
-| Category | What you get |
-|----------|--------------|
-| **Memory** | Structured long-term memory with quote-backed evidence, 64 typed dimensions, semantic dedup, nightly "dream" consolidation, procedures, user profile |
-| **Routing** | Three-track (fast / medium / full) intent routing with stuck detection and graceful finalize |
-| **Skills** | Pluggable Markdown skills with keyword + optional semantic router matching; 40+ built-in skills ship in the box |
-| **Tools** | Shell, web search, web fetch, file I/O, knowledge base, charts, browser, desktop, ACP coding-agent delegation |
-| **Channels** | CLI REPL, Web UI (Next.js), Desktop app (Tauri), Android app, Feishu/Lark (WebSocket, no public IP) |
-| **Scheduler** | Cron + interval jobs, natural-language `heartbeat.md` tasks, async background tasks |
-| **Modes** | Switchable conversation modes — companion (苏念), legal expert, immersive coding agents (Codex / Claude Code / OpenCode) |
-| **Caching** | Prompt Caching (Anthropic stable-prefix, ~0.1× input cost) + per-turn tool-call dedup |
-| **Multi-user** | Isolated memory / skills / knowledge per user, shared provider config |
-| **UI** | A2UI structured cards, interactive Chart.js charts (MCP Apps / SEP-1865), tool timeline, search card carousel |
+**Memory system**
+- **Structured long-term memory** (`memory.db`, the single source of truth for user facts): every 5 turns, source-backed candidates are extracted (each must carry an exact quote from a user message) and deterministically admitted — explicit → active immediately, observed → promoted only after ≥2 independent sessions. 64 typed dimensions across 7 categories (personal info / preference / activity / decision / relationship / methodology / companion), with TTL expiry, supersede chains, and redaction-on-forget
+- **Semantic recall & dedup**: hybrid FTS5 + BGE vector retrieval (RRF-fused) feeds a single `<memory_context>` prompt block; at admission, embedding near-neighbors are paired and merged/superseded by deterministic rules ("住在深圳" ≈ "家在深圳南山" never stored twice)
+- **Dimension registry**: the extraction prompt's dimension guide and the validation whitelist are both generated from one declarative registry — extending memory types never touches prompt text by hand
+- Hot/warm sliding window for long-conversation context (REPL); older content auto-compressed by a cheap model
+- Behavioral Procedures: learned from user corrections, loaded every conversation (`playbook.json`)
+- User Profile: narrative document storing personal phrases, goals, and agent agreements (`user_profile.md`); sections include 基础特征 (basic traits) and 心理与情绪 (emotional/psychological traits)
+- **Proactive memory write**: Agent calls `memory_write` mid-conversation — the write flows through the same candidate→admission pipeline (no separate store, same evidence semantics)
 
-Detailed feature breakdowns are in [Features](#features) below.
+**Dream — nightly memory consolidation ("做梦")**
+- Every night at 0:00, one unified pass (`run_nightly_consolidation`): re-extract the day's sessions, re-evaluate pending observations across sessions, expire TTL memories, write per-domain daily summaries, rebuild the memory vector index — then "dream": distill cross-session signals (recurring needs ≥3×, errors, success paths) into permanent insights, deduped via sqlite-vec against the freshly-admitted memories
+- Companion (苏念) emotional memory is isolated to companion mode (separate domain, never recalled elsewhere); diagnostic/clinical labels are hard-rejected by a denied-term list
+- **Reflect-back**: insights flow back as structured candidates (repetition/error → admission pipeline) and `playbook.json` (success_path) — no separate read path needed
+- **fact_sync mirror**: before each dream, active memories/playbook entries are mirrored into the vector store (type=`fact_sync`) so insight dedup naturally covers already-known facts; the mirror is fully rebuilt each cycle
+- **Permanent by design**: insights are never auto-deleted; `last_accessed` is tracked for observability but not used as an eviction basis (memory.db stays tiny, ~15KB per insight)
+- **Sessions.db rotation**: full message history grows fast, so sessions.db is auto-archived via `VACUUM INTO` to `~/.ethan/archive/sessions.{start}~{end}.db` (filename carries the date span) once it exceeds 10 MB, keeping the active db small while old chats remain queryable by date
+
+**Companion mode — 苏念 (Surrender Experiment counselor)**
+- A loadable plugin: toggle "苏念 · 陪伴倾听" in the chat UI to switch from the work assistant into a young, gentle female listener grounded in *The Surrender Experiment* (道法自然)
+- In this mode the agent affirms first, listens deeply, and accompanies rather than rushing to solve — speaking like a real person, no AI stiffness
+- While in companion mode, the consolidator auto-extracts 心理与情绪 (mood / stressors / what soothes you / inner feelings) into your profile; basic traits are set by you in the "我的画像" (My Profile) settings tab
+
+**Legal expert mode — legal-assistant (install on demand)**
+- Switch to "法律专家" (legal expert) mode and a single `legal-assistant` skill covers case analysis, litigation review, contract review, legal document/proposal generation, trademark & patent IP, case intake, legal search and visualization — routed by "task verb + practice area" to the matching playbook, instead of dozens of sub-skills
+- **Zero pollution**: legal skills are tagged `modes: [法律]` and only activate in legal mode; in normal work mode they never enter the context
+- **Auto-install (on demand)**: the first time you enter legal mode without the skill installed, the agent **automatically pulls and installs** `legal-assistant` from the repo (it announces "installing…" first — no silent network access; on failure it tells you to run `ethan skill add legal` manually). Legal content is not bundled with the main repo, honoring the upstream CC-BY-NC non-commercial license
+- **Manual install**: run `ethan skill add legal` from the CLI (= `llm011/ethan-legal-skill/skills/legal-assistant`)
+- **`/mode` switching**: both the CLI (REPL) and channels (Lark, etc.) support `/mode 法律` to enter and `/mode default` to return; an unrecognized name leaves the current mode unchanged. The mode is persisted per session and restored when you resume
+
+**Skill system**
+- Keyword trigger matching, auto-injected into system prompt
+- Optional semantic router (BGE INT8 + LR head) adds recall on top of keywords so differently-phrased requests still match (`pip install 'ethan-agent[embedding]'`; keyword-only without it — see Install section)
+- `fast_path: true` routes matched input to the millisecond fast track
+- `channels: [lark, web]` filters skills by channel so each surface gets only relevant skills
+- `modes: [法律]` filters skills by conversation mode so each mode gets only relevant skills (empty = all modes)
+- Hit tracking and correction collection; Heartbeat auto-updates skill content with a cheap model when corrections accumulate
+- Agent can create new skills mid-conversation via the `skill_create` tool
+
+**Three-track routing**
+- **fast**: short commands + keyword match → minimal prompt + fast_path tools only + 2 iterations
+- **medium**: mid-length messages → full prompt + all tools + 4 iterations
+- **full**: complex tasks → full prompt + all tools + 10 iterations
+
+**Loop control**
+- Stuck detection: when the agent repeats the same tool+args for 3 rounds (or 2 rounds of the same error), it injects a forced-reflection prompt (`<diagnosis>` + must switch strategy) instead of spinning to the iteration cap
+- Graceful finalize: on stuck-give-up (after 2 reflections) or hitting the iteration cap, the last round disables tools and the model writes a "done / blocker / what's needed from you" summary — never a raw `[max tool iterations reached]`
+
+**Scheduler & background tasks**
+- Create cron or interval jobs in conversation; SQLite-persisted, survives restarts
+- `heartbeat.md`: write natural-language tasks; the system runs them periodically
+- Background tasks: kick off a long-running task that runs async in its own session without blocking the current chat; result is fed back when done (Lark pushes to the originating chat, web surfaces the session). View/stop them on the `/background-tasks` page, with a running-count badge in the sidebar
+
+**Tool system**
+- Shell execution, web search (DuckDuckGo by default, or Tavily / self-hosted SearXNG via config — see `deploy/docker-compose.searxng.yml`), web fetch, file I/O, knowledge base
+- Sensitive/side-effecting ops (shell, file write, secret read) ask for consent before running; the web shows a consent card, the REPL prompts y/N, and once granted in a session the same tool won't ask again
+- Tool results over 4 000 chars are auto-summarized by a cheap model before going back to the main model
+- Identical calls within the same turn hit an in-memory cache — no duplicate execution
+
+**Prompt Caching**
+- System prompt split into stable layer / dynamic layer; stable layer cached 5 min, token cost drops to 0.1×
+
+**Multi-channel**
+- CLI REPL, Web UI (Next.js), **Android App** (Kotlin/Compose), Lark/Feishu (WebSocket, no public IP required)
+- Lark auto-auth guidance: when a user-token-dependent call (e.g. reading group chat context via `--as user`) fails with an auth-class error (99991663 / 99991661 / `need_user_authorization`), the bot sends a red guidance card to that chat telling the user to run `lark-cli auth login --domain im`. Throttled to once per 5 min per chat; non-auth errors (network / param / not-found) do not trigger it.
+- Lark multi-event subscription + card action callbacks: each EventKey (message received / read receipts / reactions / `card.action.trigger`) runs in its own `lark-cli event consume` subprocess with independent reconnect; interactive card button clicks route back through `_handle_card_action` for button-driven workflows.
+
+**Browser control (real Chrome)**
+- Drive the real Chrome on the machine where ethan runs, from any channel (Web / Lark / CLI) — install the bundled `browser-extension`, point it at your ethan WebSocket endpoint, and the agent gets `browser_session` / `browser_tab` / `browser_page` tools
+- agent-browser style: accessibility-tree snapshot + ref map, click/fill/type/press/select/scroll/hover, screenshot, keyboard/mouse, page `eval`, all over Chrome DevTools Protocol
+- Session is bound to the conversation (isolated per chat); page ops within a session are serialized, different sessions run in parallel; idle sessions are released (tabs kept) after 30 min
+- Session-level one-time consent: the first browser call in a chat asks once, then all browser ops (incl. `eval`) are allowed for that chat
+- Transport is WebSocket only (extension → ethan), no native messaging host; see [docs/browser-control-plan.md](docs/browser-control-plan.md)
+
+**Desktop control (macOS, via cua-driver)**
+- Control the local macOS desktop from any channel — take screenshots, click, type, drag, scroll, launch apps, open URLs
+- Powered by [trycua/cua](https://github.com/trycua/cua); connects to `cua-driver` (a native background daemon at `localhost:8000`) — no VM required
+- Screenshot results are passed directly to vision models; the agent sees the screen and decides the next action
+- `ethan server install` automatically installs and registers `cua-driver` as a launchd service; or install manually: `curl -fsSL .../install.sh | bash && cua-driver install`
+- Optional Python SDK: `pip install 'ethan-agent[computer]'` (cua-computer); gracefully absent when not installed
 
 ---
 
-## Deployment
-
-Pick the option that fits your scenario. All four end up with the same `~/.ethan/` data directory and the same `ethan` CLI.
-
-| Option | Best for | Requirements |
-|--------|----------|--------------|
-| [Desktop App](#option-1-desktop-app-macos--windows) | End users on macOS / Windows | None (one-click installer) |
-| [pip install](#option-2-pip-install) | Local CLI / Python users | Python 3.12+ |
-| [Docker](#option-3-docker-recommended-for-servers) | Server / NAS deployment | Docker 20.10+ & Compose v2 |
-| [From source](#option-4-from-source-development) | Development / contributing | Python 3.12+, uv, Node 20+ |
-
-### Option 1: Desktop App (macOS / Windows)
-
-Download the installer from [GitHub Releases](https://github.com/llm011/ethan-agent/releases):
-
-| Platform | File |
-|----------|------|
-| macOS Apple Silicon | `Ethan.Agent_<ver>_aarch64.dmg` |
-| macOS Intel | `Ethan.Agent_<ver>_x64.dmg` |
-| Windows | `Ethan.Agent_<ver>_x64-setup.exe` or `.msi` |
-
-The desktop app bundles the full Web UI in a Tauri native window. On first launch it auto-initializes `~/.ethan/` and walks you through an onboarding flow (API key, model, agent name).
-
-> **macOS Gatekeeper note**: the app is unsigned, so the first launch will say "damaged". Run this once, then open normally:
-> ```bash
-> xattr -dr com.apple.quarantine "/Applications/Ethan Agent.app"
-> ```
-
-### Option 2: pip install
+## Install
 
 Requires Python 3.12+.
 
@@ -63,391 +100,91 @@ Requires Python 3.12+.
 pip3 install ethan-agent
 ```
 
-That's it — the `ethan` command is now available. On first run, default skills and system files are written to `~/.ethan/`.
-
-### Option 3: Docker (recommended for servers)
-
-Backend and Web UI in one container, data persisted to the host's `~/.ethan/` (bind mount — inspectable, backup-friendly, and shared with any `pip`-installed `ethan` on the same machine). **No need to clone the repository.**
+Set an API key and start:
 
 ```bash
-mkdir ethan-agent && cd ethan-agent
-# Self-contained variant: pulls latest PyPI build inside container (no external files needed)
-curl -o docker-compose.yml https://raw.githubusercontent.com/llm011/ethan-agent/main/deploy/docker-compose.pip.yml
+# Any OpenAI-compatible API (OpenAI / Gemini / OpenRouter / DeepSeek / Ollama / etc.)
+ethan provider set openai_compat --api-key sk-xxx --base-url https://api.openai.com/v1
+ethan model default gpt-5.4   # or gemini-2.5-flash, etc.
 
-# Create .env (see below for required keys)
-cat > .env <<'EOF'
-ANTHROPIC_API_KEY=sk-ant-xxx
-AGENT_DEFAULT_MODEL=claude-sonnet-4-6
-EOF
-
-docker compose up -d
-```
-
-Want SearXNG (free, privacy-friendly self-hosted search) bundled in? Clone the repo and use the full compose instead:
-
-```bash
-git clone --depth=1 https://github.com/llm011/ethan-agent.git
-cd ethan-agent/deploy
-cp .env.example .env   # edit .env to fill in your API key
-docker compose -f docker-compose.yml up -d   # bundles SearXNG + uses prebuilt GHCR image
-```
-
-`.env` keys (see [`deploy/.env.example`](./deploy/.env.example) for the full template):
-
-```bash
-ANTHROPIC_API_KEY=sk-ant-xxx        # or OPENAI_API_KEY + OPENAI_BASE_URL
-AGENT_DEFAULT_MODEL=claude-sonnet-4-6
-ETHAN_AUTH_TOKEN=                   # Web UI login token (empty = no auth, fine on LAN)
-ETHAN_PROXY=                        # optional HTTP proxy
-GH_TOKEN=                           # optional, lets the container use gh CLI
-SEARXNG_BASE_URL=                   # optional, point web_search at a SearXNG instance
-```
-
-Access:
-
-| Service | URL |
-|---------|-----|
-| Web UI & API | http://localhost:8900 |
-| Health check | http://localhost:8900/health |
-| SearXNG (if enabled) | http://localhost:8888 |
-
-Common ops:
-
-```bash
-docker compose logs -f                    # tail logs (omit service name; picks the only one)
-docker compose restart                    # restart backend
-docker compose down                       # stop
-```
-
-> Updating the pip variant: `docker compose build --pull` and `docker compose up -d` re-runs the `pip install` and recreates the container. The GHCR-variant updates with `docker compose pull && docker compose up -d`.
-
-**Other compose variants** in [`deploy/`](./deploy/):
-- [`docker-compose.yml`](./deploy/docker-compose.yml) — full deployment with prebuilt GHCR image + bundled SearXNG (uses `deploy/searxng/settings.yml`, hence needs the cloned dir)
-- [`docker-compose.searxng.yml`](./deploy/docker-compose.searxng.yml) — bring-your-own SearXNG add-on (use with `docker-compose.pip.yml`)
-- [`docker-compose.nas.yml`](./deploy/docker-compose.nas.yml) — NAS-tuned variant
-
-> **One-shot legal mode**: set `ETHAN_INSTALL_SKILLS=legal` before `docker compose up` (or run `docker compose exec ethan-agent ethan skill add legal` after start — replace `ethan-agent` with `ethan` if using the GHCR variant), then pick "⚖️ 法律专家" in the Web mode dropdown.
-
-### Option 4: From source (development)
-
-```bash
-git clone https://github.com/llm011/ethan-agent.git
-cd ethan-agent
-uv sync                              # Python deps
-cd web && npm install && cd ..       # Web UI deps (optional)
-```
-
-Optional — semantic router (smarter skill matching, beginners can skip):
-
-```bash
-uv sync --extra embedding            # or: pip install 'ethan-agent[embedding]'
-ethan router pull                    # ~24MB model, first-time only
-ethan router status                  # "✓ router ready"
-```
-
-Run:
-
-```bash
-ethan                                # interactive REPL (auto-opens Web UI if serve is up)
-ethan serve                          # HTTP API + embedded Web UI on port 8900
-ethan web                           # open Web UI in browser
-cd web && npm run dev               # http://localhost:3000 (dev mode, API on 8900)
-```
-
-Optional extras:
-
-- **Browser extension** — drive your real Chrome from any channel: load [`browser-extension/`](./browser-extension) in Chrome, point it at `ws://localhost:8900/ws/browser`
-- **Desktop control** (macOS) — `ethan server install` registers `cua-driver` as a launchd service, or `pip install 'ethan-agent[computer]'` for the Python SDK
-- **Android app** — `cd app/android && ./gradlew assembleDebug` (needs Android SDK 35 + JDK 17+); see [`app/android/PRD.md`](./app/android/PRD.md)
-- **macOS auto-start** — `./deploy/install.sh` installs a launchd plist
-
----
-
-## Configure Models
-
-After any of the deployment options above, configure at least one model provider:
-
-```bash
-# Anthropic Claude (recommended — supports Prompt Caching)
+# OR Anthropic Claude
 ethan provider set anthropic --api-key sk-ant-xxx
-
-# OR any OpenAI-compatible API (Gemini, OpenRouter, DeepSeek, Ollama, etc.)
-ethan provider set openai_compat --api-key sk-xxx --base-url https://api.example.com/v1
-ethan model default <model-id>
 
 # OR Zhipu GLM (built-in preset — fills base_url/type/anti-cache + registers glm-5.2 etc.)
 ethan provider set glm --api-key <your-glm-key>
 ethan model default glm-5.2
+# (see `ethan provider presets` for all built-in presets)
 
-# List all built-in presets
-ethan provider presets
+ethan
 ```
 
-Docker users: skip the CLI and set `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `AGENT_DEFAULT_MODEL` in `.env` instead.
+> 💡 **First-run wizard**: if you just run `ethan` without configuring a provider first, an interactive prompt will guide you through choosing a provider (default: OpenAI-compatible), entering Base URL, then API Key, and finally a default model ID.
 
-> ⚠️ **Already running?** Restart `ethan serve` / the desktop app / `ethan web` after any `ethan provider set` / `ethan model default` change. The running server caches config in memory and won't pick up edits to `~/.ethan/config.yaml` until it restarts.
+> ⚠️ **Already running?** If `ethan serve`, the desktop app, or `ethan web` is already up, **restart it** after any `ethan provider set` / `ethan model default` change. The running server caches config in memory and won't pick up edits to `~/.ethan/config.yaml` until it restarts.
 
-Then start chatting:
+> 💡 **Notice**: Run `ethan` command to start the interactive chat REPL in your terminal. When `ethan serve` is running, it also hosts the Web UI on port `8900`. Running `ethan` will automatically open it in your browser. You can also run `ethan web` to open the Web UI directly.
+
+That's it. On first run, default skills and system files are written to `~/.ethan/`.
+
+---
+
+## Quick Start (Docker, recommended for server deployment)
+
+Docker runs backend and Web UI as separate containers, data persisted to a local volume. No need to clone the repository.
+
+### Prerequisites
+
+- Docker 20.10+
+- Docker Compose v2
+
+### 1. Download compose file
 
 ```bash
-ethan            # interactive REPL
-ethan -p "..."   # single-turn query
-ethan -m MODEL   # use specific model
-ethan -r last    # resume last session
+mkdir ethan-agent && cd ethan-agent
+curl -O https://raw.githubusercontent.com/llm011/ethan-agent/main/docker-compose.yml
 ```
 
-Web UI tokens:
+### 2. Configure
+
+Create a `.env` file and add your API keys:
 
 ```bash
-ethan web token          # show current Web login token
-ethan web token --rotate # regenerate token
+cat > .env << 'EOF'
+ANTHROPIC_API_KEY=sk-ant-xxx
+# OPENAI_API_KEY=sk-xxx
+# OPENAI_BASE_URL=https://api.example.com/v1
+AGENT_DEFAULT_MODEL=claude-sonnet-4-6
+EOF
 ```
 
----
+### 3. Start
 
-## Feishu (Lark) Integration
-
-Ethan connects to Feishu/Lark via **WebSocket long connection** — no public IP, no webhook URL needed. `ethan serve` spawns one `lark-cli event consume <EventKey>` subprocess per subscribed event.
-
-### Setup
-
-1. Create a Feishu app at [open.feishu.cn](https://open.feishu.cn), grab `app_id` and `app_secret`.
-2. Enable the **Bot** capability and subscribe to events (at minimum `im.message.receive_v1`; optionally message read receipts, reactions, `card.action.trigger` for interactive card buttons).
-3. Authorize user-token operations (e.g. reading group context with `--as user`): run `lark-cli auth login --domain im` once on the host. When the user token expires, the bot sends a red guidance card to the affected chat telling the user to re-run the command.
-4. Add the credentials to `~/.ethan/config.yaml`:
-
-```yaml
-lark:
-  app_id: "cli_xxxxxxxxxxxxxxxx"
-  app_secret: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+```bash
+docker compose up -d
 ```
 
-5. Restart `ethan serve`. Each EventKey gets its own subprocess with independent reconnect.
+### 4. Access
 
-### What you get
+- **Web UI**: http://localhost:3000
+- **API**: http://localhost:8900
+- **Health check**: http://localhost:8900/health
 
-- Markdown post bubbles + interactive cards (streaming `patch` updates)
-- Multi-event subscription (messages / read receipts / reactions / card button callbacks)
-- `THINKING_FACE` emoji ack on receipt, natural-language stop ("停" / "cancel" / "stop"), `/` slash commands (`/new`, `/stop`, `/help`, …)
-- Auto auth-guidance card when a user-token call fails (99991663 / 99991661 / `need_user_authorization`)
-- Per-chat session isolation; Lark sessions are visible in the Web UI with `lark:<chat_id>:` title prefix
+### 5. Common commands
 
-Full event flow, card rendering details, and table-rendering quirks are in [docs/interface.md](docs/interface.md).
+```bash
+docker compose logs -f ethan-backend  # tail logs
+docker compose restart ethan-backend  # restart backend
+docker compose pull && docker compose up -d  # update to latest version
+docker compose down                   # stop
+```
 
----
+> **One-shot legal expert mode**: set `ETHAN_INSTALL_SKILLS=legal` before `docker compose up` (or run `docker compose exec ethan-agent ethan skill add legal` after the container is up) to install the `legal-assistant` skill; then pick "⚖️ 法律专家" in the Web mode dropdown to activate it.
 
-## Built-in Skills
+### 6. Multi-user (optional)
 
-All skills in [`ethan/defaults/skills/`](./ethan/defaults/skills/) are auto-copied to `~/.ethan/skills/` on first run and auto-updated on upgrade (only `SKILL.md` + `references/` — your own files are never touched). Install third-party skills with `ethan skill add <name>`.
+Ethan supports multiple isolated users sharing one instance. Each user has their own memory (structured memories / procedures / sessions), skills, and knowledge base — fully isolated per user. System prompts and provider config stay shared.
 
-### Browser & Desktop Control
-
-| Skill | Description |
-|-------|-------------|
-| [use-browser](./ethan/defaults/skills/use-browser/SKILL.md) | Main browser skill — drive the real user Chrome via the Ethan Browser extension (reuses login cookies) |
-| [agent-browser](./ethan/defaults/skills/agent-browser/SKILL.md) | Fallback: bundled isolated Chrome via Rust CLI, token-efficient AX snapshots |
-| [dev-browser](./ethan/defaults/skills/dev-browser/SKILL.md) | Sandboxed JS + full Playwright API for complex multi-step flows |
-| [computer-use](./ethan/defaults/skills/computer-use/SKILL.md) | macOS desktop control via `cua-driver` (screenshots / click / type / drag / open apps) |
-| [macos-automation](./ethan/defaults/skills/macos-automation/SKILL.md) | Automate macOS apps (TickTick / Reminders / Calendar / Notes) via `osascript` |
-
-### Feishu / Lark
-
-| Skill | Description |
-|-------|-------------|
-| [lark-im](./ethan/defaults/skills/lark-im/SKILL.md) | Send / reply / search messages, manage chats & members, reactions, interactive cards |
-| [lark-doc](./ethan/defaults/skills/lark-doc/SKILL.md) | Read & edit Feishu Docx / Wiki documents |
-| [lark-task](./ethan/defaults/skills/lark-task/SKILL.md) | Create / assign / track Feishu tasks & lists |
-| [lark-shared](./ethan/defaults/skills/lark-shared/SKILL.md) | lark-cli setup, auth login, identity switching, scope errors |
-| [feishu-writer](./ethan/defaults/skills/feishu-writer/SKILL.md) | Long-form Feishu document generation with rich formatting & Mermaid |
-| [channels](./ethan/defaults/skills/channels/SKILL.md) | Messaging channel config (Feishu WebSocket now; WeChat / Telegram later) |
-
-### Notes & Knowledge
-
-| Skill | Description |
-|-------|-------------|
-| [deepwiki](./ethan/defaults/skills/deepwiki/SKILL.md) | Query any GitHub repo's documentation via DeepWiki |
-| [obsidian](./ethan/defaults/skills/obsidian/SKILL.md) | Read / search / create / edit Obsidian vault notes |
-| [flomo](./ethan/defaults/skills/flomo/SKILL.md) | Read / search / write flomo (浮墨) short notes |
-| [getnote](./ethan/defaults/skills/getnote/SKILL.md) | 得到大脑 (Get笔记) — save / search personal notes & knowledge base |
-| [wechat-reading](./ethan/defaults/skills/wechat-reading/SKILL.md) | 微信读书 — search books, manage bookshelf, view highlights |
-| [notebooklm](./ethan/defaults/skills/notebooklm/SKILL.md) | Query Google NotebookLM with source citations |
-| [llm-wiki](./ethan/defaults/skills/llm-wiki/SKILL.md) | Karpathy's LLM Wiki — build & query interlinked markdown KB |
-
-### Search & Information
-
-| Skill | Description |
-|-------|-------------|
-| [arxiv](./ethan/defaults/skills/arxiv/SKILL.md) | Search arXiv papers by keyword / author / category / ID |
-| [url-process](./ethan/defaults/skills/url-process/SKILL.md) | Universal link entry — auto-detect platform & route to fastest path |
-| [blogwatcher](./ethan/defaults/skills/blogwatcher/SKILL.md) | Monitor blogs & RSS / Atom feeds |
-| [rss-briefing](./ethan/defaults/skills/rss-briefing/SKILL.md) | Daily RSS briefing with Feishu-compatible layout |
-
-### Coding & Research
-
-| Skill | Description |
-|-------|-------------|
-| [code-review](./ethan/defaults/skills/code-review/SKILL.md) | Review diffs — P0 must-fix / P1 suggestion / P2 one-liner; posts inline comments |
-| [vercel-deploy](./ethan/defaults/skills/vercel-deploy/SKILL.md) | Deploy static sites / web apps to Vercel |
-| [research-paper-writing](./ethan/defaults/skills/research-paper-writing/SKILL.md) | Write ML papers for NeurIPS / ICML / ICLR — design to submit |
-| [paper-analysis](./ethan/defaults/skills/paper-analysis/SKILL.md) | Map-Reduce deep read of academic papers (PDF / arXiv ID / local file) |
-
-### Life & Productivity
-
-| Skill | Description |
-|-------|-------------|
-| [amap-lbs](./ethan/defaults/skills/amap-lbs/SKILL.md) | Amap POI search, route planning, travel planning, heatmaps |
-| [didi-ride](./ethan/defaults/skills/didi-ride/SKILL.md) | Call a Didi ride from Feishu chat |
-| [jd-shopping](./ethan/defaults/skills/jd-shopping/SKILL.md) | JD orders export, product search, cart management |
-| [travel-query](./ethan/defaults/skills/travel-query/SKILL.md) | 12306 train / high-speed rail timetable query |
-| [finance-query](./ethan/defaults/skills/finance-query/SKILL.md) | A-share / HK / US stock quotes, K-line, PE/PB, financial statements |
-| [xiaohongshu](./ethan/defaults/skills/xiaohongshu/SKILL.md) | Xiaohongshu automation — search / publish / interact |
-| [gws-gmail](./ethan/defaults/skills/gws-gmail/SKILL.md) | Gmail via gws CLI — send / read / reply / forward / triage |
-
-### Image & UI
-
-| Skill | Description |
-|-------|-------------|
-| [ui-card](./ethan/defaults/skills/ui-card/SKILL.md) | Render structured UI cards (comparison / ranking / stats / timeline) |
-| [image-split](./ethan/defaults/skills/image-split/SKILL.md) | Split long screenshots into grid pieces (smart gap-aware cutting) |
-| [excalidraw](./ethan/defaults/skills/excalidraw/SKILL.md) | Generate editable Excalidraw diagrams (Obsidian-first) |
-| [upload-cdn](./ethan/defaults/skills/upload-cdn/SKILL.md) | Upload local files to S3-compatible storage, get public URL |
-
-### Companion & Mode
-
-| Skill | Description |
-|-------|-------------|
-| [companion-listen](./ethan/defaults/skills/companion-listen/SKILL.md) | 苏念 — young gentle female companion grounded in *The Surrender Experiment* |
-| [task-strategy](./ethan/defaults/skills/task-strategy/SKILL.md) | Generic fallback strategy when tools fail / are denied / timeout |
-
-### Skill Self-Management
-
-| Skill | Description |
-|-------|-------------|
-| [skill-creator](./ethan/defaults/skills/skill-creator/SKILL.md) | Draft SKILL.md, design triggers, organize references / scripts |
-| [skills-manager](./ethan/defaults/skills/skills-manager/SKILL.md) | Search / install / update / uninstall skills via `npx skills` |
-
-### Optional / External
-
-| Skill | Description |
-|-------|-------------|
-| [legal-assistant](https://github.com/llm011/ethan-legal-skill) | Legal expert mode — case analysis, litigation review, contract review, IP, legal search (`ethan skill add legal`) |
-| [eigenflux](./ethan/defaults/skills/eigenflux/SKILL.md) | AI signal broadcast network for cross-agent collaboration (privacy-first) |
-
----
-
-## Features
-
-### Memory system
-
-- **Structured long-term memory** (`memory.db`, the single source of truth for user facts): every 5 turns, source-backed candidates are extracted (each must carry an exact quote from a user message) and deterministically admitted — explicit → active immediately, observed → promoted only after ≥2 independent sessions. 64 typed dimensions across 7 categories (personal info / preference / activity / decision / relationship / methodology / companion), with TTL expiry, supersede chains, and redaction-on-forget.
-- **Semantic recall & dedup**: hybrid FTS5 + BGE vector retrieval (RRF-fused) feeds a single `<memory_context>` prompt block; at admission, embedding near-neighbors are paired and merged/superseded by deterministic rules ("住在深圳" ≈ "家在深圳南山" never stored twice).
-- **Dimension registry**: the extraction prompt's dimension guide and the validation whitelist are both generated from one declarative registry — extending memory types never touches prompt text by hand.
-- Hot/warm sliding window for long-conversation context (REPL); older content auto-compressed by a cheap model.
-- **Behavioral Procedures**: learned from user corrections, loaded every conversation (`playbook.json`).
-- **User Profile**: narrative document storing personal phrases, goals, and agent agreements (`user_profile.md`); sections include 基础特征 (basic traits) and 心理与情绪 (emotional/psychological traits).
-- **Proactive memory write**: Agent calls `memory_write` mid-conversation — the write flows through the same candidate→admission pipeline (no separate store, same evidence semantics).
-
-### Dream — nightly memory consolidation ("做梦")
-
-- Every night at 0:00, one unified pass (`run_nightly_consolidation`): re-extract the day's sessions, re-evaluate pending observations across sessions, expire TTL memories, write per-domain daily summaries, rebuild the memory vector index — then "dream": distill cross-session signals (recurring needs ≥3×, errors, success paths) into permanent insights, deduped via sqlite-vec against the freshly-admitted memories.
-- Companion (苏念) emotional memory is isolated to companion mode (separate domain, never recalled elsewhere); diagnostic/clinical labels are hard-rejected by a denied-term list.
-- **Reflect-back**: insights flow back as structured candidates (repetition/error → admission pipeline) and `playbook.json` (success_path) — no separate read path needed.
-- **fact_sync mirror**: before each dream, active memories/playbook entries are mirrored into the vector store (type=`fact_sync`) so insight dedup naturally covers already-known facts; the mirror is fully rebuilt each cycle.
-- **Permanent by design**: insights are never auto-deleted; `last_accessed` is tracked for observability but not used as an eviction basis (memory.db stays tiny, ~15KB per insight).
-- **Sessions.db rotation**: full message history grows fast, so sessions.db is auto-archived via `VACUUM INTO` to `~/.ethan/archive/sessions.{start}~{end}.db` once it exceeds 10 MB, keeping the active db small while old chats remain queryable by date.
-
-### Companion mode — 苏念 (Surrender Experiment counselor)
-
-- A loadable plugin: toggle "苏念 · 陪伴倾听" in the chat UI to switch from the work assistant into a young, gentle female listener grounded in *The Surrender Experiment* (道法自然).
-- In this mode the agent affirms first, listens deeply, and accompanies rather than rushing to solve — speaking like a real person, no AI stiffness.
-- While in companion mode, the consolidator auto-extracts 心理与情绪 (mood / stressors / what soothes you / inner feelings) into your profile; basic traits are set by you in the "我的画像" (My Profile) settings tab.
-
-### Legal expert mode — legal-assistant (install on demand)
-
-- Switch to "法律专家" (legal expert) mode and a single `legal-assistant` skill covers case analysis, litigation review, contract review, legal document/proposal generation, trademark & patent IP, case intake, legal search and visualization — routed by "task verb + practice area" to the matching playbook, instead of dozens of sub-skills.
-- **Zero pollution**: legal skills are tagged `modes: [法律]` and only activate in legal mode; in normal work mode they never enter the context.
-- **Auto-install (on demand)**: the first time you enter legal mode without the skill installed, the agent **automatically pulls and installs** `legal-assistant` from the repo (it announces "installing…" first — no silent network access; on failure it tells you to run `ethan skill add legal` manually). Legal content is not bundled with the main repo, honoring the upstream CC-BY-NC non-commercial license.
-- **Manual install**: run `ethan skill add legal` from the CLI (= `llm011/ethan-legal-skill/skills/legal-assistant`).
-- **`/mode` switching**: both the CLI (REPL) and channels (Lark, etc.) support `/mode 法律` to enter and `/mode default` to return; an unrecognized name leaves the current mode unchanged. The mode is persisted per session and restored when you resume.
-
-### Skill system
-
-- Keyword trigger matching, auto-injected into system prompt.
-- Optional semantic router (BGE INT8 + LR head) adds recall on top of keywords so differently-phrased requests still match (`pip install 'ethan-agent[embedding]'`; keyword-only without it — see [Deployment](#option-4-from-source-development)).
-- `fast_path: true` routes matched input to the millisecond fast track.
-- `channels: [lark, web]` filters skills by channel so each surface gets only relevant skills.
-- `modes: [法律]` filters skills by conversation mode so each mode gets only relevant skills (empty = all modes).
-- Hit tracking and correction collection; Heartbeat auto-updates skill content with a cheap model when corrections accumulate.
-- Agent can create new skills mid-conversation via the `skill_create` tool.
-
-### Three-track routing
-
-- **fast**: short commands + keyword match → minimal prompt + fast_path tools only + 2 iterations.
-- **medium**: mid-length messages → full prompt + all tools + 4 iterations.
-- **full**: complex tasks → full prompt + all tools + 10 iterations.
-
-### Loop control
-
-- **Stuck detection**: when the agent repeats the same tool+args for 3 rounds (or 2 rounds of the same error), it injects a forced-reflection prompt (`<diagnosis>` + must switch strategy) instead of spinning to the iteration cap.
-- **Graceful finalize**: on stuck-give-up (after 2 reflections) or hitting the iteration cap, the last round disables tools and the model writes a "done / blocker / what's needed from you" summary — never a raw `[max tool iterations reached]`.
-
-### Scheduler & background tasks
-
-- Create cron or interval jobs in conversation; SQLite-persisted, survives restarts.
-- `heartbeat.md`: write natural-language tasks; the system runs them periodically.
-- **Background tasks**: kick off a long-running task that runs async in its own session without blocking the current chat; result is fed back when done (Lark pushes to the originating chat, web surfaces the session). View / stop them on the `/background-tasks` page, with a running-count badge in the sidebar.
-
-### Tool system
-
-- Shell execution, web search (DuckDuckGo by default; Tavily or self-hosted SearXNG via config — see [`deploy/docker-compose.searxng.yml`](./deploy/docker-compose.searxng.yml)), web fetch, file I/O, knowledge base, charts, browser, desktop control, ACP delegation.
-- Sensitive / side-effecting ops (shell, file write, secret read) ask for consent before running; the web shows a consent card, the REPL prompts y/N, and once granted in a session the same tool won't ask again.
-- Tool results over 4 000 chars are auto-summarized by a cheap model before going back to the main model.
-- Identical calls within the same turn hit an in-memory cache — no duplicate execution.
-- `no_compress = True` for tools whose output contains IDs / refs / structured JSON the model must pass back verbatim.
-
-### Prompt Caching
-
-- System prompt split into stable layer / dynamic layer; stable layer cached 5 min, token cost drops to 0.1× (Anthropic).
-
-### Multi-channel
-
-- CLI REPL, Web UI (Next.js), **Desktop App** (Tauri, macOS + Windows), **Android App** (Kotlin/Compose), Lark/Feishu (WebSocket, no public IP required).
-- **Lark auto-auth guidance**: when a user-token-dependent call (e.g. reading group chat context via `--as user`) fails with an auth-class error (99991663 / 99991661 / `need_user_authorization`), the bot sends a red guidance card to that chat telling the user to run `lark-cli auth login --domain im`. Throttled to once per 5 min per chat; non-auth errors (network / param / not-found) do not trigger it.
-- **Lark multi-event subscription + card action callbacks**: each EventKey (message received / read receipts / reactions / `card.action.trigger`) runs in its own `lark-cli event consume` subprocess with independent reconnect; interactive card button clicks route back through `_handle_card_action` for button-driven workflows.
-- **OpenAI-compatible Completions API** (`/v1/chat/completions`) with per-user API keys — drop Ethan in as a drop-in replacement for the OpenAI API.
-
-### Browser control (real Chrome)
-
-- Drive the real Chrome on the machine where ethan runs, from any channel (Web / Lark / CLI) — install the bundled [`browser-extension`](./browser-extension), point it at your ethan WebSocket endpoint, and the agent gets `browser_session` / `browser_tab` / `browser_page` tools.
-- agent-browser style: accessibility-tree snapshot + ref map, click / fill / type / press / select / scroll / hover, screenshot, keyboard/mouse, page `eval`, all over Chrome DevTools Protocol.
-- Session is bound to the conversation (isolated per chat); page ops within a session are serialized, different sessions run in parallel; idle sessions are released (tabs kept) after 30 min.
-- Session-level one-time consent: the first browser call in a chat asks once, then all browser ops (incl. `eval`) are allowed for that chat.
-- Transport is WebSocket only (extension → ethan), no native messaging host; see [docs/browser-control-plan.md](docs/browser-control-plan.md).
-
-### Desktop control (macOS, via cua-driver)
-
-- Control the local macOS desktop from any channel — take screenshots, click, type, drag, scroll, launch apps, open URLs.
-- Powered by [trycua/cua](https://github.com/trycua/cua); connects to `cua-driver` (a native background daemon at `localhost:8000`) — no VM required.
-- Screenshot results are passed directly to vision models; the agent sees the screen and decides the next action.
-- `ethan server install` automatically installs and registers `cua-driver` as a launchd service; or install manually.
-- Optional Python SDK: `pip install 'ethan-agent[computer]'` (cua-computer); gracefully absent when not installed.
-
-### Coding Agent integration (ACP)
-
-- `delegate_coding` / `ethan code "query"` delegates complex coding tasks to **Claude Code / OpenCode / Codex**, all running as JSON event streams with session resume.
-- **Immersive tool modes**: switch the conversation mode to Codex / Claude Code / OpenCode; once switched, every message in that session continues the same tool (same tool session, per-session working dir).
-- **Mirror sessions**: each `delegate()` becomes a real Ethan session (`source` = the actual tool: codex / claude / opencode) recording the dispatched query + coding-agent reply + steps, registered as a RunManager run so the delegated conversation can be watched live via SSE.
-- Tool calls parse into collapsible sub-steps in the Web UI tool timeline with the final result highlighted. See [docs/acp.md](docs/acp.md).
-
-### UI Cards & Interactive Charts
-
-- **`ui_card` tool**: render structured info as cards instead of plain text. High-frequency types (comparison / ranking / stats / timeline) use fixed backend templates — the model just fills in typed data, so styling stays clean and consistent; free-form cards can still be hand-authored. Rendering is channel-aware over the same structured `card` data: Web renders [A2UI](https://a2ui.org/) via `@a2ui/react`, the REPL degrades to text, and Feishu/Lark renders native interactive cards.
-- **Interactive charts** (`generate_chart`): Chart.js bar / line / pie / doughnut / horizontalBar / radar, following the [MCP Apps](https://modelcontextprotocol.io/) UI-resource convention (SEP-1865). The tool result carries only `{uri, data}` — the Web frontend fetches the template once per URI, renders it in a sandboxed iframe, and pushes data in via `postMessage`. A [quickchart.io](https://quickchart.io/) PNG is saved as a fallback for non-web channels.
-
-### Multi-user
-
-- Multiple isolated users share one instance. Each user has their own memory (structured memories / procedures / sessions), skills, and knowledge base — fully isolated per user. System prompts and provider config stay shared.
-- Define users in `config.yaml` (each user binds a `web_token` for browser login and `api_keys` for the `/v1/chat/completions` API — both resolve to the same `user_id`):
+Define users in `config.yaml` (each user binds a `web_token` for browser login and `api_keys` for the `/v1/chat/completions` API — both resolve to the same `user_id`):
 
 ```yaml
 users:
@@ -464,6 +201,113 @@ users:
 ```
 
 If `users` is empty (or absent), Ethan auto-creates an `admin` user whose `web_token` reuses `network.auth_token` — so existing single-user deployments keep working with zero config change. On first launch, existing global data is migrated to the admin user's directory (originals kept as backup; idempotent).
+
+---
+
+## Local Development / Install from Source
+
+### Prerequisites
+
+- Python 3.12+
+- [uv](https://docs.astral.sh/uv/) package manager
+- Node.js 20+ (Web UI only)
+
+### Install
+
+```bash
+# From PyPI
+pip install ethan-agent
+
+# Or from source
+git clone https://github.com/llm011/ethan-agent.git
+cd ethan-agent
+uv sync
+```
+
+### Optional: Semantic Router (smarter skill matching — beginners can skip)
+
+By default, Ethan uses keyword matching to decide which skill to activate. This is enough for most cases and **works without any extra setup**.
+
+If you want skills to match even when phrased differently (e.g. triggering the Feishu skill by saying "pass a message to the client" instead of literally "send Feishu"), enable the optional semantic router:
+
+```bash
+# 1. Install the optional dependency (a lightweight inference runtime, a few tens of MB)
+pip install 'ethan-agent[embedding]'      # from PyPI
+# from source: uv sync --extra embedding
+
+# 2. Pull the model (~24MB, first time only; skippable — the first message auto-downloads it)
+ethan router pull
+
+# 3. Check status
+ethan router status                    # "✓ router ready" means you're set
+```
+
+- **Fully optional**: with no dependency, no model, or offline, it silently falls back to keyword matching — nothing breaks.
+- The model is hosted on GitHub, downloaded and cached locally on first use, then works offline.
+- To disable: just uninstall the optional dependency, no config change needed.
+
+### Configure
+
+```bash
+ethan provider set anthropic --api-key sk-ant-xxx
+# or
+ethan provider set openai_compat --api-key sk-xxx --base-url https://api.example.com/v1
+```
+
+> ⚠️ Restart any running `ethan serve` / desktop app / `ethan web` after changing provider or model config — the server caches config in memory and only reloads on restart.
+
+### Run
+
+```bash
+# Interactive REPL
+ethan
+
+# Launch Web UI and open in browser
+ethan web
+# (Supports custom port via `--port 8900` or direct URL via `--url`)
+
+# Manage Web UI login token
+ethan web token
+ethan web token --rotate
+
+# Single-turn query
+ethan -p "What's the weather in Tokyo?"
+
+# Specify model
+ethan -m claude-sonnet-4-6
+
+# Resume last session
+ethan -r last
+
+# Start HTTP API server (needed for Web UI)
+ethan serve
+```
+
+### Web UI (dev mode)
+
+```bash
+cd web
+npm install
+npm run dev   # http://localhost:3000 (dev mode, API still on port 8900)
+```
+
+### Android App
+
+Native mobile client in `app/android/`. Requires Android SDK 35 and JDK 17+.
+
+```bash
+cd app/android
+./gradlew assembleDebug
+# APK: app/build/outputs/apk/debug/app-debug.apk
+```
+
+On first launch, configure the server URL (e.g. `http://<your-nas>:8900`) and Access Token (`network.auth_token` in `~/.ethan/config.yaml`). See [app/android/PRD.md](./app/android/PRD.md) for the full feature list.
+
+### macOS auto-start (launchd)
+
+```bash
+./deploy/install.sh
+```
 
 ---
 
@@ -504,19 +348,14 @@ ethan/
 │   ├── result_compressor.py   # Auto-summarize long tool output
 │   └── builtin/
 │       ├── shell.py           # Execute shell commands
-│       ├── web_search.py      # DuckDuckGo / Tavily / SearXNG search
+│       ├── web_search.py      # DuckDuckGo search
 │       ├── web.py             # Fetch & extract web page text
 │       ├── file.py            # File read/write/list
 │       ├── memory_write.py    # Proactive fact write
 │       ├── procedure_write.py # Proactive procedure write
 │       ├── profile_update.py  # Update user profile
 │       ├── skill_create.py    # Create skill mid-conversation
-│       ├── chart.py           # Interactive Chart.js charts (MCP Apps)
-│       ├── ui_card.py         # Structured A2UI cards
-│       ├── acp.py             # Delegate to Claude Code / Codex / OpenCode
-│       ├── browser.py         # Real Chrome control
-│       ├── computer_use.py    # macOS desktop control
-│       └── lark_tools.py     # Lark CLI wrappers (calendar / chat / send)
+│       └── lark_tools.py      # Lark CLI wrappers (calendar / chat messages / message send)
 ├── scheduler/
 │   └── cron.py                # APScheduler with SQLite persistence
 └── interface/
@@ -545,13 +384,11 @@ Extraction runs every 5 turns on the main chat model; in-session compression is 
 
 Agent proactively writes to all layers mid-conversation via `memory_write`, `procedure_write`, and `profile_update` tools — no waiting for the next compression cycle.
 
-See [docs/memory.md](docs/memory.md) for the full architecture.
-
 ---
 
 ## Skills
 
-Skills are Markdown files loaded from `~/.ethan/skills/`. On first run, all skills in [`ethan/defaults/skills/`](./ethan/defaults/skills/) are auto-copied there from the package; upgrades sync `SKILL.md` and `references/` (your own files are never touched).
+Skills are Markdown files loaded from `~/.ethan/skills/`. On first run, default skills (channels, deepwiki, lark-im, lark-shared, skills-manager, use-browser, agent-browser, dev-browser) are automatically copied there from the package.
 
 Both directory format (`<name>/SKILL.md` + `references/`) and legacy single-file `.md` format are supported. When a directory-format skill is matched, its `references/*.md` filenames plus a one-line summary are listed in the injected context so the model knows which detail docs exist — use `skill_read(name=..., file="references/<name>.md")` to pull the full content on demand (pull-based, not bulk-injected).
 
@@ -563,8 +400,6 @@ description: Pre-deployment checklist
 fast_path: true       # route to fast track when triggered
 channels:             # empty = all channels; list = restrict
   - web
-modes:                # empty = all modes; list = restrict to specific modes
-  - 法律
 version: "1.0"
 ---
 
@@ -574,11 +409,9 @@ Steps before deploying:
 3. ...
 ```
 
-When a user message matches a skill's `trigger`, the skill content is injected into the system prompt. See the [Built-in Skills](#built-in-skills) table above for everything that ships in the box.
+When a user message matches a skill's `trigger`, the skill content is injected into the system prompt. Built-in skills include `channels`, `lark-im`, and `home-assistant`.
 
 Skills accumulate hit stats and user corrections. When corrections reach a threshold (default: 2), the Heartbeat job merges them into the skill file using a cheap model.
-
-Install third-party skills with `ethan skill add <name>` (e.g. `ethan skill add legal`).
 
 ---
 
@@ -605,33 +438,7 @@ Register it in `cli.py` and the LLM will automatically use it when relevant.
 
 > **`no_compress`**: tool output over 4000 chars is auto-summarized by a cheap model before reaching the main model. Leave it off when the output is prose to *read* (web pages, logs). Turn it on when the output contains data the model must pass back *verbatim* — IDs, refs, paths, structured JSON — otherwise the summary loses those tokens and the model can't act on the result.
 
-### Built-in tools
-
-| Tool | Description |
-|------|-------------|
-| `shell` | Execute shell commands |
-| `web_search` | DuckDuckGo (default) / Tavily / self-hosted SearXNG |
-| `web` | Fetch and extract web page text |
-| `file` | File read / write / list |
-| `find_tools` | `rg` (ripgrep) and `fd` for code / file search |
-| `knowledge` | Local markdown KB + sqlite-vec semantic search |
-| `schedule` | Cron / interval job management |
-| `memory_write` | Proactive fact write (candidate→admission pipeline) |
-| `procedure_write` | Proactive procedure write |
-| `profile_update` | Update user profile |
-| `skill_create` / `skill_read` | Create / read skills mid-conversation |
-| `install_skill` | Install third-party skill on demand |
-| `secrets` | Read secret values from `~/.ethan/.secrets/` |
-| `config` | Read / edit runtime config |
-| `acp` | Delegate to Claude Code / Codex / OpenCode |
-| `browser` | Real Chrome control (`browser_session` / `browser_tab` / `browser_page`) |
-| `computer_use` | macOS desktop control via cua-driver |
-| `ui_card` | Structured A2UI cards |
-| `chart` | Interactive Chart.js charts (MCP Apps / SEP-1865) |
-| `image_search` | Image search |
-| `lark_tools` | Lark CLI wrappers (calendar / chat / messages) |
-| `background_task` | Kick off async long-running tasks |
-| `weather` | Weather lookup |
+Built-in tools also include `ui_card`, which renders structured info as cards instead of plain text. High-frequency types (comparison / ranking / stats / timeline) use fixed backend templates — the model just fills in typed data, so styling stays clean and consistent; free-form cards can still be hand-authored. Rendering is channel-aware over the same structured `card` data: the web renders [A2UI](https://a2ui.org/) via `@a2ui/react`, the REPL degrades to text, and Feishu/Lark renders native interactive cards (an incremental nicety on top of the base text/post + streaming-card output). Format details live in the on-demand `ui-card` skill, so the system prompt stays lean.
 
 ### Interactive Charts (MCP Apps / SEP-1865)
 
@@ -655,17 +462,12 @@ ethan -r last                      Resume last session
 ethan serve                        Start HTTP API server (foreground)
 ethan serve stop                   Stop background serve process
 ethan serve restart                Restart background serve process
-ethan web                          Open Web UI in browser
-ethan web token                    Show / rotate Web login token
 
 ethan model list|add|remove|default
-ethan provider list|set|presets
+ethan provider list|set
 ethan session list|show|delete
 ethan skill list|show|add|create
 ethan schedule list|remove|pause|resume
-ethan router pull|status           # optional semantic router
-ethan server install              # install cua-driver / launchd services
-ethan code "query"                # ACP delegation to coding agents
 ```
 
 ---
@@ -690,7 +492,6 @@ GET  /channels                  # Channel list
 GET  /knowledge/search          # Semantic search
 GET  /ui-resources              # MCP Apps UI resources (SEP-1865): list
 GET  /ui-resources/read?uri=    # MCP Apps UI resource: read HTML + _meta
-POST /v1/chat/completions       # OpenAI-compatible API (per-user API key)
 ```
 
 ---
@@ -718,17 +519,6 @@ models:
     provider: openai_compat
     alias: [gpt]
 
-lark:
-  app_id: "cli_xxxxxxxxxxxxxxxx"
-  app_secret: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-
-users:
-  - id: admin
-    name: Admin
-    web_token: admin_pass
-    api_keys: [sk-ethan-admin-key]
-    is_admin: true
-
 network:
   proxy: http://127.0.0.1:7890           # global proxy
 
@@ -748,13 +538,13 @@ defaults:
       - "home assistant"
 ```
 
-Environment variables in `.env` override config values (useful for secrets). See [`deploy/.env.example`](./deploy/.env.example) for the Docker template.
+Environment variables in `.env` override config values (useful for secrets).
 
 ### Config directory layout
 
 ```
 ~/.ethan/
-├── config.yaml          # Main config (providers, models, routing, lark, users)
+├── config.yaml          # Main config (providers, models, routing)
 ├── system/
 │   ├── identity.md      # Agent identity (name, role)
 │   ├── soul.md          # Behavioral principles
@@ -763,10 +553,9 @@ Environment variables in `.env` override config values (useful for secrets). See
 │   ├── memory.db        # Structured memories + evidence + insights + vector index
 │   ├── playbook.json  # Behavioral rules
 │   └── user_profile.md  # User profile (narrative)
-├── skills/              # User-installed + auto-copied default skills
+├── skills/              # User-defined skills
 │   └── <name>/
 │       └── SKILL.md
-├── .secrets/             # Secret files for skills (e.g. Feishu app creds)
 └── sessions.db          # Session history (SQLite)
 ```
 
@@ -795,27 +584,23 @@ Environment variables in `.env` override config values (useful for secrets). See
 - [x] `fast_path` opt-in, hit stats, correction collection, auto-update (Updater)
 - [x] Session-end background Skill generation (Hermes-style)
 - [x] Optional semantic router (BGE INT8 + LR head, macro F1 0.851) for recall beyond keywords; silent keyword fallback. The same `[embedding]` optional dependency also powers semantic dedup in memory.db
-- [x] 40+ built-in skills shipping in the box (see [Built-in Skills](#built-in-skills))
+- [x] Built-in skills: home-assistant, lark-im, channels, deepwiki
 
 **Tools**
 - [x] shell, web_search, web_fetch, file_read/write/list, rg, fd
-- [x] Knowledge base (sqlite-vec semantic search), scheduler tools, ACP → Claude Code / Codex / OpenCode
-- [x] `ui_card` (A2UI structured cards), `generate_chart` (interactive Chart.js via MCP Apps)
-- [x] Browser control (real Chrome via extension) + desktop control (macOS via cua-driver)
+- [x] Knowledge base (sqlite-vec semantic search), scheduler tools, ACP → Claude Code
 
 **Scheduler**
-- [x] cron + interval, SQLite persistence, auto-restore on restart
+- [x] Cron + interval, SQLite persistence, auto-restore on restart
 - [x] `heartbeat.md`: natural-language periodic tasks executed automatically
-- [x] Background tasks with per-chat async execution
 
 **Channels & API**
 - [x] Web UI (Next.js): chat timeline, memory, skills, schedule, knowledge, settings
-- [x] Desktop App (Tauri): macOS + Windows, native window with embedded Web UI
 - [x] Android App (Kotlin/Compose): mobile client with chat SSE, sessions, memory, settings
-- [x] Feishu/Lark WebSocket (no public IP required) + multi-event subscription + card action callbacks
-- [x] OpenAI-compatible Completions API (`/v1/chat/completions`) + per-user API key management
+- [x] Tool call timeline (collapsible, with icons + duration)
+- [x] Feishu/Lark WebSocket (no public IP required)
+- [x] OpenAI-compatible Completions API (`/v1/chat/completions`) + API key management
 - [x] Docker deployment + macOS launchd auto-start
-- [x] Multi-user isolation (memory / skills / knowledge per user)
 
 ---
 
@@ -832,9 +617,9 @@ Environment variables in `.env` override config values (useful for secrets). See
 - [ ] **Mobile UI**: bottom tab nav, touch gestures, keyboard inset handling
 
 **Coding Agent Integration**
-- [x] **ACP multi-turn optimization**: `delegate_coding` resumes coding-agent sessions per (agent × working_dir). All three backends (Claude Code / OpenCode / Codex) run as JSON event streams with session resume, parsed into collapsible sub-steps in the Web UI tool timeline with highlighted final result.
-- [x] **Mirror sessions**: each `delegate()` becomes a real Ethan session recording the dispatched query + coding-agent reply + steps
-- [x] **Immersive tool modes**: switch the conversation mode to Codex / Claude Code / OpenCode
+- [x] **ACP multi-turn optimization**: `delegate_coding` resumes coding-agent sessions per (agent × working_dir). All three backends (Claude Code / OpenCode / Codex) run as JSON event streams with session resume, parsed into collapsible sub-steps in the Web UI tool timeline with highlighted final result. Codex reuses Ethan's cliproxy provider; timeouts terminate gracefully and clear the session to avoid resuming a stuck thread
+- [x] **Mirror sessions**: each `delegate()` becomes a real Ethan session (`source` = the actual tool: codex/claude/opencode) recording the dispatched query + coding-agent reply + steps, registered as a RunManager run so the delegated conversation can be watched live via SSE
+- [x] **Immersive tool modes**: switch the conversation mode to Codex / Claude Code / OpenCode; once switched, every message in that session continues the same tool (same tool session, per-session working dir). Supports both ad-hoc delegation and immersive continuous conversation. Messaging a mirror session also auto-resumes the matching tool
 - [ ] **MCP client**: connect external MCP servers, auto-register tools
 
 **Long-term**
@@ -849,18 +634,10 @@ Environment variables in `.env` override config values (useful for secrets). See
 Full documentation is available at **[llm011.github.io/ethan-agent](https://llm011.github.io/ethan-agent/)** — the same docs site you see in Ethan's built-in "Docs" tab.
 
 Key docs:
-- [Installation](docs/installation.md) — pip / Docker / source / desktop app
 - [Memory System](docs/memory.md) — five-layer architecture, dream consolidation, fact_sync
-- [Agent Loop](docs/agent-loop.md) — three-track routing, memory injection
+- [Agent Loop](docs/agent-loop.md) — dual-track routing, memory injection
 - [Architecture Overview](docs/architecture.md) — system components, data flow
-- [Interface](docs/interface.md) — CLI / REPL / HTTP API / Web UI / Desktop / Feishu channels
 - [Heartbeat](docs/heartbeat.md) — background maintenance, midnight loop
-- [Tools](docs/tools.md) — built-in tools, `no_compress`, `ui_card`, MCP Apps charts
-- [ACP Integration](docs/acp.md) — Claude Code / OpenCode / Codex delegation
-- [Browser Control](docs/browser/overview.md) — real Chrome automation
-- [Web Search](docs/web-search.md) — DuckDuckGo / Tavily / SearXNG
-- [Modes](docs/modes.md) — companion / legal / coding agent modes
-- [Legal Mode](docs/legal-mode.md) — `legal-assistant` skill details
 
 All source markdown lives in [`docs/`](./docs/); changes to `main` auto-deploy via GitHub Actions.
 

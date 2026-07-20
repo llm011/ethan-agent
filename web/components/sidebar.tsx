@@ -20,7 +20,7 @@ import {
   renameSession,
   regenSessionTitle,
   createSession,
-  fetchVersion,
+  fetchHealth,
   fetchModes,
   type ModeEntry,
 } from "@/lib/api";
@@ -61,7 +61,7 @@ export function Sidebar() {
   const [heartbeatExpanded, setHeartbeatExpanded] = useState(false);
   const [schedules, setSchedules] = useState<any[]>([]);
   const [runningTaskCount, setRunningTaskCount] = useState(0);
-  const [version, setVersion] = useState<string | null>(null);
+  const [health, setHealth] = useState<{version: string | null; agent_name: string | null}>({version: null, agent_name: null});
   const [modes, setModes] = useState<ModeEntry[]>([]);
   const [lastSeenSchedule, setLastSeenSchedule] = useState(() => {
     if (typeof window !== "undefined") {
@@ -120,9 +120,9 @@ export function Sidebar() {
     fetchSchedules().then(setSchedules).catch(() => {});
   }, [pathname]);
 
-  // 获取版本号（挂载时一次）
+  // 获取版本号 + agent_name（挂载时一次）
   useEffect(() => {
-    fetchVersion().then(setVersion);
+    fetchHealth().then(setHealth);
   }, []);
 
   // 获取对话模式表（挂载时一次），用于左栏会话的模式标识
@@ -346,14 +346,14 @@ export function Sidebar() {
           className="text-lg font-semibold flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity min-w-0 flex-1"
           onClick={() => { navigate("/chat"); if (window.innerWidth < 768) setSidebarOpen(false); }}
         >
-          <Image src={`${process.env.NEXT_PUBLIC_BASE_PATH || ''}/logo-sidebar.png`} alt="Ethan Agent" width={28} height={28} className="rounded-full shrink-0" />
-          <span className="whitespace-nowrap">Ethan Agent</span>
-          {version && (
+          <Image src={`${process.env.NEXT_PUBLIC_BASE_PATH || ''}/logo-sidebar.png`} alt={health.agent_name || "Ethan"} width={28} height={28} className="rounded-full shrink-0" />
+          <span className="whitespace-nowrap">{health.agent_name || "Ethan"}</span>
+          {health.version && (
             <span
               className="text-[9px] font-mono text-muted-foreground/60 bg-muted border border-border/60 rounded-full px-1.5 py-0.5 leading-none shrink-0"
-              title={`ethan-agent v${version}`}
+              title={`ethan-agent v${health.version}`}
             >
-              v{version}
+              v{health.version}
             </span>
           )}
         </h1>

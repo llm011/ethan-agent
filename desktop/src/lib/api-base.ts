@@ -21,7 +21,8 @@ export function setApiUrl(url: string): void {
 /**
  * @deprecated 桌面端使用 getApiUrl() 获取实时 URL。
  * 此处保留只是为了兼容 web 端迁移过来的代码中 `import { API_URL } from "./api-base"`。
- * 实际所有 `${API_URL}` 模板字符串都已在迁移时被替换为 `${getApiUrl()}`。
+ * 注意：所有 fetch 调用必须使用 `${getApiUrl()}` 而非 `${API_URL}`，否则用户在
+ * Settings 中修改的 API URL 不会生效（auth/models/modes 等接口会走默认端口 8900）。
  */
 export const API_URL = DEFAULT_API_URL;
 
@@ -55,7 +56,7 @@ export function headers(): HeadersInit {
 }
 
 export async function verifyAuth(token: string): Promise<boolean> {
-  const res = await fetch(`${API_URL}/auth`, {
+  const res = await fetch(`${getApiUrl()}/auth`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ token }),
@@ -72,7 +73,7 @@ export interface ModelEntry {
 }
 
 export async function fetchModels(): Promise<ModelEntry[]> {
-  const res = await fetch(`${API_URL}/models`, { headers: headers() });
+  const res = await fetch(`${getApiUrl()}/models`, { headers: headers() });
   if (!res.ok) throw new Error("Failed to fetch models");
   const data = await res.json();
   return data.models;
@@ -87,14 +88,14 @@ export interface ModeEntry {
 }
 
 export async function fetchModes(): Promise<ModeEntry[]> {
-  const res = await fetch(`${API_URL}/modes`, { headers: headers() });
+  const res = await fetch(`${getApiUrl()}/modes`, { headers: headers() });
   if (!res.ok) throw new Error("Failed to fetch modes");
   const data = await res.json();
   return data.modes;
 }
 
 export async function addModel(m: ModelEntry): Promise<{ ok: boolean; error?: string }> {
-  const res = await fetch(`${API_URL}/models`, {
+  const res = await fetch(`${getApiUrl()}/models`, {
     method: "POST", headers: { ...headers(), "Content-Type": "application/json" },
     body: JSON.stringify(m),
   });
@@ -105,7 +106,7 @@ export async function addModel(m: ModelEntry): Promise<{ ok: boolean; error?: st
 }
 
 export async function deleteModel(provider: string, modelId: string): Promise<{ ok: boolean; error?: string }> {
-  const res = await fetch(`${API_URL}/models/${encodeURIComponent(provider)}/${encodeURIComponent(modelId)}`, {
+  const res = await fetch(`${getApiUrl()}/models/${encodeURIComponent(provider)}/${encodeURIComponent(modelId)}`, {
     method: "DELETE", headers: headers(),
   });
   const data = await res.json();
@@ -114,7 +115,7 @@ export async function deleteModel(provider: string, modelId: string): Promise<{ 
 }
 
 export async function discoverModels(provider: string): Promise<{ ok: boolean; models?: (ModelEntry & { exists?: boolean })[]; error?: string; url?: string }> {
-  const res = await fetch(`${API_URL}/models/discover`, {
+  const res = await fetch(`${getApiUrl()}/models/discover`, {
     method: "POST", headers: { ...headers(), "Content-Type": "application/json" },
     body: JSON.stringify({ provider }),
   });
@@ -122,7 +123,7 @@ export async function discoverModels(provider: string): Promise<{ ok: boolean; m
 }
 
 export async function respondConsent(requestId: string, allowed: boolean): Promise<{ ok: boolean }> {
-  const res = await fetch(`${API_URL}/consent/${encodeURIComponent(requestId)}`, {
+  const res = await fetch(`${getApiUrl()}/consent/${encodeURIComponent(requestId)}`, {
     method: "POST",
     headers: { ...headers(), "Content-Type": "application/json" },
     body: JSON.stringify({ allowed }),
@@ -132,7 +133,7 @@ export async function respondConsent(requestId: string, allowed: boolean): Promi
 
 /** Tool UI resources: 按 ui:// URI 获取工具 UI 模板 HTML（前端缓存，模板只拉一次）。 */
 export async function fetchUiResource(uri: string): Promise<{ text: string; _meta?: unknown }> {
-  const res = await fetch(`${API_URL}/ui-resources/read?uri=${encodeURIComponent(uri)}`, {
+  const res = await fetch(`${getApiUrl()}/ui-resources/read?uri=${encodeURIComponent(uri)}`, {
     headers: headers(),
   });
   if (!res.ok) throw new Error(`Failed to fetch UI resource: ${uri}`);
@@ -142,7 +143,7 @@ export async function fetchUiResource(uri: string): Promise<{ text: string; _met
 /** 获取后端版本号（与 PyPI 版本一致，来自 ethan.__version__） */
 export async function fetchVersion(): Promise<string | null> {
   try {
-    const res = await fetch(`${API_URL}/health`);
+    const res = await fetch(`${getApiUrl()}/health`);
     const data = await res.json();
     return data.version ?? null;
   } catch {

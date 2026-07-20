@@ -11,14 +11,15 @@ pip3 install ethan-agent
 设置 API Key：
 
 ```bash
-# Anthropic Claude
-ethan provider set anthropic --api-key sk-ant-xxx
+# OpenAI 兼容 API（默认推荐：OpenAI / Gemini / OpenRouter / Ollama 等）
+ethan provider set openai_compat --api-key sk-xxx --base-url https://api.openai.com/v1
+ethan model default gpt-5.4   # 或 gemini-2.5-flash 等
 
-# 或 OpenAI 兼容 API（Gemini / OpenRouter / Ollama 等）
-ethan provider set openai_compat --api-key sk-xxx --base-url https://api.example.com/v1
+# 或 Anthropic Claude
+ethan provider set anthropic --api-key sk-ant-xxx
 ```
 
-启动：
+启动（若未配置 provider，会进入交互式向导，依次填 base_url / api_key / 默认模型）：
 
 ```bash
 ethan

@@ -65,7 +65,15 @@ def _is_local(request: Request) -> bool:
 
 @router.get("/health")
 async def health():
-    return {"status": "ok", "version": __version__}
+    # 前端用于存活检测 + 获取版本号 + agent_name（左上角标题）。
+    # 无需 auth：前端在登录前也要能检测服务是否存活。
+    from ethan.core.config import get_config
+    cfg = get_config()
+    return {
+        "status": "ok",
+        "version": __version__,
+        "agent_name": cfg.defaults.agent_name or "Ethan",
+    }
 
 
 @router.get("/poll")
