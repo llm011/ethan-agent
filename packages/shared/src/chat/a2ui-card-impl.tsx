@@ -2,7 +2,7 @@
 // A2UI 卡片渲染：把 ui_card 工具产出的 A2UI v0.9.1 envelope 用官方 @a2ui/react 渲染。
 // 仅客户端运行（用 next/dynamic ssr:false 加载本组件，见 a2ui-card.tsx 包装器）。
 
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { MessageProcessor, type SurfaceModel } from "@a2ui/web_core/v0_9";
 import {
   basicCatalog,
@@ -22,16 +22,22 @@ export default function A2uiCardImpl({ surfaces: envelopes, onAction }: A2uiCard
   const [processor, setProcessor] = useState<MessageProcessor<ReactComponentImplementation> | null>(null);
   const [surfaceIds, setSurfaceIds] = useState<string[]>([]);
 
+  // 保持对最新 onAction 的引用：useEffect 依赖项为 [envelopes]，若直接闭包捕获 onAction，
+  // 父组件传入新函数引用时 processor 仍会调用旧闭包。通过 ref 始终拿到最新值。
+  const onActionRef = useRef(onAction);
+  onActionRef.current = onAction;
+
   useEffect(() => {
     const proc = new MessageProcessor<ReactComponentImplementation>(
       [shadcnCatalog],
       async (action) => {
         // 按钮等交互：把 action 转成一句自然语言，作为新一轮用户消息发回 agent。
-        if (!onAction) return;
+        const fn = onActionRef.current;
+        if (!fn) return;
         const ctx = action.context && Object.keys(action.context).length
           ? ` ${JSON.stringify(action.context)}`
           : "";
-        onAction(`[卡片操作] ${action.name}${ctx}`);
+        fn(`[卡片操作] ${action.name}${ctx}`);
       },
     );
     try {

@@ -24,18 +24,27 @@ import { readCache, writeCache, onBust, deleteCache } from "./local-cache";
 /* 浅比较两个值是否相等（用于避免后台 refetch 返回相同数据时触发 re-render）。
  * models/modes/settings 这些数据内容通常不变，但每次 fetch 返回的是新对象引用，
  * 不做比较会导致每次后台 refetch 都触发 4 次 setData → 4 次 ChatView re-render。
+ *
+ * 对数组元素和对象属性值补充一层属性比较（depth=2）：
+ * 准静态列表（ModelEntry[] 等）每次 JSON 解析出来的元素都是新对象引用，
+ * 仅做 aa[i] !== bb[i] 必然判不等，无法屏蔽无意义的 re-render。
  */
 function shallowEqual(a: unknown, b: unknown): boolean {
+  return equalAtDepth(a, b, 2);
+}
+
+function equalAtDepth(a: unknown, b: unknown, depth: number): boolean {
   if (a === b) return true;
   if (a == null || b == null) return false;
   if (typeof a !== "object" || typeof b !== "object") return false;
   if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (depth <= 0) return true; // 超过比较深度，假定相等（避免无限递归）
   if (Array.isArray(a)) {
     const aa = a as unknown[];
     const bb = b as unknown[];
     if (aa.length !== bb.length) return false;
     for (let i = 0; i < aa.length; i++) {
-      if (aa[i] !== bb[i]) return false;
+      if (!equalAtDepth(aa[i], bb[i], depth - 1)) return false;
     }
     return true;
   }
@@ -45,7 +54,7 @@ function shallowEqual(a: unknown, b: unknown): boolean {
   const keysB = Object.keys(objB);
   if (keysA.length !== keysB.length) return false;
   for (const k of keysA) {
-    if (objA[k] !== objB[k]) return false;
+    if (!equalAtDepth(objA[k], objB[k], depth - 1)) return false;
   }
   return true;
 }

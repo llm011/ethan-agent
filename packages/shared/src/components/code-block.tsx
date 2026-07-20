@@ -1,5 +1,5 @@
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { Check, Copy, WrapText } from "lucide-react";
@@ -36,17 +36,19 @@ export function CodeBlock({ language, code }: CodeBlockProps) {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const toggleWrap = () => {
-    const next = !wrap;
-    setWrap(next);
-    // Directly patch the <pre> element — avoids re-rendering SyntaxHighlighter
+  const toggleWrap = () => setWrap((w) => !w);
+
+  // 通过 useEffect 同步 DOM 样式：保留"避免 SyntaxHighlighter 重渲染"的性能优势
+  // （不把 wrap 作为 props 传给 SyntaxHighlighter），同时保证组件重新挂载或
+  // state 变化后 DOM 与 state 一致（原直接操作 DOM 在重新挂载时会出现 state
+  // 与 DOM 状态不同步）。
+  useEffect(() => {
     const pre = containerRef.current?.querySelector("pre");
-    if (pre) {
-      pre.style.whiteSpace = next ? "pre-wrap" : "pre";
-      pre.style.wordBreak = next ? "break-all" : "normal";
-      pre.style.overflowX = next ? "hidden" : "auto";
-    }
-  };
+    if (!pre) return;
+    pre.style.whiteSpace = wrap ? "pre-wrap" : "pre";
+    pre.style.wordBreak = wrap ? "break-all" : "normal";
+    pre.style.overflowX = wrap ? "hidden" : "auto";
+  }, [wrap]);
 
   // Memoised so the object reference stays stable across parent re-renders
   const customStyle = useMemo(() => BASE_STYLE, []);
