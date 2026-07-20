@@ -22,7 +22,7 @@ class Session:
     updated_at: float
     messages: list[Message] = field(default_factory=list)
     snippet: str | None = None
-    source: str = "web"  # web | repl | lark | custom
+    source: str = "web"  # web | repl | lark | cli | desktop | custom
     mode: str = ""  # "" = 工作助手; 规范英文 key，如 "legal"/"companion"（见 core/modes.py）
 
 
@@ -33,16 +33,45 @@ def _generate_id() -> str:
 
 
 def _auto_title(messages: list[Message]) -> str:
-    """从第一条用户消息提取标题。"""
+    """从第一条用户消息提取占位标题（已清洗 markdown / 命令前缀）。"""
+    import re
     for m in messages:
         if m.role == "user" and m.content:
-            title = m.content.strip().replace("\n", " ")
-            return title[:40] + ("…" if len(title) > 40 else "")
+            t = m.content.strip()
+            # 去掉 markdown 标记（**粗体**、# 标题、`代码`、_斜体_、~删除~）
+            t = re.sub(r'[*#`_~]', '', t)
+            # 去掉命令前缀（/help xxx → xxx；/review url 保留 url 由 _review_title 处理）
+            t = re.sub(r'^/(?:help|new|model|token|btw|stop)\s+', '', t)
+            t = t.replace("\n", " ").strip()
+            if not t:
+                t = m.content.strip().replace("\n", " ")
+            return t[:40] + ("…" if len(t) > 40 else "")
     return "新对话"
 
 
-# 首条问题少于该字数视为「太短」，推迟到第 2 轮再生成智能标题
-SHORT_QUESTION_CHARS = 7
+def _count_content(text: str) -> int:
+    """中英文混合的内容量度：中文按字数，英文按单词数，取两者之和。
+
+    例：
+      "你好" → 2
+      "hello world" → 2
+      "你好 hello world" → 4
+      "hi" → 1
+    """
+    import re
+    if not text:
+        return 0
+    # 中日韩字符（含全角标点）每个算 1
+    cjk = len(re.findall(r'[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]', text))
+    # 去掉 CJK 后按空白拆分英文单词
+    non_cjk = re.sub(r'[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]', ' ', text)
+    words = [w for w in non_cjk.split() if w and any(c.isalnum() for c in w)]
+    return cjk + len(words)
+
+
+# 首条问题内容量少于该值视为「太短」，推迟到第 2 轮再生成智能标题
+# （中文按字、英文按单词，混合求和）
+SHORT_QUESTION_CHARS = 3
 
 
 async def _generate_smart_title(messages: list[Message], retries: int = 3) -> str | None:
@@ -112,10 +141,9 @@ def _review_title(text: str) -> str | None:
 async def decide_title(messages: list[Message], current_title: str = "") -> str | None:
     """统一的标题策略，返回应设置的标题；返回 None 表示本轮不改标题。
 
-    - 第 1 轮：首条问题 ≥7 字直接生成智能标题；否则先用原文占位。
-    - 第 2 轮：仅当首条问题太短（之前是占位）时补生成智能标题。
-    - 第 3、6、9… 轮：仍是占位标题（lite 之前没成功）时再尝试一次，靠 _generate_smart_title
-      的内部重试 + 跨轮重试自愈；已有智能标题则跳过，不浪费 lite 调用。
+    - 第 1 轮：首条问题内容量 ≥3（中文按字、英文按单词）直接生成智能标题；否则先用清洗后的原文占位。
+    - 第 2 轮：仅当首条问题太短（之前是占位）时补生成智能标题；失败则放弃，保留占位。
+    - 第 3 轮起：不再自动重试，避免用户突然看到标题变化。用户可用 🔄 按钮手动重试。
     """
     # 保护特殊标题（定时/后台/心跳等），不被自动标题覆盖
     if any(current_title.startswith(p) for p in _PROTECTED_PREFIXES):
@@ -129,21 +157,19 @@ async def decide_title(messages: list[Message], current_title: str = "") -> str 
         review = _review_title(first)
         if review:
             return review
-        if len(first) >= SHORT_QUESTION_CHARS:
+        if _count_content(first) >= SHORT_QUESTION_CHARS:
             return await _generate_smart_title(messages) or _auto_title(messages)
         return _auto_title(messages)
     if n == 2:
         first = user_msgs[0].content.strip()
-        if len(first) < SHORT_QUESTION_CHARS:
+        if _count_content(first) < SHORT_QUESTION_CHARS:
             return await _generate_smart_title(messages) or _auto_title(messages)
         # 首条够长但 round 1 智能标题失败（或被 API 路径用首条消息当了初始标题）：
         # 仍是占位/截断标题时再试一次智能生成；已有好标题则跳过
         if any(current_title == p for p in ("", "新对话")) or current_title == _auto_title(messages):
             return await _generate_smart_title(messages) or _auto_title(messages)
         return None
-    # 第 3 轮起，每 3 轮兜底重试；当且仅当标题仍是占位（新对话/截断首句）
-    if n >= 3 and n % 3 == 0 and current_title in ("", "新对话", _auto_title(messages)):
-        return await _generate_smart_title(messages) or _auto_title(messages)
+    # 第 3 轮起不再自动重试：占位标题已足够可读，用户可手动点 🔄 触发 regen_title
     return None
 
 
