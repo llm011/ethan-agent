@@ -120,6 +120,7 @@ export interface TierTool {
   name: string;
   description: string;
   fast_path: boolean;
+  in_full_base: boolean;
   side_effect: boolean;
   no_compress: boolean;
 }
@@ -135,6 +136,8 @@ export interface ToolTiers {
   tiers: ToolTier[];
   fast_count: number;
   fast_rule_tool_count: number;
+  full_count: number;
+  longtail_count: number;
   total_count: number;
 }
 

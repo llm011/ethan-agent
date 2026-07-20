@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { fetchToolTiers, ToolTiers, TierTool, ToolTier } from "@/lib/api";
+import { fetchToolTiers, ToolTiers, TierTool } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
@@ -30,7 +30,8 @@ function fmtChars(n: number): string {
   return n >= 1000 ? `~${Math.round(n / 100) / 10}k` : `${n}`;
 }
 
-function ComparisonTable({ tiers }: { tiers: ToolTier[] }) {
+function ComparisonTable({ data }: { data: ToolTiers }) {
+  const { tiers, full_count, longtail_count } = data;
   // Full 档作为工具全集
   const allTools = tiers.find((t) => t.key === "full")?.tools ?? [];
 
@@ -59,6 +60,14 @@ function ComparisonTable({ tiers }: { tiers: ToolTier[] }) {
               </th>
               {tiers.map((tier) => {
                 const meta = TIER_META[tier.key];
+                // Fast: 直接显示基础工具数；Full: 显示「初始广播 N + 长尾 M」
+                const isFull = tier.key === "full";
+                const initialCount = isFull ? full_count : tier.tools.length;
+                const longtail = isFull ? longtail_count : 0;
+                // 字符统计：Full 只统计初始广播集（长尾不广播，不耗 token）
+                const charsTools = isFull
+                  ? tier.tools.filter((t) => t.in_full_base)
+                  : tier.tools;
                 return (
                   <th key={tier.key} className="py-3 px-4 text-center w-28">
                     <Tooltip>
@@ -68,10 +77,14 @@ function ComparisonTable({ tiers }: { tiers: ToolTier[] }) {
                             {tier.label}
                           </div>
                           <div className="text-[10px] text-muted-foreground font-normal">
-                            {tier.tools.length} 个工具
+                            {isFull ? (
+                              <span>{initialCount} 初始{longtail > 0 ? ` + ${longtail} 长尾` : ""}</span>
+                            ) : (
+                              <span>{initialCount} 个工具</span>
+                            )}
                           </div>
                           <div className="text-[10px] text-muted-foreground/50 font-normal">
-                            {fmtChars(calcChars(tier.tools))} 字符
+                            {fmtChars(calcChars(charsTools))} 字符
                           </div>
                       </TooltipTrigger>
                       <TooltipContent side="top" className="max-w-56 text-center">
@@ -130,10 +143,23 @@ function ComparisonTable({ tiers }: { tiers: ToolTier[] }) {
                   {tiers.map((tier) => {
                     const has = memberSets[tier.key]?.has(tool.name);
                     const meta = TIER_META[tier.key];
+                    // Full 列：长尾工具（不在初始广播集）显示「需激活」，区别于 Fast 列的 ✗
+                    const isFullLongtail = tier.key === "full" && has && !tool.in_full_base;
                     return (
                       <td key={tier.key} className="py-2 px-4 text-center">
                         {has ? (
-                          <span className={`text-sm font-bold ${meta.check}`}>✓</span>
+                          isFullLongtail ? (
+                            <Tooltip>
+                              <TooltipTrigger render={<span className="text-[10px] text-muted-foreground/60 cursor-default" />}>
+                                激活
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="max-w-56">
+                                长尾工具：模型调 find_tools 后才可见
+                              </TooltipContent>
+                            </Tooltip>
+                          ) : (
+                            <span className={`text-sm font-bold ${meta.check}`}>✓</span>
+                          )
                         ) : (
                           <span className="text-xs text-muted-foreground/20">✗</span>
                         )}
@@ -193,13 +219,16 @@ export function ToolTiersView() {
               对话按规则路由到两档。
               <b className="text-foreground/80">Fast</b> 档仅含基础工具 + 规则额外工具，长尾能力靠{" "}
               <code className="text-xs font-mono">find_tools</code> 激活；
-              <b className="text-foreground/80">Full</b> 档全量可见。
+              <b className="text-foreground/80">Full</b> 档初始广播{" "}
+              <b className="text-foreground/80">{data.full_count}</b> 个核心工具，剩余{" "}
+              <b className="text-foreground/80">{data.longtail_count}</b> 个长尾工具同样靠{" "}
+              <code className="text-xs font-mono">find_tools</code> 激活。
               共注册 <b className="text-foreground/80">{data.total_count}</b> 个工具。
             </p>
             <p className="text-xs text-muted-foreground/50">
               hover 工具名查看说明 · ⚠️ 有副作用 · 🔒 输出不压缩 · 橙色分隔线以上为 Fast 档工具
             </p>
-            <ComparisonTable tiers={data.tiers} />
+            <ComparisonTable data={data} />
           </div>
         )}
       </div>
