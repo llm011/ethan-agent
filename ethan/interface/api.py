@@ -20,6 +20,7 @@ from ethan.interface.routers import (
     completions,
     consent,
     docs,
+    images,
     knowledge,
     logs,
     memory,
@@ -195,6 +196,7 @@ app.include_router(consent.router, prefix="/api")
 app.include_router(annotations.router, prefix="/api")
 app.include_router(background_tasks.router, prefix="/api")
 app.include_router(ui_resources.router, prefix="/api")  # /api/ui-resources — 工具 UI 模板
+app.include_router(images.router, prefix="/api")  # /api/images — image_search 下载的图片
 app.include_router(browser_ws_router)  # /ws/browser, WebSocket, no prefix
 app.include_router(browser_http_router, prefix="/api")  # /api/browser/shot/{name}
 

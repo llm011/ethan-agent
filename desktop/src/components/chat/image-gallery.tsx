@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ZoomIn } from "lucide-react";
 import { Lightbox, type LightboxImage } from "./lightbox";
+import { getApiUrl } from "@/lib/api-base";
 
 // 图片卡片数据结构（image_search 工具产出）
 export interface ImageCard {
@@ -19,15 +20,29 @@ interface ImageGalleryProps {
   cards: ImageCard[];
 }
 
+// 把 card 转成可访问的图片 URL：
+// - 有 local_path（download=true 模式）：转成 /api/images/<filename> 走后端 serve，
+//   避免远程 URL 403/防盗链导致的破图
+// - 无 local_path（download=false 模式）：直接用远程 URL
+function getImageSrc(card: ImageCard): string {
+  if (card.local_path) {
+    const filename = card.local_path.split("/").pop() || "";
+    if (filename) {
+      return `${getApiUrl()}/images/${filename}`;
+    }
+  }
+  return card.url;
+}
+
 // 图片横向滚动画廊：点击图片或 hover 的「放大查看」按钮可打开 Lightbox
-// 注：local_path 是 /tmp/ethan_images/xxx.jpg 这种本地路径，前端无法直接访问，
-// 所以图片源统一用 url（远程 URL）；若存在 local_path 则在卡片上展示「已下载」标签。
+// 有 local_path 时走 /api/images/<filename>（后端 serve 本地文件，无防盗链问题），
+// 否则 fallback 到远程 URL（可能 403，卡片上会显示破图但 layout 不乱）。
 export function ImageGallery({ cards }: ImageGalleryProps) {
   const [open, setOpen] = useState(false);
   const [index, setIndex] = useState(0);
 
   const images: LightboxImage[] = cards.map((c) => ({
-    url: c.url,
+    url: getImageSrc(c),
     title: c.title,
     source: c.source,
   }));
@@ -42,7 +57,7 @@ export function ImageGallery({ cards }: ImageGalleryProps) {
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={card.url}
+              src={getImageSrc(card)}
               alt={card.title || ""}
               className="w-full h-full object-cover cursor-zoom-in"
               onClick={() => {

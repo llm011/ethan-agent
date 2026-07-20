@@ -186,15 +186,35 @@ class ImageSearchTool(BaseTool):
             img_url = item.get("img_src", "") or item.get("url", "")
             if not img_url:
                 continue
+            # SearXNG 图片结果的尺寸在 resolution 字段（字符串如 "1200x800"），
+            # 没有 img_format_src 字段，需要解析 resolution 字符串。
+            width, height = self._parse_resolution(item.get("resolution", ""))
             results.append({
                 "title": (item.get("title", "") or "")[:80],
                 "url": img_url,  # 图片直接 URL
                 "source": item.get("engine", ""),
                 "page_url": item.get("url", ""),
-                "width": item.get("img_format_src", {}).get("width") if isinstance(item.get("img_format_src"), dict) else None,
-                "height": item.get("img_format_src", {}).get("height") if isinstance(item.get("img_format_src"), dict) else None,
+                "width": width,
+                "height": height,
             })
         return results
+
+    @staticmethod
+    def _parse_resolution(resolution) -> tuple[int | None, int | None]:
+        """解析 SearXNG 的 resolution 字段（字符串如 '1200x800'）。
+
+        SearXNG images 分类返回的图片尺寸是 '1200x800' 这种字符串，不是结构化字段。
+        解析失败或字段缺失时返回 (None, None)，前端不显示尺寸。
+        """
+        if not resolution or not isinstance(resolution, str):
+            return None, None
+        try:
+            parts = resolution.lower().split("x")
+            if len(parts) == 2:
+                return int(parts[0]), int(parts[1])
+        except (ValueError, IndexError):
+            pass
+        return None, None
 
     async def _download_images(self, items: list[dict], max_results: int) -> list[dict]:
         """并发下载图片到 /tmp/ethan_images/，返回结构化结果列表。
