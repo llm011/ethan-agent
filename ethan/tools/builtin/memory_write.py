@@ -12,6 +12,21 @@ from ethan.tools.base import BaseTool
 # 注意：召回链路（recall.py）只按 domain 过滤，不依赖 dimension 标签；
 # dimension 只在 admission 的 supersede 判定里用于"同 dimension + 内容发散"，
 # 所以兜底用最粗粒度的"misc"维度，避免和真实维度撞车误触发 supersede。
+#
+# memory_type → dimension 前缀映射：personal_information 的真实前缀是 identity（不是 personal_information），
+# 其余类型同名前缀。用于 agent 传 memory_type 但不传 dimension 时的兜底，保证主动写入路径
+# 与自动提取路径产出相同 dimension 字符串——否则 supersede 判定（existing.dimension == candidate.dimension）
+# 永远配不上，主动写的 identity 记忆会和自动抽取的各存一份、旧值不被替换。
+_TYPE_DIMENSION_PREFIX: dict[str, str] = {
+    "personal_information": "identity",
+    "preference": "preference",
+    "activity": "activity",
+    "decision": "decision",
+    "relationship": "relationship",
+    "methodology": "methodology",
+    "companion": "companion",
+}
+
 _CATEGORY_FALLBACK = {
     "preference": ("preference", "preference.misc"),
     "decision": ("decision", "decision.misc"),
@@ -120,7 +135,10 @@ class MemoryWriteTool(BaseTool):
         # 优先用 agent 显式传的 memory_type / dimension；未传则按 category 兜底
         if memory_type:
             mt = memory_type
-            dim = dimension or f"{mt}.misc"
+            # 兜底 dimension 用 _TYPE_DIMENSION_PREFIX 查前缀（personal_information → identity），
+            # 保证和 dimensions.py 注册表 + extractor 路径产出的 dimension 字符串一致。
+            prefix = _TYPE_DIMENSION_PREFIX.get(mt, mt)
+            dim = dimension or f"{prefix}.misc"
         else:
             mt, dim = _CATEGORY_FALLBACK.get(category, ("preference", "preference.misc"))
 

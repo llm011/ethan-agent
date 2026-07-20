@@ -325,6 +325,45 @@ class TestMemoryWriteTool:
         finally:
             store.close()
 
+    def test_memory_type_only_uses_correct_dimension_prefix(self, tmp_path, monkeypatch):
+        """agent 传 memory_type 但不传 dimension 时，dimension 兜底前缀应与 dimensions.py 注册表一致。
+
+        回归 bug：personal_information 类型直接 f"{mt}.misc" 会产出
+        "personal_information.misc"，而 extractor 路径产出的是 "identity.misc"，
+        导致 supersede 判定（existing.dimension == candidate.dimension）永远配不上，
+        主动写的 identity 记忆和自动抽取的各存一份、旧值不被替换。
+        """
+        import asyncio
+
+        monkeypatch.setattr("ethan.core.paths.CONFIG_DIR", tmp_path)
+
+        async def run():
+            from ethan.tools.builtin.memory_write import MemoryWriteTool
+            # 不传 dimension，触发兜底
+            await MemoryWriteTool().run(
+                "用户偏好深色模式",
+                memory_type="personal_information",
+            )
+
+        asyncio.run(run())
+
+        from ethan.core.paths import user_vectors_db_path
+        from ethan.memory.store import MemoryStore
+
+        store = MemoryStore(db_path=user_vectors_db_path())
+        try:
+            memories = store.list_memories(status="active", limit=10)
+            assert len(memories) == 1
+            m = memories[0]
+            assert m.memory_type == "personal_information"
+            # 兜底 dimension 必须用 identity. 前缀，和 dimensions.py 注册表对齐
+            assert m.dimension == "identity.misc", (
+                f"personal_information 的兜底 dimension 应为 'identity.misc'，"
+                f"实际为 '{m.dimension}'——supersede 判定会和 extractor 路径对不上"
+            )
+        finally:
+            store.close()
+
 
 # ---------------------------------------------------------------------------
 # B1: ProcedureStore success_patterns（已退役，保留空注释作为分隔）
