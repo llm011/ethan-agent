@@ -125,6 +125,15 @@ ethan
 
 That's it. On first run, default skills and system files are written to `~/.ethan/`.
 
+### Desktop App (optional)
+
+Prefer a native app over the browser? Download the desktop client from [GitHub Releases](https://github.com/llm011/ethan-agent/releases):
+
+- **macOS**: `.dmg` — pick the one matching your CPU (`aarch64` for Apple Silicon, `x86_64` for Intel)
+- **Windows**: `.msi` or `.exe` (x86_64)
+
+The desktop app bundles the Web UI in a native window — just point it at your `ethan serve` instance (local or remote) and log in with your token.
+
 ---
 
 ## Quick Start (Docker, recommended for server deployment)

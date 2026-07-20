@@ -123,6 +123,15 @@ ethan
 
 首次运行会自动初始化 `~/.ethan/`，写入默认技能和系统文件。
 
+### 桌面端（可选）
+
+不想用浏览器？从 [GitHub Releases](https://github.com/llm011/ethan-agent/releases) 下载桌面客户端：
+
+- **macOS**：`.dmg`——按 CPU 选对应的包（`aarch64` = Apple Silicon，`x86_64` = Intel）
+- **Windows**：`.msi` 或 `.exe`（x86_64）
+
+桌面端把 Web UI 包成原生窗口——启动后填上你的 `ethan serve` 地址（本地或远程都行），再用 token 登录即可。
+
 ---
 
 ## 快速开始（Docker，适合服务器部署）
