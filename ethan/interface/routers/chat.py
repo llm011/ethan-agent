@@ -5,7 +5,7 @@ import asyncio
 import ipaddress
 import logging
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from ethan import __version__
@@ -13,6 +13,12 @@ from ethan.memory.session import SessionStore
 from ethan.providers.base import Message
 
 from .deps import create_agent, verify_token
+from .helpers import (
+    _friendly_error,
+    _setup_error_stream,
+    _status_for_setup_error,
+    _with_quote,
+)
 from .producers import _run_delegate_generation, _run_generation
 from .schemas import ChatRequest, ChatResponse
 from .sse import _sse_from_run
@@ -98,8 +104,6 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
     from ethan.core.context import set_session_id
     from ethan.core.paths import user_sessions_db_path
 
-    from .helpers import _with_quote
-
     # 未传 session_id 时自动生成，确保所有对话都持久化到会话列表
     if not req.session_id:
         from ethan.memory.session import _generate_id
@@ -159,9 +163,6 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
         elif req.quote and messages and messages[-1].role == "user":
             messages[-1] = _with_quote(messages[-1], req.quote)
     except Exception as e:
-        from fastapi import HTTPException
-
-        from .helpers import _friendly_error, _setup_error_stream
         friendly = _friendly_error(e, None)
         logger.exception("chat 请求建立失败 session=%s: %s", req.session_id, e)
         if req.stream:
@@ -170,7 +171,9 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
                 media_type="text/event-stream",
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )
-        raise HTTPException(status_code=500, detail=friendly)
+        # 客户端类错误（配置缺失 / 参数非法）映射为 4xx，让 client 能精准区分，
+        # 其余按 500 处理。
+        raise HTTPException(status_code=_status_for_setup_error(e), detail=friendly)
 
     if req.stream:
         # (1) 沉浸式工具模式：会话 mode 解析出 delegate_agent 时，整条会话的每句话都

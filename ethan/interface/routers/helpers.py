@@ -48,6 +48,31 @@ def _friendly_error(e: Exception, agent) -> str:
     return msg[:300]
 
 
+def _status_for_setup_error(e: Exception) -> int:
+    """请求建立期异常 → HTTP 状态码。客户端可修正的错误映射为 4xx，其余 500。
+
+    - 请求体结构非法（缺字段 / 类型不对）→ 422 Unprocessable Entity
+    - 参数值非法 / provider 未配置或鉴权缺失（用户侧可修）→ 400 Bad Request
+    - 其余（DB 初始化失败等服务端问题）→ 500 Internal Server Error
+
+    保守起见只对明确的客户端类错误降级为 4xx，无法归类的一律 500，避免把真正的
+    服务端故障误报成 client 错误。
+    """
+    # 请求体语义错误：解析 messages 时字段缺失 / 类型不对
+    if isinstance(e, (KeyError, TypeError)):
+        return 422
+    if isinstance(e, ValueError):
+        return 400
+    # provider 未配置 / 鉴权缺失：用户侧配置问题，client 无需当作服务故障重试
+    msg = str(e)
+    lower = msg.lower()
+    if ("could not resolve authentication method" in lower
+            or "未配置" in msg
+            or ("api_key" in lower and "not" in lower)):
+        return 400
+    return 500
+
+
 def _with_quote(user_msg: Message, quote: dict | None) -> Message:
     """返回一份带「引用块」前缀的用户消息副本（仅发给模型，不入库）。
 
