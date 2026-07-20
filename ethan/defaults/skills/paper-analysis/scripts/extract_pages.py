@@ -17,7 +17,7 @@
     {"pdf_path":..., "num_pages":N, "effective_pages":M, "references_start_page":K|null, "manifest":"...manifest.json", "pages":[{...}]}
 
   - effective_pages：实际应精读的页数 = min(max_pages, references_start-1)。References
-    及之后不精读，默认上限 15 页（--max-pages 可调）。
+    及之后不精读，默认上限 30 页（--max-pages 可调；0=不封顶，全部处理）。
 """
 from __future__ import annotations
 
@@ -79,7 +79,7 @@ def main() -> int:
     ap.add_argument("pdf", help="本地 PDF 路径")
     ap.add_argument("--out-dir", default=None, help="输出目录（默认 <pdf>_pages/）")
     ap.add_argument("--dpi", type=int, default=150, help="渲染 DPI（默认 150，清晰度/体积权衡）")
-    ap.add_argument("--max-pages", type=int, default=15, help="最多处理前 N 页（默认 15；0=全部）")
+    ap.add_argument("--max-pages", type=int, default=30, help="最多处理前 N 页（默认 30；0=全部）")
     args = ap.parse_args()
 
     pdf_path = Path(args.pdf)

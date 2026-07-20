@@ -6,6 +6,9 @@ description: >
   "标准 Excalidraw"、"Excalidraw 动画"或提到需要把逻辑/架构/流程转为可视化图形时。
   在 Obsidian vault 内通过 DSL 或 JSON 生成可编辑的 Excalidraw 图（.md / .excalidraw），
   默认输出 Obsidian Excalidraw 插件可直接打开的 .md 文件。
+version: 1.0.0
+source: https://github.com/axtonliu/axton-obsidian-visual-skills + https://github.com/coleam00/excalidraw-diagram-skill
+license: MIT (axtonliu) + NO LICENSE (coleam00)
 ---
 
 # Excalidraw 绘图助手 (Obsidian 优先)

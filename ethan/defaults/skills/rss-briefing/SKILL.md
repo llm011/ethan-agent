@@ -17,6 +17,7 @@ platforms: [linux, macos, windows]
 metadata:
   ethan:
     tags: [RSS, News, Briefing, Feishu, Fetch]
+source: internal (hermes agent)
 ---
 
 # RSS 深度简报助手 (RSS Briefing)

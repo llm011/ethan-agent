@@ -19,6 +19,8 @@ metadata:
     secrets: ["~/.ethan/.secrets/didi.json"]
   secretKeys: ["didi_mcp_key"]
   coordinatesWith: ["lark-im"]
+license: MIT
+source: internal (hermes agent)
 ---
 
 # 滴滴打车助手

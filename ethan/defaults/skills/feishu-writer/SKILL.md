@@ -18,6 +18,9 @@ metadata:
       scope: "知识空间节点管理。feishu-writer 写入完成后，若需挂到 Wiki 节点，转交 lark-wiki。"
     - skill: lark-shared
       scope: "认证与权限处理。当本技能脚本报权限错误时，转交 lark-shared 走 split-flow 授权。"
+license: MIT
+version: 1.0.0
+source: internal (hermes agent)
 ---
 
 # 飞书高级写作助手 (Feishu Writer)

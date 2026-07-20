@@ -3,6 +3,9 @@ name: vercel-deploy
 description: >
   TRIGGER WHEN: 用户要求"部署网页"、"发布到 Vercel"、"做个工具页面并上线"时。
   处理 Web 项目的安全部署，支持非交互式 Token 验证及通用宿主项目管理。
+license: MIT
+version: 1.0.0
+source: internal (hermes agent)
 ---
 
 # Vercel 极速部署 (Vercel Deploy)

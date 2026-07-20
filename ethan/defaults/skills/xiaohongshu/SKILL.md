@@ -20,6 +20,8 @@ trigger:
   - 小红书点赞
   - 小红书评论
   - 小红书收藏
+license: MIT
+source: internal (hermes agent) + Python CDP engine (upstream unclear)
 ---
 
 # 小红书自动化

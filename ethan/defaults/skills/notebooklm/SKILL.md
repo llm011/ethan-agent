@@ -3,6 +3,10 @@ name: notebooklm
 description: >
   TRIGGER WHEN: 用户提到“NotebookLM”、“询问我的文档”、“查询笔记本”、“添加文档到库”或提供 NotebookLM URL 时。
   利用浏览器自动化技术直接从 Google NotebookLM 获取基于源文档、带引用的回答，有效减少幻觉。
+version: 1.3.0
+source: https://github.com/PleasePrompto/notebooklm-skill
+license: MIT
+upstream_commit: eea5cb28ba79ab8b078a1eaa44ce9ec44f75dbf8
 ---
 
 # NotebookLM 调研助手 (NotebookLM Assistant)

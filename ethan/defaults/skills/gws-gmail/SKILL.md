@@ -9,6 +9,8 @@ metadata:
     bins:
       - gws
   cliHelp: "gws gmail --help"
+source: https://github.com/googleworkspace/cli (gws CLI upstream)
+license: Apache-2.0 (gws CLI, Google default; unconfirmed)
 ---
 
 # gmail (v1)

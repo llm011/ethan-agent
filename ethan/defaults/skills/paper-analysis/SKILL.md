@@ -2,6 +2,9 @@
 name: paper-analysis
 description: 学术论文深度精读与 Map-Reduce 分析。当用户要求"精读论文"、"深度解读论文"、"分析论文"、"paper analysis"、"详细解读 arxiv 论文"时触发。脚本把 PDF 逐页拆成图+文(Map)，按 5 维度逐页精读(每页实时反馈进度)，再汇总整合(Reduce)输出完整解读。支持 PDF 链接、arXiv ID 或本地文件路径。
 trigger: "精读论文|深度解读论文|解读论文|分析论文|paper analysis|论文精读|arxiv|arXiv|读这篇论文|map reduce 论文"
+license: MIT
+version: 1.0.0
+source: internal (hermes agent)
 ---
 
 # Paper Analysis — 论文精读 Skill
@@ -54,11 +57,13 @@ uv run --with pypdf,pillow python $SCRIPTS/extract_paper_content.py "<pdf>"   # 
 python $SCRIPTS/fetch_paper.py "<源>" --out-dir ./paper_work        # 解析末行 pdf_path
 uv run --with pymupdf python $SCRIPTS/extract_pages.py "<pdf>" --dpi 150  # 解析末行 manifest、effective_pages、references_start_page、text_dir
 ```
-脚本默认最多 15 页(`--max-pages N` 调),自动检测 References 起始页。末行 JSON 的 **`effective_pages`** = 实际该精读的页数(含 References 起始页、封顶 15)。每页文字层已落盘到 **`text_dir/page_NNN.txt`**(路径 B 直接读)。
+脚本默认最多 30 页,自动检测 References 起始页。末行 JSON 的 **`effective_pages`** = 实际该精读的页数(含 References 起始页、封顶 30)。每页文字层已落盘到 **`text_dir/page_NNN.txt`**(路径 B 直接读)。
+
+> **页数上限可调,不是写死的**:默认 30 只是速度与覆盖度的折中(逐页精读每页都要发请求、耗工具轮数)。读长综述/长论文时按需放宽:`--max-pages 60` 抬高上限,`--max-pages 0` 完全不封顶(处理全部正文页)。正文本身不足上限时,`effective_pages` 会自动取正文实际页数,不会硬凑。
 
 ### Phase 1 — MAP(逐页精读,**并行批处理**)
 
-[CRITICAL — **只处理第 1 到 `effective_pages` 页**。`effective_pages` 已自动扣除 References 及之后、并封顶 15。**绝不要处理 `effective_pages` 之后的页**(那是参考文献/附录,精读无意义且会耗光工具迭代轮数导致没机会输出报告)。**总精读页数 = `effective_pages`,不是 `num_pages`!**]
+[CRITICAL — **只处理第 1 到 `effective_pages` 页**。`effective_pages` 已自动扣除 References 及之后、并封顶 `--max-pages`(默认 30)。**绝不要处理 `effective_pages` 之后的页**(那是参考文献/附录,精读无意义且会耗光工具迭代轮数导致没机会输出报告)。**总精读页数 = `effective_pages`,不是 `num_pages`!**]
 
 **必须逐页,每页产出独立结果。** 每完成一批输出 `✓ 第 N1-N2 页完成(共 effective_pages 页)`。
 
