@@ -118,6 +118,8 @@ ethan model default glm-5.2
 ethan
 ```
 
+> ⚠️ **Already running?** If `ethan serve`, the desktop app, or `ethan web` is already up, **restart it** after any `ethan provider set` / `ethan model default` change. The running server caches config in memory and won't pick up edits to `~/.ethan/config.yaml` until it restarts.
+
 > 💡 **Notice**: Run `ethan` command to start the interactive chat REPL in your terminal. When `ethan serve` is running, it also hosts the Web UI on port `8900`. Running `ethan` will automatically open it in your browser. You can also run `ethan web` to open the Web UI directly.
 
 That's it. On first run, default skills and system files are written to `~/.ethan/`.
@@ -249,6 +251,8 @@ ethan provider set anthropic --api-key sk-ant-xxx
 # or
 ethan provider set openai_compat --api-key sk-xxx --base-url https://api.example.com/v1
 ```
+
+> ⚠️ Restart any running `ethan serve` / desktop app / `ethan web` after changing provider or model config — the server caches config in memory and only reloads on restart.
 
 ### Run
 

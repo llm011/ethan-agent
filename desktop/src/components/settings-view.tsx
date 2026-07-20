@@ -3,8 +3,10 @@ import { useNavigate } from "react-router-dom"
 import { Button } from "@ethan/shared/ui/button";
 import { Input } from "@ethan/shared/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@ethan/shared/ui/select";
-import { Sun, Moon, ChevronDown, ChevronRight } from "lucide-react";
+import { Check, ChevronDown, ChevronRight } from "lucide-react";
 import { useTheme } from "@/components/chat/use-theme";
+import { THEMES } from "@/components/chat/themes";
+import { ThemeSwatch } from "@ethan/shared/components/theme-swatch";
 import { MdEditor } from "@ethan/shared/components/md-editor";
 import {
   fetchAgentSettings, updateAgentSettings, AgentSettings,
@@ -81,7 +83,7 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
     setActiveTab(tab);
     navigate(`/settings/${tab}`, { replace: true });
   }, [navigate]);
-  const { theme, toggle: toggleTheme } = useTheme();
+  const { theme, setTheme } = useTheme();
 
   const [channels, setChannels] = useState<ChannelInfo[]>([]);
   // 模型管理
@@ -452,17 +454,24 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
                     </div>
 
                     <div className="grid gap-2">
-                      <label className="text-sm font-medium">外观</label>
-                      <div className="flex items-center gap-3">
-                        <Button
-                          variant="outline"
-                          className="flex items-center gap-2"
-                          onClick={toggleTheme}
-                        >
-                          {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-                          {theme === "dark" ? "切换到日间模式" : "切换到暗黑模式"}
-                        </Button>
-                        <span className="text-xs text-muted-foreground">当前：{theme === "dark" ? "暗黑模式" : "日间模式"}</span>
+                      <label className="text-sm font-medium">外观主题</label>
+                      <div className="flex flex-wrap gap-2">
+                        {THEMES.map((t) => (
+                          <button
+                            key={t.id}
+                            type="button"
+                            onClick={() => setTheme(t.id)}
+                            className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors ${
+                              theme === t.id
+                                ? "border-primary bg-primary/10 text-foreground"
+                                : "border-border text-muted-foreground hover:bg-muted"
+                            }`}
+                          >
+                            <ThemeSwatch colors={t.swatch} />
+                            {t.label}
+                            {theme === t.id && <Check className="h-3.5 w-3.5 text-primary" />}
+                          </button>
+                        ))}
                       </div>
                     </div>
 

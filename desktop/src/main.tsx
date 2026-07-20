@@ -3,17 +3,16 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import "./styles.css";
 import { isExternalUrl, openUrl } from "@/lib/external-link";
+import { normalizeThemeId, applyThemeClass } from "@/components/chat/themes";
 
 // 启动时同步主题 class 到 <html>，避免 React mount 前的首帧走 :root 默认值
-// 造成"初次加载纯白底、toggle 一次后变暖米色"的视觉漂移。
-// 必须在 createRoot 之前执行，确保首屏 paint 时 <html> 已带上正确 class。
+// 造成主题切换前后的视觉漂移。必须在 createRoot 之前执行，确保首屏 paint 时
+// <html> 已带上正确 class。
 (() => {
   try {
-    const t = (localStorage.getItem("ethan-theme") as "dark" | "light") || "dark";
-    document.documentElement.classList.toggle("dark", t === "dark");
-    document.documentElement.classList.toggle("light", t === "light");
+    applyThemeClass(normalizeThemeId(localStorage.getItem("ethan-theme")));
   } catch {
-    // localStorage 不可用时静默回退到 :root 默认值
+    // localStorage 不可用时静默回退到 :root 默认值（青瓦）
   }
 })();
 
