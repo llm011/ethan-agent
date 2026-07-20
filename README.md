@@ -138,7 +138,7 @@ The desktop app bundles the Web UI in a native window — just point it at your 
 
 ## Quick Start (Docker, recommended for server deployment)
 
-Docker runs backend and Web UI as separate containers, data persisted to a local volume. No need to clone the repository.
+Single container with API + Web UI on the same port (8900), data persisted to the host's `~/.ethan/` via bind mount (inspectable, backup-friendly, and shared with any `pip`-installed `ethan` on the same machine). A bundled SearXNG container provides web search. No need to clone the repository.
 
 ### Prerequisites
 
@@ -149,51 +149,58 @@ Docker runs backend and Web UI as separate containers, data persisted to a local
 
 ```bash
 mkdir ethan-agent && cd ethan-agent
-curl -O https://raw.githubusercontent.com/llm011/ethan-agent/main/docker-compose.yml
+# Self-contained variant: pulls the published image (no code clone needed)
+curl -o docker-compose.yml https://raw.githubusercontent.com/llm011/ethan-agent/main/deploy/docker-compose.yml
+curl -o .env.example https://raw.githubusercontent.com/llm011/ethan-agent/main/deploy/.env.example
+# (Optional) SearXNG settings file
+mkdir -p searxng && curl -o searxng/settings.yml https://raw.githubusercontent.com/llm011/ethan-agent/main/deploy/searxng/settings.yml
 ```
 
 ### 2. Configure
 
-Create a `.env` file and add your API keys:
+Copy `.env.example` to `.env` and fill in your API keys (at least one provider):
 
 ```bash
-cat > .env << 'EOF'
-ANTHROPIC_API_KEY=sk-ant-xxx
-# OPENAI_API_KEY=sk-xxx
-# OPENAI_BASE_URL=https://api.example.com/v1
-AGENT_DEFAULT_MODEL=claude-sonnet-4-6
-EOF
+cp .env.example .env
+# Edit .env — set ANTHROPIC_API_KEY or OPENAI_API_KEY + OPENAI_BASE_URL
 ```
+
+> 💡 **Tip**: you can also skip the `.env` and configure the provider interactively inside the container — see step 4.
 
 ### 3. Start
 
 ```bash
 docker compose up -d
+docker compose logs -f ethan   # the startup log prints the 🔑 Web UI Token
 ```
 
-### 4. Access
+### 4. Get the Web UI token
 
-Web UI, API, and health check are all served from the single port 8900:
-
-- **Web UI / API**: http://localhost:8900
-- **Health check**: http://localhost:8900/health
-
-On first launch the Web UI asks for a login token. Retrieve it with any of:
+The startup log prints the token, but if you missed it, either:
 
 ```bash
-# Local install
-ethan web token                       # prints the current Web login token
-# or read it directly from the config file
-grep auth_token ~/.ethan/config.yaml
+# Recommended first-run path: enter the TUI inside the container.
+# This prints the token, and if no provider is configured yet it launches
+# the interactive onboarding wizard (choose provider → base_url → api_key → default model).
+docker exec -it ethan-agent ethan
+```
 
-# Docker (service name differs per compose file)
-docker compose exec ethan ethan web token          # docker-compose.yml
-docker compose exec ethan-agent ethan web token    # docker-compose.pip.yml
-# or read from the mounted config file
+Or just fetch the token directly:
+
+```bash
+docker exec -it ethan-agent ethan web token
+# or read it from the mounted config file
 grep auth_token ~/.ethan/config.yaml
 ```
 
-### 5. Common commands
+### 5. Access
+
+- **Web UI**: http://localhost:8900  (log in with the token from step 4)
+- **API**: http://localhost:8900
+- **Health check**: http://localhost:8900/health
+- **SearXNG (web search)**: http://localhost:8888
+
+### 6. Common commands
 
 ```bash
 docker compose logs -f ethan        # tail logs

@@ -136,64 +136,69 @@ ethan
 
 ## 快速开始（Docker，适合服务器部署）
 
-Docker 方式最省事，Backend 和 Web UI 各自独立容器，数据持久化到本地卷。**无需克隆代码库。**
+单容器部署：API 和 Web UI 同在 8900 端口，数据通过 bind mount 持久化到宿主机的 `~/.ethan/`（方便查看/备份/迁移，并和本机 `pip` 装的 `ethan` 共享同一份数据目录）。另带一个 SearXNG 容器提供网页搜索。**无需克隆代码库。**
 
 ### 前置条件
 
 - Docker 20.10+
 - Docker Compose v2
 
-### 1. 下载配置并启动
+### 1. 下载配置文件
 
 ```bash
 mkdir ethan-agent && cd ethan-agent
-curl -O https://raw.githubusercontent.com/llm011/ethan-agent/main/docker-compose.yml
+# 自包含变体：直接拉官方镜像，无需 clone 代码
+curl -o docker-compose.yml https://raw.githubusercontent.com/llm011/ethan-agent/main/deploy/docker-compose.yml
+curl -o .env.example https://raw.githubusercontent.com/llm011/ethan-agent/main/deploy/.env.example
+# （可选）SearXNG 配置
+mkdir -p searxng && curl -o searxng/settings.yml https://raw.githubusercontent.com/llm011/ethan-agent/main/deploy/searxng/settings.yml
 ```
 
-### 2. 配置环境变量
+### 2. 配置
 
-创建 `.env` 文件，填入你的 API Key：
+把 `.env.example` 复制为 `.env`，填入 API Key（至少配一个 provider）：
 
 ```bash
-cat > .env << 'EOF'
-ANTHROPIC_API_KEY=sk-ant-xxx
-# OPENAI_API_KEY=sk-xxx
-# OPENAI_BASE_URL=https://api.example.com/v1
-AGENT_DEFAULT_MODEL=claude-sonnet-4-6
-EOF
+cp .env.example .env
+# 编辑 .env —— 设置 ANTHROPIC_API_KEY 或 OPENAI_API_KEY + OPENAI_BASE_URL
 ```
+
+> 💡 **提示**：你也可以跳过 `.env`，直接进容器交互式配置 provider —— 见第 4 步。
 
 ### 3. 启动
 
 ```bash
 docker compose up -d
+docker compose logs -f ethan   # 启动日志会打印 🔑 Web UI Token
 ```
 
-镜像会自动从 GitHub 下载。
+### 4. 获取 Web UI Token
 
-### 4. 访问
-
-Web UI、API、健康检查都由同一个 8900 端口提供：
-
-- **Web UI / API**：http://localhost:8900
-- **健康检查**：http://localhost:8900/health
-
-首次打开 Web UI 时需要输入登录 Token。获取方式：
+启动日志会打印 token，如果错过了，可以用以下任一方式获取：
 
 ```bash
-# 本地安装
-ethan web token                       # 打印当前 Web 登录 Token
-# 或直接读配置文件
-grep auth_token ~/.ethan/config.yaml
+# 推荐的首次运行方式：进容器跑 ethan TUI。
+# 会主动打印 token；若尚未配置 provider，还会进入交互式向导
+# （选 provider → base_url → api_key → 默认模型）。
+docker exec -it ethan-agent ethan
+```
 
-# Docker（服务名因 compose 文件而异）
-docker compose exec ethan ethan web token          # docker-compose.yml
-docker compose exec ethan-agent ethan web token    # docker-compose.pip.yml
+或者直接查 token：
+
+```bash
+docker exec -it ethan-agent ethan web token
 # 或从挂载的配置文件读取
 grep auth_token ~/.ethan/config.yaml
 ```
 
-### 5. 常用命令
+### 5. 访问
+
+- **Web UI**：http://localhost:8900  （用第 4 步拿到的 token 登录）
+- **API**：http://localhost:8900
+- **健康检查**：http://localhost:8900/health
+- **SearXNG（网页搜索）**：http://localhost:8888
+
+### 6. 常用命令
 
 ```bash
 docker compose logs -f ethan          # 查看日志
