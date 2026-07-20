@@ -127,8 +127,12 @@ async def run_repl(agent: Agent, resume_id: str | None = None, auto_consent: boo
         choice = raw_choice.strip() or "1"
 
         if choice == "2":
-            raw_key = await asyncio.to_thread(input, "  Anthropic API Key (sk-ant-...): ")
-            api_key = raw_key.strip()
+            api_key = ""
+            while not api_key:
+                raw_key = await asyncio.to_thread(input, "  Anthropic API Key (sk-ant-...): ")
+                api_key = raw_key.strip()
+                if not api_key:
+                    console.print("[yellow]API Key 不能为空，请重新输入。[/yellow]")
             _cfg.providers.setdefault("anthropic", ProviderConfig())
             _cfg.providers["anthropic"].api_key = api_key
             _cfg.defaults.model = "claude-sonnet-4.6"
@@ -139,8 +143,12 @@ async def run_repl(agent: Agent, resume_id: str | None = None, auto_consent: boo
                 "  Base URL (e.g. https://api.openai.com/v1, or https://generativelanguage.googleapis.com/v1beta/openai): ",
             )
             base_url = raw_url.strip() or None
-            raw_key = await asyncio.to_thread(input, "  API Key: ")
-            api_key = raw_key.strip()
+            api_key = ""
+            while not api_key:
+                raw_key = await asyncio.to_thread(input, "  API Key: ")
+                api_key = raw_key.strip()
+                if not api_key:
+                    console.print("[yellow]API Key 不能为空，请重新输入。[/yellow]")
             _cfg.providers.setdefault("openai_compat", ProviderConfig())
             _cfg.providers["openai_compat"].api_key = api_key
             if base_url:

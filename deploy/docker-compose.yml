@@ -34,7 +34,7 @@ services:
         rm -f /root/.lark-cli/events/*/bus.{sock,pid,alive.lock,fork.lock} 2>/dev/null;
         ethan setup &&
         echo '' &&
-        echo '🔑 Web UI Token:' $$(awk '/auth_token:/{print $$2}' /root/.ethan/config.yaml 2>/dev/null || echo '(未设置)') &&
+        TOKEN=$$(awk '/auth_token:/{print $$2}' /root/.ethan/config.yaml 2>/dev/null); echo '🔑 Web UI Token:' $${TOKEN:-(未设置)} &&
         echo '' &&
         exec ethan serve --port 8900
       "
