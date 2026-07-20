@@ -53,7 +53,7 @@ metadata:
 ## 🛡️ 核心工作流 (Workflow)
 
 ### 1. 规划阶段 (Planning)
-- 超过 5000 字长文必须"分而治之"：先出提纲 -> 标注章节字数 -> 报备给凌总。
+- 超过 5000 字长文必须"分而治之"：先出提纲 -> 标注章节字数 -> 报备给用户。
 
 ### 2. 写入阶段 (Execution)
 - **分片注入**: 每 20 个 Block 切割一次进行插入（单次上限 50）。
@@ -118,7 +118,7 @@ python ~/.ethan/skills/feishu-writer/scripts/transfer_owner.py <doc_token> \
 - **文档防碎裂 (Document Fragmentation)**: 多次向同文档注入时，必须用 `lark-cli docs +update --command overwrite` 全量覆盖或基于 Block ID 原地替换，严禁一味 append 导致结构崩塌。
 - **AI 结构化废话**: 严禁使用"1. 执行摘要"、"总结"等 AI 惯用语，必须严格遵守"黄金开局"（# 概述 -> ## 背景 -> ## 目标）；去掉所有章节数字编号（如 `## 1.`），保持专业感。
 - **429 频率**: 批量填表时必须 `time.sleep(0.5)`。
-- **身份切换**: 必须强制使用 **User Token** 创建（`lark-cli docs +create --as user`），确保文档 Owner 是凌总而非机器人。如果文档已被 bot 创建，用本技能 `transfer_owner.py` 转给凌总。
+- **身份切换**: 必须强制使用 **User Token** 创建（`lark-cli docs +create --as user`），确保文档 Owner 是用户而非机器人。如果文档已被 bot 创建，用本技能 `transfer_owner.py` 转给用户。
 - **Mermaid 崩溃**: 不要相信 API 返回的 Success，必须在注入前手动剔除节点名中的 Emoji 和特殊符号。
 - **凭据安全**: 严禁把 `app_secret` 写进脚本或日志。所有脚本只从 `~/.ethan/.secrets/my_feishu.json` 读取，且打印日志时禁止输出 Authorization header 或 token 明文。
 
