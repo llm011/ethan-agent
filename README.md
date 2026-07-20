@@ -48,10 +48,9 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 - Hit tracking and correction collection; Heartbeat auto-updates skill content with a cheap model when corrections accumulate
 - Agent can create new skills mid-conversation via the `skill_create` tool
 
-**Three-track routing**
-- **fast**: short commands + keyword match → minimal prompt + fast_path tools only + 2 iterations
-- **medium**: mid-length messages → full prompt + all tools + 4 iterations
-- **full**: complex tasks → full prompt + all tools + 10 iterations
+**Two-track routing**
+- **fast**: keyword / skill-trigger match → minimal prompt + fast_path tools only + lite model (optional)
+- **full**: everything else (including forced-full signals like "write / analyze / refactor") → full prompt + all tools
 
 **Loop control**
 - Stuck detection: when the agent repeats the same tool+args for 3 rounds (or 2 rounds of the same error), it injects a forced-reflection prompt (`<diagnosis>` + must switch strategy) instead of spinning to the iteration cap
@@ -126,11 +125,20 @@ ethan
 
 That's it. On first run, default skills and system files are written to `~/.ethan/`.
 
+### Desktop App (optional)
+
+Prefer a native app over the browser? Download the desktop client from [GitHub Releases](https://github.com/llm011/ethan-agent/releases):
+
+- **macOS**: `.dmg` — pick the one matching your CPU (`aarch64` for Apple Silicon, `x86_64` for Intel)
+- **Windows**: `.msi` or `.exe` (x86_64)
+
+The desktop app bundles the Web UI in a native window — just point it at your `ethan serve` instance (local or remote) and log in with your token.
+
 ---
 
 ## Quick Start (Docker, recommended for server deployment)
 
-Docker runs backend and Web UI as separate containers, data persisted to a local volume. No need to clone the repository.
+Single container with API + Web UI on the same port (8900), data persisted to the host's `~/.ethan/` via bind mount (inspectable, backup-friendly, and shared with any `pip`-installed `ethan` on the same machine). A bundled SearXNG container provides web search. No need to clone the repository.
 
 ### Prerequisites
 
@@ -141,39 +149,62 @@ Docker runs backend and Web UI as separate containers, data persisted to a local
 
 ```bash
 mkdir ethan-agent && cd ethan-agent
-curl -O https://raw.githubusercontent.com/llm011/ethan-agent/main/docker-compose.yml
+# Self-contained variant: pulls the published image (no code clone needed)
+curl -o docker-compose.yml https://raw.githubusercontent.com/llm011/ethan-agent/main/deploy/docker-compose.yml
+curl -o .env.example https://raw.githubusercontent.com/llm011/ethan-agent/main/deploy/.env.example
+# (Optional) SearXNG settings file
+mkdir -p searxng && curl -o searxng/settings.yml https://raw.githubusercontent.com/llm011/ethan-agent/main/deploy/searxng/settings.yml
 ```
 
 ### 2. Configure
 
-Create a `.env` file and add your API keys:
+Copy `.env.example` to `.env` and fill in your API keys (at least one provider):
 
 ```bash
-cat > .env << 'EOF'
-ANTHROPIC_API_KEY=sk-ant-xxx
-# OPENAI_API_KEY=sk-xxx
-# OPENAI_BASE_URL=https://api.example.com/v1
-AGENT_DEFAULT_MODEL=claude-sonnet-4-6
-EOF
+cp .env.example .env
+# Edit .env — set ANTHROPIC_API_KEY or OPENAI_API_KEY + OPENAI_BASE_URL
 ```
+
+> 💡 **Tip**: you can also skip the `.env` and configure the provider interactively inside the container — see step 4.
 
 ### 3. Start
 
 ```bash
 docker compose up -d
+docker compose logs -f ethan   # the startup log prints the 🔑 Web UI Token
 ```
 
-### 4. Access
+### 4. Get the Web UI token
 
-- **Web UI**: http://localhost:3000
-- **API**: http://localhost:8900
-- **Health check**: http://localhost:8900/health
-
-### 5. Common commands
+The startup log prints the token, but if you missed it, either:
 
 ```bash
-docker compose logs -f ethan-backend  # tail logs
-docker compose restart ethan-backend  # restart backend
+# Recommended first-run path: enter the TUI inside the container.
+# This prints the token, and if no provider is configured yet it launches
+# the interactive onboarding wizard (choose provider → base_url → api_key → default model).
+docker exec -it ethan-agent ethan
+```
+
+Or just fetch the token directly:
+
+```bash
+docker exec -it ethan-agent ethan web token
+# or read it from the mounted config file
+grep auth_token ~/.ethan/config.yaml
+```
+
+### 5. Access
+
+- **Web UI**: http://localhost:8900  (log in with the token from step 4)
+- **API**: http://localhost:8900
+- **Health check**: http://localhost:8900/health
+- **SearXNG (web search)**: http://localhost:8888
+
+### 6. Common commands
+
+```bash
+docker compose logs -f ethan        # tail logs
+docker compose restart ethan        # restart service
 docker compose pull && docker compose up -d  # update to latest version
 docker compose down                   # stop
 ```
@@ -316,7 +347,7 @@ On first launch, configure the server URL (e.g. `http://<your-nas>:8900`) and Ac
 ```
 ethan/
 ├── core/
-│   ├── agent.py               # ReAct loop, three-track router (fast/medium/full)
+│   ├── agent.py               # ReAct loop, two-track router (fast/full)
 │   ├── config.py              # YAML config (~/.ethan/config.yaml)
 │   └── heartbeat.py           # Heartbeat system, periodic maintenance
 ├── providers/
@@ -528,14 +559,11 @@ defaults:
   max_tokens: 4096
   max_tool_iterations: 10
   routing:
-    fast_max_length: 12
-    medium_max_length: 80
-    medium_max_iters: 15
-    fast_keywords:
-      - "turn off*light"
-      - "play music"
-    fast_skill_triggers:
-      - "home assistant"
+    fast_rules:
+      - name: Home automation
+        keywords: ["turn off*light", "play music"]
+        tools: ["shell"]
+        skills: ["home-assistant-control"]
 ```
 
 Environment variables in `.env` override config values (useful for secrets).
@@ -568,7 +596,7 @@ Environment variables in `.env` override config values (useful for secrets).
 **Core Agent**
 - [x] Multi-model provider (Anthropic + OpenAI-compatible: Gemini, GPT, Ollama, etc.)
 - [x] ReAct agent loop with streaming output
-- [x] Three-track router: fast / medium / full, tool result compression, per-turn dedup cache
+- [x] Two-track router: fast / full, tool result compression, per-turn dedup cache
 - [x] Prompt Caching (Anthropic stable-prefix cache_control, ~0.1× input cost)
 
 **Five-Layer Memory**
