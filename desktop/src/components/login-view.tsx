@@ -67,7 +67,7 @@ export function LoginView() {
                   type="text"
                   value={apiUrl}
                   onChange={(e) => setApiUrlState(e.target.value)}
-                  placeholder="http://127.0.0.1:8989/api"
+                  placeholder="http://127.0.0.1:8900/api"
                   className="text-xs font-mono"
                 />
                 <p className="text-[10px] text-muted-foreground">
