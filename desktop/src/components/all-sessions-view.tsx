@@ -197,6 +197,7 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
             <SelectContent>
               <SelectItem value="__all__" className="text-xs">全部渠道</SelectItem>
               <SelectItem value="web" className="text-xs">Web</SelectItem>
+              <SelectItem value="desktop" className="text-xs">桌面端</SelectItem>
               <SelectItem value="lark" className="text-xs">飞书</SelectItem>
               <SelectItem value="repl" className="text-xs">命令行</SelectItem>
               <SelectItem value="cli" className="text-xs">CLI</SelectItem>
@@ -261,13 +262,14 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
             {sessions.map((session) => {
-              const sourceLabel: Record<string, string> = { lark: "飞书", repl: "命令行", cli: "CLI", api: "API", web: "Web", heartbeat: "心跳", codex: "Codex", claude: "Claude Code", opencode: "OpenCode" };
+              const sourceLabel: Record<string, string> = { lark: "飞书", repl: "命令行", cli: "CLI", api: "API", web: "Web", desktop: "桌面端", heartbeat: "心跳", codex: "Codex", claude: "Claude Code", opencode: "OpenCode" };
               const sourceColor: Record<string, string> = {
                 lark: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
                 repl: "bg-purple-500/15 text-purple-600 dark:text-purple-400",
                 cli: "bg-purple-500/15 text-purple-600 dark:text-purple-400",
                 api: "bg-indigo-500/15 text-indigo-600 dark:text-indigo-400",
                 web: "bg-green-500/15 text-green-600 dark:text-green-400",
+                desktop: "bg-cyan-500/15 text-cyan-600 dark:text-cyan-400",
                 heartbeat: "bg-orange-500/15 text-orange-600 dark:text-orange-400",
                 codex: "bg-teal-500/15 text-teal-600 dark:text-teal-400",
                 claude: "bg-amber-500/15 text-amber-600 dark:text-amber-400",

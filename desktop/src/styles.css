@@ -86,7 +86,8 @@
 
 /* 浅橙暖色日间主题 */
 .light {
-  --background: oklch(0.98 0.008 60);
+  /* 背景保持纯白，与 :root 一致，避免主题切换前后背景色漂移 */
+  --background: oklch(1 0 0);
   --foreground: oklch(0.22 0.02 50);
   --card: oklch(0.995 0.005 60);
   --card-foreground: oklch(0.22 0.02 50);

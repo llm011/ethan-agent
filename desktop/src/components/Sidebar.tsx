@@ -18,10 +18,11 @@ import {
   renameSession,
   regenSessionTitle,
   createSession,
-  fetchVersion,
   fetchModes,
   type ModeEntry,
 } from "@/lib/api";
+import { useServerHealth } from "@/lib/use-server-health";
+import { ServerStatusBadge } from "@/components/server-status-badge";
 
 export function Sidebar() {
   const navigate = useNavigate();
@@ -37,6 +38,17 @@ export function Sidebar() {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [scheduleGroupSessions, setScheduleGroupSessions] = useState<SessionInfo[]>([]);
   const [heartbeatGroupSessions, setHeartbeatGroupSessions] = useState<SessionInfo[]>([]);
+
+  // 监听 ChatView 广播的标题更新事件，立即同步左侧列表（不等下次轮询）
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { sessionId, title } = (e as CustomEvent).detail || {};
+      if (!sessionId || !title) return;
+      setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, title } : s));
+    };
+    window.addEventListener("session:title-updated", handler);
+    return () => window.removeEventListener("session:title-updated", handler);
+  }, []);
   const [sessionSearch, setSessionSearch] = useState("");
   const [searchLoading, setSearchLoading] = useState(false);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
@@ -48,7 +60,6 @@ export function Sidebar() {
   const [heartbeatExpanded, setHeartbeatExpanded] = useState(false);
   const [schedules, setSchedules] = useState<any[]>([]);
   const [runningTaskCount, setRunningTaskCount] = useState(0);
-  const [version, setVersion] = useState<string | null>(null);
   const [modes, setModes] = useState<ModeEntry[]>([]);
   const [lastSeenSchedule, setLastSeenSchedule] = useState(() => {
     if (typeof window !== "undefined") {
@@ -107,10 +118,8 @@ export function Sidebar() {
     fetchSchedules().then(setSchedules).catch(() => {});
   }, [pathname]);
 
-  // 获取版本号（挂载时一次）
-  useEffect(() => {
-    fetchVersion().then(setVersion);
-  }, []);
+  // 本地服务存活状态：单例轮询 /api/health（同时拿 version），与 ChatHeader 共享
+  const health = useServerHealth();
 
   // 获取对话模式表（挂载时一次），用于左栏会话的模式标识
   useEffect(() => {
@@ -335,12 +344,13 @@ export function Sidebar() {
         >
           <img src={`${''}/logo-sidebar.png`} alt="Ethan Agent" className="rounded-full shrink-0 h-7 w-7" />
           <span className="whitespace-nowrap">Ethan Agent</span>
-          {version && (
+          <ServerStatusBadge variant="compact" />
+          {health.version && (
             <span
               className="text-[9px] font-mono text-muted-foreground/60 bg-muted border border-border/60 rounded-full px-1.5 py-0.5 leading-none shrink-0"
-              title={`ethan-agent v${version}`}
+              title={`ethan-agent v${health.version}`}
             >
-              v{version}
+              v{health.version}
             </span>
           )}
         </h1>

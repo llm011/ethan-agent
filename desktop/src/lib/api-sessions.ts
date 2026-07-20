@@ -94,10 +94,11 @@ export async function updateSessionMode(id: string, mode: string): Promise<void>
   });
 }
 
-export async function createSession(model?: string, mode?: string): Promise<{ id: string; title: string; model: string; mode?: string }> {
+export async function createSession(model?: string, mode?: string, source?: string): Promise<{ id: string; title: string; model: string; mode?: string; source?: string }> {
   const params = new URLSearchParams();
   if (model) params.append("model", model);
   if (mode) params.append("mode", mode);
+  if (source) params.append("source", source);
   const qs = params.toString();
   const res = await fetch(`${getApiUrl()}/sessions${qs ? `?${qs}` : ""}`, {
     method: "POST",

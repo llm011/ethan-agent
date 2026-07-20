@@ -1,6 +1,7 @@
 import { HashRouter, Routes, Route, Navigate, useParams, useNavigate } from "react-router-dom";
-import { useEffect, useState } from "react";
-import { fetchModels, type ModelEntry } from "@/lib/api";
+import { type ModelEntry } from "@/lib/api";
+import { fetchModels } from "@/lib/api-base";
+import { useCachedResource } from "@/lib/use-cached-resource";
 import { AuthProvider } from "@/lib/auth-context";
 import { LayoutShell } from "@/components/layout-shell";
 import { ChatView } from "@/components/chat-view";
@@ -32,15 +33,14 @@ function SessionsRoute() {
 
 function SettingsRoute() {
   const { tab } = useParams<{ tab?: string }>();
-  const [models, setModels] = useState<ModelEntry[]>([]);
-  useEffect(() => {
-    fetchModels().then(setModels).catch(() => {});
-  }, []);
+  // models 是 A 类准静态数据，进 settings 时命中缓存 0ms 渲染；
+  // 写操作（addModel/deleteModel）会 bustCache("models")，本 hook 自动 refetch
+  const { data: models } = useCachedResource<ModelEntry[]>("models", fetchModels, { ttlMs: 60 * 60_000 });
   const VALID_TABS = ["general", "providers", "channels", "identity", "soul", "tools", "heartbeat", "profile", "prompt-preview", "api-keys", "fast-rules"];
   const initialTab = tab && VALID_TABS.includes(tab) ? tab : "general";
   return (
     <div className="flex flex-col flex-1 h-full min-h-0">
-      <SettingsView models={models} initialTab={initialTab as any} />
+      <SettingsView models={models ?? []} initialTab={initialTab as any} />
     </div>
   );
 }

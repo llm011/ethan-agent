@@ -5,7 +5,7 @@ import { CodeBlock } from "@/components/code-block";
 import { PlainCodeBlock } from "@/components/plain-code-block";
 import { forwardRef, useMemo, useState } from "react";
 import { Lightbox, type LightboxImage } from "./lightbox";
-
+import { openUrl } from "@/lib/external-link";
 // CommonMark 规定 ** 紧内侧不能有空格，否则不渲染加粗。
 // 此函数去掉 AI 生成文本中 ** 内侧的多余空白，修复渲染。
 // 气泡与阅读模式都必须经过此函数，保证「渲染后的纯文本」字符序列一致，
@@ -34,6 +34,21 @@ export const markdownComponents: Components = {
     <div className="table-wrapper">
       <table>{children}</table>
     </div>
+  ),
+  // 桌面端 webview 内部点击外链会被顶走（回不去），所有 http(s)/mailto 链接
+  // 都改走系统默认浏览器打开。锚点链接（#xxx）保持默认行为。
+  a: ({ href, children }) => (
+    <a
+      href={href}
+      className="text-primary underline underline-offset-2 hover:opacity-80 cursor-pointer"
+      onClick={(e) => {
+        if (!href || href.startsWith("#")) return;
+        e.preventDefault();
+        openUrl(href);
+      }}
+    >
+      {children}
+    </a>
   ),
 };
 

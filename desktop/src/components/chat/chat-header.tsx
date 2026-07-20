@@ -1,13 +1,15 @@
 import { useState, useEffect, useRef } from "react";
-import { Pencil, Check, X, Sun, Moon, RefreshCw } from "lucide-react";
+import { Pencil, Check, X, Sun, Moon, RefreshCw, Link2 } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Clock, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { renameSession, regenSessionTitle } from "@/lib/api";
+import { getApiUrl } from "@/lib/api-base";
 import { fmtTokens } from "@/lib/utils";
 import { formatTrigger, formatNextRun } from "@/lib/utils";
 import { useTheme } from "./use-theme";
 import type { Usage } from "./types";
+import { ServerStatusBadge } from "@/components/server-status-badge";
 
 interface ChatHeaderProps {
   sessionId: string | null;
@@ -18,11 +20,12 @@ interface ChatHeaderProps {
   onTitleChange: (title: string) => void;
 }
 
-const SOURCE_LABEL: Record<string, string> = { lark: "飞书", repl: "命令行", web: "Web", heartbeat: "心跳" };
+const SOURCE_LABEL: Record<string, string> = { lark: "飞书", repl: "命令行", web: "Web", desktop: "桌面端", heartbeat: "心跳" };
 const SOURCE_COLOR: Record<string, string> = {
   lark: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
   repl: "bg-purple-500/15 text-purple-600 dark:text-purple-400",
   web: "bg-green-500/15 text-green-600 dark:text-green-400",
+  desktop: "bg-cyan-500/15 text-cyan-600 dark:text-cyan-400",
   heartbeat: "bg-orange-500/15 text-orange-600 dark:text-orange-400",
 };
 
@@ -30,6 +33,7 @@ export function ChatHeader({ sessionId, title, source, usage, schedules, onTitle
   const [isEditing, setIsEditing] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [editingTitle, setEditingTitle] = useState("");
+  const [copied, setCopied] = useState(false);
   const { theme, toggle: toggleTheme } = useTheme();
 
   // 窗口拖拽：整个 header 区域可拖拽移动窗口（用 Tauri JS API，不依赖 data-tauri-drag-region）
@@ -100,7 +104,7 @@ export function ChatHeader({ sessionId, title, source, usage, schedules, onTitle
                 onClick={startEdit}
                 title="Click to rename"
               >
-                <span className="truncate">{title}</span>
+                <span key={title} className="truncate animate-in fade-in slide-in-from-bottom-1 duration-300">{title}</span>
                 <Pencil className="h-3 w-3 opacity-0 group-hover:opacity-50 shrink-0" />
               </button>
               <button
@@ -137,10 +141,41 @@ export function ChatHeader({ sessionId, title, source, usage, schedules, onTitle
           </span>
         )}
 
+        {sessionId && (
+          <div className="relative">
+            <Button
+              variant="ghost"
+              size="icon"
+              className={usage.input > 0 ? "ml-2" : "ml-auto"}
+              onClick={async () => {
+                try {
+                  const url = `${getApiUrl().replace(/\/api\/?$/, "")}/chat/${sessionId}/`;
+                  await navigator.clipboard.writeText(url);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1500);
+                } catch (e) {
+                  alert("复制失败: " + (e as Error).message);
+                }
+              }}
+              title="复制 Web 地址"
+            >
+              <Link2 className="h-4 w-4" />
+            </Button>
+            {copied && (
+              <div className="absolute right-0 top-full mt-1 z-50 px-2 py-1 rounded-md bg-foreground text-background text-xs whitespace-nowrap shadow-md animate-in fade-in slide-in-from-top-1 duration-150">
+                已复制 ✓
+              </div>
+            )}
+          </div>
+        )}
+        <ServerStatusBadge
+          variant="full"
+          className={usage.input > 0 ? "ml-2" : (sessionId ? "ml-2" : "ml-auto")}
+        />
         <Button
           variant="ghost"
           size="icon"
-          className={usage.input > 0 ? "ml-2" : "ml-auto"}
+          className="ml-2"
           onClick={toggleTheme}
           title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
         >
