@@ -39,7 +39,7 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 
 **Skill 技能系统**
 - 触发词匹配，自动注入 system prompt 引导行为
-- 可选语义路由器（BGE INT8 + LR 头）在关键词之上补召回，换个说法也能命中（`pip install 'ethan-agent[embedding]'`，不装则纯关键词，详见安装段）
+- 语义路由器（BGE INT8 + LR 头）在关键词之上补召回，换个说法也能命中——内置，依赖随 `pip install ethan-agent` 安装；BGE 模型首次使用时自动下载（~24MB）
 - `fast_path: true` 触发后走毫秒级快速路径，适合全屋智能等高频控制
 - `channels: [lark, web]` 按渠道过滤，Skill 只在指定场景下生效
 - `modes: [法律]` 按对话模式过滤，Skill 只在指定模式下生效（空 = 所有模式）
@@ -53,7 +53,7 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 | 苏念陪伴模式 | 内置 | `/mode 苏念` 或聊天界面切换——无需安装 |
 | 默认技能（channels、lark-im、deepwiki、use-browser、agent-browser、dev-browser 等） | 内置 | 首次运行自动复制 |
 | 记忆系统、定时任务、工具、Web UI | 内置 | `ethan serve` 启动后即用 |
-| 语义路由器（更聪明的技能匹配） | 可选 | `pip install 'ethan-agent[embedding]'` |
+| 语义路由器（更聪明的技能匹配） | 内置 | 首次使用自动下载 BGE 模型（~24MB）——`ethan router pull` 可预拉取 |
 | Tavily 网页搜索 | 可选插件 | `ethan plugin add tavily`（需要 API Key） |
 | 自建 SearXNG | 可选插件 | `ethan plugin add searxng`（或用 `deploy/docker-compose.searxng.yml`） |
 | 法律专家模式（legal-assistant） | 可选技能 | `ethan skill add legal`（或首次 `/mode 法律` 时自动安装） |
@@ -266,27 +266,22 @@ cd ethan-agent
 uv sync
 ```
 
-### 可选：语义路由器（让技能匹配更聪明，新手可跳过）
+### 语义路由器（让技能匹配更聪明，内置）
 
-默认情况下，Ethan 用关键词匹配来决定启用哪个技能。这对大多数场景已经够用，**不装也能正常跑**。
+默认情况下，Ethan 用关键词匹配来决定启用哪个技能。在此之上，**内置**的语义路由器（BGE INT8 + LR 头）补了一层召回，换个说法也能命中（比如不说「发飞书」而说「给客户带句话」也能触发飞书技能）。
 
-如果你希望换个说法也能命中技能（比如不说「发飞书」而说「给客户带句话」也能触发飞书技能），可以开启可选的语义路由器：
+依赖（`onnxruntime` / `tokenizers` / `numpy`）随 `pip install ethan-agent` 安装，无需额外步骤。BGE 模型（~24MB）首次使用时自动下载并缓存到本地：
 
 ```bash
-# 1. 装可选依赖（一个轻量推理运行时，约几十 MB）
-pip install 'ethan-agent[embedding]'      # PyPI 安装
-# 从源码则： uv sync --extra embedding
-
-# 2. 拉模型（约 24MB，仅首次；不手动跑也行，首条消息会自动下载）
+# 预拉取模型（可选——不手动跑也行，首条消息会自动下载）
 ethan router pull
 
-# 3. 确认状态
+# 确认状态
 ethan router status                    # 显示「✓ 路由器就绪」即可
 ```
 
-- **完全可选**：没装依赖、没下模型或离线时，自动退回关键词匹配，不影响任何功能。
+- **优雅降级**：模型还没下好或离线时，自动退回关键词匹配，不影响任何功能。
 - 模型托管在 GitHub，首次用到时自动下载并缓存到本地，之后离线可用。
-- 想关掉：删掉可选依赖即可，无需改配置。
 
 ### 配置
 
@@ -716,7 +711,7 @@ EOF
 - [x] 双来源加载（内置 + 用户自定义）+ 渠道过滤（channels 字段）
 - [x] fast_path 标记、Skill 命中统计、纠正收集、自动更新（Updater）
 - [x] 会话结束后后台自动生成 Skill（Hermes 风格）
-- [x] 可选语义路由器（BGE INT8 + LR 头，macro F1 0.851）在关键词之上补召回；缺失时静默退回关键词。同一套 `[embedding]` 依赖也驱动 memory.db 的语义去重
+- [x] 内置语义路由器（BGE INT8 + LR 头，macro F1 0.851）在关键词之上补召回；缺失时静默退回关键词。同一套依赖也驱动 memory.db 的语义去重
 - [x] 内置技能：home-assistant、lark-im、channels、deepwiki
 
 **工具**

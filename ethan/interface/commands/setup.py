@@ -63,19 +63,8 @@ PRESET_PLUGINS: list[dict] = [
         "install_type": "lark_channel",
         "install_source": "lark-channel",
     },
-    {
-        "name": "embedding-router",
-        "label": "嵌入路由",
-        "description": "语义 skill 路由（BGE 向量 + LR 头），提升泛化召回、减少漏触发",
-        "install_type": "optional_dep",
-        "pip_packages": [
-            "onnxruntime>=1.18.0",
-            "transformers>=4.40.0",
-            "numpy>=1.26.0",
-        ],
-        # 装完依赖后自动拉取 BGE 模型（~24MB），一步到位可用
-        "post_install": "router_pull",
-    },
+    # 注：embedding-router 已内置（onnxruntime/tokenizers/numpy 已在 dependencies 里），
+    # BGE 模型首次使用时自动下载，不再作为插件提供。
 ]
 
 

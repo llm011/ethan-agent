@@ -132,15 +132,15 @@ class SkillRegistry:
             if avail and built:
                 # 主动探测运行时依赖（available/build 不覆盖此步）；用 find_spec 不触发实际 import
                 import importlib.util
-                missing = [mod for mod in ("onnxruntime", "transformers", "numpy")
+                missing = [mod for mod in ("onnxruntime", "tokenizers", "numpy")
                            if importlib.util.find_spec(mod) is None]
                 if missing:
                     # 模型就绪但依赖缺失 → route() 会始终返回 None，实为不可用
                     self._router = None
                     logger.warning(
                         "[router] embedding 路由显示就绪，但依赖缺失 %s，实际不可用"
-                        "（route() 将始终返回 None）。请运行 `ethan plugin add embedding-router`"
-                        " 安装依赖。", missing,
+                        "（route() 将始终返回 None）。请运行 "
+                        "`pip install 'ethan-agent[embedding]'` 安装依赖。", missing,
                     )
                     return
                 self._router = router
@@ -154,7 +154,7 @@ class SkillRegistry:
                 reason = "模型文件缺失" if not avail else "LR 头不可用或可路由 skill 为空"
                 logger.info(
                     "[router] embedding 路由未激活（%s）。available=%s, build=%s。"
-                    " 运行 `ethan plugin add embedding-router` 安装依赖并拉取模型后可启用。",
+                    " 模型首次使用时自动下载，或运行 `ethan router pull` 手动拉取。",
                     reason, avail, built,
                 )
         except Exception as e:

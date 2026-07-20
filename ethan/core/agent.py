@@ -840,11 +840,14 @@ class Agent:
                         final_chunk = chunk
                         self.usage.add(chunk.usage)
             except Exception:
-                # lite 模型（fast 档）可能偶发 503/鉴权失败。若还没产出任何内容，
-                # 回退主模型重试本轮一次，避免整条请求直接挂掉。
+                # lite 模型（fast 档）可能偶发 503/鉴权失败，或 lite 模型在当前
+                # provider 上不可用（如 OpenAI-compat base URL 不认识 gemini-flash-lite）。
+                # 若还没产出任何内容，回退主模型重试本轮一次，并禁用 lite provider
+                # 避免后续 fast 档重复踩坑。
                 if provider is not self._provider and not full_content:
-                    logger.warning("fast 档 provider 调用失败，回退主模型重试", exc_info=True)
+                    logger.warning("fast 档 lite provider 调用失败，回退主模型重试（后续 fast 档将直接用主模型）", exc_info=True)
                     provider = self._provider
+                    self._lite_provider = self._provider  # 禁用 lite，后续 fast 档不再重试
                     full_content = ""
                     final_chunk = None
                     async for chunk in provider.stream_chat(working, tools=tools, system=sys):

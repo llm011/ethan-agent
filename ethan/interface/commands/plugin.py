@@ -98,7 +98,7 @@ def list_plugins() -> None:
 
 @app.command("add")
 def add_plugin(
-    name: str = typer.Argument(..., help="插件名称，如 tavily / searxng / computer-use / embedding-router"),
+    name: str = typer.Argument(..., help="插件名称，如 tavily / searxng / computer-use"),
 ) -> None:
     """添加/安装插件（配置型交互式填写；预设型复用 ethan setup 的安装逻辑）。"""
     # 先查配置型插件注册表

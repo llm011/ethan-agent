@@ -24,6 +24,8 @@ dependencies = [
     "curl-cffi>=0.15.0",
     "fastapi>=0.136.3",
     "mcp>=1.27.2",
+    "numpy>=1.26.0",
+    "onnxruntime>=1.18.0",
     "openai>=2.41.1",
     "pexpect>=4.9.0",
     "prompt-toolkit>=3.0.52",
@@ -33,29 +35,20 @@ dependencies = [
     "rich>=15.0.0",
     "sqlalchemy>=2.0.50",
     "sqlite-vec>=0.1.9",
+    "tokenizers>=0.19.0",
     "typer>=0.26.7",
     "uvicorn[standard]>=0.49.0",
 ]
 
 [project.optional-dependencies]
-# 语义 embedding（可选）：BGE-small-zh INT8 ONNX（24MB，512 维，中文优化）。
+# 语义 embedding（内置）：BGE-small-zh INT8 ONNX（24MB，512 维，中文优化）。
 # 同时服务于 memory.db 的 embedding 生成和 skill 路由器的语义匹配。
-# 不装也能跑——memory 回退 char n-gram hash，router 回退纯关键词匹配。
+# 依赖已内置（onnxruntime / tokenizers / numpy 在 dependencies 里）。
 # INT8 模型 + tokenizer 首次使用时从 GitHub（llm011/router-models）按 raw URL 自动下载；
 # LR 头随包分发。无需手动准备文件，也无需 huggingface_hub/transformers。
-embedding = [
-    "onnxruntime>=1.18.0",
-    "tokenizers>=0.19.0",
-    "numpy>=1.26.0",
-]
-
-# router 是 embedding 的别名（向后兼容），实际依赖相同。
-# 沿用旧名让 `pip install 'ethan-agent[router]'` 仍能工作。
-router = [
-    "onnxruntime>=1.18.0",
-    "tokenizers>=0.19.0",
-    "numpy>=1.26.0",
-]
+# embedding / router extras 保留为空别名，向后兼容 `pip install 'ethan-agent[embedding]'`。
+embedding = []
+router = []
 
 # computer-use（可选）：通过 cua-computer SDK 控制本机桌面截图/鼠标/键盘。
 # 还需安装 cua-driver 后台服务：

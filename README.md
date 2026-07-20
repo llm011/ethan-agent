@@ -41,7 +41,7 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 
 **Skill system**
 - Keyword trigger matching, auto-injected into system prompt
-- Optional semantic router (BGE INT8 + LR head) adds recall on top of keywords so differently-phrased requests still match (`pip install 'ethan-agent[embedding]'`; keyword-only without it — see Install section)
+- Semantic router (BGE INT8 + LR head) adds recall on top of keywords so differently-phrased requests still match — built-in, deps ship with `pip install ethan-agent`; the BGE model auto-downloads on first use (~24MB)
 - `fast_path: true` routes matched input to the millisecond fast track
 - `channels: [lark, web]` filters skills by channel so each surface gets only relevant skills
 - `modes: [法律]` filters skills by conversation mode so each mode gets only relevant skills (empty = all modes)
@@ -55,7 +55,7 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 | 苏念 companion mode | built-in | `/mode 苏念` or toggle in chat UI — nothing to install |
 | Default skills (channels, lark-im, deepwiki, use-browser, agent-browser, dev-browser, …) | built-in | auto-copied on first run |
 | Memory system, scheduler, tools, web UI | built-in | works after `ethan serve` starts |
-| Semantic router (smarter skill matching) | optional | `pip install 'ethan-agent[embedding]'` |
+| Semantic router (smarter skill matching) | built-in | auto-downloads BGE model on first use (~24MB) — `ethan router pull` to pre-fetch |
 | Tavily web search | optional plugin | `ethan plugin add tavily` (needs API key) |
 | Self-hosted SearXNG | optional plugin | `ethan plugin add searxng` (or use the bundled `deploy/docker-compose.searxng.yml`) |
 | Legal expert mode (legal-assistant) | optional skill | `ethan skill add legal` (or auto-installs on first `/mode 法律`) |
@@ -268,27 +268,22 @@ cd ethan-agent
 uv sync
 ```
 
-### Optional: Semantic Router (smarter skill matching — beginners can skip)
+### Semantic Router (smarter skill matching — built-in)
 
-By default, Ethan uses keyword matching to decide which skill to activate. This is enough for most cases and **works without any extra setup**.
+By default, Ethan uses keyword matching to decide which skill to activate. On top of that, a **built-in** semantic router (BGE INT8 + LR head) adds recall so differently-phrased requests still match (e.g. triggering the Feishu skill by saying "pass a message to the client" instead of literally "send Feishu").
 
-If you want skills to match even when phrased differently (e.g. triggering the Feishu skill by saying "pass a message to the client" instead of literally "send Feishu"), enable the optional semantic router:
+The deps (`onnxruntime` / `tokenizers` / `numpy`) ship with `pip install ethan-agent` — no extra install step. The BGE model (~24MB) auto-downloads on first use and is cached locally:
 
 ```bash
-# 1. Install the optional dependency (a lightweight inference runtime, a few tens of MB)
-pip install 'ethan-agent[embedding]'      # from PyPI
-# from source: uv sync --extra embedding
-
-# 2. Pull the model (~24MB, first time only; skippable — the first message auto-downloads it)
+# Pre-fetch the model (optional — the first message auto-downloads it anyway)
 ethan router pull
 
-# 3. Check status
+# Check status
 ethan router status                    # "✓ router ready" means you're set
 ```
 
-- **Fully optional**: with no dependency, no model, or offline, it silently falls back to keyword matching — nothing breaks.
+- **Graceful fallback**: if the model isn't downloaded yet or you're offline, it silently falls back to keyword matching — nothing breaks.
 - The model is hosted on GitHub, downloaded and cached locally on first use, then works offline.
-- To disable: just uninstall the optional dependency, no config change needed.
 
 ### Configure
 
@@ -624,7 +619,7 @@ Environment variables in `.env` override config values (useful for secrets).
 - [x] Dual-source loading (built-in + user-defined) + channel filter (`channels` field)
 - [x] `fast_path` opt-in, hit stats, correction collection, auto-update (Updater)
 - [x] Session-end background Skill generation (Hermes-style)
-- [x] Optional semantic router (BGE INT8 + LR head, macro F1 0.851) for recall beyond keywords; silent keyword fallback. The same `[embedding]` optional dependency also powers semantic dedup in memory.db
+- [x] Built-in semantic router (BGE INT8 + LR head, macro F1 0.851) for recall beyond keywords; silent keyword fallback. The same deps also power semantic dedup in memory.db
 - [x] Built-in skills: home-assistant, lark-im, channels, deepwiki
 
 **Tools**
