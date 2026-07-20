@@ -95,7 +95,6 @@ error            → 错误提示
 | Tab | 功能 | API |
 |-----|------|-----|
 | 事实 Facts | 列表 + 选中编辑 + 删除 | `GET/PATCH/DELETE /api/memory/facts/*` |
-| 情景 Episodes | 列表 + 删除 | `GET/DELETE /api/memory/episodes/*` |
 | 流程 Procedures | 列表 + 删除 | `GET/DELETE /api/memory/procedures/*` |
 
 ---

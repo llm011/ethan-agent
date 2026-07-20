@@ -403,27 +403,33 @@ async def tool_tiers(model: str | None = None):
 
     与 agent._select_route 的取值规则保持一致：
       - fast 档：基础系统工具(fast_base_tools) + 命中规则声明的额外工具；其余靠 find_tools 激活
-      - full 档：全量工具直接可见
+      - full 档：base_tools 初始广播集 + 长尾工具同样靠 find_tools 激活（非全量直接可见）
     所以前端不写死任何清单，每次按当前注册表 + 配置实时算。
+
+    Full tier 的 tools 字段返回全部注册工具（供表格展示），每条用 in_full_base
+    标记是否在初始广播集里；前端据此对长尾工具显示「需激活」而非 ✓。
     """
     agent = create_agent(model)
     tools = sorted(agent._registry.all(), key=lambda t: t.name)
     routing = get_config().defaults.routing
     base_names = set(routing.fast_base_tools)
+    full_base_names = set(routing.base_tools) if routing.base_tools else {t.name for t in tools}
     rule_tool_names = {n for r in routing.fast_rules for n in r.tools}
 
-    def info(t) -> dict:
+    def info(t, in_full_base: bool) -> dict:
         return {
             "name": t.name,
             "description": t.description,
             "fast_path": t.name in base_names,
+            "in_full_base": in_full_base,
             "side_effect": bool(getattr(t, "side_effect", False)),
             "no_compress": bool(getattr(t, "no_compress", False)),
         }
 
-    fast_tools = [info(t) for t in tools if t.name in base_names]
-    fast_rule_tools = [info(t) for t in tools if t.name in rule_tool_names and t.name not in base_names]
-    all_tools = [info(t) for t in tools]
+    fast_tools = [info(t, True) for t in tools if t.name in base_names]
+    fast_rule_tools = [info(t, t.name in full_base_names) for t in tools if t.name in rule_tool_names and t.name not in base_names]
+    full_tools = [info(t, t.name in full_base_names) for t in tools]
+    longtail_count = sum(1 for t in tools if t.name not in full_base_names)
 
     return {
         "tiers": [
@@ -439,11 +445,15 @@ async def tool_tiers(model: str | None = None):
             {
                 "key": "full",
                 "label": "Full 档",
-                "desc": "未命中 fast 规则时进入。全量工具直接可见。",
-                "tools": all_tools,
+                "desc": (
+                    "未命中 fast 规则时进入。✓ 为初始广播工具，其余长尾工具同样需模型调 find_tools 激活。"
+                ),
+                "tools": full_tools,
             },
         ],
         "fast_count": len(fast_tools),
         "fast_rule_tool_count": len(fast_rule_tools),
-        "total_count": len(all_tools),
+        "full_count": len(full_base_names),
+        "longtail_count": longtail_count,
+        "total_count": len(tools),
     }

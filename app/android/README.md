@@ -49,7 +49,7 @@ core/datastore/ → Server URL, token, theme preferences
 |--------|-------------|
 | Chat | SSE streaming, tool timeline, consent dialog, attachments, quote reply |
 | Sessions | Search, rename, delete, 3s poll refresh |
-| Memory | Facts / Episodes / Procedures tabs |
+| Memory | Facts / Procedures tabs |
 | Knowledge | CRUD + semantic/keyword search |
 | Skills | View, create, edit, delete |
 | Schedule | Pause/resume/delete jobs, open linked chat |

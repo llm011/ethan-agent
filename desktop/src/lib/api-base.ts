@@ -1,7 +1,9 @@
 /** 基础设施：API URL、认证、headers、通用接口（Models/Modes/Version）。 */
 
 const STORAGE_KEY_API_URL = "ethan_api_url";
-const DEFAULT_API_URL = "http://127.0.0.1:8989/api";
+// 与后端 ethan.interface.api.run_server 默认端口 8900 对齐。
+// 8989 是早期 Docker 部署的遗留端口，本地 `ethan serve` 不使用。
+const DEFAULT_API_URL = "http://127.0.0.1:8900/api";
 
 /** 桌面端：API URL 存在 localStorage，可在 Settings 中修改。 */
 export function getApiUrl(): string {

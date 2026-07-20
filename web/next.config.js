@@ -8,7 +8,7 @@ const nextConfig = {
   images: { unoptimized: true },
   experimental: {
     turbopack: {
-      root: __dirname,
+      root: require('path').resolve(__dirname, '..'),
     }
   }
 };

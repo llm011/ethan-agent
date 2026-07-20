@@ -4,14 +4,12 @@ Covers differential changes vs. the original agent:
 - A1: FactStore tags + build_context_with_recall (semantic recall)
 - A2: detect_memory_signal (rule-driven memory trigger)
 - A3: lowered consolidation threshold (unit-tested via constant check)
-- B1: ProcedureStore success_patterns + old-format compat
-- B2: _build_suggestion_hint (FDE proactive suggestion injection)
+- B1: ProcedureStore procedures + old-format compat (success_patterns 已退役)
 """
 from __future__ import annotations
 
 import json
 import time
-from unittest.mock import patch
 
 # ---------------------------------------------------------------------------
 # A2: detect_memory_signal
@@ -254,7 +252,6 @@ class TestStructuredRecall:
 
     def test_touch_updates_last_recalled(self, tmp_path):
         """召回命中后 last_recalled_at 应被更新。"""
-        import time
 
         store = self._store(tmp_path)
         mem_id = _seed_memory(store, "用户喜欢深色模式")
@@ -297,66 +294,87 @@ class TestMemoryWriteTool:
 
         asyncio.run(run())
 
+    def test_explicit_memory_type_and_dimension(self, tmp_path, monkeypatch):
+        """显式传 memory_type + dimension 应直接采用，不走 category 兜底。"""
+        import asyncio
+
+        monkeypatch.setattr("ethan.core.paths.CONFIG_DIR", tmp_path)
+
+        async def run():
+            from ethan.tools.builtin.memory_write import MemoryWriteTool
+            await MemoryWriteTool().run(
+                "用户住在苏州",
+                memory_type="personal_information",
+                dimension="identity.location",
+            )
+
+        asyncio.run(run())
+
+        # 验证落库的 memory_type / dimension 是显式传入的值
         from ethan.core.paths import user_vectors_db_path
         from ethan.memory.store import MemoryStore
+
         store = MemoryStore(db_path=user_vectors_db_path())
-        memories = store.list_memories(status="active", limit=10)
-        store.close()
-        assert len(memories) == 1
-        assert memories[0].evidence_level == "corrected"
+        try:
+            memories = store.list_memories(status="active", limit=10)
+            assert len(memories) == 1
+            m = memories[0]
+            assert m.memory_type == "personal_information"
+            assert m.dimension == "identity.location"
+            assert m.evidence_level == "explicit"
+        finally:
+            store.close()
+
+    def test_memory_type_only_uses_correct_dimension_prefix(self, tmp_path, monkeypatch):
+        """agent 传 memory_type 但不传 dimension 时，dimension 兜底前缀应与 dimensions.py 注册表一致。
+
+        回归 bug：personal_information 类型直接 f"{mt}.misc" 会产出
+        "personal_information.misc"，而 extractor 路径产出的是 "identity.misc"，
+        导致 supersede 判定（existing.dimension == candidate.dimension）永远配不上，
+        主动写的 identity 记忆和自动抽取的各存一份、旧值不被替换。
+        """
+        import asyncio
+
+        monkeypatch.setattr("ethan.core.paths.CONFIG_DIR", tmp_path)
+
+        async def run():
+            from ethan.tools.builtin.memory_write import MemoryWriteTool
+            # 不传 dimension，触发兜底
+            await MemoryWriteTool().run(
+                "用户偏好深色模式",
+                memory_type="personal_information",
+            )
+
+        asyncio.run(run())
+
+        from ethan.core.paths import user_vectors_db_path
+        from ethan.memory.store import MemoryStore
+
+        store = MemoryStore(db_path=user_vectors_db_path())
+        try:
+            memories = store.list_memories(status="active", limit=10)
+            assert len(memories) == 1
+            m = memories[0]
+            assert m.memory_type == "personal_information"
+            # 兜底 dimension 必须用 identity. 前缀，和 dimensions.py 注册表对齐
+            assert m.dimension == "identity.misc", (
+                f"personal_information 的兜底 dimension 应为 'identity.misc'，"
+                f"实际为 '{m.dimension}'——supersede 判定会和 extractor 路径对不上"
+            )
+        finally:
+            store.close()
 
 
 # ---------------------------------------------------------------------------
-# B1: ProcedureStore success_patterns
+# B1: ProcedureStore success_patterns（已退役，保留空注释作为分隔）
 # ---------------------------------------------------------------------------
 
-class TestSuccessPatterns:
-    def test_add_new_pattern(self, tmp_path):
-        from ethan.memory.procedures import ProcedureStore
-        store = ProcedureStore(path=tmp_path / "playbook.json")
-        store.add_success_pattern("查京东订单", ["shell:jd_query", "file_write:save"])
-        patterns = store.all_success_patterns()
-        assert len(patterns) == 1
-        assert patterns[0].scenario == "查京东订单"
-        assert patterns[0].success_count == 1
-        assert "shell:jd_query" in patterns[0].tool_sequence
-
-    def test_merge_same_scenario(self, tmp_path):
-        """相同 scenario 的 pattern 应合并，count 累加。"""
-        from ethan.memory.procedures import ProcedureStore
-        store = ProcedureStore(path=tmp_path / "playbook.json")
-        store.add_success_pattern("查京东订单", ["shell:jd_query"])
-        store.add_success_pattern("查京东订单", ["file_write:save"])
-        patterns = store.all_success_patterns()
-        assert len(patterns) == 1
-        assert patterns[0].success_count == 2
-        # 两个 tool 都应保留
-        assert "shell:jd_query" in patterns[0].tool_sequence
-        assert "file_write:save" in patterns[0].tool_sequence
-
-    def test_different_scenarios_separate(self, tmp_path):
-        from ethan.memory.procedures import ProcedureStore
-        store = ProcedureStore(path=tmp_path / "playbook.json")
-        store.add_success_pattern("查京东订单", ["shell:jd_query"])
-        store.add_success_pattern("查淘宝订单", ["shell:tb_query"])
-        assert len(store.all_success_patterns()) == 2
-
-    def test_build_context_includes_success_patterns(self, tmp_path):
-        from ethan.memory.procedures import ProcedureStore
-        store = ProcedureStore(path=tmp_path / "playbook.json")
-        store.add("不要用浏览器模拟登录")
-        store.add_success_pattern("查京东订单", ["shell:jd_query", "file_write:save"])
-        ctx = store.build_context()
-        # 应同时包含纠正准则和成功路径
-        assert "不要用浏览器模拟登录" in ctx
-        assert "Success patterns" in ctx
-        assert "查京东订单" in ctx
-        assert "shell:jd_query" in ctx
-
-    def test_build_context_empty(self, tmp_path):
-        from ethan.memory.procedures import ProcedureStore
-        store = ProcedureStore(path=tmp_path / "playbook.json")
-        assert store.build_context() == ""
+# success_patterns 容器已于 2026-07 退役：
+# - 从 tool_steps 共现统计抽取的"模式"99.4% 是只出现一次的噪声
+# - scenario 字段被 LLM 自身的 meta 污染
+# - 注入 system prompt 信息增益为 0（~27k tokens 浪费）
+# 真正有价值的"行为准则"由 procedure_write 工具 / Consolidator 显式写入 procedures。
+# 相关测试已删除，保留 TestProcedureStoreCompat 验证旧格式加载兼容性。
 
 
 # ---------------------------------------------------------------------------
@@ -365,7 +383,10 @@ class TestSuccessPatterns:
 
 class TestProcedureStoreCompat:
     def test_old_list_format_loads(self, tmp_path):
-        """旧的纯 list 格式应正常加载为 procedures，不丢失数据。"""
+        """旧的纯 list 格式应正常加载为 procedures，不丢失数据。
+
+        注：旧文件中即使有 success_patterns 字段也会被主动丢弃（已退役）。
+        """
         from ethan.memory.procedures import ProcedureStore
         old_data = [
             {"rule": "不要用浏览器模拟登录", "context": "", "created_at": 0, "hit_count": 1},
@@ -377,136 +398,46 @@ class TestProcedureStoreCompat:
         store = ProcedureStore(path=p)
         assert len(store.all()) == 2
         assert store.all()[0].rule == "不要用浏览器模拟登录"
-        # success_patterns 应为空（旧格式没有）
-        assert store.all_success_patterns() == []
 
     def test_new_format_roundtrip(self, tmp_path):
-        """新格式（dict 含 procedures + success_patterns）应完整往返。"""
+        """新格式（dict 含 procedures + 空 success_patterns）应完整往返。"""
         from ethan.memory.procedures import ProcedureStore
         p = tmp_path / "playbook.json"
         store = ProcedureStore(path=p)
         store.add("测试准则")
-        store.add_success_pattern("场景A", ["tool1"])
         store._save()
 
         # 重新加载
         store2 = ProcedureStore(path=p)
         assert len(store2.all()) == 1
         assert store2.all()[0].rule == "测试准则"
-        assert len(store2.all_success_patterns()) == 1
-        assert store2.all_success_patterns()[0].scenario == "场景A"
 
-    def test_old_format_then_add_success_pattern(self, tmp_path):
-        """旧格式文件加载后，添加 success_pattern 应正常保存为新格式。"""
+        # 文件应为新格式（dict），success_patterns 为空数组（向后兼容）
+        data = json.loads(p.read_text(encoding="utf-8"))
+        assert isinstance(data, dict)
+        assert "procedures" in data
+        assert data["success_patterns"] == []
+
+    def test_old_format_with_success_patterns_dropped(self, tmp_path):
+        """旧格式文件含已退役的 success_patterns 字段，加载时应主动丢弃。"""
         from ethan.memory.procedures import ProcedureStore
-        old_data = [{"rule": "旧准则", "context": "", "created_at": 0, "hit_count": 1}]
+        old_data = {
+            "procedures": [{"rule": "旧准则", "context": "", "created_at": 0, "hit_count": 1}],
+            "success_patterns": [
+                {"scenario": "应被丢弃", "tool_sequence": ["tool1"], "success_count": 5}
+            ],
+        }
         p = tmp_path / "playbook.json"
         p.write_text(json.dumps(old_data), encoding="utf-8")
 
         store = ProcedureStore(path=p)
-        store.add_success_pattern("新场景", ["tool1"])
-        store._save()
+        store._save()  # 触发重写
 
-        # 文件应为新格式（dict）
+        # 重读文件 —— success_patterns 应被清空
         data = json.loads(p.read_text(encoding="utf-8"))
-        assert isinstance(data, dict)
-        assert "procedures" in data
-        assert "success_patterns" in data
+        assert data["success_patterns"] == []
         assert len(data["procedures"]) == 1
-        assert len(data["success_patterns"]) == 1
-
-
-# ---------------------------------------------------------------------------
-# B2: _build_suggestion_hint
-# ---------------------------------------------------------------------------
-
-class TestSuggestionHint:
-    """测试 Agent._build_suggestion_hint 的过滤逻辑。"""
-
-    def _make_agent(self):
-        from ethan.core.agent import Agent
-        with patch.object(Agent, "__init__", lambda self, *a, **kw: None):
-            agent = Agent()
-        return agent
-
-    def test_no_suggestions_file(self, tmp_path):
-        agent = self._make_agent()
-        with patch("ethan.core.paths.CONFIG_DIR", tmp_path):
-            assert agent._build_suggestion_hint() is None
-
-    def test_pending_suggestion_returned(self, tmp_path):
-        agent = self._make_agent()
-        mem_dir = tmp_path / "memory"
-        mem_dir.mkdir()
-        suggestions = [{
-            "pattern": "每天早上问天气",
-            "count": 4,
-            "suggestion": "可以设置定时天气播报",
-            "created_at": time.time(),
-            "rejected": False,
-        }]
-        (mem_dir / "suggestions.json").write_text(
-            json.dumps(suggestions, ensure_ascii=False), encoding="utf-8"
-        )
-        with patch("ethan.core.paths.CONFIG_DIR", tmp_path):
-            hint = agent._build_suggestion_hint()
-        assert hint is not None
-        assert "每天早上问天气" in hint
-        assert "proactive_suggestion" in hint
-
-    def test_rejected_suggestion_filtered(self, tmp_path):
-        agent = self._make_agent()
-        mem_dir = tmp_path / "memory"
-        mem_dir.mkdir()
-        suggestions = [{
-            "pattern": "已拒绝的建议",
-            "count": 5,
-            "suggestion": "不应出现",
-            "created_at": time.time(),
-            "rejected": True,
-        }]
-        (mem_dir / "suggestions.json").write_text(
-            json.dumps(suggestions, ensure_ascii=False), encoding="utf-8"
-        )
-        with patch("ethan.core.paths.CONFIG_DIR", tmp_path):
-            assert agent._build_suggestion_hint() is None
-
-    def test_expired_suggestion_filtered(self, tmp_path):
-        """超过 7 天的建议应被过滤。"""
-        agent = self._make_agent()
-        mem_dir = tmp_path / "memory"
-        mem_dir.mkdir()
-        suggestions = [{
-            "pattern": "过期建议",
-            "count": 3,
-            "suggestion": "不应出现",
-            "created_at": time.time() - 8 * 86400,  # 8 天前
-            "rejected": False,
-        }]
-        (mem_dir / "suggestions.json").write_text(
-            json.dumps(suggestions, ensure_ascii=False), encoding="utf-8"
-        )
-        with patch("ethan.core.paths.CONFIG_DIR", tmp_path):
-            assert agent._build_suggestion_hint() is None
-
-    def test_only_most_recent_returned(self, tmp_path):
-        """多条 pending 建议时，只返回最近 1 条。"""
-        agent = self._make_agent()
-        mem_dir = tmp_path / "memory"
-        mem_dir.mkdir()
-        now = time.time()
-        suggestions = [
-            {"pattern": "旧建议", "count": 3, "suggestion": "旧的", "created_at": now - 100, "rejected": False},
-            {"pattern": "新建议", "count": 5, "suggestion": "新的", "created_at": now, "rejected": False},
-        ]
-        (mem_dir / "suggestions.json").write_text(
-            json.dumps(suggestions, ensure_ascii=False), encoding="utf-8"
-        )
-        with patch("ethan.core.paths.CONFIG_DIR", tmp_path):
-            hint = agent._build_suggestion_hint()
-        assert hint is not None
-        assert "新建议" in hint
-        assert "旧建议" not in hint
+        assert data["procedures"][0]["rule"] == "旧准则"
 
 
 # ---------------------------------------------------------------------------
@@ -522,15 +453,19 @@ class TestConsolidationThreshold:
         assert cfg.warm_capacity <= 10, "warm_capacity 应 ≤ 10（原值 20）"
 
     def test_web_consolidate_interval(self):
-        """结构化提取的触发门槛是 user_turns % 5（_run_structured_extraction 内）。"""
+        """结构化提取的触发门槛是 user_turns % 3（_run_structured_extraction 内）。
+
+        注意：_maybe_generate_skill 仍保留 % 5 != 0 节流（skill 生成比记忆提取重，
+        保持更克制的频率），所以不能做全文件断言。
+        """
         import inspect
 
         from ethan.interface.routers import tasks
-        source = inspect.getsource(tasks)
-        # 确保 consolidation 门槛用的是 % 5 而不是 % 10
-        # (源码里 daily_signals 的 % 10 是合法的,不做全文件断言)
-        assert "user_turns % 5 != 0" in source
-        assert "user_turns % 10 != 0" not in source
+        extraction_src = inspect.getsource(tasks._run_structured_extraction)
+        # 记忆提取门槛用的是 % 3（从 % 5 降级到 % 3 以更及时捕获用户事实）
+        assert "user_turns % 3 != 0" in extraction_src
+        assert "user_turns % 5 != 0" not in extraction_src
+        assert "user_turns % 10 != 0" not in extraction_src
 
     def test_legacy_compress_extraction_removed(self):
         """旧 flat-facts 链路（compress/extract_cold）已从 _maybe_consolidate 退役。"""

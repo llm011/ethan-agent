@@ -16,7 +16,6 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 - **Dimension registry**: the extraction prompt's dimension guide and the validation whitelist are both generated from one declarative registry — extending memory types never touches prompt text by hand
 - Hot/warm sliding window for long-conversation context (REPL); older content auto-compressed by a cheap model
 - Behavioral Procedures: learned from user corrections, loaded every conversation (`playbook.json`)
-- Session Episodes: auto-summarized per session, supports keyword search (`episodes.json`)
 - User Profile: narrative document storing personal phrases, goals, and agent agreements (`user_profile.md`); sections include 基础特征 (basic traits) and 心理与情绪 (emotional/psychological traits)
 - **Proactive memory write**: Agent calls `memory_write` mid-conversation — the write flows through the same candidate→admission pipeline (no separate store, same evidence semantics)
 
@@ -179,7 +178,7 @@ docker compose down                   # stop
 
 ### 6. Multi-user (optional)
 
-Ethan supports multiple isolated users sharing one instance. Each user has their own memory (structured memories / procedures / episodes / sessions), skills, and knowledge base — fully isolated per user. System prompts and provider config stay shared.
+Ethan supports multiple isolated users sharing one instance. Each user has their own memory (structured memories / procedures / sessions), skills, and knowledge base — fully isolated per user. System prompts and provider config stay shared.
 
 Define users in `config.yaml` (each user binds a `web_token` for browser login and `api_keys` for the `/v1/chat/completions` API — both resolve to the same `user_id`):
 
@@ -330,7 +329,6 @@ ethan/
 │   ├── memory_vectors.py      # BGE vector index for memories
 │   ├── nightly_consolidation.py # Unified nightly pass (structured + dream)
 │   ├── procedures.py          # Behavioral rules (learned from corrections)
-│   ├── episodic.py            # Session episode archive
 │   └── consolidator.py        # Compress with cheap model
 ├── skills/
 │   ├── loader.py              # Load skills (directory format + legacy .md)
@@ -479,7 +477,6 @@ GET  /sessions/{id}             # Session detail + messages
 GET  /memory/facts              # Memories list (legacy-compatible view)
 GET  /memory/records            # Structured memories (filter: type/domain/status)
 GET  /memory/records/{id}       # Memory detail + evidence chain
-GET  /memory/episodes           # Episode summaries
 GET  /skills                    # Skill list
 POST /skills                    # Create skill
 POST /skills/evolve             # Trigger skill auto-update
@@ -549,7 +546,6 @@ Environment variables in `.env` override config values (useful for secrets).
 ├── memory/
 │   ├── memory.db        # Structured memories + evidence + insights + vector index
 │   ├── playbook.json  # Behavioral rules
-│   ├── episodes.json    # Session episode archive
 │   └── user_profile.md  # User profile (narrative)
 ├── skills/              # User-defined skills
 │   └── <name>/
@@ -573,7 +569,6 @@ Environment variables in `.env` override config values (useful for secrets).
 - [x] Hot/warm/cold sliding window + cheap-model batch compression
 - [x] Structured Facts (confidence scoring + conflict detection)
 - [x] Behavioral Procedures (learned from user corrections)
-- [x] Session Episode archive (auto-summary, keyword search)
 - [x] User Profile — narrative document with five named sections
 - [x] Proactive memory write: `memory_write`, `procedure_write`, `profile_update`, `skill_create`
 - [x] Memory context isolation (anti-pollution XML tags)

@@ -46,6 +46,9 @@ htmlcov/
 ethan/web_dist/
 ethan/docs/
 
+# Shared symlinks (created by dev setup, CI recreates)
+shared/node_modules
+
 # Claude Code artifacts
 .agents/
 skills-lock.json

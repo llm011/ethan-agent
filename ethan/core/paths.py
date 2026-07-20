@@ -54,14 +54,6 @@ def user_procedures_path() -> Path:
     return user_memory_dir() / "playbook.json"
 
 
-def user_episodes_path() -> Path:
-    return user_memory_dir() / "episodes.json"
-
-
-def user_suggestions_path() -> Path:
-    return user_memory_dir() / "suggestions.json"
-
-
 def user_profile_path() -> Path:
     return user_memory_dir() / "user_profile.md"
 
@@ -292,7 +284,6 @@ def _merge_admin_to_default(admin_dir: Path) -> None:
         if legacy.exists() and legacy.stat().st_size > 0 and not new.exists():
             shutil.copy2(str(legacy), str(new))
     _merge_json_file(admin_memory, top_memory, "playbook.json")
-    _merge_json_file(admin_memory, top_memory, "episodes.json")
 
     # 2b. lark_sessions.json：运行时状态，放在数据根目录（非 memory/）
     #      兼容旧路径 memory/lark_sessions.json
