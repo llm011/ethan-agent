@@ -8,15 +8,16 @@
 # ── Stage 1: 构建 Web UI（静态导出） ──────────────────────────
 FROM node:20-alpine AS web-builder
 
-WORKDIR /web
-COPY web/package.json web/pnpm-lock.yaml ./
-RUN npm install -g pnpm && pnpm install --frozen-lockfile
+WORKDIR /build
+COPY web/package.json web/pnpm-lock.yaml ./web/
+RUN cd web && npm install -g pnpm && pnpm install --frozen-lockfile
 
-COPY web/ .
+COPY web/ ./web/
+COPY shared/ ./shared/
 ENV NEXT_TELEMETRY_DISABLED=1
 # export 模式：产出纯静态文件，由 FastAPI 直接 serve
 ENV NEXT_OUTPUT=export
-RUN pnpm run build
+RUN cd web && pnpm run build
 
 # ── Stage 2: Python 运行时 ────────────────────────────────────
 FROM python:3.12-slim
@@ -64,7 +65,7 @@ COPY README.md README_CN.md ./
 # 从 Stage 1 拷入 Web UI 静态产物。
 # 放 /app/web_dist（ethan/ 之外）：一是不进 Python 包、避免 uv sync 重装时挪动；
 # 二是避免本地开发 mount ethan/ 源码时把前端产物覆盖掉。配合 WEB_DIST_PATH 指过来。
-COPY --from=web-builder /web/out ./web_dist
+COPY --from=web-builder /build/web/out ./web_dist
 
 # 安装项目本身（同上，带 lark extra）
 RUN uv sync --frozen --no-dev --extra lark

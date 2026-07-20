@@ -6,10 +6,8 @@ const nextConfig = {
   basePath: process.env.NEXT_PUBLIC_BASE_PATH || '',
   trailingSlash: true,
   images: { unoptimized: true },
-  experimental: {
-    turbopack: {
-      root: require('path').resolve(__dirname, '..'),
-    }
+  turbopack: {
+    root: require('path').resolve(__dirname, '..'),
   }
 };
 
