@@ -414,16 +414,19 @@ class TestConsolidationThreshold:
         assert cfg.warm_capacity <= 10, "warm_capacity 应 ≤ 10（原值 20）"
 
     def test_web_consolidate_interval(self):
-        """结构化提取的触发门槛是 user_turns % 3（_run_structured_extraction 内）。"""
+        """结构化提取的触发门槛是 user_turns % 3（_run_structured_extraction 内）。
+
+        注意：_maybe_generate_skill 仍保留 % 5 != 0 节流（skill 生成比记忆提取重，
+        保持更克制的频率），所以不能做全文件断言。
+        """
         import inspect
 
         from ethan.interface.routers import tasks
-        source = inspect.getsource(tasks)
-        # 确保 consolidation 门槛用的是 % 3（从 % 5 降级到 % 3 以更及时捕获用户事实）
-        # (源码里 daily_signals 的 % 10 是合法的,不做全文件断言)
-        assert "user_turns % 3 != 0" in source
-        assert "user_turns % 5 != 0" not in source
-        assert "user_turns % 10 != 0" not in source
+        extraction_src = inspect.getsource(tasks._run_structured_extraction)
+        # 记忆提取门槛用的是 % 3（从 % 5 降级到 % 3 以更及时捕获用户事实）
+        assert "user_turns % 3 != 0" in extraction_src
+        assert "user_turns % 5 != 0" not in extraction_src
+        assert "user_turns % 10 != 0" not in extraction_src
 
     def test_legacy_compress_extraction_removed(self):
         """旧 flat-facts 链路（compress/extract_cold）已从 _maybe_consolidate 退役。"""
