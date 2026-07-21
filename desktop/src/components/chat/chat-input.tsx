@@ -1,4 +1,4 @@
-import { useState, useRef, RefObject, useCallback } from "react";
+import { useState, useRef, RefObject, useCallback, useImperativeHandle, forwardRef } from "react";
 import { Send, Paperclip, X, Reply, Square, ImageIcon } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@ethan/shared/ui/select";
 import { uploadFile, type ModeEntry } from "@/lib/api";
@@ -23,6 +23,10 @@ const ACCENT_STYLES: Record<string, { on: string }> = {
 const OFF_STYLE =
   "bg-transparent border-transparent text-muted-foreground hover:text-foreground hover:bg-muted";
 
+export interface ChatInputHandle {
+  restoreInput: (text: string) => void;
+}
+
 interface ChatInputProps {
   streaming: boolean;
   stopping?: boolean;
@@ -41,7 +45,7 @@ interface ChatInputProps {
   onModeChange?: (mode: string) => void;
 }
 
-export function ChatInput({
+export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({
   streaming,
   stopping = false,
   models,
@@ -57,8 +61,12 @@ export function ChatInput({
   modes = [],
   mode = "",
   onModeChange,
-}: ChatInputProps) {
+}, ref) {
   const [input, setInput] = useState("");
+
+  useImperativeHandle(ref, () => ({
+    restoreInput: (text: string) => setInput(text),
+  }), []);
   const [dragging, setDragging] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -316,4 +324,4 @@ export function ChatInput({
       </div>
     </div>
   );
-}
+});

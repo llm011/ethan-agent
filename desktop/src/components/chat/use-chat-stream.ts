@@ -22,13 +22,14 @@ export async function consumeStream(
   baseMessages: Message[],
   actions: ConsumeStreamActions,
   trackTtft = false,
-): Promise<void> {
+): Promise<{ failed: boolean }> {
   const {
     setMessages, setConsentRequest, setBgPolling,
     setSessionTitle, setSessionUsage, setStopping, setStreaming,
     activeSession,
   } = actions;
 
+  let failed = false;
   let assistantContent = "";
   let intermediateOutput = "";
   const assistantThought = "";
@@ -92,6 +93,7 @@ export async function consumeStream(
         continue;
       }
       if (chunk.error) {
+        failed = true;
         const errLine = `⚠️ ${chunk.error}`;
         assistantContent = assistantContent.trim()
           ? `${assistantContent}\n\n---\n${errLine}`
@@ -206,6 +208,7 @@ export async function consumeStream(
       }
     }
   } catch (err) {
+    failed = true;
     const errLine = `⚠️ ${err instanceof Error ? err.message : "连接中断"}`;
     assistantContent = assistantContent.trim()
       ? `${assistantContent}\n\n---\n${errLine}`
@@ -253,4 +256,6 @@ export async function consumeStream(
   setConsentRequest(null);
   setStopping(false);
   setStreaming(false);
+
+  return { failed };
 }
