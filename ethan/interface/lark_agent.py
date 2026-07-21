@@ -40,7 +40,6 @@ async def _handle_agent_message(
     from ethan.core.agent import Agent
 
     # 查找或创建对应的 Session（lark 渠道归 admin）
-    from ethan.core.paths import user_sessions_db_path
     from ethan.interface.lark_stream import (
         _lark_chat_map,
         _lark_running_tasks,
@@ -52,12 +51,11 @@ async def _handle_agent_message(
         _save_lark_map,
         _untrack_task,
     )
-    from ethan.memory.session import SessionStore
+    from ethan.memory.session import get_session_store
     from ethan.providers.base import Message, SkillsMatchedEvent, ThinkingEvent, ToolEvent
     from ethan.skills.registry import SkillRegistry
     from ethan.tools.registry import ToolRegistry
-    store = SessionStore(db_path=user_sessions_db_path())
-    await store.init()
+    store = await get_session_store()
 
     try:
         from ethan.core.config import get_config
@@ -664,7 +662,6 @@ async def _handle_agent_message(
         except Exception:
             logger.exception("[Lark] error while saving stopped content for chat %s", chat_id)
         finally:
-            await store.close()
             _untrack_task(chat_id, asyncio.current_task())
         return
 
@@ -675,11 +672,9 @@ async def _handle_agent_message(
             await ts.clear()
         except Exception:
             logger.debug("TypingState.clear on error path failed", exc_info=True)
-        await store.close()
         _untrack_task(chat_id, asyncio.current_task())
         return
 
-    await store.close()
     _untrack_task(chat_id, asyncio.current_task())
 
     # A3: 飞书渠道也触发后台记忆抽取（原来只有 Web/REPL 触发）

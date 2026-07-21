@@ -69,16 +69,13 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
             result_text = f"⚠️ 定时任务执行失败: {e}"
             import asyncio
 
-            from ethan.core.paths import user_sessions_db_path
-            from ethan.memory.session import SessionStore
+            from ethan.memory.session import get_session_store
             from ethan.providers.base import Message
             async def log_error():
-                store = SessionStore(db_path=user_sessions_db_path())
-                await store.init()
+                store = await get_session_store()
                 err_msg = Message(role="assistant", content=f"⚠️ 定时任务后台执行失败:\n```text\n{e}\n```")  # noqa: F821 — closure over except-var
                 await store.save_message(session_id, err_msg)
                 await store.touch(session_id)
-                await store.close()
             try:
                 asyncio.run(log_error())
             except Exception as e2:
@@ -156,8 +153,7 @@ class ScheduleCreateTool(BaseTool):
         import httpx
 
         from ethan.core.config import get_config
-        from ethan.core.paths import user_sessions_db_path
-        from ethan.memory.session import SessionStore
+        from ethan.memory.session import get_session_store
 
         if not cron and interval_minutes <= 0:
             return "Error: provide either 'cron' or 'interval_minutes'"
@@ -184,11 +180,9 @@ class ScheduleCreateTool(BaseTool):
             channel_context = "{}"
 
         # Create a dedicated session for this task (per-user)
-        store = SessionStore(db_path=user_sessions_db_path())
-        await store.init()
+        store = await get_session_store()
         session = await store.create(get_config().defaults.model, source="schedule")
         await store.update_title(session.id, f"[定时] {title}")
-        await store.close()
 
         # Send request to FastAPI backend
         token = get_config().network.auth_token

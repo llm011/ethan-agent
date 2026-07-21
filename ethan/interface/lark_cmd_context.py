@@ -39,15 +39,10 @@ async def _resolve_lark_session(cid: str) -> str | None:
 async def _list_lark_sessions(cid: str) -> str:
     from datetime import datetime
 
-    from ethan.core.paths import user_sessions_db_path
     from ethan.interface.lark_stream import _lark_chat_map
-    from ethan.memory.session import SessionStore
-    store = SessionStore(db_path=user_sessions_db_path())
-    await store.init()
-    try:
-        recent = await store.list_recent(5)
-    finally:
-        await store.close()
+    from ethan.memory.session import get_session_store
+    store = await get_session_store()
+    recent = await store.list_recent(5)
     if not recent:
         return "暂无会话。"
     current = _lark_chat_map.get(cid)
@@ -62,15 +57,10 @@ async def _list_lark_sessions(cid: str) -> str:
 
 
 async def _resume_lark_session(cid: str, sid_prefix: str) -> str:
-    from ethan.core.paths import user_sessions_db_path
     from ethan.interface.lark_stream import _lark_chat_map, _load_lark_map, _save_lark_map
-    from ethan.memory.session import SessionStore
-    store = SessionStore(db_path=user_sessions_db_path())
-    await store.init()
-    try:
-        recent = await store.list_recent(50)
-    finally:
-        await store.close()
+    from ethan.memory.session import get_session_store
+    store = await get_session_store()
+    recent = await store.list_recent(50)
     match = next((s for s in recent if s.id == sid_prefix or s.id.endswith(sid_prefix)), None)
     if not match:
         return f"找不到会话：{sid_prefix}\n用 /sessions 查看可用 id"
@@ -83,10 +73,9 @@ async def _resume_lark_session(cid: str, sid_prefix: str) -> str:
 
 async def _compact_lark_session(cid: str) -> str:
     from ethan.core.config import get_config
-    from ethan.core.paths import user_sessions_db_path
     from ethan.core.session_ops import compact_session
     from ethan.interface.lark_stream import _lark_chat_map, _load_lark_map
-    from ethan.memory.session import SessionStore
+    from ethan.memory.session import get_session_store
     sid = _lark_chat_map.get(cid)
     if not sid:
         if not _lark_chat_map:
@@ -94,20 +83,15 @@ async def _compact_lark_session(cid: str) -> str:
         sid = _lark_chat_map.get(cid)
     if not sid:
         return "当前没有进行中的会话，先聊几句再 /compact 吧~"
-    store = SessionStore(db_path=user_sessions_db_path())
-    await store.init()
-    try:
-        return await compact_session(store, sid, get_config().defaults.model)
-    finally:
-        await store.close()
+    store = await get_session_store()
+    return await compact_session(store, sid, get_config().defaults.model)
 
 
 async def _summary_lark_session(cid: str) -> str:
     from ethan.core.config import get_config
-    from ethan.core.paths import user_sessions_db_path
     from ethan.core.session_ops import summary_session
     from ethan.interface.lark_stream import _lark_chat_map, _load_lark_map
-    from ethan.memory.session import SessionStore
+    from ethan.memory.session import get_session_store
     sid = _lark_chat_map.get(cid)
     if not sid:
         if not _lark_chat_map:
@@ -115,12 +99,8 @@ async def _summary_lark_session(cid: str) -> str:
         sid = _lark_chat_map.get(cid)
     if not sid:
         return "当前没有进行中的会话，先聊几句再 /summary 吧~"
-    store = SessionStore(db_path=user_sessions_db_path())
-    await store.init()
-    try:
-        return await summary_session(store, sid, get_config().defaults.model)
-    finally:
-        await store.close()
+    store = await get_session_store()
+    return await summary_session(store, sid, get_config().defaults.model)
 
 
 async def _set_lark_owner(cid: str, sid: str) -> str:
@@ -150,6 +130,7 @@ async def _set_lark_owner(cid: str, sid: str) -> str:
 
 async def _get_lark_mode(cid: str) -> str:
     from ethan.interface.lark_stream import _lark_chat_map, _load_lark_map
+    from ethan.memory.session import get_session_store
     sid = _lark_chat_map.get(cid)
     if not sid:
         if not _lark_chat_map:
@@ -157,37 +138,26 @@ async def _get_lark_mode(cid: str) -> str:
         sid = _lark_chat_map.get(cid)
     if not sid:
         return ""
-    from ethan.core.paths import user_sessions_db_path
-    from ethan.memory.session import SessionStore
-    store = SessionStore(db_path=user_sessions_db_path())
-    await store.init()
-    try:
-        s = await store.load(sid)
-        return getattr(s, "mode", "") or "" if s else ""
-    finally:
-        await store.close()
+    store = await get_session_store()
+    s = await store.load(sid)
+    return getattr(s, "mode", "") or "" if s else ""
 
 
 async def _set_lark_mode(cid: str, mode_key: str) -> None:
     """切换当前飞书会话模式；无会话则新建一个带该模式的 session。"""
     from ethan.core.config import get_config as _gc
-    from ethan.core.paths import user_sessions_db_path
     from ethan.interface.lark_stream import _lark_chat_map, _load_lark_map, _save_lark_map
-    from ethan.memory.session import SessionStore
+    from ethan.memory.session import get_session_store
     if not _lark_chat_map:
         _lark_chat_map.update(_load_lark_map())
     sid = _lark_chat_map.get(cid)
-    store = SessionStore(db_path=user_sessions_db_path())
-    await store.init()
-    try:
-        if not sid:
-            s = await store.create(_gc().defaults.model, source="lark", mode=mode_key)
-            _lark_chat_map[cid] = s.id
-            _save_lark_map(_lark_chat_map)
-        else:
-            await store.update_mode(sid, mode_key)
-    finally:
-        await store.close()
+    store = await get_session_store()
+    if not sid:
+        s = await store.create(_gc().defaults.model, source="lark", mode=mode_key)
+        _lark_chat_map[cid] = s.id
+        _save_lark_map(_lark_chat_map)
+    else:
+        await store.update_mode(sid, mode_key)
 
 
 def build_cmd_context(chat_id: str, text: str, sender_open_id: str, *, is_group_chat: bool = False) -> CommandContext:

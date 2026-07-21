@@ -14,7 +14,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from ethan.memory.session import SessionStore
+from ethan.memory.session import get_session_store
 
 console = Console()
 app = typer.Typer(help="管理对话会话", invoke_without_command=True)
@@ -40,10 +40,8 @@ def list_sessions(
 ) -> None:
     """列出最近的会话。"""
     async def _run():
-        store = SessionStore(db_path=_user_session_db_path())
-        await store.init()
+        store = await get_session_store()
         sessions = await store.list_recent(limit)
-        await store.close()
 
         if not sessions:
             console.print("[dim]暂无历史会话。[/dim]")
@@ -70,10 +68,8 @@ def show_session(
 ) -> None:
     """查看某个会话的消息摘要。"""
     async def _run():
-        store = SessionStore(db_path=_user_session_db_path())
-        await store.init()
+        store = await get_session_store()
         session = await store.load(session_id)
-        await store.close()
 
         if not session:
             console.print(f"[red]会话 {session_id!r} 不存在。[/red]")
@@ -97,15 +93,12 @@ def rename_session(
 ) -> None:
     """重命名一个会话。"""
     async def _run():
-        store = SessionStore(db_path=_user_session_db_path())
-        await store.init()
+        store = await get_session_store()
         session = await store.load(session_id)
         if not session:
             console.print(f"[red]会话 {session_id!r} 不存在。[/red]")
-            await store.close()
             raise typer.Exit(1)
         await store.update_title(session_id, title)
-        await store.close()
         console.print(f"[green]✓ 已重命名：{session_id} → {title!r}[/green]")
 
     asyncio.run(_run())
@@ -117,10 +110,8 @@ def delete_session(
 ) -> None:
     """删除一个会话及其所有消息。"""
     async def _run():
-        store = SessionStore(db_path=_user_session_db_path())
-        await store.init()
+        store = await get_session_store()
         ok = await store.delete(session_id)
-        await store.close()
 
         if ok:
             console.print(f"[green]✓ 已删除会话：{session_id}[/green]")

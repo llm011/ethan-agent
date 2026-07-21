@@ -17,7 +17,7 @@ from rich.text import Text
 from ethan.core.agent import Agent
 from ethan.core.config import get_config
 from ethan.memory.consolidator import Consolidator
-from ethan.memory.session import Session, SessionStore, decide_title
+from ethan.memory.session import Session, decide_title, get_session_store
 from ethan.memory.working import MemoryConfig, WorkingMemory
 from ethan.providers.base import Message
 
@@ -68,9 +68,7 @@ async def run_repl(agent: Agent, resume_id: str | None = None, auto_consent: boo
         consent_provider = TuiConsentProvider(console=console)
     set_consent_provider(consent_provider)
 
-    from ethan.core.paths import user_sessions_db_path
-    store = SessionStore(db_path=user_sessions_db_path())
-    await store.init()
+    store = await get_session_store()
 
     # 恢复或新建 session（新建时先不写 DB，等到第一条消息再持久化）
     session: Session | None = None
@@ -527,5 +525,3 @@ async def run_repl(agent: Agent, resume_id: str | None = None, auto_consent: boo
             pass  # 静默清理，不打印
     except Exception:
         pass
-
-    await store.close()

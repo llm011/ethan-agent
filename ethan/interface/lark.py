@@ -21,7 +21,7 @@ from lark_oapi.api.im.v1 import (
 
 from ethan.core.agent import Agent
 from ethan.core.config import get_config
-from ethan.memory.session import SessionStore
+from ethan.memory.session import SessionStore, get_session_store
 from ethan.providers.base import Message
 from ethan.tools.builtin.schedule import lark_chat_id_var
 
@@ -155,10 +155,8 @@ async def lark_webhook(request: Request):
         await _add_reaction(client, message_id, "THINKING_FACE")
 
     # ── 4. Run Agent ──────────────────────────────────────────────
-    from ethan.core.paths import user_sessions_db_path
     lark_user_id = _get_lark_user_id()
-    store = SessionStore(db_path=user_sessions_db_path())
-    await store.init()
+    store = await get_session_store()
 
     try:
         session_id = await _get_or_create_session(store, chat_id)
@@ -178,10 +176,7 @@ async def lark_webhook(request: Request):
         await store.touch(session_id)
     except Exception:
         logger.exception("Agent error while handling Lark message")
-        await store.close()
         return JSONResponse({"code": 0})
-
-    await store.close()
 
     # ── 5. Reply via Lark API ─────────────────────────────────────
     if client and response.content:

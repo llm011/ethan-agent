@@ -173,7 +173,7 @@ async def _consolidate_profile_for_user(user_id: str) -> None:
 async def _run_heartbeat_md() -> None:
     """读取 heartbeat.md，若有内容则作为 agent 任务执行，结果保存到专属 session。"""
     from ethan.core.config import get_config
-    from ethan.memory.session import SessionStore
+    from ethan.memory.session import get_session_store
     from ethan.providers.base import Message
 
     cfg = get_config()
@@ -189,7 +189,6 @@ async def _run_heartbeat_md() -> None:
         return
 
     # 心跳 MVP 归到 admin 用户
-    from ethan.core.paths import user_sessions_db_path
     from ethan.core.users import get_user_store
     hb_user_id = get_user_store().get_admin_user_id()
     from ethan.core.agent_factory import create_agent as _create_agent
@@ -204,8 +203,7 @@ async def _run_heartbeat_md() -> None:
         from ethan.providers.base import ThinkingEvent, ToolEvent
 
         # 每次心跳创建一个全新的专属 session，便于在 Web 上独立查看
-        store = SessionStore(db_path=user_sessions_db_path())
-        await store.init()
+        store = await get_session_store()
         hb_session = await store.create(cfg.defaults.model, source="heartbeat")
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
         await store.update_title(hb_session.id, f"[心跳] {now_str}")
@@ -263,7 +261,6 @@ async def _run_heartbeat_md() -> None:
         )
         await store.save_message(hb_session.id, asst_msg)
         await store.touch(hb_session.id)
-        await store.close()
         logger.info("[Heartbeat] heartbeat.md task done")
     except Exception:
         logger.exception("[Heartbeat] heartbeat.md execution failed")
@@ -300,6 +297,7 @@ async def _rotate_session_dbs() -> None:
         for uid in get_user_store().all_user_ids():
             token = ETHAN_USER_ID.set(uid)
             try:
+                # VACUUM 需要排他锁，使用独立连接避免阻塞主单例
                 store = SessionStore(db_path=user_sessions_db_path())
                 await store.init()
                 try:

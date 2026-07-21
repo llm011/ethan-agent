@@ -172,14 +172,12 @@ async def _handle_message(msg: dict[str, Any], creds: Any) -> None:
         await send_typing(client, creds, context_token, typing=True)
 
     # ── Session + history ─────────────────────────────────────────────────────
-    from ethan.core.paths import user_sessions_db_path
     from ethan.core.users import get_user_store
-    from ethan.memory.session import SessionStore
+    from ethan.memory.session import get_session_store
     from ethan.memory.working import MemoryConfig, WorkingMemory
 
     user_id = get_user_store().get_admin_user_id()
-    store = SessionStore(db_path=user_sessions_db_path())
-    await store.init()
+    store = await get_session_store()
 
     session_id = await _get_or_create_session(store, chat_key)
     session_obj = await store.load(session_id)
@@ -251,7 +249,6 @@ async def _handle_message(msg: dict[str, Any], creds: Any) -> None:
     except Exception:
         logger.exception("[WeChat] Agent stream error for chat_key=%s", chat_key)
         wechat_chat_id_var.reset(wechat_token)
-        await store.close()
         return
     wechat_chat_id_var.reset(wechat_token)
 
@@ -264,7 +261,6 @@ async def _handle_message(msg: dict[str, Any], creds: Any) -> None:
         final_response = Message(role="assistant", content=reply)
         await store.save_message(session_id, final_response)
     await store.touch(session_id)
-    await store.close()
 
     # A3: 微信渠道也触发后台记忆抽取（原来只有 Web/REPL 触发）
     try:

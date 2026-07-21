@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from ethan.core.config import get_config
-from ethan.memory.session import SessionStore
+from ethan.memory.session import get_session_store
 
 from .deps import verify_token
 
@@ -55,9 +55,7 @@ async def list_sessions(limit: int = 50, offset: int = 0, q: str | None = None,
                         hide_heartbeat: bool = False, hide_scheduled: bool = False,
                         title_prefixes: str | None = None,
                         user_id: str = Depends(verify_token)):
-    from ethan.core.paths import user_sessions_db_path
-    store = SessionStore(db_path=user_sessions_db_path())
-    await store.init()
+    store = await get_session_store()
     if q:
         sessions = await store.search(q, limit)
     else:
@@ -70,7 +68,6 @@ async def list_sessions(limit: int = 50, offset: int = 0, q: str | None = None,
         sessions = await store.list_recent(limit, offset, source=source or "", mode=mode,
                                            exclude_title_prefixes=exclude_prefixes or None,
                                            include_title_prefixes=include_prefixes)
-    await store.close()
     return {"sessions": [
         {
             "id": s.id,
@@ -88,22 +85,16 @@ async def list_sessions(limit: int = 50, offset: int = 0, q: str | None = None,
 
 @router.post("/sessions")
 async def create_session(model: str | None = None, mode: str | None = None, source: str | None = None, user_id: str = Depends(verify_token)):
-    from ethan.core.paths import user_sessions_db_path
     config = get_config()
-    store = SessionStore(db_path=user_sessions_db_path())
-    await store.init()
+    store = await get_session_store()
     session = await store.create(model or config.defaults.model, source=source or "web", mode=mode or "")
-    await store.close()
     return {"id": session.id, "title": session.title, "model": session.model, "mode": session.mode, "source": session.source}
 
 
 @router.get("/sessions/{session_id}")
 async def get_session(session_id: str, user_id: str = Depends(verify_token)):
-    from ethan.core.paths import user_sessions_db_path
-    store = SessionStore(db_path=user_sessions_db_path())
-    await store.init()
+    store = await get_session_store()
     session = await store.load(session_id)
-    await store.close()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     from ethan.core.run_manager import RunManager
@@ -140,11 +131,8 @@ async def get_session(session_id: str, user_id: str = Depends(verify_token)):
 
 @router.delete("/sessions/{session_id}")
 async def delete_session(session_id: str, user_id: str = Depends(verify_token)):
-    from ethan.core.paths import user_sessions_db_path
-    store = SessionStore(db_path=user_sessions_db_path())
-    await store.init()
+    store = await get_session_store()
     ok = await store.delete(session_id)
-    await store.close()
     if not ok:
         raise HTTPException(status_code=404, detail="Session not found")
     # 会话删除时清除其授权记忆，避免内存泄漏 + 同 id 复用时残留旧授权
@@ -160,20 +148,15 @@ class RenameSessionRequest(BaseModel):
 
 @router.patch("/sessions/{session_id}")
 async def rename_session(session_id: str, req: RenameSessionRequest, user_id: str = Depends(verify_token)):
-    from ethan.core.paths import user_sessions_db_path
-    store = SessionStore(db_path=user_sessions_db_path())
-    await store.init()
-    try:
-        if req.title is not None:
-            title = req.title.strip()
-            if not title:
-                raise HTTPException(status_code=400, detail="Title cannot be empty")
-            await store.update_title(session_id, title)
-        # mode 可为空字符串（切回默认模式），故用 is not None 判断
-        if req.mode is not None:
-            await store.update_mode(session_id, req.mode)
-    finally:
-        await store.close()
+    store = await get_session_store()
+    if req.title is not None:
+        title = req.title.strip()
+        if not title:
+            raise HTTPException(status_code=400, detail="Title cannot be empty")
+        await store.update_title(session_id, title)
+    # mode 可为空字符串（切回默认模式），故用 is not None 判断
+    if req.mode is not None:
+        await store.update_mode(session_id, req.mode)
     return {"ok": True}
 
 
@@ -181,39 +164,30 @@ async def rename_session(session_id: str, req: RenameSessionRequest, user_id: st
 @router.post("/sessions/{session_id}/regen-title")
 async def regen_title(session_id: str, user_id: str = Depends(verify_token)):
     """用廉价模型重新生成标题（用户手动触发，force 跳过已有标题保护）。"""
-    from ethan.core.paths import user_sessions_db_path
     from ethan.memory.session import _PROTECTED_PREFIXES, _generate_smart_title
-    store = SessionStore(db_path=user_sessions_db_path())
-    await store.init()
-    try:
-        session = await store.load(session_id)
-        if not session:
-            raise HTTPException(status_code=404, detail="Session not found")
-        # 受保护标题（定时/后台/心跳）前缀承载结构含义，不可被覆盖
-        if any(session.title.startswith(p) for p in _PROTECTED_PREFIXES):
-            return {"ok": False, "title": session.title,
-                    "error": "受保护标题（定时/后台/心跳）不可重新生成"}
-        title = await _generate_smart_title(session.messages)
-        if title:
-            await store.update_title(session_id, title)
-            return {"ok": True, "title": title}
-        return {"ok": False, "title": session.title, "error": "标题生成失败"}
-    finally:
-        await store.close()
+    store = await get_session_store()
+    session = await store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    # 受保护标题（定时/后台/心跳）前缀承载结构含义，不可被覆盖
+    if any(session.title.startswith(p) for p in _PROTECTED_PREFIXES):
+        return {"ok": False, "title": session.title,
+                "error": "受保护标题（定时/后台/心跳）不可重新生成"}
+    title = await _generate_smart_title(session.messages)
+    if title:
+        await store.update_title(session_id, title)
+        return {"ok": True, "title": title}
+    return {"ok": False, "title": session.title, "error": "标题生成失败"}
+
 @router.post("/sessions/{session_id}/compact")
 async def compact_session(session_id: str, user_id: str = Depends(verify_token)):
     """压缩会话历史：用廉价模型把旧对话压成摘要替换存储，保留最近一轮，释放上下文。
 
     供 Web 的 /compact 命令调用。返回 {ok, summary}，前端拿 summary 回显并刷新会话。
     """
-    from ethan.core.paths import user_sessions_db_path
     from ethan.core.session_ops import compact_session as _compact
-    store = SessionStore(db_path=user_sessions_db_path())
-    await store.init()
-    try:
-        summary = await _compact(store, session_id, get_config().defaults.model)
-    finally:
-        await store.close()
+    store = await get_session_store()
+    summary = await _compact(store, session_id, get_config().defaults.model)
     return {"ok": True, "summary": summary}
 
 
@@ -223,12 +197,7 @@ async def summary_session(session_id: str, user_id: str = Depends(verify_token))
 
     供 Web 的 /summary 命令调用。返回 {ok, summary}。
     """
-    from ethan.core.paths import user_sessions_db_path
     from ethan.core.session_ops import summary_session as _summary
-    store = SessionStore(db_path=user_sessions_db_path())
-    await store.init()
-    try:
-        result = await _summary(store, session_id, get_config().defaults.model)
-    finally:
-        await store.close()
+    store = await get_session_store()
+    result = await _summary(store, session_id, get_config().defaults.model)
     return {"ok": True, "summary": result}
