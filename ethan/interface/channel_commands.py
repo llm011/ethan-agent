@@ -60,6 +60,9 @@ COMMANDS = {
     "help": ("显示可用命令", False),
 }
 
+# 内置命令名集合（由 COMMANDS 派生，供冲突检测使用；CLI 与飞书/微信渠道共用，避免不同步）
+_BUILTIN = frozenset(COMMANDS)
+
 
 def resolve_custom_command(text: str) -> str | None:
     """若 text 是自定义命令，返回展开后的 agent 输入；否则返回 None。
@@ -317,8 +320,6 @@ def _handle_command_cmd(arg: str) -> str:
             return "用法：/command add <名称> <描述>\n示例：/command add review-cn 用中文做 code review，重点关注安全和性能"
         cmd_name = sub_parts[1]
         desc = sub_parts[2].strip()
-        _BUILTIN = {"new", "btw", "review", "compact", "summary", "sessions", "stop",
-                    "resume", "model", "mode", "token", "owner", "help", "command"}
         if cmd_name.lower() in _BUILTIN:
             return f"'{cmd_name}' 与内置命令冲突，请换一个名字。"
         if not cmd_name.replace("-", "").replace("_", "").isalnum():

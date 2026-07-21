@@ -3,6 +3,7 @@ import {
   fetchSession,
   fetchSessions,
   compactSession,
+  summarySession,
   stopGeneration,
 } from "@/lib/api";
 import type { Message, Usage, Quote, PendingFile } from "@ethan/shared/chat/types";
@@ -53,6 +54,7 @@ export async function handleCommand(
       "🛠 **可用命令**\n\n" +
       "- `/new` — 新建对话，清空当前上下文\n" +
       "- `/compact` — 压缩历史对话为摘要，释放上下文\n" +
+      "- `/summary` — 生成当前会话的总结\n" +
       "- `/sessions` — 列出最近的会话\n" +
       "- `/stop` — 停止当前进行中的回复\n" +
       "- `/btw <问题>` — 不带历史的单轮轻量查询\n" +
@@ -83,6 +85,22 @@ export async function handleCommand(
       pushAssistant(`🧠 **已压缩历史**\n\n> ${r.summary.slice(0, 300)}${r.summary.length > 300 ? "…" : ""}\n\n继续聊吧~`);
     } catch (e) {
       pushAssistant(`⚠️ 压缩失败：${e instanceof Error ? e.message : "未知错误"}`);
+    } finally {
+      setStreaming(false);
+    }
+    return true;
+  }
+  if (cmd === "summary") {
+    if (!activeSession) {
+      pushAssistant("⚠️ 当前没有会话，先聊几句再 `/summary` 吧~");
+      return true;
+    }
+    setStreaming(true);
+    try {
+      const r = await summarySession(activeSession);
+      pushAssistant(r.summary);
+    } catch (e) {
+      pushAssistant(`⚠️ 总结失败：${e instanceof Error ? e.message : "未知错误"}`);
     } finally {
       setStreaming(false);
     }

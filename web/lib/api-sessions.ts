@@ -126,6 +126,16 @@ export async function compactSession(id: string): Promise<{ ok: boolean; summary
   return res.json();
 }
 
+// 生成当前会话的总结（只读，不修改历史）
+export async function summarySession(id: string): Promise<{ ok: boolean; summary: string }> {
+  const res = await fetch(`${API_URL}/sessions/${id}/summary`, {
+    method: "POST",
+    headers: headers(),
+  });
+  if (!res.ok) throw new Error("Summary failed");
+  return res.json();
+}
+
 export async function cleanupTrivialSessions(): Promise<{ deleted: number; deleted_ids: string[] }> {
   const res = await fetch(`${API_URL}/sessions/cleanup-trivial`, {
     method: "POST",

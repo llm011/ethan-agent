@@ -8,6 +8,8 @@
 import typer
 from rich.console import Console
 
+from ethan.interface.channel_commands import _BUILTIN  # 内置命令名集合，与飞书/微信渠道共用，避免不同步
+
 console = Console()
 app = typer.Typer(help="管理自定义斜杠命令", invoke_without_command=True)
 
@@ -59,8 +61,6 @@ def add_command(
         raise typer.Exit(1)
 
     # 保留名与内置命令冲突检测
-    _BUILTIN = {"new", "btw", "review", "compact", "sessions", "stop",
-                "resume", "model", "mode", "token", "owner", "help", "command"}
     if name.lower() in _BUILTIN:
         console.print(f"[red]'{name}' 与内置命令冲突，请换一个名字。[/red]")
         raise typer.Exit(1)
