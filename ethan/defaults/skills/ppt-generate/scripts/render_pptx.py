@@ -307,9 +307,9 @@ def apply_line_format(line_owner, spec: dict, emu_per_px: float, default=None):
         _sub(ln_el, "a:prstDash", val=dash)
 
 
-def set_run_font(run, font_name: str):
-    """同时设置 latin / ea / cs 字体，保证中文生效。"""
-    run.font.name = font_name
+def set_run_font(run, font_name: str, latin_name: str | None = None):
+    """设置字体：ea/cs 用 font_name（中文），latin 用 latin_name（西文，缺省同 font_name）。"""
+    run.font.name = latin_name or font_name
     rPr = run._r.get_or_add_rPr()
     for tag in ("a:ea", "a:cs"):
         e = rPr.find(qn(tag))
@@ -461,6 +461,7 @@ def render_paragraphs(text_frame, paragraphs, theme, text_type=None, el_defaults
     if el_defaults:
         defaults.update(el_defaults)
     font_name = defaults.get("fontName") or theme.get("fontName", "Microsoft YaHei")
+    latin_name = defaults.get("latinFontName") or theme.get("latinFontName")
     for i, para in enumerate(paragraphs):
         p = text_frame.paragraphs[0] if i == 0 else text_frame.add_paragraph()
         p.alignment = ALIGN_MAP.get(para.get("align", "left"), PP_ALIGN.LEFT)
@@ -490,7 +491,9 @@ def render_paragraphs(text_frame, paragraphs, theme, text_type=None, el_defaults
                 f.underline = True
             rgb, alpha = parse_color(r.get("color") or defaults["color"])
             f.color.rgb = rgb
-            set_run_font(run, _pick(r, "fontName", "fontname") or font_name)
+            run_font = _pick(r, "fontName", "fontname")
+            # run 显式指定 fontName 时中西文都用它；否则中文用 font_name、西文用主题 latinFontName
+            set_run_font(run, run_font or font_name, None if run_font else latin_name)
             if r.get("strikethrough"):
                 set_strikethrough(run)
             if r.get("wordSpace"):
@@ -851,7 +854,9 @@ def render_table(slide, el, theme, emu_per_px):
             default_color = "#FFFFFF" if (emphasized and not style.get("backcolor")) else theme.get("fontColor", "#1F2937")
             rgb, _ = parse_color(style.get("color") or default_color)
             f.color.rgb = rgb
-            set_run_font(run, _pick(style, "fontName", "fontname") or theme.get("fontName", "Microsoft YaHei"))
+            cell_font = _pick(style, "fontName", "fontname")
+            set_run_font(run, cell_font or theme.get("fontName", "Microsoft YaHei"),
+                         None if cell_font else theme.get("latinFontName"))
             if style.get("strikethrough"):
                 set_strikethrough(run)
             _set_cell_border(cell, outline, emu_per_px)

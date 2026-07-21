@@ -101,3 +101,6 @@ app/android/.cxx/
 # memory eval 生成物
 tests/memory_eval/data/
 tests/memory_eval/report_live.json
+
+# ppt-generate 字体文件（Verdana / 微软雅黑为商业字体，仅本地使用，不入库）
+ethan/defaults/skills/ppt-generate/assets/fonts/

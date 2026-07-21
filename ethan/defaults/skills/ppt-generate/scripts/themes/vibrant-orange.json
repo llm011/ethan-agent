@@ -1,21 +1,71 @@
 {
   "name": "vibrant-orange",
   "backgroundColor": "#FFFBEB",
-  "themeColors": ["#EA580C", "#F97316", "#FDBA74", "#0EA5E9", "#8B5CF6"],
+  "themeColors": [
+    "#EA580C",
+    "#F97316",
+    "#FDBA74",
+    "#0EA5E9",
+    "#8B5CF6"
+  ],
   "fontColor": "#292524",
   "fontName": "Microsoft YaHei",
-  "outline": { "style": "solid", "width": 1, "color": "#FED7AA" },
-  "shadow": { "h": 0, "v": 2, "blur": 10, "color": "#EA580C24" },
+  "latinFontName": "Verdana",
+  "outline": {
+    "style": "solid",
+    "width": 1,
+    "color": "#FED7AA"
+  },
+  "shadow": {
+    "h": 0,
+    "v": 2,
+    "blur": 10,
+    "color": "#EA580C24"
+  },
   "typography": {
-    "title":      { "fontSize": 28, "color": "#431407", "bold": true },
-    "subtitle":   { "fontSize": 16, "color": "#78716C" },
-    "content":    { "fontSize": 14, "color": "#292524" },
-    "item":       { "fontSize": 14, "color": "#44403C" },
-    "itemTitle":  { "fontSize": 16, "color": "#431407", "bold": true },
-    "notes":      { "fontSize": 10, "color": "#A8A29E" },
-    "header":     { "fontSize": 10, "color": "#78716C" },
-    "footer":     { "fontSize": 10, "color": "#78716C" },
-    "partNumber": { "fontSize": 60, "color": "#EA580C", "bold": true },
-    "itemNumber": { "fontSize": 16, "color": "#EA580C", "bold": true }
+    "title": {
+      "fontSize": 28,
+      "color": "#431407",
+      "bold": true
+    },
+    "subtitle": {
+      "fontSize": 16,
+      "color": "#78716C"
+    },
+    "content": {
+      "fontSize": 14,
+      "color": "#292524"
+    },
+    "item": {
+      "fontSize": 14,
+      "color": "#44403C"
+    },
+    "itemTitle": {
+      "fontSize": 16,
+      "color": "#431407",
+      "bold": true
+    },
+    "notes": {
+      "fontSize": 10,
+      "color": "#A8A29E"
+    },
+    "header": {
+      "fontSize": 10,
+      "color": "#78716C"
+    },
+    "footer": {
+      "fontSize": 10,
+      "color": "#78716C"
+    },
+    "partNumber": {
+      "fontSize": 60,
+      "color": "#EA580C",
+      "bold": true
+    },
+    "itemNumber": {
+      "fontSize": 16,
+      "color": "#EA580C",
+      "bold": true
+    }
   }
 }

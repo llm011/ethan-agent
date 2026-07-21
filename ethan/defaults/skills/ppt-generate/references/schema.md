@@ -312,6 +312,7 @@
   "themeColors": ["#1E40AF", "#3B82F6", "#93C5FD", "#F59E0B", "#10B981"],
   "fontColor": "#1F2937",
   "fontName": "Microsoft YaHei",
+  "latinFontName": "Verdana",
   "outline": { "style": "solid", "width": 1, "color": "#D1D5DB" },
   "shadow": { "h": 0, "v": 2, "blur": 8, "color": "#00000014" },
   "typography": {
@@ -330,6 +331,7 @@
 ```
 
 - `themeColors[0]` 为主色，图表/装饰默认取它。
+- `fontName` 是中文（ea/cs）字体；`latinFontName` 是西文（latin）字体，缺省与 `fontName` 相同。两者分离可实现「中文微软雅黑 + 英文 Verdana」式混排。run 级显式 `fontName` 会同时覆盖中西文。
 - `typography` 是本格式对 PPTist SlideTheme 的扩展：按 textType 给 run 级默认值。
 - 预设主题见 `scripts/themes/`；deck 顶层 `theme` 字段写主题名即可。
 

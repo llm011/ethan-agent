@@ -1,21 +1,71 @@
 {
   "name": "dark-tech",
   "backgroundColor": "#0F172A",
-  "themeColors": ["#38BDF8", "#818CF8", "#34D399", "#FBBF24", "#F472B6"],
+  "themeColors": [
+    "#38BDF8",
+    "#818CF8",
+    "#34D399",
+    "#FBBF24",
+    "#F472B6"
+  ],
   "fontColor": "#E2E8F0",
   "fontName": "Microsoft YaHei",
-  "outline": { "style": "solid", "width": 1, "color": "#334155" },
-  "shadow": { "h": 0, "v": 4, "blur": 16, "color": "#00000066" },
+  "latinFontName": "Verdana",
+  "outline": {
+    "style": "solid",
+    "width": 1,
+    "color": "#334155"
+  },
+  "shadow": {
+    "h": 0,
+    "v": 4,
+    "blur": 16,
+    "color": "#00000066"
+  },
   "typography": {
-    "title":      { "fontSize": 28, "color": "#F8FAFC", "bold": true },
-    "subtitle":   { "fontSize": 16, "color": "#94A3B8" },
-    "content":    { "fontSize": 14, "color": "#E2E8F0" },
-    "item":       { "fontSize": 14, "color": "#CBD5E1" },
-    "itemTitle":  { "fontSize": 16, "color": "#F8FAFC", "bold": true },
-    "notes":      { "fontSize": 10, "color": "#64748B" },
-    "header":     { "fontSize": 10, "color": "#64748B" },
-    "footer":     { "fontSize": 10, "color": "#64748B" },
-    "partNumber": { "fontSize": 60, "color": "#38BDF8", "bold": true },
-    "itemNumber": { "fontSize": 16, "color": "#38BDF8", "bold": true }
+    "title": {
+      "fontSize": 28,
+      "color": "#F8FAFC",
+      "bold": true
+    },
+    "subtitle": {
+      "fontSize": 16,
+      "color": "#94A3B8"
+    },
+    "content": {
+      "fontSize": 14,
+      "color": "#E2E8F0"
+    },
+    "item": {
+      "fontSize": 14,
+      "color": "#CBD5E1"
+    },
+    "itemTitle": {
+      "fontSize": 16,
+      "color": "#F8FAFC",
+      "bold": true
+    },
+    "notes": {
+      "fontSize": 10,
+      "color": "#64748B"
+    },
+    "header": {
+      "fontSize": 10,
+      "color": "#64748B"
+    },
+    "footer": {
+      "fontSize": 10,
+      "color": "#64748B"
+    },
+    "partNumber": {
+      "fontSize": 60,
+      "color": "#38BDF8",
+      "bold": true
+    },
+    "itemNumber": {
+      "fontSize": 16,
+      "color": "#38BDF8",
+      "bold": true
+    }
   }
 }

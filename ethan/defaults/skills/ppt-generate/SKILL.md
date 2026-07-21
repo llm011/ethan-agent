@@ -25,6 +25,7 @@ metadata:
 ### Step 1：规划大纲
 
 - 先输出大纲给用户（除非用户说直接生成）：每页定 `slideType`（cover/contents/transition/content/end）和核心内容。
+- **只给主题、没给素材时**：大纲内容来自模型自身知识；若主题涉及最新资讯/实时数据/具体数字（如「2026 年行业趋势」「某公司最新财报」），先用 web_search 检索再写大纲，并在交付时说明哪些内容来自检索。
 - 页数：默认 5-8 页；用户没说要目录/过渡页就不加。
 
 ### Step 2：写 deck.json
@@ -85,6 +86,8 @@ metadata:
 
 映射规则：`[封面/目录/过渡/正文/结尾]`→slideType；`公式：`→latex；`表格：`后的 md 表格→table；`图表：`+数据表→chart；`gen:`/`icon:`→图片占位；`备注：`→remark。用户没写页类型时按内容推断（第 1 页默认封面、最后默认结尾）。md 里没给的细节（精确坐标、字号）按 layout-guide 补齐。
 
+**忠实原则**：md 里写明的页数、页序、文案、公式、表格/图表数据必须原样进入 deck.json，不增页、不减页、不改写观点、不编造 md 里没有的数据。可自由发挥的只有视觉层：版式选择、坐标、字号微调、装饰元素、配图选词。md 内容明显有误或遗漏时先问用户，不要擅自扩写。
+
 
 ### Step 3：填充图片
 
@@ -130,7 +133,9 @@ python3 ~/.ethan/skills/ppt-generate/scripts/render_pptx.py /path/to/deck.json -
 
 1. **元素可编辑是底线**：禁止把整页渲染成一张大图；禁止 SVG path 形状（用预设形状名）；禁止 HTML 文本（用 runs）。
 2. **gen:/icon: 占位符必须先跑 gen_image.py**，否则渲染器直接报错退出。
-3. **中文字体**：主题 `fontName` 默认 `Microsoft YaHei`；macOS 用户可建议换 `PingFang SC`。渲染器会同时设置 latin/ea 字体，中文不会变宋体。
+3. **中西文字体**：主题 `fontName`（中文，默认 `Microsoft YaHei`）+ `latinFontName`（西文，默认 `Verdana`）分离设置；macOS 用户可建议中文换 `PingFang SC`。run 级显式 `fontName` 会同时覆盖中西文。
+   - **渲染机不需要装字体**：渲染器只把字体名写入 pptx，字体解析发生在打开文件的机器上。
+   - **查看端是 Linux（WPS/LibreOffice）时**：雅黑/Verdana 通常都没有，会被替换成默认字体。预先知道的话把主题改成 Linux 常见自带字体：中文 `Noto Sans CJK SC` / `WenQuanYi Micro Hei`，西文 `DejaVu Sans`。
 4. **坐标纪律**：元素不越界（右 ≤940、下 ≤540）、不贴边、页边距 60/40；一行 item ≤38 字。
 5. **图表用原生 chart 元素**（数据可编辑），不要用 image_search 找图表截图。
 6. **演讲者备注**写进 slide 的 `remark` 字段，不要塞进页面元素。
@@ -149,5 +154,6 @@ python3 ~/.ethan/skills/ppt-generate/scripts/render_pptx.py /path/to/deck.json -
 | 渲染报「图片占位符未解析」 | 跳过了 Step 3 | 跑 gen_image.py 或把 src 改成本地路径 |
 | pip 自动安装失败 | 无网络/权限 | `pip3 install --user python-pptx latex2mathml mathml2omml` 后重试 |
 | 中文变方框/宋体 | 用户机器无该字体 | 换主题 fontName（Windows: 微软雅黑，macOS: PingFang SC） |
+| Linux/WPS 打开字体被替换、版式跑偏 | Linux 无雅黑/Verdana | 主题改 `fontName: Noto Sans CJK SC`（或 WenQuanYi Micro Hei）+ `latinFontName: DejaVu Sans` 后重新渲染 |
 | 公式变成一行源码文本 | latex 依赖缺失或语法错 | 看 stderr 的 [warn]，检查 LaTeX 语法（latex2mathml 子集） |
 | Pexels 搜不到中文词 | API 对中文支持差 | gen: 后用英文搜索词 |
