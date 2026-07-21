@@ -182,8 +182,8 @@ class WebSearchTool(BaseTool):
             },
             "max_results": {
                 "type": "integer",
-                "description": "Maximum number of results to return (default 5).",
-                "default": 5,
+                "description": "Maximum number of results to return (default 7). Increase to 10-15 when user wants broader coverage.",
+                "default": 7,
             },
             "category": {
                 "type": "string",
@@ -214,7 +214,7 @@ class WebSearchTool(BaseTool):
     async def run(
         self,
         query: str,
-        max_results: int = 5,
+        max_results: int = 7,
         category: str = "auto",
         time_range: str = "week",
         language: str = "zh-CN",
@@ -229,27 +229,29 @@ class WebSearchTool(BaseTool):
                 logger.info("[WebSearch] auto-routed query=%r → category=%s", query[:50], category)
 
             if category == "news":
-                results = await self._news_search(query, max_results, time_range, language, cfg)
+                results, total = await self._news_search(query, max_results, time_range, language, cfg)
             elif category in ("science", "it"):
                 # 学术/IT 分类：主力分类 → 降级到 general（引擎质量分级）
-                results = await self._categorized_search(query, max_results, category, cfg)
+                results, total = await self._categorized_search(query, max_results, category, cfg)
             else:
                 # general 或未知 category 都走通用搜索
-                results = await self._general_search(query, max_results, cfg)
+                results, total = await self._general_search(query, max_results, cfg)
 
             if not results:
                 return f"No results found for: {query}"
-            return self._build_result(query, results, category)
+            return self._build_result(query, results, category, total)
         except Exception as e:
             return f"Search failed: {e}"
 
-    def _build_result(self, query: str, results: list[dict], category: str) -> ToolResult:
+    def _build_result(self, query: str, results: list[dict], category: str, total: int | None = None) -> ToolResult:
         """把结构化结果列表转成 ToolResult。
 
         - content: 给 LLM 的纯文本摘要（兼容旧格式 **title**\\nsnippet\\nurl），保证不配置前端改造时旧逻辑仍可用
         - cards: 结构化卡片数据，前端按 type=search_result 渲染横向滚动卡片
         """
         content_parts: list[str] = []
+        if total and total > len(results):
+            content_parts.append(f"Found ~{total} results, showing top {len(results)}:\n")
         for r in results:
             title = r.get("title", "")
             snippet = r.get("snippet", "")
@@ -279,11 +281,12 @@ class WebSearchTool(BaseTool):
             tool_call_id="",  # 由 registry 回填
             content=content,
             cards=cards,
+            cards_meta={"total_results": total, "showing": len(results)} if total else None,
         )
 
     # ── Categorized search（science/it 分类，带降级）─────────────────────────
 
-    async def _categorized_search(self, query: str, max_results: int, category: str, cfg) -> list[dict]:
+    async def _categorized_search(self, query: str, max_results: int, category: str, cfg) -> tuple[list[dict], int | None]:
         """按指定分类（science/it）搜索，主力分类返回空时降级到 general。
 
         引擎质量分级策略：
@@ -298,7 +301,7 @@ class WebSearchTool(BaseTool):
             try:
                 results = await self._searxng_search_category(query, max_results, cfg.base_url, category)
                 if results:
-                    return results
+                    return results, None
                 logger.info("[WebSearch] %s category empty, falling back to general", category)
             except Exception as e:
                 logger.info("[WebSearch] %s category error: %s, falling back to general", category, e)
@@ -338,8 +341,9 @@ class WebSearchTool(BaseTool):
 
     # ── General search（retry + fallback + circuit breaker）────────────────
 
-    async def _general_search(self, query: str, max_results: int, cfg) -> list[dict]:
+    async def _general_search(self, query: str, max_results: int, cfg) -> tuple[list[dict], int | None]:
         """按优先级尝试各 provider，每个带 retry，失败则 fallback，累计熔断。"""
+        self._last_total: int | None = None  # 重置
         # 构建候选 provider 链
         candidates: list[tuple[str, object]] = []  # (name, callable_coroutine_factory)
         if cfg.base_url:
@@ -356,7 +360,7 @@ class WebSearchTool(BaseTool):
             results, had_error = await self._call_with_retry(name, factory)
             if results:
                 _breaker.record_success(name)
-                return results
+                return results, self._last_total
             if had_error:
                 # 只有实际的网络/provider 错误才计入熔断
                 _breaker.record_failure(name)
@@ -365,7 +369,7 @@ class WebSearchTool(BaseTool):
                 # 空结果但 provider 正常响应 → 不熔断，继续尝试下一个
                 logger.debug("[WebSearch] %s returned empty for query=%r, trying next", name, query[:50])
 
-        return []
+        return [], None
 
     async def _call_with_retry(self, provider_name: str, factory) -> tuple[list[dict], bool]:
         """对单个 provider 调用，失败重试 _RETRY_COUNT 次。
@@ -387,7 +391,8 @@ class WebSearchTool(BaseTool):
 
     # ── News search（同样带 retry + fallback + circuit breaker）──────────────
 
-    async def _news_search(self, query: str, max_results: int, time_range: str, language: str, cfg) -> list[dict]:
+    async def _news_search(self, query: str, max_results: int, time_range: str, language: str, cfg) -> tuple[list[dict], int | None]:
+        self._last_total: int | None = None
         candidates: list[tuple[str, object]] = []
         if cfg.base_url:
             candidates.append(("searxng_news", lambda: self._searxng_news(query, max_results, cfg.base_url, time_range, language)))
@@ -403,12 +408,12 @@ class WebSearchTool(BaseTool):
             results, had_error = await self._call_with_retry(name, factory)
             if results:
                 _breaker.record_success(name)
-                return results
+                return results, self._last_total
             if had_error:
                 _breaker.record_failure(name)
                 logger.info("[WebSearch] %s error for query=%r, trying next", name, query[:50])
 
-        return []
+        return [], None
 
     async def _searxng_news(
         self, query: str, max_results: int, base_url: str, time_range: str, language: str
@@ -521,6 +526,9 @@ class WebSearchTool(BaseTool):
         if not actual_results and unresponsive:
             engines = [e[0] for e in unresponsive[:3]]
             raise RuntimeError(f"SearXNG engines unavailable: {engines}")
+        # 捕获搜索引擎报告的总结果数
+        raw_total = data.get("number_of_results")
+        self._last_total = int(raw_total) if raw_total else len(actual_results)
         results = []
         for item in actual_results[:max_results]:
             results.append({

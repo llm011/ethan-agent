@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { ScheduleJob, fetchSchedules, deleteSchedule, patchSchedule, renameSchedule, fetchSessions, SessionInfo } from "@/lib/api";
+import { ScheduleJob, fetchSchedules, deleteSchedule, patchSchedule, renameSchedule, updateSchedulePrompt, fetchSessions, SessionInfo } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@ethan/shared/ui/card";
 import { Badge } from "@ethan/shared/ui/badge";
 import { Button } from "@ethan/shared/ui/button";
@@ -19,6 +19,7 @@ import {
   DialogTitle,
 } from "@ethan/shared/ui/dialog";
 import { Input } from "@ethan/shared/ui/input";
+import { Textarea } from "@ethan/shared/ui/textarea";
 
 export function ScheduleView() {
   const router = useRouter();
@@ -30,6 +31,7 @@ export function ScheduleView() {
   const [heartbeatSessions, setHeartbeatSessions] = useState<SessionInfo[]>([]);
   const [heartbeatExpanded, setHeartbeatExpanded] = useState(false);
   const [renameDialog, setRenameDialog] = useState<{ open: boolean; id: string; currentName: string }>({ open: false, id: "", currentName: "" });
+  const [promptDialog, setPromptDialog] = useState<{ open: boolean; id: string; currentPrompt: string }>({ open: false, id: "", currentPrompt: "" });
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -94,6 +96,21 @@ export function ScheduleView() {
     }
   };
 
+  const openEditPrompt = (job: ScheduleJob) => {
+    setPromptDialog({ open: true, id: job.id, currentPrompt: job.prompt });
+  };
+
+  const doEditPrompt = async (newPrompt: string) => {
+    const id = promptDialog.id;
+    setPromptDialog({ open: false, id: "", currentPrompt: "" });
+    setJobs(prev => prev.map(j => j.id === id ? { ...j, prompt: newPrompt } : j));
+    try {
+      await updateSchedulePrompt(id, newPrompt);
+    } catch {
+      await loadData();
+    }
+  };
+
   function RenameDialog({ open, currentName, onConfirm, onCancel }: {
     open: boolean; currentName: string; onConfirm: (name: string) => void; onCancel: () => void
   }) {
@@ -126,6 +143,38 @@ export function ScheduleView() {
     );
   }
 
+  function EditPromptDialog({ open, currentPrompt, onConfirm, onCancel }: {
+    open: boolean; currentPrompt: string; onConfirm: (prompt: string) => void; onCancel: () => void
+  }) {
+    const [inputValue, setInputValue] = useState(currentPrompt);
+    useEffect(() => {
+      if (open) setInputValue(currentPrompt);
+    }, [open, currentPrompt]);
+    return (
+      <Dialog open={open} onOpenChange={(o: boolean) => !o && onCancel()}>
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>编辑任务内容</DialogTitle>
+            <DialogDescription className="mt-1">修改定时任务执行时发送的 prompt：</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 py-2">
+            <Textarea
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              placeholder="输入任务内容"
+              rows={5}
+              autoFocus
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={onCancel}>取消</Button>
+            <Button onClick={() => inputValue.trim() && onConfirm(inputValue.trim())} disabled={!inputValue.trim()}>确认</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
   return (
     <div className="flex flex-col h-full bg-background text-foreground">
       <ConfirmDialog
@@ -141,6 +190,12 @@ export function ScheduleView() {
         currentName={renameDialog.currentName}
         onConfirm={doRename}
         onCancel={() => setRenameDialog({ open: false, id: "", currentName: "" })}
+      />
+      <EditPromptDialog
+        open={promptDialog.open}
+        currentPrompt={promptDialog.currentPrompt}
+        onConfirm={doEditPrompt}
+        onCancel={() => setPromptDialog({ open: false, id: "", currentPrompt: "" })}
       />
       <header className="h-12 border-b border-border flex items-center px-4 justify-between shrink-0">
         <h1 className="font-semibold text-lg">定时任务 (Schedules)</h1>
@@ -192,9 +247,18 @@ export function ScheduleView() {
                   <div className="space-y-3">
                     <div className="flex items-start gap-2 text-sm">
                       <TerminalSquare className="h-4 w-4 shrink-0 text-muted-foreground mt-0.5" />
-                      <p className="text-muted-foreground line-clamp-3 leading-relaxed">
+                      <p className="text-muted-foreground line-clamp-3 leading-relaxed flex-1">
                         {job.prompt}
                       </p>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 shrink-0"
+                        onClick={() => openEditPrompt(job)}
+                        title="编辑内容"
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </Button>
                     </div>
                     <div className="flex items-center gap-2 text-xs text-muted-foreground/80 bg-muted/30 p-2 rounded-md">
                       <Hash className="h-3.5 w-3.5" />

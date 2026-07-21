@@ -99,7 +99,7 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, onQuote, onCardAc
           <Image src={`${process.env.NEXT_PUBLIC_BASE_PATH || ''}/logo-avatar.png`} alt="Ethan" width={28} height={28} className="rounded-full" />
         </div>
       )}
-      <div className="relative max-w-[90%] md:max-w-[80%]">
+      <div className="relative max-w-[90%] md:max-w-[85%]">
         {/* 悬浮引用按钮 */}
         {onQuote && !isStreaming && (
           <Tooltip>

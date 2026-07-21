@@ -103,14 +103,20 @@ async def _handle_message(event_data: dict) -> None:
         logger.info("[Lark] stale event dropped: message_id=%s age=%ds", message_id, int((_t.time() * 1000 - _create_ms) / 1000))
         return
 
-    # 发消息者 open_id（飞书按 open_id 认主人）。lark-cli 展平后字段名可能是
-    # sender_id / open_id / sender_open_id，挨个兜底。
+    # 发消息者 open_id（飞书按 open_id 认主人）。lark-cli 展平后字段名是 sender_id
+    # （对应飞书原始 event.sender.sender_id.open_id）。
+    # ⚠️ 不用 open_id 兜底——open_id 在不同事件类型中含义不同（可能是 reader/operator/bot），
+    # 误取会导致 is_owner 判定出错，造成非主人拿到主人权限（安全漏洞）。
     sender_open_id = (
         event_data.get("sender_open_id")
-        or event_data.get("open_id")
         or event_data.get("sender_id")
         or ""
     )
+    if not sender_open_id:
+        logger.warning(
+            "[Lark] sender_open_id is empty! event keys=%s chat_id=%s msg_id=%s — treating as non-owner",
+            list(event_data.keys()), chat_id, event_data.get("message_id", ""),
+        )
 
     if not chat_id:
         return
@@ -129,17 +135,49 @@ async def _handle_message(event_data: dict) -> None:
     from ethan.core.config import get_config as _gc
     _lark_cfg = getattr(_gc(), "lark", None)
     owner_open_id = getattr(_lark_cfg, "owner_open_id", "") if _lark_cfg else ""
-    is_owner = bool(owner_open_id) and sender_open_id == owner_open_id
+    is_owner = bool(owner_open_id) and bool(sender_open_id) and sender_open_id == owner_open_id
     owner_claimed = bool(owner_open_id)
+    logger.debug(
+        "[Lark] identity: sender=%s owner=%s is_owner=%s chat=%s",
+        sender_open_id[:12] if sender_open_id else "(empty)",
+        owner_open_id[:12] if owner_open_id else "(empty)",
+        is_owner, chat_id,
+    )
 
     # 群聊响应过滤：按 group_response_mode 决定是否处理（私聊不过滤）
     if is_group_chat and _lark_cfg:
-        if not await _should_respond_to_group_message(text, _lark_cfg):
+        if not await _should_respond_to_group_message(text, _lark_cfg, event_data):
             logger.debug(
                 "[Lark] group message skipped by mode=%s msg=%s",
                 getattr(_lark_cfg, "group_response_mode", "mention_only"), message_id,
             )
             return
+
+    # ── 群聊剥离 @mention：兼容 "@agent /new" 和 "/new @agent" 两种写法 ──
+    # 优先用 lark-cli 事件中的 mentions 结构化数据精确匹配 bot 的 @文本；
+    # 兜底用 bot_name 文本匹配；再兜底用通用 @xxx 模式。
+    if is_group_chat:
+        import re as _re
+        _stripped = False
+        # 方式1：从 mentions 结构中提取 bot 的 name 并移除对应 @文本
+        _mentions = event_data.get("mentions") or []
+        if _mentions:
+            for m in _mentions:
+                # lark-cli 展平后 mentions 里 bot 条目: id_type=app / type=bot
+                if m.get("id_type") == "app" or m.get("type") == "bot":
+                    _m_name = m.get("name", "") or m.get("key", "") or ""
+                    if _m_name:
+                        text = _re.sub(rf"@{_re.escape(_m_name)}\s*", "", text, flags=_re.IGNORECASE).strip()
+                        _stripped = True
+        # 方式2：兜底用配置的 bot_name
+        if not _stripped and _lark_cfg:
+            _bot_name = getattr(_lark_cfg, "bot_name", "") or ""
+            if _bot_name:
+                text = _re.sub(rf"@{_re.escape(_bot_name)}\s*", "", text, flags=_re.IGNORECASE).strip()
+                _stripped = True
+        # 方式3：再兜底——去掉开头的 @任意非空白词（防止 bot_name 未配也没 mentions 时卡住）
+        if not _stripped and text.startswith("@"):
+            text = _re.sub(r"^@\S+\s*", "", text).strip()
 
     # ── /btw：顺带一问——不带历史、不带 cold facts 的单轮轻量查询 ──
     # 解析放在 /command 之前，因为 /btw 需要走完整 agent 流程（只是上下文为空）。
@@ -219,7 +257,7 @@ async def _handle_message(event_data: dict) -> None:
     # ── /command：以 / 开头的命令先于 Agent 处理（不加思考表情，直接回复）──
     if is_command(text):
         from ethan.interface.lark_cmd_context import build_cmd_context
-        cmd_ctx = build_cmd_context(chat_id, text, sender_open_id)
+        cmd_ctx = build_cmd_context(chat_id, text, sender_open_id, is_group_chat=is_group_chat)
         reply = await handle_command(cmd_ctx)
         if reply:
             await _send_reply(chat_id, reply)

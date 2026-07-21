@@ -40,6 +40,41 @@ class Scheduler:
     def start(self) -> None:
         if not self._scheduler.running:
             self._scheduler.start()
+            self._migrate_job_timezones()
+
+    def _migrate_job_timezones(self) -> None:
+        """启动时检查所有 cron job 的 trigger 时区，与当前配置时区不一致的自动修复。
+
+        旧 job 可能在未配置时区（默认 UTC）时创建，trigger 内部绑定了 UTC，
+        导致即使 scheduler 现在用本地时区，旧 job 仍按 UTC 计算下次执行时间。
+        修复方式：用相同的 cron 字段 + 正确时区重建 trigger。
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        tz_name = getattr(self._tz, "key", None) or str(self._tz)
+        for job in self._scheduler.get_jobs():
+            trigger = job.trigger
+            if not isinstance(trigger, CronTrigger):
+                continue
+            trigger_tz = getattr(trigger, "timezone", None)
+            trigger_tz_name = getattr(trigger_tz, "key", None) or str(trigger_tz) if trigger_tz else "UTC"
+            if trigger_tz_name == tz_name:
+                continue
+            # 从现有 trigger 提取 cron 字段，用正确时区重建
+            try:
+                fields = {}
+                for field in trigger.fields:
+                    expr = str(field)
+                    if expr != "*":
+                        fields[field.name] = expr
+                new_trigger = CronTrigger(timezone=self._tz, **fields)
+                # 保留 end_date
+                if hasattr(trigger, "end_date") and trigger.end_date:
+                    new_trigger.end_date = trigger.end_date
+                self._scheduler.reschedule_job(job.id, trigger=new_trigger)
+                logger.info("Migrated job %s timezone: %s → %s", job.id, trigger_tz_name, tz_name)
+            except Exception:
+                logger.warning("Failed to migrate timezone for job %s", job.id, exc_info=True)
 
     def shutdown(self) -> None:
         if self._scheduler.running:

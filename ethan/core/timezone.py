@@ -13,9 +13,18 @@ def _resolve_tz(tz_str: str = ""):
         from zoneinfo import ZoneInfo
         return ZoneInfo(tz_str)
 
+    # 尝试 TZ 环境变量（Docker 场景常用）
+    import os
+    env_tz = os.environ.get("TZ", "")
+    if env_tz and env_tz != "UTC":
+        try:
+            from zoneinfo import ZoneInfo
+            return ZoneInfo(env_tz)
+        except Exception:
+            pass
+
     # 尝试从系统符号链接读 IANA 名
     try:
-        import os
         tz_path = os.readlink("/etc/localtime")
         if "zoneinfo/" in tz_path:
             from zoneinfo import ZoneInfo
