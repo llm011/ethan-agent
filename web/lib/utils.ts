@@ -69,7 +69,7 @@ export function formatTrigger(trigger: string): string {
         const fromKey = rangeMatch[1].toLowerCase()
         const toKey = rangeMatch[2].toLowerCase()
         // 覆盖整周的 range → "每天"
-        const fullWeekRanges = new Set(["0-6", "0-7", "mon-sun", "sun-sat"])
+        const fullWeekRanges = new Set(["0-6", "0-7", "1-7", "mon-sun", "sun-sat"])
         if (fullWeekRanges.has(`${fromKey}-${toKey}`)) return "每天"
         const from = dayNameMap[fromKey] ?? rangeMatch[1]
         const to = dayNameMap[toKey] ?? rangeMatch[2]

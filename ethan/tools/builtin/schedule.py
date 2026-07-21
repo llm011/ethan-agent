@@ -109,8 +109,10 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
                         if client:
                             try:
                                 asyncio.run(_send_lark_reply(client, chat_id, formatted))
-                            except RuntimeError as e_loop:
-                                print(f"Schedule lark asyncio.run error: {e_loop}")
+                            except RuntimeError:
+                                # 当前处于 event loop 内时降级：用 create_task 异步发送
+                                loop = asyncio.get_running_loop()
+                                loop.create_task(_send_lark_reply(client, chat_id, formatted))
                 except Exception as e3:
                     print(f"Schedule lark reply error: {e3}")
 
@@ -131,8 +133,10 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
                                     await send_text(client, creds, to_user_id, "", formatted)
                             try:
                                 asyncio.run(_send_wechat())
-                            except RuntimeError as e_loop:
-                                print(f"Schedule wechat asyncio.run error: {e_loop}")
+                            except RuntimeError:
+                                # 当前处于 event loop 内时降级：用 create_task 异步发送
+                                loop = asyncio.get_running_loop()
+                                loop.create_task(_send_wechat())
                 except Exception as e4:
                     print(f"Schedule wechat reply error: {e4}")
 

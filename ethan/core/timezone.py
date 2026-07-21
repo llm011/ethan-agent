@@ -69,11 +69,13 @@ def ensure_timezone_in_config() -> None:
             from datetime import datetime
             try:
                 offset = datetime.now(tz).utcoffset()
-                total_hours = int(offset.total_seconds() // 3600)
+                total_hours = int(offset.total_seconds() / 3600)
                 # 常见偏移 → IANA 映射
                 _OFFSET_FALLBACK = {
-                    8: "Asia/Shanghai", 9: "Asia/Tokyo", -5: "America/New_York",
-                    -8: "America/Los_Angeles", 0: "UTC", 1: "Europe/London",
+                    8: "Asia/Shanghai", 9: "Asia/Tokyo",
+                    -5: "America/New_York", -4: "America/New_York",  # 美东标准/夏令时
+                    -8: "America/Los_Angeles", -7: "America/Los_Angeles",  # 美西标准/夏令时
+                    0: "UTC", 1: "Europe/London",
                     5: "Asia/Karachi",
                 }
                 tz_name = _OFFSET_FALLBACK.get(total_hours)
