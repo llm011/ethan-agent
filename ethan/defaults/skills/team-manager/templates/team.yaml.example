@@ -1,0 +1,44 @@
+# 团队配置示例
+# 复制此文件到 ~/.ethan/work/team.yaml 并填入你的团队信息
+
+# 管理者自己的信息
+self:
+  name: ""              # 你的姓名
+  role: ""              # 你的角色/职级
+  code_username: ""     # 代码平台用户名（可选，用于 CR 统计）
+
+# 团队成员列表
+members:
+  - name: ""            # 成员姓名
+    role: ""            # 角色/职级
+    direction: ""       # 负责方向
+    joined: ""          # 入职时间 (YYYY-MM)
+    code_username: ""   # 代码平台用户名（可选，用于 CR 统计）
+    # open_id: ""       # 飞书 open_id（可选，用于发消息/创建任务）
+    # projects: []      # 当前参与的项目（可选）
+    # notes: ""         # 备注（可选）
+
+  # 按需添加更多成员...
+
+# 项目列表（可选，用于关联 case）
+projects:
+  - name: ""            # 项目名称
+    owner: ""           # 项目负责人
+    members: []         # 参与成员列表
+    status: active      # active / completed / paused
+    # started: ""       # 启动时间（可选）
+    # description: ""   # 项目简述（可选）
+
+# Code Review 配置
+code_review:
+  platform: codebase    # codebase / github / gitlab
+  repos: []             # 团队相关的仓库列表（可选，留空则每次手动指定）
+
+# 绩效配置
+review:
+  cycle: quarterly      # quarterly（季度）/ semi-annual（半年度）
+  dimensions:           # 考核维度（可自定义权重或增删）
+    - name: "产出与交付"
+    - name: "技术质量"
+    - name: "主动性与影响力"
+    - name: "成长趋势"

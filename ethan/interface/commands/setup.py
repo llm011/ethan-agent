@@ -29,6 +29,13 @@ PRESET_PLUGINS: list[dict] = [
         "install_source": "companion-listen",
     },
     {
+        "name": "team-manager",
+        "label": "团队管理",
+        "description": "绩效管理 / 任务委派 / 时间线驱动（声明式周期事件自动触发）",
+        "install_type": "builtin_skill",
+        "install_source": "team-manager",
+    },
+    {
         "name": "tavily",
         "label": "AI 搜索",
         "description": "Tavily AI 搜索引擎（需 API Key）",

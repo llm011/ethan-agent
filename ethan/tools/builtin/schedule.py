@@ -41,7 +41,12 @@ def _make_fallback_title(prompt: str) -> str:
     return " ".join(words[:5]) + "…"
 
 
-def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channel_context: str = "{}", user_id: str = "", title: str = ""):
+def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channel_context: str = "{}", user_id: str = "", title: str = "", **_extra):
+    """定时任务触发时的回调。
+
+    **_extra 接收并忽略 timeline / scene / source_timeline 等元数据字段，
+    它们用于 UI 分类展示，不参与 fire 行为。
+    """
     def _do_fire():
         import requests
 
@@ -139,6 +144,7 @@ class ScheduleCreateTool(BaseTool):
             "cron": {"type": "string", "description": "Cron expression (5-part: min hour day month weekday). E.g. '0 9 * * *' for 9am daily. IMPORTANT: for weekday, always use names (mon-fri, sat, sun) not numbers — APScheduler's numeric weekday convention differs from standard cron (1-5 means Tue-Sat, not Mon-Fri)."},
             "interval_minutes": {"type": "integer", "description": "Alternative: run every N minutes."},
             "end_date": {"type": "string", "description": "Optional: date (YYYY-MM-DD) or datetime (YYYY-MM-DD HH:MM) when the job should stop firing. After this date the job is automatically removed."},
+            "category": {"type": "string", "description": "Task category for UI grouping: 'one_off' (one-time reminder), 'recurring' (regular repeat), or 'timeline' (driven by team-manager timeline). Default 'one_off' for one-time tasks, 'recurring' for cron/interval."},
         },
         "required": ["job_id", "prompt"],
     }
@@ -146,7 +152,7 @@ class ScheduleCreateTool(BaseTool):
     def __init__(self, user_id: str = ""):
         self._user_id = user_id
 
-    async def run(self, job_id: str, prompt: str, title: str = "", cron: str = "", interval_minutes: int = 0, end_date: str = "") -> str:
+    async def run(self, job_id: str, prompt: str, title: str = "", cron: str = "", interval_minutes: int = 0, end_date: str = "", category: str = "") -> str:
         import httpx
 
         from ethan.core.config import get_config
@@ -159,6 +165,10 @@ class ScheduleCreateTool(BaseTool):
         # title 兜底：模型没给 title 时自动从 prompt 生成
         if not title:
             title = _make_fallback_title(prompt)
+
+        # category 兜底：未显式指定时按 trigger 推断
+        if not category:
+            category = "recurring" if cron or interval_minutes > 0 else "one_off"
 
         # 验证 end_date 格式（早于实际创建 session 前拦截，避免 job 创建成功但日期无效）
         if end_date and not any(_try_strptime(end_date, fmt) for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d")):
@@ -200,6 +210,7 @@ class ScheduleCreateTool(BaseTool):
                     "channel": channel,
                     "channel_context": channel_context,
                     "user_id": self._user_id,
+                    "category": category,
                 }, headers=headers)
                 res.raise_for_status()
                 msg = f"Scheduled '{job_id}' successfully."

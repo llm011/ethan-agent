@@ -371,6 +371,34 @@ def _init_default_skills() -> None:
                             shutil.copy2(str(ref_file), str(dst_file))
 
 
+def _init_work_dir() -> None:
+    """初始化 ~/.ethan/work/ 目录及模板配置文件。
+
+    从 defaults/skills/team-manager/templates/ 释放示例文件。
+    已存在的文件不覆盖（保护用户已修改的配置）。
+    """
+    import shutil
+
+    work_dir = CONFIG_DIR / "work"
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    templates_dir = Path(__file__).parent.parent / "defaults" / "skills" / "team-manager" / "templates"
+    if not templates_dir.exists():
+        return
+
+    # 模板文件 → 目标文件名映射
+    mapping = {
+        "team.yaml.example": "team.yaml",
+        "timelines.yaml.example": "timelines.yaml",
+    }
+
+    for src_name, dst_name in mapping.items():
+        src = templates_dir / src_name
+        dst = work_dir / dst_name
+        if src.exists() and not dst.exists():
+            shutil.copy2(str(src), str(dst))
+
+
 def load_config() -> Config:
     import yaml
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -407,6 +435,7 @@ def load_config() -> Config:
 
     _init_system_files(config.defaults.agent_name)
     _init_default_skills()
+    _init_work_dir()
 
     # 旧 users/<admin>/ 架构 → 新 profile 架构（default = 顶层）。幂等，放最后。
     try:
