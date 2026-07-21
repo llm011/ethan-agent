@@ -207,22 +207,19 @@ class BackgroundTaskTool(BaseTool):
 
     async def run(self, title: str, prompt: str) -> str:
         from ethan.core.config import get_config
-        from ethan.core.paths import user_sessions_db_path
-        from ethan.memory.session import SessionStore
+        from ethan.memory.session import get_session_store
 
         chat_id = lark_chat_id_var.get("")
         channel = "lark" if chat_id else "web"
         channel_context = json.dumps({"chat_id": chat_id}) if chat_id else "{}"
 
         # 为该任务建一个独立 session（per-user），结果落在这里
-        store = SessionStore(db_path=user_sessions_db_path())
-        await store.init()
+        store = await get_session_store()
         session = await store.create(get_config().defaults.model)
         await store.update_title(session.id, f"[后台] {title}")
         # 首条用户消息入库，刷新后台会话能看到任务内容
         from ethan.providers.base import Message
         await store.save_message(session.id, Message(role="user", content=prompt))
-        await store.close()
 
         task = _BgTask(session_id=session.id, title=title, started_at=time.time(), channel=channel)
         t = threading.Thread(

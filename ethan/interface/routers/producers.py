@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from ethan.memory.session import SessionStore
+from ethan.memory.session import SessionStore, get_session_store
 from ethan.providers.base import Message
 
 from .helpers import _friendly_error
@@ -117,11 +117,6 @@ async def _run_delegate_generation(
             await store.touch(session_id)
         except Exception:
             pass
-        finally:
-            try:
-                await store.close()
-            except Exception:
-                pass
         run.emit({"done": True, "usage": {}})
         run.finish()
         _RunManager_schedule_removal(run.session_id)
@@ -136,10 +131,6 @@ async def _run_delegate_generation(
     except asyncio.CancelledError:
         run.emit({"stopped": True, "usage": {}})
         run.finish()
-        try:
-            await store.close()
-        except Exception:
-            pass
         _RunManager_schedule_removal(run.session_id)
         raise
     except Exception as e:
@@ -158,11 +149,6 @@ async def _run_delegate_generation(
             await store.touch(session_id)
     except Exception:
         logger.exception("保存委派续接结果失败 session=%s", session_id)
-    finally:
-        try:
-            await store.close()
-        except Exception:
-            pass
 
     run.emit({"done": True, "usage": {}})
     run.finish()
@@ -311,10 +297,6 @@ async def _run_generation(
                 logger.exception("保存已停止生成的部分内容失败 session=%s", session_id)
         run.emit({"stopped": True, "usage": collector.usage_dict})
         run.finish()
-        try:
-            await store.close()
-        except Exception:
-            pass
         _RunManager_schedule_removal(run.session_id)
         raise
     except Exception as e:
@@ -385,69 +367,62 @@ async def _run_generation(
         asyncio.create_task(_maybe_consolidate(session_id, agent._provider.model, user_id, mode=mode))
         asyncio.create_task(_maybe_generate_skill(session_id, agent._provider.model, user_id))
 
-    await store.close()
 
     # --- Get笔记 异步任务后台轮询 ---
     # 从 agent 回复中提取 getnote task_id，后台轮询直到完成，
     # 完成后把笔记内容作为独立消息推送给前端（复用 SSE 流）。
-    # store 已关闭，用独立 bg_store 落库避免长连接占用。
+    # 用独立变量引用 store 以保持语义清晰。
     from ethan.core.background_polling import extract_task_id, poll_getnote_task
     task_id = extract_task_id(collector.full or "")
     if task_id:
-        bg_store = SessionStore()
-        await bg_store.init()
+        bg_store = await get_session_store()
+        run.emit({"background_polling": True, "polling_message":
+                  "\U0001f4e1 Get笔记正在提取视频内容，请稍候..."})
         try:
-            run.emit({"background_polling": True, "polling_message":
-                      "\U0001f4e1 Get笔记正在提取视频内容，请稍候..."})
+            async def _on_progress(status, note_id):
+                if status in ("processing", "pending"):
+                    run.emit({"background_polling": True, "polling_message":
+                              "\u23f3 仍在提取中..."})
+            result = await poll_getnote_task(task_id, on_progress=_on_progress)
+        except Exception as e:
+            logger.exception("getnote 后台轮询异常: %s", e)
+            result = None
+        if result and result.get("content"):
+            note_content = result["content"]
+            note_title = result.get("title", "")
+            header = "\U0001f4dd Get笔记提取完成" + (f"：{note_title}" if note_title else "")
+            bg_msg = f"{header}\n\n{note_content}"
+            # 用 new_message 事件推送独立消息（不拼到当前消息末尾）
+            run.emit({"new_message": True, "content": bg_msg})
             try:
-                async def _on_progress(status, note_id):
-                    if status in ("processing", "pending"):
-                        run.emit({"background_polling": True, "polling_message":
-                                  "\u23f3 仍在提取中..."})
-                result = await poll_getnote_task(task_id, on_progress=_on_progress)
-            except Exception as e:
-                logger.exception("getnote 后台轮询异常: %s", e)
-                result = None
-            if result and result.get("content"):
-                note_content = result["content"]
-                note_title = result.get("title", "")
-                header = "\U0001f4dd Get笔记提取完成" + (f"：{note_title}" if note_title else "")
-                bg_msg = f"{header}\n\n{note_content}"
-                # 用 new_message 事件推送独立消息（不拼到当前消息末尾）
-                run.emit({"new_message": True, "content": bg_msg})
-                try:
-                    await bg_store.save_message(session_id, Message(
-                        role="assistant", content=bg_msg,
-                    ))
-                    await bg_store.touch(session_id)
-                except Exception:
-                    logger.exception("保存 getnote 后台结果失败 session=%s", session_id)
-            elif result and result.get("detail_failed"):
-                # 任务成功但 detail 拉取失败
-                detail_msg = f"\u2705 Get笔记任务已完成（note_id: {result.get('note_id', '?')}, task_id: {result.get('task_id', '?')}），但内容拉取失败，请用「查一下笔记」重试。"
-                run.emit({"new_message": True, "content": detail_msg})
-                try:
-                    await bg_store.save_message(session_id, Message(
-                        role="assistant", content=detail_msg,
-                    ))
-                    await bg_store.touch(session_id)
-                except Exception:
-                    logger.exception("保存 getnote detail 失败提示失败 session=%s", session_id)
-            else:
-                timeout_msg = "\u23f3 Get笔记提取超时，请稍后用「查一下笔记」重试。"
-                run.emit({"new_message": True, "content": timeout_msg})
-                try:
-                    await bg_store.save_message(session_id, Message(
-                        role="assistant", content=timeout_msg,
-                    ))
-                    await bg_store.touch(session_id)
-                except Exception:
-                    logger.exception("保存 getnote 超时提示失败 session=%s", session_id)
-        finally:
-            try:
-                await bg_store.close()
+                await bg_store.save_message(session_id, Message(
+                    role="assistant", content=bg_msg,
+                ))
+                await bg_store.touch(session_id)
             except Exception:
-                logger.exception("关闭 bg_store 失败")
+                logger.exception("保存 getnote 后台结果失败 session=%s", session_id)
+        elif result and result.get("detail_failed"):
+            # 任务成功但 detail 拉取失败
+            detail_msg = f"\u2705 Get笔记任务已完成（note_id: {result.get('note_id', '?')}, task_id: {result.get('task_id', '?')}），但内容拉取失败，请用「查一下笔记」重试。"
+            run.emit({"new_message": True, "content": detail_msg})
+            try:
+                await bg_store.save_message(session_id, Message(
+                    role="assistant", content=detail_msg,
+                ))
+                await bg_store.touch(session_id)
+            except Exception:
+                logger.exception("保存 getnote detail 失败提示失败 session=%s", session_id)
+        else:
+            timeout_msg = "\u23f3 Get笔记提取超时，请稍后用「查一下笔记」重试。"
+            run.emit({"new_message": True, "content": timeout_msg})
+            try:
+                await bg_store.save_message(session_id, Message(
+                    role="assistant", content=timeout_msg,
+                ))
+                await bg_store.touch(session_id)
+            except Exception:
+                logger.exception("保存 getnote 超时提示失败 session=%s", session_id)
+
 
     # 标题生成：await 以便把结果带进 done 事件，前端实时更新
     new_title = await _maybe_regen_title(session_id)

@@ -64,8 +64,29 @@ def ensure_timezone_in_config() -> None:
         tz = _resolve_tz("")
         tz_name = getattr(tz, "key", None)  # ZoneInfo 有 .key
         if not tz_name:
-            # 固定偏移时区无 IANA 名，不写回
-            return
+            # 固定偏移时区无 IANA 名 → 用 UTC 偏移推断常见时区作为兜底
+            import logging
+            from datetime import datetime
+            try:
+                offset = datetime.now(tz).utcoffset()
+                total_hours = int(offset.total_seconds() / 3600)
+                # 常见偏移 → IANA 映射
+                _OFFSET_FALLBACK = {
+                    8: "Asia/Shanghai", 9: "Asia/Tokyo",
+                    -5: "America/New_York", -4: "America/New_York",  # 美东标准/夏令时
+                    -8: "America/Los_Angeles", -7: "America/Los_Angeles",  # 美西标准/夏令时
+                    0: "UTC", 1: "Europe/London",
+                    5: "Asia/Karachi",
+                }
+                tz_name = _OFFSET_FALLBACK.get(total_hours)
+            except Exception:
+                pass
+            if not tz_name:
+                logging.getLogger(__name__).info(
+                    "Cannot determine IANA timezone from system; "
+                    "set defaults.timezone in config.yaml manually."
+                )
+                return
         cfg.defaults.timezone = tz_name
         save_config(cfg)
     except Exception:

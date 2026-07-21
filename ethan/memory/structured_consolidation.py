@@ -76,44 +76,39 @@ async def _backfill_short_sessions(
 
     返回本次兜底扫描尝试提取的 session 数。
     """
-    from ethan.core.paths import user_sessions_db_path
     from ethan.interface.routers.tasks import _run_structured_extraction
-    from ethan.memory.session import SessionStore
+    from ethan.memory.session import get_session_store
 
-    sess_store = SessionStore(db_path=user_sessions_db_path())
-    await sess_store.init()
+    sess_store = await get_session_store()
     tried = 0
-    try:
-        sessions = await sess_store.list_in_range(
-            start_ts, end_ts,
-            exclude_sources=["heartbeat"],
-            exclude_title_prefixes=["[心跳]", "[午夜]"],
-        )
-        for sess_meta in sessions:
-            full_sess = await sess_store.load(sess_meta.id)
-            if not full_sess:
-                continue
-            user_msgs = [m for m in full_sess.messages if m.role == "user" and m.content]
-            if len(user_msgs) >= 3:
-                continue  # 已能被实时链路触发
-            if len(user_msgs) > _BACKFILL_MAX_USER_TURNS:
-                continue
-            total_chars = sum(len(m.content) for m in user_msgs)
-            if total_chars < _BACKFILL_MIN_CHARS:
-                continue  # 闲聊过滤
-            try:
-                await _run_structured_extraction(
-                    full_sess, model, user_id, len(user_msgs), force=True,
-                )
-                tried += 1
-            except Exception:
-                logger.warning(
-                    "[StructuredConsolidation] backfill failed for session=%s",
-                    sess_meta.id, exc_info=True,
-                )
-        return tried
-    finally:
-        await sess_store.close()
+    sessions = await sess_store.list_in_range(
+        start_ts, end_ts,
+        exclude_sources=["heartbeat"],
+        exclude_title_prefixes=["[心跳]", "[午夜]"],
+    )
+    for sess_meta in sessions:
+        full_sess = await sess_store.load(sess_meta.id)
+        if not full_sess:
+            continue
+        user_msgs = [m for m in full_sess.messages if m.role == "user" and m.content]
+        if len(user_msgs) >= 3:
+            continue  # 已能被实时链路触发
+        if len(user_msgs) > _BACKFILL_MAX_USER_TURNS:
+            continue
+        total_chars = sum(len(m.content) for m in user_msgs)
+        if total_chars < _BACKFILL_MIN_CHARS:
+            continue  # 闲聊过滤
+        try:
+            await _run_structured_extraction(
+                full_sess, model, user_id, len(user_msgs), force=True,
+            )
+            tried += 1
+        except Exception:
+            logger.warning(
+                "[StructuredConsolidation] backfill failed for session=%s",
+                sess_meta.id, exc_info=True,
+            )
+    return tried
 
 
 def _candidate_payload(candidates: list) -> list[dict[str, Any]]:

@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from ethan import __version__
-from ethan.memory.session import SessionStore
+from ethan.memory.session import get_session_store
 from ethan.providers.base import Message
 
 from .deps import create_agent, verify_token
@@ -79,16 +79,13 @@ async def health():
 @router.get("/poll")
 async def poll(hide_heartbeat: bool = False, hide_scheduled: bool = False,
                user_id: str = Depends(verify_token)):
-    from ethan.core.paths import user_sessions_db_path
-    store = SessionStore(db_path=user_sessions_db_path())
-    await store.init()
+    store = await get_session_store()
     exclude_prefixes = []
     if hide_heartbeat:
         exclude_prefixes.append("[心跳]")
     if hide_scheduled:
         exclude_prefixes.append("[定时]")
     sessions = await store.list_recent(50, exclude_title_prefixes=exclude_prefixes or None)
-    await store.close()
     return {
         "sessions": [
             {
@@ -110,7 +107,6 @@ async def poll(hide_heartbeat: bool = False, hide_scheduled: bool = False,
 @router.post("/chat")
 async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify_token)):
     from ethan.core.context import set_session_id
-    from ethan.core.paths import user_sessions_db_path
 
     # 未传 session_id 时自动生成，确保所有对话都持久化到会话列表
     if not req.session_id:
@@ -132,8 +128,7 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
             for m in req.messages
         ]
 
-        store = SessionStore(db_path=user_sessions_db_path())
-        await store.init()
+        store = await get_session_store()
 
         if req.session_id:
             for m in messages[-1:]:
@@ -272,7 +267,6 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
         asyncio.create_task(_maybe_consolidate(req.session_id, agent._provider.model, user_id, mode=req.mode))
         asyncio.create_task(_maybe_generate_skill(req.session_id, agent._provider.model, user_id))
 
-    await store.close()
     return ChatResponse(
         content=response.content,
         model=agent._provider.model,

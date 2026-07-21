@@ -2,7 +2,11 @@
 
 每次对话是一个 Session，包含完整的消息历史，存储在 SQLite 中。
 支持创建、恢复、列出、删除。
+
+架构：进程级单例 SessionStore（通过 get_session_store() 获取），
+同一 db_path 只维护一个连接实例，消除多连接写锁竞争。
 """
+import asyncio
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -176,13 +180,14 @@ async def decide_title(messages: list[Message], current_title: str = "") -> str 
 class SessionStore:
     """SQLite-backed session 存储。"""
 
-    def __init__(self, db_path: Path | None = None):
+    def __init__(self, db_path: Path | None = None, *, _singleton: bool = False):
         # 不传时按当前 user context 求值，避免模块级缓存击穿 per-user 隔离
         if db_path is None:
             from ethan.core.paths import user_sessions_db_path
             db_path = user_sessions_db_path()
         self._db_path = db_path
         self._db: aiosqlite.Connection | None = None
+        self._singleton = _singleton
 
     async def init(self) -> None:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -214,7 +219,7 @@ class SessionStore:
             await self._db.execute("PRAGMA journal_mode=WAL")
         except Exception:
             pass
-        await self._db.execute("PRAGMA busy_timeout=5000")
+        await self._db.execute("PRAGMA busy_timeout=30000")
         await self._db.execute("PRAGMA foreign_keys=ON")
         await self._db.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
@@ -264,6 +269,8 @@ class SessionStore:
             pass
 
     async def close(self) -> None:
+        if self._singleton:
+            return  # 单例连接由进程生命周期管理，不关闭
         if self._db:
             await self._db.close()
 
@@ -660,6 +667,57 @@ class SessionStore:
             archive_path,
         )
         return True
+
+
+# ── 进程级单例 SessionStore ──────────────────────────────────────────────────
+_session_stores: dict[str, "SessionStore"] = {}
+_session_store_lock = asyncio.Lock()
+
+
+def _is_store_alive(store: "SessionStore") -> bool:
+    """探活单例连接是否仍可复用。
+
+    aiosqlite 的 Connection 没有公开的存活探针，这里读 `_running` 私有
+    属性。包一层 try 是为了在 aiosqlite 升级把属性改名/改语义时不抛
+    AttributeError——降级为 False 走 slow path 重建，最坏只是多一次
+    init()，不会误判存活或静默失效。
+    """
+    try:
+        return store._db is not None and bool(store._db._running)
+    except AttributeError:
+        return False
+
+
+async def get_session_store(db_path: Path | None = None) -> "SessionStore":
+    """获取进程级单例 SessionStore。
+
+    同一 db_path 只维护一个连接实例，消除多连接写锁竞争。
+    所有路由和后台任务应通过本函数获取 store，不再各自 new/close。
+    """
+    if db_path is None:
+        from ethan.core.paths import user_sessions_db_path
+        db_path = user_sessions_db_path()
+    key = str(db_path)
+
+    # Fast path（无锁）：已存在且连接健康
+    if key in _session_stores:
+        store = _session_stores[key]
+        if _is_store_alive(store):
+            return store
+
+    # Slow path：创建或重建
+    async with _session_store_lock:
+        # Double-check after acquiring lock
+        if key in _session_stores:
+            store = _session_stores[key]
+            if _is_store_alive(store):
+                return store
+            # 连接已断，清除旧实例
+            del _session_stores[key]
+        store = SessionStore(db_path=db_path, _singleton=True)
+        await store.init()
+        _session_stores[key] = store
+        return store
 
 
 def list_archived_dbs() -> list[tuple[Path, str, str]]:

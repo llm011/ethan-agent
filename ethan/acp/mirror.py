@@ -122,12 +122,10 @@ class MirrorSession:
         store = None
         try:
             from ethan.acp import get_mirror_session, set_mirror_info, set_mirror_session
-            from ethan.core.paths import user_sessions_db_path
-            from ethan.memory.session import SessionStore
+            from ethan.memory.session import get_session_store
             from ethan.providers.base import Message
 
-            store = SessionStore(db_path=user_sessions_db_path())
-            await store.init()
+            store = await get_session_store()
 
             session_id = None
             if reuse:
@@ -171,11 +169,6 @@ class MirrorSession:
             return cls(store, session_id, run=run)
         except Exception:
             logger.debug("MirrorSession.start failed (agent=%s)", agent, exc_info=True)
-            if store is not None:
-                try:
-                    await store.close()
-                except Exception:
-                    pass
             return None
 
     async def finish(self, output: str, sub_steps: list | None, is_error: bool = False) -> None:
@@ -193,10 +186,6 @@ class MirrorSession:
         except Exception:
             logger.debug("MirrorSession.finish failed", exc_info=True)
         finally:
-            try:
-                await self._store.close()
-            except Exception:
-                pass
             # 收尾实时流：通知订阅者结束并安排清理（宽限期内仍可重连回放）。
             if self._run is not None:
                 try:

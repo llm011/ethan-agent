@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 
-from ethan.memory.session import SessionStore
+from ethan.memory.session import get_session_store
 
 logger = logging.getLogger("ethan.tasks")
 
@@ -11,22 +11,17 @@ logger = logging.getLogger("ethan.tasks")
 async def _maybe_regen_title(session_id: str) -> str | None:
     """尝试生成/更新标题，返回新标题或 None（无变化/失败）。"""
     try:
-        from ethan.core.paths import user_sessions_db_path
         from ethan.memory.session import decide_title
-        store = SessionStore(db_path=user_sessions_db_path())
-        await store.init()
-        try:
-            session = await store.load(session_id)
-            if not session:
-                logger.warning("_maybe_regen_title: session %s not found", session_id)
-                return None
-            title = await decide_title(session.messages, session.title)
-            if title and title != session.title:
-                await store.update_title(session_id, title)
-                logger.debug("_maybe_regen_title: updated %s -> %s", session_id, title)
-                return title
-        finally:
-            await store.close()
+        store = await get_session_store()
+        session = await store.load(session_id)
+        if not session:
+            logger.warning("_maybe_regen_title: session %s not found", session_id)
+            return None
+        title = await decide_title(session.messages, session.title)
+        if title and title != session.title:
+            await store.update_title(session_id, title)
+            logger.debug("_maybe_regen_title: updated %s -> %s", session_id, title)
+            return title
     except Exception:
         logger.exception("_maybe_regen_title failed for session=%s", session_id)
     return None
@@ -152,13 +147,10 @@ async def _maybe_consolidate(session_id: str, model: str, user_id: str = "", mod
     try:
         # 心理画像是否额外抽取：由当前 mode 自身声明，不在此硬编码模式名
         from ethan.core.modes import resolve_mode
-        from ethan.core.paths import user_sessions_db_path
         resolve_mode(mode)  # validate mode exists
 
-        store = SessionStore(db_path=user_sessions_db_path())
-        await store.init()
+        store = await get_session_store()
         session = await store.load(session_id)
-        await store.close()
         if not session:
             return
 
@@ -187,12 +179,9 @@ async def _maybe_consolidate(session_id: str, model: str, user_id: str = "", mod
 
 async def _maybe_generate_skill(session_id: str, model: str, user_id: str = "") -> None:
     try:
-        from ethan.core.paths import user_sessions_db_path
         from ethan.skills.generator import MIN_TURNS, SkillGenerator
-        store = SessionStore(db_path=user_sessions_db_path())
-        await store.init()
+        store = await get_session_store()
         session = await store.load(session_id)
-        await store.close()
         if not session:
             return
         user_turns = sum(1 for m in session.messages if m.role == "user")

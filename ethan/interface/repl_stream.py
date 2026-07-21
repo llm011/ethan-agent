@@ -14,14 +14,12 @@ from .repl_ui import console
 async def run_once(agent: Agent, prompt: str) -> None:
     """单轮对话：发送一句，流式打印回复，退出。同时持久化到 session 列表。"""
     from ethan.core.config import get_config
-    from ethan.core.paths import user_sessions_db_path
-    from ethan.memory.session import SessionStore, _generate_id
+    from ethan.memory.session import _generate_id, get_session_store
     from ethan.providers.base import ThinkingEvent, ToolEvent
 
     # 创建 session
     session_id = _generate_id()
-    store = SessionStore(db_path=user_sessions_db_path())
-    await store.init()
+    store = await get_session_store()
     model_id = agent._provider.model or get_config().defaults.model
     await store.create_with_id(session_id, model_id, source="cli")
 
@@ -132,8 +130,6 @@ async def run_once(agent: Agent, prompt: str) -> None:
                 await store.update_title(session_id, title)
     except Exception:
         pass  # 标题生成失败不影响主流程
-
-    await store.close()
 
     # 打印 session_id 供用户后续引用
     console.print()

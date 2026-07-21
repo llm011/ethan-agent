@@ -162,6 +162,25 @@ async def _handle_message(msg: dict[str, Any], creds: Any) -> None:
 
     logger.info("[WeChat] msg from=%s group=%s text=%r", sender[:20], group_id[:20], text[:80])
 
+    # ── /command：以 / 开头的命令先于 Agent 处理（不 ack，直接回复） ──
+    # 命令不命中时原样走下面的 Agent 流程；命令命中则 return
+    from ethan.interface.channel_commands import handle_command, is_command
+    if is_command(text):
+        from ethan.interface.wechat_cmd_context import build_wechat_cmd_context
+        cmd_ctx = build_wechat_cmd_context(chat_key, text, sender, is_group_chat=bool(group_id))
+        try:
+            reply = await handle_command(cmd_ctx)
+        except Exception:
+            logger.exception("[WeChat] command handler failed for chat_key=%s", chat_key)
+            reply = "⚠️ 命令处理失败。"
+        if reply:
+            async with httpx.AsyncClient() as client:
+                try:
+                    await send_text(client, creds, reply_to, context_token, reply)
+                except Exception:
+                    logger.exception("[WeChat] Failed to send command reply")
+        return
+
     # ── Ack immediately ───────────────────────────────────────────────────────
     async with httpx.AsyncClient() as client:
         try:
@@ -172,14 +191,12 @@ async def _handle_message(msg: dict[str, Any], creds: Any) -> None:
         await send_typing(client, creds, context_token, typing=True)
 
     # ── Session + history ─────────────────────────────────────────────────────
-    from ethan.core.paths import user_sessions_db_path
     from ethan.core.users import get_user_store
-    from ethan.memory.session import SessionStore
+    from ethan.memory.session import get_session_store
     from ethan.memory.working import MemoryConfig, WorkingMemory
 
     user_id = get_user_store().get_admin_user_id()
-    store = SessionStore(db_path=user_sessions_db_path())
-    await store.init()
+    store = await get_session_store()
 
     session_id = await _get_or_create_session(store, chat_key)
     session_obj = await store.load(session_id)
@@ -213,6 +230,13 @@ async def _handle_message(msg: dict[str, Any], creds: Any) -> None:
     wechat_token = wechat_chat_id_var.set(reply_to)
     agent = create_agent(channel="wechat", user_id=user_id, toolset="full")
     final_answer = ""
+
+    # 登记 task 供 /stop 取消（仅 Agent 流程；命令分支不登记，避免 /stop 取消自己）
+    from ethan.interface.wechat_cmd_context import _register_wechat_task, _untrack_wechat_task
+    _cur_task = asyncio.current_task()
+    if _cur_task is not None:
+        _register_wechat_task(chat_key, _cur_task)
+        _cur_task.add_done_callback(lambda t, ck=chat_key: _untrack_wechat_task(ck, t))
 
     try:
         async for chunk in agent.stream_chat(context_messages):
@@ -251,7 +275,6 @@ async def _handle_message(msg: dict[str, Any], creds: Any) -> None:
     except Exception:
         logger.exception("[WeChat] Agent stream error for chat_key=%s", chat_key)
         wechat_chat_id_var.reset(wechat_token)
-        await store.close()
         return
     wechat_chat_id_var.reset(wechat_token)
 
@@ -264,7 +287,6 @@ async def _handle_message(msg: dict[str, Any], creds: Any) -> None:
         final_response = Message(role="assistant", content=reply)
         await store.save_message(session_id, final_response)
     await store.touch(session_id)
-    await store.close()
 
     # A3: 微信渠道也触发后台记忆抽取（原来只有 Web/REPL 触发）
     try:
