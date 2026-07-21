@@ -182,9 +182,26 @@ def parse_color(value: str):
     raise DeckError(f"无法解析颜色: {value!r}")
 
 
+def rel_luminance(rgb: RGBColor) -> float:
+    """相对亮度（0-1），用于判断深/浅色背景。"""
+    r, g, b = (int(v) / 255 for v in rgb)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def shift_color(rgb: RGBColor, amount: float) -> RGBColor:
+    """整体提亮（amount>0）或压暗（amount<0），amount 为 0-1 的幅度。"""
+    def f(v):
+        return max(0, min(255, round(int(v) + 255 * amount)))
+    return RGBColor(f(rgb[0]), f(rgb[1]), f(rgb[2]))
+
+
+def contrast_text_color(bg: RGBColor, dark="#1F2937", light="#FFFFFF") -> str:
+    """根据底色亮度选黑/白文字。"""
+    return dark if rel_luminance(bg) > 0.5 else light
+
+
 def px_to_emu(px: float, emu_per_px: float) -> Emu:
     return Emu(int(round(px * emu_per_px)))
-
 
 def px_to_pt(px: float) -> Pt:
     return Pt(px * PT_PER_PX)
@@ -810,7 +827,13 @@ def render_table(slide, el, theme, emu_per_px):
 
     tbl_theme = el.get("theme") or {}
     header_color = tbl_theme.get("color") or (theme.get("themeColors") or ["#1E40AF"])[0]
-    outline = el.get("outline") or {"style": "solid", "width": 1, "color": "#E5E7EB"}
+    header_rgb, _ = parse_color(header_color)
+    header_text_color = contrast_text_color(header_rgb)
+    default_outline = (theme.get("outline") or {}).get("color", "#E5E7EB")
+    outline = el.get("outline") or {"style": "solid", "width": 1, "color": default_outline}
+    # 表体填充跟随主题背景：深底提亮一档作卡片面，浅底用纯白；避免深主题下白底+浅字不可读
+    bg_rgb, _ = parse_color(theme.get("backgroundColor", "#FFFFFF"))
+    body_fill = shift_color(bg_rgb, 0.10) if rel_luminance(bg_rgb) < 0.35 else RGBColor(0xFF, 0xFF, 0xFF)
 
     for r, row in enumerate(data):
         for c in range(cols):
@@ -830,7 +853,7 @@ def render_table(slide, el, theme, emu_per_px):
             elif is_header or is_footer or is_col_header:
                 fill_color, alpha = parse_color(header_color)
             else:
-                fill_color, alpha = parse_color("#FFFFFF")
+                fill_color, alpha = body_fill, None
             cell.fill.solid()
             cell.fill.fore_color.rgb = fill_color
 
@@ -851,7 +874,7 @@ def render_table(slide, el, theme, emu_per_px):
             f.italic = bool(style.get("em", False))
             if style.get("underline"):
                 f.underline = True
-            default_color = "#FFFFFF" if (emphasized and not style.get("backcolor")) else theme.get("fontColor", "#1F2937")
+            default_color = header_text_color if (emphasized and not style.get("backcolor")) else theme.get("fontColor", "#1F2937")
             rgb, _ = parse_color(style.get("color") or default_color)
             f.color.rgb = rgb
             cell_font = _pick(style, "fontName", "fontname")

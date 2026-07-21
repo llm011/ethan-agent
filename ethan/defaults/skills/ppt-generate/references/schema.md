@@ -277,7 +277,8 @@
 
 - `colWidths`：各列宽度占比，和为 1。
 - 单元格：`text` + `colspan`/`rowspan`（合并）+ `style`（`bold/em/underline/strikethrough/color/backcolor/fontSize/fontName/align/vAlign`）。
-- `theme.rowHeader` 为 true 时首行用 `theme.color` 填充、白字加粗（单元格 style 可再覆盖）。
+- `theme.rowHeader` 为 true 时首行用 `theme.color` 填充、加粗，文字颜色按表头底色亮度自动选黑/白（单元格 style 可再覆盖）。
+- 表体默认填充跟随主题背景：深色主题下自动提亮一档作卡片面（文字用主题 fontColor），浅色主题下为纯白；边框默认取主题 outline 颜色。深浅主题下表格都可读，无需手写 backcolor。
 - 被合并覆盖的单元格写 `{ "text": "", "merged": true }` 占位。
 
 ## 7. 公式元素（latex）—— OMML 原生公式，PPT 内可继续编辑
