@@ -41,6 +41,28 @@ def get_local_timezone():
         return _resolve_tz("")
 
 
+def ensure_timezone_in_config() -> None:
+    """确保 config.defaults.timezone 已持久化。
+
+    若为空，则探测系统时区并写回 config.yaml，避免后续因环境变化（Docker、
+    远程部署等）导致时区探测结果不一致。
+    """
+    try:
+        from ethan.core.config import get_config, save_config
+        cfg = get_config()
+        if cfg.defaults.timezone:
+            return  # 已显式配置，无需操作
+        tz = _resolve_tz("")
+        tz_name = getattr(tz, "key", None)  # ZoneInfo 有 .key
+        if not tz_name:
+            # 固定偏移时区无 IANA 名，不写回
+            return
+        cfg.defaults.timezone = tz_name
+        save_config(cfg)
+    except Exception:
+        pass  # 首次启动时 config 可能尚未就绪，静默忽略
+
+
 def local_tz_name() -> str:
     """返回可读时区名称，用于展示给用户（如 'Asia/Shanghai' 或 'UTC+08:00'）。"""
     tz = get_local_timezone()

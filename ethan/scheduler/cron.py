@@ -28,7 +28,9 @@ if _OLD_DB.exists() and not DB_PATH.exists():
 class Scheduler:
     def __init__(self):
         _DB_DIR.mkdir(parents=True, exist_ok=True)
-        from ethan.core.timezone import get_local_timezone
+        from ethan.core.timezone import ensure_timezone_in_config, get_local_timezone
+        # 确保时区已持久化到 config，避免探测漂移
+        ensure_timezone_in_config()
         jobstores = {
             "default": SQLAlchemyJobStore(url=f"sqlite:///{DB_PATH}"),
         }
@@ -63,6 +65,7 @@ class Scheduler:
         func: Callable,
         cron_expr: str,
         end_date: str | None = None,
+        name: str | None = None,
         **kwargs,
     ) -> None:
         """添加 cron 定时任务。cron_expr 格式：'分 时 日 月 周' 或标准 cron。
@@ -87,6 +90,7 @@ class Scheduler:
             func,
             trigger=trigger,
             id=job_id,
+            name=name or job_id,
             replace_existing=True,
             kwargs=kwargs,
         )
@@ -99,6 +103,7 @@ class Scheduler:
         minutes: int = 0,
         hours: int = 0,
         end_date: str | None = None,
+        name: str | None = None,
         **kwargs,
     ) -> None:
         """添加 interval 定时任务。end_date 到期后自动删除 job。"""
@@ -106,6 +111,7 @@ class Scheduler:
             func,
             trigger=IntervalTrigger(seconds=seconds, minutes=minutes, hours=hours, end_date=self._parse_end_date(end_date)),
             id=job_id,
+            name=name or job_id,
             replace_existing=True,
             kwargs=kwargs,
         )
@@ -147,6 +153,19 @@ class Scheduler:
         """修改定时任务的显示名称（持久化到 SQLite）。"""
         try:
             self._scheduler.modify_job(job_id, name=new_name)
+            return True
+        except Exception:
+            return False
+
+    def modify_kwargs(self, job_id: str, **new_kwargs) -> bool:
+        """修改定时任务的执行参数（如 prompt）。合并到现有 kwargs 中。"""
+        try:
+            job = self._scheduler.get_job(job_id)
+            if not job:
+                return False
+            merged = dict(job.kwargs or {})
+            merged.update(new_kwargs)
+            self._scheduler.modify_job(job_id, kwargs=merged)
             return True
         except Exception:
             return False
