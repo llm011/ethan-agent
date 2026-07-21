@@ -30,7 +30,7 @@ timelines:
         actions:
           - type: recurring
             cron: "0 10 * * 5"   # 每周五上午 10 点
-            message: "本周有没有值得记录的团队 case？可以说「记一下，...」"
+            message: "本周有没有值得记录的团队事件？可以说「记一下，...」"
             target: self          # 发给自己
 
       - name: "集中汇总期"
@@ -39,7 +39,7 @@ timelines:
         actions:
           - type: once
             offset: "-2w"        # 阶段开始时触发一次
-            message: "绩效季将至，开始汇总本半年的 case 数据。需要我现在生成初稿吗？"
+            message: "绩效季将至，开始汇总本半年的人员事件。需要我现在生成初稿吗？"
             target: self
           - type: once
             offset: "-1w"
@@ -88,7 +88,7 @@ timelines:
         actions:
           - type: once
             offset: "-3w"
-            message: "全年绩效将至，开始汇总全年 case。需要我生成年度报告吗？"
+            message: "全年绩效将至，开始汇总全年人员事件。需要我生成年度报告吗？"
             target: self
       - name: "撰写 & 校准"
         offset_start: "-1w"
@@ -136,7 +136,7 @@ task_categories:
     examples:
       - "每周五下午发 CR 周报"
       - "每天早上 9 点日程摘要"
-      - "每周提醒补充 case"
+      - "每周提醒补充人员事件记录"
 
   - id: timeline
     name: "时间线"
