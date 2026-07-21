@@ -157,8 +157,8 @@ function ArgsPopover({ text, maxW = "max-w-[800px]" }: { text: string; maxW?: st
   const leave = () => { hideTimer.current = setTimeout(() => setShow(false), 150); };
 
   return (
-    <span className="relative inline-flex items-center group/args" onMouseEnter={enter} onMouseLeave={leave}>
-      <span className={`text-sm text-muted-foreground truncate ${maxW}`}>
+    <span className="relative inline-flex items-center max-w-full group/args" onMouseEnter={enter} onMouseLeave={leave}>
+      <span className={`text-sm text-muted-foreground truncate min-w-0 ${maxW}`}>
         ({text})
       </span>
       <button

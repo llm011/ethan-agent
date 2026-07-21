@@ -194,7 +194,7 @@ def _get_group_context(chat_id: str, limit: int = 10) -> list[dict]:
     return items[-limit:]
 
 
-async def _should_respond_to_group_message(text: str, lark_cfg) -> bool:
+async def _should_respond_to_group_message(text: str, lark_cfg, event_data: dict | None = None) -> bool:
     """根据 group_response_mode 判断是否响应该群聊消息。P2P 消息不经此函数。"""
     import fnmatch
     mode = getattr(lark_cfg, "group_response_mode", "mention_only") or "mention_only"
@@ -204,7 +204,22 @@ async def _should_respond_to_group_message(text: str, lark_cfg) -> bool:
         bot_name = getattr(lark_cfg, "bot_name", "") or ""
         if bot_name:
             return f"@{bot_name}" in text
-        return "@" in text
+        # bot_name 未配置时，检查 lark-cli 事件中的 mentions 列表
+        # 或者检查 event_data 里的 is_mentioned / mention_bot 标记
+        if event_data:
+            mentions = event_data.get("mentions") or []
+            if mentions:
+                # mentions 里有 bot 自身的 id 才响应
+                bot_open_id = getattr(lark_cfg, "bot_open_id", "") or ""
+                if bot_open_id:
+                    return any(m.get("id", {}).get("open_id") == bot_open_id or m.get("open_id") == bot_open_id for m in mentions)
+                # 没配 bot_open_id，检查 mentions 里 type=bot 的
+                return any(m.get("id_type") == "app" or m.get("type") == "bot" for m in mentions)
+            # lark-cli 也可能用 is_mention_all 或 mentioned_bot 标记
+            if event_data.get("is_mentioned") or event_data.get("mentioned_bot"):
+                return True
+        # 都没有则不响应（避免对所有带 @ 的消息都回复）
+        return False
     if mode == "keywords":
         keywords = getattr(lark_cfg, "group_keywords", []) or []
         tl = text.lower()
@@ -225,9 +240,10 @@ async def _should_respond_to_group_message(text: str, lark_cfg) -> bool:
             )
             return "yes" in (resp.content or "").lower()
         except Exception:
-            logger.warning("[Lark] llm_group_filter failed, defaulting to respond")
-            return True
-    return True
+            logger.warning("[Lark] llm_group_filter failed, defaulting to NOT respond")
+            return False
+    # 未知模式，安全起见不响应
+    return False
 
 
 # ── 工具进度污染检测 ───────────────────────────────────────────────────────────

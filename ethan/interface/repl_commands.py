@@ -30,6 +30,7 @@ _SLASH_COMMANDS = [
     ("/skills", "List installed skills"),
     ("/update", "Update Ethan Agent"),
     ("/compact", "Summarize history to free context"),
+    ("/summary", "Structured summary of current conversation"),
     ("/help", "Show available commands"),
 ]
 
@@ -180,6 +181,7 @@ async def _handle_slash_command(cmd: str, store: SessionStore, session: Session,
   /resume ID     Resume a session
   /new           Start new session
   /compact       Summarize history to free context
+  /summary       Structured summary of current conversation
   /model [ID]    Show or switch model
   /mode [NAME]   Show or switch conversation mode (e.g. /mode 法律, /mode default)
   /profile [ID]  Show or switch user profile
@@ -203,6 +205,16 @@ async def _handle_slash_command(cmd: str, store: SessionStore, session: Session,
         # 重载 session，触发主循环重建 history/memory
         reloaded = await store.load(session.id)
         return reloaded
+
+    elif command == "/summary":
+        from ethan.core.session_ops import summary_session
+        with console.status("[dim]总结对话中...[/dim]"):
+            result = await summary_session(store, session.id, agent._provider.model)
+        if result.startswith(("对话太短", "总结失败", "会话不存在")):
+            console.print(f"[yellow]{result}[/yellow]")
+            return None
+        console.print(result)
+        return None
 
     elif command == "/config":
         from ethan.core.config import reload_config, save_config

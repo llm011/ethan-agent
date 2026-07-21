@@ -22,6 +22,7 @@ class CommandContext:
     chat_id: str                       # 渠道会话标识（飞书 chat_id / 微信 ilink_id 等）
     raw_text: str                      # 原始消息文本
     sender_id: str = ""                # 发消息者标识（飞书 open_id），用于认主人
+    is_group_chat: bool = False        # 是否群聊（群聊禁止某些敏感命令如 /owner）
     # —— 会话管理回调 ——
     reset_session: callable = None     # async (chat_id) -> None：清空 chat→session 映射，下次新建
     resolve_session_id: callable | None = None   # async (chat_id) -> str|None：取当前 session_id
@@ -33,6 +34,7 @@ class CommandContext:
     get_model: callable | None = None       # async () -> str
     set_model: callable | None = None       # async (model_id) -> str
     compact_session: callable | None = None # async (chat_id) -> str：压缩当前会话历史，返回摘要/提示
+    summary_session: callable | None = None # async (chat_id) -> str：结构化总结当前对话（只读）
     set_owner: callable | None = None       # async (chat_id, sender_id) -> str：认主人 + 设主会话
     get_mode: callable | None = None        # async (chat_id) -> str：取当前会话 mode（"" = 默认）
     set_mode: callable | None = None        # async (chat_id, mode_key) -> None：切换当前会话 mode
@@ -46,6 +48,7 @@ COMMANDS = {
     "btw": ("顺带一问：不带历史直接问，单轮轻量查询（用法 /btw <问题>）", True),
     "review": ("Code review：不带历史，强制加载 code-review 技能（用法 /review <PR/MR 链接>）", True),
     "compact": ("压缩历史：把之前的对话压成摘要，释放上下文", False),
+    "summary": ("总结对话：对当前对话生成结构化总结", False),
     "sessions": ("列出最近的会话", False),
     "stop": ("停止当前进行中的回复", False),
     "resume": ("恢复指定会话（用法 /resume <id>）", True),
@@ -119,6 +122,21 @@ async def handle_command(ctx: CommandContext) -> str | None:
             return summary
         preview = summary if len(summary) <= 200 else summary[:200] + "…"
         return f"🧠 已压缩历史对话。\n\n> {preview}\n\n继续聊吧，我记着要点~"
+
+    if name == "summary":
+        if ctx.summary_session is None:
+            return "此渠道暂不支持总结。"
+        try:
+            result = await ctx.summary_session(ctx.chat_id)
+        except Exception:
+            logger.exception("summary_session failed for chat %s", ctx.chat_id)
+            return "⚠️ 总结失败，请稍后再试。"
+        if not result:
+            return "⚠️ 当前没有可总结的会话。"
+        # 提示性文案直接返回
+        if result.startswith(("对话太短", "总结失败", "会话不存在")):
+            return result
+        return result
 
     if name == "sessions":
         if ctx.list_sessions is None:
@@ -221,6 +239,8 @@ async def handle_command(ctx: CommandContext) -> str | None:
         )
 
     if name == "owner":
+        if ctx.is_group_chat:
+            return "⚠️ 认主人只能在私聊中操作，请私聊我发 /owner。"
         if ctx.set_owner is None:
             return "此渠道暂不支持认主人。"
         try:
@@ -297,7 +317,7 @@ def _handle_command_cmd(arg: str) -> str:
             return "用法：/command add <名称> <描述>\n示例：/command add review-cn 用中文做 code review，重点关注安全和性能"
         cmd_name = sub_parts[1]
         desc = sub_parts[2].strip()
-        _BUILTIN = {"new", "btw", "review", "compact", "sessions", "stop",
+        _BUILTIN = {"new", "btw", "review", "compact", "summary", "sessions", "stop",
                     "resume", "model", "mode", "token", "owner", "help", "command"}
         if cmd_name.lower() in _BUILTIN:
             return f"'{cmd_name}' 与内置命令冲突，请换一个名字。"

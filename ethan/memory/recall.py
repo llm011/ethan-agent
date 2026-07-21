@@ -7,6 +7,7 @@ other sessions. Restricted memories are never injected.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from ethan.memory.records import MemoryDomain, MemoryStatus
@@ -108,18 +109,29 @@ def _collect(
     return merged[:max_items]
 
 
-def build_structured_recall(query: str, *, mode: str = "", max_items: int = 8) -> str:
+@dataclass
+class RecallResult:
+    """Structured recall result with metadata for tool-timeline visibility."""
+    text: str  # 格式化后注入 system prompt 的多行文本
+    count: int  # 召回条数
+    items: list[str]  # 每条召回内容的格式化行（前端展开可见）
+
+    def __bool__(self) -> bool:
+        return self.count > 0
+
+
+def build_structured_recall(query: str, *, mode: str = "", max_items: int = 8) -> RecallResult:
     """Build a system-prompt memory block from structured memories.
 
-    Returns an empty string when there is nothing to recall so callers can
-    cheaply skip injection. Any storage failure is swallowed — recall must
-    never break the main conversation.
+    Returns a RecallResult (falsy when nothing recalled). Any storage failure
+    is swallowed — recall must never break the main conversation.
     """
+    empty = RecallResult(text="", count=0, items=[])
     try:
         store = MemoryStore()
     except Exception:
         logger.debug("structured recall: store unavailable", exc_info=True)
-        return ""
+        return empty
 
     try:
         general = _collect(store, query, domain=MemoryDomain.GENERAL.value, max_items=max_items)
@@ -129,7 +141,7 @@ def build_structured_recall(query: str, *, mode: str = "", max_items: int = 8) -
 
         all_hits = general + companion
         if not all_hits:
-            return ""
+            return empty
 
         try:
             store.touch_recalled([memory.id for memory in all_hits])
@@ -137,10 +149,10 @@ def build_structured_recall(query: str, *, mode: str = "", max_items: int = 8) -
             logger.debug("structured recall: touch_recalled failed", exc_info=True)
 
         lines = [_format_block(memory) for memory in all_hits]
-        return "\n".join(lines)
+        return RecallResult(text="\n".join(lines), count=len(lines), items=lines)
     except Exception:
         logger.debug("structured recall failed", exc_info=True)
-        return ""
+        return empty
     finally:
         try:
             store.close()

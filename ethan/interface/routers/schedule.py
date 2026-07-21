@@ -26,19 +26,21 @@ async def get_schedules():
         kwargs = job.kwargs or {}
         result.append({
             "id": job.id,
-            "name": job.name or job.id,
+            "title": kwargs.get("title", "") or job.name or job.id,
             "trigger": str(job.trigger),
             "next_run_time": str(job.next_run_time) if job.next_run_time else None,
             "status": "paused" if job.next_run_time is None else "active",
             "prompt": kwargs.get("prompt", ""),
             "session_id": kwargs.get("session_id", ""),
             "channel": kwargs.get("channel", "web"),
+            "channel_context": kwargs.get("channel_context", "{}"),
         })
     return {"jobs": result}
 
 
 class ScheduleCreateRequest(BaseModel):
     job_id: str
+    title: str = ""
     prompt: str
     cron: str = ""
     interval_minutes: int = 0
@@ -58,14 +60,15 @@ async def create_schedule(req: ScheduleCreateRequest, user_id: str = Depends(ver
     kwargs = dict(
         session_id=req.session_id,
         prompt=req.prompt,
+        title=req.title,
         channel=req.channel,
         channel_context=req.channel_context,
         user_id=job_user_id,
     )
     if req.cron:
-        scheduler.add_cron(req.job_id, fire_schedule_job, req.cron, end_date=req.end_date or None, **kwargs)
+        scheduler.add_cron(req.job_id, fire_schedule_job, req.cron, end_date=req.end_date or None, name=req.title or req.job_id, **kwargs)
     elif req.interval_minutes > 0:
-        scheduler.add_interval(req.job_id, fire_schedule_job, minutes=req.interval_minutes, end_date=req.end_date or None, **kwargs)
+        scheduler.add_interval(req.job_id, fire_schedule_job, minutes=req.interval_minutes, end_date=req.end_date or None, name=req.title or req.job_id, **kwargs)
     else:
         raise HTTPException(400, "Need cron or interval_minutes")
     return {"ok": True}
@@ -81,7 +84,8 @@ async def delete_schedule(job_id: str):
 
 class SchedulePatchRequest(BaseModel):
     state: str | None = None
-    name: str | None = None
+    title: str | None = None
+    prompt: str | None = None
 
 
 @router.patch("/{job_id}", dependencies=[Depends(verify_token)])
@@ -96,10 +100,18 @@ async def patch_schedule(job_id: str, req: SchedulePatchRequest):
             raise HTTPException(400, "Invalid state. Use 'paused' or 'active'")
         if not success:
             raise HTTPException(404, "Job not found or could not be updated")
-    if req.name is not None:
-        new_name = req.name.strip()
-        if not new_name:
-            raise HTTPException(400, "Name must not be empty")
-        if not scheduler.modify_name(job_id, new_name):
+    if req.title is not None:
+        new_title = req.title.strip()
+        if not new_title:
+            raise HTTPException(400, "Title must not be empty")
+        if not scheduler.modify_name(job_id, new_title):
             raise HTTPException(404, "Job not found or could not be renamed")
+        # 同步更新 kwargs 中的 title，确保 fire 时拿到最新标题
+        scheduler.modify_kwargs(job_id, title=new_title)
+    if req.prompt is not None:
+        new_prompt = req.prompt.strip()
+        if not new_prompt:
+            raise HTTPException(400, "Prompt must not be empty")
+        if not scheduler.modify_kwargs(job_id, prompt=new_prompt):
+            raise HTTPException(404, "Job not found or could not update prompt")
     return {"ok": True}

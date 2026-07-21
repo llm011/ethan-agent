@@ -209,7 +209,8 @@ async def _handle_message(msg: dict[str, Any], creds: Any) -> None:
     # ── Stream Agent ──────────────────────────────────────────────────────────
     from ethan.core.agent_factory import create_agent
     from ethan.interface.lark_tool_trace import sanitize_args_summary, sanitize_result_preview
-
+    from ethan.tools.builtin.schedule import wechat_chat_id_var
+    wechat_token = wechat_chat_id_var.set(reply_to)
     agent = create_agent(channel="wechat", user_id=user_id, toolset="full")
     final_answer = ""
 
@@ -249,8 +250,10 @@ async def _handle_message(msg: dict[str, Any], creds: Any) -> None:
 
     except Exception:
         logger.exception("[WeChat] Agent stream error for chat_key=%s", chat_key)
+        wechat_chat_id_var.reset(wechat_token)
         await store.close()
         return
+    wechat_chat_id_var.reset(wechat_token)
 
     if not final_answer:
         logger.warning("[WeChat] stream_chat produced no text for chat_key=%s", chat_key)

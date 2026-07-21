@@ -145,6 +145,10 @@ async def _run_structured_extraction(session, model: str, user_id: str, user_tur
 
 
 async def _maybe_consolidate(session_id: str, model: str, user_id: str = "", mode: str = "") -> None:
+    # 对话结束 → 触发 sessions.db 防抖备份
+    from ethan.memory.session_backup import schedule_backup
+    schedule_backup()
+
     try:
         # 心理画像是否额外抽取：由当前 mode 自身声明，不在此硬编码模式名
         from ethan.core.modes import resolve_mode

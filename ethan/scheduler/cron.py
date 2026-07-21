@@ -28,7 +28,9 @@ if _OLD_DB.exists() and not DB_PATH.exists():
 class Scheduler:
     def __init__(self):
         _DB_DIR.mkdir(parents=True, exist_ok=True)
-        from ethan.core.timezone import get_local_timezone
+        from ethan.core.timezone import ensure_timezone_in_config, get_local_timezone
+        # 确保时区已持久化到 config，避免探测漂移
+        ensure_timezone_in_config()
         jobstores = {
             "default": SQLAlchemyJobStore(url=f"sqlite:///{DB_PATH}"),
         }
@@ -38,6 +40,41 @@ class Scheduler:
     def start(self) -> None:
         if not self._scheduler.running:
             self._scheduler.start()
+            self._migrate_job_timezones()
+
+    def _migrate_job_timezones(self) -> None:
+        """启动时检查所有 cron job 的 trigger 时区，与当前配置时区不一致的自动修复。
+
+        旧 job 可能在未配置时区（默认 UTC）时创建，trigger 内部绑定了 UTC，
+        导致即使 scheduler 现在用本地时区，旧 job 仍按 UTC 计算下次执行时间。
+        修复方式：用相同的 cron 字段 + 正确时区重建 trigger。
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        tz_name = getattr(self._tz, "key", None) or str(self._tz)
+        for job in self._scheduler.get_jobs():
+            trigger = job.trigger
+            if not isinstance(trigger, CronTrigger):
+                continue
+            trigger_tz = getattr(trigger, "timezone", None)
+            trigger_tz_name = getattr(trigger_tz, "key", None) or str(trigger_tz) if trigger_tz else "UTC"
+            if trigger_tz_name == tz_name:
+                continue
+            # 从现有 trigger 提取 cron 字段，用正确时区重建
+            try:
+                fields = {}
+                for field in trigger.fields:
+                    expr = str(field)
+                    if expr != "*":
+                        fields[field.name] = expr
+                new_trigger = CronTrigger(timezone=self._tz, **fields)
+                # 保留 end_date
+                if hasattr(trigger, "end_date") and trigger.end_date:
+                    new_trigger.end_date = trigger.end_date
+                self._scheduler.reschedule_job(job.id, trigger=new_trigger)
+                logger.info("Migrated job %s timezone: %s → %s", job.id, trigger_tz_name, tz_name)
+            except Exception:
+                logger.warning("Failed to migrate timezone for job %s", job.id, exc_info=True)
 
     def shutdown(self) -> None:
         if self._scheduler.running:
@@ -63,6 +100,7 @@ class Scheduler:
         func: Callable,
         cron_expr: str,
         end_date: str | None = None,
+        name: str | None = None,
         **kwargs,
     ) -> None:
         """添加 cron 定时任务。cron_expr 格式：'分 时 日 月 周' 或标准 cron。
@@ -87,6 +125,7 @@ class Scheduler:
             func,
             trigger=trigger,
             id=job_id,
+            name=name or job_id,
             replace_existing=True,
             kwargs=kwargs,
         )
@@ -99,6 +138,7 @@ class Scheduler:
         minutes: int = 0,
         hours: int = 0,
         end_date: str | None = None,
+        name: str | None = None,
         **kwargs,
     ) -> None:
         """添加 interval 定时任务。end_date 到期后自动删除 job。"""
@@ -106,6 +146,7 @@ class Scheduler:
             func,
             trigger=IntervalTrigger(seconds=seconds, minutes=minutes, hours=hours, end_date=self._parse_end_date(end_date)),
             id=job_id,
+            name=name or job_id,
             replace_existing=True,
             kwargs=kwargs,
         )
@@ -147,6 +188,19 @@ class Scheduler:
         """修改定时任务的显示名称（持久化到 SQLite）。"""
         try:
             self._scheduler.modify_job(job_id, name=new_name)
+            return True
+        except Exception:
+            return False
+
+    def modify_kwargs(self, job_id: str, **new_kwargs) -> bool:
+        """修改定时任务的执行参数（如 prompt）。合并到现有 kwargs 中。"""
+        try:
+            job = self._scheduler.get_job(job_id)
+            if not job:
+                return False
+            merged = dict(job.kwargs or {})
+            merged.update(new_kwargs)
+            self._scheduler.modify_job(job_id, kwargs=merged)
             return True
         except Exception:
             return False

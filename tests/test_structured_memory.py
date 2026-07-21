@@ -242,12 +242,12 @@ def test_recall_isolates_companion_and_restricted(isolated_paths):
     store.close()
 
     normal = build_structured_recall("小明", mode="")
-    assert "我叫小明" in normal
-    assert "焦虑" not in normal
-    assert "秘密" not in normal
+    assert "我叫小明" in normal.text
+    assert "焦虑" not in normal.text
+    assert "秘密" not in normal.text
 
     companion_context = build_structured_recall("焦虑", mode="companion")
-    assert "焦虑" in companion_context
+    assert "焦虑" in companion_context.text
 
 
 def test_daily_summary_upsert_is_idempotent(tmp_path):

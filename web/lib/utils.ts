@@ -53,39 +53,91 @@ export function formatTrigger(trigger: string): string {
     const dow = p.day_of_week ?? "*"
     const dom = p.day ?? "*"
 
-    const padTime = (h: string, m: string) => {
-      const hh = isWild(h) ? "?" : h.padStart(2, "0")
-      const mm = isWild(m) ? "00" : m.padStart(2, "0")
-      return `${hh}:${mm}`
+    const dayNameMap: Record<string, string> = {
+      "0": "周日", "1": "周一", "2": "周二", "3": "周三",
+      "4": "周四", "5": "周五", "6": "周六", "7": "周日",
+      "mon": "周一", "tue": "周二", "wed": "周三", "thu": "周四",
+      "fri": "周五", "sat": "周六", "sun": "周日",
     }
 
-    // every N minutes via */N
-    if (minute.startsWith("*/")) {
-      const n = minute.slice(2)
-      return `每 ${n} 分钟（cron）`
-    }
-
-    // daily at fixed time
-    if (!isWild(hour) && isWild(dow) && isWild(dom)) {
-      return `每天 ${padTime(hour, minute)}`
-    }
-
-    // specific weekdays
-    if (!isWild(dow) && isWild(dom)) {
-      const dayNames: Record<string, string> = {
-        "0": "周日", "1": "周一", "2": "周二", "3": "周三",
-        "4": "周四", "5": "周五", "6": "周六",
-        "mon": "周一", "tue": "周二", "wed": "周三", "thu": "周四",
-        "fri": "周五", "sat": "周六", "sun": "周日",
+    // 解析星期：支持 "mon-fri"（range）、"mon,wed,fri"（list）、"1-5"（数字 range）
+    const formatDow = (d: string): string => {
+      if (isWild(d)) return ""
+      // range: "mon-fri" or "1-5"
+      const rangeMatch = d.match(/^(\w+)-(\w+)$/)
+      if (rangeMatch) {
+        const from = dayNameMap[rangeMatch[1].toLowerCase()] ?? rangeMatch[1]
+        const to = dayNameMap[rangeMatch[2].toLowerCase()] ?? rangeMatch[2]
+        return `每${from}~${to}`
       }
-      const days = dow.split(",").map(d => dayNames[d.trim()] ?? d).join("、")
-      return `每 ${days} ${padTime(hour, minute)}`
+      // comma list
+      const parts = d.split(",").map(s => dayNameMap[s.trim().toLowerCase()] ?? s.trim())
+      if (parts.length === 7 || (parts.length === 1 && isWild(parts[0]))) return "每天"
+      return `每${parts.join("、")}`
     }
+
+    // 解析时间部分：hour + minute 组合成可读描述
+    const formatTime = (h: string, m: string): string => {
+      // every N minutes via */N
+      if (m.startsWith("*/")) {
+        const n = m.slice(2)
+        if (isWild(h)) return `每 ${n} 分钟`
+        if (h.includes("-")) return `${h.replace("-", "~")} 点，每 ${n} 分钟`
+        return `${h} 点，每 ${n} 分钟`
+      }
+
+      const hasHourRange = h.includes("-")
+      const hasMinuteList = m.includes(",")
+
+      // hour range + minute list: "10-22点，第10/25/40/55分钟"
+      if (hasHourRange && hasMinuteList) {
+        const [hFrom, hTo] = h.split("-")
+        const mins = m.split(",").join("/")
+        return `${hFrom}~${hTo} 点，第 ${mins} 分钟`
+      }
+      // hour range + single minute: "10~22点，第10分钟" or "10:10~22:10"
+      if (hasHourRange && !hasMinuteList && !isWild(m)) {
+        const [hFrom, hTo] = h.split("-")
+        const mm = m.padStart(2, "0")
+        return `${hFrom}:${mm} ~ ${hTo}:${mm}`
+      }
+      // hour range + wildcard minute
+      if (hasHourRange && isWild(m)) {
+        const [hFrom, hTo] = h.split("-")
+        return `${hFrom}~${hTo} 点，每分钟`
+      }
+      // single/list hour + minute list
+      if (!isWild(h) && hasMinuteList) {
+        const mins = m.split(",").join("/")
+        return `${h} 点，第 ${mins} 分钟`
+      }
+      // simple: single hour + single minute
+      if (!isWild(h) && !isWild(m)) {
+        return `${h.padStart(2, "0")}:${m.padStart(2, "0")}`
+      }
+      // wildcard hour + minute list
+      if (isWild(h) && hasMinuteList) {
+        const mins = m.split(",").join("/")
+        return `每小时第 ${mins} 分钟`
+      }
+      if (isWild(h) && !isWild(m)) {
+        return `每小时第 ${m} 分钟`
+      }
+      return "每分钟"
+    }
+
+    const dowStr = formatDow(dow)
+    const timeStr = formatTime(hour, minute)
 
     // monthly
     if (!isWild(dom) && isWild(dow)) {
-      return `每月 ${dom} 日 ${padTime(hour, minute)}`
+      return `每月 ${dom} 日 ${timeStr}`
     }
+
+    if (dowStr) {
+      return `${dowStr}，${timeStr}`
+    }
+    return `每天，${timeStr}`
   }
 
   return trigger

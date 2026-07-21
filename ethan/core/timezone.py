@@ -13,9 +13,18 @@ def _resolve_tz(tz_str: str = ""):
         from zoneinfo import ZoneInfo
         return ZoneInfo(tz_str)
 
+    # 尝试 TZ 环境变量（Docker 场景常用）
+    import os
+    env_tz = os.environ.get("TZ", "")
+    if env_tz and env_tz != "UTC":
+        try:
+            from zoneinfo import ZoneInfo
+            return ZoneInfo(env_tz)
+        except Exception:
+            pass
+
     # 尝试从系统符号链接读 IANA 名
     try:
-        import os
         tz_path = os.readlink("/etc/localtime")
         if "zoneinfo/" in tz_path:
             from zoneinfo import ZoneInfo
@@ -39,6 +48,28 @@ def get_local_timezone():
         return _resolve_tz(tz_str)
     except Exception:
         return _resolve_tz("")
+
+
+def ensure_timezone_in_config() -> None:
+    """确保 config.defaults.timezone 已持久化。
+
+    若为空，则探测系统时区并写回 config.yaml，避免后续因环境变化（Docker、
+    远程部署等）导致时区探测结果不一致。
+    """
+    try:
+        from ethan.core.config import get_config, save_config
+        cfg = get_config()
+        if cfg.defaults.timezone:
+            return  # 已显式配置，无需操作
+        tz = _resolve_tz("")
+        tz_name = getattr(tz, "key", None)  # ZoneInfo 有 .key
+        if not tz_name:
+            # 固定偏移时区无 IANA 名，不写回
+            return
+        cfg.defaults.timezone = tz_name
+        save_config(cfg)
+    except Exception:
+        pass  # 首次启动时 config 可能尚未就绪，静默忽略
 
 
 def local_tz_name() -> str:

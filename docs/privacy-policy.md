@@ -24,7 +24,8 @@ Ethan Browser acts as a bridge between the Chrome browser and a personal AI agen
 | `tabs` | Identifies open tabs so the agent can target the correct one. |
 | `tabGroups` | Allows the agent to read and manage tab groups. |
 | `storage` | Saves the local server URL (`ws://localhost:8900/ws/browser`) and auth token entered in the popup. Stored in `chrome.storage.local` — never synced to the cloud. |
-| `alarms` | Fires a periodic keepalive alarm (~every 25s) to prevent Chrome from terminating the service worker, keeping the WebSocket connection alive. |
+| `alarms` | Fires a periodic keepalive alarm (~every 30s) to ensure the offscreen document stays alive as a fallback. |
+| `offscreen` | Creates an offscreen document to maintain a persistent WebSocket connection. In Manifest V3, the service worker is terminated after ~30 seconds of inactivity, making it impossible to keep long-lived connections directly. The offscreen document hosts the WebSocket client for real-time communication with the local agent server. |
 
 Host permissions are restricted to `localhost` and `127.0.0.1` only. The extension **cannot** make requests to any external domain.
 

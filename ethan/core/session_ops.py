@@ -1,7 +1,10 @@
 """Session 级操作（跨渠道复用）。
 
-目前提供 ``compact_session``：用廉价模型把会话历史压成摘要，替换存储，释放上下文。
-TUI / Web 后端 / 飞书 / 微信都调这一个函数，避免逻辑重复。
+提供：
+- ``compact_session``：用廉价模型把会话历史压成摘要，替换存储，释放上下文。
+- ``summary_session``：用模型对当前对话生成结构化总结（只读，不改会话历史）。
+
+TUI / Web 后端 / 飞书 / 微信都调这些函数，避免逻辑重复。
 """
 from __future__ import annotations
 
@@ -73,3 +76,73 @@ async def compact_session(store, session_id: str, model: str, keep_last_pairs: i
     await store.replace_messages(session_id, summary_pair + kept)
     logger.info("compact_session: %s compressed %d msgs → summary", session_id, len(to_compress))
     return summary
+
+
+# ── /summary：结构化总结当前对话（只读，不改历史） ───────────────────
+
+_SUMMARY_SYSTEM = "你是一个专业的内容总结助手，按照用户要求的格式输出结构化总结。"
+
+_SUMMARY_PROMPT = """\
+请按照以下格式，对下面的对话内容做结构化总结：
+
+格式要求：
+首先，先发一句最核心的观点，这里用一句话讲明白。
+
+## 背景
+一句话概括文章背景/问题。
+
+## 核心洞察
+1. **[洞察名称]**
+   - 关键词:短句1;短句2。
+   - 数据:具体数字。
+   - 证据:原文引用。
+
+2. **[洞察名称]**（如有多个）
+   - 关键词:短句1;短句2。
+   - 链条:步骤1 → 步骤2。
+
+## 子叙事
+1. **[子视角]**
+   - 详情
+
+---
+用最直白的话，把最重要的抓出来，不讲废话。
+
+以下是对话内容：
+{conversation}
+"""
+
+
+async def summary_session(store, session_id: str, model: str) -> str:
+    """对当前对话生成结构化总结（只读，不修改会话历史）。
+
+    返回总结文本。对话太短或无内容时返回提示串。
+    """
+    session = await store.load(session_id)
+    if not session:
+        return "会话不存在，无法总结。"
+    msgs = [m for m in session.messages if m.role in ("user", "assistant") and m.content]
+    if len(msgs) < 2:
+        return "对话太短，先聊几句再 /summary 吧~"
+
+    conversation = "\n".join(
+        f"{'用户' if m.role == 'user' else 'AI'}: {m.content}"
+        for m in msgs
+    )
+
+    # 用主模型做总结（质量优先）
+    from ethan.providers.manager import create_provider
+    provider = await create_provider(model)
+    try:
+        resp = await provider.chat(
+            [Message(role="user", content=_SUMMARY_PROMPT.format(conversation=conversation))],
+            system=_SUMMARY_SYSTEM,
+        )
+    except Exception:
+        logger.exception("summary_session: LLM call failed for %s", session_id)
+        return "总结失败，请稍后再试。"
+
+    result = (resp.content or "").strip()
+    if not result:
+        return "总结失败，请稍后再试。"
+    return result

@@ -8,6 +8,7 @@ from ethan.tools.base import BaseTool
 
 # 存储当前请求的飞书 chat_id，在 lark webhook 里设置，ScheduleCreateTool 里读取
 lark_chat_id_var: ContextVar[str] = ContextVar("lark_chat_id", default="")
+wechat_chat_id_var: ContextVar[str] = ContextVar("wechat_chat_id", default="")
 
 
 def _try_strptime(s: str, fmt: str) -> bool:
@@ -25,7 +26,22 @@ def _base_url() -> str:
     return f"http://127.0.0.1:{port}"
 
 
-def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channel_context: str = "{}", user_id: str = ""):
+def _make_fallback_title(prompt: str) -> str:
+    """无 title 时从 prompt 生成短标题：中文取前 15 字，英文取前 5 个单词。"""
+    text = prompt.replace("\n", " ").strip()
+    if not text:
+        return "未命名任务"
+    words = text.split()
+    # 含中文字符 → 按字数截取
+    if any('\u4e00' <= c <= '\u9fff' for c in text[:20]):
+        return text[:15] + ("…" if len(text) > 15 else "")
+    # 纯英文 → 按单词截取
+    if len(words) <= 5:
+        return text
+    return " ".join(words[:5]) + "…"
+
+
+def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channel_context: str = "{}", user_id: str = "", title: str = ""):
     def _do_fire():
         import requests
 
@@ -68,20 +84,43 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
             except Exception as e2:
                 print(f"Failed to log error to session: {e2}")
 
-        # 如果是飞书渠道发起的定时任务，把结果回发到对应的 chat
-        if channel == "lark" and result_text:
-            try:
-                ctx = json.loads(channel_context)
-                chat_id = ctx.get("chat_id", "")
-                if chat_id:
-                    import asyncio
+        # 把结果发回来源渠道（飞书/微信）
+        if result_text:
+            display_title = title or _make_fallback_title(prompt)
+            formatted = f"【定时任务】{display_title}\n{result_text}"
 
-                    from ethan.interface.lark import _get_lark_client, _send_lark_reply
-                    client = _get_lark_client()
-                    if client:
-                        asyncio.run(_send_lark_reply(client, chat_id, result_text))
-            except Exception as e3:
-                print(f"Schedule lark reply error: {e3}")
+            if channel == "lark":
+                try:
+                    ctx = json.loads(channel_context)
+                    chat_id = ctx.get("chat_id", "")
+                    if chat_id:
+                        import asyncio
+
+                        from ethan.interface.lark import _get_lark_client, _send_lark_reply
+                        client = _get_lark_client()
+                        if client:
+                            asyncio.run(_send_lark_reply(client, chat_id, formatted))
+                except Exception as e3:
+                    print(f"Schedule lark reply error: {e3}")
+
+            elif channel == "wechat":
+                try:
+                    ctx = json.loads(channel_context)
+                    to_user_id = ctx.get("to_user_id", "")
+                    if to_user_id:
+                        import asyncio
+
+                        import httpx
+
+                        from ethan.interface.wechat_ilink import load_credentials, send_text
+                        creds = load_credentials()
+                        if creds:
+                            async def _send_wechat():
+                                async with httpx.AsyncClient() as client:
+                                    await send_text(client, creds, to_user_id, "", formatted)
+                            asyncio.run(_send_wechat())
+                except Exception as e4:
+                    print(f"Schedule wechat reply error: {e4}")
 
     # Run in a separate thread so we don't block the APScheduler worker pool!
     threading.Thread(target=_do_fire, daemon=True).start()
@@ -95,6 +134,7 @@ class ScheduleCreateTool(BaseTool):
         "type": "object",
         "properties": {
             "job_id": {"type": "string", "description": "Unique job ID (e.g. 'morning-reminder')"},
+            "title": {"type": "string", "description": "Short human-readable title for this task (e.g. '每日早报', 'Weekly report'). Shown in task list and notifications."},
             "prompt": {"type": "string", "description": "What to do when the task fires (a prompt or description)"},
             "cron": {"type": "string", "description": "Cron expression (5-part: min hour day month weekday). E.g. '0 9 * * *' for 9am daily. IMPORTANT: for weekday, always use names (mon-fri, sat, sun) not numbers — APScheduler's numeric weekday convention differs from standard cron (1-5 means Tue-Sat, not Mon-Fri)."},
             "interval_minutes": {"type": "integer", "description": "Alternative: run every N minutes."},
@@ -106,7 +146,7 @@ class ScheduleCreateTool(BaseTool):
     def __init__(self, user_id: str = ""):
         self._user_id = user_id
 
-    async def run(self, job_id: str, prompt: str, cron: str = "", interval_minutes: int = 0, end_date: str = "") -> str:
+    async def run(self, job_id: str, prompt: str, title: str = "", cron: str = "", interval_minutes: int = 0, end_date: str = "") -> str:
         import httpx
 
         from ethan.core.config import get_config
@@ -116,20 +156,32 @@ class ScheduleCreateTool(BaseTool):
         if not cron and interval_minutes <= 0:
             return "Error: provide either 'cron' or 'interval_minutes'"
 
+        # title 兜底：模型没给 title 时自动从 prompt 生成
+        if not title:
+            title = _make_fallback_title(prompt)
+
         # 验证 end_date 格式（早于实际创建 session 前拦截，避免 job 创建成功但日期无效）
         if end_date and not any(_try_strptime(end_date, fmt) for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d")):
             return f"Error: invalid end_date '{end_date}'. Use YYYY-MM-DD or YYYY-MM-DD HH:MM format."
 
-        # 读取当前请求上下文中的飞书 chat_id（非飞书渠道时为空字符串）
+        # 读取当前请求上下文中的渠道信息
         chat_id = lark_chat_id_var.get("")
-        channel = "lark" if chat_id else "web"
-        channel_context = json.dumps({"chat_id": chat_id}) if chat_id else "{}"
+        wechat_id = wechat_chat_id_var.get("")
+        if chat_id:
+            channel = "lark"
+            channel_context = json.dumps({"chat_id": chat_id})
+        elif wechat_id:
+            channel = "wechat"
+            channel_context = json.dumps({"to_user_id": wechat_id})
+        else:
+            channel = "web"
+            channel_context = "{}"
 
         # Create a dedicated session for this task (per-user)
         store = SessionStore(db_path=user_sessions_db_path())
         await store.init()
         session = await store.create(get_config().defaults.model, source="schedule")
-        await store.update_title(session.id, f"[定时] {job_id}")
+        await store.update_title(session.id, f"[定时] {title}")
         await store.close()
 
         # Send request to FastAPI backend
@@ -139,6 +191,7 @@ class ScheduleCreateTool(BaseTool):
             async with httpx.AsyncClient() as client:
                 res = await client.post(f"{_base_url()}/api/schedule", json={
                     "job_id": job_id,
+                    "title": title,
                     "prompt": prompt,
                     "cron": cron,
                     "interval_minutes": interval_minutes,

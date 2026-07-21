@@ -215,3 +215,20 @@ async def compact_session(session_id: str, user_id: str = Depends(verify_token))
     finally:
         await store.close()
     return {"ok": True, "summary": summary}
+
+
+@router.post("/sessions/{session_id}/summary")
+async def summary_session(session_id: str, user_id: str = Depends(verify_token)):
+    """对当前对话生成结构化总结（只读，不修改会话历史）。
+
+    供 Web 的 /summary 命令调用。返回 {ok, summary}。
+    """
+    from ethan.core.paths import user_sessions_db_path
+    from ethan.core.session_ops import summary_session as _summary
+    store = SessionStore(db_path=user_sessions_db_path())
+    await store.init()
+    try:
+        result = await _summary(store, session_id, get_config().defaults.model)
+    finally:
+        await store.close()
+    return {"ok": True, "summary": result}

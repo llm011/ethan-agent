@@ -43,7 +43,6 @@ def _register_subcommands():
     from ethan.interface.commands import setup as setup_cmd
     from ethan.interface.commands import skill as skill_cmd
     from ethan.interface.commands import update as update_cmd
-    from ethan.interface.commands import wechat as wechat_cmd
 
     app.add_typer(model_cmd.app, name="model")
     app.add_typer(provider_cmd.app, name="provider")
@@ -58,7 +57,6 @@ def _register_subcommands():
     app.add_typer(channel_cmd.app, name="channel")
     app.add_typer(router_cmd.app, name="router")
     app.add_typer(command_cmd.app, name="command")
-    app.add_typer(wechat_cmd.app, name="wechat")
     app.add_typer(server_cmd.app, name="server")
     app.add_typer(setup_cmd.app, name="setup")
 

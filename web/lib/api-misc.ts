@@ -18,7 +18,7 @@ export interface ScheduleJob {
 export async function fetchSchedules(): Promise<ScheduleJob[]> {
   const res = await fetch(`${API_URL}/schedule`, { headers: headers() });
   if (!res.ok) throw new Error("Failed");
-  return res.json().then(data => data.jobs);
+  return res.json().then(data => data.jobs.map((j: any) => ({ ...j, name: j.title || j.name || j.id })));
 }
 
 export async function deleteSchedule(jobId: string): Promise<void> {
@@ -42,7 +42,16 @@ export async function renameSchedule(jobId: string, name: string): Promise<void>
   const res = await fetch(`${API_URL}/schedule/${jobId}`, {
     method: "PATCH",
     headers: headers(),
-    body: JSON.stringify({ name })
+    body: JSON.stringify({ title: name })
+  });
+  if (!res.ok) throw new Error("Failed");
+}
+
+export async function updateSchedulePrompt(jobId: string, prompt: string): Promise<void> {
+  const res = await fetch(`${API_URL}/schedule/${jobId}`, {
+    method: "PATCH",
+    headers: headers(),
+    body: JSON.stringify({ prompt })
   });
   if (!res.ok) throw new Error("Failed");
 }

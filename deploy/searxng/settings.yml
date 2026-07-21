@@ -37,6 +37,10 @@ engines:
   - name: baidu
     disabled: false
 
+  # === 频繁报错的引擎（空响应/限流），禁用减少日志噪音 ===
+  - name: bing news
+    disabled: true
+
   # === 直连模式下禁用国外引擎（代理开启时 wrapper 会自动放开）===
   # 通用搜索
   - name: brave

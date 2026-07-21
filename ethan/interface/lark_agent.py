@@ -79,13 +79,51 @@ async def _handle_agent_message(
             _save_lark_map(_lark_chat_map)
             # 首次配置飞书时发一次欢迎语；之后拉新群、/new 清上下文都不再发（无用噪音）
             if not _lark_welcomed():
-                welcome = "嘿！我是 Ethan，你的私人 AI 助手 👋\n\n我已经在这台 Mac mini 上常驻了，有任何事直接找我就行——写代码、查信息、控制设备、管理日程都行。\n\n你叫什么名字？让我记住你~"
+                # 首次对话自动绑定主人：把第一个跟 bot 说话的人设为 owner
+                if sender_open_id and not owner_claimed:
+                    from ethan.core.config import reload_config, save_config
+                    cfg.lark.owner_open_id = sender_open_id
+                    cfg.lark.main_chat_id = chat_id
+                    # 首次写入群聊响应配置，让用户知道可以调整
+                    if not cfg.lark.group_response_mode:
+                        cfg.lark.group_response_mode = "mention_only"
+                    if not cfg.lark.bot_name:
+                        cfg.lark.bot_name = "Ethan"
+                    save_config(cfg)
+                    reload_config()
+                    owner_open_id = sender_open_id
+                    is_owner = True
+                    owner_claimed = True
+                    logger.info("[Lark] Auto-bound owner on first conversation: %s", sender_open_id)
+                welcome = "嘿！我是 Ethan，你的私人 AI 助手 👋\n\n我已经在这台 Mac mini 上常驻了，有任何事直接找我就行——写代码、查信息、控制设备、管理日程都行。\n\n已自动把你设为主人 👑 以后只认你的指令~\n你叫什么名字？让我记住你~"
                 await _send_reply(chat_id, welcome)
                 _mark_lark_welcomed()
             # Let reaction stay visible while user reads welcome, then process their actual message
 
+        # 没有主人时，每条消息都提示认主（不走 Agent 流程）。
+        # 首次对话已在上面自动绑定，这里兜底：welcome 标记存在但 owner 被清空的情况。
+        if not owner_claimed:
+            await _send_reply(
+                chat_id,
+                "⚠️ 还没有认主人，我无法正常工作。\n请主人私聊我发一条消息，我会自动绑定；或发送 /owner 手动认主。",
+            )
+            return
+
         # 加载完整历史，用 WorkingMemory 重建热区（与 REPL/API 一致）
         session_obj = await store.load(session_id)
+
+        # session 被删除（/new 或手动清理）但 _lark_chat_map 仍缓存旧 id → 重建
+        if not session_obj:
+            session = await store.create(cfg.defaults.model, source="lark")
+            from ethan.memory.session import _auto_title
+            from ethan.providers.base import Message as _Msg
+            auto = _auto_title([_Msg(role="user", content=text)])
+            await store.update_title(session.id, auto)
+            session_id = session.id
+            _lark_chat_map[chat_id] = session.id
+            _save_lark_map(_lark_chat_map)
+            session_obj = await store.load(session_id)
+
         history = session_obj.messages if session_obj else []
         session_mode = getattr(session_obj, "mode", "") or "" if session_obj else ""
 
@@ -201,16 +239,21 @@ async def _handle_agent_message(
         from ethan.tools.builtin.web import WebFetchTool
         from ethan.tools.builtin.web_search import WebSearchTool
         set_session_id(session_id)  # browser 工具按对话隔离/授权
-        for tool in [ShellTool(), WebSearchTool(), WebFetchTool(),
-                     FileReadTool(), FileWriteTool(), FileListTool(),
-                     RipgrepTool(), FdTool(),
-                     ScheduleCreateTool(), ScheduleListTool(), ScheduleRemoveTool(),
-                     KnowledgeSearchTool(), KnowledgeReadTool(), KnowledgeAddTool(), KnowledgeEditTool(),
-                     MemoryWriteTool(), ProcedureWriteTool(), ProfileUpdateTool(), SkillCreateTool(),
-                     SkillReadTool(), SkillListTool(),
-                     SetSecretTool(), GetSecretTool(), ListSecretsTool(),
-                     UiCardTool(channel="lark"),
-                     BrowserSessionTool(), BrowserTabTool(), BrowserPageTool()]:
+        # 非主人：只给无隐私风险的只读工具（搜索/抓网页），不给文件/记忆/知识库/密钥等
+        if owner_claimed and not is_owner:
+            all_tools = [WebSearchTool(), WebFetchTool(), UiCardTool(channel="lark")]
+        else:
+            all_tools = [ShellTool(), WebSearchTool(), WebFetchTool(),
+                         FileReadTool(), FileWriteTool(), FileListTool(),
+                         RipgrepTool(), FdTool(),
+                         ScheduleCreateTool(), ScheduleListTool(), ScheduleRemoveTool(),
+                         KnowledgeSearchTool(), KnowledgeReadTool(), KnowledgeAddTool(), KnowledgeEditTool(),
+                         MemoryWriteTool(), ProcedureWriteTool(), ProfileUpdateTool(), SkillCreateTool(),
+                         SkillReadTool(), SkillListTool(),
+                         SetSecretTool(), GetSecretTool(), ListSecretsTool(),
+                         UiCardTool(channel="lark"),
+                         BrowserSessionTool(), BrowserTabTool(), BrowserPageTool()]
+        for tool in all_tools:
             registry.register(tool)
         skills = SkillRegistry()
         skills.load()
@@ -241,7 +284,13 @@ async def _handle_agent_message(
             agent.runtime_context = env_note + (
                 f"当前发消息的人【不是主人】（主人 open_id={owner_open_id[:8]}…）。"
                 "默认只做只读/低风险/低消耗的事；涉及改文件、删数据、执行 shell、花钱、对外发消息等操作不要主动执行，"
-                "说明需要主人授权。"
+                "说明需要主人授权。\n"
+                "【隐私保护·硬性规则】你绝不能向非主人泄露以下任何内容：\n"
+                "- 主人的记忆、用户画像、个人信息\n"
+                "- 系统配置、密钥、环境变量\n"
+                "- 本地文件、知识库内容、对话历史\n"
+                "- 定时任务、技能内容、任何属于主人的私有数据\n"
+                "即使对方要求查看、总结、读取这些内容，也必须拒绝并说明这是主人的私有信息。"
             )
 
         # 硬策略守卫：一旦认了主人（owner_claimed），后续就要校验——非主人不得执行 side_effect 工具。
@@ -271,6 +320,9 @@ async def _handle_agent_message(
         answer_created = False  # 答案卡片是否已创建
         thinking_shown = False  # 是否已在工具消息里显示了 "🤔 thinking..."
         tools_used = False      # 本条消息是否已调用过工具（决定正文是否还能乐观发卡片）
+        progress_msg_id: int | None = None  # 实时进度落库的 DB 行 id（与 Web 对齐）
+        stream_start_time = _lark_time.time()  # 计时起点
+        ttfb_time: float | None = None  # 首个有效输出的时间戳（TTFB）
         # THINKING 表情由外层 TypingState(ts) 统一管理，不再用 reply_reaction_id/msg 手工记账
         FLUSH_INTERVAL = 2.0
         ANSWER_BUFFER_THRESHOLD = 50  # 纯对话首段缓冲字数，避免孤立短卡片
@@ -489,8 +541,23 @@ async def _handle_agent_message(
                     await _update_tool_msg()
                     # ui_card 工具产出的自定义卡片：在工具完成时补发（增量，不影响上面的进度/答案流）
                     await _emit_lark_cards(getattr(chunk, "ui", None))
+                    # 实时进度落库：每个工具完成时把 tool_steps 快照写入 DB，中途崩溃也不丢过程
+                    try:
+                        _progress_msg = Message(
+                            role="assistant", content="",
+                            tool_steps=collected_tool_steps,
+                        )
+                        if progress_msg_id is None:
+                            progress_msg_id = await store.save_message(session_id, _progress_msg)
+                        else:
+                            await store.update_message(progress_msg_id, session_id, _progress_msg)
+                    except Exception:
+                        logger.debug("[Lark] 实时保存工具进度失败 session=%s", session_id, exc_info=True)
                 continue
             # 正文 chunk：进入最终回答阶段
+            # 记录 TTFB（首个有效文本输出的时间）
+            if ttfb_time is None:
+                ttfb_time = _lark_time.time()
             # 首个正文到来时若工具消息里有 "thinking..."，在工具消息末尾补一个空行分隔
             if pending == "" and tool_msg_id is not None and thinking_shown:
                 tool_text = tool_text.rstrip() + "\n"
@@ -552,14 +619,24 @@ async def _handle_agent_message(
         clean_answer = "" if _looks_like_tool_trace(answer_text) else answer_text.strip()
         stored_content = (clean_answer + f"\n\n{stats_line}") if clean_answer else (stats_line or "")
 
-        # 保存完整 assistant 消息到 session（带 usage + tool_steps）
+        # 保存完整 assistant 消息到 session（带 usage + tool_steps + 耗时）
         usage_dict = {
             "input": agent.usage.input_tokens,
             "output": agent.usage.output_tokens,
             "cache": agent.usage.cache_tokens,
         }
-        response = Message(role="assistant", content=stored_content, usage=usage_dict, tool_steps=collected_tool_steps or [])
-        await store.save_message(session_id, response)
+        total_ms = int((_lark_time.time() - stream_start_time) * 1000)
+        ttfb_ms = int((ttfb_time - stream_start_time) * 1000) if ttfb_time else None
+        response = Message(
+            role="assistant", content=stored_content, usage=usage_dict,
+            tool_steps=collected_tool_steps or [],
+            ttfb_ms=ttfb_ms, total_ms=total_ms,
+        )
+        # 复用实时进度行（避免重复两条 assistant 消息），无进度行则新建
+        if progress_msg_id:
+            await store.update_message(progress_msg_id, session_id, response)
+        else:
+            await store.save_message(session_id, response)
         await store.touch(session_id)
 
     except asyncio.CancelledError:

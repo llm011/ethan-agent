@@ -102,12 +102,42 @@ async def _compact_lark_session(cid: str) -> str:
         await store.close()
 
 
+async def _summary_lark_session(cid: str) -> str:
+    from ethan.core.config import get_config
+    from ethan.core.paths import user_sessions_db_path
+    from ethan.core.session_ops import summary_session
+    from ethan.interface.lark_stream import _lark_chat_map, _load_lark_map
+    from ethan.memory.session import SessionStore
+    sid = _lark_chat_map.get(cid)
+    if not sid:
+        if not _lark_chat_map:
+            _lark_chat_map.update(_load_lark_map())
+        sid = _lark_chat_map.get(cid)
+    if not sid:
+        return "当前没有进行中的会话，先聊几句再 /summary 吧~"
+    store = SessionStore(db_path=user_sessions_db_path())
+    await store.init()
+    try:
+        return await summary_session(store, sid, get_config().defaults.model)
+    finally:
+        await store.close()
+
+
 async def _set_lark_owner(cid: str, sid: str) -> str:
-    """认主人：把发消息者 open_id 设为主人，当前 chat 设为主会话。"""
+    """认主人：把发消息者 open_id 设为主人，当前 chat 设为主会话。
+
+    安全策略：
+    - 已有主人时，只有当前主人才能重新绑定（防止他人抢夺）
+    - 未认主人时，第一个执行 /owner 的人成为主人
+    """
     from ethan.core.config import get_config, reload_config, save_config
     if not sid:
         return "⚠️ 没拿到你的 open_id，无法认主人。"
     cfg = get_config()
+    current_owner = getattr(cfg.lark, "owner_open_id", "") or ""
+    # 已有主人且不是当前主人 → 拒绝
+    if current_owner and current_owner != sid:
+        return "⚠️ 已有主人绑定，只有当前主人才能重新设置。如需转移，请主人本人操作。"
     cfg.lark.owner_open_id = sid
     cfg.lark.main_chat_id = cid
     save_config(cfg)
@@ -160,7 +190,7 @@ async def _set_lark_mode(cid: str, mode_key: str) -> None:
         await store.close()
 
 
-def build_cmd_context(chat_id: str, text: str, sender_open_id: str) -> CommandContext:
+def build_cmd_context(chat_id: str, text: str, sender_open_id: str, *, is_group_chat: bool = False) -> CommandContext:
     """构建命令上下文，注入所有飞书 session 回调。
 
     在 _handle_message 的 is_command 分支调用，替代原来的 10 个内嵌闭包。
@@ -171,11 +201,13 @@ def build_cmd_context(chat_id: str, text: str, sender_open_id: str) -> CommandCo
         chat_id=chat_id,
         raw_text=text,
         sender_id=sender_open_id,
+        is_group_chat=is_group_chat,
         reset_session=_reset_lark_session,
         resolve_session_id=_resolve_lark_session,
         list_sessions=_list_lark_sessions,
         resume_session=_resume_lark_session,
         compact_session=_compact_lark_session,
+        summary_session=_summary_lark_session,
         set_owner=_set_lark_owner,
         get_token=_get_web_token,
         get_model=_get_model,
