@@ -69,13 +69,24 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
             result_text = f"⚠️ 定时任务执行失败: {e}"
             import asyncio
 
-            from ethan.memory.session import get_session_store
+            # 本路径跑在 daemon 线程的 asyncio.run() 临时 loop 里，
+            # 而 get_session_store() 的 _session_store_lock 是绑定到主
+            # server loop 的模块级 asyncio.Lock（非线程安全）。跨 loop
+            # await 会触发 "got Future attached to a different loop"。
+            # 这里像 core/heartbeat.py:_rotate_session_dbs 那样开独立
+            # 连接写错误日志，绕开单例。
+            from ethan.core.paths import user_sessions_db_path
+            from ethan.memory.session import SessionStore
             from ethan.providers.base import Message
             async def log_error():
-                store = await get_session_store()
-                err_msg = Message(role="assistant", content=f"⚠️ 定时任务后台执行失败:\n```text\n{e}\n```")  # noqa: F821 — closure over except-var
-                await store.save_message(session_id, err_msg)
-                await store.touch(session_id)
+                store = SessionStore(db_path=user_sessions_db_path())
+                await store.init()
+                try:
+                    err_msg = Message(role="assistant", content=f"⚠️ 定时任务后台执行失败:\n```text\n{e}\n```")  # noqa: F821 — closure over except-var
+                    await store.save_message(session_id, err_msg)
+                    await store.touch(session_id)
+                finally:
+                    await store.close()
             try:
                 asyncio.run(log_error())
             except Exception as e2:

@@ -131,7 +131,6 @@ async def _run_delegate_generation(
     except asyncio.CancelledError:
         run.emit({"stopped": True, "usage": {}})
         run.finish()
-        pass
         _RunManager_schedule_removal(run.session_id)
         raise
     except Exception as e:
@@ -298,7 +297,6 @@ async def _run_generation(
                 logger.exception("保存已停止生成的部分内容失败 session=%s", session_id)
         run.emit({"stopped": True, "usage": collector.usage_dict})
         run.finish()
-        pass
         _RunManager_schedule_removal(run.session_id)
         raise
     except Exception as e:
