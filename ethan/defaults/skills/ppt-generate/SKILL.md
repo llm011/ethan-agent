@@ -39,6 +39,53 @@ metadata:
   - 用户提供的图 → 直接写本地路径
 - 大 deck 分次写入再合并（单次响应 token 有限）：先写 cover+contents，再分批写 content 页。
 
+### Markdown 输入约定（用户给 md 大纲时）
+
+用户可能直接给一份详细的每页规划 md。按以下映射转成 deck.json：
+
+```markdown
+# PPT 主题：大模型时代的搜索架构
+主题：dark-tech          ← 可选，映射 theme
+页数：8                  ← 可选
+
+## 第1页 [封面]
+标题：大模型时代的搜索架构
+副标题：从倒排索引到向量召回
+
+## 第2页 [目录]
+- 检索范式的三次迁移：关键词→语义→生成式
+- 向量召回的工程落地：HNSW 与 IVFFlat
+
+## 第3页 [正文] 检索范式对比
+版式：三卡片            ← 可选，映射 layout-guide 版式
+- 卡片1 icon:mdi:magnify 关键词检索：倒排+BM25，精确强、语义弱
+- 卡片2 icon:mdi:vector-point 向量检索：Embedding+ANN，语义强
+- 卡片3 icon:mdi:brain 生成式：RAG，成本高
+
+## 第4页 [正文] IVFFlat 原理
+公式：\mathrm{Recall@K} = \frac{|S_K \cap S_K^*|}{K}   ← 映射 latex 元素
+要点：
+- nlist 取 √N 量级
+- nprobe 是召回/延迟旋钮
+表格：                      ← 映射 table 元素
+| nprobe | Recall@10 | P99 |
+| 8 | 0.86 | 6ms |
+| 64 | 0.97 | 21ms |
+
+## 第5页 [正文] 上线效果
+图表：柱状图               ← 映射 chart 元素，数据必须给出
+| 月份 | nDCG@10 | 召回率 |
+| 1月 | 0.61 | 0.72 |
+配图：gen:server room data center   ← 映射 gen: 占位符
+备注：强调延迟只涨 8ms        ← 映射 slide.remark
+
+## 第6页 [结尾]
+谢谢观看
+```
+
+映射规则：`[封面/目录/过渡/正文/结尾]`→slideType；`公式：`→latex；`表格：`后的 md 表格→table；`图表：`+数据表→chart；`gen:`/`icon:`→图片占位；`备注：`→remark。用户没写页类型时按内容推断（第 1 页默认封面、最后默认结尾）。md 里没给的细节（精确坐标、字号）按 layout-guide 补齐。
+
+
 ### Step 3：填充图片
 
 ```bash
