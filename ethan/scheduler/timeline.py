@@ -174,17 +174,21 @@ def _cycle_label(timeline_id: str, anchor: date, recurrence: str) -> str:
 
 
 def _next_anchor_date(schedule: dict, current: date) -> date:
-    """计算下一个周期的锚点日期。"""
+    """计算下一个周期的锚点日期。
+
+    使用 add_months 统一处理月末 clamp，避免闰年 2 月 29 日 +1 年
+    构造 date(year+1, 2, 29) 引发 ValueError。
+    """
     recurrence = schedule.get("recurrence", "yearly")
     if recurrence == "yearly":
-        return date(current.year + 1, current.month, current.day)
+        return add_months(current, 12)
     if recurrence == "semi_annual":
         return add_months(current, 6)
     if recurrence == "quarterly":
         return add_months(current, 3)
     if recurrence == "monthly":
         return add_months(current, 1)
-    return date(current.year + 1, current.month, current.day)
+    return add_months(current, 12)
 
 
 def resolve_anchors(timeline: dict, today: date) -> ResolvedCycle:

@@ -1,12 +1,17 @@
 """schedule 路由：定时任务 CRUD + 时间线管理。"""
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+
+from ethan.core.config import CONFIG_DIR
 
 from .deps import verify_token
 
 router = APIRouter(prefix="/schedule")
 
 _scheduler = None
+
 
 def get_scheduler():
     global _scheduler
@@ -15,6 +20,25 @@ def get_scheduler():
         _scheduler = Scheduler()
         _scheduler.start()
     return _scheduler
+
+
+def _validate_path_in_config(path_str: str) -> Path:
+    """校验路径在 CONFIG_DIR 内（防止任意路径读取/写入）。
+
+    允许：CONFIG_DIR 及其子目录下的文件。
+    拒绝：绝对路径穿越、CONFIG_DIR 之外的路径。
+    """
+    if not path_str:
+        raise HTTPException(400, "Missing path")
+    target = Path(path_str).expanduser().resolve()
+    config_root = CONFIG_DIR.resolve()
+    try:
+        target.relative_to(config_root)
+    except ValueError:
+        raise HTTPException(403, f"Path must be inside {config_root}, got {target}")
+    if not target.exists():
+        raise HTTPException(404, f"File not found: {target}")
+    return target
 
 
 def _infer_category(job) -> str:
@@ -199,11 +223,10 @@ class TimelineImportRequest(BaseModel):
 @router.post("/timeline-import", dependencies=[Depends(verify_token)])
 async def import_timelines(req: TimelineImportRequest):
     """导入时间线配置文件，支持校验、dry-run 和 merge 模式。"""
-    from pathlib import Path
-
     from ethan.scheduler.timeline import import_timelines as _import
+    safe_path = _validate_path_in_config(req.path)
     result = _import(
-        Path(req.path),
+        safe_path,
         restore_state=req.restore_state,
         dry_run=req.dry_run,
         mode=req.mode,
@@ -219,15 +242,12 @@ async def validate_timelines(payload: dict):
     """校验一个 timelines.yaml 文件是否符合规范（不修改任何文件）。
 
     body: {"path": "/abs/path/to/file.yaml"}
+    路径必须在 CONFIG_DIR 内。
     """
-    from pathlib import Path
-
     from ethan.scheduler.timeline import validate_timelines_file
     path_str = payload.get("path", "")
-    if not path_str:
-        raise HTTPException(400, "Missing 'path' in body")
-    path = Path(path_str)
-    result = validate_timelines_file(path)
+    safe_path = _validate_path_in_config(path_str)
+    result = validate_timelines_file(safe_path)
     if not result["ok"]:
         raise HTTPException(400, "Validation failed", detail=result)
     return result
