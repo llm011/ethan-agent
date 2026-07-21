@@ -66,8 +66,13 @@ export function formatTrigger(trigger: string): string {
       // range: "mon-fri" or "1-5"
       const rangeMatch = d.match(/^(\w+)-(\w+)$/)
       if (rangeMatch) {
-        const from = dayNameMap[rangeMatch[1].toLowerCase()] ?? rangeMatch[1]
-        const to = dayNameMap[rangeMatch[2].toLowerCase()] ?? rangeMatch[2]
+        const fromKey = rangeMatch[1].toLowerCase()
+        const toKey = rangeMatch[2].toLowerCase()
+        // 覆盖整周的 range → "每天"
+        const fullWeekRanges = new Set(["0-6", "0-7", "mon-sun", "sun-sat"])
+        if (fullWeekRanges.has(`${fromKey}-${toKey}`)) return "每天"
+        const from = dayNameMap[fromKey] ?? rangeMatch[1]
+        const to = dayNameMap[toKey] ?? rangeMatch[2]
         return `每${from}~${to}`
       }
       // comma list
