@@ -1,0 +1,21 @@
+{
+  "name": "fresh-green",
+  "backgroundColor": "#F7FEF9",
+  "themeColors": ["#059669", "#34D399", "#A7F3D0", "#F59E0B", "#0EA5E9"],
+  "fontColor": "#1F2937",
+  "fontName": "Microsoft YaHei",
+  "outline": { "style": "solid", "width": 1, "color": "#D1FAE5" },
+  "shadow": { "h": 0, "v": 2, "blur": 8, "color": "#0596691F" },
+  "typography": {
+    "title":      { "fontSize": 28, "color": "#064E3B", "bold": true },
+    "subtitle":   { "fontSize": 16, "color": "#4B5563" },
+    "content":    { "fontSize": 14, "color": "#1F2937" },
+    "item":       { "fontSize": 14, "color": "#374151" },
+    "itemTitle":  { "fontSize": 16, "color": "#065F46", "bold": true },
+    "notes":      { "fontSize": 10, "color": "#9CA3AF" },
+    "header":     { "fontSize": 10, "color": "#6B7280" },
+    "footer":     { "fontSize": 10, "color": "#6B7280" },
+    "partNumber": { "fontSize": 60, "color": "#059669", "bold": true },
+    "itemNumber": { "fontSize": 16, "color": "#059669", "bold": true }
+  }
+}
