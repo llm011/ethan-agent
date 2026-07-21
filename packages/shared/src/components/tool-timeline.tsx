@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import {
   ChevronDown, ChevronRight, Terminal, Globe, FileText,
   Search, Clock, CheckCircle2, XCircle, Loader2, Code2, Sparkles,
-  WrapText, Copy, Check
+  WrapText, Copy, Check, BrainCircuit
 } from "lucide-react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
@@ -49,6 +49,7 @@ const TOOL_ICONS: Record<string, React.ReactNode> = {
   knowledge_search: <Search className="h-3 w-3" />,
   knowledge_add:    <FileText className="h-3 w-3" />,
   delegate_coding:  <Code2 className="h-3 w-3" />,
+  memory_recall:    <BrainCircuit className="h-3 w-3" />,
 };
 
 function StateIcon({ state }: { state: ToolStep["state"] }) {
@@ -156,8 +157,8 @@ function ArgsPopover({ text, maxW = "max-w-[800px]" }: { text: string; maxW?: st
   const leave = () => { hideTimer.current = setTimeout(() => setShow(false), 150); };
 
   return (
-    <span className="relative inline-flex items-center group/args" onMouseEnter={enter} onMouseLeave={leave}>
-      <span className={`text-sm text-muted-foreground truncate ${maxW}`}>
+    <span className="relative inline-flex items-center max-w-full group/args" onMouseEnter={enter} onMouseLeave={leave}>
+      <span className={`text-sm text-muted-foreground truncate min-w-0 ${maxW}`}>
         ({text})
       </span>
       <button
