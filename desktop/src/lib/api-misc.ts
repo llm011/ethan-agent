@@ -6,6 +6,8 @@ import type { SessionInfo } from "./api-sessions";
 
 // ── Schedule ──────────────────────────────────────────────────────
 
+export type ScheduleCategory = "one_off" | "recurring" | "timeline";
+
 export interface ScheduleJob {
   id: string;
   name: string;
@@ -14,6 +16,10 @@ export interface ScheduleJob {
   status: "paused" | "active";
   prompt: string;
   session_id: string;
+  category: ScheduleCategory;
+  source_timeline?: string;
+  source_phase?: string;
+  scene?: string;
 }
 
 export async function fetchSchedules(): Promise<ScheduleJob[]> {
@@ -55,6 +61,57 @@ export async function updateSchedulePrompt(jobId: string, prompt: string): Promi
     body: JSON.stringify({ prompt })
   });
   if (!res.ok) throw new Error("Failed");
+}
+
+// ── Timeline ──────────────────────────────────────────────────────
+
+export interface TimelineTask {
+  job_id: string;
+  kind: "once" | "recurring";
+  fire_at: string | null;
+  cron: string | null;
+  active_from: string | null;
+  active_until: string | null;
+  message: string;
+  source_phase: string;
+  passed: boolean | null;
+}
+
+export interface TimelineStatus {
+  id: string;
+  name: string;
+  scene: string;
+  anchor_date: string;
+  current_phase: string | null;
+  phase_start: string | null;
+  phase_end: string | null;
+  next_phase: string | null;
+  next_anchor: string;
+  tasks: TimelineTask[];
+}
+
+export async function fetchTimelineStatus(): Promise<TimelineStatus[]> {
+  const res = await fetch(`${getApiUrl()}/schedule/timeline-status`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed");
+  return res.json().then(d => d.timelines);
+}
+
+export async function syncTimelines(): Promise<{ ok: boolean; added: number; removed: number; updated: number; kept: number }> {
+  const res = await fetch(`${getApiUrl()}/schedule/sync-timelines`, {
+    method: "POST",
+    headers: headers(),
+  });
+  if (!res.ok) throw new Error("Failed");
+  return res.json();
+}
+
+export async function timelineLifecycle(timelineId: string, action: "skip_phase" | "advance_phase" | "pause" | "resume" | "cleanup"): Promise<Record<string, any>> {
+  const res = await fetch(`${getApiUrl()}/schedule/timeline/${encodeURIComponent(timelineId)}/${action}`, {
+    method: "POST",
+    headers: headers(),
+  });
+  if (!res.ok) throw new Error("Failed");
+  return res.json();
 }
 
 // ── Background Tasks ──────────────────────────────────────────────

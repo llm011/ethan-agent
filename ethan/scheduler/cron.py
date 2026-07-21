@@ -7,6 +7,7 @@ from typing import Callable
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from ethan.core.config import CONFIG_DIR
@@ -145,6 +146,32 @@ class Scheduler:
         self._scheduler.add_job(
             func,
             trigger=IntervalTrigger(seconds=seconds, minutes=minutes, hours=hours, end_date=self._parse_end_date(end_date)),
+            id=job_id,
+            name=name or job_id,
+            replace_existing=True,
+            kwargs=kwargs,
+        )
+
+    def add_date(
+        self,
+        job_id: str,
+        func: Callable,
+        run_date: str,
+        name: str | None = None,
+        **kwargs,
+    ) -> None:
+        """添加一次性定时任务，在指定时间触发一次后自动删除。
+
+        run_date: 'YYYY-MM-DD HH:MM' 或 'YYYY-MM-DD'（默认 10:00）
+        """
+        from datetime import datetime
+        if " " not in run_date:
+            run_date = f"{run_date} 10:00"
+        dt = datetime.strptime(run_date, "%Y-%m-%d %H:%M")
+        aware = self._tz.localize(dt) if hasattr(self._tz, "localize") else dt.replace(tzinfo=self._tz)
+        self._scheduler.add_job(
+            func,
+            trigger=DateTrigger(run_date=aware, timezone=self._tz),
             id=job_id,
             name=name or job_id,
             replace_existing=True,

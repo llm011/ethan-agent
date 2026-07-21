@@ -1,0 +1,167 @@
+# 时间线配置示例
+# 复制此文件到 ~/.ethan/work/timelines.yaml 并配置你的周期性事件
+#
+# 时间线 = 周期性的重要事件 + 围绕它的一系列阶段和动作
+# 典型场景：绩效考核、OKR 周期、季度汇报、团建等
+
+# ============================================================
+# 时间线定义
+# ============================================================
+
+timelines:
+  # ---- 半年绩效 ----
+  - id: perf_semi_annual
+    name: "半年绩效考核"
+    scene: work
+    description: "每年 7 月进行的上半年绩效考核"
+
+    # 周期定义
+    schedule:
+      anchor: "07-01"            # 每年的锚定日期（MM-DD）
+      recurrence: yearly         # yearly / semi_annual / quarterly / monthly
+      # 如果是 semi_annual，填两个 anchor: ["01-01", "07-01"]
+
+    # 阶段定义（offset 相对于 anchor）
+    # offset 格式: -2w = 前2周, -1m = 前1个月, +3d = 后3天
+    phases:
+      - name: "日常收集期"
+        offset_start: "-5m"      # 考核前 5 个月开始
+        offset_end: "-2w"        # 到考核前 2 周结束
+        actions:
+          - type: recurring
+            cron: "0 10 * * 5"   # 每周五上午 10 点
+            message: "本周有没有值得记录的团队事件？可以说「记一下，...」"
+            target: self          # 发给自己
+
+      - name: "集中汇总期"
+        offset_start: "-2w"
+        offset_end: "-3d"
+        actions:
+          - type: once
+            offset: "-2w"        # 阶段开始时触发一次
+            message: "绩效季将至，开始汇总本半年的人员事件。需要我现在生成初稿吗？"
+            target: self
+          - type: once
+            offset: "-1w"
+            message: "距离绩效提交还有 1 周，请确认每位成员的评估是否完整"
+            target: self
+
+      - name: "撰写评估"
+        offset_start: "-3d"
+        offset_end: "0d"
+        actions:
+          - type: once
+            offset: "-3d"
+            message: "绩效评估撰写期开始。如需我生成评估草稿，请说「汇总绩效」"
+            target: self
+
+      - name: "校准期"
+        offset_start: "+1d"
+        offset_end: "+1w"
+        actions:
+          - type: once
+            offset: "+1d"
+            message: "绩效校准阶段开始，注意准备校准会议材料"
+            target: self
+
+      - name: "沟通期"
+        offset_start: "+1w"
+        offset_end: "+2w"
+        actions:
+          - type: once
+            offset: "+1w"
+            message: "开始 1on1 绩效沟通，建议每人 30-45 分钟"
+            target: self
+
+  # ---- 全年绩效 ----
+  - id: perf_annual
+    name: "全年绩效考核"
+    scene: work
+    description: "每年 1 月进行的全年绩效考核"
+    schedule:
+      anchor: "01-15"
+      recurrence: yearly
+    phases:
+      - name: "集中汇总期"
+        offset_start: "-3w"
+        offset_end: "-1w"
+        actions:
+          - type: once
+            offset: "-3w"
+            message: "全年绩效将至，开始汇总全年人员事件。需要我生成年度报告吗？"
+            target: self
+      - name: "撰写 & 校准"
+        offset_start: "-1w"
+        offset_end: "+1w"
+        actions:
+          - type: once
+            offset: "-1w"
+            message: "全年绩效撰写开始，请确认 H1+H2 数据完整"
+            target: self
+
+  # ---- OKR 周期（示例）----
+  # - id: okr_quarterly
+  #   name: "季度 OKR 复盘"
+  #   scene: work
+  #   schedule:
+  #     anchor: ["01-01", "04-01", "07-01", "10-01"]  # 每季度初
+  #     recurrence: quarterly
+  #   phases:
+  #     - name: "OKR 回顾"
+  #       offset_start: "-1w"
+  #       offset_end: "0d"
+  #       actions:
+  #         - type: once
+  #           offset: "-1w"
+  #           message: "下周开始新季度，请回顾当前 OKR 完成情况"
+  #           target: self
+
+# ============================================================
+# 定时任务分类定义
+# ============================================================
+
+task_categories:
+  - id: one_off
+    name: "一次性"
+    icon: "⚡"
+    description: "执行一次后自动删除"
+    examples:
+      - "提醒小王明天交方案"
+      - "下周三提醒我开会"
+
+  - id: recurring
+    name: "周期性"
+    icon: "🔄"
+    description: "按固定频率重复执行"
+    examples:
+      - "每周五下午发 CR 周报"
+      - "每天早上 9 点日程摘要"
+      - "每周提醒补充人员事件记录"
+
+  - id: timeline
+    name: "时间线"
+    icon: "📅"
+    description: "由时间线阶段驱动，到达特定节点时触发"
+    examples:
+      - "绩效季前2周提醒汇总"
+      - "OKR 周期结束前回顾"
+
+# ============================================================
+# 配置说明
+# ============================================================
+#
+# offset 格式说明：
+#   -5m   = 锚点前 5 个月
+#   -2w   = 锚点前 2 周
+#   -3d   = 锚点前 3 天
+#   0d    = 锚点当天
+#   +1w   = 锚点后 1 周
+#
+# target 说明：
+#   self     = 发给管理者自己
+#   all      = 发给所有团队成员
+#   {姓名}   = 发给指定成员
+#
+# action type 说明：
+#   once      = 在指定 offset 触发一次
+#   recurring = 在阶段期间按 cron 重复触发
