@@ -62,6 +62,7 @@ function groupJobsByDate(jobs: ScheduleJob[]): DateGroup[] {
   // Sort jobs within each group by time
   for (const g of sorted) {
     g.jobs.sort((a, b) => {
+      if (!a.next_run_time && !b.next_run_time) return 0;
       if (!a.next_run_time) return 1;
       if (!b.next_run_time) return -1;
       return new Date(a.next_run_time).getTime() - new Date(b.next_run_time).getTime();

@@ -61,6 +61,7 @@ function groupJobsByDate(jobs: ScheduleJob[]): DateGroup[] {
   }
   for (const g of sorted) {
     g.jobs.sort((a, b) => {
+      if (!a.next_run_time && !b.next_run_time) return 0;
       if (!a.next_run_time) return 1;
       if (!b.next_run_time) return -1;
       return new Date(a.next_run_time).getTime() - new Date(b.next_run_time).getTime();
@@ -73,7 +74,10 @@ function getTimeStr(nextRun: string | null): string {
   if (!nextRun) return "--:--";
   const d = new Date(nextRun);
   if (isNaN(d.getTime())) return "--:--";
-  return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
+  // 使用固定格式避免 SSR/客户端 locale 不一致导致 hydration mismatch
+  const h = String(d.getHours()).padStart(2, "0");
+  const m = String(d.getMinutes()).padStart(2, "0");
+  return `${h}:${m}`;
 }
 
 const CATEGORY_META: Record<ScheduleCategory, { label: string; icon: typeof Zap; emptyHint: string }> = {
