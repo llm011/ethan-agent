@@ -31,9 +31,16 @@ PRESET_PLUGINS: list[dict] = [
     {
         "name": "team-manager",
         "label": "团队管理",
-        "description": "绩效管理 / 任务委派 / 时间线驱动（声明式周期事件自动触发）",
+        "description": "绩效管理 / 任务委派 / 人员日志",
         "install_type": "builtin_skill",
         "install_source": "team-manager",
+    },
+    {
+        "name": "schedule-manager",
+        "label": "定时任务",
+        "description": "定时任务管理 / 时间线引擎（声明式周期事件自动触发）",
+        "install_type": "builtin_skill",
+        "install_source": "schedule-manager",
     },
     {
         "name": "tavily",
