@@ -87,6 +87,10 @@ class UserStore:
 # ── 单例 ─────────────────────────────────────────────────────────
 _user_store: Optional[UserStore] = None
 _user_store_mtime_ns: int = 0
+_last_stat_check: float = 0.0
+# 热路径节流：get_user_store 在每次 API 请求鉴权时调用，
+# 距上次 stat 超过该间隔才真正发 stat 系统调用，避免高并发下频繁磁盘 I/O
+_STAT_THROTTLE_SEC = 2.0
 
 
 def _config_file_mtime_ns() -> int:
@@ -108,10 +112,10 @@ def get_user_store() -> UserStore:
     """惰性初始化：从 get_config() 读取 users 构建 UserStore，并注入 default tokens。
 
     config.yaml 被外部直接编辑（如 docker 挂载手工加用户）后无需重启：
-    每次鉴权检查文件 mtime，变了就 reload_config 重建 store；
-    重建失败（如文件写入中途）保留旧 store，下次请求再试。
+    鉴权时检查文件 mtime（2s 节流），变了就 reload_config 重建 store；
+    重建失败（如文件写入中途）保留旧 store，下次检查再试。
     """
-    global _user_store
+    global _user_store, _last_stat_check
     if _user_store is None:
         from ethan.core.config import get_config
         config = get_config()
@@ -122,21 +126,26 @@ def get_user_store() -> UserStore:
         )
         set_user_store(store)
     else:
-        mtime_ns = _config_file_mtime_ns()
-        if mtime_ns and mtime_ns != _user_store_mtime_ns:
-            try:
-                from ethan.core.config import reload_config
-                reload_config()  # load_config 内部会 set_user_store 重建并刷新 mtime
-            except Exception:
-                pass  # 保留旧 store
+        import time
+        now = time.monotonic()
+        if now - _last_stat_check >= _STAT_THROTTLE_SEC:
+            _last_stat_check = now
+            mtime_ns = _config_file_mtime_ns()
+            if mtime_ns and mtime_ns != _user_store_mtime_ns:
+                try:
+                    from ethan.core.config import reload_config
+                    reload_config()  # load_config 内部会 set_user_store 重建并刷新 mtime
+                except Exception:
+                    pass  # 保留旧 store
     return _user_store
 
 
 def reset_user_store() -> None:
     """reload_config 后调用，强制重建。"""
-    global _user_store, _user_store_mtime_ns
+    global _user_store, _user_store_mtime_ns, _last_stat_check
     _user_store = None
     _user_store_mtime_ns = 0
+    _last_stat_check = 0.0
 
 
 def ensure_admin_user_exists(users: list[UserConfig], fallback_token: str = "") -> list[UserConfig]:
