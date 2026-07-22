@@ -1,4 +1,5 @@
 import re
+from dataclasses import dataclass
 
 from ethan.core.config import get_config
 
@@ -11,6 +12,123 @@ _FORCE_FULL_SIGNALS = [
     "write", "implement", "analyze", "explain", "generate", "create",
     "refactor", "summarize",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Instant Route: 极简问题零工具直答
+# ---------------------------------------------------------------------------
+
+# 纯算术表达式：数字 + 运算符 + 空格 + 括号
+_MATH_EXPR_RE = re.compile(r'^[\d\s\+\-\*/\.\(\)\^%]+$')
+# 安全 eval 白名单（仅允许基本算术 AST 节点）
+_SAFE_EVAL_NODES = {
+    'Expression', 'BinOp', 'UnaryOp', 'Num', 'Constant',
+    'Add', 'Sub', 'Mult', 'Div', 'Mod', 'Pow', 'FloorDiv',
+    'USub', 'UAdd',
+}
+
+_GREETING_EXACT = frozenset({
+    "你好", "hello", "hi", "hey", "嗨", "早", "早上好", "上午好",
+    "下午好", "晚上好", "晚安", "谢谢", "thanks", "thank you",
+    "好的", "ok", "行", "明白", "了解", "收到", "继续", "嗯", "嗯嗯",
+    "没事了", "算了", "再见", "拜拜", "bye",
+})
+
+# 时间类关键词
+_TIME_KEYWORDS = frozenset({
+    "现在几点", "几点了", "今天几号", "今天星期几", "什么时间",
+    "当前时间", "现在时间", "now", "what time",
+})
+
+
+@dataclass
+class InstantResult:
+    """instant 路由预判结果。"""
+    kind: str           # "math" | "time" | "greeting" | "direct"
+    answer: str = ""    # math/time 类可直接给出答案；greeting/direct 由 LLM 裸答
+
+
+def _safe_math_eval(expr: str) -> str | None:
+    """安全地计算纯算术表达式。仅允许数字和基本运算符。"""
+    import ast
+    # ^ 在 Python 中是 XOR，用户通常意为幂运算
+    normalized = expr.replace("^", "**").replace(" ", "")
+    if not normalized:
+        return None
+    try:
+        tree = ast.parse(normalized, mode='eval')
+    except SyntaxError:
+        return None
+    # 白名单检查：只允许安全节点
+    for node in ast.walk(tree):
+        if type(node).__name__ not in _SAFE_EVAL_NODES:
+            return None
+    try:
+        result = eval(compile(tree, '<expr>', 'eval'))
+        # 格式化：整数不带小数点，浮点保留合理精度
+        if isinstance(result, float) and result == int(result) and abs(result) < 1e15:
+            return str(int(result))
+        if isinstance(result, float):
+            return f"{result:.10g}"
+        return str(result)
+    except (ZeroDivisionError, OverflowError, ValueError):
+        return None
+
+
+def classify_instant(text: str) -> InstantResult | None:
+    """
+    预判是否可以 instant 直答，跳过 tools / memory recall。
+
+    返回 InstantResult 表示可以 short-circuit；None 表示走正常路由。
+    优先级：
+      1. FORCE_FULL 信号 → 不走 instant
+      2. 已有 fast_rule 命中 → 不走 instant（交给专门工具处理）
+      3. 纯数学表达式 → eval 直答
+      4. 时间查询 → 系统时间直答
+      5. 打招呼/确认 → LLM 裸答（无 tools、无 recall）
+      6. 短文本无动作意图 → LLM 裸答
+    """
+    stripped = text.strip()
+    lower = stripped.lower()
+
+    # 有 FORCE_FULL 信号不走 instant
+    if any(sig in lower for sig in _FORCE_FULL_SIGNALS):
+        return None
+
+    # 已有 fast_rule 命中（查天气、打车等需要工具的），不走 instant
+    if _match_fast_rule(stripped) is not None:
+        return None
+
+    # 1) 纯算术表达式
+    if _MATH_EXPR_RE.match(stripped) and any(c.isdigit() for c in stripped):
+        answer = _safe_math_eval(stripped)
+        if answer is not None:
+            return InstantResult(kind="math", answer=answer)
+
+    # 2) 时间查询
+    if any(kw in lower for kw in _TIME_KEYWORDS):
+        from datetime import datetime
+
+        from ethan.core.timezone import get_local_timezone
+        now = datetime.now(get_local_timezone())
+        answer = now.strftime("%Y-%m-%d %H:%M:%S %A")
+        return InstantResult(kind="time", answer=answer)
+
+    # 3) 打招呼/确认（精确匹配，避免误判）
+    if lower in _GREETING_EXACT:
+        return InstantResult(kind="greeting")
+
+    # 4) 短文本（<=20字）+ 无问号 + 无动作意图 → direct（保守策略）
+    if len(stripped) <= 20:
+        if "?" not in stripped and "？" not in stripped:
+            return InstantResult(kind="direct")
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# 原有路由逻辑
+# ---------------------------------------------------------------------------
 
 
 def _match_keyword(kw: str, text: str) -> bool:

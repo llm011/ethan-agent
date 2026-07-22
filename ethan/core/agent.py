@@ -5,7 +5,7 @@ from pathlib import Path
 
 from ethan.core.config import get_config
 from ethan.core.context_budget import enforce_context_budget
-from ethan.core.routing import _get_route, _match_fast_rule
+from ethan.core.routing import _get_route, _match_fast_rule, classify_instant
 from ethan.core.tool_format import (
     _detail,
     _format_args,
@@ -571,6 +571,11 @@ class Agent:
         """stream_chat 空回复兜底：简洁提示，工具调用详情已在前端可视化中展示。"""
         logger.warning("stream_chat() 返回空回复 (reason=%s)，合成兜底", reason)
         tool_calls = [m for m in working if m.role == "assistant" and m.tool_calls]
+        if reason == "varied":
+            return (
+                f"已经连续执行了 {len(tool_calls)} 轮批量操作，先到这里。"
+                "你可以看看当前效果，需要继续的话告诉我。"
+            )
         if tool_calls:
             fallback = f"任务执行了 {len(tool_calls)} 轮工具调用，超出当前步数限制，未能生成最终回复。"
             if reason == "finalize":
@@ -774,6 +779,12 @@ class Agent:
                     continue
 
             if monitor.is_stuck():
+                if monitor._freq_limit_varied:
+                    # 批量操作达到宽松上限（如整理 tab）→ 直接禁工具收尾，不走反思
+                    sys = system + finalize_system_suffix("varied")
+                    resp = await provider.chat(working, tools=None, system=sys)
+                    self.usage.add(resp.usage)
+                    return await self._ensure_non_empty(resp, working, monitor, "varied")
                 if monitor.exhausted():
                     # 反思次数用尽仍卡住 → 收尾放弃：禁工具，让模型整理「已做/卡点/建议」
                     sys = system + finalize_system_suffix("stuck")
@@ -787,13 +798,46 @@ class Agent:
         return Message(role="assistant", content="[max tool iterations reached]")
 
     async def stream_chat(self, messages: list[Message]):
-        """流式对话。fast/full 两档路由，按关键词规则自动选择。"""
+        """流式对话。instant/fast/full 三档路由，按关键词规则自动选择。"""
         from ethan.core.context import reset_active_tools
         from ethan.providers.base import SkillsMatchedEvent, ThinkingEvent, ToolEvent
 
         self._executor.reset_cache()
         reset_active_tools()  # 清空本请求的 find_tools 激活集
         working = list(messages)
+
+        # --- Instant Route: 极简问题零工具直答 ---
+        last_user_text = self._get_last_user_text(working)
+        instant = classify_instant(last_user_text) if last_user_text else None
+        if instant:
+            if instant.kind == "math":
+                yield f"{instant.answer}"
+                return
+            if instant.kind == "time":
+                yield f"现在是 {instant.answer}"
+                return
+            # greeting / direct: LLM 裸答（无 tools、无 memory recall、极简 system）
+            if instant.kind in ("greeting", "direct"):
+                from ethan.core.timezone import get_local_timezone
+                now = datetime.now(get_local_timezone()).strftime("%Y-%m-%d %H:%M:%S %A")
+                minimal_system = (
+                    f"{self._system_files.get('identity', 'You are a helpful assistant.')}\n"
+                    f"Current time: {now}\n"
+                    "简洁直接地回答，不需要调用任何工具。"
+                )
+                persona = self._persona_block()
+                if persona:
+                    minimal_system += f"\n{persona}"
+                provider = self._provider
+                async for chunk in provider.stream_chat(working, tools=None, system=minimal_system):
+                    if chunk.reasoning:
+                        yield ThinkingEvent(delta=chunk.reasoning)
+                    if chunk.content:
+                        yield chunk.content
+                    if chunk.is_final:
+                        self.usage.add(chunk.usage)
+                return
+
         enforce_context_budget(working)  # 历史 tool result 也可能很大，进循环前先管控
         _route, system, tools_list, max_iters = self._select_route(working)
         provider = self._provider_for_route(_route)
@@ -1086,6 +1130,19 @@ class Agent:
                     continue
 
             if monitor.is_stuck():
+                if monitor._freq_limit_varied:
+                    # 批量操作达到宽松上限（如整理 tab）→ 直接禁工具收尾，不走反思
+                    sys = system + finalize_system_suffix("varied")
+                    varied_content = ""
+                    async for chunk in self._provider.stream_chat(working, tools=None, system=sys):
+                        if chunk.content:
+                            varied_content += chunk.content
+                            yield chunk.content
+                        if chunk.is_final:
+                            self.usage.add(chunk.usage)
+                    if not varied_content:
+                        yield self._build_stream_fallback(working, "varied")
+                    return
                 if monitor.exhausted():
                     # 反思次数用尽仍卡住 → 收尾放弃：禁工具，让模型流式整理「已做/卡点/建议」
                     sys = system + finalize_system_suffix("stuck")
