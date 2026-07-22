@@ -371,32 +371,46 @@ def _init_default_skills() -> None:
                             shutil.copy2(str(ref_file), str(dst_file))
 
 
-def _init_work_dir() -> None:
-    """初始化 ~/.ethan/work/ 目录及模板配置文件。
+# 预初始化的 scene 目录；work=团队管理，life=创业/个人项目（与 work 隔离）。
+# 其他 scene（health/study/finance/social）按需惰性创建，首次写入时自动建。
+PRESET_SCENES = ("work", "life")
 
-    从 defaults/skills/team-manager/templates/ 释放示例文件。
+
+def scene_dir(scene: str) -> Path:
+    """返回某 scene 的根目录（~/.ethan/{scene}/）。不保证已存在。"""
+    return CONFIG_DIR / scene
+
+
+def _init_scene_dirs() -> None:
+    """初始化 work + life 两套 scene 目录。
+
+    work: 释放 team.yaml + timelines.yaml 模板（team-manager 技能专用）。
+    life: 建目录 + 空 timelines.yaml（创业/个人项目，与 work 隔离）。
     已存在的文件不覆盖（保护用户已修改的配置）。
     """
     import shutil
 
-    work_dir = CONFIG_DIR / "work"
-    work_dir.mkdir(parents=True, exist_ok=True)
-
     templates_dir = Path(__file__).parent.parent / "defaults" / "skills" / "team-manager" / "templates"
-    if not templates_dir.exists():
-        return
 
-    # 模板文件 → 目标文件名映射
-    mapping = {
-        "team.yaml.example": "team.yaml",
-        "timelines.yaml.example": "timelines.yaml",
-    }
+    # work 目录（向后兼容：原 _init_work_dir 逻辑）
+    work_dir = scene_dir("work")
+    work_dir.mkdir(parents=True, exist_ok=True)
+    if templates_dir.exists():
+        for src_name, dst_name in {
+            "team.yaml.example": "team.yaml",
+            "timelines.yaml.example": "timelines.yaml",
+        }.items():
+            src = templates_dir / src_name
+            dst = work_dir / dst_name
+            if src.exists() and not dst.exists():
+                shutil.copy2(str(src), str(dst))
 
-    for src_name, dst_name in mapping.items():
-        src = templates_dir / src_name
-        dst = work_dir / dst_name
-        if src.exists() and not dst.exists():
-            shutil.copy2(str(src), str(dst))
+    # life 目录：创业项目/个人事项，与工作隔离
+    life_dir = scene_dir("life")
+    life_dir.mkdir(parents=True, exist_ok=True)
+    life_timelines = life_dir / "timelines.yaml"
+    if not life_timelines.exists():
+        life_timelines.write_text("timelines: []\n", encoding="utf-8")
 
 
 def load_config() -> Config:
@@ -435,7 +449,7 @@ def load_config() -> Config:
 
     _init_system_files(config.defaults.agent_name)
     _init_default_skills()
-    _init_work_dir()
+    _init_scene_dirs()
 
     # 旧 users/<admin>/ 架构 → 新 profile 架构（default = 顶层）。幂等，放最后。
     try:

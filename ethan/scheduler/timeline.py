@@ -22,14 +22,38 @@ from typing import Any, Optional
 
 import yaml
 
-from ethan.core.config import CONFIG_DIR
+from ethan.core.config import CONFIG_DIR, scene_dir
 
 logger = logging.getLogger(__name__)
 
-WORK_DIR = CONFIG_DIR / "work"
-TIMELINES_FILE = WORK_DIR / "timelines.yaml"
-STATE_FILE = WORK_DIR / ".timeline_state.json"
-EXPORTS_DIR = WORK_DIR / "exports"
+# scene 路径函数：每个 scene 独立目录（~/.ethan/{scene}/），文件互不干扰。
+# 默认 scene 为 "work"（向后兼容）。其他 scene（life/health/...）按需惰性创建。
+
+
+def _timelines_file(scene: str = "work") -> Path:
+    return scene_dir(scene) / "timelines.yaml"
+
+
+def _state_file(scene: str = "work") -> Path:
+    return scene_dir(scene) / ".timeline_state.json"
+
+
+def _exports_dir(scene: str = "work") -> Path:
+    return scene_dir(scene) / "exports"
+
+
+def _discover_scenes() -> list[str]:
+    """扫描 CONFIG_DIR 下所有含 timelines.yaml 的 scene 目录，按字母序返回。
+
+    work/life 预初始化；health/study 等用户自建目录后自动被发现。
+    """
+    scenes: list[str] = []
+    if not CONFIG_DIR.exists():
+        return scenes
+    for p in CONFIG_DIR.iterdir():
+        if p.is_dir() and (p / "timelines.yaml").exists():
+            scenes.append(p.name)
+    return sorted(scenes)
 
 # once 类型任务默认触发时间（HH:MM）
 DEFAULT_FIRE_TIME = "10:00"
@@ -240,11 +264,14 @@ def _action_job_id(timeline_id: str, phase_name: str, action_type: str, idx: int
     return f"timeline_{timeline_id}_{safe_phase}_{action_type}_{idx}_{anchor.isoformat()}"
 
 
-def expand_actions(timeline: dict, anchor_date: date) -> list[ExpandedTask]:
-    """Step 3: 展开所有 phase 的 actions 为具体任务描述。"""
+def expand_actions(timeline: dict, anchor_date: date, scene: str = "") -> list[ExpandedTask]:
+    """Step 3: 展开所有 phase 的 actions 为具体任务描述。
+
+    scene 参数优先（以文件所属目录为准）；为空时回退到 timeline 内的 scene 字段。
+    """
     tasks: list[ExpandedTask] = []
     timeline_id = timeline.get("id", "")
-    scene = timeline.get("scene", "work")
+    tl_scene = scene or timeline.get("scene", "work")
 
     for phase in timeline.get("phases", []):
         phase_name = phase.get("name", "")
@@ -271,7 +298,7 @@ def expand_actions(timeline: dict, anchor_date: date) -> list[ExpandedTask]:
                     target=target,
                     source_timeline=timeline_id,
                     source_phase=phase_name,
-                    scene=scene,
+                    scene=tl_scene,
                 ))
             elif action_type == "recurring":
                 cron = action.get("cron", "")
@@ -286,25 +313,27 @@ def expand_actions(timeline: dict, anchor_date: date) -> list[ExpandedTask]:
                     target=target,
                     source_timeline=timeline_id,
                     source_phase=phase_name,
-                    scene=scene,
+                    scene=tl_scene,
                 ))
     return tasks
 
 
 # ── State persistence ──────────────────────────────────────────────────────
 
-def load_state() -> dict:
-    if not STATE_FILE.exists():
+def load_state(scene: str = "work") -> dict:
+    sf = _state_file(scene)
+    if not sf.exists():
         return {}
     try:
-        return json.loads(STATE_FILE.read_text(encoding="utf-8"))
+        return json.loads(sf.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return {}
 
 
-def save_state(state: dict) -> None:
-    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    STATE_FILE.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
+def save_state(state: dict, scene: str = "work") -> None:
+    sf = _state_file(scene)
+    sf.parent.mkdir(parents=True, exist_ok=True)
+    sf.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def _fired_key(phase_name: str, action_type: str, idx: int, fire_at: date) -> str:
@@ -324,43 +353,47 @@ def _list_timeline_jobs(scheduler) -> dict[str, Any]:
 
 
 def sync_scheduler(scheduler, today: Optional[date] = None) -> dict:
-    """Step 4: 将 timelines.yaml 同步到 scheduler。
+    """Step 4: 将所有 scene 的 timelines.yaml 同步到 scheduler。
 
-    返回 {added, removed, updated, kept} 计数。
+    遍历每个 scene 目录，各自独立读写 state；desired 跨 scene 合并后与现有
+    timeline 任务对比。返回 {added, removed, updated, kept} 计数。
     """
     from ethan.tools.builtin.schedule import fire_schedule_job
 
     today = today or date.today()
-    timelines = get_timelines()
-    state = load_state()
 
-    # 1. 计算期望的任务集合
+    # 1. 按 scene 计算期望任务集合（每个 scene 独立 state）
     desired: dict[str, ExpandedTask] = {}
-    for tl in timelines:
-        tl_id = tl.get("id", "")
-        if not tl_id:
+    for scene in _discover_scenes():
+        timelines = get_timelines(scene)
+        if not timelines:
             continue
-        cycle = resolve_anchors(tl, today)
-        # 周期已轮转？清理旧状态
-        tl_state = state.get(tl_id, {})
-        if tl_state.get("current_anchor") and tl_state["current_anchor"] != cycle.anchor_date.isoformat():
-            state[tl_id] = {"current_anchor": cycle.anchor_date.isoformat(), "fired_actions": []}
-        else:
-            tl_state.setdefault("current_anchor", cycle.anchor_date.isoformat())
-            tl_state.setdefault("fired_actions", [])
-            state[tl_id] = tl_state
+        state = load_state(scene)
+        for tl in timelines:
+            tl_id = tl.get("id", "")
+            if not tl_id:
+                continue
+            cycle = resolve_anchors(tl, today)
+            # 周期已轮转？清理旧状态
+            tl_state = state.get(tl_id, {})
+            if tl_state.get("current_anchor") and tl_state["current_anchor"] != cycle.anchor_date.isoformat():
+                state[tl_id] = {"current_anchor": cycle.anchor_date.isoformat(), "fired_actions": []}
+            else:
+                tl_state.setdefault("current_anchor", cycle.anchor_date.isoformat())
+                tl_state.setdefault("fired_actions", [])
+                state[tl_id] = tl_state
 
-        for task in expand_actions(tl, cycle.anchor_date):
-            # once 任务若已触发则跳过
-            if task.kind == "once" and task.fire_at:
-                fired_key = _fired_key(task.source_phase, "once", 0, task.fire_at)
-                # 通过 job_id 也能查；这里以 state 为准
-                if fired_key in tl_state.get("fired_actions", []):
-                    continue
-                # 已过期的 once 不再注册（避免启动时大量历史任务堆积）
-                if task.fire_at < today:
-                    continue
-            desired[task.job_id] = task
+            for task in expand_actions(tl, cycle.anchor_date, scene):
+                # once 任务若已触发则跳过
+                if task.kind == "once" and task.fire_at:
+                    fired_key = _fired_key(task.source_phase, "once", 0, task.fire_at)
+                    if fired_key in tl_state.get("fired_actions", []):
+                        continue
+                    # 已过期的 once 不再注册（避免启动时大量历史任务堆积）
+                    if task.fire_at < today:
+                        continue
+                desired[task.job_id] = task
+        save_state(state, scene)
 
     # 2. 对比现有 timeline 任务
     existing = _list_timeline_jobs(scheduler)
@@ -399,7 +432,6 @@ def sync_scheduler(scheduler, today: Optional[date] = None) -> dict:
             if scheduler.remove(job_id):
                 removed += 1
 
-    save_state(state)
     return {"added": added, "removed": removed, "updated": updated, "kept": kept}
 
 
@@ -441,12 +473,11 @@ def lifecycle_manage(timeline_id: str, action: str, scheduler, today: Optional[d
       cleanup         — 清理该 timeline 所有 scheduler 任务（保留 state）
     """
     today = today or date.today()
-    timelines = get_timelines()
-    timeline = next((t for t in timelines if t.get("id") == timeline_id), None)
+    scene, timeline = find_timeline(timeline_id)
     if not timeline:
         return {"ok": False, "error": f"Timeline '{timeline_id}' not found"}
 
-    state = load_state()
+    state = load_state(scene)
     tl_state = state.setdefault(timeline_id, {"current_anchor": "", "fired_actions": []})
 
     cycle = resolve_anchors(timeline, today)
@@ -466,7 +497,7 @@ def lifecycle_manage(timeline_id: str, action: str, scheduler, today: Optional[d
         for jid, job in tl_jobs.items():
             if (job.kwargs or {}).get("source_phase") == phase_name:
                 scheduler.remove(jid)
-        save_state(state)
+        save_state(state, scene)
         return {"ok": True, "skipped_phase": phase_name}
 
     if action == "advance_phase":
@@ -484,7 +515,7 @@ def lifecycle_manage(timeline_id: str, action: str, scheduler, today: Optional[d
                     logger.warning("advance_phase trigger failed: %s", e)
                 scheduler.remove(jid)
                 break
-        save_state(state)
+        save_state(state, scene)
         return {"ok": True, "advanced_to": next_p.get("name", "")}
 
     if action == "pause":
@@ -507,81 +538,87 @@ def lifecycle_manage(timeline_id: str, action: str, scheduler, today: Optional[d
 
 # ── Public API ─────────────────────────────────────────────────────────────
 
-def get_timelines() -> list[dict]:
-    """读取 timelines.yaml 中的 timelines 列表。"""
-    if not TIMELINES_FILE.exists():
+def get_timelines(scene: str = "work") -> list[dict]:
+    """读取某 scene 的 timelines.yaml 中的 timelines 列表。"""
+    tf = _timelines_file(scene)
+    if not tf.exists():
         return []
     try:
-        data = yaml.safe_load(TIMELINES_FILE.read_text(encoding="utf-8")) or {}
+        data = yaml.safe_load(tf.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError:
         return []
     return data.get("timelines", []) or []
 
 
-def save_timelines(timelines: list[dict]) -> None:
-    """写回 timelines.yaml。保留 task_categories 等其他字段。"""
+def save_timelines(timelines: list[dict], scene: str = "work") -> None:
+    """写回某 scene 的 timelines.yaml。保留 task_categories 等其他字段。"""
+    tf = _timelines_file(scene)
     data = {}
-    if TIMELINES_FILE.exists():
+    if tf.exists():
         try:
-            data = yaml.safe_load(TIMELINES_FILE.read_text(encoding="utf-8")) or {}
+            data = yaml.safe_load(tf.read_text(encoding="utf-8")) or {}
         except yaml.YAMLError:
             data = {}
     data["timelines"] = timelines
-    TIMELINES_FILE.parent.mkdir(parents=True, exist_ok=True)
-    TIMELINES_FILE.write_text(
+    tf.parent.mkdir(parents=True, exist_ok=True)
+    tf.write_text(
         yaml.safe_dump(data, allow_unicode=True, sort_keys=False, default_flow_style=False),
         encoding="utf-8",
     )
 
 
 def get_timeline_status(today: Optional[date] = None) -> list[TimelineStatus]:
-    """返回所有时间线的当前状态（用于 UI 展示）。"""
+    """返回所有 scene 的时间线当前状态（用于 UI 展示）。"""
     today = today or date.today()
     statuses: list[TimelineStatus] = []
-    for tl in get_timelines():
-        cycle = resolve_anchors(tl, today)
-        current = determine_current_phase(tl, cycle.anchor_date, today)
-        next_p = _next_phase(tl, cycle.anchor_date, today)
+    for scene in _discover_scenes():
+        for tl in get_timelines(scene):
+            cycle = resolve_anchors(tl, today)
+            current = determine_current_phase(tl, cycle.anchor_date, today)
+            next_p = _next_phase(tl, cycle.anchor_date, today)
 
-        tasks: list[dict] = []
-        for task in expand_actions(tl, cycle.anchor_date):
-            tasks.append({
-                "job_id": task.job_id,
-                "kind": task.kind,
-                "fire_at": task.fire_at.isoformat() if task.fire_at else None,
-                "cron": task.cron,
-                "active_from": task.active_from.isoformat() if task.active_from else None,
-                "active_until": task.active_until.isoformat() if task.active_until else None,
-                "message": task.message,
-                "source_phase": task.source_phase,
-                "passed": (task.fire_at < today) if task.fire_at else None,
-            })
+            tasks: list[dict] = []
+            for task in expand_actions(tl, cycle.anchor_date, scene):
+                tasks.append({
+                    "job_id": task.job_id,
+                    "kind": task.kind,
+                    "fire_at": task.fire_at.isoformat() if task.fire_at else None,
+                    "cron": task.cron,
+                    "active_from": task.active_from.isoformat() if task.active_from else None,
+                    "active_until": task.active_until.isoformat() if task.active_until else None,
+                    "message": task.message,
+                    "source_phase": task.source_phase,
+                    "passed": (task.fire_at < today) if task.fire_at else None,
+                })
 
-        statuses.append(TimelineStatus(
-            id=tl.get("id", ""),
-            name=tl.get("name", ""),
-            scene=tl.get("scene", "work"),
-            anchor_date=cycle.anchor_date.isoformat(),
-            current_phase=current.get("name") if current else None,
-            phase_start=apply_offset(cycle.anchor_date, current.get("offset_start", "0d")).isoformat() if current else None,
-            phase_end=apply_offset(cycle.anchor_date, current.get("offset_end", "0d")).isoformat() if current else None,
-            next_phase=next_p.get("name") if next_p else None,
-            next_anchor=cycle.next_anchor.isoformat(),
-            tasks=tasks,
-        ))
+            statuses.append(TimelineStatus(
+                id=tl.get("id", ""),
+                name=tl.get("name", ""),
+                scene=scene,
+                anchor_date=cycle.anchor_date.isoformat(),
+                current_phase=current.get("name") if current else None,
+                phase_start=apply_offset(cycle.anchor_date, current.get("offset_start", "0d")).isoformat() if current else None,
+                phase_end=apply_offset(cycle.anchor_date, current.get("offset_end", "0d")).isoformat() if current else None,
+                next_phase=next_p.get("name") if next_p else None,
+                next_anchor=cycle.next_anchor.isoformat(),
+                tasks=tasks,
+            ))
     return statuses
 
 
-def find_timeline(timeline_id: str) -> Optional[dict]:
-    for tl in get_timelines():
-        if tl.get("id") == timeline_id:
-            return tl
-    return None
+def find_timeline(timeline_id: str) -> tuple[str, Optional[dict]]:
+    """在所有 scene 中查找 timeline，返回 (scene, timeline)。未找到返回 (None, None)。"""
+    for scene in _discover_scenes():
+        for tl in get_timelines(scene):
+            if tl.get("id") == timeline_id:
+                return scene, tl
+    return None, None
 
 
 def upsert_timeline(timeline: dict) -> None:
-    """新增或更新（按 id 匹配）一条时间线，并写回。"""
-    timelines = get_timelines()
+    """新增或更新（按 id 匹配）一条时间线，写回其 scene 对应文件。"""
+    scene = timeline.get("scene", "work") or "work"
+    timelines = get_timelines(scene)
     tl_id = timeline.get("id", "")
     found = False
     for i, t in enumerate(timelines):
@@ -591,41 +628,47 @@ def upsert_timeline(timeline: dict) -> None:
             break
     if not found:
         timelines.append(timeline)
-    save_timelines(timelines)
+    save_timelines(timelines, scene)
 
 
 def remove_timeline(timeline_id: str) -> bool:
-    timelines = get_timelines()
+    scene, _ = find_timeline(timeline_id)
+    if not scene:
+        return False
+    timelines = get_timelines(scene)
     new_list = [t for t in timelines if t.get("id") != timeline_id]
     if len(new_list) == len(timelines):
         return False
-    save_timelines(new_list)
+    save_timelines(new_list, scene)
     # 同时清理 state
-    state = load_state()
+    state = load_state(scene)
     state.pop(timeline_id, None)
-    save_state(state)
+    save_state(state, scene)
     return True
 
 
 # ── 导出 & 导入 ────────────────────────────────────────────────────────────
 
-def export_timelines(format: str = "yaml", dest: Optional[Path] = None) -> Path:
-    """导出 timelines.yaml + .timeline_state.json 为单一文件。
+def export_timelines(format: str = "yaml", dest: Optional[Path] = None, scene: str = "work") -> Path:
+    """导出某 scene 的 timelines.yaml + .timeline_state.json 为单一文件。
 
-    默认写到 ~/.ethan/work/exports/timelines-{YYYY-MM-DD}.{ext}
+    默认写到 ~/.ethan/{scene}/exports/timelines-{YYYY-MM-DD}.{ext}
     """
-    EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    exports = _exports_dir(scene)
+    exports.mkdir(parents=True, exist_ok=True)
     today_str = date.today().isoformat()
     ext = "yaml" if format == "yaml" else "json"
-    dest = dest or EXPORTS_DIR / f"timelines-{today_str}.{ext}"
+    dest = dest or exports / f"timelines-{today_str}.{ext}"
 
     config_data = {}
-    if TIMELINES_FILE.exists():
-        config_data = yaml.safe_load(TIMELINES_FILE.read_text(encoding="utf-8")) or {}
+    tf = _timelines_file(scene)
+    if tf.exists():
+        config_data = yaml.safe_load(tf.read_text(encoding="utf-8")) or {}
 
-    state_data = load_state()
+    state_data = load_state(scene)
     package = {
         "version": "1.0",
+        "scene": scene,
         "exported_at": datetime.now().astimezone().isoformat(),
         "config": config_data,
         "state": state_data,
@@ -647,6 +690,7 @@ def import_timelines(
     dry_run: bool = False,
     mode: str = "overwrite",
     sync_after: bool = False,
+    scene: Optional[str] = None,
 ) -> dict:
     """从导出文件恢复时间线配置。
 
@@ -665,11 +709,12 @@ def import_timelines(
       - dry_run：True 时只返回"会发生什么"，不写入任何文件
       - mode：overwrite / merge
       - sync_after：写入后是否调用 sync_scheduler（需要 scheduler 已启动）
+      - scene：目标 scene；为 None 时取导出文件中的 scene 字段，缺省 "work"
 
     返回 {
       ok, error?, validation,
       timelines_count, state_restored, backup_path,
-      mode, dry_run, merged_from_existing?,
+      mode, dry_run, scene, merged_from_existing?,
     }
     """
     if not path.exists():
@@ -690,6 +735,10 @@ def import_timelines(
     version = str(package.get("version", ""))
     if not version.startswith("1."):
         return {"ok": False, "error": f"Unsupported version: {version} (require 1.x)"}
+
+    # scene 优先级：参数 > 导出文件内 scene 字段 > "work"
+    target_scene = scene or package.get("scene") or "work"
+    timelines_file = _timelines_file(target_scene)
 
     config_data = package.get("config", {}) or {}
     state_data = package.get("state", {}) or {}
@@ -717,9 +766,9 @@ def import_timelines(
     # 计算合并结果
     new_timelines = config_data.get("timelines", []) or []
     existing_timelines = []
-    if mode == "merge" and TIMELINES_FILE.exists():
+    if mode == "merge" and timelines_file.exists():
         try:
-            existing_data = yaml.safe_load(TIMELINES_FILE.read_text(encoding="utf-8")) or {}
+            existing_data = yaml.safe_load(timelines_file.read_text(encoding="utf-8")) or {}
             existing_timelines = existing_data.get("timelines", []) or []
         except yaml.YAMLError:
             existing_timelines = []
@@ -743,6 +792,7 @@ def import_timelines(
             "dry_run": True,
             "validation": validation,
             "mode": mode,
+            "scene": target_scene,
             "timelines_count": timelines_count,
             "merged_from_existing": merged_from_existing,
             "state_restored": restore_state,
@@ -750,39 +800,39 @@ def import_timelines(
 
     # 备份当前配置（带时间戳，避免多次导入互相覆盖）
     backup_path: Optional[Path] = None
-    if TIMELINES_FILE.exists():
+    if timelines_file.exists():
         from datetime import datetime as _dt
         ts = _dt.now().strftime("%Y%m%d_%H%M%S")
-        backup_path = TIMELINES_FILE.with_name(f"timelines.yaml.bak.{ts}")
-        backup_path.write_bytes(TIMELINES_FILE.read_bytes())
+        backup_path = timelines_file.with_name(f"timelines.yaml.bak.{ts}")
+        backup_path.write_bytes(timelines_file.read_bytes())
 
-    TIMELINES_FILE.parent.mkdir(parents=True, exist_ok=True)
+    timelines_file.parent.mkdir(parents=True, exist_ok=True)
     final_data = dict(config_data)
     final_data["timelines"] = final_timelines
-    TIMELINES_FILE.write_text(
+    timelines_file.write_text(
         yaml.safe_dump(final_data, allow_unicode=True, sort_keys=False, default_flow_style=False),
         encoding="utf-8",
     )
 
     state_restored = False
     if restore_state:
-        save_state(state_data)
+        save_state(state_data, target_scene)
         state_restored = True
     elif mode == "merge":
         # merge 模式：保留现有 state，只重置新导入条目的 current_anchor 以便重新编译
-        existing_state = load_state()
+        existing_state = load_state(target_scene)
         for tl in new_timelines:
             tl_id = tl.get("id", "") if isinstance(tl, dict) else ""
             if tl_id and tl_id in existing_state:
                 existing_state[tl_id]["current_anchor"] = ""
-        save_state(existing_state)
+        save_state(existing_state, target_scene)
     else:
         # overwrite 模式：清空 state 重新开始（仅保留导入文件中的 state）
         if state_data:
-            save_state(state_data)
+            save_state(state_data, target_scene)
             state_restored = True
         else:
-            save_state({})
+            save_state({}, target_scene)
 
     # 可选：同步到 scheduler
     sync_result = None
@@ -799,6 +849,7 @@ def import_timelines(
         "ok": True,
         "validation": validation,
         "mode": mode,
+        "scene": target_scene,
         "timelines_count": timelines_count,
         "merged_from_existing": merged_from_existing,
         "state_restored": state_restored,
@@ -1044,7 +1095,7 @@ def sync_to_lark(timeline_id: str, today: Optional[date] = None) -> dict:
     }
     """
     today = today or date.today()
-    tl = find_timeline(timeline_id)
+    scene, tl = find_timeline(timeline_id)
     if not tl:
         return {"ok": False, "error": f"Timeline not found: {timeline_id}"}
 
@@ -1052,7 +1103,7 @@ def sync_to_lark(timeline_id: str, today: Optional[date] = None) -> dict:
         return {"ok": False, "error": f"Timeline '{timeline_id}' has sync_to_lark=false (or missing)"}
 
     cycle = resolve_anchors(tl, today)
-    state = load_state()
+    state = load_state(scene)
     tl_state = state.get(timeline_id, {}) or {}
 
     # 检查是否已同步到当前锚点
@@ -1146,7 +1197,7 @@ def sync_to_lark(timeline_id: str, today: Optional[date] = None) -> dict:
         "synced_at": datetime.now().astimezone().isoformat(),
     }
     state[timeline_id] = tl_state
-    save_state(state)
+    save_state(state, scene)
 
     return {
         "ok": len(errors) == 0,
@@ -1165,7 +1216,10 @@ def cleanup_lark_resources(timeline_id: str) -> dict:
 
     返回 {ok, cleaned_events, errors}。
     """
-    state = load_state()
+    scene, _ = find_timeline(timeline_id)
+    if not scene:
+        return {"ok": False, "error": f"Timeline not found: {timeline_id}"}
+    state = load_state(scene)
     tl_state = state.get(timeline_id, {}) or {}
     synced = tl_state.get("lark_sync", {}) or {}
     event_ids = synced.get("event_ids", []) or []
@@ -1187,7 +1241,7 @@ def cleanup_lark_resources(timeline_id: str) -> dict:
     if "lark_sync" in tl_state:
         del tl_state["lark_sync"]
         state[timeline_id] = tl_state
-        save_state(state)
+        save_state(state, scene)
 
     return {
         "ok": len(errors) == 0,
