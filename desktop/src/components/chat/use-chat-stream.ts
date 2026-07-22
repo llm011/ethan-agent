@@ -208,6 +208,25 @@ export async function consumeStream(
       }
     }
   } catch (err) {
+    const errMsg = err instanceof Error ? err.message : "";
+    const isNetworkDrop = /load failed|network|aborted|connection/i.test(errMsg);
+    if (isNetworkDrop && activeSession) {
+      // WebKit 网络中断（休眠唤醒等）— 后端通常已完成，自动拉取 session 恢复
+      try {
+        const { fetchSession } = await import("@/lib/api-sessions");
+        const fresh = await fetchSession(activeSession);
+        if (fresh?.messages?.length) {
+          const { mapDetailMessages } = await import("@/components/chat/chat-helpers");
+          const freshMsgs = mapDetailMessages(fresh);
+          setMessages(freshMsgs);
+          setBgPolling(null);
+          setConsentRequest(null);
+          setStopping(false);
+          setStreaming(false);
+          return { failed: false };
+        }
+      } catch { /* fallback to show error */ }
+    }
     failed = true;
     const errLine = `⚠️ ${err instanceof Error ? err.message : "连接中断"}`;
     assistantContent = assistantContent.trim()
