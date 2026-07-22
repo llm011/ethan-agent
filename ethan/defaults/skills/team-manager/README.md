@@ -81,20 +81,34 @@ Agent 会自动解析并生成配置。
 
 ## 数据存储
 
-所有数据存储在本地 `~/.ethan/work/`：
+数据按 scene 隔离存储在 `~/.ethan/{scene}/` 下，预置 `work` 和 `life` 两个 scene 目录（首次启动自动创建）：
 
 ```
-~/.ethan/work/
-├── team.yaml                # 团队配置
-├── timelines.yaml           # 时间线配置
-├── .timeline_state.json     # 时间线运行状态
-├── people/                  # 人员日志（唯一记录源）
-│   ├── 李四.md
-│   └── _self.md
-├── cr-reports/              # CR 分析报告
-├── reviews/                 # 绩效评估草稿
-└── exports/                 # 导出文件
+~/.ethan/
+├── work/                    # 团队管理场景（默认）
+│   ├── team.yaml            # 团队配置
+│   ├── timelines.yaml       # 时间线配置
+│   ├── .timeline_state.json # 时间线运行状态
+│   ├── people/              # 人员日志（唯一记录源）
+│   │   ├── 李四.md
+│   │   └── _self.md
+│   ├── cr-reports/          # CR 分析报告
+│   ├── reviews/             # 绩效评估草稿
+│   └── exports/             # 导出文件
+└── life/                    # 创业/个人项目场景（与 work 完全隔离）
+    ├── timelines.yaml       # 独立时间线，避免信息泄露到工作场景
+    ├── .timeline_state.json # 独立运行状态
+    └── ...                  # 其他子目录按需创建
 ```
+
+**Scene 隔离规则**：
+
+- **目录即 scene**：数据放在哪个 scene 目录就属于哪个 scene。`timelines.yaml` 放在哪个 scene 目录就属于哪个 scene（timeline.yaml 内的 `scene` 字段为辅）
+- **运行状态隔离**：每个 scene 独立的 `.timeline_state.json`，互不影响
+- **预置 scene**：`work`（团队管理）和 `life`（创业/个人项目）首次启动自动创建，两者完全隔离
+- **其他 scene**：`health` / `study` / `finance` / `social` 按需自建目录即可被发现
+- **定时任务**：普通定时任务（schedule_create）创建时可带 `scene` 字段，归属对应 scene
+- **前端切换**：前端定时任务页面顶部有 scene 切换器（work/life），切换后展示对应 scene 的任务和时间线，组件复用
 
 ## 定时任务分类
 

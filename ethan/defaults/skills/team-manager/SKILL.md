@@ -3,10 +3,10 @@ name: team-manager
 version: 1.0.0
 description: >
   团队管理一站式技能。覆盖三大核心场景：
-  ① 绩效管理 — 收集 case、分析文档/CR、绩效季汇总评估；
+  ① 绩效管理 — 记录到 people、分析文档/CR、绩效季汇总评估；
   ② 任务委派 — 拆分 checkpoint、创建飞书任务、节点提醒跟进；
   ③ 时间线驱动 — 配置周期性事件（绩效/OKR/季度汇报），自动在关键节点触发提醒和操作。
-trigger: "工作记录|工作进展|业务进展|更新进展|进展整理|记case|记个case|我的记录|表现不错|做得好|汇总绩效|绩效总结|绩效报告|团队总结|周报汇总|CR汇总|代码产出|分配任务|委派|布置任务|任务跟踪|设个deadline|DDL|checkpoint|时间线|绩效周期|绩效期|绩效节点|配置周期|设置绩效周期|更新绩效|绩效update|导出时间线|备份时间线|导入时间线|恢复时间线|群消息|扫描群|团队管理|整理进people|记到people|归到people|整理成员|按人整理|整理观点|收藏文档|收藏链接|存个文档|记个链接"
+trigger: "工作记录|工作进展|业务进展|更新进展|进展整理|记case|记个case|我的记录|表现不错|做得好|汇总绩效|绩效总结|绩效报告|团队总结|周报汇总|CR汇总|代码产出|分配任务|委派|布置任务|任务跟踪|设个deadline|DDL|checkpoint|时间线|绩效周期|绩效期|绩效节点|配置周期|设置绩效周期|更新绩效|绩效update|截止日期|时间线节点|加节点|更新时间线|导出时间线|备份时间线|导入时间线|恢复时间线|群消息|扫描群|团队管理|整理进people|记到people|归到people|整理成员|按人整理|整理观点|收藏文档|收藏链接|存个文档|记个链接"
 author: Ethan Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -67,29 +67,47 @@ metadata:
 
 ## 📁 数据存储
 
-所有数据存储在 `~/.ethan/work/` 目录：
+### Scene 目录隔离
+
+数据按 scene 隔离存储在 `~/.ethan/{scene}/` 下，预置 `work` 和 `life` 两个 scene 目录（首次启动自动创建）：
 
 ```
-~/.ethan/work/
-├── team.yaml                # 团队配置（成员、项目、CR 平台映射）
-├── timelines.yaml           # 时间线配置（绩效周期、OKR 等）
-├── .timeline_state.json     # 时间线运行状态（已触发动作记录）
-├── people/
-│   ├── {姓名}.md            # 按人按月按日记录（唯一记录源）
-│   └── _self.md             # 管理者自己的日志
-├── project/
-│   ├── {项目名}.md          # 按项目组织进展（链接到 people）
-│   └── default.md           # 未归类项目的默认文件
-├── docs/
-│   ├── {业务名}.md          # 按业务分类收藏文档/链接
-│   └── default.md           # 无法归类时的默认收藏
-├── cr-reports/
-│   └── {YYYY}-W{NN}.md     # 周度 CR 分析报告
-├── reviews/
-│   └── {YYYY}-Q{N}-draft.md # 绩效综合评估草稿
-└── exports/                 # 导出文件存放目录
-    └── timelines-{YYYY-MM-DD}.yaml
+~/.ethan/
+├── work/                    # 团队管理场景（默认）
+│   ├── team.yaml            # 团队配置（成员、项目、CR 平台映射）
+│   ├── timelines.yaml       # 时间线配置（绩效周期、OKR 等）
+│   ├── .timeline_state.json # 时间线运行状态（已触发动作记录）
+│   ├── people/              # 按人按月按日记录（唯一记录源）
+│   │   ├── {姓名}.md
+│   │   └── _self.md         # 管理者自己的日志
+│   ├── project/             # 按项目组织进展（链接到 people）
+│   │   ├── {项目名}.md
+│   │   └── default.md       # 未归类项目的默认文件
+│   ├── docs/                # 按业务分类收藏文档/链接
+│   │   ├── {业务名}.md
+│   │   └── default.md       # 无法归类时的默认收藏
+│   ├── cr-reports/
+│   │   └── {YYYY}-W{NN}.md  # 周度 CR 分析报告
+│   ├── reviews/
+│   │   └── {YYYY}-Q{N}-draft.md # 绩效综合评估草稿
+│   └── exports/             # 导出文件存放目录
+│       └── timelines-{YYYY-MM-DD}.yaml
+└── life/                    # 创业/个人项目场景（与 work 完全隔离）
+    ├── timelines.yaml       # 独立时间线，避免信息泄露到工作场景
+    ├── .timeline_state.json # 独立运行状态
+    └── ...                  # 其他子目录按需创建
 ```
+
+**Scene 隔离规则**：
+
+| 规则 | 说明 |
+|---|---|
+| 目录即 scene | 数据放在哪个 scene 目录就属于哪个 scene。`timelines.yaml` 放在 `~/.ethan/life/` 下即属于 life scene（timeline.yaml 内的 `scene` 字段为辅） |
+| 运行状态隔离 | 每个 scene 独立的 `.timeline_state.json`，互不影响 |
+| 预置 scene | `work`（团队管理）和 `life`（创业/个人项目）首次启动自动创建，两者完全隔离 |
+| 其他 scene | `health` / `study` / `finance` / `social` 按需自建目录即可被发现 |
+| 定时任务 | 普通定时任务（schedule_create）创建时可带 `scene` 字段，归属对应 scene |
+| 前端切换 | 前端定时任务页面顶部有 scene 切换器（work/life），切换后展示对应 scene 的任务和时间线，组件复用 |
 
 ### people/ 日志格式
 
@@ -235,6 +253,45 @@ metadata:
 - `[进展]` 标签明确表示是事件更新而非重复，写入时不触发去重询问
 - 详细格式与写入流程见 `references/people-log.md`
 
+#### ⚡ 快速路径：「更新绩效时间线 / 时间线节点」
+
+当用户说「更新时间线」「加个时间线节点」「绩效节点」「截止日期是X」「X月X日截止」或贴出带具体截止日期的绩效节点清单时，**不要读 references/、不要读源码、不要 knowledge_search、不要 fd_find、不要读 config.yaml**，直接执行：
+
+**先判断节点类型**：
+
+- **A. 绝对日期的一次性截止节点**（如「7/23 23:59 自评截止」）→ 走路径①，用 `schedule_create` 建提醒
+- **B. 调整时间线阶段配置**（如「把集中汇总期提前到 -3w」「加个新阶段」）→ 走路径②，直接编辑 `timelines.yaml`
+
+**路径①：一次性截止节点提醒**（最常见）
+
+1. 从消息中提取 `{节点名, 截止时间, 当前状态}` 列表
+2. 对每个节点，调用 `schedule_create` 建一个**截止前提醒**（默认前 3 小时，用户指定则用用户值）：
+   - `job_id`: `perf-node-{简短英文/拼音}`
+   - `title`: `绩效节点：{节点名}`
+   - `prompt`: `{节点名} 将于 {截止时间} 截止（当前状态：{状态}）。请确认进度，未完成则尽快处理。`
+   - `cron`: 5 段式，对应提醒时刻，如 `0 20 23 7 *`（7/23 20:00）
+   - `category`: `one_off`
+   - `scene`: `work`
+3. 回复确认：列出创建了哪些提醒、各在什么时间触发
+
+**总计最多 3 步**：提取 → schedule_create → 确认。
+
+**路径②：调整 timelines.yaml 阶段配置**
+
+1. 读 `~/.ethan/work/timelines.yaml`
+2. 找到对应时间线/阶段，修改 offset / 新增 phase / 调整 action
+3. 写回 `~/.ethan/work/timelines.yaml`
+4. 回复确认，并提示「如需立即同步到定时任务池，可说『同步时间线』」
+
+**总计最多 4 步**：读 → 改 → 写 → 确认。
+
+**🚫 禁令**（两条路径都适用）：
+- 不读 `references/timeline-engine.md`（SOP 细节用不到）
+- 不读 `/app/ethan/scheduler/` 下任何源码
+- 不 `knowledge_search`、不 `web_search`
+- 不 `fd_find` 找文件、不读 `config.yaml`、不读 `team.yaml`（除非要解析人名）
+- 不重复读 `timelines.yaml`（路径②读一次即可）
+
 #### ⚡ 快速路径：「文档/链接收藏」
 
 当用户发送文档链接、或说「收藏这个」「存一下」「记个链接」，或 Agent 在处理过程中**解析了任何文档/链接**时，**自动追加收藏记录**：
@@ -266,7 +323,7 @@ metadata:
 用户说「CR 汇总」「代码产出统计」时：
 1. 调用 Codebase API 拉取 MR 数据
 2. 按人统计产出量、质量问题、需求归属
-3. 输出报告 + 写入 case
+3. 输出报告 + 记录到 people
 
 ### 任务委派
 
@@ -339,9 +396,9 @@ metadata:
 
 | 技能 | 联动方式 |
 |---|---|
-| `code-review` / `bytedance-code-review` | CR 结果写入 case |
+| `code-review` / `bytedance-code-review` | CR 结果记录到 people |
 | `lark-task` | 创建飞书任务和子任务 |
-| `lark-im` | 发送提醒消息、提取群聊 case |
+| `lark-im` | 发送提醒消息、识别群聊事件（写入 people） |
 | `lark-doc` | 读取文档内容 |
 | `lark-minutes` | 从飞书妙记提取信息 |
 | `lark-calendar` | 为评审/对齐创建日历事件 |
@@ -352,5 +409,5 @@ metadata:
 - **确认后再创建**：任务拆分方案、飞书任务创建，必须经用户确认
 - **不做最终绩效判定**：Agent 只提供汇总和建议，打分由管理者决定
 - **隐私边界**：所有记录仅存本地，不上传外部服务
-- **客观记录**：case 以事实描述为主，避免主观判断词
+- **客观记录**：people 日志以事实描述为主，避免主观判断词
 - **不越权**：Agent 不自行修改 DDL 或取消任务
