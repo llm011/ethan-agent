@@ -7,10 +7,9 @@ import {
 import { Badge } from "@ethan/shared/ui/badge";
 import { Button } from "@ethan/shared/ui/button";
 import { ScrollArea } from "@ethan/shared/ui/scroll-area";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@ethan/shared/ui/card";
-import { Loader2, RefreshCw, Play, Pause, Trash2, MessageSquare, ChevronDown, ChevronRight, Pencil, Clock, TerminalSquare } from "lucide-react";
+import { Loader2, RefreshCw, Play, Pause, Trash2, MessageSquare, ChevronDown, ChevronRight, Pencil } from "lucide-react";
 import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
-import { formatTrigger, formatNextRun } from "@/lib/utils";
+import { formatTrigger } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -83,8 +82,6 @@ export function ScheduleView() {
   const [loading, setLoading] = useState(true);
   const [activeScene, setActiveScene] = useState<string>("work");
   const [viewMode, setViewMode] = useState<"today" | "all">("today");
-  const [viewLayout, setViewLayout] = useState<"timeline" | "list">("timeline");
-  const [futureDays, setFutureDays] = useState(2); // all 模式下初始展示今天+未来2天，点 load more 往未来加1天
   const [confirmState, setConfirmState] = useState<{ open: boolean; id: string }>({ open: false, id: "" });
   const [scheduledSessions, setScheduledSessions] = useState<SessionInfo[]>([]);
   const [sessionsExpanded, setSessionsExpanded] = useState(false);
@@ -201,49 +198,23 @@ export function ScheduleView() {
     return counts;
   }, [scenes, jobs]);
 
-  // today 模式：只展示今天+明天的任务；all 模式：过去全部 + 今天到未来 futureDays 天，点 load more 扩展
+  // today 模式：只展示今天+明天的任务；all 模式：展示全部
   const visibleJobs = useMemo(() => {
+    if (viewMode === "all") return sceneJobs;
     const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    if (viewMode === "today") {
-      const tomorrowStr = `${new Date(now.getTime() + 86400000).getFullYear()}-${String(new Date(now.getTime() + 86400000).getMonth() + 1).padStart(2, "0")}-${String(new Date(now.getTime() + 86400000).getDate()).padStart(2, "0")}`;
-      const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-      return sceneJobs.filter(j => {
-        if (!j.next_run_time) return false;
-        const d = new Date(j.next_run_time);
-        if (isNaN(d.getTime())) return false;
-        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-        return key === todayStr || key === tomorrowStr;
-      });
-    }
-    // all 模式：过去的全部 + 今天到未来 futureDays 天 + 无下次执行时间的任务
-    const maxTime = startOfToday + (futureDays + 1) * 86400000;
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    const tomorrow = new Date(now.getTime() + 86400000);
+    const tomorrowStr = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, "0")}-${String(tomorrow.getDate()).padStart(2, "0")}`;
     return sceneJobs.filter(j => {
-      if (!j.next_run_time) return true; // 暂停/无下次执行的任务始终展示
+      if (!j.next_run_time) return false;
       const d = new Date(j.next_run_time);
-      if (isNaN(d.getTime())) return true;
-      return d.getTime() < maxTime;
+      if (isNaN(d.getTime())) return false;
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      return key === todayStr || key === tomorrowStr;
     });
-  }, [sceneJobs, viewMode, futureDays]);
+  }, [sceneJobs, viewMode]);
 
   const dateGroups = useMemo(() => groupJobsByDate(visibleJobs), [visibleJobs]);
-
-  // 列表视图：按下次运行时间排序
-  const sortedListJobs = useMemo(() => {
-    return [...visibleJobs].sort((a, b) => {
-      if (!a.next_run_time && !b.next_run_time) return 0;
-      if (!a.next_run_time) return 1;
-      if (!b.next_run_time) return -1;
-      return new Date(a.next_run_time).getTime() - new Date(b.next_run_time).getTime();
-    });
-  }, [visibleJobs]);
-
-  function formatDateTime(s: string | null): string {
-    if (!s) return "—";
-    const d = new Date(s);
-    if (isNaN(d.getTime())) return "—";
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-  }
 
   function RenameDialog({ open, currentName, onConfirm, onCancel }: {
     open: boolean; currentName: string; onConfirm: (name: string) => void; onCancel: () => void
@@ -349,21 +320,6 @@ export function ScheduleView() {
               }`}
             >全部</button>
           </div>
-          {/* View layout switch: timeline / list */}
-          <div className="flex items-center rounded-md border border-border overflow-hidden">
-            <button
-              onClick={() => setViewLayout("timeline")}
-              className={`px-2.5 py-1 text-xs transition-colors ${
-                viewLayout === "timeline" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
-              }`}
-            >时间轴</button>
-            <button
-              onClick={() => setViewLayout("list")}
-              className={`px-2.5 py-1 text-xs transition-colors ${
-                viewLayout === "list" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
-              }`}
-            >列表</button>
-          </div>
           <Button variant="ghost" size="icon" onClick={loadData} disabled={loading}>
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           </Button>
@@ -400,15 +356,6 @@ export function ScheduleView() {
       <div className="flex-1 flex overflow-hidden">
         {/* 左侧：时间轴 */}
         <ScrollArea className="flex-1 p-6">
-          {/* load more：all 模式下往未来多取一天，放在顶部 */}
-          {viewMode === "all" && !loading && visibleJobs.length > 0 && (
-            <div className="pb-3 text-center">
-              <button
-                onClick={() => setFutureDays(d => d + 1)}
-                className="text-xs text-primary hover:underline"
-              >load more…</button>
-            </div>
-          )}
           {loading && visibleJobs.length === 0 ? (
             <div className="flex items-center justify-center h-full pt-10">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -416,61 +363,6 @@ export function ScheduleView() {
           ) : visibleJobs.length === 0 ? (
             <div className="text-center text-muted-foreground pt-10">
               {viewMode === "today" ? "今天和明天暂无定时任务" : "暂无定时任务"}
-            </div>
-          ) : viewLayout === "list" ? (
-            /* ── Card Grid Layout ── */
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 p-0.5">
-              {sortedListJobs.map(job => (
-                <Card key={job.id} className={`flex flex-col shadow-sm border-border/60 bg-muted/10 ${job.status === "paused" ? "opacity-60" : ""}`}>
-                  <CardHeader className="pb-3 border-b border-border/30">
-                    <div className="flex justify-between items-start gap-2">
-                      <CardTitle className="text-sm font-semibold leading-tight line-clamp-2 flex-1 cursor-pointer hover:text-primary/70 transition-colors" onClick={() => openRename(job)} title="点击重命名">
-                        {job.name}
-                      </CardTitle>
-                      <div className="flex items-center gap-1 shrink-0">
-                        <Badge variant={job.status === "active" ? "default" : "secondary"} className="text-[9px] px-1.5 py-0 h-4">
-                          {job.status === "active" ? "运行中" : "已暂停"}
-                        </Badge>
-                        {job.source_phase && (
-                          <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4">{job.source_phase}</Badge>
-                        )}
-                      </div>
-                    </div>
-                    <CardDescription className="flex items-center gap-1.5 mt-2 text-xs">
-                      <Clock className="h-3 w-3" />
-                      {job.next_run_time ? formatNextRun(job.next_run_time) : "暂无下次执行"}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="pt-3 pb-2 flex-1">
-                    <div className="space-y-2">
-                      <div className="flex items-start gap-2 text-xs">
-                        <TerminalSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground mt-0.5" />
-                        <p className="text-muted-foreground line-clamp-3 leading-relaxed flex-1 cursor-pointer hover:text-foreground/70 transition-colors" onClick={() => openEditPrompt(job)} title="点击编辑内容">
-                          {job.prompt}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground/80 bg-muted/30 px-2 py-1 rounded">
-                        <Clock className="h-3 w-3" />
-                        <span className="truncate">{formatTrigger(job.trigger)}</span>
-                      </div>
-                    </div>
-                  </CardContent>
-                  <CardFooter className="pt-2 pb-3 flex justify-end gap-1 border-t border-border/30 mt-auto">
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openRename(job)} title="重命名">
-                      <Pencil className="h-3 w-3" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => navigate(`/chat/${job.session_id}`)} title="查看对话">
-                      <MessageSquare className="h-3 w-3" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => toggleStatus(job)} title={job.status === "active" ? "暂停" : "恢复"}>
-                      {job.status === "active" ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive/70 hover:text-destructive" onClick={() => removeJob(job.id)} title="删除">
-                      <Trash2 className="h-3 w-3" />
-                    </Button>
-                  </CardFooter>
-                </Card>
-              ))}
             </div>
           ) : (
             /* ── Vertical Timeline Layout ── */
