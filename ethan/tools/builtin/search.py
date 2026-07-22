@@ -28,7 +28,7 @@ def _extract_pattern(pattern: str = "", **kwargs) -> str:
 
 
 class RipgrepTool(BaseTool):
-    fast_path = False
+    fast_path = True
     name = "rg_search"
     description = (
         "Search file contents with ripgrep (rg). Extremely fast, respects .gitignore. "
@@ -88,7 +88,7 @@ class RipgrepTool(BaseTool):
 
 
 class FdTool(BaseTool):
-    fast_path = False
+    fast_path = True
     name = "fd_find"
     description = (
         "Find files and directories with fd (fast find). Respects .gitignore by default. "

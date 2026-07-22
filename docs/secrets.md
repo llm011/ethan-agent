@@ -34,9 +34,9 @@ GETNOTE_CLIENT_ID="cli_xxx"
 - 每行 `KEY="value"`（引号可选）。`#` 开头是注释。
 - 运行 `shell` 工具时，所有 `*.env` 的键值对会被合并注入到子进程环境（见下）。
 
-### 2. 单值文件（用 `get_secret` 取）
+### 2. 单值文件（用 `get_secret` 取，也注入 shell env）
 
-形如 `~/.ethan/.secrets/ha.env`、`image_generate_token`。整个文件内容就是密钥值，模型通过 `get_secret` 工具按名读取（需用户授权）。
+形如 `~/.ethan/.secrets/api-yuntoken`，文件内容为 `KEY=value` 格式（如 `API_YUNTOKEN=xxx`）。文件名自动 slugify（小写 + `_` 转 `-`）。模型通过 `get_secret` 工具按名读取（需用户授权），shell 子进程也会自动注入 `$KEY`。
 
 ---
 
@@ -44,7 +44,7 @@ GETNOTE_CLIENT_ID="cli_xxx"
 
 ### 方式一：env 注入子进程（推荐，最快）
 
-`shell` 工具在执行命令前，会把 `.secrets/*.env` 的键值对注入子进程环境（`ethan/tools/builtin/shell.py` → `ethan/core/secrets_store.py::load_secret_env`）。
+`shell` 工具在执行命令前，会把 `.secrets/` 下所有密钥文件的 `KEY=value` 注入子进程环境（`ethan/tools/builtin/shell.py` → `ethan/core/secrets_store.py::load_secret_env`）。来源包括 `*.env` 文件和单值文件（新格式 `KEY=value`）。
 
 所以脚本 / curl 命令里**直接用 `$KEY`**：
 
@@ -58,7 +58,7 @@ curl https://openapi.biji.com/open/api/v1/note/list \
 
 ### 方式二：`get_secret` / `set_secret`（模型直接拿值的场景）
 
-- `set_secret(name, value)` —— 把一个密钥存进 `.secrets/<name>`（`0600`）。
+- `set_secret(name, value)` —— 把一个密钥存进 `.secrets/<slug>`（`0600`），内容为 `KEY=value`，文件名自动 slugify。
 - `get_secret(name)` —— 按名读取，**需要用户授权确认**。极少数模型确实要拿到值（而非交给 shell）时用。
 - `list_secrets()` —— 只列名称，不显示值，无需授权。
 
@@ -69,9 +69,13 @@ curl https://openapi.biji.com/open/api/v1/note/list \
 用户无需手写文件，直接用 CLI 管理密钥：
 
 ```bash
-# 单值密钥（最常用）—— 整个文件内容就是值，文件名即密钥名
+# 单值密钥（最常用）—— 文件名自动 slugify，内容为 KEY=value
+ethan secret set API_YUNTOKEN xxx
+# → ~/.ethan/.secrets/api-yuntoken  内容: API_YUNTOKEN=xxx
+# agent: get_secret("api-yuntoken")  shell: $API_YUNTOKEN
+
 ethan secret set getnote gk_xxxx
-# → ~/.ethan/.secrets/getnote
+# → ~/.ethan/.secrets/getnote  内容: getnote=gk_xxxx
 # agent: get_secret("getnote")  shell: $getnote
 
 # 多 key 的 .env 文件

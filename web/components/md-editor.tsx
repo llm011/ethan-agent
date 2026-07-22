@@ -9,12 +9,14 @@ export function MdEditor({
   value = "",
   onChange,
   placeholder,
+  defaultMode = "preview",
 }: {
   value?: string;
   onChange: (v: string) => void;
   placeholder?: string;
+  defaultMode?: "edit" | "preview" | "split";
 }) {
-  const [mode, setMode] = useState<"edit" | "preview" | "split">("preview");
+  const [mode, setMode] = useState<"edit" | "preview" | "split">(defaultMode);
 
   return (
     <div className="flex flex-col flex-1 min-h-[400px] border border-border rounded-lg overflow-hidden">

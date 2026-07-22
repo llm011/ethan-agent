@@ -33,6 +33,16 @@ def _safe_name(name: str) -> str:
     return safe
 
 
+def _slugify(name: str) -> str:
+    """文件名 slug：小写，_ → -。API_YUNTOKEN → api-yuntoken。"""
+    return name.lower().replace("_", "-")
+
+
+def _deslugify(slug: str) -> str:
+    """逆操作：大写，- → _。api-yuntoken → API_YUNTOKEN。"""
+    return slug.upper().replace("-", "_")
+
+
 class SetSecretTool(BaseTool):
     fast_path = False
     cacheable = False
@@ -48,7 +58,7 @@ class SetSecretTool(BaseTool):
         "properties": {
             "name": {
                 "type": "string",
-                "description": "密钥名，按场景/功能命名，如 'openai_key'、'homeassistant_token'。字母数字 _ - . /",
+                "description": "密钥名，按场景/功能命名，如 'OPENAI_API_KEY'、'HOMEASSISTANT_TOKEN'。字母数字 _ - . /",
             },
             "value": {
                 "type": "string",
@@ -63,14 +73,15 @@ class SetSecretTool(BaseTool):
             safe = _safe_name(name)
         except ValueError as e:
             return f"Error: {e}"
-        path = _secrets_dir() / safe
+        slug = _slugify(safe)
+        path = _secrets_dir() / slug
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(str(value), encoding="utf-8")
+        path.write_text(f"{safe}={value}\n", encoding="utf-8")
         try:
             os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)  # 0600
         except OSError:
             pass
-        return f"✓ 密钥已保存: {safe}（~/.ethan/.secrets/{safe}）"
+        return f"✓ 密钥已保存: {slug}（~/.ethan/.secrets/{slug}）\n  agent 读取: get_secret(\"{slug}\")\n  shell 注入: ${safe}"
 
 
 class GetSecretTool(BaseTool):
@@ -101,15 +112,27 @@ class GetSecretTool(BaseTool):
             safe = _safe_name(name)
         except ValueError as e:
             return f"Error: {e}"
-        path = _secrets_dir() / safe
-        if not path.exists() or not path.is_file():
-            return (
-                f"Error: 密钥不存在: {safe}。用 list_secrets 查看已有密钥；"
-                "如果没有，请提示用户配置该密钥（用 set_secret 保存）。"
-                "密钥只能通过 list_secrets / get_secret 访问，"
-                "不要用 shell（rg/find/cat/ls）、file_read、file_list 扫描 .secrets 目录。"
-            )
-        return path.read_text(encoding="utf-8", errors="replace").strip()
+        slug = _slugify(safe)
+        d = _secrets_dir()
+        # Try slugified name first, then original (backward compat with old raw-value files)
+        for candidate in (slug, safe):
+            path = d / candidate
+            if not path.is_file():
+                continue
+            content = path.read_text(encoding="utf-8", errors="replace").strip()
+            # New format: KEY=value (KEY = deslugify of filename)
+            expected_key = _deslugify(candidate)
+            prefix = f"{expected_key}="
+            if content.startswith(prefix):
+                return content[len(prefix):].strip()
+            # Old format: entire content is the value
+            return content
+        return (
+            f"Error: 密钥不存在: {slug}。用 list_secrets 查看已有密钥；"
+            "如果没有，请提示用户配置该密钥（用 set_secret 保存）。"
+            "密钥只能通过 list_secrets / get_secret 访问，"
+            "不要用 shell（rg/find/cat/ls）、file_read、file_list 扫描 .secrets 目录。"
+        )
 
 
 class ListSecretsTool(BaseTool):

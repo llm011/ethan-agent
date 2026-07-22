@@ -64,7 +64,8 @@ class FileReadTool(BaseTool):
 
     def consent_check(self, path: str = "", **kwargs) -> str | None:
         if _is_inside_secrets(str(path)):
-            return f"读取密钥文件 {path}（密钥请改用 get_secret 工具）"
+            # .secrets 目录硬拦截在 run() 中，这里无需弹授权
+            return None
         return None
 
     def consent_scope(self, path: str = "", **kwargs) -> str:
@@ -76,6 +77,12 @@ class FileReadTool(BaseTool):
 
     async def run(self, path: str, max_lines: int = 0, offset: int = 0) -> str:
         p = Path(path).expanduser().resolve()
+        if _is_inside_secrets(str(p)):
+            return (
+                "Error: 禁止读取 .secrets 目录下的文件。"
+                "密钥只能通过 list_secrets / get_secret 工具访问。"
+                "如果密钥不存在，请提示用户用 set_secret 配置。"
+            )
         if not p.exists():
             return f"File not found: {p}"
         if not p.is_file():
@@ -140,6 +147,11 @@ class FileWriteTool(BaseTool):
 
     async def run(self, path: str, content: str, append: bool = False) -> str:
         p = Path(path).expanduser().resolve()
+        if _is_inside_secrets(str(p)):
+            return (
+                "Error: 禁止写入 .secrets 目录下的文件。"
+                "密钥只能通过 set_secret 工具 / ethan secret 命令管理。"
+            )
         try:
             p.parent.mkdir(parents=True, exist_ok=True)
             mode = "a" if append else "w"

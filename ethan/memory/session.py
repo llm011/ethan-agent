@@ -601,7 +601,7 @@ class SessionStore:
 
     # ── sessions.db 轮转（防止无限膨胀） ──────────────────────────
 
-    SESSION_DB_SIZE_THRESHOLD = 10 * 1024 * 1024  # 10 MB
+    SESSION_DB_SIZE_THRESHOLD = 500 * 1024 * 1024  # 500 MB — SQLite 可轻松处理 GB 级数据，10MB 阈值过于激进导致频繁清空用户数据
 
     async def rotate_if_needed(self, threshold: int = SESSION_DB_SIZE_THRESHOLD) -> bool:
         """如果 sessions.db 超过 threshold，快照归档 + 清空 active db。

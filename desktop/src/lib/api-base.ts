@@ -122,11 +122,11 @@ export async function discoverModels(provider: string): Promise<{ ok: boolean; m
   return res.json();
 }
 
-export async function respondConsent(requestId: string, allowed: boolean): Promise<{ ok: boolean }> {
+export async function respondConsent(requestId: string, allowed: boolean, message?: string): Promise<{ ok: boolean }> {
   const res = await fetch(`${getApiUrl()}/consent/${encodeURIComponent(requestId)}`, {
     method: "POST",
     headers: { ...headers(), "Content-Type": "application/json" },
-    body: JSON.stringify({ allowed }),
+    body: JSON.stringify({ allowed, message: message || "" }),
   });
   return res.json();
 }

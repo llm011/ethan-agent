@@ -31,6 +31,7 @@ export async function consumeStream(
     activeSession,
   } = actions;
 
+  let failed = false;
   let assistantContent = "";
   let intermediateOutput = "";
   const assistantThought = "";
@@ -210,6 +211,25 @@ export async function consumeStream(
       }
     }
   } catch (err) {
+    const errMsg = err instanceof Error ? err.message : "";
+    const isNetworkDrop = /load failed|network|aborted|connection/i.test(errMsg);
+    if (isNetworkDrop && activeSession) {
+      try {
+        const { fetchSession } = await import("@/lib/api-sessions");
+        const fresh = await fetchSession(activeSession);
+        if (fresh?.messages?.length) {
+          const { mapDetailMessages } = await import("@/components/chat/chat-helpers");
+          const freshMsgs = mapDetailMessages(fresh);
+          setMessages(freshMsgs);
+          setBgPolling(null);
+          setConsentRequest(null);
+          setStopping(false);
+          setStreaming(false);
+          return;
+        }
+      } catch { /* fallback to show error */ }
+    }
+    failed = true;
     const errLine = `⚠️ ${err instanceof Error ? err.message : "连接中断"}`;
     assistantContent = assistantContent.trim()
       ? `${assistantContent}\n\n---\n${errLine}`

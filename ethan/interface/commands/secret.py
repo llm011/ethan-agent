@@ -7,13 +7,14 @@
   ethan secret set-env <file> <KEY=value>... 写入/追加 .env 文件（多 key 场景）
 
 存储约定（与 docs/secrets.md 对齐）：
-- 单值密钥 → ~/.ethan/.secrets/<name>，整个文件内容就是密钥值。
-  例：ethan secret set getnote gk_xxxx → .secrets/getnote
-  agent 用 get_secret("getnote") 读取，shell 用 $getnote 注入。
+- 单值密钥 → ~/.ethan/.secrets/<slug>，内容为 KEY=value。
+  文件名自动 slugify（小写 + _ 转 -）。
+  例：ethan secret set API_YUNTOKEN xxx → .secrets/api-yuntoken  内容: API_YUNTOKEN=xxx
+  agent 用 get_secret("api-yuntoken") 读取，shell 用 $API_YUNTOKEN 注入。
 - .env 密钥 → ~/.ethan/.secrets/<service>.env，每行 KEY=value。
   例：ethan secret set-env openai OPENAI_API_KEY=sk-xxx OPENAI_BASE_URL=...
   agent 用 get_secret("openai.env:OPENAI_API_KEY") 读取（list_secrets 会显示）。
-  shell 自动注入所有 .env 文件到子进程环境。
+  shell 自动注入所有密钥文件到子进程环境。
 
 权限：.secrets/ 目录 0700，密钥文件 0600。
 """
@@ -25,7 +26,7 @@ import stat
 import typer
 from rich.console import Console
 
-from ethan.tools.builtin.secrets import _safe_name, _secrets_dir
+from ethan.tools.builtin.secrets import _deslugify, _safe_name, _secrets_dir, _slugify
 
 console = Console()
 app = typer.Typer(help="管理密钥（~/.ethan/.secrets/）", invoke_without_command=True)
@@ -66,16 +67,14 @@ def list_secrets() -> None:
 
 
 @app.command("get")
-def get_secret(name: str = typer.Argument(..., help="密钥名，如 getnote 或 openai.env:OPENAI_API_KEY")) -> None:
+def get_secret(name: str = typer.Argument(..., help="密钥名，如 api-yuntoken / getnote 或 openai.env:OPENAI_API_KEY")) -> None:
     """读取密钥值（明文打印到终端）。
 
     支持：
-    - 单值文件名：getnote → 读取 .secrets/getnote 整个内容
+    - 单值文件名（slug）：api-yuntoken → 读取 .secrets/api-yuntoken，解析 KEY=value 返回值
     - .env 文件的 KEY：openai.env:OPENAI_API_KEY → 读取 .secrets/openai.env 里 OPENAI_API_KEY 的值
     """
     # 解析 name：可能形如 "file.env:KEY"
-    if ":" in name and name.endswith(".env:" + name.split(":", 1)[1]):
-        pass  # 罕见路径，跳过特殊处理
     parts = name.split(":", 1)
     file_part = parts[0]
     key_part = parts[1] if len(parts) == 2 else None
@@ -84,10 +83,18 @@ def get_secret(name: str = typer.Argument(..., help="密钥名，如 getnote 或
     except ValueError as e:
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)
-    path = _secrets_dir() / safe
-    if not path.exists() or not path.is_file():
+    slug = _slugify(safe)
+    d = _secrets_dir()
+    # Try slugified name first, then original (backward compat)
+    path = None
+    for candidate in (slug, safe):
+        p = d / candidate
+        if p.is_file():
+            path = p
+            break
+    if path is None:
         console.print(
-            f"[red]密钥不存在: {safe}[/red]\n"
+            f"[red]密钥不存在: {slug}[/red]\n"
             f"[dim]用 ethan secret list 查看已有密钥，或 ethan secret set {file_part} <value> 创建。[/dim]"
         )
         raise typer.Exit(1)
@@ -105,42 +112,51 @@ def get_secret(name: str = typer.Argument(..., help="密钥名，如 getnote 或
                     v = v[1:-1]
                 console.print(v)
                 return
-        console.print(f"[red]Key {key_part!r} 不在 {safe} 里[/red]")
+        console.print(f"[red]Key {key_part!r} 不在 {path.name} 里[/red]")
         raise typer.Exit(1)
-    # 单值文件：整个内容就是密钥
-    console.print(content)
+    # 单值文件：尝试 KEY=value 格式（新格式），否则返回原始内容（旧格式）
+    expected_key = _deslugify(path.name)
+    prefix = f"{expected_key}="
+    # 大小写不敏感匹配：写入时可能用小写 key
+    if content.upper().startswith(prefix):
+        console.print(content[len(prefix):].strip())
+    else:
+        console.print(content)
 
 
 @app.command("set")
 def set_secret(
-    name: str = typer.Argument(..., help="密钥名，如 getnote / github_pat / openai（自动生成文件名）"),
+    name: str = typer.Argument(..., help="密钥名，如 API_YUNTOKEN / getnote / OPENAI_API_KEY（自动 slug 为文件名）"),
     value: str = typer.Argument(..., help="密钥值"),
 ) -> None:
     """写入单值密钥文件（最常用）。
 
-    整个文件内容就是密钥值，文件名即密钥名。agent 用 get_secret(name) 读取，
-    shell 子进程自动以 $<name> 环境变量注入。
+    文件名自动 slugify（小写 + _ 转 -），文件内容为 KEY=value 格式。
+    agent 用 get_secret(slug) 读取，shell 子进程自动以 $KEY 环境变量注入。
 
     \b
     示例：
-      ethan secret set getnote gk_xxxx         → .secrets/getnote
-      ethan secret set homeassistant_token ha_abc  → .secrets/homeassistant_token
+      ethan secret set API_YUNTOKEN xxx         → .secrets/api-yuntoken  内容: API_YUNTOKEN=xxx
+      ethan secret set getnote gk_xxxx           → .secrets/getnote      内容: getnote=gk_xxxx
+      ethan secret set HOMEASSISTANT_TOKEN ha_abc  → .secrets/homeassistant-token  内容: HOMEASSISTANT_TOKEN=ha_abc
     """
     try:
         safe = _safe_name(name)
     except ValueError as e:
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)
-    path = _secrets_dir() / safe
+    slug = _slugify(safe)
+    path = _secrets_dir() / slug
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(value, encoding="utf-8")
+    path.write_text(f"{safe}={value}\n", encoding="utf-8")
     try:
         os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)  # 0600
     except OSError:
         pass
-    console.print(f"[green]✓ 密钥已保存: {safe}[/green]")
+    console.print(f"[green]✓ 密钥已保存: {slug}[/green]")
     console.print(f"  [dim]路径: {path}[/dim]")
-    console.print(f"  [dim]agent 读取: get_secret(\"{safe}\")[/dim]")
+    console.print(f"  [dim]agent 读取: get_secret(\"{slug}\")[/dim]")
+    console.print(f"  [dim]shell 注入: ${safe}[/dim]")
 
 
 @app.command("set-env")

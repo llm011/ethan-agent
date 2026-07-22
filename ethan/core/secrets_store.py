@@ -60,16 +60,63 @@ def _parse_env_file(path: Path) -> dict[str, str]:
     return out
 
 
+def _slugify(name: str) -> str:
+    """文件名 slug：小写，_ → -。"""
+    return name.lower().replace("_", "-")
+
+
+def _deslugify(slug: str) -> str:
+    """逆操作：大写，- → _。"""
+    return slug.upper().replace("-", "_")
+
+
+def _parse_single_value_file(path: Path) -> dict[str, str]:
+    """解析单值密钥文件（非 .env）。
+
+    新格式：KEY=value（KEY = deslugify(文件名)）→ 返回 {KEY: value}。
+    旧格式：整个文件内容就是值 → 返回 {}（不注入 shell env，仅 get_secret 可读）。
+    """
+    try:
+        content = path.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return {}
+    if not content:
+        return {}
+    expected_key = _deslugify(path.name)
+    prefix = f"{expected_key}="
+    # 大小写不敏感匹配：写入时可能用小写 key 或中划线形式
+    # 对 content 的 key 部分也做 deslugify，兼容 api-yuntoken=xxx 形式
+    if "=" in content:
+        file_key, _, file_val = content.partition("=")
+        if _deslugify(file_key.strip()) == expected_key:
+            val = file_val.strip()
+            if val:
+                return {expected_key: val}
+    elif content.upper().startswith(prefix):
+        val = content[len(prefix):].strip()
+        if val:
+            return {expected_key: val}
+    return {}
+
+
 def load_secret_env() -> dict[str, str]:
-    """合并 .secrets/ 下所有 *.env 文件的 KEY=value，供 shell 子进程注入。"""
+    """合并 .secrets/ 下所有密钥文件的 KEY=value，供 shell 子进程注入。
+
+    来源：① *.env 文件（多 key）；② 单值文件（新格式 KEY=value，KEY = deslugify(文件名)）。
+    旧格式单值文件（原始值）不注入。
+    """
     d = _secrets_dir()
     if not d.is_dir():
         return {}
     merged: dict[str, str] = {}
     try:
-        for p in sorted(d.glob("*.env")):
-            if p.is_file():
+        for p in sorted(d.rglob("*")):
+            if not p.is_file():
+                continue
+            if p.suffix == ".env":
                 merged.update(_parse_env_file(p))
+            else:
+                merged.update(_parse_single_value_file(p))
     except OSError:
         pass
     return merged
@@ -93,8 +140,9 @@ def _scan_secret_values() -> dict[str, str]:
     """实际扫描 .secrets/ 收集所有 secret 真值及其对应 key 名。
 
     返回 {value: name} 映射：
-    - 单值文件：name = 文件名（如 github_pat）
     - .env 文件：name = "文件名:KEY"（如 openai.env:OPENAI_API_KEY）
+    - 单值文件（新格式 KEY=value）：name = 文件名（如 api-yuntoken），value = KEY 对应的值
+    - 单值文件（旧格式原始值）：name = 文件名，value = 整个内容
     """
     items: dict[str, str] = {}
     d = _secrets_dir()
@@ -109,12 +157,21 @@ def _scan_secret_values() -> dict[str, str]:
                     if v:
                         items[v] = f"{p.name}:{k}"
             else:
-                # 单值文件：整体内容当作一个 secret，文件名即 key
+                # 单值文件：尝试 KEY=value 格式（新格式），否则整体内容当作值（旧格式）
                 try:
                     content = p.read_text(encoding="utf-8", errors="replace").strip()
                 except OSError:
                     continue
-                if content:
+                if not content:
+                    continue
+                expected_key = _deslugify(p.name)
+                prefix = f"{expected_key}="
+                # 大小写不敏感匹配
+                if content.upper().startswith(prefix):
+                    val = content[len(prefix):].strip()
+                    if val:
+                        items[val] = p.name
+                else:
                     items[content] = p.name
     except OSError:
         pass
@@ -125,7 +182,7 @@ def all_secret_values(min_len: int = _MIN_MASK_LEN) -> list[tuple[str, str]]:
     """收集所有需脱敏的真值及其 key 名，按长度降序（先替长的，防子串残留）。
 
     返回 [(value, name), ...]，name 用于 mask_text 替换为 <secret:name>。
-    来源：① *.env 的 value；② 非 .env 的单值文件（如 github_pat）整体内容。
+    来源：① *.env 的 value；② 非 .env 单值文件的值（新格式 KEY=value 取值部分，旧格式取整体内容）。
 
     mask_text 在每次工具输出回流时都会调用，是热路径。按 .secrets/ 文件签名缓存
     解析结果：签名未变直接复用，避免每次重读+正则解析所有文件。

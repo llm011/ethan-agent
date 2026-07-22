@@ -74,10 +74,10 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     } catch {}
   };
 
-  const handleConsentRespond = async (requestId: string, allowed: boolean) => {
+  const handleConsentRespond = async (requestId: string, allowed: boolean, message?: string) => {
     setConsentRequest(null);
     try {
-      await respondConsent(requestId, allowed);
+      await respondConsent(requestId, allowed, message);
     } catch {}
   };
 
@@ -347,6 +347,31 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         usage={sessionUsage}
         schedules={schedules}
         onTitleChange={setSessionTitle}
+        onReloadChat={activeSession ? () => {
+          const sid = activeSession;
+          setLoadingSession(true);
+          setMessages([]);
+          fetchSession(sid).then((detail) => {
+            setLoadingSession(false);
+            setSessionTitle(detail.title || "");
+            setSessionSource(detail.source || "web");
+            const loaded = mapDetailMessages(detail);
+            setMessages(loaded);
+            fetchAnnotationsFor(loaded);
+            setSelectedModel(detail.model);
+            setMode(detail.mode || "");
+            const historicUsage = detail.messages
+              .filter((m: any) => m.role === "assistant" && m.usage)
+              .reduce((acc: any, m: any) => ({
+                input: acc.input + (m.usage.input || 0),
+                output: acc.output + (m.usage.output || 0),
+                cache: acc.cache + (m.usage.cache || 0),
+              }), { input: 0, output: 0, cache: 0 });
+            setSessionUsage(historicUsage);
+          }).catch(() => {
+            setLoadingSession(false);
+          });
+        } : undefined}
       />
 
       {loadingSession && messages.length === 0 ? (

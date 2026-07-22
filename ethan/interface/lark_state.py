@@ -201,24 +201,19 @@ async def _should_respond_to_group_message(text: str, lark_cfg, event_data: dict
     if mode == "always":
         return True
     if mode == "mention_only":
-        bot_name = getattr(lark_cfg, "bot_name", "") or ""
-        if bot_name:
-            return f"@{bot_name}" in text
-        # bot_name 未配置时，检查 lark-cli 事件中的 mentions 列表
-        # 或者检查 event_data 里的 is_mentioned / mention_bot 标记
+        # 优先用结构化 mentions 判断（lark-cli 展平后格式: {'key': '@_user_1', 'id': 'ou_xxx', 'name': 'xxx'}）
         if event_data:
             mentions = event_data.get("mentions") or []
             if mentions:
-                # mentions 里有 bot 自身的 id 才响应
-                bot_open_id = getattr(lark_cfg, "bot_open_id", "") or ""
-                if bot_open_id:
-                    return any(m.get("id", {}).get("open_id") == bot_open_id or m.get("open_id") == bot_open_id for m in mentions)
-                # 没配 bot_open_id，检查 mentions 里 type=bot 的
-                return any(m.get("id_type") == "app" or m.get("type") == "bot" for m in mentions)
-            # lark-cli 也可能用 is_mention_all 或 mentioned_bot 标记
+                # 有 mentions 数据就认为 bot 被 @ 了（群里 @ bot 才会收到事件）
+                return True
             if event_data.get("is_mentioned") or event_data.get("mentioned_bot"):
                 return True
-        # 都没有则不响应（避免对所有带 @ 的消息都回复）
+        # 没有结构化数据时兜底文本匹配
+        bot_name = getattr(lark_cfg, "bot_name", "") or ""
+        if bot_name and f"@{bot_name}" in text:
+            return True
+        # 没有 bot_name 配置且无结构化 mentions → 无法判断是否 @ 了 bot，不响应
         return False
     if mode == "keywords":
         keywords = getattr(lark_cfg, "group_keywords", []) or []

@@ -64,6 +64,17 @@ Use `search_files` for both filename and content searches. Prefer this over `gre
 
 Use `write_file` with the resolved absolute path and the full markdown content. Prefer this over shell heredocs or `echo` because it avoids shell quoting issues and returns structured results.
 
+### 内容质量要求
+
+写入 Obsidian 的内容必须遵循以下原则：
+
+1. **内容完整性**：不要只保存摘要或片段，尽量保留原始内容的完整信息（正文、代码块、表格、列表等）。如果来源是网页或文档，应提取全部有价值内容。特别是**飞书文档**，必须调用 lark-doc 技能的 `scripts/fetch_doc.py` 脚本获取完整 Markdown 内容，不要仅凭记忆或摘要转写。
+2. **格式规范**：使用标准 Markdown 格式，确保标题层级清晰、代码块有语言标识、列表缩进正确、表格对齐。
+3. **图片本地化**：笔记中引用的图片**必须先下载到 vault 的 `assets/` 目录**，然后使用相对路径或 wikilink 引用，不要直接引用外部 URL。
+   - 下载路径：`<vault>/assets/<有意义的文件名>.png`（按内容命名，避免随机串）
+   - 引用方式：`![[assets/my-image.png]]` 或 `![描述](assets/my-image.png)`
+   - 如果图片无法下载（需认证、已失效等），保留原始 URL 并加注释标记 `<!-- 图片未下载: <url> -->`
+
 ## Append to a note
 
 Prefer a native file-tool workflow when it is not awkward:

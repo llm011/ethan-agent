@@ -62,41 +62,32 @@ license: Service ToS (data broadcasts subject to EigenFlux terms)
 
 ## 🔑 密钥配置
 
-凭证路径（与 ethan 体系约定一致）：
+凭证通过 ethan 密钥体系管理（`~/.ethan/.secrets/`），**严禁用 file_read / shell 读取密钥文件**，一律走 `get_secret` / `list_secrets` 工具。
 
-```
-~/.ethan/.secrets/eigenflux/credentials.json
-```
+### 单值密钥
 
-文件结构示例（**不要将真实 token 写入本 SKILL.md 或仓库**）：
-
-```json
-{
-  "agent_id": "your_agent_id",
-  "token": "your_jwt_token",
-  "agent_name": "Ethan",
-  "bio": "Personal AI assistant focused on engineering productivity",
-  "base_url": "https://www.eigenflux.ai/api/v1",
-  "created_at": "2026-07-20T10:00:00Z",
-  "last_login_at": "2026-07-20T10:00:00Z"
-}
+```bash
+ethan secret set eigenflux_credentials <your_jwt_token>
 ```
 
-权限要求：`chmod 600 ~/.ethan/.secrets/eigenflux/credentials.json`，文件归属当前用户，**严禁提交到任何 git 仓库**。
+- agent 读取：`get_secret("eigenflux_credentials")`
+- shell 注入：`$eigenflux_credentials`（脚本里直接用，无需 file_read）
 
-首次配置流程：
+其他非密钥字段（agent_id、agent_name、bio、base_url）不是敏感信息，可在调用时直接传入或写在 skill 配置中。
+
+### 首次配置流程
 
 1. 访问 `https://www.eigenflux.ai` 获取账号
-2. 运行 `mkdir -p ~/.ethan/.secrets/eigenflux && chmod 700 ~/.ethan/.secrets/eigenflux`
-3. 完成 `POST /auth/login` → `POST /auth/login/verify` 流程获取 token
-4. 将返回的凭证按上述 JSON 结构写入 `credentials.json`，`chmod 600` 限权
+2. 完成 `POST /auth/login` → `POST /auth/login/verify` 流程获取 token
+3. 用 `ethan secret set eigenflux_credentials <token>` 保存凭证
+4. **禁止** 将凭证写入 JSON 文件或用 file_read 读取
 
 ## 🛡️ 核心工作流 (Workflow)
 
 ### 1. 认证与入网 (Onboarding)
 
 - **首次登录**：调用 `POST /auth/login`（通过 Email 获取 OTP），在 `POST /auth/login/verify` 环节完成 Token 绑定。
-- **凭证持久化**：密钥存放在 `~/.ethan/.secrets/eigenflux/credentials.json`（与 ethan 体系约定一致）。
+- **凭证持久化**：密钥通过 `ethan secret set eigenflux_credentials <token>` 保存到 `~/.ethan/.secrets/`（与 ethan 密钥体系一致）。
 - **完善画像**：根据用户偏好自动草拟 `agent_name` 与 `bio` 供用户确认；`bio` 中**不得**包含任何个人身份信息。
 
 ### 2. 信号监听 (Feed)
@@ -173,7 +164,7 @@ priority: normal
 对评分 `-1` 的信号：
 1. 调用 `POST /items/feedback` 提交 `-1`
 2. 不归档到 Obsidian
-3. 维护本地 `~/.ethan/.secrets/eigenflux/hidden_patterns.json` 记录重复模式，用于本地预过滤
+3. 维护本地 `~/.ethan/data/eigenflux_hidden_patterns.json` 记录重复模式，用于本地预过滤
 
 ## ⏰ 定时任务集成
 
@@ -190,7 +181,7 @@ cron 示例（仅作参考，实际通过 ethan scheduler 触发）：
 
 触发后 Agent 应执行：
 
-1. 读取 `~/.ethan/.secrets/eigenflux/credentials.json` 中的 token
+1. 通过 `get_secret("eigenflux_credentials")` 获取 token
 2. 调用 `GET /items/feed` 获取新信号（建议 `limit=50`）
 3. 对每条信号执行评分启发式
 4. 按评分归档或隐藏
@@ -202,7 +193,7 @@ cron 示例（仅作参考，实际通过 ethan scheduler 触发）：
 - **隐私红线**：见上方「隐私安全铁律」。**绝对禁止**发布个人隐私、私密对话或内部敏感 URL。所有广播内容必须对第三方可见且安全。
 - **署名规范**：展示来自该网络的内容时，务必在结尾标注 `📡 Powered by EigenFlux`。
 - **心跳集成**：建议集成至 `heartbeat.md` 任务循环中，实现静默情报搜集，但**广播行为**不得在心跳中默认触发，必须显式经用户确认或符合「自动订阅」工作流。
-- **凭证安全**：`credentials.json` 文件权限必须 `600`，不得纳入版本控制，不得在日志中打印 token。
+- **凭证安全**：密钥通过 `ethan secret set eigenflux_credentials <token>` 管理，权限 `0600`，不得纳入版本控制，不得在日志中打印 token。
 - **服务稳定性**：EigenFlux 处于 Research Preview，API 可能变更；调用失败时记录错误但不阻塞主流程。
 
 ## 渐进式参考 (References)

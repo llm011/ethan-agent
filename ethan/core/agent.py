@@ -5,7 +5,7 @@ from pathlib import Path
 
 from ethan.core.config import get_config
 from ethan.core.context_budget import enforce_context_budget
-from ethan.core.routing import _get_route, _match_fast_rule
+from ethan.core.routing import _get_route, _match_fast_rule, classify_instant
 from ethan.core.tool_format import (
     _detail,
     _format_args,
@@ -571,6 +571,11 @@ class Agent:
         """stream_chat 空回复兜底：简洁提示，工具调用详情已在前端可视化中展示。"""
         logger.warning("stream_chat() 返回空回复 (reason=%s)，合成兜底", reason)
         tool_calls = [m for m in working if m.role == "assistant" and m.tool_calls]
+        if reason == "varied":
+            return (
+                f"已经连续执行了 {len(tool_calls)} 轮批量操作，先到这里。"
+                "你可以看看当前效果，需要继续的话告诉我。"
+            )
         if tool_calls:
             fallback = f"任务执行了 {len(tool_calls)} 轮工具调用，超出当前步数限制，未能生成最终回复。"
             if reason == "finalize":
@@ -774,6 +779,12 @@ class Agent:
                     continue
 
             if monitor.is_stuck():
+                if monitor._freq_limit_varied:
+                    # 批量操作达到宽松上限（如整理 tab）→ 直接禁工具收尾，不走反思
+                    sys = system + finalize_system_suffix("varied")
+                    resp = await provider.chat(working, tools=None, system=sys)
+                    self.usage.add(resp.usage)
+                    return await self._ensure_non_empty(resp, working, monitor, "varied")
                 if monitor.exhausted():
                     # 反思次数用尽仍卡住 → 收尾放弃：禁工具，让模型整理「已做/卡点/建议」
                     sys = system + finalize_system_suffix("stuck")
@@ -787,13 +798,46 @@ class Agent:
         return Message(role="assistant", content="[max tool iterations reached]")
 
     async def stream_chat(self, messages: list[Message]):
-        """流式对话。fast/full 两档路由，按关键词规则自动选择。"""
+        """流式对话。instant/fast/full 三档路由，按关键词规则自动选择。"""
         from ethan.core.context import reset_active_tools
         from ethan.providers.base import SkillsMatchedEvent, ThinkingEvent, ToolEvent
 
         self._executor.reset_cache()
         reset_active_tools()  # 清空本请求的 find_tools 激活集
         working = list(messages)
+
+        # --- Instant Route: 极简问题零工具直答 ---
+        last_user_text = self._get_last_user_text(working)
+        instant = classify_instant(last_user_text) if last_user_text else None
+        if instant:
+            if instant.kind == "math":
+                yield f"{instant.answer}"
+                return
+            if instant.kind == "time":
+                yield f"现在是 {instant.answer}"
+                return
+            # greeting: LLM 裸答（无 tools、无 memory recall、极简 system）
+            if instant.kind == "greeting":
+                from ethan.core.timezone import get_local_timezone
+                now = datetime.now(get_local_timezone()).strftime("%Y-%m-%d %H:%M:%S %A")
+                minimal_system = (
+                    f"{self._system_files.get('identity', 'You are a helpful assistant.')}\n"
+                    f"Current time: {now}\n"
+                    "简洁直接地回答，不需要调用任何工具。"
+                )
+                persona = self._persona_block()
+                if persona:
+                    minimal_system += f"\n{persona}"
+                provider = self._provider
+                async for chunk in provider.stream_chat(working, tools=None, system=minimal_system):
+                    if chunk.reasoning:
+                        yield ThinkingEvent(delta=chunk.reasoning)
+                    if chunk.content:
+                        yield chunk.content
+                    if chunk.is_final:
+                        self.usage.add(chunk.usage)
+                return
+
         enforce_context_budget(working)  # 历史 tool result 也可能很大，进循环前先管控
         _route, system, tools_list, max_iters = self._select_route(working)
         provider = self._provider_for_route(_route)
@@ -1004,21 +1048,38 @@ class Agent:
                         event, fut = consent_provider.create(desc, tc.name, detail, always=always)
                         yield event
                         try:
-                            ok = await _aio.wait_for(fut, timeout=300)
+                            from ethan.core.consent import ConsentResult
+                            result = await _aio.wait_for(fut, timeout=300)
+                            if isinstance(result, ConsentResult):
+                                ok = result.allowed
+                                consent_msg = result.message
+                            else:
+                                ok = bool(result)
+                                consent_msg = ""
                         except (_aio.CancelledError, _aio.TimeoutError):
                             ok = False
+                            consent_msg = ""
                     else:
                         ok = await consent_provider.request(desc, tc.name, detail)
+                        consent_msg = ""
                     if not ok:
+                        reject_text = "[用户拒绝此操作]"
+                        if consent_msg:
+                            reject_text += f"\n用户补充说明：{consent_msg}"
                         yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary="", state="error",
                                         result_preview="用户拒绝",
                                         skill_category=resolve_skill_category(tc.name, tc.arguments))
                         working.append(Message(
                             role="tool",
-                            content="[用户拒绝此操作]",
+                            content=reject_text,
                             tool_call_id=tc.id,
                         ))
                         continue
+                    # 授权通过：如有用户补充信息，暂存待拼入 tool 结果（不插 user 消息，避免破坏 LLM 消息协议）
+                    if consent_msg:
+                        if not hasattr(self, '_consent_msgs'):
+                            self._consent_msgs = {}
+                        self._consent_msgs[tc.id] = consent_msg
                     # 授权通过：记录到 session 维度（按 scope），后续同 scope 不再弹。
                     # 高危调用（always）不记入放行，下次同类仍单独询问。
                     if not always:
@@ -1050,9 +1111,14 @@ class Agent:
                 preview = mask_text(_preview(r.content)) if r.content else ""
                 detail = mask_text(_detail(r.content)) if r.content else ""
                 yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary="", state="done" if not r.is_error else "error", result_preview=preview, result_detail=detail, sub_steps=getattr(r, "sub_steps", []) or [], ui=getattr(r, "ui", None), mcp_app=getattr(r, "mcp_app", None), cards=getattr(r, "cards", None), cards_meta=getattr(r, "cards_meta", None), entity_type=classify_tool(tc.name), entity_id=extract_entity_id(tc.name, tc.arguments), skill_category=resolve_skill_category(tc.name, tc.arguments))
+                # 如果授权时用户有补充信息，拼到 tool 结果内容头部
+                tool_content = r.content or ""
+                consent_extra = getattr(self, '_consent_msgs', {}).pop(tc.id, None)
+                if consent_extra:
+                    tool_content = f"[用户在授权时补充]：{consent_extra}\n\n{tool_content}"
                 working.append(Message(
                     role="tool",
-                    content=r.content,
+                    content=tool_content,
                     tool_call_id=r.tool_call_id,
                     images=r.images or [],
                 ))
@@ -1068,6 +1134,19 @@ class Agent:
                     continue
 
             if monitor.is_stuck():
+                if monitor._freq_limit_varied:
+                    # 批量操作达到宽松上限（如整理 tab）→ 直接禁工具收尾，不走反思
+                    sys = system + finalize_system_suffix("varied")
+                    varied_content = ""
+                    async for chunk in self._provider.stream_chat(working, tools=None, system=sys):
+                        if chunk.content:
+                            varied_content += chunk.content
+                            yield chunk.content
+                        if chunk.is_final:
+                            self.usage.add(chunk.usage)
+                    if not varied_content:
+                        yield self._build_stream_fallback(working, "varied")
+                    return
                 if monitor.exhausted():
                     # 反思次数用尽仍卡住 → 收尾放弃：禁工具，让模型流式整理「已做/卡点/建议」
                     sys = system + finalize_system_suffix("stuck")
