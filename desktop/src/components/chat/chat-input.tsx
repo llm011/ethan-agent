@@ -140,7 +140,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    // 输入法组合中（如中文拼音、英文候选）按 Enter 只确认候选词，不发送。
+    // e.nativeEvent.isComposing 在 IME 组合期间为 true；组合结束后 Enter 才真正发送。
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       handleSend();
     }
