@@ -182,9 +182,9 @@ class TestGreetingInstant:
         assert r.kind == "greeting"
 
     def test_continue(self):
+        """'继续' 需要上下文，不走 instant"""
         r = classify_instant("继续")
-        assert r is not None
-        assert r.kind == "greeting"
+        assert r is None
 
     def test_hello_with_exclamation(self):
         """带感叹号：你好！"""
@@ -268,4 +268,34 @@ class TestRejectInstant:
 
     def test_summarize_keyword(self):
         r = classify_instant("summarize this")
+        assert r is None
+
+    def test_retry_cn(self):
+        """'重试下' 需要回到正常路由用工具重试"""
+        r = classify_instant("重试下")
+        assert r is None
+
+    def test_retry_again(self):
+        """'再试一次'"""
+        r = classify_instant("再试一次")
+        assert r is None
+
+    def test_retry_en(self):
+        """'retry'"""
+        r = classify_instant("retry")
+        assert r is None
+
+    def test_redo(self):
+        """'重来'"""
+        r = classify_instant("重来")
+        assert r is None
+
+    def test_continue_context(self):
+        """'接着做' 需要上下文"""
+        r = classify_instant("接着做")
+        assert r is None
+
+    def test_before_reference(self):
+        """'刚才那个' 引用上下文"""
+        r = classify_instant("刚才那个")
         assert r is None

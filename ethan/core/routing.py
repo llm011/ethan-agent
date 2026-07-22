@@ -34,12 +34,19 @@ _MAX_EXPONENT = 10000
 _GREETING_EXACT = frozenset({
     "你好", "hello", "hi", "hey", "嗨", "早", "早上好", "上午好",
     "下午好", "晚上好", "晚安", "谢谢", "thanks", "thank you",
-    "好的", "ok", "行", "明白", "了解", "收到", "继续", "嗯", "嗯嗯",
+    "好的", "ok", "行", "明白", "了解", "收到", "嗯", "嗯嗯",
     "没事了", "算了", "再见", "拜拜", "bye",
 })
 
 # 末尾常见装饰性标点（匹配 greeting 前 strip 掉）
 _TRAILING_PUNCTUATION_RE = re.compile(r'[!！~～.。,，…\s]+$')
+
+# 需要上下文/工具的短指令 — 不能走 instant，必须回到正常路由
+_CONTEXT_REQUIRED_KEYWORDS = frozenset({
+    "重试", "再试", "重来", "重新", "再来", "继续", "接着",
+    "retry", "again", "redo", "continue",
+    "上一步", "刚才", "之前",
+})
 
 # 时间类关键词
 _TIME_KEYWORDS = frozenset({
@@ -107,6 +114,10 @@ def classify_instant(text: str) -> InstantResult | None:
 
     # 有 FORCE_FULL 信号不走 instant
     if any(sig in lower for sig in _FORCE_FULL_SIGNALS):
+        return None
+
+    # 需要上下文/工具的短指令（重试、继续等）→ 不走 instant
+    if any(kw in lower for kw in _CONTEXT_REQUIRED_KEYWORDS):
         return None
 
     # 已有 fast_rule 命中（查天气、打车等需要工具的），不走 instant
