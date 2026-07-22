@@ -1,0 +1,71 @@
+{
+  "name": "business-blue",
+  "backgroundColor": "#FFFFFF",
+  "themeColors": [
+    "#1E40AF",
+    "#3B82F6",
+    "#93C5FD",
+    "#F59E0B",
+    "#10B981"
+  ],
+  "fontColor": "#1F2937",
+  "fontName": "Microsoft YaHei",
+  "latinFontName": "Verdana",
+  "outline": {
+    "style": "solid",
+    "width": 1,
+    "color": "#D1D5DB"
+  },
+  "shadow": {
+    "h": 0,
+    "v": 2,
+    "blur": 8,
+    "color": "#00000014"
+  },
+  "typography": {
+    "title": {
+      "fontSize": 28,
+      "color": "#111827",
+      "bold": true
+    },
+    "subtitle": {
+      "fontSize": 16,
+      "color": "#4B5563"
+    },
+    "content": {
+      "fontSize": 14,
+      "color": "#1F2937"
+    },
+    "item": {
+      "fontSize": 14,
+      "color": "#1F2937"
+    },
+    "itemTitle": {
+      "fontSize": 16,
+      "color": "#111827",
+      "bold": true
+    },
+    "notes": {
+      "fontSize": 10,
+      "color": "#9CA3AF"
+    },
+    "header": {
+      "fontSize": 10,
+      "color": "#6B7280"
+    },
+    "footer": {
+      "fontSize": 10,
+      "color": "#6B7280"
+    },
+    "partNumber": {
+      "fontSize": 60,
+      "color": "#1E40AF",
+      "bold": true
+    },
+    "itemNumber": {
+      "fontSize": 16,
+      "color": "#1E40AF",
+      "bold": true
+    }
+  }
+}

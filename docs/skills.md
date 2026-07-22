@@ -122,6 +122,7 @@ Agent Loop 本身不感知 Skill 的存在 — 它只看到一个更丰富的 sy
 | `home-assistant` | 家居\|智能家居\|HA\|home assistant\|灯\|空调 | Home Assistant 集成，控制智能家居设备（`fast_path: true`） |
 | `agent-browser` | 浏览器\|打开网页\|网页操作\|自动填表\|网页截图\|抓取网页\|browser\|screenshot | 默认浏览器能力。包装 `agent-browser`（零依赖 Rust CLI），`snapshot` 输出可交互元素的 `@ref` 引用，极省 token。适合「开页面→读紧凑结构→点/填」这类单步操作 |
 | `dev-browser` | 复杂网页流程\|网页脚本\|playwright\|批量抓取\|多步网页操作\|循环抓取 | 进阶浏览器能力。包装 `dev-browser`，在 QuickJS WASM 沙箱里跑 JS 脚本，拿到完整 Playwright Page API。适合需要循环/条件/多页聚合的复杂流程 |
+| `ppt-generate` | PPT\|pptx\|幻灯片\|演示文稿\|slides\|presentation | 生成原生可编辑的 .pptx。中间格式是瘦身版 PPTist schema（JSON：slideType/textType/imageType 语义 + 结构化 runs + 预设几何形状），`render_pptx.py` 渲染为 python-pptx 原生元素（文本/形状/图表/表格/OMML 公式均可二次编辑），`gen_image.py` 负责图片瀑布流（Pexels→Unsplash→AI 生图→占位）与 Iconify 图标。依赖（python-pptx 等纯 Python 包）首次运行自动 pip 安装 |
 
 ### 浏览器自动化：agent-browser vs dev-browser
 

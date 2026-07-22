@@ -1,0 +1,229 @@
+{
+  "version": 1,
+  "canvas": { "width": 1000, "height": 562.5 },
+  "theme": "business-blue",
+  "slides": [
+    {
+      "id": "cover",
+      "type": "cover",
+      "background": {
+        "type": "gradient",
+        "gradient": { "type": "linear", "rotate": 135, "colors": [ { "pos": 0, "color": "#1E3A8A" }, { "pos": 100, "color": "#3B82F6" } ] }
+      },
+      "remark": "开场：一句话介绍本次分享的主题和受众收益。",
+      "elements": [
+        { "id": "deco", "type": "shape", "left": 460, "top": 160, "width": 80, "height": 6, "shape": "roundRect", "fill": "#F59E0B" },
+        { "id": "title", "type": "text", "left": 100, "top": 190, "width": 800, "height": 80, "textType": "title",
+          "paragraphs": [ { "align": "center", "runs": [ { "text": "大模型时代的搜索架构", "bold": true, "fontSize": 44, "color": "#FFFFFF" } ] } ] },
+        { "id": "subtitle", "type": "text", "left": 100, "top": 285, "width": 800, "height": 36, "textType": "subtitle",
+          "paragraphs": [ { "align": "center", "runs": [ { "text": "从倒排索引到向量召回的工程实践", "fontSize": 18, "color": "#DBEAFE" } ] } ] },
+        { "id": "meta", "type": "text", "left": 100, "top": 350, "width": 800, "height": 28, "textType": "notes",
+          "paragraphs": [ { "align": "center", "runs": [ { "text": "技术分享 · 2026-07", "fontSize": 13, "color": "#BFDBFE" } ] } ] }
+      ]
+    },
+    {
+      "id": "contents",
+      "type": "contents",
+      "remark": "目录页：四个部分，每部分一分钟带过。",
+      "elements": [
+        { "id": "title", "type": "text", "left": 60, "top": 36, "width": 880, "height": 56, "textType": "title",
+          "paragraphs": [ { "runs": [ { "text": "目录", "bold": true, "fontSize": 28 } ] } ] },
+        { "id": "rule", "type": "line", "start": [60, 108], "end": [940, 108], "width": 1.5, "style": "solid", "color": "#E5E7EB", "points": ["", ""] },
+        { "id": "c1", "type": "shape", "left": 60, "top": 140, "width": 420, "height": 140, "shape": "roundRect", "fill": "#EFF6FF" },
+        { "id": "n1", "type": "text", "left": 84, "top": 158, "width": 60, "height": 40, "textType": "itemNumber",
+          "paragraphs": [ { "runs": [ { "text": "01", "bold": true, "fontSize": 28, "color": "#1E40AF" } ] } ] },
+        { "id": "t1", "type": "text", "left": 84, "top": 204, "width": 372, "height": 30, "textType": "itemTitle",
+          "paragraphs": [ { "runs": [ { "text": "检索范式的三次迁移", "bold": true, "fontSize": 18 } ] } ] },
+        { "id": "d1", "type": "text", "left": 84, "top": 238, "width": 372, "height": 30, "textType": "content",
+          "paragraphs": [ { "runs": [ { "text": "关键词 → 语义 → 生成式，各自解决什么问题", "fontSize": 13, "color": "#4B5563" } ] } ] },
+        { "id": "c2", "type": "shape", "left": 520, "top": 140, "width": 420, "height": 140, "shape": "roundRect", "fill": "#EFF6FF" },
+        { "id": "n2", "type": "text", "left": 544, "top": 158, "width": 60, "height": 40, "textType": "itemNumber",
+          "paragraphs": [ { "runs": [ { "text": "02", "bold": true, "fontSize": 28, "color": "#1E40AF" } ] } ] },
+        { "id": "t2", "type": "text", "left": 544, "top": 204, "width": 372, "height": 30, "textType": "itemTitle",
+          "paragraphs": [ { "runs": [ { "text": "向量召回的工程落地", "bold": true, "fontSize": 18 } ] } ] },
+        { "id": "d2", "type": "text", "left": 544, "top": 238, "width": 372, "height": 30, "textType": "content",
+          "paragraphs": [ { "runs": [ { "text": "HNSW 参数、量化与混合召回策略", "fontSize": 13, "color": "#4B5563" } ] } ] },
+        { "id": "c3", "type": "shape", "left": 60, "top": 300, "width": 420, "height": 140, "shape": "roundRect", "fill": "#FFF7ED" },
+        { "id": "n3", "type": "text", "left": 84, "top": 318, "width": 60, "height": 40, "textType": "itemNumber",
+          "paragraphs": [ { "runs": [ { "text": "03", "bold": true, "fontSize": 28, "color": "#EA580C" } ] } ] },
+        { "id": "t3", "type": "text", "left": 84, "top": 364, "width": 372, "height": 30, "textType": "itemTitle",
+          "paragraphs": [ { "runs": [ { "text": "排序：从 LTR 到 LLM 裁判", "bold": true, "fontSize": 18 } ] } ] },
+        { "id": "d3", "type": "text", "left": 84, "top": 398, "width": 372, "height": 30, "textType": "content",
+          "paragraphs": [ { "runs": [ { "text": "评测集怎么建、怎么防止裁判偏见", "fontSize": 13, "color": "#4B5563" } ] } ] },
+        { "id": "c4", "type": "shape", "left": 520, "top": 300, "width": 420, "height": 140, "shape": "roundRect", "fill": "#FFF7ED" },
+        { "id": "n4", "type": "text", "left": 544, "top": 318, "width": 60, "height": 40, "textType": "itemNumber",
+          "paragraphs": [ { "runs": [ { "text": "04", "bold": true, "fontSize": 28, "color": "#EA580C" } ] } ] },
+        { "id": "t4", "type": "text", "left": 544, "top": 364, "width": 372, "height": 30, "textType": "itemTitle",
+          "paragraphs": [ { "runs": [ { "text": "线上效果与展望", "bold": true, "fontSize": 18 } ] } ] },
+        { "id": "d4", "type": "text", "left": 544, "top": 398, "width": 372, "height": 30, "textType": "content",
+          "paragraphs": [ { "runs": [ { "text": "核心指标变化与下一步规划", "fontSize": 13, "color": "#4B5563" } ] } ] }
+      ]
+    },
+    {
+      "id": "trans1",
+      "type": "transition",
+      "background": { "type": "solid", "color": "#F8FAFC" },
+      "remark": "过渡：先讲迁移史，建立共同语境。",
+      "elements": [
+        { "id": "num", "type": "text", "left": 80, "top": 170, "width": 240, "height": 120, "textType": "partNumber",
+          "paragraphs": [ { "runs": [ { "text": "01", "bold": true, "fontSize": 72, "color": "#1E40AF" } ] } ] },
+        { "id": "title", "type": "text", "left": 80, "top": 300, "width": 700, "height": 60,
+          "paragraphs": [ { "runs": [ { "text": "检索范式的三次迁移", "bold": true, "fontSize": 34, "color": "#111827" } ] } ] },
+        { "id": "dot", "type": "shape", "left": 860, "top": 120, "width": 120, "height": 120, "shape": "donut", "fill": "#3B82F6", "opacity": 0.15 },
+        { "id": "plus", "type": "shape", "left": 820, "top": 380, "width": 60, "height": 60, "shape": "plus", "fill": "#F59E0B", "opacity": 0.2 }
+      ]
+    },
+    {
+      "id": "content-icons",
+      "type": "content",
+      "remark": "三个范式各讲一个代表系统和它的短板。",
+      "elements": [
+        { "id": "title", "type": "text", "left": 60, "top": 36, "width": 880, "height": 56, "textType": "title",
+          "paragraphs": [ { "runs": [ { "text": "三次迁移：每次都在解决上一次的短板", "bold": true, "fontSize": 26 } ] } ] },
+        { "id": "rule", "type": "line", "start": [60, 108], "end": [940, 108], "width": 1.5, "style": "solid", "color": "#E5E7EB", "points": ["", ""] },
+        { "id": "card1", "type": "shape", "left": 60, "top": 140, "width": 270, "height": 300, "shape": "roundRect", "fill": "#FFFFFF", "outline": { "style": "solid", "width": 1, "color": "#E5E7EB" }, "shadow": { "h": 0, "v": 2, "blur": 8, "color": "#00000014" } },
+        { "id": "icon1", "type": "image", "left": 171, "top": 168, "width": 48, "height": 48, "src": "icon:mdi:magnify", "iconColor": "#1E40AF", "imageType": "itemFigure" },
+        { "id": "ct1", "type": "text", "left": 80, "top": 232, "width": 230, "height": 28, "textType": "itemTitle",
+          "paragraphs": [ { "align": "center", "runs": [ { "text": "关键词检索", "bold": true, "fontSize": 17 } ] } ] },
+        { "id": "cd1", "type": "text", "left": 84, "top": 268, "width": 222, "height": 150, "textType": "item",
+          "paragraphs": [
+            { "align": "left", "lineHeight": 1.5, "bullet": "bullet", "runs": [ { "text": "倒排索引 + BM25", "fontSize": 13 } ] },
+            { "align": "left", "lineHeight": 1.5, "bullet": "bullet", "runs": [ { "text": "精确匹配极强", "fontSize": 13 } ] },
+            { "align": "left", "lineHeight": 1.5, "bullet": "bullet", "runs": [ { "text": "语义鸿沟是硬伤", "fontSize": 13 } ] }
+          ] },
+        { "id": "card2", "type": "shape", "left": 365, "top": 140, "width": 270, "height": 300, "shape": "roundRect", "fill": "#FFFFFF", "outline": { "style": "solid", "width": 1, "color": "#E5E7EB" }, "shadow": { "h": 0, "v": 2, "blur": 8, "color": "#00000014" } },
+        { "id": "icon2", "type": "image", "left": 476, "top": 168, "width": 48, "height": 48, "src": "icon:mdi:vector-point", "iconColor": "#1E40AF", "imageType": "itemFigure" },
+        { "id": "ct2", "type": "text", "left": 385, "top": 232, "width": 230, "height": 28, "textType": "itemTitle",
+          "paragraphs": [ { "align": "center", "runs": [ { "text": "向量检索", "bold": true, "fontSize": 17 } ] } ] },
+        { "id": "cd2", "type": "text", "left": 389, "top": 268, "width": 222, "height": 150, "textType": "item",
+          "paragraphs": [
+            { "align": "left", "lineHeight": 1.5, "bullet": "bullet", "runs": [ { "text": "Embedding + ANN", "fontSize": 13 } ] },
+            { "align": "left", "lineHeight": 1.5, "bullet": "bullet", "runs": [ { "text": "语义召回补短板", "fontSize": 13 } ] },
+            { "align": "left", "lineHeight": 1.5, "bullet": "bullet", "runs": [ { "text": "精确匹配反而退化", "fontSize": 13 } ] }
+          ] },
+        { "id": "card3", "type": "shape", "left": 670, "top": 140, "width": 270, "height": 300, "shape": "roundRect", "fill": "#FFFFFF", "outline": { "style": "solid", "width": 1, "color": "#E5E7EB" }, "shadow": { "h": 0, "v": 2, "blur": 8, "color": "#00000014" } },
+        { "id": "icon3", "type": "image", "left": 781, "top": 168, "width": 48, "height": 48, "src": "icon:mdi:brain", "iconColor": "#EA580C", "imageType": "itemFigure" },
+        { "id": "ct3", "type": "text", "left": 690, "top": 232, "width": 230, "height": 28, "textType": "itemTitle",
+          "paragraphs": [ { "align": "center", "runs": [ { "text": "生成式检索", "bold": true, "fontSize": 17 } ] } ] },
+        { "id": "cd3", "type": "text", "left": 694, "top": 268, "width": 222, "height": 150, "textType": "item",
+          "paragraphs": [
+            { "align": "left", "lineHeight": 1.5, "bullet": "bullet", "runs": [ { "text": "LLM 直接生成答案", "fontSize": 13 } ] },
+            { "align": "left", "lineHeight": 1.5, "bullet": "bullet", "runs": [ { "text": "RAG 保 factual", "fontSize": 13 } ] },
+            { "align": "left", "lineHeight": 1.5, "bullet": "bullet", "runs": [ { "text": "成本与延迟是挑战", "fontSize": 13 } ] }
+          ] },
+        { "id": "footer", "type": "text", "left": 60, "top": 530, "width": 880, "height": 20, "textType": "footer",
+          "paragraphs": [ { "align": "right", "runs": [ { "text": "大模型时代的搜索架构 · 01", "fontSize": 10, "color": "#9CA3AF" } ] } ] }
+      ]
+    },
+    {
+      "id": "content-chart",
+      "type": "content",
+      "remark": "数据页：强调混合召回报价后 nDCG 的提升，数字是示例。",
+      "elements": [
+        { "id": "title", "type": "text", "left": 60, "top": 36, "width": 880, "height": 56, "textType": "title",
+          "paragraphs": [ { "runs": [ { "text": "混合召回上线后的核心指标", "bold": true, "fontSize": 26 } ] } ] },
+        { "id": "rule", "type": "line", "start": [60, 108], "end": [940, 108], "width": 1.5, "style": "solid", "color": "#E5E7EB", "points": ["", ""] },
+        { "id": "chart", "type": "chart", "left": 60, "top": 130, "width": 540, "height": 340, "chartType": "column",
+          "data": { "labels": ["1月", "2月", "3月", "4月", "5月", "6月"], "legends": ["nDCG@10", "召回率"], "series": [ [0.61, 0.63, 0.68, 0.72, 0.74, 0.76], [0.72, 0.74, 0.79, 0.83, 0.85, 0.87] ] },
+          "options": { "stack": false }, "themeColors": ["#1E40AF", "#F59E0B"] },
+        { "id": "side", "type": "shape", "left": 640, "top": 130, "width": 300, "height": 180, "shape": "roundRect", "fill": "#EFF6FF" },
+        { "id": "side-title", "type": "text", "left": 664, "top": 148, "width": 252, "height": 26, "textType": "itemTitle",
+          "paragraphs": [ { "runs": [ { "text": "关键结论", "bold": true, "fontSize": 16, "color": "#1E40AF" } ] } ] },
+        { "id": "side-body", "type": "text", "left": 664, "top": 182, "width": 252, "height": 110, "textType": "item",
+          "paragraphs": [
+            { "lineHeight": 1.5, "bullet": "bullet", "runs": [ { "text": "nDCG@10 提升 24%", "fontSize": 13 } ] },
+            { "lineHeight": 1.5, "bullet": "bullet", "runs": [ { "text": "长尾查询收益最大", "fontSize": 13 } ] },
+            { "lineHeight": 1.5, "bullet": "bullet", "runs": [ { "text": "延迟仅增加 8ms", "fontSize": 13 } ] }
+          ] },
+        { "id": "tbl", "type": "table", "left": 640, "top": 330, "width": 300, "height": 140, "colWidths": [0.4, 0.3, 0.3], "cellMinHeight": 34,
+          "outline": { "style": "solid", "width": 1, "color": "#E5E7EB" },
+          "theme": { "color": "#1E40AF", "rowHeader": true, "rowFooter": false, "colHeader": false, "colFooter": false },
+          "data": [
+            [ { "text": "指标" }, { "text": "旧" }, { "text": "新" } ],
+            [ { "text": "nDCG@10" }, { "text": "0.61" }, { "text": "0.76" } ],
+            [ { "text": "P99 延迟" }, { "text": "42ms" }, { "text": "50ms" } ]
+          ] },
+        { "id": "src", "type": "text", "left": 60, "top": 505, "width": 500, "height": 18, "textType": "notes",
+          "paragraphs": [ { "runs": [ { "text": "数据来源：线上 A/B 实验（示例数据）", "fontSize": 10, "color": "#9CA3AF" } ] } ] }
+      ]
+    },
+    {
+      "id": "content-formula",
+      "type": "content",
+      "remark": "召回率是 ANN 索引调参的核心指标：相对暴力精确检索的 top-K 重合度。",
+      "elements": [
+        { "id": "title", "type": "text", "left": 60, "top": 36, "width": 880, "height": 56, "textType": "title",
+          "paragraphs": [ { "runs": [ { "text": "召回率怎么衡量：Recall@K", "bold": true, "fontSize": 26 } ] } ] },
+        { "id": "rule", "type": "line", "start": [60, 108], "end": [940, 108], "width": 1.5, "style": "solid", "color": "#E5E7EB", "points": ["", ""] },
+        { "id": "formula", "type": "latex", "left": 100, "top": 160, "width": 800, "height": 110,
+          "latex": "\\mathrm{Recall@K} = \\frac{|\\,S_K(q) \\cap S_K^{*}(q)\\,|}{K}",
+          "fontSize": 30, "color": "#111827", "align": "center" },
+        { "id": "legend", "type": "text", "left": 150, "top": 285, "width": 700, "height": 60, "textType": "content",
+          "paragraphs": [
+            { "lineHeight": 1.6, "runs": [ { "text": "S_K(q)：ANN 索引返回的 top-K；", "fontSize": 14 }, { "text": "S_K*(q)：暴力精确检索的 top-K（ground truth）", "fontSize": 14, "bold": true } ] }
+          ] },
+        { "id": "explain", "type": "text", "left": 150, "top": 350, "width": 700, "height": 130, "textType": "content",
+          "paragraphs": [
+            { "lineHeight": 1.6, "bullet": "bullet", "runs": [ { "text": "离线调参看 Recall@K，线上效果看 nDCG，两者要一起看", "fontSize": 14 } ] },
+            { "lineHeight": 1.6, "bullet": "bullet", "runs": [ { "text": "K 通常取 10/100，与业务召回阶段截断一致", "fontSize": 14 } ] },
+            { "lineHeight": 1.6, "bullet": "bullet", "runs": [ { "text": "评测集要覆盖长尾 query，否则召回率虚高", "fontSize": 14 } ] }
+          ] }
+      ]
+    },
+    {
+      "id": "content-ivfflat",
+      "type": "content",
+      "remark": "IVFFlat 的核心 trade-off：nprobe 越大召回越高、延迟越大。flat 表示不重排量化，精度无损。",
+      "elements": [
+        { "id": "title", "type": "text", "left": 60, "top": 36, "width": 880, "height": 56, "textType": "title",
+          "paragraphs": [ { "runs": [ { "text": "IVFFlat：用聚类剪枝换检索速度", "bold": true, "fontSize": 26 } ] } ] },
+        { "id": "rule", "type": "line", "start": [60, 108], "end": [940, 108], "width": 1.5, "style": "solid", "color": "#E5E7EB", "points": ["", ""] },
+        { "id": "step1", "type": "text", "left": 60, "top": 126, "width": 520, "height": 24, "textType": "itemTitle",
+          "paragraphs": [ { "runs": [ { "text": "① 建索引：k-means 把向量空间切成 L 个簇", "bold": true, "fontSize": 15, "color": "#1E40AF" } ] } ] },
+        { "id": "formula1", "type": "latex", "left": 60, "top": 156, "width": 520, "height": 90,
+          "latex": "\\min_{c_1, \\dots, c_L} \\sum_{x \\in \\mathcal{X}} \\min_{1 \\le j \\le L} \\| x - c_j \\|_2^2",
+          "fontSize": 20, "color": "#111827", "align": "center" },
+        { "id": "step2", "type": "text", "left": 60, "top": 258, "width": 520, "height": 24, "textType": "itemTitle",
+          "paragraphs": [ { "runs": [ { "text": "② 查询：只扫描最近的 P 个簇（nprobe = P）", "bold": true, "fontSize": 15, "color": "#1E40AF" } ] } ] },
+        { "id": "formula2", "type": "latex", "left": 60, "top": 288, "width": 520, "height": 90,
+          "latex": "\\hat{S}(q) = \\bigcup_{j \\in \\mathrm{top}_{P}(q)} L_j, \\quad \\mathrm{top}_{P}(q) = \\underset{j \\in [L]}{\\mathrm{argmin}_{P}} \\; \\| q - c_j \\|_2",
+          "fontSize": 18, "color": "#111827", "align": "center" },
+        { "id": "side", "type": "shape", "left": 620, "top": 126, "width": 320, "height": 252, "shape": "roundRect", "fill": "#EFF6FF" },
+        { "id": "side-title", "type": "text", "left": 644, "top": 142, "width": 272, "height": 26, "textType": "itemTitle",
+          "paragraphs": [ { "runs": [ { "text": "工程要点", "bold": true, "fontSize": 16, "color": "#1E40AF" } ] } ] },
+        { "id": "side-body", "type": "text", "left": 644, "top": 176, "width": 272, "height": 190, "textType": "item",
+          "paragraphs": [
+            { "lineHeight": 1.55, "bullet": "bullet", "runs": [ { "text": "nlist = L 常取 √N 量级", "fontSize": 13 } ] },
+            { "lineHeight": 1.55, "bullet": "bullet", "runs": [ { "text": "nprobe 是召回/延迟旋钮", "fontSize": 13 } ] },
+            { "lineHeight": 1.55, "bullet": "bullet", "runs": [ { "text": "Flat 不量化，距离无损", "fontSize": 13 } ] },
+            { "lineHeight": 1.55, "bullet": "bullet", "runs": [ { "text": "内存友好度不如 IVF-PQ", "fontSize": 13 } ] }
+          ] },
+        { "id": "tbl", "type": "table", "left": 60, "top": 396, "width": 520, "height": 130, "colWidths": [0.34, 0.33, 0.33], "cellMinHeight": 32,
+          "outline": { "style": "solid", "width": 1, "color": "#E5E7EB" },
+          "theme": { "color": "#1E40AF", "rowHeader": true, "rowFooter": false, "colHeader": false, "colFooter": false },
+          "data": [
+            [ { "text": "nprobe" }, { "text": "Recall@10" }, { "text": "P99 延迟" } ],
+            [ { "text": "8" }, { "text": "0.86" }, { "text": "6ms" } ],
+            [ { "text": "64" }, { "text": "0.97" }, { "text": "21ms" } ]
+          ] },
+        { "id": "src", "type": "text", "left": 620, "top": 505, "width": 320, "height": 18, "textType": "notes",
+          "paragraphs": [ { "runs": [ { "text": "数据为 1M 向量上的示例值", "fontSize": 10, "color": "#9CA3AF" } ] } ] }
+      ]
+    },
+    {
+      "id": "end",
+      "type": "end",
+      "background": {
+        "type": "gradient",
+        "gradient": { "type": "linear", "rotate": 135, "colors": [ { "pos": 0, "color": "#1E3A8A" }, { "pos": 100, "color": "#3B82F6" } ] }
+      },
+      "remark": "收尾：留 5 分钟答疑。",
+      "elements": [
+        { "id": "thanks", "type": "text", "left": 100, "top": 220, "width": 800, "height": 80,
+          "paragraphs": [ { "align": "center", "runs": [ { "text": "谢谢观看 · Q & A", "bold": true, "fontSize": 40, "color": "#FFFFFF" } ] } ] },
+        { "id": "contact", "type": "text", "left": 100, "top": 320, "width": 800, "height": 28, "textType": "notes",
+          "paragraphs": [ { "align": "center", "runs": [ { "text": "feedback welcome", "fontSize": 13, "color": "#BFDBFE" } ] } ] }
+      ]
+    }
+  ]
+}
