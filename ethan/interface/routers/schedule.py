@@ -97,6 +97,7 @@ class ScheduleCreateRequest(BaseModel):
     channel_context: str = "{}"
     user_id: str = ""
     category: str = ""  # one_off / recurring / timeline；空则按 trigger 推断
+    scene: str = "work"  # work / life / ...；用于 UI 分组与隔离
 
 
 @router.post("")
@@ -107,6 +108,8 @@ async def create_schedule(req: ScheduleCreateRequest, user_id: str = Depends(ver
     job_user_id = req.user_id or user_id
     # category 兜底
     category = req.category or ("recurring" if req.cron or req.interval_minutes > 0 else "one_off")
+    # scene 兜底
+    scene = req.scene or "work"
     kwargs = dict(
         session_id=req.session_id,
         prompt=req.prompt,
@@ -115,6 +118,7 @@ async def create_schedule(req: ScheduleCreateRequest, user_id: str = Depends(ver
         channel_context=req.channel_context,
         user_id=job_user_id,
         category=category,
+        scene=scene,
     )
     if req.cron:
         scheduler.add_cron(req.job_id, fire_schedule_job, req.cron, end_date=req.end_date or None, name=req.title or req.job_id, **kwargs)
@@ -202,14 +206,15 @@ async def timeline_lifecycle(timeline_id: str, action: str):
 
 class TimelineExportRequest(BaseModel):
     format: str = "yaml"  # yaml / json
+    scene: str = "work"   # 导出哪个 scene
 
 
 @router.post("/timeline-export", dependencies=[Depends(verify_token)])
 async def export_timelines(req: TimelineExportRequest):
-    """导出 timelines.yaml + state 为单一文件。"""
+    """导出某 scene 的 timelines.yaml + state 为单一文件。"""
     from ethan.scheduler.timeline import export_timelines as _export
-    path = _export(format=req.format)
-    return {"ok": True, "path": str(path)}
+    path = _export(format=req.format, scene=req.scene)
+    return {"ok": True, "path": str(path), "scene": req.scene}
 
 
 class TimelineImportRequest(BaseModel):
@@ -218,6 +223,7 @@ class TimelineImportRequest(BaseModel):
     dry_run: bool = False           # True 时只返回校验结果和预览，不写入
     mode: str = "overwrite"         # overwrite / merge
     sync_after: bool = False        # 写入后是否自动同步 scheduler
+    scene: str | None = None        # 目标 scene；None 时取导出文件内的 scene 字段，缺省 work
 
 
 @router.post("/timeline-import", dependencies=[Depends(verify_token)])
@@ -231,6 +237,7 @@ async def import_timelines(req: TimelineImportRequest):
         dry_run=req.dry_run,
         mode=req.mode,
         sync_after=req.sync_after,
+        scene=req.scene,
     )
     if not result.get("ok"):
         raise HTTPException(400, result.get("error", "Import failed"), detail=result)

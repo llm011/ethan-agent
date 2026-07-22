@@ -164,6 +164,7 @@ class ScheduleCreateTool(BaseTool):
             "interval_minutes": {"type": "integer", "description": "Alternative: run every N minutes."},
             "end_date": {"type": "string", "description": "Optional: date (YYYY-MM-DD) or datetime (YYYY-MM-DD HH:MM) when the job should stop firing. After this date the job is automatically removed."},
             "category": {"type": "string", "description": "Task category for UI grouping: 'one_off' (one-time reminder), 'recurring' (regular repeat), or 'timeline' (driven by team-manager timeline). Default 'one_off' for one-time tasks, 'recurring' for cron/interval."},
+            "scene": {"type": "string", "description": "Scene/scope this task belongs to (e.g. 'work', 'life'). Tasks are isolated per scene for display and lifecycle. Default 'work'."},
         },
         "required": ["job_id", "prompt"],
     }
@@ -171,7 +172,7 @@ class ScheduleCreateTool(BaseTool):
     def __init__(self, user_id: str = ""):
         self._user_id = user_id
 
-    async def run(self, job_id: str, prompt: str, title: str = "", cron: str = "", interval_minutes: int = 0, end_date: str = "", category: str = "") -> str:
+    async def run(self, job_id: str, prompt: str, title: str = "", cron: str = "", interval_minutes: int = 0, end_date: str = "", category: str = "", scene: str = "") -> str:
         import httpx
 
         from ethan.core.config import get_config
@@ -187,6 +188,10 @@ class ScheduleCreateTool(BaseTool):
         # category 兜底：未显式指定时按 trigger 推断
         if not category:
             category = "recurring" if cron or interval_minutes > 0 else "one_off"
+
+        # scene 兜底：默认 work
+        if not scene:
+            scene = "work"
 
         # 验证 end_date 格式（早于实际创建 session 前拦截，避免 job 创建成功但日期无效）
         if end_date and not any(_try_strptime(end_date, fmt) for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d")):
@@ -227,6 +232,7 @@ class ScheduleCreateTool(BaseTool):
                     "channel_context": channel_context,
                     "user_id": self._user_id,
                     "category": category,
+                    "scene": scene,
                 }, headers=headers)
                 res.raise_for_status()
                 msg = f"Scheduled '{job_id}' successfully."
@@ -240,10 +246,17 @@ class ScheduleCreateTool(BaseTool):
 class ScheduleListTool(BaseTool):
     fast_path = False
     name = "schedule_list"
-    description = "List all scheduled tasks."
-    parameters = {"type": "object", "properties": {}, "required": []}
+    description = "List scheduled tasks, optionally filtered by scene or category."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "scene": {"type": "string", "description": "Filter by scene (e.g. 'work', 'life'). Empty = all scenes."},
+            "category": {"type": "string", "description": "Filter by category: 'one_off', 'recurring', or 'timeline'. Empty = all categories."},
+        },
+        "required": [],
+    }
 
-    async def run(self) -> str:
+    async def run(self, scene: str = "", category: str = "") -> str:
         import httpx
 
         from ethan.core.config import get_config
@@ -254,20 +267,36 @@ class ScheduleListTool(BaseTool):
                 res = await client.get(f"{_base_url()}/api/schedule", headers=headers)
                 res.raise_for_status()
                 jobs = res.json().get("jobs", [])
-                if not jobs:
-                    return "No scheduled tasks."
-                lines = []
-                for j in jobs:
-                    title = j.get("title", "") or j["id"]
-                    prompt = j.get("prompt", "")
-                    prompt_preview = (prompt[:80] + "…") if len(prompt) > 80 else prompt
-                    line = f"- {j['id']}: {j['trigger']} (next: {j.get('next_run_time', 'None')}, status: {j.get('status', 'active')})"
-                    if title and title != j["id"]:
-                        line += f"\n  title: {title}"
-                    if prompt_preview:
-                        line += f"\n  prompt: {prompt_preview}"
-                    lines.append(line)
-                return "\n".join(lines)
+
+            # 客户端筛选
+            if scene:
+                jobs = [j for j in jobs if (j.get("scene") or "work") == scene]
+            if category:
+                jobs = [j for j in jobs if (j.get("category") or "recurring") == category]
+
+            if not jobs:
+                hint_parts = []
+                if scene:
+                    hint_parts.append(f"scene='{scene}'")
+                if category:
+                    hint_parts.append(f"category='{category}'")
+                hint = f" matching {', '.join(hint_parts)}" if hint_parts else ""
+                return f"No scheduled tasks{hint}."
+
+            lines = []
+            for j in jobs:
+                title = j.get("title", "") or j["id"]
+                prompt = j.get("prompt", "")
+                prompt_preview = (prompt[:80] + "…") if len(prompt) > 80 else prompt
+                job_scene = j.get("scene", "work")
+                job_cat = j.get("category", "recurring")
+                line = f"- {j['id']}: {j['trigger']} (next: {j.get('next_run_time', 'None')}, status: {j.get('status', 'active')}, scene: {job_scene}, cat: {job_cat})"
+                if title and title != j["id"]:
+                    line += f"\n  title: {title}"
+                if prompt_preview:
+                    line += f"\n  prompt: {prompt_preview}"
+                lines.append(line)
+            return "\n".join(lines)
         except Exception as e:
             return f"Failed to list schedules: {e}"
 
