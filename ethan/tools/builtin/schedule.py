@@ -255,7 +255,17 @@ class ScheduleListTool(BaseTool):
                 jobs = res.json().get("jobs", [])
                 if not jobs:
                     return "No scheduled tasks."
-                lines = [f"- {j['id']}: {j['trigger']} (next: {j.get('next_run_time', 'None')}, status: {j.get('status', 'active')})" for j in jobs]
+                lines = []
+                for j in jobs:
+                    title = j.get("title", "") or j["id"]
+                    prompt = j.get("prompt", "")
+                    prompt_preview = (prompt[:80] + "…") if len(prompt) > 80 else prompt
+                    line = f"- {j['id']}: {j['trigger']} (next: {j.get('next_run_time', 'None')}, status: {j.get('status', 'active')})"
+                    if title and title != j["id"]:
+                        line += f"\n  title: {title}"
+                    if prompt_preview:
+                        line += f"\n  prompt: {prompt_preview}"
+                    lines.append(line)
                 return "\n".join(lines)
         except Exception as e:
             return f"Failed to list schedules: {e}"

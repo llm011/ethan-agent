@@ -26,8 +26,8 @@ import { Input } from "@ethan/shared/ui/input";
 import { Textarea } from "@ethan/shared/ui/textarea";
 
 const CATEGORY_META: Record<ScheduleCategory, { label: string; icon: typeof Zap; emptyHint: string }> = {
-  one_off: { label: "一次性", icon: Zap, emptyHint: "暂无一次性任务" },
   recurring: { label: "周期性", icon: RotateCw, emptyHint: "暂无周期性任务" },
+  one_off: { label: "一次性", icon: Zap, emptyHint: "暂无一次性任务" },
   timeline: { label: "时间线", icon: Calendar, emptyHint: "暂无时间线任务" },
 };
 
@@ -35,7 +35,7 @@ export function ScheduleView() {
   const router = useRouter();
   const [jobs, setJobs] = useState<ScheduleJob[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<ScheduleCategory>("one_off");
+  const [activeTab, setActiveTab] = useState<ScheduleCategory>("recurring");
   const [confirmState, setConfirmState] = useState<{ open: boolean; id: string }>({ open: false, id: "" });
   const [scheduledSessions, setScheduledSessions] = useState<SessionInfo[]>([]);
   const [sessionsExpanded, setSessionsExpanded] = useState(false);
