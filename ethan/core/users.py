@@ -86,15 +86,31 @@ class UserStore:
 
 # ── 单例 ─────────────────────────────────────────────────────────
 _user_store: Optional[UserStore] = None
+_user_store_mtime_ns: int = 0
+
+
+def _config_file_mtime_ns() -> int:
+    try:
+        from ethan.core.config import CONFIG_FILE
+        return CONFIG_FILE.stat().st_mtime_ns
+    except OSError:
+        return 0
 
 
 def set_user_store(store: UserStore) -> None:
-    global _user_store
+    global _user_store, _user_store_mtime_ns
     _user_store = store
+    # 记录构建时 config.yaml 的 mtime，供 get_user_store 检测外部编辑
+    _user_store_mtime_ns = _config_file_mtime_ns()
 
 
 def get_user_store() -> UserStore:
-    """惰性初始化：从 get_config() 读取 users 构建 UserStore，并注入 default tokens。"""
+    """惰性初始化：从 get_config() 读取 users 构建 UserStore，并注入 default tokens。
+
+    config.yaml 被外部直接编辑（如 docker 挂载手工加用户）后无需重启：
+    每次鉴权检查文件 mtime，变了就 reload_config 重建 store；
+    重建失败（如文件写入中途）保留旧 store，下次请求再试。
+    """
     global _user_store
     if _user_store is None:
         from ethan.core.config import get_config
@@ -104,14 +120,23 @@ def get_user_store() -> UserStore:
             web_token=config.network.auth_token,
             api_keys=config.network.api_keys,
         )
-        _user_store = store
+        set_user_store(store)
+    else:
+        mtime_ns = _config_file_mtime_ns()
+        if mtime_ns and mtime_ns != _user_store_mtime_ns:
+            try:
+                from ethan.core.config import reload_config
+                reload_config()  # load_config 内部会 set_user_store 重建并刷新 mtime
+            except Exception:
+                pass  # 保留旧 store
     return _user_store
 
 
 def reset_user_store() -> None:
     """reload_config 后调用，强制重建。"""
-    global _user_store
+    global _user_store, _user_store_mtime_ns
     _user_store = None
+    _user_store_mtime_ns = 0
 
 
 def ensure_admin_user_exists(users: list[UserConfig], fallback_token: str = "") -> list[UserConfig]:
