@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import {
   ScheduleJob, ScheduleCategory, fetchSchedules, deleteSchedule, patchSchedule, renameSchedule, updateSchedulePrompt,
@@ -25,9 +25,64 @@ import {
 import { Input } from "@ethan/shared/ui/input";
 import { Textarea } from "@ethan/shared/ui/textarea";
 
+// ── Timeline helpers ─────────────────────────────────────────────
+interface DateGroup {
+  year: number;
+  month: number;
+  day: number;
+  key: string;
+  jobs: ScheduleJob[];
+}
+
+function groupJobsByDate(jobs: ScheduleJob[]): DateGroup[] {
+  const map = new Map<string, DateGroup>();
+  const noDateJobs: ScheduleJob[] = [];
+
+  for (const job of jobs) {
+    if (!job.next_run_time) {
+      noDateJobs.push(job);
+      continue;
+    }
+    const d = new Date(job.next_run_time);
+    if (isNaN(d.getTime())) {
+      noDateJobs.push(job);
+      continue;
+    }
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    if (!map.has(key)) {
+      map.set(key, { year: d.getFullYear(), month: d.getMonth() + 1, day: d.getDate(), key, jobs: [] });
+    }
+    map.get(key)!.jobs.push(job);
+  }
+
+  const sorted = Array.from(map.values()).sort((a, b) => a.key.localeCompare(b.key));
+  if (noDateJobs.length > 0) {
+    sorted.push({ year: 0, month: 0, day: 0, key: "no-date", jobs: noDateJobs });
+  }
+  for (const g of sorted) {
+    g.jobs.sort((a, b) => {
+      if (!a.next_run_time && !b.next_run_time) return 0;
+      if (!a.next_run_time) return 1;
+      if (!b.next_run_time) return -1;
+      return new Date(a.next_run_time).getTime() - new Date(b.next_run_time).getTime();
+    });
+  }
+  return sorted;
+}
+
+function getTimeStr(nextRun: string | null): string {
+  if (!nextRun) return "--:--";
+  const d = new Date(nextRun);
+  if (isNaN(d.getTime())) return "--:--";
+  // 使用固定格式避免 SSR/客户端 locale 不一致导致 hydration mismatch
+  const h = String(d.getHours()).padStart(2, "0");
+  const m = String(d.getMinutes()).padStart(2, "0");
+  return `${h}:${m}`;
+}
+
 const CATEGORY_META: Record<ScheduleCategory, { label: string; icon: typeof Zap; emptyHint: string }> = {
-  one_off: { label: "一次性", icon: Zap, emptyHint: "暂无一次性任务" },
   recurring: { label: "周期性", icon: RotateCw, emptyHint: "暂无周期性任务" },
+  one_off: { label: "一次性", icon: Zap, emptyHint: "暂无一次性任务" },
   timeline: { label: "时间线", icon: Calendar, emptyHint: "暂无时间线任务" },
 };
 
@@ -35,7 +90,7 @@ export function ScheduleView() {
   const router = useRouter();
   const [jobs, setJobs] = useState<ScheduleJob[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<ScheduleCategory>("one_off");
+  const [activeTab, setActiveTab] = useState<ScheduleCategory>("recurring");
   const [confirmState, setConfirmState] = useState<{ open: boolean; id: string }>({ open: false, id: "" });
   const [scheduledSessions, setScheduledSessions] = useState<SessionInfo[]>([]);
   const [sessionsExpanded, setSessionsExpanded] = useState(false);
@@ -162,6 +217,8 @@ export function ScheduleView() {
     recurring: grouped.recurring.length,
     timeline: grouped.timeline.length,
   };
+
+  const dateGroups = useMemo(() => groupJobsByDate(visibleJobs), [visibleJobs]);
 
   function RenameDialog({ open, currentName, onConfirm, onCancel }: {
     open: boolean; currentName: string; onConfirm: (name: string) => void; onCancel: () => void
@@ -369,87 +426,100 @@ export function ScheduleView() {
             {CATEGORY_META[activeTab].emptyHint}
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 p-0.5">
-            {visibleJobs.map(job => (
-              <Card key={job.id} className="flex flex-col shadow-sm border-border/60 bg-muted/10">
-                <CardHeader className="pb-3 border-b border-border/30">
-                  <div className="flex justify-between items-start">
-                    <CardTitle className="text-base font-semibold leading-tight line-clamp-2 pr-2">
-                      {job.name}
-                    </CardTitle>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <Badge variant={job.status === "active" ? "default" : "secondary"} className="text-[10px]">
-                        {job.status === "active" ? "运行中" : "已暂停"}
-                      </Badge>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6"
-                        onClick={() => openRename(job)}
-                        title="重命名"
-                      >
-                        <Pencil className="h-3 w-3" />
-                      </Button>
+          /* ── Vertical Timeline Layout ── */
+          <div className="relative pl-2">
+            {dateGroups.map((group, gi) => {
+              const prevGroup = gi > 0 ? dateGroups[gi - 1] : null;
+              const showYearMonth = group.key !== "no-date" && (
+                gi === 0 || !prevGroup || prevGroup.year !== group.year || prevGroup.month !== group.month
+              );
+
+              return (
+                <div key={group.key} className="relative">
+                  {/* Year/Month marker — on the left side of the axis */}
+                  {showYearMonth && (
+                    <div className="flex items-center gap-3 mb-3 mt-2">
+                      <div className="flex items-baseline gap-1 shrink-0 min-w-[80px]">
+                        <span className="text-lg font-bold text-foreground">{group.month}月</span>
+                        <span className="text-xs text-muted-foreground">{group.year}</span>
+                      </div>
+                      <div className="flex-1 h-px bg-border/60" />
+                    </div>
+                  )}
+
+                  {/* Day section */}
+                  <div className="flex gap-0">
+                    {/* Left: Day label area */}
+                    <div className="w-[80px] shrink-0 pt-1">
+                      {group.key !== "no-date" ? (
+                        <span className="text-xs font-semibold text-muted-foreground">{group.day}日</span>
+                      ) : (
+                        <span className="text-xs font-semibold text-muted-foreground">待定</span>
+                      )}
+                    </div>
+
+                    {/* Center: Timeline axis + cards */}
+                    <div className="relative flex-1 pb-4">
+                      {/* Vertical axis line */}
+                      <div className="absolute left-[3px] top-0 bottom-0 w-px bg-border" />
+
+                      {/* Job items */}
+                      {group.jobs.map((job, ji) => (
+                        <div key={job.id} className="relative flex items-start gap-3 group mb-2 last:mb-0">
+                          {/* Dot on axis */}
+                          <div className={`relative z-10 mt-2.5 w-[7px] h-[7px] rounded-full shrink-0 ring-2 ring-background ${
+                            job.status === "active" ? "bg-primary" : "bg-muted-foreground/40"
+                          }`} />
+
+                          {/* Time label */}
+                          <span className="text-[11px] font-mono text-muted-foreground mt-2 w-[38px] shrink-0">
+                            {getTimeStr(job.next_run_time)}
+                          </span>
+
+                          {/* Compact card */}
+                          <div className={`flex-1 border border-border/50 rounded-lg px-3 py-2 transition-colors hover:border-border hover:bg-muted/20 ${
+                            job.status === "paused" ? "opacity-60" : ""
+                          }`}>
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="text-sm font-medium truncate">{job.name}</span>
+                                <Badge variant={job.status === "active" ? "default" : "secondary"} className="text-[9px] px-1.5 py-0 h-4 shrink-0">
+                                  {job.status === "active" ? "运行中" : "已暂停"}
+                                </Badge>
+                                {job.source_phase && (
+                                  <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 shrink-0">{job.source_phase}</Badge>
+                                )}
+                              </div>
+                              {/* Actions — show on hover */}
+                              <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openRename(job)} title="重命名">
+                                  <Pencil className="h-3 w-3" />
+                                </Button>
+                                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => router.push(`/chat/${job.session_id}`)} title="查看对话">
+                                  <MessageSquare className="h-3 w-3" />
+                                </Button>
+                                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => toggleStatus(job)} title={job.status === "active" ? "暂停" : "恢复"}>
+                                  {job.status === "active" ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                                </Button>
+                                <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive/70 hover:text-destructive" onClick={() => removeJob(job.id)} title="删除">
+                                  <Trash2 className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            </div>
+                            {/* Subtitle: trigger + prompt preview */}
+                            <div className="flex items-center gap-2 mt-0.5 text-[11px] text-muted-foreground">
+                              <span>{formatTrigger(job.trigger)}</span>
+                              <span className="text-border">·</span>
+                              <span className="truncate">{job.prompt}</span>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
-                  <CardDescription className="flex items-center gap-1.5 mt-2 text-xs flex-wrap">
-                    <Clock className="h-3 w-3" />
-                    {job.next_run_time ? formatNextRun(job.next_run_time) : "暂无下次执行时间"}
-                    {job.source_phase && (
-                      <Badge variant="outline" className="text-[10px] ml-1">{job.source_phase}</Badge>
-                    )}
-                  </CardDescription>
-                </CardHeader>
-
-                <CardContent className="pt-4 pb-2 flex-1">
-                  <div className="space-y-3">
-                    <div className="flex items-start gap-2 text-sm">
-                      <TerminalSquare className="h-4 w-4 shrink-0 text-muted-foreground mt-0.5" />
-                      <p className="text-muted-foreground line-clamp-3 leading-relaxed flex-1">
-                        {job.prompt}
-                      </p>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6 shrink-0"
-                        onClick={() => openEditPrompt(job)}
-                        title="编辑内容"
-                      >
-                        <Pencil className="h-3 w-3" />
-                      </Button>
-                    </div>
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground/80 bg-muted/30 p-2 rounded-md">
-                      <Hash className="h-3.5 w-3.5" />
-                      <span className="truncate">绑定的会话: {job.session_id}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground/80 bg-muted/30 p-2 rounded-md">
-                      <Clock className="h-3.5 w-3.5" />
-                      <span>{formatTrigger(job.trigger)}</span>
-                    </div>
-                  </div>
-                </CardContent>
-
-                <CardFooter className="pt-3 pb-4 flex justify-end gap-2 border-t border-border/30 mt-auto">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => router.push(`/chat/${job.session_id}`)}
-                  >
-                    <MessageSquare className="h-3.5 w-3.5 mr-1" /> 查看对话 →
-                  </Button>
-                  <Button
-                    variant={job.status === "active" ? "secondary" : "default"}
-                    size="sm"
-                    onClick={() => toggleStatus(job)}
-                  >
-                    {job.status === "active" ? <><Pause className="h-3.5 w-3.5 mr-1" /> 暂停</> : <><Play className="h-3.5 w-3.5 mr-1" /> 恢复</>}
-                  </Button>
-                  <Button variant="destructive" size="sm" onClick={() => removeJob(job.id)}>
-                    <Trash2 className="h-3.5 w-3.5 mr-1" /> 删除
-                  </Button>
-                </CardFooter>
-              </Card>
-            ))}
+                </div>
+              );
+            })}
           </div>
         )}
 
