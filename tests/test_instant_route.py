@@ -113,6 +113,21 @@ class TestMathSafety:
     def test_reject_division_by_zero(self):
         assert _safe_math_eval("1/0") is None
 
+    def test_reject_pure_number(self):
+        """纯数字（如端口号 8080）不应走 math 通道"""
+        r = classify_instant("8080")
+        assert r is None or r.kind != "math"
+
+    def test_reject_large_exponent(self):
+        """大数幂运算（9^9999999999）应被拦截，不能卡死"""
+        assert _safe_math_eval("9**9999999999") is None
+
+    def test_reject_large_exponent_caret(self):
+        """用户输入 ^ 格式的大数幂不能走 math（防卡死）"""
+        r = classify_instant("9^99999")
+        # 可能 fallback 到 direct（短文本），但绝不能是 math
+        assert r is None or r.kind != "math"
+
 
 # ---------------------------------------------------------------------------
 # 3. Time queries
@@ -168,6 +183,30 @@ class TestGreetingInstant:
 
     def test_continue(self):
         r = classify_instant("继续")
+        assert r is not None
+        assert r.kind == "greeting"
+
+    def test_hello_with_exclamation(self):
+        """带感叹号：你好！"""
+        r = classify_instant("你好！")
+        assert r is not None
+        assert r.kind == "greeting"
+
+    def test_thanks_with_tilde(self):
+        """带波浪号：谢谢~"""
+        r = classify_instant("谢谢~")
+        assert r is not None
+        assert r.kind == "greeting"
+
+    def test_hello_with_english_exclamation(self):
+        """Hello!"""
+        r = classify_instant("Hello!")
+        assert r is not None
+        assert r.kind == "greeting"
+
+    def test_bye_with_period(self):
+        """再见。"""
+        r = classify_instant("再见。")
         assert r is not None
         assert r.kind == "greeting"
 

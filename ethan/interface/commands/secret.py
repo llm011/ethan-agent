@@ -117,7 +117,8 @@ def get_secret(name: str = typer.Argument(..., help="密钥名，如 api-yuntoke
     # 单值文件：尝试 KEY=value 格式（新格式），否则返回原始内容（旧格式）
     expected_key = _deslugify(path.name)
     prefix = f"{expected_key}="
-    if content.startswith(prefix):
+    # 大小写不敏感匹配：写入时可能用小写 key
+    if content.upper().startswith(prefix):
         console.print(content[len(prefix):].strip())
     else:
         console.print(content)

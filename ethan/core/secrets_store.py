@@ -84,7 +84,8 @@ def _parse_single_value_file(path: Path) -> dict[str, str]:
         return {}
     expected_key = _deslugify(path.name)
     prefix = f"{expected_key}="
-    if content.startswith(prefix):
+    # 大小写不敏感匹配：写入时可能用小写 key，读取时 deslugify 为大写
+    if content.upper().startswith(prefix):
         val = content[len(prefix):].strip()
         if val:
             return {expected_key: val}
@@ -158,7 +159,8 @@ def _scan_secret_values() -> dict[str, str]:
                     continue
                 expected_key = _deslugify(p.name)
                 prefix = f"{expected_key}="
-                if content.startswith(prefix):
+                # 大小写不敏感匹配
+                if content.upper().startswith(prefix):
                     val = content[len(prefix):].strip()
                     if val:
                         items[val] = p.name

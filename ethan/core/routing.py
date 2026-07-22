@@ -20,12 +20,16 @@ _FORCE_FULL_SIGNALS = [
 
 # 纯算术表达式：数字 + 运算符 + 空格 + 括号
 _MATH_EXPR_RE = re.compile(r'^[\d\s\+\-\*/\.\(\)\^%]+$')
+# 必须包含至少一个运算符（纯数字如 "8080" 不应走 math 通道）
+_MATH_HAS_OPERATOR_RE = re.compile(r'[\+\-\*/\^%]')
 # 安全 eval 白名单（仅允许基本算术 AST 节点）
 _SAFE_EVAL_NODES = {
     'Expression', 'BinOp', 'UnaryOp', 'Num', 'Constant',
     'Add', 'Sub', 'Mult', 'Div', 'Mod', 'Pow', 'FloorDiv',
     'USub', 'UAdd',
 }
+# 幂运算指数上限，防止 9^9999999999 卡死
+_MAX_EXPONENT = 10000
 
 _GREETING_EXACT = frozenset({
     "你好", "hello", "hi", "hey", "嗨", "早", "早上好", "上午好",
@@ -33,6 +37,9 @@ _GREETING_EXACT = frozenset({
     "好的", "ok", "行", "明白", "了解", "收到", "继续", "嗯", "嗯嗯",
     "没事了", "算了", "再见", "拜拜", "bye",
 })
+
+# 末尾常见装饰性标点（匹配 greeting 前 strip 掉）
+_TRAILING_PUNCTUATION_RE = re.compile(r'[!！~～.。,，…\s]+$')
 
 # 时间类关键词
 _TIME_KEYWORDS = frozenset({
@@ -63,8 +70,15 @@ def _safe_math_eval(expr: str) -> str | None:
     for node in ast.walk(tree):
         if type(node).__name__ not in _SAFE_EVAL_NODES:
             return None
+    # 大数幂运算拦截：检查 ** 右侧是否超限
+    for node in ast.walk(tree):
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
+            if isinstance(node.right, ast.Constant):
+                exp_val = node.right.value
+                if isinstance(exp_val, (int, float)) and abs(exp_val) > _MAX_EXPONENT:
+                    return None
     try:
-        result = eval(compile(tree, '<expr>', 'eval'))
+        result = eval(compile(tree, '<expr>', 'eval'), {"__builtins__": None}, {})
         # 格式化：整数不带小数点，浮点保留合理精度
         if isinstance(result, float) and result == int(result) and abs(result) < 1e15:
             return str(int(result))
@@ -99,8 +113,10 @@ def classify_instant(text: str) -> InstantResult | None:
     if _match_fast_rule(stripped) is not None:
         return None
 
-    # 1) 纯算术表达式
-    if _MATH_EXPR_RE.match(stripped) and any(c.isdigit() for c in stripped):
+    # 1) 纯算术表达式（必须包含运算符，排除纯数字如 "8080"）
+    if (_MATH_EXPR_RE.match(stripped)
+            and any(c.isdigit() for c in stripped)
+            and _MATH_HAS_OPERATOR_RE.search(stripped)):
         answer = _safe_math_eval(stripped)
         if answer is not None:
             return InstantResult(kind="math", answer=answer)
@@ -114,8 +130,9 @@ def classify_instant(text: str) -> InstantResult | None:
         answer = now.strftime("%Y-%m-%d %H:%M:%S %A")
         return InstantResult(kind="time", answer=answer)
 
-    # 3) 打招呼/确认（精确匹配，避免误判）
-    if lower in _GREETING_EXACT:
+    # 3) 打招呼/确认（strip 末尾标点后精确匹配，兼容 "你好！" "谢谢~"）
+    bare = _TRAILING_PUNCTUATION_RE.sub('', lower)
+    if bare in _GREETING_EXACT:
         return InstantResult(kind="greeting")
 
     # 4) 短文本（<=20字）+ 无问号 + 无动作意图 → direct（保守策略）
