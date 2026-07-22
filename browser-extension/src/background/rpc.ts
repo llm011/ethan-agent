@@ -54,6 +54,14 @@ import type {
   BrowserTabOpenParams,
   BrowserTabOpenResult,
   BrowserTabUserListResult,
+  BrowserTabAttachBatchParams,
+  BrowserTabAttachBatchResult,
+  BrowserTabDetachParams,
+  BrowserTabDetachResult,
+  BrowserTabMoveParams,
+  BrowserTabMoveResult,
+  BrowserSessionUpdateParams,
+  BrowserSessionUpdateResult,
   JsonRpcRequest,
   JsonRpcResponse,
 } from '../shared';
@@ -94,6 +102,18 @@ export interface BrowserRequestDependencies {
     params: BrowserTabActivateParams,
   ) => Promise<BrowserTabActivateResult>;
   closeTab: (params: BrowserTabCloseParams) => Promise<BrowserTabCloseResult>;
+  attachBatchTabs: (
+    params: BrowserTabAttachBatchParams,
+  ) => Promise<BrowserTabAttachBatchResult>;
+  detachTab: (
+    params: BrowserTabDetachParams,
+  ) => Promise<BrowserTabDetachResult>;
+  moveTab: (
+    params: BrowserTabMoveParams,
+  ) => Promise<BrowserTabMoveResult>;
+  updateSession: (
+    params: BrowserSessionUpdateParams,
+  ) => Promise<BrowserSessionUpdateResult>;
   pageSnapshot: (
     params: BrowserPageSnapshotParams,
   ) => Promise<BrowserPageSnapshotResult>;
@@ -148,6 +168,10 @@ const ALLOWED_METHODS = new Set<string>([
   BROWSER_RPC_METHODS.tabsActive,
   BROWSER_RPC_METHODS.tabsActivate,
   BROWSER_RPC_METHODS.tabsClose,
+  BROWSER_RPC_METHODS.tabsAttachBatch,
+  BROWSER_RPC_METHODS.tabsDetach,
+  BROWSER_RPC_METHODS.tabsMove,
+  BROWSER_RPC_METHODS.sessionsUpdate,
   BROWSER_RPC_METHODS.pagesSnapshot,
   BROWSER_RPC_METHODS.pagesClick,
   BROWSER_RPC_METHODS.pagesFill,
@@ -650,6 +674,44 @@ function normalizePageEvalParams(params: unknown): BrowserPageEvalParams {
   };
 }
 
+function normalizeTabAttachBatchParams(params: unknown): BrowserTabAttachBatchParams {
+  const nextParams = ensureObjectParams(params, 'Invalid tabs.attachBatch params');
+  const tabIds = nextParams.tabIds;
+  if (!Array.isArray(tabIds) || tabIds.length === 0) {
+    throw createInvalidParamsError('Invalid tabs.attachBatch tabIds: must be a non-empty array');
+  }
+  return {
+    sessionId: normalizeSessionId(nextParams.sessionId),
+    tabIds: tabIds.map((id, i) => normalizeTabId(id, `tabs.attachBatch[${i}]`)),
+  };
+}
+
+function normalizeTabDetachParams(params: unknown): BrowserTabDetachParams {
+  const nextParams = ensureObjectParams(params, 'Invalid tabs.detach params');
+  return {
+    sessionId: normalizeSessionId(nextParams.sessionId),
+    tabId: normalizeTabId(nextParams.tabId, 'tabs.detach'),
+  };
+}
+
+function normalizeTabMoveParams(params: unknown): BrowserTabMoveParams {
+  const nextParams = ensureObjectParams(params, 'Invalid tabs.move params');
+  return {
+    sessionId: normalizeSessionId(nextParams.sessionId),
+    tabId: normalizeTabId(nextParams.tabId, 'tabs.move'),
+    index: normalizeNumber(nextParams.index, 'index', 'tabs.move'),
+  };
+}
+
+function normalizeSessionUpdateParams(params: unknown): BrowserSessionUpdateParams {
+  const nextParams = ensureObjectParams(params, 'Invalid sessions.update params');
+  return {
+    sessionId: normalizeSessionId(nextParams.sessionId),
+    ...(typeof nextParams.title === 'string' ? { title: nextParams.title.trim() } : {}),
+    ...(typeof nextParams.color === 'string' ? { color: nextParams.color.trim() } : {}),
+  };
+}
+
 export async function handleNativeRequest(
   message: unknown,
   deps: BrowserRequestDependencies,
@@ -759,6 +821,34 @@ export async function handleNativeRequest(
       return createSuccessResponse(
         message,
         await deps.closeTab(normalizeTabCloseParams(message.params)),
+      );
+    }
+
+    if (message.method === BROWSER_RPC_METHODS.tabsAttachBatch) {
+      return createSuccessResponse(
+        message,
+        await deps.attachBatchTabs(normalizeTabAttachBatchParams(message.params)),
+      );
+    }
+
+    if (message.method === BROWSER_RPC_METHODS.tabsDetach) {
+      return createSuccessResponse(
+        message,
+        await deps.detachTab(normalizeTabDetachParams(message.params)),
+      );
+    }
+
+    if (message.method === BROWSER_RPC_METHODS.tabsMove) {
+      return createSuccessResponse(
+        message,
+        await deps.moveTab(normalizeTabMoveParams(message.params)),
+      );
+    }
+
+    if (message.method === BROWSER_RPC_METHODS.sessionsUpdate) {
+      return createSuccessResponse(
+        message,
+        await deps.updateSession(normalizeSessionUpdateParams(message.params)),
       );
     }
 

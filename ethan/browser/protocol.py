@@ -14,6 +14,7 @@ METHODS = {
     "session_rename": "sessions.rename",
     "session_release": "sessions.release",
     "session_close": "sessions.close",
+    "session_update": "sessions.update",
     # tab
     "tab_open": "tabs.open",
     "tab_list": "tabs.list",
@@ -22,6 +23,9 @@ METHODS = {
     "tab_active": "tabs.active",
     "tab_activate": "tabs.activate",
     "tab_close": "tabs.close",
+    "tab_attach_batch": "tabs.attachBatch",
+    "tab_detach": "tabs.detach",
+    "tab_move": "tabs.move",
     # page
     "page_snapshot": "pages.snapshot",
     "page_click": "pages.click",
