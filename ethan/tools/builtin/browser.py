@@ -226,7 +226,7 @@ class BrowserTabTool(_BrowserToolBase):
                 return json.dumps(await _call("tab_attach", {"sessionId": session, "tabId": tab},
                                               browser_session_id=session), ensure_ascii=False)
             if action == "attach_batch":
-                tab_ids = [int(t) for t in (tabs or [])]
+                tab_ids = tabs or []
                 return json.dumps(await _call("tab_attach_batch", {"sessionId": session, "tabIds": tab_ids},
                                               browser_session_id=session), ensure_ascii=False)
             if action == "active":
@@ -239,10 +239,10 @@ class BrowserTabTool(_BrowserToolBase):
                 return json.dumps(await _call("tab_close", {"sessionId": session, "tabId": tab},
                                               browser_session_id=session), ensure_ascii=False)
             if action == "detach":
-                return json.dumps(await _call("tab_detach", {"sessionId": session, "tabId": int(tab)},
+                return json.dumps(await _call("tab_detach", {"sessionId": session, "tabId": tab},
                                               browser_session_id=session), ensure_ascii=False)
             if action == "move":
-                return json.dumps(await _call("tab_move", {"sessionId": session, "tabId": int(tab), "index": index},
+                return json.dumps(await _call("tab_move", {"sessionId": session, "tabId": tab, "index": index},
                                               browser_session_id=session), ensure_ascii=False)
             return f"未知 action: {action}"
         except BrowserError as e:

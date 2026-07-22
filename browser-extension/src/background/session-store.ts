@@ -537,9 +537,20 @@ export class BrowserSessionStore {
 
     await this.ungroupTabs([params.tabId]);
 
+    const remainingTabs = await this.getSessionTabs(session);
+    if (!remainingTabs.length) {
+      // Group 已空，Chrome 会自动销毁 Group，清理 session
+      this.sessions.delete(params.sessionId);
+      await this.persist();
+      return {
+        detached: true,
+        sessionId: params.sessionId,
+        detachedTabId: params.tabId,
+      };
+    }
+
     // If the detached tab was the active one, pick another
     if (session.activeTabId === params.tabId) {
-      const remainingTabs = await this.getSessionTabs(session);
       session.activeTabId = this.resolveActiveTabId(remainingTabs);
     }
     session.updatedAt = Date.now();
@@ -560,7 +571,15 @@ export class BrowserSessionStore {
     await this.reconcileSessionOrThrow(session);
     await this.assertTabInSessionGroup(session, params.tabId);
 
-    const movedTab = await this.moveTabToIndex(params.tabId, params.index);
+    // params.index 是组内相对索引，需转为 window 下的绝对索引
+    const groupTabs = await this.queryTabs({
+      groupId: session.groupId,
+      windowId: session.windowId,
+    });
+    groupTabs.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+    const groupStartIndex = groupTabs.length > 0 ? (groupTabs[0].index ?? 0) : 0;
+    const absoluteIndex = groupStartIndex + Math.max(0, Math.min(params.index, groupTabs.length - 1));
+    const movedTab = await this.moveTabToIndex(params.tabId, absoluteIndex);
     session.updatedAt = Date.now();
     await this.persist();
 
