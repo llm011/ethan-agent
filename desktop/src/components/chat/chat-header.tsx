@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Pencil, Check, X, RefreshCw, Link2 } from "lucide-react";
+import { Pencil, Check, X, RefreshCw, Link2, RotateCw } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Clock, Calendar } from "lucide-react";
 import { Button } from "@ethan/shared/ui/button";
@@ -18,6 +18,7 @@ interface ChatHeaderProps {
   usage: Usage;
   schedules: any[];
   onTitleChange: (title: string) => void;
+  onReloadChat?: () => void;
 }
 
 const SOURCE_LABEL: Record<string, string> = { lark: "飞书", repl: "命令行", web: "Web", desktop: "桌面端", heartbeat: "心跳" };
@@ -29,7 +30,7 @@ const SOURCE_COLOR: Record<string, string> = {
   heartbeat: "bg-orange-500/15 text-orange-600 dark:text-orange-400",
 };
 
-export function ChatHeader({ sessionId, title, source, usage, schedules, onTitleChange }: ChatHeaderProps) {
+export function ChatHeader({ sessionId, title, source, usage, schedules, onTitleChange, onReloadChat }: ChatHeaderProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [editingTitle, setEditingTitle] = useState("");
@@ -171,11 +172,21 @@ export function ChatHeader({ sessionId, title, source, usage, schedules, onTitle
             )}
           </div>
         )}
-        <ServerStatusBadge
-          variant="full"
-          className={usage.input > 0 ? "ml-2" : (sessionId ? "ml-2" : "ml-auto")}
-        />
+        {onReloadChat && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onReloadChat}
+            title="重新加载对话"
+          >
+            <RotateCw className="h-4 w-4" />
+          </Button>
+        )}
         <ThemePicker className="ml-2" />
+        <ServerStatusBadge
+          variant="compact"
+          className="ml-2"
+        />
       </div>
 
       {scheduleBanner}

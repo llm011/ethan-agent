@@ -154,30 +154,27 @@ async def _handle_message(event_data: dict) -> None:
             return
 
     # ── 群聊剥离 @mention：兼容 "@agent /new" 和 "/new @agent" 两种写法 ──
-    # 优先用 lark-cli 事件中的 mentions 结构化数据精确匹配 bot 的 @文本；
-    # 兜底用 bot_name 文本匹配；再兜底用通用 @xxx 模式。
+    # 用 lark-cli 事件中的 mentions 结构化数据移除所有 @文本；兜底用通用正则。
     if is_group_chat:
         import re as _re
         _stripped = False
-        # 方式1：从 mentions 结构中提取 bot 的 name 并移除对应 @文本
+        # 方式1：从 mentions 结构中提取每个被 @ 的 name，移除对应 @文本
         _mentions = event_data.get("mentions") or []
         if _mentions:
             for m in _mentions:
-                # lark-cli 展平后 mentions 里 bot 条目: id_type=app / type=bot
-                if m.get("id_type") == "app" or m.get("type") == "bot":
-                    _m_name = m.get("name", "") or m.get("key", "") or ""
-                    if _m_name:
-                        text = _re.sub(rf"@{_re.escape(_m_name)}\s*", "", text, flags=_re.IGNORECASE).strip()
-                        _stripped = True
+                _m_name = m.get("name", "") or m.get("key", "") or ""
+                if _m_name:
+                    text = _re.sub(rf"@{_re.escape(_m_name)}\s*", "", text, flags=_re.IGNORECASE).strip()
+                    _stripped = True
         # 方式2：兜底用配置的 bot_name
         if not _stripped and _lark_cfg:
             _bot_name = getattr(_lark_cfg, "bot_name", "") or ""
             if _bot_name:
                 text = _re.sub(rf"@{_re.escape(_bot_name)}\s*", "", text, flags=_re.IGNORECASE).strip()
                 _stripped = True
-        # 方式3：再兜底——去掉开头的 @任意非空白词（防止 bot_name 未配也没 mentions 时卡住）
-        if not _stripped and text.startswith("@"):
-            text = _re.sub(r"^@\S+\s*", "", text).strip()
+        # 方式3：再兜底——去掉任意位置的 @非空白词（防止 bot_name 未配也没 mentions 时残留）
+        if not _stripped and "@" in text:
+            text = _re.sub(r"@\S+\s*", "", text).strip()
 
     # ── /btw：顺带一问——不带历史、不带 cold facts 的单轮轻量查询 ──
     # 解析放在 /command 之前，因为 /btw 需要走完整 agent 流程（只是上下文为空）。
