@@ -117,6 +117,38 @@ browser_tab(action="activate", session=SID, tab=TAB_ID)
 browser_tab(action="close", session=SID, tab=TAB_ID)
 ```
 
+### Tab 整理（批量分组/移出/排序）
+
+当用户要求整理浏览器 tab 时，使用这组操作：
+
+```
+# 批量把多个 tab 移入一个 session（分组）
+browser_tab(action="attach_batch", session=SID, tabs=[TAB_ID1, TAB_ID2, TAB_ID3])
+
+# 把 tab 从当前分组移出（变为未分组 tab）
+browser_tab(action="detach", session=SID, tab=TAB_ID)
+
+# 调整 tab 在分组内的位置（index 从 0 开始）
+browser_tab(action="move", session=SID, tab=TAB_ID, index=0)
+```
+
+### 更新 Session（分组颜色/标题）
+
+```
+# 修改分组颜色和标题
+browser_session(action="update", session=SID, title="工作", color="blue")
+```
+
+支持的颜色：`grey`、`blue`、`red`、`yellow`、`green`、`pink`、`purple`、`cyan`、`orange`。
+
+### 推荐的 Tab 整理工作流
+
+1. 先 `browser_tab(action="user_list")` 获取所有未分组 tab
+2. 根据 URL/title 语义分类
+3. 为每个类别 `browser_session(action="create", title="类别名", color="颜色")` 创建分组
+4. 用 `browser_tab(action="attach_batch", session=SID, tabs=[...])` 批量归入
+5. 需要微调时用 `move` 调整顺序、`detach` 移出不合适的 tab
+
 ## Snapshot 策略
 
 不要默认 dump 大页面。优先小窗口观察：

@@ -13,16 +13,24 @@ import type {
   BrowserSessionReleaseParams,
   BrowserSessionReleaseResult,
   BrowserSessionTab,
+  BrowserSessionUpdateParams,
+  BrowserSessionUpdateResult,
   BrowserTabActivateParams,
   BrowserTabActivateResult,
   BrowserTabActiveParams,
   BrowserTabActiveResult,
+  BrowserTabAttachBatchParams,
+  BrowserTabAttachBatchResult,
   BrowserTabAttachParams,
   BrowserTabAttachResult,
   BrowserTabCloseParams,
   BrowserTabCloseResult,
+  BrowserTabDetachParams,
+  BrowserTabDetachResult,
   BrowserTabListParams,
   BrowserTabListResult,
+  BrowserTabMoveParams,
+  BrowserTabMoveResult,
   BrowserTabOpenParams,
   BrowserTabOpenResult,
   BrowserTabUserListResult,
@@ -187,6 +195,9 @@ export class BrowserSessionStore {
     };
 
     await this.updateGroup(groupId, buildGroupTitle(session));
+    if (params.color) {
+      await this.updateGroupFull(groupId, { color: params.color as chrome.tabGroups.ColorEnum });
+    }
     this.sessions.set(session.sessionId, session);
     const info = await this.reconcileSessionOrThrow(session);
     await this.persist();
@@ -228,6 +239,9 @@ export class BrowserSessionStore {
     };
 
     await this.updateGroup(groupId, buildGroupTitle(session));
+    if (params.color) {
+      await this.updateGroupFull(groupId, { color: params.color as chrome.tabGroups.ColorEnum });
+    }
     this.sessions.set(session.sessionId, session);
     const info = await this.reconcileSessionOrThrow(session);
     await this.persist();
@@ -462,6 +476,125 @@ export class BrowserSessionStore {
       closed: true,
       sessionId: params.sessionId,
       closedTabId: params.tabId,
+    };
+  }
+
+  async attachBatchTabs(
+    params: BrowserTabAttachBatchParams,
+  ): Promise<BrowserTabAttachBatchResult> {
+    await this.ensureLoaded();
+    const session = this.getSessionOrThrow(params.sessionId);
+    await this.reconcileSessionOrThrow(session);
+
+    const validTabIds: number[] = [];
+    for (const tabId of params.tabIds) {
+      const sourceTab = await this.getTab(tabId);
+      const existingSession = this.findSessionByGroup(
+        sourceTab.groupId,
+        sourceTab.windowId,
+      );
+      if (existingSession && existingSession.sessionId !== params.sessionId) {
+        throw new BrowserExtensionRpcError(
+          BROWSER_RPC_ERROR_CODE.browserTabClaimedByAnotherSession,
+          `Tab ${tabId} is already managed by session ${existingSession.sessionId}`,
+        );
+      }
+      // Move to target window if needed
+      if (sourceTab.windowId !== session.windowId) {
+        await this.moveTabToWindow(tabId, session.windowId);
+      }
+      validTabIds.push(tabId);
+    }
+
+    if (validTabIds.length) {
+      await this.groupTabs(validTabIds, session.groupId);
+    }
+
+    session.activeTabId = validTabIds[validTabIds.length - 1] ?? session.activeTabId;
+    session.updatedAt = Date.now();
+
+    const attachedTabs: BrowserSessionTab[] = [];
+    for (const tabId of validTabIds) {
+      const normalizedTab = await this.getTab(tabId);
+      attachedTabs.push(toSessionTab(normalizedTab));
+    }
+    await this.persist();
+
+    return {
+      attached: true,
+      sessionId: params.sessionId,
+      tabs: attachedTabs,
+    };
+  }
+
+  async detachTab(
+    params: BrowserTabDetachParams,
+  ): Promise<BrowserTabDetachResult> {
+    await this.ensureLoaded();
+    const session = this.getSessionOrThrow(params.sessionId);
+    await this.reconcileSessionOrThrow(session);
+    await this.assertTabInSessionGroup(session, params.tabId);
+
+    await this.ungroupTabs([params.tabId]);
+
+    // If the detached tab was the active one, pick another
+    if (session.activeTabId === params.tabId) {
+      const remainingTabs = await this.getSessionTabs(session);
+      session.activeTabId = this.resolveActiveTabId(remainingTabs);
+    }
+    session.updatedAt = Date.now();
+    await this.persist();
+
+    return {
+      detached: true,
+      sessionId: params.sessionId,
+      detachedTabId: params.tabId,
+    };
+  }
+
+  async moveTab(
+    params: BrowserTabMoveParams,
+  ): Promise<BrowserTabMoveResult> {
+    await this.ensureLoaded();
+    const session = this.getSessionOrThrow(params.sessionId);
+    await this.reconcileSessionOrThrow(session);
+    await this.assertTabInSessionGroup(session, params.tabId);
+
+    const movedTab = await this.moveTabToIndex(params.tabId, params.index);
+    session.updatedAt = Date.now();
+    await this.persist();
+
+    return {
+      moved: true,
+      sessionId: params.sessionId,
+      tab: toSessionTab(movedTab),
+    };
+  }
+
+  async updateSession(
+    params: BrowserSessionUpdateParams,
+  ): Promise<BrowserSessionUpdateResult> {
+    await this.ensureLoaded();
+    const session = this.getSessionOrThrow(params.sessionId);
+
+    if (params.title !== undefined) {
+      session.title = params.title;
+    }
+    session.updatedAt = Date.now();
+
+    const updateProps: { title: string; color?: chrome.tabGroups.ColorEnum } = {
+      title: buildGroupTitle(session),
+    };
+    if (params.color) {
+      updateProps.color = params.color as chrome.tabGroups.ColorEnum;
+    }
+    await this.updateGroupFull(session.groupId, updateProps);
+    const info = await this.reconcileSessionOrThrow(session);
+    await this.persist();
+
+    return {
+      updated: true,
+      session: info,
     };
   }
 
@@ -762,6 +895,45 @@ export class BrowserSessionStore {
     return new Promise((resolve, reject) => {
       chrome.tabs.remove(tabIds, () => {
         if (rejectWithRuntimeError(reject, 'Failed to remove tabs')) {
+          return;
+        }
+        resolve();
+      });
+    });
+  }
+
+  private ungroupTabs(tabIds: number[]): Promise<void> {
+    return new Promise((resolve, reject) => {
+      chrome.tabs.ungroup(tabIds, () => {
+        if (rejectWithRuntimeError(reject, 'Failed to ungroup tabs')) {
+          return;
+        }
+        resolve();
+      });
+    });
+  }
+
+  private moveTabToIndex(
+    tabId: number,
+    index: number,
+  ): Promise<chrome.tabs.Tab> {
+    return new Promise((resolve, reject) => {
+      chrome.tabs.move(tabId, { index }, tab => {
+        if (rejectWithRuntimeError(reject, 'Failed to move tab')) {
+          return;
+        }
+        resolve(Array.isArray(tab) ? tab[0] : tab);
+      });
+    });
+  }
+
+  private updateGroupFull(
+    groupId: number,
+    props: { title?: string; color?: chrome.tabGroups.ColorEnum },
+  ): Promise<void> {
+    return new Promise((resolve, reject) => {
+      chrome.tabGroups.update(groupId, props, () => {
+        if (rejectWithRuntimeError(reject, 'Failed to update tab group')) {
           return;
         }
         resolve();

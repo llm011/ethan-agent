@@ -103,20 +103,21 @@ class BrowserSessionTool(_BrowserToolBase):
     description = (
         "管理浏览器 session(一个 session 对应一个 Chrome Tab Group)。"
         "action=create 新建并打开 url;attach_current 接管当前 active tab;"
-        "list 列出 session;rename 改名;release 放掉控制权但保留 tab;close 关闭整个 tab group。"
+        "list 列出 session;rename 改名;update 更新标题和颜色;release 放掉控制权但保留 tab;close 关闭整个 tab group。"
     )
     parameters = {
         "type": "object",
         "properties": {
-            "action": {"type": "string", "enum": ["create", "attach_current", "list", "rename", "release", "close"]},
+            "action": {"type": "string", "enum": ["create", "attach_current", "list", "rename", "release", "close", "update"]},
             "session": {"type": "string", "description": "目标 session_id(rename/release/close 必填)"},
             "url": {"type": "string", "description": "create 时打开的初始 URL"},
             "title": {"type": "string", "description": "session 标题(create/attach_current/rename)"},
+            "color": {"type": "string", "description": "Tab Group 颜色（grey/blue/red/yellow/green/pink/purple/cyan/orange）"},
         },
         "required": ["action"],
     }
 
-    async def run(self, action: str, session: str = "", url: str = "", title: str = "") -> str:
+    async def run(self, action: str, session: str = "", url: str = "", title: str = "", color: str = "") -> str:
         self._authorize()
         try:
             if action == "create":
@@ -125,13 +126,19 @@ class BrowserSessionTool(_BrowserToolBase):
                     params["url"] = url
                 if title:
                     params["title"] = title
+                if color:
+                    params["color"] = color
                 result = await _call("session_create", params)
                 bsid = _extract_session_id(result)
                 if bsid:
                     get_session_map().bind(bsid, get_session_id())
                 return json.dumps(result, ensure_ascii=False)
             if action == "attach_current":
-                params = {"title": title} if title else {}
+                params = {}
+                if title:
+                    params["title"] = title
+                if color:
+                    params["color"] = color
                 result = await _call("session_attach_current", params)
                 bsid = _extract_session_id(result)
                 if bsid:
@@ -151,6 +158,14 @@ class BrowserSessionTool(_BrowserToolBase):
                 out = await _call("session_close", {"sessionId": session}, browser_session_id=session)
                 get_session_map().unbind(session)
                 return json.dumps(out, ensure_ascii=False)
+            if action == "update":
+                params = {"sessionId": session}
+                if title:
+                    params["title"] = title
+                if color:
+                    params["color"] = color
+                return json.dumps(await _call("session_update", params,
+                                              browser_session_id=session), ensure_ascii=False)
             return f"未知 action: {action}"
         except BrowserError as e:
             return f"浏览器错误: {e}" + (" (可重新 snapshot 后重试)" if e.retryable else "")
@@ -161,21 +176,25 @@ class BrowserTabTool(_BrowserToolBase):
     description = (
         "管理 session 内的 tab。open 新开 tab;list 列出 session 内 tab;"
         "user_list 列出用户所有 tab;find_tab 按 URL/域名查找已开 tab(active_only=true 取用户当前活动 tab);"
-        "attach 把已有 tab 纳入 session;active 取当前活动 tab;activate 切换活动 tab;close 关闭 tab。"
+        "attach 把已有 tab 纳入 session;attach_batch 批量把多个 tab 纳入 session;"
+        "active 取当前活动 tab;activate 切换活动 tab;close 关闭 tab;"
+        "detach 把 tab 移出 session(取消分组但不关闭);move 调整 tab 在组内的位置。"
     )
     parameters = {
         "type": "object",
         "properties": {
-            "action": {"type": "string", "enum": ["open", "list", "user_list", "find_tab", "attach", "active", "activate", "close"]},
+            "action": {"type": "string", "enum": ["open", "list", "user_list", "find_tab", "attach", "attach_batch", "active", "activate", "close", "detach", "move"]},
             "session": {"type": "string", "description": "目标 session_id"},
             "tab": {"type": "string", "description": "目标 tab_id(attach/activate/close)"},
             "url": {"type": "string", "description": "open 时打开的 URL;find_tab 时按域名或 URL 前缀匹配"},
             "active_only": {"type": "boolean", "description": "find_tab 专用:true=只返回用户当前活动的 tab,忽略 url"},
+            "tabs": {"type": "array", "items": {"type": "string"}, "description": "attach_batch 时的 tab_id 列表"},
+            "index": {"type": "integer", "description": "move 时的目标位置索引"},
         },
         "required": ["action"],
     }
 
-    async def run(self, action: str, session: str = "", tab: str = "", url: str = "", active_only: bool = False) -> str:
+    async def run(self, action: str, session: str = "", tab: str = "", url: str = "", active_only: bool = False, tabs: list = None, index: int = -1) -> str:
         self._authorize()
         try:
             if action == "open":
@@ -206,6 +225,10 @@ class BrowserTabTool(_BrowserToolBase):
             if action == "attach":
                 return json.dumps(await _call("tab_attach", {"sessionId": session, "tabId": tab},
                                               browser_session_id=session), ensure_ascii=False)
+            if action == "attach_batch":
+                tab_ids = [int(t) for t in (tabs or [])]
+                return json.dumps(await _call("tab_attach_batch", {"sessionId": session, "tabIds": tab_ids},
+                                              browser_session_id=session), ensure_ascii=False)
             if action == "active":
                 return json.dumps(await _call("tab_active", {"sessionId": session},
                                               browser_session_id=session), ensure_ascii=False)
@@ -214,6 +237,12 @@ class BrowserTabTool(_BrowserToolBase):
                                               browser_session_id=session), ensure_ascii=False)
             if action == "close":
                 return json.dumps(await _call("tab_close", {"sessionId": session, "tabId": tab},
+                                              browser_session_id=session), ensure_ascii=False)
+            if action == "detach":
+                return json.dumps(await _call("tab_detach", {"sessionId": session, "tabId": int(tab)},
+                                              browser_session_id=session), ensure_ascii=False)
+            if action == "move":
+                return json.dumps(await _call("tab_move", {"sessionId": session, "tabId": int(tab), "index": index},
                                               browser_session_id=session), ensure_ascii=False)
             return f"未知 action: {action}"
         except BrowserError as e:

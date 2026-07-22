@@ -97,6 +97,7 @@ export interface BrowserSessionInfo {
   windowId: number;
   groupId: number;
   groupTitle: string;
+  color?: string;
   activeTabId?: number;
   tabs: BrowserSessionTab[];
 }
@@ -104,6 +105,7 @@ export interface BrowserSessionInfo {
 export interface BrowserSessionCreateParams {
   url?: string;
   title?: string;
+  color?: string;
 }
 
 export interface BrowserSessionCreateResult {
@@ -113,6 +115,7 @@ export interface BrowserSessionCreateResult {
 
 export interface BrowserSessionAttachCurrentParams {
   title?: string;
+  color?: string;
 }
 
 export interface BrowserSessionAttachCurrentResult {
@@ -132,6 +135,17 @@ export interface BrowserSessionRenameParams {
 
 export interface BrowserSessionRenameResult {
   renamed: true;
+  session: BrowserSessionInfo;
+}
+
+export interface BrowserSessionUpdateParams {
+  sessionId: string;
+  title?: string;
+  color?: string;
+}
+
+export interface BrowserSessionUpdateResult {
+  updated: true;
   session: BrowserSessionInfo;
 }
 
@@ -222,6 +236,40 @@ export interface BrowserTabCloseResult {
   sessionId: string;
   closedTabId: number;
   sessionClosed?: boolean;
+}
+
+export interface BrowserTabAttachBatchParams {
+  sessionId: string;
+  tabIds: number[];
+}
+
+export interface BrowserTabAttachBatchResult {
+  attached: true;
+  sessionId: string;
+  tabs: BrowserSessionTab[];
+}
+
+export interface BrowserTabDetachParams {
+  sessionId: string;
+  tabId: number;
+}
+
+export interface BrowserTabDetachResult {
+  detached: true;
+  sessionId: string;
+  detachedTabId: number;
+}
+
+export interface BrowserTabMoveParams {
+  sessionId: string;
+  tabId: number;
+  index: number;
+}
+
+export interface BrowserTabMoveResult {
+  moved: true;
+  sessionId: string;
+  tab: BrowserSessionTab;
 }
 
 export type BrowserPageCoordinateSpace = 'viewport-css-pixel';
