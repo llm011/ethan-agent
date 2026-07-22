@@ -25,7 +25,8 @@ from dataclasses import dataclass, field
 STUCK_WINDOW = 3          # 连续 N 轮同一签名 → 判定卡住
 ERROR_WINDOW = 2          # 连续 N 轮同一签名且都报错 → 提前判定卡住（错误重试不必等满 3 轮）
 MAX_REFLECTIONS = 2       # 最多反思几次；仍卡住则收尾放弃
-TOOL_FREQ_LIMIT = 8       # 同一工具名连续调用超过此次数 → 判定卡住（即使参数不同）
+TOOL_FREQ_LIMIT = 8       # 同一工具名连续调用超过此次数（参数也完全相同时） → 判定卡住
+TOOL_FREQ_LIMIT_VARIED = 30  # 同一工具名连续调用但参数每次不同时的宽松阈值（如批量整理 tab）
 _FREQ_LIMIT_EXEMPT = {"file_read", "rg_search", "fd_find", "skill_read"}
 # shell 工具不整体豁免，而是按实际命令前缀判定（见 _effective_tool_name）
 
@@ -97,6 +98,7 @@ class LoopMonitor:
     reflections_used: int = 0
     awaiting_reflection_followup: bool = False  # 上一轮注入过反思，本轮需校验是否真换路
     _last_reflected_sig: str = ""
+    _freq_limit_varied: bool = False  # 最近一次 is_stuck 触发是否因为"同工具不同参数"达到宽松上限
 
     def record(self, tool_calls, had_error: bool) -> None:
         self._signatures.append(_round_signature(tool_calls))
@@ -106,10 +108,12 @@ class LoopMonitor:
 
     def is_stuck(self) -> bool:
         """是否陷入无效循环。三种触发：
-        1. 连续 STUCK_WINDOW 轮同签名（精确重复）
-        2. 连续 ERROR_WINDOW 轮同签名且都报错
-        3. 连续 TOOL_FREQ_LIMIT 轮使用同一工具（即使参数不同，搜同一主题换不同词也算）
+        1. 连续 ERROR_WINDOW 轮同签名且都报错
+        2. 连续 STUCK_WINDOW 轮同签名（精确重复）
+        3. 同一工具名连续 TOOL_FREQ_LIMIT 轮且参数完全相同 → 严格卡住；
+           参数不同 → 放宽到 TOOL_FREQ_LIMIT_VARIED 轮（varied）
         """
+        self._freq_limit_varied = False
         sigs = self._signatures
         if len(sigs) >= ERROR_WINDOW:
             tail = sigs[-ERROR_WINDOW:]
@@ -123,7 +127,17 @@ class LoopMonitor:
         if len(self._tool_names) >= TOOL_FREQ_LIMIT:
             tail = self._tool_names[-TOOL_FREQ_LIMIT:]
             if len(set(tail)) == 1 and tail[0] and tail[0] not in _FREQ_LIMIT_EXEMPT:
-                return True
+                # 进一步区分：参数是否也完全相同
+                tail_sigs = sigs[-TOOL_FREQ_LIMIT:]
+                if len(set(tail_sigs)) == 1:
+                    # 参数完全相同 → 严格限制，立即判定卡住
+                    return True
+                # 参数不同 → 宽松模式，放宽到 TOOL_FREQ_LIMIT_VARIED
+                if len(self._tool_names) >= TOOL_FREQ_LIMIT_VARIED:
+                    long_tail = self._tool_names[-TOOL_FREQ_LIMIT_VARIED:]
+                    if len(set(long_tail)) == 1:
+                        self._freq_limit_varied = True
+                        return True
         return False
 
     def repeated_after_reflection(self) -> bool:
@@ -178,17 +192,20 @@ def reflection_followup_message() -> str:
 
 
 def finalize_system_suffix(reason: str) -> str:
-    """收尾轮追加到 system prompt 的指令。reason: 'stuck' | 'max_iters'。
+    """收尾轮追加到 system prompt 的指令。reason: 'stuck' | 'varied' | 'max_iters'。
 
-    收尾轮禁用工具，让模型基于已有上下文生成「已做 / 卡点 / 建议」报告，而非截断。
+    收尾轮禁用工具，让模型基于已有上下文生成收尾报告，而非截断。
     """
     if reason == "stuck":
         head = "你在当前任务上已尝试多种策略仍未突破，现在请停止尝试，把进展整理给用户。"
+    elif reason == "varied":
+        head = "你已经连续执行了很多步批量操作，先到这里吧。"
     else:
-        head = "已接近最大执行步数限制，这是最后一次输出机会，不能再调用工具，请基于已有信息收尾。"
+        head = "本轮执行的步数已经比较多了，先整理一下当前进展。"
     return (
         f"\n\n[System: {head}请用自然中文生成一段简洁收尾，包含："
-        "①已完成什么（具体产出/发现，有文件就给路径）；"
-        "②卡在哪一步、具体什么问题（要具体，如「缺 X 权限」「Y 返回 404」，不要写「遇到困难」）；"
-        "③要继续推进需要用户提供什么（明确具体）。语气坦诚直接，不要道歉或套话，不要调用任何工具。]"
+        "①已完成什么（具体产出/发现）；"
+        "②如果还没做完，剩余哪些工作；"
+        "③建议用户看看当前效果，需要继续的话可以再告诉你。"
+        "语气坦诚直接、轻松自然，不要道歉或套话，不要调用任何工具。]"
     )

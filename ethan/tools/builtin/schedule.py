@@ -66,11 +66,12 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
             res = requests.post(f"{_base_url()}/api/chat", json={
                 "messages": [{"role": "user", "content": prompt}],
                 "session_id": session_id,
-            }, headers=headers, timeout=120)
+            }, headers=headers, timeout=300)
             res.raise_for_status()
             result_text = res.json().get("content", "")
         except Exception as e:
-            print(f"Schedule fire error: {e}")
+            import traceback
+            print(f"Schedule fire error: {e}\n{traceback.format_exc()}")
             result_text = f"⚠️ 定时任务执行失败: {e}"
             import asyncio
 

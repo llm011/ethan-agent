@@ -8,6 +8,8 @@ license: MIT
 platforms: [linux, macos, windows]
 trigger:
   - obsidian
+  - Obsidian
+  - ob笔记
   - 笔记
   - vault
   - 知识库笔记
@@ -16,8 +18,14 @@ trigger:
   - 读笔记
   - 写笔记
   - 搜索笔记
+  - 记笔记
+  - 存笔记
+  - 保存笔记
+  - 整理笔记
   - 标签
   - tag
+  - 打标签
+  - 加标签
   - 双链
   - backlink
   - frontmatter
@@ -27,6 +35,7 @@ trigger:
   - daily note
   - 日记
   - 重命名笔记
+  - 知识管理
 ---
 # Obsidian Vault
 
@@ -102,21 +111,52 @@ Obsidian links notes with `[[Note Name]]` syntax. When creating notes, use these
 - `![[image.png]]` — embed an image attachment
 - `![[image.png|300]]` — embed an image with a width hint
 
+**正文链接规范**：如果文档中提到了已有的其他笔记或项目，使用 `[[双链]]` 将它们关联起来（例如：关于 AB 灰度配置，可参考 `[[AB 实验灰度方案]]`）。原始链接（如飞书文档 URL）应写入 frontmatter 的 `source` 字段。
+
 ## Frontmatter / Properties
 
-Notes may start with a YAML frontmatter block delimited by `---`. Common fields: `title`, `tags`, `aliases`, `date`, `cssclass`.
+Notes may start with a YAML frontmatter block delimited by `---`. When creating or editing notes, **必须**遵循以下元数据规范。
 
-When creating notes that need metadata, include frontmatter at the very top, followed by a blank line before the body:
+### 必填 Frontmatter 模板
+
+每篇新笔记顶部必须包含以下 YAML 块：
 
 ```yaml
 ---
-title: My Note
+title: "笔记的标题"
+source: "原始 URL（飞书/网页等）；若为原创填 original"
+created: YYYY-MM-DD HH:mm:ss
+type: [prd, tech-design, meeting, reference, workflow]  # 按内容类型选填
 tags:
-  - project/active
-  - meeting
-date: 2026-07-20
+  - work/coze       # 一级为工作区/项目，二级为具体模块
+  - prd/schedule    # 场景标签
 ---
 ```
+
+字段说明：
+- `title`：笔记标题，必填。
+- `source`：来源 URL（飞书文档、网页链接等）；纯原创内容填 `original`。
+- `created`：创建时间，格式 `YYYY-MM-DD HH:mm:ss`。
+- `type`：内容类型，可选值：`prd` / `tech-design` / `meeting` / `reference` / `workflow`。
+- `tags`：层级标签列表，详见下方标签规范。
+
+### 标签（Tags）规范
+
+**层级格式**：使用 `分类/子分类` 格式，支持多级嵌套，方便在 Obsidian 中折叠和检索。
+
+常用标签体系：
+- `work/<项目名>` — 项目归属（如 `work/coze`、`work/lark`）
+- `tech/<技术栈>` — 技术研究（如 `tech/electron`、`tech/mcp`）
+- `work/prd` — PRD / 设计案
+- `work/tech-design` — 技术方案
+- `work/meeting` — 会议纪要
+- `work/todo` — 个人待办
+- `life/<分类>` — 生活类内容
+
+**规则**：
+- YAML 中的标签**不加** `#` 号；正文中的 inline 标签**必须**以 `#` 开头。
+- 创建新标签前，先运行 `tag_manager.py list` 查询已有标签，优先复用。
+- 合法字符：字母、数字、`_`、`-`、`/`；不以数字开头。
 
 To update frontmatter on an existing note, read the note with `read_file` first, then use `patch` against the lines between the two `---` fences. Keep YAML valid; arrays can be inline (`[a, b]`) or block-list style.
 
