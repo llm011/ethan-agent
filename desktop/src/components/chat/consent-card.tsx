@@ -1,8 +1,8 @@
 // 授权 UI：固定模板的内联卡片（非 agent 实时生成），shadcn 风格对齐 A2UI 卡片。
 // 「卡片为主，模态保底」：ConsentCard 渲染异常时由 ErrorBoundary 回退到 ConsentDialog 模态框。
 
-import { Component, type ReactNode } from "react";
-import { ShieldCheck } from "lucide-react";
+import { Component, type ReactNode, useState } from "react";
+import { ShieldCheck, ChevronDown, ChevronRight } from "lucide-react";
 import { Card } from "@ethan/shared/ui/card";
 import { Button } from "@ethan/shared/ui/button";
 import { ConsentDialog, type ConsentRequest } from "@ethan/shared/components/consent-dialog";
@@ -17,11 +17,14 @@ const TOOL_LABELS: Record<string, string> = {
 
 interface ConsentCardProps {
   request: ConsentRequest;
-  onRespond: (requestId: string, allowed: boolean) => void;
+  onRespond: (requestId: string, allowed: boolean, message?: string) => void;
 }
 
-// 固定模板卡片：工具 + 操作描述 + 详情 + 允许/拒绝。
+// 固定模板卡片：工具 + 操作描述 + 详情 + 可折叠补充输入 + 允许/拒绝。
 function ConsentCard({ request, onRespond }: ConsentCardProps) {
+  const [expanded, setExpanded] = useState(false);
+  const [message, setMessage] = useState("");
+
   return (
     <Card className="p-4 gap-3 border border-amber-500/40 bg-amber-500/5 shadow-md ring-0">
       <div className="flex items-center gap-2">
@@ -52,15 +55,36 @@ function ConsentCard({ request, onRespond }: ConsentCardProps) {
         )}
       </div>
 
+      {/* 可折叠的补充信息输入 */}
+      <div className="border-t border-border/50 pt-2">
+        <button
+          type="button"
+          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          onClick={() => setExpanded(!expanded)}
+        >
+          {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+          补充说明（可选）
+        </button>
+        {expanded && (
+          <textarea
+            className="mt-2 w-full rounded-md border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none"
+            rows={2}
+            placeholder="输入补充信息，会传给模型作为上下文参考..."
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+          />
+        )}
+      </div>
+
       <div className="text-xs text-muted-foreground">
         同一会话内同类操作授权一次后不再询问。
       </div>
 
       <div className="flex justify-end gap-2">
-        <Button variant="outline" size="sm" onClick={() => onRespond(request.request_id, false)}>
+        <Button variant="outline" size="sm" onClick={() => onRespond(request.request_id, false, message || undefined)}>
           拒绝
         </Button>
-        <Button size="sm" onClick={() => onRespond(request.request_id, true)}>
+        <Button size="sm" onClick={() => onRespond(request.request_id, true, message || undefined)}>
           允许
         </Button>
       </div>
@@ -70,7 +94,7 @@ function ConsentCard({ request, onRespond }: ConsentCardProps) {
 
 interface GateProps {
   request: ConsentRequest | null;
-  onRespond: (requestId: string, allowed: boolean) => void;
+  onRespond: (requestId: string, allowed: boolean, message?: string) => void;
 }
 
 interface GateState {

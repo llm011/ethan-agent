@@ -75,10 +75,10 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     } catch {}
   };
 
-  const handleConsentRespond = async (requestId: string, allowed: boolean) => {
+  const handleConsentRespond = async (requestId: string, allowed: boolean, message?: string) => {
     setConsentRequest(null);
     try {
-      await respondConsent(requestId, allowed);
+      await respondConsent(requestId, allowed, message);
     } catch {}
   };
 

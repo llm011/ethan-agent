@@ -22,6 +22,13 @@ from dataclasses import dataclass
 
 
 @dataclass
+class ConsentResult:
+    """授权响应结果。"""
+    allowed: bool
+    message: str = ""  # 用户在授权弹窗中附带的补充信息（可选）
+
+
+@dataclass
 class ConsentEvent:
     """向流中注入的事件 —— Web 渠道用来请求用户授权。"""
     request_id: str
@@ -94,11 +101,11 @@ class WebConsentProvider(ConsentProvider):
         _REGISTRY[req_id] = self  # 全局注册，供 /consent 端点查找
         return ConsentEvent(request_id=req_id, description=description, tool=tool, detail=detail, always=always), fut
 
-    def resolve(self, request_id: str, allowed: bool) -> bool:
+    def resolve(self, request_id: str, allowed: bool, message: str = "") -> bool:
         fut = self._pending.pop(request_id, None)
         _REGISTRY.pop(request_id, None)
         if fut is not None and not fut.done():
-            fut.set_result(allowed)
+            fut.set_result(ConsentResult(allowed=allowed, message=message))
             return True
         return False
 
@@ -199,11 +206,11 @@ def clear_session_grants(session_id: str) -> None:
     _SESSION_GRANTS.pop(session_id, None)
 
 
-def resolve_consent(request_id: str, allowed: bool) -> bool:
+def resolve_consent(request_id: str, allowed: bool, message: str = "") -> bool:
     """供 /consent 端点调用：解析某个待授权请求。"""
     provider = _REGISTRY.get(request_id)
     if provider is not None:
-        return provider.resolve(request_id, allowed)
+        return provider.resolve(request_id, allowed, message)
     return False
 
 

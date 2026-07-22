@@ -18,10 +18,11 @@ router = APIRouter()
 
 class ConsentResponse(BaseModel):
     allowed: bool
+    message: str = ""  # 用户在授权弹窗中补充的信息（可选）
 
 
 @router.post("/consent/{request_id}")
 async def respond_consent(request_id: str, body: ConsentResponse, user_id: str = Depends(verify_token)):
     from ethan.core.consent import resolve_consent
-    ok = resolve_consent(request_id, body.allowed)
+    ok = resolve_consent(request_id, body.allowed, body.message)
     return {"ok": ok}
