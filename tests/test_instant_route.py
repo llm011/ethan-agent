@@ -128,6 +128,50 @@ class TestMathSafety:
         # math 被拒绝，direct 已移除 → 返回 None
         assert r is None
 
+    def test_reject_phone_number(self):
+        """电话号码 138-1234-5678 不是算术"""
+        r = classify_instant("138-1234-5678")
+        assert r is None
+
+    def test_reject_400_number(self):
+        """400 电话 400-123-4567 不是算术"""
+        r = classify_instant("400-123-4567")
+        assert r is None
+
+    def test_reject_serial_number(self):
+        """编号 12-34-56 三段 dash 分隔不是算术"""
+        r = classify_instant("12-34-56")
+        assert r is None
+
+    def test_reject_intl_phone(self):
+        """国际电话 86-138-1234-5678"""
+        r = classify_instant("86-138-1234-5678")
+        assert r is None
+
+    def test_allow_simple_subtraction(self):
+        """两段 3-2 仍然是合法算术"""
+        r = classify_instant("3-2")
+        assert r is not None
+        assert r.kind == "math"
+        assert r.answer == "1"
+
+    def test_allow_subtraction_two_segments(self):
+        """两段 10-5 仍然是合法算术"""
+        r = classify_instant("10-5")
+        assert r is not None
+        assert r.kind == "math"
+        assert r.answer == "5"
+
+    def test_reject_verification_code(self):
+        """纯数字验证码 123456 无运算符 → 不走 math"""
+        r = classify_instant("123456")
+        assert r is None
+
+    def test_reject_short_digit_answer(self):
+        """纯数字 '3' 可能是选择题答案 → 不走 math"""
+        r = classify_instant("3")
+        assert r is None
+
 
 # ---------------------------------------------------------------------------
 # 3. Time queries
@@ -171,13 +215,25 @@ class TestGreetingInstant:
         assert r is not None
         assert r.kind == "greeting"
 
-    def test_ok(self):
-        r = classify_instant("好的")
+    def test_bye(self):
+        r = classify_instant("再见")
         assert r is not None
         assert r.kind == "greeting"
 
-    def test_bye(self):
-        r = classify_instant("再见")
+    def test_good_night(self):
+        r = classify_instant("晚安")
+        assert r is not None
+        assert r.kind == "greeting"
+
+    def test_never_mind(self):
+        """'没事了' 是取消/告别，不需要工具"""
+        r = classify_instant("没事了")
+        assert r is not None
+        assert r.kind == "greeting"
+
+    def test_forget_it(self):
+        """'算了' 是取消，不需要工具"""
+        r = classify_instant("算了")
         assert r is not None
         assert r.kind == "greeting"
 
@@ -212,7 +268,63 @@ class TestGreetingInstant:
 
 
 # ---------------------------------------------------------------------------
-# 5. Short text that should NOT be instant (previously "direct" category, now removed)
+# 5. Confirmations should NOT be instant (moved out of greeting)
+# ---------------------------------------------------------------------------
+
+class TestConfirmationsNotInstant:
+    """确认词可能是对上文动作的确认，需要工具执行 → 不走 instant。"""
+
+    def test_ok_cn(self):
+        """'好的' 可能确认'要帮你发邮件吗？' → 需要工具"""
+        r = classify_instant("好的")
+        assert r is None
+
+    def test_ok_en(self):
+        r = classify_instant("ok")
+        assert r is None
+
+    def test_ok_en_upper(self):
+        r = classify_instant("OK")
+        assert r is None
+
+    def test_xing(self):
+        """'行' 确认"""
+        r = classify_instant("行")
+        assert r is None
+
+    def test_understood(self):
+        """'明白'"""
+        r = classify_instant("明白")
+        assert r is None
+
+    def test_got_it(self):
+        """'了解'"""
+        r = classify_instant("了解")
+        assert r is None
+
+    def test_received(self):
+        """'收到'"""
+        r = classify_instant("收到")
+        assert r is None
+
+    def test_hmm(self):
+        """'嗯' 可能是确认执行"""
+        r = classify_instant("嗯")
+        assert r is None
+
+    def test_hmm_double(self):
+        """'嗯嗯'"""
+        r = classify_instant("嗯嗯")
+        assert r is None
+
+    def test_ok_with_exclamation(self):
+        """'好的！' 带标点也不应走 instant"""
+        r = classify_instant("好的！")
+        assert r is None
+
+
+# ---------------------------------------------------------------------------
+# 6. Short text that should NOT be instant (previously "direct" category, now removed)
 # ---------------------------------------------------------------------------
 
 class TestShortTextNotInstant:
@@ -260,7 +372,7 @@ class TestShortTextNotInstant:
 
 
 # ---------------------------------------------------------------------------
-# 6. Should NOT be instant — complex queries need tools/full loop
+# 7. Should NOT be instant — complex queries need tools/full loop
 # ---------------------------------------------------------------------------
 
 class TestRejectInstant:

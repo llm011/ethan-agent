@@ -22,6 +22,8 @@ _FORCE_FULL_SIGNALS = [
 _MATH_EXPR_RE = re.compile(r'^[\d\s\+\-\*/\.\(\)\^%]+$')
 # 必须包含至少一个运算符（纯数字如 "8080" 不应走 math 通道）
 _MATH_HAS_OPERATOR_RE = re.compile(r'[\+\-\*/\^%]')
+# 数字序列模式（电话号码、编号等）：3+ 段数字仅用 dash 分隔 → 非算术
+_NUMBER_SEQUENCE_RE = re.compile(r'^\d+(-\d+){2,}$')
 # 安全 eval 白名单（仅允许基本算术 AST 节点）
 _SAFE_EVAL_NODES = {
     'Expression', 'BinOp', 'UnaryOp', 'Num', 'Constant',
@@ -34,9 +36,11 @@ _MAX_EXPONENT = 10000
 _GREETING_EXACT = frozenset({
     "你好", "hello", "hi", "hey", "嗨", "早", "早上好", "上午好",
     "下午好", "晚上好", "晚安", "谢谢", "thanks", "thank you",
-    "好的", "ok", "行", "明白", "了解", "收到", "嗯", "嗯嗯",
     "没事了", "算了", "再见", "拜拜", "bye",
 })
+
+# 确认词不走 instant：可能是对上文动作的确认，需要工具执行
+# "好的/ok/行/明白/了解/收到/嗯/嗯嗯" → 走正常路由
 
 # 末尾常见装饰性标点（匹配 greeting 前 strip 掉）
 _TRAILING_PUNCTUATION_RE = re.compile(r'[!！~～.。,，…\s]+$')
@@ -125,9 +129,11 @@ def classify_instant(text: str) -> InstantResult | None:
         return None
 
     # 1) 纯算术表达式（必须包含运算符，排除纯数字如 "8080"）
+    #    排除数字序列（电话号码、编号等：3+ 段数字仅用 dash 分隔）
     if (_MATH_EXPR_RE.match(stripped)
             and any(c.isdigit() for c in stripped)
-            and _MATH_HAS_OPERATOR_RE.search(stripped)):
+            and _MATH_HAS_OPERATOR_RE.search(stripped)
+            and not _NUMBER_SEQUENCE_RE.match(stripped)):
         answer = _safe_math_eval(stripped)
         if answer is not None:
             return InstantResult(kind="math", answer=answer)
