@@ -9,7 +9,7 @@
 
 数据位置（核心资产，不在本仓库）：
   train/ val/ test/ 的 *.jsonl 放在私有 repo
-  https://github.com/llm011/ethan-router-train-data
+  https://github.com/llm011/ethan-memory-train-data 的 router/ 目录
   跑之前先把三个 split 目录拷到本目录下（或软链）。详见同目录 README.md。
 
 跑法：
