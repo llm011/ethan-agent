@@ -91,6 +91,7 @@ export function ScheduleView() {
   const [jobs, setJobs] = useState<ScheduleJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<ScheduleCategory>("recurring");
+  const [activeScene, setActiveScene] = useState<string>("work");
   const [confirmState, setConfirmState] = useState<{ open: boolean; id: string }>({ open: false, id: "" });
   const [scheduledSessions, setScheduledSessions] = useState<SessionInfo[]>([]);
   const [sessionsExpanded, setSessionsExpanded] = useState(false);
@@ -100,6 +101,32 @@ export function ScheduleView() {
   const [promptDialog, setPromptDialog] = useState<{ open: boolean; id: string; currentPrompt: string }>({ open: false, id: "", currentPrompt: "" });
   const [timelineStatuses, setTimelineStatuses] = useState<TimelineStatus[]>([]);
   const [syncing, setSyncing] = useState(false);
+
+  // ── Scene 维度：work / life 预置 + 动态发现 ──
+  const scenes = useMemo(() => {
+    const set = new Set<string>(["work", "life"]);  // 预置两个 scene
+    jobs.forEach(j => set.add(j.scene || "work"));
+    timelineStatuses.forEach(tl => set.add(tl.scene || "work"));
+    return Array.from(set).sort((a, b) => {
+      if (a === "work") return -1;
+      if (b === "work") return 1;
+      if (a === "life") return -1;
+      if (b === "life") return 1;
+      return a.localeCompare(b);
+    });
+  }, [jobs, timelineStatuses]);
+
+  const sceneLabel = (s: string) => s === "work" ? "工作" : s === "life" ? "生活" : s;
+
+  // 按 scene 过滤
+  const sceneJobs = useMemo(
+    () => jobs.filter(j => (j.scene || "work") === activeScene),
+    [jobs, activeScene],
+  );
+  const sceneTimelines = useMemo(
+    () => timelineStatuses.filter(tl => (tl.scene || "work") === activeScene),
+    [timelineStatuses, activeScene],
+  );
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -199,13 +226,13 @@ export function ScheduleView() {
     }
   };
 
-  // 按 category 分组
+  // 按 category 分组（基于当前 scene 过滤后的任务）
   const grouped: Record<ScheduleCategory, ScheduleJob[]> = {
     one_off: [],
     recurring: [],
     timeline: [],
   };
-  for (const j of jobs) {
+  for (const j of sceneJobs) {
     const cat = (j.category || "recurring") as ScheduleCategory;
     if (grouped[cat]) grouped[cat].push(j);
     else grouped.recurring.push(j);
@@ -217,6 +244,22 @@ export function ScheduleView() {
     recurring: grouped.recurring.length,
     timeline: grouped.timeline.length,
   };
+
+  // 每个 scene 的任务计数（用于 scene Tab badge）
+  const sceneCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const s of scenes) counts[s] = 0;
+    for (const j of jobs) {
+      const s = j.scene || "work";
+      counts[s] = (counts[s] || 0) + 1;
+    }
+    for (const tl of timelineStatuses) {
+      const s = tl.scene || "work";
+      // 时间线本身也算一个条目
+      counts[s] = (counts[s] || 0) + 1;
+    }
+    return counts;
+  }, [scenes, jobs, timelineStatuses]);
 
   const dateGroups = useMemo(() => groupJobsByDate(visibleJobs), [visibleJobs]);
 
@@ -321,7 +364,33 @@ export function ScheduleView() {
         </div>
       </header>
 
-      {/* Tabs */}
+      {/* Scene 切换器：work / life / ... */}
+      <div className="border-b border-border px-4 flex gap-1 shrink-0">
+        {scenes.map(scene => {
+          const active = activeScene === scene;
+          const count = sceneCounts[scene] || 0;
+          return (
+            <button
+              key={scene}
+              onClick={() => setActiveScene(scene)}
+              className={`flex items-center gap-2 px-3 py-2 text-sm border-b-2 -mb-px transition-colors ${
+                active
+                  ? "border-primary text-foreground font-medium"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {sceneLabel(scene)}
+              <span className={`text-xs px-1.5 py-0.5 rounded-full ${
+                active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
+              }`}>
+                {count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Category Tabs（在当前 scene 内切换） */}
       <div className="border-b border-border px-4 flex gap-1 shrink-0">
         {(Object.keys(CATEGORY_META) as ScheduleCategory[]).map((cat) => {
           const meta = CATEGORY_META[cat];
@@ -351,10 +420,10 @@ export function ScheduleView() {
       </div>
 
       <ScrollArea className="flex-1 p-6">
-        {activeTab === "timeline" && timelineStatuses.length > 0 && (
+        {activeTab === "timeline" && sceneTimelines.length > 0 && (
           <div className="mb-6 space-y-3">
             <h2 className="text-sm font-semibold text-muted-foreground">时间线状态</h2>
-            {timelineStatuses.map(tl => (
+            {sceneTimelines.map(tl => (
               <Card key={tl.id} className="border-border/60 bg-muted/5">
                 <CardHeader className="pb-2">
                   <div className="flex items-center justify-between">
@@ -428,6 +497,9 @@ export function ScheduleView() {
         ) : (
           /* ── Vertical Timeline Layout ── */
           <div className="relative pl-2">
+            {/* Single continuous timeline axis line */}
+            <div className="absolute left-[91px] top-0 bottom-0 w-px bg-border" />
+
             {dateGroups.map((group, gi) => {
               const prevGroup = gi > 0 ? dateGroups[gi - 1] : null;
               const showYearMonth = group.key !== "no-date" && (
@@ -436,14 +508,11 @@ export function ScheduleView() {
 
               return (
                 <div key={group.key} className="relative">
-                  {/* Year/Month marker — on the left side of the axis */}
+                  {/* Year/Month marker — inline label, doesn't break the timeline */}
                   {showYearMonth && (
-                    <div className="flex items-center gap-3 mb-3 mt-2">
-                      <div className="flex items-baseline gap-1 shrink-0 min-w-[80px]">
-                        <span className="text-lg font-bold text-foreground">{group.month}月</span>
-                        <span className="text-xs text-muted-foreground">{group.year}</span>
-                      </div>
-                      <div className="flex-1 h-px bg-border/60" />
+                    <div className="flex items-baseline gap-1 shrink-0 min-w-[80px] mb-2 mt-4 first:mt-0">
+                      <span className="text-lg font-bold text-foreground">{group.month}月</span>
+                      <span className="text-xs text-muted-foreground">{group.year}</span>
                     </div>
                   )}
 
@@ -460,9 +529,6 @@ export function ScheduleView() {
 
                     {/* Center: Timeline axis + cards */}
                     <div className="relative flex-1 pb-4">
-                      {/* Vertical axis line */}
-                      <div className="absolute left-[3px] top-0 bottom-0 w-px bg-border" />
-
                       {/* Job items */}
                       {group.jobs.map((job, ji) => (
                         <div key={job.id} className="relative flex items-start gap-3 group mb-2 last:mb-0">
@@ -477,7 +543,7 @@ export function ScheduleView() {
                           </span>
 
                           {/* Compact card */}
-                          <div className={`flex-1 border border-border/50 rounded-lg px-3 py-2 transition-colors hover:border-border hover:bg-muted/20 ${
+                          <div className={`flex-1 min-w-0 max-w-[520px] border border-border/50 rounded-lg px-3 py-2 transition-colors hover:border-border hover:bg-muted/20 ${
                             job.status === "paused" ? "opacity-60" : ""
                           }`}>
                             <div className="flex items-center justify-between gap-2">
@@ -506,11 +572,16 @@ export function ScheduleView() {
                                 </Button>
                               </div>
                             </div>
-                            {/* Subtitle: trigger + prompt preview */}
-                            <div className="flex items-center gap-2 mt-0.5 text-[11px] text-muted-foreground">
-                              <span>{formatTrigger(job.trigger)}</span>
-                              <span className="text-border">·</span>
-                              <span className="truncate">{job.prompt}</span>
+                            {/* Subtitle: trigger + prompt (clickable to edit) */}
+                            <div className="mt-1 text-[11px] text-muted-foreground space-y-0.5">
+                              <div className="flex items-center gap-2">
+                                <span className="shrink-0">{formatTrigger(job.trigger)}</span>
+                              </div>
+                              <p
+                                className="whitespace-pre-wrap break-words line-clamp-2 cursor-pointer hover:text-foreground/70 transition-colors"
+                                onClick={() => openEditPrompt(job)}
+                                title="点击编辑内容"
+                              >{job.prompt}</p>
                             </div>
                           </div>
                         </div>
