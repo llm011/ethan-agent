@@ -36,7 +36,19 @@ logger = logging.getLogger(__name__)
 # BGE 中文：query 需加指令前缀，passage 不加（分类只编码 query）
 _QUERY_PREFIX = "为这个句子生成表示以用于检索相关文章："
 _BASE_MODEL = "BAAI/bge-small-zh-v1.5"
-_MAX_LENGTH = 64  # 必须与训练/评测一致（train_lr_router.py MAX_LENGTH）
+_MAX_LENGTH = 144  # 必须与训练/评测一致（train_lr_router.py MAX_LENGTH）
+# 长 query 头尾保留：用户粘贴长文档（整份 markdown）时，意图句（"把以上内容做成胶片"）
+# 常在结尾，纯头部截断会把意图丢光。2026-07 实测：不做头尾保留时，"长 md+请求在后"
+# 样本全靠"粘贴过 md 文档"的捷径蒙对，遇到"长 md+帮我总结/翻译"必串档。
+_SPLICE_HEAD = 76  # 头部保留字符数
+_SPLICE_TAIL = 40  # 尾部保留字符数（意图句一般 <20 字，留足余量）
+
+
+def _splice_long(text: str) -> str:
+    """超长 query 保留头尾、中间用省略号拼接。与 train_lr_router.py 的 splice 完全一致。"""
+    if len(text) <= _SPLICE_HEAD + _SPLICE_TAIL + 3:
+        return text
+    return text[:_SPLICE_HEAD] + "\n…\n" + text[-_SPLICE_TAIL:]
 _DEFAULT_FLOOR = 0.0  # 缺元数据时的兜底；实际从 lr_head.npz 读
 
 # 模型路径：环境变量优先，否则包内 router_models/，再回退 ~/.ethan/models/bge-small-zh/
@@ -215,6 +227,7 @@ class _Encoder:
 
         if isinstance(texts, str):
             texts = [texts]
+        texts = [_splice_long(t) for t in texts]
         # 轻量 tokenizers 批量编码
         encodings = self._tok.encode_batch(texts)
         input_ids = np.array([e.ids for e in encodings], dtype=np.int64)

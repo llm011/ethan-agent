@@ -35,7 +35,17 @@ BASE_MODEL = "BAAI/bge-small-zh-v1.5"
 QUERY_PREFIX = "为这个句子生成表示以用于检索相关文章："
 CACHE = ROOT / "_emb_cache.npz"
 # LR 头落盘到运行时包内（随包分发，~20KB）；ONNX 不落这里，运行时从 HF 下载
-MAX_LENGTH = 64  # 必须与运行时 router.py encode 的 max_length 一致
+MAX_LENGTH = 144  # 必须与运行时 router.py encode 的 max_length 一致
+# 长 query 头尾保留（与 ethan/skills/router.py _splice_long 完全一致）：
+# 粘贴长文档时意图句常在结尾，纯头部截断会丢意图
+SPLICE_HEAD = 76
+SPLICE_TAIL = 40
+
+
+def splice_long(text: str) -> str:
+    if len(text) <= SPLICE_HEAD + SPLICE_TAIL + 3:
+        return text
+    return text[:SPLICE_HEAD] + "\n…\n" + text[-SPLICE_TAIL:]
 LR_HEAD_OUT = ROOT.parents[1] / "ethan" / "skills" / "router_models" / "lr_head.npz"
 
 SKILLS = [
@@ -46,6 +56,8 @@ SKILLS = [
     "code-review", "computer-use", "getnote", "lark-doc",
     "upload-cdn", "use-browser",
     "finance-query", "travel-query", "ui-card",
+    # ppt 技能（PR #116）：主题/要点/长 markdown → 演示材料
+    "ppt-generate",
 ]
 LABELS = SKILLS + ["others"]
 LABEL2ID = {lbl: i for i, lbl in enumerate(LABELS)}
@@ -60,7 +72,7 @@ class Encoder:
     def encode(self, texts, batch_size=64):
         out = []
         for i in range(0, len(texts), batch_size):
-            chunk = texts[i:i + batch_size]
+            chunk = [splice_long(t) for t in texts[i:i + batch_size]]
             batch = self.tok(chunk, padding=True, truncation=True, max_length=MAX_LENGTH, return_tensors="np")
             feeds = {k: v for k, v in batch.items() if k in self.input_names}
             o = self.sess.run(None, feeds)[0]
