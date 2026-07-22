@@ -15,9 +15,12 @@ default profile 的鉴权：
 """
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 
 class UserConfig(BaseModel):
@@ -136,7 +139,11 @@ def get_user_store() -> UserStore:
                     from ethan.core.config import reload_config
                     reload_config()  # load_config 内部会 set_user_store 重建并刷新 mtime
                 except Exception:
-                    pass  # 保留旧 store
+                    # 配置文件语法错误（如写入中途的 YAML）→ 保留旧 store，
+                    # 下次检查窗口再试。打 error 便于运维排查「改了配置却没生效」。
+                    logger.exception(
+                        "reload_config 失败，保留旧 UserStore；config.yaml 是否损坏？"
+                    )
     return _user_store
 
 
