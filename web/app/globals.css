@@ -356,26 +356,28 @@
   .prose blockquote p { margin: 0.3em 0; }
   /* 表格：紧凑、可读、圆角（.table-wrapper 由 markdown 组件生成） */
   .prose .table-wrapper {
-    margin-top: 0.7em;
-    margin-bottom: 0.7em;
+    margin: 0.7em 0.5em;
     border-radius: 0.5rem;
     overflow: hidden;
     border: 1px solid var(--border);
   }
   .prose .table-wrapper table {
     margin: 0;
+    padding: 0;
     font-size: 0.88em;
     width: 100%;
     border-collapse: collapse;
+    border-spacing: 0;
   }
   .prose .table-wrapper th, .prose .table-wrapper td {
-    padding: 0.6em 1em;
+    padding: 0.65em 1.2em;
     border-bottom: 1px solid var(--border);
     border-right: 1px solid var(--border);
     text-align: left;
   }
   .prose .table-wrapper th:last-child, .prose .table-wrapper td:last-child { border-right: none; }
   .prose .table-wrapper tr:last-child th, .prose .table-wrapper tr:last-child td { border-bottom: none; }
+  .prose .table-wrapper thead, .prose .table-wrapper tbody { margin: 0; padding: 0; }
   .prose .table-wrapper th { background: color-mix(in oklch, var(--muted) 90%, transparent); font-weight: 600; }
   .prose a { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
 }

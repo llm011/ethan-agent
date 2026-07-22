@@ -1004,21 +1004,39 @@ class Agent:
                         event, fut = consent_provider.create(desc, tc.name, detail, always=always)
                         yield event
                         try:
-                            ok = await _aio.wait_for(fut, timeout=300)
+                            from ethan.core.consent import ConsentResult
+                            result = await _aio.wait_for(fut, timeout=300)
+                            if isinstance(result, ConsentResult):
+                                ok = result.allowed
+                                consent_msg = result.message
+                            else:
+                                ok = bool(result)
+                                consent_msg = ""
                         except (_aio.CancelledError, _aio.TimeoutError):
                             ok = False
+                            consent_msg = ""
                     else:
                         ok = await consent_provider.request(desc, tc.name, detail)
+                        consent_msg = ""
                     if not ok:
+                        reject_text = "[用户拒绝此操作]"
+                        if consent_msg:
+                            reject_text += f"\n用户补充说明：{consent_msg}"
                         yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary="", state="error",
                                         result_preview="用户拒绝",
                                         skill_category=resolve_skill_category(tc.name, tc.arguments))
                         working.append(Message(
                             role="tool",
-                            content="[用户拒绝此操作]",
+                            content=reject_text,
                             tool_call_id=tc.id,
                         ))
                         continue
+                    # 授权通过：如有用户补充信息，注入系统消息供模型参考
+                    if consent_msg:
+                        working.append(Message(
+                            role="user",
+                            content=f"[用户在授权时补充]：{consent_msg}",
+                        ))
                     # 授权通过：记录到 session 维度（按 scope），后续同 scope 不再弹。
                     # 高危调用（always）不记入放行，下次同类仍单独询问。
                     if not always:
