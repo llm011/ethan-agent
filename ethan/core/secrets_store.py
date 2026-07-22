@@ -84,8 +84,15 @@ def _parse_single_value_file(path: Path) -> dict[str, str]:
         return {}
     expected_key = _deslugify(path.name)
     prefix = f"{expected_key}="
-    # 大小写不敏感匹配：写入时可能用小写 key，读取时 deslugify 为大写
-    if content.upper().startswith(prefix):
+    # 大小写不敏感匹配：写入时可能用小写 key 或中划线形式
+    # 对 content 的 key 部分也做 deslugify，兼容 api-yuntoken=xxx 形式
+    if "=" in content:
+        file_key, _, file_val = content.partition("=")
+        if _deslugify(file_key.strip()) == expected_key:
+            val = file_val.strip()
+            if val:
+                return {expected_key: val}
+    elif content.upper().startswith(prefix):
         val = content[len(prefix):].strip()
         if val:
             return {expected_key: val}

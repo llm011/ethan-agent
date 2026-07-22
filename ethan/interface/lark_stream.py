@@ -172,9 +172,9 @@ async def _handle_message(event_data: dict) -> None:
             if _bot_name:
                 text = _re.sub(rf"@{_re.escape(_bot_name)}\s*", "", text, flags=_re.IGNORECASE).strip()
                 _stripped = True
-        # 方式3：再兜底——去掉任意位置的 @非空白词（防止 bot_name 未配也没 mentions 时残留）
+        # 方式3：再兜底——只去开头的 @word（避免误删正文中的邮箱、装饰器等 @ 文本）
         if not _stripped and "@" in text:
-            text = _re.sub(r"@\S+\s*", "", text).strip()
+            text = _re.sub(r"^@\S+\s*", "", text).strip()
 
     # ── /btw：顺带一问——不带历史、不带 cold facts 的单轮轻量查询 ──
     # 解析放在 /command 之前，因为 /btw 需要走完整 agent 流程（只是上下文为空）。

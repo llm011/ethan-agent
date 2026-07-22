@@ -81,13 +81,18 @@ def _safe_math_eval(expr: str) -> str | None:
     for node in ast.walk(tree):
         if type(node).__name__ not in _SAFE_EVAL_NODES:
             return None
-    # 大数幂运算拦截：检查 ** 右侧是否超限
+    # 幂运算安全检查：右操作数必须是字面常量（或 -常量），防止 2**(2**20) 类嵌套幂 DoS
     for node in ast.walk(tree):
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
-            if isinstance(node.right, ast.Constant):
-                exp_val = node.right.value
-                if isinstance(exp_val, (int, float)) and abs(exp_val) > _MAX_EXPONENT:
-                    return None
+            right = node.right
+            # 允许 UnaryOp(-Constant)，如 2**-3
+            if isinstance(right, ast.UnaryOp) and isinstance(right.op, (ast.USub, ast.UAdd)):
+                right = right.operand
+            if not isinstance(right, ast.Constant):
+                return None  # 右操作数是表达式 → 拒绝，走 LLM
+            exp_val = right.value
+            if isinstance(exp_val, (int, float)) and abs(exp_val) > _MAX_EXPONENT:
+                return None
     try:
         result = eval(compile(tree, '<expr>', 'eval'), {"__builtins__": None}, {})
         # 格式化：整数不带小数点，浮点保留合理精度

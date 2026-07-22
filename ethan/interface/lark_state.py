@@ -213,9 +213,7 @@ async def _should_respond_to_group_message(text: str, lark_cfg, event_data: dict
         bot_name = getattr(lark_cfg, "bot_name", "") or ""
         if bot_name and f"@{bot_name}" in text:
             return True
-        # text 中有 @ 符号（可能 lark-cli 没传 mentions 但文本里有 @）
-        if "@" in text:
-            return True
+        # 没有 bot_name 配置且无结构化 mentions → 无法判断是否 @ 了 bot，不响应
         return False
     if mode == "keywords":
         keywords = getattr(lark_cfg, "group_keywords", []) or []

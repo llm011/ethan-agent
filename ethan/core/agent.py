@@ -1075,12 +1075,11 @@ class Agent:
                             tool_call_id=tc.id,
                         ))
                         continue
-                    # 授权通过：如有用户补充信息，注入系统消息供模型参考
+                    # 授权通过：如有用户补充信息，暂存待拼入 tool 结果（不插 user 消息，避免破坏 LLM 消息协议）
                     if consent_msg:
-                        working.append(Message(
-                            role="user",
-                            content=f"[用户在授权时补充]：{consent_msg}",
-                        ))
+                        if not hasattr(self, '_consent_msgs'):
+                            self._consent_msgs = {}
+                        self._consent_msgs[tc.id] = consent_msg
                     # 授权通过：记录到 session 维度（按 scope），后续同 scope 不再弹。
                     # 高危调用（always）不记入放行，下次同类仍单独询问。
                     if not always:
@@ -1112,9 +1111,14 @@ class Agent:
                 preview = mask_text(_preview(r.content)) if r.content else ""
                 detail = mask_text(_detail(r.content)) if r.content else ""
                 yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary="", state="done" if not r.is_error else "error", result_preview=preview, result_detail=detail, sub_steps=getattr(r, "sub_steps", []) or [], ui=getattr(r, "ui", None), mcp_app=getattr(r, "mcp_app", None), cards=getattr(r, "cards", None), cards_meta=getattr(r, "cards_meta", None), entity_type=classify_tool(tc.name), entity_id=extract_entity_id(tc.name, tc.arguments), skill_category=resolve_skill_category(tc.name, tc.arguments))
+                # 如果授权时用户有补充信息，拼到 tool 结果内容头部
+                tool_content = r.content or ""
+                consent_extra = getattr(self, '_consent_msgs', {}).pop(tc.id, None)
+                if consent_extra:
+                    tool_content = f"[用户在授权时补充]：{consent_extra}\n\n{tool_content}"
                 working.append(Message(
                     role="tool",
-                    content=r.content,
+                    content=tool_content,
                     tool_call_id=r.tool_call_id,
                     images=r.images or [],
                 ))
