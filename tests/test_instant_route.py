@@ -125,8 +125,8 @@ class TestMathSafety:
     def test_reject_large_exponent_caret(self):
         """用户输入 ^ 格式的大数幂不能走 math（防卡死）"""
         r = classify_instant("9^99999")
-        # 可能 fallback 到 direct（短文本），但绝不能是 math
-        assert r is None or r.kind != "math"
+        # math 被拒绝，direct 已移除 → 返回 None
+        assert r is None
 
 
 # ---------------------------------------------------------------------------
@@ -212,21 +212,51 @@ class TestGreetingInstant:
 
 
 # ---------------------------------------------------------------------------
-# 5. Short trivial text → direct
+# 5. Short text that should NOT be instant (previously "direct" category, now removed)
 # ---------------------------------------------------------------------------
 
-class TestDirectInstant:
-    def test_short_statement(self):
-        r = classify_instant("哈哈哈")
-        assert r is not None
-        assert r.kind == "direct"
+class TestShortTextNotInstant:
+    """短文本不再自动走 instant——只有精确匹配 greeting 才走。"""
 
-    def test_emoji_like(self):
+    def test_hahaha(self):
+        """'哈哈哈' 不在 greeting 列表 → 走正常路由"""
+        r = classify_instant("哈哈哈")
+        assert r is None
+
+    def test_pure_number(self):
+        """纯数字 '666' 无运算符 → 不走 math，也不走 direct"""
         r = classify_instant("666")
-        # 纯数字也可能走 math，但 "666" 作为单数字不是表达式（无运算符）
-        # 实际上纯数字也满足 math pattern，eval("666") = 666
-        assert r is not None
-        assert r.kind in ("math", "direct")
+        assert r is None
+
+    def test_business_progress(self):
+        """'我上周的业务进展怎么样' — 需要查记录，不能直答"""
+        r = classify_instant("我上周的业务进展怎么样")
+        assert r is None
+
+    def test_check_it(self):
+        """'你查下呀' — 明确要求查询"""
+        r = classify_instant("你查下呀")
+        assert r is None
+
+    def test_short_task(self):
+        """'发个周报' — 需要工具"""
+        r = classify_instant("发个周报")
+        assert r is None
+
+    def test_show_schedule(self):
+        """'看看日程' — 需要查日历"""
+        r = classify_instant("看看日程")
+        assert r is None
+
+    def test_short_question_no_mark(self):
+        """'最近有啥消息' — 虽无问号但需要查数据"""
+        r = classify_instant("最近有啥消息")
+        assert r is None
+
+    def test_read_doc(self):
+        """'打开那个文档' — 需要工具"""
+        r = classify_instant("打开那个文档")
+        assert r is None
 
 
 # ---------------------------------------------------------------------------

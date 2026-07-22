@@ -146,11 +146,6 @@ def classify_instant(text: str) -> InstantResult | None:
     if bare in _GREETING_EXACT:
         return InstantResult(kind="greeting")
 
-    # 4) 短文本（<=20字）+ 无问号 + 无动作意图 → direct（保守策略）
-    if len(stripped) <= 20:
-        if "?" not in stripped and "？" not in stripped:
-            return InstantResult(kind="direct")
-
     return None
 
 

@@ -816,8 +816,8 @@ class Agent:
             if instant.kind == "time":
                 yield f"现在是 {instant.answer}"
                 return
-            # greeting / direct: LLM 裸答（无 tools、无 memory recall、极简 system）
-            if instant.kind in ("greeting", "direct"):
+            # greeting: LLM 裸答（无 tools、无 memory recall、极简 system）
+            if instant.kind == "greeting":
                 from ethan.core.timezone import get_local_timezone
                 now = datetime.now(get_local_timezone()).strftime("%Y-%m-%d %H:%M:%S %A")
                 minimal_system = (
