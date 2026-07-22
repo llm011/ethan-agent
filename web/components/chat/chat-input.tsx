@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useRef, RefObject, useCallback } from "react";
-import { Send, Paperclip, X, Reply, Square, ImageIcon } from "lucide-react";
+import { Send, Paperclip, X, Reply, Square, ImageIcon, Maximize2, Minimize2 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@ethan/shared/ui/select";
 import { uploadFile, type ModeEntry } from "@/lib/api";
 import type { Quote, PendingFile } from "@ethan/shared/chat/types";
+import { MdEditor } from "@/components/md-editor";
 
 // mode.accent → 完整 Tailwind 类（必须静态写全，Tailwind 不识别动态拼接的类名）。
 // 新增带新配色的模式时在此补一条；未知 accent 回退 neutral。
@@ -59,6 +60,7 @@ export function ChatInput({
 }: ChatInputProps) {
   const [input, setInput] = useState("");
   const [dragging, setDragging] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   // 读图片文件为 base64 dataUrl，返回 PendingFile
@@ -218,17 +220,45 @@ export function ChatInput({
               松开以添加图片
             </div>
           )}
-          {!dragging && (
-            <textarea
-              ref={inputRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              onPaste={handlePaste}
-              placeholder="输入消息… (Enter 发送，Shift+Enter 换行，可直接粘贴图片)"
-              className="w-full resize-none bg-transparent px-4 pt-3 pb-2 text-sm outline-none min-h-[52px] max-h-[200px] leading-relaxed"
-              rows={1}
-            />
+          {!dragging && !expanded && (
+            <div className="relative">
+              <textarea
+                ref={inputRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                onPaste={handlePaste}
+                placeholder="输入消息… (Enter 发送，Shift+Enter 换行，可直接粘贴图片)"
+                className="w-full resize-none bg-transparent px-4 pt-3 pb-2 text-sm outline-none min-h-[52px] max-h-[200px] leading-relaxed"
+                rows={1}
+              />
+              <button
+                onClick={() => setExpanded(true)}
+                className="absolute top-2 right-2 h-6 w-6 flex items-center justify-center rounded-md text-muted-foreground/50 hover:text-foreground hover:bg-muted transition-colors"
+                title="展开为 Markdown 编辑器"
+              >
+                <Maximize2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+          {!dragging && expanded && (
+            <div className="relative">
+              <button
+                onClick={() => setExpanded(false)}
+                className="absolute top-2 right-2 z-10 h-6 w-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                title="收起编辑器"
+              >
+                <Minimize2 className="h-3.5 w-3.5" />
+              </button>
+              <div className="[&>div]:min-h-[280px] [&>div]:border-0 [&>div]:rounded-none">
+                <MdEditor
+                  value={input}
+                  onChange={setInput}
+                  placeholder="输入 Markdown 内容… (支持预览和分栏模式)"
+                  defaultMode="edit"
+                />
+              </div>
+            </div>
           )}
           <div className="flex items-center gap-1 px-3 pb-2.5">
             <button
