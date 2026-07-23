@@ -1,4 +1,5 @@
 import type { Message } from "@ethan/shared/chat/types";
+import { assetUrl } from "@/lib/api-base";
 
 // 清洗后的占位标题：去 markdown 标记 / 命令前缀，截断 40 字
 // 与后端 _auto_title 逻辑对齐，让前端 0ms 显示可读标题
@@ -25,7 +26,11 @@ export function mapDetailMessages(detail: { messages: any[] }): Message[] {
           name: "",
           path: "",
           isImage: true,
-          dataUrl: img.data ? `data:${img.media_type || "image/png"};base64,${img.data}` : img.dataUrl,
+          dataUrl: img.url
+            ? assetUrl(img.url)
+            : img.data
+              ? `data:${img.media_type || "image/png"};base64,${img.data}`
+              : img.dataUrl,
         }))
       : undefined,
     toolSteps: m.tool_steps && m.tool_steps.length > 0

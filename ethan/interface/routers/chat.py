@@ -15,6 +15,8 @@ from ethan.providers.base import Message
 from .deps import create_agent, verify_token
 from .helpers import (
     _friendly_error,
+    _persist_images_to_disk,
+    _resolve_images_for_llm,
     _setup_error_stream,
     _status_for_setup_error,
     _with_quote,
@@ -133,10 +135,23 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
         if req.session_id:
             for m in messages[-1:]:
                 if m.role == "user":
+                    # 图片持久化到本地文件，DB 只存路径
+                    original_images = None
+                    saved_image_paths: list[str] = []
+                    if m.images:
+                        original_images = m.images[:]
+                        saved_image_paths = _persist_images_to_disk(m, req.session_id)
                     # 把引用信息附到消息上一起持久化，刷新后仍能渲染引用气泡
                     if req.quote and req.quote.get("content"):
                         m.quote = req.quote
                     await store.save_message(req.session_id, m)
+                    # 恢复原始 images（含 base64），确保后续发给 LLM 时仍可用
+                    if original_images is not None:
+                        m.images = original_images
+                    # 给当前消息附加图片路径提示（仅影响发给 LLM 的内容，不入库）
+                    if saved_image_paths and m.content:
+                        paths_hint = ", ".join(saved_image_paths)
+                        m.content = f"{m.content}\n\n[image_paths: {paths_hint}]"
             # /review 命令：立即从 URL 解析出 PR 标题并更新，不等 review 跑完
             user_text = (req.messages[-1].get("content", "") if req.messages else "").strip()
             if user_text:
@@ -160,6 +175,8 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
 
             current_user = _with_quote(messages[-1], req.quote)
             messages = memory.build_context() + [current_user]
+            # 历史消息中的图片从 {path} 格式解析为 {data} base64（LLM 需要）
+            _resolve_images_for_llm(messages)
         elif req.btw and messages:
             # /btw：只带本条消息，不带任何历史
             messages = [_with_quote(messages[-1], req.quote)]

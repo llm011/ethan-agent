@@ -37,6 +37,18 @@ export function headers(): HeadersInit {
   return h;
 }
 
+/** 构建 assets URL（图片等静态资源），自动处理跨域鉴权。
+ * 生产模式同源，cookie 自动携带；开发模式跨端口，追加 ?token= query 参数。
+ */
+export function assetUrl(relativePath: string): string {
+  const url = `${API_URL}/${relativePath}`;
+  if (typeof window !== "undefined" && window.location.port === "3000") {
+    const token = getAuthToken();
+    if (token) return `${url}?token=${encodeURIComponent(token)}`;
+  }
+  return url;
+}
+
 export async function verifyAuth(token: string): Promise<boolean> {
   const res = await fetch(`${API_URL}/auth`, {
     method: "POST",

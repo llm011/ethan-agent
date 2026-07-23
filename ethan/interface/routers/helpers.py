@@ -83,4 +83,63 @@ def _with_quote(user_msg: Message, quote: dict | None) -> Message:
     role_label = "用户" if quote.get("role") == "user" else "Ethan"
     quote_text = str(quote["content"]).replace("\n", "\n> ")
     prefixed = f"> [引用 {role_label} 的消息]:\n> {quote_text}\n\n{user_msg.content}"
-    return Message(role=user_msg.role, content=prefixed, created_at=user_msg.created_at)
+    return Message(role=user_msg.role, content=prefixed, created_at=user_msg.created_at, images=user_msg.images)
+
+
+def _persist_images_to_disk(msg: Message, session_id: str) -> list[str]:
+    """将消息中的 base64 图片保存为本地文件，msg.images 就地替换为路径格式。
+
+    原始格式: [{"data": "base64...", "media_type": "image/png"}]
+    替换为:   [{"path": "session_id/ts_0.png", "media_type": "image/png"}]
+
+    返回保存的文件绝对路径列表（供调用方给 LLM 提供路径提示）。
+    """
+    from ethan.core.assets import image_file_path, save_image
+
+    persisted = []
+    saved_paths: list[str] = []
+    for idx, img in enumerate(msg.images):
+        data = img.get("data", "")
+        media_type = img.get("media_type", "image/png")
+        if not data:
+            persisted.append(img)
+            continue
+        path = save_image(session_id, idx, data, media_type)
+        persisted.append({"path": path, "media_type": media_type})
+        saved_paths.append(str(image_file_path(path)))
+
+    msg.images = persisted
+    return saved_paths
+
+
+def _resolve_images_for_llm(messages: list[Message]) -> None:
+    """将消息中 {path, media_type} 格式的图片解析为 {data, media_type}（LLM 需要 base64）。
+
+    DB 存储的历史消息只保留路径引用，发送给 LLM 前需读回文件内容还原为 base64。
+    已含 data 字段的（当前消息原始格式）直接保留不做处理。
+
+    同时在消息末尾附加图片本地路径提示，让 agent 的工具模式能直接定位文件。
+    """
+    from ethan.core.assets import image_file_path, load_image_b64
+
+    for msg in messages:
+        if not msg.images:
+            continue
+        resolved = []
+        file_paths: list[str] = []
+        for img in msg.images:
+            if "data" in img:
+                resolved.append(img)
+            elif "path" in img:
+                b64 = load_image_b64(img["path"])
+                if b64:
+                    resolved.append({"data": b64, "media_type": img.get("media_type", "image/png")})
+                    file_paths.append(str(image_file_path(img["path"])))
+                # 文件不存在则跳过（不影响 LLM 调用）
+            else:
+                resolved.append(img)
+        msg.images = resolved
+        # 附加路径提示：让 agent 工具模式知道图片在本地文件系统的位置
+        if file_paths and msg.role == "user" and msg.content:
+            paths_hint = ", ".join(file_paths)
+            msg.content = f"{msg.content}\n\n[image_paths: {paths_hint}]"

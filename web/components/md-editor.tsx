@@ -35,7 +35,7 @@ export function MdEditor({
             {m === "edit" ? "编辑" : m === "split" ? "分栏" : "预览"}
           </button>
         ))}
-        <span className="ml-auto text-xs text-muted-foreground">{value.length} 字符</span>
+        <span className="ml-auto text-xs text-muted-foreground mr-7">{value.length} 字符</span>
       </div>
 
       {/* Editor area */}

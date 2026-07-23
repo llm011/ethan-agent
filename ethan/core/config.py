@@ -27,6 +27,7 @@ class ModelEntry(BaseModel):
 
 class NetworkConfig(BaseModel):
     proxy: Optional[str] = None  # http://127.0.0.1:7890
+    base_url: str = ""  # 服务端外部可达地址（如 http://localhost:8900），用于拼接 assets URL；空=自动推断
     auth_token: str = ""  # Web UI 浏览器登录 token（default profile 的 web_token）
     api_keys: list[str] = Field(default_factory=list)  # /v1/chat/completions API keys（default profile）
 
