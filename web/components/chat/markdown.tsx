@@ -18,6 +18,98 @@ export function fixBold(text: string): string {
   });
 }
 
+// LLM 常用 LaTeX 记号（如 $\rightarrow$）不会被 react-markdown 解析，原样显示。
+// 这里把 $...$ 内的常见符号替换为 Unicode；代码块/行内 code 不经此函数（走 code 组件）。
+const LATEX_SYMBOLS: Record<string, string> = {
+  "\\rightarrow": "→", "\\to": "→",
+  "\\leftarrow": "←", "\\gets": "←",
+  "\\leftrightarrow": "↔",
+  "\\Rightarrow": "⇒", "\\implies": "⇒",
+  "\\Leftarrow": "⇐",
+  "\\Leftrightarrow": "⇔", "\\iff": "⇔",
+  "\\leq": "≤", "\\leqslant": "≤",
+  "\\geq": "≥", "\\geqslant": "≥",
+  "\\neq": "≠",
+  "\\approx": "≈",
+  "\\times": "×",
+  "\\div": "÷",
+  "\\pm": "±",
+  "\\mp": "∓",
+  "\\infty": "∞",
+  "\\cdots": "…", "\\ldots": "…", "\\dots": "…",
+  "\\cdot": "·",
+  "\\bullet": "•",
+  "\\degree": "°",
+  "\\forall": "∀",
+  "\\exists": "∃",
+  "\\nexists": "∄",
+  "\\in": "∈",
+  "\\notin": "∉",
+  "\\subset": "⊂",
+  "\\supset": "⊃",
+  "\\subseteq": "⊆",
+  "\\supseteq": "⊇",
+  "\\cup": "∪",
+  "\\cap": "∩",
+  "\\emptyset": "∅", "\\varnothing": "∅",
+  "\\propto": "∝",
+  "\\sim": "∼",
+  "\\equiv": "≡",
+  "\\perp": "⊥",
+  "\\parallel": "∥",
+  "\\angle": "∠",
+  "\\triangle": "△",
+  "\\sqrt": "√",
+  "\\partial": "∂",
+  "\\nabla": "∇",
+  "\\sum": "∑",
+  "\\prod": "∏",
+  "\\int": "∫",
+  "\\oint": "∮",
+  "\\alpha": "α", "\\beta": "β", "\\gamma": "γ", "\\delta": "δ", "\\epsilon": "ε",
+  "\\varepsilon": "ε", "\\zeta": "ζ", "\\eta": "η", "\\theta": "θ", "\\vartheta": "ϑ",
+  "\\iota": "ι", "\\kappa": "κ", "\\lambda": "λ", "\\mu": "μ", "\\nu": "ν",
+  "\\xi": "ξ", "\\pi": "π", "\\varpi": "ϖ", "\\rho": "ρ", "\\varrho": "ϱ",
+  "\\sigma": "σ", "\\varsigma": "ς", "\\tau": "τ", "\\upsilon": "υ", "\\phi": "φ",
+  "\\varphi": "φ", "\\chi": "χ", "\\psi": "ψ", "\\omega": "ω",
+  "\\Gamma": "Γ", "\\Delta": "Δ", "\\Theta": "Θ", "\\Lambda": "Λ",
+  "\\Xi": "Ξ", "\\Pi": "Π", "\\Sigma": "Σ", "\\Upsilon": "Υ",
+  "\\Phi": "Φ", "\\Psi": "Ψ", "\\Omega": "Ω",
+};
+
+export function fixLatex(text: string): string {
+  // 先抽出代码块/行内 code，避免误伤
+  const placeholders: string[] = [];
+  const CODE_BLOCK = /```[\s\S]*?```/g;
+  const CODE_INLINE = /`[^`\n]+`/g;
+  let out = text.replace(CODE_BLOCK, (m) => {
+    placeholders.push(m);
+    return `\u0000${placeholders.length - 1}\u0000`;
+  });
+  out = out.replace(CODE_INLINE, (m) => {
+    placeholders.push(m);
+    return `\u0000${placeholders.length - 1}\u0000`;
+  });
+
+  // $...$ 内的 \word 替换为对应 Unicode；未命中的 $...$ 原样保留
+  out = out.replace(/\$([^$\n]+)\$/g, (_, inner: string) => {
+    let replaced = inner;
+    for (const [cmd, sym] of Object.entries(LATEX_SYMBOLS)) {
+      replaced = replaced.split(cmd).join(sym);
+    }
+    // 若替换后已无反斜杠，说明是纯符号表达式，直接去掉 $ 包裹
+    // 否则保留 $...$ 让用户看到原始内容
+    if (!replaced.includes("\\")) {
+      return replaced;
+    }
+    return `$${replaced}$`;
+  });
+
+  // 还原代码占位
+  out = out.replace(/\u0000(\d+)\u0000/g, (_, i: string) => placeholders[+i]);
+  return out;
+}
+
 export const markdownComponents: Components = {
   code: ({ className, children }) => {
     const match = /language-(\w+)/.exec(className || "");
@@ -53,7 +145,7 @@ export const MarkdownContent = forwardRef<
     }
   >
     <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-      {fixBold(content)}
+      {fixLatex(fixBold(content))}
     </ReactMarkdown>
   </div>
 ));
