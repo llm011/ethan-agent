@@ -487,8 +487,59 @@
 .share-role.user { color: #0969da; background: #ddf4ff; }
 .share-role.assistant { color: #1f2328; background: #eaeef2; }
 .share-time { font-size: 11px; color: #8b949e; }
+.share-edit-btn {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: #8b949e;
+  opacity: 0.5;
+  padding: 2px;
+  display: inline-flex;
+  align-items: center;
+  transition: opacity 0.15s;
+}
+.share-edit-btn:hover { opacity: 1; color: #0969da; }
+.share-edit-textarea {
+  width: 100%;
+  min-height: 80px;
+  font-size: 14px;
+  line-height: 1.6;
+  font-family: inherit;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  padding: 8px 10px;
+  resize: vertical;
+  background: #fff;
+  color: #1f2328;
+  outline: none;
+}
+.share-edit-textarea:focus { border-color: #0969da; box-shadow: 0 0 0 2px rgba(9,105,218,0.15); }
 .share-user-text { font-size: 15px; line-height: 1.7; white-space: pre-wrap; word-break: break-word; }
 .share-divider { height: 1px; background: #eaecef; margin: 16px 0; }
+/* assistant 消息底部统计行：tokens / TTFB / 总耗时 / 生成耗时 */
+.share-stats {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  line-height: 1.4;
+}
+.share-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.share-stat-tokens { background: #e8f1ff; color: #0969da; }
+.share-stat-ttfb { background: #fff5d6; color: #9a6700; }
+.share-stat-total { background: #f1e8ff; color: #8957e5; }
+.share-stat-gen { background: #e6f9ec; color: #1a7f37; }
 .share-foot {
   display: flex;
   align-items: baseline;

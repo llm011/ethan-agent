@@ -178,7 +178,7 @@ function ComparisonTable({ data }: { data: ToolTiers }) {
   );
 }
 
-export function ToolTiersView() {
+export function ToolTiersView({ embedded = false }: { embedded?: boolean }) {
   const [data, setData] = useState<ToolTiers | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -199,14 +199,16 @@ export function ToolTiersView() {
 
   return (
     <div className="flex flex-col h-full bg-background text-foreground">
-      <header className="h-12 border-b border-border flex items-center px-4 justify-between shrink-0">
-        <h1 className="font-semibold text-lg">模式工具集 (Tool Tiers)</h1>
-        <Button variant="ghost" size="icon" onClick={load} disabled={loading}>
-          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-        </Button>
-      </header>
+      {!embedded && (
+        <header className="h-12 border-b border-border flex items-center px-4 justify-between shrink-0">
+          <h1 className="font-semibold text-lg">模式工具集 (Tool Tiers)</h1>
+          <Button variant="ghost" size="icon" onClick={load} disabled={loading}>
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+          </Button>
+        </header>
+      )}
 
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className={`flex-1 overflow-y-auto ${embedded ? "p-4" : "p-6"}`}>
         {loading && !data ? (
           <div className="flex items-center justify-center pt-10">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
