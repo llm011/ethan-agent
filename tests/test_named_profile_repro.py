@@ -3,8 +3,9 @@
 
 回归场景：changpeng 帐号在 1 轮短会话里说"我最近在研究机器人"没被记录。
 根因是旧的实时抽取门槛 `user_turns % 3 != 0` 让 <3 轮短会话永不触发，
-午夜 backfill 又被 `_BACKFILL_MIN_CHARS=500` 当闲聊丢弃。修复后短会话即时
-触发，explicit 事实直接准入。admin/changpeng 对称断言，杜绝 per-profile 回归。
+午夜 backfill 又被过高的字符门槛当闲聊丢弃。修复后短会话即时触发（token
+门槛只挡纯寒暄），explicit 事实直接准入。admin/changpeng 对称断言，杜绝
+per-profile 回归。
 """
 from __future__ import annotations
 
@@ -19,8 +20,8 @@ from ethan.providers.base import Message
 
 
 def _setup_profile_env(tmp_path, monkeypatch, user_id: str):
-    import ethan.core.paths as paths
     import ethan.core.config as config_mod
+    import ethan.core.paths as paths
     monkeypatch.setattr(paths, "CONFIG_DIR", tmp_path)
     monkeypatch.setattr(config_mod, "CONFIG_DIR", tmp_path)
     token = ETHAN_USER_ID.set(user_id)
@@ -71,7 +72,10 @@ class _R:
 
 
 class FakeProvider:
-    def __init__(self, p): self.payload = p; self.calls = 0
+    def __init__(self, p):
+        self.payload = p
+        self.calls = 0
+
     async def chat(self, messages, tools=None, system="", max_tokens=None):
         self.calls += 1
         return _R(self.payload)
@@ -120,8 +124,9 @@ async def test_short_session_records_explicit_for_named_profile(tmp_path, monkey
     """回归：changpeng 在 1 轮短会话里明确陈述"我最近在研究机器人"，必须被记录并召回。
 
     这是用户报告的症状根因：旧逻辑 user_turns % 3 != 0 门槛让 <3 轮短会话永不触发
-    实时抽取；午夜 backfill 又被 _BACKFILL_MIN_CHARS=500 当闲聊丢弃。修复后短会话
-    即时触发，explicit 事实直接准入。admin/changpeng 对称断言，杜绝 per-profile 回归。
+    实时抽取；午夜 backfill 又被过高的字符门槛当闲聊丢弃。修复后短会话即时触发
+    （token 门槛只挡纯寒暄），explicit 事实直接准入。admin/changpeng 对称断言，
+    杜绝 per-profile 回归。
     """
     admin = await _run_case("", "explicit", tmp_path, monkeypatch, "admin-1turn", pairs=1)
     cp = await _run_case("changpeng", "explicit", tmp_path, monkeypatch, "cp-1turn", pairs=1)

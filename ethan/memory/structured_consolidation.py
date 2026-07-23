@@ -53,7 +53,9 @@ def _day_bounds(d: date) -> tuple[float, float]:
 
 
 # 兜底扫描门槛：短会话在 12 点补一次提取
-_BACKFILL_MIN_CHARS = 20           # user 消息累计字符门槛，仅过滤 hi/hello/嗯 等纯寒暄
+# 用 token 数而非字符数：字符数对英文形同虚设（"hello there" 才 11 字符就破门），
+# token 跨中英文对齐——"我最近在研究机器人"≈9 tok，"hello"=1 tok，"hello there"=2 tok。
+_BACKFILL_MIN_TOKENS = 15          # user 消息累计 token 门槛，过滤 hi/hello/嗯 等纯寒暄
 _BACKFILL_MAX_USER_TURNS = 2       # 只补 user_turns <= 2 的 session（3 轮已能实时触发）
 
 
@@ -73,7 +75,7 @@ async def _backfill_short_sessions(
     过滤：
     - 跳过 heartbeat / midnight 等 system session
     - user_turns >= 3 的 session 已经实时触发过，跳过
-    - user 消息累计字符 < _BACKFILL_MIN_CHARS 视为闲聊，跳过（避免浪费 LLM token）
+    - user 消息累计 token < _BACKFILL_MIN_TOKENS 视为闲聊，跳过（避免浪费 LLM token）
     - _run_structured_extraction 内部还有 claim_job + 水位线检查，已提取过的会自动 return
 
     返回本次兜底扫描尝试提取的 session 数。
@@ -97,8 +99,9 @@ async def _backfill_short_sessions(
             continue  # 已能被实时链路触发
         if len(user_msgs) > _BACKFILL_MAX_USER_TURNS:
             continue
-        total_chars = sum(len(m.content) for m in user_msgs)
-        if total_chars < _BACKFILL_MIN_CHARS:
+        from ethan.memory.embeddings import count_tokens
+        total_tokens = sum(count_tokens(m.content) for m in user_msgs)
+        if total_tokens < _BACKFILL_MIN_TOKENS:
             continue  # 闲聊过滤
         try:
             await _run_structured_extraction(

@@ -174,6 +174,79 @@ def _try_get_encoder():
     return _encoder
 
 
+# ── 轻量 token 计数（只加载 tokenizer.json，不跑 ONNX、不触发下载）────────────
+
+_count_tok = None            # tokenizers.Tokenizer / None（未查）/ False（已查且不可用）
+
+
+def _heuristic_token_count(text: str) -> int:
+    """零依赖 token 估算：CJK 每字≈1 token，其余按空格分词计数。
+
+    仅在 BGE tokenizer.json 不存在时兜底。粗略但跨语言稳定，够做寒闲聊门槛。
+    """
+    cjk = 0
+    buf: list[str] = []
+    for ch in text:
+        if "一" <= ch <= "鿿" or "぀" <= ch <= "ヿ" or "가" <= ch <= "힣":
+            cjk += 1
+            buf.append(" ")
+        else:
+            buf.append(ch)
+    words = len([w for w in "".join(buf).split() if any(c.isalnum() for c in w)])
+    return cjk + words
+
+
+def _resolve_tokenizer_path() -> Path | None:
+    """定位 BGE tokenizer.json：env > 包内 router_models/ > ~/.ethan/models/。
+
+    只查本地已存在的文件，绝不触发下载——token 计数不值得为此联网拉模型。
+    """
+    env_path = os.environ.get("ETHAN_BGE_ONNX")
+    if env_path:
+        p = Path(env_path)
+        target = p.parent if p.is_file() else p
+        tj = target / "tokenizer.json"
+        if tj.exists():
+            return tj
+    pkg = Path(__file__).resolve().parent.parent / "skills" / "router_models" / "tokenizer.json"
+    if pkg.exists():
+        return pkg
+    try:
+        from ethan.core.config import CONFIG_DIR
+        fb = CONFIG_DIR / "models" / "bge-small-zh" / "tokenizer.json"
+        if fb.exists():
+            return fb
+    except Exception:
+        pass
+    return None
+
+
+def count_tokens(text: str) -> int:
+    """估算文本 token 数。优先用 BGE tokenizer.json（离线、不跑推理、不下载），
+    加载失败退化到启发式。用于短会话/兜底扫描的寒暄过滤门槛。
+    """
+    global _count_tok
+    if not text:
+        return 0
+    if _count_tok is None:
+        tj = _resolve_tokenizer_path()
+        if tj is None:
+            _count_tok = False
+        else:
+            try:
+                from tokenizers import Tokenizer
+                _count_tok = Tokenizer.from_file(str(tj))
+            except Exception:
+                _count_tok = False
+    if _count_tok is False:
+        return _heuristic_token_count(text)
+    try:
+        ids = _count_tok.encode(text).ids
+        return max(0, len(ids) - 2)  # 减 [CLS]/[SEP] 两个特殊 token
+    except Exception:
+        return _heuristic_token_count(text)
+
+
 # ── Public API ──────────────────────────────────────────────────────────────
 
 async def embed(text: str) -> list[float]:
