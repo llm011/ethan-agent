@@ -260,7 +260,7 @@ export function Sidebar() {
           />
         )}
         {editingSessionId === s.id ? (
-          <div className="flex gap-1">
+          <div className="flex gap-1 shrink-0">
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -281,7 +281,7 @@ export function Sidebar() {
             </button>
           </div>
         ) : (
-          <div className="flex opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="hidden group-hover:flex shrink-0 gap-0.5">
             <Button
               variant="ghost"
               size="icon"
