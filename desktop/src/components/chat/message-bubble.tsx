@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, memo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Quote as QuoteIcon, BookOpen as BookOpenIcon, Share2 as ShareIcon } from "lucide-react";
+import { Quote as QuoteIcon, BookOpen as BookOpenIcon, Share2 as ShareIcon, Plus as PlusIcon, Send as SendIcon, Trash2 as TrashIcon } from "lucide-react";
 import { ToolTimeline } from "@ethan/shared/components/tool-timeline";
 import { SwimlaneDiagram } from "@ethan/shared/components/swimlane-diagram";
 import { fmtTokens } from "@/lib/utils";
@@ -24,6 +24,107 @@ function CardRenderer({ cards }: { cards: CardData[] }) {
     <div className="mt-2 mb-2 space-y-2">
       {searchResults.length > 0 && <SearchCardCarousel cards={searchResults} />}
       {images.length > 0 && <ImageGallery cards={images} />}
+    </div>
+  );
+}
+
+// 运行中「补充信息」输入框：点击按钮内联展开（非弹窗），提交后塞入当前 run 的 inbox，
+// agent loop 下一轮调模型前会 append 到 working 末尾（prompt 结尾）。
+function InjectBox({ onInject }: { onInject: (content: string) => Promise<{ ok: boolean; error?: string }> }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [status, setStatus] = useState<{ kind: "ok" | "err"; msg: string } | null>(null);
+  const taRef = useRef<HTMLTextAreaElement>(null);
+
+  // 自动调整高度
+  useEffect(() => {
+    const ta = taRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
+  }, [text, open]);
+
+  // 状态提示自动消失
+  useEffect(() => {
+    if (!status) return;
+    const t = setTimeout(() => setStatus(null), status.kind === "ok" ? 2500 : 5000);
+    return () => clearTimeout(t);
+  }, [status]);
+
+  const handleSubmit = async () => {
+    const content = text.trim();
+    if (!content || submitting) return;
+    setSubmitting(true);
+    try {
+      const res = await onInject(content);
+      if (res.ok) {
+        setText("");
+        setStatus({ kind: "ok", msg: "已加入上下文，下一轮调用模型时读取" });
+      } else {
+        setStatus({ kind: "err", msg: res.error || "提交失败" });
+      }
+    } catch (e) {
+      setStatus({ kind: "err", msg: e instanceof Error ? e.message : "提交失败" });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => { setOpen(true); setTimeout(() => taRef.current?.focus(), 30); }}
+        className="mt-1 mb-1 text-xs text-muted-foreground/60 hover:text-muted-foreground inline-flex items-center gap-1 transition-colors"
+      >
+        <PlusIcon className="h-3 w-3" /> 补充信息
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-1 mb-2 rounded-lg border border-border/50 bg-background/50 px-2.5 py-1.5">
+      <textarea
+        ref={taRef}
+        className="w-full bg-transparent text-sm resize-none focus:outline-none placeholder:text-muted-foreground/40 leading-relaxed"
+        style={{ minHeight: "2.2em" }}
+        rows={2}
+        placeholder="补充一些信息给运行中的任务…（⌘/Ctrl+Enter 提交）"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+            e.preventDefault();
+            handleSubmit();
+          }
+        }}
+      />
+      <div className="flex justify-between items-center mt-1 gap-1.5">
+        <div className="text-xs min-h-[1em]">
+          {status && (
+            <span className={status.kind === "ok" ? "text-green-600/70 dark:text-green-400/70" : "text-red-600/70 dark:text-red-400/70"}>
+              {status.kind === "ok" ? "✓ " : "⚠ "}{status.msg}
+            </span>
+          )}
+        </div>
+        <div className="flex gap-1.5">
+          <button
+            onClick={() => { setOpen(false); setText(""); setStatus(null); }}
+            className="text-xs px-2 py-0.5 rounded text-muted-foreground hover:bg-muted transition-colors"
+            disabled={submitting}
+          >
+            收起
+          </button>
+          <button
+            onClick={handleSubmit}
+            className="text-xs px-2.5 py-0.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors inline-flex items-center gap-1"
+            disabled={submitting || !text.trim()}
+          >
+            <SendIcon className="h-3 w-3" />
+            {submitting ? "提交中…" : "提交"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -64,10 +165,12 @@ interface MessageBubbleProps {
   onCardAction?: (text: string) => void;
   onRead?: (msg: Message) => void;
   onShare?: (msg: Message) => void;
+  onDelete?: (msg: Message) => void;
+  onInject?: (content: string) => Promise<{ ok: boolean; error?: string }>;
   annotations?: Annotation[];
 }
 
-function MessageBubbleInner({ msg, isStreaming, isLast, onQuote, onCardAction, onRead, onShare, annotations }: MessageBubbleProps) {
+export function MessageBubbleInner({ msg, isStreaming, isLast, onQuote, onCardAction, onRead, onShare, onDelete, onInject, annotations }: MessageBubbleProps) {
   const [highlightedStep, setHighlightedStep] = useState<number | undefined>(undefined);
   // 思考过程（thought）默认展开，用户可手动折叠
   const [thoughtOpen, setThoughtOpen] = useState(true);
@@ -151,6 +254,28 @@ function MessageBubbleInner({ msg, isStreaming, isLast, onQuote, onCardAction, o
             <TooltipContent side={msg.role === "user" ? "left" : "right"}>分享这条消息</TooltipContent>
           </Tooltip>
         )}
+        {/* 悬浮删除按钮（两个角色都有，排在分享后面）：删除后消息从会话消失，后续上下文不再带上 */}
+        {onDelete && !isStreaming && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  onClick={() => onDelete(msg)}
+                  className={`absolute -top-2 ${
+                    msg.role === "user"
+                      ? "-left-21"
+                      : onRead && msg.id != null
+                        ? "-right-28"
+                        : "-right-21"
+                  } opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 flex items-center justify-center rounded-md bg-muted border border-border text-muted-foreground hover:text-destructive hover:bg-accent`}
+                />
+              }
+            >
+              <TrashIcon className="h-3 w-3" />
+            </TooltipTrigger>
+            <TooltipContent side={msg.role === "user" ? "left" : "right"}>删除这条消息（从会话移除，不再带入上下文）</TooltipContent>
+          </Tooltip>
+        )}
         <div
           className={`rounded-2xl px-4 py-3 break-words ${
             msg.role === "user"
@@ -215,6 +340,11 @@ function MessageBubbleInner({ msg, isStreaming, isLast, onQuote, onCardAction, o
             )}
             {msg.toolSteps && msg.toolSteps.length > 0 && msg.toolSteps.some(s => s.entity_type) && (
               <SwimlaneDiagram steps={msg.toolSteps} matchedSkills={msg.matchedSkills} onStepClick={setHighlightedStep} />
+            )}
+            {/* 运行中「补充信息」入口：仅在最后一条 assistant 消息流式生成中显示。
+                提交后内容塞入 ChatRun inbox，agent loop 下一轮调模型前 append 到 working 末尾。 */}
+            {isStreaming && isLast && onInject && (
+              <InjectBox onInject={onInject} />
             )}
             {msg.intermediateOutput && (
               isStreaming && isLast ? (

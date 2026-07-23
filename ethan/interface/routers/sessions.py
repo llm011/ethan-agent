@@ -146,6 +146,22 @@ async def delete_session(session_id: str, user_id: str = Depends(verify_token)):
     return {"ok": True}
 
 
+@router.delete("/sessions/{session_id}/messages/{message_id}")
+async def delete_message(session_id: str, message_id: int, user_id: str = Depends(verify_token)):
+    """删除会话中的单条消息（从存储中物理删除，后续对话不再带上其上下文）。"""
+    store = await get_session_store()
+    session = await store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    # 确认消息归属该会话
+    belongs = any(getattr(m, "id", None) == message_id for m in session.messages)
+    if not belongs:
+        raise HTTPException(status_code=404, detail="Message not found in this session")
+    await store.delete_message_by_id(message_id)
+    await store.touch(session_id)
+    return {"ok": True}
+
+
 class RenameSessionRequest(BaseModel):
     title: str | None = None
     mode: str | None = None

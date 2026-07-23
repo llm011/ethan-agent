@@ -10,10 +10,12 @@ import {
   type ModeEntry,
   type ModelEntry,
   fetchSession,
+  deleteMessage,
   fetchSchedules,
   streamChat,
   streamResume,
   stopGeneration,
+  injectMessage,
   updateSessionMode,
   fetchOnboardingStatus,
   fetchAgentSettings,
@@ -98,6 +100,30 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     setShareDefaultKey(key);
     setShareMessage(msg);
   }, []);
+
+  const handleDelete = useCallback(async (msg: Message) => {
+    if (!activeSession || msg.id == null) return;
+    if (!confirm("确定删除这条消息？删除后从会话移除，后续对话不再带上其上下文。")) return;
+    try {
+      await deleteMessage(activeSession, msg.id);
+      setMessages(prev => prev.filter(m => m.id !== msg.id));
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "删除失败");
+    }
+  }, [activeSession]);
+
+  // 运行中「补充信息」：调 POST /chat/{id}/inject，把内容塞入 ChatRun inbox。
+  // agent loop 下一轮调模型前会 append 到 working 末尾（prompt 结尾）。
+  // 无活跃 run 时后端返回 409，这里返回 {ok:false, error} 由 InjectBox 提示。
+  const handleInject = useCallback(async (content: string): Promise<{ ok: boolean; error?: string }> => {
+    if (!activeSession) return { ok: false, error: "无活跃会话" };
+    try {
+      await injectMessage(activeSession, content);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : "提交失败" };
+    }
+  }, [activeSession]);
 
   const handleQuote = useCallback((m: Message) => {
     setQuote({ role: m.role, content: m.content });
@@ -374,6 +400,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         onCardAction={handleCardAction}
         onRead={handleRead}
         onShare={handleShare}
+        onDelete={handleDelete}
+        onInject={handleInject}
         annotationsByMessage={annotationsByMessage}
       />
       )}

@@ -15,10 +15,12 @@ interface MessageListProps {
   onCardAction?: (text: string) => void;
   onRead?: (msg: Message) => void;
   onShare?: (msg: Message) => void;
+  onDelete?: (msg: Message) => void;
+  onInject?: (content: string) => Promise<{ ok: boolean; error?: string }>;
   annotationsByMessage?: Record<number, Annotation[]>;
 }
 
-export function MessageList({ messages, streaming, onQuote, onCardAction, onRead, onShare, annotationsByMessage }: MessageListProps) {
+export function MessageList({ messages, streaming, onQuote, onCardAction, onRead, onShare, onDelete, onInject, annotationsByMessage }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
@@ -118,6 +120,8 @@ export function MessageList({ messages, streaming, onQuote, onCardAction, onRead
             onCardAction={onCardAction}
             onRead={onRead}
             onShare={onShare}
+            onDelete={onDelete}
+            onInject={onInject}
             annotations={msg.id != null ? annotationsByMessage?.[msg.id] : undefined}
           />
         ))}
