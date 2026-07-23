@@ -45,9 +45,10 @@ async def _save_progress(store: SessionStore, session_id: str,
 
 
 async def _close_browser_sessions(session_id: str | None) -> None:
-    """关闭当前 ethan 会话创建的所有 browser session（tab group）。
+    """清理当前 ethan 会话创建的所有 browser session（tab group）。
 
-    对话结束后自动调用，避免用完的 tab 残留在浏览器中。
+    对话结束后自动调用。默认 close（杀 tab group）；
+    标记了 keep_alive 的 session 走 release（保留 tab，仅放掉控制权）。
     """
     if not session_id:
         return
@@ -62,9 +63,12 @@ async def _close_browser_sessions(session_id: str | None) -> None:
             return
         for bsid in smap.list_for(session_id):
             try:
-                await hub.call(METHODS["session_close"], {"sessionId": bsid}, browser_session_id=bsid)
+                if smap.is_keep_alive(bsid):
+                    await hub.call(METHODS["session_release"], {"sessionId": bsid}, browser_session_id=bsid)
+                else:
+                    await hub.call(METHODS["session_close"], {"sessionId": bsid}, browser_session_id=bsid)
             except Exception:
-                logger.warning("browser: auto-close failed for %s", bsid)
+                logger.warning("browser: auto-cleanup failed for %s", bsid)
             finally:
                 smap.unbind(bsid)
     except Exception:
@@ -176,6 +180,9 @@ async def _run_generation(
 
     # consent provider 经 ContextVar 注入；本任务有独立 context，需在任务内设置。
     set_consent_provider(consent)
+    # 「运行中补充信息」drainer 也经 ContextVar 注入：agent loop 每轮开头调它取走 inbox 内容。
+    from ethan.core.context import set_inject_drainer
+    set_inject_drainer(run.drain_injected)
 
     collector = StreamCollector().bind(agent)
     # 工具过程实时持久化：每条工具事件 emit 给前端的同时，也把步骤快照落库。

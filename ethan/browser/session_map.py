@@ -25,12 +25,13 @@ _SWEEP_INTERVAL = 5 * 60  # 每 5min 扫一次
 
 
 class _Entry:
-    __slots__ = ("ethan_session_id", "last_active", "step_count")
+    __slots__ = ("ethan_session_id", "last_active", "step_count", "keep_alive")
 
-    def __init__(self, ethan_session_id: str):
+    def __init__(self, ethan_session_id: str, keep_alive: bool = False):
         self.ethan_session_id = ethan_session_id
         self.last_active = time.monotonic()
         self.step_count = 0
+        self.keep_alive = keep_alive
 
 
 class SessionMap:
@@ -39,8 +40,8 @@ class SessionMap:
     def __init__(self) -> None:
         self._entries: dict[str, _Entry] = {}
 
-    def bind(self, browser_session_id: str, ethan_session_id: str) -> None:
-        self._entries[browser_session_id] = _Entry(ethan_session_id)
+    def bind(self, browser_session_id: str, ethan_session_id: str, keep_alive: bool = False) -> None:
+        self._entries[browser_session_id] = _Entry(ethan_session_id, keep_alive=keep_alive)
 
     def touch(self, browser_session_id: str) -> None:
         """每次对该 session 的操作刷新活跃时间。"""
@@ -62,6 +63,11 @@ class SessionMap:
 
     def unbind(self, browser_session_id: str) -> None:
         self._entries.pop(browser_session_id, None)
+
+    def is_keep_alive(self, browser_session_id: str) -> bool:
+        """该 session 是否标记为对话结束后保留（不自动 close）。"""
+        entry = self._entries.get(browser_session_id)
+        return entry.keep_alive if entry else False
 
     def list_for(self, ethan_session_id: str) -> list[str]:
         return [

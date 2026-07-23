@@ -258,11 +258,12 @@ class BrowserSessionTool(_BrowserToolBase):
             "url": {"type": "string", "description": "create 时打开的初始 URL"},
             "title": {"type": "string", "description": "session 标题(create/attach_current/rename)"},
             "color": {"type": "string", "description": "Tab Group 颜色（grey/blue/red/yellow/green/pink/purple/cyan/orange）"},
+            "keep_alive": {"type": "boolean", "description": "create/attach_current 时标记此 session 在对话结束后保留（不自动关闭 tab group）。默认 false（用完即关）。用户只是让帮个忙、页面还要继续看时设 true。"},
         },
         "required": ["action"],
     }
 
-    async def run(self, action: str, session: str = "", url: str = "", title: str = "", color: str = "") -> str:
+    async def run(self, action: str, session: str = "", url: str = "", title: str = "", color: str = "", keep_alive: bool = False) -> str:
         self._authorize()
         try:
             if action == "create":
@@ -276,7 +277,7 @@ class BrowserSessionTool(_BrowserToolBase):
                 result = await _call("session_create", params)
                 bsid = _extract_session_id(result)
                 if bsid:
-                    get_session_map().bind(bsid, get_session_id())
+                    get_session_map().bind(bsid, get_session_id(), keep_alive=keep_alive)
                 return json.dumps(result, ensure_ascii=False)
             if action == "attach_current":
                 params = {}
@@ -287,7 +288,7 @@ class BrowserSessionTool(_BrowserToolBase):
                 result = await _call("session_attach_current", params)
                 bsid = _extract_session_id(result)
                 if bsid:
-                    get_session_map().bind(bsid, get_session_id())
+                    get_session_map().bind(bsid, get_session_id(), keep_alive=keep_alive)
                 return json.dumps(result, ensure_ascii=False)
             if action == "list":
                 result = await _call("session_list", {})
@@ -806,6 +807,10 @@ class BrowserPageTool(_BrowserToolBase):
             return json.dumps({"ok": False, "error": f"读取截图失败: {e}"}, ensure_ascii=False)
         img_b64 = base64.b64encode(img_bytes).decode()
 
+        # 推断 media_type（webp/jpeg/png）
+        ext = Path(img_path).suffix.lstrip('.')
+        media_type = f"image/{ext}" if ext in ('webp', 'jpeg', 'jpg', 'png', 'gif') else "image/png"
+
         # 3. 调 VLM 定位坐标
         vlm_prompt = (
             f'在截图中找到"{prompt}"元素。'
@@ -814,7 +819,7 @@ class BrowserPageTool(_BrowserToolBase):
         )
         provider = create_provider()
         msg = Message(role="user", content=vlm_prompt,
-                      images=[{"data": img_b64, "media_type": "image/png"}])
+                      images=[{"data": img_b64, "media_type": media_type}])
         try:
             resp = await provider.chat(messages=[msg], max_tokens=300)
         except Exception as e:

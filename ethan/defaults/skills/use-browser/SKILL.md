@@ -1,6 +1,6 @@
 ---
 name: use-browser
-version: 0.3.0
+version: 0.4.0
 trigger: "浏览器|打开网页|网页操作|自动填表|网页截图|点击页面|输入文本|操作我的浏览器|我的浏览器|本机 Chrome|浏览器 cookie|扩展工具|真实 tab|接管当前页面"
 fast_path: true
 description: "主浏览器技能：通过 browser_session / browser_tab / browser_page 三个工具操作本机 Chrome（需 Ethan Browser 扩展）。嵌入本机真实 Cookie，能操作用户已登录的浏览器、接管当前 tab、做 snapshot/click/fill/screenshot/eval。当用户要求操作浏览器、网页自动化、点击输入、或需要用到本机真实 Chrome（含登录态）时触发。兜底用 agent-browser。"
@@ -152,12 +152,20 @@ browser_page(action="click", session=SID, ref="e1")
 browser_page(action="fill", session=SID, ref="e2", text="hello")
 ```
 
-任务结束：默认 release（放掉控制权、保留用户页面），仅在用户明确要求关闭时才 close：
+任务结束：对话结束时默认自动 close（杀掉 tab group，用完即关）。
+如果用户只是让帮个忙、页面还要继续看，创建/attach 时传 `keep_alive=true`，对话结束时该 session 走 release（保留 tab，仅放掉控制权）：
 
 ```
-browser_session(action="release", session=SID)   # 保留 tab
+# 创建时标记保留（帮个忙、页面用户还要看）
+browser_session(action="create", url="...", keep_alive=true)
+
+# 也可显式 release/close
+browser_session(action="release", session=SID)   # 保留 tab，放掉控制权
 browser_session(action="close", session=SID)      # 关闭整个 tab group
 ```
+
+**何时设 keep_alive=true**：用户说「帮我看下这个页面」「打开这个链接我等会看」等只需一次性操作、但页面本身用户还要继续浏览的场景。
+**何时不设**（默认 false）：Agent 自己打开的工作页面（填表单、抓数据、自动填报等），任务做完就没用了。
 
 ### 接管当前 Chrome tab
 
