@@ -202,15 +202,25 @@ async def _should_respond_to_group_message(text: str, lark_cfg, event_data: dict
         return True
     if mode == "mention_only":
         # 优先用结构化 mentions 判断（lark-cli 展平后格式: {'key': '@_user_1', 'id': 'ou_xxx', 'name': 'xxx'}）
+        # ⚠️ 不能只看 mentions 非空——群消息事件会带上所有被 @ 的对象（包括 @ 别的 bot / @ 普通人），
+        # 必须校验 mentions 里是否包含本 bot。
+        bot_name = getattr(lark_cfg, "bot_name", "") or ""
         if event_data:
-            mentions = event_data.get("mentions") or []
-            if mentions:
-                # 有 mentions 数据就认为 bot 被 @ 了（群里 @ bot 才会收到事件）
-                return True
+            # lark-cli 提供的明确标志，优先级最高
             if event_data.get("is_mentioned") or event_data.get("mentioned_bot"):
                 return True
-        # 没有结构化数据时兜底文本匹配
-        bot_name = getattr(lark_cfg, "bot_name", "") or ""
+            mentions = event_data.get("mentions") or []
+            if mentions:
+                # 校验是否有某个 mention 的 name 等于本 bot_name
+                if bot_name:
+                    for m in mentions:
+                        _m_name = (m.get("name", "") or m.get("key", "") or "").lstrip("@")
+                        if _m_name and _m_name == bot_name:
+                            return True
+                    # 有 mentions 但都不匹配本 bot → 别人 @ 了其它对象，不响应
+                    return False
+                # 没配 bot_name 无法精确判断，回退到文本匹配
+        # 兜底文本匹配
         if bot_name and f"@{bot_name}" in text:
             return True
         # 没有 bot_name 配置且无结构化 mentions → 无法判断是否 @ 了 bot，不响应

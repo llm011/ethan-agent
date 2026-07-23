@@ -256,6 +256,7 @@ async def _handle_agent_message(
         skills = SkillRegistry()
         skills.load()
         agent = Agent(tool_registry=registry, skill_registry=skills, channel="lark", mode=session_mode)
+        agent.is_owner = is_owner  # 非主人时跳过记忆召回（隐私保护）
 
         # 注入主人/授权运行时上下文，配合 soul.md 的主人准则判断是否执行有副作用操作
         # 环境提示：让模型知道自己在飞书 IM 渠道（轻提示，不压制正常的工具过程/结果输出）。
