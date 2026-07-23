@@ -185,7 +185,8 @@ flowchart LR
 | `RPC_VERSION` | 1 | `protocol.py` | 协议版本(`auth_ok` 携带) |
 | `IDLE_TTL_SECONDS` | 1800s (30min) | `session_map.py` | session 空闲回收阈值 |
 | `_SWEEP_INTERVAL` | 300s (5min) | `session_map.py` | 空闲扫描间隔 |
-| `_SNAPSHOT_MAX_CHARS` | 30000 | `browser.py` | snapshot 输出硬截断阈值 |
+| `_SNAPSHOT_CHUNK_CHARS` | 10000 | `browser.py` | snapshot 分段返回的每段目标字符数 |
+| `_SNAPSHOT_DIR` | `/tmp/ethan-snapshots` | `browser.py` | snapshot 完整内容落盘目录 |
 | `_MAX_AGE_SECONDS` | 1800s (30min) | `screenshot.py` | 截图文件保留时长 |
 | `_MAX_FILES` | 200 | `screenshot.py` | 截图文件数量上限 |
 | 心跳间隔 | 20s | `ws-client.ts` | 扩展 ping 周期 |
