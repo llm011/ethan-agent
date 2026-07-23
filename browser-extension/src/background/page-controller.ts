@@ -38,7 +38,7 @@ import { BrowserPageRefStore } from './ref-store';
 import type { BrowserPageRefEntry } from './ref-store';
 
 const COORDINATE_SPACE = 'viewport-css-pixel';
-const DEFAULT_SCREENSHOT_FORMAT = 'png';
+const DEFAULT_SCREENSHOT_FORMAT = 'webp';
 const KEY_MODIFIER_ALT = 1;
 const KEY_MODIFIER_CTRL = 2;
 const KEY_MODIFIER_META = 4;
@@ -383,7 +383,7 @@ export class BrowserPageController {
         format,
         fromSurface: true,
         captureBeyondViewport: Boolean(params.fullPage),
-        ...(format === 'jpeg' && typeof params.quality === 'number'
+        ...((format === 'jpeg' || format === 'webp') && typeof params.quality === 'number'
           ? { quality: params.quality }
           : {}),
       };
@@ -414,7 +414,7 @@ export class BrowserPageController {
         ...this.createBaseResult(params.sessionId, tab),
         screenshot: {
           data: captured.data,
-          mimeType: format === 'jpeg' ? 'image/jpeg' : 'image/png',
+          mimeType: format === 'jpeg' ? 'image/jpeg' : format === 'webp' ? 'image/webp' : 'image/png',
           format,
           width,
           height,

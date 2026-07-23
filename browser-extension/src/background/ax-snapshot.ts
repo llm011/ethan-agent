@@ -43,7 +43,7 @@ const STRUCTURAL_ROLES = new Set([
   'RootWebArea',
   'WebArea',
 ]);
-const MAX_NAME_LENGTH = 160;
+const MAX_NAME_LENGTH = 100;
 const EMPTY_SNAPSHOT = '(empty page)';
 const EMPTY_INTERACTIVE_SNAPSHOT = '(no interactive elements)';
 
@@ -117,6 +117,9 @@ interface SnapshotNode {
   ref?: string;
   href?: string;
   cursor?: CursorElementInfo;
+  bbox?: { x: number; y: number; w: number; h: number };
+  overlay?: boolean;
+  visible?: boolean;
 }
 
 export interface AxSnapshotResult {
@@ -147,6 +150,87 @@ function getNodeRole(node: CdpAxNode): string {
 
 function getNodeName(node: CdpAxNode): string {
   return getAxValue(node.name || node.value || node.description);
+}
+
+/**
+ * 检查元素是否为密码字段，需要遮蔽 value。
+ * 通过 backendNodeId 查询 DOM 节点的 tagName 和 type 属性。
+ * 缓存结果避免重复 CDP 调用。
+ */
+async function detectPasswordFields(
+  client: CdpClient,
+  nodes: Map<string, SnapshotNode>,
+): Promise<Set<string>> {
+  const passwordNodeIds = new Set<string>();
+  // 收集所有 textbox/combobox 角色的节点
+  const candidates: { nodeId: string; backendNodeId: number }[] = [];
+  nodes.forEach(node => {
+    if (
+      (node.role === 'textbox' || node.role === 'combobox') &&
+      typeof node.ax.backendDOMNodeId === 'number'
+    ) {
+      candidates.push({
+        nodeId: node.ax.nodeId,
+        backendNodeId: node.ax.backendDOMNodeId,
+      });
+    }
+  });
+  if (candidates.length === 0) return passwordNodeIds;
+
+  // 批量检测：用标记法一次性查
+  const token = `ethan-pw-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  for (let i = 0; i < candidates.length; i++) {
+    try {
+      const resolved = await client.send<{ object: { objectId?: string } }>(
+        'DOM.resolveNode',
+        { backendNodeId: candidates[i].backendNodeId, objectGroup: 'ethan-browser' },
+      );
+      const objectId = resolved.object.objectId;
+      if (!objectId) continue;
+      await client.send('Runtime.callFunctionOn', {
+        objectId,
+        functionDeclaration: `function(marker) { this.setAttribute('data-ethan-pw', marker); }`,
+        arguments: [{ value: `${token}-${i}` }],
+        returnByValue: true,
+        awaitPromise: false,
+      });
+    } catch {
+      // detached
+    }
+  }
+
+  const expr = `(() => {
+    const token = ${literal(token)};
+    const els = document.querySelectorAll('[data-ethan-pw^="' + token + '"]');
+    const result = {};
+    for (const el of els) {
+      const marker = el.getAttribute('data-ethan-pw');
+      const tag = el.tagName.toLowerCase();
+      const type = (el.getAttribute('type') || '').toLowerCase();
+      const isPassword = tag === 'input' && type === 'password';
+      const isSensitive = el.getAttribute('autocomplete') === 'off' && (type === 'text' || type === '');
+      result[marker] = { isPassword, isSensitive };
+    }
+    document.querySelectorAll('[data-ethan-pw]').forEach(el => el.removeAttribute('data-ethan-pw'));
+    return result;
+  })()`;
+
+  const runtime = await client.send<
+    RuntimeEvaluateResponse<Record<string, { isPassword: boolean; isSensitive: boolean }>>
+  >('Runtime.evaluate', {
+    expression: expr,
+    returnByValue: true,
+    awaitPromise: false,
+  });
+
+  const data = runtime.result?.value || {};
+  for (let i = 0; i < candidates.length; i++) {
+    const info = data[`${token}-${i}`];
+    if (info && (info.isPassword || info.isSensitive)) {
+      passwordNodeIds.add(candidates[i].nodeId);
+    }
+  }
+  return passwordNodeIds;
 }
 
 function getActions(role: string): string[] {
@@ -210,6 +294,10 @@ function shouldRender(
   if (node.ignored) {
     return false;
   }
+  // 不可见的节点不渲染（visible=false 已标记）
+  if (node.visible === false) {
+    return false;
+  }
   if (options.interactive) {
     return Boolean(node.refable);
   }
@@ -237,7 +325,12 @@ function renderLine(
   const cursorText = node.cursor
     ? ` ${node.cursor.kind} [${node.cursor.hints.join(', ')}]`
     : '';
-  return `${prefix}${refText}[${node.role}]${nameText}${hrefText}${cursorText}`;
+  // 补充 bbox（仅对有 ref 的元素，帮助 agent 理解元素位置）
+  const bboxText = node.ref && node.bbox
+    ? ` bbox=[${node.bbox.x},${node.bbox.y},${node.bbox.w}x${node.bbox.h}]`
+    : '';
+  const overlayText = node.overlay ? ' overlay' : '';
+  return `${prefix}${refText}[${node.role}]${nameText}${hrefText}${bboxText}${overlayText}${cursorText}`;
 }
 
 function collectRenderedNodes(
@@ -261,6 +354,16 @@ function collectRenderedNodes(
     node.renderDepth = indent;
     output.add(node.ax.nodeId);
   }
+
+  // 导航类容器：只渲染摘要行，不展开子节点（省大量字符）
+  // 除非用了 selector 限定范围（此时用户明确要这个区域）
+  if (renderSelf && isNavContainer(node) && node.children.length > 0) {
+    // 统计子节点数
+    const childCount = node.children.length;
+    node.name = `[navigation: ${childCount} items]`;
+    return; // 不递归子节点
+  }
+
   node.children
     .map(id => nodes.get(id))
     .filter((child): child is SnapshotNode => Boolean(child))
@@ -506,6 +609,113 @@ async function getHref(
   return stringifyValue(href.result?.value) || undefined;
 }
 
+/**
+ * 批量获取元素的可见性、bbox、是否浮层信息。
+ * 一次 eval 拿到所有 backendNodeId 对应的元素状态，避免逐个 CDP 调用。
+ */
+async function getElementsVisibility(
+  client: CdpClient,
+  backendNodeIds: number[],
+): Promise<
+  Map<number, { visible: boolean; bbox?: { x: number; y: number; w: number; h: number }; overlay?: boolean }>
+> {
+  if (backendNodeIds.length === 0) {
+    return new Map();
+  }
+  // 用 backendNodeId → objectId → evaluate 的方式批量获取
+  // 但 CDP 没有批量 resolveNode，所以用 DOM.requestNode + 一次性 eval
+  // 这里用标记法：给每个元素打 data 属性，然后一次 eval 读取所有信息
+  const token = `ethan-vis-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const markers: string[] = [];
+  const idToMarker = new Map<number, string>();
+  for (let i = 0; i < backendNodeIds.length; i++) {
+    const marker = `${token}-${i}`;
+    markers.push(marker);
+    idToMarker.set(backendNodeIds[i], marker);
+  }
+
+  // 逐个标记元素（用 resolveNode + setAttribute）
+  const validIds: number[] = [];
+  for (let i = 0; i < backendNodeIds.length; i++) {
+    const id = backendNodeIds[i];
+    const marker = markers[i];
+    try {
+      const resolved = await client.send<{ object: { objectId?: string } }>(
+        'DOM.resolveNode',
+        { backendNodeId: id, objectGroup: 'ethan-browser' },
+      );
+      const objectId = resolved.object.objectId;
+      if (!objectId) continue;
+      await client.send('Runtime.callFunctionOn', {
+        objectId,
+        functionDeclaration: `function(marker) { this.setAttribute('data-ethan-vis', marker); }`,
+        arguments: [{ value: marker }],
+        returnByValue: true,
+        awaitPromise: false,
+      });
+      validIds.push(id);
+    } catch {
+      // element may be detached
+    }
+  }
+
+  // 一次性 eval 读取所有标记元素的信息
+  const expr = `(() => {
+    const token = ${literal(token)};
+    const els = document.querySelectorAll('[data-ethan-vis^="' + token + '"]');
+    const result = {};
+    for (const el of els) {
+      const marker = el.getAttribute('data-ethan-vis');
+      const rect = el.getBoundingClientRect();
+      const style = getComputedStyle(el);
+      const isFixed = style.position === 'fixed' || style.position === 'sticky';
+      // offsetParent === null 表示不可见（display:none / 父级隐藏），但 fixed 元素除外
+      const offsetParent = el.offsetParent;
+      const visible = (offsetParent !== null || isFixed) && rect.width > 0 && rect.height > 0
+        && style.visibility !== 'hidden' && style.display !== 'none';
+      const inViewport = visible && rect.bottom > 0 && rect.right > 0
+        && rect.top < window.innerHeight && rect.left < window.innerWidth;
+      result[marker] = {
+        visible,
+        inViewport,
+        bbox: visible ? { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) } : null,
+        overlay: isFixed && visible,
+      };
+    }
+    // 清理标记
+    document.querySelectorAll('[data-ethan-vis]').forEach(el => el.removeAttribute('data-ethan-vis'));
+    return result;
+  })()`;
+
+  const runtime = await client.send<
+    RuntimeEvaluateResponse<Record<string, { visible: boolean; inViewport: boolean; bbox: { x: number; y: number; w: number; h: number } | null; overlay: boolean }>>
+  >('Runtime.evaluate', {
+    expression: expr,
+    returnByValue: true,
+    awaitPromise: false,
+  });
+
+  const data = runtime.result?.value || {};
+  const output = new Map<number, { visible: boolean; bbox?: { x: number; y: number; w: number; h: number }; overlay?: boolean }>();
+  for (const id of validIds) {
+    const marker = idToMarker.get(id);
+    if (!marker) continue;
+    const info = data[marker];
+    if (!info) continue;
+    output.set(id, {
+      visible: info.visible,
+      ...(info.bbox ? { bbox: info.bbox } : {}),
+      ...(info.overlay ? { overlay: true } : {}),
+    });
+  }
+  return output;
+}
+
+/** 判断节点是否属于导航类容器（需要摘要而不是展开）。 */
+function isNavContainer(node: SnapshotNode): boolean {
+  return node.role === 'navigation' || node.role === 'banner';
+}
+
 export async function takeAxSnapshot(
   client: CdpClient,
   params: BrowserPageSnapshotParams,
@@ -584,10 +794,74 @@ export async function takeAxSnapshot(
         (CONTENT_ROLES.has(node.role) && Boolean(node.name)));
   }
 
+  // ── 可见性检测：批量获取所有有 backendNodeId 的元素的可见性+bbox+浮层状态 ──
+  const allBackendNodeIds: number[] = [];
+  nodes.forEach(node => {
+    if (typeof node.ax.backendDOMNodeId === 'number') {
+      allBackendNodeIds.push(node.ax.backendDOMNodeId);
+    }
+  });
+  const visibilityMap = await getElementsVisibility(client, allBackendNodeIds);
+
+  // 过滤不可见节点 + 补充 bbox/overlay 信息
+  const invisibleNodeIds = new Set<string>();
+  nodes.forEach(node => {
+    const backendNodeId = node.ax.backendDOMNodeId;
+    if (typeof backendNodeId !== 'number') return;
+    const vis = visibilityMap.get(backendNodeId);
+    if (!vis) return;
+    node.visible = vis.visible;
+    if (vis.bbox) node.bbox = vis.bbox;
+    if (vis.overlay) node.overlay = true;
+    // 不可见的 refable 节点标记为不可渲染（省 10-20% 节点）
+    if (!vis.visible && node.refable) {
+      invisibleNodeIds.add(node.ax.nodeId);
+    }
+  });
+  // 把不可见节点从渲染集合中剔除（但不删 nodes Map，保持树结构完整）
+  nodes.forEach(node => {
+    if (invisibleNodeIds.has(node.ax.nodeId)) {
+      node.refable = false;
+    }
+  });
+
+  // ── 密码字段检测：遮蔽敏感输入框的 value，防止泄露给 LLM ──
+  const passwordNodeIds = await detectPasswordFields(client, nodes);
+  nodes.forEach(node => {
+    if (passwordNodeIds.has(node.ax.nodeId)) {
+      node.value = '***'; // 遮蔽 value
+    }
+  });
+
+  // ── iframe 数量限制：只保留主 frame + 前 N 个 iframe，其余跳过 ──
+  const MAX_IFRAMES = 3;
+  const frameIdCounts = new Map<string, number>();
+  nodes.forEach(node => {
+    const fid = node.ax.frameId || '';
+    frameIdCounts.set(fid, (frameIdCounts.get(fid) || 0) + 1);
+  });
+  const sortedFrameIds = Array.from(frameIdCounts.keys()).sort((a, b) =>
+    (frameIdCounts.get(b) || 0) - (frameIdCounts.get(a) || 0),
+  );
+  const allowedFrameIds = new Set(sortedFrameIds.slice(0, MAX_IFRAMES));
+  const skippedFrameCount = Math.max(0, sortedFrameIds.length - MAX_IFRAMES);
+  const skippedIframeNodeIds = new Set<string>();
+  if (sortedFrameIds.length > MAX_IFRAMES) {
+    nodes.forEach(node => {
+      const fid = node.ax.frameId || '';
+      if (fid && !allowedFrameIds.has(fid)) {
+        skippedIframeNodeIds.add(node.ax.nodeId);
+      }
+    });
+  }
+
   const renderedNodeIds = new Set<string>();
   getRoots(nodes).forEach(root =>
     collectRenderedNodes(nodes, root, 0, params, renderedNodeIds),
   );
+
+  // 被跳过的 iframe 节点不渲染
+  skippedIframeNodeIds.forEach(id => renderedNodeIds.delete(id));
 
   const refs: BrowserPageRefEntry[] = [];
   const elements: BrowserPageSnapshotElement[] = [];
@@ -629,17 +903,39 @@ export async function takeAxSnapshot(
         : {}),
       ...(backendNodeId ? { backendNodeId } : {}),
       ...(node.ax.frameId ? { frameId: node.ax.frameId } : {}),
+      ...(node.bbox ? { bbox: node.bbox } : {}),
+      ...(node.overlay ? { overlay: true } : {}),
       actions: getActions(node.role),
     });
   }
 
   const output: string[] = [];
-  getRoots(nodes).forEach(root =>
-    renderTree(nodes, root, renderedNodeIds, params, output),
+  // 浮层优先：先渲染浮层节点（overlay=true），再渲染正常树
+  const overlayRoots = getRoots(nodes).filter(r => r.overlay);
+  const normalRoots = getRoots(nodes).filter(r => !r.overlay);
+  // 收集浮层子树中所有已渲染节点
+  const overlayRendered = new Set<string>();
+  overlayRoots.forEach(root => {
+    collectRenderedNodes(nodes, root, 0, params, overlayRendered);
+  });
+  overlayRoots.forEach(root =>
+    renderTree(nodes, root, overlayRendered, params, output),
+  );
+  // 渲染剩余正常节点
+  const normalRendered = new Set(renderedNodeIds);
+  // 从 normalRendered 中移除已在 overlay 中渲染的
+  overlayRendered.forEach(id => normalRendered.delete(id));
+  normalRoots.forEach(root =>
+    renderTree(nodes, root, normalRendered, params, output),
   );
 
+  const snapshotStr = output.join('\n') || makeEmptySnapshot(params);
+  const finalSnapshot = skippedFrameCount > 0
+    ? `${snapshotStr}\n(已跳过 ${skippedFrameCount} 个 iframe 的内容以控制体积)`
+    : snapshotStr;
+
   return {
-    snapshot: output.join('\n') || makeEmptySnapshot(params),
+    snapshot: finalSnapshot,
     elements,
     refs,
     viewport,

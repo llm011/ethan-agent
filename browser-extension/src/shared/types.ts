@@ -274,7 +274,7 @@ export interface BrowserTabMoveResult {
 
 export type BrowserPageCoordinateSpace = 'viewport-css-pixel';
 
-export type BrowserPageScreenshotFormat = 'png' | 'jpeg';
+export type BrowserPageScreenshotFormat = 'png' | 'jpeg' | 'webp';
 
 export type BrowserPageGetWhat =
   | 'text'
@@ -327,6 +327,8 @@ export interface BrowserPageSnapshotElement {
   frameId?: string;
   box?: BrowserPageBox;
   center?: BrowserPagePoint;
+  bbox?: { x: number; y: number; w: number; h: number };
+  overlay?: boolean;
   actions: string[];
 }
 
