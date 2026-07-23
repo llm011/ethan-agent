@@ -82,6 +82,7 @@ export function ScheduleView() {
   const [loading, setLoading] = useState(true);
   const [activeScene, setActiveScene] = useState<string>("work");
   const [viewMode, setViewMode] = useState<"today" | "all">("today");
+  const [viewLayout, setViewLayout] = useState<"timeline" | "list">("timeline");
   const [confirmState, setConfirmState] = useState<{ open: boolean; id: string }>({ open: false, id: "" });
   const [scheduledSessions, setScheduledSessions] = useState<SessionInfo[]>([]);
   const [sessionsExpanded, setSessionsExpanded] = useState(false);
@@ -216,6 +217,23 @@ export function ScheduleView() {
 
   const dateGroups = useMemo(() => groupJobsByDate(visibleJobs), [visibleJobs]);
 
+  // 列表视图：按下次运行时间排序
+  const sortedListJobs = useMemo(() => {
+    return [...visibleJobs].sort((a, b) => {
+      if (!a.next_run_time && !b.next_run_time) return 0;
+      if (!a.next_run_time) return 1;
+      if (!b.next_run_time) return -1;
+      return new Date(a.next_run_time).getTime() - new Date(b.next_run_time).getTime();
+    });
+  }, [visibleJobs]);
+
+  function formatDateTime(s: string | null): string {
+    if (!s) return "—";
+    const d = new Date(s);
+    if (isNaN(d.getTime())) return "—";
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  }
+
   function RenameDialog({ open, currentName, onConfirm, onCancel }: {
     open: boolean; currentName: string; onConfirm: (name: string) => void; onCancel: () => void
   }) {
@@ -320,6 +338,21 @@ export function ScheduleView() {
               }`}
             >全部</button>
           </div>
+          {/* View layout switch: timeline / list */}
+          <div className="flex items-center rounded-md border border-border overflow-hidden">
+            <button
+              onClick={() => setViewLayout("timeline")}
+              className={`px-2.5 py-1 text-xs transition-colors ${
+                viewLayout === "timeline" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >时间轴</button>
+            <button
+              onClick={() => setViewLayout("list")}
+              className={`px-2.5 py-1 text-xs transition-colors ${
+                viewLayout === "list" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >列表</button>
+          </div>
           <Button variant="ghost" size="icon" onClick={loadData} disabled={loading}>
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           </Button>
@@ -363,6 +396,45 @@ export function ScheduleView() {
           ) : visibleJobs.length === 0 ? (
             <div className="text-center text-muted-foreground pt-10">
               {viewMode === "today" ? "今天和明天暂无定时任务" : "暂无定时任务"}
+            </div>
+          ) : viewLayout === "list" ? (
+            /* ── List Layout ── */
+            <div className="space-y-1">
+              {sortedListJobs.map(job => (
+                <div key={job.id} className={`flex items-center gap-3 group border border-border/50 rounded-lg px-3 py-2 hover:bg-muted/20 transition-colors ${job.status === "paused" ? "opacity-60" : ""}`}>
+                  <div className={`w-2 h-2 rounded-full shrink-0 ${job.status === "active" ? "bg-primary" : "bg-muted-foreground/40"}`} />
+                  <div className="flex items-center gap-2 min-w-0 w-[200px] shrink-0">
+                    <span className="text-sm font-medium truncate">{job.name}</span>
+                    <Badge variant={job.status === "active" ? "default" : "secondary"} className="text-[9px] px-1.5 py-0 h-4 shrink-0">
+                      {job.status === "active" ? "运行中" : "已暂停"}
+                    </Badge>
+                    {job.source_phase && (
+                      <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 shrink-0">{job.source_phase}</Badge>
+                    )}
+                  </div>
+                  <span className="text-xs text-muted-foreground w-[140px] shrink-0 truncate">{formatTrigger(job.trigger)}</span>
+                  <span className="text-xs text-muted-foreground w-[150px] shrink-0 font-mono">{formatDateTime(job.next_run_time)}</span>
+                  <p
+                    className="flex-1 min-w-0 text-xs text-muted-foreground truncate cursor-pointer hover:text-foreground/70 transition-colors"
+                    onClick={() => openEditPrompt(job)}
+                    title="点击编辑内容"
+                  >{job.prompt}</p>
+                  <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openRename(job)} title="重命名">
+                      <Pencil className="h-3 w-3" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => navigate(`/chat/${job.session_id}`)} title="查看对话">
+                      <MessageSquare className="h-3 w-3" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => toggleStatus(job)} title={job.status === "active" ? "暂停" : "恢复"}>
+                      {job.status === "active" ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive/70 hover:text-destructive" onClick={() => removeJob(job.id)} title="删除">
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
             </div>
           ) : (
             /* ── Vertical Timeline Layout ── */
