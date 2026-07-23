@@ -83,6 +83,7 @@ export function ScheduleView() {
   const [activeScene, setActiveScene] = useState<string>("work");
   const [viewMode, setViewMode] = useState<"today" | "all">("today");
   const [viewLayout, setViewLayout] = useState<"timeline" | "list">("timeline");
+  const [futureDays, setFutureDays] = useState(2); // all 模式下初始展示今天+未来2天，点 load more 往未来加1天
   const [confirmState, setConfirmState] = useState<{ open: boolean; id: string }>({ open: false, id: "" });
   const [scheduledSessions, setScheduledSessions] = useState<SessionInfo[]>([]);
   const [sessionsExpanded, setSessionsExpanded] = useState(false);
@@ -199,21 +200,30 @@ export function ScheduleView() {
     return counts;
   }, [scenes, jobs]);
 
-  // today 模式：只展示今天+明天的任务；all 模式：展示全部
+  // today 模式：只展示今天+明天的任务；all 模式：过去全部 + 今天到未来 futureDays 天，点 load more 扩展
   const visibleJobs = useMemo(() => {
-    if (viewMode === "all") return sceneJobs;
     const now = new Date();
-    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-    const tomorrow = new Date(now.getTime() + 86400000);
-    const tomorrowStr = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, "0")}-${String(tomorrow.getDate()).padStart(2, "0")}`;
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    if (viewMode === "today") {
+      const tomorrowStr = `${new Date(now.getTime() + 86400000).getFullYear()}-${String(new Date(now.getTime() + 86400000).getMonth() + 1).padStart(2, "0")}-${String(new Date(now.getTime() + 86400000).getDate()).padStart(2, "0")}`;
+      const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+      return sceneJobs.filter(j => {
+        if (!j.next_run_time) return false;
+        const d = new Date(j.next_run_time);
+        if (isNaN(d.getTime())) return false;
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        return key === todayStr || key === tomorrowStr;
+      });
+    }
+    // all 模式：过去的全部 + 今天到未来 futureDays 天
+    const maxTime = startOfToday + (futureDays + 1) * 86400000;
     return sceneJobs.filter(j => {
       if (!j.next_run_time) return false;
       const d = new Date(j.next_run_time);
       if (isNaN(d.getTime())) return false;
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-      return key === todayStr || key === tomorrowStr;
+      return d.getTime() < maxTime;
     });
-  }, [sceneJobs, viewMode]);
+  }, [sceneJobs, viewMode, futureDays]);
 
   const dateGroups = useMemo(() => groupJobsByDate(visibleJobs), [visibleJobs]);
 
@@ -534,6 +544,15 @@ export function ScheduleView() {
                   </div>
                 );
               })}
+            </div>
+          )}
+          {/* load more：all 模式下往未来多取一天 */}
+          {viewMode === "all" && visibleJobs.length > 0 && (
+            <div className="pt-4 pb-2 text-center">
+              <button
+                onClick={() => setFutureDays(d => d + 1)}
+                className="text-xs text-primary hover:underline"
+              >load more…</button>
             </div>
           )}
         </ScrollArea>
