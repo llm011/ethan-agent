@@ -7,9 +7,10 @@ import {
 import { Badge } from "@ethan/shared/ui/badge";
 import { Button } from "@ethan/shared/ui/button";
 import { ScrollArea } from "@ethan/shared/ui/scroll-area";
-import { Loader2, RefreshCw, Play, Pause, Trash2, MessageSquare, ChevronDown, ChevronRight, Pencil } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@ethan/shared/ui/card";
+import { Loader2, RefreshCw, Play, Pause, Trash2, MessageSquare, ChevronDown, ChevronRight, Pencil, Clock, TerminalSquare } from "lucide-react";
 import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
-import { formatTrigger } from "@/lib/utils";
+import { formatTrigger, formatNextRun } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -215,12 +216,12 @@ export function ScheduleView() {
         return key === todayStr || key === tomorrowStr;
       });
     }
-    // all 模式：过去的全部 + 今天到未来 futureDays 天
+    // all 模式：过去的全部 + 今天到未来 futureDays 天 + 无下次执行时间的任务
     const maxTime = startOfToday + (futureDays + 1) * 86400000;
     return sceneJobs.filter(j => {
-      if (!j.next_run_time) return false;
+      if (!j.next_run_time) return true; // 暂停/无下次执行的任务始终展示
       const d = new Date(j.next_run_time);
-      if (isNaN(d.getTime())) return false;
+      if (isNaN(d.getTime())) return true;
       return d.getTime() < maxTime;
     });
   }, [sceneJobs, viewMode, futureDays]);
@@ -399,6 +400,15 @@ export function ScheduleView() {
       <div className="flex-1 flex overflow-hidden">
         {/* 左侧：时间轴 */}
         <ScrollArea className="flex-1 p-6">
+          {/* load more：all 模式下往未来多取一天，放在顶部 */}
+          {viewMode === "all" && !loading && visibleJobs.length > 0 && (
+            <div className="pb-3 text-center">
+              <button
+                onClick={() => setFutureDays(d => d + 1)}
+                className="text-xs text-primary hover:underline"
+              >load more…</button>
+            </div>
+          )}
           {loading && visibleJobs.length === 0 ? (
             <div className="flex items-center justify-center h-full pt-10">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -408,28 +418,44 @@ export function ScheduleView() {
               {viewMode === "today" ? "今天和明天暂无定时任务" : "暂无定时任务"}
             </div>
           ) : viewLayout === "list" ? (
-            /* ── List Layout ── */
-            <div className="space-y-1">
+            /* ── Card Grid Layout ── */
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 p-0.5">
               {sortedListJobs.map(job => (
-                <div key={job.id} className={`flex items-center gap-3 group border border-border/50 rounded-lg px-3 py-2 hover:bg-muted/20 transition-colors ${job.status === "paused" ? "opacity-60" : ""}`}>
-                  <div className={`w-2 h-2 rounded-full shrink-0 ${job.status === "active" ? "bg-primary" : "bg-muted-foreground/40"}`} />
-                  <div className="flex items-center gap-2 min-w-0 w-[200px] shrink-0">
-                    <span className="text-sm font-medium truncate">{job.name}</span>
-                    <Badge variant={job.status === "active" ? "default" : "secondary"} className="text-[9px] px-1.5 py-0 h-4 shrink-0">
-                      {job.status === "active" ? "运行中" : "已暂停"}
-                    </Badge>
-                    {job.source_phase && (
-                      <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 shrink-0">{job.source_phase}</Badge>
-                    )}
-                  </div>
-                  <span className="text-xs text-muted-foreground w-[140px] shrink-0 truncate">{formatTrigger(job.trigger)}</span>
-                  <span className="text-xs text-muted-foreground w-[150px] shrink-0 font-mono">{formatDateTime(job.next_run_time)}</span>
-                  <p
-                    className="flex-1 min-w-0 text-xs text-muted-foreground truncate cursor-pointer hover:text-foreground/70 transition-colors"
-                    onClick={() => openEditPrompt(job)}
-                    title="点击编辑内容"
-                  >{job.prompt}</p>
-                  <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                <Card key={job.id} className={`flex flex-col shadow-sm border-border/60 bg-muted/10 ${job.status === "paused" ? "opacity-60" : ""}`}>
+                  <CardHeader className="pb-3 border-b border-border/30">
+                    <div className="flex justify-between items-start gap-2">
+                      <CardTitle className="text-sm font-semibold leading-tight line-clamp-2 flex-1 cursor-pointer hover:text-primary/70 transition-colors" onClick={() => openRename(job)} title="点击重命名">
+                        {job.name}
+                      </CardTitle>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <Badge variant={job.status === "active" ? "default" : "secondary"} className="text-[9px] px-1.5 py-0 h-4">
+                          {job.status === "active" ? "运行中" : "已暂停"}
+                        </Badge>
+                        {job.source_phase && (
+                          <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4">{job.source_phase}</Badge>
+                        )}
+                      </div>
+                    </div>
+                    <CardDescription className="flex items-center gap-1.5 mt-2 text-xs">
+                      <Clock className="h-3 w-3" />
+                      {job.next_run_time ? formatNextRun(job.next_run_time) : "暂无下次执行"}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="pt-3 pb-2 flex-1">
+                    <div className="space-y-2">
+                      <div className="flex items-start gap-2 text-xs">
+                        <TerminalSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground mt-0.5" />
+                        <p className="text-muted-foreground line-clamp-3 leading-relaxed flex-1 cursor-pointer hover:text-foreground/70 transition-colors" onClick={() => openEditPrompt(job)} title="点击编辑内容">
+                          {job.prompt}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground/80 bg-muted/30 px-2 py-1 rounded">
+                        <Clock className="h-3 w-3" />
+                        <span className="truncate">{formatTrigger(job.trigger)}</span>
+                      </div>
+                    </div>
+                  </CardContent>
+                  <CardFooter className="pt-2 pb-3 flex justify-end gap-1 border-t border-border/30 mt-auto">
                     <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openRename(job)} title="重命名">
                       <Pencil className="h-3 w-3" />
                     </Button>
@@ -442,8 +468,8 @@ export function ScheduleView() {
                     <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive/70 hover:text-destructive" onClick={() => removeJob(job.id)} title="删除">
                       <Trash2 className="h-3 w-3" />
                     </Button>
-                  </div>
-                </div>
+                  </CardFooter>
+                </Card>
               ))}
             </div>
           ) : (
@@ -544,15 +570,6 @@ export function ScheduleView() {
                   </div>
                 );
               })}
-            </div>
-          )}
-          {/* load more：all 模式下往未来多取一天 */}
-          {viewMode === "all" && visibleJobs.length > 0 && (
-            <div className="pt-4 pb-2 text-center">
-              <button
-                onClick={() => setFutureDays(d => d + 1)}
-                className="text-xs text-primary hover:underline"
-              >load more…</button>
             </div>
           )}
         </ScrollArea>
