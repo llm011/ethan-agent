@@ -40,6 +40,16 @@ EDITABLE_FIELDS: list[ConfigField] = [
                 desc="web_search 工具的搜索后端：duckduckgo（默认，免费）/ tavily（需 api_key）/ searxng（需 base_url，自建或现成实例）"),
     ConfigField("tools.web_search.base_url", "SearXNG 地址", "str",
                 desc="provider=searxng 时使用，如 http://localhost:8888（自建 docker-compose）或现成 SearXNG 实例地址"),
+    ConfigField("tools.knowledge.backend", "知识库后端", "choice", ["filesystem", "obsidian", "external"],
+                desc="知识库存储后端：filesystem（默认本地 MD）/ obsidian（Obsidian Vault）/ external（外部 API）"),
+    ConfigField("tools.knowledge.obsidian_vault_path", "Obsidian Vault 路径", "str",
+                desc="Obsidian vault 根目录绝对路径（backend=obsidian 时必填）"),
+    ConfigField("tools.knowledge.obsidian_folder", "Obsidian 知识库子目录", "str",
+                desc="Vault 内用于知识库的子目录名（默认 Knowledge）"),
+    ConfigField("tools.knowledge.external_base_url", "外部知识库 API 地址", "str",
+                desc="外部知识库 REST API 的 base URL（backend=external 时必填）"),
+    ConfigField("tools.knowledge.external_api_key", "外部知识库 API Key", "str",
+                desc="外部知识库认证 key（backend=external 时必填）"),
 ]
 
 # 路径 → field 的索引，便于工具快速查找

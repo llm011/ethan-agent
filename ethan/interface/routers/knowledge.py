@@ -1,6 +1,4 @@
 """knowledge 路由：知识库 CRUD（per-user 隔离）。"""
-from pathlib import Path
-
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
@@ -8,16 +6,9 @@ from .deps import verify_token
 
 router = APIRouter(prefix="/knowledge")
 
-# per-user 知识库管理器缓存（user_id → FilesystemKnowledgeBase）
-_knowledge_managers: dict[str, "object"] = {}
-
-
 def get_knowledge_manager(user_id: str):
-    from ethan.core.paths import user_knowledge_dir
-    from ethan.knowledge.base import FilesystemKnowledgeBase
-    if user_id not in _knowledge_managers:
-        _knowledge_managers[user_id] = FilesystemKnowledgeBase(user_knowledge_dir())
-    return _knowledge_managers[user_id]
+    from ethan.knowledge.registry import get_knowledge_backend
+    return get_knowledge_backend(user_id)
 
 
 @router.get("")
@@ -75,7 +66,7 @@ async def delete_knowledge(source: str, user_id: str = Depends(verify_token)):
     if not item:
         raise HTTPException(404, "Knowledge item not found")
     try:
-        Path(item.source).unlink()
+        manager.delete(item.source)
         return {"ok": True}
     except Exception as e:
         raise HTTPException(500, f"Failed to delete: {e}")

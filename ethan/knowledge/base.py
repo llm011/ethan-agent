@@ -1,7 +1,7 @@
 """知识库系统 — 可扩展的外部知识来源。
 
 默认实现：本地 Markdown 文件目录（~/.ethan/knowledge/）。
-通过 adapter 机制支持第三方笔记系统（Obsidian 等）。
+通过 adapter 机制支持第三方笔记系统（Obsidian 等）及外部 REST API。
 """
 import re
 from abc import ABC, abstractmethod
@@ -46,13 +46,24 @@ class KnowledgeBase(ABC):
     def update(self, source: str, title: str, content: str, tags: list[str] | None = None) -> None:
         """Update an existing item in place."""
 
+    @abstractmethod
+    def delete(self, source: str) -> None:
+        """Delete an item by source identifier."""
+
+    @abstractmethod
+    def health_check(self) -> tuple[bool, str]:
+        """Validate connectivity / accessibility. Returns (ok, message)."""
+
 
 class FilesystemKnowledgeBase(KnowledgeBase):
     """Markdown files in a local directory, with optional vector search."""
 
     def __init__(self, directory: Path):
         self._dir = directory
-        self._dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self._dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass  # health_check() will report the issue
         self._vector_store: "VectorStore | None" = None  # noqa: F821 — lazy import, forward ref
 
     # ── Vector store (lazy) ────────────────────────────────────────────────
@@ -103,6 +114,14 @@ class FilesystemKnowledgeBase(KnowledgeBase):
         tag_line = f"\ntags: {', '.join(tags)}" if tags else ""
         path.write_text(f"# {title}{tag_line}\n\n{content}", encoding="utf-8")
         self._reindex(path, title, content, tags)
+
+    def delete(self, source: str) -> None:
+        path = Path(source)
+        if not path.exists():
+            path = self._dir / source
+        if not path.exists():
+            raise FileNotFoundError(f"Knowledge item not found: {source}")
+        path.unlink()
 
     def append(self, source: str, content: str) -> str:
         """把内容追加到已有条目正文末尾（保留原标题/标签）。返回文件路径。
@@ -168,6 +187,11 @@ class FilesystemKnowledgeBase(KnowledgeBase):
             return self._parse_file(path)
         return None
 
+    def health_check(self) -> tuple[bool, str]:
+        if self._dir.exists() and self._dir.is_dir():
+            return True, f"Filesystem knowledge base OK: {self._dir}"
+        return False, f"Directory not accessible: {self._dir}"
+
     def _parse_file(self, path: Path) -> KnowledgeItem | None:
         try:
             text = path.read_text(encoding="utf-8")
@@ -190,3 +214,313 @@ class FilesystemKnowledgeBase(KnowledgeBase):
 
         content = "\n".join(lines[content_start:]).strip()
         return KnowledgeItem(title=title, content=content, source=str(path), tags=tags)
+
+
+# ── Obsidian Vault 后端 ────────────────────────────────────────────────────
+
+
+class ObsidianKnowledgeBase(KnowledgeBase):
+    """Obsidian vault 作为知识库后端，遵循 Obsidian 约定（YAML frontmatter、wikilinks 等）。"""
+
+    def __init__(self, vault_path: Path, folder: str = "Knowledge"):
+        self._vault = vault_path
+        self._folder = folder
+        self._dir = vault_path / folder
+        try:
+            self._dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass  # health_check() will report the issue
+        self._vector_store: "VectorStore | None" = None  # noqa: F821
+
+    def _get_vector_store(self):
+        if self._vector_store is None:
+            from ethan.memory.vector_store import VectorStore
+            self._vector_store = VectorStore()
+        return self._vector_store
+
+    # ── Write ──────────────────────────────────────────────────────────────
+
+    def add(self, title: str, content: str, tags: list[str] | None = None) -> str:
+        slug = re.sub(r"[^\w\-]", "-", title.lower())[:50].strip("-")
+        path = self._dir / f"{slug}.md"
+        i = 1
+        while path.exists():
+            path = self._dir / f"{slug}-{i}.md"
+            i += 1
+
+        text = self._build_file_content(title, content, tags)
+        path.write_text(text, encoding="utf-8")
+        self._reindex(path, title, content, tags)
+        return str(path)
+
+    def update(self, source: str, title: str, content: str, tags: list[str] | None = None) -> None:
+        path = Path(source)
+        if not path.exists():
+            path = self._dir / source
+        if not path.exists():
+            raise FileNotFoundError(f"Knowledge item not found: {source}")
+        text = self._build_file_content(title, content, tags)
+        path.write_text(text, encoding="utf-8")
+        self._reindex(path, title, content, tags)
+
+    def delete(self, source: str) -> None:
+        path = Path(source)
+        if not path.exists():
+            path = self._dir / source
+        if not path.exists():
+            raise FileNotFoundError(f"Knowledge item not found: {source}")
+        path.unlink()
+
+    def append(self, source: str, content: str) -> str:
+        """把内容追加到已有条目正文末尾（保留原标题/标签）。"""
+        item = self.get(source)
+        if item is None:
+            raise FileNotFoundError(f"Knowledge item not found: {source}")
+        new_content = (item.content.rstrip() + "\n\n" + content.strip()).strip()
+        self.update(item.source, item.title, new_content, tags=item.tags)
+        return item.source
+
+    # ── Search ─────────────────────────────────────────────────────────────
+
+    def search(self, query: str, limit: int = 5) -> list[KnowledgeItem]:
+        query_words = set(query.lower().split())
+        results: list[tuple[int, KnowledgeItem]] = []
+
+        for item in self.list_all():
+            text = (item.title + " " + item.content + " " + " ".join(item.tags)).lower()
+            score = sum(1 for w in query_words if w in text)
+            if score > 0:
+                results.append((score, item))
+
+        results.sort(key=lambda x: -x[0])
+        return [item for _, item in results[:limit]]
+
+    async def semantic_search(self, query: str, limit: int = 5) -> list[KnowledgeItem]:
+        from ethan.memory.embeddings import embed
+
+        query_embedding = await embed(query)
+        vs = self._get_vector_store()
+        hits = vs.search(query_embedding, limit=limit)
+
+        items: list[KnowledgeItem] = []
+        for hit in hits:
+            source = hit["metadata"].get("source") or hit["id"]
+            item = self.get(source)
+            if item:
+                items.append(item)
+        return items
+
+    # ── Read ───────────────────────────────────────────────────────────────
+
+    def list_all(self) -> list[KnowledgeItem]:
+        items = []
+        for path in sorted(self._dir.rglob("*.md")):
+            item = self._parse_obsidian_file(path)
+            if item:
+                items.append(item)
+        return items
+
+    def get(self, source: str) -> KnowledgeItem | None:
+        path = Path(source)
+        if not path.exists():
+            path = self._dir / source
+        if path.exists():
+            return self._parse_obsidian_file(path)
+        return None
+
+    def health_check(self) -> tuple[bool, str]:
+        if not self._vault.exists():
+            return False, f"Obsidian vault path not found: {self._vault}"
+        if not self._vault.is_dir():
+            return False, f"Obsidian vault path is not a directory: {self._vault}"
+        # 验证 .obsidian 目录存在（确认是合法 vault）
+        if not (self._vault / ".obsidian").exists():
+            return False, f"Not a valid Obsidian vault (missing .obsidian/): {self._vault}"
+        if not self._dir.exists():
+            return False, f"Knowledge folder not found: {self._dir}"
+        return True, f"Obsidian vault OK: {self._vault} (folder: {self._folder})"
+
+    # ── Internal ───────────────────────────────────────────────────────────
+
+    def _build_file_content(self, title: str, content: str, tags: list[str] | None) -> str:
+        """构建 Obsidian 格式 MD 文件（YAML frontmatter + 正文）。"""
+        parts = ["---"]
+        parts.append(f"title: {title}")
+        if tags:
+            parts.append("tags:")
+            for t in tags:
+                parts.append(f"  - {t}")
+        parts.append("---")
+        parts.append("")
+        parts.append(f"# {title}")
+        parts.append("")
+        parts.append(content)
+        return "\n".join(parts)
+
+    def _parse_obsidian_file(self, path: Path) -> KnowledgeItem | None:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except Exception:
+            return None
+
+        title = path.stem
+        tags: list[str] = []
+        content = text
+
+        # 解析 YAML frontmatter
+        if text.startswith("---"):
+            parts = text.split("---", 2)
+            if len(parts) >= 3:
+                frontmatter = parts[1].strip()
+                content = parts[2].strip()
+                for line in frontmatter.splitlines():
+                    line_s = line.strip()
+                    if line_s.startswith("title:"):
+                        title = line_s[6:].strip().strip("'\"")
+                    elif line_s.startswith("- ") and tags is not None:
+                        # tag item in YAML list
+                        tags.append(line_s[2:].strip())
+                    elif line_s.startswith("tags:") and "[" in line_s:
+                        # inline tags: [tag1, tag2]
+                        raw = line_s.split("[", 1)[1].rstrip("]")
+                        tags = [t.strip().strip("'\"") for t in raw.split(",") if t.strip()]
+
+        # 去掉正文中重复的 # title 行
+        lines = content.splitlines()
+        if lines and lines[0].startswith("# "):
+            title = lines[0][2:].strip()
+            content = "\n".join(lines[1:]).strip()
+
+        return KnowledgeItem(title=title, content=content, source=str(path), tags=tags)
+
+    def _reindex(self, path: Path, title: str, content: str, tags: list[str] | None) -> None:
+        try:
+            from ethan.memory.embeddings import embed_sync
+            text_for_embed = f"{title} {' '.join(tags or [])} {content}"
+            embedding = embed_sync(text_for_embed)
+            vs = self._get_vector_store()
+            vs.add(
+                id=str(path),
+                text=text_for_embed,
+                embedding=embedding,
+                metadata={"title": title, "source": str(path), "tags": tags or []},
+            )
+        except Exception:
+            pass
+
+
+# ── 外部 REST API 后端 ─────────────────────────────────────────────────────
+
+
+class ExternalKnowledgeBase(KnowledgeBase):
+    """通过 REST API 连接外部知识库服务。"""
+
+    def __init__(self, base_url: str, api_key: str = "", headers: dict[str, str] | None = None):
+        self._base_url = base_url.rstrip("/")
+        self._api_key = api_key
+        self._headers = headers or {}
+        if api_key:
+            self._headers.setdefault("Authorization", f"Bearer {api_key}")
+
+    def _client(self):
+        import httpx
+        return httpx.Client(base_url=self._base_url, headers=self._headers, timeout=30)
+
+    def _async_client(self):
+        import httpx
+        return httpx.AsyncClient(base_url=self._base_url, headers=self._headers, timeout=30)
+
+    # ── Write ──────────────────────────────────────────────────────────────
+
+    def add(self, title: str, content: str, tags: list[str] | None = None) -> str:
+        with self._client() as client:
+            resp = client.post("/items", json={"title": title, "content": content, "tags": tags or []})
+            resp.raise_for_status()
+            data = resp.json()
+            return data.get("source") or data.get("id") or ""
+
+    def update(self, source: str, title: str, content: str, tags: list[str] | None = None) -> None:
+        with self._client() as client:
+            resp = client.put(f"/items/{source}", json={"title": title, "content": content, "tags": tags or []})
+            resp.raise_for_status()
+
+    def delete(self, source: str) -> None:
+        with self._client() as client:
+            resp = client.delete(f"/items/{source}")
+            resp.raise_for_status()
+
+    def append(self, source: str, content: str) -> str:
+        """追加内容到已有条目（通过 get + update 实现）。"""
+        item = self.get(source)
+        if item is None:
+            raise FileNotFoundError(f"Knowledge item not found: {source}")
+        new_content = (item.content.rstrip() + "\n\n" + content.strip()).strip()
+        self.update(item.source, item.title, new_content, tags=item.tags)
+        return item.source
+
+    # ── Search ─────────────────────────────────────────────────────────────
+
+    def search(self, query: str, limit: int = 5) -> list[KnowledgeItem]:
+        with self._client() as client:
+            resp = client.get("/search", params={"q": query, "limit": limit})
+            resp.raise_for_status()
+            return self._parse_items(resp.json())
+
+    async def semantic_search(self, query: str, limit: int = 5) -> list[KnowledgeItem]:
+        async with self._async_client() as client:
+            resp = await client.get("/search", params={"q": query, "limit": limit, "semantic": "true"})
+            resp.raise_for_status()
+            return self._parse_items(resp.json())
+
+    # ── Read ───────────────────────────────────────────────────────────────
+
+    def list_all(self) -> list[KnowledgeItem]:
+        with self._client() as client:
+            resp = client.get("/items")
+            resp.raise_for_status()
+            return self._parse_items(resp.json())
+
+    def get(self, source: str) -> KnowledgeItem | None:
+        with self._client() as client:
+            resp = client.get(f"/items/{source}")
+            if resp.status_code == 404:
+                return None
+            resp.raise_for_status()
+            data = resp.json()
+            return KnowledgeItem(
+                title=data.get("title", ""),
+                content=data.get("content", ""),
+                source=data.get("source") or data.get("id") or source,
+                tags=data.get("tags") or [],
+            )
+
+    def health_check(self) -> tuple[bool, str]:
+        import httpx
+        try:
+            with self._client() as client:
+                # 尝试 /health 端点，退而求其次 /
+                for endpoint in ("/health", "/"):
+                    try:
+                        resp = client.get(endpoint)
+                        if resp.status_code < 500:
+                            return True, f"External KB API reachable: {self._base_url}"
+                    except httpx.HTTPError:
+                        continue
+                return False, f"External KB API not healthy: {self._base_url}"
+        except Exception as e:
+            return False, f"External KB API connection failed: {e}"
+
+    # ── Internal ───────────────────────────────────────────────────────────
+
+    def _parse_items(self, data) -> list[KnowledgeItem]:
+        """从 API 响应解析条目列表，兼容 {"items": [...]} 或直接 [...] 格式。"""
+        items_raw = data if isinstance(data, list) else data.get("items") or data.get("results") or []
+        items = []
+        for d in items_raw:
+            items.append(KnowledgeItem(
+                title=d.get("title", ""),
+                content=d.get("content", ""),
+                source=d.get("source") or d.get("id") or "",
+                tags=d.get("tags") or [],
+            ))
+        return items

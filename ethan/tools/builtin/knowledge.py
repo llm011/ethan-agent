@@ -1,11 +1,11 @@
 """知识库工具 — 让 agent 能查询和添加知识库内容。"""
-from ethan.knowledge.base import FilesystemKnowledgeBase
+from ethan.knowledge.base import KnowledgeBase
 from ethan.tools.base import BaseTool
 
 
-def _kb_for(user_id: str) -> FilesystemKnowledgeBase:
-    from ethan.core.paths import user_knowledge_dir
-    return FilesystemKnowledgeBase(user_knowledge_dir())
+def _kb_for(user_id: str) -> KnowledgeBase:
+    from ethan.knowledge.registry import get_knowledge_backend
+    return get_knowledge_backend(user_id)
 
 
 class KnowledgeSearchTool(BaseTool):
