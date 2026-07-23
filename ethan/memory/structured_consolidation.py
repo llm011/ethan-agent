@@ -1,9 +1,10 @@
 """Daily structured-memory consolidation.
 
 This is the second half of the structured-memory pipeline. Incremental
-extraction runs every five turns; the daily pass fills gaps from short
-sessions, re-evaluates pending observations across sessions, expires TTL
-records, and writes general/companion daily summaries separately.
+extraction runs on short turns (<3) then every three turns; the daily pass
+fills gaps from any short sessions the real-time path missed, re-evaluates
+pending observations across sessions, expires TTL records, and writes
+general/companion daily summaries separately.
 """
 from __future__ import annotations
 
@@ -51,8 +52,8 @@ def _day_bounds(d: date) -> tuple[float, float]:
     return start.timestamp(), end.timestamp()
 
 
-# 兜底扫描门槛：3 轮实时提取漏掉的短会话，在 12 点补一次
-_BACKFILL_MIN_CHARS = 500          # user 消息累计字符数（≈125 token）门槛，过滤 hi/hello/天气类短问答
+# 兜底扫描门槛：短会话在 12 点补一次提取
+_BACKFILL_MIN_CHARS = 20           # user 消息累计字符门槛，仅过滤 hi/hello/嗯 等纯寒暄
 _BACKFILL_MAX_USER_TURNS = 2       # 只补 user_turns <= 2 的 session（3 轮已能实时触发）
 
 
@@ -65,8 +66,9 @@ async def _backfill_short_sessions(
 ) -> int:
     """12 点兜底扫描：对当日 user_turns < 3 但内容有价值的 session 补一次提取。
 
-    解决场景：用户每个 session 只问 1-2 次但跨多天问了同一主题——
-    实时链路的 % 3 门槛永远无法触发，这些 session 会被漏掉。
+    解决场景：实时链路对 <3 轮短会话即时触发后，这里只兜历史 session——
+    尤其是本修复上线前产生的旧短会话，它们的 explicit 事实当年没被抽取，
+    午夜扫描补一次。
 
     过滤：
     - 跳过 heartbeat / midnight 等 system session
@@ -231,7 +233,8 @@ def _expire_memories(store: MemoryStore, now: float) -> int:
 async def run_structured_consolidation(target_date: date | None = None) -> dict[str, Any]:
     """Consolidate structured memories for one local day and current user.
 
-    5 轮实时抽取已覆盖当日 session 的提取职责，12 点任务不再重提取。
+    实时抽取已在对话过程中覆盖当日 session 的提取职责（<3 轮即时触发、
+    每 3 轮增量），12 点任务不再重提取当日 session。
     本函数只做：pending 跨 session 复评 + TTL 过期 + 按域日摘要。
     """
     d = target_date or (date.today() - timedelta(days=1))
@@ -265,10 +268,10 @@ async def run_structured_consolidation(target_date: date | None = None) -> dict[
             result["skipped"] = True
             return result
 
-        # 当日 session 重提取已删除：3 轮实时抽取（_run_structured_extraction）
-        # 已在对话过程中完成提取+准入，12 点不再重复处理当日 session。
+        # 当日 session 重提取已删除：实时抽取（_run_structured_extraction，<3 轮即时 +
+        # 每 3 轮增量）已在对话过程中完成提取+准入，12 点不再重复处理当日 session。
 
-        # 兜底扫描：补一次 user_turns < 3 的短会话（3 轮实时门槛漏掉的场景）
+        # 兜底扫描：补一次 user_turns < 3 的短会话（实时链路可能漏掉的历史短会话）
         # 在跨 session 复评之前跑——这样兜底产生的 pending 候选能被下面的复评处理
         try:
             from ethan.core.config import get_config

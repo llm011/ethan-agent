@@ -10,7 +10,7 @@
 
 | | 旧（flat facts） | 新（structured memory） |
 |---|---|---|
-| 提取 | `extract_cold`：每 10 轮 1 次 lite LLM，从 rolling summary 提炼 key_facts | `StructuredMemoryExtractor`：每 5 轮 1 次主模型，从原始消息增量提取 JSON 候选 |
+| 提取 | `extract_cold`：每 10 轮 1 次 lite LLM，从 rolling summary 提炼 key_facts | `StructuredMemoryExtractor`：<3 轮即时、之后每 3 轮 1 次主模型，从原始消息增量提取 JSON 候选 |
 | 写入 | 直接写 facts.json，词重叠 80% 启发式合并 | LLM 只提议候选，**确定性准入代码**决定 admitted/merged/pending/rejected |
 | 存储 | `~/.ethan/memory/facts.json`（JSON 数组） | `memory.db` SQLite 六表（memories/evidence/candidates/jobs/FTS5/日摘要） |
 | 召回 | tags 关键词匹配 + confidence 排序，top 5~20 条 | FTS5 全文检索 + importance 兜底，按 domain 隔离 |
@@ -166,4 +166,4 @@
 > - `success_patterns` 容器（B1）退役——99.4% 噪声、注入 system prompt 信息增益为 0
 > - Episode 链路（`episodic.py` / `_mine_recurring_needs` / `_build_suggestion_hint`）退役
 > - 心跳 `_extract_decision_patterns` 退役（同 success_patterns 一并清理）
-> - 提取门槛从 5 轮降为 3 轮；新增短会话兜底扫描（user_turns<3 但内容有价值）
+> - 提取门槛从 5 轮降为短会话（<3 轮）即时触发 + 每 3 轮增量；短会话兜底扫描保留（user_turns<3 但内容有价值）

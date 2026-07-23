@@ -105,7 +105,7 @@ async def test_extraction_wires_end_to_end_and_dedups(isolated_env, monkeypatch)
     session = await store.load("sess-e2e")
     await store.close()
     turns = sum(1 for m in session.messages if m.role == "user")
-    assert turns == 3  # 门槛从 %5 改为 %3，3 turns 即触发
+    assert turns == 3  # 3 turns 是 3 轮增量节流的边界点，触发增量提取
 
     # 真实 quote 校验:message_id 必须是真实消息 id,quote 是其子串。
     # fake payload 里 message_id=1 可能不对,先拿真实 user 消息 id 替换。

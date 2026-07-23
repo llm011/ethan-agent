@@ -9,7 +9,7 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 ## 特性
 
 **记忆体系**
-- **结构化长期记忆**（`memory.db`，用户事实的唯一事实源）：每 5 轮对话提取带原文 quote 佐证的候选（quote 必须是用户消息精确子串），确定性准入——explicit 立即生效，observed 需 ≥2 个独立 session 复证才晋升。64 个维度 × 7 大类（个人信息/偏好/活动/决定/关系/方法论/陪伴），支持 TTL 过期、supersede 纠正链、遗忘脱敏
+- **结构化长期记忆**（`memory.db`，用户事实的唯一事实源）：短会话（<3 轮）即时提取、之后每 3 轮增量提取带原文 quote 佐证的候选（quote 必须是用户消息精确子串），确定性准入——explicit 立即生效，observed 需 ≥2 个独立 session 复证才晋升。64 个维度 × 7 大类（个人信息/偏好/活动/决定/关系/方法论/陪伴），支持 TTL 过期、supersede 纠正链、遗忘脱敏
 - **语义召回与去重**：FTS5 + BGE 向量双通道（RRF 融合）供给唯一的 `<memory_context>` 注入块；准入时向量近邻配对，按确定性规则 merge/supersede（"住在深圳"和"家在深圳南山"不会各存一条）
 - **维度注册表**：提取 prompt 的维度说明与校验白名单由同一份声明式注册表生成——扩展维度不再需要手写 prompt
 - 热区/温区滑动窗口维持长对话上下文（REPL），廉价模型自动压缩较早内容
@@ -407,7 +407,7 @@ ethan/
 | 用户画像 | 叙事型个人信息（目标、短语、约定） | `~/.ethan/memory/user_profile.md` |
 | 热区/温区 | 最近 N 轮 + 滚动摘要（会话内压缩） | 内存 |
 
-提取每 5 轮一次（主模型）；会话内压缩**批量触发**（而非逐轮），使用自动推断的廉价模型（Claude 用户用 Haiku，Gemini 用户用 Flash Lite）。
+短会话（<3 轮）即时提取、之后每 3 轮增量一次（主模型）；会话内压缩**批量触发**（而非逐轮），使用自动推断的廉价模型（Claude 用户用 Haiku，Gemini 用户用 Flash Lite）。
 
 Agent 通过 `memory_write`、`procedure_write`、`profile_update` 工具在对话中主动写入各层，无需等待下一个压缩周期。
 

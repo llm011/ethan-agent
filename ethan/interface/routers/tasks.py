@@ -36,7 +36,7 @@ _CORRECTION_KEYWORDS = (
 def _has_correction_keyword(session) -> bool:
     """检查最近一条 user 消息是否包含否定/修正类关键词。
 
-    用于在 5 轮基线之外提前触发抽取，及时修正已有记忆。
+    用于在 3 轮基线之外提前触发抽取，及时修正已有记忆。
     """
     for msg in reversed(session.messages):
         if msg.role == "user" and msg.content:
@@ -46,14 +46,20 @@ def _has_correction_keyword(session) -> bool:
 
 async def _run_structured_extraction(session, model: str, user_id: str, user_turns: int,
                                      store=None, force: bool = False) -> None:
-    """Every three turns (or on correction keywords), extract source-backed memories.
+    """Extract source-backed memories on short turns, then every three turns.
 
-    3 轮基线触发 + 关键词触发：检测到否定/修正类关键词时立即触发，
-    避免跨轮次修正无法及时更新记忆。job_key 基于 message_id 保证幂等。
+    触发条件（任一即跑）：
+    - user_turns <= 2：短会话即时触发。否则用户只说一两句就结束的会话
+      （如"我最近在研究机器人"）永远等不到第 3 轮门槛，事实丢失。
+    - user_turns % 3 == 0：3 轮基线节流，长对话按此节奏增量提取。
+    - 命中否定/修正关键词：跨轮次纠正及时更新记忆。
+    job_key 基于 message_id、boundary 增量去重，保证幂等、不重复抽取。
     store 可注入(测试/评测用);不传则按当前用户路径创建 MemoryStore。
     force=True 时跳过门槛检查（12 点兜底扫描用，已在外层过滤过短会话）。
     """
-    if not force and user_turns % 3 != 0 and not _has_correction_keyword(session):
+    # 跳过条件：非 force、已过短会话窗口(>=3)、非 3 轮节点、且无修正关键词。
+    if (not force and user_turns >= 3 and user_turns % 3 != 0
+            and not _has_correction_keyword(session)):
         return
 
     from ethan.memory.admission import (
@@ -170,7 +176,9 @@ async def _maybe_consolidate(session_id: str, model: str, user_id: str = "", mod
             return
 
         # Structured Person/Methodology extraction is independent from the legacy
-        # rolling-summary path and runs at the approved three-turn cadence.
+        # rolling-summary path. Short turns (<3) trigger immediately so a one-liner
+        # like "我最近在研究机器人" is captured even if the session ends early;
+        # longer sessions keep the three-turn cadence.
         await _run_structured_extraction(session, model, user_id, user_turns)
 
     except Exception:
