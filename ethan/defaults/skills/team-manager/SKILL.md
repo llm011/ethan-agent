@@ -49,7 +49,7 @@ metadata:
 
 1. 读取文档/上下文内容，提取**每个人做的最关键的事**（精简，不要太多太细）
 2. **写 people**：按人写入 `~/.ethan/work/people/{姓名}.md`，格式同上
-3. **写 project**：判断内容所属业务 → 写入 `~/.ethan/work/{业务名}/project/{项目名}.md`，格式：
+3. **写 project**：先确定所属业务目录（`ls ~/.ethan/work/` 查看已有业务目录），再写入 `~/.ethan/work/{业务名}/project/{项目名}.md`，格式：
    ```markdown
    # {事项/方向名称}
    > {路线或 checkpoint 描述，含时间节点}
@@ -59,7 +59,8 @@ metadata:
 
    ---
    ```
-   - 业务名由模型根据内容判断归属（对应 `work/` 下的业务目录）
+   - ⚠️ **绝不写到 `~/.ethan/work/project/`**，必须写到 `~/.ethan/work/{业务名}/project/`
+   - 业务名根据已有目录和内容归属判断
    - 项目名由模型根据内容判断，无法归类时用 `default.md`
    - 已完结事项标题前加 `[DONE]`
    - 进展涉及具体人时链接到 people：`见 [people/小王.md](../../people/小王.md#07-21)`
@@ -72,8 +73,8 @@ metadata:
 当用户发送文档链接、或说「收藏这个」「存一下」，或 Agent 在处理过程中**解析了任何文档/链接**时，**自动追加收藏记录**：
 
 1. 解析文档：提取标题、链接、一句话摘要、作者（可选）、日期
-2. 判断归属业务：根据用户记忆中的工作方向或文档内容判断所属业务目录，不确定时用 `default` 业务目录
-3. 追加到 `~/.ethan/work/{业务名}/docs/{分类}.md`，格式：
+2. 判断归属业务：`ls ~/.ethan/work/` 查看已有业务目录，根据内容判断归属，不确定时询问用户
+3. 追加到 `~/.ethan/work/{业务名}/docs/{分类}.md`（⚠️ 绝不写到 `~/.ethan/work/docs/`），格式：
    ```markdown
    ## {文档标题}
    - 链接：{url}
@@ -156,6 +157,13 @@ metadata:
 3. **`reviews/` 跨业务**：绩效评估是对人的综合评估，不属于单一业务
 4. **业务目录内按资料类型组织**：`scope.md`（范围定义）、`project/`（项目进展）、`docs/`（文档收藏）、`cr-reports/`（代码审查报告）等
 5. **业务目录可增减**：负责的业务范围可能变化，目录随业务自然增减，无需预定义
+
+> ⚠️ **严禁在 `work/` 根目录下创建 `scope.md`、`project/`、`docs/`、`cr-reports/` 等文件或目录。** 这些资料**必须且只能**存放在对应的业务子目录内（如 `work/{业务名}/scope.md`）。`work/` 根目录下只允许存在：`team.yaml`、`people/`、`reviews/`、`.group_scan_state.json`、以及各业务文件夹本身。
+
+**写入前必检**：任何写入 project/docs/scope/cr-reports 的操作，Agent 必须先：
+1. 确定内容归属哪个业务（读已有业务目录 or 从上下文判断）
+2. 确认目标路径是 `~/.ethan/work/{业务名}/...` 而非 `~/.ethan/work/...`
+3. 若业务目录不存在，先创建目录和 `scope.md`
 
 > `timelines.yaml` 和 `.timeline_state.json` 由 `schedule-manager` 管理，不在本技能范围内。
 
