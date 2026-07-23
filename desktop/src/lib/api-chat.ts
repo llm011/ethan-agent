@@ -103,3 +103,28 @@ export async function stopGeneration(sessionId: string): Promise<{ ok: boolean; 
   if (!res.ok) return { ok: false, stopped: false };
   return res.json();
 }
+
+/** 运行中向当前 session 的 Agent 上下文「补充信息」。
+ *  信息会插入到下一轮调模型前的 working 列表末尾（prompt 结尾）。
+ *  无活跃 run（已结束）时后端返回 409，这里抛错由调用方提示。 */
+export async function injectMessage(sessionId: string, content: string): Promise<{ ok: boolean; queued: boolean }> {
+  const res = await fetch(`${getApiUrl()}/chat/${encodeURIComponent(sessionId)}/inject`, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify({ content }),
+  });
+  if (!res.ok) {
+    let detail = "";
+    try {
+      const body = await res.clone().json();
+      detail = typeof body?.detail === "string" ? body.detail : "";
+    } catch {}
+    if (!detail) {
+      if (res.status === 409) detail = "当前没有进行中的任务，无法补充信息";
+      else if (res.status === 401) detail = "登录已失效，请重新登录后重试";
+      else detail = `提交失败（${res.status}）`;
+    }
+    throw new Error(detail);
+  }
+  return res.json();
+}

@@ -886,6 +886,15 @@ class Agent:
         pending_suffix = ""  # 反思提示，仅附加到「下一轮」的 system，附完即清
 
         for i in range(max_iters):
+            # 每轮开头消费「运行中补充信息」：用户在工具调用过程中提交的补充内容，
+            # append 到 working 末尾（即 prompt 结尾），下一轮调模型时立即可见。
+            # 协议合规：Anthropic/OpenAI 都允许 tool 消息后跟 user 消息。
+            from ethan.core.context import get_injected_messages as _drain_inject
+            _injected = _drain_inject()
+            if _injected:
+                _inject_text = "\n\n".join(f"[用户运行中补充]：{m}" for m in _injected)
+                working.append(Message(role="user", content=_inject_text))
+                logger.info("stream_chat() iter=%d consumed %d injected message(s)", i, len(_injected))
             finalize = (i == max_iters - 1)  # 留最后一轮做收尾：禁工具、强制总结
             if finalize:
                 tools = None

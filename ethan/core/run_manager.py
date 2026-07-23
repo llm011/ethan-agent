@@ -51,6 +51,9 @@ class ChatRun:
     last_event_time: float = field(default_factory=time.monotonic)
     watchdog_checks: int = 0  # 已执行的 watchdog 检查次数
     watchdog_task: asyncio.Task | None = None  # watchdog 强引用，finish() 时取消
+    # 用户「运行中补充信息」收件箱：inject() 入队，agent loop 每轮开头 drain_injected() 取走。
+    # asyncio 单线程下 list.append / clear 原子，无需 lock。
+    injected_messages: list[str] = field(default_factory=list)
 
     def emit(self, event: dict) -> None:
         """记录一个事件并扇出给所有当前订阅者（同步，无 await）。"""
@@ -58,6 +61,21 @@ class ChatRun:
         self.last_event_time = time.monotonic()
         for q in self.subscribers:
             q.put_nowait(event)
+
+    def inject(self, content: str) -> None:
+        """外部异步注入补充信息：等下一轮调模型前由 agent loop 消费。
+
+        同步操作，asyncio 单线程下与 drain_injected() 互不交错。
+        """
+        self.injected_messages.append(content)
+
+    def drain_injected(self) -> list[str]:
+        """agent loop 每轮开头调一次：取走并清空待消费的补充信息。无则返回空列表。"""
+        if not self.injected_messages:
+            return []
+        msgs = self.injected_messages.copy()
+        self.injected_messages.clear()
+        return msgs
 
     def subscribe(self) -> tuple[asyncio.Queue, list[dict]]:
         """注册一个订阅者，返回 (队列, 当前缓冲快照)。

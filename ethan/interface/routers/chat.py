@@ -22,7 +22,7 @@ from .helpers import (
     _with_quote,
 )
 from .producers import _run_delegate_generation, _run_generation
-from .schemas import ChatRequest, ChatResponse
+from .schemas import ChatRequest, ChatResponse, InjectRequest
 from .sse import _sse_from_run
 
 router = APIRouter()
@@ -327,3 +327,23 @@ async def stop_generation(session_id: str, user_id: str = Depends(verify_token))
     from ethan.core.run_manager import RunManager
     stopped = RunManager.instance().stop(session_id, user_id=user_id)
     return {"ok": True, "stopped": stopped}
+
+
+@router.post("/chat/{session_id}/inject")
+async def inject_message(session_id: str, req: InjectRequest, user_id: str = Depends(verify_token)):
+    """运行中向当前 session 的 Agent 上下文「补充信息」。
+
+    信息会塞入 ChatRun 的 inbox，agent loop 下一轮调模型前会 append 到 working 末尾
+    （即 prompt 结尾处），以 `[用户运行中补充]：...` 形式呈现给模型。
+    仅当该 session 有活跃 run（未 done）时生效；run 已结束返回 409。
+    user_id 校验归属，防跨用户注入。
+    """
+    from ethan.core.run_manager import RunManager
+    run = RunManager.instance().get(session_id, user_id=user_id)
+    if run is None or run.done:
+        raise HTTPException(status_code=409, detail="当前没有进行中的任务，无法补充信息")
+    content = (req.content or "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="补充信息不能为空")
+    run.inject(content)
+    return {"ok": True, "queued": True}

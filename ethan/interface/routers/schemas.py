@@ -21,3 +21,8 @@ class ChatResponse(BaseModel):
     model: str
     usage: dict
     session_id: str | None = None
+
+
+class InjectRequest(BaseModel):
+    """运行中补充信息：插入到下一轮调模型前的 working 列表末尾（prompt 结尾）。"""
+    content: str
