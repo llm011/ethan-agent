@@ -131,26 +131,44 @@ def load_skill_from_dir(skill_dir: Path) -> Optional[Skill]:
     return skill
 
 
-def load_all_skills(user_id: str = "") -> list[Skill]:
-    """从 per-user 技能目录加载所有技能。
+def _load_skills_into(skills_dir: Path, skills: dict[str, Skill], default_names: set[str]) -> None:
+    """扫一个技能目录，加载的技能写进 skills（同名覆盖 —— 后扫的胜出）。"""
+    if not skills_dir.exists():
+        return
+    for entry in sorted(skills_dir.iterdir()):
+        skill = None
+        if entry.is_dir() and not entry.name.endswith("-references"):
+            skill = load_skill_from_dir(entry)
+        elif entry.suffix == ".md":
+            skill = load_skill_from_file(entry)
+        if skill:
+            skill.is_default = skill.name in default_names
+            skills[skill.name] = skill
 
-    user_id 非空时读 ~/.ethan/users/<uid>/skills/（per-user 隔离）；
-    user_id 为空时回退到全局 ~/.ethan/skills/（兼容 CLI/REPL 等无用户场景）。
+
+def load_all_skills(user_id: str = "") -> list[Skill]:
+    """从当前 profile 的技能目录加载所有技能。
+
+    数据模型（多用户）：**内置默认技能全员共享，自建技能各自私有**。
+    - default profile（user_id 为空）：读 ~/.ethan/skills/（已由 _init_default_skills 播种内置默认 + 自己的自建）。
+    - 命名 profile（user_id 非空）：先叠加打包内置默认技能（ethan/defaults/skills/，只含内置，
+      不含任何人的自建），再覆盖 ~/.ethan/profiles/<uid>/skills/ 里的私有技能（同名 profile 胜出，
+      允许用户覆写内置默认）。
+
+    user_id 参数保留兼容签名，实际 profile 由 context 的 ContextVar 决定
+    （verify_token 已设好），user_skills_dir() 据此解析。
     """
+    from ethan.core.context import get_user_id
     from ethan.core.paths import user_skills_dir
     skills: dict[str, Skill] = {}
     default_names = _default_skill_names()
 
-    skills_dir = user_skills_dir()
-    if skills_dir.exists():
-        for entry in sorted(skills_dir.iterdir()):
-            skill = None
-            if entry.is_dir() and not entry.name.endswith("-references"):
-                skill = load_skill_from_dir(entry)
-            elif entry.suffix == ".md":
-                skill = load_skill_from_file(entry)
-            if skill:
-                skill.is_default = skill.name in default_names
-                skills[skill.name] = skill
+    # 命名 profile：先垫一层打包内置默认技能（全员共享）。default profile 的
+    # ~/.ethan/skills 已含播种好的内置默认，无需重复叠加。
+    if get_user_id():
+        packaged = Path(__file__).parent.parent / "defaults" / "skills"
+        _load_skills_into(packaged, skills, default_names)
+
+    _load_skills_into(user_skills_dir(), skills, default_names)
 
     return list(skills.values())
