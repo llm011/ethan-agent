@@ -3,8 +3,10 @@
 
 用法:
     python3 render_pptx.py deck.json -o out.pptx [--theme NAME] [--check]
+    python3 render_pptx.py <项目目录> -o out.pptx   # 含 deck.json + pages/*.json，按文件名排序合并
 
 - deck.json 格式见 references/schema.md（画布默认 1000x562.5 px，1px = 12192 EMU，字号 pt = px * 0.96）
+- 项目目录结构见 project_loader.py  docstring（逐页生成工作流：deck.json 元信息 + 每页一个 Slide JSON）
 - --check 只校验不渲染，exit 0 = 通过
 - 依赖 python-pptx；缺失时自动 `pip install --user python-pptx` 后重试
 """
@@ -22,6 +24,8 @@ import sys
 import tempfile
 import urllib.request
 from pathlib import Path
+
+from project_loader import load_deck
 
 # ---------------------------------------------------------------------------
 # 依赖自举：python-pptx（ Pillow 随其自动安装 ）
@@ -1159,14 +1163,14 @@ def render_deck(deck: dict, out_path: Path, theme: dict, deck_dir: Path):
 
 def main():
     ap = argparse.ArgumentParser(description="瘦身版 PPTist JSON → pptx 渲染器")
-    ap.add_argument("deck", help="deck JSON 文件路径")
-    ap.add_argument("-o", "--out", help="输出 pptx 路径（默认 <deck>.pptx）")
+    ap.add_argument("deck", help="deck JSON 文件路径，或项目目录（含 deck.json + pages/*.json）")
+    ap.add_argument("-o", "--out", help="输出 pptx 路径（默认 <deck>.pptx；项目目录时为 <目录名>.pptx）")
     ap.add_argument("--theme", help="覆盖 deck 里的主题（scripts/themes/ 下的主题名）")
     ap.add_argument("--check", action="store_true", help="只校验不渲染")
     args = ap.parse_args()
 
     deck_path = Path(args.deck).resolve()
-    deck = json.loads(deck_path.read_text(encoding="utf-8"))
+    deck, deck_dir, _page_files = load_deck(deck_path)
     script_dir = Path(__file__).resolve().parent
 
     errors, warnings = validate_deck(deck)
@@ -1181,8 +1185,13 @@ def main():
         return
 
     theme = load_theme(deck, args.theme, script_dir)
-    out = Path(args.out).resolve() if args.out else deck_path.with_suffix(".pptx")
-    stats = render_deck(deck, out, theme, deck_path.parent)
+    if args.out:
+        out = Path(args.out).resolve()
+    elif deck_path.is_dir():
+        out = deck_path / (deck_path.name + ".pptx")
+    else:
+        out = deck_path.with_suffix(".pptx")
+    stats = render_deck(deck, out, theme, deck_dir)
     print(f"[ok] 已生成 {out}（{stats['slides']} 页 / {stats['elements']} 个元素，主题 {theme.get('name', 'custom')}）")
 
 

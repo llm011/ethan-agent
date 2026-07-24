@@ -17,6 +17,7 @@
 
 用法:
   python3 gen_image.py deck.json [--assets-dir DIR] [--dry-run] [--placeholder-color "#E5E7EB"]
+  python3 gen_image.py <项目目录>   # 含 deck.json + pages/*.json，逐页原地更新
 
 纯标准库实现，无第三方依赖。
 """
@@ -34,6 +35,8 @@ import urllib.parse
 import urllib.request
 import zlib
 from pathlib import Path
+
+from project_loader import default_assets_dir, load_deck, write_back
 
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
 TIMEOUT = 30
@@ -308,15 +311,15 @@ def resolve_one(src: str, el: dict, assets_dir: Path, deck_dir: Path, placeholde
 
 def main():
     ap = argparse.ArgumentParser(description="deck JSON 图片占位符瀑布流解析")
-    ap.add_argument("deck", help="deck JSON 路径（原地更新）")
-    ap.add_argument("--assets-dir", help="图片资源目录（默认 <deck名>.assets/）")
+    ap.add_argument("deck", help="deck JSON 路径，或项目目录（含 deck.json + pages/*.json）；原地更新")
+    ap.add_argument("--assets-dir", help="图片资源目录（默认 单文件: <deck名>.assets/，项目目录: assets/）")
     ap.add_argument("--dry-run", action="store_true", help="只列出待解析项，不下载")
     ap.add_argument("--placeholder-color", default="#E5E7EB", help="占位图颜色（默认 #E5E7EB）")
     args = ap.parse_args()
 
     deck_path = Path(args.deck).resolve()
-    deck = json.loads(deck_path.read_text(encoding="utf-8"))
-    assets_dir = Path(args.assets_dir).resolve() if args.assets_dir else deck_path.with_suffix("").parent / (deck_path.stem + ".assets")
+    deck, deck_dir, page_files = load_deck(deck_path)
+    assets_dir = Path(args.assets_dir).resolve() if args.assets_dir else default_assets_dir(deck_path)
 
     stats = {}
     pending = 0
@@ -326,7 +329,7 @@ def main():
             continue
         pending += 1
         label = src or f"gen:{el.get('imageQuery')}"
-        new_src, source = resolve_one(src, el, assets_dir, deck_path.parent, args.placeholder_color, args.dry_run)
+        new_src, source = resolve_one(src, el, assets_dir, deck_dir, args.placeholder_color, args.dry_run)
         if source:
             stats[source.split("(")[0]] = stats.get(source.split("(")[0], 0) + 1
             if not args.dry_run:
@@ -340,8 +343,8 @@ def main():
     if args.dry_run:
         print(f"[dry-run] 共 {pending} 个占位符待解析")
         return
-    deck_path.write_text(json.dumps(deck, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"[ok] 解析完成 {pending} 个占位符 {stats}，deck 已更新: {deck_path}")
+    write_back(deck_path, deck, page_files)
+    print(f"[ok] 解析完成 {pending} 个占位符 {stats}，已更新: {deck_path}")
 
 
 if __name__ == "__main__":
