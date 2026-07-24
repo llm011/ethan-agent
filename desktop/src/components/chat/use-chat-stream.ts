@@ -37,6 +37,7 @@ export async function consumeStream(
   let currentMatchedSkills: { name: string; is_default?: boolean }[] | undefined;
   const a2uiSurfaces: unknown[] = [];
   const mcpAppsCollected: Array<{ uri: string; data?: Record<string, unknown>; html?: string; csp?: Record<string, string[]> }> = [];
+  const cardsCollected: Array<{ type: string; [key: string]: unknown }> = [];
   const sendTime = Date.now();
   let ttft: number | undefined;
   let ttfbMs: number | undefined;
@@ -164,6 +165,9 @@ export async function consumeStream(
       if (chunk.tool && (chunk.state === "done" || chunk.state === "error") && chunk.mcp_app) {
         mcpAppsCollected.push(chunk.mcp_app);
       }
+      if (chunk.tool && (chunk.state === "done" || chunk.state === "error") && chunk.cards && Array.isArray(chunk.cards)) {
+        cardsCollected.push(...chunk.cards);
+      }
       if (chunk.content) {
         setBgPolling(null);
         assistantContent += chunk.content;
@@ -249,6 +253,7 @@ export async function consumeStream(
         total_ms: totalMs ?? last.total_ms,
         a2ui: a2uiSurfaces.length > 0 ? a2uiSurfaces : undefined,
         mcpApps: mcpAppsCollected.length > 0 ? mcpAppsCollected : undefined,
+        cards: cardsCollected.length > 0 ? (cardsCollected as unknown as Message["cards"]) : undefined,
         matchedSkills: currentMatchedSkills,
         id: messageId ?? last.id,
         intermediateOutput: intermediateOutput || undefined,
@@ -266,6 +271,7 @@ export async function consumeStream(
       total_ms: totalMs,
       a2ui: a2uiSurfaces.length > 0 ? a2uiSurfaces : undefined,
       mcpApps: mcpAppsCollected.length > 0 ? mcpAppsCollected : undefined,
+      cards: cardsCollected.length > 0 ? (cardsCollected as unknown as Message["cards"]) : undefined,
       matchedSkills: currentMatchedSkills,
       id: messageId,
       intermediateOutput: intermediateOutput || undefined,

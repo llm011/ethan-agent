@@ -247,7 +247,7 @@ class SessionStore:
         """)
         await self._db.commit()
         # Migration: add columns if they don't exist (for existing databases)
-        for col, definition in [("created_at", "REAL"), ("usage", "TEXT"), ("tool_steps", "TEXT"), ("thought", "TEXT"), ("quote", "TEXT"), ("a2ui", "TEXT"), ("mcp_apps", "TEXT"), ("images", "TEXT"), ("matched_skills", "TEXT"), ("ttfb_ms", "INTEGER"), ("total_ms", "INTEGER")]:
+        for col, definition in [("created_at", "REAL"), ("usage", "TEXT"), ("tool_steps", "TEXT"), ("thought", "TEXT"), ("quote", "TEXT"), ("a2ui", "TEXT"), ("mcp_apps", "TEXT"), ("images", "TEXT"), ("matched_skills", "TEXT"), ("ttfb_ms", "INTEGER"), ("total_ms", "INTEGER"), ("cards", "TEXT")]:
             try:
                 await self._db.execute(f"ALTER TABLE messages ADD COLUMN {col} {definition}")
                 await self._db.commit()
@@ -326,10 +326,11 @@ class SessionStore:
         mcp_apps_json = json.dumps(msg.mcp_apps, ensure_ascii=False) if msg.mcp_apps else None
         images_json = json.dumps(msg.images, ensure_ascii=False) if msg.images else None
         matched_skills_json = json.dumps(msg.matched_skills, ensure_ascii=False) if msg.matched_skills else None
+        cards_json = json.dumps(msg.cards, ensure_ascii=False) if msg.cards else None
 
         cursor = await self._db.execute(
-            "INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui, images, matched_skills, ttfb_ms, total_ms, mcp_apps) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (session_id, msg.role, msg.content, tool_calls_json, msg.tool_call_id, msg_created_at, usage_json, tool_steps_json, msg.thought, quote_json, a2ui_json, images_json, matched_skills_json, msg.ttfb_ms, msg.total_ms, mcp_apps_json),
+            "INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui, images, matched_skills, ttfb_ms, total_ms, mcp_apps, cards) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (session_id, msg.role, msg.content, tool_calls_json, msg.tool_call_id, msg_created_at, usage_json, tool_steps_json, msg.thought, quote_json, a2ui_json, images_json, matched_skills_json, msg.ttfb_ms, msg.total_ms, mcp_apps_json, cards_json),
         )
         await self._db.commit()
         return cursor.lastrowid  # 返回行 id，供「进度消息」复用同一条行做覆盖式 UPDATE
@@ -351,12 +352,13 @@ class SessionStore:
         a2ui_json = json.dumps(msg.a2ui, ensure_ascii=False) if msg.a2ui else None
         mcp_apps_json = json.dumps(msg.mcp_apps, ensure_ascii=False) if msg.mcp_apps else None
         matched_skills_json = json.dumps(msg.matched_skills, ensure_ascii=False) if msg.matched_skills else None
+        cards_json = json.dumps(msg.cards, ensure_ascii=False) if msg.cards else None
 
         await self._db.execute(
-            "UPDATE messages SET content=?, tool_calls=?, usage=?, tool_steps=?, thought=?, a2ui=?, mcp_apps=?, matched_skills=?, ttfb_ms=?, total_ms=?, created_at=? "
+            "UPDATE messages SET content=?, tool_calls=?, usage=?, tool_steps=?, thought=?, a2ui=?, mcp_apps=?, matched_skills=?, ttfb_ms=?, total_ms=?, cards=?, created_at=? "
             "WHERE id=? AND session_id=?",
             (msg.content, tool_calls_json, usage_json, tool_steps_json, msg.thought, a2ui_json,
-             mcp_apps_json, matched_skills_json, msg.ttfb_ms, msg.total_ms, msg.created_at or time.time(), row_id, session_id),
+             mcp_apps_json, matched_skills_json, msg.ttfb_ms, msg.total_ms, cards_json, msg.created_at or time.time(), row_id, session_id),
         )
         await self._db.commit()
 
@@ -429,7 +431,7 @@ class SessionStore:
         )
 
         async with self._db.execute(
-            "SELECT id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui, images, matched_skills, ttfb_ms, total_ms, mcp_apps FROM messages WHERE session_id = ? ORDER BY id",
+            "SELECT id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui, images, matched_skills, ttfb_ms, total_ms, mcp_apps, cards FROM messages WHERE session_id = ? ORDER BY id",
             (session_id,),
         ) as cursor:
             async for r in cursor:
@@ -446,6 +448,7 @@ class SessionStore:
                 ttfb_ms = r[13] if len(r) > 13 and r[13] is not None else None
                 total_ms = r[14] if len(r) > 14 and r[14] is not None else None
                 mcp_apps = json.loads(r[15]) if len(r) > 15 and r[15] else None
+                cards = json.loads(r[16]) if len(r) > 16 and r[16] else None
                 session.messages.append(Message(
                     role=r[1], content=r[2],
                     id=r[0],
@@ -462,6 +465,7 @@ class SessionStore:
                     ttfb_ms=ttfb_ms,
                     total_ms=total_ms,
                     mcp_apps=mcp_apps,
+                    cards=cards,
                 ))
 
         return session

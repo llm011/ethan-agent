@@ -28,6 +28,35 @@ async def verify_token(request: Request) -> str:
     return user_id
 
 
+async def verify_token_or_cookie(request: Request) -> str:
+    """三通道鉴权：Authorization header 优先，其次 cookie ethan_token，最后 ?token= 参数。
+
+    <img src> / <a href download> 这类浏览器直接发起的请求无法带 Authorization
+    header，必须从 cookie 读 token（前端 setAuthToken 已把 token 写进 cookie，path=/）。
+    Desktop（Tauri webview）cookie 的 origin 与 API 不一致，直链改在 URL 上带 ?token=。
+    其余流程与 verify_token 一致：解析 user_id、set_user_id、注入 request.state。
+    """
+    from ethan.core.users import get_user_store
+
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        token = auth.removeprefix("Bearer ").strip()
+    else:
+        token = request.cookies.get("ethan_token", "") or request.query_params.get("token", "")
+
+    if not token:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    user_store = get_user_store()
+    user_id = user_store.resolve_web_token(token)
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    set_user_id(user_id)
+    request.state.user_id = user_id
+    return user_id
+
+
 def create_agent(model: str | None = None, channel: str = "web", user_id: str = "", mode: str = ""):
     """Web 端 Agent 工厂，委托给 core.agent_factory。"""
     from ethan.core.agent_factory import create_agent as _create

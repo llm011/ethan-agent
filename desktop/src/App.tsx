@@ -16,6 +16,7 @@ import { ToolTiersView } from "@/components/tool-tiers-view";
 import { ChannelsView } from "@/components/channels-view";
 import { LogsView } from "@/components/logs-view";
 import { DocsView } from "@/components/docs-view";
+import PptPreviewPage from "@/pages/PptPreviewPage";
 
 /** Chat 路由：从 URL 提取 sessionId 传给 ChatView */
 function ChatRoute() {
@@ -67,6 +68,7 @@ function App() {
             <Route path="/logs" element={<LogsView />} />
             <Route path="/docs" element={<DocsView />} />
             <Route path="/docs/:slug" element={<DocsView />} />
+            <Route path="/ppt-preview" element={<PptPreviewPage />} />
           </Route>
         </Routes>
       </HashRouter>

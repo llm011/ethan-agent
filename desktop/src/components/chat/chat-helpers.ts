@@ -52,6 +52,7 @@ export function mapDetailMessages(detail: { messages: any[] }): Message[] {
     toolsExpanded: false,
     a2ui: m.a2ui && m.a2ui.length > 0 ? m.a2ui : undefined,
     mcpApps: m.mcp_apps && m.mcp_apps.length > 0 ? m.mcp_apps : undefined,
+    cards: m.cards && m.cards.length > 0 ? m.cards : undefined,
     matchedSkills: m.matched_skills || undefined,
     ttfb_ms: m.ttfb_ms ?? undefined,
     total_ms: m.total_ms ?? undefined,

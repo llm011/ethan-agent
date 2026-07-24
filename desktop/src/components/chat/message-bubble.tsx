@@ -11,19 +11,24 @@ import { MarkdownContent } from "./markdown";
 import { Lightbox, type LightboxImage } from "./lightbox";
 import { SearchCardCarousel, type SearchResultCard } from "./search-card-carousel";
 import { ImageGallery, type ImageCard } from "./image-gallery";
+import { FileCardView, type FileCard } from "./file-card";
 import { applyHighlights } from "@/lib/highlight";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@ethan/shared/ui/tooltip";
 import type { CardData, Message } from "@ethan/shared/chat/types";
 import type { Annotation } from "@/lib/api";
 
-// 按 card.type 分发到 SearchCardCarousel 或 ImageGallery
+// 按 card.type 分发到 SearchCardCarousel / ImageGallery / FileCardView
 function CardRenderer({ cards }: { cards: CardData[] }) {
   const searchResults = cards.filter((c): c is SearchResultCard => c.type === "search_result");
   const images = cards.filter((c): c is ImageCard => c.type === "image");
+  const files = cards.filter((c): c is FileCard => c.type === "file");
   return (
     <div className="mt-2 mb-2 space-y-2">
       {searchResults.length > 0 && <SearchCardCarousel cards={searchResults} />}
       {images.length > 0 && <ImageGallery cards={images} />}
+      {files.map((f, i) => (
+        <FileCardView key={`${f.path}-${i}`} card={f} />
+      ))}
     </div>
   );
 }
