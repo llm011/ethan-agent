@@ -32,6 +32,19 @@
 - `theme`：主题名（`scripts/themes/<name>.json`）或内联 SlideTheme 对象。
 - `canvas` 可省略，默认 1000×562.5。自定义比例（如 4:3 用 1000×750）时渲染器按宽度换算。
 
+### 项目目录模式（逐页生成，推荐）
+
+slides 也可以不放 deck.json 里，而是拆成项目目录——`render_pptx.py` / `gen_image.py` 的 deck 参数传目录即可：
+
+```
+<项目目录>/
+  deck.json      # 顶层结构去掉 slides：version / canvas / theme（通常内联定制主题）
+  pages/*.json   # 每页一个 Slide 对象，按文件名排序合并为 slides（NN_ 前缀控序，如 01_cover.json）
+  assets/        # gen_image.py 解析出的图片（项目模式下默认输出到这里）
+```
+
+页文件内容就是单个 Slide JSON（`{"id","type","background"?,"remark"?,"elements":[...]}`），字段定义与下文 Slide 完全一致。校验报错里的 `slides[i]` 对应排序后第 i 个页文件。
+
 ## Slide
 
 ```json
