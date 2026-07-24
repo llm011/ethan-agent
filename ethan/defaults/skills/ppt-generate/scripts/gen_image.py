@@ -343,8 +343,11 @@ def main():
     if args.dry_run:
         print(f"[dry-run] 共 {pending} 个占位符待解析")
         return
-    write_back(deck_path, deck, page_files)
-    print(f"[ok] 解析完成 {pending} 个占位符 {stats}，已更新: {deck_path}")
+    written = write_back(deck_path, deck, page_files)
+    if page_files:
+        print(f"[ok] 解析完成 {pending} 个占位符 {stats}，已回写 {written} 个页文件")
+    else:
+        print(f"[ok] 解析完成 {pending} 个占位符 {stats}，已更新: {deck_path}")
 
 
 if __name__ == "__main__":
