@@ -42,9 +42,15 @@ export function headers(): HeadersInit {
  */
 export function assetUrl(relativePath: string): string {
   const url = `${API_URL}/${relativePath}`;
-  if (typeof window !== "undefined" && window.location.port === "3000") {
-    const token = getAuthToken();
-    if (token) return `${url}?token=${encodeURIComponent(token)}`;
+  // 跨域时 cookie 不会自动发送，需要通过 query param 带 token
+  if (typeof window !== "undefined") {
+    try {
+      const apiOrigin = new URL(API_URL).origin;
+      if (apiOrigin !== window.location.origin) {
+        const token = getAuthToken();
+        if (token) return `${url}?token=${encodeURIComponent(token)}`;
+      }
+    } catch { /* malformed URL, skip */ }
   }
   return url;
 }

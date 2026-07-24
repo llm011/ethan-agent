@@ -7,6 +7,7 @@ DB 只存相对路径（如 "s_20260723_abc1/1690000000_0.png"），不存 base6
 from __future__ import annotations
 
 import base64
+import os
 import time
 from pathlib import Path
 
@@ -35,8 +36,9 @@ def save_image(session_id: str, idx: int, data_b64: str, media_type: str) -> str
     返回值如: "s_20260723_abc1/1690000000_0.png"
     """
     ext = _MIME_TO_EXT.get(media_type, ".png")
-    ts = int(time.time())
-    filename = f"{ts}_{idx}{ext}"
+    ts = int(time.time() * 1000)  # 毫秒级时间戳
+    rand = os.urandom(3).hex()    # 6 字符随机后缀防碰撞
+    filename = f"{ts}_{idx}_{rand}{ext}"
 
     session_dir = IMAGES_DIR / session_id
     session_dir.mkdir(parents=True, exist_ok=True)

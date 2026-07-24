@@ -1,4 +1,5 @@
 """schedule 路由：定时任务 CRUD + 时间线管理。"""
+import re
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -39,6 +40,16 @@ def _validate_path_in_config(path_str: str) -> Path:
     if not target.exists():
         raise HTTPException(404, f"File not found: {target}")
     return target
+
+
+_SCENE_RE = re.compile(r"^[a-zA-Z0-9_\-]+$")
+
+
+def _validate_scene(scene: str) -> str:
+    """校验 scene 名称，防止路径穿越。只允许字母数字下划线和短横线。"""
+    if not scene or not _SCENE_RE.match(scene):
+        raise HTTPException(400, f"Invalid scene name: {scene!r}")
+    return scene
 
 
 def _infer_category(job) -> str:
@@ -212,6 +223,7 @@ class TimelineExportRequest(BaseModel):
 @router.post("/timeline-export", dependencies=[Depends(verify_token)])
 async def export_timelines(req: TimelineExportRequest):
     """导出某 scene 的 timelines.yaml + state 为单一文件。"""
+    _validate_scene(req.scene)
     from ethan.scheduler.timeline import export_timelines as _export
     path = _export(format=req.format, scene=req.scene)
     return {"ok": True, "path": str(path), "scene": req.scene}

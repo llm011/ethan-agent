@@ -255,13 +255,14 @@ def _next_phase(timeline: dict, anchor_date: date, today: date) -> Optional[dict
 
 # ── Step 3: expand_actions ─────────────────────────────────────────────────
 
-def _action_job_id(timeline_id: str, phase_name: str, action_type: str, idx: int, anchor: date) -> str:
+def _action_job_id(timeline_id: str, phase_name: str, action_type: str, idx: int, anchor: date, scene: str = "") -> str:
     """生成 scheduler job 唯一 ID。
 
-    格式: timeline_{timeline_id}_{phase_name}_{action_type}_{idx}_{anchor}
+    格式: timeline_{scene}_{timeline_id}_{phase_name}_{action_type}_{idx}_{anchor}
     """
     safe_phase = re.sub(r"[^\w\u4e00-\u9fff]+", "_", phase_name).strip("_")
-    return f"timeline_{timeline_id}_{safe_phase}_{action_type}_{idx}_{anchor.isoformat()}"
+    prefix = f"timeline_{scene}_" if scene else "timeline_"
+    return f"{prefix}{timeline_id}_{safe_phase}_{action_type}_{idx}_{anchor.isoformat()}"
 
 
 def expand_actions(timeline: dict, anchor_date: date, scene: str = "") -> list[ExpandedTask]:
@@ -282,7 +283,7 @@ def expand_actions(timeline: dict, anchor_date: date, scene: str = "") -> list[E
             action_type = action.get("type", "once")
             message = action.get("message", "")
             target = action.get("target", "self")
-            job_id = _action_job_id(timeline_id, phase_name, action_type, idx, anchor_date)
+            job_id = _action_job_id(timeline_id, phase_name, action_type, idx, anchor_date, tl_scene)
 
             if action_type == "once":
                 offset = action.get("offset", "0d")
@@ -367,6 +368,8 @@ def sync_scheduler(scheduler, today: Optional[date] = None) -> dict:
     for scene in _discover_scenes():
         timelines = get_timelines(scene)
         if not timelines:
+            # scene 已清空所有 timeline，清理残留 state
+            save_state({}, scene)
             continue
         state = load_state(scene)
         for tl in timelines:
