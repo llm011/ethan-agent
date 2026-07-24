@@ -61,6 +61,22 @@ LLM 会看到错误信息并决定如何处理（重试或换个方式）。
 
 ## 内置工具一览
 
+### DeliverFileTool — `ethan/tools/builtin/deliver_file.py`
+
+把本地生成的文件（pptx/pdf/docx/xlsx/csv/zip/md/html）以「文件卡片」形式交付到聊天消息。
+前端渲染 icon + 文件名 + 大小的卡片：pptx 且同目录是项目制 deck（含 `deck.json` + `pages/`）时
+点击进入 `/ppt-preview` 逐页预览页（可选下载 PPTX 或前端合成的 PDF），其余文件点击直接下载。
+
+```
+deliver_file(path="/Users/x/Downloads/报告/报告.pptx", title="年度报告")
+```
+
+- 路径 jail：只允许 home 目录和 /tmp 下的文件，扩展名白名单
+- 卡片经 `ToolResult.cards` → SSE → 前端 CardRenderer（与 web_search 的 search_result 卡片同链路），
+  并持久化到 messages 表的 `cards` 列（刷新不丢）
+- 下载/预览数据走 `/api/files/*` 路由（见 docs/interface.md）
+- ppt-generate skill 交付段已要求渲染成功后必须调用本工具
+
 ### ShellTool — `ethan/tools/builtin/shell.py`
 
 执行 shell 命令。

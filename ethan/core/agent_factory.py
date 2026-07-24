@@ -19,6 +19,7 @@ from ethan.tools.builtin.background_task import (
 from ethan.tools.builtin.browser import BrowserPageTool, BrowserSessionTool, BrowserTabTool
 from ethan.tools.builtin.chart import ChartTool
 from ethan.tools.builtin.config import ConfigGetTool, ConfigSetTool
+from ethan.tools.builtin.deliver_file import DeliverFileTool
 from ethan.tools.builtin.file import FileListTool, FileReadTool, FileWriteTool
 from ethan.tools.builtin.find_tools import FindToolsTool
 from ethan.tools.builtin.image_search import ImageSearchTool
@@ -96,6 +97,7 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
     registry.register(FileReadTool())
     registry.register(FileWriteTool())
     registry.register(FileListTool())
+    registry.register(DeliverFileTool())
 
     if toolset == "heartbeat":
         # 心跳：只读 + 执行任务 + 调度 + 知识库，不写记忆/skill/profile
