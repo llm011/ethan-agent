@@ -150,6 +150,7 @@ slides 也可以不放 deck.json 里，而是拆成项目目录——`render_ppt
 |---|---|---|---|
 | `text` | string | ✅ | 文本内容 |
 | `bold` `italic` `underline` `strikethrough` | bool | false | 字重样式 |
+| `sub` `sup` | bool | false | 下标/上标（行内数学符号用，如 `d` + `{"text":"k","sub":true}`） |
 | `fontSize` | number | 主题 typography | px |
 | `color` | string | 主题 typography | `#RRGGBB` |
 | `fontName` | string | 主题 fontName | 字体名 |
