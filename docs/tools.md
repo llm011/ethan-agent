@@ -72,6 +72,8 @@ deliver_file(path="/Users/x/Downloads/报告/报告.pptx", title="年度报告")
 ```
 
 - 路径 jail：只允许 home 目录和 /tmp 下的文件，扩展名白名单
+- 会话级隔离：`/api/files/*` 下载/预览必须带 `session_id`，且该 session 的消息里确有本工具
+  写入的 file 卡片（授权派生自 cards 列）——每个对话框只能下载自己交付过的文件
 - 卡片经 `ToolResult.cards` → SSE → 前端 CardRenderer（与 web_search 的 search_result 卡片同链路），
   并持久化到 messages 表的 `cards` 列（刷新不丢）
 - 下载/预览数据走 `/api/files/*` 路由（见 docs/interface.md）

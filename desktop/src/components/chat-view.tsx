@@ -401,6 +401,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       <MessageList
         messages={messages}
         streaming={streaming}
+        sessionId={activeSession}
         onQuote={handleQuote}
         onCardAction={handleCardAction}
         onRead={handleRead}

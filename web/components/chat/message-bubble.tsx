@@ -21,7 +21,7 @@ import type { CardData, Message } from "@ethan/shared/chat/types";
 import type { Annotation } from "@/lib/api";
 
 // 按 card.type 分发到 SearchCardCarousel / ImageGallery / FileCardView
-function CardRenderer({ cards }: { cards: CardData[] }) {
+function CardRenderer({ cards, sessionId }: { cards: CardData[]; sessionId?: string | null }) {
   const searchResults = cards.filter((c): c is SearchResultCard => c.type === "search_result");
   const images = cards.filter((c): c is ImageCard => c.type === "image");
   const files = cards.filter((c): c is FileCard => c.type === "file");
@@ -30,7 +30,7 @@ function CardRenderer({ cards }: { cards: CardData[] }) {
       {searchResults.length > 0 && <SearchCardCarousel cards={searchResults} />}
       {images.length > 0 && <ImageGallery cards={images} />}
       {files.map((f, i) => (
-        <FileCardView key={`${f.path}-${i}`} card={f} />
+        <FileCardView key={`${f.path}-${i}`} card={f} sessionId={sessionId} />
       ))}
     </div>
   );
@@ -68,6 +68,7 @@ interface MessageBubbleProps {
   msg: Message;
   isStreaming: boolean;
   isLast: boolean;
+  sessionId?: string | null;
   onQuote?: (msg: Message) => void;
   onCardAction?: (text: string) => void;
   onRead?: (msg: Message) => void;
@@ -75,7 +76,7 @@ interface MessageBubbleProps {
   annotations?: Annotation[];
 }
 
-export function MessageBubbleInner({ msg, isStreaming, isLast, onQuote, onCardAction, onRead, onShare, annotations }: MessageBubbleProps) {
+export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuote, onCardAction, onRead, onShare, annotations }: MessageBubbleProps) {
   const [highlightedStep, setHighlightedStep] = useState<number | undefined>(undefined);
   // 思考过程（thought）默认展开，用户可手动折叠
   const [thoughtOpen, setThoughtOpen] = useState(true);
@@ -247,7 +248,7 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, onQuote, onCardAc
             )}
             <MarkdownContent ref={contentRef} content={msg.content} />
             {msg.cards && msg.cards.length > 0 && (
-              <CardRenderer cards={msg.cards} />
+              <CardRenderer cards={msg.cards} sessionId={sessionId} />
             )}
             {msg.a2ui && msg.a2ui.length > 0 && (
               <A2uiCard surfaces={msg.a2ui} onAction={onCardAction} />

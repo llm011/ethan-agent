@@ -11,6 +11,7 @@ const LOAD_MORE_COUNT = 10;
 interface MessageListProps {
   messages: Message[];
   streaming: boolean;
+  sessionId?: string | null;
   onQuote?: (msg: Message) => void;
   onCardAction?: (text: string) => void;
   onRead?: (msg: Message) => void;
@@ -18,7 +19,7 @@ interface MessageListProps {
   annotationsByMessage?: Record<number, Annotation[]>;
 }
 
-export function MessageList({ messages, streaming, onQuote, onCardAction, onRead, onShare, annotationsByMessage }: MessageListProps) {
+export function MessageList({ messages, streaming, sessionId, onQuote, onCardAction, onRead, onShare, annotationsByMessage }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
@@ -111,6 +112,7 @@ export function MessageList({ messages, streaming, onQuote, onCardAction, onRead
             msg={msg}
             isStreaming={streaming}
             isLast={startIdx + i === messages.length - 1}
+            sessionId={sessionId}
             onQuote={onQuote}
             onCardAction={onCardAction}
             onRead={onRead}
