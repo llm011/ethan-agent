@@ -295,7 +295,7 @@ slides 也可以不放 deck.json 里，而是拆成项目目录——`render_ppt
 - 表体默认填充跟随主题背景：深色主题下自动提亮一档作卡片面（文字用主题 fontColor），浅色主题下为纯白；边框默认取主题 outline 颜色。深浅主题下表格都可读，无需手写 backcolor。
 - 被合并覆盖的单元格写 `{ "text": "", "merged": true }` 占位。
 
-## 7. 公式元素（latex）—— OMML 原生公式，PPT 内可继续编辑
+## 7. 公式元素（latex）—— 原生文本 run + 真上下标，全平台可编辑
 
 ```json
 {
@@ -309,14 +309,19 @@ slides 也可以不放 deck.json 里，而是拆成项目目录——`render_ppt
 }
 ```
 
-- `latex`：LaTeX 公式源码（不需要 `$...$` 包裹）。支持 latex2mathml 覆盖的子集：
-  分式 `\frac`、根号 `\sqrt`、上下标 `^` `_`、求和/积分 `\sum \int \prod`、希腊字母、
-  矩阵 `\begin{matrix}`、常用符号与定界符。
-- 渲染链路：`LaTeX → MathML (latex2mathml) → OMML (mathml2omml) → 注入 pptx 文本框`。
-  生成的是 **PowerPoint 原生公式**，在 Office/WPS 里双击可继续编辑（不是图片）。
+- `latex`：LaTeX 公式源码（不需要 `$...$` 包裹）。支持 `\frac \sqrt ^ _ \sum \prod \int \partial`、
+  希腊字母、`\mathrm \text`、常用符号（`\cdot \otimes \infty \leq` 等）。
+- **默认引擎 omml**：LaTeX→MathML→OMML，照 Mac Office 365 原生公式的字节模式注入
+  （裸 `a14:m`、Cambria Math 字体声明、结构元素带 `m:ctrlPr`、`m:rad` 带空 `m:deg`+`degHide`）
+  ——真根号（带横线）、真分式（上下堆叠），在 PowerPoint（Win/Mac）和 WPS 里都可再编辑。
+  **Keynote 不支持 `a14:m`**（会判整个文件非法），需要 Keynote 交付时改用 runs 引擎。
+- `engine: "runs"`（可选）：LaTeX → PPT 原生文本 run（`\frac{a}{b}` → 行内式 `(a)/(b)`，
+  上下标用真实 baseline run）——全平台（含 Keynote）可见可编辑，代价是根号没有横线、
+  分式不堆叠。仅在明确要交付 Keynote 用户时逐元素指定。
 - `fontSize`（默认 20px）、`color`（默认主题 fontColor）、`align`（默认 center）。
+  LaTeX 源码会写入形状描述（选择窗格可见），方便对照手动微调。
 - 转换失败时降级为公式源码纯文本并输出警告，不阻断整页渲染。
-- 依赖 `latex2mathml` + `mathml2omml`（纯 Python，渲染器首次运行自动 pip install）。
+- omml 引擎依赖 `latex2mathml` + `mathml2omml`（渲染器自动 pip install）；runs 引擎零依赖。
 
 ## SlideTheme（主题对象）
 
