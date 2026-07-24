@@ -6,7 +6,7 @@
     python3 render_pptx.py <项目目录> -o out.pptx   # 含 deck.json + pages/*.json，按文件名排序合并
 
 - deck.json 格式见 references/schema.md（画布默认 1000x562.5 px，1px = 12192 EMU，字号 pt = px * 0.96）
-- 项目目录结构见 project_loader.py  docstring（逐页生成工作流：deck.json 元信息 + 每页一个 Slide JSON）
+- 项目目录结构见 project_loader.py docstring（逐页生成工作流：deck.json 元信息 + 每页一个 Slide JSON）
 - --check 只校验不渲染，exit 0 = 通过
 - 依赖 python-pptx；缺失时自动 `pip install --user python-pptx` 后重试
 """
