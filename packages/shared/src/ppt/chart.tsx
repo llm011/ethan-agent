@@ -31,7 +31,17 @@ export function PptChart({ el, colors }: { el: PptElement; colors: string[] }) {
   const labelSize = Math.max(8, Math.min(11, w / 50));
 
   const flat = series.flat();
-  const maxV = Math.max(...flat.map((v) => Math.abs(v)), 1);
+  // 正负值分开量程，以零轴为基线：负值向下/向左延伸，而不是产生负的 SVG 尺寸被静默丢弃
+  const posMax = Math.max(...flat.map((v) => Math.max(v, 0)), 0);
+  const negMax = Math.max(...flat.map((v) => Math.max(-v, 0)), 0);
+  const range = posMax + negMax || 1;
+  // y 方向：v → 画布 y（0..ih，零轴在 yOf(0)）
+  const yOf = (v: number) => ((posMax - v) / range) * ih;
+  // x 方向（横向 bar）：v → 画布 x（0..iw，零轴在 xOf(0)）
+  const xOf = (v: number) => ((negMax + v) / range) * iw;
+  const zeroLine = negMax > 0 && (
+    <line x1={0} y1={yOf(0)} x2={iw} y2={yOf(0)} stroke={axisColor} strokeWidth={1} strokeDasharray="3 2" />
+  );
 
   if (type === "pie" || type === "ring") {
     const vals = series[0] ?? [];
@@ -75,13 +85,14 @@ export function PptChart({ el, colors }: { el: PptElement; colors: string[] }) {
       <svg width={w} height={h} style={{ display: "block" }}>
         <g transform={`translate(${padL},${padT})`}>
           <Axis w={iw} h={ih} color={axisColor} />
+          {zeroLine}
           {series.map((s, si) => {
-            const pts = s.map((v, i) => [i * stepX, ih - (v / maxV) * ih] as const);
+            const pts = s.map((v, i) => [i * stepX, yOf(v)] as const);
             const poly = pts.map(([x, y]) => `${x},${y}`).join(" ");
             return (
               <g key={si}>
                 {type === "area" && (
-                  <polygon points={`0,${ih} ${poly} ${(n - 1) * stepX},${ih}`} fill={palette[si % palette.length]} opacity={0.25} />
+                  <polygon points={`0,${yOf(0)} ${poly} ${(n - 1) * stepX},${yOf(0)}`} fill={palette[si % palette.length]} opacity={0.25} />
                 )}
                 <polyline points={poly} fill="none" stroke={palette[si % palette.length]} strokeWidth={2} />
                 {pts.map(([x, y], i) => (
@@ -109,18 +120,23 @@ export function PptChart({ el, colors }: { el: PptElement; colors: string[] }) {
       <svg width={w} height={h} style={{ display: "block" }}>
         <g transform={`translate(${padL},${padT})`}>
           <Axis w={iw} h={ih} color={axisColor} />
+          {zeroLine}
           {series.map((s, si) =>
             s.map((v, i) => {
-              const frac = v / maxV;
-              const x = vertical ? i * (iw / n) + ((iw / n - group) / 2) + si * bw : 0;
-              const y = vertical ? ih - frac * ih : i * (ih / n) + ((ih / n - group) / 2) + si * bw;
+              // 以零轴为基线：正值向上/向右，负值向下/向左，尺寸恒为非负
+              const x = vertical
+                ? i * (iw / n) + ((iw / n - group) / 2) + si * bw
+                : Math.min(xOf(0), xOf(v));
+              const y = vertical
+                ? Math.min(yOf(0), yOf(v))
+                : i * (ih / n) + ((ih / n - group) / 2) + si * bw;
               return (
                 <rect
                   key={`${si}-${i}`}
                   x={x}
                   y={y}
-                  width={vertical ? bw * 0.9 : frac * iw}
-                  height={vertical ? frac * ih : bw * 0.9}
+                  width={vertical ? bw * 0.9 : Math.abs(xOf(v) - xOf(0))}
+                  height={vertical ? Math.abs(yOf(v) - yOf(0)) : bw * 0.9}
                   fill={palette[si % palette.length]}
                   rx={1.5}
                 />

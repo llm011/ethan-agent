@@ -88,6 +88,10 @@ DEFAULT_CANVAS_H = 562.5
 SLIDE_W_EMU = 12192000  # 13.333 in，16:9
 PT_PER_PX = 0.96  # 1000px = 13.333in → 1px = 0.96pt
 
+# 上下标基线偏移（%）：与前端 slide.tsx 的 0.7 缩放配套（预览下标略深、上标略浅是 pptx 惯例）
+SUB_BASELINE_PCT = -25
+SUP_BASELINE_PCT = 30
+
 SLIDE_TYPES = {"cover", "contents", "transition", "content", "end"}
 TEXT_TYPES = {
     "title", "subtitle", "content", "item", "itemTitle",
@@ -526,7 +530,7 @@ def render_paragraphs(text_frame, paragraphs, theme, text_type=None, el_defaults
             if r.get("strikethrough"):
                 set_strikethrough(run)
             if r.get("sub") or r.get("sup"):
-                set_baseline(run, -25 if r.get("sub") else 30)
+                set_baseline(run, SUB_BASELINE_PCT if r.get("sub") else SUP_BASELINE_PCT)
             if r.get("wordSpace"):
                 set_word_space(run, float(r["wordSpace"]))
 
@@ -1174,6 +1178,14 @@ def render_latex(slide, el, theme, emu_per_px):
     latex_src = str(el.get("latex", ""))
     font_size = float(el.get("fontSize") or 20)
     color = el.get("color") or theme.get("fontColor", "#1F2937")
+    # 两分支共用的基础字段构建一次，只在 paragraphs 上分叉（否则降级分支会静默丢 rotate 等字段）
+    base_text_el = {
+        "id": el.get("id"), "name": el.get("name"),
+        "left": el["left"], "top": el["top"],
+        "width": el["width"], "height": el["height"],
+        "rotate": el.get("rotate"),
+        "text": el.get("text"),
+    }
     try:
         runs = _latex_to_runs(latex_src)
         if not runs:
@@ -1182,11 +1194,7 @@ def render_latex(slide, el, theme, emu_per_px):
             r["fontSize"] = font_size
             r["color"] = color
         text_el = {
-            "id": el.get("id"), "name": el.get("name"),
-            "left": el["left"], "top": el["top"],
-            "width": el["width"], "height": el["height"],
-            "rotate": el.get("rotate"),
-            "text": el.get("text"),
+            **base_text_el,
             "paragraphs": [{"align": el.get("align", "center"), "runs": runs, "lineHeight": 1.3}],
         }
         box = render_text(slide, text_el, theme, emu_per_px)
@@ -1196,9 +1204,7 @@ def render_latex(slide, el, theme, emu_per_px):
     except Exception as e:  # noqa: BLE001 - 降级为原文文本，不阻断整页渲染
         print(f"[warn] latex 元素 {el.get('id')} 转换失败（{e}），已降级为源码文本", file=sys.stderr)
         text_el = {
-            "id": el.get("id"), "name": el.get("name"),
-            "left": el["left"], "top": el["top"],
-            "width": el["width"], "height": el["height"],
+            **base_text_el,
             "paragraphs": [{"align": el.get("align", "center"),
                             "runs": [{"text": latex_src, "fontSize": font_size, "color": color}]}],
         }
