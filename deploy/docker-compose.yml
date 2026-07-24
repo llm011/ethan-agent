@@ -50,6 +50,9 @@ services:
       - ETHAN_AUTH_TOKEN=${ETHAN_AUTH_TOKEN:-}
       - ETHAN_PROXY=${ETHAN_PROXY:-}
       - SEARXNG_BASE_URL=http://searxng:8080
+      # 覆盖 Docker Desktop 自动注入的 NO_PROXY：用明确 IP 代替 CIDR（httpx 不认 127.0.0.0/8）
+      - NO_PROXY=localhost,127.0.0.1,searxng,host.docker.internal,*.local,*.internal
+      - no_proxy=localhost,127.0.0.1,searxng,host.docker.internal,*.local,*.internal
     depends_on:
       searxng:
         condition: service_healthy

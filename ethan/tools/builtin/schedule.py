@@ -4,6 +4,8 @@ import os
 import threading
 from contextvars import ContextVar
 
+import httpx
+
 from ethan.tools.base import BaseTool
 
 # 存储当前请求的飞书 chat_id，在 lark webhook 里设置，ScheduleCreateTool 里读取
@@ -24,6 +26,12 @@ def _base_url() -> str:
     """返回本地 serve 的 base URL（读取 ETHAN_SERVER_PORT，默认 8900）。"""
     port = os.environ.get("ETHAN_SERVER_PORT", "8900")
     return f"http://127.0.0.1:{port}"
+
+
+def _http_client(**kwargs) -> httpx.AsyncClient:
+    """创建 httpx 客户端，强制不读代理环境变量（避免容器内 HTTP_PROXY 导致本机回环 502）。"""
+    kwargs.setdefault("trust_env", False)
+    return httpx.AsyncClient(**kwargs)
 
 
 def _make_fallback_title(prompt: str) -> str:
@@ -129,13 +137,11 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
                     if to_user_id:
                         import asyncio
 
-                        import httpx
-
                         from ethan.interface.wechat_ilink import load_credentials, send_text
                         creds = load_credentials()
                         if creds:
                             async def _send_wechat():
-                                async with httpx.AsyncClient() as client:
+                                async with _http_client() as client:
                                     await send_text(client, creds, to_user_id, "", formatted)
                             try:
                                 asyncio.run(_send_wechat())
@@ -173,7 +179,6 @@ class ScheduleCreateTool(BaseTool):
         self._user_id = user_id
 
     async def run(self, job_id: str, prompt: str, title: str = "", cron: str = "", interval_minutes: int = 0, end_date: str = "", category: str = "", scene: str = "") -> str:
-        import httpx
 
         from ethan.core.config import get_config
         from ethan.memory.session import get_session_store
@@ -219,7 +224,7 @@ class ScheduleCreateTool(BaseTool):
         token = get_config().network.auth_token
         headers = {"Authorization": f"Bearer {token}"} if token else {}
         try:
-            async with httpx.AsyncClient() as client:
+            async with _http_client() as client:
                 res = await client.post(f"{_base_url()}/api/schedule", json={
                     "job_id": job_id,
                     "title": title,
@@ -257,13 +262,12 @@ class ScheduleListTool(BaseTool):
     }
 
     async def run(self, scene: str = "", category: str = "") -> str:
-        import httpx
 
         from ethan.core.config import get_config
         token = get_config().network.auth_token
         headers = {"Authorization": f"Bearer {token}"} if token else {}
         try:
-            async with httpx.AsyncClient() as client:
+            async with _http_client() as client:
                 res = await client.get(f"{_base_url()}/api/schedule", headers=headers)
                 res.raise_for_status()
                 jobs = res.json().get("jobs", [])
@@ -315,13 +319,12 @@ class ScheduleRemoveTool(BaseTool):
     }
 
     async def run(self, job_id: str) -> str:
-        import httpx
 
         from ethan.core.config import get_config
         token = get_config().network.auth_token
         headers = {"Authorization": f"Bearer {token}"} if token else {}
         try:
-            async with httpx.AsyncClient() as client:
+            async with _http_client() as client:
                 res = await client.delete(f"{_base_url()}/api/schedule/{job_id}", headers=headers)
                 res.raise_for_status()
                 return f"Removed '{job_id}'"
