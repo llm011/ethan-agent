@@ -457,3 +457,50 @@ async def tool_tiers(model: str | None = None):
         "longtail_count": longtail_count,
         "total_count": len(tools),
     }
+
+
+# ── Knowledge backend validation ──────────────────────────────────
+
+
+class KnowledgeValidateRequest(BaseModel):
+    backend: str = "filesystem"
+    obsidian_vault_path: str = ""
+    obsidian_folder: str = "."
+    external_base_url: str = ""
+    external_api_key: str = ""
+
+
+@router.post("/settings/knowledge/validate", dependencies=[Depends(verify_token)])
+async def validate_knowledge_backend(req: KnowledgeValidateRequest):
+    """验证知识库后端配置的连通性。"""
+    from pathlib import Path as P
+
+    from ethan.knowledge.base import (
+        ExternalKnowledgeBase,
+        FilesystemKnowledgeBase,
+        ObsidianKnowledgeBase,
+    )
+
+    try:
+        if req.backend == "obsidian":
+            if not req.obsidian_vault_path:
+                return {"ok": False, "message": "Obsidian vault 路径不能为空"}
+            kb = ObsidianKnowledgeBase(
+                vault_path=P(req.obsidian_vault_path),
+                folder=req.obsidian_folder or ".",
+            )
+        elif req.backend == "external":
+            if not req.external_base_url:
+                return {"ok": False, "message": "外部知识库 API 地址不能为空"}
+            kb = ExternalKnowledgeBase(
+                base_url=req.external_base_url,
+                api_key=req.external_api_key,
+            )
+        else:
+            from ethan.core.paths import user_knowledge_dir
+            kb = FilesystemKnowledgeBase(user_knowledge_dir())
+
+        ok, message = kb.health_check()
+        return {"ok": ok, "message": message}
+    except Exception as e:
+        return {"ok": False, "message": f"验证失败: {e}"}

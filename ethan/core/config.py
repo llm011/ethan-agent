@@ -209,8 +209,17 @@ class WebSearchToolConfig(BaseModel):
     base_url: str = ""  # searxng 用，如 http://localhost:8888（自建）或第三方现成实例地址
     image_search_enabled: bool = True  # 图片搜索工具开关；仅在 base_url 配置时生效
 
+class KnowledgeConfig(BaseModel):
+    backend: str = "filesystem"  # "filesystem" | "obsidian" | "external"
+    obsidian_vault_path: str = ""  # Obsidian vault 根目录绝对路径
+    obsidian_folder: str = "."  # Vault 内用于知识库的子目录名（"." 表示根目录）
+    external_base_url: str = ""  # 外部知识库 REST API 的 base URL
+    external_api_key: str = ""  # 外部知识库认证 key
+
+
 class ToolsConfig(BaseModel):
     web_search: WebSearchToolConfig = Field(default_factory=WebSearchToolConfig)
+    knowledge: KnowledgeConfig = Field(default_factory=KnowledgeConfig)
 
 
 class Config(BaseModel):
