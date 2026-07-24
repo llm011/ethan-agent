@@ -121,12 +121,16 @@ gh api repos/<owner/repo>/pulls/<N> --jq '.head.sha' > /tmp/pr_<N>_sha.txt
 
 ```bash
 # 值得 review 的文件（排除 deleted + 噪音扩展名）
-# 注意：此正则需与下方「跳过这些文件」章节保持同步，改一处别忘了改另一处
-jq -r '.[] | select(.status != "removed") | select(.filename | test("\\.(pkl|pickle|jsonl|csv|json|lock|snap|md|rst|yaml|yml|toml|ini|cfg|conf|env|svg|png|jpg|jpeg|gif|ico|webp|mp4|mp3|wav|pdf|zip|tar|gz|bz2|7z|bin|dat|db|sqlite|parquet|arrow|npy|npz|h5|pt|pth|onnx|model|so|o|a|dll|dylib|exe|class|jar|war|pyc|pyo|wasm|min\\.js|min\\.css|map)$") | not) | "\(.status)\t\(.additions)+\(.deletions)-\t\(.filename)"' /tmp/pr_<N>_files.json
+# 用 jq 提取 + grep -v 管道过滤，避免 jq 内嵌长正则的转义问题
+jq -r '.[] | select(.status != "removed") | "\(.status)\t\(.additions)+\(.deletions)-\t\(.filename)"' /tmp/pr_<N>_files.json \
+  | grep -vE '\.(jsonl|csv|json|lock|snap|txt|md|rst|yaml|yml|toml|ini|cfg|conf|env|svg|png|jpg|jpeg|gif|ico|webp|mp4|mp3|wav|pdf|zip|tar|gz|bz2|7z|bin|dat|db|sqlite|parquet|arrow|pkl|pickle|npy|npz|h5|pt|pth|onnx|model|so|o|a|dll|dylib|exe|class|jar|war|pyc|pyo|wasm|min\.js|min\.css|map)$' \
+  | grep -vE '(pnpm-lock|package-lock|yarn\.lock|go\.sum|poetry\.lock|Cargo\.lock|uv\.lock|vendor/|node_modules/|dist/|build/|__pycache__/|\.next/)'
 
 # 被删除的文件（不读 diff，但删了函数/类要查残留引用）
 jq -r '.[] | select(.status == "removed") | "deleted\t\(.filename)"' /tmp/pr_<N>_files.json
 ```
+
+> ⚠️ **禁止在 jq 内写长正则**——shell 转义极易出错导致反复重试浪费轮次。用管道 `| grep -vE` 做后置过滤。
 
 看清单后决定：
 
@@ -153,14 +157,20 @@ rg_search(pattern=^diff --git, path=/tmp/pr_<N>.diff)
 
 ### 第 4 步：读 diff 并找问题（每文件 1 轮）
 
-用 `file_read` 的 **offset**（1-based 行号，与 rg_search 输出对齐）和 **max_lines** 读指定文件的 diff 块：
+用 `file_read` 的 **offset**（1-based 行号，与 rg_search 输出对齐）和 **max_lines** 读指定文件的 diff 块。
+
+**⚠️ `max_lines` 必须设为 500 起步。** 100 行太碎片化，会浪费大量轮次。单文件改动超过 500 行时按 500 分段，否则一次读完。绝不使用 `max_lines=100`。
 
 ```
-# 文件 1 在 diff 第 1 行，改动约 187 行
-file_read(path=/tmp/pr_59.diff, offset=1, max_lines=200)
+# 文件 1 在 diff 第 1 行，改动约 380 行 → 一次读完
+file_read(path=/tmp/pr_59.diff, offset=1, max_lines=500)
 
-# 文件 2 在 diff 第 432 行，改动约 167 行
-file_read(path=/tmp/pr_59.diff, offset=432, max_lines=200)
+# 文件 2 在 diff 第 432 行，改动约 167 行 → 一次读完
+file_read(path=/tmp/pr_59.diff, offset=432, max_lines=500)
+
+# 大文件在 diff 第 900 行，改动约 720 行 → 分两段
+file_read(path=/tmp/pr_59.diff, offset=900, max_lines=500)
+file_read(path=/tmp/pr_59.diff, offset=1400, max_lines=300)
 ```
 
 读完立即在脑子里找问题，不要多读一轮。本批所有文件读完进入第 5 步。
