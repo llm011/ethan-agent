@@ -459,14 +459,13 @@ async def tool_tiers(model: str | None = None):
     }
 
 
-
 # ── Knowledge backend validation ──────────────────────────────────
 
 
 class KnowledgeValidateRequest(BaseModel):
     backend: str = "filesystem"
     obsidian_vault_path: str = ""
-    obsidian_folder: str = "Knowledge"
+    obsidian_folder: str = "."
     external_base_url: str = ""
     external_api_key: str = ""
 
@@ -488,7 +487,7 @@ async def validate_knowledge_backend(req: KnowledgeValidateRequest):
                 return {"ok": False, "message": "Obsidian vault 路径不能为空"}
             kb = ObsidianKnowledgeBase(
                 vault_path=P(req.obsidian_vault_path),
-                folder=req.obsidian_folder or "Knowledge",
+                folder=req.obsidian_folder or ".",
             )
         elif req.backend == "external":
             if not req.external_base_url:

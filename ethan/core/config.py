@@ -211,7 +211,7 @@ class WebSearchToolConfig(BaseModel):
 class KnowledgeConfig(BaseModel):
     backend: str = "filesystem"  # "filesystem" | "obsidian" | "external"
     obsidian_vault_path: str = ""  # Obsidian vault 根目录绝对路径
-    obsidian_folder: str = "Knowledge"  # Vault 内用于知识库的子目录名
+    obsidian_folder: str = "."  # Vault 内用于知识库的子目录名（"." 表示根目录）
     external_base_url: str = ""  # 外部知识库 REST API 的 base URL
     external_api_key: str = ""  # 外部知识库认证 key
 

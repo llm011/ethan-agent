@@ -8,6 +8,7 @@ import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,19 @@ class KnowledgeBase(ABC):
     @abstractmethod
     def health_check(self) -> tuple[bool, str]:
         """Validate connectivity / accessibility. Returns (ok, message)."""
+
+    def append(self, source: str, content: str) -> str:
+        """把内容追加到已有条目正文末尾。默认基于 get+update 实现，子类可 override 优化。"""
+        item = self.get(source)
+        if item is None:
+            raise FileNotFoundError(f"Knowledge item not found: {source}")
+        new_content = (item.content.rstrip() + "\n\n" + content.strip()).strip()
+        self.update(item.source, item.title, new_content, tags=item.tags)
+        return item.source
+
+    def list_tags(self) -> dict[str, int]:
+        """列出所有 tag 及出现次数。可选能力，后端按需实现。"""
+        raise NotImplementedError(f"{type(self).__name__} does not support list_tags")
 
     def _resolve_in_dir(self, source: str) -> Path:
         """解析 source 为 self._dir 子树内的绝对路径，越界直接拒绝（防路径穿越）。"""
@@ -121,9 +135,7 @@ class FilesystemKnowledgeBase(KnowledgeBase):
             logger.warning("向量索引重建失败，条目已写入磁盘但语义搜索不可用: %s", e)
 
     def update(self, source: str, title: str, content: str, tags: list[str] | None = None) -> None:
-        path = Path(source)
-        if not path.exists():
-            path = self._dir / source
+        path = self._resolve_in_dir(source)
         if not path.exists():
             raise FileNotFoundError(f"Knowledge item not found: {source}")
         tag_line = f"\ntags: {', '.join(tags)}" if tags else ""
@@ -135,19 +147,6 @@ class FilesystemKnowledgeBase(KnowledgeBase):
         if not path.exists():
             raise FileNotFoundError(f"Knowledge item not found: {source}")
         path.unlink()
-
-    def append(self, source: str, content: str) -> str:
-        """把内容追加到已有条目正文末尾（保留原标题/标签）。返回文件路径。
-
-        与 update（整篇覆盖）互补：适合「再记一条 / 补充一点」的增量场景，不必让模型
-        先读全文再回写。中间用空行隔开，确保 markdown 段落分隔正确。
-        """
-        item = self.get(source)
-        if item is None:
-            raise FileNotFoundError(f"Knowledge item not found: {source}")
-        new_content = (item.content.rstrip() + "\n\n" + content.strip()).strip()
-        self.update(item.source, item.title, new_content, tags=item.tags)
-        return item.source
 
     # ── Keyword search (existing) ──────────────────────────────────────────
 
@@ -233,7 +232,7 @@ class FilesystemKnowledgeBase(KnowledgeBase):
 class ObsidianKnowledgeBase(KnowledgeBase):
     """Obsidian vault 作为知识库后端，遵循 Obsidian 约定（YAML frontmatter、wikilinks 等）。"""
 
-    def __init__(self, vault_path: Path, folder: str = "Knowledge"):
+    def __init__(self, vault_path: Path, folder: str = "."):
         self._vault = vault_path
         self._folder = folder
         self._dir = vault_path / folder
@@ -267,9 +266,7 @@ class ObsidianKnowledgeBase(KnowledgeBase):
         return str(path)
 
     def update(self, source: str, title: str, content: str, tags: list[str] | None = None) -> None:
-        path = Path(source)
-        if not path.exists():
-            path = self._dir / source
+        path = self._resolve_in_dir(source)
         if not path.exists():
             raise FileNotFoundError(f"Knowledge item not found: {source}")
         text = self._build_file_content(title, content, tags)
@@ -282,15 +279,6 @@ class ObsidianKnowledgeBase(KnowledgeBase):
             raise FileNotFoundError(f"Knowledge item not found: {source}")
         path.unlink()
 
-    def append(self, source: str, content: str) -> str:
-        """把内容追加到已有条目正文末尾（保留原标题/标签）。"""
-        item = self.get(source)
-        if item is None:
-            raise FileNotFoundError(f"Knowledge item not found: {source}")
-        new_content = (item.content.rstrip() + "\n\n" + content.strip()).strip()
-        self.update(item.source, item.title, new_content, tags=item.tags)
-        return item.source
-
     # ── Search ─────────────────────────────────────────────────────────────
 
     def search(self, query: str, limit: int = 5) -> list[KnowledgeItem]:
@@ -299,7 +287,7 @@ class ObsidianKnowledgeBase(KnowledgeBase):
         return self._filesystem_search(query, limit)
 
     def _cli_search(self, query: str, limit: int = 5) -> list[KnowledgeItem]:
-        """使用 Obsidian CLI 的索引搜索（更快更准）。"""
+        """使用 Obsidian CLI 的索引搜索（更快更准）。CLI 成功但无结果时返回空，不 fallback。"""
         import json
         import subprocess
         try:
@@ -323,7 +311,9 @@ class ObsidianKnowledgeBase(KnowledgeBase):
                 item = self._parse_obsidian_file(path)
                 if item:
                     items.append(item)
-            return items if items else self._filesystem_search(query, limit)
+            # CLI 成功执行（returncode=0 + JSON 可解析）就尊重结果，即使为空。
+            # 只有 CLI 异常（超时/JSON 解析失败/非 0 退出）才 fallback。
+            return items
         except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError):
             return self._filesystem_search(query, limit)
 
@@ -512,6 +502,11 @@ class ExternalKnowledgeBase(KnowledgeBase):
         import httpx
         return httpx.AsyncClient(base_url=self._base_url, headers=self._headers, timeout=30)
 
+    @staticmethod
+    def _encode_source(source: str) -> str:
+        """URL-encode source，避免 / # ? 等字符破坏路径。"""
+        return quote(str(source), safe="")
+
     # ── Write ──────────────────────────────────────────────────────────────
 
     def add(self, title: str, content: str, tags: list[str] | None = None) -> str:
@@ -523,22 +518,13 @@ class ExternalKnowledgeBase(KnowledgeBase):
 
     def update(self, source: str, title: str, content: str, tags: list[str] | None = None) -> None:
         with self._client() as client:
-            resp = client.put(f"/items/{source}", json={"title": title, "content": content, "tags": tags or []})
+            resp = client.put(f"/items/{self._encode_source(source)}", json={"title": title, "content": content, "tags": tags or []})
             resp.raise_for_status()
 
     def delete(self, source: str) -> None:
         with self._client() as client:
-            resp = client.delete(f"/items/{source}")
+            resp = client.delete(f"/items/{self._encode_source(source)}")
             resp.raise_for_status()
-
-    def append(self, source: str, content: str) -> str:
-        """追加内容到已有条目（通过 get + update 实现）。"""
-        item = self.get(source)
-        if item is None:
-            raise FileNotFoundError(f"Knowledge item not found: {source}")
-        new_content = (item.content.rstrip() + "\n\n" + content.strip()).strip()
-        self.update(item.source, item.title, new_content, tags=item.tags)
-        return item.source
 
     # ── Search ─────────────────────────────────────────────────────────────
 
@@ -564,7 +550,7 @@ class ExternalKnowledgeBase(KnowledgeBase):
 
     def get(self, source: str) -> KnowledgeItem | None:
         with self._client() as client:
-            resp = client.get(f"/items/{source}")
+            resp = client.get(f"/items/{self._encode_source(source)}")
             if resp.status_code == 404:
                 return None
             resp.raise_for_status()
@@ -585,18 +571,19 @@ class ExternalKnowledgeBase(KnowledgeBase):
                     try:
                         resp = client.get(endpoint)
                         if resp.status_code < 500:
-                            return True, f"External KB API reachable: {self._base_url}"
+                            return True, f"External KB API reachable (status={resp.status_code}): {self._base_url}"
                     except httpx.HTTPError:
                         continue
                 return False, f"External KB API not healthy: {self._base_url}"
         except Exception as e:
             return False, f"External KB API connection failed: {e}"
 
-
     # ── Internal ───────────────────────────────────────────────────────────
 
     def _parse_items(self, data) -> list[KnowledgeItem]:
         """从 API 响应解析条目列表，兼容 {"items": [...]} 或直接 [...] 格式。"""
+        if data is None:
+            return []
         items_raw = data if isinstance(data, list) else data.get("items") or data.get("results") or []
         items = []
         for d in items_raw:

@@ -1,4 +1,8 @@
-"""知识库后端工厂 — 根据配置返回对应的 KnowledgeBase 实例。"""
+"""知识库后端工厂 — 根据配置返回对应的 KnowledgeBase 实例。
+
+缓存策略：按配置指纹（backend + 关键参数）缓存，配置变更后自动失效。
+tools.knowledge 是全局配置（非 per-user），故实例也全局共享。
+"""
 from pathlib import Path
 
 from ethan.knowledge.base import (
@@ -8,18 +12,33 @@ from ethan.knowledge.base import (
     ObsidianKnowledgeBase,
 )
 
-# per-user 实例缓存
-_instances: dict[str, KnowledgeBase] = {}
+# 配置指纹 → 实例。指纹变化（用户切换后端/vault/URL）时自动建新实例。
+_instances: dict[tuple, KnowledgeBase] = {}
 
 
-def get_knowledge_backend(user_id: str) -> KnowledgeBase:
-    """根据配置获取当前用户对应的知识库后端实例（带缓存）。"""
-    if user_id in _instances:
-        return _instances[user_id]
+def _config_fingerprint(kb_cfg) -> tuple:
+    """生成配置指纹。配置变更 → 指纹变化 → 缓存自动失效。"""
+    return (
+        kb_cfg.backend,
+        kb_cfg.obsidian_vault_path,
+        kb_cfg.obsidian_folder,
+        kb_cfg.external_base_url,
+        kb_cfg.external_api_key,
+    )
 
+
+def get_knowledge_backend(user_id: str = "") -> KnowledgeBase:
+    """根据配置获取知识库后端实例（带配置指纹缓存）。
+
+    user_id 参数保留以兼容现有调用方，但配置是全局的，实例也全局共享。
+    """
     from ethan.core.config import get_config
     config = get_config()
     kb_cfg = config.tools.knowledge
+
+    fp = _config_fingerprint(kb_cfg)
+    if fp in _instances:
+        return _instances[fp]
 
     backend = kb_cfg.backend
 
@@ -48,8 +67,13 @@ def get_knowledge_backend(user_id: str) -> KnowledgeBase:
         # default: filesystem
         instance = _create_filesystem_backend()
 
-    _instances[user_id] = instance
+    _instances[fp] = instance
     return instance
+
+
+def clear_registry_cache() -> None:
+    """显式清空缓存。配置保存流程可调用以确保立即生效。"""
+    _instances.clear()
 
 
 def _create_filesystem_backend() -> FilesystemKnowledgeBase:

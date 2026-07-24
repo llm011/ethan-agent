@@ -77,6 +77,14 @@ PRESET_PLUGINS: list[dict] = [
         "install_type": "cli_tool",
         "install_source": "obsidian",
         "post_install_hint": "请在 Obsidian 中开启 CLI：Settings → General → Command line interface → Register",
+        "install_steps": [
+            "确保 Obsidian 版本 ≥ v1.12",
+            "打开 Obsidian → Settings → General",
+            "找到 'Command line interface' 选项",
+            "点击 'Register' 注册到系统 PATH",
+            "重新打开终端，运行 `obsidian --version` 验证",
+        ],
+        "config_hook": "knowledge_obsidian",
     },
     # 注：embedding-router 已内置（onnxruntime/tokenizers/numpy 已在 dependencies 里），
     # BGE 模型首次使用时自动下载，不再作为插件提供。
@@ -597,6 +605,7 @@ def _install_cli_tool(plugin: dict) -> None:
     import shutil
     source = plugin["install_source"]  # e.g. "obsidian"
     cli_cmd = source  # CLI 命令名
+    name = plugin["name"]
 
     if shutil.which(cli_cmd):
         console.print(f"[green]✓ {cli_cmd} CLI 已检测到[/green]")
@@ -611,39 +620,43 @@ def _install_cli_tool(plugin: dict) -> None:
     else:
         console.print(f"[yellow]⚠ 未检测到 {cli_cmd} 命令[/yellow]")
         console.print()
-        console.print("[bold]安装步骤：[/bold]")
-        console.print("  1. 确保 Obsidian 版本 ≥ v1.12")
-        console.print("  2. 打开 Obsidian → Settings → General")
-        console.print("  3. 找到 'Command line interface' 选项")
-        console.print("  4. 点击 'Register' 注册到系统 PATH")
-        console.print("  5. 重新打开终端，运行 [cyan]obsidian --version[/cyan] 验证")
-        console.print()
-        console.print("[dim]安装后重新运行 ethan plugin add obsidian-cli 验证。[/dim]")
+        steps = plugin.get("install_steps")
+        if steps:
+            console.print("[bold]安装步骤：[/bold]")
+            for i, step in enumerate(steps, 1):
+                console.print(f"  {i}. {step}")
+            console.print()
+            console.print(f"[dim]安装后重新运行 [cyan]ethan plugin add {name}[/cyan] 验证。[/dim]")
+        else:
+            console.print(f"[dim]请参考 {cli_cmd} 官方文档完成安装。[/dim]")
         return
 
-    # CLI 已就绪，检查知识库配置
-    from ethan.core.config import get_config, save_config
-    config = get_config()
-    kb_cfg = config.tools.knowledge
+    # CLI 已就绪。若插件声明了 post-install 配置引导（如 obsidian-cli 需要切后端），
+    # 走泛化的配置引导；否则只提示完成。
+    config_hook = plugin.get("config_hook")
+    if config_hook == "knowledge_obsidian":
+        from ethan.core.config import get_config, save_config
+        config = get_config()
+        kb_cfg = config.tools.knowledge
 
-    if kb_cfg.backend != "obsidian":
-        console.print()
-        console.print("[yellow]提示: 当前知识库后端不是 obsidian[/yellow]")
-        switch = typer.confirm("是否将知识库后端切换为 obsidian？", default=True)
-        if switch:
-            from pathlib import Path
-            vault_path = typer.prompt("Obsidian Vault 路径", default=str(Path.home() / "Documents/obsidian/work"))
-            folder = typer.prompt("知识库子目录（\".\" 表示根目录）", default=".")
-            kb_cfg.backend = "obsidian"
-            kb_cfg.obsidian_vault_path = vault_path
-            kb_cfg.obsidian_folder = folder
-            save_config(config)
-            console.print("[green]✓ 知识库已切换为 Obsidian 后端[/green]")
+        if kb_cfg.backend != "obsidian":
+            console.print()
+            console.print("[yellow]提示: 当前知识库后端不是 obsidian[/yellow]")
+            switch = typer.confirm("是否将知识库后端切换为 obsidian？", default=True)
+            if switch:
+                from pathlib import Path
+                vault_path = typer.prompt("Obsidian Vault 路径", default=str(Path.home() / "Documents/obsidian/work"))
+                folder = typer.prompt("知识库子目录（\".\" 表示根目录）", default=".")
+                kb_cfg.backend = "obsidian"
+                kb_cfg.obsidian_vault_path = vault_path
+                kb_cfg.obsidian_folder = folder
+                save_config(config)
+                console.print("[green]✓ 知识库已切换为 Obsidian 后端[/green]")
 
     hint = plugin.get("post_install_hint", "")
     if hint:
         console.print(f"\n[cyan]💡 {hint}[/cyan]")
-    console.print("\n[green]✓ obsidian-cli 插件配置完成！知识库操作将自动使用 CLI 加速。[/green]")
+    console.print(f"\n[green]✓ {name} 插件配置完成！[/green]")
 
 
 def _is_lark_channel_ready() -> bool:

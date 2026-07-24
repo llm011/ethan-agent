@@ -45,7 +45,7 @@ EDITABLE_FIELDS: list[ConfigField] = [
     ConfigField("tools.knowledge.obsidian_vault_path", "Obsidian Vault 路径", "str",
                 desc="Obsidian vault 根目录绝对路径（backend=obsidian 时必填）"),
     ConfigField("tools.knowledge.obsidian_folder", "Obsidian 知识库子目录", "str",
-                desc="Vault 内用于知识库的子目录名（默认 Knowledge）"),
+                desc="Vault 内用于知识库的子目录名（默认 \".\" 表示根目录）"),
     ConfigField("tools.knowledge.external_base_url", "外部知识库 API 地址", "str",
                 desc="外部知识库 REST API 的 base URL（backend=external 时必填）"),
     ConfigField("tools.knowledge.external_api_key", "外部知识库 API Key", "str",
