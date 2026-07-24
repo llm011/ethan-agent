@@ -208,7 +208,8 @@ async function detectPasswordFields(
       const tag = el.tagName.toLowerCase();
       const type = (el.getAttribute('type') || '').toLowerCase();
       const isPassword = tag === 'input' && type === 'password';
-      const isSensitive = el.getAttribute('autocomplete') === 'off' && (type === 'text' || type === '');
+      // 只遮蔽真正的密码类型字段；autocomplete='off' + type='text' 不再误遮（搜索框/用户名框常见此组合）
+      const isSensitive = tag === 'input' && ['new-password', 'current-password'].includes(type);
       result[marker] = { isPassword, isSensitive };
     }
     document.querySelectorAll('[data-ethan-pw]').forEach(el => el.removeAttribute('data-ethan-pw'));
@@ -310,7 +311,7 @@ function shouldRender(
     return false;
   }
   // 空名称的 StaticText 是空白占位符
-  if (node.role === 'StaticText' && !node.name.trim()) {
+  if (node.role === 'StaticText' && !node.name?.trim()) {
     return false;
   }
   if (options.interactive) {
@@ -380,7 +381,7 @@ function collectRenderedNodes(
   // 导航类容器：只渲染摘要行，不展开子节点（省大量字符）
   // 除非用了 selector 限定范围（此时用户明确要这个区域）
   if (renderSelf && isNavContainer(node) && node.children.length > 0) {
-    // 统计子节点数
+    // 统计子节点数，覆写 name 为摘要（nav 容器子节点对 AI 无逐个阅读价值）
     const childCount = node.children.length;
     node.name = `[navigation: ${childCount} items]`;
     return; // 不递归子节点
@@ -695,11 +696,8 @@ async function getElementsVisibility(
       const offsetParent = el.offsetParent;
       const visible = (offsetParent !== null || isFixed) && rect.width > 0 && rect.height > 0
         && style.visibility !== 'hidden' && style.display !== 'none';
-      const inViewport = visible && rect.bottom > 0 && rect.right > 0
-        && rect.top < window.innerHeight && rect.left < window.innerWidth;
       result[marker] = {
         visible,
-        inViewport,
         bbox: visible ? { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) } : null,
         overlay: isFixed && visible,
       };
@@ -710,7 +708,7 @@ async function getElementsVisibility(
   })()`;
 
   const runtime = await client.send<
-    RuntimeEvaluateResponse<Record<string, { visible: boolean; inViewport: boolean; bbox: { x: number; y: number; w: number; h: number } | null; overlay: boolean }>>
+    RuntimeEvaluateResponse<Record<string, { visible: boolean; bbox: { x: number; y: number; w: number; h: number } | null; overlay: boolean }>>
   >('Runtime.evaluate', {
     expression: expr,
     returnByValue: true,
