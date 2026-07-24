@@ -423,6 +423,12 @@ def set_strikethrough(run):
     rPr.set("strike", "sngStrike")
 
 
+def set_baseline(run, pct: int):
+    """上/下标：rPr baseline（千分比），正值上标、负值下标。"""
+    rPr = run._r.get_or_add_rPr()
+    rPr.set("baseline", str(pct * 1000))
+
+
 def set_word_space(run, px: float):
     """字间距 px → rPr spc（1/100 pt）。"""
     rPr = run._r.get_or_add_rPr()
@@ -517,6 +523,8 @@ def render_paragraphs(text_frame, paragraphs, theme, text_type=None, el_defaults
             set_run_font(run, run_font or font_name, None if run_font else latin_name)
             if r.get("strikethrough"):
                 set_strikethrough(run)
+            if r.get("sub") or r.get("sup"):
+                set_baseline(run, -25 if r.get("sub") else 30)
             if r.get("wordSpace"):
                 set_word_space(run, float(r["wordSpace"]))
 
