@@ -170,7 +170,7 @@ function ArgsPopover({ text, maxW = "max-w-[800px]" }: { text: string; maxW?: st
       </button>
       {show && text.length > 60 && (
         <span
-          className="absolute left-0 top-full mt-1 z-50 max-w-[min(90vw,700px)] max-h-[200px] overflow-auto rounded-md border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-md font-mono whitespace-pre-wrap break-all"
+          className="absolute left-0 bottom-full mb-1 z-50 max-w-[min(90vw,700px)] max-h-[200px] overflow-auto rounded-md border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-md font-mono whitespace-pre-wrap break-all"
           onMouseEnter={enter}
           onMouseLeave={leave}
         >
