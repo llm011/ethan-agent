@@ -528,7 +528,9 @@ def setup_text_frame(text_frame, el, theme, emu_per_px, text_type=None):
     text_frame.margin_bottom = px_to_emu(inset[2], emu_per_px)
     text_frame.margin_left = px_to_emu(inset[3], emu_per_px)
     text_frame.word_wrap = True
-    v_align = el.get("vAlign") or (el.get("text") or {}).get("align") or "top"
+    # 垂直对齐：元素级 vAlign 优先；形状内嵌文本走 text.align（schema 约定）；
+    # render_shape 直接把 text_spec 传进来时读它自身的 align
+    v_align = el.get("vAlign") or (el.get("text") or {}).get("align") or el.get("align") or "top"
     text_frame.vertical_anchor = VALIGN_MAP.get(v_align, MSO_ANCHOR.TOP)
     if el.get("vertical"):
         set_vertical_text(text_frame)
@@ -539,8 +541,8 @@ def render_text(slide, el, theme, emu_per_px):
         px_to_emu(el["left"], emu_per_px), px_to_emu(el["top"], emu_per_px),
         px_to_emu(el["width"], emu_per_px), px_to_emu(el["height"], emu_per_px),
     )
-    if el.get("name"):
-        box.name = el["name"]
+    if el.get("name") or el.get("id"):
+        box.name = el.get("name") or el["id"]
     box.rotation = float(el.get("rotate") or 0)
     setup_text_frame(box.text_frame, el, theme, emu_per_px)
     # PPTist 兼容：元素级 defaultColor/defaultFontName 作为 run 缺省
@@ -652,8 +654,8 @@ def render_shape(slide, el, theme, emu_per_px):
         px_to_emu(el["width"], emu_per_px), px_to_emu(el["height"], emu_per_px),
     )
     set_shape_geometry(shape, prst, el.get("adjust"))
-    if el.get("name"):
-        shape.name = el["name"]
+    # 形状名优先取 id：PowerPoint 选择窗格里能按元素 id 找到它，方便二次编辑
+    shape.name = el.get("name") or el.get("id") or shape.name
     shape.rotation = float(el.get("rotate") or 0)
     set_flip(shape, el.get("flipH"), el.get("flipV"))
 
@@ -945,8 +947,8 @@ def render_latex(slide, el, theme, emu_per_px):
         px_to_emu(el["left"], emu_per_px), px_to_emu(el["top"], emu_per_px),
         px_to_emu(el["width"], emu_per_px), px_to_emu(el["height"], emu_per_px),
     )
-    if el.get("name"):
-        box.name = el["name"]
+    if el.get("name") or el.get("id"):
+        box.name = el.get("name") or el["id"]
     box.rotation = float(el.get("rotate") or 0)
     setup_text_frame(box.text_frame, el, theme, emu_per_px)
     box.fill.background()
