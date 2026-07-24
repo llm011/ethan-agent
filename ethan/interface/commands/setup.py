@@ -70,6 +70,14 @@ PRESET_PLUGINS: list[dict] = [
         "install_type": "lark_channel",
         "install_source": "lark-channel",
     },
+    {
+        "name": "obsidian-cli",
+        "label": "Obsidian CLI 增强",
+        "description": "使用 Obsidian 官方 CLI 加速知识库搜索/标签管理（需 Obsidian v1.12+）",
+        "install_type": "cli_tool",
+        "install_source": "obsidian",
+        "post_install_hint": "请在 Obsidian 中开启 CLI：Settings → General → Command line interface → Register",
+    },
     # 注：embedding-router 已内置（onnxruntime/tokenizers/numpy 已在 dependencies 里），
     # BGE 模型首次使用时自动下载，不再作为插件提供。
 ]
@@ -520,6 +528,11 @@ def _do_install(plugin: dict) -> None:
         console.print(f"[dim]{plugin['description']}[/dim]")
         console.print()
         _install_lark_channel_deps()
+    elif plugin["install_type"] == "cli_tool":
+        console.print(f"[bold]配置 CLI 工具: {name}[/bold]")
+        console.print(f"[dim]{plugin['description']}[/dim]")
+        console.print()
+        _install_cli_tool(plugin)
     else:
         console.print(f"[bold]配置插件: {name}[/bold]")
         console.print(f"[dim]{plugin['description']}[/dim]")
@@ -547,6 +560,9 @@ def _check_plugin_installed(plugin: dict) -> bool:
         return deps_ok
     elif plugin["install_type"] == "lark_channel":
         return _is_lark_channel_ready()
+    elif plugin["install_type"] == "cli_tool":
+        import shutil
+        return shutil.which(plugin["install_source"]) is not None
     elif plugin["install_type"] in ("skill", "builtin_skill"):
         return name in _get_installed_skill_names()
     else:
@@ -574,6 +590,60 @@ def _post_install_router_pull() -> None:
         console.print("[yellow]⚠ 模型自动拉取失败[/yellow]")
         console.print("  可稍后手动运行 [cyan]ethan router pull[/cyan] 重试（需联网）。")
     console.print()
+
+
+def _install_cli_tool(plugin: dict) -> None:
+    """CLI 工具类插件安装：检测可执行文件，引导用户开启。"""
+    import shutil
+    source = plugin["install_source"]  # e.g. "obsidian"
+    cli_cmd = source  # CLI 命令名
+
+    if shutil.which(cli_cmd):
+        console.print(f"[green]✓ {cli_cmd} CLI 已检测到[/green]")
+        # 验证可用性
+        import subprocess
+        try:
+            result = subprocess.run([cli_cmd, "--version"], capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                console.print(f"  版本: {result.stdout.strip()}")
+        except Exception:
+            pass
+    else:
+        console.print(f"[yellow]⚠ 未检测到 {cli_cmd} 命令[/yellow]")
+        console.print()
+        console.print("[bold]安装步骤：[/bold]")
+        console.print("  1. 确保 Obsidian 版本 ≥ v1.12")
+        console.print("  2. 打开 Obsidian → Settings → General")
+        console.print("  3. 找到 'Command line interface' 选项")
+        console.print("  4. 点击 'Register' 注册到系统 PATH")
+        console.print("  5. 重新打开终端，运行 [cyan]obsidian --version[/cyan] 验证")
+        console.print()
+        console.print("[dim]安装后重新运行 ethan plugin add obsidian-cli 验证。[/dim]")
+        return
+
+    # CLI 已就绪，检查知识库配置
+    from ethan.core.config import get_config, save_config
+    config = get_config()
+    kb_cfg = config.tools.knowledge
+
+    if kb_cfg.backend != "obsidian":
+        console.print()
+        console.print("[yellow]提示: 当前知识库后端不是 obsidian[/yellow]")
+        switch = typer.confirm("是否将知识库后端切换为 obsidian？", default=True)
+        if switch:
+            from pathlib import Path
+            vault_path = typer.prompt("Obsidian Vault 路径", default=str(Path.home() / "Documents/obsidian/work"))
+            folder = typer.prompt("知识库子目录（\".\" 表示根目录）", default=".")
+            kb_cfg.backend = "obsidian"
+            kb_cfg.obsidian_vault_path = vault_path
+            kb_cfg.obsidian_folder = folder
+            save_config(config)
+            console.print("[green]✓ 知识库已切换为 Obsidian 后端[/green]")
+
+    hint = plugin.get("post_install_hint", "")
+    if hint:
+        console.print(f"\n[cyan]💡 {hint}[/cyan]")
+    console.print("\n[green]✓ obsidian-cli 插件配置完成！知识库操作将自动使用 CLI 加速。[/green]")
 
 
 def _is_lark_channel_ready() -> bool:

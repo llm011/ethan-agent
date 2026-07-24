@@ -231,6 +231,8 @@ class ObsidianKnowledgeBase(KnowledgeBase):
         except OSError:
             pass  # health_check() will report the issue
         self._vector_store: "VectorStore | None" = None  # noqa: F821
+        import shutil
+        self._cli_available = shutil.which("obsidian") is not None
 
     def _get_vector_store(self):
         if self._vector_store is None:
@@ -283,6 +285,41 @@ class ObsidianKnowledgeBase(KnowledgeBase):
     # ── Search ─────────────────────────────────────────────────────────────
 
     def search(self, query: str, limit: int = 5) -> list[KnowledgeItem]:
+        if self._cli_available:
+            return self._cli_search(query, limit)
+        return self._filesystem_search(query, limit)
+
+    def _cli_search(self, query: str, limit: int = 5) -> list[KnowledgeItem]:
+        """使用 Obsidian CLI 的索引搜索（更快更准）。"""
+        import json
+        import subprocess
+        try:
+            result = subprocess.run(
+                ["obsidian", "search", f"query={query}", "--json"],
+                capture_output=True, text=True, timeout=10,
+                cwd=str(self._vault),
+            )
+            if result.returncode != 0:
+                return self._filesystem_search(query, limit)
+
+            # 尝试解析 JSON 输出
+            data = json.loads(result.stdout)
+            items: list[KnowledgeItem] = []
+            results_list = data if isinstance(data, list) else data.get("results", [])
+            for entry in results_list[:limit]:
+                path_str = entry.get("path") or entry.get("file", "")
+                if not path_str:
+                    continue
+                path = Path(path_str) if Path(path_str).is_absolute() else self._vault / path_str
+                item = self._parse_obsidian_file(path)
+                if item:
+                    items.append(item)
+            return items if items else self._filesystem_search(query, limit)
+        except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError):
+            return self._filesystem_search(query, limit)
+
+    def _filesystem_search(self, query: str, limit: int = 5) -> list[KnowledgeItem]:
+        """纯文件系统关键词搜索（CLI 不可用时的兜底）。"""
         query_words = set(query.lower().split())
         results: list[tuple[int, KnowledgeItem]] = []
 
@@ -338,9 +375,45 @@ class ObsidianKnowledgeBase(KnowledgeBase):
             return False, f"Not a valid Obsidian vault (missing .obsidian/): {self._vault}"
         if not self._dir.exists():
             return False, f"Knowledge folder not found: {self._dir}"
-        return True, f"Obsidian vault OK: {self._vault} (folder: {self._folder})"
+        cli_status = "CLI ✓" if self._cli_available else "CLI ✗ (filesystem fallback)"
+        return True, f"Obsidian vault OK: {self._vault} (folder: {self._folder}) [{cli_status}]"
 
-    # ── Internal ───────────────────────────────────────────────────────────
+    def list_tags(self) -> dict[str, int]:
+        """列出 vault 中所有 tag 及出现次数。CLI 可用时使用 obsidian tags counts。"""
+        if self._cli_available:
+            return self._cli_list_tags()
+        return self._filesystem_list_tags()
+
+    def _cli_list_tags(self) -> dict[str, int]:
+        """通过 CLI 获取 tag 列表。"""
+        import json
+        import subprocess
+        try:
+            result = subprocess.run(
+                ["obsidian", "tags", "counts", "--json"],
+                capture_output=True, text=True, timeout=10,
+                cwd=str(self._vault),
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                if isinstance(data, dict):
+                    return data
+                # 如果是列表格式 [{tag, count}, ...]
+                if isinstance(data, list):
+                    return {item["tag"]: item.get("count", 1) for item in data if "tag" in item}
+        except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError):
+            pass
+        return self._filesystem_list_tags()
+
+    def _filesystem_list_tags(self) -> dict[str, int]:
+        """通过扫描文件 frontmatter 获取 tag 列表（兜底）。"""
+        tag_counts: dict[str, int] = {}
+        for item in self.list_all():
+            for tag in item.tags:
+                tag_counts[tag] = tag_counts.get(tag, 0) + 1
+        return tag_counts
+
+# ── Internal ───────────────────────────────────────────────────────────
 
     def _build_file_content(self, title: str, content: str, tags: list[str] | None) -> str:
         """构建 Obsidian 格式 MD 文件（YAML frontmatter + 正文）。"""
@@ -509,6 +582,7 @@ class ExternalKnowledgeBase(KnowledgeBase):
                 return False, f"External KB API not healthy: {self._base_url}"
         except Exception as e:
             return False, f"External KB API connection failed: {e}"
+
 
     # ── Internal ───────────────────────────────────────────────────────────
 
