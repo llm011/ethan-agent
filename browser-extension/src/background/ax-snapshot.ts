@@ -287,6 +287,9 @@ function isStructural(node: SnapshotNode): boolean {
   return STRUCTURAL_ROLES.has(node.role);
 }
 
+// 不渲染的 role：InlineTextBox 是 StaticText 的子节点，文本完全重复
+const SKIP_ROLES = new Set(['InlineTextBox']);
+
 function shouldRender(
   node: SnapshotNode,
   options: BrowserPageSnapshotParams,
@@ -296,6 +299,18 @@ function shouldRender(
   }
   // 不可见的节点不渲染（visible=false 已标记）
   if (node.visible === false) {
+    return false;
+  }
+  // 跳过 InlineTextBox 等冗余角色（省 ~27% 体积）
+  if (SKIP_ROLES.has(node.role)) {
+    return false;
+  }
+  // 无名称的 image 节点对 AI 无信息价值
+  if (node.role === 'image' && !node.name) {
+    return false;
+  }
+  // 空名称的 StaticText 是空白占位符
+  if (node.role === 'StaticText' && !node.name.trim()) {
     return false;
   }
   if (options.interactive) {
@@ -308,6 +323,10 @@ function shouldRender(
 }
 
 function getDisplayName(node: SnapshotNode): string {
+  // clickable 的 name 是子节点文本的聚合，子节点会单独展示，这里不重复
+  if (node.role === 'clickable') {
+    return '';
+  }
   return node.name || node.cursor?.text || '';
 }
 
@@ -319,11 +338,14 @@ function renderLine(
   const prefix = '  '.repeat(indent);
   const refText = node.ref ? `@${node.ref} ` : '';
   const name = getDisplayName(node);
-  const nameText = name ? ` "${name}"` : '';
+  // 截断超长文本（placeholder/帮助文本常超过 200 字符）
+  const truncatedName = name.length > 80 ? `${name.slice(0, 80)}...` : name;
+  const nameText = truncatedName ? ` "${truncatedName}"` : '';
   const hrefText =
     options.urls && node.href ? ` url=${JSON.stringify(node.href)}` : '';
+  // 简化 cursor hints：只保留关键信息
   const cursorText = node.cursor
-    ? ` ${node.cursor.kind} [${node.cursor.hints.join(', ')}]`
+    ? ` ${node.cursor.kind}`
     : '';
   // 补充 bbox（仅对有 ref 的元素，帮助 agent 理解元素位置）
   const bboxText = node.ref && node.bbox
