@@ -956,16 +956,36 @@ def _style_math_runs(omath, font_size_px: float, color_value):
 def _latex_fallback_text(latex_src: str) -> str:
     """LaTeX 源码 → 可读纯文本，给 mc:Fallback 用（Keynote 等不支持 OMML 的查看端）。"""
     t = latex_src
+    t = re.sub(r"\\(?:mathrm|text)\s*\{([^{}]*)\}", r"\1", t)  # \mathrm{X}→X（连括号一起去掉，避免留下双括号）
     for src, dst in (
-        ("\\mathrm", ""), ("\\text", ""), ("\\quad", "  "), ("\\cdot", "·"),
+        ("\\quad", "  "), ("\\cdot", "·"),
         ("\\times", "×"), ("\\otimes", "⊗"), ("\\sum", "Σ"), ("\\sqrt", "√"),
         ("\\frac", "FRAC"), ("\\theta", "θ"), ("\\gamma", "γ"), ("\\infty", "∞"),
         ("\\leq", "≤"), ("\\geq", "≥"), ("\\max", "max"), ("\\sin", "sin"),
         ("\\cos", "cos"), ("\\left", ""), ("\\right", ""),
     ):
         t = t.replace(src, dst)
-    # \frac{a}{b} → (a)/(b)（此时 \frac 已替换为 FRAC 占位）
-    t = re.sub(r"FRAC\s*\{([^{}]*)\}\s*\{([^{}]*)\}", r"(\1)/(\2)", t)
+    # \frac{a}{b} → (a)/(b)（此时 \frac 已替换为 FRAC 占位；允许括号内两层嵌套，循环处理嵌套分式）
+    _BRACED = r"\{((?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*)\}"
+    for _ in range(5):
+        new = re.sub(r"FRAC\s*" + _BRACED + r"\s*" + _BRACED, r"(\1)/(\2)", t)
+        if new == t:
+            break
+        t = new
+    t = t.replace("FRAC", "")
+    # Σ 上下限：Σ_{i=1}^{d_k} → Σ(i=1~d_k)（后续规则再把 d_k 变 dₖ）
+    t = re.sub(r"Σ_\{([^{}]*)\}\^\{([^{}]*)\}", lambda m: f"Σ({m.group(1)}~{m.group(2)})", t)
+    # 下/上标：带括号的整体转换——所有字符都有 Unicode 字形就全转（n-m→ₙ₋ₘ），否则去掉下划线
+    _SUB = {"i": "ᵢ", "j": "ⱼ", "k": "ₖ", "m": "ₘ", "n": "ₙ", "a": "ₐ", "e": "ₑ", "o": "ₒ", "x": "ₓ", "-": "₋", "0": "₀", "1": "₁", "2": "₂"}
+    _SUP = {"T": "ᵀ", "2": "²", "i": "ⁱ", "n": "ⁿ", "-": "⁻"}
+
+    def _map_all(s, table):
+        return "".join(table[c] for c in s) if all(c in table for c in s) else None
+
+    t = re.sub(r"_\{([^{}]*)\}", lambda m: _map_all(m.group(1), _SUB) or m.group(1), t)
+    t = re.sub(r"_([A-Za-z0-9])", lambda m: _SUB.get(m.group(1), m.group(1)), t)
+    t = re.sub(r"\^\{([^{}]*)\}", lambda m: _map_all(m.group(1), _SUP) or "^" + m.group(1), t)
+    t = re.sub(r"\^([A-Za-z0-9])", lambda m: _SUP.get(m.group(1), m.group(1)), t)
     t = t.replace("\\", "").replace("{", "").replace("}", "")
     return re.sub(r"\s+", " ", t).strip()
 
