@@ -155,7 +155,14 @@ async def _run_watchdog(run: ChatRun, manager: "RunManager") -> None:
             )
 
         if run.watchdog_checks >= _WATCHDOG_MAX_CHECKS:
-            logger.info("[Watchdog] %s reached max checks, giving up", run.session_id)
+            if run.task and not run.task.done():
+                logger.warning("[Watchdog] %s reached max checks, cancelling stalled task", run.session_id)
+                run.task.cancel()
+                run.emit({"error": "任务超时：模型长时间无响应，已自动终止。请重试。"})
+                run.finish()
+                RunManager.instance().schedule_removal(run.session_id)
+            else:
+                logger.info("[Watchdog] %s reached max checks, task already done", run.session_id)
             return
 
         # 下一轮

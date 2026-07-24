@@ -1,5 +1,8 @@
 """Web Fetch Tool — 获取网页内容并提取文本。"""
+import hashlib
 import re
+import time
+from pathlib import Path
 
 import httpx
 
@@ -71,9 +74,29 @@ class WebFetchTool(BaseTool):
             else:
                 text = resp.text
 
-            # 不截断，让 registry 的 compressor（4000字阈值）决定是否压缩
+            if not text:
+                return "(empty page)"
 
-            return text or "(empty page)"
+            # 非 HTML（API 调用等）直接返回，不做存文件处理
+            if "text/html" not in resp_ct:
+                return text
+
+            # 超过 8000 字存入 /tmp 文件，返回摘要+路径
+            if len(text) > 8000:
+                ts = int(time.time())
+                url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
+                filepath = f"/tmp/web_fetch_{ts}_{url_hash}.md"
+                Path(filepath).write_text(f"# Source: {url}\n\n{text}", encoding="utf-8")
+                total_chars = len(text)
+                preview = text[:500]
+                return (
+                    f"[网页内容过长（{total_chars} 字），已保存到文件 {filepath}]\n\n"
+                    f"如需使用完整内容（如保存到 obsidian），请用 file_read 读取该文件。\n"
+                    f"如仅需特定信息，可用 rg_search 搜索关键词。\n\n"
+                    f"页面标题和前 500 字预览：\n{preview}"
+                )
+
+            return text
         except httpx.HTTPStatusError as e:
             # status_code 错误，不返回页面内容（浪费 token）
             return f"Fetch failed: HTTP {e.response.status_code} for {url}"
@@ -89,6 +112,34 @@ class WebFetchTool(BaseTool):
         # 移除 script 和 style
         html = re.sub(r"<script[^>]*>.*?</script>", "", html, flags=re.DOTALL | re.IGNORECASE)
         html = re.sub(r"<style[^>]*>.*?</style>", "", html, flags=re.DOTALL | re.IGNORECASE)
+
+        # 移除 HTML 注释
+        html = re.sub(r"<!--.*?-->", "", html, flags=re.DOTALL)
+        # 移除 noscript
+        html = re.sub(r"<noscript[^>]*>.*?</noscript>", "", html, flags=re.DOTALL | re.IGNORECASE)
+        # 移除 svg（路径数据很长但无用）
+        html = re.sub(r"<svg[^>]*>.*?</svg>", "", html, flags=re.DOTALL | re.IGNORECASE)
+        # 移除 nav 导航栏
+        html = re.sub(r"<nav[^>]*>.*?</nav>", "", html, flags=re.DOTALL | re.IGNORECASE)
+        # 移除 footer 页脚
+        html = re.sub(r"<footer[^>]*>.*?</footer>", "", html, flags=re.DOTALL | re.IGNORECASE)
+
+        # 移除 cookie consent / GDPR banner / 社交分享 / 广告 / 侧边栏 / 推荐评论区域
+        # 匹配 class 或 id 属性中含特定关键词的块级标签（div/section/aside/ul 等）
+        _junk_keywords = (
+            r"cookie|consent|gdpr|banner|popup"
+            r"|share|social"
+            r"|ad-|ads|advertisement|sponsor"
+            r"|sidebar"
+            r"|recommend|related|comment"
+        )
+        _junk_pattern = re.compile(
+            r"<(div|section|aside|ul|ol|nav)\b[^>]*(?:class|id)\s*=\s*\"[^\"]*(?:"
+            + _junk_keywords
+            + r")[^\"]*\"[^>]*>.*?</\1>",
+            re.DOTALL | re.IGNORECASE,
+        )
+        html = _junk_pattern.sub("", html)
 
         # 提取所有图片 URL（data-src 优先，src 回退）
         img_urls: list[str] = []

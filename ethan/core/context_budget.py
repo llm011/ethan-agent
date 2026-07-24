@@ -33,7 +33,10 @@ _TRUNCATION_NOTE = (
     "\n\n[…内容过长已截断，省略 {omitted} 字。"
     "如需完整内容请用 file_read 的 offset/limit 分段读取，或重跑对应命令后用 grep/head 取需要的片段…]"
 )
-_EVICTED_NOTE = "[…旧工具结果已折叠以节省上下文，省略 {omitted} 字…]\n"
+_EVICTED_NOTE = (
+    "[…旧工具结果已折叠（省略 {omitted} 字），以节省上下文空间。"
+    "若需回顾该工具的完整输出，可重新调用相同工具，或用 rg_search/file_read 检索相关内容。]\n"
+)
 
 
 def _truncated_copy(msg: Message, keep: int, *, evicted: bool = False) -> Message:
@@ -59,7 +62,8 @@ def enforce_context_budget(working: list[Message]) -> None:
     """就地（按引用替换）管控 working 里的 tool result 体积。
 
     1. 每条 tool 消息封顶 MAX_TOOL_RESULT_CHARS。
-    2. 合计超 CONTEXT_BUDGET_CHARS 时，从最旧开始压成 EVICTED_STUB_CHARS 摘要，直到回到预算内。
+    2. 合计超 CONTEXT_BUDGET_CHARS 时，保留最近 3 条 tool 消息不动，
+       对其余可驱逐消息优先淘汰大块结果（按内容长度降序），压成 EVICTED_STUB_CHARS 摘要。
 
     幂等：已是摘要的旧消息不会再被重复截断（长度已 ≤ 阈值）。
     """
@@ -69,12 +73,16 @@ def enforce_context_budget(working: list[Message]) -> None:
     for i, m in enumerate(working):
         if m.role == "tool" and m.content and len(m.content) > MAX_TOOL_RESULT_CHARS:
             working[i] = _truncated_copy(m, MAX_TOOL_RESULT_CHARS, evicted=False)
-    # (2) 全量预算：从最旧开始淘汰
+    # (2) 全量预算：优先淘汰大块旧结果，保留最近 3 条不被驱逐
     tool_idx = [i for i, m in enumerate(working) if m.role == "tool"]
     total = sum(len(working[i].content or "") for i in tool_idx)
     if total <= CONTEXT_BUDGET_CHARS:
         return
-    for i in tool_idx:  # 列表顺序即时间顺序，最旧在前
+    # 保留最近 3 条 tool 消息不被驱逐（最新上下文最重要）
+    evictable = tool_idx[:-3] if len(tool_idx) > 3 else []
+    # 优先淘汰大块结果（> 2000 字的先淘汰），同长度再按时间顺序（索引小的先淘汰）
+    evictable_sorted = sorted(evictable, key=lambda i: (-len(working[i].content or ""), i))
+    for i in evictable_sorted:
         if total <= CONTEXT_BUDGET_CHARS:
             break
         m = working[i]

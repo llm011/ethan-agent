@@ -112,8 +112,13 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
 
     # 未传 session_id 时自动生成，确保所有对话都持久化到会话列表
     if not req.session_id:
+        from ethan.core.config import get_config as _get_config
         from ethan.memory.session import _generate_id
         req.session_id = _generate_id()
+        # 立即在 DB 创建 session 记录，避免后续 save_message 外键约束失败
+        store = await get_session_store()
+        await store.create_with_id(req.session_id, req.model or _get_config().defaults.model,
+                                   source=req.channel or "web", mode=req.mode or "")
 
     set_session_id(req.session_id)  # browser 工具按对话隔离/授权
 
@@ -133,6 +138,12 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
         store = await get_session_store()
 
         if req.session_id:
+            # 确保 session 记录存在（防止前端竞态或外部入口直接带 id 进来）
+            existing = await store.load(req.session_id)
+            if not existing:
+                from ethan.core.config import get_config as _gc
+                await store.create_with_id(req.session_id, req.model or _gc().defaults.model,
+                                           source=req.channel or "web", mode=req.mode or "")
             for m in messages[-1:]:
                 if m.role == "user":
                     # 图片持久化到本地文件，DB 只存路径
