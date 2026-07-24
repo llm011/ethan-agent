@@ -38,6 +38,9 @@ export default function PptPreviewPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const path = searchParams.get("path");
+  // 服务端只放行本 session 交付过的文件（会话级隔离），所有 /api/files 请求都带上
+  const sessionId = searchParams.get("session_id") ?? "";
+  const sidQ = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : "";
   const [deck, setDeck] = useState<DeckResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [current, setCurrent] = useState(0);
@@ -49,7 +52,7 @@ export default function PptPreviewPage() {
 
   useEffect(() => {
     if (!path) return;
-    fetch(`${getApiUrl()}/files/deck?path=${encodeURIComponent(path)}`, { headers: headers() })
+    fetch(`${getApiUrl()}/files/deck?path=${encodeURIComponent(path)}${sidQ}`, { headers: headers() })
       .then(async (res) => {
         if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.detail || `HTTP ${res.status}`);
         return res.json();
@@ -80,15 +83,15 @@ export default function PptPreviewPage() {
     (src: string) => {
       if (!deck) return src;
       const abs = src.startsWith("/") ? src : `${deck.dir}/${src}`;
-      return withToken(`${getApiUrl()}/files/asset?path=${encodeURIComponent(abs)}`);
+      return withToken(`${getApiUrl()}/files/asset?path=${encodeURIComponent(abs)}${sidQ}`);
     },
-    [deck]
+    [deck, sidQ]
   );
 
   const pptxPath = deck?.pptx_path ?? path;
 
   const downloadPptx = () => {
-    if (pptxPath) openUrl(withToken(`${getApiUrl()}/files/download?path=${encodeURIComponent(pptxPath)}`));
+    if (pptxPath) openUrl(withToken(`${getApiUrl()}/files/download?path=${encodeURIComponent(pptxPath)}${sidQ}`));
   };
 
   // 下载 PDF：隐藏容器里的全尺寸渲染逐页截图合成（jsPDF save 走 blob 下载，Tauri v2 webview 支持）

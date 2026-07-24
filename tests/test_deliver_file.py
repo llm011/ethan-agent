@@ -74,13 +74,72 @@ def test_deliver_file_non_project_no_preview():
 # ── /api/files 路由 ─────────────────────────────────────────────────
 
 @pytest.fixture
-def client():
+def client(monkeypatch):
     app = FastAPI()
     app.include_router(files_router.router, prefix="/api")
     # 跳过鉴权依赖
     app.dependency_overrides[files_router.verify_token] = lambda: "u1"
     app.dependency_overrides[files_router.verify_token_or_cookie] = lambda: "u1"
+    # session 授权打桩：默认放行 /tmp 下一切（请求时才 glob，测试里先建文件再请求）
+    async def _grants(session_id: str):
+        tmp = Path("/tmp")
+        files = {str(p.resolve()) for p in tmp.rglob("*") if p.is_file()}
+        dirs = {str(p.resolve()) for p in tmp.rglob("*") if p.is_dir()}
+        return files, dirs
+    monkeypatch.setattr(files_router, "_session_grants", _grants)
     return TestClient(app)
+
+
+def test_session_grants_from_real_store(tmp_path, monkeypatch):
+    """_session_grants 从真实 SessionStore 的 cards 列派生授权集合。"""
+    import ethan.memory.session as session_mod
+    from ethan.memory.session import Message, SessionStore
+
+    async def _go():
+        store = SessionStore(db_path=tmp_path / "s.db")
+        await store.init()
+        s = await store.create(model="m")
+        card = {"type": "file", "path": "/tmp/grants_a.pptx", "project_dir": "/tmp/grants_proj"}
+        await store.save_message(s.id, Message(role="assistant", content="ok", cards=[card]))
+        await store.save_message(s.id, Message(role="assistant", content="no cards"))
+        return store, s.id
+
+    store, sid = _run(_go())
+
+    async def _fake_store():
+        return store
+
+    monkeypatch.setattr(session_mod, "get_session_store", _fake_store)
+    files, dirs = _run(files_router._session_grants(sid))
+    assert files == {str(Path("/tmp/grants_a.pptx").resolve())}
+    assert dirs == {str(Path("/tmp/grants_proj").resolve())}
+
+    # 未知 session → 403；空 session_id → 400
+    with pytest.raises(Exception) as e1:
+        _run(files_router._session_grants("no-such-session"))
+    assert "403" in str(e1.value)
+    with pytest.raises(Exception) as e2:
+        _run(files_router._session_grants(""))
+    assert "400" in str(e2.value)
+
+
+def test_session_isolation(client, monkeypatch):
+    """别的 session 没交付过这个文件 → 403。"""
+    f = Path("/tmp/files_route_isolation.pptx")
+    f.write_bytes(b"x")
+
+    async def _grants(session_id: str):
+        if session_id == "session-A":
+            return {str(f.resolve())}, set()
+        return set(), set()  # session-B 什么都没交付过
+
+    monkeypatch.setattr(files_router, "_session_grants", _grants)
+    ok = client.get(f"/api/files/download?path={f}&session_id=session-A")
+    assert ok.status_code == 200
+    denied = client.get(f"/api/files/download?path={f}&session_id=session-B")
+    assert denied.status_code == 403
+    missing = client.get(f"/api/files/download?path={f}")
+    assert missing.status_code in (400, 403, 422)
 
 
 def test_download_ok(client):
@@ -104,8 +163,15 @@ def test_download_ext_rejects(client):
     assert res.status_code == 400
 
 
-def test_download_not_found(client):
-    res = client.get(f"/api/files/download?path={Path.home() / 'no_such_xyz.pptx'}")
+def test_download_not_found(client, monkeypatch):
+    # 已授权但文件被删 → 404；未授权的一律 403（不暴露文件存在性）
+    ghost = Path("/tmp/files_route_ghost.pptx")
+
+    async def _grants(session_id: str):
+        return {str(ghost.resolve())}, set()
+
+    monkeypatch.setattr(files_router, "_session_grants", _grants)
+    res = client.get(f"/api/files/download?path={ghost}&session_id=s1")
     assert res.status_code == 404
 
 

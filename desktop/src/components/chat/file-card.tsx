@@ -30,22 +30,25 @@ function fmtSize(kb: number | null): string {
   return kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${Math.round(kb)} KB`;
 }
 
-export function fileDownloadUrl(path: string): string {
-  return `${getApiUrl()}/files/download?path=${encodeURIComponent(path)}&token=${encodeURIComponent(getAuthToken())}`;
+export function fileDownloadUrl(path: string, sessionId?: string | null): string {
+  const sid = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : "";
+  return `${getApiUrl()}/files/download?path=${encodeURIComponent(path)}&token=${encodeURIComponent(getAuthToken())}${sid}`;
 }
 
-// 文件卡片：pptx 且带项目目录时点击进 /ppt-preview 预览页，其余点击直接下载
-export function FileCardView({ card }: { card: FileCard }) {
+// 文件卡片：pptx 且带项目目录时点击进 /ppt-preview 预览页，其余点击直接下载。
+// 所有 URL 带 session_id——服务端只放行本 session 交付过的文件（会话级隔离）。
+export function FileCardView({ card, sessionId }: { card: FileCard; sessionId?: string | null }) {
   const navigate = useNavigate();
   const Icon = KIND_ICON[card.kind] ?? FileIcon;
   const previewable = card.kind === "pptx" && !!card.project_dir;
 
   const handleClick = () => {
     if (previewable) {
-      navigate(`/ppt-preview?path=${encodeURIComponent(card.path)}`);
+      const sid = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : "";
+      navigate(`/ppt-preview?path=${encodeURIComponent(card.path)}${sid}`);
     } else {
       // Tauri webview 里直接点击会被顶走，走系统浏览器下载（URL 带 token）
-      openUrl(fileDownloadUrl(card.path));
+      openUrl(fileDownloadUrl(card.path, sessionId));
     }
   };
 

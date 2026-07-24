@@ -33,6 +33,7 @@ const THUMB_SCALE = 0.16;
 export function PptPreviewView() {
   const router = useRouter();
   const [path, setPath] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string>("");
   const [deck, setDeck] = useState<DeckResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [current, setCurrent] = useState(0);
@@ -44,19 +45,24 @@ export function PptPreviewView() {
 
   // 静态导出下 useSearchParams 需要 Suspense，直接读 location 更简单
   useEffect(() => {
-    const p = new URLSearchParams(window.location.search).get("path");
-    setPath(p);
+    const q = new URLSearchParams(window.location.search);
+    setPath(q.get("path"));
+    setSessionId(q.get("session_id") ?? "");
   }, []);
+
+  // 所有 /api/files 请求都要带 session_id——服务端只放行本 session 交付的文件
+  const sidQ = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : "";
 
   useEffect(() => {
     if (!path) return;
-    fetch(`${API_URL}/files/deck?path=${encodeURIComponent(path)}`, { headers: headers() })
+    fetch(`${API_URL}/files/deck?path=${encodeURIComponent(path)}${sidQ}`, { headers: headers() })
       .then(async (res) => {
         if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.detail || `HTTP ${res.status}`);
         return res.json();
       })
       .then((d: DeckResponse) => setDeck(d))
       .catch((e) => setError(e.message || "加载失败"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path]);
 
   // 主视图缩放：随容器宽度自适应 × 用户 zoom
@@ -82,14 +88,14 @@ export function PptPreviewView() {
     (src: string) => {
       if (!deck) return src;
       const abs = src.startsWith("/") ? src : `${deck.dir}/${src}`;
-      return `${API_URL}/files/asset?path=${encodeURIComponent(abs)}`;
+      return `${API_URL}/files/asset?path=${encodeURIComponent(abs)}${sidQ}`;
     },
-    [deck]
+    [deck, sidQ]
   );
 
   const pptxPath = deck?.pptx_path ?? path;
   const downloadPptxUrl = pptxPath
-    ? `${API_URL}/files/download?path=${encodeURIComponent(pptxPath)}`
+    ? `${API_URL}/files/download?path=${encodeURIComponent(pptxPath)}${sidQ}`
     : null;
 
   // 下载 PDF：隐藏容器里按 2x 渲染全部页，逐页截图合成
