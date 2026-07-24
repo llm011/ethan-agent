@@ -163,7 +163,6 @@ M_NS = "http://schemas.openxmlformats.org/officeDocument/2006/math"
 A14_NS = "http://schemas.microsoft.com/office/drawing/2010/main"
 # 标记兼容性：a14:m 必须再包一层 mc:AlternateContent（Choice/Fallback），
 # 否则 Office 365 不渲染公式、Keynote 直接拒收整个文件
-MC_NS = "http://schemas.openxmlformats.org/markup-compatibility/2006"
 
 
 # ---------------------------------------------------------------------------
@@ -937,60 +936,276 @@ def _unwrap_math_boxes(omath):
             parent.insert(idx + i, child)
 
 
-def _style_math_runs(omath, font_size_px: float, color_value):
-    """给每个 m:r 注入 a:rPr（PPTX 数学区用 DrawingML 运行属性）控制字号/颜色。"""
+# Cambria Math 字体声明（Mac Office 原生公式的固定写法，缺了 Mac 会静默丢弃 math zone）
+_MATH_LATIN = {"typeface": "Cambria Math", "panose": "02040503050406030204",
+               "pitchFamily": "18", "charset": "0"}
+
+
+def _math_rpr(font_size_px: float, color_value, italic: bool):
+    """构造 Mac Office 原生风格的 a:rPr：sz + i + solidFill + Cambria Math。"""
+    from lxml import etree
+
     rgb, alpha = parse_color(color_value)
     sz = str(int(round(font_size_px * PT_PER_PX * 100)))
-    for r in omath.iter(qn("m:r")):
+    attrs = {"sz": sz}
+    if italic:
+        attrs["i"] = "1"
+    rPr = etree.Element(qn("a:rPr"), attrs)
+    solid = _sub(rPr, "a:solidFill")
+    clr = _sub(solid, "a:srgbClr", val=str(rgb))
+    if alpha is not None:
+        _sub(clr, "a:alpha", val=str(int(alpha * 100000)))
+    _sub(rPr, "a:latin", **_MATH_LATIN)
+    return rPr
+
+
+# 结构元素 → 其 *Pr 子元素（Mac 原生在每个 *Pr 里都带 m:ctrlPr）
+_MATH_STRUCT_PR = {
+    "m:rad": "m:radPr", "m:f": "m:fPr", "m:sSub": "m:sSubPr", "m:sSup": "m:sSupPr",
+    "m:sSubSup": "m:sSubSupPr", "m:d": "m:dPr", "m:nary": "m:naryPr",
+    "m:func": "m:funcPr", "m:groupChr": "m:groupChrPr", "m:limLow": "m:limLowPr",
+    "m:limUpp": "m:limUppPr", "m:bar": "m:barPr", "m:m": "m:mPr", "m:eqArr": "m:eqArrPr",
+}
+
+
+def _macify_omml(omath, font_size_px: float, color_value):
+    """把 mathml2omml 的输出改写成 Mac PowerPoint 原生公式的字节模式。
+
+    实测对照（Mac Office 365 插入公式后存盘）：原生公式没有 m:rPr/m:sty，
+    样式全在 a:rPr（i="1" 表斜体），且每个 run 都显式声明 Cambria Math；
+    每个结构元素（rad/f/sSub…）的 *Pr 里都有 m:ctrlPr，m:rad 还带空 m:deg。
+    mathml2omml 的输出缺这些，Mac 解析器拿到无法排版的 math zone 会静默丢成空盒子。
+    """
+    for r in list(omath.iter(qn("m:r"))):
         t = r.find(qn("m:t"))
         if t is None:
             continue
-        rPr = r.makeelement(qn("a:rPr"), {"lang": "zh-CN", "sz": sz, "dirty": "0"})
-        solid = _sub(rPr, "a:solidFill")
-        clr = _sub(solid, "a:srgbClr", val=str(rgb))
-        if alpha is not None:
-            _sub(clr, "a:alpha", val=str(int(alpha * 100000)))
-        r.insert(list(r).index(t), rPr)
+        mrpr = r.find(qn("m:rPr"))
+        italic = False
+        if mrpr is not None:
+            sty = mrpr.find(qn("m:sty"))
+            italic = sty is not None and sty.get(qn("m:val")) == "i"
+            r.remove(mrpr)  # Mac 原生没有 m:rPr，斜体走 a:rPr 的 i 属性
+        r.insert(list(r).index(t), _math_rpr(font_size_px, color_value, italic))
+    for struct_tag, pr_tag in _MATH_STRUCT_PR.items():
+        for struct in list(omath.iter(qn(struct_tag))):
+            pr = struct.find(qn(pr_tag))
+            if pr is None:
+                pr = struct.makeelement(qn(pr_tag), {})
+                struct.insert(0, pr)
+            if pr.find(qn("m:ctrlPr")) is None:
+                ctrl = pr.makeelement(qn("m:ctrlPr"), {})
+                ctrl.append(_math_rpr(font_size_px, color_value, True))
+                pr.append(ctrl)
+    # m:rad 的子元素顺序是 radPr? deg? e —— Mac 原生带空 m:deg + degHide on，
+    # 缺了 Mac 不渲染根号；degHide 隐藏空次数占位框（\sqrt 无次数）
+    for rad in list(omath.iter(qn("m:rad"))):
+        pr = rad.find(qn("m:radPr"))
+        if pr is not None and pr.find(qn("m:degHide")) is None:
+            deghide = pr.makeelement(qn("m:degHide"), {qn("m:val"): "on"})
+            pr.append(deghide)  # radPr 内顺序：ctrlPr 在前、degHide 在后（Mac 原生如此）
+        if rad.find(qn("m:deg")) is None:
+            e = rad.find(qn("m:e"))
+            deg = rad.makeelement(qn("m:deg"), {})
+            rad.insert(list(rad).index(e) if e is not None else len(rad), deg)
 
 
-def _latex_fallback_text(latex_src: str) -> str:
-    """LaTeX 源码 → 可读纯文本，给 mc:Fallback 用（Keynote 等不支持 OMML 的查看端）。"""
-    t = latex_src
-    t = re.sub(r"\\(?:mathrm|text)\s*\{([^{}]*)\}", r"\1", t)  # \mathrm{X}→X（连括号一起去掉，避免留下双括号）
-    for src, dst in (
-        ("\\quad", "  "), ("\\cdot", "·"),
-        ("\\times", "×"), ("\\otimes", "⊗"), ("\\sum", "Σ"), ("\\sqrt", "√"),
-        ("\\frac", "FRAC"), ("\\theta", "θ"), ("\\gamma", "γ"), ("\\infty", "∞"),
-        ("\\leq", "≤"), ("\\geq", "≥"), ("\\max", "max"), ("\\sin", "sin"),
-        ("\\cos", "cos"), ("\\left", ""), ("\\right", ""),
-    ):
-        t = t.replace(src, dst)
-    # \frac{a}{b} → (a)/(b)（此时 \frac 已替换为 FRAC 占位；允许括号内两层嵌套，循环处理嵌套分式）
-    _BRACED = r"\{((?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*)\}"
-    for _ in range(5):
-        new = re.sub(r"FRAC\s*" + _BRACED + r"\s*" + _BRACED, r"(\1)/(\2)", t)
-        if new == t:
-            break
-        t = new
-    t = t.replace("FRAC", "")
-    # Σ 上下限：Σ_{i=1}^{d_k} → Σ(i=1~d_k)（后续规则再把 d_k 变 dₖ）
-    t = re.sub(r"Σ_\{([^{}]*)\}\^\{([^{}]*)\}", lambda m: f"Σ({m.group(1)}~{m.group(2)})", t)
-    # 下/上标：带括号的整体转换——所有字符都有 Unicode 字形就全转（n-m→ₙ₋ₘ），否则去掉下划线
-    _SUB = {"i": "ᵢ", "j": "ⱼ", "k": "ₖ", "m": "ₘ", "n": "ₙ", "a": "ₐ", "e": "ₑ", "o": "ₒ", "x": "ₓ", "-": "₋", "0": "₀", "1": "₁", "2": "₂"}
-    _SUP = {"T": "ᵀ", "2": "²", "i": "ⁱ", "n": "ⁿ", "-": "⁻"}
+# ---------------------------------------------------------------------------
+# LaTeX → 原生文本 run（备选引擎）：把公式转成 PPT 普通文本 + 真实上下标 run。
+# 默认引擎是 OMML（见上，照 Mac Office 原生格式注入，真根号/真分式、可编辑）；
+# 但 Keynote 不支持 a14:m（会判整个文件非法），需要 Keynote 交付时在 latex
+# 元素上加 "engine": "runs"——代价是根号没有横线、分式是行内式 (a)/(b)。
+# ---------------------------------------------------------------------------
 
-    def _map_all(s, table):
-        return "".join(table[c] for c in s) if all(c in table for c in s) else None
+_LATEX_GREEK = {
+    "alpha": "α", "beta": "β", "gamma": "γ", "delta": "δ", "epsilon": "ε",
+    "zeta": "ζ", "eta": "η", "theta": "θ", "iota": "ι", "kappa": "κ",
+    "lambda": "λ", "mu": "μ", "nu": "ν", "xi": "ξ", "pi": "π", "rho": "ρ",
+    "sigma": "σ", "tau": "τ", "phi": "φ", "chi": "χ", "psi": "ψ", "omega": "ω",
+    "Gamma": "Γ", "Delta": "Δ", "Theta": "Θ", "Lambda": "Λ", "Pi": "Π",
+    "Sigma": "Σ", "Phi": "Φ", "Omega": "Ω",
+}
+_LATEX_SYMBOLS = {
+    "cdot": "·", "times": "×", "otimes": "⊗", "oplus": "⊕", "infty": "∞",
+    "pm": "±", "mp": "∓", "leq": "≤", "geq": "≥", "neq": "≠", "approx": "≈",
+    "partial": "∂", "sum": "Σ", "prod": "∏", "int": "∫", "nabla": "∇",
+    "rightarrow": "→", "to": "→", "leftarrow": "←", "Rightarrow": "⇒",
+    "in": "∈", "subset": "⊂", "cup": "∪", "cap": "∩", "forall": "∀", "exists": "∃",
+    "quad": "  ", "qquad": "    ", ",": " ", ";": " ", " ": " ", "!": "",
+}
+_LATEX_WORDS = {
+    "sin", "cos", "tan", "log", "ln", "exp", "max", "min", "argmax", "argmin",
+    "softmax", "sigmoid", "tanh", "det", "dim", "ker", "deg", "gcd",
+}
 
-    t = re.sub(r"_\{([^{}]*)\}", lambda m: _map_all(m.group(1), _SUB) or m.group(1), t)
-    t = re.sub(r"_([A-Za-z0-9])", lambda m: _SUB.get(m.group(1), m.group(1)), t)
-    t = re.sub(r"\^\{([^{}]*)\}", lambda m: _map_all(m.group(1), _SUP) or "^" + m.group(1), t)
-    t = re.sub(r"\^([A-Za-z0-9])", lambda m: _SUP.get(m.group(1), m.group(1)), t)
-    t = t.replace("\\", "").replace("{", "").replace("}", "")
-    return re.sub(r"\s+", " ", t).strip()
+
+def _latex_tokenize(src: str):
+    toks, i = [], 0
+    while i < len(src):
+        c = src[i]
+        if c == "\\":
+            j = i + 1
+            if j < len(src) and src[j].isalpha():
+                k = j
+                while k < len(src) and src[k].isalpha():
+                    k += 1
+                toks.append(("cmd", src[j:k]))
+                i = k
+            else:  # 单字符命令（\, \; \{ 等）
+                toks.append(("cmd", src[j:j + 1]))
+                i = j + 1
+        elif c == "{":
+            toks.append(("lb", c)); i += 1
+        elif c == "}":
+            toks.append(("rb", c)); i += 1
+        elif c == "^":
+            toks.append(("sup", c)); i += 1
+        elif c == "_":
+            toks.append(("sub", c)); i += 1
+        elif c == " ":
+            toks.append(("sp", c)); i += 1
+        else:
+            toks.append(("ch", c)); i += 1
+    return toks
+
+
+def _latex_parse_arg(toks, i):
+    """解析 ^/_ 或 \sqrt/\frac 的参数：{组} | 单个命令 | 单个字符。"""
+    if i < len(toks) and toks[i][0] == "lb":
+        return _latex_parse_seq(toks, i + 1)
+    if i < len(toks) and toks[i][0] == "cmd":
+        runs, ni = _latex_cmd_runs(toks, i)
+        return runs, ni
+    if i < len(toks) and toks[i][0] == "ch":
+        return [{"text": toks[i][1]}], i + 1
+    return [], i
+
+
+def _latex_cmd_runs(toks, i):
+    """把一个命令（及其参数）转成 run 列表。返回 (runs, next_i)。"""
+    name = toks[i][1]
+    i += 1
+    if name in ("mathrm", "text", "mathbf", "operatorname", "mathit", "mathcal"):
+        return _latex_parse_arg(toks, i)
+    if name == "frac" or name == "dfrac" or name == "tfrac":
+        num, i = _latex_parse_arg(toks, i)
+        den, i = _latex_parse_arg(toks, i)
+        num_t = "".join(r["text"] for r in num)
+        den_t = "".join(r["text"] for r in den)
+        out = []
+        if len(num_t) > 1:
+            out.append({"text": "("})
+        out.extend(num)
+        if len(num_t) > 1:
+            out.append({"text": ")"})
+        out.append({"text": "/"})
+        if len(den_t) > 1 or not den:
+            out.append({"text": "("})
+        out.extend(den)
+        if len(den_t) > 1 or not den:
+            out.append({"text": ")"})
+        return out, i
+    if name == "sqrt":
+        arg, i = _latex_parse_arg(toks, i)
+        arg_t = "".join(r["text"] for r in arg)
+        out = [{"text": "√"}]
+        if any(c in arg_t for c in "+-/=·× ") or len(arg_t) > 3:
+            out.append({"text": "("})
+            out.extend(arg)
+            out.append({"text": ")"})
+        else:
+            out.extend(arg)
+        return out, i
+    if name in ("left", "right", "limits", "displaystyle", "big", "Big"):
+        return [], i
+    if name in _LATEX_GREEK:
+        return [{"text": _LATEX_GREEK[name]}], i
+    if name in _LATEX_SYMBOLS:
+        return [{"text": _LATEX_SYMBOLS[name]}], i
+    if name in _LATEX_WORDS:
+        return [{"text": name}], i
+    if name == "{":
+        return [{"text": "{"}], i
+    if name == "}":
+        return [{"text": "}"}], i
+    return [{"text": name}], i  # 未知命令：保留名字保证可读
+
+
+def _latex_parse_seq(toks, i):
+    runs = []
+    while i < len(toks):
+        kind, val = toks[i]
+        if kind == "rb":
+            return runs, i + 1
+        if kind == "lb":
+            sub, i = _latex_parse_seq(toks, i + 1)
+            runs.extend(sub)
+            continue
+        if kind in ("sup", "sub"):
+            arg, i = _latex_parse_arg(toks, i + 1)
+            for r in arg:
+                r[kind] = True
+            runs.extend(arg)
+            continue
+        if kind == "cmd":
+            out, i = _latex_cmd_runs(toks, i)
+            runs.extend(out)
+            continue
+        runs.append({"text": " " if kind == "sp" else val})
+        i += 1
+    return runs, i
+
+
+def _latex_to_runs(latex_src: str):
+    """LaTeX → run 列表（相邻同样式合并），每个 run: {text, sub?, sup?}。"""
+    runs, _ = _latex_parse_seq(_latex_tokenize(latex_src), 0)
+    merged = []
+    for r in runs:
+        if merged and merged[-1].get("sub") == r.get("sub") and merged[-1].get("sup") == r.get("sup"):
+            merged[-1]["text"] += r["text"]
+        else:
+            merged.append(dict(r))
+    return merged
 
 
 def render_latex(slide, el, theme, emu_per_px):
+    if (el.get("engine") or "omml") == "omml":
+        return _render_latex_omml(slide, el, theme, emu_per_px)
+    latex_src = str(el.get("latex", ""))
+    font_size = float(el.get("fontSize") or 20)
+    color = el.get("color") or theme.get("fontColor", "#1F2937")
+    try:
+        runs = _latex_to_runs(latex_src)
+        if not runs:
+            raise ValueError("空公式")
+        for r in runs:
+            r["fontSize"] = font_size
+            r["color"] = color
+        text_el = {
+            "id": el.get("id"), "name": el.get("name"),
+            "left": el["left"], "top": el["top"],
+            "width": el["width"], "height": el["height"],
+            "rotate": el.get("rotate"),
+            "text": el.get("text"),
+            "paragraphs": [{"align": el.get("align", "center"), "runs": runs, "lineHeight": 1.3}],
+        }
+        box = render_text(slide, text_el, theme, emu_per_px)
+        # LaTeX 源码存进选择窗格描述，后续可对照手动编辑
+        box._element.nvSpPr.cNvPr.set("descr", latex_src)
+        return box
+    except Exception as e:  # noqa: BLE001 - 降级为原文文本，不阻断整页渲染
+        print(f"[warn] latex 元素 {el.get('id')} 转换失败（{e}），已降级为源码文本", file=sys.stderr)
+        text_el = {
+            "id": el.get("id"), "name": el.get("name"),
+            "left": el["left"], "top": el["top"],
+            "width": el["width"], "height": el["height"],
+            "paragraphs": [{"align": el.get("align", "center"),
+                            "runs": [{"text": latex_src, "fontSize": font_size, "color": color}]}],
+        }
+        return render_text(slide, text_el, theme, emu_per_px)
+
+
+def _render_latex_omml(slide, el, theme, emu_per_px):
     box = slide.shapes.add_textbox(
         px_to_emu(el["left"], emu_per_px), px_to_emu(el["top"], emu_per_px),
         px_to_emu(el["width"], emu_per_px), px_to_emu(el["height"], emu_per_px),
@@ -1013,17 +1228,15 @@ def render_latex(slide, el, theme, emu_per_px):
 
         etree.register_namespace("m", M_NS)
         etree.register_namespace("a14", A14_NS)
-        etree.register_namespace("mc", MC_NS)
         omml_str = latex_to_omml(latex_src)
         wrapped = f'<root xmlns:m="{M_NS}" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">{omml_str}</root>'
         root = etree.fromstring(wrapped.encode("utf-8"))
         omath = root[0]
         _unwrap_math_boxes(omath)
-        _style_math_runs(omath, font_size, color)
-        # 对照 PowerPoint 真实输出：公式必须包在
-        # mc:AlternateContent > mc:Choice(Requires="a14") > a14:m 里；
-        # 裸 a14:m 在 Office 365 里渲染为空，Keynote 直接判整个文件非法。
-        # mc:Fallback 放可读纯文本，不支持的查看端（Keynote/WPS）也能看到内容。
+        _macify_omml(omath, font_size, color)
+        # 对照 Mac Office 365 真实存盘：公式就是裸 a14:m > m:oMathPara，没有
+        # mc:AlternateContent——Mac 遇到 Requires="a14" 的 Choice 会直接选
+        # Fallback 显示纯文本，所以这里必须照原生格式裸注入。
         jc = {"left": "left", "center": "center", "right": "right"}.get(el.get("align", "center"), "center")
         omath_para = omath.makeelement(f"{{{M_NS}}}oMathPara", {})
         para_pr = omath.makeelement(f"{{{M_NS}}}oMathParaPr", {})
@@ -1033,18 +1246,7 @@ def render_latex(slide, el, theme, emu_per_px):
         omath_para.append(omath)
         a14_m = p._p.makeelement(f"{{{A14_NS}}}m", {})
         a14_m.append(omath_para)
-        choice = p._p.makeelement(f"{{{MC_NS}}}Choice", {"Requires": "a14"})
-        choice.append(a14_m)
-        fb_r = p._p.makeelement(qn("a:r"), {})
-        _sub(fb_r, "a:rPr", lang="zh-CN", dirty="0")
-        fb_t = _sub(fb_r, "a:t")
-        fb_t.text = _latex_fallback_text(latex_src)
-        fallback = p._p.makeelement(f"{{{MC_NS}}}Fallback", {})
-        fallback.append(fb_r)
-        ac = p._p.makeelement(f"{{{MC_NS}}}AlternateContent", {})
-        ac.append(choice)
-        ac.append(fallback)
-        p._p.append(ac)
+        p._p.append(a14_m)
     except Exception as e:  # noqa: BLE001 - 降级为原文文本，不阻断整页渲染
         print(f"[warn] latex 元素 {el.get('id')} 转换失败（{e}），已降级为纯文本", file=sys.stderr)
         run = p.add_run()
