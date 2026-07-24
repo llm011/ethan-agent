@@ -161,6 +161,9 @@ _TMP_IMG_DIR = Path(tempfile.gettempdir()) / "ppt_render_imgs"
 M_NS = "http://schemas.openxmlformats.org/officeDocument/2006/math"
 # DrawingML 2010 扩展：pptx 文本体内的数学区必须包在 <a14:m> 里（对照 pandoc 输出）
 A14_NS = "http://schemas.microsoft.com/office/drawing/2010/main"
+# 标记兼容性：a14:m 必须再包一层 mc:AlternateContent（Choice/Fallback），
+# 否则 Office 365 不渲染公式、Keynote 直接拒收整个文件
+MC_NS = "http://schemas.openxmlformats.org/markup-compatibility/2006"
 
 
 # ---------------------------------------------------------------------------
@@ -950,6 +953,23 @@ def _style_math_runs(omath, font_size_px: float, color_value):
         r.insert(list(r).index(t), rPr)
 
 
+def _latex_fallback_text(latex_src: str) -> str:
+    """LaTeX 源码 → 可读纯文本，给 mc:Fallback 用（Keynote 等不支持 OMML 的查看端）。"""
+    t = latex_src
+    for src, dst in (
+        ("\\mathrm", ""), ("\\text", ""), ("\\quad", "  "), ("\\cdot", "·"),
+        ("\\times", "×"), ("\\otimes", "⊗"), ("\\sum", "Σ"), ("\\sqrt", "√"),
+        ("\\frac", "FRAC"), ("\\theta", "θ"), ("\\gamma", "γ"), ("\\infty", "∞"),
+        ("\\leq", "≤"), ("\\geq", "≥"), ("\\max", "max"), ("\\sin", "sin"),
+        ("\\cos", "cos"), ("\\left", ""), ("\\right", ""),
+    ):
+        t = t.replace(src, dst)
+    # \frac{a}{b} → (a)/(b)（此时 \frac 已替换为 FRAC 占位）
+    t = re.sub(r"FRAC\s*\{([^{}]*)\}\s*\{([^{}]*)\}", r"(\1)/(\2)", t)
+    t = t.replace("\\", "").replace("{", "").replace("}", "")
+    return re.sub(r"\s+", " ", t).strip()
+
+
 def render_latex(slide, el, theme, emu_per_px):
     box = slide.shapes.add_textbox(
         px_to_emu(el["left"], emu_per_px), px_to_emu(el["top"], emu_per_px),
@@ -973,13 +993,17 @@ def render_latex(slide, el, theme, emu_per_px):
 
         etree.register_namespace("m", M_NS)
         etree.register_namespace("a14", A14_NS)
+        etree.register_namespace("mc", MC_NS)
         omml_str = latex_to_omml(latex_src)
         wrapped = f'<root xmlns:m="{M_NS}" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">{omml_str}</root>'
         root = etree.fromstring(wrapped.encode("utf-8"))
         omath = root[0]
         _unwrap_math_boxes(omath)
         _style_math_runs(omath, font_size, color)
-        # 对照 pandoc 的 pptx 输出：<a:p><a14:m><m:oMathPara><m:oMath>…</m:oMath></m:oMathPara></a14:m></a:p>
+        # 对照 PowerPoint 真实输出：公式必须包在
+        # mc:AlternateContent > mc:Choice(Requires="a14") > a14:m 里；
+        # 裸 a14:m 在 Office 365 里渲染为空，Keynote 直接判整个文件非法。
+        # mc:Fallback 放可读纯文本，不支持的查看端（Keynote/WPS）也能看到内容。
         jc = {"left": "left", "center": "center", "right": "right"}.get(el.get("align", "center"), "center")
         omath_para = omath.makeelement(f"{{{M_NS}}}oMathPara", {})
         para_pr = omath.makeelement(f"{{{M_NS}}}oMathParaPr", {})
@@ -989,7 +1013,18 @@ def render_latex(slide, el, theme, emu_per_px):
         omath_para.append(omath)
         a14_m = p._p.makeelement(f"{{{A14_NS}}}m", {})
         a14_m.append(omath_para)
-        p._p.append(a14_m)
+        choice = p._p.makeelement(f"{{{MC_NS}}}Choice", {"Requires": "a14"})
+        choice.append(a14_m)
+        fb_r = p._p.makeelement(qn("a:r"), {})
+        _sub(fb_r, "a:rPr", lang="zh-CN", dirty="0")
+        fb_t = _sub(fb_r, "a:t")
+        fb_t.text = _latex_fallback_text(latex_src)
+        fallback = p._p.makeelement(f"{{{MC_NS}}}Fallback", {})
+        fallback.append(fb_r)
+        ac = p._p.makeelement(f"{{{MC_NS}}}AlternateContent", {})
+        ac.append(choice)
+        ac.append(fallback)
+        p._p.append(ac)
     except Exception as e:  # noqa: BLE001 - 降级为原文文本，不阻断整页渲染
         print(f"[warn] latex 元素 {el.get('id')} 转换失败（{e}），已降级为纯文本", file=sys.stderr)
         run = p.add_run()
