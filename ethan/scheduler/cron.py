@@ -219,6 +219,24 @@ class Scheduler:
         except Exception:
             return False
 
+    def run_job_now(self, job_id: str) -> bool:
+        """手动触发一次任务执行（不影响下次调度时间）。
+
+        直接调用 job.func(**job.kwargs)，绕过 APScheduler 的 reschedule 逻辑，
+        避免 modify_job(next_run_time=now) 把周期任务的整体时间表往前挪。
+        fire_schedule_job 内部起线程异步跑，这里立即返回。
+        """
+        try:
+            job = self._scheduler.get_job(job_id)
+            if not job:
+                return False
+            # job.func 是 APScheduler 包装后的；直接调会走 fire_schedule_job
+            # kwargs 里可能有 source_timeline 等元数据，fire_schedule_job 用 **_extra 接收
+            job.func(**job.kwargs)
+            return True
+        except Exception:
+            return False
+
     def modify_kwargs(self, job_id: str, **new_kwargs) -> bool:
         """修改定时任务的执行参数（如 prompt）。合并到现有 kwargs 中。"""
         try:

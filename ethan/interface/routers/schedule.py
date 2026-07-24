@@ -148,6 +148,15 @@ async def delete_schedule(job_id: str):
     return {"ok": True}
 
 
+@router.post("/{job_id}/trigger", dependencies=[Depends(verify_token)])
+async def trigger_schedule(job_id: str):
+    """手动触发一次定时任务（不影响下次调度时间）。"""
+    scheduler = get_scheduler()
+    if not scheduler.run_job_now(job_id):
+        raise HTTPException(404, "Job not found or could not be triggered")
+    return {"ok": True}
+
+
 class SchedulePatchRequest(BaseModel):
     state: str | None = None
     title: str | None = None

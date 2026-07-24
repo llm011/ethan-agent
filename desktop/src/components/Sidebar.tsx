@@ -55,8 +55,14 @@ export function Sidebar() {
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
   const [confirmState, setConfirmState] = useState<{ open: boolean; id: string }>({ open: false, id: "" });
   const [normalExpanded, setNormalExpanded] = useState(true);
-  const [scheduleExpanded, setScheduleExpanded] = useState(false);
-  const [heartbeatExpanded, setHeartbeatExpanded] = useState(false);
+  const [scheduleExpanded, setScheduleExpanded] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem("ethan_sidebar_schedule_expanded") === "1";
+  });
+  const [heartbeatExpanded, setHeartbeatExpanded] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem("ethan_sidebar_heartbeat_expanded") === "1";
+  });
   const [schedules, setSchedules] = useState<any[]>([]);
   const [runningTaskCount, setRunningTaskCount] = useState(0);
   const [modes, setModes] = useState<ModeEntry[]>([]);
@@ -416,7 +422,11 @@ export function Sidebar() {
                 <div
                   className="flex items-center justify-between py-1 mt-2 cursor-pointer text-muted-foreground hover:text-foreground"
                   onClick={() => {
-                    setScheduleExpanded(!scheduleExpanded);
+                    setScheduleExpanded(prev => {
+                      const next = !prev;
+                      try { localStorage.setItem("ethan_sidebar_schedule_expanded", next ? "1" : "0"); } catch {}
+                      return next;
+                    });
                     if (!scheduleExpanded && scheduleSessions.length > 0) {
                       const maxUpdated = Math.max(
                         ...scheduleSessions.map((s) => s.updated_at)
@@ -448,7 +458,11 @@ export function Sidebar() {
 
                 <div
                   className="flex items-center justify-between py-1 mt-2 cursor-pointer text-muted-foreground hover:text-foreground"
-                  onClick={() => setHeartbeatExpanded(!heartbeatExpanded)}
+                  onClick={() => setHeartbeatExpanded(prev => {
+                    const next = !prev;
+                    try { localStorage.setItem("ethan_sidebar_heartbeat_expanded", next ? "1" : "0"); } catch {}
+                    return next;
+                  })}
                 >
                   <span className="text-sm font-semibold">心跳(对话)</span>
                   <span className="text-[10px]">
