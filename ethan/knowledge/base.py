@@ -3,10 +3,13 @@
 默认实现：本地 Markdown 文件目录（~/.ethan/knowledge/）。
 通过 adapter 机制支持第三方笔记系统（Obsidian 等）及外部 REST API。
 """
+import logging
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -53,6 +56,18 @@ class KnowledgeBase(ABC):
     @abstractmethod
     def health_check(self) -> tuple[bool, str]:
         """Validate connectivity / accessibility. Returns (ok, message)."""
+
+    def _resolve_in_dir(self, source: str) -> Path:
+        """解析 source 为 self._dir 子树内的绝对路径，越界直接拒绝（防路径穿越）。"""
+        path = Path(source)
+        if not path.is_absolute():
+            path = self._dir / source
+        resolved = path.resolve()
+        try:
+            resolved.relative_to(self._dir.resolve())
+        except ValueError:
+            raise ValueError(f"Path outside knowledge base: {source}")
+        return resolved
 
 
 class FilesystemKnowledgeBase(KnowledgeBase):
@@ -102,8 +117,8 @@ class FilesystemKnowledgeBase(KnowledgeBase):
                 embedding=embedding,
                 metadata={"title": title, "source": str(path), "tags": tags or []},
             )
-        except Exception:
-            pass  # vector indexing is optional
+        except Exception as e:
+            logger.warning("向量索引重建失败，条目已写入磁盘但语义搜索不可用: %s", e)
 
     def update(self, source: str, title: str, content: str, tags: list[str] | None = None) -> None:
         path = Path(source)
@@ -116,9 +131,7 @@ class FilesystemKnowledgeBase(KnowledgeBase):
         self._reindex(path, title, content, tags)
 
     def delete(self, source: str) -> None:
-        path = Path(source)
-        if not path.exists():
-            path = self._dir / source
+        path = self._resolve_in_dir(source)
         if not path.exists():
             raise FileNotFoundError(f"Knowledge item not found: {source}")
         path.unlink()
@@ -180,9 +193,7 @@ class FilesystemKnowledgeBase(KnowledgeBase):
         return items
 
     def get(self, source: str) -> KnowledgeItem | None:
-        path = Path(source)
-        if not path.exists():
-            path = self._dir / source
+        path = self._resolve_in_dir(source)
         if path.exists():
             return self._parse_file(path)
         return None
@@ -266,9 +277,7 @@ class ObsidianKnowledgeBase(KnowledgeBase):
         self._reindex(path, title, content, tags)
 
     def delete(self, source: str) -> None:
-        path = Path(source)
-        if not path.exists():
-            path = self._dir / source
+        path = self._resolve_in_dir(source)
         if not path.exists():
             raise FileNotFoundError(f"Knowledge item not found: {source}")
         path.unlink()
@@ -358,9 +367,7 @@ class ObsidianKnowledgeBase(KnowledgeBase):
         return items
 
     def get(self, source: str) -> KnowledgeItem | None:
-        path = Path(source)
-        if not path.exists():
-            path = self._dir / source
+        path = self._resolve_in_dir(source)
         if path.exists():
             return self._parse_obsidian_file(path)
         return None
@@ -444,19 +451,21 @@ class ObsidianKnowledgeBase(KnowledgeBase):
         if text.startswith("---"):
             parts = text.split("---", 2)
             if len(parts) >= 3:
-                frontmatter = parts[1].strip()
+                frontmatter_text = parts[1].strip()
                 content = parts[2].strip()
-                for line in frontmatter.splitlines():
-                    line_s = line.strip()
-                    if line_s.startswith("title:"):
-                        title = line_s[6:].strip().strip("'\"")
-                    elif line_s.startswith("- ") and tags is not None:
-                        # tag item in YAML list
-                        tags.append(line_s[2:].strip())
-                    elif line_s.startswith("tags:") and "[" in line_s:
-                        # inline tags: [tag1, tag2]
-                        raw = line_s.split("[", 1)[1].rstrip("]")
-                        tags = [t.strip().strip("'\"") for t in raw.split(",") if t.strip()]
+                try:
+                    import yaml
+                    fm = yaml.safe_load(frontmatter_text) or {}
+                    if isinstance(fm, dict):
+                        if fm.get("title"):
+                            title = str(fm["title"]).strip()
+                        raw_tags = fm.get("tags", [])
+                        if isinstance(raw_tags, list):
+                            tags = [str(t).strip() for t in raw_tags if t]
+                        elif isinstance(raw_tags, str):
+                            tags = [t.strip() for t in raw_tags.split(",") if t.strip()]
+                except Exception:
+                    pass  # YAML 解析失败，降级为默认值
 
         # 去掉正文中重复的 # title 行
         lines = content.splitlines()
@@ -478,8 +487,8 @@ class ObsidianKnowledgeBase(KnowledgeBase):
                 embedding=embedding,
                 metadata={"title": title, "source": str(path), "tags": tags or []},
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("向量索引重建失败，条目已写入磁盘但语义搜索不可用: %s", e)
 
 
 # ── 外部 REST API 后端 ─────────────────────────────────────────────────────
