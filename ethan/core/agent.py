@@ -893,7 +893,16 @@ class Agent:
             _injected = _drain_inject()
             if _injected:
                 _inject_text = "\n\n".join(f"[用户运行中补充]：{m}" for m in _injected)
-                working.append(Message(role="user", content=_inject_text))
+                # 若末尾已是 user 消息（首轮尚无 assistant/tool），合并而非追加，
+                # 避免连续两条 user 消息导致部分网关 400。
+                if working and working[-1].role == "user":
+                    working[-1] = Message(
+                        role="user",
+                        content=(working[-1].content or "") + "\n\n" + _inject_text,
+                        images=working[-1].images,
+                    )
+                else:
+                    working.append(Message(role="user", content=_inject_text))
                 logger.info("stream_chat() iter=%d consumed %d injected message(s)", i, len(_injected))
             finalize = (i == max_iters - 1)  # 留最后一轮做收尾：禁工具、强制总结
             if finalize:

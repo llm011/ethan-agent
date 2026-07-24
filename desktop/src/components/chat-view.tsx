@@ -34,6 +34,7 @@ import { ConsentGate } from "@ethan/shared/chat/consent-card";
 import { placeholderTitle, mapDetailMessages } from "@/components/chat/chat-helpers";
 import { consumeStream, type ConsumeStreamActions } from "@/components/chat/use-chat-stream";
 import { handleCommand } from "@/components/chat/chat-commands";
+import { useInputStore } from "@/components/chat/use-input-store";
 
 interface ChatViewProps {
   initialSessionId?: string;
@@ -66,6 +67,11 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const [readingMessage, setReadingMessage] = useState<Message | null>(null);
   const [shareMessage, setShareMessage] = useState<Message | null>(null);
   const [shareDefaultKey, setShareDefaultKey] = useState<string | null>(null);
+
+  // 输入框状态机：按 session 缓存 draft 和排队消息
+  const inputStore = useInputStore();
+  const inputStoreRef = useRef(inputStore);
+  inputStoreRef.current = inputStore;
 
   const fetchAnnotationsFor = async (msgs: Message[]) => {
     const ids = msgs.filter((m) => m.role === "assistant" && m.id != null).map((m) => m.id as number);
@@ -140,6 +146,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   // Load session when route param changes
   useEffect(() => {
     if (!initialSessionId) {
+      // 切换到新会话 — 保存当前输入并切换状态机
+      inputStore.switchTo(null, inputRef.current?.value);
       setActiveSession(null);
       setSessionTitle("");
       setMessages([]);
@@ -156,6 +164,9 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       justFinishedRef.current = null;
       return;
     }
+
+    // 切换到目标会话 — 保存当前输入并恢复目标会话的输入状态
+    inputStore.switchTo(initialSessionId, inputRef.current?.value);
 
     setLoadingSession(true);
     setActiveSession(null);
@@ -259,10 +270,30 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     }
   }, [sessionTitle]);
 
+  const prevSessionRef = useRef(initialSessionId);
   useEffect(() => {
+    // 仅 streaming 从 true→false 时 drain 队列；切会话（initialSessionId 变化）不触发
+    const sessionChanged = prevSessionRef.current !== initialSessionId;
+    prevSessionRef.current = initialSessionId;
+    if (sessionChanged) return;
+
     if (!streaming) {
       setTimeout(() => inputRef.current?.focus(), 50);
+      // streaming 结束后，如果有排队消息，自动发送第一条（附带其图片）
+      const store = inputStoreRef.current;
+      if (store.queue.length > 0) {
+        const first = store.queue[0];
+        store.removeFromQueue(first.id);
+        // 恢复该排队消息携带的图片
+        if (first.images && first.images.length > 0) {
+          setPendingFiles(first.images);
+        }
+        setTimeout(() => {
+          handleSendRef.current(first.text);
+        }, 100);
+      }
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialSessionId, streaming]);
 
   const handleSend = async (text: string) => {
@@ -497,6 +528,13 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
               updateSessionMode(activeSession, m).catch(() => {});
             }
           }}
+          draft={inputStore.draft}
+          onDraftChange={inputStore.setDraft}
+          queue={inputStore.queue}
+          onQueueSend={(text, images) => inputStore.addToQueue(text, images)}
+          onQueueRemove={inputStore.removeFromQueue}
+          onQueueEdit={inputStore.editInQueue}
+          onQueueReorder={inputStore.reorderQueue}
         />
       </div>
     </div>

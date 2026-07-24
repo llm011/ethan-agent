@@ -309,6 +309,11 @@ class OpenAICompatProvider(BaseProvider):
             except StopAsyncIteration:
                 break
             except asyncio.TimeoutError:
+                # 关闭底层流，归还连接池，防止 socket 泄漏
+                try:
+                    await resp_iter.aclose()
+                except Exception:
+                    pass
                 raise TimeoutError(
                     f"模型响应超时：超过 {_CHUNK_TIMEOUT} 秒未收到新数据，可能是 API 挂起。"
                     "请稍后重试，或检查网络状况。"

@@ -123,7 +123,7 @@ export function QueuedMessages({ items, onRemove, onEdit, onReorder }: QueuedMes
                     className="h-5 w-5 flex items-center justify-center rounded text-muted-foreground hover:bg-muted"
                     title="取消"
                   >
-                    <X className="h-3 w-3" />
+                    <X className="h-2.5 w-2.5" />
                   </button>
                 </div>
               ) : (

@@ -43,7 +43,7 @@ interface ChatInputProps {
   onModeChange?: (mode: string) => void;
   // 排队消息相关
   queue?: QueuedMessage[];
-  onQueueSend?: (text: string) => void;
+  onQueueSend?: (text: string, images?: PendingFile[]) => void;
   onQueueRemove?: (id: string) => void;
   onQueueEdit?: (id: string, text: string) => void;
   onQueueReorder?: (from: number, to: number) => void;
@@ -164,10 +164,11 @@ export function ChatInput({
 
   const handleSend = () => {
     if (!input.trim() && pendingFiles.length === 0) return;
-    // streaming 中发送 → 进入排队队列
+    // streaming 中发送 → 进入排队队列（连同附图一起入队）
     if (streaming && onQueueSend) {
-      onQueueSend(input);
+      onQueueSend(input, pendingFiles.length > 0 ? pendingFiles : undefined);
       setInput("");
+      if (pendingFiles.length > 0) onFilesChange([]);
       return;
     }
     if (streaming) return;

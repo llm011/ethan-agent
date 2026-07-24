@@ -267,15 +267,24 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     }
   }, [sessionTitle]);
 
+  const prevSessionRef = useRef(initialSessionId);
   useEffect(() => {
+    // 仅 streaming 从 true→false 时 drain 队列；切会话（initialSessionId 变化）不触发
+    const sessionChanged = prevSessionRef.current !== initialSessionId;
+    prevSessionRef.current = initialSessionId;
+    if (sessionChanged) return;
+
     if (!streaming) {
       setTimeout(() => inputRef.current?.focus(), 50);
-      // streaming 结束后，如果有排队消息，自动发送第一条
+      // streaming 结束后，如果有排队消息，自动发送第一条（附带其图片）
       const store = inputStoreRef.current;
       if (store.queue.length > 0) {
         const first = store.queue[0];
         store.removeFromQueue(first.id);
-        // 延迟一点确保状态已更新
+        // 恢复该排队消息携带的图片
+        if (first.images && first.images.length > 0) {
+          setPendingFiles(first.images);
+        }
         setTimeout(() => {
           handleSendRef.current(first.text);
         }, 100);
@@ -491,7 +500,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           draft={inputStore.draft}
           onDraftChange={inputStore.setDraft}
           queue={inputStore.queue}
-          onQueueSend={inputStore.addToQueue}
+          onQueueSend={(text, images) => inputStore.addToQueue(text, images)}
           onQueueRemove={inputStore.removeFromQueue}
           onQueueEdit={inputStore.editInQueue}
           onQueueReorder={inputStore.reorderQueue}
