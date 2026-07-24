@@ -11,7 +11,7 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 ## Features
 
 **Memory system**
-- **Structured long-term memory** (`memory.db`, the single source of truth for user facts): every 5 turns, source-backed candidates are extracted (each must carry an exact quote from a user message) and deterministically admitted — explicit → active immediately, observed → promoted only after ≥2 independent sessions. 64 typed dimensions across 7 categories (personal info / preference / activity / decision / relationship / methodology / companion), with TTL expiry, supersede chains, and redaction-on-forget
+- **Structured long-term memory** (`memory.db`, the single source of truth for user facts): short sessions (<3 turns) extract immediately, then incrementally every 3 turns — each candidate carries an exact quote from a user message — and is deterministically admitted — explicit → active immediately, observed → promoted only after ≥2 independent sessions. 64 typed dimensions across 7 categories (personal info / preference / activity / decision / relationship / methodology / companion), with TTL expiry, supersede chains, and redaction-on-forget
 - **Semantic recall & dedup**: hybrid FTS5 + BGE vector retrieval (RRF-fused) feeds a single `<memory_context>` prompt block; at admission, embedding near-neighbors are paired and merged/superseded by deterministic rules ("住在深圳" ≈ "家在深圳南山" never stored twice)
 - **Dimension registry**: the extraction prompt's dimension guide and the validation whitelist are both generated from one declarative registry — extending memory types never touches prompt text by hand
 - Hot/warm sliding window for long-conversation context (REPL); older content auto-compressed by a cheap model
@@ -419,7 +419,7 @@ Ethan's long-term memory is a structured pipeline (extract → admit → recall 
 | User Profile | Narrative personal context (goals, phrases, agreements) | `~/.ethan/memory/user_profile.md` |
 | Hot/Warm | Last N turns + rolling summary (in-session compression) | In-memory |
 
-Extraction runs every 5 turns on the main chat model; in-session compression is **batched** (not per-turn) and uses an automatically inferred cheap model (e.g. Haiku for Claude users, Flash Lite for Gemini users).
+Short sessions (<3 turns) extract immediately, then incrementally every 3 turns on the main chat model; in-session compression is **batched** (not per-turn) and uses an automatically inferred cheap model (e.g. Haiku for Claude users, Flash Lite for Gemini users).
 
 Agent proactively writes to all layers mid-conversation via `memory_write`, `procedure_write`, and `profile_update` tools — no waiting for the next compression cycle.
 

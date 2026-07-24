@@ -173,7 +173,7 @@ ethan-ai/
 │   │   ├── working.py        # 三层工作记忆（hot/warm/cold）
 │   │   ├── consolidator.py   # 记忆压缩（廉价模型）
 │   │   ├── store.py          # MemoryStore（结构化记忆唯一事实源，替代已退役的 FactStore）
-│   │   ├── extractors.py     # StructuredMemoryExtractor（每 5 轮主模型增量提取 JSON 候选）
+│   │   ├── extractors.py     # StructuredMemoryExtractor（<3 轮即时 + 每 3 轮主模型增量提取 JSON 候选）
 │   │   ├── admission.py      # AdmissionPolicy（确定性准入：explicit/observed/corrected 决策）
 │   │   ├── recall.py         # build_structured_recall（FTS5 + BGE 向量混合召回，RRF 融合）
 │   │   ├── records.py        # 维度注册表 + prompt 生成（声明式扩展，custom.* 兜底）

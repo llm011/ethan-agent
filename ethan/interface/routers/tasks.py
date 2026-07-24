@@ -36,7 +36,7 @@ _CORRECTION_KEYWORDS = (
 def _has_correction_keyword(session) -> bool:
     """检查最近一条 user 消息是否包含否定/修正类关键词。
 
-    用于在 5 轮基线之外提前触发抽取，及时修正已有记忆。
+    用于在 3 轮基线之外提前触发抽取，及时修正已有记忆。
     """
     for msg in reversed(session.messages):
         if msg.role == "user" and msg.content:
@@ -44,17 +44,47 @@ def _has_correction_keyword(session) -> bool:
     return False
 
 
+# 短会话即时触发的 token 门槛：挡掉纯寒暄，避免为招呼语白跑一次付费 LLM 抽取。
+# 注意本门槛卡的是线上 lite_model 的 chat 调用（要钱），不是本地模型——所以宁可
+# 漏掉极短事实也不滥触发。定 5 而非 3/4：中文四字寒暄（早上好啊/好的收到/哈哈哈哈）
+# 恰好都 =4 tok，门槛 ≤4 会把它们全放进去烧钱；实测 5 只误触发极少数边界短语。
+# 代价：4 tok 的极短事实（"我叫李明"/"my name is Alex"）在 1-2 轮会话里说一次会漏，
+# 但这类信息进 ≥3 轮会话会被 3 轮基线抓到，损失可接受。
+_SHORT_SESSION_MIN_TOKENS = 5
+
+
+def _session_user_tokens(session) -> int:
+    """累计 session 内所有 user 消息的 token 数（寒暄过滤用）。"""
+    from ethan.memory.embeddings import count_tokens
+    return sum(
+        count_tokens(msg.content)
+        for msg in session.messages
+        if msg.role == "user" and msg.content
+    )
+
+
 async def _run_structured_extraction(session, model: str, user_id: str, user_turns: int,
                                      store=None, force: bool = False) -> None:
-    """Every three turns (or on correction keywords), extract source-backed memories.
+    """Extract source-backed memories on short turns, then every three turns.
 
-    3 轮基线触发 + 关键词触发：检测到否定/修正类关键词时立即触发，
-    避免跨轮次修正无法及时更新记忆。job_key 基于 message_id 保证幂等。
+    触发条件（任一即跑）：
+    - user_turns <= 2 且 user token >= _SHORT_SESSION_MIN_TOKENS：短会话即时触发。
+      否则用户只说一两句就结束的会话（如"我最近在研究机器人"）永远等不到第 3 轮
+      门槛，事实丢失；但纯寒暄（hi/hello/嗯）被 token 门槛挡下，不浪费 LLM 调用。
+    - user_turns % 3 == 0：3 轮基线节流，长对话按此节奏增量提取。
+    - 命中否定/修正关键词：跨轮次纠正及时更新记忆。
+    job_key 基于 message_id、boundary 增量去重，保证幂等、不重复抽取。
     store 可注入(测试/评测用);不传则按当前用户路径创建 MemoryStore。
     force=True 时跳过门槛检查（12 点兜底扫描用，已在外层过滤过短会话）。
     """
-    if not force and user_turns % 3 != 0 and not _has_correction_keyword(session):
-        return
+    if not force and not _has_correction_keyword(session):
+        if user_turns % 3 == 0:
+            pass  # 3 轮基线节点，触发
+        elif user_turns <= 2 and _session_user_tokens(session) >= _SHORT_SESSION_MIN_TOKENS:
+            pass  # 短会话且有实质内容，即时触发
+        else:
+            # 长对话非 3 轮节点，或纯寒暄短会话 → 跳过
+            return
 
     from ethan.memory.admission import (
         complete_incremental,
@@ -170,7 +200,9 @@ async def _maybe_consolidate(session_id: str, model: str, user_id: str = "", mod
             return
 
         # Structured Person/Methodology extraction is independent from the legacy
-        # rolling-summary path and runs at the approved three-turn cadence.
+        # rolling-summary path. Short turns (<3) trigger immediately so a one-liner
+        # like "我最近在研究机器人" is captured even if the session ends early;
+        # longer sessions keep the three-turn cadence.
         await _run_structured_extraction(session, model, user_id, user_turns)
 
     except Exception:
