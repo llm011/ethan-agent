@@ -119,7 +119,12 @@ async def get_session(session_id: str, user_id: str = Depends(verify_token)):
                 "a2ui": getattr(m, "a2ui", None),
                 "mcp_apps": getattr(m, "mcp_apps", None),
                 "cards": getattr(m, "cards", None),
-                "images": getattr(m, "images", None) or [],
+                "images": [
+                    {"url": f"assets/images/{img['path']}", "media_type": img.get("media_type", "image/png")}
+                    if "path" in img
+                    else img
+                    for img in (getattr(m, "images", None) or [])
+                ],
                 "matched_skills": getattr(m, "matched_skills", None),
                 "ttfb_ms": getattr(m, "ttfb_ms", None),
                 "total_ms": getattr(m, "total_ms", None),
@@ -138,6 +143,22 @@ async def delete_session(session_id: str, user_id: str = Depends(verify_token)):
     # 会话删除时清除其授权记忆，避免内存泄漏 + 同 id 复用时残留旧授权
     from ethan.core.consent import clear_session_grants
     clear_session_grants(session_id)
+    return {"ok": True}
+
+
+@router.delete("/sessions/{session_id}/messages/{message_id}")
+async def delete_message(session_id: str, message_id: int, user_id: str = Depends(verify_token)):
+    """删除会话中的单条消息（从存储中物理删除，后续对话不再带上其上下文）。"""
+    store = await get_session_store()
+    session = await store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    # 确认消息归属该会话
+    belongs = any(getattr(m, "id", None) == message_id for m in session.messages)
+    if not belongs:
+        raise HTTPException(status_code=404, detail="Message not found in this session")
+    await store.delete_message_by_id(message_id)
+    await store.touch(session_id)
     return {"ok": True}
 
 

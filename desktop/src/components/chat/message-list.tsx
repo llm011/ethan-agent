@@ -15,10 +15,12 @@ interface MessageListProps {
   onCardAction?: (text: string) => void;
   onRead?: (msg: Message) => void;
   onShare?: (msg: Message) => void;
+  onDelete?: (msg: Message) => void;
+  onInject?: (content: string) => Promise<{ ok: boolean; error?: string }>;
   annotationsByMessage?: Record<number, Annotation[]>;
 }
 
-export function MessageList({ messages, streaming, onQuote, onCardAction, onRead, onShare, annotationsByMessage }: MessageListProps) {
+export function MessageList({ messages, streaming, onQuote, onCardAction, onRead, onShare, onDelete, onInject, annotationsByMessage }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
@@ -70,19 +72,22 @@ export function MessageList({ messages, streaming, onQuote, onCardAction, onRead
   }, []);
 
   // 新消息到达时自动滚到底部
-  // - 用户发送的消息（最后一条 role=user）：强制滚到底部
+  // - 用户发送的消息（最后一条 role=user）：强制滚到底部（等 DOM 更新后）
   // - 助手流式更新：仅当用户在底部附近时跟随滚动，避免打断向上翻阅
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const lastIsUser = messages.length > 0 && messages[messages.length - 1].role === "user";
     if (lastIsUser) {
-      scrollToBottom();
+      // 等下一帧 DOM 渲染完成再滚，避免 scrollHeight 还是旧值
+      requestAnimationFrame(() => scrollToBottom());
       return;
     }
     // 如果用户已经滚到接近底部（80px 阈值），自动跟随
     const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-    if (isNearBottom) scrollToBottom();
+    if (isNearBottom) {
+      requestAnimationFrame(() => scrollToBottom());
+    }
   }, [messages, scrollToBottom]);
 
   return (
@@ -115,6 +120,8 @@ export function MessageList({ messages, streaming, onQuote, onCardAction, onRead
             onCardAction={onCardAction}
             onRead={onRead}
             onShare={onShare}
+            onDelete={onDelete}
+            onInject={onInject}
             annotations={msg.id != null ? annotationsByMessage?.[msg.id] : undefined}
           />
         ))}

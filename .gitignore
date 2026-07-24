@@ -107,3 +107,6 @@ tests/memory_eval/report_live.json
 
 # ppt-generate 字体文件（Verdana / 微软雅黑为商业字体，仅本地使用，不入库）
 ethan/defaults/skills/ppt-generate/assets/fonts/
+
+# 临时快照调试输出
+.tmp_snap/

@@ -1,0 +1,60 @@
+# 时间线配置示例
+# 复制此文件到 ~/.ethan/{scene}/timelines.yaml 并配置你的周期性事件
+#
+# 时间线 = 周期性的重要事件 + 围绕它的一系列阶段和动作
+# 典型场景：绩效考核、OKR 周期、季度汇报、产品发布、团建筹备等
+#
+# timelines.yaml 只是一种声明式格式，用于批量生成定时任务。
+# 可以导出为该格式，也可以导入它。生成的任务和手动创建的平等展示。
+
+# ============================================================
+# 时间线定义示例（请根据实际需求修改）
+# ============================================================
+
+timelines: []
+
+# 示例模板（复制到 timelines: [] 下按需修改）：
+#
+#   - id: my_event
+#     name: "事件名称"
+#     scene: work          # work / life / 自定义
+#     description: "事件描述"
+#
+#     schedule:
+#       anchor: "07-01"    # 锚定日期（MM-DD）；多锚点用列表 ["01-01", "07-01"]
+#       recurrence: yearly # yearly / semi_annual / quarterly / monthly
+#
+#     phases:
+#       - name: "阶段名称"
+#         offset_start: "-5m"   # 相对锚点的偏移
+#         offset_end: "-2w"
+#         actions:
+#           - type: recurring   # recurring = 按 cron 重复；once = 触发一次
+#             cron: "0 10 * * 5"
+#             message: "任务触发时发送的 prompt"
+#             target: self       # self / all / {姓名}
+#
+#           - type: once
+#             offset: "-2w"      # once 类型的触发偏移
+#             message: "一次性提醒内容"
+#             target: self
+
+# ============================================================
+# 配置说明
+# ============================================================
+#
+# offset 格式说明：
+#   -5m   = 锚点前 5 个月
+#   -2w   = 锚点前 2 周
+#   -3d   = 锚点前 3 天
+#   0d    = 锚点当天
+#   +1w   = 锚点后 1 周
+#
+# target 说明：
+#   self     = 发给管理者自己
+#   all      = 发给所有团队成员
+#   {姓名}   = 发给指定成员
+#
+# action type 说明：
+#   once      = 在指定 offset 触发一次
+#   recurring = 在阶段期间按 cron 重复触发

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toPng } from "html-to-image";
 import { invoke } from "@tauri-apps/api/core";
-import { Share2, Check, Copy, Loader2, X, FolderOpen, AlertCircle } from "lucide-react";
+import { Share2, Check, Copy, Loader2, X, FolderOpen, AlertCircle, Pencil, Eye } from "lucide-react";
 import { MarkdownContent } from "./markdown";
+import { fmtTokens } from "@/lib/utils";
 import type { Message } from "@ethan/shared/chat/types";
 
 function formatTime(ts?: number): string {
@@ -10,6 +11,13 @@ function formatTime(ts?: number): string {
   const d = new Date(ts * 1000);
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+// 毫秒 → 紧凑时长，与气泡底部统计行一致
+function fmtDur(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${Math.floor(ms / 60000)}m${Math.round((ms % 60000) / 1000)}s`;
 }
 
 function snippet(text: string, n = 80): string {
@@ -39,6 +47,8 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
   const [copyFailed, setCopyFailed] = useState(false);
   // 保存结果：path 为 null 表示仅完成浏览器下载（无法定位文件夹）
   const [saveInfo, setSaveInfo] = useState<{ path: string | null; filename: string } | null>(null);
+  const [editedContent, setEditedContent] = useState<Record<string, string>>({});
+  const [editingKey, setEditingKey] = useState<string | null>(null);
   const previewRef = useRef<HTMLDivElement>(null);
 
   // Esc 关闭
@@ -218,8 +228,15 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
               ) : (
                 <div className="share-card mx-auto" ref={previewRef}>
                   <div className="share-card-inner">
-                    {selectedMessages.map((m, idx) => (
-                      <div key={keyOf(m, idx)} className="share-msg">
+                    {selectedMessages.map((m, idx) => {
+                      const k = keyOf(m, idx);
+                      const raw = editedContent[k] ?? m.content;
+                      const display = m.role === "user"
+                        ? raw.replace(/^(\[Uploaded file: [^\]]+\]\n)+\n?/, "")
+                        : raw;
+                      const isEditing = editingKey === k;
+                      return (
+                      <div key={k} className="share-msg">
                         <div className="share-msg-head">
                           <span className={`share-role ${m.role}`}>
                             {m.role === "user" ? "我" : "Ethan"}
@@ -227,17 +244,62 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
                           {includeMeta && m.created_at && (
                             <span className="share-time">{formatTime(m.created_at)}</span>
                           )}
+                          <button
+                            type="button"
+                            className="share-edit-btn"
+                            title={isEditing ? "完成编辑" : "编辑文字"}
+                            onClick={() => setEditingKey(isEditing ? null : k)}
+                          >
+                            {isEditing ? <Eye className="h-3 w-3" /> : <Pencil className="h-3 w-3" />}
+                          </button>
                         </div>
-                        {m.role === "user" ? (
-                          <div className="share-user-text whitespace-pre-wrap">
-                            {m.content.replace(/^(\[Uploaded file: [^\]]+\]\n)+\n?/, "")}
-                          </div>
+                        {isEditing ? (
+                          <textarea
+                            className="share-edit-textarea"
+                            value={raw}
+                            autoFocus
+                            onChange={(e) =>
+                              setEditedContent((prev) => ({ ...prev, [k]: e.target.value }))
+                            }
+                          />
+                        ) : m.role === "user" ? (
+                          <div className="share-user-text whitespace-pre-wrap">{display}</div>
                         ) : (
-                          <MarkdownContent content={m.content} variant="share" />
+                          <MarkdownContent content={raw} variant="share" />
+                        )}
+                        {m.role === "assistant" && (m.usage || m.ttfb_ms != null || m.total_ms != null) && (
+                          <div className="share-stats">
+                            {m.usage && (
+                              <span
+                                className="share-stat share-stat-tokens"
+                                title={`输入 ${m.usage.input.toLocaleString()} / 输出 ${m.usage.output.toLocaleString()}${m.usage.cache > 0 ? ` / 缓存 ${m.usage.cache.toLocaleString()}` : ""}`}
+                              >
+                                <span>↑{fmtTokens(m.usage.input)}</span>
+                                <span>↓{fmtTokens(m.usage.output)}</span>
+                                {m.usage.cache > 0 && <span>⚡{fmtTokens(m.usage.cache)}</span>}
+                              </span>
+                            )}
+                            {m.ttfb_ms != null && (
+                              <span className="share-stat share-stat-ttfb" title={`首字耗时 ${m.ttfb_ms}ms`}>
+                                TTFB {m.ttfb_ms < 1000 ? `${m.ttfb_ms}ms` : `${(m.ttfb_ms / 1000).toFixed(1)}s`}
+                              </span>
+                            )}
+                            {m.total_ms != null && (
+                              <span className="share-stat share-stat-total" title={`总耗时 ${m.total_ms}ms`}>
+                                总 {fmtDur(m.total_ms)}
+                              </span>
+                            )}
+                            {m.ttfb_ms != null && m.total_ms != null && m.total_ms > m.ttfb_ms && (
+                              <span className="share-stat share-stat-gen" title={`实际生成耗时 ${m.total_ms - m.ttfb_ms}ms`}>
+                                生成 {fmtDur(m.total_ms - m.ttfb_ms)}
+                              </span>
+                            )}
+                          </div>
                         )}
                         {idx < selectedMessages.length - 1 && <div className="share-divider" />}
                       </div>
-                    ))}
+                      );
+                    })}
                     <div className="share-foot">
                       <span className="share-logo">Ethan</span>
                       <span className="share-sub">

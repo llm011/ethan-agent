@@ -354,31 +354,37 @@
     font-style: normal;
   }
   .prose blockquote p { margin: 0.3em 0; }
-  /* 表格：紧凑、可读、圆角（.table-wrapper 由 markdown 组件生成） */
+  /* 表格：轻量现代风（.table-wrapper 由 markdown 组件生成） */
   .prose .table-wrapper {
-    margin: 0.7em 0.5em;
-    border-radius: 0.5rem;
-    overflow: hidden;
-    border: 1px solid var(--border);
+    margin: 0.75em 0;
+    overflow-x: auto;
   }
   .prose .table-wrapper table {
     margin: 0;
     padding: 0;
-    font-size: 0.88em;
+    font-size: 0.85em;
     width: 100%;
     border-collapse: collapse;
     border-spacing: 0;
   }
   .prose .table-wrapper th, .prose .table-wrapper td {
-    padding: 0.65em 1.2em;
-    border-bottom: 1px solid var(--border);
-    border-right: 1px solid var(--border);
+    padding: 0.5em 0.9em;
+    border-bottom: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
     text-align: left;
+    white-space: nowrap;
   }
-  .prose .table-wrapper th:last-child, .prose .table-wrapper td:last-child { border-right: none; }
-  .prose .table-wrapper tr:last-child th, .prose .table-wrapper tr:last-child td { border-bottom: none; }
+  .prose .table-wrapper th:first-child, .prose .table-wrapper td:first-child { padding-left: 0.25em; }
+  .prose .table-wrapper tr:last-child td { border-bottom: none; }
   .prose .table-wrapper thead, .prose .table-wrapper tbody { margin: 0; padding: 0; }
-  .prose .table-wrapper th { background: color-mix(in oklch, var(--muted) 90%, transparent); font-weight: 600; }
+  .prose .table-wrapper th {
+    font-weight: 500;
+    font-size: 0.92em;
+    color: color-mix(in oklch, var(--foreground) 60%, transparent);
+    border-bottom: 1.5px solid color-mix(in oklch, var(--border) 80%, transparent);
+  }
+  .prose .table-wrapper tbody tr:hover td {
+    background: color-mix(in oklch, var(--muted) 40%, transparent);
+  }
   .prose a { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
 }
 
@@ -487,8 +493,59 @@
 .share-role.user { color: #0969da; background: #ddf4ff; }
 .share-role.assistant { color: #1f2328; background: #eaeef2; }
 .share-time { font-size: 11px; color: #8b949e; }
+.share-edit-btn {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: #8b949e;
+  opacity: 0.5;
+  padding: 2px;
+  display: inline-flex;
+  align-items: center;
+  transition: opacity 0.15s;
+}
+.share-edit-btn:hover { opacity: 1; color: #0969da; }
+.share-edit-textarea {
+  width: 100%;
+  min-height: 80px;
+  font-size: 14px;
+  line-height: 1.6;
+  font-family: inherit;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  padding: 8px 10px;
+  resize: vertical;
+  background: #fff;
+  color: #1f2328;
+  outline: none;
+}
+.share-edit-textarea:focus { border-color: #0969da; box-shadow: 0 0 0 2px rgba(9,105,218,0.15); }
 .share-user-text { font-size: 15px; line-height: 1.7; white-space: pre-wrap; word-break: break-word; }
 .share-divider { height: 1px; background: #eaecef; margin: 16px 0; }
+/* assistant 消息底部统计行：tokens / TTFB / 总耗时 / 生成耗时 */
+.share-stats {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  line-height: 1.4;
+}
+.share-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.share-stat-tokens { background: #e8f1ff; color: #0969da; }
+.share-stat-ttfb { background: #fff5d6; color: #9a6700; }
+.share-stat-total { background: #f1e8ff; color: #8957e5; }
+.share-stat-gen { background: #e6f9ec; color: #1a7f37; }
 .share-foot {
   display: flex;
   align-items: baseline;

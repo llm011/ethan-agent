@@ -15,12 +15,14 @@ from ethan.providers.base import Message
 from .deps import create_agent, verify_token
 from .helpers import (
     _friendly_error,
+    _persist_images_to_disk,
+    _resolve_images_for_llm,
     _setup_error_stream,
     _status_for_setup_error,
     _with_quote,
 )
 from .producers import _run_delegate_generation, _run_generation
-from .schemas import ChatRequest, ChatResponse
+from .schemas import ChatRequest, ChatResponse, InjectRequest
 from .sse import _sse_from_run
 
 router = APIRouter()
@@ -110,8 +112,13 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
 
     # 未传 session_id 时自动生成，确保所有对话都持久化到会话列表
     if not req.session_id:
+        from ethan.core.config import get_config as _get_config
         from ethan.memory.session import _generate_id
         req.session_id = _generate_id()
+        # 立即在 DB 创建 session 记录，避免后续 save_message 外键约束失败
+        store = await get_session_store()
+        await store.create_with_id(req.session_id, req.model or _get_config().defaults.model,
+                                   source=req.channel or "web", mode=req.mode or "")
 
     set_session_id(req.session_id)  # browser 工具按对话隔离/授权
 
@@ -131,12 +138,31 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
         store = await get_session_store()
 
         if req.session_id:
+            # 确保 session 记录存在（防止前端竞态或外部入口直接带 id 进来）
+            existing = await store.load(req.session_id)
+            if not existing:
+                from ethan.core.config import get_config as _gc
+                await store.create_with_id(req.session_id, req.model or _gc().defaults.model,
+                                           source=req.channel or "web", mode=req.mode or "")
             for m in messages[-1:]:
                 if m.role == "user":
+                    # 图片持久化到本地文件，DB 只存路径
+                    original_images = None
+                    saved_image_paths: list[str] = []
+                    if m.images:
+                        original_images = m.images[:]
+                        saved_image_paths = _persist_images_to_disk(m, req.session_id)
                     # 把引用信息附到消息上一起持久化，刷新后仍能渲染引用气泡
                     if req.quote and req.quote.get("content"):
                         m.quote = req.quote
                     await store.save_message(req.session_id, m)
+                    # 恢复原始 images（含 base64），确保后续发给 LLM 时仍可用
+                    if original_images is not None:
+                        m.images = original_images
+                    # 给当前消息附加图片路径提示（仅影响发给 LLM 的内容，不入库）
+                    if saved_image_paths and m.content:
+                        paths_hint = ", ".join(saved_image_paths)
+                        m.content = f"{m.content}\n\n[image_paths: {paths_hint}]"
             # /review 命令：立即从 URL 解析出 PR 标题并更新，不等 review 跑完
             user_text = (req.messages[-1].get("content", "") if req.messages else "").strip()
             if user_text:
@@ -160,6 +186,8 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
 
             current_user = _with_quote(messages[-1], req.quote)
             messages = memory.build_context() + [current_user]
+            # 历史消息中的图片从 {path} 格式解析为 {data} base64（LLM 需要）
+            _resolve_images_for_llm(messages)
         elif req.btw and messages:
             # /btw：只带本条消息，不带任何历史
             messages = [_with_quote(messages[-1], req.quote)]
@@ -310,3 +338,23 @@ async def stop_generation(session_id: str, user_id: str = Depends(verify_token))
     from ethan.core.run_manager import RunManager
     stopped = RunManager.instance().stop(session_id, user_id=user_id)
     return {"ok": True, "stopped": stopped}
+
+
+@router.post("/chat/{session_id}/inject")
+async def inject_message(session_id: str, req: InjectRequest, user_id: str = Depends(verify_token)):
+    """运行中向当前 session 的 Agent 上下文「补充信息」。
+
+    信息会塞入 ChatRun 的 inbox，agent loop 下一轮调模型前会 append 到 working 末尾
+    （即 prompt 结尾处），以 `[用户运行中补充]：...` 形式呈现给模型。
+    仅当该 session 有活跃 run（未 done）时生效；run 已结束返回 409。
+    user_id 校验归属，防跨用户注入。
+    """
+    from ethan.core.run_manager import RunManager
+    run = RunManager.instance().get(session_id, user_id=user_id)
+    if run is None or run.done:
+        raise HTTPException(status_code=409, detail="当前没有进行中的任务，无法补充信息")
+    content = (req.content or "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="补充信息不能为空")
+    run.inject(content)
+    return {"ok": True, "queued": True}

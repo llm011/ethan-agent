@@ -48,6 +48,13 @@ export function getAuthToken(): string {
   return authToken;
 }
 
+export function assetUrl(relativePath: string): string {
+  const url = `${getApiUrl()}/${relativePath}`;
+  const token = getAuthToken();
+  if (token) return `${url}?token=${encodeURIComponent(token)}`;
+  return url;
+}
+
 export function headers(): HeadersInit {
   const h: HeadersInit = { "Content-Type": "application/json" };
   const token = getAuthToken();

@@ -1,11 +1,13 @@
 "use client";
 
-import { useState, useRef, RefObject, useCallback } from "react";
+import { useState, useRef, RefObject, useCallback, useEffect } from "react";
 import { Send, Paperclip, X, Reply, Square, ImageIcon, Maximize2, Minimize2 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@ethan/shared/ui/select";
 import { uploadFile, type ModeEntry } from "@/lib/api";
 import type { Quote, PendingFile } from "@ethan/shared/chat/types";
 import { MdEditor } from "@/components/md-editor";
+import { QueuedMessages } from "./queued-messages";
+import type { QueuedMessage } from "./use-input-store";
 
 // mode.accent → 完整 Tailwind 类（必须静态写全，Tailwind 不识别动态拼接的类名）。
 // 新增带新配色的模式时在此补一条；未知 accent 回退 neutral。
@@ -39,6 +41,15 @@ interface ChatInputProps {
   modes?: ModeEntry[];
   mode?: string;
   onModeChange?: (mode: string) => void;
+  // 排队消息相关
+  queue?: QueuedMessage[];
+  onQueueSend?: (text: string, images?: PendingFile[]) => void;
+  onQueueRemove?: (id: string) => void;
+  onQueueEdit?: (id: string, text: string) => void;
+  onQueueReorder?: (from: number, to: number) => void;
+  // 外部驱动 draft
+  draft?: string;
+  onDraftChange?: (text: string) => void;
 }
 
 export function ChatInput({
@@ -57,11 +68,37 @@ export function ChatInput({
   modes = [],
   mode = "",
   onModeChange,
+  queue = [],
+  onQueueSend,
+  onQueueRemove,
+  onQueueEdit,
+  onQueueReorder,
+  draft: externalDraft,
+  onDraftChange,
 }: ChatInputProps) {
-  const [input, setInput] = useState("");
+  const [internalInput, setInternalInput] = useState("");
   const [dragging, setDragging] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // 外部驱动 draft 时使用外部值，否则使用内部 state
+  const isControlled = externalDraft !== undefined;
+  const input = isControlled ? externalDraft : internalInput;
+  const setInput = useCallback((text: string) => {
+    if (isControlled && onDraftChange) {
+      onDraftChange(text);
+    } else {
+      setInternalInput(text);
+    }
+  }, [isControlled, onDraftChange]);
+
+  // 当外部 draft 变化时同步内部（用于会话切换恢复）
+  useEffect(() => {
+    if (isControlled && externalDraft !== internalInput) {
+      setInternalInput(externalDraft);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalDraft]);
 
   // 读图片文件为 base64 dataUrl，返回 PendingFile
   const readImageFile = (file: File): Promise<PendingFile> =>
@@ -127,6 +164,13 @@ export function ChatInput({
 
   const handleSend = () => {
     if (!input.trim() && pendingFiles.length === 0) return;
+    // streaming 中发送 → 进入排队队列（连同附图一起入队）
+    if (streaming && onQueueSend) {
+      onQueueSend(input, pendingFiles.length > 0 ? pendingFiles : undefined);
+      setInput("");
+      if (pendingFiles.length > 0) onFilesChange([]);
+      return;
+    }
     if (streaming) return;
     onSend(input);
     setInput("");
@@ -168,6 +212,16 @@ export function ChatInput({
               <X className="h-3 w-3" />
             </button>
           </div>
+        )}
+
+        {/* 排队消息列表 — 展示在输入框上方，视觉上与输入框连为一体 */}
+        {queue.length > 0 && onQueueRemove && onQueueEdit && onQueueReorder && (
+          <QueuedMessages
+            items={queue}
+            onRemove={onQueueRemove}
+            onEdit={onQueueEdit}
+            onReorder={onQueueReorder}
+          />
         )}
 
         {/* 图片缩略图预览 */}
@@ -321,11 +375,11 @@ export function ChatInput({
               </Select>
             )}
             <div className="flex-1" />
-            {streaming ? (
+            {streaming && (
               <button
                 onClick={() => { if (!stopping) onStop?.(); }}
                 disabled={stopping}
-                className={`h-7 w-7 flex items-center justify-center rounded-lg transition-opacity ${stopping ? "bg-muted opacity-60 cursor-not-allowed" : "bg-foreground text-background hover:opacity-80"}`}
+                className={`h-7 w-7 flex items-center justify-center rounded-lg transition-opacity mr-1 ${stopping ? "bg-muted opacity-60 cursor-not-allowed" : "bg-muted text-foreground hover:opacity-80"}`}
                 title={stopping ? "正在停止..." : "停止生成"}
               >
                 {stopping
@@ -333,15 +387,15 @@ export function ChatInput({
                   : <Square className="h-3 w-3 fill-current" />
                 }
               </button>
-            ) : (
-              <button
-                onClick={handleSend}
-                disabled={!input.trim() && pendingFiles.length === 0}
-                className="h-7 w-7 flex items-center justify-center rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                <Send className="h-3.5 w-3.5" />
-              </button>
             )}
+            <button
+              onClick={handleSend}
+              disabled={!input.trim() && pendingFiles.length === 0}
+              className="h-7 w-7 flex items-center justify-center rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+              title={streaming ? "排队发送" : "发送"}
+            >
+              <Send className="h-3.5 w-3.5" />
+            </button>
           </div>
         </div>
       </div>

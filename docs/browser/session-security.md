@@ -176,7 +176,23 @@ flowchart LR
 
 ---
 
-## 8. 关键常量速查
+## 8. Snapshot 优化（v0.4.0+）
+
+扩展侧 `ax-snapshot.ts` 做了多项优化减小 snapshot 体积、提升 agent 可操作性：
+
+| 优化 | 效果 |
+|------|------|
+| **不可见节点过滤** | `offsetParent===null` 且非 fixed 的元素跳过，省 10-20% 节点 |
+| **导航容器摘要** | `role=navigation` 子树不展开，摘要成 `[navigation: N items]`，避免导航菜单撑爆预算 |
+| **浮层优先排序** | `position:fixed/sticky` 的浮层节点排到 snapshot 最前面，优先操作 |
+| **bbox 坐标补充** | refable 元素附带 `bbox=[x,y,wxh]`，agent 可判断元素位置 |
+| **密码字段遮蔽** | `type=password` 和 `autocomplete=off` 的输入框 value 替换为 `***` |
+| **名称长度缩短** | `MAX_NAME_LENGTH` 从 160 缩到 100，减少冗长文本 |
+| **截图 webp** | 默认格式从 png 改为 webp，体积小 60-70%，CDP 原生支持 |
+
+---
+
+## 9. 关键常量速查
 
 | 常量 | 值 | 位置 | 含义 |
 |---|---|---|---|
@@ -185,7 +201,10 @@ flowchart LR
 | `RPC_VERSION` | 1 | `protocol.py` | 协议版本(`auth_ok` 携带) |
 | `IDLE_TTL_SECONDS` | 1800s (30min) | `session_map.py` | session 空闲回收阈值 |
 | `_SWEEP_INTERVAL` | 300s (5min) | `session_map.py` | 空闲扫描间隔 |
-| `_SNAPSHOT_MAX_CHARS` | 30000 | `browser.py` | snapshot 输出硬截断阈值 |
+| `_SNAPSHOT_CHUNK_CHARS` | 10000 | `browser.py` | snapshot 分段返回的每段目标字符数 |
+| `_SNAPSHOT_DIR` | `/tmp/ethan-snapshots` | `browser.py` | snapshot 完整内容落盘目录 |
+| `MAX_NAME_LENGTH` | 100 | `ax-snapshot.ts` | 元素名称最大长度（原 160，缩短省空间） |
+| `DEFAULT_SCREENSHOT_FORMAT` | `webp` | `page-controller.ts` | 截图默认格式（原 png，webp 省 60-70%） |
 | `_MAX_AGE_SECONDS` | 1800s (30min) | `screenshot.py` | 截图文件保留时长 |
 | `_MAX_FILES` | 200 | `screenshot.py` | 截图文件数量上限 |
 | 心跳间隔 | 20s | `ws-client.ts` | 扩展 ping 周期 |

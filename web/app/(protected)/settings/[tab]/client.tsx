@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { SettingsView } from "@/components/settings-view";
 import { fetchModels } from "@/lib/api";
 
-const VALID_TABS = ["general", "providers", "channels", "identity", "soul", "tools", "heartbeat", "profile", "prompt-preview", "api-keys"];
+const VALID_TABS = ["general", "providers", "channels", "identity", "soul", "tools", "heartbeat", "profile", "prompt-preview", "api-keys", "tool-tiers"];
 
 export default function SettingsTabClient({ tab }: { tab: string }) {
   const [models, setModels] = useState<{ id: string; description: string }[]>([]);

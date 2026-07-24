@@ -24,13 +24,14 @@ import { ThemeSwatch } from "@ethan/shared/components/theme-swatch";
 import { PromptPreview } from "./settings/prompt-preview";
 import { ProfileEditor } from "./settings/profile-editor";
 import { FastRulesTab } from "./settings/fast-rules-tab";
+import { ToolTiersView } from "./tool-tiers-view";
 
 interface SettingsViewProps {
   models: { id: string; description: string }[];
   initialTab?: TabId;
 }
 
-type TabId = "general" | "fast-rules" | "providers" | "channels" | "identity" | "soul" | "tools" | "heartbeat" | "profile" | "prompt-preview" | "api-keys";
+type TabId = "general" | "fast-rules" | "providers" | "channels" | "identity" | "soul" | "tools" | "heartbeat" | "profile" | "prompt-preview" | "api-keys" | "tool-tiers";
 
 const TAB_GROUPS = [
   {
@@ -66,6 +67,7 @@ const TAB_GROUPS = [
   {
     group: "调试",
     items: [
+      { id: "tool-tiers" as TabId, label: "模式工具集" },
       { id: "prompt-preview" as TabId, label: "Prompt 预览" },
     ],
   },
@@ -730,6 +732,12 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
 
             {activeTab === "prompt-preview" && (
               <PromptPreview />
+            )}
+
+            {activeTab === "tool-tiers" && (
+              <div className="h-[calc(88vh-200px)] min-h-[400px]">
+                <ToolTiersView embedded />
+              </div>
             )}
 
             {activeTab === "api-keys" && (

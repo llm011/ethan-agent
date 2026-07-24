@@ -1,15 +1,14 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom"
 import {
-  ScheduleJob, ScheduleCategory, fetchSchedules, deleteSchedule, patchSchedule, renameSchedule, updateSchedulePrompt,
+  ScheduleJob, fetchSchedules, deleteSchedule, patchSchedule, renameSchedule, updateSchedulePrompt,
   fetchSessions, SessionInfo,
-  fetchTimelineStatus, syncTimelines, timelineLifecycle, TimelineStatus,
 } from "@/lib/api";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@ethan/shared/ui/card";
 import { Badge } from "@ethan/shared/ui/badge";
 import { Button } from "@ethan/shared/ui/button";
 import { ScrollArea } from "@ethan/shared/ui/scroll-area";
-import { Loader2, RefreshCw, Play, Pause, Trash2, Clock, TerminalSquare, Hash, MessageSquare, ChevronDown, ChevronRight, Pencil, Calendar, Zap, RotateCw, SkipForward } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@ethan/shared/ui/card";
+import { Loader2, RefreshCw, Play, Pause, Trash2, MessageSquare, ChevronDown, ChevronRight, Pencil, Clock, TerminalSquare } from "lucide-react";
 import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
 import { formatTrigger, formatNextRun } from "@/lib/utils";
 import {
@@ -78,17 +77,14 @@ function getTimeStr(nextRun: string | null): string {
   return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
-const CATEGORY_META: Record<ScheduleCategory, { label: string; icon: typeof Zap; emptyHint: string }> = {
-  one_off: { label: "一次性", icon: Zap, emptyHint: "暂无一次性任务" },
-  recurring: { label: "周期性", icon: RotateCw, emptyHint: "暂无周期性任务" },
-  timeline: { label: "时间线", icon: Calendar, emptyHint: "暂无时间线任务" },
-};
-
 export function ScheduleView() {
   const navigate = useNavigate();
   const [jobs, setJobs] = useState<ScheduleJob[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<ScheduleCategory>("one_off");
+  const [activeScene, setActiveScene] = useState<string>("work");
+  const [viewMode, setViewMode] = useState<"today" | "all">("today");
+  const [viewLayout, setViewLayout] = useState<"timeline" | "list">("timeline");
+  const [futureDays, setFutureDays] = useState(2); // all 模式下初始展示今天+未来2天，点 load more 往未来加1天
   const [confirmState, setConfirmState] = useState<{ open: boolean; id: string }>({ open: false, id: "" });
   const [scheduledSessions, setScheduledSessions] = useState<SessionInfo[]>([]);
   const [sessionsExpanded, setSessionsExpanded] = useState(false);
@@ -96,15 +92,33 @@ export function ScheduleView() {
   const [heartbeatExpanded, setHeartbeatExpanded] = useState(false);
   const [renameDialog, setRenameDialog] = useState<{ open: boolean; id: string; currentName: string }>({ open: false, id: "", currentName: "" });
   const [promptDialog, setPromptDialog] = useState<{ open: boolean; id: string; currentPrompt: string }>({ open: false, id: "", currentPrompt: "" });
-  const [timelineStatuses, setTimelineStatuses] = useState<TimelineStatus[]>([]);
-  const [syncing, setSyncing] = useState(false);
+
+  // ── Scene 维度：work / life 预置 + 动态发现 ──
+  const scenes = useMemo(() => {
+    const set = new Set<string>(["work", "life"]);
+    jobs.forEach(j => set.add(j.scene || "work"));
+    return Array.from(set).sort((a, b) => {
+      if (a === "work") return -1;
+      if (b === "work") return 1;
+      if (a === "life") return -1;
+      if (b === "life") return 1;
+      return a.localeCompare(b);
+    });
+  }, [jobs]);
+
+  const sceneLabel = (s: string) => s === "work" ? "工作" : s === "life" ? "生活" : s;
+
+  // 按 scene 过滤
+  const sceneJobs = useMemo(
+    () => jobs.filter(j => (j.scene || "work") === activeScene),
+    [jobs, activeScene],
+  );
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [data, tls] = await Promise.all([fetchSchedules(), fetchTimelineStatus().catch(() => [])]);
+      const data = await fetchSchedules();
       setJobs(data);
-      setTimelineStatuses(tls);
     } catch (e) {
       console.error("Failed to load schedules", e);
     } finally {
@@ -176,46 +190,60 @@ export function ScheduleView() {
     }
   };
 
-  const doSyncTimelines = async () => {
-    setSyncing(true);
-    try {
-      await syncTimelines();
-      await loadData();
-    } catch (e) {
-      console.error("Failed to sync timelines", e);
-    } finally {
-      setSyncing(false);
+  // 每个 scene 的任务计数（用于 scene Tab badge）
+  const sceneCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const s of scenes) counts[s] = 0;
+    for (const j of jobs) {
+      const s = j.scene || "work";
+      counts[s] = (counts[s] || 0) + 1;
     }
-  };
+    return counts;
+  }, [scenes, jobs]);
 
-  const doTimelineAction = async (timelineId: string, action: "skip_phase" | "advance_phase" | "pause" | "resume" | "cleanup") => {
-    try {
-      await timelineLifecycle(timelineId, action);
-      await loadData();
-    } catch (e) {
-      console.error("Timeline action failed", e);
+  // today 模式：只展示今天+明天的任务；all 模式：过去全部 + 今天到未来 futureDays 天，点 load more 扩展
+  const visibleJobs = useMemo(() => {
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    if (viewMode === "today") {
+      const tomorrowStr = `${new Date(now.getTime() + 86400000).getFullYear()}-${String(new Date(now.getTime() + 86400000).getMonth() + 1).padStart(2, "0")}-${String(new Date(now.getTime() + 86400000).getDate()).padStart(2, "0")}`;
+      const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+      return sceneJobs.filter(j => {
+        if (!j.next_run_time) return false;
+        const d = new Date(j.next_run_time);
+        if (isNaN(d.getTime())) return false;
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        return key === todayStr || key === tomorrowStr;
+      });
     }
-  };
-
-  const grouped: Record<ScheduleCategory, ScheduleJob[]> = {
-    one_off: [],
-    recurring: [],
-    timeline: [],
-  };
-  for (const j of jobs) {
-    const cat = (j.category || "recurring") as ScheduleCategory;
-    if (grouped[cat]) grouped[cat].push(j);
-    else grouped.recurring.push(j);
-  }
-
-  const visibleJobs = grouped[activeTab];
-  const tabCounts = {
-    one_off: grouped.one_off.length,
-    recurring: grouped.recurring.length,
-    timeline: grouped.timeline.length,
-  };
+    // all 模式：过去的全部 + 今天到未来 futureDays 天 + 无下次执行时间的任务
+    const maxTime = startOfToday + (futureDays + 1) * 86400000;
+    return sceneJobs.filter(j => {
+      if (!j.next_run_time) return true; // 暂停/无下次执行的任务始终展示
+      const d = new Date(j.next_run_time);
+      if (isNaN(d.getTime())) return true;
+      return d.getTime() < maxTime;
+    });
+  }, [sceneJobs, viewMode, futureDays]);
 
   const dateGroups = useMemo(() => groupJobsByDate(visibleJobs), [visibleJobs]);
+
+  // 列表视图：按下次运行时间排序
+  const sortedListJobs = useMemo(() => {
+    return [...visibleJobs].sort((a, b) => {
+      if (!a.next_run_time && !b.next_run_time) return 0;
+      if (!a.next_run_time) return 1;
+      if (!b.next_run_time) return -1;
+      return new Date(a.next_run_time).getTime() - new Date(b.next_run_time).getTime();
+    });
+  }, [visibleJobs]);
+
+  function formatDateTime(s: string | null): string {
+    if (!s) return "—";
+    const d = new Date(s);
+    if (isNaN(d.getTime())) return "—";
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  }
 
   function RenameDialog({ open, currentName, onConfirm, onCancel }: {
     open: boolean; currentName: string; onConfirm: (name: string) => void; onCancel: () => void
@@ -306,36 +334,58 @@ export function ScheduleView() {
       <header className="h-12 border-b border-border flex items-center px-4 justify-between shrink-0">
         <h1 className="font-semibold text-lg">定时任务 (Schedules)</h1>
         <div className="flex items-center gap-2">
-          {activeTab === "timeline" && (
-            <Button variant="outline" size="sm" onClick={doSyncTimelines} disabled={syncing}>
-              <RefreshCw className={`h-3.5 w-3.5 mr-1 ${syncing ? "animate-spin" : ""}`} />
-              同步时间线
-            </Button>
-          )}
+          {/* View mode switch: today / all */}
+          <div className="flex items-center rounded-md border border-border overflow-hidden">
+            <button
+              onClick={() => setViewMode("today")}
+              className={`px-2.5 py-1 text-xs transition-colors ${
+                viewMode === "today" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >今天</button>
+            <button
+              onClick={() => setViewMode("all")}
+              className={`px-2.5 py-1 text-xs transition-colors ${
+                viewMode === "all" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >全部</button>
+          </div>
+          {/* View layout switch: timeline / list */}
+          <div className="flex items-center rounded-md border border-border overflow-hidden">
+            <button
+              onClick={() => setViewLayout("timeline")}
+              className={`px-2.5 py-1 text-xs transition-colors ${
+                viewLayout === "timeline" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >时间轴</button>
+            <button
+              onClick={() => setViewLayout("list")}
+              className={`px-2.5 py-1 text-xs transition-colors ${
+                viewLayout === "list" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >列表</button>
+          </div>
           <Button variant="ghost" size="icon" onClick={loadData} disabled={loading}>
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           </Button>
         </div>
       </header>
 
+      {/* Scene 切换器：work / life / ... */}
       <div className="border-b border-border px-4 flex gap-1 shrink-0">
-        {(Object.keys(CATEGORY_META) as ScheduleCategory[]).map((cat) => {
-          const meta = CATEGORY_META[cat];
-          const Icon = meta.icon;
-          const active = activeTab === cat;
-          const count = tabCounts[cat];
+        {scenes.map(scene => {
+          const active = activeScene === scene;
+          const count = sceneCounts[scene] || 0;
           return (
             <button
-              key={cat}
-              onClick={() => setActiveTab(cat)}
+              key={scene}
+              onClick={() => setActiveScene(scene)}
               className={`flex items-center gap-2 px-3 py-2 text-sm border-b-2 -mb-px transition-colors ${
                 active
                   ? "border-primary text-foreground font-medium"
                   : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
-              <Icon className="h-3.5 w-3.5" />
-              {meta.label}
+              {sceneLabel(scene)}
               <span className={`text-xs px-1.5 py-0.5 rounded-full ${
                 active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
               }`}>
@@ -346,262 +396,271 @@ export function ScheduleView() {
         })}
       </div>
 
-      <ScrollArea className="flex-1 p-6">
-        {activeTab === "timeline" && timelineStatuses.length > 0 && (
-          <div className="mb-6 space-y-3">
-            <h2 className="text-sm font-semibold text-muted-foreground">时间线状态</h2>
-            {timelineStatuses.map(tl => (
-              <Card key={tl.id} className="border-border/60 bg-muted/5">
-                <CardHeader className="pb-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Calendar className="h-4 w-4 text-primary" />
-                      <CardTitle className="text-sm">{tl.name}</CardTitle>
-                      <Badge variant="outline" className="text-[10px]">{tl.scene}</Badge>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => doTimelineAction(tl.id, "skip_phase")} title="跳过当前阶段">
-                        <SkipForward className="h-3 w-3 mr-1" /> 跳过
-                      </Button>
-                      <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => doTimelineAction(tl.id, "advance_phase")} title="立即触发下一阶段">
-                        <Play className="h-3 w-3 mr-1" /> 推进
-                      </Button>
-                      <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => doTimelineAction(tl.id, "pause")} title="暂停该时间线">
-                        <Pause className="h-3 w-3" />
-                      </Button>
-                      <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => doTimelineAction(tl.id, "resume")} title="恢复该时间线">
-                        <Play className="h-3 w-3" />
-                      </Button>
-                      <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => doTimelineAction(tl.id, "cleanup")} title="清理所有任务">
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  </div>
-                  <CardDescription className="text-xs mt-1">
-                    {tl.current_phase ? (
-                      <span>当前阶段：<span className="text-foreground">{tl.current_phase}</span>
-                        {tl.phase_start && tl.phase_end && (
-                          <span className="text-muted-foreground ml-2">({tl.phase_start} ~ {tl.phase_end})</span>
+      {/* ── 主体：左侧时间轴 + 右侧对话记录侧栏 ── */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* 左侧：时间轴 */}
+        <ScrollArea className="flex-1 p-6">
+          {/* load more：all 模式下往未来多取一天，放在顶部 */}
+          {viewMode === "all" && !loading && visibleJobs.length > 0 && (
+            <div className="pb-3 text-center">
+              <button
+                onClick={() => setFutureDays(d => d + 1)}
+                className="text-xs text-primary hover:underline"
+              >load more…</button>
+            </div>
+          )}
+          {loading && visibleJobs.length === 0 ? (
+            <div className="flex items-center justify-center h-full pt-10">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+          ) : visibleJobs.length === 0 ? (
+            <div className="text-center text-muted-foreground pt-10">
+              {viewMode === "today" ? "今天和明天暂无定时任务" : "暂无定时任务"}
+            </div>
+          ) : viewLayout === "list" ? (
+            /* ── Card Grid Layout ── */
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 p-0.5">
+              {sortedListJobs.map(job => (
+                <Card key={job.id} className={`flex flex-col shadow-sm border-border/60 bg-muted/10 ${job.status === "paused" ? "opacity-60" : ""}`}>
+                  <CardHeader className="pb-3 border-b border-border/30">
+                    <div className="flex justify-between items-start gap-2">
+                      <CardTitle className="text-sm font-semibold leading-tight line-clamp-2 flex-1 cursor-pointer hover:text-primary/70 transition-colors" onClick={() => openRename(job)} title="点击重命名">
+                        {job.name}
+                      </CardTitle>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <Badge variant={job.status === "active" ? "default" : "secondary"} className="text-[9px] px-1.5 py-0 h-4">
+                          {job.status === "active" ? "运行中" : "已暂停"}
+                        </Badge>
+                        {job.source_phase && (
+                          <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4">{job.source_phase}</Badge>
                         )}
-                      </span>
-                    ) : (
-                      <span>休眠中 · 下一阶段：{tl.next_phase || "无"} · 下个周期锚点：{tl.next_anchor}</span>
-                    )}
-                  </CardDescription>
-                </CardHeader>
-                {tl.tasks.length > 0 && (
-                  <CardContent className="pt-0 pb-3">
-                    <div className="text-xs text-muted-foreground space-y-1 mt-1">
-                      {tl.tasks.map((t, i) => (
-                        <div key={t.job_id || i} className={`flex items-start gap-2 ${t.passed ? "opacity-50" : ""}`}>
-                          <span className="shrink-0">
-                            {t.kind === "once" ? <Zap className="h-3 w-3" /> : <RotateCw className="h-3 w-3" />}
-                          </span>
-                          <span className="flex-1 line-clamp-2">
-                            <span className="text-foreground/80">[{t.source_phase}]</span> {t.message}
-                          </span>
-                          <span className="shrink-0 text-muted-foreground">
-                            {t.kind === "once" && t.fire_at ? t.fire_at : t.cron || ""}
-                          </span>
-                        </div>
-                      ))}
+                      </div>
+                    </div>
+                    <CardDescription className="flex items-center gap-1.5 mt-2 text-xs">
+                      <Clock className="h-3 w-3" />
+                      {job.next_run_time ? formatNextRun(job.next_run_time) : "暂无下次执行"}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="pt-3 pb-2 flex-1">
+                    <div className="space-y-2">
+                      <div className="flex items-start gap-2 text-xs">
+                        <TerminalSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground mt-0.5" />
+                        <p className="text-muted-foreground line-clamp-3 leading-relaxed flex-1 cursor-pointer hover:text-foreground/70 transition-colors" onClick={() => openEditPrompt(job)} title="点击编辑内容">
+                          {job.prompt}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground/80 bg-muted/30 px-2 py-1 rounded">
+                        <Clock className="h-3 w-3" />
+                        <span className="truncate">{formatTrigger(job.trigger)}</span>
+                      </div>
                     </div>
                   </CardContent>
-                )}
-              </Card>
-            ))}
-          </div>
-        )}
+                  <CardFooter className="pt-2 pb-3 flex justify-end gap-1 border-t border-border/30 mt-auto">
+                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openRename(job)} title="重命名">
+                      <Pencil className="h-3 w-3" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => navigate(`/chat/${job.session_id}`)} title="查看对话">
+                      <MessageSquare className="h-3 w-3" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => toggleStatus(job)} title={job.status === "active" ? "暂停" : "恢复"}>
+                      {job.status === "active" ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive/70 hover:text-destructive" onClick={() => removeJob(job.id)} title="删除">
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
+                  </CardFooter>
+                </Card>
+              ))}
+            </div>
+          ) : (
+            /* ── Vertical Timeline Layout ── */
+            <div className="relative pl-2">
+              {/* Single continuous timeline axis line */}
+              <div className="absolute left-[91px] top-0 bottom-0 w-px bg-border" />
 
-        {loading && visibleJobs.length === 0 ? (
-          <div className="flex items-center justify-center h-full pt-10">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          </div>
-        ) : visibleJobs.length === 0 ? (
-          <div className="text-center text-muted-foreground pt-10">
-            {CATEGORY_META[activeTab].emptyHint}
-          </div>
-        ) : (
-          /* ── Vertical Timeline Layout ── */
-          <div className="relative pl-2">
-            {dateGroups.map((group, gi) => {
-              // Determine if we need a year/month label (show on first group or when month changes)
-              const prevGroup = gi > 0 ? dateGroups[gi - 1] : null;
-              const showYearMonth = group.key !== "no-date" && (
-                gi === 0 || !prevGroup || prevGroup.year !== group.year || prevGroup.month !== group.month
-              );
+              {dateGroups.map((group, gi) => {
+                // Determine if we need a year/month label (show on first group or when month changes)
+                const prevGroup = gi > 0 ? dateGroups[gi - 1] : null;
+                const showYearMonth = group.key !== "no-date" && (
+                  gi === 0 || !prevGroup || prevGroup.year !== group.year || prevGroup.month !== group.month
+                );
 
-              return (
-                <div key={group.key} className="relative">
-                  {/* Year/Month marker — on the left side of the axis */}
-                  {showYearMonth && (
-                    <div className="flex items-center gap-3 mb-3 mt-2">
-                      <div className="flex items-baseline gap-1 shrink-0 min-w-[80px]">
+                return (
+                  <div key={group.key} className="relative">
+                    {/* Year/Month marker — inline label, doesn't break the timeline */}
+                    {showYearMonth && (
+                      <div className="flex items-baseline gap-1 shrink-0 min-w-[80px] mb-2 mt-4 first:mt-0">
                         <span className="text-lg font-bold text-foreground">{group.month}月</span>
                         <span className="text-xs text-muted-foreground">{group.year}</span>
                       </div>
-                      <div className="flex-1 h-px bg-border/60" />
-                    </div>
-                  )}
+                    )}
 
-                  {/* Day section */}
-                  <div className="flex gap-0">
-                    {/* Left: Day label area */}
-                    <div className="w-[80px] shrink-0 pt-1">
-                      {group.key !== "no-date" ? (
-                        <span className="text-xs font-semibold text-muted-foreground">{group.day}日</span>
-                      ) : (
-                        <span className="text-xs font-semibold text-muted-foreground">待定</span>
-                      )}
-                    </div>
+                    {/* Day section */}
+                    <div className="flex gap-0">
+                      {/* Left: Day label area */}
+                      <div className="w-[80px] shrink-0 pt-1">
+                        {group.key !== "no-date" ? (
+                          <span className="text-xs font-semibold text-muted-foreground">{group.day}日</span>
+                        ) : (
+                          <span className="text-xs font-semibold text-muted-foreground">待定</span>
+                        )}
+                      </div>
 
-                    {/* Center: Timeline axis + cards */}
-                    <div className="relative flex-1 pb-4">
-                      {/* Vertical axis line */}
-                      <div className="absolute left-[3px] top-0 bottom-0 w-px bg-border" />
+                      {/* Center: Timeline axis + cards */}
+                      <div className="relative flex-1 pb-4">
+                        {/* Job items */}
+                        {group.jobs.map((job, ji) => (
+                          <div key={job.id} className="relative flex items-start gap-3 group mb-2 last:mb-0">
+                            {/* Dot on axis */}
+                            <div className={`relative z-10 mt-2.5 w-[7px] h-[7px] rounded-full shrink-0 ring-2 ring-background ${
+                              job.status === "active" ? "bg-primary" : "bg-muted-foreground/40"
+                            }`} />
 
-                      {/* Job items */}
-                      {group.jobs.map((job, ji) => (
-                        <div key={job.id} className="relative flex items-start gap-3 group mb-2 last:mb-0">
-                          {/* Dot on axis */}
-                          <div className={`relative z-10 mt-2.5 w-[7px] h-[7px] rounded-full shrink-0 ring-2 ring-background ${
-                            job.status === "active" ? "bg-primary" : "bg-muted-foreground/40"
-                          }`} />
+                            {/* Time label */}
+                            <span className="text-[11px] font-mono text-muted-foreground mt-2 w-[38px] shrink-0">
+                              {getTimeStr(job.next_run_time)}
+                            </span>
 
-                          {/* Time label */}
-                          <span className="text-[11px] font-mono text-muted-foreground mt-2 w-[38px] shrink-0">
-                            {getTimeStr(job.next_run_time)}
-                          </span>
-
-                          {/* Compact card */}
-                          <div className={`flex-1 border border-border/50 rounded-lg px-3 py-2 transition-colors hover:border-border hover:bg-muted/20 ${
-                            job.status === "paused" ? "opacity-60" : ""
-                          }`}>
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="flex items-center gap-2 min-w-0">
-                                <span className="text-sm font-medium truncate">{job.name}</span>
-                                <Badge variant={job.status === "active" ? "default" : "secondary"} className="text-[9px] px-1.5 py-0 h-4 shrink-0">
-                                  {job.status === "active" ? "运行中" : "已暂停"}
-                                </Badge>
-                                {job.source_phase && (
-                                  <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 shrink-0">{job.source_phase}</Badge>
-                                )}
+                            {/* Compact card */}
+                            <div className={`flex-1 min-w-0 max-w-[520px] border border-border/50 rounded-lg px-3 py-2 transition-colors hover:border-border hover:bg-muted/20 ${
+                              job.status === "paused" ? "opacity-60" : ""
+                            }`}>
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span className="text-sm font-medium truncate">{job.name}</span>
+                                  <Badge variant={job.status === "active" ? "default" : "secondary"} className="text-[9px] px-1.5 py-0 h-4 shrink-0">
+                                    {job.status === "active" ? "运行中" : "已暂停"}
+                                  </Badge>
+                                  {job.source_phase && (
+                                    <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 shrink-0">{job.source_phase}</Badge>
+                                  )}
+                                </div>
+                                {/* Actions — show on hover */}
+                                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openRename(job)} title="重命名">
+                                    <Pencil className="h-3 w-3" />
+                                  </Button>
+                                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => navigate(`/chat/${job.session_id}`)} title="查看对话">
+                                    <MessageSquare className="h-3 w-3" />
+                                  </Button>
+                                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => toggleStatus(job)} title={job.status === "active" ? "暂停" : "恢复"}>
+                                    {job.status === "active" ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                                  </Button>
+                                  <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive/70 hover:text-destructive" onClick={() => removeJob(job.id)} title="删除">
+                                    <Trash2 className="h-3 w-3" />
+                                  </Button>
+                                </div>
                               </div>
-                              {/* Actions — show on hover */}
-                              <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openRename(job)} title="重命名">
-                                  <Pencil className="h-3 w-3" />
-                                </Button>
-                                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => navigate(`/chat/${job.session_id}`)} title="查看对话">
-                                  <MessageSquare className="h-3 w-3" />
-                                </Button>
-                                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => toggleStatus(job)} title={job.status === "active" ? "暂停" : "恢复"}>
-                                  {job.status === "active" ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
-                                </Button>
-                                <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive/70 hover:text-destructive" onClick={() => removeJob(job.id)} title="删除">
-                                  <Trash2 className="h-3 w-3" />
-                                </Button>
+                              {/* Subtitle: trigger + prompt (clickable to edit) */}
+                              <div className="mt-1 text-[11px] text-muted-foreground space-y-0.5">
+                                <div className="flex items-center gap-2">
+                                  <span className="shrink-0">{formatTrigger(job.trigger)}</span>
+                                </div>
+                                <p
+                                  className="whitespace-pre-wrap break-words line-clamp-2 cursor-pointer hover:text-foreground/70 transition-colors"
+                                  onClick={() => openEditPrompt(job)}
+                                  title="点击编辑内容"
+                                >{job.prompt}</p>
                               </div>
-                            </div>
-                            {/* Subtitle: trigger + prompt preview */}
-                            <div className="flex items-center gap-2 mt-0.5 text-[11px] text-muted-foreground">
-                              <span>{formatTrigger(job.trigger)}</span>
-                              <span className="text-border">·</span>
-                              <span className="truncate">{job.prompt}</span>
                             </div>
                           </div>
-                        </div>
-                      ))}
+                        ))}
+                      </div>
                     </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
+          )}
+        </ScrollArea>
+
+        {/* 右侧：对话记录侧栏 */}
+        <div className="w-[260px] border-l border-border shrink-0 overflow-y-auto p-3 space-y-3">
+          {/* 定时任务对话记录 */}
+          <div className="border border-border/40 rounded-lg overflow-hidden">
+            <button
+              className="w-full flex items-center gap-2 px-3 py-2.5 text-sm font-medium bg-muted/20 hover:bg-muted/40 transition-colors text-left"
+              onClick={() => setSessionsExpanded(v => !v)}
+            >
+              {sessionsExpanded ? (
+                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+              ) : (
+                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+              )}
+              定时任务对话 ({scheduledSessions.length})
+            </button>
+            {sessionsExpanded && (
+              <div className="divide-y divide-border/30 max-h-[40vh] overflow-y-auto">
+                {scheduledSessions.length === 0 ? (
+                  <div className="px-3 py-2.5 text-xs text-muted-foreground">暂无记录</div>
+                ) : (
+                  scheduledSessions.map(s => {
+                    const displayTitle = s.title.startsWith("[定时] ")
+                      ? s.title.slice("[定时] ".length)
+                      : s.title.slice("[定时]".length);
+                    const date = new Date(s.updated_at * 1000).toLocaleString("zh-CN", {
+                      month: "2-digit", day: "2-digit",
+                      hour: "2-digit", minute: "2-digit",
+                    });
+                    return (
+                      <button
+                        key={s.id}
+                        className="w-full flex flex-col px-3 py-2 text-xs hover:bg-muted/30 transition-colors text-left"
+                        onClick={() => navigate(`/chat/${s.id}`)}
+                      >
+                        <span className="truncate text-foreground/90">{displayTitle}</span>
+                        <span className="shrink-0 text-muted-foreground mt-0.5">{date}</span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            )}
           </div>
-        )}
 
-        <div className="mt-8 border border-border/40 rounded-lg overflow-hidden">
-          <button
-            className="w-full flex items-center gap-2 px-4 py-3 text-sm font-medium bg-muted/20 hover:bg-muted/40 transition-colors text-left"
-            onClick={() => setSessionsExpanded(v => !v)}
-          >
-            {sessionsExpanded ? (
-              <ChevronDown className="h-4 w-4 text-muted-foreground" />
-            ) : (
-              <ChevronRight className="h-4 w-4 text-muted-foreground" />
-            )}
-            定时任务对话记录 ({scheduledSessions.length})
-          </button>
-          {sessionsExpanded && (
-            <div className="divide-y divide-border/30">
-              {scheduledSessions.length === 0 ? (
-                <div className="px-4 py-3 text-sm text-muted-foreground">暂无历史对话记录</div>
+          {/* 心跳对话记录 */}
+          <div className="border border-border/40 rounded-lg overflow-hidden">
+            <button
+              className="w-full flex items-center gap-2 px-3 py-2.5 text-sm font-medium bg-muted/20 hover:bg-muted/40 transition-colors text-left"
+              onClick={() => setHeartbeatExpanded(v => !v)}
+            >
+              {heartbeatExpanded ? (
+                <ChevronDown className="h-4 w-4 text-muted-foreground" />
               ) : (
-                scheduledSessions.map(s => {
-                  const displayTitle = s.title.startsWith("[定时] ")
-                    ? s.title.slice("[定时] ".length)
-                    : s.title.slice("[定时]".length);
-                  const date = new Date(s.updated_at * 1000).toLocaleString("zh-CN", {
-                    year: "numeric", month: "2-digit", day: "2-digit",
-                    hour: "2-digit", minute: "2-digit",
-                  });
-                  return (
-                    <button
-                      key={s.id}
-                      className="w-full flex items-center justify-between px-4 py-2.5 text-sm hover:bg-muted/30 transition-colors text-left"
-                      onClick={() => navigate(`/chat/${s.id}`)}
-                    >
-                      <span className="truncate mr-4 text-foreground/90">{displayTitle}</span>
-                      <span className="shrink-0 text-xs text-muted-foreground">{date}</span>
-                    </button>
-                  );
-                })
+                <ChevronRight className="h-4 w-4 text-muted-foreground" />
               )}
-            </div>
-          )}
-        </div>
-
-        <div className="mt-4 border border-border/40 rounded-lg overflow-hidden">
-          <button
-            className="w-full flex items-center gap-2 px-4 py-3 text-sm font-medium bg-muted/20 hover:bg-muted/40 transition-colors text-left"
-            onClick={() => setHeartbeatExpanded(v => !v)}
-          >
-            {heartbeatExpanded ? (
-              <ChevronDown className="h-4 w-4 text-muted-foreground" />
-            ) : (
-              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+              心跳对话 ({heartbeatSessions.length})
+            </button>
+            {heartbeatExpanded && (
+              <div className="divide-y divide-border/30 max-h-[40vh] overflow-y-auto">
+                {heartbeatSessions.length === 0 ? (
+                  <div className="px-3 py-2.5 text-xs text-muted-foreground">暂无记录</div>
+                ) : (
+                  heartbeatSessions.map(s => {
+                    const displayTitle = s.title.startsWith("[心跳] ")
+                      ? s.title.slice("[心跳] ".length)
+                      : s.title.slice("[心跳]".length);
+                    const date = new Date(s.updated_at * 1000).toLocaleString("zh-CN", {
+                      month: "2-digit", day: "2-digit",
+                      hour: "2-digit", minute: "2-digit",
+                    });
+                    return (
+                      <button
+                        key={s.id}
+                        className="w-full flex flex-col px-3 py-2 text-xs hover:bg-muted/30 transition-colors text-left"
+                        onClick={() => navigate(`/chat/${s.id}`)}
+                      >
+                        <span className="truncate text-foreground/90">{displayTitle}</span>
+                        <span className="shrink-0 text-muted-foreground mt-0.5">{date}</span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
             )}
-            心跳对话记录 ({heartbeatSessions.length})
-          </button>
-          {heartbeatExpanded && (
-            <div className="divide-y divide-border/30">
-              {heartbeatSessions.length === 0 ? (
-                <div className="px-4 py-3 text-sm text-muted-foreground">暂无心跳对话记录</div>
-              ) : (
-                heartbeatSessions.map(s => {
-                  const displayTitle = s.title.startsWith("[心跳] ")
-                    ? s.title.slice("[心跳] ".length)
-                    : s.title.slice("[心跳]".length);
-                  const date = new Date(s.updated_at * 1000).toLocaleString("zh-CN", {
-                    year: "numeric", month: "2-digit", day: "2-digit",
-                    hour: "2-digit", minute: "2-digit",
-                  });
-                  return (
-                    <button
-                      key={s.id}
-                      className="w-full flex items-center justify-between px-4 py-2.5 text-sm hover:bg-muted/30 transition-colors text-left"
-                      onClick={() => navigate(`/chat/${s.id}`)}
-                    >
-                      <span className="truncate mr-4 text-foreground/90">{displayTitle}</span>
-                      <span className="shrink-0 text-xs text-muted-foreground">{date}</span>
-                    </button>
-                  );
-                })
-              )}
-            </div>
-          )}
+          </div>
         </div>
-      </ScrollArea>
+      </div>
     </div>
   );
 }

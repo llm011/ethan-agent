@@ -1,6 +1,6 @@
 ---
 name: use-browser
-version: 0.2.1
+version: 0.4.0
 trigger: "浏览器|打开网页|网页操作|自动填表|网页截图|点击页面|输入文本|操作我的浏览器|我的浏览器|本机 Chrome|浏览器 cookie|扩展工具|真实 tab|接管当前页面"
 fast_path: true
 description: "主浏览器技能：通过 browser_session / browser_tab / browser_page 三个工具操作本机 Chrome（需 Ethan Browser 扩展）。嵌入本机真实 Cookie，能操作用户已登录的浏览器、接管当前 tab、做 snapshot/click/fill/screenshot/eval。当用户要求操作浏览器、网页自动化、点击输入、或需要用到本机真实 Chrome（含登录态）时触发。兜底用 agent-browser。"
@@ -38,7 +38,7 @@ description: "主浏览器技能：通过 browser_session / browser_tab / browse
 4. 默认用结构化 ref 操作；只有 ref 不可用或需要 GUI 级交互时才用 mouse 坐标操作。
 5. 坐标是 viewport CSS pixel，不是屏幕绝对坐标。
 6. `eval` 权限很高，只在任务需要时使用，不要对不可信页面执行无关脚本。
-7. 工具输出是 snake_case JSON；交互操作（click/fill/type/press 等）的返回中含 `_step` 字段，表示当前会话累计操作步数。
+7. 工具输出是 snake_case JSON；每次返回含 `_hint` 字段，说明本次输出的字段含义和下一步用法（如 snapshot 的 ref 格式、get 的 value 字段）。交互操作（click/fill/type/press 等）的返回还含 `_step` 字段，表示当前会话累计操作步数。
 8. 授权是会话级的：本对话第一次调用任意 browser 工具会请求一次授权，批准后本对话后续操作（含 eval）不再询问。
 
 ## 步骤预算
@@ -72,10 +72,69 @@ description: "主浏览器技能：通过 browser_session / browser_tab / browse
 
 当 ref not found 或元素定位失败时，按顺序尝试：
 
-1. `selector` 缩小 snapshot 区域重新取 ref（如 `selector="#form"`）
-2. `get action="html"` 读取目标区域 HTML，从中找稳定 selector
-3. `eval` 直接操作 DOM（`document.querySelector(...).click()`）
-4. 三种都失败则上报 blocker
+1. **`click_selector` / `fill_selector`** — 用 CSS/XPath/text 直接定位 + CDP mouse 真实点击（不依赖 snapshot，绕过 ref 失效和 covered-by 拦截）
+2. `selector` 缩小 snapshot 区域重新取 ref（如 `selector="#form"`）
+3. `get action="html"` 读取目标区域 HTML，从中找稳定 selector
+4. `click_vlm` — 截图发给多模态 LLM 识别坐标后点击（终极 fallback，适用于 Canvas/图片按钮/Semi-UI 自定义组件等 AX 树不可靠的场景）
+5. `eval` 直接操作 DOM（`document.querySelector(...).click()`，但对 React 组件可能无效）
+6. 以上都失败则上报 blocker
+
+## Selector 直接操作（不依赖 snapshot）
+
+当 snapshot 截断、ref 失效、或 covered-by 拦截时，用 selector 操作绕过：
+
+```
+# CSS selector 点击
+browser_page(action="click_selector", session=SID, selector=".radio-M-plus")
+
+# XPath 点击
+browser_page(action="click_selector", session=SID, xpath="//button[text()='提交']")
+
+# 按文本点击（取第 nth 个匹配）
+browser_page(action="click_selector", session=SID, text="字节范", nth=0)
+
+# 填输入框（兼容 React）
+browser_page(action="fill_selector", session=SID, selector="#search-input", text="关键词")
+
+# 悬停
+browser_page(action="hover_selector", session=SID, selector=".dropdown-trigger")
+
+# 等待元素出现（轮询，默认 10s 超时）
+browser_page(action="wait_for_element", session=SID, selector=".result-item", timeout=15000)
+
+# 按文本滚动定位
+browser_page(action="scroll_to_text", session=SID, text="绩效总结")
+
+# 提取页面内容
+browser_page(action="extract_content", session=SID, selector=".main-content")
+
+# 查找元素列表
+browser_page(action="find_elements", session=SID, selector="button.btn-primary")
+
+# 获取元素属性
+browser_page(action="find_attributes", session=SID, selector="a.download", attributes=["href", "title"])
+
+# 检查元素是否存在
+browser_page(action="check_exist", session=SID, selector=".loading-spinner")
+
+# 输入+回车（搜索框场景）
+browser_page(action="input_enter", session=SID, selector="#search-box", text="查询内容")
+
+# 边滚动边查找元素
+browser_page(action="scroll_find", session=SID, selector=".lazy-loaded-item", scroll_times=5)
+```
+
+**优势**：不依赖 snapshot ref，不会因截断或 covered-by 失败。底层用 eval 获取坐标 + CDP mouse 真实点击（不是 eval .click()），对 React/Semi-UI 组件有效。
+
+## VLM 视觉点击
+
+当 AX 树和 selector 都不可靠时（Canvas 应用、图片按钮、自定义组件），用 VLM 视觉点击：
+
+```
+browser_page(action="click_vlm", session=SID, prompt="字节范 M+ 按钮")
+```
+
+流程：截图 → 发给多模态 LLM 识别坐标 → CDP mouse 点击。需要当前模型支持视觉（如 claude-sonnet、gpt-4o）。
 
 ## 推荐任务流程
 
@@ -93,12 +152,20 @@ browser_page(action="click", session=SID, ref="e1")
 browser_page(action="fill", session=SID, ref="e2", text="hello")
 ```
 
-任务结束：默认 release（放掉控制权、保留用户页面），仅在用户明确要求关闭时才 close：
+任务结束：对话结束时默认自动 close（杀掉 tab group，用完即关）。
+如果用户只是让帮个忙、页面还要继续看，创建/attach 时传 `keep_alive=true`，对话结束时该 session 走 release（保留 tab，仅放掉控制权）：
 
 ```
-browser_session(action="release", session=SID)   # 保留 tab
+# 创建时标记保留（帮个忙、页面用户还要看）
+browser_session(action="create", url="...", keep_alive=true)
+
+# 也可显式 release/close
+browser_session(action="release", session=SID)   # 保留 tab，放掉控制权
 browser_session(action="close", session=SID)      # 关闭整个 tab group
 ```
+
+**何时设 keep_alive=true**：用户说「帮我看下这个页面」「打开这个链接我等会看」等只需一次性操作、但页面本身用户还要继续浏览的场景。
+**何时不设**（默认 false）：Agent 自己打开的工作页面（填表单、抓数据、自动填报等），任务做完就没用了。
 
 ### 接管当前 Chrome tab
 
@@ -206,7 +273,27 @@ browser_page(action="snapshot", session=SID, interactive=true, compact=true, dep
 - `urls=true`：需要链接 href 时开启。
 - `format="text"`：适合阅读；默认 json 适合解析。
 
-输出过大时按顺序收缩：开 interactive、开 compact、降低 depth、用 selector 限定区域。快照过大会被自动截断并提示缩小范围。
+输出过大时按顺序收缩：开 interactive、开 compact、降低 depth、用 selector 限定区域。
+
+### Snapshot 分页（大页面必读）
+
+snapshot 完整内容会落盘到 `/tmp/ethan-snapshots/` 下，prompt 里只带首段约 10000 字。返回 JSON 含以下分页字段：
+
+- `snapshot_path`：完整 snapshot 的文件路径
+- `total_chars`：完整内容总字符数
+- `chunk_offset`：当前段的起始偏移（首段为 0）
+- `chunk_length`：当前段的实际长度
+- `has_more`：是否还有后续内容
+
+**`has_more=true` 时**，当前 snapshot 字段只是首段，目标元素可能不在里面。用 `snapshot_read` 翻页读取后续内容：
+
+```
+browser_page(action="snapshot_read", path=SNAPSHOT_PATH, offset=CHUNK_LENGTH)
+```
+
+`offset` 用上次返回的 `chunk_offset + chunk_length`。每次返回新的段落（替代上一段到 prompt 里，不是累加），`has_more=true` 就继续翻，直到找到目标元素的 ref。
+
+找到 ref 后直接用 `click`/`fill` 等操作，ref 仍然有效（只要页面没跳转/刷新）。
 
 **非必要不重复 snapshot**：已有 ref 时直接操作，不要每步都重取全页面快照。
 
@@ -220,7 +307,12 @@ browser_page(action="snapshot", session=SID, interactive=true, compact=true, dep
 
 ## Page 命令速查
 
+Snapshot：snapshot(`session`, `interactive`, `compact`, `depth`, `selector`) → 返回首段+`snapshot_path`；snapshot_read(`path`, `offset`) 翻页读后续。
 Ref 操作：click / fill / type / hover / select / scroll_into_view（都用 `ref`）。
+Selector 操作：click_selector(`selector`/`xpath`/`text`, `nth`) / fill_selector(`selector`/`xpath`, `text`) / hover_selector / input_enter(`selector`, `text`)。
+查询：find_elements(`selector`) / find_attributes(`selector`, `attributes`) / check_exist(`selector`) / extract_content(`selector`) / wait_for_element(`selector`, `timeout`)。
+滚动查找：scroll_to_text(`text`) / scroll_find(`selector`, `scroll_times`)。
+VLM：click_vlm(`prompt`)。
 键盘滚动鼠标：press(`key`) / scroll(`direction`,`pixels`) / mouse(`mouse_action`,`x`,`y`,`delta_x`,`delta_y`)。
 读取：get(`what` = title/url/text/value/html/box，后四种需 `ref`)。
 截图等待执行：screenshot / wait(`ms` 或 `load`) / eval(`script`)。

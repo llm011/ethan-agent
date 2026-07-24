@@ -119,7 +119,7 @@ fire_at = anchor_date + parse_offset("-2w") = 2026-06-17
 ```yaml
 - type: recurring
   cron: "0 10 * * 5"
-  message: "本周有没有值得记录的团队 case？"
+  message: "本周有没有值得记录到 people 的团队事件？"
   target: self
 ```
 
@@ -132,7 +132,7 @@ active_until = anchor_date + parse_offset(phase.offset_end)
   cron: "0 10 * * 5"
   active_from: "2026-02-01"
   active_until: "2026-06-17"
-  message: "本周有没有值得记录的团队 case？"
+  message: "本周有没有值得记录到 people 的团队事件？"
   metadata:
     category: timeline
     source_timeline: perf_semi_annual
@@ -403,7 +403,7 @@ schedule:
    → today(03-15) 在范围内 ✓
 
 3. expand_actions:
-   → recurring: 每周五 10:00 提醒记 case（active 02-01 ~ 06-17）
+   → recurring: 每周五 10:00 提醒记录到 people（active 02-01 ~ 06-17）
    → once: 06-17 汇总提醒（尚未触发）
    → once: 06-24 一周倒计时提醒（尚未触发）
    → once: 06-28 撰写开始提醒（尚未触发）
@@ -414,7 +414,7 @@ schedule:
 
 5. 当前展示:
    📅 半年绩效考核 — 日常收集期
-      🔄 每周五 10:00 提醒记 case（进行中）
+      🔄 每周五 10:00 提醒记录到 people（进行中）
       ⚡ 06-17 启动汇总（87天后）
       ⚡ 06-24 确认评估完整（94天后）
       ⚡ 06-28 开始撰写评估（98天后）

@@ -117,6 +117,11 @@ export async function deleteSession(id: string): Promise<void> {
   await fetch(`${API_URL}/sessions/${id}`, { method: "DELETE", headers: headers() });
 }
 
+export async function deleteMessage(sessionId: string, messageId: number): Promise<void> {
+  const res = await fetch(`${API_URL}/sessions/${sessionId}/messages/${messageId}`, { method: "DELETE", headers: headers() });
+  if (!res.ok) throw new Error("Delete message failed");
+}
+
 export async function compactSession(id: string): Promise<{ ok: boolean; summary: string }> {
   const res = await fetch(`${API_URL}/sessions/${id}/compact`, {
     method: "POST",

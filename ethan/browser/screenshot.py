@@ -31,12 +31,13 @@ async def save_screenshot(result: dict | None) -> str:
 
     扩展返回的是整个 page 结果,截图数据在嵌套的 result["screenshot"]["data"]。
     同时兼容顶层直接给 data 的形式。
+    默认 webp 格式（比 png 小 60-70%,CDP 原生支持）。
     """
     result = result or {}
     shot = result.get("screenshot")
     src = shot if isinstance(shot, dict) else result
     data_b64 = src.get("data") or src.get("base64") or src.get("dataUrl")
-    fmt = src.get("format") or result.get("format", "png")
+    fmt = src.get("format") or result.get("format", "webp")
     if not data_b64:
         return json.dumps({"error": "扩展未返回截图数据", "raw": result}, ensure_ascii=False)
     # 兼容 data:image/png;base64,xxx 形式

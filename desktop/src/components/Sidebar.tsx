@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom"
 import { Plus, Trash2, Search, Settings, Book, BookOpen, Pencil, Check, X, List, Wrench, RefreshCw } from "lucide-react";
-import { Clock, Database, Layers, Activity } from "lucide-react";
+import { Clock, Database, Activity } from "lucide-react";
 import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
 import { useSidebar } from "@/components/layout-shell";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
@@ -260,7 +260,7 @@ export function Sidebar() {
           />
         )}
         {editingSessionId === s.id ? (
-          <div className="flex gap-1">
+          <div className="flex gap-1 shrink-0">
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -281,7 +281,7 @@ export function Sidebar() {
             </button>
           </div>
         ) : (
-          <div className="flex opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="hidden group-hover:flex shrink-0 gap-0.5">
             <Button
               variant="ghost"
               size="icon"
@@ -525,17 +525,6 @@ export function Sidebar() {
               {runningTaskCount}
             </span>
           )}
-        </Button>
-        <Button
-          variant="ghost"
-          className={`w-full justify-start h-9 px-3 ${
-            pathname === "/tool-tiers"
-              ? "bg-sidebar-accent text-sidebar-accent-foreground"
-              : "text-muted-foreground"
-          }`}
-          onClick={() => goTo("/tool-tiers")}
-        >
-          <Layers className="h-4 w-4 mr-2" /> 模式工具集 (Tool Tiers)
         </Button>
         <Button
           variant="ghost"

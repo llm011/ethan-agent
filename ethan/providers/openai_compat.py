@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import AsyncIterator, Optional
 
@@ -13,6 +14,8 @@ from ethan.providers.base import (
     ToolCall,
     ToolDefinition,
 )
+
+_CHUNK_TIMEOUT = 120  # 单个 chunk 超时（秒）
 
 
 class OpenAICompatProvider(BaseProvider):
@@ -299,7 +302,22 @@ class OpenAICompatProvider(BaseProvider):
                 _lg.error("[stream_chat] msg[%d] role=%s content=%s", i, role, content_preview)
             raise
 
-        async for chunk in resp_iter:
+        aiter = resp_iter.__aiter__()
+        while True:
+            try:
+                chunk = await asyncio.wait_for(aiter.__anext__(), timeout=_CHUNK_TIMEOUT)
+            except StopAsyncIteration:
+                break
+            except asyncio.TimeoutError:
+                # 关闭底层流，归还连接池，防止 socket 泄漏
+                try:
+                    await resp_iter.aclose()
+                except Exception:
+                    pass
+                raise TimeoutError(
+                    f"模型响应超时：超过 {_CHUNK_TIMEOUT} 秒未收到新数据，可能是 API 挂起。"
+                    "请稍后重试，或检查网络状况。"
+                )
             delta = chunk.choices[0].delta if chunk.choices else None
 
             # Usage comes in the final chunk (with empty choices or after finish)

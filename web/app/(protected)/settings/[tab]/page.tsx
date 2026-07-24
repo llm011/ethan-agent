@@ -1,6 +1,6 @@
 import SettingsTabClient from "./client";
 
-const VALID_TABS = ["general", "fast-rules", "providers", "channels", "identity", "soul", "tools", "heartbeat", "profile", "prompt-preview", "api-keys"];
+const VALID_TABS = ["general", "fast-rules", "providers", "channels", "identity", "soul", "tools", "heartbeat", "profile", "prompt-preview", "api-keys", "tool-tiers"];
 
 export function generateStaticParams() {
   return VALID_TABS.map(tab => ({ tab }));

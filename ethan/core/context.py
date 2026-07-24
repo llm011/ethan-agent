@@ -64,3 +64,26 @@ def activate_tools(names: list[str]) -> None:
 def get_active_tools() -> set:
     """读取当前请求已激活的工具名集合。"""
     return set(ACTIVE_TOOLS.get())
+
+
+# ── 请求级"运行中补充信息"注入 ────────────────────────────────
+# 由 producers._run_generation 在启动 generation 时设置（闭包绑定到 ChatRun），
+# agent loop 每轮开头调 get_injected_messages() 取走用户补充的内容。
+# 与 user_id 一样用 ContextVar，保证并发请求各自隔离；无 run 时返回空列表。
+INJECT_DRAINER: ContextVar = ContextVar("INJECT_DRAINER", default=None)
+
+
+def set_inject_drainer(drainer) -> None:
+    """设置当前上下文的 inbox drainer（通常是 run.drain_injected 闭包）。"""
+    INJECT_DRAINER.set(drainer)
+
+
+def get_injected_messages() -> list[str]:
+    """取走当前 run 待消费的「运行中补充信息」。无 run 或空时返回空列表。"""
+    drainer = INJECT_DRAINER.get()
+    if drainer is None:
+        return []
+    try:
+        return drainer()
+    except Exception:
+        return []
