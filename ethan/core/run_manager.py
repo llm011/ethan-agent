@@ -157,6 +157,9 @@ async def _run_watchdog(run: ChatRun, manager: "RunManager") -> None:
         if run.watchdog_checks >= _WATCHDOG_MAX_CHECKS:
             if run.task and not run.task.done():
                 logger.warning("[Watchdog] %s reached max checks, cancelling stalled task", run.session_id)
+                # 标记 stop_requested 使 producer 的 CancelledError 走"保存已有内容"路径，
+                # 而非"新 run 替换旧 run"的删除路径——否则已实时落库的 tool_steps 会被删掉。
+                run.stop_requested = True
                 run.task.cancel()
                 run.emit({"error": "任务超时：模型长时间无响应，已自动终止。请重试。"})
                 run.finish()

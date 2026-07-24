@@ -302,7 +302,17 @@ async def _run_generation(
                 await store.touch(session_id)
             except Exception:
                 logger.exception("保存已停止生成的部分内容失败 session=%s", session_id)
-        run.emit({"stopped": True, "usage": collector.usage_dict})
+        # 被 stop/watchdog cancel 时也尝试生成标题（新会话第一轮就被 cancel 则没有标题）
+        stopped_title = None
+        if session_id and getattr(run, "stop_requested", False):
+            try:
+                stopped_title = await _maybe_regen_title(session_id)
+            except Exception:
+                pass
+        stopped_evt: dict = {"stopped": True, "usage": collector.usage_dict}
+        if stopped_title:
+            stopped_evt["title"] = stopped_title
+        run.emit(stopped_evt)
         run.finish()
         _RunManager_schedule_removal(run.session_id)
         raise
