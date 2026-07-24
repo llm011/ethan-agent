@@ -62,6 +62,14 @@ export async function updateSchedulePrompt(jobId: string, prompt: string): Promi
   if (!res.ok) throw new Error("Failed");
 }
 
+export async function triggerSchedule(jobId: string): Promise<void> {
+  const res = await fetch(`${API_URL}/schedule/${jobId}/trigger`, {
+    method: "POST",
+    headers: headers(),
+  });
+  if (!res.ok) throw new Error("Failed");
+}
+
 // ── Timeline ──────────────────────────────────────────────────────
 
 export interface TimelineTask {

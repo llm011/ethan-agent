@@ -1,14 +1,14 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom"
 import {
-  ScheduleJob, fetchSchedules, deleteSchedule, patchSchedule, renameSchedule, updateSchedulePrompt,
+  ScheduleJob, fetchSchedules, deleteSchedule, patchSchedule, renameSchedule, updateSchedulePrompt, triggerSchedule,
   fetchSessions, SessionInfo,
 } from "@/lib/api";
 import { Badge } from "@ethan/shared/ui/badge";
 import { Button } from "@ethan/shared/ui/button";
 import { ScrollArea } from "@ethan/shared/ui/scroll-area";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@ethan/shared/ui/card";
-import { Loader2, RefreshCw, Play, Pause, Trash2, MessageSquare, ChevronDown, ChevronRight, Pencil, Clock, TerminalSquare } from "lucide-react";
+import { Loader2, RefreshCw, Play, Pause, Trash2, MessageSquare, ChevronDown, ChevronRight, Pencil, Clock, TerminalSquare, Zap } from "lucide-react";
 import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
 import { formatTrigger, formatNextRun } from "@/lib/utils";
 import {
@@ -187,6 +187,18 @@ export function ScheduleView() {
       await updateSchedulePrompt(id, newPrompt);
     } catch {
       await loadData();
+    }
+  };
+
+  const [triggeringId, setTriggeringId] = useState<string>("");
+  const triggerJob = async (job: ScheduleJob) => {
+    setTriggeringId(job.id);
+    try {
+      await triggerSchedule(job.id);
+    } catch {
+      // 失败不 reload，让用户看到当前状态
+    } finally {
+      setTriggeringId("");
     }
   };
 
@@ -456,6 +468,9 @@ export function ScheduleView() {
                     </div>
                   </CardContent>
                   <CardFooter className="pt-2 pb-3 flex justify-end gap-1 border-t border-border/30 mt-auto">
+                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => triggerJob(job)} title="手动触发" disabled={triggeringId === job.id}>
+                      {triggeringId === job.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Zap className="h-3 w-3" />}
+                    </Button>
                     <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openRename(job)} title="重命名">
                       <Pencil className="h-3 w-3" />
                     </Button>
@@ -537,6 +552,9 @@ export function ScheduleView() {
                                 </div>
                                 {/* Actions — show on hover */}
                                 <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => triggerJob(job)} title="手动触发" disabled={triggeringId === job.id}>
+                                    {triggeringId === job.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Zap className="h-3 w-3" />}
+                                  </Button>
                                   <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openRename(job)} title="重命名">
                                     <Pencil className="h-3 w-3" />
                                   </Button>
