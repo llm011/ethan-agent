@@ -121,6 +121,61 @@ def test_session_grants_from_real_store(tmp_path, monkeypatch):
     with pytest.raises(Exception) as e2:
         _run(files_router._session_grants(""))
     assert "400" in str(e2.value)
+    _run(store.close())  # aiosqlite 连接线程非 daemon，不关进程退不出
+
+
+def test_grants_isolated_between_users(tmp_path, monkeypatch):
+    """用户隔离：user B 的库没有 user A 的 session，拿 A 的 session_id + 路径也是 403。
+
+    走真实 get_session_store（per-user db 路径由 ContextVar 里的 user_id 决定），
+    不 mock _session_grants 本身，验证链路闭合。整个用例跑在单个事件循环里
+    （get_session_store 的单例锁/连接与 loop 绑定，拆多个 asyncio.run 会挂）。
+    """
+    import ethan.core.paths as paths_mod
+    import ethan.memory.session as session_mod
+    from ethan.core.context import set_user_id
+    from ethan.memory.session import Message, SessionStore
+
+    # get_session_store 内部 from ethan.core.paths import user_sessions_db_path，
+    # patch 模块属性即可按当前 ContextVar user 分发到不同库
+    def _per_user_db() -> Path:
+        from ethan.core.context import get_user_id
+        uid = get_user_id() or "a"
+        d = tmp_path / uid / "db"
+        d.mkdir(parents=True, exist_ok=True)
+        return d / "sessions.db"
+
+    monkeypatch.setattr(paths_mod, "user_sessions_db_path", _per_user_db)
+
+    async def _mk(db: Path, with_card: bool) -> str:
+        store = SessionStore(db_path=db)
+        await store.init()
+        s = await store.create(model="m")
+        if with_card:
+            card = {"type": "file", "path": "/tmp/userA_secret.pptx"}
+            await store.save_message(s.id, Message(role="assistant", content="ok", cards=[card]))
+        return s.id
+
+    async def _go():
+        sid_a = await _mk(tmp_path / "a" / "db" / "sessions.db", True)
+        await _mk(tmp_path / "b" / "db" / "sessions.db", False)
+
+        set_user_id("a")  # user A 自己的库：能拿到 grants
+        files, _ = await files_router._session_grants(sid_a)
+        assert files == {str(Path("/tmp/userA_secret.pptx").resolve())}
+
+        set_user_id("b")  # user B：同样的 session_id + 文件路径也查不到 → 403
+        with pytest.raises(Exception) as e:
+            await files_router._session_grants(sid_a)
+        assert "403" in str(e.value)
+        set_user_id("")
+
+        # aiosqlite 连接线程非 daemon，不关 pytest 进程退不出
+        for st in session_mod._session_stores.values():
+            await st.close()
+        session_mod._session_stores.clear()
+
+    _run(_go())
 
 
 def test_session_isolation(client, monkeypatch):
