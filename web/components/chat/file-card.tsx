@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { FileText, FileSpreadsheet, FileArchive, File as FileIcon, Presentation, Download } from "lucide-react";
 import { API_URL, getAuthToken } from "@/lib/api-base";
+import { signFileUrl } from "@ethan/shared/ppt/preview";
 import type { FileCard } from "@ethan/shared/chat/types";
 
 // 文件卡片类型以 packages/shared 为准（web/desktop 共用，避免三处声明漂移）
@@ -23,6 +24,20 @@ function fmtSize(kb: number | null): string {
   return kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${Math.round(kb)} KB`;
 }
 
+// 直链下载：先换短期签名再触发 <a download>（不再把长效 token 拼进 URL）。
+// 同源部署即便签名失败也靠 cookie 兜底；跨源失败则 401，前端提示重试。
+async function downloadSigned(path: string, sid: string) {
+  const sig = await signFileUrl(API_URL, getAuthToken(), [path]);
+  const s = sig[path];
+  const sigQ = s ? `&user=${encodeURIComponent(s.user)}&sig=${encodeURIComponent(s.sig)}` : "";
+  const a = document.createElement("a");
+  a.href = `${API_URL}/files/download?path=${encodeURIComponent(path)}${sid}${sigQ}`;
+  a.download = "";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
 // 文件卡片：pptx 且带项目目录时点击进 /ppt-preview 预览页，其余点击直接下载。
 // 所有 URL 带 session_id——服务端只放行本 session 交付过的文件（会话级隔离）。
 export function FileCardView({ card, sessionId }: { card: FileCard; sessionId?: string | null }) {
@@ -35,11 +50,7 @@ export function FileCardView({ card, sessionId }: { card: FileCard; sessionId?: 
     if (previewable) {
       router.push(`/ppt-preview/?path=${encodeURIComponent(card.path)}${sid}`);
     } else {
-      // 跨源部署时 cookie 在 web 域、API 域收不到，URL 带 token 兜底（服务端三通道鉴权）
-      window.open(
-        `${API_URL}/files/download?path=${encodeURIComponent(card.path)}&token=${encodeURIComponent(getAuthToken())}${sid}`,
-        "_blank"
-      );
+      void downloadSigned(card.path, sid);
     }
   };
 

@@ -265,3 +265,72 @@ def test_asset_only_under_assets(client):
     (d / "secret.png").write_bytes(b"x")
     res2 = client.get(f"/api/files/asset?path={d / 'secret.png'}")
     assert res2.status_code == 403
+
+
+# ── 短期签名 URL（替代 ?token= 长效 token 直链）─────────────────────
+
+@pytest.fixture
+def signed_client(monkeypatch):
+    """不覆盖鉴权依赖，走真实 verify_token_or_cookie + UserStore 打桩。"""
+    import ethan.core.users as users_mod
+    from ethan.core.users import UserConfig, UserStore
+
+    store = UserStore([UserConfig(id="u1", web_token="tok-u1")])
+    monkeypatch.setattr(users_mod, "get_user_store", lambda: store)
+
+    app = FastAPI()
+    app.include_router(files_router.router, prefix="/api")
+
+    async def _grants(session_id: str):
+        tmp = Path("/tmp")
+        files = {str(p.resolve()) for p in tmp.rglob("*") if p.is_file()}
+        return files, set()
+    monkeypatch.setattr(files_router, "_session_grants", _grants)
+    return TestClient(app)
+
+
+def test_signed_url_unit(monkeypatch):
+    import ethan.core.users as users_mod
+    from ethan.core.signed_url import sign_path, verify_path_sig
+    from ethan.core.users import UserConfig, UserStore
+
+    store = UserStore([UserConfig(id="u1", web_token="tok-u1")])
+    store.set_default_tokens(web_token="tok-default")
+    monkeypatch.setattr(users_mod, "get_user_store", lambda: store)
+
+    tok = sign_path("u1", "/tmp/a.pptx", now=1000)
+    assert verify_path_sig("u1", "/tmp/a.pptx", tok, now=1000)
+    assert not verify_path_sig("u1", "/tmp/a.pptx", tok, now=1000 + 601)  # 过期
+    assert not verify_path_sig("u1", "/tmp/b.pptx", tok, now=1000)  # 路径不符
+    assert not verify_path_sig("u2", "/tmp/a.pptx", tok, now=1000)  # 用户不符
+    assert not verify_path_sig("u1", "/tmp/a.pptx", "garbage", now=1000)
+    # default profile（user_id=""）用 default token 做 key
+    tok0 = sign_path("", "/tmp/a.pptx", now=1000)
+    assert verify_path_sig("", "/tmp/a.pptx", tok0, now=1000)
+    # 无 token 的用户签不出来
+    with pytest.raises(ValueError):
+        sign_path("ghost", "/tmp/a.pptx")
+
+
+def test_signed_url_flow(signed_client):
+    f = Path("/tmp/signed_dl.pptx")
+    f.write_bytes(b"pptx-bytes")
+    # 1. 无 Bearer → /sign 401
+    assert signed_client.post("/api/files/sign", json={"paths": [str(f)]}).status_code == 401
+    # 2. Bearer 换签名
+    r = signed_client.post("/api/files/sign", json={"paths": [str(f)]},
+                           headers={"Authorization": "Bearer tok-u1"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["user"] == "u1"
+    sig = body["signatures"][str(f)]
+    # 3. 签名 URL 直接下载（无 header 无 cookie）
+    d = signed_client.get(f"/api/files/download?path={f}&session_id=s1&user=u1&sig={sig}")
+    assert d.status_code == 200 and d.content == b"pptx-bytes"
+    # 4. 路径被改 / 换用户 → 401
+    f2 = Path("/tmp/signed_dl2.pptx")
+    f2.write_bytes(b"y")
+    assert signed_client.get(f"/api/files/download?path={f2}&session_id=s1&user=u1&sig={sig}").status_code == 401
+    assert signed_client.get(f"/api/files/download?path={f}&session_id=s1&user=u2&sig={sig}").status_code == 401
+    # 5. ?token= 长效 token 通道已移除
+    assert signed_client.get(f"/api/files/download?path={f}&session_id=s1&token=tok-u1").status_code == 401

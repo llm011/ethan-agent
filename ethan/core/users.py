@@ -69,6 +69,13 @@ class UserStore:
             return ""  # default profile
         return None
 
+    def web_tokens_for(self, user_id: str) -> list[str]:
+        """该用户的 web_token 列表（签名 URL 的 HMAC key 候选）。"""
+        if user_id == "":
+            return sorted(self._default_web_tokens)
+        u = self._by_id.get(user_id)
+        return [u.web_token] if u and u.web_token else []
+
     def get_admin_user_id(self) -> str:
         """default profile（""）就是事实上的 admin。命名 profile 里有 is_admin 的也返回其 id。"""
         return ""  # default profile 隐式为 admin

@@ -2,6 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { FileText, FileSpreadsheet, FileArchive, File as FileIcon, Presentation, Download } from "lucide-react";
 import { getApiUrl, getAuthToken } from "@/lib/api-base";
 import { openUrl } from "@/lib/external-link";
+import { signFileUrl } from "@ethan/shared/ppt/preview";
 import type { FileCard } from "@ethan/shared/chat/types";
 
 // 文件卡片类型以 packages/shared 为准（web/desktop 共用，避免三处声明漂移）
@@ -22,9 +23,13 @@ function fmtSize(kb: number | null): string {
   return kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${Math.round(kb)} KB`;
 }
 
-export function fileDownloadUrl(path: string, sessionId?: string | null): string {
-  const sid = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : "";
-  return `${getApiUrl()}/files/download?path=${encodeURIComponent(path)}&token=${encodeURIComponent(getAuthToken())}${sid}`;
+// 直链下载 URL：先换短期签名（Tauri webview 跨源，cookie 带不上，必须签名），
+// 签名失败回退空（直链会 401，调用方应捕获提示）。
+async function downloadSignedUrl(path: string, sid: string): Promise<string> {
+  const sig = await signFileUrl(getApiUrl(), getAuthToken(), [path]);
+  const s = sig[path];
+  const sigQ = s ? `&user=${encodeURIComponent(s.user)}&sig=${encodeURIComponent(s.sig)}` : "";
+  return `${getApiUrl()}/files/download?path=${encodeURIComponent(path)}${sid}${sigQ}`;
 }
 
 // 文件卡片：pptx 且带项目目录时点击进 /ppt-preview 预览页，其余点击直接下载。
@@ -34,13 +39,13 @@ export function FileCardView({ card, sessionId }: { card: FileCard; sessionId?: 
   const Icon = KIND_ICON[card.kind] ?? FileIcon;
   const previewable = card.kind === "pptx" && !!card.project_dir;
 
-  const handleClick = () => {
+  const handleClick = async () => {
+    const sid = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : "";
     if (previewable) {
-      const sid = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : "";
       navigate(`/ppt-preview?path=${encodeURIComponent(card.path)}${sid}`);
     } else {
-      // Tauri webview 里直接点击会被顶走，走系统浏览器下载（URL 带 token）
-      openUrl(fileDownloadUrl(card.path, sessionId));
+      // Tauri webview 里直接点击会被顶走，走系统浏览器下载
+      openUrl(await downloadSignedUrl(card.path, sid));
     }
   };
 

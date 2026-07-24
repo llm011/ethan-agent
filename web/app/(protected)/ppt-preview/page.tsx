@@ -1,5 +1,10 @@
-import { PptPreviewView } from "@/components/ppt-preview-view";
+import { Suspense } from "react";
+import { PptPreviewViewWeb } from "@/components/ppt-preview-view";
 
 export default function PptPreviewPage() {
-  return <PptPreviewView />;
+  return (
+    <Suspense fallback={null}>
+      <PptPreviewViewWeb />
+    </Suspense>
+  );
 }
