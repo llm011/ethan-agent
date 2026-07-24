@@ -611,6 +611,9 @@ def get_timeline_status(today: Optional[date] = None) -> list[TimelineStatus]:
 
 def find_timeline(timeline_id: str) -> tuple[str, Optional[dict]]:
     """在所有 scene 中查找 timeline，返回 (scene, timeline)。未找到返回 (None, None)。"""
+    # 空串守卫：否则会误匹配 yaml 中 id 缺失/为空的条目，影响 lifecycle/sync 等下游。
+    if not timeline_id:
+        return None, None
     for scene in _discover_scenes():
         for tl in get_timelines(scene):
             if tl.get("id") == timeline_id:
@@ -619,10 +622,20 @@ def find_timeline(timeline_id: str) -> tuple[str, Optional[dict]]:
 
 
 def upsert_timeline(timeline: dict) -> None:
-    """新增或更新（按 id 匹配）一条时间线，写回其 scene 对应文件。"""
+    """新增或更新（按 id 匹配）一条时间线，写回其 scene 对应文件。
+
+    若 timeline 的 scene 与既有记录不同（跨 scene 迁移），先在旧 scene 清理，
+    避免旧 scene 残留同名记录导致主键冲突或状态错乱。
+    """
     scene = timeline.get("scene", "work") or "work"
-    timelines = get_timelines(scene)
     tl_id = timeline.get("id", "")
+    if not tl_id:
+        raise ValueError("upsert_timeline: timeline.id 不能为空")
+    # 跨 scene 迁移检测：旧记录在别的 scene 里，先删掉再写新 scene
+    old_scene, _ = find_timeline(tl_id)
+    if old_scene and old_scene != scene:
+        remove_timeline(tl_id)
+    timelines = get_timelines(scene)
     found = False
     for i, t in enumerate(timelines):
         if t.get("id") == tl_id:

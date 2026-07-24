@@ -612,23 +612,20 @@ class BrowserPageTool(_BrowserToolBase):
             info = json.loads(raw) if isinstance(raw, str) else (raw or {})
             if not info.get("found"):
                 return json.dumps({"ok": False, "error": "未找到匹配输入框"}, ensure_ascii=False)
+            # 动态构造 target 表达式：sel 有值用 querySelector，否则用 xpath。
+            # 不能写死 `querySelector(sel) || evaluate(xp)` —— sel 为空时 querySelector("")
+            # 会抛 DOMException，|| 无法短路，xpath 兜底失效。
+            if sel:
+                target_expr = f"document.querySelector({_json.dumps(sel)})"
+            elif xp:
+                target_expr = f"document.evaluate({_json.dumps(xp)}, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue"
+            else:
+                target_expr = "document.activeElement"
             # 聚焦 + 清空 + 设值 + 触发 input/change 事件（兼容 React）
             fill_script = f"""(() => {{
-  const el = document.querySelector({_json.dumps(sel)}) ||
-    document.evaluate({_json.dumps(xp)}, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+  const el = {target_expr};
   if (!el) return false;
   el.focus();
-  el.value = {_json.dumps(txt)};
-  el.dispatchEvent(new Event('input', {{bubbles: true}}));
-  el.dispatchEvent(new Event('change', {{bubbles: true}}));
-  return true;
-}})()"""
-            if not sel and not xp:
-                # fallback：用坐标 click 后用 page_fill（需要 ref，这里用 eval 设值）
-                await _click_point(session, info["x"], info["y"])
-                fill_script = f"""(() => {{
-  const el = document.activeElement;
-  if (!el) return false;
   el.value = {_json.dumps(txt)};
   el.dispatchEvent(new Event('input', {{bubbles: true}}));
   el.dispatchEvent(new Event('change', {{bubbles: true}}));
@@ -681,7 +678,9 @@ class BrowserPageTool(_BrowserToolBase):
             return json.dumps(info, ensure_ascii=False)
         if action == "extract_content":
             import json as _json
-            sel = kw.get("selector", "body")
+            # or "body"：kw.get("selector", "body") 在传入空串时返回空串而非默认值，
+            # 导致 querySelector("") 抛 DOMException，|| document.body 兜底失效。
+            sel = kw.get("selector") or "body"
             strip_links = kw.get("strip_links", False)
             script = f"""(() => {{
   const el = document.querySelector({_json.dumps(sel)}) || document.body;
@@ -755,7 +754,12 @@ class BrowserPageTool(_BrowserToolBase):
   el.dispatchEvent(new KeyboardEvent('keydown', {{key: 'Enter', bubbles: true}}));
   return true;
 }})()"""
-            await _eval_js(session, fill_script)
+            fill_result = await _eval_js(session, fill_script)
+            # fill_script 返回 false 表示元素未找到；丢弃返回值会导致即使填充失败
+            # 仍无条件 press Enter 并报告 ok=True，误导模型。
+            if fill_result is False or fill_result == "false":
+                return json.dumps({"ok": False, "error": "未找到匹配元素", "selector": sel},
+                                  ensure_ascii=False)
             # 也用 CDP press Enter 确保触发
             await _call("page_press", {"sessionId": session, "key": "Enter"},
                         browser_session_id=session)
