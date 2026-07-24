@@ -145,12 +145,16 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
-            // macOS: dock icon 点击时重新显示窗口
+            // macOS: dock icon 点击时重新显示窗口（Reopen variant 仅 macOS 存在）
+            #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = event {
                 if let Some(window) = app_handle.get_webview_window("main") {
                     let _ = window.show();
                     let _ = window.set_focus();
                 }
             }
+            // 避免 unused variable 警告
+            let _ = app_handle;
+            let _ = event;
         });
 }
