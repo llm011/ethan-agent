@@ -470,6 +470,34 @@ class SessionStore:
 
         return session
 
+    async def load_session_cards(self, session_id: str) -> list[dict] | None:
+        """只取 messages 的 cards 列（files 路由构建交付授权集合用）。
+
+        避免 load() 全量加载消息 + 反序列化 9 个无关 JSON 列。
+        返回 None 表示 session 不存在；否则返回所有卡片 dict 的扁平列表。
+        """
+        import json
+
+        async with self._db.execute(
+            "SELECT 1 FROM sessions WHERE id = ?", (session_id,)
+        ) as cursor:
+            if not await cursor.fetchone():
+                return None
+
+        cards: list[dict] = []
+        async with self._db.execute(
+            "SELECT cards FROM messages WHERE session_id = ? AND cards IS NOT NULL",
+            (session_id,),
+        ) as cursor:
+            async for (cards_json,) in cursor:
+                try:
+                    for c in json.loads(cards_json):
+                        if isinstance(c, dict):
+                            cards.append(c)
+                except Exception:
+                    continue
+        return cards
+
     async def list_recent(self, limit: int = 20, offset: int = 0,
                           source: str = "", mode: str | None = None,
                           exclude_sources: list[str] | None = None,

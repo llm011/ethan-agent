@@ -15,9 +15,16 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import sys
 from pathlib import Path
 from typing import NamedTuple
+
+
+def _page_sort_key(p: Path) -> tuple[int, int, str]:
+    """页面文件排序：按文件名前导数字排，容忍未补零的 1_, 10_（纯字典序会得到 1,10,2…）。"""
+    m = re.match(r"(\d+)", p.name)
+    return (0, int(m.group(1)), p.name) if m else (1, 0, p.name)
 
 
 class PageFile(NamedTuple):
@@ -51,7 +58,7 @@ def load_deck(path: Path) -> tuple[dict, Path, "list[PageFile] | None"]:
     deck = _load_json(meta_path)
 
     pages_dir = path / "pages"
-    page_paths = sorted(pages_dir.glob("*.json")) if pages_dir.is_dir() else []
+    page_paths = sorted(pages_dir.glob("*.json"), key=_page_sort_key) if pages_dir.is_dir() else []
     if not page_paths:
         # 目录里没有 pages/ 时退化为「目录里的单文件 deck.json」
         return deck, path, None

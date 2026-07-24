@@ -13,10 +13,10 @@ import {
   Plus,
   Presentation,
 } from "lucide-react";
-import { PptSlide } from "@ethan/shared/ppt/slide";
+import { PptSlide, SlideGuard } from "@ethan/shared/ppt/slide";
 import { CANVAS_H, CANVAS_W } from "@ethan/shared/ppt/types";
 import type { PptSlideData, PptTheme } from "@ethan/shared/ppt/types";
-import { API_URL, headers } from "@/lib/api-base";
+import { API_URL, getAuthToken, headers } from "@/lib/api-base";
 import "katex/dist/katex.min.css";
 
 interface DeckResponse {
@@ -30,6 +30,11 @@ interface DeckResponse {
 
 const THUMB_SCALE = 0.16;
 
+// 直链（<img>/<a>）在跨源部署下带不上 cookie，统一带 ?token= 兜底（服务端三通道鉴权）
+function withToken(url: string): string {
+  return `${url}&token=${encodeURIComponent(getAuthToken())}`;
+}
+
 export function PptPreviewView() {
   const router = useRouter();
   const [path, setPath] = useState<string | null>(null);
@@ -39,6 +44,7 @@ export function PptPreviewView() {
   const [current, setCurrent] = useState(0);
   const [zoom, setZoom] = useState(1);
   const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const exportRef = useRef<HTMLDivElement>(null);
   const mainWrapRef = useRef<HTMLDivElement>(null);
   const [mainScale, setMainScale] = useState(0.8);
@@ -46,7 +52,9 @@ export function PptPreviewView() {
   // 静态导出下 useSearchParams 需要 Suspense，直接读 location 更简单
   useEffect(() => {
     const q = new URLSearchParams(window.location.search);
-    setPath(q.get("path"));
+    const p = q.get("path");
+    if (!p) setError("链接缺少 path 参数");
+    setPath(p);
     setSessionId(q.get("session_id") ?? "");
   }, []);
 
@@ -88,29 +96,36 @@ export function PptPreviewView() {
     (src: string) => {
       if (!deck) return src;
       const abs = src.startsWith("/") ? src : `${deck.dir}/${src}`;
-      return `${API_URL}/files/asset?path=${encodeURIComponent(abs)}${sidQ}`;
+      return withToken(`${API_URL}/files/asset?path=${encodeURIComponent(abs)}${sidQ}`);
     },
     [deck, sidQ]
   );
 
   const pptxPath = deck?.pptx_path ?? path;
   const downloadPptxUrl = pptxPath
-    ? `${API_URL}/files/download?path=${encodeURIComponent(pptxPath)}${sidQ}`
+    ? withToken(`${API_URL}/files/download?path=${encodeURIComponent(pptxPath)}${sidQ}`)
     : null;
 
-  // 下载 PDF：隐藏容器里按 2x 渲染全部页，逐页截图合成
+  // 下载 PDF：按需懒挂载隐藏容器（不拖累首屏），全尺寸渲染后逐页截图合成
   const downloadPdf = async () => {
-    if (!deck || !exportRef.current || exporting) return;
+    if (!deck || exporting) return;
+    setExportError(null);
     setExporting(true);
+    // 等 React 把导出容器挂载出来（exporting 置真后才渲染）
+    await new Promise((r) => setTimeout(r, 50));
     try {
+      const container = exportRef.current;
+      if (!container) throw new Error("导出容器未就绪");
       const pdf = new jsPDF({ orientation: "landscape", unit: "px", format: [CANVAS_W, CANVAS_H] });
-      const nodes = Array.from(exportRef.current.children) as HTMLElement[];
+      const nodes = Array.from(container.children) as HTMLElement[];
       for (let i = 0; i < nodes.length; i++) {
         const dataUrl = await toPng(nodes[i], { pixelRatio: 2, cacheBust: true });
         if (i > 0) pdf.addPage([CANVAS_W, CANVAS_H], "landscape");
         pdf.addImage(dataUrl, "PNG", 0, 0, CANVAS_W, CANVAS_H);
       }
       pdf.save(`${deck.name}.pdf`);
+    } catch (e) {
+      setExportError(e instanceof Error ? e.message : "PDF 导出失败");
     } finally {
       setExporting(false);
     }
@@ -172,6 +187,7 @@ export function PptPreviewView() {
           {exporting ? "导出中…" : "PDF"}
         </button>
       )}
+      {exportError && <span className="text-xs text-destructive max-w-[220px] truncate">导出失败:{exportError}</span>}
     </div>
   );
 
@@ -233,7 +249,9 @@ export function PptPreviewView() {
                 {String(i + 1).padStart(2, "0")}
               </span>
               <div className="pointer-events-none flex justify-center bg-white">
-                <PptSlide slide={p} theme={theme} scale={THUMB_SCALE} assetUrl={assetUrl} />
+                <SlideGuard key={p.id ?? i} width={CANVAS_W * THUMB_SCALE} height={CANVAS_H * THUMB_SCALE}>
+                  <PptSlide slide={p} theme={theme} scale={THUMB_SCALE} assetUrl={assetUrl} />
+                </SlideGuard>
               </div>
             </button>
           ))}
@@ -241,16 +259,22 @@ export function PptPreviewView() {
         {/* 主视图 */}
         <div ref={mainWrapRef} className="flex-1 flex items-center justify-center bg-muted/50 overflow-auto p-6">
           <div className="shadow-xl rounded-sm overflow-hidden">
-            <PptSlide slide={slide} theme={theme} scale={mainScale * zoom} assetUrl={assetUrl} />
+            <SlideGuard key={current} width={CANVAS_W * mainScale * zoom} height={CANVAS_H * mainScale * zoom}>
+              <PptSlide slide={slide} theme={theme} scale={mainScale * zoom} assetUrl={assetUrl} />
+            </SlideGuard>
           </div>
         </div>
       </div>
-      {/* PDF 导出用的隐藏全尺寸渲染（屏幕外） */}
-      <div ref={exportRef} style={{ position: "absolute", left: -99999, top: 0 }} aria-hidden>
-        {deck.pages.map((p, i) => (
-          <PptSlide key={p.id ?? i} slide={p} theme={theme} scale={1} assetUrl={assetUrl} />
-        ))}
-      </div>
+      {/* PDF 导出用的隐藏全尺寸渲染（屏幕外）：仅在导出时懒挂载，不拖累首屏 */}
+      {exporting && (
+        <div ref={exportRef} style={{ position: "absolute", left: -99999, top: 0 }} aria-hidden>
+          {deck.pages.map((p, i) => (
+            <SlideGuard key={p.id ?? i} width={CANVAS_W} height={CANVAS_H}>
+              <PptSlide slide={p} theme={theme} scale={1} assetUrl={assetUrl} />
+            </SlideGuard>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

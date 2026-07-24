@@ -8,43 +8,13 @@ icon + 文件名的卡片，点击进入 /ppt-preview 预览页或直接下载�
 """
 from __future__ import annotations
 
-from pathlib import Path
-
+from ethan.core.file_jail import DELIVER_EXTS, detect_project, resolve_jailed
 from ethan.tools.base import BaseTool, ToolResult
-
-# 允许交付的扩展名（按需扩充）
-_ALLOWED_EXTS = {".pptx", ".pdf", ".docx", ".xlsx", ".csv", ".zip", ".md", ".html"}
-
-
-def _resolve_jailed(path: str) -> Path | None:
-    """解析路径并做 jail 校验：只允许 home 目录和 /tmp 下的文件。"""
-    try:
-        p = Path(path).expanduser().resolve()
-    except Exception:
-        return None
-    home = Path.home().resolve()
-    tmp = Path("/tmp").resolve()  # macOS 上 /tmp 是 /private/tmp 的软链，resolve 后再比
-    if not (p.is_relative_to(home) or p.is_relative_to(tmp)):
-        return None
-    return p
-
-
-def _detect_project(file_path: Path) -> tuple[str | None, int | None]:
-    """pptx 同目录若存在 deck.json + pages/（项目制 deck），返回项目目录与页数。"""
-    if file_path.suffix.lower() != ".pptx":
-        return None, None
-    project_dir = file_path.parent
-    if not (project_dir / "deck.json").is_file():
-        return None, None
-    pages_dir = project_dir / "pages"
-    if not pages_dir.is_dir():
-        return None, None
-    page_count = len(list(pages_dir.glob("*.json")))
-    return (str(project_dir), page_count) if page_count else (None, None)
 
 
 class DeliverFileTool(BaseTool):
     fast_path = False
+    cacheable = False  # 同路径重复交付时文件内容已变，且缓存命中路径会丢 cards 载荷
     name = "deliver_file"
     description = (
         "Deliver a locally generated file (pptx/pdf/docx/xlsx/csv/zip/md/html) to the chat "
@@ -67,15 +37,15 @@ class DeliverFileTool(BaseTool):
     }
 
     async def run(self, path: str, title: str = "") -> str | ToolResult:
-        p = _resolve_jailed(path)
+        p = resolve_jailed(path)
         if p is None:
             return f"Deliver failed: path must be under the user home directory or /tmp: {path}"
         if not p.is_file():
             return f"Deliver failed: file not found: {p}"
-        if p.suffix.lower() not in _ALLOWED_EXTS:
-            return f"Deliver failed: unsupported file type {p.suffix} (allowed: {', '.join(sorted(_ALLOWED_EXTS))})"
+        if p.suffix.lower() not in DELIVER_EXTS:
+            return f"Deliver failed: unsupported file type {p.suffix} (allowed: {', '.join(sorted(DELIVER_EXTS))})"
 
-        project_dir, page_count = _detect_project(p)
+        project_dir, page_count = detect_project(p)
         card = {
             "type": "file",
             "filename": p.name,

@@ -2,18 +2,10 @@ import { useNavigate } from "react-router-dom";
 import { FileText, FileSpreadsheet, FileArchive, File as FileIcon, Presentation, Download } from "lucide-react";
 import { getApiUrl, getAuthToken } from "@/lib/api-base";
 import { openUrl } from "@/lib/external-link";
+import type { FileCard } from "@ethan/shared/chat/types";
 
-// 文件卡片数据结构（deliver_file 工具产出）
-export interface FileCard {
-  type: "file";
-  filename: string;
-  title?: string;
-  path: string;
-  size_kb: number | null;
-  kind: string;
-  project_dir?: string;
-  page_count?: number;
-}
+// 文件卡片类型以 packages/shared 为准（web/desktop 共用，避免三处声明漂移）
+export type { FileCard };
 
 const KIND_ICON: Record<string, typeof FileIcon> = {
   pptx: Presentation,

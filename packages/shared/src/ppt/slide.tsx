@@ -1,7 +1,7 @@
 // 单页 deck JSON → React 渲染（1000×562.5 逻辑坐标，按 scale 缩放）
 // best-effort 预览：text/shape/line/table/image/chart/latex 全覆盖，复杂形状退化为矩形
 import katex from "katex";
-import type { CSSProperties } from "react";
+import { Component, useId, type CSSProperties, type ReactNode } from "react";
 import { PptChart } from "./chart";
 import { CANVAS_H, CANVAS_W, DEFAULT_THEME } from "./types";
 import type { PptElement, PptParagraph, PptRun, PptSlideData, PptTheme } from "./types";
@@ -222,7 +222,9 @@ function LineElement({ el }: { el: PptElement; ctx: SlideRenderCtx }) {
   const color = el.color ?? "#D1D5DB";
   const width = el.width ?? 1;
   const dash = el.style === "dashed" ? "6 4" : el.style === "dotted" ? "2 3" : undefined;
-  const markerId = `arrow-${el.id}`;
+  // marker id 必须组件实例级唯一：元素 id 跨页会重复，而预览把多页挂在同一文档，
+  // url(#...) 全文档解析，同 id 会串到第一个定义的 marker（跨页串色）
+  const markerId = `arrow-${useId().replace(/:/g, "")}`;
   const [pStart, pEnd] = el.points ?? ["", ""];
   return (
     <svg style={{ position: "absolute", left, top, overflow: "visible" }} width={w} height={h}>
@@ -267,10 +269,20 @@ interface TableCell {
   };
 }
 
+/** 与 render_pptx.py 的 rel_luminance / contrast_text_color 同一规则：按底色亮度选黑/白文字 */
+function contrastTextColor(bg: string): string {
+  const m = /^#?([0-9a-fA-F]{6})/.exec(bg.trim());
+  if (!m) return "#FFFFFF";
+  const n = parseInt(m[1], 16);
+  const lum = (0.2126 * (n >> 16) + 0.7152 * ((n >> 8) & 0xff) + 0.0722 * (n & 0xff)) / 255;
+  return lum > 0.5 ? "#1F2937" : "#FFFFFF";
+}
+
 function TableElement({ el, ctx }: { el: PptElement; ctx: SlideRenderCtx }) {
-  const rows = (el.data as unknown as TableCell[][]) ?? [];
+  const rows: TableCell[][] = Array.isArray(el.data) ? (el.data as unknown as TableCell[][]) : [];
   const colWidths = el.colWidths ?? rows[0]?.map(() => 1 / (rows[0].length || 1)) ?? [];
   const headerColor = el.theme?.color ?? ctx.theme.themeColors?.[0] ?? "#1E40AF";
+  const headerTextColor = contrastTextColor(headerColor);
   const borderColor = el.outline?.color ?? ctx.theme.outline?.color ?? "#E5E7EB";
   const fontColor = ctx.theme.fontColor ?? DEFAULT_THEME.fontColor;
   return (
@@ -298,14 +310,17 @@ function TableElement({ el, ctx }: { el: PptElement; ctx: SlideRenderCtx }) {
                       padding: "4px 8px",
                       minHeight: el.cellMinHeight ?? 32,
                       background: st.backcolor ?? (isHeader ? headerColor : "transparent"),
-                      color: st.color ?? (isHeader ? "#FFFFFF" : fontColor),
+                      color: st.color ?? (isHeader ? headerTextColor : fontColor),
                       fontWeight: st.bold ?? isHeader ? 700 : 400,
                       fontStyle: st.em ? "italic" : undefined,
                       fontSize: st.fontSize ?? 12,
                       fontFamily: st.fontName ?? ctx.theme.fontName ?? DEFAULT_THEME.fontName,
                       textAlign: st.align ?? (isHeader ? "center" : "left"),
                       verticalAlign: st.vAlign ?? "middle",
-                      textDecoration: st.underline ? "underline" : st.strikethrough ? "line-through" : undefined,
+                      textDecoration:
+                        [st.underline ? "underline" : "", st.strikethrough ? "line-through" : ""]
+                          .filter(Boolean)
+                          .join(" ") || undefined,
                       whiteSpace: "pre-wrap",
                       wordBreak: "break-word",
                     }}
@@ -384,10 +399,12 @@ function slideBackground(slide: PptSlideData, ctx: SlideRenderCtx): CSSPropertie
   if (!bg) return { background: ctx.theme.backgroundColor ?? DEFAULT_THEME.backgroundColor };
   if (bg.type === "solid") return { background: bg.color };
   if (bg.type === "gradient") {
-    const stops = bg.gradient.colors.map((c) => `${c.color} ${c.pos}%`).join(", ");
-    return { background: `linear-gradient(${(bg.gradient.rotate ?? 0) + 90}deg, ${stops})` };
+    const colors = bg.gradient?.colors;
+    if (!colors?.length) return { background: ctx.theme.backgroundColor ?? DEFAULT_THEME.backgroundColor };
+    const stops = colors.map((c) => `${c.color} ${c.pos}%`).join(", ");
+    return { background: `linear-gradient(${(bg.gradient?.rotate ?? 0) + 90}deg, ${stops})` };
   }
-  if (bg.type === "image") {
+  if (bg.type === "image" && bg.image?.src) {
     return {
       backgroundImage: `url(${ctx.assetUrl(bg.image.src)})`,
       backgroundSize: bg.image.size === "contain" ? "contain" : "cover",
@@ -437,4 +454,39 @@ export function PptSlide({
       </div>
     </div>
   );
+}
+
+/** 单页渲染错误边界：某页 JSON 畸形（如 background 缺 colors、table data 非数组）
+ *  只替换该页为占位框，不拖垮整个预览页 */
+export class SlideGuard extends Component<
+  { children: ReactNode; width?: number; height?: number },
+  { failed: boolean }
+> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  render() {
+    if (this.state.failed) {
+      return (
+        <div
+          style={{
+            width: this.props.width ?? "100%",
+            height: this.props.height ?? 120,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            border: "1px dashed #D1D5DB",
+            borderRadius: 8,
+            color: "#9CA3AF",
+            fontSize: 12,
+            flexShrink: 0,
+          }}
+        >
+          此页渲染失败
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
