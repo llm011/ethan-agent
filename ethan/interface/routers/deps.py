@@ -32,23 +32,35 @@ async def verify_token(request: Request) -> str:
 
 
 async def verify_token_or_cookie(request: Request) -> str:
-    """三通道鉴权：Authorization header 优先，其次 cookie ethan_token，最后 ?token= 参数。
+    """三通道鉴权：Authorization header 优先，其次 cookie ethan_token，最后短期签名 URL。
 
     <img src> / <a href download> 这类浏览器直接发起的请求无法带 Authorization
-    header，必须从 cookie 读 token（前端 setAuthToken 已把 token 写进 cookie，path=/）。
-    Desktop（Tauri webview）cookie 的 origin 与 API 不一致，直链改在 URL 上带 ?token=。
+    header：Web 同源部署从 cookie 读 token（前端 setAuthToken 已写 cookie，path=/）；
+    跨源/Tauri webview cookie 带不上，用 ?user=&sig= 短期签名（前端先调
+    POST /files/sign 换 path 级签名，详见 ethan.core.signed_url），不再把长效
+    token 放进 URL（会留在访问日志/浏览器历史里）。
     其余流程与 verify_token 一致：解析 user_id、set_user_id、注入 request.state。
     """
     auth = request.headers.get("Authorization", "")
     if auth.startswith("Bearer "):
-        token = auth.removeprefix("Bearer ").strip()
-    else:
-        # 前端写 cookie 时做了 encodeURIComponent，读回必须 unquote 才能与配置比对
-        token = unquote(request.cookies.get("ethan_token", "")) or request.query_params.get("token", "")
+        return _resolve_user(auth.removeprefix("Bearer ").strip(), request)
 
-    if not token:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    return _resolve_user(token, request)
+    # 前端写 cookie 时做了 encodeURIComponent，读回必须 unquote 才能与配置比对
+    token = unquote(request.cookies.get("ethan_token", ""))
+    if token:
+        return _resolve_user(token, request)
+
+    # 签名通道：user + sig（"exp.sighex"）+ path（签名消息含 path，从 query 原样取）
+    from ethan.core.signed_url import verify_path_sig
+
+    user = request.query_params.get("user")
+    sig = request.query_params.get("sig", "")
+    path = request.query_params.get("path", "")
+    if user is not None and sig and path and verify_path_sig(user, path, sig):
+        set_user_id(user)
+        request.state.user_id = user
+        return user
+    raise HTTPException(status_code=401, detail="Unauthorized")
 
 
 def create_agent(model: str | None = None, channel: str = "web", user_id: str = "", mode: str = ""):

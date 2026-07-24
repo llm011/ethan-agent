@@ -970,6 +970,11 @@ _MATH_STRUCT_PR = {
     "m:func": "m:funcPr", "m:groupChr": "m:groupChrPr", "m:limLow": "m:limLowPr",
     "m:limUpp": "m:limUppPr", "m:bar": "m:barPr", "m:m": "m:mPr", "m:eqArr": "m:eqArrPr",
 }
+_MATH_STRUCT_PR_QN = {qn(k): qn(v) for k, v in _MATH_STRUCT_PR.items()}
+_QN_MR, _QN_MT, _QN_MRPR, _QN_MSTY = qn("m:r"), qn("m:t"), qn("m:rPr"), qn("m:sty")
+_QN_CTRLPR, _QN_RAD, _QN_DEGHIDE, _QN_DEG, _QN_E = (
+    qn("m:ctrlPr"), qn("m:rad"), qn("m:degHide"), qn("m:deg"), qn("m:e"))
+_QN_VAL = qn("m:val")
 
 
 def _macify_omml(omath, font_size_px: float, color_value):
@@ -979,39 +984,43 @@ def _macify_omml(omath, font_size_px: float, color_value):
     样式全在 a:rPr（i="1" 表斜体），且每个 run 都显式声明 Cambria Math；
     每个结构元素（rad/f/sSub…）的 *Pr 里都有 m:ctrlPr，m:rad 还带空 m:deg。
     mathml2omml 的输出缺这些，Mac 解析器拿到无法排版的 math zone 会静默丢成空盒子。
+
+    单次深度优先遍历完成全部改写（原实现对 15 类标签各扫一遍全树，O(15N)）。
     """
-    for r in list(omath.iter(qn("m:r"))):
-        t = r.find(qn("m:t"))
-        if t is None:
+    for el in list(omath.iter()):  # list() 快照：遍历时增删子元素不影响迭代
+        tag = el.tag
+        if tag == _QN_MR:
+            t = el.find(_QN_MT)
+            if t is None:
+                continue
+            mrpr = el.find(_QN_MRPR)
+            italic = False
+            if mrpr is not None:
+                sty = mrpr.find(_QN_MSTY)
+                italic = sty is not None and sty.get(_QN_VAL) == "i"
+                el.remove(mrpr)  # Mac 原生没有 m:rPr，斜体走 a:rPr 的 i 属性
+            el.insert(list(el).index(t), _math_rpr(font_size_px, color_value, italic))
             continue
-        mrpr = r.find(qn("m:rPr"))
-        italic = False
-        if mrpr is not None:
-            sty = mrpr.find(qn("m:sty"))
-            italic = sty is not None and sty.get(qn("m:val")) == "i"
-            r.remove(mrpr)  # Mac 原生没有 m:rPr，斜体走 a:rPr 的 i 属性
-        r.insert(list(r).index(t), _math_rpr(font_size_px, color_value, italic))
-    for struct_tag, pr_tag in _MATH_STRUCT_PR.items():
-        for struct in list(omath.iter(qn(struct_tag))):
-            pr = struct.find(qn(pr_tag))
-            if pr is None:
-                pr = struct.makeelement(qn(pr_tag), {})
-                struct.insert(0, pr)
-            if pr.find(qn("m:ctrlPr")) is None:
-                ctrl = pr.makeelement(qn("m:ctrlPr"), {})
-                ctrl.append(_math_rpr(font_size_px, color_value, True))
-                pr.append(ctrl)
-    # m:rad 的子元素顺序是 radPr? deg? e —— Mac 原生带空 m:deg + degHide on，
-    # 缺了 Mac 不渲染根号；degHide 隐藏空次数占位框（\sqrt 无次数）
-    for rad in list(omath.iter(qn("m:rad"))):
-        pr = rad.find(qn("m:radPr"))
-        if pr is not None and pr.find(qn("m:degHide")) is None:
-            deghide = pr.makeelement(qn("m:degHide"), {qn("m:val"): "on"})
-            pr.append(deghide)  # radPr 内顺序：ctrlPr 在前、degHide 在后（Mac 原生如此）
-        if rad.find(qn("m:deg")) is None:
-            e = rad.find(qn("m:e"))
-            deg = rad.makeelement(qn("m:deg"), {})
-            rad.insert(list(rad).index(e) if e is not None else len(rad), deg)
+        pr_tag = _MATH_STRUCT_PR_QN.get(tag)
+        if pr_tag is None:
+            continue
+        pr = el.find(pr_tag)
+        if pr is None:
+            pr = el.makeelement(pr_tag, {})
+            el.insert(0, pr)
+        if pr.find(_QN_CTRLPR) is None:
+            ctrl = pr.makeelement(_QN_CTRLPR, {})
+            ctrl.append(_math_rpr(font_size_px, color_value, True))
+            pr.append(ctrl)
+        # m:rad 的子元素顺序是 radPr? deg? e —— Mac 原生带空 m:deg + degHide on，
+        # 缺了 Mac 不渲染根号；degHide 隐藏空次数占位框（\sqrt 无次数）
+        if tag == _QN_RAD:
+            if pr.find(_QN_DEGHIDE) is None:
+                pr.append(pr.makeelement(_QN_DEGHIDE, {_QN_VAL: "on"}))  # ctrlPr 前、degHide 后
+            if el.find(_QN_DEG) is None:
+                e = el.find(_QN_E)
+                deg = el.makeelement(_QN_DEG, {})
+                el.insert(list(el).index(e) if e is not None else len(el), deg)
 
 
 # ---------------------------------------------------------------------------
