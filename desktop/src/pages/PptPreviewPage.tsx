@@ -20,6 +20,8 @@ export default function PptPreviewPage() {
         authToken: getAuthToken(),
         goBack: () => navigate(-1),
         openDownload: (url) => openUrl(url),
+        // Tauri 跨源无 cookie 兜底：签名到位前按住 <img>，避免首屏未签名直链 401 破图
+        requiresSignedUrls: true,
       }}
     />
   );

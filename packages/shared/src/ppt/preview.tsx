@@ -46,6 +46,9 @@ export interface PptPreviewAdapter {
   authToken: string;
   goBack: () => void;
   openDownload: (url: string) => void;
+  /** 直链是否**必须**带签名才能访问：desktop/Tauri 跨源无 cookie 兜底 → true，
+   *  签名到位前按住 <img> 避免 401 破图；web 同源有 cookie 兜底 → 省略（false）。 */
+  requiresSignedUrls?: boolean;
 }
 
 export interface PptPreviewProps {
@@ -71,7 +74,7 @@ function collectAssetPaths(pages: PptSlideData[], dir: string): string[] {
 }
 
 export function PptPreviewView({ path, sessionId, adapter }: PptPreviewProps) {
-  const { apiUrl, headers, authToken, goBack, openDownload } = adapter;
+  const { apiUrl, headers, authToken, goBack, openDownload, requiresSignedUrls } = adapter;
   const [deck, setDeck] = useState<DeckResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [current, setCurrent] = useState(0);
@@ -83,6 +86,9 @@ export function PptPreviewView({ path, sessionId, adapter }: PptPreviewProps) {
   const [mainScale, setMainScale] = useState(0.8);
   // path → 短期签名（deck 到达后批量签发，<img>/<a> 直链用）
   const [sigs, setSigs] = useState<Record<string, SignedQuery>>({});
+  // 签名进行中标记：桌面端无 cookie 兜底，未签名的直链必 401。
+  // 首屏 sigs 还没到位时先按住 <img>（渲染透明占位），签发完成再放行。
+  const [signing, setSigning] = useState(false);
 
   const sidQ = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : "";
 
@@ -96,9 +102,16 @@ export function PptPreviewView({ path, sessionId, adapter }: PptPreviewProps) {
         if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.detail || `HTTP ${res.status}`);
         return res.json();
       })
-      .then((d: DeckResponse) => setDeck(d))
+      .then((d: DeckResponse) => {
+        setDeck(d);
+        // 与 setDeck 同批置 signing——避免「deck 已到、sigs 未到」那一帧用未签名直链渲染
+        // <img>（桌面端无 cookie 兜底会 401 破图）。仅桌面端（requiresSignedUrls）需要按住；
+        // web 同源有 cookie 兜底，先渲染也不会破图。真正的签发在下面的 effect 里做。
+        const needsSig = collectAssetPaths(d.pages, d.dir).length > 0;
+        if (needsSig && authToken && requiresSignedUrls) setSigning(true);
+      })
       .catch((e) => setError(e.message || "加载失败"));
-  }, [path, apiUrl, sidQ, headers]);
+  }, [path, apiUrl, sidQ, headers, authToken]);
 
   // deck 到达后批量签发所有资源 + pptx 的短期签名（一次 POST，<img> 直链鉴权用）
   useEffect(() => {
@@ -106,9 +119,21 @@ export function PptPreviewView({ path, sessionId, adapter }: PptPreviewProps) {
     const paths = collectAssetPaths(deck.pages, deck.dir);
     if (deck.pptx_path) paths.push(deck.pptx_path);
     if (!paths.length) return;
-    signFileUrl(apiUrl, authToken, paths).then((map) => {
-      if (Object.keys(map).length) setSigs((prev) => ({ ...prev, ...map }));
-    });
+    let alive = true;
+    // 桌面端无 cookie 兜底：签名到位前渲染 <img> 会以未签名直链 401。先按住 <img>，
+    // 签发完成（或失败回退）再放行，避免首屏一闪而过的破图。web 有 cookie 兜底不需要。
+    if (requiresSignedUrls) setSigning(true);
+    signFileUrl(apiUrl, authToken, paths)
+      .then((map) => {
+        if (!alive) return;
+        if (Object.keys(map).length) setSigs((prev) => ({ ...prev, ...map }));
+      })
+      .finally(() => {
+        if (alive) setSigning(false);
+      });
+    return () => {
+      alive = false;
+    };
   }, [deck, apiUrl, authToken]);
 
   useEffect(() => {
@@ -271,6 +296,19 @@ export function PptPreviewView({ path, sessionId, adapter }: PptPreviewProps) {
             <Presentation className="w-10 h-10" />
           </span>
           <div className="text-sm text-muted-foreground">该文件不支持逐页预览，可直接下载 PPTX</div>
+        </div>
+      </div>
+    );
+  }
+
+  // 桌面端：签名到位前先不渲染 <img>（无 cookie 兜底会 401 破图），显示 spinner 顶一下。
+  // web 端 requiresSignedUrls 未置 → signing 恒 false，不受影响直接渲染。
+  if (signing) {
+    return (
+      <div className="h-full flex flex-col">
+        {topBar}
+        <div className="flex-1 flex items-center justify-center">
+          <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
         </div>
       </div>
     );
