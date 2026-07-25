@@ -42,11 +42,11 @@ class VectorStore:
 
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
-            # busy_timeout 对齐 MemoryStore：两者写同一 db 文件，
-            # 并发 reindex/召回/心跳时兜底 database is locked。
-            conn = sqlite3.connect(str(self._db_path), timeout=5.0)
+            # busy_timeout 对齐 SessionStore（30s）：三者写同一 sessions.db，
+            # DELETE 模式下写会阻塞读，夜间 reindex 与召回/心跳并发时 5s 不够。
+            conn = sqlite3.connect(str(self._db_path), timeout=30.0)
             conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA busy_timeout=5000")
+            conn.execute("PRAGMA busy_timeout=30000")
             conn.enable_load_extension(True)
             sqlite_vec.load(conn)
             conn.enable_load_extension(False)
