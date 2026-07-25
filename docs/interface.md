@@ -176,9 +176,10 @@ CLI 内部维护 `WorkingMemory` 实例：
 | GET | `/channels` | 列出所有已配置渠道 |
 | PATCH | `/channels` | 更新渠道配置 |
 | GET | `/system-prompt-preview` | 预览当前实际使用的完整 system prompt（含 skill 注入结果） |
-| GET | `/files/download?path=...&session_id=...` | 下载 deliver_file 交付的本地文件（attachment；jail：home 或 /tmp，扩展名白名单；Bearer/cookie/?token= 三通道鉴权） |
+| GET | `/files/download?path=...&session_id=...` | 下载 deliver_file 交付的本地文件（attachment；jail：home 或 /tmp，扩展名白名单；Bearer / cookie / 短期签名 URL 三通道鉴权） |
 | GET | `/files/deck?path=...&session_id=...` | pptx 项目目录的 deck.json + pages/*.json，`/ppt-preview` 预览页数据源（Bearer） |
-| GET | `/files/asset?path=...&session_id=...` | deck 项目 assets/ 下的图片（三通道鉴权，供 `<img>` 直链） |
+| POST | `/files/sign` | 用 Bearer 把 path 批量换成短期签名（`{path: "exp.sig"}`，10 分钟有效），供 `<img>`/`<a>` 直链拼 `?user=&sig=` 免带 header |
+| GET | `/files/asset?path=...&session_id=...` | deck 项目 assets/ 下的图片（Bearer / cookie / 短期签名 URL 三通道鉴权，供 `<img>` 直链） |
 
 `/api/files/*` 三个端点除了路径 jail，还有**会话级隔离**：必须带 `session_id`，且该 session
 的消息里确实存在 deliver_file 写入的 file 卡片（授权派生自 messages 表的 cards 列）——

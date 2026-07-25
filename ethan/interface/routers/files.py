@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 from pathlib import Path
 
@@ -27,6 +28,7 @@ from ethan.core.file_jail import ASSET_EXTS, DELIVER_EXTS, is_project_dir, resol
 from ethan.core.signed_url import sign_path
 from ethan.interface.routers.deps import verify_token, verify_token_or_cookie
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/files")
 
 
@@ -141,7 +143,9 @@ async def get_deck(path: str, session_id: str = ""):
     try:
         deck, pages = await asyncio.to_thread(_read_deck_files, d)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"bad deck.json: {e}")
+        # 原始异常含绝对路径/权限细节，不回显给客户端；服务端记日志即可
+        logger.warning("read deck failed (%s): %s", d, e)
+        raise HTTPException(status_code=500, detail="failed to read deck")
     # pptx_path 用实际交付（且已授权）的那个文件，而不是按目录名猜——
     # 猜出来的 <dirname>.pptx 可能不在 granted_files 里，下载必 403
     pptx_path = str(p) if p.suffix.lower() == ".pptx" and p.is_file() else None

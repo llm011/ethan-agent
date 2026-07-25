@@ -6,13 +6,17 @@ from fastapi import HTTPException, Request
 from ethan.core.context import set_user_id
 
 
-def _resolve_user(token: str, request: Request) -> str:
-    """token → user_id，命中后 set 进 ContextVar 并注入 request.state。"""
+def _resolve_user(token: str, request: Request) -> str | None:
+    """token → user_id，命中后 set 进 ContextVar 并注入 request.state；失败返回 None。
+
+    返回 Optional 而非直接抛 401，让 verify_token_or_cookie 能在 Bearer miss 后继续
+    尝试 cookie / 签名通道（否则一个过期 Bearer 会短路掉后两个兜底）。
+    """
     from ethan.core.users import get_user_store
 
     user_id = get_user_store().resolve_web_token(token)
     if user_id is None:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+        return None
     set_user_id(user_id)  # 后续 ensure_user_dirs / path 函数依赖此 ContextVar
     request.state.user_id = user_id
     return user_id
@@ -28,7 +32,10 @@ async def verify_token(request: Request) -> str:
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Unauthorized")
-    return _resolve_user(auth.removeprefix("Bearer ").strip(), request)
+    user_id = _resolve_user(auth.removeprefix("Bearer ").strip(), request)
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return user_id
 
 
 async def verify_token_or_cookie(request: Request) -> str:
@@ -41,14 +48,20 @@ async def verify_token_or_cookie(request: Request) -> str:
     token 放进 URL（会留在访问日志/浏览器历史里）。
     其余流程与 verify_token 一致：解析 user_id、set_user_id、注入 request.state。
     """
+    # 三通道依次尝试，任一命中即返回；前一通道 miss（如过期 Bearer）不短路后续，
+    # 否则前端揣着轮换前的旧 token 会让 cookie/签名兜底永远轮不到 → 全 401。
     auth = request.headers.get("Authorization", "")
     if auth.startswith("Bearer "):
-        return _resolve_user(auth.removeprefix("Bearer ").strip(), request)
+        user_id = _resolve_user(auth.removeprefix("Bearer ").strip(), request)
+        if user_id is not None:
+            return user_id
 
     # 前端写 cookie 时做了 encodeURIComponent，读回必须 unquote 才能与配置比对
     token = unquote(request.cookies.get("ethan_token", ""))
     if token:
-        return _resolve_user(token, request)
+        user_id = _resolve_user(token, request)
+        if user_id is not None:
+            return user_id
 
     # 签名通道：user + sig（"exp.sighex"）+ path（签名消息含 path，从 query 原样取）
     from ethan.core.signed_url import verify_path_sig

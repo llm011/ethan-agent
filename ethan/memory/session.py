@@ -231,6 +231,16 @@ class SessionStore:
                 await self._db.commit()
             except Exception:
                 pass  # Column already exists
+        # messages.session_id 索引：files 路由的 _session_grants（下载/预览鉴权）每次都
+        # SELECT cards FROM messages WHERE session_id=?，无索引会全表扫；长会话 + 一页多图
+        # 的 N+1 直链请求下会卡事件循环。IF NOT EXISTS 幂等。
+        try:
+            await self._db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id)"
+            )
+            await self._db.commit()
+        except Exception:
+            pass
         # Migration: sessions.mode（对话模式持久化）
         try:
             await self._db.execute("ALTER TABLE sessions ADD COLUMN mode TEXT NOT NULL DEFAULT ''")

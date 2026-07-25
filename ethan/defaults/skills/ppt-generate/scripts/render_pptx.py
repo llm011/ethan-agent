@@ -1083,7 +1083,11 @@ def _latex_tokenize(src: str):
 
 
 def _latex_parse_arg(toks, i):
-    """解析 ^/_ 或 \sqrt/\frac 的参数：{组} | 单个命令 | 单个字符。"""
+    r"""解析 ^/_ 或 \sqrt/\frac 的参数：{组} | 单个命令 | 单个字符。"""
+    # 跳过前导空格：\sqrt x / \frac a b 这类无花括号写法命令后有 sp token，
+    # 真实 LaTeX 视空格为分隔符而非参数，不跳会解析出空参数 → 公式内容静默丢失
+    while i < len(toks) and toks[i][0] == "sp":
+        i += 1
     if i < len(toks) and toks[i][0] == "lb":
         return _latex_parse_seq(toks, i + 1)
     if i < len(toks) and toks[i][0] == "cmd":
@@ -1187,11 +1191,13 @@ def render_latex(slide, el, theme, emu_per_px):
     latex_src = str(el.get("latex", ""))
     font_size = float(el.get("fontSize") or 20)
     color = el.get("color") or theme.get("fontColor", "#1F2937")
+    # 坐标字段用 .get 容错：LLM 生成的 latex 元素偶发漏 width/height，下标访问会在
+    # try 之前抛 KeyError（下面的降级 except 兜不住），导致整页/整份 pptx 渲染中断。
     # 两分支共用的基础字段构建一次，只在 paragraphs 上分叉（否则降级分支会静默丢 rotate 等字段）
     base_text_el = {
         "id": el.get("id"), "name": el.get("name"),
-        "left": el["left"], "top": el["top"],
-        "width": el["width"], "height": el["height"],
+        "left": el.get("left") or 0, "top": el.get("top") or 0,
+        "width": el.get("width") or 100, "height": el.get("height") or 40,
         "rotate": el.get("rotate"),
         "text": el.get("text"),
     }
@@ -1221,9 +1227,11 @@ def render_latex(slide, el, theme, emu_per_px):
 
 
 def _render_latex_omml(slide, el, theme, emu_per_px):
+    # 坐标用 .get 容错：默认 omml 路径也会被漏字段的 latex 元素触发 KeyError（下面的
+    # 降级 except 在 add_textbox 之后，兜不住这里），进而中断整份 pptx 渲染。
     box = slide.shapes.add_textbox(
-        px_to_emu(el["left"], emu_per_px), px_to_emu(el["top"], emu_per_px),
-        px_to_emu(el["width"], emu_per_px), px_to_emu(el["height"], emu_per_px),
+        px_to_emu(el.get("left") or 0, emu_per_px), px_to_emu(el.get("top") or 0, emu_per_px),
+        px_to_emu(el.get("width") or 100, emu_per_px), px_to_emu(el.get("height") or 40, emu_per_px),
     )
     if el.get("name") or el.get("id"):
         box.name = el.get("name") or el["id"]

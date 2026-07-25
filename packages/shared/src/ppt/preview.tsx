@@ -165,7 +165,10 @@ export function PptPreviewView({ path, sessionId, adapter }: PptPreviewProps) {
       const pdf = new jsPDF({ orientation: "landscape", unit: "px", format: [CANVAS_W, CANVAS_H] });
       const nodes = Array.from(container.children) as HTMLElement[];
       for (let i = 0; i < nodes.length; i++) {
-        const dataUrl = await toPng(nodes[i], { pixelRatio: 2, cacheBust: true });
+        // 不加 cacheBust：它会强制重取每个 <img>（附加 query 破坏缓存），Tauri
+        // webview 跨源重取的图无 cookie → 污染 canvas → toPng 抛 "Tainted canvases"，
+        // 整份 PDF 导出失败。URL 已带 session 级签名，缓存本就安全。
+        const dataUrl = await toPng(nodes[i], { pixelRatio: 2 });
         if (i > 0) pdf.addPage([CANVAS_W, CANVAS_H], "landscape");
         pdf.addImage(dataUrl, "PNG", 0, 0, CANVAS_W, CANVAS_H);
       }

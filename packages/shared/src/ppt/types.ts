@@ -116,8 +116,8 @@ export const DEFAULT_THEME: Required<Pick<PptTheme, "backgroundColor" | "themeCo
     notes: { fontSize: 10, color: "#9CA3AF" },
     header: { fontSize: 10, color: "#6B7280" },
     footer: { fontSize: 10, color: "#6B7280" },
-    partNumber: { fontSize: 60, bold: true },
-    itemNumber: { fontSize: 16, bold: true },
+    partNumber: { fontSize: 60, color: "#1E40AF", bold: true },
+    itemNumber: { fontSize: 16, color: "#1E40AF", bold: true },
   },
 };
 

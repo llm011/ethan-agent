@@ -31,9 +31,11 @@ export function PptChart({ el, colors }: { el: PptElement; colors: string[] }) {
   const labelSize = Math.max(8, Math.min(11, w / 50));
 
   const flat = series.flat();
-  // 正负值分开量程，以零轴为基线：负值向下/向左延伸，而不是产生负的 SVG 尺寸被静默丢弃
-  const posMax = Math.max(...flat.map((v) => Math.max(v, 0)), 0);
-  const negMax = Math.max(...flat.map((v) => Math.max(-v, 0)), 0);
+  // 正负值分开量程，以零轴为基线：负值向下/向左延伸，而不是产生负的 SVG 尺寸被静默丢弃。
+  // 用 reduce 而非 Math.max(...flat)——大数据量图表（上万点）spread 展开会溢出参数栈报
+  // RangeError，整页渲染崩。
+  const posMax = flat.reduce((a, v) => Math.max(a, v, 0), 0);
+  const negMax = flat.reduce((a, v) => Math.max(a, -v, 0), 0);
   const range = posMax + negMax || 1;
   // y 方向：v → 画布 y（0..ih，零轴在 yOf(0)）
   const yOf = (v: number) => ((posMax - v) / range) * ih;
@@ -46,7 +48,9 @@ export function PptChart({ el, colors }: { el: PptElement; colors: string[] }) {
   if (type === "pie" || type === "ring") {
     const vals = series[0] ?? [];
     const total = vals.reduce((a, b) => a + b, 0) || 1;
-    const cx = w / 2 - (data.legends?.length ? 40 : 0);
+    // 按 labels 判定是否为右侧图例让位——实际画在右边的是 labels（line 73），
+    // 不是 legends；legends 常缺省，用它判定会让饼图不偏移却仍画标签 → 标签压饼上
+    const cx = w / 2 - (labels.length ? 40 : 0);
     const cy = h / 2;
     const r = Math.min(w, h) / 2 - 12;
     const innerR = type === "ring" ? r * 0.55 : 0;
