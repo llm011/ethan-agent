@@ -23,7 +23,7 @@ metadata:
     - skill: lark-whiteboard
       scope: "复杂自由排版架构图（SVG/JSON DSL）。本技能 add_mermaid.py 仅用于原生 add_ons Mermaid 块这种轻量场景。"
 license: MIT
-version: 2.0.1
+version: 2.0.2
 source: internal (hermes agent, upgraded with Aime spec)
 ---
 
@@ -405,6 +405,8 @@ python ~/.ethan/skills/feishu-writer/scripts/transfer_owner.py <doc_token> \
 - **颜色滥用**：全文颜色不超过 3 种，每页不超过 5 处；状态列用 🔴🟡🟢 编码即可，不要全文彩虹化。
 - **图多文少 (All Charts, No Prose)**：图多不代表深度够。每张关键图后面必须配一段有深度的文字拆解，讲清机制细节、阈值取舍、边界条件和背后的工程动机——否则读者只能看个大概，理解不了"为什么这么设计"。图的密度要够（每个关键流程都配图），但文字的密度也要跟上。
 - **表格宽度 (Narrow Table)**：飞书文档创建时如果不指定 `<colgroup>`，表格会默认很窄、文字被挤到换行。**所有表格必须显式指定 `<colgroup><col width="..."/>` 并让总宽度接近 780**（2 列用 220+560，3 列用 220+280+280，4 列用 180+200+200+200）。已创建的窄表格用 `block_replace` 整体替换 table block 来加宽，`str_replace` 对 colgroup 不生效。
+- **大段文字未分点 (Wall of Text)**：当一段文字出现明显的"其一/其二"、"三个原因"、"四种情况"等并列结构时，必须拆成 list（`<ul>` 无序或 `<ol>` 有序），而不是一整段连续文字。判断标准：如果能在文字里找到 2 个以上同层级的并列点，就值得拆。但不要滥用——连贯的论述性文字（讲一个完整因果链）保持段落，强行拆 list 反而碎片化。用 `block_replace` 把单个 `<p>` 替换为 `<p>引导句</p>` + `<ul>分点</ul>`。
+- **左右布局未利用 (Missing Grid)**：当出现"左 vs 右"、"A 的定位 vs B 的定位"这种对比性论述时，用 `<grid><column width-ratio="0.5">` 左右布局比一整段文字更有视觉冲击力。典型场景：两个概念并排解释、两种方案对比定位。每栏正文不超过 200 字，不在分栏内再嵌套分栏。注意：column 里放 `<p>` 即可，不要放 table 或 whiteboard。
 
 ---
 
