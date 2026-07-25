@@ -24,11 +24,11 @@ services:
       # 共享宿主机密钥（只读）
       # lark-cli 目录如需持久化，可再加：- ./.lark-cli:/root/.lark-cli
       # gh CLI 配置（只读，可选）。token 认证见下方 GH_TOKEN。
-      - ~/.config/gh:/root/.config/gh:ro
-    # 清理 lark-cli event bus daemon 可能残留的 stale socket/pid/lock 文件
-    # （容器被 SIGKILL 时 daemon 来不及清理，导致重启后 exit=5 崩溃循环）。
-    # 用 bash 大括号扩展 + glob 删除，避免 docker compose 折叠标量把
-    # find 的 \( ... \) 反斜杠吞掉导致 bash syntax error。
+      - ~/.config:/root/.config
+      # 清理 lark-cli event bus daemon 可能残留的 stale socket/pid/lock 文件
+      # （容器被 SIGKILL 时 daemon 来不及清理，导致重启后 exit=5 崩溃循环）。
+      # 用 bash 大括号扩展 + glob 删除，避免 docker compose 折叠标量把
+      # find 的 \( ... \) 反斜杠吞掉导致 bash syntax error。
     command: >
       bash -c "
         rm -f /root/.lark-cli/events/*/bus.{sock,pid,alive.lock,fork.lock} 2>/dev/null;
