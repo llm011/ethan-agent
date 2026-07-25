@@ -191,34 +191,12 @@ class SessionStore:
 
     async def init(self) -> None:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        # 清理残留的 WAL 附属文件：Docker bind mount（macOS VirtioFS）或
-        # 异常退出后可能留下 -shm/-wal，新进程 mmap 这些旧文件会触发
-        # disk I/O error。只在 -wal 为空/不存在时删 -shm（有未 checkpoint
-        # 数据时保留 -wal，由新连接自动 recover）。
+        # 清理历史 WAL 残留（已切换到 DELETE 模式，-wal/-shm 不再产生）
         for suffix in ("-wal", "-shm"):
-            side = self._db_path.with_name(self._db_path.name + suffix)
-            try:
-                if not side.exists():
-                    continue
-                if suffix == "-shm":
-                    wal = self._db_path.with_name(self._db_path.name + "-wal")
-                    if not wal.exists() or wal.stat().st_size == 0:
-                        side.unlink(missing_ok=True)
-                elif side.stat().st_size == 0:
-                    side.unlink(missing_ok=True)
-            except OSError:
-                pass
+            self._db_path.with_name(self._db_path.name + suffix).unlink(missing_ok=True)
         self._db = await aiosqlite.connect(str(self._db_path))
-        # WAL + busy_timeout：sessions.db 需支持主 chat 流程写 + 后台 _maybe_consolidate
-        # / collect_signals / 12 点夜间任务并发读。非 WAL 模式下读会阻塞写，
-        # 且没有 busy_timeout 兜底会立即抛 database is locked，异常被 try/except
-        # 吞掉后可能留下 -shm/-wal 残留文件破坏一致性。
-        # Docker bind mount 等场景下 WAL 可能失败，fallback 到默认 DELETE 模式
-        # （与 store.py / vector_store.py 保持一致的容错策略）。
-        try:
-            await self._db.execute("PRAGMA journal_mode=WAL")
-        except Exception:
-            pass
+        # DELETE 模式（默认）：写时用 rollback journal，commit 后立即删除，无 -wal/-shm 残留。
+        # busy_timeout 兜底并发读写的 database is locked。
         await self._db.execute("PRAGMA busy_timeout=30000")
         await self._db.execute("PRAGMA foreign_keys=ON")
         await self._db.execute("""

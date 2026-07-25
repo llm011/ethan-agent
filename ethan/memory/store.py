@@ -46,14 +46,13 @@ class MemoryStore:
 
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
-            conn = sqlite3.connect(str(self._db_path), timeout=5.0)
+            # busy_timeout 对齐 SessionStore（30s）：三者写同一 sessions.db，
+            # DELETE 模式下写会阻塞读，_maybe_consolidate / collect_signals
+            # 与召回/心跳并发时 5s 不够。
+            conn = sqlite3.connect(str(self._db_path), timeout=30.0)
             conn.row_factory = sqlite3.Row
             conn.execute("PRAGMA foreign_keys=ON")
-            conn.execute("PRAGMA busy_timeout=5000")
-            try:
-                conn.execute("PRAGMA journal_mode=WAL")
-            except sqlite3.DatabaseError:
-                pass
+            conn.execute("PRAGMA busy_timeout=30000")
             self._conn = conn
             self._init_schema()
         return self._conn
