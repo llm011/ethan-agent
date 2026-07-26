@@ -177,6 +177,10 @@ private fun MainContent(authViewModel: AuthViewModel) {
                     onCreateApiKey = vm::createApiKey,
                     onDeleteApiKey = vm::deleteApiKey,
                     onDismissNewApiKey = vm::dismissNewApiKey,
+                    onInstallLarkDeps = vm::installLarkDeps,
+                    onValidateKnowledge = vm::validateKnowledge,
+                    onClearKnowledgeResult = vm::clearKnowledgeValidateResult,
+                    onSetTheme = vm::setTheme,
                     onClearError = vm::clearError,
                 )
             }
@@ -192,9 +196,22 @@ private fun MainContent(authViewModel: AuthViewModel) {
                     onEditChange = vm::onEditChange,
                     onSaveFact = vm::saveFact,
                     onDeleteFact = vm::deleteFact,
-                    onDeleteEpisode = vm::deleteEpisode,
                     onDeleteProcedure = vm::deleteProcedure,
                     onClearError = vm::clearError,
+                    onInsightsDateChange = vm::setInsightsDate,
+                    onRefreshInsights = vm::loadInsights,
+                    onRecordsFilterChange = vm::setRecordsFilter,
+                    onRecordsSearchChange = vm::setRecordsSearch,
+                    onSelectRecord = vm::selectRecord,
+                    onDismissRecord = vm::dismissRecord,
+                    onRecordEditContent = vm::onRecordEditContent,
+                    onSaveRecord = vm::saveRecord,
+                    onDeleteRecord = vm::deleteRecord,
+                    onConfirmRecord = vm::confirmRecord,
+                    onConsolidate = vm::triggerConsolidate,
+                    onConsolidateRecords = { vm.triggerRecordsConsolidate() },
+                    onLoadSummaries = vm::loadSummaries,
+                    onHideSummaries = vm::hideSummaries,
                 )
             }
 
@@ -209,7 +226,9 @@ private fun MainContent(authViewModel: AuthViewModel) {
                     onStartCreate = vm::startCreate,
                     onTitleChange = vm::onTitleChange,
                     onContentChange = vm::onContentChange,
-                    onTagsChange = vm::onTagsChange,
+                    onTagInputChange = vm::onTagInputChange,
+                    onAddTag = vm::addTagFromInput,
+                    onRemoveTag = vm::removeTag,
                     onSave = vm::save,
                     onDelete = vm::delete,
                     onClearError = vm::clearError,
@@ -221,6 +240,7 @@ private fun MainContent(authViewModel: AuthViewModel) {
                 val state by vm.state.collectAsState()
                 SkillsScreen(
                     state = state,
+                    onQueryChange = vm::onQueryChange,
                     onSelect = vm::selectSkill,
                     onStartCreate = vm::startCreate,
                     onNameChange = vm::onNameChange,

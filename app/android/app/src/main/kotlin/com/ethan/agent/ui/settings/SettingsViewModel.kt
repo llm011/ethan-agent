@@ -6,11 +6,19 @@ import com.ethan.agent.core.model.AgentSettings
 import com.ethan.agent.core.model.ApiKeyCreated
 import com.ethan.agent.core.model.ApiKeyInfo
 import com.ethan.agent.core.model.ChannelInfo
+import com.ethan.agent.core.model.FastRuleOptionsResponse
+import com.ethan.agent.core.model.FastRulesPatch
+import com.ethan.agent.core.model.FastRulesResponse
+import com.ethan.agent.core.model.KnowledgeValidateRequest
+import com.ethan.agent.core.model.LarkDepsStatus
 import com.ethan.agent.core.model.ProviderConfig
 import com.ethan.agent.core.model.SystemPromptPreview
 import com.ethan.agent.core.model.SystemSettings
+import com.ethan.agent.core.model.ToolTiersResponse
 import com.ethan.agent.data.EthanRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -20,6 +28,7 @@ import javax.inject.Inject
 
 enum class SettingsTab {
     Connection, General, Providers, Channels, Identity, Soul, Tools, Heartbeat, Profile, PromptPreview, ApiKeys,
+    FastRules, ToolTiers,
 }
 
 data class SettingsUiState(
@@ -37,6 +46,18 @@ data class SettingsUiState(
     val isLoading: Boolean = false,
     val saved: Boolean = false,
     val error: String? = null,
+    // Fast Rules
+    val fastRules: FastRulesResponse? = null,
+    val fastRuleOptions: FastRuleOptionsResponse? = null,
+    // Tool Tiers
+    val toolTiers: ToolTiersResponse? = null,
+    // Lark Deps
+    val larkDepsStatus: LarkDepsStatus? = null,
+    // Knowledge Validate
+    val knowledgeValidating: Boolean = false,
+    val knowledgeValidateResult: String? = null,
+    // Theme
+    val themeId: String = "system",
 )
 
 @HiltViewModel
@@ -45,6 +66,8 @@ class SettingsViewModel @Inject constructor(
 ) : ViewModel() {
     private val _state = MutableStateFlow(SettingsUiState())
     val state: StateFlow<SettingsUiState> = _state.asStateFlow()
+
+    private var larkPollJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -57,8 +80,12 @@ class SettingsViewModel @Inject constructor(
 
     fun setTab(tab: SettingsTab) {
         _state.update { it.copy(tab = tab) }
-        if (tab == SettingsTab.ApiKeys && _state.value.apiKeys.isEmpty()) {
-            loadApiKeys()
+        when (tab) {
+            SettingsTab.ApiKeys -> if (_state.value.apiKeys.isEmpty()) loadApiKeys()
+            SettingsTab.FastRules -> if (_state.value.fastRules == null) loadFastRules()
+            SettingsTab.ToolTiers -> if (_state.value.toolTiers == null) loadToolTiers()
+            SettingsTab.Channels -> loadLarkDepsStatus()
+            else -> Unit
         }
     }
 
@@ -103,6 +130,93 @@ class SettingsViewModel @Inject constructor(
                 .onSuccess { keys -> _state.update { it.copy(apiKeys = keys) } }
                 .onFailure { e -> _state.update { it.copy(error = repository.friendlyError(e)) } }
         }
+    }
+
+    fun loadFastRules() {
+        viewModelScope.launch {
+            runCatching {
+                val rules = repository.getFastRules()
+                val options = repository.getFastRuleOptions()
+                _state.update { it.copy(fastRules = rules, fastRuleOptions = options) }
+            }.onFailure { e ->
+                _state.update { it.copy(error = repository.friendlyError(e)) }
+            }
+        }
+    }
+
+    fun updateFastRules(patch: FastRulesPatch) {
+        viewModelScope.launch {
+            runCatching { repository.updateFastRules(patch) }
+                .onSuccess { loadFastRules() }
+                .onFailure { e -> _state.update { it.copy(error = repository.friendlyError(e)) } }
+        }
+    }
+
+    fun loadToolTiers() {
+        viewModelScope.launch {
+            runCatching { repository.getToolTiers() }
+                .onSuccess { tiers -> _state.update { it.copy(toolTiers = tiers) } }
+                .onFailure { e -> _state.update { it.copy(error = repository.friendlyError(e)) } }
+        }
+    }
+
+    fun loadLarkDepsStatus() {
+        viewModelScope.launch {
+            runCatching { repository.getLarkDepsStatus() }
+                .onSuccess { status ->
+                    _state.update { it.copy(larkDepsStatus = status) }
+                    if (status.installing) startLarkDepsPolling()
+                }
+                .onFailure { /* silent — Lark may not be configured */ }
+        }
+    }
+
+    fun installLarkDeps() {
+        viewModelScope.launch {
+            runCatching { repository.installLarkDeps() }
+                .onSuccess {
+                    _state.update { it.copy(larkDepsStatus = it.larkDepsStatus?.copy(installing = true)) }
+                    startLarkDepsPolling()
+                }
+                .onFailure { e -> _state.update { it.copy(error = repository.friendlyError(e)) } }
+        }
+    }
+
+    private fun startLarkDepsPolling() {
+        larkPollJob?.cancel()
+        larkPollJob = viewModelScope.launch {
+            while (true) {
+                delay(2_000)
+                val status = runCatching { repository.getLarkDepsStatus() }.getOrNull() ?: break
+                _state.update { it.copy(larkDepsStatus = status) }
+                if (!status.installing) break
+            }
+            larkPollJob = null
+        }
+    }
+
+    fun validateKnowledge(request: KnowledgeValidateRequest) {
+        viewModelScope.launch {
+            _state.update { it.copy(knowledgeValidating = true, knowledgeValidateResult = null) }
+            runCatching { repository.validateKnowledgeBackend(request) }
+                .onSuccess { resp ->
+                    val msg = if (resp.ok) "连接成功：${resp.message}" else "失败：${resp.message}"
+                    _state.update { it.copy(knowledgeValidateResult = msg) }
+                }
+                .onFailure { e ->
+                    _state.update { it.copy(knowledgeValidateResult = "错误：${repository.friendlyError(e)}") }
+                }
+            _state.update { it.copy(knowledgeValidating = false) }
+        }
+    }
+
+    fun clearKnowledgeValidateResult() {
+        _state.update { it.copy(knowledgeValidateResult = null) }
+    }
+
+    fun setTheme(themeId: String) {
+        _state.update { it.copy(themeId = themeId) }
+        // TODO("Track 7"): call EthanRepository.setTheme(themeId) once Track 7 lands
     }
 
     fun onServerUrlChange(url: String) {

@@ -7,18 +7,22 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
@@ -26,7 +30,9 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.ethan.agent.core.model.AgentSettings
+import com.ethan.agent.core.model.KnowledgeValidateRequest
 import com.ethan.agent.core.model.ProviderConfig
 import com.ethan.agent.core.model.SystemSettings
 import com.ethan.agent.ui.components.ErrorSnackbar
@@ -63,10 +70,21 @@ fun SettingsScreen(
     onCreateApiKey: (String) -> Unit,
     onDeleteApiKey: (String) -> Unit,
     onDismissNewApiKey: () -> Unit,
+    onInstallLarkDeps: () -> Unit,
+    onValidateKnowledge: (KnowledgeValidateRequest) -> Unit,
+    onClearKnowledgeResult: () -> Unit,
+    onSetTheme: (String) -> Unit,
     onClearError: () -> Unit,
 ) {
     val snackbar = remember { SnackbarHostState() }
     ErrorSnackbar(state.error, onClearError, snackbar)
+
+    state.knowledgeValidateResult?.let { msg ->
+        LaunchedEffect(msg) {
+            snackbar.showSnackbar(msg)
+            onClearKnowledgeResult()
+        }
+    }
 
     state.newApiKey?.let { key ->
         AlertDialog(
@@ -104,10 +122,16 @@ fun SettingsScreen(
                 when (state.tab) {
                     SettingsTab.Connection -> ConnectionTab(state, onServerUrlChange, onSaveServerUrl)
                     SettingsTab.General -> state.agentSettings?.let {
-                        GeneralTab(it, onUpdateAgent, onSaveAgent)
+                        GeneralTab(it, state.themeId, onUpdateAgent, onSaveAgent, onSetTheme)
                     }
                     SettingsTab.Providers -> ProvidersTab(state.providers, onUpdateProvider, onSaveProviders)
-                    SettingsTab.Channels -> ChannelsTab(state.channels, onChannelChange, onSaveChannel)
+                    SettingsTab.Channels -> ChannelsTab(
+                        state = state,
+                        onChange = onChannelChange,
+                        onSave = onSaveChannel,
+                        onInstallLarkDeps = onInstallLarkDeps,
+                        onValidateKnowledge = onValidateKnowledge,
+                    )
                     SettingsTab.Identity -> SystemTextTab("身份 (identity.md)", state.systemSettings?.identity ?: "", {
                         onUpdateSystem(state.systemSettings?.copy(identity = it) ?: SystemSettings(identity = it))
                     }, onSaveSystem)
@@ -123,6 +147,8 @@ fun SettingsScreen(
                     SettingsTab.Profile -> ProfileTab(state.profile, onProfileChange, onSaveProfile)
                     SettingsTab.PromptPreview -> PromptPreviewTab(state, onLoadPromptPreview)
                     SettingsTab.ApiKeys -> ApiKeysTab(state, onCreateApiKey, onDeleteApiKey)
+                    SettingsTab.FastRules -> FastRulesTab(state)
+                    SettingsTab.ToolTiers -> ToolTiersTab(state)
                 }
             }
         }
@@ -155,6 +181,8 @@ private fun SettingsTabRow(selected: SettingsTab, onTabChange: (SettingsTab) -> 
                                     SettingsTab.Profile -> "画像"
                                     SettingsTab.PromptPreview -> "预览"
                                     SettingsTab.ApiKeys -> "Keys"
+                                    SettingsTab.FastRules -> "Fast Rules"
+                                    SettingsTab.ToolTiers -> "路由档位"
                                 },
                                 style = MaterialTheme.typography.labelSmall,
                             )
@@ -182,8 +210,24 @@ private fun ConnectionTab(state: SettingsUiState, onUrlChange: (String) -> Unit,
     }
 }
 
+private val THEME_OPTIONS = listOf(
+    "system" to "跟随系统",
+    "light" to "浅色",
+    "dark" to "深色",
+    "qingwa" to "青瓦",
+    "warm_orange" to "暖橙",
+    "plain_paper" to "素纸",
+    "mist" to "微雾",
+)
+
 @Composable
-private fun GeneralTab(settings: AgentSettings, onUpdate: (AgentSettings) -> Unit, onSave: () -> Unit) {
+private fun GeneralTab(
+    settings: AgentSettings,
+    themeId: String,
+    onUpdate: (AgentSettings) -> Unit,
+    onSave: () -> Unit,
+    onSetTheme: (String) -> Unit,
+) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(settings.agentName, { onUpdate(settings.copy(agentName = it)) }, label = { Text("Agent 名称") }, modifier = Modifier.fillMaxWidth())
@@ -195,6 +239,31 @@ private fun GeneralTab(settings: AgentSettings, onUpdate: (AgentSettings) -> Uni
                 Switch(settings.heartbeatEnabled, { onUpdate(settings.copy(heartbeatEnabled = it)) })
             }
             TextButton(onClick = onSave) { Text("保存") }
+        }
+    }
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("主题", style = MaterialTheme.typography.titleSmall)
+            THEME_OPTIONS.forEach { (id, label) ->
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(label)
+                    if (themeId == id) {
+                        Text("✓", color = MaterialTheme.colorScheme.primary)
+                    } else {
+                        TextButton(onClick = { onSetTheme(id) }) { Text("选择") }
+                    }
+                }
+            }
+            Text(
+                "注：完整主题切换由 Track 7 实现，当前仅记录选择",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -228,13 +297,16 @@ private fun ProvidersTab(
     TextButton(onClick = onSave) { Text("保存 Provider 配置") }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ChannelsTab(
-    channels: List<com.ethan.agent.core.model.ChannelInfo>,
+    state: SettingsUiState,
     onChange: (String, String, String) -> Unit,
     onSave: (String) -> Unit,
+    onInstallLarkDeps: () -> Unit,
+    onValidateKnowledge: (KnowledgeValidateRequest) -> Unit,
 ) {
-    channels.forEach { channel ->
+    state.channels.forEach { channel ->
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(channel.name, style = MaterialTheme.typography.titleSmall)
@@ -247,6 +319,153 @@ private fun ChannelsTab(
                     )
                 }
                 TextButton(onClick = { onSave(channel.id) }) { Text("保存") }
+
+                if (channel.id == "lark") {
+                    HorizontalDivider()
+                    LarkDepsPanel(state, onInstallLarkDeps)
+                }
+            }
+        }
+    }
+
+    KnowledgeValidatePanel(state, onValidateKnowledge)
+}
+
+@Composable
+private fun LarkDepsPanel(state: SettingsUiState, onInstall: () -> Unit) {
+    val deps = state.larkDepsStatus
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("飞书依赖状态", style = MaterialTheme.typography.labelLarge)
+        if (deps == null) {
+            Text("加载中…", style = MaterialTheme.typography.bodySmall)
+            return
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            DepChip("oapi", deps.larkOapiInstalled)
+            DepChip("cli", deps.larkCliInstalled)
+            DepChip("app", deps.larkCliAppSynced)
+        }
+        if (deps.installing) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                CircularProgressIndicator(strokeWidth = 2.dp)
+                Text("安装中…", style = MaterialTheme.typography.bodySmall)
+            }
+        } else if (!deps.larkOapiInstalled || !deps.larkCliInstalled) {
+            Button(onClick = onInstall) { Text("安装依赖") }
+        }
+        if (deps.lastError.isNotBlank()) {
+            Text("错误: ${deps.lastError}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+        }
+    }
+}
+
+@Composable
+private fun DepChip(label: String, ok: Boolean) {
+    val color = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+    Text(
+        "$label: ${if (ok) "✓" else "✗"}",
+        style = MaterialTheme.typography.labelSmall,
+        color = color,
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun KnowledgeValidatePanel(
+    state: SettingsUiState,
+    onValidate: (KnowledgeValidateRequest) -> Unit,
+) {
+    var showSheet by remember { mutableStateOf(false) }
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("知识库连通性", style = MaterialTheme.typography.titleSmall)
+            OutlinedButton(onClick = { showSheet = true }, modifier = Modifier.fillMaxWidth()) {
+                Text("测试连接")
+            }
+        }
+    }
+
+    if (showSheet) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(onDismissRequest = { showSheet = false }, sheetState = sheetState) {
+            KnowledgeValidateSheet(
+                validating = state.knowledgeValidating,
+                onValidate = { req ->
+                    onValidate(req)
+                    showSheet = false
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun KnowledgeValidateSheet(
+    validating: Boolean,
+    onValidate: (KnowledgeValidateRequest) -> Unit,
+) {
+    var backend by remember { mutableStateOf("filesystem") }
+    var path by remember { mutableStateOf("") }
+    var vault by remember { mutableStateOf("") }
+    var folder by remember { mutableStateOf(".") }
+    var endpoint by remember { mutableStateOf("") }
+    var apiKey by remember { mutableStateOf("") }
+
+    val backends = listOf("filesystem", "obsidian", "external")
+
+    Column(
+        Modifier.padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text("知识库验证", style = MaterialTheme.typography.titleMedium)
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            backends.forEach { b ->
+                FilterChip(
+                    selected = backend == b,
+                    onClick = { backend = b },
+                    label = { Text(b) },
+                )
+            }
+        }
+
+        when (backend) {
+            "filesystem" -> OutlinedTextField(path, { path = it }, label = { Text("路径") }, modifier = Modifier.fillMaxWidth())
+            "obsidian" -> {
+                OutlinedTextField(vault, { vault = it }, label = { Text("Vault 路径") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(folder, { folder = it }, label = { Text("Folder") }, modifier = Modifier.fillMaxWidth())
+            }
+            "external" -> {
+                OutlinedTextField(endpoint, { endpoint = it }, label = { Text("Endpoint") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(
+                    apiKey,
+                    { apiKey = it },
+                    label = { Text("API Key") },
+                    modifier = Modifier.fillMaxWidth(),
+                    visualTransformation = PasswordVisualTransformation(),
+                )
+            }
+        }
+
+        if (validating) {
+            CircularProgressIndicator()
+        } else {
+            Button(
+                onClick = {
+                    onValidate(
+                        KnowledgeValidateRequest(
+                            backend = backend,
+                            obsidianVaultPath = vault,
+                            obsidianFolder = folder,
+                            externalBaseUrl = endpoint,
+                            externalApiKey = apiKey,
+                        )
+                    )
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("测试连接")
             }
         }
     }
@@ -310,6 +529,131 @@ private fun ApiKeysTab(
             }
             IconButton(onClick = { onDelete(key.id) }) {
                 Icon(Icons.Default.Delete, contentDescription = "删除")
+            }
+        }
+    }
+}
+
+@Composable
+private fun FastRulesTab(state: SettingsUiState) {
+    val rules = state.fastRules
+    val options = state.fastRuleOptions
+
+    if (rules == null) {
+        LoadingBox()
+        return
+    }
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("快速基础工具 (fast_base_tools)", style = MaterialTheme.typography.titleSmall)
+            if (rules.fastBaseTools.isEmpty()) {
+                Text("（无）", style = MaterialTheme.typography.bodySmall)
+            } else {
+                rules.fastBaseTools.forEach { tool ->
+                    Text("• $tool", style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        }
+    }
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Fast Rules (${rules.fastRules.size})", style = MaterialTheme.typography.titleSmall)
+            if (rules.fastRules.isEmpty()) {
+                Text("尚无规则", style = MaterialTheme.typography.bodySmall)
+            } else {
+                rules.fastRules.forEach { rule ->
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(rule.name, style = MaterialTheme.typography.labelLarge)
+                        if (rule.keywords.isNotEmpty()) {
+                            Text("关键词: ${rule.keywords.joinToString(", ")}", style = MaterialTheme.typography.bodySmall)
+                        }
+                        if (rule.tools.isNotEmpty()) {
+                            Text("工具: ${rule.tools.joinToString(", ")}", style = MaterialTheme.typography.bodySmall)
+                        }
+                        if (rule.skills.isNotEmpty()) {
+                            Text("技能: ${rule.skills.joinToString(", ")}", style = MaterialTheme.typography.bodySmall)
+                        }
+                        HorizontalDivider()
+                    }
+                }
+            }
+        }
+    }
+
+    if (options != null) {
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    "可挂载工具 (${options.tools.size}) · 已安装技能 (${options.skills.size})",
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                Text(
+                    "在 Web 或桌面端编辑 Fast Rules 后此处自动刷新",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ToolTiersTab(state: SettingsUiState) {
+    val tiers = state.toolTiers
+
+    if (tiers == null) {
+        LoadingBox()
+        return
+    }
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("汇总", style = MaterialTheme.typography.titleSmall)
+            Text("Fast: ${tiers.fastCount} 工具 (含 Fast Rules: ${tiers.fastRuleToolCount})", style = MaterialTheme.typography.bodySmall)
+            Text("Full: ${tiers.fullCount} 工具", style = MaterialTheme.typography.bodySmall)
+            Text("Longtail: ${tiers.longtailCount} 工具", style = MaterialTheme.typography.bodySmall)
+            Text("总计: ${tiers.totalCount}", style = MaterialTheme.typography.bodySmall)
+        }
+    }
+
+    tiers.tiers.forEach { tier ->
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("${tier.label} (${tier.tools.size})", style = MaterialTheme.typography.titleSmall)
+                Text(tier.desc, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                HorizontalDivider()
+                tier.tools.forEach { tool ->
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(tool.name, style = MaterialTheme.typography.labelMedium)
+                            if (tool.description.isNotBlank()) {
+                                Text(
+                                    tool.description.take(80) + if (tool.description.length > 80) "…" else "",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        val flags = buildList {
+                            if (tool.fastPath) add("fast")
+                            if (tool.sideEffect) add("side")
+                            if (tool.noCompress) add("raw")
+                        }
+                        if (flags.isNotEmpty()) {
+                            Text(
+                                flags.joinToString(" "),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                }
             }
         }
     }
