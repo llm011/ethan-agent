@@ -9,10 +9,9 @@ def _kb_for(user_id: str, scene: str = "") -> KnowledgeBase:
 
 
 _SCENE_DESC = (
-    "Scene/scope for isolation (e.g. 'work', 'life'). "
-    "Empty = knowledge base root (default, shared). "
-    "'work' = knowledge base root's work/ subdir. "
-    "Different scenes are isolated for storage and search."
+    "Scene/scope for isolation. Default 'work' for work-related queries. "
+    "Use 'life' for personal/life content. Use empty string '' only when explicitly searching across all scenes. "
+    "Different scenes are isolated — wrong scene = no results. When unsure, prefer 'work'."
 )
 
 _FRONTMATTER_DESC = (
@@ -28,7 +27,7 @@ class KnowledgeSearchTool(BaseTool):
     fast_path = True  # 常驻：本地个人知识库是高频核心能力，fast 档也要直接可见，
                       # 否则模型看不到它、会被 getnote 等「知识库」字样的 skill 抢走
     name = "knowledge_search"
-    description = "搜索本地个人知识库（knowledge base）。用户说「查知识库/找我存过的资料」时用它；对用户已沉淀的主题，先于 web_search 调用。注意：这是 ethan 内置的本地知识库，不是 Get笔记等外部笔记服务。"
+    description = "搜索本地个人知识库（knowledge base）。用户说「查知识库/找我存过的资料」时用它；对用户已沉淀的主题，先于 web_search 调用。注意：这是 ethan 内置的本地知识库，不是 Get笔记等外部笔记服务。scene 必传工作向查询用 'work'、生活类用 'life'，留空仅用于跨场景搜索；scene 选错会搜不到。"
     parameters = {
         "type": "object",
         "properties": {
