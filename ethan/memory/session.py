@@ -195,8 +195,10 @@ class SessionStore:
         for suffix in ("-wal", "-shm"):
             self._db_path.with_name(self._db_path.name + suffix).unlink(missing_ok=True)
         self._db = await aiosqlite.connect(str(self._db_path))
-        # DELETE 模式（默认）：写时用 rollback journal，commit 后立即删除，无 -wal/-shm 残留。
-        # busy_timeout 兜底并发读写的 database is locked。
+        # DELETE 模式：journal_mode 是 DB 级持久化属性，曾经设过 WAL 就会默认恢复 WAL。
+        # 必须每次连接后显式 PRAGMA journal_mode=DELETE，否则会重新生成 -wal/-shm 文件。
+        # DELETE 模式下写时用 rollback journal，commit 后立即删除，无 -wal/-shm 残留。
+        await self._db.execute("PRAGMA journal_mode=DELETE")
         await self._db.execute("PRAGMA busy_timeout=30000")
         await self._db.execute("PRAGMA foreign_keys=ON")
         await self._db.execute("""
