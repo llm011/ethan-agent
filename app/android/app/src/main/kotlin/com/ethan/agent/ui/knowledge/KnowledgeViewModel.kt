@@ -21,7 +21,8 @@ data class KnowledgeUiState(
     val selected: KnowledgeItem? = null,
     val title: String = "",
     val content: String = "",
-    val tags: String = "",
+    val tagChips: List<String> = emptyList(),
+    val tagInput: String = "",
     val isCreating: Boolean = false,
     val isLoading: Boolean = false,
     val error: String? = null,
@@ -59,10 +60,7 @@ class KnowledgeViewModel @Inject constructor(
     fun onQueryChange(query: String) {
         _state.update { it.copy(query = query) }
         searchJob?.cancel()
-        searchJob = viewModelScope.launch {
-            delay(300)
-            load()
-        }
+        searchJob = viewModelScope.launch { delay(300); load() }
     }
 
     fun toggleSemantic() {
@@ -77,25 +75,55 @@ class KnowledgeViewModel @Inject constructor(
                 isCreating = false,
                 title = item.title,
                 content = item.content ?: "",
-                tags = item.tags?.joinToString(", ") ?: "",
+                tagChips = item.tags ?: emptyList(),
+                tagInput = "",
             )
         }
     }
 
     fun startCreate() {
         _state.update {
-            it.copy(selected = null, isCreating = true, title = "", content = "", tags = "")
+            it.copy(selected = null, isCreating = true, title = "", content = "", tagChips = emptyList(), tagInput = "")
         }
     }
 
     fun onTitleChange(v: String) { _state.update { it.copy(title = v) } }
     fun onContentChange(v: String) { _state.update { it.copy(content = v) } }
-    fun onTagsChange(v: String) { _state.update { it.copy(tags = v) } }
+
+    fun onTagInputChange(v: String) {
+        if (v.endsWith(",") || v.endsWith("\n")) {
+            val tag = v.trimEnd(',', '\n').trim()
+            if (tag.isNotEmpty() && tag !in _state.value.tagChips) {
+                _state.update { it.copy(tagChips = it.tagChips + tag, tagInput = "") }
+            } else {
+                _state.update { it.copy(tagInput = "") }
+            }
+        } else {
+            _state.update { it.copy(tagInput = v) }
+        }
+    }
+
+    fun addTagFromInput() {
+        val tag = _state.value.tagInput.trim()
+        if (tag.isNotEmpty() && tag !in _state.value.tagChips) {
+            _state.update { it.copy(tagChips = it.tagChips + tag, tagInput = "") }
+        } else {
+            _state.update { it.copy(tagInput = "") }
+        }
+    }
+
+    fun removeTag(tag: String) {
+        _state.update { it.copy(tagChips = it.tagChips - tag) }
+    }
 
     fun save() {
         viewModelScope.launch {
             try {
-                val tags = _state.value.tags.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                val tags = buildList {
+                    addAll(_state.value.tagChips)
+                    val pending = _state.value.tagInput.trim()
+                    if (pending.isNotEmpty()) add(pending)
+                }
                 if (_state.value.isCreating) {
                     repository.addKnowledge(_state.value.title, _state.value.content, tags)
                 } else {

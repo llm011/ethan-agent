@@ -1,3 +1,4 @@
+import java.io.File
 import java.util.Properties
 
 plugins {
@@ -23,7 +24,7 @@ fun loadSigningProps(): Properties? {
     }
     // 否则读 ~/.gradle/gradle.properties
     val gradleHome = System.getProperty("user.home") ?: return null
-    val file = java.io.File(gradleHome, ".gradle/gradle.properties")
+    val file = File(gradleHome, ".gradle/gradle.properties")
     if (!file.exists()) return null
     file.inputStream().use { props.load(it) }
     if (props.getProperty("ANDROID_STORE_FILE") == null) return null
@@ -50,7 +51,7 @@ android {
         create("release") {
             val props = loadSigningProps()
             if (props != null) {
-                storeFile = java.io.File(props.getProperty("ANDROID_STORE_FILE"))
+                storeFile = File(props.getProperty("ANDROID_STORE_FILE"))
                 storePassword = props.getProperty("ANDROID_STORE_PASSWORD")
                 keyAlias = props.getProperty("ANDROID_KEY_ALIAS")
                 keyPassword = props.getProperty("ANDROID_KEY_PASSWORD")
