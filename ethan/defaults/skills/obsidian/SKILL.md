@@ -41,6 +41,41 @@ trigger:
 
 Use this skill for filesystem-first Obsidian vault work: reading notes, listing notes, searching note files, creating notes, appending content, adding wikilinks, managing tags, maintaining backlinks, and editing frontmatter.
 
+## 🚫 硬规则（必须遵守，不可绕过）
+
+### R1：写入笔记只用 knowledge_* 工具
+
+所有写入 Obsidian 笔记的操作，必须通过 `knowledge_add` / `knowledge_edit` 完成。
+
+- ❌ 禁止 `file_write` 直接写 markdown 文件
+- ❌ 禁止 `shell` 的 `mkdir` / `cat` / `echo` / `python3 -c "open(...).write(...)"`
+- ❌ 禁止自己拼接 vault 路径——路径由后端按 scene 自动管理（`<vault>/<scene>/<slug>.md`）
+- ✅ 新建 → `knowledge_add(title, content, tags, scene, frontmatter)`
+- ✅ 追加 → `knowledge_edit(source, content, mode="append", scene)`
+- ✅ 整篇替换 → `knowledge_edit(source, content, mode="replace", scene, frontmatter)`
+
+**判断标准**：只要写入的内容是笔记/资料/纪要/PRD/设计文档等知识库条目（即使已经用 lark-cli / web_fetch 拉取了原文），写回时也必须走 knowledge_* 工具。
+
+**为什么**：knowledge_* 工具会自动加 frontmatter（title/type/tags/created/updated，由 `yaml.safe_dump` 安全生成）、自动建子目录、自动建索引支持全文搜索；file_write 直写会绕过这一切，导致路径平铺根目录、frontmatter 字段缺失、搜索查不到。
+
+### R2：内容来自外部文档/链接时，frontmatter={"source": ...} 必传
+
+凡是笔记内容派生自外部网页/飞书文档/链接（用户提供了 URL，或你用 lark-cli / web_fetch 拉取过原文），调用 `knowledge_add` / `knowledge_edit` 时必须传 `frontmatter={"source": "{原始 URL}"}`。
+
+- 固定字段（`title` / `type` / `tags` / `created` / `updated`）由后端自动管理，**不要**在 frontmatter 里重复传
+- `type` 由 `tags[0]` 自动推断，无需手动指定
+- 可按需追加 `author` / `published` 等扩展字段
+
+### R3：scene 按场景区分
+
+| 内容类型 | scene | 示例 |
+|---|---|---|
+| 工作向记录 | `work` | PRD、设计文档、会议纪要、技术方案、工作沉淀 |
+| 个人/生活向 | `life` | 个人学习、生活记录、家庭事项 |
+| 不确定 | `work` | 默认 work，用户明确说生活类时切 life |
+
+scene 决定子目录（`<vault>/work/...` vs `<vault>/life/...`），不传 scene 会平铺到 vault 根目录——这是禁止的。
+
 ## Vault path
 
 Use a known or resolved vault path before calling file tools.
@@ -71,14 +106,29 @@ Use `search_files` for both filename and content searches. Prefer this over `gre
 
 ## Create a note
 
-Use `write_file` with the resolved absolute path and the full markdown content. Prefer this over shell heredocs or `echo` because it avoids shell quoting issues and returns structured results.
+调用 `knowledge_add` 工具创建笔记。**不要**用 `write_file` / `shell` / `file_write` 直写文件——见上方硬规则 R1。
+
+```
+knowledge_add(
+    title="笔记标题",
+    content="Markdown 正文（不要带 frontmatter，后端自动生成）",
+    tags=["work/coze", "work/prd"],   # 第一个 tag 自动成为 type
+    scene="work",                     # 必传，决定子目录
+    frontmatter={"source": "https://...原始 URL..."}  # 来自外部链接时必传 R2
+)
+```
+
+后端会自动：
+- 生成 frontmatter（`title` / `created` / `updated` / `type` / `tags`），用 `yaml.safe_dump` 安全序列化
+- 写到 `<vault>/<scene>/<slug>.md`（slug 由标题小写化生成，重名追加 `-1`/`-2`）
+- 建立全文搜索索引
 
 ### 内容质量要求
 
 写入 Obsidian 的内容必须遵循以下原则：
 
 1. **内容完整性**：不要只保存摘要或片段，尽量保留原始内容的完整信息（正文、代码块、表格、列表等）。如果来源是网页或文档，应提取全部有价值内容。特别是**飞书文档**，必须调用 lark-doc 技能的 `scripts/fetch_doc.py` 脚本获取完整 Markdown 内容，不要仅凭记忆或摘要转写。
-2. **格式规范**：使用标准 Markdown 格式，确保标题层级清晰、代码块有语言标识、列表缩进正确、表格对齐。
+2. **格式规范**：使用标准 Markdown 格式，确保标题层级清晰、代码块有语言标识、列表缩进正确、表格对齐。飞书的 `<blockquote>` / `<cite>` / `<colgroup>` 等专有标签需在写入前清理为标准 Markdown（`>` / `[[wikilink]]` / 标准 table）。
 3. **图片本地化**：笔记中引用的图片**必须先下载到 vault 的 `assets/` 目录**，然后使用相对路径或 wikilink 引用，不要直接引用外部 URL。
    - 下载路径：`<vault>/assets/<有意义的文件名>.png`（按内容命名，避免随机串）
    - 引用方式：`![[assets/my-image.png]]` 或 `![描述](assets/my-image.png)`
@@ -86,18 +136,18 @@ Use `write_file` with the resolved absolute path and the full markdown content. 
 
 ## Append to a note
 
-Prefer a native file-tool workflow when it is not awkward:
+调用 `knowledge_edit(source, content, mode="append", scene)` 追加内容。`source` 是笔记的 slug 或绝对路径（之前 `knowledge_add` 的返回值）。
 
-- Read the target note with `read_file`.
-- Use `patch` for an anchored append when there is stable context, such as adding a section after an existing heading or appending before a known trailing block.
-- Use `write_file` when rewriting the whole note is clearer than constructing a fragile patch.
+- ✅ 追加 → `knowledge_edit(source, content, mode="append", scene)`
+- ✅ 整篇替换 → `knowledge_edit(source, content, mode="replace", scene, frontmatter)`
+- ❌ 不要用 `read_file` + `write_file` 拼接整篇内容
+- ❌ 不要用 `shell` 的 `echo >>` 追加
 
-For an anchored append with `patch`, replace the anchor with the anchor plus the new content.
-For a simple append with no stable context, `terminal` is acceptable if it is the clearest safe option.
+`mode="replace"` 会保留原文件的 `created` 字段，只刷新 `updated` 为今天。
 
 ## Targeted edits
 
-Use `patch` for focused note changes when the current content gives you stable context. Prefer this over shell text rewriting.
+定向修改用 `knowledge_edit(source, content, mode="replace", scene)` 整篇替换。当前 `knowledge_edit` 不支持局部 patch，需要修改局部内容时：先 `knowledge_read(source)` 读全文 → 在内存里改 → `knowledge_edit(source, modified_content, mode="replace", scene)`。
 
 ## Wikilinks
 
@@ -115,30 +165,25 @@ Obsidian links notes with `[[Note Name]]` syntax. When creating notes, use these
 
 ## Frontmatter / Properties
 
-Notes may start with a YAML frontmatter block delimited by `---`. When creating or editing notes, **必须**遵循以下元数据规范。
+笔记的 frontmatter 由 `knowledge_add` / `knowledge_edit` 后端自动生成，**不要**在 `content` 里手写 frontmatter 块。后端用 `yaml.safe_dump` 安全序列化，避免引号/冒号/反斜杠导致的解析错误。
 
-### 必填 Frontmatter 模板
+### 自动生成的字段（不要手动传）
 
-每篇新笔记顶部必须包含以下 YAML 块：
+| 字段 | 来源 | 说明 |
+|---|---|---|
+| `title` | `knowledge_add(title=...)` | 笔记标题，引号风格由 yaml.safe_dump 按内容自动决定 |
+| `created` | 后端 | 首次创建时设为今天；`knowledge_edit(mode=replace)` 时从原文件保留 |
+| `updated` | 后端 | 每次写入刷新为今天 |
+| `type` | `tags[0]` 自动推断 | 不要手动传，传了也会被忽略 |
+| `tags` | `knowledge_add(tags=[...])` | 层级标签列表 |
 
-```yaml
----
-title: "笔记的标题"
-source: "原始 URL（飞书/网页等）；若为原创填 original"
-created: YYYY-MM-DD HH:mm:ss
-type: [prd, tech-design, meeting, reference, workflow]  # 按内容类型选填
-tags:
-  - work/coze       # 一级为工作区/项目，二级为具体模块
-  - prd/schedule    # 场景标签
----
-```
+### 扩展字段（通过 frontmatter 参数传入）
 
-字段说明：
-- `title`：笔记标题，必填。
-- `source`：来源 URL（飞书文档、网页链接等）；纯原创内容填 `original`。
-- `created`：创建时间，格式 `YYYY-MM-DD HH:mm:ss`。
-- `type`：内容类型，可选值：`prd` / `tech-design` / `meeting` / `reference` / `workflow`。
-- `tags`：层级标签列表，详见下方标签规范。
+| 字段 | 何时传 | 示例 |
+|---|---|---|
+| `source` | 内容来自外部 URL 时必传（R2） | `frontmatter={"source": "https://..."}` |
+| `author` | 需要记录作者时 | `frontmatter={"author": "张三"}` |
+| `published` | 需要记录发布时间时 | `frontmatter={"published": "2026-07-15"}` |
 
 ### 标签（Tags）规范
 
@@ -147,18 +192,19 @@ tags:
 常用标签体系：
 - `work/<项目名>` — 项目归属（如 `work/coze`、`work/lark`）
 - `tech/<技术栈>` — 技术研究（如 `tech/electron`、`tech/mcp`）
-- `work/prd` — PRD / 设计案
-- `work/tech-design` — 技术方案
-- `work/meeting` — 会议纪要
+- `work/prd` — PRD / 设计案（type 自动推断为 `prd`）
+- `work/tech-design` — 技术方案（type 自动推断为 `tech-design`）
+- `work/meeting` — 会议纪要（type 自动推断为 `meeting`）
+- `work/reference` — 参考资料（type 自动推断为 `reference`）
 - `work/todo` — 个人待办
 - `life/<分类>` — 生活类内容
 
 **规则**：
-- YAML 中的标签**不加** `#` 号；正文中的 inline 标签**必须**以 `#` 开头。
-- 创建新标签前，先运行 `tag_manager.py list` 查询已有标签，优先复用。
-- 合法字符：字母、数字、`_`、`-`、`/`；不以数字开头。
+- YAML 中的标签**不加** `#` 号；正文中的 inline 标签**必须**以 `#` 开头
+- 创建新标签前，先运行 `tag_manager.py list` 查询已有标签，优先复用
+- 合法字符：字母、数字、`_`、`-`、`/`；不以数字开头
 
-To update frontmatter on an existing note, read the note with `read_file` first, then use `patch` against the lines between the two `---` fences. Keep YAML valid; arrays can be inline (`[a, b]`) or block-list style.
+To update frontmatter on an existing note: 调用 `knowledge_edit(source, content, mode="replace", scene, frontmatter={...})` 整篇替换，frontmatter 参数里只传扩展字段（如 `source`），固定字段（`title` / `type` / `tags` / `created` / `updated`）由后端管理。不要用 `read_file` + `patch` 改 frontmatter——这会绕过 yaml.safe_dump，可能产出非法 YAML。
 
 ## Tag Management
 
