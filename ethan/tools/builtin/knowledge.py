@@ -47,7 +47,13 @@ class KnowledgeSearchTool(BaseTool):
             return f"No results found in knowledge base for: {query}"
         lines = []
         for item in results:
-            lines.append(f"## {item.title}\n{item.snippet()}\n[source: {item.source}]")
+            lines.append(
+                f"## {item.title}\n{item.snippet()}\n[source: {item.source}]"
+            )
+        lines.append(
+            "\n---\n以上为摘要预览。要看某条完整正文，调 knowledge_read(source=对应 source, scene=\"work\")。"
+            "回答用户问题前若摘要信息不足，**务必**先 knowledge_read 读全文，不要跳到 web_search 或外部链接。"
+        )
         return "\n\n".join(lines)
 
 
@@ -83,9 +89,9 @@ class KnowledgeReadTool(BaseTool):
     fast_path = True  # 与 search 成对：search 找到条目后常要读全文，fast 档也得直接可见
     name = "knowledge_read"
     description = (
-        "读取本地个人知识库中某一条的完整内容（标题/标签/正文全文）。"
-        "knowledge_search 只返回摘要列表，需要看某条的完整正文（或编辑前先读全文）时用它。"
-        "source 用 knowledge_search 结果里的 source（文件路径）。"
+        "读取本地个人知识库中某一条的完整正文（不截断）。"
+        "knowledge_search 只返回 800 字摘要预览，回答用户问题前若摘要信息不足，**务必**先调本工具读全文，"
+        "不要跳到 web_search 或拉外部链接。source 用 knowledge_search 返回的 source 字段。"
     )
     parameters = {
         "type": "object",

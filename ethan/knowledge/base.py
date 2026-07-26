@@ -20,7 +20,7 @@ class KnowledgeItem:
     source: str  # file path or URL
     tags: list[str]
 
-    def snippet(self, max_len: int = 300) -> str:
+    def snippet(self, max_len: int = 800) -> str:
         text = re.sub(r"\s+", " ", self.content).strip()
         return text[:max_len] + "…" if len(text) > max_len else text
 
