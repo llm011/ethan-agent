@@ -140,6 +140,12 @@ private fun MainContent(authViewModel: AuthViewModel) {
                     onCancelRename = vm::cancelRename,
                     onDelete = vm::deleteSession,
                     onClearError = vm::clearError,
+                    onRegenTitle = vm::regenTitle,
+                    onSummary = vm::summarySession,
+                    onDismissSummary = vm::dismissSummary,
+                    onSetSourceFilter = vm::setSourceFilter,
+                    onToggleHideHeartbeat = vm::toggleHideHeartbeat,
+                    onToggleHideScheduled = vm::toggleHideScheduled,
                 )
             }
 
@@ -234,8 +240,17 @@ private fun MainContent(authViewModel: AuthViewModel) {
                     state = state,
                     onToggle = vm::toggleJob,
                     onDelete = vm::deleteJob,
+                    onTrigger = vm::triggerJob,
                     onOpenSession = { id -> navController.navigate(Screen.Chat.createRoute(id)) },
+                    onTabChange = vm::setTab,
+                    onSyncTimelines = vm::syncTimelines,
+                    onTimelineAction = vm::timelineAction,
+                    onShowCreateSheet = vm::showCreateSheet,
+                    onDismissCreateSheet = vm::dismissCreateSheet,
+                    onUpdateForm = vm::updateForm,
+                    onSubmitCreate = vm::submitCreate,
                     onClearError = vm::clearError,
+                    onClearTriggerSuccess = vm::clearTriggerSuccess,
                 )
             }
 
