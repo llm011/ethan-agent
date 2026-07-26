@@ -29,11 +29,11 @@ PRESET_PLUGINS: list[dict] = [
         "install_source": "companion-listen",
     },
     {
-        "name": "team-manager",
-        "label": "团队管理",
-        "description": "绩效管理 / 任务委派 / 人员日志",
+        "name": "life-manager",
+        "label": "工作生活助理",
+        "description": "人员/团队/项目/文档管理 + 定时信号识别 + 知识库统一入口",
         "install_type": "builtin_skill",
-        "install_source": "team-manager",
+        "install_source": "life-manager",
     },
     {
         "name": "schedule-manager",
