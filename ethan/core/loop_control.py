@@ -99,6 +99,8 @@ class LoopMonitor:
     awaiting_reflection_followup: bool = False  # 上一轮注入过反思，本轮需校验是否真换路
     _last_reflected_sig: str = ""
     _freq_limit_varied: bool = False  # 最近一次 is_stuck 触发是否因为"同工具不同参数"达到宽松上限
+    has_planned: bool = False  # 是否已调过 plan_write（用于跳过后续 plan 建议）
+    plan_nudge_count: int = 0  # 已注入 plan 软建议的次数
 
     def record(self, tool_calls, had_error: bool) -> None:
         self._signatures.append(_round_signature(tool_calls))
@@ -208,4 +210,58 @@ def finalize_system_suffix(reason: str) -> str:
         "②如果还没做完，剩余哪些工作；"
         "③建议用户看看当前效果，需要继续的话可以再告诉你。"
         "语气坦诚直接、轻松自然，不要道歉或套话，不要调用任何工具。]"
+    )
+
+
+# ── Adaptive Planning ──────────────────────────────────────────────
+# 不是首轮强制 plan，而是跑 1 步后让模型自己判断是否需要规划。
+# 触发条件：第 2 轮起（已跑过 1 步），且模型还没调过 plan_write。
+# 软建议 → 模型自觉就 plan，跳过就跳过；不强制 gate，避免简单任务被延迟。
+
+PLAN_NUDGE_WINDOW = 2  # 在第 2、3 轮注入 plan 建议（已跑 1-2 步仍未结束）
+# 只读/探路类工具：跑这些不算是"开始执行"，不触发 plan 建议
+_PLAN_EXEMPT_TOOLS = {
+    "memory_recall", "skill_list", "skill_read", "find_tools",
+    "knowledge_search", "knowledge_read",
+}
+
+
+def should_suggest_plan(monitor: "LoopMonitor", last_tool_calls: list) -> bool:
+    """是否应该注入 plan 软建议。
+
+    条件：
+    1. 还没 plan 过（has_planned=False）
+    2. 已跑过至少 1 轮工具（signatures 非空）
+    3. 还在建议窗口内（plan_nudge_count < PLAN_NUDGE_WINDOW）
+    4. 上一轮不是纯只读探路（避免对"查一下天气"这种简单任务也建议 plan）
+
+    返回 True 时调用方应：注入 plan 建议 + plan_nudge_count += 1。
+    """
+    if monitor.has_planned:
+        return False
+    if not monitor._signatures:
+        return False
+    if monitor.plan_nudge_count >= PLAN_NUDGE_WINDOW:
+        return False
+    # 上一轮全是只读探路工具 → 简单任务，不打扰
+    if last_tool_calls:
+        all_exempt = all(
+            tc.name in _PLAN_EXEMPT_TOOLS for tc in last_tool_calls
+        )
+        if all_exempt:
+            return False
+    return True
+
+
+def plan_nudge_message() -> str:
+    """注入到下一轮 system 的 plan 软建议。
+
+    软建议而非硬 gate：模型可以选择 plan（调 plan_write）或直接继续执行。
+    如果继续执行也没问题——只是失去了"先规划"的好处，不会卡死。
+    """
+    return (
+        "\n\n[System: 你已经跑了一两步，接下来如果任务还有多步要做的样子"
+        "（多个文件要处理 / 多个分支要查 / 同类操作要重复），"
+        "建议先调 plan_write 把后续步骤列出来再执行，"
+        "避免边想边做走重复路径。如果剩余就一两步收尾，直接继续也行。]"
     )

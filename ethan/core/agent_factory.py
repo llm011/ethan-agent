@@ -31,6 +31,7 @@ from ethan.tools.builtin.lark_tools import (
     LarkMessageSendTool,
 )
 from ethan.tools.builtin.memory_write import MemoryWriteTool
+from ethan.tools.builtin.plan import PlanReadTool, PlanUpdateTool, PlanWriteTool
 from ethan.tools.builtin.procedure_write import ProcedureWriteTool
 from ethan.tools.builtin.profile_update import ProfileUpdateTool
 from ethan.tools.builtin.schedule import ScheduleCreateTool, ScheduleListTool, ScheduleRemoveTool
@@ -100,13 +101,16 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
     registry.register(DeliverFileTool())
 
     if toolset == "heartbeat":
-        # 心跳：只读 + 执行任务 + 调度 + 知识库，不写记忆/skill/profile
+        # 心跳：只读 + 执行任务 + 调度 + 知识库 + plan，不写记忆/skill/profile
         registry.register(ScheduleCreateTool(user_id=user_id))
         registry.register(ScheduleListTool())
         registry.register(ScheduleRemoveTool())
         registry.register(KnowledgeSearchTool(user_id=user_id))
         registry.register(KnowledgeReadTool(user_id=user_id))
         registry.register(KnowledgeAddTool(user_id=user_id))
+        registry.register(PlanWriteTool(user_id=user_id))
+        registry.register(PlanReadTool(user_id=user_id))
+        registry.register(PlanUpdateTool(user_id=user_id))
         return registry
 
     # full / lark：全量
@@ -125,6 +129,9 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
     registry.register(MemoryWriteTool(user_id=user_id))
     registry.register(ProcedureWriteTool(user_id=user_id))
     registry.register(ProfileUpdateTool(user_id=user_id))
+    registry.register(PlanWriteTool(user_id=user_id))
+    registry.register(PlanReadTool(user_id=user_id))
+    registry.register(PlanUpdateTool(user_id=user_id))
     registry.register(SkillCreateTool(user_id=user_id))
     registry.register(SkillReadTool())
     registry.register(SkillListTool())

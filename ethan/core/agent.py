@@ -701,11 +701,14 @@ class Agent:
         from ethan.core.loop_control import (
             LoopMonitor,
             finalize_system_suffix,
+            plan_nudge_message,
             reflection_followup_message,
             reflection_message,
+            should_suggest_plan,
         )
         monitor = LoopMonitor()
         pending_suffix = ""  # 反思提示，仅附加到「下一轮」的 system，附完即清
+        last_tool_calls: list = []  # 上一轮的工具调用，用于 plan 建议判定
 
         for i in range(max_iters):
             finalize = (i == max_iters - 1)  # 留最后一轮做收尾：禁工具、强制总结
@@ -774,6 +777,17 @@ class Agent:
                 ))
             enforce_context_budget(working)  # 新 tool result 进上下文前管控体积，防撑爆
             monitor.record(response.tool_calls, had_error)
+            last_tool_calls = response.tool_calls
+
+            # plan 工具调用感知：如果本轮调了 plan_write，标记已规划
+            if any(tc.name == "plan_write" for tc in response.tool_calls):
+                monitor.has_planned = True
+
+            # Adaptive Planning：跑 1-2 步后注入 plan 软建议（未规划且非纯探路）
+            if not monitor.has_planned and not pending_suffix:
+                if should_suggest_plan(monitor, last_tool_calls):
+                    pending_suffix = plan_nudge_message()
+                    monitor.plan_nudge_count += 1
 
             # 反思后仍重复同一操作 → 二次强提醒，逼它换路
             if monitor.awaiting_reflection_followup:
@@ -879,11 +893,14 @@ class Agent:
         from ethan.core.loop_control import (
             LoopMonitor,
             finalize_system_suffix,
+            plan_nudge_message,
             reflection_followup_message,
             reflection_message,
+            should_suggest_plan,
         )
         monitor = LoopMonitor()
         pending_suffix = ""  # 反思提示，仅附加到「下一轮」的 system，附完即清
+        last_tool_calls: list = []  # 上一轮的工具调用，用于 plan 建议判定
 
         for i in range(max_iters):
             # 每轮开头消费「运行中补充信息」：用户在工具调用过程中提交的补充内容，
@@ -1147,6 +1164,17 @@ class Agent:
 
             enforce_context_budget(working)  # 新 tool result 进上下文前管控体积，防撑爆
             monitor.record(tool_calls, had_error)
+            last_tool_calls = tool_calls
+
+            # plan 工具调用感知：如果本轮调了 plan_write，标记已规划
+            if any(tc.name == "plan_write" for tc in tool_calls):
+                monitor.has_planned = True
+
+            # Adaptive Planning：跑 1-2 步后注入 plan 软建议（未规划且非纯探路）
+            if not monitor.has_planned and not pending_suffix:
+                if should_suggest_plan(monitor, last_tool_calls):
+                    pending_suffix = plan_nudge_message()
+                    monitor.plan_nudge_count += 1
 
             # 反思后仍重复同一操作 → 二次强提醒，逼它换路
             if monitor.awaiting_reflection_followup:
