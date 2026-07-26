@@ -27,8 +27,13 @@ class KnowledgeItem:
 
 class KnowledgeBase(ABC):
     @abstractmethod
-    def add(self, title: str, content: str, tags: list[str] | None = None) -> str:
-        """Add an item. Returns its ID/path."""
+    def add(self, title: str, content: str, tags: list[str] | None = None,
+            frontmatter: dict | None = None) -> str:
+        """Add an item. Returns its ID/path.
+
+        frontmatter: 仅 Obsidian 后端生效，用于补充 source/url/author 等自定义 front matter 字段；
+                     固定字段（title/type/tags/created/updated）仍由后端自动管理，不要在此重复传入。
+        """
 
     @abstractmethod
     def search(self, query: str, limit: int = 5) -> list[KnowledgeItem]:
@@ -47,8 +52,13 @@ class KnowledgeBase(ABC):
         """Get item by source identifier."""
 
     @abstractmethod
-    def update(self, source: str, title: str, content: str, tags: list[str] | None = None) -> None:
-        """Update an existing item in place."""
+    def update(self, source: str, title: str, content: str, tags: list[str] | None = None,
+               frontmatter: dict | None = None) -> None:
+        """Update an existing item in place.
+
+        frontmatter: 仅 Obsidian 后端生效，用于补充 source/url/author 等自定义 front matter 字段；
+                     固定字段（title/type/tags/created/updated）仍由后端自动管理，不要在此重复传入。
+        """
 
     @abstractmethod
     def delete(self, source: str) -> None:
@@ -105,7 +115,8 @@ class FilesystemKnowledgeBase(KnowledgeBase):
 
     # ── Write ──────────────────────────────────────────────────────────────
 
-    def add(self, title: str, content: str, tags: list[str] | None = None) -> str:
+    def add(self, title: str, content: str, tags: list[str] | None = None,
+            frontmatter: dict | None = None) -> str:
         slug = re.sub(r"[^\w\-]", "-", title.lower())[:50].strip("-")
         path = self._dir / f"{slug}.md"
         i = 1
@@ -134,7 +145,9 @@ class FilesystemKnowledgeBase(KnowledgeBase):
         except Exception as e:
             logger.warning("向量索引重建失败，条目已写入磁盘但语义搜索不可用: %s", e)
 
-    def update(self, source: str, title: str, content: str, tags: list[str] | None = None) -> None:
+    def update(self, source: str, title: str, content: str, tags: list[str] | None = None,
+               frontmatter: dict | None = None) -> None:
+        # filesystem 后端不支持 front matter，frontmatter 被忽略。
         path = self._resolve_in_dir(source)
         if not path.exists():
             raise FileNotFoundError(f"Knowledge item not found: {source}")
@@ -252,7 +265,8 @@ class ObsidianKnowledgeBase(KnowledgeBase):
 
     # ── Write ──────────────────────────────────────────────────────────────
 
-    def add(self, title: str, content: str, tags: list[str] | None = None) -> str:
+    def add(self, title: str, content: str, tags: list[str] | None = None,
+            frontmatter: dict | None = None) -> str:
         slug = re.sub(r"[^\w\-]", "-", title.lower())[:50].strip("-")
         path = self._dir / f"{slug}.md"
         i = 1
@@ -260,18 +274,37 @@ class ObsidianKnowledgeBase(KnowledgeBase):
             path = self._dir / f"{slug}-{i}.md"
             i += 1
 
-        text = self._build_file_content(title, content, tags)
+        text = self._build_file_content(title, content, tags, frontmatter=frontmatter)
         path.write_text(text, encoding="utf-8")
         self._reindex(path, title, content, tags)
         return str(path)
 
-    def update(self, source: str, title: str, content: str, tags: list[str] | None = None) -> None:
+    def update(self, source: str, title: str, content: str, tags: list[str] | None = None,
+               frontmatter: dict | None = None) -> None:
         path = self._resolve_in_dir(source)
         if not path.exists():
             raise FileNotFoundError(f"Knowledge item not found: {source}")
-        text = self._build_file_content(title, content, tags)
+        # 读取原文件的 created 字段（append/update 时保留创建时间）
+        created = self._read_created_from_file(path)
+        text = self._build_file_content(title, content, tags, created=created,
+                                        frontmatter=frontmatter)
         path.write_text(text, encoding="utf-8")
         self._reindex(path, title, content, tags)
+
+    def _read_created_from_file(self, path: Path) -> str | None:
+        """从已有文件的 front matter 提取 created 字段，失败返回 None。"""
+        try:
+            text = path.read_text(encoding="utf-8")
+            if text.startswith("---"):
+                parts = text.split("---", 2)
+                if len(parts) >= 3:
+                    import yaml
+                    fm = yaml.safe_load(parts[1]) or {}
+                    if isinstance(fm, dict) and fm.get("created"):
+                        return str(fm["created"])
+        except Exception:
+            pass
+        return None
 
     def delete(self, source: str) -> None:
         path = self._resolve_in_dir(source)
@@ -412,14 +445,33 @@ class ObsidianKnowledgeBase(KnowledgeBase):
 
 # ── Internal ───────────────────────────────────────────────────────────
 
-    def _build_file_content(self, title: str, content: str, tags: list[str] | None) -> str:
-        """构建 Obsidian 格式 MD 文件（YAML frontmatter + 正文）。"""
+    def _build_file_content(self, title: str, content: str, tags: list[str] | None,
+                            created: str | None = None,
+                            frontmatter: dict | None = None) -> str:
+        """构建 Obsidian 格式 MD 文件（YAML frontmatter + 正文）。
+
+        固定字段：title / type / tags / created / updated
+        扩展字段：通过 frontmatter 传入，模型可自由补充 source/url/author 等。
+        所有字符串值用 repr() 包裹（单引号），避免特殊字符破坏 YAML。
+        """
+        from datetime import date
+        today = date.today().isoformat()
         parts = ["---"]
-        parts.append(f"title: {title}")
+        parts.append(f"title: {title!r}")
         if tags:
+            parts.append(f"type: {tags[0]}")
             parts.append("tags:")
             for t in tags:
                 parts.append(f"  - {t}")
+        parts.append(f"created: {created or today}")
+        parts.append(f"updated: {today}")
+        # 扩展字段：模型可自由传入 source/url/author 等任意 front matter 字段
+        if frontmatter:
+            for k, v in frontmatter.items():
+                if isinstance(v, str):
+                    parts.append(f"{k}: {v!r}")
+                else:
+                    parts.append(f"{k}: {v}")
         parts.append("---")
         parts.append("")
         parts.append(f"# {title}")
@@ -509,16 +561,24 @@ class ExternalKnowledgeBase(KnowledgeBase):
 
     # ── Write ──────────────────────────────────────────────────────────────
 
-    def add(self, title: str, content: str, tags: list[str] | None = None) -> str:
+    def add(self, title: str, content: str, tags: list[str] | None = None,
+            frontmatter: dict | None = None) -> str:
+        payload = {"title": title, "content": content, "tags": tags or []}
+        if frontmatter:
+            payload["frontmatter"] = frontmatter
         with self._client() as client:
-            resp = client.post("/items", json={"title": title, "content": content, "tags": tags or []})
+            resp = client.post("/items", json=payload)
             resp.raise_for_status()
             data = resp.json()
             return data.get("source") or data.get("id") or ""
 
-    def update(self, source: str, title: str, content: str, tags: list[str] | None = None) -> None:
+    def update(self, source: str, title: str, content: str, tags: list[str] | None = None,
+               frontmatter: dict | None = None) -> None:
+        payload = {"title": title, "content": content, "tags": tags or []}
+        if frontmatter:
+            payload["frontmatter"] = frontmatter
         with self._client() as client:
-            resp = client.put(f"/items/{self._encode_source(source)}", json={"title": title, "content": content, "tags": tags or []})
+            resp = client.put(f"/items/{self._encode_source(source)}", json=payload)
             resp.raise_for_status()
 
     def delete(self, source: str) -> None:
