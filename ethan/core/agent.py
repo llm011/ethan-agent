@@ -423,7 +423,7 @@ class Agent:
             if self.is_owner:
                 from ethan.memory.recall import build_structured_recall
                 recall_result = build_structured_recall(
-                    query=last_user_text_for_recall or "", mode=self._mode, max_items=12
+                    query=last_user_text_for_recall or "", mode=self._mode, max_items=15
                 )
                 self._last_recall_result = recall_result  # 供 stream_chat 发射 ToolEvent
                 if recall_result:
@@ -640,6 +640,53 @@ class Agent:
         defs = [t.to_definition() for t in (tools_list + extra)]
         return [_with_intent_param(d) for d in defs] or None
 
+    def _build_all_skills_brief(self) -> str:
+        """构建全量 skill 简表（含 frontmatter：name/description/trigger/category）。
+
+        仅在模型主动要"更多信息"时调用，避免每轮 token 爆炸。
+        """
+        if not self._skills:
+            return ""
+        lines = []
+        for s in self._skills.all():
+            triggers = " | ".join(s.trigger[:5]) if s.trigger else ""
+            cat = getattr(s, "category", "default")
+            desc = (s.description or "")[:120]
+            line = f"- {s.name} [{cat}]: {desc}"
+            if triggers:
+                line += f" | triggers: {triggers}"
+            lines.append(line)
+        return "\n".join(lines)
+
+    def _build_extended_memory(self, query: str, max_items: int = 30) -> str:
+        """扩大 memory recall 到 max_items 条（默认 30），用于增强上下文。
+
+        仅在模型主动要"更多信息"时调用。
+        """
+        if not self.is_owner:
+            return ""
+        try:
+            from ethan.memory.recall import build_structured_recall
+            recall_result = build_structured_recall(
+                query=query, mode=self._mode, max_items=max_items
+            )
+            return recall_result.text if recall_result else ""
+        except Exception:
+            return ""
+
+    def _build_all_tools_brief(self) -> str:
+        """构建全量工具简表（name + 一句话 desc，不含 schema）。
+
+        仅在模型主动要"更多信息"时调用，避免每轮 token 爆炸。
+        完整 schema 模型需要时可调 find_tools 拉取。
+        """
+        lines = []
+        for t in self._registry.all():
+            desc = (t.description or "")[:80]
+            fast_tag = " [fast]" if getattr(t, "fast_path", False) else ""
+            lines.append(f"- {t.name}{fast_tag}: {desc}")
+        return "\n".join(lines)
+
     def _provider_for_route(self, route: str):
         """按路由档位选 provider。fast 档且开启 fast_use_lite_model 时用 lite 模型
         （设备控制/状态查询等简单任务，省钱提速），否则用主模型。lite provider 懒加载。
@@ -700,15 +747,17 @@ class Agent:
 
         from ethan.core.loop_control import (
             LoopMonitor,
+            decision_prompt_message,
+            detect_need_more_info,
+            enhanced_context_message,
             finalize_system_suffix,
-            plan_nudge_message,
             reflection_followup_message,
             reflection_message,
-            should_suggest_plan,
+            should_trigger_decision,
         )
         monitor = LoopMonitor()
         pending_suffix = ""  # 反思提示，仅附加到「下一轮」的 system，附完即清
-        last_tool_calls: list = []  # 上一轮的工具调用，用于 plan 建议判定
+        _need_enhanced_context = False  # 上一轮模型响应是否提到"需要更多信息"
 
         for i in range(max_iters):
             finalize = (i == max_iters - 1)  # 留最后一轮做收尾：禁工具、强制总结
@@ -777,23 +826,37 @@ class Agent:
                 ))
             enforce_context_budget(working)  # 新 tool result 进上下文前管控体积，防撑爆
             monitor.record(response.tool_calls, had_error)
-            last_tool_calls = response.tool_calls
+            full_content = response.content or ""
 
             # plan 工具调用感知：如果本轮调了 plan_write，标记已规划
             if any(tc.name == "plan_write" for tc in response.tool_calls):
                 monitor.has_planned = True
 
-            # Adaptive Planning：跑 1-2 步后注入 plan 软建议（未规划且非纯探路）
-            if not monitor.has_planned and not pending_suffix:
-                if should_suggest_plan(monitor, last_tool_calls):
-                    pending_suffix = plan_nudge_message()
-                    monitor.plan_nudge_count += 1
-                    logger.info("[plan-nudge] iter=%d tools=%s → 注入 plan 软建议 (count=%d)",
-                                i, [tc.name for tc in last_tool_calls], monitor.plan_nudge_count)
-                else:
-                    logger.info("[plan-nudge] iter=%d tools=%s → 不触发 (has_planned=%s, nudge_count=%d, sigs=%d)",
-                                i, [tc.name for tc in last_tool_calls],
-                                monitor.has_planned, monitor.plan_nudge_count, len(monitor._signatures))
+            # [检测] 决策提示注入后，本轮 full_content 是模型对决策提示的响应 → 检测是否选 C
+            if monitor.awaiting_decision_response and full_content and detect_need_more_info(full_content):
+                _need_enhanced_context = True
+                logger.info("[need-more-info] iter=%d → 检测到'需要更多信息'信号", i + 1)
+            monitor.awaiting_decision_response = False
+
+            # [增强上下文] 模型选 C 时，本轮注入全量 skill + tool + 30 memory
+            if _need_enhanced_context:
+                skills_brief = self._build_all_skills_brief()
+                tools_brief = self._build_all_tools_brief()
+                _last_user = self._get_last_user_text(working) or ""
+                memory_text = self._build_extended_memory(_last_user, max_items=30)
+                enhanced_msg = enhanced_context_message(skills_brief, memory_text, tools_brief)
+                working.append(Message(role="system", content=enhanced_msg))
+                _need_enhanced_context = False
+                logger.info("[enhanced-context] iter=%d → 注入增强上下文", i + 1)
+
+            # [决策提示] 第 2 轮 + 之后每 3 轮，追加决策提示（设 flag，下一轮检测）
+            if should_trigger_decision(monitor, i):
+                decision_msg = decision_prompt_message(monitor.has_planned)
+                working.append(Message(role="system", content=decision_msg))
+                monitor.decision_count += 1
+                monitor.awaiting_decision_response = True
+                logger.info("[decision-prompt] iter=%d → 注入决策提示 (count=%d)",
+                            i + 1, monitor.decision_count)
 
             # 反思后仍重复同一操作 → 二次强提醒，逼它换路
             if monitor.awaiting_reflection_followup:
@@ -898,15 +961,17 @@ class Agent:
 
         from ethan.core.loop_control import (
             LoopMonitor,
+            decision_prompt_message,
+            detect_need_more_info,
+            enhanced_context_message,
             finalize_system_suffix,
-            plan_nudge_message,
             reflection_followup_message,
             reflection_message,
-            should_suggest_plan,
+            should_trigger_decision,
         )
         monitor = LoopMonitor()
         pending_suffix = ""  # 反思提示，仅附加到「下一轮」的 system，附完即清
-        last_tool_calls: list = []  # 上一轮的工具调用，用于 plan 建议判定
+        _need_enhanced_context = False  # 上一轮模型响应是否提到"需要更多信息"
 
         for i in range(max_iters):
             # 每轮开头消费「运行中补充信息」：用户在工具调用过程中提交的补充内容，
@@ -1171,23 +1236,41 @@ class Agent:
 
             enforce_context_budget(working)  # 新 tool result 进上下文前管控体积，防撑爆
             monitor.record(tool_calls, had_error)
-            last_tool_calls = tool_calls
 
             # plan 工具调用感知：如果本轮调了 plan_write，标记已规划
             if any(tc.name == "plan_write" for tc in tool_calls):
                 monitor.has_planned = True
 
-            # Adaptive Planning：跑 1-2 步后注入 plan 软建议（未规划且非纯探路）
-            if not monitor.has_planned and not pending_suffix:
-                if should_suggest_plan(monitor, last_tool_calls):
-                    pending_suffix = plan_nudge_message()
-                    monitor.plan_nudge_count += 1
-                    logger.info("[plan-nudge] iter=%d tools=%s → 注入 plan 软建议 (count=%d)",
-                                i, [tc.name for tc in last_tool_calls], monitor.plan_nudge_count)
-                else:
-                    logger.info("[plan-nudge] iter=%d tools=%s → 不触发 (has_planned=%s, nudge_count=%d, sigs=%d)",
-                                i, [tc.name for tc in last_tool_calls],
-                                monitor.has_planned, monitor.plan_nudge_count, len(monitor._signatures))
+            # [检测] 如果上一轮注入了决策提示（awaiting_decision_response=True），
+            #        本轮 full_content 是模型对决策提示的响应 → 检测是否选 C
+            # 仅在决策提示后的那一轮检测，避免每轮 substring 误判
+            # （"无法判断""需要补充"等词模型正常推理也会用，全轮检测会误触发增强上下文）
+            if monitor.awaiting_decision_response and full_content and detect_need_more_info(full_content):
+                _need_enhanced_context = True
+                logger.info("[need-more-info] iter=%d → 检测到'需要更多信息'信号，下一轮将追加增强上下文", i + 1)
+            monitor.awaiting_decision_response = False  # 检测完即清，无论是否命中
+
+            # [增强上下文] 如果 _need_enhanced_context（来自上轮检测）→ 本轮注入
+            if _need_enhanced_context:
+                skills_brief = self._build_all_skills_brief()
+                tools_brief = self._build_all_tools_brief()
+                _last_user = self._get_last_user_text(working) or ""
+                memory_text = self._build_extended_memory(_last_user, max_items=30)
+                enhanced_msg = enhanced_context_message(skills_brief, memory_text, tools_brief)
+                working.append(Message(role="system", content=enhanced_msg))
+                _need_enhanced_context = False
+                logger.info("[enhanced-context] iter=%d → 注入增强上下文 (skills + tools + memory 30)", i + 1)
+
+            # [决策提示] 第 2 轮 + 之后每 3 轮，在 working 末尾追加决策提示
+            # （role=system，要求模型显式判断 A/B/C，一气呵成调工具）
+            # 注入后设 flag，下一轮开头检测模型响应是否选 C
+            if should_trigger_decision(monitor, i):
+                decision_msg = decision_prompt_message(monitor.has_planned)
+                working.append(Message(role="system", content=decision_msg))
+                monitor.decision_count += 1
+                monitor.awaiting_decision_response = True  # 标记下一轮检测是否选 C
+                logger.info("[decision-prompt] iter=%d → 注入决策提示 (count=%d, has_planned=%s)",
+                            i + 1, monitor.decision_count, monitor.has_planned)
 
             # 反思后仍重复同一操作 → 二次强提醒，逼它换路
             if monitor.awaiting_reflection_followup:

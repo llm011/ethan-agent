@@ -99,8 +99,9 @@ class LoopMonitor:
     awaiting_reflection_followup: bool = False  # 上一轮注入过反思，本轮需校验是否真换路
     _last_reflected_sig: str = ""
     _freq_limit_varied: bool = False  # 最近一次 is_stuck 触发是否因为"同工具不同参数"达到宽松上限
-    has_planned: bool = False  # 是否已调过 plan_write（用于跳过后续 plan 建议）
-    plan_nudge_count: int = 0  # 已注入 plan 软建议的次数
+    has_planned: bool = False  # 是否已调过 plan_write（用于决策提示里措辞调整）
+    decision_count: int = 0  # 已注入决策提示的次数
+    awaiting_decision_response: bool = False  # 决策提示已注入，下一轮需检测是否选 C
 
     def record(self, tool_calls, had_error: bool) -> None:
         self._signatures.append(_round_signature(tool_calls))
@@ -213,55 +214,116 @@ def finalize_system_suffix(reason: str) -> str:
     )
 
 
-# ── Adaptive Planning ──────────────────────────────────────────────
-# 不是首轮强制 plan，而是跑 1 步后让模型自己判断是否需要规划。
-# 触发条件：第 2 轮起（已跑过 1 步），且模型还没调过 plan_write。
-# 软建议 → 模型自觉就 plan，跳过就跳过；不强制 gate，避免简单任务被延迟。
+# ── Adaptive Planning：决策提示 ─────────────────────────────────────
+# 第 1 轮反应式执行（不打扰）。从第 2 轮起，每 3 轮在 working messages 末尾
+# 追加一条 role=system 的决策提示，强制模型显式判断当前任务状态：
+#   A) 即将完成 → 直接继续，简述下一步
+#   B) 还有较多步骤 → 调 plan_write 列出后续步骤再执行
+#   C) 需要更多信息 → 向用户提问
+#
+# 与之前软建议的差异：
+#   1. 位置：working messages 末尾的 role=system（不是 system prompt suffix）
+#   2. 时机：第 2 轮 + 之后每 3 轮（iter=1, 3, 6, 9, ...）
+#   3. 形式：要求显式判断 + 一气呵成调工具（不是软建议可跳过）
 
-PLAN_NUDGE_WINDOW = 2  # 在第 2、3 轮注入 plan 建议（已跑 1-2 步仍未结束）
-# 只读/探路类工具：跑这些不算是"开始执行"，不触发 plan 建议
-_PLAN_EXEMPT_TOOLS = {
-    "memory_recall", "skill_list", "skill_read", "find_tools",
-    "knowledge_search", "knowledge_read",
-}
+# 触发轮次：iter 索引（从 0 开始）
+#   iter=1（第 2 轮）：第一次触发
+#   iter=3, 6, 9, ...：之后每 3 轮触发
+_DECISION_FIRST_TRIGGER = 1  # 第 2 轮（iter=1）
+_DECISION_INTERVAL = 3  # 之后每 3 轮触发一次
 
 
-def should_suggest_plan(monitor: "LoopMonitor", last_tool_calls: list) -> bool:
-    """是否应该注入 plan 软建议。
+def should_trigger_decision(monitor: "LoopMonitor", iter_idx: int) -> bool:
+    """是否应该在第 iter_idx 轮（0-based）触发决策提示。
 
-    条件：
-    1. 还没 plan 过（has_planned=False）
-    2. 已跑过至少 1 轮工具（signatures 非空）
-    3. 还在建议窗口内（plan_nudge_count < PLAN_NUDGE_WINDOW）
-    4. 上一轮不是纯只读探路（避免对"查一下天气"这种简单任务也建议 plan）
+    触发条件：
+    1. iter_idx == 1（第 2 轮，已跑过 1 轮探路）
+    2. iter_idx >= 3 且 iter_idx % 3 == 0（即 iter=3, 6, 9, ...）
 
-    返回 True 时调用方应：注入 plan 建议 + plan_nudge_count += 1。
+    第 1 轮（iter=0）不触发：让模型先跑一步探路。
     """
-    if monitor.has_planned:
-        return False
-    if not monitor._signatures:
-        return False
-    if monitor.plan_nudge_count >= PLAN_NUDGE_WINDOW:
-        return False
-    # 上一轮全是只读探路工具 → 简单任务，不打扰
-    if last_tool_calls:
-        all_exempt = all(
-            tc.name in _PLAN_EXEMPT_TOOLS for tc in last_tool_calls
-        )
-        if all_exempt:
-            return False
-    return True
+    if iter_idx == _DECISION_FIRST_TRIGGER:
+        return True
+    if iter_idx >= 3 and iter_idx % _DECISION_INTERVAL == 0:
+        return True
+    return False
 
 
-def plan_nudge_message() -> str:
-    """注入到下一轮 system 的 plan 软建议。
+def decision_prompt_message(has_planned: bool = False) -> str:
+    """决策提示消息内容（追加为 working messages 末尾的 role=system）。
 
-    软建议而非硬 gate：模型可以选择 plan（调 plan_write）或直接继续执行。
-    如果继续执行也没问题——只是失去了"先规划"的好处，不会卡死。
+    模型在同一个响应里既输出判断又调工具（不增加轮次）。
     """
-    return (
-        "\n\n[System: 你已经跑了一两步，接下来如果任务还有多步要做的样子"
-        "（多个文件要处理 / 多个分支要查 / 同类操作要重复），"
-        "建议先调 plan_write 把后续步骤列出来再执行，"
-        "避免边想边做走重复路径。如果剩余就一两步收尾，直接继续也行。]"
+    plan_hint = (
+        "如已规划过，按 plan 继续执行即可" if has_planned
+        else "如选 B，先调 plan_write(steps=[...]) 列出后续步骤，再继续执行第一步"
     )
+    return (
+        "[System 决策提示] 基于以上工具结果，判断当前任务状态并选择行动：\n"
+        "  A) 即将完成（还有 1-2 步收尾）→ 直接调工具执行下一步，并在 thought 里简述\n"
+        f"  B) 还有较多步骤（多个文件/分支/同类操作）→ {plan_hint}\n"
+        "  C) 需要更多信息或工具失败 → 调工具补全信息，或向用户提问\n"
+        "请在 thought 里先输出你的判断（A/B/C + 一句理由），再发起对应的工具调用。]"
+    )
+
+
+# ── "需要更多信息"信号检测 + 增强上下文 ────────────────────────────
+# 当模型在决策提示后选了 C（需要更多信息），下一轮追加：
+#   1. 全量 skill 清单（含 frontmatter：name/description/trigger/category）
+#   2. memory recall 扩到 30 条
+# 这是有条件触发，不是每轮都带，避免 token 爆炸。
+
+# 信号关键词：模型说"需要更多信息""信息不足""不知道有哪些工具"等
+_NEED_MORE_INFO_SIGNALS = (
+    "需要更多信息",
+    "需要更多工具",
+    "信息不足",
+    "缺少信息",
+    "不知道有哪些",
+    "需要更多上下文",
+    "need more info",
+    "需要补充",
+    "无法判断",
+    "需要先了解",
+)
+
+
+def detect_need_more_info(response_text: str) -> bool:
+    """检测模型响应是否包含"需要更多信息"信号。
+
+    匹配规则：响应文本里出现任一信号关键词，且语境是"我需要..."而非"用户需要..."。
+    简单实现：直接 substring 匹配，误判可接受（最坏情况是多带一次全量 skill）。
+    """
+    if not response_text:
+        return False
+    text_lower = response_text.lower()
+    for signal in _NEED_MORE_INFO_SIGNALS:
+        if signal in response_text or signal.lower() in text_lower:
+            return True
+    # 检测决策提示的 C 选项被选中
+    if "选 c" in text_lower or "选择c" in text_lower or "选项c" in text_lower:
+        return True
+    return False
+
+
+def enhanced_context_message(skills_brief: str = "", memory_recall_text: str = "", tools_brief: str = "") -> str:
+    """增强上下文消息（模型主动要"更多信息"时注入到下一轮 working）。
+
+    skills_brief: 全量 skill 简表（name + description + trigger + category）
+    tools_brief: 全量工具简表（name + 一句话 desc，不含 schema）
+    memory_recall_text: 扩大后的 memory recall 文本（30 条）
+
+    体量控制：skill 简表 ~5-15KB + tool 简表 ~3-8KB + 30 memory ~6-12KB ≈ 4-9k tokens，
+    能接受。完整 tool schema 不带，模型需要时调 find_tools 拉取。
+    """
+    parts = ["[System 增强上下文] 你在上一轮提到需要更多信息，已为你补充："]
+    if skills_brief:
+        parts.append(f"\n<all_skills_brief>\n{skills_brief}\n</all_skills_brief>")
+    if tools_brief:
+        parts.append(f"\n<all_tools_brief>\n[全量工具简表，需要 schema 时调 find_tools 激活]\n{tools_brief}\n</all_tools_brief>")
+    if memory_recall_text:
+        parts.append(f"\n<extended_memory>\n{memory_recall_text}\n</extended_memory>")
+    parts.append(
+        "\n请基于以上完整信息重新判断任务状态，选择 A/B/C 行动。"
+    )
+    return "".join(parts)
