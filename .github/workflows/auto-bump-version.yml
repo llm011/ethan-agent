@@ -9,6 +9,12 @@ on:
     branches:
       - main
     tags-ignore: ['v*']
+    # bump commit 只改这 4 个 version 文件，无需再触发本 workflow（避免 skipped 重复 run）
+    paths-ignore:
+      - 'pyproject.toml'
+      - 'desktop/package.json'
+      - 'desktop/src-tauri/tauri.conf.json'
+      - 'desktop/src-tauri/Cargo.toml'
 
 jobs:
   bump:
