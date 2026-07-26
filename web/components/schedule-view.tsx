@@ -142,7 +142,8 @@ export function ScheduleView() {
     try {
       await patchSchedule(job.id, newState);
       await loadData();
-    } catch {
+    } catch (e) {
+      console.error("Failed to toggle schedule status", e);
       await loadData();
     }
   };
@@ -157,7 +158,8 @@ export function ScheduleView() {
     setJobs(prev => prev.filter(j => j.id !== id));
     try {
       await deleteSchedule(id);
-    } catch {
+    } catch (e) {
+      console.error("Failed to delete schedule", e);
       await loadData();
     }
   };
@@ -172,7 +174,8 @@ export function ScheduleView() {
     setJobs(prev => prev.map(j => j.id === id ? { ...j, name: newName } : j));
     try {
       await renameSchedule(id, newName);
-    } catch {
+    } catch (e) {
+      console.error("Failed to rename schedule", e);
       await loadData();
     }
   };
@@ -187,7 +190,8 @@ export function ScheduleView() {
     setJobs(prev => prev.map(j => j.id === id ? { ...j, prompt: newPrompt } : j));
     try {
       await updateSchedulePrompt(id, newPrompt);
-    } catch {
+    } catch (e) {
+      console.error("Failed to update schedule prompt", e);
       await loadData();
     }
   };
