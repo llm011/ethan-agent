@@ -2,30 +2,57 @@ package com.ethan.agent.ui.memory
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.ethan.agent.core.model.Episode
 import com.ethan.agent.core.model.Fact
+import com.ethan.agent.core.model.InsightItem
 import com.ethan.agent.core.model.Procedure
+import com.ethan.agent.core.model.StructuredRecord
+import com.ethan.agent.core.model.UpdateRecordRequest
 import com.ethan.agent.data.EthanRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonElement
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import javax.inject.Inject
 
-enum class MemoryTab { Facts, Episodes, Procedures }
+enum class MemoryTab(val title: String) {
+    Facts("事实"), Insights("永久记忆"), Procedures("流程"), Records("结构化记忆")
+}
 
 data class MemoryUiState(
     val tab: MemoryTab = MemoryTab.Facts,
+    // Facts
     val allFacts: List<Fact> = emptyList(),
     val facts: List<FactItem> = emptyList(),
-    val episodes: List<Episode> = emptyList(),
-    val procedures: List<Procedure> = emptyList(),
     val selectedFact: Fact? = null,
     val selectedFactIndex: String? = null,
     val editContent: String = "",
+    // Insights
+    val insights: List<InsightItem> = emptyList(),
+    val insightsDate: String = "",
+    // Procedures
+    val procedures: List<Procedure> = emptyList(),
+    // Records
+    val records: List<StructuredRecord> = emptyList(),
+    val recordsFilter: RecordsFilter = RecordsFilter(),
+    val recordsSearch: String = "",
+    val selectedRecord: StructuredRecord? = null,
+    val recordEditContent: String = "",
+    val recordEditConfidence: Double = 0.0,
+    val recordEditImportance: Double = 0.0,
+    // Daily summaries
+    val summaries: List<JsonElement> = emptyList(),
+    val showSummaries: Boolean = false,
+    // Loading
     val isLoading: Boolean = false,
+    val isConsolidating: Boolean = false,
     val error: String? = null,
 )
 
@@ -36,24 +63,31 @@ class MemoryViewModel @Inject constructor(
     private val _state = MutableStateFlow(MemoryUiState())
     val state: StateFlow<MemoryUiState> = _state.asStateFlow()
 
+    private var searchJob: Job? = null
+
     init { load() }
 
     fun setTab(tab: MemoryTab) {
         _state.update { it.copy(tab = tab) }
+        when (tab) {
+            MemoryTab.Insights -> loadInsights()
+            MemoryTab.Records -> loadRecords()
+            else -> Unit
+        }
     }
+
+    // ── Facts ──────────────────────────────────────────────────────────────────
 
     fun load() {
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true) }
             try {
                 val allFacts = repository.getFacts()
-                val episodes = repository.getEpisodes()
                 val procedures = repository.getProcedures()
                 _state.update {
                     it.copy(
                         allFacts = allFacts,
                         facts = allFacts.toFactItems(),
-                        episodes = episodes,
                         procedures = procedures,
                         isLoading = false,
                     )
@@ -79,9 +113,7 @@ class MemoryViewModel @Inject constructor(
     }
 
     fun dismissFactEditor() {
-        _state.update {
-            it.copy(selectedFact = null, selectedFactIndex = null, editContent = "")
-        }
+        _state.update { it.copy(selectedFact = null, selectedFactIndex = null, editContent = "") }
     }
 
     fun saveFact() {
@@ -109,17 +141,6 @@ class MemoryViewModel @Inject constructor(
         }
     }
 
-    fun deleteEpisode(sessionId: String) {
-        viewModelScope.launch {
-            try {
-                repository.deleteEpisode(sessionId)
-                load()
-            } catch (e: Exception) {
-                _state.update { it.copy(error = repository.friendlyError(e)) }
-            }
-        }
-    }
-
     fun deleteProcedure(id: String) {
         viewModelScope.launch {
             try {
@@ -129,6 +150,191 @@ class MemoryViewModel @Inject constructor(
                 _state.update { it.copy(error = repository.friendlyError(e)) }
             }
         }
+    }
+
+    // ── Insights ───────────────────────────────────────────────────────────────
+
+    fun loadInsights() {
+        val date = _state.value.insightsDate
+        viewModelScope.launch {
+            _state.update { it.copy(isLoading = true) }
+            try {
+                val items = if (date.isBlank()) {
+                    repository.getInsights(limit = 50).items
+                } else {
+                    repository.getInsightsByDate(date).items.mapNotNull { el ->
+                        try {
+                            kotlinx.serialization.json.Json.decodeFromJsonElement(InsightItem.serializer(), el)
+                        } catch (_: Exception) { null }
+                    }
+                }
+                _state.update { it.copy(insights = items, isLoading = false) }
+            } catch (e: Exception) {
+                _state.update { it.copy(isLoading = false, error = repository.friendlyError(e)) }
+            }
+        }
+    }
+
+    fun setInsightsDate(date: String) {
+        _state.update { it.copy(insightsDate = date) }
+        loadInsights()
+    }
+
+    // ── Records ────────────────────────────────────────────────────────────────
+
+    fun loadRecords() {
+        val filter = _state.value.recordsFilter
+        val q = _state.value.recordsSearch.trim()
+        viewModelScope.launch {
+            _state.update { it.copy(isLoading = true) }
+            try {
+                val items = if (q.isNotBlank()) {
+                    repository.searchRecords(query = q, domain = filter.domain, status = filter.status).items
+                } else {
+                    repository.getRecords(
+                        type = filter.type,
+                        status = filter.status,
+                        domain = filter.domain,
+                        limit = 50,
+                    ).items
+                }
+                _state.update { it.copy(records = items, isLoading = false) }
+            } catch (e: Exception) {
+                _state.update { it.copy(isLoading = false, error = repository.friendlyError(e)) }
+            }
+        }
+    }
+
+    fun setRecordsFilter(filter: RecordsFilter) {
+        _state.update { it.copy(recordsFilter = filter) }
+        loadRecords()
+    }
+
+    fun setRecordsSearch(query: String) {
+        _state.update { it.copy(recordsSearch = query) }
+        searchJob?.cancel()
+        searchJob = viewModelScope.launch {
+            delay(300)
+            loadRecords()
+        }
+    }
+
+    fun selectRecord(record: StructuredRecord) {
+        _state.update {
+            it.copy(
+                selectedRecord = record,
+                recordEditContent = record.content,
+                recordEditConfidence = record.confidence,
+                recordEditImportance = record.importance,
+            )
+        }
+    }
+
+    fun dismissRecord() {
+        _state.update { it.copy(selectedRecord = null) }
+    }
+
+    fun onRecordEditContent(text: String) {
+        _state.update { it.copy(recordEditContent = text) }
+    }
+
+    fun onRecordEditConfidence(v: Double) {
+        _state.update { it.copy(recordEditConfidence = v) }
+    }
+
+    fun onRecordEditImportance(v: Double) {
+        _state.update { it.copy(recordEditImportance = v) }
+    }
+
+    fun saveRecord() {
+        val id = _state.value.selectedRecord?.id ?: return
+        viewModelScope.launch {
+            try {
+                repository.updateRecord(
+                    id,
+                    UpdateRecordRequest(
+                        content = _state.value.recordEditContent,
+                        confidence = _state.value.recordEditConfidence,
+                        importance = _state.value.recordEditImportance,
+                    ),
+                )
+                dismissRecord()
+                loadRecords()
+            } catch (e: Exception) {
+                _state.update { it.copy(error = repository.friendlyError(e)) }
+            }
+        }
+    }
+
+    fun deleteRecord(id: String) {
+        viewModelScope.launch {
+            try {
+                repository.deleteRecord(id)
+                dismissRecord()
+                loadRecords()
+            } catch (e: Exception) {
+                _state.update { it.copy(error = repository.friendlyError(e)) }
+            }
+        }
+    }
+
+    fun confirmRecord(id: String) {
+        viewModelScope.launch {
+            try {
+                repository.confirmRecord(id)
+                loadRecords()
+            } catch (e: Exception) {
+                _state.update { it.copy(error = repository.friendlyError(e)) }
+            }
+        }
+    }
+
+    // ── Consolidate ────────────────────────────────────────────────────────────
+
+    fun triggerConsolidate() {
+        viewModelScope.launch {
+            _state.update { it.copy(isConsolidating = true) }
+            try {
+                repository.consolidateMemory()
+                load()
+            } catch (e: Exception) {
+                _state.update { it.copy(error = repository.friendlyError(e)) }
+            } finally {
+                _state.update { it.copy(isConsolidating = false) }
+            }
+        }
+    }
+
+    fun triggerRecordsConsolidate(targetDate: String? = null) {
+        viewModelScope.launch {
+            _state.update { it.copy(isConsolidating = true) }
+            try {
+                val date = targetDate ?: SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+                repository.consolidateRecords(date)
+                loadRecords()
+            } catch (e: Exception) {
+                _state.update { it.copy(error = repository.friendlyError(e)) }
+            } finally {
+                _state.update { it.copy(isConsolidating = false) }
+            }
+        }
+    }
+
+    // ── Daily summaries ────────────────────────────────────────────────────────
+
+    fun loadSummaries() {
+        viewModelScope.launch {
+            try {
+                val items = repository.getDailySummaries(limit = 30).items
+                _state.update { it.copy(summaries = items, showSummaries = true) }
+            } catch (e: Exception) {
+                _state.update { it.copy(error = repository.friendlyError(e)) }
+            }
+        }
+    }
+
+    fun hideSummaries() {
+        _state.update { it.copy(showSummaries = false) }
     }
 
     fun clearError() {
