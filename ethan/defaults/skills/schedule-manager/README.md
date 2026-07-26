@@ -111,7 +111,7 @@ Agent 根据内容自动推断，无法推断时会询问。详见 `references/s
 
 | 技能 | 用途 |
 |---|---|
-| `team-manager` | 时间线常用于绩效周期，people 日志由 team-manager 管理 |
+| `life-manager` | 时间线常用于绩效周期，people 日志由 life-manager 管理 |
 | `lark-task` | 时间线动作可创建飞书任务 |
 | `lark-im` | 定时任务触发时通过飞书发送消息 |
 | `lark-calendar` | 时间线可选同步到飞书日历（`sync_to_lark: true`） |

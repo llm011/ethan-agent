@@ -394,19 +394,19 @@ def scene_dir(scene: str) -> Path:
 def _init_scene_dirs() -> None:
     """初始化 work + life 两套 scene 目录。
 
-    work: 释放 team.yaml（team-manager 技能）+ timelines.yaml（schedule-manager 技能）模板。
+    work: 释放 team.yaml（life-manager 技能）+ timelines.yaml（schedule-manager 技能）模板。
     life: 建目录 + 空 timelines.yaml（创业/个人项目，与 work 隔离）。
     已存在的文件不覆盖（保护用户已修改的配置）。
     """
     import shutil
 
-    team_templates_dir = Path(__file__).parent.parent / "defaults" / "skills" / "team-manager" / "templates"
+    team_templates_dir = Path(__file__).parent.parent / "defaults" / "skills" / "life-manager" / "templates"
     schedule_templates_dir = Path(__file__).parent.parent / "defaults" / "skills" / "schedule-manager" / "templates"
 
     # work 目录（向后兼容：原 _init_work_dir 逻辑）
     work_dir = scene_dir("work")
     work_dir.mkdir(parents=True, exist_ok=True)
-    # team.yaml 来自 team-manager
+    # team.yaml 来自 life-manager
     if team_templates_dir.exists():
         src = team_templates_dir / "team.yaml.example"
         dst = work_dir / "team.yaml"

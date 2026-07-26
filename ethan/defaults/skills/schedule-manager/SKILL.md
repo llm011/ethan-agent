@@ -167,7 +167,7 @@ metadata:
 
 | 技能 | 联动方式 |
 |---|---|
-| `team-manager` | 时间线常用于绩效周期，people 日志记录由 team-manager 管理 |
+| `life-manager` | 时间线常用于绩效周期，people 日志记录由 life-manager 管理 |
 | `lark-task` | 时间线动作可创建飞书任务 |
 | `lark-im` | 定时任务触发时通过飞书发送消息 |
 | `lark-calendar` | 时间线可选同步到飞书日历（`sync_to_lark: true`） |
