@@ -113,7 +113,12 @@ async def download_file(path: str, session_id: str = ""):
 
 
 def _page_sort_key(f: Path) -> tuple[int, int, str]:
-    """页面文件排序：按文件名前导数字排（容忍未补零的 1_, 10_），无前导数字的排最后。"""
+    """页面文件排序：按文件名前导数字排（容忍未补零的 1_, 10_），无前导数字的排最后。
+
+    与 project_loader._page_sort_key（skill 脚本）字节级等价——故意重复而非 import：
+    skill 脚本 standalone 只依赖 stdlib，服务端不应反向依赖用户可改的脚本。改排序
+    逻辑时两处都要同步，否则预览页顺序与渲染出的 PPTX 页顺序会静默分叉。
+    """
     m = re.match(r"(\d+)", f.name)
     return (0, int(m.group(1)), f.name) if m else (1, 0, f.name)
 
@@ -135,7 +140,7 @@ async def get_deck(path: str, session_id: str = ""):
     """返回 deck 项目的全部页面 JSON，供 /ppt-preview 前端渲染。"""
     p = _resolve_jailed(path)
     # 先授权后探测文件系统——与 download/asset 一致，未授权一律 403，不暴露目录存在性
-    _, granted_dirs = await _session_grants(session_id)
+    granted_files, granted_dirs = await _session_grants(session_id)
     d = p.parent if p.is_file() else p
     if str(d.resolve()) not in granted_dirs:
         raise HTTPException(status_code=403, detail="deck not delivered in this session")
@@ -147,8 +152,17 @@ async def get_deck(path: str, session_id: str = ""):
         logger.warning("read deck failed (%s): %s", d, e)
         raise HTTPException(status_code=500, detail="failed to read deck")
     # pptx_path 用实际交付（且已授权）的那个文件，而不是按目录名猜——
-    # 猜出来的 <dirname>.pptx 可能不在 granted_files 里，下载必 403
-    pptx_path = str(p) if p.suffix.lower() == ".pptx" and p.is_file() else None
+    # 猜出来的 <dirname>.pptx 可能不在 granted_files 里，下载必 403。
+    # 传目录时（如 deck 以 dir 形式交付）在 granted_files 里找该项目目录下的 pptx，
+    # 找不到则返回 None（前端隐藏下载按钮，而不是回退到目录路径打 /files/download 必 403）。
+    if p.suffix.lower() == ".pptx" and p.is_file():
+        pptx_path = str(p)
+    else:
+        d_str = str(d)
+        pptx_path = next(
+            (f for f in granted_files if f.endswith(".pptx") and f.startswith(d_str + "/")),
+            None,
+        )
     return {
         "name": d.name,
         "dir": str(d),

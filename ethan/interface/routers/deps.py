@@ -69,6 +69,9 @@ async def verify_token_or_cookie(request: Request) -> str:
     user = request.query_params.get("user")
     sig = request.query_params.get("sig", "")
     path = request.query_params.get("path", "")
+    # user="" 是 default profile（admin）的签名通道——不是提权：admin token 即 admin
+    # 身份，拿到 admin token 的攻击者早就能直接 Bearer 进来。这里显式接受空串，
+    # 避免 ?user= 被 query 解析成 None 而误拒 admin 签名（get_admin_user_id 返回 ""）。
     if user is not None and sig and path and verify_path_sig(user, path, sig):
         set_user_id(user)
         request.state.user_id = user

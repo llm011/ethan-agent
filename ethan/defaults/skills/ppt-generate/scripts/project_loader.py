@@ -22,7 +22,12 @@ from typing import NamedTuple
 
 
 def _page_sort_key(p: Path) -> tuple[int, int, str]:
-    """页面文件排序：按文件名前导数字排，容忍未补零的 1_, 10_（纯字典序会得到 1,10,2…）。"""
+    """页面文件排序：按文件名前导数字排，容忍未补零的 1_, 10_（纯字典序会得到 1,10,2…）。
+
+    与 ethan/interface/routers/files.py:_page_sort_key 字节级等价——故意重复而非
+    import 服务端代码：本脚本是 standalone skill（只依赖 stdlib，用户可挪走）。改排序
+    逻辑时两处都要同步，否则渲染页顺序与预览页顺序会静默分叉。
+    """
     m = re.match(r"(\d+)", p.name)
     return (0, int(m.group(1)), p.name) if m else (1, 0, p.name)
 

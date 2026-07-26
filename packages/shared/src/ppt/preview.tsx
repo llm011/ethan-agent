@@ -92,12 +92,19 @@ export function PptPreviewView({ path, sessionId, adapter }: PptPreviewProps) {
 
   const sidQ = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : "";
 
+  // headers 是对象字面量，调用方（web/desktop page）每次渲染都 `headers()` 新建，
+  // 直接进 deps 会让 deck-fetch effect 每次父重渲染都重跑（重拉整副 deck）。
+  // headers 内容完全由 authToken 决定（见 api-base.ts），authToken 已在 deps 里，
+  // 所以用 ref 钉住 headers identity，effect 内部读 ref.current 即可。
+  const headersRef = useRef(headers);
+  headersRef.current = headers;
+
   useEffect(() => {
     if (!path) {
       setError("链接缺少 path 参数"); // 不设置会永远停在 loading
       return;
     }
-    fetch(`${apiUrl}/files/deck?path=${encodeURIComponent(path)}${sidQ}`, { headers })
+    fetch(`${apiUrl}/files/deck?path=${encodeURIComponent(path)}${sidQ}`, { headers: headersRef.current })
       .then(async (res) => {
         if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.detail || `HTTP ${res.status}`);
         return res.json();
@@ -111,7 +118,7 @@ export function PptPreviewView({ path, sessionId, adapter }: PptPreviewProps) {
         if (needsSig && authToken && requiresSignedUrls) setSigning(true);
       })
       .catch((e) => setError(e.message || "加载失败"));
-  }, [path, apiUrl, sidQ, headers, authToken]);
+  }, [path, apiUrl, sidQ, authToken, requiresSignedUrls]);
 
   // deck 到达后批量签发所有资源 + pptx 的短期签名（一次 POST，<img> 直链鉴权用）
   useEffect(() => {
@@ -134,7 +141,7 @@ export function PptPreviewView({ path, sessionId, adapter }: PptPreviewProps) {
     return () => {
       alive = false;
     };
-  }, [deck, apiUrl, authToken]);
+  }, [deck, apiUrl, authToken, requiresSignedUrls]);
 
   useEffect(() => {
     const el = mainWrapRef.current;
@@ -173,7 +180,9 @@ export function PptPreviewView({ path, sessionId, adapter }: PptPreviewProps) {
     [deck, directUrl]
   );
 
-  const pptxPath = deck?.pptx_path ?? path;
+  // 不要 ?? path 兜底：传目录时 path 是目录，打 /files/download 必 403。
+  // pptx_path 为 null 时直接隐藏下载按钮（后端 get_deck 已尽量在 granted_files 里找 pptx）。
+  const pptxPath = deck?.pptx_path ?? null;
   const downloadPptx = () => {
     if (pptxPath) openDownload(directUrl("download", pptxPath));
   };

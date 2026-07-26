@@ -34,9 +34,11 @@ export function PptChart({ el, colors }: { el: PptElement; colors: string[] }) {
   // 正负值分开量程，以零轴为基线：负值向下/向左延伸，而不是产生负的 SVG 尺寸被静默丢弃。
   // 用 reduce 而非 Math.max(...flat)——大数据量图表（上万点）spread 展开会溢出参数栈报
   // RangeError，整页渲染崩。
-  const posMax = flat.reduce((a, v) => Math.max(a, v, 0), 0);
+  // posMax 兜底 1：全零/空数据时 range=1、yOf(0)=ih（零轴落底部），避免
+  // range=1 但 posMax=0 导致 yOf(0)=0（零轴跑顶部）的视觉错误。
+  const posMax = flat.reduce((a, v) => Math.max(a, v, 0), 0) || 1;
   const negMax = flat.reduce((a, v) => Math.max(a, -v, 0), 0);
-  const range = posMax + negMax || 1;
+  const range = posMax + negMax; // 永远 > 0，不再需要 || 1
   // y 方向：v → 画布 y（0..ih，零轴在 yOf(0)）
   const yOf = (v: number) => ((posMax - v) / range) * ih;
   // x 方向（横向 bar）：v → 画布 x（0..iw，零轴在 xOf(0)）

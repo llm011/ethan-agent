@@ -14,7 +14,13 @@ ASSET_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp"}
 
 
 def resolve_jailed(path: str) -> Path | None:
-    """解析路径并做 jail 校验：只允许 home 目录和 /tmp 下的文件；不合法返回 None。"""
+    """解析路径并做 jail 校验：只允许 home 目录和 /tmp 下的文件；不合法返回 None。
+
+    注意：jail 只是第一道防线，允许整个 home 是为了兼容 deliver_file 的任意输出路径。
+    它本身不足以防止越权读敏感文件（如 ~/.ssh/id_rsa）——caller（/files/* 路由）必须
+    独立做 session grant check（granted_files/granted_dirs 集合成员判定）+ 扩展名白名单
+    （DELIVER_EXTS/ASSET_EXTS）。任何新 caller 都不能只靠 jail 就放行下载。
+    """
     try:
         p = Path(path).expanduser().resolve()
     except Exception:
