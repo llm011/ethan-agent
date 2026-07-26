@@ -49,7 +49,7 @@ engines:
     disabled: true
   - name: google cse
     disabled: true
-  - name: startpage
+  - name: startpage  # 代理下也 CAPTCHA, 已加入 wrapper ALWAYS_DISABLED
     disabled: true
   - name: wikipedia
     disabled: true
@@ -70,9 +70,9 @@ engines:
     disabled: true
   - name: google cse images
     disabled: true
-  - name: startpage images
+  - name: startpage images  # 代理下也 CAPTCHA, 已加入 wrapper ALWAYS_DISABLED
     disabled: true
-  - name: startpage news
+  - name: startpage news  # 代理下也 CAPTCHA, 已加入 wrapper ALWAYS_DISABLED
     disabled: true
   - name: wikinews
     disabled: true
