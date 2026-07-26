@@ -394,26 +394,30 @@ def scene_dir(scene: str) -> Path:
 def _init_scene_dirs() -> None:
     """初始化 work + life 两套 scene 目录。
 
-    work: 释放 team.yaml + timelines.yaml 模板（team-manager 技能专用）。
+    work: 释放 team.yaml（team-manager 技能）+ timelines.yaml（schedule-manager 技能）模板。
     life: 建目录 + 空 timelines.yaml（创业/个人项目，与 work 隔离）。
     已存在的文件不覆盖（保护用户已修改的配置）。
     """
     import shutil
 
-    templates_dir = Path(__file__).parent.parent / "defaults" / "skills" / "team-manager" / "templates"
+    team_templates_dir = Path(__file__).parent.parent / "defaults" / "skills" / "team-manager" / "templates"
+    schedule_templates_dir = Path(__file__).parent.parent / "defaults" / "skills" / "schedule-manager" / "templates"
 
     # work 目录（向后兼容：原 _init_work_dir 逻辑）
     work_dir = scene_dir("work")
     work_dir.mkdir(parents=True, exist_ok=True)
-    if templates_dir.exists():
-        for src_name, dst_name in {
-            "team.yaml.example": "team.yaml",
-            "timelines.yaml.example": "timelines.yaml",
-        }.items():
-            src = templates_dir / src_name
-            dst = work_dir / dst_name
-            if src.exists() and not dst.exists():
-                shutil.copy2(str(src), str(dst))
+    # team.yaml 来自 team-manager
+    if team_templates_dir.exists():
+        src = team_templates_dir / "team.yaml.example"
+        dst = work_dir / "team.yaml"
+        if src.exists() and not dst.exists():
+            shutil.copy2(str(src), str(dst))
+    # timelines.yaml 来自 schedule-manager
+    if schedule_templates_dir.exists():
+        src = schedule_templates_dir / "timelines.yaml.example"
+        dst = work_dir / "timelines.yaml"
+        if src.exists() and not dst.exists():
+            shutil.copy2(str(src), str(dst))
 
     # life 目录：创业项目/个人事项，与工作隔离
     life_dir = scene_dir("life")
