@@ -81,6 +81,15 @@ class KnowledgeBase(ABC):
         """列出所有 tag 及出现次数。可选能力，后端按需实现。"""
         raise NotImplementedError(f"{type(self).__name__} does not support list_tags")
 
+    def rebuild_index(self) -> int:
+        """全量重建向量索引（存量文件补建 embedding）。
+
+        场景：_reindex 只在 add/update 时触发，vault 里的存量文件从没建过索引，
+        导致 semantic_search 返回 0 条。本方法遍历 list_all() 全量重建。
+        子类有更高效实现可 override。返回已建索引的条目数。
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not support rebuild_index")
+
     def _resolve_in_dir(self, source: str) -> Path:
         """解析 source 为 self._dir 子树内的绝对路径，越界直接拒绝（防路径穿越）。"""
         path = Path(source)
@@ -144,6 +153,32 @@ class FilesystemKnowledgeBase(KnowledgeBase):
             )
         except Exception as e:
             logger.warning("向量索引重建失败，条目已写入磁盘但语义搜索不可用: %s", e)
+
+    def rebuild_index(self) -> int:
+        """全量重建向量索引，为所有存量文件补建 embedding。
+
+        先清旧索引再插，避免 UNIQUE constraint（vec0 虚拟表不支持 REPLACE）。
+        """
+        try:
+            vs = self._get_vector_store()
+            # 清掉所有知识库条目（id 是文件路径，mem_* 是记忆系统的，不会误删）
+            # 按 metadata.source 存在与否判断是知识库条目（记忆条目无 source 字段）
+            # 但更简单：直接清 vec_items 里 source 字段非空的条目
+            conn = vs._get_conn()
+            rows = conn.execute(
+                "SELECT id FROM vec_items WHERE json_extract(metadata, '$.source') IS NOT NULL"
+            ).fetchall()
+            for row in rows:
+                vs.remove(row["id"])
+        except Exception as e:
+            logger.warning("清旧索引失败（忽略，继续重建）: %s", e)
+
+        count = 0
+        for item in self.list_all():
+            self._reindex(Path(item.source), item.title, item.content, item.tags)
+            count += 1
+        logger.info("[FilesystemKB] rebuilt index for %d items", count)
+        return count
 
     def update(self, source: str, title: str, content: str, tags: list[str] | None = None,
                frontmatter: dict | None = None) -> None:
@@ -546,6 +581,29 @@ class ObsidianKnowledgeBase(KnowledgeBase):
             )
         except Exception as e:
             logger.warning("向量索引重建失败，条目已写入磁盘但语义搜索不可用: %s", e)
+
+    def rebuild_index(self) -> int:
+        """全量重建向量索引，为所有存量文件补建 embedding。
+
+        先清旧索引再插，避免 UNIQUE constraint（vec0 虚拟表不支持 REPLACE）。
+        """
+        try:
+            vs = self._get_vector_store()
+            conn = vs._get_conn()
+            rows = conn.execute(
+                "SELECT id FROM vec_items WHERE json_extract(metadata, '$.source') IS NOT NULL"
+            ).fetchall()
+            for row in rows:
+                vs.remove(row["id"])
+        except Exception as e:
+            logger.warning("清旧索引失败（忽略，继续重建）: %s", e)
+
+        count = 0
+        for item in self.list_all():
+            self._reindex(Path(item.source), item.title, item.content, item.tags)
+            count += 1
+        logger.info("[ObsidianKB] rebuilt index for %d items", count)
+        return count
 
 
 # ── 外部 REST API 后端 ─────────────────────────────────────────────────────

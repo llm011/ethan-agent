@@ -70,3 +70,21 @@ async def delete_knowledge(source: str, user_id: str = Depends(verify_token)):
         return {"ok": True}
     except Exception as e:
         raise HTTPException(500, f"Failed to delete: {e}")
+
+
+@router.post("/rebuild-index")
+async def rebuild_index(user_id: str = Depends(verify_token)):
+    """全量重建知识库向量索引（存量文件补建 embedding）。
+
+    场景：_reindex 只在 add/update 时触发，vault 里的存量文件从没建过索引，
+    导致 semantic_search 返回 0 条。调用本端点为所有存量文件补建 embedding。
+    """
+    import asyncio
+    manager = get_knowledge_manager(user_id)
+    try:
+        count = await asyncio.to_thread(manager.rebuild_index)
+        return {"ok": True, "indexed": count}
+    except NotImplementedError:
+        raise HTTPException(400, "Current backend does not support rebuild_index")
+    except Exception as e:
+        raise HTTPException(500, f"Rebuild failed: {e}")

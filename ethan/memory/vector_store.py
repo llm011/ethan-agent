@@ -37,11 +37,22 @@ class VectorStore:
         self._db_path = db_path
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: sqlite3.Connection | None = None
+        self._conn_thread_id: int | None = None  # sqlite3 对象禁止跨线程使用
 
     # ── Connection management ──────────────────────────────────────────────
 
     def _get_conn(self) -> sqlite3.Connection:
-        if self._conn is None:
+        import threading
+        current_tid = threading.get_ident()
+        # sqlite3 Connection 对象禁止跨线程使用：asyncio.to_thread / 线程池场景下
+        # 需要检测线程切换并重建连接，否则会触发 ProgrammingError
+        if self._conn is None or self._conn_thread_id != current_tid:
+            if self._conn is not None:
+                try:
+                    self._conn.close()
+                except Exception:
+                    pass
+                self._conn = None
             # busy_timeout 对齐 SessionStore（30s）：三者写同一 sessions.db，
             # DELETE 模式下写会阻塞读，夜间 reindex 与召回/心跳并发时 5s 不够。
             conn = sqlite3.connect(str(self._db_path), timeout=30.0)
@@ -51,6 +62,7 @@ class VectorStore:
             sqlite_vec.load(conn)
             conn.enable_load_extension(False)
             self._conn = conn
+            self._conn_thread_id = current_tid
             self._init_schema()
         return self._conn
 
