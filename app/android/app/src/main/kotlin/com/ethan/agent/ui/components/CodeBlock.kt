@@ -63,7 +63,7 @@ fun CodeBlock(language: String, code: String, modifier: Modifier = Modifier) {
             Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 12.dp, bottom = 12.dp),
+                .padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
         ) {
             Text(
                 text = code,

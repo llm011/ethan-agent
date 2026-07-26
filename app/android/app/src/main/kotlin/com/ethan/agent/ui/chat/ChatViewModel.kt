@@ -313,8 +313,9 @@ class ChatViewModel @Inject constructor(
                     }
                 }
                 event.tool != null -> {
+                    val tool = event.tool!!
                     val step = ToolStep(
-                        tool = event.tool,
+                        tool = tool,
                         args = event.args ?: "",
                         state = event.state ?: "start",
                         durationMs = event.durationMs,
