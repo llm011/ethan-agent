@@ -8,7 +8,7 @@ description: >
   ③ 提醒与自动化 — 项目节点、交付截止、例行巡检、绩效季主动提醒。
   数据统一写入知识库（scene=work），后端可在 filesystem/Obsidian/external 间切换。
   时间线和定时任务管理由 schedule-manager 技能负责。
-trigger: "工作记录|工作进展|业务进展|更新进展|进展整理|我的记录|表现不错|做得好|汇总绩效|绩效总结|绩效报告|团队总结|周报汇总|CR汇总|代码产出|分配任务|委派|布置任务|任务跟踪|checkpoint|团队管理|整理进people|记到people|归到people|整理成员|按人整理|整理观点|收藏文档|收藏链接|存个文档|记个链接|项目节点|交付提醒|截止|巡检|延期"
+trigger: "工作记录|工作进展|业务进展|更新进展|进展整理|我的记录|表现不错|做得好|汇总绩效|绩效总结|绩效报告|团队总结|周报汇总|CR汇总|代码产出|分配任务|委派|布置任务|任务跟踪|checkpoint|团队管理|整理进people|记到people|归到people|整理成员|按人整理|整理观点|整理沉淀|工作沉淀|沉淀整理|分类写入|整理文档|收藏文档|收藏链接|存个文档|记个链接|项目节点|交付提醒|截止|巡检|延期"
 author: Ethan Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -23,6 +23,47 @@ metadata:
 
 > 数据统一写入**知识库**（`scene="work"`），后端可在 filesystem / Obsidian / external 间切换，数据自然跟随。
 > 时间线和定时任务管理由 `schedule-manager` 技能负责，本技能专注于**人**的管理。
+
+## 🚫 硬规则（必须遵守，不可绕过）
+
+### R1：写知识库只用 knowledge_* 工具
+
+**所有 team-manager 技能产生的数据写入，必须通过 `knowledge_add` / `knowledge_edit`（scene="work"）完成。**
+
+禁止行为：
+- ❌ 用 `file_write` 直接写 markdown 文件
+- ❌ 用 `shell` 的 `mkdir` / `cat` / `echo` 创建目录或文件
+- ❌ 自己拼接 vault 路径（如 `/root/Documents/obsidian/work/life/people`）——路径由后端管理，Agent 不需要关心
+
+正确做法：
+- ✅ 新建条目 → `knowledge_add(title=..., content=..., tags=..., scene="work", frontmatter=...)`
+- ✅ 追加内容 → `knowledge_edit(source=..., content=..., mode="append", scene="work")`
+- ✅ 整篇替换 → `knowledge_edit(source=..., content=..., mode="replace", scene="work", frontmatter=...)`
+
+**判断标准**：只要写入的内容属于人员日志/项目进展/业务范围/文档收藏/CR 周报/绩效草稿/工作沉淀 等本技能管理的条目类型，就必须走 knowledge_* 工具。即使你已经用 lark-cli / web_fetch 拉取了原始文档内容，写回时也要走 knowledge_* 工具，不要 file_write。
+
+### R2：内容来自外部文档/链接时，必须传 frontmatter={"source": ...}
+
+**凡是条目内容派生自外部网页/飞书文档/链接（用户提供了 URL，或你用 lark-cli / web_fetch 拉取过原文），调用 `knowledge_add` / `knowledge_edit` 时必须传 `frontmatter` 参数：**
+
+```python
+knowledge_add(
+    title="...",
+    content="...",
+    tags=[...],
+    scene="work",
+    frontmatter={"source": "{原始 URL}"},  # 必传
+)
+```
+
+- `source` 字段是**必传**项，值为原始文档的 URL（飞书 docx 链接、网页链接等）
+- 可按需追加其他字段：`author`、`published`、`url`（字段名小写、值用字符串）
+- 固定字段（title/type/tags/created/updated）由后端自动管理，**不要**在 frontmatter 里重复传
+- filesystem 后端会忽略 frontmatter，但参数仍要传（保持一致，后端切换时不丢字段）
+
+### R3：scene 固定为 work
+
+team-manager 的所有 knowledge_* 调用，`scene` 参数固定为 `"work"`，不要用 `"life"` 或空字符串。
 
 ## ⚡ 快速路径（优先匹配，命中即执行，勿绕路）
 
@@ -63,6 +104,41 @@ metadata:
 
 **总计最多 4 步**：读取 → 写 people → 写 project → 确认。
 
+### 「工作沉淀整理 / 分类写入」
+
+当用户说「整理下 XX 的工作沉淀」「整理这个同事的沉淀，分类写入」「把这份文档按类别整理进来」时，**不要 file_write、不要 shell mkdir**，直接执行：
+
+1. 拉取原文（若用户给了飞书 docx 链接，用 `lark-cli docs +fetch` 拉 markdown；若是网页用 `web_fetch`）
+2. 按内容结构分类（如：技术沉淀、项目复盘、方法论、踩坑总结、团队协作等，由内容决定）
+3. **每一类创建一个独立的知识库条目**，用 `knowledge_add`（scene="work"）：
+   - **标题**：`{姓名}工作沉淀 - {分类名}`（如 `范文杰工作沉淀 - 方法论`）
+   - **tags**：`["doc", "people", "{姓名}", "{分类名}"]`
+   - **frontmatter**：`{"source": "{原始文档 URL}"}` —— **必传**（见硬规则 R2）
+   - **内容**：
+     ```markdown
+     # {分类名}
+
+     > 原文：{url}
+     > 作者：{姓名}
+     > 整理日期：{YYYY-MM-DD}
+
+     {按内容结构组织，保留关键观点、数据、方法，去掉口水话}
+     ```
+4. **同时追加一条事件到该成员的 `人员日志 - {姓名}`**（用 `knowledge_edit` mode=append，scene="work"）：
+   ```
+   ## {MM-DD}
+   - [亮点] 整理了工作沉淀（{分类数} 个分类），原文：{url}（{HH:MM}）
+   ```
+5. 回复确认：列出创建了多少个分类条目、各自标题、原文链接已写入 front matter
+
+**总计 4-5 步**：拉取原文 → 分类整理 → knowledge_add 写入（每类一条）→ knowledge_edit 追加 people 事件 → 确认。
+
+**关键约束**：
+- 不要用 `file_write`，只用 `knowledge_add` / `knowledge_edit`
+- 不要自己拼路径，让后端管
+- 原文 URL **必须**通过 `frontmatter={"source": ...}` 传入，不要只在正文里写「原文：xxx」
+- 多个分类可以并行 `knowledge_add`，提高效率
+
 ### 「文档/链接收藏」
 
 当用户发送文档链接、或说「收藏这个」「存一下」，或 Agent 在处理过程中**解析了任何文档/链接**时，**自动追加收藏记录**：
@@ -72,7 +148,7 @@ metadata:
 3. 用 `knowledge_add`（scene="work"）创建收藏条目：
    - **标题**：`文档收藏 - {文档标题}`
    - **tags**：`["doc", "{业务名}", "{分类}"]`
-   - **frontmatter**：`{"source": "{url}"}`（Obsidian 后端写入 front matter，便于追溯原文；filesystem 后端忽略）
+   - **frontmatter**：`{"source": "{url}"}` —— **必传**（见硬规则 R2）
    - **内容**：
      ```markdown
      - 链接：{url}
@@ -82,12 +158,7 @@ metadata:
      ```
 4. 回复中附带「已收藏到知识库（scene=work）」
 
-**front matter 指导**：
-- 凡是条目内容来自外部网页/文档（有明确 URL），通过 `frontmatter={"source": "{url}"}` 把链接写入 front matter；后端是 Obsidian 时会自动出现在笔记的 YAML 头
-- 也可按需追加其他自定义字段（如 `author`、`url`、`published`），字段名小写、值用字符串
-- filesystem 后端会忽略 `frontmatter`，链接仍记录在正文「链接：」行中
-
-**注意**：这是**附带动作**——即使用户的主要意图是"更新进展"或"文档分析"，只要解析了链接就顺带收藏。
+**注意**：这是**附带动作**——即使用户的主要意图是"更新进展"或"文档分析"，只要解析了链接就顺带收藏。frontmatter 必传规则见硬规则 R2。
 
 ## 🎯 三大核心场景
 
@@ -158,8 +229,11 @@ metadata:
 | 项目进展 | `项目进展 - {业务名} - {项目名}` | `["project", "{业务名}", "{项目名}"]` | knowledge_edit(append) |
 | 业务范围 | `业务范围 - {业务名}` | `["scope", "{业务名}"]` | knowledge_edit(replace) |
 | 文档收藏 | `文档收藏 - {文档标题}` | `["doc", "{业务名}", "{分类}"]` | knowledge_add |
+| 工作沉淀 | `{姓名}工作沉淀 - {分类名}` | `["doc", "people", "{姓名}", "{分类名}"]` | knowledge_add |
 | CR 周报 | `CR周报 - {业务名} - {YYYY}-W{NN}` | `["cr-report", "{业务名}"]` | knowledge_add |
 | 绩效草稿 | `绩效草稿 - {YYYY}-Q{N}` | `["review", "{YYYY}-Q{N}"]` | knowledge_add / knowledge_edit |
+
+**frontmatter 必传场景**（见硬规则 R2）：文档收藏、工作沉淀、CR 周报等任何内容派生自外部文档/链接的条目，`knowledge_add` / `knowledge_edit` 调用时必须传 `frontmatter={"source": "{原始 URL}"}`。人员日志、项目进展等内部记录无需传。
 
 **查询方式**：
 - `knowledge_search(query="{姓名}", scene="work")` → 搜该人员的所有记录
@@ -325,3 +399,5 @@ review:
 - **客观记录**：people 日志以事实描述为主，避免主观判断词
 - **不越权**：Agent 不自行修改 DDL 或取消任务
 - **scene 固定为 work**：team-manager 的所有知识库操作 scene="work"，不要混用其他 scene
+- **写入工具**：禁止用 `file_write` / `shell` 写知识库内容，只用 `knowledge_add` / `knowledge_edit`（见硬规则 R1）
+- **链接保留**：内容来自外部文档/链接时，`frontmatter={"source": ...}` 必传，不要只在正文里写「原文：xxx」（见硬规则 R2）

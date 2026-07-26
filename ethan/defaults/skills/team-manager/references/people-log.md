@@ -13,6 +13,10 @@
 
 所有读写通过 `knowledge_read` / `knowledge_edit`（scene="work"）完成。后端切到 Obsidian 时，数据自然出现在 vault 的 `work/` 子目录下。
 
+> ⚠️ **写入工具硬约束**：禁止用 `file_write` / `shell mkdir` 写人员日志，只用 `knowledge_add` / `knowledge_edit`。路径由后端管理，不要自己拼。详见 SKILL.md 硬规则 R1。
+>
+> ⚠️ **frontmatter**：人员日志是内部记录，无需传 `frontmatter` 参数。但如果某条事件引用了外部文档/链接（如「整理了 XX 工作沉淀，原文：{url}」），**事件文本里要保留 URL**，对应的沉淀条目本身才用 `frontmatter={"source": ...}`。
+
 ## 条目内容格式
 
 ```markdown

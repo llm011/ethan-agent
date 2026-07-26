@@ -24,6 +24,9 @@
 - **标题**：`绩效草稿 - {YYYY}-Q{N}`
 - **tags**：`["review", "{YYYY}-Q{N}"]`
 - **content**：下方报告整体结构的完整 Markdown
+- **frontmatter**：绩效草稿是内部汇总，无需传（除非引用了外部文档作为评估依据，此时传 `{"source": "{url}"}`）
+
+> ⚠️ 写入工具硬约束：禁止用 `file_write` 写绩效草稿，只用 `knowledge_add` / `knowledge_edit`（scene="work"）。详见 SKILL.md 硬规则 R1。
 
 ---
 
