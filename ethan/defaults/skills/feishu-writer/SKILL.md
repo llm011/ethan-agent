@@ -1,5 +1,6 @@
 ---
 name: feishu-writer
+trigger: "写飞书文档|飞文档|写文档到飞书|生成研报|写研报|画架构图|mermaid|plantuml|飞书长文|飞书富文本|技术方案|设计文档|feishu writer|write feishu doc"
 description: >
   TRIGGER WHEN: 用户要求"写飞书文档"、"生成研报"、"画架构图(Mermaid/PlantUML)"且明确指定输出到飞书时。
   专业的飞书文档生成与富文本写入，支持高质感排版、Mermaid 净化及分块长文写入。
