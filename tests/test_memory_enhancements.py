@@ -463,7 +463,8 @@ class TestConsolidationThreshold:
         from ethan.interface.routers import tasks
         extraction_src = inspect.getsource(tasks._run_structured_extraction)
         # 记忆提取门槛用的是 % 3（从 % 5 降级到 % 3 以更及时捕获用户事实）
-        assert "user_turns % 3 != 0" in extraction_src
+        # 触发条件是 user_turns % 3 == 0（3 轮基线节点），不是 != 0
+        assert "user_turns % 3 == 0" in extraction_src
         assert "user_turns % 5 != 0" not in extraction_src
         assert "user_turns % 10 != 0" not in extraction_src
 
