@@ -302,6 +302,44 @@ private fun MainContent(authViewModel: AuthViewModel) {
                     onClearError = vm::clearError,
                 )
             }
+
+            // Track 8 routes
+            composable(Screen.BackgroundTasks.route) {
+                val vm: com.ethan.agent.ui.background.BackgroundTasksViewModel = hiltViewModel()
+                val state by vm.state.collectAsState()
+                com.ethan.agent.ui.background.BackgroundTasksScreen(
+                    state = state,
+                    onRefresh = vm::load,
+                    onStop = vm::stopTask,
+                    onOpenSession = { id -> navController.navigate(Screen.Chat.createRoute(id)) },
+                    onClearError = vm::clearError,
+                )
+            }
+
+            composable(
+                route = Screen.PptPreview.route,
+                arguments = listOf(navArgument("sessionId") { type = NavType.StringType }),
+            ) {
+                val vm: com.ethan.agent.ui.ppt.PptPreviewViewModel = hiltViewModel()
+                val state by vm.state.collectAsState()
+                com.ethan.agent.ui.ppt.PptPreviewScreen(
+                    state = state,
+                    onClearError = vm::clearError,
+                )
+            }
+
+            composable(
+                route = Screen.Annotations.route,
+                arguments = listOf(navArgument("sessionId") { type = NavType.StringType }),
+            ) {
+                val vm: com.ethan.agent.ui.annotations.AnnotationsViewModel = hiltViewModel()
+                val state by vm.state.collectAsState()
+                com.ethan.agent.ui.annotations.AnnotationsScreen(
+                    state = state,
+                    onDelete = vm::deleteAnnotation,
+                    onClearError = vm::clearError,
+                )
+            }
         }
     }
 }
