@@ -1,0 +1,172 @@
+name: Android Build
+
+# 仅在 app/android/ 或本 workflow 文件本身变化时触发。
+# tag (v*) 时打 release APK 上传到 Release；main push / PR 时只跑 lint + test + debug APK。
+#
+# 与 publish-desktop.yml 的设计思路一致：用 check-changes job 做 path filter，
+# 避免无 Android 改动时浪费 CI 资源。
+
+on:
+  push:
+    tags:
+      - 'v*'
+    branches:
+      - main
+    paths:
+      - 'app/android/**'
+      - '.github/workflows/android.yml'
+  pull_request:
+    paths:
+      - 'app/android/**'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+
+jobs:
+  # 检查自上一个 tag 以来 app/android/ 是否变化
+  # PR 触发时直接 changed=true
+  check-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      android-changed: ${{ steps.diff.outputs.changed }}
+      is-release: ${{ steps.context.outputs.is-release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect context
+        id: context
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "is-release=true" >> $GITHUB_OUTPUT
+          else
+            echo "is-release=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Detect Android changes since previous tag
+        id: diff
+        run: |
+          # PR 触发：直接 changed=true
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "PR trigger, will build"
+            exit 0
+          fi
+          # workflow_dispatch 直接 changed=true
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "Manual trigger, will build"
+            exit 0
+          fi
+          # main push：直接 changed=true（paths filter 已经保证只有相关改动才触发）
+          if [[ "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF}" == "refs/heads/main" ]]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "main push with android path filter, will build"
+            exit 0
+          fi
+          # tag 触发：和上一个 v* tag 比较
+          CURRENT="${GITHUB_REF_NAME}"
+          PREVIOUS=$(git tag --list 'v*' --sort=-creatordate | grep -v "^${CURRENT}$" | head -1)
+          if [ -z "$PREVIOUS" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "No previous tag found, will build"
+            exit 0
+          fi
+          echo "Comparing $PREVIOUS → $CURRENT"
+          DIFF=$(git diff --name-only "$PREVIOUS".."$CURRENT" -- app/android/ .github/workflows/android.yml)
+          if [ -z "$DIFF" ]; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "No android-related changes, will skip build"
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "Android changes detected:"
+            echo "$DIFF"
+          fi
+
+  build:
+    needs: check-changes
+    if: needs.check-changes.outputs.android-changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # tag 触发时需要写 Release
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
+
+      - name: Prepare signing keystore (release only)
+        if: needs.check-changes.outputs.is-release == 'true'
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "No signing secrets found, will fall back to debug key for release"
+            exit 0
+          fi
+          # 解码 keystore 到一个稳定路径
+          mkdir -p "$HOME/.android"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$HOME/.android/ethan-release.jks"
+          # 注入到环境变量（gradle 通过 System.getenv 读取）
+          echo "ANDROID_STORE_FILE=$HOME/.android/ethan-release.jks" >> $GITHUB_ENV
+          echo "ANDROID_STORE_PASSWORD=$ANDROID_STORE_PASSWORD" >> $GITHUB_ENV
+          echo "ANDROID_KEY_ALIAS=$ANDROID_KEY_ALIAS" >> $GITHUB_ENV
+          echo "ANDROID_KEY_PASSWORD=$ANDROID_KEY_PASSWORD" >> $GITHUB_ENV
+
+      - name: Lint
+        working-directory: ./app/android
+        run: ./gradlew lintDebug --no-daemon
+
+      - name: Unit tests
+        working-directory: ./app/android
+        run: ./gradlew testDebugUnitTest --no-daemon
+
+      - name: Build debug APK
+        working-directory: ./app/android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Build release APK
+        if: needs.check-changes.outputs.is-release == 'true'
+        working-directory: ./app/android
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Upload debug APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ethan-android-debug
+          path: app/android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Upload release APK artifact
+        if: needs.check-changes.outputs.is-release == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ethan-android-release
+          path: app/android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
+      - name: Attach release APK to GitHub Release
+        if: needs.check-changes.outputs.is-release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: app/android/app/build/outputs/apk/release/*.apk
+          body: Android 客户端，下载 APK 安装即可。
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

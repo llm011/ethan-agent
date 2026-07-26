@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ethan.agent.data.EthanRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -12,9 +14,10 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 data class LogsUiState(
-    val content: String = "",
     val type: String = "backend",
     val query: String = "",
+    val lines: Int = 500,
+    val content: String = "",
     val isLoading: Boolean = false,
     val error: String? = null,
 )
@@ -26,16 +29,16 @@ class LogsViewModel @Inject constructor(
     private val _state = MutableStateFlow(LogsUiState())
     val state: StateFlow<LogsUiState> = _state.asStateFlow()
 
+    private var queryJob: Job? = null
+
     init { load() }
 
     fun load() {
         viewModelScope.launch {
-            _state.update { it.copy(isLoading = true) }
+            _state.update { it.copy(isLoading = true, error = null) }
             try {
-                val content = repository.getLogs(
-                    type = _state.value.type,
-                    query = _state.value.query.ifBlank { null },
-                )
+                val s = _state.value
+                val content = repository.getLogs(s.type, s.lines, s.query.takeIf { it.isNotBlank() })
                 _state.update { it.copy(content = content, isLoading = false) }
             } catch (e: Exception) {
                 _state.update { it.copy(isLoading = false, error = repository.friendlyError(e)) }
@@ -48,8 +51,14 @@ class LogsViewModel @Inject constructor(
         load()
     }
 
-    fun onQueryChange(query: String) {
-        _state.update { it.copy(query = query) }
+    fun onQueryChange(q: String) {
+        _state.update { it.copy(query = q) }
+        // 300ms debounce，避免边输入边请求
+        queryJob?.cancel()
+        queryJob = viewModelScope.launch {
+            delay(300)
+            load()
+        }
     }
 
     fun clearError() { _state.update { it.copy(error = null) } }
