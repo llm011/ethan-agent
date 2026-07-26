@@ -43,14 +43,7 @@ class KnowledgeSearchTool(BaseTool):
 
     async def run(self, query: str, limit: int = 3, scene: str = "") -> str:
         kb = _kb_for(self._user_id, scene)
-        # 优先语义搜索（embedding 召回，对近义表述和短查询更友好），
-        # 无结果或 embedding 不可用时 fallback 到关键词搜索
-        try:
-            results = await kb.semantic_search(query, limit=limit)
-        except Exception:
-            results = []
-        if not results:
-            results = kb.search(query, limit=limit)
+        results = kb.search(query, limit=limit)
         if not results:
             return f"No results found in knowledge base for: {query}"
         lines = []

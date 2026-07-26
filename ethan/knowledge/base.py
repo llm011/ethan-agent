@@ -81,14 +81,64 @@ class KnowledgeBase(ABC):
         """列出所有 tag 及出现次数。可选能力，后端按需实现。"""
         raise NotImplementedError(f"{type(self).__name__} does not support list_tags")
 
-    def rebuild_index(self) -> int:
-        """全量重建向量索引（存量文件补建 embedding）。
+    @staticmethod
+    def _tokenize_query(query: str) -> set[str]:
+        """将查询切分为 token 集合，用于关键词搜索打分。
 
-        场景：_reindex 只在 add/update 时触发，vault 里的存量文件从没建过索引，
-        导致 semantic_search 返回 0 条。本方法遍历 list_all() 全量重建。
-        子类有更高效实现可 override。返回已建索引的条目数。
+        - 英文/数字：按空格切分（长度 >= 2 才作为 token）
+        - 中文：按 2-gram 切分（"内置浏览器" → {"内置", "置浏", "浏览", "览器"}），
+          让查询和文档字面表述不完全一致时也能匹配（如"内置的浏览器"）
+        - 完整 query 也作为一个 token（精确匹配加分）
         """
-        raise NotImplementedError(f"{type(self).__name__} does not support rebuild_index")
+        import re
+
+        query_lower = query.lower().strip()
+        if not query_lower:
+            return set()
+
+        tokens: set[str] = set()
+        for m in re.findall(r"[a-z0-9]+", query_lower):
+            if len(m) >= 2:
+                tokens.add(m)
+        for seg in re.findall(r"[\u4e00-\u9fff]+", query_lower):
+            if len(seg) >= 2:
+                for i in range(len(seg) - 1):
+                    tokens.add(seg[i : i + 2])
+            elif len(seg) == 1:
+                tokens.add(seg)
+        if len(query_lower) >= 2:
+            tokens.add(query_lower)
+        return tokens
+
+    def _keyword_search(self, query: str, limit: int = 5) -> list["KnowledgeItem"]:
+        """通用关键词搜索（2-gram 分词），FilesystemKB 和 ObsidianKB 共用。
+
+        排序策略：标题/文件名命中完整 query 加分远高于正文命中，
+        让"内置浏览器"能把标题就是"内置浏览器"的 PRD 文件排到第一，
+        而不是被内容里只是提到这个词的其他文件挤掉。
+        """
+        tokens = self._tokenize_query(query)
+        if not tokens:
+            return []
+        query_lower = query.lower().strip()
+        results: list[tuple[int, KnowledgeItem]] = []
+        for item in self.list_all():
+            filename = Path(item.source).stem.lower()
+            title_lower = item.title.lower()
+            # 标题/文件名命中完整 query：+20（强偏好）
+            # 正文命中完整 query：+5
+            # 2-gram 命中：每个 +1
+            title_text = title_lower + " " + filename
+            content_text = (item.content + " " + " ".join(item.tags)).lower()
+            score = sum(1 for t in tokens if t in title_text or t in content_text)
+            if query_lower in title_text:
+                score += 20
+            elif query_lower in content_text:
+                score += 5
+            if score > 0:
+                results.append((score, item))
+        results.sort(key=lambda x: -x[0])
+        return [item for _, item in results[:limit]]
 
     def _resolve_in_dir(self, source: str) -> Path:
         """解析 source 为 self._dir 子树内的绝对路径，越界直接拒绝（防路径穿越）。"""
@@ -135,50 +185,7 @@ class FilesystemKnowledgeBase(KnowledgeBase):
 
         tag_line = f"\ntags: {', '.join(tags)}" if tags else ""
         path.write_text(f"# {title}{tag_line}\n\n{content}", encoding="utf-8")
-        self._reindex(path, title, content, tags)
         return str(path)
-
-    def _reindex(self, path: Path, title: str, content: str, tags: list[str] | None) -> None:
-        """重建该条目的向量索引。best-effort：嵌入不可用/失败时静默跳过，不阻断写入。"""
-        try:
-            from ethan.memory.embeddings import embed_sync
-            text_for_embed = f"{title} {' '.join(tags or [])} {content}"
-            embedding = embed_sync(text_for_embed)
-            vs = self._get_vector_store()
-            vs.add(
-                id=str(path),
-                text=text_for_embed,
-                embedding=embedding,
-                metadata={"title": title, "source": str(path), "tags": tags or []},
-            )
-        except Exception as e:
-            logger.warning("向量索引重建失败，条目已写入磁盘但语义搜索不可用: %s", e)
-
-    def rebuild_index(self) -> int:
-        """全量重建向量索引，为所有存量文件补建 embedding。
-
-        先清旧索引再插，避免 UNIQUE constraint（vec0 虚拟表不支持 REPLACE）。
-        """
-        try:
-            vs = self._get_vector_store()
-            # 清掉所有知识库条目（id 是文件路径，mem_* 是记忆系统的，不会误删）
-            # 按 metadata.source 存在与否判断是知识库条目（记忆条目无 source 字段）
-            # 但更简单：直接清 vec_items 里 source 字段非空的条目
-            conn = vs._get_conn()
-            rows = conn.execute(
-                "SELECT id FROM vec_items WHERE json_extract(metadata, '$.source') IS NOT NULL"
-            ).fetchall()
-            for row in rows:
-                vs.remove(row["id"])
-        except Exception as e:
-            logger.warning("清旧索引失败（忽略，继续重建）: %s", e)
-
-        count = 0
-        for item in self.list_all():
-            self._reindex(Path(item.source), item.title, item.content, item.tags)
-            count += 1
-        logger.info("[FilesystemKB] rebuilt index for %d items", count)
-        return count
 
     def update(self, source: str, title: str, content: str, tags: list[str] | None = None,
                frontmatter: dict | None = None) -> None:
@@ -188,7 +195,6 @@ class FilesystemKnowledgeBase(KnowledgeBase):
             raise FileNotFoundError(f"Knowledge item not found: {source}")
         tag_line = f"\ntags: {', '.join(tags)}" if tags else ""
         path.write_text(f"# {title}{tag_line}\n\n{content}", encoding="utf-8")
-        self._reindex(path, title, content, tags)
 
     def delete(self, source: str) -> None:
         path = self._resolve_in_dir(source)
@@ -199,17 +205,7 @@ class FilesystemKnowledgeBase(KnowledgeBase):
     # ── Keyword search (existing) ──────────────────────────────────────────
 
     def search(self, query: str, limit: int = 5) -> list[KnowledgeItem]:
-        query_words = set(query.lower().split())
-        results: list[tuple[int, KnowledgeItem]] = []
-
-        for item in self.list_all():
-            text = (item.title + " " + item.content + " " + " ".join(item.tags)).lower()
-            score = sum(1 for w in query_words if w in text)
-            if score > 0:
-                results.append((score, item))
-
-        results.sort(key=lambda x: -x[0])
-        return [item for _, item in results[:limit]]
+        return self._keyword_search(query, limit)
 
     # ── Semantic search (new) ──────────────────────────────────────────────
 
@@ -311,7 +307,6 @@ class ObsidianKnowledgeBase(KnowledgeBase):
 
         text = self._build_file_content(title, content, tags, frontmatter=frontmatter)
         path.write_text(text, encoding="utf-8")
-        self._reindex(path, title, content, tags)
         return str(path)
 
     def update(self, source: str, title: str, content: str, tags: list[str] | None = None,
@@ -324,7 +319,6 @@ class ObsidianKnowledgeBase(KnowledgeBase):
         text = self._build_file_content(title, content, tags, created=created,
                                         frontmatter=frontmatter)
         path.write_text(text, encoding="utf-8")
-        self._reindex(path, title, content, tags)
 
     def _read_created_from_file(self, path: Path) -> str | None:
         """从已有文件的 front matter 提取 created 字段。
@@ -360,8 +354,8 @@ class ObsidianKnowledgeBase(KnowledgeBase):
     # ── Search ─────────────────────────────────────────────────────────────
 
     def search(self, query: str, limit: int = 5) -> list[KnowledgeItem]:
-        if self._cli_available:
-            return self._cli_search(query, limit)
+        # 2-gram 关键词搜索对中文更友好（CLI 的 Obsidian 索引对中文分词较弱），
+        # CLI 搜索保留作为 list_tags 等其他能力的依赖
         return self._filesystem_search(query, limit)
 
     def _cli_search(self, query: str, limit: int = 5) -> list[KnowledgeItem]:
@@ -382,7 +376,13 @@ class ObsidianKnowledgeBase(KnowledgeBase):
             items: list[KnowledgeItem] = []
             results_list = data if isinstance(data, list) else data.get("results", [])
             for entry in results_list[:limit]:
-                path_str = entry.get("path") or entry.get("file", "")
+                # CLI 可能返回字符串（路径）或字典（{"path": ...}）
+                if isinstance(entry, str):
+                    path_str = entry
+                elif isinstance(entry, dict):
+                    path_str = entry.get("path") or entry.get("file", "")
+                else:
+                    continue
                 if not path_str:
                     continue
                 path = Path(path_str) if Path(path_str).is_absolute() else self._vault / path_str
@@ -397,17 +397,7 @@ class ObsidianKnowledgeBase(KnowledgeBase):
 
     def _filesystem_search(self, query: str, limit: int = 5) -> list[KnowledgeItem]:
         """纯文件系统关键词搜索（CLI 不可用时的兜底）。"""
-        query_words = set(query.lower().split())
-        results: list[tuple[int, KnowledgeItem]] = []
-
-        for item in self.list_all():
-            text = (item.title + " " + item.content + " " + " ".join(item.tags)).lower()
-            score = sum(1 for w in query_words if w in text)
-            if score > 0:
-                results.append((score, item))
-
-        results.sort(key=lambda x: -x[0])
-        return [item for _, item in results[:limit]]
+        return self._keyword_search(query, limit)
 
     async def semantic_search(self, query: str, limit: int = 5) -> list[KnowledgeItem]:
         from ethan.memory.embeddings import embed
@@ -566,44 +556,6 @@ class ObsidianKnowledgeBase(KnowledgeBase):
             content = "\n".join(lines[1:]).strip()
 
         return KnowledgeItem(title=title, content=content, source=str(path), tags=tags)
-
-    def _reindex(self, path: Path, title: str, content: str, tags: list[str] | None) -> None:
-        try:
-            from ethan.memory.embeddings import embed_sync
-            text_for_embed = f"{title} {' '.join(tags or [])} {content}"
-            embedding = embed_sync(text_for_embed)
-            vs = self._get_vector_store()
-            vs.add(
-                id=str(path),
-                text=text_for_embed,
-                embedding=embedding,
-                metadata={"title": title, "source": str(path), "tags": tags or []},
-            )
-        except Exception as e:
-            logger.warning("向量索引重建失败，条目已写入磁盘但语义搜索不可用: %s", e)
-
-    def rebuild_index(self) -> int:
-        """全量重建向量索引，为所有存量文件补建 embedding。
-
-        先清旧索引再插，避免 UNIQUE constraint（vec0 虚拟表不支持 REPLACE）。
-        """
-        try:
-            vs = self._get_vector_store()
-            conn = vs._get_conn()
-            rows = conn.execute(
-                "SELECT id FROM vec_items WHERE json_extract(metadata, '$.source') IS NOT NULL"
-            ).fetchall()
-            for row in rows:
-                vs.remove(row["id"])
-        except Exception as e:
-            logger.warning("清旧索引失败（忽略，继续重建）: %s", e)
-
-        count = 0
-        for item in self.list_all():
-            self._reindex(Path(item.source), item.title, item.content, item.tags)
-            count += 1
-        logger.info("[ObsidianKB] rebuilt index for %d items", count)
-        return count
 
 
 # ── 外部 REST API 后端 ─────────────────────────────────────────────────────
