@@ -35,6 +35,9 @@
       "@ethan/shared/lib/*": [
         "../packages/shared/src/lib/*"
       ],
+      "@ethan/shared/ppt/*": [
+        "../packages/shared/src/ppt/*"
+      ],
       "@ethan/shared/components/*": [
         "../packages/shared/src/components/*"
       ]

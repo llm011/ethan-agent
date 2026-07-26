@@ -54,8 +54,20 @@ export interface ImageCard {
   size_kb: number | null;
 }
 
-// 结构化卡片数据（web_search/image_search 工具产出）
-export type CardData = SearchResultCard | ImageCard;
+// 文件卡片（deliver_file 工具产出）
+export interface FileCard {
+  type: "file";
+  filename: string;
+  title?: string;
+  path: string;          // 服务器本地路径（仅用于拼 /api/files URL 参数）
+  size_kb: number | null;
+  kind: string;          // pptx / pdf / ...
+  project_dir?: string;  // pptx 项目目录（含 deck.json + pages/ 时存在，可预览）
+  page_count?: number;
+}
+
+// 结构化卡片数据（web_search/image_search/deliver_file 工具产出）
+export type CardData = SearchResultCard | ImageCard | FileCard;
 
 export interface Message {
   role: "user" | "assistant";
