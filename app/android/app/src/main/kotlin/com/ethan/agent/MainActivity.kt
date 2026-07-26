@@ -1,12 +1,10 @@
 package com.ethan.agent
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.ethan.agent.ui.EthanApp
 import com.ethan.agent.ui.auth.AuthViewModel
@@ -15,17 +13,39 @@ import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+
+    // Shared content received via ACTION_SEND (Share to Ethan)
+    var pendingShareText: String? = null
+    var pendingShareUri: android.net.Uri? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        handleShareIntent(intent)
         setContent {
             val authViewModel: AuthViewModel = hiltViewModel()
-            val authState by authViewModel.state.collectAsState()
-            val systemDark = isSystemInDarkTheme()
-            val darkTheme = authState.darkTheme ?: systemDark
-
-            EthanTheme(darkTheme = darkTheme) {
+            // EthanTheme reads ThemeState.themeId set by SettingsViewModel.setTheme()
+            EthanTheme {
                 EthanApp(authViewModel = authViewModel)
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleShareIntent(intent)
+    }
+
+    private fun handleShareIntent(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_SEND) return
+        when {
+            intent.type?.startsWith("text/") == true -> {
+                pendingShareText = intent.getStringExtra(Intent.EXTRA_TEXT)
+            }
+            intent.type?.startsWith("image/") == true ||
+            intent.type?.startsWith("application/") == true -> {
+                pendingShareUri = intent.getParcelableExtra(Intent.EXTRA_STREAM, android.net.Uri::class.java)
+                    ?: @Suppress("DEPRECATION") intent.getParcelableExtra(Intent.EXTRA_STREAM)
             }
         }
     }

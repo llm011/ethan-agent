@@ -123,6 +123,8 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.retrofit)
     implementation(libs.coil.compose)
+    implementation(libs.androidx.biometric)
+    implementation(libs.material3.window.size)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 }
