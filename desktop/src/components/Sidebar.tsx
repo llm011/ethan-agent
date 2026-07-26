@@ -5,6 +5,7 @@ import { Clock, Database, Activity } from "lucide-react";
 import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
 import { useSidebar } from "@/components/layout-shell";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
+import { getVersion as getTauriAppVersion } from "@tauri-apps/api/app";
 import { Button } from "@ethan/shared/ui/button";
 import { Input } from "@ethan/shared/ui/input";
 import { Separator } from "@ethan/shared/ui/separator";
@@ -125,6 +126,15 @@ export function Sidebar() {
 
   // 本地服务存活状态：单例轮询 /api/health（同时拿 version），与 ChatHeader 共享
   const health = useServerHealth();
+
+  // 左上角版本号：优先用 Tauri 应用自身版本（来自 tauri.conf.json，与 release tag 同步），
+  // 后端版本（health.version）保留给 server-status-badge 的 hover 诊断用。
+  // 非 Tauri 环境（如 web dev）getVersion 会 reject，fallback 到后端版本。
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+  useEffect(() => {
+    getTauriAppVersion().then(setAppVersion).catch(() => {});
+  }, []);
+  const displayVersion = appVersion ?? health.version;
 
   // 获取对话模式表（挂载时一次），用于左栏会话的模式标识
   useEffect(() => {
@@ -350,12 +360,12 @@ export function Sidebar() {
         >
           <img src={`${''}/logo-sidebar.png`} alt={health.agent_name || "Ethan"} className="rounded-full shrink-0 h-7 w-7" />
           <span className="whitespace-nowrap">{health.agent_name || "Ethan"}</span>
-          {health.version && (
+          {displayVersion && (
             <span
               className="text-[9px] font-mono text-muted-foreground/60 bg-muted border border-border/60 rounded-full px-1.5 py-0.5 leading-none shrink-0"
-              title={`ethan-agent v${health.version}`}
+              title={`ethan-agent v${displayVersion}`}
             >
-              v{health.version}
+              v{displayVersion}
             </span>
           )}
         </h1>
