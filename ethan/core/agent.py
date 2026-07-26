@@ -788,6 +788,12 @@ class Agent:
                 if should_suggest_plan(monitor, last_tool_calls):
                     pending_suffix = plan_nudge_message()
                     monitor.plan_nudge_count += 1
+                    logger.info("[plan-nudge] iter=%d tools=%s → 注入 plan 软建议 (count=%d)",
+                                i, [tc.name for tc in last_tool_calls], monitor.plan_nudge_count)
+                else:
+                    logger.info("[plan-nudge] iter=%d tools=%s → 不触发 (has_planned=%s, nudge_count=%d, sigs=%d)",
+                                i, [tc.name for tc in last_tool_calls],
+                                monitor.has_planned, monitor.plan_nudge_count, len(monitor._signatures))
 
             # 反思后仍重复同一操作 → 二次强提醒，逼它换路
             if monitor.awaiting_reflection_followup:
@@ -1079,6 +1085,7 @@ class Agent:
                         continue
                     detail = _format_args(tc.arguments)
                     ok = True
+                    consent_msg = ""  # 预初始化，避免 consent_provider is None 分支未赋值
                     if consent_provider is None:
                         ok = True
                     elif consent_provider.streamed:
@@ -1175,6 +1182,12 @@ class Agent:
                 if should_suggest_plan(monitor, last_tool_calls):
                     pending_suffix = plan_nudge_message()
                     monitor.plan_nudge_count += 1
+                    logger.info("[plan-nudge] iter=%d tools=%s → 注入 plan 软建议 (count=%d)",
+                                i, [tc.name for tc in last_tool_calls], monitor.plan_nudge_count)
+                else:
+                    logger.info("[plan-nudge] iter=%d tools=%s → 不触发 (has_planned=%s, nudge_count=%d, sigs=%d)",
+                                i, [tc.name for tc in last_tool_calls],
+                                monitor.has_planned, monitor.plan_nudge_count, len(monitor._signatures))
 
             # 反思后仍重复同一操作 → 二次强提醒，逼它换路
             if monitor.awaiting_reflection_followup:
