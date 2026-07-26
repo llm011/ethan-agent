@@ -63,12 +63,11 @@ export function Sidebar() {
   const [runningTaskCount, setRunningTaskCount] = useState(0);
   const [health, setHealth] = useState<{version: string | null; agent_name: string | null}>({version: null, agent_name: null});
   const [modes, setModes] = useState<ModeEntry[]>([]);
-  const [lastSeenSchedule, setLastSeenSchedule] = useState(() => {
-    if (typeof window !== "undefined") {
-      return Number(localStorage.getItem("ethan_last_seen_schedule") || "0");
-    }
-    return 0;
-  });
+  const [lastSeenSchedule, setLastSeenSchedule] = useState(0);
+  // 客户端挂载后再读 localStorage，避免 SSR/CSR 初始值不一致导致 hydration mismatch
+  useEffect(() => {
+    setLastSeenSchedule(Number(localStorage.getItem("ethan_last_seen_schedule") || "0"));
+  }, []);
 
   // Derive active session id from pathname: /chat/[id]
   const activeSessionId = pathname.match(/^\/chat\/(.+)$/)?.[1] ?? null;
