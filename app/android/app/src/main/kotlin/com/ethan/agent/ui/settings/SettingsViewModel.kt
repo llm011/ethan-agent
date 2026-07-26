@@ -216,7 +216,7 @@ class SettingsViewModel @Inject constructor(
 
     fun setTheme(themeId: String) {
         _state.update { it.copy(themeId = themeId) }
-        // TODO("Track 7"): call EthanRepository.setTheme(themeId) once Track 7 lands
+        com.ethan.agent.ui.theme.ThemeState.themeId = themeId
     }
 
     fun onServerUrlChange(url: String) {

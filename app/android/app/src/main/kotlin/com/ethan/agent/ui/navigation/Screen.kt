@@ -29,6 +29,14 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector?
     data object DocDetail : Screen("docs/{slug}", "文档详情")
     data object Logs : Screen("logs", "日志")
     data object More : Screen("more", "更多", Icons.Default.MoreHoriz)
+    // Track 8 screens — routes declared here, wired in EthanApp (Track 9)
+    data object BackgroundTasks : Screen("background-tasks", "后台任务")
+    data object PptPreview : Screen("ppt-preview/{sessionId}", "PPT 预览") {
+        fun createRoute(sessionId: String) = "ppt-preview/$sessionId"
+    }
+    data object Annotations : Screen("annotations/{sessionId}", "标注") {
+        fun createRoute(sessionId: String) = "annotations/$sessionId"
+    }
 }
 
 val bottomNavItems = listOf(

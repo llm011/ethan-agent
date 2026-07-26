@@ -32,17 +32,28 @@ private val DarkColors = darkColorScheme(
 
 @Composable
 fun EthanTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
     dynamicColor: Boolean = true,
     content: @Composable () -> Unit,
 ) {
-    val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+    val systemDark = isSystemInDarkTheme()
+    val themeId = ThemeState.themeId
+
+    val colorScheme = when (themeId) {
+        "dark" -> DarkColors
+        "qingwa" -> if (systemDark) QingwaDark else QingwaLight
+        "warm_orange" -> if (systemDark) WarmOrangeDark else WarmOrangeLight
+        "plain_paper" -> if (systemDark) PlainPaperDark else PlainPaperLight
+        "mist" -> if (systemDark) MistDark else MistLight
+        "light" -> LightColors
+        else -> {
+            // "system" — respect dynamic color on Android 12+
+            if (dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val context = LocalContext.current
+                if (systemDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+            } else {
+                if (systemDark) DarkColors else LightColors
+            }
         }
-        darkTheme -> DarkColors
-        else -> LightColors
     }
 
     MaterialTheme(
