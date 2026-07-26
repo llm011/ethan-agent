@@ -1,14 +1,15 @@
 # Team Manager
 
-团队人员管理技能，覆盖两大核心场景：**绩效管理**、**任务委派**。
+团队人员管理技能，覆盖三大核心场景：**绩效管理**、**任务委派**、**提醒与自动化**。
 
+> 数据统一写入**知识库**（`scene="work"`），后端可在 filesystem / Obsidian / external 间切换。
 > 时间线和定时任务管理已拆分到 `schedule-manager` 技能。本技能专注于**人**的管理。
 
 ## 适用人群
 
 管理 5-20 人技术团队的 leader / 管理者，希望 Agent 辅助日常管理、减少重复跟进工作。
 
-## 两大场景
+## 三大场景
 
 ### 1. 绩效管理
 
@@ -24,7 +25,17 @@
 
 将任务分配给成员，自动拆解阶段、创建飞书任务、设置 checkpoint 提醒。
 
-**流程**：用户描述任务 → Agent 拆分阶段 → 确认 DDL → 创建飞书任务 → 关键节点自动提醒（提醒通过 `schedule-manager` 创建）
+**流程**：用户描述任务 → Agent 拆分阶段 → 确认 DDL → 创建飞书任务 → 关键节点自动提醒（提醒通过 `schedule-manager` 创建）→ 完成/延期自动回写 people 日志
+
+### 3. 提醒与自动化
+
+主动追踪项目节点、交付截止、例行巡检，到点自动提醒，不用人盯。
+
+**能力**：
+- 项目节点提醒 — 进展中记录的时间节点（如"8.15 完成 xxx"）到点前主动提醒
+- 交付截止提醒 — 任务 DDL 前 1 天/当天自动提醒
+- 例行巡检 — 每日晨间扫描项目进展，发现延期风险主动预警
+- 绩效季提醒 — 绩效季临近时主动提醒收集数据、整理 people 日志
 
 ## 快速开始
 
@@ -61,24 +72,34 @@ members:
 | 任务委派 | 「安排一下小王，设计插件架构，下周五前出方案」 |
 | 群监控 | 「帮我监控这个群，每天扫一次」（定时任务由 schedule-manager 创建） |
 | 绩效汇总 | 「帮我汇总下这季度的绩效」 |
+| 项目节点 | 「这个项目 8.15 要完成 xxx，到时候提醒我」 |
 
 ## 数据存储
 
-数据存储在 `~/.ethan/work/` 下：
+所有数据通过 `knowledge_add` / `knowledge_search` / `knowledge_read` / `knowledge_edit` 读写，`scene="work"` 隔离。后端切到 Obsidian 时数据自然出现在 vault 的 `work/` 子目录下。
 
-```
-~/.ethan/work/
-├── team.yaml            # 团队配置（成员、项目、CR 平台映射）
-├── people/              # 人员日志（唯一记录源）
-│   ├── 李四.md
-│   └── _self.md
-├── project/             # 项目进展（链接到 people）
-├── docs/                # 文档/链接收藏
-├── cr-reports/          # CR 分析报告
-└── reviews/             # 绩效评估草稿
-```
+**条目类型**：
 
-> scene 目录隔离（work / life）、timelines.yaml、`.timeline_state.json`、exports/ 由 `schedule-manager` 负责维护，不在本技能范围内。
+| 类型 | 标题格式 | tags |
+|---|---|---|
+| 人员日志 | `人员日志 - {姓名}` | `["people", "{姓名}"]` |
+| 项目进展 | `项目进展 - {业务名} - {项目名}` | `["project", "{业务名}", "{项目名}"]` |
+| 业务范围 | `业务范围 - {业务名}` | `["scope", "{业务名}"]` |
+| 文档收藏 | `文档收藏 - {文档标题}` | `["doc", "{业务名}", "{分类}"]` |
+| CR 周报 | `CR周报 - {业务名} - {YYYY}-W{NN}` | `["cr-report", "{业务名}"]` |
+| 绩效草稿 | `绩效草稿 - {YYYY}-Q{N}` | `["review", "{YYYY}-Q{N}"]` |
+
+**配置文件**：`~/.ethan/work/team.yaml`（团队信息，不走知识库）
+
+> scene 目录隔离、timelines.yaml、`.timeline_state.json`、exports/ 由 `schedule-manager` 负责维护，不在本技能范围内。
+
+### Front Matter 约定（Obsidian 后端）
+
+- 固定字段：`title` / `type` / `tags` / `created` / `updated`
+- 扩展字段：通过 `knowledge_add` / `knowledge_edit` 的 `frontmatter` 参数传入，模型按需补充
+  - 内容来自外部网页/文档时，传 `{"source": "{url}"}` 记录原文链接
+  - 也可追加 `author`、`published` 等字段，字段名小写、值用字符串
+- filesystem 后端忽略 `frontmatter`
 
 ## 关联技能
 
@@ -95,5 +116,5 @@ members:
 
 - **不做最终判定**：Agent 只提供汇总和建议，绩效打分由管理者决定
 - **确认后再创建**：任务拆分、飞书任务创建，必须经用户确认
-- **隐私边界**：所有数据仅存本地，不上传外部
+- **隐私边界**：所有数据仅存本地知识库，不上传外部
 - **通用框架**：不含任何个人/公司/团队信息，开箱即用

@@ -95,26 +95,24 @@ DDL 建议参考：
 
 3. **提醒设置**：
    - 飞书任务原生的到期提醒
-   - 额外的 Agent 定时提醒（通过 scheduler）
+   - 额外的 Agent 定时提醒（通过 `schedule_create`）
 
 ### Phase 5: 设置提醒序列
 
-为每个 checkpoint 创建提醒：
+为每个 checkpoint 创建提醒（通过 `schedule_create` 工具，category="one_off"）：
 
-```yaml
-reminders:
-  - timing: "checkpoint_start"
-    message: "今天 {阶段名} 开始，目标产出：{产出物}"
-    
-  - timing: "checkpoint_end - 1d"  
-    message: "明天 {阶段名} 截止，产出物：{产出物}。如果有阻塞请及时同步"
-    
-  - timing: "need_coordination"  # 需要约人/会议时
-    message: "记得提前约 {相关人} 的时间做 {事项}"
-    
-  - timing: "total_ddl - 2d"
-    message: "后天整体交付截止，请确认：{checklist}"
-```
+每个提醒是一个一次性的 schedule_create 调用：
+- **job_id**：`task_remind_{task_id}_{checkpoint}`（唯一 ID）
+- **prompt**：提醒内容（如「提醒 {assignee}：明天 {阶段名} 截止，产出物：{产出物}。如果有阻塞请及时同步」）
+- **cron 或 interval_minutes**：用具体日期的 cron（如 `0 10 15 8 *` = 8月15日10点）
+- **category**：`one_off`
+- **scene**：`work`
+
+提醒时机参考：
+- `checkpoint_start`：阶段开始当天上午
+- `checkpoint_end - 1d`：阶段截止前 1 天
+- `need_coordination`：需要约人/会议时
+- `total_ddl - 2d`：总 DDL 前 2 天确认 checklist
 
 ## 任务状态管理
 
@@ -155,9 +153,11 @@ schedule.create(
 )
 ```
 
-## 联动记录
+## 联动记录（写回 people 日志）
 
-任务完成时自动记录到 people：
+任务状态变化时，用 `knowledge_edit`（mode=append，scene="work"）追加到对应成员的 `人员日志 - {姓名}` 条目（tags: `["people", "{姓名}"]`）。
+
+任务完成时：
 
 ```markdown
 ## 07-31
@@ -170,3 +170,5 @@ schedule.create(
 ## 07-31
 - [问题] 插件架构方案设计延期 3 天，原因：依赖的 API 文档不全需要额外调研
 ```
+
+条目不存在时先 `knowledge_add` 创建初始条目（含当月标题），写入规则与去重逻辑见 `people-log.md`。
