@@ -1,6 +1,7 @@
 package com.ethan.agent
 
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -44,8 +45,12 @@ class MainActivity : ComponentActivity() {
             }
             intent.type?.startsWith("image/") == true ||
             intent.type?.startsWith("application/") == true -> {
-                pendingShareUri = intent.getParcelableExtra(Intent.EXTRA_STREAM, android.net.Uri::class.java)
-                    ?: @Suppress("DEPRECATION") intent.getParcelableExtra(Intent.EXTRA_STREAM)
+                pendingShareUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableExtra(Intent.EXTRA_STREAM, android.net.Uri::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM)
+                }
             }
         }
     }
