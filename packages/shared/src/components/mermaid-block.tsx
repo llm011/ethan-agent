@@ -18,7 +18,7 @@ async function getMermaid(theme: "dark" | "default") {
   const mod = await (_mermaidPromise ??= import("mermaid").then((m) => m.default));
   if (_currentTheme !== theme) {
     _currentTheme = theme;
-    mod.initialize({ startOnLoad: false, theme, securityLevel: "loose" });
+    mod.initialize({ startOnLoad: false, theme, securityLevel: "antiscript" });
   }
   return mod;
 }
