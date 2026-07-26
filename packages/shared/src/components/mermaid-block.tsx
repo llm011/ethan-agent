@@ -23,16 +23,19 @@ async function getMermaid(theme: "dark" | "default") {
   return mod;
 }
 
-// 监听系统暗色主题（与应用主题通常一致；应用强制主题的场景由 CSS 同步覆盖）。
-function useSystemDark(): boolean {
+// 监听应用实际主题：读 documentElement 的 dark class（应用强制主题时为准）。
+// 亮色主题时即使 OS 是 dark 也按 light 渲染，避免 mermaid dark 配色与亮色容器冲突。
+// MutationObserver 捕获应用主动切换主题。
+function useAppDark(): boolean {
   const [dark, setDark] = useState(false);
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const update = () => setDark(mq.matches);
+    const el = document.documentElement;
+    const update = () => setDark(el.classList.contains("dark"));
     update();
-    mq.addEventListener("change", update);
-    return () => mq.removeEventListener("change", update);
+    const observer = new MutationObserver(update);
+    observer.observe(el, { attributes: true, attributeFilter: ["class"] });
+    return () => observer.disconnect();
   }, []);
   return dark;
 }
@@ -48,7 +51,7 @@ function useDebounced<T>(value: T, delay = 150): T {
 }
 
 export function MermaidBlock({ code }: MermaidBlockProps) {
-  const dark = useSystemDark();
+  const dark = useAppDark();
   const debouncedCode = useDebounced(code);
   const [svg, setSvg] = useState<string>("");
   const [error, setError] = useState<string>("");
@@ -70,8 +73,7 @@ export function MermaidBlock({ code }: MermaidBlockProps) {
       try {
         const mermaid = await getMermaid(dark ? "dark" : "default");
         if (cancelled || seq !== renderSeq.current) return;
-        // parse 抛错即语法错误；render 再画 svg
-        await mermaid.parse(debouncedCode);
+        // render 内部已 parse，语法错会 throw；不再单独调 parse 避免重复解析
         const { svg: rendered } = await mermaid.render(
           `${idRef.current}-${seq}`,
           debouncedCode,

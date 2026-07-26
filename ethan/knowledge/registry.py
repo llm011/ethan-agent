@@ -72,8 +72,8 @@ def get_knowledge_backend(user_id: str = "", scene: str = "") -> KnowledgeBase:
             # fallback to filesystem
             instance = _create_filesystem_backend(scene)
         else:
-            # external 后端忽略 scene（无目录概念），按需在外部服务侧实现 namespace
-            instance = ExternalKnowledgeBase(base_url=base_url, api_key=api_key)
+            # scene 随 API 透传给外部服务，由服务端按 scene 隔离存储/搜索
+            instance = ExternalKnowledgeBase(base_url=base_url, api_key=api_key, scene=scene)
     else:
         # default: filesystem
         instance = _create_filesystem_backend(scene)

@@ -292,7 +292,12 @@ class ObsidianKnowledgeBase(KnowledgeBase):
         self._reindex(path, title, content, tags)
 
     def _read_created_from_file(self, path: Path) -> str | None:
-        """从已有文件的 front matter 提取 created 字段，失败返回 None。"""
+        """从已有文件的 front matter 提取 created 字段。
+
+        旧文件可能没有 YAML frontmatter 或没有 created 字段（早期版本不写），
+        此时回退到文件 mtime 作为创建日期，避免编辑时把 created 重置为今天，
+        导致老笔记的原始创建日期丢失。
+        """
         try:
             text = path.read_text(encoding="utf-8")
             if text.startswith("---"):
@@ -304,7 +309,12 @@ class ObsidianKnowledgeBase(KnowledgeBase):
                         return str(fm["created"])
         except Exception:
             pass
-        return None
+        # 旧文件无 frontmatter 或无 created 字段：回退到文件 mtime（ISO 日期）
+        try:
+            from datetime import datetime
+            return datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d")
+        except OSError:
+            return None
 
     def delete(self, source: str) -> None:
         path = self._resolve_in_dir(source)
@@ -452,31 +462,36 @@ class ObsidianKnowledgeBase(KnowledgeBase):
 
         固定字段：title / type / tags / created / updated
         扩展字段：通过 frontmatter 传入，模型可自由补充 source/url/author 等。
-        所有字符串值用 repr() 包裹（单引号），避免特殊字符破坏 YAML。
+        用 yaml.safe_dump 序列化 frontmatter，确保反斜杠/引号/冒号等特殊字符
+        不会破坏 YAML 解析（早期用 repr() 会在含 both ' 和 " 的值上让 YAML 报错）。
         """
         from datetime import date
+
+        import yaml
+
         today = date.today().isoformat()
-        parts = ["---"]
-        parts.append(f"title: {title!r}")
+        fm: dict = {
+            "title": title,
+            "created": created or today,
+            "updated": today,
+        }
         if tags:
-            parts.append(f"type: {tags[0]}")
-            parts.append("tags:")
-            for t in tags:
-                parts.append(f"  - {t}")
-        parts.append(f"created: {created or today}")
-        parts.append(f"updated: {today}")
-        # 扩展字段：模型可自由传入 source/url/author 等任意 front matter 字段
+            fm["type"] = tags[0]
+            fm["tags"] = list(tags)
+        # 拒绝固定字段，避免 frontmatter 覆盖自动管理的字段
+        reserved = {"title", "type", "tags", "created", "updated"}
         if frontmatter:
             for k, v in frontmatter.items():
-                if isinstance(v, str):
-                    parts.append(f"{k}: {v!r}")
-                else:
-                    parts.append(f"{k}: {v}")
-        parts.append("---")
-        parts.append("")
-        parts.append(f"# {title}")
-        parts.append("")
-        parts.append(content)
+                if k not in reserved:
+                    fm[k] = v
+
+        # safe_dump 自动处理引号/转义；sort_keys=False 保持稳定字段顺序；
+        # allow_unicode=True 避免中文标题被转成 \uXXXX
+        fm_text = yaml.safe_dump(
+            fm, sort_keys=False, allow_unicode=True, default_flow_style=False
+        ).rstrip("\n")
+
+        parts = ["---", fm_text, "---", "", f"# {title}", "", content]
         return "\n".join(parts)
 
     def _parse_obsidian_file(self, path: Path) -> KnowledgeItem | None:
@@ -537,11 +552,19 @@ class ObsidianKnowledgeBase(KnowledgeBase):
 
 
 class ExternalKnowledgeBase(KnowledgeBase):
-    """通过 REST API 连接外部知识库服务。"""
+    """通过 REST API 连接外部知识库服务。
 
-    def __init__(self, base_url: str, api_key: str = "", headers: dict[str, str] | None = None):
+    scene 参数用于按场景隔离（如 'work'/'life'）。客户端会把 scene 作为
+    query 参数 / payload 字段传给外部服务；外部服务应按 scene 隔离存储与搜索，
+    以履行 knowledge 工具宣称的 "Different scenes are isolated for storage
+    and search" 契约。scene 为空时不传该字段，向后兼容。
+    """
+
+    def __init__(self, base_url: str, api_key: str = "", headers: dict[str, str] | None = None,
+                 scene: str = ""):
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
+        self._scene = scene
         self._headers = headers or {}
         if api_key:
             self._headers.setdefault("Authorization", f"Bearer {api_key}")
@@ -559,11 +582,24 @@ class ExternalKnowledgeBase(KnowledgeBase):
         """URL-encode source，避免 / # ? 等字符破坏路径。"""
         return quote(str(source), safe="")
 
+    def _scene_params(self, extra: dict | None = None) -> dict:
+        """构造 query 参数，scene 非空时附加。"""
+        params = dict(extra or {})
+        if self._scene:
+            params.setdefault("scene", self._scene)
+        return params
+
+    def _with_scene(self, payload: dict) -> dict:
+        """给 POST/PUT payload 注入 scene 字段（非空时）。"""
+        if self._scene:
+            return {**payload, "scene": self._scene}
+        return payload
+
     # ── Write ──────────────────────────────────────────────────────────────
 
     def add(self, title: str, content: str, tags: list[str] | None = None,
             frontmatter: dict | None = None) -> str:
-        payload = {"title": title, "content": content, "tags": tags or []}
+        payload = self._with_scene({"title": title, "content": content, "tags": tags or []})
         if frontmatter:
             payload["frontmatter"] = frontmatter
         with self._client() as client:
@@ -574,7 +610,7 @@ class ExternalKnowledgeBase(KnowledgeBase):
 
     def update(self, source: str, title: str, content: str, tags: list[str] | None = None,
                frontmatter: dict | None = None) -> None:
-        payload = {"title": title, "content": content, "tags": tags or []}
+        payload = self._with_scene({"title": title, "content": content, "tags": tags or []})
         if frontmatter:
             payload["frontmatter"] = frontmatter
         with self._client() as client:
@@ -583,20 +619,27 @@ class ExternalKnowledgeBase(KnowledgeBase):
 
     def delete(self, source: str) -> None:
         with self._client() as client:
-            resp = client.delete(f"/items/{self._encode_source(source)}")
+            resp = client.delete(
+                f"/items/{self._encode_source(source)}", params=self._scene_params()
+            )
             resp.raise_for_status()
 
     # ── Search ─────────────────────────────────────────────────────────────
 
     def search(self, query: str, limit: int = 5) -> list[KnowledgeItem]:
         with self._client() as client:
-            resp = client.get("/search", params={"q": query, "limit": limit})
+            resp = client.get(
+                "/search", params=self._scene_params({"q": query, "limit": limit})
+            )
             resp.raise_for_status()
             return self._parse_items(resp.json())
 
     async def semantic_search(self, query: str, limit: int = 5) -> list[KnowledgeItem]:
         async with self._async_client() as client:
-            resp = await client.get("/search", params={"q": query, "limit": limit, "semantic": "true"})
+            resp = await client.get(
+                "/search",
+                params=self._scene_params({"q": query, "limit": limit, "semantic": "true"}),
+            )
             resp.raise_for_status()
             return self._parse_items(resp.json())
 
@@ -604,13 +647,15 @@ class ExternalKnowledgeBase(KnowledgeBase):
 
     def list_all(self) -> list[KnowledgeItem]:
         with self._client() as client:
-            resp = client.get("/items")
+            resp = client.get("/items", params=self._scene_params())
             resp.raise_for_status()
             return self._parse_items(resp.json())
 
     def get(self, source: str) -> KnowledgeItem | None:
         with self._client() as client:
-            resp = client.get(f"/items/{self._encode_source(source)}")
+            resp = client.get(
+                f"/items/{self._encode_source(source)}", params=self._scene_params()
+            )
             if resp.status_code == 404:
                 return None
             resp.raise_for_status()
