@@ -30,6 +30,14 @@ function keyOf(m: Message, i: number): string {
   return m.id != null ? `id:${m.id}` : `idx:${i}`;
 }
 
+// 分享卡片宽度档位：表格/宽代码块可调到更宽档位避免格内换行
+const SHARE_WIDTHS = [
+  { label: "紧凑", value: 560, desc: "560px · 纯文字、短回答" },
+  { label: "标准", value: 720, desc: "720px · 常规对话（默认）" },
+  { label: "宽", value: 960, desc: "960px · 代码块、中等表格" },
+  { label: "超宽", value: 1200, desc: "1200px · 宽表格、复杂代码" },
+] as const;
+
 interface ShareModeProps {
   open: boolean;
   messages: Message[];
@@ -49,6 +57,7 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
   const [saveInfo, setSaveInfo] = useState<{ filename: string } | null>(null);
   const [editedContent, setEditedContent] = useState<Record<string, string>>({});
   const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [cardWidth, setCardWidth] = useState<number>(720);
   const previewRef = useRef<HTMLDivElement>(null);
 
   // Esc 关闭
@@ -201,15 +210,40 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
                 />
                 显示角色与时间
               </label>
-              <span className="text-xs text-muted-foreground">已选 {selectedMessages.length} 条</span>
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-muted-foreground">已选 {selectedMessages.length} 条</span>
+                <div className="inline-flex overflow-hidden rounded-md border border-border">
+                  {SHARE_WIDTHS.map((w, i) => (
+                    <button
+                      key={w.value}
+                      type="button"
+                      onClick={() => setCardWidth(w.value)}
+                      title={w.desc}
+                      className={`px-2 py-0.5 text-[11px] leading-5 transition-colors ${
+                        i > 0 ? "border-l border-border" : ""
+                      } ${
+                        cardWidth === w.value
+                          ? "bg-primary text-primary-foreground"
+                          : "text-muted-foreground hover:bg-accent"
+                      }`}
+                    >
+                      {w.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
-            <div className="flex-1 overflow-y-auto p-5">
+            <div className="flex-1 overflow-auto p-5">
               {selectedMessages.length === 0 ? (
                 <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
                   请勾选至少一条消息
                 </div>
               ) : (
-                <div className="share-card mx-auto" ref={previewRef}>
+                <div
+                  className="share-card mx-auto"
+                  ref={previewRef}
+                  style={{ width: cardWidth, maxWidth: "none" }}
+                >
                   <div className="share-card-inner">
                     {selectedMessages.map((m, idx) => {
                       const k = keyOf(m, idx);

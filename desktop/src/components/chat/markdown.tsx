@@ -3,6 +3,7 @@ import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { CodeBlock } from "@ethan/shared/components/code-block";
 import { PlainCodeBlock } from "@ethan/shared/components/plain-code-block";
+import { MermaidBlock } from "@ethan/shared/components/mermaid-block";
 import { forwardRef, useMemo, useState } from "react";
 import { Lightbox, type LightboxImage } from "./lightbox";
 import { openUrl } from "@/lib/external-link";
@@ -113,8 +114,12 @@ export const markdownComponents: Components = {
   code: ({ className, children }) => {
     const match = /language-(\w+)/.exec(className || "");
     const raw = String(children);
+    const lang = match?.[1] || "";
+    if (lang === "mermaid") {
+      return <MermaidBlock code={raw.replace(/\n$/, "")} />;
+    }
     if (match) {
-      return <CodeBlock language={match[1]} code={raw.replace(/\n$/, "")} />;
+      return <CodeBlock language={lang} code={raw.replace(/\n$/, "")} />;
     }
     if (raw.includes("\n")) {
       return <PlainCodeBlock code={raw.replace(/\n$/, "")} />;

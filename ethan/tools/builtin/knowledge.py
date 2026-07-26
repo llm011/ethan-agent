@@ -3,9 +3,25 @@ from ethan.knowledge.base import KnowledgeBase
 from ethan.tools.base import BaseTool
 
 
-def _kb_for(user_id: str) -> KnowledgeBase:
+def _kb_for(user_id: str, scene: str = "") -> KnowledgeBase:
     from ethan.knowledge.registry import get_knowledge_backend
-    return get_knowledge_backend(user_id)
+    return get_knowledge_backend(user_id, scene=scene)
+
+
+_SCENE_DESC = (
+    "Scene/scope for isolation (e.g. 'work', 'life'). "
+    "Empty = knowledge base root (default, shared). "
+    "'work' = knowledge base root's work/ subdir. "
+    "Different scenes are isolated for storage and search."
+)
+
+_FRONTMATTER_DESC = (
+    "Extra front matter fields to attach (Obsidian backend only). "
+    "Pass as a JSON object, e.g. {\"source\": \"https://example.com/article\"}. "
+    "Use to attach source URL / author / etc. when saving a note derived from a web page or external doc. "
+    "Fixed fields (title/type/tags/created/updated) are auto-managed by the backend — do not include them here. "
+    "Filesystem backend ignores this field."
+)
 
 
 class KnowledgeSearchTool(BaseTool):
@@ -18,6 +34,7 @@ class KnowledgeSearchTool(BaseTool):
         "properties": {
             "query": {"type": "string", "description": "Search query"},
             "limit": {"type": "integer", "description": "Max results (default 3)", "default": 3},
+            "scene": {"type": "string", "description": _SCENE_DESC, "default": ""},
         },
         "required": ["query"],
     }
@@ -25,8 +42,8 @@ class KnowledgeSearchTool(BaseTool):
     def __init__(self, user_id: str = ""):
         self._user_id = user_id
 
-    async def run(self, query: str, limit: int = 3) -> str:
-        results = _kb_for(self._user_id).search(query, limit=limit)
+    async def run(self, query: str, limit: int = 3, scene: str = "") -> str:
+        results = _kb_for(self._user_id, scene).search(query, limit=limit)
         if not results:
             return f"No results found in knowledge base for: {query}"
         lines = []
@@ -46,6 +63,8 @@ class KnowledgeAddTool(BaseTool):
             "title": {"type": "string", "description": "Title of the note"},
             "content": {"type": "string", "description": "Markdown content to save"},
             "tags": {"type": "array", "items": {"type": "string"}, "description": "Optional tags"},
+            "scene": {"type": "string", "description": _SCENE_DESC, "default": ""},
+            "frontmatter": {"type": "object", "description": _FRONTMATTER_DESC},
         },
         "required": ["title", "content"],
     }
@@ -53,8 +72,11 @@ class KnowledgeAddTool(BaseTool):
     def __init__(self, user_id: str = ""):
         self._user_id = user_id
 
-    async def run(self, title: str, content: str, tags: list[str] | None = None) -> str:
-        path = _kb_for(self._user_id).add(title, content, tags=tags)
+    async def run(self, title: str, content: str, tags: list[str] | None = None,
+                  scene: str = "", frontmatter: dict | None = None) -> str:
+        path = _kb_for(self._user_id, scene).add(
+            title, content, tags=tags, frontmatter=frontmatter
+        )
         return f"Saved to knowledge base: {path}"
 
 
@@ -70,6 +92,7 @@ class KnowledgeReadTool(BaseTool):
         "type": "object",
         "properties": {
             "source": {"type": "string", "description": "条目的 source（knowledge_search 返回的文件路径）"},
+            "scene": {"type": "string", "description": _SCENE_DESC, "default": ""},
         },
         "required": ["source"],
     }
@@ -77,8 +100,8 @@ class KnowledgeReadTool(BaseTool):
     def __init__(self, user_id: str = ""):
         self._user_id = user_id
 
-    async def run(self, source: str) -> str:
-        item = _kb_for(self._user_id).get(source)
+    async def run(self, source: str, scene: str = "") -> str:
+        item = _kb_for(self._user_id, scene).get(source)
         if item is None:
             return f"知识库中找不到该条目：{source}"
         tag_line = f"\ntags: {', '.join(item.tags)}" if item.tags else ""
@@ -93,7 +116,7 @@ class KnowledgeEditTool(BaseTool):
         "编辑本地个人知识库中已有的一条（追加或整篇替换），而不是新建。"
         "用户说「在那条笔记/知识里再加一点、补充、改一下」时用它，避免每次都新建文档。\n"
         "- mode=append（默认）：把 content 追加到原正文末尾，保留原标题/标签。适合「再记一条」。\n"
-        "- mode=replace：整篇替换正文（title/tags 不传则沿用原值）。适合修订。\n"
+        "- mode=replace：整篇替换正文（title/tags 不传则沿用原值）。适合修订；可同时传 frontmatter 更新自定义 front matter。\n"
         "source 用 knowledge_search 的结果路径；不确定原文时先 knowledge_read 看全文再改。"
     )
     parameters = {
@@ -104,6 +127,8 @@ class KnowledgeEditTool(BaseTool):
             "mode": {"type": "string", "enum": ["append", "replace"], "description": "append 追加（默认）/ replace 整篇替换", "default": "append"},
             "title": {"type": "string", "description": "仅 replace 时可选：新标题，不传沿用原标题"},
             "tags": {"type": "array", "items": {"type": "string"}, "description": "仅 replace 时可选：新标签，不传沿用原标签"},
+            "scene": {"type": "string", "description": _SCENE_DESC, "default": ""},
+            "frontmatter": {"type": "object", "description": _FRONTMATTER_DESC + " Only effective in replace mode."},
         },
         "required": ["source", "content"],
     }
@@ -112,14 +137,16 @@ class KnowledgeEditTool(BaseTool):
         self._user_id = user_id
 
     async def run(self, source: str, content: str, mode: str = "append",
-                  title: str | None = None, tags: list[str] | None = None) -> str:
-        kb = _kb_for(self._user_id)
+                  title: str | None = None, tags: list[str] | None = None,
+                  scene: str = "", frontmatter: dict | None = None) -> str:
+        kb = _kb_for(self._user_id, scene)
         item = kb.get(source)
         if item is None:
             return f"知识库中找不到该条目：{source}"
         if mode == "replace":
             kb.update(item.source, title or item.title, content,
-                      tags=tags if tags is not None else item.tags)
+                      tags=tags if tags is not None else item.tags,
+                      frontmatter=frontmatter)
             return f"已替换知识库条目正文：{item.source}"
         kb.append(item.source, content)
         return f"已追加到知识库条目：{item.source}"

@@ -53,6 +53,8 @@ ALWAYS_DISABLED = {
     'baidu', 'duckduckgo',
     # duckduckgo 系列同样会触发 CAPTCHA
     'duckduckgo images', 'duckduckgo news', 'duckduckgo videos',
+    # startpage 系列实测代理下仍 CAPTCHA (suspended 3600s)
+    'startpage', 'startpage images', 'startpage news',
 }
 
 # 3. 放开其他引擎（显式设 disabled=False），确保 ALWAYS_DISABLED 中的被禁用

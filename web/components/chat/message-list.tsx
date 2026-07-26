@@ -30,11 +30,17 @@ export function MessageList({ messages, streaming, sessionId, onQuote, onCardAct
   // 当前可见消息数（从末尾算）；消息列表变短（切换会话）时重置
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE);
   const prevLenRef = useRef(messages.length);
+  // 记录上一次的 user 消息数量，用于识别"用户刚发送了消息"
+  // （不能用 messages 末尾 role 判断：consumeStream 会立即 push 空 assistant 占位，
+  // React 18 batching 后末尾是 assistant，导致 lastIsUser 误判）
+  const prevUserCountRef = useRef(0);
 
   // 会话切换（消息减少）时重置 visibleCount
   useEffect(() => {
     if (messages.length < prevLenRef.current) {
       setVisibleCount(INITIAL_VISIBLE);
+      // 切会话时同步重置 user 计数基线，避免误触发"新 user 消息"
+      prevUserCountRef.current = messages.filter(m => m.role === "user").length;
     }
     prevLenRef.current = messages.length;
   }, [messages.length]);
@@ -73,17 +79,22 @@ export function MessageList({ messages, streaming, sessionId, onQuote, onCardAct
   }, []);
 
   // 新消息到达时自动滚到底部
-  // - 用户发送的消息（最后一条 role=user）：强制滚到底部（等 DOM 更新后）
+  // - 用户发送的新消息（user 数量增加）：强制滚到底部（无论当前滚动位置）
+  //   不能用 messages 末尾 role 判断：consumeStream 会立即 push 空 assistant 占位，
+  //   React 18 batching 后末尾是 assistant，导致 lastIsUser 误判，用户在中间时不滚动
   // - 助手流式更新：仅当用户在底部附近时跟随滚动，避免打断向上翻阅
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const lastIsUser = messages.length > 0 && messages[messages.length - 1].role === "user";
-    if (lastIsUser) {
+    const userCount = messages.filter(m => m.role === "user").length;
+    const hasNewUserMessage = userCount > prevUserCountRef.current;
+    prevUserCountRef.current = userCount;
+    if (hasNewUserMessage) {
       // 等下一帧 DOM 渲染完成再滚，避免 scrollHeight 还是旧值
       requestAnimationFrame(() => scrollToBottom());
       return;
     }
+    // 如果用户已经滚到接近底部（80px 阈值），自动跟随
     const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
     if (isNearBottom) {
       requestAnimationFrame(() => scrollToBottom());

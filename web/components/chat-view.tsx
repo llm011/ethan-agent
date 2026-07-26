@@ -163,6 +163,12 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       setSessionSource("web");
       setMode("");
       setLoadingSession(false);
+      // 重置 transient 状态：否则旧会话残留的 streaming=true 会让 handleSend
+      // 的 `if (streaming) return;` 直接拦截，导致新会话无法创建（刷新才恢复）
+      setStreaming(false);
+      setStopping(false);
+      setBgPolling(null);
+      setConsentRequest(null);
       fetchAgentSettings().then((settings) => {
         if (settings.default_model) setSelectedModel(settings.default_model);
       }).catch(() => {});

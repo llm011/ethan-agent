@@ -9,9 +9,9 @@
 
 ### Step 1: 加载数据
 
-1. 读取 `~/.ethan/work/team.yaml` 获取成员列表
-2. 读取 `~/.ethan/work/people/{姓名}.md` 中本季度月份的记录
-3. 读取各业务目录下 `cr-reports/` 中当季所有周报
+1. 读取 `~/.ethan/work/team.yaml` 获取成员列表（配置文件，仍用文件读写）
+2. 对每位成员，`knowledge_search(query="人员日志 {姓名}", scene="work")` 找到条目后 `knowledge_read` 读取本季度月份的记录
+3. `knowledge_search(query="cr-report", scene="work")` 搜索当季所有 CR 周报，逐一 `knowledge_read` 读取
 4. 按标签统计每人事件分布（`[亮点]` / `[问题]` / `[进展]` / 普通）
 
 ### Step 2: 按人组织
@@ -20,7 +20,10 @@
 
 ### Step 3: 输出报告
 
-输出到 `~/.ethan/work/reviews/{YYYY}-Q{N}-draft.md`
+用 `knowledge_add`（scene="work"）创建绩效草稿条目：
+- **标题**：`绩效草稿 - {YYYY}-Q{N}`
+- **tags**：`["review", "{YYYY}-Q{N}"]`
+- **content**：下方报告整体结构的完整 Markdown
 
 ---
 
@@ -170,5 +173,5 @@
 1. **不做最终判定**：建议绩效区间仅供参考，标注醒目提示
 2. **数据缺失提示**：如果某人事件数过少（<3 条），明确提示「数据不足，建议补充」
 3. **避免偏见**：不因事件数量多少直接等同于表现好坏（可能是记录不完整）
-4. **隐私保护**：报告仅存本地，不发送到任何外部平台
+4. **隐私保护**：报告仅存本地知识库（scene=work），不发送到任何外部平台
 5. **可编辑**：输出为 Markdown 草稿，管理者可自由修改补充
