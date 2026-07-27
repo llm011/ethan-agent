@@ -12,7 +12,6 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from ethan.interface.lark_agent import _handle_agent_message
 from ethan.interface.lark_event_handlers import (
     _handle_card_action,
     _handle_message_read,
@@ -26,9 +25,13 @@ from ethan.interface.lark_send import (
 from ethan.interface.lark_state import (
     _ABORT_KEYWORDS,
     _already_handled,
+    _append_debounce_queue,
     _cache_forwarded,
     _cache_group_message,
+    _cancel_debounce_timer,
     _get_chat_lock,
+    _get_debounce_queue,
+    _init_debounce_queue,
     _is_forwarded_message,
     _lark_chat_map,  # noqa: F401 — re-exported; lark_agent lazy-imports from here
     _lark_running_tasks,  # noqa: F401
@@ -36,14 +39,75 @@ from ethan.interface.lark_state import (
     _load_lark_map,  # noqa: F401
     _looks_like_tool_trace,  # noqa: F401
     _mark_lark_welcomed,  # noqa: F401
+    _pop_debounce_queue,
     _pop_forwarded,  # noqa: F401
     _save_lark_map,  # noqa: F401
+    _schedule_debounce_flush,
     _should_respond_to_group_message,
     _stop_lark_task,
     _untrack_task,  # noqa: F401
 )
 
 logger = logging.getLogger(__name__)
+
+
+async def _run_debounce_flush(chat_id: str, sender_open_id: str) -> None:
+    """实际触发合并后的 Agent 调用。从队列取出所有文本拼接，用第 1 条的 event_data/identity。
+    走原来的串行锁 + _handle_agent_message，保持行为一致。"""
+    from ethan.interface.lark_agent import _handle_agent_message
+    q = _pop_debounce_queue(chat_id, sender_open_id)
+    if q is None:
+        return
+    merged_text = "\n".join(q["texts"])
+    first_msg_id = q["message_ids"][0] if q["message_ids"] else ""
+    ts = q["ts"]
+    try:
+        async with _get_chat_lock(chat_id):
+            await _handle_agent_message(
+                q["event_data"],
+                chat_id=chat_id,
+                message_id=first_msg_id,
+                text=merged_text,
+                sender_open_id=sender_open_id,
+                owner_open_id=q["owner_open_id"],
+                is_owner=q["is_owner"],
+                owner_claimed=q["owner_claimed"],
+                btw_mode=q["btw_mode"],
+                ts=ts,
+            )
+    except Exception:
+        # 锁本身或 _handle_agent_message 意外抛出时兜底清理表情，避免残留
+        await ts.clear()
+        raise
+
+
+async def _delayed_debounce_flush(chat_id: str, sender_open_id: str, delay: float) -> None:
+    """定时器回调：等 delay 秒后触发 flush。"""
+    await asyncio.sleep(delay)
+    await _run_debounce_flush(chat_id, sender_open_id)
+
+
+async def _flush_debounce_for_sender(chat_id: str, sender_open_id: str) -> None:
+    """立即 flush 同 sender 的 debounce 队列（命令路径 bypass 时用）。
+    取消定时器并立即触发合并 Agent 调用。"""
+    q = _get_debounce_queue(chat_id, sender_open_id)
+    if q is None:
+        return
+    await _cancel_debounce_timer(q)
+    await _run_debounce_flush(chat_id, sender_open_id)
+
+
+async def _cancel_debounce_for_sender(chat_id: str, sender_open_id: str) -> None:
+    """cancel 同 sender 的 debounce 队列（/stop/中止关键词用）。
+    丢弃队列内容并清理第 1 条消息上的 THINKING 表情。"""
+    q = _pop_debounce_queue(chat_id, sender_open_id)
+    if q is None:
+        return
+    await _cancel_debounce_timer(q)
+    try:
+        await q["ts"].clear()
+    except Exception:
+        logger.debug("[Lark] clear ts on cancel debounce failed", exc_info=True)
 
 
 async def _handle_message(event_data: dict) -> None:
@@ -189,10 +253,29 @@ async def _handle_message(event_data: dict) -> None:
     )
     btw_mode = False
 
+    # ── debounce bypass：命令路径不参与合并 ──
+    # /stop 命令 + 自然语言中止关键词 → cancel（用户主动停止，丢弃队列内容）
+    # 其他命令路径 → flush（先把队列里待合并的消息合并触发一次 agent，再执行命令）
+    # 必须在命令分流之前处理，否则命令立即 return，队列里的消息永远不会被 flush。
+    _text_lower = text.strip().lower()
+    _is_stop_cmd = _text_lower == "/stop" or _text_lower.startswith("/stop ")
+    _is_stop_intent = _is_stop_cmd or _text_lower in _ABORT_KEYWORDS
+    # 自定义命令展开（缓存结果，避免后面再调一次）
+    _expanded_cmd = resolve_custom_command(text)
+    _is_cmd_path = (
+        _text_lower in ("/test-card", "/test-card ")
+        or is_btw(text) or is_review(text) or is_command(text)
+        or _expanded_cmd is not None
+    )
+    if _is_stop_intent:
+        await _cancel_debounce_for_sender(chat_id, sender_open_id)
+    elif _is_cmd_path:
+        await _flush_debounce_for_sender(chat_id, sender_open_id)
+
     # ── /test-card：发一张带按钮的测试卡片，用于验证 card.action.trigger 事件链路 ──
     # 点按钮后飞书回调 card.action.trigger，_handle_card_action 会回一张绿色确认卡。
     # 调试用：链路打通后可删。
-    if text.strip().lower() in ("/test-card", "/test-card "):
+    if _text_lower in ("/test-card", "/test-card "):
         card = {
             "schema": "2.0",
             "header": {
@@ -248,8 +331,8 @@ async def _handle_message(event_data: dict) -> None:
         text = f"帮我 code review 这个 PR/MR：{target}"
 
     # ── 自定义命令：展开后交 agent 处理（保留历史上下文）──
-    elif (expanded := resolve_custom_command(text)) is not None:
-        text = expanded
+    elif _expanded_cmd is not None:
+        text = _expanded_cmd
 
     # ── /command：以 / 开头的命令先于 Agent 处理（不加思考表情，直接回复）──
     if is_command(text):
@@ -264,41 +347,45 @@ async def _handle_message(event_data: dict) -> None:
     # 用户在飞书里直接发"停"/"不用了"/"取消"等词（非 /stop 命令）时，若当前有正在跑的
     # Agent 任务则中止之，并直接回复，不进 Agent 流程；若无任务在跑则不拦截，继续走正常
     # Agent 流程（避免误把空 chat 的一句"停"当命令丢弃）。关键词用精确匹配防误伤。
-    if text.strip().lower() in _ABORT_KEYWORDS:
+    if _text_lower in _ABORT_KEYWORDS:
         if await _stop_lark_task(chat_id):
             await _send_reply(chat_id, "🛑 已停止当前回复。")
             return
 
-    # ── THINKING 表情：立刻添加，不等锁 ──
-    # 必须在 _get_chat_lock 之前就加表情——同 chat 连发多条时，后续消息会在锁队列里等待，
-    # 若表情在锁内加，用户发完消息后看不到任何反应，直到前一条处理完（可能几十秒）才出现表情。
-    # 把表情加到锁外，收到消息就立刻给用户反馈，再安静等锁。
+    # ── 普通消息：进 debounce 队列 ──
+    # 同一 (chat_id, sender) 在 1-5s 窗口内连发的消息合并成一次 Agent 调用，避免连发 N 条
+    # 触发 N 次 Agent。策略：第 1 条等 1s 触发，每来一条重置为 1s（"延长 1s"语义），
+    # 总等待不超过 5s。命令路径已在上方 bypass 处理（flush 或 cancel），不会进到这里。
+    #
+    # 第 1 条立即加 THINKING 表情给反馈；后续追加消息不再加表情（复用第 1 条的 ts）。
+    # flush 时用第 1 条的 event_data/message_id/identity，文本按顺序拼成 \n 分隔。
+    existing_q = _get_debounce_queue(chat_id, sender_open_id)
+    if existing_q is not None:
+        # 已有队列：追加文本，重置定时器
+        _append_debounce_queue(chat_id, sender_open_id, text=text, message_id=message_id)
+        _schedule_debounce_flush(existing_q, chat_id, sender_open_id)
+        logger.debug(
+            "[Lark] buffered msg chat=%s sender=%s queue_size=%d",
+            chat_id, sender_open_id[:12] if sender_open_id else "(empty)", len(existing_q["texts"]),
+        )
+        return
+
+    # 第 1 条：加表情，入队，起 1s 定时器
     ts = TypingState(message_id)
     await ts.__aenter__()
 
-    # ── 同 chat 串行：Agent 处理必须排队 ──
-    # 同一飞书 chat 连发多条消息时，若并发跑会互相踩：并发改同一 session、流式卡片
-    # 互相覆盖、/stop 登记混乱。命令路径不经锁（已 return），保持即时响应；这里只串行化
-    # 真正的 Agent 生成。锁按 chat_id 复用，跨消息持久；message_id 去重已在锁外完成，
-    # 重投事件不会进到这里两次。
-    try:
-        async with _get_chat_lock(chat_id):
-            await _handle_agent_message(
-                event_data,
-                chat_id=chat_id,
-                message_id=message_id,
-                text=text,
-                sender_open_id=sender_open_id,
-                owner_open_id=owner_open_id,
-                is_owner=is_owner,
-                owner_claimed=owner_claimed,
-                btw_mode=btw_mode,
-                ts=ts,
-            )
-    except Exception:
-        # 锁本身或 _handle_agent_message 意外抛出时兜底清理表情，避免残留
-        await ts.clear()
-        raise
+    q = _init_debounce_queue(
+        chat_id, sender_open_id,
+        event_data=event_data,
+        text=text,
+        message_id=message_id,
+        owner_open_id=owner_open_id,
+        is_owner=is_owner,
+        owner_claimed=owner_claimed,
+        btw_mode=btw_mode,
+        ts=ts,
+    )
+    _schedule_debounce_flush(q, chat_id, sender_open_id)
 
 
 async def _dispatch(event_key: str, event_data: dict) -> None:

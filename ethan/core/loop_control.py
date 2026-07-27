@@ -26,8 +26,10 @@ STUCK_WINDOW = 3          # 连续 N 轮同一签名 → 判定卡住
 ERROR_WINDOW = 2          # 连续 N 轮同一签名且都报错 → 提前判定卡住（错误重试不必等满 3 轮）
 MAX_REFLECTIONS = 2       # 最多反思几次；仍卡住则收尾放弃
 TOOL_FREQ_LIMIT = 8       # 同一工具名连续调用超过此次数（参数也完全相同时） → 判定卡住
-TOOL_FREQ_LIMIT_VARIED = 30  # 同一工具名连续调用但参数每次不同时的宽松阈值（如批量整理 tab）
-_FREQ_LIMIT_EXEMPT = {"file_read", "rg_search", "fd_find", "skill_read"}
+TOOL_FREQ_LIMIT_VARIED = 6  # 同一工具名连续调用但参数每次不同时的宽松阈值（如多次 file_write）
+# 豁免名单：天然支持批量不同参数的工具——shell 已按 effective_tool_name 拆分（git:status ≠ git:log），
+# file_write/file_read/web_search/web_fetch/skill_read 等多次不同参数是正常工作流，不判卡住。
+_FREQ_LIMIT_EXEMPT = {"file_read", "file_write", "rg_search", "fd_find", "skill_read", "skill_list", "web_search", "web_fetch", "memory_recall", "plan_read", "knowledge_search", "knowledge_read"}
 # shell 工具不整体豁免，而是按实际命令前缀判定（见 _effective_tool_name）
 
 # 复合命令分隔符：只取最后一段（如 `cd /x && bytedcli tea` 应判为 bytedcli，而非 cd）
@@ -102,6 +104,7 @@ class LoopMonitor:
     has_planned: bool = False  # 是否已调过 plan_write（用于决策提示里措辞调整）
     decision_count: int = 0  # 已注入决策提示的次数
     awaiting_decision_response: bool = False  # 决策提示已注入，下一轮需检测是否选 C
+    silent_decision_count: int = 0  # 决策提示被无视次数（模型既不调 decide 也没调 plan_write/find_tools）
 
     def record(self, tool_calls, had_error: bool) -> None:
         self._signatures.append(_round_signature(tool_calls))
@@ -227,32 +230,46 @@ def finalize_system_suffix(reason: str) -> str:
 #   3. 形式：要求显式判断 + 一气呵成调工具（不是软建议可跳过）
 
 # 触发轮次：iter 索引（从 0 开始）
-#   iter=1（第 2 轮）：第一次触发
-#   iter=3, 6, 9, ...：之后每 3 轮触发
-_DECISION_FIRST_TRIGGER = 1  # 第 2 轮（iter=1）
-_DECISION_INTERVAL = 3  # 之后每 3 轮触发一次
+#   iter=2（第 3 轮）：第一次触发——给模型两步探路时间，第一步拿结果、第二步看到结果走向，
+#   这时让模型决策才有意义。iter=1 注入太早，模型刚跑完一步还没头绪，倾向直接选 A 干活。
+#   iter=4, 7, 10, ...：之后每 3 轮触发（未规划）
+#   iter=6, 12, ...：已规划时每 6 轮触发（已在执行 plan，少打扰）
+_DECISION_FIRST_TRIGGER = 2  # 第 3 轮（iter=2）
+_DECISION_INTERVAL = 3  # 未规划时每 3 轮触发一次
 
 
 def should_trigger_decision(monitor: "LoopMonitor", iter_idx: int) -> bool:
     """是否应该在第 iter_idx 轮（0-based）触发决策提示。
 
     触发条件：
-    1. iter_idx == 1（第 2 轮，已跑过 1 轮探路）
-    2. iter_idx >= 3 且 iter_idx % 3 == 0（即 iter=3, 6, 9, ...）
+    1. iter_idx == 2（第 3 轮，已跑过 2 轮探路）
+    2. iter_idx >= 4 且 iter_idx % interval == 0：
+       - 未规划：每 3 轮触发一次（iter=4, 7, 10, ...）
+       - 已规划：每 6 轮触发一次（iter=6, 12, ...）——已在执行 plan 中的步骤，
+         不需要频繁打断；只用于校验方向是否偏离。
 
-    第 1 轮（iter=0）不触发：让模型先跑一步探路。
+    抑制条件：模型连续 2 次无视决策提示（既不调 decide 也没调 plan_write/find_tools，
+    silent_decision_count >= 2）→ 说明任务确实需要持续推进，决策提示成噪音，
+    停止打扰，由 max_iters / 反思机制兜底。
+
+    第 1、2 轮（iter=0,1）不触发：让模型先跑两步探路，拿到初步结果再做决策。
     """
+    if monitor.silent_decision_count >= 2:
+        return False
     if iter_idx == _DECISION_FIRST_TRIGGER:
         return True
-    if iter_idx >= 3 and iter_idx % _DECISION_INTERVAL == 0:
+    interval = 6 if monitor.has_planned else _DECISION_INTERVAL
+    start = 4  # 后续触发从 iter=4 开始
+    if iter_idx >= start and iter_idx % interval == (start % interval):
         return True
     return False
 
 
 def decision_prompt_message(has_planned: bool = False) -> str:
-    """决策提示消息内容（追加为 working messages 末尾的 role=system）。
+    """决策提示消息内容（追加为 working messages 末尾的 role=user）。
 
-    模型在同一个响应里既输出判断又调工具（不增加轮次）。
+    模型在本轮响应里调 `decide(choice=..., reason=...)` 工具表达选择，
+    agent loop 会拦截该 tool_call，不执行、不进上下文，只读 choice 字段。
 
     A 门槛收紧到"最后 1 步"（不是 1-2 步），把中间状态赶到 B。
     B 提示加强：明确"2 步以上就选 B"，并给出 plan_write 的具体示例。
@@ -266,56 +283,87 @@ def decision_prompt_message(has_planned: bool = False) -> str:
         )
     return (
         "[System 决策提示] 基于以上工具结果，判断当前任务状态并选择行动：\n"
-        "  A) 最后 1 步收尾（本轮调完工具就能交付结果）→ 直接调工具，在 thought 里简述\n"
+        "  A) 最后 1 步收尾（本轮调完工具就能交付结果）→ 直接调工具\n"
         f"  B) 还需 2 步以上（多个文件/多次同类操作/需要对比汇总）→ {plan_hint}\n"
         "  C) 需要更多信息或工具失败 → 调工具补全信息，或向用户提问\n"
-        "判断原则：只要剩余工作不止 1 步，就选 B。先 plan 再执行能避免绕路和遗漏。\n"
-        "请在 thought 里先输出「决策: X」标记（X 为 A/B/C），再发起对应的工具调用。]"
+        "判断原则：只要剩余工作不止 1 步，就选 B。先 plan 再执行能避免绕路和遗漏。\n\n"
+        "请【先调 decide(choice=\\\"A\\\"/\\\"B\\\"/\\\"C\\\", reason=\\\"简述理由\\\") 工具】表达决策，"
+        "再在同一轮里发起对应的工具调用（A: 收尾工具 / B: plan_write / C: 补全信息或提问）。"
+        "不要在回复正文里写「决策: X」之类的文字标记。"
     )
 
 
+# ── decide 工具拦截 ──────────────────────────────────────────────────
+# decide 是「虚拟」工具：agent loop 在执行前拦截，不进 ToolExecutor、不进 working。
+# 这里的 helper 给 agent loop 用，识别 + 提取 choice。
+
+_DECIDE_TOOL_NAME = "decide"
+
+
+def is_decision_call(tool_calls) -> bool:
+    """判断本轮工具调用里是否包含 decide 调用。"""
+    if not tool_calls:
+        return False
+    return any(getattr(tc, "name", "") == _DECIDE_TOOL_NAME for tc in tool_calls)
+
+
+def extract_decision_choice(tool_calls) -> str | None:
+    """从 tool_calls 里提取 decide 的 choice 参数，返回 'A'/'B'/'C' 或 None。
+
+    多个 decide 调用时取最后一个（模型可能先调一次试错再调一次确认）。
+    """
+    if not tool_calls:
+        return None
+    choice = None
+    for tc in tool_calls:
+        if getattr(tc, "name", "") != _DECIDE_TOOL_NAME:
+            continue
+        args = tc.arguments if isinstance(tc.arguments, dict) else {}
+        c = str(args.get("choice", "")).strip().upper()
+        if c in ("A", "B", "C"):
+            choice = c
+    return choice
+
+
+# ── 隐式决策检测 ──────────────────────────────────────────────────
+# 模型经常不调 decide 直接干活。我们通过观察它实际调的工具反推决策：
+#   - 调 plan_write → 推断选 B（已规划）→ 标记 has_planned，后续决策提示间隔拉到 6 轮
+#   - 调 find_tools → 推断选 C（需要更多工具/信息）→ 触发增强上下文
+#   - 调其他任意工具 → 推断选 A（直接干活，本轮就要推进）
+# 这样 decide 工具变成"显式选择"，但模型可以不调直接干活。
+# 增强上下文的触发不再硬绑定在 decide choice=C 上。
+#
+# 返回 None 仅当本轮没有任何工具调用（纯文本响应 → 模型可能要收尾）。
+
+_PLAN_WRITE_TOOL = "plan_write"
+_FIND_TOOLS_TOOL = "find_tools"
+
+
+def detect_implicit_decision(tool_calls) -> str | None:
+    """从本轮工具调用推断模型的隐式决策。
+
+    返回：
+      "B" — 调了 plan_write（推断模型选 B：还需多步，已开始规划）
+      "C" — 调了 find_tools（推断模型选 C：现有工具不够，需要更多信息）
+      "A" — 调了其他任意工具（推断模型选 A：直接干活推进任务）
+      None — 本轮没有任何工具调用（纯文本响应）
+    """
+    if not tool_calls:
+        return None
+    names = {getattr(tc, "name", "") for tc in tool_calls}
+    if _PLAN_WRITE_TOOL in names:
+        return "B"
+    if _FIND_TOOLS_TOOL in names:
+        return "C"
+    return "A"
+
+
 # ── "需要更多信息"信号检测 + 增强上下文 ────────────────────────────
-# 当模型在决策提示后选了 C（需要更多信息），下一轮追加：
+# 当模型在决策提示后调 decide(choice="C")（需要更多信息），下一轮追加：
 #   1. 全量 skill 清单（含 frontmatter：name/description/trigger/category）
 #   2. memory recall 扩到 30 条
 # 这是有条件触发，不是每轮都带，避免 token 爆炸。
-
-# 决策标记正则：匹配 "决策: A" / "决策：B" / "决策:C" 等（全角/半角冒号、大小写、空格都兼容）
-# 优先从 thought 开头匹配（决策提示要求模型在 thought 里先输出「决策: X」）
-_DECISION_PATTERN = _re.compile(r"决策\s*[:：]\s*([ABCabc])")
-
-
-def parse_decision_choice(response_text: str) -> str | None:
-    """从模型响应里解析决策标记，返回 'A'/'B'/'C' 或 None。
-
-    优先匹配「决策: X」格式（决策提示明确要求的输出格式）。
-    回退匹配「选 C」「选择C」「选项 C」等历史格式。
-    """
-    if not response_text:
-        return None
-    m = _DECISION_PATTERN.search(response_text)
-    if m:
-        return m.group(1).upper()
-    # 回退：兼容模型未严格按格式输出但表达了选择
-    text_lower = response_text.lower()
-    fallbacks = [
-        (["选 c", "选择c", "选项c", "决策: c", "决策： c", "决策:c", "决策：c"], "C"),
-        (["选 b", "选择b", "选项b", "决策: b", "决策： b", "决策:b", "决策：b"], "B"),
-        (["选 a", "选择a", "选项a", "决策: a", "决策： a", "决策:a", "决策：a"], "A"),
-    ]
-    for patterns, choice in fallbacks:
-        if any(p in text_lower for p in patterns):
-            return choice
-    return None
-
-
-def detect_need_more_info(response_text: str) -> bool:
-    """检测模型是否在决策提示后选了 C（需要更多信息）。
-
-    基于结构化标记解析（「决策: C」），而非关键词匹配——
-    抗表达差异，不会因"无法判断""需要补充"等正常推理用词误触发。
-    """
-    return parse_decision_choice(response_text) == "C"
+# 信号来源：agent loop 拦截 decide tool_call 后读 choice 字段（见 extract_decision_choice）。
 
 
 def enhanced_context_message(skills_brief: str = "", memory_recall_text: str = "", tools_brief: str = "") -> str:

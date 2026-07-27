@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time as _time
 from collections import deque
 
 logger = logging.getLogger(__name__)
@@ -249,6 +250,89 @@ async def _should_respond_to_group_message(text: str, lark_cfg, event_data: dict
             return False
     # 未知模式，安全起见不响应
     return False
+
+
+# ── 消息合并（debounce）──────────────────────────────────────────────────────
+# 同一 (chat_id, sender) 连发多条普通消息时合并成一次 Agent 调用，避免连发 N 条触发 N 次 Agent。
+# 策略：第 1 条等 1s 触发，每来一条重置为 1s（"延长 1s"语义），总等待不超过 5s。
+# 命令路径不参与 debounce：/stop/中止关键词 cancel 队列，其他命令先 flush 再执行。
+_DEBOUNCE_INITIAL = 1.0
+_DEBOUNCE_MAX = 5.0
+_debounce_queue: dict[tuple[str, str], dict] = {}
+
+
+def _get_debounce_queue(chat_id: str, sender_open_id: str) -> dict | None:
+    return _debounce_queue.get((chat_id, sender_open_id))
+
+
+def _init_debounce_queue(
+    chat_id: str,
+    sender_open_id: str,
+    *,
+    event_data: dict,
+    text: str,
+    message_id: str,
+    owner_open_id: str,
+    is_owner: bool,
+    owner_claimed: bool,
+    btw_mode: bool,
+    ts,
+) -> dict:
+    """第 1 条消息入队：记录完整上下文（后续 flush 时复用第 1 条的 event_data/identity）。"""
+    q: dict = {
+        "event_data": event_data,
+        "texts": [text],
+        "message_ids": [message_id],
+        "first_ts": _time.time(),
+        "timer": None,
+        "ts": ts,
+        "owner_open_id": owner_open_id,
+        "is_owner": is_owner,
+        "owner_claimed": owner_claimed,
+        "btw_mode": btw_mode,
+    }
+    _debounce_queue[(chat_id, sender_open_id)] = q
+    return q
+
+
+def _append_debounce_queue(
+    chat_id: str,
+    sender_open_id: str,
+    *,
+    text: str,
+    message_id: str,
+) -> dict:
+    """后续消息追加到已有队列。event_data 不更新——flush 时用第 1 条的（message_id 锚定也用第 1 条）。"""
+    q = _debounce_queue[(chat_id, sender_open_id)]
+    q["texts"].append(text)
+    q["message_ids"].append(message_id)
+    return q
+
+
+def _pop_debounce_queue(chat_id: str, sender_open_id: str) -> dict | None:
+    return _debounce_queue.pop((chat_id, sender_open_id), None)
+
+
+def _schedule_debounce_flush(q: dict, chat_id: str, sender_open_id: str) -> None:
+    """重置定时器：每次来一条重置为 1s，总等待不超过 5s（超过则立即触发）。"""
+    if q["timer"] is not None and not q["timer"].done():
+        q["timer"].cancel()
+    elapsed = _time.time() - q["first_ts"]
+    remaining = _DEBOUNCE_MAX - elapsed
+    delay = min(_DEBOUNCE_INITIAL, max(0.1, remaining))
+    # 延迟导入避免循环依赖（lark_stream 反向导入 state 的纯数据函数）
+    from ethan.interface.lark_stream import _delayed_debounce_flush
+    q["timer"] = asyncio.create_task(_delayed_debounce_flush(chat_id, sender_open_id, delay))
+
+
+async def _cancel_debounce_timer(q: dict) -> None:
+    if q["timer"] is not None and not q["timer"].done():
+        q["timer"].cancel()
+        try:
+            await q["timer"]
+        except asyncio.CancelledError:
+            pass
+    q["timer"] = None
 
 
 # ── 工具进度污染检测 ───────────────────────────────────────────────────────────
