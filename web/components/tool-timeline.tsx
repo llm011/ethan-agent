@@ -144,7 +144,37 @@ function DetailOutput({ detail }: { detail: string }) {
   );
 }
 
-/** web_search 详情：直接消费后端产出的结构化搜索卡片（浅色可读列表） */
+function parseSearchResults(detail: string): SearchResultCard[] | null {
+  const blocks = detail.split(/\n\n+/);
+  const results: SearchResultCard[] = [];
+  for (const block of blocks) {
+    let lines = block.split("\n").map(l => l.trimEnd()).filter(l => l.trim());
+    if (lines.length === 0) continue;
+    if (/^Found ~\d+ results/i.test(lines[0])) {
+      lines = lines.slice(1);
+      if (lines.length === 0) continue;
+    }
+    const urlLine = lines.find(l => /^https?:\/\//.test(l.trim()));
+    if (!urlLine) continue;
+    const url = urlLine.trim();
+    const titleLine = lines.find(l => /^\*\*.*\*\*$/.test(l.trim())) ?? lines[0];
+    const m = titleLine.match(/^\*\*(?:\[([^\]]*)\]\s*)?(.+?)(?:\s{2}\[(\d{4}[^\]]*)\])?\*\*$/);
+    let title = titleLine.replace(/^\*\*|\*\*$/g, "");
+    let source = "";
+    let published = "";
+    if (m) {
+      source = m[1] || "";
+      title = m[2] || title;
+      published = m[3] || "";
+    }
+    const snippetLines = lines.filter(l => l !== titleLine && l !== urlLine);
+    const snippet = snippetLines.join(" ").trim();
+    results.push({ type: "search_result", title, url, snippet, engine: source || "", source: "", published: published || "" });
+  }
+  return results.length > 0 ? results : null;
+}
+
+/** web_search 详情：优先消费后端产出的结构化搜索卡片，也兼容旧文本格式解析（浅色可读列表） */
 function SearchResultList({ results }: { results: SearchResultCard[] }) {
   return (
     <div className="max-h-96 overflow-y-auto rounded-md border border-border/60 divide-y divide-border/40">
@@ -229,7 +259,7 @@ function ArgsPopover({ text, maxW = "max-w-[800px]" }: { text: string; maxW?: st
   );
 }
 
-function StepRow({ step, isLast, highlight, messageCards }: { step: ToolStep; isLast: boolean; highlight: boolean; messageCards?: SearchResultCard[] }) {
+function StepRow({ step, isLast, highlight, fallbackCards }: { step: ToolStep; isLast: boolean; highlight: boolean; fallbackCards?: SearchResultCard[] }) {
   const hasSubs = step.sub_steps && step.sub_steps.length > 0;
   const [subOpen, setSubOpen] = useState(false);
   const isDelegate = step.tool === "delegate_coding";
@@ -239,40 +269,10 @@ function StepRow({ step, isLast, highlight, messageCards }: { step: ToolStep; is
   const [detailOpen, setDetailOpen] = useState(false);
   const rowRef = useRef<HTMLDivElement>(null);
 
-  function parseSearchResults(detail: string): SearchResultCard[] | null {
-    const blocks = detail.split(/\n\n+/);
-    const results: SearchResultCard[] = [];
-    for (const block of blocks) {
-      let lines = block.split("\n").map(l => l.trimEnd()).filter(l => l.trim());
-      if (lines.length === 0) continue;
-      if (/^Found ~\d+ results/i.test(lines[0])) {
-        lines = lines.slice(1);
-        if (lines.length === 0) continue;
-      }
-      const urlLine = lines.find(l => /^https?:\/\//.test(l.trim()));
-      if (!urlLine) continue;
-      const url = urlLine.trim();
-      const titleLine = lines.find(l => /^\*\*.*\*\*$/.test(l.trim())) ?? lines[0];
-      const m = titleLine.match(/^\*\*(?:\[([^\]]*)\]\s*)?(.+?)(?:\s{2}\[(\d{4}[^\]]*)\])?\*\*$/);
-      let title = titleLine.replace(/^\*\*|\*\*$/g, "");
-      let source = "";
-      let published = "";
-      if (m) {
-        source = m[1] || "";
-        title = m[2] || title;
-        published = m[3] || "";
-      }
-      const snippetLines = lines.filter(l => l !== titleLine && l !== urlLine);
-      const snippet = snippetLines.join(" ").trim();
-      results.push({ type: "search_result", title, url, snippet, engine: source || "", source: "", published: published || "" });
-    }
-    return results.length > 0 ? results : null;
-  }
-
-  // web_search 详情优先用 step 自带的结构化卡片；老会话 step 没有 cards 时回退到消息级 cards；再兜底解析文本详情
+  // web_search 详情优先用 step 自带的结构化卡片；老会话仅在 fallbackCards 门控放行时回退到消息级 cards；再兜底解析文本详情
   const searchResults: SearchResultCard[] | null = step.tool === "web_search"
     ? ((step.cards && step.cards.length > 0) ? step.cards
-        : (messageCards && messageCards.length > 0 ? messageCards
+        : (fallbackCards && fallbackCards.length > 0 ? fallbackCards
         : (step.result_detail ? parseSearchResults(step.result_detail) : null)))
     : null;
 
@@ -427,6 +427,8 @@ export function ToolTimeline({ steps, defaultExpanded = false, highlightIndex, m
   const hasRunning = steps.some(s => s.state === "running");
   const doneCount = steps.filter(s => s.state !== "running").length;
   const summaryNames = [...new Set(steps.map(s => s.tool))].join(", ");
+  const webSearchCount = steps.filter(s => s.tool === "web_search").length;
+  const fallbackCards = webSearchCount === 1 ? messageCards : undefined;
 
   useEffect(() => {
     if (hasHighlight) {
@@ -456,7 +458,7 @@ export function ToolTimeline({ steps, defaultExpanded = false, highlightIndex, m
       {expanded && (
         <div className="px-3 pb-2 space-y-0">
           {steps.map((step, i) => (
-            <StepRow key={i} step={step} isLast={i === steps.length - 1} highlight={i === highlightIndex} messageCards={messageCards} />
+            <StepRow key={i} step={step} isLast={i === steps.length - 1} highlight={i === highlightIndex} fallbackCards={fallbackCards} />
           ))}
         </div>
       )}

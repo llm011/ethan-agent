@@ -217,7 +217,7 @@ function parseSearchResults(detail: string): SearchResultCard[] | null {
   return results.length > 0 ? results : null;
 }
 
-function StepRow({ step, isLast, highlight, messageCards }: { step: ToolStep; isLast: boolean; highlight: boolean; messageCards?: SearchResultCard[] }) {
+function StepRow({ step, isLast, highlight, fallbackCards }: { step: ToolStep; isLast: boolean; highlight: boolean; fallbackCards?: SearchResultCard[] }) {
   const hasSubs = step.sub_steps && step.sub_steps.length > 0;
   const [subOpen, setSubOpen] = useState(false);
   const isDelegate = step.tool === "delegate_coding";
@@ -226,11 +226,11 @@ function StepRow({ step, isLast, highlight, messageCards }: { step: ToolStep; is
   const hasDetail = (step.thought || step.result_detail) && step.state !== "running";
   const [detailOpen, setDetailOpen] = useState(false);
   const rowRef = useRef<HTMLDivElement>(null);
-  // web_search 详情优先用 step 自带的结构化卡片；老会话 step 没有 cards 时回退到消息级 cards；再兜底解析 result_detail 文本
+  // web_search 详情优先用 step 自带的结构化卡片；老会话仅在 fallbackCards 门控放行时回退到消息级 cards；再兼容旧文本格式解析（不丢数据）
   const searchResults: SearchResultCard[] | null = step.tool === "web_search"
     ? ((step.cards && step.cards.length > 0) ? step.cards
-        : (messageCards && messageCards.length > 0 ? messageCards
-            : (step.result_detail ? parseSearchResults(step.result_detail) : null)))
+        : (fallbackCards && fallbackCards.length > 0 ? fallbackCards
+          : (step.result_detail ? parseSearchResults(step.result_detail) : null)))
     : null;
 
   useEffect(() => {
@@ -422,7 +422,7 @@ export function ToolTimeline({ steps, defaultExpanded = false, highlightIndex, m
       {expanded && (
         <div className="px-3 pb-2 space-y-0">
           {steps.map((step, i) => (
-            <StepRow key={i} step={step} isLast={i === steps.length - 1} highlight={i === highlightIndex} messageCards={fallbackCards} />
+            <StepRow key={i} step={step} isLast={i === steps.length - 1} highlight={i === highlightIndex} fallbackCards={fallbackCards} />
           ))}
         </div>
       )}
