@@ -144,7 +144,8 @@ export function MessageList({ messages, streaming, sessionId, onQuote, onCardAct
   }, [scrollToBottom]);
 
   return (
-    <div ref={scrollRef} className="relative flex-1 overflow-y-auto p-4">
+    <div className="relative flex-1 flex flex-col">
+    <div ref={scrollRef} className="flex-1 overflow-y-auto p-4">
       <div className="max-w-3xl mx-auto space-y-6">
         {/* 顶部加载更多指示器 */}
         {hasMore && (
@@ -180,13 +181,14 @@ export function MessageList({ messages, streaming, sessionId, onQuote, onCardAct
           />
         ))}
       </div>
+    </div>
 
       {/* 滚动到底部按钮：不在底部时显示；点击后锁定跟随新消息 */}
       {messages.length > 0 && !isAtBottom && (
         <button
           type="button"
           onClick={handleScrollToBottom}
-          className={`absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center justify-center h-9 w-9 rounded-full border bg-background/95 backdrop-blur shadow-md hover:bg-accent transition-colors ${stickToBottom ? "text-primary" : "text-muted-foreground"}`}
+          className={`absolute bottom-4 right-4 z-10 flex items-center justify-center h-9 w-9 rounded-full border bg-background/95 backdrop-blur shadow-md hover:bg-accent transition-colors ${stickToBottom ? "text-primary" : "text-muted-foreground"}`}
           title={stickToBottom ? "已锁定跟随底部（向上滚解除）" : "滚动到底部并跟随"}
         >
           <ArrowDown className="h-4 w-4" />
