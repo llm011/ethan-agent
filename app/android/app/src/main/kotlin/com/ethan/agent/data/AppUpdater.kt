@@ -35,6 +35,24 @@ class AppUpdater @Inject constructor(
         private const val PREF_NAME = "app_update"
         private const val KEY_LAST_CHECK = "last_check_ts"
         private const val CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000L // 4 小时
+
+        /** 常见 prerelease 前缀 → 优先级（越大越接近正式版）。 */
+        private val PRERELEASE_PRIORITY = mapOf(
+            "dev" to 0,
+            "alpha" to 1,
+            "a" to 1,
+            "beta" to 2,
+            "b" to 2,
+            "milestone" to 3,
+            "m" to 3,
+            "mvp" to 3,
+            "rc" to 4,
+            "cr" to 4,
+            "preview" to 5,
+            "pre" to 5,
+            "snapshot" to 0,
+            "nightly" to 0,
+        )
     }
 
     data class UpdateInfo(
@@ -265,25 +283,5 @@ class AppUpdater @Inject constructor(
         if (pa != null) return 1
         if (pb != null) return -1
         return a.compareTo(b)
-    }
-
-    private companion object {
-        /** 常见 prerelease 前缀 → 优先级（越大越接近正式版）。 */
-        val PRERELEASE_PRIORITY = mapOf(
-            "dev" to 0,
-            "alpha" to 1,
-            "a" to 1,
-            "beta" to 2,
-            "b" to 2,
-            "milestone" to 3,
-            "m" to 3,
-            "mvp" to 3,
-            "rc" to 4,
-            "cr" to 4,
-            "preview" to 5,
-            "pre" to 5,
-            "snapshot" to 0,
-            "nightly" to 0,
-        )
     }
 }
