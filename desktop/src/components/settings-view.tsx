@@ -23,13 +23,14 @@ import { PromptPreview } from "./settings/prompt-preview";
 import { ProfileEditor } from "./settings/profile-editor";
 import { FastRulesTab } from "./settings/fast-rules-tab";
 import { ToolTiersView } from "./tool-tiers-view";
+import { AboutTab } from "./settings/about-tab";
 
 interface SettingsViewProps {
   models: { id: string; description: string }[];
   initialTab?: TabId;
 }
 
-type TabId = "general" | "fast-rules" | "providers" | "channels" | "identity" | "soul" | "tools" | "heartbeat" | "profile" | "prompt-preview" | "api-keys" | "tool-tiers";
+type TabId = "general" | "fast-rules" | "providers" | "channels" | "identity" | "soul" | "tools" | "heartbeat" | "profile" | "prompt-preview" | "api-keys" | "tool-tiers" | "about";
 
 const TAB_GROUPS = [
   {
@@ -67,6 +68,12 @@ const TAB_GROUPS = [
     items: [
       { id: "tool-tiers" as TabId, label: "模式工具集" },
       { id: "prompt-preview" as TabId, label: "Prompt 预览" },
+    ],
+  },
+  {
+    group: "关于",
+    items: [
+      { id: "about" as TabId, label: "版本与更新" },
     ],
   },
 ];
@@ -737,6 +744,8 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
                 <ToolTiersView embedded />
               </div>
             )}
+
+            {activeTab === "about" && <AboutTab />}
 
             {activeTab === "api-keys" && (
               <div className="space-y-6">

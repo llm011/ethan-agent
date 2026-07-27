@@ -344,14 +344,18 @@ class WebSearchTool(BaseTool):
     async def _general_search(self, query: str, max_results: int, cfg) -> tuple[list[dict], int | None]:
         """按优先级尝试各 provider，每个带 retry，失败则 fallback，累计熔断。"""
         self._last_total: int | None = None  # 重置
-        # 构建候选 provider 链
-        candidates: list[tuple[str, object]] = []  # (name, callable_coroutine_factory)
+        # 可用 provider 池：searxng / tavily 需对应配置齐全才可用，ddg / bing 无条件兜底
+        available: dict[str, object] = {}  # name -> callable_coroutine_factory
         if cfg.base_url:
-            candidates.append(("searxng", lambda: self._searxng_search(query, max_results, cfg.base_url)))
+            available["searxng"] = lambda: self._searxng_search(query, max_results, cfg.base_url)
         if cfg.api_key:
-            candidates.append(("tavily", lambda: self._tavily_search(query, max_results, cfg.api_key)))
-        candidates.append(("duckduckgo", lambda: self._ddg_search(query, max_results)))
-        candidates.append(("bing", lambda: self._bing_general_search(query, max_results)))
+            available["tavily"] = lambda: self._tavily_search(query, max_results, cfg.api_key)
+        available["duckduckgo"] = lambda: self._ddg_search(query, max_results)
+        available["bing"] = lambda: self._bing_general_search(query, max_results)
+
+        # 按 cfg.provider 排首选，其余作为失败后的 fallback
+        order = [cfg.provider] + [n for n in ("searxng", "tavily", "duckduckgo", "bing") if n != cfg.provider]
+        candidates: list[tuple[str, object]] = [(n, available[n]) for n in order if n in available]
 
         for name, factory in candidates:
             if not _breaker.is_available(name):

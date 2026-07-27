@@ -11,6 +11,9 @@
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",
     "core:window:allow-close",
-    "core:window:allow-set-title"
+    "core:window:allow-set-title",
+    "updater:default",
+    "dialog:default",
+    "process:default"
   ]
 }
