@@ -86,7 +86,8 @@ async def _handle_agent_message(
                     if not cfg.lark.group_response_mode:
                         cfg.lark.group_response_mode = "mention_only"
                     if not cfg.lark.bot_name:
-                        cfg.lark.bot_name = "Ethan"
+                        # 首次认主时 bot_name 跟随 agent_name，避免硬编码导致 @ 识别失败
+                        cfg.lark.bot_name = cfg.defaults.agent_name or "Ethan"
                     save_config(cfg)
                     reload_config()
                     owner_open_id = sender_open_id

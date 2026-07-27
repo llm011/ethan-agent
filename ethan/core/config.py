@@ -88,6 +88,7 @@ class RoutingConfig(BaseModel):
     fast_base_tools: list[str] = Field(default_factory=lambda: [
         "shell", "file_read", "file_write", "skill_read", "skill_list", "find_tools",
         "schedule_create", "schedule_list", "schedule_remove",
+        "decide",  # Adaptive Planning 的决策出口（虚拟工具，agent loop 拦截不执行）
         "ui_card",
     ])  # fast 档永远挂载的基础系统工具；find_tools 用于「规则工具不够时」兜底激活进阶工具
     # ui_card 纳入 fast 档：短的结构化请求（对比/排行/统计/时间轴等）通常走 fast 档，
@@ -104,6 +105,7 @@ class RoutingConfig(BaseModel):
         "knowledge_search", "knowledge_read",
         "memory_write", "procedure_write", "profile_update",
         "schedule_create", "schedule_list", "schedule_remove",
+        "decide",  # Adaptive Planning 的决策出口（虚拟工具，agent loop 拦截不执行）
         "set_secret", "get_secret", "list_secrets",
         "skill_create", "install_skill",
         "browser_session", "browser_tab", "browser_page",

@@ -19,6 +19,7 @@ from ethan.tools.builtin.background_task import (
 from ethan.tools.builtin.browser import BrowserPageTool, BrowserSessionTool, BrowserTabTool
 from ethan.tools.builtin.chart import ChartTool
 from ethan.tools.builtin.config import ConfigGetTool, ConfigSetTool
+from ethan.tools.builtin.decide import DecideTool
 from ethan.tools.builtin.deliver_file import DeliverFileTool
 from ethan.tools.builtin.file import FileListTool, FileReadTool, FileWriteTool
 from ethan.tools.builtin.find_tools import FindToolsTool
@@ -102,6 +103,7 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
 
     if toolset == "heartbeat":
         # 心跳：只读 + 执行任务 + 调度 + 知识库 + plan，不写记忆/skill/profile
+        registry.register(DecideTool())
         registry.register(ScheduleCreateTool(user_id=user_id))
         registry.register(ScheduleListTool())
         registry.register(ScheduleRemoveTool())
@@ -114,6 +116,7 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
         return registry
 
     # full / lark：全量
+    registry.register(DecideTool())
     registry.register(RipgrepTool())
     registry.register(FdTool())
     registry.register(ScheduleCreateTool(user_id=user_id))

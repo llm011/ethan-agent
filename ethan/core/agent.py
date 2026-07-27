@@ -423,7 +423,7 @@ class Agent:
             if self.is_owner:
                 from ethan.memory.recall import build_structured_recall
                 recall_result = build_structured_recall(
-                    query=last_user_text_for_recall or "", mode=self._mode, max_items=12
+                    query=last_user_text_for_recall or "", mode=self._mode, max_items=15
                 )
                 self._last_recall_result = recall_result  # 供 stream_chat 发射 ToolEvent
                 if recall_result:
@@ -640,6 +640,53 @@ class Agent:
         defs = [t.to_definition() for t in (tools_list + extra)]
         return [_with_intent_param(d) for d in defs] or None
 
+    def _build_all_skills_brief(self) -> str:
+        """构建全量 skill 简表（含 frontmatter：name/description/trigger/category）。
+
+        仅在模型主动要"更多信息"时调用，避免每轮 token 爆炸。
+        """
+        if not self._skills:
+            return ""
+        lines = []
+        for s in self._skills.all():
+            triggers = " | ".join(s.trigger[:5]) if s.trigger else ""
+            cat = getattr(s, "category", "default")
+            desc = (s.description or "")[:120]
+            line = f"- {s.name} [{cat}]: {desc}"
+            if triggers:
+                line += f" | triggers: {triggers}"
+            lines.append(line)
+        return "\n".join(lines)
+
+    def _build_extended_memory(self, query: str, max_items: int = 30) -> str:
+        """扩大 memory recall 到 max_items 条（默认 30），用于增强上下文。
+
+        仅在模型主动要"更多信息"时调用。
+        """
+        if not self.is_owner:
+            return ""
+        try:
+            from ethan.memory.recall import build_structured_recall
+            recall_result = build_structured_recall(
+                query=query, mode=self._mode, max_items=max_items
+            )
+            return recall_result.text if recall_result else ""
+        except Exception:
+            return ""
+
+    def _build_all_tools_brief(self) -> str:
+        """构建全量工具简表（name + 一句话 desc，不含 schema）。
+
+        仅在模型主动要"更多信息"时调用，避免每轮 token 爆炸。
+        完整 schema 模型需要时可调 find_tools 拉取。
+        """
+        lines = []
+        for t in self._registry.all():
+            desc = (t.description or "")[:80]
+            fast_tag = " [fast]" if getattr(t, "fast_path", False) else ""
+            lines.append(f"- {t.name}{fast_tag}: {desc}")
+        return "\n".join(lines)
+
     def _provider_for_route(self, route: str):
         """按路由档位选 provider。fast 档且开启 fast_use_lite_model 时用 lite 模型
         （设备控制/状态查询等简单任务，省钱提速），否则用主模型。lite provider 懒加载。
@@ -700,17 +747,30 @@ class Agent:
 
         from ethan.core.loop_control import (
             LoopMonitor,
+            decision_prompt_message,
+            detect_implicit_decision,
+            enhanced_context_message,
+            extract_decision_choice,
             finalize_system_suffix,
-            plan_nudge_message,
+            is_decision_call,
             reflection_followup_message,
             reflection_message,
-            should_suggest_plan,
+            should_trigger_decision,
         )
         monitor = LoopMonitor()
         pending_suffix = ""  # 反思提示，仅附加到「下一轮」的 system，附完即清
-        last_tool_calls: list = []  # 上一轮的工具调用，用于 plan 建议判定
+        _need_enhanced_context = False  # 上一轮模型响应是否提到"需要更多信息"
+        _decision_prompt_injected = False  # 本轮开头是否注入过决策提示（pop 用）
+        _enhanced_context_injected = False  # 本轮开头是否注入过增强上下文（pop 用）
 
         for i in range(max_iters):
+            # 上一轮注入的决策提示/增强上下文是临时 user 消息，本轮消费完后 pop 掉，避免污染 history
+            if _decision_prompt_injected and working and working[-1].role == "user":
+                working.pop()
+                _decision_prompt_injected = False
+            if _enhanced_context_injected and working and working[-1].role == "user":
+                working.pop()
+                _enhanced_context_injected = False
             finalize = (i == max_iters - 1)  # 留最后一轮做收尾：禁工具、强制总结
             if finalize:
                 tools = None
@@ -752,42 +812,103 @@ class Agent:
             if not response.is_tool_call:
                 return await self._ensure_non_empty(response, working, monitor, "finalize")
 
+            # [decide 拦截] 决策提示轮的 decide tool_call 不执行、不进 working，只读 choice
+            # 识别后：从 response.tool_calls 里筛掉 decide，剩余工具照常执行；
+            # 如果除 decide 外没有别的 tool_call，模型本轮就是在做决策表达，下一轮继续。
+            _intercepted_choice: str | None = None
+            if is_decision_call(response.tool_calls):
+                _intercepted_choice = extract_decision_choice(response.tool_calls)
+                # 把 decide 从本轮 tool_calls 里去掉，避免下传给 executor
+                remaining_tcs = [tc for tc in response.tool_calls if tc.name != "decide"]
+                response = Message(
+                    role=response.role,
+                    content=response.content,
+                    tool_calls=remaining_tcs,
+                    usage=response.usage,
+                )
+                # response 已变，working 里也同步替换最后一条
+                if working and working[-1] is not response:
+                    working[-1] = response
+                logger.info("[decision-choice] iter=%d → decide choice=%s", i + 1, _intercepted_choice)
+                if monitor.awaiting_decision_response and _intercepted_choice == "C":
+                    _need_enhanced_context = True
+                    logger.info("[need-more-info] iter=%d → 模型选 C，下一轮将追加增强上下文", i + 1)
+                monitor.awaiting_decision_response = False
+            else:
+                # [隐式决策检测] 模型没调 decide 但直接干活时，通过它调的工具反推决策
+                # - 调 plan_write → 推断选 B（已规划）→ has_planned=True，后续决策提示间隔拉到 6 轮
+                # - 调 find_tools → 推断选 C（需要更多工具/信息）→ 触发增强上下文
+                # - 调其他任意工具 → 推断选 A（直接干活）→ silent_decision_count +1
+                #   连续 2 次按 A 处理后，决策提示停止打扰（见 should_trigger_decision）
+                if monitor.awaiting_decision_response:
+                    implicit = detect_implicit_decision(response.tool_calls)
+                    if implicit == "B":
+                        logger.info("[decision-choice] iter=%d → 隐式选 B（调 plan_write）", i + 1)
+                    elif implicit == "C":
+                        _need_enhanced_context = True
+                        logger.info("[decision-choice] iter=%d → 隐式选 C（调 find_tools），下一轮将追加增强上下文", i + 1)
+                    elif implicit == "A":
+                        monitor.silent_decision_count += 1
+                        _tools = [tc.name for tc in response.tool_calls][:3]
+                        logger.info("[decision-choice] iter=%d → 隐式选 A（直接干活 %s）silent_count=%d",
+                                    i + 1, _tools, monitor.silent_decision_count)
+                    monitor.awaiting_decision_response = False
+
             # 工具调用日志：记录每轮工具执行情况，便于 debug
             tool_summary = ", ".join(
                 f"{tc.name}({_format_args(tc.arguments)})" for tc in response.tool_calls
             )
             logger.info("chat() iter=%d/%d tools=[%s]", i + 1, max_iters, tool_summary)
 
-            results: list[ToolResult] = await self._executor.execute(response.tool_calls)
-            had_error = any(getattr(r, "is_error", False) for r in results)
-            for idx, r in enumerate(results):
-                rlen = len(r.content or "")
-                if r.is_error:
-                    logger.warning("  └─ tool[%d] %s ERROR len=%d: %s",
-                                   idx, response.tool_calls[idx].name if idx < len(response.tool_calls) else "?",
-                                   rlen, (r.content or "")[:200])
-                else:
-                    logger.info("  └─ tool[%d] ok len=%d", idx, rlen)
-            for r in results:
-                working.append(Message(
-                    role="tool",
-                    content=r.content,
-                    tool_call_id=r.tool_call_id,
-                    images=r.images or [],
-                ))
-            enforce_context_budget(working)  # 新 tool result 进上下文前管控体积，防撑爆
-            monitor.record(response.tool_calls, had_error)
-            last_tool_calls = response.tool_calls
+            if not response.is_tool_call:
+                # 本轮只调了 decide（或空响应）→ 不执行工具、不进执行路径，直接到注入逻辑
+                monitor.record([], had_error=False)
+            else:
+                results: list[ToolResult] = await self._executor.execute(response.tool_calls)
+                had_error = any(getattr(r, "is_error", False) for r in results)
+                for idx, r in enumerate(results):
+                    rlen = len(r.content or "")
+                    if r.is_error:
+                        logger.warning("  └─ tool[%d] %s ERROR len=%d: %s",
+                                       idx, response.tool_calls[idx].name if idx < len(response.tool_calls) else "?",
+                                       rlen, (r.content or "")[:200])
+                    else:
+                        logger.info("  └─ tool[%d] ok len=%d", idx, rlen)
+                for r in results:
+                    working.append(Message(
+                        role="tool",
+                        content=r.content,
+                        tool_call_id=r.tool_call_id,
+                        images=r.images or [],
+                    ))
+                enforce_context_budget(working)  # 新 tool result 进上下文前管控体积，防撑爆
+                monitor.record(response.tool_calls, had_error)
 
             # plan 工具调用感知：如果本轮调了 plan_write，标记已规划
             if any(tc.name == "plan_write" for tc in response.tool_calls):
                 monitor.has_planned = True
 
-            # Adaptive Planning：跑 1-2 步后注入 plan 软建议（未规划且非纯探路）
-            if not monitor.has_planned and not pending_suffix:
-                if should_suggest_plan(monitor, last_tool_calls):
-                    pending_suffix = plan_nudge_message()
-                    monitor.plan_nudge_count += 1
+            # [增强上下文] 模型选 C 时，本轮注入全量 skill + tool + 30 memory（role=user，下轮 pop）
+            if _need_enhanced_context:
+                skills_brief = self._build_all_skills_brief()
+                tools_brief = self._build_all_tools_brief()
+                _last_user = self._get_last_user_text(working) or ""
+                memory_text = self._build_extended_memory(_last_user, max_items=30)
+                enhanced_msg = enhanced_context_message(skills_brief, memory_text, tools_brief)
+                working.append(Message(role="user", content=enhanced_msg))
+                _enhanced_context_injected = True
+                _need_enhanced_context = False
+                logger.info("[enhanced-context] iter=%d → 注入增强上下文", i + 1)
+
+            # [决策提示] 第 2 轮 + 之后每 3 轮，追加决策提示（role=user，下一轮 pop）
+            if should_trigger_decision(monitor, i):
+                decision_msg = decision_prompt_message(monitor.has_planned)
+                working.append(Message(role="user", content=decision_msg))
+                _decision_prompt_injected = True
+                monitor.decision_count += 1
+                monitor.awaiting_decision_response = True
+                logger.info("[decision-prompt] iter=%d → 注入决策提示 (count=%d)",
+                            i + 1, monitor.decision_count)
 
             # 反思后仍重复同一操作 → 二次强提醒，逼它换路
             if monitor.awaiting_reflection_followup:
@@ -892,17 +1013,30 @@ class Agent:
 
         from ethan.core.loop_control import (
             LoopMonitor,
+            decision_prompt_message,
+            detect_implicit_decision,
+            enhanced_context_message,
+            extract_decision_choice,
             finalize_system_suffix,
-            plan_nudge_message,
+            is_decision_call,
             reflection_followup_message,
             reflection_message,
-            should_suggest_plan,
+            should_trigger_decision,
         )
         monitor = LoopMonitor()
         pending_suffix = ""  # 反思提示，仅附加到「下一轮」的 system，附完即清
-        last_tool_calls: list = []  # 上一轮的工具调用，用于 plan 建议判定
+        _need_enhanced_context = False  # 上一轮模型响应是否提到"需要更多信息"
+        _decision_prompt_injected = False  # 本轮开头是否注入过决策提示（pop 用）
+        _enhanced_context_injected = False  # 本轮开头是否注入过增强上下文（pop 用）
 
         for i in range(max_iters):
+            # 上一轮注入的决策提示/增强上下文是临时 user 消息，本轮消费完后 pop 掉，避免污染 history
+            if _decision_prompt_injected and working and working[-1].role == "user":
+                working.pop()
+                _decision_prompt_injected = False
+            if _enhanced_context_injected and working and working[-1].role == "user":
+                working.pop()
+                _enhanced_context_injected = False
             # 每轮开头消费「运行中补充信息」：用户在工具调用过程中提交的补充内容，
             # append 到 working 末尾（即 prompt 结尾），下一轮调模型时立即可见。
             # 协议合规：Anthropic/OpenAI 都允许 tool 消息后跟 user 消息。
@@ -1043,6 +1177,73 @@ class Agent:
                     yield fallback
                 return
 
+            # [decide 拦截] 决策提示轮的 decide tool_call 不执行、不进 working，只读 choice
+            # 识别后：从 response.tool_calls 里筛掉 decide，剩余工具照常执行；
+            # 如果除 decide 外没有别的 tool_call，模型本轮就是在做决策表达，下一轮继续。
+            if is_decision_call(tool_calls):
+                _intercepted_choice = extract_decision_choice(tool_calls)
+                # 把 decide 从本轮 tool_calls 里去掉
+                tool_calls = [tc for tc in tool_calls if tc.name != "decide"]
+                response = Message(
+                    role=response.role,
+                    content=response.content,
+                    tool_calls=tool_calls,
+                    usage=response.usage,
+                )
+                # response 已变，working 里也同步替换最后一条
+                if working and working[-1] is not response:
+                    working[-1] = response
+                logger.info("[decision-choice] iter=%d → decide choice=%s", i + 1, _intercepted_choice)
+                if monitor.awaiting_decision_response and _intercepted_choice == "C":
+                    _need_enhanced_context = True
+                    logger.info("[need-more-info] iter=%d → 模型选 C，下一轮将追加增强上下文", i + 1)
+                monitor.awaiting_decision_response = False
+                # 如果筛掉 decide 后没有其他工具调用 → 不进执行路径
+                if not tool_calls:
+                    monitor.record([], had_error=False)
+                    # 跳到注入逻辑（增强上下文/下一轮决策提示），不进授权检查
+                    full_content = response.content or ""
+                    if any(tc.name == "plan_write" for tc in []):
+                        monitor.has_planned = True
+                    if _need_enhanced_context:
+                        skills_brief = self._build_all_skills_brief()
+                        tools_brief = self._build_all_tools_brief()
+                        _last_user = self._get_last_user_text(working) or ""
+                        memory_text = self._build_extended_memory(_last_user, max_items=30)
+                        enhanced_msg = enhanced_context_message(skills_brief, memory_text, tools_brief)
+                        working.append(Message(role="user", content=enhanced_msg))
+                        _enhanced_context_injected = True
+                        _need_enhanced_context = False
+                        logger.info("[enhanced-context] iter=%d → 注入增强上下文", i + 1)
+                    if should_trigger_decision(monitor, i):
+                        decision_msg = decision_prompt_message(monitor.has_planned)
+                        working.append(Message(role="user", content=decision_msg))
+                        _decision_prompt_injected = True
+                        monitor.decision_count += 1
+                        monitor.awaiting_decision_response = True
+                        logger.info("[decision-prompt] iter=%d → 注入决策提示 (count=%d, has_planned=%s)",
+                                    i + 1, monitor.decision_count, monitor.has_planned)
+                    continue  # 直接下一轮，不走授权/执行
+            else:
+                # [隐式决策检测] 模型没调 decide 但直接干活时，通过它调的工具反推决策
+                # - 调 plan_write → 推断选 B（已规划）→ has_planned=True，后续决策提示间隔拉到 6 轮
+                # - 调 find_tools → 推断选 C（需要更多工具/信息）→ 触发增强上下文
+                # - 调其他任意工具 → 推断选 A（直接干活）→ silent_decision_count +1
+                #   连续 2 次按 A 处理后，决策提示停止打扰（见 should_trigger_decision）
+                if monitor.awaiting_decision_response:
+                    implicit = detect_implicit_decision(tool_calls)
+                    if implicit == "B":
+                        logger.info("[decision-choice] iter=%d → 隐式选 B（调 plan_write）", i + 1)
+                    elif implicit == "C":
+                        _need_enhanced_context = True
+                        logger.info("[decision-choice] iter=%d → 隐式选 C（调 find_tools），下一轮将追加增强上下文", i + 1)
+                    elif implicit == "A":
+                        monitor.silent_decision_count += 1
+                        _tools = [tc.name for tc in tool_calls][:3]
+                        logger.info("[decision-choice] iter=%d → 隐式选 A（直接干活 %s）silent_count=%d",
+                                    i + 1, _tools, monitor.silent_decision_count)
+                    monitor.awaiting_decision_response = False
+
             # --- 授权检查：执行前对工具做（1）渠道硬策略 + （2）consent 确认 ---
             import asyncio as _aio
 
@@ -1079,6 +1280,7 @@ class Agent:
                         continue
                     detail = _format_args(tc.arguments)
                     ok = True
+                    consent_msg = ""  # 预初始化，避免 consent_provider is None 分支未赋值
                     if consent_provider is None:
                         ok = True
                     elif consent_provider.streamed:
@@ -1164,17 +1366,43 @@ class Agent:
 
             enforce_context_budget(working)  # 新 tool result 进上下文前管控体积，防撑爆
             monitor.record(tool_calls, had_error)
-            last_tool_calls = tool_calls
+            # [DIAG] 签名诊断：iter / 工具名 / 签名 hash / 是否 stuck（info 级别，便于观察）
+            if tool_calls:
+                _sig = monitor._signatures[-1] if monitor._signatures else ""
+                _sig_hash = hash(_sig) & 0xFFFFFF
+                _eff_name = monitor._tool_names[-1] if monitor._tool_names else ""
+                logger.info("[sig-debug] iter=%d tools=%s eff_name=%s sig_hash=%06x sig_len=%d stuck=%s",
+                            i + 1, [tc.name for tc in tool_calls], _eff_name,
+                            _sig_hash, len(_sig), monitor.is_stuck() if len(monitor._signatures) >= 3 else False)
 
             # plan 工具调用感知：如果本轮调了 plan_write，标记已规划
             if any(tc.name == "plan_write" for tc in tool_calls):
                 monitor.has_planned = True
 
-            # Adaptive Planning：跑 1-2 步后注入 plan 软建议（未规划且非纯探路）
-            if not monitor.has_planned and not pending_suffix:
-                if should_suggest_plan(monitor, last_tool_calls):
-                    pending_suffix = plan_nudge_message()
-                    monitor.plan_nudge_count += 1
+            # [增强上下文] 如果 _need_enhanced_context（来自上轮 decide choice=C）→ 本轮注入
+            # role=user（与决策提示一样临时 user 消息，下一轮 pop 掉，避免污染 history）
+            if _need_enhanced_context:
+                skills_brief = self._build_all_skills_brief()
+                tools_brief = self._build_all_tools_brief()
+                _last_user = self._get_last_user_text(working) or ""
+                memory_text = self._build_extended_memory(_last_user, max_items=30)
+                enhanced_msg = enhanced_context_message(skills_brief, memory_text, tools_brief)
+                working.append(Message(role="user", content=enhanced_msg))
+                _enhanced_context_injected = True
+                _need_enhanced_context = False
+                logger.info("[enhanced-context] iter=%d → 注入增强上下文 (skills + tools + memory 30)", i + 1)
+
+            # [决策提示] 第 2 轮 + 之后每 3 轮，在 working 末尾追加决策提示
+            # （role=user，要求模型调 decide 工具表达 A/B/C，一气呵成调工具）
+            # 注入后设 flag，下一轮开头检测模型响应是否选 C
+            if should_trigger_decision(monitor, i):
+                decision_msg = decision_prompt_message(monitor.has_planned)
+                working.append(Message(role="user", content=decision_msg))
+                _decision_prompt_injected = True
+                monitor.decision_count += 1
+                monitor.awaiting_decision_response = True  # 标记下一轮检测是否选 C
+                logger.info("[decision-prompt] iter=%d → 注入决策提示 (count=%d, has_planned=%s)",
+                            i + 1, monitor.decision_count, monitor.has_planned)
 
             # 反思后仍重复同一操作 → 二次强提醒，逼它换路
             if monitor.awaiting_reflection_followup:
