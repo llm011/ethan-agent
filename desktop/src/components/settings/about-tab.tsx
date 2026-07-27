@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { RefreshCw, CheckCircle2, AlertCircle, Download, RotateCw } from "lucide-react";
 import { Button } from "@ethan/shared/ui/button";
 import { getVersion as getTauriAppVersion } from "@tauri-apps/api/app";
-import { useUpdater } from "@/lib/use-updater";
+import { startAutoUpdate, useUpdater } from "@/lib/use-updater";
 
 const AUTO_UPDATE_KEY = "ethan_auto_update_disabled";
 
@@ -23,8 +23,12 @@ export function AboutTab() {
   const toggleAutoUpdate = () => {
     const next = !autoUpdateDisabled;
     setAutoUpdateDisabled(next);
-    if (next) localStorage.setItem(AUTO_UPDATE_KEY, "1");
-    else localStorage.removeItem(AUTO_UPDATE_KEY);
+    if (next) {
+      localStorage.setItem(AUTO_UPDATE_KEY, "1");
+    } else {
+      localStorage.removeItem(AUTO_UPDATE_KEY);
+      startAutoUpdate();
+    }
   };
 
   const isBusy = state === "checking" || state === "downloading";
@@ -32,14 +36,15 @@ export function AboutTab() {
     idle: "已是最新版本",
     checking: "检查中…",
     downloading: `下载中 ${progress}%`,
-    ready: "已就绪",
-    installed: "已下载，等待重启",
+    ready: "已下载，等待安装",
+    installing: "安装中…",
+    installed: "已安装，正在重启",
     error: "检查失败",
   }[state];
 
   const StatusIcon = state === "idle" ? CheckCircle2
     : state === "error" ? AlertCircle
-    : state === "installed" ? RotateCw
+    : state === "ready" || state === "installed" || state === "installing" ? RotateCw
     : state === "downloading" ? Download
     : RefreshCw;
 
@@ -87,10 +92,10 @@ export function AboutTab() {
           <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${isBusy ? "animate-spin" : ""}`} />
           {state === "checking" ? "检查中…" : "手动检查更新"}
         </Button>
-        {state === "installed" && (
+        {state === "ready" && (
           <Button size="sm" onClick={() => void installNow()}>
             <RotateCw className="h-3.5 w-3.5 mr-1.5" />
-            立即重启以应用更新
+            立即安装并重启
           </Button>
         )}
       </div>

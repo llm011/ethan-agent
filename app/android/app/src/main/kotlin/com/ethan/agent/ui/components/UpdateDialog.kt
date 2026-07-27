@@ -16,7 +16,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
 import kotlinx.coroutines.delay
 
 /**
@@ -24,7 +23,7 @@ import kotlinx.coroutines.delay
  * 在 MainContent 中挂载一次，根据 UpdateViewModel 状态自动显示/隐藏。
  */
 @Composable
-fun UpdateDialog(viewModel: UpdateViewModel = hiltViewModel()) {
+fun UpdateDialog(viewModel: UpdateViewModel) {
     val state by viewModel.state.collectAsState()
 
     // 应用启动后延迟 30s 自动检查
@@ -90,6 +89,19 @@ fun UpdateDialog(viewModel: UpdateViewModel = hiltViewModel()) {
                 text = { Text("安装界面已打开，请按提示完成安装。") },
                 confirmButton = {},
                 dismissButton = {},
+            )
+        }
+
+        is UpdateViewModel.UpdateState.InstallPermissionRequired -> {
+            AlertDialog(
+                onDismissRequest = viewModel::dismiss,
+                title = { Text("需要安装权限") },
+                text = { Text("请先在系统设置中允许 Ethan 安装未知来源应用，然后返回应用重新点击更新。") },
+                confirmButton = {
+                    TextButton(onClick = viewModel::dismiss) {
+                        Text("我知道了")
+                    }
+                },
             )
         }
 

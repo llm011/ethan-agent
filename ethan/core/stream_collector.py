@@ -88,6 +88,7 @@ class StreamCollector:
                 "result_detail": "",
                 "thought": pre_thought,
                 "sub_steps": [],
+                "cards": [],
                 "entity_type": item.entity_type or "",
                 "entity_id": item.entity_id or "",
             })
@@ -109,6 +110,9 @@ class StreamCollector:
                     step["result_preview"] = item.result_preview or ""
                     step["result_detail"] = item.result_detail or ""
                     step["sub_steps"] = item.sub_steps or []
+                    # 结构化卡片（如 web_search 结果）挂到该 step，供前端时间线直接渲染
+                    if getattr(item, "cards", None):
+                        step["cards"] = item.cards
                     # done/error 时补全 entity_type/entity_id（start 时已设，但兜底）
                     if not step.get("entity_type") and item.entity_type:
                         step["entity_type"] = item.entity_type

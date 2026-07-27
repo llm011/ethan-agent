@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
+import type { SearchResultCard } from "./chat/search-card-carousel";
 
 export interface SubStep {
   tool: string;
@@ -26,6 +27,7 @@ export interface ToolStep {
   thought?: string;
   id?: string;
   sub_steps?: SubStep[];
+  cards?: SearchResultCard[];
   entity_type?: string;
   entity_id?: string;
   skill_category?: string;
@@ -36,6 +38,8 @@ interface ToolTimelineProps {
   defaultExpanded?: boolean;
   highlightIndex?: number;
   onHighlightDone?: () => void;
+  /** 老会话回退：step 上没有 cards 时，用消息级 cards 兜底（避免历史数据丢失） */
+  messageCards?: SearchResultCard[];
 }
 
 const TOOL_ICONS: Record<string, React.ReactNode> = {
@@ -139,52 +143,16 @@ function DetailOutput({ detail }: { detail: string }) {
   );
 }
 
-interface ParsedSearchResult {
-  title: string;
-  url: string;
-  snippet: string;
-  engine?: string;
-  published?: string;
-}
-
-/** 解析 web_search 的 result_detail（content 文本）为结构化结果，失败返回 null */
-function parseSearchResults(detail: string): ParsedSearchResult[] | null {
-  const blocks = detail.split(/\n\n+/);
-  const results: ParsedSearchResult[] = [];
-  for (const block of blocks) {
-    const lines = block.split("\n").map(l => l.trimEnd()).filter(l => l.trim());
-    if (lines.length === 0) continue;
-    if (/^Found ~\d+ results/i.test(lines[0])) continue;
-    const urlLine = lines.find(l => /^https?:\/\//.test(l.trim()));
-    if (!urlLine) continue;
-    const url = urlLine.trim();
-    const titleLine = lines[0];
-    const m = titleLine.match(/^\*\*(?:\[([^\]]*)\]\s*)?(.+?)(?:\s{2}\[(\d{4}[^\]]*)\])?\*\*$/);
-    let title = titleLine.replace(/^\*\*|\*\*$/g, "");
-    let source = "";
-    let published = "";
-    if (m) {
-      source = m[1] || "";
-      title = m[2] || title;
-      published = m[3] || "";
-    }
-    const snippetLines = lines.filter(l => l !== titleLine && l !== urlLine);
-    const snippet = snippetLines.join(" ").trim();
-    results.push({ title, url, snippet, engine: source || undefined, published: published || undefined });
-  }
-  return results.length > 0 ? results : null;
-}
-
-/** web_search 详情：浅色结果列表，替代黑底代码框 */
-function SearchResultList({ results }: { results: ParsedSearchResult[] }) {
+/** web_search 详情：直接消费后端产出的结构化搜索卡片（浅色可读列表） */
+function SearchResultList({ results }: { results: SearchResultCard[] }) {
   return (
-    <div className="max-h-80 overflow-y-auto rounded-md border border-border/60 divide-y divide-border/40">
+    <div className="max-h-96 overflow-y-auto rounded-md border border-border/60 divide-y divide-border/40">
       {results.map((r, i) => {
         let domain = "";
         try { domain = new URL(r.url).hostname.replace(/^www\./, ""); } catch {}
         return (
           <a
-            key={i}
+            key={`${r.url}-${i}`}
             href={r.url}
             target="_blank"
             rel="noopener noreferrer"
@@ -192,9 +160,12 @@ function SearchResultList({ results }: { results: ParsedSearchResult[] }) {
           >
             <div className="flex items-center gap-1.5 mb-0.5">
               {r.engine && (
-                <span className="text-[10px] px-1.5 py-0 rounded-full font-medium bg-primary/10 text-primary shrink-0">
+                <span className="text-[10px] px-1.5 py-0 rounded-full font-medium bg-primary/10 text-primary shrink-0 uppercase tracking-wide">
                   {r.engine}
                 </span>
+              )}
+              {r.source && (
+                <span className="text-[10px] text-muted-foreground/60 truncate">{r.source}</span>
               )}
               {r.published && (
                 <span className="text-[10px] text-muted-foreground/60 shrink-0">{r.published}</span>
@@ -204,7 +175,7 @@ function SearchResultList({ results }: { results: ParsedSearchResult[] }) {
               {r.title}
             </div>
             {r.snippet && (
-              <p className="text-xs text-muted-foreground/70 mt-0.5 line-clamp-2 leading-relaxed">
+              <p className="text-xs text-muted-foreground/70 mt-0.5 line-clamp-3 leading-relaxed">
                 {r.snippet}
               </p>
             )}
@@ -216,7 +187,37 @@ function SearchResultList({ results }: { results: ParsedSearchResult[] }) {
   );
 }
 
-function StepRow({ step, isLast, highlight }: { step: ToolStep; isLast: boolean; highlight: boolean }) {
+function parseSearchResults(detail: string): SearchResultCard[] | null {
+  const blocks = detail.split(/\n\n+/);
+  const results: SearchResultCard[] = [];
+  for (const block of blocks) {
+    let lines = block.split("\n").map(l => l.trimEnd()).filter(l => l.trim());
+    if (lines.length === 0) continue;
+    if (/^Found ~\d+ results/i.test(lines[0])) {
+      lines = lines.slice(1);
+      if (lines.length === 0) continue;
+    }
+    const urlLine = lines.find(l => /^https?:\/\//.test(l.trim()));
+    if (!urlLine) continue;
+    const url = urlLine.trim();
+    const titleLine = lines.find(l => /^\*\*.*\*\*$/.test(l.trim())) ?? lines[0];
+    const m = titleLine.match(/^\*\*(?:\[([^\]]*)\]\s*)?(.+?)(?:\s{2}\[(\d{4}[^\]]*)\])?\*\*$/);
+    let title = titleLine.replace(/^\*\*|\*\*$/g, "");
+    let source = "";
+    let published = "";
+    if (m) {
+      source = m[1] || "";
+      title = m[2] || title;
+      published = m[3] || "";
+    }
+    const snippetLines = lines.filter(l => l !== titleLine && l !== urlLine);
+    const snippet = snippetLines.join(" ").trim();
+    results.push({ type: "search_result", title, url, snippet, engine: source || "", source: "", published: published || "" });
+  }
+  return results.length > 0 ? results : null;
+}
+
+function StepRow({ step, isLast, highlight, messageCards }: { step: ToolStep; isLast: boolean; highlight: boolean; messageCards?: SearchResultCard[] }) {
   const hasSubs = step.sub_steps && step.sub_steps.length > 0;
   const [subOpen, setSubOpen] = useState(false);
   const isDelegate = step.tool === "delegate_coding";
@@ -225,7 +226,12 @@ function StepRow({ step, isLast, highlight }: { step: ToolStep; isLast: boolean;
   const hasDetail = (step.thought || step.result_detail) && step.state !== "running";
   const [detailOpen, setDetailOpen] = useState(false);
   const rowRef = useRef<HTMLDivElement>(null);
-  const searchResults = step.tool === "web_search" && step.result_detail ? parseSearchResults(step.result_detail) : null;
+  // web_search 详情优先用 step 自带的结构化卡片；老会话 step 没有 cards 时回退到消息级 cards；再兜底解析 result_detail 文本
+  const searchResults: SearchResultCard[] | null = step.tool === "web_search"
+    ? ((step.cards && step.cards.length > 0) ? step.cards
+        : (messageCards && messageCards.length > 0 ? messageCards
+            : (step.result_detail ? parseSearchResults(step.result_detail) : null)))
+    : null;
 
   useEffect(() => {
     if (highlight) {

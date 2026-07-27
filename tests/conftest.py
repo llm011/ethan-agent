@@ -23,11 +23,15 @@ def _force_hash_embed():
 
 
 def pytest_sessionfinish(session, exitstatus):
-    """强制退出，绕过非 daemon 线程阻止 Python 退出的问题。
+    """绕过非 daemon 线程阻止 Python 退出的问题。
 
     get_session_store() 创建的单例 aiosqlite 连接（非 daemon 线程）在测试
-    结束后不会被关闭（SessionStore.close() 对单例是 no-op），导致 pytest
-    跑完全部用例后进程挂起 6h 直到 GitHub Actions 超时取消。
-    os._exit 绕过 Python 正常关闭流程，直接终止进程。
+    结束后不会被关闭，导致 pytest 跑完全部用例后进程挂起。
+
+    用 atexit 注册 os._exit 而非直接调用：atexit 在 Python 正常关闭流程
+    开始后才触发，pytest 的 terminal reporter、junitxml、coverage 等后续
+    hooks 和 pytest_unconfigure 能正常执行并写完输出，再由 os._exit 强杀
+    残留的非 daemon 线程。
     """
-    os._exit(exitstatus)
+    import atexit
+    atexit.register(os._exit, int(exitstatus))

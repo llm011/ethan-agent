@@ -17,7 +17,6 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
 import com.ethan.agent.ui.components.UpdateViewModel
 import com.ethan.agent.ui.navigation.Screen
 import com.ethan.agent.ui.navigation.moreMenuItems
@@ -29,8 +28,7 @@ private val extendedMoreItems = moreMenuItems + listOf(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MoreScreen(onNavigate: (String) -> Unit) {
-    val updateViewModel: UpdateViewModel = hiltViewModel()
+fun MoreScreen(onNavigate: (String) -> Unit, updateViewModel: UpdateViewModel) {
     Scaffold(topBar = { TopAppBar(title = { Text("更多") }) }) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding)) {
             items(extendedMoreItems) { screen ->

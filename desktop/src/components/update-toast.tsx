@@ -2,10 +2,10 @@
  * 自动更新 toast：右下角轻量提示，不打扰对话。
  *
  * - downloading：仅显示一条细进度条（5px 高，右下角，无文字）
- * - installed：弹出小卡片，显示新版本号 + 「立即重启」/「下次再说」按钮
+ * - ready：弹出小卡片，显示新版本号 + 「立即安装并重启」/「下次再说」按钮
  * - error：3s 内自动消失
  *
- * 半静默策略：下载过程完全静默，下载完成后才提示重启。
+ * 半静默策略：下载过程完全静默，下载完成后才提示安装。
  */
 
 import { useEffect, useState } from "react";
@@ -35,15 +35,15 @@ export function UpdateToast() {
     );
   }
 
-  // 已就绪待重启：显示卡片
-  if (state === "installed" && !dismissed) {
+  // 已下载待安装：显示卡片
+  if (state === "ready" && !dismissed) {
     return (
       <div className="fixed bottom-4 right-4 z-50 pointer-events-auto">
         <div className="flex items-start gap-3 p-3 pr-2 rounded-lg bg-background border border-border shadow-lg max-w-sm">
           <div className="flex-1 min-w-0">
             <div className="text-sm font-medium">新版本已就绪</div>
             <div className="text-xs text-muted-foreground mt-0.5">
-              {update?.version ? `v${update.version} · ` : ""}重启后生效
+              {update?.version ? `v${update.version} · ` : ""}安装并重启后生效
             </div>
             {update?.notes && (
               <div className="text-xs text-muted-foreground mt-1 line-clamp-2">
@@ -57,7 +57,7 @@ export function UpdateToast() {
               className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
             >
               <RefreshCw className="h-3 w-3" />
-              立即重启
+              立即安装
             </button>
             <button
               onClick={() => {

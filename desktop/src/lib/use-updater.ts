@@ -5,7 +5,7 @@
  * - 应用启动 30s 后首次检查
  * - 之后每 4 小时检查一次
  * - 检测到新版本：后台静默下载，不打扰用户
- * - 下载完成：通过 onUpdateReady 回调通知 UI 弹轻量 toast，用户决定是否重启
+ * - 下载完成：提示用户“立即重启以安装”，由用户决定何时安装并重启
  * - 任何错误均静默吞掉，绝不打断对话流
  *
  * 非 Tauri 环境（web dev）下所有操作自动降级为 no-op。
@@ -50,7 +50,7 @@ async function loadProcess(): Promise<ProcessModule | null> {
   }
 }
 
-export type UpdateState = "idle" | "checking" | "downloading" | "ready" | "installed" | "error";
+export type UpdateState = "idle" | "checking" | "downloading" | "ready" | "installing" | "installed" | "error";
 
 export interface UpdateInfo {
   version: string;
@@ -76,8 +76,7 @@ const INITIAL_STATE: UpdaterState = {
 let currentState: UpdaterState = INITIAL_STATE;
 const listeners = new Set<(s: UpdaterState) => void>();
 let started = false;
-let pendingDownload: any = null; // 当前正在下载的 Update 对象
-let installedAwaitingRestart = false;
+let pendingDownload: any = null;
 
 function setState(next: Partial<UpdaterState>) {
   currentState = { ...currentState, ...next };
@@ -99,16 +98,17 @@ const CHECK_INTERVAL_MS = 4 * 60 * 60_000; // 4 小时
  * - 如果当前正在 checking/downloading，跳过
  */
 export async function checkForUpdate(): Promise<void> {
-  if (currentState.state === "checking" || currentState.state === "downloading") return;
+  if (currentState.state === "checking" || currentState.state === "downloading" || currentState.state === "installing") return;
   if (currentState.state === "ready" || currentState.state === "installed") return;
 
   const mod = await loadUpdater();
-  if (!mod) return; // web dev 环境
+  if (!mod) return;
 
   setState({ state: "checking", error: null, progress: 0 });
   try {
     const update = await mod.check();
     if (!update) {
+      pendingDownload = null;
       setState({ state: "idle", update: null });
       return;
     }
@@ -121,7 +121,7 @@ export async function checkForUpdate(): Promise<void> {
     pendingDownload = update;
     let total = 0;
     let downloaded = 0;
-    await update.downloadAndInstall((event: any) => {
+    await update.download((event: any) => {
       if (event.event === "Started" && event.data.contentLength) {
         total = event.data.contentLength;
       } else if (event.event === "Progress") {
@@ -134,45 +134,45 @@ export async function checkForUpdate(): Promise<void> {
         setState({ progress: 100 });
       }
     });
-    // downloadAndInstall 在 Windows 上会自动重启，macOS/Linux 需要手动 relaunch
-    // 这里标记为 installed 状态，由 UI 决定何时调用 relaunch
-    pendingDownload = null;
-    installedAwaitingRestart = true;
-    setState({ state: "installed", progress: 100 });
+    setState({ state: "ready", progress: 100 });
   } catch (e: any) {
+    pendingDownload = null;
     setState({ state: "error", error: e?.message ?? String(e) });
-    // 错误 5 秒后重置为 idle，避免卡在 error 状态
     setTimeout(() => {
       if (currentState.state === "error") setState({ state: "idle" });
     }, 5000);
   }
 }
 
-/**
- * 安装并重启应用（用户点击「立即重启」时调用）。
- * - 如果已经在 installed 状态，直接 relaunch
- * - 如果在 ready/downloading 中途，等下载完成再 relaunch
- */
+/** 下载完成后由用户点击触发：先安装已下载更新，再重启应用。 */
 export async function installAndRestart(): Promise<void> {
   const proc = await loadProcess();
-  if (!proc) return;
+  if (!proc || !pendingDownload) return;
   try {
+    setState({ state: "installing" });
+    await pendingDownload.install();
+    pendingDownload = null;
+    setState({ state: "installed" });
     await proc.relaunch();
-  } catch (e) {
-    console.error("[updater] relaunch failed", e);
+  } catch (e: any) {
+    setState({ state: "error", error: e?.message ?? String(e) });
+    setTimeout(() => {
+      if (currentState.state === "error") setState({ state: "ready" });
+    }, 5000);
   }
 }
 
-/** 关闭「新版本就绪」提示，但不重启（下次启动时仍生效）。 */
+/** 关闭提示，不安装本次已下载更新；下次检查会重新发现。 */
 export function dismissUpdate(): void {
-  setState({ state: "idle", update: null, progress: 0 });
+  pendingDownload = null;
+  setState({ state: "idle", update: null, progress: 0, error: null });
 }
 
 /** 启动后台自动检查（应用初始化时调用一次）。 */
 export function startAutoUpdate(): void {
   if (started) return;
-  started = true;
   if (!isAutoUpdateEnabled()) return;
+  started = true;
   setTimeout(() => {
     void checkForUpdate();
     setInterval(() => {

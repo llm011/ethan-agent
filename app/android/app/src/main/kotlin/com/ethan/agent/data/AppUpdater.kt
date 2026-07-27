@@ -2,6 +2,9 @@ package com.ethan.agent.data
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import androidx.core.content.FileProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -143,8 +146,23 @@ class AppUpdater @Inject constructor(
             }
         }
 
-    /** 用 FileProvider + Intent 触发系统安装器。 */
-    fun installApk(apkFile: File) {
+    sealed class InstallResult {
+        data object Triggered : InstallResult()
+        data object PermissionRequired : InstallResult()
+    }
+
+    /** 用 FileProvider + Intent 触发系统安装器。Android 8+ 先检查安装未知来源权限。 */
+    fun installApk(apkFile: File): InstallResult {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            if (!context.packageManager.canRequestPackageInstalls()) {
+                val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                    data = Uri.parse("package:${context.packageName}")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(intent)
+                return InstallResult.PermissionRequired
+            }
+        }
         val uri = FileProvider.getUriForFile(
             context,
             "${context.packageName}.fileprovider",
@@ -156,6 +174,7 @@ class AppUpdater @Inject constructor(
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         context.startActivity(intent)
+        return InstallResult.Triggered
     }
 
     private fun getCurrentVersion(): String? = try {
@@ -166,16 +185,35 @@ class AppUpdater @Inject constructor(
         null
     }
 
-    /** 语义版本比较：返回 >0 表示 v1 更新，<0 表示 v2 更新，0 表示相同。 */
+    /**
+     * 语义版本比较：返回 >0 表示 v1 更新，<0 表示 v2 更新，0 表示相同。
+     * prerelease 后缀（如 1.2.3-rc1）的数字段取前缀整数，后缀视为低于正式版。
+     */
     private fun compareVersions(v1: String, v2: String): Int {
-        val parts1 = v1.split(".").map { it.toIntOrNull() ?: 0 }
-        val parts2 = v2.split(".").map { it.toIntOrNull() ?: 0 }
+        // 把 "1.2.3-rc1" 拆成 numeric=[1,2,3], pre="rc1"
+        fun parse(v: String): Pair<List<Int>, String> {
+            val dashIdx = v.indexOf('-')
+            val numeric = (if (dashIdx < 0) v else v.substring(0, dashIdx))
+                .split(".")
+                .map { it.toIntOrNull() ?: 0 }
+            val pre = if (dashIdx < 0) "" else v.substring(dashIdx + 1)
+            return numeric to pre
+        }
+
+        val (parts1, pre1) = parse(v1)
+        val (parts2, pre2) = parse(v2)
         val maxLen = maxOf(parts1.size, parts2.size)
         for (i in 0 until maxLen) {
             val p1 = parts1.getOrElse(i) { 0 }
             val p2 = parts2.getOrElse(i) { 0 }
             if (p1 != p2) return p1 - p2
         }
-        return 0
+        // 数字段相同：无 prerelease 后缀 > 有 prerelease 后缀（1.2.3 > 1.2.3-rc1）
+        return when {
+            pre1.isEmpty() && pre2.isEmpty() -> 0
+            pre1.isEmpty() -> 1
+            pre2.isEmpty() -> -1
+            else -> pre1.compareTo(pre2)
+        }
     }
 }

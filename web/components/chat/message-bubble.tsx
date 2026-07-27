@@ -13,7 +13,7 @@ import { McpAppView } from "./mcp-app-view";
 import { MarkdownContent } from "./markdown";
 import { Lightbox, type LightboxImage } from "./lightbox";
 import { ImageGallery, type ImageCard } from "./image-gallery";
-import { SearchCardCarousel, type SearchResultCard } from "./search-card-carousel";
+import { type SearchResultCard } from "./search-card-carousel";
 import { FileCardView, type FileCard } from "./file-card";
 import { applyHighlights } from "@/lib/highlight";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@ethan/shared/ui/tooltip";
@@ -21,13 +21,13 @@ import type { CardData, Message } from "@ethan/shared/chat/types";
 import type { Annotation } from "@/lib/api";
 
 // 按 card.type 分发到 SearchCardCarousel / ImageGallery / FileCardView
+// 搜索结果卡片已移入工具时间线详情展示，这里只渲染图片 / 文件卡片
 function CardRenderer({ cards, sessionId }: { cards: CardData[]; sessionId?: string | null }) {
-  const searchResults = cards.filter((c): c is SearchResultCard => c.type === "search_result");
   const images = cards.filter((c): c is ImageCard => c.type === "image");
   const files = cards.filter((c): c is FileCard => c.type === "file");
+  if (images.length === 0 && files.length === 0) return null;
   return (
     <div className="mt-2 mb-2 space-y-2">
-      {searchResults.length > 0 && <SearchCardCarousel cards={searchResults} />}
       {images.length > 0 && <ImageGallery cards={images} />}
       {files.map((f, i) => (
         <FileCardView key={`${f.path}-${i}`} card={f} sessionId={sessionId} />
@@ -345,7 +345,12 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
               </details>
             )}
             {msg.toolSteps && msg.toolSteps.length > 0 && (
-              <ToolTimeline steps={msg.toolSteps} defaultExpanded={msg.toolsExpanded ?? false} highlightIndex={highlightedStep} />
+              <ToolTimeline
+                steps={msg.toolSteps}
+                defaultExpanded={msg.toolsExpanded ?? false}
+                highlightIndex={highlightedStep}
+                messageCards={msg.cards?.filter((c): c is SearchResultCard => c.type === "search_result")}
+              />
             )}
             {msg.toolSteps && msg.toolSteps.length > 0 && msg.toolSteps.some(s => s.entity_type) && (
               <SwimlaneDiagram steps={msg.toolSteps} matchedSkills={msg.matchedSkills} onStepClick={setHighlightedStep} />

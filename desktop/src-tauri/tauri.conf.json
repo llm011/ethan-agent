@@ -51,7 +51,7 @@
       "endpoints": [
         "https://github.com/llm011/ethan-agent/releases/latest/download/latest.json"
       ],
-      "pubkey": "",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEZCQzY3ODRGRjk5ODVDQjkKUldTNVhKajVUM2pHK3hoRU1MUzg1cWFBS2QzMmdoVlgzdmNuWk5SY2dJVkpZYlJBNVpEU2Vjdi8K",
       "windows": {
         "installMode": "passive"
       }

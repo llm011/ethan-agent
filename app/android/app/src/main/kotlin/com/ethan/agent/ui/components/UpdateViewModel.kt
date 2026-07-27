@@ -20,6 +20,7 @@ class UpdateViewModel @Inject constructor(
         data class Available(val info: AppUpdater.UpdateInfo) : UpdateState()
         data class Downloading(val progress: Int) : UpdateState()
         data object Installing : UpdateState()
+        data object InstallPermissionRequired : UpdateState()
         data class Error(val message: String) : UpdateState()
         data object UpToDate : UpdateState()
     }
@@ -66,11 +67,16 @@ class UpdateViewModel @Inject constructor(
             }
             if (apkFile != null) {
                 _state.value = UpdateState.Installing
-                appUpdater.installApk(apkFile)
-                // 安装 Intent 发出后回到 Idle，用户可能在安装界面取消
-                kotlinx.coroutines.delay(2000)
-                if (_state.value is UpdateState.Installing) {
-                    _state.value = UpdateState.Idle
+                when (appUpdater.installApk(apkFile)) {
+                    is AppUpdater.InstallResult.Triggered -> {
+                        kotlinx.coroutines.delay(2000)
+                        if (_state.value is UpdateState.Installing) {
+                            _state.value = UpdateState.Idle
+                        }
+                    }
+                    is AppUpdater.InstallResult.PermissionRequired -> {
+                        _state.value = UpdateState.InstallPermissionRequired
+                    }
                 }
             } else {
                 _state.value = UpdateState.Error("下载失败，请稍后重试")
