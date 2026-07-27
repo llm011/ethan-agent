@@ -426,6 +426,11 @@ export function ToolTimeline({ steps, defaultExpanded = false, highlightIndex, m
   const hasRunning = steps.some(s => s.state === "running");
   const doneCount = steps.filter(s => s.state !== "running").length;
   const summaryNames = [...new Set(steps.map(s => s.tool))].join(", ");
+  // messageCards 是整条消息合并后的搜索结果，无法按 step 拆分归属。
+  // 仅当消息里恰好只有一个 web_search step 时才用它兜底（归属唯一）；
+  // 多个搜索时传 undefined，各 step 回退到自身 result_detail 文本解析，避免重复与错配。
+  const webSearchCount = steps.filter(s => s.tool === "web_search").length;
+  const fallbackCards = webSearchCount === 1 ? messageCards : undefined;
 
   useEffect(() => {
     if (hasHighlight) {
@@ -455,7 +460,7 @@ export function ToolTimeline({ steps, defaultExpanded = false, highlightIndex, m
       {expanded && (
         <div className="px-3 pb-2 space-y-0">
           {steps.map((step, i) => (
-            <StepRow key={i} step={step} isLast={i === steps.length - 1} highlight={i === highlightIndex} messageCards={messageCards} />
+            <StepRow key={i} step={step} isLast={i === steps.length - 1} highlight={i === highlightIndex} messageCards={fallbackCards} />
           ))}
         </div>
       )}

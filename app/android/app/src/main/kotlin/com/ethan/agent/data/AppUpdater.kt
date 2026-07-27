@@ -213,7 +213,41 @@ class AppUpdater @Inject constructor(
             pre1.isEmpty() && pre2.isEmpty() -> 0
             pre1.isEmpty() -> 1
             pre2.isEmpty() -> -1
-            else -> pre1.compareTo(pre2)
+            else -> comparePrerelease(pre1, pre2)
         }
+    }
+
+    /**
+     * prerelease 后缀比较：>0 表示 a 更新，<0 表示 b 更新，0 表示相同。
+     *
+     * 按点号分段，每段拆成 "非数字前缀 + 数字后缀"：
+     * - 前缀相同则数字后缀按整数比较，避免 "rc10" < "rc9" 的字典序错误
+     * - 前缀不同则按字典序比较（rc > beta > alpha）
+     * - 段数多的更新（rc1.alpha2 > rc1）
+     *
+     * 仅匹配 "前缀+数字" 形式（如 rc10、beta2、alpha1）；纯字母或纯数字
+     * 段走字典序兜底。
+     */
+    private fun comparePrerelease(a: String, b: String): Int {
+        val segA = a.split(".")
+        val segB = b.split(".")
+        val n = minOf(segA.size, segB.size)
+        for (i in 0 until n) {
+            val sa = segA[i]
+            val sb = segB[i]
+            val ma = Regex("^(\\D*)(\\d+)$").matchEntire(sa)
+            val mb = Regex("^(\\D*)(\\d+)$").matchEntire(sb)
+            if (ma != null && mb != null) {
+                val pa = ma.groupValues[1]
+                val pb = mb.groupValues[1]
+                if (pa != pb) return pa.compareTo(pb)
+                val na = ma.groupValues[2].toInt()
+                val nb = mb.groupValues[2].toInt()
+                if (na != nb) return na - nb
+            } else {
+                return sa.compareTo(sb)
+            }
+        }
+        return segA.size - segB.size
     }
 }
