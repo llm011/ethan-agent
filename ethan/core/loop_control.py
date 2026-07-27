@@ -253,17 +253,24 @@ def decision_prompt_message(has_planned: bool = False) -> str:
     """决策提示消息内容（追加为 working messages 末尾的 role=system）。
 
     模型在同一个响应里既输出判断又调工具（不增加轮次）。
+
+    A 门槛收紧到"最后 1 步"（不是 1-2 步），把中间状态赶到 B。
+    B 提示加强：明确"2 步以上就选 B"，并给出 plan_write 的具体示例。
     """
-    plan_hint = (
-        "如已规划过，按 plan 继续执行即可" if has_planned
-        else "如选 B，先调 plan_write(steps=[...]) 列出后续步骤，再继续执行第一步"
-    )
+    if has_planned:
+        plan_hint = "按已有 plan 继续执行下一步即可"
+    else:
+        plan_hint = (
+            "先调 plan_write(steps=[\"步骤1\", \"步骤2\", ...]) 列出剩余步骤，"
+            "再继续执行第一步（plan_write 不占轮次，本轮即可继续）"
+        )
     return (
         "[System 决策提示] 基于以上工具结果，判断当前任务状态并选择行动：\n"
-        "  A) 即将完成（还有 1-2 步收尾）→ 直接调工具执行下一步，并在 thought 里简述\n"
-        f"  B) 还有较多步骤（多个文件/分支/同类操作）→ {plan_hint}\n"
+        "  A) 最后 1 步收尾（本轮调完工具就能交付结果）→ 直接调工具，在 thought 里简述\n"
+        f"  B) 还需 2 步以上（多个文件/多次同类操作/需要对比汇总）→ {plan_hint}\n"
         "  C) 需要更多信息或工具失败 → 调工具补全信息，或向用户提问\n"
-        "请在 thought 里先输出你的判断（A/B/C + 一句理由），再发起对应的工具调用。]"
+        "判断原则：只要剩余工作不止 1 步，就选 B。先 plan 再执行能避免绕路和遗漏。\n"
+        "请在 thought 里先输出「决策: X」标记（X 为 A/B/C），再发起对应的工具调用。]"
     )
 
 
@@ -300,8 +307,8 @@ def detect_need_more_info(response_text: str) -> bool:
     for signal in _NEED_MORE_INFO_SIGNALS:
         if signal in response_text or signal.lower() in text_lower:
             return True
-    # 检测决策提示的 C 选项被选中
-    if "选 c" in text_lower or "选择c" in text_lower or "选项c" in text_lower:
+    # 检测决策提示的 C 选项被选中（支持多种格式：选 C / 选择C / 决策: C / 决策：C）
+    if any(p in text_lower for p in ["选 c", "选择c", "选项c", "决策: c", "决策： c", "决策:c", "决策：c"]):
         return True
     return False
 

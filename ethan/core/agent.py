@@ -1236,6 +1236,14 @@ class Agent:
 
             enforce_context_budget(working)  # 新 tool result 进上下文前管控体积，防撑爆
             monitor.record(tool_calls, had_error)
+            # [DIAG] 签名诊断：iter / 工具名 / 签名 hash / 是否 stuck（info 级别，便于观察）
+            if tool_calls:
+                _sig = monitor._signatures[-1] if monitor._signatures else ""
+                _sig_hash = hash(_sig) & 0xFFFFFF
+                _eff_name = monitor._tool_names[-1] if monitor._tool_names else ""
+                logger.info("[sig-debug] iter=%d tools=%s eff_name=%s sig_hash=%06x sig_len=%d stuck=%s",
+                            i + 1, [tc.name for tc in tool_calls], _eff_name,
+                            _sig_hash, len(_sig), monitor.is_stuck() if len(monitor._signatures) >= 3 else False)
 
             # plan 工具调用感知：如果本轮调了 plan_write，标记已规划
             if any(tc.name == "plan_write" for tc in tool_calls):
