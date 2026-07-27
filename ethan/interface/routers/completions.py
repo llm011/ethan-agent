@@ -150,13 +150,13 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
     # 非流式：走 stream_chat + StreamCollector 收集工具步骤并实时落库，
     # 这样中断/异常时 Web UI 仍能看到已执行的工具调用过程（与 Web stream 路径行为一致）。
     from ethan.core.stream_collector import StreamCollector
-    from ethan.providers.base import SkillsMatchedEvent, ThinkingEvent, ToolEvent
+    from ethan.providers.base import InjectEvent, SkillsMatchedEvent, ThinkingEvent, ToolEvent
 
     collector = StreamCollector().bind(agent)
     progress_msg_id: int | None = None
     try:
         async for item in agent.stream_chat(messages):
-            if isinstance(item, (ToolEvent, ThinkingEvent, SkillsMatchedEvent)):
+            if isinstance(item, (ToolEvent, ThinkingEvent, SkillsMatchedEvent, InjectEvent)):
                 collector.feed(item)
                 # 工具事件实时落库进度，中断也不丢过程
                 if isinstance(item, ToolEvent) and session_id:
@@ -253,13 +253,13 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
 async def _stream_completions(agent, messages, store, session_id: str, model: str | None, user_id: str = ""):
     from ethan.core.stream_collector import StreamCollector
     from ethan.interface.routers.chat import _maybe_consolidate, _maybe_generate_skill
-    from ethan.providers.base import SkillsMatchedEvent, ThinkingEvent, ToolEvent
+    from ethan.providers.base import InjectEvent, SkillsMatchedEvent, ThinkingEvent, ToolEvent
 
     collector = StreamCollector().bind(agent)
     progress_msg_id: int | None = None
     try:
         async for item in agent.stream_chat(messages):
-            if isinstance(item, (ToolEvent, ThinkingEvent, SkillsMatchedEvent)):
+            if isinstance(item, (ToolEvent, ThinkingEvent, SkillsMatchedEvent, InjectEvent)):
                 collector.feed(item)
                 # 工具事件实时落库进度，连接中断也不丢工具调用过程
                 if isinstance(item, ToolEvent) and session_id:

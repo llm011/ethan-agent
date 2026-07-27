@@ -42,6 +42,7 @@ import com.ethan.agent.ui.settings.SettingsViewModel
 import com.ethan.agent.ui.skills.SkillsScreen
 import com.ethan.agent.ui.skills.SkillsViewModel
 import com.ethan.agent.ui.components.LoadingBox
+import com.ethan.agent.ui.components.UpdateDialog
 
 @Composable
 fun EthanApp(authViewModel: AuthViewModel) {
@@ -65,6 +66,7 @@ private fun LoginContent(state: AuthUiState, viewModel: AuthViewModel) {
 @Composable
 private fun MainContent(authViewModel: AuthViewModel) {
     val navController = rememberNavController()
+    val updateViewModel: com.ethan.agent.ui.components.UpdateViewModel = hiltViewModel()
     val backStack by navController.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
 
@@ -150,9 +152,12 @@ private fun MainContent(authViewModel: AuthViewModel) {
             }
 
             composable(Screen.More.route) {
-                MoreScreen(onNavigate = { route ->
-                    navController.navigate(route)
-                })
+                MoreScreen(
+                    onNavigate = { route ->
+                        navController.navigate(route)
+                    },
+                    updateViewModel = updateViewModel,
+                )
             }
 
             composable(Screen.Settings.route) {
@@ -341,5 +346,8 @@ private fun MainContent(authViewModel: AuthViewModel) {
                 )
             }
         }
+
+        // 全局更新提示（自动检查 + 手动触发）
+        UpdateDialog(updateViewModel)
     }
 }

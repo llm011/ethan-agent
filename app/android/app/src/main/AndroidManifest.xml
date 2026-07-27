@@ -12,6 +12,8 @@
     <!-- Track 7 Lightbox: save image to gallery (API ≤ 28; API 29+ uses MediaStore) -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
+    <!-- 自动升级：安装下载的 APK -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:name=".EthanApplication"
@@ -50,6 +52,17 @@
                 <data android:mimeType="application/*" />
             </intent-filter>
         </activity>
+
+        <!-- 自动升级：FileProvider 用于分享 APK 给系统安装器 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 
 </manifest>

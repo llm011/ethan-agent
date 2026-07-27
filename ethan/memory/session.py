@@ -7,6 +7,8 @@
 同一 db_path 只维护一个连接实例，消除多连接写锁竞争。
 """
 import asyncio
+import re
+import shutil
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -34,6 +36,40 @@ def _generate_id() -> str:
     ts = time.strftime("%Y%m%d_%H%M")
     short = uuid.uuid4().hex[:4]
     return f"s_{ts}_{short}"
+
+
+def _slug_message_id(message_id: int) -> str:
+    return f"msg_{message_id}.process.md"
+
+
+def _intermediate_preview(text: str, limit: int = 120) -> str:
+    text = re.sub(r"\s+", " ", (text or "")).strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "…"
+
+
+def _build_intermediate_markdown(msg: Message) -> str:
+    parts: list[str] = ["# 过程记录"]
+    if msg.tool_steps:
+        for idx, step in enumerate(msg.tool_steps, start=1):
+            title = step.get("tool") or f"step_{idx}"
+            parts.append(f"\n## Step {idx} · {title}")
+            if step.get("thought"):
+                parts.append("\n### 工具调用前思考\n" + str(step["thought"]).strip())
+            if step.get("injected"):
+                injected = step["injected"]
+                if isinstance(injected, list) and injected:
+                    parts.append("\n### 用户补充信息\n" + "\n\n".join(f"- {m}" for m in injected))
+            if step.get("args"):
+                parts.append("\n### 参数\n```text\n" + str(step["args"]).strip() + "\n```")
+            if step.get("result_preview"):
+                parts.append("\n### 结果摘要\n" + str(step["result_preview"]).strip())
+            if step.get("result_detail"):
+                parts.append("\n### 结果详情\n" + str(step["result_detail"]).strip())
+    elif msg.thought:
+        parts.append("\n## 思考过程\n" + str(msg.thought).strip())
+    return "\n".join(p for p in parts if p.strip()).strip() + "\n"
 
 
 def _auto_title(messages: list[Message]) -> str:
@@ -222,12 +258,29 @@ class SessionStore:
                 tool_call_id TEXT,
                 created_at REAL,
                 usage TEXT,
+                intermediate_blob_id INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            )
+        """)
+        await self._db.execute("""
+            CREATE TABLE IF NOT EXISTS message_intermediate_blobs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                message_id INTEGER NOT NULL,
+                session_id TEXT NOT NULL,
+                kind TEXT NOT NULL DEFAULT 'process',
+                file_path TEXT NOT NULL,
+                format TEXT NOT NULL DEFAULT 'markdown',
+                size_bytes INTEGER NOT NULL DEFAULT 0,
+                preview_text TEXT NOT NULL DEFAULT '',
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+                FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
             )
         """)
         await self._db.commit()
         # Migration: add columns if they don't exist (for existing databases)
-        for col, definition in [("created_at", "REAL"), ("usage", "TEXT"), ("tool_steps", "TEXT"), ("thought", "TEXT"), ("quote", "TEXT"), ("a2ui", "TEXT"), ("mcp_apps", "TEXT"), ("images", "TEXT"), ("matched_skills", "TEXT"), ("ttfb_ms", "INTEGER"), ("total_ms", "INTEGER"), ("cards", "TEXT")]:
+        for col, definition in [("created_at", "REAL"), ("usage", "TEXT"), ("tool_steps", "TEXT"), ("thought", "TEXT"), ("quote", "TEXT"), ("a2ui", "TEXT"), ("mcp_apps", "TEXT"), ("images", "TEXT"), ("matched_skills", "TEXT"), ("ttfb_ms", "INTEGER"), ("total_ms", "INTEGER"), ("cards", "TEXT"), ("intermediate_blob_id", "INTEGER NOT NULL DEFAULT 0")]: 
             try:
                 await self._db.execute(f"ALTER TABLE messages ADD COLUMN {col} {definition}")
                 await self._db.commit()
@@ -263,6 +316,87 @@ class SessionStore:
             return  # 单例连接由进程生命周期管理，不关闭
         if self._db:
             await self._db.close()
+
+    def _should_persist_intermediate(self, msg: Message) -> bool:
+        return msg.role == "assistant" and bool(msg.tool_steps or (msg.thought and msg.thought.strip()))
+
+    async def _ensure_intermediate_blob(self, session_id: str, message_id: int, msg: Message) -> int:
+        if not self._should_persist_intermediate(msg):
+            return 0
+        from ethan.core.paths import user_intermediate_dir
+        content = _build_intermediate_markdown(msg)
+        if len(content.strip()) <= len("# 过程记录"):
+            return 0
+        base_dir = user_intermediate_dir() / session_id
+        base_dir.mkdir(parents=True, exist_ok=True)
+        file_path = base_dir / _slug_message_id(message_id)
+        file_path.write_text(content, encoding="utf-8")
+        preview = _intermediate_preview(content)
+        size_bytes = file_path.stat().st_size
+        async with self._db.execute(
+            "SELECT intermediate_blob_id FROM messages WHERE id=?", (message_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        existing_blob_id = int(row[0] or 0) if row else 0
+        if existing_blob_id:
+            await self._db.execute(
+                "UPDATE message_intermediate_blobs SET file_path=?, format='markdown', size_bytes=?, preview_text=?, updated_at=? WHERE id=?",
+                (str(file_path), size_bytes, preview, time.time(), existing_blob_id),
+            )
+            await self._db.commit()
+            return existing_blob_id
+        cursor = await self._db.execute(
+            "INSERT INTO message_intermediate_blobs (message_id, session_id, kind, file_path, format, size_bytes, preview_text, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (message_id, session_id, "process", str(file_path), "markdown", size_bytes, preview, time.time(), time.time()),
+        )
+        blob_id = cursor.lastrowid
+        await self._db.execute("UPDATE messages SET intermediate_blob_id=? WHERE id=?", (blob_id, message_id))
+        await self._db.commit()
+        return blob_id
+
+    async def _delete_intermediate_blob_for_message(self, row_id: int) -> None:
+        async with self._db.execute(
+            "SELECT intermediate_blob_id FROM messages WHERE id=?", (row_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        blob_id = int(row[0] or 0) if row else 0
+        if not blob_id:
+            return
+        async with self._db.execute(
+            "SELECT file_path FROM message_intermediate_blobs WHERE id=?", (blob_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        file_path = Path(row[0]) if row and row[0] else None
+        await self._db.execute("DELETE FROM message_intermediate_blobs WHERE id=?", (blob_id,))
+        await self._db.commit()
+        if file_path:
+            file_path.unlink(missing_ok=True)
+            try:
+                if file_path.parent.exists() and not any(file_path.parent.iterdir()):
+                    file_path.parent.rmdir()
+            except OSError:
+                pass
+
+    async def load_intermediate_blob(self, row_id: int) -> dict | None:
+        async with self._db.execute(
+            "SELECT b.id, b.file_path, b.format, b.size_bytes, b.preview_text, b.kind FROM messages m JOIN message_intermediate_blobs b ON m.intermediate_blob_id = b.id WHERE m.id=? AND m.intermediate_blob_id IS NOT NULL AND m.intermediate_blob_id != 0",
+            (row_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        if not row:
+            return None
+        path = Path(row[1])
+        if not path.exists():
+            return {"id": row[0], "missing": True, "format": row[2], "size_bytes": row[3], "preview_text": row[4], "kind": row[5]}
+        return {
+            "id": row[0],
+            "format": row[2],
+            "size_bytes": row[3],
+            "preview_text": row[4],
+            "kind": row[5],
+            "content": path.read_text(encoding="utf-8"),
+            "missing": False,
+        }
 
     async def create(self, model: str, source: str = "web", mode: str = "") -> Session:
         now = time.time()
@@ -319,11 +453,14 @@ class SessionStore:
         cards_json = json.dumps(msg.cards, ensure_ascii=False) if msg.cards else None
 
         cursor = await self._db.execute(
-            "INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui, images, matched_skills, ttfb_ms, total_ms, mcp_apps, cards) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (session_id, msg.role, msg.content, tool_calls_json, msg.tool_call_id, msg_created_at, usage_json, tool_steps_json, msg.thought, quote_json, a2ui_json, images_json, matched_skills_json, msg.ttfb_ms, msg.total_ms, mcp_apps_json, cards_json),
+            "INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui, images, matched_skills, ttfb_ms, total_ms, mcp_apps, cards, intermediate_blob_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (session_id, msg.role, msg.content, tool_calls_json, msg.tool_call_id, msg_created_at, usage_json, tool_steps_json, msg.thought, quote_json, a2ui_json, images_json, matched_skills_json, msg.ttfb_ms, msg.total_ms, mcp_apps_json, cards_json, 0),
         )
         await self._db.commit()
-        return cursor.lastrowid  # 返回行 id，供「进度消息」复用同一条行做覆盖式 UPDATE
+        row_id = cursor.lastrowid
+        blob_id = await self._ensure_intermediate_blob(session_id, row_id, msg)
+        msg.intermediate_blob_id = blob_id
+        return row_id  # 返回行 id，供「进度消息」复用同一条行做覆盖式 UPDATE
 
     async def update_message(self, row_id: int, session_id: str, msg: Message) -> None:
         """按主键 id 更新一条消息。
@@ -351,9 +488,11 @@ class SessionStore:
              mcp_apps_json, matched_skills_json, msg.ttfb_ms, msg.total_ms, cards_json, msg.created_at or time.time(), row_id, session_id),
         )
         await self._db.commit()
+        msg.intermediate_blob_id = await self._ensure_intermediate_blob(session_id, row_id, msg)
 
     async def delete_message_by_id(self, row_id: int) -> None:
         """按主键 id 删除单条消息（新 run 替换旧 run 时丢弃残留的进度占位行用）。"""
+        await self._delete_intermediate_blob_for_message(row_id)
         await self._db.execute("DELETE FROM messages WHERE id=?", (row_id,))
         await self._db.commit()
 
@@ -385,6 +524,8 @@ class SessionStore:
         ) as cursor:
             if not await cursor.fetchone():
                 return False
+        from ethan.core.paths import user_intermediate_dir
+        shutil.rmtree(user_intermediate_dir() / session_id, ignore_errors=True)
         await self._db.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
         await self._db.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
         await self._db.commit()
@@ -395,6 +536,8 @@ class SessionStore:
 
         保留 session 记录本身，只清空 messages 再重写，并 touch 更新时间。
         """
+        from ethan.core.paths import user_intermediate_dir
+        shutil.rmtree(user_intermediate_dir() / session_id, ignore_errors=True)
         await self._db.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
         await self._db.commit()
         for msg in messages:
@@ -421,7 +564,7 @@ class SessionStore:
         )
 
         async with self._db.execute(
-            "SELECT id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui, images, matched_skills, ttfb_ms, total_ms, mcp_apps, cards FROM messages WHERE session_id = ? ORDER BY id",
+            "SELECT id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui, images, matched_skills, ttfb_ms, total_ms, mcp_apps, cards, intermediate_blob_id FROM messages WHERE session_id = ? ORDER BY id",
             (session_id,),
         ) as cursor:
             async for r in cursor:
@@ -439,6 +582,7 @@ class SessionStore:
                 total_ms = r[14] if len(r) > 14 and r[14] is not None else None
                 mcp_apps = json.loads(r[15]) if len(r) > 15 and r[15] else None
                 cards = json.loads(r[16]) if len(r) > 16 and r[16] else None
+                intermediate_blob_id = int(r[17] or 0) if len(r) > 17 and r[17] is not None else 0
                 session.messages.append(Message(
                     role=r[1], content=r[2],
                     id=r[0],
@@ -456,6 +600,7 @@ class SessionStore:
                     total_ms=total_ms,
                     mcp_apps=mcp_apps,
                     cards=cards,
+                    intermediate_blob_id=intermediate_blob_id,
                 ))
 
         return session

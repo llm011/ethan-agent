@@ -1,6 +1,7 @@
 import { useAuth } from "@/lib/auth-context";
 import { LoginView } from "@/components/login-view";
 import { Sidebar } from "@/components/Sidebar";
+import { UpdateToast } from "@/components/update-toast";
 import { useState, useEffect, createContext, useContext } from "react";
 import { ChevronLeft, ChevronRight, Menu } from "lucide-react";
 import { Outlet } from "react-router-dom";
@@ -80,6 +81,8 @@ export function LayoutShell() {
           )}
           <Outlet />
         </main>
+        {/* 半静默更新提示：下载完成后右下角弹卡片 */}
+        <UpdateToast />
       </div>
     </SidebarContext.Provider>
   );

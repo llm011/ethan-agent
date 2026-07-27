@@ -198,6 +198,10 @@ def user_knowledge_dir() -> Path:
     return user_data_dir() / "knowledge"
 
 
+def user_intermediate_dir() -> Path:
+    return user_data_dir() / "intermediate"
+
+
 def user_agent_session_dir(session_id: str) -> Path:
     """沉浸式工具模式下，每条 Ethan 会话独立的 coding-agent 工作目录。
 

@@ -26,6 +26,7 @@ export interface SessionDetail {
     created_at?: number;
     quote?: { role: "user" | "assistant"; content: string } | null;
     usage?: { input: number; output: number; cache: number };
+    intermediate_blob_id?: number;
     a2ui?: unknown[];
     mcp_apps?: Array<{ uri: string; data?: Record<string, unknown>; html?: string; csp?: Record<string, string[]> }>;
     images?: Array<{ data?: string; media_type?: string; dataUrl?: string }>;
@@ -43,6 +44,7 @@ export interface SessionDetail {
       thought?: string;
       entity_type?: string;
       entity_id?: string;
+      injected?: string[];
       sub_steps?: Array<{
         tool: string;
         args: string;
@@ -120,6 +122,19 @@ export async function deleteSession(id: string): Promise<void> {
 export async function deleteMessage(sessionId: string, messageId: number): Promise<void> {
   const res = await fetch(`${API_URL}/sessions/${sessionId}/messages/${messageId}`, { method: "DELETE", headers: headers() });
   if (!res.ok) throw new Error("Delete message failed");
+}
+
+export async function fetchMessageIntermediate(sessionId: string, messageId: number): Promise<string> {
+  const res = await fetch(`${API_URL}/sessions/${sessionId}/messages/${messageId}/intermediate`, { headers: headers() });
+  if (!res.ok) {
+    let detail = "过程记录加载失败";
+    try {
+      const body = await res.clone().json();
+      detail = typeof body?.detail === "string" ? body.detail : detail;
+    } catch {}
+    throw new Error(detail);
+  }
+  return res.text();
 }
 
 export async function compactSession(id: string): Promise<{ ok: boolean; summary: string }> {

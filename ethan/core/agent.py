@@ -939,7 +939,7 @@ class Agent:
     async def stream_chat(self, messages: list[Message]):
         """流式对话。instant/fast/full 三档路由，按关键词规则自动选择。"""
         from ethan.core.context import reset_active_tools
-        from ethan.providers.base import SkillsMatchedEvent, ThinkingEvent, ToolEvent
+        from ethan.providers.base import InjectEvent, SkillsMatchedEvent, ThinkingEvent, ToolEvent
 
         self._executor.reset_cache()
         reset_active_tools()  # 清空本请求的 find_tools 激活集
@@ -1055,6 +1055,7 @@ class Agent:
                 else:
                     working.append(Message(role="user", content=_inject_text))
                 logger.info("stream_chat() iter=%d consumed %d injected message(s)", i, len(_injected))
+                yield InjectEvent(messages=list(_injected))
             finalize = (i == max_iters - 1)  # 留最后一轮做收尾：禁工具、强制总结
             if finalize:
                 tools = None

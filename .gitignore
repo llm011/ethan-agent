@@ -28,6 +28,11 @@ Thumbs.db
 .env
 .env.local
 .env.production
+
+# Android signing
+keystore.properties
+*.jks
+*.keystore
 !.env.example
 
 # Project data (user-specific)

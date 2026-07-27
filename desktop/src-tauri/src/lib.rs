@@ -89,6 +89,9 @@ fn reveal_item_in_dir(app: tauri::AppHandle, path: String) -> Result<(), String>
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![save_share_image, reveal_item_in_dir])
         .setup(|app| {
     let _ = app.get_webview_window("main").map(|w| w.set_title(""));
