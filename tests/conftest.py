@@ -6,6 +6,8 @@ autouse fixture 禁用 BGE ONNX encoder，强制走 hash embedding：
   （known issue: InferenceSession 的 intra-op/inter-op 线程池阻止 Python 退出）
 - 与各测试文件内 hash_embed / force_hash_embed fixture 同手法，此处做全局兜底
 """
+import os
+
 import pytest
 
 
@@ -18,3 +20,14 @@ def _force_hash_embed():
     emb._encoder_checked = True
     yield
     emb._encoder_checked, emb._encoder = old_checked, old_encoder
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """强制退出，绕过非 daemon 线程阻止 Python 退出的问题。
+
+    get_session_store() 创建的单例 aiosqlite 连接（非 daemon 线程）在测试
+    结束后不会被关闭（SessionStore.close() 对单例是 no-op），导致 pytest
+    跑完全部用例后进程挂起 6h 直到 GitHub Actions 超时取消。
+    os._exit 绕过 Python 正常关闭流程，直接终止进程。
+    """
+    os._exit(exitstatus)
