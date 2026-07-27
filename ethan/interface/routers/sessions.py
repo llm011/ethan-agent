@@ -1,5 +1,6 @@
 """sessions 路由：Session CRUD + /auth + /models。"""
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
 from ethan.core.config import get_config
@@ -115,6 +116,7 @@ async def get_session(session_id: str, user_id: str = Depends(verify_token)):
                 "created_at": getattr(m, "created_at", None),
                 "usage": getattr(m, "usage", None),
                 "tool_steps": getattr(m, "tool_steps", None) or [],
+                "intermediate_blob_id": getattr(m, "intermediate_blob_id", 0) or 0,
                 "quote": getattr(m, "quote", None),
                 "a2ui": getattr(m, "a2ui", None),
                 "mcp_apps": getattr(m, "mcp_apps", None),
@@ -132,6 +134,23 @@ async def get_session(session_id: str, user_id: str = Depends(verify_token)):
             for m in session.messages if m.role in ("user", "assistant")
         ],
     }
+
+
+@router.get("/sessions/{session_id}/messages/{message_id}/intermediate")
+async def get_message_intermediate(session_id: str, message_id: int, user_id: str = Depends(verify_token)):
+    store = await get_session_store()
+    session = await store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    belongs = any(getattr(m, "id", None) == message_id for m in session.messages)
+    if not belongs:
+        raise HTTPException(status_code=404, detail="Message not found in this session")
+    blob = await store.load_intermediate_blob(message_id)
+    if not blob:
+        raise HTTPException(status_code=404, detail="Intermediate blob not found")
+    if blob.get("missing"):
+        raise HTTPException(status_code=410, detail="Intermediate blob file missing")
+    return PlainTextResponse(blob["content"], media_type="text/markdown; charset=utf-8")
 
 
 @router.delete("/sessions/{session_id}")

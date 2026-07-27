@@ -13,6 +13,7 @@ import { type SearchResultCard } from "./search-card-carousel";
 import { ImageGallery, type ImageCard } from "./image-gallery";
 import { FileCardView, type FileCard } from "./file-card";
 import { applyHighlights } from "@/lib/highlight";
+import { fetchMessageIntermediate } from "@/lib/api-sessions";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@ethan/shared/ui/tooltip";
 import type { CardData, Message } from "@ethan/shared/chat/types";
 import type { Annotation } from "@/lib/api";
@@ -181,6 +182,10 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
   const [thoughtOpen, setThoughtOpen] = useState(true);
   // 过程记录（intermediateOutput）默认折叠：流式中展开显示，出结果后自动折叠
   const [processOpen, setProcessOpen] = useState(false);
+  const [intermediateOpen, setIntermediateOpen] = useState(false);
+  const [intermediateLoading, setIntermediateLoading] = useState(false);
+  const [intermediateContent, setIntermediateContent] = useState<string | null>(msg.intermediateContent || null);
+  const [intermediateError, setIntermediateError] = useState<string | null>(msg.intermediateError || null);
   const contentRef = useRef<HTMLDivElement>(null);
   // 用户附带的图片点击放大用的 Lightbox 状态
   const [userImages, setUserImages] = useState<LightboxImage[]>([]);
@@ -195,6 +200,20 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
       : [];
     applyHighlights(contentRef.current, spans, true);
   }, [annotations, msg.content, isStreaming, msg.role]);
+
+  const loadIntermediate = async () => {
+    if (!sessionId || !msg.id || !msg.intermediateBlobId || intermediateLoading || intermediateContent) return;
+    setIntermediateLoading(true);
+    setIntermediateError(null);
+    try {
+      const content = await fetchMessageIntermediate(sessionId, msg.id);
+      setIntermediateContent(content);
+    } catch (e) {
+      setIntermediateError(e instanceof Error ? e.message : "过程记录加载失败");
+    } finally {
+      setIntermediateLoading(false);
+    }
+  };
 
   return (
     <TooltipProvider delay={0}>
@@ -356,7 +375,7 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
             {isStreaming && isLast && onInject && (
               <InjectBox onInject={onInject} />
             )}
-            {msg.intermediateOutput && (
+            {msg.intermediateOutput ? (
               isStreaming && isLast ? (
                 <div className="mb-2 rounded-lg border border-border/50 bg-background/30 px-3 py-2 text-sm text-muted-foreground/80 leading-relaxed">
                   <div className="text-xs font-medium text-muted-foreground mb-1.5">📝 过程记录</div>
@@ -376,7 +395,37 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
                   </div>
                 </details>
               )
-            )}
+            ) : msg.intermediateBlobId ? (
+              <details
+                className="mb-2 border border-border/50 bg-background/50 rounded-lg overflow-hidden group"
+                open={intermediateOpen}
+                onToggle={(e) => {
+                  const open = e.currentTarget.open;
+                  setIntermediateOpen(open);
+                  if (open) void loadIntermediate();
+                }}
+              >
+                <summary className="px-3 py-1.5 text-xs text-muted-foreground font-medium cursor-pointer hover:bg-background/80 flex items-center transition-colors list-none select-none">
+                  <span className="opacity-70 group-open:opacity-100 transition-opacity">📝 过程记录</span>
+                </summary>
+                <div className="px-3 py-2 text-sm text-muted-foreground/80 border-t border-border/50 bg-background/30 leading-relaxed">
+                  {intermediateLoading ? (
+                    <div className="space-y-2 animate-pulse">
+                      <div className="h-3 w-24 rounded bg-muted" />
+                      <div className="h-3 w-full rounded bg-muted" />
+                      <div className="h-3 w-5/6 rounded bg-muted" />
+                      <div className="h-3 w-4/6 rounded bg-muted" />
+                    </div>
+                  ) : intermediateError ? (
+                    <div className="text-xs text-destructive/80">⚠️ {intermediateError}</div>
+                  ) : intermediateContent ? (
+                    <MarkdownContent content={intermediateContent} />
+                  ) : (
+                    <div className="text-xs text-muted-foreground/70">已保存 · 点击展开加载</div>
+                  )}
+                </div>
+              </details>
+            ) : null}
             <MarkdownContent ref={contentRef} content={msg.content} />
             {msg.cards && msg.cards.length > 0 && (
               <CardRenderer cards={msg.cards} sessionId={sessionId} />

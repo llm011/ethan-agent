@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import {
   ChevronDown, ChevronRight, Terminal, Globe, FileText,
   Search, Clock, CheckCircle2, XCircle, Loader2, Code2, Sparkles,
-  WrapText, Copy, Check, BrainCircuit
+  WrapText, Copy, Check, BrainCircuit, MessageSquareText
 } from "lucide-react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
@@ -32,6 +32,7 @@ export interface ToolStep {
   entity_type?: string;
   entity_id?: string;
   skill_category?: string;
+  injected?: string[];
 }
 
 interface ToolTimelineProps {
@@ -294,6 +295,21 @@ function StepRow({ step, isLast, highlight, fallbackCards }: { step: ToolStep; i
       </div>
 
       <div className="flex-1 min-w-0 pb-1">
+        {step.injected && step.injected.length > 0 && (
+          <div className="mb-1.5 rounded-md bg-blue-500/8 border border-blue-500/20 px-2.5 py-1.5">
+            <div className="flex items-start gap-1.5">
+              <MessageSquareText className="h-3 w-3 text-blue-500 shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <div className="text-[10px] text-blue-600 dark:text-blue-400 font-medium mb-0.5">补充信息</div>
+                {step.injected.map((msg, i) => (
+                  <p key={i} className="text-xs text-foreground/70 leading-relaxed whitespace-pre-wrap break-words">
+                    {msg}
+                  </p>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
         <div
           className={"flex items-center gap-1.5 flex-wrap" + (hasDetail ? " cursor-pointer" : "")}
           onClick={() => hasDetail && setDetailOpen(o => !o)}

@@ -36,6 +36,7 @@ class Message:
     ttfb_ms: Optional[int] = None  # 收到第一个文本块的耗时（毫秒）
     total_ms: Optional[int] = None  # 从请求到完成的总耗时（毫秒）
     cards: Optional[list] = None  # 结构化卡片数据（web_search/image_search 产出），前端按 type 渲染横向滚动卡片
+    intermediate_blob_id: int = 0  # 中间过程正文外置文件索引；0 表示无
 
     @property
     def is_tool_call(self) -> bool:
@@ -75,6 +76,16 @@ class ToolEvent:
     skill_category: str = ""  # 工具所属 skill 分类，前端按类别展示工具调用
     cards: Optional[list] = None  # 结构化卡片数据（web_search/image_search 产出），透传给前端渲染横向滚动卡片
     cards_meta: Optional[dict] = None  # 卡片元数据，如 {"total_results": 12300, "showing": 7}
+
+
+@dataclass
+class InjectEvent:
+    """stream_chat 产出：用户运行中补充信息被 agent loop 消费。
+
+    在每轮开头 drain injected_messages 后 yield，让 StreamCollector 把内容
+    挂到随后第一个 tool step 上，前端可在时间线中展示。
+    """
+    messages: list = field(default_factory=list)
 
 
 @dataclass

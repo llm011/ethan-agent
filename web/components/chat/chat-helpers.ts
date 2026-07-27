@@ -20,6 +20,7 @@ export function mapDetailMessages(detail: { messages: any[] }): Message[] {
     content: m.content,
     created_at: m.created_at,
     usage: m.usage || undefined,
+    intermediateBlobId: m.intermediate_blob_id || undefined,
     quote: m.quote || undefined,
     images: m.images && m.images.length > 0
       ? m.images.map((img: any) => ({
@@ -45,6 +46,7 @@ export function mapDetailMessages(detail: { messages: any[] }): Message[] {
           thought: s.thought,
           entity_type: s.entity_type,
           entity_id: s.entity_id,
+          injected: s.injected,
           sub_steps: s.sub_steps?.map((ss: any) => ({
             tool: ss.tool,
             args: ss.args,

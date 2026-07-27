@@ -15,7 +15,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from ethan.providers.base import SkillsMatchedEvent, ThinkingEvent, ToolEvent
+from ethan.providers.base import InjectEvent, SkillsMatchedEvent, ThinkingEvent, ToolEvent
 
 
 class StreamCollector:
@@ -34,6 +34,8 @@ class StreamCollector:
         # 用户「看到第一个东西」的时刻：第一次工具调用开始 或 首段文本，取较早者。
         # TTFB 以此为基准（而非仅首字），这样先跑工具再出正文的场景也能正确反映「首响应」。
         self._first_visible_at: float | None = None
+        # 用户「运行中补充信息」：InjectEvent 来了存这里，下一个 tool start 时挂到 step 上并清空。
+        self._pending_injected: list[str] = []
 
     def bind(self, agent) -> "StreamCollector":
         """绑定 agent，结束时从 agent.usage 取 token。"""
@@ -48,6 +50,9 @@ class StreamCollector:
             return None
         if isinstance(item, ThinkingEvent):
             return None  # 思考内容不计入正文
+        if isinstance(item, InjectEvent):
+            self._pending_injected.extend(item.messages)
+            return None
         if isinstance(item, SkillsMatchedEvent):
             self.matched_skills = item.skills
             return None
@@ -91,7 +96,9 @@ class StreamCollector:
                 "cards": [],
                 "entity_type": item.entity_type or "",
                 "entity_id": item.entity_id or "",
+                "injected": self._pending_injected.copy() if self._pending_injected else [],
             })
+            self._pending_injected.clear()
         else:  # done / error
             duration_ms = int(
                 (time.time() - self._times.pop(item.tool_name, time.time())) * 1000

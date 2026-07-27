@@ -176,7 +176,7 @@ async def _run_generation(
     """
     from ethan.core.consent import ConsentEvent, set_consent_provider
     from ethan.core.stream_collector import StreamCollector
-    from ethan.providers.base import SkillsMatchedEvent, ThinkingEvent, ToolEvent
+    from ethan.providers.base import InjectEvent, SkillsMatchedEvent, ThinkingEvent, ToolEvent
 
     # consent provider 经 ContextVar 注入；本任务有独立 context，需在任务内设置。
     set_consent_provider(consent)
@@ -207,13 +207,18 @@ async def _run_generation(
                 run.emit({"skills_matched": item.skills})
             elif isinstance(item, ThinkingEvent):
                 run.emit({"thinking": True})
+            elif isinstance(item, InjectEvent):
+                collector.feed(item)
+                run.emit({"injected": item.messages})
             elif isinstance(item, ToolEvent):
                 collector.feed(item)
                 if item.state == "start":
+                    step = collector.tool_steps[-1]
                     run.emit({"tool": item.tool_name, "args": item.args_summary, "state": "start",
                               "id": item.tool_call_id, "intent": item.intent or "",
                               "entity_type": item.entity_type or "",
-                              "entity_id": item.entity_id or ""})
+                              "entity_id": item.entity_id or "",
+                              "injected": step.get("injected", [])})
                 else:
                     step = collector.tool_steps[-1]
                     evt = {

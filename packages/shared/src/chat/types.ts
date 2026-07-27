@@ -83,6 +83,10 @@ export interface Message {
   total_ms?: number;
   thought?: string;
   intermediateOutput?: string;
+  intermediateBlobId?: number;
+  intermediateContent?: string;
+  intermediateLoading?: boolean;
+  intermediateError?: string;
   quote?: Quote;
   a2ui?: unknown[];  // ui_card 工具产出的 A2UI envelope 列表，渲染成卡片
   mcpApps?: McpApp[];  // 工具 UI 资源，前端按 uri 拉取模板后在 iframe 沙箱渲染

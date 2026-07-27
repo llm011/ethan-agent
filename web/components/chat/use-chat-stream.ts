@@ -113,6 +113,7 @@ export async function consumeStream(
           thought: preToolThought || undefined,
           entity_type: chunk.entity_type || undefined,
           entity_id: chunk.entity_id || undefined,
+          injected: chunk.injected || undefined,
         });
         setMessages([...baseMessages, {
           role: "assistant", content: assistantContent, thought: assistantThought,
