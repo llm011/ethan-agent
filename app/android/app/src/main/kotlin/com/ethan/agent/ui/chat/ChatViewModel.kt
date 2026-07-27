@@ -14,6 +14,7 @@ import com.ethan.agent.core.model.ToolStep
 import com.ethan.agent.core.model.Usage
 import com.ethan.agent.data.EthanRepository
 import com.ethan.agent.data.UiMessage
+import retrofit2.HttpException
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
@@ -129,7 +130,7 @@ class ChatViewModel @Inject constructor(
         val text = current.inputText.trim()
         if (text.isEmpty()) return
 
-        if (current.isStreaming) {
+        if (current.isStreaming && streamJob?.isActive == true) {
             injectMessage(text)
             return
         }
@@ -196,12 +197,14 @@ class ChatViewModel @Inject constructor(
             try {
                 repository.injectMessage(sessionId, text)
             } catch (e: Exception) {
-                val msg = repository.friendlyError(e)
-                if (msg.contains("409") || msg.contains("conflict", ignoreCase = true)) {
-                    _state.update { it.copy(error = "无活跃生成，已切换为普通消息", inputText = text) }
+                val isNoActiveRun = (e is HttpException && e.code() == 409) ||
+                    (e is com.ethan.agent.core.network.ApiException && e.code == 409)
+                if (isNoActiveRun) {
+                    // 后端 run 已结束，前端 isStreaming 是 stale 状态；先清掉再降级，避免 sendMessage 因 isStreaming=true 又回到 injectMessage 形成死循环
+                    _state.update { it.copy(isStreaming = false, connectionState = ConnectionState.Idle, inputText = text) }
                     sendMessage()
                 } else {
-                    _state.update { it.copy(error = msg) }
+                    _state.update { it.copy(error = repository.friendlyError(e)) }
                 }
             }
         }
@@ -215,8 +218,14 @@ class ChatViewModel @Inject constructor(
         streamJob?.cancel()
         streamJob = viewModelScope.launch {
             _state.update { it.copy(isResuming = true, connectionState = ConnectionState.Reconnecting) }
-            val assistantIndex = _state.value.messages.size
-            _state.update { it.copy(messages = it.messages + UiMessage(role = "assistant", content = "", isStreaming = true)) }
+            // 若最后一条已是 isStreaming=true 的 assistant（上次中断的占位），复用它；否则才追加新占位
+            val msgs = _state.value.messages
+            val lastIdx = msgs.lastIndex
+            val reuseLast = lastIdx >= 0 && msgs[lastIdx].role == "assistant" && msgs[lastIdx].isStreaming
+            val assistantIndex = if (reuseLast) lastIdx else msgs.size
+            if (!reuseLast) {
+                _state.update { it.copy(messages = it.messages + UiMessage(role = "assistant", content = "", isStreaming = true)) }
+            }
             var gotAnyEvent = false
             try {
                 collectSseStream(
@@ -228,7 +237,8 @@ class ChatViewModel @Inject constructor(
             } catch (e: Exception) {
                 _state.update { it.copy(connectionState = ConnectionState.Disconnected, error = repository.friendlyError(e)) }
             } finally {
-                if (!gotAnyEvent) {
+                // 仅当追加了新占位且没收到任何事件时才 drop，避免误删复用的旧气泡
+                if (!reuseLast && !gotAnyEvent) {
                     _state.update { s -> s.copy(messages = s.messages.dropLast(1)) }
                 }
                 _state.update { it.copy(isResuming = false, isStreaming = false) }
@@ -286,62 +296,65 @@ class ChatViewModel @Inject constructor(
             }
         }
 
-        flow.collect { event ->
-            if (firstEvent) {
-                firstEvent = false
-                onFirstEvent?.invoke()
-                _state.update { it.copy(isStreaming = true) }
-            }
-            when {
-                event.consentRequest == true -> {
-                    _state.update {
-                        it.copy(
-                            consent = ConsentInfo(
-                                requestId = event.requestId ?: "",
-                                tool = event.tool ?: "",
-                                description = event.description ?: "",
-                                detail = event.detail,
-                            ),
+        try {
+            flow.collect { event ->
+                if (firstEvent) {
+                    firstEvent = false
+                    onFirstEvent?.invoke()
+                    _state.update { it.copy(isStreaming = true) }
+                }
+                when {
+                    event.consentRequest == true -> {
+                        _state.update {
+                            it.copy(
+                                consent = ConsentInfo(
+                                    requestId = event.requestId ?: "",
+                                    tool = event.tool ?: "",
+                                    description = event.description ?: "",
+                                    detail = event.detail,
+                                ),
+                            )
+                        }
+                    }
+                    event.content != null -> {
+                        contentBuilder.append(event.content)
+                        flush()
+                        if (_state.value.showScrollToBottom) {
+                            _state.update { it.copy(unreadCount = it.unreadCount + 1) }
+                        }
+                    }
+                    event.tool != null -> {
+                        val tool = event.tool!!
+                        val step = ToolStep(
+                            tool = tool,
+                            args = event.args ?: "",
+                            state = event.state ?: "start",
+                            durationMs = event.durationMs,
+                            resultPreview = event.resultPreview,
+                            resultDetail = event.resultDetail,
+                            id = event.id,
+                            subSteps = event.subSteps,
                         )
+                        val existing = toolSteps.indexOfFirst { it.id == step.id && step.id != null }
+                        if (existing >= 0) toolSteps[existing] = step else toolSteps.add(step)
+                        _state.update { s ->
+                            val msgs = s.messages.toMutableList()
+                            if (assistantIndex < msgs.size) msgs[assistantIndex] = msgs[assistantIndex].copy(toolSteps = toolSteps.toList())
+                            s.copy(messages = msgs)
+                        }
                     }
+                    event.done == true -> { usage = event.usage }
+                    event.error != null -> { _state.update { it.copy(error = event.error) } }
                 }
-                event.content != null -> {
-                    contentBuilder.append(event.content)
-                    flush()
-                    if (_state.value.showScrollToBottom) {
-                        _state.update { it.copy(unreadCount = it.unreadCount + 1) }
-                    }
-                }
-                event.tool != null -> {
-                    val tool = event.tool!!
-                    val step = ToolStep(
-                        tool = tool,
-                        args = event.args ?: "",
-                        state = event.state ?: "start",
-                        durationMs = event.durationMs,
-                        resultPreview = event.resultPreview,
-                        resultDetail = event.resultDetail,
-                        id = event.id,
-                        subSteps = event.subSteps,
-                    )
-                    val existing = toolSteps.indexOfFirst { it.id == step.id && step.id != null }
-                    if (existing >= 0) toolSteps[existing] = step else toolSteps.add(step)
-                    _state.update { s ->
-                        val msgs = s.messages.toMutableList()
-                        if (assistantIndex < msgs.size) msgs[assistantIndex] = msgs[assistantIndex].copy(toolSteps = toolSteps.toList())
-                        s.copy(messages = msgs)
-                    }
-                }
-                event.done == true -> { usage = event.usage }
-                event.error != null -> { _state.update { it.copy(error = event.error) } }
             }
-        }
-
-        flush(force = true)
-        _state.update { s ->
-            val msgs = s.messages.toMutableList()
-            if (assistantIndex < msgs.size) msgs[assistantIndex] = msgs[assistantIndex].copy(isStreaming = false, usage = usage)
-            s.copy(messages = msgs, isStreaming = false)
+        } finally {
+            // 无论正常结束还是异常，都要重置 assistant 气泡的 isStreaming，避免 spinner 永久卡住
+            flush(force = true)
+            _state.update { s ->
+                val msgs = s.messages.toMutableList()
+                if (assistantIndex < msgs.size) msgs[assistantIndex] = msgs[assistantIndex].copy(isStreaming = false, usage = usage)
+                s.copy(messages = msgs, isStreaming = false)
+            }
         }
     }
 
