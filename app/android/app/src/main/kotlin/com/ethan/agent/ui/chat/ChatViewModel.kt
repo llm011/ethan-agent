@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ethan.agent.core.model.ChatMessage
+import com.ethan.agent.core.model.ChatStreamEvent
 import com.ethan.agent.core.model.ConsentInfo
 import com.ethan.agent.core.model.ModeEntry
 import com.ethan.agent.core.model.ModelEntry
@@ -13,8 +14,10 @@ import com.ethan.agent.core.model.ToolStep
 import com.ethan.agent.core.model.Usage
 import com.ethan.agent.data.EthanRepository
 import com.ethan.agent.data.UiMessage
+import retrofit2.HttpException
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -22,6 +25,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
 import javax.inject.Inject
+
+enum class ConnectionState { Idle, Streaming, Reconnecting, Disconnected }
 
 data class ChatUiState(
     val sessionId: String? = null,
@@ -34,6 +39,11 @@ data class ChatUiState(
     val inputText: String = "",
     val isLoading: Boolean = false,
     val isStreaming: Boolean = false,
+    val isResuming: Boolean = false,
+    val isStopping: Boolean = false,
+    val connectionState: ConnectionState = ConnectionState.Idle,
+    val showScrollToBottom: Boolean = false,
+    val unreadCount: Int = 0,
     val error: String? = null,
     val consent: ConsentInfo? = null,
     val quote: Quote? = null,
@@ -87,9 +97,7 @@ class ChatViewModel @Inject constructor(
                     }
                 } else {
                     _state.update {
-                        it.copy(
-                            selectedModel = settings.defaultModel.ifBlank { models.firstOrNull()?.id },
-                        )
+                        it.copy(selectedModel = settings.defaultModel.ifBlank { models.firstOrNull()?.id })
                     }
                 }
 
@@ -108,30 +116,24 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    fun onInputChange(text: String) {
-        _state.update { it.copy(inputText = text) }
-    }
+    fun onInputChange(text: String) { _state.update { it.copy(inputText = text) } }
+    fun onModelSelected(model: String) { _state.update { it.copy(selectedModel = model) } }
+    fun onModeSelected(mode: String) { _state.update { it.copy(selectedMode = mode) } }
+    fun setQuote(quote: Quote?) { _state.update { it.copy(quote = quote) } }
+    fun clearQuote() { _state.update { it.copy(quote = null) } }
+    fun setShowScrollToBottom(show: Boolean) { _state.update { it.copy(showScrollToBottom = show) } }
+    fun clearUnread() { _state.update { it.copy(unreadCount = 0) } }
 
-    fun onModelSelected(model: String) {
-        _state.update { it.copy(selectedModel = model) }
-    }
-
-    fun onModeSelected(mode: String) {
-        _state.update { it.copy(selectedMode = mode) }
-    }
-
-    fun setQuote(quote: Quote?) {
-        _state.update { it.copy(quote = quote) }
-    }
-
-    fun clearQuote() {
-        _state.update { it.copy(quote = null) }
-    }
-
+    /** 发送消息：流式发送中则 inject，否则普通发送 */
     fun sendMessage() {
         val current = _state.value
         val text = current.inputText.trim()
-        if (text.isEmpty() || current.isStreaming) return
+        if (text.isEmpty()) return
+
+        if (current.isStreaming && streamJob?.isActive == true) {
+            injectMessage(text)
+            return
+        }
 
         if (text.startsWith("/")) {
             handleSlashCommand(text)
@@ -146,6 +148,7 @@ class ChatViewModel @Inject constructor(
                     quote = null,
                     messages = it.messages + userMessage,
                     isStreaming = true,
+                    connectionState = ConnectionState.Streaming,
                     error = null,
                 )
             }
@@ -157,108 +160,208 @@ class ChatViewModel @Inject constructor(
                     sessionId = created.id
                     _state.update { it.copy(sessionId = sessionId, title = created.title) }
                 } catch (e: Exception) {
-                    _state.update { it.copy(isStreaming = false, error = repository.friendlyError(e)) }
+                    _state.update { it.copy(isStreaming = false, connectionState = ConnectionState.Idle, error = repository.friendlyError(e)) }
                     return@launch
                 }
             }
 
             val history = _state.value.messages.map { ChatMessage(it.role, it.content) }
             val assistantIndex = _state.value.messages.size
-            _state.update {
-                it.copy(messages = it.messages + UiMessage(role = "assistant", content = "", isStreaming = true))
-            }
+            _state.update { it.copy(messages = it.messages + UiMessage(role = "assistant", content = "", isStreaming = true)) }
 
             streamJob = viewModelScope.launch {
                 try {
-                    val toolSteps = mutableListOf<ToolStep>()
-                    var usage: Usage? = null
-                    val contentBuilder = StringBuilder()
-                    var lastContentFlushMs = 0L
+                    collectSseStream(
+                        flow = repository.streamChat(
+                            messages = history,
+                            model = _state.value.selectedModel,
+                            sessionId = sessionId,
+                            quote = userMessage.quote,
+                            mode = _state.value.selectedMode,
+                        ),
+                        assistantIndex = assistantIndex,
+                    )
+                    _state.update { it.copy(connectionState = ConnectionState.Idle) }
+                } catch (e: Exception) {
+                    _state.update { it.copy(isStreaming = false, connectionState = ConnectionState.Disconnected, error = repository.friendlyError(e)) }
+                }
+            }
+        }
+    }
 
-                    fun flushStreamingContent(force: Boolean = false) {
-                        val now = System.currentTimeMillis()
-                        if (!force && now - lastContentFlushMs < 50L) return
-                        lastContentFlushMs = now
-                        val content = contentBuilder.toString()
+    /** 运行中向 agent 注入补充信息；409 = 无活跃 run，自动降级普通发送 */
+    private fun injectMessage(text: String) {
+        val sessionId = _state.value.sessionId ?: return
+        _state.update { it.copy(inputText = "") }
+        viewModelScope.launch {
+            try {
+                repository.injectMessage(sessionId, text)
+            } catch (e: Exception) {
+                val isNoActiveRun = (e is HttpException && e.code() == 409) ||
+                    (e is com.ethan.agent.core.network.ApiException && e.code == 409)
+                if (isNoActiveRun) {
+                    // 后端 run 已结束，前端 isStreaming 是 stale 状态；先清掉再降级，避免 sendMessage 因 isStreaming=true 又回到 injectMessage 形成死循环
+                    _state.update { it.copy(isStreaming = false, connectionState = ConnectionState.Idle, inputText = text) }
+                    sendMessage()
+                } else {
+                    _state.update { it.copy(error = repository.friendlyError(e)) }
+                }
+            }
+        }
+    }
+
+    /** App 从后台恢复时调用，尝试接回进行中的 SSE 流。204 = 无活跃 run，静默返回。 */
+    fun resumeStream() {
+        val sessionId = _state.value.sessionId ?: return
+        if (_state.value.isStreaming || _state.value.isResuming) return
+
+        streamJob?.cancel()
+        streamJob = viewModelScope.launch {
+            _state.update { it.copy(isResuming = true, connectionState = ConnectionState.Reconnecting) }
+            // 若最后一条已是 isStreaming=true 的 assistant（上次中断的占位），复用它；否则才追加新占位
+            val msgs = _state.value.messages
+            val lastIdx = msgs.lastIndex
+            val reuseLast = lastIdx >= 0 && msgs[lastIdx].role == "assistant" && msgs[lastIdx].isStreaming
+            val assistantIndex = if (reuseLast) lastIdx else msgs.size
+            if (!reuseLast) {
+                _state.update { it.copy(messages = it.messages + UiMessage(role = "assistant", content = "", isStreaming = true)) }
+            }
+            var gotAnyEvent = false
+            try {
+                collectSseStream(
+                    flow = repository.resumeStream(sessionId),
+                    assistantIndex = assistantIndex,
+                    onFirstEvent = { gotAnyEvent = true },
+                )
+                _state.update { it.copy(connectionState = ConnectionState.Idle) }
+            } catch (e: Exception) {
+                _state.update { it.copy(connectionState = ConnectionState.Disconnected, error = repository.friendlyError(e)) }
+            } finally {
+                // 仅当追加了新占位且没收到任何事件时才 drop，避免误删复用的旧气泡
+                if (!reuseLast && !gotAnyEvent) {
+                    _state.update { s -> s.copy(messages = s.messages.dropLast(1)) }
+                }
+                _state.update { it.copy(isResuming = false, isStreaming = false) }
+            }
+        }
+    }
+
+    /** 停止生成：先调后端 API，再取消本地 job */
+    fun stopStreaming() {
+        val sessionId = _state.value.sessionId
+        if (_state.value.isStopping) return
+        _state.update { it.copy(isStopping = true) }
+
+        viewModelScope.launch {
+            if (sessionId != null) {
+                try { repository.stopChat(sessionId) } catch (_: Exception) { /* 忽略，继续本地清理 */ }
+            }
+            streamJob?.cancel()
+            _state.update { s ->
+                val msgs = s.messages.toMutableList()
+                val lastIdx = msgs.indexOfLast { it.role == "assistant" }
+                if (lastIdx >= 0) {
+                    val last = msgs[lastIdx]
+                    msgs[lastIdx] = last.copy(
+                        content = last.content + if (last.content.isNotEmpty()) " [已停止]" else "[已停止]",
+                        isStreaming = false,
+                    )
+                }
+                s.copy(isStreaming = false, isStopping = false, connectionState = ConnectionState.Idle, messages = msgs)
+            }
+        }
+    }
+
+    /** 共享 SSE 事件处理逻辑（streamChat 和 resumeStream 复用） */
+    private suspend fun collectSseStream(
+        flow: Flow<ChatStreamEvent>,
+        assistantIndex: Int,
+        onFirstEvent: (() -> Unit)? = null,
+    ) {
+        val toolSteps = mutableListOf<ToolStep>()
+        var usage: Usage? = null
+        val contentBuilder = StringBuilder()
+        var lastFlushMs = 0L
+        var firstEvent = true
+
+        fun flush(force: Boolean = false) {
+            val now = System.currentTimeMillis()
+            if (!force && now - lastFlushMs < 50L) return
+            lastFlushMs = now
+            val content = contentBuilder.toString()
+            _state.update { s ->
+                val msgs = s.messages.toMutableList()
+                if (assistantIndex < msgs.size) msgs[assistantIndex] = msgs[assistantIndex].copy(content = content)
+                s.copy(messages = msgs)
+            }
+        }
+
+        try {
+            flow.collect { event ->
+                if (firstEvent) {
+                    firstEvent = false
+                    onFirstEvent?.invoke()
+                    _state.update { it.copy(isStreaming = true) }
+                }
+                when {
+                    event.consentRequest == true -> {
+                        _state.update {
+                            it.copy(
+                                consent = ConsentInfo(
+                                    requestId = event.requestId ?: "",
+                                    tool = event.tool ?: "",
+                                    description = event.description ?: "",
+                                    detail = event.detail,
+                                ),
+                            )
+                        }
+                    }
+                    event.content != null -> {
+                        contentBuilder.append(event.content)
+                        flush()
+                        if (_state.value.showScrollToBottom) {
+                            _state.update { it.copy(unreadCount = it.unreadCount + 1) }
+                        }
+                    }
+                    event.tool != null -> {
+                        val tool = event.tool!!
+                        val step = ToolStep(
+                            tool = tool,
+                            args = event.args ?: "",
+                            state = event.state ?: "start",
+                            durationMs = event.durationMs,
+                            resultPreview = event.resultPreview,
+                            resultDetail = event.resultDetail,
+                            id = event.id,
+                            subSteps = event.subSteps,
+                        )
+                        val existing = toolSteps.indexOfFirst { it.id == step.id && step.id != null }
+                        if (existing >= 0) toolSteps[existing] = step else toolSteps.add(step)
                         _state.update { s ->
                             val msgs = s.messages.toMutableList()
-                            msgs[assistantIndex] = msgs[assistantIndex].copy(content = content)
+                            if (assistantIndex < msgs.size) msgs[assistantIndex] = msgs[assistantIndex].copy(toolSteps = toolSteps.toList())
                             s.copy(messages = msgs)
                         }
                     }
-
-                    repository.streamChat(
-                        messages = history,
-                        model = _state.value.selectedModel,
-                        sessionId = sessionId,
-                        quote = userMessage.quote,
-                        mode = _state.value.selectedMode,
-                    ).collect { event ->
-                        when {
-                            event.consentRequest == true -> {
-                                _state.update {
-                                    it.copy(
-                                        consent = ConsentInfo(
-                                            requestId = event.requestId ?: "",
-                                            tool = event.tool ?: "",
-                                            description = event.description ?: "",
-                                            detail = event.detail,
-                                        ),
-                                    )
-                                }
-                            }
-                            event.content != null -> {
-                                contentBuilder.append(event.content)
-                                flushStreamingContent()
-                            }
-                            event.tool != null -> {
-                                val toolName = event.tool ?: return@collect
-                                val step = ToolStep(
-                                    tool = toolName,
-                                    args = event.args ?: "",
-                                    state = event.state ?: "start",
-                                    durationMs = event.durationMs,
-                                    resultPreview = event.resultPreview,
-                                    resultDetail = event.resultDetail,
-                                    id = event.id,
-                                    subSteps = event.subSteps,
-                                )
-                                val existing = toolSteps.indexOfFirst { it.id == step.id && step.id != null }
-                                if (existing >= 0) toolSteps[existing] = step else toolSteps.add(step)
-                                _state.update { s ->
-                                    val msgs = s.messages.toMutableList()
-                                    val last = msgs[assistantIndex]
-                                    msgs[assistantIndex] = last.copy(toolSteps = toolSteps.toList())
-                                    s.copy(messages = msgs)
-                                }
-                            }
-                            event.done == true -> {
-                                usage = event.usage
-                            }
-                            event.error != null -> {
-                                _state.update { it.copy(error = event.error) }
-                            }
-                        }
-                    }
-
-                    flushStreamingContent(force = true)
-                    _state.update { s ->
-                        val msgs = s.messages.toMutableList()
-                        val last = msgs[assistantIndex]
-                        msgs[assistantIndex] = last.copy(isStreaming = false, usage = usage)
-                        s.copy(messages = msgs, isStreaming = false)
-                    }
-                } catch (e: Exception) {
-                    _state.update { it.copy(isStreaming = false, error = repository.friendlyError(e)) }
+                    event.done == true -> { usage = event.usage }
+                    event.error != null -> { _state.update { it.copy(error = event.error) } }
                 }
+            }
+        } finally {
+            // 无论正常结束还是异常，都要重置 assistant 气泡的 isStreaming，避免 spinner 永久卡住
+            flush(force = true)
+            _state.update { s ->
+                val msgs = s.messages.toMutableList()
+                if (assistantIndex < msgs.size) msgs[assistantIndex] = msgs[assistantIndex].copy(isStreaming = false, usage = usage)
+                s.copy(messages = msgs, isStreaming = false)
             }
         }
     }
 
     private fun handleSlashCommand(cmd: String) {
         viewModelScope.launch {
-            when {
-                cmd == "/new" -> {
+            when (cmd) {
+                "/new" -> {
                     _state.value = ChatUiState(
                         models = _state.value.models,
                         modes = _state.value.modes,
@@ -266,7 +369,7 @@ class ChatViewModel @Inject constructor(
                         selectedMode = _state.value.selectedMode,
                     )
                 }
-                cmd == "/compact" -> {
+                "/compact" -> {
                     val id = _state.value.sessionId ?: return@launch
                     try {
                         repository.compactSession(id)
@@ -275,7 +378,7 @@ class ChatViewModel @Inject constructor(
                         _state.update { it.copy(error = repository.friendlyError(e)) }
                     }
                 }
-                cmd == "/help" -> {
+                "/help" -> {
                     _state.update {
                         it.copy(
                             inputText = "",
@@ -286,7 +389,7 @@ class ChatViewModel @Inject constructor(
                         )
                     }
                 }
-                cmd == "/sessions" -> {
+                "/sessions" -> {
                     try {
                         val sessions = repository.getSessions(limit = 8)
                         val list = sessions.joinToString("\n") { s -> "• ${s.title} (${s.id.take(8)}…)" }
@@ -317,9 +420,7 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    fun dismissConsent() {
-        _state.update { it.copy(consent = null) }
-    }
+    fun dismissConsent() { _state.update { it.copy(consent = null) } }
 
     fun uploadAttachment(file: File, filename: String) {
         viewModelScope.launch {
@@ -348,16 +449,6 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    fun dismissOnboarding() {
-        _state.update { it.copy(showOnboarding = false) }
-    }
-
-    fun clearError() {
-        _state.update { it.copy(error = null) }
-    }
-
-    fun stopStreaming() {
-        streamJob?.cancel()
-        _state.update { it.copy(isStreaming = false) }
-    }
+    fun dismissOnboarding() { _state.update { it.copy(showOnboarding = false) } }
+    fun clearError() { _state.update { it.copy(error = null) } }
 }

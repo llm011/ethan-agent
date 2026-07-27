@@ -1,3 +1,6 @@
+import java.io.File
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -5,6 +8,27 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.hilt)
     alias(libs.plugins.ksp)
+}
+
+// 读取本地 ~/.gradle/gradle.properties 中的签名信息（CI 通过环境变量注入）
+fun loadSigningProps(): Properties? {
+    val props = Properties()
+    // 优先用环境变量
+    val envStore = System.getenv("ANDROID_STORE_FILE")
+    if (!envStore.isNullOrBlank()) {
+        props["ANDROID_STORE_FILE"] = envStore
+        props["ANDROID_STORE_PASSWORD"] = System.getenv("ANDROID_STORE_PASSWORD") ?: ""
+        props["ANDROID_KEY_ALIAS"] = System.getenv("ANDROID_KEY_ALIAS") ?: ""
+        props["ANDROID_KEY_PASSWORD"] = System.getenv("ANDROID_KEY_PASSWORD") ?: ""
+        return props
+    }
+    // 否则读 ~/.gradle/gradle.properties
+    val gradleHome = System.getProperty("user.home") ?: return null
+    val file = File(gradleHome, ".gradle/gradle.properties")
+    if (!file.exists()) return null
+    file.inputStream().use { props.load(it) }
+    if (props.getProperty("ANDROID_STORE_FILE") == null) return null
+    return props
 }
 
 android {
@@ -23,6 +47,18 @@ android {
         }
     }
 
+    signingConfigs {
+        create("release") {
+            val props = loadSigningProps()
+            if (props != null) {
+                storeFile = File(props.getProperty("ANDROID_STORE_FILE"))
+                storePassword = props.getProperty("ANDROID_STORE_PASSWORD")
+                keyAlias = props.getProperty("ANDROID_KEY_ALIAS")
+                keyPassword = props.getProperty("ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -30,6 +66,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            // 仅当签名信息可用时才挂 signingConfig，否则用默认 debug key 出包（CI 无签名环境时也能跑通）
+            val props = loadSigningProps()
+            if (props != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
@@ -81,6 +122,9 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.okhttp)
     implementation(libs.retrofit)
+    implementation(libs.coil.compose)
+    implementation(libs.androidx.biometric)
+    implementation(libs.material3.window.size)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

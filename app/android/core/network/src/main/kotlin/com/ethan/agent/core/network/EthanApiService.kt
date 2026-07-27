@@ -47,6 +47,46 @@ import com.ethan.agent.core.model.SkillsResponse
 import com.ethan.agent.core.model.SystemPromptPreview
 import com.ethan.agent.core.model.SystemSettings
 import com.ethan.agent.core.model.UploadResponse
+import com.ethan.agent.core.model.AnnotationCreateRequest
+import com.ethan.agent.core.model.AnnotationCreateResponse
+import com.ethan.agent.core.model.AnnotationsResponse
+import com.ethan.agent.core.model.BackgroundTasksResponse
+import com.ethan.agent.core.model.BatchAnnotationsResponse
+import com.ethan.agent.core.model.ConfirmRecordResponse
+import com.ethan.agent.core.model.ConsolidateResponse
+import com.ethan.agent.core.model.DailySummariesResponse
+import com.ethan.agent.core.model.DeckResponse
+import com.ethan.agent.core.model.DeleteAnnotationResponse
+import com.ethan.agent.core.model.DeleteMessageResponse
+import com.ethan.agent.core.model.FastRuleOptionsResponse
+import com.ethan.agent.core.model.FastRulesPatch
+import com.ethan.agent.core.model.FastRulesResponse
+import com.ethan.agent.core.model.InjectRequest
+import com.ethan.agent.core.model.InjectResponse
+import com.ethan.agent.core.model.InsightsByDateResponse
+import com.ethan.agent.core.model.InsightsListResponse
+import com.ethan.agent.core.model.KnowledgeValidateRequest
+import com.ethan.agent.core.model.KnowledgeValidateResponse
+import com.ethan.agent.core.model.LarkDepsStatus
+import com.ethan.agent.core.model.RecordDetailResponse
+import com.ethan.agent.core.model.RecordEvidenceResponse
+import com.ethan.agent.core.model.RecordListResponse
+import com.ethan.agent.core.model.RegenTitleResponse
+import com.ethan.agent.core.model.ScheduleCreateRequest
+import com.ethan.agent.core.model.SignRequest
+import com.ethan.agent.core.model.SignResponse
+import com.ethan.agent.core.model.StopBackgroundTaskResponse
+import com.ethan.agent.core.model.StopChatResponse
+import com.ethan.agent.core.model.SummaryResponse
+import com.ethan.agent.core.model.TimelineActionResponse
+import com.ethan.agent.core.model.TimelineExportRequest
+import com.ethan.agent.core.model.TimelineExportResponse
+import com.ethan.agent.core.model.TimelineImportRequest
+import com.ethan.agent.core.model.TimelineStatusResponse
+import com.ethan.agent.core.model.TimelineValidateRequest
+import com.ethan.agent.core.model.ToolTiersResponse
+import com.ethan.agent.core.model.UpdateRecordRequest
+import com.ethan.agent.core.model.UpdateRecordResponse
 import okhttp3.MultipartBody
 import retrofit2.Response
 import retrofit2.http.Body
@@ -236,13 +276,13 @@ interface EthanApiService {
     @GET("docs/{slug}")
     suspend fun getDoc(@Path("slug") slug: String): DocContent
 
-    @GET("/api-keys")
+    @GET("api-keys")
     suspend fun getApiKeys(): ApiKeysResponse
 
-    @POST("/api-keys")
+    @POST("api-keys")
     suspend fun createApiKey(@Body body: ApiKeyCreateRequest): ApiKeyCreated
 
-    @DELETE("/api-keys/{id}")
+    @DELETE("api-keys/{id}")
     suspend fun deleteApiKey(@Path("id") id: String)
 
     @GET("logs")
@@ -251,4 +291,204 @@ interface EthanApiService {
         @Query("lines") lines: Int = 500,
         @Query("q") query: String? = null,
     ): LogsResponse
+
+    // ── Sessions 扩展 ──────────────────────────────────────────────────────
+
+    @POST("sessions/{id}/regen-title")
+    suspend fun regenTitle(@Path("id") id: String): RegenTitleResponse
+
+    @POST("sessions/{id}/summary")
+    suspend fun summarySession(@Path("id") id: String): SummaryResponse
+
+    @DELETE("sessions/{id}/messages/{msgId}")
+    suspend fun deleteMessage(
+        @Path("id") id: String,
+        @Path("msgId") msgId: Long,
+    ): DeleteMessageResponse
+
+    // ── Chat 扩展（非 SSE） ────────────────────────────────────────────────
+    // 注意：GET /chat/{id}/stream 是 SSE，不走 Retrofit，由 ChatSseClient.resumeStream 处理
+
+    @POST("chat/{id}/stop")
+    suspend fun stopChat(@Path("id") id: String): StopChatResponse
+
+    @POST("chat/{id}/inject")
+    suspend fun injectMessage(
+        @Path("id") id: String,
+        @Body body: InjectRequest,
+    ): InjectResponse
+
+    // ── Models 扩展 ────────────────────────────────────────────────────────
+
+    @PUT("models/{provider}/{modelId}")
+    suspend fun updateModel(
+        @Path("provider") provider: String,
+        @Path("modelId") modelId: String,
+        @Body model: ModelEntry,
+    ): OkResponse
+
+    // ── Memory: Insights 永久记忆 ─────────────────────────────────────────
+
+    @GET("memory/insights")
+    suspend fun getInsights(
+        @Query("limit") limit: Int = 20,
+        @Query("offset") offset: Int = 0,
+    ): InsightsListResponse
+
+    @GET("memory/insights/date/{dateStr}")
+    suspend fun getInsightsByDate(@Path("dateStr") dateStr: String): InsightsByDateResponse
+
+    @POST("memory/consolidate")
+    suspend fun consolidateMemory(): ConsolidateResponse
+
+    // ── Memory: Structured records 结构化记忆 ─────────────────────────────
+
+    @GET("memory/records")
+    suspend fun getRecords(
+        @Query("type") type: String? = null,
+        @Query("status") status: String? = null,
+        @Query("domain") domain: String? = null,
+        @Query("limit") limit: Int = 50,
+        @Query("offset") offset: Int = 0,
+    ): RecordListResponse
+
+    @GET("memory/records/search")
+    suspend fun searchRecords(
+        @Query("q") query: String,
+        @Query("type") type: String? = null,
+        @Query("domain") domain: String? = null,
+        @Query("status") status: String? = null,
+        @Query("limit") limit: Int = 20,
+    ): RecordListResponse
+
+    @GET("memory/records/{id}")
+    suspend fun getRecord(@Path("id") id: String): RecordDetailResponse
+
+    @GET("memory/records/{id}/evidence")
+    suspend fun getRecordEvidence(@Path("id") id: String): RecordEvidenceResponse
+
+    @PATCH("memory/records/{id}")
+    suspend fun updateRecord(
+        @Path("id") id: String,
+        @Body body: UpdateRecordRequest,
+    ): UpdateRecordResponse
+
+    @DELETE("memory/records/{id}")
+    suspend fun deleteRecord(@Path("id") id: String): OkResponse
+
+    @POST("memory/records/{id}/confirm")
+    suspend fun confirmRecord(@Path("id") id: String): ConfirmRecordResponse
+
+    @POST("memory/records/consolidate")
+    suspend fun consolidateRecords(
+        @Query("target_date") targetDate: String? = null,
+    ): ConsolidateResponse
+
+    @GET("memory/records/summaries")
+    suspend fun getDailySummaries(
+        @Query("domain") domain: String? = null,
+        @Query("limit") limit: Int = 30,
+    ): DailySummariesResponse
+
+    @GET("memory/records/summaries/{dateStr}")
+    suspend fun getDailySummaryByDate(
+        @Path("dateStr") dateStr: String,
+        @Query("domain") domain: String? = null,
+    ): DailySummariesResponse
+
+    // ── Schedule 扩展 ─────────────────────────────────────────────────────
+
+    @POST("schedule")
+    suspend fun createSchedule(@Body body: ScheduleCreateRequest): OkResponse
+
+    @POST("schedule/{jobId}/trigger")
+    suspend fun triggerSchedule(@Path("jobId") jobId: String): OkResponse
+
+    // ── Schedule: Timeline 时间线 ─────────────────────────────────────────
+
+    @GET("schedule/timeline-status")
+    suspend fun getTimelineStatus(): TimelineStatusResponse
+
+    @POST("schedule/sync-timelines")
+    suspend fun syncTimelines(): OkResponse
+
+    @POST("schedule/timeline/{timelineId}/{action}")
+    suspend fun timelineLifecycle(
+        @Path("timelineId") timelineId: String,
+        @Path("action") action: String,
+    ): TimelineActionResponse
+
+    @POST("schedule/timeline-export")
+    suspend fun exportTimeline(@Body body: TimelineExportRequest): TimelineExportResponse
+
+    @POST("schedule/timeline-import")
+    suspend fun importTimeline(@Body body: TimelineImportRequest): TimelineActionResponse
+
+    @POST("schedule/timeline-validate")
+    suspend fun validateTimeline(@Body body: TimelineValidateRequest): TimelineActionResponse
+
+    @POST("schedule/timeline/{timelineId}/sync-lark")
+    suspend fun syncTimelineToLark(@Path("timelineId") timelineId: String): TimelineActionResponse
+
+    @POST("schedule/timeline/{timelineId}/cleanup-lark")
+    suspend fun cleanupTimelineLark(@Path("timelineId") timelineId: String): TimelineActionResponse
+
+    // ── Settings 扩展 ─────────────────────────────────────────────────────
+
+    @GET("tool-tiers")
+    suspend fun getToolTiers(@Query("model") model: String? = null): ToolTiersResponse
+
+    @GET("fast-rules")
+    suspend fun getFastRules(): FastRulesResponse
+
+    @GET("fast-rules/options")
+    suspend fun getFastRuleOptions(@Query("model") model: String? = null): FastRuleOptionsResponse
+
+    @PATCH("fast-rules")
+    suspend fun updateFastRules(@Body body: FastRulesPatch): OkResponse
+
+    @POST("settings/knowledge/validate")
+    suspend fun validateKnowledgeBackend(@Body body: KnowledgeValidateRequest): KnowledgeValidateResponse
+
+    @GET("channels/lark/deps-status")
+    suspend fun getLarkDepsStatus(): LarkDepsStatus
+
+    @POST("channels/lark/install-deps")
+    suspend fun installLarkDeps(): OkResponse
+
+    // ── Background Tasks ──────────────────────────────────────────────────
+
+    @GET("background-tasks")
+    suspend fun getBackgroundTasks(): BackgroundTasksResponse
+
+    @POST("background-tasks/{taskId}/stop")
+    suspend fun stopBackgroundTask(@Path("taskId") taskId: String): StopBackgroundTaskResponse
+
+    // ── Annotations 标注 ──────────────────────────────────────────────────
+    // 注意：batch 端点必须声明在 {message_id} 之前，避免被路径参数路由截胡（与后端一致）
+
+    @GET("annotations/batch")
+    suspend fun batchGetAnnotations(@Query("ids") ids: String): BatchAnnotationsResponse
+
+    @GET("annotations/{messageId}")
+    suspend fun getAnnotations(@Path("messageId") messageId: Long): AnnotationsResponse
+
+    @POST("annotations")
+    suspend fun createAnnotation(@Body body: AnnotationCreateRequest): AnnotationCreateResponse
+
+    @DELETE("annotations/{annoId}")
+    suspend fun deleteAnnotation(@Path("annoId") annoId: Long): DeleteAnnotationResponse
+
+    // ── Files / 资产 ──────────────────────────────────────────────────────
+    // download/asset 走 cookie/签名 URL 双通道；Android 端走签名 URL（先 POST /files/sign 换发）
+
+    @POST("files/sign")
+    suspend fun signFiles(@Body body: SignRequest): SignResponse
+
+    @GET("files/deck")
+    suspend fun getDeck(
+        @Query("path") path: String,
+        @Query("session_id") sessionId: String = "",
+    ): DeckResponse
+
 }

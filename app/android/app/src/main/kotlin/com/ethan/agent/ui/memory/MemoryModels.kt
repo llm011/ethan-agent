@@ -19,3 +19,9 @@ fun List<Fact>.indexOfFact(target: Fact): String {
     val idx = indexOfFirst { it.content == target.content && it.createdAt == target.createdAt }
     return if (idx >= 0) idx.toString() else "0"
 }
+
+data class RecordsFilter(
+    val status: String? = null,   // null=全部 / "pending" / "confirmed" / "superseded"
+    val type: String? = null,
+    val domain: String? = null,   // null=general
+)

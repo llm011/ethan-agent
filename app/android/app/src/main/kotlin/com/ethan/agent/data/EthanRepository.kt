@@ -36,6 +36,50 @@ import com.ethan.agent.core.model.SessionInfo
 import com.ethan.agent.core.model.SkillInfo
 import com.ethan.agent.core.model.SystemPromptPreview
 import com.ethan.agent.core.model.SystemSettings
+import com.ethan.agent.core.model.Annotation
+import com.ethan.agent.core.model.AnnotationCreateRequest
+import com.ethan.agent.core.model.AnnotationCreateResponse
+import com.ethan.agent.core.model.AnnotationsResponse
+import com.ethan.agent.core.model.BatchAnnotationsResponse
+import com.ethan.agent.core.model.BackgroundTask
+import com.ethan.agent.core.model.BackgroundTasksResponse
+import com.ethan.agent.core.model.StopBackgroundTaskResponse
+import com.ethan.agent.core.model.ConfirmRecordResponse
+import com.ethan.agent.core.model.ConsolidateResponse
+import com.ethan.agent.core.model.DailySummariesResponse
+import com.ethan.agent.core.model.DeckResponse
+import com.ethan.agent.core.model.DeleteAnnotationResponse
+import com.ethan.agent.core.model.DeleteMessageResponse
+import com.ethan.agent.core.model.FastRulesPatch
+import com.ethan.agent.core.model.FastRulesResponse
+import com.ethan.agent.core.model.FastRuleOptionsResponse
+import com.ethan.agent.core.model.InsightItem
+import com.ethan.agent.core.model.InsightsByDateResponse
+import com.ethan.agent.core.model.InsightsListResponse
+import com.ethan.agent.core.model.InjectRequest
+import com.ethan.agent.core.model.InjectResponse
+import com.ethan.agent.core.model.KnowledgeValidateRequest
+import com.ethan.agent.core.model.KnowledgeValidateResponse
+import com.ethan.agent.core.model.LarkDepsStatus
+import com.ethan.agent.core.model.RegenTitleResponse
+import com.ethan.agent.core.model.RecordDetailResponse
+import com.ethan.agent.core.model.RecordEvidenceResponse
+import com.ethan.agent.core.model.RecordListResponse
+import com.ethan.agent.core.model.ScheduleCreateRequest
+import com.ethan.agent.core.model.SignRequest
+import com.ethan.agent.core.model.SignResponse
+import com.ethan.agent.core.model.StopChatResponse
+import com.ethan.agent.core.model.StructuredRecord
+import com.ethan.agent.core.model.SummaryResponse
+import com.ethan.agent.core.model.TimelineActionResponse
+import com.ethan.agent.core.model.TimelineExportRequest
+import com.ethan.agent.core.model.TimelineExportResponse
+import com.ethan.agent.core.model.TimelineImportRequest
+import com.ethan.agent.core.model.TimelineStatusResponse
+import com.ethan.agent.core.model.TimelineValidateRequest
+import com.ethan.agent.core.model.ToolTiersResponse
+import com.ethan.agent.core.model.UpdateRecordRequest
+import com.ethan.agent.core.model.UpdateRecordResponse
 import com.ethan.agent.core.network.ApiException
 import com.ethan.agent.core.network.ChatSseClient
 import com.ethan.agent.core.network.EthanApiService
@@ -377,6 +421,266 @@ class EthanRepository @Inject constructor(
     suspend fun getLogs(type: String = "backend", lines: Int = 500, query: String? = null): String {
         refreshApi()
         return api.getLogs(type, lines, query).content
+    }
+
+    // ── Sessions 扩展 ──────────────────────────────────────────────────────
+
+    suspend fun regenTitle(id: String): RegenTitleResponse {
+        refreshApi()
+        return api.regenTitle(id)
+    }
+
+    suspend fun summarySession(id: String): SummaryResponse {
+        refreshApi()
+        return api.summarySession(id)
+    }
+
+    suspend fun deleteMessage(sessionId: String, messageId: Long): DeleteMessageResponse {
+        refreshApi()
+        return api.deleteMessage(sessionId, messageId)
+    }
+
+    // ── Chat 扩展（非 SSE） ────────────────────────────────────────────────
+
+    /** 重连进行中的生成：返回 SSE Flow，204（无活跃 run）时返回空流。 */
+    fun resumeStream(sessionId: String): Flow<ChatStreamEvent> = flow {
+        val cfg = configStore.config.first()
+        sseClient.resumeStream(cfg.apiBaseUrl, cfg.authToken, sessionId).collect { emit(it) }
+    }.flowOn(Dispatchers.IO)
+
+    suspend fun stopChat(sessionId: String): StopChatResponse {
+        refreshApi()
+        return api.stopChat(sessionId)
+    }
+
+    suspend fun injectMessage(sessionId: String, content: String): InjectResponse {
+        refreshApi()
+        return api.injectMessage(sessionId, InjectRequest(content))
+    }
+
+    // ── Models 扩展 ────────────────────────────────────────────────────────
+
+    suspend fun updateModel(provider: String, modelId: String, model: ModelEntry) {
+        refreshApi()
+        api.updateModel(provider, modelId, model)
+    }
+
+    // ── Memory: Insights 永久记忆 ─────────────────────────────────────────
+
+    suspend fun getInsights(limit: Int = 20, offset: Int = 0): InsightsListResponse {
+        refreshApi()
+        return api.getInsights(limit, offset)
+    }
+
+    suspend fun getInsightsByDate(dateStr: String): InsightsByDateResponse {
+        refreshApi()
+        return api.getInsightsByDate(dateStr)
+    }
+
+    suspend fun consolidateMemory(): ConsolidateResponse {
+        refreshApi()
+        return api.consolidateMemory()
+    }
+
+    // ── Memory: Structured records 结构化记忆 ─────────────────────────────
+
+    suspend fun getRecords(
+        type: String? = null,
+        status: String? = null,
+        domain: String? = null,
+        limit: Int = 50,
+        offset: Int = 0,
+    ): RecordListResponse {
+        refreshApi()
+        return api.getRecords(type, status, domain, limit, offset)
+    }
+
+    suspend fun searchRecords(
+        query: String,
+        type: String? = null,
+        domain: String? = null,
+        status: String? = null,
+        limit: Int = 20,
+    ): RecordListResponse {
+        refreshApi()
+        return api.searchRecords(query, type, domain, status, limit)
+    }
+
+    suspend fun getRecord(id: String): RecordDetailResponse {
+        refreshApi()
+        return api.getRecord(id)
+    }
+
+    suspend fun getRecordEvidence(id: String): RecordEvidenceResponse {
+        refreshApi()
+        return api.getRecordEvidence(id)
+    }
+
+    suspend fun updateRecord(id: String, body: UpdateRecordRequest): UpdateRecordResponse {
+        refreshApi()
+        return api.updateRecord(id, body)
+    }
+
+    suspend fun deleteRecord(id: String) {
+        refreshApi()
+        api.deleteRecord(id)
+    }
+
+    suspend fun confirmRecord(id: String): ConfirmRecordResponse {
+        refreshApi()
+        return api.confirmRecord(id)
+    }
+
+    suspend fun consolidateRecords(targetDate: String? = null): ConsolidateResponse {
+        refreshApi()
+        return api.consolidateRecords(targetDate)
+    }
+
+    suspend fun getDailySummaries(domain: String? = null, limit: Int = 30): DailySummariesResponse {
+        refreshApi()
+        return api.getDailySummaries(domain, limit)
+    }
+
+    suspend fun getDailySummaryByDate(dateStr: String, domain: String? = null): DailySummariesResponse {
+        refreshApi()
+        return api.getDailySummaryByDate(dateStr, domain)
+    }
+
+    // ── Schedule 扩展 ─────────────────────────────────────────────────────
+
+    suspend fun createSchedule(body: ScheduleCreateRequest) {
+        refreshApi()
+        api.createSchedule(body)
+    }
+
+    suspend fun triggerSchedule(jobId: String) {
+        refreshApi()
+        api.triggerSchedule(jobId)
+    }
+
+    // ── Schedule: Timeline 时间线 ─────────────────────────────────────────
+
+    suspend fun getTimelineStatus(): TimelineStatusResponse {
+        refreshApi()
+        return api.getTimelineStatus()
+    }
+
+    suspend fun syncTimelines() {
+        refreshApi()
+        api.syncTimelines()
+    }
+
+    suspend fun timelineLifecycle(timelineId: String, action: String): TimelineActionResponse {
+        refreshApi()
+        return api.timelineLifecycle(timelineId, action)
+    }
+
+    suspend fun exportTimeline(body: TimelineExportRequest): TimelineExportResponse {
+        refreshApi()
+        return api.exportTimeline(body)
+    }
+
+    suspend fun importTimeline(body: TimelineImportRequest): TimelineActionResponse {
+        refreshApi()
+        return api.importTimeline(body)
+    }
+
+    suspend fun validateTimeline(body: TimelineValidateRequest): TimelineActionResponse {
+        refreshApi()
+        return api.validateTimeline(body)
+    }
+
+    suspend fun syncTimelineToLark(timelineId: String): TimelineActionResponse {
+        refreshApi()
+        return api.syncTimelineToLark(timelineId)
+    }
+
+    suspend fun cleanupTimelineLark(timelineId: String): TimelineActionResponse {
+        refreshApi()
+        return api.cleanupTimelineLark(timelineId)
+    }
+
+    // ── Settings 扩展 ─────────────────────────────────────────────────────
+
+    suspend fun getToolTiers(model: String? = null): ToolTiersResponse {
+        refreshApi()
+        return api.getToolTiers(model)
+    }
+
+    suspend fun getFastRules(): FastRulesResponse {
+        refreshApi()
+        return api.getFastRules()
+    }
+
+    suspend fun getFastRuleOptions(model: String? = null): FastRuleOptionsResponse {
+        refreshApi()
+        return api.getFastRuleOptions(model)
+    }
+
+    suspend fun updateFastRules(body: FastRulesPatch) {
+        refreshApi()
+        api.updateFastRules(body)
+    }
+
+    suspend fun validateKnowledgeBackend(body: KnowledgeValidateRequest): KnowledgeValidateResponse {
+        refreshApi()
+        return api.validateKnowledgeBackend(body)
+    }
+
+    suspend fun getLarkDepsStatus(): LarkDepsStatus {
+        refreshApi()
+        return api.getLarkDepsStatus()
+    }
+
+    suspend fun installLarkDeps() {
+        refreshApi()
+        api.installLarkDeps()
+    }
+
+    // ── Background Tasks ──────────────────────────────────────────────────
+
+    suspend fun getBackgroundTasks(): List<BackgroundTask> {
+        refreshApi()
+        return api.getBackgroundTasks().tasks
+    }
+
+    suspend fun stopBackgroundTask(taskId: String): StopBackgroundTaskResponse {
+        refreshApi()
+        return api.stopBackgroundTask(taskId)
+    }
+
+    // ── Annotations 标注 ──────────────────────────────────────────────────
+
+    suspend fun getAnnotations(messageId: Long): AnnotationsResponse {
+        refreshApi()
+        return api.getAnnotations(messageId)
+    }
+
+    suspend fun batchGetAnnotations(ids: List<Long>): BatchAnnotationsResponse {
+        refreshApi()
+        return api.batchGetAnnotations(ids.joinToString(","))
+    }
+
+    suspend fun createAnnotation(body: AnnotationCreateRequest): AnnotationCreateResponse {
+        refreshApi()
+        return api.createAnnotation(body)
+    }
+
+    suspend fun deleteAnnotation(annoId: Long): DeleteAnnotationResponse {
+        refreshApi()
+        return api.deleteAnnotation(annoId)
+    }
+
+    // ── Files / 资产 ──────────────────────────────────────────────────────
+
+    suspend fun signFiles(paths: List<String>): SignResponse {
+        refreshApi()
+        return api.signFiles(SignRequest(paths))
+    }
+
+    suspend fun getDeck(path: String, sessionId: String = ""): DeckResponse {
+        refreshApi()
+        return api.getDeck(path, sessionId)
     }
 
     suspend fun setDarkTheme(dark: Boolean) {

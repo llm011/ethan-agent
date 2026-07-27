@@ -140,6 +140,12 @@ private fun MainContent(authViewModel: AuthViewModel) {
                     onCancelRename = vm::cancelRename,
                     onDelete = vm::deleteSession,
                     onClearError = vm::clearError,
+                    onRegenTitle = vm::regenTitle,
+                    onSummary = vm::summarySession,
+                    onDismissSummary = vm::dismissSummary,
+                    onSetSourceFilter = vm::setSourceFilter,
+                    onToggleHideHeartbeat = vm::toggleHideHeartbeat,
+                    onToggleHideScheduled = vm::toggleHideScheduled,
                 )
             }
 
@@ -171,6 +177,10 @@ private fun MainContent(authViewModel: AuthViewModel) {
                     onCreateApiKey = vm::createApiKey,
                     onDeleteApiKey = vm::deleteApiKey,
                     onDismissNewApiKey = vm::dismissNewApiKey,
+                    onInstallLarkDeps = vm::installLarkDeps,
+                    onValidateKnowledge = vm::validateKnowledge,
+                    onClearKnowledgeResult = vm::clearKnowledgeValidateResult,
+                    onSetTheme = vm::setTheme,
                     onClearError = vm::clearError,
                 )
             }
@@ -186,9 +196,22 @@ private fun MainContent(authViewModel: AuthViewModel) {
                     onEditChange = vm::onEditChange,
                     onSaveFact = vm::saveFact,
                     onDeleteFact = vm::deleteFact,
-                    onDeleteEpisode = vm::deleteEpisode,
                     onDeleteProcedure = vm::deleteProcedure,
                     onClearError = vm::clearError,
+                    onInsightsDateChange = vm::setInsightsDate,
+                    onRefreshInsights = vm::loadInsights,
+                    onRecordsFilterChange = vm::setRecordsFilter,
+                    onRecordsSearchChange = vm::setRecordsSearch,
+                    onSelectRecord = vm::selectRecord,
+                    onDismissRecord = vm::dismissRecord,
+                    onRecordEditContent = vm::onRecordEditContent,
+                    onSaveRecord = vm::saveRecord,
+                    onDeleteRecord = vm::deleteRecord,
+                    onConfirmRecord = vm::confirmRecord,
+                    onConsolidate = vm::triggerConsolidate,
+                    onConsolidateRecords = { vm.triggerRecordsConsolidate() },
+                    onLoadSummaries = vm::loadSummaries,
+                    onHideSummaries = vm::hideSummaries,
                 )
             }
 
@@ -203,7 +226,9 @@ private fun MainContent(authViewModel: AuthViewModel) {
                     onStartCreate = vm::startCreate,
                     onTitleChange = vm::onTitleChange,
                     onContentChange = vm::onContentChange,
-                    onTagsChange = vm::onTagsChange,
+                    onTagInputChange = vm::onTagInputChange,
+                    onAddTag = vm::addTagFromInput,
+                    onRemoveTag = vm::removeTag,
                     onSave = vm::save,
                     onDelete = vm::delete,
                     onClearError = vm::clearError,
@@ -215,6 +240,7 @@ private fun MainContent(authViewModel: AuthViewModel) {
                 val state by vm.state.collectAsState()
                 SkillsScreen(
                     state = state,
+                    onQueryChange = vm::onQueryChange,
                     onSelect = vm::selectSkill,
                     onStartCreate = vm::startCreate,
                     onNameChange = vm::onNameChange,
@@ -234,8 +260,17 @@ private fun MainContent(authViewModel: AuthViewModel) {
                     state = state,
                     onToggle = vm::toggleJob,
                     onDelete = vm::deleteJob,
+                    onTrigger = vm::triggerJob,
                     onOpenSession = { id -> navController.navigate(Screen.Chat.createRoute(id)) },
+                    onTabChange = vm::setTab,
+                    onSyncTimelines = vm::syncTimelines,
+                    onTimelineAction = vm::timelineAction,
+                    onShowCreateSheet = vm::showCreateSheet,
+                    onDismissCreateSheet = vm::dismissCreateSheet,
+                    onUpdateForm = vm::updateForm,
+                    onSubmitCreate = vm::submitCreate,
                     onClearError = vm::clearError,
+                    onClearTriggerSuccess = vm::clearTriggerSuccess,
                 )
             }
 
@@ -264,6 +299,44 @@ private fun MainContent(authViewModel: AuthViewModel) {
                     onTypeChange = vm::setType,
                     onQueryChange = vm::onQueryChange,
                     onRefresh = vm::load,
+                    onClearError = vm::clearError,
+                )
+            }
+
+            // Track 8 routes
+            composable(Screen.BackgroundTasks.route) {
+                val vm: com.ethan.agent.ui.background.BackgroundTasksViewModel = hiltViewModel()
+                val state by vm.state.collectAsState()
+                com.ethan.agent.ui.background.BackgroundTasksScreen(
+                    state = state,
+                    onRefresh = vm::load,
+                    onStop = vm::stopTask,
+                    onOpenSession = { id -> navController.navigate(Screen.Chat.createRoute(id)) },
+                    onClearError = vm::clearError,
+                )
+            }
+
+            composable(
+                route = Screen.PptPreview.route,
+                arguments = listOf(navArgument("sessionId") { type = NavType.StringType }),
+            ) {
+                val vm: com.ethan.agent.ui.ppt.PptPreviewViewModel = hiltViewModel()
+                val state by vm.state.collectAsState()
+                com.ethan.agent.ui.ppt.PptPreviewScreen(
+                    state = state,
+                    onClearError = vm::clearError,
+                )
+            }
+
+            composable(
+                route = Screen.Annotations.route,
+                arguments = listOf(navArgument("sessionId") { type = NavType.StringType }),
+            ) {
+                val vm: com.ethan.agent.ui.annotations.AnnotationsViewModel = hiltViewModel()
+                val state by vm.state.collectAsState()
+                com.ethan.agent.ui.annotations.AnnotationsScreen(
+                    state = state,
+                    onDelete = vm::deleteAnnotation,
                     onClearError = vm::clearError,
                 )
             }

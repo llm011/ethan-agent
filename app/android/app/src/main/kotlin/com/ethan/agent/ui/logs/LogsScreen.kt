@@ -1,19 +1,24 @@
 package com.ethan.agent.ui.logs
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -40,31 +45,53 @@ fun LogsScreen(
         topBar = {
             TopAppBar(
                 title = { Text("日志") },
-                actions = { TextButton(onClick = onRefresh) { Text("刷新") } },
+                actions = {
+                    IconButton(onClick = onRefresh) {
+                        Icon(Icons.Default.Refresh, contentDescription = "刷新")
+                    }
+                },
             )
         },
         snackbarHost = { SnackbarContainer(snackbar) },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).padding(12.dp)) {
-            androidx.compose.foundation.layout.Row {
-                FilterChip(selected = state.type == "backend", onClick = { onTypeChange("backend") }, label = { Text("后端") })
-                FilterChip(selected = state.type == "frontend", onClick = { onTypeChange("frontend") }, label = { Text("前端") })
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = state.type == "backend",
+                    onClick = { onTypeChange("backend") },
+                    label = { Text("Backend") },
+                )
+                FilterChip(
+                    selected = state.type == "frontend",
+                    onClick = { onTypeChange("frontend") },
+                    label = { Text("Frontend") },
+                )
             }
+
             OutlinedTextField(
-                state.query,
-                onQueryChange,
-                label = { Text("过滤") },
-                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                value = state.query,
+                onValueChange = onQueryChange,
+                placeholder = { Text("关键字过滤") },
                 singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
             )
-            if (state.isLoading) {
+
+            if (state.isLoading && state.content.isEmpty()) {
                 LoadingBox()
             } else {
                 Text(
-                    state.content.ifBlank { "暂无日志" },
-                    modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
-                    style = MaterialTheme.typography.bodySmall,
+                    text = state.content.ifBlank { "（无日志）" },
                     fontFamily = FontFamily.Monospace,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
                 )
             }
         }

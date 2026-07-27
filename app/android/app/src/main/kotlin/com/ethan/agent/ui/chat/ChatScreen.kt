@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -24,34 +25,44 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import com.ethan.agent.core.model.Quote
 import com.ethan.agent.data.UiMessage
 import com.ethan.agent.ui.components.ErrorSnackbar
@@ -60,6 +71,8 @@ import com.ethan.agent.ui.components.SnackbarContainer
 import com.ethan.agent.ui.components.ToolTimeline
 import com.ethan.agent.ui.components.SimpleMarkdown
 import java.io.File
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -78,10 +91,14 @@ fun ChatScreen(
     onCompleteOnboarding: () -> Unit,
     onDismissOnboarding: () -> Unit,
     onClearError: () -> Unit,
+    onScrollToBottom: () -> Unit = {},
+    onResumeStream: () -> Unit = {},
 ) {
     val snackbar = remember { SnackbarHostState() }
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
 
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri ?: return@rememberLauncherForActivityResult
@@ -93,9 +110,38 @@ fun ChatScreen(
         }
     }
 
+    // 自动滚到底部（新消息到达且用户已在底部）
+    val isAtBottom by remember {
+        derivedStateOf {
+            val info = listState.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull()
+            last == null || last.index >= info.totalItemsCount - 1
+        }
+    }
+
     LaunchedEffect(state.messages.size) {
         if (state.messages.isNotEmpty()) {
-            listState.animateScrollToItem(state.messages.lastIndex)
+            if (isAtBottom) {
+                listState.animateScrollToItem(state.messages.lastIndex)
+            }
+        }
+    }
+
+    // 监听滚动位置，控制"滚到底部"FAB 和未读计数
+    LaunchedEffect(listState) {
+        snapshotFlow { isAtBottom }.distinctUntilChanged().collect { atBottom ->
+            if (atBottom) {
+                onScrollToBottom()
+            }
+        }
+    }
+
+    // App 从后台恢复时尝试重连
+    LaunchedEffect(state.sessionId) {
+        if (state.sessionId != null) {
+            lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                onResumeStream()
+            }
         }
     }
 
@@ -145,13 +191,68 @@ fun ChatScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text(state.title) })
+            TopAppBar(
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(state.title)
+                        ConnectionStateIndicator(state.connectionState, state.isResuming)
+                    }
+                },
+            )
         },
         snackbarHost = { SnackbarContainer(snackbar) },
+        floatingActionButton = {
+            if (state.showScrollToBottom) {
+                BadgedBox(
+                    badge = {
+                        if (state.unreadCount > 0) {
+                            Surface(
+                                shape = RoundedCornerShape(50),
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(16.dp),
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = if (state.unreadCount > 9) "9+" else state.unreadCount.toString(),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onError,
+                                    )
+                                }
+                            }
+                        }
+                    },
+                ) {
+                    FloatingActionButton(
+                        onClick = {
+                            scope.launch { listState.animateScrollToItem(state.messages.lastIndex) }
+                        },
+                    ) {
+                        Icon(Icons.Default.KeyboardArrowDown, contentDescription = "滚到底部")
+                    }
+                }
+            }
+        },
     ) { padding ->
         if (state.isLoading) {
             LoadingBox(Modifier.padding(padding))
             return@Scaffold
+        }
+
+        // 断线重连横幅
+        if (state.connectionState == ConnectionState.Disconnected) {
+            Surface(
+                color = MaterialTheme.colorScheme.errorContainer,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("连接断开", style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = onResumeStream) { Text("重连") }
+                }
+            }
         }
 
         Column(
@@ -198,20 +299,51 @@ fun ChatScreen(
                     value = state.inputText,
                     onValueChange = onInputChange,
                     modifier = Modifier.weight(1f),
-                    placeholder = { Text("输入消息，/help 查看命令") },
+                    placeholder = {
+                        Text(if (state.isStreaming) "补充信息给 Agent…" else "输入消息，/help 查看命令")
+                    },
                     maxLines = 5,
                 )
-                if (state.isStreaming) {
-                    IconButton(onClick = onStop) {
-                        Icon(Icons.Default.Stop, contentDescription = "停止")
+                when {
+                    state.isStopping -> {
+                        Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(Modifier.size(24.dp))
+                        }
                     }
-                } else {
-                    IconButton(onClick = onSend, enabled = state.inputText.isNotBlank()) {
-                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "发送")
+                    state.isStreaming || state.isResuming -> {
+                        IconButton(onClick = onStop) {
+                            Icon(Icons.Default.Stop, contentDescription = "停止", tint = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                    else -> {
+                        IconButton(onClick = onSend, enabled = state.inputText.isNotBlank()) {
+                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "发送")
+                        }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ConnectionStateIndicator(state: ConnectionState, isResuming: Boolean) {
+    val (color, label) = when {
+        isResuming -> Pair(MaterialTheme.colorScheme.tertiary, "重连中…")
+        state == ConnectionState.Streaming -> Pair(MaterialTheme.colorScheme.error, "生成中")
+        state == ConnectionState.Disconnected -> Pair(MaterialTheme.colorScheme.error, "已断开")
+        else -> return
+    }
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = color.copy(alpha = 0.15f),
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = color,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+        )
     }
 }
 

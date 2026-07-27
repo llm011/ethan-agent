@@ -8,8 +8,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -19,12 +21,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.CalendarToday
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -48,9 +56,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.ethan.agent.core.model.Episode
+import androidx.compose.ui.window.Dialog
 import com.ethan.agent.core.model.Fact
+import com.ethan.agent.core.model.InsightItem
 import com.ethan.agent.core.model.Procedure
+import com.ethan.agent.core.model.StructuredRecord
 import com.ethan.agent.ui.components.ErrorSnackbar
 import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.SimpleMarkdown
@@ -58,6 +68,7 @@ import com.ethan.agent.ui.components.SnackbarContainer
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.serialization.json.JsonElement
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -69,13 +80,49 @@ fun MemoryScreen(
     onEditChange: (String) -> Unit,
     onSaveFact: () -> Unit,
     onDeleteFact: (String) -> Unit,
-    onDeleteEpisode: (String) -> Unit,
     onDeleteProcedure: (String) -> Unit,
     onClearError: () -> Unit,
+    // new
+    onInsightsDateChange: (String) -> Unit = {},
+    onRefreshInsights: () -> Unit = {},
+    onRecordsFilterChange: (RecordsFilter) -> Unit = {},
+    onRecordsSearchChange: (String) -> Unit = {},
+    onSelectRecord: (StructuredRecord) -> Unit = {},
+    onDismissRecord: () -> Unit = {},
+    onRecordEditContent: (String) -> Unit = {},
+    onSaveRecord: () -> Unit = {},
+    onDeleteRecord: (String) -> Unit = {},
+    onConfirmRecord: (String) -> Unit = {},
+    onConsolidate: () -> Unit = {},
+    onConsolidateRecords: () -> Unit = {},
+    onLoadSummaries: () -> Unit = {},
+    onHideSummaries: () -> Unit = {},
 ) {
     val snackbar = remember { SnackbarHostState() }
     ErrorSnackbar(state.error, onClearError, snackbar)
 
+    // Consolidating dialog
+    if (state.isConsolidating) {
+        Dialog(onDismissRequest = {}) {
+            Surface(shape = RoundedCornerShape(16.dp)) {
+                Column(
+                    Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    CircularProgressIndicator()
+                    Text("正在沉淀，可能需要 1-2 分钟…")
+                }
+            }
+        }
+    }
+
+    // Daily summaries sheet
+    if (state.showSummaries) {
+        SummariesDialog(summaries = state.summaries, onDismiss = onHideSummaries)
+    }
+
+    // Fact editor overlay
     if (state.selectedFact != null && state.tab == MemoryTab.Facts) {
         FactEditorScreen(
             fact = state.selectedFact,
@@ -88,8 +135,43 @@ fun MemoryScreen(
         return
     }
 
+    // Record editor overlay
+    if (state.selectedRecord != null && state.tab == MemoryTab.Records) {
+        RecordEditorScreen(
+            record = state.selectedRecord,
+            content = state.recordEditContent,
+            onBack = onDismissRecord,
+            onContentChange = onRecordEditContent,
+            onSave = onSaveRecord,
+            onDelete = { onDeleteRecord(state.selectedRecord.id) },
+        )
+        return
+    }
+
     Scaffold(
-        topBar = { TopAppBar(title = { Text("记忆") }) },
+        topBar = {
+            TopAppBar(
+                title = { Text("记忆") },
+                actions = {
+                    when (state.tab) {
+                        MemoryTab.Facts -> {
+                            IconButton(onClick = onConsolidate) {
+                                Icon(Icons.Filled.AutoAwesome, contentDescription = "立即沉淀")
+                            }
+                        }
+                        MemoryTab.Records -> {
+                            IconButton(onClick = onLoadSummaries) {
+                                Icon(Icons.Filled.CalendarToday, contentDescription = "日摘要")
+                            }
+                            IconButton(onClick = onConsolidateRecords) {
+                                Icon(Icons.Filled.AutoAwesome, contentDescription = "结构化沉淀")
+                            }
+                        }
+                        else -> Unit
+                    }
+                },
+            )
+        },
         snackbarHost = { SnackbarContainer(snackbar) },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
@@ -98,15 +180,7 @@ fun MemoryScreen(
                     Tab(
                         selected = state.tab == tab,
                         onClick = { onTabChange(tab) },
-                        text = {
-                            Text(
-                                when (tab) {
-                                    MemoryTab.Facts -> "事实"
-                                    MemoryTab.Episodes -> "情景"
-                                    MemoryTab.Procedures -> "流程"
-                                },
-                            )
-                        },
+                        text = { Text(tab.title) },
                     )
                 }
             }
@@ -118,12 +192,29 @@ fun MemoryScreen(
 
             when (state.tab) {
                 MemoryTab.Facts -> FactsList(state.facts, onSelectFact)
-                MemoryTab.Episodes -> EpisodesTab(state.episodes, onDeleteEpisode)
+                MemoryTab.Insights -> InsightsTab(
+                    insights = state.insights,
+                    date = state.insightsDate,
+                    onDateChange = onInsightsDateChange,
+                    onRefresh = onRefreshInsights,
+                )
                 MemoryTab.Procedures -> ProceduresTab(state.procedures, onDeleteProcedure)
+                MemoryTab.Records -> RecordsTab(
+                    records = state.records,
+                    filter = state.recordsFilter,
+                    search = state.recordsSearch,
+                    onFilterChange = onRecordsFilterChange,
+                    onSearchChange = onRecordsSearchChange,
+                    onSelect = onSelectRecord,
+                    onConfirm = onConfirmRecord,
+                    onDelete = onDeleteRecord,
+                )
             }
         }
     }
 }
+
+// ── Fact editor ──────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -136,17 +227,13 @@ private fun FactEditorScreen(
     onDelete: () -> Unit,
 ) {
     var showDeleteConfirm by remember { mutableStateOf(false) }
-
     if (showDeleteConfirm) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
             title = { Text("删除这条记忆？") },
             text = { Text("删除后无法恢复。") },
             confirmButton = {
-                TextButton(onClick = {
-                    showDeleteConfirm = false
-                    onDelete()
-                }) { Text("删除") }
+                TextButton(onClick = { showDeleteConfirm = false; onDelete() }) { Text("删除") }
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteConfirm = false }) { Text("取消") }
@@ -167,67 +254,39 @@ private fun FactEditorScreen(
                     IconButton(onClick = { showDeleteConfirm = true }) {
                         Icon(Icons.Default.Delete, contentDescription = "删除")
                     }
-                    TextButton(onClick = onSave) {
-                        Text("保存", fontWeight = FontWeight.SemiBold)
-                    }
+                    TextButton(onClick = onSave) { Text("保存", fontWeight = FontWeight.SemiBold) }
                 },
             )
         },
     ) { padding ->
-        Column(
-            Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .imePadding(),
-        ) {
+        Column(Modifier.fillMaxSize().padding(padding).imePadding()) {
             FlowRow(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 MetaChip(fact.category.ifBlank { "knowledge" })
                 MetaChip("置信度 ${(fact.confidence * 100).toInt()}%")
                 if (fact.source.isNotBlank()) MetaChip("来源 ${fact.source.take(12)}")
             }
-
             OutlinedTextField(
                 value = content,
                 onValueChange = onContentChange,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .padding(horizontal = 16.dp),
+                modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = 16.dp),
                 placeholder = { Text("输入记忆内容，支持 Markdown") },
                 textStyle = MaterialTheme.typography.bodyLarge,
             )
-
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                tonalElevation = 2.dp,
-            ) {
+            Surface(modifier = Modifier.fillMaxWidth(), tonalElevation = 2.dp) {
                 Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .verticalScroll(rememberScrollState())
-                        .padding(16.dp),
+                    Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp),
                 ) {
-                    Text(
-                        "预览",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
+                    Text("预览", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                     Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(top = 8.dp)
+                        Modifier.fillMaxWidth().padding(top = 8.dp)
                             .clip(RoundedCornerShape(12.dp))
                             .background(MaterialTheme.colorScheme.surfaceVariant)
                             .padding(12.dp),
                     ) {
-                        SimpleMarkdown(
-                            text = content.ifBlank { "*暂无内容*" },
-                        )
+                        SimpleMarkdown(text = content.ifBlank { "*暂无内容*" })
                     }
                 }
             }
@@ -235,34 +294,76 @@ private fun FactEditorScreen(
     }
 }
 
+// ── Record editor ────────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun MetaChip(label: String) {
-    Surface(
-        shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.secondaryContainer,
-    ) {
-        Text(
-            label,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSecondaryContainer,
+private fun RecordEditorScreen(
+    record: StructuredRecord,
+    content: String,
+    onBack: () -> Unit,
+    onContentChange: (String) -> Unit,
+    onSave: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("删除这条记录？") },
+            text = { Text("删除后无法恢复。") },
+            confirmButton = {
+                TextButton(onClick = { showDeleteConfirm = false; onDelete() }) { Text("删除") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) { Text("取消") }
+            },
         )
     }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("编辑记录") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { showDeleteConfirm = true }) {
+                        Icon(Icons.Default.Delete, contentDescription = "删除")
+                    }
+                    TextButton(onClick = onSave) { Text("保存", fontWeight = FontWeight.SemiBold) }
+                },
+            )
+        },
+    ) { padding ->
+        Column(
+            Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).imePadding()
+        ) {
+            OutlinedTextField(
+                value = content,
+                onValueChange = onContentChange,
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                label = { Text("内容") },
+                minLines = 4,
+            )
+            RecordMetaRow(record)
+        }
+    }
 }
+
+// ── Facts tab ────────────────────────────────────────────────────────────────
 
 @Composable
 private fun FactsList(facts: List<FactItem>, onSelect: (FactItem) -> Unit) {
     if (facts.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(
-                "暂无事实记忆",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Text("暂无事实记忆", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         return
     }
-
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
@@ -278,104 +379,98 @@ private fun FactsList(facts: List<FactItem>, onSelect: (FactItem) -> Unit) {
 private fun FactListCard(item: FactItem, onClick: () -> Unit) {
     val fact = item.fact
     val date = remember(fact.createdAt) {
-        if (fact.createdAt > 0) {
-            SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(fact.createdAt * 1000))
-        } else {
-            ""
-        }
+        if (fact.createdAt > 0) SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(fact.createdAt * 1000))
+        else ""
     }
-
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(
-                    fact.content,
-                    style = MaterialTheme.typography.bodyLarge,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Row(
-                    Modifier.padding(top = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
+                Text(fact.content, style = MaterialTheme.typography.bodyLarge, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     if (fact.category.isNotBlank()) {
-                        Text(
-                            fact.category,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
+                        Text(fact.category, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                     }
-                    Text(
-                        "${(fact.confidence * 100).toInt()}%",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Text("${(fact.confidence * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     if (date.isNotBlank()) {
-                        Text(
-                            date,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        Text(date, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
-            Icon(
-                Icons.Default.ChevronRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Icon(Icons.Default.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+// ── Insights tab ─────────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun InsightsTab(
+    insights: List<InsightItem>,
+    date: String,
+    onDateChange: (String) -> Unit,
+    onRefresh: () -> Unit,
+) {
+    Column(Modifier.fillMaxSize()) {
+        OutlinedTextField(
+            value = date,
+            onValueChange = onDateChange,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            label = { Text("日期筛选（留空=全部，格式 yyyy-MM-dd）") },
+            trailingIcon = {
+                IconButton(onClick = onRefresh) {
+                    Icon(Icons.Default.Search, contentDescription = "查询")
+                }
+            },
+            singleLine = true,
+        )
+        if (insights.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("暂无永久记忆", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            return@Column
+        }
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            items(insights, key = { it.id }) { item ->
+                InsightCard(item)
+            }
         }
     }
 }
 
 @Composable
-private fun EpisodesTab(episodes: List<Episode>, onDelete: (String) -> Unit) {
-    if (episodes.isEmpty()) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("暂无情景记忆", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        return
-    }
-
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+private fun InsightCard(item: InsightItem) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
-        items(episodes, key = { it.sessionId }) { ep ->
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-            ) {
-                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.Top) {
-                    Column(Modifier.weight(1f)) {
-                        Text(ep.summary, style = MaterialTheme.typography.bodyLarge)
-                        Text(
-                            "${ep.turnCount} 轮 · ${ep.model}",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 6.dp),
-                        )
+        Column(Modifier.padding(16.dp)) {
+            Text(item.text, style = MaterialTheme.typography.bodyLarge)
+            if (item.metadata.isNotEmpty()) {
+                val dateVal = item.metadata["date"]?.toString()?.trim('"')
+                val importance = item.metadata["importance"]?.toString()
+                Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (!dateVal.isNullOrBlank()) {
+                        Text(dateVal, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    IconButton(onClick = { onDelete(ep.sessionId) }) {
-                        Icon(Icons.Default.Delete, contentDescription = "删除")
+                    if (!importance.isNullOrBlank()) {
+                        Text("重要度 $importance", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
         }
     }
 }
+
+// ── Procedures tab ───────────────────────────────────────────────────────────
 
 @Composable
 private fun ProceduresTab(procedures: List<Procedure>, onDelete: (String) -> Unit) {
@@ -385,7 +480,6 @@ private fun ProceduresTab(procedures: List<Procedure>, onDelete: (String) -> Uni
         }
         return
     }
-
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
@@ -412,5 +506,179 @@ private fun ProceduresTab(procedures: List<Procedure>, onDelete: (String) -> Uni
                 }
             }
         }
+    }
+}
+
+// ── Records tab ──────────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun RecordsTab(
+    records: List<StructuredRecord>,
+    filter: RecordsFilter,
+    search: String,
+    onFilterChange: (RecordsFilter) -> Unit,
+    onSearchChange: (String) -> Unit,
+    onSelect: (StructuredRecord) -> Unit,
+    onConfirm: (String) -> Unit,
+    onDelete: (String) -> Unit,
+) {
+    Column(Modifier.fillMaxSize()) {
+        // Search bar
+        OutlinedTextField(
+            value = search,
+            onValueChange = onSearchChange,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            placeholder = { Text("搜索记录…") },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+            singleLine = true,
+        )
+
+        // Status filters
+        val statuses = listOf(null to "全部", "pending" to "候选", "confirmed" to "已确认", "superseded" to "已替代")
+        FlowRow(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            statuses.forEach { (value, label) ->
+                FilterChip(
+                    selected = filter.status == value,
+                    onClick = { onFilterChange(filter.copy(status = value)) },
+                    label = { Text(label) },
+                )
+            }
+        }
+
+        Spacer(Modifier.height(4.dp))
+
+        if (records.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("暂无结构化记忆", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            return@Column
+        }
+
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            items(records, key = { it.id }) { record ->
+                RecordCard(
+                    record = record,
+                    onSelect = { onSelect(record) },
+                    onConfirm = { onConfirm(record.id) },
+                    onDelete = { onDelete(record.id) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecordCard(
+    record: StructuredRecord,
+    onSelect: () -> Unit,
+    onConfirm: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("删除这条记录？") },
+            confirmButton = {
+                TextButton(onClick = { showDeleteConfirm = false; onDelete() }) { Text("删除") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) { Text("取消") }
+            },
+        )
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onSelect),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.Top) {
+                Column(Modifier.weight(1f)) {
+                    Text(record.content, style = MaterialTheme.typography.bodyLarge, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                }
+                IconButton(onClick = { showDeleteConfirm = true }) {
+                    Icon(Icons.Default.Delete, contentDescription = "删除", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+
+            RecordMetaRow(record)
+
+            if (record.status == "pending") {
+                TextButton(onClick = onConfirm, modifier = Modifier.align(Alignment.End)) {
+                    Icon(Icons.Default.Check, contentDescription = null)
+                    Text("确认", modifier = Modifier.padding(start = 4.dp))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecordMetaRow(record: StructuredRecord) {
+    Row(
+        Modifier.fillMaxWidth().padding(top = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        if (record.memoryType.isNotBlank()) {
+            Text(record.memoryType, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+        }
+        Text(record.status, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("置信度 ${(record.confidence * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("重要度 ${(record.importance * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+// ── Summaries dialog ─────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SummariesDialog(summaries: List<JsonElement>, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("日摘要") },
+        text = {
+            if (summaries.isEmpty()) {
+                Text("暂无日摘要")
+            } else {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(summaries) { item ->
+                        Surface(shape = RoundedCornerShape(8.dp), tonalElevation = 2.dp) {
+                            Text(
+                                item.toString().take(200),
+                                modifier = Modifier.padding(12.dp),
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("关闭") }
+        },
+    )
+}
+
+// ── Shared ────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun MetaChip(label: String) {
+    Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.secondaryContainer) {
+        Text(
+            label,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+        )
     }
 }

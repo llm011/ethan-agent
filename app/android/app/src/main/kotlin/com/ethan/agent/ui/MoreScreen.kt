@@ -18,12 +18,17 @@ import androidx.compose.ui.unit.dp
 import com.ethan.agent.ui.navigation.Screen
 import com.ethan.agent.ui.navigation.moreMenuItems
 
+// Extend the standard more-menu with Track 8 screens
+private val extendedMoreItems = moreMenuItems + listOf(
+    Screen.BackgroundTasks,
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MoreScreen(onNavigate: (String) -> Unit) {
     Scaffold(topBar = { TopAppBar(title = { Text("更多") }) }) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding)) {
-            items(moreMenuItems) { screen ->
+            items(extendedMoreItems) { screen ->
                 Card(
                     Modifier
                         .padding(horizontal = 12.dp, vertical = 4.dp)

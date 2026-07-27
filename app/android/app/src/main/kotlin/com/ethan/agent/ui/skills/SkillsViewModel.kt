@@ -14,6 +14,7 @@ import javax.inject.Inject
 
 data class SkillsUiState(
     val skills: List<SkillInfo> = emptyList(),
+    val query: String = "",
     val selected: SkillInfo? = null,
     val isCreating: Boolean = false,
     val name: String = "",
@@ -22,7 +23,23 @@ data class SkillsUiState(
     val content: String = "",
     val isLoading: Boolean = false,
     val error: String? = null,
-)
+) {
+    val filteredSkills: List<SkillInfo> get() = if (query.isBlank()) {
+        skills
+    } else {
+        val q = query.lowercase()
+        skills.filter {
+            it.name.lowercase().contains(q) ||
+                it.description.lowercase().contains(q) ||
+                it.trigger.any { t -> t.lowercase().contains(q) }
+        }
+    }
+
+    // Skills have no category field yet — group by first trigger keyword if available, else "未分类"
+    val groupedSkills: Map<String, List<SkillInfo>> get() = filteredSkills
+        .groupBy { it.trigger.firstOrNull()?.take(8) ?: "未分类" }
+        .toSortedMap(compareBy { if (it == "未分类") "￿" else it })
+}
 
 @HiltViewModel
 class SkillsViewModel @Inject constructor(
@@ -44,6 +61,8 @@ class SkillsViewModel @Inject constructor(
             }
         }
     }
+
+    fun onQueryChange(q: String) { _state.update { it.copy(query = q) } }
 
     fun selectSkill(skill: SkillInfo) {
         _state.update {

@@ -203,6 +203,7 @@ data class FactsResponse(val facts: List<Fact> = emptyList())
 @Serializable
 data class FactUpdateRequest(val content: String)
 
+@Deprecated("episodes endpoint is retired on the backend; kept for UI compatibility")
 @Serializable
 data class Episode(
     @SerialName("session_id") val sessionId: String,
@@ -213,6 +214,7 @@ data class Episode(
     val model: String = "",
 )
 
+@Deprecated("episodes endpoint is retired on the backend; kept for UI compatibility")
 @Serializable
 data class EpisodesResponse(val episodes: List<Episode> = emptyList())
 
@@ -231,19 +233,25 @@ data class ProceduresResponse(val procedures: List<Procedure> = emptyList())
 @Serializable
 data class ScheduleJob(
     val id: String,
-    val name: String,
+    @SerialName("title") val name: String,
     @SerialName("next_run_time") val nextRunTime: String? = null,
     val trigger: String = "",
     val status: String = "active",
     val prompt: String = "",
     @SerialName("session_id") val sessionId: String = "",
+    val category: String = "",
+    val scene: String = "",
 )
 
 @Serializable
 data class ScheduleResponse(val jobs: List<ScheduleJob> = emptyList())
 
 @Serializable
-data class SchedulePatchRequest(val state: String)
+data class SchedulePatchRequest(
+    val state: String? = null,
+    val title: String? = null,
+    val prompt: String? = null,
+)
 
 @Serializable
 data class KnowledgeItem(

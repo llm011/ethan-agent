@@ -3,6 +3,7 @@ package com.ethan.agent.ui.sessions
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ethan.agent.core.model.SessionInfo
+import com.ethan.agent.core.model.SummaryResponse
 import com.ethan.agent.data.EthanRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -22,7 +23,18 @@ data class SessionsUiState(
     val error: String? = null,
     val renameTarget: SessionInfo? = null,
     val renameText: String = "",
-)
+    val regeningIds: Set<String> = emptySet(),
+    val summarySheet: SummaryResponse? = null,
+    val sourceFilter: String = "All",
+    val hideHeartbeat: Boolean = false,
+    val hideScheduled: Boolean = false,
+) {
+    val filteredSessions: List<SessionInfo> get() = sessions.filter { s ->
+        (sourceFilter == "All" || s.source == sourceFilter) &&
+            (!hideHeartbeat || s.source != "heartbeat") &&
+            (!hideScheduled || s.source != "scheduled")
+    }
+}
 
 @HiltViewModel
 class SessionsViewModel @Inject constructor(
@@ -42,9 +54,7 @@ class SessionsViewModel @Inject constructor(
         pollJob = viewModelScope.launch {
             while (isActive) {
                 delay(3000)
-                if (_state.value.query.isBlank()) {
-                    refreshQuietly()
-                }
+                if (_state.value.query.isBlank()) refreshQuietly()
             }
         }
     }
@@ -64,28 +74,20 @@ class SessionsViewModel @Inject constructor(
     private suspend fun refreshQuietly() {
         try {
             val sessions = repository.poll()
-            if (_state.value.query.isBlank()) {
-                _state.update { it.copy(sessions = sessions) }
-            }
-        } catch (_: Exception) {
-        }
+            if (_state.value.query.isBlank()) _state.update { it.copy(sessions = sessions) }
+        } catch (_: Exception) {}
     }
 
     fun onQueryChange(query: String) {
         _state.update { it.copy(query = query) }
-        viewModelScope.launch {
-            delay(300)
-            load()
-        }
+        viewModelScope.launch { delay(300); load() }
     }
 
     fun startRename(session: SessionInfo) {
         _state.update { it.copy(renameTarget = session, renameText = session.title) }
     }
 
-    fun onRenameTextChange(text: String) {
-        _state.update { it.copy(renameText = text) }
-    }
+    fun onRenameTextChange(text: String) { _state.update { it.copy(renameText = text) } }
 
     fun confirmRename() {
         val target = _state.value.renameTarget ?: return
@@ -100,22 +102,51 @@ class SessionsViewModel @Inject constructor(
         }
     }
 
-    fun cancelRename() {
-        _state.update { it.copy(renameTarget = null) }
-    }
+    fun cancelRename() { _state.update { it.copy(renameTarget = null) } }
 
     fun deleteSession(id: String) {
         viewModelScope.launch {
+            try { repository.deleteSession(id); load() }
+            catch (e: Exception) { _state.update { it.copy(error = repository.friendlyError(e)) } }
+        }
+    }
+
+    fun regenTitle(id: String) {
+        viewModelScope.launch {
+            _state.update { it.copy(regeningIds = it.regeningIds + id) }
             try {
-                repository.deleteSession(id)
-                load()
+                val resp = repository.regenTitle(id)
+                if (resp.ok) {
+                    _state.update { s ->
+                        s.copy(
+                            sessions = s.sessions.map { if (it.id == id) it.copy(title = resp.title) else it },
+                            regeningIds = s.regeningIds - id,
+                        )
+                    }
+                } else {
+                    _state.update { it.copy(regeningIds = it.regeningIds - id, error = resp.error ?: "重生成失败") }
+                }
             } catch (e: Exception) {
-                _state.update { it.copy(error = repository.friendlyError(e)) }
+                _state.update { it.copy(regeningIds = it.regeningIds - id, error = repository.friendlyError(e)) }
             }
         }
     }
 
-    fun clearError() {
-        _state.update { it.copy(error = null) }
+    fun summarySession(id: String) {
+        viewModelScope.launch {
+            _state.update { it.copy(isLoading = true) }
+            try {
+                val resp = repository.summarySession(id)
+                _state.update { it.copy(isLoading = false, summarySheet = resp) }
+            } catch (e: Exception) {
+                _state.update { it.copy(isLoading = false, error = repository.friendlyError(e)) }
+            }
+        }
     }
+
+    fun dismissSummary() { _state.update { it.copy(summarySheet = null) } }
+    fun setSourceFilter(source: String) { _state.update { it.copy(sourceFilter = source) } }
+    fun toggleHideHeartbeat() { _state.update { it.copy(hideHeartbeat = !it.hideHeartbeat) } }
+    fun toggleHideScheduled() { _state.update { it.copy(hideScheduled = !it.hideScheduled) } }
+    fun clearError() { _state.update { it.copy(error = null) } }
 }
