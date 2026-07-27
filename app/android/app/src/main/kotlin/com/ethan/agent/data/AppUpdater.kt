@@ -222,7 +222,7 @@ class AppUpdater @Inject constructor(
      *
      * 按点号分段，每段拆成 "非数字前缀 + 数字后缀"：
      * - 前缀相同则数字后缀按整数比较，避免 "rc10" < "rc9" 的字典序错误
-     * - 前缀不同则按字典序比较（rc > beta > alpha）
+     * - 前缀不同则按 [PRERELEASE_PRIORITY] 语义序比较
      * - 段数多的更新（rc1.alpha2 > rc1）
      *
      * 仅匹配 "前缀+数字" 形式（如 rc10、beta2、alpha1）；纯字母或纯数字
@@ -240,7 +240,7 @@ class AppUpdater @Inject constructor(
             if (ma != null && mb != null) {
                 val pa = ma.groupValues[1]
                 val pb = mb.groupValues[1]
-                if (pa != pb) return pa.compareTo(pb)
+                if (pa != pb) return comparePrereleasePrefix(pa, pb)
                 val na = ma.groupValues[2].toInt()
                 val nb = mb.groupValues[2].toInt()
                 if (na != nb) return na - nb
@@ -249,5 +249,41 @@ class AppUpdater @Inject constructor(
             }
         }
         return segA.size - segB.size
+    }
+
+    /**
+     * 常见 prerelease 前缀的语义优先级（数值越大越接近正式版）。
+     * 覆盖 dev / alpha / beta / milestone / rc / preview / snapshot 等
+     * 常见命名；未命中的前缀回退字典序（semver spec 规定非数字 identifier
+     * 用 ASCII 字典序，这里对未知前缀保持 spec 兼容）。
+     */
+    private fun comparePrereleasePrefix(a: String, b: String): Int {
+        val pa = PRERELEASE_PRIORITY[a]
+        val pb = PRERELEASE_PRIORITY[b]
+        if (pa != null && pb != null) return pa - pb
+        // 至少一方不在表内：已知方优先（视为更接近正式版），双方均未知回退字典序
+        if (pa != null) return 1
+        if (pb != null) return -1
+        return a.compareTo(b)
+    }
+
+    private companion object {
+        /** 常见 prerelease 前缀 → 优先级（越大越接近正式版）。 */
+        val PRERELEASE_PRIORITY = mapOf(
+            "dev" to 0,
+            "alpha" to 1,
+            "a" to 1,
+            "beta" to 2,
+            "b" to 2,
+            "milestone" to 3,
+            "m" to 3,
+            "mvp" to 3,
+            "rc" to 4,
+            "cr" to 4,
+            "preview" to 5,
+            "pre" to 5,
+            "snapshot" to 0,
+            "nightly" to 0,
+        )
     }
 }

@@ -21,32 +21,55 @@ def _force_hash_embed():
 
 
 def pytest_sessionfinish(session, exitstatus):
-    """关闭 get_session_store() 创建的单例 aiosqlite 连接。
+    """关闭所有泄漏的 aiosqlite 连接，防止非 daemon worker 线程挂起进程。
 
-    这些连接持有非 daemon worker 线程，若不显式关闭会阻止 pytest 进程退出
-    （历史问题：测试跑完后进程挂起 6 小时）。
+    覆盖范围：
+    - ethan.memory.session._session_stores（单例）
+    - ethan.memory.api_keys._store（模块级单例）
+    - ethan.interface.routers.annotations._store（模块级单例）
+    - 测试里直接 SessionStore(db_path=...) 构造的非单例 store
+    - 任何未来新增的 aiosqlite.connect 调用
 
-    之前用 atexit + os._exit 强杀进程，但 atexit 是 LIFO：本 hook 注册的
-    os._exit 会抢先于 coverage、临时文件清理等更早注册的 atexit handler
-    执行，导致这些收尾被静默跳过（coverage run 下数据丢失）。
+    通过 gc 遍历所有 aiosqlite.Connection 实例，无差别 stop()。
+    不用 await db.close()：连接绑定到创建时的 event loop，测试结束后
+    该 loop 已关闭。stop() 是同步方法，投递 close+stop 哨兵到 worker
+    线程队列，线程关闭底层 sqlite3 连接后正常退出。
 
-    这里改为调用 aiosqlite Connection.stop()（同步、不依赖 event loop）：
-    往 worker 线程队列投递 close+stop 哨兵，线程关闭底层 sqlite3 连接后
-    正常退出。Python 走完正常关闭流程，coverage 等基于 atexit 的收尾
-    也能正常跑。不能直接用 await db.close()，因为它绑定到创建时的
-    event loop，测试结束后该 loop 已关闭。
+    不用 atexit + os._exit：atexit LIFO 顺序会抢先于 coverage 等更早
+    注册的 atexit handler，导致 coverage 数据丢失。
     """
+    import gc
     try:
-        from ethan.memory.session import _session_stores
+        import aiosqlite
     except Exception:
         return
 
-    for store in list(_session_stores.values()):
-        db = getattr(store, "_db", None)
-        if db is None:
+    stopped = 0
+    for obj in gc.get_objects():
+        if not isinstance(obj, aiosqlite.Connection):
+            continue
+        # 跳过已经关闭的连接（_connection 为 None 表示底层 sqlite3 已关）
+        if getattr(obj, "_connection", None) is None:
             continue
         try:
-            db.stop()
+            obj.stop()
+            stopped += 1
         except Exception:
             pass
-    _session_stores.clear()
+
+    # 清空模块级单例缓存，避免后续（理论上不会有的）操作拿到已 stop 的连接
+    for mod_path, attr in [
+        ("ethan.memory.session", "_session_stores"),
+        ("ethan.memory.api_keys", "_store"),
+        ("ethan.interface.routers.annotations", "_store"),
+    ]:
+        try:
+            mod = __import__(mod_path, fromlist=[attr])
+            obj = getattr(mod, attr, None)
+            if isinstance(obj, dict):
+                obj.clear()
+            elif obj is not None:
+                # 单例对象：清掉对 _db 的引用，让 GC 回收
+                setattr(mod, attr, None)
+        except Exception:
+            pass
