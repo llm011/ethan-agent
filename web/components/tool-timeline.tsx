@@ -140,6 +140,83 @@ function DetailOutput({ detail }: { detail: string }) {
   );
 }
 
+interface ParsedSearchResult {
+  title: string;
+  url: string;
+  snippet: string;
+  engine?: string;
+  published?: string;
+}
+
+/** 解析 web_search 的 result_detail（content 文本）为结构化结果，失败返回 null */
+function parseSearchResults(detail: string): ParsedSearchResult[] | null {
+  const blocks = detail.split(/\n\n+/);
+  const results: ParsedSearchResult[] = [];
+  for (const block of blocks) {
+    const lines = block.split("\n").map(l => l.trimEnd()).filter(l => l.trim());
+    if (lines.length === 0) continue;
+    if (/^Found ~\d+ results/i.test(lines[0])) continue;
+    const urlLine = lines.find(l => /^https?:\/\//.test(l.trim()));
+    if (!urlLine) continue;
+    const url = urlLine.trim();
+    const titleLine = lines[0];
+    const m = titleLine.match(/^\*\*(?:\[([^\]]*)\]\s*)?(.+?)(?:\s{2}\[(\d{4}[^\]]*)\])?\*\*$/);
+    let title = titleLine.replace(/^\*\*|\*\*$/g, "");
+    let source = "";
+    let published = "";
+    if (m) {
+      source = m[1] || "";
+      title = m[2] || title;
+      published = m[3] || "";
+    }
+    const snippetLines = lines.filter(l => l !== titleLine && l !== urlLine);
+    const snippet = snippetLines.join(" ").trim();
+    results.push({ title, url, snippet, engine: source || undefined, published: published || undefined });
+  }
+  return results.length > 0 ? results : null;
+}
+
+/** web_search 详情：浅色结果列表，替代黑底代码框 */
+function SearchResultList({ results }: { results: ParsedSearchResult[] }) {
+  return (
+    <div className="max-h-80 overflow-y-auto rounded-md border border-border/60 divide-y divide-border/40">
+      {results.map((r, i) => {
+        let domain = "";
+        try { domain = new URL(r.url).hostname.replace(/^www\./, ""); } catch {}
+        return (
+          <a
+            key={i}
+            href={r.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block px-3 py-2 hover:bg-muted/50 transition-colors group"
+          >
+            <div className="flex items-center gap-1.5 mb-0.5">
+              {r.engine && (
+                <span className="text-[10px] px-1.5 py-0 rounded-full font-medium bg-primary/10 text-primary shrink-0">
+                  {r.engine}
+                </span>
+              )}
+              {r.published && (
+                <span className="text-[10px] text-muted-foreground/60 shrink-0">{r.published}</span>
+              )}
+            </div>
+            <div className="text-sm font-medium text-foreground/85 group-hover:text-primary line-clamp-1">
+              {r.title}
+            </div>
+            {r.snippet && (
+              <p className="text-xs text-muted-foreground/70 mt-0.5 line-clamp-2 leading-relaxed">
+                {r.snippet}
+              </p>
+            )}
+            <div className="text-[10px] text-muted-foreground/50 mt-0.5 truncate">{domain}</div>
+          </a>
+        );
+      })}
+    </div>
+  );
+}
+
 /** 工具参数：截断显示 + hover 弹出完整内容 + 复制按钮 */
 function ArgsPopover({ text, maxW = "max-w-[800px]" }: { text: string; maxW?: string }) {
   const [copied, setCopied] = useState(false);
@@ -190,6 +267,7 @@ function StepRow({ step, isLast, highlight }: { step: ToolStep; isLast: boolean;
   const hasDetail = (step.thought || step.result_detail) && step.state !== "running";
   const [detailOpen, setDetailOpen] = useState(false);
   const rowRef = useRef<HTMLDivElement>(null);
+  const searchResults = step.tool === "web_search" && step.result_detail ? parseSearchResults(step.result_detail) : null;
 
   useEffect(() => {
     if (highlight) {
@@ -326,7 +404,7 @@ function StepRow({ step, isLast, highlight }: { step: ToolStep; isLast: boolean;
             )}
             {step.result_detail && (
               <div className="px-3 py-2">
-                <DetailOutput detail={step.result_detail} />
+                {searchResults ? <SearchResultList results={searchResults} /> : <DetailOutput detail={step.result_detail} />}
               </div>
             )}
           </div>
