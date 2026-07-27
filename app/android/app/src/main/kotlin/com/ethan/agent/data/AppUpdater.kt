@@ -1,0 +1,181 @@
+package com.ethan.agent.data
+
+import android.content.Context
+import android.content.Intent
+import androidx.core.content.FileProvider
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONObject
+import java.io.File
+import java.util.concurrent.TimeUnit
+import javax.inject.Inject
+import javax.inject.Singleton
+
+/**
+ * Android 应用内自更新。
+ *
+ * 流程：检查 GitHub Releases → 比较版本号 → 下载 APK → 触发系统安装器。
+ * 所有错误静默吞掉，不打断正常使用。
+ */
+@Singleton
+class AppUpdater @Inject constructor(
+    @ApplicationContext private val context: Context,
+) {
+
+    companion object {
+        private const val GITHUB_API =
+            "https://api.github.com/repos/llm011/ethan-agent/releases/latest"
+        private const val APK_CACHE_NAME = "ethan-update.apk"
+        private const val PREF_NAME = "app_update"
+        private const val KEY_LAST_CHECK = "last_check_ts"
+        private const val CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000L // 4 小时
+    }
+
+    data class UpdateInfo(
+        val version: String,
+        val downloadUrl: String,
+        val releaseNotes: String,
+        val htmlUrl: String,
+    )
+
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .build()
+
+    private val prefs by lazy {
+        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+    }
+
+    /** 当前是否应该检查更新（距上次检查超过 4 小时）。 */
+    fun shouldCheck(): Boolean {
+        val last = prefs.getLong(KEY_LAST_CHECK, 0)
+        return System.currentTimeMillis() - last > CHECK_INTERVAL_MS
+    }
+
+    /**
+     * 检查 GitHub 上是否有比当前版本更新的 release。
+     * @return UpdateInfo 或 null（无更新 / 无 APK / 网络错误）。
+     */
+    suspend fun checkForUpdate(): UpdateInfo? = withContext(Dispatchers.IO) {
+        try {
+            prefs.edit().putLong(KEY_LAST_CHECK, System.currentTimeMillis()).apply()
+
+            val currentVersion = getCurrentVersion() ?: return@withContext null
+
+            val request = Request.Builder()
+                .url(GITHUB_API)
+                .header("Accept", "application/vnd.github+json")
+                .header("User-Agent", "Ethan-Android")
+                .build()
+
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) return@withContext null
+
+            val json = JSONObject(response.body?.string() ?: return@withContext null)
+            val tagName = json.optString("tag_name").removePrefix("v").trim()
+            if (tagName.isEmpty()) return@withContext null
+
+            // 版本号没变或更低，不提示
+            if (compareVersions(tagName, currentVersion) <= 0) return@withContext null
+
+            // 在 assets 里找 .apk 文件
+            val assets = json.optJSONArray("assets") ?: return@withContext null
+            var apkUrl: String? = null
+            for (i in 0 until assets.length()) {
+                val asset = assets.optJSONObject(i) ?: continue
+                val name = asset.optString("name")
+                if (name.endsWith(".apk", ignoreCase = true)) {
+                    apkUrl = asset.optString("browser_download_url")
+                    break
+                }
+            }
+            if (apkUrl.isNullOrEmpty()) return@withContext null
+
+            UpdateInfo(
+                version = tagName,
+                downloadUrl = apkUrl,
+                releaseNotes = json.optString("body").ifBlank { "暂无更新说明" },
+                htmlUrl = json.optString("html_url"),
+            )
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * 下载 APK 到 cacheDir。
+     * @param onProgress 进度回调 0-100。
+     * @return 下载好的 File，失败返回 null。
+     */
+    suspend fun downloadApk(url: String, onProgress: (Int) -> Unit): File? =
+        withContext(Dispatchers.IO) {
+            try {
+                val request = Request.Builder().url(url).build()
+                val response = client.newCall(request).execute()
+                if (!response.isSuccessful) return@withContext null
+
+                val body = response.body ?: return@withContext null
+                val totalBytes = body.contentLength()
+
+                val apkFile = File(context.cacheDir, APK_CACHE_NAME)
+                body.byteStream().use { input ->
+                    apkFile.outputStream().use { output ->
+                        val buffer = ByteArray(8192)
+                        var bytesRead: Int
+                        var downloaded = 0L
+                        while (input.read(buffer).also { bytesRead = it } != -1) {
+                            output.write(buffer, 0, bytesRead)
+                            downloaded += bytesRead
+                            if (totalBytes > 0) {
+                                onProgress((downloaded * 100 / totalBytes).toInt().coerceIn(0, 100))
+                            }
+                        }
+                    }
+                }
+                onProgress(100)
+                apkFile
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+    /** 用 FileProvider + Intent 触发系统安装器。 */
+    fun installApk(apkFile: File) {
+        val uri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            apkFile,
+        )
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
+    }
+
+    private fun getCurrentVersion(): String? = try {
+        context.packageManager
+            .getPackageInfo(context.packageName, 0)
+            .versionName
+    } catch (_: Exception) {
+        null
+    }
+
+    /** 语义版本比较：返回 >0 表示 v1 更新，<0 表示 v2 更新，0 表示相同。 */
+    private fun compareVersions(v1: String, v2: String): Int {
+        val parts1 = v1.split(".").map { it.toIntOrNull() ?: 0 }
+        val parts2 = v2.split(".").map { it.toIntOrNull() ?: 0 }
+        val maxLen = maxOf(parts1.size, parts2.size)
+        for (i in 0 until maxLen) {
+            val p1 = parts1.getOrElse(i) { 0 }
+            val p2 = parts2.getOrElse(i) { 0 }
+            if (p1 != p2) return p1 - p2
+        }
+        return 0
+    }
+}

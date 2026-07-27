@@ -42,6 +42,7 @@ import com.ethan.agent.ui.settings.SettingsViewModel
 import com.ethan.agent.ui.skills.SkillsScreen
 import com.ethan.agent.ui.skills.SkillsViewModel
 import com.ethan.agent.ui.components.LoadingBox
+import com.ethan.agent.ui.components.UpdateDialog
 
 @Composable
 fun EthanApp(authViewModel: AuthViewModel) {
@@ -341,5 +342,8 @@ private fun MainContent(authViewModel: AuthViewModel) {
                 )
             }
         }
+
+        // 全局更新提示（自动检查 + 手动触发）
+        UpdateDialog()
     }
 }

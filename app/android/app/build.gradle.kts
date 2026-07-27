@@ -66,10 +66,12 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-            // 仅当签名信息可用时才挂 signingConfig，否则用默认 debug key 出包（CI 无签名环境时也能跑通）
+            // 有正式签名就用正式的，否则回退 debug 签名（保证 release 包一定能装）
             val props = loadSigningProps()
-            if (props != null) {
-                signingConfig = signingConfigs.getByName("release")
+            signingConfig = if (props != null) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
             }
         }
     }
