@@ -280,37 +280,42 @@ def decision_prompt_message(has_planned: bool = False) -> str:
 #   2. memory recall 扩到 30 条
 # 这是有条件触发，不是每轮都带，避免 token 爆炸。
 
-# 信号关键词：模型说"需要更多信息""信息不足""不知道有哪些工具"等
-_NEED_MORE_INFO_SIGNALS = (
-    "需要更多信息",
-    "需要更多工具",
-    "信息不足",
-    "缺少信息",
-    "不知道有哪些",
-    "需要更多上下文",
-    "need more info",
-    "需要补充",
-    "无法判断",
-    "需要先了解",
-)
+# 决策标记正则：匹配 "决策: A" / "决策：B" / "决策:C" 等（全角/半角冒号、大小写、空格都兼容）
+# 优先从 thought 开头匹配（决策提示要求模型在 thought 里先输出「决策: X」）
+_DECISION_PATTERN = _re.compile(r"决策\s*[:：]\s*([ABCabc])")
+
+
+def parse_decision_choice(response_text: str) -> str | None:
+    """从模型响应里解析决策标记，返回 'A'/'B'/'C' 或 None。
+
+    优先匹配「决策: X」格式（决策提示明确要求的输出格式）。
+    回退匹配「选 C」「选择C」「选项 C」等历史格式。
+    """
+    if not response_text:
+        return None
+    m = _DECISION_PATTERN.search(response_text)
+    if m:
+        return m.group(1).upper()
+    # 回退：兼容模型未严格按格式输出但表达了选择
+    text_lower = response_text.lower()
+    fallbacks = [
+        (["选 c", "选择c", "选项c", "决策: c", "决策： c", "决策:c", "决策：c"], "C"),
+        (["选 b", "选择b", "选项b", "决策: b", "决策： b", "决策:b", "决策：b"], "B"),
+        (["选 a", "选择a", "选项a", "决策: a", "决策： a", "决策:a", "决策：a"], "A"),
+    ]
+    for patterns, choice in fallbacks:
+        if any(p in text_lower for p in patterns):
+            return choice
+    return None
 
 
 def detect_need_more_info(response_text: str) -> bool:
-    """检测模型响应是否包含"需要更多信息"信号。
+    """检测模型是否在决策提示后选了 C（需要更多信息）。
 
-    匹配规则：响应文本里出现任一信号关键词，且语境是"我需要..."而非"用户需要..."。
-    简单实现：直接 substring 匹配，误判可接受（最坏情况是多带一次全量 skill）。
+    基于结构化标记解析（「决策: C」），而非关键词匹配——
+    抗表达差异，不会因"无法判断""需要补充"等正常推理用词误触发。
     """
-    if not response_text:
-        return False
-    text_lower = response_text.lower()
-    for signal in _NEED_MORE_INFO_SIGNALS:
-        if signal in response_text or signal.lower() in text_lower:
-            return True
-    # 检测决策提示的 C 选项被选中（支持多种格式：选 C / 选择C / 决策: C / 决策：C）
-    if any(p in text_lower for p in ["选 c", "选择c", "选项c", "决策: c", "决策： c", "决策:c", "决策：c"]):
-        return True
-    return False
+    return parse_decision_choice(response_text) == "C"
 
 
 def enhanced_context_message(skills_brief: str = "", memory_recall_text: str = "", tools_brief: str = "") -> str:

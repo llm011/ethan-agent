@@ -748,7 +748,6 @@ class Agent:
         from ethan.core.loop_control import (
             LoopMonitor,
             decision_prompt_message,
-            detect_need_more_info,
             enhanced_context_message,
             finalize_system_suffix,
             reflection_followup_message,
@@ -832,10 +831,15 @@ class Agent:
             if any(tc.name == "plan_write" for tc in response.tool_calls):
                 monitor.has_planned = True
 
-            # [检测] 决策提示注入后，本轮 full_content 是模型对决策提示的响应 → 检测是否选 C
-            if monitor.awaiting_decision_response and full_content and detect_need_more_info(full_content):
-                _need_enhanced_context = True
-                logger.info("[need-more-info] iter=%d → 检测到'需要更多信息'信号", i + 1)
+            # [检测] 决策提示注入后，本轮 full_content 是模型对决策提示的响应 → 解析模型选了 A/B/C
+            if monitor.awaiting_decision_response and full_content:
+                from ethan.core.loop_control import parse_decision_choice
+                _choice = parse_decision_choice(full_content)
+                if _choice:
+                    logger.info("[decision-choice] iter=%d → 模型选了 %s", i + 1, _choice)
+                if _choice == "C":
+                    _need_enhanced_context = True
+                    logger.info("[need-more-info] iter=%d → 模型选 C，下一轮将追加增强上下文", i + 1)
             monitor.awaiting_decision_response = False
 
             # [增强上下文] 模型选 C 时，本轮注入全量 skill + tool + 30 memory
@@ -962,7 +966,6 @@ class Agent:
         from ethan.core.loop_control import (
             LoopMonitor,
             decision_prompt_message,
-            detect_need_more_info,
             enhanced_context_message,
             finalize_system_suffix,
             reflection_followup_message,
@@ -1250,12 +1253,16 @@ class Agent:
                 monitor.has_planned = True
 
             # [检测] 如果上一轮注入了决策提示（awaiting_decision_response=True），
-            #        本轮 full_content 是模型对决策提示的响应 → 检测是否选 C
-            # 仅在决策提示后的那一轮检测，避免每轮 substring 误判
-            # （"无法判断""需要补充"等词模型正常推理也会用，全轮检测会误触发增强上下文）
-            if monitor.awaiting_decision_response and full_content and detect_need_more_info(full_content):
-                _need_enhanced_context = True
-                logger.info("[need-more-info] iter=%d → 检测到'需要更多信息'信号，下一轮将追加增强上下文", i + 1)
+            #        本轮 full_content 是模型对决策提示的响应 → 解析模型选了 A/B/C
+            # 基于结构化标记解析（「决策: X」），不再依赖关键词匹配
+            if monitor.awaiting_decision_response and full_content:
+                from ethan.core.loop_control import parse_decision_choice
+                _choice = parse_decision_choice(full_content)
+                if _choice:
+                    logger.info("[decision-choice] iter=%d → 模型选了 %s", i + 1, _choice)
+                if _choice == "C":
+                    _need_enhanced_context = True
+                    logger.info("[need-more-info] iter=%d → 模型选 C，下一轮将追加增强上下文", i + 1)
             monitor.awaiting_decision_response = False  # 检测完即清，无论是否命中
 
             # [增强上下文] 如果 _need_enhanced_context（来自上轮检测）→ 本轮注入
