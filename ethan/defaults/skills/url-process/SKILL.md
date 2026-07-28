@@ -1,7 +1,7 @@
 ---
 name: url-process
 description: 链接处理入口。自动识别平台(飞书/微信/Notion/知乎/通用网页)，选择最快路径抓取内容，可选总结或原样存到 Get笔记。**所有链接第一次处理都应先调本技能判断平台**。
-trigger: "文章总结|总结文章|解读文章|深度总结|这篇文章核心观点|article summarize|文章分析|文章解读|摘要这篇文章|抽取.*内容|抽取.*markdown|存.*笔记|抓取.*内容|这个文档|这个链接|链接|http://|https://|feishu.cn|larksuite.com|mp.weixin.qq.com|docx|wiki"
+trigger: "文章总结|总结文章|解读文章|深度总结|这篇文章核心观点|article summarize|文章分析|文章解读|摘要这篇文章|抽取.*内容|抽取.*markdown|抓取.*内容|这个文档|这个链接|链接|http://|https://|feishu.cn|larksuite.com|mp.weixin.qq.com|docx|wiki"
 ---
 
 # URL 处理 — 链接处理入口

@@ -10,24 +10,14 @@ trigger:
   - obsidian
   - Obsidian
   - ob笔记
-  - 笔记
   - vault
-  - 知识库笔记
   - wikilink
-  - note
-  - 读笔记
-  - 写笔记
-  - 搜索笔记
-  - 记笔记
-  - 存笔记
-  - 保存笔记
-  - 整理笔记
-  - 标签
-  - tag
-  - 打标签
-  - 加标签
   - 双链
   - backlink
+  - tag
+  - 标签
+  - 打标签
+  - 加标签
   - frontmatter
   - 属性
   - canvas
