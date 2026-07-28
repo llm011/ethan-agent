@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicerack/tauri/refs/heads/main/crates/tauri-utils/schema.json",
   "productName": "Ethan Agent",
-  "version": "0.5.63",
+  "version": "0.5.64",
   "identifier": "com.ethan.agent.desktop",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -51,7 +51,7 @@
       "endpoints": [
         "https://github.com/llm011/ethan-agent/releases/latest/download/latest.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEZCQzY3ODRGRjk5ODVDQjkKUldTNVhKajVUM2pHK3hoRU1MUzg1cWFBS2QzMmdoVlgzdmNuWk5SY2dJVkpZYlJBNVpEU2Vjdi8K",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IDhBMjIxNjNBQjU1NUQ3RkIKUldUNzExVzFPaFlpaXV6K25ZQXVJY0RQUVBWVVlMcWpkYXloeDNON2lwYmREcDJJdnZ3QktZSUYK",
       "windows": {
         "installMode": "passive"
       }
