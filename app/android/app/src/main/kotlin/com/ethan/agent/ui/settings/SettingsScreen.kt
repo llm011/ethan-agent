@@ -1,22 +1,23 @@
 package com.ethan.agent.ui.settings
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -26,10 +27,10 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -74,6 +75,7 @@ fun SettingsScreen(
     onValidateKnowledge: (KnowledgeValidateRequest) -> Unit,
     onClearKnowledgeResult: () -> Unit,
     onSetTheme: (String) -> Unit,
+    onCheckUpdate: () -> Unit,
     onClearError: () -> Unit,
 ) {
     val snackbar = remember { SnackbarHostState() }
@@ -101,7 +103,20 @@ fun SettingsScreen(
     }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("设置") }) },
+        topBar = {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.surface,
+                shadowElevation = 2.dp,
+            ) {
+                Text(
+                    "设置",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+                )
+            }
+        },
         snackbarHost = { SnackbarContainer(snackbar) },
     ) { padding ->
         if (state.isLoading && state.agentSettings == null) {
@@ -122,7 +137,7 @@ fun SettingsScreen(
                 when (state.tab) {
                     SettingsTab.Connection -> ConnectionTab(state, onServerUrlChange, onSaveServerUrl)
                     SettingsTab.General -> state.agentSettings?.let {
-                        GeneralTab(it, state.themeId, onUpdateAgent, onSaveAgent, onSetTheme)
+                        GeneralTab(it, state.themeId, onUpdateAgent, onSaveAgent, onSetTheme, onCheckUpdate)
                     }
                     SettingsTab.Providers -> ProvidersTab(state.providers, onUpdateProvider, onSaveProviders)
                     SettingsTab.Channels -> ChannelsTab(
@@ -155,38 +170,54 @@ fun SettingsScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SettingsTabRow(selected: SettingsTab, onTabChange: (SettingsTab) -> Unit) {
-    LazyColumn {
-        item {
-            Row(
-                Modifier.fillMaxWidth().padding(8.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                SettingsTab.entries.forEach { tab ->
-                    FilterChip(
-                        selected = selected == tab,
-                        onClick = { onTabChange(tab) },
-                        label = {
-                            Text(
-                                when (tab) {
-                                    SettingsTab.Connection -> "连接"
-                                    SettingsTab.General -> "通用"
-                                    SettingsTab.Providers -> "模型"
-                                    SettingsTab.Channels -> "渠道"
-                                    SettingsTab.Identity -> "身份"
-                                    SettingsTab.Soul -> "灵魂"
-                                    SettingsTab.Tools -> "工具"
-                                    SettingsTab.Heartbeat -> "心跳"
-                                    SettingsTab.Profile -> "画像"
-                                    SettingsTab.PromptPreview -> "预览"
-                                    SettingsTab.ApiKeys -> "Keys"
-                                    SettingsTab.FastRules -> "Fast Rules"
-                                    SettingsTab.ToolTiers -> "路由档位"
-                                },
-                                style = MaterialTheme.typography.labelSmall,
-                            )
+    // Segment Control style: grey container with white floating active indicator
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        LazyRow(
+            modifier = Modifier.padding(3.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            items(SettingsTab.entries.toList()) { tab ->
+                val isSelected = selected == tab
+                Surface(
+                    onClick = { onTabChange(tab) },
+                    shape = RoundedCornerShape(11.dp),
+                    color = if (isSelected) MaterialTheme.colorScheme.surface
+                        else androidx.compose.ui.graphics.Color.Transparent,
+                    shadowElevation = if (isSelected) 2.dp else 0.dp,
+                ) {
+                    Text(
+                        when (tab) {
+                            SettingsTab.Connection -> "连接"
+                            SettingsTab.General -> "Agent"
+                            SettingsTab.Providers -> "模型"
+                            SettingsTab.Channels -> "渠道"
+                            SettingsTab.Identity -> "身份"
+                            SettingsTab.Soul -> "灵魂"
+                            SettingsTab.Tools -> "工具"
+                            SettingsTab.Heartbeat -> "心跳"
+                            SettingsTab.Profile -> "画像"
+                            SettingsTab.PromptPreview -> "预览"
+                            SettingsTab.ApiKeys -> "Keys"
+                            SettingsTab.FastRules -> "Fast Rules"
+                            SettingsTab.ToolTiers -> "路由档位"
                         },
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontWeight = if (isSelected) androidx.compose.ui.text.font.FontWeight.Bold
+                                else androidx.compose.ui.text.font.FontWeight.SemiBold,
+                        ),
+                        color = if (isSelected) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
                     )
                 }
             }
@@ -196,10 +227,10 @@ private fun SettingsTabRow(selected: SettingsTab, onTabChange: (SettingsTab) -> 
 
 @Composable
 private fun ConnectionTab(state: SettingsUiState, onUrlChange: (String) -> Unit, onSave: () -> Unit) {
-    Card(Modifier.fillMaxWidth()) {
+    CuteCard {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("服务器连接", style = MaterialTheme.typography.titleMedium)
-            OutlinedTextField(state.serverUrl, onUrlChange, label = { Text("服务器地址") }, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(state.serverUrl, onUrlChange, label = { Text("服务器地址") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
             state.serverVersion?.let { Text("版本: $it", style = MaterialTheme.typography.bodySmall) }
             TextButton(onClick = onSave) { Text("测试并保存") }
             Text(
@@ -227,13 +258,14 @@ private fun GeneralTab(
     onUpdate: (AgentSettings) -> Unit,
     onSave: () -> Unit,
     onSetTheme: (String) -> Unit,
+    onCheckUpdate: () -> Unit,
 ) {
-    Card(Modifier.fillMaxWidth()) {
+    CuteCard {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(settings.agentName, { onUpdate(settings.copy(agentName = it)) }, label = { Text("Agent 名称") }, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(settings.defaultModel, { onUpdate(settings.copy(defaultModel = it)) }, label = { Text("默认模型") }, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(settings.liteModel, { onUpdate(settings.copy(liteModel = it)) }, label = { Text("轻量模型") }, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(settings.language, { onUpdate(settings.copy(language = it)) }, label = { Text("语言 (zh/en)") }, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(settings.agentName, { onUpdate(settings.copy(agentName = it)) }, label = { Text("Agent 名称") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+            OutlinedTextField(settings.defaultModel, { onUpdate(settings.copy(defaultModel = it)) }, label = { Text("默认模型") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+            OutlinedTextField(settings.liteModel, { onUpdate(settings.copy(liteModel = it)) }, label = { Text("轻量模型") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+            OutlinedTextField(settings.language, { onUpdate(settings.copy(language = it)) }, label = { Text("语言 (zh/en)") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("心跳")
                 Switch(settings.heartbeatEnabled, { onUpdate(settings.copy(heartbeatEnabled = it)) })
@@ -242,7 +274,7 @@ private fun GeneralTab(
         }
     }
 
-    Card(Modifier.fillMaxWidth()) {
+    CuteCard {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("主题", style = MaterialTheme.typography.titleSmall)
             THEME_OPTIONS.forEach { (id, label) ->
@@ -266,6 +298,15 @@ private fun GeneralTab(
             )
         }
     }
+
+    CuteCard {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("系统", style = MaterialTheme.typography.titleSmall)
+            OutlinedButton(onClick = onCheckUpdate, modifier = Modifier.fillMaxWidth()) {
+                Text("检查更新")
+            }
+        }
+    }
 }
 
 @Composable
@@ -275,7 +316,7 @@ private fun ProvidersTab(
     onSave: () -> Unit,
 ) {
     providers.forEach { (name, config) ->
-        Card(Modifier.fillMaxWidth()) {
+        CuteCard {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(name, style = MaterialTheme.typography.titleSmall)
                 OutlinedTextField(
@@ -284,12 +325,14 @@ private fun ProvidersTab(
                     label = { Text("API Key") },
                     modifier = Modifier.fillMaxWidth(),
                     visualTransformation = PasswordVisualTransformation(),
+                    shape = RoundedCornerShape(12.dp),
                 )
                 OutlinedTextField(
                     config.baseUrl ?: "",
                     { onUpdate(name, config.copy(baseUrl = it.ifBlank { null })) },
                     label = { Text("Base URL") },
                     modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
                 )
             }
         }
@@ -307,7 +350,7 @@ private fun ChannelsTab(
     onValidateKnowledge: (KnowledgeValidateRequest) -> Unit,
 ) {
     state.channels.forEach { channel ->
-        Card(Modifier.fillMaxWidth()) {
+        CuteCard {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(channel.name, style = MaterialTheme.typography.titleSmall)
                 channel.config.forEach { (key, value) ->
@@ -316,6 +359,7 @@ private fun ChannelsTab(
                         { onChange(channel.id, key, it) },
                         label = { Text(key) },
                         modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
                     )
                 }
                 TextButton(onClick = { onSave(channel.id) }) { Text("保存") }
@@ -377,7 +421,7 @@ private fun KnowledgeValidatePanel(
 ) {
     var showSheet by remember { mutableStateOf(false) }
 
-    Card(Modifier.fillMaxWidth()) {
+    CuteCard {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("知识库连通性", style = MaterialTheme.typography.titleSmall)
             OutlinedButton(onClick = { showSheet = true }, modifier = Modifier.fillMaxWidth()) {
@@ -400,6 +444,7 @@ private fun KnowledgeValidatePanel(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun KnowledgeValidateSheet(
     validating: Boolean,
@@ -422,28 +467,44 @@ private fun KnowledgeValidateSheet(
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             backends.forEach { b ->
-                FilterChip(
-                    selected = backend == b,
+                val isSelected = backend == b
+                Surface(
                     onClick = { backend = b },
-                    label = { Text(b) },
-                )
+                    shape = RoundedCornerShape(20.dp),
+                    color = if (isSelected) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.surface,
+                    border = BorderStroke(
+                        1.dp,
+                        if (isSelected) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
+                    ),
+                ) {
+                    Text(
+                        b,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary
+                            else MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    )
+                }
             }
         }
 
         when (backend) {
-            "filesystem" -> OutlinedTextField(path, { path = it }, label = { Text("路径") }, modifier = Modifier.fillMaxWidth())
+            "filesystem" -> OutlinedTextField(path, { path = it }, label = { Text("路径") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
             "obsidian" -> {
-                OutlinedTextField(vault, { vault = it }, label = { Text("Vault 路径") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(folder, { folder = it }, label = { Text("Folder") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(vault, { vault = it }, label = { Text("Vault 路径") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+                OutlinedTextField(folder, { folder = it }, label = { Text("Folder") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
             }
             "external" -> {
-                OutlinedTextField(endpoint, { endpoint = it }, label = { Text("Endpoint") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(endpoint, { endpoint = it }, label = { Text("Endpoint") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
                 OutlinedTextField(
                     apiKey,
                     { apiKey = it },
                     label = { Text("API Key") },
                     modifier = Modifier.fillMaxWidth(),
                     visualTransformation = PasswordVisualTransformation(),
+                    shape = RoundedCornerShape(12.dp),
                 )
             }
         }
@@ -473,10 +534,10 @@ private fun KnowledgeValidateSheet(
 
 @Composable
 private fun SystemTextTab(title: String, content: String, onChange: (String) -> Unit, onSave: () -> Unit) {
-    Card(Modifier.fillMaxWidth()) {
+    CuteCard {
         Column(Modifier.padding(16.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium)
-            OutlinedTextField(content, onChange, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), minLines = 10)
+            OutlinedTextField(content, onChange, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), minLines = 10, shape = RoundedCornerShape(12.dp))
             TextButton(onClick = onSave) { Text("保存") }
         }
     }
@@ -484,10 +545,10 @@ private fun SystemTextTab(title: String, content: String, onChange: (String) -> 
 
 @Composable
 private fun ProfileTab(content: String, onChange: (String) -> Unit, onSave: () -> Unit) {
-    Card(Modifier.fillMaxWidth()) {
+    CuteCard {
         Column(Modifier.padding(16.dp)) {
             Text("我的画像", style = MaterialTheme.typography.titleMedium)
-            OutlinedTextField(content, onChange, modifier = Modifier.fillMaxWidth(), minLines = 12)
+            OutlinedTextField(content, onChange, modifier = Modifier.fillMaxWidth(), minLines = 12, shape = RoundedCornerShape(12.dp))
             TextButton(onClick = onSave) { Text("保存") }
         }
     }
@@ -505,6 +566,7 @@ private fun PromptPreviewTab(state: SettingsUiState, onLoad: () -> Unit) {
                 readOnly = true,
                 modifier = Modifier.fillMaxWidth(),
                 minLines = 8,
+                shape = RoundedCornerShape(12.dp),
             )
         }
     }
@@ -518,7 +580,7 @@ private fun ApiKeysTab(
 ) {
     var name by remember { mutableStateOf("") }
     Row(verticalAlignment = Alignment.CenterVertically) {
-        OutlinedTextField(name, { name = it }, label = { Text("名称") }, modifier = Modifier.weight(1f))
+        OutlinedTextField(name, { name = it }, label = { Text("名称") }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp))
         TextButton(onClick = { onCreate(name); name = "" }) { Text("创建") }
     }
     state.apiKeys.forEach { key ->
@@ -544,7 +606,7 @@ private fun FastRulesTab(state: SettingsUiState) {
         return
     }
 
-    Card(Modifier.fillMaxWidth()) {
+    CuteCard {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("快速基础工具 (fast_base_tools)", style = MaterialTheme.typography.titleSmall)
             if (rules.fastBaseTools.isEmpty()) {
@@ -557,7 +619,7 @@ private fun FastRulesTab(state: SettingsUiState) {
         }
     }
 
-    Card(Modifier.fillMaxWidth()) {
+    CuteCard {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Fast Rules (${rules.fastRules.size})", style = MaterialTheme.typography.titleSmall)
             if (rules.fastRules.isEmpty()) {
@@ -583,7 +645,7 @@ private fun FastRulesTab(state: SettingsUiState) {
     }
 
     if (options != null) {
-        Card(Modifier.fillMaxWidth()) {
+        CuteCard {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
                     "可挂载工具 (${options.tools.size}) · 已安装技能 (${options.skills.size})",
@@ -608,7 +670,7 @@ private fun ToolTiersTab(state: SettingsUiState) {
         return
     }
 
-    Card(Modifier.fillMaxWidth()) {
+    CuteCard {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("汇总", style = MaterialTheme.typography.titleSmall)
             Text("Fast: ${tiers.fastCount} 工具 (含 Fast Rules: ${tiers.fastRuleToolCount})", style = MaterialTheme.typography.bodySmall)
@@ -619,7 +681,7 @@ private fun ToolTiersTab(state: SettingsUiState) {
     }
 
     tiers.tiers.forEach { tier ->
-        Card(Modifier.fillMaxWidth()) {
+        CuteCard {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("${tier.label} (${tier.tools.size})", style = MaterialTheme.typography.titleSmall)
                 Text(tier.desc, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -656,5 +718,18 @@ private fun ToolTiersTab(state: SettingsUiState) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun CuteCard(content: @Composable () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
+        shadowElevation = 1.dp,
+    ) {
+        content()
     }
 }
