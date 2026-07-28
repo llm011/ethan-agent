@@ -64,7 +64,8 @@ services:
     ports:
       - "${SEARXNG_PORT:-8888}:8080"
     volumes:
-      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+      - ./searxng/settings.yml:/etc/searxng/settings.yml
+      - ./searxng/entrypoint-wrapper.sh:/usr/local/searxng/entrypoint-wrapper.sh
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
       interval: 30s

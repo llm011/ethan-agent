@@ -121,8 +121,6 @@ async def _run_watchdog(run: ChatRun, manager: "RunManager") -> None:
         if current is not run or run.done:
             return
 
-        run.watchdog_checks += 1
-
         # producer task 已结束但没走到 finish()（崩溃路径遗漏）
         task = run.task
         if task is not None and task.done():
@@ -147,12 +145,16 @@ async def _run_watchdog(run: ChatRun, manager: "RunManager") -> None:
         # task 仍在运行，检查是否卡住
         stall_secs = time.monotonic() - run.last_event_time
         if stall_secs >= _WATCHDOG_STALL_SECS:
+            run.watchdog_checks += 1  # 只在真正 stall 时才累计
             elapsed = int(time.monotonic() - run.start_time)
             run.emit({"heartbeat": True, "elapsed": elapsed})
             logger.info(
                 "[Watchdog] %s stalled %.0fs, emitted heartbeat (check %d/%d)",
                 run.session_id, stall_secs, run.watchdog_checks, _WATCHDOG_MAX_CHECKS,
             )
+        else:
+            # 任务活跃（有新事件），重置计数器
+            run.watchdog_checks = 0
 
         if run.watchdog_checks >= _WATCHDOG_MAX_CHECKS:
             if run.task and not run.task.done():
