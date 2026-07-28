@@ -37,7 +37,8 @@ jobs:
       - name: Detect context
         id: context
         run: |
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+          # tag 或手动触发都走 release 流程（方便验证签名）
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]] || [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
             echo "is-release=true" >> $GITHUB_OUTPUT
           else
             echo "is-release=false" >> $GITHUB_OUTPUT
