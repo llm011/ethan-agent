@@ -144,8 +144,8 @@ export function MessageList({ messages, streaming, sessionId, onQuote, onCardAct
   }, [scrollToBottom]);
 
   return (
-    <div className="relative flex-1 flex flex-col">
-    <div ref={scrollRef} className="flex-1 overflow-y-auto p-4">
+    <div className="relative flex-1 min-h-0">
+    <div ref={scrollRef} className="absolute inset-0 overflow-y-auto p-4">
       <div className="max-w-3xl mx-auto space-y-6">
         {/* 顶部加载更多指示器 */}
         {hasMore && (

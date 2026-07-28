@@ -97,8 +97,9 @@ pub fn run() {
     let _ = app.get_webview_window("main").map(|w| w.set_title(""));
             // Build tray menu
             let show_item = MenuItem::with_id(app, "show", "Show Window", true, None::<&str>)?;
+            let update_item = MenuItem::with_id(app, "check_update", "Check for Updates", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+            let menu = Menu::with_items(app, &[&show_item, &update_item, &quit_item])?;
 
             // Create tray icon
             TrayIconBuilder::new()
@@ -110,6 +111,13 @@ pub fn run() {
                         if let Some(window) = app.get_webview_window("main") {
                             let _ = window.show();
                             let _ = window.set_focus();
+                        }
+                    }
+                    "check_update" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                            let _ = window.emit("tray-check-update", ());
                         }
                     }
                     "quit" => {

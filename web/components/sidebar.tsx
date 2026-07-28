@@ -345,7 +345,7 @@ export function Sidebar() {
       onConfirm={doDeleteSession}
       onCancel={() => setConfirmState({ open: false, id: "" })}
     />
-    <aside className="w-full h-full border-r border-border flex flex-col bg-muted/30">
+    <aside className="w-full h-full border-r border-border flex flex-col bg-sidebar">
       <div className="p-4 flex items-center justify-between gap-2">
         <h1
           className="text-lg font-semibold flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity min-w-0 flex-1"
@@ -370,6 +370,16 @@ export function Sidebar() {
           title="New chat"
         >
           <Plus className="h-4 w-4" />
+        </Button>
+        {/* Mobile close button */}
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 md:hidden hover:bg-background"
+          onClick={() => setSidebarOpen(false)}
+          aria-label="Close menu"
+        >
+          <X className="h-4 w-4" />
         </Button>
       </div>
 

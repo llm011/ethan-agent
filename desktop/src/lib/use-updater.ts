@@ -197,9 +197,24 @@ export function useUpdater() {
     setLocalState(currentState);
     // 应用启动时自动检查（仅一次）
     startAutoUpdate();
+
+    // 监听 tray 菜单 "Check for Updates" 事件
+    let unlisten: (() => void) | undefined;
+    (async () => {
+      if (typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__) {
+        try {
+          const { listen } = await import("@tauri-apps/api/event");
+          unlisten = await listen("tray-check-update", () => {
+            void checkForUpdate();
+          });
+        } catch {}
+      }
+    })();
+
     return () => {
       mountedRef.current = false;
       listeners.delete(listener);
+      unlisten?.();
     };
   }, []);
 
