@@ -164,7 +164,7 @@ jobs:
           if-no-files-found: error
 
       - name: Attach release APK to GitHub Release
-        if: needs.check-changes.outputs.is-release == 'true'
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: app/android/app/build/outputs/apk/release/*.apk
