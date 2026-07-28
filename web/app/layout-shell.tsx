@@ -79,18 +79,19 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
           </button>
         </div>
 
+        {/* Mobile hamburger — outside main to avoid overflow:hidden issues */}
+        {!sidebarOpen && (
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="md:hidden fixed top-3 left-3 z-50 w-10 h-10 flex items-center justify-center rounded-full bg-background border border-border shadow-md text-foreground active:scale-95 transition-transform"
+            aria-label="Open menu"
+          >
+            <Menu className="h-5 w-5" />
+          </button>
+        )}
+
         {/* Main content */}
         <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
-          {/* Mobile hamburger — floats over content when sidebar is closed */}
-          {!sidebarOpen && (
-            <button
-              onClick={() => setSidebarOpen(true)}
-              className="md:hidden fixed top-3 left-3 z-20 w-11 h-11 flex items-center justify-center rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground bg-background/80 backdrop-blur border border-border shadow-sm"
-              aria-label="Open menu"
-            >
-              <Menu className="h-5 w-5" />
-            </button>
-          )}
           {children}
         </main>
       </div>

@@ -54,6 +54,7 @@ export function Sidebar() {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
+  const [loadingSessionId, setLoadingSessionId] = useState<string | null>(null);
   const [confirmState, setConfirmState] = useState<{ open: boolean; id: string }>({ open: false, id: "" });
   const [normalExpanded, setNormalExpanded] = useState(true);
   const [scheduleExpanded, setScheduleExpanded] = useState(() => {
@@ -76,6 +77,23 @@ export function Sidebar() {
 
   // Derive active session id from pathname: /chat/[id]
   const activeSessionId = pathname.match(/^\/chat\/(.+)$/)?.[1] ?? null;
+
+  // 会话加载完成后清除 loading 指示
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { sessionId } = (e as CustomEvent).detail || {};
+      if (sessionId && sessionId === loadingSessionId) {
+        setLoadingSessionId(null);
+      }
+    };
+    window.addEventListener("session:loaded", handler);
+    // 超时保护：5s 后强制清除，避免 loading 卡死
+    const timeout = loadingSessionId ? setTimeout(() => setLoadingSessionId(null), 5000) : undefined;
+    return () => {
+      window.removeEventListener("session:loaded", handler);
+      if (timeout) clearTimeout(timeout);
+    };
+  }, [loadingSessionId]);
 
   // Derive active view from pathname
   const activeView = pathname === "/" || pathname.startsWith("/chat")
@@ -177,6 +195,7 @@ export function Sidebar() {
 
   const handleSelectSession = (id: string) => {
     if (editingSessionId !== id) {
+      setLoadingSessionId(id);
       navigate(`/chat/${id}`);
     }
   };
@@ -235,7 +254,9 @@ export function Sidebar() {
       className={`group flex flex-col px-3 py-2 rounded-lg cursor-pointer text-sm transition-colors ${
         activeSessionId === s.id
           ? "bg-sidebar-accent text-sidebar-accent-foreground"
-          : "hover:bg-muted"
+          : loadingSessionId === s.id
+            ? "bg-sidebar-accent/50 animate-pulse"
+            : "hover:bg-muted"
       }`}
       onClick={() => handleSelectSession(s.id)}
     >

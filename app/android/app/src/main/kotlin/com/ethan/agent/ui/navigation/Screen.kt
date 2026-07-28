@@ -52,5 +52,4 @@ val moreMenuItems = listOf(
     Screen.Skills,
     Screen.Schedule,
     Screen.Docs,
-    Screen.Logs,
 )

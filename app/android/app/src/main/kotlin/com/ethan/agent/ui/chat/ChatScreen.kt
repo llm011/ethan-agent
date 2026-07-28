@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -24,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Stop
@@ -36,6 +38,9 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -99,6 +104,7 @@ fun ChatScreen(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    var showPlusSheet by remember { mutableStateOf(false) }
 
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri ?: return@rememberLauncherForActivityResult
@@ -147,6 +153,79 @@ fun ChatScreen(
 
     ErrorSnackbar(state.error, onClearError, snackbar)
 
+    // Plus button bottom sheet (model/mode/upload)
+    if (showPlusSheet) {
+        val sheetState = rememberModalBottomSheetState()
+        ModalBottomSheet(
+            onDismissRequest = { showPlusSheet = false },
+            sheetState = sheetState,
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Text("选项", style = MaterialTheme.typography.titleMedium)
+
+                // Upload section
+                Surface(
+                    onClick = { filePicker.launch("*/*"); showPlusSheet = false },
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Icon(Icons.Default.AttachFile, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Text("上传图片/文件")
+                    }
+                }
+
+                HorizontalDivider()
+
+                // Model selector
+                Text("模型", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                var modelExpanded by remember { mutableStateOf(false) }
+                ExposedDropdownMenuBox(expanded = modelExpanded, onExpandedChange = { modelExpanded = it }) {
+                    AssistChip(
+                        onClick = { modelExpanded = true },
+                        label = { Text(state.selectedModel ?: "选择模型", maxLines = 1) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth(),
+                    )
+                    ExposedDropdownMenu(expanded = modelExpanded, onDismissRequest = { modelExpanded = false }) {
+                        state.models.forEach { model ->
+                            DropdownMenuItem(
+                                text = { Text(model.id) },
+                                onClick = {
+                                    onModelSelected(model.id)
+                                    modelExpanded = false
+                                },
+                            )
+                        }
+                    }
+                }
+
+                // Mode chips
+                if (state.modes.isNotEmpty()) {
+                    Text("模式", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        state.modes.forEach { mode ->
+                            FilterChip(
+                                selected = state.selectedMode == mode.key,
+                                onClick = { onModeSelected(if (state.selectedMode == mode.key) "" else mode.key) },
+                                label = { Text(mode.label) },
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(16.dp))
+            }
+        }
+    }
+
     if (state.showOnboarding) {
         AlertDialog(
             onDismissRequest = onDismissOnboarding,
@@ -191,14 +270,26 @@ fun ChatScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(state.title)
-                        ConnectionStateIndicator(state.connectionState, state.isResuming)
-                    }
-                },
-            )
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.surface,
+                shadowElevation = 2.dp,
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = state.title,
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    ConnectionStateIndicator(state.connectionState, state.isResuming)
+                }
+            }
         },
         snackbarHost = { SnackbarContainer(snackbar) },
         floatingActionButton = {
@@ -261,8 +352,6 @@ fun ChatScreen(
                 .padding(padding)
                 .imePadding(),
         ) {
-            ModelModeBar(state, onModelSelected, onModeSelected)
-
             LazyColumn(
                 state = listState,
                 modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
@@ -288,36 +377,106 @@ fun ChatScreen(
                 )
             }
 
-            Row(
-                Modifier.fillMaxWidth().padding(12.dp),
-                verticalAlignment = Alignment.Bottom,
+            // + 按钮 + 输入框 (send button inside)
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.surface,
+                shadowElevation = 4.dp,
+                shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
             ) {
-                IconButton(onClick = { filePicker.launch("*/*") }) {
-                    Icon(Icons.Default.AttachFile, contentDescription = "附件")
-                }
-                OutlinedTextField(
-                    value = state.inputText,
-                    onValueChange = onInputChange,
-                    modifier = Modifier.weight(1f),
-                    placeholder = {
-                        Text(if (state.isStreaming) "补充信息给 Agent…" else "输入消息，/help 查看命令")
-                    },
-                    maxLines = 5,
-                )
-                when {
-                    state.isStopping -> {
-                        Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(Modifier.size(24.dp))
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.Bottom,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    // + button
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                        modifier = Modifier.size(40.dp),
+                    ) {
+                        IconButton(onClick = { showPlusSheet = true }) {
+                            Icon(
+                                Icons.Default.Add,
+                                contentDescription = "更多选项",
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
                         }
                     }
-                    state.isStreaming || state.isResuming -> {
-                        IconButton(onClick = onStop) {
-                            Icon(Icons.Default.Stop, contentDescription = "停止", tint = MaterialTheme.colorScheme.error)
-                        }
-                    }
-                    else -> {
-                        IconButton(onClick = onSend, enabled = state.inputText.isNotBlank()) {
-                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "发送")
+                    // Input field with send button inside
+                    Surface(
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(24.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(end = 4.dp),
+                            verticalAlignment = Alignment.Bottom,
+                        ) {
+                            OutlinedTextField(
+                                value = state.inputText,
+                                onValueChange = onInputChange,
+                                modifier = Modifier.weight(1f),
+                                placeholder = {
+                                    Text(
+                                        if (state.isStreaming) "补充信息给 Agent…" else "输入消息…",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                },
+                                maxLines = 5,
+                                shape = RoundedCornerShape(24.dp),
+                                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = androidx.compose.ui.graphics.Color.Transparent,
+                                    unfocusedBorderColor = androidx.compose.ui.graphics.Color.Transparent,
+                                ),
+                            )
+                            Box(
+                                modifier = Modifier.padding(bottom = 8.dp, end = 4.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                when {
+                                    state.isStopping -> {
+                                        CircularProgressIndicator(Modifier.size(20.dp))
+                                    }
+                                    state.isStreaming || state.isResuming -> {
+                                        Surface(
+                                            shape = RoundedCornerShape(50),
+                                            color = MaterialTheme.colorScheme.errorContainer,
+                                            modifier = Modifier.size(36.dp),
+                                        ) {
+                                            IconButton(onClick = onStop) {
+                                                Icon(
+                                                    Icons.Default.Stop,
+                                                    contentDescription = "停止",
+                                                    tint = MaterialTheme.colorScheme.error,
+                                                    modifier = Modifier.size(18.dp),
+                                                )
+                                            }
+                                        }
+                                    }
+                                    else -> {
+                                        Surface(
+                                            shape = RoundedCornerShape(50),
+                                            color = if (state.inputText.isNotBlank()) MaterialTheme.colorScheme.primary
+                                                else MaterialTheme.colorScheme.surfaceVariant,
+                                            modifier = Modifier.size(36.dp),
+                                        ) {
+                                            IconButton(
+                                                onClick = onSend,
+                                                enabled = state.inputText.isNotBlank(),
+                                            ) {
+                                                Icon(
+                                                    Icons.AutoMirrored.Filled.Send,
+                                                    contentDescription = "发送",
+                                                    tint = if (state.inputText.isNotBlank()) MaterialTheme.colorScheme.onPrimary
+                                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.size(20.dp),
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -344,47 +503,6 @@ private fun ConnectionStateIndicator(state: ConnectionState, isResuming: Boolean
             color = color,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
         )
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ModelModeBar(
-    state: ChatUiState,
-    onModelSelected: (String) -> Unit,
-    onModeSelected: (String) -> Unit,
-) {
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        var modelExpanded by remember { mutableStateOf(false) }
-        ExposedDropdownMenuBox(expanded = modelExpanded, onExpandedChange = { modelExpanded = it }) {
-            AssistChip(
-                onClick = { modelExpanded = true },
-                label = { Text(state.selectedModel ?: "选择模型", maxLines = 1) },
-                modifier = Modifier.menuAnchor().weight(1f),
-            )
-            ExposedDropdownMenu(expanded = modelExpanded, onDismissRequest = { modelExpanded = false }) {
-                state.models.forEach { model ->
-                    DropdownMenuItem(
-                        text = { Text(model.id) },
-                        onClick = {
-                            onModelSelected(model.id)
-                            modelExpanded = false
-                        },
-                    )
-                }
-            }
-        }
-
-        state.modes.forEach { mode ->
-            FilterChip(
-                selected = state.selectedMode == mode.key,
-                onClick = { onModeSelected(if (state.selectedMode == mode.key) "" else mode.key) },
-                label = { Text(mode.label) },
-            )
-        }
     }
 }
 

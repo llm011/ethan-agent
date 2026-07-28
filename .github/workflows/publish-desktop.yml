@@ -136,3 +136,49 @@ jobs:
           path: |
             desktop/src-tauri/target/release/bundle/**/*.msi
             desktop/src-tauri/target/release/bundle/**/*.exe
+
+  # 当 desktop 文件没有变动、build 被跳过时，把前一个 release 的 latest.json
+  # 搬到当前 release，确保 updater endpoint 始终可用。
+  carry-updater-json:
+    needs: check-changes
+    if: needs.check-changes.outputs.desktop-changed == 'false'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Copy latest.json from previous release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # 找当前 tag 之前最近的含 latest.json 的 release。
+          # 先整段捕获再取首行——若直接 `gh ... | head -1`，head 提前关闭管道会让 gh 收到
+          # EPIPE 返回非零，在默认的 `bash -eo pipefail` 下会中断整个步骤。
+          RELEASES=$(gh release list --repo "$REPO" --limit 30 --json tagName,assets \
+            -q '.[] | select(.assets[]?.name == "latest.json") | .tagName')
+          PREVIOUS=$(printf '%s\n' "$RELEASES" | head -1)
+          if [ -z "$PREVIOUS" ]; then
+            echo "No previous release with latest.json found, skipping."
+            exit 0
+          fi
+          echo "Copying latest.json from release $PREVIOUS"
+          gh release download "$PREVIOUS" --repo "$REPO" --pattern "latest.json" --dir /tmp
+          # 等待当前 release 被 docker workflow 创建。docker 用 QEMU 跑 arm64 多架构构建，
+          # 慢时要 10-20+ 分钟，等待预算必须显著大于它——最多等 30 分钟（90 次 × 20s）。
+          RELEASE_READY=false
+          for i in $(seq 1 90); do
+            if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+              RELEASE_READY=true
+              break
+            fi
+            echo "Waiting for release $TAG to be created... ($i/90)"
+            sleep 20
+          done
+          if [ "$RELEASE_READY" != "true" ]; then
+            # release 迟迟没出现：不要往不存在的 release 上传（会硬失败）。
+            # 报错退出让这次 carry 可见地失败，而非静默产出一个没有 latest.json 的 release。
+            echo "::error::Release $TAG was not created within 30min; cannot carry latest.json." >&2
+            exit 1
+          fi
+          gh release upload "$TAG" --repo "$REPO" --clobber /tmp/latest.json

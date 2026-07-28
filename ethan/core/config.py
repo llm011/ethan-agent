@@ -102,7 +102,7 @@ class RoutingConfig(BaseModel):
         "file_read", "file_write", "file_list",
         "skill_read", "skill_list", "find_tools",
         "rg_search", "fd_find",
-        "knowledge_search", "knowledge_read",
+        "knowledge_search", "knowledge_read", "knowledge_add", "knowledge_edit",
         "memory_write", "procedure_write", "profile_update",
         "schedule_create", "schedule_list", "schedule_remove",
         "decide",  # Adaptive Planning 的决策出口（虚拟工具，agent loop 拦截不执行）

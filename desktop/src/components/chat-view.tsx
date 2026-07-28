@@ -22,6 +22,7 @@ import { fetchModes } from "@/lib/api-base";
 import { fetchAgentSettings, type AgentSettings } from "@/lib/api-settings";
 import { fetchOnboardingStatus, type OnboardingStatus } from "@/lib/api-misc";
 import { useCachedResource } from "@/lib/use-cached-resource";
+import { readSessionCache, writeSessionCache } from "@/lib/session-cache";
 import { ReadingMode } from "@/components/chat/reading-mode";
 import { ShareMode } from "@/components/chat/share-mode";
 import type { Message, Usage, Quote, PendingFile } from "@ethan/shared/chat/types";
@@ -174,18 +175,44 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     // 切换到目标会话 — 保存当前输入并恢复目标会话的输入状态
     inputStore.switchTo(initialSessionId, inputRef.current?.value);
 
-    setLoadingSession(true);
-    setActiveSession(null);
-    setMessages([]);
-    setSessionTitle("");
-    setSessionUsage({ input: 0, output: 0, cache: 0 });
+    // SWR：先尝试读本地缓存，命中则立即渲染（避免白屏等待网络）
+    const cached = readSessionCache(initialSessionId);
+    if (cached) {
+      const cachedMsgs = mapDetailMessages(cached.detail);
+      setActiveSession(initialSessionId);
+      setSessionTitle(cached.detail.title || "");
+      setSessionSource(cached.detail.source || "web");
+      setMessages(cachedMsgs);
+      setSelectedModel(cached.detail.model);
+      setMode(cached.detail.mode || "");
+      const historicUsage = cached.detail.messages
+        .filter((m: any) => m.role === "assistant" && m.usage)
+        .reduce((acc: any, m: any) => ({
+          input: acc.input + (m.usage.input || 0),
+          output: acc.output + (m.usage.output || 0),
+          cache: acc.cache + (m.usage.cache || 0),
+        }), { input: 0, output: 0, cache: 0 });
+      setSessionUsage(historicUsage);
+      setLoadingSession(false);
+      window.dispatchEvent(new CustomEvent("session:loaded", { detail: { sessionId: initialSessionId } }));
+      fetchAnnotationsFor(cachedMsgs);
+    } else {
+      setLoadingSession(true);
+      setActiveSession(null);
+      setMessages([]);
+      setSessionTitle("");
+      setSessionUsage({ input: 0, output: 0, cache: 0 });
+    }
 
     let cancelled = false;
 
     fetchSession(initialSessionId)
       .then(async (detail) => {
         if (cancelled) return;
+        // 写入本地缓存
+        writeSessionCache(initialSessionId, detail);
         setLoadingSession(false);
+        window.dispatchEvent(new CustomEvent("session:loaded", { detail: { sessionId: initialSessionId } }));
         setActiveSession(initialSessionId);
         setSessionTitle(detail.title || "");
         setSessionSource(detail.source || "web");
@@ -221,6 +248,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
             const fresh = await fetchSession(initialSessionId).catch(() => null);
             if (cancelled) return;
             if (fresh) {
+              writeSessionCache(initialSessionId, fresh);
               const freshMsgs = mapDetailMessages(fresh);
               setMessages(freshMsgs);
               fetchAnnotationsFor(freshMsgs);
@@ -285,6 +313,12 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
     if (!streaming) {
       setTimeout(() => inputRef.current?.focus(), 50);
+      // streaming 结束 → 后台刷新缓存（新消息已产生）
+      if (initialSessionId) {
+        fetchSession(initialSessionId)
+          .then((detail) => writeSessionCache(initialSessionId, detail))
+          .catch(() => {});
+      }
       // streaming 结束后，如果有排队消息，自动发送第一条（附带其图片）
       const store = inputStoreRef.current;
       if (store.queue.length > 0) {
@@ -402,7 +436,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   handleSendRef.current = handleSend;
 
   return (
-    <div className="flex flex-col flex-1 h-full">
+    <div className="flex flex-col flex-1 min-h-0">
       <ChatHeader
         sessionId={activeSession}
         title={sessionTitle}
@@ -415,6 +449,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           setLoadingSession(true);
           setMessages([]);
           fetchSession(sid).then((detail) => {
+            writeSessionCache(sid, detail);
             setLoadingSession(false);
             setSessionTitle(detail.title || "");
             setSessionSource(detail.source || "web");

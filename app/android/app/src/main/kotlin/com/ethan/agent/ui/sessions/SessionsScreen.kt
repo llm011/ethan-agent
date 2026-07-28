@@ -4,24 +4,22 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -29,18 +27,30 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.height
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Surface
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import com.ethan.agent.core.model.SessionInfo
 import com.ethan.agent.core.model.SummaryResponse
 import com.ethan.agent.ui.components.ErrorSnackbar
@@ -51,9 +61,11 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private val SOURCE_OPTIONS = listOf("All", "web", "lark", "repl", "heartbeat")
+// Primary filters shown directly; extra filters in expandable row
+private val PRIMARY_SOURCES = listOf("web", "lark", "repl", "desktop")
+private val MORE_SOURCES = listOf("heartbeat", "scheduled")
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SessionsScreen(
     state: SessionsUiState,
@@ -96,39 +108,169 @@ fun SessionsScreen(
     }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("全部对话") }) },
         snackbarHost = { SnackbarContainer(snackbar) },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
-            OutlinedTextField(
-                value = state.query,
-                onValueChange = onQueryChange,
-                label = { Text("搜索对话") },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-                singleLine = true,
-            )
+        var searchExpanded by remember { mutableStateOf(false) }
+        var moreExpanded by remember { mutableStateOf(false) }
 
-            FlowRow(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            // Filter row with search icon
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                SOURCE_OPTIONS.forEach { src ->
-                    FilterChip(
-                        selected = state.sourceFilter == src,
-                        onClick = { onSetSourceFilter(src) },
-                        label = { Text(src) },
+                PRIMARY_SOURCES.forEach { src ->
+                    val selected = state.sourceFilter == src
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = if (selected) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                        border = if (selected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier.clickable { onSetSourceFilter(src) },
+                    ) {
+                        Text(
+                            text = src,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (selected) MaterialTheme.colorScheme.onPrimary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+
+                // "更多" toggle
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = if (moreExpanded) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    modifier = Modifier.clickable { moreExpanded = !moreExpanded },
+                ) {
+                    Text(
+                        text = "更多",
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                FilterChip(
-                    selected = state.hideHeartbeat,
-                    onClick = onToggleHideHeartbeat,
-                    label = { Text("隐藏心跳") },
-                )
-                FilterChip(
-                    selected = state.hideScheduled,
-                    onClick = onToggleHideScheduled,
-                    label = { Text("隐藏定时") },
-                )
+
+                // Search icon at right
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = if (searchExpanded) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clickable { searchExpanded = !searchExpanded },
+                ) {
+                    Icon(
+                        Icons.Default.Search,
+                        contentDescription = "搜索",
+                        modifier = Modifier.padding(5.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            // Expandable "more" filter row
+            AnimatedVisibility(
+                visible = moreExpanded,
+                enter = expandVertically(),
+                exit = shrinkVertically(),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    val hideHb = state.hideHeartbeat
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = if (hideHb) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier.clickable { onToggleHideHeartbeat() },
+                    ) {
+                        Text(
+                            text = "隐藏心跳",
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (hideHb) MaterialTheme.colorScheme.onPrimary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    val hideSch = state.hideScheduled
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = if (hideSch) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier.clickable { onToggleHideScheduled() },
+                    ) {
+                        Text(
+                            text = "隐藏定时",
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (hideSch) MaterialTheme.colorScheme.onPrimary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+
+            // Expandable inline search bar
+            AnimatedVisibility(
+                visible = searchExpanded,
+                enter = expandVertically(),
+                exit = shrinkVertically(),
+            ) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.outlineVariant),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            Icons.Default.Search,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        OutlinedTextField(
+                            value = state.query,
+                            onValueChange = onQueryChange,
+                            placeholder = { Text("搜索对话…", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                            modifier = Modifier.weight(1f).height(48.dp),
+                            singleLine = true,
+                            shape = RoundedCornerShape(16.dp),
+                            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = androidx.compose.ui.graphics.Color.Transparent,
+                                unfocusedBorderColor = androidx.compose.ui.graphics.Color.Transparent,
+                            ),
+                        )
+                        IconButton(
+                            onClick = { searchExpanded = false; onQueryChange("") },
+                            modifier = Modifier.size(24.dp),
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "关闭",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                    }
+                }
             }
 
             if (state.isLoading && state.sessions.isEmpty()) {
@@ -172,24 +314,47 @@ private fun SessionCard(
     }
     var menuExpanded by remember { mutableStateOf(false) }
 
-    Card(
-        Modifier.fillMaxWidth().combinedClickable(
+    Surface(
+        modifier = Modifier.fillMaxWidth().combinedClickable(
             onClick = onClick,
             onLongClick = { menuExpanded = true },
+        ),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 2.dp,
+        border = androidx.compose.foundation.BorderStroke(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
         ),
     ) {
         Column(Modifier.padding(16.dp)) {
             Text(
                 if (isRegening) "生成中..." else session.title,
                 style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             session.snippet?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
             }
-            Column(Modifier.padding(top = 8.dp)) {
-                Text("${session.model} · $date", style = MaterialTheme.typography.labelSmall)
+            Row(
+                modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "${session.model} · $date",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 SourceBadge(session.source)
             }
         }

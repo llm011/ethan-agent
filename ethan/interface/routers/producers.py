@@ -360,6 +360,10 @@ async def _run_generation(
 
     usage_dict = collector.usage_dict
 
+    # inject 之后模型只回文本、没再调工具时，补充信息仍留在 _pending_injected 里，
+    # 挂到最后一个工具步骤上一并持久化，避免静默丢失。
+    collector.flush_pending_injected()
+
     msg_id = None
     if session_id and (collector.full or collector.thought):
         asst_msg = Message(
