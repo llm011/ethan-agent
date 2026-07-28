@@ -136,3 +136,37 @@ jobs:
           path: |
             desktop/src-tauri/target/release/bundle/**/*.msi
             desktop/src-tauri/target/release/bundle/**/*.exe
+
+  # 当 desktop 文件没有变动、build 被跳过时，把前一个 release 的 latest.json
+  # 搬到当前 release，确保 updater endpoint 始终可用。
+  carry-updater-json:
+    needs: check-changes
+    if: needs.check-changes.outputs.desktop-changed == 'false'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Copy latest.json from previous release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # 找当前 tag 之前最近的含 latest.json 的 release
+          PREVIOUS=$(gh release list --repo "$REPO" --limit 20 --json tagName,assets \
+            -q '.[] | select(.assets[]?.name == "latest.json") | .tagName' | head -1)
+          if [ -z "$PREVIOUS" ]; then
+            echo "No previous release with latest.json found, skipping."
+            exit 0
+          fi
+          echo "Copying latest.json from release $PREVIOUS"
+          gh release download "$PREVIOUS" --repo "$REPO" --pattern "latest.json" --dir /tmp
+          # 等待当前 release 被 docker workflow 创建（最多等 5 分钟）
+          for i in $(seq 1 30); do
+            if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+              break
+            fi
+            echo "Waiting for release $TAG to be created... ($i)"
+            sleep 10
+          done
+          gh release upload "$TAG" --repo "$REPO" --clobber /tmp/latest.json
