@@ -176,11 +176,16 @@ class FilesystemKnowledgeBase(KnowledgeBase):
 
     def add(self, title: str, content: str, tags: list[str] | None = None,
             frontmatter: dict | None = None) -> str:
-        slug = re.sub(r"[^\w\-]", "-", title.lower())[:50].strip("-")
-        path = self._dir / f"{slug}.md"
+        slug = re.sub(r"[^\w]+", "-", title.lower())[:50].strip("-")
+        # 按 tags[0] 分子目录（如 people/、project/），无 tags 时落根目录
+        target_dir = self._dir
+        if tags:
+            target_dir = self._dir / tags[0]
+            target_dir.mkdir(parents=True, exist_ok=True)
+        path = target_dir / f"{slug}.md"
         i = 1
         while path.exists():
-            path = self._dir / f"{slug}-{i}.md"
+            path = target_dir / f"{slug}-{i}.md"
             i += 1
 
         tag_line = f"\ntags: {', '.join(tags)}" if tags else ""
@@ -229,7 +234,7 @@ class FilesystemKnowledgeBase(KnowledgeBase):
 
     def list_all(self) -> list[KnowledgeItem]:
         items = []
-        for path in sorted(self._dir.glob("*.md")):
+        for path in sorted(self._dir.rglob("*.md")):
             item = self._parse_file(path)
             if item:
                 items.append(item)
@@ -298,11 +303,16 @@ class ObsidianKnowledgeBase(KnowledgeBase):
 
     def add(self, title: str, content: str, tags: list[str] | None = None,
             frontmatter: dict | None = None) -> str:
-        slug = re.sub(r"[^\w\-]", "-", title.lower())[:50].strip("-")
-        path = self._dir / f"{slug}.md"
+        slug = re.sub(r"[^\w]+", "-", title.lower())[:50].strip("-")
+        # 按 tags[0] 分子目录（如 people/、project/），无 tags 时落根目录
+        target_dir = self._dir
+        if tags:
+            target_dir = self._dir / tags[0]
+            target_dir.mkdir(parents=True, exist_ok=True)
+        path = target_dir / f"{slug}.md"
         i = 1
         while path.exists():
-            path = self._dir / f"{slug}-{i}.md"
+            path = target_dir / f"{slug}-{i}.md"
             i += 1
 
         text = self._build_file_content(title, content, tags, frontmatter=frontmatter)
