@@ -1,6 +1,6 @@
 [package]
 name = "ethan-desktop"
-version = "0.5.61"
+version = "0.5.62"
 edition = "2021"
 description = "Ethan Agent Desktop"
 
