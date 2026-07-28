@@ -3,7 +3,7 @@ use std::fs;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, WindowEvent,
+    Emitter, Manager, WindowEvent,
 };
 
 /// 返回 ~/Pictures/Ethan 的规范路径，确保目录存在。
