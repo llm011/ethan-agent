@@ -127,6 +127,16 @@ class StreamCollector:
                         step["entity_id"] = item.entity_id
                     break
 
+    def flush_pending_injected(self) -> None:
+        """流结束时兜底：若仍有未挂载的补充信息（inject 之后模型只回文本、没再调工具，
+        `_pending_injected` 就永远等不到 tool start 来消费），挂到最后一个工具步骤上，
+        避免这条补充信息既不展示也不持久化而静默丢失。无任何工具步骤时无处可挂，只能放弃
+        （此时内容已进模型上下文、模型已据此回复，仅时间线标记缺失）。"""
+        if self._pending_injected and self.tool_steps:
+            last = self.tool_steps[-1]
+            last["injected"] = (last.get("injected") or []) + self._pending_injected
+            self._pending_injected.clear()
+
     @property
     def usage_dict(self) -> dict:
         if self._agent is not None:
