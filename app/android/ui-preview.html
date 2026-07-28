@@ -1,0 +1,1052 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ethan Agent - Android UI Preview</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, 'PingFang SC', 'Noto Sans SC', sans-serif;
+  background: #f0ebe3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 20px;
+  min-height: 100vh;
+}
+
+.theme-switcher {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.theme-btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 20px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+}
+.theme-btn.active { transform: scale(1.05); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+
+.phone-frame {
+  width: 375px;
+  height: 720px;
+  background: var(--bg);
+  border-radius: 36px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.15), 0 0 0 2px #e0d8d0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Theme Variables */
+:root {
+  --primary: #F5A623;
+  --primary-light: #FFEBC4;
+  --primary-container: #FFF3D6;
+  --on-primary: #fff;
+  --bg: #FFFDF7;
+  --surface: #FFFFFF;
+  --surface-variant: #FFF8E7;
+  --on-bg: #5D4E37;
+  --on-surface-variant: #9E8E7E;
+  --outline: #E8D5B0;
+  --outline-variant: #F0E6D0;
+}
+
+/* Page structure */
+.page { display: none; flex: 1; flex-direction: column; overflow: hidden; position: relative; min-height: 0; }
+.page.active { display: flex; }
+
+/* Header - more cute */
+.header {
+  padding: 16px 20px 12px;
+  z-index: 10;
+}
+.header h1 {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--primary);
+  letter-spacing: -0.5px;
+}
+.header-sub {
+  font-size: 11px;
+  color: var(--on-surface-variant);
+  margin-top: 2px;
+}
+
+/* Content area */
+.content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 16px;
+}
+
+/* ─── Unified Bottom Dock (Input + Nav) ─── */
+.bottom-dock {
+  background: var(--surface);
+  border-radius: 28px 28px 0 0;
+  box-shadow: 0 -6px 24px rgba(93,78,55,0.08);
+  z-index: 10;
+  padding: 10px 14px 6px;
+}
+.input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.input-wrapper {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.plus-btn {
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  background: var(--primary-container);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  transition: all 0.25s;
+  flex-shrink: 0;
+  color: var(--primary);
+  border: 1.5px solid color-mix(in srgb, var(--primary) 25%, transparent);
+}
+.plus-btn svg { width: 18px; height: 18px; stroke: var(--primary); stroke-width: 2.2; }
+.plus-btn:hover { background: var(--primary); }
+.plus-btn:hover svg { stroke: var(--on-primary); }
+.plus-btn.open {
+  background: var(--primary);
+  transform: rotate(45deg);
+}
+.plus-btn.open svg { stroke: var(--on-primary); }
+.input-box {
+  flex: 1;
+  background: var(--surface-variant);
+  border-radius: 22px;
+  padding: 10px 48px 10px 16px;
+  font-size: 14px;
+  color: var(--on-surface-variant);
+  border: 1.5px solid var(--outline-variant);
+  min-height: 40px;
+  transition: border-color 0.2s;
+}
+.input-box:focus-within { border-color: var(--primary); }
+.send-btn {
+  position: absolute;
+  right: 4px;
+  width: 34px; height: 34px;
+  border-radius: 50%;
+  background: var(--primary);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--primary) 30%, transparent);
+}
+.send-btn .icon { width: 18px; height: 18px; fill: var(--on-primary); }
+
+/* Bottom nav within dock */
+.bottom-nav {
+  display: flex;
+  height: 52px;
+  align-items: center;
+  padding: 0 4px;
+}
+.nav-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  cursor: pointer;
+  padding: 4px 0;
+  border-radius: 16px;
+  transition: all 0.2s;
+}
+.nav-item .icon-wrap {
+  width: 40px; height: 28px;
+  border-radius: 14px;
+  transition: all 0.25s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.nav-item.active .icon-wrap {
+  background: var(--primary-container);
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--primary) 15%, transparent);
+}
+.nav-item .icon {
+  width: 20px; height: 20px;
+  fill: var(--on-surface-variant);
+  transition: fill 0.2s;
+}
+.nav-item.active .icon { fill: var(--primary); }
+.nav-item span {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--on-surface-variant);
+  transition: color 0.2s;
+}
+.nav-item.active span { color: var(--primary); }
+
+/* ─── Bottom Sheet (Plus menu) ─── */
+.sheet-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(93,78,55,0.2);
+  z-index: 50;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s;
+  border-radius: 36px;
+}
+.sheet-overlay.show { opacity: 1; pointer-events: auto; }
+.bottom-sheet {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--surface);
+  border-radius: 24px 24px 0 0;
+  padding: 16px 16px 20px;
+  z-index: 51;
+  transform: translateY(100%);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 -8px 32px rgba(93,78,55,0.12);
+}
+.bottom-sheet.show { transform: translateY(0); }
+.sheet-handle {
+  width: 36px; height: 4px;
+  background: var(--outline);
+  border-radius: 2px;
+  margin: 0 auto 14px;
+}
+.sheet-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--on-surface-variant);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.sheet-grid {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.sheet-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px;
+  border-radius: 16px;
+  background: var(--surface-variant);
+  cursor: pointer;
+  transition: all 0.2s;
+  width: 72px;
+  border: 1.5px solid transparent;
+}
+.sheet-item:hover { border-color: var(--primary); background: var(--primary-container); }
+.sheet-item .item-icon {
+  width: 28px; height: 28px;
+  border-radius: 10px;
+  background: var(--primary-container);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px;
+}
+.sheet-item span { font-size: 11px; color: var(--on-bg); font-weight: 500; }
+
+.model-chips {
+  display: flex; gap: 8px; flex-wrap: wrap;
+}
+.model-chip {
+  padding: 7px 14px;
+  border-radius: 50px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: 1.5px solid var(--outline-variant);
+  background: var(--surface-variant);
+  color: var(--on-bg);
+}
+.model-chip.active {
+  background: var(--primary);
+  color: var(--on-primary);
+  border-color: var(--primary);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--primary) 25%, transparent);
+}
+.model-select-wrapper {
+  position: relative;
+  margin-bottom: 4px;
+}
+.model-select {
+  width: 100%;
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 10px 36px 10px 14px;
+  border-radius: 14px;
+  border: 1.5px solid var(--outline-variant);
+  background: var(--surface-variant);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--on-bg);
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+.model-select:focus { border-color: var(--primary); }
+.select-arrow {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px; height: 18px;
+  fill: var(--on-surface-variant);
+  pointer-events: none;
+}
+
+/* ─── Chat page ─── */
+.empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 30px;
+}
+.empty-avatar {
+  width: 80px; height: 80px;
+  border-radius: 24px;
+  background: var(--primary-container);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 40px;
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--primary) 15%, transparent);
+}
+.empty-state h2 {
+  font-size: 17px; font-weight: 700; color: var(--on-bg);
+}
+.empty-state p { color: var(--on-surface-variant); font-size: 13px; text-align: center; line-height: 1.6; }
+
+.quick-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.quick-action {
+  padding: 8px 14px;
+  background: var(--surface);
+  border: 1.5px solid var(--outline-variant);
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--on-bg);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.quick-action:hover {
+  border-color: var(--primary);
+  background: var(--primary-container);
+}
+
+/* ─── Sessions page ─── */
+.filter-row {
+  display: flex;
+  gap: 6px;
+  padding: 14px 16px 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  position: relative;
+  z-index: 20;
+}
+.filter-row::-webkit-scrollbar { display: none; }
+.filter-pill {
+  padding: 5px 12px;
+  border-radius: 50px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: 1.5px solid transparent;
+}
+.filter-pill.active { background: var(--primary); color: var(--on-primary); box-shadow: 0 2px 6px color-mix(in srgb, var(--primary) 20%, transparent); }
+.filter-pill:not(.active) { background: var(--surface-variant); color: var(--on-surface-variant); border-color: var(--outline-variant); }
+.search-pill {
+  margin-left: auto;
+  padding: 6px 8px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  width: 28px; height: 28px;
+}
+.search-bar {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  margin: 0 16px 8px;
+  padding: 8px 14px;
+  background: var(--surface-variant);
+  border-radius: 20px;
+  border: 1.5px solid var(--outline-variant);
+  transition: border-color 0.2s;
+}
+.search-bar.show { display: flex; }
+.search-bar:focus-within { border-color: var(--primary); }
+.search-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  color: var(--on-bg);
+  outline: none;
+}
+.search-input::placeholder { color: var(--on-surface-variant); }
+.search-close {
+  font-size: 14px;
+  color: var(--on-surface-variant);
+  cursor: pointer;
+  padding: 2px;
+}
+.filter-more {
+  display: flex; align-items: center; gap: 2px;
+}
+.filter-dropdown {
+  display: none;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 16px 10px;
+  background: var(--surface-variant);
+  border-bottom: 1px solid var(--outline-variant);
+}
+.filter-dropdown.show { display: flex; }
+.filter-drop-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 50px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--on-bg);
+  cursor: pointer;
+  transition: all 0.2s;
+  background: var(--surface);
+  border: 1.5px solid var(--outline-variant);
+}
+.filter-drop-item:has(input:checked) {
+  background: var(--primary);
+  color: var(--on-primary);
+  border-color: var(--primary);
+}
+.filter-drop-item input[type="checkbox"] {
+  display: none;
+}
+
+.session-card {
+  background: var(--surface);
+  border-radius: 18px;
+  padding: 14px 16px;
+  margin-bottom: 10px;
+  box-shadow: 0 2px 10px rgba(93,78,55,0.04);
+  border: 1.5px solid color-mix(in srgb, var(--primary) 12%, transparent);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.session-card:hover { box-shadow: 0 4px 16px rgba(93,78,55,0.1); transform: translateY(-1px); }
+.session-card h3 { font-size: 14px; font-weight: 600; color: var(--on-bg); margin-bottom: 4px; }
+.session-card p { font-size: 12px; color: var(--on-surface-variant); margin-bottom: 8px; line-height: 1.4; }
+.session-card .meta {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 11px; color: var(--on-surface-variant);
+}
+.source-badge {
+  padding: 3px 10px;
+  border-radius: 50px;
+  font-size: 10px;
+  font-weight: 600;
+  background: var(--primary-container);
+  color: var(--primary);
+}
+
+/* ─── More/Toolbox page ─── */
+.section-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--primary);
+  margin-bottom: 8px;
+  padding-left: 4px;
+  letter-spacing: 0.3px;
+}
+.tool-group {
+  background: var(--surface);
+  border-radius: 18px;
+  box-shadow: 0 2px 10px rgba(93,78,55,0.04);
+  border: 1.5px solid color-mix(in srgb, var(--primary) 10%, transparent);
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+.tool-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.tool-item:hover { background: color-mix(in srgb, var(--primary-container) 40%, transparent); }
+.tool-item + .tool-item { border-top: 1px solid var(--outline-variant); }
+.tool-icon {
+  width: 38px; height: 38px;
+  border-radius: 12px;
+  background: var(--primary-container);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.tool-icon .icon { width: 18px; height: 18px; fill: var(--primary); }
+.tool-item span { font-size: 14px; color: var(--on-bg); font-weight: 500; }
+
+/* ─── Settings page - Segment Control Tabs ─── */
+.settings-tabs {
+  display: flex;
+  background: var(--surface-variant);
+  border-radius: 14px;
+  padding: 3px;
+  margin-bottom: 16px;
+  border: 1.5px solid var(--outline-variant);
+  overflow-x: auto;
+}
+.settings-tabs::-webkit-scrollbar { display: none; }
+.settings-tab {
+  flex: 1;
+  padding: 9px 6px;
+  border-radius: 11px;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  text-align: center;
+  color: var(--on-surface-variant);
+  position: relative;
+  z-index: 1;
+}
+.settings-tab.active {
+  background: var(--surface);
+  color: var(--primary);
+  box-shadow: 0 2px 8px rgba(93,78,55,0.08), 0 1px 2px rgba(93,78,55,0.04);
+}
+.settings-tab:not(.active):hover {
+  color: var(--on-bg);
+  background: color-mix(in srgb, var(--surface) 50%, transparent);
+}
+.settings-tab-content {
+  display: none;
+}
+.settings-tab-content.active {
+  display: block;
+}
+.theme-dot {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: 2.5px solid transparent;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+}
+.theme-dot:hover {
+  transform: scale(1.15);
+  border-color: var(--on-bg);
+}
+.settings-card {
+  background: var(--surface);
+  border-radius: 18px;
+  padding: 16px;
+  box-shadow: 0 2px 10px rgba(93,78,55,0.04);
+  border: 1.5px solid color-mix(in srgb, var(--primary) 8%, transparent);
+  margin-bottom: 12px;
+}
+.settings-card label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--on-bg);
+  display: block;
+  margin-bottom: 6px;
+}
+.settings-input {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 14px;
+  border: 1.5px solid var(--outline-variant);
+  background: var(--surface-variant);
+  font-size: 13px;
+  color: var(--on-bg);
+  outline: none;
+  transition: border-color 0.2s;
+}
+.settings-input:focus { border-color: var(--primary); }
+.settings-btn {
+  padding: 12px 24px;
+  border-radius: 22px;
+  border: none;
+  background: var(--primary);
+  color: var(--on-primary);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 12px;
+  box-shadow: 0 3px 10px color-mix(in srgb, var(--primary) 25%, transparent);
+}
+</style>
+</head>
+<body>
+
+<h2 style="font-size:16px; color:#5D4E37; margin-bottom:6px; font-weight:700;">Ethan Agent · Android UI Preview</h2>
+<p style="font-size:12px; color:#9E8E7E; margin-bottom:12px;">点击底部导航切换页面 / 点击 + 打开功能面板 / 切换主题色</p>
+
+<div class="theme-switcher">
+  <button class="theme-btn active" onclick="setTheme('honey')" style="background:#FFF3D6;color:#F5A623;">🍯 暖黄蜜糖</button>
+  <button class="theme-btn" onclick="setTheme('matcha')" style="background:#D8F0D0;color:#7BAE6B;">🍵 抹茶</button>
+  <button class="theme-btn" onclick="setTheme('lavender')" style="background:#EDE0FF;color:#9B7EC8;">💜 薰衣草</button>
+  <button class="theme-btn" onclick="setTheme('skyblue')" style="background:#D6EEFF;color:#5BA4D9;">☁️ 天蓝</button>
+  <button class="theme-btn" onclick="setTheme('qingwa')" style="background:#CDE5F0;color:#4A6572;">🏔 青瓦</button>
+  <button class="theme-btn" onclick="setTheme('warmorange')" style="background:#FFDBC8;color:#BF5B17;">🍊 暖橙</button>
+</div>
+
+<div class="phone-frame">
+  <!-- Sheet Overlay -->
+  <div class="sheet-overlay" id="sheetOverlay" onclick="toggleSheet()"></div>
+
+  <!-- Bottom Sheet -->
+  <div class="bottom-sheet" id="bottomSheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-section-title">图片</div>
+    <div class="sheet-grid">
+      <div class="sheet-item">
+        <div class="item-icon">📷</div>
+        <span>拍照</span>
+      </div>
+      <div class="sheet-item">
+        <div class="item-icon">🖼️</div>
+        <span>相册</span>
+      </div>
+    </div>
+    <div class="sheet-section-title">模型选择</div>
+    <div class="model-select-wrapper">
+      <select class="model-select" id="modelSelect">
+        <option value="gpt-4o" selected>gpt-4o</option>
+        <option value="gpt-4o-mini">gpt-4o-mini</option>
+        <option value="claude-3.5-sonnet">claude-3.5-sonnet</option>
+        <option value="claude-3-haiku">claude-3-haiku</option>
+        <option value="deepseek-v3">deepseek-v3</option>
+        <option value="deepseek-r1">deepseek-r1</option>
+        <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+        <option value="qwen-max">qwen-max</option>
+      </select>
+      <svg class="select-arrow" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+    </div>
+    <div style="height:14px"></div>
+    <div class="sheet-section-title">对话模式</div>
+    <div class="model-chips">
+      <div class="model-chip active">💬 普通</div>
+      <div class="model-chip">🔍 深度</div>
+      <div class="model-chip">🚀 快速</div>
+    </div>
+  </div>
+
+  <!-- Chat Page -->
+  <div class="page active" id="page-chat">
+    <div class="header">
+      <h1>Ethan ✨</h1>
+      <div class="header-sub">gpt-4o · 普通模式</div>
+    </div>
+    <div class="content" style="display:flex;flex-direction:column;">
+      <div class="empty-state">
+        <div class="empty-avatar">🤖</div>
+        <h2>嗨，我是 Ethan~</h2>
+        <p>你的私人 AI 小助手<br>随时待命，有什么能帮到你的？</p>
+        <div class="quick-actions">
+          <div class="quick-action">✍️ 帮我写邮件</div>
+          <div class="quick-action">💡 头脑风暴</div>
+          <div class="quick-action">📊 分析数据</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sessions Page -->
+  <div class="page" id="page-sessions">
+    <div class="filter-row">
+      <div class="filter-pill active">web</div>
+      <div class="filter-pill active">lark</div>
+      <div class="filter-pill active">repl</div>
+      <div class="filter-pill active">桌面</div>
+      <div class="filter-pill filter-more" onclick="toggleFilterMore()">更多 ▾</div>
+      <div class="filter-pill search-pill" id="searchToggle" onclick="toggleSearch()"><svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:var(--on-surface-variant);"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg></div>
+    </div>
+    <div class="filter-dropdown" id="filterDropdown">
+      <label class="filter-drop-item"><input type="checkbox">心跳</label>
+      <label class="filter-drop-item"><input type="checkbox">定时</label>
+      <label class="filter-drop-item"><input type="checkbox" checked>API</label>
+      <label class="filter-drop-item"><input type="checkbox">telegram</label>
+    </div>
+    <div class="search-bar" id="searchBar">
+      <svg style="width:15px;height:15px;fill:var(--on-surface-variant);flex-shrink:0;" viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+      <input type="text" placeholder="搜索对话…" class="search-input">
+      <span class="search-close" onclick="toggleSearch()">✕</span>
+    </div>
+    <div class="content">
+      <div class="session-card">
+        <h3>帮我分析一下这个代码的性能问题</h3>
+        <p>好的，我来看看这段代码。首先注意到你在循环中…</p>
+        <div class="meta">
+          <span>gpt-4o · 07-28 14:30</span>
+          <span class="source-badge">web</span>
+        </div>
+      </div>
+      <div class="session-card">
+        <h3>周报总结</h3>
+        <p>根据你这周的工作内容，我帮你整理了以下几点…</p>
+        <div class="meta">
+          <span>claude-3.5 · 07-27 18:20</span>
+          <span class="source-badge">lark</span>
+        </div>
+      </div>
+      <div class="session-card">
+        <h3>React Native 跨平台方案对比</h3>
+        <p>Flutter 和 RN 各有优势，从你的需求来看…</p>
+        <div class="meta">
+          <span>deepseek · 07-26 10:15</span>
+          <span class="source-badge">web</span>
+        </div>
+      </div>
+      <div class="session-card">
+        <h3>飞书机器人自动回复配置</h3>
+        <p>已帮你配置好关键词触发规则，当消息包含…</p>
+        <div class="meta">
+          <span>gpt-4o · 07-25 22:10</span>
+          <span class="source-badge">lark</span>
+        </div>
+      </div>
+      <div class="session-card">
+        <h3>Docker Compose 多服务编排</h3>
+        <p>你的 docker-compose.yml 需要调整网络配置…</p>
+        <div class="meta">
+          <span>claude-3.5 · 07-24 15:45</span>
+          <span class="source-badge">web</span>
+        </div>
+      </div>
+      <div class="session-card">
+        <h3>帮我看一下这个 SQL 慢查询</h3>
+        <p>问题出在缺少索引，建议在 user_id 列上添加…</p>
+        <div class="meta">
+          <span>gpt-4o · 07-24 11:30</span>
+          <span class="source-badge">repl</span>
+        </div>
+      </div>
+      <div class="session-card">
+        <h3>写一个 Python 数据清洗脚本</h3>
+        <p>我帮你用 pandas 实现了去重和缺失值处理…</p>
+        <div class="meta">
+          <span>deepseek · 07-23 16:00</span>
+          <span class="source-badge">web</span>
+        </div>
+      </div>
+      <div class="session-card">
+        <h3>API 接口文档规范制定</h3>
+        <p>推荐使用 OpenAPI 3.0 规范，以下是模板…</p>
+        <div class="meta">
+          <span>claude-3.5 · 07-22 09:30</span>
+          <span class="source-badge">lark</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- More/Toolbox Page -->
+  <div class="page" id="page-more">
+    <div class="header"><h1>工具箱 🧰</h1></div>
+    <div class="content">
+      <div class="section-title">智能助手</div>
+      <div class="tool-group">
+        <div class="tool-item">
+          <div class="tool-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg></div>
+          <span>记忆</span>
+        </div>
+        <div class="tool-item">
+          <div class="tool-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M18 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 4h5v8l-2.5-1.5L6 12V4z"/></svg></div>
+          <span>知识库</span>
+        </div>
+        <div class="tool-item">
+          <div class="tool-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5C13 2.12 11.88 1 10.5 1S8 2.12 8 3.5V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7 1.49 0 2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z"/></svg></div>
+          <span>技能</span>
+        </div>
+      </div>
+
+      <div class="section-title">自动化</div>
+      <div class="tool-group">
+        <div class="tool-item">
+          <div class="tool-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg></div>
+          <span>定时任务</span>
+        </div>
+      </div>
+
+      <div class="section-title">资料</div>
+      <div class="tool-group">
+        <div class="tool-item">
+          <div class="tool-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M18 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 14H8v-2h8v2zm0-4H8v-2h8v2zm0-4H8V6h8v2z"/></svg></div>
+          <span>文档</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Page -->
+  <div class="page" id="page-settings">
+    <div class="header"><h1>设置</h1></div>
+    <div class="content">
+      <div class="settings-tabs">
+        <div class="settings-tab active" onclick="switchSettingsTab(this, 'tab-conn')">连接</div>
+        <div class="settings-tab" onclick="switchSettingsTab(this, 'tab-agent')">Agent</div>
+        <div class="settings-tab" onclick="switchSettingsTab(this, 'tab-model')">模型</div>
+        <div class="settings-tab" onclick="switchSettingsTab(this, 'tab-system')">系统</div>
+        <div class="settings-tab" onclick="switchSettingsTab(this, 'tab-theme')">主题</div>
+      </div>
+      <!-- 连接 tab -->
+      <div class="settings-tab-content active" id="tab-conn">
+        <div class="settings-card">
+          <label>服务器地址</label>
+          <input class="settings-input" value="https://ethan.example.com" />
+        </div>
+        <button class="settings-btn">💾 保存</button>
+      </div>
+      <!-- Agent tab -->
+      <div class="settings-tab-content" id="tab-agent">
+        <div class="settings-card">
+          <label>Agent 名称</label>
+          <input class="settings-input" value="Ethan" />
+        </div>
+        <div class="settings-card">
+          <label>自我介绍</label>
+          <textarea class="settings-input" rows="3" style="resize:none;">我是一名软件工程师，喜欢用 AI 提高工作效率。</textarea>
+        </div>
+        <button class="settings-btn">💾 保存</button>
+      </div>
+      <!-- 模型 tab -->
+      <div class="settings-tab-content" id="tab-model">
+        <div class="settings-card">
+          <label>默认模型</label>
+          <div class="model-select-wrapper">
+            <select class="model-select">
+              <option selected>gpt-4o</option>
+              <option>claude-3.5-sonnet</option>
+              <option>deepseek-v3</option>
+            </select>
+            <svg class="select-arrow" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+          </div>
+        </div>
+        <div class="settings-card">
+          <label>Provider 配置</label>
+          <input class="settings-input" placeholder="API Key" />
+        </div>
+        <button class="settings-btn">💾 保存</button>
+      </div>
+      <!-- 系统 tab -->
+      <div class="settings-tab-content" id="tab-system">
+        <div class="settings-card">
+          <label>系统 Prompt</label>
+          <textarea class="settings-input" rows="3" style="resize:none;">你是 Ethan，一个温暖的 AI 助手。</textarea>
+        </div>
+        <div class="settings-card" style="display:flex; align-items:center; justify-content:space-between; cursor:pointer;" onclick="alert('检查更新中...')">
+          <span style="font-size:14px; font-weight:500; color:var(--on-bg);">检查更新</span>
+          <span style="font-size:12px; color:var(--on-surface-variant);">v1.2.0 →</span>
+        </div>
+        <button class="settings-btn">💾 保存</button>
+      </div>
+      <!-- 主题 tab -->
+      <div class="settings-tab-content" id="tab-theme">
+        <div class="settings-card">
+          <label>选择主题</label>
+          <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:4px;">
+            <div class="theme-dot" style="background:#F5A623;" onclick="setTheme('honey')"></div>
+            <div class="theme-dot" style="background:#7BAE6B;" onclick="setTheme('matcha')"></div>
+            <div class="theme-dot" style="background:#9B7EC8;" onclick="setTheme('lavender')"></div>
+            <div class="theme-dot" style="background:#5BA4D9;" onclick="setTheme('skyblue')"></div>
+            <div class="theme-dot" style="background:#4A6572;" onclick="setTheme('qingwa')"></div>
+            <div class="theme-dot" style="background:#BF5B17;" onclick="setTheme('warmorange')"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Unified Bottom Dock: Input + Nav -->
+  <div class="bottom-dock">
+    <div class="input-row" id="chatInputRow">
+      <div class="plus-btn" id="plusBtn" onclick="toggleSheet()"><svg viewBox="0 0 24 24" fill="none"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></div>
+      <div class="input-wrapper">
+        <div class="input-box">输入消息，/help 查看命令</div>
+        <div class="send-btn"><svg class="icon" viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></div>
+      </div>
+    </div>
+    <div class="bottom-nav">
+      <div class="nav-item active" onclick="switchPage('chat')">
+        <div class="icon-wrap">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/></svg>
+        </div>
+        <span>对话</span>
+      </div>
+      <div class="nav-item" onclick="switchPage('sessions')">
+        <div class="icon-wrap">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M4 14h4v-4H4v4zm0 5h4v-4H4v4zM4 9h4V5H4v4zm5 5h12v-4H9v4zm0 5h12v-4H9v4zM9 5v4h12V5H9z"/></svg>
+        </div>
+        <span>历史</span>
+      </div>
+      <div class="nav-item" onclick="switchPage('more')">
+        <div class="icon-wrap">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M6 10c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm12 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm-6 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
+        </div>
+        <span>工具箱</span>
+      </div>
+      <div class="nav-item" onclick="switchPage('settings')">
+        <div class="icon-wrap">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+        </div>
+        <span>设置</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function switchPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  event.currentTarget.classList.add('active');
+
+  // Show input row only on chat page
+  const inputRow = document.getElementById('chatInputRow');
+  inputRow.style.display = name === 'chat' ? 'flex' : 'none';
+
+  // Close sheet if open
+  closeSheet();
+}
+
+function toggleSearch() {
+  const bar = document.getElementById('searchBar');
+  bar.classList.toggle('show');
+  if (bar.classList.contains('show')) {
+    bar.querySelector('input').focus();
+  }
+}
+
+function toggleFilterMore() {
+  const dd = document.getElementById('filterDropdown');
+  dd.classList.toggle('show');
+}
+
+function toggleSheet() {
+  const sheet = document.getElementById('bottomSheet');
+  const overlay = document.getElementById('sheetOverlay');
+  const btn = document.getElementById('plusBtn');
+  const isOpen = sheet.classList.contains('show');
+  if (isOpen) {
+    closeSheet();
+  } else {
+    sheet.classList.add('show');
+    overlay.classList.add('show');
+    btn.classList.add('open');
+  }
+}
+
+function closeSheet() {
+  document.getElementById('bottomSheet').classList.remove('show');
+  document.getElementById('sheetOverlay').classList.remove('show');
+  document.getElementById('plusBtn').classList.remove('open');
+}
+
+// Model chip selection
+document.querySelectorAll('.model-chip').forEach(chip => {
+  chip.addEventListener('click', function() {
+    const parent = this.parentElement;
+    parent.querySelectorAll('.model-chip').forEach(c => c.classList.remove('active'));
+    this.classList.add('active');
+  });
+});
+
+const themes = {
+  honey: {
+    '--primary': '#F5A623', '--primary-light': '#FFEBC4', '--primary-container': '#FFF3D6', '--on-primary': '#fff',
+    '--bg': '#FFFDF7', '--surface': '#FFFFFF', '--surface-variant': '#FFF8E7',
+    '--on-bg': '#5D4E37', '--on-surface-variant': '#9E8E7E',
+    '--outline': '#E8D5B0', '--outline-variant': '#F0E6D0',
+  },
+  matcha: {
+    '--primary': '#7BAE6B', '--primary-light': '#C8E8B8', '--primary-container': '#D8F0D0', '--on-primary': '#fff',
+    '--bg': '#F8FCF5', '--surface': '#FFFFFF', '--surface-variant': '#F2F8ED',
+    '--on-bg': '#5D4E37', '--on-surface-variant': '#9E8E7E',
+    '--outline': '#C0D8B0', '--outline-variant': '#D8E8D0',
+  },
+  lavender: {
+    '--primary': '#9B7EC8', '--primary-light': '#D8C0F0', '--primary-container': '#EDE0FF', '--on-primary': '#fff',
+    '--bg': '#FCF8FF', '--surface': '#FFFFFF', '--surface-variant': '#F8F2FF',
+    '--on-bg': '#5D4E37', '--on-surface-variant': '#9E8E7E',
+    '--outline': '#D0C0E8', '--outline-variant': '#E0D8F0',
+  },
+  skyblue: {
+    '--primary': '#5BA4D9', '--primary-light': '#B0D8F0', '--primary-container': '#D6EEFF', '--on-primary': '#fff',
+    '--bg': '#F5FBFF', '--surface': '#FFFFFF', '--surface-variant': '#F0F8FF',
+    '--on-bg': '#5D4E37', '--on-surface-variant': '#9E8E7E',
+    '--outline': '#B0D8F0', '--outline-variant': '#D0E8F8',
+  },
+  qingwa: {
+    '--primary': '#4A6572', '--primary-light': '#9BB5C1', '--primary-container': '#CDE5F0', '--on-primary': '#fff',
+    '--bg': '#F5F8FA', '--surface': '#FFFFFF', '--surface-variant': '#DCE4E9',
+    '--on-bg': '#1A2A32', '--on-surface-variant': '#586D78',
+    '--outline': '#9BB5C1', '--outline-variant': '#CDE5F0',
+  },
+  warmorange: {
+    '--primary': '#BF5B17', '--primary-light': '#EDB89B', '--primary-container': '#FFDBC8', '--on-primary': '#fff',
+    '--bg': '#FFF8F5', '--surface': '#FFFFFF', '--surface-variant': '#F4DDD3',
+    '--on-bg': '#3B1400', '--on-surface-variant': '#976249',
+    '--outline': '#EDB89B', '--outline-variant': '#FFDBC8',
+  },
+};
+
+function setTheme(name) {
+  const vars = themes[name];
+  const root = document.documentElement;
+  Object.entries(vars).forEach(([k, v]) => root.style.setProperty(k, v));
+  document.querySelectorAll('.theme-btn').forEach(b => b.classList.remove('active'));
+  if (event && event.currentTarget && event.currentTarget.classList) {
+    event.currentTarget.classList.add('active');
+  }
+}
+
+function switchSettingsTab(el, tabId) {
+  // Switch tab buttons
+  el.parentElement.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  // Switch tab contents
+  const container = el.closest('.content');
+  container.querySelectorAll('.settings-tab-content').forEach(c => c.classList.remove('active'));
+  document.getElementById(tabId).classList.add('active');
+}
+</script>
+</body>
+</html>
