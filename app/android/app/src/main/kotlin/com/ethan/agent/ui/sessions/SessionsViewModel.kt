@@ -66,20 +66,33 @@ class SessionsViewModel @Inject constructor(
     fun load() {
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true, error = null) }
-            try {
-                val query = _state.value.query
-                val sessions = repository.getSessions(limit = 50, query = query.ifBlank { null })
-                // 只在非搜索时检测未读，避免搜索匹配到的 session 被误标为未读
-                if (query.isBlank()) {
-                    if (knownUpdatedAt.isEmpty()) {
-                        sessions.forEach { s -> knownUpdatedAt[s.id] = s.updatedAt }
+            val query = _state.value.query
+            if (query.isBlank()) {
+                // 非搜索：用 cached flow，先秒出缓存再网络刷新
+                try {
+                    repository.cachedSessions(limit = 50).collect { sessions ->
+                        if (knownUpdatedAt.isEmpty()) {
+                            sessions.forEach { s -> knownUpdatedAt[s.id] = s.updatedAt }
+                        } else {
+                            detectUnread(sessions)
+                        }
+                        _state.update { it.copy(sessions = sessions, isLoading = false) }
+                    }
+                } catch (e: Exception) {
+                    if (_state.value.sessions.isEmpty()) {
+                        _state.update { it.copy(isLoading = false, error = repository.friendlyError(e)) }
                     } else {
-                        detectUnread(sessions)
+                        _state.update { it.copy(isLoading = false) }
                     }
                 }
-                _state.update { it.copy(sessions = sessions, isLoading = false) }
-            } catch (e: Exception) {
-                _state.update { it.copy(isLoading = false, error = repository.friendlyError(e)) }
+            } else {
+                // 搜索：直接请求网络，不缓存
+                try {
+                    val sessions = repository.getSessions(limit = 50, query = query)
+                    _state.update { it.copy(sessions = sessions, isLoading = false) }
+                } catch (e: Exception) {
+                    _state.update { it.copy(isLoading = false, error = repository.friendlyError(e)) }
+                }
             }
         }
     }
@@ -149,7 +162,7 @@ class SessionsViewModel @Inject constructor(
 
     fun deleteSession(id: String) {
         viewModelScope.launch {
-            try { repository.deleteSession(id); load() }
+            try { repository.deleteSessionCached(id); load() }
             catch (e: Exception) { _state.update { it.copy(error = repository.friendlyError(e)) } }
         }
     }

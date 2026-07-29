@@ -70,49 +70,80 @@ class ChatViewModel @Inject constructor(
     private fun loadInitial(sessionId: String?) {
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true) }
-            try {
-                val models = repository.getModels()
-                val modes = repository.getModes()
-                val settings = repository.getAgentSettings()
-                val onboarding = repository.getOnboardingStatus()
 
-                if (sessionId != null) {
-                    val session = repository.getSession(sessionId)
-                    _state.update {
-                        it.copy(
-                            sessionId = session.id,
-                            title = session.title,
-                            selectedModel = session.model,
-                            selectedMode = session.mode ?: "",
-                            messages = session.messages.map { msg ->
-                                UiMessage(
-                                    role = msg.role,
-                                    content = msg.content,
-                                    toolSteps = msg.toolSteps ?: emptyList(),
-                                    usage = msg.usage,
-                                    quote = msg.quote,
-                                    createdAt = msg.createdAt,
+            // 并行加载元数据（cached flow: 先秒出缓存，再网络刷新）
+            launch {
+                try {
+                    repository.cachedModels().collect { models ->
+                        _state.update {
+                            it.copy(models = models, selectedModel = it.selectedModel ?: models.firstOrNull()?.id)
+                        }
+                    }
+                } catch (_: Exception) { }
+            }
+            launch {
+                try {
+                    repository.cachedModes().collect { modes ->
+                        _state.update { it.copy(modes = modes) }
+                    }
+                } catch (_: Exception) { }
+            }
+            launch {
+                try {
+                    repository.cachedAgentSettings().collect { settings ->
+                        _state.update { it.copy(agentName = settings.agentName) }
+                        if (sessionId == null) {
+                            _state.update {
+                                it.copy(
+                                    selectedModel = settings.defaultModel.ifBlank { it.models.firstOrNull()?.id },
+                                    isLoading = false,
                                 )
-                            },
-                        )
+                            }
+                        }
                     }
-                } else {
-                    _state.update {
-                        it.copy(selectedModel = settings.defaultModel.ifBlank { models.firstOrNull()?.id })
-                    }
-                }
+                } catch (_: Exception) { }
+            }
+            launch {
+                try {
+                    val onboarding = repository.getOnboardingStatus()
+                    _state.update { it.copy(onboarding = onboarding, showOnboarding = onboarding.firstTime) }
+                } catch (_: Exception) { }
+            }
 
-                _state.update {
-                    it.copy(
-                        models = models,
-                        modes = modes,
-                        onboarding = onboarding,
-                        showOnboarding = onboarding.firstTime,
-                        isLoading = false,
-                    )
+            // session 详情：cached flow 先秒出缓存数据，再网络刷新
+            if (sessionId != null) {
+                try {
+                    repository.cachedSession(sessionId).collect { session ->
+                        _state.update {
+                            it.copy(
+                                sessionId = session.id,
+                                title = session.title,
+                                selectedModel = session.model,
+                                selectedMode = session.mode ?: "",
+                                messages = session.messages.map { msg ->
+                                    UiMessage(
+                                        role = msg.role,
+                                        content = msg.content,
+                                        toolSteps = msg.toolSteps ?: emptyList(),
+                                        usage = msg.usage,
+                                        quote = msg.quote,
+                                        createdAt = msg.createdAt,
+                                    )
+                                },
+                                isLoading = false,
+                            )
+                        }
+                    }
+                } catch (e: Exception) {
+                    // 网络失败且无缓存时才显示错误；有缓存时数据已在 state 中
+                    if (_state.value.messages.isEmpty()) {
+                        _state.update { it.copy(isLoading = false, error = repository.friendlyError(e)) }
+                    } else {
+                        _state.update { it.copy(isLoading = false) }
+                    }
                 }
-            } catch (e: Exception) {
-                _state.update { it.copy(isLoading = false, error = repository.friendlyError(e)) }
+            } else {
+                _state.update { it.copy(isLoading = false) }
             }
         }
     }

@@ -92,15 +92,30 @@ class SettingsViewModel @Inject constructor(
     fun load() {
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true, error = null) }
-            var error: String? = null
 
+            // agentSettings 和 systemSettings 用 cached flow，先秒出缓存
+            launch {
+                try {
+                    repository.cachedAgentSettings().collect { agent ->
+                        _state.update { it.copy(agentSettings = agent, isLoading = false) }
+                    }
+                } catch (e: Exception) {
+                    _state.update { it.copy(error = repository.friendlyError(e), isLoading = false) }
+                }
+            }
+            launch {
+                try {
+                    repository.cachedSystemSettings().collect { system ->
+                        _state.update { it.copy(systemSettings = system) }
+                    }
+                } catch (_: Exception) { }
+            }
+
+            // 其余设置直接请求网络（无缓存）
+            var error: String? = null
             val version = runCatching { repository.checkHealth() }.getOrNull()
-            val agent = runCatching { repository.getAgentSettings() }
-                .onFailure { error = repository.friendlyError(it) }.getOrNull()
             val providers = runCatching { repository.getProviderSettings() }
                 .onFailure { if (error == null) error = repository.friendlyError(it) }.getOrDefault(emptyMap())
-            val system = runCatching { repository.getSystemSettings() }
-                .onFailure { if (error == null) error = repository.friendlyError(it) }.getOrNull()
             val profile = runCatching { repository.getUserProfile() }
                 .onFailure { if (error == null) error = repository.friendlyError(it) }.getOrDefault("")
             val channels = runCatching { repository.getChannels() }
@@ -111,9 +126,7 @@ class SettingsViewModel @Inject constructor(
             _state.update {
                 it.copy(
                     serverVersion = version,
-                    agentSettings = agent,
                     providers = providers,
-                    systemSettings = system,
                     profile = profile,
                     channels = channels,
                     apiKeys = keys,

@@ -81,19 +81,25 @@ class MemoryViewModel @Inject constructor(
     fun load() {
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true) }
-            try {
-                val allFacts = repository.getFacts()
-                val procedures = repository.getProcedures()
-                _state.update {
-                    it.copy(
-                        allFacts = allFacts,
-                        facts = allFacts.toFactItems(),
-                        procedures = procedures,
-                        isLoading = false,
-                    )
+            launch {
+                try {
+                    repository.cachedFacts().collect { allFacts ->
+                        _state.update {
+                            it.copy(allFacts = allFacts, facts = allFacts.toFactItems(), isLoading = false)
+                        }
+                    }
+                } catch (e: Exception) {
+                    if (_state.value.allFacts.isEmpty()) {
+                        _state.update { it.copy(isLoading = false, error = repository.friendlyError(e)) }
+                    }
                 }
-            } catch (e: Exception) {
-                _state.update { it.copy(isLoading = false, error = repository.friendlyError(e)) }
+            }
+            launch {
+                try {
+                    repository.cachedProcedures().collect { procedures ->
+                        _state.update { it.copy(procedures = procedures) }
+                    }
+                } catch (_: Exception) { }
             }
         }
     }

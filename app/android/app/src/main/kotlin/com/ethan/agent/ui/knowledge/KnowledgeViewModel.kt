@@ -41,18 +41,32 @@ class KnowledgeViewModel @Inject constructor(
     fun load() {
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true) }
-            try {
-                val q = _state.value.query
-                val items = if (q.isBlank()) {
-                    repository.getKnowledge()
-                } else if (_state.value.semanticSearch) {
-                    repository.searchKnowledge(q)
-                } else {
-                    repository.getKnowledge(q, "keyword")
+            val q = _state.value.query
+            if (q.isBlank()) {
+                // 非搜索：用 cached flow 秒出
+                try {
+                    repository.cachedKnowledge().collect { items ->
+                        _state.update { it.copy(items = items, isLoading = false) }
+                    }
+                } catch (e: Exception) {
+                    if (_state.value.items.isEmpty()) {
+                        _state.update { it.copy(isLoading = false, error = repository.friendlyError(e)) }
+                    } else {
+                        _state.update { it.copy(isLoading = false) }
+                    }
                 }
-                _state.update { it.copy(items = items, isLoading = false) }
-            } catch (e: Exception) {
-                _state.update { it.copy(isLoading = false, error = repository.friendlyError(e)) }
+            } else {
+                // 搜索：直接网络请求
+                try {
+                    val items = if (_state.value.semanticSearch) {
+                        repository.searchKnowledge(q)
+                    } else {
+                        repository.getKnowledge(q, "keyword")
+                    }
+                    _state.update { it.copy(items = items, isLoading = false) }
+                } catch (e: Exception) {
+                    _state.update { it.copy(isLoading = false, error = repository.friendlyError(e)) }
+                }
             }
         }
     }

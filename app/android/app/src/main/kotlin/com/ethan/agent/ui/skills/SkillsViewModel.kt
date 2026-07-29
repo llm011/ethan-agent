@@ -54,10 +54,15 @@ class SkillsViewModel @Inject constructor(
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true) }
             try {
-                val skills = repository.getSkills()
-                _state.update { it.copy(skills = skills, isLoading = false) }
+                repository.cachedSkills().collect { skills ->
+                    _state.update { it.copy(skills = skills, isLoading = false) }
+                }
             } catch (e: Exception) {
-                _state.update { it.copy(isLoading = false, error = repository.friendlyError(e)) }
+                if (_state.value.skills.isEmpty()) {
+                    _state.update { it.copy(isLoading = false, error = repository.friendlyError(e)) }
+                } else {
+                    _state.update { it.copy(isLoading = false) }
+                }
             }
         }
     }

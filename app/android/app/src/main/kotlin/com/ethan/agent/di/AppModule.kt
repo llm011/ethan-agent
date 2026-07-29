@@ -8,6 +8,7 @@ import com.ethan.agent.core.network.ChatSseClient
 import com.ethan.agent.core.network.EthanApiService
 import com.ethan.agent.core.network.NetworkFactory
 import com.ethan.agent.data.EthanRepository
+import com.ethan.agent.data.LocalCache
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -56,10 +57,15 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun provideLocalCache(@ApplicationContext context: Context): LocalCache = LocalCache(context)
+
+    @Provides
+    @Singleton
     fun provideRepository(
         configStore: AppConfigStore,
         api: EthanApiService,
         sseClient: ChatSseClient,
         tokenProvider: () -> String,
-    ): EthanRepository = EthanRepository(configStore, api, sseClient, tokenProvider)
+        localCache: LocalCache,
+    ): EthanRepository = EthanRepository(configStore, api, sseClient, tokenProvider, localCache)
 }
