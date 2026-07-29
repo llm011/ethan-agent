@@ -35,6 +35,7 @@ from ethan.tools.builtin.memory_write import MemoryWriteTool
 from ethan.tools.builtin.plan import PlanReadTool, PlanUpdateTool, PlanWriteTool
 from ethan.tools.builtin.procedure_write import ProcedureWriteTool
 from ethan.tools.builtin.profile_update import ProfileUpdateTool
+from ethan.tools.builtin.recall_memory import RecallMemoryTool
 from ethan.tools.builtin.schedule import ScheduleCreateTool, ScheduleListTool, ScheduleRemoveTool
 from ethan.tools.builtin.search import FdTool, RipgrepTool
 from ethan.tools.builtin.secrets import GetSecretTool, ListSecretsTool, SetSecretTool
@@ -75,7 +76,7 @@ def _get_cached_skill_registry(user_id: str) -> SkillRegistry:
     return registry
 
 
-def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str = "web") -> ToolRegistry:
+def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str = "web", mode: str = "") -> ToolRegistry:
     """构建工具注册表。user_id 透传给需要它的工具（Schedule/Knowledge/Memory 等）。
 
     channel 决定渠道相关工具是否注册：ui_card 仅在能渲染 A2UI 的渠道（web/repl）注册，
@@ -130,6 +131,7 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
     registry.register(KnowledgeAddTool(user_id=user_id))
     registry.register(KnowledgeEditTool(user_id=user_id))
     registry.register(MemoryWriteTool(user_id=user_id))
+    registry.register(RecallMemoryTool(mode=mode))
     registry.register(ProcedureWriteTool(user_id=user_id))
     registry.register(ProfileUpdateTool(user_id=user_id))
     registry.register(PlanWriteTool(user_id=user_id))
@@ -181,6 +183,6 @@ def create_agent(
     if user_id:
         set_user_id(user_id)
     ensure_user_dirs()
-    registry = build_tool_registry(user_id=user_id, toolset=toolset, channel=channel)
+    registry = build_tool_registry(user_id=user_id, toolset=toolset, channel=channel, mode=mode)
     skills = _get_cached_skill_registry(user_id)
     return Agent(tool_registry=registry, skill_registry=skills, model=model, channel=channel, user_id=user_id, mode=mode)

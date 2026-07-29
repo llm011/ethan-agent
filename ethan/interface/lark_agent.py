@@ -228,6 +228,7 @@ async def _handle_agent_message(
         from ethan.tools.builtin.memory_write import MemoryWriteTool
         from ethan.tools.builtin.procedure_write import ProcedureWriteTool
         from ethan.tools.builtin.profile_update import ProfileUpdateTool
+        from ethan.tools.builtin.recall_memory import RecallMemoryTool
         from ethan.tools.builtin.schedule import ScheduleCreateTool, ScheduleListTool, ScheduleRemoveTool
         from ethan.tools.builtin.search import FdTool, RipgrepTool
         from ethan.tools.builtin.secrets import GetSecretTool, ListSecretsTool, SetSecretTool
@@ -247,7 +248,7 @@ async def _handle_agent_message(
                          RipgrepTool(), FdTool(),
                          ScheduleCreateTool(), ScheduleListTool(), ScheduleRemoveTool(),
                          KnowledgeSearchTool(), KnowledgeReadTool(), KnowledgeAddTool(), KnowledgeEditTool(),
-                         MemoryWriteTool(), ProcedureWriteTool(), ProfileUpdateTool(), SkillCreateTool(),
+                         MemoryWriteTool(), RecallMemoryTool(mode=session_mode), ProcedureWriteTool(), ProfileUpdateTool(), SkillCreateTool(),
                          SkillReadTool(), SkillListTool(),
                          SetSecretTool(), GetSecretTool(), ListSecretsTool(),
                          UiCardTool(channel="lark"),
