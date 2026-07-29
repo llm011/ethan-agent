@@ -18,6 +18,8 @@ import com.ethan.agent.core.model.ToolTiersResponse
 import com.ethan.agent.data.EthanRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -93,7 +95,7 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true, error = null) }
 
-            // agentSettings 和 systemSettings 用 cached flow，先秒出缓存
+            // agentSettings 和 systemSettings 用 cached flow，先秒出缓存，再后台刷新
             launch {
                 try {
                     repository.cachedAgentSettings().collect { agent ->
@@ -111,28 +113,33 @@ class SettingsViewModel @Inject constructor(
                 } catch (_: Exception) { }
             }
 
-            // 其余设置直接请求网络（无缓存）
-            var error: String? = null
-            val version = runCatching { repository.checkHealth() }.getOrNull()
-            val providers = runCatching { repository.getProviderSettings() }
-                .onFailure { if (error == null) error = repository.friendlyError(it) }.getOrDefault(emptyMap())
-            val profile = runCatching { repository.getUserProfile() }
-                .onFailure { if (error == null) error = repository.friendlyError(it) }.getOrDefault("")
-            val channels = runCatching { repository.getChannels() }
-                .onFailure { if (error == null) error = repository.friendlyError(it) }.getOrDefault(emptyList())
-            val keys = runCatching { repository.getApiKeys() }
-                .onFailure { /* API Keys 单独加载，失败不阻塞其他设置 */ }.getOrDefault(emptyList())
+            // 其余设置并行请求，避免服务器不可达时串行 30s×N 的死等
+            launch {
+                coroutineScope {
+                    val versionDef = async { runCatching { repository.checkHealth() }.getOrNull() }
+                    val providersDef = async { runCatching { repository.getProviderSettings() }.getOrDefault(emptyMap()) }
+                    val profileDef = async { runCatching { repository.getUserProfile() }.getOrDefault("") }
+                    val channelsDef = async { runCatching { repository.getChannels() }.getOrDefault(emptyList()) }
+                    // API Keys 单独加载，失败不阻塞其他设置
+                    val keysDef = async { runCatching { repository.getApiKeys() }.getOrDefault(emptyList()) }
 
-            _state.update {
-                it.copy(
-                    serverVersion = version,
-                    providers = providers,
-                    profile = profile,
-                    channels = channels,
-                    apiKeys = keys,
-                    isLoading = false,
-                    error = error,
-                )
+                    val version = versionDef.await()
+                    val providers = providersDef.await()
+                    val profile = profileDef.await()
+                    val channels = channelsDef.await()
+                    val keys = keysDef.await()
+
+                    _state.update {
+                        it.copy(
+                            serverVersion = version,
+                            providers = providers,
+                            profile = profile,
+                            channels = channels,
+                            apiKeys = keys,
+                            isLoading = false,
+                        )
+                    }
+                }
             }
         }
     }
