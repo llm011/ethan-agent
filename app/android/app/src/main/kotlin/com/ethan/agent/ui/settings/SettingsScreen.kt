@@ -246,11 +246,11 @@ private fun ConnectionTab(state: SettingsUiState, onUrlChange: (String) -> Unit,
 }
 
 private val THEME_OPTIONS = listOf(
+    "warm_orange" to "暖橙",
     "system" to "跟随系统",
     "light" to "浅色",
     "dark" to "深色",
     "qingwa" to "青瓦",
-    "warm_orange" to "暖橙",
     "plain_paper" to "素纸",
     "mist" to "微雾",
 )
