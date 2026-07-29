@@ -1,6 +1,7 @@
 package com.ethan.agent.ui.settings
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,6 +17,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
@@ -44,6 +46,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.ethan.agent.core.model.AgentSettings
@@ -58,6 +61,7 @@ import com.ethan.agent.ui.components.SnackbarContainer
 @Composable
 fun SettingsScreen(
     state: SettingsUiState,
+    onBack: () -> Unit = {},
     onTabChange: (SettingsTab) -> Unit,
     onServerUrlChange: (String) -> Unit,
     onSaveServerUrl: () -> Unit,
@@ -107,36 +111,42 @@ fun SettingsScreen(
     }
 
     Scaffold(
-        topBar = {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                color = MaterialTheme.colorScheme.surface,
-                shadowElevation = 2.dp,
-            ) {
-                Text(
-                    "设置",
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
-                )
-            }
-        },
         snackbarHost = { SnackbarContainer(snackbar) },
     ) { padding ->
-        if (state.isLoading && state.agentSettings == null) {
-            LoadingBox(Modifier.padding(padding))
-            return@Scaffold
-        }
+        Column(Modifier.fillMaxSize().padding(bottom = padding.calculateBottomPadding())) {
+            // 简洁顶栏：不再用 EthanTopBar 避免双重 statusBarsPadding
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "返回",
+                        tint = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+                Text(
+                    text = "设置",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
+                )
+            }
 
-        Column(Modifier.fillMaxSize().padding(padding)) {
+            if (state.isLoading && state.agentSettings == null) {
+                LoadingBox()
+                return@Scaffold
+            }
             SettingsTabRow(state.tab, onTabChange)
 
             Column(
                 Modifier
                     .weight(1f)
                     .verticalScroll(rememberScrollState())
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 when (state.tab) {
                     SettingsTab.Connection -> ConnectionTab(state, onServerUrlChange, onSaveServerUrl)
@@ -177,53 +187,44 @@ fun SettingsScreen(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SettingsTabRow(selected: SettingsTab, onTabChange: (SettingsTab) -> Unit) {
-    // Segment Control style: grey container with white floating active indicator
-    Surface(
+    LazyRow(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.outlineVariant),
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        LazyRow(
-            modifier = Modifier.padding(3.dp),
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            items(SettingsTab.entries.toList()) { tab ->
-                val isSelected = selected == tab
-                Surface(
-                    onClick = { onTabChange(tab) },
-                    shape = RoundedCornerShape(11.dp),
-                    color = if (isSelected) MaterialTheme.colorScheme.surface
-                        else androidx.compose.ui.graphics.Color.Transparent,
-                    shadowElevation = if (isSelected) 2.dp else 0.dp,
-                ) {
-                    Text(
-                        when (tab) {
-                            SettingsTab.Connection -> "连接"
-                            SettingsTab.General -> "Agent"
-                            SettingsTab.Providers -> "模型"
-                            SettingsTab.Channels -> "渠道"
-                            SettingsTab.Identity -> "身份"
-                            SettingsTab.Soul -> "灵魂"
-                            SettingsTab.Tools -> "工具"
-                            SettingsTab.Heartbeat -> "心跳"
-                            SettingsTab.Profile -> "画像"
-                            SettingsTab.PromptPreview -> "预览"
-                            SettingsTab.ApiKeys -> "Keys"
-                            SettingsTab.FastRules -> "Fast Rules"
-                            SettingsTab.ToolTiers -> "路由档位"
-                        },
-                        style = MaterialTheme.typography.labelMedium.copy(
-                            fontWeight = if (isSelected) androidx.compose.ui.text.font.FontWeight.Bold
-                                else androidx.compose.ui.text.font.FontWeight.SemiBold,
-                        ),
-                        color = if (isSelected) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
-                    )
-                }
+        items(SettingsTab.entries.toList()) { tab ->
+            val isSelected = selected == tab
+            val label = when (tab) {
+                SettingsTab.Connection -> "连接"
+                SettingsTab.General -> "通用"
+                SettingsTab.Providers -> "模型"
+                SettingsTab.Channels -> "渠道"
+                SettingsTab.Identity -> "身份"
+                SettingsTab.Soul -> "灵魂"
+                SettingsTab.Tools -> "工具"
+                SettingsTab.Heartbeat -> "心跳"
+                SettingsTab.Profile -> "画像"
+                SettingsTab.PromptPreview -> "预览"
+                SettingsTab.ApiKeys -> "Keys"
+                SettingsTab.FastRules -> "Fast Rules"
+                SettingsTab.ToolTiers -> "路由档位"
+            }
+            Surface(
+                onClick = { onTabChange(tab) },
+                shape = RoundedCornerShape(16.dp),
+                color = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                    else androidx.compose.ui.graphics.Color.Transparent,
+            ) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                    ),
+                    color = if (isSelected) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                )
             }
         }
     }
@@ -232,14 +233,15 @@ private fun SettingsTabRow(selected: SettingsTab, onTabChange: (SettingsTab) -> 
 @Composable
 private fun ConnectionTab(state: SettingsUiState, onUrlChange: (String) -> Unit, onSave: () -> Unit) {
     CuteCard {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("服务器连接", style = MaterialTheme.typography.titleMedium)
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("服务器连接", style = MaterialTheme.typography.titleSmall)
             OutlinedTextField(state.serverUrl, onUrlChange, label = { Text("服务器地址") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
             state.serverVersion?.let { Text("版本: $it", style = MaterialTheme.typography.bodySmall) }
             TextButton(onClick = onSave) { Text("测试并保存") }
             Text(
                 "示例: http://192.168.1.100:8900 或 https://your-nas.com:8900",
                 style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
@@ -265,7 +267,7 @@ private fun GeneralTab(
     onCheckUpdate: () -> Unit,
 ) {
     CuteCard {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             OutlinedTextField(settings.agentName, { onUpdate(settings.copy(agentName = it)) }, label = { Text("Agent 名称") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
             OutlinedTextField(settings.defaultModel, { onUpdate(settings.copy(defaultModel = it)) }, label = { Text("默认模型") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
             OutlinedTextField(settings.liteModel, { onUpdate(settings.copy(liteModel = it)) }, label = { Text("轻量模型") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
@@ -279,15 +281,15 @@ private fun GeneralTab(
     }
 
     CuteCard {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("主题", style = MaterialTheme.typography.titleSmall)
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(0.dp)) {
+            Text("主题", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(bottom = 4.dp))
             THEME_OPTIONS.forEach { (id, label) ->
                 Row(
-                    Modifier.fillMaxWidth(),
+                    Modifier.fillMaxWidth().padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    Text(label)
+                    Text(label, style = MaterialTheme.typography.bodyMedium)
                     if (themeId == id) {
                         Text("✓", color = MaterialTheme.colorScheme.primary)
                     } else {
@@ -295,16 +297,11 @@ private fun GeneralTab(
                     }
                 }
             }
-            Text(
-                "注：完整主题切换由 Track 7 实现，当前仅记录选择",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
     }
 
     CuteCard {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("系统", style = MaterialTheme.typography.titleSmall)
             OutlinedButton(onClick = onCheckUpdate, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -323,7 +320,7 @@ private fun ProvidersTab(
 ) {
     providers.forEach { (name, config) ->
         CuteCard {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(name, style = MaterialTheme.typography.titleSmall)
                 OutlinedTextField(
                     config.apiKey,
@@ -357,7 +354,7 @@ private fun ChannelsTab(
 ) {
     state.channels.forEach { channel ->
         CuteCard {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(channel.name, style = MaterialTheme.typography.titleSmall)
                 channel.config.forEach { (key, value) ->
                     OutlinedTextField(
@@ -428,7 +425,7 @@ private fun KnowledgeValidatePanel(
     var showSheet by remember { mutableStateOf(false) }
 
     CuteCard {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("知识库连通性", style = MaterialTheme.typography.titleSmall)
             OutlinedButton(onClick = { showSheet = true }, modifier = Modifier.fillMaxWidth()) {
                 Text("测试连接")
@@ -541,9 +538,9 @@ private fun KnowledgeValidateSheet(
 @Composable
 private fun SystemTextTab(title: String, content: String, onChange: (String) -> Unit, onSave: () -> Unit) {
     CuteCard {
-        Column(Modifier.padding(16.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            OutlinedTextField(content, onChange, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), minLines = 10, shape = RoundedCornerShape(12.dp))
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+            Text(title, style = MaterialTheme.typography.titleSmall)
+            OutlinedTextField(content, onChange, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), minLines = 10, shape = RoundedCornerShape(12.dp))
             TextButton(onClick = onSave) { Text("保存") }
         }
     }
@@ -552,8 +549,8 @@ private fun SystemTextTab(title: String, content: String, onChange: (String) -> 
 @Composable
 private fun ProfileTab(content: String, onChange: (String) -> Unit, onSave: () -> Unit) {
     CuteCard {
-        Column(Modifier.padding(16.dp)) {
-            Text("我的画像", style = MaterialTheme.typography.titleMedium)
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+            Text("我的画像", style = MaterialTheme.typography.titleSmall)
             OutlinedTextField(content, onChange, modifier = Modifier.fillMaxWidth(), minLines = 12, shape = RoundedCornerShape(12.dp))
             TextButton(onClick = onSave) { Text("保存") }
         }
@@ -613,7 +610,7 @@ private fun FastRulesTab(state: SettingsUiState) {
     }
 
     CuteCard {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("快速基础工具 (fast_base_tools)", style = MaterialTheme.typography.titleSmall)
             if (rules.fastBaseTools.isEmpty()) {
                 Text("（无）", style = MaterialTheme.typography.bodySmall)
@@ -626,7 +623,7 @@ private fun FastRulesTab(state: SettingsUiState) {
     }
 
     CuteCard {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Fast Rules (${rules.fastRules.size})", style = MaterialTheme.typography.titleSmall)
             if (rules.fastRules.isEmpty()) {
                 Text("尚无规则", style = MaterialTheme.typography.bodySmall)
@@ -688,7 +685,7 @@ private fun ToolTiersTab(state: SettingsUiState) {
 
     tiers.tiers.forEach { tier ->
         CuteCard {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("${tier.label} (${tier.tools.size})", style = MaterialTheme.typography.titleSmall)
                 Text(tier.desc, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 HorizontalDivider()

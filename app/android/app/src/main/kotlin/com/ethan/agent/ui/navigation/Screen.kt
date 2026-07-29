@@ -2,6 +2,7 @@ package com.ethan.agent.ui.navigation
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.filled.Assignment
 import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.MenuBook
@@ -30,7 +31,7 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector?
     data object Logs : Screen("logs", "日志")
     data object More : Screen("more", "更多", Icons.Default.MoreHoriz)
     // Track 8 screens — routes declared here, wired in EthanApp (Track 9)
-    data object BackgroundTasks : Screen("background-tasks", "后台任务")
+    data object BackgroundTasks : Screen("background-tasks", "后台任务", Icons.Default.Assignment)
     data object PptPreview : Screen("ppt-preview/{sessionId}", "PPT 预览") {
         fun createRoute(sessionId: String) = "ppt-preview/$sessionId"
     }

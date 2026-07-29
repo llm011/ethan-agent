@@ -713,4 +713,8 @@ data class UiMessage(
     val usage: com.ethan.agent.core.model.Usage? = null,
     val quote: Quote? = null,
     val isStreaming: Boolean = false,
+    val createdAt: Long? = null,
+    val ttfbMs: Long? = null,
+    val totalDurationMs: Long? = null,
+    val generationDurationMs: Long? = null,
 )

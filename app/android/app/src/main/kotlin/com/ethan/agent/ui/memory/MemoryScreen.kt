@@ -1,7 +1,9 @@
 package com.ethan.agent.ui.memory
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,11 +28,15 @@ import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -40,11 +46,15 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -62,6 +72,8 @@ import com.ethan.agent.core.model.InsightItem
 import com.ethan.agent.core.model.Procedure
 import com.ethan.agent.core.model.StructuredRecord
 import com.ethan.agent.ui.components.ErrorSnackbar
+import com.ethan.agent.ui.components.EthanScrollableTabBar
+import com.ethan.agent.ui.components.EthanTopBar
 import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.SimpleMarkdown
 import com.ethan.agent.ui.components.SnackbarContainer
@@ -82,6 +94,7 @@ fun MemoryScreen(
     onDeleteFact: (String) -> Unit,
     onDeleteProcedure: (String) -> Unit,
     onClearError: () -> Unit,
+    onBack: () -> Unit = {},
     // new
     onInsightsDateChange: (String) -> Unit = {},
     onRefreshInsights: () -> Unit = {},
@@ -149,9 +162,13 @@ fun MemoryScreen(
     }
 
     Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("记忆") },
+        snackbarHost = { SnackbarContainer(snackbar) },
+    ) { padding ->
+        Column(Modifier.fillMaxSize().padding(bottom = padding.calculateBottomPadding())) {
+            // 紧凑顶栏
+            EthanTopBar(
+                title = "记忆",
+                onBack = onBack,
                 actions = {
                     when (state.tab) {
                         MemoryTab.Facts -> {
@@ -171,19 +188,14 @@ fun MemoryScreen(
                     }
                 },
             )
-        },
-        snackbarHost = { SnackbarContainer(snackbar) },
-    ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
-            TabRow(selectedTabIndex = state.tab.ordinal) {
-                MemoryTab.entries.forEach { tab ->
-                    Tab(
-                        selected = state.tab == tab,
-                        onClick = { onTabChange(tab) },
-                        text = { Text(tab.title) },
-                    )
-                }
-            }
+
+            // 可横滑 Tab 栏
+            EthanScrollableTabBar(
+                tabs = MemoryTab.entries.toList(),
+                selectedTab = state.tab,
+                onTabSelected = onTabChange,
+                labelOf = { it.title },
+            )
 
             if (state.isLoading) {
                 LoadingBox()
@@ -415,19 +427,57 @@ private fun InsightsTab(
     onDateChange: (String) -> Unit,
     onRefresh: () -> Unit,
 ) {
-    Column(Modifier.fillMaxSize()) {
-        OutlinedTextField(
-            value = date,
-            onValueChange = onDateChange,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            label = { Text("日期筛选（留空=全部，格式 yyyy-MM-dd）") },
-            trailingIcon = {
-                IconButton(onClick = onRefresh) {
-                    Icon(Icons.Default.Search, contentDescription = "查询")
-                }
+    var showDatePicker by remember { mutableStateOf(false) }
+    val datePickerState = rememberDatePickerState()
+
+    if (showDatePicker) {
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDatePicker = false
+                    datePickerState.selectedDateMillis?.let { millis ->
+                        val formatted = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(millis))
+                        onDateChange(formatted)
+                    }
+                }) { Text("确定") }
             },
-            singleLine = true,
-        )
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) { Text("取消") }
+            },
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.weight(1f).clickable { showDatePicker = true }
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(Icons.Default.CalendarToday, contentDescription = "选择日期", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    text = date.ifBlank { "全部日期" },
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = if (date.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                )
+            }
+            if (date.isNotBlank()) {
+                TextButton(onClick = { onDateChange("") }) { Text("清除") }
+            }
+            IconButton(onClick = onRefresh) {
+                Icon(Icons.Default.Refresh, contentDescription = "刷新")
+            }
+        }
         if (insights.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("暂无永久记忆", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -472,6 +522,7 @@ private fun InsightCard(item: InsightItem) {
 
 // ── Procedures tab ───────────────────────────────────────────────────────────
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ProceduresTab(procedures: List<Procedure>, onDelete: (String) -> Unit) {
     if (procedures.isEmpty()) {
@@ -486,12 +537,49 @@ private fun ProceduresTab(procedures: List<Procedure>, onDelete: (String) -> Uni
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         items(procedures, key = { it.id }) { proc ->
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+            var showDeleteConfirm by remember { mutableStateOf(false) }
+            if (showDeleteConfirm) {
+                AlertDialog(
+                    onDismissRequest = { showDeleteConfirm = false },
+                    title = { Text("删除这条流程？") },
+                    text = { Text("删除后无法恢复。") },
+                    confirmButton = {
+                        TextButton(onClick = { showDeleteConfirm = false; onDelete(proc.id) }) { Text("删除") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showDeleteConfirm = false }) { Text("取消") }
+                    },
+                )
+            }
+            val dismissState = rememberSwipeToDismissBoxState(
+                confirmValueChange = { value ->
+                    if (value == SwipeToDismissBoxValue.EndToStart) {
+                        showDeleteConfirm = true
+                    }
+                    false
+                },
+            )
+            SwipeToDismissBox(
+                state = dismissState,
+                backgroundContent = {
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.errorContainer)
+                            .padding(horizontal = 20.dp),
+                        contentAlignment = Alignment.CenterEnd,
+                    ) {
+                        Icon(Icons.Default.Delete, contentDescription = "删除", tint = MaterialTheme.colorScheme.onErrorContainer)
+                    }
+                },
+                enableDismissFromStartToEnd = false,
             ) {
-                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.Top) {
-                    Column(Modifier.weight(1f)) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                ) {
+                    Column(Modifier.padding(16.dp)) {
                         Text(proc.rule, style = MaterialTheme.typography.bodyLarge)
                         Text(
                             "命中 ${proc.hitCount} 次",
@@ -499,9 +587,6 @@ private fun ProceduresTab(procedures: List<Procedure>, onDelete: (String) -> Uni
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 6.dp),
                         )
-                    }
-                    IconButton(onClick = { onDelete(proc.id) }) {
-                        Icon(Icons.Default.Delete, contentDescription = "删除")
                     }
                 }
             }
@@ -523,30 +608,51 @@ private fun RecordsTab(
     onConfirm: (String) -> Unit,
     onDelete: (String) -> Unit,
 ) {
-    Column(Modifier.fillMaxSize()) {
-        // Search bar
-        OutlinedTextField(
-            value = search,
-            onValueChange = onSearchChange,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            placeholder = { Text("搜索记录…") },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-            singleLine = true,
-        )
+    var filtersExpanded by remember { mutableStateOf(false) }
+    var searchVisible by remember { mutableStateOf(false) }
+    val scrollState = rememberScrollState()
 
-        // Status filters
-        val statuses = listOf(null to "全部", "pending" to "候选", "confirmed" to "已确认", "superseded" to "已替代")
-        FlowRow(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+    Column(Modifier.fillMaxSize()) {
+        // Top bar: filter chips (expandable) + fixed icons
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            statuses.forEach { (value, label) ->
-                FilterChip(
-                    selected = filter.status == value,
-                    onClick = { onFilterChange(filter.copy(status = value)) },
-                    label = { Text(label) },
-                )
+            if (filtersExpanded) {
+                val statuses = listOf(null to "全部", "pending" to "候选", "confirmed" to "已确认", "superseded" to "已替代")
+                Row(
+                    modifier = Modifier.weight(1f).horizontalScroll(scrollState),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    statuses.forEach { (value, label) ->
+                        FilterChip(
+                            selected = filter.status == value,
+                            onClick = { onFilterChange(filter.copy(status = value)) },
+                            label = { Text(label) },
+                        )
+                    }
+                }
+            } else {
+                Spacer(Modifier.weight(1f))
             }
+            IconButton(onClick = { filtersExpanded = !filtersExpanded }) {
+                Icon(Icons.Default.Tune, contentDescription = "筛选")
+            }
+            IconButton(onClick = { searchVisible = !searchVisible }) {
+                Icon(Icons.Default.Search, contentDescription = "搜索")
+            }
+        }
+
+        // Search field (conditionally shown)
+        AnimatedVisibility(visible = searchVisible) {
+            OutlinedTextField(
+                value = search,
+                onValueChange = onSearchChange,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                placeholder = { Text("搜索记录…") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                singleLine = true,
+            )
         }
 
         Spacer(Modifier.height(4.dp))

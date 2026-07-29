@@ -24,7 +24,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -32,6 +31,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ethan.agent.core.model.SkillInfo
 import com.ethan.agent.ui.components.ErrorSnackbar
+import com.ethan.agent.ui.components.EthanTopBar
 import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.SnackbarContainer
 
@@ -39,6 +39,7 @@ import com.ethan.agent.ui.components.SnackbarContainer
 @Composable
 fun SkillsScreen(
     state: SkillsUiState,
+    onBack: () -> Unit = {},
     onQueryChange: (String) -> Unit,
     onSelect: (SkillInfo) -> Unit,
     onStartCreate: () -> Unit,
@@ -54,7 +55,6 @@ fun SkillsScreen(
     ErrorSnackbar(state.error, onClearError, snackbar)
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("技能") }) },
         floatingActionButton = {
             FloatingActionButton(onClick = onStartCreate) {
                 Icon(Icons.Default.Add, contentDescription = "新建")
@@ -67,7 +67,10 @@ fun SkillsScreen(
             return@Scaffold
         }
 
-        Row(Modifier.fillMaxSize().padding(padding)) {
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            EthanTopBar(title = "技能", onBack = onBack)
+
+            Row(Modifier.fillMaxSize()) {
             Column(Modifier.weight(1f)) {
                 OutlinedTextField(
                     value = state.query,
@@ -130,6 +133,7 @@ fun SkillsScreen(
                 } else {
                     Text("选择或新建技能", modifier = Modifier.padding(16.dp))
                 }
+            }
             }
         }
     }

@@ -10,7 +10,7 @@ import androidx.compose.ui.graphics.Color
 // ── Global theme state ───────────────────────────────────────────────────────
 // Updated by SettingsViewModel.setTheme(); read by EthanTheme composable.
 object ThemeState {
-    var themeId by mutableStateOf("system")
+    var themeId by mutableStateOf("honey")
 }
 
 // ── Cute Theme Palette Helpers ────────────────────────────────────────────────

@@ -27,7 +27,6 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -42,6 +41,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.ethan.agent.core.model.KnowledgeItem
 import com.ethan.agent.ui.components.ErrorSnackbar
+import com.ethan.agent.ui.components.EthanTopBar
 import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.SimpleMarkdown
 import com.ethan.agent.ui.components.SnackbarContainer
@@ -50,6 +50,7 @@ import com.ethan.agent.ui.components.SnackbarContainer
 @Composable
 fun KnowledgeScreen(
     state: KnowledgeUiState,
+    onBack: () -> Unit = {},
     onQueryChange: (String) -> Unit,
     onToggleSemantic: () -> Unit,
     onSelect: (KnowledgeItem) -> Unit,
@@ -67,7 +68,6 @@ fun KnowledgeScreen(
     ErrorSnackbar(state.error, onClearError, snackbar)
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("知识库") }) },
         floatingActionButton = {
             FloatingActionButton(onClick = onStartCreate) {
                 Icon(Icons.Default.Add, contentDescription = "新建")
@@ -81,6 +81,7 @@ fun KnowledgeScreen(
         }
 
         Column(Modifier.fillMaxSize().padding(padding)) {
+            EthanTopBar(title = "知识库", onBack = onBack)
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
