@@ -247,10 +247,28 @@ async def update_user_profile(req: UserProfilePatch, user_id: str = Depends(veri
 # ── Provider settings ─────────────────────────────────────────────
 
 
+@router.get("/settings/providers/presets", dependencies=[Depends(verify_token)])
+async def get_provider_presets():
+    """列出内置 provider 预设，供前端「从预设添加」使用。"""
+    from ethan.core.provider_presets import PROVIDER_PRESETS
+    return {"presets": [
+        {"key": k, **{kk: vv for kk, vv in v.items() if kk != "env_keys"}}
+        for k, v in PROVIDER_PRESETS.items()
+    ]}
+
+
 @router.get("/settings/providers", dependencies=[Depends(verify_token)])
 async def get_provider_settings():
     config = get_config()
-    return {k: {"api_key": v.api_key, "base_url": v.base_url} for k, v in config.providers.items()}
+    return {
+        k: {
+            "api_key": v.api_key,
+            "base_url": v.base_url,
+            "type": v.type,
+            "disable_prompt_cache": v.disable_prompt_cache,
+        }
+        for k, v in config.providers.items()
+    }
 
 
 @router.patch("/settings/providers", dependencies=[Depends(verify_token)])
@@ -262,8 +280,26 @@ async def update_provider_settings(req: dict[str, dict]):
             config.providers[k] = ProviderConfig()
         if "api_key" in v and v["api_key"] is not None:
             config.providers[k].api_key = v["api_key"]
-        if "base_url" in v and v["base_url"] is not None:
-            config.providers[k].base_url = v["base_url"]
+        if "base_url" in v:
+            config.providers[k].base_url = v["base_url"] or None
+        if "type" in v and v["type"] is not None:
+            config.providers[k].type = v["type"]
+        if "disable_prompt_cache" in v and v["disable_prompt_cache"] is not None:
+            config.providers[k].disable_prompt_cache = bool(v["disable_prompt_cache"])
+    save_config(config)
+    reload_config()
+    return {"ok": True}
+
+
+@router.delete("/settings/providers/{key}", dependencies=[Depends(verify_token)])
+async def delete_provider(key: str):
+    """删除单个 provider 配置。同时清理引用该 provider 的模型条目。"""
+    config = get_config()
+    if key not in config.providers:
+        raise HTTPException(404, f"Provider '{key}' 不存在")
+    del config.providers[key]
+    # 移除引用了该 provider 的模型条目
+    config.models = [m for m in config.models if m.provider != key]
     save_config(config)
     reload_config()
     return {"ok": True}
