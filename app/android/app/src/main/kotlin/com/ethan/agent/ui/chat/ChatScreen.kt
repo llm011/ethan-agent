@@ -414,10 +414,13 @@ fun ChatScreen(
             ) {
                 if (state.messages.isEmpty()) {
                     item {
-                        EmptyChatState(onQuickAction = { text ->
-                            onInputChange(text)
-                            onSend()
-                        })
+                        EmptyChatState(
+                            modifier = Modifier.fillParentMaxSize(),
+                            onQuickAction = { text ->
+                                onInputChange(text)
+                                onSend()
+                            },
+                        )
                     }
                 } else {
                     // "加载更多"指示器
@@ -469,6 +472,7 @@ fun ChatScreen(
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
                     .background(MaterialTheme.colorScheme.background)
+                    .navigationBarsPadding()
                     .padding(horizontal = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
@@ -785,14 +789,16 @@ private fun formatDuration(ms: Long): String = when {
 }
 
 @Composable
-private fun EmptyChatState(onQuickAction: (String) -> Unit) {
+private fun EmptyChatState(
+    modifier: Modifier = Modifier,
+    onQuickAction: (String) -> Unit,
+) {
     val quickActions = listOf(
         "☀️ 深圳的天气怎么样" to "深圳的天气怎么样",
         "📄 帮我找找最新的 Agent 论文" to "帮我找找最新的 Agent 论文",
     )
     Column(
-        modifier = Modifier
-            .fillMaxSize()
+        modifier = modifier
             .wrapContentHeight(Alignment.CenterVertically)
             .padding(horizontal = 24.dp, vertical = 30.dp),
         horizontalAlignment = Alignment.CenterHorizontally,

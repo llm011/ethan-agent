@@ -88,6 +88,7 @@ fun SessionsScreen(
     onToggleHideHeartbeat: () -> Unit = {},
     onToggleHideScheduled: () -> Unit = {},
     onToggleSource: (String) -> Unit = {},
+    onSelectAllSources: () -> Unit = {},
     onBack: () -> Unit = {},
 ) {
     val snackbar = remember { SnackbarHostState() }
@@ -152,6 +153,26 @@ fun SessionsScreen(
                             .horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
+                    // "全部" chip：空集合表示全部
+                    val allSelected = state.selectedSources.isEmpty()
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = if (allSelected) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                        border = if (allSelected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier.clickable(
+                            indication = null,
+                            interactionSource = remember { MutableInteractionSource() },
+                        ) { onSelectAllSources() },
+                    ) {
+                        Text(
+                            text = "全部",
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (allSelected) MaterialTheme.colorScheme.onPrimary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     ALL_SOURCE_CHIPS.forEach { label ->
                         val sourceKey = SOURCE_CHIP_MAP[label] ?: label
                         val selected = state.selectedSources.contains(sourceKey)

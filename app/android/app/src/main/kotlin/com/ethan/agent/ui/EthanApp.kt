@@ -155,6 +155,7 @@ private fun MainContent(authViewModel: AuthViewModel) {
                     onToggleHideHeartbeat = vm::toggleHideHeartbeat,
                     onToggleHideScheduled = vm::toggleHideScheduled,
                     onToggleSource = vm::toggleSource,
+                    onSelectAllSources = vm::selectAllSources,
                     onBack = { navController.popBackStack() },
                 )
             }

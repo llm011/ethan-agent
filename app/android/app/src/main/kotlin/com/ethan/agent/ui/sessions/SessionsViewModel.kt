@@ -28,13 +28,13 @@ data class SessionsUiState(
     val sourceFilter: String = "All",
     val hideHeartbeat: Boolean = false,
     val hideScheduled: Boolean = false,
-    val selectedSources: Set<String> = setOf("web", "lark", "repl", "desktop", "wechat"),
+    // 空集合表示"全部"，避免 source 为 null 或非已知来源的 session 被永久隐藏
+    val selectedSources: Set<String> = emptySet(),
     val unreadSessionIds: Set<String> = emptySet(),
 ) {
-    val filteredSessions: List<SessionInfo> get() = sessions.filter { s ->
-        val src = s.source ?: ""
-        selectedSources.contains(src)
-    }
+    val filteredSessions: List<SessionInfo>
+        get() = if (selectedSources.isEmpty()) sessions
+        else sessions.filter { s -> selectedSources.contains(s.source ?: "") }
 }
 
 @HiltViewModel
@@ -67,12 +67,15 @@ class SessionsViewModel @Inject constructor(
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true, error = null) }
             try {
-                val sessions = repository.getSessions(limit = 50, query = _state.value.query.ifBlank { null })
-                // 首次加载：记录基准时间戳，不标记为未读
-                if (knownUpdatedAt.isEmpty()) {
-                    sessions.forEach { s -> knownUpdatedAt[s.id] = s.updatedAt }
-                } else {
-                    detectUnread(sessions)
+                val query = _state.value.query
+                val sessions = repository.getSessions(limit = 50, query = query.ifBlank { null })
+                // 只在非搜索时检测未读，避免搜索匹配到的 session 被误标为未读
+                if (query.isBlank()) {
+                    if (knownUpdatedAt.isEmpty()) {
+                        sessions.forEach { s -> knownUpdatedAt[s.id] = s.updatedAt }
+                    } else {
+                        detectUnread(sessions)
+                    }
                 }
                 _state.update { it.copy(sessions = sessions, isLoading = false) }
             } catch (e: Exception) {
@@ -195,5 +198,7 @@ class SessionsViewModel @Inject constructor(
             st.copy(selectedSources = next)
         }
     }
+    /** 清空来源筛选，显示全部 session */
+    fun selectAllSources() { _state.update { it.copy(selectedSources = emptySet()) } }
     fun clearError() { _state.update { it.copy(error = null) } }
 }
