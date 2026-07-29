@@ -86,7 +86,46 @@ fn reveal_item_in_dir(app: tauri::AppHandle, path: String) -> Result<(), String>
     }
 }
 
+/// 读取 macOS 系统代理设置，写入环境变量。
+/// GUI 应用从 Dock/Finder 启动时不继承终端的 shell 环境变量，
+/// 而 reqwest（Tauri updater 内部使用）只读环境变量不读系统代理，
+/// 需要手动桥接，否则在国内直连 GitHub 会超时。
+#[cfg(target_os = "macos")]
+fn setup_proxy_env() {
+    use std::process::Command;
+    let Ok(output) = Command::new("scutil").arg("--proxy").output() else {
+        return;
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut https_enabled = false;
+    let mut host = String::new();
+    let mut port = String::new();
+    for line in stdout.lines() {
+        let line = line.trim();
+        if let Some(v) = line.strip_prefix("HTTPSEnable :") {
+            https_enabled = v.trim() == "1";
+        }
+        if let Some(v) = line.strip_prefix("HTTPSProxy :") {
+            host = v.trim().to_string();
+        }
+        if let Some(v) = line.strip_prefix("HTTPSPort :") {
+            port = v.trim().to_string();
+        }
+    }
+    if https_enabled && !host.is_empty() && !port.is_empty() {
+        let proxy = format!("http://{}:{}", host, port);
+        std::env::set_var("HTTP_PROXY", &proxy);
+        std::env::set_var("HTTPS_PROXY", &proxy);
+        std::env::set_var("http_proxy", &proxy);
+        std::env::set_var("https_proxy", &proxy);
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn setup_proxy_env() {}
+
 pub fn run() {
+    setup_proxy_env();
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
