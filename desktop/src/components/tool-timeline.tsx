@@ -146,7 +146,7 @@ function DetailOutput({ detail }: { detail: string }) {
 /** web_search 详情：直接消费后端产出的结构化搜索卡片（浅色可读列表） */
 function SearchResultList({ results }: { results: SearchResultCard[] }) {
   return (
-    <div className="max-h-96 overflow-y-auto rounded-md border border-border/60 divide-y divide-border/40">
+    <div className="flex gap-3 overflow-x-auto pb-1 rounded-md">
       {results.map((r, i) => {
         let domain = "";
         try { domain = new URL(r.url).hostname.replace(/^www\./, ""); } catch {}
@@ -156,9 +156,9 @@ function SearchResultList({ results }: { results: SearchResultCard[] }) {
             href={r.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="block px-3 py-2 hover:bg-muted/50 transition-colors group"
+            className="block min-w-[260px] max-w-[320px] flex-1 px-3 py-2 rounded-md border border-border/60 bg-background no-underline hover:bg-muted/50 hover:border-border transition-colors group"
           >
-            <div className="flex items-center gap-1.5 mb-0.5">
+            <div className="flex items-center gap-1.5 mb-1">
               {r.engine && (
                 <span className="text-[10px] px-1.5 py-0 rounded-full font-medium bg-primary/10 text-primary shrink-0 uppercase tracking-wide">
                   {r.engine}
@@ -171,15 +171,15 @@ function SearchResultList({ results }: { results: SearchResultCard[] }) {
                 <span className="text-[10px] text-muted-foreground/60 shrink-0">{r.published}</span>
               )}
             </div>
-            <div className="text-sm font-medium text-foreground/85 group-hover:text-primary line-clamp-1">
+            <div className="text-sm font-medium text-foreground/85 group-hover:text-primary line-clamp-2 leading-snug">
               {r.title}
             </div>
             {r.snippet && (
-              <p className="text-xs text-muted-foreground/70 mt-0.5 line-clamp-3 leading-relaxed">
+              <p className="text-xs text-muted-foreground/70 mt-1 line-clamp-3 leading-relaxed">
                 {r.snippet}
               </p>
             )}
-            <div className="text-[10px] text-muted-foreground/50 mt-0.5 truncate">{domain}</div>
+            <div className="text-[10px] text-muted-foreground/50 mt-1 truncate">{domain}</div>
           </a>
         );
       })}

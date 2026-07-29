@@ -94,38 +94,51 @@ class SettingsViewModel @Inject constructor(
     fun load() {
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true, error = null) }
-            // 并行请求，避免服务器不可达时串行 30s×N 的死等
-            coroutineScope {
-                val versionDef = async { runCatching { repository.checkHealth() }.getOrNull() }
-                val agentDef = async { runCatching { repository.getAgentSettings() } }
-                val providersDef = async { runCatching { repository.getProviderSettings() }.getOrDefault(emptyMap()) }
-                val systemDef = async { runCatching { repository.getSystemSettings() }.getOrNull() }
-                val profileDef = async { runCatching { repository.getUserProfile() }.getOrDefault("") }
-                val channelsDef = async { runCatching { repository.getChannels() }.getOrDefault(emptyList()) }
-                val keysDef = async { runCatching { repository.getApiKeys() }.getOrDefault(emptyList()) }
 
-                val version = versionDef.await()
-                val agentRes = agentDef.await()
-                val providers = providersDef.await()
-                val system = systemDef.await()
-                val profile = profileDef.await()
-                val channels = channelsDef.await()
-                val keys = keysDef.await()
+            // agentSettings 和 systemSettings 用 cached flow，先秒出缓存，再后台刷新
+            launch {
+                try {
+                    repository.cachedAgentSettings().collect { agent ->
+                        _state.update { it.copy(agentSettings = agent, isLoading = false) }
+                    }
+                } catch (e: Exception) {
+                    _state.update { it.copy(error = repository.friendlyError(e), isLoading = false) }
+                }
+            }
+            launch {
+                try {
+                    repository.cachedSystemSettings().collect { system ->
+                        _state.update { it.copy(systemSettings = system) }
+                    }
+                } catch (_: Exception) { }
+            }
 
-                val error = agentRes.exceptionOrNull()?.let { repository.friendlyError(it) }
+            // 其余设置并行请求，避免服务器不可达时串行 30s×N 的死等
+            launch {
+                coroutineScope {
+                    val versionDef = async { runCatching { repository.checkHealth() }.getOrNull() }
+                    val providersDef = async { runCatching { repository.getProviderSettings() }.getOrDefault(emptyMap()) }
+                    val profileDef = async { runCatching { repository.getUserProfile() }.getOrDefault("") }
+                    val channelsDef = async { runCatching { repository.getChannels() }.getOrDefault(emptyList()) }
+                    // API Keys 单独加载，失败不阻塞其他设置
+                    val keysDef = async { runCatching { repository.getApiKeys() }.getOrDefault(emptyList()) }
 
-                _state.update {
-                    it.copy(
-                        serverVersion = version,
-                        agentSettings = agentRes.getOrNull(),
-                        providers = providers,
-                        systemSettings = system,
-                        profile = profile,
-                        channels = channels,
-                        apiKeys = keys,
-                        isLoading = false,
-                        error = error,
-                    )
+                    val version = versionDef.await()
+                    val providers = providersDef.await()
+                    val profile = profileDef.await()
+                    val channels = channelsDef.await()
+                    val keys = keysDef.await()
+
+                    _state.update {
+                        it.copy(
+                            serverVersion = version,
+                            providers = providers,
+                            profile = profile,
+                            channels = channels,
+                            apiKeys = keys,
+                            isLoading = false,
+                        )
+                    }
                 }
             }
         }
