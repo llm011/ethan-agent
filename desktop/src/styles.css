@@ -354,12 +354,12 @@
     font-style: normal;
   }
   .prose blockquote p { margin: 0.3em 0; }
-  /* 表格：紧凑、可读、圆角（.table-wrapper 由 markdown 组件生成） */
   .prose .table-wrapper {
-    margin-top: 0.7em;
+    margin-top: 0.4em;
     margin-bottom: 0.7em;
     border-radius: 0.5rem;
     overflow: hidden;
+    overflow-x: auto;
     border: 1px solid var(--border);
   }
   .prose .table-wrapper table {
@@ -369,14 +369,22 @@
     border-collapse: collapse;
   }
   .prose .table-wrapper th, .prose .table-wrapper td {
-    padding: 0.6em 1em;
+    padding: 0.55em 1em;
     border-bottom: 1px solid var(--border);
-    border-right: 1px solid var(--border);
     text-align: left;
+    vertical-align: top;
   }
-  .prose .table-wrapper th:last-child, .prose .table-wrapper td:last-child { border-right: none; }
   .prose .table-wrapper tr:last-child th, .prose .table-wrapper tr:last-child td { border-bottom: none; }
-  .prose .table-wrapper th { background: color-mix(in oklch, var(--muted) 90%, transparent); font-weight: 600; }
+  .prose .table-wrapper thead th {
+    background: color-mix(in oklch, var(--muted) 75%, transparent);
+    font-weight: 600;
+    text-align: center;
+    border-bottom: 2px solid var(--border);
+    white-space: nowrap;
+  }
+  .prose .table-wrapper tbody tr:nth-child(even) td {
+    background: color-mix(in oklch, var(--muted) 35%, transparent);
+  }
   .prose a { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
 }
 
@@ -591,6 +599,7 @@
   margin: 0.8em 0;
   border-radius: 8px;
   overflow: hidden;
+  overflow-x: auto;
   border: 1px solid #d0d7de;
 }
 .share-prose .table-wrapper table {
@@ -602,12 +611,18 @@
 .share-prose .table-wrapper th, .share-prose .table-wrapper td {
   padding: 8px 14px;
   border-bottom: 1px solid #d0d7de;
-  border-right: 1px solid #d0d7de;
   text-align: left;
+  vertical-align: top;
 }
-.share-prose .table-wrapper th:last-child, .share-prose .table-wrapper td:last-child { border-right: none; }
 .share-prose .table-wrapper tr:last-child th, .share-prose .table-wrapper tr:last-child td { border-bottom: none; }
-.share-prose .table-wrapper th { background: #f6f8fa; font-weight: 600; }
+.share-prose .table-wrapper thead th {
+  background: #f6f8fa;
+  font-weight: 600;
+  text-align: center;
+  border-bottom: 2px solid #d0d7de;
+  white-space: nowrap;
+}
+.share-prose .table-wrapper tbody tr:nth-child(even) td { background: #f6f8fa; }
 .share-prose img { max-width: 100%; border-radius: 8px; }
 .share-prose hr { border: none; border-top: 1px solid #eaecef; margin: 1em 0; }
 

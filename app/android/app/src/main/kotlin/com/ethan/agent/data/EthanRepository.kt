@@ -85,6 +85,7 @@ import com.ethan.agent.core.network.ChatSseClient
 import com.ethan.agent.core.network.EthanApiService
 import com.ethan.agent.core.network.NetworkFactory
 import kotlinx.serialization.SerializationException
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -105,6 +106,7 @@ class EthanRepository @Inject constructor(
     private var api: EthanApiService,
     private val sseClient: ChatSseClient,
     private val tokenProvider: () -> String,
+    private val localCache: LocalCache,
 ) {
     val config: Flow<AppConfig> = configStore.config
 
@@ -175,6 +177,96 @@ class EthanRepository @Inject constructor(
     suspend fun poll(): List<SessionInfo> {
         refreshApi()
         return api.poll().sessions
+    }
+
+    // ---------- Stale-while-revalidate cached Flows ----------
+    // 每个 cachedXxx() 先 emit 本地缓存（如有），再请求网络 emit 最新数据并写缓存。
+    // 网络失败时，如果有缓存数据，调用方已经拿到了缓存；如果没有缓存，异常会传播给调用方。
+
+    fun cachedSessions(limit: Int = 50, offset: Int = 0, query: String? = null): Flow<List<SessionInfo>> = flow {
+        val cacheKey = "sessions_list"
+        localCache.read(cacheKey, ListSerializer(SessionInfo.serializer()))?.let { emit(it) }
+        val fresh = getSessions(limit, offset, query)
+        localCache.write(cacheKey, fresh, ListSerializer(SessionInfo.serializer()))
+        emit(fresh)
+    }.flowOn(Dispatchers.IO)
+
+    fun cachedSession(id: String): Flow<SessionDetail> = flow {
+        val cacheKey = "session_$id"
+        localCache.read(cacheKey, SessionDetail.serializer())?.let { emit(it) }
+        val fresh = getSession(id)
+        localCache.write(cacheKey, fresh, SessionDetail.serializer())
+        emit(fresh)
+    }.flowOn(Dispatchers.IO)
+
+    fun cachedModels(): Flow<List<ModelEntry>> = flow {
+        val cacheKey = "models"
+        localCache.read(cacheKey, ListSerializer(ModelEntry.serializer()))?.let { emit(it) }
+        val fresh = getModels()
+        localCache.write(cacheKey, fresh, ListSerializer(ModelEntry.serializer()))
+        emit(fresh)
+    }.flowOn(Dispatchers.IO)
+
+    fun cachedModes(): Flow<List<ModeEntry>> = flow {
+        val cacheKey = "modes"
+        localCache.read(cacheKey, ListSerializer(ModeEntry.serializer()))?.let { emit(it) }
+        val fresh = getModes()
+        localCache.write(cacheKey, fresh, ListSerializer(ModeEntry.serializer()))
+        emit(fresh)
+    }.flowOn(Dispatchers.IO)
+
+    fun cachedAgentSettings(): Flow<AgentSettings> = flow {
+        val cacheKey = "agent_settings"
+        localCache.read(cacheKey, AgentSettings.serializer())?.let { emit(it) }
+        val fresh = getAgentSettings()
+        localCache.write(cacheKey, fresh, AgentSettings.serializer())
+        emit(fresh)
+    }.flowOn(Dispatchers.IO)
+
+    fun cachedSystemSettings(): Flow<SystemSettings> = flow {
+        val cacheKey = "system_settings"
+        localCache.read(cacheKey, SystemSettings.serializer())?.let { emit(it) }
+        val fresh = getSystemSettings()
+        localCache.write(cacheKey, fresh, SystemSettings.serializer())
+        emit(fresh)
+    }.flowOn(Dispatchers.IO)
+
+    fun cachedFacts(): Flow<List<Fact>> = flow {
+        val cacheKey = "facts"
+        localCache.read(cacheKey, ListSerializer(Fact.serializer()))?.let { emit(it) }
+        val fresh = getFacts()
+        localCache.write(cacheKey, fresh, ListSerializer(Fact.serializer()))
+        emit(fresh)
+    }.flowOn(Dispatchers.IO)
+
+    fun cachedProcedures(): Flow<List<Procedure>> = flow {
+        val cacheKey = "procedures"
+        localCache.read(cacheKey, ListSerializer(Procedure.serializer()))?.let { emit(it) }
+        val fresh = getProcedures()
+        localCache.write(cacheKey, fresh, ListSerializer(Procedure.serializer()))
+        emit(fresh)
+    }.flowOn(Dispatchers.IO)
+
+    fun cachedSkills(): Flow<List<SkillInfo>> = flow {
+        val cacheKey = "skills"
+        localCache.read(cacheKey, ListSerializer(SkillInfo.serializer()))?.let { emit(it) }
+        val fresh = getSkills()
+        localCache.write(cacheKey, fresh, ListSerializer(SkillInfo.serializer()))
+        emit(fresh)
+    }.flowOn(Dispatchers.IO)
+
+    fun cachedKnowledge(query: String? = null, mode: String? = null): Flow<List<KnowledgeItem>> = flow {
+        val cacheKey = "knowledge_${query ?: "all"}_${mode ?: "default"}"
+        localCache.read(cacheKey, ListSerializer(KnowledgeItem.serializer()))?.let { emit(it) }
+        val fresh = getKnowledge(query, mode)
+        localCache.write(cacheKey, fresh, ListSerializer(KnowledgeItem.serializer()))
+        emit(fresh)
+    }.flowOn(Dispatchers.IO)
+
+    /** 删除 session 时同步清除该 session 的缓存。 */
+    suspend fun deleteSessionCached(id: String) {
+        deleteSession(id)
+        localCache.remove("session_$id")
     }
 
     suspend fun createSession(model: String? = null, mode: String? = null): CreateSessionResponse {
