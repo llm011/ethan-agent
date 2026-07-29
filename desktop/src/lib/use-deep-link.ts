@@ -53,9 +53,12 @@ export function useDeepLink(): void {
   useEffect(() => {
     if (typeof window === "undefined" || !(window as any).__TAURI_INTERNALS__) return;
     let unlisten: (() => void) | undefined;
+    // aborted 标记：组件在 listen() resolve 前卸载时，避免给已卸载组件挂 listener
+    let aborted = false;
     (async () => {
       try {
         const { listen } = await import("@tauri-apps/api/event");
+        if (aborted) return;
         unlisten = await listen<string>("deep-link-url", (event) => {
           const path = mapDeepLinkUrl(event.payload);
           if (path) navigate(path);
@@ -65,6 +68,7 @@ export function useDeepLink(): void {
       }
     })();
     return () => {
+      aborted = true;
       unlisten?.();
     };
   }, [navigate]);

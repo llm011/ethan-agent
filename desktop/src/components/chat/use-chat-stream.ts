@@ -78,7 +78,10 @@ export async function consumeStream(
           created_at: Date.now() / 1000,
         }]);
         if (!document.hasFocus()) {
-          void notifyDesktop({ title: "Ethan Agent", body: chunk.content?.slice(0, 80) ?? "新消息" });
+          // 按 grapheme 截断前 80 字符，避免切断 surrogate pairs（emoji 等）
+          const bodyText = chunk.content ?? "新消息";
+          const body = Array.from(bodyText).slice(0, 80).join("");
+          void notifyDesktop({ title: "Ethan Agent", body });
         }
         continue;
       }
