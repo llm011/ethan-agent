@@ -5,6 +5,8 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, WindowEvent,
 };
+use tauri_plugin_autostart::MacosLauncher;
+use tauri_plugin_deep_link::DeepLinkExt;
 
 /// 返回 ~/Pictures/Ethan 的规范路径，确保目录存在。
 fn ethan_pictures_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
@@ -126,14 +128,38 @@ fn setup_proxy_env() {}
 
 pub fn run() {
     setup_proxy_env();
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+
+    // 单实例锁：第二个实例启动时聚焦已有窗口（macOS 由 Reopen 事件原生处理）
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+    }));
+
+    builder
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_window_state::Builder::new().build())
+        .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
         .invoke_handler(tauri::generate_handler![save_share_image, reveal_item_in_dir])
         .setup(|app| {
-    let _ = app.get_webview_window("main").map(|w| w.set_title(""));
+            let _ = app.get_webview_window("main").map(|w| w.set_title(""));
+
+            // 注册 deep-link 处理器：收到 ethan:// URL 时转发给前端
+            let handle = app.handle().clone();
+            app.deep_link().on_open_url(move |event| {
+                for url in event.urls() {
+                    let _ = handle.emit("deep-link-url", url.to_string());
+                }
+            });
+
             // Build tray menu
             let show_item = MenuItem::with_id(app, "show", "Show Window", true, None::<&str>)?;
             let update_item = MenuItem::with_id(app, "check_update", "Check for Updates", true, None::<&str>)?;

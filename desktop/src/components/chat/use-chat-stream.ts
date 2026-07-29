@@ -1,4 +1,5 @@
 import type { StreamChunk } from "@/lib/api";
+import { notifyDesktop } from "@/lib/notify";
 import type { ToolStep } from "@ethan/shared/components/tool-timeline";
 import type { Message, Usage } from "@ethan/shared/chat/types";
 import type { ConsentRequest } from "@ethan/shared/components/consent-dialog";
@@ -30,6 +31,7 @@ export async function consumeStream(
   } = actions;
 
   let failed = false;
+  let hadBackgroundPolling = false;
   let assistantContent = "";
   let intermediateOutput = "";
   const assistantThought = "";
@@ -64,6 +66,7 @@ export async function consumeStream(
         continue;
       }
       if (chunk.background_polling) {
+        hadBackgroundPolling = true;
         setBgPolling(chunk.polling_message || "\u{1f4e1} 后台任务运行中...");
         continue;
       }
@@ -74,6 +77,12 @@ export async function consumeStream(
           content: chunk.content || "",
           created_at: Date.now() / 1000,
         }]);
+        if (!document.hasFocus()) {
+          // 按 grapheme 截断前 80 字符，避免切断 surrogate pairs（emoji 等）
+          const bodyText = chunk.content ?? "新消息";
+          const body = Array.from(bodyText).slice(0, 80).join("");
+          void notifyDesktop({ title: "Ethan Agent", body });
+        }
         continue;
       }
       if (chunk.heartbeat) {
@@ -198,6 +207,9 @@ export async function consumeStream(
         }));
       }
       if (chunk.done) {
+        if (hadBackgroundPolling && !document.hasFocus()) {
+          void notifyDesktop({ title: "Ethan Agent", body: "后台任务已完成" });
+        }
         setBgPolling(null);
       }
       if (chunk.stopped) {

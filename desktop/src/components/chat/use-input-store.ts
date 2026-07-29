@@ -105,6 +105,15 @@ export function useInputStore() {
     persistStore(storeRef.current);
   }, [draft, queue]);
 
+  // 窗口失焦时自动保存草稿（防止切走应用时丢失未发送的输入）
+  const saveCurrentRef = useRef(saveCurrent);
+  saveCurrentRef.current = saveCurrent;
+  useEffect(() => {
+    const onBlur = () => saveCurrentRef.current();
+    window.addEventListener("blur", onBlur, { passive: true });
+    return () => window.removeEventListener("blur", onBlur);
+  }, []);
+
   // 切换会话
   const switchTo = useCallback((sessionId: string | null, currentDraft?: string) => {
     // 保存当前 session 状态（使用传入的 currentDraft 以获取最新值）

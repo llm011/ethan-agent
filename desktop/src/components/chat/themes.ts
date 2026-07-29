@@ -2,7 +2,7 @@
 // 每个主题对应 styles.css / globals.css 里的一段 CSS 变量（通过 className 挂到 <html>）。
 // swatch 是给右上角调色盘图标做「预览小圆点」用的代表色，纯展示、不参与实际配色。
 
-export type ThemeId = "qingwa" | "warm" | "paper" | "mist" | "dark";
+export type ThemeId = "qingwa" | "warm" | "paper" | "mist" | "dark" | "system";
 
 export interface ThemeDef {
   id: ThemeId;
@@ -51,11 +51,18 @@ export const THEMES: ThemeDef[] = [
     isDark: true,
     swatch: ["#1f1f1f", "#e8e8e8", "#3a3a3a"],
   },
+  {
+    id: "system",
+    label: "跟随系统",
+    className: "",
+    isDark: false,
+    swatch: ["#f5f7f2", "#1f1f1f", "#6f9b86"],
+  },
 ];
 
 export const DEFAULT_THEME: ThemeId = "qingwa";
 
-const ALL_CLASSES = THEMES.map((t) => t.className);
+const ALL_CLASSES = THEMES.map((t) => t.className).filter(Boolean);
 
 /** 兼容旧值：早期只有 dark/light 两种，light 即原暖橙主题 */
 export function normalizeThemeId(raw: string | null | undefined): ThemeId {
@@ -71,6 +78,17 @@ export function applyThemeClass(id: ThemeId) {
   const theme = THEMES.find((t) => t.id === id) ?? THEMES[0];
   const el = document.documentElement;
   el.classList.remove(...ALL_CLASSES, "dark", "light");
+  // system 主题：根据系统配色偏好解析为 dark 或默认浅色（青瓦）
+  if (theme.id === "system") {
+    const prefersDark = typeof window !== "undefined"
+      && window.matchMedia("(prefers-color-scheme: dark)").matches;
+    if (prefersDark) {
+      el.classList.add("dark");
+    } else {
+      el.classList.add("theme-qingwa");
+    }
+    return;
+  }
   el.classList.add(theme.className);
   // dark: 变体依赖 .dark class，深色主题额外补上（className 已是 dark 时不重复）
   if (theme.isDark) el.classList.add("dark");
