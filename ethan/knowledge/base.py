@@ -25,6 +25,17 @@ class KnowledgeItem:
         return text[:max_len] + "…" if len(text) > max_len else text
 
 
+def _safe_subdir(tag: str) -> str | None:
+    """把 tag 清洗为安全的子目录名，防路径穿越。
+
+    只保留 [a-zA-Z0-9_-]，其余替换为 -；空或全为 . 时返回 None（落根目录）。
+    """
+    name = re.sub(r"[^A-Za-z0-9_\-]", "-", tag).strip("-")
+    if not name or name == "." or name == "..":
+        return None
+    return name
+
+
 class KnowledgeBase(ABC):
     @abstractmethod
     def add(self, title: str, content: str, tags: list[str] | None = None,
@@ -177,11 +188,13 @@ class FilesystemKnowledgeBase(KnowledgeBase):
     def add(self, title: str, content: str, tags: list[str] | None = None,
             frontmatter: dict | None = None) -> str:
         slug = re.sub(r"[^\w]+", "-", title.lower())[:50].strip("-")
-        # 按 tags[0] 分子目录（如 people/、project/），无 tags 时落根目录
+        # 按 tags[0] 分子目录（如 people/、project/），sanitize 后为空则落根目录
         target_dir = self._dir
         if tags:
-            target_dir = self._dir / tags[0]
-            target_dir.mkdir(parents=True, exist_ok=True)
+            subdir = _safe_subdir(tags[0])
+            if subdir:
+                target_dir = self._dir / subdir
+                target_dir.mkdir(parents=True, exist_ok=True)
         path = target_dir / f"{slug}.md"
         i = 1
         while path.exists():
@@ -304,11 +317,13 @@ class ObsidianKnowledgeBase(KnowledgeBase):
     def add(self, title: str, content: str, tags: list[str] | None = None,
             frontmatter: dict | None = None) -> str:
         slug = re.sub(r"[^\w]+", "-", title.lower())[:50].strip("-")
-        # 按 tags[0] 分子目录（如 people/、project/），无 tags 时落根目录
+        # 按 tags[0] 分子目录（如 people/、project/），sanitize 后为空则落根目录
         target_dir = self._dir
         if tags:
-            target_dir = self._dir / tags[0]
-            target_dir.mkdir(parents=True, exist_ok=True)
+            subdir = _safe_subdir(tags[0])
+            if subdir:
+                target_dir = self._dir / subdir
+                target_dir.mkdir(parents=True, exist_ok=True)
         path = target_dir / f"{slug}.md"
         i = 1
         while path.exists():
