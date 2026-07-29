@@ -61,6 +61,8 @@ import com.ethan.agent.core.model.Fact
 import com.ethan.agent.core.model.InsightItem
 import com.ethan.agent.core.model.Procedure
 import com.ethan.agent.core.model.StructuredRecord
+import com.ethan.agent.ui.components.CuteSegmentControl
+import com.ethan.agent.ui.components.CuteTopBar
 import com.ethan.agent.ui.components.ErrorSnackbar
 import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.SimpleMarkdown
@@ -150,8 +152,8 @@ fun MemoryScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("记忆") },
+            CuteTopBar(
+                title = "记忆",
                 actions = {
                     when (state.tab) {
                         MemoryTab.Facts -> {
@@ -175,15 +177,11 @@ fun MemoryScreen(
         snackbarHost = { SnackbarContainer(snackbar) },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            TabRow(selectedTabIndex = state.tab.ordinal) {
-                MemoryTab.entries.forEach { tab ->
-                    Tab(
-                        selected = state.tab == tab,
-                        onClick = { onTabChange(tab) },
-                        text = { Text(tab.title) },
-                    )
-                }
-            }
+            CuteSegmentControl(
+                tabs = MemoryTab.entries.map { it.title },
+                selectedIndex = state.tab.ordinal,
+                onSelect = { onTabChange(MemoryTab.entries[it]) },
+            )
 
             if (state.isLoading) {
                 LoadingBox()
@@ -243,8 +241,8 @@ private fun FactEditorScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("编辑事实") },
+            CuteTopBar(
+                title = "编辑事实",
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
@@ -323,8 +321,8 @@ private fun RecordEditorScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("编辑记录") },
+            CuteTopBar(
+                title = "编辑记录",
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")

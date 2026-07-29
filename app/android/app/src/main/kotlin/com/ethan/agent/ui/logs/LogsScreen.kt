@@ -19,12 +19,12 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import com.ethan.agent.ui.components.CuteTopBar
 import com.ethan.agent.ui.components.ErrorSnackbar
 import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.SnackbarContainer
@@ -43,8 +43,8 @@ fun LogsScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("日志") },
+            CuteTopBar(
+                title = "日志",
                 actions = {
                     IconButton(onClick = onRefresh) {
                         Icon(Icons.Default.Refresh, contentDescription = "刷新")

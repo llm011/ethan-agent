@@ -3,8 +3,10 @@ package com.ethan.agent.ui.chat
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,6 +20,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -65,6 +68,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
@@ -357,10 +361,19 @@ fun ChatScreen(
                 modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                itemsIndexed(state.messages) { _, msg ->
-                    MessageBubble(msg, onLongPress = {
-                        onQuote(Quote(role = msg.role, content = msg.content))
-                    })
+                if (state.messages.isEmpty()) {
+                    item {
+                        EmptyChatState(onQuickAction = { text ->
+                            onInputChange(text)
+                            onSend()
+                        })
+                    }
+                } else {
+                    itemsIndexed(state.messages) { _, msg ->
+                        MessageBubble(msg, onLongPress = {
+                            onQuote(Quote(role = msg.role, content = msg.content))
+                        })
+                    }
                 }
             }
 
@@ -545,6 +558,71 @@ private fun MessageBubble(message: UiMessage, onLongPress: () -> Unit) {
                         "tokens: ${it.input}+${it.output}",
                         style = MaterialTheme.typography.labelSmall,
                         modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmptyChatState(onQuickAction: (String) -> Unit) {
+    val quickActions = listOf(
+        "☀️ 深圳的天气怎么样" to "深圳的天气怎么样",
+        "📄 帮我找找最新的 Agent 论文" to "帮我找找最新的 Agent 论文",
+    )
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .wrapContentHeight(Alignment.CenterVertically)
+            .padding(horizontal = 24.dp, vertical = 30.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        // 头像
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.primaryContainer,
+            modifier = Modifier.size(80.dp),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Text(
+                    "🤖",
+                    style = MaterialTheme.typography.displaySmall,
+                )
+            }
+        }
+        Text(
+            text = "嗨，我是 Ethan~",
+            style = MaterialTheme.typography.titleLarge,
+            color = MaterialTheme.colorScheme.onBackground,
+            fontWeight = FontWeight.Bold,
+        )
+        Text(
+            text = "你的私人 AI 小助手，随时待命",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(top = 4.dp),
+        ) {
+            quickActions.forEach { (label, payload) ->
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    border = BorderStroke(
+                        1.5.dp,
+                        MaterialTheme.colorScheme.outlineVariant,
+                    ),
+                    modifier = Modifier.clickable { onQuickAction(payload) },
+                ) {
+                    Text(
+                        text = label,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        fontWeight = FontWeight.Medium,
                     )
                 }
             }

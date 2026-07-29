@@ -1,20 +1,25 @@
 package com.ethan.agent.ui.knowledge
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -24,10 +29,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -41,6 +46,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.ethan.agent.core.model.KnowledgeItem
+import com.ethan.agent.ui.components.CuteCard
+import com.ethan.agent.ui.components.CuteTopBar
 import com.ethan.agent.ui.components.ErrorSnackbar
 import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.SimpleMarkdown
@@ -67,7 +74,7 @@ fun KnowledgeScreen(
     ErrorSnackbar(state.error, onClearError, snackbar)
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("知识库") }) },
+        topBar = { CuteTopBar(title = "知识库") },
         floatingActionButton = {
             FloatingActionButton(onClick = onStartCreate) {
                 Icon(Icons.Default.Add, contentDescription = "新建")
@@ -185,7 +192,7 @@ private fun TagChipInput(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun KnowledgeCard(item: KnowledgeItem, query: String, onClick: () -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth(), onClick = onClick) {
+    CuteCard(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)) {
         Column(Modifier.padding(12.dp)) {
             Text(
                 text = highlightText(item.title, query),

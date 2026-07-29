@@ -15,11 +15,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.ethan.agent.ui.components.CuteTopBar
 import com.ethan.agent.ui.components.ErrorSnackbar
 import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.SnackbarContainer
@@ -37,7 +37,7 @@ fun DocsScreen(
     ErrorSnackbar(state.error, onClearError, snackbar)
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("文档") }) },
+        topBar = { CuteTopBar(title = "文档") },
         snackbarHost = { SnackbarContainer(snackbar) },
     ) { padding ->
         if (state.isLoading) {

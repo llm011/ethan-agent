@@ -50,6 +50,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.ethan.agent.core.model.ScheduleJob
+import com.ethan.agent.ui.components.CuteSegmentControl
+import com.ethan.agent.ui.components.CuteTopBar
 import com.ethan.agent.ui.components.ErrorSnackbar
 import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.SnackbarContainer
@@ -89,7 +91,7 @@ fun ScheduleScreen(
     }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("定时任务") }) },
+        topBar = { CuteTopBar(title = "定时任务") },
         snackbarHost = { SnackbarContainer(snackbar) },
         floatingActionButton = {
             if (state.tab == ScheduleTab.Jobs) {
@@ -100,15 +102,11 @@ fun ScheduleScreen(
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            TabRow(selectedTabIndex = state.tab.ordinal) {
-                ScheduleTab.entries.forEach { tab ->
-                    Tab(
-                        selected = state.tab == tab,
-                        onClick = { onTabChange(tab) },
-                        text = { Text(tab.title) },
-                    )
-                }
-            }
+            CuteSegmentControl(
+                tabs = ScheduleTab.entries.map { it.title },
+                selectedIndex = state.tab.ordinal,
+                onSelect = { onTabChange(ScheduleTab.entries[it]) },
+            )
 
             if (state.isLoading) {
                 LoadingBox()

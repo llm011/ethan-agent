@@ -28,7 +28,7 @@ import javax.inject.Inject
 
 enum class SettingsTab {
     Connection, General, Providers, Channels, Identity, Soul, Tools, Heartbeat, Profile, PromptPreview, ApiKeys,
-    FastRules, ToolTiers,
+    FastRules, ToolTiers, Theme,
 }
 
 data class SettingsUiState(

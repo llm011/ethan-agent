@@ -31,6 +31,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ethan.agent.core.model.SkillInfo
+import com.ethan.agent.ui.components.CuteCard
+import com.ethan.agent.ui.components.CuteTopBar
 import com.ethan.agent.ui.components.ErrorSnackbar
 import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.SnackbarContainer
@@ -54,7 +56,7 @@ fun SkillsScreen(
     ErrorSnackbar(state.error, onClearError, snackbar)
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("技能") }) },
+        topBar = { CuteTopBar(title = "技能") },
         floatingActionButton = {
             FloatingActionButton(onClick = onStartCreate) {
                 Icon(Icons.Default.Add, contentDescription = "新建")
@@ -137,15 +139,10 @@ fun SkillsScreen(
 
 @Composable
 private fun SkillCard(skill: SkillInfo, isSelected: Boolean, onClick: () -> Unit) {
-    Card(
+    CuteCard(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-        colors = if (isSelected) {
-            androidx.compose.material3.CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-            )
-        } else {
-            androidx.compose.material3.CardDefaults.cardColors()
-        },
+        containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer
+            else MaterialTheme.colorScheme.surface,
     ) {
         Column(Modifier.padding(12.dp)) {
             Text(skill.name, style = MaterialTheme.typography.titleSmall)
