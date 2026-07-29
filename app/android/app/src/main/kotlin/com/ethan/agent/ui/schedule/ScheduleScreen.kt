@@ -36,11 +36,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -50,9 +47,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.ethan.agent.core.model.ScheduleJob
-import com.ethan.agent.ui.components.CuteSegmentControl
-import com.ethan.agent.ui.components.CuteTopBar
 import com.ethan.agent.ui.components.ErrorSnackbar
+import com.ethan.agent.ui.components.EthanScrollableTabBar
+import com.ethan.agent.ui.components.EthanTopBar
 import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.SnackbarContainer
 
@@ -60,6 +57,7 @@ import com.ethan.agent.ui.components.SnackbarContainer
 @Composable
 fun ScheduleScreen(
     state: ScheduleUiState,
+    onBack: () -> Unit = {},
     onToggle: (ScheduleJob) -> Unit,
     onDelete: (String) -> Unit,
     onTrigger: (ScheduleJob) -> Unit,
@@ -91,7 +89,6 @@ fun ScheduleScreen(
     }
 
     Scaffold(
-        topBar = { CuteTopBar(title = "定时任务") },
         snackbarHost = { SnackbarContainer(snackbar) },
         floatingActionButton = {
             if (state.tab == ScheduleTab.Jobs) {
@@ -101,11 +98,14 @@ fun ScheduleScreen(
             }
         },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
-            CuteSegmentControl(
-                tabs = ScheduleTab.entries.map { it.title },
-                selectedIndex = state.tab.ordinal,
-                onSelect = { onTabChange(ScheduleTab.entries[it]) },
+        Column(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding())) {
+            EthanTopBar(title = "定时任务", onBack = onBack)
+
+            EthanScrollableTabBar(
+                tabs = ScheduleTab.entries.toList(),
+                selectedTab = state.tab,
+                onTabSelected = onTabChange,
+                labelOf = { it.title },
             )
 
             if (state.isLoading) {

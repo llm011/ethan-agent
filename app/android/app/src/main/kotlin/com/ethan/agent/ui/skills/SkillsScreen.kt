@@ -24,16 +24,14 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ethan.agent.core.model.SkillInfo
-import com.ethan.agent.ui.components.CuteCard
-import com.ethan.agent.ui.components.CuteTopBar
 import com.ethan.agent.ui.components.ErrorSnackbar
+import com.ethan.agent.ui.components.EthanTopBar
 import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.SnackbarContainer
 
@@ -41,6 +39,7 @@ import com.ethan.agent.ui.components.SnackbarContainer
 @Composable
 fun SkillsScreen(
     state: SkillsUiState,
+    onBack: () -> Unit = {},
     onQueryChange: (String) -> Unit,
     onSelect: (SkillInfo) -> Unit,
     onStartCreate: () -> Unit,
@@ -56,7 +55,6 @@ fun SkillsScreen(
     ErrorSnackbar(state.error, onClearError, snackbar)
 
     Scaffold(
-        topBar = { CuteTopBar(title = "技能") },
         floatingActionButton = {
             FloatingActionButton(onClick = onStartCreate) {
                 Icon(Icons.Default.Add, contentDescription = "新建")
@@ -65,11 +63,14 @@ fun SkillsScreen(
         snackbarHost = { SnackbarContainer(snackbar) },
     ) { padding ->
         if (state.isLoading) {
-            LoadingBox(Modifier.padding(padding))
+            LoadingBox(Modifier.padding(top = padding.calculateTopPadding()))
             return@Scaffold
         }
 
-        Row(Modifier.fillMaxSize().padding(padding)) {
+        Column(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding())) {
+            EthanTopBar(title = "技能", onBack = onBack)
+
+            Row(Modifier.fillMaxSize()) {
             Column(Modifier.weight(1f)) {
                 OutlinedTextField(
                     value = state.query,
@@ -133,16 +134,22 @@ fun SkillsScreen(
                     Text("选择或新建技能", modifier = Modifier.padding(16.dp))
                 }
             }
+            }
         }
     }
 }
 
 @Composable
 private fun SkillCard(skill: SkillInfo, isSelected: Boolean, onClick: () -> Unit) {
-    CuteCard(
+    Card(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-        containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer
-            else MaterialTheme.colorScheme.surface,
+        colors = if (isSelected) {
+            androidx.compose.material3.CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+            )
+        } else {
+            androidx.compose.material3.CardDefaults.cardColors()
+        },
     ) {
         Column(Modifier.padding(12.dp)) {
             Text(skill.name, style = MaterialTheme.typography.titleSmall)

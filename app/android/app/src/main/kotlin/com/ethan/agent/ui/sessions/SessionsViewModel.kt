@@ -28,11 +28,12 @@ data class SessionsUiState(
     val sourceFilter: String = "All",
     val hideHeartbeat: Boolean = false,
     val hideScheduled: Boolean = false,
+    val selectedSources: Set<String> = setOf("web", "lark", "repl", "desktop", "wechat"),
+    val unreadSessionIds: Set<String> = emptySet(),
 ) {
     val filteredSessions: List<SessionInfo> get() = sessions.filter { s ->
-        (sourceFilter == "All" || s.source == sourceFilter) &&
-            (!hideHeartbeat || s.source != "heartbeat") &&
-            (!hideScheduled || s.source != "scheduled")
+        val src = s.source ?: ""
+        selectedSources.contains(src)
     }
 }
 
@@ -43,6 +44,9 @@ class SessionsViewModel @Inject constructor(
     private val _state = MutableStateFlow(SessionsUiState())
     val state: StateFlow<SessionsUiState> = _state.asStateFlow()
     private var pollJob: Job? = null
+
+    // 记录每个 session 上次已知的 updatedAt，用于检测新消息
+    private val knownUpdatedAt = mutableMapOf<String, Long>()
 
     init {
         load()
@@ -64,6 +68,12 @@ class SessionsViewModel @Inject constructor(
             _state.update { it.copy(isLoading = true, error = null) }
             try {
                 val sessions = repository.getSessions(limit = 50, query = _state.value.query.ifBlank { null })
+                // 首次加载：记录基准时间戳，不标记为未读
+                if (knownUpdatedAt.isEmpty()) {
+                    sessions.forEach { s -> knownUpdatedAt[s.id] = s.updatedAt }
+                } else {
+                    detectUnread(sessions)
+                }
                 _state.update { it.copy(sessions = sessions, isLoading = false) }
             } catch (e: Exception) {
                 _state.update { it.copy(isLoading = false, error = repository.friendlyError(e)) }
@@ -74,8 +84,38 @@ class SessionsViewModel @Inject constructor(
     private suspend fun refreshQuietly() {
         try {
             val sessions = repository.poll()
-            if (_state.value.query.isBlank()) _state.update { it.copy(sessions = sessions) }
+            if (_state.value.query.isBlank()) {
+                detectUnread(sessions)
+                _state.update { it.copy(sessions = sessions) }
+            }
         } catch (_: Exception) {}
+    }
+
+    private fun detectUnread(sessions: List<SessionInfo>) {
+        val newUnread = mutableSetOf<String>()
+        for (s in sessions) {
+            val known = knownUpdatedAt[s.id]
+            if (known != null && s.updatedAt > known) {
+                // session 有更新 → 标记为未读
+                newUnread.add(s.id)
+            } else if (known == null) {
+                // 全新 session → 标记为未读
+                newUnread.add(s.id)
+                knownUpdatedAt[s.id] = s.updatedAt
+            }
+        }
+        if (newUnread.isNotEmpty()) {
+            _state.update { it.copy(unreadSessionIds = it.unreadSessionIds + newUnread) }
+        }
+    }
+
+    /** 用户打开了某个 session，清除其未读标记 */
+    fun markRead(sessionId: String) {
+        val session = _state.value.sessions.find { it.id == sessionId }
+        if (session != null) {
+            knownUpdatedAt[sessionId] = session.updatedAt
+        }
+        _state.update { it.copy(unreadSessionIds = it.unreadSessionIds - sessionId) }
     }
 
     fun onQueryChange(query: String) {
@@ -148,5 +188,12 @@ class SessionsViewModel @Inject constructor(
     fun setSourceFilter(source: String) { _state.update { it.copy(sourceFilter = source) } }
     fun toggleHideHeartbeat() { _state.update { it.copy(hideHeartbeat = !it.hideHeartbeat) } }
     fun toggleHideScheduled() { _state.update { it.copy(hideScheduled = !it.hideScheduled) } }
+    fun toggleSource(source: String) {
+        _state.update { st ->
+            val current = st.selectedSources
+            val next = if (current.contains(source)) current - source else current + source
+            st.copy(selectedSources = next)
+        }
+    }
     fun clearError() { _state.update { it.copy(error = null) } }
 }

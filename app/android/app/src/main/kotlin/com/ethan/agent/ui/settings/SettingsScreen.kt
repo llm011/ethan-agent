@@ -1,26 +1,18 @@
 package com.ethan.agent.ui.settings
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -52,27 +44,22 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.ethan.agent.core.model.AgentSettings
 import com.ethan.agent.core.model.KnowledgeValidateRequest
 import com.ethan.agent.core.model.ProviderConfig
 import com.ethan.agent.core.model.SystemSettings
-import com.ethan.agent.ui.components.CuteCard
-import com.ethan.agent.ui.components.CuteTopBar
 import com.ethan.agent.ui.components.ErrorSnackbar
+import com.ethan.agent.ui.components.EthanTopBar
 import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.SnackbarContainer
-import com.ethan.agent.ui.theme.EthanTheme
-import com.ethan.agent.ui.theme.ThemeState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     state: SettingsUiState,
+    onBack: () -> Unit = {},
     onTabChange: (SettingsTab) -> Unit,
     onServerUrlChange: (String) -> Unit,
     onSaveServerUrl: () -> Unit,
@@ -122,15 +109,15 @@ fun SettingsScreen(
     }
 
     Scaffold(
-        topBar = { CuteTopBar(title = "设置") },
         snackbarHost = { SnackbarContainer(snackbar) },
     ) { padding ->
-        if (state.isLoading && state.agentSettings == null) {
-            LoadingBox(Modifier.padding(padding))
-            return@Scaffold
-        }
+        Column(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding())) {
+            EthanTopBar(title = "设置", onBack = onBack)
 
-        Column(Modifier.fillMaxSize().padding(padding)) {
+            if (state.isLoading && state.agentSettings == null) {
+                LoadingBox()
+                return@Scaffold
+            }
             SettingsTabRow(state.tab, onTabChange)
 
             Column(
@@ -143,7 +130,7 @@ fun SettingsScreen(
                 when (state.tab) {
                     SettingsTab.Connection -> ConnectionTab(state, onServerUrlChange, onSaveServerUrl)
                     SettingsTab.General -> state.agentSettings?.let {
-                        GeneralTab(it, onUpdateAgent, onSaveAgent, onCheckUpdate)
+                        GeneralTab(it, state.themeId, onUpdateAgent, onSaveAgent, onSetTheme, onCheckUpdate)
                     }
                     SettingsTab.Providers -> ProvidersTab(state.providers, onUpdateProvider, onSaveProviders)
                     SettingsTab.Channels -> ChannelsTab(
@@ -170,7 +157,6 @@ fun SettingsScreen(
                     SettingsTab.ApiKeys -> ApiKeysTab(state, onCreateApiKey, onDeleteApiKey)
                     SettingsTab.FastRules -> FastRulesTab(state)
                     SettingsTab.ToolTiers -> ToolTiersTab(state)
-                    SettingsTab.Theme -> ThemeTab(state.themeId, onSetTheme)
                 }
             }
         }
@@ -217,7 +203,6 @@ private fun SettingsTabRow(selected: SettingsTab, onTabChange: (SettingsTab) -> 
                             SettingsTab.ApiKeys -> "Keys"
                             SettingsTab.FastRules -> "Fast Rules"
                             SettingsTab.ToolTiers -> "路由档位"
-                            SettingsTab.Theme -> "主题"
                         },
                         style = MaterialTheme.typography.labelMedium.copy(
                             fontWeight = if (isSelected) androidx.compose.ui.text.font.FontWeight.Bold
@@ -250,24 +235,22 @@ private fun ConnectionTab(state: SettingsUiState, onUrlChange: (String) -> Unit,
 }
 
 private val THEME_OPTIONS = listOf(
-    Triple("honey", "🍯 暖黄蜜糖", Color(0xFFF5A623)),
-    Triple("matcha", "🍵 抹茶", Color(0xFF7BAE6B)),
-    Triple("lavender", "💜 薰衣草", Color(0xFF9B7EC8)),
-    Triple("sky_blue", "☁️ 天蓝", Color(0xFF5BA4D9)),
-    Triple("qingwa", "🏔 青瓦", Color(0xFF4A6572)),
-    Triple("warm_orange", "🍊 暖橙", Color(0xFFBF5B17)),
-    Triple("plain_paper", "📜 素纸", Color(0xFF5A5347)),
-    Triple("mist", "🌫 微雾", Color(0xFF636B74)),
-    Triple("system", "✨ 跟随系统", Color(0xFF8E8E93)),
-    Triple("light", "☀️ 浅色", Color(0xFFE0E0E0)),
-    Triple("dark", "🌙 深色", Color(0xFF333333)),
+    "warm_orange" to "暖橙",
+    "system" to "跟随系统",
+    "light" to "浅色",
+    "dark" to "深色",
+    "qingwa" to "青瓦",
+    "plain_paper" to "素纸",
+    "mist" to "微雾",
 )
 
 @Composable
 private fun GeneralTab(
     settings: AgentSettings,
+    themeId: String,
     onUpdate: (AgentSettings) -> Unit,
     onSave: () -> Unit,
+    onSetTheme: (String) -> Unit,
     onCheckUpdate: () -> Unit,
 ) {
     CuteCard {
@@ -286,56 +269,36 @@ private fun GeneralTab(
 
     CuteCard {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("主题", style = MaterialTheme.typography.titleSmall)
+            THEME_OPTIONS.forEach { (id, label) ->
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(label)
+                    if (themeId == id) {
+                        Text("✓", color = MaterialTheme.colorScheme.primary)
+                    } else {
+                        TextButton(onClick = { onSetTheme(id) }) { Text("选择") }
+                    }
+                }
+            }
+            Text(
+                "注：完整主题切换由 Track 7 实现，当前仅记录选择",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+
+    CuteCard {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("系统", style = MaterialTheme.typography.titleSmall)
             OutlinedButton(onClick = onCheckUpdate, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("检查更新")
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun ThemeTab(themeId: String, onSetTheme: (String) -> Unit) {
-    CuteCard {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("选择主题", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Text(
-                "点击色点切换主题配色",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                THEME_OPTIONS.forEach { (id, label, color) ->
-                    val isSelected = themeId == id
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .background(color, CircleShape)
-                                .border(
-                                    width = if (isSelected) 3.dp else 0.dp,
-                                    color = if (isSelected) MaterialTheme.colorScheme.onBackground else Color.Transparent,
-                                    shape = CircleShape,
-                                )
-                                .clickable { onSetTheme(id) },
-                        )
-                        Text(
-                            label,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                            modifier = Modifier.padding(top = 4.dp),
-                        )
-                    }
-                }
             }
         }
     }
@@ -753,59 +716,15 @@ private fun ToolTiersTab(state: SettingsUiState) {
     }
 }
 
-// ─── Previews ───
-
-@Preview(showBackground = true, widthDp = 375, heightDp = 720, name = "ThemeTab · Honey")
 @Composable
-private fun ThemeTabPreviewHoney() {
-    ThemeState.themeId = "honey"
-    EthanTheme {
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            color = MaterialTheme.colorScheme.background,
-        ) {
-            Column(Modifier.padding(16.dp)) {
-                CuteTopBar(title = "设置")
-                Spacer(Modifier.height(8.dp))
-                ThemeTab(themeId = "honey", onSetTheme = {})
-            }
-        }
+private fun CuteCard(content: @Composable () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
+        shadowElevation = 1.dp,
+    ) {
+        content()
     }
 }
-
-@Preview(showBackground = true, widthDp = 375, heightDp = 720, name = "ThemeTab · WarmOrange")
-@Composable
-private fun ThemeTabPreviewWarmOrange() {
-    ThemeState.themeId = "warm_orange"
-    EthanTheme {
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            color = MaterialTheme.colorScheme.background,
-        ) {
-            Column(Modifier.padding(16.dp)) {
-                CuteTopBar(title = "设置")
-                Spacer(Modifier.height(8.dp))
-                ThemeTab(themeId = "warm_orange", onSetTheme = {})
-            }
-        }
-    }
-}
-
-@Preview(showBackground = true, widthDp = 375, heightDp = 720, name = "ThemeTab · Qingwa")
-@Composable
-private fun ThemeTabPreviewQingwa() {
-    ThemeState.themeId = "qingwa"
-    EthanTheme {
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            color = MaterialTheme.colorScheme.background,
-        ) {
-            Column(Modifier.padding(16.dp)) {
-                CuteTopBar(title = "设置")
-                Spacer(Modifier.height(8.dp))
-                ThemeTab(themeId = "qingwa", onSetTheme = {})
-            }
-        }
-    }
-}
-

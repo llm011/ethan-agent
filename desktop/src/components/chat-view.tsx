@@ -175,6 +175,12 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     // 切换到目标会话 — 保存当前输入并恢复目标会话的输入状态
     inputStore.switchTo(initialSessionId, inputRef.current?.value);
 
+    // 重置 transient 状态：防止旧会话的 streaming 残留阻塞新会话操作
+    setStreaming(false);
+    setStopping(false);
+    setBgPolling(null);
+    setConsentRequest(null);
+
     // SWR：先尝试读本地缓存，命中则立即渲染（避免白屏等待网络）
     const cached = readSessionCache(initialSessionId);
     if (cached) {

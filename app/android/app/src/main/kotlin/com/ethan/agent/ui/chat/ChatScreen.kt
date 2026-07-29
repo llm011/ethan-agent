@@ -5,6 +5,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
@@ -24,6 +26,7 @@ import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -31,6 +34,7 @@ import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -102,6 +106,7 @@ fun ChatScreen(
     onClearError: () -> Unit,
     onScrollToBottom: () -> Unit = {},
     onResumeStream: () -> Unit = {},
+    onOpenDrawer: () -> Unit = {},
 ) {
     val snackbar = remember { SnackbarHostState() }
     val listState = rememberLazyListState()
@@ -282,13 +287,20 @@ fun ChatScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                        .padding(horizontal = 4.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
+                    IconButton(onClick = onOpenDrawer) {
+                        Icon(
+                            Icons.Default.Menu,
+                            contentDescription = "菜单",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
                     Text(
                         text = state.title,
-                        style = MaterialTheme.typography.titleLarge,
+                        style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.primary,
                     )
                     ConnectionStateIndicator(state.connectionState, state.isResuming)
@@ -353,7 +365,7 @@ fun ChatScreen(
         Column(
             Modifier
                 .fillMaxSize()
-                .padding(padding)
+                .padding(top = padding.calculateTopPadding())
                 .imePadding(),
         ) {
             LazyColumn(
@@ -390,110 +402,117 @@ fun ChatScreen(
                 )
             }
 
-            // + 按钮 + 输入框 (send button inside)
+            // 悬浮胶囊输入栏：+号在框内左侧
             Surface(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
                 color = MaterialTheme.colorScheme.surface,
                 shadowElevation = 4.dp,
-                shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+                shape = RoundedCornerShape(28.dp),
             ) {
                 Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.Bottom,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 6.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    // + button
+                    // + 号：小圆圈描边样式，放在输入框内左侧
                     Surface(
-                        shape = RoundedCornerShape(50),
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                        modifier = Modifier.size(40.dp),
+                        shape = CircleShape,
+                        color = androidx.compose.ui.graphics.Color.Transparent,
+                        border = BorderStroke(1.2.dp, MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)),
+                        modifier = Modifier.size(28.dp),
                     ) {
-                        IconButton(onClick = { showPlusSheet = true }) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clickable { showPlusSheet = true },
+                            contentAlignment = Alignment.Center,
+                        ) {
                             Icon(
                                 Icons.Default.Add,
                                 contentDescription = "更多选项",
-                                tint = MaterialTheme.colorScheme.primary,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(16.dp),
                             )
                         }
                     }
-                    // Input field with send button inside
-                    Surface(
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(24.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    // 输入框 + 发送按钮
+                    Row(
+                        modifier = Modifier.weight(1f).padding(end = 4.dp),
+                        verticalAlignment = Alignment.Bottom,
                     ) {
-                        Row(
-                            modifier = Modifier.padding(end = 4.dp),
-                            verticalAlignment = Alignment.Bottom,
+                        OutlinedTextField(
+                            value = state.inputText,
+                            onValueChange = onInputChange,
+                            modifier = Modifier.weight(1f),
+                            placeholder = {
+                                Text(
+                                    if (state.isStreaming) "补充信息给 Agent…" else "输入消息…",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            },
+                            maxLines = 5,
+                            shape = RoundedCornerShape(24.dp),
+                            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = androidx.compose.ui.graphics.Color.Transparent,
+                                unfocusedBorderColor = androidx.compose.ui.graphics.Color.Transparent,
+                                focusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
+                                unfocusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
+                            ),
+                        )
+                        Box(
+                            modifier = Modifier.padding(bottom = 8.dp, end = 4.dp),
+                            contentAlignment = Alignment.Center,
                         ) {
-                            OutlinedTextField(
-                                value = state.inputText,
-                                onValueChange = onInputChange,
-                                modifier = Modifier.weight(1f),
-                                placeholder = {
-                                    Text(
-                                        if (state.isStreaming) "补充信息给 Agent…" else "输入消息…",
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                },
-                                maxLines = 5,
-                                shape = RoundedCornerShape(24.dp),
-                                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = androidx.compose.ui.graphics.Color.Transparent,
-                                    unfocusedBorderColor = androidx.compose.ui.graphics.Color.Transparent,
-                                ),
-                            )
-                            Box(
-                                modifier = Modifier.padding(bottom = 8.dp, end = 4.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                when {
-                                    state.isStopping -> {
-                                        CircularProgressIndicator(Modifier.size(20.dp))
-                                    }
-                                    state.isStreaming || state.isResuming -> {
-                                        Surface(
-                                            shape = RoundedCornerShape(50),
-                                            color = MaterialTheme.colorScheme.errorContainer,
-                                            modifier = Modifier.size(36.dp),
-                                        ) {
-                                            IconButton(onClick = onStop) {
-                                                Icon(
-                                                    Icons.Default.Stop,
-                                                    contentDescription = "停止",
-                                                    tint = MaterialTheme.colorScheme.error,
-                                                    modifier = Modifier.size(18.dp),
-                                                )
-                                            }
+                            when {
+                                state.isStopping -> {
+                                    CircularProgressIndicator(Modifier.size(20.dp))
+                                }
+                                state.isStreaming || state.isResuming -> {
+                                    Surface(
+                                        shape = RoundedCornerShape(50),
+                                        color = MaterialTheme.colorScheme.errorContainer,
+                                        modifier = Modifier.size(36.dp),
+                                    ) {
+                                        IconButton(onClick = onStop) {
+                                            Icon(
+                                                Icons.Default.Stop,
+                                                contentDescription = "停止",
+                                                tint = MaterialTheme.colorScheme.error,
+                                                modifier = Modifier.size(18.dp),
+                                            )
                                         }
                                     }
-                                    else -> {
-                                        Surface(
-                                            shape = RoundedCornerShape(50),
-                                            color = if (state.inputText.isNotBlank()) MaterialTheme.colorScheme.primary
-                                                else MaterialTheme.colorScheme.surfaceVariant,
-                                            modifier = Modifier.size(36.dp),
+                                }
+                                else -> {
+                                    Surface(
+                                        shape = RoundedCornerShape(50),
+                                        color = if (state.inputText.isNotBlank()) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.surfaceVariant,
+                                        modifier = Modifier.size(36.dp),
+                                    ) {
+                                        IconButton(
+                                            onClick = onSend,
+                                            enabled = state.inputText.isNotBlank(),
                                         ) {
-                                            IconButton(
-                                                onClick = onSend,
-                                                enabled = state.inputText.isNotBlank(),
-                                            ) {
-                                                Icon(
-                                                    Icons.AutoMirrored.Filled.Send,
-                                                    contentDescription = "发送",
-                                                    tint = if (state.inputText.isNotBlank()) MaterialTheme.colorScheme.onPrimary
-                                                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    modifier = Modifier.size(20.dp),
-                                                )
-                                            }
+                                            Icon(
+                                                Icons.AutoMirrored.Filled.Send,
+                                                contentDescription = "发送",
+                                                tint = if (state.inputText.isNotBlank()) MaterialTheme.colorScheme.onPrimary
+                                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(20.dp),
+                                            )
                                         }
                                     }
                                 }
                             }
                         }
-                    }
-                }
-            }
+                    } // end inner Row (input + send)
+                } // end outer Row
+            } // end Surface
         }
     }
 }

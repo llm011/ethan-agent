@@ -123,18 +123,7 @@ fun UpdateDialog(viewModel: UpdateViewModel) {
             )
         }
 
-        is UpdateViewModel.UpdateState.UpToDate -> {
-            AlertDialog(
-                onDismissRequest = viewModel::dismiss,
-                title = { Text("已是最新版本") },
-                text = { Text("当前使用的版本已经是最新的了。") },
-                confirmButton = {
-                    TextButton(onClick = viewModel::dismiss) {
-                        Text("好的")
-                    }
-                },
-            )
-        }
+        is UpdateViewModel.UpdateState.UpToDate -> {} // 静默，不弹窗
 
         else -> {} // Idle / Checking 不显示
     }

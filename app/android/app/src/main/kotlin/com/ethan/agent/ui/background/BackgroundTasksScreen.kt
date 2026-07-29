@@ -30,8 +30,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.ethan.agent.core.model.BackgroundTask
-import com.ethan.agent.ui.components.CuteTopBar
 import com.ethan.agent.ui.components.ErrorSnackbar
+import com.ethan.agent.ui.components.EthanTopBar
 import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.SnackbarContainer
 
@@ -39,6 +39,7 @@ import com.ethan.agent.ui.components.SnackbarContainer
 @Composable
 fun BackgroundTasksScreen(
     state: BackgroundTasksUiState,
+    onBack: () -> Unit = {},
     onRefresh: () -> Unit,
     onStop: (String) -> Unit,
     onOpenSession: (String) -> Unit,
@@ -48,43 +49,45 @@ fun BackgroundTasksScreen(
     ErrorSnackbar(state.error, onClearError, snackbar)
 
     Scaffold(
-        topBar = {
-            CuteTopBar(
+        snackbarHost = { SnackbarContainer(snackbar) },
+    ) { padding ->
+        Column(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding())) {
+            EthanTopBar(
                 title = "后台任务",
+                onBack = onBack,
                 actions = {
                     IconButton(onClick = onRefresh) {
                         Icon(Icons.Default.Refresh, contentDescription = "刷新")
                     }
                 },
             )
-        },
-        snackbarHost = { SnackbarContainer(snackbar) },
-    ) { padding ->
-        if (state.isLoading && state.tasks.isEmpty()) {
-            LoadingBox(Modifier.padding(padding))
-            return@Scaffold
-        }
 
-        if (state.tasks.isEmpty()) {
-            androidx.compose.foundation.layout.Box(
-                Modifier.fillMaxSize().padding(padding),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text("暂无后台任务", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (state.isLoading && state.tasks.isEmpty()) {
+                LoadingBox()
+                return@Scaffold
             }
-            return@Scaffold
-        }
 
-        LazyColumn(
-            Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            items(state.tasks, key = { it.id }) { task ->
-                TaskCard(
-                    task = task,
-                    stopping = task.id in state.stoppingIds,
-                    onStop = { onStop(task.id) },
-                )
+            if (state.tasks.isEmpty()) {
+                androidx.compose.foundation.layout.Box(
+                    Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("暂无后台任务", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                return@Scaffold
+            }
+
+            LazyColumn(
+                Modifier.fillMaxSize().padding(horizontal = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(state.tasks, key = { it.id }) { task ->
+                    TaskCard(
+                        task = task,
+                        stopping = task.id in state.stoppingIds,
+                        onStop = { onStop(task.id) },
+                    )
+                }
             }
         }
     }

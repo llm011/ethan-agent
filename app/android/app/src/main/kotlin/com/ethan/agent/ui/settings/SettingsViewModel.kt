@@ -57,7 +57,7 @@ data class SettingsUiState(
     val knowledgeValidating: Boolean = false,
     val knowledgeValidateResult: String? = null,
     // Theme
-    val themeId: String = "warm_orange",
+    val themeId: String = "honey",
 )
 
 @HiltViewModel

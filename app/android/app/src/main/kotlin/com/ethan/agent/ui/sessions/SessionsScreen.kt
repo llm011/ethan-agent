@@ -42,7 +42,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
@@ -61,9 +65,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-// Primary filters shown directly; extra filters in expandable row
-private val PRIMARY_SOURCES = listOf("web", "lark", "repl", "desktop")
-private val MORE_SOURCES = listOf("heartbeat", "scheduled")
+// All source chips shown in filter bar
+private val ALL_SOURCE_CHIPS = listOf("web", "lark", "repl", "desktop", "wechat", "心跳", "定时")
+private val SOURCE_CHIP_MAP = mapOf("心跳" to "heartbeat", "定时" to "scheduled")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -80,9 +84,11 @@ fun SessionsScreen(
     onRegenTitle: (String) -> Unit,
     onSummary: (String) -> Unit,
     onDismissSummary: () -> Unit,
-    onSetSourceFilter: (String) -> Unit,
-    onToggleHideHeartbeat: () -> Unit,
-    onToggleHideScheduled: () -> Unit,
+    onSetSourceFilter: (String) -> Unit = {},
+    onToggleHideHeartbeat: () -> Unit = {},
+    onToggleHideScheduled: () -> Unit = {},
+    onToggleSource: (String) -> Unit = {},
+    onBack: () -> Unit = {},
 ) {
     val snackbar = remember { SnackbarHostState() }
     ErrorSnackbar(state.error, onClearError, snackbar)
@@ -109,118 +115,81 @@ fun SessionsScreen(
 
     Scaffold(
         snackbarHost = { SnackbarContainer(snackbar) },
+        containerColor = MaterialTheme.colorScheme.background,
     ) { padding ->
         var searchExpanded by remember { mutableStateOf(false) }
-        var moreExpanded by remember { mutableStateOf(false) }
 
-        Column(Modifier.fillMaxSize().padding(padding)) {
-            // Filter row with search icon
-            Row(
+        Column(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding()).navigationBarsPadding()) {
+            // Filter bar card
+            Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                PRIMARY_SOURCES.forEach { src ->
-                    val selected = state.sourceFilter == src
-                    Surface(
-                        shape = RoundedCornerShape(50),
-                        color = if (selected) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                        border = if (selected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                        modifier = Modifier.clickable { onSetSourceFilter(src) },
-                    ) {
-                        Text(
-                            text = src,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = if (selected) MaterialTheme.colorScheme.onPrimary
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-
-                // "更多" toggle
-                Surface(
-                    shape = RoundedCornerShape(50),
-                    color = if (moreExpanded) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-                        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    modifier = Modifier.clickable { moreExpanded = !moreExpanded },
-                ) {
-                    Text(
-                        text = "更多",
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-
-                // Search icon at right
-                Surface(
-                    shape = RoundedCornerShape(50),
-                    color = if (searchExpanded) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-                        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                    modifier = Modifier
-                        .size(28.dp)
-                        .clickable { searchExpanded = !searchExpanded },
-                ) {
-                    Icon(
-                        Icons.Default.Search,
-                        contentDescription = "搜索",
-                        modifier = Modifier.padding(5.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-
-            // Expandable "more" filter row
-            AnimatedVisibility(
-                visible = moreExpanded,
-                enter = expandVertically(),
-                exit = shrinkVertically(),
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surface,
+                shadowElevation = 2.dp,
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    val hideHb = state.hideHeartbeat
-                    Surface(
-                        shape = RoundedCornerShape(50),
-                        color = if (hideHb) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                        modifier = Modifier.clickable { onToggleHideHeartbeat() },
-                    ) {
-                        Text(
-                            text = "隐藏心跳",
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = if (hideHb) MaterialTheme.colorScheme.onPrimary
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                    // Back button
+                    IconButton(onClick = onBack, modifier = Modifier.size(36.dp)) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "返回",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(20.dp),
                         )
                     }
-                    val hideSch = state.hideScheduled
-                    Surface(
-                        shape = RoundedCornerShape(50),
-                        color = if (hideSch) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                        modifier = Modifier.clickable { onToggleHideScheduled() },
+
+                    // Scrollable chips
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        Text(
-                            text = "隐藏定时",
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = if (hideSch) MaterialTheme.colorScheme.onPrimary
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                    ALL_SOURCE_CHIPS.forEach { label ->
+                        val sourceKey = SOURCE_CHIP_MAP[label] ?: label
+                        val selected = state.selectedSources.contains(sourceKey)
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = if (selected) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                            border = if (selected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            modifier = Modifier.clickable(
+                                indication = null,
+                                interactionSource = remember { MutableInteractionSource() },
+                            ) { onToggleSource(sourceKey) },
+                        ) {
+                            Text(
+                                text = label,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (selected) MaterialTheme.colorScheme.onPrimary
+                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
+
+                // Search icon
+                IconButton(
+                    onClick = { searchExpanded = !searchExpanded },
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    Icon(
+                        Icons.Default.Search,
+                        contentDescription = "搜索",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
             }
+            } // end filter bar Surface
 
             // Expandable inline search bar
             AnimatedVisibility(

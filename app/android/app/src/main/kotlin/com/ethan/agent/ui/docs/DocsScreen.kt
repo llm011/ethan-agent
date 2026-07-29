@@ -19,8 +19,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.ethan.agent.ui.components.CuteTopBar
 import com.ethan.agent.ui.components.ErrorSnackbar
+import com.ethan.agent.ui.components.EthanTopBar
 import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.SnackbarContainer
 import com.ethan.agent.ui.components.SimpleMarkdown
@@ -29,6 +29,7 @@ import com.ethan.agent.ui.components.SimpleMarkdown
 @Composable
 fun DocsScreen(
     state: DocsUiState,
+    onBack: () -> Unit = {},
     onSelectDoc: (String) -> Unit,
     onClearError: () -> Unit,
     showListOnly: Boolean = false,
@@ -37,36 +38,38 @@ fun DocsScreen(
     ErrorSnackbar(state.error, onClearError, snackbar)
 
     Scaffold(
-        topBar = { CuteTopBar(title = "文档") },
         snackbarHost = { SnackbarContainer(snackbar) },
     ) { padding ->
         if (state.isLoading) {
-            LoadingBox(Modifier.padding(padding))
+            LoadingBox(Modifier.padding(top = padding.calculateTopPadding()))
             return@Scaffold
         }
 
-        if (showListOnly || state.selectedSlug == null) {
-            LazyColumn(Modifier.fillMaxSize().padding(padding).padding(12.dp)) {
-                items(state.docs, key = { it.slug }) { doc ->
-                    Card(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp)
-                            .clickable { onSelectDoc(doc.slug) },
-                    ) {
-                        Text(doc.title, modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.titleSmall)
+        Column(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding())) {
+            EthanTopBar(title = "文档", onBack = onBack)
+
+            if (showListOnly || state.selectedSlug == null) {
+                LazyColumn(Modifier.fillMaxSize().padding(12.dp)) {
+                    items(state.docs, key = { it.slug }) { doc ->
+                        Card(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                                .clickable { onSelectDoc(doc.slug) },
+                        ) {
+                            Text(doc.title, modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.titleSmall)
+                        }
                     }
                 }
-            }
-        } else {
-            Column(
-                Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-                    .verticalScroll(rememberScrollState())
-                    .padding(16.dp),
-            ) {
-                SimpleMarkdown(text = state.content)
+            } else {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(16.dp),
+                ) {
+                    SimpleMarkdown(text = state.content)
+                }
             }
         }
     }
