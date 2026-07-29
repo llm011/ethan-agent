@@ -182,3 +182,43 @@ jobs:
             exit 1
           fi
           gh release upload "$TAG" --repo "$REPO" --clobber /tmp/latest.json
+
+  # 把 latest.json 镜像到 GitHub Pages（web/public/latest.json），
+  # 桌面端 updater 通过 Pages URL 检查更新，避免直连 GitHub Releases 在国内不稳定。
+  # Pages 只用于"检查是否有新版"，实际二进制下载仍走 Releases asset URL。
+  mirror-updater-json:
+    needs: [build, carry-updater-json]
+    if: always() && (needs.build.result == 'success' || needs.carry-updater-json.result == 'success')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 需要 push 权限提交 mirror 到 main
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download latest.json from release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # build/carry 刚跑完，release 一定存在且含 latest.json
+          gh release download "$TAG" --repo "$REPO" --pattern "latest.json" --dir /tmp
+
+      - name: Commit to web/public for Pages mirror
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          mkdir -p web/public
+          cp /tmp/latest.json web/public/latest.json
+          # 只在文件有变化时提交，避免空 commit
+          if git diff --quiet web/public/latest.json; then
+            echo "latest.json unchanged, skip commit"
+          else
+            git add web/public/latest.json
+            git commit -m "chore: mirror latest.json to Pages for updater endpoint ($TAG)"
+            git push
+            echo "Pushed latest.json mirror, deploy-docs.yml will deploy to Pages"
+          fi

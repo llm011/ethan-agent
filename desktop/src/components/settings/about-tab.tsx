@@ -14,6 +14,28 @@ export function AboutTab() {
   const { state, update, progress, error, checkNow, installNow } = useUpdater();
   const [appVersion, setAppVersion] = useState<string>("");
   const [autoUpdateDisabled, setAutoUpdateDisabled] = useState(false);
+  const [autostartEnabled, setAutostartEnabled] = useState(false);
+
+  // 首次安装默认开启开机自启（仅初始化一次）
+  useEffect(() => {
+    const AUTOSTART_INIT_KEY = "ethan_autostart_initialized";
+    (async () => {
+      if (typeof window === "undefined" || !(window as any).__TAURI_INTERNALS__) return;
+      try {
+        const { isEnabled, enable } = await import("@tauri-apps/plugin-autostart");
+        const enabled = await isEnabled();
+        if (!enabled && !localStorage.getItem(AUTOSTART_INIT_KEY)) {
+          await enable();
+          localStorage.setItem(AUTOSTART_INIT_KEY, "1");
+          setAutostartEnabled(true);
+        } else {
+          setAutostartEnabled(enabled);
+        }
+      } catch {
+        // autostart 插件不可用时静默忽略
+      }
+    })();
+  }, []);
 
   useEffect(() => {
     getTauriAppVersion().then(setAppVersion).catch(() => setAppVersion(""));
@@ -28,6 +50,23 @@ export function AboutTab() {
     } else {
       localStorage.removeItem(AUTO_UPDATE_KEY);
       startAutoUpdate();
+    }
+  };
+
+  const toggleAutostart = async () => {
+    if (typeof window === "undefined" || !(window as any).__TAURI_INTERNALS__) return;
+    try {
+      const { enable, disable, isEnabled } = await import("@tauri-apps/plugin-autostart");
+      if (autostartEnabled) {
+        await disable();
+        setAutostartEnabled(false);
+      } else {
+        await enable();
+        setAutostartEnabled(true);
+        localStorage.setItem("ethan_autostart_initialized", "1");
+      }
+    } catch {
+      // 忽略错误
     }
   };
 
@@ -116,6 +155,26 @@ export function AboutTab() {
         >
           <span
             className={`inline-block h-4 w-4 transform rounded-full bg-background transition-transform ${autoUpdateDisabled ? "translate-x-0.5" : "translate-x-4"}`}
+          />
+        </button>
+      </div>
+
+      {/* 开机自启开关 */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="text-sm font-medium">开机时自动启动</div>
+          <div className="text-xs text-muted-foreground mt-1">
+            登录系统后自动在后台启动 Ethan Agent。
+          </div>
+        </div>
+        <button
+          onClick={() => void toggleAutostart()}
+          role="switch"
+          aria-checked={autostartEnabled}
+          className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${autostartEnabled ? "bg-primary" : "bg-muted"}`}
+        >
+          <span
+            className={`inline-block h-4 w-4 transform rounded-full bg-background transition-transform ${autostartEnabled ? "translate-x-4" : "translate-x-0.5"}`}
           />
         </button>
       </div>

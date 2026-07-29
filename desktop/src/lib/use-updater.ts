@@ -2,10 +2,10 @@
  * 半静默自动更新 hook。
  *
  * 策略：
- * - 应用启动 30s 后首次检查
- * - 之后每 4 小时检查一次
+ * - 应用启动 5s 后首次检查
+ * - 之后每 1 小时检查一次
  * - 检测到新版本：后台静默下载，不打扰用户
- * - 下载完成：提示用户“立即重启以安装”，由用户决定何时安装并重启
+ * - 下载完成：提示用户"立即重启以安装"，由用户决定何时安装并重启
  * - 任何错误均静默吞掉，绝不打断对话流
  *
  * 非 Tauri 环境（web dev）下所有操作自动降级为 no-op。
@@ -88,8 +88,8 @@ function isAutoUpdateEnabled(): boolean {
   return localStorage.getItem("ethan_auto_update_disabled") !== "1";
 }
 
-const STARTUP_DELAY_MS = 30_000;
-const CHECK_INTERVAL_MS = 4 * 60 * 60_000; // 4 小时
+const STARTUP_DELAY_MS = 5_000;
+const CHECK_INTERVAL_MS = 60 * 60_000; // 1 小时
 
 /**
  * 检查并下载更新（如果有）。

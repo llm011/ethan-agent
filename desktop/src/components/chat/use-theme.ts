@@ -17,6 +17,13 @@ export function useTheme() {
   // 切换一次后又走 .theme-* 造成主题漂移。
   useEffect(() => {
     applyThemeClass(theme);
+    // system 主题：监听系统配色变化，实时在 dark / qingwa 之间切换
+    if (theme === "system" && typeof window !== "undefined") {
+      const mql = window.matchMedia("(prefers-color-scheme: dark)");
+      const handler = () => applyThemeClass("system");
+      mql.addEventListener("change", handler);
+      return () => mql.removeEventListener("change", handler);
+    }
   }, [theme]);
 
   const setTheme = useCallback((next: ThemeId) => {
