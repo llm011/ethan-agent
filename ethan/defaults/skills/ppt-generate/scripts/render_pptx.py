@@ -1022,7 +1022,10 @@ def _macify_omml(omath, font_size_px: float, color_value):
         # 所以只在「无真次数」时才补 degHide + 空 m:deg。
         if tag == _QN_RAD:
             deg_el = el.find(_QN_DEG)
-            degree_empty = deg_el is None or not any(c.tag == _QN_MR for c in deg_el)
+            # 递归查找 m:deg 子树中是否有 m:r（文本 run）。不能只看直接子节点：
+            # \sqrt[n_1]{x} 的次数被 mathml2omml 转成 m:sSub，直接子节点是 m:sSub
+            # 而非 m:r，若只看直接子节点会误判为空，补上 degHide 后 n₁ 被隐藏。
+            degree_empty = deg_el is None or not any(deg_el.iter(_QN_MR))
             if degree_empty:
                 if pr.find(_QN_DEGHIDE) is None:
                     pr.insert(0, pr.makeelement(_QN_DEGHIDE, {_QN_VAL: "on"}))  # radPr 第一个子
