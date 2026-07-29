@@ -7,6 +7,10 @@ on:
     - cron: '0 * * * *'
   workflow_dispatch:
 
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
   enable-automerge:
     runs-on: ubuntu-latest
@@ -17,13 +21,17 @@ jobs:
           script: |
             const pr = context.payload.pull_request;
             if (!pr) return;
-            await github.rest.pulls.enableAutomerge({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: pr.number,
-              merge_method: 'squash'
-            });
-            console.log(`✅ Auto-merge enabled for PR #${pr.number}: ${pr.title}`);
+            try {
+              await github.rest.pulls.enableAutomerge({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: pr.number,
+                merge_method: 'squash'
+              });
+              console.log(`✅ Auto-merge enabled for PR #${pr.number}: ${pr.title}`);
+            } catch (e) {
+              console.log(`⏭️ Skip PR #${pr.number}: ${e.message}`);
+            }
 
   scan-all:
     runs-on: ubuntu-latest
