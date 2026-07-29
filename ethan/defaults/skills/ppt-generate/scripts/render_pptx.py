@@ -165,8 +165,8 @@ _TMP_IMG_DIR = Path(tempfile.gettempdir()) / "ppt_render_imgs"
 M_NS = "http://schemas.openxmlformats.org/officeDocument/2006/math"
 # DrawingML 2010 扩展：pptx 文本体内的数学区必须包在 <a14:m> 里（对照 pandoc 输出）
 A14_NS = "http://schemas.microsoft.com/office/drawing/2010/main"
-# 标记兼容性：a14:m 必须再包一层 mc:AlternateContent（Choice/Fallback），
-# 否则 Office 365 不渲染公式、Keynote 直接拒收整个文件
+# a14:m 的包裹方式见 _render_latex_omml（裸注入，不包 mc:AlternateContent）；
+# Keynote 不支持 a14:m（判整个文件非法），需 Keynote 交付时在 latex 元素加 "engine": "runs"。
 
 
 # ---------------------------------------------------------------------------
@@ -946,12 +946,18 @@ _MATH_LATIN = {"typeface": "Cambria Math", "panose": "02040503050406030204",
 
 
 def _math_rpr(font_size_px: float, color_value, italic: bool):
-    """构造 Mac Office 原生风格的 a:rPr：sz + i + solidFill + Cambria Math。"""
+    """构造 Office 365 原生公式风格的 a:rPr。
+
+    对照 test_sqrt.pptx（PowerPoint 插入公式后另存）：a:rPr 带 kumimoji/lang/
+    altLang/b="0"/i/smtClean="0" + Cambria Math latin 声明。本实现额外保留 sz +
+    solidFill 以支持 latex 元素的 fontSize/color（Office 同样接受这两个属性）。
+    """
     from lxml import etree
 
     rgb, alpha = parse_color(color_value)
     sz = str(int(round(font_size_px * PT_PER_PX * 100)))
-    attrs = {"sz": sz}
+    attrs = {"kumimoji": "1", "lang": "en-US", "altLang": "zh-CN",
+             "b": "0", "sz": sz, "smtClean": "0"}
     if italic:
         attrs["i"] = "1"
     rPr = etree.Element(qn("a:rPr"), attrs)
@@ -978,12 +984,13 @@ _QN_VAL = qn("m:val")
 
 
 def _macify_omml(omath, font_size_px: float, color_value):
-    """把 mathml2omml 的输出改写成 Mac PowerPoint 原生公式的字节模式。
+    r"""把 mathml2omml 的输出改写成 Office 365 原生公式的字节模式。
 
-    实测对照（Mac Office 365 插入公式后存盘）：原生公式没有 m:rPr/m:sty，
-    样式全在 a:rPr（i="1" 表斜体），且每个 run 都显式声明 Cambria Math；
-    每个结构元素（rad/f/sSub…）的 *Pr 里都有 m:ctrlPr，m:rad 还带空 m:deg。
-    mathml2omml 的输出缺这些，Mac 解析器拿到无法排版的 math zone 会静默丢成空盒子。
+    实测对照 test_sqrt.pptx（PowerPoint 插入 y=√f₁ 后另存的真·字节）：原生公式
+    没有 m:rPr/m:sty，样式全在 a:rPr（i="1" 表斜体），每个 run 显式声明 Cambria
+    Math；每个结构元素（rad/f/sSub…）的 *Pr 里都有 m:ctrlPr，m:rad 还带空 m:deg +
+    degHide。mathml2omml 的输出缺这些，解析器拿到无法排版的 math zone 会静默丢成
+    空盒子——这正是 \sqrt 被截断的根因。
 
     单次深度优先遍历完成全部改写（原实现对 15 类标签各扫一遍全树，O(15N)）。
     """
@@ -998,7 +1005,7 @@ def _macify_omml(omath, font_size_px: float, color_value):
             if mrpr is not None:
                 sty = mrpr.find(_QN_MSTY)
                 italic = sty is not None and sty.get(_QN_VAL) == "i"
-                el.remove(mrpr)  # Mac 原生没有 m:rPr，斜体走 a:rPr 的 i 属性
+                el.remove(mrpr)  # 原生没有 m:rPr，斜体走 a:rPr 的 i 属性
             el.insert(list(el).index(t), _math_rpr(font_size_px, color_value, italic))
             continue
         pr_tag = _MATH_STRUCT_PR_QN.get(tag)
@@ -1008,19 +1015,28 @@ def _macify_omml(omath, font_size_px: float, color_value):
         if pr is None:
             pr = el.makeelement(pr_tag, {})
             el.insert(0, pr)
+        # 对照 test_sqrt.pptx：m:radPr 子序是 degHide, ctrlPr（degHide 在前），
+        # mathml2omml 的输出完全没 radPr——必须按这个序补齐，否则根号被截断。
+        # 但 degHide=on 会隐藏整个次数占位框：\sqrt{} 无次数时正好藏掉空框；
+        # \sqrt[n]{} 有次数时若再加 degHide 会连 n 一起藏掉，n 次根号退化成平方根。
+        # 所以只在「无真次数」时才补 degHide + 空 m:deg。
+        if tag == _QN_RAD:
+            deg_el = el.find(_QN_DEG)
+            # 递归查找 m:deg 子树中是否有 m:r（文本 run）。不能只看直接子节点：
+            # \sqrt[n_1]{x} 的次数被 mathml2omml 转成 m:sSub，直接子节点是 m:sSub
+            # 而非 m:r，若只看直接子节点会误判为空，补上 degHide 后 n₁ 被隐藏。
+            degree_empty = deg_el is None or not any(deg_el.iter(_QN_MR))
+            if degree_empty:
+                if pr.find(_QN_DEGHIDE) is None:
+                    pr.insert(0, pr.makeelement(_QN_DEGHIDE, {_QN_VAL: "on"}))  # radPr 第一个子
+                if deg_el is None:  # 补空 m:deg，子序 radPr? deg? e
+                    e = el.find(_QN_E)
+                    empty_deg = el.makeelement(_QN_DEG, {})
+                    el.insert(list(el).index(e) if e is not None else len(el), empty_deg)
         if pr.find(_QN_CTRLPR) is None:
             ctrl = pr.makeelement(_QN_CTRLPR, {})
             ctrl.append(_math_rpr(font_size_px, color_value, True))
             pr.append(ctrl)
-        # m:rad 的子元素顺序是 radPr? deg? e —— Mac 原生带空 m:deg + degHide on，
-        # 缺了 Mac 不渲染根号；degHide 隐藏空次数占位框（\sqrt 无次数）
-        if tag == _QN_RAD:
-            if pr.find(_QN_DEGHIDE) is None:
-                pr.append(pr.makeelement(_QN_DEGHIDE, {_QN_VAL: "on"}))  # ctrlPr 前、degHide 后
-            if el.find(_QN_DEG) is None:
-                e = el.find(_QN_E)
-                deg = el.makeelement(_QN_DEG, {})
-                el.insert(list(el).index(e) if e is not None else len(el), deg)
 
 
 # ---------------------------------------------------------------------------
