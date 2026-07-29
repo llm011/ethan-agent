@@ -135,10 +135,6 @@ fun SettingsScreen(
                 )
             }
 
-            if (state.isLoading && state.agentSettings == null) {
-                LoadingBox()
-                return@Scaffold
-            }
             SettingsTabRow(state.tab, onTabChange)
 
             Column(
@@ -149,11 +145,18 @@ fun SettingsScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 when (state.tab) {
+                    // Connection 永远可访问，不依赖网络数据，避免"进不去设置"死锁
                     SettingsTab.Connection -> ConnectionTab(state, onServerUrlChange, onSaveServerUrl)
-                    SettingsTab.General -> state.agentSettings?.let {
-                        GeneralTab(it, state.themeId, onUpdateAgent, onSaveAgent, onSetTheme, onCheckUpdate)
+                    SettingsTab.General -> {
+                        if (state.isLoading && state.agentSettings == null) LoadingBox()
+                        else state.agentSettings?.let {
+                            GeneralTab(it, state.themeId, onUpdateAgent, onSaveAgent, onSetTheme, onCheckUpdate)
+                        }
                     }
-                    SettingsTab.Providers -> ProvidersTab(state.providers, onUpdateProvider, onSaveProviders)
+                    SettingsTab.Providers -> {
+                        if (state.isLoading && state.providers.isEmpty()) LoadingBox()
+                        else ProvidersTab(state.providers, onUpdateProvider, onSaveProviders)
+                    }
                     SettingsTab.Channels -> ChannelsTab(
                         state = state,
                         onChange = onChannelChange,

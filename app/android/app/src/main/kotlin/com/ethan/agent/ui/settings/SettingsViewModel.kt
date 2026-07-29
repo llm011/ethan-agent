@@ -18,6 +18,8 @@ import com.ethan.agent.core.model.ToolTiersResponse
 import com.ethan.agent.data.EthanRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -92,34 +94,39 @@ class SettingsViewModel @Inject constructor(
     fun load() {
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true, error = null) }
-            var error: String? = null
+            // 并行请求，避免服务器不可达时串行 30s×N 的死等
+            coroutineScope {
+                val versionDef = async { runCatching { repository.checkHealth() }.getOrNull() }
+                val agentDef = async { runCatching { repository.getAgentSettings() } }
+                val providersDef = async { runCatching { repository.getProviderSettings() }.getOrDefault(emptyMap()) }
+                val systemDef = async { runCatching { repository.getSystemSettings() }.getOrNull() }
+                val profileDef = async { runCatching { repository.getUserProfile() }.getOrDefault("") }
+                val channelsDef = async { runCatching { repository.getChannels() }.getOrDefault(emptyList()) }
+                val keysDef = async { runCatching { repository.getApiKeys() }.getOrDefault(emptyList()) }
 
-            val version = runCatching { repository.checkHealth() }.getOrNull()
-            val agent = runCatching { repository.getAgentSettings() }
-                .onFailure { error = repository.friendlyError(it) }.getOrNull()
-            val providers = runCatching { repository.getProviderSettings() }
-                .onFailure { if (error == null) error = repository.friendlyError(it) }.getOrDefault(emptyMap())
-            val system = runCatching { repository.getSystemSettings() }
-                .onFailure { if (error == null) error = repository.friendlyError(it) }.getOrNull()
-            val profile = runCatching { repository.getUserProfile() }
-                .onFailure { if (error == null) error = repository.friendlyError(it) }.getOrDefault("")
-            val channels = runCatching { repository.getChannels() }
-                .onFailure { if (error == null) error = repository.friendlyError(it) }.getOrDefault(emptyList())
-            val keys = runCatching { repository.getApiKeys() }
-                .onFailure { /* API Keys 单独加载，失败不阻塞其他设置 */ }.getOrDefault(emptyList())
+                val version = versionDef.await()
+                val agentRes = agentDef.await()
+                val providers = providersDef.await()
+                val system = systemDef.await()
+                val profile = profileDef.await()
+                val channels = channelsDef.await()
+                val keys = keysDef.await()
 
-            _state.update {
-                it.copy(
-                    serverVersion = version,
-                    agentSettings = agent,
-                    providers = providers,
-                    systemSettings = system,
-                    profile = profile,
-                    channels = channels,
-                    apiKeys = keys,
-                    isLoading = false,
-                    error = error,
-                )
+                val error = agentRes.exceptionOrNull()?.let { repository.friendlyError(it) }
+
+                _state.update {
+                    it.copy(
+                        serverVersion = version,
+                        agentSettings = agentRes.getOrNull(),
+                        providers = providers,
+                        systemSettings = system,
+                        profile = profile,
+                        channels = channels,
+                        apiKeys = keys,
+                        isLoading = false,
+                        error = error,
+                    )
+                }
             }
         }
     }
