@@ -188,6 +188,7 @@ class FilesystemKnowledgeBase(KnowledgeBase):
     def add(self, title: str, content: str, tags: list[str] | None = None,
             frontmatter: dict | None = None) -> str:
         slug = re.sub(r"[^\w]+", "-", title.lower())[:50].strip("-")
+        slug = re.sub(r"-{2,}", "-", slug)  # 双保险：合并残余连续短横线
         # 按 tags[0] 分子目录（如 people/、project/），sanitize 后为空则落根目录
         target_dir = self._dir
         if tags:
@@ -317,6 +318,7 @@ class ObsidianKnowledgeBase(KnowledgeBase):
     def add(self, title: str, content: str, tags: list[str] | None = None,
             frontmatter: dict | None = None) -> str:
         slug = re.sub(r"[^\w]+", "-", title.lower())[:50].strip("-")
+        slug = re.sub(r"-{2,}", "-", slug)  # 双保险：合并残余连续短横线
         # 按 tags[0] 分子目录（如 people/、project/），sanitize 后为空则落根目录
         target_dir = self._dir
         if tags:
