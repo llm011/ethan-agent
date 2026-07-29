@@ -98,7 +98,7 @@ fun ScheduleScreen(
             }
         },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding())) {
+        Column(Modifier.fillMaxSize().padding(padding)) {
             EthanTopBar(title = "定时任务", onBack = onBack)
 
             EthanScrollableTabBar(

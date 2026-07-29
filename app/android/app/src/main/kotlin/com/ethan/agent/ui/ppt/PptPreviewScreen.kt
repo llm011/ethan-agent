@@ -27,7 +27,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.ethan.agent.ui.components.CuteTopBar
+import com.ethan.agent.ui.components.EthanTopBar
 import com.ethan.agent.ui.components.ErrorSnackbar
 import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.SimpleMarkdown
@@ -46,7 +46,7 @@ fun PptPreviewScreen(
 
     Scaffold(
         topBar = {
-            CuteTopBar(
+            EthanTopBar(
                 title = state.deckName.ifBlank { "PPT 预览" },
                 subtitle = if (state.pageCount > 0) "共 ${state.pageCount} 页" else null,
             )

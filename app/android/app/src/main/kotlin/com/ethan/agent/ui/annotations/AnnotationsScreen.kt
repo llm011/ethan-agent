@@ -2,6 +2,7 @@ package com.ethan.agent.ui.annotations
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.core.graphics.toColorInt
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,7 +43,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.ethan.agent.core.model.Annotation
-import com.ethan.agent.ui.components.CuteTopBar
+import com.ethan.agent.ui.components.EthanTopBar
 import com.ethan.agent.ui.components.ErrorSnackbar
 import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.SnackbarContainer
@@ -58,7 +59,7 @@ fun AnnotationsScreen(
     ErrorSnackbar(state.error, onClearError, snackbar)
 
     Scaffold(
-        topBar = { CuteTopBar(title = "标注") },
+        topBar = { EthanTopBar(title = "标注") },
         snackbarHost = { SnackbarContainer(snackbar) },
     ) { padding ->
         when {
@@ -188,7 +189,7 @@ private fun annotationDecoration(type: String) = when (type) {
 }
 
 private fun parseColor(hex: String): Color? = runCatching {
-    Color(android.graphics.Color.parseColor(hex))
+    Color(hex.toColorInt())
 }.getOrNull()
 
 /**
@@ -197,6 +198,7 @@ private fun parseColor(hex: String): Color? = runCatching {
  * with highlight/underline/strikethrough spans applied. Call from ChatScreen or
  * any message-rendering composable.
  */
+@Suppress("unused")
 @Composable
 fun AnnotationLayer(
     content: String,

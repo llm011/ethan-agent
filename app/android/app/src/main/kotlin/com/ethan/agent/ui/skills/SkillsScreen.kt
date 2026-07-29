@@ -63,11 +63,11 @@ fun SkillsScreen(
         snackbarHost = { SnackbarContainer(snackbar) },
     ) { padding ->
         if (state.isLoading) {
-            LoadingBox(Modifier.padding(top = padding.calculateTopPadding()))
+            LoadingBox(Modifier.padding(padding))
             return@Scaffold
         }
 
-        Column(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding())) {
+        Column(Modifier.fillMaxSize().padding(padding)) {
             EthanTopBar(title = "技能", onBack = onBack)
 
             Row(Modifier.fillMaxSize()) {

@@ -51,7 +51,7 @@ fun BackgroundTasksScreen(
     Scaffold(
         snackbarHost = { SnackbarContainer(snackbar) },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding())) {
+        Column(Modifier.fillMaxSize().padding(padding)) {
             EthanTopBar(
                 title = "后台任务",
                 onBack = onBack,

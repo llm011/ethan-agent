@@ -76,11 +76,11 @@ fun KnowledgeScreen(
         snackbarHost = { SnackbarContainer(snackbar) },
     ) { padding ->
         if (state.isLoading && state.items.isEmpty()) {
-            LoadingBox(Modifier.padding(top = padding.calculateTopPadding()))
+            LoadingBox(Modifier.padding(padding))
             return@Scaffold
         }
 
-        Column(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding())) {
+        Column(Modifier.fillMaxSize().padding(padding)) {
             EthanTopBar(title = "知识库", onBack = onBack)
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 12.dp),

@@ -116,7 +116,10 @@ fun AppDrawerContent(
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier
                         .weight(1f)
-                        .clickable { onSearchClick(); onClose() },
+                        .clickable(
+                            indication = null,
+                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                        ) { onSearchClick(); onClose() },
                 )
                 IconButton(onClick = { onSearchClick(); onClose() }) {
                     Icon(

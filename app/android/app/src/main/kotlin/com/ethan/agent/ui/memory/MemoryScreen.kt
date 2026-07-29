@@ -164,7 +164,7 @@ fun MemoryScreen(
     Scaffold(
         snackbarHost = { SnackbarContainer(snackbar) },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding())) {
+        Column(Modifier.fillMaxSize().padding(bottom = padding.calculateBottomPadding())) {
             // 紧凑顶栏
             EthanTopBar(
                 title = "记忆",
@@ -563,7 +563,10 @@ private fun ProceduresTab(procedures: List<Procedure>, onDelete: (String) -> Uni
                 state = dismissState,
                 backgroundContent = {
                     Box(
-                        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.errorContainer)
+                        Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.errorContainer)
                             .padding(horizontal = 20.dp),
                         contentAlignment = Alignment.CenterEnd,
                     ) {

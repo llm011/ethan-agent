@@ -179,7 +179,7 @@ fun LoginScreen(
                         OutlinedTextField(
                             value = token,
                             onValueChange = { token = it },
-                            placeholder = { Text("输入 network.auth_token", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)) },
+                            placeholder = { Text("输入 token", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)) },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
                             shape = RoundedCornerShape(18.dp),

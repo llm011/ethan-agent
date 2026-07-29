@@ -91,6 +91,7 @@ class ChatViewModel @Inject constructor(
                                     toolSteps = msg.toolSteps ?: emptyList(),
                                     usage = msg.usage,
                                     quote = msg.quote,
+                                    createdAt = msg.createdAt,
                                 )
                             },
                         )
@@ -141,7 +142,7 @@ class ChatViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
-            val userMessage = UiMessage(role = "user", content = text, quote = current.quote)
+            val userMessage = UiMessage(role = "user", content = text, quote = current.quote, createdAt = System.currentTimeMillis() / 1000)
             _state.update {
                 it.copy(
                     inputText = "",
@@ -167,7 +168,7 @@ class ChatViewModel @Inject constructor(
 
             val history = _state.value.messages.map { ChatMessage(it.role, it.content) }
             val assistantIndex = _state.value.messages.size
-            _state.update { it.copy(messages = it.messages + UiMessage(role = "assistant", content = "", isStreaming = true)) }
+            _state.update { it.copy(messages = it.messages + UiMessage(role = "assistant", content = "", isStreaming = true, createdAt = System.currentTimeMillis() / 1000)) }
 
             streamJob = viewModelScope.launch {
                 try {
@@ -283,6 +284,9 @@ class ChatViewModel @Inject constructor(
         val contentBuilder = StringBuilder()
         var lastFlushMs = 0L
         var firstEvent = true
+        val streamStartMs = System.currentTimeMillis()
+        var ttfbMs: Long? = null
+        var firstContentMs: Long? = null
 
         fun flush(force: Boolean = false) {
             val now = System.currentTimeMillis()
@@ -317,6 +321,10 @@ class ChatViewModel @Inject constructor(
                         }
                     }
                     event.content != null -> {
+                        if (firstContentMs == null) {
+                            firstContentMs = System.currentTimeMillis()
+                            ttfbMs = firstContentMs!! - streamStartMs
+                        }
                         contentBuilder.append(event.content)
                         flush()
                         if (_state.value.showScrollToBottom) {
@@ -350,9 +358,17 @@ class ChatViewModel @Inject constructor(
         } finally {
             // 无论正常结束还是异常，都要重置 assistant 气泡的 isStreaming，避免 spinner 永久卡住
             flush(force = true)
+            val totalDurationMs = System.currentTimeMillis() - streamStartMs
+            val generationDurationMs = firstContentMs?.let { System.currentTimeMillis() - it }
             _state.update { s ->
                 val msgs = s.messages.toMutableList()
-                if (assistantIndex < msgs.size) msgs[assistantIndex] = msgs[assistantIndex].copy(isStreaming = false, usage = usage)
+                if (assistantIndex < msgs.size) msgs[assistantIndex] = msgs[assistantIndex].copy(
+                    isStreaming = false,
+                    usage = usage,
+                    ttfbMs = ttfbMs,
+                    totalDurationMs = totalDurationMs,
+                    generationDurationMs = generationDurationMs,
+                )
                 s.copy(messages = msgs, isStreaming = false)
             }
         }

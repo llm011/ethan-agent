@@ -119,7 +119,7 @@ fun SessionsScreen(
     ) { padding ->
         var searchExpanded by remember { mutableStateOf(false) }
 
-        Column(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding()).navigationBarsPadding()) {
+        Column(Modifier.fillMaxSize().padding(padding)) {
             // Filter bar card
             Surface(
                 modifier = Modifier
