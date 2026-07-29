@@ -1,7 +1,7 @@
 {
   "name": "ethan-desktop",
   "private": true,
-  "version": "0.5.67",
+  "version": "0.5.68",
   "type": "module",
   "scripts": {
     "dev": "vite",
