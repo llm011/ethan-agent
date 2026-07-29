@@ -22,10 +22,13 @@ class LocalCache(
 ) {
     private val cacheDir = File(context.cacheDir, "ethan_cache").apply { mkdirs() }
 
+    /** 将 key 中的路径分隔符替换为下划线，防止路径穿越。 */
+    private fun sanitizeKey(key: String): String = key.replace("/", "_").replace("\\", "_")
+
     /** 读缓存；文件不存在或反序列化失败返回 null。 */
     suspend fun <T> read(key: String, serializer: KSerializer<T>): T? = withContext(Dispatchers.IO) {
         runCatching {
-            val file = File(cacheDir, "$key.json")
+            val file = File(cacheDir, "${sanitizeKey(key)}.json")
             if (!file.exists()) return@runCatching null
             json.decodeFromString(serializer, file.readText())
         }.getOrNull()
@@ -34,14 +37,14 @@ class LocalCache(
     /** 写缓存；失败静默忽略。 */
     suspend fun <T> write(key: String, value: T, serializer: KSerializer<T>) = withContext(Dispatchers.IO) {
         runCatching {
-            val file = File(cacheDir, "$key.json")
+            val file = File(cacheDir, "${sanitizeKey(key)}.json")
             file.writeText(json.encodeToString(serializer, value))
         }
     }
 
     /** 删除指定 key 的缓存。 */
     suspend fun remove(key: String) = withContext(Dispatchers.IO) {
-        runCatching { File(cacheDir, "$key.json").delete() }
+        runCatching { File(cacheDir, "${sanitizeKey(key)}.json").delete() }
     }
 
     /** 清空所有缓存。 */

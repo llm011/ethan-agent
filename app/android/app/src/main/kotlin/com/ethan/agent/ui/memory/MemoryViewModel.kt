@@ -99,7 +99,11 @@ class MemoryViewModel @Inject constructor(
                     repository.cachedProcedures().collect { procedures ->
                         _state.update { it.copy(procedures = procedures) }
                     }
-                } catch (_: Exception) { }
+                } catch (e: Exception) {
+                    if (_state.value.procedures.isEmpty()) {
+                        _state.update { it.copy(error = repository.friendlyError(e)) }
+                    }
+                }
             }
         }
     }
