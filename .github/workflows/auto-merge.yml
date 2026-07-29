@@ -3,23 +3,55 @@ name: Auto-enable Squash Merge
 on:
   pull_request_target:
     types: [opened, reopened, ready_for_review]
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
 
 jobs:
   enable-automerge:
     runs-on: ubuntu-latest
-    if: github.event.pull_request.draft == false
+    if: github.event_name == 'pull_request_target' && github.event.pull_request.draft == false
     steps:
       - uses: actions/github-script@v7
         with:
           script: |
             const pr = context.payload.pull_request;
             if (!pr) return;
-
             await github.rest.pulls.enableAutomerge({
               owner: context.repo.owner,
               repo: context.repo.repo,
               pull_number: pr.number,
               merge_method: 'squash'
             });
-
             console.log(`✅ Auto-merge enabled for PR #${pr.number}: ${pr.title}`);
+
+  scan-all:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: prs } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open'
+            });
+            for (const pr of prs) {
+              if (pr.draft) continue;
+              if (pr.auto_merge) {
+                console.log(`⏭️ PR #${pr.number} already has auto-merge`);
+                continue;
+              }
+              try {
+                await github.rest.pulls.enableAutomerge({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: pr.number,
+                  merge_method: 'squash'
+                });
+                console.log(`✅ Auto-merge enabled for PR #${pr.number}: ${pr.title}`);
+              } catch (e) {
+                console.log(`❌ Failed PR #${pr.number}: ${e.message}`);
+              }
+            }
