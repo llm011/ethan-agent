@@ -1,8 +1,9 @@
 ---
 name: feishu-writer
-trigger: "写飞书文档|飞文档|写文档到飞书|生成研报|写研报|画架构图|mermaid|plantuml|飞书长文|飞书富文本|技术方案|设计文档|feishu writer|write feishu doc"
+category: discoverable
+trigger: "飞书文档|飞文档|写文档到飞书|生成研报|写研报|画架构图|mermaid|plantuml|飞书长文|飞书富文本|技术方案|设计文档|feishu writer|write feishu doc"
 description: >
-  TRIGGER WHEN: 用户要求"写飞书文档"、"生成研报"、"画架构图(Mermaid/PlantUML)"且明确指定输出到飞书时。
+  TRIGGER WHEN: 用户要求写/创建/整理飞书文档、"生成研报"、"画架构图(Mermaid/PlantUML)"且明确指定输出到飞书时。
   专业的飞书文档生成与富文本写入，支持高质感排版、Mermaid 净化及分块长文写入。
   本技能是 lark-doc / lark-wiki 的"长文创作 + 富文本写入"补充，不重复 lark-doc 已有的通用文档操作。
 metadata:
@@ -24,7 +25,7 @@ metadata:
     - skill: lark-whiteboard
       scope: "复杂自由排版架构图（SVG/JSON DSL）。本技能 add_mermaid.py 仅用于原生 add_ons Mermaid 块这种轻量场景。"
 license: MIT
-version: 2.0.2
+version: 2.1.0
 source: internal (hermes agent, upgraded with Aime spec)
 ---
 
