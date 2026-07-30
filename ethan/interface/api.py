@@ -27,6 +27,7 @@ from ethan.interface.routers import (
     logs,
     memory,
     models,
+    reading,
     schedule,
     sessions,
     settings,
@@ -196,6 +197,7 @@ app.include_router(logs.router, prefix="/api")
 app.include_router(models.router, prefix="/api")
 app.include_router(consent.router, prefix="/api")
 app.include_router(annotations.router, prefix="/api")
+app.include_router(reading.router, prefix="/api")  # /api/reading — 网页辅助阅读模式标注（按 URL 存 JSON）
 app.include_router(background_tasks.router, prefix="/api")
 app.include_router(ui_resources.router, prefix="/api")  # /api/ui-resources — 工具 UI 模板
 app.include_router(images.router, prefix="/api")  # /api/images — image_search 下载的图片

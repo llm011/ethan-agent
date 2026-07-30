@@ -59,7 +59,7 @@ export function Lightbox({ images, index, open, onOpenChange, onIndexChange }: L
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className="max-w-none w-screen h-screen p-0 bg-black/95 rounded-none border-none ring-0"
+        className="max-w-none sm:max-w-none w-screen h-screen p-0 gap-0 bg-black/95 rounded-none border-none ring-0"
         onClick={(e) => {
           // 点击背景（即 DialogContent 本身）关闭，点击图片不关闭
           if (e.target === e.currentTarget) onOpenChange(false);

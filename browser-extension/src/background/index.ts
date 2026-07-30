@@ -19,6 +19,14 @@ import { releaseCdpClient } from './cdp-client';
 import { KEEPALIVE_ALARM } from './ws-client';
 import { pushStep, updateStepStatus } from './overlay-injector';
 import { setupContextMenu, sendToEthan } from './context-menu';
+import {
+  startReading,
+  readingChat,
+  readingListAnnotations,
+  readingCreateAnnotation,
+  readingDeleteAnnotation,
+  readingSaveKnowledge,
+} from './reading-injector';
 
 const sessionStore = new BrowserSessionStore();
 const pageController = new BrowserPageController(sessionStore);
@@ -244,6 +252,63 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       sendResponse(resp ?? { connected: false, error: 'offscreen_no_response' });
     }).catch(e => {
       sendResponse({ connected: false, error: String(e?.message || e) });
+    });
+    return true;
+  }
+
+  // ── 辅助阅读模式 ────────────────────────────────────────────
+  // 来自 popup：对当前 tab 启动辅助阅读模式
+  if (msg?.type === 'reading:start') {
+    (async () => {
+      const tabId = msg.tabId ?? _sender.tab?.id;
+      if (typeof tabId !== 'number') {
+        sendResponse({ ok: false, error: 'no_tab' });
+        return;
+      }
+      const r = await startReading(tabId);
+      sendResponse(r);
+    })();
+    return true;
+  }
+
+  // 来自 content script（reading-mode）：流式 AI 请求
+  if (msg?.type === 'reading:chat') {
+    const tabId = _sender.tab?.id;
+    if (typeof tabId === 'number') {
+      void readingChat(tabId, msg.requestId, msg.prompt);
+    }
+    sendResponse({ ok: true });  // 立即应答，结果通过 tabs.sendMessage 流式推回
+    return true;
+  }
+
+  // 来自 content script：取某 URL 的标注
+  if (msg?.type === 'reading:listAnnotations') {
+    readingListAnnotations(msg.url).then(annotations => {
+      sendResponse({ ok: true, annotations });
+    });
+    return true;
+  }
+
+  // 来自 content script：新建标注
+  if (msg?.type === 'reading:createAnnotation') {
+    readingCreateAnnotation(msg.payload).then(id => {
+      sendResponse({ ok: id != null, id });
+    });
+    return true;
+  }
+
+  // 来自 content script：删除标注
+  if (msg?.type === 'reading:deleteAnnotation') {
+    readingDeleteAnnotation(msg.url, msg.id).then(ok => {
+      sendResponse({ ok });
+    });
+    return true;
+  }
+
+  // 来自 content script：存知识库
+  if (msg?.type === 'reading:saveKnowledge') {
+    readingSaveKnowledge(msg.title, msg.content, msg.tags).then(r => {
+      sendResponse(r);
     });
     return true;
   }

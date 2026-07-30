@@ -175,6 +175,20 @@ async function testConnect() {
 $('serverUrl').addEventListener('input', autoSave);
 $('token').addEventListener('input', autoSave);
 $('connect').addEventListener('click', testConnect);
+$('reading').addEventListener('click', async () => {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id || tab.url?.startsWith('chrome://') || tab.url?.startsWith('chrome-extension://') || tab.url?.startsWith('about:')) {
+    $('hint').textContent = '当前页面不支持阅读模式';
+    return;
+  }
+  $('hint').textContent = '正在进入阅读模式…';
+  const resp = await chrome.runtime.sendMessage({ type: 'reading:start', tabId: tab.id });
+  if (resp?.ok) {
+    window.close();
+  } else {
+    $('hint').textContent = resp?.error || '注入失败，页面不支持';
+  }
+});
 $('autoCloseCookies').addEventListener('change', async (e) => {
   await chrome.storage.local.set({ autoCloseCookies: e.target.checked });
 });
