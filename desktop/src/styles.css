@@ -354,38 +354,47 @@
     font-style: normal;
   }
   .prose blockquote p { margin: 0.3em 0; }
-  .prose .table-wrapper {
-    margin-top: 0.4em;
-    margin-bottom: 0.7em;
-    border-radius: 0.5rem;
-    overflow: hidden;
-    overflow-x: auto;
-    border: 1px solid var(--border);
-  }
-  .prose .table-wrapper table {
-    margin: 0;
-    font-size: 0.88em;
-    width: 100%;
-    border-collapse: collapse;
-  }
-  .prose .table-wrapper th, .prose .table-wrapper td {
-    padding: 0.55em 1em;
-    border-bottom: 1px solid var(--border);
-    text-align: left;
-    vertical-align: top;
-  }
-  .prose .table-wrapper tr:last-child th, .prose .table-wrapper tr:last-child td { border-bottom: none; }
-  .prose .table-wrapper thead th {
-    background: color-mix(in oklch, var(--muted) 75%, transparent);
-    font-weight: 600;
-    text-align: center;
-    border-bottom: 2px solid var(--border);
-    white-space: nowrap;
-  }
-  .prose .table-wrapper tbody tr:nth-child(even) td {
-    background: color-mix(in oklch, var(--muted) 35%, transparent);
-  }
   .prose a { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
+}
+
+.prose .table-wrapper {
+  margin-top: 0.35em;
+  margin-bottom: 0.7em;
+  border-radius: 0.75rem;
+  overflow: hidden;
+  overflow-x: auto;
+  border: 1px solid color-mix(in oklch, var(--border) 72%, var(--primary));
+  background: color-mix(in oklch, var(--background) 94%, var(--primary));
+}
+.prose .table-wrapper table {
+  margin: 0;
+  font-size: 0.9em;
+  width: 100%;
+  border-collapse: collapse;
+}
+.prose .table-wrapper th,
+.prose .table-wrapper td {
+  padding: 0.65em 1.05em;
+  border-bottom: 1px solid color-mix(in oklch, var(--border) 78%, var(--primary));
+  border-right: none;
+  text-align: left;
+  vertical-align: top;
+}
+.prose .table-wrapper tr:last-child th,
+.prose .table-wrapper tr:last-child td { border-bottom: none; }
+.prose .table-wrapper thead th {
+  background: color-mix(in oklch, var(--primary) 12%, var(--background));
+  color: var(--foreground);
+  font-weight: 700;
+  text-align: center;
+  border-bottom: 2px solid color-mix(in oklch, var(--primary) 24%, var(--border));
+  white-space: nowrap;
+}
+.prose .table-wrapper tbody tr:nth-child(even) td {
+  background: color-mix(in oklch, var(--primary) 6%, var(--background));
+}
+.prose .table-wrapper tbody tr:hover td {
+  background: color-mix(in oklch, var(--primary) 10%, var(--background));
 }
 
 /* ── 阅读模式标注（高亮/划线/批注/书签）──
