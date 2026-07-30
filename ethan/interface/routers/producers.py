@@ -44,11 +44,11 @@ async def _save_progress(store: SessionStore, session_id: str,
     return progress_msg_id
 
 
-async def _close_browser_sessions(session_id: str | None) -> None:
+async def _close_browser_sessions(session_id: str | None, run=None) -> None:
     """清理当前 ethan 会话创建的所有 browser session（tab group）。
 
-    对话结束后自动调用。默认 close（杀 tab group）；
-    标记了 keep_alive 的 session 走 release（保留 tab，仅放掉控制权）。
+    对话结束后调用。keep_alive 的 session 直接 release（保留 tab）。
+    其余 session 弹卡片让用户确认是「关闭」还是「保留」，超时默认保留。
     """
     if not session_id:
         return
@@ -61,14 +61,63 @@ async def _close_browser_sessions(session_id: str | None) -> None:
         hub = get_hub()
         if not hub.connected:
             return
-        for bsid in smap.list_for(session_id):
-            try:
-                if smap.is_keep_alive(bsid):
+
+        bsids = smap.list_for(session_id)
+        if not bsids:
+            return
+
+        # keep_alive 的直接 release，不弹卡片
+        to_confirm: list[dict] = []
+        for bsid in bsids:
+            if smap.is_keep_alive(bsid):
+                try:
                     await hub.call(METHODS["session_release"], {"sessionId": bsid}, browser_session_id=bsid)
-                else:
+                except Exception:
+                    logger.warning("browser: release keep_alive session failed for %s", bsid)
+                finally:
+                    smap.unbind(bsid)
+            else:
+                to_confirm.append({"sessionId": bsid, "title": "", "tabCount": 0})
+
+        if not to_confirm:
+            return
+
+        # 弹卡片让用户确认
+        from ethan.browser.cleanup_confirm import await_confirm, create_confirm
+
+        # 尝试获取 session 标题信息
+        try:
+            list_result = await hub.call(METHODS["session_list"], {})
+            sessions_info = {s.get("sessionId"): s for s in (list_result or {}).get("sessions", []) if isinstance(s, dict)}
+            for item in to_confirm:
+                info = sessions_info.get(item["sessionId"])
+                if info:
+                    item["title"] = info.get("title", "")
+                    item["tabCount"] = info.get("tabCount", 0)
+        except Exception:
+            pass
+
+        confirm_req = create_confirm(session_id, to_confirm)
+        if run is not None:
+            run.emit({
+                "confirm_browser_cleanup": True,
+                "request_id": confirm_req.request_id,
+                "sessions": to_confirm,
+            })
+
+        action = await await_confirm(confirm_req)
+
+        # 根据用户选择执行
+        for item in to_confirm:
+            bsid = item["sessionId"]
+            try:
+                if action == "close":
                     await hub.call(METHODS["session_close"], {"sessionId": bsid}, browser_session_id=bsid)
+                else:
+                    # keep：只 release 控制权，保留 tab
+                    await hub.call(METHODS["session_release"], {"sessionId": bsid}, browser_session_id=bsid)
             except Exception:
-                logger.warning("browser: auto-cleanup failed for %s", bsid)
+                logger.warning("browser: cleanup action '%s' failed for %s", action, bsid)
             finally:
                 smap.unbind(bsid)
     except Exception:
@@ -354,15 +403,32 @@ async def _run_generation(
         # 流结束（正常/异常）时取消未决授权 Future，避免泄漏
         if consent is not None:
             consent.cancel_all()
-        # 浏览器 session 清理：关闭本次对话创建的所有 browser tab group，
-        # 避免用完的 tab 残留在浏览器中（用户要求：用完即关）。
-        await _close_browser_sessions(session_id)
+        # 浏览器 session 清理：弹卡片让用户确认是否关闭 tab group。
+        await _close_browser_sessions(session_id, run=run)
 
     usage_dict = collector.usage_dict
 
     # inject 之后模型只回文本、没再调工具时，补充信息仍留在 _pending_injected 里，
     # 挂到最后一个工具步骤上一并持久化，避免静默丢失。
     collector.flush_pending_injected()
+
+    # 兜底：agent 忘了调 deliver_file、直接把产物绝对路径写进正文时，扫正文补文件卡片。
+    # 补进 cards 列 = 同时补下载授权（/files 路由授权源自持久化的 cards），卡片才点得动。
+    final_cards = list(collector.cards or [])
+    try:
+        from ethan.core.file_jail import scan_file_cards_in_text
+        existing_paths = {c.get("path") for c in final_cards if c.get("type") == "file"}
+        fallback_cards = scan_file_cards_in_text(collector.full or "", existing_paths)
+        if fallback_cards:
+            final_cards.extend(fallback_cards)
+            logger.info("正文兜底补文件卡片 %d 张 session=%s", len(fallback_cards), session_id)
+            # 直播中也推给前端，让当前这轮就渲染出卡片（否则要刷新会话才出现）
+            try:
+                run.emit({"cards": fallback_cards})
+            except Exception:
+                logger.debug("兜底文件卡片 emit 失败 session=%s", session_id, exc_info=True)
+    except Exception:
+        logger.exception("正文兜底扫描文件卡片失败 session=%s", session_id)
 
     msg_id = None
     if session_id and (collector.full or collector.thought):
@@ -374,7 +440,7 @@ async def _run_generation(
             tool_steps=collector.tool_steps or [],
             a2ui=collector.a2ui or None,
             mcp_apps=collector.mcp_apps or None,
-            cards=collector.cards or None,
+            cards=final_cards or None,
             matched_skills=collector.matched_skills or None,
             ttfb_ms=collector.ttfb_ms,
             total_ms=collector.total_ms,

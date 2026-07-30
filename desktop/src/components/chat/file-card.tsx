@@ -1,12 +1,17 @@
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { FileText, FileSpreadsheet, FileArchive, File as FileIcon, Presentation, Download } from "lucide-react";
+import { FileText, FileSpreadsheet, FileArchive, File as FileIcon, Presentation, Download, ImageIcon } from "lucide-react";
 import { getApiUrl, getAuthToken } from "@/lib/api-base";
 import { openUrl } from "@/lib/external-link";
 import { signFileUrl } from "@ethan/shared/ppt/preview";
+import { Lightbox } from "./lightbox";
 import type { FileCard } from "@ethan/shared/chat/types";
 
 // 文件卡片类型以 packages/shared 为准（web/desktop 共用，避免三处声明漂移）
 export type { FileCard };
+
+// 图片类 kind：交付后渲染缩略图，点击开 Lightbox 放大（不走下载）
+const IMAGE_KINDS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"]);
 
 const KIND_ICON: Record<string, typeof FileIcon> = {
   pptx: Presentation,
@@ -32,10 +37,66 @@ async function downloadSignedUrl(path: string, sid: string): Promise<string> {
   return `${getApiUrl()}/files/download?path=${encodeURIComponent(path)}${sid}${sigQ}`;
 }
 
-// 文件卡片：pptx 且带项目目录时点击进 /ppt-preview 预览页，其余点击直接下载。
+// 内联查看图片的签名 URL（走 /files/view，inline 直出，供缩略图与 Lightbox 共用）
+async function signedViewUrl(path: string, sid: string): Promise<string> {
+  const sig = await signFileUrl(getApiUrl(), getAuthToken(), [path]);
+  const s = sig[path];
+  const sigQ = s ? `&user=${encodeURIComponent(s.user)}&sig=${encodeURIComponent(s.sig)}` : "";
+  return `${getApiUrl()}/files/view?path=${encodeURIComponent(path)}${sid}${sigQ}`;
+}
+
+// 交付的图片：卡片内渲染缩略图，点击开 Lightbox 全屏放大。
+function ImageFileCard({ card, sessionId }: { card: FileCard; sessionId?: string | null }) {
+  const [url, setUrl] = useState<string>("");
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    const sid = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : "";
+    void signedViewUrl(card.path, sid).then((u) => { if (alive) setUrl(u); });
+    return () => { alive = false; };
+  }, [card.path, sessionId]);
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => url && setOpen(true)}
+        className="block rounded-lg border border-border/50 overflow-hidden hover:border-border transition-colors cursor-zoom-in max-w-[320px]"
+      >
+        {url ? (
+          <img src={url} alt={card.title || card.filename} className="block max-w-full max-h-[240px] object-contain bg-muted/30" />
+        ) : (
+          <span className="flex items-center justify-center w-[240px] h-[160px] bg-muted/30 text-muted-foreground">
+            <ImageIcon className="w-6 h-6" />
+          </span>
+        )}
+        <span className="block px-3 py-1.5 text-xs text-muted-foreground truncate border-t border-border/50">
+          {card.title || card.filename}
+          {card.size_kb != null && ` · ${fmtSize(card.size_kb)}`}
+        </span>
+      </button>
+      {url && (
+        <Lightbox
+          images={[{ url, title: card.title || card.filename }]}
+          index={0}
+          open={open}
+          onOpenChange={setOpen}
+        />
+      )}
+    </>
+  );
+}
+
+// 文件卡片：图片渲染缩略图 + Lightbox；pptx 且带项目目录时点击进 /ppt-preview 预览页；其余点击直接下载。
 // 所有 URL 带 session_id——服务端只放行本 session 交付过的文件（会话级隔离）。
 export function FileCardView({ card, sessionId }: { card: FileCard; sessionId?: string | null }) {
   const navigate = useNavigate();
+
+  if (IMAGE_KINDS.has(card.kind)) {
+    return <ImageFileCard card={card} sessionId={sessionId} />;
+  }
+
   const Icon = KIND_ICON[card.kind] ?? FileIcon;
   const previewable = card.kind === "pptx" && !!card.project_dir;
 

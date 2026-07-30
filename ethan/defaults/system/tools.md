@@ -7,6 +7,7 @@
 - 搜索文件内容 → 用 `rg_search`，不要用 `shell grep`
 - 查找文件位置 → 用 `fd_find`，不要用 `shell find`
 - 存储/检索用户知识 → 用 `knowledge_add` / `knowledge_search`
+- 读取图片文件 → 用 `file_read`，图片会自动在前端渲染为可放大查看的图片卡片，无需在回复正文中重复贴出图片内容；你只需描述分析结论
 
 ## 知识库写入硬约束
 

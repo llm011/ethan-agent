@@ -810,6 +810,18 @@ class Agent:
                     return await self._ensure_non_empty(resp, working, monitor, "nudge_exhausted")
 
             if not response.is_tool_call:
+                # 决策提示轮模型用自然语言回应（没调 decide 也没调任何工具）
+                # 移除污染消息，记 silent_count，注入 nudge 让模型重新选工具继续。
+                if monitor.awaiting_decision_response and (response.content or "").strip() and not finalize:
+                    working.pop()
+                    monitor.silent_decision_count += 1
+                    monitor.awaiting_decision_response = False
+                    logger.warning(
+                        "[decision-silent] iter=%d → 模型用正文回应决策提示（silent_count=%d），注入 nudge 重试",
+                        i + 1, monitor.silent_decision_count
+                    )
+                    working.append(Message(role="user", content="[继续执行任务。请直接调用工具完成下一步，不要用文字描述你的决策。]"))
+                    continue
                 return await self._ensure_non_empty(response, working, monitor, "finalize")
 
             # [decide 拦截] 决策提示轮的 decide tool_call 不执行、不进 working，只读 choice
@@ -1149,6 +1161,21 @@ class Agent:
                     return
 
             if not response.is_tool_call:
+                # 决策提示轮模型用自然语言回应（没调 decide 也没调任何工具）
+                # 根因：模型把"我要选 B"写进正文而不是调 decide 工具。
+                # 修复：移除这条污染消息，记 silent_count，注入 nudge 让模型重新选工具继续。
+                # 避免：1) 决策思考泄露到正文；2) 流提前结束导致会话停住。
+                if monitor.awaiting_decision_response and full_content and not finalize:
+                    working.pop()  # 移除含决策思考的 assistant 消息
+                    monitor.silent_decision_count += 1
+                    monitor.awaiting_decision_response = False
+                    logger.warning(
+                        "[decision-silent] iter=%d → 模型用正文回应决策提示（silent_count=%d），注入 nudge 重试",
+                        i + 1, monitor.silent_decision_count
+                    )
+                    nudge = Message(role="user", content="[继续执行任务。请直接调用工具完成下一步，不要用文字描述你的决策。]")
+                    working.append(nudge)
+                    continue
                 # finalize 轮可能因上下文过大模型返回空 → 兜底
                 if finalize and not full_content:
                     fallback = self._build_stream_fallback(working, "finalize")

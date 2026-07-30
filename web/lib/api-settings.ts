@@ -33,7 +33,23 @@ export async function updateAgentSettings(patch: Partial<AgentSettings>): Promis
 
 // ── Provider Settings ─────────────────────────────────────────────
 
-export type ProviderSettings = Record<string, { api_key: string, base_url: string | null }>;
+export interface ProviderConfig {
+  api_key: string;
+  base_url: string | null;
+  type: string; // "anthropic" | "openai_compat"
+  disable_prompt_cache: boolean;
+}
+
+export type ProviderSettings = Record<string, ProviderConfig>;
+
+export interface ProviderPreset {
+  key: string;
+  base_url: string;
+  type: string;
+  disable_prompt_cache: boolean;
+  description: string;
+  models: string[];
+}
 
 export async function fetchProviderSettings(): Promise<ProviderSettings> {
   const res = await fetch(`${API_URL}/settings/providers`, { headers: headers() });
@@ -46,6 +62,19 @@ export async function updateProviderSettings(patch: ProviderSettings): Promise<v
     method: "PATCH",
     headers: headers(),
     body: JSON.stringify(patch),
+  });
+}
+
+export async function fetchProviderPresets(): Promise<{ presets: ProviderPreset[] }> {
+  const res = await fetch(`${API_URL}/settings/providers/presets`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed to fetch provider presets");
+  return res.json();
+}
+
+export async function deleteProvider(key: string): Promise<void> {
+  await fetch(`${API_URL}/settings/providers/${encodeURIComponent(key)}`, {
+    method: "DELETE",
+    headers: headers(),
   });
 }
 

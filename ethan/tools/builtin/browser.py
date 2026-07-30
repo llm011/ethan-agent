@@ -62,6 +62,85 @@ def _chunk_text(content: str, offset: int, length: int) -> tuple[str, int]:
     return chunk, end - offset
 
 
+# ── page.markdown 正文提取脚本 ──────────────────────────────────
+# 在页面上下文中执行，克隆 DOM → 移除噪音 → 找正文区 → 转 Markdown。
+_MARKDOWN_SCRIPT = r"""(() => {
+  const clone = document.body.cloneNode(true);
+  clone.querySelectorAll('nav,header,footer,aside,script,style,iframe,noscript,svg,form,button,[role="navigation"],[role="banner"],[role="contentinfo"],.ad,.ads,.advertisement,.sidebar,.cookie,.popup,.modal,.share,.related,.comments').forEach(e => e.remove());
+
+  let main = clone.querySelector('article') || clone.querySelector('main') || clone.querySelector('[role="main"]') || clone.querySelector('#content,.content,.post-content,.article-content,.entry-content,.post-body,.article-body');
+  if (!main) {
+    let best = null, bestScore = 0;
+    for (const el of clone.querySelectorAll('div,section')) {
+      const t = (el.innerText||''), len = t.length;
+      if (len < 200) continue;
+      const score = len - el.querySelectorAll('a').length * 50;
+      if (score > bestScore) { bestScore = score; best = el; }
+    }
+    main = best || clone;
+  }
+
+  function cv(node) {
+    let r = '';
+    for (const c of node.childNodes) {
+      if (c.nodeType === 3) { const t = c.textContent.trim(); if (t) r += t + ' '; continue; }
+      if (c.nodeType !== 1) continue;
+      const tag = c.tagName.toLowerCase();
+      const inner = () => cv(c).trim();
+      switch (tag) {
+        case 'h1': r += '\n# '+inner()+'\n\n'; break;
+        case 'h2': r += '\n## '+inner()+'\n\n'; break;
+        case 'h3': r += '\n### '+inner()+'\n\n'; break;
+        case 'h4': r += '\n#### '+inner()+'\n\n'; break;
+        case 'h5': r += '\n##### '+inner()+'\n\n'; break;
+        case 'h6': r += '\n###### '+inner()+'\n\n'; break;
+        case 'p': r += inner()+'\n\n'; break;
+        case 'br': r += '\n'; break;
+        case 'hr': r += '\n---\n\n'; break;
+        case 'strong': case 'b': r += '**'+inner()+'**'; break;
+        case 'em': case 'i': r += '*'+inner()+'*'; break;
+        case 'code':
+          if (c.parentElement && c.parentElement.tagName.toLowerCase()==='pre') break;
+          r += '`'+(c.innerText||'')+'`'; break;
+        case 'pre': {
+          const code = c.querySelector('code');
+          const lang = code ? (code.className.match(/language-(\w+)/)||[])[1] : '';
+          r += '\n```'+(lang||'')+'\n'+(c.innerText||'')+'\n```\n\n'; break;
+        }
+        case 'blockquote': r += '\n> '+inner().replace(/\n/g,'\n> ')+'\n\n'; break;
+        case 'a': { const h=c.getAttribute('href')||'', t=c.innerText||''; r += h&&t ? '['+t+']('+h+')' : t; break; }
+        case 'img': { const s=c.getAttribute('src')||c.getAttribute('data-src')||'', a=c.getAttribute('alt')||''; if(s) r += '!['+a+']('+s+')'; break; }
+        case 'ul': case 'ol': r += '\n'+cvList(c, tag==='ol')+'\n\n'; break;
+        case 'table': r += cvTable(c)+'\n\n'; break;
+        default: r += cv(c);
+      }
+    }
+    return r;
+  }
+  function cvList(list, ord) {
+    let r = '', i = 1;
+    for (const li of list.children) {
+      if (li.tagName.toLowerCase() !== 'li') continue;
+      r += (ord ? (i++)+'. ' : '- ') + cv(li).trim().replace(/\n/g,'\n  ') + '\n';
+    }
+    return r;
+  }
+  function cvTable(t) {
+    const rows = t.querySelectorAll('tr'); if (!rows.length) return '';
+    let r = '', first = true;
+    for (const row of rows) {
+      const cells = Array.from(row.querySelectorAll('th,td')).map(c => (c.innerText||'').trim().replace(/\n/g,' '));
+      r += '| '+cells.join(' | ')+' |\n';
+      if (first) { r += '|'+cells.map(()=>'---').join('|')+'|\n'; first = false; }
+    }
+    return r;
+  }
+
+  let md = cv(main).replace(/\n{3,}/g,'\n\n').trim();
+  return JSON.stringify({markdown: md, length: md.length, title: document.title, url: location.href});
+})()"""
+
+
 # ── selector 操作辅助函数（Python 侧组合现有 CDP 方法，不改扩展）──
 
 
@@ -402,7 +481,7 @@ class BrowserPageTool(_BrowserToolBase):
         "完整内容落盘/tmp,prompt 只带首段 10000 字,has_more=true 时用 snapshot_read 翻页;"
         "click/fill/type/press/hover/select/scroll_into_view 用 ref 交互;"
         "click_selector/fill_selector/hover_selector 用 CSS/XPath/text 直接定位(不依赖 snapshot,CDP mouse 真实点击);"
-        "wait_for_element 等元素出现;scroll_to_text 按文本滚动;extract_content 提取内容;"
+        "wait_for_element 等元素出现;scroll_to_text 按文本滚动;extract_content 提取内容;markdown 提取正文为干净 Markdown;"
         "find_elements/find_attributes/check_exist 查询元素;"
         "input_enter 输入+回车;scroll_find 滚动查找;"
         "click_vlm 截图发给多模态 LLM 识别后点击(AX 树失效时的终极 fallback);"
@@ -418,7 +497,7 @@ class BrowserPageTool(_BrowserToolBase):
                 "scroll", "scroll_into_view", "screenshot", "upload", "save_pdf", "get", "mouse", "wait", "eval",
                 "click_selector", "fill_selector", "hover_selector", "wait_for_element", "scroll_to_text",
                 "extract_content", "find_elements", "find_attributes", "check_exist",
-                "input_enter", "scroll_find", "click_vlm",
+                "input_enter", "scroll_find", "click_vlm", "markdown",
             ]},
             "session": {"type": "string", "description": "目标 session_id(snapshot_read 不需要)"},
             "ref": {"type": "string", "description": "snapshot 返回的元素 ref(click/fill/type/hover/select/get/scroll_into_view/upload)"},
@@ -697,6 +776,16 @@ class BrowserPageTool(_BrowserToolBase):
             if info.get("length", 0) > max_len:
                 info["truncated"] = True
                 info["text"] = info["text"][:max_len]
+                info["_hint"] = f"内容已截断（共 {info['length']} 字，前 {max_len} 字）。"
+            return json.dumps(info, ensure_ascii=False)
+        if action == "markdown":
+            raw = await _eval_js(session, _MARKDOWN_SCRIPT)
+            info = json.loads(raw) if isinstance(raw, str) else (raw or {})
+            # 内容太长时截断
+            max_len = 30000
+            if info.get("length", 0) > max_len:
+                info["truncated"] = True
+                info["markdown"] = info["markdown"][:max_len]
                 info["_hint"] = f"内容已截断（共 {info['length']} 字，前 {max_len} 字）。"
             return json.dumps(info, ensure_ascii=False)
         if action == "find_elements":

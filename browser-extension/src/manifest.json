@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Ethan Browser",
-  "version": "0.6.1",
-  "description": "Bridge Ethan agent browser commands to Chrome tabs over WebSocket. v0.5.0 (offscreen)",
+  "version": "0.7.0",
+  "description": "Ethan Browser extension with reading mode, highlights, and knowledge saving. v0.7.0",
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",
@@ -19,6 +19,16 @@
       "128": "icons/icon-128.png"
     }
   },
+  "commands": {
+    "extract-markdown": {
+      "suggested_key": { "default": "Ctrl+Shift+M", "mac": "Command+Shift+M" },
+      "description": "提取当前页面正文为 Markdown 发给 Ethan"
+    },
+    "toggle-overlay": {
+      "suggested_key": { "default": "Ctrl+Shift+E", "mac": "Command+Shift+E" },
+      "description": "切换操作步骤浮层显示/隐藏"
+    }
+  },
   "background": {
     "service_worker": "background.js",
     "type": "module"
@@ -29,12 +39,22 @@
     "tabGroups",
     "tabs",
     "alarms",
-    "offscreen"
+    "offscreen",
+    "scripting",
+    "contextMenus"
   ],
   "host_permissions": [
     "ws://localhost/*",
     "ws://127.0.0.1/*",
     "http://localhost/*",
-    "http://127.0.0.1/*"
+    "http://127.0.0.1/*",
+    "http://*/*",
+    "https://*/*"
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["redirect.html"],
+      "matches": ["<all_urls>"]
+    }
   ]
 }

@@ -118,7 +118,6 @@ private fun ZoomableImage(url: String) {
             contentDescription = null,
             contentScale = ContentScale.Fit,
             modifier = Modifier
-                .fillMaxSize()
                 .graphicsLayer(
                     scaleX = scale,
                     scaleY = scale,

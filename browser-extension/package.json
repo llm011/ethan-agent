@@ -1,6 +1,6 @@
 {
   "name": "ethan-browser-extension",
-  "version": "0.1.0",
+  "version": "0.7.0",
   "private": true,
   "description": "Ethan Browser Chrome extension (WebSocket bridge)",
   "type": "module",

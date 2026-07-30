@@ -1,7 +1,8 @@
 import { resolve } from 'node:path';
-import { copyFileSync, mkdirSync, cpSync } from 'node:fs';
+import { copyFileSync, mkdirSync, cpSync, writeFileSync, readFileSync } from 'node:fs';
 
 import { defineConfig } from 'vite';
+import * as ts from 'typescript';
 
 export default defineConfig({
   build: {
@@ -28,7 +29,25 @@ export default defineConfig({
         copyFileSync('src/manifest.json', 'dist/manifest.json');
         copyFileSync('src/popup/popup.html', 'dist/popup.html');
         copyFileSync('src/offscreen/offscreen.html', 'dist/offscreen.html');
+        copyFileSync('src/redirect.html', 'dist/redirect.html');
         cpSync('src/assets/icons', 'dist/icons', { recursive: true });
+
+        // Build content scripts: transpile TS → JS (classic script, no ESM/CJS artifacts)
+        // executeScript({ files }) 不支持 ESM，需输出为 classic script
+        mkdirSync('dist/content', { recursive: true });
+        const contentScripts = ['overlay.ts', 'cookie-closer.ts', 'reading-mode.ts'];
+        for (const name of contentScripts) {
+          const src = readFileSync(resolve(__dirname, `src/content/${name}`), 'utf8')
+            .replace(/^\s*export\s*\{\s*\}\s*;?\s*$/m, '');  // 移除 export {} 避免 CJS interop
+          const { outputText } = ts.transpileModule(src, {
+            compilerOptions: {
+              target: ts.ScriptTarget.ES2020,
+              module: ts.ModuleKind.None,
+              removeComments: true,
+            },
+          });
+          writeFileSync(resolve(__dirname, `dist/content/${name.replace('.ts', '.js')}`), outputText);
+        }
       },
     },
   ],

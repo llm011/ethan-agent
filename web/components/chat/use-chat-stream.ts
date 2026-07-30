@@ -2,12 +2,18 @@
 
 import type { StreamChunk } from "@/lib/api";
 import type { ToolStep } from "@ethan/shared/components/tool-timeline";
-import type { Message, Usage } from "@ethan/shared/chat/types";
+import type { Message, Usage, CardData } from "@ethan/shared/chat/types";
 import type { ConsentRequest } from "@ethan/shared/components/consent-dialog";
+
+export interface CleanupConfirmRequest {
+  request_id: string;
+  sessions: Array<{ sessionId: string; title: string; tabCount: number }>;
+}
 
 export interface ConsumeStreamActions {
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
   setConsentRequest: (req: ConsentRequest | null) => void;
+  setCleanupConfirm: (req: CleanupConfirmRequest | null) => void;
   setBgPolling: (msg: string | null) => void;
   setSessionTitle: (title: string) => void;
   setSessionUsage: React.Dispatch<React.SetStateAction<Usage>>;
@@ -26,7 +32,7 @@ export async function consumeStream(
   trackTtft = false,
 ): Promise<void> {
   const {
-    setMessages, setConsentRequest, setBgPolling,
+    setMessages, setConsentRequest, setCleanupConfirm, setBgPolling,
     setSessionTitle, setSessionUsage, setStopping, setStreaming,
     activeSession,
   } = actions;
@@ -58,6 +64,13 @@ export async function consumeStream(
           tool: chunk.tool || "",
           description: chunk.description || "",
           detail: chunk.detail,
+        });
+        continue;
+      }
+      if (chunk.confirm_browser_cleanup) {
+        setCleanupConfirm({
+          request_id: chunk.request_id || "",
+          sessions: chunk.sessions || [],
         });
         continue;
       }
@@ -104,9 +117,8 @@ export async function consumeStream(
       }
       if (chunk.tool && chunk.state === "start") {
         const preToolThought = assistantContent.trim();
-        if (preToolThought) {
-          intermediateOutput += (intermediateOutput ? "\n\n" : "") + preToolThought;
-        }
+        // 不再往 intermediateOutput 累积工具调用前的文本：
+        // 这些文本已作为 tool_step.thought 存在 ToolTimeline 里，重复记录会让"过程记录"臃肿。
         assistantContent = "";
         currentToolSteps.push({
           tool: chunk.tool, args: chunk.args || "", intent: chunk.intent || undefined, state: "running", id: chunk.id,
@@ -118,7 +130,6 @@ export async function consumeStream(
         setMessages([...baseMessages, {
           role: "assistant", content: assistantContent, thought: assistantThought,
           toolSteps: [...currentToolSteps], toolsExpanded: true, created_at: Date.now() / 1000,
-          intermediateOutput: intermediateOutput || undefined,
         }]);
       }
       if (chunk.tool && (chunk.state === "done" || chunk.state === "error")) {
@@ -144,6 +155,7 @@ export async function consumeStream(
             duration_ms: chunk.duration_ms,
             result_preview: chunk.result_preview,
             result_detail: chunk.result_detail,
+            cards: (chunk.cards as ToolStep["cards"]) || currentToolSteps[matchedIdx].cards,
             entity_type: chunk.entity_type || currentToolSteps[matchedIdx].entity_type,
             entity_id: chunk.entity_id || currentToolSteps[matchedIdx].entity_id,
             sub_steps: chunk.sub_steps?.map((s) => ({
@@ -155,20 +167,24 @@ export async function consumeStream(
             })),
           };
         }
+        // 工具产出图片时往过程记录记一条简短信息（不记工具详情，只记关键产出）
+        if (chunk.cards && Array.isArray(chunk.cards)) {
+          cardsCollected.push(...chunk.cards);
+          for (const c of chunk.cards) {
+            if (c.type === "image") {
+              const action = c.source === "file_read" ? "读取" : "下载";
+              const loc = c.local_path ? `：\`${c.local_path}\`` : "";
+              intermediateOutput += (intermediateOutput ? "\n\n" : "") + `🖼️ ${action}了图片 **${c.title}**（${c.source || ""}）${loc}`;
+            }
+          }
+        }
+        if (Array.isArray(chunk.ui)) a2uiSurfaces.push(...chunk.ui);
+        if (chunk.mcp_app) mcpAppsCollected.push(chunk.mcp_app);
         setMessages([...baseMessages, {
           role: "assistant", content: assistantContent, thought: assistantThought,
           toolSteps: [...currentToolSteps], toolsExpanded: true, created_at: Date.now() / 1000,
           intermediateOutput: intermediateOutput || undefined,
         }]);
-      }
-      if (chunk.tool && (chunk.state === "done" || chunk.state === "error") && chunk.ui && Array.isArray(chunk.ui)) {
-        a2uiSurfaces.push(...chunk.ui);
-      }
-      if (chunk.tool && (chunk.state === "done" || chunk.state === "error") && chunk.mcp_app) {
-        mcpAppsCollected.push(chunk.mcp_app);
-      }
-      if (chunk.tool && (chunk.state === "done" || chunk.state === "error") && chunk.cards && Array.isArray(chunk.cards)) {
-        cardsCollected.push(...chunk.cards);
       }
       if (chunk.content) {
         setBgPolling(null);
@@ -179,6 +195,18 @@ export async function consumeStream(
           toolsExpanded: currentToolSteps.length > 0 ? true : undefined,
           created_at: Date.now() / 1000,
           intermediateOutput: intermediateOutput || undefined,
+        }]);
+      }
+      // 顶层 cards 事件（无 tool 字段）：正文兜底补的文件卡片，直播中即时渲染。
+      if (chunk.cards && !chunk.tool && Array.isArray(chunk.cards)) {
+        cardsCollected.push(...chunk.cards);
+        setMessages([...baseMessages, {
+          role: "assistant", content: assistantContent, thought: assistantThought,
+          toolSteps: currentToolSteps.length > 0 ? [...currentToolSteps] : undefined,
+          toolsExpanded: currentToolSteps.length > 0 ? true : undefined,
+          created_at: Date.now() / 1000,
+          intermediateOutput: intermediateOutput || undefined,
+          cards: cardsCollected as any,
         }]);
       }
       if (chunk.done && chunk.usage) {
@@ -213,28 +241,75 @@ export async function consumeStream(
     }
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : "";
-    const isNetworkDrop = /load failed|network|aborted|connection/i.test(errMsg);
+    const isNetworkDrop = /load failed|network|aborted|connection|SSE connection dropped/i.test(errMsg);
     if (isNetworkDrop && activeSession) {
+      // SSE 静默断开 — 尝试重连活跃 run，失败再拉最终结果
       try {
-        const { fetchSession } = await import("@/lib/api-sessions");
-        const fresh = await fetchSession(activeSession);
-        if (fresh?.messages?.length) {
-          const { mapDetailMessages } = await import("@/components/chat/chat-helpers");
-          const freshMsgs = mapDetailMessages(fresh);
-          setMessages(freshMsgs);
+        const { streamResume } = await import("@/lib/api-chat");
+        const resumed = await streamResume(activeSession);
+        if (resumed) {
+          // 后端仍有活跃 run：续接 SSE 流，继续接收后续事件
+          for await (const chunk of resumed) {
+            if (chunk.content) assistantContent += chunk.content;
+            if (chunk.id && chunk.tool) {
+              const toolId = chunk.id;
+              setMessages(prev => {
+                const msgs = [...prev];
+                const last = msgs[msgs.length - 1];
+                if (last?.role === "assistant" && last.toolSteps) {
+                  const idx = last.toolSteps.findIndex(s => s.id === toolId);
+                  if (idx >= 0) {
+                    const updated = [...last.toolSteps];
+                    updated[idx] = {
+                      ...updated[idx],
+                      state: chunk.state as "running" | "done" | "error",
+                      duration_ms: chunk.duration_ms ?? updated[idx].duration_ms,
+                      result_preview: chunk.result_preview ?? updated[idx].result_preview,
+                      result_detail: chunk.result_detail ?? updated[idx].result_detail,
+                    };
+                    msgs[msgs.length - 1] = { ...last, toolSteps: updated };
+                  }
+                }
+                return msgs;
+              });
+            }
+            if (chunk.done) {
+              if (chunk.usage) {
+                finalUsage = { input: chunk.usage.input || 0, output: chunk.usage.output || 0, cache: chunk.usage.cache || 0 };
+              }
+              break;
+            }
+          }
           setBgPolling(null);
           setConsentRequest(null);
+          setCleanupConfirm(null);
           setStopping(false);
           setStreaming(false);
-          return;
+          failed = false;
+        } else {
+          // 无活跃 run：后端已完成，拉最终结果
+          const { fetchSession } = await import("@/lib/api-sessions");
+          const fresh = await fetchSession(activeSession);
+          if (fresh?.messages?.length) {
+            const { mapDetailMessages } = await import("@/components/chat/chat-helpers");
+            const freshMsgs = mapDetailMessages(fresh);
+            setMessages(freshMsgs);
+            setBgPolling(null);
+            setConsentRequest(null);
+            setCleanupConfirm(null);
+            setStopping(false);
+            setStreaming(false);
+            return;
+          }
         }
       } catch { /* fallback to show error */ }
     }
-    failed = true;
-    const errLine = `⚠️ ${err instanceof Error ? err.message : "连接中断"}`;
-    assistantContent = assistantContent.trim()
-      ? `${assistantContent}\n\n---\n${errLine}`
-      : errLine;
+    if (failed) {
+      const errLine = `⚠️ ${err instanceof Error ? err.message : "连接中断"}`;
+      assistantContent = assistantContent.trim()
+        ? `${assistantContent}\n\n---\n${errLine}`
+        : errLine;
+    }
   }
 
   setMessages(prev => {
@@ -280,4 +355,5 @@ export async function consumeStream(
   setStopping(false);
   setStreaming(false);
   setConsentRequest(null);
+  setCleanupConfirm(null);
 }

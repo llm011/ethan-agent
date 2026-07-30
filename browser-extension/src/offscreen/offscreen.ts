@@ -25,6 +25,9 @@ class BrowserWsClient {
   private authed = false;
   private stopped = false;
   private connecting = false;
+  // 诊断状态：'connecting' | 'connected' | 'auth_failed' | 'connection_failed' | 'no_config'
+  private diagState: string = 'no_config';
+  private lastCloseCode: number | null = null;
 
   constructor(
     private getConfig: () => Promise<WsClientConfig | null>,
@@ -33,6 +36,10 @@ class BrowserWsClient {
 
   get isConnected(): boolean {
     return !!this.ws && this.ws.readyState === WebSocket.OPEN && this.authed;
+  }
+
+  get status(): { connected: boolean; diag: string; closeCode: number | null } {
+    return { connected: this.isConnected, diag: this.diagState, closeCode: this.lastCloseCode };
   }
 
   start(): void {
@@ -64,16 +71,19 @@ class BrowserWsClient {
     console.log('[EthanBrowser:offscreen] connect called, cfg=', cfg ? { url: cfg.serverUrl, hasToken: !!cfg.token } : null);
     if (!cfg || !cfg.serverUrl || !cfg.token) {
       console.warn('[EthanBrowser:offscreen] missing server url/token');
+      this.diagState = 'no_config';
       this.scheduleReconnect();
       return;
     }
 
+    this.diagState = 'connecting';
     let ws: WebSocket;
     try {
       console.log('[EthanBrowser:offscreen] creating WebSocket to', cfg.serverUrl);
       ws = new WebSocket(cfg.serverUrl);
     } catch (e) {
       console.warn('[EthanBrowser:offscreen] ws construct failed', e);
+      this.diagState = 'connection_failed';
       this.scheduleReconnect();
       return;
     }
@@ -82,6 +92,7 @@ class BrowserWsClient {
 
     ws.onopen = () => {
       console.log('[EthanBrowser:offscreen] ws opened, sending auth');
+      this.diagState = 'connecting';  // 已连上但未鉴权
       ws.send(JSON.stringify({ type: 'auth', token: cfg.token }));
     };
 
@@ -92,6 +103,16 @@ class BrowserWsClient {
     ws.onclose = (e) => {
       console.log('[EthanBrowser:offscreen] ws closed', e.code, e.reason);
       this.authed = false;
+      this.lastCloseCode = e.code;
+      // 4001 = auth failed（服务端返回的鉴权失败码）
+      if (e.code === 4001) {
+        this.diagState = 'auth_failed';
+      } else if (e.code === 1006) {
+        // 1006 = 连接未建立就关闭（server 没起 / 端口不通 / 被拒）
+        this.diagState = 'connection_failed';
+      } else {
+        this.diagState = 'connection_failed';
+      }
       this.clearPing();
       this.clearStable();
       this.clearPong();
@@ -103,6 +124,7 @@ class BrowserWsClient {
 
     ws.onerror = (e) => {
       console.warn('[EthanBrowser:offscreen] ws error', e);
+      this.diagState = 'connection_failed';
       try {
         ws.close();
       } catch {}
@@ -121,6 +143,8 @@ class BrowserWsClient {
     if (msg.type === 'auth_ok') {
       console.log('[EthanBrowser:offscreen] auth ok');
       this.authed = true;
+      this.diagState = 'connected';
+      this.lastCloseCode = null;
       this.startPing();
       this.clearStable();
       this.stableTimer = setTimeout(() => {
@@ -238,7 +262,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
   if (msg.type === 'get_status') {
-    sendResponse({ connected: wsClient.isConnected });
+    sendResponse(wsClient.status);
     return true;
   }
   if (msg.type === 'reconnect') {

@@ -1,7 +1,47 @@
 """File Tool — 读取和写入本地文件。"""
+import base64
 from pathlib import Path
 
-from ethan.tools.base import BaseTool
+from ethan.tools.base import BaseTool, ToolResult
+
+# 图片扩展名 → MIME 映射（按扩展名快速识别）
+_IMAGE_MIME = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".bmp": "image/bmp",
+    ".svg": "image/svg+xml",
+}
+
+# 文件头魔数 → MIME（扩展名不可靠时兜底）
+_MAGIC_MIME = [
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+    (b"RIFF", "image/webp"),  # RIFF....WEBP
+]
+
+
+def _detect_image_mime(path: Path) -> str | None:
+    """判断文件是否为图片，返回 MIME 或 None。扩展名 + 魔数双重判定。"""
+    ext = path.suffix.lower()
+    if ext in _IMAGE_MIME:
+        return _IMAGE_MIME[ext]
+    # 扩展名未命中，读前 16 字节看魔数
+    try:
+        with open(path, "rb") as f:
+            head = f.read(16)
+        for magic, mime in _MAGIC_MIME:
+            if head.startswith(magic):
+                if mime == "image/webp" and not head[8:12] == b"WEBP":
+                    continue
+                return mime
+    except Exception:
+        pass
+    return None
 
 
 def _is_inside_secrets(path: str) -> bool:
@@ -39,6 +79,7 @@ def _dir_scope(path: str) -> str:
 
 class FileReadTool(BaseTool):
     no_compress = True  # 文件原文必须逐字给模型，绝不压成摘要（否则模型反复重读拿不到真内容）
+    cacheable = False   # 不缓存：图片需返回 cards（缓存只存 content 会丢 cards），且文件可能被修改
     name = "file_read"
     description = "Read the contents of a local file. Use when you need to see what's in a file."
     parameters = {
@@ -75,7 +116,7 @@ class FileReadTool(BaseTool):
         except Exception:
             return path or self.name
 
-    async def run(self, path: str, max_lines: int = 0, offset: int = 0) -> str:
+    async def run(self, path: str, max_lines: int = 0, offset: int = 0) -> str | ToolResult:
         p = Path(path).expanduser().resolve()
         if _is_inside_secrets(str(p)):
             return (
@@ -87,6 +128,35 @@ class FileReadTool(BaseTool):
             return f"File not found: {p}"
         if not p.is_file():
             return f"Not a file: {p}"
+
+        # 图片：返回 ToolResult（content 给模型简短说明，cards 给前端渲染图片）
+        # offset/max_lines 对图片无意义，整张返回
+        mime = _detect_image_mime(p)
+        if mime:
+            size = p.stat().st_size
+            if size > 5_000_000:
+                return f"📷 图片 {p.name}（{mime}）过大（{size} 字节），未渲染。建议缩小后重试。"
+            try:
+                data = p.read_bytes()
+                b64 = base64.b64encode(data).decode("ascii")
+                # 给模型：简短说明，不含 base64（避免浪费 context）
+                model_content = f"📷 已读取图片文件 {p.name}（{mime}），图片已在前端以卡片形式渲染展示，无需在回复中重复贴出。"
+                # 给前端：image card（data URI）
+                cards = [{
+                    "type": "image",
+                    "title": p.name,
+                    "url": f"data:{mime};base64,{b64}",
+                    "local_path": "",
+                    "source": "file_read",
+                    "page_url": "",
+                    "width": None,
+                    "height": None,
+                    "size_kb": round(size / 1024, 1),
+                }]
+                return ToolResult(tool_call_id="", content=model_content, cards=cards)
+            except Exception as e:
+                return f"Read image error: {e}"
+
         if p.stat().st_size > 1_000_000 and max_lines == 0:
             return f"File too large ({p.stat().st_size} bytes). Use offset + max_lines to read partially."
 

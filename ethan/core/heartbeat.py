@@ -244,7 +244,7 @@ async def _run_heartbeat_md() -> None:
                             step["duration_ms"] = duration_ms
                             step["result_preview"] = item.result_preview or ""
                             break
-            else:
+            elif isinstance(item, str):
                 full += item
 
         usage_dict = {

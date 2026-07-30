@@ -64,6 +64,16 @@ export async function verifyAuth(token: string): Promise<boolean> {
   return res.ok;
 }
 
+/** 响应浏览器清理确认卡片：action="close" 关闭 tab group，action="keep" 保留。 */
+export async function respondBrowserCleanup(requestId: string, action: "close" | "keep"): Promise<{ ok: boolean }> {
+  const res = await fetch(`${API_URL}/browser/cleanup/${encodeURIComponent(requestId)}`, {
+    method: "POST",
+    headers: { ...headers(), "Content-Type": "application/json" },
+    body: JSON.stringify({ action }),
+  });
+  return res.json();
+}
+
 export interface ModelEntry {
   id: string;
   provider: string;

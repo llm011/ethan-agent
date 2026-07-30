@@ -86,10 +86,74 @@ function tryFormatJson(text: string): { formatted: string; language: string } {
 
 const HL_STYLE = { margin: 0, borderRadius: "0.5rem", fontSize: "0.75rem", lineHeight: "1.5" };
 
+/** 解析 [image:<mime>:<base64>:<filename>] 标记。返回 null 表示不是图片标记。 */
+function parseImageMarker(detail: string): { mime: string; b64: string; filename: string } | { tooLarge: true; mime: string; size: string; filename: string } | null {
+  if (!detail.startsWith("[image:")) return null;
+  // [image:<mime>:<b64>:<filename>]
+  // base64 不含冒号，filename 不含 ]，所以 split(":", 3) 安全
+  const m = detail.match(/^\[image:([^:]+):([^:]+):([^\]]+)\]$/);
+  if (!m) return null;
+  const [, mime, payload, filename] = m;
+  if (mime === "too-large") {
+    // 格式实际上是 [image:too-large:<mime>:<size>:<filename>]
+    // 上面正则把 mime 匹配成 "too-large"，payload 是真实 mime，filename 是 "size:filename"
+    const parts = filename.split(":");
+    return { tooLarge: true, mime: payload, size: parts[0] || "?", filename: parts.slice(1).join(":") || "image" };
+  }
+  return { mime, b64: payload, filename };
+}
+
+function ImageOutput({ detail }: { detail: string }) {
+  const [copied, setCopied] = useState(false);
+  const parsed = useMemo(() => parseImageMarker(detail), [detail]);
+  if (!parsed) return null;
+
+  if ("tooLarge" in parsed) {
+    return (
+      <div className="px-3 py-3 text-center text-xs text-muted-foreground">
+        🖼️ {parsed.filename}（{parsed.mime}，{parsed.size} 字节，过大未渲染）
+      </div>
+    );
+  }
+
+  const src = `data:${parsed.mime};base64,${parsed.b64}`;
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(detail);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="relative">
+      <div className="flex items-center justify-between mb-0.5 px-0.5">
+        <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+          🖼️ {parsed.filename} · {parsed.mime}
+        </span>
+        <button
+          onClick={handleCopy}
+          title="复制 Base64"
+          className="p-1 rounded hover:bg-muted text-muted-foreground transition-colors"
+        >
+          {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+        </button>
+      </div>
+      <div className="max-h-96 overflow-y-auto rounded flex justify-center bg-muted/20 p-2">
+        <img
+          src={src}
+          alt={parsed.filename}
+          className="max-w-full max-h-96 object-contain rounded"
+          style={{ imageRendering: "auto" }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function DetailOutput({ detail }: { detail: string }) {
   const [wrap, setWrap] = useState(false);
   const [copied, setCopied] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const isImage = detail.startsWith("[image:");
   const { formatted, language } = useMemo(() => tryFormatJson(detail), [detail]);
 
   const customStyle = useMemo(() => ({ ...HL_STYLE, overflowX: wrap ? "hidden" as const : "auto" as const }), [wrap]);
@@ -108,6 +172,10 @@ function DetailOutput({ detail }: { detail: string }) {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+
+  if (isImage) {
+    return <ImageOutput detail={detail} />;
+  }
 
   return (
     <div ref={containerRef} className="relative">
@@ -178,7 +246,7 @@ function parseSearchResults(detail: string): SearchResultCard[] | null {
 /** web_search 详情：优先消费后端产出的结构化搜索卡片，也兼容旧文本格式解析（浅色可读列表） */
 function SearchResultList({ results }: { results: SearchResultCard[] }) {
   return (
-    <div className="max-h-96 overflow-y-auto rounded-md border border-border/60 divide-y divide-border/40">
+    <div className="flex gap-3 overflow-x-auto pb-1 rounded-md">
       {results.map((r, i) => {
         let domain = "";
         try { domain = new URL(r.url).hostname.replace(/^www\./, ""); } catch {}
@@ -188,9 +256,9 @@ function SearchResultList({ results }: { results: SearchResultCard[] }) {
             href={r.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="block px-3 py-2 hover:bg-muted/50 transition-colors group"
+            className="block min-w-[260px] max-w-[320px] flex-1 px-3 py-2 rounded-lg border border-border/60 bg-background no-underline hover:bg-muted/50 hover:border-border transition-colors group"
           >
-            <div className="flex items-center gap-1.5 mb-0.5">
+            <div className="flex items-center gap-1.5 mb-1">
               {r.engine && (
                 <span className="text-[10px] px-1.5 py-0 rounded-full font-medium bg-primary/10 text-primary shrink-0 uppercase tracking-wide">
                   {r.engine}
@@ -203,15 +271,15 @@ function SearchResultList({ results }: { results: SearchResultCard[] }) {
                 <span className="text-[10px] text-muted-foreground/60 shrink-0">{r.published}</span>
               )}
             </div>
-            <div className="text-sm font-medium text-foreground/85 group-hover:text-primary line-clamp-1">
+            <div className="text-sm font-medium text-foreground/85 group-hover:text-primary line-clamp-2 leading-snug">
               {r.title}
             </div>
             {r.snippet && (
-              <p className="text-xs text-muted-foreground/70 mt-0.5 line-clamp-3 leading-relaxed">
+              <p className="text-xs text-muted-foreground/70 mt-1 line-clamp-3 leading-relaxed">
                 {r.snippet}
               </p>
             )}
-            <div className="text-[10px] text-muted-foreground/50 mt-0.5 truncate">{domain}</div>
+            <div className="text-[10px] text-muted-foreground/50 mt-1 truncate">{domain}</div>
           </a>
         );
       })}

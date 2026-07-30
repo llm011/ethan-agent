@@ -9,19 +9,25 @@ export interface ChatMessage {
   images?: { data: string; media_type: string }[];  // base64 raw (no data: prefix)
 }
 
-export type StreamChunk = { content?: string; done?: boolean; stopped?: boolean; error?: string; model?: string; usage?: Record<string, number>; ttfb_ms?: number; total_ms?: number; message_id?: number; title?: string; tool?: string; args?: string; intent?: string; state?: string; id?: string; duration_ms?: number; result_preview?: string; result_detail?: string; entity_type?: string; entity_id?: string; injected?: string[]; sub_steps?: Array<{ tool: string; args: string; state: string; duration_ms?: number | null; result_preview?: string }>; ui?: unknown[]; mcp_app?: { uri: string; data?: Record<string, unknown>; html?: string; csp?: Record<string, string[]> }; cards?: Array<{ type: string; [key: string]: unknown }>; consent_request?: boolean; request_id?: string; description?: string; detail?: string; thinking?: boolean; heartbeat?: boolean; elapsed?: number; skills_matched?: Array<{ name: string; is_default?: boolean }>; background_polling?: boolean; polling_message?: string; new_message?: boolean };
+export type StreamChunk = { content?: string; done?: boolean; stopped?: boolean; error?: string; model?: string; usage?: Record<string, number>; ttfb_ms?: number; total_ms?: number; message_id?: number; title?: string; tool?: string; args?: string; intent?: string; state?: string; id?: string; duration_ms?: number; result_preview?: string; result_detail?: string; entity_type?: string; entity_id?: string; injected?: string[]; sub_steps?: Array<{ tool: string; args: string; state: string; duration_ms?: number | null; result_preview?: string }>; ui?: unknown[]; mcp_app?: { uri: string; data?: Record<string, unknown>; html?: string; csp?: Record<string, string[]> }; cards?: Array<{ type: string; [key: string]: unknown }>; consent_request?: boolean; request_id?: string; description?: string; detail?: string; thinking?: boolean; heartbeat?: boolean; elapsed?: number; skills_matched?: Array<{ name: string; is_default?: boolean }>; background_polling?: boolean; polling_message?: string; new_message?: boolean; confirm_browser_cleanup?: boolean; sessions?: Array<{ sessionId: string; title: string; tabCount: number }> };
 
-/** 把一个 SSE Response body 解析成事件流（streamChat / streamResume 共用）。 */
+/** 把一个 SSE Response body 解析成事件流（streamChat / streamResume 共用）。
+ *  如果连接被静默断开（未收到 done 事件就 EOF），抛错让调用方触发重连。 */
 async function* parseSSE(res: Response): AsyncGenerator<StreamChunk> {
   const reader = res.body?.getReader();
   if (!reader) throw new Error("No response body");
 
   const decoder = new TextDecoder();
   let buffer = "";
+  let sawDone = false;
 
   while (true) {
     const { done, value } = await reader.read();
-    if (done) break;
+    if (done) {
+      // 连接关闭：如果没收到过 done 事件，说明是被静默断开（如浏览器空闲超时）
+      if (!sawDone) throw new Error("SSE connection dropped");
+      break;
+    }
 
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split("\n");
@@ -30,9 +36,12 @@ async function* parseSSE(res: Response): AsyncGenerator<StreamChunk> {
     for (const line of lines) {
       if (line.startsWith("data: ")) {
         try {
-          yield JSON.parse(line.slice(6));
+          const chunk = JSON.parse(line.slice(6));
+          if (chunk.done) sawDone = true;
+          yield chunk;
         } catch {}
       }
+      // SSE 注释行（如 ": keepalive"）忽略即可，不需要处理
     }
   }
 }

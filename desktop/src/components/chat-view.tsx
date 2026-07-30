@@ -32,6 +32,7 @@ import { ChatInput } from "@/components/chat/chat-input";
 import { OnboardingBanner } from "@/components/chat/onboarding-banner";
 import { type ConsentRequest } from "@ethan/shared/components/consent-dialog";
 import { ConsentGate } from "@ethan/shared/chat/consent-card";
+import { CleanupConfirmGate, type CleanupConfirmRequest } from "@ethan/shared/chat/cleanup-confirm-card";
 import { placeholderTitle, mapDetailMessages } from "@/components/chat/chat-helpers";
 import { consumeStream, type ConsumeStreamActions } from "@/components/chat/use-chat-stream";
 import { handleCommand } from "@/components/chat/chat-commands";
@@ -60,6 +61,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const [schedules, setSchedules] = useState<any[]>([]);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [consentRequest, setConsentRequest] = useState<ConsentRequest | null>(null);
+  const [cleanupConfirm, setCleanupConfirm] = useState<CleanupConfirmRequest | null>(null);
   const [mode, setMode] = useState<string>("");
   const [loadingSession, setLoadingSession] = useState(false);
   const [modes, setModes] = useState<ModeEntry[]>([]);
@@ -88,6 +90,14 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     try {
       await respondConsent(requestId, allowed, message);
     } catch {}
+  };
+
+  const handleCleanupRespond = async (requestId: string, action: "close" | "keep") => {
+    try {
+      const { respondBrowserCleanup } = await import("@/lib/api-base");
+      await respondBrowserCleanup(requestId, action);
+    } catch {}
+    setCleanupConfirm(null);
   };
 
   const handleRead = useCallback((msg: Message) => {
@@ -245,7 +255,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
               ? loaded.slice(0, -1)
               : loaded;
             await consumeStream(stream, base, {
-              setMessages, setConsentRequest, setBgPolling,
+              setMessages, setConsentRequest, setCleanupConfirm, setBgPolling,
               setSessionTitle, setSessionUsage, setStopping, setStreaming,
               activeSession: initialSessionId,
             });
@@ -435,7 +445,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     await consumeStream(
       streamChat(chatMessages, selectedModel, sessionId, { quote: sentQuote, mode, btw: isBtw, review: isReview }),
       newMessages,
-      { setMessages, setConsentRequest, setBgPolling, setSessionTitle, setSessionUsage, setStopping, setStreaming, activeSession: sessionId },
+      { setMessages, setConsentRequest, setCleanupConfirm, setBgPolling, setSessionTitle, setSessionUsage, setStopping, setStreaming, activeSession: sessionId },
       true,
     );
   };
@@ -504,7 +514,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       ) : (
       <MessageList
         messages={messages}
-        streaming={streaming}
+        streaming={streaming || !!bgPolling}
         sessionId={activeSession}
         onQuote={handleQuote}
         onCardAction={handleCardAction}
@@ -549,6 +559,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           </div>
         )}
         <ConsentGate request={consentRequest} onRespond={handleConsentRespond} />
+        <CleanupConfirmGate request={cleanupConfirm} onRespond={handleCleanupRespond} />
         <ChatInput
           streaming={streaming}
           models={models}
