@@ -2,7 +2,7 @@
 
 import type { StreamChunk } from "@/lib/api";
 import type { ToolStep } from "@ethan/shared/components/tool-timeline";
-import type { Message, Usage } from "@ethan/shared/chat/types";
+import type { Message, Usage, CardData } from "@ethan/shared/chat/types";
 import type { ConsentRequest } from "@ethan/shared/components/consent-dialog";
 
 export interface ConsumeStreamActions {
@@ -104,9 +104,8 @@ export async function consumeStream(
       }
       if (chunk.tool && chunk.state === "start") {
         const preToolThought = assistantContent.trim();
-        if (preToolThought) {
-          intermediateOutput += (intermediateOutput ? "\n\n" : "") + preToolThought;
-        }
+        // 不再往 intermediateOutput 累积工具调用前的文本：
+        // 这些文本已作为 tool_step.thought 存在 ToolTimeline 里，重复记录会让"过程记录"臃肿。
         assistantContent = "";
         currentToolSteps.push({
           tool: chunk.tool, args: chunk.args || "", intent: chunk.intent || undefined, state: "running", id: chunk.id,
@@ -118,7 +117,6 @@ export async function consumeStream(
         setMessages([...baseMessages, {
           role: "assistant", content: assistantContent, thought: assistantThought,
           toolSteps: [...currentToolSteps], toolsExpanded: true, created_at: Date.now() / 1000,
-          intermediateOutput: intermediateOutput || undefined,
         }]);
       }
       if (chunk.tool && (chunk.state === "done" || chunk.state === "error")) {
@@ -144,6 +142,7 @@ export async function consumeStream(
             duration_ms: chunk.duration_ms,
             result_preview: chunk.result_preview,
             result_detail: chunk.result_detail,
+            cards: (chunk.cards as ToolStep["cards"]) || currentToolSteps[matchedIdx].cards,
             entity_type: chunk.entity_type || currentToolSteps[matchedIdx].entity_type,
             entity_id: chunk.entity_id || currentToolSteps[matchedIdx].entity_id,
             sub_steps: chunk.sub_steps?.map((s) => ({
@@ -155,20 +154,24 @@ export async function consumeStream(
             })),
           };
         }
+        // 工具产出图片时往过程记录记一条简短信息（不记工具详情，只记关键产出）
+        if (chunk.cards && Array.isArray(chunk.cards)) {
+          cardsCollected.push(...chunk.cards);
+          for (const c of chunk.cards) {
+            if (c.type === "image") {
+              const action = c.source === "file_read" ? "读取" : "下载";
+              const loc = c.local_path ? `：\`${c.local_path}\`` : "";
+              intermediateOutput += (intermediateOutput ? "\n\n" : "") + `🖼️ ${action}了图片 **${c.title}**（${c.source || ""}）${loc}`;
+            }
+          }
+        }
+        if (Array.isArray(chunk.ui)) a2uiSurfaces.push(...chunk.ui);
+        if (chunk.mcp_app) mcpAppsCollected.push(chunk.mcp_app);
         setMessages([...baseMessages, {
           role: "assistant", content: assistantContent, thought: assistantThought,
           toolSteps: [...currentToolSteps], toolsExpanded: true, created_at: Date.now() / 1000,
           intermediateOutput: intermediateOutput || undefined,
         }]);
-      }
-      if (chunk.tool && (chunk.state === "done" || chunk.state === "error") && chunk.ui && Array.isArray(chunk.ui)) {
-        a2uiSurfaces.push(...chunk.ui);
-      }
-      if (chunk.tool && (chunk.state === "done" || chunk.state === "error") && chunk.mcp_app) {
-        mcpAppsCollected.push(chunk.mcp_app);
-      }
-      if (chunk.tool && (chunk.state === "done" || chunk.state === "error") && chunk.cards && Array.isArray(chunk.cards)) {
-        cardsCollected.push(...chunk.cards);
       }
       if (chunk.content) {
         setBgPolling(null);

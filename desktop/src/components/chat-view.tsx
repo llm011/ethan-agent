@@ -514,7 +514,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       ) : (
       <MessageList
         messages={messages}
-        streaming={streaming}
+        streaming={streaming || !!bgPolling}
         sessionId={activeSession}
         onQuote={handleQuote}
         onCardAction={handleCardAction}
