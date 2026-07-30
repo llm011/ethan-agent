@@ -19,6 +19,16 @@
       "128": "icons/icon-128.png"
     }
   },
+  "commands": {
+    "extract-markdown": {
+      "suggested_key": { "default": "Ctrl+Shift+M", "mac": "Command+Shift+M" },
+      "description": "提取当前页面正文为 Markdown 发给 Ethan"
+    },
+    "toggle-overlay": {
+      "suggested_key": { "default": "Ctrl+Shift+E", "mac": "Command+Shift+E" },
+      "description": "切换操作步骤浮层显示/隐藏"
+    }
+  },
   "background": {
     "service_worker": "background.js",
     "type": "module"

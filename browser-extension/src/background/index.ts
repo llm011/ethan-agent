@@ -18,7 +18,7 @@ import { NetworkMonitor } from './network-monitor';
 import { releaseCdpClient } from './cdp-client';
 import { KEEPALIVE_ALARM } from './ws-client';
 import { pushStep, updateStepStatus } from './overlay-injector';
-import { setupContextMenu } from './context-menu';
+import { setupContextMenu, sendToEthan } from './context-menu';
 
 const sessionStore = new BrowserSessionStore();
 const pageController = new BrowserPageController(sessionStore);
@@ -329,6 +329,137 @@ chrome.tabs.onUpdated.addListener((tabId, change, _tab) => {
       }).catch(() => {});  // chrome:// 等页面注入会失败，静默
     } catch {}
   })();
+});
+
+// ── 快捷键（manifest commands）─────────────────────────────────
+
+// 在页面上下文中提取正文为 Markdown（与 browser.py 的 _MARKDOWN_SCRIPT 同源逻辑）
+// 用 chrome.scripting.executeScript 的 func 参数直接传函数，避免字符串转义问题
+// 注意：此函数会被序列化后在页面上下文中执行，TypeScript 类型在此无意义，用 any 简化
+function extractMarkdownInPage(): any {
+  const clone: any = document.body.cloneNode(true);
+  clone.querySelectorAll('nav,header,footer,aside,script,style,iframe,noscript,svg,form,button,[role="navigation"],[role="banner"],[role="contentinfo"],.ad,.ads,.advertisement,.sidebar,.cookie,.popup,.modal,.share,.related,.comments').forEach((e: any) => e.remove());
+
+  let main: any = clone.querySelector('article') || clone.querySelector('main') || clone.querySelector('[role="main"]') || clone.querySelector('#content,.content,.post-content,.article-content,.entry-content,.post-body,.article-body');
+  if (!main) {
+    let best: any = null;
+    let bestScore = 0;
+    for (const el of clone.querySelectorAll('div,section')) {
+      const t = el.innerText || '';
+      const len = t.length;
+      if (len < 200) continue;
+      const score = len - el.querySelectorAll('a').length * 50;
+      if (score > bestScore) { bestScore = score; best = el; }
+    }
+    main = best || clone;
+  }
+
+  function cv(node: any): string {
+    let r = '';
+    for (const c of node.childNodes) {
+      if (c.nodeType === 3) { const t = (c.textContent || '').trim(); if (t) r += t + ' '; continue; }
+      if (c.nodeType !== 1) continue;
+      const tag = c.tagName.toLowerCase();
+      const inner = () => cv(c).trim();
+      switch (tag) {
+        case 'h1': r += '\n# ' + inner() + '\n\n'; break;
+        case 'h2': r += '\n## ' + inner() + '\n\n'; break;
+        case 'h3': r += '\n### ' + inner() + '\n\n'; break;
+        case 'h4': r += '\n#### ' + inner() + '\n\n'; break;
+        case 'h5': r += '\n##### ' + inner() + '\n\n'; break;
+        case 'h6': r += '\n###### ' + inner() + '\n\n'; break;
+        case 'p': r += inner() + '\n\n'; break;
+        case 'br': r += '\n'; break;
+        case 'hr': r += '\n---\n\n'; break;
+        case 'strong': case 'b': r += '**' + inner() + '**'; break;
+        case 'em': case 'i': r += '*' + inner() + '*'; break;
+        case 'code':
+          if (c.parentElement && c.parentElement.tagName.toLowerCase() === 'pre') break;
+          r += '`' + (c.innerText || '') + '`'; break;
+        case 'pre': {
+          const code = c.querySelector('code');
+          const lang = code ? (code.className.match(/language-(\w+)/) || [])[1] : '';
+          r += '\n```' + (lang || '') + '\n' + (c.innerText || '') + '\n```\n\n'; break;
+        }
+        case 'blockquote': r += '\n> ' + inner().replace(/\n/g, '\n> ') + '\n\n'; break;
+        case 'a': { const h = c.getAttribute('href') || '', t = c.innerText || ''; r += h && t ? '[' + t + '](' + h + ')' : t; break; }
+        case 'img': { const s = c.getAttribute('src') || c.getAttribute('data-src') || '', a = c.getAttribute('alt') || ''; if (s) r += '![' + a + '](' + s + ')'; break; }
+        case 'ul': case 'ol': r += '\n' + cvList(c, tag === 'ol') + '\n\n'; break;
+        case 'table': r += cvTable(c) + '\n\n'; break;
+        default: r += cv(c);
+      }
+    }
+    return r;
+  }
+  function cvList(list: any, ord: boolean): string {
+    let r = '', i = 1;
+    for (const li of list.children) {
+      if (li.tagName.toLowerCase() !== 'li') continue;
+      r += (ord ? (i++) + '. ' : '- ') + cv(li).trim().replace(/\n/g, '\n  ') + '\n';
+    }
+    return r;
+  }
+  function cvTable(t: any): string {
+    const rows = t.querySelectorAll('tr');
+    if (!rows.length) return '';
+    let r = '', first = true;
+    for (const row of rows) {
+      const cells = Array.from(row.querySelectorAll('th,td')).map((c: any) => (c.innerText || '').trim().replace(/\n/g, ' '));
+      r += '| ' + cells.join(' | ') + ' |\n';
+      if (first) { r += '|' + cells.map(() => '---').join('|') + '|\n'; first = false; }
+    }
+    return r;
+  }
+
+  const md = cv(main).replace(/\n{3,}/g, '\n\n').trim();
+  return JSON.stringify({ markdown: md, length: md.length, title: document.title, url: location.href });
+}
+
+chrome.commands.onCommand.addListener((command) => {
+  if (command === 'toggle-overlay') {
+    // 切换浮层：向当前激活 tab 注入 overlay 脚本（如果还没注入），然后发 toggle 消息
+    void (async () => {
+      try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tab?.id) return;
+        // 先确保 overlay.js 已注入
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          files: ['content/overlay.js'],
+        }).catch(() => {});
+        // 再发 toggle 消息
+        await chrome.tabs.sendMessage(tab.id, { target: 'overlay', type: 'toggleOverlay' }).catch(() => {});
+      } catch {}
+    })();
+    return;
+  }
+
+  if (command === 'extract-markdown') {
+    // 提取页面正文为 Markdown，发给 Ethan
+    void (async () => {
+      try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tab?.id) return;
+        // 在页面执行 Markdown 提取函数
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: extractMarkdownInPage,
+        }).catch(() => []);
+        if (!results?.[0]?.result) return;
+        const info = JSON.parse(results[0].result as string);
+        const md = info?.markdown || '';
+        if (!md) return;
+        // 截断超长内容
+        const maxLen = 30000;
+        const content = md.length > maxLen
+          ? md.slice(0, maxLen) + '\n\n<!-- 已截断（共 ' + md.length + ' 字，前 ' + maxLen + ' 字）-->\n\n来源：' + (info.url || '')
+          : md;
+        // 复用右键菜单的发送逻辑（发起对话 + 打开 redirect 页面）
+        await sendToEthan(content);
+      } catch {}
+    })();
+    return;
+  }
 });
 
 console.log('[EthanBrowser] background started, rpc v' + BROWSER_RPC_VERSION);

@@ -57,7 +57,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   void sendToEthan(content);
 });
 
-async function sendToEthan(content: string): Promise<void> {
+export async function sendToEthan(content: string): Promise<void> {
   const { serverUrl, token } = await chrome.storage.local.get(['serverUrl', 'token']);
   if (!serverUrl || !token) {
     // 没配置 → 打开 popup 让用户配置

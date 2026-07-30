@@ -194,6 +194,15 @@ function removeOverlay() {
   if (el) el.remove();
 }
 
+function toggleOverlay() {
+  const el = document.getElementById(OVERLAY_ID);
+  if (el) {
+    el.remove();
+  } else {
+    createOverlay();
+  }
+}
+
 // 监听来自 background 的消息
 const w = window as any;
 if (!w.__ethanOverlayListenerAdded) {
@@ -208,6 +217,8 @@ if (!w.__ethanOverlayListenerAdded) {
       clearSteps();
     } else if (msg.type === 'removeOverlay') {
       removeOverlay();
+    } else if (msg.type === 'toggleOverlay') {
+      toggleOverlay();
     }
     return false;
   });
