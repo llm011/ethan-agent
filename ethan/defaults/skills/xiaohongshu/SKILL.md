@@ -3,8 +3,8 @@ name: xiaohongshu
 title: 小红书自动化
 description: |
   小红书自动化技能。通过 Ethan 浏览器工具操作小红书：搜索笔记、查看详情、发布内容、社交互动。
-  使用 eval JS 直接提取数据，搜索用 URL 直跳，详情必须从搜索页点击进入（xsec_token 反爬）。
-version: 2.2.0
+  使用 eval JS 直接提取数据，搜索用 URL 直跳，详情从搜索卡片提取带 xsec_token 的链接后直接打开。
+version: 2.3.0
 author: Ethan
 platforms: [linux, macos]
 trigger:
@@ -55,17 +55,19 @@ source: internal (hermes agent) + Python CDP engine (upstream unclear)
 1. `browser_session` action=attach_current
 2. `browser_tab` action=open → `https://www.xiaohongshu.com/search_result?keyword={encodeURIComponent(关键词)}&source=web_search_source_normal`
 3. `browser_page` action=wait, ms=3000
-4. `browser_page` action=eval → JS 提取搜索结果（标题、链接、作者、点赞数）
+4. `browser_page` action=eval → JS 提取搜索结果（标题、作者、点赞数，**以及带 xsec_token 的详情链接 detailUrl**）
 5. 返回结构化结果
 
-### 查看详情（从搜索页点击进入，5 步）
-⚠️ **绝对不能直接 browser_tab open 帖子链接**（会被 xsec_token 反爬拦截到 404）。
+### 查看详情（提取带 token 链接后直接打开，5 步）
+⚠️ **不要点击卡片**：卡片可见的 `/explore/{id}` 链接 `display:none`、靠自定义 handler，点击极易失败打转。
+⚠️ **不要凭 note-id 自己拼无 token 的 URL**（会 404）。正解是用卡片里 `.cover` 那个**带 xsec_token** 的链接。
 
-1. 确保当前在搜索结果页
-2. `browser_page` action=eval → JS 点击目标卡片（按 index 或标题匹配）
+1. 从搜索结果里取目标笔记的 `detailUrl`（已含 xsec_token，见 `references/xhs-explore.md`）
+2. `browser_tab` action=open → `detailUrl`（带 token 直接打开，实测正常，不会 404）
 3. `browser_page` action=wait, ms=3000
-4. `browser_page` action=eval → JS 提取正文/图片/标签/评论
-5. 查看完毕后 `browser_page` action=eval → `window.history.back()` 返回搜索页
+4. `browser_page` action=eval → JS 提取正文/图片/标签/点赞收藏评论数
+5. 看下一篇：关掉当前详情 tab 或直接 open 下一个 `detailUrl`，**不要 history.back 回搜索页再点**
+6. 某篇打不开 / 某字段抓不到 → 标 `N/A` 跳过，**不在同一篇上反复重试**
 
 ### 点赞/收藏（3 步）
 1. 在详情页 `browser_page` action=eval → JS 找到按钮并 click
@@ -134,8 +136,8 @@ uv run --project scripts/cdp_engine scripts/cdp_engine/cli.py <subcommand> [opti
 
 ## 全局约束
 
-- **禁止 snapshot**：不要用 `action=snapshot`，DOM 太复杂且 ref 会 detach
-- **禁止直接打开帖子 URL**：小红书 xsec_token 反爬，必须从列表页点击进入
+- **优先 eval，少用 snapshot**：DOM 复杂且 ref 会 detach，提数据用 `action=eval`
+- **详情页要带 token 打开**：不要凭 note-id 拼无 token 的裸 URL（会 404）；从搜索卡片提取带 `xsec_token` 的 `.cover` 链接后 `browser_tab` open 即可，不需要点击卡片
 - **搜索可以 URL 直跳**：搜索页不受 xsec_token 限制
 - 图片懒加载：优先取 `img.src`，其次 `data-src`
 - 出现验证码时用 `browser_page` action=screenshot 截图给用户
