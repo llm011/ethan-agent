@@ -264,10 +264,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 
   // 来自 content script（reading-mode）：流式 AI 请求
+  // msg.sessionId 存在时走多轮对话（服务端按 session 维护上下文），否则单轮（摘要）
   if (msg?.type === 'reading:chat') {
     const tabId = _sender.tab?.id;
     if (typeof tabId === 'number') {
-      void readingChat(tabId, msg.requestId, msg.prompt);
+      void readingChat(tabId, msg.requestId, msg.prompt, { sessionId: msg.sessionId });
     }
     sendResponse({ ok: true });  // 立即应答，结果通过 tabs.sendMessage 流式推回
     return true;

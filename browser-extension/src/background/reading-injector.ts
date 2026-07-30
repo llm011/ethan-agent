@@ -61,11 +61,18 @@ export async function startReading(tabId: number): Promise<{ ok: boolean; error?
   }
 }
 
-/** 流式 AI：POST /api/chat（stream+btw），逐块把 delta 推回 content script。 */
+/**
+ * 流式 AI：POST /api/chat（stream），逐块把 delta 推回 content script。
+ *
+ * opts.sessionId 传入时走多轮对话：附 session_id + btw=false，服务端按 session
+ *   维护上下文（首轮把正文塞进消息，后续轮直接问，历史由服务端拼）。
+ * 不传 sessionId（如摘要）走 btw=true 单轮，不落会话上下文。
+ */
 export async function readingChat(
   tabId: number,
   requestId: string,
   prompt: string,
+  opts: { sessionId?: string } = {},
 ): Promise<void> {
   const push = (msg: Record<string, unknown>) => {
     chrome.tabs.sendMessage(tabId, { target: 'reading', ...msg }).catch(() => {});
@@ -77,6 +84,18 @@ export async function readingChat(
     return;
   }
 
+  const body: Record<string, unknown> = {
+    messages: [{ role: 'user', content: prompt }],
+    stream: true,
+    channel: 'browser-extension',
+  };
+  if (opts.sessionId) {
+    body.session_id = opts.sessionId;
+    body.btw = false;  // 多轮：服务端按 session 拼历史
+  } else {
+    body.btw = true;   // 单轮（摘要）：不带历史
+  }
+
   let res: Response;
   try {
     res = await fetch(`${cfg.httpBase}/api/chat`, {
@@ -85,12 +104,7 @@ export async function readingChat(
         'Content-Type': 'application/json',
         Authorization: `Bearer ${cfg.token}`,
       },
-      body: JSON.stringify({
-        messages: [{ role: 'user', content: prompt }],
-        stream: true,
-        btw: true,
-        channel: 'browser-extension',
-      }),
+      body: JSON.stringify(body),
     });
   } catch (e: any) {
     push({ type: 'chatDone', requestId, error: '连接不上 Ethan 服务，请确认后端已启动' });

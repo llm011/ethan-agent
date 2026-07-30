@@ -28,6 +28,10 @@
   let panelCollapsed = false;
   let activeChatHandlers: Set<(msg: any) => void> = new Set();
   let saveTimer: number | null = null;
+  // 内联多轮对话：每次进入阅读模式生成一个 session（服务端按此维护上下文），
+  // 首轮把正文塞进 prompt，后续轮只发问题、历史由服务端拼。
+  let chatSessionId = '';
+  let chatBusy = false;
 
   // ========== Utilities ==========
 
@@ -681,7 +685,12 @@
 
   // ========== AI Chat ==========
 
-  function requestChat(prompt: string, target: HTMLElement, onDone?: (text: string) => void) {
+  // sessionId \u4f20\u5165\u65f6\u8d70\u591a\u8f6e\u5bf9\u8bdd\uff08\u670d\u52a1\u7aef\u6309 session \u62fc\u5386\u53f2\uff09\uff1b\u4e0d\u4f20\u8d70\u5355\u8f6e\uff08\u6458\u8981\uff09\u3002
+  function requestChat(
+    prompt: string,
+    target: HTMLElement,
+    opts: { sessionId?: string; onDone?: (text: string) => void } = {},
+  ) {
     const reqId = genId();
     let buffer = '';
     target.innerHTML = '<span style="color:#9aa0aa;font-style:italic">\u601d\u8003\u4e2d\u2026</span>';
@@ -696,12 +705,12 @@
         if (msg.error) target.innerHTML = '<span style="color:#ef4444">\u9519\u8bef: ' + escapeHtml(msg.error) + '</span>';
         activeChatHandlers.delete(handler);
         chrome.runtime.onMessage.removeListener(handler);
-        if (onDone) onDone(buffer);
+        if (opts.onDone) opts.onDone(buffer);
       }
     };
     activeChatHandlers.add(handler);
     chrome.runtime.onMessage.addListener(handler);
-    chrome.runtime.sendMessage({ type: 'reading:chat', requestId: reqId, prompt });
+    chrome.runtime.sendMessage({ type: 'reading:chat', requestId: reqId, prompt, sessionId: opts.sessionId });
   }
 
   function renderMdSimple(md: string): string {
@@ -724,9 +733,11 @@
     if (summaryText) { target.innerHTML = renderMdSimple(summaryText); return; }
     const text = contentEl?.innerText || cleanedText;
     const prompt = '\u8fd9\u662f\u4e00\u7bc7\u6587\u7ae0\u7684\u6b63\u6587\uff0c\u8bf7\u7528\u4e2d\u6587\u56de\u590d\u3002\u8bf7\u4e25\u683c\u6309\u4ee5\u4e0b\u4e09\u4e2a\u90e8\u5206\u8f93\u51fa\uff1a\n\n## \u6982\u8ff0\n\u7528 1-2 \u53e5\u8bdd\u6982\u62ec\u6587\u7ae0\u4e3b\u65e8\u3002\n\n## \u7ed3\u6784\n\u5206\u5757\u5217\u51fa\u6587\u7ae0\u7ed3\u6784\uff08\u6bcf\u5757\u4e00\u884c\uff0c\u7528\u65e0\u5e8f\u5217\u8868\uff09\u3002\n\n## \u91cd\u70b9\n\u6307\u51fa 1-3 \u5904\u6700\u503c\u5f97\u5173\u6ce8\u7684\u5185\u5bb9\u3002\n\n\u6b63\u6587\u5982\u4e0b\uff1a\n\n' + text.slice(0, 8000);
-    requestChat(prompt, target, (result) => {
-      summaryText = result;
-      saveContent();
+    requestChat(prompt, target, {
+      onDone: (result) => {
+        summaryText = result;
+        saveContent();
+      },
     });
   }
 
@@ -790,6 +801,13 @@
       '  <div id="__ethan_reading_summary_content" style="font-size:13px;max-height:400px;overflow-y:auto;scroll-behavior:smooth;position:relative"></div>',
       '</div>',
       '<div style="margin-bottom:20px">' + secTitle('\u76ee\u5f55') + '<div id="__ethan_reading_toc" style="max-height:240px;overflow-y:auto"></div></div>',
+      '<div style="margin-bottom:20px">' + secTitle('\u5411 Ethan \u63d0\u95ee') +
+      '  <div id="__ethan_reading_chat_log" style="max-height:280px;overflow-y:auto;margin-bottom:8px"></div>' +
+      '  <div style="display:flex;gap:6px;align-items:flex-end">' +
+      '    <textarea id="__ethan_reading_chat_input" rows="1" placeholder="\u5c31\u8fd9\u7bc7\u6587\u7ae0\u63d0\u95ee\u2026" style="flex:1;resize:none;padding:8px 10px;border-radius:8px;border:1px solid ' + (dark ? '#374151' : '#e5e7eb') + ';background:' + (dark ? '#2a2e37' : '#fff') + ';color:inherit;font-size:13px;font-family:inherit;line-height:1.4;max-height:96px;outline:none"></textarea>' +
+      '    <button id="__ethan_reading_chat_send" style="flex:none;padding:8px 12px;border:none;border-radius:8px;background:#0d9488;color:#fff;font-size:13px;font-weight:500;cursor:pointer">\u53d1\u9001</button>' +
+      '  </div>' +
+      '</div>',
       '<div style="margin-top:auto;padding-top:12px;border-top:1px solid ' + (dark ? '#374151' : '#f3f4f6') + '">',
       '  <button id="__ethan_reading_save_kb" style="' + btnS + 'background:linear-gradient(135deg,#0d9488,#06b6d4);color:#fff;margin-bottom:8px">\u5b58\u77e5\u8bc6\u5e93</button>',
       '  <button id="__ethan_reading_clear_cache" style="' + btnS + 'background:' + (dark ? '#374151' : '#f3f4f6') + ';color:' + (dark ? '#9ca3af' : '#6b7280') + '">\u6e05\u9664\u7f13\u5b58\uff08\u91cd\u65b0\u52a0\u8f7d\uff09</button>',
@@ -841,6 +859,79 @@
           container.scrollTo({ top: fallback, behavior: 'smooth' });
         }
       };
+    });
+
+    // Inline chat
+    setupChat(dark);
+  }
+
+  // ========== Inline Chat（多轮对话）==========
+
+  function setupChat(dark: boolean) {
+    const input = document.getElementById('__ethan_reading_chat_input') as HTMLTextAreaElement | null;
+    const sendBtn = document.getElementById('__ethan_reading_chat_send') as HTMLButtonElement | null;
+    if (!input || !sendBtn) return;
+
+    // 自适应高度
+    input.addEventListener('input', () => {
+      input.style.height = 'auto';
+      input.style.height = Math.min(input.scrollHeight, 96) + 'px';
+    });
+    // Enter 发送，Shift+Enter 换行
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(dark); }
+    });
+    sendBtn.onclick = () => sendChat(dark);
+  }
+
+  let firstChatTurn = true;
+
+  function sendChat(dark: boolean) {
+    const input = document.getElementById('__ethan_reading_chat_input') as HTMLTextAreaElement | null;
+    const log = document.getElementById('__ethan_reading_chat_log');
+    if (!input || !log || chatBusy) return;
+    const question = input.value.trim();
+    if (!question) return;
+
+    input.value = '';
+    input.style.height = 'auto';
+    chatBusy = true;
+
+    // 用户气泡
+    const userBubble = document.createElement('div');
+    Object.assign(userBubble.style, {
+      margin: '8px 0', padding: '8px 10px', borderRadius: '8px',
+      background: dark ? '#374151' : '#eef2ff', fontSize: '13px', lineHeight: '1.5',
+      wordBreak: 'break-word',
+    });
+    userBubble.textContent = question;
+    log.appendChild(userBubble);
+
+    // 助手气泡（流式填充）
+    const answer = document.createElement('div');
+    Object.assign(answer.style, {
+      margin: '8px 0 12px', padding: '8px 10px', borderRadius: '8px',
+      background: dark ? '#2a2e37' : '#fff', border: '1px solid ' + (dark ? '#374151' : '#e5e7eb'),
+      fontSize: '13px', lineHeight: '1.6', wordBreak: 'break-word',
+    });
+    log.appendChild(answer);
+    log.scrollTop = log.scrollHeight;
+
+    // 首轮把正文塞进 prompt，后续轮只发问题（历史由服务端按 session 拼）
+    let prompt = question;
+    if (firstChatTurn) {
+      const body = (contentEl?.innerText || cleanedText).slice(0, 8000);
+      prompt = '下面是一篇文章的正文，请阅读后用中文回答我的问题。回答后无需重复正文。\n\n===== 正文开始 =====\n'
+        + body + '\n===== 正文结束 =====\n\n我的问题：' + question;
+      firstChatTurn = false;
+    }
+
+    requestChat(prompt, answer, {
+      sessionId: chatSessionId,
+      onDone: () => {
+        chatBusy = false;
+        log.scrollTop = log.scrollHeight;
+      },
     });
   }
 
@@ -1007,6 +1098,10 @@
     if (active) return;
     active = true;
     panelCollapsed = false;
+    // 每次进入生成一个新对话 session；首轮问题会带上正文，后续轮由服务端按此拼历史
+    chatSessionId = 'read-' + genId();
+    chatBusy = false;
+    firstChatTurn = true;
     removeReenterButton();
     removeExpandTab();
 
