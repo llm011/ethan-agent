@@ -8,7 +8,7 @@ icon + 文件名的卡片，点击进入 /ppt-preview 预览页或直接下载�
 """
 from __future__ import annotations
 
-from ethan.core.file_jail import DELIVER_EXTS, detect_project, resolve_jailed
+from ethan.core.file_jail import DELIVER_EXTS, build_file_card, resolve_jailed
 from ethan.tools.base import BaseTool, ToolResult
 
 
@@ -37,6 +37,7 @@ class DeliverFileTool(BaseTool):
     }
 
     async def run(self, path: str, title: str = "") -> str | ToolResult:
+        # 先做细分校验以给出可操作的报错（build_file_card 只返回 None 不区分原因）
         p = resolve_jailed(path)
         if p is None:
             return f"Deliver failed: path must be under the user home directory or /tmp: {path}"
@@ -45,18 +46,10 @@ class DeliverFileTool(BaseTool):
         if p.suffix.lower() not in DELIVER_EXTS:
             return f"Deliver failed: unsupported file type {p.suffix} (allowed: {', '.join(sorted(DELIVER_EXTS))})"
 
-        project_dir, page_count = detect_project(p)
-        card = {
-            "type": "file",
-            "filename": p.name,
-            "title": title or p.stem,
-            "path": str(p),
-            "size_kb": round(p.stat().st_size / 1024, 1),
-            "kind": p.suffix.lower().lstrip("."),
-        }
-        if project_dir:
-            card["project_dir"] = project_dir
-            card["page_count"] = page_count
+        # 卡片构造收敛在 file_jail.build_file_card，与正文兜底扫描共用，避免字段漂移
+        card = build_file_card(str(p), title)
+        if card is None:
+            return f"Deliver failed: cannot build file card for {p}"
 
         return ToolResult(
             tool_call_id="",  # 由 registry 回填

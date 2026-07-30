@@ -24,7 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from ethan.core.file_jail import ASSET_EXTS, DELIVER_EXTS, is_project_dir, resolve_jailed
+from ethan.core.file_jail import ASSET_EXTS, DELIVER_EXTS, IMAGE_EXTS, is_project_dir, resolve_jailed
 from ethan.core.signed_url import sign_path
 from ethan.interface.routers.deps import verify_token, verify_token_or_cookie
 
@@ -110,6 +110,26 @@ async def download_file(path: str, session_id: str = ""):
     if p.suffix.lower() not in DELIVER_EXTS:
         raise HTTPException(status_code=400, detail="unsupported file type")
     return FileResponse(p, filename=p.name, content_disposition_type="attachment")
+
+
+@router.get("/view", dependencies=[Depends(verify_token_or_cookie)])
+async def view_file(path: str, session_id: str = ""):
+    """内联查看交付的图片（<img src> / Lightbox 直出，inline 而非 attachment）。
+
+    与 /download 同一套 session 授权，但只放行图片类型且用 inline 呈现，
+    供 file 卡片里图片 kind 的缩略图与放大查看使用。非图片一律 400。
+    """
+    p = _resolve_jailed(path)
+    granted_files, _ = await _session_grants(session_id)
+    if str(p) not in granted_files:
+        raise HTTPException(status_code=403, detail="file not delivered in this session")
+    if not p.is_file():
+        raise HTTPException(status_code=404, detail="file not found")
+    if p.suffix.lower() not in IMAGE_EXTS:
+        raise HTTPException(status_code=400, detail="not an image")
+    # 显式带 filename + inline：Starlette 仅在有 filename 时才写 Content-Disposition，
+    # 明确 inline 意图（区别于 /download 的 attachment），浏览器/<img> 内联渲染。
+    return FileResponse(p, filename=p.name, content_disposition_type="inline")
 
 
 def _page_sort_key(f: Path) -> tuple[int, int, str]:

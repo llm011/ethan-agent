@@ -412,6 +412,24 @@ async def _run_generation(
     # 挂到最后一个工具步骤上一并持久化，避免静默丢失。
     collector.flush_pending_injected()
 
+    # 兜底：agent 忘了调 deliver_file、直接把产物绝对路径写进正文时，扫正文补文件卡片。
+    # 补进 cards 列 = 同时补下载授权（/files 路由授权源自持久化的 cards），卡片才点得动。
+    final_cards = list(collector.cards or [])
+    try:
+        from ethan.core.file_jail import scan_file_cards_in_text
+        existing_paths = {c.get("path") for c in final_cards if c.get("type") == "file"}
+        fallback_cards = scan_file_cards_in_text(collector.full or "", existing_paths)
+        if fallback_cards:
+            final_cards.extend(fallback_cards)
+            logger.info("正文兜底补文件卡片 %d 张 session=%s", len(fallback_cards), session_id)
+            # 直播中也推给前端，让当前这轮就渲染出卡片（否则要刷新会话才出现）
+            try:
+                run.emit({"cards": fallback_cards})
+            except Exception:
+                logger.debug("兜底文件卡片 emit 失败 session=%s", session_id, exc_info=True)
+    except Exception:
+        logger.exception("正文兜底扫描文件卡片失败 session=%s", session_id)
+
     msg_id = None
     if session_id and (collector.full or collector.thought):
         asst_msg = Message(
@@ -422,7 +440,7 @@ async def _run_generation(
             tool_steps=collector.tool_steps or [],
             a2ui=collector.a2ui or None,
             mcp_apps=collector.mcp_apps or None,
-            cards=collector.cards or None,
+            cards=final_cards or None,
             matched_skills=collector.matched_skills or None,
             ttfb_ms=collector.ttfb_ms,
             total_ms=collector.total_ms,

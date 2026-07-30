@@ -205,6 +205,18 @@ export async function consumeStream(
           intermediateOutput: intermediateOutput || undefined,
         }]);
       }
+      // 顶层 cards 事件（无 tool 字段）：正文兜底补的文件卡片，直播中即时渲染。
+      if (chunk.cards && !chunk.tool && Array.isArray(chunk.cards)) {
+        cardsCollected.push(...chunk.cards);
+        setMessages([...baseMessages, {
+          role: "assistant", content: assistantContent, thought: assistantThought,
+          toolSteps: currentToolSteps.length > 0 ? [...currentToolSteps] : undefined,
+          toolsExpanded: currentToolSteps.length > 0 ? true : undefined,
+          created_at: Date.now() / 1000,
+          intermediateOutput: intermediateOutput || undefined,
+          cards: cardsCollected as unknown as Message["cards"],
+        }]);
+      }
       if (chunk.done && chunk.usage) {
         finalUsage = { input: chunk.usage.input || 0, output: chunk.usage.output || 0, cache: chunk.usage.cache || 0 };
         if (chunk.ttfb_ms != null) ttfbMs = chunk.ttfb_ms;

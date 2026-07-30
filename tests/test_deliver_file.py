@@ -334,3 +334,67 @@ def test_signed_url_flow(signed_client):
     assert signed_client.get(f"/api/files/download?path={f}&session_id=s1&user=u2&sig={sig}").status_code == 401
     # 5. ?token= 长效 token 通道已移除
     assert signed_client.get(f"/api/files/download?path={f}&session_id=s1&token=tok-u1").status_code == 401
+
+
+# ── 正文兜底扫描（agent 忘调 deliver_file，直接把路径写进正文）────────────────
+
+def test_scan_file_cards_in_text():
+    from ethan.core.file_jail import scan_file_cards_in_text
+
+    d = Path("/tmp/scan_fallback_test")
+    d.mkdir(exist_ok=True)
+    pptx = d / "汇报.pptx"
+    pptx.write_bytes(b"x" * 2048)
+    png = d / "chart.png"
+    png.write_bytes(b"x" * 500)
+
+    text = (
+        f"PPT 做好了 🎉\n路径：{pptx}\n"
+        f"还生成了一张图 {png} 供参考。\n"
+        f"另外 /tmp/does_not_exist_xyz.pdf 不存在，不该匹配。"
+    )
+    cards = scan_file_cards_in_text(text, set())
+    kinds = sorted(c["kind"] for c in cards)
+    assert kinds == ["png", "pptx"]  # 存在的两个被扫到，不存在的 pdf 被跳过
+
+    # 已有同路径卡片时不重复补（去重键归一化，传原始 /tmp 写法也能命中）
+    deduped = scan_file_cards_in_text(text, {str(pptx)})
+    assert [c["kind"] for c in deduped] == ["png"]
+
+    # markdown 链接包裹的路径也能提取
+    assert len(scan_file_cards_in_text(f"见 [报告]({pptx})", set())) == 1
+
+    # 低信号扩展名（.md/.html/.csv）不做兜底，避免误伤正文里随口提到的路径
+    md = d / "notes.md"
+    md.write_bytes(b"x")
+    assert scan_file_cards_in_text(f"参考 {md}", set()) == []
+
+
+def test_view_endpoint_inline_image(client):
+    """/files/view 内联返回图片，非图片类型 400。"""
+    img = Path("/tmp/view_test.png")
+    img.write_bytes(b"png-bytes")
+    res = client.get(f"/api/files/view?path={img}&session_id=s1")
+    assert res.status_code == 200
+    assert res.content == b"png-bytes"
+    assert "inline" in res.headers.get("content-disposition", "")
+
+    # 非图片（pptx）走 /view 应被拒
+    doc = Path("/tmp/view_test.pptx")
+    doc.write_bytes(b"x")
+    assert client.get(f"/api/files/view?path={doc}&session_id=s1").status_code == 400
+
+
+def test_view_endpoint_session_isolation(client, monkeypatch):
+    """/view 与 /download 同一套 session 授权：别的 session 没交付过 → 403。"""
+    img = Path("/tmp/view_isolation.png")
+    img.write_bytes(b"x")
+
+    async def _grants(session_id: str):
+        if session_id == "session-A":
+            return {str(img.resolve())}, set()
+        return set(), set()
+
+    monkeypatch.setattr(files_router, "_session_grants", _grants)
+    assert client.get(f"/api/files/view?path={img}&session_id=session-A").status_code == 200
+    assert client.get(f"/api/files/view?path={img}&session_id=session-B").status_code == 403
