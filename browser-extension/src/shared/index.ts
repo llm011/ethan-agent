@@ -112,6 +112,11 @@ export const DEFAULT_COMMANDS: EthanCommand[] = [
       '用简洁的中文解释下面这段文字的含义{query}：\n\n{selection}',
   },
   {
+    id: 'ask-selection', label: '就选中提问', icon: '❓', scope: 'selection', builtin: true,
+    promptTemplate:
+      '下面是我选中的一段文字：\n\n{selection}\n\n请针对它回答我的问题{query}。',
+  },
+  {
     id: 'ask-page', label: '问本页', icon: '💬', scope: 'page', builtin: true,
     promptTemplate:
       '下面是一篇网页的正文，请阅读后等待我的提问（我接下来会追问）。先用一句话说明你已读完，可以开始提问。\n\n正文如下：\n\n{content}',
