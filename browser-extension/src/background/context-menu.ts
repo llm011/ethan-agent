@@ -5,34 +5,65 @@
 // 然后打开 redirect 中间页：先尝试 ethan:// deep link 唤起桌面端，
 // 唤不起时 2s 后自动 fallback 到 Web UI。
 
-import { wsToHttp, readServerConfig } from '../shared';
+import { wsToHttp, readServerConfig, readCommands, readCommandUsage } from '../shared';
+import { runCommand } from './command-runner';
 
 const MENU_SELECTION = 'ethan-send-selection';
 const MENU_LINK = 'ethan-send-link';
 const MENU_PAGE = 'ethan-send-page';
+const CMD_PREFIX = 'ethan-cmd-';   // 指令菜单项 id 前缀：ethan-cmd-<commandId>
+const TOP_N = 3;                    // 右键菜单里展示的高频指令数
 
+/**
+ * 重建右键菜单：固定的「发给 Ethan」三项 + 按使用次数排序的 top-3 指令。
+ * commands / commandUsage 变化时（storage.onChanged）会重建。
+ */
 export function setupContextMenu(): void {
-  // 清除旧菜单（重装/更新时避免重复）
-  chrome.contextMenus.removeAll(() => {
-    chrome.contextMenus.create({
-      id: MENU_SELECTION,
-      title: '发给 Ethan',
-      contexts: ['selection'],
-    });
-    chrome.contextMenus.create({
-      id: MENU_LINK,
-      title: '发送链接给 Ethan',
-      contexts: ['link'],
-    });
-    chrome.contextMenus.create({
-      id: MENU_PAGE,
-      title: '发送页面给 Ethan',
-      contexts: ['page'],
-    });
+  chrome.contextMenus.removeAll(async () => {
+    chrome.contextMenus.create({ id: MENU_SELECTION, title: '发给 Ethan', contexts: ['selection'] });
+    chrome.contextMenus.create({ id: MENU_LINK, title: '发送链接给 Ethan', contexts: ['link'] });
+    chrome.contextMenus.create({ id: MENU_PAGE, title: '发送页面给 Ethan', contexts: ['page'] });
+
+    // 高频指令：按 commandUsage 排序取前 TOP_N，scope 决定挂在选区还是整页 context
+    try {
+      const [commands, usage] = await Promise.all([readCommands(), readCommandUsage()]);
+      const top = [...commands]
+        .sort((a, b) => (usage[b.id] || 0) - (usage[a.id] || 0))
+        .slice(0, TOP_N);
+      if (top.length) {
+        chrome.contextMenus.create({ id: 'ethan-cmd-sep', type: 'separator', contexts: ['selection', 'page'] });
+        for (const cmd of top) {
+          chrome.contextMenus.create({
+            id: CMD_PREFIX + cmd.id,
+            title: cmd.icon + ' ' + cmd.label,
+            contexts: [cmd.scope === 'selection' ? 'selection' : 'page'],
+          });
+        }
+      }
+    } catch { /* 无配置时只保留固定项 */ }
   });
 }
 
+// commands / commandUsage 变化时重建菜单，让 top-3 跟随使用习惯更新
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && (changes.commands || changes.commandUsage)) {
+    setupContextMenu();
+  }
+});
+
 chrome.contextMenus.onClicked.addListener((info, tab) => {
+  const id = String(info.menuItemId);
+
+  // 指令项：交给 command-runner 执行，结果进页面结果面板
+  if (id.startsWith(CMD_PREFIX)) {
+    const commandId = id.slice(CMD_PREFIX.length);
+    const tabId = tab?.id;
+    if (typeof tabId === 'number') {
+      void runCommand(tabId, commandId, { selectionText: info.selectionText?.trim() });
+    }
+    return;
+  }
+
   let content = '';
   const pageLabel = tab?.title ? tab.title : info.pageUrl || '';
 

@@ -1,5 +1,5 @@
 /* eslint-disable */
-import { wsToHttp } from '../shared';
+import { wsToHttp, readCommands } from '../shared';
 
 const $ = id => document.getElementById(id);
 
@@ -194,4 +194,36 @@ $('reading').addEventListener('click', async () => {
 $('autoCloseCookies').addEventListener('change', async (e) => {
   await chrome.storage.local.set({ autoCloseCookies: e.target.checked });
 });
+
+// 页面指令列表：读 commands 渲染成按钮，点击 → 后台执行，结果进页面右上角面板。
+async function renderCommands() {
+  const list = $('commandList');
+  if (!list) return;
+  const commands = await readCommands();
+  list.innerHTML = '';
+  for (const cmd of commands) {
+    const btn = document.createElement('button');
+    btn.className = 'cmd-btn';
+    btn.textContent = cmd.icon + ' ' + cmd.label;
+    btn.title = cmd.scope === 'selection' ? '对当前选中文字执行' : '对当前页面执行';
+    btn.addEventListener('click', () => runCommand(cmd));
+    list.appendChild(btn);
+  }
+}
+
+async function runCommand(cmd) {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id || tab.url?.startsWith('chrome://') || tab.url?.startsWith('chrome-extension://') || tab.url?.startsWith('about:')) {
+    $('hint').textContent = '当前页面不支持';
+    return;
+  }
+  const resp = await chrome.runtime.sendMessage({ type: 'run-command', commandId: cmd.id, tabId: tab.id });
+  if (resp?.ok) {
+    window.close();
+  } else {
+    $('hint').textContent = resp?.error || '执行失败';
+  }
+}
+
 load();
+renderCommands();

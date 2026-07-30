@@ -226,6 +226,11 @@ interface EthanResultPanelApi {
 
   function onMessage(msg: any) {
     if (msg?.target !== 'result') return;
+    if (msg.type === 'newResult') {
+      // background 注入面板后开一条新结果（无法直接调 window API，走消息）
+      newResult({ title: msg.title, sessionId: msg.sessionId, requestId: msg.requestId });
+      return;
+    }
     if (msg.type === 'chatChunk' && msg.requestId === activeReqId) {
       const it = items[cur];
       if (it && !it.done) { it.markdown += msg.delta || ''; render(); }
