@@ -88,6 +88,7 @@
     bar.appendChild(mkBtn('🌐 翻译', () => runCmd('translate-sel')));
     bar.appendChild(mkBtn('💡 解释', () => runCmd('explain')));
     bar.appendChild(mkBtn('📌 存', () => saveKnowledge()));
+    bar.appendChild(mkBtn('⋯ 更多', () => showMoreMenu(bar, dark)));
     bar.appendChild(mkBtn('❓ 提问', () => showAskInput(bar, dark), true));
 
     document.documentElement.appendChild(bar);
@@ -128,6 +129,25 @@
     bar.appendChild(input);
     bar.appendChild(send);
     input.focus();
+  }
+
+  // 「更多」：写作类 + 生词卡片，换成一排次级按钮
+  function showMoreMenu(bar: HTMLElement, dark: boolean) {
+    bar.innerHTML = '';
+    const items: [string, string][] = [
+      ['✨ 润色', 'polish'],
+      ['🔄 改写', 'rewrite'],
+      ['➕ 扩写', 'expand'],
+      ['📖 生词', 'vocab'],
+    ];
+    for (const [label, id] of items) {
+      const b = document.createElement('button');
+      b.textContent = label;
+      b.style.cssText = btnStyle(dark);
+      b.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); });
+      b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); runCmd(id); });
+      bar.appendChild(b);
+    }
   }
 
   function runCmd(commandId: string, query?: string) {

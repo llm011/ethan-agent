@@ -121,6 +121,29 @@ export const DEFAULT_COMMANDS: EthanCommand[] = [
     promptTemplate:
       '下面是一篇网页的正文，请阅读后等待我的提问（我接下来会追问）。先用一句话说明你已读完，可以开始提问。\n\n正文如下：\n\n{content}',
   },
+  // ── 写作助手（scope=selection）────────────────────────────
+  {
+    id: 'polish', label: '润色', icon: '✨', scope: 'selection', builtin: true,
+    promptTemplate:
+      '请润色下面这段文字，使其更通顺、专业、地道，保持原意与语言不变，只输出润色后的文字{query}：\n\n{selection}',
+  },
+  {
+    id: 'rewrite', label: '改写', icon: '🔄', scope: 'selection', builtin: true,
+    promptTemplate:
+      '请换一种表达方式改写下面这段文字，保持原意，只输出改写后的文字{query}：\n\n{selection}',
+  },
+  {
+    id: 'expand', label: '扩写/续写', icon: '➕', scope: 'selection', builtin: true,
+    promptTemplate:
+      '请在保持风格与语气一致的前提下，扩写或续写下面这段文字{query}：\n\n{selection}',
+  },
+  // ── 生词卡片（scope=selection）────────────────────────────
+  {
+    id: 'vocab', label: '生词卡片', icon: '📖', scope: 'selection', builtin: true,
+    promptTemplate:
+      '为下面的词或短语生成一张学习卡片，用 Markdown 输出，包含：\n' +
+      '- **词条**\n- **释义**（中文）\n- **词性 / 用法**\n- **例句**（原文语言 + 中文翻译各一句）\n\n词条如下：\n\n{selection}',
+  },
 ];
 
 /** 读用户指令；storage 为空时回落到内置默认集。 */

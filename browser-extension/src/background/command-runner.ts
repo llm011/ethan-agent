@@ -88,7 +88,8 @@ export async function runCommand(
     await chrome.tabs.sendMessage(tabId, {
       target: 'result', type: 'newResult',
       // content script 侧监听 newResult 消息（见下）
-      title: cmd.label, sessionId, requestId,
+      // ask-page 是「读完正文后我来追问」的场景，让面板自动聚焦追问框
+      title: cmd.label, sessionId, requestId, focusInput: cmd.id === 'ask-page',
     });
   } catch (e: any) {
     return { ok: false, error: '面板注入失败（页面可能不允许）' };

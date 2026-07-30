@@ -229,6 +229,11 @@ interface EthanResultPanelApi {
     if (msg.type === 'newResult') {
       // background 注入面板后开一条新结果（无法直接调 window API，走消息）
       newResult({ title: msg.title, sessionId: msg.sessionId, requestId: msg.requestId });
+      // ask-page 等场景：读完正文后让用户直接追问，自动聚焦输入框
+      if (msg.focusInput) {
+        const input = el('input') as HTMLTextAreaElement | null;
+        if (input) setTimeout(() => input.focus(), 50);
+      }
       return;
     }
     if (msg.type === 'chatChunk' && msg.requestId === activeReqId) {
