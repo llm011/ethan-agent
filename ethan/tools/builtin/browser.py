@@ -42,6 +42,45 @@ def _persist_snapshot(content: str, session: str) -> str:
     return str(path)
 
 
+# eval 返回值截断：结构化 JSON（如整页视频/笔记卡片列表）动辄几十 KB，
+# 在 ReAct 循环里被逐轮回灌进上下文，是浏览器批量任务 token 爆炸的主因
+# （实测抖音 Top10 单 case input 高达 ~300 万 token）。策略与 snapshot 一致：
+# 完整结果落盘，prompt 只带首段，模型按需用 snapshot_read 翻页读取。
+_EVAL_MAX_CHARS = 8000  # eval 返回值（result 字段）超过此长度即落盘 + 截断首段
+
+
+def _truncate_eval_result(result, session: str) -> str:
+    """eval 结果过大时：完整落盘，返回体只保留 result 首段 + 读取指引。
+
+    只截断 `result`（脚本返回值）这一个字段，ok/sessionId/tabId/page 等结构字段
+    原样保留，模型仍能拿到 ID 做后续操作。result 非字符串时先 JSON 序列化再按字符截断。
+    """
+    if not isinstance(result, dict) or "result" not in result:
+        return json.dumps(result, ensure_ascii=False)
+    value = result["result"]
+    if isinstance(value, str):
+        display = value
+    else:
+        try:
+            display = json.dumps(value, ensure_ascii=False)
+        except (TypeError, ValueError):
+            display = str(value)
+    total = len(display)
+    if total <= _EVAL_MAX_CHARS:
+        return json.dumps(result, ensure_ascii=False)
+    # 落盘完整结果，返回体只带首段
+    path = _persist_snapshot(display, session)
+    chunk, chunk_len = _chunk_text(display, 0, _EVAL_MAX_CHARS)
+    out = dict(result)
+    out["result"] = chunk
+    out["result_truncated"] = True
+    out["result_path"] = path
+    out["result_total_chars"] = total
+    out["result_chunk_length"] = chunk_len
+    out["result_has_more"] = chunk_len < total
+    return json.dumps(out, ensure_ascii=False)
+
+
 def _chunk_text(content: str, offset: int, length: int) -> tuple[str, int]:
     """从 offset 取 length 字符，在末尾附近找换行符对齐截断。
 
@@ -233,7 +272,12 @@ _HINTS = {
     "screenshot": "已截图并保存。path 是本地图片路径，前端会自动渲染。",
     "upload": "已上传文件。ok=true 表示成功。",
     "save_pdf": "已保存 PDF。path 是文件路径。",
-    "eval": "已执行页面 JS。value 字段是脚本返回值（若有）。",
+    "eval": (
+        "已执行页面 JS。result 字段是脚本返回值（若有）。"
+        "result_truncated=true 时结果过大、已截断：完整内容落盘在 result_path，"
+        "当前只是首段，用 snapshot_read(action=snapshot_read, path=result_path, offset=result_chunk_length) 读取后续。"
+        "抓大列表时建议脚本内先筛选/精简字段（如只留标题+关键指标），减少无谓翻页。"
+    ),
     "click_selector": "用 CSS/XPath/text 定位元素并点击。ok=true 表示成功，coords 是点击坐标。不依赖 snapshot ref。",
     "fill_selector": "用 CSS/XPath 定位输入框并填入文本（兼容 React）。ok=true 表示成功。",
     "hover_selector": "用 CSS/XPath/text 定位元素并悬停。ok=true 表示成功。",
@@ -666,8 +710,10 @@ class BrowserPageTool(_BrowserToolBase):
             result = await _call("page_save_pdf", params, browser_session_id=session)
             return json.dumps({**(result or {}), "path": out_path}, ensure_ascii=False)
         if action == "eval":
-            return json.dumps(await _call("page_eval", {"sessionId": session, "script": kw.get("script", "")},
-                                          browser_session_id=session), ensure_ascii=False)
+            result = await _call("page_eval", {"sessionId": session, "script": kw.get("script", "")},
+                                 browser_session_id=session)
+            # 大 eval 结果（整页卡片列表等）落盘 + 截断首段，避免逐轮回灌撑爆上下文
+            return _truncate_eval_result(result, session)
         # ── selector 操作（不依赖 snapshot，直接用 CSS/XPath/text 定位 + CDP mouse 点击）──
         if action == "click_selector":
             script = _build_locate_script(kw.get("selector", ""), kw.get("xpath", ""),
