@@ -5,12 +5,13 @@ import { useRouter } from "next/navigation";
 import { Button } from "@ethan/shared/ui/button";
 import { Input } from "@ethan/shared/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@ethan/shared/ui/select";
-import { Check, ChevronDown, ChevronRight } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Plus, Trash2 } from "lucide-react";
 import { MdEditor } from "@ethan/shared/components/md-editor";
 import {
   fetchAgentSettings, updateAgentSettings, AgentSettings,
   fetchSystemSettings, updateSystemSettings, SystemSettings,
-  fetchProviderSettings, updateProviderSettings, ProviderSettings,
+  fetchProviderSettings, updateProviderSettings, ProviderSettings, ProviderConfig, ProviderPreset,
+  fetchProviderPresets, deleteProvider,
   fetchChannels, patchChannel, ChannelInfo,
   fetchAPIKeys, createAPIKey, deleteAPIKey, APIKeyInfo, APIKeyCreated,
   fetchModels, addModel, deleteModel, discoverModels, ModelEntry,
@@ -25,6 +26,7 @@ import { PromptPreview } from "./settings/prompt-preview";
 import { ProfileEditor } from "./settings/profile-editor";
 import { FastRulesTab } from "./settings/fast-rules-tab";
 import { ToolTiersView } from "./tool-tiers-view";
+import { ConfirmDialog } from "./confirm-dialog";
 
 interface SettingsViewProps {
   models: { id: string; description: string }[];
@@ -39,7 +41,7 @@ const TAB_GROUPS = [
     items: [
       { id: "general" as TabId, label: "通用" },
       { id: "fast-rules" as TabId, label: "快捷路由" },
-      { id: "providers" as TabId, label: "模型" },
+      { id: "providers" as TabId, label: "模型 provider" },
       { id: "channels" as TabId, label: "渠道" },
     ],
   },
@@ -137,14 +139,19 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
   });
 
   const [providerForm, setProviderForm] = useState<ProviderSettings>({});
+  const [providerPresets, setProviderPresets] = useState<ProviderPreset[]>([]);
+  const [addProviderOpen, setAddProviderOpen] = useState(false);
+  const [newProviderKey, setNewProviderKey] = useState("");
+  const [deleteProviderKey, setDeleteProviderKey] = useState<string | null>(null);
+  const [providerDeleting, setProviderDeleting] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   useEffect(() => {
-    Promise.all([fetchAgentSettings(), fetchSystemSettings(), fetchProviderSettings(), fetchChannels(), fetchModels()])
-      .then(([agentData, sysData, providerData, channelData, models]) => {
+    Promise.all([fetchAgentSettings(), fetchSystemSettings(), fetchProviderSettings(), fetchChannels(), fetchModels(), fetchProviderPresets()])
+      .then(([agentData, sysData, providerData, channelData, models, presetsData]) => {
         setAgentForm({
           ...agentData,
           heartbeat_enabled: agentData.heartbeat_enabled ?? true,
@@ -154,6 +161,7 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
         setProviderForm(providerData);
         setChannels(channelData);
         setModelList(models);
+        setProviderPresets(presetsData.presets);
         const initial: Record<string, Record<string, string>> = {};
         for (const ch of channelData) initial[ch.id] = { ...ch.config };
         setChannelForms(initial);
@@ -176,6 +184,35 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
       setChannelMessages(prev => ({ ...prev, [channelId]: { type: "error", text: "保存失败" } }));
     } finally {
       setChannelSaving(null);
+    }
+  };
+
+  // 添加 provider：从预设填充或手动 key，实时写入 providerForm（用户可编辑后点保存）
+  const addProviderToForm = (key: string, config: ProviderConfig) => {
+    if (!key.trim() || providerForm[key]) return;
+    setProviderForm(prev => ({ ...prev, [key]: config }));
+    setAddProviderOpen(false);
+    setNewProviderKey("");
+  };
+
+  // 删除 provider：实时调 API，成功后从 providerForm 移除
+  const handleDeleteProvider = async () => {
+    if (!deleteProviderKey) return;
+    setProviderDeleting(true);
+    try {
+      await deleteProvider(deleteProviderKey);
+      setProviderForm(prev => {
+        const next = { ...prev };
+        delete next[deleteProviderKey];
+        return next;
+      });
+      setMessage({ type: "success", text: `已删除 provider「${deleteProviderKey}」` });
+      setTimeout(() => setMessage(null), 3000);
+    } catch {
+      setMessage({ type: "error", text: "删除失败，请重试" });
+    } finally {
+      setProviderDeleting(false);
+      setDeleteProviderKey(null);
     }
   };
 
@@ -560,11 +597,24 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
             {activeTab === "providers" && (
               <div className="space-y-6">
                 <div>
-                  <h3 className="text-lg font-medium mb-4">模型提供商配置</h3>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-medium">模型 provider</h3>
+                    <Button variant="outline" size="sm" onClick={() => setAddProviderOpen(true)}>
+                      <Plus className="h-4 w-4 mr-1" />添加 Provider
+                    </Button>
+                  </div>
                   <div className="space-y-6">
                     {Object.entries(providerForm).map(([key, config]) => (
                       <div key={key} className="border p-4 rounded-md space-y-4">
-                        <h4 className="font-medium text-sm capitalize">{key}</h4>
+                        <div className="flex items-center justify-between">
+                          <h4 className="font-medium text-sm capitalize">{key}</h4>
+                          <button
+                            className="text-xs text-muted-foreground hover:text-red-500 flex items-center gap-1"
+                            onClick={() => setDeleteProviderKey(key)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />删除
+                          </button>
+                        </div>
                         <div className="grid gap-3">
                           <div className="grid gap-2">
                             <label className="text-xs text-muted-foreground">API Key</label>
@@ -589,11 +639,120 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
                               placeholder="https://api.example.com"
                             />
                           </div>
+                          <div className="grid gap-2">
+                            <label className="text-xs text-muted-foreground">协议类型</label>
+                            <Select
+                              value={config.type || "openai_compat"}
+                              onValueChange={(val) => setProviderForm({
+                                ...providerForm,
+                                [key]: { ...config, type: val || "openai_compat" }
+                              })}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="选择协议" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="anthropic">anthropic</SelectItem>
+                                <SelectItem value="openai_compat">openai_compat</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <label className="flex items-center gap-2 text-sm cursor-pointer pt-1">
+                            <input
+                              type="checkbox"
+                              className="w-4 h-4"
+                              checked={config.disable_prompt_cache ?? false}
+                              onChange={(e) => setProviderForm({
+                                ...providerForm,
+                                [key]: { ...config, disable_prompt_cache: e.target.checked }
+                              })}
+                            />
+                            禁用 Prompt Cache
+                            <span className="text-xs text-muted-foreground">（第三方网关不支持 cache_control 时开启）</span>
+                          </label>
                         </div>
                       </div>
                     ))}
+                    {Object.keys(providerForm).length === 0 && (
+                      <div className="text-sm text-muted-foreground text-center py-8 border border-dashed rounded-md">
+                        暂无 provider，点击右上角「添加 Provider」开始配置
+                      </div>
+                    )}
                   </div>
                 </div>
+
+                {/* 添加 Provider 对话框：从预设选 或 手动填 key */}
+                <Dialog open={addProviderOpen} onOpenChange={setAddProviderOpen}>
+                  <DialogContent className="max-w-md">
+                    <DialogHeader>
+                      <DialogTitle>添加 Provider</DialogTitle>
+                      <DialogDescription>从内置预设选择，或手动填写 provider key。</DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-3">
+                      {providerPresets.length > 0 && (
+                        <>
+                          <div className="text-xs font-medium text-muted-foreground">从预设添加</div>
+                          <div className="rounded-md border divide-y">
+                            {providerPresets
+                              .filter(p => !providerForm[p.key])
+                              .map(preset => (
+                                <button
+                                  key={preset.key}
+                                  className="w-full text-left px-3 py-2 text-sm hover:bg-muted/40 flex items-center justify-between"
+                                  onClick={() => addProviderToForm(preset.key, {
+                                    api_key: "",
+                                    base_url: preset.base_url,
+                                    type: preset.type,
+                                    disable_prompt_cache: preset.disable_prompt_cache,
+                                  })}
+                                >
+                                  <div>
+                                    <div className="font-mono font-medium">{preset.key}</div>
+                                    <div className="text-xs text-muted-foreground">{preset.description}</div>
+                                  </div>
+                                  <Plus className="h-4 w-4 text-muted-foreground" />
+                                </button>
+                              ))}
+                            {providerPresets.every(p => providerForm[p.key]) && (
+                              <div className="px-3 py-3 text-xs text-muted-foreground text-center">
+                                所有预设已添加
+                              </div>
+                            )}
+                          </div>
+                        </>
+                      )}
+                      <div className="text-xs font-medium text-muted-foreground pt-2">手动填写</div>
+                      <div className="flex gap-2">
+                        <Input
+                          placeholder="provider key（如 openai）"
+                          value={newProviderKey}
+                          onChange={e => setNewProviderKey(e.target.value)}
+                          className="flex-1"
+                        />
+                        <Button
+                          size="sm"
+                          disabled={!newProviderKey.trim() || !!providerForm[newProviderKey.trim()]}
+                          onClick={() => addProviderToForm(newProviderKey.trim(), {
+                            api_key: "",
+                            base_url: "",
+                            type: "openai_compat",
+                            disable_prompt_cache: false,
+                          })}
+                        >添加</Button>
+                      </div>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+
+                {/* 删除确认 */}
+                <ConfirmDialog
+                  open={deleteProviderKey !== null}
+                  title="删除 Provider"
+                  description={`确定删除 provider「${deleteProviderKey}」？引用该 provider 的模型也会一并移除，此操作不可撤销。`}
+                  confirmLabel={providerDeleting ? "删除中..." : "删除"}
+                  onCancel={() => { if (!providerDeleting) setDeleteProviderKey(null); }}
+                  onConfirm={handleDeleteProvider}
+                />
               </div>
             )}
 
