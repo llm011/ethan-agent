@@ -76,52 +76,20 @@
   }
 
   // ========== Content Detection & Cleaning ==========
+  // 检测正文 / 清洗 / 转 Markdown 统一走 reader-extract.js 暴露的 window.__ethanReader，
+  // 注入顺序由 reading-injector.ts 保证（reader-extract 先于 reading-mode）。
 
-  function detectArticle(): HTMLElement {
-    const candidates: { el: HTMLElement; score: number }[] = [];
-    const selectors = 'article, main, [role="main"], .post-content, .article-content, .entry-content, .content, .post-body, .article-body';
-    document.querySelectorAll(selectors).forEach(el => {
-      candidates.push({ el: el as HTMLElement, score: scoreBlock(el as HTMLElement) });
-    });
-    document.querySelectorAll('div, section').forEach(el => {
-      const h = el as HTMLElement;
-      if (h.offsetHeight < 200) return;
-      const text = h.innerText || '';
-      if (text.length < 300) return;
-      candidates.push({ el: h, score: scoreBlock(h) });
-    });
-    candidates.sort((a, b) => b.score - a.score);
-    return candidates[0]?.el || document.body;
+  interface EthanReaderApi {
+    detectArticle(): HTMLElement;
+    cleanArticle(el: HTMLElement): HTMLElement;
+    htmlToMarkdown(root: HTMLElement): string;
+    extractMarkdown(): { markdown: string; length: number; title: string; url: string };
   }
 
-  function scoreBlock(el: HTMLElement): number {
-    const text = el.innerText || '';
-    const textLen = text.length;
-    if (textLen < 100) return 0;
-    const pCount = el.querySelectorAll('p').length;
-    const linkText = Array.from(el.querySelectorAll('a')).reduce((s, a) => s + (a.textContent?.length || 0), 0);
-    const linkRatio = textLen > 0 ? linkText / textLen : 1;
-    let score = textLen * 0.5 + pCount * 50;
-    if (linkRatio > 0.5) score *= 0.2;
-    if (el.tagName === 'ARTICLE' || el.tagName === 'MAIN') score *= 1.5;
-    if (el === document.body) score *= 0.3;
-    return score;
-  }
-
-  function cleanArticle(el: HTMLElement): HTMLElement {
-    const clone = el.cloneNode(true) as HTMLElement;
-    const rm = 'script, style, nav, aside, footer, header, form, iframe, .ad, .ads, .advertisement, [aria-hidden="true"], .sidebar, .comments, .related, .share, .social, [class*="ad-"], [class*="popup"], [class*="modal"], [class*="banner"]';
-    clone.querySelectorAll(rm).forEach(n => n.remove());
-    clone.querySelectorAll('div, section').forEach(n => {
-      const h = n as HTMLElement;
-      if ((h.innerText || '').length < 20 && h.querySelectorAll('a').length > 2) h.remove();
-    });
-    clone.querySelectorAll('*').forEach(n => {
-      (n as HTMLElement).removeAttribute('style');
-      (n as HTMLElement).removeAttribute('class');
-      (n as HTMLElement).removeAttribute('id');
-    });
-    return clone;
+  function ethanReader(): EthanReaderApi {
+    const api = (window as any).__ethanReader as EthanReaderApi | undefined;
+    if (!api) throw new Error('__ethanReader not injected');
+    return api;
   }
 
   // ========== TOC from content ==========
@@ -769,50 +737,11 @@
     const btn = document.getElementById('__ethan_reading_save_kb') as HTMLButtonElement | null;
     if (btn) { btn.disabled = true; btn.textContent = '\u4fdd\u5b58\u4e2d\u2026'; }
     const title = document.title || 'Untitled';
-    const md = htmlToMarkdown(contentEl);
+    const md = ethanReader().htmlToMarkdown(contentEl);
     chrome.runtime.sendMessage({ type: 'reading:saveKnowledge', title, content: md }, (resp) => {
       if (resp?.ok) { showToast('\u5df2\u5b58\u5165\u77e5\u8bc6\u5e93'); if (btn) btn.textContent = '\u5df2\u4fdd\u5b58 \u2713'; }
       else { showToast('\u4fdd\u5b58\u5931\u8d25'); if (btn) { btn.disabled = false; btn.textContent = '\u5b58\u77e5\u8bc6\u5e93'; } }
     });
-  }
-
-  function htmlToMarkdown(root: HTMLElement): string {
-    const lines: string[] = [];
-    function walk(node: Node) {
-      if (node.nodeType === Node.TEXT_NODE) {
-        const text = node.nodeValue || '';
-        if (text.trim()) lines.push(text);
-        return;
-      }
-      if (node.nodeType !== Node.ELEMENT_NODE) return;
-      const el = node as HTMLElement;
-      const tag = el.tagName.toLowerCase();
-      if (tag === 'br') { lines.push('\n'); return; }
-      if (tag === 'mark') { walk_children(el); return; }
-      if (/^h[1-6]$/.test(tag)) {
-        const level = parseInt(tag[1]);
-        const prefix = '#'.repeat(level) + ' ';
-        lines.push('\n' + prefix + (el.textContent?.trim() || '') + '\n');
-        return;
-      }
-      if (tag === 'p') { lines.push('\n'); walk_children(el); lines.push('\n'); return; }
-      if (tag === 'blockquote') { lines.push('\n> ' + (el.textContent?.trim() || '') + '\n'); return; }
-      if (tag === 'li') { lines.push('\n- ' + (el.textContent?.trim() || '')); return; }
-      if (tag === 'ul' || tag === 'ol') { walk_children(el); lines.push('\n'); return; }
-      if (tag === 'pre') { lines.push('\n```\n' + (el.textContent || '') + '\n```\n'); return; }
-      if (tag === 'strong' || tag === 'b') { lines.push('**' + (el.textContent || '') + '**'); return; }
-      if (tag === 'em' || tag === 'i') { lines.push('*' + (el.textContent || '') + '*'); return; }
-      if (tag === 'code' && el.parentElement?.tagName !== 'PRE') { lines.push('`' + (el.textContent || '') + '`'); return; }
-      if (tag === 'hr') { lines.push('\n---\n'); return; }
-      if (tag === 'img') { const src = el.getAttribute('src') || ''; lines.push('\n![](' + src + ')\n'); return; }
-      if (tag === 'a') { const href = el.getAttribute('href') || ''; lines.push('[' + (el.textContent || '') + '](' + href + ')'); return; }
-      walk_children(el);
-    }
-    function walk_children(el: HTMLElement) {
-      el.childNodes.forEach(c => walk(c));
-    }
-    walk_children(root);
-    return lines.join('').replace(/\n{3,}/g, '\n\n').trim();
   }
 
   // ========== Panel ==========
@@ -1088,8 +1017,8 @@
         createReader(cached.html);
       } else {
         // Fresh: detect + clean
-        const article = detectArticle();
-        const cleanDom = cleanArticle(article);
+        const article = ethanReader().detectArticle();
+        const cleanDom = ethanReader().cleanArticle(article);
         // Build initial HTML with title
         const dark = isDarkMode();
         const titleHtml = '<h1>' + escapeHtml(document.title || '') + '</h1>';

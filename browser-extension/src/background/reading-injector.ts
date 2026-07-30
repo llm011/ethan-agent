@@ -36,9 +36,11 @@ chrome.tabs.onRemoved.addListener(tabId => {
 export async function ensureReadingInjected(tabId: number): Promise<boolean> {
   if (injectedTabs.has(tabId)) return true;
   try {
+    // reading-mode 依赖 window.__ethanReader（detectArticle/cleanArticle/htmlToMarkdown），
+    // 先注入共享正文提取脚本，再注入阅读模式脚本。
     await chrome.scripting.executeScript({
       target: { tabId },
-      files: ['content/reading-mode.js'],
+      files: ['content/reader-extract.js', 'content/reading-mode.js'],
     });
     injectedTabs.add(tabId);
     return true;
