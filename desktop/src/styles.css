@@ -367,7 +367,7 @@
   background: color-mix(in oklch, var(--background) 94%, var(--primary));
 }
 .prose .table-wrapper table {
-  margin: 0 !important;
+  margin: 0;
   font-size: 0.9em;
   width: 100%;
   border-collapse: collapse;

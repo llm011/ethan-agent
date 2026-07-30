@@ -36,10 +36,12 @@ export async function updateAgentSettings(patch: Partial<AgentSettings>): Promis
 
 // ── Provider Settings ─────────────────────────────────────────────
 
+export type ProviderType = "anthropic" | "openai_compat";
+
 export interface ProviderConfig {
   api_key: string;
   base_url: string | null;
-  type: string;            // "anthropic" | "openai_compat"
+  type: ProviderType;
   disable_prompt_cache: boolean;
 }
 
@@ -72,7 +74,7 @@ export async function deleteProvider(key: string): Promise<void> {
 export interface ProviderPreset {
   key: string;
   base_url: string;
-  type: string;
+  type: ProviderType;
   disable_prompt_cache?: boolean;
   description: string;
   models: string[];

@@ -11,7 +11,7 @@ import { MdEditor } from "@ethan/shared/components/md-editor";
 import {
   fetchAgentSettings, updateAgentSettings, AgentSettings,
   fetchSystemSettings, updateSystemSettings, SystemSettings,
-  fetchProviderSettings, updateProviderSettings, ProviderSettings, ProviderConfig,
+  fetchProviderSettings, updateProviderSettings, ProviderSettings, ProviderConfig, ProviderType,
   deleteProvider, fetchProviderPresets, ProviderPreset,
   fetchChannels, patchChannel, ChannelInfo,
   fetchAPIKeys, createAPIKey, deleteAPIKey, APIKeyInfo, APIKeyCreated,
@@ -146,7 +146,7 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
   const [providerForm, setProviderForm] = useState<ProviderSettings>({});
   const [providerPresets, setProviderPresets] = useState<ProviderPreset[]>([]);
   const [addProviderOpen, setAddProviderOpen] = useState(false);
-  const [newProvider, setNewProvider] = useState({ key: "", type: "openai_compat", base_url: "", api_key: "", disable_prompt_cache: false });
+  const [newProvider, setNewProvider] = useState<{ key: string; type: ProviderType; base_url: string; api_key: string; disable_prompt_cache: boolean }>({ key: "", type: "openai_compat", base_url: "", api_key: "", disable_prompt_cache: false });
   const [deleteProviderKey, setDeleteProviderKey] = useState<string | null>(null);
   const [providerMsg, setProviderMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
@@ -220,7 +220,8 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
       setAddProviderOpen(false);
       setNewProvider({ key: "", type: "openai_compat", base_url: "", api_key: "", disable_prompt_cache: false });
       showProviderMsg("success", `Provider '${key}' 已添加`);
-    } catch {
+    } catch (e) {
+      console.error("添加 provider 失败", e);
       showProviderMsg("error", "添加失败，请重试");
     }
   };
@@ -247,7 +248,8 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
       const models = await fetchModels();
       setModelList(models);
       showProviderMsg("success", `Provider '${key}' 已删除`);
-    } catch {
+    } catch (e) {
+      console.error("删除 provider 失败", e);
       showProviderMsg("error", "删除失败，请重试");
     } finally {
       setDeleteProviderKey(null);
@@ -668,7 +670,7 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
                                 value={config.type}
                                 onValueChange={(v) => setProviderForm({
                                   ...providerForm,
-                                  [key]: { ...config, type: v || config.type }
+                                  [key]: { ...config, type: (v || config.type) as ProviderType }
                                 })}
                               >
                                 <SelectTrigger><SelectValue /></SelectTrigger>
@@ -1027,7 +1029,7 @@ Content-Type: application/json
                 <label className="text-xs text-muted-foreground">协议类型</label>
                 <Select
                   value={newProvider.type}
-                  onValueChange={(v) => setNewProvider({ ...newProvider, type: v || newProvider.type })}
+                  onValueChange={(v) => setNewProvider({ ...newProvider, type: (v || newProvider.type) as ProviderType })}
                 >
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
