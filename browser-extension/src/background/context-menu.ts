@@ -2,7 +2,8 @@
 // 右键菜单：选中文字/链接/页面 → 发给 Ethan
 //
 // 点击后生成 session_id，POST /api/chat 发起对话（fire-and-forget），
-// 然后打开 Web UI 的对应会话页，用户在浏览器里看到 agent 的回复。
+// 然后打开 redirect 中间页：先尝试 ethan:// deep link 唤起桌面端，
+// 唤不起时 2s 后自动 fallback 到 Web UI。
 
 const MENU_SELECTION = 'ethan-send-selection';
 const MENU_LINK = 'ethan-send-link';
@@ -68,6 +69,7 @@ async function sendToEthan(content: string): Promise<void> {
   const sessionId = crypto.randomUUID();
 
   // fire-and-forget：发起对话请求，不等 agent 跑完
+  // stream: false 让后端在 agent 完成后返回完整响应，避免 SSE 流被中途丢弃
   void fetch(`${httpBase}/api/chat`, {
     method: 'POST',
     headers: {
@@ -76,14 +78,17 @@ async function sendToEthan(content: string): Promise<void> {
     },
     body: JSON.stringify({
       messages: [{ role: 'user', content }],
-      stream: true,
+      stream: false,
       session_id: sessionId,
       channel: 'browser-extension',
     }),
   }).catch(() => {
-    // 请求失败时用户会在 Web UI 看到错误，这里静默
+    // 请求失败时用户会在 redirect 后的界面看到错误
   });
 
-  // 打开 Web UI 的对应会话页
-  chrome.tabs.create({ url: `${httpBase}/chat/${sessionId}` });
+  // 打开 redirect 中间页：先尝试 deep link 唤起桌面端，唤不起时 fallback 到 Web UI
+  const redirectUrl = chrome.runtime.getURL('redirect.html') +
+    `?deeplink=${encodeURIComponent(`ethan://chat/${sessionId}`)}` +
+    `&fallback=${encodeURIComponent(`${httpBase}/chat/${sessionId}`)}`;
+  chrome.tabs.create({ url: redirectUrl });
 }

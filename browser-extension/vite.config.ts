@@ -29,6 +29,7 @@ export default defineConfig({
         copyFileSync('src/manifest.json', 'dist/manifest.json');
         copyFileSync('src/popup/popup.html', 'dist/popup.html');
         copyFileSync('src/offscreen/offscreen.html', 'dist/offscreen.html');
+        copyFileSync('src/redirect.html', 'dist/redirect.html');
         cpSync('src/assets/icons', 'dist/icons', { recursive: true });
 
         // Build content scripts: transpile TS → JS (classic script, no ESM/CJS artifacts)
