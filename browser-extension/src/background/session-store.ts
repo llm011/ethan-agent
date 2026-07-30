@@ -637,6 +637,49 @@ export class BrowserSessionStore {
       }
     });
     this.loaded = true;
+
+    // 浏览器重启后 groupId/tabId 会变，按 TabGroup 标题重新匹配
+    await this.reconcileAfterRestart();
+  }
+
+  /** 浏览器重启后 TabGroup ID 会变，按标题（Ethan · xxx）重新关联 session。 */
+  private async reconcileAfterRestart(): Promise<void> {
+    if (this.sessions.size === 0) return;
+
+    let groups: chrome.tabGroups.TabGroup[];
+    try {
+      groups = await chrome.tabGroups.query({});
+    } catch {
+      return;  // tabGroups API 不可用，静默跳过
+    }
+
+    // 按 title 建立 "title → group" 映射，只看 Ethan 开头的
+    const groupByTitle = new Map<string, chrome.tabGroups.TabGroup>();
+    for (const g of groups) {
+      if (g.title && g.title.startsWith(GROUP_TITLE_PREFIX)) {
+        groupByTitle.set(g.title, g);
+      }
+    }
+
+    if (groupByTitle.size === 0) return;
+
+    let changed = false;
+    for (const session of this.sessions.values()) {
+      const expectedTitle = buildGroupTitle(session);
+      const matched = groupByTitle.get(expectedTitle);
+      if (!matched) continue;
+      // groupId 或 windowId 变了 → 更新
+      if (session.groupId !== matched.id || session.windowId !== matched.windowId) {
+        session.groupId = matched.id;
+        session.windowId = matched.windowId;
+        session.updatedAt = Date.now();
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      await this.persist();
+    }
   }
 
   private getSessionOrThrow(sessionId: string): StoredSession {

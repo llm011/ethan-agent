@@ -29,12 +29,16 @@
     "tabGroups",
     "tabs",
     "alarms",
-    "offscreen"
+    "offscreen",
+    "scripting",
+    "contextMenus"
   ],
   "host_permissions": [
     "ws://localhost/*",
     "ws://127.0.0.1/*",
     "http://localhost/*",
-    "http://127.0.0.1/*"
+    "http://127.0.0.1/*",
+    "http://*/*",
+    "https://*/*"
   ]
 }

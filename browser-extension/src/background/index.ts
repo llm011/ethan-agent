@@ -17,6 +17,8 @@ import { BrowserPageController } from './page-controller';
 import { NetworkMonitor } from './network-monitor';
 import { releaseCdpClient } from './cdp-client';
 import { KEEPALIVE_ALARM } from './ws-client';
+import { pushStep, updateStepStatus } from './overlay-injector';
+import { setupContextMenu } from './context-menu';
 
 const sessionStore = new BrowserSessionStore();
 const pageController = new BrowserPageController(sessionStore);
@@ -24,6 +26,53 @@ const networkMonitor = new NetworkMonitor(sessionStore);
 
 const OFFSCREEN_URL = 'offscreen.html';
 let offscreenCreating: Promise<void> | null = null;
+
+// 需要推送到浮层的页面操作（method → action 名）
+const STEP_METHODS: Record<string, string> = {
+  'pages.snapshot': 'snapshot',
+  'pages.click': 'click',
+  'pages.fill': 'fill',
+  'pages.type': 'type',
+  'pages.press': 'press',
+  'pages.hover': 'hover',
+  'pages.select': 'select',
+  'pages.scroll': 'scroll',
+  'pages.scrollIntoView': 'scroll_into_view',
+  'pages.screenshot': 'screenshot',
+  'pages.get': 'get',
+  'pages.mouse': 'mouse',
+  'pages.wait': 'wait',
+  'pages.eval': 'eval',
+  'pages.upload': 'upload',
+  'pages.savePdf': 'save_pdf',
+};
+
+/** 包装页面操作：执行前推送步骤到浮层，执行后更新状态 */
+function withOverlay(action: string, handler: (params: any) => Promise<any>) {
+  return async (params: any) => {
+    // 推送步骤到浮层（fire-and-forget，不阻塞操作）
+    let tabId: number | undefined;
+    let stepTs: number | null = null;
+    try {
+      const activeTab = await sessionStore.getActiveTab({ sessionId: params.sessionId });
+      tabId = activeTab.tab.tabId;
+      stepTs = await pushStep(tabId, action, params);
+    } catch {}
+
+    try {
+      const result = await handler(params);
+      if (tabId != null && stepTs != null) {
+        void updateStepStatus(tabId, stepTs, 'done');
+      }
+      return result;
+    } catch (e) {
+      if (tabId != null && stepTs != null) {
+        void updateStepStatus(tabId, stepTs, 'error');
+      }
+      throw e;
+    }
+  };
+}
 
 async function dispatch(message: unknown): Promise<unknown | null> {
   return handleNativeRequest(message, {
@@ -44,22 +93,22 @@ async function dispatch(message: unknown): Promise<unknown | null> {
     detachTab: params => sessionStore.detachTab(params),
     moveTab: params => sessionStore.moveTab(params),
     updateSession: params => sessionStore.updateSession(params),
-    pageSnapshot: params => pageController.snapshot(params),
-    pageClick: params => pageController.click(params),
-    pageFill: params => pageController.fill(params),
-    pageType: params => pageController.type(params),
-    pagePress: params => pageController.press(params),
-    pageHover: params => pageController.hover(params),
-    pageSelect: params => pageController.select(params),
-    pageScroll: params => pageController.scroll(params),
-    pageScrollIntoView: params => pageController.scrollIntoView(params),
-    pageScreenshot: params => pageController.screenshot(params),
-    pageGet: params => pageController.get(params),
-    pageMouse: params => pageController.mouse(params),
-    pageWait: params => pageController.wait(params),
-    pageEval: params => pageController.eval(params),
-    pageUpload: params => pageController.upload(params),
-    pageSavePdf: params => pageController.savePdf(params),
+    pageSnapshot: withOverlay('snapshot', params => pageController.snapshot(params)),
+    pageClick: withOverlay('click', params => pageController.click(params)),
+    pageFill: withOverlay('fill', params => pageController.fill(params)),
+    pageType: withOverlay('type', params => pageController.type(params)),
+    pagePress: withOverlay('press', params => pageController.press(params)),
+    pageHover: withOverlay('hover', params => pageController.hover(params)),
+    pageSelect: withOverlay('select', params => pageController.select(params)),
+    pageScroll: withOverlay('scroll', params => pageController.scroll(params)),
+    pageScrollIntoView: withOverlay('scroll_into_view', params => pageController.scrollIntoView(params)),
+    pageScreenshot: withOverlay('screenshot', params => pageController.screenshot(params)),
+    pageGet: withOverlay('get', params => pageController.get(params)),
+    pageMouse: withOverlay('mouse', params => pageController.mouse(params)),
+    pageWait: withOverlay('wait', params => pageController.wait(params)),
+    pageEval: withOverlay('eval', params => pageController.eval(params)),
+    pageUpload: withOverlay('upload', params => pageController.upload(params)),
+    pageSavePdf: withOverlay('save_pdf', params => pageController.savePdf(params)),
     networkStart: params => networkMonitor.start(params),
     networkStop: params => networkMonitor.stop(params),
     networkList: params => networkMonitor.list(params),
@@ -126,6 +175,9 @@ async function ensureOffscreenDocument(): Promise<void> {
 
 // 启动时立即创建 offscreen document 并推送配置
 void ensureOffscreenAndPushConfig();
+
+// 初始化右键菜单
+setupContextMenu();
 
 /** 向 offscreen 发消息，带超时 */
 async function sendToOffscreen(message: unknown, timeoutMs = 3000): Promise<any> {
@@ -252,6 +304,31 @@ chrome.alarms.onAlarm.addListener(alarm => {
 chrome.tabs.onRemoved.addListener(tabId => {
   void sessionStore.handleTabRemoved(tabId);
   void releaseCdpClient(tabId);
+});
+
+// ── cookie 弹窗自动关闭 ───────────────────────────────────────
+// 当 Ethan session 的 tab 加载完成时，注入 cookie-closer 脚本。
+chrome.tabs.onUpdated.addListener((tabId, change, _tab) => {
+  if (change.status !== 'complete') return;
+  void (async () => {
+    try {
+      const { autoCloseCookies } = await chrome.storage.local.get('autoCloseCookies');
+      if (autoCloseCookies === false) return;  // 默认开启，显式 false 才关闭
+      // 只注入 Ethan session 管理的 tab
+      const sessions = await sessionStore.listSessions();
+      const ethanTabIds = new Set<number>();
+      for (const s of sessions.sessions) {
+        for (const t of s.tabs) {
+          if (typeof t.tabId === 'number') ethanTabIds.add(t.tabId);
+        }
+      }
+      if (!ethanTabIds.has(tabId)) return;
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: ['content/cookie-closer.js'],
+      }).catch(() => {});  // chrome:// 等页面注入会失败，静默
+    } catch {}
+  })();
 });
 
 console.log('[EthanBrowser] background started, rpc v' + BROWSER_RPC_VERSION);

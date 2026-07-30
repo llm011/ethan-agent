@@ -4,24 +4,84 @@ const $ = id => document.getElementById(id);
 const DEFAULT_URL = 'ws://localhost:8900/ws/browser';
 
 async function load() {
-  const { serverUrl, token } = await chrome.storage.local.get(['serverUrl', 'token']);
+  const { serverUrl, token, autoCloseCookies } = await chrome.storage.local.get([
+    'serverUrl', 'token', 'autoCloseCookies',
+  ]);
   $('serverUrl').value = serverUrl || DEFAULT_URL;
   $('token').value = token || '';
+  // 默认开启，显式 false 才关闭
+  $('autoCloseCookies').checked = autoCloseCookies !== false;
   refreshStatus();
 }
 
-function setStatus(connected) {
+function setStatus(connected, diag) {
   const dot = $('dot');
   const text = $('statusText');
+  const hint = $('hint');
   dot.classList.remove('on', 'off');
+
   if (connected === true) {
     dot.classList.add('on');
     text.textContent = '已连接到 Ethan Server';
-  } else if (connected === false) {
+    hint.textContent = '';
+    return;
+  }
+
+  if (diag === 'connecting') {
+    text.textContent = '正在连接…';
+    hint.textContent = '';
+    return;
+  }
+
+  if (diag === 'no_config') {
     dot.classList.add('off');
-    text.textContent = '未连接（检查地址/Token 或 ethan 是否启动）';
+    text.textContent = '未配置';
+    hint.textContent = '请填写 Server 地址和 Token';
+    return;
+  }
+
+  dot.classList.add('off');
+  if (diag === 'auth_failed') {
+    text.textContent = 'Token 错误';
+    hint.textContent = '鉴权失败，请检查 Token 是否与 ethan web token 一致';
+  } else if (diag === 'connection_failed') {
+    text.textContent = '无法连接';
+    // 进一步诊断：server 没起 vs 端口被占
+    hint.textContent = '正在诊断…';
+    void diagnoseConnection();
   } else {
-    text.textContent = '检查连接中…';
+    text.textContent = '未连接';
+    hint.textContent = '';
+  }
+}
+
+/** 诊断连接失败原因：尝试 HTTP 请求区分 server 没起 / 端口被占 */
+async function diagnoseConnection() {
+  const { serverUrl } = await chrome.storage.local.get(['serverUrl']);
+  if (!serverUrl) {
+    $('hint').textContent = '请先填写 Server 地址';
+    return;
+  }
+  const httpUrl = serverUrl.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:').replace(/\/ws\/browser\/?$/, '');
+
+  try {
+    const res = await fetch(httpUrl, { method: 'GET', signal: AbortSignal.timeout(3000) });
+    // 能拿到 HTTP 响应说明端口有服务在监听
+    const server = res.headers.get('server') || '';
+    if (res.status === 404 || (!server.includes('uvicorn') && !server.includes('starlette'))) {
+      $('hint').textContent = `端口被其他服务占用（${res.status}），非 Ethan Server`;
+    } else {
+      $('hint').textContent = 'Server 在线但 WS 连接失败，可能端口或路径不对';
+    }
+  } catch (e) {
+    const msg = String(e?.message || e);
+    if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('ECONNREFUSED')) {
+      $('hint').textContent = 'Ethan Server 未启动，请运行 ethan serve';
+    } else if (msg.includes('timed out') || msg.includes('timeout')) {
+      $('hint').textContent = '连接超时，检查地址/端口是否正确';
+    } else {
+      $('hint').textContent = '连接失败: ' + msg;
+    }
   }
 }
 
@@ -30,11 +90,12 @@ async function queryConnected() {
     const resp = await chrome.runtime.sendMessage({ type: 'getStatus' });
     if (resp && resp.error) {
       $('hint').textContent = '错误: ' + resp.error;
+      return { connected: false, diag: 'error' };
     }
-    return !!(resp && resp.connected);
+    return { connected: !!(resp && resp.connected), diag: resp?.diag || 'unknown' };
   } catch (e) {
     $('hint').textContent = '查询失败: ' + (e?.message || e);
-    return false;
+    return { connected: false, diag: 'error' };
   }
 }
 
@@ -51,31 +112,36 @@ async function checkOffscreen() {
 }
 
 async function refreshStatus() {
-  setStatus(null);
+  setStatus(null, 'connecting');
   const offscreenExists = await checkOffscreen();
   if (offscreenExists !== true) {
     $('hint').textContent = 'offscreen 未创建: ' + offscreenExists;
-    setStatus(false);
+    setStatus(false, 'connection_failed');
     return;
   }
-  const connected = await queryConnected();
-  if (connected) {
-    $('hint').textContent = '';
-  }
-  setStatus(connected);
+  const { connected, diag } = await queryConnected();
+  setStatus(connected, diag);
 }
 
 /** 轮询状态：重连 + 握手需要一点时间，连查几次直到连上或超时。 */
 async function pollUntilConnected(tries = 12, intervalMs = 400) {
-  setStatus(null);
+  setStatus(null, 'connecting');
   for (let i = 0; i < tries; i++) {
-    if (await queryConnected()) {
-      setStatus(true);
+    const { connected, diag } = await queryConnected();
+    if (connected) {
+      setStatus(true, 'connected');
+      return;
+    }
+    // auth_failed 不需要重试，直接显示
+    if (diag === 'auth_failed') {
+      setStatus(false, diag);
       return;
     }
     await new Promise(r => setTimeout(r, intervalMs));
   }
-  setStatus(false);
+  // 超时后最后查一次状态
+  const { connected, diag } = await queryConnected();
+  setStatus(connected, diag || 'connection_failed');
 }
 
 /** 当前输入值写入 storage。storage.onChanged 会触发 background 自动重连。 */
@@ -109,4 +175,7 @@ async function testConnect() {
 $('serverUrl').addEventListener('input', autoSave);
 $('token').addEventListener('input', autoSave);
 $('connect').addEventListener('click', testConnect);
+$('autoCloseCookies').addEventListener('change', async (e) => {
+  await chrome.storage.local.set({ autoCloseCookies: e.target.checked });
+});
 load();
