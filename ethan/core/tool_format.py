@@ -54,6 +54,9 @@ def _preview(content: str, max_lines: int = 3, max_chars: int = 200) -> str:
     """工具结果的紧凑预览：取前几行、总长度封顶，单行化。"""
     if not content:
         return ""
+    # 图片标记：给简短说明，不含 base64（避免预览刷屏）
+    if content.startswith("[image:"):
+        return _image_preview_text(content)
     lines = [ln.strip() for ln in content.splitlines() if ln.strip()][:max_lines]
     text = " ⏎ ".join(lines)
     if len(text) > max_chars:
@@ -65,12 +68,30 @@ def _detail(content: str, max_chars: int = 2000) -> str:
     """工具结果的详细版本（前端展开看），保留多行，封顶避免 SSE 过大。
 
     工具结果超过 4000 字会被 result_compressor 压缩，所以这里 2000 字够用。
+    图片标记不截断（base64 截断后无法解码），原样返回。
     """
     if not content:
         return ""
+    if content.startswith("[image:"):
+        return content
     if len(content) > max_chars:
         return content[:max_chars] + f"\n…(共 {len(content)} 字，已截断)"
     return content
+
+
+def _image_preview_text(content: str) -> str:
+    """从 [image:...] 标记提取简短预览文本。
+
+    格式：[image:<mime>:<base64>:<filename>] 或 [image:too-large:<mime>:<size>:<filename>]
+    """
+    parts = content.split(":", 3)
+    if len(parts) < 4:
+        return "[image]"
+    kind, mime, rest = parts[0], parts[1], parts[3]
+    filename = rest.rstrip("]")
+    if kind == "[image:too-large":
+        return f"🖼️ {filename} ({mime}, 过大未渲染)"
+    return f"🖼️ {filename} ({mime})"
 
 
 # ── 实体分类（用于调用链路可视化） ────────────────────────────────
