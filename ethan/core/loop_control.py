@@ -32,6 +32,15 @@ TOOL_FREQ_LIMIT_VARIED = 6  # 同一工具名连续调用但参数每次不同�
 _FREQ_LIMIT_EXEMPT = {"file_read", "file_write", "rg_search", "fd_find", "skill_read", "skill_list", "web_search", "web_fetch", "memory_recall", "plan_read", "knowledge_search", "knowledge_read"}
 # shell 工具不整体豁免，而是按实际命令前缀判定（见 _effective_tool_name）
 
+# browser_* 不整体豁免，而是给一个更高的「varied」阈值：逐个打开不同视频/笔记详情页、
+# 对不同页面轮流 snapshot/eval 抓数据，是浏览器批量任务（如「搜索 Top10 逐个补全指标」）的
+# 正常路径，参数每次都不同，6 轮上限太紧会误砍（实测抖音/小红书 Top10 抓取常在第 14~22 轮被误熔断）。
+# 但也不能无限放行——「换 selector 瞎试、每次脚本不同又不报错（返回空结果）」这种抓取 flail
+# 只有 varied 频率能拦，无限放行会一路跑到 max_tool_iterations 反而烧更多 token。故给更宽但有限的上限。
+# 精确重复（STUCK_WINDOW）/ 连续报错（ERROR_WINDOW）两条分支不受此影响，仍会更早刹车。
+_BROWSER_TOOL_PREFIX = "browser_"
+TOOL_FREQ_LIMIT_BROWSER = 20  # browser_* 同工具连续调用、参数每次不同时的宽松上限
+
 # 复合命令分隔符：只取最后一段（如 `cd /x && bytedcli tea` 应判为 bytedcli，而非 cd）
 _CMD_SEP_RE = _re.compile(r"&&|\|\||[|;]")
 # 前导环境变量赋值（FOO=bar）——跳过，取其后的真实命令
@@ -117,7 +126,8 @@ class LoopMonitor:
         1. 连续 ERROR_WINDOW 轮同签名且都报错
         2. 连续 STUCK_WINDOW 轮同签名（精确重复）
         3. 同一工具名连续 TOOL_FREQ_LIMIT 轮且参数完全相同 → 严格卡住；
-           参数不同 → 放宽到 TOOL_FREQ_LIMIT_VARIED 轮（varied）
+           参数不同 → 放宽到 varied 上限（browser_* 用 TOOL_FREQ_LIMIT_BROWSER，
+           其余用 TOOL_FREQ_LIMIT_VARIED）
         """
         self._freq_limit_varied = False
         sigs = self._signatures
@@ -136,11 +146,14 @@ class LoopMonitor:
                 # 进一步区分：参数是否也完全相同
                 tail_sigs = sigs[-TOOL_FREQ_LIMIT:]
                 if len(set(tail_sigs)) == 1:
-                    # 参数完全相同 → 严格限制，立即判定卡住
+                    # 参数完全相同 → 严格限制，立即判定卡住（browser 反复试同一失败脚本也算）
                     return True
-                # 参数不同 → 宽松模式，放宽到 TOOL_FREQ_LIMIT_VARIED
-                if len(self._tool_names) >= TOOL_FREQ_LIMIT_VARIED:
-                    long_tail = self._tool_names[-TOOL_FREQ_LIMIT_VARIED:]
+                # 参数不同 → 宽松模式。browser_* 是批量翻页/逐个抓详情，给更高上限；
+                # 其余工具用默认 varied 上限。
+                is_browser = tail[0].startswith(_BROWSER_TOOL_PREFIX)
+                varied_limit = TOOL_FREQ_LIMIT_BROWSER if is_browser else TOOL_FREQ_LIMIT_VARIED
+                if len(self._tool_names) >= varied_limit:
+                    long_tail = self._tool_names[-varied_limit:]
                     if len(set(long_tail)) == 1:
                         self._freq_limit_varied = True
                         return True
