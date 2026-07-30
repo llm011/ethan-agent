@@ -1,6 +1,6 @@
 ---
 name: code-review
-version: 2.8.1
+version: 2.9.0
 category: discoverable
 trigger: "code review|代码审查|review代码|review一下|帮我看看代码|看下代码|审查代码|pr review|diff review|检查代码|代码质量|代码评审|代码走查|review pr|审查pr|把评论打上去|发评论|打评论|提交评论|发布评论|pr评论"
 description: "对代码变更做审查：识别 bug、安全漏洞、性能问题。P0 必须修复写评论，P1 建议性评论，P2 只在总结里一句带过。用户要求 review、审查、发评论、打评论时都必须先用 skill_read 读全文。"
@@ -104,6 +104,8 @@ gh auth status 2>&1 | head -5
 
 **vendored/生成代码**：`vendor/ node_modules/ dist/ build/ target/ __pycache__/ .next/ .nuxt/`
 
+**测试文件**：`*_test.go *_test.py test_*.py *.test.ts *.test.tsx *.test.js *.spec.ts *.spec.tsx *.spec.js` 以及 `tests/ test/ __tests__/ spec/ e2e/` 目录下的文件。测试代码不做 review——它们是被测对象的验证，不承载业务逻辑，评审 ROI 低。例外：如果本次改动**只**改了测试文件（没有任何业务代码变更），才读测试看有没有明显写错的断言。
+
 **纯格式化**：import 排序、空白变更、行尾符变更
 
 ## 流程（严格 6 步）
@@ -124,7 +126,8 @@ gh api repos/<owner/repo>/pulls/<N> --jq '.head.sha' > /tmp/pr_<N>_sha.txt
 # 用 jq 提取 + grep -v 管道过滤，避免 jq 内嵌长正则的转义问题
 jq -r '.[] | select(.status != "removed") | "\(.status)\t\(.additions)+\(.deletions)-\t\(.filename)"' /tmp/pr_<N>_files.json \
   | grep -vE '\.(jsonl|csv|json|lock|snap|txt|md|rst|yaml|yml|toml|ini|cfg|conf|env|svg|png|jpg|jpeg|gif|ico|webp|mp4|mp3|wav|pdf|zip|tar|gz|bz2|7z|bin|dat|db|sqlite|parquet|arrow|pkl|pickle|npy|npz|h5|pt|pth|onnx|model|so|o|a|dll|dylib|exe|class|jar|war|pyc|pyo|wasm|min\.js|min\.css|map)$' \
-  | grep -vE '(pnpm-lock|package-lock|yarn\.lock|go\.sum|poetry\.lock|Cargo\.lock|uv\.lock|vendor/|node_modules/|dist/|build/|__pycache__/|\.next/)'
+  | grep -vE '(pnpm-lock|package-lock|yarn\.lock|go\.sum|poetry\.lock|Cargo\.lock|uv\.lock|vendor/|node_modules/|dist/|build/|__pycache__/|\.next/)' \
+  | grep -vE '(_test\.(go|py)$|test_[^/]*\.py$|\.(test|spec)\.(ts|tsx|js|jsx)$|(^|/)(tests?|__tests__|spec|e2e)/)'
 
 # 被删除的文件（不读 diff，但删了函数/类要查残留引用）
 jq -r '.[] | select(.status == "removed") | "deleted\t\(.filename)"' /tmp/pr_<N>_files.json
