@@ -73,7 +73,8 @@ export function MermaidBlock({ code }: MermaidBlockProps) {
       try {
         const mermaid = await getMermaid(dark ? "dark" : "default");
         if (cancelled || seq !== renderSeq.current) return;
-        // render 内部已 parse，语法错会 throw；不再单独调 parse 避免重复解析
+        await mermaid.parse(debouncedCode);
+        if (cancelled || seq !== renderSeq.current) return;
         const { svg: rendered } = await mermaid.render(
           `${idRef.current}-${seq}`,
           debouncedCode,
@@ -84,7 +85,13 @@ export function MermaidBlock({ code }: MermaidBlockProps) {
       } catch (e: unknown) {
         if (cancelled || seq !== renderSeq.current) return;
         setSvg("");
-        setError(e instanceof Error ? e.message : String(e));
+        const msg = e instanceof Error ? e.message : String(e);
+        setError(msg.replace(/^.*?Syntax error in text/s, "Syntax error in text") || "渲染失败");
+      } finally {
+        // mermaid 11.x may leave orphaned error/render containers in the DOM
+        const orphan = document.getElementById(`${idRef.current}-${seq}`);
+        orphan?.closest(".mermaid")?.remove();
+        orphan?.remove();
       }
     })();
     return () => {
