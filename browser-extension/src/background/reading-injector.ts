@@ -8,23 +8,17 @@
 // content script 无法跨域 fetch 后端，所有网络请求都由背景代理。
 // 流式回传：background fetch SSE → 逐 data 块用 chrome.tabs.sendMessage 推回 tab。
 
-interface ServerConfig {
+import { wsToHttp, readServerConfig } from '../shared';
+
+interface HttpConfig {
   httpBase: string;
   token: string;
 }
 
-/** 把 ws://host/ws/browser 转成 http://host（与 context-menu 一致）。 */
-function wsToHttp(wsUrl: string): string {
-  return wsUrl
-    .replace(/^wss:/, 'https:')
-    .replace(/^ws:/, 'http:')
-    .replace(/\/ws\/browser\/?$/, '');
-}
-
-async function readConfig(): Promise<ServerConfig | null> {
-  const { serverUrl, token } = await chrome.storage.local.get(['serverUrl', 'token']);
-  if (!serverUrl || !token) return null;
-  return { httpBase: wsToHttp(serverUrl), token };
+async function readConfig(): Promise<HttpConfig | null> {
+  const cfg = await readServerConfig();
+  if (!cfg) return null;
+  return { httpBase: wsToHttp(cfg.serverUrl), token: cfg.token };
 }
 
 const injectedTabs = new Set<number>();

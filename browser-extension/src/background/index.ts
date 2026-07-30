@@ -9,14 +9,13 @@
 //   4. storage 变化时通知 offscreen 重连
 //   5. alarm 定期确保 offscreen document 存在（兜底）
 
-import { BROWSER_RPC_VERSION } from '../shared';
+import { BROWSER_RPC_VERSION, KEEPALIVE_ALARM, readServerConfig } from '../shared';
 
 import { BrowserSessionStore } from './session-store';
 import { handleNativeRequest } from './rpc';
 import { BrowserPageController } from './page-controller';
 import { NetworkMonitor } from './network-monitor';
 import { releaseCdpClient } from './cdp-client';
-import { KEEPALIVE_ALARM } from './ws-client';
 import { pushStep, updateStepStatus } from './overlay-injector';
 import { setupContextMenu, sendToEthan } from './context-menu';
 import {
@@ -158,7 +157,7 @@ async function ensureOffscreenDocument(): Promise<void> {
     offscreenCreated = true;
     configPushed = false;  // 新 offscreen，需要重新推送
     // 直接推送配置，避免绕回 ensureOffscreenAndPushConfig 产生循环调用
-    const cfg = await readWsConfig();
+    const cfg = await readServerConfig();
     if (cfg) {
       try {
         await chrome.runtime.sendMessage({ target: 'offscreen', type: 'config', config: cfg });
@@ -201,19 +200,12 @@ async function sendToOffscreen(message: unknown, timeoutMs = 3000): Promise<any>
 
 // ── 消息路由 ──────────────────────────────────────────────────
 
-// 读 storage 配置（SW 中可用 chrome.storage）
-async function readWsConfig(): Promise<{ serverUrl: string; token: string } | null> {
-  const { serverUrl, token } = await chrome.storage.local.get(['serverUrl', 'token']);
-  if (!serverUrl || !token) return null;
-  return { serverUrl, token };
-}
-
 // 创建 offscreen 后主动推送配置（只在首次推送，避免重复触发重连）
 let configPushed = false;
 async function ensureOffscreenAndPushConfig(): Promise<void> {
   await ensureOffscreenDocument();
   if (configPushed) return;  // 已推送过，不重复
-  const cfg = await readWsConfig();
+  const cfg = await readServerConfig();
   if (cfg) {
     try {
       await chrome.runtime.sendMessage({ target: 'offscreen', type: 'config', config: cfg });
@@ -228,7 +220,7 @@ async function ensureOffscreenAndPushConfig(): Promise<void> {
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   // 来自 offscreen 的配置请求
   if (msg?.target === 'sw' && msg.type === 'get_config') {
-    readWsConfig().then(cfg => {
+    readServerConfig().then(cfg => {
       sendResponse(cfg);
     }).catch(e => {
       sendResponse(null);
@@ -318,7 +310,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     (async () => {
       try {
         await ensureOffscreenDocument();
-        const cfg = await readWsConfig();
+        const cfg = await readServerConfig();
         if (cfg) {
           try {
             await chrome.runtime.sendMessage({ target: 'offscreen', type: 'config', config: cfg });
@@ -342,7 +334,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && (changes.serverUrl || changes.token)) {
     // 配置变化：读新配置推送给 offscreen，offscreen 收到后自动重连
     void (async () => {
-      const cfg = await readWsConfig();
+      const cfg = await readServerConfig();
       if (cfg) {
         try {
           await chrome.runtime.sendMessage({ target: 'offscreen', type: 'config', config: cfg });

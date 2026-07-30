@@ -1,4 +1,6 @@
 /* eslint-disable */
+import { wsToHttp } from '../shared';
+
 const $ = id => document.getElementById(id);
 
 const DEFAULT_URL = 'ws://localhost:8900/ws/browser';
@@ -62,7 +64,7 @@ async function diagnoseConnection() {
     $('hint').textContent = '请先填写 Server 地址';
     return;
   }
-  const httpUrl = serverUrl.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:').replace(/\/ws\/browser\/?$/, '');
+  const httpUrl = wsToHttp(serverUrl);
 
   try {
     const res = await fetch(httpUrl, { method: 'GET', signal: AbortSignal.timeout(3000) });
