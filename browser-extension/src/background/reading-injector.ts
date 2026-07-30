@@ -9,6 +9,7 @@
 // 流式回传：background fetch SSE → 逐 data 块用 chrome.tabs.sendMessage 推回 tab。
 
 import { wsToHttp, readServerConfig } from '../shared';
+import { streamChat } from './chat-proxy';
 
 interface HttpConfig {
   httpBase: string;
@@ -62,11 +63,9 @@ export async function startReading(tabId: number): Promise<{ ok: boolean; error?
 }
 
 /**
- * 流式 AI：POST /api/chat（stream），逐块把 delta 推回 content script。
+ * 阅读模式的流式 AI：薄封装 streamChat，推回 target='reading'。
  *
- * opts.sessionId 传入时走多轮对话：附 session_id + btw=false，服务端按 session
- *   维护上下文（首轮把正文塞进消息，后续轮直接问，历史由服务端拼）。
- * 不传 sessionId（如摘要）走 btw=true 单轮，不落会话上下文。
+ * opts.sessionId 传入时走多轮对话（服务端按 session 拼历史），不传走单轮（摘要）。
  */
 export async function readingChat(
   tabId: number,
@@ -74,86 +73,10 @@ export async function readingChat(
   prompt: string,
   opts: { sessionId?: string } = {},
 ): Promise<void> {
-  const push = (msg: Record<string, unknown>) => {
-    chrome.tabs.sendMessage(tabId, { target: 'reading', ...msg }).catch(() => {});
-  };
-
-  const cfg = await readConfig();
-  if (!cfg) {
-    push({ type: 'chatDone', requestId, error: '未配置 Ethan Server 地址或 Token' });
-    return;
-  }
-
-  const body: Record<string, unknown> = {
-    messages: [{ role: 'user', content: prompt }],
-    stream: true,
-    channel: 'browser-extension',
-  };
-  if (opts.sessionId) {
-    body.session_id = opts.sessionId;
-    body.btw = false;  // 多轮：服务端按 session 拼历史
-  } else {
-    body.btw = true;   // 单轮（摘要）：不带历史
-  }
-
-  let res: Response;
-  try {
-    res = await fetch(`${cfg.httpBase}/api/chat`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${cfg.token}`,
-      },
-      body: JSON.stringify(body),
-    });
-  } catch (e: any) {
-    push({ type: 'chatDone', requestId, error: '连接不上 Ethan 服务，请确认后端已启动' });
-    return;
-  }
-
-  if (!res.ok || !res.body) {
-    push({ type: 'chatDone', requestId, error: `请求失败 (${res.status})` });
-    return;
-  }
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let sawDone = false;
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        let chunk: any;
-        try {
-          chunk = JSON.parse(line.slice(6));
-        } catch {
-          continue;
-        }
-        if (chunk.error) {
-          push({ type: 'chatDone', requestId, error: String(chunk.error) });
-          sawDone = true;
-          continue;
-        }
-        if (typeof chunk.content === 'string' && chunk.content) {
-          push({ type: 'chatChunk', requestId, delta: chunk.content });
-        }
-        if (chunk.done) {
-          sawDone = true;
-          push({ type: 'chatDone', requestId });
-        }
-      }
-    }
-    if (!sawDone) push({ type: 'chatDone', requestId });
-  } catch (e: any) {
-    push({ type: 'chatDone', requestId, error: String(e?.message || e) });
-  }
+  await streamChat(tabId, requestId, prompt, {
+    uiTarget: 'reading',
+    sessionId: opts.sessionId,
+  });
 }
 
 /** 取某 URL 下全部标注。 */

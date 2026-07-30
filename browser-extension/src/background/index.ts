@@ -26,6 +26,7 @@ import {
   readingDeleteAnnotation,
   readingSaveKnowledge,
 } from './reading-injector';
+import { streamChat } from './chat-proxy';
 
 const sessionStore = new BrowserSessionStore();
 const pageController = new BrowserPageController(sessionStore);
@@ -271,6 +272,20 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       void readingChat(tabId, msg.requestId, msg.prompt, { sessionId: msg.sessionId });
     }
     sendResponse({ ok: true });  // 立即应答，结果通过 tabs.sendMessage 流式推回
+    return true;
+  }
+
+  // 来自 content script（result-panel）：面板内追问，结果推回 target='result'
+  if (msg?.type === 'result:chat') {
+    const tabId = _sender.tab?.id;
+    if (typeof tabId === 'number') {
+      void streamChat(tabId, msg.requestId, msg.prompt, {
+        uiTarget: 'result',
+        sessionId: msg.sessionId,
+        model: msg.model,
+      });
+    }
+    sendResponse({ ok: true });
     return true;
   }
 
