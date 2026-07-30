@@ -4,9 +4,15 @@ import type { ToolStep } from "@ethan/shared/components/tool-timeline";
 import type { Message, Usage } from "@ethan/shared/chat/types";
 import type { ConsentRequest } from "@ethan/shared/components/consent-dialog";
 
+export interface CleanupConfirmRequest {
+  request_id: string;
+  sessions: Array<{ sessionId: string; title: string; tabCount: number }>;
+}
+
 export interface ConsumeStreamActions {
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
   setConsentRequest: (req: ConsentRequest | null) => void;
+  setCleanupConfirm: (req: CleanupConfirmRequest | null) => void;
   setBgPolling: (msg: string | null) => void;
   setSessionTitle: (title: string) => void;
   setSessionUsage: React.Dispatch<React.SetStateAction<Usage>>;
@@ -25,7 +31,7 @@ export async function consumeStream(
   trackTtft = false,
 ): Promise<{ failed: boolean }> {
   const {
-    setMessages, setConsentRequest, setBgPolling,
+    setMessages, setConsentRequest, setCleanupConfirm, setBgPolling,
     setSessionTitle, setSessionUsage, setStopping, setStreaming,
     activeSession,
   } = actions;
@@ -58,6 +64,13 @@ export async function consumeStream(
           tool: chunk.tool || "",
           description: chunk.description || "",
           detail: chunk.detail,
+        });
+        continue;
+      }
+      if (chunk.confirm_browser_cleanup) {
+        setCleanupConfirm({
+          request_id: chunk.request_id || "",
+          sessions: chunk.sessions || [],
         });
         continue;
       }
@@ -238,6 +251,7 @@ export async function consumeStream(
           setMessages(freshMsgs);
           setBgPolling(null);
           setConsentRequest(null);
+          setCleanupConfirm(null);
           setStopping(false);
           setStreaming(false);
           return { failed: false };
@@ -292,6 +306,7 @@ export async function consumeStream(
   });
   setBgPolling(null);
   setConsentRequest(null);
+  setCleanupConfirm(null);
   setStopping(false);
   setStreaming(false);
 

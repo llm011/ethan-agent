@@ -22,6 +22,13 @@ async def _sse_from_run(run) -> AsyncGenerator[str, None]:
                 # 仍在 pending 中说明还没回应，需要重新展示
                 if req_id and req_id not in getattr(run.consent, "_pending", {}):
                     continue
+            # 跳过已解决的浏览器清理确认事件
+            if evt.get("confirm_browser_cleanup"):
+                req_id = evt.get("request_id", "")
+                if req_id:
+                    from ethan.browser.cleanup_confirm import _PENDING
+                    if req_id not in _PENDING:
+                        continue
             yield f"data: {json.dumps(evt, ensure_ascii=False)}\n\n"
         # 缓冲已含结束事件且 producer 已完成：无需再等队列
         if run.done:
