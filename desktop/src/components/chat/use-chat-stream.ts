@@ -242,30 +242,81 @@ export async function consumeStream(
     }
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : "";
-    const isNetworkDrop = /load failed|network|aborted|connection/i.test(errMsg);
+    const isNetworkDrop = /load failed|network|aborted|connection|SSE connection dropped/i.test(errMsg);
     if (isNetworkDrop && activeSession) {
-      // WebKit 网络中断（休眠唤醒等）— 后端通常已完成，自动拉取 session 恢复
+      // WebKit 网络中断 / SSE 静默断开 — 尝试重连活跃 run，失败再拉最终结果
       try {
-        const { fetchSession } = await import("@/lib/api-sessions");
-        const fresh = await fetchSession(activeSession);
-        if (fresh?.messages?.length) {
-          const { mapDetailMessages } = await import("@/components/chat/chat-helpers");
-          const freshMsgs = mapDetailMessages(fresh);
-          setMessages(freshMsgs);
+        const { streamResume } = await import("@/lib/api-chat");
+        const resumed = await streamResume(activeSession);
+        if (resumed) {
+          // 后端仍有活跃 run：续接 SSE 流，继续接收后续事件
+          for await (const chunk of resumed) {
+            // 复用主循环的核心处理逻辑
+            if (chunk.content) assistantContent += chunk.content;
+            if (chunk.tool || chunk.state) {
+              // 工具事件：更新 tool steps（与主循环相同逻辑）
+              if (chunk.id && chunk.tool) {
+                const toolId = chunk.id;
+                setMessages(prev => {
+                  const msgs = [...prev];
+                  const last = msgs[msgs.length - 1];
+                  if (last?.role === "assistant" && last.toolSteps) {
+                    const idx = last.toolSteps.findIndex(s => s.id === toolId);
+                    if (idx >= 0) {
+                      const updated = [...last.toolSteps];
+                      updated[idx] = {
+                        ...updated[idx],
+                        state: chunk.state as "running" | "done" | "error",
+                        duration_ms: chunk.duration_ms ?? updated[idx].duration_ms,
+                        result_preview: chunk.result_preview ?? updated[idx].result_preview,
+                        result_detail: chunk.result_detail ?? updated[idx].result_detail,
+                      };
+                      msgs[msgs.length - 1] = { ...last, toolSteps: updated };
+                    }
+                  }
+                  return msgs;
+                });
+              }
+            }
+            if (chunk.done) {
+              if (chunk.usage) {
+                finalUsage = { input: chunk.usage.input || 0, output: chunk.usage.output || 0, cache: chunk.usage.cache || 0 };
+              }
+              break;
+            }
+          }
+          // 重连成功，正常结束
           setBgPolling(null);
           setConsentRequest(null);
           setCleanupConfirm(null);
           setStopping(false);
           setStreaming(false);
-          return { failed: false };
+          failed = false;
+          // 跳过下方的错误渲染，直接进 finally 后的 setMessages
+        } else {
+          // 无活跃 run：后端已完成，拉最终结果
+          const { fetchSession } = await import("@/lib/api-sessions");
+          const fresh = await fetchSession(activeSession);
+          if (fresh?.messages?.length) {
+            const { mapDetailMessages } = await import("@/components/chat/chat-helpers");
+            const freshMsgs = mapDetailMessages(fresh);
+            setMessages(freshMsgs);
+            setBgPolling(null);
+            setConsentRequest(null);
+            setCleanupConfirm(null);
+            setStopping(false);
+            setStreaming(false);
+            return { failed: false };
+          }
         }
       } catch { /* fallback to show error */ }
     }
-    failed = true;
-    const errLine = `⚠️ ${err instanceof Error ? err.message : "连接中断"}`;
-    assistantContent = assistantContent.trim()
-      ? `${assistantContent}\n\n---\n${errLine}`
-      : errLine;
+    if (failed) {
+      const errLine = `⚠️ ${err instanceof Error ? err.message : "连接中断"}`;
+      assistantContent = assistantContent.trim()
+        ? `${assistantContent}\n\n---\n${errLine}`
+        : errLine;
+    }
   }
 
   setMessages(prev => {
