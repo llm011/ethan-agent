@@ -87,48 +87,8 @@ function getOrCreateOverlay(): HTMLElement {
   return document.getElementById(OVERLAY_ID) || createOverlay();
 }
 
-function formatStepLabel(action: string, data: Record<string, unknown>): string {
-  const ref = data.ref ? ` [${data.ref}]` : '';
-  const text = data.text ? ` "${String(data.text).slice(0, 40)}"` : '';
-  const key = data.key ? ` ${data.key}` : '';
-  const direction = data.direction ? ` ${data.direction}` : '';
-  const what = data.what ? ` ${data.what}` : '';
-  const selector = data.selector ? ` ${String(data.selector).slice(0, 40)}` : '';
-
-  const labels: Record<string, string> = {
-    snapshot: '快照页面',
-    click: `点击${ref}`,
-    fill: `填写${ref}${text}`,
-    type: `输入${ref}${text}`,
-    press: `按键${key}`,
-    hover: `悬停${ref}`,
-    select: `选择${ref}`,
-    scroll: `滚动${direction}`,
-    scroll_into_view: `滚入视口${ref}`,
-    screenshot: '截图',
-    get: `读取${what}${ref}`,
-    mouse: '鼠标操作',
-    wait: '等待',
-    eval: '执行脚本',
-    upload: `上传${ref}`,
-    save_pdf: '保存 PDF',
-    click_selector: `点击${selector}`,
-    fill_selector: `填写${selector}${text}`,
-    hover_selector: `悬停${selector}`,
-    wait_for_element: `等待元素${selector}`,
-    scroll_to_text: `滚动到"${text}"`,
-    extract_content: '提取内容',
-    find_elements: `查找元素${selector}`,
-    find_attributes: `查找属性${selector}`,
-    check_exist: `检查存在${selector}`,
-    input_enter: `输入并回车${selector}${text}`,
-    scroll_find: `滚动查找${selector}`,
-    click_vlm: `视觉点击`,
-    network_start: '开始抓包',
-    network_stop: '停止抓包',
-  };
-  return labels[action] || action;
-}
+// 注：步骤标签由 background 侧的 overlay-injector.formatLabel 统一生成后随 addStep 消息传入
+// （见 entry.label）。此处不再重复实现，避免两份 label 逻辑漂移。
 
 function addStep(entry: StepEntry) {
   const overlay = getOrCreateOverlay();

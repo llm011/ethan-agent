@@ -83,14 +83,20 @@ def _image_preview_text(content: str) -> str:
     """从 [image:...] 标记提取简短预览文本。
 
     格式：[image:<mime>:<base64>:<filename>] 或 [image:too-large:<mime>:<size>:<filename>]
+    （base64/mime/size 均不含冒号，filename 可能含冒号，故用尾部拼接兜底。）
     """
-    parts = content.split(":", 3)
-    if len(parts) < 4:
-        return "[image]"
-    kind, mime, rest = parts[0], parts[1], parts[3]
-    filename = rest.rstrip("]")
-    if kind == "[image:too-large":
+    body = content[len("[image:"):].rstrip("]")
+    parts = body.split(":")
+    if parts and parts[0] == "too-large":
+        # too-large:<mime>:<size>:<filename>
+        mime = parts[1] if len(parts) > 1 else "?"
+        filename = ":".join(parts[3:]) if len(parts) > 3 else "image"
         return f"🖼️ {filename} ({mime}, 过大未渲染)"
+    # <mime>:<base64>:<filename>
+    if len(parts) < 3:
+        return "[image]"
+    mime = parts[0]
+    filename = ":".join(parts[2:])
     return f"🖼️ {filename} ({mime})"
 
 

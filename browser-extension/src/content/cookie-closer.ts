@@ -89,12 +89,17 @@ function tryClose(): boolean {
   }
 
   // 文本匹配兜底
+  // 短 token（如 "OK"/"同意"/"拒绝"）只允许精确相等——用 includes 会误伤
+  // "BOOKING"/"不同意" 之类的无关或语义相反按钮，在 Ethan 控制的 tab 上可能触发错误跳转/提交。
+  // 仅长度 >=5 的明确短语（"Reject all"/"Accept all"/"I agree" 等）才放宽到 includes。
   const allBtns = document.querySelectorAll<HTMLElement>('button, a, [role="button"]');
   for (const btn of allBtns) {
     const text = (btn.textContent || '').trim();
     if (!text || text.length > 30) continue;
     for (const rule of TEXT_RULES) {
-      if (text === rule.text || text.includes(rule.text)) {
+      const matched = text === rule.text
+        || (rule.text.length >= 5 && text.includes(rule.text));
+      if (matched) {
         if (btn.offsetParent !== null || btn.getClientRects().length > 0) {
           (rule.type === 'reject' ? rejectBtns : acceptBtns).push(btn);
         }
