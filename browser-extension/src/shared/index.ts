@@ -146,10 +146,31 @@ export const DEFAULT_COMMANDS: EthanCommand[] = [
   },
 ];
 
-/** 读用户指令；storage 为空时回落到内置默认集。 */
+/**
+ * 把内置默认集里「用户列表中缺失」的指令补进来（按 id 合并）。
+ * 保证扩展升级后新增的内置指令会自动出现，同时保留用户对已有指令的改动。
+ */
+export function withBuiltinDefaults(saved: EthanCommand[]): EthanCommand[] {
+  const ids = new Set(saved.map(c => c.id));
+  const missing = DEFAULT_COMMANDS.filter(c => !ids.has(c.id));
+  return [...saved, ...missing];
+}
+
+/** 读用户指令；storage 为空时回落到内置默认集，并补齐缺失的内置项。 */
 export async function readCommands(): Promise<EthanCommand[]> {
   const { commands } = await chrome.storage.local.get(['commands']);
-  return Array.isArray(commands) && commands.length ? commands : DEFAULT_COMMANDS;
+  if (Array.isArray(commands) && commands.length) return withBuiltinDefaults(commands);
+  return DEFAULT_COMMANDS;
+}
+
+/** 写用户指令列表（options 页保存时用）。 */
+export async function saveCommands(commands: EthanCommand[]): Promise<void> {
+  await chrome.storage.local.set({ commands });
+}
+
+/** 恢复内置默认集（清空用户自定义）。 */
+export async function resetCommands(): Promise<void> {
+  await chrome.storage.local.set({ commands: DEFAULT_COMMANDS });
 }
 
 /** 使用次数计数（用于右键菜单取 top-N）。 */

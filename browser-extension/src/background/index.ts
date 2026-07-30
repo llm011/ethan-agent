@@ -26,7 +26,7 @@ import {
   readingDeleteAnnotation,
   readingSaveKnowledge,
 } from './reading-injector';
-import { streamChat } from './chat-proxy';
+import { streamChat, fetchModels } from './chat-proxy';
 import { runCommand } from './command-runner';
 
 const sessionStore = new BrowserSessionStore();
@@ -304,6 +304,13 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       });
       sendResponse(r);
     })();
+    return true;
+  }
+
+  // 来自 options 页：拉取可用模型列表（供指令选 model）
+  if (msg?.type === 'list-models') {
+    fetchModels().then(r => sendResponse(r)).catch(e =>
+      sendResponse({ ok: false, error: String(e?.message || e) }));
     return true;
   }
 
