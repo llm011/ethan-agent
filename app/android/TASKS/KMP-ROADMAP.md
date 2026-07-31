@@ -58,17 +58,21 @@ Hilt → Koin，14 个 ViewModel 迁 `commonMain`。iOS 的 SwiftUI 直接观察
    `BuildConfig.DEBUG` 日志开关换 KMP 方式。
 4. **`core:datastore` KMP 化**：androidx.datastore-core（KMP 版）+ okio，`AppConfigStore` 迁 commonMain，
    路径用 expect/actual 提供。
-5. **`EthanRepository` 迁共享**：移到新 `:core:data`（或 `:shared`）的 commonMain；multipart 上传用 Ktor 重写；
-   `java.io.File` 上传参数改成平台无关（ByteArray + filename，或 expect）；`HttpException` 换 Ktor 的
-   `ResponseException`。`LocalCache` 的 `Context.cacheDir/File` 用 okio + expect/actual 路径。
-6. **`:app` 适配**：`AppModule`(Hilt) 改为注入共享层的 factory；ViewModel 不动（仍 Hilt，Phase 2 才换 Koin）。
+5. **`EthanRepository` 迁共享**：⏸ **推迟到 Phase 2**。Repository 仍带 Hilt(`@Inject`/`@Singleton`)、
+   `java.io.File`、`LocalCache(Context)`，把它迁 commonMain 势必先拆 Hilt——而 Hilt→Koin 正是 Phase 2 的核心。
+   为保持每期边界清晰，Phase 1 只把它**适配**到共享 Ktor 层（去 refreshApi/Retrofit 耦合），留在 `:app`。
+   上传参数已平台无关化（ByteArray+filename+mime），`HttpException` 已换成领域 `ApiException`。
+6. **`:app` 适配**：✅ `AppModule`(Hilt) 注入共享层 factory（`NetworkFactory.createApiService(baseUrlProvider, tokenProvider)`）；
+   新增 `ServerUrlCache` 供 Ktor 同步取 origin；ViewModel 不动（仍 Hilt）。
 7. **验证**：
-   - Android：`:app:assembleDebug` 通过 + 装模拟器冒烟（登录/对话/各页），确保零回归。
-   - iOS：`./gradlew :shared:compileKotlinIosSimulatorArm64` 编到 klib 通过（无 Xcode 也能跑）。
-   - XCFramework 产出 + iOS app 接入：需用户装 Xcode，Phase 1 末尾或 Phase 2 做。
+   - ✅ Android：`:app:assembleDebug` 通过（core:model/network/datastore 全 KMP 化后）。装模拟器冒烟待做。
+   - ✅ iOS：`:core:model` / `:core:network` / `:core:datastore` 三个 `compileKotlinIosSimulatorArm64` 均编到 klib 通过（无 Xcode）。
+   - ⏳ XCFramework 产出 + iOS app 接入：需用户装 Xcode，Phase 2 做。
 
 ## 进度
 
-- [ ] Phase 1（共享 core）— 进行中
-- [ ] Phase 2（共享 ViewModel）
+- [x] Phase 1（共享 core：model + network(Ktor) + datastore）— **基本完成**
+      - 三层已在 commonMain 且两端(android + iosSimulatorArm64 klib)编译通过；Android assembleDebug 零回归
+      - 剩余：模拟器冒烟；EthanRepository/LocalCache 迁共享随 Phase 2 一起做
+- [ ] Phase 2（共享 ViewModel：Hilt→Koin + Repository/LocalCache 迁 commonMain）
 - [ ] Phase 3（可选，共享 UI）
