@@ -1,4 +1,5 @@
 import os
+import shutil
 from pathlib import Path
 from typing import Optional
 
@@ -338,8 +339,6 @@ def _init_default_skills() -> None:
     注意：dst 可能是用户主动建的符号链接（如指向 .agents/skills/<name> 开发挂载），
     此时跳过——既不 copytree 也不 sync，完全保留用户自定义的链接。
     """
-    import shutil
-
     defaults_dir = Path(__file__).parent.parent / "defaults" / "skills"
     if not defaults_dir.exists():
         return
@@ -379,20 +378,34 @@ def _sync_skill_tree(src: Path, dst: Path) -> None:
     遍历 src 下所有文件，源比目标新（或目标缺失）就覆盖，覆盖 SKILL.md / references /
     scripts / themes / assets 等全部子路径。不删除用户在 dst 里新增的文件；用户改过的
     文件若源更新会被覆盖——内置默认技能本就随镜像走，用户要定制应走符号链接或私有 profile。
-    dst 下软链的单个文件保留（不覆盖）。
+    软链保留：dst 下软链的单个文件、以及软链的中间目录（如把整个 scripts/ 指向开发挂载）
+    都跳过——不穿透软链覆盖用户的开发副本。
+    空目录也同步创建（源技能可能 ship 了脚本依赖的空目录，如 output/、cache/）。
     """
-    import shutil
-
-    for src_file in src.rglob("*"):
-        if not src_file.is_file():
+    for src_path in src.rglob("*"):
+        rel = src_path.relative_to(src)
+        dst_path = dst / rel
+        # 目标自身是软链、或某个中间父目录是软链 → 跳过，保留用户挂载的开发副本
+        if dst_path.is_symlink() or _ancestor_is_symlink(dst, dst_path):
             continue
-        rel = src_file.relative_to(src)
-        dst_file = dst / rel
-        if dst_file.is_symlink():
-            continue  # 用户软链的单个文件，保留
-        if not dst_file.exists() or src_file.stat().st_mtime > dst_file.stat().st_mtime:
-            dst_file.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(str(src_file), str(dst_file))
+        if src_path.is_dir():
+            dst_path.mkdir(parents=True, exist_ok=True)  # 含空目录
+            continue
+        if not src_path.is_file():
+            continue  # 跳过 socket/fifo 等特殊文件
+        if not dst_path.exists() or src_path.stat().st_mtime > dst_path.stat().st_mtime:
+            dst_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(src_path), str(dst_path))
+
+
+def _ancestor_is_symlink(root: Path, target: Path) -> bool:
+    """target 与 root 之间的任一中间父目录是否为软链（不含 root 自身）。"""
+    parent = target.parent
+    while parent != root:
+        if parent.is_symlink():
+            return True
+        parent = parent.parent
+    return False
 
 
 # 预初始化的 scene 目录；work=团队管理，life=创业/个人项目（与 work 隔离）。

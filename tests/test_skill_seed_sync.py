@@ -88,3 +88,36 @@ def test_sync_skips_symlinked_dst_file(tmp_path):
     assert link.is_symlink()
     assert link.read_text() == "DEV_MOUNT"
     assert real.read_text() == "DEV_MOUNT"
+
+
+def test_sync_skips_symlinked_dst_dir(tmp_path):
+    """中间目录软链保留：用户把整个 scripts/ 指向开发挂载时，不穿透覆盖里面的文件。"""
+    src = tmp_path / "src" / "ppt-generate"
+    dst = tmp_path / "dst" / "ppt-generate"
+    _write(src / "scripts" / "render_pptx.py", "FROM_IMAGE", mtime=2000)
+
+    # 用户把 dst/scripts 整个软链到开发目录
+    dev = tmp_path / "external" / "scripts"
+    _write(dev / "render_pptx.py", "DEV_MOUNT", mtime=1000)
+    dst.mkdir(parents=True)
+    (dst / "scripts").symlink_to(dev)
+
+    _sync_skill_tree(src, dst)
+
+    # 中间目录软链保留、里面的开发副本未被覆盖
+    assert (dst / "scripts").is_symlink()
+    assert (dst / "scripts" / "render_pptx.py").read_text() == "DEV_MOUNT"
+    assert (dev / "render_pptx.py").read_text() == "DEV_MOUNT"
+
+
+def test_sync_creates_empty_dirs(tmp_path):
+    """源技能 ship 的空目录（脚本依赖的 output/、cache/ 等）也要在目标创建。"""
+    src = tmp_path / "src" / "ppt-generate"
+    dst = tmp_path / "dst" / "ppt-generate"
+    _write(src / "SKILL.md", "body")
+    (src / "cache").mkdir(parents=True)  # 空目录
+    dst.mkdir(parents=True)
+
+    _sync_skill_tree(src, dst)
+
+    assert (dst / "cache").is_dir()
