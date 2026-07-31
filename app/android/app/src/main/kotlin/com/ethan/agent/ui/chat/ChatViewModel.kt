@@ -65,6 +65,19 @@ class ChatViewModel @Inject constructor(
     init {
         val sessionId = savedStateHandle.get<String>("sessionId")
         loadInitial(sessionId)
+        consumeSharedContent()
+    }
+
+    /** 消费「分享到 Ethan」投递的文本，预填到输入框（仅新会话场景）。 */
+    private fun consumeSharedContent() {
+        val shared = com.ethan.agent.share.ShareBus.consumeText()
+        if (!shared.isNullOrBlank()) {
+            _state.update {
+                val existing = it.inputText
+                it.copy(inputText = if (existing.isBlank()) shared else "$existing\n$shared")
+            }
+        }
+        // 图片/文件 URI 由 ChatScreen 层处理上传（需要 ContentResolver），此处仅保留文本预填
     }
 
     private fun loadInitial(sessionId: String?) {

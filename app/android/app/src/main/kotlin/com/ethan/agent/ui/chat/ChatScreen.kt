@@ -95,6 +95,8 @@ import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.SnackbarContainer
 import com.ethan.agent.ui.components.ToolTimeline
 import com.ethan.agent.ui.components.SimpleMarkdown
+import android.content.Context
+import android.provider.OpenableColumns
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -199,6 +201,20 @@ fun ChatScreen(
         if (state.sessionId != null) {
             lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
                 onResumeStream()
+            }
+        }
+    }
+
+    // 「分享到 Ethan」的图片/文件：进入 Chat 后消费一次并上传
+    LaunchedEffect(Unit) {
+        val sharedUri = com.ethan.agent.share.ShareBus.consumeUri() ?: return@LaunchedEffect
+        runCatching {
+            val uri = Uri.parse(sharedUri)
+            val name = queryDisplayName(context, uri)
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                val temp = File(context.cacheDir, name)
+                temp.outputStream().use { output -> input.copyTo(output) }
+                onUpload(temp, name)
             }
         }
     }
@@ -847,4 +863,26 @@ private fun EmptyChatState(
             }
         }
     }
+}
+
+/**
+ * 取分享进来 URI 的显示文件名。
+ *
+ * content:// URI 的 lastPathSegment 往往是 document id（如 "image:1234"），
+ * 直接用会得到很怪的文件名，所以优先查 [OpenableColumns.DISPLAY_NAME]，
+ * 查不到再退回 lastPathSegment，最后兜底 "shared_file"。
+ */
+private fun queryDisplayName(context: Context, uri: Uri): String {
+    if (uri.scheme == "content") {
+        runCatching {
+            context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                ?.use { cursor ->
+                    val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (idx >= 0 && cursor.moveToFirst()) {
+                        cursor.getString(idx)?.takeIf { it.isNotBlank() }?.let { return it }
+                    }
+                }
+        }
+    }
+    return uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() } ?: "shared_file"
 }

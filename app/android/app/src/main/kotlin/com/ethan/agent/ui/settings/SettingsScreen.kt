@@ -84,10 +84,20 @@ fun SettingsScreen(
     onClearKnowledgeResult: () -> Unit,
     onSetTheme: (String) -> Unit,
     onCheckUpdate: () -> Unit,
+    onSetAppLock: (Boolean) -> Unit = {},
+    onClearCache: () -> Unit = {},
+    onClearCacheCleared: () -> Unit = {},
     onClearError: () -> Unit,
 ) {
     val snackbar = remember { SnackbarHostState() }
     ErrorSnackbar(state.error, onClearError, snackbar)
+
+    if (state.cacheCleared) {
+        LaunchedEffect(Unit) {
+            snackbar.showSnackbar("缓存已清空")
+            onClearCacheCleared()
+        }
+    }
 
     state.knowledgeValidateResult?.let { msg ->
         LaunchedEffect(msg) {
@@ -150,7 +160,7 @@ fun SettingsScreen(
                     SettingsTab.General -> {
                         if (state.isLoading && state.agentSettings == null) LoadingBox()
                         else state.agentSettings?.let {
-                            GeneralTab(it, state.themeId, onUpdateAgent, onSaveAgent, onSetTheme, onCheckUpdate)
+                            GeneralTab(it, state.themeId, state.appLockEnabled, onUpdateAgent, onSaveAgent, onSetTheme, onCheckUpdate, onSetAppLock, onClearCache)
                         }
                     }
                     SettingsTab.Providers -> {
@@ -264,10 +274,13 @@ private val THEME_OPTIONS = listOf(
 private fun GeneralTab(
     settings: AgentSettings,
     themeId: String,
+    appLockEnabled: Boolean,
     onUpdate: (AgentSettings) -> Unit,
     onSave: () -> Unit,
     onSetTheme: (String) -> Unit,
     onCheckUpdate: () -> Unit,
+    onSetAppLock: (Boolean) -> Unit,
+    onClearCache: () -> Unit,
 ) {
     CuteCard {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -305,11 +318,37 @@ private fun GeneralTab(
 
     CuteCard {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("安全", style = MaterialTheme.typography.titleSmall)
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("应用锁", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "启动时用生物识别或设备密码解锁",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(appLockEnabled, onSetAppLock)
+            }
+        }
+    }
+
+    CuteCard {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("系统", style = MaterialTheme.typography.titleSmall)
             OutlinedButton(onClick = onCheckUpdate, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("检查更新")
+            }
+            OutlinedButton(onClick = onClearCache, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("清空本地缓存")
             }
         }
     }

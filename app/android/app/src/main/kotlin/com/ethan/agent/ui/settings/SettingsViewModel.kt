@@ -60,6 +60,10 @@ data class SettingsUiState(
     val knowledgeValidateResult: String? = null,
     // Theme
     val themeId: String = "honey",
+    // App lock (biometric)
+    val appLockEnabled: Boolean = false,
+    // Cache
+    val cacheCleared: Boolean = false,
 )
 
 @HiltViewModel
@@ -74,7 +78,15 @@ class SettingsViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             repository.config.collect { config ->
-                _state.update { it.copy(serverUrl = config.serverUrl) }
+                _state.update {
+                    it.copy(
+                        serverUrl = config.serverUrl,
+                        themeId = config.themeId,
+                        appLockEnabled = config.appLockEnabled,
+                    )
+                }
+                // 持久化的主题应用到全局 ThemeState（冷启动 / 换设备后恢复）
+                com.ethan.agent.ui.theme.ThemeState.themeId = config.themeId
             }
         }
         load()
@@ -237,7 +249,24 @@ class SettingsViewModel @Inject constructor(
     fun setTheme(themeId: String) {
         _state.update { it.copy(themeId = themeId) }
         com.ethan.agent.ui.theme.ThemeState.themeId = themeId
+        // 持久化，冷启动后由 config flow 恢复
+        viewModelScope.launch { runCatching { repository.setThemeId(themeId) } }
     }
+
+    fun setAppLockEnabled(enabled: Boolean) {
+        _state.update { it.copy(appLockEnabled = enabled) }
+        viewModelScope.launch { runCatching { repository.setAppLockEnabled(enabled) } }
+    }
+
+    fun clearCache() {
+        viewModelScope.launch {
+            runCatching { repository.clearLocalCache() }
+                .onSuccess { _state.update { it.copy(cacheCleared = true) } }
+                .onFailure { e -> _state.update { it.copy(error = repository.friendlyError(e)) } }
+        }
+    }
+
+    fun clearCacheCleared() { _state.update { it.copy(cacheCleared = false) } }
 
     fun onServerUrlChange(url: String) {
         _state.update { it.copy(serverUrl = url) }
