@@ -208,7 +208,7 @@ delegate_coding(
 ```
 
 - `cacheable=False`（有副作用，不可缓存）
-- `fast_path=False`（只在 medium/full path 加载）
+- `fast_path=False`（只在 full path 加载）
 - timeout 默认 180 秒
 - 输出超 12000 字符自动截断
 - 返回 `[agent](session=xxxxxxxx) output` 格式，并携带 `sub_steps`
