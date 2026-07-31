@@ -48,6 +48,41 @@ def test_large_object_result_serialized_then_truncated():
     assert json.loads(persisted) == big_list
 
 
+def test_newline_alignment_pulls_full_content_not_truncated():
+    """内容略超阈值但尾部换行让首段覆盖全部 → 不算截断，原样返回、不落盘。
+
+    回归点：_chunk_text 向后对齐换行会把 end 拉到 ==total，若仍标 truncated
+    会误导模型 snapshot_read 一个空续段并白白落盘一个文件。
+    """
+    # 总长 8200，在 8199 处放唯一换行（落在 8000 后的 search radius=500 内）
+    display = ("a" * 8199) + "\n" + ("")  # len 8200, newline at index 8199
+    assert len(display) == 8200
+    result = {"ok": True, "sessionId": "s1", "result": display}
+    out = json.loads(B._truncate_eval_result(result, "s1"))
+    assert "result_truncated" not in out
+    assert out["result"] == display
+
+
+def test_result_has_more_true_when_truncated():
+    """真正截断时 result_has_more 恒为 True（已由 chunk_len>=total 守卫兜底）。"""
+    big = "z" * 20000  # 无换行，硬截断
+    result = {"ok": True, "sessionId": "s1", "result": big}
+    out = json.loads(B._truncate_eval_result(result, "s1"))
+    assert out["result_truncated"] is True
+    assert out["result_has_more"] is True
+    assert out["result_chunk_length"] < out["result_total_chars"]
+
+
+def test_persist_snapshot_unique_filenames_same_ms():
+    """同一 session 连续落盘不撞名（进程内自增序号），避免互相覆盖污染分页。"""
+    p1 = B._persist_snapshot("content-1", "s1")
+    p2 = B._persist_snapshot("content-2", "s1")
+    assert p1 != p2
+    from pathlib import Path
+    assert Path(p1).read_text(encoding="utf-8") == "content-1"
+    assert Path(p2).read_text(encoding="utf-8") == "content-2"
+
+
 def test_no_result_field_passthrough():
     """没有 result 字段（如 ok-only 返回）原样序列化，不报错。"""
     result = {"ok": True, "sessionId": "s1"}
