@@ -23,6 +23,8 @@ data class AppConfig(
     val userId: String? = null,
     val userName: String? = null,
     val isAdmin: Boolean = false,
+    val themeId: String = "honey",
+    val appLockEnabled: Boolean = false,
 ) {
     val apiBaseUrl: String
         get() = ServerUrlUtils.toApiBaseUrl(serverUrl)
@@ -41,6 +43,8 @@ class AppConfigStore(
         val USER_ID = stringPreferencesKey("user_id")
         val USER_NAME = stringPreferencesKey("user_name")
         val IS_ADMIN = booleanPreferencesKey("is_admin")
+        val THEME_ID = stringPreferencesKey("theme_id")
+        val APP_LOCK = booleanPreferencesKey("app_lock_enabled")
     }
 
     val config: Flow<AppConfig> = context.dataStore.data.map { prefs ->
@@ -53,6 +57,8 @@ class AppConfigStore(
             userId = prefs[Keys.USER_ID],
             userName = prefs[Keys.USER_NAME],
             isAdmin = prefs[Keys.IS_ADMIN] ?: false,
+            themeId = prefs[Keys.THEME_ID] ?: "honey",
+            appLockEnabled = prefs[Keys.APP_LOCK] ?: false,
         )
     }
 
@@ -90,5 +96,13 @@ class AppConfigStore(
 
     suspend fun setDarkTheme(dark: Boolean) {
         context.dataStore.edit { it[Keys.DARK_THEME] = dark }
+    }
+
+    suspend fun setThemeId(themeId: String) {
+        context.dataStore.edit { it[Keys.THEME_ID] = themeId }
+    }
+
+    suspend fun setAppLockEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.APP_LOCK] = enabled }
     }
 }

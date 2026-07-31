@@ -203,6 +203,20 @@ fun ChatScreen(
         }
     }
 
+    // 「分享到 Ethan」的图片/文件：进入 Chat 后消费一次并上传
+    LaunchedEffect(Unit) {
+        val sharedUri = com.ethan.agent.share.ShareBus.consumeUri() ?: return@LaunchedEffect
+        runCatching {
+            val uri = Uri.parse(sharedUri)
+            val name = uri.lastPathSegment?.substringAfterLast('/') ?: "shared_file"
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                val temp = File(context.cacheDir, name)
+                temp.outputStream().use { output -> input.copyTo(output) }
+                onUpload(temp, name)
+            }
+        }
+    }
+
     ErrorSnackbar(state.error, onClearError, snackbar)
 
     // Plus button bottom sheet (model/mode/upload)

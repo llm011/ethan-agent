@@ -779,6 +779,19 @@ class EthanRepository @Inject constructor(
         configStore.setDarkTheme(dark)
     }
 
+    suspend fun setThemeId(themeId: String) {
+        configStore.setThemeId(themeId)
+    }
+
+    suspend fun setAppLockEnabled(enabled: Boolean) {
+        configStore.setAppLockEnabled(enabled)
+    }
+
+    /** 清空本地文件缓存（Settings 「清空缓存」入口用）。 */
+    suspend fun clearLocalCache() {
+        localCache.clear()
+    }
+
     fun friendlyError(e: Throwable): String = when (e) {
         is ApiException -> e.message
         is HttpException -> when (e.code()) {

@@ -196,6 +196,9 @@ private fun MainContent(authViewModel: AuthViewModel) {
                     onClearKnowledgeResult = vm::clearKnowledgeValidateResult,
                     onSetTheme = vm::setTheme,
                     onCheckUpdate = updateViewModel::checkForUpdate,
+                    onSetAppLock = vm::setAppLockEnabled,
+                    onClearCache = vm::clearCache,
+                    onClearCacheCleared = vm::clearCacheCleared,
                     onClearError = vm::clearError,
                 )
             }
