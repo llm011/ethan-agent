@@ -2,7 +2,9 @@ package com.ethan.agent.core.network
 
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.HttpClientEngine
+import io.ktor.client.plugins.HttpResponseValidator
 import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.plugins.ResponseException
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.defaultRequest
 import io.ktor.client.plugins.logging.LogLevel
@@ -54,6 +56,19 @@ object NetworkFactory {
             if (isDebugBuild()) {
                 install(Logging) {
                     level = LogLevel.BODY
+                }
+            }
+
+            // 把 Ktor 的 4xx/5xx 异常统一映射成领域内 ApiException(code, message)，
+            // 让上层只需处理一种异常类型（替换原 retrofit2.HttpException）。
+            HttpResponseValidator {
+                handleResponseExceptionWithRequest { cause, _ ->
+                    if (cause is ResponseException) {
+                        throw ApiException(
+                            cause.response.status.value,
+                            cause.message ?: "HTTP ${cause.response.status.value}",
+                        )
+                    }
                 }
             }
 
