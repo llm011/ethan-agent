@@ -66,6 +66,24 @@
       }
       .switch input:checked + .slider { background: #4f46e5; }
       .switch input:checked + .slider::before { transform: translateX(16px); }
+      .cmd-section { margin-top: 16px; }
+      .cmd-title {
+        font-size: 11px; font-weight: 600; letter-spacing: 0.5px;
+        color: #9aa0aa; margin-bottom: 8px;
+      }
+      .cmd-list { display: flex; flex-wrap: wrap; gap: 6px; }
+      .cmd-btn {
+        display: flex; align-items: center; gap: 5px;
+        padding: 7px 10px; border-radius: 8px; cursor: pointer;
+        font-size: 12px; font-weight: 500;
+        border: 1px solid #e5e7eb; background: #f7f8fa; color: #1f2430;
+        transition: background 0.15s, border-color 0.15s;
+      }
+      .cmd-btn:hover { background: #eef0f4; border-color: #d6d9e0; }
+      @media (prefers-color-scheme: dark) {
+        .cmd-btn { background: #2a2e37; border-color: #3a3f4a; color: #e6e8ec; }
+        .cmd-btn:hover { background: #333842; }
+      }
     </style>
   </head>
   <body>
@@ -92,6 +110,11 @@
       <button id="reading">辅助阅读当前页</button>
     </div>
     <div id="hint"></div>
+
+    <div class="cmd-section">
+      <div class="cmd-title">页面指令</div>
+      <div id="commandList" class="cmd-list"></div>
+    </div>
 
     <div class="toggle-row">
       <div>

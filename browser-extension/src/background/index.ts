@@ -26,6 +26,8 @@ import {
   readingDeleteAnnotation,
   readingSaveKnowledge,
 } from './reading-injector';
+import { streamChat } from './chat-proxy';
+import { runCommand } from './command-runner';
 
 const sessionStore = new BrowserSessionStore();
 const pageController = new BrowserPageController(sessionStore);
@@ -271,6 +273,37 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       void readingChat(tabId, msg.requestId, msg.prompt, { sessionId: msg.sessionId });
     }
     sendResponse({ ok: true });  // 立即应答，结果通过 tabs.sendMessage 流式推回
+    return true;
+  }
+
+  // 来自 content script（result-panel）：面板内追问，结果推回 target='result'
+  if (msg?.type === 'result:chat') {
+    const tabId = _sender.tab?.id;
+    if (typeof tabId === 'number') {
+      void streamChat(tabId, msg.requestId, msg.prompt, {
+        uiTarget: 'result',
+        sessionId: msg.sessionId,
+        model: msg.model,
+      });
+    }
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  // 来自 popup / 选中工具条：执行一条短指令，结果流式进页面右上角结果面板
+  if (msg?.type === 'run-command') {
+    (async () => {
+      const tabId = msg.tabId ?? _sender.tab?.id;
+      if (typeof tabId !== 'number') {
+        sendResponse({ ok: false, error: 'no_tab' });
+        return;
+      }
+      const r = await runCommand(tabId, msg.commandId, {
+        selectionText: msg.selectionText,
+        query: msg.query,
+      });
+      sendResponse(r);
+    })();
     return true;
   }
 

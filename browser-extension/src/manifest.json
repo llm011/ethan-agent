@@ -33,6 +33,13 @@
     "service_worker": "background.js",
     "type": "module"
   },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content/selection-bar.js"],
+      "run_at": "document_idle"
+    }
+  ],
   "permissions": [
     "debugger",
     "storage",
