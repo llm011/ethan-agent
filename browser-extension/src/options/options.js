@@ -153,12 +153,21 @@ async function resetAll() {
   status('已恢复默认');
 }
 
+// 只刷新各卡片的 model 下拉，不整树 render，避免冲掉用户正在编辑的 textarea 焦点/未存输入
+function refreshModelSelects() {
+  document.querySelectorAll('select[data-f="model"]').forEach((sel, i) => {
+    const cmd = commands[i];
+    if (!cmd) return;
+    sel.innerHTML = modelOptions(cmd.model || '');
+  });
+}
+
 async function loadModels() {
   try {
     const resp = await chrome.runtime.sendMessage({ type: 'list-models' });
     if (resp?.ok && Array.isArray(resp.models)) {
       models = resp.models;
-      render();  // 重渲染让下拉带上模型
+      refreshModelSelects();  // 仅更新下拉选项，保留正在编辑的输入
     }
   } catch { /* 拉不到就只能手填，忽略 */ }
 }
