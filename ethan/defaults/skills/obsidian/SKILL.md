@@ -1,7 +1,7 @@
 ---
 name: obsidian
 title: Obsidian Vault Manager
-description: Read, search, create, and edit notes in the Obsidian vault.
+description: "Obsidian vault 专属操作：wikilink/双链、backlink、canvas、daily note、frontmatter 属性等 Obsidian 特有能力。注意：普通的知识库读写（存/搜/读/改笔记）统一走内置 knowledge_* 工具——当用户把知识库后端配成 Obsidian 时，knowledge_* 会自动落到 vault，无需本技能。仅当用户点名 Obsidian、或要用 vault 特有功能（双链/canvas/日记/backlink 维护）时才加载本技能。"
 version: 1.1.0
 author: NousResearch
 license: MIT
@@ -14,18 +14,11 @@ trigger:
   - wikilink
   - 双链
   - backlink
-  - tag
-  - 标签
-  - 打标签
-  - 加标签
-  - frontmatter
-  - 属性
   - canvas
   - 画布
   - daily note
   - 日记
-  - 重命名笔记
-  - 知识管理
+  - 双链笔记
 ---
 # Obsidian Vault
 

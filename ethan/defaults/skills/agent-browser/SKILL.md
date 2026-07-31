@@ -1,7 +1,7 @@
 ---
 name: agent-browser
-trigger: "抓取网页|爬网页|网页自动化脚本|批量抓取|多步网页流程|遍历页面|agent-browser|browser script|scrape|automate web|登录网站|网页脚本"
-description: "兜底浏览器技能：用 agent-browser CLI 操控内置独立 Chrome（自带 profile，与用户本机 Chrome 隔离）。打开网页、点击/填表、读取内容、截图、跑 JS。snapshot 输出极省 token（~300 vs 全 DOM 的 ~4000）。当 use-browser 不可用（未装扩展/server 不在本机）、需要隔离 profile、或做批量抓取/多步脚本时使用。日常浏览器操作优先用 use-browser。"
+trigger: "agent-browser|独立浏览器|隔离浏览器|无痕浏览器|独立 profile|干净 profile|扩展没装|扩展没连|扩展不可用|兜底浏览器|抓取网页|爬网页|scrape|automate web|自动登录网站|登录网站"
+description: "兜底/隔离浏览器技能：用 agent-browser CLI 操控内置独立 Chrome（自带 profile，与用户本机 Chrome 隔离）。做单步离散操作——打开网页、点击/填表、读取内容、截图、跑一小段 JS。snapshot 输出极省 token（~300 vs 全 DOM 的 ~4000）。三档浏览器技能里排第二：日常交互优先 use-browser（复用本机真实登录态）；需要循环/条件/多页聚合的复杂脚本用 dev-browser。仅在 use-browser 不可用（未装扩展/server 不在本机）、需要隔离 profile、或做简单独立操作时用本技能。"
 metadata:
   requires:
     bins: ["agent-browser"]
@@ -14,7 +14,9 @@ metadata:
 - 本机没装 Ethan Browser 扩展 / 扩展没连上
 - server 不在本机（远程跑、没法连本机扩展）
 - 需要一个**隔离的独立 profile**（不想动用户日常 Chrome、或要测干净登录流程）
-- 批量抓取 / 多步网页脚本（agent-browser CLI 更适合写循环）
+- 简单的独立操作（开页面、点一下、读内容、截图）在隔离环境里跑
+
+> 需要**循环 / 条件判断 / 遍历多页 / 聚合结构化结果**（"一个脚本跑完多步"）时，用 `dev-browser`——它给你完整 Playwright API，比逐条 CLI 命令更合适。本技能专注单步离散操作。
 
 用 `agent-browser` 这个原生 CLI 操控内置独立 Chrome。守护进程在命令之间常驻，所以多条命令会复用同一个浏览器会话。
 

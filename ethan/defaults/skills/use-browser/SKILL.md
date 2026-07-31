@@ -18,17 +18,24 @@ description: "主浏览器技能：通过 browser_session / browser_tab / browse
 
 不要用它替代普通网页信息检索；只需查公开网页信息时优先用 web_search / web_fetch。
 
-## 与 agent-browser 的分工
+## 三档浏览器技能的分工（重要）
 
-| | use-browser（本技能） | agent-browser |
-|--|--|--|
-| 浏览器 | 本机真实 Chrome（用户日常用的那个） | 内置独立 Chrome（自带 profile，与用户浏览器隔离） |
-| 登录态/cookie | ✅ 复用用户真实 cookie，已登录的站直接操作 | 独立 profile，需自己登录或导入 |
-| 接管当前 tab | ✅ `attach_current` 接管用户正在看的 tab | ❌ 只能自己 open |
-| 依赖 | Ethan Browser 扩展 + 本机 Chrome | agent-browser CLI |
-| 定位 | **主技能**——只要本机有扩展就用它 | **兜底**——扩展没装/不可用、或需要隔离环境时 |
+系统里有三个浏览器技能，**默认永远从本技能（use-browser）开始**，只在明确命中下面的边界时才切换：
 
-**默认走本技能**。只有以下情况才退到 agent-browser：扩展未安装/未连接、需要隔离的独立 profile、或 server 不在本机（无法连扩展）。
+| | **use-browser**（本技能，主入口） | **agent-browser**（隔离/兜底） | **dev-browser**（脚本档） |
+|--|--|--|--|
+| 定位 | 日常交互首选 | use-browser 不可用 or 要隔离 | 复杂多步/批量脚本 |
+| 浏览器 | 本机真实 Chrome | 内置独立 Chrome（隔离 profile） | 沙箱 Chromium |
+| 登录态/cookie | ✅ 复用用户真实 cookie | 独立 profile，需自己登录 | 独立，需自己登录 |
+| 接管当前 tab | ✅ `attach_current` | ❌ 只能自己 open | ❌ 只能自己 open |
+| 交互方式 | 结构化 ref / 坐标，逐步操作 | CLI 逐条命令 | 一段 JS + 完整 Playwright API |
+| 依赖 | Ethan Browser 扩展 + 本机 Chrome | agent-browser CLI | dev-browser CLI |
+| 适合 | 点击、填表、截图、接管登录页 | 简单离散操作、干净登录流程 | 循环、条件、遍历多页、聚合结构化结果 |
+
+**选择规则**：
+1. **默认用 use-browser**——只要本机装了扩展、要操作用户已登录的站，就用它。
+2. 退到 **agent-browser** 的条件：扩展未装/未连、server 不在本机、或需要一个隔离的独立 profile（测干净登录流程、不想动用户日常 Chrome）。
+3. 切到 **dev-browser** 的条件：任务需要**循环 / 条件判断 / 遍历多页 / 把多页数据聚合成结构化结果**——即"一个脚本跑完多步"。单步操作不要用它（更费 token）。
 
 ## 核心原则
 

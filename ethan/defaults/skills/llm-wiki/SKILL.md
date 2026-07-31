@@ -1,19 +1,18 @@
 ---
 name: llm-wiki
-description: "Karpathy's LLM Wiki: build/query interlinked markdown KB."
+description: "Karpathy 式 LLM Wiki：把多个来源编译成互相链接的 markdown 知识库（交叉引用、矛盾标记、一次编译长期复用）。**这是重加工/批量维护技能，通常由定时任务调用（如每周把新来源 ingest 进 wiki、lint 一致性），不是平时对话里随手记笔记的入口**。日常记录/收藏走内置 knowledge_* 或 getnote；只有用户明确要『建 wiki / ingest 来源进 wiki / 审计 wiki』或定时任务触发时才用本技能。"
 version: 2.1.0
 author: Hermes Agent
 license: MIT
 trigger:
-  - wiki
-  - 知识库
-  - knowledge base
-  - obsidian
-  - 笔记整理
-  - note organize
-  - markdown wiki
+  - llm-wiki
   - llm wiki
   - karpathy wiki
+  - markdown wiki
+  - 建wiki
+  - ingest 来源
+  - 审计wiki
+  - wiki lint
 platforms: [linux, macos, windows]
 metadata:
   hermes:
