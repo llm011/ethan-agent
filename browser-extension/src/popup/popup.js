@@ -225,5 +225,10 @@ async function runCommand(cmd) {
   }
 }
 
+$('manageCommands')?.addEventListener('click', (e) => {
+  e.preventDefault();
+  chrome.runtime.openOptionsPage();
+});
+
 load();
 renderCommands();

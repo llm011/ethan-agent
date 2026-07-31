@@ -13,6 +13,7 @@ export default defineConfig({
         background: resolve(__dirname, 'src/background/index.ts'),
         offscreen: resolve(__dirname, 'src/offscreen/offscreen.ts'),
         popup: resolve(__dirname, 'src/popup/popup.js'),
+        options: resolve(__dirname, 'src/options/options.js'),
       },
       output: {
         entryFileNames: '[name].js',
@@ -28,6 +29,7 @@ export default defineConfig({
         mkdirSync('dist/icons', { recursive: true });
         copyFileSync('src/manifest.json', 'dist/manifest.json');
         copyFileSync('src/popup/popup.html', 'dist/popup.html');
+        copyFileSync('src/options/options.html', 'dist/options.html');
         copyFileSync('src/offscreen/offscreen.html', 'dist/offscreen.html');
         copyFileSync('src/redirect.html', 'dist/redirect.html');
         cpSync('src/assets/icons', 'dist/icons', { recursive: true });

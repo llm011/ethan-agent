@@ -19,6 +19,23 @@ async function readConfig(): Promise<HttpConfig | null> {
   return { httpBase: wsToHttp(cfg.serverUrl), token: cfg.token };
 }
 
+/** 拉取 Ethan 服务端已配置的模型列表（供指令管理页选 model）。 */
+export async function fetchModels(): Promise<{ ok: boolean; models?: { id: string; description?: string }[]; error?: string }> {
+  const cfg = await readConfig();
+  if (!cfg) return { ok: false, error: '未配置 Ethan Server 地址或 Token' };
+  try {
+    const res = await fetch(`${cfg.httpBase}/api/models`, {
+      headers: { Authorization: `Bearer ${cfg.token}` },
+    });
+    if (!res.ok) return { ok: false, error: `请求失败 (${res.status})` };
+    const data = await res.json();
+    const models = (data.models || []).map((m: any) => ({ id: m.id, description: m.description || '' }));
+    return { ok: true, models };
+  } catch (e: any) {
+    return { ok: false, error: '连接不上 Ethan 服务' };
+  }
+}
+
 export interface StreamChatOpts {
   /** 推回消息挂的 target：阅读模式用 'reading'，结果面板用 'result'。默认 'result'。 */
   uiTarget?: string;

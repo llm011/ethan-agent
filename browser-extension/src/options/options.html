@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ethan Browser · 指令管理</title>
+  <style>
+    :root {
+      --bg: #f7f8fa; --card: #fff; --border: #e5e7eb; --text: #1f2430;
+      --muted: #9aa0aa; --primary: #0d9488; --danger: #dc2626;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #16181d; --card: #1c1f26; --border: #333842; --text: #e6e8ec;
+        --muted: #6b7280; --primary: #14b8a6; --danger: #ef4444;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 24px; background: var(--bg); color: var(--text);
+      font-family: -apple-system, system-ui, "PingFang SC", sans-serif; font-size: 14px;
+    }
+    .wrap { max-width: 760px; margin: 0 auto; }
+    h1 { font-size: 20px; margin: 0 0 4px; }
+    .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+    .toolbar { display: flex; gap: 8px; margin-bottom: 16px; }
+    button {
+      border: 1px solid var(--border); border-radius: 8px; padding: 8px 14px;
+      font-size: 13px; cursor: pointer; background: var(--card); color: var(--text);
+      transition: background 0.15s;
+    }
+    button:hover { background: var(--bg); }
+    button.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+    button.danger { color: var(--danger); border-color: var(--danger); }
+    .card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+      padding: 14px; margin-bottom: 12px;
+    }
+    .card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+    .card-head .name { font-weight: 600; font-size: 15px; flex: 1; }
+    .badge {
+      font-size: 11px; padding: 2px 7px; border-radius: 10px;
+      background: var(--bg); color: var(--muted); border: 1px solid var(--border);
+    }
+    .grid { display: grid; grid-template-columns: 90px 1fr; gap: 8px 12px; align-items: center; }
+    .grid label { font-size: 12px; color: var(--muted); }
+    input, select, textarea {
+      width: 100%; padding: 7px 9px; border: 1px solid var(--border); border-radius: 7px;
+      background: var(--bg); color: var(--text); font-size: 13px; font-family: inherit; outline: none;
+    }
+    input:focus, select:focus, textarea:focus { border-color: var(--primary); }
+    textarea { resize: vertical; min-height: 72px; line-height: 1.5; }
+    .icon-in { width: 56px; text-align: center; }
+    .row-inline { display: flex; gap: 10px; }
+    .row-inline > div { flex: 1; }
+    .card-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+    .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    #status { font-size: 13px; color: var(--primary); min-height: 18px; margin-left: 8px; align-self: center; }
+    .ph-list { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+    .ph {
+      font-size: 11px; padding: 1px 6px; border-radius: 4px; cursor: pointer;
+      background: var(--bg); border: 1px solid var(--border); color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>页面指令管理</h1>
+    <div class="sub">
+      指令从插件弹窗、右键菜单、选中工具条触发，结果流式展示在页面右上角。
+      模板占位符：<code>{content}</code> 页面正文 · <code>{selection}</code> 选中文字 · <code>{query}</code> 补充提问（可空）
+    </div>
+    <div class="toolbar">
+      <button id="add" class="primary">+ 新建指令</button>
+      <button id="reset">恢复默认</button>
+      <span id="status"></span>
+    </div>
+    <div id="list"></div>
+  </div>
+  <script type="module" src="./options.js"></script>
+</body>
+</html>

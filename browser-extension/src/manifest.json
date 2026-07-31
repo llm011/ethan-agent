@@ -19,6 +19,10 @@
       "128": "icons/icon-128.png"
     }
   },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
   "commands": {
     "extract-markdown": {
       "suggested_key": { "default": "Ctrl+Shift+M", "mac": "Command+Shift+M" },
