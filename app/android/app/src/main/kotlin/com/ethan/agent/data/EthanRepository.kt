@@ -83,7 +83,7 @@ import com.ethan.agent.core.model.UpdateRecordResponse
 import com.ethan.agent.core.network.ApiException
 import com.ethan.agent.core.network.ChatSseClient
 import com.ethan.agent.core.network.EthanApiService
-import com.ethan.agent.core.network.NetworkFactory
+import com.ethan.agent.di.ServerUrlCache
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.coroutines.Dispatchers
@@ -92,10 +92,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.MultipartBody
-import okhttp3.RequestBody.Companion.asRequestBody
-import retrofit2.HttpException
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -103,23 +99,14 @@ import javax.inject.Singleton
 @Singleton
 class EthanRepository @Inject constructor(
     private val configStore: AppConfigStore,
-    private var api: EthanApiService,
+    private val api: EthanApiService,
     private val sseClient: ChatSseClient,
-    private val tokenProvider: () -> String,
+    private val serverUrlCache: ServerUrlCache,
     private val localCache: LocalCache,
 ) {
     val config: Flow<AppConfig> = configStore.config
 
     val isLoggedIn: Flow<Boolean> = config.map { it.authToken.isNotBlank() }
-
-    private var cachedBaseUrl: String? = null
-
-    private suspend fun refreshApi() {
-        val baseUrl = configStore.config.first().apiBaseUrl
-        if (baseUrl == cachedBaseUrl) return
-        cachedBaseUrl = baseUrl
-        api = NetworkFactory.createApiService(baseUrl, tokenProvider)
-    }
 
     suspend fun repairStoredUrlIfNeeded() {
         configStore.repairStoredUrlIfNeeded()
@@ -128,15 +115,14 @@ class EthanRepository @Inject constructor(
     suspend fun saveServerUrl(url: String) {
         val normalized = com.ethan.agent.core.model.ServerUrlUtils.normalize(url)
             ?: throw IllegalArgumentException("无效的服务器地址，请填写如 https://chat.example.com:29999")
+        // 先同步更新缓存，让紧随其后的请求立即命中新地址（不等 DataStore collect 回来）
+        serverUrlCache.set(normalized)
         configStore.saveServerUrl(normalized)
-        refreshApi()
     }
 
     suspend fun login(token: String, serverUrl: String? = null): Result<AuthResponse> = runCatching {
         if (!serverUrl.isNullOrBlank()) {
             saveServerUrl(serverUrl)
-        } else {
-            refreshApi()
         }
         val response = api.auth(com.ethan.agent.core.model.AuthRequest(token))
         if (response.ok) {
@@ -146,7 +132,7 @@ class EthanRepository @Inject constructor(
         }
         response
     }.recoverCatching { e ->
-        if (e is HttpException && e.code() == 401) error("认证失败，请检查 Token")
+        if (e is ApiException && e.code == 401) error("认证失败，请检查 Token")
         throw e
     }
 
@@ -155,27 +141,22 @@ class EthanRepository @Inject constructor(
     }
 
     suspend fun checkHealth(): String? = runCatching {
-        refreshApi()
         api.health().version
     }.getOrNull()
 
     suspend fun getModels(): List<ModelEntry> {
-        refreshApi()
         return api.getModels().models
     }
 
     suspend fun getModes(): List<ModeEntry> {
-        refreshApi()
         return api.getModes().modes
     }
 
     suspend fun getSessions(limit: Int = 50, offset: Int = 0, query: String? = null): List<SessionInfo> {
-        refreshApi()
         return api.getSessions(limit, offset, query).sessions
     }
 
     suspend fun poll(): List<SessionInfo> {
-        refreshApi()
         return api.poll().sessions
     }
 
@@ -270,27 +251,22 @@ class EthanRepository @Inject constructor(
     }
 
     suspend fun createSession(model: String? = null, mode: String? = null): CreateSessionResponse {
-        refreshApi()
         return api.createSession(model, mode)
     }
 
     suspend fun getSession(id: String): SessionDetail {
-        refreshApi()
         return api.getSession(id)
     }
 
     suspend fun renameSession(id: String, title: String) {
-        refreshApi()
         api.renameSession(id, RenameSessionRequest(title))
     }
 
     suspend fun deleteSession(id: String) {
-        refreshApi()
         api.deleteSession(id)
     }
 
     suspend fun compactSession(id: String): CompactResponse {
-        refreshApi()
         return api.compactSession(id)
     }
 
@@ -310,225 +286,181 @@ class EthanRepository @Inject constructor(
             quote = quote,
             mode = mode?.ifBlank { null },
         )
-        sseClient.streamChat(cfg.apiBaseUrl, cfg.authToken, request).collect { emit(it) }
+        sseClient.streamChat(request).collect { emit(it) }
     }.flowOn(Dispatchers.IO)
 
     suspend fun respondConsent(requestId: String, allowed: Boolean) {
-        refreshApi()
         api.respondConsent(requestId, com.ethan.agent.core.model.ConsentRequest(allowed))
     }
 
     suspend fun uploadFile(file: File, filename: String): String {
-        refreshApi()
-        val body = file.asRequestBody("application/octet-stream".toMediaType())
-        val part = MultipartBody.Part.createFormData("file", filename, body)
-        return api.uploadFile(part).path
+        val bytes = file.readBytes()
+        return api.uploadFile(bytes, filename, "application/octet-stream").path
     }
 
     suspend fun getAgentSettings(): AgentSettings {
-        refreshApi()
         return api.getAgentSettings()
     }
 
     suspend fun updateAgentSettings(patch: AgentSettings) {
-        refreshApi()
         api.updateAgentSettings(patch)
     }
 
     suspend fun getProviderSettings(): Map<String, ProviderConfig> {
-        refreshApi()
         return api.getProviderSettings()
     }
 
     suspend fun updateProviderSettings(patch: Map<String, ProviderConfig>) {
-        refreshApi()
         api.updateProviderSettings(patch)
     }
 
     suspend fun getSystemSettings(): SystemSettings {
-        refreshApi()
         return api.getSystemSettings()
     }
 
     suspend fun updateSystemSettings(patch: SystemSettings) {
-        refreshApi()
         api.updateSystemSettings(patch)
     }
 
     suspend fun getUserProfile(): String {
-        refreshApi()
         return api.getUserProfile().content
     }
 
     suspend fun updateUserProfile(content: String) {
-        refreshApi()
         api.updateUserProfile(com.ethan.agent.core.model.ProfileRequest(content))
     }
 
     suspend fun getSystemPromptPreview(): SystemPromptPreview {
-        refreshApi()
         return api.getSystemPromptPreview()
     }
 
     suspend fun getFacts(): List<Fact> {
-        refreshApi()
         return api.getFacts().facts
     }
 
     suspend fun updateFact(id: String, content: String) {
-        refreshApi()
         api.updateFact(id, FactUpdateRequest(content))
     }
 
     suspend fun deleteFact(id: String) {
-        refreshApi()
         api.deleteFact(id)
     }
 
     suspend fun getEpisodes(): List<Episode> {
-        refreshApi()
         return api.getEpisodes().episodes
     }
 
     suspend fun deleteEpisode(id: String) {
-        refreshApi()
         api.deleteEpisode(id)
     }
 
     suspend fun getProcedures(): List<Procedure> {
-        refreshApi()
         return api.getProcedures().procedures
     }
 
     suspend fun deleteProcedure(id: String) {
-        refreshApi()
         api.deleteProcedure(id)
     }
 
     suspend fun getSchedules(): List<ScheduleJob> {
-        refreshApi()
         return api.getSchedules().jobs
     }
 
     suspend fun patchSchedule(jobId: String, state: String) {
-        refreshApi()
         api.patchSchedule(jobId, SchedulePatchRequest(state))
     }
 
     suspend fun deleteSchedule(jobId: String) {
-        refreshApi()
         api.deleteSchedule(jobId)
     }
 
     suspend fun getKnowledge(query: String? = null, mode: String? = null): List<KnowledgeItem> {
-        refreshApi()
         return api.getKnowledge(query, mode).items
     }
 
     suspend fun searchKnowledge(query: String, semantic: Boolean = true): List<KnowledgeItem> {
-        refreshApi()
         return api.searchKnowledge(query, semantic = semantic).results
     }
 
     suspend fun addKnowledge(title: String, content: String, tags: List<String>) {
-        refreshApi()
         api.addKnowledge(KnowledgeCreateRequest(title, content, tags))
     }
 
     suspend fun updateKnowledge(source: String, title: String, content: String, tags: List<String>) {
-        refreshApi()
         api.updateKnowledge(source, KnowledgeUpdateRequest(title, content, tags))
     }
 
     suspend fun deleteKnowledge(source: String) {
-        refreshApi()
         api.deleteKnowledge(source)
     }
 
     suspend fun getSkills(): List<SkillInfo> {
-        refreshApi()
         return api.getSkills().skills
     }
 
     suspend fun getSkill(name: String): SkillInfo {
-        refreshApi()
         return api.getSkill(name)
     }
 
     suspend fun saveSkill(skill: SkillInfo) {
-        refreshApi()
         api.saveSkill(skill)
     }
 
     suspend fun deleteSkill(name: String) {
-        refreshApi()
         api.deleteSkill(name)
     }
 
     suspend fun getOnboardingStatus(): OnboardingStatus {
-        refreshApi()
         return api.getOnboardingStatus()
     }
 
     suspend fun completeOnboarding(agentName: String, userInfo: String) {
-        refreshApi()
         api.completeOnboarding(OnboardingCompleteRequest(agentName, userInfo))
     }
 
     suspend fun getChannels(): List<ChannelInfo> {
-        refreshApi()
         return api.getChannels().channels
     }
 
     suspend fun patchChannel(channelId: String, config: Map<String, String>) {
-        refreshApi()
         api.patchChannel(com.ethan.agent.core.model.ChannelPatchRequest(channelId, config))
     }
 
     suspend fun getDocsList(): List<DocMeta> {
-        refreshApi()
         return api.getDocsList().docs
     }
 
     suspend fun getDoc(slug: String): DocContent {
-        refreshApi()
         return api.getDoc(slug)
     }
 
     suspend fun getApiKeys(): List<ApiKeyInfo> {
-        refreshApi()
         return api.getApiKeys().keys
     }
 
     suspend fun createApiKey(name: String): ApiKeyCreated {
-        refreshApi()
         return api.createApiKey(com.ethan.agent.core.model.ApiKeyCreateRequest(name))
     }
 
     suspend fun deleteApiKey(id: String) {
-        refreshApi()
         api.deleteApiKey(id)
     }
 
     suspend fun getLogs(type: String = "backend", lines: Int = 500, query: String? = null): String {
-        refreshApi()
         return api.getLogs(type, lines, query).content
     }
 
     // ── Sessions 扩展 ──────────────────────────────────────────────────────
 
     suspend fun regenTitle(id: String): RegenTitleResponse {
-        refreshApi()
         return api.regenTitle(id)
     }
 
     suspend fun summarySession(id: String): SummaryResponse {
-        refreshApi()
         return api.summarySession(id)
     }
 
     suspend fun deleteMessage(sessionId: String, messageId: Long): DeleteMessageResponse {
-        refreshApi()
         return api.deleteMessage(sessionId, messageId)
     }
 
@@ -536,41 +468,34 @@ class EthanRepository @Inject constructor(
 
     /** 重连进行中的生成：返回 SSE Flow，204（无活跃 run）时返回空流。 */
     fun resumeStream(sessionId: String): Flow<ChatStreamEvent> = flow {
-        val cfg = configStore.config.first()
-        sseClient.resumeStream(cfg.apiBaseUrl, cfg.authToken, sessionId).collect { emit(it) }
+        sseClient.resumeStream(sessionId).collect { emit(it) }
     }.flowOn(Dispatchers.IO)
 
     suspend fun stopChat(sessionId: String): StopChatResponse {
-        refreshApi()
         return api.stopChat(sessionId)
     }
 
     suspend fun injectMessage(sessionId: String, content: String): InjectResponse {
-        refreshApi()
         return api.injectMessage(sessionId, InjectRequest(content))
     }
 
     // ── Models 扩展 ────────────────────────────────────────────────────────
 
     suspend fun updateModel(provider: String, modelId: String, model: ModelEntry) {
-        refreshApi()
         api.updateModel(provider, modelId, model)
     }
 
     // ── Memory: Insights 永久记忆 ─────────────────────────────────────────
 
     suspend fun getInsights(limit: Int = 20, offset: Int = 0): InsightsListResponse {
-        refreshApi()
         return api.getInsights(limit, offset)
     }
 
     suspend fun getInsightsByDate(dateStr: String): InsightsByDateResponse {
-        refreshApi()
         return api.getInsightsByDate(dateStr)
     }
 
     suspend fun consolidateMemory(): ConsolidateResponse {
-        refreshApi()
         return api.consolidateMemory()
     }
 
@@ -583,7 +508,6 @@ class EthanRepository @Inject constructor(
         limit: Int = 50,
         offset: Int = 0,
     ): RecordListResponse {
-        refreshApi()
         return api.getRecords(type, status, domain, limit, offset)
     }
 
@@ -594,184 +518,150 @@ class EthanRepository @Inject constructor(
         status: String? = null,
         limit: Int = 20,
     ): RecordListResponse {
-        refreshApi()
         return api.searchRecords(query, type, domain, status, limit)
     }
 
     suspend fun getRecord(id: String): RecordDetailResponse {
-        refreshApi()
         return api.getRecord(id)
     }
 
     suspend fun getRecordEvidence(id: String): RecordEvidenceResponse {
-        refreshApi()
         return api.getRecordEvidence(id)
     }
 
     suspend fun updateRecord(id: String, body: UpdateRecordRequest): UpdateRecordResponse {
-        refreshApi()
         return api.updateRecord(id, body)
     }
 
     suspend fun deleteRecord(id: String) {
-        refreshApi()
         api.deleteRecord(id)
     }
 
     suspend fun confirmRecord(id: String): ConfirmRecordResponse {
-        refreshApi()
         return api.confirmRecord(id)
     }
 
     suspend fun consolidateRecords(targetDate: String? = null): ConsolidateResponse {
-        refreshApi()
         return api.consolidateRecords(targetDate)
     }
 
     suspend fun getDailySummaries(domain: String? = null, limit: Int = 30): DailySummariesResponse {
-        refreshApi()
         return api.getDailySummaries(domain, limit)
     }
 
     suspend fun getDailySummaryByDate(dateStr: String, domain: String? = null): DailySummariesResponse {
-        refreshApi()
         return api.getDailySummaryByDate(dateStr, domain)
     }
 
     // ── Schedule 扩展 ─────────────────────────────────────────────────────
 
     suspend fun createSchedule(body: ScheduleCreateRequest) {
-        refreshApi()
         api.createSchedule(body)
     }
 
     suspend fun triggerSchedule(jobId: String) {
-        refreshApi()
         api.triggerSchedule(jobId)
     }
 
     // ── Schedule: Timeline 时间线 ─────────────────────────────────────────
 
     suspend fun getTimelineStatus(): TimelineStatusResponse {
-        refreshApi()
         return api.getTimelineStatus()
     }
 
     suspend fun syncTimelines() {
-        refreshApi()
         api.syncTimelines()
     }
 
     suspend fun timelineLifecycle(timelineId: String, action: String): TimelineActionResponse {
-        refreshApi()
         return api.timelineLifecycle(timelineId, action)
     }
 
     suspend fun exportTimeline(body: TimelineExportRequest): TimelineExportResponse {
-        refreshApi()
         return api.exportTimeline(body)
     }
 
     suspend fun importTimeline(body: TimelineImportRequest): TimelineActionResponse {
-        refreshApi()
         return api.importTimeline(body)
     }
 
     suspend fun validateTimeline(body: TimelineValidateRequest): TimelineActionResponse {
-        refreshApi()
         return api.validateTimeline(body)
     }
 
     suspend fun syncTimelineToLark(timelineId: String): TimelineActionResponse {
-        refreshApi()
         return api.syncTimelineToLark(timelineId)
     }
 
     suspend fun cleanupTimelineLark(timelineId: String): TimelineActionResponse {
-        refreshApi()
         return api.cleanupTimelineLark(timelineId)
     }
 
     // ── Settings 扩展 ─────────────────────────────────────────────────────
 
     suspend fun getToolTiers(model: String? = null): ToolTiersResponse {
-        refreshApi()
         return api.getToolTiers(model)
     }
 
     suspend fun getFastRules(): FastRulesResponse {
-        refreshApi()
         return api.getFastRules()
     }
 
     suspend fun getFastRuleOptions(model: String? = null): FastRuleOptionsResponse {
-        refreshApi()
         return api.getFastRuleOptions(model)
     }
 
     suspend fun updateFastRules(body: FastRulesPatch) {
-        refreshApi()
         api.updateFastRules(body)
     }
 
     suspend fun validateKnowledgeBackend(body: KnowledgeValidateRequest): KnowledgeValidateResponse {
-        refreshApi()
         return api.validateKnowledgeBackend(body)
     }
 
     suspend fun getLarkDepsStatus(): LarkDepsStatus {
-        refreshApi()
         return api.getLarkDepsStatus()
     }
 
     suspend fun installLarkDeps() {
-        refreshApi()
         api.installLarkDeps()
     }
 
     // ── Background Tasks ──────────────────────────────────────────────────
 
     suspend fun getBackgroundTasks(): List<BackgroundTask> {
-        refreshApi()
         return api.getBackgroundTasks().tasks
     }
 
     suspend fun stopBackgroundTask(taskId: String): StopBackgroundTaskResponse {
-        refreshApi()
         return api.stopBackgroundTask(taskId)
     }
 
     // ── Annotations 标注 ──────────────────────────────────────────────────
 
     suspend fun getAnnotations(messageId: Long): AnnotationsResponse {
-        refreshApi()
         return api.getAnnotations(messageId)
     }
 
     suspend fun batchGetAnnotations(ids: List<Long>): BatchAnnotationsResponse {
-        refreshApi()
         return api.batchGetAnnotations(ids.joinToString(","))
     }
 
     suspend fun createAnnotation(body: AnnotationCreateRequest): AnnotationCreateResponse {
-        refreshApi()
         return api.createAnnotation(body)
     }
 
     suspend fun deleteAnnotation(annoId: Long): DeleteAnnotationResponse {
-        refreshApi()
         return api.deleteAnnotation(annoId)
     }
 
     // ── Files / 资产 ──────────────────────────────────────────────────────
 
     suspend fun signFiles(paths: List<String>): SignResponse {
-        refreshApi()
         return api.signFiles(SignRequest(paths))
     }
 
     suspend fun getDeck(path: String, sessionId: String = ""): DeckResponse {
-        refreshApi()
         return api.getDeck(path, sessionId)
     }
 
@@ -793,11 +683,10 @@ class EthanRepository @Inject constructor(
     }
 
     fun friendlyError(e: Throwable): String = when (e) {
-        is ApiException -> e.message
-        is HttpException -> when (e.code()) {
+        is ApiException -> when (e.code) {
             401 -> "未授权，请重新登录"
             404 -> "资源不存在"
-            else -> "请求失败 (${e.code()})"
+            else -> e.message.ifBlank { "请求失败 (${e.code})" }
         }
         is SerializationException -> {
             val msg = e.message.orEmpty()

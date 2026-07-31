@@ -123,8 +123,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.compose.markdown)
     implementation(libs.kotlinx.serialization.json)
-    implementation(libs.okhttp)
-    implementation(libs.retrofit)
+    implementation(libs.okhttp) // AppUpdater 仍直接用 OkHttp 下载 APK
     implementation(libs.coil.compose)
     implementation(libs.androidx.biometric)
     implementation(libs.material3.window.size)
