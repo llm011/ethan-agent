@@ -976,10 +976,11 @@ class NotionKnowledgeBase(KnowledgeBase):
             # Notion 无硬删除，归档即移出知识库
             c.patch(f"/pages/{pid}", json={"archived": True}).raise_for_status()
 
-    def append(self, source: str, content: str) -> None:
+    def append(self, source: str, content: str) -> str:
         pid = source.replace("-", "")
         with self._client() as c:
             self._write_children_batched(c, pid, self._md_to_blocks(content))
+        return pid  # 遵守基类契约：返回条目 source
 
     # ── Search / Read ────────────────────────────────────────────────────
     def _parent_page_id(self, pg: dict) -> str | None:
@@ -1069,11 +1070,23 @@ class NotionKnowledgeBase(KnowledgeBase):
         return items
 
     def _walk(self, parent_id: str, out: list[KnowledgeItem]) -> None:
-        for p in self._child_pages(parent_id):
-            it = self.get(p["id"])
-            if it:
-                out.append(it)
-            self._walk(p["id"], out)  # 容器页也可能嵌套条目
+        self._walk_pages(self._child_pages(parent_id), out)
+
+    def _walk_pages(self, pages: list[dict], out: list[KnowledgeItem]) -> None:
+        """区分层级容器页与知识条目页：
+        - 有子 page → 视作层级容器（work/、work/coze/ 这种），只递归、不收录，
+          否则空正文的容器页会以空标题条目混进 list_all，且每页 get() 一次形成 N+1。
+        - 无子 page → 叶子，才是真正的知识条目。
+        条目在本 KB 中始终是叶子（add 总把新页挂在容器下），故该启发式成立。
+        """
+        for p in pages:
+            children = self._child_pages(p["id"])
+            if children:
+                self._walk_pages(children, out)
+            else:
+                it = self.get(p["id"])
+                if it:
+                    out.append(it)
 
     def get(self, source: str) -> KnowledgeItem | None:
         pid = source.replace("-", "")
