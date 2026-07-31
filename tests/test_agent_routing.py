@@ -6,7 +6,7 @@ When route is "fast" and fast_use_lite_model is enabled:
 - If last_matched_skills is empty or has no complex skills, it should return
   the lite provider.
 
-When route is "medium" or "full", it always returns the main provider.
+For any non-fast route it always returns the main provider.
 """
 from __future__ import annotations
 
@@ -101,13 +101,18 @@ class TestProviderForRouteFastWithoutComplexSkills:
 
 
 # ---------------------------------------------------------------------------
-# Tests: medium/full route → always main provider
+# Tests: non-fast route → always main provider
 # ---------------------------------------------------------------------------
 
 class TestProviderForRouteNonFast:
-    """medium / full 路由 → 永远返回主 provider"""
+    """非 fast 路由 → 永远返回主 provider。
 
-    @pytest.mark.parametrize("route", ["medium", "full"])
+    _get_route 只产出 fast/full（medium 档位已移除），但这里额外传一个未知档位名，
+    是要固定住 _provider_for_route 的 fallback 语义：只有 route == "fast" 才可能
+    降级到 lite，其余一律主 provider——新增档位时不会意外走 lite。
+    """
+
+    @pytest.mark.parametrize("route", ["full", "unknown_route"])
     @patch("ethan.core.agent.get_config")
     def test_non_fast_returns_main(self, mock_get_config, route):
         mock_get_config.return_value = _routing_config(fast_use_lite=True)
@@ -117,7 +122,7 @@ class TestProviderForRouteNonFast:
 
         assert result is agent._provider
 
-    @pytest.mark.parametrize("route", ["medium", "full"])
+    @pytest.mark.parametrize("route", ["full", "unknown_route"])
     @patch("ethan.core.agent.get_config")
     def test_non_fast_with_complex_skill_still_returns_main(self, mock_get_config, route):
         mock_get_config.return_value = _routing_config(fast_use_lite=True)

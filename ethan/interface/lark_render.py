@@ -418,7 +418,7 @@ def _render_post_content(text: str) -> str:
     """把多行文本渲染成飞书 post(富文本) 的 content JSON。
 
     post 的 text 标签是纯文本（不解析 markdown），但保留换行。
-    适合 fast/medium 的简短回复。post 用 message.update 更新（流式编辑）。
+    适合 fast 档的简短回复。post 用 message.update 更新（流式编辑）。
     """
     import json as _json
     lines = text.split("\n") if text else [""]

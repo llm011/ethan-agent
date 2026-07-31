@@ -20,7 +20,7 @@ def _mock_config():
     """Provide default RoutingConfig so tests don't require a real config file."""
     from ethan.core.config import DefaultsConfig, RoutingConfig
 
-    routing = RoutingConfig()  # includes default fast_rules (smart home) + medium_max_length=80
+    routing = RoutingConfig()  # includes default fast_rules (smart home)
     defaults = DefaultsConfig(routing=routing)
     cfg = MagicMock()
     cfg.defaults = defaults
@@ -119,11 +119,17 @@ class TestFastRulesSmartHome:
 
 
 # ---------------------------------------------------------------------------
-# Tests: short text, no triggers → medium
+# Tests: no triggers → full（兜底档，不再按字数分 medium）
 # ---------------------------------------------------------------------------
 
-class TestMediumRoute:
-    """短文本无任何触发词 → medium"""
+class TestFallbackRoute:
+    """无任何触发词 → full。
+
+    _get_route 只返回 'fast' | 'full'：medium 档位已随「不再按字数分档」一并移除
+    （见 routing.py 的 _get_route docstring），RoutingConfig 也没有 medium_max_length 了。
+    短问题不再因为短就降档——档位只影响工具集与模型选择，迭代上限统一由
+    defaults.max_tool_iterations 控制。
+    """
 
     def test_weather_query(self):
         """'今天天气怎么样' 命中'天气怎么样' fast_rule → fast"""
@@ -132,10 +138,20 @@ class TestMediumRoute:
         assert route == "fast", f"Expected 'fast' for weather fast_rule query, got '{route}'"
 
     def test_short_general_query(self):
-        """一般短问题走 medium"""
+        """一般短问题无触发词 → full（兜底档）"""
         query = "现在几点了"
         route = _get_route(query)
-        assert route == "medium"
+        assert route == "full"
+
+    def test_route_is_only_fast_or_full(self):
+        """回归护栏：_get_route 的值域只有 fast/full，medium 不应复活。"""
+        queries = [
+            "现在几点了", "关客厅灯", "今天天气怎么样", "帮我分析下这个代码",
+            "查一下今天的新闻", "打开网页 google.com", "帮我用浏览器打开百度",
+        ]
+        for q in queries:
+            assert _get_route(q, skill_triggers=BROWSER_SKILL_TRIGGERS) in ("fast", "full"), q
+            assert _get_route(q) in ("fast", "full"), q
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +167,7 @@ class TestSkillTriggerExtraction:
         ("网页截图保存到桌面", "fast"),            # '网页截图' trigger
         ("帮我在本机 Chrome 打开设置", "fast"),   # '本机 Chrome' trigger
         ("接管当前页面帮我填个表", "fast"),        # '接管当前页面' trigger
-        ("查一下今天的新闻", "medium"),            # 无触发词，短文本
+        ("查一下今天的新闻", "full"),              # 无触发词 → 兜底 full
     ])
     def test_various_browser_triggers(self, query, expected_route):
         """各种浏览器 skill trigger 关键词均应命中 fast"""
@@ -164,11 +180,11 @@ class TestSkillTriggerExtraction:
         """skill_triggers=None 时，浏览器关键词不触发 fast"""
         query = "帮我用浏览器打开携程"
         route = _get_route(query, skill_triggers=None)
-        # 无 skill_triggers、无 fast_rule 命中，长度 < 80 → medium
-        assert route == "medium"
+        # 无 skill_triggers、无 fast_rule 命中 → 兜底 full
+        assert route == "full"
 
     def test_empty_skill_triggers(self):
         """skill_triggers=[] 时同 None"""
         query = "打开网页 google.com"
         route = _get_route(query, skill_triggers=[])
-        assert route == "medium"
+        assert route == "full"

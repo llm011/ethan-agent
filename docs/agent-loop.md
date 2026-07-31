@@ -23,11 +23,16 @@
 用户输入
    │
    ▼
-_get_route() → 'fast' | 'medium' | 'full'
+classify_instant() → 命中则零工具直答（算术/时间/打招呼），return
+   │ 未命中
+   ▼
+_get_route() → 'fast' | 'full'
    │
-   ├─ fast   → 极简 system prompt + 仅 fast_path 工具 + 最多 2 次迭代
-   ├─ medium → 完整 system prompt + 全量工具 + 最多 medium_max_iters 次迭代（默认 4）
-   └─ full   → 完整 system prompt + 全量工具 + 最多 max_tool_iterations 次迭代（默认 10）
+   ├─ fast → 极简 system prompt + fast_base_tools + 规则声明的工具
+   └─ full → 完整 system prompt + base_tools + find_tools 按需激活
+   │
+   ▼
+迭代上限统一为 max_tool_iterations（不分档；stuck detection 才是真正兜底）
    │
    ▼
 for i in range(max_iters):
@@ -129,7 +134,7 @@ result_compressor.maybe_compress(tool_name, result)
 
 ## 设计决策
 
-**三档路由**：fast / medium / full 三档兼顾延迟与推理深度。medium 档用完整上下文但限制迭代次数，适合大多数短问答，避免为简单请求跑完整 10 轮 ReAct。
+**分档路由**：instant / fast / full 兼顾延迟与推理深度（详见 [routing.md](routing.md)）。早期的 `medium` 中轨已移除——它按字数分档，而字数与任务复杂度不相关；迭代上限改为统一由 `max_tool_iterations` 控制，真正的兜底是 stuck detection 而非分档限次。
 
 **并发 tool calls**：LLM 有时在一次回复中请求多个 tool，`asyncio.gather()` 并发执行可以显著减少延迟。
 
