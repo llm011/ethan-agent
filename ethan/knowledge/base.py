@@ -769,6 +769,7 @@ class ExternalKnowledgeBase(KnowledgeBase):
 
 _NOTION_VERSION = "2022-06-28"
 _NOTION_TEXT_LIMIT = 1900  # Notion rich_text 单块上限 2000，留余量
+_NOTION_MAX_CHILDREN = 100  # Notion 单次创建/追加 children 的上限
 
 
 class NotionKnowledgeBase(KnowledgeBase):
@@ -814,6 +815,7 @@ class NotionKnowledgeBase(KnowledgeBase):
         """极简 markdown → Notion blocks：# 标题 → heading，其余按行 → paragraph。
 
         不追求完整还原，只保证内容可读、可往返（get 再拼回纯文本）。
+        不做数量截断——超过单次 API 上限的部分由调用方分批写入（见 _write_children_batched）。
         """
         blocks: list[dict] = []
         for line in content.splitlines():
@@ -831,9 +833,36 @@ class NotionKnowledgeBase(KnowledgeBase):
                     break
             rich = [{"type": "text", "text": {"content": c}} for c in cls._text_chunks(text)]
             blocks.append({"object": "block", "type": btype, btype: {"rich_text": rich}})
-            if len(blocks) >= 95:  # Notion children append 上限 100/次，留余量
-                break
         return blocks
+
+    @staticmethod
+    def _write_children_batched(client, parent_id: str, blocks: list[dict]) -> None:
+        """把 blocks 分批 append 到 parent，绕过 Notion 单次 100 children 上限。
+
+        长笔记不再静默丢内容：超过 100 块的部分按批次续写。
+        """
+        for i in range(0, len(blocks), _NOTION_MAX_CHILDREN):
+            batch = blocks[i:i + _NOTION_MAX_CHILDREN]
+            client.patch(f"/blocks/{parent_id}/children",
+                         json={"children": batch}).raise_for_status()
+
+    @staticmethod
+    def _all_child_blocks(client, parent_id: str) -> list[dict]:
+        """翻页取回 parent 下**全部** child block（不止前 100），供读取/删除用。"""
+        out: list[dict] = []
+        cursor = None
+        while True:
+            params = {"page_size": 100}
+            if cursor:
+                params["start_cursor"] = cursor
+            resp = client.get(f"/blocks/{parent_id}/children", params=params)
+            resp.raise_for_status()
+            data = resp.json()
+            out.extend(data.get("results", []))
+            if not data.get("has_more"):
+                break
+            cursor = data.get("next_cursor")
+        return out
 
     @staticmethod
     def _blocks_to_text(blocks: list[dict]) -> str:
@@ -906,14 +935,19 @@ class NotionKnowledgeBase(KnowledgeBase):
         body = content
         if tags:
             body = f"Tags: {', '.join(tags)}\n\n{content}"
+        blocks = self._md_to_blocks(body)
         with self._client() as c:
+            # 建页时最多带 100 个 children，其余分批 append，避免长笔记尾部丢失
             resp = c.post("/pages", json={
                 "parent": {"page_id": parent},
                 "properties": {"title": {"title": [{"text": {"content": title}}]}},
-                "children": self._md_to_blocks(body),
+                "children": blocks[:_NOTION_MAX_CHILDREN],
             })
             resp.raise_for_status()
-            return resp.json()["id"].replace("-", "")
+            pid = resp.json()["id"].replace("-", "")
+            if len(blocks) > _NOTION_MAX_CHILDREN:
+                self._write_children_batched(c, pid, blocks[_NOTION_MAX_CHILDREN:])
+            return pid
 
     def update(self, source: str, title: str, content: str, tags: list[str] | None = None,
                frontmatter: dict | None = None) -> None:
@@ -926,16 +960,15 @@ class NotionKnowledgeBase(KnowledgeBase):
             c.patch(f"/pages/{pid}", json={
                 "properties": {"title": {"title": [{"text": {"content": title}}]}},
             }).raise_for_status()
-            # 清空旧 block 再写新（Notion 无整页替换，逐块删）
-            resp = c.get(f"/blocks/{pid}/children", params={"page_size": 100})
-            resp.raise_for_status()
-            for blk in resp.json().get("results", []):
+            # 清空旧 block 再写新（Notion 无整页替换，逐块删）。
+            # 必须翻页取全部旧 block，否则超过 100 块的页面残留尾部会和新内容混在一起。
+            for blk in self._all_child_blocks(c, pid):
                 try:
                     c.delete(f"/blocks/{blk['id']}").raise_for_status()
                 except Exception:
                     pass
-            c.patch(f"/blocks/{pid}/children",
-                    json={"children": self._md_to_blocks(body)}).raise_for_status()
+            # 新内容分批写入，绕过单次 100 children 上限
+            self._write_children_batched(c, pid, self._md_to_blocks(body))
 
     def delete(self, source: str) -> None:
         pid = source.replace("-", "")
@@ -946,20 +979,74 @@ class NotionKnowledgeBase(KnowledgeBase):
     def append(self, source: str, content: str) -> None:
         pid = source.replace("-", "")
         with self._client() as c:
-            c.patch(f"/blocks/{pid}/children",
-                    json={"children": self._md_to_blocks(content)}).raise_for_status()
+            self._write_children_batched(c, pid, self._md_to_blocks(content))
 
     # ── Search / Read ────────────────────────────────────────────────────
+    def _parent_page_id(self, pg: dict) -> str | None:
+        """取 page 的直接父 page id（仅当 parent 是 page 时），否则 None。"""
+        parent = pg.get("parent") or {}
+        if parent.get("type") == "page_id":
+            return (parent.get("page_id") or "").replace("-", "")
+        return None
+
+    def _is_within_root(self, pg: dict, client, root_id: str, cache: dict) -> bool:
+        """沿 parent 链上溯，判断 page 是否落在 root_id 子树内。
+
+        Notion /search 是 workspace 级的，会返回 integration 可见的所有页面；
+        必须按 root 过滤，否则 people-kb 去重/召回会误匹配知识库外的页面。
+        """
+        seen: set[str] = set()
+        pid = pg.get("id", "").replace("-", "")
+        parent_id = self._parent_page_id(pg)
+        depth = 0
+        while parent_id and depth < 25:
+            if parent_id == root_id:
+                return True
+            if parent_id in seen:  # 环保护
+                return False
+            seen.add(parent_id)
+            # 缓存父链，避免同一批结果重复请求
+            if parent_id in cache:
+                parent_id = cache[parent_id]
+            else:
+                pr = client.get(f"/pages/{parent_id}")
+                if pr.status_code != 200:
+                    return False
+                nxt = self._parent_page_id(pr.json())
+                cache[parent_id] = nxt
+                parent_id = nxt
+            depth += 1
+        return False
+
+    def _resolve_scene_root(self, client) -> str | None:
+        """scene 非空时返回 root 下的 `{scene}` 容器 id（find-only，不创建）；
+        找不到返回 None（该 scene 尚无内容）。scene 为空时返回真实 root。"""
+        if not self._scene:
+            return self._root_page_id
+        for p in self._child_pages(self._root_page_id):
+            if p["title"] == self._scene:
+                return p["id"]
+        return None
+
     def search(self, query: str, limit: int = 5) -> list[KnowledgeItem]:
         with self._client() as c:
+            effective_root = self._resolve_scene_root(c)
+            if effective_root is None:
+                return []  # scene 容器还没建，说明该场景无任何条目
+            # Notion /search 无 parent 过滤能力，先多取一些候选再按 root 收敛
             resp = c.post("/search", json={
                 "query": query,
                 "filter": {"property": "object", "value": "page"},
-                "page_size": limit,
+                "page_size": max(limit * 4, 20),
             })
             resp.raise_for_status()
             items: list[KnowledgeItem] = []
-            for pg in resp.json().get("results", [])[:limit]:
+            ancestry_cache: dict[str, str | None] = {}
+            for pg in resp.json().get("results", []):
+                if len(items) >= limit:
+                    break
+                if not self._is_within_root(pg, c, effective_root, ancestry_cache):
+                    continue  # 跳过知识库 root 之外的页面
                 it = self._page_to_item(pg, with_content=False)
                 if it:
                     items.append(it)
@@ -1010,9 +1097,10 @@ class NotionKnowledgeBase(KnowledgeBase):
         content, tags = "", []
         if with_content:
             with self._client() as c:
-                resp = c.get(f"/blocks/{pid}/children", params={"page_size": 100})
-                if resp.status_code == 200:
-                    content = self._blocks_to_text(resp.json().get("results", []))
+                # 翻页取全部 block，避免长笔记只读到前 100 块——
+                # 基于截断内容再 update 会永久丢失尾部
+                blocks = self._all_child_blocks(c, pid)
+            content = self._blocks_to_text(blocks)
             if content.startswith("Tags:"):
                 first, _, rest = content.partition("\n")
                 tags = [t.strip() for t in first[len("Tags:"):].split(",") if t.strip()]
