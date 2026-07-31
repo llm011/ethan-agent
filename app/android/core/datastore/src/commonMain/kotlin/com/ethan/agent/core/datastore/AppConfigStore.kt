@@ -111,10 +111,10 @@ class AppConfigStore(
     }
 
     suspend fun setThemeId(themeId: String) {
-        context.dataStore.edit { it[Keys.THEME_ID] = themeId }
+        dataStore.edit { it[Keys.THEME_ID] = themeId }
     }
 
     suspend fun setAppLockEnabled(enabled: Boolean) {
-        context.dataStore.edit { it[Keys.APP_LOCK] = enabled }
+        dataStore.edit { it[Keys.APP_LOCK] = enabled }
     }
 }
