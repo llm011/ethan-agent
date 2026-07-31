@@ -13,15 +13,19 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.ProcessLifecycleOwner
+import androidx.lifecycle.lifecycleScope
 import com.ethan.agent.auth.BiometricLockManager
 import com.ethan.agent.core.datastore.AppConfigStore
 import com.ethan.agent.share.ShareBus
@@ -30,7 +34,7 @@ import com.ethan.agent.ui.auth.AuthViewModel
 import com.ethan.agent.ui.theme.EthanTheme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -39,31 +43,57 @@ class MainActivity : FragmentActivity() {
     @Inject
     lateinit var configStore: AppConfigStore
 
+    /** 应用锁功能是否开启（异步读 config 后确定）。 */
+    private var lockEnabled = false
+
+    /** 当前是否处于锁定态。true=显示 LockGate，false=显示主界面。 */
+    private val locked = mutableStateOf(false)
+
+    /** config 是否读取完成。未完成时显示 splash，避免开锁场景下主界面闪现。 */
+    private val configLoaded = mutableStateOf(false)
+
+    /**
+     * 应用退到后台时重新加锁。用 ProcessLifecycleOwner 而非 Activity 生命周期：
+     * BiometricPrompt 弹窗只会让 Activity onPause，不会触发进程级 ON_STOP，
+     * 因此解锁过程本身不会误触发重新加锁。
+     */
+    private val processObserver = object : DefaultLifecycleObserver {
+        override fun onStop(owner: LifecycleOwner) {
+            if (lockEnabled) locked.value = true
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         handleShareIntent(intent)
 
-        // 冷启动时读一次应用锁开关（DataStore first() 极快，不会明显阻塞启动）
-        val lockEnabled = runCatching {
-            runBlocking { configStore.config.first().appLockEnabled }
-        }.getOrDefault(false)
+        ProcessLifecycleOwner.get().lifecycle.addObserver(processObserver)
+
+        // 异步读应用锁开关，避免在主线程 runBlocking 阻塞（ANR 反模式）。
+        // 读完成前 configLoaded=false，界面显示 splash，开锁时不会闪现主界面。
+        lifecycleScope.launch {
+            lockEnabled = runCatching { configStore.config.first().appLockEnabled }
+                .getOrDefault(false)
+            locked.value = lockEnabled
+            configLoaded.value = true
+        }
 
         setContent {
             val authViewModel: AuthViewModel = hiltViewModel()
             EthanTheme {
-                // locked 初值：开启了应用锁则先锁住
-                var locked by remember { mutableStateOf(lockEnabled) }
-
-                if (locked) {
-                    LockGate(
-                        onUnlock = { locked = false },
-                    )
-                } else {
-                    EthanApp(authViewModel = authViewModel)
+                when {
+                    !configLoaded.value -> SplashGate()
+                    locked.value -> LockGate(onUnlock = { locked.value = false })
+                    else -> EthanApp(authViewModel = authViewModel)
                 }
             }
         }
+    }
+
+    override fun onDestroy() {
+        ProcessLifecycleOwner.get().lifecycle.removeObserver(processObserver)
+        super.onDestroy()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -92,11 +122,17 @@ class MainActivity : FragmentActivity() {
         }
     }
 
+    /** config 读取期间的占位遮罩，避免开锁场景下主界面短暂闪现。 */
+    @Composable
+    private fun SplashGate() {
+        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {}
+    }
+
     /** 应用锁遮罩：验证通过前不渲染主界面内容。 */
-    @androidx.compose.runtime.Composable
+    @Composable
     private fun LockGate(onUnlock: () -> Unit) {
         // 进入即自动弹一次系统验证
-        androidx.compose.runtime.LaunchedEffect(Unit) {
+        LaunchedEffect(Unit) {
             promptUnlock(onUnlock)
         }
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
