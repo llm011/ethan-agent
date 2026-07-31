@@ -111,7 +111,7 @@ trigger: "开灯|关灯|开空调|关空调|关*灯|开*灯"
 |------|------|
 | 系统提示词 | 完整版：identity + soul + tools_reference + 全量 Skill 列表 |
 | 工具集 | `base_tools`（full 档初始广播集）+ `find_tools` 按需激活的长尾工具 |
-| 记忆召回 | 按需 `recall_memory`（≤15 条，可扩展召回 30 条） |
+| 记忆召回 | 按需 `recall_memory`（工具入口，`max_items` 固定 15 条）；另有 `_build_extended_memory`（agent.py，注入增强上下文时拉最多 30 条）——两者是不同入口，30 条那条不是调 `recall_memory` 得到的 |
 | 推理轮次 | `defaults.max_tool_iterations`；真正的兜底是 stuck detection |
 
 **典型场景**：代码编写、调试、重构、长文档分析、多步骤任务规划、定时任务创建、PPT 生成。
@@ -151,8 +151,9 @@ defaults:
       - ui_card
     base_tools:                  # full 档初始广播集（长尾工具靠 find_tools 按需激活）
       - web_search
-      - deliver_file
-      # …
+      - web_fetch
+      - file_read
+      # …（deliver_file 不在默认 base_tools 集：由 agent_factory 单独注册）
     fast_rules:                  # 关键字 → 工具/技能；命中任一关键字即走 fast（不看字数）
       - name: 智能家居控制
         keywords: ["关*灯", "开*灯", "播放音乐"]
