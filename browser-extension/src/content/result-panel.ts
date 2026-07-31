@@ -37,6 +37,7 @@ interface EthanResultPanelApi {
   let items: ResultItem[] = [];
   let cur = -1;                       // 当前查看的结果索引
   let activeReqId = '';               // 正在流式接收的 requestId
+  let activeItem: ResultItem | null = null;  // 正在流式回填的目标（与 cur 解耦，翻页不影响）
   const MAX_ITEMS = 20;
 
   function isDark(): boolean {
@@ -204,6 +205,7 @@ interface EthanResultPanelApi {
     activeReqId = reqId;
     const it: ResultItem = { title: '追问：' + q.slice(0, 20), sessionId: base.sessionId, markdown: '', done: false };
     pushItem(it);
+    activeItem = it;   // 回填目标锁定到这条，翻页改 cur 也不会串
     chrome.runtime.sendMessage({ type: 'result:chat', requestId: reqId, prompt: q, sessionId: base.sessionId });
   }
 
@@ -219,7 +221,9 @@ interface EthanResultPanelApi {
 
   function newResult(opts: { title: string; sessionId: string; requestId: string }) {
     activeReqId = opts.requestId;
-    pushItem({ title: opts.title, sessionId: opts.sessionId, markdown: '', done: false });
+    const it: ResultItem = { title: opts.title, sessionId: opts.sessionId, markdown: '', done: false };
+    pushItem(it);
+    activeItem = it;   // 回填目标锁定到这条，翻页改 cur 也不会串
   }
 
   // ── 消息监听 ─────────────────────────────────────────────────
@@ -237,12 +241,14 @@ interface EthanResultPanelApi {
       return;
     }
     if (msg.type === 'chatChunk' && msg.requestId === activeReqId) {
-      const it = items[cur];
-      if (it && !it.done) { it.markdown += msg.delta || ''; render(); }
+      // 回填到 activeItem 而非 items[cur]：流式期间用户翻页改了 cur 也不会串到别条
+      const it = activeItem;
+      if (it && !it.done) { it.markdown += msg.delta || ''; if (items[cur] === it) render(); }
     } else if (msg.type === 'chatDone' && msg.requestId === activeReqId) {
-      const it = items[cur];
-      if (it) { it.done = true; if (msg.error) it.error = msg.error; render(); }
+      const it = activeItem;
+      if (it) { it.done = true; if (msg.error) it.error = msg.error; if (items[cur] === it) render(); }
       activeReqId = '';
+      activeItem = null;
     }
   }
 
