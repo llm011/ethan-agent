@@ -5,6 +5,29 @@ export type * from './types';
 
 export const BROWSER_RPC_VERSION = 1;
 
+// chrome.alarms 名称：定期唤醒 SW / 确保 offscreen 存活。
+export const KEEPALIVE_ALARM = 'ethan-browser-keepalive';
+
+export interface ServerConfig {
+  serverUrl: string; // 如 ws://localhost:8900/ws/browser
+  token: string;
+}
+
+/** 把 ws://host/ws/browser 转成 http://host（wss→https）。 */
+export function wsToHttp(wsUrl: string): string {
+  return wsUrl
+    .replace(/^wss:/, 'https:')
+    .replace(/^ws:/, 'http:')
+    .replace(/\/ws\/browser\/?$/, '');
+}
+
+/** 从 chrome.storage.local 读 serverUrl/token，缺任一则返回 null。 */
+export async function readServerConfig(): Promise<ServerConfig | null> {
+  const { serverUrl, token } = await chrome.storage.local.get(['serverUrl', 'token']);
+  if (!serverUrl || !token) return null;
+  return { serverUrl, token };
+}
+
 export const BROWSER_RPC_METHODS = {
   authenticate: 'browser.authenticate',
   sessionsCreate: 'sessions.create',

@@ -5,14 +5,11 @@
 // 然后打开 redirect 中间页：先尝试 ethan:// deep link 唤起桌面端，
 // 唤不起时 2s 后自动 fallback 到 Web UI。
 
+import { wsToHttp, readServerConfig } from '../shared';
+
 const MENU_SELECTION = 'ethan-send-selection';
 const MENU_LINK = 'ethan-send-link';
 const MENU_PAGE = 'ethan-send-page';
-
-/** 把 ws://host/ws/browser 转成 http://host */
-function wsToHttp(wsUrl: string): string {
-  return wsUrl.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:').replace(/\/ws\/browser\/?$/, '');
-}
 
 export function setupContextMenu(): void {
   // 清除旧菜单（重装/更新时避免重复）
@@ -58,13 +55,14 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 });
 
 export async function sendToEthan(content: string): Promise<void> {
-  const { serverUrl, token } = await chrome.storage.local.get(['serverUrl', 'token']);
-  if (!serverUrl || !token) {
+  const cfg = await readServerConfig();
+  if (!cfg) {
     // 没配置 → 打开 popup 让用户配置
     chrome.action.openPopup?.();
     return;
   }
 
+  const { serverUrl, token } = cfg;
   const httpBase = wsToHttp(serverUrl);
   const sessionId = crypto.randomUUID();
 

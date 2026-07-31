@@ -9,14 +9,13 @@
 //   4. storage 变化时通知 offscreen 重连
 //   5. alarm 定期确保 offscreen document 存在（兜底）
 
-import { BROWSER_RPC_VERSION } from '../shared';
+import { BROWSER_RPC_VERSION, KEEPALIVE_ALARM, readServerConfig } from '../shared';
 
 import { BrowserSessionStore } from './session-store';
 import { handleNativeRequest } from './rpc';
 import { BrowserPageController } from './page-controller';
 import { NetworkMonitor } from './network-monitor';
 import { releaseCdpClient } from './cdp-client';
-import { KEEPALIVE_ALARM } from './ws-client';
 import { pushStep, updateStepStatus } from './overlay-injector';
 import { setupContextMenu, sendToEthan } from './context-menu';
 import {
@@ -158,7 +157,7 @@ async function ensureOffscreenDocument(): Promise<void> {
     offscreenCreated = true;
     configPushed = false;  // 新 offscreen，需要重新推送
     // 直接推送配置，避免绕回 ensureOffscreenAndPushConfig 产生循环调用
-    const cfg = await readWsConfig();
+    const cfg = await readServerConfig();
     if (cfg) {
       try {
         await chrome.runtime.sendMessage({ target: 'offscreen', type: 'config', config: cfg });
@@ -201,19 +200,12 @@ async function sendToOffscreen(message: unknown, timeoutMs = 3000): Promise<any>
 
 // ── 消息路由 ──────────────────────────────────────────────────
 
-// 读 storage 配置（SW 中可用 chrome.storage）
-async function readWsConfig(): Promise<{ serverUrl: string; token: string } | null> {
-  const { serverUrl, token } = await chrome.storage.local.get(['serverUrl', 'token']);
-  if (!serverUrl || !token) return null;
-  return { serverUrl, token };
-}
-
 // 创建 offscreen 后主动推送配置（只在首次推送，避免重复触发重连）
 let configPushed = false;
 async function ensureOffscreenAndPushConfig(): Promise<void> {
   await ensureOffscreenDocument();
   if (configPushed) return;  // 已推送过，不重复
-  const cfg = await readWsConfig();
+  const cfg = await readServerConfig();
   if (cfg) {
     try {
       await chrome.runtime.sendMessage({ target: 'offscreen', type: 'config', config: cfg });
@@ -228,7 +220,7 @@ async function ensureOffscreenAndPushConfig(): Promise<void> {
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   // 来自 offscreen 的配置请求
   if (msg?.target === 'sw' && msg.type === 'get_config') {
-    readWsConfig().then(cfg => {
+    readServerConfig().then(cfg => {
       sendResponse(cfg);
     }).catch(e => {
       sendResponse(null);
@@ -272,10 +264,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 
   // 来自 content script（reading-mode）：流式 AI 请求
+  // msg.sessionId 存在时走多轮对话（服务端按 session 维护上下文），否则单轮（摘要）
   if (msg?.type === 'reading:chat') {
     const tabId = _sender.tab?.id;
     if (typeof tabId === 'number') {
-      void readingChat(tabId, msg.requestId, msg.prompt);
+      void readingChat(tabId, msg.requestId, msg.prompt, { sessionId: msg.sessionId });
     }
     sendResponse({ ok: true });  // 立即应答，结果通过 tabs.sendMessage 流式推回
     return true;
@@ -318,7 +311,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     (async () => {
       try {
         await ensureOffscreenDocument();
-        const cfg = await readWsConfig();
+        const cfg = await readServerConfig();
         if (cfg) {
           try {
             await chrome.runtime.sendMessage({ target: 'offscreen', type: 'config', config: cfg });
@@ -342,7 +335,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && (changes.serverUrl || changes.token)) {
     // 配置变化：读新配置推送给 offscreen，offscreen 收到后自动重连
     void (async () => {
-      const cfg = await readWsConfig();
+      const cfg = await readServerConfig();
       if (cfg) {
         try {
           await chrome.runtime.sendMessage({ target: 'offscreen', type: 'config', config: cfg });
@@ -398,88 +391,6 @@ chrome.tabs.onUpdated.addListener((tabId, change, _tab) => {
 
 // ── 快捷键（manifest commands）─────────────────────────────────
 
-// 在页面上下文中提取正文为 Markdown（与 browser.py 的 _MARKDOWN_SCRIPT 同源逻辑）
-// 用 chrome.scripting.executeScript 的 func 参数直接传函数，避免字符串转义问题
-// 注意：此函数会被序列化后在页面上下文中执行，TypeScript 类型在此无意义，用 any 简化
-function extractMarkdownInPage(): any {
-  const clone: any = document.body.cloneNode(true);
-  clone.querySelectorAll('nav,header,footer,aside,script,style,iframe,noscript,svg,form,button,[role="navigation"],[role="banner"],[role="contentinfo"],.ad,.ads,.advertisement,.sidebar,.cookie,.popup,.modal,.share,.related,.comments').forEach((e: any) => e.remove());
-
-  let main: any = clone.querySelector('article') || clone.querySelector('main') || clone.querySelector('[role="main"]') || clone.querySelector('#content,.content,.post-content,.article-content,.entry-content,.post-body,.article-body');
-  if (!main) {
-    let best: any = null;
-    let bestScore = 0;
-    for (const el of clone.querySelectorAll('div,section')) {
-      const t = el.innerText || '';
-      const len = t.length;
-      if (len < 200) continue;
-      const score = len - el.querySelectorAll('a').length * 50;
-      if (score > bestScore) { bestScore = score; best = el; }
-    }
-    main = best || clone;
-  }
-
-  function cv(node: any): string {
-    let r = '';
-    for (const c of node.childNodes) {
-      if (c.nodeType === 3) { const t = (c.textContent || '').trim(); if (t) r += t + ' '; continue; }
-      if (c.nodeType !== 1) continue;
-      const tag = c.tagName.toLowerCase();
-      const inner = () => cv(c).trim();
-      switch (tag) {
-        case 'h1': r += '\n# ' + inner() + '\n\n'; break;
-        case 'h2': r += '\n## ' + inner() + '\n\n'; break;
-        case 'h3': r += '\n### ' + inner() + '\n\n'; break;
-        case 'h4': r += '\n#### ' + inner() + '\n\n'; break;
-        case 'h5': r += '\n##### ' + inner() + '\n\n'; break;
-        case 'h6': r += '\n###### ' + inner() + '\n\n'; break;
-        case 'p': r += inner() + '\n\n'; break;
-        case 'br': r += '\n'; break;
-        case 'hr': r += '\n---\n\n'; break;
-        case 'strong': case 'b': r += '**' + inner() + '**'; break;
-        case 'em': case 'i': r += '*' + inner() + '*'; break;
-        case 'code':
-          if (c.parentElement && c.parentElement.tagName.toLowerCase() === 'pre') break;
-          r += '`' + (c.innerText || '') + '`'; break;
-        case 'pre': {
-          const code = c.querySelector('code');
-          const lang = code ? (code.className.match(/language-(\w+)/) || [])[1] : '';
-          r += '\n```' + (lang || '') + '\n' + (c.innerText || '') + '\n```\n\n'; break;
-        }
-        case 'blockquote': r += '\n> ' + inner().replace(/\n/g, '\n> ') + '\n\n'; break;
-        case 'a': { const h = c.getAttribute('href') || '', t = c.innerText || ''; r += h && t ? '[' + t + '](' + h + ')' : t; break; }
-        case 'img': { const s = c.getAttribute('src') || c.getAttribute('data-src') || '', a = c.getAttribute('alt') || ''; if (s) r += '![' + a + '](' + s + ')'; break; }
-        case 'ul': case 'ol': r += '\n' + cvList(c, tag === 'ol') + '\n\n'; break;
-        case 'table': r += cvTable(c) + '\n\n'; break;
-        default: r += cv(c);
-      }
-    }
-    return r;
-  }
-  function cvList(list: any, ord: boolean): string {
-    let r = '', i = 1;
-    for (const li of list.children) {
-      if (li.tagName.toLowerCase() !== 'li') continue;
-      r += (ord ? (i++) + '. ' : '- ') + cv(li).trim().replace(/\n/g, '\n  ') + '\n';
-    }
-    return r;
-  }
-  function cvTable(t: any): string {
-    const rows = t.querySelectorAll('tr');
-    if (!rows.length) return '';
-    let r = '', first = true;
-    for (const row of rows) {
-      const cells = Array.from(row.querySelectorAll('th,td')).map((c: any) => (c.innerText || '').trim().replace(/\n/g, ' '));
-      r += '| ' + cells.join(' | ') + ' |\n';
-      if (first) { r += '|' + cells.map(() => '---').join('|') + '|\n'; first = false; }
-    }
-    return r;
-  }
-
-  const md = cv(main).replace(/\n{3,}/g, '\n\n').trim();
-  return JSON.stringify({ markdown: md, length: md.length, title: document.title, url: location.href });
-}
-
 chrome.commands.onCommand.addListener((command) => {
   if (command === 'toggle-overlay') {
     // 切换浮层：向当前激活 tab 注入 overlay 脚本（如果还没注入），然后发 toggle 消息
@@ -505,19 +416,25 @@ chrome.commands.onCommand.addListener((command) => {
       try {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
         if (!tab?.id) return;
-        // 在页面执行 Markdown 提取函数
+        // 注入共享正文提取脚本（幂等），再调用 window.__ethanReader.extractMarkdown()
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          files: ['content/reader-extract.js'],
+        }).catch(() => {});
         const results = await chrome.scripting.executeScript({
           target: { tabId: tab.id },
-          func: extractMarkdownInPage,
+          func: () => (window as any).__ethanReader?.extractMarkdown() || null,
         }).catch(() => []);
-        if (!results?.[0]?.result) return;
-        const info = JSON.parse(results[0].result as string);
+        const info = results?.[0]?.result as
+          | { markdown: string; length: number; title: string; url: string }
+          | null
+          | undefined;
         const md = info?.markdown || '';
         if (!md) return;
         // 截断超长内容
         const maxLen = 30000;
         const content = md.length > maxLen
-          ? md.slice(0, maxLen) + '\n\n<!-- 已截断（共 ' + md.length + ' 字，前 ' + maxLen + ' 字）-->\n\n来源：' + (info.url || '')
+          ? md.slice(0, maxLen) + '\n\n<!-- 已截断（共 ' + md.length + ' 字，前 ' + maxLen + ' 字）-->\n\n来源：' + (info?.url || '')
           : md;
         // 复用右键菜单的发送逻辑（发起对话 + 打开 redirect 页面）
         await sendToEthan(content);

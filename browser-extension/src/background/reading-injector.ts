@@ -8,23 +8,17 @@
 // content script 无法跨域 fetch 后端，所有网络请求都由背景代理。
 // 流式回传：background fetch SSE → 逐 data 块用 chrome.tabs.sendMessage 推回 tab。
 
-interface ServerConfig {
+import { wsToHttp, readServerConfig } from '../shared';
+
+interface HttpConfig {
   httpBase: string;
   token: string;
 }
 
-/** 把 ws://host/ws/browser 转成 http://host（与 context-menu 一致）。 */
-function wsToHttp(wsUrl: string): string {
-  return wsUrl
-    .replace(/^wss:/, 'https:')
-    .replace(/^ws:/, 'http:')
-    .replace(/\/ws\/browser\/?$/, '');
-}
-
-async function readConfig(): Promise<ServerConfig | null> {
-  const { serverUrl, token } = await chrome.storage.local.get(['serverUrl', 'token']);
-  if (!serverUrl || !token) return null;
-  return { httpBase: wsToHttp(serverUrl), token };
+async function readConfig(): Promise<HttpConfig | null> {
+  const cfg = await readServerConfig();
+  if (!cfg) return null;
+  return { httpBase: wsToHttp(cfg.serverUrl), token: cfg.token };
 }
 
 const injectedTabs = new Set<number>();
@@ -42,9 +36,11 @@ chrome.tabs.onRemoved.addListener(tabId => {
 export async function ensureReadingInjected(tabId: number): Promise<boolean> {
   if (injectedTabs.has(tabId)) return true;
   try {
+    // reading-mode 依赖 window.__ethanReader（detectArticle/cleanArticle/htmlToMarkdown），
+    // 先注入共享正文提取脚本，再注入阅读模式脚本。
     await chrome.scripting.executeScript({
       target: { tabId },
-      files: ['content/reading-mode.js'],
+      files: ['content/reader-extract.js', 'content/reading-mode.js'],
     });
     injectedTabs.add(tabId);
     return true;
@@ -65,11 +61,18 @@ export async function startReading(tabId: number): Promise<{ ok: boolean; error?
   }
 }
 
-/** 流式 AI：POST /api/chat（stream+btw），逐块把 delta 推回 content script。 */
+/**
+ * 流式 AI：POST /api/chat（stream），逐块把 delta 推回 content script。
+ *
+ * opts.sessionId 传入时走多轮对话：附 session_id + btw=false，服务端按 session
+ *   维护上下文（首轮把正文塞进消息，后续轮直接问，历史由服务端拼）。
+ * 不传 sessionId（如摘要）走 btw=true 单轮，不落会话上下文。
+ */
 export async function readingChat(
   tabId: number,
   requestId: string,
   prompt: string,
+  opts: { sessionId?: string } = {},
 ): Promise<void> {
   const push = (msg: Record<string, unknown>) => {
     chrome.tabs.sendMessage(tabId, { target: 'reading', ...msg }).catch(() => {});
@@ -81,6 +84,18 @@ export async function readingChat(
     return;
   }
 
+  const body: Record<string, unknown> = {
+    messages: [{ role: 'user', content: prompt }],
+    stream: true,
+    channel: 'browser-extension',
+  };
+  if (opts.sessionId) {
+    body.session_id = opts.sessionId;
+    body.btw = false;  // 多轮：服务端按 session 拼历史
+  } else {
+    body.btw = true;   // 单轮（摘要）：不带历史
+  }
+
   let res: Response;
   try {
     res = await fetch(`${cfg.httpBase}/api/chat`, {
@@ -89,12 +104,7 @@ export async function readingChat(
         'Content-Type': 'application/json',
         Authorization: `Bearer ${cfg.token}`,
       },
-      body: JSON.stringify({
-        messages: [{ role: 'user', content: prompt }],
-        stream: true,
-        btw: true,
-        channel: 'browser-extension',
-      }),
+      body: JSON.stringify(body),
     });
   } catch (e: any) {
     push({ type: 'chatDone', requestId, error: '连接不上 Ethan 服务，请确认后端已启动' });
