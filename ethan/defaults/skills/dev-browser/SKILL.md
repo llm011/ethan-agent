@@ -1,7 +1,7 @@
 ---
 name: dev-browser
-trigger: "复杂网页流程|网页脚本|playwright|批量抓取|多步网页操作|网页自动化脚本|遍历页面|循环抓取|dev-browser|browser script"
-description: "用 dev-browser 跑沙箱 JavaScript 脚本操控浏览器，拿到完整 Playwright API（goto/click/locator/evaluate/循环/条件）。适合一个脚本搞定的复杂多步流程、批量抓取、需要循环或判断的网页任务。简单的单步操作请优先用 agent-browser。需要把多页数据聚合成结构化结果时尤其合适。"
+trigger: "dev-browser|playwright|网页脚本|browser script|批量抓取|循环抓取|遍历页面|多页聚合|复杂网页流程|多步网页脚本|网页自动化脚本"
+description: "进阶脚本浏览器技能：把一段 JavaScript 喂给 dev-browser，在沙箱里拿到完整 Playwright API（goto/click/locator/evaluate/循环/条件）。三档浏览器技能里的脚本档——专治需要循环、条件判断、遍历多页、把多页数据聚合成结构化结果的复杂任务。日常单步交互（点一下、填个表、接管当前 tab）用 use-browser；简单离散操作或隔离 profile 用 agent-browser；只有'一个脚本跑完多步/批量'才用本技能。"
 metadata:
   requires:
     bins: ["dev-browser"]
@@ -11,7 +11,7 @@ metadata:
 
 进阶浏览器技能。把一段 **JavaScript** 喂给 `dev-browser`，它在 QuickJS WASM 沙箱里跑，给你**完整 Playwright Page API**。
 
-**什么时候用它而不是 agent-browser：** 任务需要循环、条件判断、把多页数据聚合成一个结构化结果、或一次脚本完成多步操作。**简单的单步操作（开个页面、点一下、读个文字）请用 `agent-browser`，更省 token。**
+**三档分工**：日常交互（点击、填表、截图、接管当前登录 tab）默认用 `use-browser`（复用本机真实登录态）；简单离散操作或需要隔离 profile 用 `agent-browser`。**本技能只在任务需要循环、条件判断、遍历多页、把多页数据聚合成结构化结果、或一个脚本跑完多步时才用。** 简单单步操作用上面两个更省 token。
 
 ## 前置检查（第一次用先做）
 

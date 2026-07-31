@@ -30,7 +30,7 @@ CASES = [
     (
         "C8",
         "多文档整理(模拟 62 步会话)",
-        "把 ~/.ethan/skills/obsidian/SKILL.md 和 life-manager/SKILL.md 都抓来,对比它们的 frontmatter 规范差异",
+        "把 ~/.ethan/skills/obsidian/SKILL.md 和 work-notes/SKILL.md 都抓来,对比它们的 frontmatter 规范差异",
         True,
     ),
     ("C9", "简单写知识库", "往知识库存一条笔记:标题'测试',内容'adaptive planning 测试'", False),

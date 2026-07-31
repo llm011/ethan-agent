@@ -26,14 +26,39 @@ class KnowledgeItem:
 
 
 def _safe_subdir(tag: str) -> str | None:
-    """把 tag 清洗为安全的子目录名，防路径穿越。
+    """把 tag 清洗为安全的**单级**子目录名，防路径穿越。
 
     只保留 [a-zA-Z0-9_-]，其余替换为 -；空或全为 . 时返回 None（落根目录）。
+    保留此函数向后兼容；多层级请用 _safe_subpath。
     """
     name = re.sub(r"[^A-Za-z0-9_\-]", "-", tag).strip("-")
     if not name or name == "." or name == "..":
         return None
     return name
+
+
+def _safe_subpath(tag: str) -> Path | None:
+    """把带 `/` 的层级 tag 清洗为安全的**多级**相对路径（防穿越）。
+
+    例：`work/coze/prd` → Path("work/coze/prd")，落盘成嵌套目录，与 Obsidian
+    的层级标签约定打平。规则：
+    - 按 `/` 分段（`\\` 也视作分隔符，Windows 路径归一）
+    - 每段**保留 Unicode 字母/数字/下划线/连字符/空格**（含中文，与 Obsidian 打平），
+      仅把文件系统危险字符（`/ \\ : * ? " < > | ` 及控制符）替换为 `-`，去首尾 `-`/空格
+    - 空段、`.`、`..`、纯 `.` 序列跳过（防路径穿越）
+    - 所有段都为空时返回 None（落根目录）
+    """
+    segments: list[str] = []
+    for raw in re.split(r"[\\/]", str(tag)):
+        # 只替换危险字符，保留 CJK 等 Unicode 文字
+        name = re.sub(r'[\x00-\x1f<>:"|?*]', "-", raw)
+        name = re.sub(r"-{2,}", "-", name).strip("- ")
+        if not name or set(name) == {"."}:  # 空、"."、".." 等纯点段
+            continue
+        segments.append(name)
+    if not segments:
+        return None
+    return Path(*segments)
 
 
 class KnowledgeBase(ABC):
@@ -189,12 +214,12 @@ class FilesystemKnowledgeBase(KnowledgeBase):
             frontmatter: dict | None = None) -> str:
         slug = re.sub(r"[^\w]+", "-", title.lower())[:50].strip("-")
         slug = re.sub(r"-{2,}", "-", slug)  # 双保险：合并残余连续短横线
-        # 按 tags[0] 分子目录（如 people/、project/），sanitize 后为空则落根目录
+        # 按 tags[0] 分子目录，支持层级标签（如 "work/coze/prd"）；sanitize 后为空则落根目录
         target_dir = self._dir
         if tags:
-            subdir = _safe_subdir(tags[0])
-            if subdir:
-                target_dir = self._dir / subdir
+            subpath = _safe_subpath(tags[0])
+            if subpath:
+                target_dir = self._dir / subpath
                 target_dir.mkdir(parents=True, exist_ok=True)
         path = target_dir / f"{slug}.md"
         i = 1
@@ -319,12 +344,13 @@ class ObsidianKnowledgeBase(KnowledgeBase):
             frontmatter: dict | None = None) -> str:
         slug = re.sub(r"[^\w]+", "-", title.lower())[:50].strip("-")
         slug = re.sub(r"-{2,}", "-", slug)  # 双保险：合并残余连续短横线
-        # 按 tags[0] 分子目录（如 people/、project/），sanitize 后为空则落根目录
+        # 按 tags[0] 分子目录，支持层级标签（如 "work/coze/prd" → work/coze/prd/）；
+        # sanitize 后为空则落根目录
         target_dir = self._dir
         if tags:
-            subdir = _safe_subdir(tags[0])
-            if subdir:
-                target_dir = self._dir / subdir
+            subpath = _safe_subpath(tags[0])
+            if subpath:
+                target_dir = self._dir / subpath
                 target_dir.mkdir(parents=True, exist_ok=True)
         path = target_dir / f"{slug}.md"
         i = 1
@@ -736,3 +762,277 @@ class ExternalKnowledgeBase(KnowledgeBase):
                 tags=d.get("tags") or [],
             ))
         return items
+
+
+# ── Notion 后端 ────────────────────────────────────────────────────────────
+
+
+_NOTION_VERSION = "2022-06-28"
+_NOTION_TEXT_LIMIT = 1900  # Notion rich_text 单块上限 2000，留余量
+
+
+class NotionKnowledgeBase(KnowledgeBase):
+    """Notion 作为知识库后端。
+
+    模型：一个 root page 作为知识库根，每个条目是 root 下的一个 **child page**。
+    层级标签（tags[0] 如 "work/coze/prd"）会在 root 下按段创建/复用中间 page，
+    条目落在最深一级，与 filesystem/Obsidian 的多层级目录打平。
+
+    - title  → child page 标题
+    - content→ 页面正文（markdown 按段落/标题转 Notion blocks，超长自动分块）
+    - tags   → 正文顶部一行 `Tags: a, b` 记录（Notion 普通 page 无自定义属性）
+    - source → Notion page id（32 位 hex，可带连字符）
+
+    scene 隔离：scene 非空时在 root 下先建一层 `{scene}` page 作为该场景子根。
+    """
+
+    def __init__(self, token: str, root_page_id: str, scene: str = ""):
+        self._token = token
+        self._root_page_id = (root_page_id or "").replace("-", "")
+        self._scene = scene
+        self._api = "https://api.notion.com/v1"
+
+    # ── HTTP ─────────────────────────────────────────────────────────────
+    def _headers(self) -> dict:
+        return {
+            "Authorization": f"Bearer {self._token}",
+            "Notion-Version": _NOTION_VERSION,
+            "Content-Type": "application/json",
+        }
+
+    def _client(self):
+        import httpx
+        return httpx.Client(base_url=self._api, headers=self._headers(), timeout=30)
+
+    # ── markdown ⇄ blocks ────────────────────────────────────────────────
+    @staticmethod
+    def _text_chunks(s: str) -> list[str]:
+        return [s[i:i + _NOTION_TEXT_LIMIT] for i in range(0, len(s), _NOTION_TEXT_LIMIT)] or [""]
+
+    @classmethod
+    def _md_to_blocks(cls, content: str) -> list[dict]:
+        """极简 markdown → Notion blocks：# 标题 → heading，其余按行 → paragraph。
+
+        不追求完整还原，只保证内容可读、可往返（get 再拼回纯文本）。
+        """
+        blocks: list[dict] = []
+        for line in content.splitlines():
+            stripped = line.rstrip()
+            if not stripped:
+                blocks.append({"object": "block", "type": "paragraph",
+                               "paragraph": {"rich_text": []}})
+                continue
+            btype = "paragraph"
+            text = stripped
+            for lvl, mark in ((3, "### "), (2, "## "), (1, "# ")):
+                if stripped.startswith(mark):
+                    btype = f"heading_{lvl}"
+                    text = stripped[len(mark):]
+                    break
+            rich = [{"type": "text", "text": {"content": c}} for c in cls._text_chunks(text)]
+            blocks.append({"object": "block", "type": btype, btype: {"rich_text": rich}})
+            if len(blocks) >= 95:  # Notion children append 上限 100/次，留余量
+                break
+        return blocks
+
+    @staticmethod
+    def _blocks_to_text(blocks: list[dict]) -> str:
+        lines: list[str] = []
+        for b in blocks:
+            t = b.get("type", "")
+            payload = b.get(t, {})
+            rich = payload.get("rich_text", []) if isinstance(payload, dict) else []
+            text = "".join(r.get("plain_text") or r.get("text", {}).get("content", "") for r in rich)
+            if t == "heading_1":
+                lines.append(f"# {text}")
+            elif t == "heading_2":
+                lines.append(f"## {text}")
+            elif t == "heading_3":
+                lines.append(f"### {text}")
+            else:
+                lines.append(text)
+        return "\n".join(lines).strip()
+
+    # ── 层级容器 page 解析/创建 ───────────────────────────────────────────
+    def _child_pages(self, parent_id: str) -> list[dict]:
+        """返回 parent 下所有 child_page 块 [{id, title}]。"""
+        out: list[dict] = []
+        cursor = None
+        with self._client() as c:
+            while True:
+                params = {"page_size": 100}
+                if cursor:
+                    params["start_cursor"] = cursor
+                resp = c.get(f"/blocks/{parent_id}/children", params=params)
+                resp.raise_for_status()
+                data = resp.json()
+                for blk in data.get("results", []):
+                    if blk.get("type") == "child_page":
+                        out.append({"id": blk["id"].replace("-", ""),
+                                    "title": blk["child_page"].get("title", "")})
+                if not data.get("has_more"):
+                    break
+                cursor = data.get("next_cursor")
+        return out
+
+    def _find_or_create_container(self, parent_id: str, title: str) -> str:
+        for p in self._child_pages(parent_id):
+            if p["title"] == title:
+                return p["id"]
+        with self._client() as c:
+            resp = c.post("/pages", json={
+                "parent": {"page_id": parent_id},
+                "properties": {"title": {"title": [{"text": {"content": title}}]}},
+            })
+            resp.raise_for_status()
+            return resp.json()["id"].replace("-", "")
+
+    def _resolve_parent(self, tags: list[str] | None) -> str:
+        """根据 scene + tags[0] 层级解析出条目应挂载的父 page id（沿途创建容器）。"""
+        parent = self._root_page_id
+        if self._scene:
+            parent = self._find_or_create_container(parent, self._scene)
+        if tags:
+            subpath = _safe_subpath(tags[0])
+            if subpath:
+                for seg in subpath.parts:
+                    parent = self._find_or_create_container(parent, seg)
+        return parent
+
+    # ── Write ────────────────────────────────────────────────────────────
+    def add(self, title: str, content: str, tags: list[str] | None = None,
+            frontmatter: dict | None = None) -> str:
+        parent = self._resolve_parent(tags)
+        body = content
+        if tags:
+            body = f"Tags: {', '.join(tags)}\n\n{content}"
+        with self._client() as c:
+            resp = c.post("/pages", json={
+                "parent": {"page_id": parent},
+                "properties": {"title": {"title": [{"text": {"content": title}}]}},
+                "children": self._md_to_blocks(body),
+            })
+            resp.raise_for_status()
+            return resp.json()["id"].replace("-", "")
+
+    def update(self, source: str, title: str, content: str, tags: list[str] | None = None,
+               frontmatter: dict | None = None) -> None:
+        pid = source.replace("-", "")
+        body = content
+        if tags:
+            body = f"Tags: {', '.join(tags)}\n\n{content}"
+        with self._client() as c:
+            # 更新标题
+            c.patch(f"/pages/{pid}", json={
+                "properties": {"title": {"title": [{"text": {"content": title}}]}},
+            }).raise_for_status()
+            # 清空旧 block 再写新（Notion 无整页替换，逐块删）
+            resp = c.get(f"/blocks/{pid}/children", params={"page_size": 100})
+            resp.raise_for_status()
+            for blk in resp.json().get("results", []):
+                try:
+                    c.delete(f"/blocks/{blk['id']}").raise_for_status()
+                except Exception:
+                    pass
+            c.patch(f"/blocks/{pid}/children",
+                    json={"children": self._md_to_blocks(body)}).raise_for_status()
+
+    def delete(self, source: str) -> None:
+        pid = source.replace("-", "")
+        with self._client() as c:
+            # Notion 无硬删除，归档即移出知识库
+            c.patch(f"/pages/{pid}", json={"archived": True}).raise_for_status()
+
+    def append(self, source: str, content: str) -> None:
+        pid = source.replace("-", "")
+        with self._client() as c:
+            c.patch(f"/blocks/{pid}/children",
+                    json={"children": self._md_to_blocks(content)}).raise_for_status()
+
+    # ── Search / Read ────────────────────────────────────────────────────
+    def search(self, query: str, limit: int = 5) -> list[KnowledgeItem]:
+        with self._client() as c:
+            resp = c.post("/search", json={
+                "query": query,
+                "filter": {"property": "object", "value": "page"},
+                "page_size": limit,
+            })
+            resp.raise_for_status()
+            items: list[KnowledgeItem] = []
+            for pg in resp.json().get("results", [])[:limit]:
+                it = self._page_to_item(pg, with_content=False)
+                if it:
+                    items.append(it)
+            return items
+
+    async def semantic_search(self, query: str, limit: int = 5) -> list[KnowledgeItem]:
+        # Notion 无向量检索，退回关键词 search
+        return self.search(query, limit)
+
+    def list_all(self) -> list[KnowledgeItem]:
+        # 递归遍历 root（或 scene 子根）下所有 child page
+        root = self._root_page_id
+        if self._scene:
+            for p in self._child_pages(self._root_page_id):
+                if p["title"] == self._scene:
+                    root = p["id"]
+                    break
+        items: list[KnowledgeItem] = []
+        self._walk(root, items)
+        return items
+
+    def _walk(self, parent_id: str, out: list[KnowledgeItem]) -> None:
+        for p in self._child_pages(parent_id):
+            it = self.get(p["id"])
+            if it:
+                out.append(it)
+            self._walk(p["id"], out)  # 容器页也可能嵌套条目
+
+    def get(self, source: str) -> KnowledgeItem | None:
+        pid = source.replace("-", "")
+        with self._client() as c:
+            pr = c.get(f"/pages/{pid}")
+            if pr.status_code == 404:
+                return None
+            pr.raise_for_status()
+            return self._page_to_item(pr.json(), with_content=True)
+
+    def _page_to_item(self, pg: dict, with_content: bool) -> KnowledgeItem | None:
+        pid = pg.get("id", "").replace("-", "")
+        if not pid:
+            return None
+        title = ""
+        props = pg.get("properties", {})
+        for prop in props.values():
+            if prop.get("type") == "title":
+                title = "".join(t.get("plain_text", "") for t in prop.get("title", []))
+                break
+        content, tags = "", []
+        if with_content:
+            with self._client() as c:
+                resp = c.get(f"/blocks/{pid}/children", params={"page_size": 100})
+                if resp.status_code == 200:
+                    content = self._blocks_to_text(resp.json().get("results", []))
+            if content.startswith("Tags:"):
+                first, _, rest = content.partition("\n")
+                tags = [t.strip() for t in first[len("Tags:"):].split(",") if t.strip()]
+                content = rest.strip()
+        return KnowledgeItem(title=title, content=content, source=pid, tags=tags)
+
+    def health_check(self) -> tuple[bool, str]:
+        if not self._token:
+            return False, "Notion token 未配置"
+        if not self._root_page_id:
+            return False, "Notion root_page_id 未配置"
+        try:
+            with self._client() as c:
+                resp = c.get(f"/pages/{self._root_page_id}")
+                if resp.status_code == 200:
+                    return True, f"Notion 后端 OK：root={self._root_page_id[:8]}…"
+                if resp.status_code in (401, 403):
+                    return False, "Notion token 无效或未授权访问该 root page（需在 Notion 里把页面分享给 integration）"
+                if resp.status_code == 404:
+                    return False, "找不到 root page（检查 root_page_id，并确认已分享给 integration）"
+                return False, f"Notion API 返回 {resp.status_code}"
+        except Exception as e:
+            return False, f"Notion 连接失败：{e}"

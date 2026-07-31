@@ -212,11 +212,13 @@ class WebSearchToolConfig(BaseModel):
     image_search_enabled: bool = True  # 图片搜索工具开关；仅在 base_url 配置时生效
 
 class KnowledgeConfig(BaseModel):
-    backend: str = "filesystem"  # "filesystem" | "obsidian" | "external"
+    backend: str = "filesystem"  # "filesystem" | "obsidian" | "external" | "notion"
     obsidian_vault_path: str = ""  # Obsidian vault 根目录绝对路径
     obsidian_folder: str = "."  # Vault 内用于知识库的子目录名（"." 表示根目录）
     external_base_url: str = ""  # 外部知识库 REST API 的 base URL
     external_api_key: str = ""  # 外部知识库认证 key
+    notion_token: str = ""  # Notion integration token（secret_xxx / ntn_xxx）
+    notion_root_page_id: str = ""  # 作为知识库根的 Notion 页面 ID（条目作为其子页面）
 
 
 class ToolsConfig(BaseModel):
@@ -396,19 +398,19 @@ def scene_dir(scene: str) -> Path:
 def _init_scene_dirs() -> None:
     """初始化 work + life 两套 scene 目录。
 
-    work: 释放 team.yaml（life-manager 技能）+ timelines.yaml（schedule-manager 技能）模板。
+    work: 释放 team.yaml（team-manager 技能）+ timelines.yaml（schedule-manager 技能）模板。
     life: 建目录 + 空 timelines.yaml（创业/个人项目，与 work 隔离）。
     已存在的文件不覆盖（保护用户已修改的配置）。
     """
     import shutil
 
-    team_templates_dir = Path(__file__).parent.parent / "defaults" / "skills" / "life-manager" / "templates"
+    team_templates_dir = Path(__file__).parent.parent / "defaults" / "skills" / "team-manager" / "templates"
     schedule_templates_dir = Path(__file__).parent.parent / "defaults" / "skills" / "schedule-manager" / "templates"
 
     # work 目录（向后兼容：原 _init_work_dir 逻辑）
     work_dir = scene_dir("work")
     work_dir.mkdir(parents=True, exist_ok=True)
-    # team.yaml 来自 life-manager
+    # team.yaml 来自 team-manager
     if team_templates_dir.exists():
         src = team_templates_dir / "team.yaml.example"
         dst = work_dir / "team.yaml"

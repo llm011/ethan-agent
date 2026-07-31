@@ -155,7 +155,7 @@ schedule.create(
 
 ## 联动记录（写回 people 日志）
 
-任务状态变化时，用 `knowledge_edit`（mode=append，scene="work"）追加到对应成员的 `人员日志 - {姓名}` 条目（tags: `["people", "{姓名}"]`）。
+任务状态变化时，用 `knowledge_edit`（mode=append，scene="work"）追加到对应成员的 `人物 - {姓名}` 条目（tags: `["people", "{姓名}"]`）。
 
 任务完成时：
 
@@ -171,4 +171,4 @@ schedule.create(
 - [问题] 插件架构方案设计延期 3 天，原因：依赖的 API 文档不全需要额外调研
 ```
 
-条目不存在时先 `knowledge_add` 创建初始条目（含当月标题），写入规则与去重逻辑见 `people-log.md`。
+条目不存在时先 `knowledge_add` 创建初始条目（含当月标题），写入规则与去重逻辑见 people-kb 的 `references/profile-format.md`。

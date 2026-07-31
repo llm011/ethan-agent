@@ -509,6 +509,8 @@ class KnowledgeValidateRequest(BaseModel):
     obsidian_folder: str = "."
     external_base_url: str = ""
     external_api_key: str = ""
+    notion_token: str = ""
+    notion_root_page_id: str = ""
 
 
 @router.post("/settings/knowledge/validate", dependencies=[Depends(verify_token)])
@@ -519,6 +521,7 @@ async def validate_knowledge_backend(req: KnowledgeValidateRequest):
     from ethan.knowledge.base import (
         ExternalKnowledgeBase,
         FilesystemKnowledgeBase,
+        NotionKnowledgeBase,
         ObsidianKnowledgeBase,
     )
 
@@ -536,6 +539,15 @@ async def validate_knowledge_backend(req: KnowledgeValidateRequest):
             kb = ExternalKnowledgeBase(
                 base_url=req.external_base_url,
                 api_key=req.external_api_key,
+            )
+        elif req.backend == "notion":
+            if not req.notion_token:
+                return {"ok": False, "message": "Notion token 不能为空"}
+            if not req.notion_root_page_id:
+                return {"ok": False, "message": "Notion root page ID 不能为空"}
+            kb = NotionKnowledgeBase(
+                token=req.notion_token,
+                root_page_id=req.notion_root_page_id,
             )
         else:
             from ethan.core.paths import user_knowledge_dir

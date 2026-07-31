@@ -42,7 +42,7 @@ CASES = [
         "id": "M3",
         "desc": "复杂多步(应触发多轮决策提示)",
         "msg": (
-            "对比 ~/.ethan/skills/obsidian 和 ~/.ethan/skills/life-manager 两个技能："
+            "对比 ~/.ethan/skills/obsidian 和 ~/.ethan/skills/work-notes 两个技能："
             "1) 都读 SKILL.md；2) 找出各自的硬规则段；3) 对比硬规则的差异；"
             "4) 把差异整理成清单；5) 存到知识库。"
         ),

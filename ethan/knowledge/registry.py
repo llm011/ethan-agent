@@ -9,6 +9,7 @@ from ethan.knowledge.base import (
     ExternalKnowledgeBase,
     FilesystemKnowledgeBase,
     KnowledgeBase,
+    NotionKnowledgeBase,
     ObsidianKnowledgeBase,
 )
 
@@ -24,6 +25,8 @@ def _config_fingerprint(kb_cfg, scene: str = "") -> tuple:
         kb_cfg.obsidian_folder,
         kb_cfg.external_base_url,
         kb_cfg.external_api_key,
+        getattr(kb_cfg, "notion_token", ""),
+        getattr(kb_cfg, "notion_root_page_id", ""),
         scene,
     )
 
@@ -74,6 +77,15 @@ def get_knowledge_backend(user_id: str = "", scene: str = "") -> KnowledgeBase:
         else:
             # scene 随 API 透传给外部服务，由服务端按 scene 隔离存储/搜索
             instance = ExternalKnowledgeBase(base_url=base_url, api_key=api_key, scene=scene)
+    elif backend == "notion":
+        token = getattr(kb_cfg, "notion_token", "")
+        root_page_id = getattr(kb_cfg, "notion_root_page_id", "")
+        if not token or not root_page_id:
+            # 配置不全时回退 filesystem，保证知识库始终可用
+            instance = _create_filesystem_backend(scene)
+        else:
+            # scene 作为 root 下一层容器 page，由后端按 scene 隔离
+            instance = NotionKnowledgeBase(token=token, root_page_id=root_page_id, scene=scene)
     else:
         # default: filesystem
         instance = _create_filesystem_backend(scene)

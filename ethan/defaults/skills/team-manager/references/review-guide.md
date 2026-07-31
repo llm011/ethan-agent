@@ -10,7 +10,7 @@
 ### Step 1: 加载数据
 
 1. 读取 `~/.ethan/work/team.yaml` 获取成员列表（配置文件，仍用文件读写）
-2. 对每位成员，`knowledge_search(query="人员日志 {姓名}", scene="work")` 找到条目后 `knowledge_read` 读取本季度月份的记录
+2. 对每位成员，`knowledge_search(query="人物档案 {姓名}", scene="work")` 找到条目后 `knowledge_read` 读取本季度月份的记录
 3. `knowledge_search(query="cr-report", scene="work")` 搜索当季所有 CR 周报，逐一 `knowledge_read` 读取
 4. 按标签统计每人事件分布（`[亮点]` / `[问题]` / `[进展]` / 普通）
 

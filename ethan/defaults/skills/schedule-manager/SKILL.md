@@ -5,7 +5,7 @@ description: >
   定时任务与时间线管理技能。覆盖两大场景：
   ① 定时任务 — 创建/列出/暂停/删除一次性与周期性任务，支持 scene 隔离与筛选；
   ② 时间线引擎 — 用声明式 timelines.yaml 批量生成周期性多阶段任务，支持 lifecycle 管理。
-trigger: "定时任务|定时提醒|每天提醒|每周提醒|设个提醒|提醒我|周期性任务|一次性任务|schedule|cron|时间线|timelines|绩效周期|OKR周期|季度汇报|配置周期|加节点|更新时间线|导出时间线|备份时间线|导入时间线|恢复时间线|同步时间线|时间线节点|截止日期|DDL|跳过阶段|推进阶段|暂停时间线|恢复时间线"
+trigger: "定时任务|定时提醒|每天提醒|每周提醒|设个提醒|提醒我|周期性任务|一次性任务|schedule|cron|时间线|timelines|绩效周期|OKR周期|季度汇报|配置周期|加节点|更新时间线|导出时间线|备份时间线|导入时间线|恢复时间线|同步时间线|时间线节点|截止日期|DDL|跳过阶段|推进阶段|暂停时间线|恢复时间线|时间信号|识别时间|电话里说|通话记录|妙记|会议纪要|到点提醒|交付提醒|巡检|例行"
 author: Ethan Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -60,6 +60,18 @@ metadata:
 - 不读 `/app/ethan/scheduler/` 下任何源码
 - 不 `knowledge_search`、不 `web_search`、不 `fd_find`
 - 不重复读 `timelines.yaml`（路径②读一次即可）
+
+### 定时信号识别（从任意内容里抠时间节点）
+
+当对话/电话/妙记/文档/口述里出现时间节点或待办信号时（哪怕用户主要意图是别的），主动识别并列候选：
+
+1. 抽取所有候选信号（时间表达式、解析后日期、事件、来源、置信度）
+2. 列出候选清单给用户看
+3. 用户回编号确认
+4. 对确认的调 `schedule_create`（一次性 `one_off` / 周期 `recurring`）
+5. 回复已创建的提醒
+
+**必须先确认再创建**，模糊时间先问。people-kb / work-notes / team-manager 发现时间信号都转交到这条路径。详见 `references/signal-recognition.md`。
 
 ## 🎯 两大核心场景
 
@@ -167,7 +179,9 @@ metadata:
 
 | 技能 | 联动方式 |
 |---|---|
-| `life-manager` | 时间线常用于绩效周期，people 日志记录由 life-manager 管理 |
+| `team-manager` | 时间线常用于绩效周期；委派节点提醒、群扫描、CR 周度汇总的定时任务由本技能承载 |
+| `people-kb` | 含人物的时间信号（生日、约饭）在这里建提醒；人物档案本身归 people-kb |
+| `work-notes` | 项目进展中的时间节点转交本技能做信号识别 |
 | `lark-task` | 时间线动作可创建飞书任务 |
 | `lark-im` | 定时任务触发时通过飞书发送消息 |
 | `lark-calendar` | 时间线可选同步到飞书日历（`sync_to_lark: true`） |
