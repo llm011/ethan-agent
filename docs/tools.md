@@ -77,7 +77,11 @@ deliver_file(path="/Users/x/Downloads/报告/报告.pptx", title="年度报告")
 - 卡片经 `ToolResult.cards` → SSE → 前端 CardRenderer（与 web_search 的 search_result 卡片同链路），
   并持久化到 messages 表的 `cards` 列（刷新不丢）
 - 下载/预览数据走 `/api/files/*` 路由（见 docs/interface.md）
-- ppt-generate skill 交付段已要求渲染成功后必须调用本工具
+- ppt-generate skill 的 Step 9 把「渲染成功后必须调用本工具」列为硬性收尾步骤
+- **常驻 `base_tools`**（full 档初始广播集）：本工具不是 fast 工具，若不常驻，可见性就只剩
+  agent.py 的「skill 正文里出现过工具名就自动激活」一条路——那里取的是 `content[:3000]`，
+  技能正文一扩写、工具名滑出截断窗口，激活即静默失效，模型被要求调一个看不见的工具。
+  不进 `fast_base_tools`：PPT 类请求经 `_get_route` 判定全部走 full 档
 
 ### ShellTool — `ethan/tools/builtin/shell.py`
 
