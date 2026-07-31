@@ -59,7 +59,8 @@ metadata:
   pages/           # 每页一个 JSON，Step 4 逐页写入
 ```
 
-- 项目名用人类可读命名（如 `Transformer详解课件/`）。
+- **默认输出目录钉在 `~/.ethan/output/`**（即 `$HOME/.ethan/output/<项目名>/`），除非用户明确指定别的位置。这一步不能用 cwd 相对路径：ethan 可能从 home 外的目录启动，相对路径建的目录渲染虽成功，但 Step 9 的 `deliver_file` 会因「路径必须在用户主目录或 `/tmp` 下」而报错，整份 deck 得挪目录重渲一遍。钉到 `~/.ethan/output/` 从源头避免这轮返工。
+- 项目名用人类可读命名（如 `Transformer详解课件/`），最终项目目录形如 `~/.ethan/output/Transformer详解课件/`。
 - `deck.json` 骨架：`{"version": 1, "canvas": {"width": 1000, "height": 562.5}, "theme": {...内联主题...}}`。
 - ≤5 页的小 deck 可以走旧的单文件模式（一个含 slides 的 deck.json），但逐页生成 + 复审的效果更好，默认用项目制。
 

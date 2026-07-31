@@ -110,12 +110,11 @@ class RoutingConfig(BaseModel):
         "skill_create", "install_skill",
         "browser_session", "browser_tab", "browser_page",
         "ui_card",
-        # deliver_file 必须常驻：ppt-generate 等技能把「渲染完必须交付文件卡片」写成硬性
-        # 收尾步骤，而它不是 fast 工具。若不在此广播，可见性就只剩 agent.py 的
-        # 「skill 正文里出现过工具名就自动激活」这一条路——那里用的是 content[:3000]，
-        # 一旦技能正文扩写、工具名滑出截断窗口，激活就静默失效，模型被要求调一个看不见的
-        # 工具，交付环节无声丢失。常驻广播让可见性不依赖散文里的字符位置。
-        "deliver_file",
+        # deliver_file 不进 base_tools：它会把 home 下任意文件推成聊天里的文件卡片（对外
+        # 交付语义），若无条件广播，飞书非主人会话或被注入的消息就能诱导模型交付任意文件，
+        # 而它 side_effect=False、ChannelGuardProvider 拦不住。改为在 agent 层「仅 owner
+        # 注入 tools_list」（见 agent.py _prepare_route，与 recall_memory 同款思路）：
+        # 可见性对 owner 恒定、不依赖散文里的字符位置，同时非 owner 永不广播。
         # 飞书工具不再放在 base_tools：仅飞书渠道注册时才暴露（agent_factory.py）。
     ])
     fast_rules: list[FastRule] = Field(default_factory=lambda: [

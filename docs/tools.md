@@ -78,10 +78,11 @@ deliver_file(path="/Users/x/Downloads/报告/报告.pptx", title="年度报告")
   并持久化到 messages 表的 `cards` 列（刷新不丢）
 - 下载/预览数据走 `/api/files/*` 路由（见 docs/interface.md）
 - ppt-generate skill 的 Step 9 把「渲染成功后必须调用本工具」列为硬性收尾步骤
-- **常驻 `base_tools`**（full 档初始广播集）：本工具不是 fast 工具，若不常驻，可见性就只剩
-  agent.py 的「skill 正文里出现过工具名就自动激活」一条路——那里取的是 `content[:3000]`，
-  技能正文一扩写、工具名滑出截断窗口，激活即静默失效，模型被要求调一个看不见的工具。
-  不进 `fast_base_tools`：PPT 类请求经 `_get_route` 判定全部走 full 档
+- **仅 owner 会话注入**（不进 `base_tools`/`fast_base_tools`）：本工具会把 home 下任意文件推成
+  聊天里的对外文件卡片，但 `side_effect=False`，`ChannelGuardProvider` 拦不住——若无条件广播，
+  飞书非主人会话或被注入的消息就能诱导模型交付任意文件。故与 `recall_memory` 同款，由
+  `agent._prepare_route` 只在 `is_owner` 时注入 `tools_list`：可见性对 owner 恒定、不依赖技能
+  正文里的字符位置（不必再靠 agent.py 的 `content[:3000]` 自动激活），非 owner 则永不广播。
 
 ### ShellTool — `ethan/tools/builtin/shell.py`
 
