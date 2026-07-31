@@ -1,13 +1,13 @@
 package com.ethan.agent.ui.chat
 
+import android.content.Context
 import android.net.Uri
-import androidx.compose.foundation.Image
-import androidx.compose.ui.res.painterResource
-import com.ethan.agent.R
+import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
@@ -73,6 +73,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -83,11 +84,13 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
+import com.ethan.agent.R
 import com.ethan.agent.core.model.Quote
 import com.ethan.agent.data.UiMessage
 import com.ethan.agent.ui.components.ErrorSnackbar
@@ -95,8 +98,6 @@ import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.SnackbarContainer
 import com.ethan.agent.ui.components.ToolTimeline
 import com.ethan.agent.ui.components.SimpleMarkdown
-import android.content.Context
-import android.provider.OpenableColumns
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -162,12 +163,8 @@ fun ChatScreen(
 
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri ?: return@rememberLauncherForActivityResult
-        val name = uri.lastPathSegment ?: "file"
-        context.contentResolver.openInputStream(uri)?.use { input ->
-            val temp = File(context.cacheDir, name)
-            temp.outputStream().use { output -> input.copyTo(output) }
-            onUpload(temp, name)
-        }
+        val name = queryDisplayName(context, uri)
+        copyToTempAndUpload(context, uri, name, onUpload)
     }
 
     // 自动滚到底部（新消息到达且用户已在底部）
@@ -205,18 +202,16 @@ fun ChatScreen(
         }
     }
 
-    // 「分享到 Ethan」的图片/文件：进入 Chat 后消费一次并上传
-    LaunchedEffect(Unit) {
-        val sharedUri = com.ethan.agent.share.ShareBus.consumeUri() ?: return@LaunchedEffect
-        runCatching {
-            val uri = Uri.parse(sharedUri)
-            val name = queryDisplayName(context, uri)
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                val temp = File(context.cacheDir, name)
-                temp.outputStream().use { output -> input.copyTo(output) }
-                onUpload(temp, name)
-            }
-        }
+    // 「分享到 Ethan」的图片/文件：订阅 pendingUri（而非 LaunchedEffect(Unit) 只跑一次），
+    // app 已在前台时再次分享也能触发上传。
+    val pendingUri by com.ethan.agent.share.ShareBus.pendingUri.collectAsState()
+    LaunchedEffect(pendingUri) {
+        val sharedUri = pendingUri ?: return@LaunchedEffect
+        val uri = Uri.parse(sharedUri)
+        val name = queryDisplayName(context, uri)
+        copyToTempAndUpload(context, uri, name, onUpload)
+        // 原子消费，避免误清消费期间到达的新分享
+        com.ethan.agent.share.ShareBus.consumeUri(sharedUri)
     }
 
     ErrorSnackbar(state.error, onClearError, snackbar)
@@ -872,6 +867,29 @@ private fun EmptyChatState(
  * 直接用会得到很怪的文件名，所以优先查 [OpenableColumns.DISPLAY_NAME]，
  * 查不到再退回 lastPathSegment，最后兜底 "shared_file"。
  */
+/**
+ * 把 URI 内容复制到 cacheDir 的唯一临时文件再上传。
+ *
+ * 用 [File.createTempFile] 而非「cacheDir/原文件名」：原文件名会让同名分享互相覆盖
+ * （两次分享 photo.jpg 会踩同一个文件）。保留原扩展名方便后端识别类型；
+ * 展示给用户的文件名仍用 [displayName]。临时文件在上传结束后由 ViewModel 删除。
+ */
+private fun copyToTempAndUpload(
+    context: Context,
+    uri: Uri,
+    displayName: String,
+    onUpload: (File, String) -> Unit,
+) {
+    runCatching {
+        val suffix = displayName.substringAfterLast('.', "").let { if (it.isBlank()) "" else ".$it" }
+        val temp = File.createTempFile("share_", suffix, context.cacheDir)
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            temp.outputStream().use { output -> input.copyTo(output) }
+            onUpload(temp, displayName)
+        } ?: temp.delete()
+    }
+}
+
 private fun queryDisplayName(context: Context, uri: Uri): String {
     if (uri.scheme == "content") {
         runCatching {

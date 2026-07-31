@@ -44,11 +44,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import android.widget.Toast
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.fragment.app.FragmentActivity
+import com.ethan.agent.auth.BiometricLockManager
 import com.ethan.agent.core.model.AgentSettings
 import com.ethan.agent.core.model.KnowledgeValidateRequest
 import com.ethan.agent.core.model.ProviderConfig
@@ -332,7 +336,26 @@ private fun GeneralTab(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                Switch(appLockEnabled, onSetAppLock)
+                val context = LocalContext.current
+                Switch(
+                    checked = appLockEnabled,
+                    onCheckedChange = onAppLockToggle@{ enabled ->
+                        // 打开前校验设备确有可用凭据；无凭据则提示并阻止打开，
+                        // 避免「开关开着但设备没锁屏密码 → 解锁时静默放行」的矛盾状态。
+                        if (enabled) {
+                            val activity = context as? FragmentActivity
+                            if (activity == null || !BiometricLockManager.canAuthenticate(activity)) {
+                                Toast.makeText(
+                                    context,
+                                    "请先在系统设置中设置锁屏密码或生物识别",
+                                    Toast.LENGTH_LONG,
+                                ).show()
+                                return@onAppLockToggle
+                            }
+                        }
+                        onSetAppLock(enabled)
+                    },
+                )
             }
         }
     }

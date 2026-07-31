@@ -85,8 +85,6 @@ class SettingsViewModel @Inject constructor(
                         appLockEnabled = config.appLockEnabled,
                     )
                 }
-                // 持久化的主题应用到全局 ThemeState（冷启动 / 换设备后恢复）
-                com.ethan.agent.ui.theme.ThemeState.themeId = config.themeId
             }
         }
         load()
@@ -247,9 +245,9 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun setTheme(themeId: String) {
+        // 只更新本地 UI 态（settings 页里的 ✓）+ 持久化；全局主题由 config flow 驱动，
+        // MainActivity 观察 config.themeId 应用到 EthanTheme，单向数据流不再直写全局可变状态。
         _state.update { it.copy(themeId = themeId) }
-        com.ethan.agent.ui.theme.ThemeState.themeId = themeId
-        // 持久化，冷启动后由 config flow 恢复
         viewModelScope.launch { runCatching { repository.setThemeId(themeId) } }
     }
 

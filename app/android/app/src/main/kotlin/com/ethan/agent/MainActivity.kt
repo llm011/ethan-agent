@@ -49,6 +49,9 @@ class MainActivity : FragmentActivity() {
     /** 当前是否处于锁定态。true=显示 LockGate，false=显示主界面。 */
     private val locked = mutableStateOf(false)
 
+    /** 当前主题 id（持续跟随 config，Settings 里切换即时生效）。 */
+    private val themeId = mutableStateOf("system")
+
     /** config 是否读取完成。未完成时显示 splash，避免开锁场景下主界面闪现。 */
     private val configLoaded = mutableStateOf(false)
 
@@ -72,16 +75,25 @@ class MainActivity : FragmentActivity() {
 
         // 异步读应用锁开关，避免在主线程 runBlocking 阻塞（ANR 反模式）。
         // 读完成前 configLoaded=false，界面显示 splash，开锁时不会闪现主界面。
+        // 仅在首次读取时决定初始锁定态；主题则持续跟随 config，Settings 切换即时生效。
         lifecycleScope.launch {
-            lockEnabled = runCatching { configStore.config.first().appLockEnabled }
-                .getOrDefault(false)
-            locked.value = lockEnabled
-            configLoaded.value = true
+            var firstEmit = true
+            configStore.config.collect { config ->
+                themeId.value = config.themeId
+                // lockEnabled 持续跟随开关（用户在设置里开/关后，退后台重新加锁的判断能即时生效）
+                lockEnabled = config.appLockEnabled
+                if (firstEmit) {
+                    // 仅首次读取时决定初始锁定态，避免后续 config 变更把已解锁界面又锁上
+                    locked.value = lockEnabled
+                    configLoaded.value = true
+                    firstEmit = false
+                }
+            }
         }
 
         setContent {
             val authViewModel: AuthViewModel = hiltViewModel()
-            EthanTheme {
+            EthanTheme(themeId = themeId.value) {
                 when {
                     !configLoaded.value -> SplashGate()
                     locked.value -> LockGate(onUnlock = { locked.value = false })
