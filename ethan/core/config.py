@@ -327,9 +327,13 @@ def _init_system_files(agent_name: str) -> None:
 def _init_default_skills() -> None:
     """释放内置默认技能到 ~/.ethan/skills/。
 
-    目标目录不存在时首次拷贝；已存在时，仅同步单个 SKILL.md 文件——若源文件比目标新
-    （即升级后有了新字段如 channels），则覆盖更新。不覆盖 references/ 等用户可能修改的
-    附属文件，也不删除用户从技能目录里新增的文件。
+    目标目录不存在时首次 copytree；已存在时做**整树增量同步**——遍历源目录下所有文件，
+    源文件比目标新（或目标缺失）就覆盖，覆盖范围含 SKILL.md / references / scripts /
+    themes / assets 等全部子路径。只增不删：不动用户在技能目录里新增的文件。
+
+    历史 bug：旧实现升级时只同步 SKILL.md + references/，scripts/ 从不更新，导致镜像
+    升级后 render_pptx.py 等脚本仍停在首次播种的旧版（技能行为主要在 scripts/ 里，
+    公式渲染等修复因此在部署环境静默失效）。改为整树同步从根上消除这类分叉。
 
     注意：dst 可能是用户主动建的符号链接（如指向 .agents/skills/<name> 开发挂载），
     此时跳过——既不 copytree 也不 sync，完全保留用户自定义的链接。
@@ -365,22 +369,30 @@ def _init_default_skills() -> None:
                         target.parent.mkdir(parents=True, exist_ok=True)
                         shutil.copy2(f, target)
         else:
-            # 目标已存在，同步 SKILL.md 和 references/ 中的文件
-            src_md = src / "SKILL.md"
-            dst_md = dst / "SKILL.md"
-            if src_md.exists():
-                if not dst_md.exists() or src_md.stat().st_mtime > dst_md.stat().st_mtime:
-                    shutil.copy2(str(src_md), str(dst_md))
-            # 同步 references/：仅添加或更新，不删除用户自建文件
-            src_refs = src / "references"
-            if src_refs.is_dir():
-                dst_refs = dst / "references"
-                dst_refs.mkdir(parents=True, exist_ok=True)
-                for ref_file in src_refs.iterdir():
-                    if ref_file.is_file():
-                        dst_file = dst_refs / ref_file.name
-                        if not dst_file.exists() or ref_file.stat().st_mtime > dst_file.stat().st_mtime:
-                            shutil.copy2(str(ref_file), str(dst_file))
+            # 目标已存在：整树增量同步。
+            _sync_skill_tree(src, dst)
+
+
+def _sync_skill_tree(src: Path, dst: Path) -> None:
+    """把源技能目录 src 整树增量同步到已存在的目标 dst（只增不删）。
+
+    遍历 src 下所有文件，源比目标新（或目标缺失）就覆盖，覆盖 SKILL.md / references /
+    scripts / themes / assets 等全部子路径。不删除用户在 dst 里新增的文件；用户改过的
+    文件若源更新会被覆盖——内置默认技能本就随镜像走，用户要定制应走符号链接或私有 profile。
+    dst 下软链的单个文件保留（不覆盖）。
+    """
+    import shutil
+
+    for src_file in src.rglob("*"):
+        if not src_file.is_file():
+            continue
+        rel = src_file.relative_to(src)
+        dst_file = dst / rel
+        if dst_file.is_symlink():
+            continue  # 用户软链的单个文件，保留
+        if not dst_file.exists() or src_file.stat().st_mtime > dst_file.stat().st_mtime:
+            dst_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(src_file), str(dst_file))
 
 
 # 预初始化的 scene 目录；work=团队管理，life=创业/个人项目（与 work 隔离）。
