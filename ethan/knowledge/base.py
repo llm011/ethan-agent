@@ -1095,7 +1095,12 @@ class NotionKnowledgeBase(KnowledgeBase):
             if pr.status_code == 404:
                 return None
             pr.raise_for_status()
-            return self._page_to_item(pr.json(), with_content=True)
+            pg = pr.json()
+            # 归档页 = 已删除（delete 用 archived=true 实现）。Notion 对归档页
+            # /pages 仍返回 200，但其 children 已不可读（404）——视作不存在。
+            if pg.get("archived") or pg.get("in_trash"):
+                return None
+            return self._page_to_item(pg, with_content=True)
 
     def _page_to_item(self, pg: dict, with_content: bool) -> KnowledgeItem | None:
         pid = pg.get("id", "").replace("-", "")
