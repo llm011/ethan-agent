@@ -522,12 +522,16 @@ class Agent:
             system = self._build_system(working, fast=False)
             wanted = set(routing.base_tools) if routing.base_tools else None
             tools_list = [t for t in self._registry.all() if t.name in wanted] if wanted else self._registry.all()
-        # recall_memory：仅 owner 可用，按需调用（不在 config base_tools 里，避免非 owner 广播）。
-        # 放在 tools_list 第一位，模型在需要时被使用的概率最大。
+        # recall_memory / deliver_file：仅 owner 可用，按需调用（不在 config base_tools 里，
+        # 避免非 owner 广播）。deliver_file 会把 home 下任意文件推成对外文件卡片，且
+        # side_effect=False（ChannelGuardProvider 拦不住），无条件广播会让飞书非主人会话
+        # 诱导模型交付任意文件——故与 recall_memory 同款，只在 owner 会话注入。
+        # 放在 tools_list 前部，模型在需要时被使用的概率最大。
         if self.is_owner:
-            _recall_tool = self._registry.get("recall_memory")
-            if _recall_tool and _recall_tool not in tools_list:
-                tools_list.insert(0, _recall_tool)
+            for _name in ("deliver_file", "recall_memory"):
+                _tool = self._registry.get(_name)
+                if _tool and _tool not in tools_list:
+                    tools_list.insert(0, _tool)
         return route, system, tools_list, max_iters
 
     async def _ensure_non_empty(self, response: Message, working: list[Message],

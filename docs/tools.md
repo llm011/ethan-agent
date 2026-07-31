@@ -77,7 +77,12 @@ deliver_file(path="/Users/x/Downloads/报告/报告.pptx", title="年度报告")
 - 卡片经 `ToolResult.cards` → SSE → 前端 CardRenderer（与 web_search 的 search_result 卡片同链路），
   并持久化到 messages 表的 `cards` 列（刷新不丢）
 - 下载/预览数据走 `/api/files/*` 路由（见 docs/interface.md）
-- ppt-generate skill 交付段已要求渲染成功后必须调用本工具
+- ppt-generate skill 的 Step 9 把「渲染成功后必须调用本工具」列为硬性收尾步骤
+- **仅 owner 会话注入**（不进 `base_tools`/`fast_base_tools`）：本工具会把 home 下任意文件推成
+  聊天里的对外文件卡片，但 `side_effect=False`，`ChannelGuardProvider` 拦不住——若无条件广播，
+  飞书非主人会话或被注入的消息就能诱导模型交付任意文件。故与 `recall_memory` 同款，由
+  `agent._prepare_route` 只在 `is_owner` 时注入 `tools_list`：可见性对 owner 恒定、不依赖技能
+  正文里的字符位置（不必再靠 agent.py 的 `content[:3000]` 自动激活），非 owner 则永不广播。
 
 ### ShellTool — `ethan/tools/builtin/shell.py`
 

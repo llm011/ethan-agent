@@ -2,7 +2,7 @@
 name: ppt-generate
 description: "从一句话/大纲/文档生成原生可编辑的 PPT（.pptx）。项目制逐页生成：先定大纲与专属 design system，再每页独立构思版式/内容/衔接，渲染为 python-pptx 原生矢量元素——文本、形状、图表、表格、公式全部可在 PowerPoint/WPS 里二次编辑。当用户说「做PPT」「生成幻灯片」「写个汇报PPT」「把这份文档做成演示文稿」「pptx」「slides」「presentation」「课件」时触发。"
 trigger: "PPT|ppt|pptx|幻灯片|演示文稿|slides|presentation|deck|做PPT|生成PPT|汇报PPT|课件|keynote"
-version: 2.0.0
+version: 2.1.0
 display_name: PPT 生成器
 platforms: [macos, linux, windows]
 metadata:
@@ -22,8 +22,11 @@ metadata:
 
 ```
 需求 → ①大纲(含衔接设计) → ②design system → ③建项目目录 → ④逐页生成
-     → ⑤gen_image.py 填图 → ⑥--check 校验 → ⑦渲染 → ⑧逐页复审/单页返修 → 交付
+     → ⑤gen_image.py 填图 → ⑥--check 校验 → ⑦渲染 → ⑧逐页复审/单页返修
+     → ⑨deliver_file 可视化交付（强制，缺此步即视为任务失败）
 ```
+
+⑨ 不是可选的收尾动作，是本技能的**终止条件**：没有调用 `deliver_file`，这次 PPT 生成就没有完成。
 
 ### Step 1：规划大纲（含衔接设计）
 
@@ -56,7 +59,8 @@ metadata:
   pages/           # 每页一个 JSON，Step 4 逐页写入
 ```
 
-- 项目名用人类可读命名（如 `Transformer详解课件/`）。
+- **默认输出目录钉在 `~/.ethan/output/`**（即 `$HOME/.ethan/output/<项目名>/`），除非用户明确指定别的位置。这一步不能用 cwd 相对路径：ethan 可能从 home 外的目录启动，相对路径建的目录渲染虽成功，但 Step 9 的 `deliver_file` 会因「路径必须在用户主目录或 `/tmp` 下」而报错，整份 deck 得挪目录重渲一遍。钉到 `~/.ethan/output/` 从源头避免这轮返工。
+- 项目名用人类可读命名（如 `Transformer详解课件/`），最终项目目录形如 `~/.ethan/output/Transformer详解课件/`。
 - `deck.json` 骨架：`{"version": 1, "canvas": {"width": 1000, "height": 562.5}, "theme": {...内联主题...}}`。
 - ≤5 页的小 deck 可以走旧的单文件模式（一个含 slides 的 deck.json），但逐页生成 + 复审的效果更好，默认用项目制。
 
@@ -171,16 +175,24 @@ python3 ~/.ethan/skills/ppt-generate/scripts/render_pptx.py /path/to/<项目目�
 - 若本机装了 LibreOffice（`soffice`），可 `soffice --headless --convert-to pdf <pptx>` 再 `pdftoppm -png` 逐页转图，用文件读取工具看图做视觉自检，溢出/重叠/字体替换问题一目了然；没有这些工具就按清单文字审查。
 - 返修只动 `pages/` 下的单页文件，改完重跑 Step 7 即可（页少时秒级）。
 
-### 交付（硬约束 · 违反即失败）
+### Step 9：可视化交付（强制 · 违反即失败）
 
-> 🚫 **绝不允许把文件路径当纯文本吐给用户。** 像「pptx 路径：/root/.ethan/ppt_projects/xxx.pptx」这样直接在正文里写一行路径，用户根本点不动、看不了预览——这是**失败交付**。文件必须以「文件卡片」形态交付。
+> 🚫 **绝不允许把文件路径当纯文本吐给用户。** 像「pptx 路径：/root/.ethan/output/xxx.pptx」这样直接在正文里写一行路径，用户根本点不动、看不了预览——这是**失败交付**。文件必须以「文件卡片」形态交付。
 
-**渲染成功后，报告最终结果前，必须先调用 `deliver_file` 工具**传入 pptx 绝对路径。它会在聊天里生成可点击的文件卡片（icon + 文件名 + 页数），用户点击卡片进入逐页预览页，可在线翻页预览并选择下载 PPTX 或 PDF。
+渲染成功后、报告最终结果前，**必须先调用 `deliver_file` 工具**，传入 pptx 的**绝对路径**：
+
+```
+deliver_file(path="/absolute/path/to/<项目目录>/<项目名>.pptx")
+```
+
+它会在聊天里生成可点击的文件卡片（icon + 文件名 + 页数），用户点击卡片进入逐页预览页，可在线翻页预览并选择下载 PPTX 或 PDF。
 
 正确顺序：
-1. 先调 `deliver_file(path="<pptx 绝对路径>")` —— 生成文件卡片（这一步不可省）。
+1. 先调 `deliver_file(path="<pptx 绝对路径>")` —— 生成文件卡片（这一步不可省）。**调用时机**是 pptx 已完整落盘之后（Step 7 渲染成功、Step 8 复审通过）；若 Step 8 返修后重新渲染，用最终那次渲染的 pptx 再调一次，确保卡片指向最终版本。
 2. 卡片发出后，再用文字补充说明：页数、design system 名称与要点、哪些图是占位图（若有）、项目目录位置（`pages/` 下单页 JSON 可改后重新渲染）、所有元素都能在 PPT 里直接二次编辑。
 3. **文字说明里不要再重复粘贴那条绝对路径**——路径已经在卡片里，重复只会把 AI 味写回来。
+
+**失败必须处理，不能静默跳过**：若 `deliver_file` 返回 `Deliver failed: ...`，说明路径不合法（必须在用户主目录或 `/tmp` 下，见 Step 3 的默认落点）、文件不存在或扩展名不支持。此时**修正问题后重试**——例如把项目输出目录挪到用户主目录下再重新渲染。重试仍失败时，明确告知用户「文件已生成但卡片交付失败」并附上原因和路径，不要假装交付成功。
 
 自检：回复发出前问自己「我调 deliver_file 了吗？」没调就是没交付完，回去补。
 
@@ -197,15 +209,17 @@ python3 ~/.ethan/skills/ppt-generate/scripts/render_pptx.py /path/to/<项目目�
 
 ## 关键约束（违反必然翻车）
 
-1. **元素可编辑是底线**：禁止把整页渲染成一张大图；禁止 SVG path 形状（用预设形状名）；禁止 HTML 文本（用 runs）。
-2. **gen:/icon: 占位符必须先跑 gen_image.py**，否则渲染器直接报错退出。
-3. **中西文字体**：主题 `fontName`（中文）+ `latinFontName`（西文）分离设置；配对选择读 `references/fonts.md`。run 级显式 `fontName` 会同时覆盖中西文。
+1. **渲染完必须 `deliver_file`**：Step 9 是本技能的终止条件。渲染出 pptx 却只在文字里报路径、没生成文件卡片，视为任务失败——用户在聊天里拿不到可点击的预览/下载入口。工具报错要修正重试，不能静默跳过。
+2. **元素可编辑是底线**：禁止把整页渲染成一张大图；禁止 SVG path 形状（用预设形状名）；禁止 HTML 文本（用 runs）。
+3. **gen:/icon: 占位符必须先跑 gen_image.py**，否则渲染器直接报错退出。
+4. **中西文字体**：主题 `fontName`（中文）+ `latinFontName`（西文）分离设置；配对选择读 `references/fonts.md`。run 级显式 `fontName` 会同时覆盖中西文。
    - **渲染机不需要装字体**：渲染器只把字体名写入 pptx，字体解析发生在打开文件的机器上。
    - **查看端是 Linux（WPS/LibreOffice）时**：雅黑/Verdana 通常都没有，会被替换成默认字体。预先知道的话把主题改成 Linux 常见自带字体：中文 `Noto Sans CJK SC` / `WenQuanYi Micro Hei`，西文 `DejaVu Sans`。
-4. **坐标纪律**：元素不越界（右 ≤940、下 ≤540）、不贴边、页边距 60/40；一行 item ≤38 字。
-5. **图表用原生 chart 元素**（数据可编辑），不要用 image_search 找图表截图。
-6. **演讲者备注**写进该页 JSON 的 `remark` 字段，不要塞进页面元素。
-7. 项目目录整体交付与保留：`deck.json` + `pages/` + `assets/` 别删（用户可能改单页后重新渲染）；pptx 默认输出在项目目录内。
+5. **坐标纪律**：元素不越界（右 ≤940、下 ≤540）、不贴边、页边距 60/40；一行 item ≤38 字。
+6. **图表用原生 chart 元素**（数据可编辑），不要用 image_search 找图表截图。
+7. **演讲者备注**写进该页 JSON 的 `remark` 字段，不要塞进页面元素。
+8. 项目目录整体交付与保留：`deck.json` + `pages/` + `assets/` 别删（用户可能改单页后重新渲染）；pptx 默认输出在项目目录内。
+9. **输出目录要落在可交付范围内**：`deliver_file` 只接受用户主目录或 `/tmp` 下的绝对路径，项目目录别建在别处，否则渲染完无法交付。
 
 ## 参考文档（按需 skill_read 加载）
 
@@ -218,6 +232,9 @@ python3 ~/.ethan/skills/ppt-generate/scripts/render_pptx.py /path/to/<项目目�
 
 | 症状 | 原因 | 处理 |
 |---|---|---|
+| `deliver_file` 报 path must be under the user home directory or /tmp | 项目目录建在了主目录/`/tmp` 之外 | 把项目目录移到主目录下（如 `~/Downloads/`）重新渲染再交付 |
+| `deliver_file` 报 file not found | pptx 还没落盘或路径拼错 | 确认 Step 7 渲染成功、用渲染输出的实际绝对路径 |
+| 用户说「没看到文件 / 收不到」 | 漏了 Step 9，只在文字里报了路径 | 补调 `deliver_file` 传 pptx 绝对路径 |
 | 渲染报「图片占位符未解析」 | 跳过了 Step 5 | 跑 gen_image.py 或把 src 改成本地路径 |
 | 渲染报「项目目录缺少 deck.json」 | deck 参数传了目录但没有元信息文件 | 在项目目录补 deck.json（version/canvas/theme） |
 | 渲染报「页文件应为单个 Slide 对象」 | pages/*.json 里写成了数组或包裹层 | 每页文件直接是 `{"id","type","elements":[...]}` |
