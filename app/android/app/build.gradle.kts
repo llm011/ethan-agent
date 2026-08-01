@@ -31,7 +31,7 @@ fun deriveVersionCode(version: String): Int {
 }
 
 // 读取本地 ~/.gradle/gradle.properties 中的签名信息（CI 通过环境变量注入）
-fun loadSigningProps(): Properties {
+fun loadSigningProps(): Properties? {
     val props = Properties()
     // 优先用环境变量
     val envStore = System.getenv("ANDROID_STORE_FILE")
