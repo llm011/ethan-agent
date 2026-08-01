@@ -20,6 +20,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -38,6 +40,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -198,7 +203,10 @@ fun ToolTimeline(steps: List<ToolStep>, modifier: Modifier = Modifier) {
 @Composable
 private fun CollapsibleToolItem(step: ToolStep) {
     var expanded by remember { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
+    val hasThought = !step.thought.isNullOrBlank()
     val hasDetail = !step.resultPreview.isNullOrBlank() || !step.resultDetail.isNullOrBlank()
+    val canExpand = hasDetail || hasThought
 
     Surface(
         shape = RoundedCornerShape(8.dp),
@@ -206,11 +214,11 @@ private fun CollapsibleToolItem(step: ToolStep) {
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
-            // 头部：工具名 + 状态 + 展开按钮
+            // 头部：工具名 + intent 描述 + 状态 + 展开按钮
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable(enabled = hasDetail) { expanded = !expanded },
+                    .clickable(enabled = canExpand) { expanded = !expanded },
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
@@ -226,6 +234,17 @@ private fun CollapsibleToolItem(step: ToolStep) {
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
+                    // 一句话描述（intent）
+                    if (!step.intent.isNullOrBlank()) {
+                        Text(
+                            "· ${step.intent}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                    }
                     if (step.durationMs != null) {
                         Text(
                             "${step.durationMs}ms",
@@ -234,63 +253,116 @@ private fun CollapsibleToolItem(step: ToolStep) {
                         )
                     }
                 }
-                // 状态标识
-                Text(
-                    when (step.state) {
-                        "done", "completed" -> "✓"
-                        "running" -> "⟳"
-                        "error" -> "✗"
-                        else -> step.state
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = when (step.state) {
-                        "done", "completed" -> MaterialTheme.colorScheme.primary
-                        "error" -> MaterialTheme.colorScheme.error
-                        else -> MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    if (canExpand) {
+                        Icon(
+                            Icons.Default.ExpandMore,
+                            contentDescription = if (expanded) "收起" else "展开",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(14.dp),
+                        )
+                    }
+                    // 状态标识
+                    Text(
+                        when (step.state) {
+                            "done", "completed" -> "✓"
+                            "running" -> "⟳"
+                            "error" -> "✗"
+                            else -> step.state
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = when (step.state) {
+                            "done", "completed" -> MaterialTheme.colorScheme.primary
+                            "error" -> MaterialTheme.colorScheme.error
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                }
             }
-            // 参数摘要（始终可见，单行）
+            // 参数摘要（始终可见，单行）+ 复制按钮
             if (step.args.isNotBlank()) {
-                Text(
-                    step.args.lines().firstOrNull()?.take(80) ?: "",
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 2.dp),
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        step.args.lines().firstOrNull()?.take(80) ?: "",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Surface(
+                        onClick = { clipboard.setText(AnnotatedString(step.args)) },
+                        shape = RoundedCornerShape(4.dp),
+                        color = Color.Transparent,
+                        modifier = Modifier.size(20.dp),
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Default.ContentCopy,
+                                contentDescription = "复制参数",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                modifier = Modifier.size(12.dp),
+                            )
+                        }
+                    }
+                }
             }
-            // 折叠区域：执行结果（code block 风格，横向可滚动）
-            if (expanded && hasDetail) {
+            // 折叠区域：思考过程 + 执行结果
+            if (expanded && canExpand) {
                 HorizontalDivider(
                     modifier = Modifier.padding(vertical = 4.dp),
                     color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
                 )
-                val detail = step.resultDetail ?: step.resultPreview ?: ""
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(
-                            MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
-                            RoundedCornerShape(4.dp),
-                        )
-                        .border(
-                            width = 1.dp,
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
-                            shape = RoundedCornerShape(4.dp),
-                        )
-                        .horizontalScroll(rememberScrollState())
-                        .padding(8.dp),
-                ) {
+                // 思考过程（thought）
+                if (hasThought) {
                     Text(
-                        detail,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontFamily = FontFamily.Monospace,
+                        "思考",
+                        style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        softWrap = false,
+                        modifier = Modifier.padding(bottom = 2.dp),
                     )
+                    Text(
+                        step.thought!!,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = if (hasDetail) 6.dp else 0.dp),
+                    )
+                }
+                // 执行结果（code block 风格，横向可滚动）
+                if (hasDetail) {
+                    val detail = step.resultDetail ?: step.resultPreview ?: ""
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
+                                RoundedCornerShape(4.dp),
+                            )
+                            .border(
+                                width = 1.dp,
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                                shape = RoundedCornerShape(4.dp),
+                            )
+                            .horizontalScroll(rememberScrollState())
+                            .padding(8.dp),
+                    ) {
+                        Text(
+                            detail,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            softWrap = false,
+                        )
+                    }
                 }
             }
         }

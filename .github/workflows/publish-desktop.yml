@@ -97,6 +97,33 @@ jobs:
         working-directory: ./desktop
         run: pnpm install --frozen-lockfile
 
+      - name: Sync version from pyproject.toml
+        run: |
+          # pyproject.toml 是唯一版本源，构建前把版本号同步到 desktop 各文件
+          VERSION=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+          echo "Syncing desktop version files to $VERSION"
+          # tauri.conf.json
+          python3 -c "
+          import json
+          f = 'desktop/src-tauri/tauri.conf.json'
+          d = json.load(open(f))
+          d['version'] = '$VERSION'
+          json.dump(d, open(f, 'w'), indent=2, ensure_ascii=False)
+          open(f, 'a').write('\n')
+          "
+          # package.json
+          python3 -c "
+          import json
+          f = 'desktop/package.json'
+          d = json.load(open(f))
+          d['version'] = '$VERSION'
+          json.dump(d, open(f, 'w'), indent=2, ensure_ascii=False)
+          open(f, 'a').write('\n')
+          "
+          # Cargo.toml（只替换 [package] 下第一行 version）
+          sed -i "0,/^version = \".*\"/s//version = \"$VERSION\"/" desktop/src-tauri/Cargo.toml
+          echo "Verified: $(grep '^version' desktop/src-tauri/Cargo.toml)"
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v1
         env:

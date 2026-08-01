@@ -2,8 +2,6 @@ package com.ethan.agent.di
 
 import android.content.Context
 import com.ethan.agent.core.datastore.AppConfigStore
-import com.ethan.agent.core.datastore.DEFAULT_SERVER_URL
-import com.ethan.agent.core.model.ServerUrlUtils
 import com.ethan.agent.core.network.ChatSseClient
 import com.ethan.agent.core.network.EthanApiService
 import com.ethan.agent.core.network.NetworkFactory
@@ -14,8 +12,6 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
 import javax.inject.Singleton
 
 @Module
@@ -31,29 +27,23 @@ object AppModule {
     @Singleton
     fun provideTokenProvider(tokenCache: AuthTokenCache): () -> String = tokenCache::get
 
+    // Ktor client 是单例：baseUrl 不再固化在构造期，而是每次请求经 baseUrlProvider 实时取，
+    // 天然支持登录后/切服务器变更，省掉了原 refreshApi 重建 client 的逻辑。
     @Provides
     @Singleton
     fun provideApiService(
-        configStore: AppConfigStore,
+        serverUrlCache: ServerUrlCache,
         tokenProvider: () -> String,
-    ): EthanApiService {
-        val config = runBlocking { configStore.config.first() }
-        val apiBase = ServerUrlUtils.toApiBaseUrl(config.serverUrl)
-        return try {
-            NetworkFactory.createApiService(apiBase, tokenProvider)
-        } catch (_: IllegalArgumentException) {
-            NetworkFactory.createApiService(
-                ServerUrlUtils.toApiBaseUrl(DEFAULT_SERVER_URL),
-                tokenProvider,
-            )
-        }
-    }
+    ): EthanApiService =
+        NetworkFactory.createApiService(serverUrlCache::get, tokenProvider)
 
     @Provides
     @Singleton
-    fun provideSseClient(tokenProvider: () -> String): ChatSseClient {
-        return NetworkFactory.createSseClient(tokenProvider)
-    }
+    fun provideSseClient(
+        serverUrlCache: ServerUrlCache,
+        tokenProvider: () -> String,
+    ): ChatSseClient =
+        NetworkFactory.createSseClient(serverUrlCache::get, tokenProvider)
 
     @Provides
     @Singleton
@@ -65,7 +55,7 @@ object AppModule {
         configStore: AppConfigStore,
         api: EthanApiService,
         sseClient: ChatSseClient,
-        tokenProvider: () -> String,
+        serverUrlCache: ServerUrlCache,
         localCache: LocalCache,
-    ): EthanRepository = EthanRepository(configStore, api, sseClient, tokenProvider, localCache)
+    ): EthanRepository = EthanRepository(configStore, api, sseClient, serverUrlCache, localCache)
 }

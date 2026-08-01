@@ -15,7 +15,6 @@ import com.ethan.agent.core.model.Usage
 import com.ethan.agent.data.EthanRepository
 import com.ethan.agent.data.UiMessage
 import com.ethan.agent.share.ShareBus
-import retrofit2.HttpException
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
@@ -250,8 +249,7 @@ class ChatViewModel @Inject constructor(
             try {
                 repository.injectMessage(sessionId, text)
             } catch (e: Exception) {
-                val isNoActiveRun = (e is HttpException && e.code() == 409) ||
-                    (e is com.ethan.agent.core.network.ApiException && e.code == 409)
+                val isNoActiveRun = e is com.ethan.agent.core.network.ApiException && e.code == 409
                 if (isNoActiveRun) {
                     // 后端 run 已结束，前端 isStreaming 是 stale 状态；先清掉再降级，避免 sendMessage 因 isStreaming=true 又回到 injectMessage 形成死循环
                     _state.update { it.copy(isStreaming = false, connectionState = ConnectionState.Idle, inputText = text) }
@@ -392,6 +390,8 @@ class ChatViewModel @Inject constructor(
                             durationMs = event.durationMs,
                             resultPreview = event.resultPreview,
                             resultDetail = event.resultDetail,
+                            thought = event.thought,
+                            intent = event.intent,
                             id = event.id,
                             subSteps = event.subSteps,
                         )

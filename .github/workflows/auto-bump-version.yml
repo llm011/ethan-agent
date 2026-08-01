@@ -1,5 +1,9 @@
 name: Auto bump version on merge to main
 
+# pyproject.toml 是唯一版本号来源。本 workflow 只 bump pyproject.toml，
+# desktop (tauri.conf.json / package.json / Cargo.toml) 和 Android (build.gradle.kts)
+# 在各自构建 CI 中从 pyproject.toml 动态读取版本号，不再依赖 sed 同步。
+#
 # 前置条件：在仓库 Settings → Secrets 里添加名为 PAT 的 Personal Access Token
 # （需要 contents: write 权限）。用 PAT 推送的 tag 才能触发 publish-pypi.yml，
 # 用默认 GITHUB_TOKEN 推送的 tag 不会触发其他 workflow（GitHub 限制）。
@@ -9,12 +13,9 @@ on:
     branches:
       - main
     tags-ignore: ['v*']
-    # bump commit 只改这 4 个 version 文件，无需再触发本 workflow（避免 skipped 重复 run）
+    # bump commit 只改 pyproject.toml，无需再触发本 workflow（避免 skipped 重复 run）
     paths-ignore:
       - 'pyproject.toml'
-      - 'desktop/package.json'
-      - 'desktop/src-tauri/tauri.conf.json'
-      - 'desktop/src-tauri/Cargo.toml'
 
 jobs:
   bump:
@@ -36,14 +37,7 @@ jobs:
           OLD=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
           IFS='.' read -r MAJOR MINOR PATCH <<< "$OLD"
           NEW="$MAJOR.$MINOR.$((PATCH + 1))"
-          # 1) pyproject.toml
           sed -i "s/^version = \"$OLD\"/version = \"$NEW\"/" pyproject.toml
-          # 2) desktop/package.json
-          sed -i "s/\"version\": \"$OLD\"/\"version\": \"$NEW\"/" desktop/package.json
-          # 3) desktop/src-tauri/tauri.conf.json
-          sed -i "s/\"version\": \"$OLD\"/\"version\": \"$NEW\"/" desktop/src-tauri/tauri.conf.json
-          # 4) desktop/src-tauri/Cargo.toml
-          sed -i "s/^version = \"$OLD\"/version = \"$NEW\"/" desktop/src-tauri/Cargo.toml
           echo "version=$NEW" >> $GITHUB_OUTPUT
 
       - name: Commit and push tag
@@ -52,7 +46,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           # 显式用 PAT 配置 remote URL，避免 push 时找不到凭证
           git remote set-url origin "https://x-access-token:${{ secrets.PAT }}@github.com/${{ github.repository }}.git"
-          git add pyproject.toml desktop/package.json desktop/src-tauri/tauri.conf.json desktop/src-tauri/Cargo.toml
+          git add pyproject.toml
           git commit -m "chore: bump version to v${{ steps.bump.outputs.version }}"
           git tag "v${{ steps.bump.outputs.version }}"
           git push origin main

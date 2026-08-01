@@ -83,7 +83,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
@@ -132,6 +134,10 @@ fun ChatScreen(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var showPlusSheet by remember { mutableStateOf(false) }
+    // 动态测量输入框区域高度，让消息列表 bottom padding 自适应（避免被输入框遮挡）
+    val density = LocalDensity.current
+    var inputBarHeightPx by remember { mutableStateOf(0) }
+    val inputBarHeightDp = with(density) { inputBarHeightPx.toDp() }
 
     // 渐进加载：初始只渲染最后 10 条，向上滚动加载更多
     val pageSize = 10
@@ -421,7 +427,7 @@ fun ChatScreen(
                 state = listState,
                 modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = PaddingValues(bottom = 68.dp),
+                contentPadding = PaddingValues(bottom = inputBarHeightDp + 8.dp),
             ) {
                 if (state.messages.isEmpty()) {
                     item {
@@ -484,7 +490,8 @@ fun ChatScreen(
                     .fillMaxWidth()
                     .background(MaterialTheme.colorScheme.background)
                     .navigationBarsPadding()
-                    .padding(horizontal = 12.dp),
+                    .padding(horizontal = 12.dp)
+                    .onGloballyPositioned { inputBarHeightPx = it.size.height },
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 state.quote?.let { quote ->
