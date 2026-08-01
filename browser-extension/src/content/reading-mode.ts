@@ -28,6 +28,7 @@
   let panelCollapsed = false;
   let activeChatHandlers: Set<(msg: any) => void> = new Set();
   let saveTimer: number | null = null;
+  let refreshTimer: number | null = null;
   // 内联多轮对话：每次进入阅读模式生成一个 session（服务端按此维护上下文），
   // 首轮把正文塞进 prompt，后续轮只发问题、历史由服务端拼。
   let chatSessionId = '';
@@ -70,6 +71,15 @@
       };
       chrome.storage.local.set({ [storageKey()]: data });
     }, 800);
+  }
+
+  // 防抖刷新 TOC + 标注列表，避免编辑时每键全量重建
+  function scheduleRefresh() {
+    if (refreshTimer) clearTimeout(refreshTimer);
+    refreshTimer = window.setTimeout(() => {
+      refreshToc();
+      refreshAnnotations();
+    }, 250);
   }
 
   function loadContent(cb: (data: SavedData | null) => void) {
@@ -157,7 +167,7 @@
     document.body.style.overflow = 'hidden';
 
     // Auto-save on edit
-    content.addEventListener('input', () => { saveContent(); refreshToc(); });
+    content.addEventListener('input', () => { saveContent(); scheduleRefresh(); });
   }
 
   function styleContent(container: HTMLElement, dark: boolean) {
@@ -195,6 +205,14 @@
       '#' + CONTENT_ID + ' mark.anno-pink { background:oklch(0.92 0.14 350/0.70); font-weight:600; }',
       '#' + CONTENT_ID + ' mark.anno-commented { border-bottom:2px dashed #0d9488; cursor:help; }',
       '#' + CONTENT_ID + ' mark.anno-commented::after { content:"💬"; font-size:10px; vertical-align:super; margin-left:2px; }',
+      '#' + CONTENT_ID + ' mark.anno-underline { background:transparent; border-bottom:2px solid currentColor; font-weight:400; }',
+      '#' + CONTENT_ID + ' mark.anno-underline.anno-yellow { border-bottom-color:#ca8a04; }',
+      '#' + CONTENT_ID + ' mark.anno-underline.anno-blue { border-bottom-color:#2563eb; }',
+      '#' + CONTENT_ID + ' mark.anno-underline.anno-green { border-bottom-color:#16a34a; }',
+      '#' + CONTENT_ID + ' mark.anno-underline.anno-pink { border-bottom-color:#db2777; }',
+      '#' + CONTENT_ID + ' mark.anno-strike { background:transparent; text-decoration:line-through; text-decoration-color:#9ca3af; text-decoration-thickness:2px; font-weight:400; }',
+      '#' + CONTENT_ID + ' mark.anno-bookmark { background:transparent; border-left:3px solid #ec4899; padding-left:4px; font-weight:400; }',
+      '#' + CONTENT_ID + ' mark.anno-bookmark::before { content:"🔖"; font-size:11px; vertical-align:super; margin-right:2px; }',
       '#' + CONTENT_ID + ' hr { border:none; border-top:1px solid ' + (dark ? '#374151' : '#e5e7eb') + '; margin:2em 0; }',
       '#' + READER_ID + '::-webkit-scrollbar { width:8px; }',
       '#' + READER_ID + '::-webkit-scrollbar-thumb { background:rgba(127,127,127,0.2); border-radius:4px; }',
@@ -306,15 +324,24 @@
     return bar;
   }
 
-  // ========== Highlight ==========
+  // ========== Annotation（高亮 / 划线 / 书签 / 批注） ==========
 
-  function applyHighlightColor(color: string) {
-    const sel = window.getSelection();
-    if (!sel || sel.isCollapsed || !contentEl) return;
-    const range = sel.getRangeAt(0);
-    if (!contentEl.contains(range.startContainer)) return;
+  type AnnoType = 'highlight' | 'underline' | 'strike' | 'bookmark' | 'comment';
 
-    // Collect text nodes in range, then wrap each individually
+  // 把 mark.className 和 dataset 设置统一封装
+  function buildMark(type: AnnoType, color: string, note?: string): HTMLElement {
+    const mark = document.createElement('mark');
+    const cls = ['anno-' + type, 'anno-' + color];
+    if (note) cls.push('anno-commented');
+    mark.className = cls.filter(Boolean).join(' ');
+    mark.dataset.annoType = type;
+    if (note) { mark.title = note; mark.dataset.note = note; }
+    return mark;
+  }
+
+  function applyAnnotation(range: Range, type: AnnoType, color: string, note?: string): boolean {
+    if (!contentEl || !contentEl.contains(range.startContainer)) return false;
+    // Collect text nodes in range
     const textNodes: Text[] = [];
     const walker = document.createTreeWalker(
       range.commonAncestorContainer.nodeType === Node.TEXT_NODE
@@ -328,33 +355,33 @@
         textNodes.push(node as Text);
       }
     }
-    if (!textNodes.length) return;
+    if (!textNodes.length) return false;
 
     for (const tn of textNodes) {
       let target = tn;
       let startOff = 0;
       let endOff = tn.nodeValue!.length;
-
       if (tn === range.startContainer) startOff = range.startOffset;
       if (tn === range.endContainer) endOff = range.endOffset;
+      if (startOff > 0) { target = tn.splitText(startOff); endOff -= startOff; }
+      if (endOff < target.nodeValue!.length) target.splitText(endOff);
 
-      // Split if partial
-      if (startOff > 0) {
-        target = tn.splitText(startOff);
-        endOff -= startOff;
-      }
-      if (endOff < target.nodeValue!.length) {
-        target.splitText(endOff);
-      }
-
-      const mark = document.createElement('mark');
-      mark.className = 'anno-' + color;
+      const mark = buildMark(type, color, note);
       target.parentNode!.insertBefore(mark, target);
       mark.appendChild(target);
     }
-
-    sel.removeAllRanges();
     saveContent();
+    scheduleRefresh();
+    return true;
+  }
+
+  function applyHighlightColor(color: string) {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !contentEl) return;
+    const range = sel.getRangeAt(0);
+    if (applyAnnotation(range, 'highlight', color)) {
+      sel.removeAllRanges();
+    }
   }
 
   function removeHighlightFromSelection() {
@@ -371,6 +398,7 @@
         parent.normalize();
       }
       saveContent();
+      refreshAnnotations();
     }
   }
 
@@ -448,6 +476,53 @@
     Object.assign(sep.style, { width: '1px', height: '18px', background: dark ? '#4b5563' : '#e5e7eb', margin: '0 4px' });
     bar.appendChild(sep);
 
+    // Underline button
+    const underlineBtn = document.createElement('button');
+    underlineBtn.textContent = 'U\u0332';
+    underlineBtn.title = '\u5212\u7ebf';
+    Object.assign(underlineBtn.style, {
+      border: 'none', background: 'none', fontSize: '14px', fontWeight: '600', cursor: 'pointer',
+      padding: '4px 6px', borderRadius: '6px', transition: 'background 0.1s', color: dark ? '#e6e8ec' : '#374151',
+    });
+    underlineBtn.onmousedown = (e) => e.preventDefault();
+    underlineBtn.onmouseenter = () => { underlineBtn.style.background = dark ? '#374151' : '#f3f4f6'; };
+    underlineBtn.onmouseleave = () => { underlineBtn.style.background = ''; };
+    underlineBtn.onclick = () => {
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed && sel.rangeCount > 0) {
+        applyAnnotation(sel.getRangeAt(0), 'underline', 'yellow');
+        sel.removeAllRanges();
+      }
+      removeToolbar();
+    };
+    bar.appendChild(underlineBtn);
+
+    // Bookmark button
+    const bookmarkBtn = document.createElement('button');
+    bookmarkBtn.textContent = '\uD83D\uDD16';
+    bookmarkBtn.title = '\u4E66\u7B7E';
+    Object.assign(bookmarkBtn.style, {
+      border: 'none', background: 'none', fontSize: '14px', cursor: 'pointer',
+      padding: '4px 6px', borderRadius: '6px', transition: 'background 0.1s',
+    });
+    bookmarkBtn.onmousedown = (e) => e.preventDefault();
+    bookmarkBtn.onmouseenter = () => { bookmarkBtn.style.background = dark ? '#374151' : '#f3f4f6'; };
+    bookmarkBtn.onmouseleave = () => { bookmarkBtn.style.background = ''; };
+    bookmarkBtn.onclick = () => {
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed && sel.rangeCount > 0) {
+        applyAnnotation(sel.getRangeAt(0), 'bookmark', 'pink');
+        sel.removeAllRanges();
+      }
+      removeToolbar();
+    };
+    bar.appendChild(bookmarkBtn);
+
+    // Separator
+    const sep2 = document.createElement('div');
+    Object.assign(sep2.style, { width: '1px', height: '18px', background: dark ? '#4b5563' : '#e5e7eb', margin: '0 4px' });
+    bar.appendChild(sep2);
+
     // Comment button
     const commentBtn = document.createElement('button');
     commentBtn.textContent = '\uD83D\uDCAC';
@@ -513,41 +588,7 @@
   }
 
   function applyHighlightFromRange(range: Range, color: string, note?: string) {
-    if (!contentEl || !contentEl.contains(range.startContainer)) return;
-    // Collect text nodes in range
-    const textNodes: Text[] = [];
-    const walker = document.createTreeWalker(
-      range.commonAncestorContainer.nodeType === Node.TEXT_NODE
-        ? range.commonAncestorContainer.parentElement!
-        : range.commonAncestorContainer as HTMLElement,
-      NodeFilter.SHOW_TEXT
-    );
-    let node: Node | null;
-    while ((node = walker.nextNode())) {
-      if (range.intersectsNode(node) && (node as Text).nodeValue?.trim()) {
-        textNodes.push(node as Text);
-      }
-    }
-    if (!textNodes.length) return;
-
-    let firstMark: HTMLElement | null = null;
-    for (const tn of textNodes) {
-      let target = tn;
-      let startOff = 0;
-      let endOff = tn.nodeValue!.length;
-      if (tn === range.startContainer) startOff = range.startOffset;
-      if (tn === range.endContainer) endOff = range.endOffset;
-      if (startOff > 0) { target = tn.splitText(startOff); endOff -= startOff; }
-      if (endOff < target.nodeValue!.length) target.splitText(endOff);
-
-      const mark = document.createElement('mark');
-      mark.className = 'anno-' + color + (note ? ' anno-commented' : '');
-      if (note) { mark.title = note; mark.dataset.note = note; }
-      target.parentNode!.insertBefore(mark, target);
-      mark.appendChild(target);
-      if (!firstMark) firstMark = mark;
-    }
-    saveContent();
+    applyAnnotation(range, 'comment', color, note);
   }
 
   function removeToolbar() {
@@ -612,6 +653,7 @@
         parent.normalize();
       }
       saveContent();
+      refreshAnnotations();
     };
     popup.appendChild(delBtn);
 
@@ -801,6 +843,13 @@
       '  <div id="__ethan_reading_summary_content" style="font-size:13px;max-height:400px;overflow-y:auto;scroll-behavior:smooth;position:relative"></div>',
       '</div>',
       '<div style="margin-bottom:20px">' + secTitle('\u76ee\u5f55') + '<div id="__ethan_reading_toc" style="max-height:240px;overflow-y:auto"></div></div>',
+      '<div style="margin-bottom:20px">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">' +
+          secTitle('\u6807\u6ce8') +
+          '<div id="__ethan_reading_anno_filter" style="display:flex;gap:2px;font-size:11px"></div>' +
+        '</div>' +
+        '<div id="__ethan_reading_anno_list" style="max-height:200px;overflow-y:auto"></div>' +
+      '</div>',
       '<div style="margin-bottom:20px">' + secTitle('\u5411 Ethan \u63d0\u95ee') +
       '  <div id="__ethan_reading_chat_log" style="max-height:280px;overflow-y:auto;margin-bottom:8px"></div>' +
       '  <div style="display:flex;gap:6px;align-items:flex-end">' +
@@ -822,6 +871,7 @@
 
     // Render TOC
     refreshToc();
+    refreshAnnotations();
 
     // Events
     document.getElementById('__ethan_reading_close')!.onclick = exitReading;
@@ -965,6 +1015,144 @@
         if (reader && item.el) { reader.scrollTo({ top: item.el.offsetTop - 80, behavior: 'smooth' }); }
       };
       tocEl.appendChild(div);
+    });
+  }
+
+  // ========== 标注管理（筛选/跳转/删除） ==========
+
+  let annoFilter: 'all' | 'bookmark' = 'all';
+
+  function collectAnnotations(): { el: HTMLElement; type: string; color: string; note?: string; text: string }[] {
+    if (!contentEl) return [];
+    const marks = Array.from(contentEl.querySelectorAll<HTMLElement>('mark[data-anno-type]'));
+    return marks.map(m => ({
+      el: m,
+      type: m.dataset.annoType || 'highlight',
+      color: ['yellow', 'blue', 'green', 'pink'].find(c => m.classList.contains('anno-' + c)) || 'yellow',
+      note: m.dataset.note,
+      text: (m.textContent || '').trim().slice(0, 60),
+    }));
+  }
+
+  function refreshAnnotations() {
+    const listEl = document.getElementById('__ethan_reading_anno_list');
+    const filterEl = document.getElementById('__ethan_reading_anno_filter');
+    if (!listEl || !filterEl) return;
+    const dark = isDarkMode();
+    const all = collectAnnotations();
+
+    // Filter tabs
+    const bookmarkCount = all.filter(a => a.type === 'bookmark').length;
+    const tabs: { key: 'all' | 'bookmark'; label: string }[] = [
+      { key: 'all', label: '\u5168\u90e8 ' + all.length },
+      { key: 'bookmark', label: '\u4e66\u7b7e ' + bookmarkCount },
+    ];
+    filterEl.innerHTML = '';
+    tabs.forEach(t => {
+      const btn = document.createElement('button');
+      btn.textContent = t.label;
+      const active = annoFilter === t.key;
+      Object.assign(btn.style, {
+        border: 'none', background: active ? '#0d9488' : (dark ? '#2a2e37' : '#f3f4f6'),
+        color: active ? '#fff' : (dark ? '#9ca3af' : '#6b7280'),
+        padding: '2px 6px', borderRadius: '4px', fontSize: '11px', cursor: 'pointer',
+      });
+      btn.onclick = () => { annoFilter = t.key; refreshAnnotations(); };
+      filterEl.appendChild(btn);
+    });
+
+    // List
+    const filtered = annoFilter === 'bookmark' ? all.filter(a => a.type === 'bookmark') : all;
+    if (!filtered.length) {
+      listEl.innerHTML = '<div style="color:' + (dark ? '#6b7280' : '#9ca3af') + ';font-size:12px;padding:8px 0">\u6682\u65e0\u6807\u6ce8</div>';
+      return;
+    }
+    listEl.innerHTML = '';
+    filtered.forEach(a => {
+      const div = document.createElement('div');
+      Object.assign(div.style, {
+        display: 'flex', alignItems: 'flex-start', gap: '6px',
+        padding: '6px 8px', borderRadius: '6px', marginBottom: '4px',
+        cursor: 'pointer', transition: 'background 0.15s',
+        background: dark ? '#2a2e37' : '#fff',
+        border: '1px solid ' + (dark ? '#333' : '#e5e7eb'),
+      });
+      const icon = a.type === 'bookmark' ? '\uD83D\uDD16' : a.type === 'underline' ? 'U\u0332' : a.type === 'strike' ? 'S\u0336' : a.note ? '\uD83D\uDCAC' : '\uD83D\uDCDD';
+      const colorDot = a.type === 'highlight' ? '\u25cf' : '';
+      const dot = document.createElement('span');
+      dot.textContent = icon;
+      Object.assign(dot.style, { flexShrink: '0', fontSize: '12px', lineHeight: '1.4' });
+
+      const textWrap = document.createElement('div');
+      Object.assign(textWrap.style, { flex: '1', minWidth: '0' });
+      const textEl = document.createElement('div');
+      textEl.textContent = a.text || '(空)';
+      Object.assign(textEl.style, {
+        fontSize: '12px', lineHeight: '1.4',
+        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        color: dark ? '#e6e8ec' : '#1f2430',
+      });
+      textWrap.appendChild(textEl);
+      if (a.note) {
+        const noteEl = document.createElement('div');
+        noteEl.textContent = a.note;
+        Object.assign(noteEl.style, {
+          fontSize: '11px', color: dark ? '#9ca3af' : '#6b7280', marginTop: '2px',
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        });
+        textWrap.appendChild(noteEl);
+      }
+      if (colorDot) {
+        const cd = document.createElement('span');
+        cd.textContent = colorDot;
+        const colors: Record<string, string> = { yellow: '#ca8a04', blue: '#2563eb', green: '#16a34a', pink: '#db2777' };
+        cd.style.color = colors[a.color] || '#ca8a04';
+        cd.style.marginRight = '2px';
+        dot.textContent = colorDot + ' ' + icon;
+        dot.style.color = colors[a.color] || '#ca8a04';
+      }
+
+      const delBtn = document.createElement('button');
+      delBtn.textContent = '\u2715';
+      delBtn.title = '\u5220\u9664';
+      Object.assign(delBtn.style, {
+        border: 'none', background: 'none', cursor: 'pointer',
+        fontSize: '11px', color: dark ? '#6b7280' : '#9ca3af', padding: '0 2px', flexShrink: '0',
+      });
+      delBtn.onmouseenter = () => { delBtn.style.color = '#ef4444'; };
+      delBtn.onmouseleave = () => { delBtn.style.color = dark ? '#6b7280' : '#9ca3af'; };
+      delBtn.onclick = (e) => {
+        e.stopPropagation();
+        const parent = a.el.parentNode;
+        if (parent) {
+          while (a.el.firstChild) parent.insertBefore(a.el.firstChild, a.el);
+          parent.removeChild(a.el);
+          parent.normalize();
+          saveContent();
+          refreshAnnotations();
+        }
+      };
+
+      div.onmouseenter = () => { div.style.background = dark ? '#333' : '#f3f4f6'; };
+      div.onmouseleave = () => { div.style.background = dark ? '#2a2e37' : '#fff'; };
+      div.onclick = () => {
+        const reader = document.getElementById(READER_ID);
+        if (reader) {
+          // 用 getBoundingClientRect 相对 reader 计算滚动位置，避免 offsetParent 不一致
+          const markRect = a.el.getBoundingClientRect();
+          const readerRect = reader.getBoundingClientRect();
+          const offsetTop = markRect.top - readerRect.top + reader.scrollTop;
+          reader.scrollTo({ top: offsetTop - 80, behavior: 'smooth' });
+        }
+        // Flash highlight
+        const orig = a.el.style.background;
+        a.el.style.background = 'rgba(13,148,136,0.3)';
+        setTimeout(() => { a.el.style.background = orig; }, 1000);
+      };
+      div.appendChild(dot);
+      div.appendChild(textWrap);
+      div.appendChild(delBtn);
+      listEl.appendChild(div);
     });
   }
 
