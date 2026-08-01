@@ -10,8 +10,28 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+// 从仓库根 pyproject.toml 读取版本号，与 release tag 保持同步
+// （pyproject.toml 是唯一版本源，auto-bump 只 bump 它；
+//  Android / desktop 构建时各自从此读取，不再依赖 sed 同步）
+fun readPyprojectVersion(): String {
+    val pyproject = File(rootProject.projectDir.parentFile.parentFile, "pyproject.toml")
+    if (!pyproject.exists()) return "0.0.1"
+    val match = Regex("""^version\s*=\s*"([^"]+)"""", RegexOption.MULTILINE)
+        .find(pyproject.readText())
+    return match?.groupValues?.get(1) ?: "0.0.1"
+}
+
+// versionCode 必须是整数且单调递增，从语义版本派生：major*1000000 + minor*1000 + patch
+fun deriveVersionCode(version: String): Int {
+    val parts = version.split("-")[0].split(".").map { it.toIntOrNull() ?: 0 }
+    val major = parts.getOrElse(0) { 0 }
+    val minor = parts.getOrElse(1) { 0 }
+    val patch = parts.getOrElse(2) { 0 }
+    return major * 1_000_000 + minor * 1_000 + patch
+}
+
 // 读取本地 ~/.gradle/gradle.properties 中的签名信息（CI 通过环境变量注入）
-fun loadSigningProps(): Properties? {
+fun loadSigningProps(): Properties {
     val props = Properties()
     // 优先用环境变量
     val envStore = System.getenv("ANDROID_STORE_FILE")
@@ -39,8 +59,9 @@ android {
         applicationId = "com.ethan.agent"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        val appVersion = readPyprojectVersion()
+        versionCode = deriveVersionCode(appVersion)
+        versionName = appVersion
 
         vectorDrawables {
             useSupportLibrary = true

@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import android.widget.Toast
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -15,6 +16,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 
@@ -25,11 +27,19 @@ import kotlinx.coroutines.delay
 @Composable
 fun UpdateDialog(viewModel: UpdateViewModel) {
     val state by viewModel.state.collectAsState()
+    val context = LocalContext.current
 
     // 应用启动后延迟 30s 自动检查
     LaunchedEffect(Unit) {
         delay(30_000)
         viewModel.autoCheck()
+    }
+
+    // "已是最新版本" 用 Toast 反馈，避免手动检查时无任何响应
+    LaunchedEffect(state) {
+        if (state is UpdateViewModel.UpdateState.UpToDate) {
+            Toast.makeText(context, "已是最新版本", Toast.LENGTH_SHORT).show()
+        }
     }
 
     when (val s = state) {
