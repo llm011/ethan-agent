@@ -13,6 +13,7 @@ import com.ethan.agent.core.model.ToolStep
 import com.ethan.agent.core.model.Usage
 import com.ethan.agent.shared.EthanRepository
 import com.ethan.agent.shared.UiMessage
+import com.ethan.agent.shared.UiMessageImage
 import com.ethan.agent.shared.ShareBus
 import kotlinx.datetime.Clock
 import kotlinx.coroutines.Job
@@ -20,10 +21,19 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 enum class ConnectionState { Idle, Streaming, Reconnecting, Disconnected }
+
+/** 待发送的图片：内存临时持有，发送后清空。不落 DB。 */
+data class PendingImage(
+    val dataUrl: String,        // "data:image/png;base64,..." 用于预览
+    val base64Data: String,     // 无前缀的 base64，发送时用
+    val mediaType: String,      // "image/png" 等
+    val filename: String,
+)
 
 data class ChatUiState(
     val sessionId: String? = null,
@@ -34,6 +44,7 @@ data class ChatUiState(
     val selectedModel: String? = null,
     val selectedMode: String = "",
     val inputText: String = "",
+    val pendingImages: List<PendingImage> = emptyList(),
     val isLoading: Boolean = false,
     val isStreaming: Boolean = false,
     val isResuming: Boolean = false,
@@ -127,6 +138,8 @@ class ChatViewModel(
 
             // session 详情：cached flow 先秒出缓存数据，再网络刷新
             if (sessionId != null) {
+                // 取 serverUrl 用于拼接历史消息里的图片相对路径
+                val serverUrl = repository.config.first().serverUrl
                 try {
                     repository.cachedSession(sessionId).collect { session ->
                         _state.update {
@@ -143,6 +156,9 @@ class ChatViewModel(
                                         usage = msg.usage,
                                         quote = msg.quote,
                                         createdAt = msg.createdAt,
+                                        images = msg.images?.mapNotNull { img ->
+                                            img.url?.let { UiMessageImage(displayUrl = "${serverUrl.trimEnd('/')}/api/${it}") }
+                                        } ?: emptyList(),
                                     )
                                 },
                                 isLoading = false,
@@ -168,6 +184,15 @@ class ChatViewModel(
     fun onModeSelected(mode: String) { _state.update { it.copy(selectedMode = mode) } }
     fun setQuote(quote: Quote?) { _state.update { it.copy(quote = quote) } }
     fun clearQuote() { _state.update { it.copy(quote = null) } }
+
+    fun addImage(dataUrl: String, base64Data: String, mediaType: String, filename: String) {
+        _state.update { it.copy(pendingImages = it.pendingImages + PendingImage(dataUrl, base64Data, mediaType, filename)) }
+    }
+
+    fun removeImage(index: Int) {
+        _state.update { it.copy(pendingImages = it.pendingImages.toMutableList().also { it.removeAt(index) }) }
+    }
+
     fun setShowScrollToBottom(show: Boolean) { _state.update { it.copy(showScrollToBottom = show) } }
     fun clearUnread() { _state.update { it.copy(unreadCount = 0) } }
 
@@ -175,23 +200,29 @@ class ChatViewModel(
     fun sendMessage() {
         val current = _state.value
         val text = current.inputText.trim()
-        if (text.isEmpty()) return
+        val images = current.pendingImages
+        if (text.isEmpty() && images.isEmpty()) return
 
         if (current.isStreaming && streamJob?.isActive == true) {
-            injectMessage(text)
+            if (text.isNotEmpty()) injectMessage(text)
             return
         }
 
-        if (text.startsWith("/")) {
+        // 有图片时不走 slash command
+        if (text.startsWith("/") && images.isEmpty()) {
             handleSlashCommand(text)
             return
         }
 
         viewModelScope.launch {
-            val userMessage = UiMessage(role = "user", content = text, quote = current.quote, createdAt = Clock.System.now().toEpochMilliseconds() / 1000)
+            // 待发送图片转成 UI 渲染格式（用 dataUrl 即时预览）和 API 格式
+            val uiImages = images.map { UiMessageImage(displayUrl = it.dataUrl) }
+            val apiImages = images.map { com.ethan.agent.core.model.MessageImage(data = it.base64Data, mediaType = it.mediaType) }
+            val userMessage = UiMessage(role = "user", content = text, quote = current.quote, createdAt = Clock.System.now().toEpochMilliseconds() / 1000, images = uiImages)
             _state.update {
                 it.copy(
                     inputText = "",
+                    pendingImages = emptyList(),
                     quote = null,
                     messages = it.messages + userMessage,
                     isStreaming = true,
@@ -212,7 +243,15 @@ class ChatViewModel(
                 }
             }
 
-            val history = _state.value.messages.map { ChatMessage(it.role, it.content) }
+            // 当前用户消息带图片；历史消息的图片已由后端转成文件，content 里不含 base64
+            val history = _state.value.messages.mapIndexed { idx, msg ->
+                val isLastUser = idx == _state.value.messages.lastIndex && msg.role == "user"
+                ChatMessage(
+                    role = msg.role,
+                    content = msg.content,
+                    images = if (isLastUser && apiImages.isNotEmpty()) apiImages else null,
+                )
+            }
             val assistantIndex = _state.value.messages.size
             _state.update { it.copy(messages = it.messages + UiMessage(role = "assistant", content = "", isStreaming = true, createdAt = Clock.System.now().toEpochMilliseconds() / 1000)) }
 

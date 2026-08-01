@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentHeight
@@ -87,6 +88,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
@@ -107,6 +109,7 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import coil.compose.rememberAsyncImagePainter
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
@@ -120,6 +123,8 @@ fun ChatScreen(
     onModeSelected: (String) -> Unit,
     onQuote: (Quote?) -> Unit,
     onUpload: (ByteArray, String) -> Unit,
+    onAddImage: (dataUrl: String, base64Data: String, mediaType: String, filename: String) -> Unit,
+    onRemoveImage: (Int) -> Unit,
     onConsent: (Boolean) -> Unit,
     onDismissConsent: () -> Unit,
     onStop: () -> Unit,
@@ -173,7 +178,12 @@ fun ChatScreen(
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri ?: return@rememberLauncherForActivityResult
         val name = queryDisplayName(context, uri)
-        copyToTempAndUpload(context, uri, name, onUpload)
+        val isImage = context.contentResolver.getType(uri)?.startsWith("image/") == true
+        if (isImage) {
+            copyAndAddImage(context, uri, name, onAddImage)
+        } else {
+            copyToTempAndUpload(context, uri, name, onUpload)
+        }
     }
 
     // 自动滚到底部（新消息到达且用户已在底部）
@@ -218,7 +228,12 @@ fun ChatScreen(
         val sharedUri = pendingUri ?: return@LaunchedEffect
         val uri = Uri.parse(sharedUri)
         val name = queryDisplayName(context, uri)
-        copyToTempAndUpload(context, uri, name, onUpload)
+        val isImage = context.contentResolver.getType(uri)?.startsWith("image/") == true
+        if (isImage) {
+            copyAndAddImage(context, uri, name, onAddImage)
+        } else {
+            copyToTempAndUpload(context, uri, name, onUpload)
+        }
         // 原子消费，避免误清消费期间到达的新分享
         com.ethan.agent.shared.ShareBus.consumeUri(sharedUri)
     }
@@ -497,6 +512,44 @@ fun ChatScreen(
                     .onGloballyPositioned { inputBarHeightPx = it.size.height },
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
+                // 待发送图片预览（对齐 Web：输入框上方缩略图 + 删除按钮）
+                if (state.pendingImages.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        state.pendingImages.forEachIndexed { index, img ->
+                            Box(modifier = Modifier.size(56.dp)) {
+                                Image(
+                                    painter = rememberAsyncImagePainter(img.dataUrl),
+                                    contentDescription = img.filename,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .clip(RoundedCornerShape(8.dp)),
+                                    contentScale = ContentScale.Crop,
+                                )
+                                Surface(
+                                    onClick = { onRemoveImage(index) },
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .size(18.dp),
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            Icons.Default.Close,
+                                            contentDescription = "移除图片",
+                                            tint = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.size(12.dp),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 state.quote?.let { quote ->
                     AssistChip(
                         onClick = {},
@@ -597,18 +650,18 @@ fun ChatScreen(
                                     else -> {
                                         Surface(
                                             shape = RoundedCornerShape(50),
-                                            color = if (state.inputText.isNotBlank()) MaterialTheme.colorScheme.primary
+                                            color = if (state.inputText.isNotBlank() || state.pendingImages.isNotEmpty()) MaterialTheme.colorScheme.primary
                                                 else MaterialTheme.colorScheme.surfaceVariant,
                                             modifier = Modifier.size(32.dp),
                                         ) {
                                             IconButton(
                                                 onClick = onSend,
-                                                enabled = state.inputText.isNotBlank(),
+                                                enabled = state.inputText.isNotBlank() || state.pendingImages.isNotEmpty(),
                                             ) {
                                                 Icon(
                                                     Icons.AutoMirrored.Filled.Send,
                                                     contentDescription = "发送",
-                                                    tint = if (state.inputText.isNotBlank()) MaterialTheme.colorScheme.onPrimary
+                                                    tint = if (state.inputText.isNotBlank() || state.pendingImages.isNotEmpty()) MaterialTheme.colorScheme.onPrimary
                                                         else MaterialTheme.colorScheme.onSurfaceVariant,
                                                     modifier = Modifier.size(16.dp).offset(x = 1.dp),
                                                 )
@@ -695,6 +748,24 @@ private fun MessageBubble(message: UiMessage, onLongPress: () -> Unit) {
                 ),
             ) {
                 Column(Modifier.background(bg).padding(10.dp)) {
+                    // 用户消息图片（在文本之前）
+                    if (message.images.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(bottom = if (message.content.isNotBlank()) 6.dp else 0.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            message.images.forEach { img ->
+                                Image(
+                                    painter = rememberAsyncImagePainter(img.displayUrl),
+                                    contentDescription = null,
+                                    modifier = Modifier
+                                        .sizeIn(maxHeight = 160.dp, maxWidth = 160.dp)
+                                        .clip(RoundedCornerShape(8.dp)),
+                                    contentScale = ContentScale.FillWidth,
+                                )
+                            }
+                        }
+                    }
                     message.quote?.let {
                         Text(
                             "↩ ${it.content.take(60)}",
@@ -895,6 +966,25 @@ private fun copyToTempAndUpload(
         // 避免旧实现中 temp 文件在成功路径不删除导致 cacheDir 泄漏。
         context.contentResolver.openInputStream(uri)?.use { input ->
             onUpload(input.readBytes(), displayName)
+        }
+    }
+}
+
+/** 图片专用：读 bytes 转 base64 dataUrl，走 addImage 而非 uploadAttachment */
+private fun copyAndAddImage(
+    context: Context,
+    uri: Uri,
+    displayName: String,
+    onAddImage: (dataUrl: String, base64Data: String, mediaType: String, filename: String) -> Unit,
+) {
+    runCatching {
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            val bytes = input.readBytes()
+            // 从 URI 推断 MIME type，默认 image/png
+            val mediaType = context.contentResolver.getType(uri) ?: "image/png"
+            val base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+            val dataUrl = "data:$mediaType;base64,$base64"
+            onAddImage(dataUrl, base64, mediaType, displayName)
         }
     }
 }

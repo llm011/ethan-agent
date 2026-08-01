@@ -693,6 +693,11 @@ class EthanRepository(
     }
 }
 
+/** 渲染用图片：displayUrl 是 dataUrl（新发送）或完整远程 URL（历史消息）。 */
+data class UiMessageImage(
+    val displayUrl: String,
+)
+
 data class UiMessage(
     val role: String,
     val content: String,
@@ -704,4 +709,5 @@ data class UiMessage(
     val ttfbMs: Long? = null,
     val totalDurationMs: Long? = null,
     val generationDurationMs: Long? = null,
+    val images: List<UiMessageImage> = emptyList(),
 )

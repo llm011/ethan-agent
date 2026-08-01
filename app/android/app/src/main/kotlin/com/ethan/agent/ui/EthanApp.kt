@@ -129,6 +129,8 @@ private fun MainContent(authViewModel: AuthViewModel) {
                     onModeSelected = vm::onModeSelected,
                     onQuote = vm::setQuote,
                     onUpload = vm::uploadAttachment,
+                    onAddImage = vm::addImage,
+                    onRemoveImage = vm::removeImage,
                     onConsent = vm::respondConsent,
                     onDismissConsent = vm::dismissConsent,
                     onStop = vm::stopStreaming,
