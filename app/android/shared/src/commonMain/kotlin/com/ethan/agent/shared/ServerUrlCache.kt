@@ -20,19 +20,32 @@ import kotlinx.coroutines.runBlocking
  * 请求会打到错误地址。后台 collect 随后接管后续更新；saveServerUrl 时同步 set()。
  */
 class ServerUrlCache(
-    configStore: AppConfigStore,
+    private val configStore: AppConfigStore,
 ) {
-    private val url = MutableStateFlow(
-        runBlocking { configStore.config.first().serverUrl }
-    )
+    private val url = MutableStateFlow(DEFAULT_SERVER_URL)
+    private var seeded = false
 
     init {
+        // async collect：后台读 DataStore，首次发射后标记 seeded。
+        // 构造器不阻塞，避免 Koin single 懒加载时在主线程 runBlocking。
         CoroutineScope(SupervisorJob() + ioDispatcher).launch {
-            configStore.config.collect { url.value = it.serverUrl }
+            configStore.config.collect {
+                url.value = it.serverUrl
+                seeded = true
+            }
         }
     }
 
-    fun get(): String = url.value
+    fun get(): String {
+        // 冷启动竞态兜底：若 async collect 尚未首次发射，同步读一次。
+        // get() 由 Ktor baseUrlProvider 在请求时调用，请求跑在后台线程，不阻塞主线程。
+        // 正常情况 collect 已发射（几 ms），直接返回缓存值，无 runBlocking。
+        if (!seeded) {
+            runBlocking { url.value = configStore.config.first().serverUrl }
+            seeded = true
+        }
+        return url.value
+    }
 
     fun set(newUrl: String) {
         url.value = newUrl

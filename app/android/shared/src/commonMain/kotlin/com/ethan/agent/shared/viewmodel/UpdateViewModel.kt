@@ -60,11 +60,13 @@ class UpdateViewModel(
         if (_state.value is UpdateState.Downloading) return
         viewModelScope.launch {
             _state.value = UpdateState.Downloading(0)
-            _state.value = UpdateState.Installing
             when (appUpdater.downloadAndInstall(info.downloadUrl) { progress ->
                 _state.value = UpdateState.Downloading(progress)
             }) {
                 is AppUpdater.InstallResult.Triggered -> {
+                    // 下载完成，安装已触发。显示 Installing 后短暂停留再回 Idle，
+                    // 让用户看到"正在安装"的过渡态。
+                    _state.value = UpdateState.Installing
                     delay(2000)
                     if (_state.value is UpdateState.Installing) {
                         _state.value = UpdateState.Idle

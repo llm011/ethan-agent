@@ -22,13 +22,10 @@ fun sharedModule(): Module = module {
     single { AuthTokenCache(get()) }
     single { ServerUrlCache(get()) }
     single { LocalCache() }
-    single { (tokenCache: AuthTokenCache) -> tokenCache::get }
-    single { (serverUrlCache: ServerUrlCache, tokenProvider: () -> String) ->
-        NetworkFactory.createApiService(serverUrlCache::get, tokenProvider)
-    }
-    single { (serverUrlCache: ServerUrlCache, tokenProvider: () -> String) ->
-        NetworkFactory.createSseClient(serverUrlCache::get, tokenProvider)
-    }
+    // 图解析（非参数化）：Koin 自动从容器取 AuthTokenCache，避免 get() 无参时抛异常
+    single<() -> String> { get<AuthTokenCache>()::get }
+    single { NetworkFactory.createApiService(get<ServerUrlCache>()::get, get()) }
+    single { NetworkFactory.createSseClient(get<ServerUrlCache>()::get, get()) }
     single { EthanRepository(get(), get(), get(), get(), get()) }
 
     // ViewModels

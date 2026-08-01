@@ -11,33 +11,29 @@ import kotlinx.coroutines.launch
  *
  * 不继承 NSObject（KVO 的 willChange/didChange 在 Kotlin/Native 2.1 有重载
  * 解析问题，NotificationCenter 的 API 互操作也有诸多坑），改用纯 Kotlin
- * callback：collect StateFlow，每次新值触发 [onChange] 回调。
+ * callback：collect StateFlow，每次新值触发所有已注册的 [observe] 回调。
  *
- * Swift 端用一个轻量 ObservableObject wrapper 即可接入 SwiftUI：
+ * 支持多观察者（list），避免第二次 observe 静默替换第一次。Swift 端用
+ * 轻量 ObservableObject wrapper 接入 SwiftUI：
  *
  * ```swift
- * // 放在 iOS 工程的 Shared/ 目录
  * final class ObservableState<T: AnyObject>: ObservableObject {
  *     @Published var value: T
  *     private let wrapper: StateFlowWrapper<T>
+ *     private var observer: ((T) -> Void)?
  *     init(_ wrapper: StateFlowWrapper<T>) {
  *         self.wrapper = wrapper
  *         self.value = wrapper.value
- *         wrapper.observe { [weak self] newValue in
+ *         observer = wrapper.observe { [weak self] newValue in
  *             DispatchQueue.main.async { self?.value = newValue }
  *         }
  *     }
  *     deinit { wrapper.close() }
  * }
- *
- * // 在 View 里使用
- * @StateObject private var state = ObservableState(
- *     StateFlowWrapper(flow: IosViewModels.sharedChatViewModel(sessionId: nil).state)
- * )
- * // state.value.xxx
  * ```
  *
- * 持续在 MainScope 上 collect。VM 销毁时调 [close] 释放协程，避免泄漏。
+ * 线程安全：collect 在 MainScope（主线程）上跑，observe/removeObserver
+ * 由 Swift 端在主线程调用，两者同线程，无需同步原语。
  */
 class StateFlowWrapper<T : Any>(flow: StateFlow<T>) {
 
@@ -47,28 +43,35 @@ class StateFlowWrapper<T : Any>(flow: StateFlow<T>) {
     var value: T = flow.value
         private set
 
-    private var onChange: ((T) -> Unit)? = null
+    private val observers = mutableListOf<(T) -> Unit>()
 
     init {
         scope.launch {
             flow.collect { newValue ->
                 value = newValue
-                onChange?.invoke(newValue)
+                observers.forEach { it.invoke(newValue) }
             }
         }
     }
 
     /**
      * 注册值变化回调。注册后立即触发一次（同步推送当前值），让 UI 首帧有数据。
-     * 后续每次 StateFlow 发射新值时异步触发（在 collect 所在线程，通常是 Default）。
+     * 返回回调本身，传给 [removeObserver] 注销。支持多观察者，不会互相替换。
      */
-    fun observe(callback: (T) -> Unit) {
-        onChange = callback
+    fun observe(callback: (T) -> Unit): (T) -> Unit {
+        observers.add(callback)
         callback(value)
+        return callback
     }
 
-    /** 释放 collect 协程。VM 销毁时调用。 */
+    /** 注销 [observe] 返回的回调。 */
+    fun removeObserver(callback: (T) -> Unit) {
+        observers.remove(callback)
+    }
+
+    /** 释放 collect 协程并清空观察者。VM 销毁时调用。 */
     fun close() {
         scope.cancel()
+        observers.clear()
     }
 }

@@ -891,12 +891,11 @@ private fun copyToTempAndUpload(
     onUpload: (ByteArray, String) -> Unit,
 ) {
     runCatching {
-        val suffix = displayName.substringAfterLast('.', "").let { if (it.isBlank()) "" else ".$it" }
-        val temp = File.createTempFile("share_", suffix, context.cacheDir)
+        // onUpload 接 ByteArray，无需落地临时文件——直接从 InputStream 读 bytes，
+        // 避免旧实现中 temp 文件在成功路径不删除导致 cacheDir 泄漏。
         context.contentResolver.openInputStream(uri)?.use { input ->
-            temp.outputStream().use { output -> input.copyTo(output) }
-            onUpload(temp.readBytes(), displayName)
-        } ?: temp.delete()
+            onUpload(input.readBytes(), displayName)
+        }
     }
 }
 
