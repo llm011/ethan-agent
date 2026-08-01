@@ -390,6 +390,8 @@ class ChatViewModel @Inject constructor(
                             durationMs = event.durationMs,
                             resultPreview = event.resultPreview,
                             resultDetail = event.resultDetail,
+                            thought = event.thought,
+                            intent = event.intent,
                             id = event.id,
                             subSteps = event.subSteps,
                         )

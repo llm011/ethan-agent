@@ -95,6 +95,7 @@ data class ToolStep(
     @SerialName("result_preview") val resultPreview: String? = null,
     @SerialName("result_detail") val resultDetail: String? = null,
     val thought: String? = null,
+    val intent: String? = null,
     val id: String? = null,
     @SerialName("sub_steps") val subSteps: List<SubToolStep>? = null,
 )
@@ -427,6 +428,8 @@ data class ChatStreamEvent(
     @SerialName("result_preview") val resultPreview: String? = null,
     @SerialName("result_detail") val resultDetail: String? = null,
     @SerialName("sub_steps") val subSteps: List<SubToolStep>? = null,
+    val thought: String? = null,
+    val intent: String? = null,
     @SerialName("consent_request") val consentRequest: Boolean? = null,
     @SerialName("request_id") val requestId: String? = null,
     val description: String? = null,
