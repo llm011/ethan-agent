@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Tune
@@ -239,6 +240,9 @@ private fun FactEditorScreen(
     onDelete: () -> Unit,
 ) {
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    // 默认预览模式，点编辑才进入编辑模式
+    var isEditing by remember { mutableStateOf(false) }
+
     if (showDeleteConfirm) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
@@ -256,7 +260,7 @@ private fun FactEditorScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("编辑事实") },
+                title = { Text(if (isEditing) "编辑事实" else "事实详情") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
@@ -266,7 +270,15 @@ private fun FactEditorScreen(
                     IconButton(onClick = { showDeleteConfirm = true }) {
                         Icon(Icons.Default.Delete, contentDescription = "删除")
                     }
-                    TextButton(onClick = onSave) { Text("保存", fontWeight = FontWeight.SemiBold) }
+                    if (isEditing) {
+                        TextButton(onClick = { isEditing = false; onSave() }) {
+                            Text("保存", fontWeight = FontWeight.SemiBold)
+                        }
+                    } else {
+                        IconButton(onClick = { isEditing = true }) {
+                            Icon(Icons.Default.Edit, contentDescription = "编辑")
+                        }
+                    }
                 },
             )
         },
@@ -280,26 +292,27 @@ private fun FactEditorScreen(
                 MetaChip("置信度 ${(fact.confidence * 100).toInt()}%")
                 if (fact.source.isNotBlank()) MetaChip("来源 ${fact.source.take(12)}")
             }
-            OutlinedTextField(
-                value = content,
-                onValueChange = onContentChange,
-                modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = 16.dp),
-                placeholder = { Text("输入记忆内容，支持 Markdown") },
-                textStyle = MaterialTheme.typography.bodyLarge,
-            )
-            Surface(modifier = Modifier.fillMaxWidth(), tonalElevation = 2.dp) {
-                Column(
-                    Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp),
+            if (isEditing) {
+                OutlinedTextField(
+                    value = content,
+                    onValueChange = onContentChange,
+                    modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = 16.dp),
+                    placeholder = { Text("输入记忆内容，支持 Markdown") },
+                    textStyle = MaterialTheme.typography.bodyLarge,
+                )
+            } else {
+                // 预览模式：Markdown 渲染，可滚动
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp),
                 ) {
-                    Text("预览", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                    Box(
-                        Modifier.fillMaxWidth().padding(top = 8.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
-                            .padding(12.dp),
-                    ) {
-                        SimpleMarkdown(text = content.ifBlank { "*暂无内容*" })
-                    }
+                    SimpleMarkdown(
+                        text = content.ifBlank { "*暂无内容*" },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
             }
         }
