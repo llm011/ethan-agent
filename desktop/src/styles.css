@@ -358,8 +358,8 @@
 }
 
 .prose .table-wrapper {
-  margin-top: 0.35em;
-  margin-bottom: 0.7em;
+  margin-top: 0.25em;
+  margin-bottom: 0.5em;
   border-radius: 0.75rem;
   overflow: hidden;
   overflow-x: auto;
@@ -371,14 +371,23 @@
   font-size: 0.9em;
   width: 100%;
   border-collapse: collapse;
+  border-spacing: 0;
 }
 .prose .table-wrapper th,
 .prose .table-wrapper td {
-  padding: 0.65em 1.05em;
+  padding: 0.5em 1em;
+  border: none;
   border-bottom: 1px solid color-mix(in oklch, var(--border) 78%, var(--primary));
-  border-right: none;
   text-align: left;
   vertical-align: top;
+}
+.prose .table-wrapper th:first-child,
+.prose .table-wrapper td:first-child {
+  padding-left: 1em;
+}
+.prose .table-wrapper th:last-child,
+.prose .table-wrapper td:last-child {
+  padding-right: 1em;
 }
 .prose .table-wrapper tr:last-child th,
 .prose .table-wrapper tr:last-child td { border-bottom: none; }
