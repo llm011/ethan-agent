@@ -12,6 +12,7 @@ import { createAnnotation, deleteAnnotation } from "@/lib/api";
 import { MarkdownContent } from "./markdown";
 import { applyHighlights, getSelectionOffsets, type HighlightSpan } from "@/lib/highlight";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@ethan/shared/ui/tooltip";
+import { annotationTypeLabel as typeLabel, annotationColorBg as colorBg } from "@ethan/shared/lib/reading";
 
 interface ReadingModeProps {
   open: boolean;
@@ -27,22 +28,6 @@ const HL_COLORS: { key: AnnotationColor; label: string; bg: string }[] = [
   { key: "green", label: "待办", bg: "oklch(0.94 0.12 150 / 0.6)" },
   { key: "pink", label: "反对", bg: "oklch(0.93 0.11 350 / 0.6)" },
 ];
-
-function colorBg(c: AnnotationColor): string {
-  switch (c) {
-    case "yellow": return "oklch(0.95 0.13 105 / 0.8)";
-    case "blue": return "oklch(0.92 0.10 230 / 0.7)";
-    case "green": return "oklch(0.94 0.12 150 / 0.7)";
-    case "pink": return "oklch(0.93 0.11 350 / 0.7)";
-    default: return "var(--muted-foreground)";
-  }
-}
-
-function typeLabel(t: AnnotationType): string {
-  return (
-    { highlight: "高亮", underline: "划线", strike: "删除线", comment: "批注", bookmark: "书签" } as Record<string, string>
-  )[t] ?? t;
-}
 
 function formatTime(ts?: number): string {
   if (!ts) return "";

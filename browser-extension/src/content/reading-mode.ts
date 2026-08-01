@@ -28,6 +28,7 @@
   let panelCollapsed = false;
   let activeChatHandlers: Set<(msg: any) => void> = new Set();
   let saveTimer: number | null = null;
+  let refreshTimer: number | null = null;
   // 内联多轮对话：每次进入阅读模式生成一个 session（服务端按此维护上下文），
   // 首轮把正文塞进 prompt，后续轮只发问题、历史由服务端拼。
   let chatSessionId = '';
@@ -70,6 +71,15 @@
       };
       chrome.storage.local.set({ [storageKey()]: data });
     }, 800);
+  }
+
+  // 防抖刷新 TOC + 标注列表，避免编辑时每键全量重建
+  function scheduleRefresh() {
+    if (refreshTimer) clearTimeout(refreshTimer);
+    refreshTimer = window.setTimeout(() => {
+      refreshToc();
+      refreshAnnotations();
+    }, 250);
   }
 
   function loadContent(cb: (data: SavedData | null) => void) {
@@ -157,7 +167,7 @@
     document.body.style.overflow = 'hidden';
 
     // Auto-save on edit
-    content.addEventListener('input', () => { saveContent(); refreshToc(); refreshAnnotations(); });
+    content.addEventListener('input', () => { saveContent(); scheduleRefresh(); });
   }
 
   function styleContent(container: HTMLElement, dark: boolean) {
@@ -200,6 +210,7 @@
       '#' + CONTENT_ID + ' mark.anno-underline.anno-blue { border-bottom-color:#2563eb; }',
       '#' + CONTENT_ID + ' mark.anno-underline.anno-green { border-bottom-color:#16a34a; }',
       '#' + CONTENT_ID + ' mark.anno-underline.anno-pink { border-bottom-color:#db2777; }',
+      '#' + CONTENT_ID + ' mark.anno-strike { background:transparent; text-decoration:line-through; text-decoration-color:#9ca3af; text-decoration-thickness:2px; font-weight:400; }',
       '#' + CONTENT_ID + ' mark.anno-bookmark { background:transparent; border-left:3px solid #ec4899; padding-left:4px; font-weight:400; }',
       '#' + CONTENT_ID + ' mark.anno-bookmark::before { content:"🔖"; font-size:11px; vertical-align:super; margin-right:2px; }',
       '#' + CONTENT_ID + ' hr { border:none; border-top:1px solid ' + (dark ? '#374151' : '#e5e7eb') + '; margin:2em 0; }',
@@ -315,7 +326,7 @@
 
   // ========== Annotation（高亮 / 划线 / 书签 / 批注） ==========
 
-  type AnnoType = 'highlight' | 'underline' | 'bookmark' | 'comment';
+  type AnnoType = 'highlight' | 'underline' | 'strike' | 'bookmark' | 'comment';
 
   // 把 mark.className 和 dataset 设置统一封装
   function buildMark(type: AnnoType, color: string, note?: string): HTMLElement {
@@ -328,8 +339,8 @@
     return mark;
   }
 
-  function applyAnnotation(range: Range, type: AnnoType, color: string, note?: string) {
-    if (!contentEl || !contentEl.contains(range.startContainer)) return;
+  function applyAnnotation(range: Range, type: AnnoType, color: string, note?: string): boolean {
+    if (!contentEl || !contentEl.contains(range.startContainer)) return false;
     // Collect text nodes in range
     const textNodes: Text[] = [];
     const walker = document.createTreeWalker(
@@ -344,7 +355,7 @@
         textNodes.push(node as Text);
       }
     }
-    if (!textNodes.length) return;
+    if (!textNodes.length) return false;
 
     for (const tn of textNodes) {
       let target = tn;
@@ -360,14 +371,17 @@
       mark.appendChild(target);
     }
     saveContent();
+    scheduleRefresh();
+    return true;
   }
 
   function applyHighlightColor(color: string) {
     const sel = window.getSelection();
     if (!sel || sel.isCollapsed || !contentEl) return;
     const range = sel.getRangeAt(0);
-    applyAnnotation(range, 'highlight', color);
-    sel.removeAllRanges();
+    if (applyAnnotation(range, 'highlight', color)) {
+      sel.removeAllRanges();
+    }
   }
 
   function removeHighlightFromSelection() {
@@ -1063,7 +1077,7 @@
         background: dark ? '#2a2e37' : '#fff',
         border: '1px solid ' + (dark ? '#333' : '#e5e7eb'),
       });
-      const icon = a.type === 'bookmark' ? '\uD83D\uDD16' : a.type === 'underline' ? 'U\u0332' : a.note ? '\uD83D\uDCAC' : '\uD83D\uDCDD';
+      const icon = a.type === 'bookmark' ? '\uD83D\uDD16' : a.type === 'underline' ? 'U\u0332' : a.type === 'strike' ? 'S\u0336' : a.note ? '\uD83D\uDCAC' : '\uD83D\uDCDD';
       const colorDot = a.type === 'highlight' ? '\u25cf' : '';
       const dot = document.createElement('span');
       dot.textContent = icon;
@@ -1123,7 +1137,13 @@
       div.onmouseleave = () => { div.style.background = dark ? '#2a2e37' : '#fff'; };
       div.onclick = () => {
         const reader = document.getElementById(READER_ID);
-        if (reader) reader.scrollTo({ top: a.el.offsetTop - 80, behavior: 'smooth' });
+        if (reader) {
+          // 用 getBoundingClientRect 相对 reader 计算滚动位置，避免 offsetParent 不一致
+          const markRect = a.el.getBoundingClientRect();
+          const readerRect = reader.getBoundingClientRect();
+          const offsetTop = markRect.top - readerRect.top + reader.scrollTop;
+          reader.scrollTo({ top: offsetTop - 80, behavior: 'smooth' });
+        }
         // Flash highlight
         const orig = a.el.style.background;
         a.el.style.background = 'rgba(13,148,136,0.3)';
