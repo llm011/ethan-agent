@@ -18,6 +18,11 @@ services:
       - ETHAN_AUTH_TOKEN=${ETHAN_AUTH_TOKEN:-}
       # Optional: HTTP proxy if needed
       - ETHAN_PROXY=${ETHAN_PROXY:-}
+      # Computer Use bridge: 让容器内的 ethan 通过宿主机 cua-bridge 操控桌面
+      - CUA_BRIDGE_HOST=${CUA_BRIDGE_HOST:-host.docker.internal}
+      - CUA_BRIDGE_PORT=${CUA_BRIDGE_PORT:-8000}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     # Install the package and run the server
     command: >
       bash -c "

@@ -50,9 +50,16 @@ services:
       - ETHAN_AUTH_TOKEN=${ETHAN_AUTH_TOKEN:-}
       - ETHAN_PROXY=${ETHAN_PROXY:-}
       - SEARXNG_BASE_URL=http://searxng:8080
+      # Computer Use bridge: 让容器内的 ethan 通过宿主机 cua-bridge 操控桌面
+      # 前提: 宿主机已安装 cua-bridge（ethan setup → 桌面自动化-桥接）
+      - CUA_BRIDGE_HOST=${CUA_BRIDGE_HOST:-host.docker.internal}
+      - CUA_BRIDGE_PORT=${CUA_BRIDGE_PORT:-8000}
       # 覆盖 Docker Desktop 自动注入的 NO_PROXY：用明确 IP 代替 CIDR（httpx 不认 127.0.0.0/8）
       - NO_PROXY=localhost,127.0.0.1,searxng,host.docker.internal,*.local,*.internal
       - no_proxy=localhost,127.0.0.1,searxng,host.docker.internal,*.local,*.internal
+    extra_hosts:
+      # 确保 host.docker.internal 在所有平台可解析（Linux 上 Docker 不自动注入）
+      - "host.docker.internal:host-gateway"
     depends_on:
       searxng:
         condition: service_healthy

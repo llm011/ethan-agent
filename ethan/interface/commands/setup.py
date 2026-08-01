@@ -85,6 +85,28 @@ PRESET_PLUGINS: list[dict] = [
         ),
     },
     {
+        "name": "computer-use-bridge",
+        "label": "桌面自动化-桥接",
+        "description": "Docker 容器跑 ethan 时，通过宿主机 cua-bridge 操控桌面（需先安装 cua-driver）",
+        "install_type": "cli_tool",
+        "install_source": "cua-bridge",
+        "post_install_hint": (
+            "在宿主机（macOS）上运行以下命令安装 cua-bridge 服务：\n"
+            "  curl -fsSL https://raw.githubusercontent.com/llm011/ethan-agent/main/deploy/cua-bridge/install.sh | bash\n"
+            "\n"
+            "这会在宿主机上部署一个 TCP→UDS 桥（launchd 自启，端口 8000），\n"
+            "让 Docker 容器内的 ethan 能通过 host.docker.internal 访问 cua-driver。\n"
+            "详见 docs/computer-use-bridge.md"
+        ),
+        "install_steps": [
+            "确认已安装 cua-driver（运行 cua-driver --version 验证）",
+            "在宿主机终端执行: curl -fsSL https://raw.githubusercontent.com/llm011/ethan-agent/main/deploy/cua-bridge/install.sh | bash",
+            "脚本会自动安装 cua-bridge.py 到 ~/.cua-bridge/ 并注册 launchd 服务",
+            "确认服务运行: launchctl list | grep cua-bridge",
+            "Docker 容器内设置 CUA_BRIDGE_HOST=host.docker.internal 即可使用",
+        ],
+    },
+    {
         "name": "lark-channel",
         "label": "飞书渠道依赖",
         "description": "安装 lark-oapi + lark-cli 并同步已配置的飞书应用（无需重新填 app 凭证）",
