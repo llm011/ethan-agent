@@ -1,5 +1,6 @@
 package com.ethan.agent.ui.background
 
+import com.ethan.agent.shared.viewmodel.BackgroundTasksUiState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row

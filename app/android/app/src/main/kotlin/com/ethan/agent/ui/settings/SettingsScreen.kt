@@ -1,5 +1,7 @@
 package com.ethan.agent.ui.settings
 
+import com.ethan.agent.shared.viewmodel.SettingsTab
+import com.ethan.agent.shared.viewmodel.SettingsUiState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement

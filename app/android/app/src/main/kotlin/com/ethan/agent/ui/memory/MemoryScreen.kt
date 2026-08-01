@@ -1,5 +1,9 @@
 package com.ethan.agent.ui.memory
 
+import com.ethan.agent.shared.viewmodel.MemoryUiState
+import com.ethan.agent.shared.viewmodel.FactItem
+import com.ethan.agent.shared.viewmodel.MemoryTab
+import com.ethan.agent.shared.viewmodel.RecordsFilter
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -137,9 +141,10 @@ fun MemoryScreen(
     }
 
     // Fact editor overlay
-    if (state.selectedFact != null && state.tab == MemoryTab.Facts) {
+    val selectedFact = state.selectedFact
+    if (selectedFact != null && state.tab == MemoryTab.Facts) {
         FactEditorScreen(
-            fact = state.selectedFact,
+            fact = selectedFact,
             content = state.editContent,
             onBack = onDismissFactEditor,
             onContentChange = onEditChange,
@@ -150,14 +155,15 @@ fun MemoryScreen(
     }
 
     // Record editor overlay
-    if (state.selectedRecord != null && state.tab == MemoryTab.Records) {
+    val selectedRecord = state.selectedRecord
+    if (selectedRecord != null && state.tab == MemoryTab.Records) {
         RecordEditorScreen(
-            record = state.selectedRecord,
+            record = selectedRecord,
             content = state.recordEditContent,
             onBack = onDismissRecord,
             onContentChange = onRecordEditContent,
             onSave = onSaveRecord,
-            onDelete = { onDeleteRecord(state.selectedRecord.id) },
+            onDelete = { onDeleteRecord(selectedRecord.id) },
         )
         return
     }

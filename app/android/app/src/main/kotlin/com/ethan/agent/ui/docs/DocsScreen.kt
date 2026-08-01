@@ -1,5 +1,6 @@
 package com.ethan.agent.ui.docs
 
+import com.ethan.agent.shared.viewmodel.DocsUiState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize

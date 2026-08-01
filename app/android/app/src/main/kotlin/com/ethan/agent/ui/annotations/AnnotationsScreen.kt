@@ -1,5 +1,6 @@
 package com.ethan.agent.ui.annotations
 
+import com.ethan.agent.shared.viewmodel.AnnotationsUiState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.core.graphics.toColorInt

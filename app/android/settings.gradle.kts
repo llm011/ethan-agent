@@ -22,4 +22,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "Ethan"
-include(":app", ":core:model", ":core:network", ":core:datastore")
+include(":app", ":core:model", ":core:network", ":core:datastore", ":shared")

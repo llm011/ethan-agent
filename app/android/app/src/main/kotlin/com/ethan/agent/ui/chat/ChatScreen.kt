@@ -1,5 +1,8 @@
 package com.ethan.agent.ui.chat
 
+import com.ethan.agent.shared.viewmodel.ChatUiState
+import com.ethan.agent.shared.viewmodel.ConnectionState
+
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -94,7 +97,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import com.ethan.agent.R
 import com.ethan.agent.core.model.Quote
-import com.ethan.agent.data.UiMessage
+import com.ethan.agent.shared.UiMessage
 import com.ethan.agent.ui.components.ErrorSnackbar
 import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.SnackbarContainer
@@ -116,7 +119,7 @@ fun ChatScreen(
     onModelSelected: (String) -> Unit,
     onModeSelected: (String) -> Unit,
     onQuote: (Quote?) -> Unit,
-    onUpload: (File, String) -> Unit,
+    onUpload: (ByteArray, String) -> Unit,
     onConsent: (Boolean) -> Unit,
     onDismissConsent: () -> Unit,
     onStop: () -> Unit,
@@ -210,14 +213,14 @@ fun ChatScreen(
 
     // 「分享到 Ethan」的图片/文件：订阅 pendingUri（而非 LaunchedEffect(Unit) 只跑一次），
     // app 已在前台时再次分享也能触发上传。
-    val pendingUri by com.ethan.agent.share.ShareBus.pendingUri.collectAsState()
+    val pendingUri by com.ethan.agent.shared.ShareBus.pendingUri.collectAsState()
     LaunchedEffect(pendingUri) {
         val sharedUri = pendingUri ?: return@LaunchedEffect
         val uri = Uri.parse(sharedUri)
         val name = queryDisplayName(context, uri)
         copyToTempAndUpload(context, uri, name, onUpload)
         // 原子消费，避免误清消费期间到达的新分享
-        com.ethan.agent.share.ShareBus.consumeUri(sharedUri)
+        com.ethan.agent.shared.ShareBus.consumeUri(sharedUri)
     }
 
     ErrorSnackbar(state.error, onClearError, snackbar)
@@ -885,14 +888,14 @@ private fun copyToTempAndUpload(
     context: Context,
     uri: Uri,
     displayName: String,
-    onUpload: (File, String) -> Unit,
+    onUpload: (ByteArray, String) -> Unit,
 ) {
     runCatching {
         val suffix = displayName.substringAfterLast('.', "").let { if (it.isBlank()) "" else ".$it" }
         val temp = File.createTempFile("share_", suffix, context.cacheDir)
         context.contentResolver.openInputStream(uri)?.use { input ->
             temp.outputStream().use { output -> input.copyTo(output) }
-            onUpload(temp, displayName)
+            onUpload(temp.readBytes(), displayName)
         } ?: temp.delete()
     }
 }

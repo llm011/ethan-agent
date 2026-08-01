@@ -1,5 +1,6 @@
 package com.ethan.agent.ui.sessions
 
+import com.ethan.agent.shared.viewmodel.SessionsUiState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
