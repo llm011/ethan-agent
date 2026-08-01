@@ -377,7 +377,7 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
             )}
             {msg.intermediateOutput ? (
               isStreaming && isLast ? (
-                <div className="mb-2 rounded-lg border border-border/50 bg-background/30 px-3 py-2 text-sm text-muted-foreground/80 leading-relaxed">
+                <div className="mb-2 rounded-lg border border-border/50 bg-background/30 px-3 py-2 process-record">
                   <div className="text-xs font-medium text-muted-foreground mb-1.5">📝 过程记录</div>
                   <MarkdownContent content={msg.intermediateOutput} />
                 </div>
@@ -390,7 +390,7 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
                   <summary className="px-3 py-1.5 text-xs text-muted-foreground font-medium cursor-pointer hover:bg-background/80 flex items-center transition-colors list-none select-none">
                     <span className="opacity-70 group-open:opacity-100 transition-opacity">📝 过程记录</span>
                   </summary>
-                  <div className="px-3 py-2 text-sm text-muted-foreground/80 border-t border-border/50 bg-background/30 leading-relaxed">
+                  <div className="px-3 py-2 border-t border-border/50 bg-background/30 process-record">
                     <MarkdownContent content={msg.intermediateOutput} />
                   </div>
                 </details>
@@ -408,7 +408,7 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
                 <summary className="px-3 py-1.5 text-xs text-muted-foreground font-medium cursor-pointer hover:bg-background/80 flex items-center transition-colors list-none select-none">
                   <span className="opacity-70 group-open:opacity-100 transition-opacity">📝 过程记录</span>
                 </summary>
-                <div className="px-3 py-2 text-sm text-muted-foreground/80 border-t border-border/50 bg-background/30 leading-relaxed">
+                <div className="px-3 py-2 border-t border-border/50 bg-background/30 process-record">
                   {intermediateLoading ? (
                     <div className="space-y-2 animate-pulse">
                       <div className="h-3 w-24 rounded bg-muted" />

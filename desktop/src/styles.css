@@ -395,7 +395,7 @@
   background: color-mix(in oklch, var(--primary) 12%, var(--background));
   color: var(--foreground);
   font-weight: 700;
-  text-align: center;
+  text-align: left;
   border-bottom: 2px solid color-mix(in oklch, var(--primary) 24%, var(--border));
   white-space: nowrap;
 }
@@ -405,6 +405,75 @@
 .prose .table-wrapper tbody tr:hover td {
   background: color-mix(in oklch, var(--primary) 10%, var(--background));
 }
+
+/* ── 过程记录紧凑排版（intermediateOutput / tool trace）──
+   后端生成的 markdown 含 H1/H2/H3 多层标题，默认 prose 字号太大、间距太松。
+   外层 details/div 已有「📝 过程记录」标题，所以 H1 直接隐藏避免重复。 */
+.process-record .prose {
+  font-size: 0.8rem;
+  line-height: 1.55;
+  color: var(--muted-foreground);
+}
+.process-record .prose > :first-child { margin-top: 0; }
+.process-record .prose > :last-child { margin-bottom: 0; }
+.process-record .prose h1 { display: none; }
+.process-record .prose h2 {
+  font-size: 0.85em;
+  font-weight: 600;
+  margin-top: 0.7em;
+  margin-bottom: 0.25em;
+  color: var(--foreground);
+}
+.process-record .prose h3 {
+  font-size: 0.72em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-top: 0.55em;
+  margin-bottom: 0.2em;
+  color: var(--muted-foreground);
+}
+.process-record .prose p {
+  margin-top: 0.2em;
+  margin-bottom: 0.2em;
+  line-height: 1.55;
+}
+.process-record .prose ul, .process-record .prose ol {
+  margin-top: 0.2em;
+  margin-bottom: 0.2em;
+  padding-left: 1.2em;
+}
+.process-record .prose li { margin-top: 0.1em; margin-bottom: 0.1em; line-height: 1.5; }
+.process-record .prose pre {
+  margin-top: 0.3em;
+  margin-bottom: 0.3em;
+  padding: 0.5em 0.7em;
+  font-size: 0.72em;
+  border-radius: 0.4rem;
+  line-height: 1.5;
+}
+.process-record .prose code { font-size: 0.85em; }
+.process-record .prose :not(pre) > code {
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+  background: color-mix(in oklch, var(--muted) 60%, transparent);
+}
+.process-record .prose blockquote {
+  margin: 0.3em 0;
+  padding-left: 0.7em;
+  font-size: 0.9em;
+}
+.process-record .prose hr { margin: 0.5em 0; }
+/* 结果详情内嵌套的 markdown（如 SKILL.md 全文）再缩小一级，避免喧宾夺主 */
+.process-record .prose h4,
+.process-record .prose h5,
+.process-record .prose h6 {
+  font-size: 0.8em;
+  font-weight: 600;
+  margin-top: 0.5em;
+  margin-bottom: 0.15em;
+}
+.process-record .prose .table-wrapper { margin-top: 0.2em; margin-bottom: 0.3em; }
 
 /* ── 阅读模式标注（高亮/划线/批注/书签）──
    偏移基于「渲染后纯文本」，气泡与阅读模式共用 MarkdownContent 渲染，
