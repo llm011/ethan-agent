@@ -67,11 +67,11 @@ private val CuteShapes = Shapes(
 
 @Composable
 fun EthanTheme(
+    themeId: String = "system",
     dynamicColor: Boolean = true,
     content: @Composable () -> Unit,
 ) {
     val systemDark = isSystemInDarkTheme()
-    val themeId = ThemeState.themeId
 
     val colorScheme = when (themeId) {
         "dark" -> DarkColors

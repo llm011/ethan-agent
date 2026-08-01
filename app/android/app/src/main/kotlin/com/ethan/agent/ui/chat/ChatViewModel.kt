@@ -14,6 +14,7 @@ import com.ethan.agent.core.model.ToolStep
 import com.ethan.agent.core.model.Usage
 import com.ethan.agent.data.EthanRepository
 import com.ethan.agent.data.UiMessage
+import com.ethan.agent.share.ShareBus
 import retrofit2.HttpException
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -65,19 +66,26 @@ class ChatViewModel @Inject constructor(
     init {
         val sessionId = savedStateHandle.get<String>("sessionId")
         loadInitial(sessionId)
-        consumeSharedContent()
+        observeSharedText()
     }
 
-    /** 消费「分享到 Ethan」投递的文本，预填到输入框（仅新会话场景）。 */
-    private fun consumeSharedContent() {
-        val shared = com.ethan.agent.share.ShareBus.consumeText()
-        if (!shared.isNullOrBlank()) {
-            _state.update {
-                val existing = it.inputText
-                it.copy(inputText = if (existing.isBlank()) shared else "$existing\n$shared")
+    /**
+     * 响应式消费「分享到 Ethan」投递的文本：订阅 ShareBus 而非 init 里一次性取值。
+     * 这样 app 已在前台时再次分享（onNewIntent 更新 pendingText），也能再次预填进输入框。
+     * 图片/文件 URI 由 ChatScreen 层处理上传（需要 ContentResolver），此处仅管文本。
+     */
+    private fun observeSharedText() {
+        viewModelScope.launch {
+            ShareBus.pendingText.collect { shared ->
+                if (shared.isNullOrBlank()) return@collect
+                _state.update {
+                    val existing = it.inputText
+                    it.copy(inputText = if (existing.isBlank()) shared else "$existing\n$shared")
+                }
+                // 原子清空，避免误清 collect 期间到达的新分享
+                ShareBus.consumeText(shared)
             }
         }
-        // 图片/文件 URI 由 ChatScreen 层处理上传（需要 ContentResolver），此处仅保留文本预填
     }
 
     private fun loadInitial(sessionId: String?) {
@@ -490,6 +498,9 @@ class ChatViewModel @Inject constructor(
                 _state.update { it.copy(inputText = prefix + if (it.inputText.isBlank()) "" else "\n${it.inputText}") }
             } catch (e: Exception) {
                 _state.update { it.copy(error = repository.friendlyError(e)) }
+            } finally {
+                // 上传结束（成功/失败）都清掉复制到 cacheDir 的临时文件，避免堆积
+                runCatching { if (file.exists()) file.delete() }
             }
         }
     }
