@@ -24,9 +24,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import signal
 import socket
+import subprocess
 import sys
 import threading
 
@@ -35,9 +37,53 @@ DEFAULT_UDS = os.path.expanduser("~/Library/Caches/cua-driver/cua-driver.sock")
 RECV_BUF = 65536
 UDS_TIMEOUT = 30  # cua-driver 截图等操作可能较慢
 
+# bridge 本地方法（不转发到 cua-driver，直接在宿主机执行）
+_LOCAL_METHODS = {"set_clipboard", "get_clipboard", "restore_clipboard", "activate_app"}
+
+
+def _handle_local(name: str, args: dict) -> bytes:
+    """处理 bridge 本地方法，返回 JSON 响应字节。"""
+    try:
+        if name == "set_clipboard":
+            text = args.get("text", "")
+            r = subprocess.run(["pbcopy"], input=text, text=True, timeout=3)
+            if r.returncode != 0:
+                return json.dumps({"ok": False, "error": "pbcopy failed"}).encode()
+            return json.dumps({"ok": True, "result": {"text_len": len(text)}}).encode()
+
+        if name == "get_clipboard":
+            # 读取当前剪贴板内容（用于 paste_text 前备份）
+            r = subprocess.run(["pbpaste"], capture_output=True, text=True, timeout=3)
+            # pbpaste 返回非 0 不一定代表错误（空剪贴板时也可能非 0），统一取 stdout
+            return json.dumps({"ok": True, "result": {"text": r.stdout}}).encode()
+
+        if name == "restore_clipboard":
+            # 恢复剪贴板到指定内容
+            text = args.get("text", "")
+            r = subprocess.run(["pbcopy"], input=text, text=True, timeout=3)
+            if r.returncode != 0:
+                return json.dumps({"ok": False, "error": "pbcopy failed"}).encode()
+            return json.dumps({"ok": True, "result": {"restored": True}}).encode()
+
+        if name == "activate_app":
+            app_name = args.get("name", "")
+            if not app_name:
+                return json.dumps({"ok": False, "error": "activate_app requires name"}).encode()
+            r = subprocess.run(
+                ["osascript", "-e", f'tell application "{app_name}" to activate'],
+                capture_output=True, text=True, timeout=10,
+            )
+            if r.returncode != 0:
+                return json.dumps({"ok": False, "error": r.stderr.strip()[:200]}).encode()
+            return json.dumps({"ok": True, "result": {"activated": app_name}}).encode()
+
+        return json.dumps({"ok": False, "error": f"unknown local method: {name}"}).encode()
+    except Exception as e:
+        return json.dumps({"ok": False, "error": f"local method error: {e}"}).encode()
+
 
 def forward(client: socket.socket, peer: str, uds_path: str) -> None:
-    """一条 TCP 连接 → 一条 UDS 连接，透明转发。"""
+    """一条 TCP 连接 → 一条 UDS 连接，透明转发（含 bridge 本地方法分流）。"""
     uds = None
     try:
         # 读客户端全部请求数据（读到 EOF / 半关闭）
@@ -51,13 +97,25 @@ def forward(client: socket.socket, peer: str, uds_path: str) -> None:
         if not chunks:
             return
 
+        raw = b"".join(chunks)
+
+        # 尝试解析 JSON，判断是否为 bridge 本地方法
+        try:
+            req = json.loads(raw.decode())
+            if req.get("method") == "call" and req.get("name") in _LOCAL_METHODS:
+                resp = _handle_local(req["name"], req.get("args", {}))
+                client.sendall(resp)
+                return
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            pass  # 非 JSON 或解析失败，走默认转发
+
         # 连 UDS
         uds = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         uds.settimeout(UDS_TIMEOUT)
         uds.connect(uds_path)
 
         # 写请求 + 半关闭（cua-driver 要求客户端写完后 shutdown SHUT_WR 才处理）
-        uds.sendall(b"".join(chunks))
+        uds.sendall(raw)
         uds.shutdown(socket.SHUT_WR)
 
         # 读响应并回写

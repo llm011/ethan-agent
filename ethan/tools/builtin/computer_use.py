@@ -96,7 +96,7 @@ class _BridgeClient:
 
     def _call_sync(self, name: str, arguments: dict | None = None) -> dict:
         """同步 TCP 调用 cua-driver 工具，返回完整 JSON 响应。"""
-        req = json.dumps({"method": "call", "name": name, "arguments": arguments or {}})
+        req = json.dumps({"method": "call", "name": name, "args": arguments or {}})
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.settimeout(30)  # 截图等操作可能较慢
         try:
@@ -135,36 +135,28 @@ class _BridgeClient:
             raise RuntimeError(f"list_windows 失败: {r.get('error', '?')}")
 
         sc = r.get("result", {}).get("structuredContent", {})
-        # 兼容多种可能的返回格式
         windows = sc.get("windows", []) if isinstance(sc, dict) else sc
         if not windows:
             raise RuntimeError("未找到任何窗口，请确认宿主机有可见窗口")
 
-        # 找前台窗口（尝试多种可能的字段名）
-        for w in windows:
-            if not isinstance(w, dict):
-                continue
-            if w.get("is_frontmost") or w.get("frontmost") or w.get("focused") or w.get("is_active"):
-                self._focus_pid = w.get("pid") or w.get("owner_pid")
-                self._focus_window = w.get("window_id") or w.get("id") or w.get("windowID")
-                if self._focus_pid is not None:
-                    break
+        # 过滤可见窗口（is_on_screen=true），按 z_index 降序找最前台窗口
+        visible = [
+            w for w in windows
+            if isinstance(w, dict) and w.get("is_on_screen") and w.get("pid")
+        ]
+        if not visible:
+            # fallback: 取第一个有 pid 的窗口
+            visible = [w for w in windows if isinstance(w, dict) and w.get("pid")]
 
-        # fallback: 取第一个有 pid 的窗口
-        if self._focus_pid is None:
-            for w in windows:
-                if not isinstance(w, dict):
-                    continue
-                pid = w.get("pid") or w.get("owner_pid")
-                if pid:
-                    self._focus_pid = pid
-                    self._focus_window = w.get("window_id") or w.get("id") or w.get("windowID")
-                    break
-
-        if self._focus_pid is None:
+        if not visible:
             raise RuntimeError("无法确定前台窗口的 pid")
 
-        return self._focus_pid, self._focus_window or 0
+        visible.sort(key=lambda w: w.get("z_index", 0), reverse=True)
+        w = visible[0]
+        self._focus_pid = w["pid"]
+        self._focus_window = w.get("window_id", 0)
+
+        return self._focus_pid, self._focus_window
 
     def invalidate_focus(self) -> None:
         """清除焦点窗口缓存（窗口关闭/切换时调用）。"""
@@ -205,8 +197,20 @@ async def _get_bridge_client() -> _BridgeClient:
 
 
 def _bridge_enabled() -> bool:
-    """是否激活 bridge 模式。"""
-    return bool(os.environ.get("CUA_BRIDGE_HOST"))
+    """是否激活 bridge 模式。
+
+    显式设置 CUA_BRIDGE_HOST 时激活。
+    Docker 容器内（/.dockerenv 存在）自动激活——cua-driver 依赖 macOS API，
+    在 Linux 容器里只能通过 bridge 连接宿主机。
+    """
+    if os.environ.get("CUA_BRIDGE_HOST"):
+        return True
+    # Docker 容器内自动激活
+    if os.path.exists("/.dockerenv"):
+        os.environ.setdefault("CUA_BRIDGE_HOST", "host.docker.internal")
+        os.environ.setdefault("CUA_BRIDGE_PORT", "8000")
+        return True
+    return False
 
 
 # ── 工具类 ───────────────────────────────────────────────────────────────────
