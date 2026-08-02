@@ -1,16 +1,19 @@
 package com.ethan.agent.ui.knowledge
 
+import androidx.compose.foundation.clickable
 import com.ethan.agent.shared.viewmodel.KnowledgeUiState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
@@ -20,34 +23,24 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.InputChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onKeyEvent
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ethan.agent.core.model.KnowledgeItem
 import com.ethan.agent.ui.components.ErrorSnackbar
 import com.ethan.agent.ui.components.EthanTopBar
 import com.ethan.agent.ui.components.LoadingBox
-import com.ethan.agent.ui.components.SimpleMarkdown
 import com.ethan.agent.ui.components.SnackbarContainer
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun KnowledgeScreen(
     state: KnowledgeUiState,
@@ -55,6 +48,7 @@ fun KnowledgeScreen(
     onQueryChange: (String) -> Unit,
     onToggleSemantic: () -> Unit,
     onSelect: (KnowledgeItem) -> Unit,
+    onDeselect: () -> Unit,
     onStartCreate: () -> Unit,
     onTitleChange: (String) -> Unit,
     onContentChange: (String) -> Unit,
@@ -68,10 +62,35 @@ fun KnowledgeScreen(
     val snackbar = remember { SnackbarHostState() }
     ErrorSnackbar(state.error, onClearError, snackbar)
 
+    val isDetailOpen = state.selected != null || state.isCreating
+
     Scaffold(
+        topBar = {
+            if (isDetailOpen) {
+                EthanTopBar(
+                    title = if (state.isCreating) "新建知识" else "编辑知识",
+                    onBack = onDeselect,
+                    actions = {
+                        TextButton(onClick = onSave) { Text("保存") }
+                        if (!state.isCreating) {
+                            IconButton(onClick = onDelete) {
+                                Icon(Icons.Default.Delete, contentDescription = "删除")
+                            }
+                        }
+                    }
+                )
+            } else {
+                EthanTopBar(
+                    title = "知识库",
+                    onBack = onBack,
+                )
+            }
+        },
         floatingActionButton = {
-            FloatingActionButton(onClick = onStartCreate) {
-                Icon(Icons.Default.Add, contentDescription = "新建")
+            if (!isDetailOpen) {
+                FloatingActionButton(onClick = onStartCreate) {
+                    Icon(Icons.Default.Add, contentDescription = "新建")
+                }
             }
         },
         snackbarHost = { SnackbarContainer(snackbar) },
@@ -82,139 +101,153 @@ fun KnowledgeScreen(
         }
 
         Column(Modifier.fillMaxSize().padding(padding)) {
-            EthanTopBar(title = "知识库", onBack = onBack)
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                OutlinedTextField(
-                    value = state.query,
-                    onValueChange = onQueryChange,
-                    label = { Text("搜索") },
-                    modifier = Modifier.weight(1f),
-                    singleLine = true,
+            if (isDetailOpen) {
+                KnowledgeDetailContent(
+                    state = state,
+                    onTitleChange = onTitleChange,
+                    onContentChange = onContentChange,
+                    onTagInputChange = onTagInputChange,
+                    onAddTag = onAddTag,
+                    onRemoveTag = onRemoveTag,
                 )
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(start = 8.dp)) {
-                    Text("语义", style = MaterialTheme.typography.labelSmall)
-                    Switch(checked = state.semanticSearch, onCheckedChange = { onToggleSemantic() })
-                }
-            }
-
-            Row(Modifier.weight(1f)) {
-                LazyColumn(Modifier.weight(1f).padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    items(state.items, key = { it.source }) { item ->
-                        KnowledgeCard(item = item, query = state.query, onClick = { onSelect(item) })
-                    }
-                }
-
-                Column(Modifier.weight(1.2f).padding(8.dp)) {
-                    if (state.selected != null || state.isCreating) {
-                        OutlinedTextField(
-                            state.title, onTitleChange,
-                            label = { Text("标题") },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        OutlinedTextField(
-                            state.content, onContentChange,
-                            label = { Text("内容 (Markdown)") },
-                            modifier = Modifier.fillMaxWidth().weight(1f),
-                        )
-                        SimpleMarkdown(
-                            text = state.content,
-                            modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = 4.dp),
-                        )
-                        TagChipInput(
-                            chips = state.tagChips,
-                            input = state.tagInput,
-                            onInputChange = onTagInputChange,
-                            onAddTag = onAddTag,
-                            onRemoveTag = onRemoveTag,
-                        )
-                        Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
-                            TextButton(onClick = onSave) { Text("保存") }
-                            if (!state.isCreating) {
-                                IconButton(onClick = onDelete) {
-                                    Icon(Icons.Default.Delete, contentDescription = "删除")
-                                }
-                            }
-                        }
-                    } else {
-                        Text("选择或新建知识条目", modifier = Modifier.padding(16.dp))
-                    }
-                }
+            } else {
+                KnowledgeListContent(
+                    state = state,
+                    onQueryChange = onQueryChange,
+                    onSelect = onSelect,
+                )
             }
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-private fun TagChipInput(
-    chips: List<String>,
-    input: String,
-    onInputChange: (String) -> Unit,
+private fun KnowledgeListContent(
+    state: KnowledgeUiState,
+    onQueryChange: (String) -> Unit,
+    onSelect: (KnowledgeItem) -> Unit,
+) {
+    Column {
+        OutlinedTextField(
+            value = state.query,
+            onValueChange = onQueryChange,
+            label = { Text("搜索知识") },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            singleLine = true,
+        )
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+        ) {
+            items(state.items, key = { it.source }) { item ->
+                KnowledgeCard(item = item, onClick = { onSelect(item) })
+            }
+        }
+    }
+}
+
+@Composable
+private fun KnowledgeDetailContent(
+    state: KnowledgeUiState,
+    onTitleChange: (String) -> Unit,
+    onContentChange: (String) -> Unit,
+    onTagInputChange: (String) -> Unit,
     onAddTag: () -> Unit,
     onRemoveTag: (String) -> Unit,
 ) {
-    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            chips.forEach { tag ->
-                InputChip(
-                    selected = false,
-                    onClick = { onRemoveTag(tag) },
-                    label = { Text(tag) },
-                    trailingIcon = { Icon(Icons.Default.Close, contentDescription = null) },
-                )
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        OutlinedTextField(
+            value = state.title,
+            onValueChange = onTitleChange,
+            label = { Text("标题") },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = state.content,
+            onValueChange = onContentChange,
+            label = { Text("内容 (Markdown)") },
+            modifier = Modifier.fillMaxWidth(),
+            minLines = 8,
+        )
+        Column {
+            Text("标签", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                state.tagChips.forEach { tag ->
+                    Chip(label = tag, onRemove = { onRemoveTag(tag) })
+                }
             }
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
-                value = input,
-                onValueChange = onInputChange,
-                label = { Text("添加标签") },
+                value = state.tagInput,
+                onValueChange = onTagInputChange,
+                label = { Text("添加标签，回车确认") },
+                modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                modifier = Modifier.weight(1f).onKeyEvent { event ->
-                    if (event.key == Key.Enter) { onAddTag(); true } else false
-                },
             )
-            IconButton(onClick = onAddTag) {
-                Icon(Icons.Default.Add, contentDescription = "添加")
-            }
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun KnowledgeCard(item: KnowledgeItem, query: String, onClick: () -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth(), onClick = onClick) {
+private fun Chip(label: String, onRemove: () -> Unit) {
+    androidx.compose.material3.AssistChip(
+        onClick = onRemove,
+        label = { Text(label) },
+        trailingIcon = {
+            Icon(
+                Icons.Default.Close,
+                contentDescription = "移除",
+                modifier = Modifier.padding(start = 4.dp).size(16.dp)
+            )
+        },
+    )
+}
+
+@Composable
+private fun KnowledgeCard(item: KnowledgeItem, query: String = "", onClick: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+    ) {
         Column(Modifier.padding(12.dp)) {
             Text(
-                text = highlightText(item.title, query),
+                item.title,
                 style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
-            item.tags?.let {
-                Text(it.joinToString(", "), style = MaterialTheme.typography.labelSmall)
+            item.content?.takeIf { it.isNotBlank() }?.let { content ->
+                Text(
+                    content.take(150),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+            item.tags?.takeIf { it.isNotEmpty() }?.let { tags ->
+                Row(
+                    modifier = Modifier.padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    tags.take(3).forEach { tag ->
+                        androidx.compose.material3.SuggestionChip(
+                            onClick = {},
+                            label = { Text(tag, style = MaterialTheme.typography.labelSmall) },
+                            modifier = Modifier.height(24.dp),
+                        )
+                    }
+                }
             }
         }
-    }
-}
-
-private fun highlightText(text: String, query: String) = buildAnnotatedString {
-    if (query.isBlank()) {
-        append(text)
-        return@buildAnnotatedString
-    }
-    val lower = text.lowercase()
-    val lowerQ = query.lowercase()
-    var start = 0
-    while (start < text.length) {
-        val idx = lower.indexOf(lowerQ, start)
-        if (idx < 0) { append(text.substring(start)); break }
-        append(text.substring(start, idx))
-        withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-            append(text.substring(idx, idx + lowerQ.length))
-        }
-        start = idx + lowerQ.length
     }
 }

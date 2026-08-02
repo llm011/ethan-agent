@@ -92,6 +92,10 @@ class KnowledgeViewModel(
         }
     }
 
+    fun deselectItem() {
+        _state.update { it.copy(selected = null, isCreating = false) }
+    }
+
     fun startCreate() {
         _state.update {
             it.copy(selected = null, isCreating = true, title = "", content = "", tagChips = emptyList(), tagInput = "")

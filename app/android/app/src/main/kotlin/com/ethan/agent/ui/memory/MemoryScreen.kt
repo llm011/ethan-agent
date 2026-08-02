@@ -35,7 +35,6 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -169,10 +168,7 @@ fun MemoryScreen(
     }
 
     Scaffold(
-        snackbarHost = { SnackbarContainer(snackbar) },
-    ) { padding ->
-        Column(Modifier.fillMaxSize().padding(bottom = padding.calculateBottomPadding())) {
-            // 紧凑顶栏
+        topBar = {
             EthanTopBar(
                 title = "记忆",
                 onBack = onBack,
@@ -195,7 +191,10 @@ fun MemoryScreen(
                     }
                 },
             )
-
+        },
+        snackbarHost = { SnackbarContainer(snackbar) },
+    ) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding)) {
             // 可横滑 Tab 栏
             EthanScrollableTabBar(
                 tabs = MemoryTab.entries.toList(),
@@ -627,35 +626,27 @@ private fun RecordsTab(
     onConfirm: (String) -> Unit,
     onDelete: (String) -> Unit,
 ) {
-    var filtersExpanded by remember { mutableStateOf(false) }
     var searchVisible by remember { mutableStateOf(false) }
     val scrollState = rememberScrollState()
 
     Column(Modifier.fillMaxSize()) {
-        // Top bar: filter chips (expandable) + fixed icons
+        // Top bar: filter chips (always visible) + search icon
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (filtersExpanded) {
-                val statuses = listOf(null to "全部", "pending" to "候选", "confirmed" to "已确认", "superseded" to "已替代")
-                Row(
-                    modifier = Modifier.weight(1f).horizontalScroll(scrollState),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    statuses.forEach { (value, label) ->
-                        FilterChip(
-                            selected = filter.status == value,
-                            onClick = { onFilterChange(filter.copy(status = value)) },
-                            label = { Text(label) },
-                        )
-                    }
+            val statuses = listOf(null to "全部", "pending" to "候选", "confirmed" to "已确认", "superseded" to "已替代")
+            Row(
+                modifier = Modifier.weight(1f).horizontalScroll(scrollState),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                statuses.forEach { (value, label) ->
+                    FilterChip(
+                        selected = filter.status == value,
+                        onClick = { onFilterChange(filter.copy(status = value)) },
+                        label = { Text(label) },
+                    )
                 }
-            } else {
-                Spacer(Modifier.weight(1f))
-            }
-            IconButton(onClick = { filtersExpanded = !filtersExpanded }) {
-                Icon(Icons.Default.Tune, contentDescription = "筛选")
             }
             IconButton(onClick = { searchVisible = !searchVisible }) {
                 Icon(Icons.Default.Search, contentDescription = "搜索")

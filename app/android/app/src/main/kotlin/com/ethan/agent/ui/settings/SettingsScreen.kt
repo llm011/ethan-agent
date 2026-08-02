@@ -15,11 +15,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
@@ -45,6 +46,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import android.widget.Toast
 import androidx.compose.ui.Alignment
@@ -60,8 +62,10 @@ import com.ethan.agent.core.model.KnowledgeValidateRequest
 import com.ethan.agent.core.model.ProviderConfig
 import com.ethan.agent.core.model.SystemSettings
 import com.ethan.agent.ui.components.ErrorSnackbar
+import com.ethan.agent.ui.components.EthanTopBar
 import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.SnackbarContainer
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -127,76 +131,89 @@ fun SettingsScreen(
     }
 
     Scaffold(
+        topBar = { EthanTopBar(title = "设置", onBack = onBack) },
         snackbarHost = { SnackbarContainer(snackbar) },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(bottom = padding.calculateBottomPadding())) {
-            // 简洁顶栏：不再用 EthanTopBar 避免双重 statusBarsPadding
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 4.dp, vertical = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "返回",
-                        tint = MaterialTheme.colorScheme.onSurface,
-                    )
-                }
-                Text(
-                    text = "设置",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f),
-                )
+        val tabs = SettingsTab.entries.toList()
+        val pagerState = rememberPagerState(pageCount = { tabs.size })
+        val coroutineScope = rememberCoroutineScope()
+
+        // 同步 Tab 点击与 Pager 页面
+        LaunchedEffect(state.tab) {
+            val index = tabs.indexOf(state.tab)
+            if (index >= 0 && index != pagerState.currentPage) {
+                pagerState.animateScrollToPage(index)
             }
+        }
 
-            SettingsTabRow(state.tab, onTabChange)
+        // 同步 Pager 滑动到 Tab 选中
+        LaunchedEffect(pagerState.currentPage) {
+            val index = pagerState.currentPage
+            if (index >= 0 && index < tabs.size && tabs[index] != state.tab) {
+                onTabChange(tabs[index])
+            }
+        }
 
-            Column(
-                Modifier
-                    .weight(1f)
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                when (state.tab) {
-                    // Connection 永远可访问，不依赖网络数据，避免"进不去设置"死锁
-                    SettingsTab.Connection -> ConnectionTab(state, onServerUrlChange, onSaveServerUrl)
-                    SettingsTab.General -> {
-                        if (state.isLoading && state.agentSettings == null) LoadingBox()
-                        else state.agentSettings?.let {
-                            GeneralTab(it, state.themeId, state.appLockEnabled, onUpdateAgent, onSaveAgent, onSetTheme, onCheckUpdate, onSetAppLock, onClearCache)
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            SettingsTabRow(
+                selected = state.tab,
+                onTabChange = { tab ->
+                    onTabChange(tab)
+                    coroutineScope.launch {
+                        pagerState.animateScrollToPage(tabs.indexOf(tab))
+                    }
+                }
+            )
+
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize(),
+            ) { page ->
+                val tab = tabs[page]
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    when (tab) {
+                        SettingsTab.Connection -> ConnectionTab(state, onServerUrlChange, onSaveServerUrl)
+                        SettingsTab.General -> {
+                            if (state.isLoading && state.agentSettings == null) LoadingBox()
+                            else state.agentSettings?.let {
+                                GeneralTab(it, state.themeId, state.appLockEnabled, onUpdateAgent, onSaveAgent, onSetTheme, onCheckUpdate, onSetAppLock, onClearCache)
+                            }
                         }
+                        SettingsTab.Providers -> {
+                            if (state.isLoading && state.providers.isEmpty()) LoadingBox()
+                            else ProvidersTab(state.providers, onUpdateProvider, onSaveProviders)
+                        }
+                        SettingsTab.Channels -> ChannelsTab(
+                            state = state,
+                            onChange = onChannelChange,
+                            onSave = onSaveChannel,
+                            onInstallLarkDeps = onInstallLarkDeps,
+                            onValidateKnowledge = onValidateKnowledge,
+                        )
+                        SettingsTab.Identity -> SystemTextTab("身份 (identity.md)", state.systemSettings?.identity ?: "", {
+                            onUpdateSystem(state.systemSettings?.copy(identity = it) ?: SystemSettings(identity = it))
+                        }, onSaveSystem)
+                        SettingsTab.Soul -> SystemTextTab("灵魂 (soul.md)", state.systemSettings?.soul ?: "", {
+                            onUpdateSystem(state.systemSettings?.copy(soul = it) ?: SystemSettings(soul = it))
+                        }, onSaveSystem)
+                        SettingsTab.Tools -> SystemTextTab("工具 (tools.md)", state.systemSettings?.tools ?: "", {
+                            onUpdateSystem(state.systemSettings?.copy(tools = it) ?: SystemSettings(tools = it))
+                        }, onSaveSystem)
+                        SettingsTab.Heartbeat -> SystemTextTab("心跳 (heartbeat.md)", state.systemSettings?.heartbeat ?: "", {
+                            onUpdateSystem(state.systemSettings?.copy(heartbeat = it) ?: SystemSettings(heartbeat = it))
+                        }, onSaveSystem)
+                        SettingsTab.Profile -> ProfileTab(state.profile, onProfileChange, onSaveProfile)
+                        SettingsTab.PromptPreview -> PromptPreviewTab(state, onLoadPromptPreview)
+                        SettingsTab.ApiKeys -> ApiKeysTab(state, onCreateApiKey, onDeleteApiKey)
+                        SettingsTab.FastRules -> FastRulesTab(state)
+                        SettingsTab.ToolTiers -> ToolTiersTab(state)
                     }
-                    SettingsTab.Providers -> {
-                        if (state.isLoading && state.providers.isEmpty()) LoadingBox()
-                        else ProvidersTab(state.providers, onUpdateProvider, onSaveProviders)
-                    }
-                    SettingsTab.Channels -> ChannelsTab(
-                        state = state,
-                        onChange = onChannelChange,
-                        onSave = onSaveChannel,
-                        onInstallLarkDeps = onInstallLarkDeps,
-                        onValidateKnowledge = onValidateKnowledge,
-                    )
-                    SettingsTab.Identity -> SystemTextTab("身份 (identity.md)", state.systemSettings?.identity ?: "", {
-                        onUpdateSystem(state.systemSettings?.copy(identity = it) ?: SystemSettings(identity = it))
-                    }, onSaveSystem)
-                    SettingsTab.Soul -> SystemTextTab("灵魂 (soul.md)", state.systemSettings?.soul ?: "", {
-                        onUpdateSystem(state.systemSettings?.copy(soul = it) ?: SystemSettings(soul = it))
-                    }, onSaveSystem)
-                    SettingsTab.Tools -> SystemTextTab("工具 (tools.md)", state.systemSettings?.tools ?: "", {
-                        onUpdateSystem(state.systemSettings?.copy(tools = it) ?: SystemSettings(tools = it))
-                    }, onSaveSystem)
-                    SettingsTab.Heartbeat -> SystemTextTab("心跳 (heartbeat.md)", state.systemSettings?.heartbeat ?: "", {
-                        onUpdateSystem(state.systemSettings?.copy(heartbeat = it) ?: SystemSettings(heartbeat = it))
-                    }, onSaveSystem)
-                    SettingsTab.Profile -> ProfileTab(state.profile, onProfileChange, onSaveProfile)
-                    SettingsTab.PromptPreview -> PromptPreviewTab(state, onLoadPromptPreview)
-                    SettingsTab.ApiKeys -> ApiKeysTab(state, onCreateApiKey, onDeleteApiKey)
-                    SettingsTab.FastRules -> FastRulesTab(state)
-                    SettingsTab.ToolTiers -> ToolTiersTab(state)
                 }
             }
         }
