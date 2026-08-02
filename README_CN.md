@@ -99,7 +99,7 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 - 截图结果直接传给视觉模型，agent 看到屏幕后决定下一步操作
 - `ethan server install` 自动安装并注册 `cua-driver` 为 launchd 服务；也可手动安装：`curl -fsSL .../install.sh | bash && cua-driver install`
 - 可选 Python SDK：`pip install 'ethan-agent[computer]'`（cua-computer）；未安装时工具自动不可见，不影响其他功能
-
+- **Docker 容器场景**：cua-driver 依赖 macOS Accessibility API 无法在容器内运行，需在宿主机上额外部署 `cua-bridge`（TCP→UDS 桥）；容器内 ethan 通过 `host.docker.internal` 访问。一键安装：`curl -fsSL https://raw.githubusercontent.com/llm011/ethan-agent/main/deploy/cua-bridge/install.sh | bash`，详见 [docs/computer-use-bridge.md](docs/computer-use-bridge.md)
 ---
 
 ## 安装

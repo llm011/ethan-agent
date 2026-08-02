@@ -5,11 +5,65 @@
 """
 from __future__ import annotations
 
+import os
+
 import typer
 from rich.console import Console
 
 console = Console()
 app = typer.Typer(help="交互式引导安装 & 配置", invoke_without_command=True)
+
+
+def _is_in_docker() -> bool:
+    """检测当前是否运行在 Docker 容器内。"""
+    return os.path.exists("/.dockerenv")
+
+
+def _is_bridge_reachable() -> bool:
+    """检测 cua-bridge 是否可连通（Docker 容器内用）。
+
+    尝试连接 CUA_BRIDGE_HOST:CUA_BRIDGE_PORT（默认 host.docker.internal:8000），
+    连通即视为 computer-use 可用（bridge 背后是宿主机的 cua-driver）。
+    """
+    import socket
+
+    host = os.environ.get("CUA_BRIDGE_HOST", "host.docker.internal")
+    port = int(os.environ.get("CUA_BRIDGE_PORT", "8000"))
+    try:
+        with socket.create_connection((host, port), timeout=2):
+            return True
+    except OSError:
+        return False
+
+
+def _get_install_hint(plugin: dict) -> str:
+    """获取插件的安装后提示（优先动态函数，其次静态字符串）。"""
+    hint_func = plugin.get("post_install_hint_func")
+    if hint_func:
+        return hint_func()
+    return plugin.get("post_install_hint", "")
+
+
+def _computer_use_install_hint() -> str:
+    """根据运行环境动态生成 computer-use 安装提示。
+
+    - Docker 容器：cua-driver 依赖 macOS API，容器内装不了；需要宿主机装 cua-bridge
+    - 宿主机原生：直接装 cua-driver，无需 bridge
+    """
+    if _is_in_docker():
+        return (
+            "当前运行在 Docker 容器内，cua-driver 依赖 macOS API 无法在容器中运行。\n"
+            "请在 [宿主机] 上执行以下命令安装 cua-bridge（TCP→UDS 桥）：\n"
+            "  curl -fsSL https://raw.githubusercontent.com/llm011/ethan-agent/main/deploy/cua-bridge/install.sh | bash\n"
+            "\n"
+            "bridge 会自动安装并启动 cua-driver + cua-bridge 服务，容器内设置 CUA_BRIDGE_HOST 即可使用。"
+        )
+    return (
+        "还需安装 cua-driver 后台服务：\n"
+        "  curl -fsSL https://raw.githubusercontent.com/trycua/cua/main/libs/cua-driver/scripts/install.sh | bash\n"
+        "  cua-driver install   # 注册开机自启\n"
+        "  cua-driver serve     # 或手动启动"
+    )
 
 
 # ── 插件注册表 ────────────────────────────────────────────────────────────────
@@ -77,12 +131,8 @@ PRESET_PLUGINS: list[dict] = [
         "install_type": "optional_dep",
         "install_source": "computer",
         "pip_packages": ["cua-computer"],
-        "post_install_hint": (
-            "还需安装 cua-driver 后台服务：\n"
-            "  curl -fsSL https://raw.githubusercontent.com/trycua/cua/main/libs/cua-driver/scripts/install.sh | bash\n"
-            "  cua-driver install   # 注册开机自启\n"
-            "  cua-driver serve     # 或手动启动"
-        ),
+        # 动态生成：Docker 环境提示装 cua-bridge，宿主机提示装 cua-driver
+        "post_install_hint_func": _computer_use_install_hint,
     },
     {
         "name": "lark-channel",
@@ -527,8 +577,9 @@ def _install_plugin(name: str) -> None:
         elif action == "info":
             console.print(f"[bold]{name}[/bold] — {plugin['description']}")
             console.print(f"[dim]类型: {plugin['install_type']}[/dim]")
-            if plugin.get("post_install_hint"):
-                console.print(f"[dim]{plugin['post_install_hint']}[/dim]")
+            hint = _get_install_hint(plugin)
+            if hint:
+                console.print(f"[dim]{hint}[/dim]")
             console.print()
     else:
         _do_install(plugin)
@@ -578,6 +629,10 @@ def _check_plugin_installed(plugin: dict) -> bool:
     """统一检测插件是否已安装。"""
     name = plugin["name"]
     if plugin["install_type"] == "optional_dep":
+        # Docker 容器内的 computer-use：检查 bridge 连通性而非 pip 包
+        # （cua-computer 包依赖 macOS API，容器内不装；bridge 通即视为可用）
+        if name == "computer-use" and _is_in_docker():
+            return _is_bridge_reachable()
         deps_ok = _is_optional_dep_installed(plugin)
         # 嵌入路由类：依赖 + 模型文件都就位才算"已安装"
         if plugin.get("post_install") == "router_pull":
@@ -674,7 +729,7 @@ def _install_cli_tool(plugin: dict) -> None:
                 save_config(config)
                 console.print("[green]✓ 知识库已切换为 Obsidian 后端[/green]")
 
-    hint = plugin.get("post_install_hint", "")
+    hint = _get_install_hint(plugin)
     if hint:
         console.print(f"\n[cyan]💡 {hint}[/cyan]")
     console.print(f"\n[green]✓ {name} 插件配置完成！[/green]")
@@ -768,8 +823,9 @@ def _install_builtin_skill(plugin: dict) -> None:
         _pip_install(pip_packages)
 
     console.print(f"[green]✓ 已启用内置技能: {name}[/green]")
-    if plugin.get("post_install_hint"):
-        console.print(f"[dim]{plugin['post_install_hint']}[/dim]")
+    hint = _get_install_hint(plugin)
+    if hint:
+        console.print(f"[dim]{hint}[/dim]")
     console.print()
 
 
@@ -786,6 +842,19 @@ def _install_config_plugin(plugin_name: str) -> None:
 
 def _install_optional_dep(plugin: dict) -> None:
     """安装可选依赖型插件。"""
+    # Docker 容器内安装 computer-use：cua-computer 包依赖 macOS API，容器内装了也没用。
+    # 跳过 pip 安装，直接提示用户去宿主机装 cua-bridge。
+    if plugin.get("name") == "computer-use" and _is_in_docker():
+        console.print("[yellow]当前运行在 Docker 容器内，跳过容器内 pip 安装。[/yellow]")
+        console.print("[dim]cua-driver 依赖 macOS API，必须在宿主机上安装。[/dim]")
+        console.print()
+        hint = _computer_use_install_hint()
+        console.print("[bold yellow]请在宿主机执行:[/bold yellow]")
+        for line in hint.split("\n"):
+            console.print(f"  {line}")
+        console.print()
+        return
+
     packages = plugin.get("pip_packages", [])
     if not packages:
         console.print("[red]无包可安装[/red]")
@@ -795,8 +864,8 @@ def _install_optional_dep(plugin: dict) -> None:
     if not success:
         return
 
-    # 后续操作提示
-    hint = plugin.get("post_install_hint")
+    # 后续操作提示（支持静态 hint 和动态 hint 函数）
+    hint = _get_install_hint(plugin)
     if hint:
         console.print()
         console.print("[bold yellow]后续步骤:[/bold yellow]")

@@ -101,6 +101,7 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 - Screenshot results are passed directly to vision models; the agent sees the screen and decides the next action
 - `ethan server install` automatically installs and registers `cua-driver` as a launchd service; or install manually: `curl -fsSL .../install.sh | bash && cua-driver install`
 - Optional Python SDK: `pip install 'ethan-agent[computer]'` (cua-computer); gracefully absent when not installed
+- **Docker 容器场景**：cua-driver 依赖 macOS Accessibility API 无法在容器内运行，需在宿主机上额外部署 `cua-bridge`（TCP→UDS 桥）；容器内 ethan 通过 `host.docker.internal` 访问。一键安装：`curl -fsSL https://raw.githubusercontent.com/llm011/ethan-agent/main/deploy/cua-bridge/install.sh | bash`，详见 [docs/computer-use-bridge.md](docs/computer-use-bridge.md)
 
 ---
 
