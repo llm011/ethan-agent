@@ -2,6 +2,8 @@ package com.ethan.agent.ui.docs
 
 import com.ethan.agent.shared.viewmodel.DocsUiState
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,7 +20,9 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.ethan.agent.ui.components.ErrorSnackbar
 import com.ethan.agent.ui.components.EthanTopBar
@@ -39,6 +43,7 @@ fun DocsScreen(
     ErrorSnackbar(state.error, onClearError, snackbar)
 
     Scaffold(
+        topBar = { EthanTopBar(title = "文档", onBack = onBack) },
         snackbarHost = { SnackbarContainer(snackbar) },
     ) { padding ->
         if (state.isLoading) {
@@ -46,29 +51,55 @@ fun DocsScreen(
             return@Scaffold
         }
 
-        Column(Modifier.fillMaxSize().padding(padding)) {
-            EthanTopBar(title = "文档", onBack = onBack)
-
-            if (showListOnly || state.selectedSlug == null) {
-                LazyColumn(Modifier.fillMaxSize().padding(12.dp)) {
+        if (showListOnly || state.selectedSlug == null) {
+            if (state.docs.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize().padding(padding),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        "暂无文档",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize().padding(padding).padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
                     items(state.docs, key = { it.slug }) { doc ->
                         Card(
                             Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 4.dp)
                                 .clickable { onSelectDoc(doc.slug) },
                         ) {
-                            Text(doc.title, modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                doc.title,
+                                modifier = Modifier.padding(16.dp),
+                                style = MaterialTheme.typography.titleSmall,
+                            )
                         }
                     }
                 }
-            } else {
-                Column(
-                    Modifier
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState())
-                        .padding(16.dp),
-                ) {
+            }
+        } else {
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .verticalScroll(rememberScrollState())
+                    .padding(16.dp),
+            ) {
+                if (state.content.isBlank()) {
+                    Text(
+                        "文档内容为空",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().padding(top = 60.dp),
+                    )
+                } else {
                     SimpleMarkdown(text = state.content)
                 }
             }

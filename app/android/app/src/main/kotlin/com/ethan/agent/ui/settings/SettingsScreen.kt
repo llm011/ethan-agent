@@ -10,16 +10,18 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
@@ -45,6 +47,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import android.widget.Toast
 import androidx.compose.ui.Alignment
@@ -60,8 +63,13 @@ import com.ethan.agent.core.model.KnowledgeValidateRequest
 import com.ethan.agent.core.model.ProviderConfig
 import com.ethan.agent.core.model.SystemSettings
 import com.ethan.agent.ui.components.ErrorSnackbar
+import com.ethan.agent.ui.components.EthanPrimaryButton
+import com.ethan.agent.ui.components.EthanSecondaryButton
+import com.ethan.agent.ui.components.EthanScrollableTabBar
+import com.ethan.agent.ui.components.EthanTopBar
 import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.SnackbarContainer
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -127,123 +135,119 @@ fun SettingsScreen(
     }
 
     Scaffold(
+        topBar = { EthanTopBar(title = "设置", onBack = onBack) },
         snackbarHost = { SnackbarContainer(snackbar) },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(bottom = padding.calculateBottomPadding())) {
-            // 简洁顶栏：不再用 EthanTopBar 避免双重 statusBarsPadding
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 4.dp, vertical = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "返回",
-                        tint = MaterialTheme.colorScheme.onSurface,
-                    )
-                }
-                Text(
-                    text = "设置",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f),
-                )
-            }
+        val tabs = SettingsTab.entries.toList()
+        val pagerState = rememberPagerState(pageCount = { tabs.size })
+        val coroutineScope = rememberCoroutineScope()
 
-            SettingsTabRow(state.tab, onTabChange)
-
-            Column(
-                Modifier
-                    .weight(1f)
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                when (state.tab) {
-                    // Connection 永远可访问，不依赖网络数据，避免"进不去设置"死锁
-                    SettingsTab.Connection -> ConnectionTab(state, onServerUrlChange, onSaveServerUrl)
-                    SettingsTab.General -> {
-                        if (state.isLoading && state.agentSettings == null) LoadingBox()
-                        else state.agentSettings?.let {
-                            GeneralTab(it, state.themeId, state.appLockEnabled, onUpdateAgent, onSaveAgent, onSetTheme, onCheckUpdate, onSetAppLock, onClearCache)
-                        }
-                    }
-                    SettingsTab.Providers -> {
-                        if (state.isLoading && state.providers.isEmpty()) LoadingBox()
-                        else ProvidersTab(state.providers, onUpdateProvider, onSaveProviders)
-                    }
-                    SettingsTab.Channels -> ChannelsTab(
-                        state = state,
-                        onChange = onChannelChange,
-                        onSave = onSaveChannel,
-                        onInstallLarkDeps = onInstallLarkDeps,
-                        onValidateKnowledge = onValidateKnowledge,
-                    )
-                    SettingsTab.Identity -> SystemTextTab("身份 (identity.md)", state.systemSettings?.identity ?: "", {
-                        onUpdateSystem(state.systemSettings?.copy(identity = it) ?: SystemSettings(identity = it))
-                    }, onSaveSystem)
-                    SettingsTab.Soul -> SystemTextTab("灵魂 (soul.md)", state.systemSettings?.soul ?: "", {
-                        onUpdateSystem(state.systemSettings?.copy(soul = it) ?: SystemSettings(soul = it))
-                    }, onSaveSystem)
-                    SettingsTab.Tools -> SystemTextTab("工具 (tools.md)", state.systemSettings?.tools ?: "", {
-                        onUpdateSystem(state.systemSettings?.copy(tools = it) ?: SystemSettings(tools = it))
-                    }, onSaveSystem)
-                    SettingsTab.Heartbeat -> SystemTextTab("心跳 (heartbeat.md)", state.systemSettings?.heartbeat ?: "", {
-                        onUpdateSystem(state.systemSettings?.copy(heartbeat = it) ?: SystemSettings(heartbeat = it))
-                    }, onSaveSystem)
-                    SettingsTab.Profile -> ProfileTab(state.profile, onProfileChange, onSaveProfile)
-                    SettingsTab.PromptPreview -> PromptPreviewTab(state, onLoadPromptPreview)
-                    SettingsTab.ApiKeys -> ApiKeysTab(state, onCreateApiKey, onDeleteApiKey)
-                    SettingsTab.FastRules -> FastRulesTab(state)
-                    SettingsTab.ToolTiers -> ToolTiersTab(state)
-                }
+        // 同步 Tab 点击与 Pager 页面
+        LaunchedEffect(state.tab) {
+            val index = tabs.indexOf(state.tab)
+            if (index >= 0 && index != pagerState.currentPage && pagerState.currentPage != pagerState.targetPage) {
+                // 只在 pager 不在动画中时程序化滚动，避免与用户手势冲突
+                pagerState.animateScrollToPage(index)
             }
         }
-    }
-}
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun SettingsTabRow(selected: SettingsTab, onTabChange: (SettingsTab) -> Unit) {
-    LazyRow(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        items(SettingsTab.entries.toList()) { tab ->
-            val isSelected = selected == tab
-            val label = when (tab) {
-                SettingsTab.Connection -> "连接"
-                SettingsTab.General -> "通用"
-                SettingsTab.Providers -> "模型"
-                SettingsTab.Channels -> "渠道"
-                SettingsTab.Identity -> "身份"
-                SettingsTab.Soul -> "灵魂"
-                SettingsTab.Tools -> "工具"
-                SettingsTab.Heartbeat -> "心跳"
-                SettingsTab.Profile -> "画像"
-                SettingsTab.PromptPreview -> "预览"
-                SettingsTab.ApiKeys -> "Keys"
-                SettingsTab.FastRules -> "Fast Rules"
-                SettingsTab.ToolTiers -> "路由档位"
+        // 同步 Pager 滑动到 Tab 选中（跳过初始状态，避免覆盖已持久化的 tab）
+        val isFirstPagerSync = remember { mutableStateOf(true) }
+        LaunchedEffect(pagerState.currentPage) {
+            if (isFirstPagerSync.value) {
+                isFirstPagerSync.value = false
+                // 初次进入：如果 state.tab 不是第0个 tab，同步 pager 到正确页面
+                val initialIndex = tabs.indexOf(state.tab)
+                if (initialIndex > 0) {
+                    pagerState.scrollToPage(initialIndex)
+                }
+                return@LaunchedEffect
             }
-            Surface(
-                onClick = { onTabChange(tab) },
-                shape = RoundedCornerShape(16.dp),
-                color = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                    else androidx.compose.ui.graphics.Color.Transparent,
-            ) {
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.labelMedium.copy(
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                    ),
-                    color = if (isSelected) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                )
+            val index = pagerState.currentPage
+            if (index >= 0 && index < tabs.size && tabs[index] != state.tab) {
+                onTabChange(tabs[index])
+            }
+        }
+
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            EthanScrollableTabBar(
+                tabs = tabs,
+                selectedTab = state.tab,
+                onTabSelected = { tab ->
+                    onTabChange(tab)
+                    coroutineScope.launch {
+                        pagerState.animateScrollToPage(tabs.indexOf(tab))
+                    }
+                },
+                labelOf = { tab ->
+                    when (tab) {
+                        SettingsTab.Connection -> "连接"
+                        SettingsTab.General -> "通用"
+                        SettingsTab.Providers -> "模型"
+                        SettingsTab.Channels -> "渠道"
+                        SettingsTab.Identity -> "身份"
+                        SettingsTab.Soul -> "灵魂"
+                        SettingsTab.Tools -> "工具"
+                        SettingsTab.Heartbeat -> "心跳"
+                        SettingsTab.Profile -> "画像"
+                        SettingsTab.PromptPreview -> "预览"
+                        SettingsTab.ApiKeys -> "Keys"
+                        SettingsTab.FastRules -> "Fast Rules"
+                        SettingsTab.ToolTiers -> "路由档位"
+                    }
+                },
+            )
+
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize(),
+            ) { page ->
+                val tab = tabs[page]
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    when (tab) {
+                        SettingsTab.Connection -> ConnectionTab(state, onServerUrlChange, onSaveServerUrl)
+                        SettingsTab.General -> {
+                            if (state.isLoading && state.agentSettings == null) LoadingBox()
+                            else state.agentSettings?.let {
+                                GeneralTab(it, state.themeId, state.appLockEnabled, onUpdateAgent, onSaveAgent, onSetTheme, onCheckUpdate, onSetAppLock, onClearCache)
+                            }
+                        }
+                        SettingsTab.Providers -> {
+                            if (state.isLoading && state.providers.isEmpty()) LoadingBox()
+                            else ProvidersTab(state.providers, onUpdateProvider, onSaveProviders)
+                        }
+                        SettingsTab.Channels -> ChannelsTab(
+                            state = state,
+                            onChange = onChannelChange,
+                            onSave = onSaveChannel,
+                            onInstallLarkDeps = onInstallLarkDeps,
+                            onValidateKnowledge = onValidateKnowledge,
+                        )
+                        SettingsTab.Identity -> SystemTextTab("身份 (identity.md)", state.systemSettings?.identity ?: "", {
+                            onUpdateSystem(state.systemSettings?.copy(identity = it) ?: SystemSettings(identity = it))
+                        }, onSaveSystem)
+                        SettingsTab.Soul -> SystemTextTab("灵魂 (soul.md)", state.systemSettings?.soul ?: "", {
+                            onUpdateSystem(state.systemSettings?.copy(soul = it) ?: SystemSettings(soul = it))
+                        }, onSaveSystem)
+                        SettingsTab.Tools -> SystemTextTab("工具 (tools.md)", state.systemSettings?.tools ?: "", {
+                            onUpdateSystem(state.systemSettings?.copy(tools = it) ?: SystemSettings(tools = it))
+                        }, onSaveSystem)
+                        SettingsTab.Heartbeat -> SystemTextTab("心跳 (heartbeat.md)", state.systemSettings?.heartbeat ?: "", {
+                            onUpdateSystem(state.systemSettings?.copy(heartbeat = it) ?: SystemSettings(heartbeat = it))
+                        }, onSaveSystem)
+                        SettingsTab.Profile -> ProfileTab(state.profile, onProfileChange, onSaveProfile)
+                        SettingsTab.PromptPreview -> PromptPreviewTab(state, onLoadPromptPreview)
+                        SettingsTab.ApiKeys -> ApiKeysTab(state, onCreateApiKey, onDeleteApiKey)
+                        SettingsTab.FastRules -> FastRulesTab(state)
+                        SettingsTab.ToolTiers -> ToolTiersTab(state)
+                    }
+                }
             }
         }
     }
@@ -256,7 +260,7 @@ private fun ConnectionTab(state: SettingsUiState, onUrlChange: (String) -> Unit,
             Text("服务器连接", style = MaterialTheme.typography.titleSmall)
             OutlinedTextField(state.serverUrl, onUrlChange, label = { Text("服务器地址") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
             state.serverVersion?.let { Text("版本: $it", style = MaterialTheme.typography.bodySmall) }
-            TextButton(onClick = onSave) { Text("测试并保存") }
+            EthanPrimaryButton("测试并保存", onClick = onSave, modifier = Modifier.fillMaxWidth())
             Text(
                 "示例: http://192.168.1.100:8900 或 https://your-nas.com:8900",
                 style = MaterialTheme.typography.bodySmall,
@@ -298,7 +302,7 @@ private fun GeneralTab(
                 Text("心跳")
                 Switch(settings.heartbeatEnabled, { onUpdate(settings.copy(heartbeatEnabled = it)) })
             }
-            TextButton(onClick = onSave) { Text("保存") }
+            EthanPrimaryButton("保存", onClick = onSave, modifier = Modifier.fillMaxWidth())
         }
     }
 
@@ -365,15 +369,20 @@ private fun GeneralTab(
     CuteCard {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("系统", style = MaterialTheme.typography.titleSmall)
-            OutlinedButton(onClick = onCheckUpdate, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("检查更新")
-            }
-            OutlinedButton(onClick = onClearCache, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("清空本地缓存")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                EthanSecondaryButton(
+                    text = "检查更新",
+                    onClick = onCheckUpdate,
+                    modifier = Modifier.weight(1f),
+                )
+                EthanSecondaryButton(
+                    text = "清空缓存",
+                    onClick = onClearCache,
+                    modifier = Modifier.weight(1f),
+                )
             }
         }
     }
@@ -407,7 +416,7 @@ private fun ProvidersTab(
             }
         }
     }
-    TextButton(onClick = onSave) { Text("保存 Provider 配置") }
+    EthanPrimaryButton("保存 Provider 配置", onClick = onSave, modifier = Modifier.fillMaxWidth())
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -432,11 +441,28 @@ private fun ChannelsTab(
                         shape = RoundedCornerShape(12.dp),
                     )
                 }
-                TextButton(onClick = { onSave(channel.id) }) { Text("保存") }
 
                 if (channel.id == "lark") {
-                    HorizontalDivider()
-                    LarkDepsPanel(state, onInstallLarkDeps)
+                    HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                    LarkDepsStatus(state)
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        EthanSecondaryButton(
+                            text = "测试依赖状态",
+                            onClick = onInstallLarkDeps,
+                            modifier = Modifier.weight(1f),
+                        )
+                        EthanPrimaryButton(
+                            text = "保存并启用",
+                            onClick = { onSave(channel.id) },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                } else {
+                    EthanPrimaryButton("保存", onClick = { onSave(channel.id) }, modifier = Modifier.fillMaxWidth())
                 }
             }
         }
@@ -446,7 +472,7 @@ private fun ChannelsTab(
 }
 
 @Composable
-private fun LarkDepsPanel(state: SettingsUiState, onInstall: () -> Unit) {
+private fun LarkDepsStatus(state: SettingsUiState) {
     val deps = state.larkDepsStatus
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("飞书依赖状态", style = MaterialTheme.typography.labelLarge)
@@ -454,18 +480,25 @@ private fun LarkDepsPanel(state: SettingsUiState, onInstall: () -> Unit) {
             Text("加载中…", style = MaterialTheme.typography.bodySmall)
             return
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            DepChip("oapi", deps.larkOapiInstalled)
-            DepChip("cli", deps.larkCliInstalled)
-            DepChip("app", deps.larkCliAppSynced)
+        Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = androidx.compose.ui.graphics.Color(0xFF1A1A1A),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                DepChip("oapi", deps.larkOapiInstalled, onDark = true)
+                DepChip("cli", deps.larkCliInstalled, onDark = true)
+                DepChip("app", deps.larkCliAppSynced, onDark = true)
+            }
         }
         if (deps.installing) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                CircularProgressIndicator(strokeWidth = 2.dp)
+                CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
                 Text("安装中…", style = MaterialTheme.typography.bodySmall)
             }
-        } else if (!deps.larkOapiInstalled || !deps.larkCliInstalled) {
-            Button(onClick = onInstall) { Text("安装依赖") }
         }
         if (deps.lastError.isNotBlank()) {
             Text("错误: ${deps.lastError}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
@@ -474,12 +507,13 @@ private fun LarkDepsPanel(state: SettingsUiState, onInstall: () -> Unit) {
 }
 
 @Composable
-private fun DepChip(label: String, ok: Boolean) {
-    val color = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+private fun DepChip(label: String, ok: Boolean, onDark: Boolean = false) {
+    val color = if (ok) androidx.compose.ui.graphics.Color(0xFF4CAF50) else MaterialTheme.colorScheme.error
+    val icon = if (ok) "✓" else "✗"
     Text(
-        "$label: ${if (ok) "✓" else "✗"}",
-        style = MaterialTheme.typography.labelSmall,
-        color = color,
+        "$label: $icon",
+        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
+        color = if (onDark) androidx.compose.ui.graphics.Color.White else color,
     )
 }
 
@@ -494,9 +528,7 @@ private fun KnowledgeValidatePanel(
     CuteCard {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("知识库连通性", style = MaterialTheme.typography.titleSmall)
-            OutlinedButton(onClick = { showSheet = true }, modifier = Modifier.fillMaxWidth()) {
-                Text("测试连接")
-            }
+            EthanSecondaryButton("测试连接", onClick = { showSheet = true }, modifier = Modifier.fillMaxWidth())
         }
     }
 
@@ -580,9 +612,12 @@ private fun KnowledgeValidateSheet(
         }
 
         if (validating) {
-            CircularProgressIndicator()
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                CircularProgressIndicator()
+            }
         } else {
-            Button(
+            EthanPrimaryButton(
+                text = "测试连接",
                 onClick = {
                     onValidate(
                         KnowledgeValidateRequest(
@@ -595,9 +630,7 @@ private fun KnowledgeValidateSheet(
                     )
                 },
                 modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("测试连接")
-            }
+            )
         }
     }
 }
@@ -608,7 +641,7 @@ private fun SystemTextTab(title: String, content: String, onChange: (String) -> 
         Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
             Text(title, style = MaterialTheme.typography.titleSmall)
             OutlinedTextField(content, onChange, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), minLines = 10, shape = RoundedCornerShape(12.dp))
-            TextButton(onClick = onSave) { Text("保存") }
+            EthanPrimaryButton("保存", onClick = onSave, modifier = Modifier.fillMaxWidth())
         }
     }
 }
@@ -619,7 +652,7 @@ private fun ProfileTab(content: String, onChange: (String) -> Unit, onSave: () -
         Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
             Text("我的画像", style = MaterialTheme.typography.titleSmall)
             OutlinedTextField(content, onChange, modifier = Modifier.fillMaxWidth(), minLines = 12, shape = RoundedCornerShape(12.dp))
-            TextButton(onClick = onSave) { Text("保存") }
+            EthanPrimaryButton("保存", onClick = onSave, modifier = Modifier.fillMaxWidth())
         }
     }
 }
@@ -627,9 +660,11 @@ private fun ProfileTab(content: String, onChange: (String) -> Unit, onSave: () -
 @Composable
 private fun PromptPreviewTab(state: SettingsUiState, onLoad: () -> Unit) {
     Column {
-        TextButton(onClick = onLoad) { Text("加载预览") }
+        EthanSecondaryButton("加载预览", onClick = onLoad, modifier = Modifier.fillMaxWidth())
         state.promptPreview?.let { preview ->
-            Text("约 ${preview.approxTotalTokens} tokens · ${preview.toolCount} 工具")
+            Spacer(Modifier.height(8.dp))
+            Text("约 ${preview.approxTotalTokens} tokens · ${preview.toolCount} 工具", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(4.dp))
             OutlinedTextField(
                 preview.systemPrompt,
                 {},
@@ -649,15 +684,29 @@ private fun ApiKeysTab(
     onDelete: (String) -> Unit,
 ) {
     var name by remember { mutableStateOf("") }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        OutlinedTextField(name, { name = it }, label = { Text("名称") }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp))
-        TextButton(onClick = { onCreate(name); name = "" }) { Text("创建") }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        OutlinedTextField(
+            name, { name = it },
+            label = { Text("名称") },
+            modifier = Modifier.weight(1f),
+            shape = RoundedCornerShape(12.dp),
+        )
+        EthanPrimaryButton("创建", onClick = { onCreate(name); name = "" })
     }
+    Spacer(Modifier.height(8.dp))
     state.apiKeys.forEach { key ->
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Column {
-                Text(key.name)
-                Text(key.keyPreview, style = MaterialTheme.typography.bodySmall)
+        Row(
+            Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(key.name, style = MaterialTheme.typography.bodyMedium)
+                Text(key.keyPreview, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             IconButton(onClick = { onDelete(key.id) }) {
                 Icon(Icons.Default.Delete, contentDescription = "删除")

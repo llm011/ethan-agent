@@ -4,12 +4,15 @@ import com.ethan.agent.shared.viewmodel.SkillsUiState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
@@ -27,6 +30,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -43,6 +47,7 @@ fun SkillsScreen(
     onBack: () -> Unit = {},
     onQueryChange: (String) -> Unit,
     onSelect: (SkillInfo) -> Unit,
+    onDeselect: () -> Unit,
     onStartCreate: () -> Unit,
     onNameChange: (String) -> Unit,
     onDescriptionChange: (String) -> Unit,
@@ -55,88 +60,147 @@ fun SkillsScreen(
     val snackbar = remember { SnackbarHostState() }
     ErrorSnackbar(state.error, onClearError, snackbar)
 
+    val isDetailOpen = state.selected != null || state.isCreating
+
     Scaffold(
+        topBar = {
+            if (isDetailOpen) {
+                EthanTopBar(
+                    title = if (state.isCreating) "新建技能" else "编辑技能",
+                    onBack = onDeselect,
+                    actions = {
+                        TextButton(onClick = onSave) { Text("保存") }
+                        if (!state.isCreating) {
+                            IconButton(onClick = { state.selected?.name?.let(onDelete) }) {
+                                Icon(Icons.Default.Delete, contentDescription = "删除")
+                            }
+                        }
+                    }
+                )
+            } else {
+                EthanTopBar(
+                    title = "技能",
+                    onBack = onBack,
+                )
+            }
+        },
         floatingActionButton = {
-            FloatingActionButton(onClick = onStartCreate) {
-                Icon(Icons.Default.Add, contentDescription = "新建")
+            if (!isDetailOpen) {
+                FloatingActionButton(onClick = onStartCreate) {
+                    Icon(Icons.Default.Add, contentDescription = "新建")
+                }
             }
         },
         snackbarHost = { SnackbarContainer(snackbar) },
     ) { padding ->
-        if (state.isLoading) {
+        if (state.isLoading && state.skills.isEmpty()) {
             LoadingBox(Modifier.padding(padding))
             return@Scaffold
         }
 
         Column(Modifier.fillMaxSize().padding(padding)) {
-            EthanTopBar(title = "技能", onBack = onBack)
-
-            Row(Modifier.fillMaxSize()) {
-            Column(Modifier.weight(1f)) {
-                OutlinedTextField(
-                    value = state.query,
-                    onValueChange = onQueryChange,
-                    label = { Text("搜索技能") },
-                    modifier = Modifier.fillMaxWidth().padding(8.dp),
-                    singleLine = true,
+            if (isDetailOpen) {
+                SkillDetailContent(
+                    state = state,
+                    onNameChange = onNameChange,
+                    onDescriptionChange = onDescriptionChange,
+                    onTriggersChange = onTriggersChange,
+                    onContentChange = onContentChange,
                 )
-                LazyColumn(Modifier.weight(1f).padding(horizontal = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    state.groupedSkills.forEach { (category, skills) ->
-                        item(key = "header_$category") {
-                            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                                HorizontalDivider(Modifier.weight(1f).padding(end = 8.dp).align(androidx.compose.ui.Alignment.CenterVertically))
-                                Text(
-                                    category,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.primary,
-                                )
-                                HorizontalDivider(Modifier.weight(1f).padding(start = 8.dp).align(androidx.compose.ui.Alignment.CenterVertically))
-                            }
-                        }
-                        items(skills, key = { it.name }) { skill ->
-                            SkillCard(skill = skill, isSelected = state.selected?.name == skill.name, onClick = { onSelect(skill) })
-                        }
-                    }
-                }
-            }
-
-            Column(Modifier.weight(1.3f).padding(8.dp)) {
-                if (state.selected != null || state.isCreating) {
-                    OutlinedTextField(
-                        state.name, onNameChange,
-                        label = { Text("名称") },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = state.isCreating,
-                    )
-                    OutlinedTextField(
-                        state.description, onDescriptionChange,
-                        label = { Text("描述") },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    OutlinedTextField(
-                        state.triggers, onTriggersChange,
-                        label = { Text("触发词 (逗号分隔)") },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    OutlinedTextField(
-                        state.content, onContentChange,
-                        label = { Text("内容 (Markdown)") },
-                        modifier = Modifier.fillMaxWidth().weight(1f),
-                    )
-                    Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
-                        TextButton(onClick = onSave) { Text("保存") }
-                        state.selected?.let {
-                            IconButton(onClick = { onDelete(it.name) }) {
-                                Icon(Icons.Default.Delete, contentDescription = "删除")
-                            }
-                        }
-                    }
-                } else {
-                    Text("选择或新建技能", modifier = Modifier.padding(16.dp))
-                }
-            }
+            } else {
+                SkillListContent(
+                    state = state,
+                    onQueryChange = onQueryChange,
+                    onSelect = onSelect,
+                )
             }
         }
+    }
+}
+
+@Composable
+private fun SkillListContent(
+    state: SkillsUiState,
+    onQueryChange: (String) -> Unit,
+    onSelect: (SkillInfo) -> Unit,
+) {
+    Column {
+        OutlinedTextField(
+            value = state.query,
+            onValueChange = onQueryChange,
+            label = { Text("搜索技能") },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            singleLine = true,
+        )
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(16.dp),
+        ) {
+            state.groupedSkills.forEach { (category, skills) ->
+                item(key = "header_$category") {
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        HorizontalDivider(Modifier.weight(1f).padding(end = 8.dp))
+                        Text(
+                            category,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        HorizontalDivider(Modifier.weight(1f).padding(start = 8.dp))
+                    }
+                }
+                items(skills, key = { it.name }) { skill ->
+                    SkillCard(
+                        skill = skill,
+                        isSelected = state.selected?.name == skill.name,
+                        onClick = { onSelect(skill) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SkillDetailContent(
+    state: SkillsUiState,
+    onNameChange: (String) -> Unit,
+    onDescriptionChange: (String) -> Unit,
+    onTriggersChange: (String) -> Unit,
+    onContentChange: (String) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        OutlinedTextField(
+            state.name, onNameChange,
+            label = { Text("名称") },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = state.isCreating,
+        )
+        OutlinedTextField(
+            state.description, onDescriptionChange,
+            label = { Text("描述") },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            state.triggers, onTriggersChange,
+            label = { Text("触发词 (逗号分隔)") },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            state.content, onContentChange,
+            label = { Text("内容 (Markdown)") },
+            modifier = Modifier.fillMaxWidth(),
+            minLines = 10,
+        )
     }
 }
 
@@ -160,17 +224,22 @@ private fun SkillCard(skill: SkillInfo, isSelected: Boolean, onClick: () -> Unit
                     style = MaterialTheme.typography.bodySmall,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
-                )
-            }
-            if (skill.content.isNotBlank()) {
-                Text(
-                    skill.content.take(200),
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 2.dp),
                 )
+            }
+            if (skill.trigger.isNotEmpty()) {
+                Row(
+                    modifier = Modifier.padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    skill.trigger.take(3).forEach { trigger ->
+                        androidx.compose.material3.SuggestionChip(
+                            onClick = {},
+                            label = { Text(trigger, style = MaterialTheme.typography.labelSmall) },
+                            modifier = Modifier,
+                        )
+                    }
+                }
             }
         }
     }

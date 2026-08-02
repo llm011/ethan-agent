@@ -44,9 +44,7 @@ fun LogsScreen(
     ErrorSnackbar(state.error, onClearError, snackbar)
 
     Scaffold(
-        snackbarHost = { SnackbarContainer(snackbar) },
-    ) { padding ->
-        Column(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding())) {
+        topBar = {
             EthanTopBar(
                 title = "日志",
                 onBack = onBack,
@@ -56,13 +54,16 @@ fun LogsScreen(
                     }
                 },
             )
-
-            Column(
-                Modifier
-                    .fillMaxSize()
-                    .padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
+        },
+        snackbarHost = { SnackbarContainer(snackbar) },
+    ) { padding ->
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
                         selected = state.type == "backend",
@@ -96,7 +97,6 @@ fun LogsScreen(
                             .verticalScroll(rememberScrollState()),
                     )
                 }
-            }
         }
     }
 }

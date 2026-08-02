@@ -93,6 +93,7 @@ fun ScheduleScreen(
     }
 
     Scaffold(
+        topBar = { EthanTopBar(title = "定时任务", onBack = onBack) },
         snackbarHost = { SnackbarContainer(snackbar) },
         floatingActionButton = {
             if (state.tab == ScheduleTab.Jobs) {
@@ -103,8 +104,6 @@ fun ScheduleScreen(
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            EthanTopBar(title = "定时任务", onBack = onBack)
-
             EthanScrollableTabBar(
                 tabs = ScheduleTab.entries.toList(),
                 selectedTab = state.tab,

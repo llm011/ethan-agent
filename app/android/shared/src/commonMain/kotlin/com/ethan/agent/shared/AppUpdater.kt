@@ -13,6 +13,12 @@ interface AppUpdater {
         val htmlUrl: String,
     )
 
+    sealed class CheckResult {
+        data class UpdateAvailable(val info: UpdateInfo) : CheckResult()
+        data object UpToDate : CheckResult()
+        data class Error(val message: String) : CheckResult()
+    }
+
     sealed class InstallResult {
         data object Triggered : InstallResult()
         data object PermissionRequired : InstallResult()
@@ -20,7 +26,7 @@ interface AppUpdater {
     }
 
     fun shouldCheck(): Boolean
-    suspend fun checkForUpdate(): UpdateInfo?
+    suspend fun checkForUpdate(): CheckResult
 
     /** 下载并安装；onProgress 回调 0-100。 */
     suspend fun downloadAndInstall(url: String, onProgress: (Int) -> Unit): InstallResult

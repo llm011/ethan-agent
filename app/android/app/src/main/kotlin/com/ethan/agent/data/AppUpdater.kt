@@ -58,6 +58,12 @@ class AppUpdater(
         val htmlUrl: String,
     )
 
+    sealed class CheckResult {
+        data class UpdateAvailable(val info: UpdateInfo) : CheckResult()
+        data object UpToDate : CheckResult()
+        data class Error(val message: String) : CheckResult()
+    }
+
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
@@ -75,13 +81,14 @@ class AppUpdater(
 
     /**
      * 检查 GitHub 上是否有比当前版本更新的 release。
-     * @return UpdateInfo 或 null（无更新 / 无 APK / 网络错误）。
+     * @return CheckResult 表示检查结果（有更新/已是最新/错误）。
      */
-    suspend fun checkForUpdate(): UpdateInfo? = withContext(Dispatchers.IO) {
+    suspend fun checkForUpdate(): CheckResult = withContext(Dispatchers.IO) {
         try {
             prefs.edit().putLong(KEY_LAST_CHECK, System.currentTimeMillis()).apply()
 
-            val currentVersion = getCurrentVersion() ?: return@withContext null
+            val currentVersion = getCurrentVersion()
+                ?: return@withContext CheckResult.Error("无法获取当前版本号")
 
             val request = Request.Builder()
                 .url(GITHUB_API)
@@ -90,17 +97,28 @@ class AppUpdater(
                 .build()
 
             val response = client.newCall(request).execute()
-            if (!response.isSuccessful) return@withContext null
+            if (!response.isSuccessful) {
+                return@withContext CheckResult.Error("网络请求失败 (HTTP ${response.code})")
+            }
 
-            val json = JSONObject(response.body?.string() ?: return@withContext null)
+            val body = response.body?.string()
+                ?: return@withContext CheckResult.Error("服务器返回为空")
+
+            val json = JSONObject(body)
             val tagName = json.optString("tag_name").removePrefix("v").trim()
-            if (tagName.isEmpty()) return@withContext null
+            if (tagName.isEmpty()) {
+                return@withContext CheckResult.Error("无法解析版本号")
+            }
 
             // 版本号没变或更低，不提示
-            if (compareVersions(tagName, currentVersion) <= 0) return@withContext null
+            if (compareVersions(tagName, currentVersion) <= 0) {
+                return@withContext CheckResult.UpToDate
+            }
 
             // 在 assets 里找 .apk 文件
-            val assets = json.optJSONArray("assets") ?: return@withContext null
+            val assets = json.optJSONArray("assets")
+                ?: return@withContext CheckResult.Error("Release 中没有安装包")
+
             var apkUrl: String? = null
             for (i in 0 until assets.length()) {
                 val asset = assets.optJSONObject(i) ?: continue
@@ -110,16 +128,19 @@ class AppUpdater(
                     break
                 }
             }
-            if (apkUrl.isNullOrEmpty()) return@withContext null
 
-            UpdateInfo(
+            if (apkUrl.isNullOrEmpty()) {
+                return@withContext CheckResult.Error("Release 中没有 APK 安装包")
+            }
+
+            CheckResult.UpdateAvailable(UpdateInfo(
                 version = tagName,
                 downloadUrl = apkUrl,
                 releaseNotes = json.optString("body").ifBlank { "暂无更新说明" },
                 htmlUrl = json.optString("html_url"),
-            )
-        } catch (_: Exception) {
-            null
+            ))
+        } catch (e: Exception) {
+            CheckResult.Error("网络错误：${e.message ?: "未知错误"}")
         }
     }
 

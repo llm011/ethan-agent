@@ -6,8 +6,10 @@ import com.ethan.agent.shared.viewmodel.MemoryTab
 import com.ethan.agent.shared.viewmodel.RecordsFilter
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +22,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -35,7 +39,6 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -48,13 +51,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -68,9 +70,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.ui.window.Dialog
 import com.ethan.agent.core.model.Fact
 import com.ethan.agent.core.model.InsightItem
@@ -168,11 +174,10 @@ fun MemoryScreen(
         return
     }
 
+    var factsSearchQuery by remember { mutableStateOf("") }
+
     Scaffold(
-        snackbarHost = { SnackbarContainer(snackbar) },
-    ) { padding ->
-        Column(Modifier.fillMaxSize().padding(bottom = padding.calculateBottomPadding())) {
-            // 紧凑顶栏
+        topBar = {
             EthanTopBar(
                 title = "记忆",
                 onBack = onBack,
@@ -195,8 +200,10 @@ fun MemoryScreen(
                     }
                 },
             )
-
-            // 可横滑 Tab 栏
+        },
+        snackbarHost = { SnackbarContainer(snackbar) },
+    ) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding)) {
             EthanScrollableTabBar(
                 tabs = MemoryTab.entries.toList(),
                 selectedTab = state.tab,
@@ -210,7 +217,12 @@ fun MemoryScreen(
             }
 
             when (state.tab) {
-                MemoryTab.Facts -> FactsList(state.facts, onSelectFact)
+                MemoryTab.Facts -> FactsListContent(
+                    facts = state.facts,
+                    searchQuery = factsSearchQuery,
+                    onSearchChange = { factsSearchQuery = it },
+                    onSelect = onSelectFact,
+                )
                 MemoryTab.Insights -> InsightsTab(
                     insights = state.insights,
                     date = state.insightsDate,
@@ -388,20 +400,55 @@ private fun RecordEditorScreen(
 // ── Facts tab ────────────────────────────────────────────────────────────────
 
 @Composable
-private fun FactsList(facts: List<FactItem>, onSelect: (FactItem) -> Unit) {
-    if (facts.isEmpty()) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("暂无事实记忆", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+private fun FactsListContent(
+    facts: List<FactItem>,
+    searchQuery: String,
+    onSearchChange: (String) -> Unit,
+    onSelect: (FactItem) -> Unit,
+) {
+    Column(Modifier.fillMaxSize()) {
+        // 搜索框（始终可见）
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = onSearchChange,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            placeholder = { Text("搜索记忆，支持 Markdown...") },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+            singleLine = true,
+            shape = RoundedCornerShape(12.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+            ),
+        )
+
+        val filteredFacts = if (searchQuery.isBlank()) {
+            facts
+        } else {
+            facts.filter { it.fact.content.contains(searchQuery, ignoreCase = true) }
         }
-        return
-    }
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        items(facts, key = { it.index }) { item ->
-            FactListCard(item, onClick = { onSelect(item) })
+
+        if (filteredFacts.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    if (searchQuery.isBlank()) "暂无事实记忆" else "未找到匹配的记忆",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            return@Column
+        }
+
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            items(filteredFacts, key = { it.index }) { item ->
+                FactListCard(item, onClick = { onSelect(item) })
+            }
         }
     }
 }
@@ -413,26 +460,93 @@ private fun FactListCard(item: FactItem, onClick: () -> Unit) {
         if (fact.createdAt > 0) SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(fact.createdAt * 1000))
         else ""
     }
+
     Card(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
     ) {
-        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            // 左侧大脑图标
+            Surface(
+                modifier = Modifier.size(40.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        text = "🧠",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontSize = 22.sp,
+                    )
+                }
+            }
+
+            Spacer(Modifier.width(12.dp))
+
             Column(Modifier.weight(1f)) {
-                Text(fact.content, style = MaterialTheme.typography.bodyLarge, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (fact.category.isNotBlank()) {
-                        Text(fact.category, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                    }
-                    Text("${(fact.confidence * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    text = fact.content,
+                    style = MaterialTheme.typography.bodyLarge,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                    lineHeight = MaterialTheme.typography.bodyLarge.lineHeight * 1.3,
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // 分类标签（彩色）
+                    CategoryChip(category = fact.category)
+                    // 置信度
+                    Text(
+                        "${(fact.confidence * 100).toInt()}%",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    // 日期
                     if (date.isNotBlank()) {
-                        Text(date, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            date,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        )
                     }
                 }
             }
-            Icon(Icons.Default.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+    }
+}
+
+@Composable
+private fun CategoryChip(category: String) {
+    if (category.isBlank()) return
+
+    val (bgColor, textColor) = when (category.lowercase()) {
+        "knowledge" -> Color(0xFF3B82F6).copy(alpha = 0.15f) to Color(0xFF2563EB)
+        "preference" -> Color(0xFFF59E0B).copy(alpha = 0.15f) to Color(0xFFD97706)
+        "correction" -> Color(0xFFEF4444).copy(alpha = 0.15f) to Color(0xFFDC2626)
+        "procedure" -> Color(0xFF10B981).copy(alpha = 0.15f) to Color(0xFF059669)
+        else -> MaterialTheme.colorScheme.secondaryContainer to MaterialTheme.colorScheme.onSecondaryContainer
+    }
+
+    Surface(
+        shape = RoundedCornerShape(6.dp),
+        color = bgColor,
+    ) {
+        Text(
+            text = category,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = textColor,
+            fontWeight = FontWeight.Medium,
+        )
     }
 }
 
@@ -627,35 +741,27 @@ private fun RecordsTab(
     onConfirm: (String) -> Unit,
     onDelete: (String) -> Unit,
 ) {
-    var filtersExpanded by remember { mutableStateOf(false) }
     var searchVisible by remember { mutableStateOf(false) }
     val scrollState = rememberScrollState()
 
     Column(Modifier.fillMaxSize()) {
-        // Top bar: filter chips (expandable) + fixed icons
+        // Top bar: filter chips (always visible) + search icon
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (filtersExpanded) {
-                val statuses = listOf(null to "全部", "pending" to "候选", "confirmed" to "已确认", "superseded" to "已替代")
-                Row(
-                    modifier = Modifier.weight(1f).horizontalScroll(scrollState),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    statuses.forEach { (value, label) ->
-                        FilterChip(
-                            selected = filter.status == value,
-                            onClick = { onFilterChange(filter.copy(status = value)) },
-                            label = { Text(label) },
-                        )
-                    }
+            val statuses = listOf(null to "全部", "pending" to "候选", "confirmed" to "已确认", "superseded" to "已替代")
+            Row(
+                modifier = Modifier.weight(1f).horizontalScroll(scrollState),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                statuses.forEach { (value, label) ->
+                    FilterChip(
+                        selected = filter.status == value,
+                        onClick = { onFilterChange(filter.copy(status = value)) },
+                        label = { Text(label) },
+                    )
                 }
-            } else {
-                Spacer(Modifier.weight(1f))
-            }
-            IconButton(onClick = { filtersExpanded = !filtersExpanded }) {
-                Icon(Icons.Default.Tune, contentDescription = "筛选")
             }
             IconButton(onClick = { searchVisible = !searchVisible }) {
                 Icon(Icons.Default.Search, contentDescription = "搜索")

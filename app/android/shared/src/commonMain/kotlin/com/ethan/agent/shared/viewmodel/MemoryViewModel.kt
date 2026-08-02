@@ -44,7 +44,10 @@ data class RecordsFilter(
 )
 
 enum class MemoryTab(val title: String) {
-    Facts("事实"), Insights("永久记忆"), Procedures("流程"), Records("结构化记忆")
+    Facts("事实"),
+    Insights("永久记忆"),
+    Procedures("流程"),
+    Records("结构化记忆")
 }
 
 data class MemoryUiState(

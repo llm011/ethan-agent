@@ -1,5 +1,7 @@
 package com.ethan.agent.ui
 
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.core.tween
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Scaffold
@@ -12,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.Modifier
 import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
+import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -47,6 +50,31 @@ import com.ethan.agent.ui.components.AppDrawerContent
 import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.UpdateDialog
 import kotlinx.coroutines.launch
+
+private val slideIn: AnimatedContentTransitionScope<NavBackStackEntry>.() -> androidx.compose.animation.EnterTransition = {
+    slideIntoContainer(
+        towards = AnimatedContentTransitionScope.SlideDirection.Left,
+        animationSpec = tween(300),
+    )
+}
+private val slideOut: AnimatedContentTransitionScope<NavBackStackEntry>.() -> androidx.compose.animation.ExitTransition = {
+    slideOutOfContainer(
+        towards = AnimatedContentTransitionScope.SlideDirection.Left,
+        animationSpec = tween(300),
+    )
+}
+private val popSlideIn: AnimatedContentTransitionScope<NavBackStackEntry>.() -> androidx.compose.animation.EnterTransition = {
+    slideIntoContainer(
+        towards = AnimatedContentTransitionScope.SlideDirection.Right,
+        animationSpec = tween(300),
+    )
+}
+private val popSlideOut: AnimatedContentTransitionScope<NavBackStackEntry>.() -> androidx.compose.animation.ExitTransition = {
+    slideOutOfContainer(
+        towards = AnimatedContentTransitionScope.SlideDirection.Right,
+        animationSpec = tween(300),
+    )
+}
 
 @Composable
 fun EthanApp(authViewModel: AuthViewModel) {
@@ -109,11 +137,15 @@ private fun MainContent(authViewModel: AuthViewModel) {
             )
         },
     ) {
-        Scaffold { padding ->
+        Scaffold { innerPadding ->
             NavHost(
                 navController = navController,
                 startDestination = "chat",
-                modifier = Modifier.padding(padding),
+                enterTransition = slideIn,
+                exitTransition = slideOut,
+                popEnterTransition = popSlideIn,
+                popExitTransition = popSlideOut,
+                modifier = Modifier.padding(innerPadding),
             ) {
             composable(
                 route = "chat?sessionId={sessionId}",
@@ -250,6 +282,7 @@ private fun MainContent(authViewModel: AuthViewModel) {
                     onQueryChange = vm::onQueryChange,
                     onToggleSemantic = vm::toggleSemantic,
                     onSelect = vm::selectItem,
+                    onDeselect = vm::deselectItem,
                     onStartCreate = vm::startCreate,
                     onTitleChange = vm::onTitleChange,
                     onContentChange = vm::onContentChange,
@@ -270,6 +303,7 @@ private fun MainContent(authViewModel: AuthViewModel) {
                     onBack = { navController.popBackStack() },
                     onQueryChange = vm::onQueryChange,
                     onSelect = vm::selectSkill,
+                    onDeselect = vm::deselectSkill,
                     onStartCreate = vm::startCreate,
                     onNameChange = vm::onNameChange,
                     onDescriptionChange = vm::onDescriptionChange,

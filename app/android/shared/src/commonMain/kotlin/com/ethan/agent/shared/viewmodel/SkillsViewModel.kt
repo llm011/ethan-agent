@@ -82,6 +82,10 @@ class SkillsViewModel(
         }
     }
 
+    fun deselectSkill() {
+        _state.update { it.copy(selected = null, isCreating = false) }
+    }
+
     fun startCreate() {
         _state.update {
             it.copy(isCreating = true, selected = null, name = "", description = "", triggers = "", content = "")

@@ -30,26 +30,38 @@ class UpdateViewModel(
     fun autoCheck() {
         if (!appUpdater.shouldCheck()) return
         if (_state.value !is UpdateState.Idle) return
-        checkForUpdate()
+        checkForUpdate(silent = true)
     }
 
     /** 手动检查更新（忽略时间限制）。 */
-    fun checkForUpdate() {
+    fun checkForUpdate(silent: Boolean = false) {
         if (_state.value is UpdateState.Checking) return
         if (_state.value is UpdateState.Downloading) return
         viewModelScope.launch {
             _state.value = UpdateState.Checking
-            val info = appUpdater.checkForUpdate()
-            _state.value = if (info != null) {
-                UpdateState.Available(info)
-            } else {
-                UpdateState.UpToDate
-            }
-            // "已是最新" 3 秒后自动消失
-            if (_state.value is UpdateState.UpToDate) {
-                delay(3000)
-                if (_state.value is UpdateState.UpToDate) {
-                    _state.value = UpdateState.Idle
+            when (val result = appUpdater.checkForUpdate()) {
+                is AppUpdater.CheckResult.UpdateAvailable -> {
+                    _state.value = UpdateState.Available(result.info)
+                }
+                is AppUpdater.CheckResult.UpToDate -> {
+                    if (silent) {
+                        _state.value = UpdateState.Idle
+                    } else {
+                        _state.value = UpdateState.UpToDate
+                        // "已是最新" 3 秒后自动消失
+                        delay(3000)
+                        if (_state.value is UpdateState.UpToDate) {
+                            _state.value = UpdateState.Idle
+                        }
+                    }
+                }
+                is AppUpdater.CheckResult.Error -> {
+                    if (silent) {
+                        // 自动检查失败时静默，不打扰用户
+                        _state.value = UpdateState.Idle
+                    } else {
+                        _state.value = UpdateState.Error(result.message)
+                    }
                 }
             }
         }

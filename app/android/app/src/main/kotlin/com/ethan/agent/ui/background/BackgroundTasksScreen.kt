@@ -50,9 +50,7 @@ fun BackgroundTasksScreen(
     ErrorSnackbar(state.error, onClearError, snackbar)
 
     Scaffold(
-        snackbarHost = { SnackbarContainer(snackbar) },
-    ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
+        topBar = {
             EthanTopBar(
                 title = "后台任务",
                 onBack = onBack,
@@ -62,7 +60,10 @@ fun BackgroundTasksScreen(
                     }
                 },
             )
-
+        },
+        snackbarHost = { SnackbarContainer(snackbar) },
+    ) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding)) {
             if (state.isLoading && state.tasks.isEmpty()) {
                 LoadingBox()
                 return@Scaffold

@@ -5,16 +5,19 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -33,6 +36,8 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -137,10 +142,11 @@ fun EthanTopBar(
 }
 
 /**
- * 通用可横滑 Tab 栏：
+ * 通用可横滑 Tab 栏（下划线指示器风格）：
  * - 单行不换行，文字超长省略
  * - 超出屏宽时可手势横向滚动
- * - 选中项有底部指示条
+ * - 选中项有底部圆角指示条
+ * - 支持可选副标题（双行模式）
  */
 @Composable
 fun <T> EthanScrollableTabBar(
@@ -149,17 +155,20 @@ fun <T> EthanScrollableTabBar(
     onTabSelected: (T) -> Unit,
     labelOf: (T) -> String,
     modifier: Modifier = Modifier,
+    subtitleOf: ((T) -> String)? = null,
+    horizontalPadding: androidx.compose.ui.unit.Dp = 12.dp,
 ) {
     val scrollState = rememberScrollState()
     Row(
         modifier = modifier
             .fillMaxWidth()
             .horizontalScroll(scrollState)
-            .padding(horizontal = 12.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+            .padding(horizontal = horizontalPadding),
+        horizontalArrangement = Arrangement.spacedBy(0.dp),
     ) {
         tabs.forEach { tab ->
             val selected = tab == selectedTab
+            val hasSubtitle = subtitleOf != null
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
@@ -167,7 +176,10 @@ fun <T> EthanScrollableTabBar(
                         indication = null,
                         interactionSource = remember { MutableInteractionSource() },
                     ) { onTabSelected(tab) }
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                    .padding(
+                        horizontal = if (hasSubtitle) 16.dp else 12.dp,
+                        vertical = if (hasSubtitle) 10.dp else 8.dp,
+                    ),
             ) {
                 Text(
                     text = labelOf(tab),
@@ -179,13 +191,27 @@ fun <T> EthanScrollableTabBar(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                if (selected) {
-                    Surface(
-                        modifier = Modifier.padding(top = 4.dp).size(width = 24.dp, height = 3.dp),
-                        shape = RoundedCornerShape(2.dp),
-                        color = MaterialTheme.colorScheme.primary,
-                    ) {}
+                if (hasSubtitle) {
+                    Text(
+                        text = subtitleOf!!(tab),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                } else {
+                    Spacer(Modifier.height(4.dp))
                 }
+                Surface(
+                    modifier = Modifier.size(
+                        width = if (hasSubtitle) 32.dp else 24.dp,
+                        height = 3.dp,
+                    ),
+                    shape = RoundedCornerShape(2.dp),
+                    color = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                ) {}
             }
         }
     }
@@ -193,179 +219,259 @@ fun <T> EthanScrollableTabBar(
 
 @Composable
 fun ToolTimeline(steps: List<ToolStep>, modifier: Modifier = Modifier) {
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        steps.forEach { step ->
-            CollapsibleToolItem(step)
+    if (steps.isEmpty()) return
+
+    var expanded by remember { mutableStateOf(true) }
+    val totalDuration = steps.mapNotNull { it.durationMs }.sum()
+    val hasAnyError = steps.any { it.state == "error" }
+    val allDone = steps.all { it.state == "done" || it.state == "completed" || it.state == "error" }
+
+    // 整体带边框的日志卡片
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+            // 顶部汇总标题栏（可折叠整个块）
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    if (expanded) "▼" else "▶",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    if (allDone) {
+                        if (hasAnyError) "执行完成（有错误）" else "正在执行自动化操作"
+                    } else {
+                        "正在执行自动化操作"
+                    },
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                )
+                Text(
+                    "[${steps.size}步]",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (totalDuration > 0) {
+                    Text(
+                        "[耗时 ${"%.1f".format(totalDuration / 1000.0)}s]",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                if (!allDone) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(14.dp),
+                        strokeWidth = 2.dp,
+                    )
+                }
+            }
+
+            if (expanded) {
+                Spacer(Modifier.height(4.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                    steps.forEach { step ->
+                        ToolStepRow(step, indent = 0)
+                    }
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun CollapsibleToolItem(step: ToolStep) {
-    var expanded by remember { mutableStateOf(false) }
-    val clipboard = LocalClipboardManager.current
-    val hasThought = !step.thought.isNullOrBlank()
-    val hasDetail = !step.resultPreview.isNullOrBlank() || !step.resultDetail.isNullOrBlank()
-    val canExpand = hasDetail || hasThought
+private fun ToolStepRow(step: ToolStep, indent: Int) {
+    val isDone = step.state == "done" || step.state == "completed"
+    val isError = step.state == "error"
+    val isRunning = step.state == "running"
+    val statusColor = when {
+        isError -> Color(0xFFE53935)
+        isDone -> Color(0xFF43A047)
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val statusMark = when {
+        isDone -> "✓"
+        isError -> "✗"
+        isRunning -> "⟳"
+        else -> "○"
+    }
+    val hasSubSteps = !step.subSteps.isNullOrEmpty()
+    var subExpanded by remember { mutableStateOf(true) }
 
-    Surface(
-        shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
-            // 头部：工具名 + intent 描述 + 状态 + 展开按钮
-            Row(
+    Column(modifier = Modifier.fillMaxWidth()) {
+        // 步骤主行：[✓ tool_name] 耗时 ✓
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = (indent * 12).dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // 子步骤折叠标记（仅当有subSteps时显示）
+            if (hasSubSteps) {
+                Text(
+                    if (subExpanded) "▼" else "▶",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .clickable { subExpanded = !subExpanded }
+                        .padding(end = 2.dp),
+                )
+            }
+
+            // [✓ tool_name] 状态标记 + 工具名
+            Text(
+                "[$statusMark ${step.tool}]",
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontFamily = FontFamily.Monospace,
+                ),
+                color = statusColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+
+            Spacer(Modifier.weight(1f))
+
+            // 耗时
+            if (step.durationMs != null) {
+                Text(
+                    "${step.durationMs}ms",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                )
+            }
+            Spacer(Modifier.width(4.dp))
+            // 右侧状态图标
+            Text(
+                statusMark,
+                style = MaterialTheme.typography.bodySmall,
+                color = statusColor,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+
+        // 参数摘要（args第一行，缩进显示）
+        val argsLine = step.args.lines().firstOrNull { it.isNotBlank() }
+        if (!argsLine.isNullOrBlank()) {
+            Text(
+                argsLine,
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontFamily = FontFamily.Monospace,
+                ),
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable(enabled = canExpand) { expanded = !expanded },
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text("⚙", style = MaterialTheme.typography.labelSmall)
-                    Text(
-                        step.tool,
-                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    // 一句话描述（intent）
-                    if (!step.intent.isNullOrBlank()) {
-                        Text(
-                            "· ${step.intent}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false),
-                        )
-                    }
-                    if (step.durationMs != null) {
-                        Text(
-                            "${step.durationMs}ms",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                    if (canExpand) {
-                        Icon(
-                            Icons.Default.ExpandMore,
-                            contentDescription = if (expanded) "收起" else "展开",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(14.dp),
-                        )
-                    }
-                    // 状态标识
-                    Text(
-                        when (step.state) {
-                            "done", "completed" -> "✓"
-                            "running" -> "⟳"
-                            "error" -> "✗"
-                            else -> step.state
-                        },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = when (step.state) {
-                            "done", "completed" -> MaterialTheme.colorScheme.primary
-                            "error" -> MaterialTheme.colorScheme.error
-                            else -> MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                    )
-                }
-            }
-            // 参数摘要（始终可见，单行）+ 复制按钮
-            if (step.args.isNotBlank()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Text(
-                        step.args.lines().firstOrNull()?.take(80) ?: "",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Surface(
-                        onClick = { clipboard.setText(AnnotatedString(step.args)) },
-                        shape = RoundedCornerShape(4.dp),
-                        color = Color.Transparent,
-                        modifier = Modifier.size(20.dp),
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.Default.ContentCopy,
-                                contentDescription = "复制参数",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                                modifier = Modifier.size(12.dp),
-                            )
-                        }
-                    }
-                }
-            }
-            // 折叠区域：思考过程 + 执行结果
-            if (expanded && canExpand) {
-                HorizontalDivider(
-                    modifier = Modifier.padding(vertical = 4.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                )
-                // 思考过程（thought）
-                if (hasThought) {
-                    Text(
-                        "思考",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(bottom = 2.dp),
-                    )
-                    Text(
-                        step.thought!!,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = if (hasDetail) 6.dp else 0.dp),
-                    )
-                }
-                // 执行结果（code block 风格，横向可滚动）
-                if (hasDetail) {
-                    val detail = step.resultDetail ?: step.resultPreview ?: ""
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
-                                RoundedCornerShape(4.dp),
-                            )
-                            .border(
-                                width = 1.dp,
-                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
-                                shape = RoundedCornerShape(4.dp),
-                            )
-                            .horizontalScroll(rememberScrollState())
-                            .padding(8.dp),
-                    ) {
-                        Text(
-                            detail,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = FontFamily.Monospace,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            softWrap = false,
-                        )
-                    }
-                }
+                    .padding(start = (indent * 12 + 16).dp),
+            )
+        }
+
+        // intent 描述（如果有且不是和args重复）
+        step.intent?.takeIf { it.isNotBlank() && it != step.args }?.let { intentText ->
+            Text(
+                intentText,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = (indent * 12 + 16).dp),
+            )
+        }
+
+        // 子步骤（递归渲染，缩进+前缀>）
+        if (hasSubSteps && subExpanded) {
+            step.subSteps!!.forEach { sub ->
+                SubToolStepRow(sub, indent = indent + 1)
             }
         }
+    }
+}
+
+@Composable
+private fun SubToolStepRow(sub: com.ethan.agent.core.model.SubToolStep, indent: Int) {
+    val isDone = sub.state == "done" || sub.state == "completed"
+    val isError = sub.state == "error"
+    val statusColor = when {
+        isError -> Color(0xFFE53935)
+        isDone -> Color(0xFF43A047)
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val statusMark = when {
+        isDone -> "✓"
+        isError -> "✗"
+        else -> "○"
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = (indent * 12).dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // > 前缀表示子步骤
+        Text(
+            ">",
+            style = MaterialTheme.typography.bodySmall,
+            fontFamily = FontFamily.Monospace,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+        )
+        Spacer(Modifier.width(4.dp))
+        Text(
+            sub.tool,
+            style = MaterialTheme.typography.bodySmall.copy(
+                fontFamily = FontFamily.Monospace,
+            ),
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        if (sub.durationMs != null) {
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "${sub.durationMs}ms",
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+            )
+        }
+        Spacer(Modifier.weight(1f))
+        Text(
+            statusMark,
+            style = MaterialTheme.typography.bodySmall,
+            color = statusColor,
+            fontWeight = FontWeight.Bold,
+        )
+    }
+
+    // 子步骤参数
+    val subArgsLine = sub.args.lines().firstOrNull { it.isNotBlank() }
+    if (!subArgsLine.isNullOrBlank()) {
+        Text(
+            "action=$subArgsLine".takeIf { subArgsLine.startsWith("action=") } ?: subArgsLine,
+            style = MaterialTheme.typography.bodySmall.copy(
+                fontFamily = FontFamily.Monospace,
+            ),
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = (indent * 12 + 16).dp),
+        )
     }
 }
 
@@ -380,4 +486,59 @@ fun SourceBadge(source: String?) {
         else -> source
     }
     Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+}
+
+@Composable
+fun EthanPrimaryButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.heightIn(min = 40.dp),
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.primary,
+        contentColor = MaterialTheme.colorScheme.onPrimary,
+    ) {
+        Box(
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+            contentAlignment = androidx.compose.ui.Alignment.Center,
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Medium),
+            )
+        }
+    }
+}
+
+@Composable
+fun EthanSecondaryButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.heightIn(min = 40.dp),
+        shape = RoundedCornerShape(24.dp),
+        color = Color.Transparent,
+        contentColor = MaterialTheme.colorScheme.primary,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)),
+    ) {
+        Box(
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+            contentAlignment = androidx.compose.ui.Alignment.Center,
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Medium),
+            )
+        }
+    }
 }
