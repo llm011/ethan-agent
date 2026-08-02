@@ -8,14 +8,19 @@ class AndroidAppUpdater(context: Context) : SharedAppUpdater {
 
     override fun shouldCheck(): Boolean = delegate.shouldCheck()
 
-    override suspend fun checkForUpdate(): SharedAppUpdater.UpdateInfo? {
-        val info = delegate.checkForUpdate() ?: return null
-        return SharedAppUpdater.UpdateInfo(
-            version = info.version,
-            downloadUrl = info.downloadUrl,
-            releaseNotes = info.releaseNotes,
-            htmlUrl = info.htmlUrl,
-        )
+    override suspend fun checkForUpdate(): SharedAppUpdater.CheckResult {
+        return when (val result = delegate.checkForUpdate()) {
+            is AppUpdater.CheckResult.UpdateAvailable -> SharedAppUpdater.CheckResult.UpdateAvailable(
+                SharedAppUpdater.UpdateInfo(
+                    version = result.info.version,
+                    downloadUrl = result.info.downloadUrl,
+                    releaseNotes = result.info.releaseNotes,
+                    htmlUrl = result.info.htmlUrl,
+                )
+            )
+            is AppUpdater.CheckResult.UpToDate -> SharedAppUpdater.CheckResult.UpToDate
+            is AppUpdater.CheckResult.Error -> SharedAppUpdater.CheckResult.Error(result.message)
+        }
     }
 
     override suspend fun downloadAndInstall(url: String, onProgress: (Int) -> Unit): SharedAppUpdater.InstallResult {

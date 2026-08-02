@@ -26,6 +26,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -117,8 +119,14 @@ private fun tokenize(text: String): List<MdToken> {
 }
 
 @Composable
-fun SimpleMarkdown(text: String, modifier: Modifier = Modifier) {
+fun SimpleMarkdown(
+    text: String,
+    modifier: Modifier = Modifier,
+    textColor: Color = Color.Unspecified,
+) {
     val context = LocalContext.current
+    val defaultColor = MaterialTheme.colorScheme.onSurface
+    val resolvedTextColor = if (textColor.isSpecified) textColor else defaultColor
 
     // Track images in the text for lightbox
     val imageUrls = remember(text) {
@@ -144,7 +152,7 @@ fun SimpleMarkdown(text: String, modifier: Modifier = Modifier) {
                         MarkdownText(
                             markdown = token.value,
                             style = MaterialTheme.typography.bodyMedium.copy(
-                                color = MaterialTheme.colorScheme.onSurface,
+                                color = resolvedTextColor,
                             ),
                             onLinkClicked = { url ->
                                 // Check if URL is an image — open lightbox
@@ -174,6 +182,7 @@ fun SimpleMarkdown(text: String, modifier: Modifier = Modifier) {
                         headers = token.headers,
                         rows = token.rows,
                         modifier = Modifier.padding(vertical = 4.dp),
+                        textColor = resolvedTextColor,
                     )
                     Spacer(Modifier.height(4.dp))
                 }
@@ -187,11 +196,13 @@ private fun MarkdownTable(
     headers: List<String>,
     rows: List<List<String>>,
     modifier: Modifier = Modifier,
+    textColor: Color = Color.Unspecified,
 ) {
     val borderColor = MaterialTheme.colorScheme.outlineVariant
     val headerBg = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+    val resolvedColor = if (textColor.isSpecified) textColor else MaterialTheme.colorScheme.onSurface
     val textStyle = MaterialTheme.typography.bodySmall.copy(
-        color = MaterialTheme.colorScheme.onSurface,
+        color = resolvedColor,
     )
     val headerStyle = textStyle.copy(fontWeight = FontWeight.SemiBold)
 

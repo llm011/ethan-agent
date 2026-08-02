@@ -41,6 +41,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material.icons.Icons
@@ -62,6 +63,7 @@ import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.FloatingActionButton
@@ -566,22 +568,21 @@ fun ChatScreen(
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     color = MaterialTheme.colorScheme.surface,
-                    shadowElevation = 4.dp,
-                    shape = RoundedCornerShape(24.dp),
+                    shadowElevation = 6.dp,
+                    shape = RoundedCornerShape(28.dp),
                 ) {
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .padding(start = 8.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                            .padding(start = 6.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        // + 号：小圆圈描边样式
+                        // + 号按钮：圆形
                         Surface(
                             onClick = { showPlusSheet = true },
                             shape = CircleShape,
-                            color = Color.Transparent,
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)),
-                            modifier = Modifier.size(20.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier.size(32.dp),
                         ) {
                             Box(
                                 modifier = Modifier.fillMaxSize(),
@@ -591,13 +592,13 @@ fun ChatScreen(
                                     Icons.Default.Add,
                                     contentDescription = "更多选项",
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(11.dp),
+                                    modifier = Modifier.size(18.dp),
                                 )
                             }
                         }
                         // 输入框 + 发送按钮
                         Row(
-                            modifier = Modifier.weight(1f).padding(end = 2.dp),
+                            modifier = Modifier.weight(1f).padding(start = 4.dp, end = 2.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             BasicTextField(
@@ -605,7 +606,7 @@ fun ChatScreen(
                                 onValueChange = onInputChange,
                                 modifier = Modifier
                                     .weight(1f)
-                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                                    .padding(horizontal = 8.dp, vertical = 6.dp),
                                 maxLines = 5,
                                 textStyle = MaterialTheme.typography.bodyMedium.copy(
                                     color = MaterialTheme.colorScheme.onSurface,
@@ -614,8 +615,8 @@ fun ChatScreen(
                                     Box {
                                         if (state.inputText.isEmpty()) {
                                             Text(
-                                                if (state.isStreaming) "补充信息给 Agent…" else "输入消息…",
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                if (state.isStreaming) "补充信息给 Agent…" else "输入消息，支持 Markdown…",
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                                                 style = MaterialTheme.typography.bodyMedium,
                                             )
                                         }
@@ -629,30 +630,30 @@ fun ChatScreen(
                             ) {
                                 when {
                                     state.isStopping -> {
-                                        CircularProgressIndicator(Modifier.size(20.dp))
+                                        CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
                                     }
                                     state.isStreaming || state.isResuming -> {
                                         Surface(
-                                            shape = RoundedCornerShape(50),
+                                            shape = CircleShape,
                                             color = MaterialTheme.colorScheme.errorContainer,
-                                            modifier = Modifier.size(32.dp),
+                                            modifier = Modifier.size(36.dp),
                                         ) {
                                             IconButton(onClick = onStop) {
                                                 Icon(
                                                     Icons.Default.Stop,
                                                     contentDescription = "停止",
                                                     tint = MaterialTheme.colorScheme.error,
-                                                    modifier = Modifier.size(16.dp),
+                                                    modifier = Modifier.size(18.dp),
                                                 )
                                             }
                                         }
                                     }
                                     else -> {
                                         Surface(
-                                            shape = RoundedCornerShape(50),
+                                            shape = CircleShape,
                                             color = if (state.inputText.isNotBlank() || state.pendingImages.isNotEmpty()) MaterialTheme.colorScheme.primary
-                                                else MaterialTheme.colorScheme.surfaceVariant,
-                                            modifier = Modifier.size(32.dp),
+                                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                            modifier = Modifier.size(36.dp),
                                         ) {
                                             IconButton(
                                                 onClick = onSend,
@@ -663,7 +664,7 @@ fun ChatScreen(
                                                     contentDescription = "发送",
                                                     tint = if (state.inputText.isNotBlank() || state.pendingImages.isNotEmpty()) MaterialTheme.colorScheme.onPrimary
                                                         else MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    modifier = Modifier.size(16.dp).offset(x = 1.dp),
+                                                    modifier = Modifier.size(18.dp).offset(x = 1.dp),
                                                 )
                                             }
                                         }
@@ -710,14 +711,23 @@ private fun ConnectionStateIndicator(state: ConnectionState, isResuming: Boolean
 @Composable
 private fun MessageBubble(message: UiMessage, onLongPress: () -> Unit) {
     val isUser = message.role == "user"
-    val bg = if (isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
+    val bubbleColor = if (isUser) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+    }
+    val textColor = if (isUser) {
+        MaterialTheme.colorScheme.onPrimary
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .padding(horizontal = 4.dp, vertical = 2.dp),
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
-        verticalAlignment = Alignment.Top,
+        verticalAlignment = Alignment.Bottom,
     ) {
         // Assistant avatar (left)
         if (!isUser) {
@@ -725,15 +735,18 @@ private fun MessageBubble(message: UiMessage, onLongPress: () -> Unit) {
                 painter = painterResource(id = R.mipmap.ic_launcher_round),
                 contentDescription = "Assistant",
                 modifier = Modifier
-                    .size(32.dp)
+                    .size(30.dp)
                     .clip(CircleShape),
             )
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(6.dp))
         }
 
         // Bubble content
-        Column(modifier = Modifier.widthIn(max = 300.dp)) {
-            Card(
+        Column(
+            modifier = Modifier.widthIn(max = 310.dp),
+            horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
+        ) {
+            Surface(
                 modifier = Modifier.combinedClickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
@@ -741,17 +754,19 @@ private fun MessageBubble(message: UiMessage, onLongPress: () -> Unit) {
                     onLongClick = onLongPress,
                 ),
                 shape = RoundedCornerShape(
-                    topStart = if (isUser) 16.dp else 4.dp,
-                    topEnd = if (isUser) 4.dp else 16.dp,
-                    bottomStart = 16.dp,
-                    bottomEnd = 16.dp,
+                    topStart = 18.dp,
+                    topEnd = 18.dp,
+                    bottomStart = if (isUser) 18.dp else 4.dp,
+                    bottomEnd = if (isUser) 4.dp else 18.dp,
                 ),
+                color = bubbleColor,
+                shadowElevation = 0.dp,
             ) {
-                Column(Modifier.background(bg).padding(10.dp)) {
+                Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
                     // 用户消息图片（在文本之前）
                     if (message.images.isNotEmpty()) {
                         Row(
-                            modifier = Modifier.fillMaxWidth().padding(bottom = if (message.content.isNotBlank()) 6.dp else 0.dp),
+                            modifier = Modifier.fillMaxWidth().padding(bottom = if (message.content.isNotBlank() || message.toolSteps.isNotEmpty() || message.quote != null) 6.dp else 0.dp),
                             horizontalArrangement = Arrangement.spacedBy(4.dp),
                         ) {
                             message.images.forEach { img ->
@@ -770,48 +785,56 @@ private fun MessageBubble(message: UiMessage, onLongPress: () -> Unit) {
                         Text(
                             "↩ ${it.content.take(60)}",
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = if (isUser) textColor.copy(alpha = 0.7f)
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Spacer(Modifier.height(4.dp))
                     }
                     // 工具调用在前（折叠式）
                     if (message.toolSteps.isNotEmpty()) {
-                        ToolTimeline(message.toolSteps)
+                        CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides textColor) {
+                            ToolTimeline(message.toolSteps)
+                        }
                         if (message.content.isNotBlank()) {
                             Spacer(Modifier.height(6.dp))
                         }
                     }
                     // 文本结论在后
                     if (message.content.isNotBlank()) {
-                        SimpleMarkdown(text = message.content)
+                        SimpleMarkdown(
+                            text = message.content,
+                            textColor = textColor,
+                        )
                     }
                     if (message.isStreaming && message.content.isEmpty() && message.toolSteps.isEmpty()) {
-                        Text("思考中…", style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            "思考中…",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = textColor.copy(alpha = 0.7f),
+                        )
                     }
                 }
             }
 
             // Bottom info bar: timestamp + stats pills
             if (!message.isStreaming) {
-                MessageStatsBar(message)
+                MessageStatsBar(message, isUser)
             }
         }
-
-
     }
 }
 
 @Composable
-private fun MessageStatsBar(message: UiMessage) {
+private fun MessageStatsBar(message: UiMessage, isUser: Boolean = false) {
     val hasStats = message.createdAt != null || message.usage != null || message.ttfbMs != null
     if (!hasStats) return
 
     Row(
         modifier = Modifier
-            .padding(top = 4.dp, start = 2.dp, end = 2.dp)
+            .padding(top = 3.dp, start = 4.dp, end = 4.dp)
             .horizontalScroll(rememberScrollState()),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.spacedBy(4.dp),
     ) {
         // Timestamp
         message.createdAt?.let { ts ->
