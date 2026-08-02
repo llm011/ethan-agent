@@ -202,7 +202,7 @@ cua-driver 的 UDS 协议是自定义 JSON 格式（非标准 JSON-RPC）：
 
 ```json
 // 请求
-{"method": "call", "name": "get_screen_size", "arguments": {}}
+{"method": "call", "name": "get_screen_size", "args": {}}
 
 // 响应
 {"ok": true, "result": {"content": [...], "structuredContent": {...}}}

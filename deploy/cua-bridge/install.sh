@@ -138,7 +138,7 @@ s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 s.settimeout(5)
 try:
     s.connect(('127.0.0.1', ${PORT}))
-    s.sendall(json.dumps({'method':'call','name':'get_screen_size','arguments':{}}).encode())
+    s.sendall(json.dumps({'method':'call','name':'get_screen_size','args':{}}).encode())
     s.shutdown(socket.SHUT_WR)
     resp = b''
     while True:
