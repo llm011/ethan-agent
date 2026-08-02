@@ -10,6 +10,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.Modifier
 import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
@@ -136,7 +137,7 @@ private fun MainContent(authViewModel: AuthViewModel) {
             )
         },
     ) {
-        Scaffold { _ ->
+        Scaffold { innerPadding ->
             NavHost(
                 navController = navController,
                 startDestination = "chat",
@@ -144,6 +145,7 @@ private fun MainContent(authViewModel: AuthViewModel) {
                 exitTransition = slideOut,
                 popEnterTransition = popSlideIn,
                 popExitTransition = popSlideOut,
+                modifier = Modifier.padding(innerPadding),
             ) {
             composable(
                 route = "chat?sessionId={sessionId}",

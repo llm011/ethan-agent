@@ -179,8 +179,7 @@ fun <T> EthanScrollableTabBar(
                     .padding(
                         horizontal = if (hasSubtitle) 16.dp else 12.dp,
                         vertical = if (hasSubtitle) 10.dp else 8.dp,
-                    )
-                    .weight(1f, fill = false),
+                    ),
             ) {
                 Text(
                     text = labelOf(tab),

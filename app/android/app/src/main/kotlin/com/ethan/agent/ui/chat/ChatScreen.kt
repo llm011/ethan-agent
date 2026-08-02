@@ -834,7 +834,7 @@ private fun MessageStatsBar(message: UiMessage, isUser: Boolean = false) {
             .padding(top = 3.dp, start = 4.dp, end = 4.dp)
             .horizontalScroll(rememberScrollState()),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.spacedBy(4.dp),
+        horizontalArrangement = if (isUser) Arrangement.spacedBy(4.dp, Alignment.End) else Arrangement.spacedBy(4.dp),
     ) {
         // Timestamp
         message.createdAt?.let { ts ->

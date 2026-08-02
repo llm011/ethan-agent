@@ -145,13 +145,24 @@ fun SettingsScreen(
         // 同步 Tab 点击与 Pager 页面
         LaunchedEffect(state.tab) {
             val index = tabs.indexOf(state.tab)
-            if (index >= 0 && index != pagerState.currentPage) {
+            if (index >= 0 && index != pagerState.currentPage && pagerState.currentPage != pagerState.targetPage) {
+                // 只在 pager 不在动画中时程序化滚动，避免与用户手势冲突
                 pagerState.animateScrollToPage(index)
             }
         }
 
-        // 同步 Pager 滑动到 Tab 选中
+        // 同步 Pager 滑动到 Tab 选中（跳过初始状态，避免覆盖已持久化的 tab）
+        val isFirstPagerSync = remember { mutableStateOf(true) }
         LaunchedEffect(pagerState.currentPage) {
+            if (isFirstPagerSync.value) {
+                isFirstPagerSync.value = false
+                // 初次进入：如果 state.tab 不是第0个 tab，同步 pager 到正确页面
+                val initialIndex = tabs.indexOf(state.tab)
+                if (initialIndex > 0) {
+                    pagerState.scrollToPage(initialIndex)
+                }
+                return@LaunchedEffect
+            }
             val index = pagerState.currentPage
             if (index >= 0 && index < tabs.size && tabs[index] != state.tab) {
                 onTabChange(tabs[index])

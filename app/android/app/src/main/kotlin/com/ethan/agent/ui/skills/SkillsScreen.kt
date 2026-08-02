@@ -133,7 +133,7 @@ private fun SkillListContent(
             singleLine = true,
         )
         LazyColumn(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(16.dp),
         ) {
