@@ -71,8 +71,13 @@ Hilt → Koin，14 个 ViewModel 迁 `commonMain`。iOS 的 SwiftUI 直接观察
 
 ## 进度
 
-- [x] Phase 1（共享 core：model + network(Ktor) + datastore）— **基本完成**
-      - 三层已在 commonMain 且两端(android + iosSimulatorArm64 klib)编译通过；Android assembleDebug 零回归
-      - 剩余：模拟器冒烟；EthanRepository/LocalCache 迁共享随 Phase 2 一起做
-- [ ] Phase 2（共享 ViewModel：Hilt→Koin + Repository/LocalCache 迁 commonMain）
+- [x] Phase 1（共享 core：model + network(Ktor) + datastore）— **已合并 main（PR #161）**
+      - 三层在 commonMain，两端(android + iosSimulatorArm64 klib)编译通过；Android 冒烟全过
+- [x] Phase 2（共享 ViewModel：Hilt→Koin + Repository/LocalCache 迁 commonMain）— **代码层完成，待 iOS 接入验证**
+      - 14 ViewModel + Repository + 缓存 + ShareBus 全部迁入 :shared/commonMain
+      - Hilt→Koin，viewModelOf DSL；Android :app 接入 Koin（setupAndroidPlatformModule + initKoin）
+      - iOS klib 自带完整运行时：iosPlatformModule（AppConfigStore + IosAppUpdater no-op）+ initKoin
+      - Android :app + iOS 三架构(Arm64/SimulatorArm64/x64) klib 编译均通过
+      - 修复 SSE client 共享 requestTimeout/BODY logging 的回归、ServerUrlCache/AuthTokenCache 冷启动竞态、versionCode 单调性
+      - 待装 Xcode：产出 XCFramework + 搭 iOS SwiftUI 壳工程接入 initKoin 跑登录页
 - [ ] Phase 3（可选，共享 UI）

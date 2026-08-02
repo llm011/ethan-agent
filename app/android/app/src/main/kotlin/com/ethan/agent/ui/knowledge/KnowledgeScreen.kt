@@ -1,5 +1,6 @@
 package com.ethan.agent.ui.knowledge
 
+import com.ethan.agent.shared.viewmodel.KnowledgeUiState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi

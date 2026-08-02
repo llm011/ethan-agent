@@ -10,34 +10,39 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.Modifier
-import androidx.hilt.navigation.compose.hiltViewModel
+import org.koin.androidx.compose.koinViewModel
+import org.koin.core.parameter.parametersOf
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import com.ethan.agent.ui.auth.AuthUiState
-import com.ethan.agent.ui.auth.AuthViewModel
+import com.ethan.agent.shared.viewmodel.AuthUiState
+import com.ethan.agent.shared.viewmodel.AuthViewModel
 import com.ethan.agent.ui.auth.LoginScreen
 import com.ethan.agent.ui.chat.ChatScreen
-import com.ethan.agent.ui.chat.ChatViewModel
+import com.ethan.agent.shared.viewmodel.ChatViewModel
 import com.ethan.agent.ui.docs.DocsScreen
-import com.ethan.agent.ui.docs.DocsViewModel
+import com.ethan.agent.shared.viewmodel.DocsViewModel
 import com.ethan.agent.ui.knowledge.KnowledgeScreen
-import com.ethan.agent.ui.knowledge.KnowledgeViewModel
+import com.ethan.agent.shared.viewmodel.KnowledgeViewModel
 import com.ethan.agent.ui.logs.LogsScreen
-import com.ethan.agent.ui.logs.LogsViewModel
+import com.ethan.agent.shared.viewmodel.LogsViewModel
 import com.ethan.agent.ui.memory.MemoryScreen
-import com.ethan.agent.ui.memory.MemoryViewModel
+import com.ethan.agent.shared.viewmodel.MemoryViewModel
 import com.ethan.agent.ui.navigation.Screen
 import com.ethan.agent.ui.schedule.ScheduleScreen
-import com.ethan.agent.ui.schedule.ScheduleViewModel
+import com.ethan.agent.shared.viewmodel.ScheduleViewModel
 import com.ethan.agent.ui.sessions.SessionsScreen
-import com.ethan.agent.ui.sessions.SessionsViewModel
+import com.ethan.agent.shared.viewmodel.SessionsViewModel
 import com.ethan.agent.ui.settings.SettingsScreen
-import com.ethan.agent.ui.settings.SettingsViewModel
+import com.ethan.agent.shared.viewmodel.SettingsViewModel
 import com.ethan.agent.ui.skills.SkillsScreen
-import com.ethan.agent.ui.skills.SkillsViewModel
+import com.ethan.agent.shared.viewmodel.SkillsViewModel
+import com.ethan.agent.shared.viewmodel.UpdateViewModel
+import com.ethan.agent.shared.viewmodel.BackgroundTasksViewModel
+import com.ethan.agent.shared.viewmodel.PptPreviewViewModel
+import com.ethan.agent.shared.viewmodel.AnnotationsViewModel
 import com.ethan.agent.ui.components.AppDrawerContent
 import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.UpdateDialog
@@ -65,12 +70,12 @@ private fun LoginContent(state: AuthUiState, viewModel: AuthViewModel) {
 @Composable
 private fun MainContent(authViewModel: AuthViewModel) {
     val navController = rememberNavController()
-    val updateViewModel: com.ethan.agent.ui.components.UpdateViewModel = hiltViewModel()
+    val updateViewModel: UpdateViewModel = koinViewModel()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
 
     // Sessions data for drawer
-    val sessionsVm: SessionsViewModel = hiltViewModel()
+    val sessionsVm: SessionsViewModel = koinViewModel()
     val sessionsState by sessionsVm.state.collectAsState()
 
     ModalNavigationDrawer(
@@ -114,7 +119,7 @@ private fun MainContent(authViewModel: AuthViewModel) {
                 route = "chat?sessionId={sessionId}",
                 arguments = listOf(navArgument("sessionId") { type = NavType.StringType; nullable = true; defaultValue = null }),
             ) {
-                val vm: ChatViewModel = hiltViewModel()
+                val vm: ChatViewModel = koinViewModel { parametersOf(it.arguments?.getString("sessionId")) }
                 val state by vm.state.collectAsState()
                 ChatScreen(
                     state = state,
@@ -124,6 +129,8 @@ private fun MainContent(authViewModel: AuthViewModel) {
                     onModeSelected = vm::onModeSelected,
                     onQuote = vm::setQuote,
                     onUpload = vm::uploadAttachment,
+                    onAddImage = vm::addImage,
+                    onRemoveImage = vm::removeImage,
                     onConsent = vm::respondConsent,
                     onDismissConsent = vm::dismissConsent,
                     onStop = vm::stopStreaming,
@@ -136,7 +143,7 @@ private fun MainContent(authViewModel: AuthViewModel) {
             }
 
             composable(Screen.Sessions.route) {
-                val vm: SessionsViewModel = hiltViewModel()
+                val vm: SessionsViewModel = koinViewModel()
                 val state by vm.state.collectAsState()
                 SessionsScreen(
                     state = state,
@@ -169,7 +176,7 @@ private fun MainContent(authViewModel: AuthViewModel) {
             }
 
             composable(Screen.Settings.route) {
-                val vm: SettingsViewModel = hiltViewModel()
+                val vm: SettingsViewModel = koinViewModel()
                 val state by vm.state.collectAsState()
                 SettingsScreen(
                     state = state,
@@ -204,7 +211,7 @@ private fun MainContent(authViewModel: AuthViewModel) {
             }
 
             composable(Screen.Memory.route) {
-                val vm: MemoryViewModel = hiltViewModel()
+                val vm: MemoryViewModel = koinViewModel()
                 val state by vm.state.collectAsState()
                 MemoryScreen(
                     state = state,
@@ -235,7 +242,7 @@ private fun MainContent(authViewModel: AuthViewModel) {
             }
 
             composable(Screen.Knowledge.route) {
-                val vm: KnowledgeViewModel = hiltViewModel()
+                val vm: KnowledgeViewModel = koinViewModel()
                 val state by vm.state.collectAsState()
                 KnowledgeScreen(
                     state = state,
@@ -256,7 +263,7 @@ private fun MainContent(authViewModel: AuthViewModel) {
             }
 
             composable(Screen.Skills.route) {
-                val vm: SkillsViewModel = hiltViewModel()
+                val vm: SkillsViewModel = koinViewModel()
                 val state by vm.state.collectAsState()
                 SkillsScreen(
                     state = state,
@@ -275,7 +282,7 @@ private fun MainContent(authViewModel: AuthViewModel) {
             }
 
             composable(Screen.Schedule.route) {
-                val vm: ScheduleViewModel = hiltViewModel()
+                val vm: ScheduleViewModel = koinViewModel()
                 val state by vm.state.collectAsState()
                 ScheduleScreen(
                     state = state,
@@ -297,7 +304,7 @@ private fun MainContent(authViewModel: AuthViewModel) {
             }
 
             composable(Screen.Docs.route) {
-                val vm: DocsViewModel = hiltViewModel()
+                val vm: DocsViewModel = koinViewModel()
                 val state by vm.state.collectAsState()
                 DocsScreen(state = state, onBack = { navController.popBackStack() }, onSelectDoc = { slug ->
                     navController.navigate("docs/$slug")
@@ -308,13 +315,13 @@ private fun MainContent(authViewModel: AuthViewModel) {
                 route = Screen.DocDetail.route,
                 arguments = listOf(navArgument("slug") { type = NavType.StringType }),
             ) {
-                val vm: DocsViewModel = hiltViewModel()
+                val vm: DocsViewModel = koinViewModel { parametersOf(it.arguments?.getString("slug")) }
                 val state by vm.state.collectAsState()
                 DocsScreen(state = state, onBack = { navController.popBackStack() }, onSelectDoc = vm::selectDoc, onClearError = vm::clearError)
             }
 
             composable(Screen.Logs.route) {
-                val vm: LogsViewModel = hiltViewModel()
+                val vm: LogsViewModel = koinViewModel()
                 val state by vm.state.collectAsState()
                 LogsScreen(
                     state = state,
@@ -328,7 +335,7 @@ private fun MainContent(authViewModel: AuthViewModel) {
 
             // Track 8 routes
             composable(Screen.BackgroundTasks.route) {
-                val vm: com.ethan.agent.ui.background.BackgroundTasksViewModel = hiltViewModel()
+                val vm: BackgroundTasksViewModel = koinViewModel()
                 val state by vm.state.collectAsState()
                 com.ethan.agent.ui.background.BackgroundTasksScreen(
                     state = state,
@@ -344,7 +351,7 @@ private fun MainContent(authViewModel: AuthViewModel) {
                 route = Screen.PptPreview.route,
                 arguments = listOf(navArgument("sessionId") { type = NavType.StringType }),
             ) {
-                val vm: com.ethan.agent.ui.ppt.PptPreviewViewModel = hiltViewModel()
+                val vm: PptPreviewViewModel = koinViewModel { parametersOf(it.arguments?.getString("sessionId")) }
                 val state by vm.state.collectAsState()
                 com.ethan.agent.ui.ppt.PptPreviewScreen(
                     state = state,
@@ -356,7 +363,7 @@ private fun MainContent(authViewModel: AuthViewModel) {
                 route = Screen.Annotations.route,
                 arguments = listOf(navArgument("sessionId") { type = NavType.StringType }),
             ) {
-                val vm: com.ethan.agent.ui.annotations.AnnotationsViewModel = hiltViewModel()
+                val vm: AnnotationsViewModel = koinViewModel()
                 val state by vm.state.collectAsState()
                 com.ethan.agent.ui.annotations.AnnotationsScreen(
                     state = state,

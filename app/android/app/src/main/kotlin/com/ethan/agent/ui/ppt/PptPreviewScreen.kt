@@ -1,5 +1,6 @@
 package com.ethan.agent.ui.ppt
 
+import com.ethan.agent.shared.viewmodel.PptPreviewUiState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column

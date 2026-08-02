@@ -1,5 +1,6 @@
 package com.ethan.agent.ui.auth
 
+import com.ethan.agent.shared.viewmodel.AuthUiState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement

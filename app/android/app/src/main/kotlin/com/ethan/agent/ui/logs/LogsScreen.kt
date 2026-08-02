@@ -1,5 +1,6 @@
 package com.ethan.agent.ui.logs
 
+import com.ethan.agent.shared.viewmodel.LogsUiState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row

@@ -21,27 +21,24 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
-import androidx.hilt.navigation.compose.hiltViewModel
+import org.koin.android.ext.android.inject
+import org.koin.androidx.compose.koinViewModel
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import com.ethan.agent.auth.BiometricLockManager
 import com.ethan.agent.core.datastore.AppConfigStore
-import com.ethan.agent.share.ShareBus
+import com.ethan.agent.shared.ShareBus
 import com.ethan.agent.ui.EthanApp
-import com.ethan.agent.ui.auth.AuthViewModel
+import com.ethan.agent.shared.viewmodel.AuthViewModel
 import com.ethan.agent.ui.theme.EthanTheme
-import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
-@AndroidEntryPoint
 class MainActivity : FragmentActivity() {
 
-    @Inject
-    lateinit var configStore: AppConfigStore
+    private val configStore: AppConfigStore by inject()
 
     /** 应用锁功能是否开启（异步读 config 后确定）。 */
     private var lockEnabled = false
@@ -92,7 +89,7 @@ class MainActivity : FragmentActivity() {
         }
 
         setContent {
-            val authViewModel: AuthViewModel = hiltViewModel()
+            val authViewModel: AuthViewModel = koinViewModel()
             EthanTheme(themeId = themeId.value) {
                 when {
                     !configLoaded.value -> SplashGate()

@@ -108,6 +108,7 @@ data class Message(
     val quote: Quote? = null,
     val usage: Usage? = null,
     @SerialName("tool_steps") val toolSteps: List<ToolStep>? = null,
+    val images: List<MessageImage>? = null,
 )
 
 @Serializable
@@ -124,10 +125,18 @@ data class SessionDetail(
 data class RenameSessionRequest(val title: String)
 
 @Serializable
+data class MessageImage(
+    val data: String? = null,        // base64 raw（无 data: 前缀），发送给后端时用
+    @SerialName("media_type") val mediaType: String? = null,
+    val url: String? = null,         // 后端历史消息返回的相对路径，如 "assets/images/session_id/xxx.png"
+)
+
+@Serializable
 data class ChatMessage(
     val role: String,
     val content: String,
     @SerialName("created_at") @Serializable(with = NullableEpochSecondsSerializer::class) val createdAt: Long? = null,
+    val images: List<MessageImage>? = null,
 )
 
 @Serializable

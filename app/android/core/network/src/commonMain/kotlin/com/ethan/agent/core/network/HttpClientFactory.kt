@@ -38,8 +38,13 @@ object NetworkFactory {
     /**
      * 创建共享 HttpClient：注入鉴权头 + JSON 反序列化 + 超时 + 可选日志。
      * tokenProvider 每次请求实时取 token，兼容登录后 token 变化。
+     *
+     * @param streaming 为 SSE 流式 client 置 true：禁用 requestTimeout（否则会强制
+     *                  中断 >120s 的长生成，是原 OkHttp 只设 readTimeout 的回归），
+     *                  并跳过 BODY 级日志（Logging 会 buffer/干扰流式 body 读取）。
+     *                  socketTimeout 保留——它只卡「无数据读取」场景，持续有数据流不触发。
      */
-    fun createHttpClient(tokenProvider: () -> String): HttpClient {
+    fun createHttpClient(tokenProvider: () -> String, streaming: Boolean = false): HttpClient {
         return HttpClient(httpClientEngine()) {
             expectSuccess = true
 
@@ -49,11 +54,13 @@ object NetworkFactory {
 
             install(HttpTimeout) {
                 connectTimeoutMillis = 30_000
-                requestTimeoutMillis = 120_000
+                // requestTimeout 限制整个请求（含流式 body）：流式场景必须禁用，否则
+                // 长生成会被 HttpRequestTimeoutException 中断。0 表示不超时。
+                requestTimeoutMillis = if (streaming) 0L else 120_000L
                 socketTimeoutMillis = 120_000
             }
 
-            if (isDebugBuild()) {
+            if (!streaming && isDebugBuild()) {
                 install(Logging) {
                     level = LogLevel.BODY
                 }
@@ -87,6 +94,6 @@ object NetworkFactory {
     }
 
     fun createSseClient(baseUrlProvider: () -> String, tokenProvider: () -> String): ChatSseClient {
-        return ChatSseClient(createHttpClient(tokenProvider), baseUrlProvider, NetworkJson.instance)
+        return ChatSseClient(createHttpClient(tokenProvider, streaming = true), baseUrlProvider, NetworkJson.instance)
     }
 }

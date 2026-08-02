@@ -6,7 +6,6 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.core.content.FileProvider
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -14,8 +13,6 @@ import okhttp3.Request
 import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.TimeUnit
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Android 应用内自更新。
@@ -23,9 +20,8 @@ import javax.inject.Singleton
  * 流程：检查 GitHub Releases → 比较版本号 → 下载 APK → 触发系统安装器。
  * 所有错误静默吞掉，不打断正常使用。
  */
-@Singleton
-class AppUpdater @Inject constructor(
-    @ApplicationContext private val context: Context,
+class AppUpdater(
+    private val context: Context,
 ) {
 
     companion object {

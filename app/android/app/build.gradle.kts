@@ -6,8 +6,6 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
-    alias(libs.plugins.hilt)
-    alias(libs.plugins.ksp)
 }
 
 // 从仓库根 pyproject.toml 读取版本号，与 release tag 保持同步
@@ -21,13 +19,15 @@ fun readPyprojectVersion(): String {
     return match?.groupValues?.get(1) ?: "0.0.1"
 }
 
-// versionCode 必须是整数且单调递增，从语义版本派生：major*1000000 + minor*1000 + patch
+// versionCode 必须是整数且单调递增，从语义版本派生：major*10_000_000 + minor*10_000 + patch。
+// patch 段留 4 位（可到 9999），保证 patch 达到 1000 也不会和下一个 minor 碰撞，
+// 维持 Play Store / 更新器的单调性判定。
 fun deriveVersionCode(version: String): Int {
     val parts = version.split("-")[0].split(".").map { it.toIntOrNull() ?: 0 }
     val major = parts.getOrElse(0) { 0 }
     val minor = parts.getOrElse(1) { 0 }
     val patch = parts.getOrElse(2) { 0 }
-    return major * 1_000_000 + minor * 1_000 + patch
+    return major * 10_000_000 + minor * 10_000 + patch
 }
 
 // 读取本地 ~/.gradle/gradle.properties 中的签名信息（CI 通过环境变量注入）
@@ -121,6 +121,7 @@ dependencies {
     implementation(project(":core:model"))
     implementation(project(":core:network"))
     implementation(project(":core:datastore"))
+    implementation(project(":shared"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -137,9 +138,9 @@ dependencies {
     implementation(libs.androidx.compose.material.icons)
     implementation(libs.androidx.navigation.compose)
 
-    implementation(libs.hilt.android)
-    ksp(libs.hilt.compiler)
-    implementation(libs.hilt.navigation.compose)
+    implementation(libs.koin.android)
+    implementation(libs.koin.androidx.compose)
+
 
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.compose.markdown)
