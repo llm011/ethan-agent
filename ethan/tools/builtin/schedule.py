@@ -49,6 +49,28 @@ def _make_fallback_title(prompt: str) -> str:
     return " ".join(words[:5]) + "…"
 
 
+def _is_tool_result_noise(text: str) -> bool:
+    """检测 result_text 是否只是工具返回的噪音（如 lark-cli 返回的 message_id JSON），
+    而非有意义的任务结果。这种情况通常是 agent 错误地用 shell 发消息后把返回值当成了回复。"""
+    import re
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        stripped = re.sub(r"^```\w*\n?", "", stripped)
+        stripped = re.sub(r"\n?```$", "", stripped)
+    stripped = stripped.strip()
+    try:
+        data = json.loads(stripped)
+        if isinstance(data, dict):
+            keys = set(data.keys())
+            if keys <= {"ok", "code", "msg", "data"} and "message_id" in json.dumps(data):
+                return True
+            if keys == {"message_id"}:
+                return True
+    except (json.JSONDecodeError, ValueError):
+        pass
+    return False
+
+
 def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channel_context: str = "{}", user_id: str = "", title: str = "", **_extra):
     """定时任务触发时的回调。
 
@@ -71,10 +93,26 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
             if not token:
                 token = get_config().network.auth_token
             headers = {"Authorization": f"Bearer {token}"} if token else {}
+
+            channel_hint = ""
+            if channel == "lark":
+                channel_hint = "飞书对话"
+            elif channel == "wechat":
+                channel_hint = "微信"
+            schedule_ctx = (
+                f"【定时任务执行环境】你正在执行一个定时任务（cron job）。\n"
+                f"任务完成后，你的回复结果将被自动发送到创建该任务时的{channel_hint or '原始渠道'}中，用户会收到你的回复。\n"
+                f"【重要】\n"
+                f"1. 你不需要、也不应该自己调用任何工具（如 shell/lark-cli）来发送消息——系统会自动把你的回复发给用户。\n"
+                f"2. 直接输出任务结果文本即可，简洁明了。不要输出工具调用的返回值（如 JSON、message_id 等）。\n"
+                f"3. 如果任务要求发送消息到某个聊天/群，那是目标聊天而非本对话，你仍需输出要发送的内容（系统会发），不要自己调用发送命令。"
+            )
+
             res = requests.post(f"{_base_url()}/api/chat", json={
                 "messages": [{"role": "user", "content": prompt}],
                 "session_id": session_id,
                 "channel": "schedule",
+                "runtime_context": schedule_ctx,
             }, headers=headers, timeout=300)
             res.raise_for_status()
             result_text = res.json().get("content", "")
@@ -108,6 +146,11 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
                 print(f"Failed to log error to session: {e2}")
 
         # 把结果发回来源渠道（飞书/微信）
+        # 防御性检查：过滤掉工具返回的噪音（如 agent 错误地把 lark-cli 的 JSON 结果当回复）
+        if result_text and _is_tool_result_noise(result_text):
+            print(f"Schedule job '{title}' result looks like tool noise, skipping send. Content preview: {result_text[:200]}")
+            result_text = ""
+
         if result_text:
             display_title = title or _make_fallback_title(prompt)
             formatted = f"【定时任务】{display_title}\n{result_text}"
