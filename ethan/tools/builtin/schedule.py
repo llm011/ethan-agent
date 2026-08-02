@@ -49,26 +49,72 @@ def _make_fallback_title(prompt: str) -> str:
     return " ".join(words[:5]) + "…"
 
 
+def _is_pure_send_confirmation(data: dict) -> bool:
+    """判断 JSON 对象是否仅是消息发送的确认结果。
+
+    仅当 JSON 结构满足以下任一"纯发送确认"形态时返回 True：
+    - {"message_id": "om_xxx"}（顶层只有 message_id 字符串）
+    - {"ok": true, "code": 0, "msg": "...", "data": {"message_id": "om_xxx"}}
+      （顶层 keys 限定为 ok/code/msg/data，且 data 子对象只有 message_id 字符串）
+
+    任何包含其他业务字段的 JSON 都会返回 False，不会误杀合法结果。
+    """
+    top_keys = set(data.keys())
+
+    # 形态1: 仅含 message_id
+    if top_keys == {"message_id"} and isinstance(data.get("message_id"), str):
+        return True
+
+    # 形态2: API 风格包装——顶层 keys 必须是 {ok, code, msg, data} 的子集，
+    # 且 data 必须是仅含 message_id 的 dict，不能携带其他业务数据
+    if not top_keys <= {"ok", "code", "msg", "data"}:
+        return False
+    nested = data.get("data")
+    if not isinstance(nested, dict):
+        return False
+    if set(nested.keys()) != {"message_id"}:
+        return False
+    if not isinstance(nested.get("message_id"), str):
+        return False
+    # ok 字段若存在须为 true（成功发送）；失败响应不应被静默吞掉
+    if "ok" in data and data["ok"] is not True:
+        return False
+    return True
+
+
 def _is_tool_result_noise(text: str) -> bool:
-    """检测 result_text 是否只是工具返回的噪音（如 lark-cli 返回的 message_id JSON），
-    而非有意义的任务结果。这种情况通常是 agent 错误地用 shell 发消息后把返回值当成了回复。"""
+    """检测 agent 的回复是否仅为消息发送工具的返回噪音。
+
+    判断标准极其保守：**整个回复**必须只是一个发送确认 JSON（裸 JSON 或被单个
+    markdown 代码块包裹），不能包含任何其他文字说明。只要回复中夹杂了任何人类可读
+    的文本（如代码块外的"已发送"、结果摘要等），就返回 False，保证不会误杀合法结果。
+
+    这是一层防御性兜底——主要修复依赖 runtime_context 从源头阻止 agent 自行发消息。
+    """
     import re
     stripped = text.strip()
-    if stripped.startswith("```"):
-        stripped = re.sub(r"^```\w*\n?", "", stripped)
-        stripped = re.sub(r"\n?```$", "", stripped)
-    stripped = stripped.strip()
+    if not stripped:
+        return False
+
+    inner = None  # 用于尝试 JSON 解析的内容
+
+    # 用 fullmatch 严格检测：整个字符串是否只是一个 markdown 代码块
+    fence_match = re.fullmatch(r"```(?:\w*\n)?(.+?)\n?```\s*", stripped, re.DOTALL)
+    if fence_match:
+        inner = fence_match.group(1).strip()
+    elif stripped.startswith("{") and stripped.endswith("}"):
+        # 整个字符串是裸 JSON 对象
+        inner = stripped
+    else:
+        # 代码块外有额外文字，或不是 JSON → 不是纯噪音
+        return False
+
     try:
-        data = json.loads(stripped)
-        if isinstance(data, dict):
-            keys = set(data.keys())
-            if keys <= {"ok", "code", "msg", "data"} and "message_id" in json.dumps(data):
-                return True
-            if keys == {"message_id"}:
-                return True
+        data = json.loads(inner)
     except (json.JSONDecodeError, ValueError):
-        pass
-    return False
+        return False
+
+    return isinstance(data, dict) and _is_pure_send_confirmation(data)
 
 
 def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channel_context: str = "{}", user_id: str = "", title: str = "", **_extra):
@@ -94,19 +140,24 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
                 token = get_config().network.auth_token
             headers = {"Authorization": f"Bearer {token}"} if token else {}
 
-            channel_hint = ""
-            if channel == "lark":
-                channel_hint = "飞书对话"
-            elif channel == "wechat":
-                channel_hint = "微信"
-            schedule_ctx = (
-                f"【定时任务执行环境】你正在执行一个定时任务（cron job）。\n"
-                f"任务完成后，你的回复结果将被自动发送到创建该任务时的{channel_hint or '原始渠道'}中，用户会收到你的回复。\n"
-                f"【重要】\n"
-                f"1. 你不需要、也不应该自己调用任何工具（如 shell/lark-cli）来发送消息——系统会自动把你的回复发给用户。\n"
-                f"2. 直接输出任务结果文本即可，简洁明了。不要输出工具调用的返回值（如 JSON、message_id 等）。\n"
-                f"3. 如果任务要求发送消息到某个聊天/群，那是目标聊天而非本对话，你仍需输出要发送的内容（系统会发），不要自己调用发送命令。"
-            )
+            # 按 channel 构造 runtime_context：lark/wechat 会自动回发结果，web 仅存会话
+            if channel in ("lark", "wechat"):
+                channel_hint = "飞书对话" if channel == "lark" else "微信"
+                schedule_ctx = (
+                    f"【定时任务执行环境】你正在执行一个定时任务（cron job）。\n"
+                    f"任务完成后，你的回复将被自动发送到创建该任务时的{channel_hint}中，用户会收到。\n"
+                    f"【重要】\n"
+                    f"1. 不要自己调用 shell/lark-cli 等工具来发消息——系统会自动把你的回复发给用户。\n"
+                    f"2. 直接输出任务结果文本即可，简洁明了。不要输出工具调用的返回值（如 JSON、message_id）。\n"
+                    f"3. 如果任务要求发送消息到某个聊天/群（而非本对话），仍需你输出内容（系统会发到目标），不要自己执行发送命令。"
+                )
+            else:
+                # web channel：结果保存到会话，用户在 Web 界面查看；不会自动外发
+                schedule_ctx = (
+                    "【定时任务执行环境】你正在执行一个定时任务（cron job）。\n"
+                    "任务完成后，你的回复将保存到会话记录中，用户可在 Web 界面的定时任务详情里查看。\n"
+                    "直接输出任务结果文本即可，简洁明了。"
+                )
 
             res = requests.post(f"{_base_url()}/api/chat", json={
                 "messages": [{"role": "user", "content": prompt}],
