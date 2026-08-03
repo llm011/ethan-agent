@@ -267,7 +267,10 @@ async def _run_heartbeat_md() -> None:
 
 
 async def _tick() -> None:
-    """执行一次心跳：facts 整理 + 画像每日压缩 + heartbeat.md 任务 + skill 进化 + watchdog 检查 + memory.db 孤儿清理 + sessions.db 轮转检查。"""
+    """执行一次心跳：watchdog 检查 + 画像压缩 + heartbeat.md 任务 + skill 进化 + memory.db 清理 + sessions.db 轮转。
+
+    watchdog 先串行（互相拉起逻辑需确保进程存活）；其余任务并行（无依赖、资源不冲突）。
+    """
     logger.info("[Heartbeat] tick")
     # 确保 watchdog 进程存活（互相拉起的 server 侧逻辑）
     # 多 worktree 开发时跳过（ETHAN_NO_WATCHDOG=1）
@@ -277,13 +280,24 @@ async def _tick() -> None:
             check_watchdog_health()
         except Exception:
             logger.exception("[Heartbeat] Watchdog health check failed")
-    # facts.json 定期去重已随 flat-facts 系统退役删除：
-    # 长期事实由结构化 pipeline 的准入 merge + 午夜复评负责
-    await _consolidate_profiles()
-    await _run_heartbeat_md()
-    await _update_skills()
-    await _cleanup_memory_db()
-    await _rotate_session_dbs()
+    # watchdog 存活后，其余任务并行执行：
+    # - 画像压缩、heartbeat.md、skill 进化、db 清理、db 轮转之间无依赖
+    # - heartbeat.md 用主模型，skill 进化用 lite model，不抢同一 provider 配额
+    # - 各任务内部已有 try/except，return_exceptions=True 再兜一层防止单个失败阻塞其他
+    results = await asyncio.gather(
+        _consolidate_profiles(),
+        _run_heartbeat_md(),
+        _update_skills(),
+        _cleanup_memory_db(),
+        _rotate_session_dbs(),
+        return_exceptions=True,
+    )
+    for name, result in zip(
+        ["profiles", "heartbeat.md", "skills", "memory_db", "session_dbs"],
+        results,
+    ):
+        if isinstance(result, Exception):
+            logger.exception("[Heartbeat] %s failed (uncaught)", name, exc_info=result)
 
 
 async def _rotate_session_dbs() -> None:
