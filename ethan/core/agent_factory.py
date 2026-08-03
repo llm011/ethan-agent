@@ -23,6 +23,7 @@ from ethan.tools.builtin.decide import DecideTool
 from ethan.tools.builtin.deliver_file import DeliverFileTool
 from ethan.tools.builtin.file import FileListTool, FileReadTool, FileWriteTool
 from ethan.tools.builtin.find_tools import FindToolsTool
+from ethan.tools.builtin.heartbeat import HeartbeatAddTool, HeartbeatListTool, HeartbeatRemoveTool
 from ethan.tools.builtin.image_search import ImageSearchTool
 from ethan.tools.builtin.install_skill import InstallSkillTool
 from ethan.tools.builtin.knowledge import KnowledgeAddTool, KnowledgeEditTool, KnowledgeReadTool, KnowledgeSearchTool
@@ -143,6 +144,9 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
     registry.register(DelegateCodingTool(user_id=user_id))
     registry.register(ConfigGetTool())
     registry.register(ConfigSetTool())
+    registry.register(HeartbeatAddTool())
+    registry.register(HeartbeatRemoveTool())
+    registry.register(HeartbeatListTool())
     registry.register(SetSecretTool())
     registry.register(GetSecretTool())
     registry.register(ListSecretsTool())

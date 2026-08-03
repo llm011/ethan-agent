@@ -11,7 +11,7 @@ description: >
      由 heartbeat 心跳在工作日白天范围内检查状态、决定是否提醒，支持飞书通知和跳过记录。
   进展中的时间节点转交 schedule-manager 识别并建提醒；涉及人时同步到 people-kb 档案。
   与 team-manager 分工：本技能记录"事"的工作过程，team-manager 记录"人"的工作结果。
-trigger: "工作进展|项目进展|业务范围|工作沉淀|收藏文档|收藏链接|每日例行|配置每日例行|产品体验|文档阅读|工作梳理|每日回顾|今天不做"
+trigger: "工作进展|项目进展|业务范围|工作沉淀|收藏文档|收藏链接|每日例行|配置每日例行|产品体验|文档阅读|工作梳理|每日回顾|今天不做|每天需要|每天安排|每天固定|每天习惯|每天阅读|每天梳理|固定时间"
 author: Ethan Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -194,13 +194,14 @@ title 决定文件名。禁止 `/`、`\`、连续 `-`、连续空格、前后空
 
 **2. heartbeat 指令**
 
-配置完成后，Agent 在 `{workspace}/system/heartbeat.md` 中追加一行（按 heartbeat 规范，若已存在 `[agent:work-notes]` 条目则跳过）：
+配置完成后，Agent 调用 `heartbeat_add` 工具注册心跳任务（工具自动分配编号、去重、保证格式）：
 
 ```
-[agent:work-notes] 检查每日例行状态
+heartbeat_add(task_type="agent", task="work-notes")
 ```
 
-> heartbeat 规范见 `{workspace}/system/heartbeat.md` 顶部注释。指令一行写完，具体流程在本 SKILL.md 的「心跳检查流程」中定义。
+> 工具会在 heartbeat.md 追加一行如 `1  [agent:work-notes]`。具体心跳检查流程在本 SKILL.md 的「心跳检查流程」中定义。
+> 若要移除：`heartbeat_remove(task_id=<编号>)`，编号用 `heartbeat_list()` 查。
 
 **3. 状态文件**：`{workspace}/system/routine-state.json`
 
