@@ -244,6 +244,24 @@ function parseSearchResults(detail: string): SearchResultCard[] | null {
 }
 
 /** web_search 详情：优先消费后端产出的结构化搜索卡片，也兼容旧文本格式解析（浅色可读列表） */
+
+/** 将 ISO / 日期字符串统一格式化为 YYYY-MM-DD；无法解析则原样返回前 10 字符 */
+function formatDate(raw: string): string {
+  if (!raw) return "";
+  // 已是 YYYY-MM-DD 格式（10 字符）
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  // 尝试解析 ISO（2026-08-03T07:06:33.218901+00:00 / 2026-08-03T07:06:33Z）
+  const d = new Date(raw);
+  if (!isNaN(d.getTime())) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+  // 兜底：截取前 10 字符
+  return raw.slice(0, 10);
+}
+
 function SearchResultList({ results }: { results: SearchResultCard[] }) {
   return (
     <div className="flex gap-3 overflow-x-auto pb-1 rounded-md">
@@ -259,17 +277,17 @@ function SearchResultList({ results }: { results: SearchResultCard[] }) {
             style={{ textDecoration: "none" }}
             className="block w-[250px] min-w-[250px] max-w-[250px] flex-shrink-0 px-3 py-2 rounded-lg border border-border/60 bg-background no-underline hover:bg-muted/50 hover:border-border transition-colors group"
           >
-            <div className="flex items-center gap-1.5 mb-1">
+            <div className="flex items-center gap-1.5 mb-1 min-w-0">
               {r.engine && (
                 <span className="text-[10px] px-1.5 py-0 rounded-full font-medium bg-primary/10 text-primary shrink-0 uppercase tracking-wide">
                   {r.engine}
                 </span>
               )}
               {r.source && (
-                <span className="text-[10px] text-muted-foreground/60 truncate">{r.source}</span>
+                <span className="text-[10px] text-muted-foreground/60 truncate min-w-0 flex-1">{r.source}</span>
               )}
               {r.published && (
-                <span className="text-[10px] text-muted-foreground/60 shrink-0">{r.published}</span>
+                <span className="text-[10px] text-muted-foreground/60 shrink-0 tabular-nums">{formatDate(r.published)}</span>
               )}
             </div>
             <div className="text-sm font-medium text-foreground/85 group-hover:text-primary line-clamp-2 leading-snug">
