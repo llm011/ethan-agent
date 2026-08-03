@@ -149,7 +149,7 @@ class AnthropicProvider(BaseProvider):
         return result
 
     def _to_anthropic_tools(self, tools: list[ToolDefinition]) -> list[dict]:
-        return [
+        result = [
             {
                 "name": t.name,
                 "description": t.description,
@@ -157,6 +157,11 @@ class AnthropicProvider(BaseProvider):
             }
             for t in tools
         ]
+        # 在最后一个工具定义上加 cache_control，整块 tools 走 ephemeral 缓存。
+        # 多轮工具调用时省 ~5K tokens/轮（35 个工具定义只需首轮 creation，后续 read）。
+        if result and not self._disable_prompt_cache:
+            result[-1]["cache_control"] = {"type": "ephemeral"}
+        return result
 
     def _parse_response(self, response: anthropic.types.Message) -> Message:  # noqa: F821 — lazy-imported in __init__
         tool_calls = []

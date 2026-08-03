@@ -9,9 +9,13 @@
 本模块在 tool result 进 working 前做两件事：
   1. 单条结果硬封顶 MAX_TOOL_RESULT_CHARS：超长就截断 + 标注省略字数与查看方式。
      —— 任何模型都吃不下几十万字的单条结果；超了就该让模型用 file_read offset/limit
-        或重跑命令 + grep/head 按需取片段（Claude Code 等也是这么做的）。
+        或重跑命令 + grep/head 取需片段（Claude Code 等也是这么做的）。
   2. 全量预算 CONTEXT_BUDGET_CHARS：累计超出就从最旧的 tool result 开始压成小摘要，
      保留最近的完整——agent loop 里最近的上下文最重要，旧的压成提示即可。
+
+另外提供 compress_previous_round_tools()：对上一轮的 web_search/web_fetch 结果
+做分级压缩（search 压成 title+url，fetch 存文件替换为指针），在不损失当前轮信息
+的前提下大幅减少历史 tool result 的重复发送。
 
 只动 role=='tool' 的消息，不碰 user/assistant/system；通过替换 working 里的 Message
 引用实现（不就地改写历史 Message.content，避免污染调用方共享的 session 内存对象）。
@@ -19,6 +23,9 @@
 阈值是经验默认值，后续可上提到 config。
 """
 from __future__ import annotations
+
+import os
+import re
 
 from ethan.providers.base import Message
 
@@ -92,3 +99,121 @@ def enforce_context_budget(working: list[Message]) -> None:
         working[i] = _truncated_copy(m, EVICTED_STUB_CHARS, evicted=True)
         # 用截断后的真实长度算 delta（含标注 overhead），避免累计偏差导致提前停手
         total -= cur - len(working[i].content)
+
+
+# ── 上一轮工具结果分级压缩 ──────────────────────────────────────────────
+
+_COMPRESSED_MARKER = "[搜索结果已压缩"
+_FETCH_OFFLOADED_MARKER = "[fetch结果已存文件"
+
+
+def _find_tool_name(working: list[Message], tool_idx: int) -> str:
+    """根据 tool_call_id 反查对应的工具名。"""
+    target_id = working[tool_idx].tool_call_id
+    if not target_id:
+        return ""
+    for j in range(tool_idx - 1, -1, -1):
+        msg = working[j]
+        if msg.is_tool_call and msg.tool_calls:
+            for tc in msg.tool_calls:
+                if tc.id == target_id:
+                    return tc.name
+    return ""
+
+
+def _compress_search_content(content: str) -> str:
+    """把 web_search 的多结果文本压成 title + url 列表。
+
+    原始格式（web_search._build_result）：
+        **[source] title** [date]
+        snippet
+
+        url
+
+    压缩后：
+        [搜索结果已压缩为标题+URL列表]
+        - title | url
+    """
+    blocks = content.split("\n\n")
+    lines: list[str] = []
+    for block in blocks:
+        block = block.strip()
+        if not block or block.startswith("Found ~"):
+            continue
+        parts = block.split("\n")
+        title_line = parts[0] if parts else ""
+        url_line = parts[-1] if len(parts) > 1 else ""
+        # 去掉 ** 和 [source] 前缀
+        title = re.sub(r"^\*\*\[.*?\]\s*", "", title_line).replace("**", "").strip()
+        url = url_line.strip()
+        if url.startswith("http"):
+            lines.append(f"- {title} | {url}")
+    if not lines:
+        return content[:200] + "…" if len(content) > 200 else content
+    return _COMPRESSED_MARKER + "为标题+URL列表]\n" + "\n".join(lines)
+
+
+def _offload_fetch_content(content: str, session_id: str, tool_call_id: str) -> str:
+    """把 web_fetch 结果写入文件，返回文件指针提示。"""
+    dir_path = f"/tmp/ethan/{session_id}"
+    os.makedirs(dir_path, exist_ok=True)
+    file_path = f"{dir_path}/{tool_call_id}.md"
+    try:
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(content)
+    except OSError:
+        return content  # 写文件失败则不压缩，保留原文
+    return (
+        f"{_FETCH_OFFLOADED_MARKER}: {file_path}]\n"
+        f"如需引用该页面内容，用 file_read 读取 {file_path}。"
+    )
+
+
+def _replace_content(msg: Message, new_content: str) -> Message:
+    """复制一条 tool 消息，替换 content（不改原对象）。"""
+    return Message(
+        role=msg.role, content=new_content,
+        tool_calls=msg.tool_calls, tool_call_id=msg.tool_call_id,
+        usage=msg.usage, created_at=msg.created_at,
+        tool_steps=msg.tool_steps, thought=msg.thought,
+        quote=msg.quote, a2ui=msg.a2ui, mcp_apps=msg.mcp_apps,
+    )
+
+
+def compress_previous_round_tools(working: list[Message], session_id: str = "") -> None:
+    """对上一轮的 web_search/web_fetch 结果做分级压缩。
+
+    只压缩「旧」tool result（最后一个 assistant 消息之前的），当前轮保持完整。
+    - web_search: 压成 title+url 列表（丢 snippet，模型已看过、后续轮通常只需 URL）
+    - web_fetch: 写入 /tmp/ethan/<session_id>/ 文件，替换为文件指针
+      （模型刚拿到的当前轮保持全文；下一轮起只保留路径，需要时 file_read 取回）
+    """
+    if not working or not session_id:
+        return
+
+    # 找最后一条 assistant 消息（不论是否带 tool_calls），它之前的 tool result 都是「旧的」
+    last_asst_idx = -1
+    for i in range(len(working) - 1, -1, -1):
+        if working[i].role == "assistant":
+            last_asst_idx = i
+            break
+    if last_asst_idx <= 0:
+        return
+
+    for i in range(last_asst_idx):
+        msg = working[i]
+        if msg.role != "tool":
+            continue
+        content = msg.content or ""
+        if not content:
+            continue
+        # 已压缩过的跳过
+        if _COMPRESSED_MARKER in content or _FETCH_OFFLOADED_MARKER in content:
+            continue
+
+        tool_name = _find_tool_name(working, i)
+        if tool_name == "web_search":
+            working[i] = _replace_content(msg, _compress_search_content(content))
+        elif tool_name == "web_fetch" and len(content) > 500:
+            tc_id = msg.tool_call_id or f"tool_{i}"
+            working[i] = _replace_content(msg, _offload_fetch_content(content, session_id, tc_id))

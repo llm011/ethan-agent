@@ -27,13 +27,20 @@ def _format_args(arguments: dict, max_items: int = 3) -> str:
 #
 # ⚠️ 这是标准 JSON Schema 参数（不是自定义顶层字段），所有 OpenAI 兼容 / Anthropic 模型都支持；
 # 不放进 required，弱模型/中转即便不填也只回退到旧的 args 摘要，绝不报错（切模型也安全）。
-_INTENT_DESC = "用不超过12个字说明本次调用目的（给用户看，会显示在工具调用旁）。例如：查 MR 状态 / 读配置文件 / 搜飞书文档"
+#
+# token 优化：intent 的完整说明放在 system prompt 里全局声明一次（见 agent._build_system），
+# 这里只保留极简 description，避免 35 个工具各重复一遍 ~40 token 的说明文字。
+_INTENT_SYSTEM_INSTRUCTION = (
+    "[工具调用意图] 每次调用工具时，在可选的 intent 参数里用不超过12个字说明本次目的"
+    "（给用户看，会显示在工具调用旁）。例如：查 MR 状态 / 读配置文件 / 搜飞书文档。"
+)
 
 
 def _with_intent_param(td: ToolDefinition) -> ToolDefinition:
     """给工具定义注入一个可选 intent 参数（模型填，用于展示调用意图）。
 
-    不改原对象：deep copy parameters、追加 description，避免污染 registry 里共享的工具定义。
+    不改原对象：deep copy parameters，避免污染 registry 里共享的工具定义。
+    intent 的完整说明放在 system prompt 里，这里只用极简 description 省 token。
     """
     import copy
     params = copy.deepcopy(td.parameters) if isinstance(td.parameters, dict) else {}
@@ -42,10 +49,10 @@ def _with_intent_param(td: ToolDefinition) -> ToolDefinition:
     if not isinstance(props, dict):
         props = {}
         params["properties"] = props
-    props["intent"] = {"type": "string", "description": _INTENT_DESC}
+    props["intent"] = {"type": "string", "description": "调用目的（≤12字）"}
     return ToolDefinition(
         name=td.name,
-        description=td.description + "\n\n调用前请在 intent 参数里用一句话说明本次目的。",
+        description=td.description,
         parameters=params,
     )
 

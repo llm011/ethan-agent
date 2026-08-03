@@ -113,6 +113,7 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
             await store.update_title(req.session_id, init_title)
 
     session_id = req.session_id
+    agent.session_id = session_id
     user_msg = Message(role=req.messages[-1].role, content=req.messages[-1].content)
     await store.save_message(session_id, user_msg)
 
@@ -165,6 +166,7 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
                             store, session_id, progress_msg_id,
                             collector.tool_steps or [], collector.a2ui or None,
                             collector.mcp_apps or None,
+                            collector.cards or None,
                         )
                     except Exception:
                         logger.exception("实时保存工具进度失败 session=%s", session_id)
@@ -183,6 +185,7 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
                     matched_skills=collector.matched_skills or None,
                     ttfb_ms=collector.ttfb_ms,
                     total_ms=collector.total_ms,
+                    cards=collector.cards or None,
                 )
                 if progress_msg_id:
                     await store.update_message(progress_msg_id, session_id, stopped_msg)
@@ -204,6 +207,7 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
             matched_skills=collector.matched_skills or None,
             ttfb_ms=collector.ttfb_ms,
             total_ms=collector.total_ms,
+            cards=collector.cards or None,
         )
         try:
             if progress_msg_id:
@@ -228,6 +232,7 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
         matched_skills=collector.matched_skills or None,
         ttfb_ms=collector.ttfb_ms,
         total_ms=collector.total_ms,
+        cards=collector.cards or None,
     )
     # 正常结束：把实时进度行更新为最终回复，复用同一行避免重复两条 assistant 消息
     if progress_msg_id:
@@ -268,6 +273,7 @@ async def _stream_completions(agent, messages, store, session_id: str, model: st
                             store, session_id, progress_msg_id,
                             collector.tool_steps or [], collector.a2ui or None,
                             collector.mcp_apps or None,
+                            collector.cards or None,
                         )
                     except Exception:
                         logger.exception("实时保存工具进度失败 session=%s", session_id)
@@ -294,6 +300,7 @@ async def _stream_completions(agent, messages, store, session_id: str, model: st
                     tool_steps=collector.tool_steps or [], a2ui=collector.a2ui or None,
                     mcp_apps=collector.mcp_apps or None,
                     matched_skills=collector.matched_skills or None,
+                    cards=collector.cards or None,
                 )
                 if progress_msg_id:
                     await store.update_message(progress_msg_id, session_id, stopped_msg)
@@ -313,6 +320,7 @@ async def _stream_completions(agent, messages, store, session_id: str, model: st
             tool_steps=collector.tool_steps or [], a2ui=collector.a2ui or None,
             mcp_apps=collector.mcp_apps or None,
             matched_skills=collector.matched_skills or None,
+            cards=collector.cards or None,
         )
         try:
             if progress_msg_id:
@@ -336,6 +344,7 @@ async def _stream_completions(agent, messages, store, session_id: str, model: st
             tool_steps=collector.tool_steps or [], a2ui=collector.a2ui or None,
             mcp_apps=collector.mcp_apps or None,
             matched_skills=collector.matched_skills or None,
+            cards=collector.cards or None,
         )
         # 正常结束：把实时进度行更新为最终回复，复用同一行避免重复两条 assistant 消息
         if progress_msg_id:

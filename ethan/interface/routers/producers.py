@@ -227,6 +227,9 @@ async def _run_generation(
     from ethan.core.stream_collector import StreamCollector
     from ethan.providers.base import InjectEvent, SkillsMatchedEvent, ThinkingEvent, ToolEvent
 
+    if session_id:
+        agent.session_id = session_id
+
     # consent provider 经 ContextVar 注入；本任务有独立 context，需在任务内设置。
     set_consent_provider(consent)
     # 「运行中补充信息」drainer 也经 ContextVar 注入：agent loop 每轮开头调它取走 inbox 内容。
