@@ -250,6 +250,8 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
             "prompt_tokens": agent.usage.input_tokens,
             "completion_tokens": agent.usage.output_tokens,
             "total_tokens": agent.usage.input_tokens + agent.usage.output_tokens,
+            "cache_tokens": agent.usage.cache_tokens,
+            "cached_tokens": agent.usage.cache_tokens,
         },
         "ethan": {"session_id": session_id},
     }
