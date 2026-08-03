@@ -194,11 +194,13 @@ title 决定文件名。禁止 `/`、`\`、连续 `-`、连续空格、前后空
 
 **2. heartbeat 指令**
 
-配置完成后，Agent 在 `{workspace}/system/heartbeat.md` 中追加一行（若已存在则跳过）：
+配置完成后，Agent 在 `{workspace}/system/heartbeat.md` 中追加一行（按 heartbeat 规范，若已存在 `[agent:work-notes]` 条目则跳过）：
 
-```markdown
-- 检查每日例行状态，按 work-notes 技能的「心跳检查流程」处理
 ```
+[agent:work-notes] 检查每日例行状态
+```
+
+> heartbeat 规范见 `{workspace}/system/heartbeat.md` 顶部注释。指令一行写完，具体流程在本 SKILL.md 的「心跳检查流程」中定义。
 
 **3. 状态文件**：`{workspace}/system/routine-state.json`
 
