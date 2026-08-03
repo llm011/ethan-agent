@@ -49,6 +49,10 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const messagesRef = useRef<Message[]>(messages);
   messagesRef.current = messages;
   const [streaming, setStreaming] = useState(false);
+  // streaming 的同步镜像：state 批处理有延迟，handleSend 用 ref 读取最新值，
+  // 避免刚切到新会话时旧 streaming=true 还没刷新就被 if(streaming) return 拦截
+  const streamingRef = useRef(false);
+  const _setStreaming = (v: boolean) => { streamingRef.current = v; setStreaming(v); };
   const [bgPolling, setBgPolling] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
   const [activeSession, setActiveSession] = useState<string | null>(null);
@@ -157,7 +161,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   // 构建 consumeStream 所需的 actions 对象
   const getStreamActions = (): ConsumeStreamActions => ({
     setMessages, setConsentRequest, setCleanupConfirm, setBgPolling,
-    setSessionTitle, setSessionUsage, setStopping, setStreaming,
+    setSessionTitle, setSessionUsage, setStopping, setStreaming: _setStreaming,
     activeSession,
   });
 
@@ -175,7 +179,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       setLoadingSession(false);
       // 重置 transient 状态：否则旧会话残留的 streaming=true 会让 handleSend
       // 的 `if (streaming) return;` 直接拦截，导致新会话无法创建（刷新才恢复）
-      setStreaming(false);
+      _setStreaming(false);
       setStopping(false);
       setBgPolling(null);
       setConsentRequest(null);
@@ -197,7 +201,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     inputStore.switchTo(initialSessionId, inputRef.current?.value);
 
     // 重置 transient 状态：防止旧会话的 streaming 残留阻塞新会话操作
-    setStreaming(false);
+    _setStreaming(false);
     setStopping(false);
     setBgPolling(null);
     setConsentRequest(null);
@@ -233,7 +237,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         setSessionUsage(historicUsage);
 
         if (detail.active_run) {
-          setStreaming(true);
+          _setStreaming(true);
           const stream = await streamResume(initialSessionId).catch(() => null);
           if (cancelled) return;
           if (stream) {
@@ -242,11 +246,11 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
               : loaded;
             await consumeStream(stream, base, {
               setMessages, setConsentRequest, setCleanupConfirm, setBgPolling,
-              setSessionTitle, setSessionUsage, setStopping, setStreaming,
+              setSessionTitle, setSessionUsage, setStopping, setStreaming: _setStreaming,
               activeSession: initialSessionId,
             });
           } else {
-            setStreaming(false);
+            _setStreaming(false);
             const fresh = await fetchSession(initialSessionId).catch(() => null);
             if (cancelled) return;
             if (fresh) {
@@ -326,7 +330,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
   const handleSend = async (text: string) => {
     if (!text.trim() && pendingFiles.length === 0) return;
-    if (streaming) return;
+    // 用 ref 读取最新值，避免 state 批处理延迟导致新会话被旧 streaming=true 拦截
+    if (streamingRef.current) return;
 
     const trimmed = text.trim();
     const isBtw = trimmed.toLowerCase().startsWith("/btw ");
@@ -334,7 +339,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     if (trimmed.startsWith("/") && !isBtw && !isReview) {
       await handleCommand(trimmed, {
         setMessages, setActiveSession, setSessionTitle,
-        setSessionUsage, setPendingFiles, setQuote, setStreaming,
+        setSessionUsage, setPendingFiles, setQuote, setStreaming: _setStreaming,
         selectedModel, mode, activeSession,
       });
       return;
@@ -344,14 +349,25 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
     let sessionId = activeSession;
     if (!sessionId) {
-      const s = await createSession(selectedModel, mode);
-      sessionId = s.id;
-      setActiveSession(s.id);
-      const pTitle = placeholderTitle(text);
-      setSessionTitle(pTitle);
-      window.dispatchEvent(new CustomEvent("session:title-updated", { detail: { sessionId: s.id, title: pTitle } }));
-      justFinishedRef.current = s.id;
-      window.history.replaceState(null, "", `/chat/${s.id}/`);
+      try {
+        const s = await createSession(selectedModel, mode);
+        sessionId = s.id;
+        setActiveSession(s.id);
+        const pTitle = placeholderTitle(text);
+        setSessionTitle(pTitle);
+        window.dispatchEvent(new CustomEvent("session:title-updated", { detail: { sessionId: s.id, title: pTitle } }));
+        justFinishedRef.current = s.id;
+        window.history.replaceState(null, "", `/chat/${s.id}/`);
+      } catch (e) {
+        // createSession 失败（网络抖动 / 后端 500 / model 参数非法）时给用户明确反馈，
+        // 否则 Promise rejection 被静默吞掉，用户只看到"点了没反应"
+        setMessages(prev => [...prev, {
+          role: "assistant",
+          content: `⚠️ 创建会话失败：${e instanceof Error ? e.message : "未知错误"}\n\n请重试，或检查后端服务是否正常。`,
+          created_at: Date.now() / 1000,
+        }]);
+        return;
+      }
     }
     let content = isBtw ? (btwQuestion ?? text) : text;
     if (isReview) {
@@ -402,7 +418,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     const sentQuote = quote;
     setPendingFiles([]);
     setQuote(null);
-    setStreaming(true);
+    _setStreaming(true);
 
     const chatMessages: ChatMessage[] = newMessages.map((m) => ({
       role: m.role,
@@ -416,7 +432,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     await consumeStream(
       streamChat(chatMessages, selectedModel, sessionId, { quote: sentQuote, mode, btw: isBtw, review: isReview }),
       newMessages,
-      { setMessages, setConsentRequest, setCleanupConfirm, setBgPolling, setSessionTitle, setSessionUsage, setStopping, setStreaming, activeSession: sessionId },
+      { setMessages, setConsentRequest, setCleanupConfirm, setBgPolling, setSessionTitle, setSessionUsage, setStopping, setStreaming: _setStreaming, activeSession: sessionId },
       true,
     );
   };
