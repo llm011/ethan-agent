@@ -257,7 +257,7 @@ function SearchResultList({ results }: { results: SearchResultCard[] }) {
             target="_blank"
             rel="noopener noreferrer"
             style={{ textDecoration: "none" }}
-            className="block w-[300px] flex-shrink-0 px-3 py-2 rounded-lg border border-border/60 bg-background no-underline hover:bg-muted/50 hover:border-border transition-colors group"
+            className="block w-[250px] min-w-[250px] max-w-[250px] flex-shrink-0 px-3 py-2 rounded-lg border border-border/60 bg-background no-underline hover:bg-muted/50 hover:border-border transition-colors group"
           >
             <div className="flex items-center gap-1.5 mb-1">
               {r.engine && (

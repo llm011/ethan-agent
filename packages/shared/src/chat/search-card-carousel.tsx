@@ -46,7 +46,7 @@ export function SearchCardCarousel({ cards }: SearchCardCarouselProps) {
             key={`${card.url}-${i}`}
             type="button"
             onClick={() => setOpenIndex(i)}
-            className="text-left bg-muted/50 border border-border/50 rounded-lg p-3 min-w-[280px] max-w-[280px] flex-shrink-0 hover:bg-muted hover:border-border transition-colors cursor-pointer"
+            className="text-left bg-muted/50 border border-border/50 rounded-lg p-3 w-[250px] min-w-[250px] max-w-[250px] flex-shrink-0 hover:bg-muted hover:border-border transition-colors cursor-pointer"
           >
             <div className="flex items-center gap-1.5 mb-1.5">
               <span className="inline-flex items-center rounded bg-primary/10 text-primary px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide">
