@@ -1,10 +1,11 @@
-"""Image Search Tool — 基于 SearXNG 的图片搜索工具。
+"""Image Search Tool — 基于 Wallhaven + SearXNG 的图片搜索工具。
 
 仅在配置了 SearXNG（config.tools.web_search.base_url 非空）且
 image_search_enabled=True 时启用（注册逻辑见 ethan/core/agent_factory.py）。
 
 特点：
-  - 调用 SearXNG images 分类，并行聚合 bing images / flickr / openverse / devicons 等引擎
+  - 并行查询 Wallhaven API（高质量壁纸）+ SearXNG images（通用图片）
+  - Wallhaven 结果优先排列（高清壁纸质量更高）
   - 默认只返回图片元数据（URL + 标题 + 来源 + 尺寸）
   - 可选 download=True：下载图片到本地临时目录，返回本地路径
     下载时会用真实 User-Agent + Referer 绕过部分防盗链
@@ -14,11 +15,11 @@ image_search_enabled=True 时启用（注册逻辑见 ethan/core/agent_factory.p
   - download=False（默认）：
       **标题**
       URL: https://example.com/image.jpg
-      来源: bing images | 尺寸: 1920x1080
+      来源: wallhaven | 尺寸: 1920x1080
   - download=True：
       **标题**
       本地路径: /tmp/ethan_images/img_xxxxxx.jpg
-      来源: bing images | 原始 URL: https://example.com/image.jpg
+      来源: wallhaven | 原始 URL: https://example.com/image.jpg
 """
 from __future__ import annotations
 
@@ -50,10 +51,11 @@ class ImageSearchTool(BaseTool):
     side_effect = True  # download=True 时会写文件
     name = "image_search"
     description = (
-        "Search for images on the web. Returns image URLs and metadata (title, source, dimensions). "
+        "Search for images on the web. Queries Wallhaven (high-quality wallpaper site, "
+        "sorted by favorites, SFW only) and SearXNG in parallel, Wallhaven results first. "
+        "Returns image URLs and metadata (title, source, dimensions). "
         "Optionally downloads images to local /tmp directory when download=true. "
-        "Requires SearXNG to be configured. "
-        "Use cases: find product photos, illustrations, logos, diagrams, etc."
+        "Use cases: find wallpapers, character art, landscapes, illustrations, logos, etc."
     )
     parameters = {
         "type": "object",
@@ -96,16 +98,30 @@ class ImageSearchTool(BaseTool):
             from ethan.core.config import get_config
             cfg = get_config().tools.web_search
 
-            if not cfg.base_url:
-                return (
-                    "Image search requires SearXNG to be configured. "
-                    "Please set SEARXNG_BASE_URL environment variable or "
-                    "configure tools.web_search.base_url in config.yaml."
-                )
-
             # 搜索图片（多取一些，过滤后取前 max_results）
             fetch_count = max_results * 3 if download else max_results
-            raw_results = await self._searxng_images(query, fetch_count, cfg.base_url, language)
+
+            # 并行查询：Wallhaven（高质量壁纸站，主力来源）+ SearXNG（补充来源）
+            wallhaven_task = self._wallhaven_search(query, fetch_count)
+            searxng_task = (
+                self._searxng_images(query, fetch_count, cfg.base_url, language)
+                if cfg.base_url
+                else None
+            )
+
+            if searxng_task:
+                wh_results, sx_results = await asyncio.gather(
+                    wallhaven_task, searxng_task, return_exceptions=True
+                )
+                wh_results = wh_results if isinstance(wh_results, list) else []
+                sx_results = sx_results if isinstance(sx_results, list) else []
+            else:
+                wh_results = await wallhaven_task
+                wh_results = wh_results if isinstance(wh_results, list) else []
+                sx_results = []
+
+            # 合并：Wallhaven 优先（高清壁纸），SearXNG 补充
+            raw_results = self._merge_results(wh_results, sx_results)
 
             if not raw_results:
                 return f"No images found for: {query}"
@@ -198,6 +214,66 @@ class ImageSearchTool(BaseTool):
                 "height": height,
             })
         return results
+
+    async def _wallhaven_search(self, query: str, max_results: int) -> list[dict]:
+        """调用 Wallhaven API 搜索高清壁纸。
+
+        Wallhaven 是高质量壁纸社区，默认 sorting=favorites（按收藏数排序，质量最高）、
+        purity=100（仅 SFW）。返回标准化结果列表，格式与 _searxng_images 一致。
+        可选环境变量 WALLHAVEN_API_KEY 提升速率限制（无 key 时 45 req/min）。
+        """
+        import os
+
+        url = "https://wallhaven.cc/api/v1/search"
+        params: dict = {
+            "q": query,
+            "sorting": "favorites",
+            "purity": "100",  # SFW only
+        }
+        api_key = os.environ.get("WALLHAVEN_API_KEY", "")
+        if api_key:
+            params["apikey"] = api_key
+
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(url, params=params)
+                resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            logger.warning("[ImageSearch] Wallhaven search failed: %s", e)
+            return []
+
+        results = []
+        for item in data.get("data", [])[:max_results]:
+            img_url = item.get("path", "")
+            if not img_url:
+                continue
+            wid = item.get("id", "")
+            file_size = item.get("file_size")
+            results.append({
+                "title": f"{query} #{wid}" if wid else query,
+                "url": img_url,
+                "source": "wallhaven",
+                "page_url": item.get("url", ""),
+                "width": item.get("dimension_x"),
+                "height": item.get("dimension_y"),
+                "size_kb": (file_size // 1024) if file_size else None,
+            })
+        return results
+
+    @staticmethod
+    def _merge_results(wallhaven: list[dict], searxng: list[dict]) -> list[dict]:
+        """合并两个来源的结果：Wallhaven 优先（高清壁纸），SearXNG 补充，按 URL 去重。"""
+        seen_urls: set[str] = set()
+        merged: list[dict] = []
+        for r in wallhaven + searxng:
+            url = r.get("url", "")
+            if url and url in seen_urls:
+                continue
+            if url:
+                seen_urls.add(url)
+            merged.append(r)
+        return merged
 
     @staticmethod
     def _parse_resolution(resolution) -> tuple[int | None, int | None]:
