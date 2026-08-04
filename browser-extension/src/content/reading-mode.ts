@@ -771,8 +771,72 @@
 
   // ========== Summary (with cache) ==========
 
+  let summaryCountdownTimer: ReturnType<typeof setInterval> | null = null;
+
   function requestSummary(target: HTMLElement) {
     if (summaryText) { target.innerHTML = renderMdSimple(summaryText); return; }
+    showSummaryCountdown(target);
+  }
+
+  function showSummaryCountdown(target: HTMLElement) {
+    // 清理可能残留的旧 timer，避免重复进入时 interval 泄漏
+    if (summaryCountdownTimer) { clearInterval(summaryCountdownTimer); summaryCountdownTimer = null; }
+    let remaining = 5;
+    const dark = isDarkMode();
+    // structured 标志：首次创建完整 DOM，后续只更新数字，避免每秒重建丢失按钮 focus
+    let structured = false;
+
+    const bindButtons = () => {
+      const cancelBtn = document.getElementById('__ethan_summary_cancel');
+      const startBtn = document.getElementById('__ethan_summary_start');
+      if (cancelBtn) cancelBtn.onclick = () => {
+        if (summaryCountdownTimer) { clearInterval(summaryCountdownTimer); summaryCountdownTimer = null; }
+        target.innerHTML = '<div style="text-align:center;padding:16px 0;color:' + (dark ? '#6b7280' : '#9ca3af') + ';font-size:12px">' +
+          '已取消自动解读 · <a id="__ethan_summary_retry" href="#" style="color:#0d9488;text-decoration:none">点此手动开始</a></div>';
+        structured = false;
+        const retry = document.getElementById('__ethan_summary_retry');
+        if (retry) retry.onclick = (e) => { e.preventDefault(); doRequestSummary(target); };
+      };
+      if (startBtn) startBtn.onclick = () => {
+        if (summaryCountdownTimer) { clearInterval(summaryCountdownTimer); summaryCountdownTimer = null; }
+        doRequestSummary(target);
+      };
+    };
+
+    const render = () => {
+      if (!structured) {
+        target.innerHTML = '<div style="text-align:center;padding:16px 0">' +
+          '<div style="font-size:13px;color:' + (dark ? '#9ca3af' : '#6b7280') + ';margin-bottom:12px">' +
+          '<span id="__ethan_summary_count" style="font-size:20px;font-weight:600;color:' + (dark ? '#e6e8ec' : '#1f2430') + '">' + remaining + '</span> 秒后开始解读文章</div>' +
+          '<div style="display:flex;gap:8px;justify-content:center">' +
+          '<button id="__ethan_summary_cancel" style="padding:6px 16px;border:1px solid ' + (dark ? '#4b5563' : '#d1d5db') + ';border-radius:8px;background:' + (dark ? '#2a2e37' : '#fff') + ';color:' + (dark ? '#e6e8ec' : '#374151') + ';font-size:12px;cursor:pointer">取消</button>' +
+          '<button id="__ethan_summary_start" style="padding:6px 16px;border:none;border-radius:8px;background:#0d9488;color:#fff;font-size:12px;cursor:pointer;font-weight:500">立即开始</button>' +
+          '</div></div>';
+        structured = true;
+        bindButtons();
+      } else {
+        // 只更新数字 span，不重建 DOM，保留按钮 focus 状态
+        const countEl = document.getElementById('__ethan_summary_count');
+        if (countEl) countEl.textContent = String(remaining);
+      }
+    };
+
+    render();
+    summaryCountdownTimer = setInterval(() => {
+      remaining--;
+      if (remaining <= 0) {
+        // 归零时先显示 0 一帧，再触发请求，避免用户看不到 0
+        const countEl = document.getElementById('__ethan_summary_count');
+        if (countEl) countEl.textContent = '0';
+        clearInterval(summaryCountdownTimer!); summaryCountdownTimer = null;
+        setTimeout(() => doRequestSummary(target), 250);
+      } else {
+        render();
+      }
+    }, 1000);
+  }
+
+  function doRequestSummary(target: HTMLElement) {
     const text = contentEl?.innerText || cleanedText;
     const prompt = '\u8fd9\u662f\u4e00\u7bc7\u6587\u7ae0\u7684\u6b63\u6587\uff0c\u8bf7\u7528\u4e2d\u6587\u56de\u590d\u3002\u8bf7\u4e25\u683c\u6309\u4ee5\u4e0b\u4e09\u4e2a\u90e8\u5206\u8f93\u51fa\uff1a\n\n## \u6982\u8ff0\n\u7528 1-2 \u53e5\u8bdd\u6982\u62ec\u6587\u7ae0\u4e3b\u65e8\u3002\n\n## \u7ed3\u6784\n\u5206\u5757\u5217\u51fa\u6587\u7ae0\u7ed3\u6784\uff08\u6bcf\u5757\u4e00\u884c\uff0c\u7528\u65e0\u5e8f\u5217\u8868\uff09\u3002\n\n## \u91cd\u70b9\n\u6307\u51fa 1-3 \u5904\u6700\u503c\u5f97\u5173\u6ce8\u7684\u5185\u5bb9\u3002\n\n\u6b63\u6587\u5982\u4e0b\uff1a\n\n' + text.slice(0, 8000);
     requestChat(prompt, target, {
@@ -1477,6 +1541,7 @@
     if (!active) return;
     active = false;
     panelCollapsed = false;
+    if (summaryCountdownTimer) { clearInterval(summaryCountdownTimer); summaryCountdownTimer = null; }
 
     // Final save
     if (contentEl) saveContent();
