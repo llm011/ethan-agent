@@ -104,8 +104,9 @@ def _persist_images_to_disk(msg: Message, session_id: str) -> list[str]:
         if not data:
             persisted.append(img)
             continue
-        path = save_image(session_id, idx, data, media_type)
-        persisted.append({"path": path, "media_type": media_type})
+        # save_image 返回 (路径, 实际 media_type)，缩放后可能变更
+        path, actual_media_type = save_image(session_id, idx, data, media_type)
+        persisted.append({"path": path, "media_type": actual_media_type})
         saved_paths.append(str(image_file_path(path)))
 
     msg.images = persisted
@@ -120,7 +121,8 @@ def _resolve_images_for_llm(messages: list[Message]) -> None:
 
     同时在消息末尾附加图片本地路径提示，让 agent 的工具模式能直接定位文件。
     当前消息的 base64 图片（data 字段）可能超限，需缩放；
-    历史消息的 path 图片在落盘时已缩放（save_image），直接读取即可。
+    历史消息的 path 图片落盘时已缩放（save_image），但兼容旧数据仍调用 downscale 做安全网
+    （对已缩放的图片 Pillow 只检查尺寸即返回，开销极低）。
     """
     from ethan.core.assets import downscale_image_b64, image_file_path, load_image_b64
 
@@ -133,12 +135,14 @@ def _resolve_images_for_llm(messages: list[Message]) -> None:
             if "data" in img:
                 # 当前消息的原始 base64 图片，落盘前缩放一次
                 data, downscaled = downscale_image_b64(img["data"], img.get("media_type", "image/png"))
-                resolved.append({"data": data, "media_type": "image/png" if downscaled else img.get("media_type", "image/png")})
+                resolved.append({"data": data, "media_type": img.get("media_type", "image/png")})
             elif "path" in img:
-                # 历史消息：落盘时已缩放，直接读取即可
+                # 历史消息：落盘时已缩放，但兼容旧数据（升级前未缩放）仍调用 downscale 做安全网
                 b64 = load_image_b64(img["path"])
                 if b64:
-                    resolved.append({"data": b64, "media_type": img.get("media_type", "image/png")})
+                    media_type = img.get("media_type", "image/png")
+                    data, downscaled = downscale_image_b64(b64, media_type)
+                    resolved.append({"data": data, "media_type": media_type})
                     file_paths.append(str(image_file_path(img["path"])))
                 # 文件不存在则跳过（不影响 LLM 调用）
             else:

@@ -88,11 +88,11 @@ interface EthanResultPanelApi {
       '<div id="' + PANEL_ID + '_head" style="display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid ' + (dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)') + ';flex-shrink:0;cursor:pointer;user-select:none">',
       '  <span style="font-size:15px">🦊</span>',
       '  <strong id="' + PANEL_ID + '_title" style="flex:1;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">结果</strong>',
-      '  <button id="' + PANEL_ID + '_prev" title="上一条" style="border:none;background:none;cursor:pointer;color:inherit;font-size:13px;padding:2px 5px;opacity:0.6" onclick="event.stopPropagation()">‹</button>',
+      '  <button id="' + PANEL_ID + '_prev" title="上一条" style="border:none;background:none;cursor:pointer;color:inherit;font-size:13px;padding:2px 5px;opacity:0.6">‹</button>',
       '  <span id="' + PANEL_ID + '_idx" style="font-size:11px;opacity:0.6;min-width:28px;text-align:center">-</span>',
-      '  <button id="' + PANEL_ID + '_next" title="下一条" style="border:none;background:none;cursor:pointer;color:inherit;font-size:13px;padding:2px 5px;opacity:0.6" onclick="event.stopPropagation()">›</button>',
+      '  <button id="' + PANEL_ID + '_next" title="下一条" style="border:none;background:none;cursor:pointer;color:inherit;font-size:13px;padding:2px 5px;opacity:0.6">›</button>',
       '  <span id="' + PANEL_ID + '_chevron" style="font-size:11px;opacity:0.6;transition:transform 0.2s;margin-left:2px">▼</span>',
-      '  <button id="' + PANEL_ID + '_close" title="关闭" style="border:none;background:none;cursor:pointer;color:inherit;font-size:14px;padding:2px 6px" onclick="event.stopPropagation()">✕</button>',
+      '  <button id="' + PANEL_ID + '_close" title="关闭" style="border:none;background:none;cursor:pointer;color:inherit;font-size:14px;padding:2px 6px">✕</button>',
       '</div>',
       // 可折叠主体 wrapper（body + actions + followup
       '<div id="' + PANEL_ID + '_bodyWrap" style="display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden;transition:flex 0.2s ease,min-height 0.2s ease">',
@@ -110,7 +110,8 @@ interface EthanResultPanelApi {
 
     document.documentElement.appendChild(host);
 
-    // header 点击折叠（按钮事件已 stopPropagation）
+    // header 点击折叠；按钮用 addEventListener + stopPropagation 防止冒泡触发折叠
+    // （不用 inline onclick，避免被严格 CSP 拦截）
     let collapsed = false;
     const head = host.querySelector('#' + PANEL_ID + '_head') as HTMLElement;
     const wrap = host.querySelector('#' + PANEL_ID + '_bodyWrap') as HTMLElement;
@@ -130,9 +131,12 @@ interface EthanResultPanelApi {
       });
     }
 
-    (host.querySelector('#' + PANEL_ID + '_close') as HTMLElement).onclick = hide;
-    (host.querySelector('#' + PANEL_ID + '_prev') as HTMLElement).onclick = () => nav(-1);
-    (host.querySelector('#' + PANEL_ID + '_next') as HTMLElement).onclick = () => nav(1);
+    const closeBtn = host.querySelector('#' + PANEL_ID + '_close') as HTMLElement;
+    if (closeBtn) { closeBtn.addEventListener('click', (e) => { e.stopPropagation(); hide(); }); }
+    const prevBtn = host.querySelector('#' + PANEL_ID + '_prev') as HTMLElement;
+    if (prevBtn) { prevBtn.addEventListener('click', (e) => { e.stopPropagation(); nav(-1); }); }
+    const nextBtn = host.querySelector('#' + PANEL_ID + '_next') as HTMLElement;
+    if (nextBtn) { nextBtn.addEventListener('click', (e) => { e.stopPropagation(); nav(1); }); }
     (host.querySelector('#' + PANEL_ID + '_copy') as HTMLElement).onclick = copyCur;
     (host.querySelector('#' + PANEL_ID + '_kb') as HTMLElement).onclick = saveKb;
 

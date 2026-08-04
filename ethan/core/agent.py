@@ -26,15 +26,17 @@ from ethan.tools.registry import ToolExecutor, ToolRegistry
 logger = logging.getLogger(__name__)
 
 
-# 图片类 400 错误：只匹配精确的 provider error code 和明确的尺寸超限措辞，
-# 避免误匹配包含 'image size' 的无关错误（如 rate-limit 消息引用 image processing）
+# 图片类 400 错误：匹配 provider error code 和明确的尺寸超限措辞。
+# 排除 'image size'（太模糊，rate-limit 消息可能包含），保留其他常见措辞。
 _IMAGE_ERROR_PATTERNS = (
     "image_dimension_exceeded",
+    "image too large",
+    "image dimension",
     "dimensions exceed",
     "dimensions exceeded",
     "max allowed size",
     "图片过大",
-    "图片尺寸超",
+    "图片尺寸",
 )
 
 
