@@ -27,6 +27,7 @@ _SLASH_COMMANDS = [
     ("/profile", "Show or switch user profile"),
     ("/config", "Edit settings interactively"),
     ("/token", "Show or rotate Web login token"),
+    ("/version", "Show current version"),
     ("/skills", "List installed skills"),
     ("/update", "Update Ethan Agent"),
     ("/compact", "Summarize history to free context"),
@@ -187,6 +188,7 @@ async def _handle_slash_command(cmd: str, store: SessionStore, session: Session,
   /profile [ID]  Show or switch user profile
   /config        Edit settings interactively
   /token [rotate]  Show or rotate Web login token
+  /version       Show current version
   /skills        List installed skills
   /update        Update Ethan Agent
   /help          Show this help[/dim]""")
@@ -262,6 +264,11 @@ async def _handle_slash_command(cmd: str, store: SessionStore, session: Session,
             console.print(f"Web 登录 Token: [cyan]{token}[/cyan]")
         if not arg:
             console.print("[dim]轮换: /token rotate[/dim]")
+        return None
+
+    elif command == "/version":
+        from ethan import __version__
+        console.print(f"Ethan Agent [cyan]v{__version__}[/cyan]")
         return None
 
     elif command == "/skills":
