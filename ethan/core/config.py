@@ -215,7 +215,7 @@ class WebSearchToolConfig(BaseModel):
     provider: str = "duckduckgo"  # "duckduckgo" | "tavily" | "searxng"
     api_key: str = ""  # tavily 用
     base_url: str = ""  # searxng 用，如 http://localhost:8888（自建）或第三方现成实例地址
-    image_search_enabled: bool = True  # 图片搜索工具开关；仅在 base_url 配置时生效
+    image_search_enabled: bool = True  # 图片搜索工具开关；Wallhaven 为主力来源，无需 SearXNG 也能用
 
 class KnowledgeConfig(BaseModel):
     backend: str = "filesystem"  # "filesystem" | "obsidian" | "external" | "notion"
@@ -310,6 +310,13 @@ def _default_config() -> dict:
             "fallback_model": os.environ.get("AGENT_FALLBACK_MODEL", ""),  # 主模型不可用时的兜底模型（模型 id，支持 provider/model）；空=不兜底
             "max_tokens": 8192,
             "max_tool_iterations": 100,
+        },
+        "tools": {
+            "web_search": {
+                # 图片搜索默认开启；Wallhaven 为主力来源，无需 SearXNG 也能用。
+                # 配置了 base_url 时会并行查询 SearXNG 作补充。
+                "image_search_enabled": True,
+            },
         },
     }
 

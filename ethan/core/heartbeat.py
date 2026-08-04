@@ -280,25 +280,24 @@ async def _tick() -> None:
             check_watchdog_health()
         except Exception:
             logger.exception("[Heartbeat] Watchdog health check failed")
-    # watchdog 存活后，其余任务串行执行：
-    # - 这些任务共享 SQLite 文件（sessions.db / memory.db），并行会出现
-    #   'recursive use of cursors not allowed' / 'database is locked' /
-    #   rotation 改名时 live writer 报 'no such table' 等问题。
-    # - _run_heartbeat_md() 的 agent 也会读写 session store 和 memory.db，
-    #   与 _rotate_session_dbs() / _cleanup_memory_db() 并行会冲突。
-    # - 串行执行恢复原有的顺序不变量，单任务失败不阻塞后续（各自有 try/except）。
-    sequential_tasks = [
-        ("profiles", _consolidate_profiles),
-        ("heartbeat.md", _run_heartbeat_md),
-        ("skills", _update_skills),
-        ("memory_db", _cleanup_memory_db),
-        ("session_dbs", _rotate_session_dbs),
-    ]
-    for name, coro_fn in sequential_tasks:
-        try:
-            await coro_fn()
-        except Exception as exc:
-            logger.exception("[Heartbeat] %s failed (uncaught)", name, exc_info=exc)
+    # watchdog 存活后，其余任务并行执行：
+    # - 画像压缩、heartbeat.md、skill 进化、db 清理、db 轮转之间无依赖
+    # - heartbeat.md 用主模型，skill 进化用 lite model，不抢同一 provider 配额
+    # - 各任务内部已有 try/except，return_exceptions=True 再兜一层防止单个失败阻塞其他
+    results = await asyncio.gather(
+        _consolidate_profiles(),
+        _run_heartbeat_md(),
+        _update_skills(),
+        _cleanup_memory_db(),
+        _rotate_session_dbs(),
+        return_exceptions=True,
+    )
+    for name, result in zip(
+        ["profiles", "heartbeat.md", "skills", "memory_db", "session_dbs"],
+        results,
+    ):
+        if isinstance(result, Exception):
+            logger.exception("[Heartbeat] %s failed (uncaught)", name, exc_info=result)
 
 
 async def _rotate_session_dbs() -> None:
