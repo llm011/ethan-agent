@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 # 图片类 400 错误：匹配 provider error code 和明确的尺寸超限措辞。
 # 排除 'image size'（太模糊，rate-limit 消息可能包含），保留其他常见措辞。
+# 另含 non-VLM 模型收到 image_url 时的反序列化错误（unknown variant image_url）。
 _IMAGE_ERROR_PATTERNS = (
     "image_dimension_exceeded",
     "image too large",
@@ -37,37 +38,68 @@ _IMAGE_ERROR_PATTERNS = (
     "max allowed size",
     "图片过大",
     "图片尺寸",
+    "unknown variant",   # non-VLM 模型拒绝 image_url content block
+    "image_url",         # image_url 反序列化失败
 )
 
 
 def _is_image_error(e: Exception) -> bool:
-    """判断异常是否为图片尺寸/体积超限类错误。"""
+    """判断异常是否为图片相关错误（尺寸超限 / non-VLM 模型拒绝 image_url）。"""
     msg = str(e).lower()
     return any(p in msg for p in _IMAGE_ERROR_PATTERNS)
 
 
-def _strip_images_from_messages(messages: list[Message]) -> bool:
-    """剥离所有消息中的图片数据，保留 content 中的 [image_paths: ...] 路径提示。
+def _save_msg_images_to_files(msg: Message, session_id: str) -> list[str]:
+    """把消息中的图片写入本地文件，返回绝对路径列表。
+
+    支持 {data: base64} 格式（工具截图）和 {path: ...} 格式（已持久化的历史图片）。
+    """
+    from ethan.core.assets import image_file_path, save_image
+
+    sid = session_id or "no_session"
+    paths: list[str] = []
+    for idx, img in enumerate(msg.images):
+        data = img.get("data", "")
+        media_type = img.get("media_type", "image/png")
+        if data:
+            rel_path, _ = save_image(sid, idx, data, media_type)
+            paths.append(str(image_file_path(rel_path)))
+        elif "path" in img:
+            paths.append(str(image_file_path(img["path"])))
+    return paths
+
+
+def _strip_images_from_messages(messages: list[Message], session_id: str = "") -> bool:
+    """把消息中的图片写入本地文件，并从上下文中移除内联图片数据。
+
+    用于：
+    - 模型不支持 VLM 时（proactive，调 provider 前做）
+    - provider 因图片超限 / non-VLM 拒绝返回 400 时（reactive）
+
+    图片写文件后，在 content 中附 [image_paths: ...] 路径提示，模型可通过
+    file_read / shell 工具读取本地文件自行处理。
 
     **不会 mutate 原 Message 对象**：对含图片的消息用 dataclasses.replace 创建浅拷贝，
     替换到 messages 列表中，确保 session 历史不受影响。
-
-    在 provider 因图片超限返回 400 时调用，让模型能通过工具读取本地文件自行处理。
-    返回 True 表示至少剥离了一张图片。
+    返回 True 表示至少处理了一张图片。
     """
     from dataclasses import replace  # noqa: PLC0415
 
     stripped = False
     for i, msg in enumerate(messages):
-        if msg.images:
-            stripped = True
-            # 提示追加到实际被剥离图片的消息上（而非固定追加到最后一条 user 消息）
+        if not msg.images:
+            continue
+        stripped = True
+        saved_paths = _save_msg_images_to_files(msg, session_id)
+        if saved_paths:
             hint = (
-                "\n\n[系统提示：附图因尺寸超过 API 限制已从上下文中移除，"
-                "但文件已保存在本地（路径见上方 image_paths 提示）。"
-                "可使用 file_read 或 shell 工具读取/缩放/处理。]"
+                "\n\n[系统提示：附图已从上下文中移除并保存为本地文件"
+                f"（image_paths: {', '.join(saved_paths)}）。"
+                "可使用 file_read 或 shell 工具读取/查看。]"
             )
-            messages[i] = replace(msg, images=[], content=(msg.content or "") + hint)
+        else:
+            hint = "\n\n[系统提示：附图已从上下文中移除。]"
+        messages[i] = replace(msg, images=[], content=(msg.content or "") + hint)
     return stripped
 
 
@@ -839,11 +871,11 @@ class Agent:
             try:
                 response = await provider.chat(working, tools=tools, system=sys)
             except Exception as e:
-                # 图片尺寸超限：剥离图片后重试一次
+                # 图片相关错误（尺寸超限 / non-VLM 拒绝 image_url）：写文件后重试一次
                 if _is_image_error(e) and not _image_stripped:
                     _image_stripped = True
-                    if _strip_images_from_messages(working):
-                        logger.warning("图片尺寸超限，剥离图片后重试: %s", e)
+                    if _strip_images_from_messages(working, self.session_id):
+                        logger.warning("图片相关错误，写文件后重试: %s", e)
                         response = await provider.chat(working, tools=tools, system=sys)
                     else:
                         raise
@@ -1145,13 +1177,13 @@ class Agent:
                         final_chunk = chunk
                         self.usage.add(chunk.usage)
             except Exception as e:
-                # 图片尺寸超限：剥离图片后重试一次。
+                # 图片相关错误（尺寸超限 / non-VLM 拒绝 image_url）：写文件后重试一次。
                 # 图片已落盘，[image_paths: ...] 路径提示已在 content 中，
                 # 模型可通过 file_read/shell 工具读取本地文件自行处理。
                 if _is_image_error(e) and not _image_stripped and not full_content:
                     _image_stripped = True
-                    if _strip_images_from_messages(working):
-                        logger.warning("图片尺寸超限，剥离图片后重试: %s", e)
+                    if _strip_images_from_messages(working, self.session_id):
+                        logger.warning("图片相关错误，写文件后重试: %s", e)
                         full_content = ""
                         final_chunk = None
                         async for chunk in provider.stream_chat(working, tools=tools, system=sys):

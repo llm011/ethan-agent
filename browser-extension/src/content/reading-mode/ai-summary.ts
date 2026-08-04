@@ -71,14 +71,14 @@
     let structured = false;
 
     const bindButtons = () => {
-      const cancelBtn = document.getElementById('__ethan_summary_cancel');
-      const startBtn = document.getElementById('__ethan_summary_start');
+      const cancelBtn = getPanelEl('__ethan_summary_cancel');
+      const startBtn = getPanelEl('__ethan_summary_start');
       if (cancelBtn) cancelBtn.onclick = () => {
         if (summaryCountdownTimer) { clearInterval(summaryCountdownTimer); summaryCountdownTimer = null; }
         target.innerHTML = '<div style="text-align:center;padding:16px 0;color:' + (dark ? '#6b7280' : '#9ca3af') + ';font-size:12px">' +
           '已取消自动解读 · <a id="__ethan_summary_retry" href="#" style="color:#0d9488;text-decoration:none">点此手动开始</a></div>';
         structured = false;
-        const retry = document.getElementById('__ethan_summary_retry');
+        const retry = getPanelEl('__ethan_summary_retry');
         if (retry) retry.onclick = (e) => { e.preventDefault(); doRequestSummary(target); };
       };
       if (startBtn) startBtn.onclick = () => {
@@ -100,7 +100,7 @@
         bindButtons();
       } else {
         // 只更新数字 span，不重建 DOM，保留按钮 focus 状态
-        const countEl = document.getElementById('__ethan_summary_count');
+        const countEl = getPanelEl('__ethan_summary_count');
         if (countEl) countEl.textContent = String(remaining);
       }
     };
@@ -110,8 +110,8 @@
       remaining--;
       if (remaining <= 0) {
         // 归零时先显示 0 一帧，再触发请求，避免用户看不到 0
-        const countEl = document.getElementById('__ethan_summary_count');
-        if (countEl) countEl.textContent = '0';
+        const countEl = getPanelEl('__ethan_summary_count');
+        if (countEl) countEl.textContent = String(remaining);
         clearInterval(summaryCountdownTimer!); summaryCountdownTimer = null;
         setTimeout(() => doRequestSummary(target), 250);
       } else {
@@ -135,7 +135,7 @@
 
   function saveKnowledge() {
     if (!contentEl) return;
-    const btn = document.getElementById('__ethan_reading_save_kb') as HTMLButtonElement | null;
+    const btn = getPanelEl('__ethan_reading_save_kb') as HTMLButtonElement | null;
     if (btn) { btn.disabled = true; btn.textContent = '\u4fdd\u5b58\u4e2d\u2026'; }
     const title = document.title || 'Untitled';
     const md = ethanReader().htmlToMarkdown(contentEl);

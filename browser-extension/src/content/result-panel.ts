@@ -62,7 +62,11 @@ interface EthanResultPanelApi {
     h = h.replace(/^# (.+)$/gm, '<h3 style="margin:10px 0 4px;font-size:15px;font-weight:700">$1</h3>');
     h = h.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
     h = h.replace(/`([^`]+?)`/g, '<code style="background:rgba(127,127,127,0.15);padding:1px 4px;border-radius:3px">$1</code>');
-    h = h.replace(/^[-*] (.+)$/gm, '<div style="padding-left:12px;margin:2px 0">• $1</div>');
+    h = h.replace(/^[-*•]\s*(.+)$/gm, '<div style="padding-left:12px;margin:2px 0">• $1</div>');
+    h = h.replace(/^(\d+)\.\s*(.+)$/gm, '<div style="padding-left:12px;margin:2px 0"><span style="color:#0d9488;font-weight:500">$1.</span> $2</div>');
+    h = h.replace(/(<\/(?:h3|h4|div|pre)>)\s*\n+/gi, '$1');
+    h = h.replace(/\n+\s*(<(?:h3|h4|div|pre)[\s>])/gi, '$1');
+    h = h.replace(/\n{2,}/g, '\n');
     h = h.replace(/\n/g, '<br>');
     return h;
   }

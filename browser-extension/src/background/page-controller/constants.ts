@@ -1,0 +1,11 @@
+export const COORDINATE_SPACE = 'viewport-css-pixel';
+export const DEFAULT_SCREENSHOT_FORMAT = 'webp';
+export const KEY_MODIFIER_ALT = 1;
+export const KEY_MODIFIER_CTRL = 2;
+export const KEY_MODIFIER_META = 4;
+export const KEY_MODIFIER_SHIFT = 8;
+export const READY_POLL_INTERVAL_MS = 100;
+export const READY_TIMEOUT_MS = 10_000;
+export const NETWORK_IDLE_EXTRA_WAIT_MS = 500;
+export const DEFAULT_MOUSE_X = 0;
+export const DEFAULT_MOUSE_Y = 0;

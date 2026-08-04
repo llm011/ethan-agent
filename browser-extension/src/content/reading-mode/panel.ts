@@ -14,93 +14,132 @@
     Object.assign(panel.style, {
       position: 'fixed', top: '0', right: '0', width: PANEL_WIDTH + 'px', height: '100vh',
       zIndex: String(Z_PANEL), overflow: 'hidden',
-      background: dark ? '#1c1f26' : '#fafafa',
-      color: dark ? '#e6e8ec' : '#1f2430',
-      borderLeft: '1px solid ' + (dark ? '#333' : '#e5e7eb'),
-      boxShadow: '-4px 0 24px rgba(0,0,0,0.1)',
-      padding: '16px 14px', fontFamily: '-apple-system, system-ui, "PingFang SC", sans-serif',
-      fontSize: '13px', lineHeight: '1.6',
-      display: 'flex', flexDirection: 'column',
+      boxSizing: 'border-box', margin: '0', padding: '0',
       transform: 'translateX(100%)', transition: 'transform 0.3s cubic-bezier(0.4,0,0.2,1)',
     });
+
+    // Shadow DOM for complete style isolation (protects panel from host CSS & protects host page)
+    const shadow = panel.attachShadow({ mode: 'open' });
 
     const charCount = (contentEl?.innerText || '').length;
     const formattedChar = charCount > 10000 ? (charCount / 10000).toFixed(1) + '万' : charCount.toLocaleString();
     const readTime = estimateReadTime(contentEl?.innerText || '');
 
-    panel.innerHTML = [
-      '<!-- Header -->',
-      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-shrink:0">',
-      '  <div style="display:flex;align-items:center;gap:6px;min-width:0;flex:1">',
-      '    <div style="width:7px;height:7px;border-radius:50%;background:#0d9488;flex-shrink:0"></div>',
-      '    <strong style="font-size:14px;font-weight:600;flex-shrink:0">辅助阅读</strong>',
-      '    <span style="font-size:11px;color:' + (dark ? '#6b7280' : '#9ca3af') + ';white-space:nowrap;overflow:hidden;text-overflow:ellipsis">约 ' + formattedChar + ' 字 · ' + readTime + '分钟</span>',
-      '  </div>',
-      '  <div style="display:flex;gap:4px;align-items:center;position:relative;flex-shrink:0">',
-      '    <button id="__ethan_reading_settings_toggle" style="border:none;background:' + (dark ? '#2a2e37' : '#f3f4f6') + ';cursor:pointer;font-size:13px;padding:4px 7px;border-radius:6px;color:inherit" title="设置与更多">⚙</button>',
-      '    <button id="__ethan_reading_collapse" style="border:none;background:' + (dark ? '#2a2e37' : '#f3f4f6') + ';cursor:pointer;font-size:13px;padding:4px 7px;border-radius:6px;color:inherit" title="折叠">❯</button>',
-      '    <button id="__ethan_reading_close" style="border:none;background:' + (dark ? '#2a2e37' : '#f3f4f6') + ';cursor:pointer;font-size:13px;padding:4px 7px;border-radius:6px;color:inherit" title="退出 (Esc)">✕</button>',
-      '    <!-- Popover Settings Menu -->',
-      '    <div id="__ethan_reading_settings_menu" style="display:none;position:absolute;top:30px;right:0;z-index:20;width:190px;padding:6px;border-radius:10px;background:' + (dark ? '#2a2e37' : '#fff') + ';border:1px solid ' + (dark ? '#374151' : '#e5e7eb') + ';box-shadow:0 10px 25px rgba(0,0,0,0.15)">',
-      '      <button id="__ethan_reading_clear_cache" style="width:100%;text-align:left;padding:8px 10px;border:none;background:none;border-radius:6px;font-size:12px;cursor:pointer;color:' + (dark ? '#e6e8ec' : '#374151') + ';display:flex;align-items:center;gap:6px">',
-      '        <span>🔄</span> <span>清除缓存（重新加载）</span>',
-      '      </button>',
-      '      <div style="margin-top:4px;padding:6px 10px;border-top:1px solid ' + (dark ? '#374151' : '#f3f4f6') + ';font-size:11px;color:' + (dark ? '#6b7280' : '#9ca3af') + '">',
-      '        💡 正文可直接编辑 · Esc 退出',
-      '      </div>',
+    const styleBlock = [
+      '<style>',
+      '  * {',
+      '    box-sizing: border-box !important;',
+      '    margin: 0;',
+      '    padding: 0;',
+      '    font-family: -apple-system, system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;',
+      '    line-height: 1.5;',
+      '    -webkit-font-smoothing: antialiased;',
+      '  }',
+      '  button, input, textarea {',
+      '    font-family: inherit;',
+      '    font-size: inherit;',
+      '  }',
+      '  button {',
+      '    background: none;',
+      '    border: none;',
+      '    cursor: pointer;',
+      '  }',
+      '  textarea {',
+      '    outline: none;',
+      '  }',
+      '  ::-webkit-scrollbar {',
+      '    width: 4px;',
+      '    height: 4px;',
+      '  }',
+      '  ::-webkit-scrollbar-track {',
+      '    background: transparent;',
+      '  }',
+      '  ::-webkit-scrollbar-thumb {',
+      '    background: rgba(150, 150, 150, 0.3);',
+      '    border-radius: 4px;',
+      '  }',
+      '  ::-webkit-scrollbar-thumb:hover {',
+      '    background: rgba(150, 150, 150, 0.5);',
+      '  }',
+      '</style>',
+    ].join('\n');
+
+    shadow.innerHTML = [
+      styleBlock,
+      '<div style="display:flex;flex-direction:column;height:100vh;width:100%;padding:16px 14px;background:' + (dark ? '#1c1f26' : '#fafafa') + ';color:' + (dark ? '#e6e8ec' : '#1f2430') + ';border-left:1px solid ' + (dark ? '#333' : '#e5e7eb') + ';box-shadow:-4px 0 24px rgba(0,0,0,0.1);font-size:13px;line-height:1.6;overflow:hidden;box-sizing:border-box">',
+      '  <!-- Header -->',
+      '  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-shrink:0">',
+      '    <div style="display:flex;align-items:center;gap:6px;min-width:0;flex:1">',
+      '      <div style="width:7px;height:7px;border-radius:50%;background:#0d9488;flex-shrink:0"></div>',
+      '      <strong style="font-size:14px;font-weight:600;flex-shrink:0">辅助阅读</strong>',
+      '      <span style="font-size:11px;color:' + (dark ? '#6b7280' : '#9ca3af') + ';white-space:nowrap;overflow:hidden;text-overflow:ellipsis">约 ' + formattedChar + ' 字 · ' + readTime + '分钟</span>',
       '    </div>',
-      '  </div>',
-      '</div>',
-      '<!-- Segmented Control Bar -->',
-      '<div style="display:flex;padding:3px;border-radius:10px;background:' + (dark ? '#2a2e37' : '#f3f4f6') + ';margin-bottom:12px;flex-shrink:0">',
-      '  <button class="__ethan_main_tab" data-tab="summary" style="flex:1;padding:6px 0;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;background:' + (dark ? '#1c1f26' : '#fff') + ';color:#0d9488;box-shadow:0 1px 3px rgba(0,0,0,0.08);transition:all 0.2s">AI 解读</button>',
-      '  <button class="__ethan_main_tab" data-tab="toc" style="flex:1;padding:6px 0;border:none;border-radius:8px;font-size:12px;font-weight:500;cursor:pointer;background:none;color:' + (dark ? '#9ca3af' : '#6b7280') + ';transition:all 0.2s">目录</button>',
-      '  <button class="__ethan_main_tab" data-tab="anno" style="flex:1;padding:6px 0;border:none;border-radius:8px;font-size:12px;font-weight:500;cursor:pointer;background:none;color:' + (dark ? '#9ca3af' : '#6b7280') + ';transition:all 0.2s">标注 <span id="__ethan_anno_count_badge" style="font-size:10px;padding:1px 5px;border-radius:10px;background:' + (dark ? '#374151' : '#e5e7eb') + ';color:inherit">0</span></button>',
-      '</div>',
-      '<!-- Main Scrollable Body -->',
-      '<div style="flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden">',
-      '  <div style="flex:1;min-height:0;overflow-y:auto;padding-right:2px">',
-      '    <!-- Tab 1: AI 解读 -->',
-      '    <div id="__ethan_tab_summary" style="display:block">',
-      '      <div style="padding:12px;border-radius:12px;background:' + (dark ? '#222630' : '#fff') + ';border:1px solid ' + (dark ? '#333' : '#e5e7eb') + ';box-shadow:0 1px 4px rgba(0,0,0,0.03)">',
-      '        <div style="display:flex;gap:12px;margin-bottom:10px;border-bottom:1px solid ' + (dark ? '#2a2e37' : '#f3f4f6') + ';padding-bottom:8px">',
-      '          <button class="__ethan_sum_tab" data-section="overview" style="border:none;background:none;padding:2px 0;font-size:12px;font-weight:600;letter-spacing:0.5px;cursor:pointer;color:#0d9488;border-bottom:2px solid #0d9488">概述</button>',
-      '          <button class="__ethan_sum_tab" data-section="structure" style="border:none;background:none;padding:2px 0;font-size:12px;font-weight:600;letter-spacing:0.5px;cursor:pointer;color:' + (dark ? '#6b7280' : '#9ca3af') + ';border-bottom:2px solid transparent">结构</button>',
-      '          <button class="__ethan_sum_tab" data-section="keypoints" style="border:none;background:none;padding:2px 0;font-size:12px;font-weight:600;letter-spacing:0.5px;cursor:pointer;color:' + (dark ? '#6b7280' : '#9ca3af') + ';border-bottom:2px solid transparent">重点</button>',
+      '    <div style="display:flex;gap:4px;align-items:center;position:relative;flex-shrink:0">',
+      '      <button id="__ethan_reading_settings_toggle" style="border:none;background:' + (dark ? '#2a2e37' : '#f3f4f6') + ';cursor:pointer;font-size:13px;padding:4px 7px;border-radius:6px;color:inherit" title="设置与更多">⚙</button>',
+      '      <button id="__ethan_reading_collapse" style="border:none;background:' + (dark ? '#2a2e37' : '#f3f4f6') + ';cursor:pointer;font-size:13px;padding:4px 7px;border-radius:6px;color:inherit" title="折叠">❯</button>',
+      '      <button id="__ethan_reading_close" style="border:none;background:' + (dark ? '#2a2e37' : '#f3f4f6') + ';cursor:pointer;font-size:13px;padding:4px 7px;border-radius:6px;color:inherit" title="退出 (Esc)">✕</button>',
+      '      <!-- Popover Settings Menu -->',
+      '      <div id="__ethan_reading_settings_menu" style="display:none;position:absolute;top:30px;right:0;z-index:20;width:190px;padding:6px;border-radius:10px;background:' + (dark ? '#2a2e37' : '#fff') + ';border:1px solid ' + (dark ? '#374151' : '#e5e7eb') + ';box-shadow:0 10px 25px rgba(0,0,0,0.15)">',
+      '        <button id="__ethan_reading_clear_cache" style="width:100%;text-align:left;padding:8px 10px;border:none;background:none;border-radius:6px;font-size:12px;cursor:pointer;color:' + (dark ? '#e6e8ec' : '#374151') + ';display:flex;align-items:center;gap:6px">',
+      '          <span>🔄</span> <span>清除缓存（重新加载）</span>',
+      '        </button>',
+      '        <div style="margin-top:4px;padding:6px 10px;border-top:1px solid ' + (dark ? '#374151' : '#f3f4f6') + ';font-size:11px;color:' + (dark ? '#6b7280' : '#9ca3af') + '">',
+      '          💡 正文可直接编辑 · Esc 退出',
       '        </div>',
-      '        <div id="__ethan_reading_summary_content" style="font-size:13px;max-height:360px;overflow-y:auto;scroll-behavior:smooth;position:relative"></div>',
       '      </div>',
       '    </div>',
-      '    <!-- Tab 2: 目录 -->',
-      '    <div id="__ethan_tab_toc" style="display:none">',
-      '      <div style="padding:10px 12px;border-radius:12px;background:' + (dark ? '#222630' : '#fff') + ';border:1px solid ' + (dark ? '#333' : '#e5e7eb') + '">',
-      '        <div id="__ethan_reading_toc" style="max-height:380px;overflow-y:auto"></div>',
-      '      </div>',
-      '    </div>',
-      '    <!-- Tab 3: 标注 -->',
-      '    <div id="__ethan_tab_anno" style="display:none">',
-      '      <div style="padding:12px;border-radius:12px;background:' + (dark ? '#222630' : '#fff') + ';border:1px solid ' + (dark ? '#333' : '#e5e7eb') + '">',
-      '        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">',
-      '          <div style="font-weight:600;font-size:12px;color:' + (dark ? '#9ca3af' : '#6b7280') + '">标注与书签</div>',
-      '          <div id="__ethan_reading_anno_filter" style="display:flex;gap:4px"></div>',
+      '  </div>',
+      '  <!-- Segmented Control Bar -->',
+      '  <div style="display:flex;padding:3px;border-radius:10px;background:' + (dark ? '#2a2e37' : '#f3f4f6') + ';margin-bottom:12px;flex-shrink:0">',
+      '    <button class="__ethan_main_tab" data-tab="summary" style="flex:1;padding:6px 0;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;background:' + (dark ? '#1c1f26' : '#fff') + ';color:#0d9488;box-shadow:0 1px 3px rgba(0,0,0,0.08);transition:all 0.2s">AI 解读</button>',
+      '    <button class="__ethan_main_tab" data-tab="toc" style="flex:1;padding:6px 0;border:none;border-radius:8px;font-size:12px;font-weight:500;cursor:pointer;background:none;color:' + (dark ? '#9ca3af' : '#6b7280') + ';transition:all 0.2s">目录</button>',
+      '    <button class="__ethan_main_tab" data-tab="anno" style="flex:1;padding:6px 0;border:none;border-radius:8px;font-size:12px;font-weight:500;cursor:pointer;background:none;color:' + (dark ? '#9ca3af' : '#6b7280') + ';transition:all 0.2s">标注 <span id="__ethan_anno_count_badge" style="font-size:10px;padding:1px 5px;border-radius:10px;background:' + (dark ? '#374151' : '#e5e7eb') + ';color:inherit">0</span></button>',
+      '  </div>',
+      '  <!-- Main Scrollable Body -->',
+      '  <div style="flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden">',
+      '    <div style="flex:1;min-height:0;overflow-y:auto;padding-right:2px">',
+      '      <!-- Tab 1: AI 解读 -->',
+      '      <div id="__ethan_tab_summary" style="display:block">',
+      '        <div style="padding:12px;border-radius:12px;background:' + (dark ? '#222630' : '#fff') + ';border:1px solid ' + (dark ? '#333' : '#e5e7eb') + ';box-shadow:0 1px 4px rgba(0,0,0,0.03)">',
+      '          <div style="display:flex;gap:12px;margin-bottom:10px;border-bottom:1px solid ' + (dark ? '#2a2e37' : '#f3f4f6') + ';padding-bottom:8px">',
+      '            <button class="__ethan_sum_tab" data-section="overview" style="border:none;background:none;padding:2px 0;font-size:12px;font-weight:600;letter-spacing:0.5px;cursor:pointer;color:#0d9488;border-bottom:2px solid #0d9488">概述</button>',
+      '            <button class="__ethan_sum_tab" data-section="structure" style="border:none;background:none;padding:2px 0;font-size:12px;font-weight:600;letter-spacing:0.5px;cursor:pointer;color:' + (dark ? '#6b7280' : '#9ca3af') + ';border-bottom:2px solid transparent">结构</button>',
+      '            <button class="__ethan_sum_tab" data-section="keypoints" style="border:none;background:none;padding:2px 0;font-size:12px;font-weight:600;letter-spacing:0.5px;cursor:pointer;color:' + (dark ? '#6b7280' : '#9ca3af') + ';border-bottom:2px solid transparent">重点</button>',
+      '          </div>',
+      '          <div id="__ethan_reading_summary_content" style="font-size:13px;max-height:300px;overflow-y:auto;scroll-behavior:smooth;position:relative"></div>',
       '        </div>',
-      '        <div id="__ethan_reading_anno_list" style="max-height:340px;overflow-y:auto"></div>',
+      '      </div>',
+      '      <!-- Tab 2: 目录 -->',
+      '      <div id="__ethan_tab_toc" style="display:none">',
+      '        <div style="padding:10px 12px;border-radius:12px;background:' + (dark ? '#222630' : '#fff') + ';border:1px solid ' + (dark ? '#333' : '#e5e7eb') + '">',
+      '          <div id="__ethan_reading_toc" style="max-height:320px;overflow-y:auto"></div>',
+      '        </div>',
+      '      </div>',
+      '      <!-- Tab 3: 标注 -->',
+      '      <div id="__ethan_tab_anno" style="display:none">',
+      '        <div style="padding:12px;border-radius:12px;background:' + (dark ? '#222630' : '#fff') + ';border:1px solid ' + (dark ? '#333' : '#e5e7eb') + '">',
+      '          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">',
+      '            <div style="font-weight:600;font-size:12px;color:' + (dark ? '#9ca3af' : '#6b7280') + '">标注与书签</div>',
+      '            <div id="__ethan_reading_anno_filter" style="display:flex;gap:4px"></div>',
+      '          </div>',
+      '          <div id="__ethan_reading_anno_list" style="max-height:300px;overflow-y:auto"></div>',
+      '        </div>',
+      '      </div>',
+      '    </div>',
+      '    <!-- QA Section ("向 Ethan 提问") -->',
+      '    <div style="margin-top:10px;padding:10px 12px;border-radius:12px;background:' + (dark ? '#222630' : '#fff') + ';border:1px solid ' + (dark ? '#333' : '#e5e7eb') + ';flex-shrink:0">',
+      '      <div style="font-weight:600;font-size:12px;color:' + (dark ? '#9ca3af' : '#6b7280') + ';margin-bottom:6px">向 Ethan 提问</div>',
+      '      <div id="__ethan_reading_chat_log" style="max-height:120px;overflow-y:auto;margin-bottom:6px"></div>',
+      '      <div style="display:flex;gap:6px;align-items:flex-end">',
+      '        <textarea id="__ethan_reading_chat_input" rows="1" placeholder="就这篇文章提问…" style="flex:1;resize:none;padding:7px 9px;border-radius:8px;border:1px solid ' + (dark ? '#374151' : '#e5e7eb') + ';background:' + (dark ? '#1c1f26' : '#fafafa') + ';color:inherit;font-size:12px;font-family:inherit;line-height:1.4;max-height:72px;outline:none"></textarea>',
+      '        <button id="__ethan_reading_chat_send" style="flex:none;padding:6px 12px;border:none;border-radius:8px;background:#0d9488;color:#fff;font-size:12px;font-weight:500;cursor:pointer;transition:opacity 0.2s">发送</button>',
       '      </div>',
       '    </div>',
       '  </div>',
-      '  <!-- QA Section ("向 Ethan 提问") -->',
-      '  <div style="margin-top:12px;padding:12px;border-radius:12px;background:' + (dark ? '#222630' : '#fff') + ';border:1px solid ' + (dark ? '#333' : '#e5e7eb') + ';flex-shrink:0">',
-      '    <div style="font-weight:600;font-size:12px;color:' + (dark ? '#9ca3af' : '#6b7280') + ';margin-bottom:6px">向 Ethan 提问</div>',
-      '    <div id="__ethan_reading_chat_log" style="max-height:160px;overflow-y:auto;margin-bottom:8px"></div>',
-      '    <div style="display:flex;gap:6px;align-items:flex-end">',
-      '      <textarea id="__ethan_reading_chat_input" rows="1" placeholder="就这篇文章提问…" style="flex:1;resize:none;padding:8px 10px;border-radius:8px;border:1px solid ' + (dark ? '#374151' : '#e5e7eb') + ';background:' + (dark ? '#1c1f26' : '#fafafa') + ';color:inherit;font-size:12px;font-family:inherit;line-height:1.4;max-height:80px;outline:none"></textarea>',
-      '      <button id="__ethan_reading_chat_send" style="flex:none;padding:7px 14px;border:none;border-radius:8px;background:#0d9488;color:#fff;font-size:12px;font-weight:500;cursor:pointer;transition:opacity 0.2s">发送</button>',
-      '    </div>',
+      '  <!-- Footer Action Bar -->',
+      '  <div style="padding-top:10px;margin-top:10px;border-top:1px solid ' + (dark ? '#333' : '#e5e7eb') + ';flex-shrink:0">',
+      '    <button id="__ethan_reading_save_kb" style="width:100%;padding:9px;border:none;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;background:linear-gradient(135deg,#0d9488,#06b6d4);color:#fff;box-shadow:0 2px 8px rgba(13,148,136,0.25);transition:opacity 0.2s">存知识库</button>',
       '  </div>',
-      '</div>',
-      '<!-- Footer Action Bar -->',
-      '<div style="padding-top:12px;margin-top:12px;border-top:1px solid ' + (dark ? '#333' : '#e5e7eb') + ';flex-shrink:0">',
-      '  <button id="__ethan_reading_save_kb" style="width:100%;padding:10px;border:none;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;background:linear-gradient(135deg,#0d9488,#06b6d4);color:#fff;box-shadow:0 2px 8px rgba(13,148,136,0.25);transition:opacity 0.2s">存知识库</button>',
       '</div>',
     ].join('\n');
 
@@ -112,12 +151,12 @@
     refreshAnnotations();
 
     // Header & Settings Events
-    document.getElementById('__ethan_reading_close')!.onclick = exitReading;
-    document.getElementById('__ethan_reading_collapse')!.onclick = collapsePanel;
-    document.getElementById('__ethan_reading_save_kb')!.onclick = saveKnowledge;
+    getPanelEl('__ethan_reading_close')!.onclick = exitReading;
+    getPanelEl('__ethan_reading_collapse')!.onclick = collapsePanel;
+    getPanelEl('__ethan_reading_save_kb')!.onclick = saveKnowledge;
 
-    const settingsBtn = document.getElementById('__ethan_reading_settings_toggle');
-    const settingsMenu = document.getElementById('__ethan_reading_settings_menu');
+    const settingsBtn = getPanelEl('__ethan_reading_settings_toggle');
+    const settingsMenu = getPanelEl('__ethan_reading_settings_menu');
     if (settingsBtn && settingsMenu) {
       settingsBtn.onclick = (e) => {
         e.stopPropagation();
@@ -130,7 +169,7 @@
       });
     }
 
-    document.getElementById('__ethan_reading_clear_cache')!.onclick = () => {
+    getPanelEl('__ethan_reading_clear_cache')!.onclick = () => {
       chrome.storage.local.remove([storageKey()], () => {
         showToast('已清除缓存');
         exitReading();
@@ -139,10 +178,10 @@
     };
 
     // Main Tab Bar Switching
-    panel.querySelectorAll<HTMLButtonElement>('.__ethan_main_tab').forEach(tab => {
+    shadow.querySelectorAll<HTMLButtonElement>('.__ethan_main_tab').forEach(tab => {
       tab.onclick = () => {
         const targetTab = tab.dataset.tab;
-        panel.querySelectorAll<HTMLButtonElement>('.__ethan_main_tab').forEach(t => {
+        shadow.querySelectorAll<HTMLButtonElement>('.__ethan_main_tab').forEach(t => {
           const active = t.dataset.tab === targetTab;
           t.style.background = active ? (dark ? '#1c1f26' : '#fff') : 'none';
           t.style.color = active ? '#0d9488' : (dark ? '#9ca3af' : '#6b7280');
@@ -151,7 +190,7 @@
         });
 
         ['summary', 'toc', 'anno'].forEach(t => {
-          const el = document.getElementById('__ethan_tab_' + t);
+          const el = getPanelEl('__ethan_tab_' + t);
           if (el) el.style.display = t === targetTab ? 'block' : 'none';
         });
       };
@@ -159,12 +198,12 @@
 
     // Summary sub-tab clicks → scroll to section anchors
     const dark2 = isDarkMode();
-    panel.querySelectorAll<HTMLButtonElement>('.__ethan_sum_tab').forEach(tab => {
+    shadow.querySelectorAll<HTMLButtonElement>('.__ethan_sum_tab').forEach(tab => {
       tab.onclick = () => {
         const section = tab.dataset.section;
-        const container = document.getElementById('__ethan_reading_summary_content');
+        const container = getPanelEl('__ethan_reading_summary_content');
         if (!container) return;
-        panel.querySelectorAll<HTMLButtonElement>('.__ethan_sum_tab').forEach(t => {
+        shadow.querySelectorAll<HTMLButtonElement>('.__ethan_sum_tab').forEach(t => {
           t.style.color = dark2 ? '#6b7280' : '#9ca3af';
           t.style.borderBottomColor = 'transparent';
         });

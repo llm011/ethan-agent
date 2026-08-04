@@ -14,3 +14,11 @@
     for (let i = 0; i < currentUrl.length; i++) hash = ((hash << 5) - hash + currentUrl.charCodeAt(i)) | 0;
     return 'reading_' + Math.abs(hash).toString(36);
   }
+
+  function getPanelEl(id: string): HTMLElement | null {
+    const panel = document.getElementById(PANEL_ID);
+    if (panel && panel.shadowRoot) {
+      return (panel.shadowRoot.getElementById(id) as HTMLElement | null) || document.getElementById(id);
+    }
+    return document.getElementById(id);
+  }

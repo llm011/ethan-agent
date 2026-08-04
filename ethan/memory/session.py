@@ -637,10 +637,13 @@ class SessionStore:
                           source: str = "", mode: str | None = None,
                           exclude_sources: list[str] | None = None,
                           exclude_title_prefixes: list[str] | None = None,
-                          include_title_prefixes: list[str] | None = None) -> list[Session]:
+                          include_title_prefixes: list[str] | None = None,
+                          has_images: bool = False) -> list[Session]:
         """最近会话列表。source 非空时按渠道过滤；mode 非 None 时按对话模式过滤
         （传空串可筛默认模式会话）。exclude_sources 排除指定渠道。过滤在 SQL 层做，分页对过滤后结果生效。
-        include_title_prefixes 非空时只保留标题以任一前缀开头的会话（OR 关系）。"""
+        include_title_prefixes 非空时只保留标题以任一前缀开头的会话（OR 关系）。
+        has_images=True 时只返回含图片消息的会话（EXISTS 子查询，仅在开启时付出成本）。
+        每行附带 first_query（第一条 user 消息前 80 字）填入 snippet，供列表卡片预览。"""
         where = []
         params: list = []
         if source:
@@ -661,20 +664,27 @@ class SessionStore:
             ors = " OR ".join("title LIKE ?" for _ in include_title_prefixes)
             where.append(f"({ors})")
             params.extend(f"{prefix}%" for prefix in include_title_prefixes)
+        if has_images:
+            # EXISTS 短路：找到第一条 images 非空即命中，不走全表
+            where.append("EXISTS (SELECT 1 FROM messages m WHERE m.session_id = sessions.id AND m.images IS NOT NULL AND m.images != '[]' AND m.images != '')")
         where_sql = (" WHERE " + " AND ".join(where)) if where else ""
         params.extend([limit, offset])
         sessions = []
+        # first_query 子查询：每行一次索引查找，取第一条 user 消息前 80 字填 snippet
         async with self._db.execute(
-            "SELECT id, title, model, created_at, updated_at, COALESCE(source, 'web') as source, COALESCE(mode, '') as mode "
+            "SELECT id, title, model, created_at, updated_at, COALESCE(source, 'web') as source, COALESCE(mode, '') as mode, "
+            "(SELECT substr(m.content, 1, 80) FROM messages m WHERE m.session_id = sessions.id AND m.role = 'user' ORDER BY m.id LIMIT 1) as first_query "
             f"FROM sessions{where_sql} ORDER BY updated_at DESC LIMIT ? OFFSET ?",
             tuple(params),
         ) as cursor:
             async for row in cursor:
+                snippet = row[7] if len(row) > 7 and row[7] else None
                 sessions.append(Session(
                     id=row[0], title=row[1], model=row[2],
                     created_at=row[3], updated_at=row[4],
                     source=row[5] if len(row) > 5 else "web",
                     mode=row[6] if len(row) > 6 else "",
+                    snippet=snippet,
                 ))
         return sessions
 

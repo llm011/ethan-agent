@@ -55,6 +55,7 @@ async def list_sessions(limit: int = 50, offset: int = 0, q: str | None = None,
                         source: str | None = None, mode: str | None = None,
                         hide_heartbeat: bool = False, hide_scheduled: bool = False,
                         title_prefixes: str | None = None,
+                        has_images: bool = False,
                         user_id: str = Depends(verify_token)):
     store = await get_session_store()
     if q:
@@ -68,7 +69,8 @@ async def list_sessions(limit: int = 50, offset: int = 0, q: str | None = None,
         include_prefixes = [p for p in (title_prefixes or "").split(",") if p] or None
         sessions = await store.list_recent(limit, offset, source=source or "", mode=mode,
                                            exclude_title_prefixes=exclude_prefixes or None,
-                                           include_title_prefixes=include_prefixes)
+                                           include_title_prefixes=include_prefixes,
+                                           has_images=has_images)
     return {"sessions": [
         {
             "id": s.id,

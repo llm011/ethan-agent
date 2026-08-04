@@ -153,7 +153,7 @@
       setupSelectionListener();
       setupMarkClickListener();
       setupKeyboard();
-      const summaryEl = document.getElementById('__ethan_reading_summary_content');
+      const summaryEl = getPanelEl('__ethan_reading_summary_content');
       if (summaryEl) requestSummary(summaryEl);
       return;
     }
