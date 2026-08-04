@@ -25,7 +25,7 @@
 
   function highlightToc() {
     if (!tocItemsRef.length) return;
-    const tocEl = document.getElementById('__ethan_reading_toc');
+    const tocEl = getPanelEl('__ethan_reading_toc');
     const reader = document.getElementById(READER_ID);
     if (!tocEl || !reader) return;
     const scrollTop = reader.scrollTop;

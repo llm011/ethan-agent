@@ -31,3 +31,5 @@
   // 首轮把正文塞进 prompt，后续轮只发问题、历史由服务端拼。
   let chatSessionId = '';
   let chatBusy = false;
+  // 代码块高亮注入 span 时会触发 input 事件，用此标志抑制 saveContent / scheduleRefresh
+  let suppressInput = false;

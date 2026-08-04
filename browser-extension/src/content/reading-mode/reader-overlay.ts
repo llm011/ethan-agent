@@ -42,12 +42,18 @@
     // Style content
     styleContent(content, dark);
 
+    // 语法高亮 + 复制/换行按钮
+    enhanceCodeBlocks(content, dark);
+
+    // Fade in给正文图片绑定 hover 放大/删除按钮
+    setupImageOverlays();
+
     // Fade in
     requestAnimationFrame(() => { reader.style.opacity = '1'; });
     document.body.style.overflow = 'hidden';
 
     // Auto-save on edit
-    content.addEventListener('input', () => { saveContent(); scheduleRefresh(); });
+    content.addEventListener('input', () => { if (suppressInput) return; saveContent(); scheduleRefresh(); });
   }
 
   function styleContent(container: HTMLElement, dark: boolean) {

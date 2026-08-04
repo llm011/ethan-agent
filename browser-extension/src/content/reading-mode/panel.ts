@@ -226,8 +226,8 @@
   // ========== Inline Chat（多轮对话）==========
 
   function setupChat(dark: boolean) {
-    const input = document.getElementById('__ethan_reading_chat_input') as HTMLTextAreaElement | null;
-    const sendBtn = document.getElementById('__ethan_reading_chat_send') as HTMLButtonElement | null;
+    const input = getPanelEl('__ethan_reading_chat_input') as HTMLTextAreaElement | null;
+    const sendBtn = getPanelEl('__ethan_reading_chat_send') as HTMLButtonElement | null;
     if (!input || !sendBtn) return;
 
     // 自适应高度
@@ -245,8 +245,8 @@
   let firstChatTurn = true;
 
   function sendChat(dark: boolean) {
-    const input = document.getElementById('__ethan_reading_chat_input') as HTMLTextAreaElement | null;
-    const log = document.getElementById('__ethan_reading_chat_log');
+    const input = getPanelEl('__ethan_reading_chat_input') as HTMLTextAreaElement | null;
+    const log = getPanelEl('__ethan_reading_chat_log');
     if (!input || !log || chatBusy) return;
     const question = input.value.trim();
     if (!question) return;
@@ -296,7 +296,7 @@
   function refreshToc() {
     if (!contentEl) return;
     tocItemsRef = generateToc(contentEl);
-    const tocEl = document.getElementById('__ethan_reading_toc');
+    const tocEl = getPanelEl('__ethan_reading_toc');
     if (!tocEl) return;
     const dark = isDarkMode();
     if (!tocItemsRef.length) {
@@ -343,14 +343,14 @@
   }
 
   function refreshAnnotations() {
-    const listEl = document.getElementById('__ethan_reading_anno_list');
-    const filterEl = document.getElementById('__ethan_reading_anno_filter');
+    const listEl = getPanelEl('__ethan_reading_anno_list');
+    const filterEl = getPanelEl('__ethan_reading_anno_filter');
     if (!listEl || !filterEl) return;
     const dark = isDarkMode();
     const all = collectAnnotations();
 
     // Update main tab badge
-    const badgeEl = document.getElementById('__ethan_anno_count_badge');
+    const badgeEl = getPanelEl('__ethan_anno_count_badge');
     if (badgeEl) badgeEl.textContent = String(all.length);
 
     // Filter tabs

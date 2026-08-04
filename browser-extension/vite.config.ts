@@ -3,6 +3,7 @@ import { copyFileSync, mkdirSync, cpSync, writeFileSync, readFileSync } from 'no
 
 import { defineConfig } from 'vite';
 import * as ts from 'typescript';
+import { build as esbuildBuild } from 'esbuild';
 
 export default defineConfig({
   build: {
@@ -25,7 +26,7 @@ export default defineConfig({
   plugins: [
     {
       name: 'copy-extension-assets',
-      writeBundle() {
+      async writeBundle() {
         mkdirSync('dist/icons', { recursive: true });
         copyFileSync('src/manifest.json', 'dist/manifest.json');
         copyFileSync('src/popup/popup.html', 'dist/popup.html');
@@ -47,11 +48,24 @@ export default defineConfig({
             const dir = resolve(__dirname, 'src/content/reading-mode');
             const order = [
               'state.ts', 'utils.ts', 'storage.ts', 'reader-api.ts',
-              'reader-overlay.ts', 'annotation.ts', 'selection-toolbar.ts',
+              'reader-overlay.ts', 'code-enhance.ts', 'annotation.ts', 'selection-toolbar.ts',
               'mark-click.ts', 'progress-toast.ts', 'ai-summary.ts',
               'panel.ts', 'spy-kbd-reenter.ts', 'entry.ts',
             ];
             src = entrySrc + '\n' + order.map(f => readFileSync(resolve(dir, f), 'utf8')).join('\n');
+            // 预打包 highlight.js（common：~40 种语言）为 IIFE，注入为全局 __hljs。
+            // reading-mode 是经典脚本（不能 import），需在构建时内联。
+            const hljsResult = await esbuildBuild({
+              entryPoints: [resolve(__dirname, 'node_modules/highlight.js/lib/common.js')],
+              bundle: true,
+              format: 'iife',
+              globalName: '__hljs',
+              write: false,
+              minify: true,
+              target: 'es2020',
+              legalComments: 'none',
+            });
+            src = hljsResult.outputFiles[0].text + '\n' + src;
           } else {
             src = readFileSync(resolve(__dirname, `src/content/${name}`), 'utf8')
               .replace(/^\s*export\s*\{\s*\}\s*;?\s*$/m, '');  // 移除 export {} 避免 CJS interop
