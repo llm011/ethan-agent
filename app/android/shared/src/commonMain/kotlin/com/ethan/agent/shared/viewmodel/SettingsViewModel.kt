@@ -81,7 +81,8 @@ class SettingsViewModel(
                 _state.update {
                     it.copy(
                         serverUrl = config.serverUrl,
-                        authToken = config.authToken,
+                        // authToken 不预填：字段为空表示"不修改"，填入新值才触发重新认证，
+                        // 避免纯 URL 改动被误判为重新登录（旧 token 打到新服务器会 401）
                         themeId = config.themeId,
                         appLockEnabled = config.appLockEnabled,
                     )
@@ -275,23 +276,34 @@ class SettingsViewModel(
         _state.update { it.copy(authToken = token) }
     }
 
-    /** 测试并保存连接：保存服务器地址，若 token 非空则重新认证。结果写入 connectionToast。 */
+    /** 测试并保存连接：保存服务器地址，若 token 非空则重新认证。结果只走 connectionToast。 */
     fun saveServerUrl() {
         viewModelScope.launch {
+            val url = _state.value.serverUrl
+            val newToken = _state.value.authToken
             try {
-                val url = _state.value.serverUrl
-                val token = _state.value.authToken
                 repository.saveServerUrl(url)
-                if (token.isNotBlank()) {
-                    val result = repository.login(token)
+                var authenticated = false
+                if (newToken.isNotBlank()) {
+                    val result = repository.login(newToken)
                     if (result.isFailure) {
                         throw result.exceptionOrNull() ?: RuntimeException("认证失败")
                     }
+                    authenticated = true
                 }
                 val version = repository.checkHealth()
-                _state.update { it.copy(saved = true, serverVersion = version, connectionToast = if (version != null) "连接成功（v$version）" else "已保存") }
+                val msg = when {
+                    version != null && authenticated -> "认证成功（v$version）"
+                    version != null -> "连接成功（v$version）"
+                    authenticated -> "认证成功"
+                    else -> "已保存服务器地址"
+                }
+                // 连接流程只走 connectionToast，不写 error（避免与 ErrorSnackbar 重复）；
+                // 同时清掉残留 error，避免旧失败弹窗在成功后再次出现
+                _state.update { it.copy(saved = true, serverVersion = version, connectionToast = msg, error = null) }
             } catch (e: Exception) {
-                _state.update { it.copy(error = repository.friendlyError(e), connectionToast = "保存失败：${repository.friendlyError(e)}") }
+                // 失败也只走 connectionToast，不写 error，避免重复通知
+                _state.update { it.copy(connectionToast = "保存失败：${repository.friendlyError(e)}") }
             }
         }
     }

@@ -279,6 +279,7 @@ private fun ConnectionTab(
                 value = state.authToken,
                 onValueChange = onAuthTokenChange,
                 label = { Text("Access Token") },
+                placeholder = { Text("留空不修改，输入新 Token 以重新认证", style = MaterialTheme.typography.bodySmall) },
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
                 singleLine = true,
