@@ -11,6 +11,7 @@ export const KEEPALIVE_ALARM = 'ethan-browser-keepalive';
 export interface ServerConfig {
   serverUrl: string; // 如 ws://localhost:8900/ws/browser
   token: string;
+  clientName?: string; // 本端名称,用于多浏览器区分(缺省时服务端自动分配)
 }
 
 /** 把 ws://host/ws/browser 转成 http://host（wss→https）。 */
@@ -21,11 +22,13 @@ export function wsToHttp(wsUrl: string): string {
     .replace(/\/ws\/browser\/?$/, '');
 }
 
-/** 从 chrome.storage.local 读 serverUrl/token，缺任一则返回 null。 */
+/** 从 chrome.storage.local 读 serverUrl/token/clientName，缺 serverUrl/token 则返回 null。 */
 export async function readServerConfig(): Promise<ServerConfig | null> {
-  const { serverUrl, token } = await chrome.storage.local.get(['serverUrl', 'token']);
+  const { serverUrl, token, clientName } = await chrome.storage.local.get([
+    'serverUrl', 'token', 'clientName',
+  ]);
   if (!serverUrl || !token) return null;
-  return { serverUrl, token };
+  return { serverUrl, token, clientName: clientName || undefined };
 }
 
 export const BROWSER_RPC_METHODS = {

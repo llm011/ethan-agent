@@ -1,20 +1,21 @@
 ---
 name: use-browser
-version: 0.4.0
+version: 0.5.0
 trigger: "浏览器|打开网页|网页操作|自动填表|网页截图|点击页面|输入文本|操作我的浏览器|我的浏览器|本机 Chrome|浏览器 cookie|扩展工具|真实 tab|接管当前页面"
 fast_path: true
-description: "主浏览器技能：通过 browser_session / browser_tab / browser_page 三个工具操作本机 Chrome（需 Ethan Browser 扩展）。嵌入本机真实 Cookie，能操作用户已登录的浏览器、接管当前 tab、做 snapshot/click/fill/screenshot/eval。当用户要求操作浏览器、网页自动化、点击输入、或需要用到本机真实 Chrome（含登录态）时触发。兜底用 agent-browser。"
+description: "主浏览器技能：通过 browser_session / browser_tab / browser_page / browser_client 四个工具操作本机 Chrome（需 Ethan Browser 扩展）。嵌入本机真实 Cookie，能操作用户已登录的浏览器、接管当前 tab、做 snapshot/click/fill/screenshot/eval。支持多个浏览器同时连接，每个有自己的名字，agent 按需选择操作哪个端。当用户要求操作浏览器、网页自动化、点击输入、或需要用到本机真实 Chrome（含登录态）时触发。兜底用 agent-browser。"
 ---
 
 # 浏览器控制使用规则
 
-本技能指导你用 `browser_session` / `browser_tab` / `browser_page` 三个工具操作 ethan server 所在机器上的真实 Chrome（需已安装并连接 Ethan Browser 扩展）。
+本技能指导你用 `browser_session` / `browser_tab` / `browser_page` / `browser_client` 四个工具操作 ethan server 所在机器上的真实 Chrome（需已安装并连接 Ethan Browser 扩展）。多个浏览器可同时连接，每个有自己的名字。
 
 ## 适用场景
 
 - 用户要求操作浏览器、做网页自动化：创建 session、观察页面、点击、输入、截图、执行 JS。
 - 需要操作本机 Chrome 中的 tab、tab group、当前 active tab。
 - **需要复用用户登录态/cookie**：直接接管用户已登录的 Chrome tab（`attach_current`），不必重新登录。
+- **多个浏览器同时连接**：用户可能有多台机器都装了扩展并连到同一个 Ethan Server，每台有自己的名字，按需选择操作哪个。
 
 不要用它替代普通网页信息检索；只需查公开网页信息时优先用 web_search / web_fetch。
 
@@ -47,6 +48,53 @@ description: "主浏览器技能：通过 browser_session / browser_tab / browse
 6. `eval` 权限很高，只在任务需要时使用，不要对不可信页面执行无关脚本。
 7. 工具输出是 snake_case JSON；每次返回含 `_hint` 字段，说明本次输出的字段含义和下一步用法（如 snapshot 的 ref 格式、get 的 value 字段）。交互操作（click/fill/type/press 等）的返回还含 `_step` 字段，表示当前会话累计操作步数。
 8. 授权是会话级的：本对话第一次调用任意 browser 工具会请求一次授权，批准后本对话后续操作（含 eval）不再询问。
+9. **多浏览器客户端**：多个浏览器可同时连接 Ethan Server，每个在扩展 popup 里设了自己的「本端名称」（如 `work-laptop`、`home-mac`）。当前对话的活跃客户端一旦选定，后续所有 browser 操作都路由到它。详见下方「多浏览器客户端管理」。
+
+## 多浏览器客户端管理
+
+多个浏览器（如办公电脑、家用电脑）可同时连接 Ethan Server。每个浏览器在扩展 popup 的「本端名称」字段里设置自己的名字，留空则服务端自动分配 `browser-N`。
+
+### 工具：browser_client
+
+| action | 作用 | 关键返回字段 |
+|--------|------|-------------|
+| `list` | 列出所有已连接的浏览器客户端 | `clients`（含 name/connected）、`active`（当前对话的活跃客户端） |
+| `use` | 设置当前对话使用哪个客户端（`name` 必填） | `ok`、`active` |
+| `status` | 查看当前活跃客户端 + 全部已连接客户端 | `active`、`clients` |
+
+### 选择规则
+
+1. **只有一个客户端连接** → 自动选中，无需手动 `use`。
+2. **多个客户端连接且未设活跃** → 任何 browser 操作会返回错误，提示「当前有 N 个浏览器客户端已连接: ...。请先用 browser_client(action='use', name='客户端名称') 选择一个」。
+3. **用户在消息里指明了浏览器**（如「用 work-laptop 打开...」「在 home-mac 上...」）→ 直接 `browser_client(action='use', name='work-laptop')`，不必再问。
+4. **不确定用哪个** → 用 `browser_client(action='list')` 列出已连接客户端，然后**问用户**「检测到 N 个浏览器已连接：work-laptop、home-mac。你想操作哪个？」，不要自行猜测。
+
+活跃客户端是**会话级**的：设一次后整个对话都生效，不同对话可以绑不同的浏览器。
+
+### 常见流程
+
+```
+# 不确定有几个浏览器连着 → 先查
+browser_client(action="list")
+
+# 只有一个 → 自动选中，直接开干
+browser_session(action="create", url="https://example.com")
+
+# 多个且用户没指明 → 问用户后再选
+browser_client(action="use", name="work-laptop")
+browser_session(action="create", url="https://example.com")
+
+# 用户消息里已指明 → 直接选
+# 用户：「用 home-mac 打开 youtube」
+browser_client(action="use", name="home-mac")
+browser_session(action="create", url="https://www.youtube.com")
+```
+
+### 客户端断连
+
+活跃客户端断连后，再次操作浏览器会报「客户端 'xxx' 未连接」。此时：
+1. `browser_client(action="list")` 看还有哪些在线
+2. 若只剩一个，自动选中；若仍有多个，问用户换哪个
 
 ## 步骤预算
 
@@ -364,4 +412,6 @@ screenshot 返回本地文件路径，可直接在飞书发图或在 Web 渲染�
 ## 常见错误处理
 
 - 浏览器扩展未连接：提示用户安装并启用 Ethan Browser 扩展，在扩展 options 里填好 server 地址和 token。
+- 多个浏览器连接且未选活跃客户端：错误消息会列出所有已连接的客户端名称。用 `browser_client(action='use', name='...')` 选择，或问用户要用哪个。
+- 客户端 'xxx' 未连接：活跃客户端断连了。`browser_client(action='list')` 看还有哪些在线，重新选一个。
 - ref not found / 浏览器断连：通常是页面跳转或刷新、或扩展重连。按「AX 树不稳定的兜底路径」处理。

@@ -16,7 +16,7 @@ from ethan.tools.builtin.background_task import (
     BackgroundTaskStopTool,
     BackgroundTaskTool,
 )
-from ethan.tools.builtin.browser import BrowserPageTool, BrowserSessionTool, BrowserTabTool
+from ethan.tools.builtin.browser import BrowserClientTool, BrowserPageTool, BrowserSessionTool, BrowserTabTool
 from ethan.tools.builtin.chart import ChartTool
 from ethan.tools.builtin.config import ConfigGetTool, ConfigSetTool
 from ethan.tools.builtin.decide import DecideTool
@@ -154,6 +154,7 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
     registry.register(GetSecretTool())
     registry.register(ListSecretsTool())
     registry.register(InstallSkillTool())
+    registry.register(BrowserClientTool())
     registry.register(BrowserSessionTool())
     registry.register(BrowserTabTool())
     registry.register(BrowserPageTool())

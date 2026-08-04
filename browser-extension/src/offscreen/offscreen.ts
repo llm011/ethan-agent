@@ -28,6 +28,8 @@ class BrowserWsClient {
   // 诊断状态：'connecting' | 'connected' | 'auth_failed' | 'connection_failed' | 'no_config'
   private diagState: string = 'no_config';
   private lastCloseCode: number | null = null;
+  // 服务端分配/确认的客户端名称
+  private clientName: string = '';
 
   constructor(
     private getConfig: () => Promise<WsClientConfig | null>,
@@ -38,8 +40,13 @@ class BrowserWsClient {
     return !!this.ws && this.ws.readyState === WebSocket.OPEN && this.authed;
   }
 
-  get status(): { connected: boolean; diag: string; closeCode: number | null } {
-    return { connected: this.isConnected, diag: this.diagState, closeCode: this.lastCloseCode };
+  get status(): { connected: boolean; diag: string; closeCode: number | null; clientName: string } {
+    return {
+      connected: this.isConnected,
+      diag: this.diagState,
+      closeCode: this.lastCloseCode,
+      clientName: this.clientName,
+    };
   }
 
   start(): void {
@@ -93,7 +100,11 @@ class BrowserWsClient {
     ws.onopen = () => {
       console.log('[EthanBrowser:offscreen] ws opened, sending auth');
       this.diagState = 'connecting';  // 已连上但未鉴权
-      ws.send(JSON.stringify({ type: 'auth', token: cfg.token }));
+      const authMsg: Record<string, string> = { type: 'auth', token: cfg.token };
+      if (cfg.clientName) {
+        authMsg.name = cfg.clientName;
+      }
+      ws.send(JSON.stringify(authMsg));
     };
 
     ws.onmessage = ev => {
@@ -141,10 +152,11 @@ class BrowserWsClient {
     }
 
     if (msg.type === 'auth_ok') {
-      console.log('[EthanBrowser:offscreen] auth ok');
+      console.log('[EthanBrowser:offscreen] auth ok, client name:', msg.name);
       this.authed = true;
       this.diagState = 'connected';
       this.lastCloseCode = null;
+      this.clientName = msg.name || '';
       this.startPing();
       this.clearStable();
       this.stableTimer = setTimeout(() => {

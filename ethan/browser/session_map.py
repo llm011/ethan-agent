@@ -25,23 +25,32 @@ _SWEEP_INTERVAL = 5 * 60  # 每 5min 扫一次
 
 
 class _Entry:
-    __slots__ = ("ethan_session_id", "last_active", "step_count", "keep_alive")
+    __slots__ = ("ethan_session_id", "last_active", "step_count", "keep_alive", "client_name")
 
-    def __init__(self, ethan_session_id: str, keep_alive: bool = False):
+    def __init__(self, ethan_session_id: str, client_name: str = "", keep_alive: bool = False):
         self.ethan_session_id = ethan_session_id
+        self.client_name = client_name
         self.last_active = time.monotonic()
         self.step_count = 0
         self.keep_alive = keep_alive
 
 
 class SessionMap:
-    """browser_session_id → 归属 ethan 会话 + 最后活跃时间。"""
+    """browser_session_id → 归属 ethan 会话 + 客户端名称 + 最后活跃时间。"""
 
     def __init__(self) -> None:
         self._entries: dict[str, _Entry] = {}
 
-    def bind(self, browser_session_id: str, ethan_session_id: str, keep_alive: bool = False) -> None:
-        self._entries[browser_session_id] = _Entry(ethan_session_id, keep_alive=keep_alive)
+    def bind(self, browser_session_id: str, ethan_session_id: str,
+             client_name: str = "", keep_alive: bool = False) -> None:
+        self._entries[browser_session_id] = _Entry(
+            ethan_session_id, client_name=client_name, keep_alive=keep_alive,
+        )
+
+    def get_client(self, browser_session_id: str) -> str:
+        """返回该 browser session 所属的客户端名称。"""
+        entry = self._entries.get(browser_session_id)
+        return entry.client_name if entry else ""
 
     def touch(self, browser_session_id: str) -> None:
         """每次对该 session 的操作刷新活跃时间。"""
@@ -109,9 +118,14 @@ async def _sweep_once() -> None:
     if not hub.connected:
         return  # 扩展没连,跳过(断连时 session 状态已无意义)
     for bsid in smap.idle_sessions(IDLE_TTL_SECONDS):
+        client = smap.get_client(bsid)
+        if not client:
+            smap.unbind(bsid)
+            continue
         try:
-            await hub.call(METHODS["session_release"], {"sessionId": bsid}, browser_session_id=bsid)
-            logger.info("browser: released idle session %s", bsid)
+            await hub.call(METHODS["session_release"], {"sessionId": bsid},
+                           client_name=client, browser_session_id=bsid)
+            logger.info("browser: released idle session %s (client=%s)", bsid, client)
         except BrowserError as e:
             logger.warning("browser: idle release failed for %s: %s", bsid, e)
         finally:

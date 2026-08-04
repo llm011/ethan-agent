@@ -6,17 +6,18 @@ const $ = id => document.getElementById(id);
 const DEFAULT_URL = 'ws://localhost:8900/ws/browser';
 
 async function load() {
-  const { serverUrl, token, autoCloseCookies } = await chrome.storage.local.get([
-    'serverUrl', 'token', 'autoCloseCookies',
+  const { serverUrl, token, clientName, autoCloseCookies } = await chrome.storage.local.get([
+    'serverUrl', 'token', 'clientName', 'autoCloseCookies',
   ]);
   $('serverUrl').value = serverUrl || DEFAULT_URL;
   $('token').value = token || '';
+  $('clientName').value = clientName || '';
   // 默认开启，显式 false 才关闭
   $('autoCloseCookies').checked = autoCloseCookies !== false;
   refreshStatus();
 }
 
-function setStatus(connected, diag) {
+function setStatus(connected, diag, clientName) {
   const dot = $('dot');
   const text = $('statusText');
   const hint = $('hint');
@@ -24,7 +25,9 @@ function setStatus(connected, diag) {
 
   if (connected === true) {
     dot.classList.add('on');
-    text.textContent = '已连接到 Ethan Server';
+    text.textContent = clientName
+      ? `已连接 (${clientName})`
+      : '已连接到 Ethan Server';
     hint.textContent = '';
     return;
   }
@@ -92,12 +95,16 @@ async function queryConnected() {
     const resp = await chrome.runtime.sendMessage({ type: 'getStatus' });
     if (resp && resp.error) {
       $('hint').textContent = '错误: ' + resp.error;
-      return { connected: false, diag: 'error' };
+      return { connected: false, diag: 'error', clientName: '' };
     }
-    return { connected: !!(resp && resp.connected), diag: resp?.diag || 'unknown' };
+    return {
+      connected: !!(resp && resp.connected),
+      diag: resp?.diag || 'unknown',
+      clientName: resp?.clientName || '',
+    };
   } catch (e) {
     $('hint').textContent = '查询失败: ' + (e?.message || e);
-    return { connected: false, diag: 'error' };
+    return { connected: false, diag: 'error', clientName: '' };
   }
 }
 
@@ -121,17 +128,17 @@ async function refreshStatus() {
     setStatus(false, 'connection_failed');
     return;
   }
-  const { connected, diag } = await queryConnected();
-  setStatus(connected, diag);
+  const { connected, diag, clientName } = await queryConnected();
+  setStatus(connected, diag, clientName);
 }
 
 /** 轮询状态：重连 + 握手需要一点时间，连查几次直到连上或超时。 */
 async function pollUntilConnected(tries = 12, intervalMs = 400) {
   setStatus(null, 'connecting');
   for (let i = 0; i < tries; i++) {
-    const { connected, diag } = await queryConnected();
+    const { connected, diag, clientName } = await queryConnected();
     if (connected) {
-      setStatus(true, 'connected');
+      setStatus(true, 'connected', clientName);
       return;
     }
     // auth_failed 不需要重试，直接显示
@@ -142,8 +149,8 @@ async function pollUntilConnected(tries = 12, intervalMs = 400) {
     await new Promise(r => setTimeout(r, intervalMs));
   }
   // 超时后最后查一次状态
-  const { connected, diag } = await queryConnected();
-  setStatus(connected, diag || 'connection_failed');
+  const { connected, diag, clientName } = await queryConnected();
+  setStatus(connected, diag || 'connection_failed', clientName);
 }
 
 /** 当前输入值写入 storage。storage.onChanged 会触发 background 自动重连。 */
@@ -151,6 +158,7 @@ async function persist() {
   await chrome.storage.local.set({
     serverUrl: $('serverUrl').value.trim() || DEFAULT_URL,
     token: $('token').value.trim(),
+    clientName: $('clientName').value.trim(),
   });
 }
 
@@ -176,6 +184,7 @@ async function testConnect() {
 
 $('serverUrl').addEventListener('input', autoSave);
 $('token').addEventListener('input', autoSave);
+$('clientName').addEventListener('input', autoSave);
 $('connect').addEventListener('click', testConnect);
 $('reading').addEventListener('click', async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });

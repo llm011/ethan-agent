@@ -313,15 +313,43 @@ _HINTS = {
 
 
 async def _call(method_key: str, params: dict, browser_session_id: str | None = None):
+    """发起 browser RPC。自动解析目标客户端:
+    - 操作既有 browser_session_id → 从 session_map 取该 session 所属客户端
+    - 新建/列表等无 session_id 的操作 → 用当前 ethan 会话的活跃客户端
+
+    当有多个客户端连接且未设活跃时,抛出明确错误提示 agent 询问用户。
+    """
+    smap = get_session_map()
+    hub = get_hub()
+    ethan_sid = get_session_id()
+
     # 会话隔离门禁:凡是操作既有 browser session 的调用,该 session 必须属于当前 ethan 会话。
-    # create/attach_current 不传 browser_session_id(新建后才 bind),session_list/user_list 同理,
-    # 所以这一处收口即可覆盖 rename/release/close + 全部 tab/page 操作,杜绝跨会话/跨用户操控。
     if browser_session_id is not None:
         _require_owned(browser_session_id)
-    hub = get_hub()
-    result = await hub.call(METHODS[method_key], params, browser_session_id=browser_session_id)
+        client_name = smap.get_client(browser_session_id) or hub.resolve_client(ethan_sid)
+    else:
+        client_name = hub.resolve_client(ethan_sid)
+        if client_name is None:
+            clients = hub.list_clients()
+            if not clients:
+                raise BrowserError(
+                    "浏览器扩展未连接,请确认已安装并启用扩展",
+                    code=ERROR_CODE["extension_not_connected"],
+                    retryable=False,
+                )
+            names = [c["name"] for c in clients]
+            raise BrowserError(
+                f"当前有 {len(clients)} 个浏览器客户端已连接: {', '.join(names)}。"
+                f"请先用 browser_client(action='use', name='客户端名称') 选择一个,"
+                f"或直接告诉用户你想操作哪个浏览器。也可以用 browser_client(action='list') 查看详情。",
+                code=ERROR_CODE["extension_not_connected"],
+                retryable=False,
+            )
+
+    result = await hub.call(METHODS[method_key], params,
+                            client_name=client_name, browser_session_id=browser_session_id)
     if browser_session_id:
-        get_session_map().touch(browser_session_id)
+        smap.touch(browser_session_id)
     return result
 
 
@@ -419,7 +447,9 @@ class BrowserSessionTool(_BrowserToolBase):
                 result = await _call("session_create", params)
                 bsid = _extract_session_id(result)
                 if bsid:
-                    get_session_map().bind(bsid, get_session_id(), keep_alive=keep_alive)
+                    client = get_hub().get_active_client(get_session_id()) or ""
+                    get_session_map().bind(bsid, get_session_id(),
+                                           client_name=client, keep_alive=keep_alive)
                 return json.dumps(result, ensure_ascii=False)
             if action == "attach_current":
                 params = {}
@@ -430,7 +460,9 @@ class BrowserSessionTool(_BrowserToolBase):
                 result = await _call("session_attach_current", params)
                 bsid = _extract_session_id(result)
                 if bsid:
-                    get_session_map().bind(bsid, get_session_id(), keep_alive=keep_alive)
+                    client = get_hub().get_active_client(get_session_id()) or ""
+                    get_session_map().bind(bsid, get_session_id(),
+                                           client_name=client, keep_alive=keep_alive)
                 return json.dumps(result, ensure_ascii=False)
             if action == "list":
                 result = await _call("session_list", {})
@@ -1075,3 +1107,74 @@ class BrowserNetworkTool(_BrowserToolBase):
             return f"未知 action: {action}"
         except BrowserError as e:
             return f"浏览器错误: {e}" + (" (可重新 snapshot 后重试)" if e.retryable else "")
+
+
+class BrowserClientTool(_BrowserToolBase):
+    name = "browser_client"
+    description = (
+        "管理浏览器客户端连接。多个浏览器可同时连接 Ethan Server,每个有自己的名字。"
+        "action=list 列出所有已连接的浏览器客户端(含名称);"
+        "use 设置当前对话使用哪个客户端(name 必填);"
+        "status 查看当前对话的活跃客户端和全部已连接客户端。"
+        "当有多个浏览器连接时,操作浏览器前需先用 use 选择一个;仅一个连接时自动选中。"
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "action": {"type": "string", "enum": ["list", "use", "status"]},
+            "name": {"type": "string", "description": "use 时的客户端名称(从 list 结果中取)"},
+        },
+        "required": ["action"],
+    }
+
+    async def run(self, action: str, name: str = "") -> str:
+        self._authorize()
+        hub = get_hub()
+        try:
+            if action == "list":
+                clients = hub.list_clients()
+                if not clients:
+                    return json.dumps({
+                        "clients": [],
+                        "_hint": "没有浏览器客户端连接。请确认已安装并启用 Ethan Browser 扩展。",
+                    }, ensure_ascii=False)
+                active = hub.get_active_client(get_session_id())
+                return json.dumps({
+                    "clients": clients,
+                    "active": active,
+                    "_hint": f"共 {len(clients)} 个客户端已连接。"
+                             + (f"当前活跃: {active}" if active else "尚未选择活跃客户端,用 use 选择。"),
+                }, ensure_ascii=False)
+            if action == "use":
+                if not name:
+                    return json.dumps({
+                        "ok": False,
+                        "error": "use 需要 name 参数。用 action=list 查看已连接的客户端。",
+                    }, ensure_ascii=False)
+                ok = hub.set_active_client(get_session_id(), name)
+                if ok:
+                    return json.dumps({
+                        "ok": True,
+                        "active": name,
+                        "_hint": f"已切换到客户端 '{name}'。后续 browser_session/tab/page/network 操作都会路由到这个浏览器。",
+                    }, ensure_ascii=False)
+                clients = hub.list_clients()
+                names = [c["name"] for c in clients]
+                return json.dumps({
+                    "ok": False,
+                    "error": f"客户端 '{name}' 未连接。",
+                    "available": names,
+                    "_hint": "可用客户端: " + ", ".join(names) if names else "没有已连接的客户端",
+                }, ensure_ascii=False)
+            if action == "status":
+                active = hub.get_active_client(get_session_id())
+                clients = hub.list_clients()
+                return json.dumps({
+                    "active": active,
+                    "clients": clients,
+                    "_hint": f"当前活跃: {active}" if active else "未设活跃客户端"
+                             + (f" (共 {len(clients)} 个已连接)" if clients else " (无连接)"),
+                }, ensure_ascii=False)
+            return f"未知 action: {action}"
+        except BrowserError as e:
+            return f"浏览器错误: {e}"
