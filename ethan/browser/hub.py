@@ -131,6 +131,26 @@ class BrowserHub:
         else:
             fut.set_result(msg.get("result"))
 
+    async def broadcast_notification(self, method: str, params: dict | None = None) -> int:
+        """向所有在线扩展客户端发送一条单向 JSON-RPC 通知（无 id），不等待响应。
+
+        用于广播无需回执的事件（如授权 consent 请求、系统通知等）。
+        返回成功发送的连接数。"""
+        sent = 0
+        payload = json.dumps({"jsonrpc": "2.0", "method": method, "params": params or {}})
+        # snapshot conns 避免持有锁期间 send_text 可能阻塞/抛错
+        async with self._conn_lock:
+            conns = list(self._conns.values())
+        for conn in conns:
+            if conn.closed:
+                continue
+            try:
+                await conn.ws.send_text(payload)
+                sent += 1
+            except Exception as e:
+                logger.info("browser: notify client '%s' failed: %s", conn.name, e)
+        return sent
+
     # ── 锁 ────────────────────────────────────────────────────
     def _lock_for(self, method: str, browser_session_id: str | None) -> asyncio.Lock | None:
         """page 操作按 browser_session_id 取串行锁;其余操作不加锁。"""

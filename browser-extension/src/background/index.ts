@@ -83,6 +83,127 @@ function withOverlay(action: string, handler: (params: any) => Promise<any>) {
   };
 }
 
+// ── 系统通知（consent 授权等）───────────────────────────────
+
+/** ws://host:port/path  ->  http://host:port ; wss -> https */
+function wsToHttp(wsUrl: string): string {
+  if (!wsUrl) return 'http://localhost:8900';
+  if (wsUrl.startsWith('wss://')) return 'https://' + wsUrl.slice(6).split('/')[0];
+  if (wsUrl.startsWith('ws://')) return 'http://' + wsUrl.slice(5).split('/')[0];
+  if (wsUrl.startsWith('http://') || wsUrl.startsWith('https://')) {
+    return wsUrl.replace(/\/$/, '');
+  }
+  return 'http://localhost:8900';
+}
+
+/** 打开或聚焦聊天页，并把用户带到指定 session */
+async function openOrFocusChatPage(sessionId: string): Promise<void> {
+  try {
+    const stored = await chrome.storage.local.get(['serverUrl']);
+    const httpBase = wsToHttp(stored.serverUrl || '');
+    const target = sessionId ? `${httpBase}/chat/${encodeURIComponent(sessionId)}` : `${httpBase}/chat`;
+    // 找有没有已打开的 ethan 聊天页（同 origin），有则聚焦 + 跳转
+    let found: chrome.tabs.Tab | null = null;
+    try {
+      const tabs = await chrome.tabs.query({});
+      let origin = '';
+      try { origin = new URL(httpBase).origin; } catch {}
+      for (const t of tabs) {
+        if (!t?.url || !origin) continue;
+        try {
+          const u = new URL(t.url);
+          if (u.origin === origin) {
+            found = t;
+            break;
+          }
+        } catch {}
+      }
+    } catch {}
+    if (found && found.id != null) {
+      await chrome.tabs.update(found.id, { active: true, url: target });
+      try {
+        if (found.windowId != null) {
+          await chrome.windows.update(found.windowId, { focused: true });
+        }
+      } catch {}
+      return;
+    }
+    // 没找到则新建标签页打开
+    await chrome.tabs.create({ url: target, active: true });
+  } catch (e) {
+    console.warn('[EthanBrowser] open chat page failed', e);
+    try {
+      await chrome.tabs.create({
+        url: 'http://localhost:8900/chat' + (sessionId ? `/${sessionId}` : ''),
+        active: true,
+      });
+    } catch {}
+  }
+}
+
+/** 发送系统通知：授权 consent 请求待确认 */
+async function showConsentNotification(params: {
+  request_id?: string; session_id?: string; tool?: string;
+  description?: string; detail?: string; always?: boolean;
+}): Promise<void> {
+  const rid = params.request_id || '';
+  const sid = params.session_id || '';
+  const tool = params.tool || '工具调用';
+  const desc = params.description || '需要你确认是否允许执行此操作';
+  const nid = 'consent:' + rid + ':' + sid;
+  try {
+    const title = 'Ethan 需要你的确认';
+    const message = String(tool) + ' — ' + String(desc);
+    await chrome.notifications.create(nid, {
+      type: 'basic',
+      iconUrl: 'icons/icon-128.png',
+      title,
+      message: message.length > 180 ? message.slice(0, 177) + '...' : message,
+      priority: 2,
+      requireInteraction: true,
+      buttons: [
+        { title: '去处理' },
+        { title: '稍后' },
+      ],
+    });
+  } catch (e) {
+    console.warn('[EthanBrowser] create notification failed', e);
+  }
+}
+
+// 通知按钮：「去处理」跳转，「稍后」直接清除
+chrome.notifications.onButtonClicked.addListener((notificationId, buttonIndex) => {
+  if (!notificationId.startsWith('consent:')) return;
+  if (buttonIndex === 0) {
+    const parts = notificationId.split(':');
+    // notificationId 形如 consent:rid:sid，sid 本身也可能含冒号所以取剩余
+    const sid = parts.slice(2).join(':') || '';
+    void openOrFocusChatPage(sid);
+  }
+  try { chrome.notifications.clear(notificationId); } catch {}
+});
+
+// 通知主体被点击：视为「去处理」
+chrome.notifications.onClicked.addListener((notificationId) => {
+  if (!notificationId.startsWith('consent:')) return;
+  const parts = notificationId.split(':');
+  const sid = parts.slice(2).join(':') || '';
+  void openOrFocusChatPage(sid);
+  try { chrome.notifications.clear(notificationId); } catch {}
+});
+
+/** 处理 Ethan server 推送过来的单向通知（非 RPC 请求） */
+async function handleServerNotification(msg: { method?: string; params?: any }): Promise<void> {
+  if (!msg.method) return;
+  switch (msg.method) {
+    case 'notify:consent_request':
+      await showConsentNotification(msg.params || {});
+      break;
+    default:
+      break;
+  }
+}
+
 /** 移除某 tab 上的两个右上角容器（overlay 步骤面板 + result-panel 结果面板） */
 async function removeTabPanels(tabId: number): Promise<void> {
   try {
@@ -246,6 +367,13 @@ async function ensureOffscreenAndPushConfig(): Promise<void> {
 }
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  // 来自 offscreen：Ethan server 推送的单向通知（JSON-RPC notification，无 id）
+  if (msg?.target === 'sw' && msg.server_notification === true && msg.payload) {
+    void handleServerNotification(msg.payload);
+    sendResponse({ ok: true });
+    return false; // 同步响应即可，无异步
+  }
+
   // 来自 offscreen 的配置请求
   if (msg?.target === 'sw' && msg.type === 'get_config') {
     readServerConfig().then(cfg => {

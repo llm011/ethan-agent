@@ -26,14 +26,15 @@ from ethan.tools.registry import ToolExecutor, ToolRegistry
 logger = logging.getLogger(__name__)
 
 
-# 图片类 400 错误关键词（provider 返回的报错文本匹配）
-_IMAGE_ERROR_KEYWORDS = (
+# 图片类 400 错误：匹配 provider error code 和明确的尺寸超限措辞。
+# 排除 'image size'（太模糊，rate-limit 消息可能包含），保留其他常见措辞。
+_IMAGE_ERROR_PATTERNS = (
     "image_dimension_exceeded",
-    "image dimension",
     "image too large",
-    "image size",
-    "max allowed size",
+    "image dimension",
     "dimensions exceed",
+    "dimensions exceeded",
+    "max allowed size",
     "图片过大",
     "图片尺寸",
 )
@@ -42,30 +43,31 @@ _IMAGE_ERROR_KEYWORDS = (
 def _is_image_error(e: Exception) -> bool:
     """判断异常是否为图片尺寸/体积超限类错误。"""
     msg = str(e).lower()
-    return any(k.lower() in msg for k in _IMAGE_ERROR_KEYWORDS)
+    return any(p in msg for p in _IMAGE_ERROR_PATTERNS)
 
 
 def _strip_images_from_messages(messages: list[Message]) -> bool:
     """剥离所有消息中的图片数据，保留 content 中的 [image_paths: ...] 路径提示。
 
+    **不会 mutate 原 Message 对象**：对含图片的消息用 dataclasses.replace 创建浅拷贝，
+    替换到 messages 列表中，确保 session 历史不受影响。
+
     在 provider 因图片超限返回 400 时调用，让模型能通过工具读取本地文件自行处理。
     返回 True 表示至少剥离了一张图片。
     """
+    from dataclasses import replace  # noqa: PLC0415
+
     stripped = False
-    for msg in messages:
+    for i, msg in enumerate(messages):
         if msg.images:
             stripped = True
-            msg.images = []
-    if stripped:
-        # 在最后一条 user 消息末尾追加提示，让模型知道图片已移除但可工具处理
-        for msg in reversed(messages):
-            if msg.role == "user":
-                msg.content = (msg.content or "") + (
-                    "\n\n[系统提示：附图因尺寸超过 API 限制已从上下文中移除，"
-                    "但文件已保存在本地（路径见上方 image_paths 提示）。"
-                    "可使用 file_read 或 shell 工具读取/缩放/处理。]"
-                )
-                break
+            # 提示追加到实际被剥离图片的消息上（而非固定追加到最后一条 user 消息）
+            hint = (
+                "\n\n[系统提示：附图因尺寸超过 API 限制已从上下文中移除，"
+                "但文件已保存在本地（路径见上方 image_paths 提示）。"
+                "可使用 file_read 或 shell 工具读取/缩放/处理。]"
+            )
+            messages[i] = replace(msg, images=[], content=(msg.content or "") + hint)
     return stripped
 
 

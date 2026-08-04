@@ -66,23 +66,43 @@
       }
       .switch input:checked + .slider { background: #4f46e5; }
       .switch input:checked + .slider::before { transform: translateX(16px); }
-      .cmd-section { margin-top: 16px; }
+      .cmd-section { margin-top: 20px; padding-top: 6px; }
       .cmd-title {
-        font-size: 11px; font-weight: 600; letter-spacing: 0.5px;
-        color: #9aa0aa; margin-bottom: 8px;
+        font-size: 12px; font-weight: 600; letter-spacing: 0.3px;
+        color: #8b909a; margin-bottom: 10px;
+        display: flex; align-items: center; justify-content: space-between;
       }
-      .cmd-list { display: flex; flex-wrap: wrap; gap: 6px; }
+      .cmd-list {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+      }
       .cmd-btn {
-        display: flex; align-items: center; gap: 5px;
-        padding: 7px 10px; border-radius: 8px; cursor: pointer;
-        font-size: 12px; font-weight: 500;
-        border: 1px solid #e5e7eb; background: #f7f8fa; color: #1f2430;
-        transition: background 0.15s, border-color 0.15s;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: 4px;
+        padding: 10px 6px 12px;
+        min-height: 76px;
+        border-radius: 14px; cursor: pointer;
+        font-size: 12px; font-weight: 500; line-height: 1.35; text-align: center;
+        border: 1px solid #eceef3; background: #f7f8fb; color: #1f2430;
+        box-shadow: 0 1px 2px rgba(17, 24, 39, 0.03);
+        transition: background 0.15s, border-color 0.15s, transform 0.08s, box-shadow 0.15s;
       }
-      .cmd-btn:hover { background: #eef0f4; border-color: #d6d9e0; }
+      .cmd-btn:hover {
+        background: #eef1f8;
+        border-color: #d7dbe5;
+        box-shadow: 0 3px 8px rgba(17, 24, 39, 0.06);
+      }
+      .cmd-btn:active { transform: translateY(1px); }
+      .cmd-btn .cmd-icon {
+        font-size: 20px; line-height: 1;
+      }
       @media (prefers-color-scheme: dark) {
-        .cmd-btn { background: #2a2e37; border-color: #3a3f4a; color: #e6e8ec; }
-        .cmd-btn:hover { background: #333842; }
+        .cmd-btn {
+          background: #262a33; border-color: #323744; color: #e6e8ec;
+          box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+        }
+        .cmd-btn:hover { background: #2f343f; border-color: #3d4350; }
       }
     </style>
   </head>
@@ -117,8 +137,8 @@
 
     <div class="cmd-section">
       <div class="cmd-title">
-        页面指令
-        <a id="manageCommands" href="#" style="float:right;font-weight:400;color:#0d9488;text-decoration:none">管理</a>
+        <span>页面指令</span>
+        <a id="manageCommands" href="#" style="font-weight:400;color:#0d9488;text-decoration:none">管理</a>
       </div>
       <div id="commandList" class="cmd-list"></div>
     </div>

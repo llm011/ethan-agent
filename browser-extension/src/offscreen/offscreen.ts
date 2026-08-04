@@ -170,6 +170,15 @@ class BrowserWsClient {
       return;
     }
 
+    // 来自 Ethan server 的 JSON-RPC 通知：无 id 有 method，单向 fire-and-forget。
+    // 直接转发给 Service Worker 处理（发系统通知、打开页面等），不等待响应。
+    if (msg.jsonrpc === '2.0' && typeof msg.method === 'string' && !('id' in msg)) {
+      try {
+        chrome.runtime.sendMessage({ target: 'sw', server_notification: true, payload: msg }).catch(() => {});
+      } catch {}
+      return;
+    }
+
     const response = await this.onRequest(msg);
     if (response && this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(response));
