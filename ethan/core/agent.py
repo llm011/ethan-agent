@@ -26,6 +26,49 @@ from ethan.tools.registry import ToolExecutor, ToolRegistry
 logger = logging.getLogger(__name__)
 
 
+# 图片类 400 错误关键词（provider 返回的报错文本匹配）
+_IMAGE_ERROR_KEYWORDS = (
+    "image_dimension_exceeded",
+    "image dimension",
+    "image too large",
+    "image size",
+    "max allowed size",
+    "dimensions exceed",
+    "图片过大",
+    "图片尺寸",
+)
+
+
+def _is_image_error(e: Exception) -> bool:
+    """判断异常是否为图片尺寸/体积超限类错误。"""
+    msg = str(e).lower()
+    return any(k.lower() in msg for k in _IMAGE_ERROR_KEYWORDS)
+
+
+def _strip_images_from_messages(messages: list[Message]) -> bool:
+    """剥离所有消息中的图片数据，保留 content 中的 [image_paths: ...] 路径提示。
+
+    在 provider 因图片超限返回 400 时调用，让模型能通过工具读取本地文件自行处理。
+    返回 True 表示至少剥离了一张图片。
+    """
+    stripped = False
+    for msg in messages:
+        if msg.images:
+            stripped = True
+            msg.images = []
+    if stripped:
+        # 在最后一条 user 消息末尾追加提示，让模型知道图片已移除但可工具处理
+        for msg in reversed(messages):
+            if msg.role == "user":
+                msg.content = (msg.content or "") + (
+                    "\n\n[系统提示：附图因尺寸超过 API 限制已从上下文中移除，"
+                    "但文件已保存在本地（路径见上方 image_paths 提示）。"
+                    "可使用 file_read 或 shell 工具读取/缩放/处理。]"
+                )
+                break
+    return stripped
+
+
 @dataclass
 class UsageStats:
     input_tokens: int = 0
@@ -772,6 +815,7 @@ class Agent:
         _need_enhanced_context = False  # 上一轮模型响应是否提到"需要更多信息"
         _decision_prompt_injected = False  # 本轮开头是否注入过决策提示（pop 用）
         _enhanced_context_injected = False  # 本轮开头是否注入过增强上下文（pop 用）
+        _image_stripped = False  # 图片超限时剥离重试（只允许一次，避免循环）
 
         for i in range(max_iters):
             # 上一轮注入的决策提示/增强上下文是临时 user 消息，本轮消费完后 pop 掉，避免污染 history
@@ -790,7 +834,19 @@ class Agent:
                 sys = system + pending_suffix if pending_suffix else system
             pending_suffix = ""
 
-            response = await provider.chat(working, tools=tools, system=sys)
+            try:
+                response = await provider.chat(working, tools=tools, system=sys)
+            except Exception as e:
+                # 图片尺寸超限：剥离图片后重试一次
+                if _is_image_error(e) and not _image_stripped:
+                    _image_stripped = True
+                    if _strip_images_from_messages(working):
+                        logger.warning("图片尺寸超限，剥离图片后重试: %s", e)
+                        response = await provider.chat(working, tools=tools, system=sys)
+                    else:
+                        raise
+                else:
+                    raise
             self.usage.add(response.usage)
             working.append(response)
 
@@ -1036,6 +1092,7 @@ class Agent:
         _need_enhanced_context = False  # 上一轮模型响应是否提到"需要更多信息"
         _decision_prompt_injected = False  # 本轮开头是否注入过决策提示（pop 用）
         _enhanced_context_injected = False  # 本轮开头是否注入过增强上下文（pop 用）
+        _image_stripped = False  # 图片超限时剥离重试（只允许一次，避免循环）
 
         for i in range(max_iters):
             # 上一轮注入的决策提示/增强上下文是临时 user 消息，本轮消费完后 pop 掉，避免污染 history
@@ -1085,12 +1142,32 @@ class Agent:
                     if chunk.is_final:
                         final_chunk = chunk
                         self.usage.add(chunk.usage)
-            except Exception:
+            except Exception as e:
+                # 图片尺寸超限：剥离图片后重试一次。
+                # 图片已落盘，[image_paths: ...] 路径提示已在 content 中，
+                # 模型可通过 file_read/shell 工具读取本地文件自行处理。
+                if _is_image_error(e) and not _image_stripped and not full_content:
+                    _image_stripped = True
+                    if _strip_images_from_messages(working):
+                        logger.warning("图片尺寸超限，剥离图片后重试: %s", e)
+                        full_content = ""
+                        final_chunk = None
+                        async for chunk in provider.stream_chat(working, tools=tools, system=sys):
+                            if chunk.reasoning:
+                                yield ThinkingEvent(delta=chunk.reasoning)
+                            if chunk.content:
+                                full_content += chunk.content
+                                yield chunk.content
+                            if chunk.is_final:
+                                final_chunk = chunk
+                                self.usage.add(chunk.usage)
+                    else:
+                        raise  # 没有图片可剥离，不是图片问题
                 # lite 模型（fast 档）可能偶发 503/鉴权失败，或 lite 模型在当前
                 # provider 上不可用（如 OpenAI-compat base URL 不认识 gemini-flash-lite）。
                 # 若还没产出任何内容，回退主模型重试本轮一次，并禁用 lite provider
                 # 避免后续 fast 档重复踩坑。
-                if provider is not self._provider and not full_content:
+                elif provider is not self._provider and not full_content:
                     logger.warning("fast 档 lite provider 调用失败，回退主模型重试（后续 fast 档将直接用主模型）", exc_info=True)
                     provider = self._provider
                     self._lite_provider = self._provider  # 禁用 lite，后续 fast 档不再重试

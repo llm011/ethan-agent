@@ -61,3 +61,40 @@ def load_image_b64(relative_path: str) -> str | None:
 def image_file_path(relative_path: str) -> Path:
     """根据相对路径返回绝对文件路径（供 FileResponse 用）。"""
     return IMAGES_DIR / relative_path
+
+
+# 大多数 LLM provider 对图片单边尺寸限制 8000px（Anthropic/Kiro 等）
+_MAX_IMAGE_DIM = 8000
+
+
+def downscale_image_b64(data_b64: str, media_type: str, max_dim: int = _MAX_IMAGE_DIM) -> tuple[str, bool]:
+    """如果图片任一边超过 max_dim，按比例缩小为 JPEG。
+
+    返回 (新 base64, 是否缩放)。Pillow 不可用或解析失败时返回原图，
+    交由 agent 层的 reactive fallback 兜底。
+    """
+    try:
+        import io  # noqa: PLC0415
+
+        from PIL import Image  # noqa: PLC0415
+
+        raw = base64.b64decode(data_b64)
+        img = Image.open(io.BytesIO(raw))
+        w, h = img.size
+        if w <= max_dim and h <= max_dim:
+            return data_b64, False
+
+        ratio = min(max_dim / w, max_dim / h)
+        new_w, new_h = int(w * ratio), int(h * ratio)
+        img = img.resize((new_w, new_h), Image.LANCZOS)
+
+        # RGB 化以兼容 JPEG（RGBA 图片直接存 JPEG 会报错）
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=85)
+        new_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+        return new_b64, True
+    except Exception:
+        return data_b64, False
