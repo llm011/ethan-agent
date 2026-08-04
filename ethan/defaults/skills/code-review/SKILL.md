@@ -1,6 +1,6 @@
 ---
 name: code-review
-version: 2.9.0
+version: 2.10.0
 category: discoverable
 trigger: "code review|代码审查|review代码|review一下|帮我看看代码|看下代码|审查代码|pr review|diff review|检查代码|代码质量|代码评审|代码走查|review pr|审查pr|把评论打上去|发评论|打评论|提交评论|发布评论|pr评论"
 description: "对代码变更做审查：识别 bug、安全漏洞、性能问题。P0 必须修复写评论，P1 建议性评论，P2 只在总结里一句带过。用户要求 review、审查、发评论、打评论时都必须先用 skill_read 读全文。"
@@ -9,6 +9,23 @@ description: "对代码变更做审查：识别 bug、安全漏洞、性能问�
 # code-review
 
 对 PR/MR diff 做审查，发现问题并发布行内评论。
+
+## 🔀 模式选择（先读这段）
+
+本技能有两种模式，**默认走快速模式**：
+
+| 模式 | 触发 | 流程文档 | 特点 |
+|------|------|---------|------|
+| 快速模式（默认） | 用户说 review / 审查 / 看看代码，但**没**强调深度 | 本文件下方「硬约束 + 6 步流程」 | 只看 diff，快 |
+| 深度模式 | 用户明确说「深度 review / deep review / thorough review / 严格审查 / 彻底 review / 仔细审查 / deep code review」 | `references/deep-review.md` | 读 diff 外上下文 + 多 agent 扇出 + 对抗式验证，慢 5-10 倍 |
+
+**不确定 → 走快速模式。** 别自作主张进深度模式（它慢很多，且会读 diff 外文件）。
+
+深度模式与下方硬约束的关系：
+- **继承**：只读不写、跳过噪音文件、评论风格、P0/P1/P2 分级、发评论方式、GitHub 访问策略、评论语言。
+- **覆盖**：深度模式**会读 diff 外的单个文件**（按需 `gh api contents` 拉取，按 head sha），用于补封闭上下文。下方「只看 diff / 禁止 clone」对深度模式放宽为「禁止 `git clone`/`git checkout`，但允许按需拉单个文件 + `search/code` 找调用方」。其余硬约束深度模式同样遵守。
+
+下面从「⚠️ 硬约束」开始的内容是**快速模式**的流程；深度模式见 `references/deep-review.md`。
 
 ## ⚠️ 硬约束（违反即失败）
 
