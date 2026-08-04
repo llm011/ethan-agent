@@ -98,31 +98,38 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Sync version from pyproject.toml
+        # Windows runner 默认用 PowerShell，但脚本里是 bash 语法（$(...)、${...}），
+        # 必须显式指定 bash（Windows 自带 Git Bash）。
+        # 同时避免用 sed——BSD sed (macOS) 不支持 0,/pattern/ 范围语法，
+        # 会报 "extra characters at the end of d command" 导致 macOS 构建失败。
+        shell: bash
         run: |
           # pyproject.toml 是唯一版本源，构建前把版本号同步到 desktop 各文件
           VERSION=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
           echo "Syncing desktop version files to $VERSION"
-          # tauri.conf.json
+          # tauri.conf.json / package.json / Cargo.toml 统一用 Python 跨平台处理
           python3 -c "
-          import json
+          import json, re
+          version = '$VERSION'
+          # tauri.conf.json
           f = 'desktop/src-tauri/tauri.conf.json'
           d = json.load(open(f))
-          d['version'] = '$VERSION'
+          d['version'] = version
           json.dump(d, open(f, 'w'), indent=2, ensure_ascii=False)
           open(f, 'a').write('\n')
-          "
           # package.json
-          python3 -c "
-          import json
           f = 'desktop/package.json'
           d = json.load(open(f))
-          d['version'] = '$VERSION'
+          d['version'] = version
           json.dump(d, open(f, 'w'), indent=2, ensure_ascii=False)
           open(f, 'a').write('\n')
+          # Cargo.toml：只替换 [package] 下第一行 version（首个出现的 version = \"...\")
+          f = 'desktop/src-tauri/Cargo.toml'
+          content = open(f).read()
+          content = re.sub(r'^version = \".*?\"', f'version = \"{version}\"', content, count=1, flags=re.MULTILINE)
+          open(f, 'w').write(content)
+          print('Verified:', [l for l in content.splitlines() if l.startswith('version')][:1])
           "
-          # Cargo.toml（只替换 [package] 下第一行 version）
-          sed -i "0,/^version = \".*\"/s//version = \"$VERSION\"/" desktop/src-tauri/Cargo.toml
-          echo "Verified: $(grep '^version' desktop/src-tauri/Cargo.toml)"
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v1

@@ -167,11 +167,7 @@ class OpenAICompatProvider(BaseProvider):
 
         usage_dict = None
         if usage:
-            usage_dict = {
-                "input": getattr(usage, "prompt_tokens", 0),
-                "output": getattr(usage, "completion_tokens", 0),
-                "cache": getattr(usage.prompt_tokens_details, "cached_tokens", 0) if hasattr(usage, "prompt_tokens_details") and usage.prompt_tokens_details else 0,
-            }
+            usage_dict = self._parse_usage(usage)
 
         return Message(
             role="assistant",
@@ -179,6 +175,33 @@ class OpenAICompatProvider(BaseProvider):
             tool_calls=tool_calls,
             usage=usage_dict,
         )
+
+    @staticmethod
+    def _parse_usage(usage) -> dict:
+        """解析 usage，统一读取 OpenAI 标准 + DeepSeek 专有的缓存字段。
+
+        各家返回结构：
+        - OpenAI 标准：prompt_tokens_details.cached_tokens
+        - DeepSeek 官方：prompt_cache_hit_tokens / prompt_cache_miss_tokens
+          （同时也会在 prompt_tokens_details.cached_tokens 回填，两者取一致值）
+        - 火山 ARK：prompt_tokens_details.cached_tokens
+
+        返回统一字段：input/output/cache，其中 cache = 命中缓存的 token 数。
+        """
+        usage_dict = {
+            "input": getattr(usage, "prompt_tokens", 0) or 0,
+            "output": getattr(usage, "completion_tokens", 0) or 0,
+            "cache": 0,
+        }
+        # OpenAI 标准 / ARK 隐式缓存的 cached_tokens
+        ptd = getattr(usage, "prompt_tokens_details", None)
+        if ptd:
+            usage_dict["cache"] = getattr(ptd, "cached_tokens", 0) or 0
+        # DeepSeek 专有字段（优先级高于标准字段，若两者不一致以专有字段为准）
+        hit = getattr(usage, "prompt_cache_hit_tokens", None)
+        if hit and hit > usage_dict["cache"]:
+            usage_dict["cache"] = hit
+        return usage_dict
 
     def _parse_text_tool_calls(self, content: str) -> list[ToolCall]:
         """从文本中解析 `call:<tool_name>{<args>}` 格式的工具调用。
@@ -322,13 +345,7 @@ class OpenAICompatProvider(BaseProvider):
 
             # Usage comes in the final chunk (with empty choices or after finish)
             if chunk.usage:
-                stream_usage = {
-                    "input": chunk.usage.prompt_tokens or 0,
-                    "output": chunk.usage.completion_tokens or 0,
-                    "cache": 0,
-                }
-                if hasattr(chunk.usage, "prompt_tokens_details") and chunk.usage.prompt_tokens_details:
-                    stream_usage["cache"] = getattr(chunk.usage.prompt_tokens_details, "cached_tokens", 0) or 0
+                stream_usage = self._parse_usage(chunk.usage)
 
                 # If this is the standalone usage chunk (choices is empty), yield it and we're done.
                 # 必须携带累积的 tool_calls：部分网关（如 Gemini 经由 openai 兼容端点）在

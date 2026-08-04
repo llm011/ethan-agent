@@ -4,9 +4,10 @@ from datetime import datetime
 from pathlib import Path
 
 from ethan.core.config import get_config
-from ethan.core.context_budget import enforce_context_budget
+from ethan.core.context_budget import compress_previous_round_tools, enforce_context_budget
 from ethan.core.routing import _get_route, _match_fast_rule, classify_instant
 from ethan.core.tool_format import (
+    _INTENT_SYSTEM_INSTRUCTION,
     _detail,
     _format_args,
     _preview,
@@ -74,6 +75,8 @@ class Agent:
         self.runtime_context: str = ""
         # 是否为主人：非主人时跳过记忆召回（隐私保护），由渠道层（如 lark_agent）设置
         self.is_owner: bool = True
+        # 当前会话 ID（由路由层设置），用于 web_fetch 结果存文件的目录隔离
+        self.session_id: str = ""
         self._load_system_files()
 
     def _load_system_files(self) -> None:
@@ -298,6 +301,7 @@ class Agent:
                 "（知识库/定时任务/密钥/记忆写入/代码委派等），激活后直接调用。"
                 "绝不要用 shell/terminal 跑 python 去硬凑这些能力。"
             )
+            parts.append(_INTENT_SYSTEM_INSTRUCTION)
             # 记忆召回改为按需工具调用（recall_memory），不再前置注入 system prompt。
             # 模型在第一轮自行判断是否需要召回，若需要则调用 recall_memory(query) 并传入
             # 改写后的自包含 query（用对话上下文消解代词/省略）。
@@ -395,6 +399,7 @@ class Agent:
             parts.append(f"<agent_protocols>\n{agent_content}\n</agent_protocols>")
         if tools_content:
             parts.append(f"<tools_reference>\n{tools_content}\n</tools_reference>")
+            parts.append(_INTENT_SYSTEM_INSTRUCTION)
 
         # Inject default 类 skill 清单（全量注入的稳定能力集），让 Agent 知道自己的核心能力。
         # 只列 name + description 首行（≤80 字符），discoverable 类在下方单独列（name+trigger），
@@ -746,6 +751,7 @@ class Agent:
         reset_active_tools()  # 清空本请求的 find_tools 激活集
         working = list(messages)
         enforce_context_budget(working)  # 历史 tool result 也可能很大，进循环前先管控
+        compress_previous_round_tools(working, self.session_id)  # 压缩上一轮 search/fetch 结果
         _route, system, tools_list, max_iters = self._select_route(working)
         provider = self._provider_for_route(_route)
 
@@ -898,6 +904,7 @@ class Agent:
                         images=r.images or [],
                     ))
                 enforce_context_budget(working)  # 新 tool result 进上下文前管控体积，防撑爆
+                compress_previous_round_tools(working, self.session_id)  # 压缩上一轮 search/fetch 结果
                 monitor.record(response.tool_calls, had_error)
 
             # plan 工具调用感知：如果本轮调了 plan_write，标记已规划
@@ -994,6 +1001,7 @@ class Agent:
                 return
 
         enforce_context_budget(working)  # 历史 tool result 也可能很大，进循环前先管控
+        compress_previous_round_tools(working, self.session_id)  # 压缩上一轮 search/fetch 结果
         _route, system, tools_list, max_iters = self._select_route(working)
         provider = self._provider_for_route(_route)
 
@@ -1381,6 +1389,7 @@ class Agent:
                 ))
 
             enforce_context_budget(working)  # 新 tool result 进上下文前管控体积，防撑爆
+            compress_previous_round_tools(working, self.session_id)  # 压缩上一轮 search/fetch 结果
             monitor.record(tool_calls, had_error)
             # [DIAG] 签名诊断：iter / 工具名 / 签名 hash / 是否 stuck（info 级别，便于观察）
             if tool_calls:

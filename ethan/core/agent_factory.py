@@ -23,6 +23,7 @@ from ethan.tools.builtin.decide import DecideTool
 from ethan.tools.builtin.deliver_file import DeliverFileTool
 from ethan.tools.builtin.file import FileListTool, FileReadTool, FileWriteTool
 from ethan.tools.builtin.find_tools import FindToolsTool
+from ethan.tools.builtin.heartbeat import HeartbeatAddTool, HeartbeatListTool, HeartbeatRemoveTool
 from ethan.tools.builtin.image_search import ImageSearchTool
 from ethan.tools.builtin.install_skill import InstallSkillTool
 from ethan.tools.builtin.knowledge import KnowledgeAddTool, KnowledgeEditTool, KnowledgeReadTool, KnowledgeSearchTool
@@ -86,11 +87,12 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
     # 基础工具（所有 toolset 共有）
     registry.register(ShellTool())
     registry.register(WebSearchTool())
-    # image_search：仅在配置了 SearXNG 且开启时注册
+    # image_search：开启 image_search_enabled 即注册。
+    # Wallhaven 是主力来源，不依赖 SearXNG；SearXNG 仅作补充（配置了 base_url 才用）。
     try:
         from ethan.core.config import get_config as _get_cfg
         _ws_cfg = _get_cfg().tools.web_search
-        if _ws_cfg.base_url and _ws_cfg.image_search_enabled:
+        if _ws_cfg.image_search_enabled:
             registry.register(ImageSearchTool())
     except Exception:
         pass  # 配置未加载时不阻塞工具注册
@@ -103,7 +105,8 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
     registry.register(DeliverFileTool())
 
     if toolset == "heartbeat":
-        # 心跳：只读 + 执行任务 + 调度 + 知识库 + plan，不写记忆/skill/profile
+        # 心跳：只读 + 执行任务 + 调度 + 知识库 + plan + skill_read，不写记忆/skill/profile
+        # skill_read 让 heartbeat agent 能按需拉取 [agent:xxx] 任务的完整 SKILL.md 和 references
         registry.register(DecideTool())
         registry.register(ScheduleCreateTool(user_id=user_id))
         registry.register(ScheduleListTool())
@@ -114,6 +117,7 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
         registry.register(PlanWriteTool(user_id=user_id))
         registry.register(PlanReadTool(user_id=user_id))
         registry.register(PlanUpdateTool(user_id=user_id))
+        registry.register(SkillReadTool())
         return registry
 
     # full / lark：全量
@@ -143,6 +147,9 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
     registry.register(DelegateCodingTool(user_id=user_id))
     registry.register(ConfigGetTool())
     registry.register(ConfigSetTool())
+    registry.register(HeartbeatAddTool())
+    registry.register(HeartbeatRemoveTool())
+    registry.register(HeartbeatListTool())
     registry.register(SetSecretTool())
     registry.register(GetSecretTool())
     registry.register(ListSecretsTool())

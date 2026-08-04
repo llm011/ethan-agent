@@ -130,6 +130,8 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
     #   非 stream 模式 → 返回带 friendly detail 的 500。
     try:
         agent = create_agent(req.model, channel=req.channel, user_id=user_id, mode=req.mode)
+        if req.session_id:
+            agent.session_id = req.session_id
         if req.runtime_context:
             if agent.runtime_context:
                 agent.runtime_context = agent.runtime_context + "\n\n" + req.runtime_context
