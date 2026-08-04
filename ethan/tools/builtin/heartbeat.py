@@ -125,12 +125,16 @@ class HeartbeatAddTool(BaseTool):
         header = _read_header(content)
         tasks = _parse_tasks(content)
 
-        # 去重：相同 task_type+task 已存在则跳过
+        # 去重：相同 task_type+task 已存在则跳过。
+        # agent 类型用正则提取 [agent:skill] 中的 skill 名做归一化比较，
+        # 容忍 [agent:work-notes ] / [agent:work-notes] 等空格差异。
         type_label = task_type if task_type == "script" else f"agent:{task}"
+        target_task_norm = task.strip()
         for t in tasks:
             existing_type = t["type"]
             if task_type == "agent":
-                if existing_type == f"agent:{task}":
+                m = re.match(r"agent:\s*(.+?)\s*$", existing_type)
+                if m and m.group(1).strip() == target_task_norm:
                     return f"已存在相同任务（id={t['id']}），未重复添加"
             else:
                 if existing_type == "script" and t["command"] == task:

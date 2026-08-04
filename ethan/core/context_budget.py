@@ -105,6 +105,8 @@ def enforce_context_budget(working: list[Message]) -> None:
 
 _COMPRESSED_MARKER = "[搜索结果已压缩"
 _FETCH_OFFLOADED_MARKER = "[fetch结果已存文件"
+# web.py 自身的 offload 标记（web_fetch 结果 >8000 字时已存到 /tmp/web_fetch_*.md）
+_WEB_FETCH_OFFLOADED_MARKER = "[网页内容过长"
 
 
 def _find_tool_name(working: list[Message], tool_idx: int) -> str:
@@ -130,27 +132,40 @@ def _compress_search_content(content: str) -> str:
 
         url
 
+    snippet 可能含空白行，简单 split("\\n\\n") 会把一条结果拆成两块，
+    导致 URL 与标题分离后被丢弃。这里改用「以 http URL 行为锚点回溯标题」
+    的方式重建每条结果，避免丢 URL。
+
     压缩后：
         [搜索结果已压缩为标题+URL列表]
         - title | url
     """
-    blocks = content.split("\n\n")
-    lines: list[str] = []
-    for block in blocks:
-        block = block.strip()
-        if not block or block.startswith("Found ~"):
-            continue
-        parts = block.split("\n")
-        title_line = parts[0] if parts else ""
-        url_line = parts[-1] if len(parts) > 1 else ""
-        # 去掉 ** 和 [source] 前缀
-        title = re.sub(r"^\*\*\[.*?\]\s*", "", title_line).replace("**", "").strip()
-        url = url_line.strip()
-        if url.startswith("http"):
-            lines.append(f"- {title} | {url}")
-    if not lines:
+    lines_out: list[str] = []
+    # 以 URL 行为锚点：每遇到一个 http(s) 开头的行，往前找最近的标题行。
+    all_lines = content.split("\n")
+    url_re = re.compile(r"^https?://\S+$")
+    title_re = re.compile(r"^\*\*\[.*?\]\s*(.*?)\s*\*{0,2}")
+    # 先收集所有 URL 行的索引
+    url_indices = [i for i, ln in enumerate(all_lines) if url_re.match(ln.strip())]
+    if not url_indices:
         return content[:200] + "…" if len(content) > 200 else content
-    return _COMPRESSED_MARKER + "为标题+URL列表]\n" + "\n".join(lines)
+    # 从每个 URL 行向前回溯找标题（跳过 snippet / 空行），最多回溯 10 行
+    for ui in url_indices:
+        url = all_lines[ui].strip()
+        title = ""
+        for j in range(ui - 1, max(ui - 10, -1), -1):
+            candidate = all_lines[j].strip()
+            if not candidate:
+                continue
+            m = title_re.match(candidate)
+            if m:
+                title = m.group(1).replace("**", "").strip()
+                break
+            # 非空非标题行：可能是 snippet，继续回溯
+        lines_out.append(f"- {title} | {url}")
+    if not lines_out:
+        return content[:200] + "…" if len(content) > 200 else content
+    return _COMPRESSED_MARKER + "为标题+URL列表]\n" + "\n".join(lines_out)
 
 
 def _offload_fetch_content(content: str, session_id: str, tool_call_id: str) -> str:
@@ -207,8 +222,12 @@ def compress_previous_round_tools(working: list[Message], session_id: str = "") 
         content = msg.content or ""
         if not content:
             continue
-        # 已压缩过的跳过
-        if _COMPRESSED_MARKER in content or _FETCH_OFFLOADED_MARKER in content:
+        # 已压缩过的跳过（含本模块的标记 + web.py 自身的 offload 标记）
+        if (
+            _COMPRESSED_MARKER in content
+            or _FETCH_OFFLOADED_MARKER in content
+            or _WEB_FETCH_OFFLOADED_MARKER in content
+        ):
             continue
 
         tool_name = _find_tool_name(working, i)

@@ -1,10 +1,10 @@
 """Image Search Tool — 基于 Wallhaven + SearXNG 的图片搜索工具。
 
-仅在配置了 SearXNG（config.tools.web_search.base_url 非空）且
-image_search_enabled=True 时启用（注册逻辑见 ethan/core/agent_factory.py）。
+开启 image_search_enabled=True 即注册（注册逻辑见 ethan/core/agent_factory.py）。
+Wallhaven 为主力来源，SearXNG 为可选补充（配置了 base_url 才查询）。
 
 特点：
-  - 并行查询 Wallhaven API（高质量壁纸）+ SearXNG images（通用图片）
+  - 并行查询 Wallhaven API（高质量壁纸）+ SearXNG images（通用图片，可选）
   - Wallhaven 结果优先排列（高清壁纸质量更高）
   - 默认只返回图片元数据（URL + 标题 + 来源 + 尺寸）
   - 可选 download=True：下载图片到本地临时目录，返回本地路径

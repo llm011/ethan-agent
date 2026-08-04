@@ -157,10 +157,14 @@ class AnthropicProvider(BaseProvider):
             }
             for t in tools
         ]
-        # 在最后一个工具定义上加 cache_control，整块 tools 走 ephemeral 缓存。
-        # 多轮工具调用时省 ~5K tokens/轮（35 个工具定义只需首轮 creation，后续 read）。
+        # 在第一个工具定义上加 cache_control，使缓存断点位于稳定的工具前缀。
+        # 缓存块以 cache_control 所在位置为终点，之前的内容（含所有靠前工具）可被复用。
+        # 放在 result[-1] 时，find_tools 激活新工具会改变末尾工具的身份/顺序，
+        # 导致整块缓存失效；放在 result[0] 时，只要第一个工具不变（通常是最基础的
+        # web_search/shell 等 always-on 工具），缓存前缀就稳定，后续激活新工具
+        # 不影响已缓存部分，依然能命中省 token。
         if result and not self._disable_prompt_cache:
-            result[-1]["cache_control"] = {"type": "ephemeral"}
+            result[0]["cache_control"] = {"type": "ephemeral"}
         return result
 
     def _parse_response(self, response: anthropic.types.Message) -> Message:  # noqa: F821 — lazy-imported in __init__
