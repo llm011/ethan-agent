@@ -18,6 +18,7 @@ interface ResultItem {
   markdown: string;    // 累积的结果文本
   done: boolean;
   error?: string;
+  aborted?: boolean;   // 用户点击「停止」中止
 }
 
 interface EthanResultPanelApi {
@@ -100,6 +101,7 @@ interface EthanResultPanelApi {
       '  <div id="' + PANEL_ID + '_actions" style="display:flex;gap:6px;padding:8px 12px;border-top:1px solid ' + (dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)') + ';flex-shrink:0">',
       '    <button id="' + PANEL_ID + '_copy" style="flex:none;padding:5px 10px;border:1px solid ' + (dark ? '#374151' : '#e5e7eb') + ';border-radius:6px;background:none;color:inherit;cursor:pointer;font-size:12px">复制</button>',
       '    <button id="' + PANEL_ID + '_kb" style="flex:none;padding:5px 10px;border:1px solid ' + (dark ? '#374151' : '#e5e7eb') + ';border-radius:6px;background:none;color:inherit;cursor:pointer;font-size:12px">存知识库</button>',
+      '    <button id="' + PANEL_ID + '_stop" style="display:none;margin-left:auto;flex:none;padding:5px 10px;border:1px solid #b91c1c;border-radius:6px;background:#fef2f2;color:#b91c1c;cursor:pointer;font-size:12px;font-weight:500">停止生成</button>',
       '  </div>',
       '  <div id="' + PANEL_ID + '_followup" style="display:flex;gap:6px;align-items:flex-end;padding:0 12px 12px">',
       '    <textarea id="' + PANEL_ID + '_input" rows="1" placeholder="追问…" style="flex:1;resize:none;padding:7px 9px;border-radius:8px;border:1px solid ' + (dark ? '#374151' : '#e5e7eb') + ';background:' + (dark ? '#2a2e37' : '#fff') + ';color:inherit;font-size:13px;font-family:inherit;line-height:1.4;max-height:80px;outline:none"></textarea>',
@@ -139,6 +141,7 @@ interface EthanResultPanelApi {
     if (nextBtn) { nextBtn.addEventListener('click', (e) => { e.stopPropagation(); nav(1); }); }
     (host.querySelector('#' + PANEL_ID + '_copy') as HTMLElement).onclick = copyCur;
     (host.querySelector('#' + PANEL_ID + '_kb') as HTMLElement).onclick = saveKb;
+    (host.querySelector('#' + PANEL_ID + '_stop') as HTMLElement).onclick = cancelActive;
 
     const input = host.querySelector('#' + PANEL_ID + '_input') as HTMLTextAreaElement;
     input.addEventListener('input', () => {
@@ -180,7 +183,9 @@ interface EthanResultPanelApi {
       } else if (!it.markdown) {
         body.innerHTML = '<span style="color:#9aa0aa;font-style:italic">思考中…</span>';
       } else {
-        body.innerHTML = renderMd(it.markdown);
+        let html = renderMd(it.markdown);
+        if (it.aborted) html += '<div style="margin-top:8px;color:#9aa0aa;font-size:12px;font-style:italic">— 已停止生成 —</div>';
+        body.innerHTML = html;
       }
       body.scrollTop = body.scrollHeight;
     }
@@ -216,6 +221,22 @@ interface EthanResultPanelApi {
     setTimeout(() => { b.textContent = old; }, 1500);
   }
 
+  /** 切换「停止生成」按钮显示：有流式请求显示、没有就隐藏 */
+  function syncStopBtn() {
+    const stopBtn = el('stop') as HTMLButtonElement | null;
+    if (!stopBtn) return;
+    stopBtn.style.display = activeReqId ? 'inline-flex' : 'none';
+  }
+
+  /** 取消当前正在流式的请求（由停止按钮触发）。 */
+  function cancelActive() {
+    if (!activeReqId) return;
+    const rid = activeReqId;
+    try {
+      chrome.runtime.sendMessage({ type: 'cancel-chat', requestId: rid }).catch(() => {});
+    } catch {}
+  }
+
   function sendFollowUp() {
     const input = el('input') as HTMLTextAreaElement | null;
     if (!input || cur < 0 || !items[cur]) return;
@@ -228,6 +249,7 @@ interface EthanResultPanelApi {
     // 追问延用当前结果的 session，走多轮
     const reqId = genId();
     activeReqId = reqId;
+    syncStopBtn();
     const it: ResultItem = { title: '追问：' + q.slice(0, 20), sessionId: base.sessionId, markdown: '', done: false };
     pushItem(it);
     activeItem = it;   // 回填目标锁定到这条，翻页改 cur 也不会串
@@ -240,6 +262,7 @@ interface EthanResultPanelApi {
     cur = items.length - 1;
     show();
     render();
+    syncStopBtn();
   }
 
   // ── 对外 API ─────────────────────────────────────────────────
@@ -249,6 +272,7 @@ interface EthanResultPanelApi {
     const it: ResultItem = { title: opts.title, sessionId: opts.sessionId, markdown: '', done: false };
     pushItem(it);
     activeItem = it;   // 回填目标锁定到这条，翻页改 cur 也不会串
+    syncStopBtn();
   }
 
   // ── 消息监听 ─────────────────────────────────────────────────
@@ -280,9 +304,10 @@ interface EthanResultPanelApi {
       if (it && !it.done) { it.markdown += msg.delta || ''; if (items[cur] === it) render(); }
     } else if (msg.type === 'chatDone' && msg.requestId === activeReqId) {
       const it = activeItem;
-      if (it) { it.done = true; if (msg.error) it.error = msg.error; if (items[cur] === it) render(); }
+      if (it) { it.done = true; if (msg.error) it.error = msg.error; if (msg.aborted && !it.error) it.aborted = true; if (items[cur] === it) render(); }
       activeReqId = '';
       activeItem = null;
+      syncStopBtn();
     }
   }
 

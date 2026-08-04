@@ -46,7 +46,10 @@
       #connect:hover { background: #4338ca; }
       #reading { background: #0d9488; color: #fff; }
       #reading:hover { background: #0f766e; }
-      #hint { font-size: 12px; color: #16a34a; min-height: 16px; margin-top: 8px; text-align: center; }
+      #hint { font-size: 12px; color: #9aa0aa; min-height: 16px; margin-top: 8px; text-align: center; transition: color 0.15s; }
+      #hint.ok { color: #16a34a; }
+      #hint.err { color: #dc2626; }
+      #hint.warn { color: #b45309; }
       .toggle-row {
         display: flex; align-items: center; justify-content: space-between;
         margin-top: 14px; padding: 10px 12px; border-radius: 8px;

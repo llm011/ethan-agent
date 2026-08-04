@@ -5,6 +5,15 @@ const $ = id => document.getElementById(id);
 
 const DEFAULT_URL = 'ws://localhost:8900/ws/browser';
 
+/** 给 #hint 设文案；level=ok 绿/err 红/warn 黄/默认灰 */
+function setHint(text, level) {
+  const el = $('hint');
+  if (!el) return;
+  el.classList.remove('ok', 'err', 'warn');
+  if (level) el.classList.add(level);
+  el.textContent = text || '';
+}
+
 /** 生成 6 位随机字母+数字（大小写混合，去掉易混的 0O1l），用于多端区分的默认本端名称 */
 function genRandomClientName() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
@@ -39,7 +48,6 @@ async function load() {
 function setStatus(connected, diag, clientName) {
   const dot = $('dot');
   const text = $('statusText');
-  const hint = $('hint');
   dot.classList.remove('on', 'off');
 
   if (connected === true) {
@@ -47,35 +55,34 @@ function setStatus(connected, diag, clientName) {
     text.textContent = clientName
       ? `已连接 (${clientName})`
       : '已连接到 Ethan Server';
-    hint.textContent = '';
+    setHint('', '');
     return;
   }
 
   if (diag === 'connecting') {
     text.textContent = '正在连接…';
-    hint.textContent = '';
+    setHint('', '');
     return;
   }
 
   if (diag === 'no_config') {
     dot.classList.add('off');
     text.textContent = '未配置';
-    hint.textContent = '请填写 Server 地址和 Token';
+    setHint('请填写 Server 地址和 Token', 'warn');
     return;
   }
 
   dot.classList.add('off');
   if (diag === 'auth_failed') {
     text.textContent = 'Token 错误';
-    hint.textContent = '鉴权失败，请检查 Token 是否与 ethan web token 一致';
+    setHint('鉴权失败，请检查 Token 是否与 ethan web token 一致', 'err');
   } else if (diag === 'connection_failed') {
     text.textContent = '无法连接';
-    // 进一步诊断：server 没起 vs 端口被占
-    hint.textContent = '正在诊断…';
+    setHint('正在诊断…', 'warn');
     void diagnoseConnection();
   } else {
     text.textContent = '未连接';
-    hint.textContent = '';
+    setHint('', '');
   }
 }
 
@@ -83,7 +90,7 @@ function setStatus(connected, diag, clientName) {
 async function diagnoseConnection() {
   const { serverUrl } = await chrome.storage.local.get(['serverUrl']);
   if (!serverUrl) {
-    $('hint').textContent = '请先填写 Server 地址';
+    setHint('请先填写 Server 地址', 'warn');
     return;
   }
   const httpUrl = wsToHttp(serverUrl);
@@ -93,18 +100,18 @@ async function diagnoseConnection() {
     // 能拿到 HTTP 响应说明端口有服务在监听
     const server = res.headers.get('server') || '';
     if (res.status === 404 || (!server.includes('uvicorn') && !server.includes('starlette'))) {
-      $('hint').textContent = `端口被其他服务占用（${res.status}），非 Ethan Server`;
+      setHint(`端口被其他服务占用（${res.status}），非 Ethan Server`, 'err');
     } else {
-      $('hint').textContent = 'Server 在线但 WS 连接失败，可能端口或路径不对';
+      setHint('Server 在线但 WS 连接失败，可能端口或路径不对（确认 /ws/browser）', 'err');
     }
   } catch (e) {
     const msg = String(e?.message || e);
     if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('ECONNREFUSED')) {
-      $('hint').textContent = 'Ethan Server 未启动，请运行 ethan serve';
+      setHint('Ethan Server 未启动，请运行 ethan serve', 'warn');
     } else if (msg.includes('timed out') || msg.includes('timeout')) {
-      $('hint').textContent = '连接超时，检查地址/端口是否正确';
+      setHint('连接超时，检查地址/端口是否正确', 'warn');
     } else {
-      $('hint').textContent = '连接失败: ' + msg;
+      setHint('连接失败: ' + msg, 'err');
     }
   }
 }
@@ -113,7 +120,7 @@ async function queryConnected() {
   try {
     const resp = await chrome.runtime.sendMessage({ type: 'getStatus' });
     if (resp && resp.error) {
-      $('hint').textContent = '错误: ' + resp.error;
+      setHint('错误: ' + resp.error, 'err');
       return { connected: false, diag: 'error', clientName: '' };
     }
     return {
@@ -122,7 +129,7 @@ async function queryConnected() {
       clientName: resp?.clientName || '',
     };
   } catch (e) {
-    $('hint').textContent = '查询失败: ' + (e?.message || e);
+    setHint('查询失败: ' + (e?.message || e), 'err');
     return { connected: false, diag: 'error', clientName: '' };
   }
 }
@@ -251,14 +258,24 @@ async function renderCommands() {
 async function runCommand(cmd) {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id || tab.url?.startsWith('chrome://') || tab.url?.startsWith('chrome-extension://') || tab.url?.startsWith('about:')) {
-    $('hint').textContent = '当前页面不支持';
+    setHint('当前页面不支持', 'err');
     return;
+  }
+  // 「全文翻译」会把整页发给模型，token 消耗大：二次确认，用户取消就中止。
+  if (cmd && cmd.id === 'translate' && cmd.scope === 'page') {
+    const ok = window.confirm(
+      '全文翻译会把当前页面整页内容发送给模型，可能消耗较多 Token。\n\n是否继续？',
+    );
+    if (!ok) {
+      setHint('已取消', 'warn');
+      return;
+    }
   }
   const resp = await chrome.runtime.sendMessage({ type: 'run-command', commandId: cmd.id, tabId: tab.id });
   if (resp?.ok) {
     window.close();
   } else {
-    $('hint').textContent = resp?.error || '执行失败';
+    setHint(resp?.error || '执行失败', 'err');
   }
 }
 
