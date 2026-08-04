@@ -11,10 +11,19 @@ on:
   push:
     tags:
       - 'v*'
+  # 允许手动触发 mirror-updater-json 单独验证（不需要发新版本）。
+  # 触发时只需指定 tag（如 v0.5.99），会从该 release 拉 latest.json 镜像到 Pages。
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to mirror latest.json from (e.g. v0.5.99)'
+        required: true
+        type: string
 
 jobs:
   # 检查自上一个 tag 以来 desktop 相关文件是否变化
   check-changes:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     outputs:
       desktop-changed: ${{ steps.diff.outputs.changed }}
@@ -49,7 +58,7 @@ jobs:
 
   build:
     needs: check-changes
-    if: needs.check-changes.outputs.desktop-changed == 'true'
+    if: github.event_name == 'push' && needs.check-changes.outputs.desktop-changed == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -175,7 +184,7 @@ jobs:
   # 搬到当前 release，确保 updater endpoint 始终可用。
   carry-updater-json:
     needs: check-changes
-    if: needs.check-changes.outputs.desktop-changed == 'false'
+    if: github.event_name == 'push' && needs.check-changes.outputs.desktop-changed == 'false'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -222,13 +231,18 @@ jobs:
   # Pages 只用于"检查是否有新版"，实际二进制下载仍走 Releases asset URL。
   mirror-updater-json:
     needs: [build, carry-updater-json]
-    if: always() && (needs.build.result == 'success' || needs.carry-updater-json.result == 'success')
+    # workflow_dispatch 时 build/carry 都跳过（result 为 'skipped'），需要显式放行
+    if: always() && (github.event_name == 'workflow_dispatch' || needs.build.result == 'success' || needs.carry-updater-json.result == 'success')
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      # 必须显式 ref: main —— tag push 触发时默认 checkout 进入 detached HEAD（指向 tag commit），
+      # 后续 git push 会报 "fatal: You are not currently on a branch." (exit 128)。
+      # mirror 只需把 latest.json 写回 main 分支，所以直接检 main。
       - uses: actions/checkout@v4
         with:
+          ref: main
           # 需要 push 权限提交 mirror 到 main
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -236,7 +250,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
+          # workflow_dispatch 时用 inputs.tag；tag push 时用 github.ref_name
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           # build/carry 刚跑完，release 一定存在且含 latest.json
           gh release download "$TAG" --repo "$REPO" --pattern "latest.json" --dir /tmp
@@ -252,7 +267,7 @@ jobs:
             echo "latest.json unchanged, skip commit"
           else
             git add web/public/latest.json
-            git commit -m "chore: mirror latest.json to Pages for updater endpoint ($TAG)"
+            git commit -m "chore: mirror latest.json to Pages for updater endpoint (${{ inputs.tag || github.ref_name }})"
             git push
             echo "Pushed latest.json mirror, deploy-docs.yml will deploy to Pages"
           fi
