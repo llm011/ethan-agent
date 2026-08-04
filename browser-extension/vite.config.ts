@@ -39,8 +39,23 @@ export default defineConfig({
         mkdirSync('dist/content', { recursive: true });
         const contentScripts = ['reader-extract.ts', 'overlay.ts', 'cookie-closer.ts', 'reading-mode.ts', 'result-panel.ts', 'selection-bar.ts'];
         for (const name of contentScripts) {
-          const src = readFileSync(resolve(__dirname, `src/content/${name}`), 'utf8')
-            .replace(/^\s*export\s*\{\s*\}\s*;?\s*$/m, '');  // 移除 export {} 避免 CJS interop
+          let src: string;
+          if (name === 'reading-mode.ts') {
+            // reading-mode 拆分到 reading-mode/ 目录，按显式顺序 concat 入口 + 片段后编译
+            const entrySrc = readFileSync(resolve(__dirname, `src/content/${name}`), 'utf8')
+              .replace(/^\s*export\s*\{\s*\}\s*;?\s*$/m, '');
+            const dir = resolve(__dirname, 'src/content/reading-mode');
+            const order = [
+              'state.ts', 'utils.ts', 'storage.ts', 'reader-api.ts',
+              'reader-overlay.ts', 'annotation.ts', 'selection-toolbar.ts',
+              'mark-click.ts', 'progress-toast.ts', 'ai-summary.ts',
+              'panel.ts', 'spy-kbd-reenter.ts', 'entry.ts',
+            ];
+            src = entrySrc + '\n' + order.map(f => readFileSync(resolve(dir, f), 'utf8')).join('\n');
+          } else {
+            src = readFileSync(resolve(__dirname, `src/content/${name}`), 'utf8')
+              .replace(/^\s*export\s*\{\s*\}\s*;?\s*$/m, '');  // 移除 export {} 避免 CJS interop
+          }
           const { outputText } = ts.transpileModule(src, {
             compilerOptions: {
               target: ts.ScriptTarget.ES2020,
