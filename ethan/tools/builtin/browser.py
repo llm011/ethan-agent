@@ -324,9 +324,12 @@ async def _call(method_key: str, params: dict, browser_session_id: str | None = 
     ethan_sid = get_session_id()
 
     # 会话隔离门禁:凡是操作既有 browser session 的调用,该 session 必须属于当前 ethan 会话。
+    # 若绑定关系丢失(例如 ethan 重启、对话换 ID),允许先向扩展核实 session 真实存在且
+    # 未被其他 ethan 会话占用,再自动恢复绑定,避免用户明明在「这个」tab 上操作却被拒。
     if browser_session_id is not None:
-        _require_owned(browser_session_id)
-        client_name = smap.get_client(browser_session_id) or hub.resolve_client(ethan_sid)
+        client_name = await _require_owned_or_recover(browser_session_id, ethan_sid)
+        if not client_name:
+            client_name = hub.resolve_client(ethan_sid)
     else:
         client_name = hub.resolve_client(ethan_sid)
         if client_name is None:
@@ -353,8 +356,75 @@ async def _call(method_key: str, params: dict, browser_session_id: str | None = 
     return result
 
 
+async def _require_owned_or_recover(browser_session_id: str, ethan_sid: str) -> str | None:
+    """校验 browser session 归属当前 ethan 会话;不归属时尝试恢复绑定。
+
+    返回该 session 所在的客户端名称(通常非空,除非扩展也找不到它),以便调用方
+    不用再去二次 resolve。未通过校验且恢复失败则抛出 BrowserError。
+    """
+    if not browser_session_id:
+        raise BrowserError(
+            "该 browser session 不属于当前对话,拒绝操作",
+            code=ERROR_CODE["session_not_found"],
+        )
+    smap = get_session_map()
+    owned = smap.list_for(ethan_sid)
+    if browser_session_id in owned:
+        return smap.get_client(browser_session_id) or None
+
+    # --- 绑定关系丢失:向扩展核实 session 是否真的存在 ---
+    hub = get_hub()
+    # 优先用当前 ethan 会话的活跃客户端去查(大多时候会话就在这个浏览器里)
+    probe_clients: list[str] = []
+    active = hub.get_active_client(ethan_sid)
+    if active:
+        probe_clients.append(active)
+    for name, conn in getattr(hub, "_conns", {}).items():
+        if not getattr(conn, "closed", True) and name not in probe_clients:
+            probe_clients.append(name)
+
+    found_client: str | None = None
+    for cname in probe_clients:
+        try:
+            res = await hub.call(METHODS["session_list"], {}, client_name=cname)
+        except Exception:
+            continue
+        sessions = res.get("sessions") if isinstance(res, dict) else None
+        if not isinstance(sessions, list):
+            continue
+        if any(
+            isinstance(s, dict)
+            and (s.get("sessionId") or s.get("session_id")) == browser_session_id
+            for s in sessions
+        ):
+            found_client = cname
+            break
+
+    if found_client is None:
+        # 扩展侧也确实找不到这个 session,正常拒绝
+        raise BrowserError(
+            "该 browser session 不属于当前对话,拒绝操作",
+            code=ERROR_CODE["session_not_found"],
+        )
+
+    # 检查是否已被其他 ethan 会话占用:若占用则不抢,仍拒绝(避免跨对话抢 tab)
+    all_entries = getattr(smap, "_entries", {})
+    for bsid, entry in all_entries.items():
+        if bsid == browser_session_id:
+            if entry.ethan_session_id and entry.ethan_session_id != ethan_sid:
+                raise BrowserError(
+                    "该 browser session 不属于当前对话,拒绝操作",
+                    code=ERROR_CODE["session_not_found"],
+                )
+            break
+
+    # 可以安全恢复绑定
+    smap.bind(browser_session_id, ethan_sid, client_name=found_client)
+    return found_client
+
+
 def _require_owned(browser_session_id: str) -> None:
-    """校验 browser session 归属当前 ethan 会话,不属于则拒绝。"""
+    """同步版本的归属校验(仅用于无需恢复绑定的调用点,保持兼容)。"""
     owned = get_session_map().list_for(get_session_id())
     if not browser_session_id or browser_session_id not in owned:
         raise BrowserError(
