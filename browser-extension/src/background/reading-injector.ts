@@ -50,12 +50,23 @@ export async function ensureReadingInjected(tabId: number): Promise<boolean> {
   }
 }
 
-/** 触发目标页进入阅读模式（content script 收到后自行渲染面板）。 */
+/** 触发目标页进入阅读模式（content script 收到后自行渲染面板）。
+ * 对飞书文档页：background 先抓全文 Markdown（带缓存），再把 presetMarkdown 传给阅读模式，
+ * 直接渲染全文，绕开虚拟滚动 DOM 拿不全的问题。 */
 export async function startReading(tabId: number): Promise<{ ok: boolean; error?: string }> {
   const ok = await ensureReadingInjected(tabId);
   if (!ok) return { ok: false, error: 'inject_failed' };
   try {
-    await chrome.tabs.sendMessage(tabId, { target: 'reading', type: 'start' });
+    const tab = await chrome.tabs.get(tabId);
+    const url = tab?.url || '';
+    let payload: any = { target: 'reading', type: 'start' };
+    // 飞书文档直接走 server 拉全文 Markdown（带 24h 浏览器缓存 + skill 自身磁盘缓存）
+    const feishu = url ? await fetchFeishuDocMarkdown(tabId, url) : null;
+    if (feishu) {
+      payload.presetMarkdown = feishu.markdown;
+      payload.presetTitle = feishu.title;
+    }
+    await chrome.tabs.sendMessage(tabId, payload);
     return { ok: true };
   } catch (e: any) {
     return { ok: false, error: String(e?.message || e) };
@@ -148,4 +159,106 @@ export async function readingSaveKnowledge(
   } catch (e: any) {
     return { ok: false, error: String(e?.message || e) };
   }
+}
+
+// ── 飞书文档全文获取（绕开网页 DOM 的虚拟滚动）────────────────────────────
+
+const FEISHU_DOC_CACHE_KEY = 'feishu_doc_cache_v1';
+const FEISHU_DOC_CACHE_MAX_AGE_MS = 24 * 3600 * 1000;
+
+interface FeishuDocCacheEntry {
+  markdown: string;
+  title: string;
+  url: string;
+  length: number;
+  fetchedAt: number;
+}
+
+function isFeishuDocUrl(url: string): boolean {
+  if (!url) return false;
+  try {
+    const u = new URL(url);
+    const host = u.hostname.toLowerCase();
+    if (!host.endsWith('feishu.cn') && !host.endsWith('larksuite.com') && !host.endsWith('feishu.net')) {
+      return false;
+    }
+    const parts = u.pathname.split('/').filter(Boolean);
+    if (!parts.length) return false;
+    const prefix = parts[0].toLowerCase();
+    // 仅处理云文档，忽略多维表格 / 表格（虚拟滚动且非纯文档）
+    return ['docx', 'wiki', 'doc', 'docs'].includes(prefix);
+  } catch {
+    return false;
+  }
+}
+
+async function readFeishuDocCache(url: string): Promise<FeishuDocCacheEntry | null> {
+  try {
+    const all = await chrome.storage.local.get([FEISHU_DOC_CACHE_KEY]);
+    const map: Record<string, FeishuDocCacheEntry> = all[FEISHU_DOC_CACHE_KEY] || {};
+    const e = map[url];
+    if (!e) return null;
+    if (Date.now() - (e.fetchedAt || 0) > FEISHU_DOC_CACHE_MAX_AGE_MS) return null;
+    return e;
+  } catch {
+    return null;
+  }
+}
+
+async function writeFeishuDocCache(url: string, entry: FeishuDocCacheEntry): Promise<void> {
+  try {
+    const all = await chrome.storage.local.get([FEISHU_DOC_CACHE_KEY]);
+    const map: Record<string, FeishuDocCacheEntry> = all[FEISHU_DOC_CACHE_KEY] || {};
+    map[url] = entry;
+    // 清理超龄项，避免 storage 无限涨
+    for (const k of Object.keys(map)) {
+      if (Date.now() - (map[k].fetchedAt || 0) > FEISHU_DOC_CACHE_MAX_AGE_MS) {
+        delete map[k];
+      }
+    }
+    await chrome.storage.local.set({ [FEISHU_DOC_CACHE_KEY]: map });
+  } catch {
+    /* ignore */
+  }
+}
+
+/** 通过本地 server 抓飞书文档全文 Markdown（带浏览器缓存 24h，server 端也自带缓存）。
+ * 失败返回 null（调用方退回 DOM 抽取方案）。 */
+export async function fetchFeishuDocMarkdown(
+  tabId: number,
+  url: string,
+): Promise<{ markdown: string; title: string; url: string; length: number } | null> {
+  if (!isFeishuDocUrl(url)) return null;
+
+  // 先查浏览器 storage 的缓存，避免即使有 /tmp 缓存仍要走 HTTP 往返
+  const cached = await readFeishuDocCache(url);
+  if (cached) return { markdown: cached.markdown, title: cached.title, url: cached.url, length: cached.length };
+
+  const cfg = await readConfig();
+  if (!cfg) return null;
+  try {
+    const res = await fetch(`${cfg.httpBase}/api/feishu-doc/fetch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.token}` },
+      body: JSON.stringify({ url, nocache: false }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data?.ok || !data.markdown) return null;
+    const entry: FeishuDocCacheEntry = {
+      markdown: String(data.markdown),
+      title: String(data.title || documentTitleFor(url)),
+      url: String(data.url || url),
+      length: Number(data.length || 0),
+      fetchedAt: Date.now(),
+    };
+    await writeFeishuDocCache(url, entry);
+    return { markdown: entry.markdown, title: entry.title, url: entry.url, length: entry.length };
+  } catch {
+    return null;
+  }
+}
+
+function documentTitleFor(_url: string): string {
+  return '';
 }
