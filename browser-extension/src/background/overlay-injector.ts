@@ -89,11 +89,53 @@ export async function removeOverlay(tabId: number): Promise<void> {
 
 function formatLabel(action: string, data: Record<string, unknown>): string {
   const ref = data.ref ? ` [${data.ref}]` : '';
-  const text = data.text ? ` "${String(data.text).slice(0, 40)}"` : '';
-  const key = data.key ? ` ${data.key}` : '';
-  const direction = data.direction ? ` ${data.direction}` : '';
-  const what = data.what ? ` ${data.what}` : '';
-  const selector = data.selector ? ` ${String(data.selector).slice(0, 40)}` : '';
+  const text = typeof data.text === 'string' ? ` "${String(data.text).slice(0, 20)}"` : '';
+  const key = typeof data.key === 'string' ? ` ${data.key}` : '';
+  const direction = typeof data.direction === 'string' ? ` ${data.direction}` : '';
+  const what = typeof data.what === 'string' ? ` ${data.what}` : '';
+  const selector = typeof data.selector === 'string' ? ` ${String(data.selector).slice(0, 20)}` : '';
+  const xpath = typeof data.xpath === 'string' ? ` xpath:${String(data.xpath).slice(0, 20)}` : '';
+  const ms = typeof data.ms === 'number' && data.ms ? ` ${data.ms}ms` : '';
+  const load = typeof data.load === 'string' ? ` ${data.load}` : '';
+  const prompt = typeof data.prompt === 'string' ? ` "${String(data.prompt).slice(0, 20)}"` : '';
+  const attributes = Array.isArray(data.attributes)
+    ? ` ${(data.attributes as string[]).slice(0, 3).join('/')}` : '';
+  const nth = typeof data.nth === 'number' ? ` #${data.nth}` : '';
+
+  // eval: 从脚本内容推断做了什么，给一个简短提示
+  let evalHint = '';
+  {
+    const script = typeof data.script === 'string' ? data.script : '';
+    if (script) {
+      if (/\.click\s*\(/.test(script)) evalHint = ' (点击元素)';
+      else if (/\.value\s*=/.test(script)) evalHint = ' (设值)';
+      else if (/scroll/.test(script)) evalHint = ' (滚动)';
+      else if (/querySelector/.test(script) && !evalHint) evalHint = ' (查询)';
+      else if (/fetch\s*\(/.test(script)) evalHint = ' (取数)';
+      else if (script.length < 30) evalHint = ` (${script.slice(0, 12)})`;
+    }
+  }
+
+  // mouse: 显示动作名 + 坐标（若有）
+  let mouseLabel = '鼠标操作';
+  {
+    const a = typeof data.action === 'string' ? ` ${data.action}` : '';
+    const x = typeof data.x === 'number' ? Math.round(data.x) : null;
+    const y = typeof data.y === 'number' ? Math.round(data.y) : null;
+    const coord = x != null && y != null ? ` (${x},${y})` : '';
+    if (a || coord) mouseLabel = `鼠标${a || '操作'}${coord}`;
+  }
+
+  // wait: 智能组合 ms / load / selector 等
+  let waitLabel = '等待';
+  {
+    const parts: string[] = [];
+    if (ms) parts.push(String(ms).trim());
+    if (load) parts.push(String(load).trim());
+    if (selector) parts.push(String(selector).trim());
+    if (xpath) parts.push(String(xpath).trim());
+    if (parts.length) waitLabel = `等待${parts.join(' ')}`;
+  }
 
   const labels: Record<string, string> = {
     snapshot: '快照页面',
@@ -107,23 +149,23 @@ function formatLabel(action: string, data: Record<string, unknown>): string {
     scroll_into_view: `滚入视口${ref}`,
     screenshot: '截图',
     get: `读取${what}${ref}`,
-    mouse: '鼠标操作',
-    wait: '等待',
-    eval: '执行脚本',
+    mouse: mouseLabel,
+    wait: waitLabel,
+    eval: `执行脚本${evalHint}`,
     upload: `上传${ref}`,
     save_pdf: '保存 PDF',
-    click_selector: `点击${selector}`,
-    fill_selector: `填写${selector}${text}`,
-    hover_selector: `悬停${selector}`,
-    wait_for_element: `等待元素${selector}`,
-    scroll_to_text: `滚动到"${text}"`,
-    extract_content: '提取内容',
+    click_selector: `点击${selector || xpath}${nth}${text}`,
+    fill_selector: `填写${selector || xpath}${text}`,
+    hover_selector: `悬停${selector || xpath}`,
+    wait_for_element: `等待元素${selector || xpath}`,
+    scroll_to_text: `滚动到${text}`,
+    extract_content: `提取内容${selector}`,
     find_elements: `查找元素${selector}`,
-    find_attributes: `查找属性${selector}`,
-    check_exist: `检查存在${selector}`,
+    find_attributes: `查找属性${selector}${attributes}`,
+    check_exist: `检查存在${selector || xpath}`,
     input_enter: `输入并回车${selector}${text}`,
     scroll_find: `滚动查找${selector}`,
-    click_vlm: `视觉点击`,
+    click_vlm: `视觉点击${prompt}`,
     network_start: '开始抓包',
     network_stop: '停止抓包',
   };

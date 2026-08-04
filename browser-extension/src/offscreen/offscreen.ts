@@ -11,6 +11,7 @@ const STABLE_MS = 5_000;
 interface WsClientConfig {
   serverUrl: string;
   token: string;
+  clientName?: string;
 }
 
 type RequestHandler = (message: unknown) => Promise<unknown | null>;
