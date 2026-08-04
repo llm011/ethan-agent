@@ -34,6 +34,7 @@ enum class SettingsTab {
 data class SettingsUiState(
     val tab: SettingsTab = SettingsTab.General,
     val serverUrl: String = "",
+    val authToken: String = "",
     val serverVersion: String? = null,
     val agentSettings: AgentSettings? = null,
     val providers: Map<String, ProviderConfig> = emptyMap(),
@@ -46,6 +47,8 @@ data class SettingsUiState(
     val isLoading: Boolean = false,
     val saved: Boolean = false,
     val error: String? = null,
+    /** 连接保存结果 Toast（成功/失败消息），UI 消费后清空 */
+    val connectionToast: String? = null,
     // Fast Rules
     val fastRules: FastRulesResponse? = null,
     val fastRuleOptions: FastRuleOptionsResponse? = null,
@@ -78,6 +81,7 @@ class SettingsViewModel(
                 _state.update {
                     it.copy(
                         serverUrl = config.serverUrl,
+                        authToken = config.authToken,
                         themeId = config.themeId,
                         appLockEnabled = config.appLockEnabled,
                     )
@@ -267,15 +271,33 @@ class SettingsViewModel(
         _state.update { it.copy(serverUrl = url) }
     }
 
+    fun onAuthTokenChange(token: String) {
+        _state.update { it.copy(authToken = token) }
+    }
+
+    /** 测试并保存连接：保存服务器地址，若 token 非空则重新认证。结果写入 connectionToast。 */
     fun saveServerUrl() {
         viewModelScope.launch {
             try {
-                repository.saveServerUrl(_state.value.serverUrl)
-                _state.update { it.copy(saved = true, serverVersion = repository.checkHealth()) }
+                val url = _state.value.serverUrl
+                val token = _state.value.authToken
+                repository.saveServerUrl(url)
+                if (token.isNotBlank()) {
+                    val result = repository.login(token)
+                    if (result.isFailure) {
+                        throw result.exceptionOrNull() ?: RuntimeException("认证失败")
+                    }
+                }
+                val version = repository.checkHealth()
+                _state.update { it.copy(saved = true, serverVersion = version, connectionToast = if (version != null) "连接成功（v$version）" else "已保存") }
             } catch (e: Exception) {
-                _state.update { it.copy(error = repository.friendlyError(e)) }
+                _state.update { it.copy(error = repository.friendlyError(e), connectionToast = "保存失败：${repository.friendlyError(e)}") }
             }
         }
+    }
+
+    fun clearConnectionToast() {
+        _state.update { it.copy(connectionToast = null) }
     }
 
     fun updateAgent(patch: AgentSettings) {
