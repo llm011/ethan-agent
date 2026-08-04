@@ -119,7 +119,8 @@ def _resolve_images_for_llm(messages: list[Message]) -> None:
     已含 data 字段的（当前消息原始格式）直接保留不做处理。
 
     同时在消息末尾附加图片本地路径提示，让 agent 的工具模式能直接定位文件。
-    超过 API 尺寸限制（8000px）的图片会自动缩放，避免 provider 返回 400。
+    当前消息的 base64 图片（data 字段）可能超限，需缩放；
+    历史消息的 path 图片在落盘时已缩放（save_image），直接读取即可。
     """
     from ethan.core.assets import downscale_image_b64, image_file_path, load_image_b64
 
@@ -130,15 +131,14 @@ def _resolve_images_for_llm(messages: list[Message]) -> None:
         file_paths: list[str] = []
         for img in msg.images:
             if "data" in img:
-                # 当前消息的原始 base64 图片，也可能超限
-                data, _ = downscale_image_b64(img["data"], img.get("media_type", "image/png"))
-                resolved.append({"data": data, "media_type": "image/jpeg" if data != img["data"] else img.get("media_type", "image/png")})
+                # 当前消息的原始 base64 图片，落盘前缩放一次
+                data, downscaled = downscale_image_b64(img["data"], img.get("media_type", "image/png"))
+                resolved.append({"data": data, "media_type": "image/png" if downscaled else img.get("media_type", "image/png")})
             elif "path" in img:
+                # 历史消息：落盘时已缩放，直接读取即可
                 b64 = load_image_b64(img["path"])
                 if b64:
-                    media_type = img.get("media_type", "image/png")
-                    data, downscaled = downscale_image_b64(b64, media_type)
-                    resolved.append({"data": data, "media_type": "image/jpeg" if downscaled else media_type})
+                    resolved.append({"data": b64, "media_type": img.get("media_type", "image/png")})
                     file_paths.append(str(image_file_path(img["path"])))
                 # 文件不存在则跳过（不影响 LLM 调用）
             else:

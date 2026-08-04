@@ -32,10 +32,22 @@ _MIME_TO_EXT: dict[str, str] = {
 def save_image(session_id: str, idx: int, data_b64: str, media_type: str) -> str:
     """将 base64 图片数据保存到本地文件，返回相对路径（不含 IMAGES_DIR 前缀）。
 
+    落盘时自动缩放超过 API 限制（8000px）的图片，避免每轮 LLM 请求重复 decode+resize。
+    缩放后的图片以 PNG 无损格式保存，保护截图中的文字清晰度。
+
     文件路径: ~/.ethan/assets/images/{session_id}/{timestamp}_{idx}.{ext}
     返回值如: "s_20260723_abc1/1690000000_0.png"
     """
-    ext = _MIME_TO_EXT.get(media_type, ".png")
+    raw = base64.b64decode(data_b64)
+
+    # 落盘前检查尺寸，超限则缩放为 PNG（无损，保护文字）
+    downscaled, did_resize = _downscale_bytes(raw)
+    if did_resize:
+        raw = downscaled
+        ext = ".png"
+    else:
+        ext = _MIME_TO_EXT.get(media_type, ".png")
+
     ts = int(time.time() * 1000)  # 毫秒级时间戳
     rand = os.urandom(3).hex()    # 6 字符随机后缀防碰撞
     filename = f"{ts}_{idx}_{rand}{ext}"
@@ -44,7 +56,7 @@ def save_image(session_id: str, idx: int, data_b64: str, media_type: str) -> str
     session_dir.mkdir(parents=True, exist_ok=True)
 
     file_path = session_dir / filename
-    file_path.write_bytes(base64.b64decode(data_b64))
+    file_path.write_bytes(raw)
 
     # 返回相对路径
     return f"{session_id}/{filename}"
@@ -67,10 +79,10 @@ def image_file_path(relative_path: str) -> Path:
 _MAX_IMAGE_DIM = 8000
 
 
-def downscale_image_b64(data_b64: str, media_type: str, max_dim: int = _MAX_IMAGE_DIM) -> tuple[str, bool]:
-    """如果图片任一边超过 max_dim，按比例缩小为 JPEG。
+def _downscale_bytes(raw: bytes, max_dim: int = _MAX_IMAGE_DIM) -> tuple[bytes, bool]:
+    """如果图片任一边超过 max_dim，按比例缩小为 PNG（无损，保护文字清晰度）。
 
-    返回 (新 base64, 是否缩放)。Pillow 不可用或解析失败时返回原图，
+    返回 (新字节, 是否缩放)。Pillow 不可用或解析失败时返回原图，
     交由 agent 层的 reactive fallback 兜底。
     """
     try:
@@ -78,23 +90,30 @@ def downscale_image_b64(data_b64: str, media_type: str, max_dim: int = _MAX_IMAG
 
         from PIL import Image  # noqa: PLC0415
 
-        raw = base64.b64decode(data_b64)
         img = Image.open(io.BytesIO(raw))
         w, h = img.size
         if w <= max_dim and h <= max_dim:
-            return data_b64, False
+            return raw, False
 
         ratio = min(max_dim / w, max_dim / h)
         new_w, new_h = int(w * ratio), int(h * ratio)
         img = img.resize((new_w, new_h), Image.LANCZOS)
 
-        # RGB 化以兼容 JPEG（RGBA 图片直接存 JPEG 会报错）
-        if img.mode in ("RGBA", "P"):
-            img = img.convert("RGB")
-
         buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=85)
-        new_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
-        return new_b64, True
+        img.save(buf, format="PNG")
+        return buf.getvalue(), True
     except Exception:
+        return raw, False
+
+
+def downscale_image_b64(data_b64: str, media_type: str, max_dim: int = _MAX_IMAGE_DIM) -> tuple[str, bool]:
+    """如果图片任一边超过 max_dim，按比例缩小为 PNG（无损）。
+
+    返回 (新 base64, 是否缩放)。Pillow 不可用或解析失败时返回原图，
+    交由 agent 层的 reactive fallback 兜底。
+    """
+    raw = base64.b64decode(data_b64)
+    downscaled, did_resize = _downscale_bytes(raw, max_dim)
+    if not did_resize:
         return data_b64, False
+    return base64.b64encode(downscaled).decode("ascii"), True
