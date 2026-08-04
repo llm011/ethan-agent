@@ -55,15 +55,16 @@ export async function* streamChat(
     mode?: string;
     btw?: boolean;
     review?: boolean;
+    autoConsent?: boolean;
   },
 ): AsyncGenerator<StreamChunk> {
-  const { quote = null, mode = "", btw = false, review = false } = options ?? {};
+  const { quote = null, mode = "", btw = false, review = false, autoConsent = false } = options ?? {};
   let res: Response;
   try {
     res = await fetch(`${getApiUrl()}/chat`, {
       method: "POST",
       headers: headers(),
-      body: JSON.stringify({ messages, model, stream: true, session_id: sessionId, quote: quote ?? undefined, mode: mode || undefined, btw: btw || undefined, auto_consent: review || undefined }),
+      body: JSON.stringify({ messages, model, stream: true, session_id: sessionId, quote: quote ?? undefined, mode: mode || undefined, btw: btw || undefined, auto_consent: autoConsent || review || undefined }),
     });
   } catch {
     // fetch 直接抛错 = 连不上后端（服务没起 / 端口不通）

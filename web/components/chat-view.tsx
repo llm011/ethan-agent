@@ -71,6 +71,15 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const [cleanupConfirm, setCleanupConfirm] = useState<CleanupConfirmRequest | null>(null);
   const [askUserRequest, setAskUserRequest] = useState<AskUserRequest | null>(null);
   const [mode, setMode] = useState<string>("");
+  // 超级权限：开启后自动批准所有工具授权，任务中途不弹窗。持久化到 localStorage。
+  const [autoConsent, setAutoConsent] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem("ethan:auto-consent") === "1";
+  });
+  const handleAutoConsentChange = useCallback((v: boolean) => {
+    setAutoConsent(v);
+    try { localStorage.setItem("ethan:auto-consent", v ? "1" : "0"); } catch {}
+  }, []);
   const [loadingSession, setLoadingSession] = useState(false);
   const [modes, setModes] = useState<ModeEntry[]>([]);
 
@@ -442,7 +451,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     }));
 
     await consumeStream(
-      streamChat(chatMessages, selectedModel, sessionId, { quote: sentQuote, mode, btw: isBtw, review: isReview }),
+      streamChat(chatMessages, selectedModel, sessionId, { quote: sentQuote, mode, btw: isBtw, review: isReview, autoConsent }),
       newMessages,
       { setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setBgPolling, setSessionTitle, setSessionUsage, setStopping, setStreaming: _setStreaming, activeSession: sessionId },
       true,
@@ -556,6 +565,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
               updateSessionMode(activeSession, m).catch(() => {});
             }
           }}
+          autoConsent={autoConsent}
+          onAutoConsentChange={handleAutoConsentChange}
           draft={inputStore.draft}
           onDraftChange={inputStore.setDraft}
           queue={inputStore.queue}
