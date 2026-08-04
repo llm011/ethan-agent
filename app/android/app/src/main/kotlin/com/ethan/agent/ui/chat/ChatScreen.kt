@@ -144,11 +144,6 @@ fun ChatScreen(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var showPlusSheet by remember { mutableStateOf(false) }
-    // 动态测量输入框区域高度，让消息列表 bottom padding 自适应（避免被输入框遮挡）
-    val density = LocalDensity.current
-    var inputBarHeightPx by remember { mutableStateOf(0) }
-    val inputBarHeightDp = with(density) { inputBarHeightPx.toDp() }
-
     // 渐进加载：初始只渲染最后 10 条，向上滚动加载更多
     val pageSize = 10
     var visibleCount by remember { mutableStateOf(pageSize) }
@@ -436,18 +431,19 @@ fun ChatScreen(
             }
         }
 
-        Box(
+        // 消息列表 + 输入栏垂直排列：输入栏不再覆盖消息列表底部，
+        // 从根本上解决底部内容被遮挡、滑不动的问题
+        Column(
             Modifier
                 .fillMaxSize()
                 .padding(top = padding.calculateTopPadding())
                 .imePadding(),
         ) {
-            // 消息列表（底部留出输入框的空间）
+            // 消息列表
             LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
+                modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = PaddingValues(bottom = inputBarHeightDp + 8.dp),
             ) {
                 if (state.messages.isEmpty()) {
                     item {
@@ -503,15 +499,13 @@ fun ChatScreen(
                 }
             }
 
-            // 输入框区域 — 绝对定位在底部
+            // 输入框区域
             Column(
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
                     .fillMaxWidth()
                     .background(MaterialTheme.colorScheme.background)
                     .navigationBarsPadding()
-                    .padding(horizontal = 12.dp)
-                    .onGloballyPositioned { inputBarHeightPx = it.size.height },
+                    .padding(horizontal = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 // 待发送图片预览（对齐 Web：输入框上方缩略图 + 删除按钮）
@@ -727,7 +721,7 @@ private fun MessageBubble(message: UiMessage, onLongPress: () -> Unit) {
             .fillMaxWidth()
             .padding(horizontal = 4.dp, vertical = 2.dp),
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
-        verticalAlignment = Alignment.Bottom,
+        verticalAlignment = Alignment.Top,
     ) {
         // Assistant avatar (left)
         if (!isUser) {

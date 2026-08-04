@@ -27,12 +27,12 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 enum class SettingsTab {
-    Connection, General, Providers, Channels, Identity, Soul, Tools, Heartbeat, Profile, PromptPreview, ApiKeys,
+    General, Connection, Providers, Channels, Identity, Soul, Tools, Heartbeat, Profile, PromptPreview, ApiKeys,
     FastRules, ToolTiers,
 }
 
 data class SettingsUiState(
-    val tab: SettingsTab = SettingsTab.Connection,
+    val tab: SettingsTab = SettingsTab.General,
     val serverUrl: String = "",
     val serverVersion: String? = null,
     val agentSettings: AgentSettings? = null,

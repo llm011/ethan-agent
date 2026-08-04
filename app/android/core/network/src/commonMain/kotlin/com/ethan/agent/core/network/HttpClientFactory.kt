@@ -56,7 +56,7 @@ object NetworkFactory {
                 connectTimeoutMillis = 30_000
                 // requestTimeout 限制整个请求（含流式 body）：流式场景必须禁用，否则
                 // 长生成会被 HttpRequestTimeoutException 中断。0 表示不超时。
-                requestTimeoutMillis = if (streaming) 0L else 120_000L
+                requestTimeoutMillis = if (streaming) Long.MAX_VALUE else 120_000L
                 socketTimeoutMillis = 120_000
             }
 
