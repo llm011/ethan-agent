@@ -5,10 +5,29 @@ const $ = id => document.getElementById(id);
 
 const DEFAULT_URL = 'ws://localhost:8900/ws/browser';
 
+/** 生成 6 位随机字母+数字（大小写混合，去掉易混的 0O1l），用于多端区分的默认本端名称 */
+function genRandomClientName() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+  let s = '';
+  const arr = new Uint8Array(6);
+  crypto.getRandomValues(arr);
+  for (const b of arr) s += chars[b % chars.length];
+  return 'browser-' + s;
+}
+
 async function load() {
-  const { serverUrl, token, clientName, autoCloseCookies } = await chrome.storage.local.get([
+  const stored = await chrome.storage.local.get([
     'serverUrl', 'token', 'clientName', 'autoCloseCookies',
   ]);
+  let { clientName } = stored;
+  const { serverUrl, token, autoCloseCookies } = stored;
+  // 没填过就自动生成一个可读的随机名，并立刻落盘保存
+  if (!clientName || !clientName.trim()) {
+    clientName = genRandomClientName();
+    try {
+      await chrome.storage.local.set({ clientName });
+    } catch {}
+  }
   $('serverUrl').value = serverUrl || DEFAULT_URL;
   $('token').value = token || '';
   $('clientName').value = clientName || '';
@@ -213,8 +232,17 @@ async function renderCommands() {
   for (const cmd of commands) {
     const btn = document.createElement('button');
     btn.className = 'cmd-btn';
-    btn.textContent = cmd.icon + ' ' + cmd.label;
     btn.title = cmd.scope === 'selection' ? '对当前选中文字执行' : '对当前页面执行';
+
+    const iconSpan = document.createElement('span');
+    iconSpan.className = 'cmd-icon';
+    iconSpan.textContent = cmd.icon || '';
+    const labelSpan = document.createElement('span');
+    labelSpan.className = 'cmd-label';
+    labelSpan.textContent = cmd.label || '';
+
+    btn.appendChild(iconSpan);
+    btn.appendChild(labelSpan);
     btn.addEventListener('click', () => runCommand(cmd));
     list.appendChild(btn);
   }

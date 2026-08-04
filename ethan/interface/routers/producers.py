@@ -246,14 +246,35 @@ async def _run_generation(
     try:
         async for item in agent.stream_chat(messages):
             if isinstance(item, ConsentEvent):
-                run.emit({
+                evt = {
                     "consent_request": True,
                     "request_id": item.request_id,
                     "tool": item.tool,
                     "description": item.description,
                     "detail": item.detail,
                     "always": item.always,
-                })
+                }
+                run.emit(evt)
+                # 同步广播给所有连接的浏览器扩展，让扩展发系统通知兜底，
+                # 避免用户只开着浏览器没看聊天页面时错过授权。
+                try:
+                    from ethan.browser.hub import get_hub
+                    hub = get_hub()
+                    if hub.connected:
+                        await hub.broadcast_notification(
+                            "notify:consent_request",
+                            {
+                                "request_id": item.request_id,
+                                "session_id": session_id or "",
+                                "tool": item.tool,
+                                "description": item.description,
+                                "detail": item.detail,
+                                "always": bool(item.always),
+                                "server_url": "",  # 扩展侧自己从 storage 取 serverUrl 再转 http
+                            },
+                        )
+                except Exception:
+                    logger.exception("向浏览器扩展广播 consent 通知失败")
             elif isinstance(item, SkillsMatchedEvent):
                 collector.feed(item)
                 run.emit({"skills_matched": item.skills})
