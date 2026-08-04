@@ -55,6 +55,7 @@ COMMANDS = {
     "model": ("查看/切换模型（用法 /model [id]）", False),
     "mode": ("查看/切换对话模式（用法 /mode [名称]，不带参数或 default 切回默认）", False),
     "token": ("显示 Web 访问 token（用于浏览器登录）", False),
+    "version": ("显示当前版本号", False),
     "owner": ("认主人：把你设为主人、当前会话设为主会话", False),
     "command": ("管理自定义命令（用法 /command add <名> <描述> | list | remove <名>）", True),
     "help": ("显示可用命令", False),
@@ -181,6 +182,10 @@ async def handle_command(ctx: CommandContext) -> str | None:
             logger.exception("get_token failed")
             return "⚠️ 获取 token 失败。"
         return f"🔑 Web 访问 token：\n{token}\n\n浏览器打开 http://<本机IP>:8900 粘贴登录。"
+
+    if name == "version":
+        from ethan import __version__
+        return f"📌 Ethan Agent v{__version__}"
 
     if name == "model":
         # 无参数：显示当前模型；有参数：尝试切换

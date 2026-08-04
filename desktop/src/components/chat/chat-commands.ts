@@ -5,6 +5,7 @@ import {
   compactSession,
   summarySession,
   stopGeneration,
+  fetchVersion,
 } from "@/lib/api";
 import type { Message, Usage, Quote, PendingFile } from "@ethan/shared/chat/types";
 
@@ -59,6 +60,7 @@ export async function handleCommand(
       "- `/stop` — 停止当前进行中的回复\n" +
       "- `/btw <问题>` — 不带历史的单轮轻量查询\n" +
       "- `/review <链接>` — Code review：加载 review 技能分析代码\n" +
+      "- `/version` — 显示当前版本号\n" +
       "- `/help` — 显示本帮助\n\n" +
       "（`/model` `/token` 请用顶部下拉和设置页；其它消息正常对话即可）"
     );
@@ -126,6 +128,11 @@ export async function handleCommand(
     if (activeSession) {
       await stopGeneration(activeSession).catch(() => {});
     }
+    return true;
+  }
+  if (cmd === "version") {
+    const v = await fetchVersion();
+    pushAssistant(v ? `📌 Ethan Agent v${v}` : "⚠️ 无法获取版本号。");
     return true;
   }
   // 未知命令

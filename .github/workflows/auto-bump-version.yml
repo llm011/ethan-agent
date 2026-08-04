@@ -13,9 +13,12 @@ on:
     branches:
       - main
     tags-ignore: ['v*']
-    # bump commit 只改 pyproject.toml，无需再触发本 workflow（避免 skipped 重复 run）
+    # bump commit 只改 pyproject.toml，无需再触发本 workflow（避免 skipped 重复 run）。
+    # web/public/latest.json 由 publish-desktop 的 mirror-updater-json job 推送，
+    # 也是 bot 产物，不应触发版本 bump——否则会引发二次 bump 导致 APK/Desktop 版本错位。
     paths-ignore:
       - 'pyproject.toml'
+      - 'web/public/**'
 
 jobs:
   bump:
