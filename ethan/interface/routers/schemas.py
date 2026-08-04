@@ -13,6 +13,7 @@ class ChatRequest(BaseModel):
     quote: dict | None = None  # {role, content}：引用某条历史消息，注入给模型但不入库
     mode: str = ""  # "" = 工作助手; 规范英文 key，如 "legal"/"companion"（见 core/modes.py）
     btw: bool = False  # /btw 顺带一问：不带历史，单轮轻量查询
+    direct: bool = False  # 直调 LLM：跳过 agent loop / 工具 / 技能，纯模型流式输出
     auto_consent: bool = False  # 自动批准所有工具授权（仅本地回环请求生效，见 chat.py）
     runtime_context: str = ""  # 注入 agent 的运行时上下文提示（如定时任务环境说明）
 

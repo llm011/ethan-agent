@@ -43,6 +43,8 @@ export interface StreamChatOpts {
   sessionId?: string;
   /** 指令指定的模型（如翻译走小模型）；不传用服务端默认。 */
   model?: string;
+  /** 直调 LLM：跳过 agent loop / 工具 / 技能，纯模型流式输出。适合翻译、摘要等轻量调用。 */
+  direct?: boolean;
   /** 外部传入的取消信号；streamChat 内部也会自建一个，用哪个都能停。 */
   signal?: AbortSignal;
 }
@@ -89,6 +91,7 @@ export async function streamChat(
     channel: 'browser-extension',
   };
   if (opts.model) body.model = opts.model;
+  if (opts.direct) body.direct = true;
   if (opts.sessionId) {
     body.session_id = opts.sessionId;
     body.btw = false;  // 多轮：服务端按 session 拼历史

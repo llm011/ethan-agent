@@ -62,6 +62,18 @@ def _is_local(request: Request) -> bool:
     return ip.is_loopback or any(ip in net for net in _PRIVATE_NETWORKS)
 
 
+async def _direct_stream(agent, messages: list):
+    """Direct LLM streaming: skip agent loop, no tools, no skills. Fastest path."""
+    import json
+    try:
+        async for chunk in agent._provider.stream_chat(messages, tools=None, system=None):
+            if chunk.content:
+                yield f"data: {json.dumps({'content': chunk.content})}\n\n"
+        yield f"data: {json.dumps({'done': True})}\n\n"
+    except Exception as e:
+        yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+
 # ── Health / Poll ────────────────────────────────────────────────
 
 
@@ -214,6 +226,15 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
         raise HTTPException(status_code=_status_for_setup_error(e), detail=friendly)
 
     if req.stream:
+        # (0) Direct 模式：跳过 agent loop，直调 LLM 流式输出。
+        #     适用于浏览器扩展的翻译、摘要等无需工具/技能的轻量请求。
+        if req.direct:
+            return StreamingResponse(
+                _direct_stream(agent, messages),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
+
         # (1) 沉浸式工具模式：会话 mode 解析出 delegate_agent 时，整条会话的每句话都
         #     直接续接该 coding agent（同一工具 session），不走 Ethan chat 模型。
         #     工作目录按会话隔离（~/.ethan/agent-sessions/<会话id>）。
