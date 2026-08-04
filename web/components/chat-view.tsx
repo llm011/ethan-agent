@@ -21,6 +21,7 @@ import {
   fetchAgentSettings,
   respondConsent,
   respondBrowserCleanup,
+  respondAskUser,
   getAnnotationsBatch,
   type Annotation,
 } from "@/lib/api";
@@ -34,6 +35,7 @@ import { OnboardingBanner } from "@/components/chat/onboarding-banner";
 import { type ConsentRequest } from "@ethan/shared/components/consent-dialog";
 import { ConsentGate } from "@ethan/shared/chat/consent-card";
 import { CleanupConfirmGate, type CleanupConfirmRequest } from "@ethan/shared/chat/cleanup-confirm-card";
+import { AskUserCard, type AskUserRequest } from "@ethan/shared/chat/ask-user-card";
 import { placeholderTitle, mapDetailMessages } from "@/components/chat/chat-helpers";
 import { consumeStream, type ConsumeStreamActions } from "@/components/chat/use-chat-stream";
 import { handleCommand } from "@/components/chat/chat-commands";
@@ -67,6 +69,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [consentRequest, setConsentRequest] = useState<ConsentRequest | null>(null);
   const [cleanupConfirm, setCleanupConfirm] = useState<CleanupConfirmRequest | null>(null);
+  const [askUserRequest, setAskUserRequest] = useState<AskUserRequest | null>(null);
   const [mode, setMode] = useState<string>("");
   const [loadingSession, setLoadingSession] = useState(false);
   const [modes, setModes] = useState<ModeEntry[]>([]);
@@ -102,6 +105,13 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       await respondBrowserCleanup(requestId, action);
     } catch {}
     setCleanupConfirm(null);
+  };
+
+  const handleAskUserRespond = async (requestId: string, value: string) => {
+    setAskUserRequest(null);
+    try {
+      await respondAskUser(requestId, value);
+    } catch {}
   };
 
   const handleRead = useCallback((msg: Message) => {
@@ -160,7 +170,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
   // 构建 consumeStream 所需的 actions 对象
   const getStreamActions = (): ConsumeStreamActions => ({
-    setMessages, setConsentRequest, setCleanupConfirm, setBgPolling,
+    setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setBgPolling,
     setSessionTitle, setSessionUsage, setStopping, setStreaming: _setStreaming,
     activeSession,
   });
@@ -184,6 +194,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       setBgPolling(null);
       setConsentRequest(null);
       setCleanupConfirm(null);
+      setAskUserRequest(null);
       fetchAgentSettings().then((settings) => {
         if (settings.default_model) setSelectedModel(settings.default_model);
       }).catch(() => {});
@@ -206,6 +217,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     setBgPolling(null);
     setConsentRequest(null);
     setCleanupConfirm(null);
+    setAskUserRequest(null);
 
     setLoadingSession(true);
     setActiveSession(null);
@@ -245,7 +257,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
               ? loaded.slice(0, -1)
               : loaded;
             await consumeStream(stream, base, {
-              setMessages, setConsentRequest, setCleanupConfirm, setBgPolling,
+              setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setBgPolling,
               setSessionTitle, setSessionUsage, setStopping, setStreaming: _setStreaming,
               activeSession: initialSessionId,
             });
@@ -432,7 +444,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     await consumeStream(
       streamChat(chatMessages, selectedModel, sessionId, { quote: sentQuote, mode, btw: isBtw, review: isReview }),
       newMessages,
-      { setMessages, setConsentRequest, setCleanupConfirm, setBgPolling, setSessionTitle, setSessionUsage, setStopping, setStreaming: _setStreaming, activeSession: sessionId },
+      { setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setBgPolling, setSessionTitle, setSessionUsage, setStopping, setStreaming: _setStreaming, activeSession: sessionId },
       true,
     );
   };
@@ -512,6 +524,11 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         )}
         <ConsentGate request={consentRequest} onRespond={handleConsentRespond} />
         <CleanupConfirmGate request={cleanupConfirm} onRespond={handleCleanupRespond} />
+        {askUserRequest && (
+          <div className="max-w-3xl mx-auto px-4 pb-2">
+            <AskUserCard request={askUserRequest} onRespond={handleAskUserRespond} />
+          </div>
+        )}
         <ChatInput
           streaming={streaming}
           models={models}

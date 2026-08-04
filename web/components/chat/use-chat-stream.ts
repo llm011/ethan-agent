@@ -4,6 +4,7 @@ import type { StreamChunk } from "@/lib/api";
 import type { ToolStep } from "@ethan/shared/components/tool-timeline";
 import type { Message, Usage, CardData } from "@ethan/shared/chat/types";
 import type { ConsentRequest } from "@ethan/shared/components/consent-dialog";
+import type { AskUserRequest } from "@ethan/shared/chat/ask-user-card";
 
 export interface CleanupConfirmRequest {
   request_id: string;
@@ -14,6 +15,7 @@ export interface ConsumeStreamActions {
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
   setConsentRequest: (req: ConsentRequest | null) => void;
   setCleanupConfirm: (req: CleanupConfirmRequest | null) => void;
+  setAskUserRequest: (req: AskUserRequest | null) => void;
   setBgPolling: (msg: string | null) => void;
   setSessionTitle: (title: string) => void;
   setSessionUsage: React.Dispatch<React.SetStateAction<Usage>>;
@@ -32,7 +34,7 @@ export async function consumeStream(
   trackTtft = false,
 ): Promise<void> {
   const {
-    setMessages, setConsentRequest, setCleanupConfirm, setBgPolling,
+    setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setBgPolling,
     setSessionTitle, setSessionUsage, setStopping, setStreaming,
     activeSession,
   } = actions;
@@ -71,6 +73,16 @@ export async function consumeStream(
         setCleanupConfirm({
           request_id: chunk.request_id || "",
           sessions: chunk.sessions || [],
+        });
+        continue;
+      }
+      if (chunk.ask_user_request) {
+        setAskUserRequest({
+          request_id: chunk.request_id || "",
+          question: chunk.question || "",
+          options: chunk.options || [],
+          default: chunk.default || "",
+          timeout: chunk.timeout || 20,
         });
         continue;
       }

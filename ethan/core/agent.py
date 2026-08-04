@@ -1354,6 +1354,35 @@ class Agent:
             allowed_calls = []
             for tc in tool_calls:
                 tool = self._registry.get(tc.name)
+
+                # [ask_user 拦截] 非危险操作的用户确认/选择，不进 executor，阻塞等回复
+                if tc.name == "ask_user":
+                    from ethan.core.ask_user import AskUserProvider
+                    args = tc.arguments or {}
+                    question = args.get("question", "")
+                    options = args.get("options") or []
+                    default = args.get("default", "")
+                    timeout = 20
+
+                    yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary=question,
+                                    state="start", skill_category=resolve_skill_category(tc.name, tc.arguments))
+
+                    _ask_provider = AskUserProvider()
+                    _ask_event, _ask_fut = _ask_provider.create(question, options, default, timeout)
+                    yield _ask_event
+
+                    try:
+                        _ask_result = await _aio.wait_for(_ask_fut, timeout=timeout)
+                    except (_aio.CancelledError, _aio.TimeoutError):
+                        _ask_result = default
+                        _ask_provider.cancel_all()
+
+                    yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary=question,
+                                    state="done", result_preview=f"用户选择：{_ask_result}",
+                                    skill_category=resolve_skill_category(tc.name, tc.arguments))
+                    working.append(Message(role="tool", content=f"用户选择：{_ask_result}", tool_call_id=tc.id))
+                    continue
+
                 consent_provider = get_consent_provider()
 
                 # (1) 渠道硬策略：如三方渠道认主人后，非主人不得执行 side_effect 工具。

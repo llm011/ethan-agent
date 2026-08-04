@@ -223,6 +223,7 @@ async def _run_generation(
     与 HTTP 连接解耦——订阅者（SSE 响应）断开不会取消本任务，生成照常跑完并入库。
     所有原先 `yield` 的地方改为 `run.emit(...)`。
     """
+    from ethan.core.ask_user import AskUserEvent
     from ethan.core.consent import ConsentEvent, set_consent_provider
     from ethan.core.stream_collector import StreamCollector
     from ethan.providers.base import InjectEvent, SkillsMatchedEvent, ThinkingEvent, ToolEvent
@@ -275,6 +276,15 @@ async def _run_generation(
                         )
                 except Exception:
                     logger.exception("向浏览器扩展广播 consent 通知失败")
+            elif isinstance(item, AskUserEvent):
+                run.emit({
+                    "ask_user_request": True,
+                    "request_id": item.request_id,
+                    "question": item.question,
+                    "options": item.options,
+                    "default": item.default,
+                    "timeout": item.timeout,
+                })
             elif isinstance(item, SkillsMatchedEvent):
                 collector.feed(item)
                 run.emit({"skills_matched": item.skills})
