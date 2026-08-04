@@ -1,6 +1,7 @@
 /** Session 相关类型和 API。 */
 
 import { API_URL, getAuthToken, headers } from "./api-base";
+import { readSessionDetail, writeSessionDetail, readSessionList, writeSessionList, makeListKey, isOffline } from "./session-db";
 
 export interface SessionInfo {
   id: string;
@@ -65,11 +66,23 @@ export async function fetchSessions(limit = 50, offset = 0, q?: string, source?:
   if (hideScheduled) params.set("hide_scheduled", "true");
   if (titlePrefixes) params.set("title_prefixes", titlePrefixes);
   if (hasImages) params.set("has_images", "true");
+
+  // 离线时直接返回缓存
+  if (isOffline()) {
+    const cacheKey = makeListKey({ limit, offset, q, source, mode, hideHeartbeat, hideScheduled });
+    const cached = await readSessionList(cacheKey);
+    if (cached) return cached;
+    throw new Error("离线模式：无可用缓存");
+  }
+
   const res = await fetch(`${API_URL}/sessions?${params}`, { headers: headers() });
   if (!res.ok) throw new Error("Failed to fetch sessions");
   const data = await res.json();
   const sessions = data.sessions as SessionInfo[];
   (sessions as SessionInfo[] & { total?: number }).total = data.total ?? undefined;
+  // 写入缓存（fire-and-forget，不阻塞返回）
+  const cacheKey = makeListKey({ limit, offset, q, source, mode, hideHeartbeat, hideScheduled });
+  writeSessionList(cacheKey, sessions).catch(() => {});
   return sessions;
 }
 
@@ -113,9 +126,23 @@ export async function createSession(model?: string, mode?: string): Promise<{ id
 }
 
 export async function fetchSession(id: string): Promise<SessionDetail> {
+  // 离线时先返回缓存
+  if (isOffline()) {
+    const cached = await readSessionDetail(id);
+    if (cached) return cached;
+    throw new Error("离线模式：无可用缓存");
+  }
+
   const res = await fetch(`${API_URL}/sessions/${id}`, { headers: headers() });
-  if (!res.ok) throw new Error("Session not found");
-  return res.json();
+  if (!res.ok) {
+    // 网络失败时降级到缓存
+    const cached = await readSessionDetail(id);
+    if (cached) return cached;
+    throw new Error("Session not found");
+  }
+  const detail = await res.json();
+  writeSessionDetail(id, detail).catch(() => {});
+  return detail;
 }
 
 export async function deleteSession(id: string): Promise<void> {
