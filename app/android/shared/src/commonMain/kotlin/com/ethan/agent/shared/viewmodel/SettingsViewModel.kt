@@ -34,6 +34,7 @@ enum class SettingsTab {
 data class SettingsUiState(
     val tab: SettingsTab = SettingsTab.General,
     val serverUrl: String = "",
+    val authToken: String = "",
     val serverVersion: String? = null,
     val agentSettings: AgentSettings? = null,
     val providers: Map<String, ProviderConfig> = emptyMap(),
@@ -46,6 +47,8 @@ data class SettingsUiState(
     val isLoading: Boolean = false,
     val saved: Boolean = false,
     val error: String? = null,
+    /** 连接保存结果 Toast（成功/失败消息），UI 消费后清空 */
+    val connectionToast: String? = null,
     // Fast Rules
     val fastRules: FastRulesResponse? = null,
     val fastRuleOptions: FastRuleOptionsResponse? = null,
@@ -78,6 +81,8 @@ class SettingsViewModel(
                 _state.update {
                     it.copy(
                         serverUrl = config.serverUrl,
+                        // authToken 不预填：字段为空表示"不修改"，填入新值才触发重新认证，
+                        // 避免纯 URL 改动被误判为重新登录（旧 token 打到新服务器会 401）
                         themeId = config.themeId,
                         appLockEnabled = config.appLockEnabled,
                     )
@@ -267,15 +272,44 @@ class SettingsViewModel(
         _state.update { it.copy(serverUrl = url) }
     }
 
+    fun onAuthTokenChange(token: String) {
+        _state.update { it.copy(authToken = token) }
+    }
+
+    /** 测试并保存连接：保存服务器地址，若 token 非空则重新认证。结果只走 connectionToast。 */
     fun saveServerUrl() {
         viewModelScope.launch {
+            val url = _state.value.serverUrl
+            val newToken = _state.value.authToken
             try {
-                repository.saveServerUrl(_state.value.serverUrl)
-                _state.update { it.copy(saved = true, serverVersion = repository.checkHealth()) }
+                repository.saveServerUrl(url)
+                var authenticated = false
+                if (newToken.isNotBlank()) {
+                    val result = repository.login(newToken)
+                    if (result.isFailure) {
+                        throw result.exceptionOrNull() ?: RuntimeException("认证失败")
+                    }
+                    authenticated = true
+                }
+                val version = repository.checkHealth()
+                val msg = when {
+                    version != null && authenticated -> "认证成功（v$version）"
+                    version != null -> "连接成功（v$version）"
+                    authenticated -> "认证成功"
+                    else -> "已保存服务器地址"
+                }
+                // 连接流程只走 connectionToast，不写 error（避免与 ErrorSnackbar 重复）；
+                // 同时清掉残留 error，避免旧失败弹窗在成功后再次出现
+                _state.update { it.copy(saved = true, serverVersion = version, connectionToast = msg, error = null) }
             } catch (e: Exception) {
-                _state.update { it.copy(error = repository.friendlyError(e)) }
+                // 失败也只走 connectionToast，不写 error，避免重复通知
+                _state.update { it.copy(connectionToast = "保存失败：${repository.friendlyError(e)}") }
             }
         }
+    }
+
+    fun clearConnectionToast() {
+        _state.update { it.copy(connectionToast = null) }
     }
 
     fun updateAgent(patch: AgentSettings) {

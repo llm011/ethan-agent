@@ -362,17 +362,20 @@
   margin-top: 0.25em;
   margin-bottom: 0.5em;
   border-radius: 0.75rem;
-  overflow: hidden;
   overflow-x: auto;
+  overflow-y: hidden;
   border: 1px solid color-mix(in oklch, var(--border) 72%, var(--primary));
   background: color-mix(in oklch, var(--background) 94%, var(--primary));
+  -webkit-overflow-scrolling: touch;
 }
 .prose .table-wrapper table {
   margin: 0;
   font-size: 0.9em;
-  width: 100%;
+  width: auto;
+  min-width: 100%;
   border-collapse: collapse;
   border-spacing: 0;
+  table-layout: auto;
 }
 .prose .table-wrapper th,
 .prose .table-wrapper td {
@@ -381,6 +384,18 @@
   border-bottom: 1px solid color-mix(in oklch, var(--border) 78%, var(--primary));
   text-align: left;
   vertical-align: top;
+  min-width: 88px;
+  max-width: 520px;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+.prose .table-wrapper th {
+  white-space: nowrap;
+  background: color-mix(in oklch, var(--background) 86%, var(--primary));
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }
 .prose .table-wrapper th:first-child,
 .prose .table-wrapper td:first-child {

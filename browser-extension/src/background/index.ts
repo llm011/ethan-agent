@@ -16,7 +16,7 @@ import { handleNativeRequest } from './rpc';
 import { BrowserPageController } from './page-controller';
 import { NetworkMonitor } from './network-monitor';
 import { releaseCdpClient } from './cdp-client';
-import { pushStep, updateStepStatus } from './overlay-injector';
+import { pushStep, updateStepStatus, removeOverlay } from './overlay-injector';
 import { setupContextMenu, sendToEthan } from './context-menu';
 import {
   startReading,
@@ -83,14 +83,40 @@ function withOverlay(action: string, handler: (params: any) => Promise<any>) {
   };
 }
 
+/** 移除某 tab 上的两个右上角容器（overlay 步骤面板 + result-panel 结果面板） */
+async function removeTabPanels(tabId: number): Promise<void> {
+  try {
+    await removeOverlay(tabId);
+  } catch {}
+  try {
+    // result-panel.ts 监听 message, type=removeResultPanel
+    await chrome.tabs.sendMessage(tabId, { target: 'result', type: 'removeResultPanel' }).catch(() => {});
+  } catch {}
+}
+
+/** 包装 release/close：结束前移除该 session 所有 tab 上的面板 */
+async function wrapSessionEnd<T>(
+  sessionId: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const tabs = await sessionStore.listTabs({ sessionId }).catch(() => null);
+  const result = await fn();
+  if (tabs && Array.isArray((tabs as any).tabs)) {
+    for (const t of (tabs as any).tabs) {
+      if (t?.tabId) void removeTabPanels(t.tabId as number);
+    }
+  }
+  return result;
+}
+
 async function dispatch(message: unknown): Promise<unknown | null> {
   return handleNativeRequest(message, {
     createSession: params => sessionStore.createSession(params),
     attachCurrentSession: params => sessionStore.attachCurrentSession(params),
     listSessions: () => sessionStore.listSessions(),
     renameSession: params => sessionStore.renameSession(params),
-    releaseSession: params => sessionStore.releaseSession(params),
-    closeSession: params => sessionStore.closeSession(params),
+    releaseSession: params => wrapSessionEnd(params.sessionId, () => sessionStore.releaseSession(params)),
+    closeSession: params => wrapSessionEnd(params.sessionId, () => sessionStore.closeSession(params)),
     openTab: params => sessionStore.openTab(params),
     listTabs: params => sessionStore.listTabs(params),
     listUserTabs: () => sessionStore.listUserTabs(),

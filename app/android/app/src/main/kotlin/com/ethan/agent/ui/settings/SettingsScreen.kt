@@ -78,7 +78,9 @@ fun SettingsScreen(
     onBack: () -> Unit = {},
     onTabChange: (SettingsTab) -> Unit,
     onServerUrlChange: (String) -> Unit,
+    onAuthTokenChange: (String) -> Unit,
     onSaveServerUrl: () -> Unit,
+    onClearConnectionToast: () -> Unit,
     onUpdateAgent: (AgentSettings) -> Unit,
     onSaveAgent: () -> Unit,
     onUpdateProvider: (String, ProviderConfig) -> Unit,
@@ -211,7 +213,7 @@ fun SettingsScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     when (tab) {
-                        SettingsTab.Connection -> ConnectionTab(state, onServerUrlChange, onSaveServerUrl)
+                        SettingsTab.Connection -> ConnectionTab(state, onServerUrlChange, onAuthTokenChange, onSaveServerUrl, onClearConnectionToast)
                         SettingsTab.General -> {
                             if (state.isLoading && state.agentSettings == null) LoadingBox()
                             else state.agentSettings?.let {
@@ -254,11 +256,35 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun ConnectionTab(state: SettingsUiState, onUrlChange: (String) -> Unit, onSave: () -> Unit) {
+private fun ConnectionTab(
+    state: SettingsUiState,
+    onUrlChange: (String) -> Unit,
+    onAuthTokenChange: (String) -> Unit,
+    onSave: () -> Unit,
+    onClearToast: () -> Unit,
+) {
+    val context = LocalContext.current
+    // 测试并保存结果 → Toast 反馈
+    LaunchedEffect(state.connectionToast) {
+        state.connectionToast?.let {
+            Toast.makeText(context, it, Toast.LENGTH_LONG).show()
+            onClearToast()
+        }
+    }
     CuteCard {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("服务器连接", style = MaterialTheme.typography.titleSmall)
             OutlinedTextField(state.serverUrl, onUrlChange, label = { Text("服务器地址") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+            OutlinedTextField(
+                value = state.authToken,
+                onValueChange = onAuthTokenChange,
+                label = { Text("Access Token") },
+                placeholder = { Text("留空不修改，输入新 Token 以重新认证", style = MaterialTheme.typography.bodySmall) },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+            )
             state.serverVersion?.let { Text("版本: $it", style = MaterialTheme.typography.bodySmall) }
             EthanPrimaryButton("测试并保存", onClick = onSave, modifier = Modifier.fillMaxWidth())
             Text(
@@ -373,9 +399,13 @@ private fun GeneralTab(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                val context = LocalContext.current
                 EthanSecondaryButton(
                     text = "检查更新",
-                    onClick = onCheckUpdate,
+                    onClick = {
+                        Toast.makeText(context, "正在检查更新…", Toast.LENGTH_SHORT).show()
+                        onCheckUpdate()
+                    },
                     modifier = Modifier.weight(1f),
                 )
                 EthanSecondaryButton(

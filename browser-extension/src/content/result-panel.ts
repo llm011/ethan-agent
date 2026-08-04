@@ -84,30 +84,51 @@ interface EthanResultPanelApi {
     ].join(';');
 
     host.innerHTML = [
-      // header
-      '<div id="' + PANEL_ID + '_head" style="display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid ' + (dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)') + ';flex-shrink:0">',
+      // header（点击除按钮外区域可折叠主体）
+      '<div id="' + PANEL_ID + '_head" style="display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid ' + (dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)') + ';flex-shrink:0;cursor:pointer;user-select:none">',
       '  <span style="font-size:15px">🦊</span>',
       '  <strong id="' + PANEL_ID + '_title" style="flex:1;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">结果</strong>',
-      '  <button id="' + PANEL_ID + '_prev" title="上一条" style="border:none;background:none;cursor:pointer;color:inherit;font-size:13px;padding:2px 5px;opacity:0.6">‹</button>',
+      '  <button id="' + PANEL_ID + '_prev" title="上一条" style="border:none;background:none;cursor:pointer;color:inherit;font-size:13px;padding:2px 5px;opacity:0.6" onclick="event.stopPropagation()">‹</button>',
       '  <span id="' + PANEL_ID + '_idx" style="font-size:11px;opacity:0.6;min-width:28px;text-align:center">-</span>',
-      '  <button id="' + PANEL_ID + '_next" title="下一条" style="border:none;background:none;cursor:pointer;color:inherit;font-size:13px;padding:2px 5px;opacity:0.6">›</button>',
-      '  <button id="' + PANEL_ID + '_close" title="关闭" style="border:none;background:none;cursor:pointer;color:inherit;font-size:14px;padding:2px 6px">✕</button>',
+      '  <button id="' + PANEL_ID + '_next" title="下一条" style="border:none;background:none;cursor:pointer;color:inherit;font-size:13px;padding:2px 5px;opacity:0.6" onclick="event.stopPropagation()">›</button>',
+      '  <span id="' + PANEL_ID + '_chevron" style="font-size:11px;opacity:0.6;transition:transform 0.2s;margin-left:2px">▼</span>',
+      '  <button id="' + PANEL_ID + '_close" title="关闭" style="border:none;background:none;cursor:pointer;color:inherit;font-size:14px;padding:2px 6px" onclick="event.stopPropagation()">✕</button>',
       '</div>',
-      // body
-      '<div id="' + PANEL_ID + '_body" style="flex:1;overflow-y:auto;padding:12px;line-height:1.6;min-height:0;word-break:break-word"></div>',
-      // actions
-      '<div style="display:flex;gap:6px;padding:8px 12px;border-top:1px solid ' + (dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)') + ';flex-shrink:0">',
-      '  <button id="' + PANEL_ID + '_copy" style="flex:none;padding:5px 10px;border:1px solid ' + (dark ? '#374151' : '#e5e7eb') + ';border-radius:6px;background:none;color:inherit;cursor:pointer;font-size:12px">复制</button>',
-      '  <button id="' + PANEL_ID + '_kb" style="flex:none;padding:5px 10px;border:1px solid ' + (dark ? '#374151' : '#e5e7eb') + ';border-radius:6px;background:none;color:inherit;cursor:pointer;font-size:12px">存知识库</button>',
-      '</div>',
-      // follow-up
-      '<div style="display:flex;gap:6px;align-items:flex-end;padding:0 12px 12px">',
-      '  <textarea id="' + PANEL_ID + '_input" rows="1" placeholder="追问…" style="flex:1;resize:none;padding:7px 9px;border-radius:8px;border:1px solid ' + (dark ? '#374151' : '#e5e7eb') + ';background:' + (dark ? '#2a2e37' : '#fff') + ';color:inherit;font-size:13px;font-family:inherit;line-height:1.4;max-height:80px;outline:none"></textarea>',
-      '  <button id="' + PANEL_ID + '_send" style="flex:none;padding:7px 12px;border:none;border-radius:8px;background:#0d9488;color:#fff;font-size:13px;cursor:pointer">发送</button>',
+      // 可折叠主体 wrapper（body + actions + followup
+      '<div id="' + PANEL_ID + '_bodyWrap" style="display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden;transition:flex 0.2s ease,min-height 0.2s ease">',
+      '  <div id="' + PANEL_ID + '_body" style="flex:1;overflow-y:auto;padding:12px;line-height:1.6;min-height:0;word-break:break-word"></div>',
+      '  <div id="' + PANEL_ID + '_actions" style="display:flex;gap:6px;padding:8px 12px;border-top:1px solid ' + (dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)') + ';flex-shrink:0">',
+      '    <button id="' + PANEL_ID + '_copy" style="flex:none;padding:5px 10px;border:1px solid ' + (dark ? '#374151' : '#e5e7eb') + ';border-radius:6px;background:none;color:inherit;cursor:pointer;font-size:12px">复制</button>',
+      '    <button id="' + PANEL_ID + '_kb" style="flex:none;padding:5px 10px;border:1px solid ' + (dark ? '#374151' : '#e5e7eb') + ';border-radius:6px;background:none;color:inherit;cursor:pointer;font-size:12px">存知识库</button>',
+      '  </div>',
+      '  <div id="' + PANEL_ID + '_followup" style="display:flex;gap:6px;align-items:flex-end;padding:0 12px 12px">',
+      '    <textarea id="' + PANEL_ID + '_input" rows="1" placeholder="追问…" style="flex:1;resize:none;padding:7px 9px;border-radius:8px;border:1px solid ' + (dark ? '#374151' : '#e5e7eb') + ';background:' + (dark ? '#2a2e37' : '#fff') + ';color:inherit;font-size:13px;font-family:inherit;line-height:1.4;max-height:80px;outline:none"></textarea>',
+      '    <button id="' + PANEL_ID + '_send" style="flex:none;padding:7px 12px;border:none;border-radius:8px;background:#0d9488;color:#fff;font-size:13px;cursor:pointer">发送</button>',
+      '  </div>',
       '</div>',
     ].join('');
 
     document.documentElement.appendChild(host);
+
+    // header 点击折叠（按钮事件已 stopPropagation）
+    let collapsed = false;
+    const head = host.querySelector('#' + PANEL_ID + '_head') as HTMLElement;
+    const wrap = host.querySelector('#' + PANEL_ID + '_bodyWrap') as HTMLElement;
+    const chevron = host.querySelector('#' + PANEL_ID + '_chevron') as HTMLElement;
+    if (head && wrap) {
+      head.addEventListener('click', () => {
+        collapsed = !collapsed;
+        if (collapsed) {
+          wrap.style.flex = '0 0 0px';
+          wrap.style.minHeight = '0';
+          if (chevron) chevron.style.transform = 'rotate(-90deg)';
+        } else {
+          wrap.style.flex = '1';
+          wrap.style.minHeight = '0';
+          if (chevron) chevron.style.transform = 'rotate(0deg)';
+        }
+      });
+    }
 
     (host.querySelector('#' + PANEL_ID + '_close') as HTMLElement).onclick = hide;
     (host.querySelector('#' + PANEL_ID + '_prev') as HTMLElement).onclick = () => nav(-1);
@@ -228,8 +249,17 @@ interface EthanResultPanelApi {
 
   // ── 消息监听 ─────────────────────────────────────────────────
 
+  function removePanel() {
+    const p = document.getElementById(PANEL_ID);
+    if (p) p.remove();
+  }
+
   function onMessage(msg: any) {
     if (msg?.target !== 'result') return;
+    if (msg.type === 'removeResultPanel') {
+      removePanel();
+      return;
+    }
     if (msg.type === 'newResult') {
       // background 注入面板后开一条新结果（无法直接调 window API，走消息）
       newResult({ title: msg.title, sessionId: msg.sessionId, requestId: msg.requestId });

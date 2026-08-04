@@ -41,10 +41,10 @@ function createOverlay(): HTMLElement {
     'box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15)',
     'backdrop-filter: blur(8px)',
     'pointer-events: auto',
-    'transition: opacity 0.3s',
+    'transition: max-height 0.2s ease, opacity 0.3s',
   ].join(';');
 
-  // 标题栏
+  // 标题栏（点击可折叠列表）
   const header = document.createElement('div');
   header.style.cssText = [
     'display: flex',
@@ -55,8 +55,12 @@ function createOverlay(): HTMLElement {
     'font-weight: 600',
     'font-size: 13px',
     'flex-shrink: 0',
+    'cursor: pointer',
+    'user-select: none',
   ].join(';');
-  header.innerHTML = '<span style="font-size: 14px;">🦊</span> Ethan Agent';
+  header.innerHTML =
+    '<span style="font-size: 14px;">🦊</span> Ethan Agent' +
+    '<span id="' + OVERLAY_ID + '_chevron" style="margin-left:auto;transition:transform 0.2s;font-size:12px;opacity:0.6">▼</span>';
 
   // 步骤列表容器
   const list = document.createElement('div');
@@ -66,6 +70,7 @@ function createOverlay(): HTMLElement {
     'overflow-y: auto',
     'padding: 4px 0',
     'min-height: 0',
+    'transition: flex 0.2s ease, min-height 0.2s ease, padding 0.2s ease',
   ].join(';');
 
   // 自定义滚动条样式
@@ -80,6 +85,31 @@ function createOverlay(): HTMLElement {
   host.appendChild(list);
   document.documentElement.appendChild(style);
   document.documentElement.appendChild(host);
+
+  // 点击 header 折叠/展开列表
+  let collapsed = false;
+  header.onclick = () => {
+    collapsed = !collapsed;
+    const chevron = document.getElementById(OVERLAY_ID + '_chevron') as HTMLElement | null;
+    if (collapsed) {
+      list.style.flex = '0 0 0px';
+      list.style.minHeight = '0';
+      list.style.padding = '0';
+      list.style.overflow = 'hidden';
+      list.style.opacity = '0';
+      if (chevron) chevron.style.transform = 'rotate(-90deg)';
+      host.style.maxHeight = 'none';
+    } else {
+      list.style.flex = '1';
+      list.style.minHeight = '0';
+      list.style.padding = '4px 0';
+      list.style.overflow = 'auto';
+      list.style.opacity = '1';
+      if (chevron) chevron.style.transform = 'rotate(0deg)';
+      host.style.maxHeight = '400px';
+    }
+  };
+
   return host;
 }
 
