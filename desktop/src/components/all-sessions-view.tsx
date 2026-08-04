@@ -44,6 +44,7 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
   const [filterMode, setFilterMode] = useState<string>("__all__");
   const [showHeartbeat, setShowHeartbeat] = useState(false);
   const [showScheduled, setShowScheduled] = useState(false);
+  const [filterHasImages, setFilterHasImages] = useState(false);
   const [cleanupLoading, setCleanupLoading] = useState(false);
   const [cleanupMsg, setCleanupMsg] = useState("");
   const limit = 20;
@@ -52,12 +53,12 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
     fetchModes().then(setModes).catch(() => {});
   }, []);
 
-  const loadSessions = useCallback(async (pageNum: number, q: string, src: string, md: string, hb: boolean, sched: boolean) => {
+  const loadSessions = useCallback(async (pageNum: number, q: string, src: string, md: string, hb: boolean, sched: boolean, hasImg: boolean) => {
     setLoading(true);
     try {
       const offset = (pageNum - 1) * limit;
       const modeParam = md === "__all__" ? undefined : (md === "__default__" ? "" : md);
-      const data = await fetchSessions(limit, offset, q || undefined, src || undefined, modeParam, !hb, !sched);
+      const data = await fetchSessions(limit, offset, q || undefined, src || undefined, modeParam, !hb, !sched, undefined, hasImg || undefined);
       if (data.length < limit) {
         setHasMore(false);
       } else {
@@ -75,22 +76,22 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
     const q = search.trim();
     const timer = setTimeout(() => {
       setPage(1);
-      loadSessions(1, q, filterSource, filterMode, showHeartbeat, showScheduled);
+      loadSessions(1, q, filterSource, filterMode, showHeartbeat, showScheduled, filterHasImages);
     }, 300);
     return () => clearTimeout(timer);
-  }, [search, filterSource, filterMode, showHeartbeat, showScheduled, loadSessions]);
+  }, [search, filterSource, filterMode, showHeartbeat, showScheduled, filterHasImages, loadSessions]);
 
   useEffect(() => {
     if (page > 1) {
-      loadSessions(page, search.trim(), filterSource, filterMode, showHeartbeat, showScheduled);
+      loadSessions(page, search.trim(), filterSource, filterMode, showHeartbeat, showScheduled, filterHasImages);
     }
-  }, [page, search, filterSource, filterMode, showHeartbeat, showScheduled, loadSessions]);
+  }, [page, search, filterSource, filterMode, showHeartbeat, showScheduled, filterHasImages, loadSessions]);
 
   // Poll for new sessions every 3s（搜索/筛选/非第一页时暂停，避免轮询结果覆盖当前视图）
   useEffect(() => {
     const interval = setInterval(async () => {
       if (page !== 1) return;
-      if (search.trim() || filterSource || filterMode !== "__all__") return;
+      if (search.trim() || filterSource || filterMode !== "__all__" || filterHasImages) return;
       try {
         const data = await fetchSessions(20, 0, undefined, undefined, undefined, !showHeartbeat, !showScheduled);
         setSessions(prev => {
@@ -102,7 +103,7 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
     }, 3000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, search, filterSource, filterMode, showHeartbeat, showScheduled]);
+  }, [page, search, filterSource, filterMode, showHeartbeat, showScheduled, filterHasImages]);
 
   const commitRename = async (id: string) => {
     const title = editingTitle.trim();
@@ -131,7 +132,7 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
       const result = await cleanupTrivialSessions();
       if (result.deleted > 0) {
         setCleanupMsg(`已清理 ${result.deleted} 个无意义对话`);
-        loadSessions(1, search.trim(), filterSource, filterMode, showHeartbeat, showScheduled);
+        loadSessions(1, search.trim(), filterSource, filterMode, showHeartbeat, showScheduled, filterHasImages);
       } else {
         setCleanupMsg("没有需要清理的对话");
       }
@@ -186,6 +187,14 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
             onClick={() => setShowScheduled(v => !v)}
           >
             定时
+          </Button>
+          <Button
+            variant={filterHasImages ? "default" : "outline"}
+            size="sm"
+            className="h-8 text-xs px-2.5"
+            onClick={() => setFilterHasImages(v => !v)}
+          >
+            图片
           </Button>
           {/* 渠道筛选 */}
           <Select value={filterSource || "__all__"} onValueChange={(v) => { if (v) setFilterSource(v === "__all__" ? "" : v); }}>
