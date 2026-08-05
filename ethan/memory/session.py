@@ -19,6 +19,11 @@ import aiosqlite
 from ethan.providers.base import Message
 
 
+class PaginatedList(list):
+    """A list that carries a .total attribute for pagination."""
+    total: int = 0
+
+
 @dataclass
 class Session:
     id: str
@@ -672,7 +677,7 @@ class SessionStore:
         where_sql = (" WHERE " + " AND ".join(where)) if where else ""
         count_params = list(params)
         params.extend([limit, offset])
-        sessions = []
+        sessions: PaginatedList = PaginatedList()
         # total count for pagination
         async with self._db.execute(
             f"SELECT COUNT(*) FROM sessions{where_sql}",
