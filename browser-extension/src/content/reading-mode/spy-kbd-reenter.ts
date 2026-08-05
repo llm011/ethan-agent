@@ -36,7 +36,6 @@
     tocEl.querySelectorAll<HTMLElement>('[data-toc-idx]').forEach((el, i) => {
       el.style.fontWeight = i === activeIdx ? '600' : '';
       el.style.color = i === activeIdx ? '#0d9488' : '';
-      el.style.borderLeftColor = i === activeIdx ? '#0d9488' : 'transparent';
     });
   }
 

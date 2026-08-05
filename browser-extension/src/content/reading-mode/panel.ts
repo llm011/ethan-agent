@@ -422,7 +422,7 @@
         padding: ITEM_PAD_Y + 'px 8px ' + ITEM_PAD_Y + 'px ' + textPadLeft(depth) + 'px',
         borderRadius: '6px', fontSize: '12px', cursor: 'pointer', lineHeight: '1.5',
         whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-        transition: 'background 0.15s', borderLeft: '2px solid transparent',
+        transition: 'background 0.15s',
       });
       div.textContent = item.text;
 
