@@ -12,6 +12,10 @@ const STATIC_CACHE = "ethan-static-v1";
 const API_CACHE = "ethan-api-v1";
 const SHELL_ASSETS = ["/", "/manifest.json", "/icon-192.png", "/icon-512.png", "/apple-icon.png"];
 
+// 当前版本使用的全部缓存名：activate 时只清理 ethan- 前缀但不在白名单内的旧版本缓存，
+// 同源部署的其他应用缓存（不以 ethan- 开头）保持不动，避免误删。
+const ACTIVE_CACHES = new Set([SHELL_CACHE, STATIC_CACHE, API_CACHE]);
+
 // ---------- install: 预缓存 App Shell ----------
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -32,11 +36,12 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     (async () => {
-      // 删除所有不以 ethan- 开头的旧缓存，以及过期版本缓存
+      // 仅清理本应用自身过期版本的缓存（以 ethan- 开头但不在当前白名单内）。
+      // 不动其他 ethan- 前缀以外的同源缓存，避免误删同源部署的其他应用。
       const keys = await caches.keys();
       await Promise.all(
         keys.map((k) => {
-          if (!k.startsWith("ethan-")) return caches.delete(k);
+          if (k.startsWith("ethan-") && !ACTIVE_CACHES.has(k)) return caches.delete(k);
           return null;
         }),
       );
