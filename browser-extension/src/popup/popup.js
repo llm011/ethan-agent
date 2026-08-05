@@ -219,11 +219,18 @@ $('reading').addEventListener('click', async () => {
     return;
   }
   $('hint').textContent = '正在进入阅读模式…';
-  const resp = await chrome.runtime.sendMessage({ type: 'reading:start', tabId: tab.id });
-  if (resp?.ok) {
-    window.close();
-  } else {
-    $('hint').textContent = resp?.error || '注入失败，页面不支持';
+  try {
+    const resp = await Promise.race([
+      chrome.runtime.sendMessage({ type: 'reading:start', tabId: tab.id }),
+      new Promise(r => setTimeout(() => r({ ok: false, error: 'timeout' }), 8000)),
+    ]);
+    if (resp?.ok) {
+      window.close();
+    } else {
+      $('hint').textContent = resp?.error === 'timeout' ? '响应超时，请重试或刷新扩展' : (resp?.error || '注入失败，页面不支持');
+    }
+  } catch (e) {
+    $('hint').textContent = '通信异常: ' + (e?.message || e);
   }
 });
 $('autoCloseCookies').addEventListener('change', async (e) => {

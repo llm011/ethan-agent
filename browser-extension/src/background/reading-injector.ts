@@ -66,9 +66,11 @@ export async function startReading(tabId: number): Promise<{ ok: boolean; error?
       payload.presetMarkdown = feishu.markdown;
       payload.presetTitle = feishu.title;
     }
+    console.log('[EthanBrowser] reading:start sendMessage to tab', tabId);
     await chrome.tabs.sendMessage(tabId, payload);
     return { ok: true };
   } catch (e: any) {
+    console.warn('[EthanBrowser] reading:start error', e);
     return { ok: false, error: String(e?.message || e) };
   }
 }

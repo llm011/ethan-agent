@@ -235,7 +235,20 @@
     w.__ethanReadingListenerAdded = true;
     chrome.runtime.onMessage.addListener((msg, _sender, _sendResponse) => {
       if (msg?.target !== 'reading') return;
-      if (msg.type === 'start') enterReading({ presetMarkdown: msg.presetMarkdown, presetTitle: msg.presetTitle });
+      if (msg.type === 'start') {
+        if (active) {
+          // 已在阅读模式：如果面板折叠了就展开，否则不做重复进入
+          const panel = document.getElementById(PANEL_ID);
+          if (panel && panelCollapsed) {
+            panel.style.transform = 'translateX(0)';
+            panelCollapsed = false;
+            const reader = document.getElementById(READER_ID);
+            if (reader) reader.style.paddingRight = PANEL_WIDTH + 'px';
+          }
+        } else {
+          enterReading({ presetMarkdown: msg.presetMarkdown, presetTitle: msg.presetTitle });
+        }
+      }
       return false;
     });
   }
