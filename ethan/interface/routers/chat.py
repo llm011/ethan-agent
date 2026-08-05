@@ -62,16 +62,42 @@ def _is_local(request: Request) -> bool:
     return ip.is_loopback or any(ip in net for net in _PRIVATE_NETWORKS)
 
 
-async def _direct_stream(agent, messages: list):
-    """Direct LLM streaming: skip agent loop, no tools, no skills. Fastest path."""
+async def _direct_stream(agent, messages: list, *,
+                        save_user=None, save_assistant=None):
+    """Direct LLM streaming: skip agent loop, no tools, no skills. Fastest path.
+
+    save_user / save_assistant 可选：传入 coroutine 工厂（零参数返回 Awaitable）
+    后会在首块前落用户消息、done 时落助手消息。给 direct=true + session_id 场景
+    提供与正常 chat 一致的落库行为（会话列表能看到摘要/翻译的内容）。
+    """
     import json
+
+    if save_user:
+        try:
+            await save_user()
+        except Exception as e:  # noqa: BLE001
+            # 用户消息落库失败不该中断生成
+            import logging as _log
+            _log.getLogger(__name__).warning("direct save_user failed: %s", e)
+
+    full = ""
+    saw_error = False
     try:
         async for chunk in agent._provider.stream_chat(messages, tools=None, system=None):
             if chunk.content:
+                full += chunk.content
                 yield f"data: {json.dumps({'content': chunk.content})}\n\n"
         yield f"data: {json.dumps({'done': True})}\n\n"
     except Exception as e:
+        saw_error = True
         yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    if save_assistant and (not saw_error) and full:
+        try:
+            await save_assistant(full)
+        except Exception as e:  # noqa: BLE001
+            import logging as _log
+            _log.getLogger(__name__).warning("direct save_assistant failed: %s", e)
 
 
 # ── Health / Poll ────────────────────────────────────────────────
@@ -228,9 +254,43 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
     if req.stream:
         # (0) Direct 模式：跳过 agent loop，直调 LLM 流式输出。
         #     适用于浏览器扩展的翻译、摘要等无需工具/技能的轻量请求。
+        #     当请求带 session_id 时，消息要落库（会话列表里能看到），
+        #     所以在 _direct_stream 里挂一对 save_user/save_assistant 回调。
         if req.direct:
+            save_user_cb = None
+            save_assistant_cb = None
+            if req.session_id:
+                _local_store = await get_session_store()
+                _user_msgs = [
+                    Message(role=m["role"], content=m.get("content", ""),
+                            images=m.get("images") or [])
+                    for m in req.messages if m.get("role") == "user"
+                ]
+                if _user_msgs:
+                    async def _save_user():
+                        s = _local_store
+                        sid = req.session_id
+                        for _m in _user_msgs:
+                            orig_images = None
+                            if _m.images:
+                                orig_images = _m.images[:]
+                                _persist_images_to_disk(_m, sid)
+                            if req.quote and req.quote.get("content"):
+                                _m.quote = req.quote
+                            await s.save_message(sid, _m)
+                            if orig_images is not None:
+                                _m.images = orig_images
+                    save_user_cb = _save_user
+                async def _save_assistant(full_text: str):
+                    s = _local_store
+                    m = Message(role="assistant", content=full_text)
+                    await s.save_message(req.session_id, m)
+                    await s.touch(req.session_id)
+                save_assistant_cb = _save_assistant
             return StreamingResponse(
-                _direct_stream(agent, messages),
+                _direct_stream(agent, messages,
+                               save_user=save_user_cb,
+                               save_assistant=save_assistant_cb),
                 media_type="text/event-stream",
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )

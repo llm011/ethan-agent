@@ -78,8 +78,9 @@ export async function startReading(tabId: number): Promise<{ ok: boolean; error?
 /**
  * 阅读模式的流式 AI：薄封装 streamChat，推回 target='reading'。
  *
- * opts.sessionId 传入时走多轮对话（服务端按 session 拼历史），不传走单轮（摘要）。
+ * opts.sessionId 传入时走多轮对话（服务端按 session 拼历史），不传走单轮（一次性摘要）。
  * 单轮默认走 direct 模式（跳过 agent loop，纯 LLM 输出，更快）。
+ * 多轮也走 direct（摘要 + 对文章提问都是正文相关，不需要工具；同时让服务端把问答对也落库到 session）。
  */
 export async function readingChat(
   tabId: number,
@@ -90,7 +91,7 @@ export async function readingChat(
   await streamChat(tabId, requestId, prompt, {
     uiTarget: 'reading',
     sessionId: opts.sessionId,
-    direct: !opts.sessionId,
+    direct: true,
   });
 }
 
