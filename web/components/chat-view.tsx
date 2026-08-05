@@ -23,6 +23,7 @@ import {
   respondBrowserCleanup,
   respondAskUser,
   getAnnotationsBatch,
+  renameSession,
   type Annotation,
 } from "@/lib/api";
 import { ReadingMode } from "@/components/chat/reading-mode";
@@ -36,7 +37,7 @@ import { type ConsentRequest } from "@ethan/shared/components/consent-dialog";
 import { ConsentGate } from "@ethan/shared/chat/consent-card";
 import { CleanupConfirmGate, type CleanupConfirmRequest } from "@ethan/shared/chat/cleanup-confirm-card";
 import { AskUserCard, type AskUserRequest } from "@ethan/shared/chat/ask-user-card";
-import { placeholderTitle, mapDetailMessages } from "@/components/chat/chat-helpers";
+import { placeholderTitle, mapDetailMessages, isFirstQuerySignificant } from "@/components/chat/chat-helpers";
 import { consumeStream, type ConsumeStreamActions } from "@/components/chat/use-chat-stream";
 import { handleCommand } from "@/components/chat/chat-commands";
 import { useInputStore } from "@/components/chat/use-input-store";
@@ -377,6 +378,15 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         const pTitle = placeholderTitle(text);
         setSessionTitle(pTitle);
         window.dispatchEvent(new CustomEvent("session:title-updated", { detail: { sessionId: s.id, title: pTitle } }));
+        // 首轮：如果 query 信息量足够，同时 fire-and-forget 把占位标题写入后端，
+        // 作为与后端 chat.py init_title 逻辑的双重保障：
+        //   (1) 后端会在 chat 请求到达时按同一阈值写 init_title；
+        //   (2) 前端再写一次 PATCH 保证 3s 会话轮询不会把本地标题覆盖回"新对话"
+        //       （竞态：createSession 先返回"新对话"，若后端 init_title 还没执行完，
+        //         侧边栏的第一次 list/fetchSessions 读到的仍是"新对话"）。
+        if (isFirstQuerySignificant(text) && pTitle && pTitle !== "新对话") {
+          renameSession(s.id, pTitle).catch(() => { /* PATCH 失败静默忽略，后端稍后会补 */ });
+        }
         justFinishedRef.current = s.id;
         window.history.replaceState(null, "", `/chat/${s.id}/`);
       } catch (e) {
@@ -404,8 +414,15 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       content = `帮我 code review：${target}`;
       const ghMatch = target.match(/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/);
       const glMatch = target.match(/gitlab\.com\/([^/]+\/[^/]+)\/-\/merge_requests\/(\d+)/);
-      if (ghMatch) setSessionTitle(`PR #${ghMatch[2]} ${ghMatch[1]}`);
-      else if (glMatch) setSessionTitle(`MR !${glMatch[2]} ${glMatch[1]}`);
+      if (ghMatch) {
+        const reviewTitle = `PR #${ghMatch[2]} ${ghMatch[1]}`;
+        setSessionTitle(reviewTitle);
+        if (sessionId) window.dispatchEvent(new CustomEvent("session:title-updated", { detail: { sessionId, title: reviewTitle } }));
+      } else if (glMatch) {
+        const reviewTitle = `MR !${glMatch[2]} ${glMatch[1]}`;
+        setSessionTitle(reviewTitle);
+        if (sessionId) window.dispatchEvent(new CustomEvent("session:title-updated", { detail: { sessionId, title: reviewTitle } }));
+      }
     }
     const imageFiles = pendingFiles.filter((f) => f.isImage);
     const nonImageFiles = pendingFiles.filter((f) => !f.isImage);

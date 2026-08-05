@@ -193,6 +193,7 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
                 from ethan.core.config import get_config as _gc
                 await store.create_with_id(req.session_id, req.model or _gc().defaults.model,
                                            source=req.channel or "web", mode=req.mode or "")
+            session_obj = existing or await store.load(req.session_id)
             for m in messages[-1:]:
                 if m.role == "user":
                     # 图片持久化到本地文件，DB 只存路径
@@ -212,13 +213,39 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
                     if saved_image_paths and m.content:
                         paths_hint = ", ".join(saved_image_paths)
                         m.content = f"{m.content}\n\n[image_paths: {paths_hint}]"
-            # /review 命令：立即从 URL 解析出 PR 标题并更新，不等 review 跑完
+            # 首轮对话立即写标题：避免"新对话"残留很久，也避免前端本地 placeholderTitle
+            # 被 3s 会话列表轮询覆盖回"新对话"。与 completions.py / repl_stream.py 初始化思路对齐。
+            # 策略（仅首轮生效，且当前标题仍是默认"新对话"才写）：
+            #   - /review 命令：从 URL 解析 "PR #xx owner/repo"，写标题。
+            #   - 普通首条 query：内容量足够（≥10 中文等价字、或英文单词≥6）→ 立即用
+            #     _auto_title（清洗 + 40 字截断）写 DB 标题，不等模型智能标题；
+            #     若太短（你好/hi/测试）则保留"新对话"，等第二轮智能标题，避免把毫无
+            #     信息的"你好"作为永久标题。
+            #   - 只有纯图片等零文本场景才不写（保持"新对话"，等后续消息或模型标题）。
             user_text = (req.messages[-1].get("content", "") if req.messages else "").strip()
+            early_title = None
             if user_text:
                 from ethan.memory.session import _review_title
                 early_title = _review_title(user_text)
+            from ethan.memory.session import _PROTECTED_PREFIXES
+            if (not any(getattr(session_obj, "title", "").startswith(p) for p in _PROTECTED_PREFIXES)) and (
+                (not getattr(session_obj, "title", "")) or getattr(session_obj, "title", "") == "新对话"
+            ):
                 if early_title:
                     await store.update_title(req.session_id, early_title)
+                elif user_text:
+                    from ethan.memory.session import _auto_title, _count_content
+                    # 阈值：中文等价字≥10 或 英文单词≥6 视为有信息量。
+                    # 阈值为什么不是 3/4？因为用户明确反馈"先发了 query 很久标题还是新对话"，
+                    # 说明用户不想等模型智能标题；但太短的问候语直接当标题又很丑（"你好"/"hi"），
+                    # 所以只提前写"看起来能当标题"的长度。
+                    cjk = len(__import__("re").findall(r'[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]', user_text))
+                    non_cjk = __import__("re").sub(r'[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]', ' ', user_text)
+                    en_words = len([w for w in non_cjk.split() if w and any(c.isalnum() for c in w)])
+                    if cjk >= 10 or en_words >= 6 or _count_content(user_text) >= 10:
+                        init = _auto_title([Message(role="user", content=user_text)])
+                        if init and init != "新对话":
+                            await store.update_title(req.session_id, init)
             # 持久化对话模式：退出再进入保持当前模式
             if req.mode:
                 await store.update_mode(req.session_id, req.mode)

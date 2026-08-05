@@ -12,6 +12,26 @@ export function placeholderTitle(text: string): string {
   return t.slice(0, 40) + (t.length > 40 ? '…' : '');
 }
 
+// 判定首条 query 是否"信息量足够"直接当标题（不等模型智能标题）。
+// 阈值与后端 chat.py 首轮 init_title 阈值保持一致：
+//   - 中文字符（含日韩语）≥ 10
+//   - 或英文（含数字）单词 ≥ 6
+//   - 或混用汇总（_count_content 等价）≥ 10
+// 短消息（"你好"/"hi"/"测试"）保持"新对话"，避免把无信息的问候当永久标题。
+export function isFirstQuerySignificant(text: string): boolean {
+  const t = text?.trim() ?? "";
+  if (!t) return false;
+  // CJK + 假名 + 谚文
+  const cjk = (t.match(/[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/g) || []).length;
+  if (cjk >= 10) return true;
+  // 去掉 CJK 后按空格分词，取带字母/数字的 token
+  const nonCjk = t.replace(/[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/g, " ");
+  const words = nonCjk.split(/\s+/).filter(w => w && /[A-Za-z0-9]/.test(w));
+  if (words.length >= 6) return true;
+  // 兜底：混用汇总 ≥10（与后端 _count_content 等价）
+  return cjk + words.length >= 10;
+}
+
 // SessionDetail.messages → 组件内 Message[]（fetchSession 初次加载 + 重连失败兜底共用）
 export function mapDetailMessages(detail: { messages: any[] }): Message[] {
   return detail.messages.map((m: any) => ({

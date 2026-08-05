@@ -67,6 +67,8 @@ export function ChatHeader({ sessionId, title, source, usage, schedules, onTitle
     if (trimmed && sessionId) {
       await renameSession(sessionId, trimmed);
       onTitleChange(trimmed);
+      // 同步 Sidebar：重命名后立即广播事件，不等 3s 轮询
+      window.dispatchEvent(new CustomEvent("session:title-updated", { detail: { sessionId, title: trimmed } }));
     }
     setIsEditing(false);
   };
@@ -121,6 +123,8 @@ export function ChatHeader({ sessionId, title, source, usage, schedules, onTitle
                   setRegenerating(false);
                   if (newTitle) {
                     onTitleChange(newTitle);
+                    // 同步 Sidebar：AI 重新生成标题后立即广播事件
+                    window.dispatchEvent(new CustomEvent("session:title-updated", { detail: { sessionId, title: newTitle } }));
                   } else {
                     alert("标题重新生成失败");
                   }
