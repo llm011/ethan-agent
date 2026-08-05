@@ -89,15 +89,20 @@
       '      </div>',
       '    </div>',
       '  </div>',
+      '  <!-- Chat Mode Header (hidden by default) -->',
+      '  <div id="__ethan_reading_chat_header" style="display:none;justify-content:space-between;align-items:center;margin-bottom:10px;flex-shrink:0">',
+      '    <button id="__ethan_reading_chat_back" style="border:none;background:' + (dark ? '#2a2e37' : '#f3f4f6') + ';cursor:pointer;font-size:13px;padding:4px 8px;border-radius:6px;color:inherit;display:flex;align-items:center;gap:3px">← 返回</button>',
+      '    <strong style="font-size:13px;color:' + (dark ? '#9ca3af' : '#6b7280') + '">向 Ethan 提问</strong>',
+      '  </div>',
       '  <!-- Segmented Control Bar -->',
-      '  <div style="display:flex;padding:3px;border-radius:10px;background:' + (dark ? '#2a2e37' : '#f3f4f6') + ';margin-bottom:12px;flex-shrink:0">',
+      '  <div id="__ethan_reading_tab_bar" style="display:flex;padding:3px;border-radius:10px;background:' + (dark ? '#2a2e37' : '#f3f4f6') + ';margin-bottom:12px;flex-shrink:0">',
       '    <button class="__ethan_main_tab" data-tab="summary" style="flex:1;padding:6px 0;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;background:' + (dark ? '#1c1f26' : '#fff') + ';color:#0d9488;box-shadow:0 1px 3px rgba(0,0,0,0.08);transition:all 0.2s">AI 解读</button>',
       '    <button class="__ethan_main_tab" data-tab="toc" style="flex:1;padding:6px 0;border:none;border-radius:8px;font-size:12px;font-weight:500;cursor:pointer;background:none;color:' + (dark ? '#9ca3af' : '#6b7280') + ';transition:all 0.2s">目录</button>',
       '    <button class="__ethan_main_tab" data-tab="anno" style="flex:1;padding:6px 0;border:none;border-radius:8px;font-size:12px;font-weight:500;cursor:pointer;background:none;color:' + (dark ? '#9ca3af' : '#6b7280') + ';transition:all 0.2s">标注 <span id="__ethan_anno_count_badge" style="font-size:10px;padding:1px 5px;border-radius:10px;background:' + (dark ? '#374151' : '#e5e7eb') + ';color:inherit">0</span></button>',
       '  </div>',
       '  <!-- Main Scrollable Body -->',
       '  <div style="flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden">',
-      '    <div style="flex:1;min-height:0;overflow-y:auto;padding-right:2px">',
+      '    <div id="__ethan_reading_tabs_body" style="flex:1;min-height:0;overflow-y:auto;padding-right:2px">',
       '      <!-- Tab 1: AI 解读 -->',
       '      <div id="__ethan_tab_summary" style="display:block">',
       '        <div style="padding:12px;border-radius:12px;background:' + (dark ? '#222630' : '#fff') + ';border:1px solid ' + (dark ? '#333' : '#e5e7eb') + ';box-shadow:0 1px 4px rgba(0,0,0,0.03)">',
@@ -106,13 +111,13 @@
       '            <button class="__ethan_sum_tab" data-section="structure" style="border:none;background:none;padding:2px 0;font-size:12px;font-weight:600;letter-spacing:0.5px;cursor:pointer;color:' + (dark ? '#6b7280' : '#9ca3af') + ';border-bottom:2px solid transparent">结构</button>',
       '            <button class="__ethan_sum_tab" data-section="keypoints" style="border:none;background:none;padding:2px 0;font-size:12px;font-weight:600;letter-spacing:0.5px;cursor:pointer;color:' + (dark ? '#6b7280' : '#9ca3af') + ';border-bottom:2px solid transparent">重点</button>',
       '          </div>',
-      '          <div id="__ethan_reading_summary_content" style="font-size:13px;max-height:300px;overflow-y:auto;scroll-behavior:smooth;position:relative"></div>',
+      '          <div id="__ethan_reading_summary_content" style="font-size:13px;overflow-y:auto;scroll-behavior:smooth;position:relative"></div>',
       '        </div>',
       '      </div>',
       '      <!-- Tab 2: 目录 -->',
       '      <div id="__ethan_tab_toc" style="display:none">',
       '        <div style="padding:10px 12px;border-radius:12px;background:' + (dark ? '#222630' : '#fff') + ';border:1px solid ' + (dark ? '#333' : '#e5e7eb') + '">',
-      '          <div id="__ethan_reading_toc" style="max-height:320px;overflow-y:auto"></div>',
+      '          <div id="__ethan_reading_toc" style="overflow-y:auto"></div>',
       '        </div>',
       '      </div>',
       '      <!-- Tab 3: 标注 -->',
@@ -122,13 +127,13 @@
       '            <div style="font-weight:600;font-size:12px;color:' + (dark ? '#9ca3af' : '#6b7280') + '">标注与书签</div>',
       '            <div id="__ethan_reading_anno_filter" style="display:flex;gap:4px"></div>',
       '          </div>',
-      '          <div id="__ethan_reading_anno_list" style="max-height:300px;overflow-y:auto"></div>',
+      '          <div id="__ethan_reading_anno_list" style="overflow-y:auto"></div>',
       '        </div>',
       '      </div>',
       '    </div>',
       '    <!-- QA Section ("向 Ethan 提问") -->',
-      '    <div style="margin-top:10px;padding:10px 12px;border-radius:12px;background:' + (dark ? '#222630' : '#fff') + ';border:1px solid ' + (dark ? '#333' : '#e5e7eb') + ';flex-shrink:0">',
-      '      <div style="font-weight:600;font-size:12px;color:' + (dark ? '#9ca3af' : '#6b7280') + ';margin-bottom:6px">向 Ethan 提问</div>',
+      '    <div id="__ethan_reading_qa_section" style="margin-top:10px;padding:10px 12px;border-radius:12px;background:' + (dark ? '#222630' : '#fff') + ';border:1px solid ' + (dark ? '#333' : '#e5e7eb') + ';flex-shrink:0">',
+      '      <div id="__ethan_reading_qa_title" style="font-weight:600;font-size:12px;color:' + (dark ? '#9ca3af' : '#6b7280') + ';margin-bottom:6px">向 Ethan 提问</div>',
       '      <div id="__ethan_reading_chat_log" style="max-height:120px;overflow-y:auto;margin-bottom:6px"></div>',
       '      <div style="display:flex;gap:6px;align-items:flex-end">',
       '        <textarea id="__ethan_reading_chat_input" rows="1" placeholder="就这篇文章提问…" style="flex:1;resize:none;padding:7px 9px;border-radius:8px;border:1px solid ' + (dark ? '#374151' : '#e5e7eb') + ';background:' + (dark ? '#1c1f26' : '#fafafa') + ';color:inherit;font-size:12px;font-family:inherit;line-height:1.4;max-height:72px;outline:none"></textarea>',
@@ -221,6 +226,68 @@
 
     // Inline chat
     setupChat(dark);
+
+    // Chat mode: 返回按钮
+    const backBtn = getPanelEl('__ethan_reading_chat_back');
+    if (backBtn) backBtn.onclick = exitChatMode;
+  }
+
+  // ========== Chat Mode（全屏聊天，最大化阅读区） ==========
+
+  let chatMode = false;
+
+  function enterChatMode() {
+    if (chatMode) return;
+    chatMode = true;
+    const tabBar = getPanelEl('__ethan_reading_tab_bar');
+    const tabsBody = getPanelEl('__ethan_reading_tabs_body');
+    const chatHeader = getPanelEl('__ethan_reading_chat_header');
+    const qaSection = getPanelEl('__ethan_reading_qa_section');
+    const qaTitle = getPanelEl('__ethan_reading_qa_title');
+    const chatLog = getPanelEl('__ethan_reading_chat_log');
+    if (tabBar) tabBar.style.display = 'none';
+    if (tabsBody) tabsBody.style.display = 'none';
+    if (chatHeader) chatHeader.style.display = 'flex';
+    if (qaTitle) qaTitle.style.display = 'none';
+    if (qaSection) {
+      qaSection.style.flex = '1';
+      qaSection.style.minHeight = '0';
+      qaSection.style.marginTop = '0';
+      qaSection.style.display = 'flex';
+      qaSection.style.flexDirection = 'column';
+    }
+    if (chatLog) {
+      chatLog.style.maxHeight = 'none';
+      chatLog.style.flex = '1';
+      chatLog.style.minHeight = '0';
+    }
+  }
+
+  function exitChatMode() {
+    if (!chatMode) return;
+    chatMode = false;
+    const tabBar = getPanelEl('__ethan_reading_tab_bar');
+    const tabsBody = getPanelEl('__ethan_reading_tabs_body');
+    const chatHeader = getPanelEl('__ethan_reading_chat_header');
+    const qaSection = getPanelEl('__ethan_reading_qa_section');
+    const qaTitle = getPanelEl('__ethan_reading_qa_title');
+    const chatLog = getPanelEl('__ethan_reading_chat_log');
+    if (tabBar) tabBar.style.display = 'flex';
+    if (tabsBody) tabsBody.style.display = 'block';
+    if (chatHeader) chatHeader.style.display = 'none';
+    if (qaTitle) qaTitle.style.display = 'block';
+    if (qaSection) {
+      qaSection.style.flex = '';
+      qaSection.style.minHeight = '';
+      qaSection.style.marginTop = '10px';
+      qaSection.style.display = '';
+      qaSection.style.flexDirection = '';
+    }
+    if (chatLog) {
+      chatLog.style.maxHeight = '120px';
+      chatLog.style.flex = '';
+      chatLog.style.minHeight = '';
+    }
   }
 
   // ========== Inline Chat（多轮对话）==========
@@ -234,6 +301,11 @@
     input.addEventListener('input', () => {
       input.style.height = 'auto';
       input.style.height = Math.min(input.scrollHeight, 96) + 'px';
+    });
+    // 聚焦输入框时进入全屏聊天模式（已有对话或正在输入时）
+    input.addEventListener('focus', () => {
+      const log = getPanelEl('__ethan_reading_chat_log');
+      if (log && log.children.length > 0) enterChatMode();
     });
     // Enter 发送，Shift+Enter 换行
     input.addEventListener('keydown', (e) => {
@@ -254,6 +326,8 @@
     input.value = '';
     input.style.height = 'auto';
     chatBusy = true;
+    // 发送时进入全屏聊天模式，最大化回复阅读区
+    enterChatMode();
 
     // 用户气泡
     const userBubble = document.createElement('div');
