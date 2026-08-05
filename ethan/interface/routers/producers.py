@@ -449,8 +449,9 @@ async def _run_generation(
         # 流结束（正常/异常）时取消未决授权 Future，避免泄漏
         if consent is not None:
             consent.cancel_all()
-        # 浏览器 session 清理：弹卡片让用户确认是否关闭 tab group。
-        await _close_browser_sessions(session_id, run=run)
+        # 浏览器 session 清理移至 done 事件之前（见下方），
+        # 因为 finally 在 stop/error 路径已 run.finish() 之后才执行，
+        # 此时 SSE 连接已断，无法送达 confirm 卡片。
 
     usage_dict = collector.usage_dict
 
@@ -564,6 +565,9 @@ async def _run_generation(
 
     # 标题生成：await 以便把结果带进 done 事件，前端实时更新
     new_title = await _maybe_regen_title(session_id)
+
+    # 浏览器 session 清理：必须在 done/finish 之前，否则 SSE 已断无法送达 confirm 卡片
+    await _close_browser_sessions(session_id, run=run)
 
     # 通知所有订阅者「流结束」并附最终 usage
     done_evt: dict = {"done": True, "usage": usage_dict, "ttfb_ms": collector.ttfb_ms, "total_ms": collector.total_ms, "message_id": msg_id}

@@ -48,7 +48,7 @@ export function QueryDots({ messages, scrollRef }: QueryDotsProps) {
             onClick={() => handleClick(idx)}
             className="h-4 w-4 flex items-center justify-center cursor-pointer group/btn"
           >
-            <span className="block h-[5px] w-[5px] rounded-full bg-muted-foreground/25 group-hover/btn:bg-muted-foreground/60 group-hover/btn:scale-[1.8] transition-all duration-150" />
+            <span className="block h-[6px] w-[6px] rounded-full bg-muted-foreground/40 group-hover/btn:bg-muted-foreground/80 group-hover/btn:scale-[1.6] transition-all duration-150" />
           </button>
           {hoverIdx === dotIdx && (
             <div
