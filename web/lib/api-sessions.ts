@@ -1,6 +1,7 @@
 /** Session 相关类型和 API。 */
 
 import { API_URL, getAuthToken, headers } from "./api-base";
+import { readSessionDetail, writeSessionDetail, deleteSessionDetail, readSessionList, writeSessionList, makeListKey, isOffline } from "./session-db";
 
 export interface SessionInfo {
   id: string;
@@ -65,11 +66,29 @@ export async function fetchSessions(limit = 50, offset = 0, q?: string, source?:
   if (hideScheduled) params.set("hide_scheduled", "true");
   if (titlePrefixes) params.set("title_prefixes", titlePrefixes);
   if (hasImages) params.set("has_images", "true");
+
+  // 离线时直接返回缓存
+  if (isOffline()) {
+    const cacheKey = makeListKey({ limit, offset, q, source, mode, hideHeartbeat, hideScheduled, titlePrefixes });
+    const cached = await readSessionList(cacheKey);
+    if (cached) return cached;
+    throw new Error("离线模式：无可用缓存");
+  }
+
   const res = await fetch(`${API_URL}/sessions?${params}`, { headers: headers() });
-  if (!res.ok) throw new Error("Failed to fetch sessions");
+  if (!res.ok) {
+    // 网络失败时降级到缓存，与 fetchSession 行为一致
+    const cacheKey = makeListKey({ limit, offset, q, source, mode, hideHeartbeat, hideScheduled, titlePrefixes });
+    const cached = await readSessionList(cacheKey);
+    if (cached) return cached;
+    throw new Error("Failed to fetch sessions");
+  }
   const data = await res.json();
   const sessions = data.sessions as SessionInfo[];
   (sessions as SessionInfo[] & { total?: number }).total = data.total ?? undefined;
+  // 写入缓存（fire-and-forget，不阻塞返回）
+  const cacheKey = makeListKey({ limit, offset, q, source, mode, hideHeartbeat, hideScheduled, titlePrefixes });
+  writeSessionList(cacheKey, sessions).catch(() => {});
   return sessions;
 }
 
@@ -113,13 +132,41 @@ export async function createSession(model?: string, mode?: string): Promise<{ id
 }
 
 export async function fetchSession(id: string): Promise<SessionDetail> {
-  const res = await fetch(`${API_URL}/sessions/${id}`, { headers: headers() });
-  if (!res.ok) throw new Error("Session not found");
-  return res.json();
+  // 离线时先返回缓存
+  if (isOffline()) {
+    const cached = await readSessionDetail(id);
+    if (cached) return cached;
+    throw new Error("离线模式：无可用缓存");
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}/sessions/${id}`, { headers: headers() });
+  } catch {
+    // 网络错误（fetch 抛错）才降级到缓存
+    const cached = await readSessionDetail(id);
+    if (cached) return cached;
+    throw new Error("Session not found");
+  }
+  // 4xx 客户端错误（如 404 会话已删除）：直接抛错，不降级缓存，避免已删会话"诈尸"
+  if (res.status >= 400 && res.status < 500) {
+    throw new Error("Session not found");
+  }
+  if (!res.ok) {
+    // 5xx 服务端错误：降级到缓存
+    const cached = await readSessionDetail(id);
+    if (cached) return cached;
+    throw new Error("Session not found");
+  }
+  const detail = await res.json();
+  writeSessionDetail(id, detail).catch(() => {});
+  return detail;
 }
 
 export async function deleteSession(id: string): Promise<void> {
   await fetch(`${API_URL}/sessions/${id}`, { method: "DELETE", headers: headers() });
+  // 清除 IndexedDB 缓存，避免离线时已删会话仍可读出导致"诈尸"
+  deleteSessionDetail(id).catch(() => {});
 }
 
 export async function deleteMessage(sessionId: string, messageId: number): Promise<void> {
