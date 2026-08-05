@@ -33,7 +33,7 @@ export function QueryDots({ messages, scrollRef }: QueryDotsProps) {
   return (
     <div
       ref={dotsRef}
-      className="absolute left-0 top-0 bottom-0 w-7 z-20 flex flex-col items-center justify-center overflow-hidden pointer-events-none"
+      className="absolute left-0 top-0 bottom-0 w-7 z-20 flex flex-col items-center justify-center pointer-events-none"
       style={{ gap: `${gap * 4}px` }}
     >
       {userMessages.map(({ msg, idx }, dotIdx) => (
