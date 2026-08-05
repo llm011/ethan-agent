@@ -14,7 +14,9 @@ import {
   injectMessage,
   updateSessionMode,
   respondConsent,
+  respondAskUser,
   getAnnotationsBatch,
+  renameSession,
   type Annotation,
 } from "@/lib/api";
 import { fetchModels } from "@/lib/api-base";
@@ -33,7 +35,8 @@ import { OnboardingBanner } from "@/components/chat/onboarding-banner";
 import { type ConsentRequest } from "@ethan/shared/components/consent-dialog";
 import { ConsentGate } from "@ethan/shared/chat/consent-card";
 import { CleanupConfirmGate, type CleanupConfirmRequest } from "@ethan/shared/chat/cleanup-confirm-card";
-import { placeholderTitle, mapDetailMessages } from "@/components/chat/chat-helpers";
+import { AskUserCard, type AskUserRequest } from "@ethan/shared/chat/ask-user-card";
+import { placeholderTitle, mapDetailMessages, isFirstQuerySignificant } from "@/components/chat/chat-helpers";
 import { consumeStream, type ConsumeStreamActions } from "@/components/chat/use-chat-stream";
 import { handleCommand } from "@/components/chat/chat-commands";
 import { useInputStore } from "@/components/chat/use-input-store";
@@ -62,6 +65,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [consentRequest, setConsentRequest] = useState<ConsentRequest | null>(null);
   const [cleanupConfirm, setCleanupConfirm] = useState<CleanupConfirmRequest | null>(null);
+  const [askUserRequest, setAskUserRequest] = useState<AskUserRequest | null>(null);
   const [mode, setMode] = useState<string>("");
   // 超级权限：开启后自动批准所有工具授权，任务中途不弹窗。持久化到 localStorage。
   const [autoConsent, setAutoConsent] = useState<boolean>(() => {
@@ -106,6 +110,13 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       await respondBrowserCleanup(requestId, action);
     } catch {}
     setCleanupConfirm(null);
+  };
+
+  const handleAskUserRespond = async (requestId: string, value: string) => {
+    setAskUserRequest(null);
+    try {
+      await respondAskUser(requestId, value);
+    } catch {}
   };
 
   const handleRead = useCallback((msg: Message) => {
@@ -180,6 +191,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       setStopping(false);
       setBgPolling(null);
       setConsentRequest(null);
+      setAskUserRequest(null);
       return;
     }
 
@@ -198,6 +210,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     setStopping(false);
     setBgPolling(null);
     setConsentRequest(null);
+    setAskUserRequest(null);
 
     // SWR：先尝试读本地缓存，命中则立即渲染（避免白屏等待网络）
     const cached = readSessionCache(initialSessionId);
@@ -263,7 +276,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
               ? loaded.slice(0, -1)
               : loaded;
             await consumeStream(stream, base, {
-              setMessages, setConsentRequest, setCleanupConfirm, setBgPolling,
+              setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setBgPolling,
               setSessionTitle, setSessionUsage, setStopping, setStreaming,
               activeSession: initialSessionId,
             });
@@ -383,10 +396,17 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       const s = await createSession(selectedModel, mode, "desktop");
       sessionId = s.id;
       setActiveSession(s.id);
-      setSessionTitle(placeholderTitle(text));
+      const pTitle = placeholderTitle(text);
+      setSessionTitle(pTitle);
       window.dispatchEvent(new CustomEvent("session:title-updated", {
-        detail: { sessionId: s.id, title: placeholderTitle(text) }
+        detail: { sessionId: s.id, title: pTitle }
       }));
+      // 首轮：如果 query 信息量足够，同时 fire-and-forget 把占位标题写入后端，
+      // 防止 3s 会话列表轮询把本地标题覆盖回"新对话"（createSession 返回"新对话"与后端
+      // chat.py init_title 之间存在竞态）。
+      if (isFirstQuerySignificant(text) && pTitle && pTitle !== "新对话") {
+        renameSession(s.id, pTitle).catch(() => { /* 失败静默忽略，后端稍后会补 */ });
+      }
       justFinishedRef.current = s.id;
       window.history.replaceState(null, "", `/chat/${s.id}/`);
     }
@@ -404,8 +424,15 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       content = `帮我 code review：${target}`;
       const ghMatch = target.match(/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/);
       const glMatch = target.match(/gitlab\.com\/([^/]+\/[^/]+)\/-\/merge_requests\/(\d+)/);
-      if (ghMatch) setSessionTitle(`PR #${ghMatch[2]} ${ghMatch[1]}`);
-      else if (glMatch) setSessionTitle(`MR !${glMatch[2]} ${glMatch[1]}`);
+      if (ghMatch) {
+        const reviewTitle = `PR #${ghMatch[2]} ${ghMatch[1]}`;
+        setSessionTitle(reviewTitle);
+        if (sessionId) window.dispatchEvent(new CustomEvent("session:title-updated", { detail: { sessionId, title: reviewTitle } }));
+      } else if (glMatch) {
+        const reviewTitle = `MR !${glMatch[2]} ${glMatch[1]}`;
+        setSessionTitle(reviewTitle);
+        if (sessionId) window.dispatchEvent(new CustomEvent("session:title-updated", { detail: { sessionId, title: reviewTitle } }));
+      }
     }
     const imageFiles = pendingFiles.filter((f) => f.isImage);
     const nonImageFiles = pendingFiles.filter((f) => !f.isImage);
@@ -453,7 +480,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     await consumeStream(
       streamChat(chatMessages, selectedModel, sessionId, { quote: sentQuote, mode, btw: isBtw, review: isReview, autoConsent }),
       newMessages,
-      { setMessages, setConsentRequest, setCleanupConfirm, setBgPolling, setSessionTitle, setSessionUsage, setStopping, setStreaming, activeSession: sessionId },
+      { setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setBgPolling, setSessionTitle, setSessionUsage, setStopping, setStreaming, activeSession: sessionId },
       true,
     );
   };
@@ -568,6 +595,11 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         )}
         <ConsentGate request={consentRequest} onRespond={handleConsentRespond} />
         <CleanupConfirmGate request={cleanupConfirm} onRespond={handleCleanupRespond} />
+        {askUserRequest && (
+          <div className="max-w-3xl mx-auto px-4 pb-2">
+            <AskUserCard request={askUserRequest} onRespond={handleAskUserRespond} />
+          </div>
+        )}
         <ChatInput
           streaming={streaming}
           models={models}
