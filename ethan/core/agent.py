@@ -676,13 +676,22 @@ class Agent:
         return fallback
 
     def _parse_stream_text_tool_calls(self, content: str) -> list:
-        """stream_chat 中从文本解析工具调用（与 openai_compat._parse_text_tool_calls 同逻辑）。
+        """stream_chat 中从文本解析工具调用。
 
-        流式模式下，如果模型把工具调用写成文本（call:xxx{args}），它会作为 delta.content
+        流式模式下，如果模型把工具调用写成文本，它会作为 delta.content
         流式返回，不会出现在 delta.tool_calls 里。此方法在 final chunk 后做一次检测。
+        支持两种格式：
+        1. Gemini call:xxx{args}
+        2. DeepSeek DSML 标记
         """
         import re
         import uuid
+
+        # 优先检测 DSML 格式
+        from ethan.providers.openai_compat import OpenAICompatProvider
+        dsml_results = OpenAICompatProvider._parse_dsml_tool_calls(content)
+        if dsml_results:
+            return dsml_results
 
         pattern = re.compile(
             r'call:\w+:(?P<tool>\w+)\{(?P<args>[^}]*)\}'
@@ -1221,12 +1230,20 @@ class Agent:
                     raise
 
             tool_calls = final_chunk.tool_calls if final_chunk else []
-            # Fallback：模型把工具调用写成文本（call:xxx{args}）时，从 content 解析
+            # Fallback：模型把工具调用写成文本时，从 content 解析
             if not tool_calls and full_content:
                 parsed = self._parse_stream_text_tool_calls(full_content)
                 if parsed:
                     tool_calls = parsed
-                    full_content = ""  # 清空，避免把工具调用指令当回复 yield
+                    # 保留 DSML/call 标记之前的正文作为 thought 内容
+                    from ethan.providers.openai_compat import OpenAICompatProvider
+                    if OpenAICompatProvider._contains_dsml(full_content):
+                        # 截取 DSML 标记之前的文本
+                        import re
+                        dsml_start = re.search(r'<[｜|][｜|]DSML[｜|][｜|]', full_content)
+                        full_content = full_content[:dsml_start.start()].rstrip() if dsml_start else ""
+                    else:
+                        full_content = ""
                     response = Message(role="assistant", content=full_content, tool_calls=tool_calls)
                 else:
                     response = Message(role="assistant", content=full_content, tool_calls=tool_calls)

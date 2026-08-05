@@ -427,6 +427,13 @@ class OpenAICompatProvider(BaseProvider):
                     else:
                         yield StreamChunk(content=content_buf)
                         content_buf = ""
+                elif content_buf.rstrip().endswith("<"):
+                    # 末尾 < 可能是 DSML 标记的开头，短暂缓冲等待后续字符
+                    if len(content_buf) < 50:
+                        pass
+                    else:
+                        yield StreamChunk(content=content_buf)
+                        content_buf = ""
                 else:
                     yield StreamChunk(content=content_buf)
                     content_buf = ""
@@ -449,6 +456,12 @@ class OpenAICompatProvider(BaseProvider):
                 if content_buf:
                     dsml_calls = self._parse_dsml_tool_calls(content_buf)
                     if dsml_calls:
+                        # 保留 DSML 标记之前的正文
+                        import re as _re
+                        dsml_start = _re.search(r'<[｜|][｜|]DSML[｜|][｜|]', content_buf)
+                        pre_text = content_buf[:dsml_start.start()].rstrip() if dsml_start else ""
+                        if pre_text:
+                            yield StreamChunk(content=pre_text)
                         for dc in dsml_calls:
                             tool_calls_acc[len(tool_calls_acc)] = {
                                 "id": dc.id, "name": dc.name, "args_raw": json.dumps(dc.arguments, ensure_ascii=False)
