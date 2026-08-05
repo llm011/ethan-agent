@@ -45,7 +45,7 @@ export function AskUserCard({ request, onRespond }: AskUserCardProps) {
         </div>
         <div className="text-sm font-semibold flex-1">{request.question}</div>
         {!responded && (
-          <span className="text-xs text-muted-foreground tabular-nums">{remaining}s</span>
+          <span className="text-xs text-muted-foreground tabular-nums bg-muted px-1.5 py-0.5 rounded">{remaining}s</span>
         )}
       </div>
 

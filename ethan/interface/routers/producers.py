@@ -83,7 +83,7 @@ async def _close_browser_sessions(session_id: str | None, run=None) -> None:
             return
 
         # 弹卡片让用户确认
-        from ethan.browser.cleanup_confirm import await_confirm, create_confirm
+        from ethan.browser.cleanup_confirm import TIMEOUT_SECONDS, await_confirm, create_confirm
 
         # 尝试获取 session 标题信息
         try:
@@ -103,6 +103,7 @@ async def _close_browser_sessions(session_id: str | None, run=None) -> None:
                 "confirm_browser_cleanup": True,
                 "request_id": confirm_req.request_id,
                 "sessions": to_confirm,
+                "timeout": TIMEOUT_SECONDS,
             })
 
         action = await await_confirm(confirm_req)

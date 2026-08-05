@@ -361,10 +361,11 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
             {onAutoConsentChange && (
               <button
                 onClick={() => onAutoConsentChange(!autoConsent)}
-                className={`h-7 w-7 flex items-center justify-center rounded-lg transition-colors ${autoConsent ? "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400" : "text-muted-foreground hover:text-foreground hover:bg-muted"}`}
-                title={autoConsent ? "超级权限已开启：所有操作自动批准，不弹窗" : "超级权限：开启后自动批准所有工具授权"}
+                className={`h-7 flex items-center gap-1 px-1.5 rounded-lg transition-colors text-xs ${autoConsent ? "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400" : "text-muted-foreground hover:text-foreground hover:bg-muted"}`}
+                title={autoConsent ? "超级权限已开启：所有操作自动批准，不弹窗确认" : "超级权限：开启后自动批准所有工具授权，任务中途不再弹窗确认"}
               >
                 {autoConsent ? <ShieldCheck className="h-4 w-4" /> : <Shield className="h-4 w-4" />}
+                <span>{autoConsent ? "已授权" : "授权"}</span>
               </button>
             )}
             <div className="flex-1" />

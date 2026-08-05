@@ -9,6 +9,7 @@ import type { AskUserRequest } from "@ethan/shared/chat/ask-user-card";
 export interface CleanupConfirmRequest {
   request_id: string;
   sessions: Array<{ sessionId: string; title: string; tabCount: number }>;
+  timeout?: number;
 }
 
 export interface ConsumeStreamActions {
@@ -73,6 +74,7 @@ export async function consumeStream(
         setCleanupConfirm({
           request_id: chunk.request_id || "",
           sessions: chunk.sessions || [],
+          timeout: chunk.timeout || 120,
         });
         continue;
       }
