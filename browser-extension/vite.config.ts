@@ -48,7 +48,7 @@ export default defineConfig({
             const dir = resolve(__dirname, 'src/content/reading-mode');
             const order = [
               'state.ts', 'utils.ts', 'storage.ts', 'reader-api.ts',
-              'reader-overlay.ts', 'code-enhance.ts', 'annotation.ts', 'selection-toolbar.ts',
+              'reader-overlay.ts', 'image-overlay.ts', 'code-enhance.ts', 'annotation.ts', 'selection-toolbar.ts',
               'mark-click.ts', 'progress-toast.ts', 'ai-summary.ts',
               'panel.ts', 'spy-kbd-reenter.ts', 'entry.ts',
             ];
