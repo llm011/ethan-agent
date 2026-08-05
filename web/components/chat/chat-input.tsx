@@ -379,6 +379,10 @@ export function ChatInput({
               </Select>
             )}
             {/* 超级权限开关：开启后自动批准所有工具授权，任务中途不再弹窗确认 */}
+            {/* TODO(开启态视觉不醒目 + 无二次确认): 当前只是 amber 浅色 pill + "已授权" 字样，
+                长时间运行时用户可能忘了自己开着自动批准，导致 shell/写文件等危险操作一路放行。
+                建议：开启时加一圈脉动环、按钮文字改"⚠ 自动授权中"、hover tooltip 显示风险提示；
+                或首次开启时弹一个二次确认（"确定开启自动批准？写文件、shell 执行将不弹窗"）。 */}
             {onAutoConsentChange && (
               <button
                 onClick={() => onAutoConsentChange(!autoConsent)}

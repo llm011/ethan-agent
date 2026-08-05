@@ -22,6 +22,9 @@ class AskUserResponse(BaseModel):
 
 @router.post("/ask-user/{request_id}")
 async def respond_ask_user(request_id: str, body: AskUserResponse, user_id: str = Depends(verify_token)):
+    # TODO(输入校验): 目前接受 body.value 任意字符串。应该把 create() 时的 options 存到 _REGISTRY，
+    #   然后在这里校验 value 必须在 options.value 集合中；否则返回 400。
+    #   有 token 保护风险很低，但仍是一个可以被滥用的入口。
     from ethan.core.ask_user import resolve_ask_user
     ok = resolve_ask_user(request_id, body.value)
     return {"ok": ok}

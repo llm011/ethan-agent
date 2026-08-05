@@ -74,6 +74,10 @@
       const cancelBtn = getPanelEl('__ethan_summary_cancel');
       const startBtn = getPanelEl('__ethan_summary_start');
       if (cancelBtn) cancelBtn.onclick = () => {
+        // TODO(竞态窗口): 这里只清 timer 但无法撤销已经 setTimeout 排队的 doRequestSummary。
+        //   归零瞬间（remaining==0 时已经 setTimeout 250ms 之后触发 doRequestSummary）点击取消，
+        //   请求照样会发出。修复：引入全局 summaryCancelled 标志，doRequestSummary 入口检查。
+        //   目前概率很低（<1%），暂不修。
         if (summaryCountdownTimer) { clearInterval(summaryCountdownTimer); summaryCountdownTimer = null; }
         target.innerHTML = '<div style="text-align:center;padding:16px 0;color:' + (dark ? '#6b7280' : '#9ca3af') + ';font-size:12px">' +
           '已取消自动解读 · <a id="__ethan_summary_retry" href="#" style="color:#0d9488;text-decoration:none">点此手动开始</a></div>';

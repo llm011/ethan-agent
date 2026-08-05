@@ -1406,6 +1406,10 @@ class Agent:
                 tool = self._registry.get(tc.name)
 
                 # [ask_user 拦截] 非危险操作的用户确认/选择，不进 executor，阻塞等回复
+                # TODO(风险: ask_user 飞书/微信等非 Web 渠道静默失效):
+                #   AskUserProvider 只实现了 Web 消费端（SSE yield AskUserEvent → 前端 POST 回传）。
+                #   飞书/微信渠道没有渲染卡片 + POST 回传的消费端，Agent 会 await 20s 后超时走 default，
+                #   用户在三方渠道端完全无感知。需要在非 Web 渠道用飞书交互卡片/微信公众号菜单替换。
                 if tc.name == "ask_user":
                     from ethan.core.ask_user import AskUserProvider
                     args = tc.arguments or {}

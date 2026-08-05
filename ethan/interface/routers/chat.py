@@ -69,6 +69,10 @@ async def _direct_stream(agent, messages: list, *,
     save_user / save_assistant 可选：传入 coroutine 工厂（零参数返回 Awaitable）
     后会在首块前落用户消息、done 时落助手消息。给 direct=true + session_id 场景
     提供与正常 chat 一致的落库行为（会话列表能看到摘要/翻译的内容）。
+
+    TODO(绕过抽象层): 这里直接访问 agent._provider 私有属性，跳过了 agent.stream_chat 包装的
+    图片剥离、工具注入、指数退避错误重试等兜底。翻译/摘要场景不涉及多模态/重试故暂可接受；
+    如后续 direct 也需要多模态或稳定重试，应改调用 agent 层公开方法。
     """
     import json
 

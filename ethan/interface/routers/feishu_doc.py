@@ -36,6 +36,9 @@ class FetchDocResponse(BaseModel):
 # ── server 端内存级缓存（与 skill 里的 /tmp 缓存并行，减少重复子进程开销）─
 _CACHE: dict[str, tuple[str, str, str, float]] = {}  # key -> (markdown, title, url, mtime)
 _CACHE_MAX_AGE = 24 * 3600
+# TODO(内存缓存无淘汰): 只有"每次命中后按插入时间清理过期项"的被动清理逻辑。
+#   如果一次性访问 10k+ 不同的飞书文档 URL，缓存不会主动淘汰，会慢慢吃内存。
+#   实际 markdown 单篇不大（几 KB ~ 几十 KB），风险低。想更稳妥就换成 cachetools.TTLCache(maxsize=xxx)。
 
 # ── fetch_doc.py 模块懒加载（用户安装目录优先，仓库内 fallback）──────────────
 # 用户安装路径：~/.ethan/skills/lark-doc/scripts/fetch_doc.py（可被 skill update 更新）

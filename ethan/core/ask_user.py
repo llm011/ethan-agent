@@ -29,7 +29,11 @@ class AskUserEvent:
 
 
 class AskUserProvider:
-    """Web 模式：创建 Future，Agent yield AskUserEvent 后 await。前端 POST 解析。"""
+    """Web 模式：创建 Future，Agent yield AskUserEvent 后 await。前端 POST 解析。
+
+    TODO(渠道覆盖): 仅实现 Web 消费端。飞书/微信渠道需替换为飞书交互卡片 / 微信菜单 + 回调，
+    否则会 20s 超时走默认值且用户无任何感知。
+    """
 
     def __init__(self):
         self._pending: dict[str, asyncio.Future] = {}
