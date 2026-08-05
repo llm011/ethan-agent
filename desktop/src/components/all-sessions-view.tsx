@@ -35,7 +35,7 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(true);
+  const [total, setTotal] = useState(0);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const [confirmState, setConfirmState] = useState<{ open: boolean; id: string }>({ open: false, id: "" });
@@ -47,7 +47,7 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
   const [filterHasImages, setFilterHasImages] = useState(false);
   const [cleanupLoading, setCleanupLoading] = useState(false);
   const [cleanupMsg, setCleanupMsg] = useState("");
-  const limit = 20;
+  const limit = 21;
 
   useEffect(() => {
     fetchModes().then(setModes).catch(() => {});
@@ -59,11 +59,8 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
       const offset = (pageNum - 1) * limit;
       const modeParam = md === "__all__" ? undefined : (md === "__default__" ? "" : md);
       const data = await fetchSessions(limit, offset, q || undefined, src || undefined, modeParam, !hb, !sched, undefined, hasImg || undefined);
-      if (data.length < limit) {
-        setHasMore(false);
-      } else {
-        setHasMore(true);
-      }
+      const t = (data as SessionInfo[] & { total?: number }).total;
+      if (t != null) setTotal(t);
       setSessions(data);
     } catch (e) {
       console.error(e);
@@ -93,7 +90,7 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
       if (page !== 1) return;
       if (search.trim() || filterSource || filterMode !== "__all__" || filterHasImages) return;
       try {
-        const data = await fetchSessions(20, 0, undefined, undefined, undefined, !showHeartbeat, !showScheduled);
+        const data = await fetchSessions(limit, 0, undefined, undefined, undefined, !showHeartbeat, !showScheduled);
         setSessions(prev => {
           const changed = data.length !== prev.length ||
             data.some((s, i) => s.updated_at !== prev[i]?.updated_at || s.title !== prev[i]?.title);
@@ -133,6 +130,7 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
       if (result.deleted > 0) {
         setCleanupMsg(`已清理 ${result.deleted} 个无意义对话`);
         loadSessions(1, search.trim(), filterSource, filterMode, showHeartbeat, showScheduled, filterHasImages);
+        window.dispatchEvent(new CustomEvent("sessions:refresh"));
       } else {
         setCleanupMsg("没有需要清理的对话");
       }
@@ -155,7 +153,7 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
         onCancel={() => setConfirmState({ open: false, id: "" })}
       />
       <div className="p-4 border-b border-border flex items-center justify-between gap-3 shrink-0 flex-wrap">
-        <h1 className="text-lg font-semibold shrink-0">全部历史对话</h1>
+        <h1 className="text-lg font-semibold shrink-0">全部历史对话 <span className="text-sm font-normal text-muted-foreground ml-1">({total})</span></h1>
         <div className="flex items-center gap-2 flex-wrap">
           <Button
             variant="ghost"
@@ -376,29 +374,32 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
         )}
 
         {/* Pagination Controls */}
-        {sessions.length > 0 && (
-          <div className="flex items-center justify-center mt-8 gap-4 pb-4">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setPage(p => Math.max(1, p - 1))}
-              disabled={page === 1 || loading}
-            >
-              <ChevronLeft className="h-4 w-4 mr-1" /> 上一页
-            </Button>
-            <span className="text-sm text-muted-foreground">
-              第 {page} 页
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setPage(p => p + 1)}
-              disabled={!hasMore || loading}
-            >
-              下一页 <ChevronRight className="h-4 w-4 ml-1" />
-            </Button>
-          </div>
-        )}
+        {sessions.length > 0 && (() => {
+          const totalPages = Math.max(1, Math.ceil(total / limit));
+          return (
+            <div className="flex items-center justify-center mt-8 gap-2 pb-4">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={page === 1 || loading}
+              >
+                <ChevronLeft className="h-4 w-4 mr-1" /> 上一页
+              </Button>
+              <span className="text-sm text-muted-foreground px-3">
+                {page} / {totalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages || loading}
+              >
+                下一页 <ChevronRight className="h-4 w-4 ml-1" />
+              </Button>
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
