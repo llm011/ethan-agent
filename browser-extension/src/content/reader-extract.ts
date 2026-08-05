@@ -72,6 +72,33 @@ interface EthanReaderApi {
       const h = n as HTMLElement;
       if ((h.innerText || '').length < 20 && h.querySelectorAll('a').length > 2) h.remove();
     });
+    // 代码块归一化：pre 内如果存在 <code>（标准结构），把 code 之外的兄弟节点（工具栏/操作栏/复制按钮容器/语言标签栏等）全部删除，
+    // 避免它们的文字（"复制代码""代码解读"等）被 innerText 取进代码内容。
+    // 那些元素通常不是 <button>（否则前面 rm 已删），而是 div/span/a 等包一层，cleanArticle 的 rm 覆盖不到。
+    clone.querySelectorAll('pre').forEach(preEl => {
+      const code = (preEl as HTMLElement).querySelector(':scope > code') as HTMLElement | null;
+      if (!code) {
+        // 有些站点 pre 里先放语言标签再 code，或 pre 里直接文本无 code：保留文本节点，删除任何看起来是工具栏/标签栏的块级/行内容器。
+        // 尽量找一个层级最深、文本最长、且最符合"代码"特征的 code 元素作为核心；找不到就算了。
+        const anyCode = (preEl as HTMLElement).querySelector('code');
+        if (anyCode && anyCode.parentElement === preEl) {
+          // same as :scope > code below
+        }
+      }
+      // 仅当 pre 里存在直属 code 子元素时才做清理——这是绝大多数 Markdown 渲染器/代码组件的标准结构。
+      const directCode = (preEl as HTMLElement).querySelector(':scope > code');
+      if (directCode) {
+        Array.from((preEl as HTMLElement).children).forEach(ch => {
+          if (ch !== directCode) (ch as HTMLElement).remove();
+        });
+        // 把 code 之外的直接文本节点也清掉（通常是前后的空白或残留字符，例如" }css" 这种"标签行"残片是文本的话会被包在子元素，这里处理不到）
+        Array.from((preEl as HTMLElement).childNodes).forEach(cn => {
+          if (cn.nodeType === Node.TEXT_NODE && !(cn.textContent || '').trim()) {
+            (preEl as HTMLElement).removeChild(cn);
+          }
+        });
+      }
+    });
     clone.querySelectorAll('*').forEach(n => {
       const h = n as HTMLElement;
       const tag = h.tagName.toLowerCase();
