@@ -66,7 +66,9 @@ def _build_intermediate_markdown(msg: Message) -> str:
             if step.get("result_preview"):
                 parts.append("\n### 结果摘要\n" + str(step["result_preview"]).strip())
             if step.get("result_detail"):
-                parts.append("\n### 结果详情\n" + str(step["result_detail"]).strip())
+                detail = str(step["result_detail"]).strip()
+                fence = "````" if "```" in detail else "```"
+                parts.append(f"\n### 结果详情\n{fence}\n" + detail + f"\n{fence}")
     elif msg.thought:
         parts.append("\n## 思考过程\n" + str(msg.thought).strip())
     return "\n".join(p for p in parts if p.strip()).strip() + "\n"
