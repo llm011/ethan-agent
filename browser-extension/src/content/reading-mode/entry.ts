@@ -198,6 +198,7 @@
     if (!active) return;
     active = false;
     panelCollapsed = false;
+    chatMode = false;
     if (summaryCountdownTimer) { clearInterval(summaryCountdownTimer); summaryCountdownTimer = null; }
 
     // Final save

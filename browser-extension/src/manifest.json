@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Ethan Browser",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Ethan Browser extension with reading mode, highlights, and knowledge saving. v0.7.0",
   "icons": {
     "16": "icons/icon-16.png",
@@ -53,7 +53,8 @@
     "offscreen",
     "scripting",
     "contextMenus",
-    "notifications"
+    "notifications",
+    "clipboardWrite"
   ],
   "host_permissions": [
     "ws://localhost/*",
