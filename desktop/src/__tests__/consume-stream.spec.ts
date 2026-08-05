@@ -8,6 +8,7 @@ function mockActions(): ConsumeStreamActions {
     setMessages: vi.fn(),
     setConsentRequest: vi.fn(),
     setCleanupConfirm: vi.fn(),
+    setAskUserRequest: vi.fn(),
     setBgPolling: vi.fn(),
     setSessionTitle: vi.fn(),
     setSessionUsage: vi.fn(),

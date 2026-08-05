@@ -11,6 +11,7 @@ from ethan.core.agent import Agent
 from ethan.core.context import set_user_id
 from ethan.skills.registry import SkillRegistry
 from ethan.tools.builtin.acp import DelegateCodingTool
+from ethan.tools.builtin.ask_user import AskUserTool
 from ethan.tools.builtin.background_task import (
     BackgroundTaskListTool,
     BackgroundTaskStopTool,
@@ -122,6 +123,7 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
 
     # full / lark：全量
     registry.register(DecideTool())
+    registry.register(AskUserTool())
     registry.register(RipgrepTool())
     registry.register(FdTool())
     registry.register(ScheduleCreateTool(user_id=user_id))

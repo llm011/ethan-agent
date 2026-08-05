@@ -69,25 +69,31 @@ async def _close_browser_sessions(session_id: str | None, run=None) -> None:
         # keep_alive 的直接 release，不弹卡片
         to_confirm: list[dict] = []
         for bsid in bsids:
+            client_name = smap.get_client(bsid)
+            if not client_name:
+                smap.unbind(bsid)
+                continue
             if smap.is_keep_alive(bsid):
                 try:
-                    await hub.call(METHODS["session_release"], {"sessionId": bsid}, browser_session_id=bsid)
+                    await hub.call(METHODS["session_release"], {"sessionId": bsid},
+                                   client_name=client_name, browser_session_id=bsid)
                 except Exception:
                     logger.warning("browser: release keep_alive session failed for %s", bsid)
                 finally:
                     smap.unbind(bsid)
             else:
-                to_confirm.append({"sessionId": bsid, "title": "", "tabCount": 0})
+                to_confirm.append({"sessionId": bsid, "title": "", "tabCount": 0, "_client": client_name})
 
         if not to_confirm:
             return
 
         # 弹卡片让用户确认
-        from ethan.browser.cleanup_confirm import await_confirm, create_confirm
+        from ethan.browser.cleanup_confirm import TIMEOUT_SECONDS, await_confirm, create_confirm
 
-        # 尝试获取 session 标题信息
+        # 尝试获取 session 标题信息（用第一个 client 查询即可）
         try:
-            list_result = await hub.call(METHODS["session_list"], {})
+            first_client = to_confirm[0]["_client"]
+            list_result = await hub.call(METHODS["session_list"], {}, client_name=first_client)
             sessions_info = {s.get("sessionId"): s for s in (list_result or {}).get("sessions", []) if isinstance(s, dict)}
             for item in to_confirm:
                 info = sessions_info.get(item["sessionId"])
@@ -102,7 +108,8 @@ async def _close_browser_sessions(session_id: str | None, run=None) -> None:
             run.emit({
                 "confirm_browser_cleanup": True,
                 "request_id": confirm_req.request_id,
-                "sessions": to_confirm,
+                "sessions": [{"sessionId": s["sessionId"], "title": s["title"], "tabCount": s["tabCount"]} for s in to_confirm],
+                "timeout": TIMEOUT_SECONDS,
             })
 
         action = await await_confirm(confirm_req)
@@ -110,12 +117,17 @@ async def _close_browser_sessions(session_id: str | None, run=None) -> None:
         # 根据用户选择执行
         for item in to_confirm:
             bsid = item["sessionId"]
+            cname = item.get("_client", "")
+            if not cname:
+                smap.unbind(bsid)
+                continue
             try:
                 if action == "close":
-                    await hub.call(METHODS["session_close"], {"sessionId": bsid}, browser_session_id=bsid)
+                    await hub.call(METHODS["session_close"], {"sessionId": bsid},
+                                   client_name=cname, browser_session_id=bsid)
                 else:
-                    # keep：只 release 控制权，保留 tab
-                    await hub.call(METHODS["session_release"], {"sessionId": bsid}, browser_session_id=bsid)
+                    await hub.call(METHODS["session_release"], {"sessionId": bsid},
+                                   client_name=cname, browser_session_id=bsid)
             except Exception:
                 logger.warning("browser: cleanup action '%s' failed for %s", action, bsid)
             finally:
@@ -187,7 +199,11 @@ async def _run_delegate_generation(
         _RunManager_schedule_removal(run.session_id)
         raise
     except Exception as e:
-        run.emit({"error": _friendly_error(e, None)})
+        err_text = _friendly_error(e, None)
+        if err_text:
+            run.emit({"error": err_text})
+        else:
+            logger.warning("Suppressed transient error in delegate: %s", e)
 
     try:
         if result is not None:
@@ -223,6 +239,7 @@ async def _run_generation(
     与 HTTP 连接解耦——订阅者（SSE 响应）断开不会取消本任务，生成照常跑完并入库。
     所有原先 `yield` 的地方改为 `run.emit(...)`。
     """
+    from ethan.core.ask_user import AskUserEvent
     from ethan.core.consent import ConsentEvent, set_consent_provider
     from ethan.core.stream_collector import StreamCollector
     from ethan.providers.base import InjectEvent, SkillsMatchedEvent, ThinkingEvent, ToolEvent
@@ -275,6 +292,15 @@ async def _run_generation(
                         )
                 except Exception:
                     logger.exception("向浏览器扩展广播 consent 通知失败")
+            elif isinstance(item, AskUserEvent):
+                run.emit({
+                    "ask_user_request": True,
+                    "request_id": item.request_id,
+                    "question": item.question,
+                    "options": item.options,
+                    "default": item.default,
+                    "timeout": item.timeout,
+                })
             elif isinstance(item, SkillsMatchedEvent):
                 collector.feed(item)
                 run.emit({"skills_matched": item.skills})
@@ -396,6 +422,13 @@ async def _run_generation(
         raise
     except Exception as e:
         err_text = _friendly_error(e, agent)
+        if not err_text:
+            # transient DB error (e.g. locked) — suppress, task already done
+            logger.warning("Suppressed transient error in generation: %s", e)
+            run.emit({"done": True, "usage": collector.usage_dict})
+            run.finish()
+            _RunManager_schedule_removal(run.session_id)
+            return
         run.emit({"error": err_text})
         # 异常中断：把错误信息持久化，保证刷新后用户仍能看到出了什么问题。
         # 已有进度行（有 tool_steps）则 UPDATE；否则新建一条 assistant 消息。
@@ -427,8 +460,9 @@ async def _run_generation(
         # 流结束（正常/异常）时取消未决授权 Future，避免泄漏
         if consent is not None:
             consent.cancel_all()
-        # 浏览器 session 清理：弹卡片让用户确认是否关闭 tab group。
-        await _close_browser_sessions(session_id, run=run)
+        # 浏览器 session 清理移至 done 事件之前（见下方），
+        # 因为 finally 在 stop/error 路径已 run.finish() 之后才执行，
+        # 此时 SSE 连接已断，无法送达 confirm 卡片。
 
     usage_dict = collector.usage_dict
 
@@ -542,6 +576,9 @@ async def _run_generation(
 
     # 标题生成：await 以便把结果带进 done 事件，前端实时更新
     new_title = await _maybe_regen_title(session_id)
+
+    # 浏览器 session 清理：必须在 done/finish 之前，否则 SSE 已断无法送达 confirm 卡片
+    await _close_browser_sessions(session_id, run=run)
 
     # 通知所有订阅者「流结束」并附最终 usage
     done_evt: dict = {"done": True, "usage": usage_dict, "ttfb_ms": collector.ttfb_ms, "total_ms": collector.total_ms, "message_id": msg_id}

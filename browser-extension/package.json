@@ -12,7 +12,11 @@
   "devDependencies": {
     "@types/chrome": "^0.0.270",
     "@types/node": "^24",
+    "playwright": "^1.62.1",
     "typescript": "~5.8.2",
     "vite": "^6.3.5"
+  },
+  "dependencies": {
+    "highlight.js": "^11.11.1"
   }
 }

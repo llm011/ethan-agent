@@ -26,7 +26,7 @@ import {
   readingDeleteAnnotation,
   readingSaveKnowledge,
 } from './reading-injector';
-import { streamChat, fetchModels } from './chat-proxy';
+import { streamChat, fetchModels, cancelStream } from './chat-proxy';
 import { runCommand } from './command-runner';
 
 const sessionStore = new BrowserSessionStore();
@@ -441,6 +441,13 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       });
     }
     sendResponse({ ok: true });
+    return true;
+  }
+
+  // 来自结果面板/阅读面板：点「停止」按钮取消一条正在流式的请求
+  if (msg?.type === 'cancel-chat' && typeof msg.requestId === 'string') {
+    const ok = cancelStream(msg.requestId);
+    sendResponse({ ok });
     return true;
   }
 

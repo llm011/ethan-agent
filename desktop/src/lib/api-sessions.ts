@@ -56,7 +56,7 @@ export interface SessionDetail {
   }[];
 }
 
-export async function fetchSessions(limit = 50, offset = 0, q?: string, source?: string, mode?: string, hideHeartbeat?: boolean, hideScheduled?: boolean, titlePrefixes?: string): Promise<SessionInfo[]> {
+export async function fetchSessions(limit = 50, offset = 0, q?: string, source?: string, mode?: string, hideHeartbeat?: boolean, hideScheduled?: boolean, titlePrefixes?: string, hasImages?: boolean): Promise<SessionInfo[]> {
   const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
   if (q) params.set("q", q);
   if (source) params.set("source", source);
@@ -64,10 +64,13 @@ export async function fetchSessions(limit = 50, offset = 0, q?: string, source?:
   if (hideHeartbeat) params.set("hide_heartbeat", "true");
   if (hideScheduled) params.set("hide_scheduled", "true");
   if (titlePrefixes) params.set("title_prefixes", titlePrefixes);
+  if (hasImages) params.set("has_images", "true");
   const res = await fetch(`${getApiUrl()}/sessions?${params}`, { headers: headers() });
   if (!res.ok) throw new Error("Failed to fetch sessions");
   const data = await res.json();
-  return data.sessions;
+  const sessions = data.sessions as SessionInfo[];
+  (sessions as SessionInfo[] & { total?: number }).total = data.total ?? undefined;
+  return sessions;
 }
 
 export async function renameSession(id: string, title: string): Promise<void> {

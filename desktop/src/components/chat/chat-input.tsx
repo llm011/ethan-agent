@@ -1,5 +1,5 @@
 import { useState, useRef, RefObject, useCallback, useEffect, useImperativeHandle, forwardRef } from "react";
-import { Send, Paperclip, X, Reply, Square, ImageIcon } from "lucide-react";
+import { Send, Paperclip, X, Reply, Square, ImageIcon, Shield, ShieldCheck } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@ethan/shared/ui/select";
 import { uploadFile, type ModeEntry } from "@/lib/api";
 import type { Quote, PendingFile } from "@ethan/shared/chat/types";
@@ -45,6 +45,8 @@ interface ChatInputProps {
   modes?: ModeEntry[];
   mode?: string;
   onModeChange?: (mode: string) => void;
+  autoConsent?: boolean;
+  onAutoConsentChange?: (v: boolean) => void;
   // 排队消息相关
   queue?: QueuedMessage[];
   onQueueSend?: (text: string, images?: PendingFile[]) => void;
@@ -72,6 +74,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   modes = [],
   mode = "",
   onModeChange,
+  autoConsent = false,
+  onAutoConsentChange,
   queue = [],
   onQueueSend,
   onQueueRemove,
@@ -352,6 +356,17 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                   ))}
                 </SelectContent>
               </Select>
+            )}
+            {/* 超级权限开关：开启后自动批准所有工具授权，任务中途不再弹窗确认 */}
+            {onAutoConsentChange && (
+              <button
+                onClick={() => onAutoConsentChange(!autoConsent)}
+                className={`h-7 flex items-center gap-1 px-1.5 rounded-lg transition-colors text-xs ${autoConsent ? "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400" : "text-muted-foreground hover:text-foreground hover:bg-muted"}`}
+                title={autoConsent ? "超级权限已开启：所有操作自动批准，不弹窗确认" : "超级权限：开启后自动批准所有工具授权，任务中途不再弹窗确认"}
+              >
+                {autoConsent ? <ShieldCheck className="h-4 w-4" /> : <Shield className="h-4 w-4" />}
+                <span>{autoConsent ? "已授权" : "授权"}</span>
+              </button>
             )}
             <div className="flex-1" />
             {streaming && (

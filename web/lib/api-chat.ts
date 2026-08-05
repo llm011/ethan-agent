@@ -9,7 +9,7 @@ export interface ChatMessage {
   images?: { data: string; media_type: string }[];  // base64 raw (no data: prefix)
 }
 
-export type StreamChunk = { content?: string; done?: boolean; stopped?: boolean; error?: string; model?: string; usage?: Record<string, number>; ttfb_ms?: number; total_ms?: number; message_id?: number; title?: string; tool?: string; args?: string; intent?: string; state?: string; id?: string; duration_ms?: number; result_preview?: string; result_detail?: string; entity_type?: string; entity_id?: string; injected?: string[]; sub_steps?: Array<{ tool: string; args: string; state: string; duration_ms?: number | null; result_preview?: string }>; ui?: unknown[]; mcp_app?: { uri: string; data?: Record<string, unknown>; html?: string; csp?: Record<string, string[]> }; cards?: Array<{ type: string; [key: string]: unknown }>; consent_request?: boolean; request_id?: string; description?: string; detail?: string; thinking?: boolean; heartbeat?: boolean; elapsed?: number; skills_matched?: Array<{ name: string; is_default?: boolean }>; background_polling?: boolean; polling_message?: string; new_message?: boolean; confirm_browser_cleanup?: boolean; sessions?: Array<{ sessionId: string; title: string; tabCount: number }> };
+export type StreamChunk = { content?: string; done?: boolean; stopped?: boolean; error?: string; model?: string; usage?: Record<string, number>; ttfb_ms?: number; total_ms?: number; message_id?: number; title?: string; tool?: string; args?: string; intent?: string; state?: string; id?: string; duration_ms?: number; result_preview?: string; result_detail?: string; entity_type?: string; entity_id?: string; injected?: string[]; sub_steps?: Array<{ tool: string; args: string; state: string; duration_ms?: number | null; result_preview?: string }>; ui?: unknown[]; mcp_app?: { uri: string; data?: Record<string, unknown>; html?: string; csp?: Record<string, string[]> }; cards?: Array<{ type: string; [key: string]: unknown }>; consent_request?: boolean; request_id?: string; description?: string; detail?: string; thinking?: boolean; heartbeat?: boolean; elapsed?: number; skills_matched?: Array<{ name: string; is_default?: boolean }>; background_polling?: boolean; polling_message?: string; new_message?: boolean; confirm_browser_cleanup?: boolean; sessions?: Array<{ sessionId: string; title: string; tabCount: number }>; ask_user_request?: boolean; question?: string; options?: Array<{ label: string; value: string }>; default?: string; timeout?: number };
 
 /** 把一个 SSE Response body 解析成事件流（streamChat / streamResume 共用）。
  *  如果连接被静默断开（未收到 done 事件就 EOF），抛错让调用方触发重连。 */
@@ -55,15 +55,16 @@ export async function* streamChat(
     mode?: string;
     btw?: boolean;
     review?: boolean;
+    autoConsent?: boolean;
   },
 ): AsyncGenerator<StreamChunk> {
-  const { quote = null, mode = "", btw = false, review = false } = options ?? {};
+  const { quote = null, mode = "", btw = false, review = false, autoConsent = false } = options ?? {};
   let res: Response;
   try {
     res = await fetch(`${API_URL}/chat`, {
       method: "POST",
       headers: headers(),
-      body: JSON.stringify({ messages, model, stream: true, session_id: sessionId, quote: quote ?? undefined, mode: mode || undefined, btw: btw || undefined, auto_consent: review || undefined }),
+      body: JSON.stringify({ messages, model, stream: true, session_id: sessionId, quote: quote ?? undefined, mode: mode || undefined, btw: btw || undefined, auto_consent: autoConsent || review || undefined }),
     });
   } catch {
     // fetch 直接抛错 = 连不上后端（服务没起 / 端口不通）

@@ -138,6 +138,16 @@ export async function respondConsent(requestId: string, allowed: boolean, messag
   return res.json();
 }
 
+/** 响应 ask_user 选择卡片：POST 用户选中的 value。 */
+export async function respondAskUser(requestId: string, value: string): Promise<{ ok: boolean }> {
+  const res = await fetch(`${getApiUrl()}/ask-user/${encodeURIComponent(requestId)}`, {
+    method: "POST",
+    headers: { ...headers(), "Content-Type": "application/json" },
+    body: JSON.stringify({ value }),
+  });
+  return res.json();
+}
+
 /** 响应浏览器清理确认卡片：action="close" 关闭 tab group，action="keep" 保留。 */
 export async function respondBrowserCleanup(requestId: string, action: "close" | "keep"): Promise<{ ok: boolean }> {
   const res = await fetch(`${getApiUrl()}/browser/cleanup/${encodeURIComponent(requestId)}`, {

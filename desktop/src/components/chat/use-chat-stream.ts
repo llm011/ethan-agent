@@ -3,16 +3,19 @@ import { notifyDesktop } from "@/lib/notify";
 import type { ToolStep } from "@ethan/shared/components/tool-timeline";
 import type { Message, Usage } from "@ethan/shared/chat/types";
 import type { ConsentRequest } from "@ethan/shared/components/consent-dialog";
+import type { AskUserRequest } from "@ethan/shared/chat/ask-user-card";
 
 export interface CleanupConfirmRequest {
   request_id: string;
   sessions: Array<{ sessionId: string; title: string; tabCount: number }>;
+  timeout?: number;
 }
 
 export interface ConsumeStreamActions {
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
   setConsentRequest: (req: ConsentRequest | null) => void;
   setCleanupConfirm: (req: CleanupConfirmRequest | null) => void;
+  setAskUserRequest: (req: AskUserRequest | null) => void;
   setBgPolling: (msg: string | null) => void;
   setSessionTitle: (title: string) => void;
   setSessionUsage: React.Dispatch<React.SetStateAction<Usage>>;
@@ -31,8 +34,8 @@ export async function consumeStream(
   trackTtft = false,
 ): Promise<{ failed: boolean }> {
   const {
-    setMessages, setConsentRequest, setCleanupConfirm, setBgPolling,
-    setSessionTitle, setSessionUsage, setStopping, setStreaming,
+    setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest,
+    setBgPolling, setSessionTitle, setSessionUsage, setStopping, setStreaming,
     activeSession,
   } = actions;
 
@@ -71,6 +74,17 @@ export async function consumeStream(
         setCleanupConfirm({
           request_id: chunk.request_id || "",
           sessions: chunk.sessions || [],
+          timeout: chunk.timeout || 120,
+        });
+        continue;
+      }
+      if (chunk.ask_user_request) {
+        setAskUserRequest({
+          request_id: chunk.request_id || "",
+          question: chunk.question || "",
+          options: chunk.options || [],
+          default: chunk.default || "",
+          timeout: chunk.timeout || 20,
         });
         continue;
       }
@@ -127,7 +141,7 @@ export async function consumeStream(
         const preToolThought = assistantContent.trim();
         // 不再往 intermediateOutput 累积工具调用前的文本：
         // 这些文本已作为 tool_step.thought 存在 ToolTimeline 里，重复记录会让"过程记录"臃肿。
-        assistantContent = "";
+        // 但保留 assistantContent 展示直到下一个动作完成，让用户能看到思考过程
         currentToolSteps.push({
           tool: chunk.tool, args: chunk.args || "", intent: chunk.intent || undefined, state: "running", id: chunk.id,
           thought: preToolThought || undefined,
@@ -141,6 +155,8 @@ export async function consumeStream(
         }]);
       }
       if (chunk.tool && (chunk.state === "done" || chunk.state === "error")) {
+        // 动作完成时清除之前的思考文本
+        assistantContent = "";
         let matchedIdx = -1;
         if (chunk.id) {
           for (let i = currentToolSteps.length - 1; i >= 0; i--) {
@@ -301,6 +317,7 @@ export async function consumeStream(
           setBgPolling(null);
           setConsentRequest(null);
           setCleanupConfirm(null);
+          setAskUserRequest(null);
           setStopping(false);
           setStreaming(false);
           failed = false;
@@ -316,6 +333,7 @@ export async function consumeStream(
             setBgPolling(null);
             setConsentRequest(null);
             setCleanupConfirm(null);
+            setAskUserRequest(null);
             setStopping(false);
             setStreaming(false);
             return { failed: false };
@@ -373,6 +391,7 @@ export async function consumeStream(
   setBgPolling(null);
   setConsentRequest(null);
   setCleanupConfirm(null);
+  setAskUserRequest(null);
   setStopping(false);
   setStreaming(false);
 

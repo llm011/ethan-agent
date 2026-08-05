@@ -587,6 +587,127 @@ def _cache_dir(doc_token: str) -> Path:
     return d
 
 
+def fetch_doc_to_markdown(doc: str, *, use_cache: bool = True, output_path: Path | None = None) -> tuple[str, dict, Path]:
+    """API 友好的 fetch_doc：返回 (最终 markdown, meta_dict, output_path)。
+
+    参数：
+      doc        -- 飞书文档 URL 或 doc_token
+      use_cache  -- 命中缓存时跳过 API 调用（图片/媒体处理仍走，因为缓存里已是
+                    原始 Markdown，不含图片上传结果，本地浏览器阅读场景无需上传
+                    CDN，默认保留飞书原始链接即可）
+      output_path -- 输出文件路径；None 则落到默认缓存目录
+    """
+    doc_token = _doc_token_from_input(doc)
+    cache = _cache_dir(doc_token)
+    cache_md = cache / "raw_markdown.md"
+    cache_xml = cache / "raw_xml.xml"
+    cache_meta = cache / "meta.json"
+    cache_final = cache / "final.md"
+
+    if output_path is None:
+        output_path = cache_final
+
+    if use_cache and cache_final.is_file():
+        try:
+            content = cache_final.read_text(encoding="utf-8")
+            meta: dict = {}
+            if cache_meta.is_file():
+                try:
+                    meta = json.loads(cache_meta.read_text())
+                except (json.JSONDecodeError, OSError):
+                    meta = {}
+            return content, meta, output_path
+        except OSError:
+            # 缓存读失败就按未命中重抓
+            pass
+
+    print(f"获取文档内容: {doc}", file=sys.stderr)
+    if use_cache and cache_md.is_file():
+        print(f"  使用原始 Markdown 缓存: {cache_md}", file=sys.stderr)
+        content = cache_md.read_text(encoding="utf-8")
+        document_id = ""
+        if cache_meta.is_file():
+            try:
+                document_id = json.loads(cache_meta.read_text()).get("document_id", "")
+            except (json.JSONDecodeError, KeyError, OSError):
+                document_id = ""
+    else:
+        try:
+            content, document_id = _fetch_doc_markdown(doc)
+        except Exception as e:
+            raise RuntimeError(f"抓取飞书文档 Markdown 失败: {e}") from e
+        cache_md.write_text(content, encoding="utf-8")
+        cache_meta.write_text(json.dumps({"document_id": document_id}, ensure_ascii=False), encoding="utf-8")
+
+    print("获取文档基本信息...", file=sys.stderr)
+    meta = _fetch_doc_meta(document_id)
+
+    url_token_map: dict[str, str] = {}
+    isv_block_ids: list[str] = []
+    print("获取 XML 格式以提取图片 token 和 ISV 块...", file=sys.stderr)
+    if use_cache and cache_xml.is_file():
+        xml_content = cache_xml.read_text(encoding="utf-8")
+    else:
+        xml_content = _fetch_doc_xml(doc)
+        if xml_content:
+            cache_xml.write_text(xml_content, encoding="utf-8")
+    if xml_content:
+        url_token_map = _build_url_token_map(xml_content)
+        isv_block_ids = re.findall(
+            r'<readonly-block\s+id="([^"]+)"\s+type="isv"', xml_content
+        ) or re.findall(
+            r'<readonly-block[^>]+\btype="isv"[^>]+\bid="([^"]+)"', xml_content
+        )
+
+    # 浏览器阅读场景：不下载图片不上传 CDN，保留飞书原始链接即可（浏览器会话已登录）。
+    # 只做：ISV 占位 + 媒体 Token 占位 + 标签清洗 + 元信息插入。
+    def _image_skip(content: str, _url_map: dict) -> tuple[str, int, int]:
+        return content, 0, 0
+
+    img_total = img_ok = 0
+    try:
+        content, img_total, img_ok = process_images(content, url_token_map)  # type: ignore[name-defined]
+    except NameError:
+        content, img_total, img_ok = _image_skip(content, url_token_map)
+    except Exception as e:
+        print(f"  [warn] 图片处理跳过：{e}", file=sys.stderr)
+        content, img_total, img_ok = _image_skip(content, url_token_map)
+
+    try:
+        content, _isv_total, _isv_ok = process_isv_blocks(content, output_path, isv_block_ids)  # type: ignore[name-defined]
+    except Exception:
+        _isv_total = _isv_ok = 0
+    try:
+        content, _media_total, _media_ok = process_media_tokens(content, output_path)  # type: ignore[name-defined]
+    except Exception:
+        _media_total = _media_ok = 0
+
+    content = clean_markdown(content, base_domain=_base_domain(doc))
+
+    meta_block = _render_meta_block(meta)
+    if meta_block:
+        lines = content.split("\n", 1)
+        if lines and lines[0].startswith("# "):
+            rest = lines[1] if len(lines) > 1 else ""
+            content = lines[0] + "\n\n" + meta_block + rest.lstrip("\n")
+        else:
+            content = meta_block + content
+
+    if img_total > 0 and not _cdn_available():
+        content += (
+            "\n\n---\n"
+            f"> 文档中有 {img_total} 张图片，保留飞书原始链接（浏览器会话已登录时可正常查看）。\n"
+        )
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(content, encoding="utf-8")
+    try:
+        cache_final.write_text(content, encoding="utf-8")
+    except OSError:
+        pass
+    return content, meta, output_path
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         print("Usage: fetch_doc.py <doc_url_or_token> [output_path]", file=sys.stderr)

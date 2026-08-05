@@ -61,6 +61,37 @@ def _safe_subpath(tag: str) -> Path | None:
     return Path(*segments)
 
 
+def _strip_redundant_title_line(title: str, content: str) -> str:
+    """Remove the first non-empty line of content if it's a heading that duplicates the title."""
+    lines = content.split("\n")
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("#"):
+            heading_text = stripped.lstrip("#").strip()
+            title_norm = re.sub(r"\s+", "", title.lower())
+            heading_norm = re.sub(r"\s+", "", heading_text.lower())
+            if title_norm and heading_norm and (
+                title_norm in heading_norm or heading_norm in title_norm
+                or _similarity(title_norm, heading_norm) > 0.6
+            ):
+                lines.pop(i)
+                while i < len(lines) and not lines[i].strip():
+                    lines.pop(i)
+                return "\n".join(lines)
+        break
+    return content
+
+
+def _similarity(a: str, b: str) -> float:
+    """Simple character-level Jaccard similarity."""
+    sa, sb = set(a), set(b)
+    if not sa or not sb:
+        return 0.0
+    return len(sa & sb) / len(sa | sb)
+
+
 class KnowledgeBase(ABC):
     @abstractmethod
     def add(self, title: str, content: str, tags: list[str] | None = None,
@@ -228,6 +259,7 @@ class FilesystemKnowledgeBase(KnowledgeBase):
             i += 1
 
         tag_line = f"\ntags: {', '.join(tags)}" if tags else ""
+        content = _strip_redundant_title_line(title, content)
         path.write_text(f"# {title}{tag_line}\n\n{content}", encoding="utf-8")
         return str(path)
 
@@ -238,6 +270,7 @@ class FilesystemKnowledgeBase(KnowledgeBase):
         if not path.exists():
             raise FileNotFoundError(f"Knowledge item not found: {source}")
         tag_line = f"\ntags: {', '.join(tags)}" if tags else ""
+        content = _strip_redundant_title_line(title, content)
         path.write_text(f"# {title}{tag_line}\n\n{content}", encoding="utf-8")
 
     def delete(self, source: str) -> None:
@@ -569,7 +602,7 @@ class ObsidianKnowledgeBase(KnowledgeBase):
             fm, sort_keys=False, allow_unicode=True, default_flow_style=False
         ).rstrip("\n")
 
-        parts = ["---", fm_text, "---", "", f"# {title}", "", content]
+        parts = ["---", fm_text, "---", "", f"# {title}", "", _strip_redundant_title_line(title, content)]
         return "\n".join(parts)
 
     def _parse_obsidian_file(self, path: Path) -> KnowledgeItem | None:
@@ -997,7 +1030,6 @@ class NotionKnowledgeBase(KnowledgeBase):
         必须按 root 过滤，否则 people-kb 去重/召回会误匹配知识库外的页面。
         """
         seen: set[str] = set()
-        pid = pg.get("id", "").replace("-", "")
         parent_id = self._parent_page_id(pg)
         depth = 0
         while parent_id and depth < 25:

@@ -55,10 +55,12 @@ async def list_sessions(limit: int = 50, offset: int = 0, q: str | None = None,
                         source: str | None = None, mode: str | None = None,
                         hide_heartbeat: bool = False, hide_scheduled: bool = False,
                         title_prefixes: str | None = None,
+                        has_images: bool = False,
                         user_id: str = Depends(verify_token)):
     store = await get_session_store()
     if q:
         sessions = await store.search(q, limit)
+        total = await store.count_search(q)
     else:
         exclude_prefixes = []
         if hide_heartbeat:
@@ -68,7 +70,9 @@ async def list_sessions(limit: int = 50, offset: int = 0, q: str | None = None,
         include_prefixes = [p for p in (title_prefixes or "").split(",") if p] or None
         sessions = await store.list_recent(limit, offset, source=source or "", mode=mode,
                                            exclude_title_prefixes=exclude_prefixes or None,
-                                           include_title_prefixes=include_prefixes)
+                                           include_title_prefixes=include_prefixes,
+                                           has_images=has_images)
+        total = len(sessions)
     return {"sessions": [
         {
             "id": s.id,
@@ -81,7 +85,7 @@ async def list_sessions(limit: int = 50, offset: int = 0, q: str | None = None,
             "mode": getattr(s, "mode", "") or "",
         }
         for s in sessions
-    ]}
+    ], "total": total}
 
 
 @router.post("/sessions")
@@ -199,6 +203,14 @@ async def rename_session(session_id: str, req: RenameSessionRequest, user_id: st
         await store.update_mode(session_id, req.mode)
     return {"ok": True}
 
+
+
+@router.post("/sessions/cleanup-trivial")
+async def cleanup_trivial_sessions(user_id: str = Depends(verify_token)):
+    """批量删除只含试探性消息的会话（hi/hello/测试/你是谁等）。"""
+    store = await get_session_store()
+    deleted, deleted_ids = await store.cleanup_trivial()
+    return {"deleted": deleted, "deleted_ids": deleted_ids}
 
 
 @router.post("/sessions/{session_id}/regen-title")

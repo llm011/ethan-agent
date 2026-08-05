@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, RefObject, useCallback, useEffect } from "react";
-import { Send, Paperclip, X, Reply, Square, ImageIcon, Maximize2, Minimize2 } from "lucide-react";
+import { Send, Paperclip, X, Reply, Square, ImageIcon, Maximize2, Minimize2, Shield, ShieldCheck } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@ethan/shared/ui/select";
 import { uploadFile, type ModeEntry } from "@/lib/api";
 import type { Quote, PendingFile } from "@ethan/shared/chat/types";
@@ -41,6 +41,8 @@ interface ChatInputProps {
   modes?: ModeEntry[];
   mode?: string;
   onModeChange?: (mode: string) => void;
+  autoConsent?: boolean;
+  onAutoConsentChange?: (v: boolean) => void;
   // 排队消息相关
   queue?: QueuedMessage[];
   onQueueSend?: (text: string, images?: PendingFile[]) => void;
@@ -68,6 +70,8 @@ export function ChatInput({
   modes = [],
   mode = "",
   onModeChange,
+  autoConsent = false,
+  onAutoConsentChange,
   queue = [],
   onQueueSend,
   onQueueRemove,
@@ -373,6 +377,21 @@ export function ChatInput({
                   ))}
                 </SelectContent>
               </Select>
+            )}
+            {/* 超级权限开关：开启后自动批准所有工具授权，任务中途不再弹窗确认 */}
+            {/* TODO(开启态视觉不醒目 + 无二次确认): 当前只是 amber 浅色 pill + "已授权" 字样，
+                长时间运行时用户可能忘了自己开着自动批准，导致 shell/写文件等危险操作一路放行。
+                建议：开启时加一圈脉动环、按钮文字改"⚠ 自动授权中"、hover tooltip 显示风险提示；
+                或首次开启时弹一个二次确认（"确定开启自动批准？写文件、shell 执行将不弹窗"）。 */}
+            {onAutoConsentChange && (
+              <button
+                onClick={() => onAutoConsentChange(!autoConsent)}
+                className={`h-7 flex items-center gap-1 px-1.5 rounded-lg transition-colors text-xs ${autoConsent ? "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400" : "text-muted-foreground hover:text-foreground hover:bg-muted"}`}
+                title={autoConsent ? "超级权限已开启：所有操作自动批准，不弹窗确认" : "超级权限：开启后自动批准所有工具授权，任务中途不再弹窗确认"}
+              >
+                {autoConsent ? <ShieldCheck className="h-4 w-4" /> : <Shield className="h-4 w-4" />}
+                <span>{autoConsent ? "已授权" : "授权"}</span>
+              </button>
             )}
             <div className="flex-1" />
             {streaming && (

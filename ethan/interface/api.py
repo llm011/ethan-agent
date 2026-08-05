@@ -15,12 +15,14 @@ from ethan.browser.ws_route import router as browser_ws_router
 from ethan.core.heartbeat import start_heartbeat, stop_heartbeat
 from ethan.interface.routers import (
     annotations,
+    ask_user,
     assets,
     background_tasks,
     chat,
     completions,
     consent,
     docs,
+    feishu_doc,
     files,
     images,
     knowledge,
@@ -196,8 +198,10 @@ app.include_router(completions.router)  # /v1 OpenAI-compat, no /api prefix
 app.include_router(logs.router, prefix="/api")
 app.include_router(models.router, prefix="/api")
 app.include_router(consent.router, prefix="/api")
+app.include_router(ask_user.router, prefix="/api")
 app.include_router(annotations.router, prefix="/api")
 app.include_router(reading.router, prefix="/api")  # /api/reading — 网页辅助阅读模式标注（按 URL 存 JSON）
+app.include_router(feishu_doc.router, prefix="/api")  # /api/feishu-doc — 扩展读飞书文档全文
 app.include_router(background_tasks.router, prefix="/api")
 app.include_router(ui_resources.router, prefix="/api")  # /api/ui-resources — 工具 UI 模板
 app.include_router(images.router, prefix="/api")  # /api/images — image_search 下载的图片

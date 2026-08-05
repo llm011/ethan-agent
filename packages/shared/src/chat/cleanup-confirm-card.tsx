@@ -2,7 +2,7 @@
 // 浏览器清理确认卡片：对话结束后弹出，让用户选择是否关闭 agent 打开的 tab group。
 // 样式与 ConsentCard 对齐，蓝色主题区分于授权的琥珀色。
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { FolderX, FolderCheck } from "lucide-react";
 import { Card } from "../ui/card";
 import { Button } from "../ui/button";
@@ -16,17 +16,31 @@ export interface CleanupSessionInfo {
 export interface CleanupConfirmRequest {
   request_id: string;
   sessions: CleanupSessionInfo[];
+  timeout?: number;
 }
 
 interface CleanupCardProps extends CleanupConfirmRequest {
   onRespond: (requestId: string, action: "close" | "keep") => void;
 }
 
-function CleanupConfirmCard({ request_id, sessions, onRespond }: CleanupCardProps) {
+function CleanupConfirmCard({ request_id, sessions, timeout = 120, onRespond }: CleanupCardProps) {
   const [responded, setResponded] = useState(false);
+  const [remaining, setRemaining] = useState(timeout);
+
   const groupLabel = sessions.length === 1
     ? (sessions[0].title || "未命名标签组")
     : `${sessions.length} 个标签组`;
+
+  useEffect(() => {
+    if (responded) return;
+    if (remaining <= 0) {
+      setResponded(true);
+      onRespond(request_id, "keep");
+      return;
+    }
+    const timer = setTimeout(() => setRemaining((r) => r - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [remaining, responded, request_id, onRespond]);
 
   const handle = (action: "close" | "keep") => {
     if (responded) return;
@@ -40,7 +54,10 @@ function CleanupConfirmCard({ request_id, sessions, onRespond }: CleanupCardProp
         <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-500/15">
           <FolderCheck className="h-4 w-4 text-blue-600 dark:text-blue-400" />
         </div>
-        <div className="text-sm font-semibold">浏览器标签组清理</div>
+        <div className="text-sm font-semibold flex-1">浏览器标签组清理</div>
+        {!responded && (
+          <span className="text-xs text-muted-foreground tabular-nums bg-muted px-1.5 py-0.5 rounded">{remaining}s 后自动保留</span>
+        )}
       </div>
 
       <div className="text-sm text-muted-foreground">
@@ -63,13 +80,13 @@ function CleanupConfirmCard({ request_id, sessions, onRespond }: CleanupCardProp
         </div>
       ) : (
         <div className="flex justify-end gap-2">
-          <Button variant="outline" size="sm" onClick={() => handle("keep")}>
-            <FolderCheck className="h-3.5 w-3.5 mr-1" />
-            保留
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => handle("close")}>
+          <Button variant="destructive" size="sm" onClick={() => handle("close")}>
             <FolderX className="h-3.5 w-3.5 mr-1" />
-            关闭
+            关闭标签组
+          </Button>
+          <Button variant="default" size="sm" onClick={() => handle("keep")}>
+            <FolderCheck className="h-3.5 w-3.5 mr-1" />
+            保留（默认）
           </Button>
         </div>
       )}

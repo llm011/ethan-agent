@@ -19,6 +19,11 @@ import aiosqlite
 from ethan.providers.base import Message
 
 
+class PaginatedList(list):
+    """A list that carries a .total attribute for pagination."""
+    total: int = 0
+
+
 @dataclass
 class Session:
     id: str
@@ -635,14 +640,17 @@ class SessionStore:
                     continue
         return cards
 
-    async def list_recent(self, limit: int = 20, offset: int = 0,
+    async def list_recent(self, limit: int = 20, offset: int = 0, *,
                           source: str = "", mode: str | None = None,
                           exclude_sources: list[str] | None = None,
                           exclude_title_prefixes: list[str] | None = None,
-                          include_title_prefixes: list[str] | None = None) -> list[Session]:
+                          include_title_prefixes: list[str] | None = None,
+                          has_images: bool = False) -> list[Session]:
         """最近会话列表。source 非空时按渠道过滤；mode 非 None 时按对话模式过滤
         （传空串可筛默认模式会话）。exclude_sources 排除指定渠道。过滤在 SQL 层做，分页对过滤后结果生效。
-        include_title_prefixes 非空时只保留标题以任一前缀开头的会话（OR 关系）。"""
+        include_title_prefixes 非空时只保留标题以任一前缀开头的会话（OR 关系）。
+        has_images=True 时只返回含图片消息的会话（EXISTS 子查询，仅在开启时付出成本）。
+        每行附带 first_query（第一条 user 消息前 80 字）填入 snippet，供列表卡片预览。"""
         where = []
         params: list = []
         if source:
@@ -663,21 +671,37 @@ class SessionStore:
             ors = " OR ".join("title LIKE ?" for _ in include_title_prefixes)
             where.append(f"({ors})")
             params.extend(f"{prefix}%" for prefix in include_title_prefixes)
+        if has_images:
+            # EXISTS 短路：找到第一条 images 非空即命中，不走全表
+            where.append("EXISTS (SELECT 1 FROM messages m WHERE m.session_id = sessions.id AND m.images IS NOT NULL AND m.images != '[]' AND m.images != '')")
         where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+        count_params = list(params)
         params.extend([limit, offset])
-        sessions = []
+        sessions: PaginatedList = PaginatedList()
+        # total count for pagination
         async with self._db.execute(
-            "SELECT id, title, model, created_at, updated_at, COALESCE(source, 'web') as source, COALESCE(mode, '') as mode "
+            f"SELECT COUNT(*) FROM sessions{where_sql}",
+            tuple(count_params),
+        ) as cursor:
+            total = (await cursor.fetchone())[0]
+        # first_query 子查询：每行一次索引查找，取第一条 user 消息前 80 字填 snippet
+        async with self._db.execute(
+            "SELECT id, title, model, created_at, updated_at, COALESCE(source, 'web') as source, COALESCE(mode, '') as mode, "
+            "(SELECT substr(m.content, 1, 80) FROM messages m WHERE m.session_id = sessions.id AND m.role = 'user' ORDER BY m.id LIMIT 1) as first_query "
             f"FROM sessions{where_sql} ORDER BY updated_at DESC LIMIT ? OFFSET ?",
             tuple(params),
         ) as cursor:
             async for row in cursor:
+                snippet = row[7] if len(row) > 7 and row[7] else None
                 sessions.append(Session(
                     id=row[0], title=row[1], model=row[2],
                     created_at=row[3], updated_at=row[4],
                     source=row[5] if len(row) > 5 else "web",
                     mode=row[6] if len(row) > 6 else "",
+                    snippet=snippet,
                 ))
+        # Attach total as attribute for callers that need it
+        sessions.total = total  # type: ignore[attr-defined]
         return sessions
 
     async def list_in_range(
@@ -722,6 +746,35 @@ class SessionStore:
                 ))
         return sessions
 
+    async def find_today_session(self, source: str) -> Session | None:
+        """查找当天（本地时区）指定 source 的第一个 session。
+
+        用于心跳等按天聚合的场景：一天只开一个会话窗口，所有消息都往里面放。
+        返回当天最早创建的匹配 session，没有则返回 None。
+        """
+        from datetime import datetime, timedelta
+
+        from ethan.core.timezone import get_local_timezone
+        tz = get_local_timezone()
+        now = datetime.now(tz)
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        tomorrow_start = today_start + timedelta(days=1)
+        async with self._db.execute(
+            "SELECT id, title, model, created_at, updated_at, "
+            "COALESCE(source, 'web'), COALESCE(mode, '') "
+            "FROM sessions WHERE source = ? AND created_at >= ? AND created_at < ? "
+            "ORDER BY created_at ASC LIMIT 1",
+            (source, today_start.timestamp(), tomorrow_start.timestamp()),
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row is None:
+                return None
+            return Session(
+                id=row[0], title=row[1], model=row[2],
+                created_at=row[3], updated_at=row[4],
+                source=row[5], mode=row[6],
+            )
+
     async def search(self, query: str, limit: int = 50) -> list[Session]:
         """全文搜索：匹配 session 标题或消息内容。返回去重后的 session 列表。"""
         q = f"%{query}%"
@@ -760,6 +813,18 @@ class SessionStore:
         # 按 updated_at 倒序返回
         return sorted(sessions.values(), key=lambda s: s.updated_at, reverse=True)[:limit]
 
+    async def count_search(self, query: str) -> int:
+        """统计搜索匹配的去重 session 总数（标题或消息内容匹配）。"""
+        q = f"%{query}%"
+        async with self._db.execute(
+            """SELECT COUNT(DISTINCT s.id) FROM sessions s
+               LEFT JOIN messages m ON m.session_id = s.id AND m.role IN ('user', 'assistant')
+               WHERE s.title LIKE ? OR m.content LIKE ?""",
+            (q, q),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else 0
+
     async def cleanup_empty(self) -> int:
         """删除没有任何消息的空 session，返回删除数量。"""
         cursor = await self._db.execute(
@@ -767,6 +832,65 @@ class SessionStore:
         )
         await self._db.commit()
         return cursor.rowcount
+
+    async def cleanup_trivial(self) -> tuple[int, list[str]]:
+        """删除无意义会话：空会话 + 只含试探性消息的会话 + 无回复的单条会话，返回 (deleted_count, deleted_ids)。"""
+        import re
+        trivial_patterns = re.compile(
+            r"^(h[ei]|hi|hello|hey|yo|test|测试|你好|你是谁|谁|在吗|在不在|你是什么|什么|哈喽|嗨|ok|okay|嗯|哦|喂|1|11|111|aaa|啊|哈|嘿|\.+|。+|…+|\?+|？+|!+|！+)$",
+            re.IGNORECASE,
+        )
+        max_msg_count = 4
+        deleted_ids: list[str] = []
+
+        # 1) 空会话（无任何消息）
+        async with self._db.execute(
+            "SELECT id FROM sessions WHERE id NOT IN (SELECT DISTINCT session_id FROM messages)"
+        ) as cursor:
+            deleted_ids.extend(row[0] for row in await cursor.fetchall())
+
+        # 2) 只有 user 消息且 assistant 回复为空的会话（发了但没得到回复，abandoned）
+        async with self._db.execute(
+            """
+            SELECT s.id
+            FROM sessions s
+            JOIN messages m ON m.session_id = s.id
+            GROUP BY s.id
+            HAVING COUNT(m.id) <= 2
+               AND SUM(CASE WHEN m.role = 'assistant' AND length(trim(m.content)) > 0 THEN 1 ELSE 0 END) = 0
+            """,
+        ) as cursor:
+            for row in await cursor.fetchall():
+                if row[0] not in deleted_ids:
+                    deleted_ids.append(row[0])
+
+        # 3) 消息内容全为试探性的会话
+        async with self._db.execute(
+            """
+            SELECT s.id, GROUP_CONCAT(m.content, '\x1f') as contents, COUNT(m.id) as cnt
+            FROM sessions s
+            JOIN messages m ON m.session_id = s.id
+            WHERE m.role IN ('user', 'assistant')
+            GROUP BY s.id
+            HAVING cnt <= ?
+            """,
+            (max_msg_count,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+        for sid, contents_concat, _ in rows:
+            if sid in deleted_ids:
+                continue
+            msgs = contents_concat.split("\x1f") if contents_concat else []
+            if all(trivial_patterns.match(m.strip()) for m in msgs if m.strip()):
+                deleted_ids.append(sid)
+
+        if deleted_ids:
+            placeholders = ",".join("?" * len(deleted_ids))
+            await self._db.execute(f"DELETE FROM sessions WHERE id IN ({placeholders})", deleted_ids)
+            await self._db.commit()
+
+        return len(deleted_ids), deleted_ids
 
     # ── sessions.db 轮转（防止无限膨胀） ──────────────────────────
 

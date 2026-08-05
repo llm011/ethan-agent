@@ -3,6 +3,7 @@
 import { useRef, useEffect, useCallback, useState } from "react";
 import { ArrowDown } from "lucide-react";
 import { MessageBubble } from "./message-bubble";
+import { QueryDots } from "./query-dots";
 import type { Message } from "@ethan/shared/chat/types";
 import type { Annotation } from "@/lib/api";
 
@@ -145,7 +146,7 @@ export function MessageList({ messages, streaming, sessionId, onQuote, onCardAct
 
   return (
     <div className="relative flex-1 min-h-0">
-    <div ref={scrollRef} className="absolute inset-0 overflow-y-auto p-4">
+    <div ref={scrollRef} className="absolute inset-0 overflow-y-auto p-4 pl-7">
       <div className="max-w-3xl mx-auto space-y-6">
         {/* 顶部加载更多指示器 */}
         {hasMore && (
@@ -165,8 +166,8 @@ export function MessageList({ messages, streaming, sessionId, onQuote, onCardAct
           </div>
         )}
         {visibleMessages.map((msg, i) => (
+          <div key={msg.id ?? `idx-${startIdx + i}`} data-msg-idx={startIdx + i}>
           <MessageBubble
-            key={msg.id ?? `idx-${startIdx + i}`}
             msg={msg}
             isStreaming={streaming}
             isLast={startIdx + i === messages.length - 1}
@@ -179,9 +180,12 @@ export function MessageList({ messages, streaming, sessionId, onQuote, onCardAct
             onInject={onInject}
             annotations={msg.id != null ? annotationsByMessage?.[msg.id] : undefined}
           />
+          </div>
         ))}
       </div>
     </div>
+
+      <QueryDots messages={messages} scrollRef={scrollRef} />
 
       {/* 滚动到底部按钮：不在底部时显示；点击后锁定跟随新消息 */}
       {messages.length > 0 && !isAtBottom && (

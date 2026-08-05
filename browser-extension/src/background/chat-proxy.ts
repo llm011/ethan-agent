@@ -43,6 +43,22 @@ export interface StreamChatOpts {
   sessionId?: string;
   /** 指令指定的模型（如翻译走小模型）；不传用服务端默认。 */
   model?: string;
+  /** 直调 LLM：跳过 agent loop / 工具 / 技能，纯模型流式输出。适合翻译、摘要等轻量调用。 */
+  direct?: boolean;
+  /** 外部传入的取消信号；streamChat 内部也会自建一个，用哪个都能停。 */
+  signal?: AbortSignal;
+}
+
+/** 正在进行中的流式请求：requestId → {abort}，供扩展侧「停止」按钮中止。 */
+const ACTIVE_STREAMS: Map<string, { abort: () => void; tabId: number }> = new Map();
+
+/** 取消某条正在流式的请求（无则静默）。通常由页面结果面板/阅读面板的「停止」按钮触发。 */
+export function cancelStream(requestId: string): boolean {
+  const entry = ACTIVE_STREAMS.get(requestId);
+  if (!entry) return false;
+  ACTIVE_STREAMS.delete(requestId);
+  try { entry.abort(); } catch {}
+  return true;
 }
 
 /**
@@ -75,12 +91,23 @@ export async function streamChat(
     channel: 'browser-extension',
   };
   if (opts.model) body.model = opts.model;
+  if (opts.direct) body.direct = true;
   if (opts.sessionId) {
     body.session_id = opts.sessionId;
     body.btw = false;  // 多轮：服务端按 session 拼历史
   } else {
     body.btw = true;   // 单轮：不带历史
   }
+
+  // 取消控制器：外部 signal + 内部 selfAbort 任一触发都会中断底层 fetch。
+  const selfAbort = new AbortController();
+  const combinedSig = opts.signal
+    ? AbortSignal.any([selfAbort.signal, opts.signal])
+    : selfAbort.signal;
+
+  const entry = { abort: () => selfAbort.abort(), tabId };
+  ACTIVE_STREAMS.set(requestId, entry);
+  const cleanup = () => { if (ACTIVE_STREAMS.get(requestId) === entry) ACTIVE_STREAMS.delete(requestId); };
 
   let res: Response;
   try {
@@ -91,13 +118,20 @@ export async function streamChat(
         Authorization: `Bearer ${cfg.token}`,
       },
       body: JSON.stringify(body),
+      signal: combinedSig,
     });
   } catch (e: any) {
-    push({ type: 'chatDone', requestId, error: '连接不上 Ethan 服务，请确认后端已启动' });
+    cleanup();
+    if (e?.name === 'AbortError' || combinedSig.aborted) {
+      push({ type: 'chatDone', requestId, error: '已取消' });
+    } else {
+      push({ type: 'chatDone', requestId, error: '连接不上 Ethan 服务，请确认后端已启动' });
+    }
     return;
   }
 
   if (!res.ok || !res.body) {
+    cleanup();
     push({ type: 'chatDone', requestId, error: `请求失败 (${res.status})` });
     return;
   }
@@ -106,6 +140,7 @@ export async function streamChat(
   const decoder = new TextDecoder();
   let buffer = '';
   let sawDone = false;
+  let aborted = false;
 
   try {
     while (true) {
@@ -138,6 +173,15 @@ export async function streamChat(
     }
     if (!sawDone) push({ type: 'chatDone', requestId });
   } catch (e: any) {
-    push({ type: 'chatDone', requestId, error: String(e?.message || e) });
+    if (e?.name === 'AbortError' || combinedSig.aborted) {
+      aborted = true;
+      push({ type: 'chatDone', requestId, error: '已取消' });
+    } else {
+      push({ type: 'chatDone', requestId, error: String(e?.message || e) });
+    }
+  } finally {
+    cleanup();
+    // 稳妥：万一 reader 没释放，显式取消一下 reader
+    try { if (!aborted) void reader.cancel(); } catch {}
   }
 }

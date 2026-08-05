@@ -310,10 +310,19 @@ class ScheduleCreateTool(BaseTool):
             channel = "web"
             channel_context = "{}"
 
-        # Create a dedicated session for this task (per-user)
+        # Create a dedicated session for this task (per-user).
+        #
+        # 注：把 create session 放在 /api/schedule 调用之后。之前在前面创建会
+        # 导致 API 调用失败（500/400/422 等）时，会话库里留下一个"建了会话但
+        # /api/schedule 实际没注册成功"的孤儿会话——标题是 [定时] xxx，里面
+        # 一条消息都没有。
         store = await get_session_store()
         session = await store.create(get_config().defaults.model, source="schedule")
-        await store.update_title(session.id, f"[定时] {title}")
+        try:
+            await store.update_title(session.id, f"[定时] {title}")
+        except Exception:
+            # update_title 失败不会让整个任务失败
+            pass
 
         # Send request to FastAPI backend
         token = get_config().network.auth_token
@@ -340,6 +349,14 @@ class ScheduleCreateTool(BaseTool):
                     msg += f" Auto-expires on {end_date}."
                 return msg + f" (Session: {session.id})"
         except Exception as e:
+            # 失败时清理刚刚创建的孤儿会话（没写入任何消息），
+            # 避免会话列表里出现空的 [定时] 项。
+            try:
+                existing = await store.load(session.id)
+                if existing and len(getattr(existing, "messages", [])) == 0:
+                    await store.delete(session.id)
+            except Exception:
+                pass
             return f"Failed to create job '{job_id}' via API: {e}"
 
 

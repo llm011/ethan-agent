@@ -553,7 +553,7 @@ export function ToolTimeline({ steps, defaultExpanded = false, highlightIndex, m
         {expanded
           ? <ChevronDown className="h-3 w-3 shrink-0" />
           : <ChevronRight className="h-3 w-3 shrink-0" />}
-        <span className="font-medium">
+        <span className="font-medium shrink-0 whitespace-nowrap">
           {hasRunning ? "Running" : `${doneCount} action${doneCount !== 1 ? "s" : ""}`}
         </span>
         <span className="truncate opacity-60">{summaryNames}</span>

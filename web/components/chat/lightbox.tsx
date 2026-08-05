@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
-import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { ChevronLeft, ChevronRight, X, ZoomIn, ZoomOut } from "lucide-react";
 import { Dialog, DialogContent } from "@ethan/shared/ui/dialog";
 
-// Lightbox 单张图片的描述信息
 export interface LightboxImage {
   url: string;
   title?: string;
@@ -19,39 +18,101 @@ interface LightboxProps {
   onIndexChange?: (index: number) => void;
 }
 
-// 全屏黑色背景的图片查看器：支持多图浏览、键盘左右切换、ESC 关闭
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 4;
+const ZOOM_STEP = 0.3;
+
 export function Lightbox({ images, index, open, onOpenChange, onIndexChange }: LightboxProps) {
   const total = images.length;
   const current = total > 0 ? images[Math.min(index, total - 1)] : null;
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [hint, setHint] = useState("");
+  const hintTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const dragRef = useRef<{ startX: number; startY: number; panX: number; panY: number } | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (open) { setZoom(1); setPan({ x: 0, y: 0 }); }
+  }, [open, index]);
+
+  const showHint = useCallback((text: string) => {
+    setHint(text);
+    if (hintTimer.current) clearTimeout(hintTimer.current);
+    hintTimer.current = setTimeout(() => setHint(""), 1500);
+  }, []);
 
   const goPrev = useCallback(() => {
     if (total <= 1) return;
-    onIndexChange?.((index - 1 + total) % total);
-  }, [index, total, onIndexChange]);
+    const next = (index - 1 + total) % total;
+    if (next === total - 1) showHint("已是第一张，从末尾继续");
+    onIndexChange?.(next);
+  }, [index, total, onIndexChange, showHint]);
 
   const goNext = useCallback(() => {
     if (total <= 1) return;
-    onIndexChange?.((index + 1) % total);
-  }, [index, total, onIndexChange]);
+    const next = (index + 1) % total;
+    if (next === 0) showHint("已是最后一张，从头开始");
+    onIndexChange?.(next);
+  }, [index, total, onIndexChange, showHint]);
 
-  // 键盘事件：ESC 关闭、左右切换
+  const zoomIn = useCallback(() => {
+    setZoom((z) => Math.min(z + ZOOM_STEP, ZOOM_MAX));
+  }, []);
+
+  const zoomOut = useCallback(() => {
+    setZoom((z) => {
+      const next = Math.max(z - ZOOM_STEP, ZOOM_MIN);
+      if (next <= 1) setPan({ x: 0, y: 0 });
+      return next;
+    });
+  }, []);
+
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault();
+    if (e.deltaY < 0) zoomIn();
+    else zoomOut();
+  }, [zoomIn, zoomOut]);
+
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
+    if (zoom <= 1) return;
+    e.preventDefault();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    dragRef.current = { startX: e.clientX, startY: e.clientY, panX: pan.x, panY: pan.y };
+  }, [zoom, pan]);
+
+  const handlePointerMove = useCallback((e: React.PointerEvent) => {
+    if (!dragRef.current) return;
+    const dx = e.clientX - dragRef.current.startX;
+    const dy = e.clientY - dragRef.current.startY;
+    setPan({ x: dragRef.current.panX + dx, y: dragRef.current.panY + dy });
+  }, []);
+
+  const handlePointerUp = useCallback(() => {
+    dragRef.current = null;
+  }, []);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onOpenChange(false);
-      } else if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        goPrev();
-      } else if (e.key === "ArrowRight") {
-        e.preventDefault();
-        goNext();
-      }
+      if (e.key === "Escape") { e.preventDefault(); onOpenChange(false); }
+      else if (e.key === "ArrowLeft") { e.preventDefault(); goPrev(); }
+      else if (e.key === "ArrowRight") { e.preventDefault(); goNext(); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); zoomIn(); }
+      else if (e.key === "ArrowDown") { e.preventDefault(); zoomOut(); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, goPrev, goNext, onOpenChange]);
+  }, [open, goPrev, goNext, zoomIn, zoomOut, onOpenChange]);
+
+  const handleDoubleClick = useCallback(() => {
+    if (zoom > 1) {
+      setZoom(1);
+      setPan({ x: 0, y: 0 });
+    } else {
+      setZoom(2);
+    }
+  }, [zoom]);
 
   if (!current) return null;
 
@@ -61,7 +122,6 @@ export function Lightbox({ images, index, open, onOpenChange, onIndexChange }: L
         showCloseButton={false}
         className="max-w-none sm:max-w-none w-screen h-screen p-0 gap-0 bg-black/95 rounded-none border-none ring-0"
         onClick={(e) => {
-          // 点击背景（即 DialogContent 本身）关闭，点击图片不关闭
           if (e.target === e.currentTarget) onOpenChange(false);
         }}
       >
@@ -79,6 +139,36 @@ export function Lightbox({ images, index, open, onOpenChange, onIndexChange }: L
         {total > 1 && (
           <div className="absolute top-3 right-14 z-10 px-2.5 py-1 rounded-full bg-black/50 text-white text-xs tabular-nums">
             {index + 1} / {total}
+          </div>
+        )}
+
+        {/* 缩放按钮 */}
+        <div className="absolute top-3 left-3 z-10 flex gap-1.5">
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); zoomOut(); }}
+            className="p-1.5 rounded-full bg-black/50 text-white hover:bg-black/70 transition-colors"
+            aria-label="缩小"
+          >
+            <ZoomOut className="h-4 w-4" />
+          </button>
+          <span className="flex items-center px-1.5 text-white/80 text-xs tabular-nums">
+            {Math.round(zoom * 100)}%
+          </span>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); zoomIn(); }}
+            className="p-1.5 rounded-full bg-black/50 text-white hover:bg-black/70 transition-colors"
+            aria-label="放大"
+          >
+            <ZoomIn className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* 循环提示 */}
+        {hint && (
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 px-4 py-2 rounded-lg bg-black/70 text-white text-sm pointer-events-none animate-pulse">
+            {hint}
           </div>
         )}
 
@@ -104,16 +194,26 @@ export function Lightbox({ images, index, open, onOpenChange, onIndexChange }: L
           </>
         )}
 
-        {/* 图片本体：居中放大，最大 90vw x 90vh；阻止点击冒泡到背景 */}
+        {/* 图片本体 */}
         <div
-          className="flex items-center justify-center w-full h-full"
+          ref={containerRef}
+          className="flex items-center justify-center w-full h-full select-none"
+          style={{ cursor: zoom > 1 ? "grab" : "default" }}
           onClick={(e) => e.stopPropagation()}
+          onWheel={handleWheel}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+          onDoubleClick={handleDoubleClick}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={current.url}
             alt={current.title || ""}
-            className="max-w-[90vw] max-h-[90vh] object-contain"
+            draggable={false}
+            className="max-w-[90vw] max-h-[90vh] object-contain transition-transform duration-150"
+            style={{ transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)` }}
           />
         </div>
 

@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 # 图片类 400 错误：匹配 provider error code 和明确的尺寸超限措辞。
 # 排除 'image size'（太模糊，rate-limit 消息可能包含），保留其他常见措辞。
+# 另含 non-VLM 模型收到 image_url 时的反序列化错误（unknown variant image_url）。
 _IMAGE_ERROR_PATTERNS = (
     "image_dimension_exceeded",
     "image too large",
@@ -37,37 +38,69 @@ _IMAGE_ERROR_PATTERNS = (
     "max allowed size",
     "图片过大",
     "图片尺寸",
+    "unknown variant",   # non-VLM 模型拒绝 image_url content block
+    "unknown variant `image_url`",  # image_url 反序列化失败（精确匹配反序列化错误）
+    "image_url, expected",
 )
 
 
 def _is_image_error(e: Exception) -> bool:
-    """判断异常是否为图片尺寸/体积超限类错误。"""
+    """判断异常是否为图片相关错误（尺寸超限 / non-VLM 模型拒绝 image_url）。"""
     msg = str(e).lower()
     return any(p in msg for p in _IMAGE_ERROR_PATTERNS)
 
 
-def _strip_images_from_messages(messages: list[Message]) -> bool:
-    """剥离所有消息中的图片数据，保留 content 中的 [image_paths: ...] 路径提示。
+def _save_msg_images_to_files(msg: Message, session_id: str) -> list[str]:
+    """把消息中的图片写入本地文件，返回绝对路径列表。
+
+    支持 {data: base64} 格式（工具截图）和 {path: ...} 格式（已持久化的历史图片）。
+    """
+    from ethan.core.assets import image_file_path, save_image
+
+    sid = session_id or "no_session"
+    paths: list[str] = []
+    for idx, img in enumerate(msg.images):
+        data = img.get("data", "")
+        media_type = img.get("media_type", "image/png")
+        if data:
+            rel_path, _ = save_image(sid, idx, data, media_type)
+            paths.append(str(image_file_path(rel_path)))
+        elif "path" in img:
+            paths.append(str(image_file_path(img["path"])))
+    return paths
+
+
+def _strip_images_from_messages(messages: list[Message], session_id: str = "") -> bool:
+    """把消息中的图片写入本地文件，并从上下文中移除内联图片数据。
+
+    用于：
+    - 模型不支持 VLM 时（proactive，调 provider 前做）
+    - provider 因图片超限 / non-VLM 拒绝返回 400 时（reactive）
+
+    图片写文件后，在 content 中附 [image_paths: ...] 路径提示，模型可通过
+    file_read / shell 工具读取本地文件自行处理。
 
     **不会 mutate 原 Message 对象**：对含图片的消息用 dataclasses.replace 创建浅拷贝，
     替换到 messages 列表中，确保 session 历史不受影响。
-
-    在 provider 因图片超限返回 400 时调用，让模型能通过工具读取本地文件自行处理。
-    返回 True 表示至少剥离了一张图片。
+    返回 True 表示至少处理了一张图片。
     """
     from dataclasses import replace  # noqa: PLC0415
 
     stripped = False
     for i, msg in enumerate(messages):
-        if msg.images:
-            stripped = True
-            # 提示追加到实际被剥离图片的消息上（而非固定追加到最后一条 user 消息）
+        if not msg.images:
+            continue
+        stripped = True
+        saved_paths = _save_msg_images_to_files(msg, session_id)
+        if saved_paths:
             hint = (
-                "\n\n[系统提示：附图因尺寸超过 API 限制已从上下文中移除，"
-                "但文件已保存在本地（路径见上方 image_paths 提示）。"
-                "可使用 file_read 或 shell 工具读取/缩放/处理。]"
+                "\n\n[系统提示：附图已从上下文中移除并保存为本地文件"
+                f"（image_paths: {', '.join(saved_paths)}）。"
+                "可使用 file_read 或 shell 工具读取/查看。]"
             )
-            messages[i] = replace(msg, images=[], content=(msg.content or "") + hint)
+        else:
+            hint = "\n\n[系统提示：附图已从上下文中移除。]"
+        messages[i] = replace(msg, images=[], content=(msg.content or "") + hint)
     return stripped
 
 
@@ -643,13 +676,22 @@ class Agent:
         return fallback
 
     def _parse_stream_text_tool_calls(self, content: str) -> list:
-        """stream_chat 中从文本解析工具调用（与 openai_compat._parse_text_tool_calls 同逻辑）。
+        """stream_chat 中从文本解析工具调用。
 
-        流式模式下，如果模型把工具调用写成文本（call:xxx{args}），它会作为 delta.content
+        流式模式下，如果模型把工具调用写成文本，它会作为 delta.content
         流式返回，不会出现在 delta.tool_calls 里。此方法在 final chunk 后做一次检测。
+        支持两种格式：
+        1. Gemini call:xxx{args}
+        2. DeepSeek DSML 标记
         """
         import re
         import uuid
+
+        # 优先检测 DSML 格式
+        from ethan.providers.openai_compat import OpenAICompatProvider
+        dsml_results = OpenAICompatProvider._parse_dsml_tool_calls(content)
+        if dsml_results:
+            return dsml_results
 
         pattern = re.compile(
             r'call:\w+:(?P<tool>\w+)\{(?P<args>[^}]*)\}'
@@ -839,11 +881,11 @@ class Agent:
             try:
                 response = await provider.chat(working, tools=tools, system=sys)
             except Exception as e:
-                # 图片尺寸超限：剥离图片后重试一次
+                # 图片相关错误（尺寸超限 / non-VLM 拒绝 image_url）：写文件后重试一次
                 if _is_image_error(e) and not _image_stripped:
                     _image_stripped = True
-                    if _strip_images_from_messages(working):
-                        logger.warning("图片尺寸超限，剥离图片后重试: %s", e)
+                    if _strip_images_from_messages(working, self.session_id):
+                        logger.warning("图片相关错误，写文件后重试: %s", e)
                         response = await provider.chat(working, tools=tools, system=sys)
                     else:
                         raise
@@ -1145,13 +1187,13 @@ class Agent:
                         final_chunk = chunk
                         self.usage.add(chunk.usage)
             except Exception as e:
-                # 图片尺寸超限：剥离图片后重试一次。
+                # 图片相关错误（尺寸超限 / non-VLM 拒绝 image_url）：写文件后重试一次。
                 # 图片已落盘，[image_paths: ...] 路径提示已在 content 中，
                 # 模型可通过 file_read/shell 工具读取本地文件自行处理。
                 if _is_image_error(e) and not _image_stripped and not full_content:
                     _image_stripped = True
-                    if _strip_images_from_messages(working):
-                        logger.warning("图片尺寸超限，剥离图片后重试: %s", e)
+                    if _strip_images_from_messages(working, self.session_id):
+                        logger.warning("图片相关错误，写文件后重试: %s", e)
                         full_content = ""
                         final_chunk = None
                         async for chunk in provider.stream_chat(working, tools=tools, system=sys):
@@ -1188,12 +1230,20 @@ class Agent:
                     raise
 
             tool_calls = final_chunk.tool_calls if final_chunk else []
-            # Fallback：模型把工具调用写成文本（call:xxx{args}）时，从 content 解析
+            # Fallback：模型把工具调用写成文本时，从 content 解析
             if not tool_calls and full_content:
                 parsed = self._parse_stream_text_tool_calls(full_content)
                 if parsed:
                     tool_calls = parsed
-                    full_content = ""  # 清空，避免把工具调用指令当回复 yield
+                    # 保留 DSML/call 标记之前的正文作为 thought 内容
+                    from ethan.providers.openai_compat import OpenAICompatProvider
+                    if OpenAICompatProvider._contains_dsml(full_content):
+                        # 截取 DSML 标记之前的文本
+                        import re
+                        dsml_start = re.search(r'<[｜|][｜|]DSML[｜|][｜|]', full_content)
+                        full_content = full_content[:dsml_start.start()].rstrip() if dsml_start else ""
+                    else:
+                        full_content = ""
                     response = Message(role="assistant", content=full_content, tool_calls=tool_calls)
                 else:
                     response = Message(role="assistant", content=full_content, tool_calls=tool_calls)
@@ -1354,6 +1404,39 @@ class Agent:
             allowed_calls = []
             for tc in tool_calls:
                 tool = self._registry.get(tc.name)
+
+                # [ask_user 拦截] 非危险操作的用户确认/选择，不进 executor，阻塞等回复
+                # TODO(风险: ask_user 飞书/微信等非 Web 渠道静默失效):
+                #   AskUserProvider 只实现了 Web 消费端（SSE yield AskUserEvent → 前端 POST 回传）。
+                #   飞书/微信渠道没有渲染卡片 + POST 回传的消费端，Agent 会 await 20s 后超时走 default，
+                #   用户在三方渠道端完全无感知。需要在非 Web 渠道用飞书交互卡片/微信公众号菜单替换。
+                if tc.name == "ask_user":
+                    from ethan.core.ask_user import AskUserProvider
+                    args = tc.arguments or {}
+                    question = args.get("question", "")
+                    options = args.get("options") or []
+                    default = args.get("default", "")
+                    timeout = 20
+
+                    yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary=question,
+                                    state="start", skill_category=resolve_skill_category(tc.name, tc.arguments))
+
+                    _ask_provider = AskUserProvider()
+                    _ask_event, _ask_fut = _ask_provider.create(question, options, default, timeout)
+                    yield _ask_event
+
+                    try:
+                        _ask_result = await _aio.wait_for(_ask_fut, timeout=timeout)
+                    except (_aio.CancelledError, _aio.TimeoutError):
+                        _ask_result = default
+                        _ask_provider.cancel_all()
+
+                    yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary=question,
+                                    state="done", result_preview=f"用户选择：{_ask_result}",
+                                    skill_category=resolve_skill_category(tc.name, tc.arguments))
+                    working.append(Message(role="tool", content=f"用户选择：{_ask_result}", tool_call_id=tc.id))
+                    continue
+
                 consent_provider = get_consent_provider()
 
                 # (1) 渠道硬策略：如三方渠道认主人后，非主人不得执行 side_effect 工具。
