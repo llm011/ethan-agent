@@ -16,6 +16,7 @@ in their `SKILL.md` frontmatter.
 | notebooklm | https://github.com/PleasePrompto/notebooklm-skill | MIT | v1.3.0, upstream LICENSE retained |
 | excalidraw | https://github.com/axtonliu/axton-obsidian-visual-skills + https://github.com/coleam00/excalidraw-diagram-skill | MIT + NO LICENSE | See `excalidraw/NOTICE.md` for risk assessment |
 | gws-gmail | https://github.com/googleworkspace/cli (gws CLI) | Apache-2.0 (unconfirmed) | Skill wraps the gws CLI; CLI license applies to binary, skill code is project MIT |
+| hsk-deploy | https://hsk.oray.com/doc/cli-setup.md (@aweray/hsk-cli) | 花生壳服务 ToS | Skill wraps the hsk-cli npm package; CLI license applies to binary, 花生壳服务 ToS 管控数据流，skill 代码为项目 MIT |
 
 ## Self-Maintained Skills (project MIT)
 
