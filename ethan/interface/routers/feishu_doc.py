@@ -37,6 +37,50 @@ class FetchDocResponse(BaseModel):
 _CACHE: dict[str, tuple[str, str, str, float]] = {}  # key -> (markdown, title, url, mtime)
 _CACHE_MAX_AGE = 24 * 3600
 
+# ── fetch_doc.py 模块懒加载（用户安装目录优先，仓库内 fallback）──────────────
+# 用户安装路径：~/.ethan/skills/lark-doc/scripts/fetch_doc.py（可被 skill update 更新）
+# 仓库内路径：ethan/defaults/skills/lark-doc/scripts/fetch_doc.py（feishu_doc.py 在
+#   ethan/interface/routers/，parents[2] 才是 ethan/ 包根，旧代码误用 parents[3]
+#   导致路径算到仓库根，脚本永远找不到）
+_FETCH_DOC_MOD = None
+
+
+def _load_fetch_doc_module():
+    """懒加载 lark-doc skill 的 fetch_doc.py。
+
+    优先用户安装目录（与 skill loader 同源，能拿到 update 后的版本），
+    fallback 仓库内 defaults/skills/lark-doc/scripts/fetch_doc.py。
+    目录名含连字符不符合 Python 包命名规范，故用 importlib 按文件路径加载。
+    """
+    global _FETCH_DOC_MOD
+    if _FETCH_DOC_MOD is not None:
+        return _FETCH_DOC_MOD
+
+    import importlib.util
+    from pathlib import Path
+
+    from ethan.core.paths import user_skills_dir
+
+    candidates = [
+        user_skills_dir() / "lark-doc" / "scripts" / "fetch_doc.py",
+        Path(__file__).resolve().parents[2] / "defaults" / "skills" / "lark-doc" / "scripts" / "fetch_doc.py",
+    ]
+    script_path = next((p for p in candidates if p.is_file()), None)
+    if script_path is None:
+        raise RuntimeError(f"fetch_doc.py not found; tried: {[str(c) for c in candidates]}")
+
+    spec = importlib.util.spec_from_file_location("_ethan_fetch_doc_mod", str(script_path))
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"failed to build spec for {script_path}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    _FETCH_DOC_MOD = mod
+    log.info("feishu-doc: loaded fetch_doc.py from %s", script_path)
+    return mod
+
+
+_FEISHU_HOST_SUFFIXES = ("feishu.cn", "larksuite.com", "feishu.net", "larkoffice.com")
+
 
 def _is_feishu_doc_url(url: str) -> bool:
     if not url:
@@ -46,7 +90,7 @@ def _is_feishu_doc_url(url: str) -> bool:
         if not p.scheme or not p.netloc:
             return False
         host = p.netloc.lower()
-        if not (host.endswith("feishu.cn") or host.endswith("larksuite.com") or host.endswith("feishu.net")):
+        if not any(host.endswith(s) for s in _FEISHU_HOST_SUFFIXES):
             return False
         # 只处理云文档路径：/docx/xxx, /wiki/xxx, /doc/xxx, /base/xxx 不处理
         path = p.path or ""
@@ -83,19 +127,7 @@ def _fetch_feishu_doc_impl(url: str, nocache: bool) -> FetchDocResponse:
                 age_seconds=now - mtime,
             )
 
-    # 调用 skill：ethan/defaults/skills/lark-doc/scripts/fetch_doc.py 内 fetch_doc_to_markdown
-    # 注意目录名「lark-doc」含连字符，不符合 Python 包命名规范，改用 importlib 从文件路径加载。
-    import importlib.util
-    from pathlib import Path
-    _root = Path(__file__).resolve().parents[3]
-    _script_path = _root / "defaults" / "skills" / "lark-doc" / "scripts" / "fetch_doc.py"
-    if not _script_path.exists():
-        raise RuntimeError(f"fetch_doc.py not found at {_script_path}")
-    _spec = importlib.util.spec_from_file_location("_ethan_fetch_doc_mod", str(_script_path))
-    if _spec is None or _spec.loader is None:
-        raise RuntimeError(f"failed to build spec for {_script_path}")
-    _mod = importlib.util.module_from_spec(_spec)
-    _spec.loader.exec_module(_mod)
+    _mod = _load_fetch_doc_module()
     fetch_doc_to_markdown = getattr(_mod, "fetch_doc_to_markdown")
     _doc_token_from_input = getattr(_mod, "_doc_token_from_input", lambda s: s)
 
