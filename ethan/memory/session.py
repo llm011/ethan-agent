@@ -746,6 +746,35 @@ class SessionStore:
                 ))
         return sessions
 
+    async def find_today_session(self, source: str) -> Session | None:
+        """查找当天（本地时区）指定 source 的第一个 session。
+
+        用于心跳等按天聚合的场景：一天只开一个会话窗口，所有消息都往里面放。
+        返回当天最早创建的匹配 session，没有则返回 None。
+        """
+        from datetime import datetime, timedelta
+
+        from ethan.core.timezone import get_local_timezone
+        tz = get_local_timezone()
+        now = datetime.now(tz)
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        tomorrow_start = today_start + timedelta(days=1)
+        async with self._db.execute(
+            "SELECT id, title, model, created_at, updated_at, "
+            "COALESCE(source, 'web'), COALESCE(mode, '') "
+            "FROM sessions WHERE source = ? AND created_at >= ? AND created_at < ? "
+            "ORDER BY created_at ASC LIMIT 1",
+            (source, today_start.timestamp(), tomorrow_start.timestamp()),
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row is None:
+                return None
+            return Session(
+                id=row[0], title=row[1], model=row[2],
+                created_at=row[3], updated_at=row[4],
+                source=row[5], mode=row[6],
+            )
+
     async def search(self, query: str, limit: int = 50) -> list[Session]:
         """全文搜索：匹配 session 标题或消息内容。返回去重后的 session 列表。"""
         q = f"%{query}%"

@@ -203,11 +203,13 @@ async def _run_heartbeat_md() -> None:
 
         from ethan.providers.base import ThinkingEvent, ToolEvent
 
-        # 每次心跳创建一个全新的专属 session，便于在 Web 上独立查看
+        # 按天聚合：一天只开一个 heartbeat session，所有心跳消息都往里面放
         store = await get_session_store()
-        hb_session = await store.create(cfg.defaults.model, source="heartbeat")
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-        await store.update_title(hb_session.id, f"[心跳] {now_str}")
+        hb_session = await store.find_today_session("heartbeat")
+        if hb_session is None:
+            hb_session = await store.create(cfg.defaults.model, source="heartbeat")
+            today_str = datetime.now().strftime("%Y-%m-%d")
+            await store.update_title(hb_session.id, f"[心跳] {today_str} · 系统维护")
 
         user_msg = Message(role="user", content=prompt)
         await store.save_message(hb_session.id, user_msg)
@@ -265,12 +267,7 @@ async def _run_heartbeat_md() -> None:
         logger.info("[Heartbeat] heartbeat.md task done")
     except Exception:
         logger.exception("[Heartbeat] heartbeat.md execution failed")
-        # 清理失败时残留的空 session，避免空心跳会话堆积
-        try:
-            if hb_session:
-                await store.delete(hb_session.id)
-        except Exception:
-            pass
+        # 按天聚合后不删除 session：可能已有之前的消息，删除会丢失当天所有心跳记录
 
 
 async def _tick() -> None:
