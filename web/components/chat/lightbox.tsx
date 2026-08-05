@@ -26,11 +26,14 @@ export function Lightbox({ images, index, open, onOpenChange, onIndexChange }: L
   const total = images.length;
   const current = total > 0 ? images[Math.min(index, total - 1)] : null;
   const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
   const [hint, setHint] = useState("");
   const hintTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const dragRef = useRef<{ startX: number; startY: number; panX: number; panY: number } | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (open) setZoom(1);
+    if (open) { setZoom(1); setPan({ x: 0, y: 0 }); }
   }, [open, index]);
 
   const showHint = useCallback((text: string) => {
@@ -58,7 +61,35 @@ export function Lightbox({ images, index, open, onOpenChange, onIndexChange }: L
   }, []);
 
   const zoomOut = useCallback(() => {
-    setZoom((z) => Math.max(z - ZOOM_STEP, ZOOM_MIN));
+    setZoom((z) => {
+      const next = Math.max(z - ZOOM_STEP, ZOOM_MIN);
+      if (next <= 1) setPan({ x: 0, y: 0 });
+      return next;
+    });
+  }, []);
+
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault();
+    if (e.deltaY < 0) zoomIn();
+    else zoomOut();
+  }, [zoomIn, zoomOut]);
+
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
+    if (zoom <= 1) return;
+    e.preventDefault();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    dragRef.current = { startX: e.clientX, startY: e.clientY, panX: pan.x, panY: pan.y };
+  }, [zoom, pan]);
+
+  const handlePointerMove = useCallback((e: React.PointerEvent) => {
+    if (!dragRef.current) return;
+    const dx = e.clientX - dragRef.current.startX;
+    const dy = e.clientY - dragRef.current.startY;
+    setPan({ x: dragRef.current.panX + dx, y: dragRef.current.panY + dy });
+  }, []);
+
+  const handlePointerUp = useCallback(() => {
+    dragRef.current = null;
   }, []);
 
   useEffect(() => {
@@ -73,6 +104,15 @@ export function Lightbox({ images, index, open, onOpenChange, onIndexChange }: L
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, goPrev, goNext, zoomIn, zoomOut, onOpenChange]);
+
+  const handleDoubleClick = useCallback(() => {
+    if (zoom > 1) {
+      setZoom(1);
+      setPan({ x: 0, y: 0 });
+    } else {
+      setZoom(2);
+    }
+  }, [zoom]);
 
   if (!current) return null;
 
@@ -156,15 +196,24 @@ export function Lightbox({ images, index, open, onOpenChange, onIndexChange }: L
 
         {/* 图片本体 */}
         <div
-          className="flex items-center justify-center w-full h-full overflow-auto"
+          ref={containerRef}
+          className="flex items-center justify-center w-full h-full select-none"
+          style={{ cursor: zoom > 1 ? "grab" : "default" }}
           onClick={(e) => e.stopPropagation()}
+          onWheel={handleWheel}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+          onDoubleClick={handleDoubleClick}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={current.url}
             alt={current.title || ""}
+            draggable={false}
             className="max-w-[90vw] max-h-[90vh] object-contain transition-transform duration-150"
-            style={{ transform: `scale(${zoom})` }}
+            style={{ transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)` }}
           />
         </div>
 
