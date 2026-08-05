@@ -155,15 +155,16 @@ class OpenAICompatProvider(BaseProvider):
                     args = {}
                 tool_calls.append(ToolCall(id=tc.id, name=tc.function.name, arguments=args))
 
-        # Fallback：某些模型/中转（如 Gemini 经 cliproxy）偶尔不返回标准 tool_calls，
-        # 而是把工具调用写成文本：`call:default_api:shell{command:...,intent:...}`
-        # 此时从 content 里解析出工具调用，避免 agent 循环中断。
+        # Fallback：某些模型/中转偶尔不返回标准 tool_calls，而是把工具调用写成文本。
+        # 支持两种格式：
+        # 1. Gemini 经 cliproxy: `call:default_api:shell{command:...,intent:...}`
+        # 2. DeepSeek DSML: `<｜｜DSML｜｜tool_calls>...<｜｜DSML｜｜invoke name="...">...`
         content_text = msg.content or ""
         if not tool_calls and content_text:
-            parsed = self._parse_text_tool_calls(content_text)
+            parsed = self._parse_dsml_tool_calls(content_text) or self._parse_text_tool_calls(content_text)
             if parsed:
                 tool_calls = parsed
-                content_text = ""  # 解析成功则清空文本，避免把工具调用指令当回复返回
+                content_text = ""
 
         usage_dict = None
         if usage:
@@ -202,6 +203,52 @@ class OpenAICompatProvider(BaseProvider):
         if hit and hit > usage_dict["cache"]:
             usage_dict["cache"] = hit
         return usage_dict
+
+    @staticmethod
+    def _parse_dsml_tool_calls(content: str) -> list[ToolCall]:
+        """解析 DeepSeek DSML 格式的工具调用文本。
+
+        DeepSeek 模型偶尔会在 content 中以自有标记格式输出 tool calls：
+            <｜｜DSML｜｜tool_calls> <｜｜DSML｜｜invoke name="tool"> <｜｜DSML｜｜parameter name="key" string="true">value</｜｜DSML｜｜parameter> ...
+        """
+        import re
+        import uuid
+
+        # 全角和半角竖线都匹配
+        sep = r'[｜|]'
+        tag = sep + sep + r'DSML' + sep + sep
+
+        if "DSML" not in content:
+            return []
+
+        results = []
+        # 匹配每个 invoke 块
+        invoke_pattern = re.compile(
+            r'<' + tag + r'invoke\s+name="([^"]+)"[^>]*>(.*?)</' + tag + r'invoke>',
+            re.DOTALL
+        )
+        param_pattern = re.compile(
+            r'<' + tag + r'parameter\s+name="([^"]+)"[^>]*>(.*?)</' + tag + r'parameter>',
+            re.DOTALL
+        )
+
+        for inv_match in invoke_pattern.finditer(content):
+            tool_name = inv_match.group(1)
+            body = inv_match.group(2)
+            args = {}
+            for p_match in param_pattern.finditer(body):
+                args[p_match.group(1)] = p_match.group(2).strip()
+            results.append(ToolCall(
+                id=f"call_{uuid.uuid4().hex[:8]}",
+                name=tool_name,
+                arguments=args,
+            ))
+
+        return results
+
+    @staticmethod
+    def _contains_dsml(content: str) -> bool:
+        return "DSML" in content and ("｜｜DSML｜｜" in content or "||DSML||" in content)
 
     def _parse_text_tool_calls(self, content: str) -> list[ToolCall]:
         """从文本中解析 `call:<tool_name>{<args>}` 格式的工具调用。
@@ -300,8 +347,9 @@ class OpenAICompatProvider(BaseProvider):
             kwargs["tool_choice"] = "auto"
 
         tool_calls_acc: dict[int, dict] = {}
-        final_tool_calls: list[ToolCall] = []  # 累积已构建的 tool_calls，供后续独立 usage chunk 的 final yield 携带
+        final_tool_calls: list[ToolCall] = []
         stream_usage = None
+        content_buf = ""  # 缓冲区：检测 DSML 标记
 
         try:
             resp_iter = await self._client.chat.completions.create(**kwargs)  # type: ignore
@@ -368,7 +416,20 @@ class OpenAICompatProvider(BaseProvider):
                 yield StreamChunk(content="", reasoning=rc)
 
             if delta.content:
-                yield StreamChunk(content=delta.content)
+                content_buf += delta.content
+                # DSML 标记开头特征：一旦检测到就持续缓冲直到流结束或 finish
+                if self._contains_dsml(content_buf):
+                    pass  # 继续缓冲，不 yield
+                elif "<｜" in content_buf or "<|" in content_buf:
+                    # 可能是 DSML 片段还没完整，继续缓冲（最多 200 字符探测）
+                    if len(content_buf) < 200:
+                        pass
+                    else:
+                        yield StreamChunk(content=content_buf)
+                        content_buf = ""
+                else:
+                    yield StreamChunk(content=content_buf)
+                    content_buf = ""
 
             if delta.tool_calls:
                 for tc_delta in delta.tool_calls:
@@ -384,6 +445,19 @@ class OpenAICompatProvider(BaseProvider):
                             tool_calls_acc[idx]["args_raw"] += tc_delta.function.arguments
 
             if chunk.choices and chunk.choices[0].finish_reason in ("tool_calls", "stop"):
+                # 处理缓冲区中可能的 DSML 文本 tool calls
+                if content_buf:
+                    dsml_calls = self._parse_dsml_tool_calls(content_buf)
+                    if dsml_calls:
+                        for dc in dsml_calls:
+                            tool_calls_acc[len(tool_calls_acc)] = {
+                                "id": dc.id, "name": dc.name, "args_raw": json.dumps(dc.arguments, ensure_ascii=False)
+                            }
+                        content_buf = ""
+                    else:
+                        yield StreamChunk(content=content_buf)
+                        content_buf = ""
+
                 tool_calls = []
                 for tc in tool_calls_acc.values():
                     try:
