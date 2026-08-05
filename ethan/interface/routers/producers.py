@@ -187,7 +187,11 @@ async def _run_delegate_generation(
         _RunManager_schedule_removal(run.session_id)
         raise
     except Exception as e:
-        run.emit({"error": _friendly_error(e, None)})
+        err_text = _friendly_error(e, None)
+        if err_text:
+            run.emit({"error": err_text})
+        else:
+            logger.warning("Suppressed transient error in delegate: %s", e)
 
     try:
         if result is not None:
@@ -406,6 +410,13 @@ async def _run_generation(
         raise
     except Exception as e:
         err_text = _friendly_error(e, agent)
+        if not err_text:
+            # transient DB error (e.g. locked) — suppress, task already done
+            logger.warning("Suppressed transient error in generation: %s", e)
+            run.emit({"done": True, "usage": collector.usage_dict})
+            run.finish()
+            _RunManager_schedule_removal(run.session_id)
+            return
         run.emit({"error": err_text})
         # 异常中断：把错误信息持久化，保证刷新后用户仍能看到出了什么问题。
         # 已有进度行（有 tool_steps）则 UPDATE；否则新建一条 assistant 消息。

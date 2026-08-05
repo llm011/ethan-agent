@@ -1,10 +1,14 @@
 """Small pure helpers used across the chat router."""
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 from typing import AsyncGenerator
 
 from ethan.providers.base import Message
+
+logger = logging.getLogger(__name__)
 
 
 async def _setup_error_stream(message: str, session_id: str) -> AsyncGenerator[str, None]:
@@ -45,7 +49,28 @@ def _friendly_error(e: Exception, agent) -> str:
                                 "remoteprotocolerror", "connection reset",
                                 "stream ended", "incompleteread", "chunkedencodingerror")):
         return "上游连接在生成中途断开（多见于中转服务不稳）。以上内容已保存，可直接发「继续」补全，或在设置页切换 model 重试。"
+    # SQLite database locked — 瞬态并发冲突，任务本身已完成，不应暴露给用户
+    if "database is locked" in lower:
+        return ""
     return msg[:300]
+
+
+def _is_db_locked(e: Exception) -> bool:
+    return "database is locked" in str(e).lower()
+
+
+async def _retry_on_locked(coro_fn, *args, retries: int = 3, delay: float = 0.5):
+    """对 DB locked 错误静默重试，超时后仅记日志不抛给用户。"""
+    for attempt in range(retries):
+        try:
+            return await coro_fn(*args)
+        except Exception as e:
+            if not _is_db_locked(e) or attempt == retries - 1:
+                if _is_db_locked(e):
+                    logger.warning("DB locked after %d retries, giving up: %s", retries, coro_fn.__name__)
+                    return None
+                raise
+            await asyncio.sleep(delay * (attempt + 1))
 
 
 def _status_for_setup_error(e: Exception) -> int:
