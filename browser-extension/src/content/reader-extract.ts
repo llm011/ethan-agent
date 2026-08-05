@@ -112,6 +112,14 @@ interface EthanReaderApi {
         case 'strong': case 'b': r += '**' + inner() + '**'; break;
         case 'em': case 'i': r += '*' + inner() + '*'; break;
         case 'mark': r += inner(); break;  // 高亮透明化，只留内容
+        case 'div': {
+          if (el.classList.contains('code-wrapper')) {
+            const pre = el.querySelector('pre');
+            if (pre) { r += convertNode({ childNodes: [pre] } as any); break; }
+          }
+          r += convertNode(el);
+          break;
+        }
         case 'code':
           if (el.parentElement && el.parentElement.tagName.toLowerCase() === 'pre') break;
           r += '`' + (el.innerText || '') + '`';
@@ -119,7 +127,8 @@ interface EthanReaderApi {
         case 'pre': {
           const code = el.querySelector('code');
           const lang = code ? (code.className.match(/language-(\w+)/) || [])[1] : '';
-          r += '\n```' + (lang || '') + '\n' + (el.innerText || '') + '\n```\n\n';
+          const text = code ? code.innerText : el.innerText || '';
+          r += '\n```' + (lang || '') + '\n' + text + '\n```\n\n';
           break;
         }
         case 'blockquote':
