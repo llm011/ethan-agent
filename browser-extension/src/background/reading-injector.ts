@@ -179,12 +179,14 @@ interface FeishuDocCacheEntry {
   fetchedAt: number;
 }
 
+const FEISHU_HOST_SUFFIXES = ['feishu.cn', 'larksuite.com', 'feishu.net', 'larkoffice.com'];
+
 function isFeishuDocUrl(url: string): boolean {
   if (!url) return false;
   try {
     const u = new URL(url);
     const host = u.hostname.toLowerCase();
-    if (!host.endsWith('feishu.cn') && !host.endsWith('larksuite.com') && !host.endsWith('feishu.net')) {
+    if (!FEISHU_HOST_SUFFIXES.some(s => host.endsWith(s))) {
       return false;
     }
     const parts = u.pathname.split('/').filter(Boolean);
