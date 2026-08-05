@@ -308,7 +308,16 @@ interface EthanResultPanelApi {
       if (it && !it.done) { it.markdown += msg.delta || ''; if (items[cur] === it) render(); }
     } else if (msg.type === 'chatDone' && msg.requestId === activeReqId) {
       const it = activeItem;
-      if (it) { it.done = true; if (msg.error) it.error = msg.error; if (msg.aborted && !it.error) it.aborted = true; if (items[cur] === it) render(); }
+      if (it) {
+        it.done = true;
+        if (msg.error && msg.error.includes('取消')) {
+          it.aborted = true;  // 用户取消：显示「已停止生成」而非 error
+        } else if (msg.error) {
+          it.error = msg.error;
+        }
+        if (msg.aborted && !it.error) it.aborted = true;
+        if (items[cur] === it) render();
+      }
       activeReqId = '';
       activeItem = null;
       syncStopBtn();

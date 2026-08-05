@@ -39,7 +39,8 @@ _IMAGE_ERROR_PATTERNS = (
     "图片过大",
     "图片尺寸",
     "unknown variant",   # non-VLM 模型拒绝 image_url content block
-    "image_url",         # image_url 反序列化失败
+    "unknown variant `image_url`",  # image_url 反序列化失败（精确匹配反序列化错误）
+    "image_url, expected",
 )
 
 

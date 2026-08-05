@@ -129,7 +129,8 @@ export async function runCommand(
 
   // 注入结果面板，开一条新结果
   const requestId = genId();
-  const sessionId = 'cmd-' + genId();   // 每条指令一个 session，供面板内追问多轮
+  // 仅 ask-page 是多轮场景需要 sessionId；单次指令（翻译/摘要/解释）不传，避免服务端无谓持久化
+  const sessionId = cmd.id === 'ask-page' ? 'cmd-' + genId() : '';
   try {
     await chrome.scripting.executeScript({
       target: { tabId },
@@ -146,8 +147,8 @@ export async function runCommand(
   }
 
   // ask-page 是「首轮塞正文、后续追问」的多轮场景 → 带 sessionId 走多轮；
-  // 其它指令首轮也带 sessionId（btw=false），让 Ethan 服务端按 session 存好 user+assistant 两条历史。
-  // 这样用户在结果面板里追问时（sendFollowUp 会带同一个 sessionId），服务端能拼上之前的上下文。
+  // 单次指令（翻译/摘要/解释）不带 sessionId（btw=true），服务端不持久化 session 历史。
+  // 追问时 sendFollowUp 会带同一个 sessionId（单次指令为空 → 追问也走单轮，不拼历史）。
   void streamChat(tabId, requestId, prompt, {
     uiTarget: 'result',
     model: cmd.model,

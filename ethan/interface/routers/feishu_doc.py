@@ -107,6 +107,10 @@ def _fetch_feishu_doc_impl(url: str, nocache: bool) -> FetchDocResponse:
         return FetchDocResponse(ok=False, error=f"{type(e).__name__}: {e}"[:500], url=url)
 
     title = (meta.get("title") if isinstance(meta, dict) else "") or _extract_title(md) or _doc_token_from_input(url)
+    # 清理过期条目，防止 _CACHE 无限增长
+    expired = [k for k, v in _CACHE.items() if now - v[3] > _CACHE_MAX_AGE]
+    for k in expired:
+        del _CACHE[k]
     _CACHE[cache_key] = (md, title, url, now)
     return FetchDocResponse(
         ok=True,
