@@ -33,7 +33,7 @@ export function QueryDots({ messages, scrollRef }: QueryDotsProps) {
   return (
     <div
       ref={dotsRef}
-      className="absolute left-0 top-0 bottom-0 w-7 z-10 flex flex-col items-center justify-center overflow-hidden"
+      className="absolute left-0 top-0 bottom-0 w-7 z-20 flex flex-col items-center justify-center overflow-hidden pointer-events-none"
       style={{ gap: `${gap * 4}px` }}
     >
       {userMessages.map(({ msg, idx }, dotIdx) => (
@@ -48,11 +48,11 @@ export function QueryDots({ messages, scrollRef }: QueryDotsProps) {
             onClick={() => handleClick(idx)}
             className="h-4 w-4 flex items-center justify-center cursor-pointer group/btn"
           >
-            <span className="block h-[6px] w-[6px] rounded-full bg-muted-foreground/40 group-hover/btn:bg-muted-foreground/80 group-hover/btn:scale-[1.6] transition-all duration-150" />
+            <span className="block h-[7px] w-[7px] rounded-full bg-muted-foreground/50 group-hover/btn:bg-primary group-hover/btn:scale-[1.8] transition-all duration-150" />
           </button>
           {hoverIdx === dotIdx && (
             <div
-              className="absolute left-4 top-1/2 -translate-y-1/2 px-2.5 py-1.5 rounded-lg bg-foreground text-background text-xs leading-snug max-w-[240px] line-clamp-2 whitespace-pre-wrap shadow-lg pointer-events-none z-50"
+              className="absolute left-5 top-1/2 -translate-y-1/2 px-2.5 py-1.5 rounded-lg bg-foreground text-background text-xs leading-snug max-w-[240px] line-clamp-2 whitespace-pre-wrap shadow-lg pointer-events-none z-50"
             >
               {msg.content || "(空)"}
             </div>

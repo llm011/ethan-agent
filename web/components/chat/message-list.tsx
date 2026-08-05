@@ -146,7 +146,6 @@ export function MessageList({ messages, streaming, sessionId, onQuote, onCardAct
 
   return (
     <div className="relative flex-1 min-h-0">
-    <QueryDots messages={messages} scrollRef={scrollRef} />
     <div ref={scrollRef} className="absolute inset-0 overflow-y-auto p-4 pl-7">
       <div className="max-w-3xl mx-auto space-y-6">
         {/* 顶部加载更多指示器 */}
@@ -185,6 +184,8 @@ export function MessageList({ messages, streaming, sessionId, onQuote, onCardAct
         ))}
       </div>
     </div>
+
+      <QueryDots messages={messages} scrollRef={scrollRef} />
 
       {/* 滚动到底部按钮：不在底部时显示；点击后锁定跟随新消息 */}
       {messages.length > 0 && !isAtBottom && (

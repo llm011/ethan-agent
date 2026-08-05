@@ -69,15 +69,20 @@ async def _close_browser_sessions(session_id: str | None, run=None) -> None:
         # keep_alive 的直接 release，不弹卡片
         to_confirm: list[dict] = []
         for bsid in bsids:
+            client_name = smap.get_client(bsid)
+            if not client_name:
+                smap.unbind(bsid)
+                continue
             if smap.is_keep_alive(bsid):
                 try:
-                    await hub.call(METHODS["session_release"], {"sessionId": bsid}, browser_session_id=bsid)
+                    await hub.call(METHODS["session_release"], {"sessionId": bsid},
+                                   client_name=client_name, browser_session_id=bsid)
                 except Exception:
                     logger.warning("browser: release keep_alive session failed for %s", bsid)
                 finally:
                     smap.unbind(bsid)
             else:
-                to_confirm.append({"sessionId": bsid, "title": "", "tabCount": 0})
+                to_confirm.append({"sessionId": bsid, "title": "", "tabCount": 0, "_client": client_name})
 
         if not to_confirm:
             return
@@ -85,9 +90,10 @@ async def _close_browser_sessions(session_id: str | None, run=None) -> None:
         # 弹卡片让用户确认
         from ethan.browser.cleanup_confirm import TIMEOUT_SECONDS, await_confirm, create_confirm
 
-        # 尝试获取 session 标题信息
+        # 尝试获取 session 标题信息（用第一个 client 查询即可）
         try:
-            list_result = await hub.call(METHODS["session_list"], {})
+            first_client = to_confirm[0]["_client"]
+            list_result = await hub.call(METHODS["session_list"], {}, client_name=first_client)
             sessions_info = {s.get("sessionId"): s for s in (list_result or {}).get("sessions", []) if isinstance(s, dict)}
             for item in to_confirm:
                 info = sessions_info.get(item["sessionId"])
@@ -102,7 +108,7 @@ async def _close_browser_sessions(session_id: str | None, run=None) -> None:
             run.emit({
                 "confirm_browser_cleanup": True,
                 "request_id": confirm_req.request_id,
-                "sessions": to_confirm,
+                "sessions": [{"sessionId": s["sessionId"], "title": s["title"], "tabCount": s["tabCount"]} for s in to_confirm],
                 "timeout": TIMEOUT_SECONDS,
             })
 
@@ -111,12 +117,17 @@ async def _close_browser_sessions(session_id: str | None, run=None) -> None:
         # 根据用户选择执行
         for item in to_confirm:
             bsid = item["sessionId"]
+            cname = item.get("_client", "")
+            if not cname:
+                smap.unbind(bsid)
+                continue
             try:
                 if action == "close":
-                    await hub.call(METHODS["session_close"], {"sessionId": bsid}, browser_session_id=bsid)
+                    await hub.call(METHODS["session_close"], {"sessionId": bsid},
+                                   client_name=cname, browser_session_id=bsid)
                 else:
-                    # keep：只 release 控制权，保留 tab
-                    await hub.call(METHODS["session_release"], {"sessionId": bsid}, browser_session_id=bsid)
+                    await hub.call(METHODS["session_release"], {"sessionId": bsid},
+                                   client_name=cname, browser_session_id=bsid)
             except Exception:
                 logger.warning("browser: cleanup action '%s' failed for %s", action, bsid)
             finally:
