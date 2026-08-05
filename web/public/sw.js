@@ -113,6 +113,13 @@ async function handleSessionsApi(req) {
     const res = await fetch(req);
     if (res && res.ok) {
       cache.put(req, res.clone());
+      // LRU 淘汰：Cache API 无时间戳，超限时删除最早的一半
+      const keys = await cache.keys();
+      if (keys.length > 50) {
+        for (let i = 0; i < keys.length - 25; i++) {
+          await cache.delete(keys[i]);
+        }
+      }
     }
     return res;
   } catch {
@@ -161,6 +168,6 @@ async function staleWhileRevalidate(req, cacheName) {
       if (res && res.ok) cache.put(req, res.clone());
       return res;
     })
-    .catch(() => cached);
+    .catch(() => cached || new Response("离线且无缓存", { status: 503, statusText: "Offline" }));
   return cached || fetchPromise;
 }

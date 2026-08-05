@@ -83,23 +83,37 @@ function withStore<T>(
   );
 }
 
-/** LRU 淘汰：按 accessedAt 升序，删除超出上限的最旧记录。 */
+/** LRU 淘汰：按 accessedAt 升序，删除超出上限的最旧记录。
+ * 不走 withStore：withStore 会覆盖 getAll.onsuccess，导致淘汰逻辑永不执行。
+ * 改用独立事务，靠 tx.oncomplete resolve。
+ */
 function evictLRU(storeName: string, max: number): Promise<void> {
   return new Promise((resolve) => {
-    withStore(storeName, "readwrite", (store) => {
-      const getAll = store.getAll();
-      getAll.onsuccess = () => {
-        const records = (getAll.result as Array<{ accessedAt: number; id?: string; key?: string }>) || [];
-        if (records.length <= max) return;
-        const sorted = [...records].sort((a, b) => a.accessedAt - b.accessedAt);
-        const toDelete = sorted.slice(0, records.length - max);
-        for (const r of toDelete) {
-          const pk = r.id ?? r.key;
-          if (pk !== undefined) store.delete(pk);
-        }
-      };
-      return getAll;
-    }).then(() => resolve());
+    getDB().then((db) => {
+      if (!db) {
+        resolve();
+        return;
+      }
+      try {
+        const tx = db.transaction(storeName, "readwrite");
+        const store = tx.objectStore(storeName);
+        const getAll = store.getAll();
+        getAll.onsuccess = () => {
+          const records = (getAll.result as Array<{ accessedAt: number; id?: string; key?: string }>) || [];
+          if (records.length <= max) return;
+          const sorted = [...records].sort((a, b) => a.accessedAt - b.accessedAt);
+          const toDelete = sorted.slice(0, records.length - max);
+          for (const r of toDelete) {
+            const pk = r.id ?? r.key;
+            if (pk !== undefined) store.delete(pk);
+          }
+        };
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => resolve();
+      } catch {
+        resolve();
+      }
+    });
   });
 }
 

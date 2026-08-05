@@ -76,7 +76,13 @@ export async function fetchSessions(limit = 50, offset = 0, q?: string, source?:
   }
 
   const res = await fetch(`${API_URL}/sessions?${params}`, { headers: headers() });
-  if (!res.ok) throw new Error("Failed to fetch sessions");
+  if (!res.ok) {
+    // 网络失败时降级到缓存，与 fetchSession 行为一致
+    const cacheKey = makeListKey({ limit, offset, q, source, mode, hideHeartbeat, hideScheduled });
+    const cached = await readSessionList(cacheKey);
+    if (cached) return cached;
+    throw new Error("Failed to fetch sessions");
+  }
   const data = await res.json();
   const sessions = data.sessions as SessionInfo[];
   (sessions as SessionInfo[] & { total?: number }).total = data.total ?? undefined;
