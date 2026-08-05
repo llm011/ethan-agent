@@ -50,6 +50,15 @@ export function Sidebar() {
     window.addEventListener("session:title-updated", handler);
     return () => window.removeEventListener("session:title-updated", handler);
   }, []);
+
+  useEffect(() => {
+    const handler = () => {
+      fetchSessions(50, 0, undefined, undefined, undefined, true, true)
+        .then(setSessions).catch(() => {});
+    };
+    window.addEventListener("sessions:refresh", handler);
+    return () => window.removeEventListener("sessions:refresh", handler);
+  }, []);
   const [sessionSearch, setSessionSearch] = useState("");
   const [searchLoading, setSearchLoading] = useState(false);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);

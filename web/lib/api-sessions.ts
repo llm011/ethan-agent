@@ -68,7 +68,9 @@ export async function fetchSessions(limit = 50, offset = 0, q?: string, source?:
   const res = await fetch(`${API_URL}/sessions?${params}`, { headers: headers() });
   if (!res.ok) throw new Error("Failed to fetch sessions");
   const data = await res.json();
-  return data.sessions;
+  const sessions = data.sessions as SessionInfo[];
+  (sessions as SessionInfo[] & { total?: number }).total = data.total ?? undefined;
+  return sessions;
 }
 
 export async function renameSession(id: string, title: string): Promise<void> {
