@@ -397,17 +397,64 @@
     }
     tocEl.innerHTML = '';
     const minLevel = Math.min(...tocItemsRef.map(t => t.level));
+    // 虚线颜色按深浅主题取细灰线
+    const dashColor = dark ? '#3f4856' : '#c7ccd3';
+    const dotColor = dark ? '#6b7280' : '#9ca3af';
+    const dotColorL1 = dark ? '#94a3b8' : '#4b5563';
+
+    const INDENT = 14;
+    // 每一级层级引导线的水平中心（x 的中点）：
+    //   L0 → 6, L1 → 20, L2 → 34, L3 → 48 ...
+    // 基准固定（与 depth 无关），这样兄弟项的线在同一列上对齐。
+    const levelCenter = (d: number) => 6 + d * INDENT;
+    // 圆点是 4×4，x = 中心 - 2；圆点右边界 = 中心 + 2
+    const dotLeft = (d: number) => levelCenter(d) - 2;
+    // 文字起始 padding-left：最深圆点右边界 + 12px 留白 → 当前项 depth 的中心 + 2 + 12 = center(depth) + 14
+    const textPadLeft = (d: number) => levelCenter(d) + 14;
+
+    const ITEM_PAD_Y = 4;
     tocItemsRef.forEach((item, i) => {
-      const indent = (item.level - minLevel) * 14;
+      const depth = item.level - minLevel;
       const div = document.createElement('div');
+      div.dataset.tocIdx = String(i);
       Object.assign(div.style, {
-        padding: '4px 6px 4px ' + (indent + 6) + 'px',
-        borderRadius: '6px', fontSize: '12px', cursor: 'pointer',
+        position: 'relative',
+        padding: ITEM_PAD_Y + 'px 8px ' + ITEM_PAD_Y + 'px ' + textPadLeft(depth) + 'px',
+        borderRadius: '6px', fontSize: '12px', cursor: 'pointer', lineHeight: '1.5',
         whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
         transition: 'background 0.15s', borderLeft: '2px solid transparent',
       });
       div.textContent = item.text;
-      div.dataset.tocIdx = String(i);
+
+      // 层级虚线 + 圆点（全部挂在一个 absolute inset 容器里，不影响文字布局）
+      const deco = document.createElement('div');
+      deco.style.cssText = 'pointer-events:none;position:absolute;inset:0;';
+
+      if (depth > 0) {
+        // 画 L0 .. L(depth-1) 的引导虚线。
+        // top/bottom 各留 4px 不画：与上下相邻项的虚线天然断开，避免"粘"成一条连续实线
+        const LINE_TOP = 4, LINE_BOTTOM = 4;
+        for (let lvl = 0; lvl < depth; lvl++) {
+          const line = document.createElement('span');
+          const x = levelCenter(lvl) - 0.5;  // 1px 宽线的中心点对齐
+          line.style.cssText =
+            'position:absolute;' +
+            'left:' + x + 'px;top:' + LINE_TOP + 'px;bottom:' + LINE_BOTTOM + 'px;width:1px;' +
+            'border-left:1px dashed ' + dashColor + ';';
+          deco.appendChild(line);
+        }
+      }
+
+      // 当前项的层级锚点（4×4 圆）
+      const dot = document.createElement('span');
+      dot.style.cssText =
+        'position:absolute;' +
+        'left:' + dotLeft(depth) + 'px;top:50%;width:4px;height:4px;margin-top:-2px;' +
+        'border-radius:50%;background:' + (depth === 0 ? dotColorL1 : dotColor) + ';';
+      deco.appendChild(dot);
+
+      div.appendChild(deco);
+
       div.onmouseenter = () => { div.style.background = dark ? '#374151' : '#f3f4f6'; };
       div.onmouseleave = () => { div.style.background = ''; };
       div.onclick = () => {
