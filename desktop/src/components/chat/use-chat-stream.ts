@@ -129,7 +129,7 @@ export async function consumeStream(
         const preToolThought = assistantContent.trim();
         // 不再往 intermediateOutput 累积工具调用前的文本：
         // 这些文本已作为 tool_step.thought 存在 ToolTimeline 里，重复记录会让"过程记录"臃肿。
-        assistantContent = "";
+        // 但保留 assistantContent 展示直到下一个动作完成，让用户能看到思考过程
         currentToolSteps.push({
           tool: chunk.tool, args: chunk.args || "", intent: chunk.intent || undefined, state: "running", id: chunk.id,
           thought: preToolThought || undefined,
@@ -143,6 +143,8 @@ export async function consumeStream(
         }]);
       }
       if (chunk.tool && (chunk.state === "done" || chunk.state === "error")) {
+        // 动作完成时清除之前的思考文本
+        assistantContent = "";
         let matchedIdx = -1;
         if (chunk.id) {
           for (let i = currentToolSteps.length - 1; i >= 0; i--) {
