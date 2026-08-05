@@ -136,11 +136,11 @@
   function saveKnowledge() {
     if (!contentEl) return;
     const btn = getPanelEl('__ethan_reading_save_kb') as HTMLButtonElement | null;
-    if (btn) { btn.disabled = true; btn.textContent = '\u4fdd\u5b58\u4e2d\u2026'; }
+    if (btn) { btn.disabled = true; btn.textContent = '保存中…'; }
     const title = document.title || 'Untitled';
     const md = ethanReader().htmlToMarkdown(contentEl);
     chrome.runtime.sendMessage({ type: 'reading:saveKnowledge', title, content: md }, (resp) => {
-      if (resp?.ok) { showToast('\u5df2\u5b58\u5165\u77e5\u8bc6\u5e93'); if (btn) btn.textContent = '\u5df2\u4fdd\u5b58 \u2713'; }
-      else { showToast('\u4fdd\u5b58\u5931\u8d25'); if (btn) { btn.disabled = false; btn.textContent = '\u5b58\u77e5\u8bc6\u5e93'; } }
+      if (resp?.ok) { showToast('已存入知识库'); if (btn) btn.textContent = '✓ 已保存'; }
+      else { showToast('保存失败'); if (btn) { btn.disabled = false; btn.textContent = '📥 存知识库'; } }
     });
   }

@@ -133,18 +133,13 @@
       '    </div>',
       '    <!-- QA Section ("向 Ethan 提问") -->',
       '    <div id="__ethan_reading_qa_section" style="margin-top:10px;flex-shrink:0">',
-      '      <div id="__ethan_reading_chat_log" style="max-height:120px;overflow-y:auto;margin-bottom:6px"></div>',
-      '      <div style="position:relative">',
-      '        <textarea id="__ethan_reading_chat_input" rows="1" placeholder="向 Ethan 提问…" style="width:100%;resize:none;padding:10px 48px 10px 12px;border-radius:10px;border:1px solid ' + (dark ? '#374151' : '#e5e7eb') + ';background:' + (dark ? '#222630' : '#fff') + ';color:inherit;font-size:13px;font-family:inherit;line-height:1.5;max-height:80px;outline:none;box-sizing:border-box;transition:border-color 0.2s"></textarea>',
-      '        <button id="__ethan_reading_chat_send" style="position:absolute;right:8px;bottom:8px;width:28px;height:28px;border:none;border-radius:7px;background:#0d9488;color:#fff;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:opacity 0.2s;padding:0;line-height:0" title="发送">',
-      '          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>',
-      '        </button>',
+      '      <div id="__ethan_reading_chat_log" style="max-height:120px;overflow-y:auto;margin-bottom:6px;position:relative"></div>',
+      '      <textarea id="__ethan_reading_chat_input" rows="1" placeholder="向 Ethan 提问…" style="width:100%;resize:none;padding:9px 12px;border-radius:10px;border:1px solid ' + (dark ? '#374151' : '#e5e7eb') + ';background:' + (dark ? '#222630' : '#fff') + ';color:inherit;font-size:13px;font-family:inherit;line-height:1.5;max-height:80px;outline:none;box-sizing:border-box;transition:border-color 0.2s"></textarea>',
+      '      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">',
+      '        <button id="__ethan_reading_save_kb" style="border:none;background:none;color:' + (dark ? '#6b7280' : '#9ca3af') + ';font-size:11px;cursor:pointer;padding:2px 0;transition:color 0.2s">\ud83d\udce5 存知识库</button>',
+      '        <button id="__ethan_reading_chat_send" style="border:none;border-radius:8px;background:#0d9488;color:#fff;font-size:12px;font-weight:500;cursor:pointer;padding:5px 14px;transition:opacity 0.2s">发送</button>',
       '      </div>',
       '    </div>',
-      '  </div>',
-      '  <!-- Footer Action Bar -->',
-      '  <div style="padding-top:10px;margin-top:10px;border-top:1px solid ' + (dark ? '#333' : '#e5e7eb') + ';flex-shrink:0">',
-      '    <button id="__ethan_reading_save_kb" style="width:100%;padding:9px;border:none;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;background:linear-gradient(135deg,#0d9488,#06b6d4);color:#fff;box-shadow:0 2px 8px rgba(13,148,136,0.25);transition:opacity 0.2s">存知识库</button>',
       '  </div>',
       '</div>',
     ].join('\n');
@@ -250,6 +245,10 @@
     if (tabsBody) tabsBody.style.display = 'none';
     if (chatHeader) chatHeader.style.display = 'flex';
     if (qaTitle) qaTitle.style.display = 'none';
+    if (chatLog) {
+      const detailBtn = chatLog.querySelector('.__ethan_chat_detail_btn');
+      if (detailBtn) detailBtn.remove();
+    }
     if (qaSection) {
       qaSection.style.flex = '1';
       qaSection.style.minHeight = '0';
@@ -288,7 +287,25 @@
       chatLog.style.maxHeight = '120px';
       chatLog.style.flex = '';
       chatLog.style.minHeight = '';
+      showDetailBtn(chatLog);
     }
+  }
+
+  function showDetailBtn(chatLog: HTMLElement) {
+    let btn = chatLog.querySelector('.__ethan_chat_detail_btn') as HTMLElement | null;
+    if (chatLog.children.length === 0) { if (btn) btn.remove(); return; }
+    if (btn) return;
+    btn = document.createElement('button');
+    btn.className = '__ethan_chat_detail_btn';
+    Object.assign(btn.style, {
+      position: 'sticky', top: '0', float: 'right',
+      border: 'none', background: 'rgba(13,148,136,0.08)', color: '#0d9488',
+      fontSize: '11px', padding: '2px 8px', borderRadius: '6px',
+      cursor: 'pointer', marginBottom: '4px', zIndex: '1',
+    });
+    btn.textContent = '详情 →';
+    btn.onclick = (e) => { e.stopPropagation(); enterChatMode(); };
+    chatLog.insertBefore(btn, chatLog.firstChild);
   }
 
   // ========== Inline Chat（多轮对话）==========
