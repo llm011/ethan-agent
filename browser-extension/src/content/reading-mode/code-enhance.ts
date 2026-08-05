@@ -216,6 +216,96 @@
   const ICON_WRAP = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><path d="M3 12h15a3 3 0 0 1 0 6h-4"/><polyline points="16 16 14 18 16 20"/><line x1="3" y1="18" x2="10" y2="18"/></svg>';
 
   // ---------- 入口 ----------
+  /** 代码脏行清理：对付一些博客/文档站会把"复制代码/代码解读/代码展开"这类按钮文字或语言标签
+   *  通过 div/span/text 混进 <code> 内部（不是 <pre> 的兄弟，而是 <code> 的直系文本节点/子元素）。
+   *  这一步在 highlight 之前做，改 <code> 的 innerHTML 后 hljs.highlightElement 仍能跑。
+   *
+   *  启发式（保守）：
+   *  1) 以"整行"为单位匹配按钮文字。文字里不允许有代码字符（ASCII 可打印里的运算符/标点/数字/引号都少），
+   *     只允许常见的 2~6 个中文汉字/英文单词（"复制代码"、"代码解读"、"Copy code"、"Copy"、"复制"、"展开代码"、"折叠代码"等）。
+   *  2) 行首出现 `}<1-16 个纯字母>`（例如 `}css`、`}javascript`、`}scss`）这种"闭合大括号 + 语言名"，
+   *     几乎可以肯定是上一段代码闭合字符 + 被塞在 code 开头的语言标签 span 粘到了一行——清理掉。
+   *  3) 行首/行尾单独出现形如 `css` / `javascript` 这种纯字母、长度 <=16 的语言名（与 detectLang 同一行的语言标签），
+   *     如果这一行没有任何其他代码字符（空格/tab/换行之外没有别的东西），删掉。
+   */
+  function sanitizeCodeContent(codeEl: HTMLElement) {
+    // 用 innerText 拿到行（考虑 <br>/块级元素的可视换行），再按可视换行拆分，把脏行从 DOM 里删掉。
+    // 为了避免误伤真正的代码（比如某一行恰好就是注释 "// 复制代码"），我们额外要求：脏行必须"完全不含 ASCII 可打印代码字符"。
+    const raw = codeEl.innerText || '';
+    const lines = raw.replace(/\n$/, '').split('\n');
+    if (!lines.length) return;
+
+    // 常见代码块按钮/标签文字（中英文）——整行完全匹配其中之一就删掉。
+    const BUTTON_WHOLE_LINE = new Set([
+      '复制代码', '复制', '拷贝代码', '拷贝',
+      '代码解读', '代码解释', '代码注释',
+      '展开代码', '展开', '查看全部', '查看完整代码',
+      '折叠代码', '折叠',
+      'Copy code', 'Copy', 'COPY CODE', 'COPY',
+      '复制到剪贴板', '复制到剪切板', '复制至剪贴板',
+      '在线运行', '运行代码', 'Playground', 'PLAYGROUND',
+    ]);
+
+    // 语言名识别（和 detectLang 里 language- 后出现的字符串集合近似）。
+    // 用于行"单独就是一个语言名"的情况（语言标签栏被吸进 code）。
+    const COMMON_LANG = new Set([
+      'js', 'javascript', 'ts', 'typescript',
+      'css', 'scss', 'sass', 'less', 'html', 'xml', 'vue', 'svelte',
+      'py', 'python', 'rb', 'ruby', 'php', 'java', 'kt', 'kotlin', 'go', 'rust', 'rs',
+      'c', 'cpp', 'cxx', 'h', 'hpp', 'cs', 'csharp', 'swift', 'oc', 'objc',
+      'sh', 'bash', 'shell', 'zsh', 'fish', 'ps', 'powershell', 'cmd', 'bat',
+      'sql', 'mysql', 'pgsql', 'sqlite', 'json', 'yaml', 'yml', 'toml', 'ini',
+      'md', 'markdown', 'tex', 'latex', 'lua', 'r', 'dart', 'scala', 'perl',
+      'wasm', 'wat', 'dockerfile', 'makefile', 'nginx', 'vim', 'diff', 'patch',
+    ]);
+
+    // 判断一行是不是"非代码"：长度 <=24 且整行没有 ASCII 代码字符集合。
+    // 允许的字符仅为：CJK 汉字/字母/空格/tab；一旦出现 !@#$%^&*()_+-=[]{}|;':",./<>? 或数字，就认为是代码行不删。
+    const reNonCodeLine = /^[\s\u4e00-\u9fa5A-Za-z·]{0,24}$/;
+    const isNonCodeLine = (s: string) => reNonCodeLine.test(s.trim());
+
+    const dirtyIdx = new Set<number>();
+    lines.forEach((rawLine, i) => {
+      const line = rawLine.trim();
+      if (!line) return;
+      // 1) 按钮整行匹配
+      if (BUTTON_WHOLE_LINE.has(line) && isNonCodeLine(line)) {
+        dirtyIdx.add(i);
+        return;
+      }
+      // 2) 首行：} + 语言名（无空格，纯字母）
+      if (i === 0) {
+        const m = line.match(/^}\s*([A-Za-z]{1,16})$/);
+        if (m && COMMON_LANG.has(m[1].toLowerCase())) {
+          dirtyIdx.add(i);
+          return;
+        }
+      }
+      // 3) 单独的语言名行（没有其他字符），出现在代码首行或末行才删（中间行比如 "sql" 可能是真的 SQL 语句）
+      if ((i === 0 || i === lines.length - 1) && line.length <= 16 && /^[A-Za-z]+$/.test(line)) {
+        if (COMMON_LANG.has(line.toLowerCase())) {
+          dirtyIdx.add(i);
+          return;
+        }
+      }
+    });
+
+    if (!dirtyIdx.size) return;
+
+    // 应用删除：用 line 索引和 visual 换行对齐比较难（因为 innerText 换行源可能是 <br> 或块元素闭合），
+    // 这里走更简单的做法——直接把 codeEl.textContent 按行重建，再用 splitText/append/prepend 调整文本节点。
+    // 不过 codeEl 里可能已经有 hljs 的 span（本函数在 highlight 前调用，所以应该没有），所以直接处理 innerText 重建就够了：
+    // 逐行保留，最后用 "\n" join 回去，塞回 codeEl 纯文本。
+    // 代价：如果 <code> 里本身就含有"非 <span> 高亮用的其他 DOM 结构"（比如 <a>、<em> 等）会丢失——现实中 <code> 里不会放这些，丢失无影响。
+    const kept = lines.filter((_, i) => !dirtyIdx.has(i));
+    suppressInput = true;
+    try {
+      codeEl.textContent = kept.join('\n');
+    } finally {
+      queueMicrotask(() => { suppressInput = false; });
+    }
+  }
+
   function enhanceCodeBlocks(container: HTMLElement, dark: boolean) {
     const codeBlocks = container.querySelectorAll('pre code');
     if (!codeBlocks.length) return;
@@ -231,6 +321,9 @@
         oldWrapper.parentElement!.insertBefore(pre, oldWrapper);
         oldWrapper.remove();
       }
+
+      // 先做内容清洗（脏行：按钮文字/语言标签），再高亮——顺序很重要，高亮后再改 textContent 会把 span 色丢了。
+      sanitizeCodeContent(codeEl);
 
       if (codeEl.dataset.highlighted !== 'yes' && typeof (self as any).__hljs !== 'undefined') {
         suppressInput = true;
