@@ -66,7 +66,9 @@ def _build_intermediate_markdown(msg: Message) -> str:
             if step.get("result_preview"):
                 parts.append("\n### 结果摘要\n" + str(step["result_preview"]).strip())
             if step.get("result_detail"):
-                parts.append("\n### 结果详情\n" + str(step["result_detail"]).strip())
+                detail = str(step["result_detail"]).strip()
+                fence = "````" if "```" in detail else "```"
+                parts.append(f"\n### 结果详情\n{fence}\n" + detail + f"\n{fence}")
     elif msg.thought:
         parts.append("\n## 思考过程\n" + str(msg.thought).strip())
     return "\n".join(p for p in parts if p.strip()).strip() + "\n"
@@ -633,7 +635,7 @@ class SessionStore:
                     continue
         return cards
 
-    async def list_recent(self, limit: int = 20, offset: int = 0,
+    async def list_recent(self, limit: int = 20, offset: int = 0, *,
                           source: str = "", mode: str | None = None,
                           exclude_sources: list[str] | None = None,
                           exclude_title_prefixes: list[str] | None = None,
@@ -668,8 +670,15 @@ class SessionStore:
             # EXISTS 短路：找到第一条 images 非空即命中，不走全表
             where.append("EXISTS (SELECT 1 FROM messages m WHERE m.session_id = sessions.id AND m.images IS NOT NULL AND m.images != '[]' AND m.images != '')")
         where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+        count_params = list(params)
         params.extend([limit, offset])
         sessions = []
+        # total count for pagination
+        async with self._db.execute(
+            f"SELECT COUNT(*) FROM sessions{where_sql}",
+            tuple(count_params),
+        ) as cursor:
+            total = (await cursor.fetchone())[0]
         # first_query 子查询：每行一次索引查找，取第一条 user 消息前 80 字填 snippet
         async with self._db.execute(
             "SELECT id, title, model, created_at, updated_at, COALESCE(source, 'web') as source, COALESCE(mode, '') as mode, "
@@ -686,6 +695,8 @@ class SessionStore:
                     mode=row[6] if len(row) > 6 else "",
                     snippet=snippet,
                 ))
+        # Attach total as attribute for callers that need it
+        sessions.total = total  # type: ignore[attr-defined]
         return sessions
 
     async def list_in_range(
@@ -775,6 +786,65 @@ class SessionStore:
         )
         await self._db.commit()
         return cursor.rowcount
+
+    async def cleanup_trivial(self) -> tuple[int, list[str]]:
+        """删除无意义会话：空会话 + 只含试探性消息的会话 + 无回复的单条会话，返回 (deleted_count, deleted_ids)。"""
+        import re
+        trivial_patterns = re.compile(
+            r"^(h[ei]|hi|hello|hey|yo|test|测试|你好|你是谁|谁|在吗|在不在|你是什么|什么|哈喽|嗨|ok|okay|嗯|哦|喂|1|11|111|aaa|啊|哈|嘿|\.+|。+|…+|\?+|？+|!+|！+)$",
+            re.IGNORECASE,
+        )
+        max_msg_count = 4
+        deleted_ids: list[str] = []
+
+        # 1) 空会话（无任何消息）
+        async with self._db.execute(
+            "SELECT id FROM sessions WHERE id NOT IN (SELECT DISTINCT session_id FROM messages)"
+        ) as cursor:
+            deleted_ids.extend(row[0] for row in await cursor.fetchall())
+
+        # 2) 只有 user 消息且 assistant 回复为空的会话（发了但没得到回复，abandoned）
+        async with self._db.execute(
+            """
+            SELECT s.id
+            FROM sessions s
+            JOIN messages m ON m.session_id = s.id
+            GROUP BY s.id
+            HAVING COUNT(m.id) <= 2
+               AND SUM(CASE WHEN m.role = 'assistant' AND length(trim(m.content)) > 0 THEN 1 ELSE 0 END) = 0
+            """,
+        ) as cursor:
+            for row in await cursor.fetchall():
+                if row[0] not in deleted_ids:
+                    deleted_ids.append(row[0])
+
+        # 3) 消息内容全为试探性的会话
+        async with self._db.execute(
+            """
+            SELECT s.id, GROUP_CONCAT(m.content, '\x1f') as contents, COUNT(m.id) as cnt
+            FROM sessions s
+            JOIN messages m ON m.session_id = s.id
+            WHERE m.role IN ('user', 'assistant')
+            GROUP BY s.id
+            HAVING cnt <= ?
+            """,
+            (max_msg_count,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+        for sid, contents_concat, _ in rows:
+            if sid in deleted_ids:
+                continue
+            msgs = contents_concat.split("\x1f") if contents_concat else []
+            if all(trivial_patterns.match(m.strip()) for m in msgs if m.strip()):
+                deleted_ids.append(sid)
+
+        if deleted_ids:
+            placeholders = ",".join("?" * len(deleted_ids))
+            await self._db.execute(f"DELETE FROM sessions WHERE id IN ({placeholders})", deleted_ids)
+            await self._db.commit()
+
+        return len(deleted_ids), deleted_ids
 
     # ── sessions.db 轮转（防止无限膨胀） ──────────────────────────
 

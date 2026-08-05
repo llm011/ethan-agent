@@ -83,7 +83,7 @@ async def list_sessions(limit: int = 50, offset: int = 0, q: str | None = None,
             "mode": getattr(s, "mode", "") or "",
         }
         for s in sessions
-    ]}
+    ], "total": getattr(sessions, "total", None)}
 
 
 @router.post("/sessions")
@@ -201,6 +201,14 @@ async def rename_session(session_id: str, req: RenameSessionRequest, user_id: st
         await store.update_mode(session_id, req.mode)
     return {"ok": True}
 
+
+
+@router.post("/sessions/cleanup-trivial")
+async def cleanup_trivial_sessions(user_id: str = Depends(verify_token)):
+    """批量删除只含试探性消息的会话（hi/hello/测试/你是谁等）。"""
+    store = await get_session_store()
+    deleted, deleted_ids = await store.cleanup_trivial()
+    return {"deleted": deleted, "deleted_ids": deleted_ids}
 
 
 @router.post("/sessions/{session_id}/regen-title")

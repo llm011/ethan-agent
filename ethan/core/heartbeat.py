@@ -197,6 +197,7 @@ async def _run_heartbeat_md() -> None:
     logger.info("[Heartbeat] Running heartbeat.md tasks...")
     prompt = f"[Heartbeat] 正在执行系统心跳任务：heartbeat.md\n\n{content.strip()}"
 
+    hb_session = None
     try:
         import time
 
@@ -264,6 +265,12 @@ async def _run_heartbeat_md() -> None:
         logger.info("[Heartbeat] heartbeat.md task done")
     except Exception:
         logger.exception("[Heartbeat] heartbeat.md execution failed")
+        # 清理失败时残留的空 session，避免空心跳会话堆积
+        try:
+            if hb_session:
+                await store.delete(hb_session.id)
+        except Exception:
+            pass
 
 
 async def _tick() -> None:
