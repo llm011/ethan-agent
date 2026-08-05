@@ -14,6 +14,9 @@ export function registerSW() {
 export function UpdateToast() {
   const [waiting, setWaiting] = useState(false);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 标记用户是否点过「刷新」：首次安装时 activate 里 clients.claim() 也会派发
+  // controllerchange（controller 从 null 变 SW），此时不应强制 reload，否则丢失输入。
+  const userRequestedRefresh = useRef(false);
 
   useEffect(() => {
     if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
@@ -32,16 +35,26 @@ export function UpdateToast() {
     const onUpdateFound = async () => {
       const r = await reg.getRegistration();
       if (!r || !r.installing) return;
-      r.installing.addEventListener("statechange", () => {
-        if (r.installing && r.installing.state === "installed" && reg.controller) {
+      // 捕获局部引用：SW 进入 installed 瞬间 r.installing 即置 null（改由 r.waiting 指向），
+      // statechange 回调执行时再读 r.installing 必为 null，会导致提示条永远不弹出。
+      const sw = r.installing;
+      sw.addEventListener("statechange", () => {
+        // 进入 installed 即表示新版本已就绪（此时 SW 由 r.waiting 指向）。
+        // 不再附加 reg.controller 条件：首次安装未 claim 前 controller 为 null，
+        // 会导致提示条弹不出来。是否 reload 由 onControllerChange 里的 flag 控制。
+        if (sw.state === "installed") {
           setWaiting(true);
         }
       });
     };
 
-    // 新 SW 接管后刷新页面加载新资源
+    // 新 SW 接管后刷新页面加载新资源。
+    // 仅用户点过「刷新」才 reload，避免首次安装 clients.claim() 触发的 controllerchange
+    // 强制刷新页面导致输入框内容丢失。
     const onControllerChange = () => {
-      window.location.reload();
+      if (userRequestedRefresh.current) {
+        window.location.reload();
+      }
     };
 
     reg.addEventListener("updatefound", onUpdateFound);
@@ -68,6 +81,7 @@ export function UpdateToast() {
     if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
     navigator.serviceWorker.getRegistration().then((r) => {
       if (r && r.waiting) {
+        userRequestedRefresh.current = true;
         r.waiting.postMessage({ type: "SKIP_WAITING" });
       }
     });
