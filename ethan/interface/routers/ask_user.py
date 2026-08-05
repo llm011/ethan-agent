@@ -8,7 +8,7 @@
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from .deps import verify_token
@@ -22,9 +22,12 @@ class AskUserResponse(BaseModel):
 
 @router.post("/ask-user/{request_id}")
 async def respond_ask_user(request_id: str, body: AskUserResponse, user_id: str = Depends(verify_token)):
-    # TODO(输入校验): 目前接受 body.value 任意字符串。应该把 create() 时的 options 存到 _REGISTRY，
-    #   然后在这里校验 value 必须在 options.value 集合中；否则返回 400。
-    #   有 token 保护风险很低，但仍是一个可以被滥用的入口。
-    from ethan.core.ask_user import resolve_ask_user
+    from ethan.core.ask_user import _OPTIONS_REGISTRY, resolve_ask_user
+
+    # 校验 value 是否在创建时的 options 中，防止传入任意字符串
+    valid_values = _OPTIONS_REGISTRY.get(request_id)
+    if valid_values is not None and body.value not in valid_values:
+        raise HTTPException(status_code=400, detail="invalid option value")
+
     ok = resolve_ask_user(request_id, body.value)
     return {"ok": ok}

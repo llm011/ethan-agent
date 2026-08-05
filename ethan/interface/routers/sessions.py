@@ -60,6 +60,7 @@ async def list_sessions(limit: int = 50, offset: int = 0, q: str | None = None,
     store = await get_session_store()
     if q:
         sessions = await store.search(q, limit)
+        total = await store.count_search(q)
     else:
         exclude_prefixes = []
         if hide_heartbeat:
@@ -71,6 +72,7 @@ async def list_sessions(limit: int = 50, offset: int = 0, q: str | None = None,
                                            exclude_title_prefixes=exclude_prefixes or None,
                                            include_title_prefixes=include_prefixes,
                                            has_images=has_images)
+        total = len(sessions)
     return {"sessions": [
         {
             "id": s.id,
@@ -83,7 +85,7 @@ async def list_sessions(limit: int = 50, offset: int = 0, q: str | None = None,
             "mode": getattr(s, "mode", "") or "",
         }
         for s in sessions
-    ], "total": getattr(sessions, "total", None)}
+    ], "total": total}
 
 
 @router.post("/sessions")

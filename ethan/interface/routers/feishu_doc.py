@@ -137,9 +137,9 @@ def _fetch_feishu_doc_impl(url: str, nocache: bool) -> FetchDocResponse:
     # fetch_doc_to_markdown 内部已经有自己的缓存；这里再套一层内存级缓存。
     try:
         md, meta, _out = fetch_doc_to_markdown(url, use_cache=not nocache)
-    except Exception as e:
+    except Exception:
         log.exception("feishu-doc fetch failed for %s", url)
-        return FetchDocResponse(ok=False, error=f"{type(e).__name__}: {e}"[:500], url=url)
+        return FetchDocResponse(ok=False, error="fetch failed", url=url)
 
     title = (meta.get("title") if isinstance(meta, dict) else "") or _extract_title(md) or _doc_token_from_input(url)
     # 清理过期条目，防止 _CACHE 无限增长
@@ -191,7 +191,7 @@ async def fetch_doc_api(
         raise
     except Exception as e:
         log.exception("feishu-doc fetch failed for %s", url)
-        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}"[:500]) from e
+        raise HTTPException(status_code=500, detail="failed to fetch feishu doc") from e
 
 
 __all__ = ["router"]

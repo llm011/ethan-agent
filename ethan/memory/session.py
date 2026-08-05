@@ -813,6 +813,18 @@ class SessionStore:
         # 按 updated_at 倒序返回
         return sorted(sessions.values(), key=lambda s: s.updated_at, reverse=True)[:limit]
 
+    async def count_search(self, query: str) -> int:
+        """统计搜索匹配的去重 session 总数（标题或消息内容匹配）。"""
+        q = f"%{query}%"
+        async with self._db.execute(
+            """SELECT COUNT(DISTINCT s.id) FROM sessions s
+               LEFT JOIN messages m ON m.session_id = s.id AND m.role IN ('user', 'assistant')
+               WHERE s.title LIKE ? OR m.content LIKE ?""",
+            (q, q),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else 0
+
     async def cleanup_empty(self) -> int:
         """删除没有任何消息的空 session，返回删除数量。"""
         cursor = await self._db.execute(

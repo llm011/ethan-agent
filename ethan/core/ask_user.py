@@ -50,6 +50,8 @@ class AskUserProvider:
         fut: asyncio.Future = loop.create_future()
         self._pending[req_id] = fut
         _REGISTRY[req_id] = self
+        # 存 options 供端点校验 value 合法性
+        _OPTIONS_REGISTRY[req_id] = {str(o.get("value", "")) for o in options}
         return AskUserEvent(
             request_id=req_id,
             question=question,
@@ -61,6 +63,7 @@ class AskUserProvider:
     def resolve(self, request_id: str, value: str) -> bool:
         fut = self._pending.pop(request_id, None)
         _REGISTRY.pop(request_id, None)
+        _OPTIONS_REGISTRY.pop(request_id, None)
         if fut is not None and not fut.done():
             fut.set_result(value)
             return True
@@ -69,6 +72,7 @@ class AskUserProvider:
     def cancel_all(self) -> None:
         for req_id, fut in list(self._pending.items()):
             _REGISTRY.pop(req_id, None)
+            _OPTIONS_REGISTRY.pop(req_id, None)
             if not fut.done():
                 fut.cancel()
         self._pending.clear()
@@ -76,6 +80,8 @@ class AskUserProvider:
 
 # 全局注册表：request_id → AskUserProvider
 _REGISTRY: dict[str, AskUserProvider] = {}
+# request_id → 合法 value 集合（供端点校验）
+_OPTIONS_REGISTRY: dict[str, set[str]] = {}
 
 
 def resolve_ask_user(request_id: str, value: str) -> bool:
