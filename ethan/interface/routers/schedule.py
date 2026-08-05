@@ -1,4 +1,5 @@
 """schedule 路由：定时任务 CRUD + 时间线管理。"""
+import logging
 import re
 from pathlib import Path
 
@@ -8,6 +9,8 @@ from pydantic import BaseModel
 from ethan.core.config import CONFIG_DIR
 
 from .deps import verify_token
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/schedule")
 
@@ -131,12 +134,20 @@ async def create_schedule(req: ScheduleCreateRequest, user_id: str = Depends(ver
         category=category,
         scene=scene,
     )
-    if req.cron:
-        scheduler.add_cron(req.job_id, fire_schedule_job, req.cron, end_date=req.end_date or None, name=req.title or req.job_id, **kwargs)
-    elif req.interval_minutes > 0:
-        scheduler.add_interval(req.job_id, fire_schedule_job, minutes=req.interval_minutes, end_date=req.end_date or None, name=req.title or req.job_id, **kwargs)
-    else:
-        raise HTTPException(400, "Need cron or interval_minutes")
+    try:
+        if req.cron:
+            scheduler.add_cron(req.job_id, fire_schedule_job, req.cron, end_date=req.end_date or None, name=req.title or req.job_id, **kwargs)
+        elif req.interval_minutes > 0:
+            scheduler.add_interval(req.job_id, fire_schedule_job, minutes=req.interval_minutes, end_date=req.end_date or None, name=req.title or req.job_id, **kwargs)
+        else:
+            raise HTTPException(400, "Need cron or interval_minutes")
+    except ValueError as e:
+        # 无效 cron 表达式等参数错误
+        raise HTTPException(400, f"Invalid schedule parameters: {e}")
+    except Exception as e:
+        # DB 写入失败（如 readonly / locked）等运行时错误
+        logger.exception("Failed to create schedule job '%s'", req.job_id)
+        raise HTTPException(503, f"Scheduler temporarily unavailable: {e}")
     return {"ok": True}
 
 
