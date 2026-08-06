@@ -287,7 +287,18 @@ def _render_meta_block(meta: dict) -> str:
 
 def _cdn_available() -> bool:
     required = ["CDN_ENDPOINT", "CDN_ACCESS_KEY", "CDN_SECRET_KEY", "CDN_BUCKET", "CDN_PUBLIC_URL"]
-    return all(os.environ.get(k) for k in required)
+    if all(os.environ.get(k) for k in required):
+        return True
+    # 尝试从 secrets env 文件加载
+    env_file = Path.home() / ".ethan" / ".secrets" / "upload-cdn.env"
+    if env_file.is_file():
+        for line in env_file.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, _, v = line.partition("=")
+                os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+        return all(os.environ.get(k) for k in required)
+    return False
 
 
 def _upload_script_path() -> Path:
