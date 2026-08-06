@@ -21,7 +21,7 @@ import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@ethan
 import type { CardData, Message } from "@ethan/shared/chat/types";
 import type { Annotation } from "@/lib/api";
 
-const URL_RE = /https?:\/\/[^\s<>"')\]]+/g;
+const URL_RE = /https?:\/\/[^\s<>"')\]\u0000-\u001f\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]+/g;
 
 function shortenUrl(url: string): string {
   try {
