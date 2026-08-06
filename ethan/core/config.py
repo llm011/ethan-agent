@@ -227,9 +227,24 @@ class KnowledgeConfig(BaseModel):
     notion_root_page_id: str = ""  # 作为知识库根的 Notion 页面 ID（条目作为其子页面）
 
 
+class MCPServerConfig(BaseModel):
+    name: str = ""  # 唯一标识（如 "dida365"），工具名前缀
+    url: str = ""  # MCP server 地址；streamable-http 用（如 https://mcp.dida365.com）
+    bearer_token: str = ""  # 可选 Bearer Token（滴答清单 API 口令等）
+    # 本地 stdio server：设置了 command 则优先走 stdio 子进程（url 忽略）
+    command: str = ""
+    args: list[str] = Field(default_factory=list)
+    enabled: bool = True
+
+
+class MCPConfig(BaseModel):
+    servers: list[MCPServerConfig] = Field(default_factory=list)
+
+
 class ToolsConfig(BaseModel):
     web_search: WebSearchToolConfig = Field(default_factory=WebSearchToolConfig)
     knowledge: KnowledgeConfig = Field(default_factory=KnowledgeConfig)
+    mcp: MCPConfig = Field(default_factory=MCPConfig)
 
 
 class Config(BaseModel):
