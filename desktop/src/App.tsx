@@ -1,4 +1,5 @@
 import { HashRouter, Routes, Route, Navigate, useParams, useNavigate } from "react-router-dom";
+import { useEffect } from "react";
 import { type ModelEntry } from "@/lib/api";
 import { fetchModels } from "@/lib/api-base";
 import { useCachedResource } from "@/lib/use-cached-resource";
@@ -39,7 +40,7 @@ function SettingsRoute() {
   // models 是 A 类准静态数据，进 settings 时命中缓存 0ms 渲染；
   // 写操作（addModel/deleteModel）会 bustCache("models")，本 hook 自动 refetch
   const { data: models } = useCachedResource<ModelEntry[]>("models", fetchModels, { ttlMs: 60 * 60_000 });
-  const VALID_TABS = ["general", "providers", "channels", "identity", "soul", "tools", "heartbeat", "profile", "prompt-preview", "api-keys", "fast-rules", "tool-tiers", "about"];
+  const VALID_TABS = ["general", "countdown", "providers", "channels", "identity", "soul", "tools", "heartbeat", "profile", "prompt-preview", "api-keys", "fast-rules", "tool-tiers", "about"];
   const initialTab = tab && VALID_TABS.includes(tab) ? tab : "general";
   return (
     <div className="flex flex-col flex-1 h-full min-h-0">
@@ -51,6 +52,18 @@ function SettingsRoute() {
 /** 路由树容器：在 HashRouter 内部注册 deep-link 监听 */
 function RoutesTree() {
   useDeepLink();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    import("@tauri-apps/api/event").then(({ listen }) => {
+      listen<string>("navigate", (event) => {
+        if (event.payload) navigate(event.payload);
+      }).then((fn) => { unlisten = fn; });
+    }).catch(() => {});
+    return () => { unlisten?.(); };
+  }, [navigate]);
+
   return (
     <Routes>
       <Route path="/countdown" element={<CountdownPage />} />
