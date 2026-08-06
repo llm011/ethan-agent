@@ -18,6 +18,53 @@ import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@ethan
 import type { CardData, Message } from "@ethan/shared/chat/types";
 import type { Annotation } from "@/lib/api";
 
+const URL_RE = /https?:\/\/[^\s<>"')\]]+/g;
+
+function shortenUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    const host = u.host;
+    const rest = url.slice(url.indexOf(host) + host.length);
+    if (rest.length <= 10) return host + rest;
+    return host + "..." + rest.slice(-10);
+  } catch {
+    return url.length > 40 ? url.slice(0, 20) + "..." + url.slice(-10) : url;
+  }
+}
+
+function LinkifiedText({ text }: { text: string }) {
+  const parts: (string | { url: string; key: number })[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let key = 0;
+  URL_RE.lastIndex = 0;
+  while ((match = URL_RE.exec(text)) !== null) {
+    if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index));
+    parts.push({ url: match[0], key: key++ });
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < text.length) parts.push(text.slice(lastIndex));
+  if (key === 0) return <>{text}</>;
+  return (
+    <>
+      {parts.map((p) =>
+        typeof p === "string" ? p : (
+          <a
+            key={p.key}
+            href={p.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={p.url}
+            className="underline text-primary hover:opacity-80 break-all"
+          >
+            {shortenUrl(p.url)}
+          </a>
+        )
+      )}
+    </>
+  );
+}
+
 // 搜索结果卡片已移入工具时间线详情展示，这里只渲染图片 / 文件卡片
 function CardRenderer({ cards, sessionId }: { cards: CardData[]; sessionId?: string | null }) {
   const images = cards.filter((c): c is ImageCard => c.type === "image");
@@ -340,7 +387,7 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
                   ))}
                 </div>
               )}
-              <p className="whitespace-pre-wrap">{msg.content.replace(/^(\[Uploaded file: [^\]]+\]\n)+\n?/, '')}</p>
+              <p className="whitespace-pre-wrap"><LinkifiedText text={msg.content.replace(/^(\[Uploaded file: [^\]]+\]\n)+\n?/, '')} /></p>
               {msg.created_at && (
                 <div className="text-[10px] opacity-40 mt-1 text-right">
                   {formatTime(msg.created_at)}

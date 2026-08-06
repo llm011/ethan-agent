@@ -21,6 +21,53 @@ import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@ethan
 import type { CardData, Message } from "@ethan/shared/chat/types";
 import type { Annotation } from "@/lib/api";
 
+const URL_RE = /https?:\/\/[^\s<>"')\]]+/g;
+
+function shortenUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    const host = u.host;
+    const rest = url.slice(url.indexOf(host) + host.length);
+    if (rest.length <= 10) return host + rest;
+    return host + "..." + rest.slice(-10);
+  } catch {
+    return url.length > 40 ? url.slice(0, 20) + "..." + url.slice(-10) : url;
+  }
+}
+
+function LinkifiedText({ text }: { text: string }) {
+  const parts: (string | { url: string; key: number })[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let key = 0;
+  URL_RE.lastIndex = 0;
+  while ((match = URL_RE.exec(text)) !== null) {
+    if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index));
+    parts.push({ url: match[0], key: key++ });
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < text.length) parts.push(text.slice(lastIndex));
+  if (key === 0) return <>{text}</>;
+  return (
+    <>
+      {parts.map((p) =>
+        typeof p === "string" ? p : (
+          <a
+            key={p.key}
+            href={p.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={p.url}
+            className="underline text-primary hover:opacity-80 break-all"
+          >
+            {shortenUrl(p.url)}
+          </a>
+        )
+      )}
+    </>
+  );
+}
+
 // 按 card.type 分发到 SearchCardCarousel / ImageGallery / FileCardView
 // 搜索结果卡片已移入工具时间线详情展示，这里只渲染图片 / 文件卡片
 function CardRenderer({ cards, sessionId }: { cards: CardData[]; sessionId?: string | null }) {
@@ -344,7 +391,7 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
                   ))}
                 </div>
               )}
-              <p className="whitespace-pre-wrap">{msg.content.replace(/^(\[Uploaded file: [^\]]+\]\n)+\n?/, '')}</p>
+              <p className="whitespace-pre-wrap"><LinkifiedText text={msg.content.replace(/^(\[Uploaded file: [^\]]+\]\n)+\n?/, '')} /></p>
               {msg.created_at && (
                 <div className="text-[10px] opacity-40 mt-1 text-right">
                   {formatTime(msg.created_at)}
@@ -441,6 +488,11 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
               <McpAppView apps={msg.mcpApps} />
             )}
             <div className="flex justify-end items-center mt-2 gap-1.5 text-[10px] text-muted-foreground/40 tabular-nums flex-wrap">
+              {msg.model && (
+                <span className="inline-flex items-center rounded-full bg-slate-500/8 text-slate-600/50 dark:text-slate-400/50 px-1.5 py-px font-normal proportional-nums">
+                  {msg.model.split('/').pop() || msg.model}
+                </span>
+              )}
               {msg.created_at && <span>{formatTime(msg.created_at)}</span>}
               {msg.created_at && (msg.usage || msg.ttfb_ms != null || msg.total_ms != null) && <span className="inline-block w-px h-2.5 bg-muted-foreground/15" />}
               {msg.usage && (
