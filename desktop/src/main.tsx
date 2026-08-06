@@ -4,6 +4,7 @@ import App from "./App";
 import "./styles.css";
 import { isExternalUrl, openUrl } from "@/lib/external-link";
 import { normalizeThemeId, applyThemeClass } from "@/components/chat/themes";
+import { initDesktopWebSocket } from "@/lib/desktop-ws";
 
 // 启动时同步主题 class 到 <html>，避免 React mount 前的首帧走 :root 默认值
 // 造成主题切换前后的视觉漂移。必须在 createRoot 之前执行，确保首屏 paint 时
@@ -36,3 +37,6 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <App />
   </React.StrictMode>
 );
+
+// 初始化桌面端 WebSocket 长连接（接收 server 推送的通知和指令）
+initDesktopWebSocket();

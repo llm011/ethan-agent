@@ -13,6 +13,7 @@ from ethan import __version__
 from ethan.browser.http_route import router as browser_http_router
 from ethan.browser.ws_route import router as browser_ws_router
 from ethan.core.heartbeat import start_heartbeat, stop_heartbeat
+from ethan.desktop.ws_route import router as desktop_ws_router
 from ethan.interface.routers import (
     annotations,
     ask_user,
@@ -208,6 +209,7 @@ app.include_router(images.router, prefix="/api")  # /api/images — image_search
 app.include_router(assets.router, prefix="/api")  # /api/assets — 用户上传的图片等资产
 app.include_router(files.router, prefix="/api")  # /api/files — deliver_file 交付文件的下载/预览
 app.include_router(browser_ws_router)  # /ws/browser, WebSocket, no prefix
+app.include_router(desktop_ws_router)  # /ws/desktop, WebSocket, no prefix
 app.include_router(browser_http_router, prefix="/api")  # /api/browser/shot/{name}
 
 if _WEB_DIST.exists():

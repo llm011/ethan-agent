@@ -22,6 +22,7 @@ from ethan.tools.builtin.chart import ChartTool
 from ethan.tools.builtin.config import ConfigGetTool, ConfigSetTool
 from ethan.tools.builtin.decide import DecideTool
 from ethan.tools.builtin.deliver_file import DeliverFileTool
+from ethan.tools.builtin.desktop import DesktopCountdownTool, DesktopNotifyTool
 from ethan.tools.builtin.file import FileListTool, FileReadTool, FileWriteTool
 from ethan.tools.builtin.find_tools import FindToolsTool
 from ethan.tools.builtin.heartbeat import HeartbeatAddTool, HeartbeatListTool, HeartbeatRemoveTool
@@ -160,6 +161,8 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
     registry.register(BrowserSessionTool())
     registry.register(BrowserTabTool())
     registry.register(BrowserPageTool())
+    registry.register(DesktopCountdownTool())
+    registry.register(DesktopNotifyTool())
     # Lark CLI wrapper tools — 仅飞书渠道注册，非飞书渠道不暴露给模型
     if channel == "lark":
         registry.register(LarkCalendarEventsTool())
