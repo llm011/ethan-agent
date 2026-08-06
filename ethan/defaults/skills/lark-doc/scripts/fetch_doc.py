@@ -15,6 +15,7 @@ Usage:
 成功时 stdout 打印输出文件路径；失败时 stderr 打印错误并 exit 非0。
 """
 import hashlib
+import html as html_mod
 import json
 import os
 import re
@@ -46,9 +47,28 @@ _READONLY_ISV_RE = re.compile(
     r'<readonly-block\b[^>]*\bid="([^"]+)"[^>]*\btype="isv"[^>]*>\s*</readonly-block>',
     re.IGNORECASE,
 )
+# 画板嵌入块：<whiteboard token="xxx"></whiteboard>
+_WHITEBOARD_RE = re.compile(
+    r'<whiteboard\b[^>]*\btoken="([^"]+)"[^>]*>\s*</whiteboard>',
+    re.IGNORECASE,
+)
 _READONLY_RE = re.compile(r'<readonly-block\b[^>]*>\s*</readonly-block>', re.IGNORECASE)
 _CALLOUT_RE = re.compile(r'<callout\b([^>]*)>(.*?)</callout>', re.IGNORECASE | re.DOTALL)
 _CALLOUT_EMOJI_RE = re.compile(r'\bemoji="([^"]*)"', re.IGNORECASE)
+# <bookmark name="..." href="..."></bookmark> → [name](href)
+_BOOKMARK_RE = re.compile(
+    r'<bookmark\b[^>]*\bname="([^"]*)"[^>]*\bhref="([^"]*)"[^>]*>\s*</bookmark>',
+    re.IGNORECASE,
+)
+_BOOKMARK_RE2 = re.compile(
+    r'<bookmark\b[^>]*\bhref="([^"]*)"[^>]*\bname="([^"]*)"[^>]*>\s*</bookmark>',
+    re.IGNORECASE,
+)
+# <chat_card name="..." chat-id="..."></chat_card> → 群聊占位
+_CHAT_CARD_RE = re.compile(
+    r'<chat_card\b[^>]*\bname="([^"]*)"[^>]*>\s*</chat_card>',
+    re.IGNORECASE,
+)
 # 匹配任意 HTML/组件开闭/自闭合标签（含 <UIResourceRenderer />、<h1> 等）
 _ANY_TAG_RE = re.compile(r'</?[a-zA-Z][a-zA-Z0-9-]*(?:\s[^<>]*?)?/?>')
 
@@ -204,7 +224,7 @@ def _fetch_doc_meta(document_id: str) -> dict:
 
 
 def _render_meta_block(meta: dict) -> str:
-    """把元信息渲染成 markdown 头部块（blockquote，ProseMirror 友好）。"""
+    """把元信息渲染成 HTML 头部块（div.doc-meta）。"""
     if not meta:
         return ""
     owner = meta.get("owner")
@@ -213,31 +233,34 @@ def _render_meta_block(meta: dict) -> str:
     modify_time = meta.get("modify_time")
     url = meta.get("url")
 
-    lines: list[str] = []
+    parts: list[str] = []
 
     # 第一行：作者（+ 最近编辑，仅当与作者不同）
     people = []
     if owner:
-        people.append(f"**作者**：{owner}")
+        people.append(f"<strong>作者</strong>：{owner}")
     if modify_user and modify_user != owner:
-        people.append(f"**最近编辑**：{modify_user}")
+        people.append(f"<strong>最近编辑</strong>：{modify_user}")
     if people:
-        lines.append("> " + " | ".join(people))
+        parts.append(" | ".join(people))
 
     # 第二行：创建时间 + 最近修改时间
     times = []
     if create_time:
-        times.append(f"**创建时间**：{create_time}")
+        times.append(f"<strong>创建时间</strong>：{create_time}")
     if modify_time:
-        times.append(f"**最近修改时间**：{modify_time}")
+        times.append(f"<strong>最近修改时间</strong>：{modify_time}")
     if times:
-        lines.append("> " + " | ".join(times))
+        parts.append(" | ".join(times))
 
     # 第三行：原文链接
     if url:
-        lines.append(f"> **原文链接**：{url}")
+        parts.append(f"<strong>原文链接</strong>：<br/>{url}")
 
-    return ("\n".join(lines) + "\n\n") if lines else ""
+    if not parts:
+        return ""
+    inner = "<br/>".join(parts)
+    return f'<div class="doc-meta">{inner}</div>\n\n'
 
 
 def _cdn_available() -> bool:
@@ -252,40 +275,27 @@ def _upload_script_path() -> Path:
 
 def _download_img_by_token(token: str) -> "str | None":
     """用 lark-cli docs +media-download 下载图片到临时文件，返回路径或 None。"""
-    suffix = ".png"
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        tmp_path = tmp.name
-
-    # lark-cli 会自动加扩展名，所以先给个无扩展名的路径
-    base_path = tmp_path[:-len(suffix)]
+    tmp_dir = tempfile.mkdtemp(prefix="img-")
+    filename = f"img-{token[:8]}"
     result = subprocess.run(
         [
             "lark-cli", "docs", "+media-download",
             "--token", token,
-            "--output", base_path,
+            "--output", filename,
             "--as", "user",
         ],
         capture_output=True,
         text=True,
         timeout=60,
+        cwd=tmp_dir,
     )
-
-    # 删掉预创建的临时文件（lark-cli 会写新文件名）
-    try:
-        Path(tmp_path).unlink(missing_ok=True)
-    except OSError:
-        pass
 
     if result.returncode != 0:
         print(f"  [warn] 图片下载失败 token={token}: {(result.stderr or result.stdout).strip()}", file=sys.stderr)
         return None
 
-    # lark-cli 会自动补扩展名
-    candidates = sorted(Path(base_path).parent.glob(Path(base_path).name + "*"))
+    candidates = sorted(Path(tmp_dir).glob(filename + "*"))
     if not candidates:
-        # 也可能直接写到了 base_path
-        if Path(base_path).is_file():
-            return base_path
         print(f"  [warn] 图片下载后找不到文件: token={token}", file=sys.stderr)
         return None
     return str(candidates[0])
@@ -336,12 +346,24 @@ def _url_to_key(url: str) -> str:
     return f"feishu-docs/{digest}{ext}"
 
 
+_TABLE_TAGS = re.compile(
+    r'</?(?:table|thead|tbody|tfoot|tr|th|td|caption|colgroup|col)\b[^>]*/?>', re.IGNORECASE
+)
+_PASSTHROUGH_TAGS = re.compile(
+    r'</?(?:table|thead|tbody|tfoot|tr|th|td|caption|colgroup|col'
+    r'|br|img|a|code|pre|strong|em|b|i|u|s|del|sub|sup|hr|div|span|p'
+    r'|ul|ol|li|blockquote|h[1-6]|grid|column)\b[^>]*/?>', re.IGNORECASE
+)
+
 def _escape_tags_outside_code(text: str) -> str:
-    """把残留的 HTML/组件标签转义成实体，但保护 ``` 代码块和 `行内代码`。"""
+    """把残留的 HTML/组件标签转义成实体，但保护 ``` 代码块、`行内代码` 和常用 HTML 标签。"""
     def _esc(seg: str) -> str:
-        return _ANY_TAG_RE.sub(
-            lambda m: m.group(0).replace("<", "&lt;").replace(">", "&gt;"), seg
-        )
+        def _replace_tag(m: re.Match) -> str:
+            tag = m.group(0)
+            if _PASSTHROUGH_TAGS.match(tag):
+                return tag
+            return tag.replace("<", "&lt;").replace(">", "&gt;")
+        return _ANY_TAG_RE.sub(_replace_tag, seg)
     out = []
     for i, block in enumerate(re.split(r'(```[\s\S]*?```)', text)):
         if i % 2 == 1:  # 代码块，原样保留
@@ -361,21 +383,77 @@ def _callout_to_blockquote(m: re.Match) -> str:
     if not lines:
         return ""
     prefix = (emoji + " ") if emoji else ""
-    quoted = [f"> {prefix}{lines[0]}"] + [f"> {ln}" for ln in lines[1:]]
-    return "\n" + "\n".join(quoted) + "\n"
+    body = prefix + lines[0] + ("".join(f"<br/>{ln}" for ln in lines[1:]) if len(lines) > 1 else "")
+    # 根据 emoji 推断颜色变体
+    color_map = {
+        "📌": "red", "❗": "red", "🚨": "red", "⛔": "red", "❌": "red",
+        "✅": "green", "💚": "green", "🟢": "green",
+        "💡": "yellow", "⚠️": "yellow", "🌟": "yellow", "⭐": "yellow",
+        "💫": "purple", "🔮": "purple", "💜": "purple",
+        "💙": "blue", "ℹ️": "blue", "🔵": "blue",
+    }
+    variant = color_map.get(emoji, "green")
+    return f'\n<div class="callout callout-{variant}">{body}</div>\n'
+
+
+def _process_whiteboard_tag(m: re.Match) -> str:
+    """尝试把 <whiteboard token="xxx"> 下载为图片并替换。失败则留占位提示。"""
+    token = m.group(1)
+    tmp_dir = tempfile.mkdtemp(prefix="wb-")
+    filename = f"wb-{token[:8]}"
+    for dl_type in ("whiteboard", "media"):
+        result = subprocess.run(
+            ["lark-cli", "docs", "+media-download",
+             "--type", dl_type, "--token", token, "--output", filename, "--as", "user"],
+            capture_output=True, text=True, timeout=60, cwd=tmp_dir,
+        )
+        if result.returncode == 0:
+            candidates = sorted(Path(tmp_dir).glob(filename + "*"))
+            local_path = str(candidates[0]) if candidates else None
+            if local_path:
+                upload_script = _upload_script_path()
+                if _cdn_available() and upload_script.is_file():
+                    key = f"feishu-docs/wb-{hashlib.md5(token.encode()).hexdigest()[:10]}.png"
+                    r = subprocess.run(
+                        [sys.executable, str(upload_script), local_path, key],
+                        capture_output=True, text=True, timeout=60,
+                    )
+                    if r.returncode == 0:
+                        try:
+                            Path(local_path).unlink(missing_ok=True)
+                        except OSError:
+                            pass
+                        print(f"  画板已上传 CDN: {r.stdout.strip()}", file=sys.stderr)
+                        return f"![画板]({r.stdout.strip()})"
+                print(f"  画板已下载: {local_path}", file=sys.stderr)
+                return f"![画板]({local_path})"
+    return "> 🖼️ 此处为飞书画板（whiteboard），暂无法导出。"
+
+
+def _collapse_blank_lines(content: str) -> str:
+    """压缩连续空行：3+ 连续空行 → 2 行（即保留一个空行分隔）。"""
+    return re.sub(r'\n{3,}', '\n\n', content)
 
 
 def clean_markdown(content: str, base_domain: str = "https://feishu.cn") -> str:
     """清洗飞书 markdown 导出里残留的 DocxXML 标签，避免 ProseMirror 渲染丢内容/变换行。"""
-    content = _TITLE_RE.sub(lambda m: f"# {m.group(1).strip()}\n", content)
+    content = _TITLE_RE.sub(lambda m: f"# {html_mod.unescape(m.group(1).strip())}\n", content)
     content = _CALLOUT_RE.sub(_callout_to_blockquote, content)
     content = _CITE_RE.sub(lambda m: _cite_to_link(m, base_domain), content)
+    # bookmark → markdown 链接
+    content = _BOOKMARK_RE.sub(lambda m: f"[{m.group(1)}]({m.group(2)})" if m.group(1) else m.group(2), content)
+    content = _BOOKMARK_RE2.sub(lambda m: f"[{m.group(2)}]({m.group(1)})" if m.group(2) else m.group(1), content)
+    # chat_card → 占位
+    content = _CHAT_CARD_RE.sub(lambda m: f"> 💬 飞书群聊：{m.group(1)}", content)
+    # 画板嵌入块：尝试下载转图片
+    content = _WHITEBOARD_RE.sub(_process_whiteboard_tag, content)
     # 剩余未被 process_isv_blocks 替换掉的 readonly-block 换占位
     content = _READONLY_RE.sub(
         "> ⚠️ 此处为第三方交互嵌入块（ISV widget），导出接口无法获取内容，已省略。",
         content,
     )
     content = _escape_tags_outside_code(content)
+    content = _collapse_blank_lines(content)
     return content
 
 
@@ -400,33 +478,24 @@ def process_isv_blocks(content: str, output_path: Path, isv_block_ids: list) -> 
         print(f"  处理 ISV 块 {total - i}/{total}: {block_id}", file=sys.stderr)
 
         local_path: "str | None" = None
+        tmp_dir = tempfile.mkdtemp(prefix="isv-")
+        filename = f"isv-{block_id[:8]}"
 
         for dl_type in ("whiteboard", "media"):
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
-                tmp_path = tmp.name
-            base_path = tmp_path[:-4]
-            try:
-                Path(tmp_path).unlink(missing_ok=True)
-            except OSError:
-                pass
-
             result = subprocess.run(
                 [
                     "lark-cli", "docs", "+media-download",
                     "--type", dl_type,
                     "--token", block_id,
-                    "--output", base_path,
+                    "--output", filename,
                     "--as", "user",
                 ],
-                capture_output=True, text=True, timeout=60,
+                capture_output=True, text=True, timeout=60, cwd=tmp_dir,
             )
             if result.returncode == 0:
-                candidates = sorted(Path(base_path).parent.glob(Path(base_path).name + "*"))
+                candidates = sorted(Path(tmp_dir).glob(filename + "*"))
                 if candidates:
                     local_path = str(candidates[0])
-                    break
-                if Path(base_path).is_file():
-                    local_path = base_path
                     break
             else:
                 err = result.stderr or result.stdout
@@ -517,17 +586,17 @@ def process_images(content: str, url_token_map: dict[str, str]) -> tuple[str, in
 def _download_media_token(token: str, media_dir: Path) -> "str | None":
     """用 lark-cli docs +media-download 下载媒体文件，返回文件名或 None。"""
     media_dir.mkdir(parents=True, exist_ok=True)
-    out_path = media_dir / token
     result = subprocess.run(
         [
             "lark-cli", "docs", "+media-download",
             "--token", token,
-            "--output", str(out_path),
+            "--output", token,
             "--as", "user",
         ],
         capture_output=True,
         text=True,
         timeout=120,
+        cwd=str(media_dir),
     )
     if result.returncode != 0:
         print(f"  [warn] 视频下载失败 {token}: {(result.stderr or result.stdout).strip()}", file=sys.stderr)
