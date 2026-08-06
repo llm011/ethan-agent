@@ -204,6 +204,7 @@ export async function deleteKnowledge(source: string): Promise<void> {
 
 export interface PollData {
   sessions: Pick<SessionInfo, "id" | "title" | "model" | "updated_at" | "source" | "mode">[];
+  active_sessions?: string[];
 }
 
 export async function fetchPoll(hideHeartbeat?: boolean, hideScheduled?: boolean): Promise<PollData> {

@@ -644,6 +644,7 @@
   border-radius: 999px;
   white-space: nowrap;
 }
+.share-stat-model { background: #f1f3f5; color: #57606a; }
 .share-stat-tokens { background: #e8f1ff; color: #0969da; }
 .share-stat-ttfb { background: #fff5d6; color: #9a6700; }
 .share-stat-total { background: #f1e8ff; color: #8957e5; }

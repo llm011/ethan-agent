@@ -59,12 +59,16 @@ export async function startReading(tabId: number): Promise<{ ok: boolean; error?
   try {
     const tab = await chrome.tabs.get(tabId);
     const url = tab?.url || '';
+    console.log('[EthanBrowser] reading:start tab url =', url);
     let payload: any = { target: 'reading', type: 'start' };
     // 飞书文档直接走 server 拉全文 Markdown（带 24h 浏览器缓存 + skill 自身磁盘缓存）
     const feishu = url ? await fetchFeishuDocMarkdown(tabId, url) : null;
     if (feishu) {
+      console.log('[EthanBrowser] reading:start using feishu API markdown, title=', feishu.title);
       payload.presetMarkdown = feishu.markdown;
       payload.presetTitle = feishu.title;
+    } else if (url) {
+      console.log('[EthanBrowser] reading:start feishu fetch returned null, falling back to DOM');
     }
     console.log('[EthanBrowser] reading:start sendMessage to tab', tabId);
     await chrome.tabs.sendMessage(tabId, payload);
@@ -235,23 +239,43 @@ export async function fetchFeishuDocMarkdown(
   tabId: number,
   url: string,
 ): Promise<{ markdown: string; title: string; url: string; length: number } | null> {
-  if (!isFeishuDocUrl(url)) return null;
+  if (!isFeishuDocUrl(url)) {
+    console.log('[EthanBrowser] feishu-doc: URL not recognized as feishu doc:', url);
+    return null;
+  }
+  console.log('[EthanBrowser] feishu-doc: detected feishu doc URL, fetching via API:', url);
 
   // 先查浏览器 storage 的缓存，避免即使有 /tmp 缓存仍要走 HTTP 往返
   const cached = await readFeishuDocCache(url);
-  if (cached) return { markdown: cached.markdown, title: cached.title, url: cached.url, length: cached.length };
+  if (cached) {
+    console.log('[EthanBrowser] feishu-doc: hit browser cache');
+    return { markdown: cached.markdown, title: cached.title, url: cached.url, length: cached.length };
+  }
 
   const cfg = await readConfig();
-  if (!cfg) return null;
+  if (!cfg) {
+    console.warn('[EthanBrowser] feishu-doc: no server config (serverUrl/token missing), fallback to DOM');
+    return null;
+  }
   try {
-    const res = await fetch(`${cfg.httpBase}/api/feishu-doc/fetch`, {
+    const apiUrl = `${cfg.httpBase}/api/feishu-doc/fetch`;
+    console.log('[EthanBrowser] feishu-doc: calling', apiUrl);
+    const res = await fetch(apiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.token}` },
-      body: JSON.stringify({ url, nocache: false }),
+      body: JSON.stringify({ url, nocache: false, renderer: 'chrome' }),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      console.warn('[EthanBrowser] feishu-doc: API returned', res.status, text.slice(0, 200));
+      return null;
+    }
     const data = await res.json();
-    if (!data?.ok || !data.markdown) return null;
+    if (!data?.ok || !data.markdown) {
+      console.warn('[EthanBrowser] feishu-doc: API response not ok or empty markdown', JSON.stringify({ ok: data?.ok, error: data?.error, length: data?.length }).slice(0, 300));
+      return null;
+    }
+    console.log('[EthanBrowser] feishu-doc: success, length=', data.length);
     const entry: FeishuDocCacheEntry = {
       markdown: String(data.markdown),
       title: String(data.title || documentTitleFor(url)),
@@ -261,7 +285,8 @@ export async function fetchFeishuDocMarkdown(
     };
     await writeFeishuDocCache(url, entry);
     return { markdown: entry.markdown, title: entry.title, url: entry.url, length: entry.length };
-  } catch {
+  } catch (e: any) {
+    console.warn('[EthanBrowser] feishu-doc: fetch error', e?.message || e);
     return null;
   }
 }

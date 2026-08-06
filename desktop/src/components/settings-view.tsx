@@ -32,7 +32,9 @@ interface SettingsViewProps {
   initialTab?: TabId;
 }
 
-type TabId = "general" | "fast-rules" | "providers" | "channels" | "identity" | "soul" | "tools" | "heartbeat" | "profile" | "prompt-preview" | "api-keys" | "tool-tiers" | "about";
+type TabId = "general" | "countdown" | "fast-rules" | "providers" | "channels" | "identity" | "soul" | "tools" | "heartbeat" | "profile" | "prompt-preview" | "api-keys" | "tool-tiers" | "about";
+
+const isDesktop = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 const TAB_GROUPS = [
   {
@@ -72,6 +74,12 @@ const TAB_GROUPS = [
       { id: "prompt-preview" as TabId, label: "Prompt 预览" },
     ],
   },
+  ...(isDesktop ? [{
+    group: "桌面端",
+    items: [
+      { id: "countdown" as TabId, label: "倒计时" },
+    ],
+  }] : []),
   {
     group: "关于",
     items: [
@@ -115,6 +123,15 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
   const [apiKeyNewName, setApiKeyNewName] = useState("");
   const [apiKeyCreating, setApiKeyCreating] = useState(false);
   const [apiKeyJustCreated, setApiKeyJustCreated] = useState<APIKeyCreated | null>(null);
+
+  const [serverUrl, setServerUrl] = useState(() => {
+    const raw = localStorage.getItem("ethan_api_url") || "http://127.0.0.1:8900";
+    return raw.replace(/\/api\/?$/, "").replace(/\/+$/, "");
+  });
+  const [serverToken, setServerToken] = useState(() => localStorage.getItem("ethan_token") || "");
+
+  const [countdownMinutes, setCountdownMinutes] = useState(() => localStorage.getItem("countdown_minutes") || "25");
+  const [countdownPin, setCountdownPin] = useState(() => localStorage.getItem("countdown_pin") !== "0");
 
   useEffect(() => {
     if (activeTab === "api-keys") {
@@ -314,6 +331,39 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
             
             {activeTab === "general" && (
               <div className="space-y-6">
+                <div>
+                  <h3 className="text-lg font-medium mb-4">Server 连接</h3>
+                  <div className="grid gap-4">
+                    <div className="grid gap-2">
+                      <label className="text-sm font-medium">Server 地址</label>
+                      <Input
+                        value={serverUrl}
+                        onChange={(e) => setServerUrl(e.target.value)}
+                        onBlur={() => {
+                          import("@/lib/api-base").then(m => m.setApiUrl(serverUrl));
+                          import("@/lib/desktop-ws").then(m => m.reconnectDesktopWebSocket());
+                        }}
+                        placeholder="http://127.0.0.1:8900"
+                      />
+                      <p className="text-xs text-muted-foreground">Server 后端地址（不含 /api），修改后自动重连</p>
+                    </div>
+                    <div className="grid gap-2">
+                      <label className="text-sm font-medium">Access Token</label>
+                      <Input
+                        type="password"
+                        value={serverToken}
+                        onChange={(e) => setServerToken(e.target.value)}
+                        onBlur={() => {
+                          import("@/lib/api-base").then(m => m.setAuthToken(serverToken));
+                          import("@/lib/desktop-ws").then(m => m.reconnectDesktopWebSocket());
+                        }}
+                        placeholder="填写认证 Token"
+                      />
+                      <p className="text-xs text-muted-foreground">用于 API 和 WebSocket 连接认证</p>
+                    </div>
+                  </div>
+                </div>
+
                 <div>
                   <h3 className="text-lg font-medium mb-4">通用设置</h3>
                   <div className="grid gap-4">
@@ -625,6 +675,49 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
                             onChange={(e) => { const n = parseInt(e.target.value); if (!isNaN(n)) setAgentForm({ ...agentForm, max_tool_iterations: n }); }}
                           />
                         </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === "countdown" && (
+              <div className="space-y-6">
+                <div>
+                  <h3 className="text-lg font-medium mb-4">倒计时设置</h3>
+                  <div className="grid gap-4">
+                    <div className="grid gap-2">
+                      <label className="text-sm font-medium">默认时长（分钟）</label>
+                      <Input
+                        type="number"
+                        min="1"
+                        max="999"
+                        value={countdownMinutes}
+                        onChange={(e) => setCountdownMinutes(e.target.value)}
+                        onBlur={() => {
+                          const mins = Math.max(1, Math.min(999, parseInt(countdownMinutes) || 25));
+                          setCountdownMinutes(mins.toString());
+                          localStorage.setItem("countdown_minutes", mins.toString());
+                        }}
+                      />
+                      <p className="text-xs text-muted-foreground">每次开启倒计时的默认分钟数</p>
+                    </div>
+                    <div className="grid gap-2">
+                      <label className="text-sm font-medium">窗口置顶</label>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant={countdownPin ? "default" : "outline"}
+                          size="sm"
+                          onClick={() => {
+                            const next = !countdownPin;
+                            setCountdownPin(next);
+                            localStorage.setItem("countdown_pin", next ? "1" : "0");
+                          }}
+                        >
+                          {countdownPin ? "ON" : "OFF"}
+                        </Button>
+                        <span className="text-xs text-muted-foreground">倒计时窗口是否始终置顶显示</span>
                       </div>
                     </div>
                   </div>

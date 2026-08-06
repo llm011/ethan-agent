@@ -55,6 +55,7 @@ export async function consumeStream(
   let totalMs: number | undefined;
   let messageId: number | undefined;
   let finalUsage: Usage | undefined;
+  let finalModel: string | undefined;
   setMessages([...baseMessages, { role: "assistant", content: "", created_at: Date.now() / 1000 }]);
 
   try {
@@ -238,6 +239,7 @@ export async function consumeStream(
         if (chunk.ttfb_ms != null) ttfbMs = chunk.ttfb_ms;
         if (chunk.total_ms != null) totalMs = chunk.total_ms;
         if (chunk.message_id != null) messageId = chunk.message_id;
+        if (chunk.model) finalModel = chunk.model;
         if (chunk.title) {
           setSessionTitle(chunk.title);
           window.dispatchEvent(new CustomEvent("session:title-updated", {
@@ -368,6 +370,7 @@ export async function consumeStream(
         matchedSkills: currentMatchedSkills,
         id: messageId ?? last.id,
         intermediateOutput: intermediateOutput || undefined,
+        model: finalModel ?? last.model,
       };
       return msgs;
     }
@@ -386,6 +389,7 @@ export async function consumeStream(
       matchedSkills: currentMatchedSkills,
       id: messageId,
       intermediateOutput: intermediateOutput || undefined,
+      model: finalModel,
     }];
   });
   setBgPolling(null);

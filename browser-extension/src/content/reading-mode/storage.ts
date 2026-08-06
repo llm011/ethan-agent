@@ -8,6 +8,7 @@
     title: string;
     html: string;
     summary?: string;
+    scrollTop?: number;
     savedAt: number;
   }
 
@@ -15,11 +16,13 @@
     if (!contentEl) return;
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = window.setTimeout(() => {
+      const reader = document.getElementById(READER_ID);
       const data: SavedData = {
         url: currentUrl,
         title: document.title || '',
         html: contentEl!.innerHTML,
         summary: summaryText || undefined,
+        scrollTop: reader ? reader.scrollTop : undefined,
         savedAt: Date.now(),
       };
       chrome.storage.local.set({ [storageKey()]: data });

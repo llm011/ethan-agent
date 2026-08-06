@@ -1,0 +1,15 @@
+{
+  "identifier": "countdown",
+  "description": "Capabilities for the countdown timer window",
+  "windows": [
+    "countdown"
+  ],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-close",
+    "core:window:allow-hide",
+    "core:window:allow-show",
+    "core:window:allow-set-always-on-top"
+  ]
+}

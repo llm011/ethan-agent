@@ -52,6 +52,15 @@
     requestAnimationFrame(() => { reader.style.opacity = '1'; });
     document.body.style.overflow = 'hidden';
 
+    // contentEditable 模式下 <a> 链接不可点击，需要手动委托
+    content.addEventListener('click', (e) => {
+      const target = (e.target as HTMLElement).closest('a') as HTMLAnchorElement | null;
+      if (target && target.href) {
+        e.preventDefault();
+        window.open(target.href, '_blank');
+      }
+    });
+
     // Auto-save on edit
     content.addEventListener('input', () => { if (suppressInput) return; saveContent(); scheduleRefresh(); });
   }
@@ -78,8 +87,21 @@
       '#' + CONTENT_ID + ' code { font-size:14px; border-radius:4px; padding:2px 6px; background:' + (dark ? '#2a2e37' : '#f5f5f5') + '; }',
       '#' + CONTENT_ID + ' pre code { padding:0; background:none; }',
       '#' + CONTENT_ID + ' blockquote { border-left:3px solid ' + (dark ? '#4b5563' : '#d1d5db') + '; padding-left:16px; margin:16px 0; color:' + (dark ? '#9ca3af' : '#6b7280') + '; font-style:italic; }',
+      '#' + CONTENT_ID + ' .callout { border-left:4px solid ' + (dark ? '#34d399' : '#16a34a') + '; border-radius:6px; padding:12px 16px; margin:16px 0; color:' + (dark ? '#d1d5db' : '#1f2937') + '; font-style:normal; line-height:1.7; background:' + (dark ? '#2a2e37' : '#f0fdf4') + '; }',
+      '#' + CONTENT_ID + ' .callout-red { border-left-color:' + (dark ? '#f87171' : '#dc2626') + '; background:' + (dark ? '#2a2025' : '#fef2f2') + '; }',
+      '#' + CONTENT_ID + ' .callout-yellow { border-left-color:' + (dark ? '#fbbf24' : '#d97706') + '; background:' + (dark ? '#2a2820' : '#fffbeb') + '; }',
+      '#' + CONTENT_ID + ' .callout-purple { border-left-color:' + (dark ? '#a78bfa' : '#7c3aed') + '; background:' + (dark ? '#252030' : '#f5f3ff') + '; }',
+      '#' + CONTENT_ID + ' .callout-blue { border-left-color:' + (dark ? '#60a5fa' : '#2563eb') + '; background:' + (dark ? '#202530' : '#eff6ff') + '; }',
+      '#' + CONTENT_ID + ' .doc-meta { background:' + (dark ? '#1f2937' : '#f9fafb') + '; border:1px solid ' + (dark ? '#374151' : '#e5e7eb') + '; border-radius:8px; padding:12px 16px; margin:0 0 24px 0; color:' + (dark ? '#9ca3af' : '#6b7280') + '; font-size:14px; line-height:1.8; }',
+      '#' + CONTENT_ID + ' .grid-layout { display:flex; gap:16px; margin:16px 0; }',
+      '#' + CONTENT_ID + ' .grid-col { flex:1; min-width:0; }',
       '#' + CONTENT_ID + ' ul,#' + CONTENT_ID + ' ol { padding-left:24px; margin-bottom:1em; }',
+      '#' + CONTENT_ID + ' ol { list-style:none; counter-reset:ol-counter; }',
+      '#' + CONTENT_ID + ' ol > li { counter-increment:ol-counter; }',
+      '#' + CONTENT_ID + ' ol > li::before { content:counter(ol-counter) "."; color:' + (dark ? '#34d399' : '#0d9488') + '; font-weight:600; margin-right:6px; margin-left:-24px; display:inline-block; width:18px; }',
       '#' + CONTENT_ID + ' li { margin-bottom:0.4em; }',
+      '#' + CONTENT_ID + ' li.task-item { list-style:none; margin-left:-20px; }',
+      '#' + CONTENT_ID + ' li.task-item.checked { color:' + (dark ? '#6b7280' : '#9ca3af') + '; text-decoration:line-through; }',
       '#' + CONTENT_ID + ' a { color:#0d9488; text-decoration:underline; text-underline-offset:3px; }',
       '#' + CONTENT_ID + ' table { border-collapse:collapse; width:100%; margin:16px 0; font-size:14px; }',
       '#' + CONTENT_ID + ' th,#' + CONTENT_ID + ' td { border:1px solid ' + (dark ? '#374151' : '#e5e7eb') + '; padding:8px 12px; text-align:left; }',

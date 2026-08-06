@@ -20,6 +20,7 @@ router = APIRouter(prefix="/feishu-doc")
 class FetchDocRequest(BaseModel):
     url: str
     nocache: bool = False
+    renderer: str = "plain"  # "plain" strips layout tags; "chrome" preserves grid/column as HTML
 
 
 class FetchDocResponse(BaseModel):
@@ -109,13 +110,13 @@ def _is_feishu_doc_url(url: str) -> bool:
         return False
 
 
-def _fetch_feishu_doc_impl(url: str, nocache: bool) -> FetchDocResponse:
+def _fetch_feishu_doc_impl(url: str, nocache: bool, renderer: str = "plain") -> FetchDocResponse:
     """同步实现（lark-cli 是 subprocess 阻塞调用，因此用 to_thread 外包 async）。"""
     if not _is_feishu_doc_url(url):
         raise HTTPException(status_code=400, detail="not a feishu doc url")
 
     now = time.time()
-    cache_key = url
+    cache_key = f"{url}:{renderer}"
     if not nocache:
         cached = _CACHE.get(cache_key)
         if cached and (now - cached[3]) < _CACHE_MAX_AGE:
@@ -136,7 +137,7 @@ def _fetch_feishu_doc_impl(url: str, nocache: bool) -> FetchDocResponse:
 
     # fetch_doc_to_markdown 内部已经有自己的缓存；这里再套一层内存级缓存。
     try:
-        md, meta, _out = fetch_doc_to_markdown(url, use_cache=not nocache)
+        md, meta, _out = fetch_doc_to_markdown(url, use_cache=not nocache, renderer=renderer)
     except Exception:
         log.exception("feishu-doc fetch failed for %s", url)
         return FetchDocResponse(ok=False, error="fetch failed", url=url)
@@ -186,7 +187,7 @@ async def fetch_doc_api(
     if not url:
         raise HTTPException(status_code=400, detail="missing url")
     try:
-        return await asyncio.to_thread(_fetch_feishu_doc_impl, url, bool(req.nocache))
+        return await asyncio.to_thread(_fetch_feishu_doc_impl, url, bool(req.nocache), req.renderer)
     except HTTPException:
         raise
     except Exception as e:

@@ -11,6 +11,7 @@
   },
   "app": {
     "withGlobalTauri": true,
+    "macOSPrivateApi": true,
     "security": {
       "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost data: blob:; style-src 'unsafe-inline' 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:* http://localhost:* https://127.0.0.1:* https://localhost:*; font-src 'self' data:"
     },
@@ -26,6 +27,20 @@
         "decorations": true,
         "visible": true,
         "titleBarStyle": "Overlay"
+      },
+      {
+        "label": "countdown",
+        "title": "Countdown",
+        "url": "index.html#/countdown",
+        "width": 300,
+        "height": 130,
+        "minWidth": 180,
+        "minHeight": 80,
+        "decorations": false,
+        "visible": false,
+        "transparent": true,
+        "resizable": true,
+        "alwaysOnTop": true
       }
     ]
   },

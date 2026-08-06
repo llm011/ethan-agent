@@ -3,19 +3,31 @@
 import { bustCache } from "./local-cache";
 
 const STORAGE_KEY_API_URL = "ethan_api_url";
-// 与后端 ethan.interface.api.run_server 默认端口 8900 对齐。
-// 8989 是早期 Docker 部署的遗留端口，本地 `ethan serve` 不使用。
-const DEFAULT_API_URL = "http://127.0.0.1:8900/api";
+const DEFAULT_SERVER_URL = "http://127.0.0.1:8900";
 
-/** 桌面端：API URL 存在 localStorage，可在 Settings 中修改。 */
-export function getApiUrl(): string {
-  if (typeof window === "undefined") return DEFAULT_API_URL;
-  return localStorage.getItem(STORAGE_KEY_API_URL) || DEFAULT_API_URL;
+function normalizeServerUrl(raw: string | null): string {
+  if (!raw) return DEFAULT_SERVER_URL;
+  let url = raw.replace(/\/+$/, "");
+  // 兼容：用户存了带 /api 的旧值，剥离后存储 base
+  if (url.endsWith("/api")) url = url.slice(0, -4);
+  return url;
 }
 
+/** 获取完整 API URL（含 /api 后缀），供 fetch 调用使用。 */
+export function getApiUrl(): string {
+  if (typeof window === "undefined") return `${DEFAULT_SERVER_URL}/api`;
+  return `${normalizeServerUrl(localStorage.getItem(STORAGE_KEY_API_URL))}/api`;
+}
+
+/** 获取 Server 基础地址（不含 /api），用于 WebSocket 等非 REST 连接。 */
+export function getServerUrl(): string {
+  if (typeof window === "undefined") return DEFAULT_SERVER_URL;
+  return normalizeServerUrl(localStorage.getItem(STORAGE_KEY_API_URL));
+}
+
+/** 保存 Server 地址（用户只需填写 base，如 http://127.0.0.1:8900）。 */
 export function setApiUrl(url: string): void {
-  const trimmed = url.replace(/\/+$/, "");
-  localStorage.setItem(STORAGE_KEY_API_URL, trimmed);
+  localStorage.setItem(STORAGE_KEY_API_URL, normalizeServerUrl(url));
 }
 
 /**
@@ -24,7 +36,7 @@ export function setApiUrl(url: string): void {
  * 注意：所有 fetch 调用必须使用 `${getApiUrl()}` 而非 `${API_URL}`，否则用户在
  * Settings 中修改的 API URL 不会生效（auth/models/modes 等接口会走默认端口 8900）。
  */
-export const API_URL = DEFAULT_API_URL;
+export const API_URL = `${DEFAULT_SERVER_URL}/api`;
 
 let authToken = "";
 

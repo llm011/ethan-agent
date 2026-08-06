@@ -581,7 +581,7 @@ async def _run_generation(
     await _close_browser_sessions(session_id, run=run)
 
     # 通知所有订阅者「流结束」并附最终 usage
-    done_evt: dict = {"done": True, "usage": usage_dict, "ttfb_ms": collector.ttfb_ms, "total_ms": collector.total_ms, "message_id": msg_id}
+    done_evt: dict = {"done": True, "usage": usage_dict, "ttfb_ms": collector.ttfb_ms, "total_ms": collector.total_ms, "message_id": msg_id, "model": agent._provider.model}
     if new_title:
         done_evt["title"] = new_title
     run.emit(done_evt)

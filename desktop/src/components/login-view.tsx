@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { Button } from "@ethan/shared/ui/button";
 import { Input } from "@ethan/shared/ui/input";
-import { getApiUrl, setApiUrl } from "@/lib/api-base";
+import { getServerUrl, setApiUrl } from "@/lib/api-base";
 import { ChevronDown, ChevronUp, Server } from "lucide-react";
 
 export function LoginView() {
@@ -12,14 +12,13 @@ export function LoginView() {
   const [loading, setLoading] = useState(false);
   // 桌面端专属：可折叠的 API 地址输入框（web 端不需要，走同源）
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [apiUrl, setApiUrlState] = useState(getApiUrl());
+  const [apiUrl, setApiUrlState] = useState(getServerUrl());
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setLoading(true);
-    // 先把用户填的 API 地址存下来，再尝试登录
-    if (apiUrl !== getApiUrl()) {
+    if (apiUrl !== getServerUrl()) {
       setApiUrl(apiUrl);
     }
     try {
@@ -62,16 +61,16 @@ export function LoginView() {
             </button>
             {showAdvanced && (
               <div className="space-y-1 rounded-md border bg-muted/30 p-3">
-                <label className="text-xs text-muted-foreground">API 地址</label>
+                <label className="text-xs text-muted-foreground">Server 地址</label>
                 <Input
                   type="text"
                   value={apiUrl}
                   onChange={(e) => setApiUrlState(e.target.value)}
-                  placeholder="http://127.0.0.1:8900/api"
+                  placeholder="http://127.0.0.1:8900"
                   className="text-xs font-mono"
                 />
                 <p className="text-[10px] text-muted-foreground">
-                  桌面端通过此地址连接后端 Ethan Agent 服务。
+                  桌面端通过此地址连接后端 Ethan Agent 服务（不含 /api）。
                 </p>
               </div>
             )}
