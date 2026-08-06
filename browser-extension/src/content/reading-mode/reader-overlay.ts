@@ -52,6 +52,15 @@
     requestAnimationFrame(() => { reader.style.opacity = '1'; });
     document.body.style.overflow = 'hidden';
 
+    // contentEditable 模式下 <a> 链接不可点击，需要手动委托
+    content.addEventListener('click', (e) => {
+      const target = (e.target as HTMLElement).closest('a') as HTMLAnchorElement | null;
+      if (target && target.href) {
+        e.preventDefault();
+        window.open(target.href, '_blank');
+      }
+    });
+
     // Auto-save on edit
     content.addEventListener('input', () => { if (suppressInput) return; saveContent(); scheduleRefresh(); });
   }
