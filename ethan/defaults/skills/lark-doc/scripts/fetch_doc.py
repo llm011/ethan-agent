@@ -726,7 +726,10 @@ def fetch_doc_to_markdown(doc: str, *, use_cache: bool = True, output_path: Path
     cache_md = cache / "raw_markdown.md"
     cache_xml = cache / "raw_xml.xml"
     cache_meta = cache / "meta.json"
-    cache_final = cache / "final.md"
+    # final.md 内容依赖 renderer（plain 去除 grid/column 标签，chrome 保留为 HTML div），
+    # 缓存 key 必须包含 renderer，否则 plain 先写入后 chrome 请求会读到 plain 版本，
+    # 分栏布局被静默丢弃。
+    cache_final = cache / f"final.{renderer}.md"
 
     if output_path is None:
         output_path = cache_final
