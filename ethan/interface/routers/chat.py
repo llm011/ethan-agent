@@ -130,6 +130,8 @@ async def poll(hide_heartbeat: bool = False, hide_scheduled: bool = False,
     if hide_scheduled:
         exclude_prefixes.append("[定时]")
     sessions = await store.list_recent(50, exclude_title_prefixes=exclude_prefixes or None)
+    from ethan.core.run_manager import RunManager
+    rm = RunManager.instance()
     return {
         "sessions": [
             {
@@ -141,7 +143,8 @@ async def poll(hide_heartbeat: bool = False, hide_scheduled: bool = False,
                 "mode": getattr(s, "mode", "") or "",
             }
             for s in sessions
-        ]
+        ],
+        "active_sessions": [s.id for s in sessions if rm.has_active(s.id, user_id)],
     }
 
 

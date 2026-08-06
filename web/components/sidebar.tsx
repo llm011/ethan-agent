@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Image from "next/image";
-import { Plus, Trash2, Search, Settings, Book, BookOpen, Pencil, Check, X, List, Wrench, RefreshCw } from "lucide-react";
+import { Plus, Trash2, Search, Settings, Book, BookOpen, Pencil, Check, X, List, Wrench, RefreshCw, Loader2 } from "lucide-react";
 import { Clock, Database, Activity } from "lucide-react";
 import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
 import { useSidebar } from "@/app/layout-shell";
@@ -39,6 +39,8 @@ export function Sidebar() {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [scheduleGroupSessions, setScheduleGroupSessions] = useState<SessionInfo[]>([]);
   const [heartbeatGroupSessions, setHeartbeatGroupSessions] = useState<SessionInfo[]>([]);
+  const [extensionSessions, setExtensionSessions] = useState<SessionInfo[]>([]);
+  const [activeSessions, setActiveSessions] = useState<Set<string>>(new Set());
 
   // 监听 ChatView 广播的标题更新事件，立即同步左侧列表（不等下次轮询）
   useEffect(() => {
@@ -74,6 +76,10 @@ export function Sidebar() {
     if (typeof window === "undefined") return false;
     return localStorage.getItem("ethan_sidebar_heartbeat_expanded") === "1";
   });
+  const [extensionExpanded, setExtensionExpanded] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem("ethan_sidebar_extension_expanded") !== "0";
+  });
   const [schedules, setSchedules] = useState<any[]>([]);
   const [runningTaskCount, setRunningTaskCount] = useState(0);
   const [health, setHealth] = useState<{version: string | null; agent_name: string | null}>({version: null, agent_name: null});
@@ -94,7 +100,7 @@ export function Sidebar() {
 
   // 主列表请求已 hide 心跳/定时（否则高频心跳会话会挤爆前 50，把普通会话顶出去）；
   // 定时/心跳两个分组改用 title_prefixes 独立拉取，互不影响。
-  const normalSessions = sessions.filter((s) => !s.title.startsWith("[定时]") && !s.title.startsWith("[心跳]"));
+  const normalSessions = sessions.filter((s) => !s.title.startsWith("[定时]") && !s.title.startsWith("[心跳]") && s.source !== "browser-extension");
   const scheduleSessions = scheduleGroupSessions;
   const heartbeatSessions = heartbeatGroupSessions;
   const scheduleUnreadCount = scheduleSessions.filter(
@@ -115,7 +121,7 @@ export function Sidebar() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionSearch, pathname]);
 
-  // 定时/心跳两个分组：按标题前缀各拉前 5 条，30s 低频轮询（不参与 3s 主 poll）
+  // 定时/心跳/浏览器插件三个分组：各拉前 5 条，30s 低频轮询（不参与 3s 主 poll）
   useEffect(() => {
     const fetchGroups = () => {
       fetchSessions(5, 0, undefined, undefined, undefined, false, false, "[定时]")
@@ -123,6 +129,9 @@ export function Sidebar() {
         .catch(() => {});
       fetchSessions(5, 0, undefined, undefined, undefined, false, false, "[心跳]")
         .then(setHeartbeatGroupSessions)
+        .catch(() => {});
+      fetchSessions(5, 0, undefined, "browser-extension")
+        .then(setExtensionSessions)
         .catch(() => {});
     };
     fetchGroups();
@@ -156,6 +165,9 @@ export function Sidebar() {
             incoming.some((s, i) => s.updated_at !== prev[i]?.updated_at || s.title !== prev[i]?.title);
           return changed ? incoming : prev;
         });
+        if (data.active_sessions) {
+          setActiveSessions(new Set(data.active_sessions));
+        }
       } catch {}
     }, 3000);
     return () => clearInterval(interval);
@@ -243,6 +255,10 @@ export function Sidebar() {
       onClick={() => handleSelectSession(s.id)}
     >
       <div className="flex items-center gap-2">
+        {/* Loading indicator for active sessions */}
+        {activeSessions.has(s.id) && (
+          <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary" />
+        )}
         {/* 对话模式标识：由 /modes 表驱动；匹配到非默认模式则显示其图标，否则工作助手 🛠️ */}
         {editingSessionId !== s.id && (() => {
           const m = s.mode ? modes.find((x) => x.key === s.mode) : null;
@@ -440,6 +456,25 @@ export function Sidebar() {
                   </span>
                 </div>
                 {normalExpanded && normalSessions.slice(0, 5).map(renderSession)}
+
+                {extensionSessions.length > 0 && (
+                  <>
+                    <div
+                      className="flex items-center justify-between py-1 mt-2 cursor-pointer text-muted-foreground hover:text-foreground"
+                      onClick={() => setExtensionExpanded(prev => {
+                        const next = !prev;
+                        try { localStorage.setItem("ethan_sidebar_extension_expanded", next ? "1" : "0"); } catch {}
+                        return next;
+                      })}
+                    >
+                      <span className="text-sm font-semibold">浏览器插件</span>
+                      <span className="text-[10px]">
+                        {extensionExpanded ? "▼" : "▶"}
+                      </span>
+                    </div>
+                    {extensionExpanded && extensionSessions.slice(0, 5).map(renderSession)}
+                  </>
+                )}
 
                 <div
                   className="flex items-center justify-between py-1 mt-2 cursor-pointer text-muted-foreground hover:text-foreground"
