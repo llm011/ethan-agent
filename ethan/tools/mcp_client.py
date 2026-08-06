@@ -123,17 +123,22 @@ class MCPClient:
             self._read_cm = stdio_client(params)
         try:
             streams = await self._read_cm.__aenter__()
+            if len(streams) == 3:  # http: (read, write, get_session_id)
+                self._read, self._write, self._get_session_id = streams
+            else:  # stdio: (read, write)
+                self._read, self._write = streams
+            self._session_cm = ClientSession(self._read, self._write)
+            self.session = await self._session_cm.__aenter__()
+            await self.session.initialize()
         except Exception:
-            # 进入失败也在 finally 里尝试关闭，避免泄漏
+            # 任一环节失败（握手、鉴权 401、协议不匹配）都统一关闭连接，避免 HTTP 连接泄漏
+            if self._session_cm is not None:
+                try:
+                    await self._session_cm.__aexit__(None, None, None)
+                except Exception:
+                    pass
             await self._read_cm.__aexit__(None, None, None)
             raise
-        if len(streams) == 3:  # http: (read, write, get_session_id)
-            self._read, self._write, self._get_session_id = streams
-        else:  # stdio: (read, write)
-            self._read, self._write = streams
-        self._session_cm = ClientSession(self._read, self._write)
-        self.session = await self._session_cm.__aenter__()
-        await self.session.initialize()
 
         tools_result = await self.session.list_tools()
         return [
@@ -248,7 +253,10 @@ class MCPManager:
                         runner=runner,
                     )
                     self._tools.append(tool)
-            self._connected = True
+            # 至少有一个 server 连接成功才缓存为已连接；全部失败时保持 False，
+            # 下次 get_tools 会重试（避免把空列表永久缓存、网络恢复后仍失效）
+            if self._clients:
+                self._connected = True
             return list(self._tools)
 
     def disconnect_all(self) -> None:

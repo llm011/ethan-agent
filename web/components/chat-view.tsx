@@ -385,6 +385,9 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         // 标记 "这个会话别让稍后到达的 fetchSession.then 用旧数据覆盖流式消息"
         justFinishedRef.current = initialSessionId;
         setActiveSession(initialSessionId);
+        // 复用分支会命中上面 fetchSession.then 的 justFinishedRef 短路（直接 return，
+        // 跳过 setLoadingSession(false)），这里主动清掉 loading，避免界面卡在骨架屏
+        setLoadingSession(false);
       } else {
         try {
           const s = await createSession(selectedModel, mode);
