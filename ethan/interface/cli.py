@@ -32,6 +32,7 @@ def _register_subcommands():
     from ethan.interface.commands import code as code_cmd
     from ethan.interface.commands import command as command_cmd
     from ethan.interface.commands import knowledge as knowledge_cmd
+    from ethan.interface.commands import mcp as mcp_cmd
     from ethan.interface.commands import model as model_cmd
     from ethan.interface.commands import plugin as plugin_cmd
     from ethan.interface.commands import provider as provider_cmd
@@ -52,6 +53,7 @@ def _register_subcommands():
     app.add_typer(schedule_cmd.app, name="schedule")
     app.add_typer(secret_cmd.app, name="secret")
     app.add_typer(knowledge_cmd.app, name="knowledge")
+    app.add_typer(mcp_cmd.app, name="mcp")
     app.add_typer(code_cmd.app, name="code")
     app.add_typer(update_cmd.app, name="update")
     app.add_typer(channel_cmd.app, name="channel")

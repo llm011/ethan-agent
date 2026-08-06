@@ -178,6 +178,14 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
         registry.register(ComputerUseTool())
     except ImportError:
         pass  # cua-computer 未安装，工具不可用
+    # MCP 外部工具：配置了 tools.mcp.servers 才注册（可选）。连接失败只跳过该 server，
+    # 不阻塞其余工具；未配置时不产生任何开销。工具名带 server 前缀（如 dida365_*）。
+    try:
+        from ethan.tools.mcp_client import get_mcp_manager
+        for mcp_tool in get_mcp_manager().get_tools():
+            registry.register(mcp_tool)
+    except Exception:
+        pass  # MCP 不可用时静默跳过，不影响工具注册
     # 工具发现元工具：fast 档只广播常驻工具，模型需要长尾能力时用它检索并激活。
     # 持有 registry 引用以便检索；放最后确保它能看到上面注册的全部工具。
     registry.register(FindToolsTool(registry))
