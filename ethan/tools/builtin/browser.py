@@ -407,18 +407,8 @@ async def _require_owned_or_recover(browser_session_id: str, ethan_sid: str) -> 
             code=ERROR_CODE["session_not_found"],
         )
 
-    # 检查是否已被其他 ethan 会话占用:若占用则不抢,仍拒绝(避免跨对话抢 tab)
-    all_entries = getattr(smap, "_entries", {})
-    for bsid, entry in all_entries.items():
-        if bsid == browser_session_id:
-            if entry.ethan_session_id and entry.ethan_session_id != ethan_sid:
-                raise BrowserError(
-                    "该 browser session 不属于当前对话,拒绝操作",
-                    code=ERROR_CODE["session_not_found"],
-                )
-            break
-
-    # 可以安全恢复绑定
+    # 扩展确认 session 存在即可恢复绑定。
+    # 单用户场景下不同对话操作同一 tab 是正常行为，无需防跨对话抢占。
     smap.bind(browser_session_id, ethan_sid, client_name=found_client)
     return found_client
 
