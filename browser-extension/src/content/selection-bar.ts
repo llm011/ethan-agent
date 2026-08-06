@@ -13,8 +13,10 @@
   w.__ethanSelectionBarAdded = true;
 
   const BAR_ID = '__ethan_selection_bar';
+  const DISABLED_KEY = '__ethan_selection_bar_disabled';
   const Z = 2147483644;
   let lastSelection = '';
+  let disabled = localStorage.getItem(DISABLED_KEY) === '1';
 
   function isDark(): boolean {
     return window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -51,6 +53,7 @@
   }
 
   function showBar() {
+    if (disabled) return;
     const text = currentSelectionText();
     if (!text) { removeBar(); return; }
     lastSelection = text;
@@ -90,6 +93,20 @@
     bar.appendChild(mkBtn('📌 存', () => saveKnowledge()));
     bar.appendChild(mkBtn('⋯ 更多', () => showMoreMenu(bar, dark)));
     bar.appendChild(mkBtn('❓ 提问', () => showAskInput(bar, dark), true));
+
+    // 关闭按钮：永久隐藏工具条
+    const close = document.createElement('button');
+    close.textContent = '✕';
+    close.title = '关闭（不再显示选中工具条）';
+    close.style.cssText = 'border:none;border-radius:50%;width:20px;height:20px;font-size:11px;line-height:20px;text-align:center;cursor:pointer;margin-left:2px;background:none;color:' + (dark ? '#888' : '#999');
+    close.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); });
+    close.addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      disabled = true;
+      localStorage.setItem(DISABLED_KEY, '1');
+      removeBar();
+    });
+    bar.appendChild(close);
 
     document.documentElement.appendChild(bar);
 
