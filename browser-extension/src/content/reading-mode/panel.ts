@@ -174,7 +174,7 @@
       chrome.storage.local.remove([storageKey()], () => {
         showToast('已清除缓存');
         exitReading();
-        setTimeout(() => enterReading(), 400);
+        setTimeout(() => enterReading(lastPresetOpts), 400);
       });
     };
 

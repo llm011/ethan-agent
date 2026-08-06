@@ -11,7 +11,10 @@
     let inUl = false;
     let inOl = false;
     let inCode = false;
+    let inHtmlBlock = '';
+    let htmlBlockBuf: string[] = [];
     let codeLang = '';
+    let codeBuf: string[] = [];
     let tableBuf: string[] = [];
     const closeLists = () => {
       if (inUl) { out.push('</ul>'); inUl = false; }
@@ -28,7 +31,7 @@
           if (idx === arr.length - 1 && !c.trim()) return false;
           return true;
         }).map(c => c.trim());
-        if (i === 1 && cells.every(c => /^:?-{3,}:?$/.test(c))) return;  // 表格对齐行
+        if (i === 1 && cells.every(c => /^:?-+:?$/.test(c))) return;  // 表格对齐行
         const tag = i === 0 ? 'th' : 'td';
         out.push('<tr>' + cells.map(c => `<${tag}>${inline(escapeHtml(c))}</${tag}>`).join('') + '</tr>');
       });
@@ -52,20 +55,46 @@
 
     for (const rawLine of lines) {
       const line = rawLine.trimEnd();
+      // HTML 块透传：遇到 <table/<grid/<blockquote 开始收集，遇到对应闭合标签结束
+      if (inHtmlBlock) {
+        htmlBlockBuf.push(rawLine);
+        if (new RegExp(`</${inHtmlBlock}\\s*>`, 'i').test(line)) {
+          inHtmlBlock = '';
+          out.push(htmlBlockBuf.join('\n'));
+          htmlBlockBuf = [];
+        }
+        continue;
+      }
+      const htmlBlockMatch = line.match(/^<(table|grid|blockquote|div)[\s>]/i);
+      if (htmlBlockMatch) {
+        closeLists(); flushTable();
+        inHtmlBlock = htmlBlockMatch[1].toLowerCase();
+        htmlBlockBuf = [rawLine];
+        if (new RegExp(`</${inHtmlBlock}\\s*>`, 'i').test(line)) {
+          out.push(htmlBlockBuf.join('\n'));
+          inHtmlBlock = '';
+          htmlBlockBuf = [];
+        }
+        continue;
+      }
       if (inCode) {
         if (/^```\s*$/.test(line)) {
           inCode = false;
-          out.push('</code></pre>');
+          // 去掉收集内容的首尾空行，拼成整块
+          while (codeBuf.length && codeBuf[0].trim() === '') codeBuf.shift();
+          while (codeBuf.length && codeBuf[codeBuf.length - 1].trim() === '') codeBuf.pop();
+          out.push(`<pre><code${codeLang ? ` class="language-${codeLang}"` : ''}>${codeBuf.join('\n')}</code></pre>`);
+          codeBuf = [];
           continue;
         }
-        out.push(escapeHtml(line) + '\n');
+        codeBuf.push(escapeHtml(line));
         continue;
       }
-      const fence = line.match(/^```(\w*)\s*$/);
+      const fence = line.match(/^```(.*)$/);
       if (fence) {
         closeLists(); flushTable();
-        inCode = true; codeLang = fence[1] || '';
-        out.push(`<pre><code${codeLang ? ` class="language-${codeLang}"` : ''}>`);
+        inCode = true; codeLang = fence[1].trim().split(/\s+/)[0].toLowerCase() || '';
+        codeBuf = [];
         continue;
       }
       // 表格行
@@ -84,10 +113,20 @@
         out.push(`<h${level}>${inline(escapeHtml(h[2]))}</h${level}>`);
         continue;
       }
-      // 引用
+      // 引用（连续 > 行合并为同一个 blockquote）
       if (/^>\s?/.test(line)) {
         closeLists();
-        out.push(`<blockquote>${inline(escapeHtml(line.replace(/^>\s?/, '')))}</blockquote>`);
+        const bqLines: string[] = [line.replace(/^>\s?/, '')];
+        // 向前看：后续连续引用行一起收集（rawLine 数组已经通过 for-of 遍历，这里用 peek 方式不行，
+        // 改为在 out 里检测上一个元素是否是未关闭的 blockquote 来追加）
+        const last = out[out.length - 1];
+        if (last && last.startsWith('<blockquote>') && last.endsWith('</blockquote>')) {
+          // 追加到上一个 blockquote
+          const inner = last.slice('<blockquote>'.length, -'</blockquote>'.length);
+          out[out.length - 1] = `<blockquote>${inner}<br/>${inline(escapeHtml(bqLines[0]))}</blockquote>`;
+        } else {
+          out.push(`<blockquote>${inline(escapeHtml(bqLines[0]))}</blockquote>`);
+        }
         continue;
       }
       // 无序列表
@@ -110,16 +149,23 @@
         closeLists(); out.push('<hr/>'); continue;
       }
       closeLists();
-      if (!line.trim()) { out.push('<p><br/></p>'); continue; }
+      if (!line.trim()) continue;
       out.push(`<p>${inline(escapeHtml(line))}</p>`);
     }
     flushTable(); closeLists();
-    if (inCode) out.push('</code></pre>');
+    if (inCode) {
+      while (codeBuf.length && codeBuf[0].trim() === '') codeBuf.shift();
+      while (codeBuf.length && codeBuf[codeBuf.length - 1].trim() === '') codeBuf.pop();
+      out.push(`<pre><code${codeLang ? ` class="language-${codeLang}"` : ''}>${codeBuf.join('\n')}</code></pre>`);
+    }
     return out.join('\n');
   }
 
+  let lastPresetOpts: { presetMarkdown?: string; presetTitle?: string } | undefined;
+
   function enterReading(opts?: { presetMarkdown?: string; presetTitle?: string }) {
     if (active) return;
+    if (opts?.presetMarkdown) lastPresetOpts = opts;
     active = true;
     panelCollapsed = false;
     // 每次进入生成一个新对话 session；首轮问题会带上正文，后续轮由服务端按此拼历史
@@ -131,30 +177,41 @@
 
     // presetMarkdown：飞书文档全文，background 预先抓的 Markdown，直接跳过 DOM 检测
     if (opts?.presetMarkdown || false) {
-      // 创建 reader（不经过 loadContent —— loadContent 是按 URL 缓存 HTML，我们这里直接从 Markdown 生成）
-      const md = String(opts?.presetMarkdown || '');
+      let md = String(opts?.presetMarkdown || '');
       const titleStr = String(opts?.presetTitle || document.title || '');
-      const dark = isDarkMode();
-      const titleHtml = '<h1>' + escapeHtml(titleStr) + '</h1>';
-      let hostStr = '';
-      try { hostStr = new URL(currentUrl).hostname; } catch {}
-      const metaHtml = '<p style="font-size:13px;color:#9ca3af;border-bottom:1px solid ' + (dark ? '#374151' : '#e5e7eb') + ';padding-bottom:16px;margin-bottom:24px">' +
-        escapeHtml(hostStr) + ' · 已从飞书 API 拉取全文</p>';
-      const html = titleHtml + metaHtml + mdToHtml(md);
-      createReader(html);
-      // 直接保存内容（沿用同一 storageKey，后续刷新仍能从 loadContent 读回）
-      saveContent();
-      // Reserve panel space
-      const reader = document.getElementById(READER_ID);
-      if (reader) reader.style.paddingRight = PANEL_WIDTH + 'px';
-      createProgressBar();
-      createPanel();
-      setupScrollSpy();
-      setupSelectionListener();
-      setupMarkClickListener();
-      setupKeyboard();
-      const summaryEl = getPanelEl('__ethan_reading_summary_content');
-      if (summaryEl) requestSummary(summaryEl);
+      // 去掉正文中的首个 # 标题行（前端已单独渲染 presetTitle）
+      md = md.replace(/^#\s+[^\n]*\n*/, '');
+
+      // 先尝试从 storage 恢复已有 summary（避免退出再进入时重复请求 AI）
+      loadContent((cached) => {
+        if (cached?.summary) summaryText = cached.summary;
+        const savedScrollTop = cached?.scrollTop;
+
+        const dark = isDarkMode();
+        const titleHtml = '<h1>' + escapeHtml(titleStr) + '</h1>';
+        let hostStr = '';
+        try { hostStr = new URL(currentUrl).hostname; } catch {}
+        const metaHtml = '<p style="font-size:13px;color:#9ca3af;border-bottom:1px solid ' + (dark ? '#374151' : '#e5e7eb') + ';padding-bottom:16px;margin-bottom:24px">' +
+          escapeHtml(hostStr) + ' · 已从飞书 API 拉取全文</p>';
+        const html = titleHtml + metaHtml + mdToHtml(md);
+        createReader(html);
+        if (savedScrollTop) {
+          const reader = document.getElementById(READER_ID);
+          if (reader) requestAnimationFrame(() => { reader.scrollTop = savedScrollTop; });
+        }
+        saveContent();
+        // Reserve panel space
+        const reader = document.getElementById(READER_ID);
+        if (reader) reader.style.paddingRight = PANEL_WIDTH + 'px';
+        createProgressBar();
+        createPanel();
+        setupScrollSpy();
+        setupSelectionListener();
+        setupMarkClickListener();
+        setupKeyboard();
+        const summaryEl = getPanelEl('__ethan_reading_summary_content');
+        if (summaryEl) requestSummary(summaryEl);
+      });
       return;
     }
 
@@ -163,6 +220,11 @@
         // Load from cache
         summaryText = cached.summary || '';
         createReader(cached.html);
+        // 恢复滚动位置
+        if (cached.scrollTop) {
+          const reader = document.getElementById(READER_ID);
+          if (reader) requestAnimationFrame(() => { reader.scrollTop = cached.scrollTop!; });
+        }
       } else {
         // Fresh: detect + clean
         const article = ethanReader().detectArticle();
