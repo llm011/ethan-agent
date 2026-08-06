@@ -18,9 +18,10 @@ import threading
 from typing import Any, Awaitable
 
 try:
+    import httpx
     from mcp import ClientSession
     from mcp.client.stdio import StdioServerParameters, stdio_client
-    from mcp.client.streamable_http import streamablehttp_client
+    from mcp.client.streamable_http import streamable_http_client
     _mcp_available = True
 except ImportError:  # pragma: no cover - mcp 未安装时静默降级
     _mcp_available = False
@@ -57,8 +58,10 @@ class MCPTool(BaseTool):
         parameters: dict[str, Any],
         session: ClientSession,
         runner: LoopRunner,
+        call_name: str | None = None,
     ):
         self._name = name
+        self._call_name = call_name or name
         self._description = description
         self._parameters = parameters
         self._session = session
@@ -77,7 +80,8 @@ class MCPTool(BaseTool):
         return self._parameters
 
     async def run(self, **kwargs) -> str:
-        result = await self._runner.run(self._session.call_tool(self._name, arguments=kwargs))
+        # 调用时用原始工具名（不带 server 前缀），前缀只用于本地展示与去重
+        result = await self._runner.run(self._session.call_tool(self._call_name, arguments=kwargs))
         if result.content:
             parts = []
             for block in result.content:
@@ -117,7 +121,12 @@ class MCPClient:
             headers: dict[str, str] = {}
             if self._token:
                 headers["Authorization"] = f"Bearer {self._token}"
-            self._read_cm = streamablehttp_client(self._url, headers=headers)
+            # trust_env=False：不受 HTTP_PROXY/HTTPS_PROXY 影响，避免本地/私网
+            # MCP server 被开发机代理（如 Clash 127.0.0.1:7890）劫持导致连接失败。
+            http_client = httpx.AsyncClient(headers=headers, trust_env=False)
+            self._read_cm = streamable_http_client(
+                self._url, http_client=http_client, terminate_on_close=True
+            )
         else:
             params = StdioServerParameters(command=self._command, args=self._args)
             self._read_cm = stdio_client(params)
@@ -246,6 +255,7 @@ class MCPManager:
                         parameters=meta["schema"],
                         session=client.session,
                         runner=runner,
+                        call_name=meta["name"],
                     )
                     self._tools.append(tool)
             self._connected = True

@@ -21,7 +21,8 @@ from ethan.core.config import MCPConfig, MCPServerConfig, ToolsConfig
 from ethan.tools.mcp_client import MCPManager
 
 PORT = 8765
-BASE = f"http://127.0.0.1:{PORT}"
+# FastMCP 的 streamable_http_app 默认挂在 /mcp 路径下
+BASE = f"http://127.0.0.1:{PORT}/mcp"
 
 captured_headers: dict[str, str] = {}
 
@@ -133,7 +134,7 @@ def test_bad_server_skipped_not_reported(http_server):
     try:
         tools = mgr.get_tools()
         # 坏的 server 被跳过，好的 server 工具正常注册
-        assert [t.name for t in tools] == ["dida365_add_task", "dida365_get_tasks"]
+        assert sorted(t.name for t in tools) == ["dida365_add_task", "dida365_get_tasks"]
     finally:
         mgr.disconnect_all()
         _stop_loop(mgr)
