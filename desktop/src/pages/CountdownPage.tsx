@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, Window } from "@tauri-apps/api/window";
 import { type ThemeId, THEMES, normalizeThemeId } from "../components/chat/themes";
 
-const DEFAULT_MINUTES = 25;
+const DEFAULT_MINUTES = parseInt(localStorage.getItem("countdown_minutes") || "25") || 25;
 type Phase = "idle" | "running" | "paused" | "done";
 
 interface CountdownColors {
@@ -86,9 +86,10 @@ export default function CountdownPage() {
   const [totalSeconds, setTotalSeconds] = useState(DEFAULT_MINUTES * 60);
   const [remaining, setRemaining] = useState(DEFAULT_MINUTES * 60);
   const [phase, setPhase] = useState<Phase>("idle");
-  const [alwaysOnTop, setAlwaysOnTop] = useState(true);
-  const [showSettings, setShowSettings] = useState(false);
-  const [inputMinutes, setInputMinutes] = useState(DEFAULT_MINUTES.toString());
+  const [alwaysOnTop, setAlwaysOnTop] = useState(() => {
+    const saved = localStorage.getItem("countdown_pin");
+    return saved !== null ? saved === "1" : true;
+  });
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [colors, setColors] = useState<CountdownColors>(() =>
@@ -97,9 +98,24 @@ export default function CountdownPage() {
 
   useEffect(() => {
     const syncTheme = () => setColors(getColorsForTheme(normalizeThemeId(localStorage.getItem("ethan-theme"))));
-    window.addEventListener("storage", syncTheme);
+    const syncSettings = (e: StorageEvent) => {
+      if (e.key === "ethan-theme") syncTheme();
+      if (e.key === "countdown_minutes" && e.newValue) {
+        const mins = parseInt(e.newValue) || 25;
+        const newTotal = mins * 60;
+        setTotalSeconds(newTotal);
+        if (phase === "idle") setRemaining(newTotal);
+      }
+      if (e.key === "countdown_pin") {
+        const pin = e.newValue !== "0";
+        setAlwaysOnTop(pin);
+        invoke("set_countdown_always_on_top", { onTop: pin }).catch(() => {});
+      }
+    };
+    window.addEventListener("storage", syncSettings);
     const poll = setInterval(syncTheme, 2000);
-    return () => { window.removeEventListener("storage", syncTheme); clearInterval(poll); };
+    invoke("set_countdown_always_on_top", { onTop: alwaysOnTop }).catch(() => {});
+    return () => { window.removeEventListener("storage", syncSettings); clearInterval(poll); };
   }, []);
 
   const minutes = Math.floor(remaining / 60);
@@ -147,6 +163,48 @@ export default function CountdownPage() {
     else { startTimer(); }
   };
 
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.code === "Space") {
+        e.preventDefault();
+        togglePause();
+      }
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  });
+
+  useEffect(() => {
+    const handleCommand = (e: StorageEvent) => {
+      if (e.key !== "countdown_command" || !e.newValue) return;
+      try {
+        const cmd = JSON.parse(e.newValue);
+        switch (cmd.action) {
+          case "start":
+            if (cmd.minutes) {
+              const newTotal = Math.max(1, Math.min(999, cmd.minutes)) * 60;
+              setTotalSeconds(newTotal);
+              setRemaining(newTotal);
+            }
+            clearTimer();
+            setPhase("running");
+            break;
+          case "pause":
+            if (phase === "running") { clearTimer(); setPhase("paused"); }
+            break;
+          case "resume":
+            if (phase === "paused") setPhase("running");
+            break;
+          case "reset":
+            clearTimer(); setRemaining(totalSeconds); setPhase("idle");
+            break;
+        }
+      } catch { /* ignore */ }
+    };
+    window.addEventListener("storage", handleCommand);
+    return () => window.removeEventListener("storage", handleCommand);
+  });
+
   const reset = () => { clearTimer(); setRemaining(totalSeconds); setPhase("idle"); };
 
   const handleClose = async () => {
@@ -154,21 +212,15 @@ export default function CountdownPage() {
     catch { await getCurrentWindow().close(); }
   };
 
-  const toggleAlwaysOnTop = async () => {
-    const next = !alwaysOnTop;
-    setAlwaysOnTop(next);
-    await invoke("set_countdown_always_on_top", { onTop: next });
-  };
-
-  const applySettings = () => {
-    const mins = Math.max(1, Math.min(999, parseInt(inputMinutes) || DEFAULT_MINUTES));
-    const newTotal = mins * 60;
-    setTotalSeconds(newTotal);
-    setRemaining(newTotal);
-    setInputMinutes(mins.toString());
-    setPhase("idle");
-    clearTimer();
-    setShowSettings(false);
+  const openSettings = async () => {
+    try {
+      const main = await Window.getByLabel("main");
+      if (main) {
+        await main.show();
+        await main.setFocus();
+        await main.emit("navigate", "/settings/countdown");
+      }
+    } catch { /* fallback: ignore */ }
   };
 
   const pad = (n: number) => n.toString().padStart(2, "0");
@@ -201,34 +253,22 @@ export default function CountdownPage() {
 
   return (
     <div className="cd-root" data-tauri-drag-region onDoubleClick={togglePause}>
+      <div className="cd-inner" data-tauri-drag-region>
+        <div className="cd-clock" data-tauri-drag-region>
+          <FlipCard value={pad(minutes)} />
+          <span className="cd-sep" data-tauri-drag-region>:</span>
+          <FlipCard value={pad(seconds)} />
+        </div>
+      </div>
+
       <div className="cd-corner-bl"><LeftControls /></div>
       <div className="cd-corner-br">
-        <button className="cd-btn" onClick={(e) => { e.stopPropagation(); setShowSettings(!showSettings); }} title="Settings">
+        <button className="cd-btn" onClick={(e) => { e.stopPropagation(); openSettings(); }} title="Settings">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         </button>
         <button className="cd-btn" onClick={(e) => { e.stopPropagation(); handleClose(); }} title="Close">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
-      </div>
-
-      {showSettings && (
-        <div className="cd-settings" onClick={(e) => e.stopPropagation()}>
-          <div className="cd-srow">
-            <label>Min</label>
-            <input type="number" min="1" max="999" value={inputMinutes} onChange={(e) => setInputMinutes(e.target.value)} onKeyDown={(e) => e.key === "Enter" && applySettings()} />
-            <button className="cd-sok" onClick={applySettings}>OK</button>
-          </div>
-          <div className="cd-srow">
-            <label>Pin</label>
-            <button className={`cd-stoggle ${alwaysOnTop ? "on" : ""}`} onClick={toggleAlwaysOnTop}>{alwaysOnTop ? "ON" : "OFF"}</button>
-          </div>
-        </div>
-      )}
-
-      <div className="cd-clock" data-tauri-drag-region>
-        <FlipCard value={pad(minutes)} />
-        <span className="cd-sep" data-tauri-drag-region>:</span>
-        <FlipCard value={pad(seconds)} />
       </div>
 
       <style>{`
@@ -245,16 +285,21 @@ export default function CountdownPage() {
           --cd-btn-hover: ${colors.btnHover};
           --cd-accent: ${colors.accent};
           width: 100vw; height: 100vh;
-          display: flex; align-items: center; justify-content: center;
-          background: var(--cd-bg);
-          border-radius: 14px;
-          position: relative; overflow: hidden;
+          position: relative; overflow: visible;
           user-select: none; -webkit-user-select: none;
           cursor: grab;
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
           padding: 0;
         }
         .cd-root * { user-select: none; -webkit-user-select: none; }
+
+        .cd-inner {
+          position: absolute; inset: 0;
+          display: flex; align-items: center; justify-content: center;
+          background: var(--cd-bg);
+          border-radius: min(14px, 8vw, 15vh);
+          overflow: hidden;
+        }
 
         .cd-corner-bl, .cd-corner-br {
           position: absolute; display: flex; gap: 3px;
@@ -272,31 +317,7 @@ export default function CountdownPage() {
         }
         .cd-btn:hover { background: var(--cd-btn-hover); }
 
-        .cd-settings {
-          position: absolute; bottom: 34px; right: 8px;
-          background: rgba(20,20,20,0.95); 
-          border: 1px solid rgba(255,255,255,0.18);
-          border-radius: 10px; padding: 12px 14px;
-          display: flex; flex-direction: column; gap: 8px; z-index: 20;
-          box-shadow: 0 8px 24px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.05);
-          backdrop-filter: blur(12px);
-        }
-        .cd-srow { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #aaa; }
-        .cd-srow label { width: 28px; }
-        .cd-srow input {
-          width: 44px; padding: 2px 5px; border-radius: 4px;
-          border: 1px solid rgba(255,255,255,0.15); background: rgba(0,0,0,0.4);
-          color: #fff; font-size: 11px; outline: none;
-        }
-        .cd-sok { padding: 2px 7px; border-radius: 4px; border: none; background: var(--cd-accent); color: #fff; font-size: 10px; cursor: pointer; }
-        .cd-stoggle {
-          padding: 2px 8px; border-radius: 4px;
-          border: 1px solid rgba(255,255,255,0.15); background: rgba(0,0,0,0.3);
-          color: #666; font-size: 10px; cursor: pointer; transition: all 0.15s;
-        }
-        .cd-stoggle.on { background: var(--cd-accent); color: #fff; border-color: var(--cd-accent); }
-
-        .cd-clock { display: flex; align-items: center; gap: clamp(2px, 1vw, 6px); pointer-events: none; width: 100%; height: 100%; padding: 0 2px; }
+        .cd-clock { display: flex; align-items: center; gap: clamp(2px, 1vw, 6px); pointer-events: none; width: 100%; height: 100%; padding: 0 4px; }
         .cd-sep { font-size: clamp(24px, 10vw, 60px); color: var(--cd-sep); font-weight: 700; pointer-events: none; flex-shrink: 0; }
 
         /* ===== Flip Card =====
