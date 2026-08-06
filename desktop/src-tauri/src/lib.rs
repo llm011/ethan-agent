@@ -126,6 +126,29 @@ fn setup_proxy_env() {
 #[cfg(not(target_os = "macos"))]
 fn setup_proxy_env() {}
 
+#[tauri::command]
+fn set_countdown_always_on_top(app: tauri::AppHandle, on_top: bool) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("countdown") {
+        window.set_always_on_top(on_top).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn close_countdown_window(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("countdown") {
+        window.hide().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+fn open_countdown_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("countdown") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
 pub fn run() {
     setup_proxy_env();
     let builder = tauri::Builder::default();
@@ -148,7 +171,7 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
-        .invoke_handler(tauri::generate_handler![save_share_image, reveal_item_in_dir])
+        .invoke_handler(tauri::generate_handler![save_share_image, reveal_item_in_dir, set_countdown_always_on_top, close_countdown_window])
         .setup(|app| {
             let _ = app.get_webview_window("main").map(|w| w.set_title(""));
 
@@ -162,21 +185,25 @@ pub fn run() {
 
             // Build tray menu
             let show_item = MenuItem::with_id(app, "show", "Show Window", true, None::<&str>)?;
+            let countdown_item = MenuItem::with_id(app, "countdown", "Start Countdown", true, None::<&str>)?;
             let update_item = MenuItem::with_id(app, "check_update", "Check for Updates", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_item, &update_item, &quit_item])?;
+            let menu = Menu::with_items(app, &[&show_item, &countdown_item, &update_item, &quit_item])?;
 
             // Create tray icon
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
-                .show_menu_on_left_click(false)
+                .show_menu_on_left_click(true)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "show" => {
                         if let Some(window) = app.get_webview_window("main") {
                             let _ = window.show();
                             let _ = window.set_focus();
                         }
+                    }
+                    "countdown" => {
+                        open_countdown_window(app);
                     }
                     "check_update" => {
                         if let Some(window) = app.get_webview_window("main") {
@@ -190,21 +217,7 @@ pub fn run() {
                     }
                     _ => {}
                 })
-                .on_tray_icon_event(|tray, event| {
-                    // Left click on tray icon shows the window
-                    if let TrayIconEvent::Click {
-                        button: MouseButton::Left,
-                        button_state: MouseButtonState::Up,
-                        ..
-                    } = event
-                    {
-                        let app = tray.app_handle();
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
-                    }
-                })
+                .on_tray_icon_event(|_tray, _event| {})
                 .build(app)?;
 
             Ok(())
@@ -212,10 +225,10 @@ pub fn run() {
         // Intercept close: hide window instead of exiting
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
-                // Prevent the window from being destroyed
-                api.prevent_close();
-                // Just hide it
-                let _ = window.hide();
+                if window.label() == "main" {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
             }
         })
         .build(tauri::generate_context!())

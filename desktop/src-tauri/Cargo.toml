@@ -8,7 +8,7 @@ description = "Ethan Agent Desktop"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "devtools"] }
+tauri = { version = "2", features = ["macos-private-api", "tray-icon", "devtools"] }
 tauri-plugin-shell = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-dialog = "2"

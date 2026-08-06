@@ -18,6 +18,7 @@ import { ChannelsView } from "@/components/channels-view";
 import { LogsView } from "@/components/logs-view";
 import { DocsView } from "@/components/docs-view";
 import PptPreviewPage from "@/pages/PptPreviewPage";
+import CountdownPage from "@/pages/CountdownPage";
 
 /** Chat 路由：从 URL 提取 sessionId 传给 ChatView */
 function ChatRoute() {
@@ -52,6 +53,7 @@ function RoutesTree() {
   useDeepLink();
   return (
     <Routes>
+      <Route path="/countdown" element={<CountdownPage />} />
       <Route path="/" element={<Navigate to="/chat" replace />} />
       <Route element={<LayoutShell />}>
         <Route path="/chat" element={<ChatRoute />} />
