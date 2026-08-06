@@ -93,4 +93,5 @@ export interface Message {
   images?: PendingFile[];  // 发送时附带的图片
   matchedSkills?: SkillMatch[];  // 本次对话命中的 Skill 列表，用于可视化
   cards?: CardData[];  // 结构化卡片数据（web_search/image_search 产出）
+  model?: string;
 }
