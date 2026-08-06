@@ -166,7 +166,7 @@ export default function CountdownPage() {
           if (prev <= 1) {
             clearTimer();
             setPhase("done");
-            return 0;
+            return totalSeconds;
           }
           return prev - 1;
         });
