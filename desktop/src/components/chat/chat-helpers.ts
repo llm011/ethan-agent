@@ -80,5 +80,6 @@ export function mapDetailMessages(detail: { messages: any[] }): Message[] {
     matchedSkills: m.matched_skills || undefined,
     ttfb_ms: m.ttfb_ms ?? undefined,
     total_ms: m.total_ms ?? undefined,
+    model: m.model || undefined,
   }));
 }

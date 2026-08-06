@@ -49,6 +49,7 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
     () => new Set(defaultSelectedKey ? [defaultSelectedKey] : []),
   );
   const [includeMeta, setIncludeMeta] = useState(true);
+  const [includeStats, setIncludeStats] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [resultImage, setResultImage] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -218,15 +219,26 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
           {/* 右侧：预览卡片（即导出内容） */}
           <div className="flex min-w-0 flex-1 flex-col bg-muted/40">
             <div className="flex items-center justify-between border-b border-border bg-background/60 px-4 py-2">
-              <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
-                <input
-                  type="checkbox"
-                  checked={includeMeta}
-                  onChange={(e) => setIncludeMeta(e.target.checked)}
-                  className="h-3.5 w-3.5 accent-primary"
-                />
-                显示角色与时间
-              </label>
+              <div className="flex items-center gap-4">
+                <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={includeMeta}
+                    onChange={(e) => setIncludeMeta(e.target.checked)}
+                    className="h-3.5 w-3.5 accent-primary"
+                  />
+                  显示角色与时间
+                </label>
+                <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={includeStats}
+                    onChange={(e) => setIncludeStats(e.target.checked)}
+                    className="h-3.5 w-3.5 accent-primary"
+                  />
+                  显示模型与耗时
+                </label>
+              </div>
               <div className="flex items-center gap-3">
                 <span className="text-xs text-muted-foreground">已选 {selectedMessages.length} 条</span>
                 <div className="inline-flex overflow-hidden rounded-md border border-border">
@@ -301,8 +313,13 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
                         ) : (
                           <MarkdownContent content={raw} variant="share" />
                         )}
-                        {m.role === "assistant" && (m.usage || m.ttfb_ms != null || m.total_ms != null) && (
+                        {includeStats && m.role === "assistant" && (m.model || m.usage || m.ttfb_ms != null || m.total_ms != null) && (
                           <div className="share-stats">
+                            {m.model && (
+                              <span className="share-stat share-stat-model">
+                                {m.model.split('/').pop() || m.model}
+                              </span>
+                            )}
                             {m.usage && (
                               <span
                                 className="share-stat share-stat-tokens"

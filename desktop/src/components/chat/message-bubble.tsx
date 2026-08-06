@@ -18,7 +18,7 @@ import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@ethan
 import type { CardData, Message } from "@ethan/shared/chat/types";
 import type { Annotation } from "@/lib/api";
 
-const URL_RE = /https?:\/\/[^\s<>"')\]\u0000-\u001f\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]+/g;
+const URL_RE = /https?:\/\/[^\s<>"'\]\u0000-\u001f]+/g;
 
 function shortenUrl(url: string): string {
   try {
@@ -484,6 +484,11 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
               <McpAppView apps={msg.mcpApps} />
             )}
             <div className="flex justify-end items-center mt-2 gap-1.5 text-[10px] text-muted-foreground/40 tabular-nums flex-wrap">
+              {msg.model && (
+                <span className="inline-flex items-center rounded-full bg-slate-500/8 text-slate-600/50 dark:text-slate-400/50 px-1.5 py-px font-normal proportional-nums">
+                  {msg.model.split('/').pop() || msg.model}
+                </span>
+              )}
               {msg.created_at && <span>{formatTime(msg.created_at)}</span>}
               {msg.created_at && (msg.usage || msg.ttfb_ms != null || msg.total_ms != null) && <span className="inline-block w-px h-2.5 bg-muted-foreground/15" />}
               {msg.usage && (
