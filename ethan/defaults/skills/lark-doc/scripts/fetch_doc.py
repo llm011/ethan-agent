@@ -457,7 +457,7 @@ def _collapse_blank_lines(content: str) -> str:
     return re.sub(r'\n{3,}', '\n\n', content)
 
 
-def clean_markdown(content: str, base_domain: str = "https://feishu.cn") -> str:
+def clean_markdown(content: str, base_domain: str = "https://feishu.cn", *, renderer: str = "plain") -> str:
     """清洗飞书 markdown 导出里残留的 DocxXML 标签，避免 ProseMirror 渲染丢内容/变换行。"""
     content = _TITLE_RE.sub(lambda m: f"# {html_mod.unescape(m.group(1).strip())}\n", content)
     content = _CALLOUT_RE.sub(_callout_to_blockquote, content)
@@ -476,6 +476,25 @@ def clean_markdown(content: str, base_domain: str = "https://feishu.cn") -> str:
         "> ⚠️ 此处为第三方交互嵌入块（ISV widget），导出接口无法获取内容，已省略。",
         content,
     )
+    # grid/column 分栏处理
+    if renderer == "chrome":
+        # 保留为 HTML div，前端渲染分栏
+        content = re.sub(
+            r'<grid[^>]*>',
+            '<div class="grid-layout">',
+            content, flags=re.IGNORECASE,
+        )
+        content = re.sub(
+            r'<column\b[^>]*\bwidth-ratio="([^"]*)"[^>]*>',
+            lambda m: f'<div class="grid-col" style="flex:{m.group(1)}">',
+            content, flags=re.IGNORECASE,
+        )
+        content = re.sub(r'</column\s*>', '</div>', content, flags=re.IGNORECASE)
+        content = re.sub(r'</grid\s*>', '</div>', content, flags=re.IGNORECASE)
+    else:
+        # 纯文本模式：去掉 grid/column 标签，只保留内容
+        content = re.sub(r'</?grid[^>]*>', '', content, flags=re.IGNORECASE)
+        content = re.sub(r'</?column[^>]*>', '', content, flags=re.IGNORECASE)
     content = _escape_tags_outside_code(content)
     content = _collapse_blank_lines(content)
     return content
@@ -680,7 +699,7 @@ def _cache_dir(doc_token: str) -> Path:
     return d
 
 
-def fetch_doc_to_markdown(doc: str, *, use_cache: bool = True, output_path: Path | None = None) -> tuple[str, dict, Path]:
+def fetch_doc_to_markdown(doc: str, *, use_cache: bool = True, output_path: Path | None = None, renderer: str = "plain") -> tuple[str, dict, Path]:
     """API 友好的 fetch_doc：返回 (最终 markdown, meta_dict, output_path)。
 
     参数：
@@ -689,6 +708,7 @@ def fetch_doc_to_markdown(doc: str, *, use_cache: bool = True, output_path: Path
                     原始 Markdown，不含图片上传结果，本地浏览器阅读场景无需上传
                     CDN，默认保留飞书原始链接即可）
       output_path -- 输出文件路径；None 则落到默认缓存目录
+      renderer   -- "plain" 去除布局标签; "chrome" 保留 grid/column 为 HTML div
     """
     doc_token = _doc_token_from_input(doc)
     cache = _cache_dir(doc_token)
@@ -775,7 +795,7 @@ def fetch_doc_to_markdown(doc: str, *, use_cache: bool = True, output_path: Path
     except Exception:
         _media_total = _media_ok = 0
 
-    content = clean_markdown(content, base_domain=_base_domain(doc))
+    content = clean_markdown(content, base_domain=_base_domain(doc), renderer=renderer)
 
     meta_block = _render_meta_block(meta)
     if meta_block:
@@ -808,6 +828,7 @@ def main() -> None:
 
     doc = sys.argv[1]
     output_path = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("document.md")
+    renderer = "chrome" if "--chrome" in sys.argv else "plain"
 
     # 缓存目录：/tmp/feishu-doc-cache/<doc_token>/
     doc_token = _doc_token_from_input(doc)
@@ -876,7 +897,7 @@ def main() -> None:
     content, media_total, media_ok = process_media_tokens(content, output_path)
 
     print("清洗残留标签...", file=sys.stderr)
-    content = clean_markdown(content, base_domain=_base_domain(doc))
+    content = clean_markdown(content, base_domain=_base_domain(doc), renderer=renderer)
 
     # 在标题后插入元信息块
     meta_block = _render_meta_block(meta)

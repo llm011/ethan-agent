@@ -84,6 +84,8 @@
       '#' + CONTENT_ID + ' .callout-purple { border-left-color:' + (dark ? '#a78bfa' : '#7c3aed') + '; background:' + (dark ? '#252030' : '#f5f3ff') + '; }',
       '#' + CONTENT_ID + ' .callout-blue { border-left-color:' + (dark ? '#60a5fa' : '#2563eb') + '; background:' + (dark ? '#202530' : '#eff6ff') + '; }',
       '#' + CONTENT_ID + ' .doc-meta { background:' + (dark ? '#1f2937' : '#f9fafb') + '; border:1px solid ' + (dark ? '#374151' : '#e5e7eb') + '; border-radius:8px; padding:12px 16px; margin:0 0 24px 0; color:' + (dark ? '#9ca3af' : '#6b7280') + '; font-size:14px; line-height:1.8; }',
+      '#' + CONTENT_ID + ' .grid-layout { display:flex; gap:16px; margin:16px 0; }',
+      '#' + CONTENT_ID + ' .grid-col { flex:1; min-width:0; }',
       '#' + CONTENT_ID + ' ul,#' + CONTENT_ID + ' ol { padding-left:24px; margin-bottom:1em; }',
       '#' + CONTENT_ID + ' ol { list-style:none; counter-reset:ol-counter; }',
       '#' + CONTENT_ID + ' ol > li { counter-increment:ol-counter; }',

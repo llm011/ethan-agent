@@ -263,7 +263,7 @@ export async function fetchFeishuDocMarkdown(
     const res = await fetch(apiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.token}` },
-      body: JSON.stringify({ url, nocache: false }),
+      body: JSON.stringify({ url, nocache: false, renderer: 'chrome' }),
     });
     if (!res.ok) {
       const text = await res.text().catch(() => '');
