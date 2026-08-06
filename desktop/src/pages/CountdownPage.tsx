@@ -2,9 +2,28 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow, Window } from "@tauri-apps/api/window";
 import { type ThemeId, THEMES, normalizeThemeId } from "../components/chat/themes";
+import { notifyDesktop } from "../lib/notify";
 
 const DEFAULT_MINUTES = parseInt(localStorage.getItem("countdown_minutes") || "25") || 25;
 type Phase = "idle" | "running" | "paused" | "done";
+
+function playChime() {
+  try {
+    const ctx = new AudioContext();
+    const notes = [523.25, 659.25, 783.99]; // C5, E5, G5
+    notes.forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.3, ctx.currentTime + i * 0.2);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.2 + 0.8);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(ctx.currentTime + i * 0.2);
+      osc.stop(ctx.currentTime + i * 0.2 + 0.8);
+    });
+  } catch { /* audio not available */ }
+}
 
 interface CountdownColors {
   bg: string;
@@ -143,7 +162,7 @@ export default function CountdownPage() {
           if (prev <= 1) {
             clearTimer();
             setPhase("done");
-            return 0;
+            return totalSeconds;
           }
           return prev - 1;
         });
@@ -151,6 +170,12 @@ export default function CountdownPage() {
     }
     return clearTimer;
   }, [phase, clearTimer]);
+
+  useEffect(() => {
+    if (phase !== "done") return;
+    notifyDesktop({ title: "倒计时结束", body: "休息一下吧 ☕" });
+    playChime();
+  }, [phase]);
 
   const togglePause = () => {
     if (phase === "running") { clearTimer(); setPhase("paused"); }
