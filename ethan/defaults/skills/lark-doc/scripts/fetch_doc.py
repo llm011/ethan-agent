@@ -69,6 +69,11 @@ _CHAT_CARD_RE = re.compile(
     r'<chat_card\b[^>]*\bname="([^"]*)"[^>]*>\s*</chat_card>',
     re.IGNORECASE,
 )
+# <time expire-time="1785837600000" ...></time> → 可读日期
+_TIME_RE = re.compile(
+    r'<time\b([^>]*)>\s*</time>',
+    re.IGNORECASE,
+)
 # 匹配任意 HTML/组件开闭/自闭合标签（含 <UIResourceRenderer />、<h1> 等）
 _ANY_TAG_RE = re.compile(r'</?[a-zA-Z][a-zA-Z0-9-]*(?:\s[^<>]*?)?/?>')
 
@@ -143,6 +148,13 @@ def _base_domain(doc: str) -> str:
 def _cite_to_link(m: re.Match, base_domain: str) -> str:
     """把 <cite doc-id="..." file-type="..." title="..."> 转成 [title](url)。"""
     attrs = m.group(1)
+
+    # user mention: <cite type="user" user-name="xxx">
+    type_m = re.search(r'\btype="([^"]+)"', attrs)
+    if type_m and type_m.group(1) == "user":
+        name_m = re.search(r'\buser-name="([^"]+)"', attrs)
+        return f" @{name_m.group(1)}" if name_m else ""
+
     doc_id = (re.search(r'\bdoc-id="([^"]+)"', attrs) or re.search(r'\bdoc-id=\'([^\']+)\'', attrs))
     file_type = (re.search(r'\bfile-type="([^"]+)"', attrs) or re.search(r"\bfile-type='([^']+)'", attrs))
     title_m = (re.search(r'\btitle="([^"]+)"', attrs) or re.search(r"\btitle='([^']+)'", attrs))
@@ -185,6 +197,16 @@ def _fmt_ts(ts: str) -> str:
         return dt.strftime("%Y-%m-%d %H:%M")
     except (ValueError, TypeError, OSError):
         return ts or ""
+
+
+def _time_tag_to_text(m: re.Match) -> str:
+    """把 <time expire-time="ms_timestamp" ...> 转成可读日期。"""
+    attrs = m.group(1)
+    ts_m = re.search(r'\bexpire-time="(\d+)"', attrs)
+    if not ts_m:
+        return ""
+    ms = int(ts_m.group(1))
+    return f"⏰ {_fmt_ts(str(ms // 1000))}"
 
 
 def _fetch_doc_meta(document_id: str) -> dict:
@@ -445,6 +467,8 @@ def clean_markdown(content: str, base_domain: str = "https://feishu.cn") -> str:
     content = _BOOKMARK_RE2.sub(lambda m: f"[{m.group(2)}]({m.group(1)})" if m.group(2) else m.group(1), content)
     # chat_card → 占位
     content = _CHAT_CARD_RE.sub(lambda m: f"> 💬 飞书群聊：{m.group(1)}", content)
+    # <time> 标签：转为可读日期
+    content = _TIME_RE.sub(_time_tag_to_text, content)
     # 画板嵌入块：尝试下载转图片
     content = _WHITEBOARD_RE.sub(_process_whiteboard_tag, content)
     # 剩余未被 process_isv_blocks 替换掉的 readonly-block 换占位

@@ -129,11 +129,19 @@
         }
         continue;
       }
-      // 无序列表
+      // 无序列表（含 checkbox）
       if (/^[-*+]\s+/.test(line)) {
         if (inOl) { out.push('</ol>'); inOl = false; }
         if (!inUl) { out.push('<ul>'); inUl = true; }
-        out.push(`<li>${inline(escapeHtml(line.replace(/^[-*+]\s+/, '')))}</li>`);
+        const stripped = line.replace(/^[-*+]\s+/, '');
+        const cbMatch = stripped.match(/^\[([ xX])\]\s*(.*)/);
+        if (cbMatch) {
+          const checked = cbMatch[1] !== ' ';
+          const icon = checked ? '☑' : '☐';
+          out.push(`<li class="task-item${checked ? ' checked' : ''}">${icon} ${inline(escapeHtml(cbMatch[2]))}</li>`);
+        } else {
+          out.push(`<li>${inline(escapeHtml(stripped))}</li>`);
+        }
         continue;
       }
       // 有序列表

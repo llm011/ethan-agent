@@ -89,6 +89,8 @@
       '#' + CONTENT_ID + ' ol > li { counter-increment:ol-counter; }',
       '#' + CONTENT_ID + ' ol > li::before { content:counter(ol-counter) "."; color:' + (dark ? '#34d399' : '#0d9488') + '; font-weight:600; margin-right:6px; margin-left:-24px; display:inline-block; width:18px; }',
       '#' + CONTENT_ID + ' li { margin-bottom:0.4em; }',
+      '#' + CONTENT_ID + ' li.task-item { list-style:none; margin-left:-20px; }',
+      '#' + CONTENT_ID + ' li.task-item.checked { color:' + (dark ? '#6b7280' : '#9ca3af') + '; text-decoration:line-through; }',
       '#' + CONTENT_ID + ' a { color:#0d9488; text-decoration:underline; text-underline-offset:3px; }',
       '#' + CONTENT_ID + ' table { border-collapse:collapse; width:100%; margin:16px 0; font-size:14px; }',
       '#' + CONTENT_ID + ' th,#' + CONTENT_ID + ' td { border:1px solid ' + (dark ? '#374151' : '#e5e7eb') + '; padding:8px 12px; text-align:left; }',
