@@ -2,7 +2,7 @@ use base64::{engine::general_purpose, Engine as _};
 use std::fs;
 use tauri::{
     menu::{Menu, MenuItem},
-    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    tray::TrayIconBuilder,
     Emitter, Manager, WindowEvent,
 };
 use tauri_plugin_autostart::MacosLauncher;
@@ -149,6 +149,11 @@ fn open_countdown_window(app: &tauri::AppHandle) {
     }
 }
 
+#[tauri::command]
+fn open_countdown_window_cmd(app: tauri::AppHandle) {
+    open_countdown_window(&app);
+}
+
 pub fn run() {
     setup_proxy_env();
     let builder = tauri::Builder::default();
@@ -171,7 +176,7 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
-        .invoke_handler(tauri::generate_handler![save_share_image, reveal_item_in_dir, set_countdown_always_on_top, close_countdown_window])
+        .invoke_handler(tauri::generate_handler![save_share_image, reveal_item_in_dir, set_countdown_always_on_top, close_countdown_window, open_countdown_window_cmd])
         .setup(|app| {
             let _ = app.get_webview_window("main").map(|w| w.set_title(""));
 
@@ -225,7 +230,8 @@ pub fn run() {
         // Intercept close: hide window instead of exiting
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == "main" {
+                let label = window.label();
+                if label == "main" || label == "countdown" {
                     api.prevent_close();
                     let _ = window.hide();
                 }

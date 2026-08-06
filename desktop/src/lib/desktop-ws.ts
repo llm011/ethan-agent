@@ -35,13 +35,14 @@ function connect() {
 
   const url = getWsUrl();
   console.log("[DesktopWS] connecting to", url);
-  ws = new WebSocket(url);
+  const sock = new WebSocket(url);
+  ws = sock;
 
-  ws.onopen = () => {
-    ws!.send(JSON.stringify({ type: "auth", token, name: "desktop" }));
+  sock.onopen = () => {
+    sock.send(JSON.stringify({ type: "auth", token, name: "desktop" }));
   };
 
-  ws.onmessage = (event) => {
+  sock.onmessage = (event) => {
     try {
       const msg = JSON.parse(event.data);
       if (msg.type === "auth_ok") {
@@ -54,7 +55,7 @@ function connect() {
         dispatch(msg.method, msg.params || {});
         // If it has an id, respond with ack
         if (msg.id != null) {
-          ws!.send(JSON.stringify({ id: msg.id, result: "ok" }));
+          sock.send(JSON.stringify({ id: msg.id, result: "ok" }));
         }
       }
     } catch {
@@ -62,14 +63,16 @@ function connect() {
     }
   };
 
-  ws.onclose = (ev) => {
+  sock.onclose = (ev) => {
     console.warn("[DesktopWS] closed, code:", ev.code, ev.reason);
-    ws = null;
-    scheduleReconnect();
+    if (ws === sock) {
+      ws = null;
+      scheduleReconnect();
+    }
   };
 
-  ws.onerror = () => {
-    ws?.close();
+  sock.onerror = () => {
+    sock.close();
   };
 }
 
@@ -106,7 +109,7 @@ async function handleCountdown(params: Record<string, unknown>) {
   switch (action) {
     case "start":
       try {
-        await invoke("open_countdown_window");
+        await invoke("open_countdown_window_cmd");
       } catch { /* already open */ }
       // Send event to countdown window via localStorage (cross-window communication)
       localStorage.setItem(

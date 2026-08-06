@@ -152,11 +152,6 @@ export default function CountdownPage() {
     return clearTimer;
   }, [phase, clearTimer]);
 
-  useEffect(() => {
-    if (phase === "idle") startTimer();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   const togglePause = () => {
     if (phase === "running") { clearTimer(); setPhase("paused"); }
     else if (phase === "paused") { setPhase("running"); }

@@ -38,5 +38,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
   </React.StrictMode>
 );
 
-// 初始化桌面端 WebSocket 长连接（接收 server 推送的通知和指令）
-initDesktopWebSocket();
+// 初始化桌面端 WebSocket 长连接（仅主窗口，避免 countdown 窗口重复连接）
+if (!window.location.hash.includes("/countdown")) {
+  initDesktopWebSocket();
+}
