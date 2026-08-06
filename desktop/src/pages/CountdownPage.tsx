@@ -110,6 +110,10 @@ export default function CountdownPage() {
     return saved !== null ? saved === "1" : true;
   });
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // phaseRef 让 storage 事件回调读到最新 phase，避免空依赖 effect 闭包陈旧
+  // 导致 running 中改 countdown_minutes 时 phase 仍被读成 "idle" 而覆盖剩余时间。
+  const phaseRef = useRef(phase);
+  useEffect(() => { phaseRef.current = phase; }, [phase]);
 
   const [colors, setColors] = useState<CountdownColors>(() =>
     getColorsForTheme(normalizeThemeId(localStorage.getItem("ethan-theme")))
@@ -123,7 +127,7 @@ export default function CountdownPage() {
         const mins = parseInt(e.newValue) || 25;
         const newTotal = mins * 60;
         setTotalSeconds(newTotal);
-        if (phase === "idle") setRemaining(newTotal);
+        if (phaseRef.current === "idle") setRemaining(newTotal);
       }
       if (e.key === "countdown_pin") {
         const pin = e.newValue !== "0";
@@ -162,7 +166,7 @@ export default function CountdownPage() {
           if (prev <= 1) {
             clearTimer();
             setPhase("done");
-            return totalSeconds;
+            return 0;
           }
           return prev - 1;
         });
