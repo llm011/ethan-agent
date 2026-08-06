@@ -240,6 +240,12 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     fetchSession(initialSessionId)
       .then(async (detail) => {
         if (cancelled) return;
+        // 竞态保护：如果 handleSend 已经基于 initialSessionId 启动了流式响应，
+        // 就不要再用 DB 里的旧消息覆盖正在写入的实时消息；也不要重设 activeSession/title 等。
+        if (justFinishedRef.current === initialSessionId) {
+          justFinishedRef.current = null;
+          return;
+        }
         setLoadingSession(false);
         setActiveSession(initialSessionId);
         setSessionTitle(detail.title || "");
@@ -371,33 +377,43 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
     let sessionId = activeSession;
     if (!sessionId) {
-      try {
-        const s = await createSession(selectedModel, mode);
-        sessionId = s.id;
-        setActiveSession(s.id);
-        const pTitle = placeholderTitle(text);
-        setSessionTitle(pTitle);
-        window.dispatchEvent(new CustomEvent("session:title-updated", { detail: { sessionId: s.id, title: pTitle } }));
-        // 首轮：如果 query 信息量足够，同时 fire-and-forget 把占位标题写入后端，
-        // 作为与后端 chat.py init_title 逻辑的双重保障：
-        //   (1) 后端会在 chat 请求到达时按同一阈值写 init_title；
-        //   (2) 前端再写一次 PATCH 保证 3s 会话轮询不会把本地标题覆盖回"新对话"
-        //       （竞态：createSession 先返回"新对话"，若后端 init_title 还没执行完，
-        //         侧边栏的第一次 list/fetchSessions 读到的仍是"新对话"）。
-        if (isFirstQuerySignificant(text) && pTitle && pTitle !== "新对话") {
-          renameSession(s.id, pTitle).catch(() => { /* PATCH 失败静默忽略，后端稍后会补 */ });
+      // 竞态修复：用户点击侧边栏会话（/chat/:id）后，fetchSession 还在飞行，
+      // activeSession 仍是 null，但 initialSessionId 已经稳定存在。此时发送消息
+      // 绝不应该 createSession 新建一条，而要直接复用 initialSessionId。
+      if (initialSessionId) {
+        sessionId = initialSessionId;
+        // 标记 "这个会话别让稍后到达的 fetchSession.then 用旧数据覆盖流式消息"
+        justFinishedRef.current = initialSessionId;
+        setActiveSession(initialSessionId);
+      } else {
+        try {
+          const s = await createSession(selectedModel, mode);
+          sessionId = s.id;
+          setActiveSession(s.id);
+          const pTitle = placeholderTitle(text);
+          setSessionTitle(pTitle);
+          window.dispatchEvent(new CustomEvent("session:title-updated", { detail: { sessionId: s.id, title: pTitle } }));
+          // 首轮：如果 query 信息量足够，同时 fire-and-forget 把占位标题写入后端，
+          // 作为与后端 chat.py init_title 逻辑的双重保障：
+          //   (1) 后端会在 chat 请求到达时按同一阈值写 init_title；
+          //   (2) 前端再写一次 PATCH 保证 3s 会话轮询不会把本地标题覆盖回"新对话"
+          //       （竞态：createSession 先返回"新对话"，若后端 init_title 还没执行完，
+          //         侧边栏的第一次 list/fetchSessions 读到的仍是"新对话"）。
+          if (isFirstQuerySignificant(text) && pTitle && pTitle !== "新对话") {
+            renameSession(s.id, pTitle).catch(() => { /* PATCH 失败静默忽略，后端稍后会补 */ });
+          }
+          justFinishedRef.current = s.id;
+          window.history.replaceState(null, "", `/chat/${s.id}/`);
+        } catch (e) {
+          // createSession 失败（网络抖动 / 后端 500 / model 参数非法）时给用户明确反馈，
+          // 否则 Promise rejection 被静默吞掉，用户只看到"点了没反应"
+          setMessages(prev => [...prev, {
+            role: "assistant",
+            content: `⚠️ 创建会话失败：${e instanceof Error ? e.message : "未知错误"}\n\n请重试，或检查后端服务是否正常。`,
+            created_at: Date.now() / 1000,
+          }]);
+          return;
         }
-        justFinishedRef.current = s.id;
-        window.history.replaceState(null, "", `/chat/${s.id}/`);
-      } catch (e) {
-        // createSession 失败（网络抖动 / 后端 500 / model 参数非法）时给用户明确反馈，
-        // 否则 Promise rejection 被静默吞掉，用户只看到"点了没反应"
-        setMessages(prev => [...prev, {
-          role: "assistant",
-          content: `⚠️ 创建会话失败：${e instanceof Error ? e.message : "未知错误"}\n\n请重试，或检查后端服务是否正常。`,
-          created_at: Date.now() / 1000,
-        }]);
-        return;
       }
     }
     let content = isBtw ? (btwQuestion ?? text) : text;
