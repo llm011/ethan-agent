@@ -13,6 +13,7 @@
     let inCode = false;
     let inHtmlBlock = '';
     let htmlBlockBuf: string[] = [];
+    let htmlBlockDepth = 0;
     let codeLang = '';
     let codeBuf: string[] = [];
     let tableBuf: string[] = [];
@@ -58,7 +59,10 @@
       // HTML 块透传：遇到 <table/<grid/<blockquote 开始收集，遇到对应闭合标签结束
       if (inHtmlBlock) {
         htmlBlockBuf.push(rawLine);
-        if (new RegExp(`</${inHtmlBlock}\\s*>`, 'i').test(line)) {
+        const openRe = new RegExp(`<${inHtmlBlock}[\\s>]`, 'gi');
+        const closeRe = new RegExp(`</${inHtmlBlock}\\s*>`, 'gi');
+        htmlBlockDepth += (line.match(openRe) || []).length - (line.match(closeRe) || []).length;
+        if (htmlBlockDepth <= 0) {
           inHtmlBlock = '';
           out.push(htmlBlockBuf.join('\n'));
           htmlBlockBuf = [];
@@ -70,7 +74,10 @@
         closeLists(); flushTable();
         inHtmlBlock = htmlBlockMatch[1].toLowerCase();
         htmlBlockBuf = [rawLine];
-        if (new RegExp(`</${inHtmlBlock}\\s*>`, 'i').test(line)) {
+        const openRe = new RegExp(`<${inHtmlBlock}[\\s>]`, 'gi');
+        const closeRe = new RegExp(`</${inHtmlBlock}\\s*>`, 'gi');
+        htmlBlockDepth = (line.match(openRe) || []).length - (line.match(closeRe) || []).length;
+        if (htmlBlockDepth <= 0) {
           out.push(htmlBlockBuf.join('\n'));
           inHtmlBlock = '';
           htmlBlockBuf = [];
@@ -157,7 +164,14 @@
         closeLists(); out.push('<hr/>'); continue;
       }
       closeLists();
-      if (!line.trim()) continue;
+      if (!line.trim()) {
+        // 空行发出段落分隔，避免相邻 blockquote 被合并成一个；
+        // 连续空行不叠加，只保留一个分隔。
+        if (out[out.length - 1] !== '<p><br/></p>') {
+          out.push('<p><br/></p>');
+        }
+        continue;
+      }
       out.push(`<p>${inline(escapeHtml(line))}</p>`);
     }
     flushTable(); closeLists();
