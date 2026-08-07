@@ -160,3 +160,18 @@ def test_agent_factory_gates_dida_registration(monkeypatch):
     reg2 = build_tool_registry()
     names2 = {t.name for t in reg2.all()}
     assert not ({"dida_project_list", "dida_task_create", "dida_task_list", "dida_task_complete"} & names2)
+
+
+# -- plugin remove: boolean 字段置 False 而非空字符串 -----------------
+
+def test_clear_plugin_config_boolean_sets_false():
+    """plugin remove 时 boolean 字段应置 False，而非空字符串（避免 pydantic bool_parsing 崩溃）。"""
+    from ethan.core.config import Config
+    from ethan.interface.commands.plugin import PLUGIN_REGISTRY, _clear_plugin_config
+
+    cfg = Config()
+    cfg.tools.dida.enabled = True
+    _clear_plugin_config(cfg, PLUGIN_REGISTRY["dida"])
+    assert cfg.tools.dida.enabled is False
+    saved = cfg.model_dump()
+    assert saved["tools"]["dida"]["enabled"] is False

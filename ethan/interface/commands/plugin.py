@@ -236,7 +236,13 @@ def _clear_plugin_config(config, plugin: _PluginDef) -> None:
     if obj is None:
         return
     for field in plugin.fields:
-        if hasattr(obj, field.key):
+        if not hasattr(obj, field.key):
+            continue
+        if field.boolean:
+            # boolean 字段清空时置 False；若置空字符串 ""，重载 config 时
+            # pydantic 走 bool_parsing 校验会直接 ValidationError，导致整个配置加载崩溃。
+            setattr(obj, field.key, False)
+        else:
             setattr(obj, field.key, "")
 
 
