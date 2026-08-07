@@ -167,8 +167,8 @@
       if (!line.trim()) {
         // 空行发出段落分隔，避免相邻 blockquote 被合并成一个；
         // 连续空行不叠加，只保留一个分隔。
-        if (out[out.length - 1] !== '<p><br/></p>') {
-          out.push('<p><br/></p>');
+        if (out[out.length - 1] !== '<p class="sep"></p>') {
+          out.push('<p class="sep"></p>');
         }
         continue;
       }

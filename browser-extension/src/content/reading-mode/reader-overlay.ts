@@ -82,6 +82,7 @@
       '#' + CONTENT_ID + ' h3 { font-size:18px; font-weight:600; margin:1.4em 0 0.5em; line-height:1.4; color:' + (dark ? '#f3f4f6' : '#111827') + '; }',
       '#' + CONTENT_ID + ' h4,#' + CONTENT_ID + ' h5,#' + CONTENT_ID + ' h6 { font-size:16px; font-weight:600; margin:1.2em 0 0.4em; }',
       '#' + CONTENT_ID + ' p { margin-bottom:1.1em; }',
+      '#' + CONTENT_ID + ' p.sep { margin:0; padding:0; height:0.4em; }',
       '#' + CONTENT_ID + ' img { max-width:100%; height:auto; border-radius:8px; margin:20px 0; display:block; }',
       '#' + CONTENT_ID + ' pre { font-size:14px; border-radius:8px; padding:16px 20px; overflow-x:auto; background:' + (dark ? '#2a2e37' : '#f5f5f5') + '; margin:16px 0; line-height:1.5; }',
       '#' + CONTENT_ID + ' code { font-size:14px; border-radius:4px; padding:2px 6px; background:' + (dark ? '#2a2e37' : '#f5f5f5') + '; }',
