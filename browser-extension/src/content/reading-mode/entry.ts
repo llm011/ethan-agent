@@ -212,6 +212,14 @@
         }
         continue;
       }
+      // 独立图片行不包 <p>，避免双重 margin
+      if (/^!\[/.test(line)) {
+        const rendered = inline(escapeHtml(line));
+        if (rendered.startsWith('<img') || rendered.startsWith('<figure')) {
+          out.push(rendered);
+          continue;
+        }
+      }
       out.push(`<p>${inline(escapeHtml(line))}</p>`);
     }
     flushTable(); closeLists();
