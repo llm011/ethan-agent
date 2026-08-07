@@ -16,9 +16,10 @@
       // 包装
       const wrap = document.createElement('div');
       wrap.className = '__ethan_img_wrap';
+      const insideFigure = parent.tagName === 'FIGURE';
       Object.assign(wrap.style, {
         position: 'relative', display: 'inline-block',
-        maxWidth: '100%', margin: '20px 0', lineHeight: '0',
+        maxWidth: '100%', margin: insideFigure ? '0' : '20px 0', lineHeight: '0',
       } as any);
 
       parent.insertBefore(wrap, img);

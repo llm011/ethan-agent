@@ -16,7 +16,7 @@
     // 图片：![alt](url) — 在链接之前处理
     html = html.replace(/!\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g, (_, alt, url) => {
       if (alt.length > 60) {
-        return `<figure style="margin:12px 0 24px"><img alt="" src="${url}" style="max-width:100%;border-radius:8px;display:block" /><figcaption style="font-size:13px;color:#6b7280;line-height:1.6;margin-top:4px;padding:8px 12px;background:rgba(127,127,127,0.06);border-radius:6px">${alt}</figcaption></figure>`;
+        return `<figure style="margin:12px 0 24px"><img alt="" src="${url}" style="max-width:100%;border-radius:8px;display:block" /><figcaption style="font-size:13px;color:#6b7280;line-height:1.6;padding:8px 12px;background:rgba(127,127,127,0.06);border-radius:6px">${alt}</figcaption></figure>`;
       }
       return `<img alt="${alt}" src="${url}" style="max-width:100%;border-radius:8px;margin:12px 0;display:block" />`;
     });
@@ -70,7 +70,7 @@
       // 图片：![alt](url) — 必须在链接之前
       s = s.replace(/!\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g, (_, alt, url) => {
         if (alt.length > 60) {
-          return `<figure style="margin:12px 0 24px"><img alt="" src="${url}" style="max-width:100%;border-radius:8px;display:block" /><figcaption style="font-size:13px;color:#6b7280;line-height:1.6;margin-top:4px;padding:8px 12px;background:rgba(127,127,127,0.06);border-radius:6px">${alt}</figcaption></figure>`;
+          return `<figure style="margin:12px 0 24px"><img alt="" src="${url}" style="max-width:100%;border-radius:8px;display:block" /><figcaption style="font-size:13px;color:#6b7280;line-height:1.6;padding:8px 12px;background:rgba(127,127,127,0.06);border-radius:6px">${alt}</figcaption></figure>`;
         }
         return `<img alt="${alt}" src="${url}" style="max-width:100%;border-radius:8px;margin:12px 0;display:block" />`;
       });
