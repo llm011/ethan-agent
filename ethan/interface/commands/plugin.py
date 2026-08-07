@@ -7,11 +7,17 @@
 """
 from __future__ import annotations
 
+import shutil
+import subprocess
+
 import typer
 from rich.console import Console
 from rich.table import Table
 
 from ethan.core.config import get_config, save_config
+
+# dida 插件依赖的 npm 包名
+_DIDA_NPM_PKG = "@suibiji/dida-cli"
 
 console = Console()
 app = typer.Typer(help="管理工具插件（搜索后端等可插拔组件）", invoke_without_command=True)
@@ -42,7 +48,7 @@ class _PluginDef:
 PLUGIN_REGISTRY: dict[str, _PluginDef] = {
     "dida": _PluginDef(
         name="dida",
-        description="滴答清单（DIDi）CLI 插件 — 管理任务/清单（依赖 dida-cli 已安装并登录）",
+        description="滴答清单（DIDi）CLI 插件 — 管理任务/清单（启用时自动安装 dida-cli）",
         fields=[
             _PluginField(
                 "enabled", "启用滴答清单插件",
@@ -164,6 +170,10 @@ def _add_config_plugin(plugin: _PluginDef) -> None:
     _apply_plugin_config(config, plugin, values)
     save_config(config)
 
+    # dida 插件启用时自动安装 CLI，避免功能不可用
+    if plugin.name == "dida" and values.get("enabled", "").lower() in ("1", "true", "yes", "on"):
+        _install_dida_cli()
+
     console.print(f"\n[green]✓ 插件 {plugin.name} 配置已写入。[/green]")
     console.print("[yellow]⚠ 需要重启 server 生效：ethan server restart[/yellow]")
 
@@ -238,3 +248,33 @@ def _resolve_config_obj(config, path: str):
         if obj is None:
             return None
     return obj
+
+
+def _install_dida_cli() -> bool:
+    """确保 dida-cli 已安装；缺失时自动 npm install -g。返回是否可用。"""
+    if shutil.which("dida"):
+        console.print("[green]✓ dida-cli 已安装。[/green]")
+        return True
+    if not shutil.which("npm"):
+        console.print("[red]未找到 npm，无法自动安装 dida-cli。[/red]")
+        console.print("  可手动安装：npm install -g @suibiji/dida-cli")
+        return False
+    console.print("[yellow]未检测到 dida-cli，正在自动安装（npm install -g @suibiji/dida-cli）...[/yellow]")
+    try:
+        proc = subprocess.run(
+            ["npm", "install", "-g", _DIDA_NPM_PKG],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+    except Exception as e:  # noqa: BLE001
+        console.print(f"[red]dida-cli 安装失败：{e}[/red]")
+        return False
+    if proc.returncode != 0:
+        console.print(f"[red]dida-cli 安装失败：\n{proc.stderr.strip()}[/red]")
+        return False
+    if shutil.which("dida"):
+        console.print("[green]✓ dida-cli 安装成功。[/green]")
+        return True
+    console.print("[yellow]dida-cli 已安装但未在 PATH 中，请确认 npm 全局 bin 目录已加入 PATH。[/yellow]")
+    return False
