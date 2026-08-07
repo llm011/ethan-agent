@@ -417,6 +417,37 @@ def _restore_col_widths(md_content: str, xml_content: str) -> str:
     return re.sub(r'<colgroup>.*?</colgroup>', _replace_colgroup, md_content, flags=re.DOTALL | re.IGNORECASE)
 
 
+def _format_lists_in_table(md_content: str) -> str:
+    """在 HTML 表格内的列表标签前后加换行，使 Obsidian 等编辑器能正确渲染嵌套列表。"""
+    def _fmt_cell(m: re.Match) -> str:
+        cell = m.group(0)
+        # 在 <ul>/<ol> 前加换行
+        cell = re.sub(r'(?<!\n)(<(?:ul|ol)\b)', r'\n\1', cell)
+        # 在 <li 前加换行
+        cell = re.sub(r'(?<!\n)(<li\b)', r'\n\1', cell)
+        # 在 </ul>、</ol> 后加换行
+        cell = re.sub(r'(</(?:ul|ol)>)(?!\n)', r'\1\n', cell)
+        return cell
+    return re.sub(r'<t[dh]\b[^>]*>.*?</t[dh]>', _fmt_cell, md_content, flags=re.DOTALL | re.IGNORECASE)
+
+
+def _fix_img_src_from_href(md_content: str) -> str:
+    """对 src 为纯 token 的 <img> 标签，用 href 属性中的真实 URL 替换 src。"""
+    def _replace(m: re.Match) -> str:
+        tag = m.group(0)
+        src_m = re.search(r'\bsrc="([^"]*)"', tag)
+        href_m = re.search(r'\bhref="([^"]*)"', tag)
+        if not src_m or not href_m:
+            return tag
+        src_val = src_m.group(1)
+        href_val = href_m.group(1)
+        # src 不是 URL（纯 token），且 href 是有效 URL
+        if not src_val.startswith('http') and href_val.startswith('http'):
+            tag = tag[:src_m.start(1)] + href_val + tag[src_m.end(1):]
+        return tag
+    return re.sub(r'<img\b[^>]+>', _replace, md_content, flags=re.IGNORECASE)
+
+
 _PASSTHROUGH_TAGS = re.compile(
     r'</?(?:table|thead|tbody|tfoot|tr|th|td|caption|colgroup|col'
     r'|br|img|a|code|pre|strong|em|b|i|u|s|del|sub|sup|hr|div|span|p'
@@ -852,6 +883,8 @@ def fetch_doc_to_markdown(doc: str, *, use_cache: bool = True, output_path: Path
     if renderer == "chrome" and xml_content:
         content = _restore_col_widths(content, xml_content)
 
+    content = _format_lists_in_table(content)
+    content = _fix_img_src_from_href(content)
     content = clean_markdown(content, base_domain=_base_domain(doc), renderer=renderer)
 
     meta_block = _render_meta_block(meta)
@@ -957,6 +990,8 @@ def main() -> None:
     if renderer == "chrome" and xml_content:
         content = _restore_col_widths(content, xml_content)
 
+    content = _format_lists_in_table(content)
+    content = _fix_img_src_from_href(content)
     content = clean_markdown(content, base_domain=_base_domain(doc), renderer=renderer)
 
     # 在标题后插入元信息块

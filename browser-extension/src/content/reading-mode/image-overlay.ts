@@ -12,6 +12,45 @@
       const parent = img.parentElement;
       if (!parent) return;
       if (parent.classList && parent.classList.contains('__ethan_img_wrap')) return; // 已处理
+      if (parent.classList && parent.classList.contains('__ethan_img_broken')) return;
+
+      // 处理加载失败的图片
+      const handleError = () => {
+        const alt = img.getAttribute('alt') || '';
+        const placeholder = document.createElement('div');
+        placeholder.className = '__ethan_img_broken';
+        Object.assign(placeholder.style, {
+          padding: '16px 20px', borderRadius: '8px', margin: '12px 0',
+          background: 'rgba(127,127,127,0.06)', border: '1px solid rgba(127,127,127,0.12)',
+        } as any);
+        if (alt && alt.length > 10) {
+          placeholder.innerHTML = `<p style="font-size:13px;color:#6b7280;line-height:1.6;margin:0">${alt}</p>`;
+        } else {
+          placeholder.innerHTML = `<p style="font-size:13px;color:#9ca3af;margin:0">⚠️ 图片无法加载</p>`;
+        }
+        // 如果已经被 wrap 包裹，替换整个 wrap
+        const wrap = img.closest('.__ethan_img_wrap');
+        if (wrap) {
+          wrap.replaceWith(placeholder);
+        } else {
+          img.replaceWith(placeholder);
+        }
+      };
+
+      // 检测 src 不是有效 URL 的情况（只是 token）
+      const src = img.getAttribute('src') || '';
+      if (src && !src.startsWith('http') && !src.startsWith('data:') && !src.startsWith('/') && !src.startsWith('./')) {
+        // src 是 media token，尝试用 href 属性
+        const href = img.getAttribute('href') || '';
+        if (href && href.startsWith('http')) {
+          img.src = href;
+        } else {
+          handleError();
+          return;
+        }
+      }
+
+      img.addEventListener('error', handleError, { once: true });
 
       // 包装
       const wrap = document.createElement('div');
