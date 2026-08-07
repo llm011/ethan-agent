@@ -113,7 +113,10 @@ observed 模式可用 `ETHAN_ADMISSION_OBSERVED_MODE=accrual` 切换为：
 
 `ethan/memory/recall.py`：system prompt 唯一的长期记忆块 `<memory_context>`。
 
-- **精确通道**：FTS5 bm25（零命中落 LIKE 兜底——unicode61 对 CJK 无分词）
+- **精确通道**：FTS5 bm25。索引侧把 content/memory_key/searchable_data 切成 bigram 串
+  （CJK 切二字、ASCII 词整取），查询侧同样用 bigram OR 拼 MATCH——unicode61 对整段
+  CJK 不分词、trigram(3-gram) 实测 0 命中，只有 bigram 能让中文子串匹配命中。零命中落
+  LIKE 兜底（bigram OR 子串匹配）。schema v2 升级时 DROP+重建 memory_fts 并回灌现有记忆。
 - **语义通道**：BGE 向量近邻（补齐 CJK 与语序变换/同义改写）
 - **融合**：RRF(k=60) 排名倒数求和，importance/confidence 决胜
 - 无命中回退 importance top-N（身份类事实始终可用）
