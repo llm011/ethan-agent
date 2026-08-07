@@ -195,8 +195,9 @@
       const blockId = el.getAttribute('data-block-id');
       if (!blockId) return;
       // 在原始页面 DOM 中查找对应的 block 元素（飞书页面按 data-block-id 或 id 属性标记）
+      const safeId = CSS.escape(blockId);
       const originalBlock = document.querySelector(
-        `[data-block-id="${blockId}"] iframe, [id="${blockId}"] iframe`
+        `[data-block-id="${safeId}"] iframe, [id="${safeId}"] iframe`
       ) as HTMLIFrameElement | null;
       if (originalBlock && originalBlock.src) {
         const iframe = document.createElement('iframe');
@@ -211,7 +212,7 @@
   }
 
   function setupCheckboxPersistence(container: HTMLElement) {
-    const storageKey = `__ethan_cb_${btoa(location.href).slice(0, 20)}`;
+    const storageKey = `__ethan_cb_${btoa(encodeURIComponent(location.href)).slice(0, 20)}`;
     const saved: Record<number, boolean> = JSON.parse(localStorage.getItem(storageKey) || '{}');
 
     const checkboxes = container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
@@ -245,7 +246,7 @@
       table.style.tableLayout = 'fixed';
 
       // 还原保存的列宽
-      const storageKey = `__ethan_colw_${btoa(pageUrl).slice(0, 20)}_${tableIdx}`;
+      const storageKey = `__ethan_colw_${btoa(encodeURIComponent(pageUrl)).slice(0, 20)}_${tableIdx}`;
       const saved = localStorage.getItem(storageKey);
       if (saved) {
         try {
@@ -335,46 +336,58 @@
     const wraps = reader.querySelectorAll<HTMLElement>('.table-wrap');
     if (!wraps.length) return;
 
-    const dark = reader.style.background?.includes('17') || false; // dark mode check
+    const dark = isDarkMode();
     const clones: Map<HTMLElement, HTMLElement> = new Map();
+
+    const updateClone = (wrap: HTMLElement, readerRect: DOMRect) => {
+      const table = wrap.querySelector('table');
+      if (!table) return;
+      const thead = table.querySelector('thead') as HTMLElement | null;
+      if (!thead) return;
+
+      const tableRect = table.getBoundingClientRect();
+      const theadH = thead.offsetHeight;
+
+      if (tableRect.top < readerRect.top && tableRect.bottom > readerRect.top + theadH) {
+        let clone = clones.get(wrap);
+        if (!clone) {
+          clone = document.createElement('div');
+          clone.className = '__ethan_sticky_thead';
+          const thBg = dark ? '#2a2e37' : '#f9fafb';
+          const borderC = dark ? '#374151' : '#e5e7eb';
+          clone.style.cssText = `position:fixed;z-index:9999;overflow:hidden;box-shadow:0 2px 6px rgba(0,0,0,0.08);pointer-events:none;`;
+          clone.innerHTML = `<style>.__ethan_sticky_thead th,.__ethan_sticky_thead td{border:1px solid ${borderC};padding:8px 12px;text-align:left;font-size:14px;white-space:normal;word-wrap:break-word;background:${thBg};font-weight:600}</style><table style="table-layout:fixed;width:${table.offsetWidth}px;border-collapse:collapse">${table.querySelector('colgroup')?.outerHTML || ''}${thead.outerHTML}</table>`;
+          document.body.appendChild(clone);
+          clones.set(wrap, clone);
+        }
+        const wrapRect = wrap.getBoundingClientRect();
+        clone.style.top = readerRect.top + 'px';
+        clone.style.left = wrapRect.left + 'px';
+        clone.style.width = wrapRect.width + 'px';
+        const innerTable = clone.querySelector('table') as HTMLElement;
+        if (innerTable) innerTable.style.marginLeft = `-${wrap.scrollLeft}px`;
+        clone.style.display = '';
+      } else {
+        const clone = clones.get(wrap);
+        if (clone) clone.style.display = 'none';
+      }
+    };
 
     reader.addEventListener('scroll', () => {
       const readerRect = reader.getBoundingClientRect();
+      wraps.forEach(wrap => updateClone(wrap, readerRect));
+    }, { passive: true });
 
-      wraps.forEach(wrap => {
-        const table = wrap.querySelector('table');
-        if (!table) return;
-        const thead = table.querySelector('thead') as HTMLElement | null;
-        if (!thead) return;
-
-        const tableRect = table.getBoundingClientRect();
-        const theadH = thead.offsetHeight;
-
-        if (tableRect.top < readerRect.top && tableRect.bottom > readerRect.top + theadH) {
-          let clone = clones.get(wrap);
-          if (!clone) {
-            clone = document.createElement('div');
-            clone.className = '__ethan_sticky_thead';
-            const thBg = dark ? '#2a2e37' : '#f9fafb';
-            const borderC = dark ? '#374151' : '#e5e7eb';
-            clone.style.cssText = `position:fixed;z-index:9999;overflow:hidden;box-shadow:0 2px 6px rgba(0,0,0,0.08);pointer-events:none;`;
-            clone.innerHTML = `<style>.__ethan_sticky_thead th,.__ethan_sticky_thead td{border:1px solid ${borderC};padding:8px 12px;text-align:left;font-size:14px;white-space:normal;word-wrap:break-word;background:${thBg};font-weight:600}</style><table style="table-layout:fixed;width:${table.offsetWidth}px;border-collapse:collapse">${table.querySelector('colgroup')?.outerHTML || ''}${thead.outerHTML}</table>`;
-            document.body.appendChild(clone);
-            clones.set(wrap, clone);
-          }
-          const wrapRect = wrap.getBoundingClientRect();
-          clone.style.top = readerRect.top + 'px';
-          clone.style.left = wrapRect.left + 'px';
-          clone.style.width = wrapRect.width + 'px';
+    // Sync horizontal scroll inside table-wrap to sticky clone
+    wraps.forEach(wrap => {
+      wrap.addEventListener('scroll', () => {
+        const clone = clones.get(wrap);
+        if (clone) {
           const innerTable = clone.querySelector('table') as HTMLElement;
           if (innerTable) innerTable.style.marginLeft = `-${wrap.scrollLeft}px`;
-          clone.style.display = '';
-        } else {
-          const clone = clones.get(wrap);
-          if (clone) clone.style.display = 'none';
         }
-      });
-    }, { passive: true });
+      }, { passive: true });
+    });
   }
 
   // ========== Format Bar ==========

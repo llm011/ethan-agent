@@ -137,9 +137,11 @@ export function KnowledgeView() {
     if (target) {
       setSelected(target);
       setPanelMode("view");
-      deepLinkHandled.current = true;
-      setSearchParams({}, { replace: true });
     }
+    deepLinkHandled.current = true;
+    const next = new URLSearchParams(searchParams);
+    next.delete("source");
+    setSearchParams(next, { replace: true });
   }, [items, searchParams, setSearchParams]);
 
   useEffect(() => {

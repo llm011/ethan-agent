@@ -44,7 +44,8 @@ _TITLE_RE = re.compile(r'<title>(.*?)</title>', re.IGNORECASE | re.DOTALL)
 _CITE_RE = re.compile(r'<cite\b([^>]*)>\s*</cite>', re.IGNORECASE)
 # ISV 只读块：先在 process_isv_blocks 尝试下载，失败后由 clean_markdown 换成占位
 _READONLY_ISV_RE = re.compile(
-    r'<readonly-block\b[^>]*\bid="([^"]+)"[^>]*\btype="isv"[^>]*>\s*</readonly-block>',
+    r'<readonly-block\b[^>]*\bid="([^"]+)"[^>]*\btype="isv"[^>]*>\s*</readonly-block>|'
+    r'<readonly-block\b[^>]*\btype="isv"[^>]*\bid="([^"]+)"[^>]*>\s*</readonly-block>',
     re.IGNORECASE,
 )
 # 画板嵌入块：<whiteboard token="xxx"></whiteboard>
@@ -155,7 +156,7 @@ def _cite_to_link(m: re.Match, base_domain: str, renderer: str = "plain") -> str
         name_m = re.search(r'\buser-name="([^"]+)"', attrs)
         if not name_m:
             return ""
-        name = name_m.group(1)
+        name = html_mod.escape(name_m.group(1))
         if renderer == "chrome":
             return f' <span class="mention">@{name}</span>'
         return f" @{name}"
@@ -393,12 +394,12 @@ def _restore_col_widths(md_content: str, xml_content: str) -> str:
     """从 XML 提取表格列宽，补全 Markdown 中 <col/> 缺失的 width 属性。"""
     if not xml_content:
         return md_content
-    xml_tables = re.findall(r'<colgroup>(.*?)</colgroup>', xml_content, re.DOTALL)
+    xml_tables = re.findall(r'<colgroup\b[^>]*>(.*?)</colgroup>', xml_content, re.DOTALL)
     if not xml_tables:
         return md_content
     table_widths: list[list[int]] = []
     for cg in xml_tables:
-        widths = [int(w) for w in re.findall(r'<col\s+width="(\d+)"', cg)]
+        widths = [int(w) for w in re.findall(r'<col\b[^>]*\bwidth="(\d+)"', cg)]
         if widths:
             table_widths.append(widths)
     if not table_widths:
@@ -414,7 +415,7 @@ def _restore_col_widths(md_content: str, xml_content: str) -> str:
         cols = ''.join(f'<col width="{w}"/>' for w in widths)
         return f'<colgroup>{cols}</colgroup>'
 
-    return re.sub(r'<colgroup>.*?</colgroup>', _replace_colgroup, md_content, flags=re.DOTALL | re.IGNORECASE)
+    return re.sub(r'<colgroup\b[^>]*>.*?</colgroup>', _replace_colgroup, md_content, flags=re.DOTALL | re.IGNORECASE)
 
 
 def _format_lists_in_table(md_content: str) -> str:
@@ -551,7 +552,7 @@ def clean_markdown(content: str, base_domain: str = "https://feishu.cn", *, rend
     # 剩余未被 process_isv_blocks 替换掉的 readonly-block 换占位
     if renderer == "chrome":
         content = _READONLY_ISV_RE.sub(
-            lambda m: f'<div class="isv-embed" data-block-id="{m.group(1)}"></div>',
+            lambda m: f'<div class="isv-embed" data-block-id="{m.group(1) or m.group(2)}"></div>',
             content,
         )
     content = _READONLY_RE.sub(

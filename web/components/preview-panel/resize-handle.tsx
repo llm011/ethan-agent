@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 interface ResizeHandleProps {
   onResize: (deltaX: number) => void;
@@ -9,6 +9,15 @@ interface ResizeHandleProps {
 
 export function ResizeHandle({ onResize, onResizeEnd }: ResizeHandleProps) {
   const dragging = useRef(false);
+  const cleanupRef = useRef<(() => void) | null>(null);
+
+  // Clean up listeners if component unmounts mid-drag
+  useEffect(() => {
+    return () => {
+      cleanupRef.current?.();
+      cleanupRef.current = null;
+    };
+  }, []);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -26,6 +35,7 @@ export function ResizeHandle({ onResize, onResizeEnd }: ResizeHandleProps) {
       document.removeEventListener("mouseup", handleMouseUp);
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
+      cleanupRef.current = null;
       onResizeEnd?.();
     };
 
@@ -33,6 +43,7 @@ export function ResizeHandle({ onResize, onResizeEnd }: ResizeHandleProps) {
     document.body.style.userSelect = "none";
     document.addEventListener("mousemove", handleMouseMove);
     document.addEventListener("mouseup", handleMouseUp);
+    cleanupRef.current = handleMouseUp;
   }, [onResize, onResizeEnd]);
 
   return (

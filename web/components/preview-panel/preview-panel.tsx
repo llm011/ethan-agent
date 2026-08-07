@@ -12,7 +12,8 @@ const STORAGE_KEY = "ethan:preview-panel-size";
 export function getStoredPanelSize(): number {
   if (typeof window === "undefined") return 40;
   const v = localStorage.getItem(STORAGE_KEY);
-  return v ? Number(v) : 40;
+  const n = Number(v);
+  return v && !isNaN(n) ? n : 40;
 }
 
 export function storePanelSize(size: number) {
@@ -32,9 +33,12 @@ async function fetchFileContent(path: string, sessionId?: string | null): Promis
   return res.text();
 }
 
-function buildDownloadUrl(path: string, sessionId?: string | null): string {
+async function buildDownloadUrl(path: string, sessionId?: string | null): Promise<string> {
   const sidQ = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : "";
-  return `${API_URL}/files/download?path=${encodeURIComponent(path)}${sidQ}`;
+  const sig = await signFileUrl(API_URL, getAuthToken(), [path]);
+  const s = sig[path];
+  const sigQ = s ? `&user=${encodeURIComponent(s.user)}&sig=${encodeURIComponent(s.sig)}` : "";
+  return `${API_URL}/files/download?path=${encodeURIComponent(path)}${sidQ}${sigQ}`;
 }
 
 export function PreviewPanel() {
@@ -60,8 +64,8 @@ export function PreviewPanel() {
 
   if (!file) return null;
 
-  const handleDownload = () => {
-    const url = buildDownloadUrl(file.path, file.sessionId);
+  const handleDownload = async () => {
+    const url = await buildDownloadUrl(file.path, file.sessionId);
     const a = document.createElement("a");
     a.href = url;
     a.download = "";

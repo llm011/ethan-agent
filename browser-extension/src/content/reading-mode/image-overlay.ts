@@ -24,7 +24,10 @@
           background: 'rgba(127,127,127,0.06)', border: '1px solid rgba(127,127,127,0.12)',
         } as any);
         if (alt && alt.length > 10) {
-          placeholder.innerHTML = `<p style="font-size:13px;color:#6b7280;line-height:1.6;margin:0">${alt}</p>`;
+          const p = document.createElement('p');
+          p.style.cssText = 'font-size:13px;color:#6b7280;line-height:1.6;margin:0';
+          p.textContent = alt;
+          placeholder.appendChild(p);
         } else {
           placeholder.innerHTML = `<p style="font-size:13px;color:#9ca3af;margin:0">⚠️ 图片无法加载</p>`;
         }
@@ -51,6 +54,8 @@
       }
 
       img.addEventListener('error', handleError, { once: true });
+      // Handle images that already failed before listener was attached
+      if (img.complete && img.naturalWidth === 0) handleError();
 
       // 包装
       const wrap = document.createElement('div');

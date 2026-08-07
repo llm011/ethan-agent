@@ -4,7 +4,7 @@
   // ========== Utilities ==========
 
   function genId(): string { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36); }
-  function escapeHtml(s: string): string { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function escapeHtml(s: string): string { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
   function estimateReadTime(text: string): number { return Math.max(1, Math.ceil(text.length / 400)); }
   function clamp(v: number, min: number, max: number): number { return Math.max(min, Math.min(max, v)); }
   function isDarkMode(): boolean { return window.matchMedia('(prefers-color-scheme: dark)').matches; }

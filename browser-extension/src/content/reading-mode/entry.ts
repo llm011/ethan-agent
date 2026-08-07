@@ -15,17 +15,18 @@
     html = html.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
     // 图片：![alt](url) — 在链接之前处理
     html = html.replace(/!\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g, (_, alt, url) => {
+      const safeAlt = escapeHtml(alt);
       if (alt.length > 60) {
-        return `<figure style="margin:12px 0 24px"><img alt="" src="${url}" style="max-width:100%;border-radius:8px;display:block" /><figcaption style="font-size:13px;color:#6b7280;line-height:1.6;padding:8px 12px;background:rgba(127,127,127,0.06);border-radius:6px">${alt}</figcaption></figure>`;
+        return `<figure style="margin:12px 0 24px"><img alt="" src="${url}" style="max-width:100%;border-radius:8px;display:block" /><figcaption style="font-size:13px;color:#6b7280;line-height:1.6;padding:8px 12px;background:rgba(127,127,127,0.06);border-radius:6px">${safeAlt}</figcaption></figure>`;
       }
-      return `<img alt="${alt}" src="${url}" style="max-width:100%;border-radius:8px;margin:12px 0;display:block" />`;
+      return `<img alt="${safeAlt}" src="${url}" style="max-width:100%;border-radius:8px;margin:12px 0;display:block" />`;
     });
     // 链接：支持文本中含方括号，如 [[PRD] xxx](url)
     html = html.replace(/\[([^\[\]]*(?:\[[^\]]*\][^\[\]]*)*)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
     // 飞书 XML 残留的 <checkbox> 标签
     html = html.replace(/&lt;checkbox\s+done="(true|false)"&gt;(.*?)&lt;\/checkbox&gt;/g, (_, done, text) => {
       const checked = done === 'true';
-      return `<span style="display:inline-flex;align-items:center;gap:4px"><input type="checkbox" ${checked ? 'checked' : ''} style="cursor:pointer;accent-color:#0d9488" />${text}</span>`;
+      return `<span style="display:inline-flex;align-items:center;gap:4px"><input type="checkbox" ${checked ? 'checked' : ''} style="cursor:pointer;accent-color:#0d9488" />${escapeHtml(text)}</span>`;
     });
     return html;
   }

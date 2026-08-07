@@ -134,9 +134,9 @@ export function KnowledgeView() {
     if (target) {
       setSelected(target);
       setPanelMode("view");
-      deepLinkHandled.current = true;
-      router.replace("/knowledge", { scroll: false });
     }
+    deepLinkHandled.current = true;
+    router.replace("/knowledge", { scroll: false });
   }, [items, searchParams, router]);
 
   useEffect(() => {
