@@ -6,6 +6,11 @@
   /** 在 HTML 块内将 markdown 行内语法转为 HTML（不转义已有标签） */
   function inlineLinksInHtml(html: string): string {
     html = html.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+    // 列表项：- / – / * 开头的行（在 italic 之前处理，避免 * 冲突）
+    html = html.replace(/^( *)[-–*]\s+(.+)$/gm, (_, indent, text) => {
+      const pl = 16 + Math.floor(indent.length / 2) * 16;
+      return `<div style="padding-left:${pl}px;position:relative"><span style="position:absolute;left:${pl - 14}px">•</span>${text}</div>`;
+    });
     html = html.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
     html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
     return html;
