@@ -51,6 +51,9 @@
     // ISV 嵌入块：从原始页面 DOM 提取 iframe 嵌入
     embedIsvBlocks(content);
 
+    // 表格 sticky header
+    setupStickyTableHeaders(reader);
+
     // Fade in给正文图片绑定 hover 放大/删除按钮
     setupImageOverlays();
 
@@ -142,6 +145,7 @@
   function removeReader() {
     document.getElementById(READER_ID)?.remove();
     document.getElementById('__ethan_reading_content_styles')?.remove();
+    document.querySelectorAll('.__ethan_sticky_thead').forEach(el => el.remove());
     document.body.style.overflow = '';
     contentEl = null;
   }
@@ -197,6 +201,52 @@
         el.innerHTML = '<div style="padding:16px;border:1px dashed #d1d5db;border-radius:8px;color:#9ca3af;text-align:center;margin:16px 0">⚠️ 嵌入块暂无法在阅读模式中展示</div>';
       }
     });
+  }
+
+  function setupStickyTableHeaders(reader: HTMLElement) {
+    const wraps = reader.querySelectorAll<HTMLElement>('.table-wrap');
+    if (!wraps.length) return;
+
+    const dark = reader.style.background?.includes('17') || false; // dark mode check
+    const clones: Map<HTMLElement, HTMLElement> = new Map();
+
+    reader.addEventListener('scroll', () => {
+      const readerRect = reader.getBoundingClientRect();
+
+      wraps.forEach(wrap => {
+        const table = wrap.querySelector('table');
+        if (!table) return;
+        const thead = table.querySelector('thead') as HTMLElement | null;
+        if (!thead) return;
+
+        const tableRect = table.getBoundingClientRect();
+        const theadH = thead.offsetHeight;
+
+        if (tableRect.top < readerRect.top && tableRect.bottom > readerRect.top + theadH) {
+          let clone = clones.get(wrap);
+          if (!clone) {
+            clone = document.createElement('div');
+            clone.className = '__ethan_sticky_thead';
+            const thBg = dark ? '#2a2e37' : '#f9fafb';
+            const borderC = dark ? '#374151' : '#e5e7eb';
+            clone.style.cssText = `position:fixed;z-index:9999;overflow:hidden;box-shadow:0 2px 6px rgba(0,0,0,0.08);pointer-events:none;`;
+            clone.innerHTML = `<style>.__ethan_sticky_thead th,.__ethan_sticky_thead td{border:1px solid ${borderC};padding:8px 12px;text-align:left;font-size:14px;white-space:normal;word-wrap:break-word;background:${thBg};font-weight:600}</style><table style="table-layout:fixed;width:${table.offsetWidth}px;border-collapse:collapse">${table.querySelector('colgroup')?.outerHTML || ''}${thead.outerHTML}</table>`;
+            document.body.appendChild(clone);
+            clones.set(wrap, clone);
+          }
+          const wrapRect = wrap.getBoundingClientRect();
+          clone.style.top = readerRect.top + 'px';
+          clone.style.left = wrapRect.left + 'px';
+          clone.style.width = wrapRect.width + 'px';
+          const innerTable = clone.querySelector('table') as HTMLElement;
+          if (innerTable) innerTable.style.marginLeft = `-${wrap.scrollLeft}px`;
+          clone.style.display = '';
+        } else {
+          const clone = clones.get(wrap);
+          if (clone) clone.style.display = 'none';
+        }
+      });
+    }, { passive: true });
   }
 
   // ========== Format Bar ==========
