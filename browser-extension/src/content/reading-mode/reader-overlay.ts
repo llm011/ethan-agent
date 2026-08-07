@@ -57,6 +57,9 @@
     // 表格 sticky header
     setupStickyTableHeaders(reader);
 
+    // Checkbox 状态持久化
+    setupCheckboxPersistence(content);
+
     // Fade in给正文图片绑定 hover 放大/删除按钮
     setupImageOverlays();
 
@@ -204,6 +207,27 @@
       } else {
         el.innerHTML = '<div style="padding:16px;border:1px dashed #d1d5db;border-radius:8px;color:#9ca3af;text-align:center;margin:16px 0">⚠️ 嵌入块暂无法在阅读模式中展示</div>';
       }
+    });
+  }
+
+  function setupCheckboxPersistence(container: HTMLElement) {
+    const storageKey = `__ethan_cb_${btoa(location.href).slice(0, 20)}`;
+    const saved: Record<number, boolean> = JSON.parse(localStorage.getItem(storageKey) || '{}');
+
+    const checkboxes = container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
+    checkboxes.forEach((cb, idx) => {
+      if (idx in saved) {
+        cb.checked = saved[idx];
+        const li = cb.closest('.task-item');
+        if (li) li.classList.toggle('checked', saved[idx]);
+      }
+      cb.addEventListener('change', () => {
+        const all: Record<number, boolean> = {};
+        checkboxes.forEach((c, i) => { if (c.checked) all[i] = true; });
+        localStorage.setItem(storageKey, JSON.stringify(all));
+        const li = cb.closest('.task-item');
+        if (li) li.classList.toggle('checked', cb.checked);
+      });
     });
   }
 
