@@ -77,7 +77,10 @@
           inHtmlBlock = '';
           let block = htmlBlockBuf.join('\n');
           block = inlineLinksInHtml(block);
-          if (block.trimStart().startsWith('<table')) block = '<div class="table-wrap">' + block + '</div>';
+          if (block.trimStart().startsWith('<table')) {
+            block = block.replace(/<col\s+width="(\d+)"\/?\s*>/g, '<col style="width:$1px">');
+            block = '<div class="table-wrap">' + block + '</div>';
+          }
           out.push(block);
           htmlBlockBuf = [];
         }
@@ -94,7 +97,10 @@
         if (htmlBlockDepth <= 0) {
           let block = htmlBlockBuf.join('\n');
           block = inlineLinksInHtml(block);
-          if (block.trimStart().startsWith('<table')) block = '<div class="table-wrap">' + block + '</div>';
+          if (block.trimStart().startsWith('<table')) {
+            block = block.replace(/<col\s+width="(\d+)"\/?\s*>/g, '<col style="width:$1px">');
+            block = '<div class="table-wrap">' + block + '</div>';
+          }
           out.push(block);
           inHtmlBlock = '';
           htmlBlockBuf = [];

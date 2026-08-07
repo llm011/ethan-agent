@@ -145,7 +145,7 @@ def _base_domain(doc: str) -> str:
     return "https://feishu.cn"
 
 
-def _cite_to_link(m: re.Match, base_domain: str) -> str:
+def _cite_to_link(m: re.Match, base_domain: str, renderer: str = "plain") -> str:
     """把 <cite doc-id="..." file-type="..." title="..."> 转成 [title](url)。"""
     attrs = m.group(1)
 
@@ -153,7 +153,12 @@ def _cite_to_link(m: re.Match, base_domain: str) -> str:
     type_m = re.search(r'\btype="([^"]+)"', attrs)
     if type_m and type_m.group(1) == "user":
         name_m = re.search(r'\buser-name="([^"]+)"', attrs)
-        return f" @{name_m.group(1)}" if name_m else ""
+        if not name_m:
+            return ""
+        name = name_m.group(1)
+        if renderer == "chrome":
+            return f' <span class="mention">@{name}</span>'
+        return f" @{name}"
 
     doc_id = (re.search(r'\bdoc-id="([^"]+)"', attrs) or re.search(r'\bdoc-id=\'([^\']+)\'', attrs))
     file_type = (re.search(r'\bfile-type="([^"]+)"', attrs) or re.search(r"\bfile-type='([^']+)'", attrs))
@@ -382,6 +387,36 @@ def _url_to_key(url: str) -> str:
 _TABLE_TAGS = re.compile(
     r'</?(?:table|thead|tbody|tfoot|tr|th|td|caption|colgroup|col)\b[^>]*/?>', re.IGNORECASE
 )
+
+
+def _restore_col_widths(md_content: str, xml_content: str) -> str:
+    """从 XML 提取表格列宽，补全 Markdown 中 <col/> 缺失的 width 属性。"""
+    if not xml_content:
+        return md_content
+    xml_tables = re.findall(r'<colgroup>(.*?)</colgroup>', xml_content, re.DOTALL)
+    if not xml_tables:
+        return md_content
+    table_widths: list[list[int]] = []
+    for cg in xml_tables:
+        widths = [int(w) for w in re.findall(r'<col\s+width="(\d+)"', cg)]
+        if widths:
+            table_widths.append(widths)
+    if not table_widths:
+        return md_content
+
+    idx = [0]
+
+    def _replace_colgroup(m: re.Match) -> str:
+        if idx[0] >= len(table_widths):
+            return m.group(0)
+        widths = table_widths[idx[0]]
+        idx[0] += 1
+        cols = ''.join(f'<col width="{w}"/>' for w in widths)
+        return f'<colgroup>{cols}</colgroup>'
+
+    return re.sub(r'<colgroup>.*?</colgroup>', _replace_colgroup, md_content, flags=re.DOTALL | re.IGNORECASE)
+
+
 _PASSTHROUGH_TAGS = re.compile(
     r'</?(?:table|thead|tbody|tfoot|tr|th|td|caption|colgroup|col'
     r'|br|img|a|code|pre|strong|em|b|i|u|s|del|sub|sup|hr|div|span|p'
@@ -472,7 +507,7 @@ def clean_markdown(content: str, base_domain: str = "https://feishu.cn", *, rend
     """清洗飞书 markdown 导出里残留的 DocxXML 标签，避免 ProseMirror 渲染丢内容/变换行。"""
     content = _TITLE_RE.sub(lambda m: f"# {html_mod.unescape(m.group(1).strip())}\n", content)
     content = _CALLOUT_RE.sub(_callout_to_blockquote, content)
-    content = _CITE_RE.sub(lambda m: _cite_to_link(m, base_domain), content)
+    content = _CITE_RE.sub(lambda m: _cite_to_link(m, base_domain, renderer), content)
     # bookmark → markdown 链接
     content = _BOOKMARK_RE.sub(lambda m: f"[{m.group(1)}]({m.group(2)})" if m.group(1) else m.group(2), content)
     content = _BOOKMARK_RE2.sub(lambda m: f"[{m.group(2)}]({m.group(1)})" if m.group(2) else m.group(1), content)
@@ -809,6 +844,9 @@ def fetch_doc_to_markdown(doc: str, *, use_cache: bool = True, output_path: Path
     except Exception:
         _media_total = _media_ok = 0
 
+    if renderer == "chrome" and xml_content:
+        content = _restore_col_widths(content, xml_content)
+
     content = clean_markdown(content, base_domain=_base_domain(doc), renderer=renderer)
 
     meta_block = _render_meta_block(meta)
@@ -911,6 +949,9 @@ def main() -> None:
     content, media_total, media_ok = process_media_tokens(content, output_path)
 
     print("清洗残留标签...", file=sys.stderr)
+    if renderer == "chrome" and xml_content:
+        content = _restore_col_widths(content, xml_content)
+
     content = clean_markdown(content, base_domain=_base_domain(doc), renderer=renderer)
 
     # 在标题后插入元信息块
