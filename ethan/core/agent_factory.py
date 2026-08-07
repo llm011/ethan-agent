@@ -23,6 +23,12 @@ from ethan.tools.builtin.config import ConfigGetTool, ConfigSetTool
 from ethan.tools.builtin.decide import DecideTool
 from ethan.tools.builtin.deliver_file import DeliverFileTool
 from ethan.tools.builtin.desktop import DesktopCountdownTool, DesktopNotifyTool
+from ethan.tools.builtin.dida_tools import (
+    DidaProjectListTool,
+    DidaTaskCompleteTool,
+    DidaTaskCreateTool,
+    DidaTaskListTool,
+)
 from ethan.tools.builtin.file import FileListTool, FileReadTool, FileWriteTool
 from ethan.tools.builtin.find_tools import FindToolsTool
 from ethan.tools.builtin.heartbeat import HeartbeatAddTool, HeartbeatListTool, HeartbeatRemoveTool
@@ -105,6 +111,18 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
     registry.register(FileWriteTool())
     registry.register(FileListTool())
     registry.register(DeliverFileTool())
+    # DIDA（滴答清单）CLI wrapper tools — 仅 DIDA_ENABLED=true 时注册（可选插件）。
+    # 依赖 dida-cli 已安装并登录（docker 通过挂载 ~/.config/dida-cli 共享登录态）。
+    # 未启用时工具不注册，不影响其他工具。
+    try:
+        from ethan.core.config import get_config as _get_cfg
+        if _get_cfg().tools.dida.enabled:
+            registry.register(DidaProjectListTool())
+            registry.register(DidaTaskCreateTool())
+            registry.register(DidaTaskListTool())
+            registry.register(DidaTaskCompleteTool())
+    except Exception:
+        pass  # 配置未加载或未启用时不注册 dida 工具
 
     if toolset == "heartbeat":
         # 心跳：只读 + 执行任务 + 调度 + 知识库 + plan + skill_read，不写记忆/skill/profile
