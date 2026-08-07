@@ -518,6 +518,11 @@ def clean_markdown(content: str, base_domain: str = "https://feishu.cn", *, rend
     # 画板嵌入块：尝试下载转图片
     content = _WHITEBOARD_RE.sub(_process_whiteboard_tag, content)
     # 剩余未被 process_isv_blocks 替换掉的 readonly-block 换占位
+    if renderer == "chrome":
+        content = _READONLY_ISV_RE.sub(
+            lambda m: f'<div class="isv-embed" data-block-id="{m.group(1)}"></div>',
+            content,
+        )
     content = _READONLY_RE.sub(
         "> ⚠️ 此处为第三方交互嵌入块（ISV widget），导出接口无法获取内容，已省略。",
         content,

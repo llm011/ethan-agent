@@ -48,6 +48,9 @@
     // Mermaid 图表渲染
     renderMermaidBlocks(content, dark);
 
+    // ISV 嵌入块：从原始页面 DOM 提取 iframe 嵌入
+    embedIsvBlocks(content);
+
     // Fade in给正文图片绑定 hover 放大/删除按钮
     setupImageOverlays();
 
@@ -172,6 +175,28 @@
       script.onload = run;
       document.head.appendChild(script);
     }
+  }
+
+  function embedIsvBlocks(container: HTMLElement) {
+    const embeds = container.querySelectorAll<HTMLElement>('.isv-embed');
+    if (!embeds.length) return;
+    embeds.forEach(el => {
+      const blockId = el.getAttribute('data-block-id');
+      if (!blockId) return;
+      // 在原始页面 DOM 中查找对应的 block 元素（飞书页面按 data-block-id 或 id 属性标记）
+      const originalBlock = document.querySelector(
+        `[data-block-id="${blockId}"] iframe, [id="${blockId}"] iframe`
+      ) as HTMLIFrameElement | null;
+      if (originalBlock && originalBlock.src) {
+        const iframe = document.createElement('iframe');
+        iframe.src = originalBlock.src;
+        iframe.style.cssText = 'width:100%;height:500px;border:1px solid #e5e7eb;border-radius:8px;margin:16px 0;';
+        iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups');
+        el.replaceWith(iframe);
+      } else {
+        el.innerHTML = '<div style="padding:16px;border:1px dashed #d1d5db;border-radius:8px;color:#9ca3af;text-align:center;margin:16px 0">⚠️ 嵌入块暂无法在阅读模式中展示</div>';
+      }
+    });
   }
 
   // ========== Format Bar ==========
