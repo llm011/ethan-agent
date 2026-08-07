@@ -5,6 +5,7 @@
 
   /** 在 HTML 块内将 markdown 行内语法转为 HTML（不转义已有标签） */
   function inlineLinksInHtml(html: string): string {
+    html = html.replace(/`([^`\n]+)`/g, '<code>$1</code>');
     html = html.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
     // 列表项：- / – / * 开头的行（在 italic 之前处理，避免 * 冲突）
     html = html.replace(/^( *)[-–*]\s+(.+)$/gm, (_, indent, text) => {
@@ -12,7 +13,21 @@
       return `<div style="padding-left:${pl}px;position:relative"><span style="position:absolute;left:${pl - 14}px">•</span>${text}</div>`;
     });
     html = html.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
-    html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    // 图片：![alt](url) — 在链接之前处理
+    html = html.replace(/!\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g, (_, alt, url) => {
+      const safeAlt = escapeHtml(alt);
+      if (alt.length > 60) {
+        return `<figure style="margin:12px 0 24px"><img alt="" src="${url}" style="max-width:100%;border-radius:8px;display:block" /><figcaption style="font-size:13px;color:#6b7280;line-height:1.6;padding:8px 12px;background:rgba(127,127,127,0.06);border-radius:6px">${safeAlt}</figcaption></figure>`;
+      }
+      return `<img alt="${safeAlt}" src="${url}" style="max-width:100%;border-radius:8px;margin:12px 0;display:block" />`;
+    });
+    // 链接：支持文本中含方括号，如 [[PRD] xxx](url)
+    html = html.replace(/\[([^\[\]]*(?:\[[^\]]*\][^\[\]]*)*)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    // 飞书 XML 残留的 <checkbox> 标签
+    html = html.replace(/&lt;checkbox\s+done="(true|false)"&gt;(.*?)&lt;\/checkbox&gt;/g, (_, done, text) => {
+      const checked = done === 'true';
+      return `<span style="display:inline-flex;align-items:center;gap:4px"><input type="checkbox" ${checked ? 'checked' : ''} style="cursor:pointer;accent-color:#0d9488" />${escapeHtml(text)}</span>`;
+    });
     return html;
   }
 
@@ -30,6 +45,7 @@
     let codeLang = '';
     let codeBuf: string[] = [];
     let tableBuf: string[] = [];
+    let cbCounter = 0;
     const closeLists = () => {
       if (inUl) { out.push('</ul>'); inUl = false; }
       if (inOl) { out.push('</ol>'); inOl = false; }
@@ -58,10 +74,17 @@
       s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
       // 斜体：*xxx*（注意与 ** 的冲突：粗体已处理过）
       s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
-      // 链接：[text](url)
-      s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-      // 图片：![alt](url)
-      s = s.replace(/!\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g, '<img alt="$1" src="$2" />');
+      // 图片：![alt](url) — 必须在链接之前
+      s = s.replace(/!\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g, (_, alt, url) => {
+        if (alt.length > 60) {
+          return `<figure style="margin:12px 0 24px"><img alt="" src="${url}" style="max-width:100%;border-radius:8px;display:block" /><figcaption style="font-size:13px;color:#6b7280;line-height:1.6;padding:8px 12px;background:rgba(127,127,127,0.06);border-radius:6px">${alt}</figcaption></figure>`;
+        }
+        return `<img alt="${alt}" src="${url}" style="max-width:100%;border-radius:8px;margin:12px 0;display:block" />`;
+      });
+      // 链接：[text](url)，支持文本中含方括号
+      s = s.replace(/\[([^\[\]]*(?:\[[^\]]*\][^\[\]]*)*)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+      // 还原被 escapeHtml 转义的 <span class="mention">@xxx</span>
+      s = s.replace(/&lt;span class=&quot;mention&quot;&gt;(@[^&]+)&lt;\/span&gt;/g, '<span class="mention">$1</span>');
       return s;
     }
 
@@ -77,7 +100,15 @@
           inHtmlBlock = '';
           let block = htmlBlockBuf.join('\n');
           block = inlineLinksInHtml(block);
-          if (block.trimStart().startsWith('<table')) block = '<div class="table-wrap">' + block + '</div>';
+          if (block.trimStart().startsWith('<table')) {
+            block = block.replace(/<col\s+width="(\d+)"\/?\s*>/g, '<col style="width:$1px">');
+            const colWidths = [...block.matchAll(/<col\s+style="width:(\d+)px"/g)].map(m => parseInt(m[1]));
+            if (colWidths.length) {
+              const totalW = colWidths.reduce((a, b) => a + b, 0);
+              block = block.replace(/^<table/, `<table style="width:${totalW}px"`);
+            }
+            block = '<div class="table-wrap">' + block + '</div>';
+          }
           out.push(block);
           htmlBlockBuf = [];
         }
@@ -94,7 +125,15 @@
         if (htmlBlockDepth <= 0) {
           let block = htmlBlockBuf.join('\n');
           block = inlineLinksInHtml(block);
-          if (block.trimStart().startsWith('<table')) block = '<div class="table-wrap">' + block + '</div>';
+          if (block.trimStart().startsWith('<table')) {
+            block = block.replace(/<col\s+width="(\d+)"\/?\s*>/g, '<col style="width:$1px">');
+            const colWidths = [...block.matchAll(/<col\s+style="width:(\d+)px"/g)].map(m => parseInt(m[1]));
+            if (colWidths.length) {
+              const totalW = colWidths.reduce((a, b) => a + b, 0);
+              block = block.replace(/^<table/, `<table style="width:${totalW}px"`);
+            }
+            block = '<div class="table-wrap">' + block + '</div>';
+          }
           out.push(block);
           inHtmlBlock = '';
           htmlBlockBuf = [];
@@ -104,10 +143,13 @@
       if (inCode) {
         if (/^```\s*$/.test(line)) {
           inCode = false;
-          // 去掉收集内容的首尾空行，拼成整块
           while (codeBuf.length && codeBuf[0].trim() === '') codeBuf.shift();
           while (codeBuf.length && codeBuf[codeBuf.length - 1].trim() === '') codeBuf.pop();
-          out.push(`<pre><code${codeLang ? ` class="language-${codeLang}"` : ''}>${codeBuf.join('\n')}</code></pre>`);
+          if (codeLang === 'mermaid') {
+            out.push(`<pre class="mermaid-src" data-mermaid="${encodeURIComponent(codeBuf.join('\n'))}"><code class="language-mermaid">${codeBuf.join('\n')}</code></pre>`);
+          } else {
+            out.push(`<pre><code${codeLang ? ` class="language-${codeLang}"` : ''}>${codeBuf.join('\n')}</code></pre>`);
+          }
           codeBuf = [];
           continue;
         }
@@ -161,8 +203,8 @@
         const cbMatch = stripped.match(/^\[([ xX])\]\s*(.*)/);
         if (cbMatch) {
           const checked = cbMatch[1] !== ' ';
-          const icon = checked ? '☑' : '☐';
-          out.push(`<li class="task-item${checked ? ' checked' : ''}">${icon} ${inline(escapeHtml(cbMatch[2]))}</li>`);
+          const cbId = `__ethan_cb_${cbCounter++}`;
+          out.push(`<li class="task-item${checked ? ' checked' : ''}"><input type="checkbox" id="${cbId}" ${checked ? 'checked' : ''} style="margin-right:6px;cursor:pointer;accent-color:#0d9488" /><label for="${cbId}" style="cursor:pointer">${inline(escapeHtml(cbMatch[2]))}</label></li>`);
         } else {
           out.push(`<li>${inline(escapeHtml(stripped))}</li>`);
         }
@@ -189,13 +231,25 @@
         }
         continue;
       }
+      // 独立图片行不包 <p>，避免双重 margin
+      if (/^!\[/.test(line)) {
+        const rendered = inline(escapeHtml(line));
+        if (rendered.startsWith('<img') || rendered.startsWith('<figure')) {
+          out.push(rendered);
+          continue;
+        }
+      }
       out.push(`<p>${inline(escapeHtml(line))}</p>`);
     }
     flushTable(); closeLists();
     if (inCode) {
       while (codeBuf.length && codeBuf[0].trim() === '') codeBuf.shift();
       while (codeBuf.length && codeBuf[codeBuf.length - 1].trim() === '') codeBuf.pop();
-      out.push(`<pre><code${codeLang ? ` class="language-${codeLang}"` : ''}>${codeBuf.join('\n')}</code></pre>`);
+      if (codeLang === 'mermaid') {
+        out.push(`<pre class="mermaid-src" data-mermaid="${encodeURIComponent(codeBuf.join('\n'))}"><code class="language-mermaid">${codeBuf.join('\n')}</code></pre>`);
+      } else {
+        out.push(`<pre><code${codeLang ? ` class="language-${codeLang}"` : ''}>${codeBuf.join('\n')}</code></pre>`);
+      }
     }
     return out.join('\n');
   }

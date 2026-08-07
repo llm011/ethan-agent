@@ -53,7 +53,7 @@ export async function ensureReadingInjected(tabId: number): Promise<boolean> {
 /** 触发目标页进入阅读模式（content script 收到后自行渲染面板）。
  * 对飞书文档页：background 先抓全文 Markdown（带缓存），再把 presetMarkdown 传给阅读模式，
  * 直接渲染全文，绕开虚拟滚动 DOM 拿不全的问题。 */
-export async function startReading(tabId: number): Promise<{ ok: boolean; error?: string }> {
+export async function startReading(tabId: number, opts?: { nocache?: boolean }): Promise<{ ok: boolean; error?: string }> {
   const ok = await ensureReadingInjected(tabId);
   if (!ok) return { ok: false, error: 'inject_failed' };
   try {
@@ -62,7 +62,7 @@ export async function startReading(tabId: number): Promise<{ ok: boolean; error?
     console.log('[EthanBrowser] reading:start tab url =', url);
     let payload: any = { target: 'reading', type: 'start' };
     // 飞书文档直接走 server 拉全文 Markdown（带 24h 浏览器缓存 + skill 自身磁盘缓存）
-    const feishu = url ? await fetchFeishuDocMarkdown(tabId, url) : null;
+    const feishu = url ? await fetchFeishuDocMarkdown(tabId, url, opts) : null;
     if (feishu) {
       console.log('[EthanBrowser] reading:start using feishu API markdown, title=', feishu.title);
       payload.presetMarkdown = feishu.markdown;
@@ -233,11 +233,21 @@ async function writeFeishuDocCache(url: string, entry: FeishuDocCacheEntry): Pro
   }
 }
 
+export async function invalidateFeishuDocCache(url: string): Promise<void> {
+  try {
+    const all = await chrome.storage.local.get([FEISHU_DOC_CACHE_KEY]);
+    const map: Record<string, FeishuDocCacheEntry> = all[FEISHU_DOC_CACHE_KEY] || {};
+    delete map[url];
+    await chrome.storage.local.set({ [FEISHU_DOC_CACHE_KEY]: map });
+  } catch { /* ignore */ }
+}
+
 /** 通过本地 server 抓飞书文档全文 Markdown（带浏览器缓存 24h，server 端也自带缓存）。
  * 失败返回 null（调用方退回 DOM 抽取方案）。 */
 export async function fetchFeishuDocMarkdown(
   tabId: number,
   url: string,
+  opts?: { nocache?: boolean },
 ): Promise<{ markdown: string; title: string; url: string; length: number } | null> {
   if (!isFeishuDocUrl(url)) {
     console.log('[EthanBrowser] feishu-doc: URL not recognized as feishu doc:', url);
@@ -246,10 +256,12 @@ export async function fetchFeishuDocMarkdown(
   console.log('[EthanBrowser] feishu-doc: detected feishu doc URL, fetching via API:', url);
 
   // 先查浏览器 storage 的缓存，避免即使有 /tmp 缓存仍要走 HTTP 往返
-  const cached = await readFeishuDocCache(url);
-  if (cached) {
-    console.log('[EthanBrowser] feishu-doc: hit browser cache');
-    return { markdown: cached.markdown, title: cached.title, url: cached.url, length: cached.length };
+  if (!opts?.nocache) {
+    const cached = await readFeishuDocCache(url);
+    if (cached) {
+      console.log('[EthanBrowser] feishu-doc: hit browser cache');
+      return { markdown: cached.markdown, title: cached.title, url: cached.url, length: cached.length };
+    }
   }
 
   const cfg = await readConfig();
@@ -263,7 +275,7 @@ export async function fetchFeishuDocMarkdown(
     const res = await fetch(apiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.token}` },
-      body: JSON.stringify({ url, nocache: false, renderer: 'chrome' }),
+      body: JSON.stringify({ url, nocache: !!opts?.nocache, renderer: 'chrome' }),
     });
     if (!res.ok) {
       const text = await res.text().catch(() => '');

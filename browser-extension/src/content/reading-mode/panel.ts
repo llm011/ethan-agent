@@ -80,8 +80,11 @@
       '      <button id="__ethan_reading_close" style="border:none;background:' + (dark ? '#2a2e37' : '#f3f4f6') + ';cursor:pointer;font-size:13px;padding:4px 7px;border-radius:6px;color:inherit" title="退出 (Esc)">✕</button>',
       '      <!-- Popover Settings Menu -->',
       '      <div id="__ethan_reading_settings_menu" style="display:none;position:absolute;top:30px;right:0;z-index:20;width:190px;padding:6px;border-radius:10px;background:' + (dark ? '#2a2e37' : '#fff') + ';border:1px solid ' + (dark ? '#374151' : '#e5e7eb') + ';box-shadow:0 10px 25px rgba(0,0,0,0.15)">',
+      '        <button id="__ethan_reading_refetch" style="width:100%;text-align:left;padding:8px 10px;border:none;background:none;border-radius:6px;font-size:12px;cursor:pointer;color:' + (dark ? '#e6e8ec' : '#374151') + ';display:flex;align-items:center;gap:6px">',
+      '          <span>🔄</span> <span>重新抽取</span>',
+      '        </button>',
       '        <button id="__ethan_reading_clear_cache" style="width:100%;text-align:left;padding:8px 10px;border:none;background:none;border-radius:6px;font-size:12px;cursor:pointer;color:' + (dark ? '#e6e8ec' : '#374151') + ';display:flex;align-items:center;gap:6px">',
-      '          <span>🔄</span> <span>清除缓存（重新加载）</span>',
+      '          <span>🗑</span> <span>清除缓存</span>',
       '        </button>',
       '        <div style="margin-top:4px;padding:6px 10px;border-top:1px solid ' + (dark ? '#374151' : '#f3f4f6') + ';font-size:11px;color:' + (dark ? '#6b7280' : '#9ca3af') + '">',
       '          💡 正文可直接编辑 · Esc 退出',
@@ -169,6 +172,16 @@
         }
       });
     }
+
+    getPanelEl('__ethan_reading_refetch')!.onclick = () => {
+      showToast('正在重新抽取…');
+      exitReading();
+      chrome.storage.local.remove([storageKey()]);
+      // nocache: true 让 background 跳过浏览器缓存+服务端缓存，重新从飞书拉取
+      setTimeout(() => {
+        chrome.runtime.sendMessage({ type: 'reading:start', nocache: true });
+      }, 300);
+    };
 
     getPanelEl('__ethan_reading_clear_cache')!.onclick = () => {
       chrome.storage.local.remove([storageKey()], () => {

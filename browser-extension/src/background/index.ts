@@ -21,6 +21,7 @@ import { setupContextMenu, sendToEthan } from './context-menu';
 import {
   startReading,
   readingChat,
+  invalidateFeishuDocCache,
   readingListAnnotations,
   readingCreateAnnotation,
   readingDeleteAnnotation,
@@ -413,8 +414,17 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         sendResponse({ ok: false, error: 'no_tab' });
         return;
       }
-      const r = await startReading(tabId);
+      const r = await startReading(tabId, { nocache: !!msg.nocache });
       sendResponse(r);
+    })();
+    return true;
+  }
+
+  if (msg?.type === 'reading:refetch') {
+    (async () => {
+      const url = msg.url as string;
+      if (url) await invalidateFeishuDocCache(url);
+      sendResponse({ ok: true });
     })();
     return true;
   }

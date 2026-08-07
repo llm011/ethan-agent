@@ -45,6 +45,21 @@
     // 语法高亮 + 复制/换行按钮
     enhanceCodeBlocks(content, dark);
 
+    // Mermaid 图表渲染
+    renderMermaidBlocks(content, dark);
+
+    // ISV 嵌入块：从原始页面 DOM 提取 iframe 嵌入
+    embedIsvBlocks(content);
+
+    // 表格列宽手动拖拽调整
+    setupColumnResize(content);
+
+    // 表格 sticky header
+    setupStickyTableHeaders(reader);
+
+    // Checkbox 状态持久化
+    setupCheckboxPersistence(content);
+
     // Fade in给正文图片绑定 hover 放大/删除按钮
     setupImageOverlays();
 
@@ -105,9 +120,12 @@
       '#' + CONTENT_ID + ' li.task-item.checked { color:' + (dark ? '#6b7280' : '#9ca3af') + '; text-decoration:line-through; }',
       '#' + CONTENT_ID + ' a { color:#0d9488; text-decoration:underline; text-underline-offset:3px; }',
       '#' + CONTENT_ID + ' .table-wrap { overflow-x:auto; margin:16px 0; }',
-      '#' + CONTENT_ID + ' table { border-collapse:collapse; min-width:100%; margin:0; font-size:14px; }',
-      '#' + CONTENT_ID + ' th,#' + CONTENT_ID + ' td { border:1px solid ' + (dark ? '#374151' : '#e5e7eb') + '; padding:8px 12px; text-align:left; white-space:normal; min-width:120px; }',
+      '#' + CONTENT_ID + ' table { border-collapse:collapse; margin:0; font-size:14px; }',
+      '#' + CONTENT_ID + ' table:not(:has(colgroup)) { min-width:100%; }',
+      '#' + CONTENT_ID + ' table:has(colgroup) { table-layout:fixed; }',
+      '#' + CONTENT_ID + ' th,#' + CONTENT_ID + ' td { border:1px solid ' + (dark ? '#374151' : '#e5e7eb') + '; padding:8px 12px; text-align:left; white-space:normal; word-wrap:break-word; }',
       '#' + CONTENT_ID + ' th { background:' + (dark ? '#2a2e37' : '#f9fafb') + '; font-weight:600; }',
+      '#' + CONTENT_ID + ' .mention { background:' + (dark ? '#3b3422' : '#fff3e0') + '; padding:2px 4px; border-radius:4px; font-weight:500; }',
       '#' + CONTENT_ID + ' mark { border-radius:0.2em; padding:0.04em 0.02em; cursor:pointer; }',
       '#' + CONTENT_ID + ' mark.anno-yellow { background:oklch(0.92 0.16 105/0.85); font-weight:600; }',
       '#' + CONTENT_ID + ' mark.anno-blue { background:oklch(0.90 0.13 230/0.75); font-weight:600; }',
@@ -134,8 +152,242 @@
   function removeReader() {
     document.getElementById(READER_ID)?.remove();
     document.getElementById('__ethan_reading_content_styles')?.remove();
+    document.querySelectorAll('.__ethan_sticky_thead').forEach(el => el.remove());
     document.body.style.overflow = '';
     contentEl = null;
+  }
+
+  function renderMermaidBlocks(container: HTMLElement, dark: boolean) {
+    const blocks = container.querySelectorAll<HTMLElement>('pre.mermaid-src');
+    if (!blocks.length) return;
+    const src = 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js';
+    const existing = document.querySelector(`script[src="${src}"]`);
+    const run = () => {
+      const mermaid = (window as any).mermaid;
+      if (!mermaid) return;
+      mermaid.initialize({ startOnLoad: false, theme: dark ? 'dark' : 'default' });
+      blocks.forEach(pre => {
+        const code = decodeURIComponent(pre.getAttribute('data-mermaid') || '');
+        if (!code) return;
+        const div = document.createElement('div');
+        div.className = 'mermaid';
+        div.textContent = code;
+        pre.insertAdjacentElement('afterend', div);
+        mermaid.run({ nodes: [div] }).then(() => {
+          pre.style.display = 'none';
+        }).catch(() => {});
+      });
+    };
+    if (existing && (window as any).mermaid) {
+      run();
+    } else {
+      const script = document.createElement('script');
+      script.src = src;
+      script.onload = run;
+      document.head.appendChild(script);
+    }
+  }
+
+  function embedIsvBlocks(container: HTMLElement) {
+    const embeds = container.querySelectorAll<HTMLElement>('.isv-embed');
+    if (!embeds.length) return;
+    embeds.forEach(el => {
+      const blockId = el.getAttribute('data-block-id');
+      if (!blockId) return;
+      // 在原始页面 DOM 中查找对应的 block 元素（飞书页面按 data-block-id 或 id 属性标记）
+      const safeId = CSS.escape(blockId);
+      const originalBlock = document.querySelector(
+        `[data-block-id="${safeId}"] iframe, [id="${safeId}"] iframe`
+      ) as HTMLIFrameElement | null;
+      if (originalBlock && originalBlock.src) {
+        const iframe = document.createElement('iframe');
+        iframe.src = originalBlock.src;
+        iframe.style.cssText = 'width:100%;height:500px;border:1px solid #e5e7eb;border-radius:8px;margin:16px 0;';
+        iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups');
+        el.replaceWith(iframe);
+      } else {
+        el.innerHTML = '<div style="padding:16px;border:1px dashed #d1d5db;border-radius:8px;color:#9ca3af;text-align:center;margin:16px 0">⚠️ 嵌入块暂无法在阅读模式中展示</div>';
+      }
+    });
+  }
+
+  function setupCheckboxPersistence(container: HTMLElement) {
+    const storageKey = `__ethan_cb_${btoa(encodeURIComponent(location.href)).slice(0, 20)}`;
+    const saved: Record<number, boolean> = JSON.parse(localStorage.getItem(storageKey) || '{}');
+
+    const checkboxes = container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
+    checkboxes.forEach((cb, idx) => {
+      if (idx in saved) {
+        cb.checked = saved[idx];
+        const li = cb.closest('.task-item');
+        if (li) li.classList.toggle('checked', saved[idx]);
+      }
+      cb.addEventListener('change', () => {
+        const all: Record<number, boolean> = {};
+        checkboxes.forEach((c, i) => { if (c.checked) all[i] = true; });
+        localStorage.setItem(storageKey, JSON.stringify(all));
+        const li = cb.closest('.task-item');
+        if (li) li.classList.toggle('checked', cb.checked);
+      });
+    });
+  }
+
+  function setupColumnResize(container: HTMLElement) {
+    const tables = container.querySelectorAll<HTMLTableElement>('table');
+    const pageUrl = location.href;
+
+    tables.forEach((table, tableIdx) => {
+      const headerRow = table.querySelector('thead tr') || table.querySelector('tr');
+      if (!headerRow) return;
+      const ths = headerRow.querySelectorAll<HTMLElement>('th, td');
+      if (!ths.length) return;
+
+      // 确保 table-layout: fixed
+      table.style.tableLayout = 'fixed';
+
+      // 还原保存的列宽
+      const storageKey = `__ethan_colw_${btoa(encodeURIComponent(pageUrl)).slice(0, 20)}_${tableIdx}`;
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        try {
+          const widths: number[] = JSON.parse(saved);
+          let colgroup = table.querySelector('colgroup');
+          if (!colgroup) {
+            colgroup = document.createElement('colgroup');
+            table.prepend(colgroup);
+          }
+          colgroup.innerHTML = '';
+          widths.forEach(w => {
+            const col = document.createElement('col');
+            col.style.width = w + 'px';
+            colgroup!.appendChild(col);
+          });
+          table.style.width = widths.reduce((a, b) => a + b, 0) + 'px';
+        } catch {}
+      }
+
+      // 为每个 th 添加拖拽 handle
+      ths.forEach((th, colIdx) => {
+        const handle = document.createElement('div');
+        Object.assign(handle.style, {
+          position: 'absolute', top: '0', right: '0', width: '4px', height: '100%',
+          cursor: 'col-resize', background: 'transparent', zIndex: '3',
+        } as any);
+        handle.addEventListener('mouseenter', () => { handle.style.background = 'rgba(13,148,136,0.4)'; });
+        handle.addEventListener('mouseleave', () => { if (!handle.dataset.dragging) handle.style.background = 'transparent'; });
+
+        th.style.position = 'relative';
+        th.appendChild(handle);
+
+        handle.addEventListener('mousedown', (e: MouseEvent) => {
+          e.preventDefault();
+          e.stopPropagation();
+          handle.dataset.dragging = '1';
+          handle.style.background = 'rgba(13,148,136,0.6)';
+          const startX = e.clientX;
+          const startW = th.offsetWidth;
+
+          const onMove = (ev: MouseEvent) => {
+            const diff = ev.clientX - startX;
+            const newW = Math.max(40, startW + diff);
+            // 更新 col 宽度
+            let colgroup = table.querySelector('colgroup');
+            if (!colgroup) {
+              colgroup = document.createElement('colgroup');
+              ths.forEach(t => {
+                const col = document.createElement('col');
+                col.style.width = t.offsetWidth + 'px';
+                colgroup!.appendChild(col);
+              });
+              table.prepend(colgroup);
+            }
+            const cols = colgroup.querySelectorAll('col');
+            if (cols[colIdx]) (cols[colIdx] as HTMLElement).style.width = newW + 'px';
+            // 更新 table 总宽
+            let total = 0;
+            cols.forEach(col => { total += parseInt((col as HTMLElement).style.width) || 0; });
+            table.style.width = total + 'px';
+          };
+
+          const onUp = () => {
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            delete handle.dataset.dragging;
+            handle.style.background = 'transparent';
+            // 保存列宽
+            const colgroup = table.querySelector('colgroup');
+            if (colgroup) {
+              const widths: number[] = [];
+              colgroup.querySelectorAll('col').forEach(col => {
+                widths.push(parseInt((col as HTMLElement).style.width) || 80);
+              });
+              localStorage.setItem(storageKey, JSON.stringify(widths));
+            }
+          };
+
+          document.addEventListener('mousemove', onMove);
+          document.addEventListener('mouseup', onUp);
+        });
+      });
+    });
+  }
+
+  function setupStickyTableHeaders(reader: HTMLElement) {
+    const wraps = reader.querySelectorAll<HTMLElement>('.table-wrap');
+    if (!wraps.length) return;
+
+    const dark = isDarkMode();
+    const clones: Map<HTMLElement, HTMLElement> = new Map();
+
+    const updateClone = (wrap: HTMLElement, readerRect: DOMRect) => {
+      const table = wrap.querySelector('table');
+      if (!table) return;
+      const thead = table.querySelector('thead') as HTMLElement | null;
+      if (!thead) return;
+
+      const tableRect = table.getBoundingClientRect();
+      const theadH = thead.offsetHeight;
+
+      if (tableRect.top < readerRect.top && tableRect.bottom > readerRect.top + theadH) {
+        let clone = clones.get(wrap);
+        if (!clone) {
+          clone = document.createElement('div');
+          clone.className = '__ethan_sticky_thead';
+          const thBg = dark ? '#2a2e37' : '#f9fafb';
+          const borderC = dark ? '#374151' : '#e5e7eb';
+          clone.style.cssText = `position:fixed;z-index:9999;overflow:hidden;box-shadow:0 2px 6px rgba(0,0,0,0.08);pointer-events:none;`;
+          clone.innerHTML = `<style>.__ethan_sticky_thead th,.__ethan_sticky_thead td{border:1px solid ${borderC};padding:8px 12px;text-align:left;font-size:14px;white-space:normal;word-wrap:break-word;background:${thBg};font-weight:600}</style><table style="table-layout:fixed;width:${table.offsetWidth}px;border-collapse:collapse">${table.querySelector('colgroup')?.outerHTML || ''}${thead.outerHTML}</table>`;
+          document.body.appendChild(clone);
+          clones.set(wrap, clone);
+        }
+        const wrapRect = wrap.getBoundingClientRect();
+        clone.style.top = readerRect.top + 'px';
+        clone.style.left = wrapRect.left + 'px';
+        clone.style.width = wrapRect.width + 'px';
+        const innerTable = clone.querySelector('table') as HTMLElement;
+        if (innerTable) innerTable.style.marginLeft = `-${wrap.scrollLeft}px`;
+        clone.style.display = '';
+      } else {
+        const clone = clones.get(wrap);
+        if (clone) clone.style.display = 'none';
+      }
+    };
+
+    reader.addEventListener('scroll', () => {
+      const readerRect = reader.getBoundingClientRect();
+      wraps.forEach(wrap => updateClone(wrap, readerRect));
+    }, { passive: true });
+
+    // Sync horizontal scroll inside table-wrap to sticky clone
+    wraps.forEach(wrap => {
+      wrap.addEventListener('scroll', () => {
+        const clone = clones.get(wrap);
+        if (clone) {
+          const innerTable = clone.querySelector('table') as HTMLElement;
+          if (innerTable) innerTable.style.marginLeft = `-${wrap.scrollLeft}px`;
+        }
+      }, { passive: true });
+    });
   }
 
   // ========== Format Bar ==========

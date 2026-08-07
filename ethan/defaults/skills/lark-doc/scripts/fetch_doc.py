@@ -44,7 +44,8 @@ _TITLE_RE = re.compile(r'<title>(.*?)</title>', re.IGNORECASE | re.DOTALL)
 _CITE_RE = re.compile(r'<cite\b([^>]*)>\s*</cite>', re.IGNORECASE)
 # ISV 只读块：先在 process_isv_blocks 尝试下载，失败后由 clean_markdown 换成占位
 _READONLY_ISV_RE = re.compile(
-    r'<readonly-block\b[^>]*\bid="([^"]+)"[^>]*\btype="isv"[^>]*>\s*</readonly-block>',
+    r'<readonly-block\b[^>]*\bid="([^"]+)"[^>]*\btype="isv"[^>]*>\s*</readonly-block>|'
+    r'<readonly-block\b[^>]*\btype="isv"[^>]*\bid="([^"]+)"[^>]*>\s*</readonly-block>',
     re.IGNORECASE,
 )
 # 画板嵌入块：<whiteboard token="xxx"></whiteboard>
@@ -145,7 +146,7 @@ def _base_domain(doc: str) -> str:
     return "https://feishu.cn"
 
 
-def _cite_to_link(m: re.Match, base_domain: str) -> str:
+def _cite_to_link(m: re.Match, base_domain: str, renderer: str = "plain") -> str:
     """把 <cite doc-id="..." file-type="..." title="..."> 转成 [title](url)。"""
     attrs = m.group(1)
 
@@ -153,7 +154,12 @@ def _cite_to_link(m: re.Match, base_domain: str) -> str:
     type_m = re.search(r'\btype="([^"]+)"', attrs)
     if type_m and type_m.group(1) == "user":
         name_m = re.search(r'\buser-name="([^"]+)"', attrs)
-        return f" @{name_m.group(1)}" if name_m else ""
+        if not name_m:
+            return ""
+        name = html_mod.escape(name_m.group(1))
+        if renderer == "chrome":
+            return f' <span class="mention">@{name}</span>'
+        return f" @{name}"
 
     doc_id = (re.search(r'\bdoc-id="([^"]+)"', attrs) or re.search(r'\bdoc-id=\'([^\']+)\'', attrs))
     file_type = (re.search(r'\bfile-type="([^"]+)"', attrs) or re.search(r"\bfile-type='([^']+)'", attrs))
@@ -382,6 +388,67 @@ def _url_to_key(url: str) -> str:
 _TABLE_TAGS = re.compile(
     r'</?(?:table|thead|tbody|tfoot|tr|th|td|caption|colgroup|col)\b[^>]*/?>', re.IGNORECASE
 )
+
+
+def _restore_col_widths(md_content: str, xml_content: str) -> str:
+    """从 XML 提取表格列宽，补全 Markdown 中 <col/> 缺失的 width 属性。"""
+    if not xml_content:
+        return md_content
+    xml_tables = re.findall(r'<colgroup\b[^>]*>(.*?)</colgroup>', xml_content, re.DOTALL)
+    if not xml_tables:
+        return md_content
+    table_widths: list[list[int]] = []
+    for cg in xml_tables:
+        widths = [int(w) for w in re.findall(r'<col\b[^>]*\bwidth="(\d+)"', cg)]
+        if widths:
+            table_widths.append(widths)
+    if not table_widths:
+        return md_content
+
+    idx = [0]
+
+    def _replace_colgroup(m: re.Match) -> str:
+        if idx[0] >= len(table_widths):
+            return m.group(0)
+        widths = table_widths[idx[0]]
+        idx[0] += 1
+        cols = ''.join(f'<col width="{w}"/>' for w in widths)
+        return f'<colgroup>{cols}</colgroup>'
+
+    return re.sub(r'<colgroup\b[^>]*>.*?</colgroup>', _replace_colgroup, md_content, flags=re.DOTALL | re.IGNORECASE)
+
+
+def _format_lists_in_table(md_content: str) -> str:
+    """在 HTML 表格内的列表标签前后加换行，使 Obsidian 等编辑器能正确渲染嵌套列表。"""
+    def _fmt_cell(m: re.Match) -> str:
+        cell = m.group(0)
+        # 在 <ul>/<ol> 前加换行
+        cell = re.sub(r'(?<!\n)(<(?:ul|ol)\b)', r'\n\1', cell)
+        # 在 <li 前加换行
+        cell = re.sub(r'(?<!\n)(<li\b)', r'\n\1', cell)
+        # 在 </ul>、</ol> 后加换行
+        cell = re.sub(r'(</(?:ul|ol)>)(?!\n)', r'\1\n', cell)
+        return cell
+    return re.sub(r'<t[dh]\b[^>]*>.*?</t[dh]>', _fmt_cell, md_content, flags=re.DOTALL | re.IGNORECASE)
+
+
+def _fix_img_src_from_href(md_content: str) -> str:
+    """对 src 为纯 token 的 <img> 标签，用 href 属性中的真实 URL 替换 src。"""
+    def _replace(m: re.Match) -> str:
+        tag = m.group(0)
+        src_m = re.search(r'\bsrc="([^"]*)"', tag)
+        href_m = re.search(r'\bhref="([^"]*)"', tag)
+        if not src_m or not href_m:
+            return tag
+        src_val = src_m.group(1)
+        href_val = href_m.group(1)
+        # src 不是 URL（纯 token），且 href 是有效 URL
+        if not src_val.startswith('http') and href_val.startswith('http'):
+            tag = tag[:src_m.start(1)] + href_val + tag[src_m.end(1):]
+        return tag
+    return re.sub(r'<img\b[^>]+>', _replace, md_content, flags=re.IGNORECASE)
+
+
 _PASSTHROUGH_TAGS = re.compile(
     r'</?(?:table|thead|tbody|tfoot|tr|th|td|caption|colgroup|col'
     r'|br|img|a|code|pre|strong|em|b|i|u|s|del|sub|sup|hr|div|span|p'
@@ -472,7 +539,7 @@ def clean_markdown(content: str, base_domain: str = "https://feishu.cn", *, rend
     """清洗飞书 markdown 导出里残留的 DocxXML 标签，避免 ProseMirror 渲染丢内容/变换行。"""
     content = _TITLE_RE.sub(lambda m: f"# {html_mod.unescape(m.group(1).strip())}\n", content)
     content = _CALLOUT_RE.sub(_callout_to_blockquote, content)
-    content = _CITE_RE.sub(lambda m: _cite_to_link(m, base_domain), content)
+    content = _CITE_RE.sub(lambda m: _cite_to_link(m, base_domain, renderer), content)
     # bookmark → markdown 链接
     content = _BOOKMARK_RE.sub(lambda m: f"[{m.group(1)}]({m.group(2)})" if m.group(1) else m.group(2), content)
     content = _BOOKMARK_RE2.sub(lambda m: f"[{m.group(2)}]({m.group(1)})" if m.group(2) else m.group(1), content)
@@ -483,6 +550,11 @@ def clean_markdown(content: str, base_domain: str = "https://feishu.cn", *, rend
     # 画板嵌入块：尝试下载转图片
     content = _WHITEBOARD_RE.sub(_process_whiteboard_tag, content)
     # 剩余未被 process_isv_blocks 替换掉的 readonly-block 换占位
+    if renderer == "chrome":
+        content = _READONLY_ISV_RE.sub(
+            lambda m: f'<div class="isv-embed" data-block-id="{m.group(1) or m.group(2)}"></div>',
+            content,
+        )
     content = _READONLY_RE.sub(
         "> ⚠️ 此处为第三方交互嵌入块（ISV widget），导出接口无法获取内容，已省略。",
         content,
@@ -809,6 +881,11 @@ def fetch_doc_to_markdown(doc: str, *, use_cache: bool = True, output_path: Path
     except Exception:
         _media_total = _media_ok = 0
 
+    if renderer == "chrome" and xml_content:
+        content = _restore_col_widths(content, xml_content)
+
+    content = _format_lists_in_table(content)
+    content = _fix_img_src_from_href(content)
     content = clean_markdown(content, base_domain=_base_domain(doc), renderer=renderer)
 
     meta_block = _render_meta_block(meta)
@@ -911,6 +988,11 @@ def main() -> None:
     content, media_total, media_ok = process_media_tokens(content, output_path)
 
     print("清洗残留标签...", file=sys.stderr)
+    if renderer == "chrome" and xml_content:
+        content = _restore_col_widths(content, xml_content)
+
+    content = _format_lists_in_table(content)
+    content = _fix_img_src_from_href(content)
     content = clean_markdown(content, base_domain=_base_domain(doc), renderer=renderer)
 
     # 在标题后插入元信息块

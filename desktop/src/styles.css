@@ -370,8 +370,9 @@
 .prose .table-wrapper table {
   margin: 0;
   font-size: 0.9em;
-  width: auto;
+  width: max-content;
   min-width: 100%;
+  max-width: none;
   border-collapse: collapse;
   border-spacing: 0;
   table-layout: auto;
@@ -384,9 +385,7 @@
   text-align: left;
   vertical-align: top;
   min-width: 88px;
-  max-width: 520px;
-  word-break: keep-all;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
   line-height: 1.5;
 }
 .prose .table-wrapper th {

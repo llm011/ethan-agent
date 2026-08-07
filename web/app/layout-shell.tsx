@@ -5,6 +5,7 @@ import { LoginView } from "@/components/login-view";
 import { Sidebar } from "@/components/sidebar";
 import { useState, useEffect, createContext, useContext } from "react";
 import { ChevronLeft, ChevronRight, Menu } from "lucide-react";
+import { PreviewProvider } from "@/components/preview-panel/preview-context";
 
 // Shared context so child views (chat-view, etc.) can toggle the sidebar
 export const SidebarContext = createContext<{
@@ -39,6 +40,7 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
 
   return (
     <SidebarContext.Provider value={{ sidebarOpen, setSidebarOpen }}>
+      <PreviewProvider>
       <div className="flex h-screen bg-background overflow-hidden">
         {/* Mobile overlay backdrop — click to close sidebar */}
         {sidebarOpen && (
@@ -95,6 +97,7 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
           {children}
         </main>
       </div>
+      </PreviewProvider>
     </SidebarContext.Provider>
   );
 }

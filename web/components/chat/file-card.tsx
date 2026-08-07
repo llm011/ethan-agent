@@ -2,11 +2,12 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { FileText, FileSpreadsheet, FileArchive, File as FileIcon, Presentation, Download, ImageIcon } from "lucide-react";
+import { FileText, FileSpreadsheet, FileArchive, File as FileIcon, Presentation, Download, ImageIcon, Eye } from "lucide-react";
 import { API_URL, getAuthToken } from "@/lib/api-base";
 import { signFileUrl } from "@ethan/shared/ppt/preview";
 import { Lightbox } from "./lightbox";
 import type { FileCard } from "@ethan/shared/chat/types";
+import { usePreview } from "@/components/preview-panel/preview-context";
 
 // 文件卡片类型以 packages/shared 为准（web/desktop 共用，避免三处声明漂移）
 export type { FileCard };
@@ -95,10 +96,15 @@ function ImageFileCard({ card, sessionId }: { card: FileCard; sessionId?: string
   );
 }
 
-// 文件卡片：图片渲染缩略图 + Lightbox；pptx 且带项目目录时点击进 /ppt-preview 预览页；其余点击直接下载。
+// 可侧边预览的文件类型
+const PREVIEWABLE_KINDS = new Set(["md", "html", "htm"]);
+
+// 文件卡片：图片渲染缩略图 + Lightbox；pptx 且带项目目录时点击进 /ppt-preview 预览页；
+// md/html 点击在侧边面板预览；其余点击直接下载。
 // 所有 URL 带 session_id——服务端只放行本 session 交付过的文件（会话级隔离）。
 export function FileCardView({ card, sessionId }: { card: FileCard; sessionId?: string | null }) {
   const router = useRouter();
+  const preview = usePreview();
 
   if (IMAGE_KINDS.has(card.kind)) {
     return <ImageFileCard card={card} sessionId={sessionId} />;
@@ -106,10 +112,18 @@ export function FileCardView({ card, sessionId }: { card: FileCard; sessionId?: 
 
   const Icon = KIND_ICON[card.kind] ?? FileIcon;
   const previewable = card.kind === "pptx" && !!card.project_dir;
+  const sidePreviewable = PREVIEWABLE_KINDS.has(card.kind);
 
   const handleClick = () => {
     const sid = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : "";
-    if (previewable) {
+    if (sidePreviewable) {
+      preview.open({
+        path: card.path,
+        filename: card.title || card.filename,
+        kind: card.kind === "htm" ? "html" : card.kind as "md" | "html",
+        sessionId,
+      });
+    } else if (previewable) {
       router.push(`/ppt-preview/?path=${encodeURIComponent(card.path)}${sid}`);
     } else {
       void downloadSigned(card.path, sid);
@@ -133,7 +147,9 @@ export function FileCardView({ card, sessionId }: { card: FileCard; sessionId?: 
           {card.page_count != null && ` · ${card.page_count} 页`}
         </span>
       </span>
-      {previewable ? (
+      {sidePreviewable ? (
+        <Eye className="w-4 h-4 text-primary flex-shrink-0" />
+      ) : previewable ? (
         <span className="text-xs text-primary flex-shrink-0">预览</span>
       ) : (
         <Download className="w-4 h-4 text-muted-foreground flex-shrink-0" />
