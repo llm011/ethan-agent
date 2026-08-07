@@ -26,7 +26,7 @@
     content.contentEditable = 'true';
     content.spellcheck = false;
     Object.assign(content.style, {
-      maxWidth: '720px', margin: '64px auto 100px', padding: '0 40px',
+      maxWidth: '820px', margin: '64px auto 100px', padding: '0 40px',
       fontSize: '17px', lineHeight: '1.9',
       color: dark ? '#e2e4e8' : '#1f2430',
       fontFamily: '-apple-system, "PingFang SC", "Noto Sans SC", system-ui, sans-serif',
@@ -104,8 +104,9 @@
       '#' + CONTENT_ID + ' li.task-item { list-style:none; margin-left:-20px; }',
       '#' + CONTENT_ID + ' li.task-item.checked { color:' + (dark ? '#6b7280' : '#9ca3af') + '; text-decoration:line-through; }',
       '#' + CONTENT_ID + ' a { color:#0d9488; text-decoration:underline; text-underline-offset:3px; }',
-      '#' + CONTENT_ID + ' table { border-collapse:collapse; width:100%; margin:16px 0; font-size:14px; }',
-      '#' + CONTENT_ID + ' th,#' + CONTENT_ID + ' td { border:1px solid ' + (dark ? '#374151' : '#e5e7eb') + '; padding:8px 12px; text-align:left; }',
+      '#' + CONTENT_ID + ' .table-wrap { overflow-x:auto; margin:16px 0; }',
+      '#' + CONTENT_ID + ' table { border-collapse:collapse; min-width:100%; margin:0; font-size:14px; }',
+      '#' + CONTENT_ID + ' th,#' + CONTENT_ID + ' td { border:1px solid ' + (dark ? '#374151' : '#e5e7eb') + '; padding:8px 12px; text-align:left; white-space:normal; min-width:120px; }',
       '#' + CONTENT_ID + ' th { background:' + (dark ? '#2a2e37' : '#f9fafb') + '; font-weight:600; }',
       '#' + CONTENT_ID + ' mark { border-radius:0.2em; padding:0.04em 0.02em; cursor:pointer; }',
       '#' + CONTENT_ID + ' mark.anno-yellow { background:oklch(0.92 0.16 105/0.85); font-weight:600; }',
