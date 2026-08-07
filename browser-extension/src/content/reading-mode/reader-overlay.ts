@@ -45,6 +45,9 @@
     // 语法高亮 + 复制/换行按钮
     enhanceCodeBlocks(content, dark);
 
+    // Mermaid 图表渲染
+    renderMermaidBlocks(content, dark);
+
     // Fade in给正文图片绑定 hover 放大/删除按钮
     setupImageOverlays();
 
@@ -138,6 +141,27 @@
     document.getElementById('__ethan_reading_content_styles')?.remove();
     document.body.style.overflow = '';
     contentEl = null;
+  }
+
+  function renderMermaidBlocks(container: HTMLElement, dark: boolean) {
+    const blocks = container.querySelectorAll<HTMLElement>('.mermaid');
+    if (!blocks.length) return;
+    const src = 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js';
+    const existing = document.querySelector(`script[src="${src}"]`);
+    const run = () => {
+      const mermaid = (window as any).mermaid;
+      if (!mermaid) return;
+      mermaid.initialize({ startOnLoad: false, theme: dark ? 'dark' : 'default' });
+      mermaid.run({ nodes: blocks });
+    };
+    if (existing && (window as any).mermaid) {
+      run();
+    } else {
+      const script = document.createElement('script');
+      script.src = src;
+      script.onload = run;
+      document.head.appendChild(script);
+    }
   }
 
   // ========== Format Bar ==========

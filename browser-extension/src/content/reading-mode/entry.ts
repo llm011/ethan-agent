@@ -110,10 +110,13 @@
       if (inCode) {
         if (/^```\s*$/.test(line)) {
           inCode = false;
-          // 去掉收集内容的首尾空行，拼成整块
           while (codeBuf.length && codeBuf[0].trim() === '') codeBuf.shift();
           while (codeBuf.length && codeBuf[codeBuf.length - 1].trim() === '') codeBuf.pop();
-          out.push(`<pre><code${codeLang ? ` class="language-${codeLang}"` : ''}>${codeBuf.join('\n')}</code></pre>`);
+          if (codeLang === 'mermaid') {
+            out.push(`<div class="mermaid">${codeBuf.join('\n')}</div>`);
+          } else {
+            out.push(`<pre><code${codeLang ? ` class="language-${codeLang}"` : ''}>${codeBuf.join('\n')}</code></pre>`);
+          }
           codeBuf = [];
           continue;
         }
@@ -201,7 +204,11 @@
     if (inCode) {
       while (codeBuf.length && codeBuf[0].trim() === '') codeBuf.shift();
       while (codeBuf.length && codeBuf[codeBuf.length - 1].trim() === '') codeBuf.pop();
-      out.push(`<pre><code${codeLang ? ` class="language-${codeLang}"` : ''}>${codeBuf.join('\n')}</code></pre>`);
+      if (codeLang === 'mermaid') {
+        out.push(`<div class="mermaid">${codeBuf.join('\n')}</div>`);
+      } else {
+        out.push(`<pre><code${codeLang ? ` class="language-${codeLang}"` : ''}>${codeBuf.join('\n')}</code></pre>`);
+      }
     }
     return out.join('\n');
   }
