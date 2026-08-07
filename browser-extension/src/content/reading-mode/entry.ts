@@ -13,7 +13,10 @@
       return `<div style="padding-left:${pl}px;position:relative"><span style="position:absolute;left:${pl - 14}px">•</span>${text}</div>`;
     });
     html = html.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
-    html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    // 图片：![alt](url) — 在链接之前处理
+    html = html.replace(/!\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g, '<img alt="$1" src="$2" style="max-width:100%;border-radius:8px;margin:12px 0;display:block" />');
+    // 链接：支持文本中含方括号，如 [[PRD] xxx](url)
+    html = html.replace(/\[([^\[\]]*(?:\[[^\]]*\][^\[\]]*)*)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
     return html;
   }
 
@@ -59,10 +62,15 @@
       s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
       // 斜体：*xxx*（注意与 ** 的冲突：粗体已处理过）
       s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
-      // 链接：[text](url)
-      s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-      // 图片：![alt](url)
-      s = s.replace(/!\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g, '<img alt="$1" src="$2" />');
+      // 图片：![alt](url) — 必须在链接之前
+      s = s.replace(/!\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g, (_, alt, url) => {
+        if (alt.length > 60) {
+          return `<figure style="margin:12px 0"><img alt="" src="${url}" style="max-width:100%;border-radius:8px;display:block" /><figcaption style="font-size:13px;color:#6b7280;line-height:1.6;margin-top:8px;padding:8px 12px;background:rgba(127,127,127,0.06);border-radius:6px">${escapeHtml(alt)}</figcaption></figure>`;
+        }
+        return `<img alt="${escapeHtml(alt)}" src="${url}" style="max-width:100%;border-radius:8px;margin:12px 0;display:block" />`;
+      });
+      // 链接：[text](url)，支持文本中含方括号
+      s = s.replace(/\[([^\[\]]*(?:\[[^\]]*\][^\[\]]*)*)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
       return s;
     }
 
