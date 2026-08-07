@@ -757,9 +757,10 @@ class Agent:
     async def _build_extended_memory(self, query: str, max_items: int = 30) -> str:
         """增强上下文用的记忆召回。
 
-        仅在模型主动要"更多信息"时调用。max_items 是**候选预算**（喂给重排判官），
-        实际注入条数由 reranker 的切点决定——增强上下文这条路径本就容易被噪声淹，
-        30 条里通常只有 2-3 条与当前问题相关。
+        仅在模型主动要"更多信息"时调用。max_items 是**候选预算**（宽召回），实际注入
+        条数由判官切点或 `INJECT_MAX` 决定——这条路径本就最容易被噪声淹，30 条里通常
+        只有 2-3 条与当前问题相关，所以**不要**把 fallback_keep 顶到 max_items，
+        那等于把整个候选池原样灌进 prompt。
         """
         if not self.is_owner:
             return ""
@@ -767,7 +768,6 @@ class Agent:
             from ethan.memory.recall import build_structured_recall_async
             recall_result = await build_structured_recall_async(
                 query=query, mode=self._mode, max_items=max_items,
-                fallback_keep=max_items,
             )
             return recall_result.text if recall_result else ""
         except Exception:

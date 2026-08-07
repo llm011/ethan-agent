@@ -7,6 +7,7 @@ other sessions. Restricted memories are never injected.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -14,6 +15,26 @@ from ethan.memory.records import MemoryDomain, MemoryStatus
 from ethan.memory.store import MemoryStore
 
 logger = logging.getLogger(__name__)
+
+# 注入上限：候选池按 RRF 排序后**每域**取前多少条进 prompt。与候选预算解耦——
+# 池子照旧宽（保 recall），只收窄进 prompt 的那一屏（降噪）。
+#
+# 默认 6 是实测拐点（tests/memory_eval/probe_inject_depth.py，120 case/6 域，
+# 真实 `_collect` 链路，候选预算固定 20）：
+#
+#     深度   P@注入   recall   真值条数  噪声条数
+#       6    21.4%   83.2%     1.32     4.85   ← 默认
+#       8    16.5%   85.3%     1.35     6.82
+#      15    14.2%  100.0%     1.58     9.58   ← 改造前
+#
+# 8→6 是曲线上唯一划算的一段：掉 2.1pt recall 换掉近 2 条噪声。再浅收益就反转
+# （6→5 掉 3.2pt 只换 0.95 条）。
+#
+# 逐域耐受度差异很大，全局平均会掩盖单域崩溃：深度 6 时 methodology / companion
+# 已满额 100%，但 personal_information 只有 71.7%。身份类事实缺一条比多几条噪声
+# 更贵，所以这个值留成 env 可调——把 recall 在浅切下买回来是判官（或修活 FTS
+# 词法通道）的活，不是调这个常量能解决的。
+INJECT_MAX = int(os.environ.get("ETHAN_MEMORY_INJECT_MAX", "6"))
 
 _TYPE_LABELS = {
     "personal_information": "个人信息",
@@ -186,35 +207,41 @@ async def build_structured_recall_async(
     query: str, *, mode: str = "", max_items: int = 8,
     fallback_keep: int | None = None, rerank: bool = True,
 ) -> RecallResult:
-    """带 LLM 重排 + 切点的召回。异步调用方应优先用这个。
+    """宽候选池 + 浅注入的召回。异步调用方应优先用这个。
 
-    与同步版的唯一区别是多一个重排阶段，因此 `max_items` 的语义也变了：
-    同步版里它是**注入上限**，这里它是**候选预算**（宽召回，喂给判官），最终注入
-    条数由 reranker 的切点 + `MAX_KEEP` 硬上限决定。
+    两个参数管两件独立的事——这是本函数存在的理由：
 
-    `fallback_keep` 是判官不可用时的注入上限，应填调用方**改造前**的 max_items。
-    默认取 `max_items`。两种情形的保真度不同，别混淆：
+    - `max_items` = **候选预算**。控 `_collect` 里的 FTS limit / 向量 limit(*2) /
+      RRF 池大小。它只决定 recall，宽一点没坏处。
+    - `INJECT_MAX`（可用 `fallback_keep` 覆盖）= **注入上限，逐域**。控进 prompt
+      的条数，也就是噪声量。
 
-    - 判官不跑（默认关 / `rerank=False`）：候选预算也收回 `fallback_keep`，
-      结果与改造前**逐条一致**（已用 18 case 验证，含 companion 双域路径）。
-    - 判官跑了但失败：退回的是**宽预算候选池**的 RRF top-`fallback_keep`。它与
-      改造前的窄预算召回**不保证逐条相同**——`_collect` 的 max_items 同时控制
-      FTS limit 与向量 limit(*2)，池子变大后双通道命中会拿到额外 RRF 分，可能
-      挤掉窄预算下靠前的单通道命中。质量不低于改造前，但不是同一个列表。
+    改造前这两件事是同一个参数，所以调它只能在 recall 和 precision 之间平移——
+    收紧则真值被砍（阈值 1.1 时代 recall 58.3%），放宽则噪声灌进来（1.3 之后平均
+    9.58 条噪声、P@注入 14%）。拆开之后才能同时保住 recall 和降噪。
 
-    重排在两域候选的**并集**上只做一次，不能下推到 `_collect` 里分域各做一次——
-    否则 general 和 companion 会各自算出一个分数分布、各切一个断层，两边按不同
-    标准砍，合起来条数还可能翻倍。domain 隔离仍由 `_collect_split` 硬门控保证。
+    判官（`rerank_and_cut`）跑的时候注入条数由它的切点 + `MAX_KEEP` 决定；不跑或
+    跑失败时退回 RRF 序的逐域 top-`keep`。
+
+    **这与改造前不再逐条一致，是有意的行为变更。** #189 曾刻意保住「默认关 = 逐条
+    等于改造前」，代价是默认关时候选预算也被收回注入上限、降噪为零。实测拐点数据
+    （见 `INJECT_MAX` 的注释）说明那个保真度不值得——8→6 掉 2.1pt recall 换掉近
+    2 条噪声。同步版 `build_structured_recall` 保持原样，仍可当 A/B 的对照臂。
+
+    截断**逐域**做，不在并集上截。companion 模式下 general 通常就能占满额度，在
+    并集上截会把 companion 整段砍掉。实测确认过这个坑：并集截断下 companion 域
+    recall 从深度 1 到 10 恒为 33.3%、到 15 才突变 100%。
+
+    重排本身仍在两域候选的**并集**上只做一次，不能下推到 `_collect` 里分域各做
+    一次——否则 general 和 companion 会各自算出一个分数分布、各切一个断层，两边按
+    不同标准砍，合起来条数还可能翻倍。domain 隔离由 `_collect_split` 硬门控保证。
     """
     from ethan.memory.reranker import RERANK_ENABLED, rerank_and_cut
 
     empty = RecallResult(text="", count=0, items=[])
-    keep = max_items if fallback_keep is None else fallback_keep
+    # 注入上限默认走实测拐点；`fallback_keep` 留给评测 harness 扫深度用。
+    keep = INJECT_MAX if fallback_keep is None else fallback_keep
     do_rerank = rerank and RERANK_ENABLED
-    # 判官不跑时**不要**放宽候选预算。`_collect` 的 max_items 同时控制 FTS limit、
-    # 向量 limit 和最终截断，放宽后 RRF 的 top-N 可能与窄预算下不同（多召回的双通道
-    # 命中会挤掉原本靠前的单通道命中）。预算收回 keep → 默认关时逐条等于改造前。
-    budget = max_items if do_rerank else keep
 
     try:
         store = MemoryStore()
@@ -223,18 +250,20 @@ async def build_structured_recall_async(
         return empty
 
     try:
-        general, companion = _collect_split(store, query, mode, budget)
-        all_hits = general + companion
+        # 候选预算始终取满。池子宽只影响 recall，收窄它等于又一次调阈值。
+        general, companion = _collect_split(store, query, mode, max_items)
+        if not general and not companion:
+            return empty
+        shallow = general[:keep] + companion[:keep]
+        if do_rerank:
+            # 判官看并集（见 docstring），失败时退回逐域浅注入
+            all_hits = await rerank_and_cut(
+                query, general + companion, fallback=shallow
+            )
+        else:
+            all_hits = shallow
         if not all_hits:
             return empty
-        if do_rerank:
-            # fallback 逐域截断，不在并集上截——companion 模式下 general 占满额度时
-            # 在并集上截会把 companion 整段砍掉，与改造前不符。
-            all_hits = await rerank_and_cut(
-                query, all_hits, fallback=general[:keep] + companion[:keep]
-            )
-            if not all_hits:
-                return empty
         return _finalize(store, all_hits)
     except Exception:
         logger.debug("structured recall (async) failed", exc_info=True)
