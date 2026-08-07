@@ -14,7 +14,12 @@
     });
     html = html.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
     // 图片：![alt](url) — 在链接之前处理
-    html = html.replace(/!\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g, '<img alt="$1" src="$2" style="max-width:100%;border-radius:8px;margin:12px 0;display:block" />');
+    html = html.replace(/!\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g, (_, alt, url) => {
+      if (alt.length > 60) {
+        return `<figure style="margin:12px 0"><img alt="" src="${url}" style="max-width:100%;border-radius:8px;display:block" /><figcaption style="font-size:13px;color:#6b7280;line-height:1.6;margin-top:8px;padding:8px 12px;background:rgba(127,127,127,0.06);border-radius:6px">${alt}</figcaption></figure>`;
+      }
+      return `<img alt="${alt}" src="${url}" style="max-width:100%;border-radius:8px;margin:12px 0;display:block" />`;
+    });
     // 链接：支持文本中含方括号，如 [[PRD] xxx](url)
     html = html.replace(/\[([^\[\]]*(?:\[[^\]]*\][^\[\]]*)*)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
     return html;
