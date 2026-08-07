@@ -22,12 +22,13 @@ app = typer.Typer(help="管理工具插件（搜索后端等可插拔组件）",
 
 class _PluginField:
     """插件需要用户输入的单个配置字段。"""
-    def __init__(self, key: str, label: str, secret: bool = False, default: str = "", hint: str = ""):
+    def __init__(self, key: str, label: str, secret: bool = False, default: str = "", hint: str = "", boolean: bool = False):
         self.key = key
         self.label = label
         self.secret = secret      # True 则输入时隐藏（如 API key）
         self.default = default
         self.hint = hint          # 输入提示
+        self.boolean = boolean    # True 则用 yes/no 交互，写入真正的 bool（而非字符串）
 
 class _PluginDef:
     """插件定义。"""
@@ -39,6 +40,19 @@ class _PluginDef:
 
 
 PLUGIN_REGISTRY: dict[str, _PluginDef] = {
+    "dida": _PluginDef(
+        name="dida",
+        description="滴答清单（DIDi）CLI 插件 — 管理任务/清单（依赖 dida-cli 已安装并登录）",
+        fields=[
+            _PluginField(
+                "enabled", "启用滴答清单插件",
+                boolean=True,
+                default="true",
+                hint="docker 场景可用环境变量 DIDA_ENABLED=true 自动启用，无需手动 install",
+            ),
+        ],
+        config_path="tools.dida",
+    ),
     "tavily": _PluginDef(
         name="tavily",
         description="Tavily AI 搜索引擎（需要 API Key，https://tavily.com 免费注册）",
@@ -132,6 +146,10 @@ def _add_config_plugin(plugin: _PluginDef) -> None:
     # 交互式收集配置
     values: dict[str, str] = {}
     for field in plugin.fields:
+        if field.boolean:
+            default_on = str(field.default or "").lower() in ("1", "true", "yes", "on")
+            values[field.key] = str(typer.confirm(f"  {field.label}？", default=default_on)).lower()
+            continue
         if field.secret:
             value = typer.prompt(f"  {field.label}", hide_input=True, default=field.default or "")
         else:
@@ -192,7 +210,13 @@ def _apply_plugin_config(config, plugin: _PluginDef, values: dict[str, str]) -> 
     if obj is None:
         return
     for key, val in values.items():
-        if hasattr(obj, key):
+        if not hasattr(obj, key):
+            continue
+        field = next((f for f in plugin.fields if f.key == key), None)
+        if field is not None and field.boolean:
+            # boolean 字段：把 "true"/"false" 字符串转成真正的 bool，避免 pydantic 不校验直接落字符串
+            setattr(obj, key, val.lower() in ("1", "true", "yes", "on"))
+        else:
             setattr(obj, key, val)
 
 

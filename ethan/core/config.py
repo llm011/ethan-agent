@@ -237,6 +237,10 @@ class MCPServerConfig(BaseModel):
     enabled: bool = True
 
 
+class DidaConfig(BaseModel):
+    enabled: bool = False  # 滴答清单 CLI 插件开关；true 时注册 dida_* 工具
+
+
 class MCPConfig(BaseModel):
     servers: list[MCPServerConfig] = Field(default_factory=list)
 
@@ -245,6 +249,7 @@ class ToolsConfig(BaseModel):
     web_search: WebSearchToolConfig = Field(default_factory=WebSearchToolConfig)
     knowledge: KnowledgeConfig = Field(default_factory=KnowledgeConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
+    dida: DidaConfig = Field(default_factory=DidaConfig)
 
 
 class Config(BaseModel):
@@ -612,6 +617,13 @@ def _apply_env_overrides(raw: dict) -> None:
     proxy_env = os.environ.get("ETHAN_PROXY", "")
     if proxy_env:
         raw.setdefault("network", {})["proxy"] = proxy_env
+
+    # DIDA（滴答清单）插件开关：DIDA_ENABLED=true 时启用 dida_* 工具。
+    # docker 场景通过环境变量控制，无需手动进容器执行 install。
+    dida_env = os.environ.get("DIDA_ENABLED", "")
+    if dida_env and dida_env.lower() in ("1", "true", "yes", "on"):
+        dcfg = tools.setdefault("dida", {})
+        dcfg["enabled"] = True
 
     # Web UI 登录 token：环境变量 ETHAN_AUTH_TOKEN 覆盖
     # （否则 load_config 会用 secrets.token_hex(6) 随机生成一个写进 config.yaml）
