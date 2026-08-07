@@ -95,6 +95,11 @@
           block = inlineLinksInHtml(block);
           if (block.trimStart().startsWith('<table')) {
             block = block.replace(/<col\s+width="(\d+)"\/?\s*>/g, '<col style="width:$1px">');
+            const colWidths = [...block.matchAll(/<col\s+style="width:(\d+)px"/g)].map(m => parseInt(m[1]));
+            if (colWidths.length) {
+              const totalW = colWidths.reduce((a, b) => a + b, 0);
+              block = block.replace(/^<table/, `<table style="width:${totalW}px"`);
+            }
             block = '<div class="table-wrap">' + block + '</div>';
           }
           out.push(block);
@@ -115,6 +120,11 @@
           block = inlineLinksInHtml(block);
           if (block.trimStart().startsWith('<table')) {
             block = block.replace(/<col\s+width="(\d+)"\/?\s*>/g, '<col style="width:$1px">');
+            const colWidths = [...block.matchAll(/<col\s+style="width:(\d+)px"/g)].map(m => parseInt(m[1]));
+            if (colWidths.length) {
+              const totalW = colWidths.reduce((a, b) => a + b, 0);
+              block = block.replace(/^<table/, `<table style="width:${totalW}px"`);
+            }
             block = '<div class="table-wrap">' + block + '</div>';
           }
           out.push(block);
