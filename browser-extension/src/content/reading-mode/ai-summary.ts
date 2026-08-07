@@ -41,9 +41,17 @@
     h = h.replace(/^## (.+)$/gm, '<h3 style="margin:10px 0 4px;font-size:14px;font-weight:600">$1</h3>');
     h = h.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
     h = h.replace(/`([^`]+?)`/g, '<code style="background:rgba(127,127,127,0.15);padding:1px 4px;border-radius:3px">$1</code>');
-    // Bullet & Numbered lists (supports -, *, •, and 1. 2. 3.)
-    h = h.replace(/^[-*•]\s*(.+)$/gm, '<div style="padding-left:12px;margin:2px 0">• $1</div>');
-    h = h.replace(/^(\d+)\.\s*(.+)$/gm, '<div style="padding-left:12px;margin:2px 0"><span style="color:#0d9488;font-weight:500">$1.</span> $2</div>');
+    // Bullet & Numbered lists (supports -, *, •, indented sub-items)
+    h = h.replace(/^( *)[-*•]\s*(.+)$/gm, (_, indent, text) => {
+      const level = Math.floor(indent.length / 2);
+      const pl = 12 + level * 14;
+      return '<div style="padding-left:' + pl + 'px;margin:2px 0">• ' + text + '</div>';
+    });
+    h = h.replace(/^( *)(\d+)\.\s*(.+)$/gm, (_, indent, num, text) => {
+      const level = Math.floor(indent.length / 2);
+      const pl = 12 + level * 14;
+      return '<div style="padding-left:' + pl + 'px;margin:2px 0"><span style="color:#0d9488;font-weight:500">' + num + '.</span> ' + text + '</div>';
+    });
     // Remove redundant newlines before & after block tags
     h = h.replace(/(<\/(?:h3|h4|div|pre)>)\s*\n+/gi, '$1');
     h = h.replace(/\n+\s*(<(?:h3|h4|div|pre)[\s>])/gi, '$1');
