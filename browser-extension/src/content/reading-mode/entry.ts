@@ -3,6 +3,19 @@
 
   // ========== Enter / Exit ==========
 
+  /** 在 HTML 块内将 markdown 行内语法转为 HTML（不转义已有标签） */
+  function inlineLinksInHtml(html: string): string {
+    html = html.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+    // 列表项：- / – / * 开头的行（在 italic 之前处理，避免 * 冲突）
+    html = html.replace(/^( *)[-–*]\s+(.+)$/gm, (_, indent, text) => {
+      const pl = 16 + Math.floor(indent.length / 2) * 16;
+      return `<div style="padding-left:${pl}px;position:relative"><span style="position:absolute;left:${pl - 14}px">•</span>${text}</div>`;
+    });
+    html = html.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+    html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    return html;
+  }
+
   /** Markdown 快速转 HTML（给飞书文档全文用：reader-extract 只处理 DOM，纯 Markdown 需要本地渲染）。
    * 用 result-panel.ts 的精简版：标题 / 加粗 / 斜体 / 行内代码 / 无序列表 / 表格 / 换行。 */
   function mdToHtml(md: string): string {
@@ -23,20 +36,18 @@
     };
     const flushTable = () => {
       if (!tableBuf.length) return;
-      // 简化：所有行都当 <tr><td>...</td></tr>，保留格式
-      out.push('<table>');
+      out.push('<div class="table-wrap"><table>');
       tableBuf.forEach((row, i) => {
         const cells = row.split('|').filter((c, idx, arr) => {
-          // 丢弃开头 / 结尾的空字符串（由首尾的 | 产生）
           if (idx === 0 && !c.trim()) return false;
           if (idx === arr.length - 1 && !c.trim()) return false;
           return true;
         }).map(c => c.trim());
-        if (i === 1 && cells.every(c => /^:?-+:?$/.test(c))) return;  // 表格对齐行
+        if (i === 1 && cells.every(c => /^:?-+:?$/.test(c))) return;
         const tag = i === 0 ? 'th' : 'td';
         out.push('<tr>' + cells.map(c => `<${tag}>${inline(escapeHtml(c))}</${tag}>`).join('') + '</tr>');
       });
-      out.push('</table>');
+      out.push('</table></div>');
       tableBuf = [];
     };
 
@@ -64,7 +75,10 @@
         htmlBlockDepth += (line.match(openRe) || []).length - (line.match(closeRe) || []).length;
         if (htmlBlockDepth <= 0) {
           inHtmlBlock = '';
-          out.push(htmlBlockBuf.join('\n'));
+          let block = htmlBlockBuf.join('\n');
+          block = inlineLinksInHtml(block);
+          if (block.trimStart().startsWith('<table')) block = '<div class="table-wrap">' + block + '</div>';
+          out.push(block);
           htmlBlockBuf = [];
         }
         continue;
@@ -78,7 +92,10 @@
         const closeRe = new RegExp(`</${inHtmlBlock}\\s*>`, 'gi');
         htmlBlockDepth = (line.match(openRe) || []).length - (line.match(closeRe) || []).length;
         if (htmlBlockDepth <= 0) {
-          out.push(htmlBlockBuf.join('\n'));
+          let block = htmlBlockBuf.join('\n');
+          block = inlineLinksInHtml(block);
+          if (block.trimStart().startsWith('<table')) block = '<div class="table-wrap">' + block + '</div>';
+          out.push(block);
           inHtmlBlock = '';
           htmlBlockBuf = [];
         }

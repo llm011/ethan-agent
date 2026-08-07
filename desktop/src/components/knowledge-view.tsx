@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
-import { Loader2, Plus, Trash2, Search, Book, Save, Pencil, X } from "lucide-react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { Loader2, Plus, Trash2, Search, Book, Save, Pencil, X, ChevronRight, ChevronDown, Folder, FolderOpen, FileText } from "lucide-react";
 import { Button } from "@ethan/shared/ui/button";
 import { Input } from "@ethan/shared/ui/input";
 import { ScrollArea } from "@ethan/shared/ui/scroll-area";
@@ -16,6 +16,51 @@ import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
 
 type PanelMode = "view" | "edit" | "add";
 
+// ── 目录树构建 ──────────────────────────────────────────────────────
+type TreeNode = {
+  name: string;
+  path: string;
+  children: Map<string, TreeNode>;
+  items: KnowledgeItem[];
+};
+
+function newNode(name: string, path: string): TreeNode {
+  return { name, path, children: new Map(), items: [] };
+}
+
+function groupSegments(item: KnowledgeItem): string[] {
+  const tag = item.tags?.[0]?.trim();
+  if (!tag) return [];
+  return tag.split("/").map(s => s.trim()).filter(Boolean);
+}
+
+function buildTree(items: KnowledgeItem[]): TreeNode {
+  const root = newNode("", "");
+  for (const item of items) {
+    const segs = groupSegments(item);
+    let node = root;
+    let acc = "";
+    for (const seg of segs) {
+      acc = acc ? `${acc}/${seg}` : seg;
+      let child = node.children.get(seg);
+      if (!child) {
+        child = newNode(seg, acc);
+        node.children.set(seg, child);
+      }
+      node = child;
+    }
+    node.items.push(item);
+  }
+  return root;
+}
+
+function allFolderPaths(node: TreeNode, acc: Set<string>): void {
+  for (const child of node.children.values()) {
+    acc.add(child.path);
+    allFolderPaths(child, acc);
+  }
+}
+
 export function KnowledgeView() {
   const [items, setItems] = useState<KnowledgeItem[]>([]);
   const [selected, setSelected] = useState<KnowledgeItem | null>(null);
@@ -26,6 +71,40 @@ export function KnowledgeView() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [confirmState, setConfirmState] = useState<{ open: boolean; source: string }>({ open: false, source: "" });
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [userToggled, setUserToggled] = useState(false);
+
+  const isSearching = search.trim().length > 0;
+  const tree = useMemo(() => buildTree(items), [items]);
+  const itemCounts = useMemo(() => {
+    const map = new Map<string, number>();
+    function count(node: TreeNode): number {
+      let n = node.items.length;
+      for (const child of node.children.values()) n += count(child);
+      if (node.path) map.set(node.path, n);
+      return n;
+    }
+    count(tree);
+    return map;
+  }, [tree]);
+
+  useEffect(() => {
+    if (!userToggled && !isSearching) {
+      const paths = new Set<string>();
+      allFolderPaths(tree, paths);
+      setExpanded(paths);
+    }
+  }, [tree, userToggled, isSearching]);
+
+  const toggleFolder = useCallback((path: string) => {
+    setUserToggled(true);
+    setExpanded(prev => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  }, []);
 
   // Form fields (shared between add and edit)
   const [editTitle, setEditTitle] = useState("");
@@ -186,36 +265,49 @@ export function KnowledgeView() {
         </div>
 
         <ScrollArea className="flex-1">
-          <div className="p-2 space-y-1">
+          <div className="p-2 space-y-0.5">
             {loading && items.length === 0 ? (
               <div className="flex justify-center py-6">
                 <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
               </div>
             ) : items.length === 0 ? (
-              <div className="p-4 text-xs text-muted-foreground text-center">暂无知识条目</div>
+              <div className="p-4 text-xs text-muted-foreground text-center">
+                {isSearching ? "无匹配结果" : "暂无知识条目"}
+              </div>
+            ) : isSearching ? (
+              items.map(item => {
+                const segs = groupSegments(item);
+                return (
+                  <button
+                    key={item.source}
+                    type="button"
+                    onClick={() => handleSelect(item)}
+                    className={`w-full text-left px-2 py-1.5 rounded-md cursor-pointer transition-colors flex items-start gap-2 ${
+                      selected?.source === item.source && panelMode !== "add"
+                        ? "bg-primary/10 text-primary"
+                        : "hover:bg-muted"
+                    }`}
+                  >
+                    <FileText className="w-3.5 h-3.5 mt-0.5 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0">
+                      <span className="block text-sm truncate">{item.title}</span>
+                      {segs.length > 0 && (
+                        <span className="block text-[10px] text-muted-foreground truncate">{segs.join(" / ")}</span>
+                      )}
+                    </span>
+                  </button>
+                );
+              })
             ) : (
-              items.map(item => (
-                <div
-                  key={item.source}
-                  onClick={() => handleSelect(item)}
-                  className={`p-3 rounded-lg cursor-pointer transition-colors border ${
-                    selected?.source === item.source && panelMode !== "add"
-                      ? "bg-primary/10 border-primary/20"
-                      : "hover:bg-muted border-transparent"
-                  }`}
-                >
-                  <div className="font-medium text-sm truncate">{item.title}</div>
-                  {item.tags && item.tags.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-1">
-                      {item.tags.slice(0, 3).map(tag => (
-                        <span key={tag} className="text-[10px] bg-secondary text-secondary-foreground px-1.5 py-0.5 rounded-full">
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))
+              <TreeView
+                node={tree}
+                depth={0}
+                expanded={expanded}
+                onToggle={toggleFolder}
+                selectedSource={panelMode === "add" ? null : (selected?.source ?? null)}
+                onSelect={handleSelect}
+                itemCounts={itemCounts}
+              />
             )}
           </div>
         </ScrollArea>
@@ -327,5 +419,78 @@ export function KnowledgeView() {
         )}
       </div>
     </div>
+  );
+}
+
+// ── 目录树渲染 ──────────────────────────────────────────────────────
+function TreeView({
+  node,
+  depth,
+  expanded,
+  onToggle,
+  selectedSource,
+  onSelect,
+  itemCounts,
+}: {
+  node: TreeNode;
+  depth: number;
+  expanded: Set<string>;
+  onToggle: (path: string) => void;
+  selectedSource: string | null;
+  onSelect: (item: KnowledgeItem) => void;
+  itemCounts: Map<string, number>;
+}) {
+  const folders = Array.from(node.children.values()).sort((a, b) => a.name.localeCompare(b.name));
+  const items = [...node.items].sort((a, b) => a.title.localeCompare(b.title));
+
+  return (
+    <>
+      {folders.map(child => {
+        const isOpen = expanded.has(child.path);
+        const count = itemCounts.get(child.path) ?? 0;
+        return (
+          <div key={child.path}>
+            <button
+              type="button"
+              onClick={() => onToggle(child.path)}
+              className="w-full text-left px-1.5 py-1 rounded-md hover:bg-muted transition-colors flex items-center gap-1 text-sm"
+              style={{ paddingLeft: `${depth * 12 + 6}px` }}
+            >
+              {isOpen ? <ChevronDown className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+                      : <ChevronRight className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />}
+              {isOpen ? <FolderOpen className="w-3.5 h-3.5 shrink-0 text-primary/70" />
+                      : <Folder className="w-3.5 h-3.5 shrink-0 text-primary/70" />}
+              <span className="truncate font-medium">{child.name}</span>
+              <span className="ml-auto pl-1 text-[10px] text-muted-foreground shrink-0">{count}</span>
+            </button>
+            {isOpen && (
+              <TreeView
+                node={child}
+                depth={depth + 1}
+                expanded={expanded}
+                onToggle={onToggle}
+                selectedSource={selectedSource}
+                onSelect={onSelect}
+                itemCounts={itemCounts}
+              />
+            )}
+          </div>
+        );
+      })}
+      {items.map(item => (
+        <button
+          key={item.source}
+          type="button"
+          onClick={() => onSelect(item)}
+          className={`w-full text-left px-1.5 py-1 rounded-md cursor-pointer transition-colors flex items-center gap-1.5 ${
+            selectedSource === item.source ? "bg-primary/10 text-primary" : "hover:bg-muted"
+          }`}
+          style={{ paddingLeft: `${depth * 12 + 8}px` }}
+        >
+          <FileText className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+          <span className="truncate text-sm">{item.title}</span>
+        </button>
+      ))}
+    </>
   );
 }
