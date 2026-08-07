@@ -144,7 +144,7 @@
   }
 
   function renderMermaidBlocks(container: HTMLElement, dark: boolean) {
-    const blocks = container.querySelectorAll<HTMLElement>('.mermaid');
+    const blocks = container.querySelectorAll<HTMLElement>('pre.mermaid-src');
     if (!blocks.length) return;
     const src = 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js';
     const existing = document.querySelector(`script[src="${src}"]`);
@@ -152,7 +152,17 @@
       const mermaid = (window as any).mermaid;
       if (!mermaid) return;
       mermaid.initialize({ startOnLoad: false, theme: dark ? 'dark' : 'default' });
-      mermaid.run({ nodes: blocks });
+      blocks.forEach(pre => {
+        const code = decodeURIComponent(pre.getAttribute('data-mermaid') || '');
+        if (!code) return;
+        const div = document.createElement('div');
+        div.className = 'mermaid';
+        div.textContent = code;
+        pre.insertAdjacentElement('afterend', div);
+        mermaid.run({ nodes: [div] }).then(() => {
+          pre.style.display = 'none';
+        }).catch(() => {});
+      });
     };
     if (existing && (window as any).mermaid) {
       run();

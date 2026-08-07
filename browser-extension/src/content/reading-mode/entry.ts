@@ -5,6 +5,7 @@
 
   /** 在 HTML 块内将 markdown 行内语法转为 HTML（不转义已有标签） */
   function inlineLinksInHtml(html: string): string {
+    html = html.replace(/`([^`\n]+)`/g, '<code>$1</code>');
     html = html.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
     // 列表项：- / – / * 开头的行（在 italic 之前处理，避免 * 冲突）
     html = html.replace(/^( *)[-–*]\s+(.+)$/gm, (_, indent, text) => {
@@ -113,7 +114,7 @@
           while (codeBuf.length && codeBuf[0].trim() === '') codeBuf.shift();
           while (codeBuf.length && codeBuf[codeBuf.length - 1].trim() === '') codeBuf.pop();
           if (codeLang === 'mermaid') {
-            out.push(`<div class="mermaid">${codeBuf.join('\n')}</div>`);
+            out.push(`<pre class="mermaid-src" data-mermaid="${encodeURIComponent(codeBuf.join('\n'))}"><code class="language-mermaid">${codeBuf.join('\n')}</code></pre>`);
           } else {
             out.push(`<pre><code${codeLang ? ` class="language-${codeLang}"` : ''}>${codeBuf.join('\n')}</code></pre>`);
           }
@@ -205,7 +206,7 @@
       while (codeBuf.length && codeBuf[0].trim() === '') codeBuf.shift();
       while (codeBuf.length && codeBuf[codeBuf.length - 1].trim() === '') codeBuf.pop();
       if (codeLang === 'mermaid') {
-        out.push(`<div class="mermaid">${codeBuf.join('\n')}</div>`);
+        out.push(`<pre class="mermaid-src" data-mermaid="${encodeURIComponent(codeBuf.join('\n'))}"><code class="language-mermaid">${codeBuf.join('\n')}</code></pre>`);
       } else {
         out.push(`<pre><code${codeLang ? ` class="language-${codeLang}"` : ''}>${codeBuf.join('\n')}</code></pre>`);
       }
