@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { Loader2, Plus, Trash2, Search, Book, Save, Pencil, X, ChevronRight, ChevronDown, Folder, FolderOpen, FileText } from "lucide-react";
 import { Button } from "@ethan/shared/ui/button";
 import { Input } from "@ethan/shared/ui/input";
@@ -67,9 +68,12 @@ function allFolderPaths(node: TreeNode, acc: Set<string>): void {
 }
 
 export function KnowledgeView() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
   const [items, setItems] = useState<KnowledgeItem[]>([]);
   const [selected, setSelected] = useState<KnowledgeItem | null>(null);
   const [panelMode, setPanelMode] = useState<PanelMode>("view");
+  const deepLinkHandled = useRef(false);
 
   const [search, setSearch] = useState("");
   const [searchMode, setSearchMode] = useState<"keyword" | "semantic">("keyword");
@@ -122,6 +126,18 @@ export function KnowledgeView() {
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  useEffect(() => {
+    const sourceParam = searchParams.get("source");
+    if (!sourceParam || deepLinkHandled.current || items.length === 0) return;
+    const target = items.find(i => i.source === sourceParam);
+    if (target) {
+      setSelected(target);
+      setPanelMode("view");
+      deepLinkHandled.current = true;
+      router.replace("/knowledge", { scroll: false });
+    }
+  }, [items, searchParams, router]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
