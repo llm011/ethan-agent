@@ -88,7 +88,7 @@
       '#' + CONTENT_ID + ' code { font-size:14px; border-radius:4px; padding:2px 6px; background:' + (dark ? '#2a2e37' : '#f5f5f5') + '; }',
       '#' + CONTENT_ID + ' pre code { padding:0; background:none; }',
       '#' + CONTENT_ID + ' blockquote { border-left:3px solid ' + (dark ? '#4b5563' : '#d1d5db') + '; padding-left:16px; margin:16px 0; color:' + (dark ? '#9ca3af' : '#6b7280') + '; font-style:italic; }',
-      '#' + CONTENT_ID + ' .callout { border-left:4px solid ' + (dark ? '#34d399' : '#16a34a') + '; border-radius:6px; padding:12px 16px; margin:16px 0; color:' + (dark ? '#d1d5db' : '#1f2937') + '; font-style:normal; line-height:1.7; background:' + (dark ? '#2a2e37' : '#f0fdf4') + '; }',
+      '#' + CONTENT_ID + ' .callout { border-left:4px solid ' + (dark ? '#34d399' : '#16a34a') + '; border-radius:6px; padding:12px 16px; margin:24px 0 16px; color:' + (dark ? '#d1d5db' : '#1f2937') + '; font-style:normal; line-height:1.7; background:' + (dark ? '#2a2e37' : '#f0fdf4') + '; }',
       '#' + CONTENT_ID + ' .callout-red { border-left-color:' + (dark ? '#f87171' : '#dc2626') + '; background:' + (dark ? '#2a2025' : '#fef2f2') + '; }',
       '#' + CONTENT_ID + ' .callout-yellow { border-left-color:' + (dark ? '#fbbf24' : '#d97706') + '; background:' + (dark ? '#2a2820' : '#fffbeb') + '; }',
       '#' + CONTENT_ID + ' .callout-purple { border-left-color:' + (dark ? '#a78bfa' : '#7c3aed') + '; background:' + (dark ? '#252030' : '#f5f3ff') + '; }',
