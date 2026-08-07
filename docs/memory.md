@@ -161,6 +161,13 @@ recall（召回命中/泄漏）、tasks（全链路含 job/准入正确率）。
 tasks 96/96 job 完成、准入 110/110 正确。任何 prompt/阈值/模型改动
 必须用该基线做前后对比。
 
+recall runner 已迁回本仓 `tests/memory_eval/eval_runner_recall.py`（测试基建
+应跟代码同仓演进——曾因分离导致 API drift 未被发现），golden 数据仍留外部仓，
+经 `ETHAN_MEMORY_TRAIN_DATA` 或主仓同级 `ethan-memory-train-data/` 定位。
+`tests/memory_eval/sweep_threshold.py` 扫 `RECALL_L2_MAX` 工作点：
+1.1 时命中率 89.0%（同维度并列事实被阈值截断），1.3 时 100%，泄漏率全程 0%
+（leak 由域隔离保证，与阈值无关）。
+
 ## 卫星组件
 
 - **User Profile**（`user_profile.md`）：7 个固定 section 的手写画像层，

@@ -26,8 +26,19 @@ logger = logging.getLogger(__name__)
 #   阈值即 MERGE_L2_THRESHOLD（配对发现），确定性规则在 admission 里
 MERGE_L2_THRESHOLD = float(os.environ.get("ETHAN_MEMORY_PAIR_L2", "0.7"))
 
-# 召回向量通道的截断：L2 > 1.1 视为完全无关（标定同 daily_consolidation）
-RECALL_L2_MAX = float(os.environ.get("ETHAN_MEMORY_RECALL_L2", "1.1"))
+# 召回向量通道的截断：L2 > 阈值视为无关，在 recall_neighbors 里丢弃。
+#
+# 默认 1.3（曾为 1.1）。实测 1200 条 golden recall 集（见
+# tests/memory_eval/sweep_threshold.py 的阈值扫描）：1.1 时命中率 89.0%，
+# 1.3 时 100%，且泄漏率全程 0%——leak 由域隔离（companion 域在非 companion
+# 模式不召回）+ restricted 不注入保证，与阈值无关，故阈值可安全放宽。
+#
+# 失败根因：同维度前缀的并列事实（"我是谁，做什么的"应召回 name+occupation+
+# expertise 三条），BGE 对其中 2 条打分落在 1.15~1.20，1.1 截断把它们丢了。
+# 1.3 是达到 100% 命中的最低工作点（留余量，不取 1.4 以免无谓放大候选）。
+# 召回条目数实测 1.1→1.3 仅从均值 1.41 升到 1.60、上限不变（跟 seed 数走），
+# 不产生噪声泛滥。
+RECALL_L2_MAX = float(os.environ.get("ETHAN_MEMORY_RECALL_L2", "1.3"))
 
 
 def _vector_store(db_path: Path | None = None):
