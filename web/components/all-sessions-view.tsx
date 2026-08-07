@@ -11,6 +11,19 @@ import { Badge } from "@ethan/shared/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@ethan/shared/ui/select";
 import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
 
+const escapeReg = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const escapeHtml = (s: string) => s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
+const highlight = (text: string, search: string) => {
+  const q = search.trim();
+  if (!q) return escapeHtml(text);
+  const safe = escapeHtml(text);
+  try {
+    return safe.replace(new RegExp(escapeReg(q), 'gi'), m => `<span class="bg-yellow-500/30 text-yellow-500 rounded px-0.5">${m}</span>`);
+  } catch {
+    return safe;
+  }
+};
+
 interface AllSessionsViewProps {
   onSelectSession: (id: string) => void;
 }
@@ -305,9 +318,7 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
                       <h3
                         className="font-semibold text-sm text-card-foreground line-clamp-2 leading-snug group-hover:text-primary transition-colors flex-1 min-w-0 pt-0.5"
                         dangerouslySetInnerHTML={{
-                          __html: search.trim()
-                            ? session.title.replace(new RegExp(search.trim(), 'gi'), match => `<span class="bg-yellow-500/30 text-yellow-500 rounded px-0.5">${match}</span>`)
-                            : session.title
+                          __html: highlight(session.title, search)
                         }}
                       />
                     )}
@@ -331,9 +342,7 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
                     <p
                       className="text-xs text-muted-foreground/70 line-clamp-1 mb-2 pl-[46px]"
                       dangerouslySetInnerHTML={{
-                        __html: search.trim()
-                          ? session.snippet.slice(0, 40).replace(new RegExp(search.trim(), 'gi'), match => `<span class="bg-yellow-500/30 text-yellow-500 rounded px-0.5">${match}</span>`)
-                          : session.snippet.slice(0, 40)
+                        __html: highlight(session.snippet.slice(0, 40), search)
                       }}
                     />
                   )}

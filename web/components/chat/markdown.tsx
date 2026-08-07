@@ -6,7 +6,8 @@ import remarkGfm from "remark-gfm";
 import { CodeBlock } from "@ethan/shared/components/code-block";
 import { PlainCodeBlock } from "@ethan/shared/components/plain-code-block";
 import { MermaidBlock } from "@ethan/shared/components/mermaid-block";
-import { forwardRef } from "react";
+import { forwardRef, useMemo, useState } from "react";
+import { Lightbox, type LightboxImage } from "./lightbox";
 
 // CommonMark 规定 ** 紧内侧不能有空格，否则不渲染加粗。
 // 此函数去掉 AI 生成文本中 ** 内侧的多余空白，修复渲染。
@@ -140,18 +141,58 @@ export const markdownComponents: Components = {
 export const MarkdownContent = forwardRef<
   HTMLDivElement,
   { content: string; className?: string; variant?: "bubble" | "share" }
->(({ content, className, variant = "bubble" }, ref) => (
-  <div
-    ref={ref}
-    className={
-      variant === "share"
-        ? `share-prose ${className ?? ""}`
-        : `prose prose-sm dark:prose-invert max-w-none ${className ?? ""}`
-    }
-  >
-    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-      {fixLatex(fixBold(content))}
-    </ReactMarkdown>
-  </div>
-));
+>(({ content, className, variant = "bubble" }, ref) => {
+  const [lightboxImages, setLightboxImages] = useState<LightboxImage[]>([]);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+
+  const components = useMemo<Components>(() => ({
+    ...markdownComponents,
+    img: ({ src, alt }) => {
+      const url = String(src || "");
+      return (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={url}
+          alt={alt || ""}
+          className="cursor-zoom-in max-h-96 rounded-lg"
+          onClick={() => {
+            setLightboxImages([{ url, title: alt || "" }]);
+            setLightboxIndex(0);
+            setLightboxOpen(true);
+          }}
+        />
+      );
+    },
+  }), []);
+
+  const parsed = useMemo(
+    () => (
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+        {fixLatex(fixBold(content))}
+      </ReactMarkdown>
+    ),
+    [content, components],
+  );
+
+  return (
+    <div
+      ref={ref}
+      className={
+        variant === "share"
+          ? `share-prose ${className ?? ""}`
+          : `prose prose-sm dark:prose-invert max-w-none ${className ?? ""}`
+      }
+    >
+      {parsed}
+      <Lightbox
+        images={lightboxImages}
+        index={lightboxIndex}
+        open={lightboxOpen}
+        onOpenChange={setLightboxOpen}
+        onIndexChange={setLightboxIndex}
+      />
+    </div>
+  );
+});
 MarkdownContent.displayName = "MarkdownContent";
