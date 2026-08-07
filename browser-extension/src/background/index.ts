@@ -21,6 +21,8 @@ import { setupContextMenu, sendToEthan } from './context-menu';
 import {
   startReading,
   readingChat,
+  invalidateFeishuDocCache,
+  fetchFeishuDocMarkdown,
   readingListAnnotations,
   readingCreateAnnotation,
   readingDeleteAnnotation,
@@ -415,6 +417,25 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       }
       const r = await startReading(tabId);
       sendResponse(r);
+    })();
+    return true;
+  }
+
+  if (msg?.type === 'reading:refetch') {
+    (async () => {
+      const tabId = _sender.tab?.id;
+      const url = msg.url as string;
+      if (typeof tabId !== 'number' || !url) {
+        sendResponse({ ok: false, error: 'no_tab_or_url' });
+        return;
+      }
+      await invalidateFeishuDocCache(url);
+      const feishu = await fetchFeishuDocMarkdown(tabId, url, { nocache: true });
+      if (feishu) {
+        sendResponse({ ok: true, markdown: feishu.markdown, title: feishu.title });
+      } else {
+        sendResponse({ ok: false, error: 'fetch_failed' });
+      }
     })();
     return true;
   }

@@ -76,6 +76,8 @@
       });
       // 链接：[text](url)，支持文本中含方括号
       s = s.replace(/\[([^\[\]]*(?:\[[^\]]*\][^\[\]]*)*)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+      // 还原被 escapeHtml 转义的 <span class="mention">@xxx</span>
+      s = s.replace(/&lt;span class=&quot;mention&quot;&gt;(@[^&]+)&lt;\/span&gt;/g, '<span class="mention">$1</span>');
       return s;
     }
 

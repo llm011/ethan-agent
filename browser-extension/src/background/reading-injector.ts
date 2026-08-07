@@ -233,11 +233,21 @@ async function writeFeishuDocCache(url: string, entry: FeishuDocCacheEntry): Pro
   }
 }
 
+export async function invalidateFeishuDocCache(url: string): Promise<void> {
+  try {
+    const all = await chrome.storage.local.get([FEISHU_DOC_CACHE_KEY]);
+    const map: Record<string, FeishuDocCacheEntry> = all[FEISHU_DOC_CACHE_KEY] || {};
+    delete map[url];
+    await chrome.storage.local.set({ [FEISHU_DOC_CACHE_KEY]: map });
+  } catch { /* ignore */ }
+}
+
 /** 通过本地 server 抓飞书文档全文 Markdown（带浏览器缓存 24h，server 端也自带缓存）。
  * 失败返回 null（调用方退回 DOM 抽取方案）。 */
 export async function fetchFeishuDocMarkdown(
   tabId: number,
   url: string,
+  opts?: { nocache?: boolean },
 ): Promise<{ markdown: string; title: string; url: string; length: number } | null> {
   if (!isFeishuDocUrl(url)) {
     console.log('[EthanBrowser] feishu-doc: URL not recognized as feishu doc:', url);
@@ -246,10 +256,12 @@ export async function fetchFeishuDocMarkdown(
   console.log('[EthanBrowser] feishu-doc: detected feishu doc URL, fetching via API:', url);
 
   // 先查浏览器 storage 的缓存，避免即使有 /tmp 缓存仍要走 HTTP 往返
-  const cached = await readFeishuDocCache(url);
-  if (cached) {
-    console.log('[EthanBrowser] feishu-doc: hit browser cache');
-    return { markdown: cached.markdown, title: cached.title, url: cached.url, length: cached.length };
+  if (!opts?.nocache) {
+    const cached = await readFeishuDocCache(url);
+    if (cached) {
+      console.log('[EthanBrowser] feishu-doc: hit browser cache');
+      return { markdown: cached.markdown, title: cached.title, url: cached.url, length: cached.length };
+    }
   }
 
   const cfg = await readConfig();
@@ -263,7 +275,7 @@ export async function fetchFeishuDocMarkdown(
     const res = await fetch(apiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.token}` },
-      body: JSON.stringify({ url, nocache: false, renderer: 'chrome' }),
+      body: JSON.stringify({ url, nocache: !!opts?.nocache, renderer: 'chrome' }),
     });
     if (!res.ok) {
       const text = await res.text().catch(() => '');

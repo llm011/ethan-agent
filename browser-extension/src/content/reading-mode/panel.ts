@@ -81,7 +81,7 @@
       '      <!-- Popover Settings Menu -->',
       '      <div id="__ethan_reading_settings_menu" style="display:none;position:absolute;top:30px;right:0;z-index:20;width:190px;padding:6px;border-radius:10px;background:' + (dark ? '#2a2e37' : '#fff') + ';border:1px solid ' + (dark ? '#374151' : '#e5e7eb') + ';box-shadow:0 10px 25px rgba(0,0,0,0.15)">',
       '        <button id="__ethan_reading_clear_cache" style="width:100%;text-align:left;padding:8px 10px;border:none;background:none;border-radius:6px;font-size:12px;cursor:pointer;color:' + (dark ? '#e6e8ec' : '#374151') + ';display:flex;align-items:center;gap:6px">',
-      '          <span>🔄</span> <span>清除缓存（重新加载）</span>',
+      '          <span>🔄</span> <span>重新抽取</span>',
       '        </button>',
       '        <div style="margin-top:4px;padding:6px 10px;border-top:1px solid ' + (dark ? '#374151' : '#f3f4f6') + ';font-size:11px;color:' + (dark ? '#6b7280' : '#9ca3af') + '">',
       '          💡 正文可直接编辑 · Esc 退出',
@@ -171,10 +171,41 @@
     }
 
     getPanelEl('__ethan_reading_clear_cache')!.onclick = () => {
-      chrome.storage.local.remove([storageKey()], () => {
-        showToast('已清除缓存');
-        exitReading();
-        setTimeout(() => enterReading(lastPresetOpts), 400);
+      const btn = getPanelEl('__ethan_reading_clear_cache')!;
+      btn.style.opacity = '0.5';
+      btn.style.pointerEvents = 'none';
+      showToast('正在重新抽取…');
+      chrome.runtime.sendMessage({ type: 'reading:refetch', url: currentUrl }, (resp) => {
+        btn.style.opacity = '1';
+        btn.style.pointerEvents = '';
+        if (resp?.ok && resp.markdown) {
+          // 更新 lastPresetOpts 以便后续复用
+          lastPresetOpts = { presetMarkdown: resp.markdown, presetTitle: resp.title || '' };
+          // 直接原地重新渲染
+          const reader = document.getElementById(READER_ID);
+          if (reader) {
+            let md = String(resp.markdown);
+            md = md.replace(/^#\s+[^\n]*\n*/, '');
+            const dark = isDarkMode();
+            const titleHtml = '<h1>' + escapeHtml(resp.title || '') + '</h1>';
+            let hostStr = '';
+            try { hostStr = new URL(currentUrl).hostname; } catch {}
+            const metaHtml = '<p style="font-size:13px;color:#9ca3af;border-bottom:1px solid ' + (dark ? '#374151' : '#e5e7eb') + ';padding-bottom:16px;margin-bottom:24px">' +
+              escapeHtml(hostStr) + ' · 已从飞书 API 拉取全文</p>';
+            reader.innerHTML = titleHtml + metaHtml + mdToHtml(md);
+            reader.scrollTop = 0;
+          }
+          // 清掉旧 local 缓存再保存新内容
+          chrome.storage.local.remove([storageKey()], () => { saveContent(); });
+          showToast('抽取完成');
+        } else {
+          showToast('重新抽取失败，请检查后端服务');
+          // fallback：清缓存退出重进
+          chrome.storage.local.remove([storageKey()], () => {
+            exitReading();
+            setTimeout(() => enterReading(lastPresetOpts), 400);
+          });
+        }
       });
     };
 
