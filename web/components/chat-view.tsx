@@ -41,6 +41,9 @@ import { placeholderTitle, mapDetailMessages, isFirstQuerySignificant } from "@/
 import { consumeStream, type ConsumeStreamActions } from "@/components/chat/use-chat-stream";
 import { handleCommand } from "@/components/chat/chat-commands";
 import { useInputStore } from "@/components/chat/use-input-store";
+import { usePreview } from "@/components/preview-panel/preview-context";
+import { PreviewPanel, getStoredPanelSize, storePanelSize } from "@/components/preview-panel/preview-panel";
+import { ResizeHandle } from "@/components/preview-panel/resize-handle";
 
 interface ChatViewProps {
   initialSessionId?: string;
@@ -93,6 +96,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const inputStore = useInputStore();
   const inputStoreRef = useRef(inputStore);
   inputStoreRef.current = inputStore;
+
+  const preview = usePreview();
 
   const fetchAnnotationsFor = async (msgs: Message[]) => {
     const ids = msgs.filter((m) => m.role === "assistant" && m.id != null).map((m) => m.id as number);
@@ -495,8 +500,30 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   };
   handleSendRef.current = handleSend;
 
+  const previewOpen = !!preview.file;
+  const panelWidthRef = useRef(getStoredPanelSize());
+  const [panelWidth, setPanelWidth] = useState(() => getStoredPanelSize());
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const handleResize = useCallback((deltaX: number) => {
+    const container = containerRef.current;
+    if (!container) return;
+    const totalWidth = container.offsetWidth;
+    const newPct = Math.max(20, Math.min(60, panelWidthRef.current + (-deltaX / totalWidth) * 100));
+    setPanelWidth(newPct);
+  }, []);
+
+  const handleResizeEnd = useCallback(() => {
+    setPanelWidth((current) => {
+      panelWidthRef.current = current;
+      storePanelSize(current);
+      return current;
+    });
+  }, []);
+
   return (
-    <div className="flex flex-col flex-1 min-h-0">
+    <div ref={containerRef} className="flex flex-1 min-h-0">
+      <div className="flex flex-col flex-1 min-w-0 min-h-0">
       <ChatHeader
         sessionId={activeSession}
         title={sessionTitle}
@@ -612,6 +639,16 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           onQueueReorder={inputStore.reorderQueue}
         />
       </div>
+    </div>
+
+      {previewOpen && (
+        <>
+          <ResizeHandle onResize={handleResize} onResizeEnd={handleResizeEnd} />
+          <div className="shrink-0 h-full overflow-hidden" style={{ width: `${panelWidth}%` }}>
+            <PreviewPanel />
+          </div>
+        </>
+      )}
     </div>
   );
 }
