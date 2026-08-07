@@ -51,6 +51,9 @@
     // ISV 嵌入块：从原始页面 DOM 提取 iframe 嵌入
     embedIsvBlocks(content);
 
+    // 表格列宽手动拖拽调整
+    setupColumnResize(content);
+
     // 表格 sticky header
     setupStickyTableHeaders(reader);
 
@@ -200,6 +203,106 @@
       } else {
         el.innerHTML = '<div style="padding:16px;border:1px dashed #d1d5db;border-radius:8px;color:#9ca3af;text-align:center;margin:16px 0">⚠️ 嵌入块暂无法在阅读模式中展示</div>';
       }
+    });
+  }
+
+  function setupColumnResize(container: HTMLElement) {
+    const tables = container.querySelectorAll<HTMLTableElement>('table');
+    const pageUrl = location.href;
+
+    tables.forEach((table, tableIdx) => {
+      const headerRow = table.querySelector('thead tr') || table.querySelector('tr');
+      if (!headerRow) return;
+      const ths = headerRow.querySelectorAll<HTMLElement>('th, td');
+      if (!ths.length) return;
+
+      // 确保 table-layout: fixed
+      table.style.tableLayout = 'fixed';
+
+      // 还原保存的列宽
+      const storageKey = `__ethan_colw_${btoa(pageUrl).slice(0, 20)}_${tableIdx}`;
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        try {
+          const widths: number[] = JSON.parse(saved);
+          let colgroup = table.querySelector('colgroup');
+          if (!colgroup) {
+            colgroup = document.createElement('colgroup');
+            table.prepend(colgroup);
+          }
+          colgroup.innerHTML = '';
+          widths.forEach(w => {
+            const col = document.createElement('col');
+            col.style.width = w + 'px';
+            colgroup!.appendChild(col);
+          });
+          table.style.width = widths.reduce((a, b) => a + b, 0) + 'px';
+        } catch {}
+      }
+
+      // 为每个 th 添加拖拽 handle
+      ths.forEach((th, colIdx) => {
+        const handle = document.createElement('div');
+        Object.assign(handle.style, {
+          position: 'absolute', top: '0', right: '0', width: '4px', height: '100%',
+          cursor: 'col-resize', background: 'transparent', zIndex: '3',
+        } as any);
+        handle.addEventListener('mouseenter', () => { handle.style.background = 'rgba(13,148,136,0.4)'; });
+        handle.addEventListener('mouseleave', () => { if (!handle.dataset.dragging) handle.style.background = 'transparent'; });
+
+        th.style.position = 'relative';
+        th.appendChild(handle);
+
+        handle.addEventListener('mousedown', (e: MouseEvent) => {
+          e.preventDefault();
+          e.stopPropagation();
+          handle.dataset.dragging = '1';
+          handle.style.background = 'rgba(13,148,136,0.6)';
+          const startX = e.clientX;
+          const startW = th.offsetWidth;
+
+          const onMove = (ev: MouseEvent) => {
+            const diff = ev.clientX - startX;
+            const newW = Math.max(40, startW + diff);
+            // 更新 col 宽度
+            let colgroup = table.querySelector('colgroup');
+            if (!colgroup) {
+              colgroup = document.createElement('colgroup');
+              ths.forEach(t => {
+                const col = document.createElement('col');
+                col.style.width = t.offsetWidth + 'px';
+                colgroup!.appendChild(col);
+              });
+              table.prepend(colgroup);
+            }
+            const cols = colgroup.querySelectorAll('col');
+            if (cols[colIdx]) (cols[colIdx] as HTMLElement).style.width = newW + 'px';
+            // 更新 table 总宽
+            let total = 0;
+            cols.forEach(col => { total += parseInt((col as HTMLElement).style.width) || 0; });
+            table.style.width = total + 'px';
+          };
+
+          const onUp = () => {
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            delete handle.dataset.dragging;
+            handle.style.background = 'transparent';
+            // 保存列宽
+            const colgroup = table.querySelector('colgroup');
+            if (colgroup) {
+              const widths: number[] = [];
+              colgroup.querySelectorAll('col').forEach(col => {
+                widths.push(parseInt((col as HTMLElement).style.width) || 80);
+              });
+              localStorage.setItem(storageKey, JSON.stringify(widths));
+            }
+          };
+
+          document.addEventListener('mousemove', onMove);
+          document.addEventListener('mouseup', onUp);
+        });
+      });
     });
   }
 
