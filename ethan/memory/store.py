@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
 import time
 from contextlib import contextmanager
@@ -25,7 +26,7 @@ from ethan.memory.records import (
     MemoryStatus,
 )
 
-_SCHEMA_VERSION = "1"
+_SCHEMA_VERSION = "2"
 
 
 class MemoryStore:
@@ -220,6 +221,29 @@ class MemoryStore:
             (_SCHEMA_VERSION,),
         )
         try:
+            # schema v2: 修中文词法通道。v1 用默认 unicode61 tokenizer + 原文索引，
+            # CJK 整段是单个 token，FTS5 是 token 相等匹配不做子串 → 中文 query 全 0
+            # 命中，词法通道形同虚设，召回全压在向量一路。
+            #
+            # 探针（probe_lexical.py）实测四种方案：trigram + OR 三字仍是 0 命中；
+            # 唯一有效的是 **unicode61 + 二字索引 + OR 二字查询**（59.2% 精度 / 24%
+            # case 覆盖）。所以这里保持默认 unicode61 tokenizer，但在写入时把
+            # content/memory_key/searchable_data 都转成 bigram 串（CJK 切二字、ASCII
+            # 词整取），查询侧同样用 bigram OR。token 相等匹配于是能在 bigram 粒度
+            # 命中：「用户偏好用中文交流」→ 索引含「用户」「户偏」「偏好」…，查询
+            # 「中文」→ OR「中文」，命中。
+            #
+            # FTS5 不支持 ALTER，只能 DROP + 重建；数据在 memories 表，重建无损。
+            fts_ver = conn.execute(
+                "SELECT value FROM structured_memory_meta WHERE key='fts_version'"
+            ).fetchone()
+            need_reindex = fts_ver is None or fts_ver[0] != "2"
+            if need_reindex:
+                conn.execute("DROP TABLE IF EXISTS memory_fts")
+                conn.execute(
+                    "INSERT OR REPLACE INTO structured_memory_meta(key, value) "
+                    "VALUES ('fts_version', '2')"
+                )
             conn.execute("""
                 CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
                     memory_id UNINDEXED,
@@ -230,9 +254,29 @@ class MemoryStore:
                 )
             """)
             self._fts_available = True
+            if need_reindex:
+                # DROP+重建后 FTS 表空了，旧库的 active/disputed 记忆不会自动回流——
+                # _sync_fts 只在写入时触发。这里把现存记忆重建索引，否则升级后词法
+                # 通道会在首次写入前持续 0 命中。
+                self._reindex_fts(conn)
         except sqlite3.DatabaseError:
             self._fts_available = False
         conn.commit()
+
+    def _reindex_fts(self, conn: sqlite3.Connection) -> None:
+        """从 memories 表把所有 active/disputed 记忆重建进 memory_fts。
+
+        只在 schema v2 升级时调一次。逐行取 record 再走 _sync_fts，复用 bigram
+        索引逻辑，保证迁移后的索引与正常运行时一致。
+        """
+        if not self._fts_available:
+            return
+        rows = conn.execute(
+            "SELECT * FROM memories WHERE status IN (?, ?)",
+            (MemoryStatus.ACTIVE.value, MemoryStatus.DISPUTED.value),
+        ).fetchall()
+        for row in rows:
+            self._sync_fts(conn, self._record_from_row(row))
 
     @staticmethod
     def _json(value: dict[str, Any]) -> str:
@@ -241,6 +285,31 @@ class MemoryStore:
     @staticmethod
     def _quote_hash(quote: str) -> str:
         return hashlib.sha256(quote.strip().encode("utf-8")).hexdigest()
+
+    # CJK 连续段（含扩展 A 区及常用标点外的表意文字）与 ASCII 词元分别抽取。
+    # 与 tests/memory_eval/probe_lexical.py 的 CJK/ASCII_WORD 保持同口径，避免
+    # 索引侧与查询侧分词不一致导致 MATCH 永远错位。
+    _CJK_RE = re.compile(r"[一-鿿]+")
+    _ASCII_WORD_RE = re.compile(r"[A-Za-z0-9_]+")
+
+    @classmethod
+    def _ngrams(cls, text: str, n: int) -> list[str]:
+        """CJK 段切 n-gram，ASCII 词整取，去重保序。
+
+        这是 FTS 词法通道的索引/查询共用分词器。probe 实测：unicode61 tokenizer
+        对整段 CJK 不分词，trigram（n=3）OR 查询在 120 case 上 0 命中；只有
+        n=2（bigram）能把「用户偏好用中文交流」这类 query 拆成可命中记忆的 token
+        （59.2% 精度 / 15.3% recall / 24% case 覆盖）。所以索引列存 bigram 串、
+        查询侧也用 bigram OR，两侧必须用同一个函数。
+        """
+        out: list[str] = []
+        for run in cls._CJK_RE.findall(text):
+            if len(run) <= n:
+                out.append(run)
+            else:
+                out.extend(run[i : i + n] for i in range(len(run) - n + 1))
+        out.extend(cls._ASCII_WORD_RE.findall(text.lower()))
+        return list(dict.fromkeys(out))
 
     @staticmethod
     def _candidate_fingerprint(candidate: MemoryCandidate) -> str:
@@ -261,10 +330,19 @@ class MemoryStore:
             return
         conn.execute("DELETE FROM memory_fts WHERE memory_id=?", (record.id,))
         if record.status in {MemoryStatus.ACTIVE.value, MemoryStatus.DISPUTED.value}:
+            # 索引列存 bigram 串而非原文：见 _init_schema 里 schema v2 的说明。
+            # content/memory_key 用 bigram；dimension 是离散枚举值，原文整取即可。
             searchable = " ".join(self._flatten(record.structured_data))
             conn.execute(
-                "INSERT INTO memory_fts(memory_id, content, memory_key, dimension, searchable_data) VALUES (?, ?, ?, ?, ?)",
-                (record.id, record.content, record.memory_key, record.dimension, searchable),
+                "INSERT INTO memory_fts(memory_id, content, memory_key, dimension, searchable_data) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    record.id,
+                    " ".join(self._ngrams(record.content, 2)),
+                    " ".join(self._ngrams(record.memory_key, 2)),
+                    record.dimension,
+                    " ".join(self._ngrams(searchable, 2)),
+                ),
             )
 
     @classmethod
@@ -585,23 +663,43 @@ class MemoryStore:
 
         if query.strip() and self._fts_available:
             try:
-                sql = f"""
-                    SELECT m.* FROM memory_fts f JOIN memories m ON m.id=f.memory_id
-                    WHERE memory_fts MATCH ? AND {where}
-                    ORDER BY bm25(memory_fts), m.importance DESC, m.confidence DESC,
-                             m.updated_at DESC, m.id LIMIT ?
-                """
-                rows = conn.execute(sql, [query.strip(), *params, limit]).fetchall()
-                if rows:
-                    return [self._record_from_row(r) for r in rows]
-                # FTS 零命中时落到 LIKE：unicode61 对 CJK 无分词，"用户偏好用中文交流"
-                # 是单个 token，查询"中文" MATCH 成功但 0 行，必须给 LIKE 兜底机会
+                # bigram OR 查询：把 query 切成 2 字符 n-gram（CJK）+ ASCII 整词，
+                # OR 拼 MATCH。与索引侧（_sync_fts 写 bigram 串）同口径，token 相等
+                # 匹配才能命中。OR 意味着 query 的任意一个 bigram 出现在文档里就命中，
+                # 比 AND（默认）宽松，CJK 子串匹配终于能工作。探针实测 trigram(n=3) 全
+                # 0 命中，只有 n=2 有效。
+                terms = self._ngrams(query, 2)
+                if terms:
+                    expr = " OR ".join(f'"{t}"' for t in terms)
+                    sql = f"""
+                        SELECT m.* FROM memory_fts f JOIN memories m ON m.id=f.memory_id
+                        WHERE memory_fts MATCH ? AND {where}
+                        ORDER BY bm25(memory_fts), m.importance DESC, m.confidence DESC,
+                                 m.updated_at DESC, m.id LIMIT ?
+                    """
+                    rows = conn.execute(sql, [expr, *params, limit]).fetchall()
+                    if rows:
+                        return [self._record_from_row(r) for r in rows]
+                # bigram 为空（极短 query）或 FTS 0 命中，落到下面的 LIKE 兜底
             except sqlite3.DatabaseError:
                 pass
         if query.strip():
-            escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-            where += " AND (m.content LIKE ? ESCAPE '\\' OR m.memory_key LIKE ? ESCAPE '\\')"
-            params.extend([f"%{escaped}%", f"%{escaped}%"])
+            # LIKE 兜底：2 字符 bigram OR 匹配。比整串 LIKE 宽松——query 的任意
+            # 2 字符子串出现在 content 或 memory_key 里就命中。bigram FTS 对 query
+            # 与文档无 2 字符重叠时会漏（理论上极少，因为 bigram 粒度够细），这里兜住，
+            # 也兜住 FTS 表不可用的环境。
+            bigrams = self._ngrams(query, 2)
+            if bigrams:
+                like_parts = ["(m.content LIKE ? ESCAPE '\\' OR m.memory_key LIKE ? ESCAPE '\\')"] * len(bigrams)
+                where += f" AND ({' OR '.join(like_parts)})"
+                escaped = [bg.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") for bg in bigrams]
+                for bg in escaped:
+                    params.extend([f"%{bg}%", f"%{bg}%"])
+            else:
+                # 纯 ASCII 单词或单字 query，ngrams 退化为整词，回退整串子串
+                escaped_q = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                where += " AND (m.content LIKE ? ESCAPE '\\' OR m.memory_key LIKE ? ESCAPE '\\')"
+                params.extend([f"%{escaped_q}%", f"%{escaped_q}%"])
         rows = conn.execute(
             f"SELECT m.* FROM memories m WHERE {where} ORDER BY m.importance DESC, "
             "m.confidence DESC, m.updated_at DESC, m.id LIMIT ?",
