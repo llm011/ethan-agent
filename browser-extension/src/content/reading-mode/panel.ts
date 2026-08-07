@@ -174,34 +174,13 @@
     }
 
     getPanelEl('__ethan_reading_refetch')!.onclick = () => {
-      const btn = getPanelEl('__ethan_reading_refetch')!;
-      btn.style.opacity = '0.5';
-      btn.style.pointerEvents = 'none';
       showToast('正在重新抽取…');
-      chrome.runtime.sendMessage({ type: 'reading:refetch', url: currentUrl }, (resp) => {
-        btn.style.opacity = '1';
-        btn.style.pointerEvents = '';
-        if (resp?.ok && resp.markdown) {
-          lastPresetOpts = { presetMarkdown: resp.markdown, presetTitle: resp.title || '' };
-          const reader = document.getElementById(READER_ID);
-          if (reader) {
-            let md = String(resp.markdown);
-            md = md.replace(/^#\s+[^\n]*\n*/, '');
-            const dark = isDarkMode();
-            const titleHtml = '<h1>' + escapeHtml(resp.title || '') + '</h1>';
-            let hostStr = '';
-            try { hostStr = new URL(currentUrl).hostname; } catch {}
-            const metaHtml = '<p style="font-size:13px;color:#9ca3af;border-bottom:1px solid ' + (dark ? '#374151' : '#e5e7eb') + ';padding-bottom:16px;margin-bottom:24px">' +
-              escapeHtml(hostStr) + ' · 已从飞书 API 拉取全文</p>';
-            reader.innerHTML = titleHtml + metaHtml + mdToHtml(md);
-            reader.scrollTop = 0;
-          }
-          chrome.storage.local.remove([storageKey()], () => { saveContent(); });
-          showToast('抽取完成');
-        } else {
-          showToast('重新抽取失败，请检查后端服务');
-        }
-      });
+      exitReading();
+      chrome.storage.local.remove([storageKey()]);
+      // nocache: true 让 background 跳过浏览器缓存+服务端缓存，重新从飞书拉取
+      setTimeout(() => {
+        chrome.runtime.sendMessage({ type: 'reading:start', nocache: true });
+      }, 300);
     };
 
     getPanelEl('__ethan_reading_clear_cache')!.onclick = () => {
