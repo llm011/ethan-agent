@@ -311,11 +311,16 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
             </div>
           )}
           {!dragging && expanded && (
-            <div className="relative">
+            <div className="relative" onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}>
               <button
                 onClick={() => setExpanded(false)}
                 className="absolute top-2 right-2 z-10 h-6 w-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                title="收起编辑器"
+                title="收起编辑器 (Cmd/Ctrl+Enter 发送)"
               >
                 <Minimize2 className="h-3.5 w-3.5" />
               </button>
@@ -323,7 +328,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                 <MdEditor
                   value={input}
                   onChange={setInput}
-                  placeholder="输入 Markdown 内容… (支持预览和分栏模式)"
+                  placeholder="输入 Markdown 内容… (Cmd/Ctrl+Enter 发送)"
                 />
               </div>
             </div>

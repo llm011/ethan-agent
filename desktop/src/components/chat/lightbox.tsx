@@ -66,11 +66,25 @@ export function Lightbox({ images, index, open, onOpenChange, onIndexChange }: L
     });
   }, []);
 
-  const handleWheel = useCallback((e: React.WheelEvent) => {
-    e.preventDefault();
-    if (e.deltaY < 0) zoomIn();
-    else zoomOut();
-  }, [zoomIn, zoomOut]);
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || !open) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      if (e.deltaY < 0) zoomIn();
+      else zoomOut();
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [open, zoomIn, zoomOut]);
+
+  const clampPan = useCallback((x: number, y: number, z: number) => {
+    const maxPan = Math.max(0, (z - 1) * 300);
+    return {
+      x: Math.max(-maxPan, Math.min(maxPan, x)),
+      y: Math.max(-maxPan, Math.min(maxPan, y)),
+    };
+  }, []);
 
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
     if (zoom <= 1) return;
@@ -83,8 +97,8 @@ export function Lightbox({ images, index, open, onOpenChange, onIndexChange }: L
     if (!dragRef.current) return;
     const dx = e.clientX - dragRef.current.startX;
     const dy = e.clientY - dragRef.current.startY;
-    setPan({ x: dragRef.current.panX + dx, y: dragRef.current.panY + dy });
-  }, []);
+    setPan(clampPan(dragRef.current.panX + dx, dragRef.current.panY + dy, zoom));
+  }, [clampPan, zoom]);
 
   const handlePointerUp = useCallback(() => {
     dragRef.current = null;
@@ -198,7 +212,6 @@ export function Lightbox({ images, index, open, onOpenChange, onIndexChange }: L
           className="flex items-center justify-center w-full h-full select-none"
           style={{ cursor: zoom > 1 ? "grab" : "default" }}
           onClick={(e) => e.stopPropagation()}
-          onWheel={handleWheel}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}

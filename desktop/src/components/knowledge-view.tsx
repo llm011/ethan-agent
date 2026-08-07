@@ -76,14 +76,25 @@ export function KnowledgeView() {
 
   const isSearching = search.trim().length > 0;
   const tree = useMemo(() => buildTree(items), [items]);
-  const [autoExpandedFor, setAutoExpandedFor] = useState<TreeNode | null>(null);
+  const itemCounts = useMemo(() => {
+    const map = new Map<string, number>();
+    function count(node: TreeNode): number {
+      let n = node.items.length;
+      for (const child of node.children.values()) n += count(child);
+      if (node.path) map.set(node.path, n);
+      return n;
+    }
+    count(tree);
+    return map;
+  }, [tree]);
 
-  if (!userToggled && !isSearching && tree !== autoExpandedFor) {
-    const paths = new Set<string>();
-    allFolderPaths(tree, paths);
-    setExpanded(paths);
-    setAutoExpandedFor(tree);
-  }
+  useEffect(() => {
+    if (!userToggled && !isSearching) {
+      const paths = new Set<string>();
+      allFolderPaths(tree, paths);
+      setExpanded(paths);
+    }
+  }, [tree, userToggled, isSearching]);
 
   const toggleFolder = useCallback((path: string) => {
     setUserToggled(true);
@@ -295,6 +306,7 @@ export function KnowledgeView() {
                 onToggle={toggleFolder}
                 selectedSource={panelMode === "add" ? null : (selected?.source ?? null)}
                 onSelect={handleSelect}
+                itemCounts={itemCounts}
               />
             )}
           </div>
@@ -418,6 +430,7 @@ function TreeView({
   onToggle,
   selectedSource,
   onSelect,
+  itemCounts,
 }: {
   node: TreeNode;
   depth: number;
@@ -425,6 +438,7 @@ function TreeView({
   onToggle: (path: string) => void;
   selectedSource: string | null;
   onSelect: (item: KnowledgeItem) => void;
+  itemCounts: Map<string, number>;
 }) {
   const folders = Array.from(node.children.values()).sort((a, b) => a.name.localeCompare(b.name));
   const items = [...node.items].sort((a, b) => a.title.localeCompare(b.title));
@@ -433,7 +447,7 @@ function TreeView({
     <>
       {folders.map(child => {
         const isOpen = expanded.has(child.path);
-        const count = countItems(child);
+        const count = itemCounts.get(child.path) ?? 0;
         return (
           <div key={child.path}>
             <button
@@ -457,6 +471,7 @@ function TreeView({
                 onToggle={onToggle}
                 selectedSource={selectedSource}
                 onSelect={onSelect}
+                itemCounts={itemCounts}
               />
             )}
           </div>
@@ -478,10 +493,4 @@ function TreeView({
       ))}
     </>
   );
-}
-
-function countItems(node: TreeNode): number {
-  let n = node.items.length;
-  for (const child of node.children.values()) n += countItems(child);
-  return n;
 }

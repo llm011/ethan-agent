@@ -142,29 +142,39 @@ export const MarkdownContent = forwardRef<
   HTMLDivElement,
   { content: string; className?: string; variant?: "bubble" | "share" }
 >(({ content, className, variant = "bubble" }, ref) => {
-  const [lightboxImages, setLightboxImages] = useState<LightboxImage[]>([]);
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [lightboxOpen, setLightboxOpen] = useState(false);
 
+  const allImages = useMemo<LightboxImage[]>(() => {
+    const imgs: LightboxImage[] = [];
+    const imgRe = /!\[([^\]]*)\]\(([^)]+)\)/g;
+    let m: RegExpExecArray | null;
+    while ((m = imgRe.exec(content)) !== null) {
+      imgs.push({ url: m[2], title: m[1] || "" });
+    }
+    return imgs;
+  }, [content]);
+
   const components = useMemo<Components>(() => ({
     ...markdownComponents,
-    img: ({ src, alt }) => {
+    img: ({ src, alt, title }) => {
       const url = String(src || "");
       return (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={url}
           alt={alt || ""}
+          title={title || undefined}
           className="cursor-zoom-in max-h-96 rounded-lg"
           onClick={() => {
-            setLightboxImages([{ url, title: alt || "" }]);
-            setLightboxIndex(0);
+            const idx = allImages.findIndex(img => img.url === url);
+            setLightboxIndex(idx >= 0 ? idx : 0);
             setLightboxOpen(true);
           }}
         />
       );
     },
-  }), []);
+  }), [allImages]);
 
   const parsed = useMemo(
     () => (
@@ -186,7 +196,7 @@ export const MarkdownContent = forwardRef<
     >
       {parsed}
       <Lightbox
-        images={lightboxImages}
+        images={allImages}
         index={lightboxIndex}
         open={lightboxOpen}
         onOpenChange={setLightboxOpen}
