@@ -374,6 +374,7 @@ class OpenAICompatProvider(BaseProvider):
             raise
 
         aiter = resp_iter.__aiter__()
+        _ssl_retried = False  # 流式中途 SSL 断连只重试一次
         while True:
             try:
                 chunk = await asyncio.wait_for(aiter.__anext__(), timeout=_CHUNK_TIMEOUT)
@@ -389,6 +390,39 @@ class OpenAICompatProvider(BaseProvider):
                     f"模型响应超时：超过 {_CHUNK_TIMEOUT} 秒未收到新数据，可能是 API 挂起。"
                     "请稍后重试，或检查网络状况。"
                 )
+            except Exception as e:
+                # 流式读取中途 TLS 记录层失败 / 连接被重置（Docker 网络抖动、中转服务不稳）。
+                # 已产出部分内容时直接当作正常结束，保留已生成内容避免整段丢失；
+                # 未产出任何内容时重试一次。
+                _msg = str(e).lower()
+                is_midstream_break = any(k in _msg for k in (
+                    "record layer failure", "_ssl.c", "ssl", "connection reset",
+                    "peer closed", "unexpected eof", "broken pipe",
+                ))
+                if not is_midstream_break:
+                    raise
+                try:
+                    await resp_iter.aclose()
+                except Exception:
+                    pass
+                # 已有内容或 tool_calls → 优雅收尾，不丢用户已等到的输出
+                if content_buf or final_tool_calls or any(tc.get("args_raw") for tc in tool_calls_acc.values()):
+                    import logging as _log
+                    _log.getLogger("ethan.providers.openai_compat").warning(
+                        "[stream_chat] midstream SSL break, salvaging partial output: %s", e
+                    )
+                    break
+                # 无内容且未重试过 → 重新建连重试一次
+                if _ssl_retried:
+                    raise
+                _ssl_retried = True
+                import logging as _log
+                _log.getLogger("ethan.providers.openai_compat").warning(
+                    "[stream_chat] midstream SSL break with no output, retrying once: %s", e
+                )
+                resp_iter = await self._client.chat.completions.create(**kwargs)  # type: ignore
+                aiter = resp_iter.__aiter__()
+                continue
             delta = chunk.choices[0].delta if chunk.choices else None
 
             # Usage comes in the final chunk (with empty choices or after finish)

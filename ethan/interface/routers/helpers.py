@@ -49,6 +49,9 @@ def _friendly_error(e: Exception, agent) -> str:
                                 "remoteprotocolerror", "connection reset",
                                 "stream ended", "incompleteread", "chunkedencodingerror")):
         return "上游连接在生成中途断开（多见于中转服务不稳）。以上内容已保存，可直接发「继续」补全，或在设置页切换 model 重试。"
+    # TLS 记录层失败：Docker 网络抖动 / 中转服务 TLS 中断，特征是 _ssl.c 行号
+    if "record layer failure" in lower or "ssl" in lower and ("_ssl.c" in lower or "sslerror" in lower):
+        return "上游 TLS 连接中断（record layer failure，多见于容器网络抖动或中转服务不稳）。以上内容已保存，可直接发「继续」补全，或在设置页切换 model 重试。"
     # SQLite database locked — 瞬态并发冲突，任务本身已完成，不应暴露给用户
     if "database is locked" in lower:
         return ""
