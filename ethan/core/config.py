@@ -242,12 +242,6 @@ class DidaConfig(BaseModel):
     enabled: bool = False  # 滴答清单 CLI 插件开关；true 时注册 dida_* 工具
 
 
-class FlomoConfig(BaseModel):
-    # flomo 工具始终注册；写入需 webhook key（secrets），读取需 Mac 客户端登录态。
-    # 此开关仅用于全局禁用（如不需要 flomo 时设 false 跳过注册）。
-    enabled: bool = True
-
-
 class MCPConfig(BaseModel):
     servers: list[MCPServerConfig] = Field(default_factory=list)
 
@@ -257,7 +251,6 @@ class ToolsConfig(BaseModel):
     knowledge: KnowledgeConfig = Field(default_factory=KnowledgeConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     dida: DidaConfig = Field(default_factory=DidaConfig)
-    flomo: FlomoConfig = Field(default_factory=FlomoConfig)
 
 
 class Config(BaseModel):
