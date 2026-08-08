@@ -41,12 +41,13 @@ RUN if [ -n "$APT_MIRROR" ]; then \
 # - fd-find：fd 文件搜索工具（ln -s 为 fd）
 # - curl/git：uv 安装 + 依赖获取 + healthcheck
 # - nodejs/npm：lark-cli 运行时（飞书事件流 WebSocket 长连接依赖）
+# - @suibiji/dida-cli：滴答清单 CLI（DIDA_ENABLED=true 时启用）
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc make \
     ripgrep fd-find \
     curl git ca-certificates \
     nodejs npm \
-    && npm install -g @larksuite/cli \
+    && npm install -g @larksuite/cli @suibiji/dida-cli \
     && ln -s /usr/bin/fdfind /usr/local/bin/fd \
     && rm -rf /var/lib/apt/lists/*
 
