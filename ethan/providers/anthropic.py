@@ -65,10 +65,27 @@ class AnthropicProvider(BaseProvider):
             # Some relays block the default anthropic-python user-agent
             request.headers["user-agent"] = "python-httpx/0.28.1"
 
-        http_client = httpx.AsyncClient(
-            proxy=proxy if proxy else None,
-            event_hooks={"request": [_clean_headers]},
-        )
+        # 默认走 curl_cffi transport：yuntoken 等中转网关拦截 Python httpx 的 TLS 指纹
+        # （ClientHello 阶段 SSL UNEXPECTED_EOF），curl_cffi 模拟 Chrome JA3 能过。
+        # 走 curl_cffi 时 _clean_headers 的去指纹头逻辑仍有用（x-stainless 等），
+        # 但 event_hooks 只在 httpx 原生 client 上生效，curl_cffi transport 在
+        # handle_async_request 里直接读 request.headers，所以这里同步在 transport
+        # 层之外无法 hook——改由 transport 内部透传 headers 时由 SDK 已处理的请求头
+        # 决定。实测 curl_cffi + impersonate=chrome 已足够绕过指纹拦截。
+        # 回退原生 httpx：ETHAN_HTTP_BACKEND=httpx（调试或直连官方 API 时用）。
+        import os
+        backend = os.environ.get("ETHAN_HTTP_BACKEND", "curl").lower()
+        if backend == "httpx":
+            http_client = httpx.AsyncClient(
+                proxy=proxy if proxy else None,
+                event_hooks={"request": [_clean_headers]},
+            )
+        else:
+            from ethan.providers.curl_transport import CurlCffiTransport
+            http_client = httpx.AsyncClient(
+                transport=CurlCffiTransport(proxy=proxy),
+                event_hooks={"request": [_clean_headers]},
+            )
 
         # 空字符串 api_key 会让 SDK 抛 "Could not resolve authentication method"。
         # 转成 None，让 SDK fall back 到 ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN 环境变量。

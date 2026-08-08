@@ -123,6 +123,12 @@ observed 模式可用 `ETHAN_ADMISSION_OBSERVED_MODE=accrual` 切换为：
   融合后对「向量独占」命中施加相对距离断层（`dist - min(dist)`），双通道一致命中
   无条件保留。1200-case 扫参结论：BGE-small-zh INT8 动态范围 0.88-1.22，距离不可分，
   0.25 才不掉 recall 但只省 0.17 条噪声——收益不足，默认关。换 embedding 后可复测。
+- **判官重排 + maxgap 切点**（`ETHAN_MEMORY_RERANK=1` 开启，默认关）：60-case A/B
+  （FTS 修活后的干净候选池）opus-5 判官 P@k 40.6%→92.5%、nDCG 0.720→0.975，maxgap
+  切点 P=77.9% / R=95%、保留 2.7 条。opus 0 fallback 优于 haiku 的 3 个。成本：每次
+  召回 +7-10s 延迟，且 Yuntoken 网关拦 httpx 指纹、需走 curl_cffi transport
+  （`ethan/providers/curl_transport.py`）。候选池 FTS 修活后 8-12 条、0% 低于
+  `MIN_CANDIDATES=4`，判官不会被跳过。
 - 无命中回退 importance top-N（身份类事实始终可用）
 - companion 域仅陪伴模式召回；restricted 永不注入；forget 同步删除向量索引
 
