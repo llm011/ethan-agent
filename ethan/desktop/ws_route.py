@@ -11,7 +11,7 @@ import itertools
 import json
 import logging
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
 
 from ethan.desktop.hub import get_desktop_hub
 
@@ -20,6 +20,21 @@ logger = logging.getLogger("ethan.desktop")
 router = APIRouter()
 
 _name_gen = itertools.count(1)
+
+
+@router.get("/api/desktop/status")
+async def desktop_status(request: Request) -> dict:
+    """诊断接口：返回桌面端 WS 连接状态。供桌面端 / curl 排查连接问题。"""
+    hub = get_desktop_hub()
+    conns = []
+    async with hub._conn_lock:
+        for name, conn in hub._conns.items():
+            conns.append({"name": name, "closed": conn.closed})
+    return {
+        "connected": hub.connected,
+        "connection_count": len(conns),
+        "connections": conns,
+    }
 
 
 def _authenticate(token: str) -> str | None:
