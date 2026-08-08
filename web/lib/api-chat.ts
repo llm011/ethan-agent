@@ -114,6 +114,16 @@ export async function stopGeneration(sessionId: string): Promise<{ ok: boolean; 
   return res.json();
 }
 
+/** 取消单个工具调用（不影响整轮生成）。被取消的工具回灌为「用户已取消」。 */
+export async function cancelToolCall(sessionId: string, toolCallId: string): Promise<{ ok: boolean; cancelled: boolean }> {
+  const res = await fetch(`${API_URL}/chat/${encodeURIComponent(sessionId)}/tool/${encodeURIComponent(toolCallId)}/cancel`, {
+    method: "POST",
+    headers: headers(),
+  });
+  if (!res.ok) return { ok: false, cancelled: false };
+  return res.json();
+}
+
 /** 运行中向当前 session 的 Agent 上下文「补充信息」。
  *  信息会插入到下一轮调模型前的 working 列表末尾（prompt 结尾）。
  *  无活跃 run（已结束）时后端返回 409，这里抛错由调用方提示。 */

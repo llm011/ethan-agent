@@ -54,6 +54,11 @@ class ChatRun:
     # 用户「运行中补充信息」收件箱：inject() 入队，agent loop 每轮开头 drain_injected() 取走。
     # asyncio 单线程下 list.append / clear 原子，无需 lock。
     injected_messages: list[str] = field(default_factory=list)
+    # 当前正在执行的工具 task 引用（tool_call_id → asyncio.Task），由 ToolExecutor 注册/注销。
+    # 用户可按 tool_call_id 取消单个工具而不影响整轮生成。
+    tool_tasks: dict[str, asyncio.Task] = field(default_factory=dict)
+    # 用户主动取消的工具 ID 集合：_run_one 据此区分「单工具取消」与「整轮取消」。
+    cancelled_tool_ids: set[str] = field(default_factory=set)
 
     def emit(self, event: dict) -> None:
         """记录一个事件并扇出给所有当前订阅者（同步，无 await）。"""
@@ -76,6 +81,20 @@ class ChatRun:
         msgs = self.injected_messages.copy()
         self.injected_messages.clear()
         return msgs
+
+    def cancel_tool(self, tool_call_id: str) -> bool:
+        """用户取消单个工具调用：标记 cancelled + cancel 对应 asyncio.Task。
+
+        与 stop()（整轮取消）不同——只终止被点击的工具，其他并行工具继续执行，
+        整轮生成继续（被取消工具的结果回灌为「用户已取消」，由 LLM 决定下一步）。
+        返回是否找到了正在执行的工具 task。
+        """
+        self.cancelled_tool_ids.add(tool_call_id)
+        task = self.tool_tasks.get(tool_call_id)
+        if task is not None and not task.done():
+            task.cancel()
+            return True
+        return False
 
     def subscribe(self) -> tuple[asyncio.Queue, list[dict]]:
         """注册一个订阅者，返回 (队列, 当前缓冲快照)。
@@ -220,6 +239,16 @@ class RunManager:
         if run.task is not None:
             run.task.cancel()
         return True
+
+    def cancel_tool(self, session_id: str, tool_call_id: str, user_id: str | None = None) -> bool:
+        """用户取消单个工具调用（不影响整轮生成）。
+
+        传 user_id 时校验归属，不匹配返回 False（防跨用户取消别人的工具）。
+        返回是否找到了正在执行的工具 task。"""
+        run = self.get(session_id, user_id)
+        if run is None or run.done:
+            return False
+        return run.cancel_tool(tool_call_id)
 
     def create(self, session_id: str, consent: Any = None, user_id: str = "") -> ChatRun:
         """为 session 创建新 run。若已有未完成的 run，先取消它，避免两个 writer。"""

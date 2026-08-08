@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import {
   ChevronDown, ChevronRight, Terminal, Globe, FileText,
   Search, Clock, CheckCircle2, XCircle, Loader2, Code2, Sparkles,
-  WrapText, Copy, Check, BrainCircuit, MessageSquareText
+  WrapText, Copy, Check, BrainCircuit, MessageSquareText, X, Ban
 } from "lucide-react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
@@ -12,7 +12,7 @@ import type { SearchResultCard } from "../chat/search-card-carousel";
 export interface SubStep {
   tool: string;
   args: string;
-  state: "running" | "done" | "error";
+  state: "running" | "done" | "error" | "cancelled";
   duration_ms?: number;
   result_preview?: string;
 }
@@ -21,7 +21,7 @@ export interface ToolStep {
   tool: string;
   args: string;
   intent?: string;
-  state: "running" | "done" | "error";
+  state: "running" | "done" | "error" | "cancelled";
   duration_ms?: number;
   result_preview?: string;
   result_detail?: string;
@@ -42,6 +42,8 @@ interface ToolTimelineProps {
   onHighlightDone?: () => void;
   /** 老会话回退：step 上没有 cards 时，用消息级 cards 兜底（避免历史数据丢失） */
   messageCards?: SearchResultCard[];
+  /** 取消正在运行的工具调用（tool_call_id）。仅在工具 running 状态可用。 */
+  onCancelTool?: (toolCallId: string) => void;
 }
 
 const TOOL_ICONS: Record<string, React.ReactNode> = {
@@ -60,7 +62,24 @@ const TOOL_ICONS: Record<string, React.ReactNode> = {
 function StateIcon({ state }: { state: ToolStep["state"] }) {
   if (state === "running") return <Loader2 className="h-3 w-3 animate-spin text-blue-400" />;
   if (state === "done")    return <CheckCircle2 className="h-3 w-3 text-green-400" />;
+  if (state === "cancelled") return <Ban className="h-3 w-3 text-muted-foreground" />;
   return <XCircle className="h-3 w-3 text-red-400" />;
+}
+
+/** 取消按钮：点击后立即隐藏（乐观 UI），避免工具恰好完成时点 X 无反馈。
+ *  cancelled=false 时工具已完成，SSE 会很快把 state 从 running 更新为 done/error/cancelled。 */
+function CancelButton({ onClick }: { onClick: (e: React.MouseEvent) => void }) {
+  const [clicked, setClicked] = useState(false);
+  if (clicked) return <Loader2 className="ml-auto h-3 w-3 animate-spin text-muted-foreground/50 shrink-0" />;
+  return (
+    <button
+      className="ml-auto p-0.5 rounded text-muted-foreground/50 hover:text-red-500 hover:bg-red-500/10 transition-colors shrink-0"
+      title="终止此工具"
+      onClick={(e) => { e.stopPropagation(); setClicked(true); onClick(e); }}
+    >
+      <X className="h-3 w-3" />
+    </button>
+  );
 }
 
 function formatDuration(ms?: number) {
@@ -347,7 +366,7 @@ function ArgsPopover({ text, maxW = "max-w-[800px]" }: { text: string; maxW?: st
   );
 }
 
-function StepRow({ step, isLast, highlight, fallbackCards }: { step: ToolStep; isLast: boolean; highlight: boolean; fallbackCards?: SearchResultCard[] }) {
+function StepRow({ step, isLast, highlight, fallbackCards, onCancelTool }: { step: ToolStep; isLast: boolean; highlight: boolean; fallbackCards?: SearchResultCard[]; onCancelTool?: (toolCallId: string) => void }) {
   const hasSubs = step.sub_steps && step.sub_steps.length > 0;
   const [subOpen, setSubOpen] = useState(false);
   const isDelegate = step.tool === "delegate_coding";
@@ -452,6 +471,9 @@ function StepRow({ step, isLast, highlight, fallbackCards }: { step: ToolStep; i
               {formatDuration(step.duration_ms)}
             </span>
           )}
+          {step.state === "running" && onCancelTool && step.id && (
+            <CancelButton onClick={(e) => { e.stopPropagation(); onCancelTool(step.id!); }} />
+          )}
         </div>
 
         {hasSubs && subOpen && (
@@ -523,7 +545,7 @@ function StepRow({ step, isLast, highlight, fallbackCards }: { step: ToolStep; i
   );
 }
 
-export function ToolTimeline({ steps, defaultExpanded = false, highlightIndex, messageCards }: ToolTimelineProps) {
+export function ToolTimeline({ steps, defaultExpanded = false, highlightIndex, messageCards, onCancelTool }: ToolTimelineProps) {
   const hasHighlight = highlightIndex !== undefined;
   const [expanded, setExpanded] = useState(defaultExpanded || hasHighlight);
   const hasRunning = steps.some(s => s.state === "running");
@@ -563,7 +585,7 @@ export function ToolTimeline({ steps, defaultExpanded = false, highlightIndex, m
       {expanded && (
         <div className="px-3 pb-2 space-y-0">
           {steps.map((step, i) => (
-            <StepRow key={i} step={step} isLast={i === steps.length - 1} highlight={i === highlightIndex} fallbackCards={fallbackCards} />
+            <StepRow key={i} step={step} isLast={i === steps.length - 1} highlight={i === highlightIndex} fallbackCards={fallbackCards} onCancelTool={onCancelTool} />
           ))}
         </div>
       )}

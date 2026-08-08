@@ -246,6 +246,8 @@ async def _run_generation(
 
     if session_id:
         agent.session_id = session_id
+    # 关联 ChatRun 到 ToolExecutor：使外部可通过 run.cancel_tool(tool_call_id) 取消单个工具。
+    agent._executor.current_run = run
 
     # consent provider 经 ContextVar 注入；本任务有独立 context，需在任务内设置。
     set_consent_provider(consent)

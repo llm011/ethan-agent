@@ -15,6 +15,7 @@ import {
   streamChat,
   streamResume,
   stopGeneration,
+  cancelToolCall,
   injectMessage,
   updateSessionMode,
   fetchOnboardingStatus,
@@ -179,6 +180,16 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const handleCardAction = useCallback((text: string) => {
     handleSendRef.current(text);
   }, []);
+
+  // 取消正在运行的工具调用（best-effort，静默失败）
+  const handleCancelTool = useCallback(async (toolCallId: string) => {
+    if (!activeSession) return;
+    try {
+      await cancelToolCall(activeSession, toolCallId);
+    } catch {
+      // 静默失败：取消是 best-effort 操作
+    }
+  }, [activeSession]);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const justFinishedRef = useRef<string | null>(null);
@@ -558,6 +569,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         onShare={handleShare}
         onDelete={handleDelete}
         onInject={handleInject}
+        onCancelTool={handleCancelTool}
         annotationsByMessage={annotationsByMessage}
       />
       )}

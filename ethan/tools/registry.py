@@ -24,16 +24,42 @@ class ToolExecutor:
     def __init__(self, registry: ToolRegistry):
         self._registry = registry
         self._cache: dict[str, str] = {}  # 轮次内缓存：key = "tool_name:args_hash"
+        # 当前关联的 ChatRun（由 producer 在 stream_chat 前设置）：用于注册 tool task 引用，
+        # 使外部可通过 run.cancel_tool(tool_call_id) 取消单个工具。
+        self._current_run = None
 
     def reset_cache(self) -> None:
         """每次新的 chat() 调用前重置。"""
         self._cache.clear()
 
+    @property
+    def current_run(self):
+        return self._current_run
+
+    @current_run.setter
+    def current_run(self, run):
+        self._current_run = run
+
     async def execute(self, tool_calls: list[ToolCall]) -> list[ToolResult]:
-        tasks = [self._run_one(tc) for tc in tool_calls]
-        return await asyncio.gather(*tasks)
+        run = self._current_run
+        # 逐个创建 asyncio.Task 并注册到 run.tool_tasks，使外部可按 tool_call_id 取消。
+        tasks: dict[str, asyncio.Task] = {}
+        for tc in tool_calls:
+            t = asyncio.create_task(self._run_one(tc))
+            tasks[tc.id] = t
+            if run is not None:
+                run.tool_tasks[tc.id] = t
+        try:
+            results = await asyncio.gather(*tasks.values())
+        finally:
+            # 无论正常完成还是整轮取消，都清理 task 引用
+            if run is not None:
+                for tc_id in tasks:
+                    run.tool_tasks.pop(tc_id, None)
+        return results
 
     async def _run_one(self, tc: ToolCall) -> ToolResult:
+        run = self._current_run
         tool = self._registry.get(tc.name)
         if tool is None:
             return ToolResult(
@@ -83,6 +109,17 @@ class ToolExecutor:
                     result.content = await maybe_compress(tc.name, result.content)
 
             return result
+        except asyncio.CancelledError:
+            # 区分「用户取消单个工具」与「整轮生成被取消」：
+            # 前者（tc.id in run.cancelled_tool_ids）→ 返回「已取消」结果，生成继续
+            # 后者 → 重新抛出，让 gather → producer 的 CancelledError 分支处理
+            if run is not None and tc.id in run.cancelled_tool_ids:
+                return ToolResult(
+                    tool_call_id=tc.id,
+                    content="用户已取消此工具调用。",
+                    is_cancelled=True,
+                )
+            raise
         except Exception as e:
             return ToolResult(
                 tool_call_id=tc.id,

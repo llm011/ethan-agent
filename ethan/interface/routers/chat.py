@@ -462,6 +462,19 @@ async def stop_generation(session_id: str, user_id: str = Depends(verify_token))
     return {"ok": True, "stopped": stopped}
 
 
+@router.post("/chat/{session_id}/tool/{tool_call_id}/cancel")
+async def cancel_tool(session_id: str, tool_call_id: str, user_id: str = Depends(verify_token)):
+    """取消单个工具调用（不影响整轮生成）。
+
+    被取消的工具结果回灌为「用户已取消」，由 LLM 决定下一步（重试/换工具/直接回答）。
+    返回 {ok, cancelled}：cancelled=True 表示找到了正在执行的工具 task 并已取消。
+    user_id 校验归属，防跨用户取消别人的工具。
+    """
+    from ethan.core.run_manager import RunManager
+    cancelled = RunManager.instance().cancel_tool(session_id, tool_call_id, user_id=user_id)
+    return {"ok": True, "cancelled": cancelled}
+
+
 @router.post("/chat/{session_id}/inject")
 async def inject_message(session_id: str, req: InjectRequest, user_id: str = Depends(verify_token)):
     """运行中向当前 session 的 Agent 上下文「补充信息」。

@@ -12,6 +12,7 @@ import {
   streamResume,
   stopGeneration,
   injectMessage,
+  cancelToolCall,
   updateSessionMode,
   respondConsent,
   respondAskUser,
@@ -160,6 +161,15 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     }
   }, [activeSession]);
 
+  const handleCancelTool = useCallback(async (toolCallId: string) => {
+    if (!activeSession) return;
+    try {
+      await cancelToolCall(activeSession, toolCallId);
+    } catch {
+      // 静默失败：取消是 best-effort 操作，不弹错误提示
+    }
+  }, [activeSession]);
+
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const handleQuote = useCallback((m: Message) => {
@@ -171,6 +181,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const handleCardAction = useCallback((text: string) => {
     handleSendRef.current(text);
   }, []);
+
   const justFinishedRef = useRef<string | null>(null);
 
   // Load session when route param changes
@@ -557,6 +568,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         onShare={handleShare}
         onDelete={handleDelete}
         onInject={handleInject}
+        onCancelTool={handleCancelTool}
         annotationsByMessage={annotationsByMessage}
       />
       )}
