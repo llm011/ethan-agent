@@ -1,6 +1,6 @@
 # Work Notes（项目与文档沉淀）
 
-把零散的工作信息按结构沉淀进知识库：项目进展、业务范围、文档收藏、工作沉淀整理。进展里的时间节点交给 `schedule-manager` 建提醒，涉及具体人时同步到 `people-kb` 人物档案。
+把零散的工作信息按结构沉淀进知识库：项目进展、业务范围、文档收藏、工作沉淀整理。进展里的时间节点交给 `task-and-schedule-manager` 建提醒，涉及具体人时同步到 `people-kb` 人物档案。
 
 > 数据写知识库（`scene` 区分 work/life），外部内容必带 `source`。
 
@@ -8,7 +8,7 @@
 
 ### 1. 项目进展
 
-按 `项目进展 - {业务名} - {项目名}` 记录，每次追加一个日期标题，`>` 引用块写路线/checkpoint。涉及人时注明 `（@姓名）`，含时间节点时触发 schedule-manager 识别。
+按 `项目进展 - {业务名} - {项目名}` 记录，每次追加一个日期标题，`>` 引用块写路线/checkpoint。涉及人时注明 `（@姓名）`，含时间节点时触发 task-and-schedule-manager 识别。
 
 ### 2. 业务范围
 
@@ -27,7 +27,7 @@
 | 技能 | 用途 |
 |---|---|
 | `url-process` | 消息含 URL 时先做平台识别与抓取 |
-| `schedule-manager` | 进展中的时间节点建提醒 |
+| `task-and-schedule-manager` | 进展中的时间节点建提醒 |
 | `people-kb` | 涉及人的进展/沉淀同步人物档案 |
 | `lark-doc` / `lark-minutes` | 读飞书文档/妙记 |
 
@@ -35,4 +35,4 @@
 
 - **隐私边界**：仅存本地知识库
 - **来源可溯**：外部内容必带 source
-- **不重复造时间逻辑**：提醒/定时交 schedule-manager
+- **不重复造时间逻辑**：提醒/定时交 task-and-schedule-manager

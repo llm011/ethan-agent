@@ -1,6 +1,6 @@
 # Team Manager（团队管理）
 
-面向带团队的 leader。基于 `people-kb` 的人物档案，做四件管理向的事：CR 分析、绩效汇总、任务委派、群消息扫描。识别到的人员事件统一写进人物档案（带工作标签），定时任务和提醒交给 `schedule-manager`。
+面向带团队的 leader。基于 `people-kb` 的人物档案，做四件管理向的事：CR 分析、绩效汇总、任务委派、群消息扫描。识别到的人员事件统一写进人物档案（带工作标签），定时任务和提醒交给 `task-and-schedule-manager`。
 
 > 人员事件的**存储格式归 people-kb 管**（`人物 - {姓名}` 档案）；本技能负责识别、统计、汇总、委派。
 
@@ -16,7 +16,7 @@
 
 ### 3. 任务委派
 
-拆 checkpoint、创建飞书任务和子任务、配节点提醒（提醒走 schedule-manager）。任务状态变化写回人物档案。
+拆 checkpoint、创建飞书任务和子任务、配节点提醒（提醒走 task-and-schedule-manager）。任务状态变化写回人物档案。
 
 ### 4. 群消息扫描
 
@@ -31,7 +31,7 @@
 | 技能 | 用途 |
 |---|---|
 | `people-kb` | 人员事件的档案格式与存储 |
-| `schedule-manager` | 节点提醒、群扫描定时任务、CR 周度汇总 |
+| `task-and-schedule-manager` | 节点提醒、群扫描定时任务、CR 周度汇总 |
 | `code-review` | CR 数据拉取与分析 |
 | `lark-task` / `lark-im` / `lark-doc` / `lark-minutes` | 飞书任务、群消息、文档、妙记 |
 

@@ -241,6 +241,12 @@ class DidaConfig(BaseModel):
     enabled: bool = False  # 滴答清单 CLI 插件开关；true 时注册 dida_* 工具
 
 
+class FlomoConfig(BaseModel):
+    # flomo 工具始终注册；写入需 webhook key（secrets），读取需 Mac 客户端登录态。
+    # 此开关仅用于全局禁用（如不需要 flomo 时设 false 跳过注册）。
+    enabled: bool = True
+
+
 class MCPConfig(BaseModel):
     servers: list[MCPServerConfig] = Field(default_factory=list)
 
@@ -250,6 +256,7 @@ class ToolsConfig(BaseModel):
     knowledge: KnowledgeConfig = Field(default_factory=KnowledgeConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     dida: DidaConfig = Field(default_factory=DidaConfig)
+    flomo: FlomoConfig = Field(default_factory=FlomoConfig)
 
 
 class Config(BaseModel):
@@ -455,14 +462,14 @@ def scene_dir(scene: str) -> Path:
 def _init_scene_dirs() -> None:
     """初始化 work + life 两套 scene 目录。
 
-    work: 释放 team.yaml（team-manager 技能）+ timelines.yaml（schedule-manager 技能）模板。
+    work: 释放 team.yaml（team-manager 技能）+ timelines.yaml（task-and-schedule-manager 技能）模板。
     life: 建目录 + 空 timelines.yaml（创业/个人项目，与 work 隔离）。
     已存在的文件不覆盖（保护用户已修改的配置）。
     """
     import shutil
 
     team_templates_dir = Path(__file__).parent.parent / "defaults" / "skills" / "team-manager" / "templates"
-    schedule_templates_dir = Path(__file__).parent.parent / "defaults" / "skills" / "schedule-manager" / "templates"
+    schedule_templates_dir = Path(__file__).parent.parent / "defaults" / "skills" / "task-and-schedule-manager" / "templates"
 
     # work 目录（向后兼容：原 _init_work_dir 逻辑）
     work_dir = scene_dir("work")
@@ -473,7 +480,7 @@ def _init_scene_dirs() -> None:
         dst = work_dir / "team.yaml"
         if src.exists() and not dst.exists():
             shutil.copy2(str(src), str(dst))
-    # timelines.yaml 来自 schedule-manager
+    # timelines.yaml 来自 task-and-schedule-manager
     if schedule_templates_dir.exists():
         src = schedule_templates_dir / "timelines.yaml.example"
         dst = work_dir / "timelines.yaml"

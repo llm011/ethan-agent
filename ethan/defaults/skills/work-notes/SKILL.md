@@ -9,7 +9,7 @@ description: >
   ④ 工作沉淀整理 — 把文档按分类整理进知识库；
   ⑤ 每日例行 — 每天固定要有产品体验/文档阅读/工作梳理三类日程（不固定时间），
      由 heartbeat 心跳在工作日白天范围内检查状态、决定是否提醒，支持飞书通知和跳过记录。
-  进展中的时间节点转交 schedule-manager 识别并建提醒；涉及人时同步到 people-kb 档案。
+  进展中的时间节点转交 task-and-schedule-manager 识别并建提醒；涉及人时同步到 people-kb 档案。
   与 team-manager 分工：本技能记录"事"的工作过程，team-manager 记录"人"的工作结果。
 trigger: "工作进展|项目进展|业务范围|工作沉淀|收藏文档|收藏链接|每日例行|配置每日例行|产品体验|文档阅读|工作梳理|每日回顾|今天不做|每天需要|每天安排|每天固定|每天习惯|每天阅读|每天梳理|固定时间"
 author: Ethan Agent
@@ -23,7 +23,7 @@ metadata:
 # Work Notes（工作过程记录与沉淀）
 
 > 把项目进展、业务范围、文档收藏、工作沉淀、每日例行结构化写入知识库（`scene` 区分 work/life）。
-> 时间节点交 `schedule-manager`；涉及人时同步 `people-kb`。
+> 时间节点交 `task-and-schedule-manager`；涉及人时同步 `people-kb`。
 > **定位**：记录"事"的工作过程。团队成员的工作结果（绩效、CR、表现）归 `team-manager`。
 
 ## 🚫 硬规则
@@ -73,7 +73,7 @@ title 决定文件名。禁止 `/`、`\`、连续 `-`、连续空格、前后空
    - {进展条目}（@{姓名}）
    ```
 3. **涉及具体人的进展** → 同步一条到 people-kb 的 `人物 - {姓名}` 档案（格式见 people-kb 的 `references/profile-format.md`）
-4. **含时间节点**（如"8.15 完成"）→ 转交 `schedule-manager` 走定时信号识别
+4. **含时间节点**（如"8.15 完成"）→ 转交 `task-and-schedule-manager` 走定时信号识别
 5. 回复：更新了哪些项目、哪些人
 
 ### 项目进展格式
@@ -92,7 +92,7 @@ title 决定文件名。禁止 `/`、`\`、连续 `-`、连续空格、前后空
 ```
 
 - 每次追加一个 `## {YYYY-MM-DD}` 日期标题
-- `>` 引用块写路线/checkpoint（含时间节点，触发 schedule-manager 识别）
+- `>` 引用块写路线/checkpoint（含时间节点，触发 task-and-schedule-manager 识别）
 - 涉及人时注明 `（@{姓名}）`
 
 ### 文档 / 链接收藏
@@ -307,7 +307,7 @@ heartbeat_add(task_type="agent", task="work-notes")
      - {观点2}
    - 启发：{对自己工作的启发}
    ```
-4. 若文档中含时间节点或待办，触发 `schedule-manager` 的定时信号识别
+4. 若文档中含时间节点或待办，触发 `task-and-schedule-manager` 的定时信号识别
 5. 更新 routine-state.json：`reading.done=true`
 
 **3. 工作梳理**
@@ -328,7 +328,7 @@ heartbeat_add(task_type="agent", task="work-notes")
    - 下一步：{具体动作}（@{时间节点}）
    ```
    条目不存在时先 `knowledge_add`（tags: `["routine", "reflection", "{YYYY-MM}"]`）
-4. 时间节点触发 `schedule-manager` 识别流程
+4. 时间节点触发 `task-and-schedule-manager` 识别流程
 5. 更新 routine-state.json：`reflection.done=true`
 
 ### 业务范围维护
@@ -342,7 +342,7 @@ heartbeat_add(task_type="agent", task="work-notes")
 | 技能 | 联动 |
 |---|---|
 | `url-process` | 消息含 URL 时先走它做平台识别与抓取 |
-| `schedule-manager` | 进展中的时间节点转交它建提醒 |
+| `task-and-schedule-manager` | 进展中的时间节点转交它建提醒 |
 | `people-kb` | 涉及人的进展/沉淀同步到人物档案 |
 | `lark-doc` / `lark-minutes` | 读飞书文档/妙记原文（文档阅读例行） |
 | `team-manager` | 分工：本技能记"事"，team-manager 记"人" |
@@ -354,7 +354,7 @@ heartbeat_add(task_type="agent", task="work-notes")
 
 - **隐私边界**：所有记录仅存本地知识库，不上传外部
 - **来源可溯**：外部内容必带 source（R2）
-- **不重复造时间逻辑**：定时提醒交 schedule-manager；每日例行的时间范围检查交 heartbeat
+- **不重复造时间逻辑**：定时提醒交 task-and-schedule-manager；每日例行的时间范围检查交 heartbeat
 - **每日例行不强催**：每类每日最多提醒 `max_reminds_per_day` 次，用户跳过后当天不再提醒
 - **通知渠道不擅自创建**：必须用户明确同意后才配置飞书通知；未配置时不发通知，下次交互时提醒一次
 - **聚焦"事"**：涉及人的工作结果（绩效/CR/表现）转交 team-manager
