@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import AsyncIterator, Optional
 
 import httpx
@@ -13,6 +14,8 @@ from ethan.providers.base import (
     ToolCall,
     ToolDefinition,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _split_system_for_cache(system: str) -> tuple[str, str]:
@@ -58,14 +61,14 @@ class AnthropicProvider(BaseProvider):
         import anthropic  # lazy: SDK is heavy; only load when a provider instance is created
 
         # httpx event hooks must be async; strip SDK fingerprint headers that
-        # third-party relays (yuntoken.vip etc.) block, and replace the user-agent.
+        # some relay gateways block these fingerprint headers, and replace the user-agent.
         async def _clean_headers(request: httpx.Request) -> None:
             for key in [k for k in request.headers if k.lower().startswith("x-stainless")]:
                 del request.headers[key]
             # Some relays block the default anthropic-python user-agent
             request.headers["user-agent"] = "python-httpx/0.28.1"
 
-        # 默认走 curl_cffi transport：yuntoken 等中转网关拦截 Python httpx 的 TLS 指纹
+        # 默认走 curl_cffi transport：某些中转网关拦截 Python httpx 的 TLS 指纹
         # （ClientHello 阶段 SSL UNEXPECTED_EOF），curl_cffi 模拟 Chrome JA3 能过。
         # _clean_headers 的去指纹头逻辑在 curl_cffi 路径上**同样生效**——httpx 在调
         # handle_async_request 之前就执行 request event hooks（_send_handling_redirects），
@@ -79,11 +82,20 @@ class AnthropicProvider(BaseProvider):
                 event_hooks={"request": [_clean_headers]},
             )
         else:
-            from ethan.providers.curl_transport import CurlCffiTransport
-            http_client = httpx.AsyncClient(
-                transport=CurlCffiTransport(proxy=proxy),
-                event_hooks={"request": [_clean_headers]},
-            )
+            try:
+                from ethan.providers.curl_transport import CurlCffiTransport
+                http_client = httpx.AsyncClient(
+                    transport=CurlCffiTransport(proxy=proxy),
+                    event_hooks={"request": [_clean_headers]},
+                )
+            except Exception:
+                # curl_cffi 未安装或初始化失败时自动回退原生 httpx，避免整条 LLM 通道
+                # 因一个 transport 依赖挂掉。手动逃生口仍是 ETHAN_HTTP_BACKEND=httpx。
+                logger.warning("curl_cffi transport 不可用，回退原生 httpx", exc_info=True)
+                http_client = httpx.AsyncClient(
+                    proxy=proxy if proxy else None,
+                    event_hooks={"request": [_clean_headers]},
+                )
 
         # 空字符串 api_key 会让 SDK 抛 "Could not resolve authentication method"。
         # 转成 None，让 SDK fall back 到 ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN 环境变量。

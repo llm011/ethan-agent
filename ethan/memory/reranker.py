@@ -104,6 +104,7 @@ _provider_cache: dict[str, tuple[Any, Any]] = {}
 async def _get_judge_provider(model: str) -> Any:
     """返回按 model 复用的判官 provider，绑定当前事件循环。"""
     import asyncio as _asyncio
+
     from ethan.providers.manager import create_provider
 
     loop = _asyncio.get_running_loop()
@@ -290,7 +291,33 @@ async def rerank_and_cut(
     order = sorted(range(len(memories)), key=lambda i: -scored.get(i, -1.0))
     ranked_scores = [scored.get(i, -1.0) for i in order]
     keep = pick_cut(ranked_scores)
-    kept = [memories[i] for i in order[:keep]]
+
+    # 判官全砍（pick_cut 返回 0，所有候选 < MIN_SCORE）。身份类事实缺一条比多几条
+    # 噪声更贵（PR 注释），且 docstring 约定"任何失败都返回 fallback"。全砍不算失败，
+    # 但空召回的代价更高——调用方显式传了 fallback（shallow，逐域 6+6）时就回退它的
+    # top-1，保住最该注入的一条；没传 fallback 才返回空（保留 MIN_SCORE 的语义）。
+    if keep == 0:
+        if fallback is not None:
+            logger.info("[memory-rerank] model=%s 判官全砍 keep=0，回退 fallback top-1", model)
+            return fb[:1]
+        return []
+
+    kept_idx = order[:keep]
+    # 域配额：并集重排只在两域上做一次（保持单一分数分布、单一断层，见 recall.py
+    # docstring），但并集一刀切会让低分域（companion 情绪类普遍低于 general 事实类）
+    # 整段出局。这里补一个逐域硬保证：输入里出现的每个域至少保住其最高分那条
+    # （score < MIN_SCORE 的域除外），避免 companion 被砍光。
+    top_idx_by_domain: dict[str, int] = {}
+    for i, score in zip(order, ranked_scores):
+        domain = getattr(memories[i], "memory_domain", "general")
+        if domain not in top_idx_by_domain and score >= MIN_SCORE:
+            top_idx_by_domain[domain] = i
+    kept_set = set(kept_idx)
+    for i in top_idx_by_domain.values():
+        if i not in kept_set:
+            kept_idx.append(i)
+            kept_set.add(i)
+    kept = [memories[i] for i in kept_idx]
     logger.info(
         "[memory-rerank] model=%s 候选=%d 保留=%d 分数=%s",
         model, len(memories), len(kept), [round(s, 1) for s in ranked_scores[:8]],

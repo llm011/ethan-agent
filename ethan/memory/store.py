@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 import sqlite3
 import time
@@ -25,6 +26,8 @@ from ethan.memory.records import (
     MemoryRecord,
     MemoryStatus,
 )
+
+logger = logging.getLogger(__name__)
 
 _SCHEMA_VERSION = "2"
 
@@ -240,10 +243,6 @@ class MemoryStore:
             need_reindex = fts_ver is None or fts_ver[0] != "2"
             if need_reindex:
                 conn.execute("DROP TABLE IF EXISTS memory_fts")
-                conn.execute(
-                    "INSERT OR REPLACE INTO structured_memory_meta(key, value) "
-                    "VALUES ('fts_version', '2')"
-                )
             conn.execute("""
                 CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
                     memory_id UNINDEXED,
@@ -258,12 +257,22 @@ class MemoryStore:
                 # DROP+重建后 FTS 表空了，旧库的 active/disputed 记忆不会自动回流——
                 # _sync_fts 只在写入时触发。这里把现存记忆重建索引，否则升级后词法
                 # 通道会在首次写入前持续 0 命中。
+                #
+                # 迁移**必须原子**：fts_version 等 reindex 全部成功后才写。若先写
+                # fts_version=2 再 reindex，_reindex_fts 因某行损坏的 structured_data
+                # 抛异常（见下方 except）时 meta 已标记 v2、索引却半残，下次启动
+                # need_reindex 为 False，词法通道永久降级。后置写入保证失败时旧版本
+                # 仍在 meta，下次启动能重试。
                 self._reindex_fts(conn)
+                conn.execute(
+                    "INSERT OR REPLACE INTO structured_memory_meta(key, value) "
+                    "VALUES ('fts_version', '2')"
+                )
         except Exception:
             # 不只 DatabaseError：_reindex_fts 里 _record_from_row 的 json.loads 可能
             # 因某行损坏的 structured_data 抛 JSONDecodeError（非 sqlite 异常）。
-            # 若漏过这个 except，fts_version=2 已写入但索引不全，下次启动 need_reindex
-            # 为 False，词法通道永久半残。所以任何异常都置 FTS 不可用，下次启动重试。
+            # 任何异常都置 FTS 不可用，回退 LIKE 通道；fts_version 保持旧值（后置写入
+            # 保证的），下次启动 need_reindex 仍为 True，能重试，不会永久降级。
             self._fts_available = False
             logger.warning("memory FTS 初始化失败，回退 LIKE 通道", exc_info=True)
         conn.commit()
@@ -294,7 +303,7 @@ class MemoryStore:
     # CJK 连续段（含扩展 A 区及常用标点外的表意文字）与 ASCII 词元分别抽取。
     # 与 tests/memory_eval/probe_lexical.py 的 CJK/ASCII_WORD 保持同口径，避免
     # 索引侧与查询侧分词不一致导致 MATCH 永远错位。
-    _CJK_RE = re.compile(r"[一-鿿]+")
+    _CJK_RE = re.compile(r"[\u3400-\u9fff]+")
     _ASCII_WORD_RE = re.compile(r"[A-Za-z0-9_]+")
     # bigram 查询项数上限：长 CJK query 会被拆成几百个 bigram，LIKE 兜底每项 2 个
     # 参数，超 SQLite 默认 999 变量上限会抛 "too many SQL variables"。FTS MATCH

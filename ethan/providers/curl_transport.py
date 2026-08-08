@@ -2,7 +2,7 @@
 
 为什么需要这个
 --------------
-yuntoken 等第三方中转网关会拦截 Python httpx 的 TLS 指纹（ClientHello 阶段
+某些第三方中转网关会拦截 Python httpx 的 TLS 指纹（ClientHello 阶段
 `SSL: UNEXPECTED_EOF_WHILE_READING`），但 curl / libcurl 的 TLS 栈能正常握手
 （curl_cffi 实测 200）。anthropic SDK 底层走 httpx，所以整套 LLM 调用链都被卡住。
 
@@ -54,7 +54,7 @@ class _CurlStream(httpx.AsyncByteStream):
 class CurlCffiTransport(httpx.AsyncBaseTransport):
     """用 curl_cffi 发请求的 httpx async transport。
 
-    `impersonate` 默认 'chrome'——yuntoken 拦截的是 Python OpenSSL 的 TLS 指纹，
+    `impersonate` 默认 'chrome'——某些网关拦截的是 Python OpenSSL 的 TLS 指纹，
     模拟 Chrome 的 JA3 能过。如果将来别的网关拦别的指纹，可换 'safari' / 'firefox'。
     """
 

@@ -59,7 +59,7 @@ from eval_runner_precision import (  # noqa: E402
     pick_distractors,
 )
 
-CJK = re.compile(r"[一-鿿]+")
+CJK = re.compile(r"[\u3400-\u9fff]+")
 ASCII_WORD = re.compile(r"[A-Za-z0-9_]+")
 
 
@@ -147,7 +147,7 @@ def main() -> int:
         print(f"找不到 {jsonl}", file=sys.stderr)
         return 2
 
-    all_cases = [json.loads(l) for l in jsonl.read_text(encoding="utf-8").splitlines() if l.strip()]
+    all_cases = [json.loads(line) for line in jsonl.read_text(encoding="utf-8").splitlines() if line.strip()]
     pool = build_distractor_pool(all_cases)
     by_dom: dict[str, list[dict]] = collections.defaultdict(list)
     for c in all_cases:
@@ -212,7 +212,7 @@ def main() -> int:
         print(f"{label:<30}{tot/len(cases):>9.2f}{prec:>7.1%}{rc:>8.1%}"
               f"{ncase/len(cases):>11.0%}")
 
-    print(f"\n=== 通道一致性（向量 vs unicode61+二字索引）===")
+    print("\n=== 通道一致性（向量 vs unicode61+二字索引）===")
     print(f"{'集合':<20}{'条数':>8}{'真值':>7}{'精度':>8}")
     for label, (h, t) in (("双通道一致", agree), ("仅向量", vec_only), ("仅词法", lex_only)):
         print(f"{label:<20}{t:>8}{h:>7}{(h/t if t else 0):>7.1%}")
