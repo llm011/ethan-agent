@@ -101,12 +101,12 @@ metadata:
 | 技能 | 关系 |
 |---|---|
 | `team-manager` | **消费者**：绩效/CR/群扫描识别出的工作事件，写进本技能的 `人物 - {名字}` 时间线（带 `[亮点]/[问题]` 工作标签）。存储格式归本技能管。 |
-| `schedule-manager` | 「X 生日 6.1」「下周约 X 吃饭」这类含人物的时间信号，转交 schedule-manager 建提醒；人物本身信息留在这里。 |
+| `task-and-schedule-manager` | 「X 生日 6.1」「下周约 X 吃饭」这类含人物的时间信号，转交 task-and-schedule-manager 建提醒；人物本身信息留在这里。 |
 | `recall_memory` / `memory_write` | 人物指针的读写通道（R3）。 |
 
 ## 🧹 定期整理（建议配定时任务）
 
-同一个人可能被零散记了多条、或名字写法不一（"张三" vs "老张"）。建议用 `schedule-manager` 配一个低频任务（如每月）做整理，prompt 见 `references/recall-and-dedup.md` 的「定期整理」章节：合并重名档案、去重时间线、补全画像摘要、刷新 memory 指针。
+同一个人可能被零散记了多条、或名字写法不一（"张三" vs "老张"）。建议用 `task-and-schedule-manager` 配一个低频任务（如每月）做整理，prompt 见 `references/recall-and-dedup.md` 的「定期整理」章节：合并重名档案、去重时间线、补全画像摘要、刷新 memory 指针。
 
 ## ⚠️ 约束
 
