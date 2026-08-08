@@ -46,15 +46,6 @@ async def _run_dida(args: list[str], timeout: int = 30) -> str:
         return f"dida error (exit {proc.returncode}): {err_text or out_text}"
     return out_text or "(no output)"
 
-
-def _first_line_or_json(text: str) -> str:
-    """非 JSON 输出取首行，JSON 输出保持原样（模型可读）。"""
-    stripped = text.strip()
-    if stripped.startswith("{") or stripped.startswith("["):
-        return stripped
-    return stripped.splitlines()[0] if stripped else stripped
-
-
 class DidaProjectListTool(BaseTool):
     """列出滴答清单（项目）。"""
 

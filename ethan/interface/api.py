@@ -159,6 +159,12 @@ async def lifespan(app: FastAPI):
     stop_heartbeat()
     stop_idle_sweep()
     await app.state.api_key_store.close()
+    # 关闭 reranker 缓存的判官 provider 连接池（长跑进程退出时释放 fd，见 review）
+    try:
+        from ethan.memory.reranker import _close_judge_providers
+        await _close_judge_providers()
+    except Exception:
+        pass
     # 清理 server PID 文件
     from ethan.watchdog import SERVER_PID_FILE, _remove_pid
     _remove_pid(SERVER_PID_FILE)

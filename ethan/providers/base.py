@@ -119,3 +119,7 @@ class BaseProvider(ABC):
     @property
     @abstractmethod
     def model(self) -> str: ...
+
+    async def close(self) -> None:
+        """释放底层 HTTP 连接。子类持有长连接 client 时覆盖。"""
+        return None
