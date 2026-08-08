@@ -111,6 +111,7 @@ class RoutingConfig(BaseModel):
         "skill_create", "install_skill",
         "browser_session", "browser_tab", "browser_page",
         "ui_card",
+        "desktop_notify",  # 桌面通知：高频且明确，full 档直接可见，避免模型在 Docker/无头环境绕路用 shell
         # deliver_file 不进 base_tools：它会把 home 下任意文件推成聊天里的文件卡片（对外
         # 交付语义），若无条件广播，飞书非主人会话或被注入的消息就能诱导模型交付任意文件，
         # 而它 side_effect=False、ChannelGuardProvider 拦不住。改为在 agent 层「仅 owner
