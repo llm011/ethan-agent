@@ -36,6 +36,24 @@ logger = logging.getLogger(__name__)
 # 词法通道）的活，不是调这个常量能解决的。
 INJECT_MAX = int(os.environ.get("ETHAN_MEMORY_INJECT_MAX", "6"))
 
+# Layer 2 确定性截断：RRF 融合后，对「单向量独占命中」施加相对距离断层截断。
+#
+# 背景：`recall_neighbors` 返回每条候选的 L2 距离，但原来解到 `_distance` 就丢了，
+# 只拿 rank 喂 RRF——距离 0.6 的命中和 1.28 的命中权重完全相同。距离是全链路唯一
+# 的连续相关性信号，丢掉它等于把判别全压在离散 rank 上。
+#
+# 机制（逐 query+domain 自适应，复用判官 maxgap 的相对断层思路，但零 LLM 成本）：
+#   rel_dist = dist - min(dist in this query+domain)
+# 双通道一致命中（FTS∩向量）无条件保留——一致性本身是强信号，RRF 已隐式奖励它
+# （两份倒数相加），Layer 2 不再砍；FTS 独占命中无距离信号，也不参与截断，避免误
+# 杀精确命中；只有「向量独占」命中受 rel_dist <= REL_GAP 约束。
+#
+# probe_distance.py 的 REL_GAP 扫（120 case）给出 go/no-go 判据：
+#   REL_GAP=0.15 → recall 100%、precision 19.3%（vs 当前 17.4%）
+#   REL_GAP=0.10 → recall 95.7%（掉 recall，不能开）
+# ∞ = 关闭（等价改造前行为）。默认 ∞，等 1200-case 扫参确认 recall 仍 100% 后再开。
+REL_GAP = float(os.environ.get("ETHAN_MEMORY_RECALL_REL_GAP", "inf"))
+
 _TYPE_LABELS = {
     "personal_information": "个人信息",
     "preference": "偏好",
@@ -105,9 +123,12 @@ def _collect(
     now = _time.time()
     scores: dict[str, float] = {}
     by_id: dict[str, Any] = {}
+    dist: dict[str, float] = {}           # memory_id → L2 距离（仅向量命中有）
+    fts_ids: set[str] = set()
     for rank, memory in enumerate(fts_hits):
         scores[memory.id] = scores.get(memory.id, 0.0) + 1.0 / (61 + rank)
         by_id[memory.id] = memory
+        fts_ids.add(memory.id)
     for rank, (memory_id, _distance) in enumerate(vec_hits):
         memory = by_id.get(memory_id)
         if memory is None:
@@ -122,6 +143,23 @@ def _collect(
                 continue
             by_id[memory_id] = memory
         scores[memory_id] = scores.get(memory_id, 0.0) + 1.0 / (61 + rank)
+        # 多域调用里同一 id 取最小距离；单次 _collect 内不会重复，这里写一次即可
+        if memory_id not in dist or _distance < dist[memory_id]:
+            dist[memory_id] = _distance
+
+    # Layer 2 确定性截断：相对距离断层。只切「向量独占」命中——双通道一致
+    # （FTS∩向量）无条件保留，FTS 独占无距离不参与。min_dist 逐 query+domain
+    # 自适应标定，不假设悬崖在同一绝对位置。REL_GAP=inf 时整段短路，逐条等于
+    # 改造前。
+    if REL_GAP < float("inf") and dist:
+        min_dist = min(dist.values())
+        keep_ids = {
+            mid for mid, d in dist.items()
+            if d - min_dist <= REL_GAP or mid in fts_ids
+        }
+        # 只在向量独占命中里砍；FTS 独占（无 dist）和双通道一致自然保留
+        by_id = {mid: m for mid, m in by_id.items() if mid in keep_ids or mid not in dist}
+        scores = {mid: s for mid, s in scores.items() if mid in keep_ids or mid not in dist}
 
     merged = sorted(
         by_id.values(),
