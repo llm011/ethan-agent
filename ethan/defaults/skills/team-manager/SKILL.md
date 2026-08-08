@@ -8,7 +8,7 @@ description: >
   ③ 任务委派 — 拆 checkpoint、创建飞书任务、配节点提醒；
   ④ 群消息扫描 — 定时扫团队群，识别值得记录的人员事件。
   识别到的人员事件统一写进 people-kb 的 `人物 - {姓名}` 档案（带工作标签）。
-  定时任务/提醒由 schedule-manager 负责，本技能只负责识别与汇总。
+  定时任务/提醒由 task-and-schedule-manager 负责，本技能只负责识别与汇总。
 trigger: "汇总绩效|绩效总结|绩效报告|绩效草稿|团队总结|周报汇总|CR汇总|CR周报|代码产出|代码统计|本周CR|分配任务|委派|布置任务|安排.*出方案|任务跟踪|checkpoint|拆解任务|团队管理|监控.*群|扫.*群|群消息|群扫描"
 author: Ethan Agent
 license: MIT
@@ -22,7 +22,7 @@ metadata:
 
 > 面向带团队的管理者。人员事件的**存储格式归 `people-kb` 管**（写进 `人物 - {姓名}` 档案）；
 > 本技能负责**识别、统计、汇总、委派**这些管理动作。
-> 定时任务和提醒由 `schedule-manager` 负责。
+> 定时任务和提醒由 `task-and-schedule-manager` 负责。
 
 ## 🚫 硬规则
 
@@ -85,7 +85,7 @@ CR 周报、绩效草稿等内容派生自外部文档/链接时，传 `frontmat
 2. 确认 DDL（用户没给就按复杂度建议后确认）
 3. 拆 checkpoint（模板见 `references/workflow.md`）
 4. 调 `lark-task` 创建主任务 + 子任务
-5. **节点提醒转交 `schedule-manager`**：对每个 checkpoint 调 `schedule_create`（category="one_off"）
+5. **节点提醒转交 `task-and-schedule-manager`**：对每个 checkpoint 调 `schedule_create`（category="one_off"）
 6. 任务状态变化时，`knowledge_edit` 追加到 `人物 - {assignee}` 档案（完成/延期，带标签）
 7. 详见 `references/workflow.md`
 
@@ -95,7 +95,7 @@ CR 周报、绩效草稿等内容派生自外部文档/链接时，传 `frontmat
 
 1. 取群 chat_id（已在群内 @bot 则取当前群）
 2. 确认扫描频率（默认每天 22:00）和窗口（默认 24h）
-3. 调 `schedule-manager` 的 `schedule_create` 建定时任务，prompt 用 `references/group-scan-prompt.md` 模板
+3. 调 `task-and-schedule-manager` 的 `schedule_create` 建定时任务，prompt 用 `references/group-scan-prompt.md` 模板
 4. 触发时拉消息、识别候选、输出去重清单
 5. 用户回复「入库 1,3,5」后 `knowledge_edit` 追加到对应 `人物 - {姓名}`
 6. 详见 `references/group-scan-prompt.md`
@@ -108,7 +108,7 @@ CR 周报、绩效草稿等内容派生自外部文档/链接时，传 `frontmat
 2. 按 `references/analysis.md` 框架提取亮点（数据/架构/业务价值/风险）
 3. 确认归属人
 4. `knowledge_edit` 追加到 `人物 - {姓名}`，带 `[亮点]`/`[问题]`
-5. 文档中的时间节点转交 `schedule-manager` 识别
+5. 文档中的时间节点转交 `task-and-schedule-manager` 识别
 
 ## ⚙️ 配置
 
@@ -119,7 +119,7 @@ CR 周报、绩效草稿等内容派生自外部文档/链接时，传 `frontmat
 | 技能 | 联动 |
 |---|---|
 | `people-kb` | 人员事件的档案格式与存储归它管；本技能往 `人物 - {姓名}` 写工作事件 |
-| `schedule-manager` | 节点提醒、群扫描定时任务、绩效季提醒、CR 周度汇总定时任务 |
+| `task-and-schedule-manager` | 节点提醒、群扫描定时任务、绩效季提醒、CR 周度汇总定时任务 |
 | `code-review` / `bytedance-code-review` | CR 数据拉取与分析 |
 | `lark-task` | 创建飞书任务和子任务 |
 | `lark-im` | 发提醒、扫群消息 |

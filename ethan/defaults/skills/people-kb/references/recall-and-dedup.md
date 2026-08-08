@@ -53,7 +53,7 @@ memory_write(
    - 无相关 → 直接写
 4. 按用户回复执行
 
-## 定期整理（配 schedule-manager 定时任务）
+## 定期整理（配 task-and-schedule-manager 定时任务）
 
 日积月累档案会有噪声：重名分裂、时间线碎片、画像过时。建议每月一次低频整理任务，prompt 模板：
 
@@ -69,4 +69,4 @@ memory_write(
 约束：不臆造、不删除用户可能还需要的信息、合并前先征得确认。写入只用 knowledge_edit。
 ```
 
-配置方式见 `schedule-manager` 技能（category=recurring，如每月 1 号）。
+配置方式见 `task-and-schedule-manager` 技能（category=recurring，如每月 1 号）。

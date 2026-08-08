@@ -104,11 +104,11 @@ PRESET_PLUGINS: list[dict] = [
         "install_source": "work-notes",
     },
     {
-        "name": "schedule-manager",
-        "label": "定时任务",
-        "description": "定时任务管理 / 时间线引擎（声明式周期事件自动触发）",
+        "name": "task-and-schedule-manager",
+        "label": "任务与日程",
+        "description": "统一任务路由（滴答清单/飞书任务/schedule）+ 定时任务 + 时间线引擎",
         "install_type": "builtin_skill",
-        "install_source": "schedule-manager",
+        "install_source": "task-and-schedule-manager",
     },
     {
         "name": "tavily",

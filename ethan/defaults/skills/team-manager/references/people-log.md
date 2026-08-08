@@ -188,7 +188,7 @@ Agent 行为：
 1. **本地存储**：人员日志仅存本地知识库，不发送到其他群或个人
 2. **访问控制**：仅管理者本人可读写
 3. **敏感信息**：薪资、绩效评级等敏感字段不写入 people 日志
-4. **导出限制**：people 日志不包含在 `schedule-manager` 的时间线导出中（仅导出 timelines.yaml + state）
+4. **导出限制**：people 日志不包含在 `task-and-schedule-manager` 的时间线导出中（仅导出 timelines.yaml + state）
 
 ## 示例：新建条目
 
