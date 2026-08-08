@@ -191,6 +191,11 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     }
   }, [activeSession]);
 
+  // 用户点击「操作完成，继续」按钮后，自动发送预设消息让 Agent 继续执行
+  const handleActionConfirm = useCallback((message: string) => {
+    handleSendRef.current(message);
+  }, []);
+
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const justFinishedRef = useRef<string | null>(null);
 
@@ -570,6 +575,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         onDelete={handleDelete}
         onInject={handleInject}
         onCancelTool={handleCancelTool}
+        onActionConfirm={handleActionConfirm}
         annotationsByMessage={annotationsByMessage}
       />
       )}

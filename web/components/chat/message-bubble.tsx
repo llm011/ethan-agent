@@ -18,6 +18,7 @@ import { FileCardView, type FileCard } from "./file-card";
 import { applyHighlights } from "@/lib/highlight";
 import { fetchMessageIntermediate } from "@/lib/api-sessions";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@ethan/shared/ui/tooltip";
+import { ActionConfirmBar } from "@ethan/shared/chat/action-confirm-bar";
 import type { CardData, Message } from "@ethan/shared/chat/types";
 import type { Annotation } from "@/lib/api";
 
@@ -225,10 +226,11 @@ interface MessageBubbleProps {
   onDelete?: (msg: Message) => void;
   onInject?: (content: string) => Promise<{ ok: boolean; error?: string }>;
   onCancelTool?: (toolCallId: string) => void;
+  onActionConfirm?: (message: string) => void;
   annotations?: Annotation[];
 }
 
-export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuote, onCardAction, onRead, onShare, onDelete, onInject, onCancelTool, annotations }: MessageBubbleProps) {
+export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuote, onCardAction, onRead, onShare, onDelete, onInject, onCancelTool, onActionConfirm, annotations }: MessageBubbleProps) {
   const [highlightedStep, setHighlightedStep] = useState<number | undefined>(undefined);
   // 思考过程（thought）默认展开，用户可手动折叠
   const [thoughtOpen, setThoughtOpen] = useState(true);
@@ -488,6 +490,14 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
             )}
             {msg.mcpApps && msg.mcpApps.length > 0 && (
               <McpAppView apps={msg.mcpApps} />
+            )}
+            {onActionConfirm && msg.role === "assistant" && (
+              <ActionConfirmBar
+                content={msg.content}
+                isStreaming={isStreaming}
+                isLast={isLast}
+                onConfirm={onActionConfirm}
+              />
             )}
             <div className="flex justify-end items-center mt-2 gap-1.5 text-[10px] text-muted-foreground/40 tabular-nums flex-wrap">
               {msg.model && (
