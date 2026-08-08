@@ -82,12 +82,19 @@ uv run --with openai python $SCRIPTS/analyze_page_vision.py "<manifest>" --page 
 ### Phase 2 — REDUCE(汇总)
 ```bash
 python $SCRIPTS/merge_analysis.py "<pages_dir>"     # 末行 merged 路径
+# 强烈推荐：同时提取论文图片，供配图使用
+uv run --with pypdf,pillow python $SCRIPTS/extract_paper_content.py "<pdf>" 2>/dev/null  # 末行 useful_images_dir
 ```
 `file_read` 合并后的 `merged_analysis.json`,深度整合(合并同类项/去重/数据成表/创新点↔实验对应),**流式输出最终报告**:
+
+**配图要求(重要,不能只有文字)**:论文解读必须配图,两类都要有:
+1. **从论文提取有价值的图**:上一步 `useful_images_dir` 里有语义命名的图片(`Figure1_xxx_useful.png`),挑 2-4 张最有价值的(核心架构图、主结果图、关键流程图),在报告对应章节插入。插入方式随输出载体而定(飞书文档用 `docs +media-insert`,Markdown 用 `![](path)`)。
+2. **自己画的方法流程图**:把论文方法的核心流程/模块关系/数据流画成 Mermaid,至少 1 张全景流程图。遵循 feishu-writer 的图种速选表与 Mermaid 净化规则(节点名双引号包裹、无斜杠括号 Emoji)。
+
 ```
 # <标题>   **arXiv: <编号>**
 ## 1.执行摘要  ## 2.为什么重要  ## 3.前人工作(对比表)
-## 4.创新点(逐条+技术原理)  ## 5.实验结果(主结果表+消融表)
+## 4.创新点(逐条+技术原理 + 方法流程图)  ## 5.实验结果(主结果表+消融表 + 论文原图)
 ## 总体评价(创新/实用/严谨打星 + 启发)
 ```
 
