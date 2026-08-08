@@ -22,7 +22,6 @@ services:
       # 挂载宿主机 ~/.ethan 目录（直接持久化到本机，方便查看/备份/迁移）
       - ~/.ethan:/root/.ethan
       # 共享宿主机密钥（只读）
-      # 注意：~/.config 挂载已包含 dida-cli token（~/.config/dida-cli/config.json）
       # lark-cli 目录如需持久化，可再加：- ./.lark-cli:/root/.lark-cli
       # gh CLI 配置（只读，可选）。token 认证见下方 GH_TOKEN。
       - ~/.config:/root/.config
@@ -51,8 +50,6 @@ services:
       - ETHAN_AUTH_TOKEN=${ETHAN_AUTH_TOKEN:-}
       - ETHAN_PROXY=${ETHAN_PROXY:-}
       - SEARXNG_BASE_URL=http://searxng:8080
-      # 滴答清单（Dida365）CLI — 在容器内使用需挂载 token
-      - DIDA_ENABLED=${DIDA_ENABLED:-false}
       # Computer Use bridge: 让容器内的 ethan 通过宿主机 cua-bridge 操控桌面
       # 前提: 宿主机已安装 cua-bridge（ethan setup → 桌面自动化-桥接）
       - CUA_BRIDGE_HOST=${CUA_BRIDGE_HOST:-host.docker.internal}
