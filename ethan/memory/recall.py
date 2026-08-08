@@ -123,12 +123,16 @@ def _collect(
     now = _time.time()
     scores: dict[str, float] = {}
     by_id: dict[str, Any] = {}
-    dist: dict[str, float] = {}           # memory_id → L2 距离（仅向量命中有）
-    fts_ids: set[str] = set()
+    # dist / fts_ids 仅 Layer 2（REL_GAP<inf）截断时需要；默认 inf 时跳过构造，
+    # 省掉热路径上每个 hit 的 dict 写入。REL_GAP 开关在模块加载时定，这里分支稳定。
+    use_gap = REL_GAP < float("inf")
+    dist: dict[str, float] | None = {} if use_gap else None
+    fts_ids: set[str] | None = set() if use_gap else None
     for rank, memory in enumerate(fts_hits):
         scores[memory.id] = scores.get(memory.id, 0.0) + 1.0 / (61 + rank)
         by_id[memory.id] = memory
-        fts_ids.add(memory.id)
+        if fts_ids is not None:
+            fts_ids.add(memory.id)
     for rank, (memory_id, _distance) in enumerate(vec_hits):
         memory = by_id.get(memory_id)
         if memory is None:
@@ -143,15 +147,14 @@ def _collect(
                 continue
             by_id[memory_id] = memory
         scores[memory_id] = scores.get(memory_id, 0.0) + 1.0 / (61 + rank)
-        # 多域调用里同一 id 取最小距离；单次 _collect 内不会重复，这里写一次即可
-        if memory_id not in dist or _distance < dist[memory_id]:
+        if dist is not None and (memory_id not in dist or _distance < dist[memory_id]):
             dist[memory_id] = _distance
 
     # Layer 2 确定性截断：相对距离断层。只切「向量独占」命中——双通道一致
     # （FTS∩向量）无条件保留，FTS 独占无距离不参与。min_dist 逐 query+domain
-    # 自适应标定，不假设悬崖在同一绝对位置。REL_GAP=inf 时整段短路，逐条等于
-    # 改造前。
-    if REL_GAP < float("inf") and dist:
+    # 自适应标定，不假设悬崖在同一绝对位置。REL_GAP=inf 时 use_gap=False 整段
+    # 跳过，逐条等于改造前。
+    if dist is not None and fts_ids is not None and dist:
         min_dist = min(dist.values())
         keep_ids = {
             mid for mid, d in dist.items()

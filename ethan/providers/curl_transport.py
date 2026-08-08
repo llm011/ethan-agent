@@ -28,10 +28,14 @@ class _CurlStream(httpx.AsyncByteStream):
     """把 curl_cffi 流式 response 桥接成 httpx AsyncByteStream。
 
     curl_cffi 的 `aiter_content` 产出 bytes，正好是 httpx AsyncByteStream 要的
-    `__aiter__` 协议。`aclose` 关掉底层 curl session，释放连接。
+    `__aiter__` 协议。`aclose` 关掉底层 curl 流，释放连接。
 
     必须显式继承 `httpx.AsyncByteStream`——httpx 在 `_send_single_request` 里用
     `isinstance(response.stream, AsyncByteStream)` 断言，鸭子类型过不了。
+
+    注意**不在这里关 session**：session 由 `CurlCffiTransport` 持有并在请求间复用
+    （见该类的泄漏教训），流关闭只释放本次响应。若把 session 塞进来关，第一个响应
+    读完连接池就被关了，后续请求全部重建。
     """
 
     def __init__(self, curl_response):
@@ -60,18 +64,23 @@ class CurlCffiTransport(httpx.AsyncBaseTransport):
         self._proxy = proxy
         self._verify = verify
         self._timeout = timeout
+        self._session = None  # 懒建，请求间复用；aclose() 统一关闭
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-        from curl_cffi.requests import AsyncSession
+        # 复用 transport 级 session：连接池跨请求保活，省每次 TLS 握手（curl_cffi
+        # impersonate 的握手开销比原生 httpx 大，判官路径每次召回 1-2 次调用，
+        # 新建 session 的握手成本不可忽略）。
+        if self._session is None:
+            from curl_cffi.requests import AsyncSession
+            session_kwargs: dict = {
+                "impersonate": self._impersonate,
+                "verify": self._verify,
+            }
+            if self._proxy:
+                session_kwargs["proxy"] = self._proxy
+            self._session = AsyncSession(**session_kwargs)
 
-        # curl_cffi 的 session 非一次性的话要复用连接池；但 anthropic SDK 每次
-        # 请求都走 transport，这里 per-request 建 session 最简单也最稳。流式响应
-        # 的生命周期由 _CurlStream.aclose 负责。
-        session_kwargs: dict = {"impersonate": self._impersonate, "verify": self._verify}
-        if self._proxy:
-            session_kwargs["proxy"] = self._proxy
-
-        session = AsyncSession(**session_kwargs)
+        session = self._session
         try:
             # curl_cffi 用 data 收 raw bytes（httpx 的 request.content 就是字节）；
             # 空请求体传 None。stream=True 让 curl_cffi 不预读 body，SSE 才能逐块产出。
@@ -86,13 +95,15 @@ class CurlCffiTransport(httpx.AsyncBaseTransport):
                 request_kwargs["data"] = request.content
             resp = await session.request(**request_kwargs)
         except Exception as exc:
-            await session.close()
+            # 会话可能已损坏（连接被网关掐断等），丢弃让下次重建
+            await self._close_session()
             # 转成 httpx 的连接错误，让 anthropic SDK 走它的重试/报错路径
             raise httpx.ConnectError(str(exc) or "curl_cffi connect failed",
                                       request=request) from exc
 
-        # 构造 httpx Response。stream 用 _CurlStream 桥接，非流式调用方会
-        # aread() 迭代到结束。headers 原样透传。
+        # 构造 httpx Response。stream 用 _CurlStream 桥接；session 留在 transport
+        # 上复用，_CurlStream.aclose 只释放本次响应。非流式调用方会 aread()
+        # 迭代到结束。headers 原样透传。
         return httpx.Response(
             status_code=resp.status_code,
             headers=httpx.Headers(resp.headers),
@@ -100,5 +111,13 @@ class CurlCffiTransport(httpx.AsyncBaseTransport):
             request=request,
         )
 
+    async def _close_session(self) -> None:
+        if self._session is not None:
+            try:
+                await self._session.close()
+            except Exception:
+                pass
+            self._session = None
+
     async def aclose(self) -> None:
-        pass
+        await self._close_session()

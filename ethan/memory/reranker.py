@@ -93,6 +93,46 @@ RERANK_TIMEOUT_S = float(os.environ.get("ETHAN_MEMORY_RERANK_TIMEOUT", "30"))
 # persona 走 system，评分标准走 user 轮。这两条的**分工**是实测过的配置，
 # 合并或对调都属于未测组合，见模块 docstring 的 2×2 表。
 _JUDGE_SYSTEM = "你是记忆相关性判官，只输出 JSON 数组，不要解释。"
+
+# 判官 provider 复用缓存：每次召回都 create_provider 会建新的 httpx client +
+# curl_cffi session，调完不关就泄漏连接池（长跑进程 fd 缓涨）。按 model 缓存
+# provider，跨召回复用同一连接池。绑定创建时的事件循环——换循环（测试/重连）
+# 时丢弃重建，避免 "attached to a different loop"。
+_provider_cache: dict[str, tuple[Any, Any]] = {}
+
+
+async def _get_judge_provider(model: str) -> Any:
+    """返回按 model 复用的判官 provider，绑定当前事件循环。"""
+    import asyncio as _asyncio
+    from ethan.providers.manager import create_provider
+
+    loop = _asyncio.get_running_loop()
+    cached = _provider_cache.get(model)
+    if cached is not None:
+        prov, bound_loop = cached
+        if bound_loop is loop:
+            return prov
+        # 循环变了，旧 provider 绑死在旧循环上，关掉重建
+        try:
+            await prov.close()
+        except Exception:
+            pass
+        _provider_cache.pop(model, None)
+    prov = create_provider(model)
+    _provider_cache[model] = (prov, loop)
+    return prov
+
+
+async def _close_judge_providers() -> None:
+    """进程退出 / 测试 teardown 时调，关掉所有缓存的连接池。"""
+    for model in list(_provider_cache):
+        prov, _ = _provider_cache.pop(model)
+        try:
+            await prov.close()
+        except Exception:
+            pass
+
+
 _INSTRUCTION = (
     "下面是一次记忆检索的结果。请判断每条记忆与用户 query 的相关性。\n"
     "打分标准：10=直接回答 query，5=相关但不直接回答，0=完全无关。\n"
@@ -175,9 +215,8 @@ async def _score_candidates(query: str, memories: list[Any], model: str,
     不要改动（见模块 docstring）。
     """
     from ethan.providers.base import Message
-    from ethan.providers.manager import create_provider
 
-    provider = create_provider(model)
+    provider = await _get_judge_provider(model)
     prompt = build_prompt(query, memories)
     last_bad = ""
 

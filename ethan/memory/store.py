@@ -259,8 +259,13 @@ class MemoryStore:
                 # _sync_fts 只在写入时触发。这里把现存记忆重建索引，否则升级后词法
                 # 通道会在首次写入前持续 0 命中。
                 self._reindex_fts(conn)
-        except sqlite3.DatabaseError:
+        except Exception:
+            # 不只 DatabaseError：_reindex_fts 里 _record_from_row 的 json.loads 可能
+            # 因某行损坏的 structured_data 抛 JSONDecodeError（非 sqlite 异常）。
+            # 若漏过这个 except，fts_version=2 已写入但索引不全，下次启动 need_reindex
+            # 为 False，词法通道永久半残。所以任何异常都置 FTS 不可用，下次启动重试。
             self._fts_available = False
+            logger.warning("memory FTS 初始化失败，回退 LIKE 通道", exc_info=True)
         conn.commit()
 
     def _reindex_fts(self, conn: sqlite3.Connection) -> None:
@@ -291,6 +296,11 @@ class MemoryStore:
     # 索引侧与查询侧分词不一致导致 MATCH 永远错位。
     _CJK_RE = re.compile(r"[一-鿿]+")
     _ASCII_WORD_RE = re.compile(r"[A-Za-z0-9_]+")
+    # bigram 查询项数上限：长 CJK query 会被拆成几百个 bigram，LIKE 兜底每项 2 个
+    # 参数，超 SQLite 默认 999 变量上限会抛 "too many SQL variables"。FTS MATCH
+    # 的 OR 项过多也会让查询规划器退化。200 个 bigram 覆盖 ~400 字 CJK query，
+    # 远超召回 query 的正常长度；取前 200（去重保序后）足够覆盖语义。
+    _MAX_QUERY_BIGRAMS = 200
 
     @classmethod
     def _ngrams(cls, text: str, n: int) -> list[str]:
@@ -670,6 +680,8 @@ class MemoryStore:
                 # 0 命中，只有 n=2 有效。
                 terms = self._ngrams(query, 2)
                 if terms:
+                    if len(terms) > self._MAX_QUERY_BIGRAMS:
+                        terms = terms[: self._MAX_QUERY_BIGRAMS]
                     expr = " OR ".join(f'"{t}"' for t in terms)
                     sql = f"""
                         SELECT m.* FROM memory_fts f JOIN memories m ON m.id=f.memory_id
@@ -690,6 +702,8 @@ class MemoryStore:
             # 也兜住 FTS 表不可用的环境。
             bigrams = self._ngrams(query, 2)
             if bigrams:
+                if len(bigrams) > self._MAX_QUERY_BIGRAMS:
+                    bigrams = bigrams[: self._MAX_QUERY_BIGRAMS]
                 like_parts = ["(m.content LIKE ? ESCAPE '\\' OR m.memory_key LIKE ? ESCAPE '\\')"] * len(bigrams)
                 where += f" AND ({' OR '.join(like_parts)})"
                 escaped = [bg.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") for bg in bigrams]

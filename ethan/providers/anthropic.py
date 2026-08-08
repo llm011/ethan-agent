@@ -67,11 +67,9 @@ class AnthropicProvider(BaseProvider):
 
         # 默认走 curl_cffi transport：yuntoken 等中转网关拦截 Python httpx 的 TLS 指纹
         # （ClientHello 阶段 SSL UNEXPECTED_EOF），curl_cffi 模拟 Chrome JA3 能过。
-        # 走 curl_cffi 时 _clean_headers 的去指纹头逻辑仍有用（x-stainless 等），
-        # 但 event_hooks 只在 httpx 原生 client 上生效，curl_cffi transport 在
-        # handle_async_request 里直接读 request.headers，所以这里同步在 transport
-        # 层之外无法 hook——改由 transport 内部透传 headers 时由 SDK 已处理的请求头
-        # 决定。实测 curl_cffi + impersonate=chrome 已足够绕过指纹拦截。
+        # _clean_headers 的去指纹头逻辑在 curl_cffi 路径上**同样生效**——httpx 在调
+        # handle_async_request 之前就执行 request event hooks（_send_handling_redirects），
+        # transport 读到的是已清理的 headers。x-stainless-* 头和 user-agent 都会被剥掉。
         # 回退原生 httpx：ETHAN_HTTP_BACKEND=httpx（调试或直连官方 API 时用）。
         import os
         backend = os.environ.get("ETHAN_HTTP_BACKEND", "curl").lower()
@@ -106,6 +104,15 @@ class AnthropicProvider(BaseProvider):
     @property
     def model(self) -> str:
         return self._model
+
+    async def close(self) -> None:
+        # AsyncAnthropic.aclose() 关底层 httpx.AsyncClient（含 CurlCffiTransport
+        # 的 session 连接池）。reranker 等短生命周期调用方必须显式关闭，否则每个
+        # provider 实例泄漏一个连接池。
+        try:
+            await self._client.close()
+        except Exception:
+            pass
 
     def _to_anthropic_messages(self, messages: list[Message]) -> list[dict]:
         result = []
