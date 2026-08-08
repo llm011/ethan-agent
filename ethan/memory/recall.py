@@ -109,6 +109,39 @@ def _collect(
     return merged[:max_items]
 
 
+def _collect_split(
+    store: MemoryStore, query: str, mode: str, max_items: int
+) -> tuple[list[Any], list[Any]]:
+    """分域收候选，**不合并**。domain 隔离是硬门控——companion 只在 companion 模式取。
+
+    保持分域返回是为了 fallback 能逐域截断：同步版从不对并集做最终截断，
+    companion 模式下 general 和 companion 各拿满 max_items。若在并集上截断，
+    general 满额时 companion 会被整段砍掉。
+    """
+    general = _collect(store, query, domain=MemoryDomain.GENERAL.value, max_items=max_items)
+    companion: list[Any] = []
+    if _is_companion_mode(mode):
+        companion = _collect(
+            store, query, domain=MemoryDomain.COMPANION.value, max_items=max_items
+        )
+    return general, companion
+
+
+def _finalize(store: MemoryStore, hits: list[Any]) -> "RecallResult":
+    """标记已召回 + 格式化。
+
+    touch_recalled 必须在切点之后：被重排砍掉的候选**从未进入 prompt**，若把它们
+    也记上 last_recalled_at/recall_count，召回统计就失真，而这套统计会反过来喂
+    importance 排序，形成自我强化。
+    """
+    try:
+        store.touch_recalled([memory.id for memory in hits])
+    except Exception:
+        logger.debug("structured recall: touch_recalled failed", exc_info=True)
+    lines = [_format_block(memory) for memory in hits]
+    return RecallResult(text="\n".join(lines), count=len(lines), items=lines)
+
+
 @dataclass
 class RecallResult:
     """Structured recall result with metadata for tool-timeline visibility."""
@@ -134,24 +167,77 @@ def build_structured_recall(query: str, *, mode: str = "", max_items: int = 8) -
         return empty
 
     try:
-        general = _collect(store, query, domain=MemoryDomain.GENERAL.value, max_items=max_items)
-        companion: list[Any] = []
-        if _is_companion_mode(mode):
-            companion = _collect(store, query, domain=MemoryDomain.COMPANION.value, max_items=max_items)
-
+        general, companion = _collect_split(store, query, mode, max_items)
         all_hits = general + companion
         if not all_hits:
             return empty
-
-        try:
-            store.touch_recalled([memory.id for memory in all_hits])
-        except Exception:
-            logger.debug("structured recall: touch_recalled failed", exc_info=True)
-
-        lines = [_format_block(memory) for memory in all_hits]
-        return RecallResult(text="\n".join(lines), count=len(lines), items=lines)
+        return _finalize(store, all_hits)
     except Exception:
         logger.debug("structured recall failed", exc_info=True)
+        return empty
+    finally:
+        try:
+            store.close()
+        except Exception:
+            pass
+
+
+async def build_structured_recall_async(
+    query: str, *, mode: str = "", max_items: int = 8,
+    fallback_keep: int | None = None, rerank: bool = True,
+) -> RecallResult:
+    """带 LLM 重排 + 切点的召回。异步调用方应优先用这个。
+
+    与同步版的唯一区别是多一个重排阶段，因此 `max_items` 的语义也变了：
+    同步版里它是**注入上限**，这里它是**候选预算**（宽召回，喂给判官），最终注入
+    条数由 reranker 的切点 + `MAX_KEEP` 硬上限决定。
+
+    `fallback_keep` 是判官不可用时的注入上限，应填调用方**改造前**的 max_items。
+    默认取 `max_items`。两种情形的保真度不同，别混淆：
+
+    - 判官不跑（默认关 / `rerank=False`）：候选预算也收回 `fallback_keep`，
+      结果与改造前**逐条一致**（已用 18 case 验证，含 companion 双域路径）。
+    - 判官跑了但失败：退回的是**宽预算候选池**的 RRF top-`fallback_keep`。它与
+      改造前的窄预算召回**不保证逐条相同**——`_collect` 的 max_items 同时控制
+      FTS limit 与向量 limit(*2)，池子变大后双通道命中会拿到额外 RRF 分，可能
+      挤掉窄预算下靠前的单通道命中。质量不低于改造前，但不是同一个列表。
+
+    重排在两域候选的**并集**上只做一次，不能下推到 `_collect` 里分域各做一次——
+    否则 general 和 companion 会各自算出一个分数分布、各切一个断层，两边按不同
+    标准砍，合起来条数还可能翻倍。domain 隔离仍由 `_collect_split` 硬门控保证。
+    """
+    from ethan.memory.reranker import RERANK_ENABLED, rerank_and_cut
+
+    empty = RecallResult(text="", count=0, items=[])
+    keep = max_items if fallback_keep is None else fallback_keep
+    do_rerank = rerank and RERANK_ENABLED
+    # 判官不跑时**不要**放宽候选预算。`_collect` 的 max_items 同时控制 FTS limit、
+    # 向量 limit 和最终截断，放宽后 RRF 的 top-N 可能与窄预算下不同（多召回的双通道
+    # 命中会挤掉原本靠前的单通道命中）。预算收回 keep → 默认关时逐条等于改造前。
+    budget = max_items if do_rerank else keep
+
+    try:
+        store = MemoryStore()
+    except Exception:
+        logger.debug("structured recall: store unavailable", exc_info=True)
+        return empty
+
+    try:
+        general, companion = _collect_split(store, query, mode, budget)
+        all_hits = general + companion
+        if not all_hits:
+            return empty
+        if do_rerank:
+            # fallback 逐域截断，不在并集上截——companion 模式下 general 占满额度时
+            # 在并集上截会把 companion 整段砍掉，与改造前不符。
+            all_hits = await rerank_and_cut(
+                query, all_hits, fallback=general[:keep] + companion[:keep]
+            )
+            if not all_hits:
+                return empty
+        return _finalize(store, all_hits)
+    except Exception:
+        logger.debug("structured recall (async) failed", exc_info=True)
         return empty
     finally:
         try:
