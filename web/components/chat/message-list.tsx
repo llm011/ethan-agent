@@ -22,10 +22,11 @@ interface MessageListProps {
   onShare?: (msg: Message) => void;
   onDelete?: (msg: Message) => void;
   onInject?: (content: string) => Promise<{ ok: boolean; error?: string }>;
+  onCancelTool?: (toolCallId: string) => void;
   annotationsByMessage?: Record<number, Annotation[]>;
 }
 
-export function MessageList({ messages, streaming, sessionId, onQuote, onCardAction, onRead, onShare, onDelete, onInject, annotationsByMessage }: MessageListProps) {
+export function MessageList({ messages, streaming, sessionId, onQuote, onCardAction, onRead, onShare, onDelete, onInject, onCancelTool, annotationsByMessage }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
@@ -178,6 +179,7 @@ export function MessageList({ messages, streaming, sessionId, onQuote, onCardAct
             onShare={onShare}
             onDelete={onDelete}
             onInject={onInject}
+            onCancelTool={onCancelTool}
             annotations={msg.id != null ? annotationsByMessage?.[msg.id] : undefined}
           />
           </div>

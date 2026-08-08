@@ -2,6 +2,7 @@ import asyncio
 import os
 import re
 import shutil
+import signal
 
 from ethan.tools.base import BaseTool
 
@@ -31,6 +32,24 @@ _DANGEROUS_PATTERNS = [
     r'\bgit\b.*\b(?:reset\s+--hard|clean\s+-\w*[fd]|push\s+.*--force|push\s+.*-f)\b',  # 破坏性 git
 ]
 _DANGEROUS_RE = re.compile("|".join(_DANGEROUS_PATTERNS))
+
+
+def _kill_process_group(proc: asyncio.subprocess.Process) -> None:
+    """Kill 整个进程组（含孙进程），兼容进程已退出的情况。
+
+    start_new_session=True 时子进程是进程组 leader，os.killpg 能传播 SIGKILL 给所有子进程。
+    进程已退出则 getpgid 抛 ProcessLookupError，静默忽略。
+    """
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+    except Exception:
+        pass
+    try:
+        proc.wait()
+    except Exception:
+        pass
 
 
 class ShellTool(BaseTool):
@@ -100,22 +119,26 @@ class ShellTool(BaseTool):
                 env.update(load_secret_env())
             except Exception:
                 pass
+            # start_new_session=True 使子进程成为新会话/进程组的 leader，
+            # 这样 os.killpg 可以一把杀掉整个进程组（包括 shell 派生的孙进程），
+            # 避免 proc.kill() 只杀 shell 本身、子进程（python/管道/&后台）继续跑的问题。
             proc = await asyncio.create_subprocess_shell(
                 command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
                 env=env,
                 cwd=os.path.expanduser("~"),  # 默认 home 目录，避免 launchd 下 cwd 为 /
+                start_new_session=True,
             )
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             output = stdout.decode(errors="replace").strip()
             # 不截断，让模型自己判断哪些有用（shell 有 no_compress=True，不会被压缩）
             return output or "(no output)"
         except asyncio.TimeoutError:
-            # 超时后必须 kill 子进程，避免僵尸进程（如 osascript 弹权限框一直挂起）
-            try:
-                proc.kill()
-                await proc.wait()
-            except Exception:
-                pass
+            # 超时后必须 kill 整个进程组，避免僵尸进程（如 osascript 弹权限框一直挂起）
+            _kill_process_group(proc)
             return f"Command timed out after {timeout}s"
+        except asyncio.CancelledError:
+            # 用户取消工具调用时，kill 整个进程组，避免孙进程残留
+            _kill_process_group(proc)
+            raise

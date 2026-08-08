@@ -220,10 +220,11 @@ interface MessageBubbleProps {
   onShare?: (msg: Message) => void;
   onDelete?: (msg: Message) => void;
   onInject?: (content: string) => Promise<{ ok: boolean; error?: string }>;
+  onCancelTool?: (toolCallId: string) => void;
   annotations?: Annotation[];
 }
 
-export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuote, onCardAction, onRead, onShare, onDelete, onInject, annotations }: MessageBubbleProps) {
+export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuote, onCardAction, onRead, onShare, onDelete, onInject, onCancelTool, annotations }: MessageBubbleProps) {
   const [highlightedStep, setHighlightedStep] = useState<number | undefined>(undefined);
   // 思考过程（thought）默认展开，用户可手动折叠
   const [thoughtOpen, setThoughtOpen] = useState(true);
@@ -412,6 +413,7 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
                 defaultExpanded={msg.toolsExpanded ?? false}
                 highlightIndex={highlightedStep}
                 messageCards={msg.cards?.filter((c): c is SearchResultCard => c.type === "search_result")}
+                onCancelTool={isStreaming && isLast ? onCancelTool : undefined}
               />
             )}
             {msg.toolSteps && msg.toolSteps.length > 0 && msg.toolSteps.some(s => s.entity_type) && (
