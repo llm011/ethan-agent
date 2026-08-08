@@ -82,8 +82,9 @@ uv run --with openai python $SCRIPTS/analyze_page_vision.py "<manifest>" --page 
 ### Phase 2 — REDUCE(汇总)
 ```bash
 python $SCRIPTS/merge_analysis.py "<pages_dir>"     # 末行 merged 路径
-# 强烈推荐：同时提取论文图片，供配图使用
-uv run --with pypdf,pillow python $SCRIPTS/extract_paper_content.py "<pdf>" 2>/dev/null  # 末行 useful_images_dir
+# 强烈推荐：同时提取论文图片，供配图使用（不要用 2>/dev/null 吞掉 stderr，
+# 否则提取失败时 agent 无法感知，会静默跳过配图环节）
+uv run --with pypdf,pillow python $SCRIPTS/extract_paper_content.py "<pdf>"  # 末行 useful_images_dir
 ```
 `file_read` 合并后的 `merged_analysis.json`,深度整合(合并同类项/去重/数据成表/创新点↔实验对应),**流式输出最终报告**:
 
