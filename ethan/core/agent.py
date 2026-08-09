@@ -837,6 +837,8 @@ class Agent:
         self._executor.reset_cache()
         reset_active_tools()  # 清空本请求的 find_tools 激活集
         working = list(messages)
+        from ethan.core.artifacts import inject_artifacts_prompt
+        inject_artifacts_prompt(working)  # 注入本会话已生成/交付的文件清单，供后续轮次直接引用
         enforce_context_budget(working)  # 历史 tool result 也可能很大，进循环前先管控
         compress_previous_round_tools(working, self.session_id)  # 压缩上一轮 search/fetch 结果
         _route, system, tools_list, max_iters = self._select_route(working)
@@ -1100,6 +1102,8 @@ class Agent:
                         self.usage.add(chunk.usage)
                 return
 
+        from ethan.core.artifacts import inject_artifacts_prompt
+        inject_artifacts_prompt(working)  # 注入本会话已生成/交付的文件清单，供后续轮次直接引用
         enforce_context_budget(working)  # 历史 tool result 也可能很大，进循环前先管控
         compress_previous_round_tools(working, self.session_id)  # 压缩上一轮 search/fetch 结果
         _route, system, tools_list, max_iters = self._select_route(working)
