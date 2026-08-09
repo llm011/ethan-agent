@@ -86,33 +86,47 @@ def _collect(
     *,
     domain: str,
     max_items: int,
+    intent: str = "unknown",
 ) -> list[Any]:
     """召回候选集：FTS/LIKE 精确通道 + 向量语义通道，RRF 融合排序。
 
     向量通道补齐 FTS 的 CJK 分词短板与语义泛化（"住哪" 命中 "家在深圳"）；
     两通道都空时回退 importance top-N，保证身份类事实始终可用。
+
+    intent: query intent,用于召回层 role 过滤。intent → role 映射见 INTENT_ROLE_MAP。
     """
+    from ethan.memory.classifier import INTENT_ROLE_MAP
+
+    role_filter = INTENT_ROLE_MAP.get(intent)
+
     statuses = [MemoryStatus.ACTIVE.value]
     fts_hits: list[Any] = []
     vec_hits: list[tuple[str, float]] = []
     if query.strip():
         fts_hits = [
             memory
-            for memory in store.search_memories(query, memory_domain=domain, statuses=statuses, limit=max_items)
+            for memory in store.search_memories(
+                query, memory_domain=domain, memory_role=role_filter, statuses=statuses, limit=max_items
+            )
             if memory.sensitivity != "restricted"
         ]
         from ethan.memory.memory_vectors import recall_neighbors
         vec_hits = recall_neighbors(
-            query=query, memory_domain=domain, db_path=store.db_path, limit=max_items * 2
+            query=query, memory_domain=domain, db_path=store.db_path, limit=max_items * 2,
+            memory_role=role_filter,
         )
 
     if not fts_hits and not vec_hits:
-        # Fall back to the most important active memories when there is no query
-        # or the query matches nothing — keeps identity facts available.
+        # 双通道皆空时按 importance 兜底。role_filter 与搜索层一致——已知 intent
+        # (role_filter 非 None) 时仍按该 role 取 top-N：该 role 有记忆但语义没命中，
+        # 按 importance 注入同 role 记忆比跨 role 注入噪声合理；该 role 无记忆(如
+        # emotion→task_context 在 GENERAL 域)则返回空,由其他域(COMPANION)提供相关记忆。
+        # role_filter=None(unknown intent)时跨全 role 取 top-N,等价改造前安全网。
         return [
             memory
             for memory in store.list_memories(
-                memory_domain=domain, status=MemoryStatus.ACTIVE.value, limit=max_items * 3
+                memory_domain=domain, status=MemoryStatus.ACTIVE.value,
+                memory_role=role_filter, limit=max_items * 3,
             )
             if memory.sensitivity != "restricted"
         ][:max_items]
@@ -172,7 +186,7 @@ def _collect(
 
 
 def _collect_split(
-    store: MemoryStore, query: str, mode: str, max_items: int
+    store: MemoryStore, query: str, mode: str, max_items: int, intent: str = "unknown"
 ) -> tuple[list[Any], list[Any]]:
     """分域收候选，**不合并**。domain 隔离是硬门控——companion 只在 companion 模式取。
 
@@ -180,11 +194,11 @@ def _collect_split(
     companion 模式下 general 和 companion 各拿满 max_items。若在并集上截断，
     general 满额时 companion 会被整段砍掉。
     """
-    general = _collect(store, query, domain=MemoryDomain.GENERAL.value, max_items=max_items)
+    general = _collect(store, query, domain=MemoryDomain.GENERAL.value, max_items=max_items, intent=intent)
     companion: list[Any] = []
     if _is_companion_mode(mode):
         companion = _collect(
-            store, query, domain=MemoryDomain.COMPANION.value, max_items=max_items
+            store, query, domain=MemoryDomain.COMPANION.value, max_items=max_items, intent=intent
         )
     return general, companion
 
@@ -229,7 +243,10 @@ def build_structured_recall(query: str, *, mode: str = "", max_items: int = 8) -
         return empty
 
     try:
-        general, companion = _collect_split(store, query, mode, max_items)
+        from ethan.memory.classifier import classify_query_intent
+
+        intent = classify_query_intent(query)
+        general, companion = _collect_split(store, query, mode, max_items, intent=intent)
         all_hits = general + companion
         if not all_hits:
             return empty
@@ -292,7 +309,12 @@ async def build_structured_recall_async(
 
     try:
         # 候选预算始终取满。池子宽只影响 recall，收窄它等于又一次调阈值。
-        general, companion = _collect_split(store, query, mode, max_items)
+        # 异步路径用 classify_query_intent_async：规则先行，miss 走 LLM 兜底
+        # （需 ETHAN_MEMORY_CLASSIFY_LLM=1，默认关 = 等价同步规则分类）。
+        from ethan.memory.classifier import classify_query_intent_async
+
+        intent = await classify_query_intent_async(query)
+        general, companion = _collect_split(store, query, mode, max_items, intent=intent)
         if not general and not companion:
             return empty
         shallow = general[:keep] + companion[:keep]

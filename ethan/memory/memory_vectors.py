@@ -75,6 +75,7 @@ def index_memory(record: Any, *, db_path: Path | None = None) -> None:
                     "scope_type": record.scope_type,
                     "scope_id": record.scope_id,
                     "memory_domain": record.memory_domain,
+                    "memory_role": record.memory_role,
                     "dimension": record.dimension,
                     "memory_type": record.memory_type,
                 },
@@ -138,20 +139,28 @@ def recall_neighbors(
     memory_domain: str,
     db_path: Path | None = None,
     limit: int = 16,
+    memory_role: str | None = None,
 ) -> list[tuple[str, float]]:
     """召回向量通道：返回 [(memory_id, l2_distance)]，截断到 RECALL_L2_MAX。
 
-    失败返回空列表（召回降级为纯 FTS/LIKE）。
+    memory_role 非空时按 role 过滤（召回层 intent→role 映射），None 则不过滤
+    （unknown intent 走全量）。失败返回空列表（召回降级为纯 FTS/LIKE）。
     """
     try:
         from ethan.memory.embeddings import embed_sync
 
         vec = _vector_store(db_path)
         try:
+            metadata_filter: dict[str, Any] = {
+                "type": "memory",
+                "memory_domain": memory_domain,
+            }
+            if memory_role is not None:
+                metadata_filter["memory_role"] = memory_role
             hits = vec.search(
                 query_embedding=embed_sync(query),
                 limit=limit,
-                filter={"type": "memory", "memory_domain": memory_domain},
+                filter=metadata_filter,
                 update_access=False,
             )
             return [(h["id"], h["distance"]) for h in hits if h["distance"] <= RECALL_L2_MAX]
@@ -184,6 +193,7 @@ def reindex_all(*, db_path: Path | None = None) -> int:
                         "scope_type": record.scope_type,
                         "scope_id": record.scope_id,
                         "memory_domain": record.memory_domain,
+                        "memory_role": record.memory_role,
                         "dimension": record.dimension,
                         "memory_type": record.memory_type,
                     },

@@ -29,7 +29,7 @@ from ethan.memory.records import (
 
 logger = logging.getLogger(__name__)
 
-_SCHEMA_VERSION = "2"
+_SCHEMA_VERSION = "3"
 
 
 class MemoryStore:
@@ -103,6 +103,7 @@ class MemoryStore:
                 scope_type TEXT NOT NULL,
                 scope_id TEXT NOT NULL,
                 memory_domain TEXT NOT NULL DEFAULT 'general',
+                memory_role TEXT NOT NULL DEFAULT 'task_context',
                 status TEXT NOT NULL,
                 evidence_level TEXT NOT NULL,
                 confidence REAL NOT NULL,
@@ -129,6 +130,8 @@ class MemoryStore:
                 ON memories(valid_until, status);
             CREATE INDEX IF NOT EXISTS idx_memories_updated
                 ON memories(updated_at DESC);
+            -- idx_memories_role_status 在下方 v3 migration 补列后建，不在这里——
+            -- 旧库此列尚不存在，executescript 会因引用未定义列整体回滚。
 
             CREATE TABLE IF NOT EXISTS memory_evidence (
                 id TEXT PRIMARY KEY,
@@ -223,6 +226,59 @@ class MemoryStore:
             "INSERT OR REPLACE INTO structured_memory_meta(key, value) VALUES ('schema_version', ?)",
             (_SCHEMA_VERSION,),
         )
+
+        # schema v3: 加 memory_role 列（召回层 intent→role 过滤的分类轴）。
+        # 必须在 FTS reindex 之前跑——_reindex_fts 里 _record_from_row 会读 memory_role，
+        # 旧库若无此列会 OperationalError。CREATE TABLE IF NOT EXISTS 对已存在的表是
+        # no-op，旧库靠 ALTER TABLE 补列；PRAGMA table_info 检测列是否已存在避免重复
+        # ALTER 报错。补列后按 dimension 前缀回填存量记忆的 role，让旧库也能参与
+        # role 过滤；新记忆在 records.__post_init__ 里已推断好。
+        existing_cols = {
+            row[1] for row in conn.execute("PRAGMA table_info(memories)").fetchall()
+        }
+        # 守卫：只在 schema_version < 3 时执行 v3 迁移，避免每次启动都跑 6 个全表扫描。
+        # schema_version 在迁移成功后由 line 226 写入，旧库该 key 不存在（返回 None）。
+        need_v3_migrate = (
+            "memory_role" not in existing_cols
+            or conn.execute(
+                "SELECT value FROM structured_memory_meta WHERE key='schema_version'"
+            ).fetchone() is None
+        )
+        if need_v3_migrate:
+            if "memory_role" not in existing_cols:
+                conn.execute(
+                    "ALTER TABLE memories ADD COLUMN memory_role TEXT NOT NULL DEFAULT 'task_context'"
+                )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_memories_role_status "
+                "ON memories(memory_role, status)"
+            )
+            # 回填：role 仍为默认 task_context 但 dimension 前缀指向其他类的行。
+            # dimension 一级前缀即 role，逐前缀批量 UPDATE。companion 域由 domain 隔离，
+            # 不进 role 体系，其 dimension 前缀 companion 落到 task_context 兜底无妨。
+            #
+            # 覆盖所有 MEMORY_ROLES 中定义的前缀（identity/activity/decision/preference/
+            # methodology/skill_experience/relationship），保证新旧记忆 role 一致。
+            # skill/relationship 前缀的记忆若不回填会保持 task_context，导致 emotion
+            # intent（role_filter=task_context）错误召回这些 GENERAL 域的工作记忆。
+            #
+            # 兼容：早期 v3 回填用的是 identity_fact/decision_record/preference_rule 等
+            # 旧 role 名，后改为与 dimension 前缀对齐的 identity/decision/preference。这里
+            # 先把旧名重置成 task_context，再按前缀统一回填，保证升级到新命名口径。
+            conn.execute(
+                "UPDATE memories SET memory_role='task_context' WHERE memory_role IN "
+                "('identity_fact','decision_record','preference_rule')"
+            )
+            for prefix in (
+                "identity", "activity", "decision", "preference",
+                "methodology", "skill_experience", "relationship",
+            ):
+                conn.execute(
+                    "UPDATE memories SET memory_role=? WHERE memory_role='task_context' "
+                    "AND lower(dimension) LIKE ?",
+                    (prefix, f"{prefix}%"),
+                )
+
         try:
             # schema v2: 修中文词法通道。v1 用默认 unicode61 tokenizer + 原文索引，
             # CJK 整段是单个 token，FTS5 是 token 相等匹配不做子串 → 中文 query 全 0
@@ -459,14 +515,14 @@ class MemoryStore:
         conn.execute("""
             INSERT INTO memories(
                 id,user_id,memory_type,dimension,memory_key,content,structured_data,scope_type,
-                scope_id,memory_domain,status,evidence_level,confidence,importance,sensitivity,
-                valid_from,valid_until,source_session_id,source_message_id,created_at,updated_at,
-                last_recalled_at,superseded_by,forgotten_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                scope_id,memory_domain,memory_role,status,evidence_level,confidence,importance,
+                sensitivity,valid_from,valid_until,source_session_id,source_message_id,created_at,
+                updated_at,last_recalled_at,superseded_by,forgotten_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             r.id,r.user_id,r.memory_type,r.dimension,r.memory_key,r.content,self._json(r.structured_data),
-            r.scope_type,r.scope_id,r.memory_domain,r.status,r.evidence_level,r.confidence,r.importance,
-            r.sensitivity,r.valid_from,r.valid_until,r.source_session_id,r.source_message_id,
+            r.scope_type,r.scope_id,r.memory_domain,r.memory_role,r.status,r.evidence_level,r.confidence,
+            r.importance,r.sensitivity,r.valid_from,r.valid_until,r.source_session_id,r.source_message_id,
             r.created_at,r.updated_at,r.last_recalled_at,r.superseded_by,r.forgotten_at,
         ))
 
@@ -552,6 +608,7 @@ class MemoryStore:
         self, *, memory_type: str | None = None, dimension: str | None = None,
         scope_type: str | None = None, scope_id: str | None = None,
         memory_domain: str | None = None, status: str | None = None,
+        memory_role: str | None = None,
         limit: int = 100, offset: int = 0,
     ) -> list[MemoryRecord]:
         clauses: list[str] = []
@@ -560,6 +617,7 @@ class MemoryStore:
             ("memory_type", memory_type), ("dimension", dimension),
             ("scope_type", scope_type), ("scope_id", scope_id),
             ("memory_domain", memory_domain), ("status", status),
+            ("memory_role", memory_role),
         ):
             if value is not None:
                 clauses.append(f"{column}=?")
@@ -655,6 +713,7 @@ class MemoryStore:
         self, query: str = "", *, memory_types: list[str] | None = None,
         memory_domain: str | None = None, statuses: list[str] | None = None,
         scope_pairs: list[tuple[str, str]] | None = None, limit: int = 20,
+        memory_role: str | None = None,
     ) -> list[MemoryRecord]:
         conn = self._get_conn()
         clauses: list[str] = []
@@ -668,6 +727,9 @@ class MemoryStore:
         if memory_domain is not None:
             clauses.append("m.memory_domain=?")
             params.append(memory_domain)
+        if memory_role is not None:
+            clauses.append("m.memory_role=?")
+            params.append(memory_role)
         if scope_pairs:
             pieces = []
             for scope_type, scope_id in scope_pairs:
@@ -929,7 +991,8 @@ class MemoryStore:
             id=row["id"],user_id=row["user_id"],memory_type=row["memory_type"],
             dimension=row["dimension"],memory_key=row["memory_key"],content=row["content"],
             structured_data=json.loads(row["structured_data"] or "{}"),scope_type=row["scope_type"],
-            scope_id=row["scope_id"],memory_domain=row["memory_domain"],status=row["status"],
+            scope_id=row["scope_id"],memory_domain=row["memory_domain"],
+            memory_role=row["memory_role"],status=row["status"],
             evidence_level=row["evidence_level"],confidence=row["confidence"],importance=row["importance"],
             sensitivity=row["sensitivity"],valid_from=row["valid_from"],valid_until=row["valid_until"],
             source_session_id=row["source_session_id"] or "",source_message_id=row["source_message_id"] or "",

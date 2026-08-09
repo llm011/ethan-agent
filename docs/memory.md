@@ -123,6 +123,13 @@ observed 模式可用 `ETHAN_ADMISSION_OBSERVED_MODE=accrual` 切换为：
   融合后对「向量独占」命中施加相对距离断层（`dist - min(dist)`），双通道一致命中
   无条件保留。1200-case 扫参结论：BGE-small-zh INT8 动态范围 0.88-1.22，距离不可分，
   0.25 才不掉 recall 但只省 0.17 条噪声——收益不足，默认关。换 embedding 后可复测。
+- **Intent→Role 过滤**（`ethan/memory/classifier.py`，默认开）：召回前对 query 做
+  intent 分类（identity/activity/decision/preference/procedure/unknown），按
+  `INTENT_ROLE_MAP` 映射到 memory_role，在 FTS/向量/fallback 三条路径上同时过滤。
+  memory_role 入库时从 dimension 一级前缀推断（identity.*→identity 等），与 intent
+  近似双射。unknown intent 不过滤走全量。1200-case 实测：P@k 45.6%→91.7%、P@注入
+  14.0%→93.1%、噪声 9.58→0.83 条，recall 仍 100%、leak 仍 0。5 个域 P@k 达 100%，
+  仅 companion 域因 query 多为 unknown 走全量仍有噪声（情感陪伴场景不宜硬切 role）。
 - **判官重排 + maxgap 切点**（`ETHAN_MEMORY_RERANK=1` 开启，默认关）：60-case A/B
   （FTS 修活后的干净候选池）opus-5 判官 P@k 40.6%→92.5%、nDCG 0.720→0.975，maxgap
   切点 P=77.9% / R=95%、保留 2.7 条。opus 0 fallback 优于 haiku 的 3 个。成本：每次
