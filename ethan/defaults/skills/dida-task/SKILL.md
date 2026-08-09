@@ -1,6 +1,6 @@
 ---
 name: dida-task
-version: 1.0.0
+version: 1.1.0
 description: >
   滴答清单（Dida365 / TickTick）个人 TODO 管理技能。
   覆盖任务的创建、查询、完成、更新，以及清单/标签/习惯/专注/倒数日的管理。
@@ -37,17 +37,22 @@ metadata:
 用户说「记一下xxx」「提醒我周五xxx」「帮我加个待办」时：
 
 1. 提取：`{title, due_date, priority, tags, project, content, repeat, reminders}`
-2. 判断 tag：
+2. 判断 priority（**用户偏好规则，见下方「优先级判定」**）：
+   - 一般任务 → `priority: 1`（低）
+   - 无关紧要、可做可不做、或不太确定 → `priority: 0`（不设）
+   - 很重要、要引起重视 → `priority: 3`（中），这类不要太多
+   - 非常紧急、不做后果严重 → `priority: 5`（高），不要随便用
+3. 判断 tag：
    - 工作相关 → `tags: "work"`
    - 生活相关 → `tags: "life"`
    - 用户明确说了 tag → 用用户指定的
    - 不确定 → 默认 `work`
-3. 判断 project（清单）：
+4. 判断 project（清单）：
    - 工作相关 → 用户工作清单（如「工作日常」）
    - 生活相关 → 用户生活清单（如「日常」）
    - 不确定 → 不传 project，任务进默认收件箱
-4. 调用 `dida_task_create`
-5. 回复确认：任务标题、截止时间、标签
+5. 调用 `dida_task_create`
+6. 回复确认：任务标题、截止时间、优先级、标签
 
 **总计最多 2 步**：提取 → dida_task_create。
 
@@ -84,7 +89,7 @@ metadata:
 
 ```bash
 # 创建任务
-dida task create --title "买牛奶" --project <id> --due-date "2026-08-09T09:00:00Z" --tags "life" --priority 0 --json
+dida task create --title "买牛奶" --project <id> --due-date "2026-08-09T09:00:00Z" --tags "life" --priority 1 --json
 
 # 更新任务（含子任务、重复规则等高级字段）
 dida task update <taskId> --title "新标题" --priority 5 --tags "work,紧急" --items "[\"子任务1\",\"子任务2\"]" --json
@@ -167,6 +172,22 @@ dida countdown list --json
 | 3 | 中 |
 | 5 | 高 |
 
+**优先级判定（用户偏好，创建任务时强制遵循）**：
+
+| 场景 | 优先级 | 值 |
+|------|--------|-----|
+| 一般任务（默认） | 低 | 1 |
+| 无关紧要、可做可不做、或不太确定 | 不设 | 0 |
+| 很重要、要引起用户重视 | 中 | 3 |
+| 非常紧急、不做后果严重 | 高 | 5 |
+
+使用要点：
+- **低（1）是默认值**：绝大多数任务都标低，无需多想。
+- **不设（0）**：觉得无关紧要、可做可不做、或不确定有没有必要——直接不设优先级。
+- **中（3）**：确实重要、希望用户注意到，但这类任务不要太多，泛滥就失去意义。
+- **高（5）**：非常紧急、不做就有严重后果（如最后期限、关键交付）才用，绝不随便标高。
+- 用户明确指定优先级时，以用户说的为准。
+
 ### 重复规则（RRULE）
 
 | 规则 | 示例 |
@@ -226,5 +247,6 @@ dida countdown list --json
 
 - **不越权**：不自动完成用户没确认的任务，不删除任务（除非用户明确要求）
 - **tag 必带**：创建任务时必须带 work 或 life 标签
+- **priority 必判**：创建任务时必须按「优先级判定」规则设定优先级，不得跳过
 - **project 可选**：不确定放哪个清单时不传 project，进默认收件箱
 - **CLI 超时**：dida 命令默认 30s 超时，批量操作注意分批
