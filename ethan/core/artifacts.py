@@ -28,7 +28,10 @@ _ARTIFACTS_MARKER = "[本对话可用文件清单]"
 # - 绝对路径，以 / 开头
 # - 允许常见文件扩展名（.md/.txt/.pdf/.docx/.pptx/.xlsx/.csv/.html/.json/.png/.jpg/.jpeg/.gif/.webp/.svg/.zip）
 # - 路径中不含空白字符和常见标点
+# - lookbehind `(?<![:/\w.])`：排除 URL 段（`https://host/foo.json` 中 /foo.json 前是字母）
+#   和路径中段（`/a/b/foo.json` 中 /foo.json 前是字母），避免把 URL 路径段误识为本地文件
 _FILE_PATH_RE = re.compile(
+    r"(?<![:/\w.])"
     r"(/[^\s`\"'<>|]+\.(?:md|txt|pdf|docx|pptx|xlsx|csv|html|json|png|jpg|jpeg|gif|webp|svg|zip))",
     re.IGNORECASE,
 )
