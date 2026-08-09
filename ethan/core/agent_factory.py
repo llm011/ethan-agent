@@ -40,6 +40,7 @@ from ethan.tools.builtin.lark_tools import (
     LarkChatMessagesTool,
     LarkMessageSendTool,
 )
+from ethan.tools.builtin.lunar import LunarCalendarTool
 from ethan.tools.builtin.memory_write import MemoryWriteTool
 from ethan.tools.builtin.plan import PlanReadTool, PlanUpdateTool, PlanWriteTool
 from ethan.tools.builtin.procedure_write import ProcedureWriteTool
@@ -106,6 +107,7 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
         pass  # 配置未加载时不阻塞工具注册
     registry.register(WebFetchTool())
     registry.register(WeatherTool())
+    registry.register(LunarCalendarTool())
     registry.register(ChartTool())
     registry.register(FileReadTool())
     registry.register(FileWriteTool())

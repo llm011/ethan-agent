@@ -23,6 +23,7 @@ dependencies = [
     "apscheduler>=3.11.2",
     "curl-cffi>=0.15.0",
     "fastapi>=0.136.3",
+    "lunar-python>=1.4.8",
     "mcp>=1.27.2",
     "numpy>=1.26.0",
     "onnxruntime>=1.18.0",
