@@ -25,6 +25,11 @@ _name_gen = itertools.count(1)
 @router.get("/api/desktop/status")
 async def desktop_status(request: Request) -> dict:
     """诊断接口：返回桌面端 WS 连接状态。供桌面端 / curl 排查连接问题。"""
+    # 复用 WS 鉴权：query param token 校验，防止未授权探测连接名/状态
+    token = request.query_params.get("token", "")
+    if _authenticate(token) is None:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="unauthorized")
     hub = get_desktop_hub()
     conns = []
     async with hub._conn_lock:

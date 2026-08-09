@@ -124,12 +124,14 @@ export function ActionConfirmBar({ content, isStreaming, isLast, onConfirm }: Ac
     }
   }, [content, isStreaming]);
 
-  const handleConfirm = useCallback(() => {
+  const handleConfirm = useCallback(async () => {
     if (!config) return;
     setDialogOpen(false);
     // 先发送，成功后再置 confirmed，失败则按钮保持可见可重试
+    // onConfirm 实际是 async 的 handleSend，同步 try/catch 抓不到 async 错误，
+    // 必须 await Promise.resolve 后才能捕获 reject
     try {
-      onConfirmRef.current(config.autoMessage);
+      await Promise.resolve(onConfirmRef.current(config.autoMessage));
       setConfirmed(true);
     } catch {
       // 发送异常时不置 confirmed，用户可重试

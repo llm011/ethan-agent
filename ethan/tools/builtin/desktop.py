@@ -73,7 +73,7 @@ class DesktopCountdownTool(BaseTool):
 
 
 class DesktopNotifyTool(BaseTool):
-    fast_path = False  # 不在 base_tools 白名单，需经 find_tools 激活
+    fast_path = False  # full 档在 base_tools 直接可见（config.py），fast 档需 find_tools 激活
     cacheable = False
     side_effect = True
 

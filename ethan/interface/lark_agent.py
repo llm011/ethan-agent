@@ -229,7 +229,7 @@ async def _handle_agent_message(
         # 非主人：只保留无隐私风险的只读工具（搜索/抓网页/卡片），移除文件/记忆/知识库/密钥/Shell 等
         if owner_claimed and not is_owner:
             safe_tools = ToolRegistry()
-            allowed_names = {"web_search", "web_fetch", "ui_card", "find_tools"}
+            allowed_names = {"web_search", "web_fetch", "ui_card"}  # 不含 find_tools：避免激活 file_read/shell 等敏感工具绕过只读限制
             for tool in registry.all():
                 if tool.name in allowed_names:
                     safe_tools.register(tool)

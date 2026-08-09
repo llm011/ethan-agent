@@ -168,6 +168,12 @@ def inject_artifacts_prompt(messages: list[Message]) -> None:
             last_user_idx = i
             break
     if last_user_idx >= 0:
-        messages.insert(last_user_idx, artifact_msg)
+        # 合并进最后一条 user 消息，避免连续两条 user 消息导致部分网关 400
+        existing = messages[last_user_idx]
+        messages[last_user_idx] = Message(
+            role="user",
+            content=prompt + "\n\n" + (existing.content or ""),
+            images=existing.images,
+        )
     else:
         messages.append(artifact_msg)

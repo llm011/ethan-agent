@@ -208,8 +208,13 @@ def _api_request(method: str, path: str, extra_params: dict[str, object] | None 
             "device-id": "ethan-flomo",
         },
     )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"flomo HTTP error: {e.code} {e.reason}") from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"flomo network error: {e.reason}") from e
     if data.get("code") != 0:
         raise RuntimeError(f"flomo API error: {data}")
     return data["data"]
@@ -415,7 +420,8 @@ def cmd_query(
         end_date = datetime.now().strftime("%Y-%m-%d")
 
     hits = _filter_memos(memos, keyword or None, tag or None, start_date or None, end_date or None)
-    hits = hits[:limit]
+    # _fetch_all_memos 按 created_at 升序（旧→新），取最近 limit 条需用 [-limit:]
+    hits = hits[-limit:] if limit > 0 else hits
 
     if not hits:
         return "没有找到匹配的笔记。"

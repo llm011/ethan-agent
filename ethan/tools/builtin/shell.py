@@ -38,7 +38,21 @@ _DANGEROUS_RE = re.compile("|".join(_DANGEROUS_PATTERNS))
 # `echo $TOKEN | base64` 套出密钥（编码后可绕过 mask_text 的全字符串匹配）。
 # 命中时走高危路径——每次重新授权、不计入会话放行，让用户在授权弹窗里看到具体
 # 引用了哪个 secret 变量，再决定是否放行。
-_DOLLAR_VAR_RE = re.compile(r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)')
+_DOLLAR_VAR_RE = re.compile(r'\$\{([A-Za-z_][A-Za-z0-9_]*)(?::[^}]*)?\}|\$([A-Za-z_][A-Za-z0-9_]*)')
+
+# 能列举环境变量的命令：env/printenv/set/export -p/declare -x/compgen -v。
+# 这些命令不需要 $VAR 语法就能 dump 所有 secret（含注入的密钥），必须单独拦截。
+# env/set 后面必须是分隔符（;|&或行尾）才算 dump（env VAR=val cmd 是设置不是列举）。
+_ENV_DUMP_RE = re.compile(
+    r'\b(?:'
+    r'printenv'
+    r'|env(?=\s*(?:[;&|]|$))'
+    r'|set(?=\s*(?:[;&|]|$))'
+    r'|export\s+-p'
+    r'|declare\s+-[xp]'
+    r'|compgen\s+-v'
+    r')\b'
+)
 
 
 def _extract_dollar_vars(command: str) -> set[str]:
@@ -97,6 +111,10 @@ class ShellTool(BaseTool):
         if _DANGEROUS_RE.search(cmd):
             # 高危命令：文案标红提示，且每次都问（见 consent_always）
             return f"⚠️ 高危 shell 命令，请确认：{cmd[:200]}"
+        # 环境变量列举命令（env/printenv/set 等）：不需要 $VAR 就能 dump 所有 secret，
+        # 每次重新授权。
+        if _ENV_DUMP_RE.search(cmd):
+            return f"⚠️ 命令可能泄露环境变量（含 secret），请确认：{cmd[:200]}"
         # 命令引用了 secret 环境变量：可被诱导泄露密钥（编码能绕过 mask_text），
         # 每次重新授权，让用户在弹窗里看到具体引用了哪个 secret 变量。
         secret_refs = _detect_secret_env_refs(cmd)
@@ -111,7 +129,7 @@ class ShellTool(BaseTool):
     def consent_always(self, command: str = "", **kwargs) -> bool:
         # 高危命令始终重新询问，即使本会话已授权过 shell，也不计入会话放行
         cmd = command or ""
-        return bool(_DANGEROUS_RE.search(cmd)) or bool(_detect_secret_env_refs(cmd))
+        return bool(_DANGEROUS_RE.search(cmd)) or bool(_ENV_DUMP_RE.search(cmd)) or bool(_detect_secret_env_refs(cmd))
     parameters = {
         "type": "object",
         "properties": {

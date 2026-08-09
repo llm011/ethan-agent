@@ -900,8 +900,6 @@ class Agent:
                 finalize = True  # 原始最后一轮，正常收尾
             elif _inject_extra_rounds >= MAX_INJECT_EXTRA_ROUNDS:
                 finalize = True  # 达到追加轮次上限，强制收尾
-            elif _inject_extra_rounds > 0 and i >= max_iters + MAX_INJECT_EXTRA_ROUNDS * 3:
-                finalize = True  # 安全网：处理补充时轮次过多，强制收尾
             if finalize:
                 tools = None
                 sys = system + finalize_system_suffix("max_iters")
@@ -1298,8 +1296,6 @@ class Agent:
                 finalize = True  # 原始最后一轮，正常收尾
             elif _inject_extra_rounds >= MAX_INJECT_EXTRA_ROUNDS:
                 finalize = True  # 达到追加轮次上限，强制收尾
-            elif _inject_extra_rounds > 0 and i >= max_iters + MAX_INJECT_EXTRA_ROUNDS * 3:
-                finalize = True  # 安全网：处理补充时轮次过多，强制收尾
             if finalize:
                 tools = None
                 sys = system + finalize_system_suffix("max_iters")
