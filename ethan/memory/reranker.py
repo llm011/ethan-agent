@@ -94,10 +94,10 @@ RERANK_TIMEOUT_S = float(os.environ.get("ETHAN_MEMORY_RERANK_TIMEOUT", "30"))
 # 合并或对调都属于未测组合，见模块 docstring 的 2×2 表。
 _JUDGE_SYSTEM = "你是记忆相关性判官，只输出 JSON 数组，不要解释。"
 
-# 判官 provider 复用缓存：每次召回都 create_provider 会建新的 httpx client +
-# curl_cffi session，调完不关就泄漏连接池（长跑进程 fd 缓涨）。按 model 缓存
-# provider，跨召回复用同一连接池。绑定创建时的事件循环——换循环（测试/重连）
-# 时丢弃重建，避免 "attached to a different loop"。
+# 判官 provider 复用缓存：每次召回都 create_provider 会建新的 httpx client，
+# 调完不关就泄漏连接池（长跑进程 fd 缓涨）。按 model 缓存 provider，跨召回
+# 复用同一连接池。绑定创建时的事件循环——换循环（测试/重连）时丢弃重建，
+# 避免 "attached to a different loop"。
 _provider_cache: dict[str, tuple[Any, Any]] = {}
 
 

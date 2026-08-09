@@ -8,8 +8,8 @@ agent 框架的 tool result 只能是纯文本，file_read 读 PNG 会变乱码�
 为什么逐页而不是一次跑完：① 控制单次 token 量避免网关 524 超时；② agent 每调一次本脚本
 = 一个 ToolEvent(start/done)，前端能逐页看到进度。
 
-用 OpenAI 兼容协议（绝大多数中转网关 yuntoken/lkfhome/new-api 以及 OpenAI/Anthropic
-官方的兼容层都走这个），统一 image_url base64 格式。依赖 openai SDK：
+用 OpenAI 兼容协议（各类第三方中转网关以及 OpenAI/Anthropic 官方的兼容层
+都走这个），统一 image_url base64 格式。依赖 openai SDK：
     uv run --with openai python analyze_page_vision.py ...
 
 环境变量（按优先级，VISION_* 优先于 OPENAI_*）：
