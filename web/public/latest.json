@@ -1,35 +1,35 @@
 {
-  "version": "0.5.124",
+  "version": "0.5.125",
   "notes": "桌面端应用，下载对应平台的安装包即可使用。",
-  "pub_date": "2026-08-10T03:04:59.445Z",
+  "pub_date": "2026-08-10T07:26:54.789Z",
   "platforms": {
-    "darwin-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUNzExVzFPaFlpaXNHU2grZ0lJeVg0NHltZW9sVU82L3l3L0VNbThrckowUElLeXE0cVRyNnF0dGdOY3ZhdjIrTU9ZN3g5VE1EOHhqRmNLdS9yV2RaQU1CSThJSzNNY3dBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2MzMwODM0CWZpbGU6RXRoYW4gQWdlbnQuYXBwLnRhci5negprWmNTYUxSampQV2x3Z2ZkMlpZODFxTkZRdnN4UzlTbzlLalErWjJxc1RMelAyZ2ZTaWJPRmRYTkN1MGdabmVlNlJaRU8vajlkdEw3V3NKUEJBZklEZz09Cg==",
-      "url": "https://api.github.com/repos/llm011/ethan-agent/releases/assets/508204464"
-    },
-    "darwin-x86_64-app": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUNzExVzFPaFlpaXNHU2grZ0lJeVg0NHltZW9sVU82L3l3L0VNbThrckowUElLeXE0cVRyNnF0dGdOY3ZhdjIrTU9ZN3g5VE1EOHhqRmNLdS9yV2RaQU1CSThJSzNNY3dBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2MzMwODM0CWZpbGU6RXRoYW4gQWdlbnQuYXBwLnRhci5negprWmNTYUxSampQV2x3Z2ZkMlpZODFxTkZRdnN4UzlTbzlLalErWjJxc1RMelAyZ2ZTaWJPRmRYTkN1MGdabmVlNlJaRU8vajlkdEw3V3NKUEJBZklEZz09Cg==",
-      "url": "https://api.github.com/repos/llm011/ethan-agent/releases/assets/508204464"
-    },
     "darwin-aarch64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUNzExVzFPaFlpaXZWdTNsWDV4U1VBVmdHem5IQ0Nhdm5DbVdtNlJVK0Iyd2JGa1lpS2QxRUVuODJWckk1a3QxT3hHeGNZeE9GVUhtb2t0MDMyY1AwbUpDTXF4R0d4VlFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2MzMwODk4CWZpbGU6RXRoYW4gQWdlbnQuYXBwLnRhci5negpEWDdpTElXcVAwNS9Benh2NlRrc29kaGRBa1luU1VONGRvQWxIYXVEdy9CN0NQSFNaWGdERERYVUE0dm5pb3FEQ040b3ByZnoyWUR6N2dqOXNzaGJEdz09Cg==",
-      "url": "https://api.github.com/repos/llm011/ethan-agent/releases/assets/508205667"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUNzExVzFPaFlpaW5wSFBhWDhWU2tzMWM1R3h5Zk4rT0VEcmhxb0JCS2JiRGpWa2EwbzZJTVRBM2E0WVp5MFRwNEh4RTJ5UU9vTnVsYksxYzJSbjBrMzJUWHdVcmdmL3dZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2MzQ2NTIyCWZpbGU6RXRoYW4gQWdlbnQuYXBwLnRhci5negpibjBic3NveFhLSzQrbXFWMG1pcFZYS2JZZFVjd1Q3VTJsNXJjTlBkS3dzcEpQTkRYeXVsa0Z0dnVNdy9EZHYzVnUrcndkQVh6Q3dUcitvR3c5QnJEQT09Cg==",
+      "url": "https://api.github.com/repos/llm011/ethan-agent/releases/assets/508441444"
     },
     "darwin-aarch64-app": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUNzExVzFPaFlpaXZWdTNsWDV4U1VBVmdHem5IQ0Nhdm5DbVdtNlJVK0Iyd2JGa1lpS2QxRUVuODJWckk1a3QxT3hHeGNZeE9GVUhtb2t0MDMyY1AwbUpDTXF4R0d4VlFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2MzMwODk4CWZpbGU6RXRoYW4gQWdlbnQuYXBwLnRhci5negpEWDdpTElXcVAwNS9Benh2NlRrc29kaGRBa1luU1VONGRvQWxIYXVEdy9CN0NQSFNaWGdERERYVUE0dm5pb3FEQ040b3ByZnoyWUR6N2dqOXNzaGJEdz09Cg==",
-      "url": "https://api.github.com/repos/llm011/ethan-agent/releases/assets/508205667"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUNzExVzFPaFlpaW5wSFBhWDhWU2tzMWM1R3h5Zk4rT0VEcmhxb0JCS2JiRGpWa2EwbzZJTVRBM2E0WVp5MFRwNEh4RTJ5UU9vTnVsYksxYzJSbjBrMzJUWHdVcmdmL3dZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2MzQ2NTIyCWZpbGU6RXRoYW4gQWdlbnQuYXBwLnRhci5negpibjBic3NveFhLSzQrbXFWMG1pcFZYS2JZZFVjd1Q3VTJsNXJjTlBkS3dzcEpQTkRYeXVsa0Z0dnVNdy9EZHYzVnUrcndkQVh6Q3dUcitvR3c5QnJEQT09Cg==",
+      "url": "https://api.github.com/repos/llm011/ethan-agent/releases/assets/508441444"
+    },
+    "darwin-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUNzExVzFPaFlpaXV5WnhPN0NYdjF2bGpmL0xmQkJEcCswUXllVkVkcXNXZTNaOUJmQmNmek1reVU5dnUzSm5wUENRS3dSR1JYbE5pWkF5TGY0ODAyVkczVzBFTkc4UmdjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2MzQ2NTQyCWZpbGU6RXRoYW4gQWdlbnQuYXBwLnRhci5negpSWVBZOEhHNllKR1pGMjdpN1ZYVHFaVEJCRFBodUIybHMxUFBVZEQzSnNCVDFFcXAxQXIvRElGV2kxclhWMXRjNGVwMUxsZlBjR1l5UFYxQzVPYktBZz09Cg==",
+      "url": "https://api.github.com/repos/llm011/ethan-agent/releases/assets/508441671"
+    },
+    "darwin-x86_64-app": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUNzExVzFPaFlpaXV5WnhPN0NYdjF2bGpmL0xmQkJEcCswUXllVkVkcXNXZTNaOUJmQmNmek1reVU5dnUzSm5wUENRS3dSR1JYbE5pWkF5TGY0ODAyVkczVzBFTkc4UmdjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2MzQ2NTQyCWZpbGU6RXRoYW4gQWdlbnQuYXBwLnRhci5negpSWVBZOEhHNllKR1pGMjdpN1ZYVHFaVEJCRFBodUIybHMxUFBVZEQzSnNCVDFFcXAxQXIvRElGV2kxclhWMXRjNGVwMUxsZlBjR1l5UFYxQzVPYktBZz09Cg==",
+      "url": "https://api.github.com/repos/llm011/ethan-agent/releases/assets/508441671"
     },
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUNzExVzFPaFlpaW0vbkhSNTdkMlpqZ25Kc1VONXErU1ZSV2NpZnZsMGlPd1Iva3BtVVM0QnlNbkZ6dEVKOTEzVVl3UTZXTTQ1ZG90ZFlIeHBVM2x4TkkxdFNRVk52OXdZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2MzMxMDk2CWZpbGU6RXRoYW4gQWdlbnRfMC41LjEyNF94NjQtc2V0dXAuZXhlCkxKVEVQZVJrYnNqOE12UVdXenhtUnFPbnk0bCs2a1BtZTJGUTI3R2w4ZnB1cU5EeGd0K0JYU3dxR3FObGUwTXU2ejkva25VLzRLcDErTG11b2w1MkFBPT0K",
-      "url": "https://api.github.com/repos/llm011/ethan-agent/releases/assets/508209252"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUNzExVzFPaFlpaWp6SjEvUE53RjVsOERPdlJ1WHpzcDVDbHR0VHA2VW50YnUyUHZQMHNORUp2WTcva09MMytVR1RSRlN3TVVnVENnWmlUclZhVHBEdXpnNmxiOXI1d3dJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2MzQ2ODEwCWZpbGU6RXRoYW4gQWdlbnRfMC41LjEyNV94NjQtc2V0dXAuZXhlCjZNS0lBelpJcmNESllHVDI5S21tUWRPSkNVSTFmZUNtT1IzcU9heDRrdjRpaGdFUHloY1QwVm1wMzIwUzgvdWxJT2hyMHVYcllYc1JDZmJ2eHlQT0RBPT0K",
+      "url": "https://api.github.com/repos/llm011/ethan-agent/releases/assets/508445018"
     },
     "windows-x86_64-nsis": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUNzExVzFPaFlpaW0vbkhSNTdkMlpqZ25Kc1VONXErU1ZSV2NpZnZsMGlPd1Iva3BtVVM0QnlNbkZ6dEVKOTEzVVl3UTZXTTQ1ZG90ZFlIeHBVM2x4TkkxdFNRVk52OXdZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2MzMxMDk2CWZpbGU6RXRoYW4gQWdlbnRfMC41LjEyNF94NjQtc2V0dXAuZXhlCkxKVEVQZVJrYnNqOE12UVdXenhtUnFPbnk0bCs2a1BtZTJGUTI3R2w4ZnB1cU5EeGd0K0JYU3dxR3FObGUwTXU2ejkva25VLzRLcDErTG11b2w1MkFBPT0K",
-      "url": "https://api.github.com/repos/llm011/ethan-agent/releases/assets/508209252"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUNzExVzFPaFlpaWp6SjEvUE53RjVsOERPdlJ1WHpzcDVDbHR0VHA2VW50YnUyUHZQMHNORUp2WTcva09MMytVR1RSRlN3TVVnVENnWmlUclZhVHBEdXpnNmxiOXI1d3dJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2MzQ2ODEwCWZpbGU6RXRoYW4gQWdlbnRfMC41LjEyNV94NjQtc2V0dXAuZXhlCjZNS0lBelpJcmNESllHVDI5S21tUWRPSkNVSTFmZUNtT1IzcU9heDRrdjRpaGdFUHloY1QwVm1wMzIwUzgvdWxJT2hyMHVYcllYc1JDZmJ2eHlQT0RBPT0K",
+      "url": "https://api.github.com/repos/llm011/ethan-agent/releases/assets/508445018"
     },
     "windows-x86_64-msi": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUNzExVzFPaFlpaWtmQ0hXTklnbEJXK21HRXhDallaeFFpUXdGdmtXbGJRU0w1NkZpWXlma0ZrWHhOcFl5azhaWlRWRDdxNm5oSG1kSkozN2dLTEtpUXhxZVpaNTRBVFFzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2MzMxMDk2CWZpbGU6RXRoYW4gQWdlbnRfMC41LjEyNF94NjRfZW4tVVMubXNpCloyQkw2QW9BQldSeVhkamhOMkY3QjBzTCs1YkNacXo3cmlMT21YeVlocnJ0S053WFVBMGErMGdtVFdRbCtCRGVQM2tqeUlLVXcvOWNocU13U0w4bEFnPT0K",
-      "url": "https://api.github.com/repos/llm011/ethan-agent/releases/assets/508209244"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUNzExVzFPaFlpaXN4RGg1VzMycDNTbGQvVEpBQ05RMHI2TVowRUsrVzFRQ3BQQXlYTGtMQjF6Q1NUenhFMjlJbythbkdZZHUySW5veHFhSlpGZ0pac1JEZVZFM1hzL3drPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2MzQ2ODEwCWZpbGU6RXRoYW4gQWdlbnRfMC41LjEyNV94NjRfZW4tVVMubXNpCkRoUm1kcGRZelFBUTlqNHpEYnZ5eTl6TFlSY0h1c1lOL00zRXZranFmKzZyTmpyMG9EWG9MV1p5OXU2YUt3d3Nac2xRR2VZT1Fta3NTTFFLMTdBVUFRPT0K",
+      "url": "https://api.github.com/repos/llm011/ethan-agent/releases/assets/508445007"
     }
   }
 }
