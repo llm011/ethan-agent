@@ -122,84 +122,157 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
 
     **_extra 接收并忽略 timeline / scene / source_timeline 等元数据字段，
     它们用于 UI 分类展示，不参与 fire 行为。
+
+    执行流程与普通对话完全对齐：使用 stream_chat() + StreamCollector 实时
+    持久化工具调用过程（tool_steps），便于事后排查问题。
     """
-    def _do_fire():
-        import requests
+    import asyncio
 
-        from ethan.core.config import get_config
+    async def _run_schedule_task():
+        """在 server event loop 中跑完整 agent 流式循环，实时落库工具步骤。"""
+        import logging as _log
+
+        from ethan.core.agent import create_agent
+        from ethan.core.consent import AutoConsentProvider, set_consent_provider
+        from ethan.core.context import set_session_id
+        from ethan.core.stream_collector import StreamCollector
+        from ethan.interface.routers.producers import _save_progress
+        from ethan.memory.session import get_session_store
+        from ethan.providers.base import Message, ToolEvent
+
+        _logger = _log.getLogger("ethan.schedule")
         result_text = ""
+        collector = None
+        consent = None
+        progress_msg_id: int | None = None
+
+        # 构造 runtime_context
+        if channel in ("lark", "wechat"):
+            channel_hint = "飞书对话" if channel == "lark" else "微信"
+            schedule_ctx = (
+                f"【定时任务执行环境】你正在执行一个定时任务（cron job）。\n"
+                f"任务完成后，你的回复将被自动发送到创建该任务时的{channel_hint}中，用户会收到。\n"
+                f"【重要】\n"
+                f"1. 不要自己调用 shell/lark-cli 等工具来发消息——系统会自动把你的回复发给用户。\n"
+                f"2. 直接输出任务结果文本即可，简洁明了。不要输出工具调用的返回值（如 JSON、message_id）。\n"
+                f"3. 如果任务要求发送消息到某个聊天/群（而非本对话），仍需你输出内容（系统会发到目标），不要自己执行发送命令。"
+            )
+        else:
+            schedule_ctx = (
+                "【定时任务执行环境】你正在执行一个定时任务（cron job）。\n"
+                "任务完成后，你的回复将保存到会话记录中，用户可在 Web 界面的定时任务详情里查看。\n"
+                "直接输出任务结果文本即可，简洁明了。"
+            )
+
         try:
-            # 用该 job 所属用户的 web_token 调 /chat（落到该用户的会话/记忆）
-            token = ""
-            if user_id:
-                from ethan.core.users import get_user_store
-                user = get_user_store().get_user(user_id)
-                if user:
-                    token = user.web_token
-            if not token:
-                token = get_config().network.auth_token
-            headers = {"Authorization": f"Bearer {token}"} if token else {}
+            store = await get_session_store()
+            set_session_id(session_id)
 
-            # 按 channel 构造 runtime_context：lark/wechat 会自动回发结果，web 仅存会话
-            if channel in ("lark", "wechat"):
-                channel_hint = "飞书对话" if channel == "lark" else "微信"
-                schedule_ctx = (
-                    f"【定时任务执行环境】你正在执行一个定时任务（cron job）。\n"
-                    f"任务完成后，你的回复将被自动发送到创建该任务时的{channel_hint}中，用户会收到。\n"
-                    f"【重要】\n"
-                    f"1. 不要自己调用 shell/lark-cli 等工具来发消息——系统会自动把你的回复发给用户。\n"
-                    f"2. 直接输出任务结果文本即可，简洁明了。不要输出工具调用的返回值（如 JSON、message_id）。\n"
-                    f"3. 如果任务要求发送消息到某个聊天/群（而非本对话），仍需你输出内容（系统会发到目标），不要自己执行发送命令。"
-                )
+            # 确保 session 记录存在
+            existing = await store.load(session_id)
+            if not existing:
+                from ethan.core.config import get_config as _gc
+                await store.create_with_id(session_id, _gc().defaults.model,
+                                           source="schedule", mode="")
+
+            # 保存 user message
+            user_msg = Message(role="user", content=prompt)
+            await store.save_message(session_id, user_msg)
+
+            # 创建 agent（与普通对话路径一致）
+            agent = create_agent(None, channel="schedule", user_id=user_id)
+            agent.session_id = session_id
+            if agent.runtime_context:
+                agent.runtime_context = agent.runtime_context + "\n\n" + schedule_ctx
             else:
-                # web channel：结果保存到会话，用户在 Web 界面查看；不会自动外发
-                schedule_ctx = (
-                    "【定时任务执行环境】你正在执行一个定时任务（cron job）。\n"
-                    "任务完成后，你的回复将保存到会话记录中，用户可在 Web 界面的定时任务详情里查看。\n"
-                    "直接输出任务结果文本即可，简洁明了。"
-                )
+                agent.runtime_context = schedule_ctx
 
-            res = requests.post(f"{_base_url()}/api/chat", json={
-                "messages": [{"role": "user", "content": prompt}],
-                "session_id": session_id,
-                "channel": "schedule",
-                "runtime_context": schedule_ctx,
-            }, headers=headers, timeout=300)
-            res.raise_for_status()
-            result_text = res.json().get("content", "")
+            # 加载历史上下文（让重复执行的任务能看到之前的结果）
+            from ethan.memory.working import WorkingMemory
+            history = await store.load_messages(session_id)
+            memory = WorkingMemory.from_history(history, hot_size=10)
+            messages = memory.build_context() + [Message(role="user", content=prompt)]
+
+            # 定时任务无人值守，自动批准所有工具
+            consent = AutoConsentProvider(session_id=session_id)
+            set_consent_provider(consent)
+
+            # 流式执行 + 实时落库
+            collector = StreamCollector().bind(agent)
+
+            async for item in agent.stream_chat(messages):
+                if isinstance(item, ToolEvent):
+                    collector.feed(item)
+                    if item.state != "start":
+                        try:
+                            progress_msg_id = await _save_progress(
+                                store, session_id, progress_msg_id,
+                                collector.tool_steps or [], collector.a2ui or None,
+                                collector.mcp_apps or None,
+                                collector.cards or None,
+                            )
+                        except Exception:
+                            _logger.exception("定时任务实时保存工具进度失败 session=%s", session_id)
+                else:
+                    collector.feed(item)
+
+            # 流结束：保存最终 assistant 消息（含完整 tool_steps）
+            collector.flush_pending_injected()
+            result_text = collector.full or ""
+
+            if result_text or collector.tool_steps:
+                asst_msg = Message(
+                    role="assistant",
+                    content=result_text,
+                    thought=collector.thought,
+                    usage=collector.usage_dict,
+                    tool_steps=collector.tool_steps or [],
+                    a2ui=collector.a2ui or None,
+                    mcp_apps=collector.mcp_apps or None,
+                    cards=collector.cards or None,
+                    matched_skills=collector.matched_skills or None,
+                    ttfb_ms=collector.ttfb_ms,
+                    total_ms=collector.total_ms,
+                )
+                if progress_msg_id:
+                    await store.update_message(progress_msg_id, session_id, asst_msg)
+                else:
+                    await store.save_message(session_id, asst_msg)
+                await store.touch(session_id)
+
+            # 触发记忆沉淀
+            from ethan.interface.routers.tasks import _maybe_consolidate
+            asyncio.create_task(_maybe_consolidate(session_id, agent._provider.model, user_id))
+
         except Exception as e:
             import traceback
-            print(f"Schedule fire error: {e}\n{traceback.format_exc()}")
+            _logger.error("Schedule fire error: %s\n%s", e, traceback.format_exc())
             result_text = f"⚠️ 定时任务执行失败: {e}"
-            import asyncio
-
-            # 本路径跑在 daemon 线程的 asyncio.run() 临时 loop 里，
-            # 而 get_session_store() 的 _session_store_lock 是绑定到主
-            # server loop 的模块级 asyncio.Lock（非线程安全）。跨 loop
-            # await 会触发 "got Future attached to a different loop"。
-            # 这里像 core/heartbeat.py:_rotate_session_dbs 那样开独立
-            # 连接写错误日志，绕开单例。
-            from ethan.core.paths import user_sessions_db_path
-            from ethan.memory.session import SessionStore
-            from ethan.providers.base import Message
-            async def log_error():
-                store = SessionStore(db_path=user_sessions_db_path())
-                await store.init()
-                try:
-                    err_msg = Message(role="assistant", content=f"⚠️ 定时任务后台执行失败:\n```text\n{e}\n```")  # noqa: F821 — closure over except-var
-                    await store.save_message(session_id, err_msg)
-                    await store.touch(session_id)
-                finally:
-                    await store.close()
             try:
-                asyncio.run(log_error())
+                store = await get_session_store()
+                err_content = ""
+                if collector and collector.full:
+                    err_content = collector.full + "\n\n"
+                err_content += f"⚠️ 定时任务后台执行失败:\n```text\n{e}\n```"
+                err_msg = Message(
+                    role="assistant",
+                    content=err_content,
+                    tool_steps=collector.tool_steps if collector else [],
+                )
+                if progress_msg_id:
+                    await store.update_message(progress_msg_id, session_id, err_msg)
+                else:
+                    await store.save_message(session_id, err_msg)
+                await store.touch(session_id)
             except Exception as e2:
-                print(f"Failed to log error to session: {e2}")
+                _logger.error("Failed to log schedule error to session: %s", e2)
+        finally:
+            if consent:
+                consent.cancel_all()
 
         # 把结果发回来源渠道（飞书/微信）
-        # 防御性检查：过滤掉工具返回的噪音（如 agent 错误地把 lark-cli 的 JSON 结果当回复）
         if result_text and _is_tool_result_noise(result_text):
-            print(f"Schedule job '{title}' result looks like tool noise, skipping send. Content preview: {result_text[:200]}")
+            _logger.info("Schedule job '%s' result looks like tool noise, skipping send.", title)
             result_text = ""
 
         if result_text:
@@ -211,44 +284,36 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
                     ctx = json.loads(channel_context)
                     chat_id = ctx.get("chat_id", "")
                     if chat_id:
-                        import asyncio
-
                         from ethan.interface.lark import _get_lark_client, _send_lark_reply
                         client = _get_lark_client()
                         if client:
-                            try:
-                                asyncio.run(_send_lark_reply(client, chat_id, formatted))
-                            except RuntimeError:
-                                # 当前处于 event loop 内时降级：用 create_task 异步发送
-                                loop = asyncio.get_running_loop()
-                                loop.create_task(_send_lark_reply(client, chat_id, formatted))
+                            await _send_lark_reply(client, chat_id, formatted)
                 except Exception as e3:
-                    print(f"Schedule lark reply error: {e3}")
+                    _logger.error("Schedule lark reply error: %s", e3)
 
             elif channel == "wechat":
                 try:
                     ctx = json.loads(channel_context)
                     to_user_id = ctx.get("to_user_id", "")
                     if to_user_id:
-                        import asyncio
 
                         from ethan.interface.wechat_ilink import load_credentials, send_text
                         creds = load_credentials()
                         if creds:
-                            async def _send_wechat():
-                                async with _http_client() as client:
-                                    await send_text(client, creds, to_user_id, "", formatted)
-                            try:
-                                asyncio.run(_send_wechat())
-                            except RuntimeError:
-                                # 当前处于 event loop 内时降级：用 create_task 异步发送
-                                loop = asyncio.get_running_loop()
-                                loop.create_task(_send_wechat())
+                            async with _http_client() as client:
+                                await send_text(client, creds, to_user_id, "", formatted)
                 except Exception as e4:
-                    print(f"Schedule wechat reply error: {e4}")
+                    _logger.error("Schedule wechat reply error: %s", e4)
 
-    # Run in a separate thread so we don't block the APScheduler worker pool!
-    threading.Thread(target=_do_fire, daemon=True).start()
+    # 在 server event loop 中调度异步任务（APScheduler 回调在 worker 线程中运行）
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(_run_schedule_task())
+    except RuntimeError:
+        # 无 running loop（测试/CLI 场景）：起 daemon 线程跑
+        def _thread_run():
+            asyncio.run(_run_schedule_task())
+        threading.Thread(target=_thread_run, daemon=True).start()
 
 class ScheduleCreateTool(BaseTool):
     fast_path = False
