@@ -1301,6 +1301,7 @@ class Agent:
         _image_stripped = False  # 图片超限时剥离重试（只允许一次，避免循环）
         _inject_extra_rounds = 0  # 因处理运行中补充信息而追加的额外轮次（上限防死循环）
         MAX_INJECT_EXTRA_ROUNDS = 5  # 最多追加 5 轮处理连续补充信息
+        _ssl_continue_used = False  # SSL 断连自动续接（仅允许一次）
 
         for i in range(max_iters + MAX_INJECT_EXTRA_ROUNDS):
             # 上一轮注入的决策提示/增强上下文是临时 user 消息，本轮消费完后 pop 掉，避免污染 history
@@ -1436,6 +1437,18 @@ class Agent:
             else:
                 response = Message(role="assistant", content=full_content, tool_calls=tool_calls)
             working.append(response)
+
+            # SSL 断连自动续接：检测到 truncated 且为纯文本回复时，注入续接提示重新调模型
+            if (final_chunk and final_chunk.truncated
+                    and not response.is_tool_call and full_content
+                    and not _ssl_continue_used and not finalize):
+                _ssl_continue_used = True
+                logger.warning("stream_chat() iter=%d SSL truncated, auto-continuing", i + 1)
+                working.append(Message(
+                    role="user",
+                    content="[网络中断，请从断点继续你的回复，不要重复已说内容。]",
+                ))
+                continue
 
             # 空响应（既无正文也无工具调用）= 模型静默放弃。
             # 修复：移除空 assistant 消息，注入 nudge 唤醒模型再重试一轮（带工具）。

@@ -375,6 +375,7 @@ class OpenAICompatProvider(BaseProvider):
 
         aiter = resp_iter.__aiter__()
         _ssl_retried = False  # 流式中途 SSL 断连只重试一次
+        _ssl_salvaged = False  # 标记是否因 SSL 断连而 salvage 退出
         while True:
             try:
                 chunk = await asyncio.wait_for(aiter.__anext__(), timeout=_CHUNK_TIMEOUT)
@@ -411,6 +412,7 @@ class OpenAICompatProvider(BaseProvider):
                     _log.getLogger("ethan.providers.openai_compat").warning(
                         "[stream_chat] midstream SSL break, salvaging partial output: %s", e
                     )
+                    _ssl_salvaged = True
                     break
                 # 无内容且未重试过 → 重新建连重试一次
                 if _ssl_retried:
@@ -517,3 +519,9 @@ class OpenAICompatProvider(BaseProvider):
                 is_final_now = bool(stream_usage) or not kwargs.get("stream_options")
                 final_tool_calls = tool_calls  # 保存：若后续有独立 usage chunk，其 final yield 需要带上
                 yield StreamChunk(content="", tool_calls=tool_calls, is_final=is_final_now, usage=stream_usage if is_final_now else None)
+
+        # SSL 中途断连 salvage：flush 剩余缓冲并标记 truncated，上层 agent 据此自动续接
+        if _ssl_salvaged:
+            if content_buf:
+                yield StreamChunk(content=content_buf)
+            yield StreamChunk(content="", is_final=True, truncated=True)

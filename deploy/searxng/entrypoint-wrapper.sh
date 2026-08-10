@@ -39,22 +39,18 @@ cfg.setdefault('outgoing', {})['proxies'] = {
     'https': [proxy_url],
 }
 
-# 2. 代理模式下也必须禁用的引擎（即使走代理也 init 失败或被反爬）
-#    - wikidata/ahmia/torch: init 必然失败
-#    - brave 全系列: 反爬严格，代理也返回 403/captcha
-#    - vimeo: access denied
-#    - google news: region 限制
-#    - baidu: 对服务器 IP 100% CAPTCHA 拦截
-#    - duckduckgo: cn-zh region 触发 CAPTCHA（SearXNG default_lang=zh-CN 导致）
+# 2. 代理模式下也必须禁用的引擎（即使走代理也失败）
 ALWAYS_DISABLED = {
     'wikidata', 'ahmia', 'torch',
     'brave', 'brave.images', 'brave.videos', 'brave.news',
     'vimeo', 'google news',
     'baidu', 'duckduckgo',
-    # duckduckgo 系列同样会触发 CAPTCHA
     'duckduckgo images', 'duckduckgo news', 'duckduckgo videos',
-    # startpage 系列实测代理下仍 CAPTCHA (suspended 3600s)
     'startpage', 'startpage images', 'startpage news',
+    'openairedatasets',
+    'qwant', 'qwant news',
+    'yahoo',
+    'mojeek', 'presearch', 'yep',
 }
 
 # 3. 放开其他引擎（显式设 disabled=False），确保 ALWAYS_DISABLED 中的被禁用
