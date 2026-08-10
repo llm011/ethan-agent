@@ -63,8 +63,9 @@ def _save_msg_images_to_files(msg: Message, session_id: str) -> list[str]:
         data = img.get("data", "")
         media_type = img.get("media_type", "image/png")
         if data:
-            rel_path, _ = save_image(sid, idx, data, media_type)
-            paths.append(str(image_file_path(rel_path)))
+            # save_image 返回 [(路径, media_type), ...]，长图会返回多段
+            for rel_path, _ in save_image(sid, idx, data, media_type):
+                paths.append(str(image_file_path(rel_path)))
         elif "path" in img:
             paths.append(str(image_file_path(img["path"])))
     return paths

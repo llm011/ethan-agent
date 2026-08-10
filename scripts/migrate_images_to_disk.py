@@ -66,9 +66,9 @@ def migrate(db_path: Path | None = None) -> None:
             if not data:
                 new_images.append(img)
                 continue
-            # 保存到文件
-            path = save_image(session_id, idx, data, media_type)
-            new_images.append({"path": path, "media_type": media_type})
+            # 保存到文件（长图会返回多段，均以 path 记录入库）
+            for seg_path, seg_media_type in save_image(session_id, idx, data, media_type):
+                new_images.append({"path": seg_path, "media_type": seg_media_type})
             changed = True
             images_saved += 1
 
