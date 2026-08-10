@@ -223,6 +223,10 @@ class WebSearchTool(BaseTool):
             from ethan.core.config import get_config
             cfg = get_config().tools.web_search
 
+            # language 格式校验：SearXNG 接受 xx 或 xx-XX 格式，非标准值回退默认
+            if not re.match(r"^[a-z]{2}(-[A-Za-z]{2,4})?$", language):
+                language = "zh-CN"
+
             # 自动路由：按 query 意图选择分类
             if category == "auto":
                 category = _route_category(query)
@@ -299,7 +303,7 @@ class WebSearchTool(BaseTool):
         # 主力：SearXNG 指定分类
         if cfg.base_url:
             try:
-                results = await self._searxng_search_category(query, max_results, cfg.base_url, category)
+                results = await self._searxng_search_category(query, max_results, cfg.base_url, category, language)
                 if results:
                     return results, None
                 logger.info("[WebSearch] %s category empty, falling back to general", category)
@@ -313,11 +317,11 @@ class WebSearchTool(BaseTool):
         return await self._general_search(query, max_results, cfg, language)
 
     async def _searxng_search_category(
-        self, query: str, max_results: int, base_url: str, category: str
+        self, query: str, max_results: int, base_url: str, category: str, language: str = "zh-CN"
     ) -> list[dict]:
         """SearXNG 指定分类搜索。异常向上传播。"""
         url = base_url.rstrip("/") + "/search"
-        params = {"q": query, "format": "json", "categories": category}
+        params = {"q": query, "format": "json", "categories": category, "language": language}
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(url, params=params)
             resp.raise_for_status()
