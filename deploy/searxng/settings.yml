@@ -1,66 +1,116 @@
 # SearXNG 配置 —— 为 ethan web_search 工具启用 JSON 输出。
 # 完整选项见 https://docs.searxng.org/admin/settings/
 #
-# 注意：SearXNG 镜像的 entrypoint 不支持 settings.yml 里用 ${VAR} 引用环境变量
-# （无 envsubst），secret_key 必须是明文。下面这个值仅用于本机/局域网自用场景；
-# 若要对公网开放，请换成自己生成的随机值（如 `openssl rand -hex 24`）。
+# 引擎测试结果（2026-08-07 代理模式实测）：
+#   通用搜索稳定: google(30) > swisscows(30) > google cse(20) > yandex(15) > naver(15) > bing(10) > dogpile(8)
+#   仅中文: quark(10)
+#   新闻稳定: yahoo news(20+) > chinaso news(20) > bing news(10, 偶尔解析失败)
+#   IT 稳定: github, stackoverflow, mdn, docker hub
+#   科学稳定: arxiv, google scholar, semantic scholar, core.ac.uk, springer nature, pubmed
+#   不可用: yahoo(协议错误), qwant(CAPTCHA), mojeek(403), brave(403), presearch(超时), yep(403)
 use_default_settings: true
 
 server:
   secret_key: "please-change-this-searxng-secret-key"
-  limiter: false  # 单机自用场景关闭限流；对公网开放时请改为 true 并配置 limiter.toml
+  limiter: false
 
 search:
-  # 默认语言设为中文 —— Bing 国际版页面结构已改（无 b_algo class），
-  # SearXNG 的 XPath 解析器解析不到结果；中文 region (mkt=zh-CN) 下页面结构正常。
-  # 同时 baidu 等国内引擎也需要中文 locale 才能正确返回结果。
   default_lang: zh-CN
   formats:
     - html
-    - json  # ethan web_search 工具依赖 JSON 输出，默认关闭，必须显式开启
+    - json
 
 outgoing:
-  request_timeout: 12.0      # 默认 3.0s 太短，Google/DDG 等在部分网络环境容易 timeout
+  request_timeout: 12.0
   max_request_timeout: 20.0
-  # 代理配置已关闭 —— 宿主机 7890 未监听时强制走代理会导致所有引擎 init 失败。
-  # 需要时再取消注释（确保代理客户端已启动并监听 7890）：
-  # proxies:
-  #   http:
-  #     - http://host.docker.internal:7890
-  #   https:
-  #     - http://host.docker.internal:7890
 
 engines:
-  # === 显式启用国内可直连的引擎 ===
+  # ════════════════════════════════════════════════════════════════════════════
+  # 通用搜索（general）—— 多引擎冗余，避免少数 suspended 就全军覆没
+  # ════════════════════════════════════════════════════════════════════════════
   - name: bing
     disabled: false
-  - name: baidu
-    disabled: false
-
-  # === 频繁报错的引擎（空响应/限流），禁用减少日志噪音 ===
-  - name: bing news
-    disabled: true
-
-  # === 直连模式下禁用国外引擎（代理开启时 wrapper 会自动放开）===
-  # 通用搜索
-  - name: brave
-    disabled: true
-  - name: duckduckgo
-    disabled: true
+  - name: google
+    disabled: true          # 代理模式由 wrapper 放开
   - name: google cse
     disabled: true
-  - name: startpage  # 代理下也 CAPTCHA, 已加入 wrapper ALWAYS_DISABLED
+  - name: yandex
     disabled: true
+  - name: naver
+    disabled: true
+  - name: swisscows
+    disabled: true
+  - name: dogpile
+    disabled: true
+  - name: quark
+    disabled: false         # 夸克：国内直连，仅中文有效
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # 新闻（news）
+  # ════════════════════════════════════════════════════════════════════════════
+  - name: bing news
+    disabled: true
+  - name: yahoo news
+    disabled: true
+  - name: chinaso news
+    disabled: false         # 中国搜索新闻：国内直连
+  - name: wikinews
+    disabled: true
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # IT / 代码
+  # ════════════════════════════════════════════════════════════════════════════
+  - name: github
+    disabled: true
+  - name: stackoverflow
+    disabled: true
+  - name: mdn
+    disabled: true
+  - name: docker hub
+    disabled: true
+  - name: askubuntu
+    disabled: true
+  - name: superuser
+    disabled: true
+  - name: pypi
+    disabled: true
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # 科学 / 学术
+  # ════════════════════════════════════════════════════════════════════════════
+  - name: arxiv
+    disabled: true
+  - name: pubmed
+    disabled: true
+  - name: google scholar
+    disabled: true
+  - name: semantic scholar
+    disabled: true
+  - name: core.ac.uk
+    disabled: true
+  - name: springer nature
+    disabled: true
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # 直连模式禁用（代理模式由 wrapper 放开）
+  # ════════════════════════════════════════════════════════════════════════════
   - name: wikipedia
     disabled: true
-  - name: lingva  # Google Translate 代理
+  - name: lingva
     disabled: true
-  # 图片/视频/新闻分类中的国外引擎
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # 已知不可用 / 质量差 —— 始终禁用
+  # ════════════════════════════════════════════════════════════════════════════
+  - name: brave
+    disabled: true
   - name: brave.images
     disabled: true
   - name: brave.videos
     disabled: true
   - name: brave.news
+    disabled: true
+  - name: duckduckgo
     disabled: true
   - name: duckduckgo images
     disabled: true
@@ -68,17 +118,40 @@ engines:
     disabled: true
   - name: duckduckgo videos
     disabled: true
-  - name: google cse images
+  - name: startpage
     disabled: true
-  - name: startpage images  # 代理下也 CAPTCHA, 已加入 wrapper ALWAYS_DISABLED
+  - name: startpage images
     disabled: true
-  - name: startpage news  # 代理下也 CAPTCHA, 已加入 wrapper ALWAYS_DISABLED
+  - name: startpage news
     disabled: true
-  - name: wikinews
+  - name: google news
     disabled: true
-  - name: wiktionary
+  - name: baidu
     disabled: true
-  # wikimedia 系列共用 *.wikimedia.org，国内 IP 层阻断
+  - name: qwant
+    disabled: true
+  - name: qwant news
+    disabled: true
+  - name: mojeek
+    disabled: true
+  - name: yahoo
+    disabled: true
+  - name: presearch
+    disabled: true
+  - name: yep
+    disabled: true
+  - name: vimeo
+    disabled: true
+  - name: openairedatasets
+    disabled: true
+  - name: openstreetmap
+    disabled: true
+  - name: wikidata
+    disabled: true
+  - name: ahmia
+    disabled: true
+  - name: torch
+    disabled: true
   - name: wikicommons.files
     disabled: true
   - name: wikicommons.images
@@ -87,37 +160,5 @@ engines:
     disabled: true
   - name: wikicommons.videos
     disabled: true
-
-  # === 其他国内无法直连的引擎 ===
-  # news
-  - name: google news
-    disabled: true
-  - name: reuters
-    disabled: true
-  # videos / music
-  - name: youtube
-    disabled: true
-  - name: dailymotion
-    disabled: true
-  - name: sepiasearch
-    disabled: true
-  - name: vimeo
-    disabled: true
-  # science
-  - name: google scholar
-    disabled: true
-  - name: openairedatasets
-    disabled: true
-  - name: semantic scholar
-    disabled: true
-  # map
-  - name: openstreetmap
-    disabled: true
-
-  # === init 必然失败的引擎（代理模式也禁用）===
-  - name: wikidata
-    disabled: true
-  - name: ahmia
-    disabled: true
-  - name: torch
+  - name: wiktionary
     disabled: true

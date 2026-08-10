@@ -46,9 +46,9 @@ logger = logging.getLogger(__name__)
 _DDG_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
 
 # ── Circuit Breaker（进程级单例） ─────────────────────────────────────────────
-_RETRY_COUNT = 1          # 每个 provider 重试次数（加上首次 = 共 2 次机会）
-_FAILURE_THRESHOLD = 2    # 连续失败几轮后熔断
-_COOLDOWN_SECONDS = 300   # 熔断冷却期（秒）
+_RETRY_COUNT = 2          # 每个 provider 重试次数（加上首次 = 共 3 次机会）
+_FAILURE_THRESHOLD = 3    # 连续失败几轮后熔断
+_COOLDOWN_SECONDS = 180   # 熔断冷却期（秒）
 
 # ── 自动路由关键词表 ────────────────────────────────────────────────────────
 # 用于 category='auto' 时按 query 意图自动选择 SearXNG 分类。
@@ -232,10 +232,10 @@ class WebSearchTool(BaseTool):
                 results, total = await self._news_search(query, max_results, time_range, language, cfg)
             elif category in ("science", "it"):
                 # 学术/IT 分类：主力分类 → 降级到 general（引擎质量分级）
-                results, total = await self._categorized_search(query, max_results, category, cfg)
+                results, total = await self._categorized_search(query, max_results, category, cfg, language)
             else:
                 # general 或未知 category 都走通用搜索
-                results, total = await self._general_search(query, max_results, cfg)
+                results, total = await self._general_search(query, max_results, cfg, language)
 
             if not results:
                 return f"No results found for: {query}"
@@ -286,7 +286,7 @@ class WebSearchTool(BaseTool):
 
     # ── Categorized search（science/it 分类，带降级）─────────────────────────
 
-    async def _categorized_search(self, query: str, max_results: int, category: str, cfg) -> tuple[list[dict], int | None]:
+    async def _categorized_search(self, query: str, max_results: int, category: str, cfg, language: str = "zh-CN") -> tuple[list[dict], int | None]:
         """按指定分类（science/it）搜索，主力分类返回空时降级到 general。
 
         引擎质量分级策略：
@@ -310,7 +310,7 @@ class WebSearchTool(BaseTool):
             logger.debug("[WebSearch] no SearXNG configured, %s category falls back to general", category)
 
         # 降级到 general（包含 SearXNG general → tavily → ddg → bing 完整链）
-        return await self._general_search(query, max_results, cfg)
+        return await self._general_search(query, max_results, cfg, language)
 
     async def _searxng_search_category(
         self, query: str, max_results: int, base_url: str, category: str
@@ -341,13 +341,13 @@ class WebSearchTool(BaseTool):
 
     # ── General search（retry + fallback + circuit breaker）────────────────
 
-    async def _general_search(self, query: str, max_results: int, cfg) -> tuple[list[dict], int | None]:
+    async def _general_search(self, query: str, max_results: int, cfg, language: str = "zh-CN") -> tuple[list[dict], int | None]:
         """按优先级尝试各 provider，每个带 retry，失败则 fallback，累计熔断。"""
         self._last_total: int | None = None  # 重置
         # 可用 provider 池：searxng / tavily 需对应配置齐全才可用，ddg / bing 无条件兜底
         available: dict[str, object] = {}  # name -> callable_coroutine_factory
         if cfg.base_url:
-            available["searxng"] = lambda: self._searxng_search(query, max_results, cfg.base_url)
+            available["searxng"] = lambda: self._searxng_search(query, max_results, cfg.base_url, language)
         if cfg.api_key:
             available["tavily"] = lambda: self._tavily_search(query, max_results, cfg.api_key)
         available["duckduckgo"] = lambda: self._ddg_search(query, max_results)
@@ -390,7 +390,7 @@ class WebSearchTool(BaseTool):
                 had_error = True
                 logger.debug("[WebSearch] %s attempt %d error: %s", provider_name, attempt + 1, e)
             if attempt < _RETRY_COUNT:
-                await asyncio.sleep(0.5)  # 重试前短暂等待
+                await asyncio.sleep(1.0 + attempt * 0.5)
         return [], had_error
 
     # ── News search（同样带 retry + fallback + circuit breaker）──────────────
@@ -516,10 +516,10 @@ class WebSearchTool(BaseTool):
 
     # ── SearXNG general ──────────────────────────────────────────────────────
 
-    async def _searxng_search(self, query: str, max_results: int, base_url: str) -> list[dict]:
+    async def _searxng_search(self, query: str, max_results: int, base_url: str, language: str = "zh-CN") -> list[dict]:
         """SearXNG 通用搜索。异常向上传播给 _call_with_retry 处理。"""
         url = base_url.rstrip("/") + "/search"
-        params = {"q": query, "format": "json"}
+        params = {"q": query, "format": "json", "language": language}
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(url, params=params)
             resp.raise_for_status()
