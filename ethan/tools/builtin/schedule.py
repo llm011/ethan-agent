@@ -1,4 +1,5 @@
 """Schedule Tool — 让 agent 通过 tool call 创建和管理定时任务。"""
+import asyncio
 import json
 import os
 import threading
@@ -11,6 +12,15 @@ from ethan.tools.base import BaseTool
 # 存储当前请求的飞书 chat_id，在 lark webhook 里设置，ScheduleCreateTool 里读取
 lark_chat_id_var: ContextVar[str] = ContextVar("lark_chat_id", default="")
 wechat_chat_id_var: ContextVar[str] = ContextVar("wechat_chat_id", default="")
+
+# 主 server event loop 引用，在 lifespan startup 时设置
+_server_loop: asyncio.AbstractEventLoop | None = None
+
+
+def set_server_loop(loop: asyncio.AbstractEventLoop) -> None:
+    """在 server startup 时调用，保存主 event loop 引用供定时任务回调使用。"""
+    global _server_loop
+    _server_loop = loop
 
 
 def _try_strptime(s: str, fmt: str) -> bool:
@@ -126,8 +136,6 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
     执行流程与普通对话完全对齐：使用 stream_chat() + StreamCollector 实时
     持久化工具调用过程（tool_steps），便于事后排查问题。
     """
-    import asyncio
-
     async def _run_schedule_task():
         """在 server event loop 中跑完整 agent 流式循环，实时落库工具步骤。"""
         import logging as _log
@@ -305,12 +313,14 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
                 except Exception as e4:
                     _logger.error("Schedule wechat reply error: %s", e4)
 
-    # 在 server event loop 中调度异步任务（APScheduler 回调在 worker 线程中运行）
-    try:
-        loop = asyncio.get_running_loop()
-        loop.create_task(_run_schedule_task())
-    except RuntimeError:
-        # 无 running loop（测试/CLI 场景）：起 daemon 线程跑
+    # APScheduler BackgroundScheduler 的回调在 worker 线程中运行，
+    # 必须把 async task 提交到主 server event loop（而非 asyncio.run 创建新 loop，
+    # 否则 get_session_store 的 asyncio.Lock 跨 loop 会报错）。
+    loop = _server_loop
+    if loop and loop.is_running():
+        asyncio.run_coroutine_threadsafe(_run_schedule_task(), loop)
+    else:
+        # fallback：无 server loop（测试/CLI 场景）
         def _thread_run():
             asyncio.run(_run_schedule_task())
         threading.Thread(target=_thread_run, daemon=True).start()

@@ -144,6 +144,9 @@ async def lifespan(app: FastAPI):
     # 不能依赖懒加载（首次 GET /api/schedule 才 start），否则服务空跑时 job 永远不触发。
     from ethan.interface.routers.schedule import get_scheduler
     get_scheduler()
+    # 保存主 event loop 引用，供定时任务回调中 run_coroutine_threadsafe 使用
+    from ethan.tools.builtin.schedule import set_server_loop
+    set_server_loop(_asyncio.get_running_loop())
     from ethan.browser.session_map import start_idle_sweep, stop_idle_sweep
     start_idle_sweep()
     key_store = APIKeyStore()

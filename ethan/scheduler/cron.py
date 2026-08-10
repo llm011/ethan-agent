@@ -35,7 +35,11 @@ class Scheduler:
         jobstores = {
             "default": SQLAlchemyJobStore(url=f"sqlite:///{DB_PATH}"),
         }
-        self._scheduler = BackgroundScheduler(jobstores=jobstores, timezone=get_local_timezone())
+        self._scheduler = BackgroundScheduler(
+            jobstores=jobstores,
+            timezone=get_local_timezone(),
+            job_defaults={"misfire_grace_time": 300, "coalesce": True},
+        )
         self._tz = get_local_timezone()
 
     def start(self) -> None:
@@ -128,6 +132,7 @@ class Scheduler:
             id=job_id,
             name=name or job_id,
             replace_existing=True,
+            misfire_grace_time=300,
             kwargs=kwargs,
         )
 
