@@ -236,13 +236,16 @@ class MemoryStore:
         existing_cols = {
             row[1] for row in conn.execute("PRAGMA table_info(memories)").fetchall()
         }
-        # 守卫：只在 schema_version < 3 时执行 v3 迁移，避免每次启动都跑 6 个全表扫描。
-        # schema_version 在迁移成功后由 line 226 写入，旧库该 key 不存在（返回 None）。
+        # 守卫：用独立的 'v3_migrated' key 判断回填是否完成。schema_version 在上方
+        # 已被无条件写为 "3"，不能用来判断回填状态——若 ALTER 成功但回填崩溃，
+        # schema_version 已是 "3"、列已存在，下次启动会跳过回填。v3_migrated 只在
+        # 回填全部成功后写入，保证中途崩溃时下次启动能重试。
+        v3_done = conn.execute(
+            "SELECT value FROM structured_memory_meta WHERE key='v3_migrated'"
+        ).fetchone()
         need_v3_migrate = (
             "memory_role" not in existing_cols
-            or conn.execute(
-                "SELECT value FROM structured_memory_meta WHERE key='schema_version'"
-            ).fetchone() is None
+            or v3_done is None
         )
         if need_v3_migrate:
             if "memory_role" not in existing_cols:
@@ -278,6 +281,10 @@ class MemoryStore:
                     "AND lower(dimension) LIKE ?",
                     (prefix, f"{prefix}%"),
                 )
+            conn.execute(
+                "INSERT OR REPLACE INTO structured_memory_meta(key, value) "
+                "VALUES ('v3_migrated', '1')"
+            )
 
         try:
             # schema v2: 修中文词法通道。v1 用默认 unicode61 tokenizer + 原文索引，

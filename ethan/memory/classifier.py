@@ -227,7 +227,11 @@ def _parse_intent(text: str) -> str:
     # 整行不是单个标签时,按词边界查第一个完整出现的标签(排除 not/no 等否定)
     import re
 
-    negated = bool(re.search(r"\b(not|no|non|不是|不|没)\b", t))
+    # \b 对 CJK 无效,中文否定词用前后非汉字(或行首/行尾)判断边界
+    negated = bool(
+        re.search(r"\b(not|no|non)\b", t)
+        or re.search(r"(?:^|(?<=[\s，。,;：:]))(不是|不|没)(?:$|(?=[\s，。,;：:]))", t)
+    )
     if negated:
         return "unknown"  # 否定句无法可靠解析意图,回退全量召回保 recall
     for intent in ("identity", "activity", "decision", "preference",
