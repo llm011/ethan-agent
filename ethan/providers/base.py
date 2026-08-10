@@ -50,6 +50,7 @@ class StreamChunk:
     is_final: bool = False
     usage: Optional[dict] = None
     reasoning: str = ""  # 模型思考内容（reasoning_content / thinking）；与 content 分流，不当正文展示
+    truncated: bool = False  # SSL 中途断连导致输出被截断，上层可据此决定是否续接
 
 
 @dataclass
