@@ -33,6 +33,52 @@ _DANGEROUS_PATTERNS = [
 ]
 _DANGEROUS_RE = re.compile("|".join(_DANGEROUS_PATTERNS))
 
+# 检测命令里引用 secret 环境变量的语法：$VAR / ${VAR}。
+# secrets 通过 load_secret_env() 注入 shell 子进程环境（见 run()），agent 可被诱导
+# `echo $TOKEN | base64` 套出密钥（编码后可绕过 mask_text 的全字符串匹配）。
+# 命中时走高危路径——每次重新授权、不计入会话放行，让用户在授权弹窗里看到具体
+# 引用了哪个 secret 变量，再决定是否放行。
+_DOLLAR_VAR_RE = re.compile(r'\$\{([A-Za-z_][A-Za-z0-9_]*)(?::[^}]*)?\}|\$([A-Za-z_][A-Za-z0-9_]*)')
+
+# 能列举环境变量的命令：env/printenv/set/export -p/declare -x/compgen -v。
+# 这些命令不需要 $VAR 语法就能 dump 所有 secret（含注入的密钥），必须单独拦截。
+# env/set 后面必须是分隔符（;|&或行尾）才算 dump（env VAR=val cmd 是设置不是列举）。
+_ENV_DUMP_RE = re.compile(
+    r'\b(?:'
+    r'printenv'
+    r'|env(?=\s*(?:[;&|]|$))'
+    r'|set(?=\s*(?:[;&|]|$))'
+    r'|export\s+-p'
+    r'|declare\s+-[xp]'
+    r'|compgen\s+-v'
+    r')\b'
+)
+
+
+def _extract_dollar_vars(command: str) -> set[str]:
+    """提取命令里所有 $VAR / ${VAR} 引用的变量名。"""
+    refs: set[str] = set()
+    for m in _DOLLAR_VAR_RE.finditer(command):
+        name = m.group(1) or m.group(2)
+        if name:
+            refs.add(name)
+    return refs
+
+
+def _detect_secret_env_refs(command: str) -> list[str]:
+    """命令引用了哪些已注入的 secret 环境变量，返回命中的变量名（排序）。
+
+    与 shell 子进程注入同源（load_secret_env），确保检测口径和注入口径一致。
+    """
+    try:
+        from ethan.core.secrets_store import load_secret_env
+        secret_keys = set(load_secret_env().keys())
+    except Exception:
+        return []
+    if not secret_keys:
+        return []
+    return sorted(_extract_dollar_vars(command) & secret_keys)
+
 
 def _kill_process_group(proc: asyncio.subprocess.Process) -> None:
     """Kill 整个进程组（含孙进程），兼容进程已退出的情况。
@@ -61,15 +107,29 @@ class ShellTool(BaseTool):
 
     def consent_check(self, command: str = "", **kwargs) -> str | None:
         # shell 可执行任意副作用操作，执行前请求授权。
-        if _DANGEROUS_RE.search(command or ""):
+        cmd = command or ""
+        if _DANGEROUS_RE.search(cmd):
             # 高危命令：文案标红提示，且每次都问（见 consent_always）
-            return f"⚠️ 高危 shell 命令，请确认：{command[:200]}"
+            return f"⚠️ 高危 shell 命令，请确认：{cmd[:200]}"
+        # 环境变量列举命令（env/printenv/set 等）：不需要 $VAR 就能 dump 所有 secret，
+        # 每次重新授权。
+        if _ENV_DUMP_RE.search(cmd):
+            return f"⚠️ 命令可能泄露环境变量（含 secret），请确认：{cmd[:200]}"
+        # 命令引用了 secret 环境变量：可被诱导泄露密钥（编码能绕过 mask_text），
+        # 每次重新授权，让用户在弹窗里看到具体引用了哪个 secret 变量。
+        secret_refs = _detect_secret_env_refs(cmd)
+        if secret_refs:
+            return (
+                f"⚠️ 命令引用了 secret 环境变量（{', '.join(secret_refs)}），"
+                f"可能泄露密钥，请确认：{cmd[:200]}"
+            )
         # 普通命令：文案显式告知 scope 是会话级，避免用户以为只授了卡片上那一条
         return "执行 shell 命令（授权后本会话内的所有 shell 命令都不再询问）"
 
     def consent_always(self, command: str = "", **kwargs) -> bool:
         # 高危命令始终重新询问，即使本会话已授权过 shell，也不计入会话放行
-        return bool(_DANGEROUS_RE.search(command or ""))
+        cmd = command or ""
+        return bool(_DANGEROUS_RE.search(cmd)) or bool(_ENV_DUMP_RE.search(cmd)) or bool(_detect_secret_env_refs(cmd))
     parameters = {
         "type": "object",
         "properties": {

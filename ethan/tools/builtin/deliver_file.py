@@ -51,8 +51,14 @@ class DeliverFileTool(BaseTool):
         if card is None:
             return f"Deliver failed: cannot build file card for {p}"
 
+        # 注意：content 中必须包含完整绝对路径，让历史上下文追踪机制能提取到，
+        # 后续轮次模型可以直接用 file_read 读取该文件，无需重新生成。
         return ToolResult(
             tool_call_id="",  # 由 registry 回填
-            content=f"已交付文件 {p.name}（{card['size_kb']} KB），用户可点击卡片预览或下载。",
+            content=(
+                f"已交付文件：{card['title']}（{p.name}，{card['size_kb']} KB）\n"
+                f"文件路径：{p}\n"
+                f"用户可点击卡片预览或下载；如需引用文件内容，用 file_read 读取 {p}。"
+            ),
             cards=[card],
         )

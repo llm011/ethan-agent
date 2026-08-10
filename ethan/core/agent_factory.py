@@ -31,13 +31,6 @@ from ethan.tools.builtin.dida_tools import (
 )
 from ethan.tools.builtin.file import FileListTool, FileReadTool, FileWriteTool
 from ethan.tools.builtin.find_tools import FindToolsTool
-from ethan.tools.builtin.flomo import (
-    FlomoCreateTool,
-    FlomoEditTool,
-    FlomoQueryTool,
-    FlomoTagsTool,
-    FlomoWriteTool,
-)
 from ethan.tools.builtin.heartbeat import HeartbeatAddTool, HeartbeatListTool, HeartbeatRemoveTool
 from ethan.tools.builtin.image_search import ImageSearchTool
 from ethan.tools.builtin.install_skill import InstallSkillTool
@@ -47,6 +40,7 @@ from ethan.tools.builtin.lark_tools import (
     LarkChatMessagesTool,
     LarkMessageSendTool,
 )
+from ethan.tools.builtin.lunar import LunarCalendarTool
 from ethan.tools.builtin.memory_write import MemoryWriteTool
 from ethan.tools.builtin.plan import PlanReadTool, PlanUpdateTool, PlanWriteTool
 from ethan.tools.builtin.procedure_write import ProcedureWriteTool
@@ -113,6 +107,7 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
         pass  # 配置未加载时不阻塞工具注册
     registry.register(WebFetchTool())
     registry.register(WeatherTool())
+    registry.register(LunarCalendarTool())
     registry.register(ChartTool())
     registry.register(FileReadTool())
     registry.register(FileWriteTool())
@@ -130,19 +125,8 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
             registry.register(DidaTaskCompleteTool())
     except Exception:
         pass  # 配置未加载或未启用时不注册 dida 工具
-    # flomo 浮墨笔记工具 — 写入走 webhook（需 webhook key），读取/编辑走本地 API（需 Mac 客户端登录）。
-    # webhook key 通过 set_secret("flomo_webhook_key", ...) 配置；本地 API 自动从客户端存储提取 token。
-    # 读取工具在无 Mac 客户端时返回引导提示，不影响其他工具。
-    try:
-        from ethan.core.config import get_config as _get_cfg2
-        if _get_cfg2().tools.flomo.enabled:
-            registry.register(FlomoWriteTool())
-            registry.register(FlomoQueryTool())
-            registry.register(FlomoTagsTool())
-            registry.register(FlomoCreateTool())
-            registry.register(FlomoEditTool())
-    except Exception:
-        pass  # 配置未加载时不注册 flomo 工具
+    # flomo 已改为技能目录下的 flomo.py 脚本，通过 shell 工具调用，不再注册为 builtin tool。
+    # 详见 ethan/defaults/skills/flomo/SKILL.md 和 flomo.py。
 
     if toolset == "heartbeat":
         # 心跳：只读 + 执行任务 + 调度 + 知识库 + plan + skill_read，不写记忆/skill/profile

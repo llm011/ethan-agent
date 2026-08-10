@@ -837,6 +837,8 @@ class Agent:
         self._executor.reset_cache()
         reset_active_tools()  # 清空本请求的 find_tools 激活集
         working = list(messages)
+        from ethan.core.artifacts import inject_artifacts_prompt
+        inject_artifacts_prompt(working)  # 注入本会话已生成/交付的文件清单，供后续轮次直接引用
         enforce_context_budget(working)  # 历史 tool result 也可能很大，进循环前先管控
         compress_previous_round_tools(working, self.session_id)  # 压缩上一轮 search/fetch 结果
         _route, system, tools_list, max_iters = self._select_route(working)
@@ -860,8 +862,10 @@ class Agent:
         _decision_prompt_injected = False  # 本轮开头是否注入过决策提示（pop 用）
         _enhanced_context_injected = False  # 本轮开头是否注入过增强上下文（pop 用）
         _image_stripped = False  # 图片超限时剥离重试（只允许一次，避免循环）
+        _inject_extra_rounds = 0  # 因处理运行中补充信息而追加的额外轮次（上限防死循环）
+        MAX_INJECT_EXTRA_ROUNDS = 5  # 最多追加 5 轮处理连续补充信息
 
-        for i in range(max_iters):
+        for i in range(max_iters + MAX_INJECT_EXTRA_ROUNDS):
             # 上一轮注入的决策提示/增强上下文是临时 user 消息，本轮消费完后 pop 掉，避免污染 history
             if _decision_prompt_injected and working and working[-1].role == "user":
                 working.pop()
@@ -869,7 +873,47 @@ class Agent:
             if _enhanced_context_injected and working and working[-1].role == "user":
                 working.pop()
                 _enhanced_context_injected = False
-            finalize = (i == max_iters - 1)  # 留最后一轮做收尾：禁工具、强制总结
+            # 每轮开头消费「运行中补充信息」：用户在工具调用过程中提交的补充内容，
+            # append 到 working 末尾（即 prompt 结尾），下一轮调模型时立即可见。
+            # 协议合规：Anthropic/OpenAI 都允许 tool 消息后跟 user 消息。
+            from ethan.core.context import get_injected_messages as _drain_inject
+            _injected = _drain_inject()
+            if _injected:
+                _inject_text = "\n\n".join(f"[用户运行中补充]：{m}" for m in _injected)
+                # 若末尾已是 user 消息（首轮尚无 assistant/tool），合并而非追加，
+                # 避免连续两条 user 消息导致部分网关 400。
+                if working and working[-1].role == "user":
+                    working[-1] = Message(
+                        role="user",
+                        content=(working[-1].content or "") + "\n\n" + _inject_text,
+                        images=working[-1].images,
+                    )
+                else:
+                    working.append(Message(role="user", content=_inject_text))
+                logger.info("chat() iter=%d consumed %d injected message(s)", i, len(_injected))
+                # 开头 drain 到补充时：若本轮即将进入 finalize（i 已到 max_iters-1+extra），
+                # 主动递增 _inject_extra_rounds 推迟 finalize，给模型工具能力处理补充；
+                # 已达上限则记 warning，避免静默丢弃。
+                if i >= max_iters - 1 + _inject_extra_rounds:
+                    if _inject_extra_rounds < MAX_INJECT_EXTRA_ROUNDS:
+                        _inject_extra_rounds += 1
+                        logger.info(
+                            "chat() iter=%d 开头收到补充，递增 _inject_extra_rounds=%d 推迟 finalize",
+                            i, _inject_extra_rounds,
+                        )
+                    else:
+                        logger.warning(
+                            "chat() iter=%d 收到补充信息但追加轮次已达上限（%d），本轮仍会 finalize，补充可能未被完整处理",
+                            i, _inject_extra_rounds,
+                        )
+            # finalize 判断：
+            # - i 抵达「原始最后一轮 + 已追加轮次」即正常 finalize，每追加 1 轮就在该轮内允许收尾
+            # - 已达追加轮次上限：强制 finalize（兜底，避免模型持续调工具撞循环上限）
+            finalize = False
+            if i >= max_iters - 1 + _inject_extra_rounds:
+                finalize = True
+            if _inject_extra_rounds >= MAX_INJECT_EXTRA_ROUNDS:
+                finalize = True  # 达到追加轮次上限，强制收尾
             if finalize:
                 tools = None
                 sys = system + finalize_system_suffix("max_iters")
@@ -907,6 +951,28 @@ class Agent:
                 if (resp.content or "").strip() or resp.is_tool_call:
                     working.append(resp)
                     if not resp.is_tool_call:
+                        # 返回前检查是否有运行中补充信息刚进来，有则再跑一轮处理
+                        _late_injected = _drain_inject()
+                        if _late_injected and _inject_extra_rounds >= MAX_INJECT_EXTRA_ROUNDS:
+                            logger.warning(
+                                "chat() 空响应重试结束前 收到 %d 条补充但追加轮次已达上限，丢弃",
+                                len(_late_injected),
+                            )
+                        if _late_injected and _inject_extra_rounds < MAX_INJECT_EXTRA_ROUNDS:
+                            _inject_text = "\n\n".join(f"[用户运行中补充]：{m}" for m in _late_injected)
+                            if working and working[-1].role == "assistant":
+                                working.append(Message(role="user", content=_inject_text))
+                            else:
+                                working[-1] = Message(
+                                    role="user",
+                                    content=(working[-1].content or "") + "\n\n" + _inject_text,
+                                    images=getattr(working[-1], "images", None) or [],
+                                )
+                            _inject_extra_rounds += 1
+                            logger.info("chat() 结束前收到补充信息，追加第 %d 轮处理", _inject_extra_rounds)
+                            _decision_prompt_injected = False
+                            _enhanced_context_injected = False
+                            continue
                         return resp
                     # 有工具调用 → 继续正常流程
                     response = resp
@@ -917,6 +983,28 @@ class Agent:
                     sys = system + finalize_system_suffix("max_iters")
                     resp = await provider.chat(working, tools=None, system=sys)
                     self.usage.add(resp.usage)
+                    # finalize 兜底返回前也检查补充信息
+                    _late_injected = _drain_inject()
+                    if _late_injected and _inject_extra_rounds >= MAX_INJECT_EXTRA_ROUNDS:
+                        logger.warning(
+                            "chat() finalize 兜底前 收到 %d 条补充但追加轮次已达上限，丢弃",
+                            len(_late_injected),
+                        )
+                    if _late_injected and _inject_extra_rounds < MAX_INJECT_EXTRA_ROUNDS:
+                        # 先把 finalize 的回复放入 working，让模型知道自己说了什么
+                        resp = await self._ensure_non_empty(resp, working, monitor, "nudge_exhausted")
+                        if resp.content:
+                            working.append(Message(role="assistant", content=resp.content))
+                        working.append(Message(
+                            role="user",
+                            content="\n\n".join(f"[用户运行中补充]：{m}" for m in _late_injected),
+                        ))
+                        _inject_extra_rounds += 1
+                        logger.info("chat() finalize 前收到补充信息，追加第 %d 轮处理", _inject_extra_rounds)
+                        _decision_prompt_injected = False
+                        _enhanced_context_injected = False
+                        finalize = False  # 允许调工具处理补充
+                        continue
                     return await self._ensure_non_empty(resp, working, monitor, "nudge_exhausted")
 
             if not response.is_tool_call:
@@ -931,6 +1019,29 @@ class Agent:
                         i + 1, monitor.silent_decision_count
                     )
                     working.append(Message(role="user", content="[继续执行任务。请直接调用工具完成下一步，不要用文字描述你的决策。]"))
+                    continue
+                # 返回前检查是否有运行中补充信息刚进来，有则再跑一轮处理
+                _late_injected = _drain_inject()
+                if _late_injected and _inject_extra_rounds >= MAX_INJECT_EXTRA_ROUNDS:
+                    logger.warning(
+                        "chat() 正常结束前 收到 %d 条补充但追加轮次已达上限，丢弃",
+                        len(_late_injected),
+                    )
+                if _late_injected and _inject_extra_rounds < MAX_INJECT_EXTRA_ROUNDS:
+                    _inject_text = "\n\n".join(f"[用户运行中补充]：{m}" for m in _late_injected)
+                    # 若末尾已是 user 消息则合并，否则追加
+                    if working and working[-1].role == "user":
+                        working[-1] = Message(
+                            role="user",
+                            content=(working[-1].content or "") + "\n\n" + _inject_text,
+                            images=working[-1].images,
+                        )
+                    else:
+                        working.append(Message(role="user", content=_inject_text))
+                    _inject_extra_rounds += 1
+                    logger.info("chat() 正常结束前收到补充信息，追加第 %d 轮处理", _inject_extra_rounds)
+                    _decision_prompt_injected = False
+                    _enhanced_context_injected = False
                     continue
                 return await self._ensure_non_empty(response, working, monitor, "finalize")
 
@@ -1046,17 +1157,63 @@ class Agent:
                     sys = system + finalize_system_suffix("varied")
                     resp = await provider.chat(working, tools=None, system=sys)
                     self.usage.add(resp.usage)
-                    return await self._ensure_non_empty(resp, working, monitor, "varied")
+                    resp = await self._ensure_non_empty(resp, working, monitor, "varied")
+                    # varied 收尾前检查补充信息
+                    _late_injected = _drain_inject()
+                    if _late_injected and _inject_extra_rounds >= MAX_INJECT_EXTRA_ROUNDS:
+                        logger.warning(
+                            "chat() varied 收尾前 收到 %d 条补充但追加轮次已达上限，丢弃",
+                            len(_late_injected),
+                        )
+                    if _late_injected and _inject_extra_rounds < MAX_INJECT_EXTRA_ROUNDS:
+                        if resp.content:
+                            working.append(Message(role="assistant", content=resp.content))
+                        working.append(Message(
+                            role="user",
+                            content="\n\n".join(f"[用户运行中补充]：{m}" for m in _late_injected),
+                        ))
+                        _inject_extra_rounds += 1
+                        logger.info("chat() varied 收尾前收到补充信息，追加第 %d 轮处理", _inject_extra_rounds)
+                        _decision_prompt_injected = False
+                        _enhanced_context_injected = False
+                        finalize = False
+                        continue
+                    return resp
                 if monitor.exhausted():
                     # 反思次数用尽仍卡住 → 收尾放弃：禁工具，让模型整理「已做/卡点/建议」
                     sys = system + finalize_system_suffix("stuck")
                     resp = await provider.chat(working, tools=None, system=sys)
                     self.usage.add(resp.usage)
-                    return await self._ensure_non_empty(resp, working, monitor, "stuck")
+                    resp = await self._ensure_non_empty(resp, working, monitor, "stuck")
+                    # stuck 收尾前检查补充信息
+                    _late_injected = _drain_inject()
+                    if _late_injected and _inject_extra_rounds >= MAX_INJECT_EXTRA_ROUNDS:
+                        logger.warning(
+                            "chat() stuck 收尾前 收到 %d 条补充但追加轮次已达上限，丢弃",
+                            len(_late_injected),
+                        )
+                    if _late_injected and _inject_extra_rounds < MAX_INJECT_EXTRA_ROUNDS:
+                        if resp.content:
+                            working.append(Message(role="assistant", content=resp.content))
+                        working.append(Message(
+                            role="user",
+                            content="\n\n".join(f"[用户运行中补充]：{m}" for m in _late_injected),
+                        ))
+                        _inject_extra_rounds += 1
+                        logger.info("chat() stuck 收尾前收到补充信息，追加第 %d 轮处理", _inject_extra_rounds)
+                        _decision_prompt_injected = False
+                        _enhanced_context_injected = False
+                        finalize = False
+                        continue
+                    return resp
                 last_result = results[-1].content if results else ""
                 pending_suffix = "\n\n[System: " + reflection_message(monitor, last_result) + "]"
                 monitor.mark_reflected()
 
+        # 循环兜底返回前最后检查一次补充信息（已达轮次上限则不再追加，直接返回）
+        _late_injected = _drain_inject()
+        if _late_injected:
+            logger.warning("chat() 达到轮次上限，丢弃 %d 条未处理补充信息", len(_late_injected))
         return Message(role="assistant", content="[max tool iterations reached]")
 
     async def stream_chat(self, messages: list[Message]):
@@ -1100,6 +1257,8 @@ class Agent:
                         self.usage.add(chunk.usage)
                 return
 
+        from ethan.core.artifacts import inject_artifacts_prompt
+        inject_artifacts_prompt(working)  # 注入本会话已生成/交付的文件清单，供后续轮次直接引用
         enforce_context_budget(working)  # 历史 tool result 也可能很大，进循环前先管控
         compress_previous_round_tools(working, self.session_id)  # 压缩上一轮 search/fetch 结果
         _route, system, tools_list, max_iters = self._select_route(working)
@@ -1137,8 +1296,10 @@ class Agent:
         _decision_prompt_injected = False  # 本轮开头是否注入过决策提示（pop 用）
         _enhanced_context_injected = False  # 本轮开头是否注入过增强上下文（pop 用）
         _image_stripped = False  # 图片超限时剥离重试（只允许一次，避免循环）
+        _inject_extra_rounds = 0  # 因处理运行中补充信息而追加的额外轮次（上限防死循环）
+        MAX_INJECT_EXTRA_ROUNDS = 5  # 最多追加 5 轮处理连续补充信息
 
-        for i in range(max_iters):
+        for i in range(max_iters + MAX_INJECT_EXTRA_ROUNDS):
             # 上一轮注入的决策提示/增强上下文是临时 user 消息，本轮消费完后 pop 掉，避免污染 history
             if _decision_prompt_injected and working and working[-1].role == "user":
                 working.pop()
@@ -1165,7 +1326,29 @@ class Agent:
                     working.append(Message(role="user", content=_inject_text))
                 logger.info("stream_chat() iter=%d consumed %d injected message(s)", i, len(_injected))
                 yield InjectEvent(messages=list(_injected))
-            finalize = (i == max_iters - 1)  # 留最后一轮做收尾：禁工具、强制总结
+                # 开头 drain 到补充时：若本轮即将进入 finalize（i 已到 max_iters-1+extra），
+                # 主动递增 _inject_extra_rounds 推迟 finalize，给模型工具能力处理补充；
+                # 已达上限则记 warning，避免静默丢弃。
+                if i >= max_iters - 1 + _inject_extra_rounds:
+                    if _inject_extra_rounds < MAX_INJECT_EXTRA_ROUNDS:
+                        _inject_extra_rounds += 1
+                        logger.info(
+                            "stream_chat() iter=%d 开头收到补充，递增 _inject_extra_rounds=%d 推迟 finalize",
+                            i, _inject_extra_rounds,
+                        )
+                    else:
+                        logger.warning(
+                            "stream_chat() iter=%d 收到补充信息但追加轮次已达上限（%d），本轮仍会 finalize，补充可能未被完整处理",
+                            i, _inject_extra_rounds,
+                        )
+            # finalize 判断：
+            # - i 抵达「原始最后一轮 + 已追加轮次」即正常 finalize，每追加 1 轮就在该轮内允许收尾
+            # - 已达追加轮次上限：强制 finalize（兜底，避免模型持续调工具撞循环上限）
+            finalize = False
+            if i >= max_iters - 1 + _inject_extra_rounds:
+                finalize = True
+            if _inject_extra_rounds >= MAX_INJECT_EXTRA_ROUNDS:
+                finalize = True  # 达到追加轮次上限，强制收尾
             if finalize:
                 tools = None
                 sys = system + finalize_system_suffix("max_iters")
@@ -1279,6 +1462,31 @@ class Agent:
                     retry_resp = Message(role="assistant", content=retry_content, tool_calls=retry_tool_calls)
                     working.append(retry_resp)
                     if not retry_resp.is_tool_call:
+                        # 返回前检查是否有运行中补充信息刚进来，有则再跑一轮处理
+                        _late_injected = _drain_inject()
+                        if _late_injected and _inject_extra_rounds >= MAX_INJECT_EXTRA_ROUNDS:
+                            logger.warning(
+                                "stream_chat() 空响应重试结束前 收到 %d 条补充但追加轮次已达上限，丢弃",
+                                len(_late_injected),
+                            )
+                        if _late_injected and _inject_extra_rounds < MAX_INJECT_EXTRA_ROUNDS:
+                            _inject_text = "\n\n".join(f"[用户运行中补充]：{m}" for m in _late_injected)
+                            if working and working[-1].role == "assistant":
+                                working.append(Message(role="user", content=_inject_text))
+                            else:
+                                working[-1] = Message(
+                                    role="user",
+                                    content=(working[-1].content or "") + "\n\n" + _inject_text,
+                                    images=getattr(working[-1], "images", None) or [],
+                                )
+                            _inject_extra_rounds += 1
+                            logger.info("stream_chat() 空响应重试结束前收到补充信息，追加第 %d 轮处理", _inject_extra_rounds)
+                            yield InjectEvent(messages=list(_late_injected))
+                            _decision_prompt_injected = False
+                            _enhanced_context_injected = False
+                            tool_calls = []
+                            response = retry_resp
+                            continue  # 不进工具执行路径，直接下一轮
                         return
                     # 有工具调用 → 正常执行（跳到下一轮循环开头处理不太方便，直接 continue）
                     tool_calls = retry_tool_calls
@@ -1297,6 +1505,34 @@ class Agent:
                             yield chunk.content
                         if chunk.is_final:
                             self.usage.add(chunk.usage)
+                    # finalize 兜底返回前也检查补充信息
+                    _late_injected = _drain_inject()
+                    if _late_injected and _inject_extra_rounds >= MAX_INJECT_EXTRA_ROUNDS:
+                        logger.warning(
+                            "stream_chat() finalize 兜底前 收到 %d 条补充但追加轮次已达上限，丢弃",
+                            len(_late_injected),
+                        )
+                    if _late_injected and _inject_extra_rounds < MAX_INJECT_EXTRA_ROUNDS:
+                        # 先处理空内容兜底，再放入 working
+                        if not fin_content:
+                            fallback_msg = self._build_stream_fallback(working, "nudge_exhausted")
+                            yield fallback_msg
+                            fin_content = fallback_msg if isinstance(fallback_msg, str) else str(fallback_msg)
+                        # 把 finalize 的回复放入 working，让模型知道自己说了什么
+                        working.append(Message(role="assistant", content=fin_content))
+                        working.append(Message(
+                            role="user",
+                            content="\n\n".join(f"[用户运行中补充]：{m}" for m in _late_injected),
+                        ))
+                        _inject_extra_rounds += 1
+                        logger.info("stream_chat() nudge_exhausted 前收到补充信息，追加第 %d 轮处理", _inject_extra_rounds)
+                        yield InjectEvent(messages=list(_late_injected))
+                        _decision_prompt_injected = False
+                        _enhanced_context_injected = False
+                        finalize = False  # 允许调工具处理补充
+                        tool_calls = []
+                        response = Message(role="assistant", content=fin_content)
+                        continue
                     if not fin_content:
                         yield self._build_stream_fallback(working, "nudge_exhausted")
                     return
@@ -1321,6 +1557,30 @@ class Agent:
                 if finalize and not full_content:
                     fallback = self._build_stream_fallback(working, "finalize")
                     yield fallback
+                # 返回前检查是否有运行中补充信息刚进来，有则再跑一轮处理
+                _late_injected = _drain_inject()
+                if _late_injected and _inject_extra_rounds >= MAX_INJECT_EXTRA_ROUNDS:
+                    logger.warning(
+                        "stream_chat() 正常结束前 收到 %d 条补充但追加轮次已达上限，丢弃",
+                        len(_late_injected),
+                    )
+                if _late_injected and _inject_extra_rounds < MAX_INJECT_EXTRA_ROUNDS:
+                    _inject_text = "\n\n".join(f"[用户运行中补充]：{m}" for m in _late_injected)
+                    # 若末尾已是 user 消息则合并，否则追加
+                    if working and working[-1].role == "user":
+                        working[-1] = Message(
+                            role="user",
+                            content=(working[-1].content or "") + "\n\n" + _inject_text,
+                            images=working[-1].images,
+                        )
+                    else:
+                        working.append(Message(role="user", content=_inject_text))
+                    _inject_extra_rounds += 1
+                    logger.info("stream_chat() 正常结束前收到补充信息，追加第 %d 轮处理", _inject_extra_rounds)
+                    yield InjectEvent(messages=list(_late_injected))
+                    _decision_prompt_injected = False
+                    _enhanced_context_injected = False
+                    continue
                 return
             if finalize:
                 # 收尾轮已禁工具并流式吐出总结；即便模型仍返回 tool_calls 也不执行，直接结束。
@@ -1328,6 +1588,26 @@ class Agent:
                 if not full_content:
                     fallback = self._build_stream_fallback(working, "finalize")
                     yield fallback
+                # finalize 结束前也检查补充信息
+                _late_injected = _drain_inject()
+                if _late_injected and _inject_extra_rounds >= MAX_INJECT_EXTRA_ROUNDS:
+                    logger.warning(
+                        "stream_chat() finalize 结束前 收到 %d 条补充但追加轮次已达上限，丢弃",
+                        len(_late_injected),
+                    )
+                if _late_injected and _inject_extra_rounds < MAX_INJECT_EXTRA_ROUNDS:
+                    _inject_text = "\n\n".join(f"[用户运行中补充]：{m}" for m in _late_injected)
+                    # response（含 full_content）已在第 1382 行 append 到 working，直接追加补充即可
+                    working.append(Message(role="user", content=_inject_text))
+                    _inject_extra_rounds += 1
+                    logger.info("stream_chat() finalize 轮结束前收到补充信息，追加第 %d 轮处理", _inject_extra_rounds)
+                    yield InjectEvent(messages=list(_late_injected))
+                    _decision_prompt_injected = False
+                    _enhanced_context_injected = False
+                    finalize = False  # 允许调工具处理补充
+                    tool_calls = []
+                    response = Message(role="assistant", content=full_content)
+                    continue
                 return
 
             # [decide 拦截] 决策提示轮的 decide tool_call 不执行、不进 working，只读 choice
@@ -1611,6 +1891,29 @@ class Agent:
                             self.usage.add(chunk.usage)
                     if not varied_content:
                         yield self._build_stream_fallback(working, "varied")
+                    # varied 收尾前检查补充信息
+                    _late_injected = _drain_inject()
+                    if _late_injected and _inject_extra_rounds >= MAX_INJECT_EXTRA_ROUNDS:
+                        logger.warning(
+                            "stream_chat() varied 收尾前 收到 %d 条补充但追加轮次已达上限，丢弃",
+                            len(_late_injected),
+                        )
+                    if _late_injected and _inject_extra_rounds < MAX_INJECT_EXTRA_ROUNDS:
+                        if varied_content:
+                            working.append(Message(role="assistant", content=varied_content))
+                        working.append(Message(
+                            role="user",
+                            content="\n\n".join(f"[用户运行中补充]：{m}" for m in _late_injected),
+                        ))
+                        _inject_extra_rounds += 1
+                        logger.info("stream_chat() varied 收尾前收到补充信息，追加第 %d 轮处理", _inject_extra_rounds)
+                        yield InjectEvent(messages=list(_late_injected))
+                        _decision_prompt_injected = False
+                        _enhanced_context_injected = False
+                        finalize = False
+                        tool_calls = []
+                        response = Message(role="assistant", content=varied_content)
+                        continue
                     return
                 if monitor.exhausted():
                     # 反思次数用尽仍卡住 → 收尾放弃：禁工具，让模型流式整理「已做/卡点/建议」
@@ -1624,6 +1927,29 @@ class Agent:
                             self.usage.add(chunk.usage)
                     if not stuck_content:
                         yield self._build_stream_fallback(working, "stuck")
+                    # stuck 收尾前检查补充信息
+                    _late_injected = _drain_inject()
+                    if _late_injected and _inject_extra_rounds >= MAX_INJECT_EXTRA_ROUNDS:
+                        logger.warning(
+                            "stream_chat() stuck 收尾前 收到 %d 条补充但追加轮次已达上限，丢弃",
+                            len(_late_injected),
+                        )
+                    if _late_injected and _inject_extra_rounds < MAX_INJECT_EXTRA_ROUNDS:
+                        if stuck_content:
+                            working.append(Message(role="assistant", content=stuck_content))
+                        working.append(Message(
+                            role="user",
+                            content="\n\n".join(f"[用户运行中补充]：{m}" for m in _late_injected),
+                        ))
+                        _inject_extra_rounds += 1
+                        logger.info("stream_chat() stuck 收尾前收到补充信息，追加第 %d 轮处理", _inject_extra_rounds)
+                        yield InjectEvent(messages=list(_late_injected))
+                        _decision_prompt_injected = False
+                        _enhanced_context_injected = False
+                        finalize = False
+                        tool_calls = []
+                        response = Message(role="assistant", content=stuck_content)
+                        continue
                     return
                 last_result = results[-1].content if results else ""
                 pending_suffix = "\n\n[System: " + reflection_message(monitor, last_result) + "]"
@@ -1631,4 +1957,8 @@ class Agent:
 
         # 正常情况下最后一轮（finalize）已禁工具并流式吐出收尾总结后 return，
         # 不会落到这里。保留一个兜底，极端竞态下也不至于静默结束。
+        # 兜底返回前最后检查一次补充信息（已达轮次上限则不再追加，直接返回）
+        _late_injected = _drain_inject()
+        if _late_injected:
+            logger.warning("stream_chat() 达到轮次上限，丢弃 %d 条未处理补充信息", len(_late_injected))
         return

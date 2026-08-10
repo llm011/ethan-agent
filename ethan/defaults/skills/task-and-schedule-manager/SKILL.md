@@ -51,6 +51,11 @@ metadata:
 **快速直接调用**（不需读 skill，DIDA_ENABLED=true 时）：
 - 创建：`dida_task_create(title, project, due_date, tags, priority, ...)`
   - tag 必带 `work` 或 `life`
+  - priority 按用户偏好规则（详见 dida-task 技能「优先级判定」）：
+    - 一般任务 → `1`（低，默认）
+    - 无关紧要/可做可不做/不确定 → `0`（不设）
+    - 很重要、要引起重视 → `3`（中，不要太多）
+    - 非常紧急、不做后果严重 → `5`（高，不要随便用）
 - 查询：`dida_task_list(keyword, tags, status, ...)`
 - 完成：`dida_task_complete(project, task_id)`
 

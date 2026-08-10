@@ -8,7 +8,7 @@ from ethan.tools.base import BaseTool, ToolResult
 
 
 class DesktopCountdownTool(BaseTool):
-    fast_path = True
+    fast_path = False  # 不在 base_tools 白名单，需经 find_tools 激活
     cacheable = False
     side_effect = True
 
@@ -25,7 +25,10 @@ class DesktopCountdownTool(BaseTool):
             "'resume' (resume paused timer), "
             "'reset' (reset to initial duration), "
             "'close' (close the countdown window). "
-            "Requires the Ethan desktop app to be running."
+            "Works by forwarding the command over WebSocket to the connected Ethan desktop app, "
+            "so it works EVEN WHEN the server runs in Docker / headless / remote environments. "
+            "If no desktop client is connected, the tool reports it explicitly — try it first "
+            "rather than assuming it won't work based on the server's environment."
         )
 
     @property
@@ -70,7 +73,7 @@ class DesktopCountdownTool(BaseTool):
 
 
 class DesktopNotifyTool(BaseTool):
-    fast_path = True
+    fast_path = False  # full 档在 base_tools 直接可见（config.py），fast 档需 find_tools 激活
     cacheable = False
     side_effect = True
 
@@ -81,9 +84,13 @@ class DesktopNotifyTool(BaseTool):
     @property
     def description(self) -> str:
         return (
-            "Send a native desktop notification to the user. "
-            "Shows a macOS/Windows system notification with title and body. "
-            "Requires the Ethan desktop app to be running."
+            "Send a native desktop notification to the user (macOS/Windows system notification). "
+            "Works by forwarding the notification over WebSocket to the connected Ethan desktop app, "
+            "so it works EVEN WHEN the server runs in Docker / headless / remote environments "
+            "where local notify-send or osascript would fail. "
+            "Always prefer this tool over shell commands (notify-send/osascript) for desktop notifications. "
+            "If no desktop client is connected, the tool reports it explicitly — try it first "
+            "rather than assuming it won't work based on the server's environment."
         )
 
     @property

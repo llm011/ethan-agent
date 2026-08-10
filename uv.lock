@@ -517,6 +517,7 @@ dependencies = [
     { name = "apscheduler" },
     { name = "curl-cffi" },
     { name = "fastapi" },
+    { name = "lunar-python" },
     { name = "mcp" },
     { name = "numpy" },
     { name = "onnxruntime" },
@@ -557,6 +558,7 @@ requires-dist = [
     { name = "curl-cffi", specifier = ">=0.15.0" },
     { name = "fastapi", specifier = ">=0.136.3" },
     { name = "lark-oapi", marker = "extra == 'lark'", specifier = ">=1.6.8" },
+    { name = "lunar-python", specifier = ">=1.4.8" },
     { name = "mcp", specifier = ">=1.27.2" },
     { name = "numpy", specifier = ">=1.26.0" },
     { name = "onnxruntime", specifier = ">=1.18.0" },
@@ -1032,6 +1034,12 @@ dependencies = [
 wheels = [
     { url = "https://files.pythonhosted.org/packages/4a/ad/1ab04db5d549ad1a7a2cd33682b1c38dee1d65019cb24fd7a23270e6337d/lark_oapi-1.6.8-py3-none-any.whl", hash = "sha256:9b443a5d47a7d204dd42dc40896c8b75087cc35788e45c48c140806d7df7e5e8", size = 7798300, upload-time = "2026-06-02T07:40:05.492Z" },
 ]
+
+[[package]]
+name = "lunar-python"
+version = "1.4.8"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/59/45/5154c95ae7feaab7ca508e71c3288692c09952dfe33b03b7c2f18a32e2cd/lunar_python-1.4.8.tar.gz", hash = "sha256:3aa11cc73c25e70ddf0ba5bdac7398c03acc9491a3aa512a91c9642973b669d6", size = 105862, upload-time = "2025-11-05T12:31:53.353Z" }
 
 [[package]]
 name = "markdown-it-py"

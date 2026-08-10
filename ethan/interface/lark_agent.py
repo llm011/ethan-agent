@@ -215,46 +215,26 @@ async def _handle_agent_message(
                 memory.hot.append(a)
             context_messages = memory.build_context() + [agent_user_msg]
 
-        registry = ToolRegistry()
+        from ethan.core.agent_factory import build_tool_registry
         from ethan.core.context import set_session_id
-        from ethan.tools.builtin.browser import BrowserPageTool, BrowserSessionTool, BrowserTabTool
-        from ethan.tools.builtin.file import FileListTool, FileReadTool, FileWriteTool
-        from ethan.tools.builtin.knowledge import (
-            KnowledgeAddTool,
-            KnowledgeEditTool,
-            KnowledgeReadTool,
-            KnowledgeSearchTool,
-        )
-        from ethan.tools.builtin.memory_write import MemoryWriteTool
-        from ethan.tools.builtin.procedure_write import ProcedureWriteTool
-        from ethan.tools.builtin.profile_update import ProfileUpdateTool
-        from ethan.tools.builtin.recall_memory import RecallMemoryTool
-        from ethan.tools.builtin.schedule import ScheduleCreateTool, ScheduleListTool, ScheduleRemoveTool
-        from ethan.tools.builtin.search import FdTool, RipgrepTool
-        from ethan.tools.builtin.secrets import GetSecretTool, ListSecretsTool, SetSecretTool
-        from ethan.tools.builtin.shell import ShellTool
-        from ethan.tools.builtin.skill_create import SkillCreateTool
-        from ethan.tools.builtin.skill_read import SkillListTool, SkillReadTool
-        from ethan.tools.builtin.ui_card import UiCardTool
-        from ethan.tools.builtin.web import WebFetchTool
-        from ethan.tools.builtin.web_search import WebSearchTool
+        from ethan.tools.registry import ToolRegistry
+
         set_session_id(session_id)  # browser 工具按对话隔离/授权
-        # 非主人：只给无隐私风险的只读工具（搜索/抓网页），不给文件/记忆/知识库/密钥等
+
+        # 复用统一的 build_tool_registry，避免手动维护两份列表容易漏工具
+        # （天气、农历、图表等工具自动包含，新增工具只需在 build_tool_registry 改一次）
+        # lark 渠道归 admin user（空 user_id）
+        registry = build_tool_registry(user_id="", toolset="full", channel="lark", mode=session_mode)
+
+        # 非主人：只保留无隐私风险的只读工具（搜索/抓网页/卡片），移除文件/记忆/知识库/密钥/Shell 等
         if owner_claimed and not is_owner:
-            all_tools = [WebSearchTool(), WebFetchTool(), UiCardTool(channel="lark")]
-        else:
-            all_tools = [ShellTool(), WebSearchTool(), WebFetchTool(),
-                         FileReadTool(), FileWriteTool(), FileListTool(),
-                         RipgrepTool(), FdTool(),
-                         ScheduleCreateTool(), ScheduleListTool(), ScheduleRemoveTool(),
-                         KnowledgeSearchTool(), KnowledgeReadTool(), KnowledgeAddTool(), KnowledgeEditTool(),
-                         MemoryWriteTool(), RecallMemoryTool(mode=session_mode), ProcedureWriteTool(), ProfileUpdateTool(), SkillCreateTool(),
-                         SkillReadTool(), SkillListTool(),
-                         SetSecretTool(), GetSecretTool(), ListSecretsTool(),
-                         UiCardTool(channel="lark"),
-                         BrowserSessionTool(), BrowserTabTool(), BrowserPageTool()]
-        for tool in all_tools:
-            registry.register(tool)
+            safe_tools = ToolRegistry()
+            allowed_names = {"web_search", "web_fetch", "ui_card"}  # 不含 find_tools：避免激活 file_read/shell 等敏感工具绕过只读限制
+            for tool in registry.all():
+                if tool.name in allowed_names:
+                    safe_tools.register(tool)
+            registry = safe_tools
+
         skills = SkillRegistry()
         skills.load()
         agent = Agent(tool_registry=registry, skill_registry=skills, channel="lark", mode=session_mode)

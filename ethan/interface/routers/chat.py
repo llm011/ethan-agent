@@ -183,7 +183,13 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
             else:
                 agent.runtime_context = req.runtime_context
         messages = [
-            Message(role=m["role"], content=m.get("content", ""), images=m.get("images") or [])
+            Message(
+                role=m["role"],
+                content=m.get("content", ""),
+                images=m.get("images") or [],
+                cards=m.get("cards"),
+                quote=m.get("quote"),
+            )
             for m in req.messages
         ]
 

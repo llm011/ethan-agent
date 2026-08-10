@@ -111,6 +111,7 @@ class RoutingConfig(BaseModel):
         "skill_create", "install_skill",
         "browser_session", "browser_tab", "browser_page",
         "ui_card",
+        "desktop_notify",  # 桌面通知：高频且明确，full 档直接可见，避免模型在 Docker/无头环境绕路用 shell
         # deliver_file 不进 base_tools：它会把 home 下任意文件推成聊天里的文件卡片（对外
         # 交付语义），若无条件广播，飞书非主人会话或被注入的消息就能诱导模型交付任意文件，
         # 而它 side_effect=False、ChannelGuardProvider 拦不住。改为在 agent 层「仅 owner
@@ -241,12 +242,6 @@ class DidaConfig(BaseModel):
     enabled: bool = False  # 滴答清单 CLI 插件开关；true 时注册 dida_* 工具
 
 
-class FlomoConfig(BaseModel):
-    # flomo 工具始终注册；写入需 webhook key（secrets），读取需 Mac 客户端登录态。
-    # 此开关仅用于全局禁用（如不需要 flomo 时设 false 跳过注册）。
-    enabled: bool = True
-
-
 class MCPConfig(BaseModel):
     servers: list[MCPServerConfig] = Field(default_factory=list)
 
@@ -256,7 +251,6 @@ class ToolsConfig(BaseModel):
     knowledge: KnowledgeConfig = Field(default_factory=KnowledgeConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     dida: DidaConfig = Field(default_factory=DidaConfig)
-    flomo: FlomoConfig = Field(default_factory=FlomoConfig)
 
 
 class Config(BaseModel):
