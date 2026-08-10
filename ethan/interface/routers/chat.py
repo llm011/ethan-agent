@@ -206,22 +206,14 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
             for m in messages[-1:]:
                 if m.role == "user":
                     # 图片持久化到本地文件，DB 只存路径
-                    saved_image_paths: list[str] = []
-                    split_hints: list[str] = []
                     if m.images:
-                        saved_image_paths, split_hints = _persist_images_to_disk(m, req.session_id)
+                        _persist_images_to_disk(m, req.session_id)
                     # 把引用信息附到消息上一起持久化，刷新后仍能渲染引用气泡
                     if req.quote and req.quote.get("content"):
                         m.quote = req.quote
                     # save_message 持久化 path 格式图片（含切分分段）；
                     # 不再恢复原始 base64 —— 切分后的分段需原样流入 _resolve_images_for_llm
                     await store.save_message(req.session_id, m)
-                    # 给当前消息附加图片路径提示（仅影响发给 LLM 的内容，不入库）
-                    if saved_image_paths and m.content:
-                        paths_hint = ", ".join(saved_image_paths)
-                        m.content = f"{m.content}\n\n[image_paths: {paths_hint}]"
-                        if split_hints:
-                            m.content = f"{m.content}\n[image_split: {'; '.join(split_hints)}]"
             # 首轮对话立即写标题：避免"新对话"残留很久，也避免前端本地 placeholderTitle
             # 被 3s 会话列表轮询覆盖回"新对话"。与 completions.py / repl_stream.py 初始化思路对齐。
             # 策略（仅首轮生效，且当前标题仍是默认"新对话"才写）：

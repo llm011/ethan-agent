@@ -226,7 +226,7 @@ def _do_vertical_split(img, media_type: str, w: int, h: int) -> list[tuple[bytes
     else:
         row_std = arr.std(axis=1)
 
-    # 按 _SPLIT_SEGMENT 间距计算分割位置，最后一段 < 100px 则并入前段
+    # 按 _SPLIT_SEGMENT 间距计算分割位置
     positions = [0]
     pos = _SPLIT_SEGMENT
     while pos < h:
@@ -239,6 +239,10 @@ def _do_vertical_split(img, media_type: str, w: int, h: int) -> list[tuple[bytes
         positions.append(best)
         pos += _SPLIT_SEGMENT
     positions.append(h)
+
+    # 最后一段 <100px 则并入前段（避免 LLM 收到几乎全空的图片）
+    if len(positions) > 2 and (positions[-1] - positions[-2]) < 100:
+        positions.pop(-2)
 
     is_jpeg = media_type in ("image/jpeg", "image/jpg")
     segments: list[tuple[bytes, str]] = []
