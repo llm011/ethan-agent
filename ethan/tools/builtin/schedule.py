@@ -140,8 +140,13 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
     _entry_logger = _entry_log.getLogger("ethan.schedule")
     _entry_logger.info("[Schedule] fire_schedule_job called: session=%s title=%r", session_id, title)
 
-    async def _run_schedule_task():
-        """在 server event loop 中跑完整 agent 流式循环，实时落库工具步骤。"""
+    async def _run_schedule_task(*, dedicated_store: bool = False):
+        """在 server event loop 中跑完整 agent 流式循环，实时落库工具步骤。
+
+        dedicated_store=True 时创建独立 SessionStore 连接（绑当前 loop），
+        用于 fallback 线程路径——单例连接绑主 loop，跨 loop await 必崩
+        （aiosqlite _tx 队列和 _session_store_lock 都绑主 loop）。
+        """
         import logging as _log
 
         from ethan.core.agent_factory import create_agent
@@ -153,11 +158,23 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
         from ethan.providers.base import Message, ToolEvent
 
         _logger = _log.getLogger("ethan.schedule")
-        _logger.info("[Schedule] _run_schedule_task started: session=%s title=%r", session_id, title)
+        _logger.info("[Schedule] _run_schedule_task started: session=%s title=%r dedicated=%s",
+                     session_id, title, dedicated_store)
         result_text = ""
         collector = None
         consent = None
         progress_msg_id: int | None = None
+        store = None
+
+        async def _open_store():
+            """获取 store：dedicated 模式创建独立连接（绑当前 loop），否则用单例。"""
+            if dedicated_store:
+                from ethan.core.paths import user_sessions_db_path
+                from ethan.memory.session import SessionStore
+                s = SessionStore(db_path=user_sessions_db_path())
+                await s.init()
+                return s
+            return await get_session_store()
 
         # 构造 runtime_context
         if channel in ("lark", "wechat"):
@@ -178,7 +195,7 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
             )
 
         try:
-            store = await get_session_store()
+            store = await _open_store()
             set_session_id(session_id)
 
             # 确保 session 记录存在
@@ -254,16 +271,22 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
                     await store.save_message(session_id, asst_msg)
                 await store.touch(session_id)
 
-            # 触发记忆沉淀
-            from ethan.interface.routers.tasks import _maybe_consolidate
-            asyncio.create_task(_maybe_consolidate(session_id, agent._provider.model, user_id))
+            # 触发记忆沉淀：仅在 server loop 上 fire（_maybe_consolidate 内部用单例
+            # store，fallback 临时 loop 上单例连接绑主 loop 会崩；且 asyncio.run()
+            # 退出即关 loop → create_task 被取消，记忆沉淀静默丢失）。
+            if not dedicated_store:
+                from ethan.interface.routers.tasks import _maybe_consolidate
+                asyncio.create_task(_maybe_consolidate(session_id, agent.model, user_id))
+            else:
+                _logger.warning("[Schedule] fallback thread: skip memory consolidation (cross-loop)")
 
         except Exception as e:
             import traceback
             _logger.error("Schedule fire error: %s\n%s", e, traceback.format_exc())
             result_text = f"⚠️ 定时任务执行失败: {e}"
             try:
-                store = await get_session_store()
+                # dedicated 模式复用已开连接（若已建立）；server 模式取单例
+                err_store = store if (store and dedicated_store) else await get_session_store()
                 err_content = ""
                 if collector and collector.full:
                     err_content = collector.full + "\n\n"
@@ -274,15 +297,20 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
                     tool_steps=collector.tool_steps if collector else [],
                 )
                 if progress_msg_id:
-                    await store.update_message(progress_msg_id, session_id, err_msg)
+                    await err_store.update_message(progress_msg_id, session_id, err_msg)
                 else:
-                    await store.save_message(session_id, err_msg)
-                await store.touch(session_id)
+                    await err_store.save_message(session_id, err_msg)
+                await err_store.touch(session_id)
             except Exception as e2:
                 _logger.error("Failed to log schedule error to session: %s", e2)
         finally:
             if consent:
                 consent.cancel_all()
+            if store and dedicated_store:
+                try:
+                    await store.close()
+                except Exception:
+                    pass
 
         # 把结果发回来源渠道（飞书/微信）
         if result_text and _is_tool_result_noise(result_text):
@@ -333,7 +361,7 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
     else:
         _entry_logger.warning("[Schedule] no server loop (loop=%s), using thread fallback", loop)
         def _thread_run():
-            asyncio.run(_run_schedule_task())
+            asyncio.run(_run_schedule_task(dedicated_store=True))
         threading.Thread(target=_thread_run, daemon=True).start()
 
 class ScheduleCreateTool(BaseTool):

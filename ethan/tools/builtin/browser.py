@@ -438,18 +438,6 @@ def _extract_session_id(result: dict | None) -> str | None:
     return result.get("session_id") or result.get("sessionId")
 
 
-def _filter_owned_sessions(result: dict | None) -> dict:
-    """session_list 结果按当前 ethan 会话过滤,避免泄漏其他会话/用户的 session。"""
-    result = result or {}
-    owned = set(get_session_map().list_for(get_session_id()))
-    sessions = result.get("sessions")
-    if isinstance(sessions, list):
-        kept = [s for s in sessions if isinstance(s, dict)
-                and (s.get("sessionId") or s.get("session_id")) in owned]
-        return {**result, "sessions": kept}
-    return result
-
-
 def _annotate_sessions(result: dict | None) -> dict:
     """session_list 结果标注归属：owned=当前对话绑定的，available=可通过 attach 复用的。"""
     result = result or {}
@@ -538,7 +526,22 @@ class BrowserSessionTool(_BrowserToolBase):
                 client = get_hub().resolve_client(get_session_id())
                 if not client:
                     return json.dumps({"error": "没有可用的浏览器客户端"})
-                get_session_map().bind(session, get_session_id(),
+                # 校验 session 存在性：attach 不存在的 id 会假成功，后续操作全挂
+                list_result = await _call("session_list", {})
+                known_ids = set()
+                for s in (list_result or {}).get("sessions", []) or []:
+                    if isinstance(s, dict):
+                        sid = s.get("sessionId") or s.get("session_id")
+                        if sid:
+                            known_ids.add(sid)
+                if session not in known_ids:
+                    return json.dumps({"error": f"session {session} 不存在，无法 attach"})
+                # 校验归属：已被其他对话绑定时拒绝，避免覆盖式接管互相踩
+                owner = get_session_map().get_owner(session)
+                cur_sid = get_session_id()
+                if owner and owner != cur_sid:
+                    return json.dumps({"error": f"session {session} 正被其他会话使用，无法 attach"})
+                get_session_map().bind(session, cur_sid,
                                        client_name=client, keep_alive=keep_alive)
                 get_session_map().touch(session)
                 return json.dumps({"attached": True, "sessionId": session})

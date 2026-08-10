@@ -84,6 +84,11 @@ class SessionMap:
             if e.ethan_session_id == ethan_session_id
         ]
 
+    def get_owner(self, browser_session_id: str) -> str:
+        """返回该 browser session 当前绑定的 ethan 会话 ID，未绑定返回空串。"""
+        entry = self._entries.get(browser_session_id)
+        return entry.ethan_session_id if entry else ""
+
     def idle_sessions(self, ttl: float) -> list[str]:
         now = time.monotonic()
         return [

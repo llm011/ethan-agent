@@ -192,7 +192,7 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
         registry.register(LarkMessageSendTool())
     # ui_card 在能渲染卡片的渠道注册：web/repl 走 A2UI，lark 走飞书 interactive 卡片。
     # 同一套结构化 card 数据，按渠道选渲染目标（见 UiCardTool）。api 等无渲染器的渠道不暴露。
-    if channel in ("web", "repl", "lark"):
+    if channel in ("web", "repl", "lark", "schedule"):
         registry.register(UiCardTool(channel=channel))
     # computer_use：依赖 cua-computer 包 + cua-driver 后台服务（可选，包未安装时静默跳过）
     try:
