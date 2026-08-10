@@ -36,9 +36,14 @@ class RecallMemoryTool(BaseTool):
         self._mode = mode
 
     async def run(self, query: str) -> str:
-        from ethan.memory.recall import build_structured_recall
+        from ethan.memory.recall import build_structured_recall_async
 
-        result = build_structured_recall(query=query, mode=self._mode, max_items=15)
+        # max_items 是**候选预算**（宽召回保 recall），不是注入条数。后者由判官切点
+        # 决定，判官不跑时走 `INJECT_MAX`（逐域，实测拐点 6 条）。不传 fallback_keep
+        # 就是要跟随那个默认值——写死在这里会让扫参改不动生产行为。
+        result = await build_structured_recall_async(
+            query=query, mode=self._mode, max_items=20
+        )
         if not result:
             return "[No relevant memories found for this query.]"
         return (

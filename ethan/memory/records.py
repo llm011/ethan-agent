@@ -115,6 +115,7 @@ class MemoryRecord:
     scope_type: str = ScopeType.USER.value
     scope_id: str = "self"
     memory_domain: str = MemoryDomain.GENERAL.value
+    memory_role: str | None = None
     status: str = MemoryStatus.CANDIDATE.value
     evidence_level: str = EvidenceLevel.OBSERVED.value
     confidence: float = 0.5
@@ -166,6 +167,15 @@ class MemoryRecord:
                 raise ValueError("companion domain requires companion memory_type")
         elif self.memory_type == MemoryType.COMPANION.value:
             raise ValueError("companion memory_type requires companion domain")
+        # memory_role：召回层按 intent→role 过滤的分类轴。None 时从 dimension
+        # 一级前缀推断（identity.*→identity / decision.*→decision / preference.*→
+        # preference / activity.*→activity / methodology.*→methodology / 其余→
+        # task_context），与 classifier.infer_memory_role 同口径。显式传入的合法值
+        # 优先，允许调用方覆盖推断结果；非法值回退推断。
+        from ethan.memory.classifier import infer_memory_role, MEMORY_ROLES
+
+        if not self.memory_role or self.memory_role not in MEMORY_ROLES:
+            self.memory_role = infer_memory_role(self.dimension)
 
 
 @dataclass(slots=True)

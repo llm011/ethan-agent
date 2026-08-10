@@ -113,9 +113,28 @@ observed 模式可用 `ETHAN_ADMISSION_OBSERVED_MODE=accrual` 切换为：
 
 `ethan/memory/recall.py`：system prompt 唯一的长期记忆块 `<memory_context>`。
 
-- **精确通道**：FTS5 bm25（零命中落 LIKE 兜底——unicode61 对 CJK 无分词）
+- **精确通道**：FTS5 bm25。索引侧把 content/memory_key/searchable_data 切成 bigram 串
+  （CJK 切二字、ASCII 词整取），查询侧同样用 bigram OR 拼 MATCH——unicode61 对整段
+  CJK 不分词、trigram(3-gram) 实测 0 命中，只有 bigram 能让中文子串匹配命中。零命中落
+  LIKE 兜底（bigram OR 子串匹配）。schema v2 升级时 DROP+重建 memory_fts 并回灌现有记忆。
 - **语义通道**：BGE 向量近邻（补齐 CJK 与语序变换/同义改写）
 - **融合**：RRF(k=60) 排名倒数求和，importance/confidence 决胜
+- **Layer 2 确定性截断**（`ETHAN_MEMORY_RECALL_REL_GAP`，默认 `inf`=关闭）：RRF
+  融合后对「向量独占」命中施加相对距离断层（`dist - min(dist)`），双通道一致命中
+  无条件保留。1200-case 扫参结论：BGE-small-zh INT8 动态范围 0.88-1.22，距离不可分，
+  0.25 才不掉 recall 但只省 0.17 条噪声——收益不足，默认关。换 embedding 后可复测。
+- **Intent→Role 过滤**（`ethan/memory/classifier.py`，默认开）：召回前对 query 做
+  intent 分类（identity/activity/decision/preference/procedure/unknown），按
+  `INTENT_ROLE_MAP` 映射到 memory_role，在 FTS/向量/fallback 三条路径上同时过滤。
+  memory_role 入库时从 dimension 一级前缀推断（identity.*→identity 等），与 intent
+  近似双射。unknown intent 不过滤走全量。1200-case 实测：P@k 45.6%→91.7%、P@注入
+  14.0%→93.1%、噪声 9.58→0.83 条，recall 仍 100%、leak 仍 0。5 个域 P@k 达 100%，
+  仅 companion 域因 query 多为 unknown 走全量仍有噪声（情感陪伴场景不宜硬切 role）。
+- **判官重排 + maxgap 切点**（`ETHAN_MEMORY_RERANK=1` 开启，默认关）：60-case A/B
+  （FTS 修活后的干净候选池）opus-5 判官 P@k 40.6%→92.5%、nDCG 0.720→0.975，maxgap
+  切点 P=77.9% / R=95%、保留 2.7 条。opus 0 fallback 优于 haiku 的 3 个。成本：每次
+  召回 +7-10s 延迟。候选池 FTS 修活后 8-12 条、0% 低于
+  `MIN_CANDIDATES=4`，判官不会被跳过。
 - 无命中回退 importance top-N（身份类事实始终可用）
 - companion 域仅陪伴模式召回；restricted 永不注入；forget 同步删除向量索引
 

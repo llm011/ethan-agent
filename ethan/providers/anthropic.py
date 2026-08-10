@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import AsyncIterator, Optional
 
 import httpx
@@ -13,6 +14,8 @@ from ethan.providers.base import (
     ToolCall,
     ToolDefinition,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _split_system_for_cache(system: str) -> tuple[str, str]:
@@ -58,7 +61,7 @@ class AnthropicProvider(BaseProvider):
         import anthropic  # lazy: SDK is heavy; only load when a provider instance is created
 
         # httpx event hooks must be async; strip SDK fingerprint headers that
-        # third-party relays (yuntoken.vip etc.) block, and replace the user-agent.
+        # some third-party relays block, and replace the user-agent.
         async def _clean_headers(request: httpx.Request) -> None:
             for key in [k for k in request.headers if k.lower().startswith("x-stainless")]:
                 del request.headers[key]
@@ -89,6 +92,14 @@ class AnthropicProvider(BaseProvider):
     @property
     def model(self) -> str:
         return self._model
+
+    async def close(self) -> None:
+        # AsyncAnthropic.aclose() 关底层 httpx.AsyncClient。reranker 等短生命周期
+        # 调用方必须显式关闭，否则每个 provider 实例泄漏一个连接池。
+        try:
+            await self._client.close()
+        except Exception:
+            pass
 
     def _to_anthropic_messages(self, messages: list[Message]) -> list[dict]:
         result = []

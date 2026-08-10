@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import re
 import sqlite3
 import time
 from contextlib import contextmanager
@@ -25,7 +27,9 @@ from ethan.memory.records import (
     MemoryStatus,
 )
 
-_SCHEMA_VERSION = "1"
+logger = logging.getLogger(__name__)
+
+_SCHEMA_VERSION = "3"
 
 
 class MemoryStore:
@@ -99,6 +103,7 @@ class MemoryStore:
                 scope_type TEXT NOT NULL,
                 scope_id TEXT NOT NULL,
                 memory_domain TEXT NOT NULL DEFAULT 'general',
+                memory_role TEXT NOT NULL DEFAULT 'task_context',
                 status TEXT NOT NULL,
                 evidence_level TEXT NOT NULL,
                 confidence REAL NOT NULL,
@@ -125,6 +130,8 @@ class MemoryStore:
                 ON memories(valid_until, status);
             CREATE INDEX IF NOT EXISTS idx_memories_updated
                 ON memories(updated_at DESC);
+            -- idx_memories_role_status 在下方 v3 migration 补列后建，不在这里——
+            -- 旧库此列尚不存在，executescript 会因引用未定义列整体回滚。
 
             CREATE TABLE IF NOT EXISTS memory_evidence (
                 id TEXT PRIMARY KEY,
@@ -219,7 +226,86 @@ class MemoryStore:
             "INSERT OR REPLACE INTO structured_memory_meta(key, value) VALUES ('schema_version', ?)",
             (_SCHEMA_VERSION,),
         )
+
+        # schema v3: 加 memory_role 列（召回层 intent→role 过滤的分类轴）。
+        # 必须在 FTS reindex 之前跑——_reindex_fts 里 _record_from_row 会读 memory_role，
+        # 旧库若无此列会 OperationalError。CREATE TABLE IF NOT EXISTS 对已存在的表是
+        # no-op，旧库靠 ALTER TABLE 补列；PRAGMA table_info 检测列是否已存在避免重复
+        # ALTER 报错。补列后按 dimension 前缀回填存量记忆的 role，让旧库也能参与
+        # role 过滤；新记忆在 records.__post_init__ 里已推断好。
+        existing_cols = {
+            row[1] for row in conn.execute("PRAGMA table_info(memories)").fetchall()
+        }
+        # 守卫：用独立的 'v3_migrated' key 判断回填是否完成。schema_version 在上方
+        # 已被无条件写为 "3"，不能用来判断回填状态——若 ALTER 成功但回填崩溃，
+        # schema_version 已是 "3"、列已存在，下次启动会跳过回填。v3_migrated 只在
+        # 回填全部成功后写入，保证中途崩溃时下次启动能重试。
+        v3_done = conn.execute(
+            "SELECT value FROM structured_memory_meta WHERE key='v3_migrated'"
+        ).fetchone()
+        need_v3_migrate = (
+            "memory_role" not in existing_cols
+            or v3_done is None
+        )
+        if need_v3_migrate:
+            if "memory_role" not in existing_cols:
+                conn.execute(
+                    "ALTER TABLE memories ADD COLUMN memory_role TEXT NOT NULL DEFAULT 'task_context'"
+                )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_memories_role_status "
+                "ON memories(memory_role, status)"
+            )
+            # 回填：role 仍为默认 task_context 但 dimension 前缀指向其他类的行。
+            # dimension 一级前缀即 role，逐前缀批量 UPDATE。companion 域由 domain 隔离，
+            # 不进 role 体系，其 dimension 前缀 companion 落到 task_context 兜底无妨。
+            #
+            # 覆盖所有 MEMORY_ROLES 中定义的前缀（identity/activity/decision/preference/
+            # methodology/skill_experience/relationship），保证新旧记忆 role 一致。
+            # skill/relationship 前缀的记忆若不回填会保持 task_context，导致 emotion
+            # intent（role_filter=task_context）错误召回这些 GENERAL 域的工作记忆。
+            #
+            # 兼容：早期 v3 回填用的是 identity_fact/decision_record/preference_rule 等
+            # 旧 role 名，后改为与 dimension 前缀对齐的 identity/decision/preference。这里
+            # 先把旧名重置成 task_context，再按前缀统一回填，保证升级到新命名口径。
+            conn.execute(
+                "UPDATE memories SET memory_role='task_context' WHERE memory_role IN "
+                "('identity_fact','decision_record','preference_rule')"
+            )
+            for prefix in (
+                "identity", "activity", "decision", "preference",
+                "methodology", "skill_experience", "relationship",
+            ):
+                conn.execute(
+                    "UPDATE memories SET memory_role=? WHERE memory_role='task_context' "
+                    "AND lower(dimension) LIKE ?",
+                    (prefix, f"{prefix}%"),
+                )
+            conn.execute(
+                "INSERT OR REPLACE INTO structured_memory_meta(key, value) "
+                "VALUES ('v3_migrated', '1')"
+            )
+
         try:
+            # schema v2: 修中文词法通道。v1 用默认 unicode61 tokenizer + 原文索引，
+            # CJK 整段是单个 token，FTS5 是 token 相等匹配不做子串 → 中文 query 全 0
+            # 命中，词法通道形同虚设，召回全压在向量一路。
+            #
+            # 探针（probe_lexical.py）实测四种方案：trigram + OR 三字仍是 0 命中；
+            # 唯一有效的是 **unicode61 + 二字索引 + OR 二字查询**（59.2% 精度 / 24%
+            # case 覆盖）。所以这里保持默认 unicode61 tokenizer，但在写入时把
+            # content/memory_key/searchable_data 都转成 bigram 串（CJK 切二字、ASCII
+            # 词整取），查询侧同样用 bigram OR。token 相等匹配于是能在 bigram 粒度
+            # 命中：「用户偏好用中文交流」→ 索引含「用户」「户偏」「偏好」…，查询
+            # 「中文」→ OR「中文」，命中。
+            #
+            # FTS5 不支持 ALTER，只能 DROP + 重建；数据在 memories 表，重建无损。
+            fts_ver = conn.execute(
+                "SELECT value FROM structured_memory_meta WHERE key='fts_version'"
+            ).fetchone()
+            need_reindex = fts_ver is None or fts_ver[0] != "2"
+            if need_reindex:
+                conn.execute("DROP TABLE IF EXISTS memory_fts")
             conn.execute("""
                 CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
                     memory_id UNINDEXED,
@@ -230,9 +316,44 @@ class MemoryStore:
                 )
             """)
             self._fts_available = True
-        except sqlite3.DatabaseError:
+            if need_reindex:
+                # DROP+重建后 FTS 表空了，旧库的 active/disputed 记忆不会自动回流——
+                # _sync_fts 只在写入时触发。这里把现存记忆重建索引，否则升级后词法
+                # 通道会在首次写入前持续 0 命中。
+                #
+                # 迁移**必须原子**：fts_version 等 reindex 全部成功后才写。若先写
+                # fts_version=2 再 reindex，_reindex_fts 因某行损坏的 structured_data
+                # 抛异常（见下方 except）时 meta 已标记 v2、索引却半残，下次启动
+                # need_reindex 为 False，词法通道永久降级。后置写入保证失败时旧版本
+                # 仍在 meta，下次启动能重试。
+                self._reindex_fts(conn)
+                conn.execute(
+                    "INSERT OR REPLACE INTO structured_memory_meta(key, value) "
+                    "VALUES ('fts_version', '2')"
+                )
+        except Exception:
+            # 不只 DatabaseError：_reindex_fts 里 _record_from_row 的 json.loads 可能
+            # 因某行损坏的 structured_data 抛 JSONDecodeError（非 sqlite 异常）。
+            # 任何异常都置 FTS 不可用，回退 LIKE 通道；fts_version 保持旧值（后置写入
+            # 保证的），下次启动 need_reindex 仍为 True，能重试，不会永久降级。
             self._fts_available = False
+            logger.warning("memory FTS 初始化失败，回退 LIKE 通道", exc_info=True)
         conn.commit()
+
+    def _reindex_fts(self, conn: sqlite3.Connection) -> None:
+        """从 memories 表把所有 active/disputed 记忆重建进 memory_fts。
+
+        只在 schema v2 升级时调一次。逐行取 record 再走 _sync_fts，复用 bigram
+        索引逻辑，保证迁移后的索引与正常运行时一致。
+        """
+        if not self._fts_available:
+            return
+        rows = conn.execute(
+            "SELECT * FROM memories WHERE status IN (?, ?)",
+            (MemoryStatus.ACTIVE.value, MemoryStatus.DISPUTED.value),
+        ).fetchall()
+        for row in rows:
+            self._sync_fts(conn, self._record_from_row(row))
 
     @staticmethod
     def _json(value: dict[str, Any]) -> str:
@@ -241,6 +362,36 @@ class MemoryStore:
     @staticmethod
     def _quote_hash(quote: str) -> str:
         return hashlib.sha256(quote.strip().encode("utf-8")).hexdigest()
+
+    # CJK 连续段（含扩展 A 区及常用标点外的表意文字）与 ASCII 词元分别抽取。
+    # 与 tests/memory_eval/probe_lexical.py 的 CJK/ASCII_WORD 保持同口径，避免
+    # 索引侧与查询侧分词不一致导致 MATCH 永远错位。
+    _CJK_RE = re.compile(r"[\u3400-\u9fff]+")
+    _ASCII_WORD_RE = re.compile(r"[A-Za-z0-9_]+")
+    # bigram 查询项数上限：长 CJK query 会被拆成几百个 bigram，LIKE 兜底每项 2 个
+    # 参数，超 SQLite 默认 999 变量上限会抛 "too many SQL variables"。FTS MATCH
+    # 的 OR 项过多也会让查询规划器退化。200 个 bigram 覆盖 ~400 字 CJK query，
+    # 远超召回 query 的正常长度；取前 200（去重保序后）足够覆盖语义。
+    _MAX_QUERY_BIGRAMS = 200
+
+    @classmethod
+    def _ngrams(cls, text: str, n: int) -> list[str]:
+        """CJK 段切 n-gram，ASCII 词整取，去重保序。
+
+        这是 FTS 词法通道的索引/查询共用分词器。probe 实测：unicode61 tokenizer
+        对整段 CJK 不分词，trigram（n=3）OR 查询在 120 case 上 0 命中；只有
+        n=2（bigram）能把「用户偏好用中文交流」这类 query 拆成可命中记忆的 token
+        （59.2% 精度 / 15.3% recall / 24% case 覆盖）。所以索引列存 bigram 串、
+        查询侧也用 bigram OR，两侧必须用同一个函数。
+        """
+        out: list[str] = []
+        for run in cls._CJK_RE.findall(text):
+            if len(run) <= n:
+                out.append(run)
+            else:
+                out.extend(run[i : i + n] for i in range(len(run) - n + 1))
+        out.extend(cls._ASCII_WORD_RE.findall(text.lower()))
+        return list(dict.fromkeys(out))
 
     @staticmethod
     def _candidate_fingerprint(candidate: MemoryCandidate) -> str:
@@ -261,10 +412,19 @@ class MemoryStore:
             return
         conn.execute("DELETE FROM memory_fts WHERE memory_id=?", (record.id,))
         if record.status in {MemoryStatus.ACTIVE.value, MemoryStatus.DISPUTED.value}:
+            # 索引列存 bigram 串而非原文：见 _init_schema 里 schema v2 的说明。
+            # content/memory_key 用 bigram；dimension 是离散枚举值，原文整取即可。
             searchable = " ".join(self._flatten(record.structured_data))
             conn.execute(
-                "INSERT INTO memory_fts(memory_id, content, memory_key, dimension, searchable_data) VALUES (?, ?, ?, ?, ?)",
-                (record.id, record.content, record.memory_key, record.dimension, searchable),
+                "INSERT INTO memory_fts(memory_id, content, memory_key, dimension, searchable_data) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    record.id,
+                    " ".join(self._ngrams(record.content, 2)),
+                    " ".join(self._ngrams(record.memory_key, 2)),
+                    record.dimension,
+                    " ".join(self._ngrams(searchable, 2)),
+                ),
             )
 
     @classmethod
@@ -362,14 +522,14 @@ class MemoryStore:
         conn.execute("""
             INSERT INTO memories(
                 id,user_id,memory_type,dimension,memory_key,content,structured_data,scope_type,
-                scope_id,memory_domain,status,evidence_level,confidence,importance,sensitivity,
-                valid_from,valid_until,source_session_id,source_message_id,created_at,updated_at,
-                last_recalled_at,superseded_by,forgotten_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                scope_id,memory_domain,memory_role,status,evidence_level,confidence,importance,
+                sensitivity,valid_from,valid_until,source_session_id,source_message_id,created_at,
+                updated_at,last_recalled_at,superseded_by,forgotten_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             r.id,r.user_id,r.memory_type,r.dimension,r.memory_key,r.content,self._json(r.structured_data),
-            r.scope_type,r.scope_id,r.memory_domain,r.status,r.evidence_level,r.confidence,r.importance,
-            r.sensitivity,r.valid_from,r.valid_until,r.source_session_id,r.source_message_id,
+            r.scope_type,r.scope_id,r.memory_domain,r.memory_role,r.status,r.evidence_level,r.confidence,
+            r.importance,r.sensitivity,r.valid_from,r.valid_until,r.source_session_id,r.source_message_id,
             r.created_at,r.updated_at,r.last_recalled_at,r.superseded_by,r.forgotten_at,
         ))
 
@@ -455,6 +615,7 @@ class MemoryStore:
         self, *, memory_type: str | None = None, dimension: str | None = None,
         scope_type: str | None = None, scope_id: str | None = None,
         memory_domain: str | None = None, status: str | None = None,
+        memory_role: str | None = None,
         limit: int = 100, offset: int = 0,
     ) -> list[MemoryRecord]:
         clauses: list[str] = []
@@ -463,6 +624,7 @@ class MemoryStore:
             ("memory_type", memory_type), ("dimension", dimension),
             ("scope_type", scope_type), ("scope_id", scope_id),
             ("memory_domain", memory_domain), ("status", status),
+            ("memory_role", memory_role),
         ):
             if value is not None:
                 clauses.append(f"{column}=?")
@@ -558,6 +720,7 @@ class MemoryStore:
         self, query: str = "", *, memory_types: list[str] | None = None,
         memory_domain: str | None = None, statuses: list[str] | None = None,
         scope_pairs: list[tuple[str, str]] | None = None, limit: int = 20,
+        memory_role: str | None = None,
     ) -> list[MemoryRecord]:
         conn = self._get_conn()
         clauses: list[str] = []
@@ -571,6 +734,9 @@ class MemoryStore:
         if memory_domain is not None:
             clauses.append("m.memory_domain=?")
             params.append(memory_domain)
+        if memory_role is not None:
+            clauses.append("m.memory_role=?")
+            params.append(memory_role)
         if scope_pairs:
             pieces = []
             for scope_type, scope_id in scope_pairs:
@@ -585,23 +751,47 @@ class MemoryStore:
 
         if query.strip() and self._fts_available:
             try:
-                sql = f"""
-                    SELECT m.* FROM memory_fts f JOIN memories m ON m.id=f.memory_id
-                    WHERE memory_fts MATCH ? AND {where}
-                    ORDER BY bm25(memory_fts), m.importance DESC, m.confidence DESC,
-                             m.updated_at DESC, m.id LIMIT ?
-                """
-                rows = conn.execute(sql, [query.strip(), *params, limit]).fetchall()
-                if rows:
-                    return [self._record_from_row(r) for r in rows]
-                # FTS 零命中时落到 LIKE：unicode61 对 CJK 无分词，"用户偏好用中文交流"
-                # 是单个 token，查询"中文" MATCH 成功但 0 行，必须给 LIKE 兜底机会
+                # bigram OR 查询：把 query 切成 2 字符 n-gram（CJK）+ ASCII 整词，
+                # OR 拼 MATCH。与索引侧（_sync_fts 写 bigram 串）同口径，token 相等
+                # 匹配才能命中。OR 意味着 query 的任意一个 bigram 出现在文档里就命中，
+                # 比 AND（默认）宽松，CJK 子串匹配终于能工作。探针实测 trigram(n=3) 全
+                # 0 命中，只有 n=2 有效。
+                terms = self._ngrams(query, 2)
+                if terms:
+                    if len(terms) > self._MAX_QUERY_BIGRAMS:
+                        terms = terms[: self._MAX_QUERY_BIGRAMS]
+                    expr = " OR ".join(f'"{t}"' for t in terms)
+                    sql = f"""
+                        SELECT m.* FROM memory_fts f JOIN memories m ON m.id=f.memory_id
+                        WHERE memory_fts MATCH ? AND {where}
+                        ORDER BY bm25(memory_fts), m.importance DESC, m.confidence DESC,
+                                 m.updated_at DESC, m.id LIMIT ?
+                    """
+                    rows = conn.execute(sql, [expr, *params, limit]).fetchall()
+                    if rows:
+                        return [self._record_from_row(r) for r in rows]
+                # bigram 为空（极短 query）或 FTS 0 命中，落到下面的 LIKE 兜底
             except sqlite3.DatabaseError:
                 pass
         if query.strip():
-            escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-            where += " AND (m.content LIKE ? ESCAPE '\\' OR m.memory_key LIKE ? ESCAPE '\\')"
-            params.extend([f"%{escaped}%", f"%{escaped}%"])
+            # LIKE 兜底：2 字符 bigram OR 匹配。比整串 LIKE 宽松——query 的任意
+            # 2 字符子串出现在 content 或 memory_key 里就命中。bigram FTS 对 query
+            # 与文档无 2 字符重叠时会漏（理论上极少，因为 bigram 粒度够细），这里兜住，
+            # 也兜住 FTS 表不可用的环境。
+            bigrams = self._ngrams(query, 2)
+            if bigrams:
+                if len(bigrams) > self._MAX_QUERY_BIGRAMS:
+                    bigrams = bigrams[: self._MAX_QUERY_BIGRAMS]
+                like_parts = ["(m.content LIKE ? ESCAPE '\\' OR m.memory_key LIKE ? ESCAPE '\\')"] * len(bigrams)
+                where += f" AND ({' OR '.join(like_parts)})"
+                escaped = [bg.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") for bg in bigrams]
+                for bg in escaped:
+                    params.extend([f"%{bg}%", f"%{bg}%"])
+            else:
+                # 纯 ASCII 单词或单字 query，ngrams 退化为整词，回退整串子串
+                escaped_q = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                where += " AND (m.content LIKE ? ESCAPE '\\' OR m.memory_key LIKE ? ESCAPE '\\')"
+                params.extend([f"%{escaped_q}%", f"%{escaped_q}%"])
         rows = conn.execute(
             f"SELECT m.* FROM memories m WHERE {where} ORDER BY m.importance DESC, "
             "m.confidence DESC, m.updated_at DESC, m.id LIMIT ?",
@@ -808,7 +998,8 @@ class MemoryStore:
             id=row["id"],user_id=row["user_id"],memory_type=row["memory_type"],
             dimension=row["dimension"],memory_key=row["memory_key"],content=row["content"],
             structured_data=json.loads(row["structured_data"] or "{}"),scope_type=row["scope_type"],
-            scope_id=row["scope_id"],memory_domain=row["memory_domain"],status=row["status"],
+            scope_id=row["scope_id"],memory_domain=row["memory_domain"],
+            memory_role=row["memory_role"],status=row["status"],
             evidence_level=row["evidence_level"],confidence=row["confidence"],importance=row["importance"],
             sensitivity=row["sensitivity"],valid_from=row["valid_from"],valid_until=row["valid_until"],
             source_session_id=row["source_session_id"] or "",source_message_id=row["source_message_id"] or "",
