@@ -114,31 +114,43 @@ def _with_quote(user_msg: Message, quote: dict | None) -> Message:
     return Message(role=user_msg.role, content=prefixed, created_at=user_msg.created_at, images=user_msg.images)
 
 
-def _persist_images_to_disk(msg: Message, session_id: str) -> list[str]:
+def _persist_images_to_disk(msg: Message, session_id: str) -> tuple[list[str], list[str]]:
     """将消息中的 base64 图片保存为本地文件，msg.images 就地替换为路径格式。
 
     原始格式: [{"data": "base64...", "media_type": "image/png"}]
     替换为:   [{"path": "session_id/ts_0.png", "media_type": "image/png"}]
 
-    返回保存的文件绝对路径列表（供调用方给 LLM 提供路径提示）。
+    长图（高度 > 8000px）会被自动垂直切分为多段，每段独立保存为一个文件。
+    切分后 msg.images 会展开为多条 path 记录，同源分段共享 split_group 字段
+    （值为原始图片索引），供 _resolve_images_for_llm 识别并给 LLM 加顺序提示。
+
+    返回 (保存的文件绝对路径列表, 切分提示列表)。
+    切分提示如 "图片1因过长切分为3段（按顺序展示）"，无切分时为空列表。
     """
     from ethan.core.assets import image_file_path, save_image
 
     persisted = []
     saved_paths: list[str] = []
+    split_hints: list[str] = []
     for idx, img in enumerate(msg.images):
         data = img.get("data", "")
         media_type = img.get("media_type", "image/png")
         if not data:
             persisted.append(img)
             continue
-        # save_image 返回 (路径, 实际 media_type)，缩放后可能变更
-        path, actual_media_type = save_image(session_id, idx, data, media_type)
-        persisted.append({"path": path, "media_type": actual_media_type})
-        saved_paths.append(str(image_file_path(path)))
+        # save_image 返回 [(路径, media_type), ...]，长图会返回多段
+        segments = save_image(session_id, idx, data, media_type)
+        if len(segments) > 1:
+            split_hints.append(f"图片{idx + 1}因过长切分为{len(segments)}段（按顺序展示）")
+        for seg_path, seg_media_type in segments:
+            entry: dict = {"path": seg_path, "media_type": seg_media_type}
+            if len(segments) > 1:
+                entry["split_group"] = idx
+            persisted.append(entry)
+            saved_paths.append(str(image_file_path(seg_path)))
 
     msg.images = persisted
-    return saved_paths
+    return saved_paths, split_hints
 
 
 def _resolve_images_for_llm(messages: list[Message]) -> None:
@@ -151,6 +163,8 @@ def _resolve_images_for_llm(messages: list[Message]) -> None:
     当前消息的 base64 图片（data 字段）可能超限，需缩放；
     历史消息的 path 图片落盘时已缩放（save_image），但兼容旧数据仍调用 downscale 做安全网
     （对已缩放的图片 Pillow 只检查尺寸即返回，开销极低）。
+
+    若消息中含 split_group 标记（长图切分的多段），附加顺序提示让 LLM 理解分段关系。
     """
     from ethan.core.assets import downscale_image_b64, image_file_path, load_image_b64
 
@@ -159,6 +173,8 @@ def _resolve_images_for_llm(messages: list[Message]) -> None:
             continue
         resolved = []
         file_paths: list[str] = []
+        # 收集 split_group → 段数，用于给 LLM 加顺序提示
+        split_groups: dict[int, int] = {}
         for img in msg.images:
             if "data" in img:
                 # 当前消息的原始 base64 图片，落盘前缩放一次
@@ -170,7 +186,13 @@ def _resolve_images_for_llm(messages: list[Message]) -> None:
                 if b64:
                     media_type = img.get("media_type", "image/png")
                     data, downscaled = downscale_image_b64(b64, media_type)
-                    resolved.append({"data": data, "media_type": media_type})
+                    entry: dict = {"data": data, "media_type": media_type}
+                    # 保留 split_group 标记，后续用于生成顺序提示
+                    sg = img.get("split_group")
+                    if sg is not None:
+                        entry["split_group"] = sg
+                        split_groups[sg] = split_groups.get(sg, 0) + 1
+                    resolved.append(entry)
                     file_paths.append(str(image_file_path(img["path"])))
                 # 文件不存在则跳过（不影响 LLM 调用）
             else:
@@ -180,3 +202,8 @@ def _resolve_images_for_llm(messages: list[Message]) -> None:
         if file_paths and msg.role == "user" and msg.content:
             paths_hint = ", ".join(file_paths)
             msg.content = f"{msg.content}\n\n[image_paths: {paths_hint}]"
+            # 如果有切分的长图，追加顺序提示
+            multi_seg = {g: n for g, n in split_groups.items() if n > 1}
+            if multi_seg:
+                parts = [f"图片{g + 1}切分为{n}段（按顺序展示）" for g, n in sorted(multi_seg.items())]
+                msg.content = f"{msg.content}\n[image_split: {'; '.join(parts)}]"
