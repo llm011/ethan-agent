@@ -136,11 +136,15 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
     执行流程与普通对话完全对齐：使用 stream_chat() + StreamCollector 实时
     持久化工具调用过程（tool_steps），便于事后排查问题。
     """
+    import logging as _entry_log
+    _entry_logger = _entry_log.getLogger("ethan.schedule")
+    _entry_logger.info("[Schedule] fire_schedule_job called: session=%s title=%r", session_id, title)
+
     async def _run_schedule_task():
         """在 server event loop 中跑完整 agent 流式循环，实时落库工具步骤。"""
         import logging as _log
 
-        from ethan.core.agent import create_agent
+        from ethan.core.agent_factory import create_agent
         from ethan.core.consent import AutoConsentProvider, set_consent_provider
         from ethan.core.context import set_session_id
         from ethan.core.stream_collector import StreamCollector
@@ -149,6 +153,7 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
         from ethan.providers.base import Message, ToolEvent
 
         _logger = _log.getLogger("ethan.schedule")
+        _logger.info("[Schedule] _run_schedule_task started: session=%s title=%r", session_id, title)
         result_text = ""
         collector = None
         consent = None
@@ -197,7 +202,8 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
 
             # 加载历史上下文（让重复执行的任务能看到之前的结果）
             from ethan.memory.working import WorkingMemory
-            history = await store.load_messages(session_id)
+            session_obj = await store.load(session_id)
+            history = session_obj.messages if session_obj else []
             memory = WorkingMemory.from_history(history, hot_size=10)
             messages = memory.build_context() + [Message(role="user", content=prompt)]
 
@@ -313,14 +319,19 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
                 except Exception as e4:
                     _logger.error("Schedule wechat reply error: %s", e4)
 
-    # APScheduler BackgroundScheduler 的回调在 worker 线程中运行，
-    # 必须把 async task 提交到主 server event loop（而非 asyncio.run 创建新 loop，
-    # 否则 get_session_store 的 asyncio.Lock 跨 loop 会报错）。
     loop = _server_loop
     if loop and loop.is_running():
-        asyncio.run_coroutine_threadsafe(_run_schedule_task(), loop)
+        _entry_logger.info("[Schedule] dispatching to server loop (loop=%s)", loop)
+        fut = asyncio.run_coroutine_threadsafe(_run_schedule_task(), loop)
+        def _on_done(f):
+            exc = f.exception()
+            if exc:
+                _entry_logger.error("[Schedule] _run_schedule_task failed: %s", exc, exc_info=exc)
+            else:
+                _entry_logger.info("[Schedule] _run_schedule_task completed for session=%s", session_id)
+        fut.add_done_callback(_on_done)
     else:
-        # fallback：无 server loop（测试/CLI 场景）
+        _entry_logger.warning("[Schedule] no server loop (loop=%s), using thread fallback", loop)
         def _thread_run():
             asyncio.run(_run_schedule_task())
         threading.Thread(target=_thread_run, daemon=True).start()
