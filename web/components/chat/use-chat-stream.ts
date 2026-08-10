@@ -268,6 +268,24 @@ export async function consumeStream(
         if (resumed) {
           // 后端仍有活跃 run：续接 SSE 流，继续接收后续事件
           for await (const chunk of resumed) {
+            if (chunk.confirm_browser_cleanup) {
+              setCleanupConfirm({
+                request_id: chunk.request_id || "",
+                sessions: chunk.sessions || [],
+                timeout: chunk.timeout || 120,
+              });
+              continue;
+            }
+            if (chunk.ask_user_request) {
+              setAskUserRequest({
+                request_id: chunk.request_id || "",
+                question: chunk.question || "",
+                options: chunk.options || [],
+                default: chunk.default || "",
+                timeout: chunk.timeout || 20,
+              });
+              continue;
+            }
             if (chunk.content) assistantContent += chunk.content;
             if (chunk.id && chunk.tool) {
               const toolId = chunk.id;
