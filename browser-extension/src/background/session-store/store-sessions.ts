@@ -32,14 +32,59 @@ import {
 } from './chrome-api';
 
 export class BrowserSessionStoreSessions extends BrowserSessionStoreCore {
+  private _bgWindowId: number | undefined;
+
+  private async _getBackgroundWindow(): Promise<number | undefined> {
+    if (this._bgWindowId == null) return undefined;
+    try {
+      const win = await new Promise<chrome.windows.Window | undefined>((resolve) => {
+        chrome.windows.get(this._bgWindowId!, (w) => {
+          if (chrome.runtime.lastError || !w) resolve(undefined);
+          else resolve(w);
+        });
+      });
+      if (win && !win.focused) return this._bgWindowId;
+      // Window is focused or gone — clear it
+      this._bgWindowId = undefined;
+      return undefined;
+    } catch {
+      this._bgWindowId = undefined;
+      return undefined;
+    }
+  }
+
   async createSession(
     params: BrowserSessionCreateParams,
   ): Promise<BrowserSessionCreateResult> {
     await this.ensureLoaded();
 
+    let windowId: number | undefined;
+    if (params.background) {
+      windowId = await this._getBackgroundWindow();
+      if (windowId == null) {
+        const win = await new Promise<chrome.windows.Window>((resolve, reject) => {
+          chrome.windows.create({ focused: false, type: 'normal' }, w => {
+            if (chrome.runtime.lastError || !w) {
+              reject(new Error(chrome.runtime.lastError?.message || 'Failed to create background window'));
+            } else {
+              resolve(w);
+            }
+          });
+        });
+        windowId = win.id;
+        this._bgWindowId = windowId;
+        if (win.tabs && win.tabs.length > 0 && win.tabs[0].id) {
+          await new Promise<void>(resolve => {
+            chrome.tabs.remove(win.tabs![0].id!, () => resolve());
+          });
+        }
+      }
+    }
+
     const tab = await createTab({
       url: params.url || DEFAULT_SESSION_URL,
-      active: true,
+      active: !params.background,
+      ...(windowId != null ? { windowId } : {}),
     });
     const tabId = getTabId(tab, 'Cannot create a session without tab id');
     const groupId = await groupTabs([tabId]);

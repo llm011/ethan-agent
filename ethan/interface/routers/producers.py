@@ -125,9 +125,8 @@ async def _close_browser_sessions(session_id: str | None, run=None) -> None:
                 if action == "close":
                     await hub.call(METHODS["session_close"], {"sessionId": bsid},
                                    client_name=cname, browser_session_id=bsid)
-                else:
-                    await hub.call(METHODS["session_release"], {"sessionId": bsid},
-                                   client_name=cname, browser_session_id=bsid)
+                # "keep" 只解绑后端映射，不调 session_release：
+                # 扩展继续追踪该 session，下次对话可通过 list + attach 复用。
             except Exception:
                 logger.warning("browser: cleanup action '%s' failed for %s", action, bsid)
             finally:
