@@ -81,7 +81,9 @@ def build_file_card(path: str, title: str = "") -> dict | None:
 
 
 # 兜底扫描只认「明确是产物」的高信号扩展名，避免正文里随手提到的 .md/.html 被误转成卡片。
-FALLBACK_CARD_EXTS = {".pptx", ".pdf", ".docx", ".xlsx", ".mp4"} | IMAGE_EXTS
+# 注意：.mp4 不在此列——视频是重交付物，正文里提到路径就自动建卡 + 授权下载会带来
+# 意外的播放器 UI 和授权面。视频必须经 deliver_file 显式交付（DELIVER_EXTS 仍含 .mp4）。
+FALLBACK_CARD_EXTS = {".pptx", ".pdf", ".docx", ".xlsx"} | IMAGE_EXTS
 
 
 def scan_file_cards_in_text(text: str, existing_paths: set[str]) -> list[dict]:

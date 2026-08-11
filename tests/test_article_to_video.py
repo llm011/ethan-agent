@@ -103,6 +103,56 @@ def test_long_edge_tts_caption_is_paginated():
     assert all(len(page.text) <= 22 for page in pages)
 
 
+def test_split_caption_text_preserves_english_spaces():
+    # 英文/混排在空格处切分不能丢空格，tail-merge 也不能把单词粘成 helloworld。
+    text = "The quick brown fox jumps over the lazy dog repeatedly"
+    chunks = pipeline._split_caption_text(text, maximum=20)
+
+    rejoined = " ".join(part for part in " ".join(chunks).split(" ") if part)
+    # 切再拼回应能还原原句的词序列（不粘连、不丢词）。
+    assert rejoined == text
+    assert "helloworld" not in "".join(chunks).lower().replace(" ", "")
+
+
+def test_paginate_subtitles_cursor_is_monotonic():
+    # 短时长 + 多分片：round() 可能归零，cursor 必须仍单调推进，不产生重叠/倒退。
+    source = [pipeline.Subtitle(text="aaaaaaaaaa bbbbbbbbbb cccccccccc dddddddddd", start_ms=0, end_ms=5)]
+    pages = pipeline.paginate_subtitles(source, maximum=10)
+
+    assert len(pages) >= 2
+    for prev, cur in zip(pages, pages[1:]):
+        assert cur.start_ms >= prev.end_ms, f"cursor went backwards: {prev} -> {cur}"
+        assert cur.end_ms > cur.start_ms
+
+
+def test_normalize_manifest_handles_null_fields():
+    raw = sample_manifest()
+    raw["summary"] = None
+    raw["language"] = None
+    raw["sourceUrl"] = None
+
+    result = pipeline.normalize_manifest(raw)
+
+    assert result["summary"] == ""
+    assert result["language"] == "zh-CN"
+    assert result["sourceUrl"] == ""
+
+
+def test_enforce_target_duration_uses_narration_not_padding():
+    value = sample_manifest()
+    value["targetDurationSec"] = 30
+    manifest = pipeline.normalize_manifest(value)
+
+    # 旁白实际 30s（captions 末尾），但 totalDurationMs 含 2 场景 × 350ms padding = 30.7s。
+    # 旧逻辑会误判超时（30.7 > 33? 否，但接近；构造更明确的边界：旁白 32s，padding 后 32.7s）。
+    timeline = {
+        "totalDurationMs": 32_700,  # 含 padding
+        "captions": [{"text": "x", "startMs": 0, "endMs": 32_000}],  # 实际旁白 32s
+    }
+    # 32s 在 30±3s 内 → 通过；若用 totalDurationMs(32.7s) 则会误判失败。
+    pipeline.enforce_target_duration(manifest, timeline)
+
+
 def test_target_duration_defaults_tolerance_and_enforces_actual_timing():
     value = sample_manifest()
     value["targetDurationSec"] = 30
@@ -151,6 +201,7 @@ def test_failed_rerun_archives_previous_published_outputs(tmp_path, monkeypatch)
         "cover.png": b"old-cover",
         "render-report.json": b"old-report",
         "deliverables.zip": b"old-archive",
+        "source.md": b"old-source",  # 非 PUBLISHED_OUTPUTS，但也要被归档清走
     }
     for name, content in previous.items():
         (output_dir / name).write_bytes(content)

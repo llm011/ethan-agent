@@ -86,7 +86,9 @@ def test_deliver_file_mp4_card():
     assert "project_dir" not in card
 
 
-def test_fallback_scan_recognizes_mp4():
+def test_fallback_scan_does_not_auto_grant_mp4():
+    # .mp4 不在 FALLBACK_CARD_EXTS 里——视频是重交付物，正文提到路径不应自动建卡 + 授权。
+    # 必须经 deliver_file 显式交付（见 test_deliver_file_mp4_card）。
     from ethan.core.file_jail import scan_file_cards_in_text
 
     video = Path("/tmp/fallback_video.mp4")
@@ -94,9 +96,7 @@ def test_fallback_scan_recognizes_mp4():
 
     cards = scan_file_cards_in_text(f"视频已生成：{video}", set())
 
-    assert len(cards) == 1
-    assert cards[0]["path"] == str(video.resolve())
-    assert cards[0]["kind"] == "mp4"
+    assert cards == []
 
 
 # ── /api/files 路由 ─────────────────────────────────────────────────

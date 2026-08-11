@@ -32,6 +32,8 @@ ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 PROSODY_RE = re.compile(r"^[+-]\d+%$")
 PITCH_RE = re.compile(r"^[+-]\d+Hz$")
 PUBLISHED_OUTPUTS = ("final.mp4", "cover.png", "render-report.json", "deliverables.zip")
+# source.md 由 skill 写入但不属于"产物"，归档时也要清走，避免上轮残留混进下轮 deliverables.zip。
+ARCHIVE_EXTRA = ("source.md",)
 
 
 class ManifestError(ValueError):
@@ -167,16 +169,35 @@ def normalize_manifest(raw: Any) -> dict[str, Any]:
             }
         )
 
+    summary_raw = raw.get("summary", "")
+    if summary_raw is None:
+        summary = ""
+    elif isinstance(summary_raw, str):
+        summary = summary_raw.strip()
+    else:
+        raise ManifestError("summary must be a string or null")
+    language_raw = raw.get("language", "zh-CN")
+    language = (language_raw.strip() if isinstance(language_raw, str) else "") or "zh-CN"
+    if not isinstance(language_raw, str) and language_raw is not None:
+        raise ManifestError("language must be a string or null")
+    source_raw = raw.get("sourceUrl", "")
+    if source_raw is None:
+        source_url = ""
+    elif isinstance(source_raw, str):
+        source_url = source_raw.strip()
+    else:
+        raise ManifestError("sourceUrl must be a string or null")
+
     result = {
         "title": title,
-        "summary": str(raw.get("summary", "")).strip(),
+        "summary": summary,
         "width": width,
         "height": height,
         "fps": fps,
         "targetDurationSec": float(target_duration) if target_duration is not None else None,
         "durationToleranceSec": float(duration_tolerance) if duration_tolerance is not None else None,
-        "language": str(raw.get("language", "zh-CN")).strip() or "zh-CN",
-        "sourceUrl": str(raw.get("sourceUrl", "")).strip(),
+        "language": language,
+        "sourceUrl": source_url,
         "voice": voice,
         "theme": theme,
         "scenes": scenes,
@@ -250,11 +271,17 @@ def _split_caption_text(text: str, maximum: int) -> list[str]:
             split_at = remaining.rfind(" ", 0, maximum + 1)
             if split_at < maximum // 2:
                 split_at = maximum
+            # 切在空格上时空格作为分隔符被吞掉；硬切（无空格）时原样断开。
+            # 两种情况都不 strip 已切出的 head，保证词内硬切不丢字符、空格切不粘词。
             chunks.append(remaining[:split_at].strip())
-            remaining = remaining[split_at:].strip()
+            remaining = remaining[split_at:].lstrip()
         if remaining:
             if chunks and len(chunks[-1]) + len(remaining) <= maximum:
-                chunks[-1] += remaining
+                # tail-merge：若前块非标点结尾且 remaining 非标点开头，补一个空格防词粘连。
+                prev_tail = chunks[-1][-1:]
+                next_head = remaining[0]
+                need_space = prev_tail and next_head and prev_tail not in "，。！？；,.!?;" and next_head not in "，。！？；,.!?;"
+                chunks[-1] = chunks[-1] + (" " if need_space else "") + remaining
             else:
                 chunks.append(remaining)
     return chunks or [text]
@@ -273,8 +300,10 @@ def paginate_subtitles(subtitles: list[Subtitle], *, maximum: int) -> list[Subti
                 if index == len(chunks) - 1
                 else cursor + round((subtitle.end_ms - subtitle.start_ms) * weight / total_weight)
             )
-            paginated.append(Subtitle(text=chunk, start_ms=cursor, end_ms=max(cursor + 1, end_ms)))
-            cursor = end_ms
+            # 用 clamp 后的 end_ms 推进 cursor，避免 round() 归零时 cursor 倒退造成字幕重叠。
+            clamped_end = max(cursor + 1, end_ms)
+            paginated.append(Subtitle(text=chunk, start_ms=cursor, end_ms=clamped_end))
+            cursor = clamped_end
     return paginated
 
 
@@ -317,6 +346,38 @@ async def _synthesize_once(text: str, voice: dict[str, str], media_path: Path, s
         raise RuntimeError("Edge TTS returned no subtitle boundaries")
 
 
+async def _synthesize_scene(scene: dict[str, Any], voice: dict[str, str], cache_dir: Path, *, retries: int) -> None:
+    """单场景 TTS：校验缓存 → 带重试的合成 → 原子替换缓存文件。协程化以支持并发。"""
+    key = _tts_cache_key(scene, voice)
+    cached_audio = cache_dir / f"{key}.mp3"
+    cached_srt = cache_dir / f"{key}.srt"
+    if _valid_tts_cache(cached_audio, cached_srt):
+        return
+    cached_audio.unlink(missing_ok=True)
+    cached_srt.unlink(missing_ok=True)
+    last_error: Exception | None = None
+    for attempt in range(1, retries + 1):
+        nonce = uuid.uuid4().hex
+        pending_audio = cache_dir / f".{key}.{nonce}.mp3.tmp"
+        pending_srt = cache_dir / f".{key}.{nonce}.srt.tmp"
+        try:
+            await _synthesize_once(scene["narration"], voice, pending_audio, pending_srt)
+            if not _valid_tts_cache(pending_audio, pending_srt):
+                raise RuntimeError("Edge TTS produced an invalid cache entry")
+            pending_audio.replace(cached_audio)
+            pending_srt.replace(cached_srt)
+            last_error = None
+            break
+        except Exception as exc:  # network/service failures are retriable
+            last_error = exc
+            pending_audio.unlink(missing_ok=True)
+            pending_srt.unlink(missing_ok=True)
+            if attempt < retries:
+                await asyncio.sleep(attempt * 1.5)
+    if last_error is not None:
+        raise RuntimeError(f"TTS failed for scene {scene['id']}: {last_error}") from last_error
+
+
 def synthesize_scenes(manifest: dict[str, Any], output_dir: Path, *, retries: int = 3) -> list[dict[str, Any]]:
     cache_dir = output_dir / "work" / "tts-cache"
     audio_dir = output_dir / "work" / "public" / "audio"
@@ -324,35 +385,19 @@ def synthesize_scenes(manifest: dict[str, Any], output_dir: Path, *, retries: in
     for directory in (cache_dir, audio_dir, subtitle_dir):
         directory.mkdir(parents=True, exist_ok=True)
 
+    # 所有场景在同一个事件循环里并发合成（单场景内仍带重试），不再每场景一次 asyncio.run。
+    async def _synthesize_all() -> None:
+        await asyncio.gather(
+            *[_synthesize_scene(scene, manifest["voice"], cache_dir, retries=retries) for scene in manifest["scenes"]]
+        )
+
+    asyncio.run(_synthesize_all())
+
     artifacts: list[dict[str, Any]] = []
     for scene in manifest["scenes"]:
         key = _tts_cache_key(scene, manifest["voice"])
         cached_audio = cache_dir / f"{key}.mp3"
         cached_srt = cache_dir / f"{key}.srt"
-        if not _valid_tts_cache(cached_audio, cached_srt):
-            cached_audio.unlink(missing_ok=True)
-            cached_srt.unlink(missing_ok=True)
-            last_error: Exception | None = None
-            for attempt in range(1, retries + 1):
-                nonce = uuid.uuid4().hex
-                pending_audio = cache_dir / f".{key}.{nonce}.mp3.tmp"
-                pending_srt = cache_dir / f".{key}.{nonce}.srt.tmp"
-                try:
-                    asyncio.run(_synthesize_once(scene["narration"], manifest["voice"], pending_audio, pending_srt))
-                    if not _valid_tts_cache(pending_audio, pending_srt):
-                        raise RuntimeError("Edge TTS produced an invalid cache entry")
-                    pending_audio.replace(cached_audio)
-                    pending_srt.replace(cached_srt)
-                    last_error = None
-                    break
-                except Exception as exc:  # network/service failures are retriable
-                    last_error = exc
-                    pending_audio.unlink(missing_ok=True)
-                    pending_srt.unlink(missing_ok=True)
-                    if attempt < retries:
-                        time.sleep(attempt * 1.5)
-            if last_error is not None:
-                raise RuntimeError(f"TTS failed for scene {scene['id']}: {last_error}") from last_error
         scene_audio = audio_dir / f"{scene['id']}.mp3"
         scene_srt = subtitle_dir / f"{scene['id']}.srt"
         shutil.copy2(cached_audio, scene_audio)
@@ -404,7 +449,16 @@ def build_timeline(
 
 
 def _run_command(command: list[str], *, cwd: Path) -> None:
-    subprocess.run(command, cwd=cwd, check=True)
+    # 捕获 stderr，失败时把 Node/Remotion/pnpm 的诊断写进 run-status.json，
+    # 否则只留 "non-zero exit status 1"，agent 无法定位渲染失败原因。
+    completed = subprocess.run(command, cwd=cwd, check=False, capture_output=True, text=True)
+    if completed.returncode != 0:
+        stderr = completed.stderr.strip()
+        detail = f"\nstderr:\n{stderr}" if stderr else ""
+        raise RuntimeError(f"command failed ({' '.join(command)}): exit {completed.returncode}{detail}")
+    # pnpm/node 正常输出走 stderr（进度日志），透传给上层日志，不静默吞掉。
+    if completed.stderr.strip():
+        sys.stderr.write(completed.stderr)
 
 
 def ensure_renderer(template_dir: Path) -> None:
@@ -439,11 +493,14 @@ def verify_outputs(output_dir: Path, timeline: dict[str, Any]) -> dict[str, Any]
     for path, minimum in ((video, 10_000), (cover, 1_000), (report_path, 10)):
         if not path.is_file() or path.stat().st_size < minimum:
             raise RuntimeError(f"invalid or missing output: {path}")
-    header = video.read_bytes()[:32]
+    # 只读头部 32 字节验 ftyp 标记，不要把整个 MP4 读进内存。
+    with video.open("rb") as fh:
+        header = fh.read(32)
     if b"ftyp" not in header:
         raise RuntimeError("final.mp4 does not contain an MP4 ftyp marker")
-    if not cover.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"):
-        raise RuntimeError("cover.png is not a PNG file")
+    with cover.open("rb") as fh:
+        if not fh.read(8).startswith(b"\x89PNG\r\n\x1a\n"):
+            raise RuntimeError("cover.png is not a PNG file")
     report = json.loads(report_path.read_text(encoding="utf-8"))
     expected = {
         "width": timeline["width"],
@@ -489,7 +546,7 @@ def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
 
 
 def _archive_published_outputs(output_dir: Path, run_id: str) -> Path | None:
-    existing = [output_dir / name for name in PUBLISHED_OUTPUTS if (output_dir / name).exists()]
+    existing = [output_dir / name for name in (PUBLISHED_OUTPUTS + ARCHIVE_EXTRA) if (output_dir / name).exists()]
     if not existing:
         return None
     archive_dir = output_dir / "work" / "previous-runs" / run_id
@@ -504,7 +561,11 @@ def enforce_target_duration(manifest: dict[str, Any], timeline: dict[str, Any]) 
     if target is None:
         return
     tolerance = manifest["durationToleranceSec"]
-    actual = timeline["totalDurationMs"] / 1000
+    # 用最后一条字幕的结束时间作为旁白实际时长，排除 build_timeline 每场景的 tail_padding，
+    # 否则 N 场景的 padding 累加会让恰好达标的旁白被误判超时。
+    captions = timeline.get("captions") or []
+    actual_ms = captions[-1]["endMs"] if captions else timeline["totalDurationMs"]
+    actual = actual_ms / 1000
     if abs(actual - target) > tolerance:
         raise RuntimeError(
             f"actual narration duration is {actual:.1f}s; target is {target:.1f}s ± {tolerance:.1f}s. "

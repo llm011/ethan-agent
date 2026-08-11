@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, type SyntheticEvent } from "react";
 import { useRouter } from "next/navigation";
 import { FileText, FileSpreadsheet, FileArchive, File as FileIcon, Presentation, Download, ImageIcon, Eye, Video } from "lucide-react";
 import { API_URL, getAuthToken } from "@/lib/api-base";
@@ -98,13 +98,48 @@ function ImageFileCard({ card, sessionId }: { card: FileCard; sessionId?: string
 
 function VideoFileCard({ card, sessionId }: { card: FileCard; sessionId?: string | null }) {
   const [url, setUrl] = useState<string>("");
+  const [ratio, setRatio] = useState<string | null>(null); // 检测到的宽高比，竖屏用 9/16 否则用 16/9
   const sid = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : "";
+
+  const refreshUrl = async (): Promise<string | undefined> => {
+    try {
+      const u = await signedViewUrl(card.path, sid);
+      setUrl(u);
+      return u;
+    } catch {
+      return undefined;
+    }
+  };
 
   useEffect(() => {
     let alive = true;
-    void signedViewUrl(card.path, sid).then((u) => { if (alive) setUrl(u); });
+    void signedViewUrl(card.path, sid)
+      .then((u) => { if (alive) setUrl(u); })
+      .catch(() => {});
     return () => { alive = false; };
   }, [card.path, sid]);
+
+  // 签名 URL 有 10 分钟 TTL；用户点播放时若已过期会 401/403，此时换一次新签名再播。
+  const handlePlay = (e: SyntheticEvent<HTMLVideoElement>) => {
+    const video = e.currentTarget;
+    if (video.readyState === 0 || video.error) {
+      void refreshUrl().then((fresh) => {
+        if (fresh) {
+          const t = video.currentTime;
+          video.src = fresh;
+          video.currentTime = t;
+          video.play().catch(() => {});
+        }
+      });
+    }
+  };
+
+  const onLoadedMetadata = (e: SyntheticEvent<HTMLVideoElement>) => {
+    const v = e.currentTarget;
+    if (v.videoWidth && v.videoHeight) {
+      setRatio(`${v.videoWidth} / ${v.videoHeight}`);
+    }
+  };
 
   return (
     <div className="overflow-hidden rounded-lg border border-border/50 bg-muted/30 w-full max-w-[520px]">
@@ -113,11 +148,17 @@ function VideoFileCard({ card, sessionId }: { card: FileCard; sessionId?: string
           src={url}
           controls
           preload="metadata"
-          className="block w-full aspect-video bg-black object-contain"
+          // 不用固定的 aspect-video（16:9）：默认竖屏 1080×1920 会留大片黑边。
+          // 用检测到的真实宽高比，未检测到时回退 16/9（横屏）避免布局抖动。
+          style={{ aspectRatio: ratio ?? "16 / 9" }}
+          className="block w-full max-h-[520px] bg-black object-contain"
           aria-label={card.title || card.filename}
+          onLoadedMetadata={onLoadedMetadata}
+          onPlay={handlePlay}
+          onError={handlePlay}
         />
       ) : (
-        <div className="flex aspect-video items-center justify-center bg-black/90 text-muted-foreground">
+        <div className="flex items-center justify-center bg-black/90 text-muted-foreground" style={{ aspectRatio: ratio ?? "16 / 9" }}>
           <Video className="h-8 w-8" />
         </div>
       )}
@@ -128,7 +169,7 @@ function VideoFileCard({ card, sessionId }: { card: FileCard; sessionId?: string
         </span>
         <button
           type="button"
-          onClick={() => void downloadSigned(card.path, sid)}
+          onClick={() => void downloadSigned(card.path, sid).catch(() => {})}
           className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-primary hover:bg-primary/10"
           aria-label={`下载 ${card.title || card.filename}`}
         >
