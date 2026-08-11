@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { FileText, FileSpreadsheet, FileArchive, File as FileIcon, Presentation, Download, ImageIcon, Eye } from "lucide-react";
+import { FileText, FileSpreadsheet, FileArchive, File as FileIcon, Presentation, Download, ImageIcon, Eye, Video } from "lucide-react";
 import { API_URL, getAuthToken } from "@/lib/api-base";
 import { signFileUrl } from "@ethan/shared/ppt/preview";
 import { Lightbox } from "./lightbox";
@@ -44,7 +44,7 @@ async function downloadSigned(path: string, sid: string) {
   a.remove();
 }
 
-// 内联查看图片的签名 URL（走 /files/view，inline 直出，供缩略图与 Lightbox 共用）
+// 内联查看媒体的签名 URL（走 /files/view，供图片 Lightbox 与 MP4 播放器共用）
 async function signedViewUrl(path: string, sid: string): Promise<string> {
   const sig = await signFileUrl(API_URL, getAuthToken(), [path]);
   const s = sig[path];
@@ -96,11 +96,55 @@ function ImageFileCard({ card, sessionId }: { card: FileCard; sessionId?: string
   );
 }
 
+function VideoFileCard({ card, sessionId }: { card: FileCard; sessionId?: string | null }) {
+  const [url, setUrl] = useState<string>("");
+  const sid = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : "";
+
+  useEffect(() => {
+    let alive = true;
+    void signedViewUrl(card.path, sid).then((u) => { if (alive) setUrl(u); });
+    return () => { alive = false; };
+  }, [card.path, sid]);
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-border/50 bg-muted/30 w-full max-w-[520px]">
+      {url ? (
+        <video
+          src={url}
+          controls
+          preload="metadata"
+          className="block w-full aspect-video bg-black object-contain"
+          aria-label={card.title || card.filename}
+        />
+      ) : (
+        <div className="flex aspect-video items-center justify-center bg-black/90 text-muted-foreground">
+          <Video className="h-8 w-8" />
+        </div>
+      )}
+      <div className="flex items-center gap-3 border-t border-border/50 px-3 py-2">
+        <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+          {card.title || card.filename}
+          {card.size_kb != null && ` · ${fmtSize(card.size_kb)}`}
+        </span>
+        <button
+          type="button"
+          onClick={() => void downloadSigned(card.path, sid)}
+          className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-primary hover:bg-primary/10"
+          aria-label={`下载 ${card.title || card.filename}`}
+        >
+          <Download className="h-3.5 w-3.5" />
+          下载
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // 可侧边预览的文件类型
 const PREVIEWABLE_KINDS = new Set(["md", "html", "htm"]);
 
-// 文件卡片：图片渲染缩略图 + Lightbox；pptx 且带项目目录时点击进 /ppt-preview 预览页；
-// md/html 点击在侧边面板预览；其余点击直接下载。
+// 文件卡片：图片渲染缩略图 + Lightbox；MP4 内嵌播放并保留下载按钮；
+// pptx 项目进入 /ppt-preview；md/html 在侧边面板预览；其余点击直接下载。
 // 所有 URL 带 session_id——服务端只放行本 session 交付过的文件（会话级隔离）。
 export function FileCardView({ card, sessionId }: { card: FileCard; sessionId?: string | null }) {
   const router = useRouter();
@@ -108,6 +152,9 @@ export function FileCardView({ card, sessionId }: { card: FileCard; sessionId?: 
 
   if (IMAGE_KINDS.has(card.kind)) {
     return <ImageFileCard card={card} sessionId={sessionId} />;
+  }
+  if (card.kind === "mp4") {
+    return <VideoFileCard card={card} sessionId={sessionId} />;
   }
 
   const Icon = KIND_ICON[card.kind] ?? FileIcon;

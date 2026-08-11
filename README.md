@@ -42,6 +42,7 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 **Skill system**
 - Keyword trigger matching, auto-injected into system prompt
 - Semantic router (BGE INT8 + LR head) adds recall on top of keywords so differently-phrased requests still match — built-in, deps ship with `pip install ethan-agent`; the BGE model auto-downloads on first use (~24MB)
+- Built-in `article-to-video` turns a topic, article, local Markdown/TXT file, or public URL into a narrated MP4 with Edge TTS, timed captions, and deterministic Remotion motion graphics; Web and Desktop file cards provide inline playback plus download, and optional media dependencies install lazily on first use
 - `fast_path: true` routes matched input to the millisecond fast track
 - `channels: [lark, web]` filters skills by channel so each surface gets only relevant skills
 - `modes: [法律]` filters skills by conversation mode so each mode gets only relevant skills (empty = all modes)
@@ -53,7 +54,7 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 | Feature | Status | How to enable |
 |---|---|---|
 | 苏念 companion mode | built-in | `/mode 苏念` or toggle in chat UI — nothing to install |
-| Default skills (channels, lark-im, deepwiki, use-browser, agent-browser, dev-browser, …) | built-in | auto-copied on first run |
+| Default skills (channels, lark-im, deepwiki, article-to-video, use-browser, agent-browser, dev-browser, …) | built-in | auto-copied on first run |
 | Memory system, scheduler, tools, web UI | built-in | works after `ethan serve` starts |
 | Semantic router (smarter skill matching) | built-in | auto-downloads BGE model on first use (~24MB) — `ethan router pull` to pre-fetch |
 | Tavily web search | optional plugin | `ethan plugin add tavily` (needs API key) |
@@ -428,7 +429,7 @@ Agent proactively writes to all layers mid-conversation via `memory_write`, `pro
 
 ## Skills
 
-Skills are Markdown files loaded from `~/.ethan/skills/`. On first run, default skills (channels, deepwiki, lark-im, lark-shared, skills-manager, use-browser, agent-browser, dev-browser) are automatically copied there from the package.
+Skills are Markdown files loaded from `~/.ethan/skills/`. On first run, default skills (channels, deepwiki, lark-im, lark-shared, skills-manager, article-to-video, use-browser, agent-browser, dev-browser) are automatically copied there from the package.
 
 Both directory format (`<name>/SKILL.md` + `references/`) and legacy single-file `.md` format are supported. When a directory-format skill is matched, its `references/*.md` filenames plus a one-line summary are listed in the injected context so the model knows which detail docs exist — use `skill_read(name=..., file="references/<name>.md")` to pull the full content on demand (pull-based, not bulk-injected).
 
@@ -449,9 +450,11 @@ Steps before deploying:
 3. ...
 ```
 
-When a user message matches a skill's `trigger`, the skill content is injected into the system prompt. Built-in skills include `channels`, `lark-im`, and `home-assistant`.
+When a user message matches a skill's `trigger`, the skill content is injected into the system prompt. Built-in skills include `channels`, `lark-im`, `home-assistant`, and `article-to-video`.
 
 Skills accumulate hit stats and user corrections. When corrections reach a threshold (default: 2), the Heartbeat job merges them into the skill file using a cheap model.
+
+The built-in `article-to-video` skill turns a topic, article body, local Markdown/TXT file, or public URL into an MP4. The model creates the structured script and storyboard; Edge TTS generates per-scene narration and captions; Remotion renders code-generated motion graphics against the measured audio timeline. Web and Desktop file cards can play or download the finished video, while production files are delivered separately. `edge-tts`, Remotion, and Chromium install lazily and do not enter Ethan's core Python dependencies.
 
 ---
 

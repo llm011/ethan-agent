@@ -6,6 +6,26 @@ required by those licenses.
 
 ---
 
+## Article to Video Optional Runtime Dependencies
+
+The built-in `article-to-video` skill contains original Ethan orchestration and
+Remotion template code. It does not vendor the following libraries; they are
+installed on demand from their package registries and remain under their own
+licenses:
+
+- [`edge-tts`](https://github.com/rany2/edge-tts) — LGPL-3.0 for the main
+  library, with its SRT composer under MIT. It connects to Microsoft Edge's
+  online text-to-speech service and is not an Azure service-level agreement.
+- [`Remotion`](https://github.com/remotion-dev/remotion) — the Remotion License.
+  Its Free License covers individuals, non-profits, and eligible small
+  companies; other organizations must obtain the appropriate license.
+
+The exact dependency versions are recorded in the skill's `package.json` and
+`pnpm-lock.yaml`. Installed package distributions include their complete
+license texts.
+
+---
+
 ## Lark CLI Skills (`larksuite/cli`)
 
 The Feishu/Lark skill documents under `ethan/defaults/skills/` whose names begin

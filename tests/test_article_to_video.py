@@ -1,0 +1,197 @@
+import importlib.util
+import json
+import sys
+from pathlib import Path
+
+import pytest
+
+from ethan.skills.loader import load_skill_from_dir
+
+SCRIPT = (
+    Path(__file__).parents[1]
+    / "ethan"
+    / "defaults"
+    / "skills"
+    / "article-to-video"
+    / "scripts"
+    / "video_pipeline.py"
+)
+SPEC = importlib.util.spec_from_file_location("article_to_video_pipeline", SCRIPT)
+assert SPEC and SPEC.loader
+pipeline = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = pipeline
+SPEC.loader.exec_module(pipeline)
+
+
+def sample_manifest():
+    return {
+        "title": "测试视频",
+        "scenes": [
+            {
+                "id": "opening",
+                "narration": "这是第一段旁白。",
+                "headline": "第一幕",
+                "visual": {"type": "kinetic-text", "keywords": ["主题", "变化"]},
+            },
+            {
+                "id": "ending",
+                "narration": "这是最后一段旁白。",
+                "headline": "第二幕",
+                "body": "补充说明",
+                "visual": {"type": "summary", "items": ["第一点", "第二点"]},
+            },
+        ],
+    }
+
+
+def test_normalize_manifest_adds_deterministic_defaults():
+    result = pipeline.normalize_manifest(sample_manifest())
+
+    assert result["width"] == 1080
+    assert result["height"] == 1920
+    assert result["fps"] == 30
+    assert result["voice"]["name"] == "zh-CN-XiaoxiaoNeural"
+    assert result["theme"]["background"] == "#081120"
+    assert result["scenes"][0]["body"] == ""
+    assert result["targetDurationSec"] is None
+
+
+@pytest.mark.parametrize(
+    "mutate, message",
+    [
+        (lambda value: value["scenes"][1].update(id="opening"), "duplicate scene id"),
+        (lambda value: value["scenes"][0].update(narration=""), "narration"),
+        (lambda value: value["scenes"][0]["visual"].update(type="photo"), "visual.type"),
+        (lambda value: value.update(fps=29), "fps"),
+        (lambda value: value.update(durationToleranceSec=2), "requires targetDurationSec"),
+    ],
+)
+def test_manifest_validation_rejects_invalid_values(mutate, message):
+    value = sample_manifest()
+    mutate(value)
+
+    with pytest.raises(pipeline.ManifestError, match=message):
+        pipeline.normalize_manifest(value)
+
+
+def test_srt_round_trip_and_global_timeline(tmp_path):
+    first = tmp_path / "first.srt"
+    second = tmp_path / "second.srt"
+    first.write_text("1\n00:00:00,100 --> 00:00:01,000\n第一句\n", encoding="utf-8")
+    second.write_text("1\n00:00:00,050 --> 00:00:00,800\n第二句\n", encoding="utf-8")
+
+    manifest = pipeline.normalize_manifest(sample_manifest())
+    timeline = pipeline.build_timeline(manifest, [{"srt": first}, {"srt": second}])
+
+    combined = timeline["_combinedSubtitles"]
+    assert timeline["scenes"][0]["startMs"] == 0
+    assert timeline["scenes"][0]["durationMs"] == 1350
+    assert timeline["scenes"][1]["startMs"] == 1350
+    assert combined[1].start_ms == 1400
+    assert pipeline.parse_srt(pipeline.serialize_srt(combined)) == combined
+
+
+def test_long_edge_tts_caption_is_paginated():
+    source = [pipeline.Subtitle(text="AI Agent 不只回答问题，它还能理解目标，调用工具，并完成任务。", start_ms=100, end_ms=6400)]
+
+    pages = pipeline.paginate_subtitles(source, maximum=22)
+
+    assert len(pages) >= 2
+    assert pages[0].start_ms == 100
+    assert pages[-1].end_ms == 6400
+    assert "".join(page.text for page in pages) == source[0].text
+    assert all(len(page.text) <= 22 for page in pages)
+
+
+def test_target_duration_defaults_tolerance_and_enforces_actual_timing():
+    value = sample_manifest()
+    value["targetDurationSec"] = 30
+    manifest = pipeline.normalize_manifest(value)
+
+    assert manifest["durationToleranceSec"] == 3
+    pipeline.enforce_target_duration(manifest, {"totalDurationMs": 32_900})
+    with pytest.raises(RuntimeError, match="actual narration duration"):
+        pipeline.enforce_target_duration(manifest, {"totalDurationMs": 34_000})
+
+
+def test_corrupt_tts_cache_is_rebuilt_atomically(tmp_path, monkeypatch):
+    raw = sample_manifest()
+    raw["scenes"] = raw["scenes"][:1]
+    manifest = pipeline.normalize_manifest(raw)
+    output_dir = tmp_path / "output"
+    cache_dir = output_dir / "work" / "tts-cache"
+    cache_dir.mkdir(parents=True)
+    key = pipeline._tts_cache_key(manifest["scenes"][0], manifest["voice"])
+    (cache_dir / f"{key}.mp3").write_bytes(b"broken")
+    (cache_dir / f"{key}.srt").write_text("not an srt", encoding="utf-8")
+    calls = []
+
+    async def fake_synthesize(text, voice, media_path, srt_path):
+        calls.append((text, voice["name"]))
+        media_path.write_bytes(b"valid-audio" * 64)
+        srt_path.write_text("1\n00:00:00,000 --> 00:00:01,000\n修复后的字幕\n", encoding="utf-8")
+
+    monkeypatch.setattr(pipeline, "_synthesize_once", fake_synthesize)
+
+    artifacts = pipeline.synthesize_scenes(manifest, output_dir, retries=1)
+
+    assert len(calls) == 1
+    assert Path(artifacts[0]["audio"]).stat().st_size >= 256
+    assert pipeline.parse_srt(Path(artifacts[0]["srt"]).read_text(encoding="utf-8"))
+    assert not list(cache_dir.glob("*.tmp"))
+
+
+def test_failed_rerun_archives_previous_published_outputs(tmp_path, monkeypatch):
+    manifest_path = tmp_path / "input.json"
+    manifest_path.write_text(json.dumps(sample_manifest(), ensure_ascii=False), encoding="utf-8")
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    previous = {
+        "final.mp4": b"old-video",
+        "cover.png": b"old-cover",
+        "render-report.json": b"old-report",
+        "deliverables.zip": b"old-archive",
+    }
+    for name, content in previous.items():
+        (output_dir / name).write_bytes(content)
+
+    def fail_synthesis(manifest, destination):
+        raise RuntimeError("tts offline")
+
+    monkeypatch.setattr(pipeline, "synthesize_scenes", fail_synthesis)
+
+    with pytest.raises(RuntimeError, match="tts offline"):
+        pipeline.run_pipeline(manifest_path, output_dir)
+
+    assert all(not (output_dir / name).exists() for name in previous)
+    archived_dirs = list((output_dir / "work" / "previous-runs").iterdir())
+    assert len(archived_dirs) == 1
+    for name, content in previous.items():
+        assert (archived_dirs[0] / name).read_bytes() == content
+    status = json.loads((output_dir / "run-status.json").read_text(encoding="utf-8"))
+    assert status["status"] == "error"
+    assert status["error"] == "tts offline"
+
+
+def test_load_manifest_from_json_file(tmp_path):
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps(sample_manifest(), ensure_ascii=False), encoding="utf-8")
+
+    loaded = pipeline.load_manifest(manifest)
+
+    assert loaded["title"] == "测试视频"
+
+
+def test_skill_metadata_and_references_are_discoverable():
+    skill_dir = SCRIPT.parents[1]
+
+    skill = load_skill_from_dir(skill_dir)
+
+    assert skill is not None
+    assert skill.name == "article-to-video"
+    assert "文章转视频" in skill.trigger
+    assert {path.name for path in skill.references} == {
+        "manifest-schema.md",
+        "script-guide.md",
+        "visual-presets.md",
+    }

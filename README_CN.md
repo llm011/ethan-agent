@@ -40,6 +40,7 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 **Skill 技能系统**
 - 触发词匹配，自动注入 system prompt 引导行为
 - 语义路由器（BGE INT8 + LR 头）在关键词之上补召回，换个说法也能命中——内置，依赖随 `pip install ethan-agent` 安装；BGE 模型首次使用时自动下载（~24MB）
+- 内置 `article-to-video`：把主题、文章、本地 Markdown/TXT 文件或公开 URL 生成带 Edge TTS 配音、时间轴字幕和 Remotion 动效的 MP4；Web 与 Desktop 文件卡片均可直接播放和下载，媒体依赖首次使用时按需安装
 - `fast_path: true` 触发后走毫秒级快速路径，适合全屋智能等高频控制
 - `channels: [lark, web]` 按渠道过滤，Skill 只在指定场景下生效
 - `modes: [法律]` 按对话模式过滤，Skill 只在指定模式下生效（空 = 所有模式）
@@ -51,7 +52,7 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 | 功能 | 状态 | 启用方式 |
 |---|---|---|
 | 苏念陪伴模式 | 内置 | `/mode 苏念` 或聊天界面切换——无需安装 |
-| 默认技能（channels、lark-im、deepwiki、use-browser、agent-browser、dev-browser 等） | 内置 | 首次运行自动复制 |
+| 默认技能（channels、lark-im、deepwiki、article-to-video、use-browser、agent-browser、dev-browser 等） | 内置 | 首次运行自动复制 |
 | 记忆系统、定时任务、工具、Web UI | 内置 | `ethan serve` 启动后即用 |
 | 语义路由器（更聪明的技能匹配） | 内置 | 首次使用自动下载 BGE 模型（~24MB）——`ethan router pull` 可预拉取 |
 | Tavily 网页搜索 | 可选插件 | `ethan plugin add tavily`（需要 API Key） |
@@ -417,7 +418,7 @@ Agent 通过 `memory_write`、`procedure_write`、`profile_update` 工具在对�
 
 ## Skill 技能系统
 
-Skill 从 `~/.ethan/skills/` 加载。首次运行时，包内默认技能（channels、deepwiki、lark-im、lark-shared、skills-manager、use-browser、agent-browser、dev-browser）会自动复制到该目录。
+Skill 从 `~/.ethan/skills/` 加载。首次运行时，包内默认技能（channels、deepwiki、lark-im、lark-shared、skills-manager、article-to-video、use-browser、agent-browser、dev-browser）会自动复制到该目录。
 
 支持目录格式（`<name>/SKILL.md` + `references/` 子目录）和旧版单文件 `.md` 格式。命中目录格式 skill 时，注入的 context 会附上 `references/*.md` 的文件名 + 一行摘要清单，让模型知道有哪些细节文档可查——再用 `skill_read(name=..., file="references/<name>.md")` 按需拉具体内容（pull-based，不全量灌入正文）。
 
@@ -439,6 +440,8 @@ version: "1.0"
 ```
 
 Skill 会累积命中次数和用户纠正记录。当纠正达到阈值（默认 2 条），Heartbeat 任务用廉价模型将纠正合并进 Skill 文件。
+
+内置 `article-to-video` 可将主题、文章正文、本地 Markdown/TXT 文件或公开 URL 制作为 MP4：模型生成结构化剧本和分镜，Edge TTS 逐场景生成配音与字幕，Remotion 根据真实语音时长渲染代码生成动效。成片通过 Web/Desktop 文件卡片直接播放或下载，制作文件另行交付；`edge-tts`、Remotion 和 Chromium 均在首次使用时按需安装，不进入 Ethan 的 Python 主依赖。
 
 ---
 

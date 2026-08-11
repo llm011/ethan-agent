@@ -17,7 +17,7 @@ class DeliverFileTool(BaseTool):
     cacheable = False  # 同路径重复交付时文件内容已变，且缓存命中路径会丢 cards 载荷
     name = "deliver_file"
     description = (
-        "Deliver a locally generated file (pptx/pdf/docx/xlsx/csv/zip/md/html) to the chat "
+        "Deliver a locally generated file (pptx/pdf/docx/xlsx/csv/zip/md/html/mp4) to the chat "
         "as a clickable file card with preview/download entry. Call this AFTER the file has "
         "been fully written to disk. The path must be absolute and under the user home or /tmp."
     )
