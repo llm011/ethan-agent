@@ -105,6 +105,39 @@ def _strip_images_from_messages(messages: list[Message], session_id: str = "") -
     return stripped
 
 
+def _empty_reply_fallback_text(reason: str, tool_call_count: int) -> str:
+    """空回复兜底文案。reason: 'stuck' | 'nudge_exhausted' | 'varied' | 'finalize'。
+
+    只有 finalize（max_iters 达限）才会提到步数限制；stuck/nudge_exhausted 在达限前
+    触发，不应谎称步数限制。tool_call_count 为 0 时不报步数（零工具调用报步数无意义）。
+    """
+    n = tool_call_count
+    if n == 0:
+        # 零工具调用时报步数/轮数无意义，统一给一句中性兜底（保留原因描述）
+        if reason == "stuck":
+            return "在当前任务上尝试了多种策略仍未突破，未能生成最终回复。"
+        if reason == "nudge_exhausted":
+            return "模型多次返回空回复，未能生成最终回复。可能上下文过大或模型异常，请重试。"
+        return "任务执行完毕但未生成回复。可能上下文过大或模型异常，请重试。"
+    if reason == "varied":
+        return (
+            f"已经连续执行了 {n} 轮批量操作，先到这里。"
+            "你可以看看当前效果，需要继续的话告诉我。"
+        )
+    if reason == "stuck":
+        return (
+            f"在当前任务上尝试了多种策略仍未突破，未能生成最终回复。已执行 {n} 轮工具调用。\n\n"
+            "建议：检查工具调用是否有权限/网络问题，或拆分任务重试。"
+        )
+    if reason == "nudge_exhausted":
+        return (
+            f"模型多次返回空回复，未能生成最终回复。已执行 {n} 轮工具调用。\n\n"
+            "建议：精简上下文后重试，或拆分任务。"
+        )
+    # finalize（max_iters 达限）——唯一提步数限制的原因
+    return f"已达到最大执行步数限制。任务执行了 {n} 轮工具调用，未能生成最终回复。"
+
+
 @dataclass
 class UsageStats:
     input_tokens: int = 0
@@ -623,63 +656,44 @@ class Agent:
                     tools_list.insert(0, _tool)
         return route, system, tools_list, max_iters
 
-    async def _ensure_non_empty(self, response: Message, working: list[Message],
-                                monitor, reason: str) -> Message:
-        """确保返回给用户的回复非空。
+    async def _minimal_retry(self, working: list[Message]) -> str | None:
+        """极简 prompt 重试：只给最后一条 user 消息 + 禁工具，逼模型至少说一句话。
 
-        当模型在 finalize / stuck / nudge_exhausted 轮返回空内容时（常见于超大上下文
-        导致模型静默放弃），用极简 prompt 再试一次；仍空则从工具调用历史中合成结构化兜底。
-
-        reason: 触发原因，写入日志便于排查。
+        返回非空内容字符串，或 None（重试失败/仍空）。供 _ensure_non_empty
+        和 stream_chat 的各空回复兜底点共用。
         """
-        content = (response.content or "").strip()
-        if content:
-            return response
-
-        logger.warning("chat() 返回空回复 (reason=%s)，尝试极简 prompt 重试", reason)
-
-        # 极简重试：只给最后一条 user 消息 + 禁工具，逼模型至少说一句话
         try:
             last_user = next((m for m in reversed(working) if m.role == "user"), None)
             mini_msgs = [last_user] if last_user else []
             mini_sys = "请用中文简洁回答用户的问题。如果任务已完成，请总结你做了什么。如果遇到问题，请说明卡在哪里。"
             resp = await self._provider.chat(mini_msgs, tools=None, system=mini_sys)
             self.usage.add(resp.usage)
-            if (resp.content or "").strip():
-                return resp
+            return (resp.content or "").strip() or None
         except Exception:
-            logger.warning("极简 prompt 重试也失败", exc_info=True)
+            logger.warning("极简 prompt 重试失败", exc_info=True)
+            return None
 
-        # 仍空 → 简洁兜底提示（工具调用详情已在前端可视化中展示，无需重复罗列）
+    async def _ensure_non_empty(self, response: Message, working: list[Message],
+                                monitor, reason: str) -> Message:
+        """确保返回给用户的回复非空。
+
+        当模型在 finalize / stuck / nudge_exhausted 轮返回空内容时（常见于超大上下文
+        导致模型静默放弃），用极简 prompt 再试一次；仍空则合成原因专属兜底文案。
+
+        reason: 触发原因，写入日志便于排查，也决定兜底文案措辞。
+        """
+        content = (response.content or "").strip()
+        if content:
+            return response
+
+        logger.warning("chat() 返回空回复 (reason=%s)，尝试极简 prompt 重试", reason)
+        retried = await self._minimal_retry(working)
+        if retried:
+            return Message(role="assistant", content=retried)
+
         logger.warning("极简重试仍空，合成兜底 (reason=%s)", reason)
         tool_calls = [m for m in working if m.role == "assistant" and m.tool_calls]
-        if tool_calls:
-            fallback = f"任务执行了 {len(tool_calls)} 轮工具调用，超出当前步数限制，未能生成最终回复。"
-            if reason == "stuck":
-                fallback = f"在当前任务上尝试了多种策略仍未突破。\n{fallback}\n\n建议：检查工具调用是否有权限/网络问题，或拆分任务重试。"
-            elif reason == "finalize":
-                fallback = f"已达到最大执行步数限制。\n{fallback}"
-        else:
-            fallback = "任务执行完毕但未生成回复。可能上下文过大或模型异常，请重试。"
-
-        return Message(role="assistant", content=fallback)
-
-    def _build_stream_fallback(self, working: list[Message], reason: str) -> str:
-        """stream_chat 空回复兜底：简洁提示，工具调用详情已在前端可视化中展示。"""
-        logger.warning("stream_chat() 返回空回复 (reason=%s)，合成兜底", reason)
-        tool_calls = [m for m in working if m.role == "assistant" and m.tool_calls]
-        if reason == "varied":
-            return (
-                f"已经连续执行了 {len(tool_calls)} 轮批量操作，先到这里。"
-                "你可以看看当前效果，需要继续的话告诉我。"
-            )
-        if tool_calls:
-            fallback = f"任务执行了 {len(tool_calls)} 轮工具调用，超出当前步数限制，未能生成最终回复。"
-            if reason == "finalize":
-                fallback = f"已达到最大执行步数限制。\n{fallback}"
-        else:
-            fallback = "任务执行完毕但未生成回复。可能上下文过大或模型异常，请重试。"
-        return fallback
+        return Message(role="assistant", content=_empty_reply_fallback_text(reason, len(tool_calls)))
 
     def _parse_stream_text_tool_calls(self, content: str) -> list:
         """stream_chat 中从文本解析工具调用。
@@ -1001,7 +1015,7 @@ class Agent:
                         )
                     if _late_injected and _inject_extra_rounds < MAX_INJECT_EXTRA_ROUNDS:
                         # 先把 finalize 的回复放入 working，让模型知道自己说了什么
-                        resp = await self._ensure_non_empty(resp, working, monitor, "nudge_exhausted")
+                        resp = await self._ensure_non_empty(resp, working, monitor, "finalize")
                         if resp.content:
                             working.append(Message(role="assistant", content=resp.content))
                         working.append(Message(
@@ -1014,7 +1028,7 @@ class Agent:
                         _enhanced_context_injected = False
                         finalize = False  # 允许调工具处理补充
                         continue
-                    return await self._ensure_non_empty(resp, working, monitor, "nudge_exhausted")
+                    return await self._ensure_non_empty(resp, working, monitor, "finalize")
 
             if not response.is_tool_call:
                 # 决策提示轮模型用自然语言回应（没调 decide 也没调任何工具）
@@ -1233,6 +1247,21 @@ class Agent:
         self._executor.reset_cache()
         reset_active_tools()  # 清空本请求的 find_tools 激活集
         working = list(messages)
+
+        # 空回复兜底：先极简重试（每次 stream_chat 仅一次），仍空则合成原因专属文案。
+        # 闭包捕获局部 _empty_retried，天然按调用隔离；nonlocal 保证只重试一次。
+        _empty_retried = False
+
+        async def _empty_reply(working_msgs: list[Message], rsn: str) -> str:
+            nonlocal _empty_retried
+            logger.warning("stream_chat() 返回空回复 (reason=%s)，尝试兜底", rsn)
+            if not _empty_retried:
+                _empty_retried = True
+                retried = await self._minimal_retry(working_msgs)
+                if retried:
+                    return retried
+            tc = [m for m in working_msgs if m.role == "assistant" and m.tool_calls]
+            return _empty_reply_fallback_text(rsn, len(tc))
 
         # --- Instant Route: 极简问题零工具直答 ---
         last_user_text = self._get_last_user_text(working)
@@ -1537,9 +1566,8 @@ class Agent:
                     if _late_injected and _inject_extra_rounds < MAX_INJECT_EXTRA_ROUNDS:
                         # 先处理空内容兜底，再放入 working
                         if not fin_content:
-                            fallback_msg = self._build_stream_fallback(working, "nudge_exhausted")
-                            yield fallback_msg
-                            fin_content = fallback_msg if isinstance(fallback_msg, str) else str(fallback_msg)
+                            fin_content = await _empty_reply(working, "nudge_exhausted")
+                            yield fin_content
                         # 把 finalize 的回复放入 working，让模型知道自己说了什么
                         working.append(Message(role="assistant", content=fin_content))
                         working.append(Message(
@@ -1556,7 +1584,7 @@ class Agent:
                         response = Message(role="assistant", content=fin_content)
                         continue
                     if not fin_content:
-                        yield self._build_stream_fallback(working, "nudge_exhausted")
+                        yield await _empty_reply(working, "nudge_exhausted")
                     return
 
             if not response.is_tool_call:
@@ -1577,8 +1605,8 @@ class Agent:
                     continue
                 # finalize 轮可能因上下文过大模型返回空 → 兜底
                 if finalize and not full_content:
-                    fallback = self._build_stream_fallback(working, "finalize")
-                    yield fallback
+                    full_content = await _empty_reply(working, "finalize")
+                    yield full_content
                 # 返回前检查是否有运行中补充信息刚进来，有则再跑一轮处理
                 _late_injected = _drain_inject()
                 if _late_injected and _inject_extra_rounds >= MAX_INJECT_EXTRA_ROUNDS:
@@ -1608,8 +1636,8 @@ class Agent:
                 # 收尾轮已禁工具并流式吐出总结；即便模型仍返回 tool_calls 也不执行，直接结束。
                 # 但如果 finalize 轮没有任何内容产出，也需要兜底
                 if not full_content:
-                    fallback = self._build_stream_fallback(working, "finalize")
-                    yield fallback
+                    full_content = await _empty_reply(working, "finalize")
+                    yield full_content
                 # finalize 结束前也检查补充信息
                 _late_injected = _drain_inject()
                 if _late_injected and _inject_extra_rounds >= MAX_INJECT_EXTRA_ROUNDS:
@@ -1912,7 +1940,8 @@ class Agent:
                         if chunk.is_final:
                             self.usage.add(chunk.usage)
                     if not varied_content:
-                        yield self._build_stream_fallback(working, "varied")
+                        varied_content = await _empty_reply(working, "varied")
+                        yield varied_content
                     # varied 收尾前检查补充信息
                     _late_injected = _drain_inject()
                     if _late_injected and _inject_extra_rounds >= MAX_INJECT_EXTRA_ROUNDS:
@@ -1948,7 +1977,8 @@ class Agent:
                         if chunk.is_final:
                             self.usage.add(chunk.usage)
                     if not stuck_content:
-                        yield self._build_stream_fallback(working, "stuck")
+                        stuck_content = await _empty_reply(working, "stuck")
+                        yield stuck_content
                     # stuck 收尾前检查补充信息
                     _late_injected = _drain_inject()
                     if _late_injected and _inject_extra_rounds >= MAX_INJECT_EXTRA_ROUNDS:
