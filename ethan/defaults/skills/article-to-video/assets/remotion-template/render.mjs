@@ -22,9 +22,7 @@ const serveUrl = await bundle({
   entryPoint,
   publicDir,
   onProgress: (progress) => {
-    // progress 是 0-1 的浮点数，直接 % 25 只有 0% 会触发；换算成整数百分比再取模。
-    const percent = Math.round(progress * 100);
-    if (percent % 25 === 0) process.stderr.write(`Bundling ${percent}%\n`);
+    if (progress % 25 === 0) process.stderr.write(`Bundling ${progress}%\n`);
   },
 });
 
