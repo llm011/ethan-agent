@@ -106,6 +106,7 @@ export interface BrowserSessionCreateParams {
   url?: string;
   title?: string;
   color?: string;
+  background?: boolean;
 }
 
 export interface BrowserSessionCreateResult {

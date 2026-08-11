@@ -77,17 +77,23 @@ description: "主浏览器技能：通过 browser_session / browser_tab / browse
 # 不确定有几个浏览器连着 → 先查
 browser_client(action="list")
 
-# 只有一个 → 自动选中，直接开干
-browser_session(action="create", url="https://example.com")
+# 只有一个 → 自动选中，直接开干（先检查可复用的 session）
+browser_session(action="list")
+# 若 list 结果有 status="available" 的 session（标题/URL 匹配任务目标）→ 复用
+browser_session(action="attach", session="已有的session_id")
+# 若无可复用的 → 在后台新建
+browser_session(action="create", url="https://example.com", background=true)
 
 # 多个且用户没指明 → 问用户后再选
 browser_client(action="use", name="work-laptop")
-browser_session(action="create", url="https://example.com")
+browser_session(action="list")  # 先查已有 session
+browser_session(action="create", url="https://example.com", background=true)
 
 # 用户消息里已指明 → 直接选
 # 用户：「用 home-mac 打开 youtube」
 browser_client(action="use", name="home-mac")
-browser_session(action="create", url="https://www.youtube.com")
+browser_session(action="list")  # 先查已有 session
+browser_session(action="create", url="https://www.youtube.com", background=true)
 ```
 
 ### 客户端断连
@@ -207,16 +213,39 @@ browser_page(action="click", session=SID, ref="e1")
 browser_page(action="fill", session=SID, ref="e2", text="hello")
 ```
 
-任务结束：对话结束时默认自动 close（杀掉 tab group，用完即关）。
-如果用户只是让帮个忙、页面还要继续看，创建/attach 时传 `keep_alive=true`，对话结束时该 session 走 release（保留 tab，仅放掉控制权）：
+任务结束：对话结束时系统会弹确认卡片让用户选择 close（关闭 tab group）或 keep（保留 tab）。
+- 保留的 session 下次对话可通过 `list` + `attach` 复用（status="available"）。
+- 默认 `keep_alive=false` 的 session 会弹确认；`keep_alive=true` 的自动保留。
 
 ```
 # 创建时标记保留（帮个忙、页面用户还要看）
-browser_session(action="create", url="...", keep_alive=true)
+browser_session(action="create", url="...", keep_alive=true, background=true)
 
 # 也可显式 release/close
 browser_session(action="release", session=SID)   # 保留 tab，放掉控制权
 browser_session(action="close", session=SID)      # 关闭整个 tab group
+```
+
+### Session 复用（操作前必做）
+
+**每次需要操作浏览器时，先 `list` 检查是否有可复用的 session：**
+
+```
+browser_session(action="list")
+# 返回 sessions 列表，每个有 status 字段：
+#   "owned" = 当前对话已绑定的
+#   "available" = 之前保留的，可通过 attach 复用
+```
+
+如果找到 status="available" 且标题/URL 匹配当前任务目标的 session：
+```
+browser_session(action="attach", session=SID)  # 获取控制权
+browser_page(action="snapshot", session=SID, ...)  # 直接操作
+```
+
+如果 attach 失败或无可复用 session，再新建：
+```
+browser_session(action="create", url="...", background=true)  # 后台新建，不抢焦点
 ```
 
 **何时设 keep_alive=true**：用户说「帮我看下这个页面」「打开这个链接我等会看」等只需一次性操作、但页面本身用户还要继续浏览的场景。

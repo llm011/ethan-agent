@@ -158,6 +158,11 @@ class Agent:
         self.session_id: str = ""
         self._load_system_files()
 
+    @property
+    def model(self) -> str:
+        """当前使用的模型 ID（公开访问，避免外部直接读 _provider 私有属性）。"""
+        return self._provider.model
+
     def _load_system_files(self) -> None:
         """启动时一次性读入 system 目录下的 md 文件，避免每次对话都做磁盘 I/O。"""
         from ethan.core.paths import user_profile_path
@@ -1784,7 +1789,7 @@ class Agent:
                             ok = False
                             consent_msg = ""
                     else:
-                        ok = await consent_provider.request(desc, tc.name, detail)
+                        ok = await consent_provider.request(desc, tc.name, detail, always=always)
                         consent_msg = ""
                     if not ok:
                         reject_text = "[用户拒绝此操作]"

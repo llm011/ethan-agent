@@ -142,6 +142,11 @@ async def lifespan(app: FastAPI):
         ensure_watchdog_running()
     # 主动启动调度器，确保持久化的定时任务在服务重启后自动恢复运行。
     # 不能依赖懒加载（首次 GET /api/schedule 才 start），否则服务空跑时 job 永远不触发。
+    # 保存主 event loop 引用，供定时任务回调中 run_coroutine_threadsafe 使用。
+    # 必须在 get_scheduler() 之前：scheduler 一启动就可能 misfire 触发回调，
+    # 若此时 _server_loop 仍为 None 会走 fallback 线程路径（CLI/非 server 场景必炸）。
+    from ethan.tools.builtin.schedule import set_server_loop
+    set_server_loop(_asyncio.get_running_loop())
     from ethan.interface.routers.schedule import get_scheduler
     get_scheduler()
     from ethan.browser.session_map import start_idle_sweep, stop_idle_sweep

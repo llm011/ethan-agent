@@ -32,15 +32,81 @@ import {
 } from './chrome-api';
 
 export class BrowserSessionStoreSessions extends BrowserSessionStoreCore {
+  private _bgWindowId: number | undefined;
+  private _bgWindowPromise: Promise<{ windowId: number | undefined; defaultTabId?: number }> | undefined;
+
+  private async _getBackgroundWindow(): Promise<number | undefined> {
+    if (this._bgWindowId == null) return undefined;
+    try {
+      const win = await new Promise<chrome.windows.Window | undefined>((resolve) => {
+        chrome.windows.get(this._bgWindowId!, (w) => {
+          if (chrome.runtime.lastError || !w) resolve(undefined);
+          else resolve(w);
+        });
+      });
+      // 只在窗口已销毁时清除；用户聚焦过仍可复用，不必每次新建窗口
+      if (win) return this._bgWindowId;
+      this._bgWindowId = undefined;
+      return undefined;
+    } catch {
+      this._bgWindowId = undefined;
+      return undefined;
+    }
+  }
+
+  private async _ensureBackgroundWindow(): Promise<{ windowId: number | undefined; defaultTabId?: number }> {
+    // 并发 create 复用同一 in-flight promise，避免各建一个背景窗口
+    if (this._bgWindowPromise) return this._bgWindowPromise;
+    const promise = (async () => {
+      const existing = await this._getBackgroundWindow();
+      if (existing != null) return { windowId: existing };
+      const win = await new Promise<chrome.windows.Window>((resolve, reject) => {
+        chrome.windows.create({ focused: false, type: 'normal' }, w => {
+          if (chrome.runtime.lastError || !w) {
+            reject(new Error(chrome.runtime.lastError?.message || 'Failed to create background window'));
+          } else {
+            resolve(w);
+          }
+        });
+      });
+      this._bgWindowId = win.id;
+      const defaultTabId = win.tabs && win.tabs.length > 0 ? win.tabs[0].id : undefined;
+      return { windowId: win.id, defaultTabId };
+    })();
+    this._bgWindowPromise = promise;
+    try {
+      return await promise;
+    } finally {
+      if (this._bgWindowPromise === promise) {
+        this._bgWindowPromise = undefined;
+      }
+    }
+  }
+
   async createSession(
     params: BrowserSessionCreateParams,
   ): Promise<BrowserSessionCreateResult> {
     await this.ensureLoaded();
 
+    let windowId: number | undefined;
+    let defaultTabId: number | undefined;
+    if (params.background) {
+      const bg = await this._ensureBackgroundWindow();
+      windowId = bg.windowId;
+      defaultTabId = bg.defaultTabId;
+    }
+
     const tab = await createTab({
       url: params.url || DEFAULT_SESSION_URL,
-      active: true,
+      active: !params.background,
+      ...(windowId != null ? { windowId } : {}),
     });
+    // 先建新 tab 再删默认 tab：避免窗口最后一个 tab 被删时 Chrome 自动关窗口
+    if (defaultTabId != null) {
+      await new Promise<void>(resolve => {
+        chrome.tabs.remove(defaultTabId, () => resolve());
+      });
+    }
     const tabId = getTabId(tab, 'Cannot create a session without tab id');
     const groupId = await groupTabs([tabId]);
     const now = Date.now();

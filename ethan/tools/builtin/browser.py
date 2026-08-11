@@ -438,15 +438,21 @@ def _extract_session_id(result: dict | None) -> str | None:
     return result.get("session_id") or result.get("sessionId")
 
 
-def _filter_owned_sessions(result: dict | None) -> dict:
-    """session_list 结果按当前 ethan 会话过滤,避免泄漏其他会话/用户的 session。"""
+def _annotate_sessions(result: dict | None) -> dict:
+    """session_list 结果标注归属：owned=当前对话绑定的，available=可通过 attach 复用的。"""
     result = result or {}
     owned = set(get_session_map().list_for(get_session_id()))
     sessions = result.get("sessions")
     if isinstance(sessions, list):
-        kept = [s for s in sessions if isinstance(s, dict)
-                and (s.get("sessionId") or s.get("session_id")) in owned]
-        return {**result, "sessions": kept}
+        annotated = []
+        for s in sessions:
+            if not isinstance(s, dict):
+                continue
+            sid = s.get("sessionId") or s.get("session_id")
+            s_copy = dict(s)
+            s_copy["status"] = "owned" if sid in owned else "available"
+            annotated.append(s_copy)
+        return {**result, "sessions": annotated}
     return result
 
 
@@ -477,23 +483,24 @@ class BrowserSessionTool(_BrowserToolBase):
     name = "browser_session"
     description = (
         "管理浏览器 session(一个 session 对应一个 Chrome Tab Group)。"
-        "action=create 新建并打开 url;attach_current 接管当前 active tab;"
-        "list 列出 session;rename 改名;update 更新标题和颜色;release 放掉控制权但保留 tab;close 关闭整个 tab group。"
+        "action=create 新建并打开 url;attach 获取已有 session 控制权(复用之前保留的);attach_current 接管当前 active tab;"
+        "list 列出所有 session(含可复用的);rename 改名;update 更新标题和颜色;release 放掉控制权但保留 tab;close 关闭整个 tab group。"
     )
     parameters = {
         "type": "object",
         "properties": {
-            "action": {"type": "string", "enum": ["create", "attach_current", "list", "rename", "release", "close", "update"]},
-            "session": {"type": "string", "description": "目标 session_id(rename/release/close 必填)"},
+            "action": {"type": "string", "enum": ["create", "attach", "attach_current", "list", "rename", "release", "close", "update"]},
+            "session": {"type": "string", "description": "目标 session_id(attach/rename/release/close 必填)"},
             "url": {"type": "string", "description": "create 时打开的初始 URL"},
             "title": {"type": "string", "description": "session 标题(create/attach_current/rename)"},
             "color": {"type": "string", "description": "Tab Group 颜色（grey/blue/red/yellow/green/pink/purple/cyan/orange）"},
-            "keep_alive": {"type": "boolean", "description": "create/attach_current 时标记此 session 在对话结束后保留（不自动关闭 tab group）。默认 false（用完即关）。用户只是让帮个忙、页面还要继续看时设 true。"},
+            "keep_alive": {"type": "boolean", "description": "create/attach/attach_current 时标记此 session 在对话结束后保留（不自动关闭 tab group）。默认 false（用完即关）。用户只是让帮个忙、页面还要继续看时设 true。"},
+            "background": {"type": "boolean", "description": "create 时为 true 则在后台新窗口打开，不抢用户焦点。默认 false。"},
         },
         "required": ["action"],
     }
 
-    async def run(self, action: str, session: str = "", url: str = "", title: str = "", color: str = "", keep_alive: bool = False) -> str:
+    async def run(self, action: str, session: str = "", url: str = "", title: str = "", color: str = "", keep_alive: bool = False, background: bool = False) -> str:
         self._authorize()
         try:
             if action == "create":
@@ -504,6 +511,8 @@ class BrowserSessionTool(_BrowserToolBase):
                     params["title"] = title
                 if color:
                     params["color"] = color
+                if background:
+                    params["background"] = True
                 result = await _call("session_create", params)
                 bsid = _extract_session_id(result)
                 if bsid:
@@ -511,6 +520,31 @@ class BrowserSessionTool(_BrowserToolBase):
                     get_session_map().bind(bsid, get_session_id(),
                                            client_name=client, keep_alive=keep_alive)
                 return json.dumps(result, ensure_ascii=False)
+            if action == "attach":
+                if not session:
+                    return json.dumps({"error": "attach 需要指定 session id"})
+                client = get_hub().resolve_client(get_session_id())
+                if not client:
+                    return json.dumps({"error": "没有可用的浏览器客户端"})
+                # 校验 session 存在性：attach 不存在的 id 会假成功，后续操作全挂
+                list_result = await _call("session_list", {})
+                known_ids = set()
+                for s in (list_result or {}).get("sessions", []) or []:
+                    if isinstance(s, dict):
+                        sid = s.get("sessionId") or s.get("session_id")
+                        if sid:
+                            known_ids.add(sid)
+                if session not in known_ids:
+                    return json.dumps({"error": f"session {session} 不存在，无法 attach"})
+                # 校验归属：已被其他对话绑定时拒绝，避免覆盖式接管互相踩
+                owner = get_session_map().get_owner(session)
+                cur_sid = get_session_id()
+                if owner and owner != cur_sid:
+                    return json.dumps({"error": f"session {session} 正被其他会话使用，无法 attach"})
+                get_session_map().bind(session, cur_sid,
+                                       client_name=client, keep_alive=keep_alive)
+                get_session_map().touch(session)
+                return json.dumps({"attached": True, "sessionId": session})
             if action == "attach_current":
                 params = {}
                 if title:
@@ -526,7 +560,7 @@ class BrowserSessionTool(_BrowserToolBase):
                 return json.dumps(result, ensure_ascii=False)
             if action == "list":
                 result = await _call("session_list", {})
-                return json.dumps(_filter_owned_sessions(result), ensure_ascii=False)
+                return json.dumps(_annotate_sessions(result), ensure_ascii=False)
             if action == "rename":
                 return json.dumps(await _call("session_rename", {"sessionId": session, "title": title},
                                               browser_session_id=session), ensure_ascii=False)

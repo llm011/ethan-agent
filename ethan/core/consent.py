@@ -43,8 +43,11 @@ class ConsentProvider:
     streamed: bool = False  # True = 需要向流注入 ConsentEvent（Web）
     session_id: str = ""    # 所属会话；用于 session 维度授权记忆（同会话同工具授权过不再弹）
 
-    async def request(self, description: str, tool: str = "", detail: str = "") -> bool:
-        """请求授权，返回是否允许。streamed=True 时由 Agent 调 create() + await。"""
+    async def request(self, description: str, tool: str = "", detail: str = "", always: bool = False) -> bool:
+        """请求授权，返回是否允许。streamed=True 时由 Agent 调 create() + await。
+
+        always=True 表示高危调用（如 rm -rf），即使自动化场景也不应自动批准。
+        """
         return True
 
     def policy_check(self, tool: str, side_effect: bool) -> str | None:
@@ -64,7 +67,7 @@ class TuiConsentProvider(ConsentProvider):
     def __init__(self, console=None):
         self._console = console
 
-    async def request(self, description: str, tool: str = "", detail: str = "") -> bool:
+    async def request(self, description: str, tool: str = "", detail: str = "", always: bool = False) -> bool:
         def _ask() -> bool:
             c = self._console
             if c is not None:
@@ -119,13 +122,19 @@ class WebConsentProvider(ConsentProvider):
 
 
 class AutoConsentProvider(ConsentProvider):
-    """自动批准所有授权请求（自动化/测试/API 调用场景）。"""
+    """自动批准授权请求（自动化/测试/API 调用场景）。
+
+    高危调用（consent_always=True，如 rm -rf）绝不自动批准 —— 无人值守场景
+    无法交互确认，放行高危命令与框架声明自相矛盾，且 prompt 注入风险不可接受。
+    """
     streamed = False
 
     def __init__(self, session_id: str = ""):
         self.session_id = session_id
 
-    async def request(self, description: str, tool: str = "", detail: str = "") -> bool:
+    async def request(self, description: str, tool: str = "", detail: str = "", always: bool = False) -> bool:
+        if always:
+            return False
         return True
 
     def cancel_all(self) -> None:
@@ -148,7 +157,7 @@ class ChannelGuardProvider(ConsentProvider):
     def __init__(self, is_owner: bool):
         self._is_owner = is_owner
 
-    async def request(self, description: str, tool: str = "", detail: str = "") -> bool:
+    async def request(self, description: str, tool: str = "", detail: str = "", always: bool = False) -> bool:
         # consent_check 命中（如读密钥）：主人放行，非主人拒绝
         return self._is_owner
 
