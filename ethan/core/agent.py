@@ -1761,7 +1761,10 @@ class Agent:
 
                     try:
                         _wfu_result = await _aio.wait_for(_wfu_fut, timeout=timeout)
-                    except (_aio.CancelledError, _aio.TimeoutError):
+                    except _aio.CancelledError:
+                        _wfu_provider.cancel_all()
+                        raise
+                    except _aio.TimeoutError:
                         _wfu_result = "timeout"
                         _wfu_provider.cancel_all()
 

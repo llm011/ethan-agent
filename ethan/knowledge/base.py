@@ -365,6 +365,26 @@ class ObsidianKnowledgeBase(KnowledgeBase):
         self._vector_store: "VectorStore | None" = None  # noqa: F821
         import shutil
         self._cli_available = shutil.which("obsidian") is not None
+        self._migrate_double_nested()
+
+    def _migrate_double_nested(self) -> None:
+        """一次性修复 scene 前缀重复导致的 double-nested 目录（如 work/work/coze → work/coze）。"""
+        if not self._scene or not self._dir.exists():
+            return
+        dup_dir = self._dir / self._scene
+        if not dup_dir.is_dir():
+            return
+        for child in list(dup_dir.iterdir()):
+            dest = self._dir / child.name
+            if dest.exists():
+                if child.is_dir():
+                    for f in child.iterdir():
+                        f.rename(dest / f.name)
+                    child.rmdir()
+            else:
+                child.rename(dest)
+        if not any(dup_dir.iterdir()):
+            dup_dir.rmdir()
 
     def _get_vector_store(self):
         if self._vector_store is None:

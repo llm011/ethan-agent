@@ -150,7 +150,6 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
     # full / lark：全量
     registry.register(DecideTool())
     registry.register(AskUserTool())
-    registry.register(WaitForUserTool())
     registry.register(RipgrepTool())
     registry.register(FdTool())
     registry.register(ScheduleCreateTool(user_id=user_id))
@@ -200,6 +199,9 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
     # 同一套结构化 card 数据，按渠道选渲染目标（见 UiCardTool）。api 等无渲染器的渠道不暴露。
     if channel in ("web", "repl", "lark", "schedule"):
         registry.register(UiCardTool(channel=channel))
+    # wait_for_user 依赖前端 SSE + POST 交互，仅 web/repl 可消费
+    if channel in ("web", "repl"):
+        registry.register(WaitForUserTool())
     # computer_use：依赖 cua-computer 包 + cua-driver 后台服务（可选，包未安装时静默跳过）
     try:
         from ethan.tools.builtin.computer_use import ComputerUseTool  # noqa: PLC0415
