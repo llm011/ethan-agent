@@ -219,6 +219,13 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
   // Load session when route param changes
   useEffect(() => {
+    // 守卫：handleSend 刚创建了新会话并启动了流式响应，replaceState 触发了
+    // initialSessionId 变化。此时绝不能 abort 正在进行的流。
+    if (justFinishedRef.current === initialSessionId) {
+      justFinishedRef.current = null;
+      return;
+    }
+
     streamAbortRef.current?.abort();
     streamAbortRef.current = null;
 
@@ -247,11 +254,6 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     }
 
     if (initialSessionId === activeSession && streaming) return;
-
-    if (justFinishedRef.current === initialSessionId) {
-      justFinishedRef.current = null;
-      return;
-    }
 
     // 切换到目标会话 — 保存当前输入并恢复目标会话的输入状态
     inputStore.switchTo(initialSessionId, inputRef.current?.value);
