@@ -353,10 +353,11 @@ class FilesystemKnowledgeBase(KnowledgeBase):
 class ObsidianKnowledgeBase(KnowledgeBase):
     """Obsidian vault 作为知识库后端，遵循 Obsidian 约定（YAML frontmatter、wikilinks 等）。"""
 
-    def __init__(self, vault_path: Path, folder: str = "."):
+    def __init__(self, vault_path: Path, folder: str = ".", scene: str = ""):
         self._vault = vault_path
         self._folder = folder
         self._dir = vault_path / folder
+        self._scene = scene
         try:
             self._dir.mkdir(parents=True, exist_ok=True)
         except OSError:
@@ -373,11 +374,27 @@ class ObsidianKnowledgeBase(KnowledgeBase):
 
     # ── Write ──────────────────────────────────────────────────────────────
 
+    def _strip_scene_prefix(self, tags: list[str] | None) -> list[str] | None:
+        """剥掉 tags[0] 开头的 scene 前缀，防止路径重复拼接。
+
+        scene 已由 registry 拼进 self._dir，若 tags[0] 也带 scene 前缀
+        （如 scene="work" + tags=["work/coze"]），会导致多套一层 work/work/。
+        """
+        if not tags or not self._scene:
+            return tags
+        prefix = f"{self._scene}/"
+        if tags[0].startswith(prefix):
+            stripped = tags[0][len(prefix):]
+            if stripped:
+                return [stripped, *tags[1:]]
+        return tags
+
     def add(self, title: str, content: str, tags: list[str] | None = None,
             frontmatter: dict | None = None) -> str:
+        tags = self._strip_scene_prefix(tags)
         slug = re.sub(r"[^\w]+", "-", title.lower())[:50].strip("-")
         slug = re.sub(r"-{2,}", "-", slug)  # 双保险：合并残余连续短横线
-        # 按 tags[0] 分子目录，支持层级标签（如 "work/coze/prd" → work/coze/prd/）；
+        # 按 tags[0] 分子目录，支持层级标签（如 "coze/prd" → coze/prd/）；
         # sanitize 后为空则落根目录
         target_dir = self._dir
         if tags:
@@ -397,6 +414,7 @@ class ObsidianKnowledgeBase(KnowledgeBase):
 
     def update(self, source: str, title: str, content: str, tags: list[str] | None = None,
                frontmatter: dict | None = None) -> None:
+        tags = self._strip_scene_prefix(tags)
         path = self._resolve_in_dir(source)
         if not path.exists():
             raise FileNotFoundError(f"Knowledge item not found: {source}")

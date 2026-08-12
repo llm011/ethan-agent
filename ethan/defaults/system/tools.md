@@ -43,7 +43,7 @@
 **必传参数**：
 - `scene`：`work` / `life`，不传会平铺到 vault 根目录（禁止）
 - `frontmatter={"source": "原始URL"}`：内容来自外部链接时必传
-- `tags`：层级标签如 `["work/coze", "work/prd"]`，`tags[0]` 自动成为 `type` 字段
+- `tags`：层级标签如 `["coze", "prd"]`，`tags[0]` 自动成为 `type` 字段（**不要带 `work/`/`life/` 前缀**，scene 已决定顶层目录）
 
 **为什么**：knowledge_* 工具会自动加 frontmatter（`yaml.safe_dump` 安全生成）、建子目录、建索引支持全文搜索；file_write 直写会绕过这一切，导致路径平铺根目录、frontmatter 字段缺失、搜索查不到、重复写入不 dedup。
 
