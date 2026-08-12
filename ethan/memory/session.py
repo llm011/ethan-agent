@@ -35,6 +35,7 @@ class Session:
     snippet: str | None = None
     source: str = "web"  # web | repl | lark | cli | desktop | custom
     mode: str = ""  # "" = 工作助手; 规范英文 key，如 "legal"/"companion"（见 core/modes.py）
+    pinned_at: float = 0.0  # >0 表示已置顶，值为置顶时间戳
 
 
 def _generate_id() -> str:
@@ -317,6 +318,12 @@ class SessionStore:
             await self._db.commit()
         except Exception:
             pass
+        # Migration: sessions.pinned_at（置顶时间戳）
+        try:
+            await self._db.execute("ALTER TABLE sessions ADD COLUMN pinned_at REAL NOT NULL DEFAULT 0")
+            await self._db.commit()
+        except Exception:
+            pass
 
     async def close(self) -> None:
         if self._singleton:
@@ -518,6 +525,34 @@ class SessionStore:
         )
         await self._db.commit()
 
+    async def pin_session(self, session_id: str) -> None:
+        await self._db.execute(
+            "UPDATE sessions SET pinned_at = ? WHERE id = ?",
+            (time.time(), session_id),
+        )
+        await self._db.commit()
+
+    async def unpin_session(self, session_id: str) -> None:
+        await self._db.execute(
+            "UPDATE sessions SET pinned_at = 0 WHERE id = ?",
+            (session_id,),
+        )
+        await self._db.commit()
+
+    async def list_pinned(self) -> list[Session]:
+        sessions: list[Session] = []
+        async with self._db.execute(
+            "SELECT id, title, model, created_at, updated_at, COALESCE(source, 'web') as source, COALESCE(mode, '') as mode, pinned_at "
+            "FROM sessions WHERE pinned_at > 0 ORDER BY pinned_at DESC"
+        ) as cursor:
+            async for row in cursor:
+                sessions.append(Session(
+                    id=row[0], title=row[1], model=row[2],
+                    created_at=row[3], updated_at=row[4],
+                    source=row[5], mode=row[6], pinned_at=row[7],
+                ))
+        return sessions
+
     async def touch(self, session_id: str) -> None:
         await self._db.execute(
             "UPDATE sessions SET updated_at = ? WHERE id = ?",
@@ -687,7 +722,8 @@ class SessionStore:
         # first_query 子查询：每行一次索引查找，取第一条 user 消息前 80 字填 snippet
         async with self._db.execute(
             "SELECT id, title, model, created_at, updated_at, COALESCE(source, 'web') as source, COALESCE(mode, '') as mode, "
-            "(SELECT substr(m.content, 1, 80) FROM messages m WHERE m.session_id = sessions.id AND m.role = 'user' ORDER BY m.id LIMIT 1) as first_query "
+            "(SELECT substr(m.content, 1, 80) FROM messages m WHERE m.session_id = sessions.id AND m.role = 'user' ORDER BY m.id LIMIT 1) as first_query, "
+            "COALESCE(pinned_at, 0) as pinned_at "
             f"FROM sessions{where_sql} ORDER BY updated_at DESC LIMIT ? OFFSET ?",
             tuple(params),
         ) as cursor:
@@ -699,6 +735,7 @@ class SessionStore:
                     source=row[5] if len(row) > 5 else "web",
                     mode=row[6] if len(row) > 6 else "",
                     snippet=snippet,
+                    pinned_at=row[8] if len(row) > 8 else 0.0,
                 ))
         # Attach total as attribute for callers that need it
         sessions.total = total  # type: ignore[attr-defined]

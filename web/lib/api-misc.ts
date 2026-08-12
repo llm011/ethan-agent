@@ -215,7 +215,7 @@ export async function deleteKnowledge(source: string): Promise<void> {
 // ── Poll ──────────────────────────────────────────────────────────
 
 export interface PollData {
-  sessions: Pick<SessionInfo, "id" | "title" | "model" | "updated_at" | "source" | "mode">[];
+  sessions: Pick<SessionInfo, "id" | "title" | "model" | "updated_at" | "source" | "mode" | "pinned_at">[];
   active_sessions?: string[];
 }
 

@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Image from "next/image";
-import { Plus, Trash2, Search, Settings, Book, BookOpen, Pencil, Check, X, List, Wrench, RefreshCw, Loader2 } from "lucide-react";
+import { Plus, Trash2, Search, Settings, Book, BookOpen, Pencil, Check, X, List, Wrench, RefreshCw, Loader2, Pin, PinOff } from "lucide-react";
 import { Clock, Database, Activity } from "lucide-react";
 import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
 import { useSidebar } from "@/app/layout-shell";
@@ -22,6 +22,9 @@ import {
   createSession,
   fetchHealth,
   fetchModes,
+  pinSession,
+  unpinSession,
+  fetchPinnedSessions,
   type ModeEntry,
 } from "@/lib/api";
 
@@ -37,6 +40,7 @@ export function Sidebar() {
   };
 
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [pinnedSessions, setPinnedSessions] = useState<SessionInfo[]>([]);
   const [scheduleGroupSessions, setScheduleGroupSessions] = useState<SessionInfo[]>([]);
   const [heartbeatGroupSessions, setHeartbeatGroupSessions] = useState<SessionInfo[]>([]);
   const [extensionSessions, setExtensionSessions] = useState<SessionInfo[]>([]);
@@ -57,6 +61,7 @@ export function Sidebar() {
     const handler = () => {
       fetchSessions(50, 0, undefined, undefined, undefined, true, true)
         .then(setSessions).catch(() => {});
+      fetchPinnedSessions().then(setPinnedSessions).catch(() => {});
     };
     window.addEventListener("sessions:refresh", handler);
     return () => window.removeEventListener("sessions:refresh", handler);
@@ -100,7 +105,8 @@ export function Sidebar() {
 
   // 主列表请求已 hide 心跳/定时（否则高频心跳会话会挤爆前 50，把普通会话顶出去）；
   // 定时/心跳两个分组改用 title_prefixes 独立拉取，互不影响。
-  const normalSessions = sessions.filter((s) => !s.title.startsWith("[定时]") && !s.title.startsWith("[心跳]") && s.source !== "browser-extension");
+  const pinnedIds = new Set(pinnedSessions.map((s) => s.id));
+  const normalSessions = sessions.filter((s) => !s.title.startsWith("[定时]") && !s.title.startsWith("[心跳]") && s.source !== "browser-extension" && !pinnedIds.has(s.id));
   const scheduleSessions = scheduleGroupSessions;
   const heartbeatSessions = heartbeatGroupSessions;
   const scheduleUnreadCount = scheduleSessions.filter(
@@ -132,6 +138,9 @@ export function Sidebar() {
         .catch(() => {});
       fetchSessions(5, 0, undefined, "browser-extension")
         .then(setExtensionSessions)
+        .catch(() => {});
+      fetchPinnedSessions()
+        .then(setPinnedSessions)
         .catch(() => {});
     };
     fetchGroups();
@@ -244,6 +253,17 @@ export function Sidebar() {
     }
   };
 
+  const handleTogglePin = async (id: string, isPinned: boolean, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (isPinned) {
+      await unpinSession(id);
+      setPinnedSessions((prev) => prev.filter((s) => s.id !== id));
+    } else {
+      await pinSession(id);
+      fetchPinnedSessions().then(setPinnedSessions).catch(() => {});
+    }
+  };
+
   const renderSession = (s: SessionInfo) => (
     <div
       key={s.id}
@@ -259,13 +279,26 @@ export function Sidebar() {
         {activeSessions.has(s.id) && (
           <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary" />
         )}
-        {/* 对话模式标识：由 /modes 表驱动；匹配到非默认模式则显示其图标，否则工作助手 🛠️ */}
+        {/* 对话模式标识：hover 时变为 pin 图标（可点击置顶/取消置顶） */}
         {editingSessionId !== s.id && (() => {
           const m = s.mode ? modes.find((x) => x.key === s.mode) : null;
-          return m ? (
+          const isPinned = !!(s.pinned_at && s.pinned_at > 0) || pinnedSessions.some((p) => p.id === s.id);
+          const modeIcon = m ? (
             <span title={m.label} className="shrink-0 text-xs">{m.icon}</span>
           ) : (
             <span title="工作助手模式" className="shrink-0 text-xs opacity-60">🛠️</span>
+          );
+          return (
+            <span className="shrink-0 relative">
+              <span className="group-hover:hidden">{isPinned ? <Pin className="h-3.5 w-3.5 text-primary fill-primary" /> : modeIcon}</span>
+              <button
+                className="hidden group-hover:block"
+                onClick={(e) => handleTogglePin(s.id, isPinned, e)}
+                title={isPinned ? "取消置顶" : "置顶"}
+              >
+                {isPinned ? <PinOff className="h-3.5 w-3.5 text-muted-foreground hover:text-primary" /> : <Pin className="h-3.5 w-3.5 text-muted-foreground hover:text-primary" />}
+              </button>
+            </span>
           );
         })()}
         {editingSessionId === s.id ? (
@@ -446,6 +479,16 @@ export function Sidebar() {
           <div className="pl-6 pr-1 flex flex-col gap-1">
             {!sessionSearch && (
               <>
+                {pinnedSessions.length > 0 && (
+                  <>
+                    <div className="flex items-center justify-between py-1 mt-1 text-muted-foreground">
+                      <span className="text-sm font-semibold flex items-center gap-1">
+                        <Pin className="h-3 w-3" />置顶
+                      </span>
+                    </div>
+                    {pinnedSessions.map(renderSession)}
+                  </>
+                )}
                 <div
                   className="flex items-center justify-between py-1 mt-1 cursor-pointer text-muted-foreground hover:text-foreground"
                   onClick={() => setNormalExpanded(!normalExpanded)}
