@@ -273,7 +273,6 @@ export async function consumeStream(
     }
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
-      setStreaming(false);
       return;
     }
     const errMsg = err instanceof Error ? err.message : "";
