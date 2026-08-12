@@ -95,7 +95,7 @@ Use `search_files` for both filename and content searches. Prefer this over `gre
 knowledge_add(
     title="笔记标题",
     content="Markdown 正文（不要带 frontmatter，后端自动生成）",
-    tags=["work/coze", "work/prd"],   # 第一个 tag 自动成为 type
+    tags=["coze", "prd"],             # 第一个 tag 自动成为 type（不要带 scene 前缀）
     scene="work",                     # 必传，决定子目录
     frontmatter={"source": "https://...原始 URL..."}  # 来自外部链接时必传 R2
 )
@@ -172,15 +172,15 @@ Obsidian links notes with `[[Note Name]]` syntax. When creating notes, use these
 
 **层级格式**：使用 `分类/子分类` 格式，支持多级嵌套，方便在 Obsidian 中折叠和检索。
 
-常用标签体系：
-- `work/<项目名>` — 项目归属（如 `work/coze`、`work/lark`）
+常用标签体系（**不要带 `work/`/`life/` 前缀**，scene 参数已决定顶层目录）：
+- `<项目名>` — 项目归属（如 `coze`、`lark`）
 - `tech/<技术栈>` — 技术研究（如 `tech/electron`、`tech/mcp`）
-- `work/prd` — PRD / 设计案（type 自动推断为 `prd`）
-- `work/tech-design` — 技术方案（type 自动推断为 `tech-design`）
-- `work/meeting` — 会议纪要（type 自动推断为 `meeting`）
-- `work/reference` — 参考资料（type 自动推断为 `reference`）
-- `work/todo` — 个人待办
-- `life/<分类>` — 生活类内容
+- `prd` — PRD / 设计案（type 自动推断为 `prd`）
+- `tech-design` — 技术方案（type 自动推断为 `tech-design`）
+- `meeting` — 会议纪要（type 自动推断为 `meeting`）
+- `reference` — 参考资料（type 自动推断为 `reference`）
+- `todo` — 个人待办
+- `<分类>` — 生活类内容
 
 **规则**：
 - YAML 中的标签**不加** `#` 号；正文中的 inline 标签**必须**以 `#` 开头

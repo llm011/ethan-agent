@@ -83,6 +83,7 @@ async def list_sessions(limit: int = 50, offset: int = 0, q: str | None = None,
             "snippet": getattr(s, "snippet", None),
             "source": getattr(s, "source", "web"),
             "mode": getattr(s, "mode", "") or "",
+            "pinned_at": getattr(s, "pinned_at", 0) or 0,
         }
         for s in sessions
     ], "total": total}
@@ -94,6 +95,25 @@ async def create_session(model: str | None = None, mode: str | None = None, sour
     store = await get_session_store()
     session = await store.create(model or config.defaults.model, source=source or "web", mode=mode or "")
     return {"id": session.id, "title": session.title, "model": session.model, "mode": session.mode, "source": session.source}
+
+
+@router.get("/sessions/pinned")
+async def list_pinned(user_id: str = Depends(verify_token)):
+    store = await get_session_store()
+    sessions = await store.list_pinned()
+    return {"sessions": [
+        {
+            "id": s.id,
+            "title": s.title,
+            "model": s.model,
+            "created_at": s.created_at,
+            "updated_at": s.updated_at,
+            "source": getattr(s, "source", "web"),
+            "mode": getattr(s, "mode", "") or "",
+            "pinned_at": s.pinned_at,
+        }
+        for s in sessions
+    ]}
 
 
 @router.get("/sessions/{session_id}")
@@ -202,6 +222,20 @@ async def rename_session(session_id: str, req: RenameSessionRequest, user_id: st
     # mode 可为空字符串（切回默认模式），故用 is not None 判断
     if req.mode is not None:
         await store.update_mode(session_id, req.mode)
+    return {"ok": True}
+
+
+@router.post("/sessions/{session_id}/pin")
+async def pin_session(session_id: str, user_id: str = Depends(verify_token)):
+    store = await get_session_store()
+    await store.pin_session(session_id)
+    return {"ok": True}
+
+
+@router.delete("/sessions/{session_id}/pin")
+async def unpin_session(session_id: str, user_id: str = Depends(verify_token)):
+    store = await get_session_store()
+    await store.unpin_session(session_id)
     return {"ok": True}
 
 

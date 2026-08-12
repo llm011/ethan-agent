@@ -146,11 +146,11 @@ function InjectBox({ onInject }: { onInject: (content: string) => Promise<{ ok: 
         className="w-full bg-transparent text-sm resize-none focus:outline-none placeholder:text-muted-foreground/40 leading-relaxed"
         style={{ minHeight: "2.2em" }}
         rows={2}
-        placeholder="补充一些信息给运行中的任务…（⌘/Ctrl+Enter 提交）"
+        placeholder="补充一些信息给运行中的任务…（Enter 提交，Shift+Enter 换行）"
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
-          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+          if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
             e.preventDefault();
             handleSubmit();
           }

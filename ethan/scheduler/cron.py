@@ -126,6 +126,9 @@ class Scheduler:
             if parsed_end_date:
                 trigger.end_date = parsed_end_date
 
+        # 把 cron 字符串同步进 kwargs，供 GET /schedule 回显编辑框
+        kwargs["cron"] = cron_expr
+
         self._scheduler.add_job(
             func,
             trigger=trigger,
@@ -254,3 +257,26 @@ class Scheduler:
             return True
         except Exception:
             return False
+
+    def modify_cron(self, job_id: str, cron_expr: str) -> bool:
+        """修改 cron 定时任务的触发时间（保留原 end_date）。
+
+        用与 add_cron 相同的 from_crontab 约定（0/7=周日，1=周一…）重建 trigger，
+        并把最新的 cron 字符串同步进 kwargs，供 GET /schedule 回显编辑框。
+        cron_expr 非法时抛 ValueError，交由上层转 400。
+        """
+        job = self._scheduler.get_job(job_id)
+        if not job:
+            return False
+        # from_crontab 解析失败会抛 ValueError，让调用方转 400
+        new_trigger = CronTrigger.from_crontab(cron_expr, timezone=self._tz)
+        # 保留原 trigger 的 end_date（到期自动删除的语义不能因改时间而丢失）
+        old_trigger = job.trigger
+        if isinstance(old_trigger, CronTrigger) and getattr(old_trigger, "end_date", None):
+            new_trigger.end_date = old_trigger.end_date
+        self._scheduler.reschedule_job(job_id, trigger=new_trigger)
+        # 同步 kwargs.cron，供列表接口回显（modify_job 单独调，reschedule 不动 kwargs）
+        merged = dict(job.kwargs or {})
+        merged["cron"] = cron_expr
+        self._scheduler.modify_job(job_id, kwargs=merged)
+        return True

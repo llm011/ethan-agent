@@ -67,6 +67,7 @@ def get_knowledge_backend(user_id: str = "", scene: str = "") -> KnowledgeBase:
             instance = ObsidianKnowledgeBase(
                 vault_path=Path(vault_path),
                 folder=folder,
+                scene=scene,
             )
     elif backend == "external":
         base_url = kb_cfg.external_base_url

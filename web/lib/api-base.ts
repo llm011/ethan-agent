@@ -145,6 +145,20 @@ export async function respondAskUser(requestId: string, value: string): Promise<
   return res.json();
 }
 
+/** 响应 wait_for_user 等待卡片：POST 用户的确认/取消/文本输入。 */
+export async function respondWaitForUser(requestId: string, value: string): Promise<{ ok: boolean }> {
+  const res = await fetch(`${API_URL}/wait-for-user/${encodeURIComponent(requestId)}`, {
+    method: "POST",
+    headers: { ...headers(), "Content-Type": "application/json" },
+    body: JSON.stringify({ value }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed (${res.status})`);
+  }
+  return res.json();
+}
+
 /** Tool UI resources: 按 ui:// URI 获取工具 UI 模板 HTML（前端缓存，模板只拉一次）。 */
 export async function fetchUiResource(uri: string): Promise<{ text: string; _meta?: unknown }> {
   const res = await fetch(`${API_URL}/ui-resources/read?uri=${encodeURIComponent(uri)}`, {

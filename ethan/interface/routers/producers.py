@@ -241,6 +241,7 @@ async def _run_generation(
     from ethan.core.ask_user import AskUserEvent
     from ethan.core.consent import ConsentEvent, set_consent_provider
     from ethan.core.stream_collector import StreamCollector
+    from ethan.core.wait_for_user import WaitForUserEvent
     from ethan.providers.base import InjectEvent, SkillsMatchedEvent, ThinkingEvent, ToolEvent
 
     if session_id:
@@ -300,6 +301,17 @@ async def _run_generation(
                     "question": item.question,
                     "options": item.options,
                     "default": item.default,
+                    "timeout": item.timeout,
+                })
+            elif isinstance(item, WaitForUserEvent):
+                run.emit({
+                    "wait_for_user_request": True,
+                    "request_id": item.request_id,
+                    "prompt": item.prompt,
+                    "input_type": item.input_type,
+                    "placeholder": item.placeholder,
+                    "confirm_label": item.confirm_label,
+                    "cancel_label": item.cancel_label,
                     "timeout": item.timeout,
                 })
             elif isinstance(item, SkillsMatchedEvent):

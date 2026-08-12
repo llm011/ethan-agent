@@ -5,6 +5,7 @@ import type { ToolStep } from "@ethan/shared/components/tool-timeline";
 import type { Message, Usage, CardData } from "@ethan/shared/chat/types";
 import type { ConsentRequest } from "@ethan/shared/components/consent-dialog";
 import type { AskUserRequest } from "@ethan/shared/chat/ask-user-card";
+import type { WaitForUserRequest } from "@ethan/shared/chat/wait-for-user-card";
 
 export interface CleanupConfirmRequest {
   request_id: string;
@@ -17,6 +18,7 @@ export interface ConsumeStreamActions {
   setConsentRequest: (req: ConsentRequest | null) => void;
   setCleanupConfirm: (req: CleanupConfirmRequest | null) => void;
   setAskUserRequest: (req: AskUserRequest | null) => void;
+  setWaitForUserRequest: (req: WaitForUserRequest | null) => void;
   setBgPolling: (msg: string | null) => void;
   setSessionTitle: (title: string) => void;
   setSessionUsage: React.Dispatch<React.SetStateAction<Usage>>;
@@ -35,7 +37,7 @@ export async function consumeStream(
   trackTtft = false,
 ): Promise<void> {
   const {
-    setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setBgPolling,
+    setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setWaitForUserRequest, setBgPolling,
     setSessionTitle, setSessionUsage, setStopping, setStreaming,
     activeSession,
   } = actions;
@@ -86,6 +88,18 @@ export async function consumeStream(
           options: chunk.options || [],
           default: chunk.default || "",
           timeout: chunk.timeout || 20,
+        });
+        continue;
+      }
+      if (chunk.wait_for_user_request) {
+        setWaitForUserRequest({
+          request_id: chunk.request_id || "",
+          prompt: chunk.prompt || "",
+          input_type: (chunk.input_type as "confirm" | "text") || "confirm",
+          placeholder: chunk.placeholder || "",
+          confirm_label: chunk.confirm_label || "已完成",
+          cancel_label: chunk.cancel_label || "取消",
+          timeout: chunk.timeout || 300,
         });
         continue;
       }
@@ -258,6 +272,14 @@ export async function consumeStream(
       }
     }
   } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      // 切换会话/发新消息 abort 旧流：清理残留的交互卡片状态，避免新会话误显示
+      setConsentRequest(null);
+      setCleanupConfirm(null);
+      setAskUserRequest(null);
+      setWaitForUserRequest(null);
+      return;
+    }
     const errMsg = err instanceof Error ? err.message : "";
     const isNetworkDrop = /load failed|network|aborted|connection|SSE connection dropped/i.test(errMsg);
     if (isNetworkDrop && activeSession) {
@@ -319,6 +341,8 @@ export async function consumeStream(
           setBgPolling(null);
           setConsentRequest(null);
           setCleanupConfirm(null);
+          setAskUserRequest(null);
+          setWaitForUserRequest(null);
           setStopping(false);
           setStreaming(false);
           failed = false;
@@ -333,6 +357,8 @@ export async function consumeStream(
             setBgPolling(null);
             setConsentRequest(null);
             setCleanupConfirm(null);
+            setAskUserRequest(null);
+            setWaitForUserRequest(null);
             setStopping(false);
             setStreaming(false);
             return;
@@ -394,4 +420,6 @@ export async function consumeStream(
   setStreaming(false);
   setConsentRequest(null);
   setCleanupConfirm(null);
+  setAskUserRequest(null);
+  setWaitForUserRequest(null);
 }

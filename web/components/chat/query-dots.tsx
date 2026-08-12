@@ -52,10 +52,10 @@ export function QueryDots({ messages, scrollRef }: QueryDotsProps) {
           </button>
           {hoverIdx === dotIdx && (
             <div
-              className="absolute left-5 top-1/2 -translate-y-1/2 px-2.5 py-1.5 rounded-lg bg-foreground text-background text-xs leading-snug max-w-[240px] shadow-lg pointer-events-none z-50 overflow-hidden text-ellipsis"
+              className="absolute left-5 top-1/2 -translate-y-1/2 px-2.5 py-1.5 rounded-lg bg-foreground text-background text-xs leading-snug max-w-[420px] shadow-lg pointer-events-none z-50 overflow-hidden text-ellipsis"
               style={{
                 display: "-webkit-box",
-                WebkitLineClamp: 2,
+                WebkitLineClamp: 3,
                 WebkitBoxOrient: "vertical",
                 wordBreak: "break-word",
                 whiteSpace: "normal",

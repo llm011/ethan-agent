@@ -329,6 +329,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                   value={input}
                   onChange={setInput}
                   placeholder="输入 Markdown 内容… (Cmd/Ctrl+Enter 发送)"
+                  defaultMode="edit"
                 />
               </div>
             </div>

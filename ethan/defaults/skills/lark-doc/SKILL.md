@@ -51,6 +51,7 @@ python ~/.ethan/skills/lark-doc/scripts/fetch_doc.py "https://xxx.feishu.cn/wiki
 > - **精准编辑场景**（`docs +update` 的 `str_replace` / `block_insert_after` / `block_replace` / `block_delete` / `block_move_after` 等局部精修指令）：优先使用 XML（`--doc-format xml`，即默认值）。XML 能稳定表达 block 结构和样式，局部精修更可控；不要因为 Markdown 更简单就自行切换。
 
 ## 快速决策
+- 用户意图为**收藏 / 存起来 / 沉淀 / 存档 / 保存到知识库**时 → **必须**用脚本 `python ~/.ethan/skills/lark-doc/scripts/fetch_doc.py "<文档URL>" <输出路径.md>` 拉取完整内容，再存入知识库。禁止用 `lark-cli docs +fetch` 替代（会截断）。存储目标是知识库，不是"得到大脑/Get笔记"。
 - 用户要**复制文档 / 创建文档副本 / 另存为副本**时，切到 [`lark-drive`](../lark-drive/SKILL.md)，按其中的复制指引使用 `lark-cli drive files copy`；不要用 `docs +fetch` + `docs +create` 重建正文，也不要走 `drive +export` / `drive +import`。
 - 先判定任务路径：找文档 / 导入导出走 [`lark-drive`](../lark-drive/SKILL.md)；只读 / 摘要用 `docs +fetch` 默认 `simple`；明确旧文本 → 新文本直接 `str_replace`；只有 block 链接、评论锚点、插入 / 替换 / 删除 / 移动才局部 fetch `with-ids`；保真改写已有内容才读 `full`
 - block 直达链接格式：`文档基础 URL#block_id`；没有 block_id 时局部 fetch `with-ids`

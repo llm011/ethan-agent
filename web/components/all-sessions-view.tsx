@@ -3,8 +3,8 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { format } from "date-fns";
 import { zhCN } from "date-fns/locale";
-import { SessionInfo, fetchSessions, renameSession, deleteSession, cleanupTrivialSessions, fetchModes, type ModeEntry } from "@/lib/api";
-import { Loader2, Search, Calendar, MessageSquare, ChevronLeft, ChevronRight, Pencil, Trash2, Check, X, Eraser } from "lucide-react";
+import { SessionInfo, fetchSessions, renameSession, deleteSession, cleanupTrivialSessions, fetchModes, pinSession, unpinSession, type ModeEntry } from "@/lib/api";
+import { Loader2, Search, Calendar, MessageSquare, ChevronLeft, ChevronRight, Pencil, Trash2, Check, X, Eraser, Pin, PinOff } from "lucide-react";
 import { Input } from "@ethan/shared/ui/input";
 import { Button } from "@ethan/shared/ui/button";
 import { Badge } from "@ethan/shared/ui/badge";
@@ -111,6 +111,20 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
 
   const handleDelete = (id: string) => {
     setConfirmState({ open: true, id });
+  };
+
+  const handleTogglePin = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const session = sessions.find((s) => s.id === id);
+    const isPinned = !!(session?.pinned_at && session.pinned_at > 0);
+    if (isPinned) {
+      await unpinSession(id);
+      setSessions((prev) => prev.map((s) => s.id === id ? { ...s, pinned_at: 0 } : s));
+    } else {
+      await pinSession(id);
+      setSessions((prev) => prev.map((s) => s.id === id ? { ...s, pinned_at: Date.now() / 1000 } : s));
+    }
+    window.dispatchEvent(new CustomEvent("sessions:refresh"));
   };
 
   const doDelete = async () => {
@@ -323,6 +337,15 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
                       />
                     )}
                     <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                      <button
+                        onClick={e => handleTogglePin(session.id, e)}
+                        className="p-1.5 hover:text-primary hover:bg-primary/10 text-muted-foreground rounded-lg"
+                        title={session.pinned_at && session.pinned_at > 0 ? "取消置顶" : "置顶"}
+                      >
+                        {session.pinned_at && session.pinned_at > 0
+                          ? <PinOff className="h-3.5 w-3.5" />
+                          : <Pin className="h-3.5 w-3.5" />}
+                      </button>
                       <button
                         onClick={e => { e.stopPropagation(); setEditingTitle(session.title); setEditingId(session.id); }}
                         className="p-1.5 hover:text-foreground hover:bg-muted text-muted-foreground rounded-lg"

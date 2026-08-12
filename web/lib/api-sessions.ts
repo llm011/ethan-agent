@@ -12,6 +12,7 @@ export interface SessionInfo {
   snippet?: string;
   source?: string;
   mode?: string;
+  pinned_at?: number;
 }
 
 export interface SessionDetail {
@@ -116,6 +117,27 @@ export async function updateSessionMode(id: string, mode: string): Promise<void>
     headers: headers(),
     body: JSON.stringify({ mode }),
   });
+}
+
+export async function pinSession(id: string): Promise<void> {
+  await fetch(`${API_URL}/sessions/${id}/pin`, {
+    method: "POST",
+    headers: headers(),
+  });
+}
+
+export async function unpinSession(id: string): Promise<void> {
+  await fetch(`${API_URL}/sessions/${id}/pin`, {
+    method: "DELETE",
+    headers: headers(),
+  });
+}
+
+export async function fetchPinnedSessions(): Promise<SessionInfo[]> {
+  const res = await fetch(`${API_URL}/sessions/pinned`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed to fetch pinned sessions");
+  const data = await res.json();
+  return data.sessions as SessionInfo[];
 }
 
 export async function createSession(model?: string, mode?: string): Promise<{ id: string; title: string; model: string; mode?: string }> {

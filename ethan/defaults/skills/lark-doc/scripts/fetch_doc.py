@@ -455,18 +455,21 @@ _PASSTHROUGH_TAGS = re.compile(
     r'|ul|ol|li|blockquote|h[1-6]|grid|column)\b[^>]*/?>', re.IGNORECASE
 )
 
-def _escape_tags_outside_code(text: str) -> str:
-    """把残留的 HTML/组件标签转义成实体，但保护 ``` 代码块、`行内代码` 和常用 HTML 标签。"""
+def _escape_tags_outside_code(text: str, *, strip_unknown: bool = False) -> str:
+    """处理残留的 HTML/组件标签，保护 ``` 代码块、`行内代码` 和常用 HTML 标签。
+    strip_unknown=True 时直接删除未知标签（保留内容），False 时转义为实体。"""
     def _esc(seg: str) -> str:
         def _replace_tag(m: re.Match) -> str:
             tag = m.group(0)
             if _PASSTHROUGH_TAGS.match(tag):
                 return tag
+            if strip_unknown:
+                return ''
             return tag.replace("<", "&lt;").replace(">", "&gt;")
         return _ANY_TAG_RE.sub(_replace_tag, seg)
     out = []
     for i, block in enumerate(re.split(r'(```[\s\S]*?```)', text)):
-        if i % 2 == 1:  # 代码块，原样保留
+        if i % 2 == 1:
             out.append(block)
             continue
         for j, span in enumerate(re.split(r'(`[^`\n]*`)', block)):
@@ -531,8 +534,78 @@ def _process_whiteboard_tag(m: re.Match) -> str:
 
 
 def _collapse_blank_lines(content: str) -> str:
-    """压缩连续空行：3+ 连续空行 → 2 行（即保留一个空行分隔）。"""
+    """压缩连续空行：含尾随空白的行也视为空行，3+ 连续 → 2 行。"""
+    content = re.sub(r'[ \t]+$', '', content, flags=re.MULTILINE)
     return re.sub(r'\n{3,}', '\n\n', content)
+
+
+def _strip_html_inline(text: str) -> str:
+    """去除 HTML 内联标签但保留文本内容和 markdown 格式。"""
+    text = re.sub(r'<br\s*/?>', ' ', text, flags=re.IGNORECASE)
+    text = re.sub(r'<strong\b[^>]*>(.*?)</strong>', r'**\1**', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'<b\b[^>]*>(.*?)</b>', r'**\1**', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'<em\b[^>]*>(.*?)</em>', r'*\1*', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'<i\b[^>]*>(.*?)</i>', r'*\1*', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'<code\b[^>]*>(.*?)</code>', r'`\1`', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'<a\b[^>]*href="([^"]*)"[^>]*>(.*?)</a>', r'[\2](\1)', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'<[^>]+>', '', text)
+    return html_mod.unescape(text).replace('|', '\\|').replace('\n', ' ').strip()
+
+
+def _html_table_to_markdown(table_html: str) -> str:
+    """将单个 <table>...</table> 转为 markdown pipe table；复杂表格（有 rowspan）保留原 HTML。"""
+    if re.search(r'\browspan\b', table_html, re.IGNORECASE):
+        return table_html
+
+    rows: list[list[str]] = []
+    is_header: list[bool] = []
+    for tr_m in re.finditer(r'<tr\b[^>]*>(.*?)</tr>', table_html, re.DOTALL | re.IGNORECASE):
+        tr_content = tr_m.group(1)
+        cells: list[str] = []
+        has_th = False
+        for cell_m in re.finditer(r'<(th|td)\b([^>]*)>(.*?)</\1>', tr_content, re.DOTALL | re.IGNORECASE):
+            tag_name = cell_m.group(1).lower()
+            attrs = cell_m.group(2)
+            cell_text = _strip_html_inline(cell_m.group(3))
+            if tag_name == 'th':
+                has_th = True
+            colspan_m = re.search(r'\bcolspan="(\d+)"', attrs)
+            span = int(colspan_m.group(1)) if colspan_m else 1
+            cells.append(cell_text)
+            for _ in range(span - 1):
+                cells.append('')
+        if cells:
+            rows.append(cells)
+            is_header.append(has_th)
+
+    if not rows:
+        return table_html
+
+    col_count = max(len(r) for r in rows)
+    for r in rows:
+        while len(r) < col_count:
+            r.append('')
+
+    lines: list[str] = []
+    header_done = False
+    for i, row in enumerate(rows):
+        line = '| ' + ' | '.join(row) + ' |'
+        lines.append(line)
+        if not header_done and (is_header[i] or i == 0):
+            lines.append('| ' + ' | '.join(['---'] * col_count) + ' |')
+            header_done = True
+
+    return '\n'.join(lines)
+
+
+def _html_tables_to_markdown(content: str) -> str:
+    """将内容中所有 HTML table 转为 markdown pipe table。"""
+    return re.sub(
+        r'<table\b[^>]*>.*?</table>',
+        lambda m: _html_table_to_markdown(m.group(0)),
+        content,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
 
 
 def clean_markdown(content: str, base_domain: str = "https://feishu.cn", *, renderer: str = "plain") -> str:
@@ -578,7 +651,8 @@ def clean_markdown(content: str, base_domain: str = "https://feishu.cn", *, rend
         # 纯文本模式：去掉 grid/column 标签，只保留内容
         content = re.sub(r'</?grid[^>]*>', '', content, flags=re.IGNORECASE)
         content = re.sub(r'</?column[^>]*>', '', content, flags=re.IGNORECASE)
-    content = _escape_tags_outside_code(content)
+        content = _html_tables_to_markdown(content)
+    content = _escape_tags_outside_code(content, strip_unknown=(renderer == "plain"))
     content = _collapse_blank_lines(content)
     return content
 

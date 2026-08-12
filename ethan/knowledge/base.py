@@ -353,10 +353,11 @@ class FilesystemKnowledgeBase(KnowledgeBase):
 class ObsidianKnowledgeBase(KnowledgeBase):
     """Obsidian vault 作为知识库后端，遵循 Obsidian 约定（YAML frontmatter、wikilinks 等）。"""
 
-    def __init__(self, vault_path: Path, folder: str = "."):
+    def __init__(self, vault_path: Path, folder: str = ".", scene: str = ""):
         self._vault = vault_path
         self._folder = folder
         self._dir = vault_path / folder
+        self._scene = scene
         try:
             self._dir.mkdir(parents=True, exist_ok=True)
         except OSError:
@@ -364,6 +365,53 @@ class ObsidianKnowledgeBase(KnowledgeBase):
         self._vector_store: "VectorStore | None" = None  # noqa: F821
         import shutil
         self._cli_available = shutil.which("obsidian") is not None
+        self._migrate_double_nested()
+
+    def _migrate_double_nested(self) -> None:
+        """一次性修复 scene 前缀重复导致的 double-nested 目录（如 work/work/coze → work/coze）。
+
+        安全策略：
+        - 同名文件/目录跳过并告警，绝不覆盖。
+        - dest 是文件而 child 是目录时跳过（避免 NotADirectoryError）。
+        - 整体包 try/except，迁移失败不影响知识库初始化。
+        """
+        if not self._scene or not self._dir.exists():
+            return
+        dup_dir = self._dir / self._scene
+        if not dup_dir.is_dir():
+            return
+        try:
+            for child in list(dup_dir.iterdir()):
+                dest = self._dir / child.name
+                if dest.exists():
+                    # dest 已是文件但 child 是目录，跳过避免 NotADirectoryError
+                    if dest.is_file() and child.is_dir():
+                        print(f"[knowledge] skip migrate {child} -> {dest}: dest is file, child is dir")
+                        continue
+                    if child.is_dir():
+                        for f in child.iterdir():
+                            target = dest / f.name
+                            if target.exists():
+                                print(f"[knowledge] skip migrate {f} -> {target}: dest exists")
+                                continue
+                            f.rename(target)
+                        # 只在子目录已空时删除
+                        try:
+                            child.rmdir()
+                        except OSError:
+                            pass
+                    else:
+                        print(f"[knowledge] skip migrate {child} -> {dest}: dest exists")
+                else:
+                    child.rename(dest)
+            # 仅当 dup_dir 真正空了才删
+            try:
+                if not any(dup_dir.iterdir()):
+                    dup_dir.rmdir()
+            except OSError:
+                pass
+        except Exception as e:
+            print(f"[knowledge] _migrate_double_nested failed: {e}")
 
     def _get_vector_store(self):
         if self._vector_store is None:
@@ -373,11 +421,27 @@ class ObsidianKnowledgeBase(KnowledgeBase):
 
     # ── Write ──────────────────────────────────────────────────────────────
 
+    def _strip_scene_prefix(self, tags: list[str] | None) -> list[str] | None:
+        """剥掉 tags[0] 开头的 scene 前缀，防止路径重复拼接。
+
+        scene 已由 registry 拼进 self._dir，若 tags[0] 也带 scene 前缀
+        （如 scene="work" + tags=["work/coze"]），会导致多套一层 work/work/。
+        """
+        if not tags or not self._scene:
+            return tags
+        prefix = f"{self._scene}/"
+        if tags[0].startswith(prefix):
+            stripped = tags[0][len(prefix):]
+            if stripped:
+                return [stripped, *tags[1:]]
+        return tags
+
     def add(self, title: str, content: str, tags: list[str] | None = None,
             frontmatter: dict | None = None) -> str:
+        tags = self._strip_scene_prefix(tags)
         slug = re.sub(r"[^\w]+", "-", title.lower())[:50].strip("-")
         slug = re.sub(r"-{2,}", "-", slug)  # 双保险：合并残余连续短横线
-        # 按 tags[0] 分子目录，支持层级标签（如 "work/coze/prd" → work/coze/prd/）；
+        # 按 tags[0] 分子目录，支持层级标签（如 "coze/prd" → coze/prd/）；
         # sanitize 后为空则落根目录
         target_dir = self._dir
         if tags:
@@ -397,6 +461,7 @@ class ObsidianKnowledgeBase(KnowledgeBase):
 
     def update(self, source: str, title: str, content: str, tags: list[str] | None = None,
                frontmatter: dict | None = None) -> None:
+        tags = self._strip_scene_prefix(tags)
         path = self._resolve_in_dir(source)
         if not path.exists():
             raise FileNotFoundError(f"Knowledge item not found: {source}")

@@ -95,6 +95,7 @@ async def get_schedules():
             "source_timeline": kwargs.get("source_timeline", ""),
             "source_phase": kwargs.get("source_phase", ""),
             "scene": kwargs.get("scene", "work"),
+            "cron": kwargs.get("cron", ""),
         })
     return {"jobs": result}
 
@@ -172,6 +173,7 @@ class SchedulePatchRequest(BaseModel):
     state: str | None = None
     title: str | None = None
     prompt: str | None = None
+    cron: str | None = None
 
 
 @router.patch("/{job_id}", dependencies=[Depends(verify_token)])
@@ -200,6 +202,15 @@ async def patch_schedule(job_id: str, req: SchedulePatchRequest):
             raise HTTPException(400, "Prompt must not be empty")
         if not scheduler.modify_kwargs(job_id, prompt=new_prompt):
             raise HTTPException(404, "Job not found or could not update prompt")
+    if req.cron is not None:
+        new_cron = req.cron.strip()
+        if not new_cron:
+            raise HTTPException(400, "Cron expression must not be empty")
+        try:
+            if not scheduler.modify_cron(job_id, new_cron):
+                raise HTTPException(404, "Job not found")
+        except ValueError as e:
+            raise HTTPException(400, f"Invalid cron expression: {e}")
     return {"ok": True}
 
 
