@@ -126,6 +126,9 @@ class Scheduler:
             if parsed_end_date:
                 trigger.end_date = parsed_end_date
 
+        # 把 cron 字符串同步进 kwargs，供 GET /schedule 回显编辑框
+        kwargs["cron"] = cron_expr
+
         self._scheduler.add_job(
             func,
             trigger=trigger,

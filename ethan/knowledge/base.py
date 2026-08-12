@@ -368,23 +368,50 @@ class ObsidianKnowledgeBase(KnowledgeBase):
         self._migrate_double_nested()
 
     def _migrate_double_nested(self) -> None:
-        """一次性修复 scene 前缀重复导致的 double-nested 目录（如 work/work/coze → work/coze）。"""
+        """一次性修复 scene 前缀重复导致的 double-nested 目录（如 work/work/coze → work/coze）。
+
+        安全策略：
+        - 同名文件/目录跳过并告警，绝不覆盖。
+        - dest 是文件而 child 是目录时跳过（避免 NotADirectoryError）。
+        - 整体包 try/except，迁移失败不影响知识库初始化。
+        """
         if not self._scene or not self._dir.exists():
             return
         dup_dir = self._dir / self._scene
         if not dup_dir.is_dir():
             return
-        for child in list(dup_dir.iterdir()):
-            dest = self._dir / child.name
-            if dest.exists():
-                if child.is_dir():
-                    for f in child.iterdir():
-                        f.rename(dest / f.name)
-                    child.rmdir()
-            else:
-                child.rename(dest)
-        if not any(dup_dir.iterdir()):
-            dup_dir.rmdir()
+        try:
+            for child in list(dup_dir.iterdir()):
+                dest = self._dir / child.name
+                if dest.exists():
+                    # dest 已是文件但 child 是目录，跳过避免 NotADirectoryError
+                    if dest.is_file() and child.is_dir():
+                        print(f"[knowledge] skip migrate {child} -> {dest}: dest is file, child is dir")
+                        continue
+                    if child.is_dir():
+                        for f in child.iterdir():
+                            target = dest / f.name
+                            if target.exists():
+                                print(f"[knowledge] skip migrate {f} -> {target}: dest exists")
+                                continue
+                            f.rename(target)
+                        # 只在子目录已空时删除
+                        try:
+                            child.rmdir()
+                        except OSError:
+                            pass
+                    else:
+                        print(f"[knowledge] skip migrate {child} -> {dest}: dest exists")
+                else:
+                    child.rename(dest)
+            # 仅当 dup_dir 真正空了才删
+            try:
+                if not any(dup_dir.iterdir()):
+                    dup_dir.rmdir()
+            except OSError:
+                pass
+        except Exception as e:
+            print(f"[knowledge] _migrate_double_nested failed: {e}")
 
     def _get_vector_store(self):
         if self._vector_store is None:

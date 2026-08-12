@@ -4,14 +4,53 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import threading
+import time
 
 from ethan.tools.base import BaseTool
 
 logger = logging.getLogger(__name__)
 
-# 模块级存储：domain → device_code（跨工具调用传递）
+# 模块级存储：domain → (device_code, created_ts)（跨工具调用传递）
 # LarkAuthStartTool 写入，LarkAuthCompleteTool 读取后清除
-_PENDING_DEVICE_CODES: dict[str, str] = {}
+# 飞书 device_code 有效期通常 5-10 分钟，这里设 600s 过期清理
+_DEVICE_CODE_TTL = 600
+_PENDING_DEVICE_CODES: dict[str, tuple[str, float]] = {}
+_PENDING_DEVICE_CODES_LOCK = threading.Lock()
+
+
+def _store_device_code(domain: str, code: str) -> None:
+    """线程安全地存储 device_code，并顺带清理过期项。"""
+    with _PENDING_DEVICE_CODES_LOCK:
+        _cleanup_expired_codes_locked()
+        _PENDING_DEVICE_CODES[domain] = (code, time.time())
+
+
+def _take_device_code(domain: str) -> str | None:
+    """线程安全地取出 device_code（pop）。返回 None 表示不存在或已过期。"""
+    with _PENDING_DEVICE_CODES_LOCK:
+        _cleanup_expired_codes_locked()
+        entry = _PENDING_DEVICE_CODES.pop(domain, None)
+        if entry is None:
+            return None
+        code, created_ts = entry
+        if time.time() - created_ts > _DEVICE_CODE_TTL:
+            return None  # 已过期
+        return code
+
+
+def _peek_device_code(domain: str) -> tuple[str, float] | None:
+    """线程安全地 peek（不 pop），用于失败重试时检查是否过期。"""
+    with _PENDING_DEVICE_CODES_LOCK:
+        return _PENDING_DEVICE_CODES.get(domain)
+
+
+def _cleanup_expired_codes_locked() -> None:
+    """清理过期的 device_code（调用方需持锁）。"""
+    now = time.time()
+    expired = [k for k, (_, ts) in _PENDING_DEVICE_CODES.items() if now - ts > _DEVICE_CODE_TTL]
+    for k in expired:
+        _PENDING_DEVICE_CODES.pop(k, None)
 
 
 class LarkCalendarEventsTool(BaseTool):
@@ -427,8 +466,8 @@ class LarkAuthStartTool(BaseTool):
                     return f"Already authorized for domain '{domain}', or no device_code in response: {out_text}"
                 return f"Failed to get device_code: {data.get('msg', str(data))}"
 
-            # 存储 device_code 供 lark_auth_complete 使用
-            _PENDING_DEVICE_CODES[domain] = device_code
+            # 存储 device_code 供 lark_auth_complete 使用（带 TTL，自动过期清理）
+            _store_device_code(domain, device_code)
 
             return (
                 f"OAuth flow started for domain '{domain}'.\n"
@@ -476,11 +515,20 @@ class LarkAuthCompleteTool(BaseTool):
         if not domain:
             return "Error: domain is required"
 
-        device_code = _PENDING_DEVICE_CODES.pop(domain, None)
+        device_code = _take_device_code(domain)
         if not device_code:
+            # 区分"从未 start"和"已过期"
+            peek = _peek_device_code(domain)
+            if peek is None:
+                return (
+                    f"Error: No pending device_code for domain '{domain}'. "
+                    f"Make sure lark_auth_start was called first with the same domain."
+                )
+            # peek 非空但 take 返回 None → 已过期
             return (
-                f"Error: No pending device_code for domain '{domain}'. "
-                f"Make sure lark_auth_start was called first with the same domain."
+                f"Error: device_code for domain '{domain}' has expired "
+                f"(TTL {_DEVICE_CODE_TTL}s). Please call lark_auth_start again "
+                f"to get a new device_code and auth URL."
             )
 
         try:
@@ -499,9 +547,19 @@ class LarkAuthCompleteTool(BaseTool):
             err_text = stderr.decode(errors="replace").strip()
 
             if proc.returncode != 0:
-                # 把 device_code 放回去，允许重试
-                _PENDING_DEVICE_CODES[domain] = device_code
-                return f"lark-cli error (exit {proc.returncode}): {err_text or out_text}"
+                # 失败时检查 device_code 是否仍有效，决定提示重试还是重新 start
+                peek = _peek_device_code(domain)
+                if peek and time.time() - peek[1] > _DEVICE_CODE_TTL:
+                    return (
+                        f"Authorization failed (exit {proc.returncode}): {err_text or out_text}\n"
+                        f"device_code has expired. Please call lark_auth_start again."
+                    )
+                # device_code 仍有效，放回去允许重试
+                _store_device_code(domain, device_code)
+                return (
+                    f"lark-cli error (exit {proc.returncode}): {err_text or out_text}\n"
+                    f"You can retry lark_auth_complete with domain='{domain}'."
+                )
 
             # 解析结果
             try:
@@ -514,12 +572,12 @@ class LarkAuthCompleteTool(BaseTool):
 
         except asyncio.TimeoutError:
             # 超时可能是用户还没完成授权，把 device_code 放回去允许重试
-            _PENDING_DEVICE_CODES[domain] = device_code
+            _store_device_code(domain, device_code)
             return (
                 "lark-cli auth login timed out (30s). "
                 "User may not have completed authorization yet. "
                 "Please ask the user to complete authorization and retry."
             )
         except Exception as e:
-            _PENDING_DEVICE_CODES[domain] = device_code
+            _store_device_code(domain, device_code)
             return f"Error: {e}"

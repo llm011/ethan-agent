@@ -1748,7 +1748,11 @@ class Agent:
                     placeholder = args.get("placeholder", "")
                     confirm_label = args.get("confirm_label", "已完成")
                     cancel_label = args.get("cancel_label", "取消")
-                    timeout = min(int(args.get("timeout", 300)), 600)
+                    # 容错解析 timeout：LLM 可能传非数字（如 "abc" 或 "300s"），兜底 300s
+                    try:
+                        timeout = min(int(args.get("timeout", 300)), 600)
+                    except (TypeError, ValueError):
+                        timeout = 300
 
                     yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary=prompt,
                                     state="start", skill_category=resolve_skill_category(tc.name, tc.arguments))

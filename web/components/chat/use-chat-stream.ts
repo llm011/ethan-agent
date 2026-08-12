@@ -273,6 +273,11 @@ export async function consumeStream(
     }
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
+      // 切换会话/发新消息 abort 旧流：清理残留的交互卡片状态，避免新会话误显示
+      setConsentRequest(null);
+      setCleanupConfirm(null);
+      setAskUserRequest(null);
+      setWaitForUserRequest(null);
       return;
     }
     const errMsg = err instanceof Error ? err.message : "";
