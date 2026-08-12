@@ -2,7 +2,7 @@
 
 deliver_file 工具把文件路径写进消息卡片，前端点击卡片后通过本路由：
   /api/files/download?path=...  → 直接下载文件（Content-Disposition: attachment）
-  /api/files/view?path=...      → 内联读取图片或 MP4（支持 Range，供图片/视频控件）
+  /api/files/view?path=...      → 内联读取图片或 MP4（支持 Range，供图片/视频控件；Starlette ≥0.37 原生支持）
   /api/files/deck?path=...      → pptx 项目目录的 deck.json + pages/*.json（预览页数据源）
   /api/files/asset?path=...     → 项目 assets/ 里的图片（<img> 标签用）
 
