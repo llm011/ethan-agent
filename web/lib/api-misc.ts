@@ -19,6 +19,7 @@ export interface ScheduleJob {
   source_timeline?: string;
   source_phase?: string;
   scene?: string;
+  cron?: string;  // 原始 cron 表达式（仅 recurring 的 cron 任务有；供编辑框预填）
 }
 
 export async function fetchSchedules(): Promise<ScheduleJob[]> {
@@ -60,6 +61,18 @@ export async function updateSchedulePrompt(jobId: string, prompt: string): Promi
     body: JSON.stringify({ prompt })
   });
   if (!res.ok) throw new Error("Failed");
+}
+
+export async function updateScheduleCron(jobId: string, cron: string): Promise<void> {
+  const res = await fetch(`${API_URL}/schedule/${jobId}`, {
+    method: "PATCH",
+    headers: headers(),
+    body: JSON.stringify({ cron })
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed (${res.status})`);
+  }
 }
 
 export async function triggerSchedule(jobId: string): Promise<void> {

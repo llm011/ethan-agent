@@ -172,6 +172,7 @@ class SchedulePatchRequest(BaseModel):
     state: str | None = None
     title: str | None = None
     prompt: str | None = None
+    cron: str | None = None
 
 
 @router.patch("/{job_id}", dependencies=[Depends(verify_token)])

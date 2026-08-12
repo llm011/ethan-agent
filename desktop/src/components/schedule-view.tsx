@@ -1,14 +1,14 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom"
 import {
-  ScheduleJob, fetchSchedules, deleteSchedule, patchSchedule, renameSchedule, updateSchedulePrompt, triggerSchedule,
+  ScheduleJob, fetchSchedules, deleteSchedule, patchSchedule, renameSchedule, updateSchedulePrompt, updateScheduleCron, triggerSchedule,
   fetchSessions, SessionInfo,
 } from "@/lib/api";
 import { Badge } from "@ethan/shared/ui/badge";
 import { Button } from "@ethan/shared/ui/button";
 import { ScrollArea } from "@ethan/shared/ui/scroll-area";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@ethan/shared/ui/card";
-import { Loader2, RefreshCw, Play, Pause, Trash2, MessageSquare, ChevronDown, ChevronRight, Pencil, Clock, TerminalSquare, Zap } from "lucide-react";
+import { Loader2, RefreshCw, Play, Pause, Trash2, MessageSquare, ChevronDown, ChevronRight, Pencil, Clock, CalendarClock, TerminalSquare, Zap } from "lucide-react";
 import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
 import { formatTrigger, formatNextRun } from "@/lib/utils";
 import {
@@ -92,6 +92,7 @@ export function ScheduleView() {
   const [heartbeatExpanded, setHeartbeatExpanded] = useState(false);
   const [renameDialog, setRenameDialog] = useState<{ open: boolean; id: string; currentName: string }>({ open: false, id: "", currentName: "" });
   const [promptDialog, setPromptDialog] = useState<{ open: boolean; id: string; currentPrompt: string }>({ open: false, id: "", currentPrompt: "" });
+  const [cronDialog, setCronDialog] = useState<{ open: boolean; id: string; currentCron: string }>({ open: false, id: "", currentCron: "" });
 
   // ── Scene 维度：work / life 预置 + 动态发现 ──
   const scenes = useMemo(() => {
@@ -190,6 +191,23 @@ export function ScheduleView() {
       await updateSchedulePrompt(id, newPrompt);
     } catch (e) {
       console.error("Failed to update schedule prompt", e);
+      await loadData();
+    }
+  };
+
+  const openEditCron = (job: ScheduleJob) => {
+    setCronDialog({ open: true, id: job.id, currentCron: job.cron || "" });
+  };
+
+  const doEditCron = async (newCron: string) => {
+    const id = cronDialog.id;
+    setCronDialog({ open: false, id: "", currentCron: "" });
+    try {
+      await updateScheduleCron(id, newCron);
+      await loadData();  // 重新拉取以刷新 next_run_time / trigger 展示
+    } catch (e) {
+      console.error("Failed to update schedule cron", e);
+      alert(e instanceof Error ? e.message : "修改定时时间失败");
       await loadData();
     }
   };
@@ -325,6 +343,44 @@ export function ScheduleView() {
     );
   }
 
+  function EditCronDialog({ open, currentCron, onConfirm, onCancel }: {
+    open: boolean; currentCron: string; onConfirm: (cron: string) => void; onCancel: () => void
+  }) {
+    const [inputValue, setInputValue] = useState(currentCron);
+    useEffect(() => {
+      if (open) setInputValue(currentCron);
+    }, [open, currentCron]);
+    return (
+      <Dialog open={open} onOpenChange={(o: boolean) => !o && onCancel()}>
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>修改定时时间</DialogTitle>
+            <DialogDescription className="mt-1">
+              直接编辑 cron 表达式（5 段：分 时 日 月 周）。例：<code className="text-foreground">0 9 * * 1-5</code> 表示工作日每天 9:00。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 py-2">
+            <Input
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              placeholder="0 9 * * 1-5"
+              className="font-mono"
+              onKeyDown={(e) => e.key === "Enter" && inputValue.trim() && onConfirm(inputValue.trim())}
+              autoFocus
+            />
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
+              周字段：0/7=周日，1=周一 … 6=周六。留空的段用 <code>*</code>。仅支持 cron 周期任务，一次性任务请删除后重建。
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={onCancel}>取消</Button>
+            <Button onClick={() => inputValue.trim() && onConfirm(inputValue.trim())} disabled={!inputValue.trim()}>确认</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
   return (
     <div className="flex flex-col h-full bg-background text-foreground">
       <ConfirmDialog
@@ -334,6 +390,12 @@ export function ScheduleView() {
         confirmLabel="删除"
         onConfirm={doRemoveJob}
         onCancel={() => setConfirmState({ open: false, id: "" })}
+      />
+      <EditCronDialog
+        open={cronDialog.open}
+        currentCron={cronDialog.currentCron}
+        onConfirm={doEditCron}
+        onCancel={() => setCronDialog({ open: false, id: "", currentCron: "" })}
       />
       <RenameDialog
         open={renameDialog.open}
@@ -562,6 +624,11 @@ export function ScheduleView() {
                                   <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openRename(job)} title="重命名">
                                     <Pencil className="h-3 w-3" />
                                   </Button>
+                                  {job.cron && (
+                                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEditCron(job)} title="修改定时时间">
+                                      <CalendarClock className="h-3 w-3" />
+                                    </Button>
+                                  )}
                                   <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => navigate(`/chat/${job.session_id}`)} title="查看对话">
                                     <MessageSquare className="h-3 w-3" />
                                   </Button>
