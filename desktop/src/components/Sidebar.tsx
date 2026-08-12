@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom"
 import { Plus, Trash2, Search, Settings, Book, BookOpen, Pencil, Check, X, List, Wrench, RefreshCw, Loader2 } from "lucide-react";
-import { Clock, Database, Activity } from "lucide-react";
+import { Clock, Database } from "lucide-react";
 import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
 import { useSidebar } from "@/components/layout-shell";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
@@ -14,7 +14,6 @@ import {
   fetchSessions,
   fetchSchedules,
   fetchPoll,
-  fetchBackgroundTasks,
   deleteSession,
   renameSession,
   regenSessionTitle,
@@ -81,7 +80,6 @@ export function Sidebar() {
     return localStorage.getItem("ethan_sidebar_extension_expanded") !== "0";
   });
   const [schedules, setSchedules] = useState<any[]>([]);
-  const [runningTaskCount, setRunningTaskCount] = useState(0);
   const [modes, setModes] = useState<ModeEntry[]>([]);
   const [lastSeenSchedule, setLastSeenSchedule] = useState(() => {
     if (typeof window !== "undefined") {
@@ -197,18 +195,6 @@ export function Sidebar() {
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionSearch]);
-
-  // 后台任务运行数：菜单角标。每 5s 轮询（ethan 无 WS 推送）
-  useEffect(() => {
-    const tick = () => {
-      fetchBackgroundTasks()
-        .then(ts => setRunningTaskCount(ts.filter(t => t.status === "running").length))
-        .catch(() => {});
-    };
-    tick();
-    const interval = setInterval(tick, 5000);
-    return () => clearInterval(interval);
-  }, []);
 
   const handleNewSession = () => {
     navigate("/chat");
@@ -598,22 +584,6 @@ export function Sidebar() {
           onClick={() => goTo("/schedule")}
         >
           <Clock className="h-4 w-4 mr-2" /> 定时任务 (Schedule)
-        </Button>
-        <Button
-          variant="ghost"
-          className={`w-full justify-start h-9 px-3 ${
-            pathname === "/background-tasks"
-              ? "bg-sidebar-accent text-sidebar-accent-foreground"
-              : "text-muted-foreground"
-          }`}
-          onClick={() => goTo("/background-tasks")}
-        >
-          <Activity className="h-4 w-4 mr-2" /> 后台任务 (Tasks)
-          {runningTaskCount > 0 && (
-            <span className="ml-auto flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-medium">
-              {runningTaskCount}
-            </span>
-          )}
         </Button>
         <Button
           variant="ghost"
