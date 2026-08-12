@@ -63,12 +63,12 @@ LLM 会看到错误信息并决定如何处理（重试或换个方式）。
 
 ### DeliverFileTool — `ethan/tools/builtin/deliver_file.py`
 
-把本地生成的文件（pptx/pdf/docx/xlsx/csv/zip/md/html）以「文件卡片」形式交付到聊天消息。
-前端渲染 icon + 文件名 + 大小的卡片：pptx 且同目录是项目制 deck（含 `deck.json` + `pages/`）时
-点击进入 `/ppt-preview` 逐页预览页（可选下载 PPTX 或前端合成的 PDF），其余文件点击直接下载。
+把本地生成的文件（pptx/pdf/docx/xlsx/csv/zip/md/html/mp4）以「文件卡片」形式交付到聊天消息。
+前端渲染文件卡片：MP4 在 Web/Desktop 中显示带原生控制条的内嵌播放器和独立下载按钮；pptx 且同目录是项目制 deck（含 `deck.json` + `pages/`）时点击进入 `/ppt-preview` 逐页预览页（可选下载 PPTX 或前端合成的 PDF），其余文件点击直接下载。
 
 ```
 deliver_file(path="/Users/x/Downloads/报告/报告.pptx", title="年度报告")
+deliver_file(path="/Users/x/.ethan/output/article-to-video/demo/final.mp4", title="文章视频")
 ```
 
 - 路径 jail：只允许 home 目录和 /tmp 下的文件，扩展名白名单
@@ -78,6 +78,7 @@ deliver_file(path="/Users/x/Downloads/报告/报告.pptx", title="年度报告")
   并持久化到 messages 表的 `cards` 列（刷新不丢）
 - 下载/预览数据走 `/api/files/*` 路由（见 docs/interface.md）
 - ppt-generate skill 的 Step 9 把「渲染成功后必须调用本工具」列为硬性收尾步骤
+- article-to-video skill 用本工具交付可直接播放/下载的 MP4 成片，并另交付包含字幕、封面和 manifest 的 ZIP
 - **仅 owner 会话注入**（不进 `base_tools`/`fast_base_tools`）：本工具会把 home 下任意文件推成
   聊天里的对外文件卡片，但 `side_effect=False`，`ChannelGuardProvider` 拦不住——若无条件广播，
   飞书非主人会话或被注入的消息就能诱导模型交付任意文件。故与 `recall_memory` 同款，由

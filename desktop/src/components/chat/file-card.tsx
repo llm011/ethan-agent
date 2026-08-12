@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, type SyntheticEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { FileText, FileSpreadsheet, FileArchive, File as FileIcon, Presentation, Download, ImageIcon } from "lucide-react";
+import { FileText, FileSpreadsheet, FileArchive, File as FileIcon, Presentation, Download, ImageIcon, Video } from "lucide-react";
 import { getApiUrl, getAuthToken } from "@/lib/api-base";
 import { openUrl } from "@/lib/external-link";
 import { signFileUrl } from "@ethan/shared/ppt/preview";
@@ -37,7 +37,7 @@ async function downloadSignedUrl(path: string, sid: string): Promise<string> {
   return `${getApiUrl()}/files/download?path=${encodeURIComponent(path)}${sid}${sigQ}`;
 }
 
-// 内联查看图片的签名 URL（走 /files/view，inline 直出，供缩略图与 Lightbox 共用）
+// 内联查看媒体的签名 URL（走 /files/view，供图片 Lightbox 与 MP4 播放器共用）
 async function signedViewUrl(path: string, sid: string): Promise<string> {
   const sig = await signFileUrl(getApiUrl(), getAuthToken(), [path]);
   const s = sig[path];
@@ -88,13 +88,117 @@ function ImageFileCard({ card, sessionId }: { card: FileCard; sessionId?: string
   );
 }
 
-// 文件卡片：图片渲染缩略图 + Lightbox；pptx 且带项目目录时点击进 /ppt-preview 预览页；其余点击直接下载。
+function VideoFileCard({ card, sessionId }: { card: FileCard; sessionId?: string | null }) {
+  const [url, setUrl] = useState<string>("");
+  const [ratio, setRatio] = useState<string | null>(null); // 检测到的宽高比，竖屏用 9/16 否则用 16/9
+  const sid = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : "";
+  const refreshCountRef = useRef(0); // 防止 onError 无限循环：最多刷新一次签名，仍失败则降级
+
+  const refreshUrl = async (): Promise<string | undefined> => {
+    try {
+      const u = await signedViewUrl(card.path, sid);
+      setUrl(u);
+      return u;
+    } catch {
+      return undefined;
+    }
+  };
+
+  useEffect(() => {
+    let alive = true;
+    void signedViewUrl(card.path, sid)
+      .then((u) => { if (alive) setUrl(u); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [card.path, sid]);
+
+  // 签名 URL 有 10 分钟 TTL；用户点播放时若已过期会 401/403，此时换一次新签名再播。
+  // refreshCountRef 保证只刷新一次：刷新后仍失败说明视频永久损坏，清空 url 降级为下载。
+  const handlePlay = (e: SyntheticEvent<HTMLVideoElement>) => {
+    const video = e.currentTarget;
+    if (video.readyState === 0 || video.error) {
+      if (refreshCountRef.current >= 1) {
+        setUrl(""); // 第二次失败，清空降级为下载按钮
+        return;
+      }
+      refreshCountRef.current += 1;
+      void refreshUrl().then((fresh) => {
+        if (fresh) {
+          const t = video.currentTime;
+          video.src = fresh;
+          video.currentTime = t;
+          video.play().catch(() => {});
+        }
+      });
+    }
+  };
+
+  const onLoadedMetadata = (e: SyntheticEvent<HTMLVideoElement>) => {
+    const v = e.currentTarget;
+    if (v.videoWidth && v.videoHeight) {
+      setRatio(`${v.videoWidth} / ${v.videoHeight}`);
+    }
+  };
+
+  const handleDownload = async () => {
+    try {
+      openUrl(await downloadSignedUrl(card.path, sid));
+    } catch {
+      // 签名接口失败时静默处理，避免 unhandled rejection
+    }
+  };
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-border/50 bg-muted/30 w-full max-w-[520px]">
+      {url ? (
+        <video
+          src={url}
+          controls
+          preload="metadata"
+          // 不用固定的 aspect-video（16:9）：默认竖屏 1080×1920 会留大片黑边。
+          // 用检测到的真实宽高比，未检测到时回退 16/9（横屏）避免布局抖动。
+          style={{ aspectRatio: ratio ?? "16 / 9" }}
+          className="block w-full max-h-[520px] bg-black object-contain"
+          aria-label={card.title || card.filename}
+          onLoadedMetadata={onLoadedMetadata}
+          onPlay={handlePlay}
+          onError={handlePlay}
+        />
+      ) : (
+        <div className="flex items-center justify-center bg-black/90 text-muted-foreground" style={{ aspectRatio: ratio ?? "16 / 9" }}>
+          <Video className="h-8 w-8" />
+        </div>
+      )}
+      <div className="flex items-center gap-3 border-t border-border/50 px-3 py-2">
+        <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+          {card.title || card.filename}
+          {card.size_kb != null && ` · ${fmtSize(card.size_kb)}`}
+        </span>
+        <button
+          type="button"
+          onClick={() => void handleDownload()}
+          className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-primary hover:bg-primary/10"
+          aria-label={`下载 ${card.title || card.filename}`}
+        >
+          <Download className="h-3.5 w-3.5" />
+          下载
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// 文件卡片：图片渲染缩略图 + Lightbox；MP4 内嵌播放并保留下载按钮；
+// pptx 项目进入 /ppt-preview；其余点击直接下载。
 // 所有 URL 带 session_id——服务端只放行本 session 交付过的文件（会话级隔离）。
 export function FileCardView({ card, sessionId }: { card: FileCard; sessionId?: string | null }) {
   const navigate = useNavigate();
 
   if (IMAGE_KINDS.has(card.kind)) {
     return <ImageFileCard card={card} sessionId={sessionId} />;
+  }
+  if (card.kind === "mp4") {
+    return <VideoFileCard card={card} sessionId={sessionId} />;
   }
 
   const Icon = KIND_ICON[card.kind] ?? FileIcon;

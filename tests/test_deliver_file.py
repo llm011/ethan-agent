@@ -71,6 +71,34 @@ def test_deliver_file_non_project_no_preview():
     assert "page_count" not in card
 
 
+def test_deliver_file_mp4_card():
+    t = DeliverFileTool()
+    video = Path("/tmp/deliver_video.mp4")
+    video.write_bytes(b"fake-mp4" * 128)
+
+    r = _run(t.run(str(video), title="测试视频"))
+
+    assert r.cards and len(r.cards) == 1
+    card = r.cards[0]
+    assert card["filename"] == "deliver_video.mp4"
+    assert card["title"] == "测试视频"
+    assert card["kind"] == "mp4"
+    assert "project_dir" not in card
+
+
+def test_fallback_scan_does_not_auto_grant_mp4():
+    # .mp4 不在 FALLBACK_CARD_EXTS 里——视频是重交付物，正文提到路径不应自动建卡 + 授权。
+    # 必须经 deliver_file 显式交付（见 test_deliver_file_mp4_card）。
+    from ethan.core.file_jail import scan_file_cards_in_text
+
+    video = Path("/tmp/fallback_video.mp4")
+    video.write_bytes(b"fake-mp4")
+
+    cards = scan_file_cards_in_text(f"视频已生成：{video}", set())
+
+    assert cards == []
+
+
 # ── /api/files 路由 ─────────────────────────────────────────────────
 
 @pytest.fixture
@@ -370,8 +398,8 @@ def test_scan_file_cards_in_text():
     assert scan_file_cards_in_text(f"参考 {md}", set()) == []
 
 
-def test_view_endpoint_inline_image(client):
-    """/files/view 内联返回图片，非图片类型 400。"""
+def test_view_endpoint_inline_media(client):
+    """/files/view 内联返回图片和 MP4，其他文件类型 400。"""
     img = Path("/tmp/view_test.png")
     img.write_bytes(b"png-bytes")
     res = client.get(f"/api/files/view?path={img}&session_id=s1")
@@ -379,7 +407,21 @@ def test_view_endpoint_inline_image(client):
     assert res.content == b"png-bytes"
     assert "inline" in res.headers.get("content-disposition", "")
 
-    # 非图片（pptx）走 /view 应被拒
+    video = Path("/tmp/view_test.mp4")
+    video.write_bytes(b"0123456789abcdef")
+    video_res = client.get(f"/api/files/view?path={video}&session_id=s1")
+    assert video_res.status_code == 200
+    assert video_res.headers["content-type"] == "video/mp4"
+    assert "inline" in video_res.headers.get("content-disposition", "")
+
+    range_res = client.get(
+        f"/api/files/view?path={video}&session_id=s1",
+        headers={"Range": "bytes=0-3"},
+    )
+    assert range_res.status_code == 206
+    assert range_res.content == b"0123"
+
+    # 非媒体（pptx）走 /view 应被拒
     doc = Path("/tmp/view_test.pptx")
     doc.write_bytes(b"x")
     assert client.get(f"/api/files/view?path={doc}&session_id=s1").status_code == 400

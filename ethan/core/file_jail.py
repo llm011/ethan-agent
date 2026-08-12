@@ -11,9 +11,12 @@ from pathlib import Path
 # 与 ASSET_EXTS 内容一致但语义不同——ASSET_EXTS 限项目 assets/ 内引用，
 # IMAGE_EXTS 是「作为独立文件交付」的图片（deliver_file 直接交付一张图）。
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp"}
+# 可通过 /files/view 内联呈现的媒体类型。MP4 使用浏览器原生 video 控件，
+# 仍需经过与下载接口相同的 session grant 与签名校验。
+INLINE_VIEW_EXTS = IMAGE_EXTS | {".mp4"}
 # 允许交付/下载的扩展名（按需扩充）。图片并入——交付图片时走文件卡片（kind=png 等），
 # 前端识别图片 kind 后渲染缩略图 + 点击 Lightbox 放大，其余类型走下载/预览。
-DELIVER_EXTS = {".pptx", ".pdf", ".docx", ".xlsx", ".csv", ".zip", ".md", ".html"} | IMAGE_EXTS
+DELIVER_EXTS = {".pptx", ".pdf", ".docx", ".xlsx", ".csv", ".zip", ".md", ".html", ".mp4"} | IMAGE_EXTS
 # 项目 assets/ 里允许直出的图片扩展名
 ASSET_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp"}
 
@@ -78,6 +81,8 @@ def build_file_card(path: str, title: str = "") -> dict | None:
 
 
 # 兜底扫描只认「明确是产物」的高信号扩展名，避免正文里随手提到的 .md/.html 被误转成卡片。
+# 注意：.mp4 不在此列——视频是重交付物，正文里提到路径就自动建卡 + 授权下载会带来
+# 意外的播放器 UI 和授权面。视频必须经 deliver_file 显式交付（DELIVER_EXTS 仍含 .mp4）。
 FALLBACK_CARD_EXTS = {".pptx", ".pdf", ".docx", ".xlsx"} | IMAGE_EXTS
 
 

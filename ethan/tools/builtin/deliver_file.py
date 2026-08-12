@@ -15,9 +15,12 @@ from ethan.tools.base import BaseTool, ToolResult
 class DeliverFileTool(BaseTool):
     fast_path = False
     cacheable = False  # 同路径重复交付时文件内容已变，且缓存命中路径会丢 cards 载荷
+    # content 里的绝对路径模型必须逐字拿去 file_read，不能被 result_compressor 摘成散文
+    # （否则路径被改写/丢失，模型无法读取刚交付的文件）。见 CLAUDE.md 的 no_compress 规约。
+    no_compress = True
     name = "deliver_file"
     description = (
-        "Deliver a locally generated file (pptx/pdf/docx/xlsx/csv/zip/md/html) to the chat "
+        "Deliver a locally generated file (pptx/pdf/docx/xlsx/csv/zip/md/html/mp4) to the chat "
         "as a clickable file card with preview/download entry. Call this AFTER the file has "
         "been fully written to disk. The path must be absolute and under the user home or /tmp."
     )
