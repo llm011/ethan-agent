@@ -276,11 +276,12 @@ def _split_caption_text(text: str, maximum: int) -> list[str]:
             chunks.append(remaining[:split_at].strip())
             remaining = remaining[split_at:].lstrip()
         if remaining:
-            if chunks and len(chunks[-1]) + len(remaining) <= maximum:
-                # tail-merge：若前块非标点结尾且 remaining 非标点开头，补一个空格防词粘连。
-                prev_tail = chunks[-1][-1:]
-                next_head = remaining[0]
-                need_space = prev_tail and next_head and prev_tail not in "，。！？；,.!?;" and next_head not in "，。！？；,.!?;"
+            # tail-merge：若前块非标点结尾且 remaining 非标点开头，补一个空格防词粘连。
+            prev_tail = chunks[-1][-1:] if chunks else ""
+            next_head = remaining[0]
+            need_space = prev_tail and next_head and prev_tail not in "，。！？；,.!?;" and next_head not in "，。！？；,.!?;"
+            # 合并后长度要加上可能补的空格（+1 if need_space），不能只算两段原长。
+            if chunks and len(chunks[-1]) + len(remaining) + (1 if need_space else 0) <= maximum:
                 chunks[-1] = chunks[-1] + (" " if need_space else "") + remaining
             else:
                 chunks.append(remaining)
@@ -319,6 +320,10 @@ def _valid_tts_cache(media_path: Path, srt_path: Path) -> bool:
         return False
 
 
+# 同 key 的并发合成去重：多个场景 narration+voice 相同时只合成一次，后续 await 同一个 Future。
+_inflight_tts: dict[str, asyncio.Future[None]] = {}
+
+
 async def _synthesize_once(text: str, voice: dict[str, str], media_path: Path, srt_path: Path) -> None:
     try:
         import edge_tts
@@ -353,29 +358,45 @@ async def _synthesize_scene(scene: dict[str, Any], voice: dict[str, str], cache_
     cached_srt = cache_dir / f"{key}.srt"
     if _valid_tts_cache(cached_audio, cached_srt):
         return
-    cached_audio.unlink(missing_ok=True)
-    cached_srt.unlink(missing_ok=True)
-    last_error: Exception | None = None
-    for attempt in range(1, retries + 1):
-        nonce = uuid.uuid4().hex
-        pending_audio = cache_dir / f".{key}.{nonce}.mp3.tmp"
-        pending_srt = cache_dir / f".{key}.{nonce}.srt.tmp"
-        try:
-            await _synthesize_once(scene["narration"], voice, pending_audio, pending_srt)
-            if not _valid_tts_cache(pending_audio, pending_srt):
-                raise RuntimeError("Edge TTS produced an invalid cache entry")
-            pending_audio.replace(cached_audio)
-            pending_srt.replace(cached_srt)
-            last_error = None
-            break
-        except Exception as exc:  # network/service failures are retriable
-            last_error = exc
-            pending_audio.unlink(missing_ok=True)
-            pending_srt.unlink(missing_ok=True)
-            if attempt < retries:
-                await asyncio.sleep(attempt * 1.5)
-    if last_error is not None:
-        raise RuntimeError(f"TTS failed for scene {scene['id']}: {last_error}") from last_error
+    # 同 key 并发去重：首个合成者创建 Future 并执行，后续者 await 同一个 Future 不重复合成。
+    if key in _inflight_tts:
+        await _inflight_tts[key]
+        return
+    loop = asyncio.get_running_loop()
+    fut: asyncio.Future[None] = loop.create_future()
+    _inflight_tts[key] = fut
+    try:
+        cached_audio.unlink(missing_ok=True)
+        cached_srt.unlink(missing_ok=True)
+        last_error: Exception | None = None
+        for attempt in range(1, retries + 1):
+            nonce = uuid.uuid4().hex
+            pending_audio = cache_dir / f".{key}.{nonce}.mp3.tmp"
+            pending_srt = cache_dir / f".{key}.{nonce}.srt.tmp"
+            try:
+                await _synthesize_once(scene["narration"], voice, pending_audio, pending_srt)
+                if not _valid_tts_cache(pending_audio, pending_srt):
+                    raise RuntimeError("Edge TTS produced an invalid cache entry")
+                pending_audio.replace(cached_audio)
+                pending_srt.replace(cached_srt)
+                last_error = None
+                break
+            except Exception as exc:  # network/service failures are retriable
+                last_error = exc
+                pending_audio.unlink(missing_ok=True)
+                pending_srt.unlink(missing_ok=True)
+                if attempt < retries:
+                    await asyncio.sleep(attempt * 1.5)
+        if last_error is not None:
+            raise RuntimeError(f"TTS failed for scene {scene['id']}: {last_error}") from last_error
+        if not fut.done():
+            fut.set_result(None)
+    except BaseException as exc:
+        if not fut.done():
+            fut.set_exception(exc)
+        raise
+    finally:
+        _inflight_tts.pop(key, None)
 
 
 def synthesize_scenes(manifest: dict[str, Any], output_dir: Path, *, retries: int = 3) -> list[dict[str, Any]]:
@@ -386,12 +407,24 @@ def synthesize_scenes(manifest: dict[str, Any], output_dir: Path, *, retries: in
         directory.mkdir(parents=True, exist_ok=True)
 
     # 所有场景在同一个事件循环里并发合成（单场景内仍带重试），不再每场景一次 asyncio.run。
-    async def _synthesize_all() -> None:
-        await asyncio.gather(
-            *[_synthesize_scene(scene, manifest["voice"], cache_dir, retries=retries) for scene in manifest["scenes"]]
+    # return_exceptions=True 防止单场景失败级联取消其余协程（CancelledError 不会被
+    # except Exception 捕获，会留下 .tmp 残留文件）。收集结果后如有失败则统一抛出。
+    _inflight_tts.clear()  # 上次 run 的 Future 属于旧事件循环，必须清掉
+
+    async def _synthesize_all() -> list[BaseException | None]:
+        return await asyncio.gather(
+            *[_synthesize_scene(scene, manifest["voice"], cache_dir, retries=retries) for scene in manifest["scenes"]],
+            return_exceptions=True,
         )
 
-    asyncio.run(_synthesize_all())
+    results = asyncio.run(_synthesize_all())
+    failed = [(i, r) for i, r in enumerate(results) if isinstance(r, BaseException)]
+    if failed:
+        # 清理残留的 .tmp 文件
+        for tmp in cache_dir.glob(".*.tmp"):
+            tmp.unlink(missing_ok=True)
+        idx, exc = failed[0]
+        raise RuntimeError(f"TTS failed for scene {manifest['scenes'][idx]['id']}: {exc}") from exc
 
     artifacts: list[dict[str, Any]] = []
     for scene in manifest["scenes"]:
@@ -667,7 +700,7 @@ def main() -> int:
             result = run_pipeline(args.manifest.resolve(), args.output_dir.expanduser().resolve())
         print(json.dumps(result, ensure_ascii=False))
         return 0
-    except (ManifestError, RuntimeError, subprocess.CalledProcessError) as exc:
+    except Exception as exc:
         print(json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False), file=sys.stderr)
         return 1
 

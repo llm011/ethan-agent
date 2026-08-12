@@ -1,4 +1,4 @@
-import { useState, useEffect, type SyntheticEvent } from "react";
+import { useState, useEffect, useRef, type SyntheticEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { FileText, FileSpreadsheet, FileArchive, File as FileIcon, Presentation, Download, ImageIcon, Video } from "lucide-react";
 import { getApiUrl, getAuthToken } from "@/lib/api-base";
@@ -92,6 +92,7 @@ function VideoFileCard({ card, sessionId }: { card: FileCard; sessionId?: string
   const [url, setUrl] = useState<string>("");
   const [ratio, setRatio] = useState<string | null>(null); // 检测到的宽高比，竖屏用 9/16 否则用 16/9
   const sid = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : "";
+  const refreshCountRef = useRef(0); // 防止 onError 无限循环：最多刷新一次签名，仍失败则降级
 
   const refreshUrl = async (): Promise<string | undefined> => {
     try {
@@ -112,9 +113,15 @@ function VideoFileCard({ card, sessionId }: { card: FileCard; sessionId?: string
   }, [card.path, sid]);
 
   // 签名 URL 有 10 分钟 TTL；用户点播放时若已过期会 401/403，此时换一次新签名再播。
+  // refreshCountRef 保证只刷新一次：刷新后仍失败说明视频永久损坏，清空 url 降级为下载。
   const handlePlay = (e: SyntheticEvent<HTMLVideoElement>) => {
     const video = e.currentTarget;
     if (video.readyState === 0 || video.error) {
+      if (refreshCountRef.current >= 1) {
+        setUrl(""); // 第二次失败，清空降级为下载按钮
+        return;
+      }
+      refreshCountRef.current += 1;
       void refreshUrl().then((fresh) => {
         if (fresh) {
           const t = video.currentTime;
@@ -134,7 +141,11 @@ function VideoFileCard({ card, sessionId }: { card: FileCard; sessionId?: string
   };
 
   const handleDownload = async () => {
-    openUrl(await downloadSignedUrl(card.path, sid));
+    try {
+      openUrl(await downloadSignedUrl(card.path, sid));
+    } catch {
+      // 签名接口失败时静默处理，避免 unhandled rejection
+    }
   };
 
   return (
