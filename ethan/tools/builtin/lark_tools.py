@@ -1,10 +1,17 @@
-"""Lark CLI wrapper tools — calendar events, chat messages, message send."""
+"""Lark CLI wrapper tools — calendar events, chat messages, message send, auth."""
 from __future__ import annotations
 
 import asyncio
 import json
+import logging
 
 from ethan.tools.base import BaseTool
+
+logger = logging.getLogger(__name__)
+
+# 模块级存储：domain → device_code（跨工具调用传递）
+# LarkAuthStartTool 写入，LarkAuthCompleteTool 读取后清除
+_PENDING_DEVICE_CODES: dict[str, str] = {}
 
 
 class LarkCalendarEventsTool(BaseTool):
@@ -330,4 +337,189 @@ class LarkMessageSendTool(BaseTool):
         except asyncio.TimeoutError:
             return "lark-cli command timed out (15s)"
         except Exception as e:
+            return f"Error: {e}"
+
+
+class LarkAuthStartTool(BaseTool):
+    """Start Lark OAuth device flow — returns auth URL for user to visit.
+
+    Runs `lark-cli auth login --domain {domain} --no-wait --json` to get
+    device_code + auth URL. The device_code is stored internally for
+    LarkAuthCompleteTool to pick up after the user finishes authorization.
+
+    Typical flow:
+      1. LLM calls lark_auth_start → gets auth URL
+      2. LLM calls wait_for_user with the URL → user visits link, authorizes
+      3. User clicks "done" → LLM calls lark_auth_complete → OAuth finished
+    """
+
+    cacheable = False
+    side_effect = True
+    no_compress = False
+
+    name = "lark_auth_start"
+    description = (
+        "启动飞书 OAuth 设备码授权流程，返回授权链接。"
+        "调用后会运行 lark-cli auth login --no-wait，拿到设备码和授权链接。"
+        "接下来应该用 wait_for_user 工具把链接展示给用户，等用户完成授权后，"
+        "再调用 lark_auth_complete 完成授权。"
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "domain": {
+                "type": "string",
+                "description": "授权的域（如 calendar、im、drive、sheets 等）",
+            },
+        },
+        "required": ["domain"],
+    }
+
+    async def run(self, domain: str = "") -> str:
+        if not domain:
+            return "Error: domain is required (e.g. calendar, im, drive)"
+
+        try:
+            args = [
+                "lark-cli", "auth", "login",
+                "--domain", domain,
+                "--no-wait",
+                "--json",
+            ]
+            proc = await asyncio.create_subprocess_exec(
+                *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=15)
+            out_text = stdout.decode(errors="replace").strip()
+            err_text = stderr.decode(errors="replace").strip()
+
+            if proc.returncode != 0:
+                return f"lark-cli error (exit {proc.returncode}): {err_text or out_text}"
+
+            # 解析 JSON，提取 device_code 和 url
+            try:
+                data = json.loads(out_text)
+            except json.JSONDecodeError:
+                return f"Unexpected output (non-JSON): {out_text or err_text}"
+
+            # 尝试多种可能的字段名
+            device_code = (
+                data.get("device_code")
+                or data.get("deviceCode")
+                or data.get("data", {}).get("device_code")
+                or data.get("data", {}).get("deviceCode")
+                or ""
+            )
+            url = (
+                data.get("url")
+                or data.get("auth_url")
+                or data.get("verification_url")
+                or data.get("data", {}).get("url")
+                or data.get("data", {}).get("auth_url")
+                or data.get("data", {}).get("verification_url")
+                or ""
+            )
+
+            if not device_code:
+                if data.get("ok") or data.get("code") in (0, None):
+                    return f"Already authorized for domain '{domain}', or no device_code in response: {out_text}"
+                return f"Failed to get device_code: {data.get('msg', str(data))}"
+
+            # 存储 device_code 供 lark_auth_complete 使用
+            _PENDING_DEVICE_CODES[domain] = device_code
+
+            return (
+                f"OAuth flow started for domain '{domain}'.\n"
+                f"Auth URL: {url}\n"
+                f"Device code stored. Next: use wait_for_user to show the URL to user, "
+                f"then call lark_auth_complete with domain='{domain}' after user confirms."
+            )
+
+        except asyncio.TimeoutError:
+            return "lark-cli auth login timed out (15s)"
+        except Exception as e:
+            return f"Error: {e}"
+
+
+class LarkAuthCompleteTool(BaseTool):
+    """Complete Lark OAuth device flow — poll for authorization result.
+
+    Runs `lark-cli auth login --device-code {code}` to complete the OAuth flow.
+    The device_code is retrieved from the internal store populated by
+    LarkAuthStartTool.
+    """
+
+    cacheable = False
+    side_effect = True
+    no_compress = False
+
+    name = "lark_auth_complete"
+    description = (
+        "完成飞书 OAuth 授权。从 lark_auth_start 保存的设备码继续，"
+        "运行 lark-cli auth login --device-code 完成授权。"
+        "应在用户通过 wait_for_user 确认已完成授权后调用。"
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "domain": {
+                "type": "string",
+                "description": "授权的域（必须与 lark_auth_start 使用的 domain 一致）",
+            },
+        },
+        "required": ["domain"],
+    }
+
+    async def run(self, domain: str = "") -> str:
+        if not domain:
+            return "Error: domain is required"
+
+        device_code = _PENDING_DEVICE_CODES.pop(domain, None)
+        if not device_code:
+            return (
+                f"Error: No pending device_code for domain '{domain}'. "
+                f"Make sure lark_auth_start was called first with the same domain."
+            )
+
+        try:
+            args = [
+                "lark-cli", "auth", "login",
+                "--device-code", device_code,
+            ]
+            proc = await asyncio.create_subprocess_exec(
+                *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            # 授权完成可能需要轮询等待，给更长超时
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+            out_text = stdout.decode(errors="replace").strip()
+            err_text = stderr.decode(errors="replace").strip()
+
+            if proc.returncode != 0:
+                # 把 device_code 放回去，允许重试
+                _PENDING_DEVICE_CODES[domain] = device_code
+                return f"lark-cli error (exit {proc.returncode}): {err_text or out_text}"
+
+            # 解析结果
+            try:
+                data = json.loads(out_text)
+                if data.get("ok") or data.get("code") in (0, None):
+                    return f"Authorization completed successfully for domain '{domain}'."
+                return f"Authorization may have failed: {data.get('msg', str(data))}"
+            except json.JSONDecodeError:
+                return f"Authorization completed for domain '{domain}'. Output: {out_text or err_text}"
+
+        except asyncio.TimeoutError:
+            # 超时可能是用户还没完成授权，把 device_code 放回去允许重试
+            _PENDING_DEVICE_CODES[domain] = device_code
+            return (
+                "lark-cli auth login timed out (30s). "
+                "User may not have completed authorization yet. "
+                "Please ask the user to complete authorization and retry."
+            )
+        except Exception as e:
+            _PENDING_DEVICE_CODES[domain] = device_code
             return f"Error: {e}"
