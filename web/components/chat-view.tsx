@@ -23,6 +23,7 @@ import {
   respondConsent,
   respondBrowserCleanup,
   respondAskUser,
+  respondWaitForUser,
   getAnnotationsBatch,
   renameSession,
   type Annotation,
@@ -38,6 +39,7 @@ import { type ConsentRequest } from "@ethan/shared/components/consent-dialog";
 import { ConsentGate } from "@ethan/shared/chat/consent-card";
 import { CleanupConfirmGate, type CleanupConfirmRequest } from "@ethan/shared/chat/cleanup-confirm-card";
 import { AskUserCard, type AskUserRequest } from "@ethan/shared/chat/ask-user-card";
+import { WaitForUserCard, type WaitForUserRequest } from "@ethan/shared/chat/wait-for-user-card";
 import { placeholderTitle, mapDetailMessages, isFirstQuerySignificant } from "@/components/chat/chat-helpers";
 import { consumeStream, type ConsumeStreamActions } from "@/components/chat/use-chat-stream";
 import { handleCommand } from "@/components/chat/chat-commands";
@@ -60,6 +62,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   // 避免刚切到新会话时旧 streaming=true 还没刷新就被 if(streaming) return 拦截
   const streamingRef = useRef(false);
   const _setStreaming = (v: boolean) => { streamingRef.current = v; setStreaming(v); };
+  const streamAbortRef = useRef<AbortController | null>(null);
   const [bgPolling, setBgPolling] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
   const [activeSession, setActiveSession] = useState<string | null>(null);
@@ -75,6 +78,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const [consentRequest, setConsentRequest] = useState<ConsentRequest | null>(null);
   const [cleanupConfirm, setCleanupConfirm] = useState<CleanupConfirmRequest | null>(null);
   const [askUserRequest, setAskUserRequest] = useState<AskUserRequest | null>(null);
+  const [waitforUserRequest, setWaitForUserRequest] = useState<WaitForUserRequest | null>(null);
   const [mode, setMode] = useState<string>("");
   // 超级权限：开启后自动批准所有工具授权，任务中途不弹窗。持久化到 localStorage。
   const [autoConsent, setAutoConsent] = useState<boolean>(() => {
@@ -127,6 +131,13 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     setAskUserRequest(null);
     try {
       await respondAskUser(requestId, value);
+    } catch {}
+  };
+
+  const handleWaitForUserRespond = async (requestId: string, value: string) => {
+    setWaitForUserRequest(null);
+    try {
+      await respondWaitForUser(requestId, value);
     } catch {}
   };
 
@@ -201,13 +212,16 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
   // 构建 consumeStream 所需的 actions 对象
   const getStreamActions = (): ConsumeStreamActions => ({
-    setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setBgPolling,
+    setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setWaitForUserRequest, setBgPolling,
     setSessionTitle, setSessionUsage, setStopping, setStreaming: _setStreaming,
     activeSession,
   });
 
   // Load session when route param changes
   useEffect(() => {
+    streamAbortRef.current?.abort();
+    streamAbortRef.current = null;
+
     if (!initialSessionId) {
       // 切换到新会话 — 保存当前输入并切换状态机
       inputStore.switchTo(null, inputRef.current?.value);
@@ -287,14 +301,16 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
         if (detail.active_run) {
           _setStreaming(true);
-          const stream = await streamResume(initialSessionId).catch(() => null);
+          const ac = new AbortController();
+          streamAbortRef.current = ac;
+          const stream = await streamResume(initialSessionId, ac.signal).catch(() => null);
           if (cancelled) return;
           if (stream) {
             const base = loaded.length > 0 && loaded[loaded.length - 1].role === "assistant"
               ? loaded.slice(0, -1)
               : loaded;
             await consumeStream(stream, base, {
-              setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setBgPolling,
+              setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setWaitForUserRequest, setBgPolling,
               setSessionTitle, setSessionUsage, setStopping, setStreaming: _setStreaming,
               activeSession: initialSessionId,
             });
@@ -497,6 +513,9 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     setPendingFiles([]);
     setQuote(null);
     _setStreaming(true);
+    streamAbortRef.current?.abort();
+    const ac = new AbortController();
+    streamAbortRef.current = ac;
 
     const chatMessages: ChatMessage[] = newMessages.map((m) => ({
       role: m.role,
@@ -508,9 +527,9 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     }));
 
     await consumeStream(
-      streamChat(chatMessages, selectedModel, sessionId, { quote: sentQuote, mode, btw: isBtw, review: isReview, autoConsent }),
+      streamChat(chatMessages, selectedModel, sessionId, { quote: sentQuote, mode, btw: isBtw, review: isReview, autoConsent, signal: ac.signal }),
       newMessages,
-      { setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setBgPolling, setSessionTitle, setSessionUsage, setStopping, setStreaming: _setStreaming, activeSession: sessionId },
+      { setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setWaitForUserRequest, setBgPolling, setSessionTitle, setSessionUsage, setStopping, setStreaming: _setStreaming, activeSession: sessionId },
       true,
     );
   };
@@ -617,6 +636,11 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         {askUserRequest && (
           <div className="max-w-3xl mx-auto px-4 pb-2">
             <AskUserCard request={askUserRequest} onRespond={handleAskUserRespond} />
+          </div>
+        )}
+        {waitforUserRequest && (
+          <div className="max-w-3xl mx-auto px-4 pb-2">
+            <WaitForUserCard request={waitforUserRequest} onRespond={handleWaitForUserRespond} />
           </div>
         )}
         <ChatInput

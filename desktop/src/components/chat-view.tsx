@@ -16,6 +16,7 @@ import {
   updateSessionMode,
   respondConsent,
   respondAskUser,
+  respondWaitForUser,
   getAnnotationsBatch,
   renameSession,
   type Annotation,
@@ -37,6 +38,7 @@ import { type ConsentRequest } from "@ethan/shared/components/consent-dialog";
 import { ConsentGate } from "@ethan/shared/chat/consent-card";
 import { CleanupConfirmGate, type CleanupConfirmRequest } from "@ethan/shared/chat/cleanup-confirm-card";
 import { AskUserCard, type AskUserRequest } from "@ethan/shared/chat/ask-user-card";
+import { WaitForUserCard, type WaitForUserRequest } from "@ethan/shared/chat/wait-for-user-card";
 import { placeholderTitle, mapDetailMessages, isFirstQuerySignificant } from "@/components/chat/chat-helpers";
 import { consumeStream, type ConsumeStreamActions } from "@/components/chat/use-chat-stream";
 import { handleCommand } from "@/components/chat/chat-commands";
@@ -67,6 +69,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const [consentRequest, setConsentRequest] = useState<ConsentRequest | null>(null);
   const [cleanupConfirm, setCleanupConfirm] = useState<CleanupConfirmRequest | null>(null);
   const [askUserRequest, setAskUserRequest] = useState<AskUserRequest | null>(null);
+  const [waitforUserRequest, setWaitForUserRequest] = useState<WaitForUserRequest | null>(null);
   const [mode, setMode] = useState<string>("");
   // 超级权限：开启后自动批准所有工具授权，任务中途不弹窗。持久化到 localStorage。
   const [autoConsent, setAutoConsent] = useState<boolean>(() => {
@@ -117,6 +120,13 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     setAskUserRequest(null);
     try {
       await respondAskUser(requestId, value);
+    } catch {}
+  };
+
+  const handleWaitForUserRespond = async (requestId: string, value: string) => {
+    setWaitForUserRequest(null);
+    try {
+      await respondWaitForUser(requestId, value);
     } catch {}
   };
 
@@ -292,7 +302,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
               ? loaded.slice(0, -1)
               : loaded;
             await consumeStream(stream, base, {
-              setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setBgPolling,
+              setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setWaitForUserRequest, setBgPolling,
               setSessionTitle, setSessionUsage, setStopping, setStreaming,
               activeSession: initialSessionId,
             });
@@ -496,7 +506,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     await consumeStream(
       streamChat(chatMessages, selectedModel, sessionId, { quote: sentQuote, mode, btw: isBtw, review: isReview, autoConsent }),
       newMessages,
-      { setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setBgPolling, setSessionTitle, setSessionUsage, setStopping, setStreaming, activeSession: sessionId },
+      { setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setWaitForUserRequest, setBgPolling, setSessionTitle, setSessionUsage, setStopping, setStreaming, activeSession: sessionId },
       true,
     );
   };
@@ -616,6 +626,11 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         {askUserRequest && (
           <div className="max-w-3xl mx-auto px-4 pb-2">
             <AskUserCard request={askUserRequest} onRespond={handleAskUserRespond} />
+          </div>
+        )}
+        {waitforUserRequest && (
+          <div className="max-w-3xl mx-auto px-4 pb-2">
+            <WaitForUserCard request={waitforUserRequest} onRespond={handleWaitForUserRespond} />
           </div>
         )}
         <ChatInput

@@ -36,6 +36,8 @@ from ethan.tools.builtin.image_search import ImageSearchTool
 from ethan.tools.builtin.install_skill import InstallSkillTool
 from ethan.tools.builtin.knowledge import KnowledgeAddTool, KnowledgeEditTool, KnowledgeReadTool, KnowledgeSearchTool
 from ethan.tools.builtin.lark_tools import (
+    LarkAuthCompleteTool,
+    LarkAuthStartTool,
     LarkCalendarEventsTool,
     LarkChatMessagesTool,
     LarkMessageSendTool,
@@ -53,6 +55,7 @@ from ethan.tools.builtin.shell import ShellTool
 from ethan.tools.builtin.skill_create import SkillCreateTool
 from ethan.tools.builtin.skill_read import SkillListTool, SkillReadTool
 from ethan.tools.builtin.ui_card import UiCardTool
+from ethan.tools.builtin.wait_for_user import WaitForUserTool
 from ethan.tools.builtin.weather import WeatherTool
 from ethan.tools.builtin.web import WebFetchTool
 from ethan.tools.builtin.web_search import WebSearchTool
@@ -147,6 +150,7 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
     # full / lark：全量
     registry.register(DecideTool())
     registry.register(AskUserTool())
+    registry.register(WaitForUserTool())
     registry.register(RipgrepTool())
     registry.register(FdTool())
     registry.register(ScheduleCreateTool(user_id=user_id))
@@ -190,6 +194,8 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
         registry.register(LarkCalendarEventsTool())
         registry.register(LarkChatMessagesTool())
         registry.register(LarkMessageSendTool())
+        registry.register(LarkAuthStartTool())
+        registry.register(LarkAuthCompleteTool())
     # ui_card 在能渲染卡片的渠道注册：web/repl 走 A2UI，lark 走飞书 interactive 卡片。
     # 同一套结构化 card 数据，按渠道选渲染目标（见 UiCardTool）。api 等无渲染器的渠道不暴露。
     if channel in ("web", "repl", "lark", "schedule"):

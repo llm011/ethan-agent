@@ -160,6 +160,20 @@ export async function respondAskUser(requestId: string, value: string): Promise<
   return res.json();
 }
 
+/** 响应 wait_for_user 等待卡片：POST 用户的确认/取消/文本输入。 */
+export async function respondWaitForUser(requestId: string, value: string): Promise<{ ok: boolean }> {
+  const res = await fetch(`${getApiUrl()}/wait-for-user/${encodeURIComponent(requestId)}`, {
+    method: "POST",
+    headers: { ...headers(), "Content-Type": "application/json" },
+    body: JSON.stringify({ value }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed (${res.status})`);
+  }
+  return res.json();
+}
+
 /** 响应浏览器清理确认卡片：action="close" 关闭 tab group，action="keep" 保留。 */
 export async function respondBrowserCleanup(requestId: string, action: "close" | "keep"): Promise<{ ok: boolean }> {
   const res = await fetch(`${getApiUrl()}/browser/cleanup/${encodeURIComponent(requestId)}`, {

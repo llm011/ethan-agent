@@ -1739,6 +1739,47 @@ class Agent:
                     working.append(Message(role="tool", content=f"用户选择：{_ask_result}", tool_call_id=tc.id))
                     continue
 
+                # [wait_for_user 拦截] 等待用户完成外部操作（OAuth/浏览器操作等），不进 executor，长超时阻塞
+                if tc.name == "wait_for_user":
+                    from ethan.core.wait_for_user import WaitForUserProvider
+                    args = tc.arguments or {}
+                    prompt = args.get("prompt", "")
+                    input_type = args.get("input_type", "confirm")
+                    placeholder = args.get("placeholder", "")
+                    confirm_label = args.get("confirm_label", "已完成")
+                    cancel_label = args.get("cancel_label", "取消")
+                    timeout = min(int(args.get("timeout", 300)), 600)
+
+                    yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary=prompt,
+                                    state="start", skill_category=resolve_skill_category(tc.name, tc.arguments))
+
+                    _wfu_provider = WaitForUserProvider()
+                    _wfu_event, _wfu_fut = _wfu_provider.create(
+                        prompt, input_type, placeholder, confirm_label, cancel_label, timeout,
+                    )
+                    yield _wfu_event
+
+                    try:
+                        _wfu_result = await _aio.wait_for(_wfu_fut, timeout=timeout)
+                    except (_aio.CancelledError, _aio.TimeoutError):
+                        _wfu_result = "timeout"
+                        _wfu_provider.cancel_all()
+
+                    if _wfu_result == "timeout":
+                        _wfu_preview = "等待超时"
+                    elif _wfu_result == "cancel":
+                        _wfu_preview = "用户取消"
+                    elif _wfu_result == "done":
+                        _wfu_preview = "用户确认完成"
+                    else:
+                        _wfu_preview = f"用户输入：{_wfu_result}"
+
+                    yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary=prompt,
+                                    state="done", result_preview=_wfu_preview,
+                                    skill_category=resolve_skill_category(tc.name, tc.arguments))
+                    working.append(Message(role="tool", content=_wfu_preview, tool_call_id=tc.id))
+                    continue
+
                 consent_provider = get_consent_provider()
 
                 # (1) 渠道硬策略：如三方渠道认主人后，非主人不得执行 side_effect 工具。

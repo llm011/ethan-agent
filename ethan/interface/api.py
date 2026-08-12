@@ -36,6 +36,7 @@ from ethan.interface.routers import (
     settings,
     skills,
     ui_resources,
+    wait_for_user,
 )
 from ethan.memory.api_keys import APIKeyStore
 
@@ -216,6 +217,7 @@ app.include_router(logs.router, prefix="/api")
 app.include_router(models.router, prefix="/api")
 app.include_router(consent.router, prefix="/api")
 app.include_router(ask_user.router, prefix="/api")
+app.include_router(wait_for_user.router, prefix="/api")
 app.include_router(annotations.router, prefix="/api")
 app.include_router(reading.router, prefix="/api")  # /api/reading — 网页辅助阅读模式标注（按 URL 存 JSON）
 app.include_router(feishu_doc.router, prefix="/api")  # /api/feishu-doc — 扩展读飞书文档全文
