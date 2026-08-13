@@ -9,9 +9,13 @@ def _kb_for(user_id: str, scene: str = "") -> KnowledgeBase:
 
 
 _SCENE_DESC = (
-    "Scene/scope for isolation. Default 'work' for work-related queries. "
-    "Use 'life' for personal/life content. Use empty string '' only when explicitly searching across all scenes. "
-    "Different scenes are isolated — wrong scene = no results. When unsure, prefer 'work'."
+    "Scene/scope for isolation. Free-form string — pick any name that matches your "
+    "content taxonomy, e.g. 'work' (default, work/business queries), 'life' "
+    "(personal/life content), 'docs', 'books', 'legal', 'projects', 'recipes', etc. "
+    "Use empty string '' only when explicitly searching across ALL scenes. "
+    "Different scenes are fully isolated by directory — wrong scene = no results. "
+    "When unsure, use 'work' for professional tasks or 'life' for personal ones; "
+    "for domain-specific content you are free to invent a new scene name on the fly."
 )
 
 _FRONTMATTER_DESC = (
@@ -27,7 +31,7 @@ class KnowledgeSearchTool(BaseTool):
     fast_path = True  # 常驻：本地个人知识库是高频核心能力，fast 档也要直接可见，
                       # 否则模型看不到它、会被 getnote 等「知识库」字样的 skill 抢走
     name = "knowledge_search"
-    description = "搜索本地个人知识库（knowledge base）。**优先级高于 web_search**：用户问任何业务/项目/团队/文档相关问题时，必须先调本工具搜知识库，只有知识库无结果或确认无相关条目时才 fallback 到 web_search。scene 必传工作向查询用 'work'、生活类用 'life'，留空仅用于跨场景搜索；scene 选错会搜不到。注意：这是 ethan 内置的本地知识库，不是 Get笔记等外部笔记服务。"
+    description = "搜索本地个人知识库（knowledge base）。**优先级高于 web_search**：用户问任何业务/项目/团队/文档相关问题时，必须先调本工具搜知识库，只有知识库无结果或确认无相关条目时才 fallback 到 web_search。scene 必传：自由字符串，常用值 'work'（工作/业务）、'life'（生活/个人），也可以按分类自定义（如 'docs'/'books'/'legal'）；留空仅用于跨场景搜索；scene 选错会搜不到。注意：这是 ethan 内置的本地知识库，不是 Get笔记等外部笔记服务。"
     parameters = {
         "type": "object",
         "properties": {
