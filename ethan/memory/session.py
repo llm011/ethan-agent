@@ -7,6 +7,7 @@
 同一 db_path 只维护一个连接实例，消除多连接写锁竞争。
 """
 import asyncio
+import logging
 import re
 import shutil
 import time
@@ -17,6 +18,8 @@ from pathlib import Path
 import aiosqlite
 
 from ethan.providers.base import Message
+
+logger = logging.getLogger(__name__)
 
 
 class PaginatedList(list):
@@ -267,6 +270,7 @@ class SessionStore:
                 created_at REAL,
                 usage TEXT,
                 intermediate_blob_id INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'completed',
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
             )
         """)
@@ -288,7 +292,7 @@ class SessionStore:
         """)
         await self._db.commit()
         # Migration: add columns if they don't exist (for existing databases)
-        for col, definition in [("created_at", "REAL"), ("usage", "TEXT"), ("tool_steps", "TEXT"), ("thought", "TEXT"), ("quote", "TEXT"), ("a2ui", "TEXT"), ("mcp_apps", "TEXT"), ("images", "TEXT"), ("matched_skills", "TEXT"), ("ttfb_ms", "INTEGER"), ("total_ms", "INTEGER"), ("cards", "TEXT"), ("intermediate_blob_id", "INTEGER NOT NULL DEFAULT 0")]: 
+        for col, definition in [("created_at", "REAL"), ("usage", "TEXT"), ("tool_steps", "TEXT"), ("thought", "TEXT"), ("quote", "TEXT"), ("a2ui", "TEXT"), ("mcp_apps", "TEXT"), ("images", "TEXT"), ("matched_skills", "TEXT"), ("ttfb_ms", "INTEGER"), ("total_ms", "INTEGER"), ("cards", "TEXT"), ("intermediate_blob_id", "INTEGER NOT NULL DEFAULT 0"), ("status", "TEXT NOT NULL DEFAULT 'completed'")]: 
             try:
                 await self._db.execute(f"ALTER TABLE messages ADD COLUMN {col} {definition}")
                 await self._db.commit()
@@ -322,6 +326,18 @@ class SessionStore:
         try:
             await self._db.execute("ALTER TABLE sessions ADD COLUMN pinned_at REAL NOT NULL DEFAULT 0")
             await self._db.commit()
+        except Exception:
+            pass
+        # 启动扫描：把上次进程崩溃/重启时仍处于 running 的消息标记为 interrupted。
+        # running 状态只存在于进程内存（ChatRun），进程重启后这些消息永远不会被更新，
+        # 必须在此兜底标记，前端才能据此显示「继续」按钮。
+        try:
+            cursor = await self._db.execute(
+                "UPDATE messages SET status='interrupted' WHERE status='running'"
+            )
+            if cursor.rowcount > 0:
+                await self._db.commit()
+                logger.info("[SessionStore] Marked %d interrupted messages on startup", cursor.rowcount)
         except Exception:
             pass
 
@@ -467,8 +483,8 @@ class SessionStore:
         cards_json = json.dumps(msg.cards, ensure_ascii=False) if msg.cards else None
 
         cursor = await self._db.execute(
-            "INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui, images, matched_skills, ttfb_ms, total_ms, mcp_apps, cards, intermediate_blob_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (session_id, msg.role, msg.content, tool_calls_json, msg.tool_call_id, msg_created_at, usage_json, tool_steps_json, msg.thought, quote_json, a2ui_json, images_json, matched_skills_json, msg.ttfb_ms, msg.total_ms, mcp_apps_json, cards_json, 0),
+            "INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui, images, matched_skills, ttfb_ms, total_ms, mcp_apps, cards, intermediate_blob_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (session_id, msg.role, msg.content, tool_calls_json, msg.tool_call_id, msg_created_at, usage_json, tool_steps_json, msg.thought, quote_json, a2ui_json, images_json, matched_skills_json, msg.ttfb_ms, msg.total_ms, mcp_apps_json, cards_json, 0, msg.status),
         )
         await self._db.commit()
         row_id = cursor.lastrowid
@@ -496,13 +512,28 @@ class SessionStore:
         cards_json = json.dumps(msg.cards, ensure_ascii=False) if msg.cards else None
 
         await self._db.execute(
-            "UPDATE messages SET content=?, tool_calls=?, usage=?, tool_steps=?, thought=?, a2ui=?, mcp_apps=?, matched_skills=?, ttfb_ms=?, total_ms=?, cards=?, created_at=? "
+            "UPDATE messages SET content=?, tool_calls=?, usage=?, tool_steps=?, thought=?, a2ui=?, mcp_apps=?, matched_skills=?, ttfb_ms=?, total_ms=?, cards=?, created_at=?, status=? "
             "WHERE id=? AND session_id=?",
             (msg.content, tool_calls_json, usage_json, tool_steps_json, msg.thought, a2ui_json,
-             mcp_apps_json, matched_skills_json, msg.ttfb_ms, msg.total_ms, cards_json, msg.created_at or time.time(), row_id, session_id),
+             mcp_apps_json, matched_skills_json, msg.ttfb_ms, msg.total_ms, cards_json, msg.created_at or time.time(), msg.status, row_id, session_id),
         )
         await self._db.commit()
         msg.intermediate_blob_id = await self._ensure_intermediate_blob(session_id, row_id, msg)
+
+    async def update_message_status(self, row_id: int, status: str, expected: str | None = None) -> bool:
+        """原子更新消息状态。传入 expected 时仅当前状态匹配才更新（CAS），返回是否生效。"""
+        if expected:
+            cursor = await self._db.execute(
+                "UPDATE messages SET status=? WHERE id=? AND status=?",
+                (status, row_id, expected),
+            )
+        else:
+            cursor = await self._db.execute(
+                "UPDATE messages SET status=? WHERE id=?",
+                (status, row_id),
+            )
+        await self._db.commit()
+        return cursor.rowcount > 0
 
     async def delete_message_by_id(self, row_id: int) -> None:
         """按主键 id 删除单条消息（新 run 替换旧 run 时丢弃残留的进度占位行用）。"""
@@ -606,7 +637,7 @@ class SessionStore:
         )
 
         async with self._db.execute(
-            "SELECT id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui, images, matched_skills, ttfb_ms, total_ms, mcp_apps, cards, intermediate_blob_id FROM messages WHERE session_id = ? ORDER BY id",
+            "SELECT id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui, images, matched_skills, ttfb_ms, total_ms, mcp_apps, cards, intermediate_blob_id, status FROM messages WHERE session_id = ? ORDER BY id",
             (session_id,),
         ) as cursor:
             async for r in cursor:
@@ -625,6 +656,7 @@ class SessionStore:
                 mcp_apps = json.loads(r[15]) if len(r) > 15 and r[15] else None
                 cards = json.loads(r[16]) if len(r) > 16 and r[16] else None
                 intermediate_blob_id = int(r[17] or 0) if len(r) > 17 and r[17] is not None else 0
+                _status = r[18] if len(r) > 18 and r[18] else "completed"
                 session.messages.append(Message(
                     role=r[1], content=r[2],
                     id=r[0],
@@ -643,6 +675,7 @@ class SessionStore:
                     mcp_apps=mcp_apps,
                     cards=cards,
                     intermediate_blob_id=intermediate_blob_id,
+                    status=_status,
                 ))
 
         return session

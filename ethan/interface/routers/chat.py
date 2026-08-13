@@ -488,3 +488,63 @@ async def inject_message(session_id: str, req: InjectRequest, user_id: str = Dep
         raise HTTPException(status_code=400, detail="补充信息不能为空")
     run.inject(content)
     return {"ok": True, "queued": True}
+
+
+@router.post("/chat/{session_id}/resume/{message_id}")
+async def resume_from_message(session_id: str, message_id: int, request: Request,
+                              user_id: str = Depends(verify_token)):
+    """从一条中断的消息继续执行。
+
+    读取该消息的过程记录（intermediate blob 或从 tool_steps 重建），构造续接 prompt，
+    把原消息标记为 completed，然后走正常 chat 流程。前端点击「继续」按钮时调用。
+    """
+    store = await get_session_store()
+    session = await store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    target = None
+    for m in session.messages:
+        if getattr(m, "id", None) == message_id:
+            target = m
+            break
+    if not target:
+        raise HTTPException(status_code=404, detail="Message not found in this session")
+
+    # 原子 CAS：仅当状态仍为 interrupted 时才标记为 completed，防止并发重复触发
+    claimed = await store.update_message_status(message_id, "completed", expected="interrupted")
+    if not claimed:
+        raise HTTPException(status_code=409, detail="该消息已不处于中断状态，可能已被其他请求处理")
+
+    # 读取过程记录
+    process_md = ""
+    blob = await store.load_intermediate_blob(message_id)
+    if blob and not blob.get("missing"):
+        process_md = blob.get("content", "")
+    elif target.tool_steps:
+        from ethan.memory.session import _build_intermediate_markdown
+        process_md = _build_intermediate_markdown(target)
+
+    resume_context = (
+        "上面的任务因服务重启而中断。以下是中断前已完成的进度记录：\n\n"
+        + (process_md or "（无过程记录）")
+        + "\n\n请基于以上进度继续完成任务。注意：进度记录是工具调用的摘要，"
+        "可能缺少部分细节，请根据情况判断是否需要重新执行某些步骤。"
+    )
+
+    # 用 runtime_context 传递续跑上下文，避免污染用户消息历史
+    req = ChatRequest(
+        messages=[{"role": "user", "content": "继续执行"}],
+        session_id=session_id,
+        stream=True,
+        channel="web",
+        mode=session.mode,
+        auto_consent=_is_local(request),
+        runtime_context=resume_context,
+    )
+    try:
+        return await chat(req, request, user_id)
+    except Exception:
+        # chat 失败时回滚状态，让用户可以重试
+        await store.update_message_status(message_id, "interrupted")
+        raise

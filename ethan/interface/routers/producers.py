@@ -37,6 +37,7 @@ async def _save_progress(store: SessionStore, session_id: str,
         a2ui=a2ui,
         mcp_apps=mcp_apps,
         cards=cards,
+        status="running",
     )
     if progress_msg_id is None:
         return await store.save_message(session_id, msg)
@@ -393,6 +394,7 @@ async def _run_generation(
                         matched_skills=collector.matched_skills or None,
                         ttfb_ms=collector.ttfb_ms,
                         total_ms=collector.total_ms,
+                        status="stopped",
                     ))
                     await store.touch(session_id)
                 else:
@@ -414,6 +416,7 @@ async def _run_generation(
                     matched_skills=collector.matched_skills or None,
                     ttfb_ms=collector.ttfb_ms,
                     total_ms=collector.total_ms,
+                    status="stopped",
                 )
                 await store.save_message(session_id, stopped_msg)
                 await store.touch(session_id)
@@ -460,6 +463,7 @@ async def _run_generation(
                 matched_skills=collector.matched_skills or None,
                 ttfb_ms=collector.ttfb_ms,
                 total_ms=collector.total_ms,
+                status="interrupted",
             )
             try:
                 if progress_msg_id:

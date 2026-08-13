@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, memo } from "react";
 import Image from "next/image";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Quote as QuoteIcon, BookOpen as BookOpenIcon, Share2 as ShareIcon, Plus as PlusIcon, Send as SendIcon, Trash2 as TrashIcon } from "lucide-react";
+import { Quote as QuoteIcon, BookOpen as BookOpenIcon, Share2 as ShareIcon, Plus as PlusIcon, Send as SendIcon, Trash2 as TrashIcon, RotateCcw as RotateCcwIcon } from "lucide-react";
 import { ToolTimeline } from "@ethan/shared/components/tool-timeline";
 import { SwimlaneDiagram } from "@ethan/shared/components/swimlane-diagram";
 import { fmtTokens } from "@/lib/utils";
@@ -227,10 +227,11 @@ interface MessageBubbleProps {
   onInject?: (content: string) => Promise<{ ok: boolean; error?: string }>;
   onCancelTool?: (toolCallId: string) => void;
   onActionConfirm?: (message: string) => void;
+  onResume?: (msg: Message) => void;
   annotations?: Annotation[];
 }
 
-export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuote, onCardAction, onRead, onShare, onDelete, onInject, onCancelTool, onActionConfirm, annotations }: MessageBubbleProps) {
+export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuote, onCardAction, onRead, onShare, onDelete, onInject, onCancelTool, onActionConfirm, onResume, annotations }: MessageBubbleProps) {
   const [highlightedStep, setHighlightedStep] = useState<number | undefined>(undefined);
   // 思考过程（thought）默认展开，用户可手动折叠
   const [thoughtOpen, setThoughtOpen] = useState(true);
@@ -447,6 +448,7 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
                   </summary>
                   <div className="px-3 py-2 border-t border-border/50 bg-background/30 process-record">
                     <MarkdownContent content={msg.intermediateOutput} />
+                    <button onClick={() => setProcessOpen(false)} className="mt-2 text-xs text-muted-foreground hover:text-foreground transition-colors">收起 ↑</button>
                   </div>
                 </details>
               )
@@ -478,6 +480,9 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
                   ) : (
                     <div className="text-xs text-muted-foreground/70">已保存 · 点击展开加载</div>
                   )}
+                  {intermediateContent && (
+                    <button onClick={() => setIntermediateOpen(false)} className="mt-2 text-xs text-muted-foreground hover:text-foreground transition-colors">收起 ↑</button>
+                  )}
                 </div>
               </details>
             ) : null}
@@ -498,6 +503,17 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
                 isLast={isLast}
                 onConfirm={onActionConfirm}
               />
+            )}
+            {msg.role === "assistant" && msg.status === "interrupted" && onResume && !isStreaming && (
+              <div className="flex items-center mt-2 mb-1">
+                <button
+                  onClick={() => onResume(msg)}
+                  className="text-xs px-2.5 py-1 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20 transition-colors inline-flex items-center gap-1"
+                >
+                  <RotateCcwIcon className="h-3 w-3" />
+                  继续执行
+                </button>
+              </div>
             )}
             <div className="flex justify-end items-center mt-2 gap-1.5 text-[10px] text-muted-foreground/40 tabular-nums flex-wrap">
               {msg.model && (

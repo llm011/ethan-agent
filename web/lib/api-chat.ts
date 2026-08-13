@@ -46,6 +46,26 @@ async function* parseSSE(res: Response): AsyncGenerator<StreamChunk> {
   }
 }
 
+/** 从一条中断的消息继续执行：后端读取过程记录并构造续接 prompt，走正常 chat 流程。 */
+export async function* resumeFromMessage(
+  sessionId: string,
+  messageId: number,
+): AsyncGenerator<StreamChunk> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}/chat/${encodeURIComponent(sessionId)}/resume/${encodeURIComponent(messageId)}`, {
+      method: "POST",
+      headers: headers(),
+    });
+  } catch {
+    throw new Error("连接不上 Ethan 服务，请确认后端已启动后重试。");
+  }
+  if (!res.ok) {
+    throw new Error(await friendlyHttpError(res));
+  }
+  yield* parseSSE(res);
+}
+
 export async function* streamChat(
   messages: ChatMessage[],
   model?: string,

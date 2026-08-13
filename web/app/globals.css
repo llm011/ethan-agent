@@ -466,6 +466,8 @@
   font-size: 0.72em;
   border-radius: 0.4rem;
   line-height: 1.5;
+  max-height: 300px;
+  overflow-y: auto;
 }
 .process-record .prose code { font-size: 0.85em; }
 .process-record .prose :not(pre) > code {
