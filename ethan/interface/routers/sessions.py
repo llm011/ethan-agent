@@ -72,7 +72,7 @@ async def list_sessions(limit: int = 50, offset: int = 0, q: str | None = None,
                                            exclude_title_prefixes=exclude_prefixes or None,
                                            include_title_prefixes=include_prefixes,
                                            has_images=has_images)
-        total = len(sessions)
+        total = getattr(sessions, "total", len(sessions))
     return {"sessions": [
         {
             "id": s.id,
