@@ -273,7 +273,7 @@ export async function consumeStream(
       }
     }
   } catch (err) {
-    if (err instanceof DOMException && err.name === "AbortError") {
+    if ((err as { name?: string })?.name === "AbortError") {
       // 切换会话/发新消息 abort 旧流：清理残留的交互卡片状态，避免新会话误显示
       setConsentRequest(null);
       setCleanupConfirm(null);
@@ -282,7 +282,7 @@ export async function consumeStream(
       return;
     }
     const errMsg = err instanceof Error ? err.message : "";
-    const isNetworkDrop = /load failed|network|aborted|connection|SSE connection dropped/i.test(errMsg);
+    const isNetworkDrop = /load failed|network|connection|SSE connection dropped/i.test(errMsg);
     if (isNetworkDrop && activeSession) {
       // SSE 静默断开 — 尝试重连活跃 run，失败再拉最终结果
       try {
@@ -369,7 +369,7 @@ export async function consumeStream(
         }
       } catch (reconnectErr) {
         // reconnect 中被 abort：与顶层 AbortError 同处理
-        if (reconnectErr instanceof DOMException && reconnectErr.name === "AbortError") {
+        if ((reconnectErr as { name?: string })?.name === "AbortError") {
           setConsentRequest(null);
           setCleanupConfirm(null);
           setAskUserRequest(null);

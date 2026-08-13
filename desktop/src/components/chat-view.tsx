@@ -55,6 +55,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const messagesRef = useRef<Message[]>(messages);
   messagesRef.current = messages;
   const [streaming, setStreaming] = useState(false);
+  const streamingRef = useRef(false);
+  const _setStreaming = (v: boolean) => { streamingRef.current = v; setStreaming(v); };
   const [bgPolling, setBgPolling] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
   const [activeSession, setActiveSession] = useState<string | null>(null);
@@ -87,6 +89,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const [readingMessage, setReadingMessage] = useState<Message | null>(null);
   const [shareMessage, setShareMessage] = useState<Message | null>(null);
   const [shareDefaultKey, setShareDefaultKey] = useState<string | null>(null);
+
+  const streamAbortRef = useRef<AbortController | null>(null);
 
   // 输入框状态机：按 session 缓存 draft 和排队消息
   const inputStore = useInputStore();
@@ -210,7 +214,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setWaitForUserRequest, setBgPolling,
         setSessionTitle, setSessionUsage, setStopping, setStreaming: _setStreaming,
         activeSession,
-      });
+      }, false, ac.signal);
     } catch {
       _setStreaming(false);
     }
@@ -514,6 +518,9 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     setPendingFiles([]);
     setQuote(null);
     setStreaming(true);
+    streamAbortRef.current?.abort();
+    const ac = new AbortController();
+    streamAbortRef.current = ac;
 
     const chatMessages: ChatMessage[] = newMessages.map((m) => ({
       role: m.role,
@@ -529,6 +536,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       newMessages,
       { setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setWaitForUserRequest, setBgPolling, setSessionTitle, setSessionUsage, setStopping, setStreaming, activeSession: sessionId },
       true,
+      ac.signal,
     );
   };
   handleSendRef.current = handleSend;

@@ -368,7 +368,7 @@ export async function consumeStream(
           }
         }
       } catch (reconnectErr) {
-        if (reconnectErr instanceof DOMException && reconnectErr.name === "AbortError") {
+        if ((reconnectErr as { name?: string })?.name === "AbortError") {
           setConsentRequest(null);
           setCleanupConfirm(null);
           setAskUserRequest(null);
