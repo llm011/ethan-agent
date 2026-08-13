@@ -326,14 +326,14 @@ async def _run_generation(
             elif isinstance(item, ToolEvent):
                 collector.feed(item)
                 if item.state == "start":
-                    step = collector.tool_steps[-1]
+                    step = collector.tool_steps[-1] if collector.tool_steps else {}
                     run.emit({"tool": item.tool_name, "args": item.args_summary, "state": "start",
                               "id": item.tool_call_id, "intent": item.intent or "",
                               "entity_type": item.entity_type or "",
                               "entity_id": item.entity_id or "",
                               "injected": step.get("injected", [])})
                 else:
-                    step = collector.tool_steps[-1]
+                    step = collector.tool_steps[-1] if collector.tool_steps else {}
                     evt = {
                         "tool": item.tool_name,
                         "args": item.args_summary,
@@ -437,6 +437,7 @@ async def _run_generation(
         _RunManager_schedule_removal(run.session_id)
         raise
     except Exception as e:
+        logger.exception("Generation failed session=%s", session_id)
         err_text = _friendly_error(e, agent)
         if not err_text:
             # transient DB error (e.g. locked) — suppress, task already done
@@ -473,6 +474,10 @@ async def _run_generation(
                 await store.touch(session_id)
             except Exception:
                 logger.exception("保存错误消息失败 session=%s", session_id)
+        run.emit({"done": True, "usage": collector.usage_dict})
+        run.finish()
+        _RunManager_schedule_removal(run.session_id)
+        return
     finally:
         # 流结束（正常/异常）时取消未决授权 Future，避免泄漏
         if consent is not None:
