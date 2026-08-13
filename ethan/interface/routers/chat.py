@@ -488,3 +488,57 @@ async def inject_message(session_id: str, req: InjectRequest, user_id: str = Dep
         raise HTTPException(status_code=400, detail="补充信息不能为空")
     run.inject(content)
     return {"ok": True, "queued": True}
+
+
+@router.post("/chat/{session_id}/resume/{message_id}")
+async def resume_from_message(session_id: str, message_id: int, request: Request,
+                              user_id: str = Depends(verify_token)):
+    """从一条中断的消息继续执行。
+
+    读取该消息的过程记录（intermediate blob 或从 tool_steps 重建），构造续接 prompt，
+    把原消息标记为 completed，然后走正常 chat 流程。前端点击「继续」按钮时调用。
+    """
+    store = await get_session_store()
+    session = await store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    target = None
+    for m in session.messages:
+        if getattr(m, "id", None) == message_id:
+            target = m
+            break
+    if not target:
+        raise HTTPException(status_code=404, detail="Message not found in this session")
+    if getattr(target, "status", "completed") != "interrupted":
+        raise HTTPException(status_code=400, detail="该消息未处于中断状态，无法继续")
+
+    # 读取过程记录
+    process_md = ""
+    blob = await store.load_intermediate_blob(message_id)
+    if blob and not blob.get("missing"):
+        process_md = blob.get("content", "")
+    elif target.tool_steps:
+        from ethan.memory.session import _build_intermediate_markdown
+        process_md = _build_intermediate_markdown(target)
+
+    resume_prompt = (
+        "上面的任务因服务重启而中断。以下是中断前已完成的进度记录：\n\n"
+        + (process_md or "（无过程记录）")
+        + "\n\n请基于以上进度继续完成任务。注意：进度记录是工具调用的摘要，"
+        "可能缺少部分细节，请根据情况判断是否需要重新执行某些步骤。"
+    )
+
+    # 原消息不再是 interrupted（避免重复点击继续）
+    await store.update_message_status(message_id, "completed")
+
+    # 构造 ChatRequest 转发给正常 chat 流程
+    req = ChatRequest(
+        messages=[{"role": "user", "content": resume_prompt}],
+        session_id=session_id,
+        stream=True,
+        channel="web",
+        mode=session.mode,
+        auto_consent=_is_local(request),
+    )
+    return await chat(req, request, user_id)

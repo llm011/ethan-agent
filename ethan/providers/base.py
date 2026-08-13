@@ -37,6 +37,7 @@ class Message:
     total_ms: Optional[int] = None  # 从请求到完成的总耗时（毫秒）
     cards: Optional[list] = None  # 结构化卡片数据（web_search/image_search 产出），前端按 type 渲染横向滚动卡片
     intermediate_blob_id: int = 0  # 中间过程正文外置文件索引；0 表示无
+    status: str = "completed"  # running | completed | interrupted | stopped — 消息生成状态，用于中断检测与续跑
 
     @property
     def is_tool_call(self) -> bool:

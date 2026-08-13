@@ -84,5 +84,6 @@ export function mapDetailMessages(detail: { messages: any[] }): Message[] {
     ttfb_ms: m.ttfb_ms ?? undefined,
     total_ms: m.total_ms ?? undefined,
     model: m.model || undefined,
+    status: m.status || undefined,
   }));
 }
