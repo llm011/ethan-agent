@@ -510,8 +510,11 @@ async def resume_from_message(session_id: str, message_id: int, request: Request
             break
     if not target:
         raise HTTPException(status_code=404, detail="Message not found in this session")
-    if getattr(target, "status", "completed") != "interrupted":
-        raise HTTPException(status_code=400, detail="该消息未处于中断状态，无法继续")
+
+    # 原子 CAS：仅当状态仍为 interrupted 时才标记为 completed，防止并发重复触发
+    claimed = await store.update_message_status(message_id, "completed", expected="interrupted")
+    if not claimed:
+        raise HTTPException(status_code=409, detail="该消息已不处于中断状态，可能已被其他请求处理")
 
     # 读取过程记录
     process_md = ""
@@ -522,23 +525,26 @@ async def resume_from_message(session_id: str, message_id: int, request: Request
         from ethan.memory.session import _build_intermediate_markdown
         process_md = _build_intermediate_markdown(target)
 
-    resume_prompt = (
+    resume_context = (
         "上面的任务因服务重启而中断。以下是中断前已完成的进度记录：\n\n"
         + (process_md or "（无过程记录）")
         + "\n\n请基于以上进度继续完成任务。注意：进度记录是工具调用的摘要，"
         "可能缺少部分细节，请根据情况判断是否需要重新执行某些步骤。"
     )
 
-    # 原消息不再是 interrupted（避免重复点击继续）
-    await store.update_message_status(message_id, "completed")
-
-    # 构造 ChatRequest 转发给正常 chat 流程
+    # 用 runtime_context 传递续跑上下文，避免污染用户消息历史
     req = ChatRequest(
-        messages=[{"role": "user", "content": resume_prompt}],
+        messages=[{"role": "user", "content": "继续执行"}],
         session_id=session_id,
         stream=True,
         channel="web",
         mode=session.mode,
         auto_consent=_is_local(request),
+        runtime_context=resume_context,
     )
-    return await chat(req, request, user_id)
+    try:
+        return await chat(req, request, user_id)
+    except Exception:
+        # chat 失败时回滚状态，让用户可以重试
+        await store.update_message_status(message_id, "interrupted")
+        raise

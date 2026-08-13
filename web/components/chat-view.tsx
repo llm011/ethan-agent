@@ -14,6 +14,7 @@ import {
   fetchSchedules,
   streamChat,
   streamResume,
+  resumeFromMessage,
   stopGeneration,
   cancelToolCall,
   injectMessage,
@@ -206,6 +207,25 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const handleActionConfirm = useCallback((message: string) => {
     handleSendRef.current(message);
   }, []);
+
+  const handleResume = useCallback(async (msg: Message) => {
+    if (!activeSession || msg.id == null) return;
+    _setStreaming(true);
+    streamAbortRef.current?.abort();
+    const ac = new AbortController();
+    streamAbortRef.current = ac;
+    try {
+      const stream = resumeFromMessage(activeSession, msg.id);
+      await consumeStream(stream, messages, {
+        setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setWaitForUserRequest, setBgPolling,
+        setSessionTitle, setSessionUsage, setStopping, setStreaming: _setStreaming,
+        activeSession,
+      });
+    } catch {
+      _setStreaming(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSession, messages]);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const justFinishedRef = useRef<string | null>(null);
@@ -597,6 +617,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         onInject={handleInject}
         onCancelTool={handleCancelTool}
         onActionConfirm={handleActionConfirm}
+        onResume={handleResume}
         annotationsByMessage={annotationsByMessage}
       />
       )}

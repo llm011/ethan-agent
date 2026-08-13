@@ -520,13 +520,20 @@ class SessionStore:
         await self._db.commit()
         msg.intermediate_blob_id = await self._ensure_intermediate_blob(session_id, row_id, msg)
 
-    async def update_message_status(self, row_id: int, status: str) -> None:
-        """单独更新消息状态（续跑时把 interrupted 消息标记为 completed 用）。"""
-        await self._db.execute(
-            "UPDATE messages SET status=? WHERE id=?",
-            (status, row_id),
-        )
+    async def update_message_status(self, row_id: int, status: str, expected: str | None = None) -> bool:
+        """原子更新消息状态。传入 expected 时仅当前状态匹配才更新（CAS），返回是否生效。"""
+        if expected:
+            cursor = await self._db.execute(
+                "UPDATE messages SET status=? WHERE id=? AND status=?",
+                (status, row_id, expected),
+            )
+        else:
+            cursor = await self._db.execute(
+                "UPDATE messages SET status=? WHERE id=?",
+                (status, row_id),
+            )
         await self._db.commit()
+        return cursor.rowcount > 0
 
     async def delete_message_by_id(self, row_id: int) -> None:
         """按主键 id 删除单条消息（新 run 替换旧 run 时丢弃残留的进度占位行用）。"""

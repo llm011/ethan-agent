@@ -463,6 +463,7 @@ async def _run_generation(
                 matched_skills=collector.matched_skills or None,
                 ttfb_ms=collector.ttfb_ms,
                 total_ms=collector.total_ms,
+                status="interrupted",
             )
             try:
                 if progress_msg_id:
