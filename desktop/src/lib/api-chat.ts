@@ -116,9 +116,10 @@ async function friendlyHttpError(res: Response): Promise<string> {
 
 /** 重连一个仍在进行的生成：刷新页面后调此函数，回放缓冲 + 继续实时。
  *  无活跃 run 时后端返回 204，这里返回 null，调用方走普通 fetchSession。 */
-export async function streamResume(sessionId: string): Promise<AsyncGenerator<StreamChunk> | null> {
+export async function streamResume(sessionId: string, signal?: AbortSignal): Promise<AsyncGenerator<StreamChunk> | null> {
   const res = await fetch(`${getApiUrl()}/chat/${encodeURIComponent(sessionId)}/stream`, {
     headers: headers(),
+    signal,
   });
   if (res.status === 204 || !res.ok) return null;
   return parseSSE(res);

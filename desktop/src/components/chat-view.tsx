@@ -315,8 +315,9 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
         if (detail.active_run) {
           setStreaming(true);
-          const stream = await streamResume(initialSessionId).catch(() => null);
-          if (cancelled) return;
+          const resumeAc = new AbortController();
+          const stream = await streamResume(initialSessionId, resumeAc.signal).catch(() => null);
+          if (cancelled) { resumeAc.abort(); return; }
           if (stream) {
             const base = loaded.length > 0 && loaded[loaded.length - 1].role === "assistant"
               ? loaded.slice(0, -1)
@@ -325,7 +326,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
               setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setWaitForUserRequest, setBgPolling,
               setSessionTitle, setSessionUsage, setStopping, setStreaming,
               activeSession: initialSessionId,
-            });
+            }, false, resumeAc.signal);
           } else {
             setStreaming(false);
             const fresh = await fetchSession(initialSessionId).catch(() => null);
