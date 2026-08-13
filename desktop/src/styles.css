@@ -385,7 +385,9 @@
   text-align: left;
   vertical-align: top;
   min-width: 88px;
-  white-space: nowrap;
+  max-width: 620px;
+  white-space: normal;
+  word-break: break-word;
   line-height: 1.5;
 }
 .prose .table-wrapper th {
