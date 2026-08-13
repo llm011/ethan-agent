@@ -21,6 +21,7 @@ import {
 } from "@ethan/shared/ui/dialog";
 import { Input } from "@ethan/shared/ui/input";
 import { Textarea } from "@ethan/shared/ui/textarea";
+import { MdEditor } from "@/components/md-editor";
 
 // ── Timeline helpers ─────────────────────────────────────────────
 interface DateGroup {
@@ -320,21 +321,20 @@ export function ScheduleView() {
     }, [open, currentPrompt]);
     return (
       <Dialog open={open} onOpenChange={(o: boolean) => !o && onCancel()}>
-        <DialogContent showCloseButton={false}>
-          <DialogHeader>
+        <DialogContent showCloseButton={false} className="max-w-3xl h-[70vh] flex flex-col">
+          <DialogHeader className="shrink-0">
             <DialogTitle>编辑任务内容</DialogTitle>
-            <DialogDescription className="mt-1">修改定时任务执行时发送的 prompt：</DialogDescription>
+            <DialogDescription className="mt-1">修改定时任务执行时发送的 prompt（支持 Markdown）：</DialogDescription>
           </DialogHeader>
-          <div className="space-y-2 py-2">
-            <Textarea
+          <div className="flex-1 min-h-0 py-2">
+            <MdEditor
               value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
+              onChange={setInputValue}
               placeholder="输入任务内容"
-              rows={5}
-              autoFocus
+              defaultMode="edit"
             />
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0">
             <Button variant="outline" onClick={onCancel}>取消</Button>
             <Button onClick={() => inputValue.trim() && onConfirm(inputValue.trim())} disabled={!inputValue.trim()}>确认</Button>
           </DialogFooter>
