@@ -55,7 +55,7 @@
 
       img.addEventListener('error', handleError, { once: true });
       // Handle images that already failed before listener was attached
-      if (img.complete && img.naturalWidth === 0) handleError();
+      if (img.complete && img.naturalWidth === 0) { handleError(); return; }
 
       // 包装
       const wrap = document.createElement('div');
