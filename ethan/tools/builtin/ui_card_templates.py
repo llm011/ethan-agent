@@ -139,9 +139,35 @@ def _build_stats(card: dict) -> list[dict]:
     return [_surface(sid), _components(sid, comps)]
 
 
+def _extract_body_items(node: dict) -> list[str] | None:
+    """从节点抽取分点文本，返回规范化后的条目列表；无正文返回 None。
+
+    字段优先级：items（推荐，与 rank/stats 命名一致）> body。
+    body 支持 str | list[str]：str 按真换行切块，list[str] 直接用。
+    """
+    src = node.get("items")
+    if src is None:
+        src = node.get("body")
+    if src is None or src == "":
+        return None
+    if isinstance(src, list):
+        items: list[str] = []
+        for x in src:
+            t = _text(x)
+            if t.strip():
+                items.append(t.strip())
+        return items or None
+    text = _text(src)
+    lines = [ln.strip() for ln in text.split("\n")]
+    lines = [ln for ln in lines if ln]
+    return lines or None
+
+
 def _build_timeline(card: dict) -> list[dict]:
-    """时间轴卡：title + Timeline（每个节点 = 标题 + 可选正文）。
-    card = {title, nodes:[{title, body?}]}
+    """时间轴卡：title + Timeline（每个节点 = 标题 + 可选正文分点）。
+
+    card = {title, nodes:[{title, body?: str|list[str], items?: list[str]}]}
+    - body 与 items 二选一即可，传 string 是一段正文，传数组是分点罗列。
     """
     sid = "timeline"
     nodes = card.get("nodes") or []
@@ -155,9 +181,25 @@ def _build_timeline(card: dict) -> list[dict]:
         node_ids.append(nid)
         node_children = [f"{nid}-t"]
         comps.append({"id": f"{nid}-t", "component": "Text", "text": _text(n.get("title", "")), "variant": "h4"})
-        if n.get("body"):
-            node_children.append(f"{nid}-b")
-            comps.append({"id": f"{nid}-b", "component": "Text", "text": _text(n["body"])})
+        items = _extract_body_items(n)
+        if items:
+            if len(items) == 1:
+                # 单段：复用旧结构，视觉与历史卡片完全一致
+                node_children.append(f"{nid}-b")
+                comps.append({"id": f"{nid}-b", "component": "Text", "text": items[0]})
+            else:
+                # 多分点：每项一个 Text，前缀 "• "，整体 Column 包一层
+                bullet_ids: list[str] = []
+                for bi, txt in enumerate(items):
+                    bid = f"{nid}-b{bi}"
+                    bullet_ids.append(bid)
+                    comps.append({
+                        "id": bid,
+                        "component": "Text",
+                        "text": f"• {txt}",
+                    })
+                node_children.append(f"{nid}-blist")
+                comps.append({"id": f"{nid}-blist", "component": "Column", "gap": 4, "children": bullet_ids})
         comps.append({"id": nid, "component": "Column", "children": node_children})
     comps.append({"id": "tl", "component": "Timeline", "children": node_ids})
 
