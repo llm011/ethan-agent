@@ -28,6 +28,7 @@ class Message:
     created_at: Optional[float] = None
     tool_steps: Optional[list] = field(default_factory=list)  # ToolEvent 执行摘要
     thought: Optional[str] = None  # 独立分离出来的思考过程
+    reasoning: Optional[str] = None  # DeepSeek/Anthropic reasoning_content 原始思考链；续跑时回传 API
     quote: Optional[dict] = None  # 用户引用的某条历史消息 {role, content}，持久化以便刷新后仍显示引用气泡
     a2ui: Optional[list] = None  # ui_card 工具产出的 A2UI envelope 列表，持久化以便刷新后仍渲染卡片
     mcp_apps: Optional[list] = None  # 工具 UI 资源列表 [{uri, data}]，持久化后刷新仍可重渲染交互式图表
