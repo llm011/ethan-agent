@@ -75,11 +75,17 @@ class OpenAICompatProvider(BaseProvider):
                     }
                     for tc in msg.tool_calls
                 ]
-                result.append({
+                msg_dict = {
                     "role": "assistant",
                     "content": msg.content or None,
                     "tool_calls": oai_tool_calls,
-                })
+                }
+                if msg.reasoning:
+                    # DeepSeek / deepseek-reasoner 等 reasoning 模型要求：上一轮 API 返回过
+                    # reasoning_content（思考过程），下一轮请求必须原样回传在 assistant 消息里，
+                    # 否则返回 400: "The reasoning_content in the thinking mode must be passed back to the API."
+                    msg_dict["reasoning_content"] = msg.reasoning
+                result.append(msg_dict)
             elif msg.role == "user" and msg.images:
                 # 普通用户图片消息（发送时粘贴的图），同样先刷积压图片
                 result.extend(pending_img_messages)
@@ -103,7 +109,11 @@ class OpenAICompatProvider(BaseProvider):
                 # 能到这里的 assistant 必然无 tool_calls），Gemini 不接受纯空 assistant 消息
                 if msg.role == "assistant" and not msg.content:
                     continue
-                result.append({"role": msg.role, "content": msg.content})
+                out = {"role": msg.role, "content": msg.content}
+                if msg.role == "assistant" and msg.reasoning:
+                    # reasoning_content 回传：详见上方 is_tool_call 分支注释
+                    out["reasoning_content"] = msg.reasoning
+                result.append(out)
 
         # 末尾剩余的图片消息（最后一组 tool messages 后面没有后续消息时）
         result.extend(pending_img_messages)
@@ -300,6 +310,23 @@ class OpenAICompatProvider(BaseProvider):
 
         return results
 
+    # --- reasoning / thinking 协议（DeepSeek R1 / deepseek-reasoner / 兼容 reasoning_content 的转发）---
+
+    _REASONING_MODEL_PATTERNS = ("reasoner", "reasoning", "-r1", "deepseek-r")
+
+    def _is_reasoning_model(self, oai_messages: list[dict]) -> bool:
+        """启发式判断当前请求是否需要开启 thinking 模式并回传 reasoning_content：
+        - 模型名命中 reasoner/reasoning/-r1/deepseek-r 关键字；或
+        - 历史里已有 assistant 消息带 reasoning_content（说明上游要求续跑保持 thinking）。
+        """
+        model = (self._model or "").lower()
+        if any(k in model for k in self._REASONING_MODEL_PATTERNS):
+            return True
+        return any(
+            m.get("role") == "assistant" and m.get("reasoning_content")
+            for m in oai_messages
+        )
+
     async def chat(
         self,
         messages: list[Message],
@@ -320,6 +347,8 @@ class OpenAICompatProvider(BaseProvider):
         if tools:
             kwargs["tools"] = self._to_openai_tools(tools)
             kwargs["tool_choice"] = "auto"
+        if self._is_reasoning_model(oai_messages):
+            kwargs["thinking"] = {"type": "enabled"}
 
         response = await self._client.chat.completions.create(**kwargs)
         if not response.choices:
@@ -345,6 +374,8 @@ class OpenAICompatProvider(BaseProvider):
         if tools:
             kwargs["tools"] = self._to_openai_tools(tools)
             kwargs["tool_choice"] = "auto"
+        if self._is_reasoning_model(oai_messages):
+            kwargs["thinking"] = {"type": "enabled"}
 
         tool_calls_acc: dict[int, dict] = {}
         final_tool_calls: list[ToolCall] = []
