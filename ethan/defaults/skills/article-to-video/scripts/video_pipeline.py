@@ -629,7 +629,7 @@ def build_timeline(
 def _run_command(command: list[str], *, cwd: Path) -> None:
     # 捕获 stderr，失败时把 Node/Remotion/pnpm 的诊断写进 run-status.json，
     # 否则只留 "non-zero exit status 1"，agent 无法定位渲染失败原因。
-    completed = subprocess.run(command, cwd=cwd, check=False, capture_output=True, text=True)
+    completed = subprocess.run(command, cwd=cwd, check=False, capture_output=True, text=True, timeout=1200)
     if completed.returncode != 0:
         stderr = completed.stderr.strip()
         detail = f"\nstderr:\n{stderr}" if stderr else ""
@@ -831,6 +831,7 @@ def publish_outputs(output_dir: Path, run_id: str) -> dict[str, Any]:
 
     # Check if outputs already exist in output_dir (from a previous partial publish).
     already_published = (output_dir / "final.mp4").exists() and (output_dir / "cover.png").exists()
+    staged_archive: Path | None = None
     if already_published:
         # Read existing report from output_dir (source may have been moved already).
         existing_report = output_dir / "render-report.json"
@@ -851,7 +852,7 @@ def publish_outputs(output_dir: Path, run_id: str) -> dict[str, Any]:
         "final.mp4": render_dir / "final.mp4",
         "cover.png": render_dir / "cover.png",
         "render-report.json": render_dir / "render-report.json",
-        "deliverables.zip": staged_archive if not already_published else output_dir / "deliverables.zip",
+        "deliverables.zip": staged_archive or (output_dir / "deliverables.zip"),
     }
     for name, src in staged_outputs.items():
         dest = output_dir / name
@@ -878,12 +879,10 @@ def _infer_run_id(output_dir: Path) -> str | None:
     render_runs = output_dir / "work" / "render-runs"
     if not render_runs.is_dir():
         return None
-    dirs = sorted(
-        [d for d in render_runs.iterdir() if d.is_dir()],
-        key=lambda d: d.name,
-        reverse=True,
-    )
-    return dirs[0].name if dirs else None
+    dirs = [d for d in render_runs.iterdir() if d.is_dir()]
+    if not dirs:
+        return None
+    return max(dirs, key=lambda d: d.name).name
 
 
 def _handle_status(output_dir: Path) -> dict[str, Any]:
@@ -910,7 +909,7 @@ def _handle_status(output_dir: Path) -> dict[str, Any]:
             return result
     elif status == "render-ok-publish-failed":
         retry_count = status_data.get("retryCount", 0) + 1
-        if retry_count >= MAX_PUBLISH_RETRIES:
+        if retry_count > MAX_PUBLISH_RETRIES:
             result = {"status": "error", "runId": run_id, "error": f"publish failed after {MAX_PUBLISH_RETRIES} retries: {status_data.get('error', '')}"}
             _write_json_atomic(status_path, result)
             return result
