@@ -934,9 +934,15 @@ class MemoryStore:
                 # evidence 被清（理论上 dormant 不脱敏不会发生）时跳过而非中断整批
                 logger.warning("wake skipped for %s: no evidence", memory_id)
                 continue
-            from ethan.memory.memory_vectors import index_memory
+            try:
+                from ethan.memory.memory_vectors import index_memory
 
-            index_memory(self.get_memory(memory_id), db_path=self._db_path)
+                index_memory(self.get_memory(memory_id), db_path=self._db_path)
+            except Exception:
+                # sqlite-vec 虚拟表 UNIQUE 约束等异常在 index_memory 内部未必被
+                # 完全吞掉（virtual table 的 OperationalError 有时穿透 Python
+                # try/except）。唤醒失败只意味着该记忆晚一步再索引，不阻塞主链路。
+                logger.debug("[MemoryStore] reindex failed for %s during wake", memory_id, exc_info=True)
             woken += 1
         return woken
 

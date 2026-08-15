@@ -351,6 +351,7 @@ class AdmissionPolicy:
                     )
                     if existing:
                         self._store.add_evidence(self._evidence_from_candidate(candidate, existing.id))
+                        self._maybe_clear_tentative(existing, candidate)
                         self._store.mark_candidate_processed(candidate.id, CandidateStatus.MERGED.value, "reinforced", existing.id)
                         return existing.id, OUTCOME_MERGED
                     self._store.mark_candidate_processed(candidate.id, CandidateStatus.REJECTED.value, "race")
@@ -373,6 +374,7 @@ class AdmissionPolicy:
             )
             if existing:
                 self._store.add_evidence(self._evidence_from_candidate(candidate, existing.id, EvidenceLevel.INFERRED.value))
+                self._maybe_clear_tentative(existing, candidate)
                 self._store.mark_candidate_processed(candidate.id, CandidateStatus.MERGED.value, "reinforced", existing.id)
                 return existing.id, OUTCOME_MERGED
             self._store.mark_candidate_processed(candidate.id, CandidateStatus.REJECTED.value, "race")

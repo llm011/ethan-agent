@@ -764,3 +764,657 @@ def test_project_admission_wakes_dormant_scope(tmp_path, hash_embed):
     got = store.get_memory(old_id)
     assert got.status == MemoryStatus.ACTIVE.value and got.dormant_at is None
     store.close()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 全量场景测试：review 边界 + 生命周期组合 + 多信号交互
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── 1. Tier 判定边界 ─────────────────────────────────────────────────────────
+
+
+def test_tier_priority_a_overrides_c(tmp_path):
+    """A 豁免压过 tentative：user scope + tentative → A。"""
+    assert memory_tier(make_record(scope_type="user", tentative=True)) == TIER_A
+    assert memory_tier(make_record(scope_type="user_domain", tentative=True)) == TIER_A
+    assert memory_tier(make_record(scope_type="user_skill", tentative=True)) == TIER_A
+
+
+def test_tier_priority_c_overrides_b():
+    """decision/activity tentative → C；其他类型 tentative → B。"""
+    assert memory_tier(make_record(tentative=True)) == TIER_C
+    assert memory_tier(make_record(memory_type="activity", dimension="activity.focus", tentative=True)) == TIER_C
+    # methodology 不接受 tentative
+    assert memory_tier(make_record(memory_type="methodology", dimension="methodology.approach", tentative=True)) == TIER_B
+    # relationship.* 是 Tier A 豁免维度，tentative 无效
+    assert memory_tier(make_record(memory_type="relationship", dimension="relationship.agreement", tentative=True)) == TIER_A
+
+
+def test_tier_case_insensitive_dimension_prefix():
+    """dimension 前缀大小写不敏感。"""
+    r = make_record(memory_type="preference", dimension="Preference.Content")
+    assert memory_tier(r) == TIER_A
+
+
+# ── 2. rank_decay_factor 边界 ───────────────────────────────────────────────
+
+
+def test_rank_decay_factor_zero_half_life_is_exempt(monkeypatch):
+    """半衰期 0 → 因子恒 1.0（豁免行为）。"""
+    monkeypatch.setattr("ethan.memory.decay.HALF_LIFE_B_DAYS", 0)
+    r = make_record(updated_at=NOW - 365 * DAY)
+    assert rank_decay_factor(r, NOW) == 1.0
+
+
+def test_rank_decay_factor_negative_half_life(monkeypatch):
+    """非法半衰期 → 因子恒 1.0（防御）。"""
+    monkeypatch.setattr("ethan.memory.decay.HALF_LIFE_C_DAYS", -5)
+    r = make_record(tentative=True, updated_at=NOW - 30 * DAY)
+    assert rank_decay_factor(r, NOW) == 1.0
+
+
+def test_rank_decay_factor_companion_tier_a_always_1():
+    """companion 域记忆因子恒 1.0。"""
+    r = make_record(
+        memory_type="companion", dimension="companion.emotional_event",
+        scope_type="mode", scope_id="companion", updated_at=NOW - 365 * DAY,
+    )
+    assert rank_decay_factor(r, NOW) == 1.0
+
+
+def test_rank_decay_factor_evidence_resets_anchor(tmp_path):
+    """add_evidence bump updated_at → 重置衰减锚点。"""
+    real_now = _time.time()
+    store = MemoryStore(tmp_path / "memory.db")
+    old = make_record(updated_at=real_now - 60 * DAY, created_at=real_now - 60 * DAY)
+    add_memory(store, old, evidence_at=real_now - 60 * DAY)
+    # 模拟 add_evidence bump（写入 evidence + 更新 updated_at）
+    store.add_evidence(MemoryEvidence(
+        memory_id=old.id, evidence_level="explicit",
+        source_session_id="s2", source_message_id="m2",
+        source_role="user", source_quote="强化", created_at=real_now,
+    ))
+    refreshed = store.get_memory(old.id)
+    # add_evidence 将 updated_at bump 到 time.time()，与 real_now 基本一致 → 因子 ~1.0
+    assert rank_decay_factor(refreshed, real_now) == pytest.approx(1.0, abs=0.05)
+    store.close()
+
+
+# ── 3. 休眠检测：多信号交互 ─────────────────────────────────────────────────
+
+
+def test_project_21day_exact_boundary(tmp_path, decay_on):
+    """刚好 21 天前的 updated_at → 不休眠（>=cutoff）。"""
+    store = MemoryStore(tmp_path / "memory.db")
+    exactly_21 = NOW - 21 * DAY
+    d = make_record(content="边界记忆", updated_at=exactly_21, created_at=exactly_21)
+    add_memory(store, d, evidence_at=exactly_21)
+    result = apply_memory_decay(store, NOW)
+    assert result["dormanted"] == 0
+    assert store.get_memory(d.id).status == MemoryStatus.ACTIVE.value
+    store.close()
+
+
+def test_project_22day_dormant(tmp_path, decay_on):
+    """超过 21 天 → 休眠。"""
+    store = MemoryStore(tmp_path / "memory.db")
+    d = make_record(content="过期记忆", updated_at=NOW - 22 * DAY, created_at=NOW - 22 * DAY)
+    add_memory(store, d, evidence_at=NOW - 22 * DAY)
+    result = apply_memory_decay(store, NOW)
+    assert result["dormanted"] == 1
+    store.close()
+
+
+def test_add_evidence_bump_prevents_dormancy(tmp_path, decay_on):
+    """add_evidence bump updated_at → 即使 created_at 很旧，scope 仍活跃。"""
+    real_now = _time.time()
+    store = MemoryStore(tmp_path / "memory.db")
+    d = make_record(content="路线B", updated_at=real_now - 30 * DAY, created_at=real_now - 30 * DAY)
+    add_memory(store, d, evidence_at=real_now - 30 * DAY)
+    # add_evidence bump updated_at（与当前实现一致）
+    store.add_evidence(MemoryEvidence(
+        memory_id=d.id, evidence_level="explicit",
+        source_session_id="s2", source_message_id="m2",
+        source_role="user", source_quote="还是路线B", created_at=real_now,
+    ))
+    result = apply_memory_decay(store, real_now)
+    assert result["dormanted"] == 0
+    store.close()
+
+
+def test_tentative_with_created_at_blocks_dormancy(tmp_path, decay_on):
+    """tentative 的 created_at 新但 updated_at 旧 → 不应休眠（四路 MAX 含 created_at）。"""
+    store = MemoryStore(tmp_path / "memory.db")
+    # created_at 是昨天，updated_at 是 20 天前（旧）
+    d = make_record(
+        content="先试方案X", tentative=True,
+        updated_at=NOW - 20 * DAY, created_at=NOW - 1 * DAY,
+    )
+    add_memory(store, d, evidence_at=NOW - 20 * DAY)
+    result = apply_memory_decay(store, NOW)
+    assert result["decayed"] == 0, "created_at 新 → 四路 MAX 新 → 不应归档"
+    assert store.get_memory(d.id).status == MemoryStatus.ACTIVE.value
+    store.close()
+
+
+def test_fresh_dormant_not_forgotten(tmp_path, decay_on):
+    """刚 dormant（dormant_at=昨天）→ 不应被 forgotten。"""
+    store = MemoryStore(tmp_path / "memory.db")
+    d = make_record(content="刚归档")
+    add_memory(store, d)
+    store.bulk_set_dormant([d.id])
+    conn = store._get_conn()
+    conn.execute("UPDATE memories SET dormant_at=? WHERE id=?", (NOW - 1 * DAY, d.id))
+    conn.commit()
+    result = apply_memory_decay(store, NOW)
+    assert result["forgotten"] == 0
+    assert store.get_memory(d.id).status == MemoryStatus.DORMANT.value
+    store.close()
+
+
+def test_exactly_180_days_not_forgotten(tmp_path, decay_on):
+    """dormant_at 恰好 180 天前 → 不被 forgotten（>=cutoff）。"""
+    store = MemoryStore(tmp_path / "memory.db")
+    d = make_record(content="180天边界")
+    add_memory(store, d)
+    store.bulk_set_dormant([d.id])
+    conn = store._get_conn()
+    conn.execute("UPDATE memories SET dormant_at=? WHERE id=?", (NOW - 180 * DAY, d.id))
+    conn.commit()
+    result = apply_memory_decay(store, NOW)
+    assert result["forgotten"] == 0
+    assert store.get_memory(d.id).status == MemoryStatus.DORMANT.value
+    store.close()
+
+
+# ── 4. 置信度晋升：阶梯 + 不动 updated_at ──────────────────────────────────
+
+
+def test_promotion_ladder_progression(tmp_path):
+    """从 0.6 开始，逐步增加 evidence session 数，置信度阶梯递增。"""
+    store = MemoryStore(tmp_path / "memory.db")
+    pref = make_record(
+        content="精读论文做成PPT", memory_type="preference",
+        dimension="preference.content", scope_type="user", scope_id="self",
+        confidence=0.6,
+    )
+    add_memory(store, pref, sessions=("s1",))  # 1 session → None
+    assert apply_confidence_promotion(store, NOW) == 0
+    assert store.get_memory(pref.id).confidence == 0.6
+
+    # 补到 2 session → 0.8
+    store.add_evidence(MemoryEvidence(
+        memory_id=pref.id, evidence_level="explicit",
+        source_session_id="s2", source_message_id="m2",
+        source_role="user", source_quote="做PPT", created_at=NOW,
+    ))
+    assert apply_confidence_promotion(store, NOW) == 1
+    assert store.get_memory(pref.id).confidence == 0.8
+
+    # 补到 3 session → 0.9
+    store.add_evidence(MemoryEvidence(
+        memory_id=pref.id, evidence_level="explicit",
+        source_session_id="s3", source_message_id="m3",
+        source_role="user", source_quote="做PPT", created_at=NOW,
+    ))
+    assert apply_confidence_promotion(store, NOW) == 1
+    assert store.get_memory(pref.id).confidence == 0.9
+
+    # 补到 5 session → 0.95
+    store.add_evidence(MemoryEvidence(
+        memory_id=pref.id, evidence_level="explicit",
+        source_session_id="s4", source_message_id="m4",
+        source_role="user", source_quote="做PPT", created_at=NOW,
+    ))
+    store.add_evidence(MemoryEvidence(
+        memory_id=pref.id, evidence_level="explicit",
+        source_session_id="s5", source_message_id="m5",
+        source_role="user", source_quote="做PPT", created_at=NOW,
+    ))
+    assert apply_confidence_promotion(store, NOW) == 1
+    assert store.get_memory(pref.id).confidence == 0.95
+
+    # 再多也不超 0.95（封顶）
+    store.add_evidence(MemoryEvidence(
+        memory_id=pref.id, evidence_level="explicit",
+        source_session_id="s6", source_message_id="m6",
+        source_role="user", source_quote="做PPT", created_at=NOW,
+    ))
+    assert apply_confidence_promotion(store, NOW) == 0  # 已封顶
+    assert store.get_memory(pref.id).confidence == 0.95
+    store.close()
+
+
+def test_promotion_monotonic_never_decreases(tmp_path):
+    """晋升只做 max(conf, 阶梯值)，永远不会降低置信度。"""
+    store = MemoryStore(tmp_path / "memory.db")
+    # 已经 0.95 的记忆
+    high = make_record(
+        content="高置信偏好", memory_type="preference",
+        dimension="preference.content", scope_type="user", scope_id="self",
+        confidence=0.95,
+    )
+    add_memory(store, high, sessions=("s1", "s2", "s3", "s4", "s5"))
+    assert apply_confidence_promotion(store, NOW) == 0
+    assert store.get_memory(high.id).confidence == 0.95
+
+    # 0.8 的记忆有 5 session → 应该升到 0.95，不是降
+    mid = make_record(
+        content="中置信偏好", memory_type="preference",
+        dimension="preference.content:mid",
+        memory_key="preference.content:mid",
+        scope_type="user", scope_id="self", confidence=0.8,
+    )
+    add_memory(store, mid, sessions=("s1", "s2", "s3", "s4", "s5"))
+    assert apply_confidence_promotion(store, NOW) == 1
+    assert store.get_memory(mid.id).confidence == 0.95
+    store.close()
+
+
+def test_promotion_domain_filter(tmp_path, monkeypatch):
+    """PROMOTE_DOMAINS 过滤：只提升 general 域。"""
+    monkeypatch.setattr("ethan.memory.decay.PROMOTE_DOMAINS", {"general"})
+    store = MemoryStore(tmp_path / "memory.db")
+    comp = make_record(
+        content="陪伴记忆", memory_type="companion",
+        dimension="companion.emotional_event", scope_type="mode", scope_id="companion",
+        confidence=0.6,
+    )
+    add_memory(store, comp, sessions=("s1", "s2", "s3"))
+    assert apply_confidence_promotion(store, NOW) == 0
+    assert store.get_memory(comp.id).confidence == 0.6
+    store.close()
+
+
+# ── 5. Tentative 全生命周期 ──────────────────────────────────────────────────
+
+
+def test_tentative_full_lifecycle_accural(tmp_path):
+    """tentative 决定创建 → 晋升 → 被定稿强化 → 清标 → 退出 Tier C。"""
+    from ethan.memory.admission import run_incremental_admission
+
+    store = MemoryStore(tmp_path / "memory.db")
+    # 1. 创建 tentative
+    first = _decision_candidate(session="s1", structured={"tentative": True})
+    store.create_candidate_batch([first])
+    mem_id = run_incremental_admission(store, [first]).admitted[0]
+    rec = store.get_memory(mem_id)
+    assert rec.structured_data.get("tentative") is True
+    assert memory_tier(rec) == TIER_C
+
+    # 2. 被非临时候选强化 → 清标
+    final = _decision_candidate(session="s2")
+    store.create_candidate_batch([final])
+    run_incremental_admission(store, [final])
+    rec2 = store.get_memory(mem_id)
+    assert rec2.structured_data.get("tentative") is None
+    assert memory_tier(rec2) == TIER_B
+    store.close()
+
+
+def test_tentative_fresh_not_dormant(tmp_path, decay_on):
+    """tentative 创建 1 天后 → 不应被归档（在宽限期内）。"""
+    store = MemoryStore(tmp_path / "memory.db")
+    d = make_record(content="先试试", tentative=True, updated_at=NOW - 1 * DAY, created_at=NOW - 1 * DAY)
+    add_memory(store, d, evidence_at=NOW - 1 * DAY)
+    result = apply_memory_decay(store, NOW)
+    assert result["decayed"] == 0
+    store.close()
+
+
+def test_tentative_old_dormant(tmp_path, decay_on):
+    """tentative 15 天无强化 → 归档。"""
+    store = MemoryStore(tmp_path / "memory.db")
+    d = make_record(content="先试试", tentative=True, updated_at=NOW - 15 * DAY, created_at=NOW - 15 * DAY)
+    add_memory(store, d, evidence_at=NOW - 15 * DAY)
+    result = apply_memory_decay(store, NOW)
+    assert result["decayed"] == 1
+    store.close()
+
+
+def test_tentative_new_evidence_resets_dormancy(tmp_path, decay_on):
+    """tentative 被新 evidence 强化 → 重置归档计时。"""
+    real_now = _time.time()
+    store = MemoryStore(tmp_path / "memory.db")
+    d = make_record(content="先试试", tentative=True, updated_at=real_now - 13 * DAY, created_at=real_now - 13 * DAY)
+    add_memory(store, d, evidence_at=real_now - 13 * DAY)
+    # 强化 → bump updated_at
+    store.add_evidence(MemoryEvidence(
+        memory_id=d.id, evidence_level="explicit",
+        source_session_id="s2", source_message_id="m2",
+        source_role="user", source_quote="还是先试试", created_at=real_now,
+    ))
+    result = apply_memory_decay(store, real_now)
+    assert result["decayed"] == 0, "updated_at 被 bump → 在宽限期内"
+    store.close()
+
+
+# ── 6. 跨 scope 偏好配对：全护栏 ──────────────────────────────────────────
+
+
+def test_cross_scope_pair_user_scope_rejected(tmp_path, hash_embed, monkeypatch):
+    """候选是 user scope → 不应走跨 scope（已有同 scope 语义配对）。"""
+    from ethan.memory.admission import run_incremental_admission
+
+    store = MemoryStore(tmp_path / "memory.db")
+    _seed_user_preference(store)
+    cand = _pref_candidate(scope_type="user", scope_id="self")
+    store.create_candidate_batch([cand])
+    r = run_incremental_admission(store, [cand])
+    # 同 scope + 同内容 → 走语义配对（semantic_reinforced），不是 cross_scope
+    reason = store.get_candidate(cand.id).processing_reason
+    assert "cross_scope" not in reason
+    store.close()
+
+
+def test_cross_scope_pair_requires_same_dimension(tmp_path, hash_embed, monkeypatch):
+    """不同维度 → 不跨 scope。"""
+    from ethan.memory.admission import run_incremental_admission
+
+    store = MemoryStore(tmp_path / "memory.db")
+    _seed_user_preference(store)
+    cand = _pref_candidate(dimension="preference.format", scope_id="proj_x")
+    store.create_candidate_batch([cand])
+    r = run_incremental_admission(store, [cand])
+    assert len(r.admitted) == 1  # 新建
+    store.close()
+
+
+def test_cross_scope_pair_inferred_eligible(tmp_path, hash_embed, monkeypatch):
+    """inferred 偏好候选可以跨 scope 配对。"""
+    from ethan.memory.admission import run_incremental_admission
+
+    store = MemoryStore(tmp_path / "memory.db")
+    _seed_user_preference(store)
+    cand = _pref_candidate(level="inferred", scope_id="proj_y")
+    store.create_candidate_batch([cand])
+    r = run_incremental_admission(store, [cand])
+    reason = store.get_candidate(cand.id).processing_reason
+    assert reason.startswith("cross_scope_reinforced:")
+    store.close()
+
+
+# ── 7. 唤醒：多态场景 ──────────────────────────────────────────────────────
+
+
+def test_wake_already_active_is_noop(tmp_path):
+    """唤醒 active 记忆 → 返回 0（幂等）。"""
+    store = MemoryStore(tmp_path / "memory.db")
+    d = make_record(content="已活跃")
+    add_memory(store, d)
+    assert store.wake_memories([d.id]) == 0
+    store.close()
+
+
+def test_wake_scope_empty_is_noop(tmp_path):
+    """唤醒空 scope → 返回 0（幂等）。"""
+    store = MemoryStore(tmp_path / "memory.db")
+    assert wake_scope_dormant(store, "project", "不存在的 scope") == 0
+    store.close()
+
+
+def test_wake_restores_fts_searchability(tmp_path, hash_embed):
+    """唤醒后 FTS 搜索恢复。"""
+    store = MemoryStore(tmp_path / "memory.db")
+    d = make_record(content="路线B决策")
+    add_memory(store, d)
+    assert store.search_memories("路线", statuses=["active"])
+    store.bulk_set_dormant([d.id])
+    assert store.search_memories("路线", statuses=["active"]) == []
+    store.wake_memories([d.id])
+    assert store.search_memories("路线", statuses=["active"])
+    store.close()
+
+
+def test_wake_scope_multiple_records(tmp_path, hash_embed):
+    """唤醒一个 scope 下多条 dormant 记忆。"""
+    store = MemoryStore(tmp_path / "memory.db")
+    r1 = make_record(content="路线A", memory_key="decision.chosen:a")
+    r2 = make_record(content="路线B", memory_key="decision.chosen:b")
+    add_memory(store, r1)
+    add_memory(store, r2)
+    store.bulk_set_dormant([r1.id, r2.id])
+    woken = wake_scope_dormant(store, "project", "proj_a")
+    assert woken == 2
+    assert store.get_memory(r1.id).status == MemoryStatus.ACTIVE.value
+    assert store.get_memory(r2.id).status == MemoryStatus.ACTIVE.value
+    store.close()
+
+
+def test_wake_scope_only_wakes_correct_scope(tmp_path, hash_embed):
+    """唤醒 scope A 不影响 scope B 的 dormant 记忆。"""
+    store = MemoryStore(tmp_path / "memory.db")
+    r1 = make_record(content="A的记忆", memory_key="a:k", scope_id="scope_a")
+    r2 = make_record(content="B的记忆", memory_key="b:k", scope_id="scope_b")
+    add_memory(store, r1)
+    add_memory(store, r2)
+    store.bulk_set_dormant([r1.id, r2.id])
+    wake_scope_dormant(store, "project", "scope_a")
+    assert store.get_memory(r1.id).status == MemoryStatus.ACTIVE.value
+    assert store.get_memory(r2.id).status == MemoryStatus.DORMANT.value
+    store.close()
+
+
+# ── 8. Dry-run 全链路 ───────────────────────────────────────────────────────
+
+
+def test_dry_run_full_lifecycle(tmp_path, monkeypatch):
+    """dry-run 模式：计数真实但不改任何状态。"""
+    monkeypatch.setattr("ethan.memory.decay.DECAY_ENABLED", True)
+    monkeypatch.setattr("ethan.memory.decay.DECAY_DRY_RUN", True)
+    store = MemoryStore(tmp_path / "memory.db")
+
+    old = NOW - 22 * DAY
+    # Tier B decision（会 dormant）
+    d = make_record(content="路线B", updated_at=old, created_at=old, confidence=0.6)
+    add_memory(store, d, sessions=("s1", "s2"), evidence_at=old)
+    # Tier A preference（不会 dormant，但会 promotion）
+    p = make_record(
+        content="偏好PPT", memory_type="preference",
+        dimension="preference.content", scope_type="user", scope_id="self",
+        confidence=0.6, updated_at=old, created_at=old,
+    )
+    add_memory(store, p, sessions=("s1", "s2"), evidence_at=old)
+    # Tier C tentative（会 dormant）
+    t = make_record(content="先试试X", tentative=True, updated_at=old, created_at=old)
+    add_memory(store, t, evidence_at=old)
+    # dormant + 181 天（会 forgotten）
+    fd = make_record(content="要遗忘的")
+    add_memory(store, fd)
+    store.bulk_set_dormant([fd.id])
+    conn = store._get_conn()
+    conn.execute("UPDATE memories SET dormant_at=? WHERE id=?", (NOW - 181 * DAY, fd.id))
+    conn.commit()
+
+    result = apply_memory_decay(store, NOW)
+
+    # dry_run 模式下两条检测路径不互斥（都不改状态），同一 tentative 被两边各计一次
+    assert result["dormanted"] == 2  # idle_projects: Tier B decision + Tier C tentative
+    assert result["decayed"] == 1    # stale_tentative 也捕获同一 tentative（dry_run 不改状态）
+    assert result["forgotten"] == 1  # dormant 181 天
+
+    # 状态全部未变（dry-run 不执行实际操作）
+    assert store.get_memory(d.id).status == MemoryStatus.ACTIVE.value
+    assert store.get_memory(p.id).status == MemoryStatus.ACTIVE.value
+    assert store.get_memory(p.id).confidence == 0.6
+    assert store.get_memory(t.id).status == MemoryStatus.ACTIVE.value
+    # forgotten 也只计数不执行（dry-run），dormant 记忆保持 dormant
+    assert store.get_memory(fd.id).status == MemoryStatus.DORMANT.value
+    store.close()
+
+
+# ── 9. recall 排序：A/B 守门 ────────────────────────────────────────────────
+
+
+def test_recall_tier_a_never_reranked_by_decay(tmp_path, hash_embed, monkeypatch):
+    """Tier A 记忆即使很旧，因子恒 1.0，排名不受 decay 影响。"""
+    monkeypatch.setattr("ethan.memory.memory_vectors.recall_neighbors", lambda **kw: [])
+    real_now = _time.time()
+    store = MemoryStore(tmp_path / "memory.db")
+    old_pref = make_record(
+        content="老偏好做PPT", memory_type="preference",
+        dimension="preference.content", memory_key="preference.content:old",
+        importance=0.9, updated_at=real_now - 365 * DAY, created_at=real_now - 365 * DAY,
+    )
+    fresh_decision = make_record(
+        content="新决定写报告", memory_key="decision.chosen:fresh",
+        importance=0.9, updated_at=real_now - 1 * DAY, created_at=real_now - 1 * DAY,
+    )
+    add_memory(store, old_pref, evidence_at=real_now - 365 * DAY)
+    add_memory(store, fresh_decision, evidence_at=real_now - 1 * DAY)
+    hits = _collect(store, "做PPT 报告", domain="general", max_items=4, intent="unknown")
+    ids = [h.id for h in hits]
+    # Tier A 因子 1.0，Tier B 因子 0.5^(1/30)≈0.977 → Tier A 略高
+    # 但 RRF 分数可能不同，这里验证 Tier A 不被人为压低
+    old_in_hits = old_pref.id in ids
+    fresh_in_hits = fresh_decision.id in ids
+    assert old_in_hits and fresh_in_hits, "两条都应命中"
+    # Tier A 不被衰减压到 Tier B 之下
+    idx_a = ids.index(old_pref.id)
+    idx_b = ids.index(fresh_decision.id)
+    # importance 相同，Tier A factor 1.0 > Tier B factor ~0.977 → Tier A 排前
+    assert idx_a < idx_b, f"Tier A 应排在 Tier B 前面：{ids}"
+    store.close()
+
+
+# ── 10. 休眠阈值自定义 env ──────────────────────────────────────────────────
+
+
+def test_custom_project_idle_days(monkeypatch, tmp_path):
+    """自定义 PROJECT_IDLE_DAYS=7。"""
+    monkeypatch.setattr("ethan.memory.decay.PROJECT_IDLE_DAYS", 7.0)
+    monkeypatch.setattr("ethan.memory.decay.DECAY_ENABLED", True)
+    monkeypatch.setattr("ethan.memory.decay.DECAY_DRY_RUN", False)
+    store = MemoryStore(tmp_path / "memory.db")
+    d = make_record(content="记忆", updated_at=NOW - 8 * DAY, created_at=NOW - 8 * DAY)
+    add_memory(store, d, evidence_at=NOW - 8 * DAY)
+    result = apply_memory_decay(store, NOW)
+    assert result["dormanted"] == 1
+    store.close()
+
+
+def test_custom_tentative_grace_days(monkeypatch, tmp_path):
+    """自定义 TENTATIVE_GRACE_DAYS=7。"""
+    monkeypatch.setattr("ethan.memory.decay.TENTATIVE_GRACE_DAYS", 7.0)
+    monkeypatch.setattr("ethan.memory.decay.DECAY_ENABLED", True)
+    monkeypatch.setattr("ethan.memory.decay.DECAY_DRY_RUN", False)
+    store = MemoryStore(tmp_path / "memory.db")
+    d = make_record(content="先试试", tentative=True, updated_at=NOW - 8 * DAY, created_at=NOW - 8 * DAY)
+    add_memory(store, d, evidence_at=NOW - 8 * DAY)
+    result = apply_memory_decay(store, NOW)
+    assert result["decayed"] == 1
+    store.close()
+
+
+def test_custom_forget_days(monkeypatch, tmp_path):
+    """自定义 FORGET_DAYS=30。"""
+    monkeypatch.setattr("ethan.memory.decay.DORMANT_FORGET_DAYS", 30.0)
+    monkeypatch.setattr("ethan.memory.decay.DECAY_ENABLED", True)
+    monkeypatch.setattr("ethan.memory.decay.DECAY_DRY_RUN", False)
+    store = MemoryStore(tmp_path / "memory.db")
+    d = make_record(content="要遗忘的")
+    add_memory(store, d)
+    store.bulk_set_dormant([d.id])
+    conn = store._get_conn()
+    conn.execute("UPDATE memories SET dormant_at=? WHERE id=?", (NOW - 31 * DAY, d.id))
+    conn.commit()
+    result = apply_memory_decay(store, NOW)
+    assert result["forgotten"] == 1
+    store.close()
+
+
+# ── 11. 边界组合：多项目 scope 混合 ─────────────────────────────────────────
+
+
+def test_multiple_project_scopes_independent(tmp_path, decay_on):
+    """不同 project scope 独立判定：A 休眠不影响 B。"""
+    store = MemoryStore(tmp_path / "memory.db")
+    old = NOW - 22 * DAY
+    d_a = make_record(content="A的记忆", scope_id="proj_a", updated_at=old, created_at=old)
+    d_b = make_record(content="B的记忆", scope_id="proj_b", memory_key="decision.chosen:b",
+                       updated_at=NOW - 1 * DAY, created_at=NOW - 1 * DAY)
+    add_memory(store, d_a, evidence_at=old)
+    add_memory(store, d_b, evidence_at=NOW - 1 * DAY)
+    result = apply_memory_decay(store, NOW)
+    assert result["dormanted"] == 1  # 只有 proj_a 休眠
+    assert store.get_memory(d_a.id).status == MemoryStatus.DORMANT.value
+    assert store.get_memory(d_b.id).status == MemoryStatus.ACTIVE.value
+    store.close()
+
+
+def test_tier_a_in_dormant_project_survives(tmp_path, decay_on):
+    """dormant project 内的 Tier A 记忆不被归档。"""
+    store = MemoryStore(tmp_path / "memory.db")
+    old = NOW - 22 * DAY
+    decision = make_record(content="项目决定", updated_at=old, created_at=old)
+    pref = make_record(
+        content="项目偏好", memory_type="preference",
+        dimension="preference.content", memory_key="preference.content:proj",
+        updated_at=old, created_at=old,
+    )
+    add_memory(store, decision, evidence_at=old)
+    add_memory(store, pref, evidence_at=old)
+    result = apply_memory_decay(store, NOW)
+    assert result["dormanted"] == 1  # 只归档 Tier B decision
+    assert store.get_memory(decision.id).status == MemoryStatus.DORMANT.value
+    assert store.get_memory(pref.id).status == MemoryStatus.ACTIVE.value
+    store.close()
+
+
+# ── 12. 综合生命周期：提取→准入→休眠→唤醒→遗忘 ──────────────────────────────
+
+
+def test_full_lifecycle_extract_to_forget(tmp_path, hash_embed, monkeypatch):
+    """端到端：tentative 决定创建 → 项目休眠 → 唤醒 → 项目又休眠 → 180 天遗忘。"""
+    from ethan.memory.admission import run_incremental_admission
+    from ethan.memory.records import MemoryCandidate
+
+    monkeypatch.setattr("ethan.memory.decay.DECAY_ENABLED", True)
+    monkeypatch.setattr("ethan.memory.decay.DECAY_DRY_RUN", False)
+
+    monkeypatch.setattr("ethan.memory.memory_vectors.recall_neighbors", lambda **kw: [])
+    real_now = _time.time()
+    store = MemoryStore(tmp_path / "memory.db")
+
+    # 1. 创建 tentative 决定
+    cand = MemoryCandidate(
+        memory_type="decision", dimension="decision.chosen",
+        memory_key="decision.chosen:test", content="先试试方案X",
+        scope_type="project", scope_id="proj_lifecycle", memory_domain="general",
+        evidence_level="explicit", source_session_id="s1", source_message_id="1",
+        source_role="user", source_quote="先试试方案X", confidence=0.9, importance=0.8,
+        structured_data={"tentative": True},
+    )
+    store.create_candidate_batch([cand])
+    mem_id = run_incremental_admission(store, [cand]).admitted[0]
+    assert memory_tier(store.get_memory(mem_id)) == TIER_C
+
+    # 2. 项目休眠（模拟 22 天后）
+    store.bulk_set_dormant([mem_id])
+    assert store.get_memory(mem_id).status == MemoryStatus.DORMANT.value
+    conn = store._get_conn()
+    conn.execute("UPDATE memories SET dormant_at=? WHERE id=?", (real_now - 22 * DAY, mem_id))
+    conn.commit()
+
+    # 3. 唤醒
+    woken = wake_scope_dormant(store, "project", "proj_lifecycle")
+    assert woken == 1
+    got = store.get_memory(mem_id)
+    assert got.status == MemoryStatus.ACTIVE.value and got.dormant_at is None
+
+    # 4. 项目又休眠
+    conn.execute("UPDATE memories SET updated_at=? WHERE id=?", (real_now - 22 * DAY, mem_id))
+    conn.commit()
+    store.bulk_set_dormant([mem_id])
+    conn.execute("UPDATE memories SET dormant_at=? WHERE id=?", (real_now - 22 * DAY, mem_id))
+    conn.commit()
+    assert store.get_memory(mem_id).status == MemoryStatus.DORMANT.value
+
+    # 5. 181 天后 forgotten
+    conn.execute("UPDATE memories SET dormant_at=? WHERE id=?", (real_now - 181 * DAY, mem_id))
+    conn.commit()
+    result = apply_memory_decay(store, NOW)
+    assert result["forgotten"] == 1
+    assert store.get_memory(mem_id).status == MemoryStatus.FORGOTTEN.value
+    assert store.get_memory(mem_id).content == "[forgotten]"
+    store.close()

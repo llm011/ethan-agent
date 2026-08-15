@@ -228,6 +228,13 @@ export function MemoryView() {
     description: string;
     onConfirm: () => void;
   }>({ open: false, description: "", onConfirm: () => {} });
+  const [notice, setNotice] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), 3000);
+    return () => clearTimeout(t);
+  }, [notice]);
 
   const activeConfig = useMemo(() => TABS.find(tab => tab.key === activeTab) || TABS[0], [activeTab]);
 
@@ -285,10 +292,11 @@ export function MemoryView() {
   const handleWake = async (memory: StructuredMemory) => {
     try {
       await wakeStructuredMemory(memory.id);
+      setNotice({ type: "success", text: "记忆已唤醒，重新参与召回" });
       await loadData();
     } catch (err) {
       console.error(err);
-      alert("唤醒记忆失败");
+      setNotice({ type: "error", text: "唤醒记忆失败" });
     }
   };
 
@@ -297,11 +305,11 @@ export function MemoryView() {
     try {
       const result = await triggerStructuredConsolidation(dateFilter || undefined);
       const data = result.result;
-      alert(`结构化沉淀完成：${String(data.candidates ?? 0)} 个候选，${String(data.admitted ?? 0)} 条生效记忆`);
+      setNotice({ type: "success", text: `结构化沉淀完成：${String(data.candidates ?? 0)} 个候选，${String(data.admitted ?? 0)} 条生效记忆` });
       await loadData();
     } catch (err) {
       console.error(err);
-      alert("结构化沉淀失败");
+      setNotice({ type: "error", text: "结构化沉淀失败" });
     } finally {
       setConsolidating(false);
     }

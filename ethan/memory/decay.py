@@ -191,6 +191,7 @@ def _dormant_stale_tentative(store: MemoryStore, now: float, *, dry_run: bool) -
             continue  # user scope 下的 tentative 是 Tier A，跳过
         last_signal = max(
             memory.updated_at or 0.0,
+            memory.created_at or 0.0,
             memory.last_recalled_at or 0.0,
             store.last_evidence_at(memory.id) or 0.0,
         )

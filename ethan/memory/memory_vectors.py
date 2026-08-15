@@ -66,6 +66,9 @@ def index_memory(record: Any, *, db_path: Path | None = None) -> None:
 
         vec = _vector_store(db_path)
         try:
+            # sqlite-vec 虚拟表对 INSERT OR REPLACE 的 UNIQUE 约束异常
+            # 可能穿透 Python try/except（C 扩展层面），先删除再插入确保幂等
+            vec.remove(record.id)
             vec.add(
                 id=record.id,
                 text=record.content,
