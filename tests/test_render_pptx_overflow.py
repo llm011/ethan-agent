@@ -1,6 +1,6 @@
 """render_pptx 文字溢出估算与 autofit 兜底的回归测试。
 
-覆盖：字宽系数（中西文分开）、换行模拟（拉丁词不拆/CJK 逐字/行尾空格不计）、
+覆盖：字宽系数（中西文分开）、换行模拟（拉丁词应急折行/CJK 逐字/显式换行）、
 行高模型（单倍 ≈1.32×字号，显式 lineHeight 再乘）、三级溢出判定（紧凑单行条
 放行 / fixable warn / unfixable error / autoFit=none error）、表格行高估算与
 两级表格检查（超设定高 warn、超画布 error）、normAutofit XML 写入（显式
@@ -63,12 +63,18 @@ def test_wrap_cjk_by_char():
     assert lines[0] == 14.0  # 每行最大字号
 
 
-def test_wrap_latin_word_not_split():
-    """拉丁词是原子，放不下也不拆（对齐 PowerPoint 断词换行）。"""
+def test_wrap_latin_word_emergency_break():
+    """超过整行宽的拉丁词会应急折行，避免漏算 URL/标识符造成的纵向溢出。"""
     atoms = render_pptx._tokenize_runs([{"text": "internationalization", "fontSize": 14}],
                                        _content_defaults())
     lines = render_pptx._wrap_lines(atoms, 60, 60)  # 词宽 ~154px > 60px
-    assert len(lines) == 1
+    assert len(lines) == 3
+
+
+def test_explicit_newlines_force_lines():
+    atoms = render_pptx._tokenize_runs([{"text": "first\nsecond\nthird", "fontSize": 14}],
+                                       _content_defaults())
+    assert len(render_pptx._wrap_lines(atoms, 300, 300)) == 3
 
 
 def test_wrap_trailing_space_ignored():
@@ -142,6 +148,27 @@ def test_overflow_autofit_none_is_error():
     issues = _issues_for(el)
     assert _codes(issues) == ["overflow.nofit"]
     assert issues[0]["severity"] == "error"
+
+
+def test_invalid_autofit_is_error_not_fixable_warning():
+    el = {"id": "c4", "type": "text", "left": 40, "top": 40, "width": 300, "height": 125,
+          "autoFit": "shirnk",
+          "paragraphs": [{"runs": [{"text": "字" * 138, "fontSize": 14}]}]}
+    issues = _issues_for(el)
+    assert _codes(issues) == ["autofit.invalid"]
+    assert issues[0]["severity"] == "error"
+
+
+def test_explicit_newlines_are_checked_for_overflow():
+    el = {"id": "c5", "type": "text", "left": 40, "top": 40, "width": 300, "height": 30,
+          "paragraphs": [{"runs": [{"text": "first\nsecond\nthird", "fontSize": 14}]}]}
+    assert "overflow.unfixable" in _codes(_issues_for(el))
+
+
+def test_long_unbroken_word_is_checked_for_overflow():
+    el = {"id": "c6", "type": "text", "left": 40, "top": 40, "width": 100, "height": 50,
+          "paragraphs": [{"runs": [{"text": "internationalizationinternationalization", "fontSize": 14}]}]}
+    assert "overflow.unfixable" in _codes(_issues_for(el))
 
 
 def test_small_font_never_shrinks():
@@ -249,6 +276,19 @@ def test_shape_text_autofit_written():
     shape = render_pptx.render_shape(slide, el, THEME, 12192.0)
     fit = _body_pr(shape).find(QN("a:normAutofit"))
     assert fit is not None and fit.get("fontScale")
+
+
+def test_rotated_shape_text_skips_autofit():
+    import pptx
+    prs = pptx.Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    el = {"id": "s2", "type": "shape", "left": 40, "top": 40, "width": 300, "height": 125,
+          "rotate": 30, "shape": "roundRect",
+          "text": {"paragraphs": [{"runs": [{"text": "字" * 138, "fontSize": 14}]}]}}
+    shape = render_pptx.render_shape(slide, el, THEME, 12192.0)
+    body = _body_pr(shape)
+    assert body.find(QN("a:normAutofit")) is None
+    assert body.find(QN("a:noAutofit")) is not None
 
 
 def test_table_row_heights_written():

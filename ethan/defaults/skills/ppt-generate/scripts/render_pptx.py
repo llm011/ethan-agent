@@ -555,6 +555,7 @@ def _tokenize_runs(runs: list, defaults: dict) -> list:
     """把 runs 展开为原子序列 [(em_w, fs_px, is_space), ...]。
 
     拉丁词整词不拆（对齐 PowerPoint 的断词换行），CJK/全角/标点/空格逐字成原子。
+    显式换行用 em_w=None 的哨兵表示；超出整行的拉丁词由 _wrap_lines 应急折行。
     镜像 render_paragraphs 的 runs/para.text 回退由调用方处理。
     """
     atoms = []
@@ -564,31 +565,44 @@ def _tokenize_runs(runs: list, defaults: dict) -> list:
             continue
         fs = run_font_px(r, defaults)
         bold = bool(r.get("bold", defaults.get("bold", False)))
-        pos = 0
-        for m in _LATIN_WORD_RE.finditer(text):
-            for ch in text[pos:m.start()]:
+        for part in re.split(r"(\r\n|\r|\n)", text):
+            if not part:
+                continue
+            if part in ("\r\n", "\r", "\n"):
+                atoms.append((None, fs, False))
+                continue
+            pos = 0
+            for m in _LATIN_WORD_RE.finditer(part):
+                for ch in part[pos:m.start()]:
+                    atoms.append((char_w_em(ch, bold), fs, ch == " "))
+                atoms.append((sum(char_w_em(c, bold) for c in m.group()), fs, False))
+                pos = m.end()
+            for ch in part[pos:]:
                 atoms.append((char_w_em(ch, bold), fs, ch == " "))
-            atoms.append((sum(char_w_em(c, bold) for c in m.group()), fs, False))
-            pos = m.end()
-        for ch in text[pos:]:
-            atoms.append((char_w_em(ch, bold), fs, ch == " "))
     return atoms
 
 
 def _wrap_lines(atoms: list, first_w: float, rest_w: float, scale: float = 1.0) -> list:
     """贪心断行（对齐 wrap=square）。返回每行的最大字号（px，已乘 scale）。
 
-    行尾空格不计宽（不参与断行判定）、换行后行首空格丢弃；空原子序列返回 [0.0]，
-    由调用方按默认字号替换（空段占一行）。
+    行尾空格不计宽、换行后行首空格丢弃；显式换行强制另起一行；超过整行宽的
+    拉丁词按其估算宽度应急折行。空原子序列返回 [0.0]，由调用方按默认字号替换。
     """
     lines = []
     avail = first_w
     cur_w, cur_fs, pend = 0.0, 0.0, 0.0
     for em, fs, is_space in atoms:
+        if em is None:
+            lines.append(cur_fs * scale if cur_fs > 0 else fs * scale)
+            avail = rest_w
+            cur_w, cur_fs, pend = 0.0, 0.0, 0.0
+            continue
         w = em * fs * scale
         if is_space:
             pend += w
             continue
+        if cur_w == 0:
+            pend = 0.0  # 丢弃段首/换行后的空格
         if cur_w > 0 and cur_w + pend + w > avail:
             lines.append(cur_fs * scale)
             avail = rest_w
@@ -597,6 +611,12 @@ def _wrap_lines(atoms: list, first_w: float, rest_w: float, scale: float = 1.0) 
             cur_w += pend + w
             cur_fs = max(cur_fs, fs)
             pend = 0.0
+        # PowerPoint/LibreOffice 会对超过整行宽的 URL、标识符等做应急折行；若仍
+        # 把它当一行，校验会漏掉由此产生的纵向溢出。
+        while cur_w > avail and avail > 0:
+            lines.append(cur_fs * scale)
+            cur_w -= avail
+            avail = rest_w
     lines.append(cur_fs * scale if cur_fs > 0 else 0.0)
     return lines
 
@@ -983,7 +1003,12 @@ def render_shape(slide, el, theme, emu_per_px):
             el_defaults["fontName"] = text_spec["defaultFontName"]
         render_paragraphs(shape.text_frame, text_spec["paragraphs"], theme, text_spec.get("textType"), el_defaults)
         # text_spec 只有样式（inset/autoFit），几何宽高取外层元素
-        _apply_autofit(shape.text_frame, {**text_spec, "width": el.get("width"), "height": el.get("height")}, theme)
+        _apply_autofit(shape.text_frame, {
+            **text_spec,
+            "width": el.get("width"),
+            "height": el.get("height"),
+            "rotate": el.get("rotate"),
+        }, theme)
     else:
         shape.text_frame.word_wrap = True
         set_autofit(shape.text_frame, "none")
@@ -1619,6 +1644,10 @@ def _check_text_overflow(spec: dict, theme: dict, ep: str, err, warn):
     paragraphs = spec.get("paragraphs") or []
     if not paragraphs:
         return
+    auto_fit = spec.get("autoFit") or "shrink"
+    if auto_fit not in ("shrink", "none"):
+        err(f"{ep} autoFit 无效: {auto_fit!r}（可用: shrink / none）", code="autofit.invalid")
+        return
     # 旋转元素的文字度量模型未考虑旋转投影，与 render_text/render_shape 的 _apply_autofit 对齐
     if spec.get("rotate") or 0:
         return
@@ -1632,7 +1661,7 @@ def _check_text_overflow(spec: dict, theme: dict, ep: str, err, warn):
         return
     content, avail = plan["content"], plan["avail"]
     pct = round(content / avail * 100) if avail > 0 else 0
-    if spec.get("autoFit", "shrink") == "none":
+    if auto_fit == "none":
         err(f"{ep} 文字溢出：需 {content:.0f}px > 可用 {avail:.0f}px（{pct}%），autoFit=none 不自动缩字；"
             f"建议删减至约 {plan['cut_chars']} 字或高度改 ≥ {plan['suggested_height']}px",
             code="overflow.nofit")
@@ -1738,7 +1767,7 @@ def validate_deck(deck: dict, theme: dict | None = None) -> list:
                 tt = el.get("textType")
                 if tt and tt not in TEXT_TYPES:
                     warn(f"{ep} 未知 textType: {tt}")
-                if geom_ok and not (el.get("rotate") or 0):
+                if geom_ok:
                     _check_text_overflow(el, theme, ep, err, warn)
             elif etype == "latex":
                 if not el.get("latex"):
@@ -1757,10 +1786,14 @@ def validate_deck(deck: dict, theme: dict | None = None) -> list:
                 if prst not in PRESET_SHAPES:
                     err(f"{ep} 未知预设形状: {prst}（可用: {', '.join(sorted(PRESET_SHAPES))}）")
                 text_spec = el.get("text")
-                if geom_ok and not (el.get("rotate") or 0) and isinstance(text_spec, dict) and text_spec.get("paragraphs"):
+                if geom_ok and isinstance(text_spec, dict) and text_spec.get("paragraphs"):
                     # 样式（inset/autoFit）从 text_spec 读，几何宽高取外层元素
-                    _check_text_overflow({**text_spec, "width": el.get("width"), "height": el.get("height")},
-                                         theme, ep, err, warn)
+                    _check_text_overflow({
+                        **text_spec,
+                        "width": el.get("width"),
+                        "height": el.get("height"),
+                        "rotate": el.get("rotate"),
+                    }, theme, ep, err, warn)
             elif etype == "chart":
                 ct = el.get("chartType")
                 if ct not in CHART_TYPES:
