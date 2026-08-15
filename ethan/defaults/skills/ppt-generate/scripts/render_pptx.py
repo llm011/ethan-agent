@@ -1616,12 +1616,18 @@ def _check_text_overflow(spec: dict, theme: dict, ep: str, err, warn):
     paragraphs = spec.get("paragraphs") or []
     if not paragraphs:
         return
+    # 旋转元素的文字度量模型未考虑旋转投影，与 render_text/render_shape 的 _apply_autofit 对齐
+    if spec.get("rotate") or 0:
+        return
     plan = plan_autofit(paragraphs, spec, theme)
     if plan is None:
         return
-    content, avail = plan["content"], plan["avail"]
-    if content <= avail * OVERFLOW_TOL or content <= plan["height"] + 0.5:
+    # scale=1.0 → plan_autofit 判定无溢出（含紧凑单行条 height+0.5 容差），
+    # 与渲染端 _apply_autofit 的触发条件完全对齐，无 gap 无 diverge。
+    # scale=None → 缩到下限仍装不下（unfixable），必须进 error 分支。
+    if plan["scale"] is not None and plan["scale"] >= 1.0:
         return
+    content, avail = plan["content"], plan["avail"]
     pct = round(content / avail * 100) if avail > 0 else 0
     if spec.get("autoFit", "shrink") == "none":
         err(f"{ep} 文字溢出：需 {content:.0f}px > 可用 {avail:.0f}px（{pct}%），autoFit=none 不自动缩字；"
