@@ -121,17 +121,19 @@ export async function updateSessionMode(id: string, mode: string): Promise<void>
 }
 
 export async function pinSession(id: string): Promise<void> {
-  await fetch(`${API_URL}/sessions/${id}/pin`, {
+  const res = await fetch(`${API_URL}/sessions/${id}/pin`, {
     method: "POST",
     headers: headers(),
   });
+  if (!res.ok) throw new Error("Failed to pin session");
 }
 
 export async function unpinSession(id: string): Promise<void> {
-  await fetch(`${API_URL}/sessions/${id}/pin`, {
+  const res = await fetch(`${API_URL}/sessions/${id}/pin`, {
     method: "DELETE",
     headers: headers(),
   });
+  if (!res.ok) throw new Error("Failed to unpin session");
 }
 
 export async function fetchPinnedSessions(): Promise<SessionInfo[]> {
