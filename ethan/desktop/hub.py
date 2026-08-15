@@ -28,6 +28,7 @@ class _Connection:
         self.name = name
         self.pending: dict[int, asyncio.Future] = {}
         self.closed = False
+        self.evicted = asyncio.Event()
 
     def fail_all(self, exc: Exception) -> None:
         for fut in self.pending.values():
@@ -52,6 +53,7 @@ class DesktopHub:
             if old is not None and not old.closed:
                 logger.info("desktop: client '%s' reconnecting, evicting previous", name)
                 old.closed = True
+                old.evicted.set()
                 old.fail_all(DesktopError("桌面端连接被新连接顶替", retryable=True))
                 try:
                     await old.ws.close()

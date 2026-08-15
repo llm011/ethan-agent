@@ -45,6 +45,7 @@ class _Connection:
         self.name = name
         self.pending: dict[int, asyncio.Future] = {}
         self.closed = False
+        self.evicted = asyncio.Event()
 
     def fail_all(self, exc: Exception) -> None:
         for fut in self.pending.values():
@@ -75,6 +76,7 @@ class BrowserHub:
             if old is not None and not old.closed:
                 logger.info("browser: client '%s' reconnecting, evicting previous", name)
                 old.closed = True
+                old.evicted.set()
                 old.fail_all(BrowserError(
                     "浏览器连接被新连接顶替",
                     code=ERROR_CODE["extension_not_connected"],

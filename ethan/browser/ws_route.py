@@ -7,6 +7,7 @@ name 缺省时自动分配 "default"。同名连接 last-wins(同一浏览器的
 """
 from __future__ import annotations
 
+import asyncio
 import itertools
 import json
 import logging
@@ -67,8 +68,16 @@ async def browser_ws(ws: WebSocket) -> None:
     logger.info("browser ws: extension '%s' connected", client_name)
 
     try:
+        evict_waiter = asyncio.ensure_future(conn.evicted.wait())
         while True:
-            raw = await ws.receive_text()
+            recv_task = asyncio.ensure_future(ws.receive_text())
+            done, _ = await asyncio.wait(
+                {recv_task, evict_waiter}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if evict_waiter in done:
+                recv_task.cancel()
+                break
+            raw = recv_task.result()
             # ping/pong 保活帧不进 RPC 配对
             try:
                 msg = json.loads(raw)
@@ -79,6 +88,8 @@ async def browser_ws(ws: WebSocket) -> None:
                 continue
             hub.on_message(conn, raw)
     except WebSocketDisconnect:
+        pass
+    except asyncio.CancelledError:
         pass
     except Exception:
         logger.exception("browser ws: unexpected error")

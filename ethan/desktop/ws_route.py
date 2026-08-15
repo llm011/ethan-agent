@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import itertools
 import json
 import logging
@@ -81,8 +82,16 @@ async def desktop_ws(ws: WebSocket) -> None:
     logger.info("desktop ws: client '%s' connected", client_name)
 
     try:
+        evict_waiter = asyncio.ensure_future(conn.evicted.wait())
         while True:
-            raw = await ws.receive_text()
+            recv_task = asyncio.ensure_future(ws.receive_text())
+            done, _ = await asyncio.wait(
+                {recv_task, evict_waiter}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if evict_waiter in done:
+                recv_task.cancel()
+                break
+            raw = recv_task.result()
             try:
                 msg = json.loads(raw)
             except (ValueError, TypeError):
@@ -92,6 +101,8 @@ async def desktop_ws(ws: WebSocket) -> None:
                 continue
             hub.on_message(conn, raw)
     except WebSocketDisconnect:
+        pass
+    except asyncio.CancelledError:
         pass
     except Exception:
         logger.exception("desktop ws: unexpected error")
