@@ -707,6 +707,9 @@ def _apply_autofit(text_frame, spec: dict, theme: dict):
     """
     if (spec.get("autoFit") or "shrink") != "shrink":
         return
+    # 旋转元素的文字度量模型未考虑旋转投影，与 _check_text_overflow 对齐
+    if spec.get("rotate") or 0:
+        return
     paragraphs = spec.get("paragraphs") or []
     if not paragraphs:
         return
