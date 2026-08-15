@@ -325,6 +325,22 @@ def test_vertical_shape_text_skips_horizontal_overflow_model():
     assert body.find(QN("a:normAutofit")) is None
 
 
+def test_invalid_text_inset_is_error_and_direct_render_falls_back():
+    el = {"id": "i1", "type": "text", "left": 40, "top": 40, "width": 200, "height": 60,
+          "inset": [0],
+          "paragraphs": [{"runs": [{"text": "正文", "fontSize": 14}]}]}
+    assert "schema.inset" in _codes(_issues_for(el))
+    box = _render_text_el(el)
+    assert box.text_frame.margin_top / 12192.0 == pytest.approx(10)
+
+
+def test_invalid_shape_text_inset_is_error():
+    el = {"id": "i2", "type": "shape", "left": 40, "top": 40, "width": 200, "height": 60,
+          "shape": "rect",
+          "text": {"inset": [0, 0, 0], "paragraphs": [{"runs": [{"text": "正文", "fontSize": 14}]}]}}
+    assert "schema.inset" in _codes(_issues_for(el))
+
+
 def test_table_row_heights_written():
     import pptx
     prs = pptx.Presentation()

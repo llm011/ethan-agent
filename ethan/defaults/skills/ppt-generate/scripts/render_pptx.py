@@ -853,7 +853,9 @@ def render_paragraphs(text_frame, paragraphs, theme, text_type=None, el_defaults
 
 
 def setup_text_frame(text_frame, el, theme, emu_per_px, text_type=None):
-    inset = el.get("inset") or [10, 10, 10, 10]
+    # 与溢出测量共用同一回退规则；正常 CLI 流程会先由 validate_deck 报 schema error，
+    # 这里仍需防御直接调用渲染函数时传入非法 inset。
+    inset = _el_inset(el)
     text_frame.margin_top = px_to_emu(inset[0], emu_per_px)
     text_frame.margin_right = px_to_emu(inset[1], emu_per_px)
     text_frame.margin_bottom = px_to_emu(inset[2], emu_per_px)
@@ -1753,6 +1755,17 @@ def validate_deck(deck: dict, theme: dict | None = None) -> list:
                     valid = False
         return valid
 
+    def validate_inset(spec: dict, sp: str) -> bool:
+        inset = spec.get("inset")
+        if inset is None:
+            return True
+        if not isinstance(inset, (list, tuple)) or len(inset) != 4 or not all(
+            isinstance(value, (int, float)) for value in inset
+        ):
+            err(f"{sp}.inset 必须是 4 个数值组成的数组", code="schema.inset")
+            return False
+        return True
+
     if not isinstance(deck, dict):
         err("deck 根节点必须是 JSON 对象")
         return issues
@@ -1820,10 +1833,11 @@ def validate_deck(deck: dict, theme: dict | None = None) -> list:
 
             if etype == "text":
                 paragraphs_ok = validate_paragraphs(el.get("paragraphs"), f"{ep} text")
+                inset_ok = validate_inset(el, ep)
                 tt = el.get("textType")
                 if tt and (not isinstance(tt, str) or tt not in TEXT_TYPES):
                     warn(f"{ep} 未知 textType: {tt}")
-                if geom_ok and paragraphs_ok:
+                if geom_ok and paragraphs_ok and inset_ok:
                     _check_text_overflow(el, theme, ep, err, warn)
             elif etype == "latex":
                 if not el.get("latex"):
@@ -1848,7 +1862,8 @@ def validate_deck(deck: dict, theme: dict | None = None) -> list:
                     err(f"{ep} shape.text 必须是对象", code="schema.shape-text")
                 elif isinstance(text_spec, dict) and text_spec.get("paragraphs"):
                     paragraphs_ok = validate_paragraphs(text_spec["paragraphs"], f"{ep} shape.text")
-                    if geom_ok and paragraphs_ok:
+                    inset_ok = validate_inset(text_spec, f"{ep} shape.text")
+                    if geom_ok and paragraphs_ok and inset_ok:
                         # 样式（inset/autoFit）从 text_spec 读，几何宽高取外层元素
                         _check_text_overflow({
                             **text_spec,
