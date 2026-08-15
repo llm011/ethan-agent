@@ -291,6 +291,33 @@ def test_rotated_shape_text_skips_autofit():
     assert body.find(QN("a:noAutofit")) is not None
 
 
+def test_vertical_text_skips_horizontal_overflow_model():
+    """竖排文字按高度向下排，不能套用横排宽度换行模型。"""
+    el = {"id": "v1", "type": "text", "left": 40, "top": 40, "width": 40, "height": 300,
+          "vertical": True,
+          "paragraphs": [{"runs": [{"text": "字" * 20, "fontSize": 14}]}]}
+    assert _codes(_issues_for(el)) == []
+    box = _render_text_el(el)
+    body = _body_pr(box)
+    assert body.get("vert") == "eaVert"
+    assert body.find(QN("a:normAutofit")) is None
+    assert body.find(QN("a:noAutofit")) is not None
+
+
+def test_vertical_shape_text_skips_horizontal_overflow_model():
+    import pptx
+    prs = pptx.Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    el = {"id": "v2", "type": "shape", "left": 40, "top": 40, "width": 40, "height": 300,
+          "shape": "rect",
+          "text": {"vertical": True, "paragraphs": [{"runs": [{"text": "字" * 20, "fontSize": 14}]}]}}
+    assert _codes(_issues_for(el)) == []
+    shape = render_pptx.render_shape(slide, el, THEME, 12192.0)
+    body = _body_pr(shape)
+    assert body.get("vert") == "eaVert"
+    assert body.find(QN("a:normAutofit")) is None
+
+
 def test_table_row_heights_written():
     import pptx
     prs = pptx.Presentation()

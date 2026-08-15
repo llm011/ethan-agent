@@ -727,8 +727,8 @@ def _apply_autofit(text_frame, spec: dict, theme: dict):
     """
     if (spec.get("autoFit") or "shrink") != "shrink":
         return
-    # 旋转元素的文字度量模型未考虑旋转投影，与 _check_text_overflow 对齐
-    if spec.get("rotate") or 0:
+    # 旋转/竖排文字不适用横排换行模型，与 _check_text_overflow 对齐。
+    if spec.get("rotate") or spec.get("vertical"):
         return
     paragraphs = spec.get("paragraphs") or []
     if not paragraphs:
@@ -1648,8 +1648,8 @@ def _check_text_overflow(spec: dict, theme: dict, ep: str, err, warn):
     if auto_fit not in ("shrink", "none"):
         err(f"{ep} autoFit 无效: {auto_fit!r}（可用: shrink / none）", code="autofit.invalid")
         return
-    # 旋转元素的文字度量模型未考虑旋转投影，与 render_text/render_shape 的 _apply_autofit 对齐
-    if spec.get("rotate") or 0:
+    # 旋转/竖排文字不适用横排换行模型，与 render_text/render_shape 的 _apply_autofit 对齐
+    if spec.get("rotate") or spec.get("vertical"):
         return
     plan = plan_autofit(paragraphs, spec, theme)
     if plan is None:
