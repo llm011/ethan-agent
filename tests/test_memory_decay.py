@@ -507,3 +507,260 @@ def test_apply_memory_decay_disabled_by_default(monkeypatch, tmp_path):
     assert result["dormanted"] == 0
     assert store.get_memory(decision.id).status == MemoryStatus.ACTIVE.value
     store.close()
+
+
+# ── 阶段3：提取器 tentative 标记 ────────────────────────────────────────────
+
+
+def _build_one(item: dict, *, content: str = "先试试因子动量方案A", quote: str | None = None):
+    from ethan.memory.extractors import SourceMessage, StructuredMemoryExtractor
+
+    source = SourceMessage(session_id="s1", message_id=1, role="user", content=content)
+    return StructuredMemoryExtractor()._build_one(
+        {**item, "quote": quote if quote is not None else content},
+        by_id={"1": source}, session_id="s1", user_id="", job_key="", is_companion=False,
+    )
+
+
+def _decision_item(**overrides) -> dict:
+    item = {
+        "memory_type": "decision", "dimension": "decision.chosen",
+        "memory_key": "decision.chosen:plan", "content": "先试试因子动量方案A",
+        "evidence_level": "explicit", "scope_type": "project", "scope_id": "proj_a",
+        "message_id": "1", "confidence": 0.9, "importance": 0.7, "structured": {},
+    }
+    item.update(overrides)
+    return item
+
+
+def test_extractor_tentative_true_marks_decision():
+    cand = _build_one(_decision_item(tentative=True))
+    assert cand.structured_data.get("tentative") is True
+    assert memory_tier(cand) == TIER_C
+
+
+def test_extractor_tentative_string_forms_accepted():
+    for raw in ("true", "1", "yes", "True"):
+        cand = _build_one(_decision_item(tentative=raw))
+        assert cand.structured_data.get("tentative") is True, raw
+
+
+def test_extractor_tentative_dropped_for_non_tentative_types():
+    # preference 没有"临时"语义：即使模型标了也静默丢弃
+    pref = _build_one(_decision_item(
+        memory_type="preference", dimension="preference.content", tentative=True,
+    ))
+    assert "tentative" not in pref.structured_data
+    assert memory_tier(pref) == TIER_A
+    # false/缺省 → 不标
+    for raw in (False, None, "false", ""):
+        assert "tentative" not in _build_one(_decision_item(tentative=raw)).structured_data
+
+
+# ── 阶段3：跨 scope 偏好配对 ────────────────────────────────────────────────
+
+
+def _pref_candidate(
+    *, content: str = "精读的论文要做成PPT", scope_type: str = "project",
+    scope_id: str = "proj_ppt", level: str = "explicit",
+    dimension: str = "preference.content", structured: dict | None = None,
+    session: str = "s2",
+):
+    from ethan.memory.records import MemoryCandidate
+
+    return MemoryCandidate(
+        memory_type="preference", dimension=dimension,
+        memory_key=f"{dimension}:{content[:8]}", content=content,
+        scope_type=scope_type, scope_id=scope_id, memory_domain="general",
+        evidence_level=level, source_session_id=session, source_message_id="9",
+        source_role="user", source_quote=content,
+        confidence=0.9, importance=0.8,
+        structured_data=structured or {},
+    )
+
+
+def _seed_user_preference(store: MemoryStore, content: str = "精读的论文要做成PPT") -> str:
+    """user scope 既有偏好，走完整准入（顺带建好向量索引）。"""
+    from ethan.memory.admission import run_incremental_admission
+    from ethan.memory.records import MemoryCandidate
+
+    seed = MemoryCandidate(
+        memory_type="preference", dimension="preference.content",
+        memory_key="preference.content:ppt", content=content,
+        scope_type="user", scope_id="self", memory_domain="general",
+        evidence_level="explicit", source_session_id="s0", source_message_id="1",
+        source_role="user", source_quote=content, confidence=0.9, importance=0.8,
+    )
+    store.create_candidate_batch([seed])
+    result = run_incremental_admission(store, [seed])
+    assert len(result.admitted) == 1
+    return result.admitted[0]
+
+
+def test_cross_scope_preference_reinforces_user_memory(tmp_path, hash_embed, monkeypatch):
+    """project 偏好候选配到 user 级既有偏好 → 只补证据，不新建 project 副本。"""
+    from ethan.memory.admission import run_incremental_admission
+
+    store = MemoryStore(tmp_path / "memory.db")
+    user_mem_id = _seed_user_preference(store)
+
+    cand = _pref_candidate()  # 同文同维度，project scope
+    store.create_candidate_batch([cand])
+    result = run_incremental_admission(store, [cand])
+
+    assert result.merged == [user_mem_id], "应跨 scope 合并进 user 级偏好"
+    assert len(store.list_memories(status="active")) == 1  # 无 project 副本
+    reason = store.get_candidate(cand.id).processing_reason
+    assert reason.startswith("cross_scope_reinforced:"), reason
+    assert len(store.list_evidence(user_mem_id)) == 2  # 证据挂到 user 级记忆
+    store.close()
+
+
+def test_cross_scope_pair_guards(tmp_path, hash_embed, monkeypatch):
+    """护栏：非 preference 维度 / corrected / 维度不相等 → 不跨 scope，走正常准入。"""
+    from ethan.memory.admission import run_incremental_admission
+    from ethan.memory.records import MemoryCandidate
+
+    store = MemoryStore(tmp_path / "memory.db")
+    user_mem_id = _seed_user_preference(store)
+
+    # corrected：替换语义不走"只补证据"通道
+    corrected = _pref_candidate(level="corrected", scope_id="proj_c")
+    store.create_candidate_batch([corrected])
+    r = run_incremental_admission(store, [corrected])
+    assert len(r.admitted) == 1 and r.admitted[0] != user_mem_id
+    assert store.get_memory(r.admitted[0]).scope_type == "project"
+
+    # 维度严格相等：preference.format ≠ preference.content 不配
+    # （各 case 独立 scope，避免同 scope 语义配对互相干扰）
+    diff_dim = _pref_candidate(dimension="preference.format", scope_id="proj_d", session="s3")
+    store.create_candidate_batch([diff_dim])
+    r2 = run_incremental_admission(store, [diff_dim])
+    assert len(r2.admitted) == 1 and r2.admitted[0] != user_mem_id
+
+    # 非偏好维度（decision）从不跨 scope
+    decision = MemoryCandidate(
+        memory_type="decision", dimension="decision.chosen",
+        memory_key="decision.chosen:x", content="精读的论文要做成PPT",
+        scope_type="project", scope_id="proj_e", memory_domain="general",
+        evidence_level="explicit", source_session_id="s4", source_message_id="2",
+        source_role="user", source_quote="精读的论文要做成PPT",
+        confidence=0.9, importance=0.8,
+    )
+    store.create_candidate_batch([decision])
+    r3 = run_incremental_admission(store, [decision])
+    assert len(r3.admitted) == 1 and r3.admitted[0] != user_mem_id
+    assert len(store.list_evidence(user_mem_id)) == 1  # user 级记忆零污染
+    store.close()
+
+
+def test_cross_scope_pair_excludes_observed(tmp_path, hash_embed, monkeypatch):
+    """observed 噪声不跨 scope：单 session observed 落 pending，不碰 user 级记忆。"""
+    from ethan.memory.admission import run_incremental_admission
+
+    store = MemoryStore(tmp_path / "memory.db")
+    user_mem_id = _seed_user_preference(store)
+
+    obs = _pref_candidate(level="observed")
+    store.create_candidate_batch([obs])
+    r = run_incremental_admission(store, [obs])
+    assert not r.admitted and not r.merged
+    assert store.get_candidate(obs.id).processing_status == "pending"
+    assert len(store.list_evidence(user_mem_id)) == 1
+    store.close()
+
+
+# ── 阶段3：tentative 清标 + project 唤醒钩子 ────────────────────────────────
+
+
+def _decision_candidate(
+    *, content: str = "先试试因子动量方案A", scope_id: str = "proj_factor",
+    session: str = "s1", structured: dict | None = None,
+    memory_key: str = "decision.chosen:plan",
+):
+    from ethan.memory.records import MemoryCandidate
+
+    return MemoryCandidate(
+        memory_type="decision", dimension="decision.chosen",
+        memory_key=memory_key, content=content,
+        scope_type="project", scope_id=scope_id, memory_domain="general",
+        evidence_level="explicit", source_session_id=session, source_message_id="9",
+        source_role="user", source_quote=content, confidence=0.9, importance=0.8,
+        structured_data=structured or {},
+    )
+
+
+def test_reinforce_clears_tentative_flag(tmp_path):
+    """tentative 记忆被非临时候选强化 → 清标退出 Tier C，且 updated_at 重置。"""
+    from ethan.memory.admission import run_incremental_admission
+
+    store = MemoryStore(tmp_path / "memory.db")
+    first = _decision_candidate(session="s1", structured={"tentative": True})
+    store.create_candidate_batch([first])
+    mem_id = run_incremental_admission(store, [first]).admitted[0]
+    assert store.get_memory(mem_id).structured_data.get("tentative") is True
+    before = store.get_memory(mem_id).updated_at
+
+    final = _decision_candidate(session="s2")  # 同 key 同文，无 tentative
+    store.create_candidate_batch([final])
+    r2 = run_incremental_admission(store, [final])
+
+    assert r2.merged == [mem_id]
+    got = store.get_memory(mem_id)
+    assert got.structured_data.get("tentative") is None, "定稿强化应清标"
+    assert memory_tier(got) == TIER_B  # 退出快速衰减轨道
+    assert got.updated_at >= before
+    assert len(store.list_evidence(mem_id)) == 2
+    store.close()
+
+
+def test_tentative_candidate_keeps_flag_on_tentative_existing(tmp_path):
+    """候选本身也是 tentative（先试 A 又说再试试 A）→ 不清标。"""
+    from ethan.memory.admission import run_incremental_admission
+
+    store = MemoryStore(tmp_path / "memory.db")
+    first = _decision_candidate(session="s1", structured={"tentative": True})
+    store.create_candidate_batch([first])
+    mem_id = run_incremental_admission(store, [first]).admitted[0]
+
+    again = _decision_candidate(session="s2", structured={"tentative": True})
+    store.create_candidate_batch([again])
+    run_incremental_admission(store, [again])
+
+    assert store.get_memory(mem_id).structured_data.get("tentative") is True
+    assert memory_tier(store.get_memory(mem_id)) == TIER_C
+    store.close()
+
+
+def test_project_admission_wakes_dormant_scope(tmp_path, hash_embed):
+    """project scope 有新候选落地 → 该 scope 的 dormant 记忆自动唤醒。"""
+    from ethan.memory.admission import run_incremental_admission
+    from ethan.memory.records import MemoryCandidate
+
+    store = MemoryStore(tmp_path / "memory.db")
+    old = MemoryCandidate(
+        memory_type="decision", dimension="decision.chosen",
+        memory_key="decision.chosen:old", content="路线B定稿",
+        scope_type="project", scope_id="proj_ppt", memory_domain="general",
+        evidence_level="explicit", source_session_id="s1", source_message_id="1",
+        source_role="user", source_quote="路线B定稿", confidence=0.9, importance=0.8,
+    )
+    store.create_candidate_batch([old])
+    old_id = run_incremental_admission(store, [old]).admitted[0]
+    store.bulk_set_dormant([old_id])
+    assert store.get_memory(old_id).status == MemoryStatus.DORMANT.value
+
+    fresh = MemoryCandidate(
+        memory_type="decision", dimension="decision.chosen",
+        memory_key="decision.chosen:fresh", content="补充口径：风险来自验证层",
+        scope_type="project", scope_id="proj_ppt", memory_domain="general",
+        evidence_level="explicit", source_session_id="s2", source_message_id="2",
+        source_role="user", source_quote="补充口径：风险来自验证层",
+        confidence=0.9, importance=0.7,
+    )
+    store.create_candidate_batch([fresh])
+    run_incremental_admission(store, [fresh])
+
+    got = store.get_memory(old_id)
+    assert got.status == MemoryStatus.ACTIVE.value and got.dormant_at is None
+    store.close()

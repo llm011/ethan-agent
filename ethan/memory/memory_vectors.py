@@ -100,30 +100,35 @@ def remove_memory_index(memory_id: str, *, db_path: Path | None = None) -> None:
 def semantic_neighbors(
     *,
     content: str,
-    scope_type: str,
-    scope_id: str,
+    scope_type: str | None = None,
+    scope_id: str | None = None,
     memory_domain: str,
     db_path: Path | None = None,
     limit: int = 3,
 ) -> list[dict[str, Any]]:
-    """查同 scope+domain 的最近邻记忆向量，返回 [{id, distance, text, metadata}]。
+    """查最近邻记忆向量，返回 [{id, distance, text, metadata}]。
 
-    供准入配对建议用。任何失败返回空列表（降级为纯精确 key 匹配）。
+    供准入配对建议用。scope_type/scope_id 传 None 表示不按该维度过滤
+    （跨 scope 配对：先全量取近邻，由调用方按护栏筛 scope）。任何失败返回
+    空列表（降级为纯精确 key 匹配）。
     """
     try:
         from ethan.memory.embeddings import embed_sync
 
+        metadata_filter: dict[str, Any] = {
+            "type": "memory",
+            "memory_domain": memory_domain,
+        }
+        if scope_type is not None:
+            metadata_filter["scope_type"] = scope_type
+        if scope_id is not None:
+            metadata_filter["scope_id"] = scope_id
         vec = _vector_store(db_path)
         try:
             return vec.search(
                 query_embedding=embed_sync(content),
                 limit=limit,
-                filter={
-                    "type": "memory",
-                    "scope_type": scope_type,
-                    "scope_id": scope_id,
-                    "memory_domain": memory_domain,
-                },
+                filter=metadata_filter,
                 update_access=False,
             )
         finally:
