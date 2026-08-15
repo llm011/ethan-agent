@@ -197,11 +197,14 @@ def parse_color(value: str):
     s = value.strip().lstrip("#")
     if len(s) == 3:
         s = "".join(c * 2 for c in s)
-    if len(s) == 6:
-        return RGBColor.from_string(s.upper()), None
-    if len(s) == 8:
-        rgb, a = s[:6], s[6:]
-        return RGBColor.from_string(rgb.upper()), int(a, 16) / 255.0
+    try:
+        if len(s) == 6:
+            return RGBColor.from_string(s.upper()), None
+        if len(s) == 8:
+            rgb, a = s[:6], s[6:]
+            return RGBColor.from_string(rgb.upper()), int(a, 16) / 255.0
+    except (TypeError, ValueError) as e:
+        raise DeckError(f"无法解析颜色: {value!r}") from e
     raise DeckError(f"无法解析颜色: {value!r}")
 
 
@@ -1732,6 +1735,37 @@ def validate_deck(deck: dict, theme: dict | None = None, deck_dir: Path | None =
     def warn(msg, code=None):
         issues.append({"severity": "warning", "code": code, "message": msg})
 
+    def validate_color(value, cp: str, allow_none: bool = False) -> bool:
+        if value is None and allow_none:
+            return True
+        try:
+            parse_color(value)
+        except DeckError:
+            err(f"{cp} 颜色格式无效: {value!r}", code="schema.color")
+            return False
+        return True
+
+    def validate_color_fields(spec, sp: str):
+        """检查所有会进入 parse_color() 的 schema 颜色字段。"""
+        if isinstance(spec, dict):
+            for key, value in spec.items():
+                path = f"{sp}.{key}"
+                if key in ("color", "backgroundColor"):
+                    validate_color(value, path)
+                elif key in ("fill", "backcolor", "defaultColor"):
+                    validate_color(value, path, allow_none=True)
+                elif key == "themeColors":
+                    if not isinstance(value, list):
+                        err(f"{path} 必须是颜色数组", code="schema.color")
+                    else:
+                        for ci, color in enumerate(value):
+                            validate_color(color, f"{path}[{ci}]")
+                elif isinstance(value, (dict, list)):
+                    validate_color_fields(value, path)
+        elif isinstance(spec, list):
+            for index, value in enumerate(spec):
+                validate_color_fields(value, f"{sp}[{index}]")
+
     def validate_paragraphs(paragraphs, pp: str) -> bool:
         """确认文字层级可安全交给 _check_text_overflow / render_paragraphs。"""
         if not isinstance(paragraphs, list) or not paragraphs:
@@ -1780,6 +1814,7 @@ def validate_deck(deck: dict, theme: dict | None = None, deck_dir: Path | None =
     if not isinstance(deck.get("slides"), list) or not deck["slides"]:
         err("deck.slides 必须是非空数组")
         return issues
+    validate_color_fields(theme, "theme")
     canvas = deck.get("canvas") or {}
     cw, ch = float(canvas.get("width", DEFAULT_CANVAS_W)), float(canvas.get("height", DEFAULT_CANVAS_H))
     seen_slide_ids = set()
@@ -1800,6 +1835,7 @@ def validate_deck(deck: dict, theme: dict | None = None, deck_dir: Path | None =
         stype = slide.get("type")
         if stype and (not isinstance(stype, str) or stype not in SLIDE_TYPES):
             warn(f"{sprefix} 未知 slideType: {stype}")
+        validate_color_fields(slide.get("background"), f"{sprefix}.background")
         elements = slide.get("elements")
         if not isinstance(elements, list):
             err(f"{sprefix} 缺少 elements 数组")
@@ -1820,6 +1856,7 @@ def validate_deck(deck: dict, theme: dict | None = None, deck_dir: Path | None =
                 warn(f"{ep} 元素 id 重复: {eid}")
             else:
                 seen_el_ids.add(eid)
+            validate_color_fields(el, ep)
 
             geom_ok = True  # 几何字段齐全才做溢出估算（缺失时上面已报 error）
             if etype == "line":

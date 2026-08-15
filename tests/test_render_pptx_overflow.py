@@ -171,6 +171,18 @@ def test_scatter_non_numeric_x_label_is_error():
     assert "schema.chart-value" in _codes(_issues_for(el))
 
 
+def test_invalid_run_color_is_error():
+    el = {"id": "color1", "type": "text", "left": 40, "top": 40, "width": 200, "height": 60,
+          "paragraphs": [{"runs": [{"text": "正文", "fontSize": 14, "color": "red"}]}]}
+    assert "schema.color" in _codes(_issues_for(el))
+
+
+def test_invalid_theme_color_is_error():
+    theme = {**THEME, "backgroundColor": "not-a-color"}
+    deck = {"slides": [{"id": "s1", "elements": []}]}
+    assert "schema.color" in _codes(render_pptx.validate_deck(deck, theme))
+
+
 def test_invalid_autofit_is_error_not_fixable_warning():
     el = {"id": "c4", "type": "text", "left": 40, "top": 40, "width": 300, "height": 125,
           "autoFit": "shirnk",
