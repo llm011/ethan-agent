@@ -81,8 +81,6 @@ ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 PROSODY_RE = re.compile(r"^[+-]\d+%$")
 PITCH_RE = re.compile(r"^[+-]\d+Hz$")
 PUBLISHED_OUTPUTS = ("final.mp4", "cover.png", "render-report.json", "deliverables.zip")
-# source.md 由 skill 写入但不属于"产物"，归档时也要清走，避免上轮残留混进下轮 deliverables.zip。
-ARCHIVE_EXTRA = ("source.md",)
 
 
 class ManifestError(ValueError):
@@ -443,6 +441,9 @@ def paginate_subtitles(subtitles: list[Subtitle], *, maximum: int) -> list[Subti
             )
             # 用 clamp 后的 end_ms 推进 cursor，避免 round() 归零时 cursor 倒退造成字幕重叠。
             clamped_end = max(cursor + 1, end_ms)
+            # 最后一个 chunk 的 endMs 不能超过原始字幕结束时间。
+            if index == len(chunks) - 1:
+                clamped_end = min(clamped_end, subtitle.end_ms)
             paginated.append(Subtitle(text=chunk, start_ms=cursor, end_ms=clamped_end))
             cursor = clamped_end
     return paginated
@@ -502,6 +503,9 @@ async def _synthesize_scene(scene: dict[str, Any], voice: dict[str, str], cache_
     if key in _inflight_tts:
         await _inflight_tts[key]
         return
+    # Validate retries before doing any work.
+    if retries <= 0:
+        raise ValueError(f"_synthesize_scene requires retries >= 1, got {retries}")
     loop = asyncio.get_running_loop()
     fut: asyncio.Future[None] = loop.create_future()
     _inflight_tts[key] = fut
@@ -726,7 +730,7 @@ def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
 
 
 def _archive_published_outputs(output_dir: Path, run_id: str) -> Path | None:
-    existing = [output_dir / name for name in (PUBLISHED_OUTPUTS + ARCHIVE_EXTRA) if (output_dir / name).exists()]
+    existing = [output_dir / name for name in PUBLISHED_OUTPUTS if (output_dir / name).exists()]
     if not existing:
         return None
     archive_dir = output_dir / "work" / "previous-runs" / run_id

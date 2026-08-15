@@ -28,14 +28,14 @@ const toneColor = (tone: string | undefined, theme: Theme): string => {
   return theme.primary;
 };
 
-/** Parse numeric prefix from a string like "92.7%" → 92.7. Returns NaN if none. */
+/** Parse numeric value from strings like "-15%", "92.7%", "3.5x". Returns NaN if none. */
 const parseNumeric = (s: string): number => {
-  const m = s.match(/[\d.]+/);
+  const m = s.match(/-?[\d.]+/);
   return m ? parseFloat(m[0]) : NaN;
 };
 
 /** Extract non-numeric suffix from a string like "92.7%" → "%". */
-const numericSuffix = (s: string): string => s.replace(/[\d.]+/, "");
+const numericSuffix = (s: string): string => s.replace(/-?[\d.]+/, "");
 
 /* ── Shared styles ───────────────────────────────────────── */
 
@@ -60,9 +60,10 @@ const VisualStat: React.FC<{visual: Extract<Visual, {type: "stat"}>; theme: Them
   const enter = spring({frame, fps, config: {damping: 16, stiffness: 120}});
   const num = parseNumeric(visual.value);
   const suffix = numericSuffix(visual.value);
+  const decimals = (visual.value.match(/\.(\d+)/) || ["", ""])[1].length;
   const display = isNaN(num)
     ? visual.value
-    : `${Math.round(interpolate(frame, [0, 25], [0, num], clamp))}${suffix}`;
+    : `${Number(interpolate(frame, [0, 25], [0, num], clamp).toFixed(decimals))}${suffix}`;
 
   return (
     <div style={{textAlign: "center", transform: `scale(${0.86 + enter * 0.14})`}}>

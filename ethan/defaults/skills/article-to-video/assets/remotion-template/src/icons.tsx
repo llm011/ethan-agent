@@ -6,15 +6,6 @@ import React from "react";
  * Unrecognized names fall back to emoji passthrough (rendered as text).
  */
 
-const S = (d: string, viewBox = "0 0 24 24"): React.FC<{size?: number; color?: string}> => ({
-  size = 48,
-  color = "currentColor",
-}) => (
-  <svg width={size} height={size} viewBox={viewBox} fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-    <path d={d} />
-  </svg>
-);
-
 const Lightning: React.FC<{size?: number; color?: string}> = ({size = 48, color = "currentColor"}) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
     <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" fill={color} opacity={0.15} />
