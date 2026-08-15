@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Pencil, Check, X, RefreshCw, Link2, RotateCw } from "lucide-react";
+import { Pencil, Check, X, RefreshCw, Link2, RotateCw, Pin, PinOff } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Clock, Calendar } from "lucide-react";
 import { Button } from "@ethan/shared/ui/button";
@@ -17,7 +17,9 @@ interface ChatHeaderProps {
   source: string;
   usage: Usage;
   schedules: any[];
+  pinnedAt?: number;
   onTitleChange: (title: string) => void;
+  onTogglePin?: () => void;
   onReloadChat?: () => void;
 }
 
@@ -30,7 +32,7 @@ const SOURCE_COLOR: Record<string, string> = {
   heartbeat: "bg-orange-500/15 text-orange-600 dark:text-orange-400",
 };
 
-export function ChatHeader({ sessionId, title, source, usage, schedules, onTitleChange, onReloadChat }: ChatHeaderProps) {
+export function ChatHeader({ sessionId, title, source, usage, schedules, pinnedAt, onTitleChange, onTogglePin, onReloadChat }: ChatHeaderProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [editingTitle, setEditingTitle] = useState("");
@@ -133,6 +135,15 @@ export function ChatHeader({ sessionId, title, source, usage, schedules, onTitle
               >
                 <RefreshCw className={`h-3 w-3 ${regenerating ? "animate-spin" : ""}`} />
               </button>
+              {onTogglePin && (
+                <button
+                  className={`shrink-0 hover:text-primary ${pinnedAt && pinnedAt > 0 ? "opacity-70 text-primary" : "opacity-0 group-hover:opacity-50 hover:!opacity-100 text-muted-foreground"}`}
+                  onClick={(e) => { e.stopPropagation(); onTogglePin(); }}
+                  title={pinnedAt && pinnedAt > 0 ? "取消置顶" : "置顶"}
+                >
+                  {pinnedAt && pinnedAt > 0 ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}
+                </button>
+              )}
             </div>
           )
         )}

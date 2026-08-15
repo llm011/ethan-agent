@@ -21,6 +21,7 @@ export interface SessionDetail {
   model: string;
   source?: string;
   mode?: string;
+  pinned_at?: number;
   active_run?: boolean;
   messages: {
     role: string;
