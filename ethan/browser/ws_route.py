@@ -94,4 +94,5 @@ async def browser_ws(ws: WebSocket) -> None:
     except Exception:
         logger.exception("browser ws: unexpected error")
     finally:
+        evict_waiter.cancel()
         await hub.detach(conn)

@@ -107,4 +107,5 @@ async def desktop_ws(ws: WebSocket) -> None:
     except Exception:
         logger.exception("desktop ws: unexpected error")
     finally:
+        evict_waiter.cancel()
         await hub.detach(conn)
