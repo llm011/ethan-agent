@@ -362,3 +362,21 @@ def test_check_json_ok(tmp_path):
                        capture_output=True, text=True, timeout=120)
     data = json.loads(r.stdout)
     assert r.returncode == 0 and data["ok"] is True and data["issues"] == []
+
+
+@pytest.mark.parametrize("name, contents", [
+    ("missing.json", None),
+    ("invalid.json", "{not valid json"),
+    ("list.json", "[]"),
+])
+def test_check_json_load_failures_are_structured(tmp_path, name, contents):
+    p = tmp_path / name
+    if contents is not None:
+        p.write_text(contents, encoding="utf-8")
+    r = subprocess.run([sys.executable, str(SCRIPTS / "render_pptx.py"), str(p), "--json"],
+                       capture_output=True, text=True, timeout=120)
+    data = json.loads(r.stdout)
+    assert r.returncode == 1 and data["ok"] is False
+    assert data["warnings"] == []
+    assert data["issues"][0]["severity"] == "error"
+    assert r.stderr == ""

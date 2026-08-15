@@ -488,8 +488,13 @@ def load_theme(deck: dict, cli_theme: str | None, script_dir: Path) -> dict:
         path = script_dir / "themes" / f"{theme_spec}.json"
         if not path.is_file():
             raise DeckError(f"主题不存在: {theme_spec}（{path}）")
-        loaded = json.loads(path.read_text(encoding="utf-8"))
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as e:
+            raise DeckError(f"主题读取失败: {path}（{e}）") from e
     if loaded:
+        if not isinstance(loaded, dict):
+            raise DeckError("主题必须是 JSON 对象")
         for k, v in loaded.items():
             if k == "typography" and isinstance(v, dict):
                 theme["typography"].update(v)
@@ -1709,6 +1714,9 @@ def validate_deck(deck: dict, theme: dict | None = None) -> list:
     def warn(msg, code=None):
         issues.append({"severity": "warning", "code": code, "message": msg})
 
+    if not isinstance(deck, dict):
+        err("deck 根节点必须是 JSON 对象")
+        return issues
     if not isinstance(deck.get("slides"), list) or not deck["slides"]:
         err("deck.slides 必须是非空数组")
         return issues
@@ -1877,20 +1885,38 @@ def main():
     args = ap.parse_args()
 
     deck_path = Path(args.deck).resolve()
-    deck, deck_dir, _page_files = load_deck(deck_path)
+
+    def exit_with_error(message: str, code: str, slides: int = 0):
+        """按 CLI 模式输出统一错误；--json 路径永远只写一个可解析对象到 stdout。"""
+        if args.json:
+            print(json.dumps({
+                "ok": False,
+                "slides": slides,
+                "errors": [message],
+                "warnings": [],
+                "issues": [{"severity": "error", "code": code, "message": message}],
+            }, ensure_ascii=False))
+        else:
+            prefix = "" if message.startswith("[error]") else "[error] "
+            print(f"{prefix}{message}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        deck, deck_dir, _page_files = load_deck(deck_path)
+    except SystemExit as e:
+        # project_loader 用 SystemExit 报可预期的 JSON/项目结构错误。
+        exit_with_error(str(e.code or "加载 deck 失败"), "deck")
+    except OSError as e:
+        exit_with_error(f"无法读取 deck: {deck_path}（{e}）", "deck")
+    if not isinstance(deck, dict):
+        exit_with_error("deck 根节点必须是 JSON 对象", "deck")
     script_dir = Path(__file__).resolve().parent
 
     # theme 先于校验加载：溢出估算需要主题默认字号，顺带让 --check 抓主题名拼错
     try:
         theme = load_theme(deck, args.theme, script_dir)
     except DeckError as e:
-        if args.json:
-            print(json.dumps({"ok": False, "slides": 0, "errors": [str(e)], "warnings": [],
-                              "issues": [{"severity": "error", "code": "theme", "message": str(e)}]},
-                             ensure_ascii=False))
-        else:
-            print(f"[error] {e}", file=sys.stderr)
-        sys.exit(1)
+        exit_with_error(str(e), "theme", len(deck.get("slides") or []))
 
     issues = validate_deck(deck, theme)
     errors = [i for i in issues if i["severity"] == "error"]
