@@ -1730,6 +1730,29 @@ def validate_deck(deck: dict, theme: dict | None = None) -> list:
     def warn(msg, code=None):
         issues.append({"severity": "warning", "code": code, "message": msg})
 
+    def validate_paragraphs(paragraphs, pp: str) -> bool:
+        """确认文字层级可安全交给 _check_text_overflow / render_paragraphs。"""
+        if not isinstance(paragraphs, list) or not paragraphs:
+            err(f"{pp} 缺少非空 paragraphs 数组", code="schema.paragraphs")
+            return False
+        valid = True
+        for pi, para in enumerate(paragraphs):
+            para_path = f"{pp}.paragraphs[{pi}]"
+            if not isinstance(para, dict):
+                err(f"{para_path} 必须是对象", code="schema.paragraph")
+                valid = False
+                continue
+            runs = para.get("runs")
+            if runs is not None and not isinstance(runs, list):
+                err(f"{para_path}.runs 必须是数组", code="schema.runs")
+                valid = False
+                continue
+            for ri, run in enumerate(runs or []):
+                if not isinstance(run, dict):
+                    err(f"{para_path}.runs[{ri}] 必须是对象", code="schema.run")
+                    valid = False
+        return valid
+
     if not isinstance(deck, dict):
         err("deck 根节点必须是 JSON 对象")
         return issues
@@ -1742,104 +1765,148 @@ def validate_deck(deck: dict, theme: dict | None = None) -> list:
 
     for si, slide in enumerate(deck["slides"]):
         sprefix = f"slides[{si}]"
+        if not isinstance(slide, dict):
+            err(f"{sprefix} 必须是对象", code="schema.slide")
+            continue
         sid = slide.get("id")
-        if not sid:
-            err(f"{sprefix} 缺少 id")
+        if not isinstance(sid, str) or not sid:
+            err(f"{sprefix} 缺少非空字符串 id", code="schema.slide-id")
         elif sid in seen_slide_ids:
             err(f"{sprefix} id 重复: {sid}")
-        seen_slide_ids.add(sid)
+        else:
+            seen_slide_ids.add(sid)
         seen_el_ids = set()  # 元素 id 只需页内唯一
         stype = slide.get("type")
-        if stype and stype not in SLIDE_TYPES:
+        if stype and (not isinstance(stype, str) or stype not in SLIDE_TYPES):
             warn(f"{sprefix} 未知 slideType: {stype}")
         elements = slide.get("elements")
         if not isinstance(elements, list):
             err(f"{sprefix} 缺少 elements 数组")
             continue
         for ei, el in enumerate(elements):
+            if not isinstance(el, dict):
+                err(f"{sprefix}.elements[{ei}] 必须是对象", code="schema.element")
+                continue
             ep = f"{sprefix}.elements[{ei}]({el.get('id', '?')})"
             etype = el.get("type")
-            if etype not in ("text", "image", "shape", "line", "chart", "table", "latex"):
+            if not isinstance(etype, str) or etype not in ("text", "image", "shape", "line", "chart", "table", "latex"):
                 err(f"{ep} 未知元素类型: {etype}")
                 continue
             eid = el.get("id")
-            if not eid:
-                err(f"{ep} 缺少 id")
+            if not isinstance(eid, str) or not eid:
+                err(f"{ep} 缺少非空字符串 id", code="schema.element-id")
             elif eid in seen_el_ids:
                 warn(f"{ep} 元素 id 重复: {eid}")
-            seen_el_ids.add(eid)
+            else:
+                seen_el_ids.add(eid)
 
             geom_ok = True  # 几何字段齐全才做溢出估算（缺失时上面已报 error）
             if etype == "line":
-                if not el.get("start") or not el.get("end"):
-                    err(f"{ep} line 需要 start/end")
+                for key in ("start", "end"):
+                    point = el.get(key)
+                    if (not isinstance(point, (list, tuple)) or len(point) != 2
+                            or not all(isinstance(v, (int, float)) for v in point)):
+                        err(f"{ep} line.{key} 必须是两个数值坐标", code="schema.line")
             else:
                 for k in ("left", "top", "width", "height"):
                     if not isinstance(el.get(k), (int, float)):
                         err(f"{ep} 缺少数值字段 {k}")
                         geom_ok = False
-                else:
+                if geom_ok:
                     if el.get("left", 0) < -1 or el.get("top", 0) < -1:
                         warn(f"{ep} 位置为负（超出画布左上）")
-                    if isinstance(el.get("left"), (int, float)) and isinstance(el.get("width"), (int, float)):
-                        if el["left"] + el["width"] > cw + 1 or el.get("top", 0) + el.get("height", 0) > ch + 1:
-                            warn(f"{ep} 超出画布右/下边界")
+                    if el["left"] + el["width"] > cw + 1 or el["top"] + el["height"] > ch + 1:
+                        warn(f"{ep} 超出画布右/下边界")
 
             if etype == "text":
-                if not el.get("paragraphs"):
-                    err(f"{ep} text 缺少 paragraphs")
+                paragraphs_ok = validate_paragraphs(el.get("paragraphs"), f"{ep} text")
                 tt = el.get("textType")
-                if tt and tt not in TEXT_TYPES:
+                if tt and (not isinstance(tt, str) or tt not in TEXT_TYPES):
                     warn(f"{ep} 未知 textType: {tt}")
-                if geom_ok:
+                if geom_ok and paragraphs_ok:
                     _check_text_overflow(el, theme, ep, err, warn)
             elif etype == "latex":
                 if not el.get("latex"):
                     err(f"{ep} latex 元素缺少 latex 字段（公式源码）")
             elif etype == "image":
                 src = el.get("src") or ""
-                if src.startswith("gen:") or src.startswith("icon:"):
+                if not isinstance(src, str):
+                    err(f"{ep} image.src 必须是字符串", code="schema.image-src")
+                elif src.startswith("gen:") or src.startswith("icon:"):
                     err(f"{ep} 图片占位符未解析: {src}，请先运行 gen_image.py")
                 elif not src:
                     warn(f"{ep} image 缺少 src（如需自动生成请用 gen:关键词 或 icon:集合:名称）")
                 it = el.get("imageType")
-                if it and it not in IMAGE_TYPES:
+                if it and (not isinstance(it, str) or it not in IMAGE_TYPES):
                     warn(f"{ep} 未知 imageType: {it}")
             elif etype == "shape":
                 prst = el.get("shape", "rect")
-                if prst not in PRESET_SHAPES:
+                if not isinstance(prst, str) or prst not in PRESET_SHAPES:
                     err(f"{ep} 未知预设形状: {prst}（可用: {', '.join(sorted(PRESET_SHAPES))}）")
                 text_spec = el.get("text")
-                if geom_ok and isinstance(text_spec, dict) and text_spec.get("paragraphs"):
-                    # 样式（inset/autoFit）从 text_spec 读，几何宽高取外层元素
-                    _check_text_overflow({
-                        **text_spec,
-                        "width": el.get("width"),
-                        "height": el.get("height"),
-                        "rotate": el.get("rotate"),
-                    }, theme, ep, err, warn)
+                if text_spec is not None and not isinstance(text_spec, dict):
+                    err(f"{ep} shape.text 必须是对象", code="schema.shape-text")
+                elif isinstance(text_spec, dict) and text_spec.get("paragraphs"):
+                    paragraphs_ok = validate_paragraphs(text_spec["paragraphs"], f"{ep} shape.text")
+                    if geom_ok and paragraphs_ok:
+                        # 样式（inset/autoFit）从 text_spec 读，几何宽高取外层元素
+                        _check_text_overflow({
+                            **text_spec,
+                            "width": el.get("width"),
+                            "height": el.get("height"),
+                            "rotate": el.get("rotate"),
+                        }, theme, ep, err, warn)
             elif etype == "chart":
                 ct = el.get("chartType")
-                if ct not in CHART_TYPES:
+                if not isinstance(ct, str) or ct not in CHART_TYPES:
                     err(f"{ep} 未知 chartType: {ct}")
-                data = el.get("data") or {}
-                labels = data.get("labels") or []
-                for i, ys in enumerate(data.get("series") or []):
-                    if len(ys) != len(labels):
-                        err(f"{ep} series[{i}] 长度 {len(ys)} 与 labels 长度 {len(labels)} 不一致")
+                data = el.get("data")
+                if not isinstance(data, dict):
+                    err(f"{ep} chart.data 必须是对象", code="schema.chart-data")
+                else:
+                    labels = data.get("labels") or []
+                    series = data.get("series") or []
+                    if not isinstance(labels, list) or not isinstance(series, list):
+                        err(f"{ep} chart.data.labels/series 必须是数组", code="schema.chart-data")
+                    else:
+                        for i, ys in enumerate(series):
+                            if not isinstance(ys, list):
+                                err(f"{ep} series[{i}] 必须是数组", code="schema.chart-series")
+                            elif len(ys) != len(labels):
+                                err(f"{ep} series[{i}] 长度 {len(ys)} 与 labels 长度 {len(labels)} 不一致")
             elif etype == "table":
-                rows = el.get("data") or []
-                if not rows:
+                rows = el.get("data")
+                if not isinstance(rows, list) or not rows:
                     err(f"{ep} table data 为空")
+                elif not all(isinstance(row, list) for row in rows):
+                    err(f"{ep} table data 的每一行必须是数组", code="schema.table-data")
                 else:
                     ncol = max(len(r) for r in rows)
+                    if ncol == 0:
+                        err(f"{ep} table data 至少需要一列", code="schema.table-data")
+                        continue
+                    cells_ok = True
                     for ri, r in enumerate(rows):
                         if len(r) != ncol:
                             warn(f"{ep} 第 {ri} 行列数 {len(r)} 与最多列数 {ncol} 不一致")
-                    cw_sum = sum(el.get("colWidths") or [])
-                    if el.get("colWidths") and abs(cw_sum - 1.0) > 0.02:
-                        warn(f"{ep} colWidths 之和为 {cw_sum:.3f}（建议归一到 1.0）")
-                    if geom_ok:
+                        for ci, cell in enumerate(r):
+                            if not isinstance(cell, dict):
+                                err(f"{ep} data[{ri}][{ci}] 必须是对象", code="schema.table-cell")
+                                cells_ok = False
+                            elif cell.get("style") is not None and not isinstance(cell["style"], dict):
+                                err(f"{ep} data[{ri}][{ci}].style 必须是对象", code="schema.table-style")
+                                cells_ok = False
+                    col_widths = el.get("colWidths")
+                    widths_ok = col_widths is None or (
+                        isinstance(col_widths, list) and all(isinstance(w, (int, float)) for w in col_widths)
+                    )
+                    if not widths_ok:
+                        err(f"{ep} colWidths 必须是数值数组", code="schema.table-widths")
+                    elif col_widths:
+                        cw_sum = sum(col_widths)
+                        if abs(cw_sum - 1.0) > 0.02:
+                            warn(f"{ep} colWidths 之和为 {cw_sum:.3f}（建议归一到 1.0）")
+                    if geom_ok and widths_ok and cells_ok:
                         check_table_overflow(el, theme, ep, ch, err, warn)
     return issues
 

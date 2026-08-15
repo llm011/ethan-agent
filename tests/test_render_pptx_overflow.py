@@ -402,3 +402,37 @@ def test_check_json_project_root_failure_is_structured(tmp_path):
     assert r.returncode == 1 and data["ok"] is False
     assert data["issues"][0]["code"] == "deck"
     assert r.stderr == ""
+
+
+def test_check_json_nested_schema_failures_are_structured(tmp_path):
+    deck = {"slides": [None, {
+        "id": "s2",
+        "elements": [None, {
+            "id": "t1", "type": "text", "left": 0, "top": 0, "width": 100, "height": 50,
+            "paragraphs": [None, {"runs": [None]}],
+        }],
+    }]}
+    p = tmp_path / "invalid-nested.json"
+    p.write_text(json.dumps(deck), encoding="utf-8")
+    r = subprocess.run([sys.executable, str(SCRIPTS / "render_pptx.py"), str(p), "--json"],
+                       capture_output=True, text=True, timeout=120)
+    data = json.loads(r.stdout)
+    codes = _codes(data["issues"])
+    assert r.returncode == 1 and data["ok"] is False
+    assert {"schema.slide", "schema.element", "schema.paragraph", "schema.run"} <= set(codes)
+    assert r.stderr == ""
+
+
+def test_check_json_table_cell_failure_is_structured(tmp_path):
+    deck = {"slides": [{"id": "s1", "elements": [{
+        "id": "tb1", "type": "table", "left": 0, "top": 0, "width": 100, "height": 50,
+        "data": [[None]],
+    }]}]}
+    p = tmp_path / "invalid-table.json"
+    p.write_text(json.dumps(deck), encoding="utf-8")
+    r = subprocess.run([sys.executable, str(SCRIPTS / "render_pptx.py"), str(p), "--json"],
+                       capture_output=True, text=True, timeout=120)
+    data = json.loads(r.stdout)
+    assert r.returncode == 1 and data["ok"] is False
+    assert "schema.table-cell" in _codes(data["issues"])
+    assert r.stderr == ""
