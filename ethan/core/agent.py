@@ -368,6 +368,55 @@ class Agent:
             "</mode_setup>"
         )
 
+    def _build_previous_run_summary(self, messages: list[Message]) -> str | None:
+        """从历史消息中找到「上一轮 assistant 回复」，若有 tool_steps 则生成精简摘要。
+
+        下一轮对话时，模型看不到数据库里的 tool_steps（只有 role/content 进 messages），
+        所以上一轮具体调了哪些工具、拿到了什么结果摘要对模型是"盲区"。这里把关键信息
+        作为 system prompt 末尾的一段上下文注入，帮助模型在续跑时衔接上一轮动作。
+
+        内容刻意精简：只给工具名 + intent + result_preview（≤60字），不塞 result_detail
+        （避免爆 token，完整细节模型可自己追问/查本地文件）。
+        """
+        # 找最后一条 assistant 消息（= 上一轮 AI 回复；当前 messages 末尾是本轮新 user 输入）
+        last_assistant: Message | None = None
+        for m in reversed(messages):
+            if m.role == "assistant":
+                last_assistant = m
+                break
+        if last_assistant is None:
+            return None
+        steps = getattr(last_assistant, "tool_steps", None) or []
+        if not steps:
+            return None
+        lines: list[str] = []
+        for idx, step in enumerate(steps, start=1):
+            tool = step.get("tool") or "unknown_tool"
+            state = step.get("state") or "done"
+            state_tag = "✓" if state == "done" else ("✗" if state == "error" else "…")
+            parts = [f"{idx}. {state_tag} {tool}"]
+            intent = (step.get("intent") or "").strip()
+            if intent:
+                parts.append(f"— {intent[:40]}")
+            preview = (step.get("result_preview") or "").strip()
+            if preview:
+                preview = preview.replace("\n", " ")
+                if len(preview) > 60:
+                    preview = preview[:57] + "…"
+                parts.append(f" → {preview}")
+            lines.append(" ".join(parts))
+        if not lines:
+            return None
+        summary = "\n".join(lines)
+        return (
+            "<previous_run_summary>\n"
+            f"[System note: 以下是同一会话中上一轮 AI 执行的 {len(steps)} 个工具步骤摘要，"
+            "仅用于衔接上下文（不是本轮要做的事）。如果用户要求「继续」「修复刚才的问题」等，"
+            "请结合这些信息理解上一轮做了什么、卡在哪里；正常提问则忽略即可。]\n\n"
+            f"{summary}\n"
+            "</previous_run_summary>"
+        )
+
     def _build_system(self, messages: list[Message], fast: bool = False, fast_rule=None) -> str:
         """构建 system prompt。fast=True 时使用极简版本减少 token。
 
@@ -493,6 +542,9 @@ class Agent:
                 activate_tools(["memory_write", "procedure_write"])
             if self.runtime_context:
                 parts.append(f"<runtime_context>\n[CRITICAL — 当前会话上下文，结合 soul 的主人/授权准则判断]\n\n{self.runtime_context}\n</runtime_context>")
+            prev_summary = self._build_previous_run_summary(messages)
+            if prev_summary:
+                parts.append(prev_summary)
             return "\n\n".join(parts)
 
         # Full Path: 完整 Prompt（从缓存读取静态文件）
@@ -609,6 +661,10 @@ class Agent:
 
         if self.runtime_context:
             parts.append(f"<runtime_context>\n[CRITICAL — 当前会话上下文，结合 soul 的主人/授权准则判断]\n\n{self.runtime_context}\n</runtime_context>")
+
+        prev_summary = self._build_previous_run_summary(messages)
+        if prev_summary:
+            parts.append(prev_summary)
 
         return "\n\n".join(parts)
 
@@ -1871,6 +1927,7 @@ class Agent:
                         reject_text = "[用户拒绝此操作]"
                         if consent_msg:
                             reject_text += f"\n用户补充说明：{consent_msg}"
+                        yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary=_format_args(tc.arguments), intent=str(tc.arguments.get("intent", "") or ""), state="start", entity_type=classify_tool(tc.name), entity_id=extract_entity_id(tc.name, tc.arguments), skill_category=resolve_skill_category(tc.name, tc.arguments))
                         yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary="", state="error",
                                         result_preview="用户拒绝",
                                         skill_category=resolve_skill_category(tc.name, tc.arguments))

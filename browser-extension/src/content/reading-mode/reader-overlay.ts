@@ -39,6 +39,7 @@
     contentEl = content;
     cleanedText = content.innerText || '';
 
+    try {
     // Style content
     styleContent(content, dark);
 
@@ -62,6 +63,7 @@
 
     // Fade in给正文图片绑定 hover 放大/删除按钮
     setupImageOverlays();
+    } catch (e) { console.warn('[EthanReader] createReader enhancement error', e); }
 
     // Fade in
     requestAnimationFrame(() => { reader.style.opacity = '1'; });

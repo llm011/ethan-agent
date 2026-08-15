@@ -226,6 +226,7 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
         content = "[Agent 返回了空回复。可能原因：上下文过大、模型异常或工具执行卡住。请重试或简化任务。]"
     asst_msg = Message(
         role="assistant", content=content, thought=collector.thought,
+        reasoning=collector.reasoning,  # DeepSeek/Anthropic reasoning 模型续轮回传用
         usage=usage_dict, tool_steps=collector.tool_steps or [],
         a2ui=collector.a2ui or None,
         mcp_apps=collector.mcp_apps or None,
@@ -318,7 +319,9 @@ async def _stream_completions(agent, messages, store, session_id: str, model: st
         error_content = (collector.full + "\n\n" if collector.full else "") + err_text
         err_msg = Message(
             role="assistant", content=error_content,
-            thought=collector.thought, usage=collector.usage_dict,
+            thought=collector.thought,
+            reasoning=collector.reasoning,
+            usage=collector.usage_dict,
             tool_steps=collector.tool_steps or [], a2ui=collector.a2ui or None,
             mcp_apps=collector.mcp_apps or None,
             matched_skills=collector.matched_skills or None,

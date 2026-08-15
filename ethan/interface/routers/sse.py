@@ -43,6 +43,13 @@ async def _sse_from_run(run) -> AsyncGenerator[str, None]:
                     from ethan.core.wait_for_user import _REGISTRY as _WFU_REGISTRY
                     if req_id not in _WFU_REGISTRY:
                         continue
+            # 跳过已解决的 ask_user 事件
+            if evt.get("ask_user_request"):
+                req_id = evt.get("request_id", "")
+                if req_id:
+                    from ethan.core.ask_user import _REGISTRY as _ASK_REGISTRY
+                    if req_id not in _ASK_REGISTRY:
+                        continue
             yield f"data: {json.dumps(evt, ensure_ascii=False)}\n\n"
         # 缓冲已含结束事件且 producer 已完成：无需再等队列
         if run.done:

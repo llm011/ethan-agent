@@ -19,6 +19,7 @@ export interface SessionDetail {
   model: string;
   source?: string;
   mode?: string;
+  pinned_at?: number;
   active_run?: boolean;
   messages: {
     role: string;
@@ -79,6 +80,22 @@ export async function renameSession(id: string, title: string): Promise<void> {
     headers: headers(),
     body: JSON.stringify({ title }),
   });
+}
+
+export async function pinSession(id: string): Promise<void> {
+  const res = await fetch(`${getApiUrl()}/sessions/${id}/pin`, {
+    method: "POST",
+    headers: headers(),
+  });
+  if (!res.ok) throw new Error("Failed to pin session");
+}
+
+export async function unpinSession(id: string): Promise<void> {
+  const res = await fetch(`${getApiUrl()}/sessions/${id}/pin`, {
+    method: "DELETE",
+    headers: headers(),
+  });
+  if (!res.ok) throw new Error("Failed to unpin session");
 }
 
 export async function regenSessionTitle(id: string): Promise<string | null> {

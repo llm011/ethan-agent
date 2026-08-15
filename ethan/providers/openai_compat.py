@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import AsyncIterator, Optional
+from urllib.parse import urlparse
 
 import httpx
 
@@ -31,12 +32,13 @@ class OpenAICompatProvider(BaseProvider):
             timeout=120.0,  # 2 分钟超时，防止 LLM 不响应导致无限挂起
         )
         self._model = model
+        self._base_url = (provider_cfg.base_url or "").lower()
 
     @property
     def model(self) -> str:
         return self._model
 
-    def _to_openai_messages(self, messages: list[Message]) -> list[dict]:
+    def _to_openai_messages(self, messages: list[Message], include_reasoning: bool = False) -> list[dict]:
         result = []
         # 第一遍：按原顺序转换所有消息，图片 user 消息先暂存
         pending_img_messages: list[dict] = []
@@ -75,11 +77,18 @@ class OpenAICompatProvider(BaseProvider):
                     }
                     for tc in msg.tool_calls
                 ]
-                result.append({
+                msg_dict = {
                     "role": "assistant",
                     "content": msg.content or None,
                     "tool_calls": oai_tool_calls,
-                })
+                }
+                if msg.reasoning and include_reasoning:
+                    # DeepSeek / deepseek-reasoner 等 reasoning 模型要求：上一轮 API 返回过
+                    # reasoning_content（思考过程），下一轮请求必须原样回传在 assistant 消息里，
+                    # 否则返回 400: "The reasoning_content in the thinking mode must be passed back to the API."
+                    # 仅当前模型走 reasoning 协议时才序列化，避免切换模型后污染新端点。
+                    msg_dict["reasoning_content"] = msg.reasoning
+                result.append(msg_dict)
             elif msg.role == "user" and msg.images:
                 # 普通用户图片消息（发送时粘贴的图），同样先刷积压图片
                 result.extend(pending_img_messages)
@@ -103,7 +112,11 @@ class OpenAICompatProvider(BaseProvider):
                 # 能到这里的 assistant 必然无 tool_calls），Gemini 不接受纯空 assistant 消息
                 if msg.role == "assistant" and not msg.content:
                     continue
-                result.append({"role": msg.role, "content": msg.content})
+                out = {"role": msg.role, "content": msg.content}
+                if msg.role == "assistant" and msg.reasoning and include_reasoning:
+                    # reasoning_content 回传：详见上方 is_tool_call 分支注释
+                    out["reasoning_content"] = msg.reasoning
+                result.append(out)
 
         # 末尾剩余的图片消息（最后一组 tool messages 后面没有后续消息时）
         result.extend(pending_img_messages)
@@ -300,6 +313,32 @@ class OpenAICompatProvider(BaseProvider):
 
         return results
 
+    # --- reasoning / thinking 协议（DeepSeek R1 / deepseek-reasoner / 兼容 reasoning_content 的转发）---
+
+    _REASONING_MODEL_PATTERNS = ("reasoner", "reasoning", "-r1", "deepseek-r")
+
+    def _wants_reasoning(self) -> bool:
+        """当前模型是否走 reasoning 协议（序列化历史 reasoning_content + 注入顶层 thinking）。
+
+        只看模型名，不看历史：会话中途从 reasoning 模型切到普通模型（如 gpt-4o）时，
+        历史里存的 reasoning 不再发给新端点——严格校验的 API 收到额外字段会 400
+        (Extra inputs are not permitted)，与 _skip_thinking_field 是同族防护。
+        """
+        model = (self._model or "").lower()
+        return any(k in model for k in self._REASONING_MODEL_PATTERNS)
+
+    def _skip_thinking_field(self) -> bool:
+        """直连 DeepSeek 官方 API 时不传顶层 thinking 字段：
+        官方对 deepseek-reasoner 默认强制开启推理，额外字段会报 400
+        (Extra inputs are not permitted)。该字段仅面向需要显式声明的
+        Anthropic 风格中转网关。
+        """
+        try:
+            host = urlparse(self._base_url).hostname or ""
+        except ValueError:
+            return False
+        return host == "api.deepseek.com" or host.endswith(".deepseek.com")
+
     async def chat(
         self,
         messages: list[Message],
@@ -307,7 +346,8 @@ class OpenAICompatProvider(BaseProvider):
         system: str | None = None,
         max_tokens: int | None = None,
     ) -> Message:
-        oai_messages = self._to_openai_messages(messages)
+        reasoning = self._wants_reasoning()
+        oai_messages = self._to_openai_messages(messages, include_reasoning=reasoning)
         if system:
             oai_messages.insert(0, {"role": "system", "content": system})
 
@@ -320,6 +360,8 @@ class OpenAICompatProvider(BaseProvider):
         if tools:
             kwargs["tools"] = self._to_openai_tools(tools)
             kwargs["tool_choice"] = "auto"
+        if reasoning and not self._skip_thinking_field():
+            kwargs["thinking"] = {"type": "enabled"}
 
         response = await self._client.chat.completions.create(**kwargs)
         if not response.choices:
@@ -332,7 +374,8 @@ class OpenAICompatProvider(BaseProvider):
         tools: list[ToolDefinition] | None = None,
         system: str | None = None,
     ) -> AsyncIterator[StreamChunk]:
-        oai_messages = self._to_openai_messages(messages)
+        reasoning = self._wants_reasoning()
+        oai_messages = self._to_openai_messages(messages, include_reasoning=reasoning)
         if system:
             oai_messages.insert(0, {"role": "system", "content": system})
 
@@ -345,6 +388,8 @@ class OpenAICompatProvider(BaseProvider):
         if tools:
             kwargs["tools"] = self._to_openai_tools(tools)
             kwargs["tool_choice"] = "auto"
+        if reasoning and not self._skip_thinking_field():
+            kwargs["thinking"] = {"type": "enabled"}
 
         tool_calls_acc: dict[int, dict] = {}
         final_tool_calls: list[ToolCall] = []

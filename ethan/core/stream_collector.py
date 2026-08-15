@@ -22,6 +22,11 @@ class StreamCollector:
     def __init__(self):
         self.full: str = ""
         self.thought: str = ""
+        self.reasoning: str = ""  # 模型思考链（reasoning_content / thinking），与正文分流：
+                                 # - 用于 DeepSeek / Anthropic 等 reasoning 模型的续轮回传
+                                 #   （API 要求：上一轮返回过 reasoning_content，下一轮必须原样
+                                 #   带回；否则返回 400）
+                                 # - 前端不展示该字段，仅内部持久化与回放使用
         self.tool_steps: list[dict] = []
         self.a2ui: list = []  # ui_card 工具汇总的 A2UI envelopes（持久化进 assistant 消息）
         self.mcp_apps: list = []  # 工具 UI 资源数据列表 [{uri, data}]，透传给前端 iframe 渲染
@@ -56,6 +61,12 @@ class StreamCollector:
         if isinstance(item, SkillsMatchedEvent):
             self.matched_skills = item.skills
             return None
+        # 先累积 reasoning（与 content/text 独立字段）：DeepSeek reasoning_content 或
+        # Anthropic thinking 作为 StreamChunk.reasoning 传入，需要回放给下一轮请求。
+        rc = getattr(item, "reasoning", "")
+        if rc:
+            self.reasoning += rc
+            # reasoning 只做累积，不对外 yield（渠道 UI 层通常不会显示思考过程）
         # 文本块
         text = item if isinstance(item, str) else getattr(item, "content", "")
         if not text:

@@ -27,6 +27,8 @@ import {
   respondWaitForUser,
   getAnnotationsBatch,
   renameSession,
+  pinSession,
+  unpinSession,
   type Annotation,
 } from "@/lib/api";
 import { ReadingMode } from "@/components/chat/reading-mode";
@@ -69,6 +71,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const [activeSession, setActiveSession] = useState<string | null>(null);
   const [sessionTitle, setSessionTitle] = useState("");
   const [sessionSource, setSessionSource] = useState("web");
+  const [sessionPinnedAt, setSessionPinnedAt] = useState(0);
+  const pinTogglingRef = useRef(false); // pin 切换 in-flight 标记，防快速双击竞态
   const [sessionUsage, setSessionUsage] = useState<Usage>({ input: 0, output: 0, cache: 0 });
   const [models, setModels] = useState<ModelEntry[]>([]);
   const [selectedModel, setSelectedModel] = useState("");
@@ -257,6 +261,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       setMessages([]);
       setSessionUsage({ input: 0, output: 0, cache: 0 });
       setSessionSource("web");
+      setSessionPinnedAt(0);
       setMode("");
       setLoadingSession(false);
       // 重置 transient 状态：否则旧会话残留的 streaming=true 会让 handleSend
@@ -307,6 +312,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         setActiveSession(initialSessionId);
         setSessionTitle(detail.title || "");
         setSessionSource(detail.source || "web");
+        setSessionPinnedAt(detail.pinned_at || 0);
         const loaded = mapDetailMessages(detail);
         setMessages(loaded);
         fetchAnnotationsFor(loaded);
@@ -588,7 +594,26 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         source={sessionSource}
         usage={sessionUsage}
         schedules={schedules}
+        pinnedAt={sessionPinnedAt}
         onTitleChange={setSessionTitle}
+        onTogglePin={async () => {
+          if (!activeSession || pinTogglingRef.current) return;
+          pinTogglingRef.current = true;
+          try {
+            if (sessionPinnedAt > 0) {
+              await unpinSession(activeSession);
+              setSessionPinnedAt(0);
+            } else {
+              await pinSession(activeSession);
+              setSessionPinnedAt(Date.now() / 1000);
+            }
+            window.dispatchEvent(new CustomEvent("session:pin-updated"));
+          } catch (e) {
+            console.error("toggle pin failed:", e);
+          } finally {
+            pinTogglingRef.current = false;
+          }
+        }}
       />
 
       {loadingSession ? (

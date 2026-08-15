@@ -104,16 +104,45 @@ def _build_stats(card: dict) -> dict:
     return _card(card.get("title", ""), [element])
 
 
+def _extract_body_items(node: dict) -> list[str] | None:
+    """从节点抽取分点文本；与 ui_card_templates._extract_body_items 逻辑保持一致：
+    items（list/string）优先，缺则退回 body；string 时按真换行切块。"""
+    src = node.get("items")
+    if src is None:
+        src = node.get("body")
+    if src is None or src == "":
+        return None
+    if isinstance(src, list):
+        items: list[str] = []
+        for x in src:
+            t = _text(x)
+            if t.strip():
+                items.append(t.strip())
+        return items or None
+    text = _text(src)
+    lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+    return lines or None
+
+
 def _build_timeline(card: dict) -> dict:
-    """时间轴卡 → markdown 分节（每节点带 emoji 圆点）。card = {title, nodes:[{title, body?}]}"""
+    """时间轴卡 → markdown 分节（每节点带 emoji 圆点）。card = {title, nodes:[{title, body?, items?}]}
+
+    body/items 支持 str | list[str]：list 转成 `- xxx` 飞书 md 无序列表，
+    单条时直接当段落，与旧视觉完全一致。
+    """
     nodes = card.get("nodes") or []
     blocks = []
     for n in nodes:
         block = f"🔹 **{_text(n.get('title', ''))}**"
-        if n.get("body"):
-            block += "\n" + _text(n["body"])
+        items = _extract_body_items(n)
+        if items:
+            if len(items) == 1:
+                block += "\n" + items[0]
+            else:
+                bullets = "\n".join(f"- {t}" for t in items)
+                block += "\n" + bullets
         blocks.append(block)
-    return _card(card.get("title", "时间轴"), [_md("\n\n".join(blocks))])
+    return _card(card.get("title", "时间轴"), [_md(_md_hardbreak("\n\n".join(blocks)))])
 
 
 _BUILDERS = {
