@@ -40,6 +40,8 @@ def _tool_icon(name: str) -> str:
 
 def start_wechat_listener() -> None:
     """Spawn the bot loop task (idempotent)."""
+    # done task（如登录失败 give-up 退出）不阻塞重启，否则要重启进程才能恢复监听
+    _listeners[:] = [t for t in _listeners if not t.done()]
     if _listeners:
         return
     task = asyncio.ensure_future(_bot_loop())
