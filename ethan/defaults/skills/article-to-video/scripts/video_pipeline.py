@@ -7,6 +7,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -18,7 +19,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-VISUAL_TYPES = {"kinetic-text", "steps", "stat", "quote", "summary"}
+VISUAL_TYPES = {
+    "kinetic-text", "steps", "stat", "quote", "summary",
+    "icon-card", "comparison", "timeline", "callout", "question", "definition",
+}
 FPS_VALUES = {24, 25, 30, 60}
 DEFAULT_THEME = {
     "background": "#081120",
@@ -26,6 +30,51 @@ DEFAULT_THEME = {
     "primary": "#6EE7F9",
     "secondary": "#A78BFA",
     "text": "#F8FAFC",
+    "accent": "#F59E0B",
+    "positive": "#10B981",
+    "negative": "#EF4444",
+    "textMuted": "#94A3B8",
+    "backgroundEnd": "#1a0a2e",
+}
+MODES = {"general", "news", "paper", "kids"}
+MODE_THEMES: dict[str, dict[str, str]] = {
+    "general": {},  # empty = use DEFAULT_THEME
+    "news": {
+        "background": "#0f172a",
+        "backgroundEnd": "#1e293b",
+        "surface": "#1e293b",
+        "primary": "#38bdf8",
+        "secondary": "#818cf8",
+        "accent": "#fbbf24",
+        "positive": "#34d399",
+        "negative": "#f87171",
+        "text": "#f1f5f9",
+        "textMuted": "#94a3b8",
+    },
+    "paper": {
+        "background": "#0c0a1d",
+        "backgroundEnd": "#1a103c",
+        "surface": "#151030",
+        "primary": "#a78bfa",
+        "secondary": "#c084fc",
+        "accent": "#f59e0b",
+        "positive": "#34d399",
+        "negative": "#fb7185",
+        "text": "#f5f3ff",
+        "textMuted": "#a78bfa",
+    },
+    "kids": {
+        "background": "#1a1040",
+        "backgroundEnd": "#2d1b69",
+        "surface": "#2d1b69",
+        "primary": "#fbbf24",
+        "secondary": "#fb923c",
+        "accent": "#fb923c",
+        "positive": "#4ade80",
+        "negative": "#f87171",
+        "text": "#fefce8",
+        "textMuted": "#fde68a",
+    },
 }
 COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -115,7 +164,15 @@ def normalize_manifest(raw: Any) -> dict[str, Any]:
     theme_raw = raw.get("theme") or {}
     if not isinstance(theme_raw, dict):
         raise ManifestError("theme must be an object")
-    theme = {**DEFAULT_THEME, **theme_raw}
+
+    mode_raw = raw.get("mode", "general")
+    if not isinstance(mode_raw, str) or mode_raw not in MODES:
+        raise ManifestError(f"mode must be one of {sorted(MODES)}")
+    mode = mode_raw
+
+    # Apply mode-specific default colors (user's explicit theme overrides these).
+    mode_defaults = MODE_THEMES.get(mode, {})
+    theme = {**DEFAULT_THEME, **mode_defaults, **theme_raw}
     for key, color in theme.items():
         if key not in DEFAULT_THEME:
             raise ManifestError(f"unknown theme field: {key}")
@@ -159,6 +216,83 @@ def normalize_manifest(raw: Any) -> dict[str, Any]:
             if not isinstance(attribution, str) or len(attribution.strip()) > 80:
                 raise ManifestError(f"{field}.visual.attribution must be a string with at most 80 characters")
             visual["attribution"] = attribution.strip()
+        elif visual_type == "icon-card":
+            icon = visual_raw.get("icon", "")
+            if not isinstance(icon, str) or len(icon.strip()) > 32:
+                raise ManifestError(f"{field}.visual.icon must be a string with at most 32 characters")
+            visual["icon"] = icon.strip()
+            visual["title"] = _require_text(visual_raw.get("title"), f"{field}.visual.title", maximum=80)
+            subtitle = visual_raw.get("subtitle", "")
+            if not isinstance(subtitle, str) or len(subtitle.strip()) > 120:
+                raise ManifestError(f"{field}.visual.subtitle must be a string with at most 120 characters")
+            visual["subtitle"] = subtitle.strip()
+        elif visual_type == "comparison":
+            for side in ("left", "right"):
+                side_raw = visual_raw.get(side)
+                if not isinstance(side_raw, dict):
+                    raise ManifestError(f"{field}.visual.{side} must be an object")
+                side_label = _require_text(side_raw.get("label"), f"{field}.visual.{side}.label", maximum=30)
+                side_items = _string_list(side_raw.get("items"), f"{field}.visual.{side}.items", maximum=5)
+                side_tone = side_raw.get("tone", "neutral")
+                if side_tone not in {"positive", "negative", "neutral"}:
+                    raise ManifestError(f"{field}.visual.{side}.tone must be positive, negative, or neutral")
+                visual[side] = {"label": side_label, "items": side_items, "tone": side_tone}
+        elif visual_type == "timeline":
+            items_raw = visual_raw.get("items")
+            if not isinstance(items_raw, list) or not items_raw:
+                raise ManifestError(f"{field}.visual.items must be a non-empty list")
+            if len(items_raw) > 6:
+                raise ManifestError(f"{field}.visual.items must contain at most 6 items")
+            tl_items: list[dict[str, Any]] = []
+            for j, tl_item in enumerate(items_raw):
+                if not isinstance(tl_item, dict):
+                    raise ManifestError(f"{field}.visual.items[{j}] must be an object")
+                tl_label = _require_text(tl_item.get("label"), f"{field}.visual.items[{j}].label", maximum=80)
+                tl_desc = tl_item.get("description", "")
+                if not isinstance(tl_desc, str) or len(tl_desc.strip()) > 120:
+                    raise ManifestError(f"{field}.visual.items[{j}].description must be a string with at most 120 characters")
+                tl_tone = tl_item.get("tone", "neutral")
+                if tl_tone not in {"positive", "negative", "neutral"}:
+                    raise ManifestError(f"{field}.visual.items[{j}].tone must be positive, negative, or neutral")
+                tl_items.append({"label": tl_label, "description": tl_desc, "tone": tl_tone})
+            visual["items"] = tl_items
+        elif visual_type == "callout":
+            visual["text"] = _require_text(visual_raw.get("text"), f"{field}.visual.text", maximum=160)
+            callout_tone = visual_raw.get("tone", "accent")
+            if callout_tone not in {"positive", "negative", "neutral", "accent"}:
+                raise ManifestError(f"{field}.visual.tone must be positive, negative, neutral, or accent")
+            visual["tone"] = callout_tone
+            callout_icon = visual_raw.get("icon", "")
+            if not isinstance(callout_icon, str) or len(callout_icon.strip()) > 32:
+                raise ManifestError(f"{field}.visual.icon must be a string with at most 32 characters")
+            visual["icon"] = callout_icon.strip()
+        elif visual_type == "question":
+            visual["question"] = _require_text(visual_raw.get("question"), f"{field}.visual.question", maximum=120)
+            hint = visual_raw.get("hint", "")
+            if not isinstance(hint, str) or len(hint.strip()) > 120:
+                raise ManifestError(f"{field}.visual.hint must be a string with at most 120 characters")
+            visual["hint"] = hint.strip()
+        elif visual_type == "definition":
+            visual["term"] = _require_text(visual_raw.get("term"), f"{field}.visual.term", maximum=60)
+            visual["definition"] = _require_text(visual_raw.get("definition"), f"{field}.visual.definition", maximum=200)
+            example = visual_raw.get("example", "")
+            if not isinstance(example, str) or len(example.strip()) > 160:
+                raise ManifestError(f"{field}.visual.example must be a string with at most 160 characters")
+            visual["example"] = example.strip()
+
+        scene_theme_raw = item.get("theme")
+        scene_theme: dict[str, str] | None = None
+        if scene_theme_raw is not None:
+            if not isinstance(scene_theme_raw, dict):
+                raise ManifestError(f"{field}.theme must be an object")
+            scene_theme = {**theme}
+            for st_key, st_color in scene_theme_raw.items():
+                if st_key not in DEFAULT_THEME:
+                    raise ManifestError(f"{field}.theme unknown field: {st_key}")
+                if not isinstance(st_color, str) or not COLOR_RE.fullmatch(st_color):
+                    raise ManifestError(f"{field}.theme.{st_key} must be a six-digit hex color")
+                scene_theme[st_key] = st_color
+
         scenes.append(
             {
                 "id": scene_id,
@@ -166,6 +300,7 @@ def normalize_manifest(raw: Any) -> dict[str, Any]:
                 "headline": headline,
                 "body": body.strip(),
                 "visual": visual,
+                "theme": scene_theme,
             }
         )
 
@@ -191,6 +326,7 @@ def normalize_manifest(raw: Any) -> dict[str, Any]:
     result = {
         "title": title,
         "summary": summary,
+        "mode": mode,
         "width": width,
         "height": height,
         "fps": fps,
@@ -470,6 +606,7 @@ def build_timeline(
     return {
         "title": manifest["title"],
         "summary": manifest["summary"],
+        "mode": manifest.get("mode", "general"),
         "width": manifest["width"],
         "height": manifest["height"],
         "fps": manifest["fps"],
@@ -502,21 +639,27 @@ def ensure_renderer(template_dir: Path) -> None:
         _run_command(["pnpm", "install", "--ignore-workspace", "--frozen-lockfile"], cwd=template_dir)
 
 
-def render_video(template_dir: Path, render_dir: Path, timeline_path: Path, public_dir: Path) -> None:
+def render_video_background(
+    template_dir: Path, render_dir: Path, timeline_path: Path, public_dir: Path, output_dir: Path, run_id: str
+) -> int:
+    """Launch Remotion render in the background with start_new_session to survive shell timeouts."""
     ensure_renderer(template_dir)
     render_dir.mkdir(parents=True, exist_ok=True)
-    _run_command(
-        [
-            "node",
-            str(template_dir / "render.mjs"),
-            str(timeline_path),
-            str(render_dir / "final.mp4"),
-            str(render_dir / "cover.png"),
-            str(render_dir / "render-report.json"),
-            str(public_dir),
-        ],
-        cwd=template_dir,
-    )
+    log_path = output_dir / "work" / "render.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    command = [
+        "node", str(template_dir / "render.mjs"), str(timeline_path),
+        str(render_dir / "final.mp4"), str(render_dir / "cover.png"),
+        str(render_dir / "render-report.json"), str(public_dir),
+    ]
+    log_fh = open(log_path, "w", encoding="utf-8")
+    try:
+        proc = subprocess.Popen(
+            command, cwd=template_dir, stdout=log_fh, stderr=subprocess.STDOUT, start_new_session=True,
+        )
+    finally:
+        log_fh.close()
+    return proc.pid
 
 
 def verify_outputs(output_dir: Path, timeline: dict[str, Any]) -> dict[str, Any]:
@@ -589,6 +732,163 @@ def _archive_published_outputs(output_dir: Path, run_id: str) -> Path | None:
     return archive_dir
 
 
+def _read_log_tail(log_path: Path, *, lines: int = 50) -> str:
+    """Read the last N lines of a log file efficiently by seeking from the end."""
+    try:
+        size = log_path.stat().st_size
+    except OSError:
+        return ""
+    if size == 0:
+        return ""
+    chunk = min(size, 8192)
+    try:
+        with log_path.open("rb") as fh:
+            fh.seek(-chunk, 2)
+            data = fh.read()
+    except OSError:
+        return ""
+    return "\n".join(data.decode("utf-8", errors="replace").splitlines()[-lines:])
+
+
+def _is_process_alive(pid: int) -> bool:
+    """Check whether a process with the given PID is still running (Unix only)."""
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
+def check_render_status(output_dir: Path) -> dict[str, Any]:
+    """Check if a background render is still running, finished, or died.
+
+    Updates run-status.json in place and returns the new status dict.
+    """
+    status_path = output_dir / "run-status.json"
+    try:
+        status_data = json.loads(status_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"status": "unknown", "error": "run-status.json not found or invalid"}
+
+    status = status_data.get("status")
+    run_id = status_data.get("runId")
+
+    if status in ("running", "rendering"):
+        pid = status_data.get("renderPid") or status_data.get("currentPid")
+        if pid:
+            if not _is_process_alive(pid):
+                if status == "rendering":
+                    # Check ONLY this run's render-report.json (do NOT glob all dirs).
+                    report_path = output_dir / "work" / "render-runs" / run_id / "render-report.json"
+                    if report_path.is_file():
+                        status_data["status"] = "ok"
+                    else:
+                        log_path = output_dir / "work" / "render.log"
+                        status_data["status"] = "error"
+                        status_data["error"] = "render process died without producing output"
+                        tail = _read_log_tail(log_path)
+                        if tail:
+                            status_data["logTail"] = tail
+                else:
+                    # status == "running": pipeline process died before reaching render
+                    status_data["status"] = "error"
+                    status_data["error"] = "pipeline process died unexpectedly"
+        # If process is alive, keep status as-is
+
+    _write_json_atomic(status_path, status_data)
+    return status_data
+
+
+def publish_outputs(output_dir: Path, run_id: str) -> dict[str, Any]:
+    """Verify render outputs, package deliverables, and atomically publish to output_dir."""
+    render_dir = output_dir / "work" / "render-runs" / run_id
+    timeline_path = output_dir / "timeline.json"
+    timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
+    report = verify_outputs(render_dir, timeline)
+    staged_archive = package_deliverables(
+        output_dir,
+        archive_path=render_dir / "deliverables.zip",
+        file_overrides={
+            "cover.png": render_dir / "cover.png",
+            "render-report.json": render_dir / "render-report.json",
+        },
+    )
+    staged_outputs = {
+        "final.mp4": render_dir / "final.mp4",
+        "cover.png": render_dir / "cover.png",
+        "render-report.json": render_dir / "render-report.json",
+        "deliverables.zip": staged_archive,
+    }
+    for name, staged_path in staged_outputs.items():
+        staged_path.replace(output_dir / name)
+    return {
+        "video": str((output_dir / "final.mp4").resolve()),
+        "cover": str((output_dir / "cover.png").resolve()),
+        "subtitles": str((output_dir / "subtitles.srt").resolve()),
+        "archive": str((output_dir / "deliverables.zip").resolve()),
+        "durationMs": timeline["totalDurationMs"],
+        "sceneCount": len(timeline["scenes"]),
+        "render": report,
+    }
+
+
+def _infer_run_id(output_dir: Path) -> str | None:
+    """Find the most recent run directory under render-runs/."""
+    render_runs = output_dir / "work" / "render-runs"
+    if not render_runs.is_dir():
+        return None
+    dirs = sorted(
+        [d for d in render_runs.iterdir() if d.is_dir()],
+        key=lambda d: d.name,
+        reverse=True,
+    )
+    return dirs[0].name if dirs else None
+
+
+def _handle_status(output_dir: Path) -> dict[str, Any]:
+    """Orchestrate status check and publish: check render status, publish if ready."""
+    status_path = output_dir / "run-status.json"
+    try:
+        status_data = json.loads(status_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"status": "unknown", "error": "run-status.json not found or invalid"}
+
+    # First, check if the render process is still alive / has finished.
+    status_data = check_render_status(output_dir)
+    status = status_data.get("status")
+    run_id = status_data.get("runId") or _infer_run_id(output_dir)
+
+    if status == "ok":
+        # Render finished successfully — publish outputs.
+        try:
+            publish_result = publish_outputs(output_dir, run_id)
+            result = {"status": "published", "runId": run_id, **publish_result}
+            _write_json_atomic(status_path, result)
+            return result
+        except Exception as exc:
+            result = {**status_data, "status": "render-ok-publish-failed", "error": str(exc)}
+            _write_json_atomic(status_path, result)
+            return result
+    elif status == "render-ok-publish-failed":
+        # Retry publish.
+        try:
+            publish_result = publish_outputs(output_dir, run_id)
+            result = {"status": "published", "runId": run_id, **publish_result}
+            _write_json_atomic(status_path, result)
+            return result
+        except Exception as exc:
+            result = {**status_data, "error": str(exc)}
+            _write_json_atomic(status_path, result)
+            return result
+    else:
+        # running, rendering, error, published, etc. — return as-is.
+        return status_data
+
+
 def enforce_target_duration(manifest: dict[str, Any], timeline: dict[str, Any]) -> None:
     target = manifest.get("targetDurationSec")
     if target is None:
@@ -614,7 +914,12 @@ def run_pipeline(manifest_path: Path, output_dir: Path) -> dict[str, Any]:
     status_path = output_dir / "run-status.json"
     _write_json_atomic(
         status_path,
-        {"status": "running", "runId": run_id, "previousOutputs": str(previous_outputs) if previous_outputs else None},
+        {
+            "status": "running",
+            "runId": run_id,
+            "currentPid": os.getpid(),
+            "previousOutputs": str(previous_outputs) if previous_outputs else None,
+        },
     )
     try:
         normalized_manifest_path = output_dir / "manifest.json"
@@ -629,37 +934,26 @@ def run_pipeline(manifest_path: Path, output_dir: Path) -> dict[str, Any]:
 
         render_dir = output_dir / "work" / "render-runs" / run_id
         template_dir = Path(__file__).resolve().parent.parent / "assets" / "remotion-template"
-        render_video(template_dir, render_dir, timeline_path, output_dir / "work" / "public")
-        report = verify_outputs(render_dir, timeline)
-        staged_archive = package_deliverables(
-            output_dir,
-            archive_path=render_dir / "deliverables.zip",
-            file_overrides={
-                "cover.png": render_dir / "cover.png",
-                "render-report.json": render_dir / "render-report.json",
+        public_dir = output_dir / "work" / "public"
+        render_pid = render_video_background(
+            template_dir, render_dir, timeline_path, public_dir, output_dir, run_id
+        )
+        render_log = output_dir / "work" / "render.log"
+        _write_json_atomic(
+            status_path,
+            {
+                "status": "rendering",
+                "runId": run_id,
+                "renderPid": render_pid,
+                "renderLog": str(render_log),
             },
         )
-        staged_outputs = {
-            "final.mp4": render_dir / "final.mp4",
-            "cover.png": render_dir / "cover.png",
-            "render-report.json": render_dir / "render-report.json",
-            "deliverables.zip": staged_archive,
+        return {
+            "status": "rendering",
+            "runId": run_id,
+            "renderPid": render_pid,
+            "renderLog": str(render_log),
         }
-        for name, staged_path in staged_outputs.items():
-            staged_path.replace(output_dir / name)
-
-        result = {
-            "status": "ok",
-            "video": str((output_dir / "final.mp4").resolve()),
-            "cover": str((output_dir / "cover.png").resolve()),
-            "subtitles": str((output_dir / "subtitles.srt").resolve()),
-            "archive": str((output_dir / "deliverables.zip").resolve()),
-            "durationMs": timeline["totalDurationMs"],
-            "sceneCount": len(timeline["scenes"]),
-            "render": report,
-        }
-        _write_json_atomic(status_path, {"status": "ok", "runId": run_id, **result})
-        return result
     except Exception as exc:
         _write_json_atomic(
             status_path,
@@ -681,6 +975,8 @@ def build_parser() -> argparse.ArgumentParser:
     run = subparsers.add_parser("run", help="synthesize speech, render, verify, and package the video")
     run.add_argument("--manifest", type=Path, required=True)
     run.add_argument("--output-dir", type=Path, required=True)
+    status = subparsers.add_parser("status", help="check render status and publish outputs if ready")
+    status.add_argument("--output-dir", type=Path, required=True)
     return parser
 
 
@@ -696,6 +992,8 @@ def main() -> int:
                 "targetDurationSec": manifest["targetDurationSec"],
                 "durationToleranceSec": manifest["durationToleranceSec"],
             }
+        elif args.command == "status":
+            result = _handle_status(args.output_dir.expanduser().resolve())
         else:
             result = run_pipeline(args.manifest.resolve(), args.output_dir.expanduser().resolve())
         print(json.dumps(result, ensure_ascii=False))
