@@ -81,6 +81,9 @@ ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 PROSODY_RE = re.compile(r"^[+-]\d+%$")
 PITCH_RE = re.compile(r"^[+-]\d+Hz$")
 PUBLISHED_OUTPUTS = ("final.mp4", "cover.png", "render-report.json", "deliverables.zip")
+# source.md 由 skill 在调 run 前后写入，不属于渲染产物，但 rerun 时也要归档清走，
+# 避免上一轮的旧文章混进本轮 deliverables.zip（publish 阶段会从归档目录兜底找回）。
+ARCHIVED_EXTRAS = ("source.md",)
 
 
 class ManifestError(ValueError):
@@ -730,7 +733,7 @@ def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
 
 
 def _archive_published_outputs(output_dir: Path, run_id: str) -> Path | None:
-    existing = [output_dir / name for name in PUBLISHED_OUTPUTS if (output_dir / name).exists()]
+    existing = [output_dir / name for name in (*PUBLISHED_OUTPUTS, *ARCHIVED_EXTRAS) if (output_dir / name).exists()]
     if not existing:
         return None
     archive_dir = output_dir / "work" / "previous-runs" / run_id
@@ -828,6 +831,14 @@ def publish_outputs(output_dir: Path, run_id: str) -> dict[str, Any]:
     render_dir = output_dir / "work" / "render-runs" / run_id
     timeline_path = output_dir / "timeline.json"
     timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
+
+    # source.md 若在 run 开始时被归档（skill 先写 source 再调 run 的时序），
+    # 打包前从本次 run 的归档目录复制回来，保证 deliverables.zip 内容完整。
+    source_md = output_dir / "source.md"
+    if not source_md.exists():
+        archived_source = output_dir / "work" / "previous-runs" / run_id / "source.md"
+        if archived_source.is_file():
+            shutil.copy2(archived_source, source_md)
 
     # Check if outputs already exist in output_dir (from a previous partial publish).
     already_published = (output_dir / "final.mp4").exists() and (output_dir / "cover.png").exists()

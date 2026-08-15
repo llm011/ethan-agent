@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import sys
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -222,6 +223,35 @@ def test_failed_rerun_archives_previous_published_outputs(tmp_path, monkeypatch)
     status = json.loads((output_dir / "run-status.json").read_text(encoding="utf-8"))
     assert status["status"] == "error"
     assert status["error"] == "tts offline"
+
+
+def test_publish_recovers_archived_source_md(tmp_path):
+    """skill 先写 source.md 再调 run 的时序下，run 开头的归档会把它清走；
+    publish 打包时应从归档目录复制回来，保证 deliverables.zip 内容完整。"""
+    output_dir = tmp_path / "output"
+    run_id = "20260816-000000-deadbeef"
+    render_dir = output_dir / "work" / "render-runs" / run_id
+    render_dir.mkdir(parents=True)
+    timeline = {
+        "width": 1080, "height": 1920, "fps": 30,
+        "scenes": [{"id": "opening"}], "totalDurationMs": 60000, "captions": [],
+    }
+    (output_dir / "timeline.json").write_text(json.dumps(timeline), encoding="utf-8")
+    (render_dir / "final.mp4").write_bytes(b"\x00\x00\x00\x1cftypisom" + b"\x00" * 10000)
+    (render_dir / "cover.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 1000)
+    (render_dir / "render-report.json").write_text(
+        json.dumps({"width": 1080, "height": 1920, "fps": 30, "sceneCount": 1}), encoding="utf-8",
+    )
+    archive_dir = output_dir / "work" / "previous-runs" / run_id
+    archive_dir.mkdir(parents=True)
+    (archive_dir / "source.md").write_text("# 原文\n", encoding="utf-8")
+
+    pipeline.publish_outputs(output_dir, run_id)
+
+    assert (output_dir / "source.md").read_text(encoding="utf-8") == "# 原文\n"
+    with zipfile.ZipFile(output_dir / "deliverables.zip") as bundle:
+        assert "source.md" in bundle.namelist()
+    assert (archive_dir / "source.md").is_file()  # 归档原件保留，不移动
 
 
 def test_load_manifest_from_json_file(tmp_path):
