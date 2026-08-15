@@ -801,6 +801,14 @@ def check_render_status(output_dir: Path) -> dict[str, Any]:
                     # status == "running": pipeline process died before reaching render
                     status_data["status"] = "error"
                     status_data["error"] = "pipeline process died unexpectedly"
+        else:
+            # No PID available — check staleness to detect crashed process.
+            started_at = status_data.get("startedAt")
+            if started_at:
+                age_seconds = time.time() - started_at
+                if age_seconds > 600:  # 10 minutes
+                    status_data["status"] = "error"
+                    status_data["error"] = f"no process PID recorded after {int(age_seconds)}s — pipeline likely crashed during startup"
         # If process is alive, keep status as-is
 
     _write_json_atomic(status_path, status_data)
@@ -810,8 +818,8 @@ def check_render_status(output_dir: Path) -> dict[str, Any]:
 def publish_outputs(output_dir: Path, run_id: str) -> dict[str, Any]:
     """Verify render outputs, package deliverables, and atomically publish to output_dir.
 
-    On retry (after partial failure), files already in output_dir are detected and
-    the function skips verification of the missing source files.
+    On retry (after partial failure), files already in output_dir are detected
+    and only the remaining files are moved from render_dir.
     """
     render_dir = output_dir / "work" / "render-runs" / run_id
     timeline_path = output_dir / "timeline.json"
@@ -820,26 +828,36 @@ def publish_outputs(output_dir: Path, run_id: str) -> dict[str, Any]:
     # Check if outputs already exist in output_dir (from a previous partial publish).
     already_published = (output_dir / "final.mp4").exists() and (output_dir / "cover.png").exists()
     if already_published:
-        # Skip verify_outputs (source files may have been moved already).
-        report = {}
+        # Read existing report from output_dir (source may have been moved already).
+        existing_report = output_dir / "render-report.json"
+        report = json.loads(existing_report.read_text(encoding="utf-8")) if existing_report.exists() else {}
     else:
         report = verify_outputs(render_dir, timeline)
-    staged_archive = package_deliverables(
-        output_dir,
-        archive_path=render_dir / "deliverables.zip",
-        file_overrides={
-            "cover.png": render_dir / "cover.png",
-            "render-report.json": render_dir / "render-report.json",
-        },
-    )
+        staged_archive = package_deliverables(
+            output_dir,
+            archive_path=render_dir / "deliverables.zip",
+            file_overrides={
+                "cover.png": render_dir / "cover.png",
+                "render-report.json": render_dir / "render-report.json",
+            },
+        )
+
+    # Only move files that haven't been moved yet (idempotent on retry).
     staged_outputs = {
         "final.mp4": render_dir / "final.mp4",
         "cover.png": render_dir / "cover.png",
         "render-report.json": render_dir / "render-report.json",
-        "deliverables.zip": staged_archive,
+        "deliverables.zip": staged_archive if not already_published else output_dir / "deliverables.zip",
     }
-    for name, staged_path in staged_outputs.items():
-        staged_path.replace(output_dir / name)
+    for name, src in staged_outputs.items():
+        dest = output_dir / name
+        if src.exists() and not dest.exists():
+            src.replace(dest)
+        elif src.exists() and dest.exists():
+            pass  # Already published, skip
+        else:
+            # Source missing but dest exists — partial publish recovery.
+            pass
     return {
         "video": str((output_dir / "final.mp4").resolve()),
         "cover": str((output_dir / "cover.png").resolve()),
@@ -867,14 +885,16 @@ def _infer_run_id(output_dir: Path) -> str | None:
 def _handle_status(output_dir: Path) -> dict[str, Any]:
     """Orchestrate status check and publish: check render status, publish if ready."""
     status_path = output_dir / "run-status.json"
+    MAX_PUBLISH_RETRIES = 5
 
-    # check_render_status reads run-status.json internally; no need to read it again here.
     status_data = check_render_status(output_dir)
     status = status_data.get("status")
     run_id = status_data.get("runId") or _infer_run_id(output_dir)
 
+    if not run_id:
+        return {"status": "error", "error": "could not determine runId"}
+
     if status == "ok":
-        # Render finished successfully — publish outputs.
         try:
             publish_result = publish_outputs(output_dir, run_id)
             result = {"status": "published", "runId": run_id, **publish_result}
@@ -885,18 +905,21 @@ def _handle_status(output_dir: Path) -> dict[str, Any]:
             _write_json_atomic(status_path, result)
             return result
     elif status == "render-ok-publish-failed":
-        # Retry publish.
+        retry_count = status_data.get("retryCount", 0) + 1
+        if retry_count >= MAX_PUBLISH_RETRIES:
+            result = {"status": "error", "runId": run_id, "error": f"publish failed after {MAX_PUBLISH_RETRIES} retries: {status_data.get('error', '')}"}
+            _write_json_atomic(status_path, result)
+            return result
         try:
             publish_result = publish_outputs(output_dir, run_id)
             result = {"status": "published", "runId": run_id, **publish_result}
             _write_json_atomic(status_path, result)
             return result
         except Exception as exc:
-            result = {**status_data, "error": str(exc)}
+            result = {**status_data, "error": str(exc), "retryCount": retry_count}
             _write_json_atomic(status_path, result)
             return result
     else:
-        # running, rendering, error, published, etc. — return as-is.
         return status_data
 
 
@@ -929,6 +952,7 @@ def run_pipeline(manifest_path: Path, output_dir: Path) -> dict[str, Any]:
             "status": "running",
             "runId": run_id,
             "currentPid": os.getpid(),
+            "startedAt": time.time(),
             "previousOutputs": str(previous_outputs) if previous_outputs else None,
         },
     )
