@@ -35,6 +35,7 @@ export async function consumeStream(
   baseMessages: Message[],
   actions: ConsumeStreamActions,
   trackTtft = false,
+  signal?: AbortSignal,
 ): Promise<void> {
   const {
     setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setWaitForUserRequest, setBgPolling,
@@ -272,7 +273,7 @@ export async function consumeStream(
       }
     }
   } catch (err) {
-    if (err instanceof DOMException && err.name === "AbortError") {
+    if ((err as { name?: string })?.name === "AbortError") {
       // 切换会话/发新消息 abort 旧流：清理残留的交互卡片状态，避免新会话误显示
       setConsentRequest(null);
       setCleanupConfirm(null);
@@ -281,12 +282,14 @@ export async function consumeStream(
       return;
     }
     const errMsg = err instanceof Error ? err.message : "";
-    const isNetworkDrop = /load failed|network|aborted|connection|SSE connection dropped/i.test(errMsg);
+    const isNetworkDrop = /load failed|network|connection|SSE connection dropped/i.test(errMsg);
     if (isNetworkDrop && activeSession) {
       // SSE 静默断开 — 尝试重连活跃 run，失败再拉最终结果
       try {
+        if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
         const { streamResume } = await import("@/lib/api-chat");
-        const resumed = await streamResume(activeSession);
+        const resumed = await streamResume(activeSession, signal);
+        if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
         if (resumed) {
           // 后端仍有活跃 run：续接 SSE 流，继续接收后续事件
           for await (const chunk of resumed) {
@@ -364,7 +367,17 @@ export async function consumeStream(
             return;
           }
         }
-      } catch { /* fallback to show error */ }
+      } catch (reconnectErr) {
+        // reconnect 中被 abort：与顶层 AbortError 同处理
+        if ((reconnectErr as { name?: string })?.name === "AbortError") {
+          setConsentRequest(null);
+          setCleanupConfirm(null);
+          setAskUserRequest(null);
+          setWaitForUserRequest(null);
+          return;
+        }
+        failed = true;
+      }
     }
     if (failed) {
       const errLine = `⚠️ ${err instanceof Error ? err.message : "连接中断"}`;

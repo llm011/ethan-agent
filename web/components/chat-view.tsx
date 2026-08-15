@@ -335,7 +335,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
               setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setWaitForUserRequest, setBgPolling,
               setSessionTitle, setSessionUsage, setStopping, setStreaming: _setStreaming,
               activeSession: initialSessionId,
-            });
+            }, false, ac.signal);
           } else {
             _setStreaming(false);
             const fresh = await fetchSession(initialSessionId).catch(() => null);
@@ -553,6 +553,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       newMessages,
       { setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setWaitForUserRequest, setBgPolling, setSessionTitle, setSessionUsage, setStopping, setStreaming: _setStreaming, activeSession: sessionId },
       true,
+      ac.signal,
     );
   };
   handleSendRef.current = handleSend;

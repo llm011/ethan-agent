@@ -99,6 +99,33 @@ uv run --with pypdf,pillow python $SCRIPTS/extract_paper_content.py "<pdf>"  # �
 ## 总体评价(创新/实用/严谨打星 + 启发)
 ```
 
+### Phase 3 — 默认存档到知识库（除非用户明确说不存）
+
+[CRITICAL — 只要用户没在对话里明确说「不用存知识库」「别存」「只给我看报告」这类跳过存档的指令，**必须**执行本步骤。先流式输出报告给用户看、再调工具存档，不要让用户等存档。]
+
+存档内容：**把上述最终报告（含 Markdown 标题层级、配图 Mermaid、表格）完整作为 content 存一篇。** Mermaid 流程图保留 ```mermaid ``` 代码块原样，不用额外渲染成图片。
+
+调用 `knowledge_add`：
+```
+knowledge_add(
+  title="论文精读：<论文主标题>（arXiv:<编号>）",
+  content=<完整的最终 Markdown 报告，含 # 标题、章节、表格、mermaid、插图 Markdown>,
+  tags=["paper/<arXiv 编号或短标题>", "paper-analysis", "ai-paper"],
+  scene="work",
+  frontmatter={
+    "source": "https://arxiv.org/abs/<arxiv_id>",
+    "paper_arxiv_id": "<arxiv_id>",
+    "paper_pdf_url": "<PDF 原 URL>",
+    "type": "paper-analysis"
+  }
+)
+```
+
+目录规则：`tags[0]` 是 `"paper/..."`，Obsidian / Filesystem 后端会按 tags[0] 的第一段 `paper/` 自动创建 `paper/` 子目录，所有论文精读归档到知识库 `paper/` 下，避免散落在根目录。
+
+存档完成后末尾追加一行轻提示即可，不要喧宾夺主：`📚 已存档到知识库 paper/ 目录。`
+- 用户如果说过「不用存/别存知识库」：跳过本步，**不要**调 `knowledge_add`，也不要提存档。
+
 ## 5 维度框架(每页按此分析,**只填该页涉及的维度,带原文数字**)
 1. **摘要** — 核心问题/方案/关键创新(1-3)/成果(必须具体数字)
 2. **为什么重要** — 痛点/真实场景/不解决后果/一句话通俗总结

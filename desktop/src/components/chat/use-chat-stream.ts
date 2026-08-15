@@ -34,6 +34,7 @@ export async function consumeStream(
   baseMessages: Message[],
   actions: ConsumeStreamActions,
   trackTtft = false,
+  signal?: AbortSignal,
 ): Promise<{ failed: boolean }> {
   const {
     setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setWaitForUserRequest, setBgPolling,
@@ -285,13 +286,22 @@ export async function consumeStream(
       }
     }
   } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      setConsentRequest(null);
+      setCleanupConfirm(null);
+      setAskUserRequest(null);
+      setWaitForUserRequest(null);
+      return { failed: false };
+    }
     const errMsg = err instanceof Error ? err.message : "";
     const isNetworkDrop = /load failed|network|aborted|connection|SSE connection dropped/i.test(errMsg);
     if (isNetworkDrop && activeSession) {
       // WebKit 网络中断 / SSE 静默断开 — 尝试重连活跃 run，失败再拉最终结果
       try {
+        if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
         const { streamResume } = await import("@/lib/api-chat");
-        const resumed = await streamResume(activeSession);
+        const resumed = await streamResume(activeSession, signal);
+        if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
         if (resumed) {
           // 后端仍有活跃 run：续接 SSE 流，继续接收后续事件
           for await (const chunk of resumed) {
@@ -357,7 +367,16 @@ export async function consumeStream(
             return { failed: false };
           }
         }
-      } catch { /* fallback to show error */ }
+      } catch (reconnectErr) {
+        if ((reconnectErr as { name?: string })?.name === "AbortError") {
+          setConsentRequest(null);
+          setCleanupConfirm(null);
+          setAskUserRequest(null);
+          setWaitForUserRequest(null);
+          return { failed: false };
+        }
+        failed = true;
+      }
     }
     if (failed) {
       const errLine = `⚠️ ${err instanceof Error ? err.message : "连接中断"}`;

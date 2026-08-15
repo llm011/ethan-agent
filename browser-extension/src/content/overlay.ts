@@ -150,8 +150,17 @@ function addStep(entry: StepEntry) {
   textSpan.style.cssText = 'flex: 1; word-break: break-word; color: #374151;';
   textSpan.textContent = entry.label;
 
+  const timeSpan = document.createElement('span');
+  const d = new Date(entry.timestamp);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const ss = String(d.getSeconds()).padStart(2, '0');
+  timeSpan.textContent = `${hh}:${mm}:${ss}`;
+  timeSpan.style.cssText = 'flex-shrink: 0; font-size: 10px; color: #9ca3af; margin-left: 4px; line-height: 1.4;';
+
   item.appendChild(icon);
   item.appendChild(textSpan);
+  item.appendChild(timeSpan);
   list.appendChild(item);
 
   // 自动滚动到底部

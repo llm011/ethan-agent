@@ -3,6 +3,7 @@ import { toPng } from "html-to-image";
 import { invoke } from "@tauri-apps/api/core";
 import { Share2, Check, Copy, Loader2, X, FolderOpen, AlertCircle, Pencil, Eye } from "lucide-react";
 import { MarkdownContent } from "./markdown";
+import { A2uiCard } from "./a2ui-card";
 import { fmtTokens } from "@/lib/utils";
 import type { Message } from "@ethan/shared/chat/types";
 
@@ -50,6 +51,8 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
   );
   const [includeMeta, setIncludeMeta] = useState(true);
   const [includeStats, setIncludeStats] = useState(true);
+  const [includeCards, setIncludeCards] = useState(true);
+  const [cardsOnly, setCardsOnly] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [resultImage, setResultImage] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -75,6 +78,8 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
     () => messages.filter((m, i) => selected.has(keyOf(m, i))),
     [messages, selected],
   );
+  // 选中消息中是否有 A2UI 卡片
+  const hasCards = selectedMessages.some((m) => m.a2ui && m.a2ui.length > 0);
 
   if (!open) return null;
 
@@ -219,7 +224,7 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
           {/* 右侧：预览卡片（即导出内容） */}
           <div className="flex min-w-0 flex-1 flex-col bg-muted/40">
             <div className="flex items-center justify-between border-b border-border bg-background/60 px-4 py-2">
-              <div className="flex items-center gap-4">
+              <div className="flex flex-wrap items-center gap-4">
                 <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
                   <input
                     type="checkbox"
@@ -238,6 +243,28 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
                   />
                   显示模型与耗时
                 </label>
+                {hasCards && (
+                  <>
+                    <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
+                      <input
+                        type="checkbox"
+                        checked={includeCards}
+                        onChange={(e) => setIncludeCards(e.target.checked)}
+                        className="h-3.5 w-3.5 accent-primary"
+                      />
+                      包含卡片
+                    </label>
+                    <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
+                      <input
+                        type="checkbox"
+                        checked={cardsOnly}
+                        onChange={(e) => setCardsOnly(e.target.checked)}
+                        className="h-3.5 w-3.5 accent-primary"
+                      />
+                      只分享卡片
+                    </label>
+                  </>
+                )}
               </div>
               <div className="flex items-center gap-3">
                 <span className="text-xs text-muted-foreground">已选 {selectedMessages.length} 条</span>
@@ -266,6 +293,25 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
               {selectedMessages.length === 0 ? (
                 <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
                   请勾选至少一条消息
+                </div>
+              ) : cardsOnly ? (
+                // 只分享卡片：沉浸式渲染，无文字/角色/时间/stats/footer
+                <div
+                  className="share-card mx-auto"
+                  ref={previewRef}
+                  style={{ width: cardWidth, maxWidth: "none" }}
+                >
+                  <div className="share-card-inner share-cards-only">
+                    {selectedMessages.map((m, idx) => {
+                      const k = keyOf(m, idx);
+                      if (!m.a2ui || m.a2ui.length === 0) return null;
+                      return (
+                        <div key={k} className="share-msg-share-cards-only">
+                          <A2uiCard surfaces={m.a2ui} />
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               ) : (
                 <div
@@ -312,6 +358,9 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
                           <div className="share-user-text whitespace-pre-wrap">{display}</div>
                         ) : (
                           <MarkdownContent content={raw} variant="share" />
+                        )}
+                        {includeCards && m.a2ui && m.a2ui.length > 0 && (
+                          <A2uiCard surfaces={m.a2ui} />
                         )}
                         {includeStats && m.role === "assistant" && (m.model || m.usage || m.ttfb_ms != null || m.total_ms != null) && (
                           <div className="share-stats">
