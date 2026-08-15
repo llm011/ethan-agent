@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import AsyncIterator, Optional
+from urllib.parse import urlparse
 
 import httpx
 
@@ -31,6 +32,7 @@ class OpenAICompatProvider(BaseProvider):
             timeout=120.0,  # 2 分钟超时，防止 LLM 不响应导致无限挂起
         )
         self._model = model
+        self._base_url = (provider_cfg.base_url or "").lower()
 
     @property
     def model(self) -> str:
@@ -327,6 +329,18 @@ class OpenAICompatProvider(BaseProvider):
             for m in oai_messages
         )
 
+    def _skip_thinking_field(self) -> bool:
+        """直连 DeepSeek 官方 API 时不传顶层 thinking 字段：
+        官方对 deepseek-reasoner 默认强制开启推理，额外字段会报 400
+        (Extra inputs are not permitted)。该字段仅面向需要显式声明的
+        Anthropic 风格中转网关。
+        """
+        try:
+            host = urlparse(self._base_url).hostname or ""
+        except ValueError:
+            return False
+        return host == "api.deepseek.com" or host.endswith(".deepseek.com")
+
     async def chat(
         self,
         messages: list[Message],
@@ -347,7 +361,7 @@ class OpenAICompatProvider(BaseProvider):
         if tools:
             kwargs["tools"] = self._to_openai_tools(tools)
             kwargs["tool_choice"] = "auto"
-        if self._is_reasoning_model(oai_messages):
+        if self._is_reasoning_model(oai_messages) and not self._skip_thinking_field():
             kwargs["thinking"] = {"type": "enabled"}
 
         response = await self._client.chat.completions.create(**kwargs)
@@ -374,7 +388,7 @@ class OpenAICompatProvider(BaseProvider):
         if tools:
             kwargs["tools"] = self._to_openai_tools(tools)
             kwargs["tool_choice"] = "auto"
-        if self._is_reasoning_model(oai_messages):
+        if self._is_reasoning_model(oai_messages) and not self._skip_thinking_field():
             kwargs["thinking"] = {"type": "enabled"}
 
         tool_calls_acc: dict[int, dict] = {}
