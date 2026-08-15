@@ -1717,7 +1717,7 @@ def check_table_overflow(el: dict, theme: dict, ep: str, canvas_h: float, err, w
             code="overflow.table-canvas")
 
 
-def validate_deck(deck: dict, theme: dict | None = None) -> list:
+def validate_deck(deck: dict, theme: dict | None = None, deck_dir: Path | None = None) -> list:
     """结构/几何/文字溢出校验。返回 issue 列表 [{severity, code, message}, ...]。
 
     severity: "error"（必须修，--check exit 1）/ "warning"；code 标记检查类别，
@@ -1849,7 +1849,14 @@ def validate_deck(deck: dict, theme: dict | None = None) -> list:
                 elif src.startswith("gen:") or src.startswith("icon:"):
                     err(f"{ep} 图片占位符未解析: {src}，请先运行 gen_image.py")
                 elif not src:
-                    warn(f"{ep} image 缺少 src（如需自动生成请用 gen:关键词 或 icon:集合:名称）")
+                    err(f"{ep} image 缺少 src（请先运行 gen_image.py 或填写本地/HTTP 图片路径）",
+                        code="image.missing-src")
+                elif not re.match(r"^https?://", src) and deck_dir is not None:
+                    image_path = Path(src)
+                    if not image_path.is_absolute():
+                        image_path = deck_dir / image_path
+                    if not image_path.is_file():
+                        err(f"{ep} 图片不存在: {image_path}", code="image.not-found")
                 it = el.get("imageType")
                 if it and (not isinstance(it, str) or it not in IMAGE_TYPES):
                     warn(f"{ep} 未知 imageType: {it}")
@@ -2016,7 +2023,7 @@ def main():
     except DeckError as e:
         exit_with_error(str(e), "theme", len(deck.get("slides") or []))
 
-    issues = validate_deck(deck, theme)
+    issues = validate_deck(deck, theme, deck_dir)
     errors = [i for i in issues if i["severity"] == "error"]
     warnings = [i for i in issues if i["severity"] == "warning"]
     if args.json:

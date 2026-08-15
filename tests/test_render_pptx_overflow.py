@@ -34,9 +34,9 @@ def _content_defaults():
     return render_pptx.typo_default(THEME, "content")
 
 
-def _issues_for(*elements):
+def _issues_for(*elements, deck_dir=None):
     deck = {"slides": [{"id": "s1", "elements": list(elements)}]}
-    return render_pptx.validate_deck(deck, THEME)
+    return render_pptx.validate_deck(deck, THEME, deck_dir)
 
 
 def _codes(issues):
@@ -148,6 +148,13 @@ def test_overflow_autofit_none_is_error():
     issues = _issues_for(el)
     assert _codes(issues) == ["overflow.nofit"]
     assert issues[0]["severity"] == "error"
+
+
+def test_image_without_src_is_error():
+    el = {"id": "img1", "type": "image", "left": 40, "top": 40, "width": 100, "height": 100}
+    issues = _issues_for(el)
+    assert "image.missing-src" in _codes(issues)
+    assert next(i for i in issues if i["code"] == "image.missing-src")["severity"] == "error"
 
 
 def test_invalid_autofit_is_error_not_fixable_warning():
@@ -451,4 +458,19 @@ def test_check_json_table_cell_failure_is_structured(tmp_path):
     data = json.loads(r.stdout)
     assert r.returncode == 1 and data["ok"] is False
     assert "schema.table-cell" in _codes(data["issues"])
+    assert r.stderr == ""
+
+
+def test_check_json_reports_missing_local_image(tmp_path):
+    deck = {"slides": [{"id": "s1", "elements": [{
+        "id": "img1", "type": "image", "left": 0, "top": 0, "width": 100, "height": 100,
+        "src": "assets/missing.png",
+    }]}]}
+    p = tmp_path / "deck.json"
+    p.write_text(json.dumps(deck), encoding="utf-8")
+    r = subprocess.run([sys.executable, str(SCRIPTS / "render_pptx.py"), str(p), "--json"],
+                       capture_output=True, text=True, timeout=120)
+    data = json.loads(r.stdout)
+    assert r.returncode == 1 and data["ok"] is False
+    assert "image.not-found" in _codes(data["issues"])
     assert r.stderr == ""
