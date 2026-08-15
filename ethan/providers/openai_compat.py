@@ -38,7 +38,7 @@ class OpenAICompatProvider(BaseProvider):
     def model(self) -> str:
         return self._model
 
-    def _to_openai_messages(self, messages: list[Message]) -> list[dict]:
+    def _to_openai_messages(self, messages: list[Message], include_reasoning: bool = False) -> list[dict]:
         result = []
         # 第一遍：按原顺序转换所有消息，图片 user 消息先暂存
         pending_img_messages: list[dict] = []
@@ -82,10 +82,11 @@ class OpenAICompatProvider(BaseProvider):
                     "content": msg.content or None,
                     "tool_calls": oai_tool_calls,
                 }
-                if msg.reasoning:
+                if msg.reasoning and include_reasoning:
                     # DeepSeek / deepseek-reasoner 等 reasoning 模型要求：上一轮 API 返回过
                     # reasoning_content（思考过程），下一轮请求必须原样回传在 assistant 消息里，
                     # 否则返回 400: "The reasoning_content in the thinking mode must be passed back to the API."
+                    # 仅当前模型走 reasoning 协议时才序列化，避免切换模型后污染新端点。
                     msg_dict["reasoning_content"] = msg.reasoning
                 result.append(msg_dict)
             elif msg.role == "user" and msg.images:
@@ -112,7 +113,7 @@ class OpenAICompatProvider(BaseProvider):
                 if msg.role == "assistant" and not msg.content:
                     continue
                 out = {"role": msg.role, "content": msg.content}
-                if msg.role == "assistant" and msg.reasoning:
+                if msg.role == "assistant" and msg.reasoning and include_reasoning:
                     # reasoning_content 回传：详见上方 is_tool_call 分支注释
                     out["reasoning_content"] = msg.reasoning
                 result.append(out)
@@ -316,18 +317,15 @@ class OpenAICompatProvider(BaseProvider):
 
     _REASONING_MODEL_PATTERNS = ("reasoner", "reasoning", "-r1", "deepseek-r")
 
-    def _is_reasoning_model(self, oai_messages: list[dict]) -> bool:
-        """启发式判断当前请求是否需要开启 thinking 模式并回传 reasoning_content：
-        - 模型名命中 reasoner/reasoning/-r1/deepseek-r 关键字；或
-        - 历史里已有 assistant 消息带 reasoning_content（说明上游要求续跑保持 thinking）。
+    def _wants_reasoning(self) -> bool:
+        """当前模型是否走 reasoning 协议（序列化历史 reasoning_content + 注入顶层 thinking）。
+
+        只看模型名，不看历史：会话中途从 reasoning 模型切到普通模型（如 gpt-4o）时，
+        历史里存的 reasoning 不再发给新端点——严格校验的 API 收到额外字段会 400
+        (Extra inputs are not permitted)，与 _skip_thinking_field 是同族防护。
         """
         model = (self._model or "").lower()
-        if any(k in model for k in self._REASONING_MODEL_PATTERNS):
-            return True
-        return any(
-            m.get("role") == "assistant" and m.get("reasoning_content")
-            for m in oai_messages
-        )
+        return any(k in model for k in self._REASONING_MODEL_PATTERNS)
 
     def _skip_thinking_field(self) -> bool:
         """直连 DeepSeek 官方 API 时不传顶层 thinking 字段：
@@ -348,7 +346,8 @@ class OpenAICompatProvider(BaseProvider):
         system: str | None = None,
         max_tokens: int | None = None,
     ) -> Message:
-        oai_messages = self._to_openai_messages(messages)
+        reasoning = self._wants_reasoning()
+        oai_messages = self._to_openai_messages(messages, include_reasoning=reasoning)
         if system:
             oai_messages.insert(0, {"role": "system", "content": system})
 
@@ -361,7 +360,7 @@ class OpenAICompatProvider(BaseProvider):
         if tools:
             kwargs["tools"] = self._to_openai_tools(tools)
             kwargs["tool_choice"] = "auto"
-        if self._is_reasoning_model(oai_messages) and not self._skip_thinking_field():
+        if reasoning and not self._skip_thinking_field():
             kwargs["thinking"] = {"type": "enabled"}
 
         response = await self._client.chat.completions.create(**kwargs)
@@ -375,7 +374,8 @@ class OpenAICompatProvider(BaseProvider):
         tools: list[ToolDefinition] | None = None,
         system: str | None = None,
     ) -> AsyncIterator[StreamChunk]:
-        oai_messages = self._to_openai_messages(messages)
+        reasoning = self._wants_reasoning()
+        oai_messages = self._to_openai_messages(messages, include_reasoning=reasoning)
         if system:
             oai_messages.insert(0, {"role": "system", "content": system})
 
@@ -388,7 +388,7 @@ class OpenAICompatProvider(BaseProvider):
         if tools:
             kwargs["tools"] = self._to_openai_tools(tools)
             kwargs["tool_choice"] = "auto"
-        if self._is_reasoning_model(oai_messages) and not self._skip_thinking_field():
+        if reasoning and not self._skip_thinking_field():
             kwargs["thinking"] = {"type": "enabled"}
 
         tool_calls_acc: dict[int, dict] = {}
