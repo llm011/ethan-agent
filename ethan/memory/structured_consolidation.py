@@ -253,6 +253,10 @@ async def run_structured_consolidation(target_date: date | None = None) -> dict[
         "rejected": 0,
         "disputed": 0,
         "expired": 0,
+        "dormanted": 0,
+        "decayed": 0,
+        "forgotten": 0,
+        "promoted": 0,
         "summaries": 0,
         "backfilled": 0,
         "skipped": False,
@@ -302,6 +306,18 @@ async def run_structured_consolidation(target_date: date | None = None) -> dict[
             result["disputed"] += len(admitted.disputed)
 
         result["expired"] = _expire_memories(memory_store, time.time())
+
+        # 记忆衰减/归档 + 强化晋升（ETHAN_MEMORY_DECAY=0 默认关；晋升走
+        # ETHAN_MEMORY_PROMOTE=1 独立开关）。失败不炸 daily job——与 backfill
+        # 同样的容错模式，衰减明晚重试（幂等）。
+        try:
+            from ethan.memory.decay import apply_memory_decay
+
+            result.update(apply_memory_decay(memory_store, time.time()))
+        except Exception:
+            logger.warning(
+                "[StructuredConsolidation] memory decay pass failed", exc_info=True
+            )
 
         # 日摘要：基于当日准入的 memories（而非重提取的 candidates）
         for domain in (MemoryDomain.GENERAL.value, MemoryDomain.COMPANION.value):
