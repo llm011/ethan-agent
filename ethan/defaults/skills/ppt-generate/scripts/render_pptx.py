@@ -1783,10 +1783,26 @@ def validate_deck(deck: dict, theme: dict | None = None, deck_dir: Path | None =
                 err(f"{para_path}.runs 必须是数组", code="schema.runs")
                 valid = False
                 continue
+            for keys in (("lineHeight",), ("spaceBefore",), ("spaceAfter", "paragraphSpace")):
+                key = next((name for name in keys if para.get(name) is not None), None)
+                value = para.get(key) if key else None
+                # 渲染端以 ``value or default`` 处理空值和 0；只拒绝会在 float()
+                # 转换时抛异常的有效值，以保持 --check 与渲染行为一致。
+                if value and not is_floatable(value):
+                    err(f"{para_path}.{key} 必须可转换为数值", code="schema.number")
+                    valid = False
             for ri, run in enumerate(runs or []):
                 if not isinstance(run, dict):
                     err(f"{para_path}.runs[{ri}] 必须是对象", code="schema.run")
                     valid = False
+                    continue
+                run_path = f"{para_path}.runs[{ri}]"
+                for keys in (("fontSize", "fontsize"), ("wordSpace",)):
+                    key = next((name for name in keys if run.get(name) is not None), None)
+                    value = run.get(key) if key else None
+                    if value and not is_floatable(value):
+                        err(f"{run_path}.{key} 必须可转换为数值", code="schema.number")
+                        valid = False
         return valid
 
     def validate_inset(spec: dict, sp: str) -> bool:

@@ -177,6 +177,24 @@ def test_invalid_run_color_is_error():
     assert "schema.color" in _codes(_issues_for(el))
 
 
+@pytest.mark.parametrize(("container", "field"), [
+    ("run", "fontSize"),
+    ("run", "fontsize"),
+    ("run", "wordSpace"),
+    ("paragraph", "lineHeight"),
+    ("paragraph", "spaceBefore"),
+    ("paragraph", "spaceAfter"),
+    ("paragraph", "paragraphSpace"),
+])
+def test_non_numeric_text_style_is_schema_error(container, field):
+    para = {"runs": [{"text": "正文"}]}
+    target = para["runs"][0] if container == "run" else para
+    target[field] = "not-a-number"
+    el = {"id": "n1", "type": "text", "left": 40, "top": 40, "width": 200, "height": 60,
+          "paragraphs": [para]}
+    assert "schema.number" in _codes(_issues_for(el))
+
+
 def test_invalid_theme_color_is_error():
     theme = {**THEME, "backgroundColor": "not-a-color"}
     deck = {"slides": [{"id": "s1", "elements": []}]}
@@ -418,6 +436,21 @@ def test_check_json_ok(tmp_path):
                        capture_output=True, text=True, timeout=120)
     data = json.loads(r.stdout)
     assert r.returncode == 0 and data["ok"] is True and data["issues"] == []
+
+
+def test_check_json_non_numeric_font_size_is_structured(tmp_path):
+    deck = {"slides": [{"id": "s1", "elements": [
+        {"id": "t1", "type": "text", "left": 0, "top": 0, "width": 200, "height": 60,
+         "paragraphs": [{"runs": [{"text": "正文", "fontSize": "large"}]}]},
+    ]}]}
+    p = tmp_path / "invalid-font-size.json"
+    p.write_text(json.dumps(deck), encoding="utf-8")
+    r = subprocess.run([sys.executable, str(SCRIPTS / "render_pptx.py"), str(p), "--check", "--json"],
+                       capture_output=True, text=True, timeout=120)
+    data = json.loads(r.stdout)
+    assert r.returncode == 1 and data["ok"] is False
+    assert "schema.number" in _codes(data["issues"])
+    assert r.stderr == ""
 
 
 @pytest.mark.parametrize("name, contents", [
