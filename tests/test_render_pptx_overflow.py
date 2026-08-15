@@ -157,6 +157,20 @@ def test_image_without_src_is_error():
     assert next(i for i in issues if i["code"] == "image.missing-src")["severity"] == "error"
 
 
+def test_chart_non_numeric_series_value_is_error():
+    el = {"id": "chart1", "type": "chart", "chartType": "column",
+          "left": 40, "top": 40, "width": 300, "height": 200,
+          "data": {"labels": ["Q1"], "series": [["not-a-number"]]}}
+    assert "schema.chart-value" in _codes(_issues_for(el))
+
+
+def test_scatter_non_numeric_x_label_is_error():
+    el = {"id": "chart2", "type": "chart", "chartType": "scatter",
+          "left": 40, "top": 40, "width": 300, "height": 200,
+          "data": {"labels": ["not-a-number"], "series": [[1]]}}
+    assert "schema.chart-value" in _codes(_issues_for(el))
+
+
 def test_invalid_autofit_is_error_not_fixable_warning():
     el = {"id": "c4", "type": "text", "left": 40, "top": 40, "width": 300, "height": 125,
           "autoFit": "shirnk",

@@ -1766,6 +1766,14 @@ def validate_deck(deck: dict, theme: dict | None = None, deck_dir: Path | None =
             return False
         return True
 
+    def is_floatable(value) -> bool:
+        """与 render_chart 的 float() 转换保持一致，避免检查通过后渲染崩溃。"""
+        try:
+            float(value)
+        except (TypeError, ValueError):
+            return False
+        return True
+
     if not isinstance(deck, dict):
         err("deck 根节点必须是 JSON 对象")
         return issues
@@ -1891,11 +1899,15 @@ def validate_deck(deck: dict, theme: dict | None = None, deck_dir: Path | None =
                     if not isinstance(labels, list) or not isinstance(series, list):
                         err(f"{ep} chart.data.labels/series 必须是数组", code="schema.chart-data")
                     else:
+                        if ct == "scatter" and any(not is_floatable(label) for label in labels):
+                            err(f"{ep} scatter 的 labels（x 值）必须可转换为数值", code="schema.chart-value")
                         for i, ys in enumerate(series):
                             if not isinstance(ys, list):
                                 err(f"{ep} series[{i}] 必须是数组", code="schema.chart-series")
                             elif len(ys) != len(labels):
                                 err(f"{ep} series[{i}] 长度 {len(ys)} 与 labels 长度 {len(labels)} 不一致")
+                            elif any(not is_floatable(value) for value in ys):
+                                err(f"{ep} series[{i}] 含无法转换为数值的值", code="schema.chart-value")
             elif etype == "table":
                 rows = el.get("data")
                 if not isinstance(rows, list) or not rows:
