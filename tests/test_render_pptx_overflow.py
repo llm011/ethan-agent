@@ -171,6 +171,13 @@ def test_long_unbroken_word_is_checked_for_overflow():
     assert "overflow.unfixable" in _codes(_issues_for(el))
 
 
+def test_word_space_is_included_in_overflow_check():
+    """字符间距会显著吃掉可用宽度，必须参与换行和高度估算。"""
+    el = {"id": "c7", "type": "text", "left": 40, "top": 40, "width": 200, "height": 30,
+          "paragraphs": [{"runs": [{"text": "a" * 12, "fontSize": 14, "wordSpace": 20}]}]}
+    assert "overflow.unfixable" in _codes(_issues_for(el))
+
+
 def test_small_font_never_shrinks():
     """notes 10px 溢出：字号已低于 12px 下限，不许缩 → unfixable error（改文案而非缩字）。"""
     el = {"id": "n1", "type": "text", "left": 40, "top": 40, "width": 300, "height": 40,
@@ -379,4 +386,19 @@ def test_check_json_load_failures_are_structured(tmp_path, name, contents):
     assert r.returncode == 1 and data["ok"] is False
     assert data["warnings"] == []
     assert data["issues"][0]["severity"] == "error"
+    assert r.stderr == ""
+
+
+def test_check_json_project_root_failure_is_structured(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "deck.json").write_text("[]", encoding="utf-8")
+    (project / "pages").mkdir()
+    (project / "pages" / "01_page.json").write_text(
+        json.dumps({"id": "s1", "elements": []}), encoding="utf-8")
+    r = subprocess.run([sys.executable, str(SCRIPTS / "render_pptx.py"), str(project), "--json"],
+                       capture_output=True, text=True, timeout=120)
+    data = json.loads(r.stdout)
+    assert r.returncode == 1 and data["ok"] is False
+    assert data["issues"][0]["code"] == "deck"
     assert r.stderr == ""

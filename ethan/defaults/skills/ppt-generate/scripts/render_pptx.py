@@ -560,7 +560,8 @@ def _tokenize_runs(runs: list, defaults: dict) -> list:
     """把 runs 展开为原子序列 [(em_w, fs_px, is_space), ...]。
 
     拉丁词整词不拆（对齐 PowerPoint 的断词换行），CJK/全角/标点/空格逐字成原子。
-    显式换行用 em_w=None 的哨兵表示；超出整行的拉丁词由 _wrap_lines 应急折行。
+    显式换行用 em_w=None 的哨兵表示；wordSpace 计入相邻字符之间的额外宽度；
+    超出整行的拉丁词由 _wrap_lines 应急折行。
     镜像 render_paragraphs 的 runs/para.text 回退由调用方处理。
     """
     atoms = []
@@ -570,20 +571,32 @@ def _tokenize_runs(runs: list, defaults: dict) -> list:
             continue
         fs = run_font_px(r, defaults)
         bold = bool(r.get("bold", defaults.get("bold", False)))
+        word_space = float(r.get("wordSpace") or 0)
         for part in re.split(r"(\r\n|\r|\n)", text):
             if not part:
                 continue
             if part in ("\r\n", "\r", "\n"):
-                atoms.append((None, fs, False))
+                atoms.append((None, fs, False, 0.0))
                 continue
+            part_atoms = []
+
+            def add_atom(em_w: float, is_space: bool, chars: int):
+                # spc 只作用于相邻字符：原子内部的字符间距加到自身宽度，
+                # 原子之间的间距在 _wrap_lines 中仅当两者位于同一行时计入。
+                before = word_space if part_atoms else 0.0
+                internal = word_space * max(0, chars - 1) / fs
+                part_atoms.append((em_w + internal, fs, is_space, before))
+
             pos = 0
             for m in _LATIN_WORD_RE.finditer(part):
                 for ch in part[pos:m.start()]:
-                    atoms.append((char_w_em(ch, bold), fs, ch == " "))
-                atoms.append((sum(char_w_em(c, bold) for c in m.group()), fs, False))
+                    add_atom(char_w_em(ch, bold), ch == " ", 1)
+                token = m.group()
+                add_atom(sum(char_w_em(c, bold) for c in token), False, len(token))
                 pos = m.end()
             for ch in part[pos:]:
-                atoms.append((char_w_em(ch, bold), fs, ch == " "))
+                add_atom(char_w_em(ch, bold), ch == " ", 1)
+            atoms.extend(part_atoms)
     return atoms
 
 
@@ -596,7 +609,9 @@ def _wrap_lines(atoms: list, first_w: float, rest_w: float, scale: float = 1.0) 
     lines = []
     avail = first_w
     cur_w, cur_fs, pend = 0.0, 0.0, 0.0
-    for em, fs, is_space in atoms:
+    for atom in atoms:
+        em, fs, is_space = atom[:3]
+        char_space = atom[3] if len(atom) > 3 else 0.0
         if em is None:
             lines.append(cur_fs * scale if cur_fs > 0 else fs * scale)
             avail = rest_w
@@ -604,16 +619,17 @@ def _wrap_lines(atoms: list, first_w: float, rest_w: float, scale: float = 1.0) 
             continue
         w = em * fs * scale
         if is_space:
-            pend += w
+            pend += w + (char_space * scale if cur_w > 0 or pend > 0 else 0.0)
             continue
         if cur_w == 0:
             pend = 0.0  # 丢弃段首/换行后的空格
-        if cur_w > 0 and cur_w + pend + w > avail:
+        gap = char_space * scale if cur_w > 0 else 0.0
+        if cur_w > 0 and cur_w + pend + gap + w > avail:
             lines.append(cur_fs * scale)
             avail = rest_w
             cur_w, cur_fs, pend = w, fs, 0.0
         else:
-            cur_w += pend + w
+            cur_w += pend + gap + w
             cur_fs = max(cur_fs, fs)
             pend = 0.0
         # PowerPoint/LibreOffice 会对超过整行宽的 URL、标识符等做应急折行；若仍
