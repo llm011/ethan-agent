@@ -139,7 +139,7 @@ slides 也可以不放 deck.json 里，而是拆成项目目录——`render_ppt
 | 字段 | 类型 | 默认 | 说明 |
 |---|---|---|---|
 | `align` | `left/center/right/justify` | left | 水平对齐 |
-| `lineHeight` | number | 单倍 | 行高倍数。**未设置=单倍行距，中文实际行高 ≈ 1.32×字号**（不是 1.5）；设 L 时 ≈ 1.32×L×字号。做高度预算按此估（见 layout-guide「高度预算」） |
+| `lineHeight` | number | 单倍 | 行高倍数。**未设置=单倍行距，中文实际行高 ≈ 1.36×字号**（不是 1.5）；设 L 时 ≈ 1.36×L×字号。做高度预算按此估（见 layout-guide「高度预算」） |
 | `spaceBefore/spaceAfter` | number | 0/5 | 段前/段后间距 px |
 | `bullet` | false / `"bullet"` / `"number"` | false | 项目符号 / 自动编号 |
 | `runs` | array | ✅ | run 列表 |
@@ -294,7 +294,7 @@ slides 也可以不放 deck.json 里，而是拆成项目目录——`render_ppt
 ```
 
 - `colWidths`：各列宽度占比，和为 1。
-- `cellMinHeight`：行**最小**高（px，默认 36）——渲染器会按单元格内容估算行高写入（窄列文字换行会把行撑高），所以**表格总高可能大于 height**：`--check` 对「总高超设定高度」给 warn（行向下撑、注意压住下方元素），对「底边超画布」给 error（末行被裁，必须删行/降行高/上移）。预算公式：`总高 ≈ Σ 每行 max(cellMinHeight, 行数×字号×1.32+8)`，生成时确保 `top+总高 ≤ 540`。
+- `cellMinHeight`：行**最小**高（px，默认 36）——渲染器会按单元格内容估算行高写入（窄列文字换行会把行撑高），所以**表格总高可能大于 height**：`--check` 对「总高超设定高度」给 warn（行向下撑、注意压住下方元素），对「底边超画布」给 error（末行被裁，必须删行/降行高/上移）。预算公式：`总高 ≈ Σ 每行 max(cellMinHeight, 行数×字号×1.36+8)`，生成时确保 `top+总高 ≤ 540`。
 - 单元格：`text` + `colspan`/`rowspan`（合并）+ `style`（`bold/em/underline/strikethrough/color/backcolor/fontSize/fontName/align/vAlign`）。
 - `theme.rowHeader` 为 true 时首行用 `theme.color` 填充、加粗，文字颜色按表头底色亮度自动选黑/白（单元格 style 可再覆盖）。
 - 表体默认填充跟随主题背景：深色主题下自动提亮一档作卡片面（文字用主题 fontColor），浅色主题下为纯白；边框默认取主题 outline 颜色。深浅主题下表格都可读，无需手写 backcolor。

@@ -85,15 +85,15 @@ def test_wrap_trailing_space_ignored():
 def test_paragraph_height_line_factors():
     d = _content_defaults()
     para = [{"runs": [{"text": "你好", "fontSize": 14}]}]
-    assert render_pptx.estimate_paragraphs_height(para, d, 250) == pytest.approx(14 * 1.32)
+    assert render_pptx.estimate_paragraphs_height(para, d, 250) == pytest.approx(14 * render_pptx.LINE_SINGLE_FACTOR)
     para15 = [{"runs": [{"text": "你好", "fontSize": 14}], "lineHeight": 1.5}]
-    assert render_pptx.estimate_paragraphs_height(para15, d, 250) == pytest.approx(14 * 1.32 * 1.5)
+    assert render_pptx.estimate_paragraphs_height(para15, d, 250) == pytest.approx(14 * render_pptx.LINE_SINGLE_FACTOR * 1.5)
 
 
 def test_paragraph_space_before_after():
     d = _content_defaults()
     para = [{"runs": [{"text": "你好", "fontSize": 14}], "spaceBefore": 4, "spaceAfter": 6}]
-    assert render_pptx.estimate_paragraphs_height(para, d, 250) == pytest.approx(14 * 1.32 + 10)
+    assert render_pptx.estimate_paragraphs_height(para, d, 250) == pytest.approx(14 * render_pptx.LINE_SINGLE_FACTOR + 10)
 
 
 def test_bullet_indent_narrows_wrap():
@@ -101,8 +101,8 @@ def test_bullet_indent_narrows_wrap():
     d = _content_defaults()
     plain = [{"runs": [{"text": "字" * 34, "fontSize": 14}]}]
     bullet = [{"runs": [{"text": "字" * 34, "fontSize": 14}], "bullet": True}]
-    assert render_pptx.estimate_paragraphs_height(plain, d, 250) == pytest.approx(2 * 14 * 1.32)
-    assert render_pptx.estimate_paragraphs_height(bullet, d, 250) == pytest.approx(3 * 14 * 1.32)
+    assert render_pptx.estimate_paragraphs_height(plain, d, 250) == pytest.approx(2 * 14 * render_pptx.LINE_SINGLE_FACTOR)
+    assert render_pptx.estimate_paragraphs_height(bullet, d, 250) == pytest.approx(3 * 14 * render_pptx.LINE_SINGLE_FACTOR)
 
 
 # --- 溢出分级（validate_deck） ----------------------------------------------
@@ -116,7 +116,7 @@ def test_compact_single_line_bar_passes():
 
 
 def test_overflow_fixable_is_warning():
-    el = {"id": "c1", "type": "text", "left": 40, "top": 40, "width": 300, "height": 115,
+    el = {"id": "c1", "type": "text", "left": 40, "top": 40, "width": 300, "height": 125,
           "paragraphs": [{"runs": [{"text": "字" * 138, "fontSize": 14}]}]}
     issues = _issues_for(el)
     assert "overflow.fixable" in _codes(issues)
@@ -136,7 +136,7 @@ def test_overflow_unfixable_is_error():
 
 
 def test_overflow_autofit_none_is_error():
-    el = {"id": "c3", "type": "text", "left": 40, "top": 40, "width": 300, "height": 115,
+    el = {"id": "c3", "type": "text", "left": 40, "top": 40, "width": 300, "height": 125,
           "autoFit": "none",
           "paragraphs": [{"runs": [{"text": "字" * 138, "fontSize": 14}]}]}
     issues = _issues_for(el)
@@ -172,7 +172,7 @@ def test_table_row_heights():
     ]}
     rh = render_pptx.estimate_table_row_heights(el, THEME)
     assert rh[0] == 36.0  # 短文本不撑行
-    assert rh[1] == pytest.approx(3 * 13 * 1.32 + 8)  # 逐内容行数 × 默认 13px
+    assert rh[1] == pytest.approx(3 * 13 * render_pptx.LINE_SINGLE_FACTOR + 8)  # 逐内容行数 × 默认 13px
 
 
 def test_table_canvas_overflow_is_error():
@@ -210,7 +210,7 @@ def _body_pr(shape):
 def test_normautofit_written_with_explicit_scale():
     """溢出可救 → 显式 fontScale 的 normAutofit，且模板残留的 spAutoFit 已剥。"""
     box = _render_text_el({"id": "c1", "type": "text", "left": 40, "top": 40,
-                           "width": 300, "height": 115,
+                           "width": 300, "height": 125,
                            "paragraphs": [{"runs": [{"text": "字" * 138, "fontSize": 14}]}]})
     body = _body_pr(box)
     fit = body.find(QN("a:normAutofit"))
@@ -243,7 +243,7 @@ def test_shape_text_autofit_written():
     import pptx
     prs = pptx.Presentation()
     slide = prs.slides.add_slide(prs.slide_layouts[6])
-    el = {"id": "s1", "type": "shape", "left": 40, "top": 40, "width": 300, "height": 115,
+    el = {"id": "s1", "type": "shape", "left": 40, "top": 40, "width": 300, "height": 125,
           "shape": "roundRect",
           "text": {"paragraphs": [{"runs": [{"text": "字" * 138, "fontSize": 14}]}]}}
     shape = render_pptx.render_shape(slide, el, THEME, 12192.0)

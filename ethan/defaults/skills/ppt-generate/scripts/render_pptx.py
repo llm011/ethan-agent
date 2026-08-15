@@ -138,8 +138,10 @@ VALIGN_MAP = {
 DASH_MAP = {"solid": None, "dashed": "dash", "dotted": "sysDot"}
 
 # --- 文本溢出估算（--check 诊断与渲染 autofit 兜底共用同一套模型） ---
-# 中文常用字体（微软雅黑等）单倍行距系数：winAscent+winDescent ≈ (2167+536)/2048
-LINE_SINGLE_FACTOR = 1.32
+# 中文常用字体单倍行距系数（winAscent+winDescent / upem）：微软雅黑 ≈1.32、
+# 苹方/Noto Sans CJK ≈1.35-1.44。取 1.36 宁高估：高估只多报 warn（fixable 不
+# 阻断），低估会漏报；normAutofit 的 fontScale 在 PowerPoint 打开时还会重算纠正。
+LINE_SINGLE_FACTOR = 1.36
 BULLET_INDENT_PX = 18.75  # set_bullet 的悬挂缩进 marL=228600 EMU
 BULLET_W_EM = 0.8  # bullet 符号本身占宽（em）
 OVERFLOW_TOL = 1.02  # 内容高超出可用高 2% 以内视为通过（防边缘误报）
