@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 _listeners: list[asyncio.Task] = []
 _RETRY_DELAY_S = 2
 _MAX_CONSECUTIVE_ERRORS = 5
+_MAX_LOGIN_FAILURES = 10
 _BACKOFF_S = 30
 
 # 工具名 → emoji（与飞书保持一致）
@@ -67,6 +68,7 @@ async def _bot_loop() -> None:
     )
 
     consecutive_errors = 0
+    login_failures = 0
     buf = ""
 
     while True:
@@ -75,10 +77,15 @@ async def _bot_loop() -> None:
             logger.info("[WeChat] No credentials — starting QR login...")
             try:
                 creds = await login_via_qrcode()
+                login_failures = 0
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                logger.error("[WeChat] Login failed: %s — retrying in %ss", e, _BACKOFF_S)
+                login_failures += 1
+                if login_failures >= _MAX_LOGIN_FAILURES:
+                    logger.error("[WeChat] Login failed %d times, giving up: %s", login_failures, e)
+                    return
+                logger.error("[WeChat] Login failed (%d/%d): %s — retrying in %ss", login_failures, _MAX_LOGIN_FAILURES, e, _BACKOFF_S)
                 await asyncio.sleep(_BACKOFF_S)
                 continue
 
