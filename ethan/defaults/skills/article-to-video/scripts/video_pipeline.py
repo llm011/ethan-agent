@@ -192,6 +192,8 @@ def normalize_manifest(raw: Any) -> dict[str, Any]:
             raise ManifestError(f"duplicate scene id: {scene_id}")
         seen.add(scene_id)
         narration = _require_text(item.get("narration"), f"{field}.narration", maximum=1000)
+        if mode == "kids" and len(narration.strip()) > 80:
+            raise ManifestError(f"{field}.narration must be at most 80 characters in kids mode (got {len(narration.strip())})")
         headline = _require_text(item.get("headline"), f"{field}.headline", maximum=80)
         body = item.get("body", "")
         if not isinstance(body, str) or len(body.strip()) > 200:
@@ -285,7 +287,9 @@ def normalize_manifest(raw: Any) -> dict[str, Any]:
         if scene_theme_raw is not None:
             if not isinstance(scene_theme_raw, dict):
                 raise ManifestError(f"{field}.theme must be an object")
-            scene_theme = {**theme}
+            # Store only the override keys (not the full resolved theme) so that
+            # React's useTheme hook does a proper partial merge at render time.
+            scene_theme = {}
             for st_key, st_color in scene_theme_raw.items():
                 if st_key not in DEFAULT_THEME:
                     raise ManifestError(f"{field}.theme unknown field: {st_key}")
@@ -781,7 +785,7 @@ def check_render_status(output_dir: Path) -> dict[str, Any]:
         pid = status_data.get("renderPid") or status_data.get("currentPid")
         if pid:
             if not _is_process_alive(pid):
-                if status == "rendering":
+                if status == "rendering" and run_id:
                     # Check ONLY this run's render-report.json (do NOT glob all dirs).
                     report_path = output_dir / "work" / "render-runs" / run_id / "render-report.json"
                     if report_path.is_file():
@@ -804,11 +808,22 @@ def check_render_status(output_dir: Path) -> dict[str, Any]:
 
 
 def publish_outputs(output_dir: Path, run_id: str) -> dict[str, Any]:
-    """Verify render outputs, package deliverables, and atomically publish to output_dir."""
+    """Verify render outputs, package deliverables, and atomically publish to output_dir.
+
+    On retry (after partial failure), files already in output_dir are detected and
+    the function skips verification of the missing source files.
+    """
     render_dir = output_dir / "work" / "render-runs" / run_id
     timeline_path = output_dir / "timeline.json"
     timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
-    report = verify_outputs(render_dir, timeline)
+
+    # Check if outputs already exist in output_dir (from a previous partial publish).
+    already_published = (output_dir / "final.mp4").exists() and (output_dir / "cover.png").exists()
+    if already_published:
+        # Skip verify_outputs (source files may have been moved already).
+        report = {}
+    else:
+        report = verify_outputs(render_dir, timeline)
     staged_archive = package_deliverables(
         output_dir,
         archive_path=render_dir / "deliverables.zip",
@@ -852,12 +867,8 @@ def _infer_run_id(output_dir: Path) -> str | None:
 def _handle_status(output_dir: Path) -> dict[str, Any]:
     """Orchestrate status check and publish: check render status, publish if ready."""
     status_path = output_dir / "run-status.json"
-    try:
-        status_data = json.loads(status_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {"status": "unknown", "error": "run-status.json not found or invalid"}
 
-    # First, check if the render process is still alive / has finished.
+    # check_render_status reads run-status.json internally; no need to read it again here.
     status_data = check_render_status(output_dir)
     status = status_data.get("status")
     run_id = status_data.get("runId") or _infer_run_id(output_dir)

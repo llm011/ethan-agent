@@ -66,6 +66,7 @@ for cmd in uv node pnpm; do command -v "$cmd" >/dev/null || echo "MISSING: $cmd"
 后台启动流水线（TTS + 时间轴 + 渲染）。流水线在 TTS 完成后会自动以 `start_new_session` 启动 Remotion 渲染并立即返回渲染 PID，不会被 shell 超时杀掉：
 
 ```bash
+mkdir -p "$PROJECT/work"
 nohup uv run --isolated --no-project --with 'edge-tts>=7,<8' python \
   ~/.ethan/skills/article-to-video/scripts/video_pipeline.py run \
   --manifest "$PROJECT/manifest.json" \
