@@ -74,6 +74,7 @@ class AdmissionPolicy:
 
     def __init__(self, store: MemoryStore):
         self._store = store
+        self._last_same_scope: bool | None = None  # admit_candidate 后可读取
 
     def admit_candidate(self, candidate: MemoryCandidate) -> tuple[str | None, str]:
         """Admit one candidate.
@@ -186,6 +187,8 @@ class AdmissionPolicy:
         self._maybe_clear_tentative(existing, candidate)
         self._store.mark_candidate_processed(
             candidate.id, CandidateStatus.MERGED.value, tag, existing.id)
+        # 标记是否同 scope 合并：cross-scope 合并不触发 project scope 唤醒
+        self._last_same_scope = (existing.scope_type == candidate.scope_type)
         return existing.id, OUTCOME_MERGED
 
     def _maybe_clear_tentative(
@@ -434,7 +437,11 @@ class AdmissionPolicy:
             if outcome == OUTCOME_MERGED:
                 if memory_id:
                     merged.append(memory_id)
-                    if candidate.scope_type == "project" and candidate.scope_id:
+                    # 只有同 scope 合并才唤醒 project scope；
+                    # cross-scope 合并（_reinforce_cross_scope）只是往 user scope 补证据，
+                    # project scope 没有新活动，不需要唤醒
+                    if (candidate.scope_type == "project" and candidate.scope_id
+                            and self._last_same_scope is not False):
                         scopes_to_wake.add(("project", candidate.scope_id))
                 continue
             # OUTCOME_ADMITTED — a new/active memory was produced.
@@ -452,19 +459,6 @@ class AdmissionPolicy:
             for scope_type, scope_id in scopes_to_wake:
                 wake_scope_dormant(self._store, scope_type, scope_id)
         return AdmissionResult(admitted=admitted, merged=merged, rejected=rejected, disputed=disputed)
-
-    def _maybe_wake_scope(self, candidate: MemoryCandidate) -> None:
-        """project scope 重新有候选落地（admitted/merged）→ 唤醒该 scope 全部 dormant。
-
-        项目回归信号：用户回到一个已休眠的项目并留下新记忆时，旧决策/方法论
-        应立即回来参与召回，而不是等手动唤醒。唤醒异常在 wake_scope_dormant
-        内部吞掉，不影响准入主链路。
-        """
-        if candidate.scope_type != "project" or not candidate.scope_id:
-            return
-        from ethan.memory.decay import wake_scope_dormant
-
-        wake_scope_dormant(self._store, "project", candidate.scope_id)
 
     def _has_conflicting_evidence(self, key_scope: tuple[str, str, str, str], *, exclude_memory_id: str) -> bool:
         memory_key, scope_type, scope_id, domain = key_scope

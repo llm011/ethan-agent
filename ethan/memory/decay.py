@@ -145,7 +145,7 @@ def _forget_long_dormant(store: MemoryStore, now: float, *, dry_run: bool) -> in
 
 
 def _dormant_idle_projects(store: MemoryStore, now: float, *, dry_run: bool,
-                           idle_project_info: dict[str, float] | None = None) -> int:
+                           idle_project_info: dict[str, float] = {}) -> int:
     """Tier B：project scope 连续 PROJECT_IDLE_DAYS 无信号 → 非 Tier A 记忆批量 dormant。
 
     休眠信号是 scope 级四路 MAX（见 store.project_scope_last_activity）：
@@ -183,7 +183,7 @@ def _dormant_idle_projects(store: MemoryStore, now: float, *, dry_run: bool,
 
 
 def _dormant_stale_tentative(store: MemoryStore, now: float, *, dry_run: bool,
-                             idle_project_scopes: frozenset[str] | None = None) -> int:
+                             idle_project_scopes: frozenset[str] = frozenset()) -> int:
     """Tier C：tentative 决定 TENTATIVE_GRACE_DAYS 无强化 → dormant。
 
     强化清标在 admission 侧（_maybe_clear_tentative）：用户后续表达定稿意图

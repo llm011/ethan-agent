@@ -975,30 +975,25 @@ class MemoryStore:
         rows = self._get_conn().execute(sql, params).fetchall()
         return {row["memory_id"]: row["sessions"] for row in rows}
 
-    def last_evidence_at(self, memory_id: str) -> float | None:
-        row = self._get_conn().execute(
-            "SELECT MAX(created_at) AS t FROM memory_evidence WHERE memory_id=?",
-            (memory_id,),
-        ).fetchone()
-        return row["t"] if row else None
-
     def batch_last_evidence_at(self, memory_ids: list[str]) -> dict[str, float]:
         """批量查询多条记忆的最后 evidence 时间，返回 {memory_id: timestamp}。
 
-        替代逐条 last_evidence_at 调用，消除 N+1 查询。
+        替代逐条 last_evidence_at 调用，消除 N+1 查询。分 chunk 避免 SQLite 999 变量上限。
         """
         if not memory_ids:
             return {}
         result: dict[str, float] = {}
-        placeholders = ",".join("?" for _ in memory_ids)
-        rows = self._get_conn().execute(
-            f"SELECT memory_id, MAX(created_at) AS t FROM memory_evidence "
-            f"WHERE memory_id IN ({placeholders}) GROUP BY memory_id",
-            memory_ids,
-        ).fetchall()
-        for row in rows:
-            if row["t"] is not None:
-                result[row["memory_id"]] = float(row["t"])
+        for i in range(0, len(memory_ids), 500):
+            chunk = memory_ids[i:i + 500]
+            placeholders = ",".join("?" for _ in chunk)
+            rows = self._get_conn().execute(
+                f"SELECT memory_id, MAX(created_at) AS t FROM memory_evidence "
+                f"WHERE memory_id IN ({placeholders}) GROUP BY memory_id",
+                chunk,
+            ).fetchall()
+            for row in rows:
+                if row["t"] is not None:
+                    result[row["memory_id"]] = float(row["t"])
         return result
 
     def project_scope_last_activity(self) -> list[tuple[str, float]]:
