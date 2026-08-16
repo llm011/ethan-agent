@@ -589,6 +589,17 @@ def _archive_published_outputs(output_dir: Path, run_id: str) -> Path | None:
     return archive_dir
 
 
+def restore_archived_source_md(output_dir: Path, run_id: str) -> None:
+    """source.md 若在 run 开始时被归档（skill 先写 source 再调 run 的时序），
+    打包前从本次 run 的归档目录复制回来，保证 deliverables.zip 内容完整。"""
+    source_md = output_dir / "source.md"
+    if source_md.exists():
+        return
+    archived_source = output_dir / "work" / "previous-runs" / run_id / "source.md"
+    if archived_source.is_file():
+        shutil.copy2(archived_source, source_md)
+
+
 def enforce_target_duration(manifest: dict[str, Any], timeline: dict[str, Any]) -> None:
     target = manifest.get("targetDurationSec")
     if target is None:
@@ -631,6 +642,7 @@ def run_pipeline(manifest_path: Path, output_dir: Path) -> dict[str, Any]:
         template_dir = Path(__file__).resolve().parent.parent / "assets" / "open-motion-template"
         render_video(template_dir, render_dir, timeline_path, output_dir / "work" / "public")
         report = verify_outputs(render_dir, timeline)
+        restore_archived_source_md(output_dir, run_id)
         staged_archive = package_deliverables(
             output_dir,
             archive_path=render_dir / "deliverables.zip",

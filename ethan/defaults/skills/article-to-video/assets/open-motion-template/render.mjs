@@ -36,6 +36,10 @@ try {
   execSync("npx playwright install chromium", { cwd: __dirname, stdio: "inherit" });
 }
 
+const renderDir = path.dirname(outputPath);
+const tmpDir = path.join(renderDir, "temp");
+const distDir = path.join(tmpDir, "vite-dist");
+
 // ── 2. Vite build ──
 process.stderr.write("[Step 2/5] Building with Vite...\n");
 fs.mkdirSync(distDir, { recursive: true });
