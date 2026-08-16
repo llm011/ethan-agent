@@ -70,7 +70,7 @@ from pptx.chart.data import CategoryChartData, XyChartData  # noqa: E402
 from pptx.dml.color import RGBColor  # noqa: E402
 from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION  # noqa: E402
 from pptx.enum.shapes import MSO_CONNECTOR, MSO_SHAPE  # noqa: E402
-from pptx.enum.text import MSO_ANCHOR, PP_ALIGN  # noqa: E402
+from pptx.enum.text import MSO_ANCHOR, MSO_AUTO_SIZE, PP_ALIGN  # noqa: E402
 from pptx.oxml.ns import qn  # noqa: E402
 from pptx.util import Emu, Pt  # noqa: E402
 
@@ -137,6 +137,19 @@ VALIGN_MAP = {
 }
 DASH_MAP = {"solid": None, "dashed": "dash", "dotted": "sysDot"}
 
+# --- 文本溢出估算（--check 诊断与渲染 autofit 兜底共用同一套模型） ---
+# 中文常用字体单倍行距系数（winAscent+winDescent / upem）：微软雅黑 ≈1.32、
+# 苹方/Noto Sans CJK ≈1.35-1.44。取 1.36 宁高估：高估只多报 warn（fixable 不
+# 阻断），低估会漏报；normAutofit 的 fontScale 在 PowerPoint 打开时还会重算纠正。
+LINE_SINGLE_FACTOR = 1.36
+BULLET_INDENT_PX = 18.75  # set_bullet 的悬挂缩进 marL=228600 EMU
+BULLET_W_EM = 0.8  # bullet 符号本身占宽（em）
+OVERFLOW_TOL = 1.02  # 内容高超出可用高 2% 以内视为通过（防边缘误报）
+AUTOFIT_MIN_RATIO = 0.80  # 缩字下限：不低于原字号 80%（保跨页一致性）
+AUTOFIT_MIN_FONT_PX = 12.0  # 缩字下限：不低于 12px（保投影可读；小字再缩不如改文案）
+TABLE_CELL_MARGIN_V = 4  # 表格 cell 上下边距（与 render_table 写入值一致）
+TABLE_CELL_MARGIN_H = 8  # 表格 cell 左右边距
+
 DEFAULT_THEME = {
     "name": "default",
     "backgroundColor": "#FFFFFF",
@@ -184,11 +197,14 @@ def parse_color(value: str):
     s = value.strip().lstrip("#")
     if len(s) == 3:
         s = "".join(c * 2 for c in s)
-    if len(s) == 6:
-        return RGBColor.from_string(s.upper()), None
-    if len(s) == 8:
-        rgb, a = s[:6], s[6:]
-        return RGBColor.from_string(rgb.upper()), int(a, 16) / 255.0
+    try:
+        if len(s) == 6:
+            return RGBColor.from_string(s.upper()), None
+        if len(s) == 8:
+            rgb, a = s[:6], s[6:]
+            return RGBColor.from_string(rgb.upper()), int(a, 16) / 255.0
+    except (TypeError, ValueError) as e:
+        raise DeckError(f"无法解析颜色: {value!r}") from e
     raise DeckError(f"无法解析颜色: {value!r}")
 
 
@@ -292,7 +308,7 @@ def apply_shadow(sp_pr, shadow: dict, emu_per_px: float):
     """注入 a:outerShdw。shadow: {h, v, blur(px), color:#RRGGBB[AA]}"""
     h, v = float(shadow.get("h", 0)), float(shadow.get("v", 0))
     blur = float(shadow.get("blur", 0))
-    rgb, alpha = parse_color(shadow.get("color", "#00000033"))
+    rgb, alpha = parse_color(shadow.get("color") or "#00000033")
     dist = math.hypot(h, v)
     direction = int((math.degrees(math.atan2(v, h)) % 360) * 60000)
     old = sp_pr.find(qn("a:effectLst"))
@@ -318,7 +334,7 @@ def apply_line_format(line_owner, spec: dict, emu_per_px: float, default=None):
     if not spec:
         ln.fill.background()
         return
-    rgb, alpha = parse_color(spec.get("color", "#D1D5DB"))
+    rgb, alpha = parse_color(spec.get("color") or "#D1D5DB")
     ln.color.rgb = rgb
     ln.width = Emu(int(spec.get("width", 1) * emu_per_px))
     ln_el = ln._get_or_add_ln()
@@ -441,6 +457,26 @@ def set_word_space(run, px: float):
     rPr.set("spc", str(int(px * PT_PER_PX * 100)))
 
 
+def set_autofit(text_frame, mode, scale=None):
+    """设置文本框 autofit：none=固定盒；shrink=溢出缩字。
+
+    python-pptx 的 add_textbox 默认带 <a:spAutoFit/>（盒子随文字长高），与本渲染器
+    "固定几何"的语义冲突；且 bodyPr 的 autofit 子元素是 choice 三选一，写入前必须
+    先清除已有元素 —— auto_size setter 内部会正确处理 choice，借它写、再补 fontScale。
+    fontScale 为千分比（85000=85%）：显式写入后 Office 365/WPS/LibreOffice 均直接生效，
+    无需等 PowerPoint 打开时重算（Keynote 支持差，交付 Keynote 时用 autoFit="none"）。
+    """
+    if mode == "shrink":
+        text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE  # <a:normAutofit/>
+        if scale is not None:
+            fit = text_frame._txBody.bodyPr.find(qn("a:normAutofit"))
+            if fit is not None:
+                fit.set("fontScale", str(int(round(scale * 100000))))
+                fit.set("lnSpcReduction", "0")
+    else:  # none / 默认
+        text_frame.auto_size = MSO_AUTO_SIZE.NONE  # <a:noAutofit/>，同时剥掉模板残留的 spAutoFit
+
+
 # ---------------------------------------------------------------------------
 # 主题
 # ---------------------------------------------------------------------------
@@ -455,8 +491,13 @@ def load_theme(deck: dict, cli_theme: str | None, script_dir: Path) -> dict:
         path = script_dir / "themes" / f"{theme_spec}.json"
         if not path.is_file():
             raise DeckError(f"主题不存在: {theme_spec}（{path}）")
-        loaded = json.loads(path.read_text(encoding="utf-8"))
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as e:
+            raise DeckError(f"主题读取失败: {path}（{e}）") from e
     if loaded:
+        if not isinstance(loaded, dict):
+            raise DeckError("主题必须是 JSON 对象")
         for k, v in loaded.items():
             if k == "typography" and isinstance(v, dict):
                 theme["typography"].update(v)
@@ -474,6 +515,285 @@ def typo_default(theme: dict, text_type: str | None) -> dict:
     base.setdefault("color", theme.get("fontColor", "#1F2937"))
     base.setdefault("bold", False)
     return base
+
+
+# ---------------------------------------------------------------------------
+# 文本度量（纯函数）：字宽估算 / 换行模拟 / 行高 —— --check 诊断与渲染 autofit 共用，
+# 改这里的模型必须同步 render_paragraphs（两侧行为要一致，否则诊断不可信）
+# ---------------------------------------------------------------------------
+
+_LATIN_WORD_RE = re.compile(r"[A-Za-z0-9]+(?:['’.\-][A-Za-z0-9]+)*")
+# 中文语境下的全宽标点（弯引号/省略号/破折号等不在 U+3000-303F/FF00-FFEF 段内）
+_CJK_FULLWIDTH_PUNCT = set("‘’“”…—·【】、。")
+
+
+def run_font_px(run_spec: dict, defaults: dict) -> float:
+    """run 的渲染字号（px）。与 render_paragraphs 的取值链保持单一来源。"""
+    return float(_pick(run_spec, "fontSize", "fontsize") or defaults["fontSize"])
+
+
+def char_w_em(ch: str, bold: bool = False) -> float:
+    """单字符宽度（em 倍数）。中西文分开：中文/全角=1.0（字体规范定死），
+    拉丁/数字取真实分布的上界（安全余量烘进系数，不做全局乘法——换行是分段
+    常数函数，全局 5% 膨胀会在行尾凭空多出一整行的假溢出）。"""
+    o = ord(ch)
+    if (
+        0x4E00 <= o <= 0x9FFF or 0x3400 <= o <= 0x4DBF  # CJK 统一表意 + 扩展A
+        or 0xF900 <= o <= 0xFAFF  # CJK 兼容表意
+        or 0x3040 <= o <= 0x30FF  # 假名
+        or 0xAC00 <= o <= 0xD7AF  # 谚文
+        or 0x3000 <= o <= 0x303F or 0xFF00 <= o <= 0xFFEF  # CJK 标点 / 全角形式
+        or ch in _CJK_FULLWIDTH_PUNCT
+    ):
+        return 1.0
+    if ch == " ":
+        return 0.32
+    if ch.isdigit():
+        return 0.60
+    if "A" <= ch <= "Z":
+        return 0.75 if bold else 0.72
+    if "a" <= ch <= "z":
+        return 0.58 if bold else 0.55
+    if ch.isascii():  # ASCII 标点
+        return 0.42
+    return 0.65  # 兜底（希腊/西里尔等）
+
+
+def _tokenize_runs(runs: list, defaults: dict) -> list:
+    """把 runs 展开为原子序列 [(em_w, fs_px, is_space), ...]。
+
+    拉丁词整词不拆（对齐 PowerPoint 的断词换行），CJK/全角/标点/空格逐字成原子。
+    显式换行用 em_w=None 的哨兵表示；wordSpace 计入相邻字符之间的额外宽度；
+    超出整行的拉丁词由 _wrap_lines 应急折行。
+    镜像 render_paragraphs 的 runs/para.text 回退由调用方处理。
+    """
+    atoms = []
+    for r in runs or []:
+        text = str(r.get("text", ""))
+        if not text:
+            continue
+        fs = run_font_px(r, defaults)
+        bold = bool(r.get("bold", defaults.get("bold", False)))
+        word_space = float(r.get("wordSpace") or 0)
+        for part in re.split(r"(\r\n|\r|\n)", text):
+            if not part:
+                continue
+            if part in ("\r\n", "\r", "\n"):
+                atoms.append((None, fs, False, 0.0))
+                continue
+            part_atoms = []
+
+            def add_atom(em_w: float, is_space: bool, chars: int):
+                # spc 只作用于相邻字符：原子内部的字符间距加到自身宽度，
+                # 原子之间的间距在 _wrap_lines 中仅当两者位于同一行时计入。
+                before = word_space if part_atoms else 0.0
+                internal = word_space * max(0, chars - 1) / fs
+                part_atoms.append((em_w + internal, fs, is_space, before))
+
+            pos = 0
+            for m in _LATIN_WORD_RE.finditer(part):
+                for ch in part[pos:m.start()]:
+                    add_atom(char_w_em(ch, bold), ch == " ", 1)
+                token = m.group()
+                add_atom(sum(char_w_em(c, bold) for c in token), False, len(token))
+                pos = m.end()
+            for ch in part[pos:]:
+                add_atom(char_w_em(ch, bold), ch == " ", 1)
+            atoms.extend(part_atoms)
+    return atoms
+
+
+def _wrap_lines(atoms: list, first_w: float, rest_w: float, scale: float = 1.0) -> list:
+    """贪心断行（对齐 wrap=square）。返回每行的最大字号（px，已乘 scale）。
+
+    行尾空格不计宽、换行后行首空格丢弃；显式换行强制另起一行；超过整行宽的
+    拉丁词按其估算宽度应急折行。空原子序列返回 [0.0]，由调用方按默认字号替换。
+    """
+    lines = []
+    avail = first_w
+    cur_w, cur_fs, pend = 0.0, 0.0, 0.0
+    for atom in atoms:
+        em, fs, is_space = atom[:3]
+        char_space = atom[3] if len(atom) > 3 else 0.0
+        if em is None:
+            lines.append(cur_fs * scale if cur_fs > 0 else fs * scale)
+            avail = rest_w
+            cur_w, cur_fs, pend = 0.0, 0.0, 0.0
+            continue
+        w = em * fs * scale
+        if is_space:
+            pend += w + (char_space * scale if cur_w > 0 or pend > 0 else 0.0)
+            continue
+        if cur_w == 0:
+            pend = 0.0  # 丢弃段首/换行后的空格
+        gap = char_space * scale if cur_w > 0 else 0.0
+        if cur_w > 0 and cur_w + pend + gap + w > avail:
+            lines.append(cur_fs * scale)
+            avail = rest_w
+            cur_w, cur_fs, pend = w, fs, 0.0
+        else:
+            cur_w += pend + gap + w
+            cur_fs = max(cur_fs, fs)
+            pend = 0.0
+        # PowerPoint/LibreOffice 会对超过整行宽的 URL、标识符等做应急折行；若仍
+        # 把它当一行，校验会漏掉由此产生的纵向溢出。
+        while cur_w > avail and avail > 0:
+            lines.append(cur_fs * scale)
+            cur_w -= avail
+            avail = rest_w
+    lines.append(cur_fs * scale if cur_fs > 0 else 0.0)
+    return lines
+
+
+def _para_runs(para: dict) -> list:
+    """镜像 render_paragraphs 的 runs / para.text 回退。"""
+    runs = para.get("runs") or []
+    if not runs and para.get("text"):
+        runs = [{"text": para["text"]}]
+    return runs
+
+
+def _el_inset(el: dict) -> list:
+    """元素 inset（上右下左 px）。非法值回退默认，防诊断路径崩。"""
+    inset = el.get("inset")
+    if isinstance(inset, (list, tuple)) and len(inset) == 4:
+        try:
+            return [float(v) for v in inset]
+        except (TypeError, ValueError):
+            pass
+    return [10.0, 10.0, 10.0, 10.0]
+
+
+def estimate_paragraphs_height(paragraphs: list, defaults: dict, usable_w: float,
+                               scale: float = 1.0) -> float:
+    """段落组渲染高度估算（px）。scale<1 模拟缩字（字宽与行高同步缩，段距不缩）。"""
+    total = 0.0
+    for para in paragraphs or []:
+        bullet = para.get("bullet")
+        has_bullet = bullet in ("bullet", "number") or bullet is True
+        runs = _para_runs(para)
+        atoms = _tokenize_runs(runs, defaults)
+        lh = float(para.get("lineHeight") or 1.0)
+        if has_bullet:
+            fs0 = max([a[1] for a in atoms] or [float(defaults["fontSize"])])
+            first_w = usable_w - BULLET_W_EM * fs0 * scale
+            rest_w = usable_w - BULLET_INDENT_PX
+        else:
+            first_w = rest_w = usable_w
+        for fs in _wrap_lines(atoms, first_w, rest_w, scale):
+            f = fs if fs > 0 else float(defaults["fontSize"]) * scale
+            total += f * LINE_SINGLE_FACTOR * lh
+        total += float(para.get("spaceBefore") or 0)
+        total += float(_pick(para, "spaceAfter", "paragraphSpace") or 0)
+    return total
+
+
+def plan_autofit(paragraphs: list, box: dict, theme: dict, text_type=None) -> dict | None:
+    """估算文本内容高度并求解 autofit 缩放。
+
+    box 需含 width/height/inset（shape 传其 text_spec，autoFit 同样从它读）。
+    返回 None 表示无段落；否则：
+      content  原始内容高（px）
+      avail    严格可用高 = height − 上下 inset
+      height   容器高（px）
+      scale    可行的缩放比例（1.0=无需缩，None=缩到下限仍装不下）
+      scale_min / fs_max / suggested_height / cut_chars
+    """
+    if not paragraphs:
+        return None
+    inset = _el_inset(box)
+    usable_w = float(box.get("width") or 0) - inset[1] - inset[3]
+    height = float(box.get("height") or 0)
+    avail = height - inset[0] - inset[2]
+    defaults = typo_default(theme, text_type or box.get("textType"))
+    content = estimate_paragraphs_height(paragraphs, defaults, usable_w)
+    fs_max = 0.0
+    for para in paragraphs:
+        for r in _para_runs(para):
+            fs_max = max(fs_max, run_font_px(r, defaults))
+    fs_max = fs_max or float(defaults["fontSize"])
+    # 下限双约束：≥原字号 80%（跨页一致），且缩后 ≥12px（投影可读）。
+    # fs_max<12 时 12/fs>1 → 下限收敛到 1.0：小字不许缩，只能改文案/布局。
+    scale_min = min(1.0, max(AUTOFIT_MIN_RATIO, AUTOFIT_MIN_FONT_PX / fs_max))
+    # 触发条件与 _check_text_overflow 三级判定一致：超出整个盒子才算溢出
+    # （压上下 inset 不裁剪、不算丑，kicker/takeaway 单行条因此免缩）；
+    # 缩字目标盒用严格 avail —— 缩进去后文字落在 inset 内，体面。
+    scale = 1.0
+    if content > height + 0.5:
+        scale = None
+        s = 1.0
+        while s >= scale_min - 1e-9:
+            if estimate_paragraphs_height(paragraphs, defaults, usable_w, s) <= avail * OVERFLOW_TOL:
+                scale = s
+                break
+            s -= 0.01
+    overflow_px = max(0.0, content - avail)
+    line_px = fs_max * LINE_SINGLE_FACTOR
+    chars_per_line = max(1, int(usable_w / fs_max)) if fs_max else 1
+    return {
+        "content": content,
+        "avail": avail,
+        "height": height,
+        "scale": scale,
+        "scale_min": scale_min,
+        "fs_max": fs_max,
+        "suggested_height": int(content + inset[0] + inset[2] + 0.999),
+        "cut_chars": int(overflow_px / line_px * chars_per_line) if line_px > 0 else 0,
+    }
+
+
+def _apply_autofit(text_frame, spec: dict, theme: dict):
+    """渲染时溢出兜底：默认 shrink。
+
+    估算溢出且缩到下限内可解时，写显式 fontScale 的 normAutofit；无解或
+    autoFit="none" 时保持原字号（此时 --check 已给 error，由 LLM 改文案/布局）。
+    spec 为 text 元素，或 shape 的 text_spec（autoFit/inset 从它读，与渲染一致）。
+    """
+    if (spec.get("autoFit") or "shrink") != "shrink":
+        return
+    # 旋转/竖排文字不适用横排换行模型，与 _check_text_overflow 对齐。
+    if spec.get("rotate") or spec.get("vertical"):
+        return
+    paragraphs = spec.get("paragraphs") or []
+    if not paragraphs:
+        return
+    plan = plan_autofit(paragraphs, spec, theme)
+    if plan and plan["scale"] is not None and plan["scale"] < 1.0:
+        set_autofit(text_frame, "shrink", plan["scale"])
+
+
+def estimate_table_row_heights(el: dict, theme: dict) -> list:
+    """按内容估算表格逐行高度（px）。render_table 写入同一结果，保证文件几何
+    与 --check 诊断模型一致（PowerPoint 的行高是最小值，内容会把行撑高）。"""
+    data = el.get("data") or []
+    if not data:
+        return []
+    rows = len(data)
+    cols = max(len(r) for r in data)
+    col_widths = el.get("colWidths") or [1.0 / cols] * cols
+    min_h = float(el.get("cellMinHeight", 36))
+    width = float(el.get("width") or 0)
+    col_px = [width * (col_widths[c] if c < len(col_widths) else 1.0 / cols) for c in range(cols)]
+    row_h = [min_h] * rows
+    for r, row in enumerate(data):
+        for c in range(cols):
+            spec = row[c] if c < len(row) else None
+            if not isinstance(spec, dict) or spec.get("merged"):
+                continue
+            colspan = max(1, int(spec.get("colspan") or 1))
+            rowspan = max(1, int(spec.get("rowspan") or 1))
+            span_px = sum(col_px[c:c + colspan])
+            usable = span_px - TABLE_CELL_MARGIN_H * 2
+            style = spec.get("style") or {}
+            fs = float(_pick(style, "fontSize", "fontsize") or 13)
+            atoms = _tokenize_runs([{"text": str(spec.get("text", ""))}], {"fontSize": fs})
+            n_lines = len(_wrap_lines(atoms, usable, usable))
+            h = n_lines * fs * LINE_SINGLE_FACTOR + TABLE_CELL_MARGIN_V * 2
+            # rowspan 单元格的内容高均摊到各跨行
+            per_row = h / rowspan
+            for k in range(r, min(r + rowspan, rows)):
+                row_h[k] = max(row_h[k], per_row)
+    return row_h
 
 
 # ---------------------------------------------------------------------------
@@ -517,7 +837,7 @@ def render_paragraphs(text_frame, paragraphs, theme, text_type=None, el_defaults
             run = p.add_run()
             run.text = str(r.get("text", ""))
             f = run.font
-            f.size = px_to_pt(float(_pick(r, "fontSize", "fontsize") or defaults["fontSize"]))
+            f.size = px_to_pt(run_font_px(r, defaults))
             f.bold = bool(r.get("bold", defaults.get("bold", False)))
             f.italic = bool(r.get("italic", defaults.get("italic", False)))
             if r.get("underline"):
@@ -536,7 +856,9 @@ def render_paragraphs(text_frame, paragraphs, theme, text_type=None, el_defaults
 
 
 def setup_text_frame(text_frame, el, theme, emu_per_px, text_type=None):
-    inset = el.get("inset") or [10, 10, 10, 10]
+    # 与溢出测量共用同一回退规则；正常 CLI 流程会先由 validate_deck 报 schema error，
+    # 这里仍需防御直接调用渲染函数时传入非法 inset。
+    inset = _el_inset(el)
     text_frame.margin_top = px_to_emu(inset[0], emu_per_px)
     text_frame.margin_right = px_to_emu(inset[1], emu_per_px)
     text_frame.margin_bottom = px_to_emu(inset[2], emu_per_px)
@@ -548,6 +870,9 @@ def setup_text_frame(text_frame, el, theme, emu_per_px, text_type=None):
     text_frame.vertical_anchor = VALIGN_MAP.get(v_align, MSO_ANCHOR.TOP)
     if el.get("vertical"):
         set_vertical_text(text_frame)
+    # 默认固定盒：剥掉 add_textbox 模板自带的 spAutoFit（盒子随文字长高），
+    # 溢出兜底由 _apply_autofit 按需覆盖为 normAutofit
+    set_autofit(text_frame, "none")
 
 
 def render_text(slide, el, theme, emu_per_px):
@@ -566,6 +891,7 @@ def render_text(slide, el, theme, emu_per_px):
     if el.get("defaultFontName"):
         el_defaults["fontName"] = el["defaultFontName"]
     render_paragraphs(box.text_frame, el.get("paragraphs") or [], theme, el.get("textType"), el_defaults)
+    _apply_autofit(box.text_frame, el, theme)
     if el.get("fill"):
         apply_solid_fill(box.fill, el["fill"])
     else:
@@ -702,8 +1028,16 @@ def render_shape(slide, el, theme, emu_per_px):
         if text_spec.get("defaultFontName"):
             el_defaults["fontName"] = text_spec["defaultFontName"]
         render_paragraphs(shape.text_frame, text_spec["paragraphs"], theme, text_spec.get("textType"), el_defaults)
+        # text_spec 只有样式（inset/autoFit），几何宽高取外层元素
+        _apply_autofit(shape.text_frame, {
+            **text_spec,
+            "width": el.get("width"),
+            "height": el.get("height"),
+            "rotate": el.get("rotate"),
+        }, theme)
     else:
         shape.text_frame.word_wrap = True
+        set_autofit(shape.text_frame, "none")
     return shape
 
 
@@ -719,7 +1053,7 @@ def render_line(slide, el, emu_per_px):
         conn.name = el["name"]
     apply_line_format(
         conn.line,
-        {"style": el.get("style", "solid"), "width": el.get("width", 2), "color": el.get("color", "#1F2937")},
+        {"style": el.get("style", "solid"), "width": el.get("width", 2), "color": el.get("color") or "#1F2937"},
         emu_per_px,
     )
     set_arrowheads(conn, el.get("points") or ["", ""])
@@ -806,7 +1140,7 @@ def render_chart(slide, el, theme, emu_per_px):
 
 
 def _set_cell_border(cell, outline: dict, emu_per_px: float):
-    rgb, _ = parse_color(outline.get("color", "#E5E7EB"))
+    rgb, _ = parse_color(outline.get("color") or "#E5E7EB")
     w = str(int(outline.get("width", 1) * emu_per_px))
     dash = DASH_MAP.get(outline.get("style", "solid"))
     tcPr = cell._tc.get_or_add_tcPr()
@@ -841,18 +1175,21 @@ def render_table(slide, el, theme, emu_per_px):
     for i in range(cols):
         frac = col_widths[i] if i < len(col_widths) else 1.0 / cols
         table.columns[i].width = px_to_emu(total_w * frac, emu_per_px)
-    min_h = float(el.get("cellMinHeight", 36))
+    # 行高按内容估算写入（cellMinHeight 是最小值）：PowerPoint 会按内容把行撑到
+    # 不低于设定值 —— 预写内容高，让文件几何与 --check 诊断模型一致，末行不被裁
+    row_heights = estimate_table_row_heights(el, theme)
     for r in range(rows):
-        table.rows[r].height = px_to_emu(min_h, emu_per_px)
+        fallback_h = float(el.get("cellMinHeight", 36))
+        table.rows[r].height = px_to_emu(row_heights[r] if r < len(row_heights) else fallback_h, emu_per_px)
 
     tbl_theme = el.get("theme") or {}
     header_color = tbl_theme.get("color") or (theme.get("themeColors") or ["#1E40AF"])[0]
     header_rgb, _ = parse_color(header_color)
     header_text_color = contrast_text_color(header_rgb)
-    default_outline = (theme.get("outline") or {}).get("color", "#E5E7EB")
+    default_outline = (theme.get("outline") or {}).get("color") or "#E5E7EB"
     outline = el.get("outline") or {"style": "solid", "width": 1, "color": default_outline}
     # 表体填充跟随主题背景：深底提亮一档作卡片面，浅底用纯白；避免深主题下白底+浅字不可读
-    bg_rgb, _ = parse_color(theme.get("backgroundColor", "#FFFFFF"))
+    bg_rgb, _ = parse_color(theme.get("backgroundColor") or "#FFFFFF")
     body_fill = shift_color(bg_rgb, 0.10) if rel_luminance(bg_rgb) < 0.35 else RGBColor(0xFF, 0xFF, 0xFF)
 
     for r, row in enumerate(data):
@@ -1297,13 +1634,13 @@ def _render_latex_omml(slide, el, theme, emu_per_px):
 
 
 def render_background(slide, bg: dict | None, theme, canvas_w, canvas_h, emu_per_px, deck_dir):
-    bg = bg or {"type": "solid", "color": theme.get("backgroundColor", "#FFFFFF")}
+    bg = bg or {"type": "solid", "color": theme.get("backgroundColor") or "#FFFFFF"}
     btype = bg.get("type", "solid")
     if btype == "gradient" and bg.get("gradient"):
         apply_gradient_fill(slide.background.fill, bg["gradient"], emu_per_px)
     elif btype == "image" and (bg.get("image") or {}).get("src"):
         # 底色先铺上，图片以全幅 cover 插入到最底层（第一个添加）
-        color = bg.get("color") or theme.get("backgroundColor", "#FFFFFF")
+        color = bg.get("color") or theme.get("backgroundColor") or "#FFFFFF"
         slide.background.fill.solid()
         slide.background.fill.fore_color.rgb = parse_color(color)[0]
         img = bg["image"]
@@ -1314,7 +1651,7 @@ def render_background(slide, bg: dict | None, theme, canvas_w, canvas_h, emu_per
         }
         render_image(slide, el, deck_dir, emu_per_px)
     else:
-        color = bg.get("color") or theme.get("backgroundColor", "#FFFFFF")
+        color = bg.get("color") or theme.get("backgroundColor") or "#FFFFFF"
         slide.background.fill.solid()
         slide.background.fill.fore_color.rgb = parse_color(color)[0]
 
@@ -1323,102 +1660,346 @@ def render_background(slide, bg: dict | None, theme, canvas_w, canvas_h, emu_per
 # 校验
 # ---------------------------------------------------------------------------
 
-def validate_deck(deck: dict):
-    errors, warnings = [], []
+def _check_text_overflow(spec: dict, theme: dict, ep: str, err, warn):
+    """文字溢出三级判定 + 可执行建议。
+
+    strict 通过 / 紧凑单行条（kicker、takeaway 等：content ≤ height+0.5，上下 inset
+    被文字重叠是 PPT 常态且不裁剪）静默放行；溢出按可否 autofit 分级：
+    fixable→warn（渲染自动缩字），unfixable / autoFit=none→error（必须改内容或布局）。
+    """
+    paragraphs = spec.get("paragraphs") or []
+    if not paragraphs:
+        return
+    auto_fit = spec.get("autoFit") or "shrink"
+    if auto_fit not in ("shrink", "none"):
+        err(f"{ep} autoFit 无效: {auto_fit!r}（可用: shrink / none）", code="autofit.invalid")
+        return
+    # 旋转/竖排文字不适用横排换行模型，与 render_text/render_shape 的 _apply_autofit 对齐
+    if spec.get("rotate") or spec.get("vertical"):
+        return
+    plan = plan_autofit(paragraphs, spec, theme)
+    if plan is None:
+        return
+    # scale=1.0 → plan_autofit 判定无溢出（含紧凑单行条 height+0.5 容差），
+    # 与渲染端 _apply_autofit 的触发条件完全对齐，无 gap 无 diverge。
+    # scale=None → 缩到下限仍装不下（unfixable），必须进 error 分支。
+    if plan["scale"] is not None and plan["scale"] >= 1.0:
+        return
+    content, avail = plan["content"], plan["avail"]
+    pct = round(content / avail * 100) if avail > 0 else 0
+    if auto_fit == "none":
+        err(f"{ep} 文字溢出：需 {content:.0f}px > 可用 {avail:.0f}px（{pct}%），autoFit=none 不自动缩字；"
+            f"建议删减至约 {plan['cut_chars']} 字或高度改 ≥ {plan['suggested_height']}px",
+            code="overflow.nofit")
+    elif plan["scale"] is not None:
+        warn(f"{ep} 文字溢出：需 {content:.0f}px > 可用 {avail:.0f}px（{pct}%），"
+             f"渲染将自动缩字 {plan['fs_max']:g}→{plan['fs_max'] * plan['scale']:.1f}px；"
+             f"建议缩短文案或高度改 ≥ {plan['suggested_height']}px",
+             code="overflow.fixable")
+    else:
+        err(f"{ep} 文字溢出：需 {content:.0f}px，缩字至下限 {plan['fs_max'] * plan['scale_min']:.1f}px 仍装不下；"
+            f"建议删减至约 {plan['cut_chars']} 字或高度改 ≥ {plan['suggested_height']}px",
+            code="overflow.unfixable")
+
+
+def check_table_overflow(el: dict, theme: dict, ep: str, canvas_h: float, err, warn):
+    """表格溢出两级检查：超设定高度→warn（行向下撑，可能压下方元素）；
+    底边超画布→error（末行被裁掉，不可恢复）。"""
+    row_h = estimate_table_row_heights(el, theme)
+    if not row_h:
+        return
+    total = sum(row_h)
+    height = float(el.get("height") or 0)
+    if total > height + 1:
+        warn(f"{ep} 表格内容高 {total:.0f}px 超出设定高度 {height:.0f}px（行会向下撑开，注意是否压住下方元素）",
+             code="overflow.table-grow")
+    bottom = float(el.get("top") or 0) + total
+    if bottom > canvas_h + 1:
+        err(f"{ep} 表格底边 {bottom:.0f}px 超出画布 {canvas_h:g}px（末行会被裁掉）；"
+            f"建议删行、降低 cellMinHeight（当前 {el.get('cellMinHeight', 36)}）或表格上移",
+            code="overflow.table-canvas")
+
+
+def validate_deck(deck: dict, theme: dict | None = None, deck_dir: Path | None = None) -> list:
+    """结构/几何/文字溢出校验。返回 issue 列表 [{severity, code, message}, ...]。
+
+    severity: "error"（必须修，--check exit 1）/ "warning"；code 标记检查类别，
+    溢出类（overflow.*）的建议直接可执行，供 agent 程序化消费（main --json）。
+    """
+    theme = theme or DEFAULT_THEME
+    issues = []
+
+    def err(msg, code=None):
+        issues.append({"severity": "error", "code": code, "message": msg})
+
+    def warn(msg, code=None):
+        issues.append({"severity": "warning", "code": code, "message": msg})
+
+    def validate_color(value, cp: str, allow_none: bool = False) -> bool:
+        if value is None and allow_none:
+            return True
+        try:
+            parse_color(value)
+        except DeckError:
+            err(f"{cp} 颜色格式无效: {value!r}", code="schema.color")
+            return False
+        return True
+
+    def validate_color_fields(spec, sp: str):
+        """检查所有会进入 parse_color() 的 schema 颜色字段。
+
+        所有颜色字段统一 allow_none=True：渲染端对 null 一律走 falsy-or 回退
+        默认色（run/element 级 ``or default``，theme/outline/shadow 级同样），
+        故 null 在 --check 与渲染中行为一致——回退默认色，不报错。非 null 的
+        非法值仍由 parse_color 拒绝。
+        """
+        if isinstance(spec, dict):
+            for key, value in spec.items():
+                path = f"{sp}.{key}"
+                if key in ("color", "backgroundColor", "fill", "backcolor", "defaultColor"):
+                    validate_color(value, path, allow_none=True)
+                elif key == "themeColors":
+                    if not isinstance(value, list):
+                        err(f"{path} 必须是颜色数组", code="schema.color")
+                    else:
+                        for ci, color in enumerate(value):
+                            validate_color(color, f"{path}[{ci}]")
+                elif isinstance(value, (dict, list)):
+                    validate_color_fields(value, path)
+        elif isinstance(spec, list):
+            for index, value in enumerate(spec):
+                validate_color_fields(value, f"{sp}[{index}]")
+
+    def validate_paragraphs(paragraphs, pp: str) -> bool:
+        """确认文字层级可安全交给 _check_text_overflow / render_paragraphs。"""
+        if not isinstance(paragraphs, list) or not paragraphs:
+            err(f"{pp} 缺少非空 paragraphs 数组", code="schema.paragraphs")
+            return False
+        valid = True
+        for pi, para in enumerate(paragraphs):
+            para_path = f"{pp}.paragraphs[{pi}]"
+            if not isinstance(para, dict):
+                err(f"{para_path} 必须是对象", code="schema.paragraph")
+                valid = False
+                continue
+            runs = para.get("runs")
+            if runs is not None and not isinstance(runs, list):
+                err(f"{para_path}.runs 必须是数组", code="schema.runs")
+                valid = False
+                continue
+            for keys in (("lineHeight",), ("spaceBefore",), ("spaceAfter", "paragraphSpace")):
+                key = next((name for name in keys if para.get(name) is not None), None)
+                value = para.get(key) if key else None
+                # 渲染端以 ``value or default`` 处理空值和 0；只拒绝会在 float()
+                # 转换时抛异常的有效值，以保持 --check 与渲染行为一致。
+                if value and not is_floatable(value):
+                    err(f"{para_path}.{key} 必须可转换为数值", code="schema.number")
+                    valid = False
+            for ri, run in enumerate(runs or []):
+                if not isinstance(run, dict):
+                    err(f"{para_path}.runs[{ri}] 必须是对象", code="schema.run")
+                    valid = False
+                    continue
+                run_path = f"{para_path}.runs[{ri}]"
+                for keys in (("fontSize", "fontsize"), ("wordSpace",)):
+                    key = next((name for name in keys if run.get(name) is not None), None)
+                    value = run.get(key) if key else None
+                    if value and not is_floatable(value):
+                        err(f"{run_path}.{key} 必须可转换为数值", code="schema.number")
+                        valid = False
+        return valid
+
+    def validate_inset(spec: dict, sp: str) -> bool:
+        inset = spec.get("inset")
+        if inset is None:
+            return True
+        if not isinstance(inset, (list, tuple)) or len(inset) != 4 or not all(
+            isinstance(value, (int, float)) for value in inset
+        ):
+            err(f"{sp}.inset 必须是 4 个数值组成的数组", code="schema.inset")
+            return False
+        return True
+
+    def is_floatable(value) -> bool:
+        """与 render_chart 的 float() 转换保持一致，避免检查通过后渲染崩溃。"""
+        try:
+            float(value)
+        except (TypeError, ValueError):
+            return False
+        return True
+
+    if not isinstance(deck, dict):
+        err("deck 根节点必须是 JSON 对象")
+        return issues
     if not isinstance(deck.get("slides"), list) or not deck["slides"]:
-        errors.append("deck.slides 必须是非空数组")
-        return errors, warnings
+        err("deck.slides 必须是非空数组")
+        return issues
+    validate_color_fields(theme, "theme")
     canvas = deck.get("canvas") or {}
     cw, ch = float(canvas.get("width", DEFAULT_CANVAS_W)), float(canvas.get("height", DEFAULT_CANVAS_H))
     seen_slide_ids = set()
 
     for si, slide in enumerate(deck["slides"]):
         sprefix = f"slides[{si}]"
+        if not isinstance(slide, dict):
+            err(f"{sprefix} 必须是对象", code="schema.slide")
+            continue
         sid = slide.get("id")
-        if not sid:
-            errors.append(f"{sprefix} 缺少 id")
+        if not isinstance(sid, str) or not sid:
+            err(f"{sprefix} 缺少非空字符串 id", code="schema.slide-id")
         elif sid in seen_slide_ids:
-            errors.append(f"{sprefix} id 重复: {sid}")
-        seen_slide_ids.add(sid)
+            err(f"{sprefix} id 重复: {sid}")
+        else:
+            seen_slide_ids.add(sid)
         seen_el_ids = set()  # 元素 id 只需页内唯一
         stype = slide.get("type")
-        if stype and stype not in SLIDE_TYPES:
-            warnings.append(f"{sprefix} 未知 slideType: {stype}")
+        if stype and (not isinstance(stype, str) or stype not in SLIDE_TYPES):
+            warn(f"{sprefix} 未知 slideType: {stype}")
+        validate_color_fields(slide.get("background"), f"{sprefix}.background")
         elements = slide.get("elements")
         if not isinstance(elements, list):
-            errors.append(f"{sprefix} 缺少 elements 数组")
+            err(f"{sprefix} 缺少 elements 数组")
             continue
         for ei, el in enumerate(elements):
+            if not isinstance(el, dict):
+                err(f"{sprefix}.elements[{ei}] 必须是对象", code="schema.element")
+                continue
             ep = f"{sprefix}.elements[{ei}]({el.get('id', '?')})"
             etype = el.get("type")
-            if etype not in ("text", "image", "shape", "line", "chart", "table", "latex"):
-                errors.append(f"{ep} 未知元素类型: {etype}")
+            if not isinstance(etype, str) or etype not in ("text", "image", "shape", "line", "chart", "table", "latex"):
+                err(f"{ep} 未知元素类型: {etype}")
                 continue
             eid = el.get("id")
-            if not eid:
-                errors.append(f"{ep} 缺少 id")
+            if not isinstance(eid, str) or not eid:
+                err(f"{ep} 缺少非空字符串 id", code="schema.element-id")
             elif eid in seen_el_ids:
-                warnings.append(f"{ep} 元素 id 重复: {eid}")
-            seen_el_ids.add(eid)
+                warn(f"{ep} 元素 id 重复: {eid}")
+            else:
+                seen_el_ids.add(eid)
+            validate_color_fields(el, ep)
 
+            geom_ok = True  # 几何字段齐全才做溢出估算（缺失时上面已报 error）
             if etype == "line":
-                if not el.get("start") or not el.get("end"):
-                    errors.append(f"{ep} line 需要 start/end")
+                for key in ("start", "end"):
+                    point = el.get(key)
+                    if (not isinstance(point, (list, tuple)) or len(point) != 2
+                            or not all(isinstance(v, (int, float)) for v in point)):
+                        err(f"{ep} line.{key} 必须是两个数值坐标", code="schema.line")
             else:
                 for k in ("left", "top", "width", "height"):
                     if not isinstance(el.get(k), (int, float)):
-                        errors.append(f"{ep} 缺少数值字段 {k}")
-                else:
+                        err(f"{ep} 缺少数值字段 {k}")
+                        geom_ok = False
+                if geom_ok:
                     if el.get("left", 0) < -1 or el.get("top", 0) < -1:
-                        warnings.append(f"{ep} 位置为负（超出画布左上）")
-                    if isinstance(el.get("left"), (int, float)) and isinstance(el.get("width"), (int, float)):
-                        if el["left"] + el["width"] > cw + 1 or el.get("top", 0) + el.get("height", 0) > ch + 1:
-                            warnings.append(f"{ep} 超出画布右/下边界")
+                        warn(f"{ep} 位置为负（超出画布左上）")
+                    if el["left"] + el["width"] > cw + 1 or el["top"] + el["height"] > ch + 1:
+                        warn(f"{ep} 超出画布右/下边界")
 
             if etype == "text":
-                if not el.get("paragraphs"):
-                    errors.append(f"{ep} text 缺少 paragraphs")
+                paragraphs_ok = validate_paragraphs(el.get("paragraphs"), f"{ep} text")
+                inset_ok = validate_inset(el, ep)
                 tt = el.get("textType")
-                if tt and tt not in TEXT_TYPES:
-                    warnings.append(f"{ep} 未知 textType: {tt}")
+                if tt and (not isinstance(tt, str) or tt not in TEXT_TYPES):
+                    warn(f"{ep} 未知 textType: {tt}")
+                if geom_ok and paragraphs_ok and inset_ok:
+                    _check_text_overflow(el, theme, ep, err, warn)
             elif etype == "latex":
                 if not el.get("latex"):
-                    errors.append(f"{ep} latex 元素缺少 latex 字段（公式源码）")
+                    err(f"{ep} latex 元素缺少 latex 字段（公式源码）")
             elif etype == "image":
                 src = el.get("src") or ""
-                if src.startswith("gen:") or src.startswith("icon:"):
-                    errors.append(f"{ep} 图片占位符未解析: {src}，请先运行 gen_image.py")
+                if not isinstance(src, str):
+                    err(f"{ep} image.src 必须是字符串", code="schema.image-src")
+                elif src.startswith("gen:") or src.startswith("icon:"):
+                    err(f"{ep} 图片占位符未解析: {src}，请先运行 gen_image.py")
                 elif not src:
-                    warnings.append(f"{ep} image 缺少 src（如需自动生成请用 gen:关键词 或 icon:集合:名称）")
+                    err(f"{ep} image 缺少 src（请先运行 gen_image.py 或填写本地/HTTP 图片路径）",
+                        code="image.missing-src")
+                elif not re.match(r"^https?://", src) and deck_dir is not None:
+                    image_path = Path(src)
+                    if not image_path.is_absolute():
+                        image_path = deck_dir / image_path
+                    if not image_path.is_file():
+                        err(f"{ep} 图片不存在: {image_path}", code="image.not-found")
                 it = el.get("imageType")
-                if it and it not in IMAGE_TYPES:
-                    warnings.append(f"{ep} 未知 imageType: {it}")
+                if it and (not isinstance(it, str) or it not in IMAGE_TYPES):
+                    warn(f"{ep} 未知 imageType: {it}")
             elif etype == "shape":
                 prst = el.get("shape", "rect")
-                if prst not in PRESET_SHAPES:
-                    errors.append(f"{ep} 未知预设形状: {prst}（可用: {', '.join(sorted(PRESET_SHAPES))}）")
+                if not isinstance(prst, str) or prst not in PRESET_SHAPES:
+                    err(f"{ep} 未知预设形状: {prst}（可用: {', '.join(sorted(PRESET_SHAPES))}）")
+                text_spec = el.get("text")
+                if text_spec is not None and not isinstance(text_spec, dict):
+                    err(f"{ep} shape.text 必须是对象", code="schema.shape-text")
+                elif isinstance(text_spec, dict) and text_spec.get("paragraphs"):
+                    paragraphs_ok = validate_paragraphs(text_spec["paragraphs"], f"{ep} shape.text")
+                    inset_ok = validate_inset(text_spec, f"{ep} shape.text")
+                    if geom_ok and paragraphs_ok and inset_ok:
+                        # 样式（inset/autoFit）从 text_spec 读，几何宽高取外层元素
+                        _check_text_overflow({
+                            **text_spec,
+                            "width": el.get("width"),
+                            "height": el.get("height"),
+                            "rotate": el.get("rotate"),
+                        }, theme, ep, err, warn)
             elif etype == "chart":
                 ct = el.get("chartType")
-                if ct not in CHART_TYPES:
-                    errors.append(f"{ep} 未知 chartType: {ct}")
-                data = el.get("data") or {}
-                labels = data.get("labels") or []
-                for i, ys in enumerate(data.get("series") or []):
-                    if len(ys) != len(labels):
-                        errors.append(f"{ep} series[{i}] 长度 {len(ys)} 与 labels 长度 {len(labels)} 不一致")
+                if not isinstance(ct, str) or ct not in CHART_TYPES:
+                    err(f"{ep} 未知 chartType: {ct}")
+                data = el.get("data")
+                if not isinstance(data, dict):
+                    err(f"{ep} chart.data 必须是对象", code="schema.chart-data")
+                else:
+                    labels = data.get("labels") or []
+                    series = data.get("series") or []
+                    if not isinstance(labels, list) or not isinstance(series, list):
+                        err(f"{ep} chart.data.labels/series 必须是数组", code="schema.chart-data")
+                    else:
+                        if ct == "scatter" and any(not is_floatable(label) for label in labels):
+                            err(f"{ep} scatter 的 labels（x 值）必须可转换为数值", code="schema.chart-value")
+                        for i, ys in enumerate(series):
+                            if not isinstance(ys, list):
+                                err(f"{ep} series[{i}] 必须是数组", code="schema.chart-series")
+                            elif len(ys) != len(labels):
+                                err(f"{ep} series[{i}] 长度 {len(ys)} 与 labels 长度 {len(labels)} 不一致")
+                            elif any(not is_floatable(value) for value in ys):
+                                err(f"{ep} series[{i}] 含无法转换为数值的值", code="schema.chart-value")
             elif etype == "table":
-                rows = el.get("data") or []
-                if not rows:
-                    errors.append(f"{ep} table data 为空")
+                rows = el.get("data")
+                if not isinstance(rows, list) or not rows:
+                    err(f"{ep} table data 为空")
+                elif not all(isinstance(row, list) for row in rows):
+                    err(f"{ep} table data 的每一行必须是数组", code="schema.table-data")
                 else:
                     ncol = max(len(r) for r in rows)
+                    if ncol == 0:
+                        err(f"{ep} table data 至少需要一列", code="schema.table-data")
+                        continue
+                    cells_ok = True
                     for ri, r in enumerate(rows):
                         if len(r) != ncol:
-                            warnings.append(f"{ep} 第 {ri} 行列数 {len(r)} 与最多列数 {ncol} 不一致")
-                    cw_sum = sum(el.get("colWidths") or [])
-                    if el.get("colWidths") and abs(cw_sum - 1.0) > 0.02:
-                        warnings.append(f"{ep} colWidths 之和为 {cw_sum:.3f}（建议归一到 1.0）")
-    return errors, warnings
+                            warn(f"{ep} 第 {ri} 行列数 {len(r)} 与最多列数 {ncol} 不一致")
+                        for ci, cell in enumerate(r):
+                            if not isinstance(cell, dict):
+                                err(f"{ep} data[{ri}][{ci}] 必须是对象", code="schema.table-cell")
+                                cells_ok = False
+                            elif cell.get("style") is not None and not isinstance(cell["style"], dict):
+                                err(f"{ep} data[{ri}][{ci}].style 必须是对象", code="schema.table-style")
+                                cells_ok = False
+                    col_widths = el.get("colWidths")
+                    widths_ok = col_widths is None or (
+                        isinstance(col_widths, list) and all(isinstance(w, (int, float)) for w in col_widths)
+                    )
+                    if not widths_ok:
+                        err(f"{ep} colWidths 必须是数值数组", code="schema.table-widths")
+                    elif col_widths:
+                        cw_sum = sum(col_widths)
+                        if abs(cw_sum - 1.0) > 0.02:
+                            warn(f"{ep} colWidths 之和为 {cw_sum:.3f}（建议归一到 1.0）")
+                    if geom_ok and widths_ok and cells_ok:
+                        check_table_overflow(el, theme, ep, ch, err, warn)
+    return issues
 
 
 # ---------------------------------------------------------------------------
@@ -1473,24 +2054,69 @@ def main():
     ap.add_argument("-o", "--out", help="输出 pptx 路径（默认 <deck>.pptx；项目目录时为 <目录名>.pptx）")
     ap.add_argument("--theme", help="覆盖 deck 里的主题（scripts/themes/ 下的主题名）")
     ap.add_argument("--check", action="store_true", help="只校验不渲染")
+    ap.add_argument("--json", action="store_true",
+                    help="校验结果以 JSON 输出到 stdout（issues 含 severity/code/message，供程序化消费；隐含 --check）")
     args = ap.parse_args()
 
     deck_path = Path(args.deck).resolve()
-    deck, deck_dir, _page_files = load_deck(deck_path)
+
+    def exit_with_error(message: str, code: str, slides: int = 0):
+        """按 CLI 模式输出统一错误；--json 路径永远只写一个可解析对象到 stdout。"""
+        if args.json:
+            print(json.dumps({
+                "ok": False,
+                "slides": slides,
+                "errors": [message],
+                "warnings": [],
+                "issues": [{"severity": "error", "code": code, "message": message}],
+            }, ensure_ascii=False))
+        else:
+            prefix = "" if message.startswith("[error]") else "[error] "
+            print(f"{prefix}{message}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        deck, deck_dir, _page_files = load_deck(deck_path)
+    except SystemExit as e:
+        # project_loader 用 SystemExit 报可预期的 JSON/项目结构错误（code 为
+        # 错误消息字符串）；防御性处理 SystemExit(int) 等无消息退出，避免输出
+        # 裸数字如 "2"。
+        msg = e.code if isinstance(e.code, str) else "加载 deck 失败"
+        exit_with_error(msg, "deck")
+    except OSError as e:
+        exit_with_error(f"无法读取 deck: {deck_path}（{e}）", "deck")
+    if not isinstance(deck, dict):
+        exit_with_error("deck 根节点必须是 JSON 对象", "deck")
     script_dir = Path(__file__).resolve().parent
 
-    errors, warnings = validate_deck(deck)
+    # theme 先于校验加载：溢出估算需要主题默认字号，顺带让 --check 抓主题名拼错
+    try:
+        theme = load_theme(deck, args.theme, script_dir)
+    except DeckError as e:
+        exit_with_error(str(e), "theme", len(deck.get("slides") or []))
+
+    issues = validate_deck(deck, theme, deck_dir)
+    errors = [i for i in issues if i["severity"] == "error"]
+    warnings = [i for i in issues if i["severity"] == "warning"]
+    if args.json:
+        print(json.dumps({
+            "ok": not errors,
+            "slides": len(deck.get("slides") or []),
+            "errors": [i["message"] for i in errors],
+            "warnings": [i["message"] for i in warnings],
+            "issues": issues,
+        }, ensure_ascii=False))
+        sys.exit(1 if errors else 0)
     for w in warnings:
-        print(f"[warn] {w}", file=sys.stderr)
+        print(f"[warn] {w['message']}", file=sys.stderr)
     if errors:
         for e in errors:
-            print(f"[error] {e}", file=sys.stderr)
+            print(f"[error] {e['message']}", file=sys.stderr)
         sys.exit(1)
     if args.check:
         print(f"[ok] 校验通过（{len(deck['slides'])} 页，{len(warnings)} 个警告）")
         return
 
-    theme = load_theme(deck, args.theme, script_dir)
     if args.out:
         out = Path(args.out).resolve()
     elif deck_path.is_dir():

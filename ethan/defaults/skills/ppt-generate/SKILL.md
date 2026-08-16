@@ -68,11 +68,12 @@ metadata:
 
 **一次只写一页**：`pages/NN_slug.json`（NN 两位序号保证排序，如 `01_cover.json`、`05_attention_intro.json`），文件内容是单个 Slide 对象（`{"id","type","background"?,"remark"?,"elements":[...]}`）。
 
-每写一页之前，显式过三遍再落笔（可以在回复里用一两句话说明设计意图）：
+每写一页之前，显式过四遍再落笔（可以在回复里用一两句话说明设计意图）：
 
 1. **版式**：本页从 layout-guide 版式库选哪个骨架？为什么适合这段内容？（三卡片 / 左右论点-证据 / 图表页 / 公式页 / 流程图页…）
 2. **内容**：action title 是不是观点句？2-4 个区块形态是否错开？每条 bullet 有没有数字/机制/对比？密度够不够（构件清单见 layout-guide）？
-3. **衔接**：kicker 与章节导航点对不对？总览锚点编号是否全局一致？本页是否兑现了大纲里的承上/启下钩子（该引用的页码要写进文案）？
+3. **高度预算**：多行文本按 layout-guide「宽度与行数估算」核一遍——中文字 ≈1 个字号宽（270px 卡片 @14px 每行只装 17 字）、行高 ≈1.36×字号、表格总高 ≈ Σ行 max(cellMinHeight, 行数×13×1.36+8) 且 `top+总高 ≤ 540`。**中文宽约西文 1.8 倍，字符数直觉不可信，必须按容器宽度换算**。
+4. **衔接**：kicker 与章节导航点对不对？总览锚点编号是否全局一致？本页是否兑现了大纲里的承上/启下钩子（该引用的页码要写进文案）？
 
 - **Schema 全文见 `references/schema.md`**（元素字段、形状名表、主题结构），写之前必读。
 - **排版必读 `references/layout-guide.md`**：咨询式页面骨架、版式库、信息密度标准、衔接与设计语言规则。
@@ -150,7 +151,13 @@ python3 ~/.ethan/skills/ppt-generate/scripts/gen_image.py /path/to/<项目目录
 python3 ~/.ethan/skills/ppt-generate/scripts/render_pptx.py /path/to/<项目目录> --check
 ```
 
-- 有 error 必须修到 0 个再渲染；warning（越界/未知 textType 等）尽量修。报错信息里的 `slides[i]` 对应 `pages/` 下排序后的第 i 个文件，回到那一页改。
+- 有 error 必须修到 0 个再渲染；warning 尽量修。报错信息里的 `slides[i]` 对应 `pages/` 下排序后的第 i 个文件，回到那一页改。
+- **文字溢出检测**（overflow.*）分级：
+  - `overflow.fixable`（warn）：渲染时会自动缩字兜底（不小于原字号 80% 且 ≥12px），但建议按报错里的「建议高度/删减字数」改文案——自动缩字会让该页字号与别页不一致。
+  - `overflow.unfixable` / `overflow.nofit`（error）：缩字也救不了，**必须**删字或加高，error 清零前不许渲染。
+  - `overflow.table-canvas`（error）：表格末行会被画布裁掉——删行/降 cellMinHeight/表格上移。
+  - `overflow.table-grow`（warn）：表格行会被内容撑高、可能压住下方元素，核对下方留白。
+- 加 `--json` 可拿到结构化 issues（severity/code/message）供程序化消费。
 
 ### Step 7：渲染
 
@@ -170,7 +177,8 @@ python3 ~/.ethan/skills/ppt-generate/scripts/render_pptx.py /path/to/<项目目�
 3. 衔接：锚点编号全 deck 一致？承上/启下钩子都兑现了？章节导航点逐页正确？
 4. 视觉纪律：无越界/贴边、语义色一致、装饰语法统一？主色是否灰调雅致、大面积填充是否「深色字+浅色底」（白字深底只留给小徽章）？
 5. 数据页有结论栏和来源行？公式符号逐一解释了？
-6. **公式纪律**：grep 一遍页面 JSON 里的 `_k`、`√d_`、`\sqrt` 字面量——展示公式都走 latex 元素、行内变量都用 sub/sup run，没有裸文本伪公式？形状内嵌文本（圆圈/步骤条/按钮）都写了 `text.align: "middle"`？
+6. **溢出复查**：`--check` 的 overflow 警告是否都已处理？转图后目检文字有没有触底/压框、表格末行有没有被裁（这三类是最影响观感的缺陷，Step 6 已给过建议值）。
+7. **公式纪律**：grep 一遍页面 JSON 里的 `_k`、`√d_`、`\sqrt` 字面量——展示公式都走 latex 元素、行内变量都用 sub/sup run，没有裸文本伪公式？形状内嵌文本（圆圈/步骤条/按钮）都写了 `text.align: "middle"`？
 
 - 若本机装了 LibreOffice（`soffice`），可 `soffice --headless --convert-to pdf <pptx>` 再 `pdftoppm -png` 逐页转图，用文件读取工具看图做视觉自检，溢出/重叠/字体替换问题一目了然；没有这些工具就按清单文字审查。
 - 返修只动 `pages/` 下的单页文件，改完重跑 Step 7 即可（页少时秒级）。
@@ -215,7 +223,7 @@ deliver_file(path="/absolute/path/to/<项目目录>/<项目名>.pptx")
 4. **中西文字体**：主题 `fontName`（中文）+ `latinFontName`（西文）分离设置；配对选择读 `references/fonts.md`。run 级显式 `fontName` 会同时覆盖中西文。
    - **渲染机不需要装字体**：渲染器只把字体名写入 pptx，字体解析发生在打开文件的机器上。
    - **查看端是 Linux（WPS/LibreOffice）时**：雅黑/Verdana 通常都没有，会被替换成默认字体。预先知道的话把主题改成 Linux 常见自带字体：中文 `Noto Sans CJK SC` / `WenQuanYi Micro Hei`，西文 `DejaVu Sans`。
-5. **坐标纪律**：元素不越界（右 ≤940、下 ≤540）、不贴边、页边距 60/40；一行 item ≤38 字。
+5. **坐标纪律**：元素不越界（右 ≤940、下 ≤540）、不贴边、页边距 60/40；字数按容器宽度核（左栏 430px 一行 ≤29 个中文字，全栏 880px ≤61 字；西文字符按 0.6 个中文字折算），速查表见 layout-guide。
 6. **图表用原生 chart 元素**（数据可编辑），不要用 image_search 找图表截图。
 7. **演讲者备注**写进该页 JSON 的 `remark` 字段，不要塞进页面元素。
 8. 项目目录整体交付与保留：`deck.json` + `pages/` + `assets/` 别删（用户可能改单页后重新渲染）；pptx 默认输出在项目目录内。

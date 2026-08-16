@@ -85,7 +85,7 @@
         { "id": "icon1", "type": "image", "left": 171, "top": 168, "width": 48, "height": 48, "src": "icon:mdi:magnify", "iconColor": "#1E40AF", "imageType": "itemFigure" },
         { "id": "ct1", "type": "text", "left": 80, "top": 232, "width": 230, "height": 28, "textType": "itemTitle",
           "paragraphs": [ { "align": "center", "runs": [ { "text": "关键词检索", "bold": true, "fontSize": 17 } ] } ] },
-        { "id": "cd1", "type": "text", "left": 84, "top": 268, "width": 222, "height": 150, "textType": "item",
+        { "id": "cd1", "type": "text", "left": 84, "top": 268, "width": 222, "height": 150, "textType": "item", "autoFit": "shrink",
           "paragraphs": [
             { "align": "left", "lineHeight": 1.5, "bullet": "bullet", "runs": [ { "text": "倒排索引 + BM25", "fontSize": 13 } ] },
             { "align": "left", "lineHeight": 1.5, "bullet": "bullet", "runs": [ { "text": "精确匹配极强", "fontSize": 13 } ] },

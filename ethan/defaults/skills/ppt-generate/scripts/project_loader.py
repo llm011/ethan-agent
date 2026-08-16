@@ -46,6 +46,14 @@ def _load_json(path: Path) -> dict:
         raise SystemExit(f"[error] JSON 解析失败: {path}（{e}）") from e
 
 
+def _load_deck_object(path: Path) -> dict:
+    """读取 deck 元数据，并在访问其字段前保证根节点为对象。"""
+    deck = _load_json(path)
+    if not isinstance(deck, dict):
+        raise SystemExit(f"[error] deck 根节点必须是 JSON 对象: {path}")
+    return deck
+
+
 def load_deck(path: Path) -> tuple[dict, Path, "list[PageFile] | None"]:
     """加载 deck，返回 (deck, deck_dir, page_files)。
 
@@ -55,12 +63,12 @@ def load_deck(path: Path) -> tuple[dict, Path, "list[PageFile] | None"]:
     """
     path = path.resolve()
     if not path.is_dir():
-        return _load_json(path), path.parent, None
+        return _load_deck_object(path), path.parent, None
 
     meta_path = path / "deck.json"
     if not meta_path.is_file():
         raise SystemExit(f"[error] 项目目录缺少 deck.json: {path}")
-    deck = _load_json(meta_path)
+    deck = _load_deck_object(meta_path)
 
     pages_dir = path / "pages"
     page_paths = sorted(pages_dir.glob("*.json"), key=_page_sort_key) if pages_dir.is_dir() else []
