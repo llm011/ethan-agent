@@ -26,6 +26,11 @@ if _OLD_DB.exists() and not DB_PATH.exists():
         pass  # 另一进程已迁移/正在迁移，忽略
 
 
+AGENDA_JOB_PREFIX = "agenda:"
+"""日程（agenda）job 的 id 前缀。共用同一个 APScheduler 实例做调度内核，
+但通过该前缀与定时任务做命名空间隔离（列表 API 各自过滤，互不混淆）。"""
+
+
 class Scheduler:
     def __init__(self):
         _DB_DIR.mkdir(parents=True, exist_ok=True)
@@ -285,3 +290,17 @@ class Scheduler:
         merged["cron"] = cron_expr
         self._scheduler.modify_job(job_id, kwargs=merged)
         return True
+
+
+_shared_scheduler: "Scheduler | None" = None
+
+
+def get_scheduler() -> "Scheduler":
+    """进程级共享单例。定时任务（schedule）和日程（agenda）必须复用同一实例：
+    各自 new Scheduler() 会产生两个 BackgroundScheduler 争抢同一个 scheduler.db，
+    导致同一 job 被双重触发或 SQLite 锁竞争。"""
+    global _shared_scheduler
+    if _shared_scheduler is None:
+        _shared_scheduler = Scheduler()
+        _shared_scheduler.start()
+    return _shared_scheduler

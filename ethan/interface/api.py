@@ -15,6 +15,7 @@ from ethan.browser.ws_route import router as browser_ws_router
 from ethan.core.heartbeat import start_heartbeat, stop_heartbeat
 from ethan.desktop.ws_route import router as desktop_ws_router
 from ethan.interface.routers import (
+    agenda,
     annotations,
     ask_user,
     assets,
@@ -150,6 +151,10 @@ async def lifespan(app: FastAPI):
     set_server_loop(_asyncio.get_running_loop())
     from ethan.interface.routers.schedule import get_scheduler
     get_scheduler()
+    # 日程对账：错过宽限窗口的一次性日程标 missed 并补发错过通知，
+    # 丢 job 的 pending 日程补注册。必须在 scheduler 启动后执行。
+    from ethan.scheduler.agenda import reconcile as _agenda_reconcile
+    _agenda_reconcile()
     from ethan.browser.session_map import start_idle_sweep, stop_idle_sweep
     start_idle_sweep()
     key_store = APIKeyStore()
@@ -209,6 +214,7 @@ app.include_router(sessions.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")
 app.include_router(memory.router, prefix="/api")
 app.include_router(schedule.router, prefix="/api")
+app.include_router(agenda.router, prefix="/api")
 app.include_router(knowledge.router, prefix="/api")
 app.include_router(skills.router, prefix="/api")
 app.include_router(docs.router, prefix="/api")
