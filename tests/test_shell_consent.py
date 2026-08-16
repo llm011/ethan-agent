@@ -40,6 +40,9 @@ CASES = [
     ("cat server.pem", False),
     ("cat ~/.netrc", False),
     ("cat ~/.git-credentials", False),
+    ("cat ~/.config/gh/hosts.yml", False),    # gh CLI 明文 GitHub token
+    ("cat ~/.bash_history", False),           # 历史命令常含 export 的密钥
+    ("cat ~/.zsh_history", False),
     ("ls ~/.ssh", False),                     # 目录列表也保守拦截
     ("stat /etc/secret_config", False),       # 命名含 secret
     ("cat auth/tokens.json", False),          # 命名含 token
@@ -52,6 +55,13 @@ CASES = [
     ("python3 -c \"print(open('README.md').read())\"", False),           # 任意文件内容读取
     ("python3 -c \"from pathlib import Path; print(Path('.env').read_text())\"", False),
     ("python3 -c \"print(__import__('os').environ)\"", False),
+
+    # ── 必须弹窗：python -c 黑名单绕过（严格白名单回归核心）──
+    ("python3 -c \"from os import system; system('rm -rf /')\"", False),         # from-import 别名执行子进程
+    ("python3 -c \"from pathlib import Path; Path('/x').write_text('pwned')\"", False),  # 方法直呼写文件
+    ("python3 -c \"import os; os.remove('/x')\"", False),                       # os.remove 删文件
+    ("python3 -c \"from shutil import rmtree; rmtree('/x')\"", False),          # 别名导入 rmtree
+    ("python3 -c \"from pathlib import Path; print(Path('/x').exists()); import os; os.system('id')\"", False),  # 探测后拼接任意代码
 
     # ── 必须弹窗：组合符/写操作/危险命令 ──
     ("rm -rf /tmp/x", False),

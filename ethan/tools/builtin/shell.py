@@ -62,7 +62,8 @@ _SAFE_READONLY_CMD_RE = re.compile(
     r'^(?:'
     # ls 纯列表：允许 ls + 路径/通配 + 常见只读选项 + 尾部 && echo <标识符>
     r'ls\s+(?:-[ahlLdsinrtSuUgGmkpZ1@\,]+\s+)?(?:(?:--?(?:time|sort|color|width|tabsize|block-size|ignore|indicator-style|context|classify|hide|group-directories-first)\S*\s+)?)*[\w~/.\-*?[\]{}]+\s*(?:&&\s*echo\s+[A-Za-z_][A-Za-z0-9_]*)?'
-    # python/python3 -c 单行脚本（只读判断由 helper 进一步做 import/open 扫描）
+    # python/python3 -c 单行脚本（安全性由 _PY_C_STRICT_RE 严格结构白名单兜底：
+    # 仅放行 Path(...).exists() 探测形态，其余一律照常弹窗）
     r'|python3?\s+-c\s+"[^"]*"'
     r'|python3?\s+-c\s+\'[^\']*\''
     # 纯文本只读：cat/head/tail/file/stat/wc 加一个普通路径/可选参数（head -n 5 等）
@@ -98,6 +99,17 @@ _STRIP_PY_C_STR_RE = re.compile(
     r'''(\bpython3?\s+-c\s+)("[^"\n]*(?:\\.[^"\n]*)*"|'[^'\n]*(?:\\.[^'\n]*)*')'''
 )
 
+# python -c 脚本的严格结构白名单：唯一放行形态是
+#   from pathlib import Path; print(Path('<路径字面量>').exists())
+# 此前按危险特性黑名单扫描（禁 open/write/import os…），可被 `from os import
+# system`、`from shutil import rmtree`、`Path(...).write_text(...)` 等别名导入/
+# 方法直呼完全绕过，导致任意子进程/写文件被判定只读免弹窗。改为结构性白名单：
+# 不匹配此形态的 python -c 一律照常走 consent。路径字面量内禁止引号/换行，
+# 杜绝闭合引号后拼接任意代码。
+_PY_C_STRICT_RE = re.compile(
+    r"""^from pathlib import Path; print\(Path\((['"])[^'"\n]*\1\)\.exists\(\)\)\s*$"""
+)
+
 # 敏感文件/目录模式：cat/head/ls 等只读命令的「读取路径」命中即不免单。
 # 密钥/凭据文件的读取此前靠 consent 弹窗作为唯一人工闸门，白名单不得绕过。
 # 保守取向：宁可误伤（如 ls ~/.ssh 目录列表也弹窗），不可漏放。
@@ -110,6 +122,8 @@ _SENSITIVE_PATH_RE = re.compile(
     r'|\.netrc|\.npmrc|\.pypirc|\.git-credentials|\.docker/config'        # 带token的配置
     r'|\.gnupg\b'                                                         # GPG
     r'|secrets?[\w./-]*|token[\w./-]*|password[\w./-]*'                  # 命名含 secret/token/password 的路径
+    r'|\.config/gh[\w./-]*|gh/hosts\b'                                    # gh CLI 凭据（hosts.yml 含明文 GitHub token）
+    r'|[\w./-]*history\b'                                                 # shell 历史（.bash_history/.zsh_history 常含 export 的密钥）
     r')',
     re.IGNORECASE,
 )
@@ -154,25 +168,18 @@ def _is_safe_readonly(command: str) -> bool:
         rest = re.sub(r'&&\s*echo\s+[A-Za-z_][A-Za-z0-9_]*\s*$', '', shell_only).strip()
         if _DANGEROUS_COMPOSE_RE.search(rest):
             return False
-    # 3. python -c 的额外过滤：检查 -c 脚本内容里不能有 write/subprocess/requests/... 等
+    # 3. python -c 的额外过滤：严格结构白名单，仅放行
+    #    `from pathlib import Path; print(Path('...').exists())` 路径探测形态。
+    #    此前的危险特性黑名单可被 from-import 别名（from os import system、
+    #    from shutil import rmtree）或方法直呼（Path(...).write_text）绕过，
+    #    故不匹配 _PY_C_STRICT_RE 的一律弹窗。
     m = _STRIP_PY_C_STR_RE.search(cmd)
     if m:
         script_body = m.group(2)
         if script_body:
             # 去掉首尾一层引号
             script_body = script_body[1:-1]
-        unsafe_py = re.compile(
-            r"open\s*\("                                       # 任何 open()（含只读：读文件内容一律弹窗）
-            r"|\.write\s*\("                                   # 写文件
-            r"|\bexec\s*\(|\beval\s*\("                        # 动态执行
-            r"|import\s+(?:subprocess|requests|socket|httpx|urllib)"  # 危险模块 import
-            r"|os\.system\s*\(|subprocess\.|run\s*\("          # 子进程
-            r"|shutil\.(?:copy|move|rm|r?mtree)\s*\("          # fs 写
-            r"|os\.environ|getenv\s*\(|environ\s*\["           # 环境变量读取（可 dump 密钥）
-            r"|read_text\s*\(|read_bytes\s*\(|\.read\s*\("     # Path/文件对象读内容
-            r"|__import__\b|globals\s*\(\)|locals\s*\("        # 动态导入/命名空间逃逸
-        )
-        if unsafe_py.search(script_body or ""):
+        if not _PY_C_STRICT_RE.match(script_body or ""):
             return False
     return True
 
