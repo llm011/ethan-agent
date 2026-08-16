@@ -201,6 +201,32 @@ def test_invalid_theme_color_is_error():
     assert "schema.color" in _codes(render_pptx.validate_deck(deck, theme))
 
 
+@pytest.mark.parametrize("field", ["color", "backgroundColor", "fill", "backcolor", "defaultColor"])
+def test_null_color_falls_back_not_error(field):
+    """null 颜色应回退默认色（与渲染端 falsy-or 一致），不报 schema.color error。"""
+    el = {"id": "n1", "type": "text", "left": 40, "top": 40, "width": 200, "height": 60,
+          "paragraphs": [{"runs": [{"text": "正文", "fontSize": 14, "color": None}]}],
+          field: None}
+    assert "schema.color" not in _codes(_issues_for(el))
+
+
+def test_null_theme_background_color_not_error():
+    theme = {**THEME, "backgroundColor": None}
+    deck = {"slides": [{"id": "s1", "elements": []}]}
+    assert "schema.color" not in _codes(render_pptx.validate_deck(deck, theme))
+
+
+def test_null_run_color_renders_with_theme_fallback():
+    """null run color 不会崩溃：渲染端走 falsy-or 回退主题默认色。"""
+    import pptx
+    prs = pptx.Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    el = {"id": "nc1", "type": "text", "left": 40, "top": 40, "width": 200, "height": 60,
+          "paragraphs": [{"runs": [{"text": "测试null颜色", "fontSize": 14, "color": None}]}]}
+    # 不崩溃即通过；run color 应回退 theme.fontColor
+    render_pptx.render_text(slide, el, THEME, 12192.0)
+
+
 def test_invalid_autofit_is_error_not_fixable_warning():
     el = {"id": "c4", "type": "text", "left": 40, "top": 40, "width": 300, "height": 125,
           "autoFit": "shirnk",

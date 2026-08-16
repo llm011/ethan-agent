@@ -308,7 +308,7 @@ def apply_shadow(sp_pr, shadow: dict, emu_per_px: float):
     """注入 a:outerShdw。shadow: {h, v, blur(px), color:#RRGGBB[AA]}"""
     h, v = float(shadow.get("h", 0)), float(shadow.get("v", 0))
     blur = float(shadow.get("blur", 0))
-    rgb, alpha = parse_color(shadow.get("color", "#00000033"))
+    rgb, alpha = parse_color(shadow.get("color") or "#00000033")
     dist = math.hypot(h, v)
     direction = int((math.degrees(math.atan2(v, h)) % 360) * 60000)
     old = sp_pr.find(qn("a:effectLst"))
@@ -334,7 +334,7 @@ def apply_line_format(line_owner, spec: dict, emu_per_px: float, default=None):
     if not spec:
         ln.fill.background()
         return
-    rgb, alpha = parse_color(spec.get("color", "#D1D5DB"))
+    rgb, alpha = parse_color(spec.get("color") or "#D1D5DB")
     ln.color.rgb = rgb
     ln.width = Emu(int(spec.get("width", 1) * emu_per_px))
     ln_el = ln._get_or_add_ln()
@@ -1053,7 +1053,7 @@ def render_line(slide, el, emu_per_px):
         conn.name = el["name"]
     apply_line_format(
         conn.line,
-        {"style": el.get("style", "solid"), "width": el.get("width", 2), "color": el.get("color", "#1F2937")},
+        {"style": el.get("style", "solid"), "width": el.get("width", 2), "color": el.get("color") or "#1F2937"},
         emu_per_px,
     )
     set_arrowheads(conn, el.get("points") or ["", ""])
@@ -1140,7 +1140,7 @@ def render_chart(slide, el, theme, emu_per_px):
 
 
 def _set_cell_border(cell, outline: dict, emu_per_px: float):
-    rgb, _ = parse_color(outline.get("color", "#E5E7EB"))
+    rgb, _ = parse_color(outline.get("color") or "#E5E7EB")
     w = str(int(outline.get("width", 1) * emu_per_px))
     dash = DASH_MAP.get(outline.get("style", "solid"))
     tcPr = cell._tc.get_or_add_tcPr()
@@ -1186,10 +1186,10 @@ def render_table(slide, el, theme, emu_per_px):
     header_color = tbl_theme.get("color") or (theme.get("themeColors") or ["#1E40AF"])[0]
     header_rgb, _ = parse_color(header_color)
     header_text_color = contrast_text_color(header_rgb)
-    default_outline = (theme.get("outline") or {}).get("color", "#E5E7EB")
+    default_outline = (theme.get("outline") or {}).get("color") or "#E5E7EB"
     outline = el.get("outline") or {"style": "solid", "width": 1, "color": default_outline}
     # 表体填充跟随主题背景：深底提亮一档作卡片面，浅底用纯白；避免深主题下白底+浅字不可读
-    bg_rgb, _ = parse_color(theme.get("backgroundColor", "#FFFFFF"))
+    bg_rgb, _ = parse_color(theme.get("backgroundColor") or "#FFFFFF")
     body_fill = shift_color(bg_rgb, 0.10) if rel_luminance(bg_rgb) < 0.35 else RGBColor(0xFF, 0xFF, 0xFF)
 
     for r, row in enumerate(data):
@@ -1634,13 +1634,13 @@ def _render_latex_omml(slide, el, theme, emu_per_px):
 
 
 def render_background(slide, bg: dict | None, theme, canvas_w, canvas_h, emu_per_px, deck_dir):
-    bg = bg or {"type": "solid", "color": theme.get("backgroundColor", "#FFFFFF")}
+    bg = bg or {"type": "solid", "color": theme.get("backgroundColor") or "#FFFFFF"}
     btype = bg.get("type", "solid")
     if btype == "gradient" and bg.get("gradient"):
         apply_gradient_fill(slide.background.fill, bg["gradient"], emu_per_px)
     elif btype == "image" and (bg.get("image") or {}).get("src"):
         # 底色先铺上，图片以全幅 cover 插入到最底层（第一个添加）
-        color = bg.get("color") or theme.get("backgroundColor", "#FFFFFF")
+        color = bg.get("color") or theme.get("backgroundColor") or "#FFFFFF"
         slide.background.fill.solid()
         slide.background.fill.fore_color.rgb = parse_color(color)[0]
         img = bg["image"]
@@ -1651,7 +1651,7 @@ def render_background(slide, bg: dict | None, theme, canvas_w, canvas_h, emu_per
         }
         render_image(slide, el, deck_dir, emu_per_px)
     else:
-        color = bg.get("color") or theme.get("backgroundColor", "#FFFFFF")
+        color = bg.get("color") or theme.get("backgroundColor") or "#FFFFFF"
         slide.background.fill.solid()
         slide.background.fill.fore_color.rgb = parse_color(color)[0]
 
@@ -1746,13 +1746,17 @@ def validate_deck(deck: dict, theme: dict | None = None, deck_dir: Path | None =
         return True
 
     def validate_color_fields(spec, sp: str):
-        """检查所有会进入 parse_color() 的 schema 颜色字段。"""
+        """检查所有会进入 parse_color() 的 schema 颜色字段。
+
+        所有颜色字段统一 allow_none=True：渲染端对 null 一律走 falsy-or 回退
+        默认色（run/element 级 ``or default``，theme/outline/shadow 级同样），
+        故 null 在 --check 与渲染中行为一致——回退默认色，不报错。非 null 的
+        非法值仍由 parse_color 拒绝。
+        """
         if isinstance(spec, dict):
             for key, value in spec.items():
                 path = f"{sp}.{key}"
-                if key in ("color", "backgroundColor"):
-                    validate_color(value, path)
-                elif key in ("fill", "backcolor", "defaultColor"):
+                if key in ("color", "backgroundColor", "fill", "backcolor", "defaultColor"):
                     validate_color(value, path, allow_none=True)
                 elif key == "themeColors":
                     if not isinstance(value, list):
@@ -2074,8 +2078,11 @@ def main():
     try:
         deck, deck_dir, _page_files = load_deck(deck_path)
     except SystemExit as e:
-        # project_loader 用 SystemExit 报可预期的 JSON/项目结构错误。
-        exit_with_error(str(e.code or "加载 deck 失败"), "deck")
+        # project_loader 用 SystemExit 报可预期的 JSON/项目结构错误（code 为
+        # 错误消息字符串）；防御性处理 SystemExit(int) 等无消息退出，避免输出
+        # 裸数字如 "2"。
+        msg = e.code if isinstance(e.code, str) else "加载 deck 失败"
+        exit_with_error(msg, "deck")
     except OSError as e:
         exit_with_error(f"无法读取 deck: {deck_path}（{e}）", "deck")
     if not isinstance(deck, dict):
