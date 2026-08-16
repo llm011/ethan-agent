@@ -142,27 +142,26 @@ def _forget_long_dormant(store: MemoryStore, now: float, *, dry_run: bool) -> in
 
 
 def _dormant_idle_projects(store: MemoryStore, now: float, *, dry_run: bool,
-                           idle_project_scopes: frozenset[str] | None = None) -> int:
+                           idle_project_info: dict[str, float] | None = None) -> int:
     """Tier B：project scope 连续 PROJECT_IDLE_DAYS 无信号 → 非 Tier A 记忆批量 dormant。
 
     休眠信号是 scope 级四路 MAX（见 store.project_scope_last_activity）：
     updated_at / created_at / last_recalled_at / evidence.created_at。Tier A
     维度（项目内沉淀出的偏好等）留在原地不归档——它们的价值独立于项目窗口。
 
-    idle_project_scopes 由调用方预计算传入，避免重复查询。
+    idle_project_info: {scope_id: last_activity_timestamp} 由调用方预计算传入，
+    既用于成员判定也用于日志输出，避免重复查询 project_scope_last_activity()。
     """
     count = 0
     # 若调用方未传入，自行计算（向后兼容）
-    if idle_project_scopes is None:
+    if idle_project_info is None:
         cutoff = now - PROJECT_IDLE_DAYS * _SECONDS_PER_DAY
-        idle_project_scopes = frozenset(
-            scope_id for scope_id, last in store.project_scope_last_activity()
+        idle_project_info = {
+            scope_id: last
+            for scope_id, last in store.project_scope_last_activity()
             if last < cutoff
-        )
-    # 仍需 last_signal 值来打日志，重新查询
-    for scope_id, last_signal in store.project_scope_last_activity():
-        if scope_id not in idle_project_scopes:
-            continue
+        }
+    for scope_id, last_signal in idle_project_info.items():
         targets = [
             m for m in store.list_memories(
                 scope_type="project", scope_id=scope_id,
@@ -335,17 +334,17 @@ def apply_memory_decay(store: MemoryStore, now: float) -> dict[str, int]:
         return result
     dry = DECAY_DRY_RUN
     result["forgotten"] = _forget_long_dormant(store, now, dry_run=dry)
-    # 预计算一次 idle project scopes，供 _dormant_idle_projects 和
-    # _dormant_stale_tentative 共用，避免重复调用 project_scope_last_activity()
+    # 预计算一次 idle project scopes + last_signal，供两个函数共用
     idle_cutoff = now - PROJECT_IDLE_DAYS * _SECONDS_PER_DAY
-    idle_project_scopes = frozenset(
-        scope_id for scope_id, last in store.project_scope_last_activity()
+    idle_project_info: dict[str, float] = {
+        scope_id: last
+        for scope_id, last in store.project_scope_last_activity()
         if last < idle_cutoff
-    )
+    }
     result["dormanted"] = _dormant_idle_projects(store, now, dry_run=dry,
-                                                 idle_project_scopes=idle_project_scopes)
+                                                 idle_project_info=idle_project_info)
     result["decayed"] = _dormant_stale_tentative(store, now, dry_run=dry,
-                                                  idle_project_scopes=idle_project_scopes)
+                                                  idle_project_scopes=frozenset(idle_project_info))
     logger.info("[MemoryDecay] %s%s", result, " (dry-run)" if dry else "")
     return result
 

@@ -930,11 +930,11 @@ class MemoryStore:
                 continue
             try:
                 self.set_status(memory_id, MemoryStatus.ACTIVE.value)
-            except (ValueError, KeyError):
+            except (ValueError, KeyError) as exc:
                 # ValueError: evidence 被清（理论上 dormant 不脱敏不会发生）
                 # KeyError: record 并发删除（极端场景）
                 # 两种情况跳过而非中断整批
-                logger.warning("wake skipped for %s: %s", memory_id, type(__name__).split(".")[-1])
+                logger.warning("wake skipped for %s: %s: %s", memory_id, type(exc).__name__, exc)
                 continue
             try:
                 from ethan.memory.memory_vectors import index_memory
