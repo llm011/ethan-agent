@@ -1014,9 +1014,9 @@ class MemoryStore:
                    MAX(m.updated_at) AS lu, MAX(m.created_at) AS lc,
                    MAX(m.last_recalled_at) AS lr, MAX(e.created_at) AS le
             FROM memories m LEFT JOIN memory_evidence e ON e.memory_id=m.id
-            WHERE m.scope_type='project' AND m.status='active'
+            WHERE m.scope_type=? AND m.status=?
             GROUP BY m.scope_id
-        """).fetchall()
+        """, ("project", MemoryStatus.ACTIVE.value)).fetchall()
         return [
             (row["scope_id"], max(row["lu"] or 0.0, row["lc"] or 0.0, row["lr"] or 0.0, row["le"] or 0.0))
             for row in rows
