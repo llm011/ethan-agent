@@ -145,7 +145,7 @@ def _forget_long_dormant(store: MemoryStore, now: float, *, dry_run: bool) -> in
 
 
 def _dormant_idle_projects(store: MemoryStore, now: float, *, dry_run: bool,
-                           idle_project_info: dict[str, float] = {}) -> int:
+                           idle_project_info: dict[str, float] | None = None) -> int:
     """Tier B：project scope 连续 PROJECT_IDLE_DAYS 无信号 → 非 Tier A 记忆批量 dormant。
 
     休眠信号是 scope 级四路 MAX（见 store.project_scope_last_activity）：
@@ -155,6 +155,8 @@ def _dormant_idle_projects(store: MemoryStore, now: float, *, dry_run: bool,
     idle_project_info: {scope_id: last_activity_timestamp} 由调用方预计算传入，
     既用于成员判定也用于日志输出，避免重复查询 project_scope_last_activity()。
     """
+    if idle_project_info is None:
+        idle_project_info = {}
     count = 0
     for scope_id, last_signal in idle_project_info.items():
         targets = [
@@ -292,18 +294,20 @@ def apply_confidence_promotion(
     # 预解析一次，避免每条记忆重解析
     ladder = _parse_ladder(PROMOTE_LADDER_RAW)
     promoted = 0
-    for memory_id, sessions in counts.items():
-        record = records.get(memory_id)
-        if record is None:
-            continue
-        if PROMOTE_DOMAINS and record.memory_domain not in PROMOTE_DOMAINS:
-            continue
-        target = ladder_target(sessions, ladder=ladder)
-        if target is None or target <= record.confidence:
-            continue
-        if not dry_run:
-            store.set_confidence_quiet(memory_id, target)
-        promoted += 1
+    # 批量提升包装在单个事务里，避免 N 条记忆 N 次 fsync
+    with store.transaction():
+        for memory_id, sessions in counts.items():
+            record = records.get(memory_id)
+            if record is None:
+                continue
+            if PROMOTE_DOMAINS and record.memory_domain not in PROMOTE_DOMAINS:
+                continue
+            target = ladder_target(sessions, ladder=ladder)
+            if target is None or target <= record.confidence:
+                continue
+            if not dry_run:
+                store.set_confidence_quiet(memory_id, target)
+            promoted += 1
     if promoted:
         logger.info(
             "[MemoryDecay] promoted confidence for %d memories%s",

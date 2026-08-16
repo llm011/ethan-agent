@@ -92,6 +92,7 @@ class AdmissionPolicy:
         # 确定性的 merge/supersede,避免"住在深圳"和"家在深圳南山"各存一条。
         # companion 域不参与(情感记忆的语义合并风险高于收益)。
         if candidate.memory_domain == MemoryDomain.GENERAL.value:
+            self._last_same_scope = None  # 重置上一轮状态，避免泄漏
             pair = self._semantic_pair(candidate)
             if pair is not None:
                 return self._admit_with_pair(candidate, *pair)
