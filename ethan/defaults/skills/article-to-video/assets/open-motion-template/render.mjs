@@ -2,6 +2,7 @@ import { getCompositions, renderFrames } from "@open-motion/renderer";
 import { chromium } from "playwright";
 import { execSync, spawn } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -19,6 +20,11 @@ const coverPath = path.resolve(coverPathArg);
 const reportPath = path.resolve(reportPathArg);
 const publicDir = path.resolve(publicDirArg);
 const timeline = JSON.parse(fs.readFileSync(timelinePath, "utf8"));
+
+// ── Derive output paths ──
+const renderDir = path.dirname(outputPath);
+const tmpDir = path.join(renderDir, "temp");
+const distDir = path.join(tmpDir, "vite-dist");
 
 // ── 1. Ensure Playwright browsers are installed ──
 process.stderr.write("[Step 1/5] Checking Playwright browsers...\n");
@@ -55,9 +61,6 @@ await new Promise((resolve) => {
 });
 
 const url = `http://127.0.0.1:${PORT}`;
-const renderDir = path.dirname(outputPath);
-const tmpDir = path.join(renderDir, "temp");
-const distDir = path.join(tmpDir, "vite-dist");
 
 try {
   // ── 4. Discover compositions ──
@@ -84,7 +87,7 @@ try {
     outputDir: tmpDir,
     compositionId: comp.id,
     inputProps: timeline,
-    concurrency: Math.min(9, Math.max(1, Math.floor((require("os").cpus().length || 4) / 2))),
+    concurrency: Math.min(9, Math.max(1, Math.floor((os.cpus().length || 4) / 2))),
     publicDir,
     timeout: 600000,
     onProgress: (frame) => {
