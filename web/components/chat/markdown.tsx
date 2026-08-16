@@ -45,7 +45,12 @@ function remarkMath(): (tree: any) => void {
     while ((m = MATH_RE.exec(value)) !== null) {
       const isDisplayDollar = m[1] !== undefined;
       const latex = (isDisplayDollar ? m[1] : m[2]).trim();
-      if (!latex || (!isDisplayDollar && !/[\\^_]/.test(latex))) continue;
+      // 非公式（如货币 $50）不能吞掉右侧 $：回退 lastIndex，让该 $ 可作为
+      // 后续公式（如 $x^2$）的起始定界符，否则紧随其后的公式会漏渲染
+      if (!latex || (!isDisplayDollar && !/[\\^_]/.test(latex))) {
+        MATH_RE.lastIndex = m.index + (isDisplayDollar ? 2 : 1);
+        continue;
+      }
       // $$...$$ 夹在其他文字中间（如行内合计式）按行内渲染；独占段落才用 display 模式
       const alone =
         value.slice(0, m.index).trim() === "" && value.slice(m.index + m[0].length).trim() === "";
