@@ -98,6 +98,22 @@ _STRIP_PY_C_STR_RE = re.compile(
     r'''(\bpython3?\s+-c\s+)("[^"\n]*(?:\\.[^"\n]*)*"|'[^'\n]*(?:\\.[^'\n]*)*')'''
 )
 
+# 敏感文件/目录模式：cat/head/ls 等只读命令的「读取路径」命中即不免单。
+# 密钥/凭据文件的读取此前靠 consent 弹窗作为唯一人工闸门，白名单不得绕过。
+# 保守取向：宁可误伤（如 ls ~/.ssh 目录列表也弹窗），不可漏放。
+_SENSITIVE_PATH_RE = re.compile(
+    r'(?:'
+    r'\.ssh\b|id_rsa|id_ed25519|id_ecdsa|id_dsa|authorized_keys'          # SSH 私钥/凭据
+    r'|\.aws\b|credentials'                                               # AWS / 通用凭据
+    r'|\.env[\w.]*'                                                       # .env / .env.local / .env.production
+    r'|\.pem\b|\.key\b|\.p12\b|\.pfx\b'                                   # 证书/私钥文件
+    r'|\.netrc|\.npmrc|\.pypirc|\.git-credentials|\.docker/config'        # 带token的配置
+    r'|\.gnupg\b'                                                         # GPG
+    r'|secrets?[\w./-]*|token[\w./-]*|password[\w./-]*'                  # 命名含 secret/token/password 的路径
+    r')',
+    re.IGNORECASE,
+)
+
 
 def _shell_level_command(cmd: str) -> str:
     """把 python3 -c "...内联脚本..." 的脚本字符串替换成占位，仅保留 shell 层面的 token。
@@ -121,6 +137,10 @@ def _is_safe_readonly(command: str) -> bool:
     # 0. 引用 secret 环境变量的（即使只读也可能泄露密钥）不免单
     if _detect_secret_env_refs(cmd):
         return False
+    # 0.5 读取路径命中敏感文件模式（.env / id_rsa / credentials 等）不免单：
+    #     密钥文件的读取此前靠 consent 作为唯一人工闸门，白名单不得绕过
+    if _SENSITIVE_PATH_RE.search(cmd):
+        return False
     # 1. 基础白名单正则过（格式正确 + 只读命令种类）
     if not _SAFE_READONLY_CMD_RE.match(cmd):
         return False
@@ -142,12 +162,15 @@ def _is_safe_readonly(command: str) -> bool:
             # 去掉首尾一层引号
             script_body = script_body[1:-1]
         unsafe_py = re.compile(
-            r"open\s*\(\s*['\"][^'\"]+['\"]\s*,\s*['\"][wa]"  # 写模式
+            r"open\s*\("                                       # 任何 open()（含只读：读文件内容一律弹窗）
             r"|\.write\s*\("                                   # 写文件
             r"|\bexec\s*\(|\beval\s*\("                        # 动态执行
             r"|import\s+(?:subprocess|requests|socket|httpx|urllib)"  # 危险模块 import
             r"|os\.system\s*\(|subprocess\.|run\s*\("          # 子进程
             r"|shutil\.(?:copy|move|rm|r?mtree)\s*\("          # fs 写
+            r"|os\.environ|getenv\s*\(|environ\s*\["           # 环境变量读取（可 dump 密钥）
+            r"|read_text\s*\(|read_bytes\s*\(|\.read\s*\("     # Path/文件对象读内容
+            r"|__import__\b|globals\s*\(\)|locals\s*\("        # 动态导入/命名空间逃逸
         )
         if unsafe_py.search(script_body or ""):
             return False
