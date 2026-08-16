@@ -54,6 +54,135 @@ _ENV_DUMP_RE = re.compile(
     r')\b'
 )
 
+# 只读无副作用命令白名单：匹配到直接跳过 consent 弹窗。
+# 目的：避免「ls 某脚本目录是否存在 / python -c 仅 Path.exists() 探测」
+# 这类零风险命令被误拒后，模型绕到 web_fetch 等低质量替代路径。
+# 注意：这只是不弹授权，不影响其他安全拦截（_DANGEROUS_RE / _ENV_DUMP_RE 仍优先命中）。
+_SAFE_READONLY_CMD_RE = re.compile(
+    r'^(?:'
+    # ls 纯列表：允许 ls + 路径/通配 + 常见只读选项 + 尾部 && echo <标识符>
+    r'ls\s+(?:-[ahlLdsinrtSuUgGmkpZ1@\,]+\s+)?(?:(?:--?(?:time|sort|color|width|tabsize|block-size|ignore|indicator-style|context|classify|hide|group-directories-first)\S*\s+)?)*[\w~/.\-*?[\]{}]+\s*(?:&&\s*echo\s+[A-Za-z_][A-Za-z0-9_]*)?'
+    # python/python3 -c 单行脚本（安全性由 _PY_C_STRICT_RE 严格结构白名单兜底：
+    # 仅放行 Path(...).exists() 探测形态，其余一律照常弹窗）
+    r'|python3?\s+-c\s+"[^"]*"'
+    r'|python3?\s+-c\s+\'[^\']*\''
+    # 纯文本只读：cat/head/tail/file/stat/wc 加一个普通路径/可选参数（head -n 5 等）
+    r'|(?:cat|head|tail|file|stat|wc)\s+(?:-[A-Za-z0-9]+\s+)?(?:[A-Za-z0-9_\-]+\s+)?[\w~/.\-\[\]{}]+'
+    # pwd / which / whereis
+    r'|pwd'
+    r'|which\s+[\w\-]+'
+    r'|whereis\s+[\w\-]+'
+    # echo 简单字符串（不含 $VAR 引用 secret 的，由 helper 扫）
+    r'|echo\s+[\w\s~/.\-:,_=+#@!?$%^&\[\]{}()<>\/]+'
+    # md5/sha 校验文件
+    r'|(?:md5|sha1|sha256|sha512|md5sum|sha256sum|sha512sum)\s+[\w~/.\-]+'
+    r')\s*$'
+)
+# 命令级危险组合符：非 Python `-c`/`-c` 字符串字面量上下文里命中任一，说明命令不是纯读。
+# 注意：末尾 `&& echo <标识符>` 这类常见"探测成功打标记"用法会单独放行（见 `_is_safe_readonly`）。
+_DANGEROUS_COMPOSE_RE = re.compile(
+    r'>>?'                          # 重定向 > / >>
+    r'|\|'                          # 管道 |（包含 ||）
+    r'|;\s*'                        # 命令分隔
+    r'|&\s+'                        # 后台执行 &（区分 &&/& 后面不是&）
+    r'|`'                           # 反引号子 shell
+    r'|\$\('                        # $(...) 子 shell
+    r'|&&'                          # && 组合（含例外，见下）
+    r'|\|\|'                        # || 组合
+    r'|\beval\b|\bsource\b|\bexec\b'  # 动态执行/加载
+)
+
+# 从命令里剥离 `python -c "...script..."` / `python -c '...script...'`
+# 的脚本字符串内容，让后续危险组合符只查「shell 层」而不是 Python 源码层。
+# 否则 Python 源码里的 `.write(` / `||` / `&&` 会把纯探测 Python 误判成危险。
+_STRIP_PY_C_STR_RE = re.compile(
+    r'''(\bpython3?\s+-c\s+)("[^"\n]*(?:\\.[^"\n]*)*"|'[^'\n]*(?:\\.[^'\n]*)*')'''
+)
+
+# python -c 脚本的严格结构白名单：唯一放行形态是
+#   from pathlib import Path; print(Path('<路径字面量>').exists())
+# 此前按危险特性黑名单扫描（禁 open/write/import os…），可被 `from os import
+# system`、`from shutil import rmtree`、`Path(...).write_text(...)` 等别名导入/
+# 方法直呼完全绕过，导致任意子进程/写文件被判定只读免弹窗。改为结构性白名单：
+# 不匹配此形态的 python -c 一律照常走 consent。路径字面量内禁止引号/换行，
+# 杜绝闭合引号后拼接任意代码。
+_PY_C_STRICT_RE = re.compile(
+    r"""^from pathlib import Path; print\(Path\((['"])[^'"\n]*\1\)\.exists\(\)\)\s*$"""
+)
+
+# 敏感文件/目录模式：cat/head/ls 等只读命令的「读取路径」命中即不免单。
+# 密钥/凭据文件的读取此前靠 consent 弹窗作为唯一人工闸门，白名单不得绕过。
+# 保守取向：宁可误伤（如 ls ~/.ssh 目录列表也弹窗），不可漏放。
+_SENSITIVE_PATH_RE = re.compile(
+    r'(?:'
+    r'\.ssh\b|id_rsa|id_ed25519|id_ecdsa|id_dsa|authorized_keys'          # SSH 私钥/凭据
+    r'|\.aws\b|credentials'                                               # AWS / 通用凭据
+    r'|\.env[\w.]*'                                                       # .env / .env.local / .env.production
+    r'|\.pem\b|\.key\b|\.p12\b|\.pfx\b'                                   # 证书/私钥文件
+    r'|\.netrc|\.npmrc|\.pypirc|\.git-credentials|\.docker/config'        # 带token的配置
+    r'|\.gnupg\b'                                                         # GPG
+    r'|secrets?[\w./-]*|token[\w./-]*|password[\w./-]*'                  # 命名含 secret/token/password 的路径
+    r'|\.config/gh[\w./-]*|gh/hosts\b'                                    # gh CLI 凭据（hosts.yml 含明文 GitHub token）
+    r'|[\w./-]*history\b'                                                 # shell 历史（.bash_history/.zsh_history 常含 export 的密钥）
+    r')',
+    re.IGNORECASE,
+)
+
+
+def _shell_level_command(cmd: str) -> str:
+    """把 python3 -c "...内联脚本..." 的脚本字符串替换成占位，仅保留 shell 层面的 token。
+
+    这样判断 `>/>>/|/;&/&&/||` 等组合符时，不会被 Python 源码里的 `x if a else b`
+    （Python 内部不含 ||/&& 但单引号字符、.write( 等会触发其他拦截）等误伤。
+    """
+    return _STRIP_PY_C_STR_RE.sub(r'\1"PYC"', cmd)
+
+
+def _is_allowed_echo_tail(cmd: str) -> bool:
+    """匹配 `... && echo <标识符>` 这种末尾纯只读组合，返回 True。"""
+    return bool(re.search(r'&&\s*echo\s+[A-Za-z_][A-Za-z0-9_]*\s*$', cmd))
+
+
+def _is_safe_readonly(command: str) -> bool:
+    """保守判定 cmd 是否纯读、零副作用。命中可免 consent 弹窗。"""
+    cmd = (command or "").strip()
+    if not cmd:
+        return False
+    # 0. 引用 secret 环境变量的（即使只读也可能泄露密钥）不免单
+    if _detect_secret_env_refs(cmd):
+        return False
+    # 0.5 读取路径命中敏感文件模式（.env / id_rsa / credentials 等）不免单：
+    #     密钥文件的读取此前靠 consent 作为唯一人工闸门，白名单不得绕过
+    if _SENSITIVE_PATH_RE.search(cmd):
+        return False
+    # 1. 基础白名单正则过（格式正确 + 只读命令种类）
+    if not _SAFE_READONLY_CMD_RE.match(cmd):
+        return False
+    # 2. 危险组合符拦截：仅在「剥离 python -c 内联脚本」的 shell 层检查，
+    #    避免 Python 源码字符（括号、引号）误伤。
+    shell_only = _shell_level_command(cmd)
+    if _DANGEROUS_COMPOSE_RE.search(shell_only):
+        if not _is_allowed_echo_tail(cmd):
+            return False
+        # 对允许的 && echo <标识符>，再确认除了这个「一次 && echo」之外没有其他组合符
+        rest = re.sub(r'&&\s*echo\s+[A-Za-z_][A-Za-z0-9_]*\s*$', '', shell_only).strip()
+        if _DANGEROUS_COMPOSE_RE.search(rest):
+            return False
+    # 3. python -c 的额外过滤：严格结构白名单，仅放行
+    #    `from pathlib import Path; print(Path('...').exists())` 路径探测形态。
+    #    此前的危险特性黑名单可被 from-import 别名（from os import system、
+    #    from shutil import rmtree）或方法直呼（Path(...).write_text）绕过，
+    #    故不匹配 _PY_C_STRICT_RE 的一律弹窗。
+    m = _STRIP_PY_C_STR_RE.search(cmd)
+    if m:
+        script_body = m.group(2)
+        if script_body:
+            # 去掉首尾一层引号
+            script_body = script_body[1:-1]
+        if not _PY_C_STRICT_RE.match(script_body or ""):
+            return False
+    return True
+
 
 def _extract_dollar_vars(command: str) -> set[str]:
     """提取命令里所有 $VAR / ${VAR} 引用的变量名。"""
@@ -123,6 +252,11 @@ class ShellTool(BaseTool):
                 f"⚠️ 命令引用了 secret 环境变量（{', '.join(secret_refs)}），"
                 f"可能泄露密钥，请确认：{cmd[:200]}"
             )
+        # 纯读/零副作用命令（ls 目录探测、python -c 仅 Path.exists 等）：
+        # 直接放行，不弹 consent 弹窗，避免新会话首次就被拒，
+        # 导致模型绕到 web_fetch 等低质量替代路径。
+        if _is_safe_readonly(cmd):
+            return None
         # 普通命令：文案显式告知 scope 是会话级，避免用户以为只授了卡片上那一条
         return "执行 shell 命令（授权后本会话内的所有 shell 命令都不再询问）"
 
