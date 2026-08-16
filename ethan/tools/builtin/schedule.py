@@ -561,6 +561,33 @@ class ScheduleListTool(BaseTool):
             return f"Failed to list schedules: {e}"
 
 
+class SchedulePauseTool(BaseTool):
+    fast_path = False
+    side_effect = True
+    name = "schedule_pause"
+    description = "Pause a scheduled task (stop firing, kept for future resume) or resume a paused one. Paused state persists across restarts."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "job_id": {"type": "string", "description": "The job ID to pause/resume"},
+            "state": {"type": "string", "enum": ["paused", "active"], "description": "'paused' to stop firing (task is kept, not deleted), 'active' to resume a paused task. Default 'paused'."},
+        },
+        "required": ["job_id"],
+    }
+
+    async def run(self, job_id: str, state: str = "paused") -> str:
+        from ethan.core.config import get_config
+        token = get_config().network.auth_token
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        try:
+            async with _http_client() as client:
+                res = await client.patch(f"{_base_url()}/api/schedule/{job_id}", json={"state": state}, headers=headers)
+                res.raise_for_status()
+                return f"Job '{job_id}' is now {state}"
+        except Exception as e:
+            return f"Failed to update job '{job_id}' state to {state}: {e}"
+
+
 class ScheduleRemoveTool(BaseTool):
     fast_path = False
     side_effect = True

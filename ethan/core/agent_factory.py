@@ -48,7 +48,7 @@ from ethan.tools.builtin.plan import PlanReadTool, PlanUpdateTool, PlanWriteTool
 from ethan.tools.builtin.procedure_write import ProcedureWriteTool
 from ethan.tools.builtin.profile_update import ProfileUpdateTool
 from ethan.tools.builtin.recall_memory import RecallMemoryTool
-from ethan.tools.builtin.schedule import ScheduleCreateTool, ScheduleListTool, ScheduleRemoveTool
+from ethan.tools.builtin.schedule import ScheduleCreateTool, ScheduleListTool, SchedulePauseTool, ScheduleRemoveTool
 from ethan.tools.builtin.search import FdTool, RipgrepTool
 from ethan.tools.builtin.secrets import GetSecretTool, ListSecretsTool, SetSecretTool
 from ethan.tools.builtin.shell import ShellTool
@@ -155,6 +155,7 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
         registry.register(DecideTool())
         registry.register(ScheduleCreateTool(user_id=user_id))
         registry.register(ScheduleListTool())
+        registry.register(SchedulePauseTool())
         registry.register(ScheduleRemoveTool())
         registry.register(KnowledgeSearchTool(user_id=user_id))
         registry.register(KnowledgeReadTool(user_id=user_id))
@@ -172,6 +173,7 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
     registry.register(FdTool())
     registry.register(ScheduleCreateTool(user_id=user_id))
     registry.register(ScheduleListTool())
+    registry.register(SchedulePauseTool())
     registry.register(ScheduleRemoveTool())
     registry.register(BackgroundTaskTool(user_id=user_id))
     registry.register(BackgroundTaskListTool())
