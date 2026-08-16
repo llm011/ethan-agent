@@ -206,8 +206,10 @@ def create_event(title: str, when: str, repeat: str = "none", weekdays: list[int
         "updated_at": _now().isoformat(),
     }
     store = get_agenda_store()
-    _register_job(event)
+    # 先写 store 再注册 job：若顺序相反，二者之间 job 恰好到点触发时
+    # fire_agenda_event 读 store 得 None 会静默跳过通知（概率极低但存在）
     store.upsert(event)
+    _register_job(event)
     return event
 
 
@@ -344,7 +346,10 @@ def reconcile() -> dict:
             continue
         if ev["repeat"] == "none" and dt < now - timedelta(seconds=MISFIRE_GRACE_SECONDS):
             # 超宽限的一次性日程：无论 job 是否残留（APScheduler 可能
-            # 尚未清理 misfire job），统一标 missed + 摘 job + 补发通知
+            # 尚未清理 misfire job），统一标 missed + 摘 job + 补发通知。
+            # 注意：daily/weekly 有意不判 missed——重复日程错过一次后下次
+            # 照常触发，若补发「已错过」会为每个重复日程都产生一条过期
+            # 提醒噪音，且错过次数无意义（下次触发才是用户关心的）
             store.set_status(ev["id"], "missed")
             scheduler.remove(ev["id"])
             stats["missed"] += 1

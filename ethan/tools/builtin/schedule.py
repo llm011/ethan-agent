@@ -143,9 +143,6 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
     """
     import logging as _entry_log
     _entry_logger = _entry_log.getLogger("ethan.schedule")
-    # job_id 由 cron.py 的 add_cron/add_interval/add_date 写入 kwargs，
-    # 用于 session 轮转时回写新的 session_id 到 job
-    job_id = _extra.get("job_id", "")
     _entry_logger.info("[Schedule] fire_schedule_job called: session=%s title=%r", session_id, title)
 
     async def _run_schedule_task(*, dedicated_store: bool = False):
@@ -155,7 +152,6 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
         用于 fallback 线程路径——单例连接绑主 loop，跨 loop await 必崩
         （aiosqlite _tx 队列和 _session_store_lock 都绑主 loop）。
         """
-        nonlocal session_id
         import logging as _log
 
         from ethan.core.agent_factory import create_agent
