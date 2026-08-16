@@ -47,7 +47,9 @@ PROMOTION_SESSION_THRESHOLD = 2
 # 级被反复强化（evidence 独立 session 数 → confidence 晋升）。只补证据永不
 # supersede；阈值比同 scope 配对（0.7）更严。
 CROSS_SCOPE_PAIR_L2 = float(_os.environ.get("ETHAN_MEMORY_PAIR_CROSS_L2", "0.6"))
-CROSS_SCOPE_SCOPE_TYPES = frozenset({"user", "user_domain", "user_skill"})
+# cross-scope 偏好配对的目标 scope 类型 = Tier A 豁免的 user 级 scope。
+# 与 decay.EXEMPT_SCOPE_TYPES 同源，共用一处定义。
+from ethan.memory.decay import EXEMPT_SCOPE_TYPES as CROSS_SCOPE_SCOPE_TYPES
 
 
 @dataclass

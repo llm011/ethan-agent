@@ -141,17 +141,27 @@ def _forget_long_dormant(store: MemoryStore, now: float, *, dry_run: bool) -> in
     return count
 
 
-def _dormant_idle_projects(store: MemoryStore, now: float, *, dry_run: bool) -> int:
+def _dormant_idle_projects(store: MemoryStore, now: float, *, dry_run: bool,
+                           idle_project_scopes: frozenset[str] | None = None) -> int:
     """Tier B：project scope 连续 PROJECT_IDLE_DAYS 无信号 → 非 Tier A 记忆批量 dormant。
 
     休眠信号是 scope 级四路 MAX（见 store.project_scope_last_activity）：
     updated_at / created_at / last_recalled_at / evidence.created_at。Tier A
     维度（项目内沉淀出的偏好等）留在原地不归档——它们的价值独立于项目窗口。
+
+    idle_project_scopes 由调用方预计算传入，避免重复查询。
     """
-    cutoff = now - PROJECT_IDLE_DAYS * _SECONDS_PER_DAY
     count = 0
+    # 若调用方未传入，自行计算（向后兼容）
+    if idle_project_scopes is None:
+        cutoff = now - PROJECT_IDLE_DAYS * _SECONDS_PER_DAY
+        idle_project_scopes = frozenset(
+            scope_id for scope_id, last in store.project_scope_last_activity()
+            if last < cutoff
+        )
+    # 仍需 last_signal 值来打日志，重新查询
     for scope_id, last_signal in store.project_scope_last_activity():
-        if last_signal >= cutoff:
+        if scope_id not in idle_project_scopes:
             continue
         targets = [
             m for m in store.list_memories(
@@ -178,7 +188,8 @@ def _dormant_idle_projects(store: MemoryStore, now: float, *, dry_run: bool) -> 
     return count
 
 
-def _dormant_stale_tentative(store: MemoryStore, now: float, *, dry_run: bool) -> int:
+def _dormant_stale_tentative(store: MemoryStore, now: float, *, dry_run: bool,
+                             idle_project_scopes: frozenset[str] | None = None) -> int:
     """Tier C：tentative 决定 TENTATIVE_GRACE_DAYS 无强化 → dormant。
 
     强化清标在 admission 侧（_maybe_clear_tentative）：用户后续表达定稿意图
@@ -186,14 +197,16 @@ def _dormant_stale_tentative(store: MemoryStore, now: float, *, dry_run: bool) -
 
     跳过 idle project scope 内的 tentative：_dormant_idle_projects 已在前面
     捕获（tier != A 一律归档），避免 dry_run 下双重计数违反不变量 #3。
+    idle_project_scopes 由调用方预计算传入，避免重复查询。
     """
     cutoff = now - TENTATIVE_GRACE_DAYS * _SECONDS_PER_DAY
-    # 预算 idle project scope 集合（与 _dormant_idle_projects 同源信号）
-    idle_cutoff = now - PROJECT_IDLE_DAYS * _SECONDS_PER_DAY
-    idle_project_scopes = {
-        scope_id for scope_id, last in store.project_scope_last_activity()
-        if last < idle_cutoff
-    }
+    # 若调用方未传入，自行计算（向后兼容）
+    if idle_project_scopes is None:
+        idle_cutoff = now - PROJECT_IDLE_DAYS * _SECONDS_PER_DAY
+        idle_project_scopes = frozenset(
+            scope_id for scope_id, last in store.project_scope_last_activity()
+            if last < idle_cutoff
+        )
     count = 0
     for memory in store.list_active_tentative():
         if memory_tier(memory) != TIER_C:
@@ -284,6 +297,8 @@ def apply_confidence_promotion(
         record.id: record
         for record in store.list_memories(status=MemoryStatus.ACTIVE.value, limit=5000)
     }
+    # 预解析一次，避免每条记忆重解析
+    ladder = _parse_ladder(PROMOTE_LADDER_RAW)
     promoted = 0
     for memory_id, sessions in counts.items():
         record = records.get(memory_id)
@@ -291,7 +306,7 @@ def apply_confidence_promotion(
             continue
         if PROMOTE_DOMAINS and record.memory_domain not in PROMOTE_DOMAINS:
             continue
-        target = ladder_target(sessions)
+        target = ladder_target(sessions, ladder=ladder)
         if target is None or target <= record.confidence:
             continue
         if not dry_run:
@@ -320,8 +335,17 @@ def apply_memory_decay(store: MemoryStore, now: float) -> dict[str, int]:
         return result
     dry = DECAY_DRY_RUN
     result["forgotten"] = _forget_long_dormant(store, now, dry_run=dry)
-    result["dormanted"] = _dormant_idle_projects(store, now, dry_run=dry)
-    result["decayed"] = _dormant_stale_tentative(store, now, dry_run=dry)
+    # 预计算一次 idle project scopes，供 _dormant_idle_projects 和
+    # _dormant_stale_tentative 共用，避免重复调用 project_scope_last_activity()
+    idle_cutoff = now - PROJECT_IDLE_DAYS * _SECONDS_PER_DAY
+    idle_project_scopes = frozenset(
+        scope_id for scope_id, last in store.project_scope_last_activity()
+        if last < idle_cutoff
+    )
+    result["dormanted"] = _dormant_idle_projects(store, now, dry_run=dry,
+                                                 idle_project_scopes=idle_project_scopes)
+    result["decayed"] = _dormant_stale_tentative(store, now, dry_run=dry,
+                                                  idle_project_scopes=idle_project_scopes)
     logger.info("[MemoryDecay] %s%s", result, " (dry-run)" if dry else "")
     return result
 

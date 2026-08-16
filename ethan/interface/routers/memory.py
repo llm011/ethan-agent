@@ -429,7 +429,8 @@ async def wake_record(memory_id: str, user_id: str = Depends(verify_token)):
         record = store.get_memory(memory_id)
         if not record:
             raise HTTPException(404, "Memory not found")
-        if record.status != "dormant":
+        from ethan.memory.records import MemoryStatus
+        if record.status != MemoryStatus.DORMANT.value:
             raise HTTPException(400, "Memory is not dormant")
         woken = store.wake_memories([memory_id])
         return {"ok": True, "woken": woken, "record": _record_to_api(store.get_memory(memory_id)).model_dump()}
