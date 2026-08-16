@@ -383,7 +383,7 @@ export function AgendaView() {
           <div className="min-w-0">
             <div className="text-sm font-medium">Agent 日程工具</div>
             <div className="text-xs text-muted-foreground mt-0.5">
-              开启后，Agent 获得 agenda_add / agenda_update / agenda_complete / agenda_list / agenda_delete 工具，可以帮你管理日程。
+              开启后，Agent 获得 agenda_add / agenda_update / agenda_remove / agenda_list 工具，可以帮你管理日程。
             </div>
           </div>
         </div>
