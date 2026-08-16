@@ -319,6 +319,11 @@ def reconcile() -> dict:
     - 一次性日程过期未触发（服务宕机期间到期）→ 标 missed + 补发错过通知；
     - pending 事件缺 job（scheduler.db 损坏/回滚）→ 补注册；
     - scheduler 里的孤儿 agenda job（store 已删）→ 移除。
+
+    missed 判定以 store 的 when 为准（用户意图的权威数据源），不依赖
+    jobstore 状态：APScheduler 恢复 misfire job 是异步的，若此处依赖
+    get_job() 判存，可能在它移除超宽限 job 之前误判「job 还在」而跳过，
+    导致事件永远停在 pending。
     """
     store = get_agenda_store()
     scheduler = get_scheduler()
@@ -328,9 +333,6 @@ def reconcile() -> dict:
     for ev in store.list_events():
         if ev["status"] != "pending":
             continue
-        has_job = scheduler._scheduler.get_job(ev["id"]) is not None
-        if has_job:
-            continue
         try:
             dt = _parse_when(ev["when"])
         except ValueError:
@@ -339,16 +341,21 @@ def reconcile() -> dict:
             stats["missed"] += 1
             continue
         if ev["repeat"] == "none" and dt < now - timedelta(seconds=MISFIRE_GRACE_SECONDS):
+            # 超宽限的一次性日程：无论 job 是否残留（APScheduler 可能
+            # 尚未清理 misfire job），统一标 missed + 摘 job + 补发通知
             store.set_status(ev["id"], "missed")
+            scheduler.remove(ev["id"])
             stats["missed"] += 1
             logger.info("[Agenda] event '%s' missed (was due %s)", ev["title"], ev["when"])
             _dispatch_notification({**ev, "title": f"【已错过】{ev['title']}（{ev['when']}）"})
-        else:
-            try:
-                _register_job(ev)
-                stats["restored"] += 1
-            except Exception:
-                logger.exception("[Agenda] reconcile: failed to re-register %s", ev["id"])
+            continue
+        if scheduler._scheduler.get_job(ev["id"]) is not None:
+            continue
+        try:
+            _register_job(ev)
+            stats["restored"] += 1
+        except Exception:
+            logger.exception("[Agenda] reconcile: failed to re-register %s", ev["id"])
 
     # 孤儿 job 清理
     known_ids = {e["id"] for e in store.list_events()}

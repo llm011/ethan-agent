@@ -169,6 +169,35 @@ def test_reconcile_missed(isolated, monkeypatch):
     assert notified  # 补发错过通知
 
 
+def test_reconcile_missed_even_with_stale_job(isolated, monkeypatch):
+    """竞态回归：超宽限的一次性日程即使 jobstore 里 job 仍残留（APScheduler
+    的 misfire 清理是异步的，reconcile 可能先于它执行），也必须标 missed，
+    不能因 get_job() 命中而跳过 —— 否则事件永远停在 pending。"""
+    from datetime import datetime
+
+    from ethan.core.timezone import get_local_timezone
+    from ethan.scheduler.cron import get_scheduler
+
+    ev = agenda_mod.create_event("宕机错过但 job 残留", _when_future())
+    # 模拟服务宕机期间到期：store 的 when 改为 10 分钟前（超 5 分钟宽限），
+    # job 留在 jobstore 不动（next_run 仍是原未来时间，模拟未清理状态）
+    store = agenda_mod.get_agenda_store()
+    tz = get_local_timezone()
+    past = (datetime.now(tz) - timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M")
+    raw = store.get(ev["id"])
+    raw["when"] = past
+    store.upsert(raw)
+    assert get_scheduler()._scheduler.get_job(ev["id"]) is not None  # job 确实还在
+
+    notified = []
+    monkeypatch.setattr(agenda_mod, "_dispatch_notification", lambda e: notified.append(e))
+    stats = agenda_mod.reconcile()
+    assert stats["missed"] == 1
+    assert store.get(ev["id"])["status"] == "missed"
+    assert notified  # 补发【已错过】通知
+    assert get_scheduler()._scheduler.get_job(ev["id"]) is None  # 残留 job 已摘除
+
+
 def test_reconcile_restores_lost_job(isolated):
     from ethan.scheduler.cron import get_scheduler
     ev = agenda_mod.create_event("恢复我", _when_future())
