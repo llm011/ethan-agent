@@ -183,8 +183,9 @@ scope 配对）→ 清掉标记退出 Tier C，updated_at 重置（强化即活�
 
 **强化链路**（`ETHAN_MEMORY_PROMOTE=1`，默认开，独立于衰减开关）：
 - evidence 独立 session 数达阶梯（默认 2:0.8 / 3:0.9 / 5:0.95）→ confidence
-  单调抬升到阶梯值（`set_confidence_quiet` 不动 updated_at，避免批量晋升
-  重置 scope 休眠计时）——修复"多次发生的偏好卡在首次准入 60%"的存量问题
+  单调抬升到阶梯值（`bulk_set_confidence_quiet` 单事务批量写入、不动
+  updated_at，避免批量晋升重置 scope 休眠计时）——修复"多次发生的偏好
+  卡在首次准入 60%"的存量问题
 - 补证据（add_evidence bump updated_at）、召回（last_recalled_at）、tentative
   清标（bump updated_at）都是活跃信号，自动重置衰减锚点
 

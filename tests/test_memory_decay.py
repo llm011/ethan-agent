@@ -468,6 +468,45 @@ def test_promotion_companion_exempt(tmp_path):
     store.close()
 
 
+def test_bulk_set_confidence_quiet_updates_and_clamps(tmp_path):
+    """批量契约：一次调用更新多条，confidence 钳制到 [0,1]，不动 updated_at。"""
+    store = MemoryStore(tmp_path / "memory.db")
+    old = NOW - 5 * DAY
+    r1 = make_record(content="偏好甲", confidence=0.6, updated_at=old, created_at=old)
+    r2 = make_record(content="偏好乙", confidence=0.6)
+    add_memory(store, r1)
+    add_memory(store, r2)
+
+    store.bulk_set_confidence_quiet([(r1.id, 0.9), (r2.id, 1.7)])
+
+    a, b = store.get_memory(r1.id), store.get_memory(r2.id)
+    assert a.confidence == 0.9
+    assert b.confidence == 1.0  # 越界钳制
+    assert a.updated_at == old  # 不动 updated_at（scope 休眠计时不变量）
+    store.close()
+
+
+def test_bulk_set_confidence_quiet_no_partial_write(tmp_path):
+    """批量置信度更新不得留半批状态：输入非法 fail-fast，一条都不写。
+
+    回归背景：旧实现逐条内部 commit，即使调用方包了外层事务也会被第一条
+    的 commit 提前打断——既丢批量 fsync 收益，失败时还会留下半批晋升。
+    """
+    store = MemoryStore(tmp_path / "memory.db")
+    r1 = make_record(content="偏好甲", confidence=0.6)
+    r2 = make_record(content="偏好乙", confidence=0.6)
+    add_memory(store, r1)
+    add_memory(store, r2)
+
+    # 第二行缺参数 → 构造参数行时即抛 ValueError（未进事务），全批零写入
+    with pytest.raises(ValueError):
+        store.bulk_set_confidence_quiet([(r1.id, 0.9), (r2.id,)])
+
+    assert store.get_memory(r1.id).confidence == 0.6
+    assert store.get_memory(r2.id).confidence == 0.6
+    store.close()
+
+
 # ── 迁移 ────────────────────────────────────────────────────────────────────
 
 

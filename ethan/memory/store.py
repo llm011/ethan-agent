@@ -1030,17 +1030,27 @@ class MemoryStore:
                 if r.structured_data.get("tentative") is True]
 
     def set_confidence_quiet(self, memory_id: str, confidence: float) -> None:
-        """只动 confidence，不动 updated_at。
+        """只动 confidence，不动 updated_at（单条便捷入口，不变量见批量版）。"""
+        self.bulk_set_confidence_quiet([(memory_id, confidence)])
+
+    def bulk_set_confidence_quiet(self, updates: list[tuple[str, float]]) -> None:
+        """批量只动 confidence，不动 updated_at；整体单事务、一次 commit。
 
         夜间晋升阶梯的关键不变量：批量晋升若刷新 updated_at 会永久重置 Tier B
         scope 休眠计时（scope 活跃信号含 MAX(updated_at)），休眠检测失效。
+
+        必须整体走单个事务：若逐条内部 commit，会打断调用方的外层事务
+        （第一条就提前提交，后续退化回逐条自动提交，N 条 N 次 fsync），
+        且中途失败无法整体回滚、留下半批晋升状态。
         """
-        conn = self._get_conn()
-        conn.execute(
-            "UPDATE memories SET confidence=? WHERE id=?",
-            (min(1.0, max(0.0, float(confidence))), memory_id),
-        )
-        conn.commit()
+        if not updates:
+            return
+        rows = [
+            (min(1.0, max(0.0, float(confidence))), memory_id)
+            for memory_id, confidence in updates
+        ]
+        with self.transaction() as conn:
+            conn.executemany("UPDATE memories SET confidence=? WHERE id=?", rows)
 
     def touch_recalled(self, memory_ids: list[str]) -> None:
         if not memory_ids:

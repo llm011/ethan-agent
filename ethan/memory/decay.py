@@ -29,7 +29,7 @@ C     14 天    3 天                             decision/activity 且
 核心不变量：
 1. 一切状态迁移纯确定性、零 LLM、阈值全部 env 可调；
 2. 晋升只做 max(conf, 阶梯值) 单调抬升，且不碰 updated_at（走
-   set_confidence_quiet）——批量晋升若刷新 updated_at 会永久重置 Tier B
+   bulk_set_confidence_quiet）——批量晋升若刷新 updated_at 会永久重置 Tier B
    scope 休眠计时（scope 活跃信号含 MAX(updated_at)），休眠检测失效；
 3. dry_run 只读不改状态，返回计数与日志真实，供真实库验证；
 4. 强化信号统一为：add_evidence（bump updated_at）、touch_recalled
@@ -279,7 +279,7 @@ def apply_confidence_promotion(
     只做 max(conf, 阶梯值)：explicit(>=0.95)/corrected(1.0) 不受影响，救的是
     observed 晋升、accrual、以及历史上只补证据从不更新置信度的记忆（如
     "论文做成 PPT"偏好发生多次仍卡 60% 的 case——存量数据首夜自动自愈）。
-    写入走 set_confidence_quiet（不动 updated_at，见模块不变量 2）。
+    写入走 bulk_set_confidence_quiet（不动 updated_at，见模块不变量 2）。
     PROMOTE_DOMAINS 默认 {"general"}：companion 有自己的晋升语义，默认豁免。
     """
     if not PROMOTE_ENABLED:
@@ -294,20 +294,23 @@ def apply_confidence_promotion(
     # 预解析一次，避免每条记忆重解析
     ladder = _parse_ladder(PROMOTE_LADDER_RAW)
     promoted = 0
-    # 批量提升包装在单个事务里，避免 N 条记忆 N 次 fsync
-    with store.transaction():
-        for memory_id, sessions in counts.items():
-            record = records.get(memory_id)
-            if record is None:
-                continue
-            if PROMOTE_DOMAINS and record.memory_domain not in PROMOTE_DOMAINS:
-                continue
-            target = ladder_target(sessions, ladder=ladder)
-            if target is None or target <= record.confidence:
-                continue
-            if not dry_run:
-                store.set_confidence_quiet(memory_id, target)
-            promoted += 1
+    # 收集后经 bulk_set_confidence_quiet 单事务提交（N 条记忆一次 fsync）。
+    # 不能在 store.transaction() 里逐条调 set_confidence_quiet：其内部
+    # commit 会提前打断外层事务，退化回逐条自动提交。
+    pending: list[tuple[str, float]] = []
+    for memory_id, sessions in counts.items():
+        record = records.get(memory_id)
+        if record is None:
+            continue
+        if PROMOTE_DOMAINS and record.memory_domain not in PROMOTE_DOMAINS:
+            continue
+        target = ladder_target(sessions, ladder=ladder)
+        if target is None or target <= record.confidence:
+            continue
+        if not dry_run:
+            pending.append((memory_id, target))
+        promoted += 1
+    store.bulk_set_confidence_quiet(pending)
     if promoted:
         logger.info(
             "[MemoryDecay] promoted confidence for %d memories%s",
