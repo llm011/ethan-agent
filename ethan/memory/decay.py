@@ -153,14 +153,6 @@ def _dormant_idle_projects(store: MemoryStore, now: float, *, dry_run: bool,
     既用于成员判定也用于日志输出，避免重复查询 project_scope_last_activity()。
     """
     count = 0
-    # 若调用方未传入，自行计算（向后兼容）
-    if idle_project_info is None:
-        cutoff = now - PROJECT_IDLE_DAYS * _SECONDS_PER_DAY
-        idle_project_info = {
-            scope_id: last
-            for scope_id, last in store.project_scope_last_activity()
-            if last < cutoff
-        }
     for scope_id, last_signal in idle_project_info.items():
         targets = [
             m for m in store.list_memories(
@@ -199,13 +191,6 @@ def _dormant_stale_tentative(store: MemoryStore, now: float, *, dry_run: bool,
     idle_project_scopes 由调用方预计算传入，避免重复查询。
     """
     cutoff = now - TENTATIVE_GRACE_DAYS * _SECONDS_PER_DAY
-    # 若调用方未传入，自行计算（向后兼容）
-    if idle_project_scopes is None:
-        idle_cutoff = now - PROJECT_IDLE_DAYS * _SECONDS_PER_DAY
-        idle_project_scopes = frozenset(
-            scope_id for scope_id, last in store.project_scope_last_activity()
-            if last < idle_cutoff
-        )
     count = 0
     for memory in store.list_active_tentative():
         if memory_tier(memory) != TIER_C:

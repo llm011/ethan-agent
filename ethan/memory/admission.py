@@ -412,6 +412,8 @@ class AdmissionPolicy:
         merged: list[str] = []
         rejected: list[str] = []
         disputed: list[str] = []
+        # 收集需要唤醒的 project scope，循环后一次性唤醒（避免逐 candidate 重复扫描）
+        scopes_to_wake: set[tuple[str, str]] = set()
         for candidate in candidates:
             try:
                 memory_id, outcome = self.admit_candidate(candidate)
@@ -432,16 +434,23 @@ class AdmissionPolicy:
             if outcome == OUTCOME_MERGED:
                 if memory_id:
                     merged.append(memory_id)
-                    self._maybe_wake_scope(candidate)
+                    if candidate.scope_type == "project" and candidate.scope_id:
+                        scopes_to_wake.add(("project", candidate.scope_id))
                 continue
             # OUTCOME_ADMITTED — a new/active memory was produced.
             if memory_id is None:
                 continue
             admitted.append(memory_id)
-            self._maybe_wake_scope(candidate)
+            if candidate.scope_type == "project" and candidate.scope_id:
+                scopes_to_wake.add(("project", candidate.scope_id))
             key_scope = (candidate.memory_key, candidate.scope_type, candidate.scope_id, candidate.memory_domain)
             if self._has_conflicting_evidence(key_scope, exclude_memory_id=memory_id):
                 disputed.append(memory_id)
+        # 统一唤醒所有有新候选落地的 project scope（一次扫描，避免逐 candidate 重复）
+        if scopes_to_wake:
+            from ethan.memory.decay import wake_scope_dormant
+            for scope_type, scope_id in scopes_to_wake:
+                wake_scope_dormant(self._store, scope_type, scope_id)
         return AdmissionResult(admitted=admitted, merged=merged, rejected=rejected, disputed=disputed)
 
     def _maybe_wake_scope(self, candidate: MemoryCandidate) -> None:
