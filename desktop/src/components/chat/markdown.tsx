@@ -1,6 +1,8 @@
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import katex from "katex";
+import "katex/dist/katex.min.css";
 import { CodeBlock } from "@ethan/shared/components/code-block";
 import { PlainCodeBlock } from "@ethan/shared/components/plain-code-block";
 import { MermaidBlock } from "@ethan/shared/components/mermaid-block";
@@ -18,97 +20,89 @@ export function fixBold(text: string): string {
   });
 }
 
-// LLM 常用 LaTeX 记号（如 $\rightarrow$）不会被 react-markdown 解析，原样显示。
-// 这里把 $...$ 内的常见符号替换为 Unicode；代码块/行内 code 不经此函数（走 code 组件）。
-const LATEX_SYMBOLS: Record<string, string> = {
-  "\\rightarrow": "→", "\\to": "→",
-  "\\leftarrow": "←", "\\gets": "←",
-  "\\leftrightarrow": "↔",
-  "\\Rightarrow": "⇒", "\\implies": "⇒",
-  "\\Leftarrow": "⇐",
-  "\\Leftrightarrow": "⇔", "\\iff": "⇔",
-  "\\leq": "≤", "\\leqslant": "≤",
-  "\\geq": "≥", "\\geqslant": "≥",
-  "\\neq": "≠",
-  "\\approx": "≈",
-  "\\times": "×",
-  "\\div": "÷",
-  "\\pm": "±",
-  "\\mp": "∓",
-  "\\infty": "∞",
-  "\\cdots": "…", "\\ldots": "…", "\\dots": "…",
-  "\\cdot": "·",
-  "\\bullet": "•",
-  "\\degree": "°",
-  "\\forall": "∀",
-  "\\exists": "∃",
-  "\\nexists": "∄",
-  "\\in": "∈",
-  "\\notin": "∉",
-  "\\subset": "⊂",
-  "\\supset": "⊃",
-  "\\subseteq": "⊆",
-  "\\supseteq": "⊇",
-  "\\cup": "∪",
-  "\\cap": "∩",
-  "\\emptyset": "∅", "\\varnothing": "∅",
-  "\\propto": "∝",
-  "\\sim": "∼",
-  "\\equiv": "≡",
-  "\\perp": "⊥",
-  "\\parallel": "∥",
-  "\\angle": "∠",
-  "\\triangle": "△",
-  "\\sqrt": "√",
-  "\\partial": "∂",
-  "\\nabla": "∇",
-  "\\sum": "∑",
-  "\\prod": "∏",
-  "\\int": "∫",
-  "\\oint": "∮",
-  "\\alpha": "α", "\\beta": "β", "\\gamma": "γ", "\\delta": "δ", "\\epsilon": "ε",
-  "\\varepsilon": "ε", "\\zeta": "ζ", "\\eta": "η", "\\theta": "θ", "\\vartheta": "ϑ",
-  "\\iota": "ι", "\\kappa": "κ", "\\lambda": "λ", "\\mu": "μ", "\\nu": "ν",
-  "\\xi": "ξ", "\\pi": "π", "\\varpi": "ϖ", "\\rho": "ρ", "\\varrho": "ϱ",
-  "\\sigma": "σ", "\\varsigma": "ς", "\\tau": "τ", "\\upsilon": "υ", "\\phi": "φ",
-  "\\varphi": "φ", "\\chi": "χ", "\\psi": "ψ", "\\omega": "ω",
-  "\\Gamma": "Γ", "\\Delta": "Δ", "\\Theta": "Θ", "\\Lambda": "Λ",
-  "\\Xi": "Ξ", "\\Pi": "Π", "\\Sigma": "Σ", "\\Upsilon": "Υ",
-  "\\Phi": "Φ", "\\Psi": "Ψ", "\\Omega": "Ω",
-};
+// ---- 数学公式渲染 ----
+// LLM 常输出 $$...$$ / $...$ 包裹的 LaTeX（如 $$\text{¥94.59}+...$$），此前只会原样
+// 漏出。这里用轻量 remark 插件把 text 节点里的公式拆成 span 元素，交给 KaTeX 真渲染
+// （代码块/行内 code 是独立 mdast 节点，天然不受影响）。
+// 标注偏移基于渲染后纯文本（highlight.ts 的 TreeWalker），KaTeX html 输出的 text 节点
+// 仍可被遍历，且气泡与阅读模式共用本组件，两端 DOM 保持一致。
 
-export function fixLatex(text: string): string {
-  // 先抽出代码块/行内 code，避免误伤
-  const placeholders: string[] = [];
-  const CODE_BLOCK = /```[\s\S]*?```/g;
-  const CODE_INLINE = /`[^`\n]+`/g;
-  let out = text.replace(CODE_BLOCK, (m) => {
-    placeholders.push(m);
-    return `\u0000${placeholders.length - 1}\u0000`;
-  });
-  out = out.replace(CODE_INLINE, (m) => {
-    placeholders.push(m);
-    return `\u0000${placeholders.length - 1}\u0000`;
-  });
+// $$...$$ 总是公式；单 $...$ 常见于货币（"价格 $5 和 $9"），仅当内容含 LaTeX 命令
+// 特征（反斜杠/上下标）时才按公式处理，避免货币被误渲染。
+const MATH_RE = /\$\$([\s\S]+?)\$\$|\$([^$\n]+?)\$/g;
 
-  // $...$ 内的 \word 替换为对应 Unicode；未命中的 $...$ 原样保留
-  out = out.replace(/\$([^$\n]+)\$/g, (_, inner: string) => {
-    let replaced = inner;
-    for (const [cmd, sym] of Object.entries(LATEX_SYMBOLS)) {
-      replaced = replaced.split(cmd).join(sym);
+/* eslint-disable @typescript-eslint/no-explicit-any */
+function remarkMath(): (tree: any) => void {
+  // 把一个 text 节点拆成 [text, inlineMath, text, ...]；无公式时返回 null
+  const split = (value: string): any[] | null => {
+    if (!value.includes("$")) return null;
+    const out: any[] = [];
+    let last = 0;
+    let m: RegExpExecArray | null;
+    MATH_RE.lastIndex = 0;
+    while ((m = MATH_RE.exec(value)) !== null) {
+      const isDisplayDollar = m[1] !== undefined;
+      const latex = (isDisplayDollar ? m[1] : m[2]).trim();
+      // 非公式（如货币 $50）不能吞掉右侧 $：回退 lastIndex，让该 $ 可作为
+      // 后续公式（如 $x^2$）的起始定界符，否则紧随其后的公式会漏渲染
+      if (!latex || (!isDisplayDollar && !/[\\^_]/.test(latex))) {
+        MATH_RE.lastIndex = m.index + (isDisplayDollar ? 2 : 1);
+        continue;
+      }
+      // $$...$$ 夹在其他文字中间（如行内合计式）按行内渲染；独占段落才用 display 模式
+      const alone =
+        value.slice(0, m.index).trim() === "" && value.slice(m.index + m[0].length).trim() === "";
+      const display = isDisplayDollar && alone;
+      if (m.index > last) out.push({ type: "text", value: value.slice(last, m.index) });
+      out.push({
+        type: "inlineMath",
+        data: {
+          hName: "span",
+          hProperties: { className: [display ? "math-block" : "math-inline"], "data-latex": latex },
+        },
+      });
+      last = m.index + m[0].length;
     }
-    // 若替换后已无反斜杠，说明是纯符号表达式，直接去掉 $ 包裹
-    // 否则保留 $...$ 让用户看到原始内容
-    if (!replaced.includes("\\")) {
-      return replaced;
-    }
-    return `$${replaced}$`;
-  });
+    if (last === 0) return null;
+    out.push({ type: "text", value: value.slice(last) });
+    return out;
+  };
 
-  // 还原代码占位
-  out = out.replace(/\u0000(\d+)\u0000/g, (_, i: string) => placeholders[+i]);
-  return out;
+  return (tree) => {
+    const walk = (node: any) => {
+      if (!node || !Array.isArray(node.children)) return;
+      const next: any[] = [];
+      for (const child of node.children) {
+        if (child?.type === "text" && typeof child.value === "string") {
+          const parts = split(child.value);
+          if (parts) {
+            next.push(...parts);
+            continue;
+          }
+        }
+        walk(child);
+        next.push(child);
+      }
+      node.children = next;
+    };
+    walk(tree);
+  };
 }
+
+function MathSpan({ latex, display }: { latex: string; display: boolean }) {
+  const html = useMemo(() => {
+    try {
+      // output:"html" 只产出可见文本的 text 节点，标注 TreeWalker 可正常遍历
+      return katex.renderToString(latex, { displayMode: display, throwOnError: false, output: "html" });
+    } catch {
+      return null;
+    }
+  }, [latex, display]);
+  if (!html) return <code className="bg-background/50 px-1 py-0.5 rounded text-xs font-mono">{latex}</code>;
+  // display 时 KaTeX 自带 katex-display 样式（居中块级），外层 span 仅作挂载点
+  return <span dangerouslySetInnerHTML={{ __html: html }} />;
+}
+
 
 export const markdownComponents: Components = {
   code: ({ className, children }) => {
@@ -127,6 +121,14 @@ export const markdownComponents: Components = {
     return <code className="bg-background/50 px-1 py-0.5 rounded text-xs font-mono break-all">{children}</code>;
   },
   pre: ({ children }) => <>{children}</>,
+  span: ({ className, children, ...rest }) => {
+    const cls = String(className || "");
+    if (cls.includes("math-inline") || cls.includes("math-block")) {
+      const latex = String((rest as Record<string, unknown>)["data-latex"] || "");
+      return <MathSpan latex={latex} display={cls.includes("math-block")} />;
+    }
+    return <span className={className}>{children}</span>;
+  },
   table: ({ children }) => (
     <div className="table-wrapper">
       <table>{children}</table>
@@ -184,8 +186,8 @@ export const MarkdownContent = forwardRef<
   // 缓存 markdown 解析结果：content 不变时不重新解析（react-markdown 解析是同步阻塞主线程的昂贵操作）
   const parsed = useMemo(
     () => (
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
-        {fixLatex(fixBold(content))}
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath as never]} components={components}>
+        {fixBold(content)}
       </ReactMarkdown>
     ),
     [content, components],
