@@ -848,6 +848,27 @@ class SessionStore:
                 source=row[5], mode=row[6],
             )
 
+    async def count_today_runs(self, session_id: str) -> int:
+        """统计某 session 今天（本地时区）的执行次数（按 user 消息计数）。
+
+        用于定时任务 session 轮转：当天执行次数超阈值时新建 session，
+        避免高频任务的会话无限膨胀。
+        """
+        from datetime import datetime, timedelta
+
+        from ethan.core.timezone import get_local_timezone
+        tz = get_local_timezone()
+        now = datetime.now(tz)
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        tomorrow_start = today_start + timedelta(days=1)
+        async with self._db.execute(
+            "SELECT COUNT(*) FROM messages WHERE session_id = ? AND role = 'user' "
+            "AND created_at >= ? AND created_at < ?",
+            (session_id, today_start.timestamp(), tomorrow_start.timestamp()),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else 0
+
     async def search(self, query: str, limit: int = 50) -> list[Session]:
         """全文搜索：匹配 session 标题或消息内容。返回去重后的 session 列表。"""
         q = f"%{query}%"
