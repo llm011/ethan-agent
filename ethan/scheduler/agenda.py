@@ -267,7 +267,9 @@ def complete_event(event_id: str) -> dict | None:
 def next_run_of(event_id: str) -> str | None:
     try:
         job = get_scheduler()._scheduler.get_job(event_id)
-        return str(job.next_run_time) if job and job.next_run_time else None
+        # isoformat() 产出 ISO 8601（T 分隔）：前端 new Date() 在 WebKit/WKWebView
+        # 下对空格分隔的 "2026-08-17 09:30:00+08:00" 解析严格，会返回 Invalid Date
+        return job.next_run_time.isoformat() if job and job.next_run_time else None
     except Exception:
         return None
 
