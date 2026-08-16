@@ -157,7 +157,7 @@ class AdmissionPolicy:
             content=candidate.content,
             memory_domain=candidate.memory_domain,
             db_path=self._store.db_path,
-            limit=8,
+            limit=16,
         )
         for hit in hits:
             if hit["distance"] > CROSS_SCOPE_PAIR_L2:

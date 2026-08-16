@@ -131,8 +131,11 @@ def _forget_long_dormant(store: MemoryStore, now: float, *, dry_run: bool) -> in
         if dry_run:
             count += 1
             continue
-        store.forget_memory(memory.id)
-        count += 1
+        try:
+            store.forget_memory(memory.id)
+            count += 1
+        except Exception:
+            logger.warning("[MemoryDecay] forget failed for %s", memory.id, exc_info=True)
     if count:
         logger.info(
             "[MemoryDecay] forgot %d long-dormant memories (>%.0f days)%s",
@@ -191,18 +194,23 @@ def _dormant_stale_tentative(store: MemoryStore, now: float, *, dry_run: bool,
     idle_project_scopes 由调用方预计算传入，避免重复查询。
     """
     cutoff = now - TENTATIVE_GRACE_DAYS * _SECONDS_PER_DAY
-    count = 0
+    # 先收集所有候选，一次性批量查询 last_evidence_at，消除 N+1
+    candidates = []
     for memory in store.list_active_tentative():
         if memory_tier(memory) != TIER_C:
             continue  # user scope 下的 tentative 是 Tier A，跳过
-        # project scope 已被 _dormant_idle_projects 捕获 → 跳过
         if memory.scope_type == "project" and memory.scope_id in idle_project_scopes:
-            continue
+            continue  # project scope 已被 _dormant_idle_projects 捕获
+        candidates.append(memory)
+    # 批量查询 evidence 时间（一次 GROUP BY，替代逐条 SELECT MAX）
+    evidence_ts = store.batch_last_evidence_at([m.id for m in candidates])
+    count = 0
+    for memory in candidates:
         last_signal = max(
             memory.updated_at or 0.0,
             memory.created_at or 0.0,
             memory.last_recalled_at or 0.0,
-            store.last_evidence_at(memory.id) or 0.0,
+            evidence_ts.get(memory.id, 0.0),
         )
         if last_signal >= cutoff:
             continue

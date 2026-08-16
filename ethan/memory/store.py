@@ -982,6 +982,25 @@ class MemoryStore:
         ).fetchone()
         return row["t"] if row else None
 
+    def batch_last_evidence_at(self, memory_ids: list[str]) -> dict[str, float]:
+        """批量查询多条记忆的最后 evidence 时间，返回 {memory_id: timestamp}。
+
+        替代逐条 last_evidence_at 调用，消除 N+1 查询。
+        """
+        if not memory_ids:
+            return {}
+        result: dict[str, float] = {}
+        placeholders = ",".join("?" for _ in memory_ids)
+        rows = self._get_conn().execute(
+            f"SELECT memory_id, MAX(created_at) AS t FROM memory_evidence "
+            f"WHERE memory_id IN ({placeholders}) GROUP BY memory_id",
+            memory_ids,
+        ).fetchall()
+        for row in rows:
+            if row["t"] is not None:
+                result[row["memory_id"]] = float(row["t"])
+        return result
+
     def project_scope_last_activity(self) -> list[tuple[str, float]]:
         """每个 project scope 的最后活跃时间（用于休眠检测）。
 

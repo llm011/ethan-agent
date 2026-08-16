@@ -101,7 +101,7 @@ def _collect(
     # 时间衰减软降权（ETHAN_MEMORY_RANK_DECAY，默认开）：factor 只影响排序，
     # 不改状态。Tier A 恒 1.0；RANK_DECAY=0 时恒 1.0——乘以 1.0 不改变任何
     # 比较结果，排序与旧实现逐位一致（回归测试的硬断言）。
-    from ethan.memory.decay import rank_decay_factor
+    from ethan.memory.decay import RANK_DECAY_ENABLED, rank_decay_factor
 
     import time as _time
 
@@ -128,8 +128,6 @@ def _collect(
         # 按 importance 注入同 role 记忆比跨 role 注入噪声合理；该 role 无记忆(如
         # emotion→task_context 在 GENERAL 域)则返回空,由其他域(COMPANION)提供相关记忆。
         # role_filter=None(unknown intent)时跨全 role 取 top-N,等价改造前安全网。
-        from ethan.memory.decay import RANK_DECAY_ENABLED
-
         pool = [
             memory
             for memory in store.list_memories(
