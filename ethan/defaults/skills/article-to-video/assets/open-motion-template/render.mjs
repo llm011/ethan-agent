@@ -1,6 +1,6 @@
 import { getCompositions, renderFrames } from "@open-motion/renderer";
 import { chromium } from "playwright";
-import { execSync, spawn } from "node:child_process";
+import { execFileSync, execSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -36,10 +36,6 @@ try {
   execSync("npx playwright install chromium", { cwd: __dirname, stdio: "inherit" });
 }
 
-const renderDir = path.dirname(outputPath);
-const tmpDir = path.join(renderDir, "temp");
-const distDir = path.join(tmpDir, "vite-dist");
-
 // ── 2. Vite build ──
 process.stderr.write("[Step 2/5] Building with Vite...\n");
 fs.mkdirSync(distDir, { recursive: true });
@@ -53,20 +49,26 @@ const server = spawn("npx", ["http-server", distDir, "-p", String(PORT), "-a", "
 server.unref();
 
 // Wait for server to be ready
-await new Promise((resolve) => {
-  const check = async () => {
-    try {
-      const res = await fetch(`http://127.0.0.1:${PORT}/`);
-      if (res.ok) { resolve(); return; }
-    } catch {}
-    setTimeout(check, 200);
-  };
-  check();
-});
-
 const url = `http://127.0.0.1:${PORT}`;
 
 try {
+  // 放进 try：超时 reject 后 finally 才能顺带 kill 掉 detached 的 http-server
+  await new Promise((resolve, reject) => {
+    const deadline = Date.now() + 10_000;
+    const check = async () => {
+      if (Date.now() > deadline) {
+        reject(new Error(`http-server not ready on port ${PORT} within 10s`));
+        return;
+      }
+      try {
+        const res = await fetch(url);
+        if (res.ok) { resolve(); return; }
+      } catch {}
+      setTimeout(check, 200);
+    };
+    check();
+  });
+
   // ── 4. Discover compositions ──
   process.stderr.write(`[Step 3/5] Discovering compositions from ${url}...\n`);
   process.stderr.write(`timeline scenes: ${timeline.scenes?.length}, totalDurationMs: ${timeline.totalDurationMs}\n`);
@@ -123,14 +125,31 @@ try {
     const filterComplex = filterParts.join(";");
 
     process.stderr.write("[Step 5/5] Encoding MP4 with FFmpeg (video + audio)...\n");
-    execSync(
-      `ffmpeg -y -framerate ${config.fps} -i "${tmpDir}/frame-%05d.png" ${audioInputArgs.join(" ")} -filter_complex "${filterComplex}" -map 0:v -map "[aout]" -c:v libx264 -pix_fmt yuv420p -crf 20 -c:a aac -b:a 128k "${outputPath}"`,
+    // execFileSync 数组传参，不经 shell：路径含空格/特殊字符时不会断裂
+    execFileSync(
+      "ffmpeg",
+      [
+        "-y", "-framerate", String(config.fps),
+        "-i", `${tmpDir}/frame-%05d.png`,
+        ...audioInputArgs,
+        "-filter_complex", filterComplex,
+        "-map", "0:v", "-map", "[aout]",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "20",
+        "-c:a", "aac", "-b:a", "128k",
+        outputPath,
+      ],
       { stdio: "inherit" },
     );
   } else {
     process.stderr.write("[Step 5/5] Encoding MP4 with FFmpeg (video only)...\n");
-    execSync(
-      `ffmpeg -y -framerate ${config.fps} -i "${tmpDir}/frame-%05d.png" -c:v libx264 -pix_fmt yuv420p -crf 20 "${outputPath}"`,
+    execFileSync(
+      "ffmpeg",
+      [
+        "-y", "-framerate", String(config.fps),
+        "-i", `${tmpDir}/frame-%05d.png`,
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "20",
+        outputPath,
+      ],
       { stdio: "inherit" },
     );
   }
