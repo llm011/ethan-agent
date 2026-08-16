@@ -14,16 +14,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/schedule")
 
-_scheduler = None
-
 
 def get_scheduler():
-    global _scheduler
-    if _scheduler is None:
-        from ethan.scheduler.cron import Scheduler
-        _scheduler = Scheduler()
-        _scheduler.start()
-    return _scheduler
+    """共享调度器单例（转发到 cron.get_scheduler，agenda 模块也复用同一实例）。"""
+    from ethan.scheduler.cron import get_scheduler as _get_shared
+    return _get_shared()
 
 
 def _validate_path_in_config(path_str: str) -> Path:
@@ -77,7 +72,8 @@ def _infer_category(job) -> str:
 @router.get("", dependencies=[Depends(verify_token)])
 async def get_schedules():
     scheduler = get_scheduler()
-    jobs = scheduler._scheduler.get_jobs()
+    from ethan.scheduler.cron import AGENDA_JOB_PREFIX
+    jobs = [j for j in scheduler._scheduler.get_jobs() if not j.id.startswith(AGENDA_JOB_PREFIX)]
     result = []
     for job in jobs:
         kwargs = job.kwargs or {}

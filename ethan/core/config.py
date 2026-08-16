@@ -106,6 +106,9 @@ class RoutingConfig(BaseModel):
         "knowledge_search", "knowledge_read", "knowledge_add", "knowledge_edit",
         "memory_write", "procedure_write", "profile_update",
         "schedule_create", "schedule_list", "schedule_remove",
+        "agenda_add", "agenda_update", "agenda_remove", "agenda_list",
+        # agenda_*：默认 enabled=False 时工具不注册，白名单里的名字无匹配 → 零开销；
+        # 日程页开关打开后工具注册即广播进提示词（full 档）。
         "decide",  # Adaptive Planning 的决策出口（虚拟工具，agent loop 拦截不执行）
         "set_secret", "get_secret", "list_secrets",
         "skill_create", "install_skill",
@@ -208,6 +211,8 @@ class DefaultsConfig(BaseModel):
     timezone: str = ""  # IANA 时区名（如 "Asia/Shanghai"）。空 = 自动探测系统时区。
     max_tokens: int = 8192
     max_tool_iterations: int = 100
+    # 定时任务 session 轮转阈值：当天执行次数超此值则新建对话，避免高频任务会话无限膨胀
+    schedule_session_rotate_threshold: int = 24
     routing: RoutingConfig = Field(default_factory=RoutingConfig)
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
     # 定时任务 session 轮转阈值：当天执行次数（按 user 消息数）达到后新建对话，
@@ -245,6 +250,13 @@ class DidaConfig(BaseModel):
     enabled: bool = False  # 滴答清单 CLI 插件开关；true 时注册 dida_* 工具
 
 
+class AgendaConfig(BaseModel):
+    # 日程（agenda）插件开关：true 时注册 agenda_* 工具（加/改/删/查日程）。
+    # 特殊插件：调度与桌面通知始终可用，本开关只控制 agent 是否能通过对话操作日程。
+    # 由日程页面（AgendaView）的开关切换，写入 config.yaml。
+    enabled: bool = False
+
+
 class MCPConfig(BaseModel):
     servers: list[MCPServerConfig] = Field(default_factory=list)
 
@@ -254,6 +266,7 @@ class ToolsConfig(BaseModel):
     knowledge: KnowledgeConfig = Field(default_factory=KnowledgeConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     dida: DidaConfig = Field(default_factory=DidaConfig)
+    agenda: AgendaConfig = Field(default_factory=AgendaConfig)
 
 
 class Config(BaseModel):

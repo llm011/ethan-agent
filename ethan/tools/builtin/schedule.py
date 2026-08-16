@@ -23,6 +23,11 @@ def set_server_loop(loop: asyncio.AbstractEventLoop) -> None:
     _server_loop = loop
 
 
+def get_server_loop() -> asyncio.AbstractEventLoop | None:
+    """供 agenda 等其他调度回调模块读取主 event loop。"""
+    return _server_loop
+
+
 def _try_strptime(s: str, fmt: str) -> bool:
     from datetime import datetime
     try:

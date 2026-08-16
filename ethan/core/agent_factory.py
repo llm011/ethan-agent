@@ -128,6 +128,24 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
             registry.register(DidaTaskCompleteTool())
     except Exception:
         pass  # 配置未加载或未启用时不注册 dida 工具
+    # Agenda（日程）工具 — 仅 tools.agenda.enabled=true 时注册（日程页面开关控制，
+    # 特殊插件机制：调度与通知不依赖此开关，只有 agent 对话操作能力受控）。
+    # 名称已列入 RoutingConfig.base_tools 白名单，注册即广播进提示词（full 档）。
+    try:
+        from ethan.core.config import get_config as _get_cfg
+        if _get_cfg().tools.agenda.enabled:
+            from ethan.tools.builtin.agenda import (
+                AgendaAddTool,
+                AgendaListTool,
+                AgendaRemoveTool,
+                AgendaUpdateTool,
+            )
+            registry.register(AgendaAddTool())
+            registry.register(AgendaUpdateTool())
+            registry.register(AgendaRemoveTool())
+            registry.register(AgendaListTool())
+    except Exception:
+        pass  # 配置未加载或未启用时不注册 agenda 工具
     # flomo 已改为技能目录下的 flomo.py 脚本，通过 shell 工具调用，不再注册为 builtin tool。
     # 详见 ethan/defaults/skills/flomo/SKILL.md 和 flomo.py。
 

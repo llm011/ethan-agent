@@ -12,6 +12,7 @@ import { MemoryView } from "@/components/memory-view";
 import { KnowledgeView } from "@/components/knowledge-view";
 import { SkillsView } from "@/components/skills-view";
 import { ScheduleView } from "@/components/schedule-view";
+import { AgendaView } from "@/components/agenda-view";
 import { BackgroundTasksView } from "@/components/background-tasks-view";
 import { SettingsView } from "@/components/settings-view";
 import { ToolTiersView } from "@/components/tool-tiers-view";
@@ -76,6 +77,7 @@ function RoutesTree() {
         <Route path="/knowledge" element={<KnowledgeView />} />
         <Route path="/skills" element={<SkillsView />} />
         <Route path="/schedule" element={<ScheduleView />} />
+        <Route path="/agenda" element={<AgendaView />} />
         <Route path="/background-tasks" element={<BackgroundTasksView />} />
         <Route path="/settings" element={<Navigate to="/settings/general" replace />} />
         <Route path="/settings/:tab" element={<SettingsRoute />} />

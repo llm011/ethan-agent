@@ -11,16 +11,22 @@ source: internal (hermes agent)
 
 把论文做成结构化、有据可查的深度解读。核心 **Map-Reduce + 脚本控制 PDF**:脚本拆页,逐页精读,汇总。**所有结论落到具体数字和引用,不许含糊。**
 
-[CRITICAL — 触发本 skill 时,必须严格按下列流程用 `shell`/`file_write` 工具执行脚本完成精读,**禁止用 web_search/web_fetch 替代**(它们拿不到图表/公式)。]
+[CRITICAL — 触发本 skill 时,必须严格按下列流程用 `shell`/`file_write` 工具执行脚本完成精读,**禁止用 web_search/web_fetch 直接抓 arXiv 摘要/HTML 然后写浅层解读。** 拿不到 PDF → 直接告诉用户,不允许"我读了摘要给你讲讲"这种降级。即使 shell 被拒/脚本报错,也绝对**不要**绕到 web_fetch 写一份无图表无实验数据的浅层解读。]
 
 ## 脚本路径(重要,先确定)
 
-脚本目录有两种可能,**开工前先用一次 `shell` 确定哪条存在**,后续命令统一用它:
+脚本目录有两种可能,**开工前依次 `ls` 两条(两个独立的只读 shell,都不弹 consent 弹窗)。命中哪条存在就用哪条,不要用 `||` 或 `2>/dev/null` 串起来。**
+- 先跑:
 ```bash
-ls ./ethan/defaults/skills/paper-analysis/scripts/ 2>/dev/null && echo USE_PKG || ls ~/.ethan/skills/paper-analysis/scripts/
+ls ./ethan/defaults/skills/paper-analysis/scripts/ && echo USE_PKG
 ```
-- 输出含 `USE_PKG` → 脚本根 `SCRIPTS=./ethan/defaults/skills/paper-analysis/scripts`
-- 否则 → 脚本根 `SCRIPTS=~/.ethan/skills/paper-analysis/scripts`
+  - 输出末尾有 `USE_PKG` → 脚本根 `SCRIPTS=./ethan/defaults/skills/paper-analysis/scripts`
+- 如果上面 `ls` 报"目录不存在"错误,再跑:
+```bash
+ls ~/.ethan/skills/paper-analysis/scripts/
+```
+  - 这条能列出文件 → 脚本根 `SCRIPTS=~/.ethan/skills/paper-analysis/scripts`
+- 如果**两条都不存在**(`ls` 两条都报 No such file or directory):不要硬猜路径,直接告诉用户脚本未安装,结束。
 
 (下文统一写 `$SCRIPTS/xxx.py`;不要用 `fd_find` 满仓库找脚本。)
 
@@ -125,6 +131,8 @@ knowledge_add(
 
 存档完成后末尾追加一行轻提示即可，不要喧宾夺主：`📚 已存档到知识库 paper/ 目录。`
 - 用户如果说过「不用存/别存知识库」：跳过本步，**不要**调 `knowledge_add`，也不要提存档。
+
+[IMPORTANT — 判定「流程跑完整」的唯一标准 = 已经执行过 Phase 3（要么存档完成、要么用户明确说了不存）。如果中途因为 fetch_paper 失败、extract_pages 报错、页面请求超时等原因**没走到 REDUCE 出完整报告**，就视为没跑完整：此时要把报错/卡点明确告诉用户并说明没有存档，**不得**假装完成、更不得跳过存档提示。]
 
 ## 5 维度框架(每页按此分析,**只填该页涉及的维度,带原文数字**)
 1. **摘要** — 核心问题/方案/关键创新(1-3)/成果(必须具体数字)
