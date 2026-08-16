@@ -53,16 +53,34 @@ python3 ~/.ethan/skills/article-to-video/scripts/video_pipeline.py \
 for cmd in uv node pnpm; do command -v "$cmd" >/dev/null || echo "MISSING: $cmd"; done
 ```
 
-使用 `uv` 临时注入 `edge-tts`，避免把可选依赖加入 Ethan 主安装包：
+使用 `uv` 临时注入 `edge-tts`，避免把可选依赖加入 Ethan 主安装包。**渲染耗时较长（5-15 分钟），必须后台运行**：
 
 ```bash
-uv run --isolated --no-project --with 'edge-tts>=7,<8' python \
+# 后台渲染，日志写入文件，不阻塞 agent
+nohup uv run --isolated --no-project --with 'edge-tts>=7,<8' python \
   ~/.ethan/skills/article-to-video/scripts/video_pipeline.py run \
   --manifest "$PROJECT/manifest.json" \
-  --output-dir "$PROJECT"
+  --output-dir "$PROJECT" \
+  > "$PROJECT/render.log" 2>&1 &
+
+RENDER_PID=$!
+echo "渲染已启动，PID: $RENDER_PID，日志: $PROJECT/render.log"
+
+# 等待 5 秒后开始轮询进度
+sleep 5
+while kill -0 $RENDER_PID 2>/dev/null; do
+  tail -3 "$PROJECT/render.log"
+  echo "---"
+  sleep 30
+done
+
+# 渲染完成，检查结果
+tail -5 "$PROJECT/render.log"
 ```
 
 脚本会按场景原子缓存音频与 SRT、合并全局字幕、生成 Open Motion timeline、用实际语音检查目标时长、懒安装锁定的 Node 依赖、在隔离目录渲染并校验 H.264/AAC MP4，再原子发布成片和封面。首次运行需要联网安装 `edge-tts`、Node 依赖和 Playwright Chromium；Open Motion 渲染依赖系统已安装 FFmpeg。
+
+渲染进度会在日志中实时报告：`Step 1/5: TTS` → `Step 2/5: Timeline` → `Step 3/5: Frames (1200/5289, 23%)` → `Step 4/5: Encode` → `Step 5/5: Verify`。
 
 Edge TTS 是第三方库连接的在线服务。网络失败时最多重试三次；仍失败则保留项目并报告可重跑命令。不要声称它有官方 SLA。
 

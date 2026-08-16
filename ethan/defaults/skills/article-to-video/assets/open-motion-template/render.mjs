@@ -21,17 +21,20 @@ const publicDir = path.resolve(publicDirArg);
 const timeline = JSON.parse(fs.readFileSync(timelinePath, "utf8"));
 
 // ── 1. Ensure Playwright browsers are installed ──
+process.stderr.write("[Step 1/5] Checking Playwright browsers...\n");
 try {
   chromium.executablePath();
+  process.stderr.write("[Step 1/5] Playwright OK\n");
 } catch {
-  process.stderr.write("Installing Playwright Chromium...\n");
+  process.stderr.write("[Step 1/5] Installing Playwright Chromium...\n");
   execSync("npx playwright install chromium", { cwd: __dirname, stdio: "inherit" });
 }
 
 // ── 2. Vite build ──
-process.stderr.write("Building with Vite...\n");
+process.stderr.write("[Step 2/5] Building with Vite...\n");
 fs.mkdirSync(distDir, { recursive: true });
 execSync(`npx vite build --outDir "${distDir}"`, { cwd: __dirname, stdio: "inherit" });
+process.stderr.write("[Step 2/5] Vite build done\n");
 
 // ── 3. Start http-server to serve dist/ ──
 const PORT = 10000 + Math.floor(Math.random() * 5000);
@@ -58,7 +61,7 @@ const distDir = path.join(tmpDir, "vite-dist");
 
 try {
   // ── 4. Discover compositions ──
-  process.stderr.write(`Fetching compositions from ${url}...\n`);
+  process.stderr.write(`[Step 3/5] Discovering compositions from ${url}...\n`);
   process.stderr.write(`timeline scenes: ${timeline.scenes?.length}, totalDurationMs: ${timeline.totalDurationMs}\n`);
   const compositions = await getCompositions(url, { inputProps: timeline, timeout: 60000 });
   const comp = compositions.find((c) => c.id === "ArticleVideo") || compositions[0];
@@ -71,9 +74,10 @@ try {
     fps: comp.fps || timeline.fps || 30,
     durationInFrames: Math.max(1, Math.ceil(((timeline.totalDurationMs || 3000) / 1000) * (timeline.fps || 30))),
   };
-  process.stderr.write(`Rendering ${comp.id} (${config.width}x${config.height}, ${config.fps}fps, ${config.durationInFrames} frames)\n`);
+  process.stderr.write(`[Step 3/5] Rendering ${comp.id} (${config.width}x${config.height}, ${config.fps}fps, ${config.durationInFrames} frames)\n`);
 
   // ── 5. Render frames (Playwright screenshots) ──
+  process.stderr.write(`[Step 4/5] Capturing frames (0/${config.durationInFrames})...\n`);
   const { audioAssets } = await renderFrames({
     url,
     config,
@@ -85,9 +89,10 @@ try {
     timeout: 600000,
     onProgress: (frame) => {
       const pct = Math.round((frame / config.durationInFrames) * 100);
-      if (pct % 10 === 0) process.stderr.write(`Rendering frame ${frame}/${config.durationInFrames} (${pct}%)\n`);
+      if (pct % 10 === 0) process.stderr.write(`[Step 4/5] Frames: ${frame}/${config.durationInFrames} (${pct}%)\n`);
     },
   });
+  process.stderr.write(`[Step 4/5] Frames complete: ${config.durationInFrames}/${config.durationInFrames} (100%)\n`);
 
   // ── 6. Encode frames → MP4 with audio mixing ──
   const scenes = timeline.scenes || [];
@@ -110,13 +115,13 @@ try {
     filterParts.push(`${mixInputs}amix=inputs=${audioEntries.length}:duration=longest[aout]`);
     const filterComplex = filterParts.join(";");
 
-    process.stderr.write("Encoding MP4 with FFmpeg (video + audio)...\n");
+    process.stderr.write("[Step 5/5] Encoding MP4 with FFmpeg (video + audio)...\n");
     execSync(
       `ffmpeg -y -framerate ${config.fps} -i "${tmpDir}/frame-%05d.png" ${audioInputArgs.join(" ")} -filter_complex "${filterComplex}" -map 0:v -map "[aout]" -c:v libx264 -pix_fmt yuv420p -crf 20 -c:a aac -b:a 128k "${outputPath}"`,
       { stdio: "inherit" },
     );
   } else {
-    process.stderr.write("Encoding MP4 with FFmpeg (video only, no audio files found)...\n");
+    process.stderr.write("[Step 5/5] Encoding MP4 with FFmpeg (video only)...\n");
     execSync(
       `ffmpeg -y -framerate ${config.fps} -i "${tmpDir}/frame-%05d.png" -c:v libx264 -pix_fmt yuv420p -crf 20 "${outputPath}"`,
       { stdio: "inherit" },
