@@ -973,13 +973,6 @@ class MemoryStore:
         rows = self._get_conn().execute(sql, params).fetchall()
         return {row["memory_id"]: row["sessions"] for row in rows}
 
-    def count_evidence_sessions(self, memory_id: str) -> int:
-        row = self._get_conn().execute(
-            "SELECT COUNT(DISTINCT source_session_id) AS n FROM memory_evidence WHERE memory_id=?",
-            (memory_id,),
-        ).fetchone()
-        return int(row["n"]) if row else 0
-
     def last_evidence_at(self, memory_id: str) -> float | None:
         row = self._get_conn().execute(
             "SELECT MAX(created_at) AS t FROM memory_evidence WHERE memory_id=?",

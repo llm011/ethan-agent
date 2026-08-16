@@ -382,6 +382,11 @@ export function MemoryView() {
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
           )}
+          {notice && (
+            <div className={`text-center text-sm py-2 rounded-md ${notice.type === "success" ? "bg-green-500/10 text-green-600" : "bg-destructive/10 text-destructive"}`}>
+              {notice.text}
+            </div>
+          )}
           {error && <div className="text-center text-destructive py-8 text-sm">{error}</div>}
           {!loading && !error && activeTab !== "daily" && memories.length === 0 && (
             <div className="text-center text-muted-foreground py-12 text-sm">

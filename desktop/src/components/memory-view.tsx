@@ -262,6 +262,12 @@ export function MemoryView() {
     loadData();
   }, [loadData]);
 
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), 3000);
+    return () => clearTimeout(t);
+  }, [notice]);
+
   const handleSave = async (memory: StructuredMemory, content: string) => {
     await updateStructuredMemory(memory.id, { content });
     setEditingId(null);

@@ -183,12 +183,24 @@ def _dormant_stale_tentative(store: MemoryStore, now: float, *, dry_run: bool) -
 
     强化清标在 admission 侧（_maybe_clear_tentative）：用户后续表达定稿意图
     时候选 merge 会清掉 tentative，这条记忆即退出 Tier C 轨道。
+
+    跳过 idle project scope 内的 tentative：_dormant_idle_projects 已在前面
+    捕获（tier != A 一律归档），避免 dry_run 下双重计数违反不变量 #3。
     """
     cutoff = now - TENTATIVE_GRACE_DAYS * _SECONDS_PER_DAY
+    # 预算 idle project scope 集合（与 _dormant_idle_projects 同源信号）
+    idle_cutoff = now - PROJECT_IDLE_DAYS * _SECONDS_PER_DAY
+    idle_project_scopes = {
+        scope_id for scope_id, last in store.project_scope_last_activity()
+        if last < idle_cutoff
+    }
     count = 0
     for memory in store.list_active_tentative():
         if memory_tier(memory) != TIER_C:
             continue  # user scope 下的 tentative 是 Tier A，跳过
+        # project scope 已被 _dormant_idle_projects 捕获 → 跳过
+        if memory.scope_type == "project" and memory.scope_id in idle_project_scopes:
+            continue
         last_signal = max(
             memory.updated_at or 0.0,
             memory.created_at or 0.0,
@@ -214,6 +226,7 @@ def _parse_ladder(raw: str) -> list[tuple[int, float]]:
     """解析 "2:0.8,3:0.9,5:0.95" → [(2,0.8),(3,0.9),(5,0.95)]（阈值升序）。
 
     非法条目静默跳过——env 配错不该让夜间任务崩，只让晋升退化为空。
+    但若全部非法（输入非空却返回空列表），打 warning 帮助定位配置问题。
     """
     ladder: list[tuple[int, float]] = []
     for piece in raw.split(","):
@@ -229,6 +242,11 @@ def _parse_ladder(raw: str) -> list[tuple[int, float]]:
         if threshold > 0 and 0.0 <= value <= 1.0:
             ladder.append((threshold, value))
     ladder.sort()
+    if not ladder and raw.strip():
+        logger.warning(
+            "[MemoryDecay] PROMOTE_LADDER parsed to empty from %r — "
+            "confidence promotion will be a no-op", raw,
+        )
     return ladder
 
 

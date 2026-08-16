@@ -406,6 +406,15 @@ def test_parse_ladder_and_target():
     assert _parse_ladder("x:y,2:0.8,0:1.5") == [(2, 0.8)]
 
 
+def test_parse_ladder_all_malformed_warns(caplog):
+    """全部非法输入 → 返回空列表 + warning 日志。"""
+    import logging
+    with caplog.at_level(logging.WARNING, logger="ethan.memory.decay"):
+        result = _parse_ladder("abc,xyz,1.2.3")
+    assert result == []
+    assert "parsed to empty" in caplog.text
+
+
 def test_promotion_by_distinct_sessions(tmp_path):
     """多次独立 session 证据 → 置信度阶梯晋升（60% 卡死 case 的自愈路径）。"""
     store = MemoryStore(tmp_path / "memory.db")
@@ -1228,9 +1237,10 @@ def test_dry_run_full_lifecycle(tmp_path, monkeypatch):
 
     result = apply_memory_decay(store, NOW)
 
-    # dry_run 模式下两条检测路径不互斥（都不改状态），同一 tentative 被两边各计一次
-    assert result["dormanted"] == 2  # idle_projects: Tier B decision + Tier C tentative
-    assert result["decayed"] == 1    # stale_tentative 也捕获同一 tentative（dry_run 不改状态）
+    # idle project 一次抓所有非 Tier A 记忆；tentative 在 idle scope 内
+    # 被 _dormant_idle_projects 捕获，_dormant_stale_tentative 跳过 → 不双重计数
+    assert result["dormanted"] == 2  # Tier B decision + Tier C tentative（同 scope idle）
+    assert result["decayed"] == 0    # idle scope 内 tentative 已被 project idle 路径捕获，跳过
     assert result["forgotten"] == 1  # dormant 181 天
 
     # 状态全部未变（dry-run 不执行实际操作）
