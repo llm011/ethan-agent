@@ -128,6 +128,9 @@ class Scheduler:
 
         # 把 cron 字符串同步进 kwargs，供 GET /schedule 回显编辑框
         kwargs["cron"] = cron_expr
+        # job_id 注入 kwargs：fire_schedule_job 据此在 session 轮转时
+        # 回写新 session_id 到 job（modify_kwargs），否则轮转无法生效
+        kwargs["job_id"] = job_id
 
         self._scheduler.add_job(
             func,
@@ -151,6 +154,7 @@ class Scheduler:
         **kwargs,
     ) -> None:
         """添加 interval 定时任务。end_date 到期后自动删除 job。"""
+        kwargs["job_id"] = job_id  # 供 fire 时 session 轮转回写新 session_id
         self._scheduler.add_job(
             func,
             trigger=IntervalTrigger(seconds=seconds, minutes=minutes, hours=hours, end_date=self._parse_end_date(end_date)),
@@ -177,6 +181,7 @@ class Scheduler:
             run_date = f"{run_date} 10:00"
         dt = datetime.strptime(run_date, "%Y-%m-%d %H:%M")
         aware = self._tz.localize(dt) if hasattr(self._tz, "localize") else dt.replace(tzinfo=self._tz)
+        kwargs["job_id"] = job_id  # 供 fire 时 session 轮转回写新 session_id
         self._scheduler.add_job(
             func,
             trigger=DateTrigger(run_date=aware, timezone=self._tz),

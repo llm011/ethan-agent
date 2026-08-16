@@ -138,6 +138,9 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
     """
     import logging as _entry_log
     _entry_logger = _entry_log.getLogger("ethan.schedule")
+    # job_id 由 cron.py 的 add_cron/add_interval/add_date 写入 kwargs，
+    # 用于 session 轮转时回写新的 session_id 到 job
+    job_id = _extra.get("job_id", "")
     _entry_logger.info("[Schedule] fire_schedule_job called: session=%s title=%r", session_id, title)
 
     async def _run_schedule_task(*, dedicated_store: bool = False):
@@ -147,6 +150,7 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
         用于 fallback 线程路径——单例连接绑主 loop，跨 loop await 必崩
         （aiosqlite _tx 队列和 _session_store_lock 都绑主 loop）。
         """
+        nonlocal session_id
         import logging as _log
 
         from ethan.core.agent_factory import create_agent
@@ -195,15 +199,36 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
             )
 
         try:
+            from ethan.core.config import get_config as _gc
+
             store = await _open_store()
             set_session_id(session_id)
 
             # 确保 session 记录存在
             existing = await store.load(session_id)
             if not existing:
-                from ethan.core.config import get_config as _gc
                 await store.create_with_id(session_id, _gc().defaults.model,
                                            source="schedule", mode="")
+
+            # session 轮转：当天执行次数超阈值则新建对话，避免高频任务会话无限膨胀
+            _rotate_threshold = _gc().defaults.schedule_session_rotate_threshold
+            if _rotate_threshold > 0:
+                _today_runs = await store.count_today_runs(session_id)
+                if _today_runs >= _rotate_threshold:
+                    _new_session = await store.create(_gc().defaults.model, source="schedule", mode="")
+                    _new_title = f"[定时] {title}" if title else "[定时] 未命名任务"
+                    await store.update_title(_new_session.id, _new_title)
+                    # 更新 job 关联的 session_id，后续触发走新 session
+                    if job_id:
+                        from ethan.interface.routers.schedule import get_scheduler as _get_sched
+                        try:
+                            _get_sched().modify_kwargs(job_id, session_id=_new_session.id)
+                        except Exception:
+                            _logger.warning("[Schedule] failed to update job session_id: job=%s", job_id, exc_info=True)
+                    session_id = _new_session.id
+                    set_session_id(session_id)
+                    _logger.info("[Schedule] session rotated to %s (today_runs=%d >= threshold %d)",
+                                 session_id, _today_runs, _rotate_threshold)
 
             # 保存 user message
             user_msg = Message(role="user", content=prompt)
