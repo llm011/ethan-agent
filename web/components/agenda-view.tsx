@@ -1,14 +1,13 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import {
   AgendaEvent, AgendaRepeat, fetchAgenda, createAgendaEvent, updateAgendaEvent,
   completeAgendaEvent, deleteAgendaEvent, setAgendaEnabled,
 } from "@/lib/api-misc";
 import { Badge } from "@ethan/shared/ui/badge";
 import { Button } from "@ethan/shared/ui/button";
-import { ScrollArea } from "@ethan/shared/ui/scroll-area";
-import { Loader2, RefreshCw, Trash2, Pencil, Check, Plus, BellRing } from "lucide-react";
+import { Loader2, RefreshCw, Trash2, Pencil, Check, Plus, BellRing, ChevronLeft, ChevronRight } from "lucide-react";
 import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
 import {
   Dialog,
@@ -25,6 +24,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 // ── Helpers ─────────────────────────────────────────────────────
 
 const WEEKDAY_LABELS = ["一", "二", "三", "四", "五", "六", "日"];
+const WEEKDAY_SHORT = ["一", "二", "三", "四", "五", "六", "日"];
 
 function repeatLabel(ev: AgendaEvent): string {
   if (ev.repeat === "daily") return "每天";
@@ -44,6 +44,20 @@ function parseWhen(when: string): Date | null {
 
 function dateKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function addDays(d: Date, n: number): Date {
+  const r = new Date(d);
+  r.setDate(r.getDate() + n);
+  return r;
+}
+
+function startOfMonth(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), 1);
+}
+
+function getISOWeekday(d: Date): number {
+  return d.getDay() === 0 ? 7 : d.getDay();
 }
 
 interface DateGroup {
@@ -82,6 +96,91 @@ function groupEventsByDate(events: AgendaEvent[]): DateGroup[] {
     g.events.sort((a, b) => (a._sort ?? 0) - (b._sort ?? 0));
   }
   return groups;
+}
+
+// ── 月历导航组件 ─────────────────────────────────────────────────
+
+function MonthCalendar({ currentDate, eventDates, onSelectDate }: {
+  currentDate: Date;
+  eventDates: Set<string>;
+  onSelectDate: (key: string) => void;
+}) {
+  const [displayMonth, setDisplayMonth] = useState(() => startOfMonth(currentDate));
+  const todayKey = dateKey(new Date());
+
+  const daysInMonth = new Date(displayMonth.getFullYear(), displayMonth.getMonth() + 1, 0).getDate();
+  const firstWeekday = getISOWeekday(displayMonth); // 1=Mon
+
+  const cells: (Date | null)[] = [];
+  for (let i = 1; i < firstWeekday; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) {
+    cells.push(new Date(displayMonth.getFullYear(), displayMonth.getMonth(), d));
+  }
+
+  const prevMonth = () => setDisplayMonth(new Date(displayMonth.getFullYear(), displayMonth.getMonth() - 1, 1));
+  const nextMonth = () => setDisplayMonth(new Date(displayMonth.getFullYear(), displayMonth.getMonth() + 1, 1));
+  const goToday = () => {
+    setDisplayMonth(startOfMonth(new Date()));
+    onSelectDate(todayKey);
+  };
+
+  const selectedKey = dateKey(currentDate);
+
+  return (
+    <div className="px-4 py-3 border-b border-border shrink-0">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <button onClick={prevMonth} className="p-1 rounded hover:bg-muted transition-colors">
+            <ChevronLeft className="h-4 w-4 text-muted-foreground" />
+          </button>
+          <span className="text-sm font-medium min-w-[80px] text-center">
+            {displayMonth.getFullYear()}年{displayMonth.getMonth() + 1}月
+          </span>
+          <button onClick={nextMonth} className="p-1 rounded hover:bg-muted transition-colors">
+            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          </button>
+        </div>
+        <button
+          onClick={goToday}
+          className="text-xs text-primary hover:text-primary/80 font-medium px-2 py-0.5 rounded hover:bg-primary/10 transition-colors"
+        >
+          今天
+        </button>
+      </div>
+      <div className="grid grid-cols-7 gap-0">
+        {WEEKDAY_SHORT.map(w => (
+          <div key={w} className="text-center text-[10px] text-muted-foreground py-1">{w}</div>
+        ))}
+        {cells.map((date, i) => {
+          if (!date) return <div key={`empty-${i}`} />;
+          const key = dateKey(date);
+          const isToday = key === todayKey;
+          const isSelected = key === selectedKey;
+          const hasEvent = eventDates.has(key);
+          return (
+            <button
+              key={key}
+              onClick={() => onSelectDate(key)}
+              className={`relative flex flex-col items-center justify-center h-7 rounded-md text-xs transition-colors ${
+                isSelected
+                  ? "bg-primary text-primary-foreground"
+                  : isToday
+                    ? "bg-primary/10 text-primary font-semibold"
+                    : "hover:bg-muted text-foreground"
+              }`}
+            >
+              {date.getDate()}
+              {hasEvent && (
+                <span className={`absolute bottom-0.5 w-1 h-1 rounded-full ${
+                  isSelected ? "bg-primary-foreground" : "bg-primary"
+                }`} />
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 // ── 事件编辑弹窗 ─────────────────────────────────────────────────
@@ -232,10 +331,13 @@ export function AgendaView() {
   const [events, setEvents] = useState<AgendaEvent[]>([]);
   const [enabled, setEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [viewMode, setViewMode] = useState<"today" | "all">("today");
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [confirmState, setConfirmState] = useState<{ open: boolean; id: string }>({ open: false, id: "" });
   const [dialogState, setDialogState] = useState<{ open: boolean; editing: AgendaEvent | null }>({ open: false, editing: null });
   const [togglingEnabled, setTogglingEnabled] = useState(false);
+  const [scrolledToToday, setScrolledToToday] = useState(false);
+  const timelineRef = useRef<HTMLDivElement>(null);
+  const groupRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -252,23 +354,53 @@ export function AgendaView() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // 轮询刷新（web 端没有 WebSocket 推送）
   useEffect(() => {
     const interval = setInterval(loadData, 30000);
     return () => clearInterval(interval);
   }, [loadData]);
 
-  const visibleEvents = useMemo(() => {
-    if (viewMode === "all") return events;
-    const todayKey = dateKey(new Date());
-    return events.filter(ev => {
-      if (ev.status === "pending") return true;
-      const d = parseWhen(ev.when);
-      return !d || dateKey(d) >= todayKey;
-    });
-  }, [events, viewMode]);
+  const dateGroups = useMemo(() => groupEventsByDate(events), [events]);
 
-  const dateGroups = useMemo(() => groupEventsByDate(visibleEvents), [visibleEvents]);
+  const eventDates = useMemo(() => {
+    const set = new Set<string>();
+    for (const ev of events) {
+      const d = (ev.status === "pending" && ev.next_run_time)
+        ? new Date(ev.next_run_time)
+        : parseWhen(ev.when);
+      if (d && !isNaN(d.getTime())) set.add(dateKey(d));
+    }
+    return set;
+  }, [events]);
+
+  // 首次加载完成后自动滚到今天
+  useEffect(() => {
+    if (!loading && dateGroups.length > 0 && !scrolledToToday) {
+      setScrolledToToday(true);
+      const todayKey = dateKey(new Date());
+      scrollToDate(todayKey);
+    }
+  }, [loading, dateGroups, scrolledToToday]);
+
+  const scrollToDate = (key: string) => {
+    const el = groupRefs.current.get(key);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+    } else {
+      // 如果目标日期没有事件，滚动到最近的有事件的日期
+      const sorted = dateGroups.map(g => g.key).sort();
+      const closest = sorted.find(k => k >= key) || sorted[sorted.length - 1];
+      if (closest) {
+        const closestEl = groupRefs.current.get(closest);
+        closestEl?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }
+  };
+
+  const handleSelectDate = (key: string) => {
+    const parts = key.split("-").map(Number);
+    setSelectedDate(new Date(parts[0], parts[1] - 1, parts[2]));
+    scrollToDate(key);
+  };
 
   const toggleEnabled = async (next: boolean) => {
     setEnabled(next);
@@ -350,36 +482,27 @@ export function AgendaView() {
       <header className="h-12 border-b border-border flex items-center px-4 justify-between shrink-0">
         <h1 className="font-semibold text-lg">日程 (Agenda)</h1>
         <div className="flex items-center gap-2">
-          <div className="flex items-center rounded-md border border-border overflow-hidden">
-            <button
-              onClick={() => setViewMode("today")}
-              className={`px-2.5 py-1 text-xs transition-colors ${
-                viewMode === "today" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
-              }`}
-            >今天</button>
-            <button
-              onClick={() => setViewMode("all")}
-              className={`px-2.5 py-1 text-xs transition-colors ${
-                viewMode === "all" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
-              }`}
-            >全部</button>
-          </div>
+          <Button size="sm" variant="outline" onClick={() => setDialogState({ open: true, editing: null })}>
+            <Plus className="h-3.5 w-3.5 mr-1.5" /> 添加
+          </Button>
           <Button variant="ghost" size="icon" onClick={loadData} disabled={loading}>
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           </Button>
         </div>
       </header>
 
+      {/* 月历导航 */}
+      <MonthCalendar
+        currentDate={selectedDate}
+        eventDates={eventDates}
+        onSelectDate={handleSelectDate}
+      />
+
       {/* Agent 日程工具开关 */}
-      <div className="border-b border-border px-4 py-2.5 flex items-center justify-between gap-4 shrink-0">
-        <div className="flex items-start gap-2 min-w-0">
-          <BellRing className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />
-          <div className="min-w-0">
-            <div className="text-sm font-medium">Agent 日程工具</div>
-            <div className="text-xs text-muted-foreground mt-0.5">
-              开启后，Agent 获得 agenda_add / agenda_update / agenda_remove / agenda_list 工具，可以帮你管理日程。
-            </div>
-          </div>
+      <div className="border-b border-border px-4 py-2 flex items-center justify-between gap-4 shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <BellRing className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <span className="text-xs text-muted-foreground">Agent 日程工具</span>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {togglingEnabled && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
@@ -387,31 +510,24 @@ export function AgendaView() {
             onClick={() => void toggleEnabled(!enabled)}
             role="switch"
             aria-checked={enabled}
-            className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${enabled ? "bg-primary" : "bg-muted"}`}
+            className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors ${enabled ? "bg-primary" : "bg-muted"}`}
           >
             <span
-              className={`inline-block h-4 w-4 transform rounded-full bg-background transition-transform ${enabled ? "translate-x-4" : "translate-x-0.5"}`}
+              className={`inline-block h-3 w-3 transform rounded-full bg-background transition-transform ${enabled ? "translate-x-3.5" : "translate-x-0.5"}`}
             />
           </button>
         </div>
       </div>
 
-      {/* 添加按钮 */}
-      <div className="px-4 pt-3 shrink-0">
-        <Button size="sm" onClick={() => setDialogState({ open: true, editing: null })}>
-          <Plus className="h-3.5 w-3.5 mr-1.5" /> 添加日程
-        </Button>
-      </div>
-
       {/* 时间轴 */}
-      <ScrollArea className="flex-1 p-4 pt-3">
+      <div ref={timelineRef} className="flex-1 overflow-y-auto p-4 pt-3">
         {loading && events.length === 0 ? (
           <div className="flex items-center justify-center h-full pt-10">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
           </div>
         ) : dateGroups.length === 0 ? (
           <div className="text-center text-muted-foreground pt-10">
-            {viewMode === "today" ? "暂无待办日程，点击上方「添加日程」创建" : "暂无日程"}
+            暂无日程，点击右上角「添加」创建
           </div>
         ) : (
           <div className="relative pl-2">
@@ -420,7 +536,11 @@ export function AgendaView() {
               const prevGroup = gi > 0 ? dateGroups[gi - 1] : null;
               const showYearMonth = gi === 0 || !prevGroup || prevGroup.year !== group.year || prevGroup.month !== group.month;
               return (
-                <div key={group.key} className="relative">
+                <div
+                  key={group.key}
+                  className="relative"
+                  ref={(el) => { if (el) groupRefs.current.set(group.key, el); }}
+                >
                   {showYearMonth && (
                     <div className="flex items-baseline gap-1 shrink-0 min-w-[80px] mb-2 mt-4 first:mt-0">
                       <span className="text-lg font-bold text-foreground">{group.month}月</span>
@@ -489,7 +609,7 @@ export function AgendaView() {
             })}
           </div>
         )}
-      </ScrollArea>
+      </div>
     </div>
   );
 }
