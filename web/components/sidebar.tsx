@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Image from "next/image";
 import { Plus, Trash2, Search, Settings, Book, BookOpen, Pencil, Check, X, List, Wrench, RefreshCw, Loader2, Pin, PinOff } from "lucide-react";
-import { Clock, Database } from "lucide-react";
+import { Clock, Database, CalendarDays } from "lucide-react";
 import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
 import { useSidebar } from "@/app/layout-shell";
 import { Button } from "@ethan/shared/ui/button";
@@ -609,6 +609,17 @@ export function Sidebar() {
           onClick={() => navigate("/schedule")}
         >
           <Clock className="h-4 w-4 mr-2" /> 定时任务 (Schedule)
+        </Button>
+        <Button
+          variant="ghost"
+          className={`w-full justify-start h-9 px-3 ${
+            pathname === "/agenda"
+              ? "bg-accent text-accent-foreground"
+              : "text-muted-foreground"
+          }`}
+          onClick={() => navigate("/agenda")}
+        >
+          <CalendarDays className="h-4 w-4 mr-2" /> 日程 (Agenda)
         </Button>
         <Button
           variant="ghost"
