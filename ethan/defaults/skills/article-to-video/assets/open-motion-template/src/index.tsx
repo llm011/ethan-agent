@@ -51,8 +51,8 @@ const Root: React.FC = () => {
         component={ArticleVideo}
         durationInFrames={90}
         fps={30}
-        width={1080}
-        height={1920}
+        width={defaults.width || 1080}
+        height={defaults.height || 1920}
         defaultProps={defaults}
         calculateMetadata={({ props }) => ({
           durationInFrames: Math.max(1, Math.ceil((props.totalDurationMs / 1000) * props.fps)),
