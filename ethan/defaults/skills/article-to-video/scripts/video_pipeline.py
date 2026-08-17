@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministic Edge TTS + Remotion pipeline for the article-to-video skill."""
+"""Deterministic Edge TTS + Open Motion pipeline for the article-to-video skill."""
 
 from __future__ import annotations
 
@@ -32,8 +32,6 @@ ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 PROSODY_RE = re.compile(r"^[+-]\d+%$")
 PITCH_RE = re.compile(r"^[+-]\d+Hz$")
 PUBLISHED_OUTPUTS = ("final.mp4", "cover.png", "render-report.json", "deliverables.zip")
-# source.md 由 skill 写入但不属于"产物"，归档时也要清走，避免上轮残留混进下轮 deliverables.zip。
-ARCHIVE_EXTRA = ("source.md",)
 
 
 class ManifestError(ValueError):
@@ -482,7 +480,7 @@ def build_timeline(
 
 
 def _run_command(command: list[str], *, cwd: Path) -> None:
-    # 捕获 stderr，失败时把 Node/Remotion/pnpm 的诊断写进 run-status.json，
+    # 捕获 stderr，失败时把 Node/Open Motion/pnpm 的诊断写进 run-status.json，
     # 否则只留 "non-zero exit status 1"，agent 无法定位渲染失败原因。
     completed = subprocess.run(command, cwd=cwd, check=False, capture_output=True, text=True)
     if completed.returncode != 0:
@@ -497,7 +495,7 @@ def _run_command(command: list[str], *, cwd: Path) -> None:
 def ensure_renderer(template_dir: Path) -> None:
     if shutil.which("node") is None or shutil.which("pnpm") is None:
         raise RuntimeError("Node.js and pnpm are required to render the video")
-    marker = template_dir / "node_modules" / "remotion" / "package.json"
+    marker = template_dir / "node_modules" / "@open-motion" / "core" / "package.json"
     if not marker.exists():
         _run_command(["pnpm", "install", "--ignore-workspace", "--frozen-lockfile"], cwd=template_dir)
 
@@ -579,7 +577,7 @@ def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
 
 
 def _archive_published_outputs(output_dir: Path, run_id: str) -> Path | None:
-    existing = [output_dir / name for name in (PUBLISHED_OUTPUTS + ARCHIVE_EXTRA) if (output_dir / name).exists()]
+    existing = [output_dir / name for name in PUBLISHED_OUTPUTS if (output_dir / name).exists()]
     if not existing:
         return None
     archive_dir = output_dir / "work" / "previous-runs" / run_id
@@ -628,7 +626,7 @@ def run_pipeline(manifest_path: Path, output_dir: Path) -> dict[str, Any]:
         enforce_target_duration(manifest, timeline)
 
         render_dir = output_dir / "work" / "render-runs" / run_id
-        template_dir = Path(__file__).resolve().parent.parent / "assets" / "remotion-template"
+        template_dir = Path(__file__).resolve().parent.parent / "assets" / "open-motion-template"
         render_video(template_dir, render_dir, timeline_path, output_dir / "work" / "public")
         report = verify_outputs(render_dir, timeline)
         staged_archive = package_deliverables(
@@ -674,7 +672,7 @@ def run_pipeline(manifest_path: Path, output_dir: Path) -> dict[str, Any]:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Generate a narrated Remotion video from an article-to-video manifest")
+    parser = argparse.ArgumentParser(description="Generate a narrated Open Motion video from an article-to-video manifest")
     subparsers = parser.add_subparsers(dest="command", required=True)
     validate = subparsers.add_parser("validate", help="validate and normalize a manifest without network access")
     validate.add_argument("--manifest", type=Path, required=True)

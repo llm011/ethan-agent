@@ -1,4 +1,4 @@
 interface:
   display_name: "Article to Video"
-  short_description: "将主题、文章或网页生成带配音字幕的 Remotion 视频"
+  short_description: "将主题、文章或网页生成带配音字幕的 Open Motion 视频"
   default_prompt: "Use $article-to-video to turn this topic or article into a narrated MP4 video."

@@ -215,9 +215,6 @@ class DefaultsConfig(BaseModel):
     schedule_session_rotate_threshold: int = 24
     routing: RoutingConfig = Field(default_factory=RoutingConfig)
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
-    # 定时任务 session 轮转阈值：当天执行次数（按 user 消息数）达到后新建对话，
-    # 避免高频任务会话无限膨胀。0 = 关闭轮转。
-    schedule_session_rotate_threshold: int = 24
 
 
 class WebSearchToolConfig(BaseModel):

@@ -139,6 +139,7 @@ export async function consumeStream(
         continue;
       }
       if (chunk.error) {
+        failed = true;
         const errLine = `⚠️ ${chunk.error}`;
         assistantContent = assistantContent.trim()
           ? `${assistantContent}\n\n---\n${errLine}`

@@ -105,23 +105,9 @@ def _build_stats(card: dict) -> dict:
 
 
 def _extract_body_items(node: dict) -> list[str] | None:
-    """从节点抽取分点文本；与 ui_card_templates._extract_body_items 逻辑保持一致：
-    items（list/string）优先，缺则退回 body；string 时按真换行切块。"""
-    src = node.get("items")
-    if src is None:
-        src = node.get("body")
-    if src is None or src == "":
-        return None
-    if isinstance(src, list):
-        items: list[str] = []
-        for x in src:
-            t = _text(x)
-            if t.strip():
-                items.append(t.strip())
-        return items or None
-    text = _text(src)
-    lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
-    return lines or None
+    """从节点抽取分点文本；复用 ui_card_templates 的实现，保持一致性。"""
+    from ethan.tools.builtin.ui_card_templates import _extract_body_items as _ui_extract
+    return _ui_extract(node)
 
 
 def _build_timeline(card: dict) -> dict:

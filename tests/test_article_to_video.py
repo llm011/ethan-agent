@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import sys
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -201,7 +202,6 @@ def test_failed_rerun_archives_previous_published_outputs(tmp_path, monkeypatch)
         "cover.png": b"old-cover",
         "render-report.json": b"old-report",
         "deliverables.zip": b"old-archive",
-        "source.md": b"old-source",  # 非 PUBLISHED_OUTPUTS，但也要被归档清走
     }
     for name, content in previous.items():
         (output_dir / name).write_bytes(content)

@@ -132,6 +132,7 @@ class AgendaRemoveTool(BaseTool):
 
 class AgendaListTool(BaseTool):
     fast_path = False
+    no_compress = True  # 输出含 event_id，模型需原样回传给 update/delete
     name = "agenda_list"
     description = (
         "List agenda events (day-schedule reminders). Default: pending events from today "

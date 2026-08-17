@@ -119,3 +119,12 @@ ethan/defaults/skills/ppt-generate/assets/fonts/
 
 # updater endpoint（CI 构建时从 release 动态拉取，不入库）
 web/public/latest.json
+# article-to-video Open Motion renderer 临时文件
+ethan/defaults/skills/article-to-video/assets/open-motion-template/dist/
+ethan/defaults/skills/article-to-video/assets/open-motion-template/node_modules/
+ethan/defaults/skills/article-to-video/assets/open-motion-template/.open-motion-tmp/
+ethan/defaults/skills/article-to-video/assets/open-motion-template/debug-*.png
+
+# Code review / temp files
+.review_diff.txt
+AGENTS.md
