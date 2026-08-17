@@ -114,13 +114,16 @@ async function handleCountdown(params: Record<string, unknown>) {
       // Send event to countdown window via localStorage (cross-window communication)
       localStorage.setItem(
         "countdown_command",
-        JSON.stringify({ action: "start", minutes: params.minutes || 25, ts: Date.now() })
+        JSON.stringify({ action: "start", minutes: params.minutes || 25, label: params.label || "", ts: Date.now() })
       );
       break;
     case "pause":
     case "resume":
     case "reset":
       localStorage.setItem("countdown_command", JSON.stringify({ action, ts: Date.now() }));
+      break;
+    case "set_label":
+      localStorage.setItem("countdown_command", JSON.stringify({ action: "set_label", label: params.label || "", ts: Date.now() }));
       break;
     case "close":
       try {

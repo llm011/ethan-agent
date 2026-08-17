@@ -1,8 +1,10 @@
+"use client";
+
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import {
   AgendaEvent, AgendaRepeat, fetchAgenda, createAgendaEvent, updateAgendaEvent,
   completeAgendaEvent, deleteAgendaEvent, setAgendaEnabled,
-} from "@/lib/api";
+} from "@/lib/api-misc";
 import { Badge } from "@ethan/shared/ui/badge";
 import { Button } from "@ethan/shared/ui/button";
 import { Loader2, RefreshCw, Trash2, Pencil, Check, Plus, BellRing, ChevronLeft, ChevronRight } from "lucide-react";
@@ -18,12 +20,10 @@ import {
 import { Input } from "@ethan/shared/ui/input";
 import { Textarea } from "@ethan/shared/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@ethan/shared/ui/select";
-import { addHandler, removeHandler } from "@/lib/desktop-ws";
 
 // ── Helpers ─────────────────────────────────────────────────────
 
 const WEEKDAY_LABELS = ["一", "二", "三", "四", "五", "六", "日"];
-const WEEKDAY_SHORT = ["一", "二", "三", "四", "五", "六", "日"];
 
 function repeatLabel(ev: AgendaEvent): string {
   if (ev.repeat === "daily") return "每天";
@@ -91,8 +91,6 @@ function groupEventsByDate(events: AgendaEvent[]): DateGroup[] {
   return groups;
 }
 
-// ── 月历导航组件 ─────────────────────────────────────────────────
-
 // ── 当前时间指示器 ─────────────────────────────────────────────────
 
 function useNow(intervalMs = 1000): Date {
@@ -115,6 +113,8 @@ function NowIndicator({ now }: { now: Date }) {
   );
 }
 
+// ── 月历导航组件 ─────────────────────────────────────────────────
+
 function MonthCalendar({ currentDate, eventDates, onSelectDate }: {
   currentDate: Date;
   eventDates: Set<string>;
@@ -124,7 +124,7 @@ function MonthCalendar({ currentDate, eventDates, onSelectDate }: {
   const todayKey = dateKey(new Date());
 
   const daysInMonth = new Date(displayMonth.getFullYear(), displayMonth.getMonth() + 1, 0).getDate();
-  const firstWeekday = getISOWeekday(displayMonth);
+  const firstWeekday = getISOWeekday(displayMonth); // 1=Mon
 
   const cells: (Date | null)[] = [];
   for (let i = 1; i < firstWeekday; i++) cells.push(null);
@@ -163,7 +163,7 @@ function MonthCalendar({ currentDate, eventDates, onSelectDate }: {
         </button>
       </div>
       <div className="grid grid-cols-7 gap-0">
-        {WEEKDAY_SHORT.map(w => (
+        {WEEKDAY_LABELS.map(w => (
           <div key={w} className="text-center text-[9px] text-muted-foreground py-0.5">{w}</div>
         ))}
         {cells.map((date, i) => {
@@ -250,14 +250,30 @@ function EventDialog({ open, editing, onConfirm, onCancel }: {
 
   const valid = draft.title.trim() && draft.whenLocal && (draft.repeat !== "weekly" || draft.weekdays.length > 0);
 
+  const patch = (p: Partial<EventDraft>) => {
+    setDraft(d => ({ ...d, ...p }));
+    setError("");
+  };
+
   const submit = () => {
-    if (!valid) return;
+    if (!draft.title.trim()) {
+      setError("请填写要做什么");
+      return;
+    }
+    if (!draft.whenLocal) {
+      setError("请选择提醒时间");
+      return;
+    }
+    if (draft.repeat === "weekly" && draft.weekdays.length === 0) {
+      setError("每周重复需至少选择一天");
+      return;
+    }
     onConfirm(draft);
   };
 
   return (
     <Dialog open={open} onOpenChange={(o: boolean) => !o && onCancel()}>
-      <DialogContent showCloseButton={false} className="max-w-md">
+      <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>{editing ? "编辑日程" : "添加日程"}</DialogTitle>
           <DialogDescription className="mt-1">
@@ -267,19 +283,19 @@ function EventDialog({ open, editing, onConfirm, onCancel }: {
         <div className="space-y-3 py-1">
           <Input
             value={draft.title}
-            onChange={(e) => setDraft(d => ({ ...d, title: e.target.value }))}
+            onChange={(e) => patch({ title: e.target.value })}
             placeholder="要做什么？（如：下午 3 点开周会）"
             autoFocus
           />
           <Input
             type="datetime-local"
             value={draft.whenLocal}
-            onChange={(e) => setDraft(d => ({ ...d, whenLocal: e.target.value }))}
+            onChange={(e) => patch({ whenLocal: e.target.value })}
           />
           <div className="flex items-center gap-2">
             <Select
               value={draft.repeat}
-              onValueChange={(v) => v && setDraft(d => ({ ...d, repeat: v as AgendaRepeat }))}
+              onValueChange={(v) => v && patch({ repeat: v as AgendaRepeat })}
             >
               <SelectTrigger className="w-[120px]">
                 <SelectValue />
@@ -302,12 +318,11 @@ function EventDialog({ open, editing, onConfirm, onCancel }: {
                       className={`h-7 w-7 rounded-md text-xs transition-colors ${
                         active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground"
                       }`}
-                      onClick={() => setDraft(d => ({
-                        ...d,
+                      onClick={() => patch({
                         weekdays: active
-                          ? d.weekdays.filter(x => x !== iso)
-                          : [...d.weekdays, iso],
-                      }))}
+                          ? draft.weekdays.filter(x => x !== iso)
+                          : [...draft.weekdays, iso],
+                      })}
                     >{label}</button>
                   );
                 })}
@@ -316,7 +331,7 @@ function EventDialog({ open, editing, onConfirm, onCancel }: {
           </div>
           <Textarea
             value={draft.note}
-            onChange={(e) => setDraft(d => ({ ...d, note: e.target.value }))}
+            onChange={(e) => patch({ note: e.target.value })}
             placeholder="备注（可选）"
             className="min-h-[60px]"
           />
@@ -370,13 +385,9 @@ export function AgendaView() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // 监听后端 WS 推送（日程到点/错过时自动刷新列表）
   useEffect(() => {
-    const handler = (method: string) => {
-      if (method === "agenda_changed") loadData();
-    };
-    addHandler(handler);
-    return () => removeHandler(handler);
+    const interval = setInterval(loadData, 30000);
+    return () => clearInterval(interval);
   }, [loadData]);
 
   const dateGroups = useMemo(() => groupEventsByDate(events), [events]);
@@ -406,6 +417,7 @@ export function AgendaView() {
     if (el) {
       el.scrollIntoView({ behavior: "smooth", block: "start" });
     } else {
+      // 如果目标日期没有事件，滚动到最近的有事件的日期
       const sorted = dateGroups.map(g => g.key).sort();
       const closest = sorted.find(k => k >= key) || sorted[sorted.length - 1];
       if (closest) {

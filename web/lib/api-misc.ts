@@ -134,6 +134,80 @@ export async function timelineLifecycle(timelineId: string, action: "skip_phase"
   return res.json();
 }
 
+// ── Agenda（日程） ────────────────────────────────────────────────
+
+export type AgendaRepeat = "none" | "daily" | "weekly";
+export type AgendaStatus = "pending" | "fired" | "missed" | "done";
+
+export interface AgendaEvent {
+  id: string;
+  title: string;
+  note: string;
+  when: string;
+  repeat: AgendaRepeat;
+  weekdays: number[];
+  status: AgendaStatus;
+  created_at: string;
+  updated_at: string;
+  next_run_time?: string | null;
+}
+
+export interface AgendaData {
+  enabled: boolean;
+  events: AgendaEvent[];
+}
+
+export async function fetchAgenda(): Promise<AgendaData> {
+  const res = await fetch(`${API_URL}/agenda`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed");
+  return res.json();
+}
+
+export async function createAgendaEvent(item: { title: string; when: string; repeat?: AgendaRepeat; weekdays?: number[]; note?: string }): Promise<AgendaEvent> {
+  const res = await fetch(`${API_URL}/agenda`, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify(item),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed (${res.status})`);
+  }
+  return res.json().then(d => d.event);
+}
+
+export async function updateAgendaEvent(id: string, patch: Partial<{ title: string; when: string; repeat: AgendaRepeat; weekdays: number[]; note: string }>): Promise<AgendaEvent> {
+  const res = await fetch(`${API_URL}/agenda/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: headers(),
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed (${res.status})`);
+  }
+  return res.json().then(d => d.event);
+}
+
+export async function completeAgendaEvent(id: string): Promise<void> {
+  const res = await fetch(`${API_URL}/agenda/${encodeURIComponent(id)}/complete`, { method: "POST", headers: headers() });
+  if (!res.ok) throw new Error("Failed");
+}
+
+export async function deleteAgendaEvent(id: string): Promise<void> {
+  const res = await fetch(`${API_URL}/agenda/${encodeURIComponent(id)}`, { method: "DELETE", headers: headers() });
+  if (!res.ok) throw new Error("Failed");
+}
+
+export async function setAgendaEnabled(enabled: boolean): Promise<void> {
+  const res = await fetch(`${API_URL}/agenda/enabled`, {
+    method: "PUT",
+    headers: headers(),
+    body: JSON.stringify({ enabled }),
+  });
+  if (!res.ok) throw new Error("Failed");
+}
+
 // ── Background Tasks ──────────────────────────────────────────────
 
 export interface BackgroundTask {

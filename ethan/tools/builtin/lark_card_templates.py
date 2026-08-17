@@ -9,6 +9,8 @@ ui_card 工具按渠道选用哪套模板（web/repl→A2UI，lark→飞书卡�
 """
 from __future__ import annotations
 
+import re
+
 
 def _text(v) -> str:
     """规整文本：还原模型可能误传的字面量 \\n 为真换行（与 A2UI 模板一致）。"""
@@ -18,8 +20,7 @@ def _text(v) -> str:
 
 
 def _md_hardbreak(text: str) -> str:
-    """飞书 markdown：单 \n 会被折叠成空格。把孤立单 \n 转成硬换行 "  \n"，保留 \n\n 作段落。"""
-    import re
+    """飞书 markdown：单 \\n 会被折叠成空格。把孤立单 \\n 转成硬换行 "  \\n"，保留 \\n\\n 作段落。"""
     return re.sub(r"(?<!\n)\n(?!\n)", "  \n", text)
 
 
@@ -101,7 +102,7 @@ def _build_stats(card: dict) -> dict:
             "elements": [{"tag": "markdown", "content": "\n".join(parts)}],
         })
     element = {"tag": "column_set", "flex_mode": "stretch", "columns": columns}
-    return _card(card.get("title", ""), [element])
+    return _card(card.get("title", "统计"), [element])
 
 
 def _extract_body_items(node: dict) -> list[str] | None:

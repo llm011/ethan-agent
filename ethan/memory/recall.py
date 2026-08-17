@@ -101,9 +101,9 @@ def _collect(
     # 时间衰减软降权（ETHAN_MEMORY_RANK_DECAY，默认开）：factor 只影响排序，
     # 不改状态。Tier A 恒 1.0；RANK_DECAY=0 时恒 1.0——乘以 1.0 不改变任何
     # 比较结果，排序与旧实现逐位一致（回归测试的硬断言）。
-    from ethan.memory.decay import RANK_DECAY_ENABLED, rank_decay_factor
-
     import time as _time
+
+    from ethan.memory.decay import RANK_DECAY_ENABLED, rank_decay_factor
 
     statuses = [MemoryStatus.ACTIVE.value]
     fts_hits: list[Any] = []

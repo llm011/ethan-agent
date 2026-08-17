@@ -176,7 +176,7 @@ class MemoryRecord:
         # preference / activity.*→activity / methodology.*→methodology / 其余→
         # task_context），与 classifier.infer_memory_role 同口径。显式传入的合法值
         # 优先，允许调用方覆盖推断结果；非法值回退推断。
-        from ethan.memory.classifier import infer_memory_role, MEMORY_ROLES
+        from ethan.memory.classifier import MEMORY_ROLES, infer_memory_role
 
         if not self.memory_role or self.memory_role not in MEMORY_ROLES:
             self.memory_role = infer_memory_role(self.dimension)

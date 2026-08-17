@@ -186,7 +186,7 @@ def _register_job(event: dict) -> None:
 
 
 def create_event(title: str, when: str, repeat: str = "none", weekdays: list[int] | None = None,
-                 note: str = "") -> dict:
+                 note: str = "", short_title: str = "") -> dict:
     """创建日程：写 store + 注册调度。时间过早（超出宽限窗口）直接报错。"""
     weekdays = weekdays or []
     dt = _validate_payload(title, when, repeat, weekdays)
@@ -198,6 +198,7 @@ def create_event(title: str, when: str, repeat: str = "none", weekdays: list[int
     event = {
         "id": f"{AGENDA_JOB_PREFIX}{secrets.token_hex(4)}",
         "title": title.strip(),
+        "short_title": short_title.strip()[:10] if short_title else "",
         "note": note or "",
         "when": when,
         "repeat": repeat,
@@ -216,7 +217,7 @@ def create_event(title: str, when: str, repeat: str = "none", weekdays: list[int
 
 def update_event(event_id: str, title: str | None = None, when: str | None = None,
                  repeat: str | None = None, weekdays: list[int] | None = None,
-                 note: str | None = None) -> dict:
+                 note: str | None = None, short_title: str | None = None) -> dict:
     """修改日程。时间/重复规则变化时重建调度 job；已终结（fired/missed/done）
     的事件改时间会重新激活为 pending。"""
     store = get_agenda_store()
@@ -229,6 +230,7 @@ def update_event(event_id: str, title: str | None = None, when: str | None = Non
     new_repeat = repeat if repeat is not None else ev["repeat"]
     new_weekdays = weekdays if weekdays is not None else ev.get("weekdays", [])
     new_note = note if note is not None else ev["note"]
+    new_short_title = short_title if short_title is not None else ev.get("short_title", "")
 
     dt = _validate_payload(new_title, new_when, new_repeat, new_weekdays)
     rescheduled = (new_when != ev["when"] or new_repeat != ev["repeat"]
@@ -240,6 +242,7 @@ def update_event(event_id: str, title: str | None = None, when: str | None = Non
     updated.update({
         "title": new_title.strip(), "note": new_note, "when": new_when,
         "repeat": new_repeat,
+        "short_title": new_short_title.strip()[:10] if new_short_title else "",
         "weekdays": sorted(set(new_weekdays)) if new_repeat == "weekly" else [],
         "updated_at": _now().isoformat(),
     })
@@ -306,6 +309,10 @@ def _dispatch_notification(ev: dict) -> None:
         })
         if sent == 0:
             logger.warning("[Agenda] 日程 '%s' 触发但无桌面端在线，通知未送达", ev["title"])
+        else:
+            # Auto-start countdown with short_title label
+            label = ev.get("short_title") or ev["title"][:10]
+            await hub.notify("countdown", {"action": "start", "minutes": 25, "label": label})
         # 让打开着的日程页自动刷新（fired 状态/今日列表）
         await hub.notify("agenda_changed", {"event_id": ev["id"]})
 

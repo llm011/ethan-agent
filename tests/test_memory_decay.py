@@ -1148,7 +1148,7 @@ def test_cross_scope_pair_user_scope_rejected(tmp_path, hash_embed, monkeypatch)
     _seed_user_preference(store)
     cand = _pref_candidate(scope_type="user", scope_id="self")
     store.create_candidate_batch([cand])
-    r = run_incremental_admission(store, [cand])
+    run_incremental_admission(store, [cand])
     # 同 scope + 同内容 → 走语义配对（semantic_reinforced），不是 cross_scope
     reason = store.get_candidate(cand.id).processing_reason
     assert "cross_scope" not in reason
@@ -1176,7 +1176,7 @@ def test_cross_scope_pair_inferred_eligible(tmp_path, hash_embed, monkeypatch):
     _seed_user_preference(store)
     cand = _pref_candidate(level="inferred", scope_id="proj_y")
     store.create_candidate_batch([cand])
-    r = run_incremental_admission(store, [cand])
+    run_incremental_admission(store, [cand])
     reason = store.get_candidate(cand.id).processing_reason
     assert reason.startswith("cross_scope_reinforced:")
     store.close()

@@ -109,6 +109,7 @@ export default function CountdownPage() {
     const saved = localStorage.getItem("countdown_pin");
     return saved !== null ? saved === "1" : true;
   });
+  const [label, setLabel] = useState(() => localStorage.getItem("countdown_label") || "");
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // phaseRef 让 storage 事件回调读到最新 phase，避免空依赖 effect 闭包陈旧
   // 导致 running 中改 countdown_minutes 时 phase 仍被读成 "idle" 而覆盖剩余时间。
@@ -210,6 +211,10 @@ export default function CountdownPage() {
               setTotalSeconds(newTotal);
               setRemaining(newTotal);
             }
+            if (cmd.label !== undefined) {
+              setLabel(cmd.label || "");
+              localStorage.setItem("countdown_label", cmd.label || "");
+            }
             clearTimer();
             setPhase("running");
             break;
@@ -221,6 +226,12 @@ export default function CountdownPage() {
             break;
           case "reset":
             clearTimer(); setRemaining(totalSeconds); setPhase("idle");
+            break;
+          case "set_label":
+            if (cmd.label !== undefined) {
+              setLabel(cmd.label || "");
+              localStorage.setItem("countdown_label", cmd.label || "");
+            }
             break;
         }
       } catch { /* ignore */ }
@@ -278,6 +289,7 @@ export default function CountdownPage() {
   return (
     <div className="cd-root" data-tauri-drag-region onDoubleClick={togglePause}>
       <div className="cd-inner" data-tauri-drag-region>
+        {label && <div className="cd-label" data-tauri-drag-region>{label}</div>}
         <div className="cd-clock" data-tauri-drag-region>
           <FlipCard value={pad(minutes)} />
           <span className="cd-sep" data-tauri-drag-region>:</span>
@@ -319,10 +331,24 @@ export default function CountdownPage() {
 
         .cd-inner {
           position: absolute; inset: 0;
-          display: flex; align-items: center; justify-content: center;
+          display: flex; flex-direction: column; align-items: center; justify-content: center;
           background: var(--cd-bg);
           border-radius: min(14px, 8vw, 15vh);
           overflow: hidden;
+        }
+
+        .cd-label {
+          font-size: clamp(10px, 3vw, 14px);
+          color: var(--cd-digit);
+          opacity: 0.7;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          max-width: 90%;
+          text-align: center;
+          margin-bottom: 2px;
+          pointer-events: none;
+          letter-spacing: 0.5px;
         }
 
         .cd-corner-bl, .cd-corner-br {
@@ -341,7 +367,7 @@ export default function CountdownPage() {
         }
         .cd-btn:hover { background: var(--cd-btn-hover); }
 
-        .cd-clock { display: flex; align-items: center; gap: clamp(2px, 1vw, 6px); pointer-events: none; width: 100%; height: 100%; padding: 0 4px; }
+        .cd-clock { display: flex; align-items: center; gap: clamp(2px, 1vw, 6px); pointer-events: none; width: 100%; padding: 0 4px; flex: 1; }
         .cd-sep { font-size: clamp(24px, 10vw, 60px); color: var(--cd-sep); font-weight: 700; pointer-events: none; flex-shrink: 0; }
 
         /* ===== Flip Card =====

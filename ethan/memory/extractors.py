@@ -31,11 +31,10 @@ _EXTRACTION_MAX_TOKENS = 16384
 # Dimensions allowed per memory_type are defined in the registry
 # (ethan/memory/dimensions.py) — 白名单校验与 prompt 维度段落都由注册表生成，
 # 保证模型看到的维度与校验集合严格一致。custom.* 前缀维度放行但强制 observed。
-from ethan.memory.dimensions import CUSTOM_PREFIX, build_dimension_prompt, valid_dimensions  # noqa: E402
-
 # tentative 标记只对 decision/activity 有效（与 decay.TENTATIVE_MEMORY_TYPES
 # 同源，避免两处白名单漂移）
 from ethan.memory.decay import TENTATIVE_MEMORY_TYPES as _TENTATIVE_TYPES  # noqa: E402
+from ethan.memory.dimensions import CUSTOM_PREFIX, build_dimension_prompt, valid_dimensions  # noqa: E402
 
 # 苏念陪伴模式情感提取的完整 system prompt(职责/边界/禁止项/状态机)。
 # 维度详解与示例在 _build_prompt 的 companion_block;此处只放约束与规则。

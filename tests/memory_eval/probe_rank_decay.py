@@ -35,8 +35,8 @@ from unittest.mock import patch
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent.parent))
 
-from ethan.core.context import ETHAN_USER_ID  # noqa: E402
 import ethan.memory.decay as decay_mod  # noqa: E402
+from ethan.core.context import ETHAN_USER_ID  # noqa: E402
 from ethan.memory.recall import _collect  # noqa: E402
 from ethan.memory.records import MemoryEvidence, MemoryRecord  # noqa: E402
 from ethan.memory.store import MemoryStore  # noqa: E402

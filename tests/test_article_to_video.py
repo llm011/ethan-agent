@@ -1,7 +1,6 @@
 import importlib.util
 import json
 import sys
-import zipfile
 from pathlib import Path
 
 import pytest

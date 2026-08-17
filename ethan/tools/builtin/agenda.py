@@ -30,6 +30,8 @@ def _fmt(ev: dict) -> str:
         days = ",".join(names[d - 1] for d in ev.get("weekdays", []))
         line += f" (每周{days})"
     line += f" [{ev['status']}]"
+    if ev.get("short_title"):
+        line += f" 〔{ev['short_title']}〕"
     if ev.get("note"):
         line += f" — {ev['note']}"
     return line
@@ -53,6 +55,7 @@ class AgendaAddTool(BaseTool):
             "repeat": {"type": "string", "description": _REPEAT_DESC},
             "weekdays": {"type": "array", "items": {"type": "integer"}, "description": _WEEKDAYS_DESC},
             "note": {"type": "string", "description": "Optional note shown in the agenda UI."},
+            "short_title": {"type": "string", "description": "Very short label (max 10 chars) shown on the desktop countdown widget when this event fires. E.g. '对齐排期' or 'deep work'."},
         },
         "required": ["title", "when"],
     }
@@ -66,6 +69,7 @@ class AgendaAddTool(BaseTool):
                 kwargs.get("repeat", "none") or "none",
                 kwargs.get("weekdays") or [],
                 kwargs.get("note", ""),
+                kwargs.get("short_title", ""),
             )
         except AgendaError as e:
             return f"Error: {e}"
@@ -90,6 +94,7 @@ class AgendaUpdateTool(BaseTool):
             "repeat": {"type": "string", "description": _REPEAT_DESC},
             "weekdays": {"type": "array", "items": {"type": "integer"}, "description": _WEEKDAYS_DESC},
             "note": {"type": "string", "description": "New note (optional)."},
+            "short_title": {"type": "string", "description": "New short label (max 10 chars) for countdown widget."},
         },
         "required": ["event_id"],
     }
@@ -104,6 +109,7 @@ class AgendaUpdateTool(BaseTool):
                 kwargs.get("repeat"),
                 kwargs.get("weekdays"),
                 kwargs.get("note"),
+                kwargs.get("short_title"),
             )
         except AgendaError as e:
             return f"Error: {e}"

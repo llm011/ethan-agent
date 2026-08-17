@@ -20,10 +20,11 @@ class DesktopCountdownTool(BaseTool):
     def description(self) -> str:
         return (
             "Control the desktop countdown timer. Actions: "
-            "'start' (begin countdown, optional minutes param, default 25), "
+            "'start' (begin countdown, optional minutes/label params, default 25min), "
             "'pause' (pause the timer), "
             "'resume' (resume paused timer), "
             "'reset' (reset to initial duration), "
+            "'set_label' (update the displayed label without affecting timer), "
             "'close' (close the countdown window). "
             "Works by forwarding the command over WebSocket to the connected Ethan desktop app, "
             "so it works EVEN WHEN the server runs in Docker / headless / remote environments. "
@@ -38,12 +39,16 @@ class DesktopCountdownTool(BaseTool):
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["start", "pause", "resume", "reset", "close"],
+                    "enum": ["start", "pause", "resume", "reset", "close", "set_label"],
                     "description": "The countdown action to perform.",
                 },
                 "minutes": {
                     "type": "integer",
                     "description": "Duration in minutes (only for 'start' action). Default 25.",
+                },
+                "label": {
+                    "type": "string",
+                    "description": "Short label (max 10 chars) displayed above the countdown timer.",
                 },
             },
             "required": ["action"],
@@ -52,6 +57,7 @@ class DesktopCountdownTool(BaseTool):
     async def run(self, **kwargs) -> str | ToolResult:
         action = kwargs.get("action", "start")
         minutes = kwargs.get("minutes")
+        label = kwargs.get("label")
         hub = get_desktop_hub()
         if not hub.connected:
             return "错误：桌面端未连接。请确认 Ethan 桌面应用已启动并登录。"
@@ -59,6 +65,8 @@ class DesktopCountdownTool(BaseTool):
             params: dict[str, Any] = {"action": action}
             if minutes is not None and action == "start":
                 params["minutes"] = int(minutes)
+            if label is not None and action in ("start", "set_label"):
+                params["label"] = label[:10]
             await hub.notify("countdown", params)
             messages = {
                 "start": f"倒计时已开始（{minutes or 25} 分钟）",
@@ -66,6 +74,7 @@ class DesktopCountdownTool(BaseTool):
                 "resume": "倒计时已继续",
                 "reset": "倒计时已重置",
                 "close": "倒计时窗口已关闭",
+                "set_label": f"倒计时标签已更新：{label}",
             }
             return messages.get(action, f"已执行 countdown.{action}")
         except DesktopError as e:

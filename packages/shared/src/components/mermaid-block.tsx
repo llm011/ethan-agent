@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Copy, Expand, AlertCircle } from "lucide-react";
-import { Dialog, DialogContent } from "../ui/dialog";
+import { Lightbox } from "../chat/lightbox";
 import { PlainCodeBlock } from "./plain-code-block";
 
 interface MermaidBlockProps {
@@ -23,23 +23,6 @@ async function getMermaid(theme: "dark" | "default") {
   return mod;
 }
 
-// 监听应用实际主题：读 documentElement 的 dark class（应用强制主题时为准）。
-// 亮色主题时即使 OS 是 dark 也按 light 渲染，避免 mermaid dark 配色与亮色容器冲突。
-// MutationObserver 捕获应用主动切换主题。
-function useAppDark(): boolean {
-  const [dark, setDark] = useState(false);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const el = document.documentElement;
-    const update = () => setDark(el.classList.contains("dark"));
-    update();
-    const observer = new MutationObserver(update);
-    observer.observe(el, { attributes: true, attributeFilter: ["class"] });
-    return () => observer.disconnect();
-  }, []);
-  return dark;
-}
-
 // 流式友好：code 变化后等 150ms 无新内容再 parse，避免半截代码块报错闪烁。
 function useDebounced<T>(value: T, delay = 150): T {
   const [debounced, setDebounced] = useState(value);
@@ -51,7 +34,6 @@ function useDebounced<T>(value: T, delay = 150): T {
 }
 
 export function MermaidBlock({ code }: MermaidBlockProps) {
-  const dark = useAppDark();
   const debouncedCode = useDebounced(code);
   const [svg, setSvg] = useState<string>("");
   const [error, setError] = useState<string>("");
@@ -71,7 +53,7 @@ export function MermaidBlock({ code }: MermaidBlockProps) {
     const seq = ++renderSeq.current;
     (async () => {
       try {
-        const mermaid = await getMermaid(dark ? "dark" : "default");
+        const mermaid = await getMermaid("default");
         if (cancelled || seq !== renderSeq.current) return;
         await mermaid.parse(debouncedCode);
         if (cancelled || seq !== renderSeq.current) return;
@@ -97,7 +79,7 @@ export function MermaidBlock({ code }: MermaidBlockProps) {
     return () => {
       cancelled = true;
     };
-  }, [debouncedCode, dark]);
+  }, [debouncedCode]);
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(code);
@@ -110,8 +92,13 @@ export function MermaidBlock({ code }: MermaidBlockProps) {
     [svg],
   );
 
+  const svgDataUrl = useMemo(
+    () => svg ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}` : "",
+    [svg],
+  );
+
   return (
-    <div className="relative group my-3 rounded-lg border border-border overflow-hidden bg-background">
+    <div className="relative group my-3 rounded-lg border border-border overflow-hidden">
       <div className="absolute right-2 top-2 z-10 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
         {svg && (
           <button
@@ -146,7 +133,7 @@ export function MermaidBlock({ code }: MermaidBlockProps) {
         </div>
       ) : svgNode ? (
         <div
-          className="flex items-center justify-center p-4 cursor-zoom-in"
+          className="flex items-center justify-center p-4 bg-white cursor-zoom-in"
           onClick={() => setZoomOpen(true)}
         >
           {svgNode}
@@ -155,26 +142,12 @@ export function MermaidBlock({ code }: MermaidBlockProps) {
         <div className="p-4 text-xs text-muted-foreground">渲染中…</div>
       )}
 
-      <Dialog open={zoomOpen} onOpenChange={setZoomOpen}>
-        <DialogContent
-          showCloseButton
-          className="max-w-none w-screen h-screen p-0 bg-black/95 rounded-none border-none ring-0"
-        >
-          <div
-            className="flex items-center justify-center w-full h-full p-8 overflow-auto"
-            onClick={(e) => {
-              if (e.target === e.currentTarget) setZoomOpen(false);
-            }}
-          >
-            {svg ? (
-              <div
-                className="max-w-[90vw] max-h-[90vh]"
-                dangerouslySetInnerHTML={{ __html: svg }}
-              />
-            ) : null}
-          </div>
-        </DialogContent>
-      </Dialog>
+      <Lightbox
+        images={svgDataUrl ? [{ url: svgDataUrl, title: "Mermaid Diagram" }] : []}
+        index={0}
+        open={zoomOpen}
+        onOpenChange={setZoomOpen}
+      />
     </div>
   );
 }

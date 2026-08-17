@@ -49,7 +49,7 @@ PROMOTION_SESSION_THRESHOLD = 2
 CROSS_SCOPE_PAIR_L2 = float(_os.environ.get("ETHAN_MEMORY_PAIR_CROSS_L2", "0.6"))
 # cross-scope 偏好配对的目标 scope 类型 = Tier A 豁免的 user 级 scope。
 # 与 decay.EXEMPT_SCOPE_TYPES 同源，共用一处定义。
-from ethan.memory.decay import EXEMPT_SCOPE_TYPES as CROSS_SCOPE_SCOPE_TYPES
+from ethan.memory.decay import EXEMPT_SCOPE_TYPES as CROSS_SCOPE_SCOPE_TYPES  # noqa: E402
 
 
 @dataclass
