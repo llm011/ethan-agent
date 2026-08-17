@@ -20,8 +20,10 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.ethan.agent.shared.viewmodel.AgendaViewModel
 import com.ethan.agent.shared.viewmodel.AuthUiState
 import com.ethan.agent.shared.viewmodel.AuthViewModel
+import com.ethan.agent.ui.agenda.AgendaScreen
 import com.ethan.agent.ui.auth.LoginScreen
 import com.ethan.agent.ui.chat.ChatScreen
 import com.ethan.agent.shared.viewmodel.ChatViewModel
@@ -313,6 +315,32 @@ private fun MainContent(authViewModel: AuthViewModel) {
                     onContentChange = vm::onContentChange,
                     onSave = vm::save,
                     onDelete = vm::delete,
+                    onClearError = vm::clearError,
+                )
+            }
+
+            composable(Screen.Agenda.route) {
+                val vm: AgendaViewModel = koinViewModel()
+                val state by vm.state.collectAsState()
+                AgendaScreen(
+                    state = state,
+                    onBack = { navController.popBackStack() },
+                    onRefresh = vm::load,
+                    onToggleEnabled = vm::toggleEnabled,
+                    onSelectDate = vm::selectDate,
+                    onPrevMonth = vm::prevMonth,
+                    onNextMonth = vm::nextMonth,
+                    onToggleCalendar = vm::toggleCalendar,
+                    onGoToday = vm::goToday,
+                    onShowCreate = vm::showCreateSheet,
+                    onEditEvent = vm::editEvent,
+                    onDismissSheet = vm::dismissSheet,
+                    onUpdateForm = vm::updateForm,
+                    onSubmit = vm::submitEvent,
+                    onComplete = vm::completeEvent,
+                    onRequestDelete = vm::requestDelete,
+                    onCancelDelete = vm::cancelDelete,
+                    onConfirmDelete = vm::confirmDelete,
                     onClearError = vm::clearError,
                 )
             }

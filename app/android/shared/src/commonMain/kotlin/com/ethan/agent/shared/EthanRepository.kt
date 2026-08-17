@@ -2,6 +2,10 @@ package com.ethan.agent.shared
 
 import com.ethan.agent.core.datastore.AppConfig
 import com.ethan.agent.core.datastore.AppConfigStore
+import com.ethan.agent.core.model.AgendaCreateRequest
+import com.ethan.agent.core.model.AgendaEnabledRequest
+import com.ethan.agent.core.model.AgendaPatchRequest
+import com.ethan.agent.core.model.AgendaResponse
 import com.ethan.agent.core.model.AgentSettings
 import com.ethan.agent.core.model.ApiKeyCreated
 import com.ethan.agent.core.model.ApiKeyInfo
@@ -673,6 +677,30 @@ class EthanRepository(
     /** 清空本地文件缓存（Settings 「清空缓存」入口用）。 */
     suspend fun clearLocalCache() {
         localCache.clear()
+    }
+
+    // ── Agenda 日程 ─────────────────────────────────────────────────────────
+
+    suspend fun getAgenda(): AgendaResponse = api.getAgenda()
+
+    suspend fun createAgenda(body: AgendaCreateRequest) {
+        api.createAgenda(body)
+    }
+
+    suspend fun patchAgenda(eventId: String, body: AgendaPatchRequest) {
+        api.patchAgenda(eventId, body)
+    }
+
+    suspend fun completeAgenda(eventId: String) {
+        api.completeAgenda(eventId)
+    }
+
+    suspend fun deleteAgenda(eventId: String) {
+        api.deleteAgenda(eventId)
+    }
+
+    suspend fun setAgendaEnabled(enabled: Boolean) {
+        api.setAgendaEnabled(AgendaEnabledRequest(enabled))
     }
 
     fun friendlyError(e: Throwable): String = when (e) {

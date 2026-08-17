@@ -34,6 +34,7 @@ fun sharedModule(): Module = module {
     viewModelOf(::SettingsViewModel)
     viewModelOf(::SkillsViewModel)
     viewModelOf(::ScheduleViewModel)
+    viewModelOf(::AgendaViewModel)
     viewModelOf(::SessionsViewModel)
     viewModel { params -> PptPreviewViewModel(get(), params.getOrNull<String>() ?: "") }
     viewModelOf(::MemoryViewModel)
