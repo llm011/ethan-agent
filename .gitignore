@@ -116,3 +116,6 @@ ethan/defaults/skills/ppt-generate/assets/fonts/
 
 # 临时快照调试输出
 .tmp_snap/
+
+# updater endpoint（CI 构建时从 release 动态拉取，不入库）
+web/public/latest.json
