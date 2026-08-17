@@ -24,7 +24,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 // ── Helpers ─────────────────────────────────────────────────────
 
 const WEEKDAY_LABELS = ["一", "二", "三", "四", "五", "六", "日"];
-const WEEKDAY_SHORT = ["一", "二", "三", "四", "五", "六", "日"];
 
 function repeatLabel(ev: AgendaEvent): string {
   if (ev.repeat === "daily") return "每天";
@@ -44,12 +43,6 @@ function parseWhen(when: string): Date | null {
 
 function dateKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-function addDays(d: Date, n: number): Date {
-  const r = new Date(d);
-  r.setDate(r.getDate() + n);
-  return r;
 }
 
 function startOfMonth(d: Date): Date {
@@ -170,7 +163,7 @@ function MonthCalendar({ currentDate, eventDates, onSelectDate }: {
         </button>
       </div>
       <div className="grid grid-cols-7 gap-0">
-        {WEEKDAY_SHORT.map(w => (
+        {WEEKDAY_LABELS.map(w => (
           <div key={w} className="text-center text-[9px] text-muted-foreground py-0.5">{w}</div>
         ))}
         {cells.map((date, i) => {
@@ -257,8 +250,24 @@ function EventDialog({ open, editing, onConfirm, onCancel }: {
 
   const valid = draft.title.trim() && draft.whenLocal && (draft.repeat !== "weekly" || draft.weekdays.length > 0);
 
+  const patch = (p: Partial<EventDraft>) => {
+    setDraft(d => ({ ...d, ...p }));
+    setError("");
+  };
+
   const submit = () => {
-    if (!valid) return;
+    if (!draft.title.trim()) {
+      setError("请填写要做什么");
+      return;
+    }
+    if (!draft.whenLocal) {
+      setError("请选择提醒时间");
+      return;
+    }
+    if (draft.repeat === "weekly" && draft.weekdays.length === 0) {
+      setError("每周重复需至少选择一天");
+      return;
+    }
     onConfirm(draft);
   };
 
@@ -274,19 +283,19 @@ function EventDialog({ open, editing, onConfirm, onCancel }: {
         <div className="space-y-3 py-1">
           <Input
             value={draft.title}
-            onChange={(e) => setDraft(d => ({ ...d, title: e.target.value }))}
+            onChange={(e) => patch({ title: e.target.value })}
             placeholder="要做什么？（如：下午 3 点开周会）"
             autoFocus
           />
           <Input
             type="datetime-local"
             value={draft.whenLocal}
-            onChange={(e) => setDraft(d => ({ ...d, whenLocal: e.target.value }))}
+            onChange={(e) => patch({ whenLocal: e.target.value })}
           />
           <div className="flex items-center gap-2">
             <Select
               value={draft.repeat}
-              onValueChange={(v) => v && setDraft(d => ({ ...d, repeat: v as AgendaRepeat }))}
+              onValueChange={(v) => v && patch({ repeat: v as AgendaRepeat })}
             >
               <SelectTrigger className="w-[120px]">
                 <SelectValue />
@@ -309,12 +318,11 @@ function EventDialog({ open, editing, onConfirm, onCancel }: {
                       className={`h-7 w-7 rounded-md text-xs transition-colors ${
                         active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground"
                       }`}
-                      onClick={() => setDraft(d => ({
-                        ...d,
+                      onClick={() => patch({
                         weekdays: active
-                          ? d.weekdays.filter(x => x !== iso)
-                          : [...d.weekdays, iso],
-                      }))}
+                          ? draft.weekdays.filter(x => x !== iso)
+                          : [...draft.weekdays, iso],
+                      })}
                     >{label}</button>
                   );
                 })}
@@ -323,7 +331,7 @@ function EventDialog({ open, editing, onConfirm, onCancel }: {
           </div>
           <Textarea
             value={draft.note}
-            onChange={(e) => setDraft(d => ({ ...d, note: e.target.value }))}
+            onChange={(e) => patch({ note: e.target.value })}
             placeholder="备注（可选）"
             className="min-h-[60px]"
           />
