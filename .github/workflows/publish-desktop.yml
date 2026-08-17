@@ -198,8 +198,9 @@ jobs:
           # 找当前 tag 之前最近的含 latest.json 的 release。
           # 先整段捕获再取首行——若直接 `gh ... | head -1`，head 提前关闭管道会让 gh 收到
           # EPIPE 返回非零，在默认的 `bash -eo pipefail` 下会中断整个步骤。
-          RELEASES=$(gh release list --repo "$REPO" --limit 30 --json tagName,assets \
-            -q '.[] | select(.assets[]?.name == "latest.json") | .tagName')
+          # gh release list --json 不支持 assets 字段，走 REST API（响应原生含 assets 数组）
+          RELEASES=$(gh api "repos/$REPO/releases?per_page=30" \
+            -q '.[] | select(.assets[]?.name == "latest.json") | .tag_name')
           PREVIOUS=$(printf '%s\n' "$RELEASES" | head -1)
           if [ -z "$PREVIOUS" ]; then
             echo "No previous release with latest.json found, skipping."
