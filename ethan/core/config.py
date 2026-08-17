@@ -88,7 +88,7 @@ class RoutingConfig(BaseModel):
     """
     fast_base_tools: list[str] = Field(default_factory=lambda: [
         "shell", "file_read", "file_write", "skill_read", "skill_list", "find_tools",
-        "schedule_create", "schedule_list", "schedule_remove",
+        "schedule_create", "schedule_list", "schedule_remove", "schedule_pause",
         "decide",  # Adaptive Planning 的决策出口（虚拟工具，agent loop 拦截不执行）
         "ui_card",
     ])  # fast 档永远挂载的基础系统工具；find_tools 用于「规则工具不够时」兜底激活进阶工具
@@ -105,7 +105,7 @@ class RoutingConfig(BaseModel):
         "rg_search", "fd_find",
         "knowledge_search", "knowledge_read", "knowledge_add", "knowledge_edit",
         "memory_write", "procedure_write", "profile_update",
-        "schedule_create", "schedule_list", "schedule_remove",
+        "schedule_create", "schedule_list", "schedule_remove", "schedule_pause",
         "agenda_add", "agenda_update", "agenda_remove", "agenda_list",
         # agenda_*：默认 enabled=False 时工具不注册，白名单里的名字无匹配 → 零开销；
         # 日程页开关打开后工具注册即广播进提示词（full 档）。
@@ -143,7 +143,7 @@ class RoutingConfig(BaseModel):
                 "提醒我", "设置一个", "定时任务",
                 "schedule", "reminder", "每天*点",
             ],
-            tools=["schedule_create", "schedule_list", "schedule_remove"],
+            tools=["schedule_create", "schedule_list", "schedule_remove", "schedule_pause"],
             skills=[],
         ),
         FastRule(
