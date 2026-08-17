@@ -81,6 +81,11 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
   // 选中消息中是否有 A2UI 卡片
   const hasCards = selectedMessages.some((m) => m.a2ui && m.a2ui.length > 0);
 
+  // 当没有选中任何带卡片的消息时，重置 cardsOnly 避免导出空白
+  useEffect(() => {
+    if (!hasCards && cardsOnly) setCardsOnly(false);
+  }, [hasCards, cardsOnly]);
+
   if (!open) return null;
 
   const toggle = (key: string) => {

@@ -225,7 +225,7 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
                     await store.update_title(_new_session.id, _new_title)
                     # 更新 job 关联的 session_id，后续触发走新 session
                     if job_id:
-                        from ethan.interface.routers.schedule import get_scheduler as _get_sched
+                        from ethan.scheduler.cron import get_scheduler as _get_sched
                         try:
                             _get_sched().modify_kwargs(job_id, session_id=_new_session.id)
                         except Exception:

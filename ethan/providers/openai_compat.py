@@ -109,9 +109,12 @@ class OpenAICompatProvider(BaseProvider):
                 result.extend(pending_img_messages)
                 pending_img_messages = []
                 # 跳过空 assistant 消息（带 tool_calls 的已在上方 elif is_tool_call 分支处理，
-                # 能到这里的 assistant 必然无 tool_calls），Gemini 不接受纯空 assistant 消息
+                # 能到这里的 assistant 必然无 tool_calls），Gemini 不接受纯空 assistant 消息。
+                # 但如果该消息携带 reasoning_content（推理模型的思考过程），必须保留——
+                # DeepSeek 等 API 要求 reasoning_content 原样回传，丢弃会导致 400。
                 if msg.role == "assistant" and not msg.content:
-                    continue
+                    if not (msg.reasoning and include_reasoning):
+                        continue
                 out = {"role": msg.role, "content": msg.content}
                 if msg.role == "assistant" and msg.reasoning and include_reasoning:
                     # reasoning_content 回传：详见上方 is_tool_call 分支注释
@@ -315,7 +318,7 @@ class OpenAICompatProvider(BaseProvider):
 
     # --- reasoning / thinking 协议（DeepSeek R1 / deepseek-reasoner / 兼容 reasoning_content 的转发）---
 
-    _REASONING_MODEL_PATTERNS = ("reasoner", "reasoning", "-r1", "deepseek-r")
+    _REASONING_MODEL_PATTERNS = ("deepseek-r1", "deepseek-reasoner")
 
     def _wants_reasoning(self) -> bool:
         """当前模型是否走 reasoning 协议（序列化历史 reasoning_content + 注入顶层 thinking）。
@@ -361,7 +364,7 @@ class OpenAICompatProvider(BaseProvider):
             kwargs["tools"] = self._to_openai_tools(tools)
             kwargs["tool_choice"] = "auto"
         if reasoning and not self._skip_thinking_field():
-            kwargs["thinking"] = {"type": "enabled"}
+            kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
 
         response = await self._client.chat.completions.create(**kwargs)
         if not response.choices:
@@ -389,7 +392,7 @@ class OpenAICompatProvider(BaseProvider):
             kwargs["tools"] = self._to_openai_tools(tools)
             kwargs["tool_choice"] = "auto"
         if reasoning and not self._skip_thinking_field():
-            kwargs["thinking"] = {"type": "enabled"}
+            kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
 
         tool_calls_acc: dict[int, dict] = {}
         final_tool_calls: list[ToolCall] = []

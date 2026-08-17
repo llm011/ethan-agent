@@ -470,3 +470,92 @@ export async function deleteAPIKey(keyId: string): Promise<void> {
   });
   if (!res.ok) throw new Error("Failed");
 }
+
+// ── Agenda（日程） ────────────────────────────────────────────────
+
+export type AgendaRepeat = "none" | "daily" | "weekly";
+export type AgendaStatus = "pending" | "fired" | "missed" | "done";
+
+export interface AgendaEvent {
+  id: string;
+  title: string;
+  note: string;
+  when: string;              // 'YYYY-MM-DD HH:MM'（本地时区）
+  repeat: AgendaRepeat;      // none / daily / weekly
+  weekdays: number[];        // ISO：1=周一 … 7=周日（仅 weekly）
+  status: AgendaStatus;
+  created_at: string;
+  updated_at: string;
+  next_run_time?: string | null;
+}
+
+export interface AgendaData {
+  enabled: boolean;
+  events: AgendaEvent[];
+}
+
+export async function fetchAgenda(): Promise<AgendaData> {
+  const res = await fetch(`${API_URL}/agenda`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed to fetch agenda");
+  return res.json();
+}
+
+export async function createAgendaEvent(item: {
+  title: string;
+  when: string;
+  repeat?: AgendaRepeat;
+  weekdays?: number[];
+  note?: string;
+}): Promise<AgendaEvent> {
+  const res = await fetch(`${API_URL}/agenda`, {
+    method: "POST",
+    headers: { ...headers(), "Content-Type": "application/json" },
+    body: JSON.stringify(item),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to create agenda event (${res.status})`);
+  }
+  return res.json().then((d: any) => d.event);
+}
+
+export async function updateAgendaEvent(
+  id: string,
+  patch: Partial<Pick<AgendaEvent, "title" | "note" | "when" | "repeat" | "weekdays">>,
+): Promise<AgendaEvent> {
+  const res = await fetch(`${API_URL}/agenda/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { ...headers(), "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to update agenda event (${res.status})`);
+  }
+  return res.json().then((d: any) => d.event);
+}
+
+export async function completeAgendaEvent(id: string): Promise<void> {
+  const res = await fetch(`${API_URL}/agenda/${encodeURIComponent(id)}/complete`, {
+    method: "POST",
+    headers: headers(),
+  });
+  if (!res.ok) throw new Error("Failed to complete agenda event");
+}
+
+export async function deleteAgendaEvent(id: string): Promise<void> {
+  const res = await fetch(`${API_URL}/agenda/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: headers(),
+  });
+  if (!res.ok) throw new Error("Failed to delete agenda event");
+}
+
+export async function setAgendaEnabled(enabled: boolean): Promise<void> {
+  const res = await fetch(`${API_URL}/agenda/enabled`, {
+    method: "PUT",
+    headers: { ...headers(), "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+  if (!res.ok) throw new Error("Failed to toggle agenda");
+}
