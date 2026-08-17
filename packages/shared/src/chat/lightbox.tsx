@@ -27,7 +27,7 @@ export function Lightbox({ images, index, open, onOpenChange, onIndexChange }: L
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [hint, setHint] = useState("");
-  const hintTimer = useRef<ReturnType<typeof setTimeout>>();
+  const hintTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const dragRef = useRef<{ startX: number; startY: number; panX: number; panY: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
