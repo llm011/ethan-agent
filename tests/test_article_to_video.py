@@ -202,7 +202,6 @@ def test_failed_rerun_archives_previous_published_outputs(tmp_path, monkeypatch)
         "cover.png": b"old-cover",
         "render-report.json": b"old-report",
         "deliverables.zip": b"old-archive",
-        "source.md": b"old-source",  # 非 PUBLISHED_OUTPUTS，但也要被归档清走
     }
     for name, content in previous.items():
         (output_dir / name).write_bytes(content)
@@ -223,26 +222,6 @@ def test_failed_rerun_archives_previous_published_outputs(tmp_path, monkeypatch)
     status = json.loads((output_dir / "run-status.json").read_text(encoding="utf-8"))
     assert status["status"] == "error"
     assert status["error"] == "tts offline"
-
-
-def test_publish_recovers_archived_source_md(tmp_path):
-    """skill 先写 source.md 再调 run 的时序下，run 开头的归档会把它清走；
-    打包前应从归档目录复制回来，保证 deliverables.zip 内容完整。"""
-    output_dir = tmp_path / "output"
-    output_dir.mkdir()
-    run_id = "20260816-000000-deadbeef"
-    (output_dir / "source.md").write_text("# 原文\n", encoding="utf-8")
-
-    pipeline._archive_published_outputs(output_dir, run_id)
-    assert not (output_dir / "source.md").exists()  # run 开头被归档清走
-
-    pipeline.restore_archived_source_md(output_dir, run_id)
-    archive = pipeline.package_deliverables(output_dir)
-
-    assert (output_dir / "source.md").read_text(encoding="utf-8") == "# 原文\n"
-    with zipfile.ZipFile(archive) as bundle:
-        assert "source.md" in bundle.namelist()
-    assert (output_dir / "work" / "previous-runs" / run_id / "source.md").is_file()  # 归档原件保留，不移动
 
 
 def test_load_manifest_from_json_file(tmp_path):

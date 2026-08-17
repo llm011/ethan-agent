@@ -77,17 +77,18 @@ try {
   if (!comp) throw new Error("No composition found — ArticleVideo not registered");
 
   // Use timeline.json values for config — getCompositions may return defaults if calculateMetadata isn't invoked
+  const fps = comp.fps || timeline.fps || 30;
   const config = {
     width: comp.width || timeline.width || 1080,
     height: comp.height || timeline.height || 1920,
-    fps: comp.fps || timeline.fps || 30,
-    durationInFrames: Math.max(1, Math.ceil(((timeline.totalDurationMs || 3000) / 1000) * (timeline.fps || 30))),
+    fps,
+    durationInFrames: Math.max(1, Math.ceil(((timeline.totalDurationMs || 3000) / 1000) * fps)),
   };
   process.stderr.write(`[Step 3/5] Rendering ${comp.id} (${config.width}x${config.height}, ${config.fps}fps, ${config.durationInFrames} frames)\n`);
 
   // ── 5. Render frames (Playwright screenshots) ──
   process.stderr.write(`[Step 4/5] Capturing frames (0/${config.durationInFrames})...\n`);
-  const { audioAssets } = await renderFrames({
+  const result = await renderFrames({
     url,
     config,
     outputDir: tmpDir,
@@ -101,6 +102,7 @@ try {
       if (pct % 10 === 0) process.stderr.write(`[Step 4/5] Frames: ${frame}/${config.durationInFrames} (${pct}%)\n`);
     },
   });
+  const audioAssets = result?.audioAssets || [];
   process.stderr.write(`[Step 4/5] Frames complete: ${config.durationInFrames}/${config.durationInFrames} (100%)\n`);
 
   // ── 6. Encode frames → MP4 with audio mixing ──
@@ -121,7 +123,7 @@ try {
   if (audioEntries.length > 0) {
     const audioInputArgs = audioEntries.flatMap((e) => ["-i", e.path]);
     const mixInputs = audioEntries.map((e, i) => `[a${i}]`).join("");
-    filterParts.push(`${mixInputs}amix=inputs=${audioEntries.length}:duration=longest[aout]`);
+    filterParts.push(`${mixInputs}amix=inputs=${audioEntries.length}:duration=longest:normalize=0[aout]`);
     const filterComplex = filterParts.join(";");
 
     process.stderr.write("[Step 5/5] Encoding MP4 with FFmpeg (video + audio)...\n");
@@ -185,11 +187,9 @@ try {
 
 } finally {
   // ── Cleanup: kill http-server + remove all temp files ──
-  try { process.kill(-server.pid); } catch {}
-  // Remove rendered frames
+  try { if (server.pid) process.kill(-server.pid); } catch {}
+  // Remove rendered frames + Vite build output (distDir is child of tmpDir)
   try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
-  // Remove Vite build output
-  try { fs.rmSync(distDir, { recursive: true, force: true }); } catch {}
   // Remove debug screenshots
   try {
     for (const f of fs.readdirSync(__dirname)) {
