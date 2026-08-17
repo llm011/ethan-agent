@@ -151,7 +151,10 @@ def _brew_install_lark_cli() -> tuple[bool, str]:
 
 
 def _sync_lark_cli_app(app_id: str, app_secret: str) -> tuple[bool, str]:
-    """调 lark-cli config init 把 app 同步过去（secret 走 stdin 防泄露）。"""
+    """调 lark-cli config init 把 app 同步过去（secret 走 stdin 防泄露）。
+
+    若 keychain 被阻止，回退到直接写 ~/.lark-cli/config.json（与 Linux/Docker 行为一致）。
+    """
     lark_cli = _lark_cli_path()
     if not lark_cli:
         return False, "lark-cli 未安装"
@@ -170,7 +173,44 @@ def _sync_lark_cli_app(app_id: str, app_secret: str) -> tuple[bool, str]:
 
     if proc.returncode == 0:
         return True, ""
-    return False, proc.stderr.decode(errors="replace").strip()[-400:]
+
+    output = (proc.stdout + proc.stderr).decode(errors="replace")
+    if "keychain" not in output.lower():
+        return False, output.strip()[-400:]
+
+    # keychain 被阻止 → 直接写 config.json（与 Docker/Linux 一致的明文存储）
+    return _sync_lark_cli_app_file_fallback(app_id, app_secret)
+
+
+def _sync_lark_cli_app_file_fallback(app_id: str, app_secret: str) -> tuple[bool, str]:
+    """直接写 ~/.lark-cli/config.json 绕过 keychain。"""
+    cfg_dir = Path.home() / ".lark-cli"
+    cfg_file = cfg_dir / "config.json"
+    try:
+        cfg_dir.mkdir(parents=True, exist_ok=True)
+        if cfg_file.exists():
+            data = json.loads(cfg_file.read_text(encoding="utf-8"))
+        else:
+            data = {}
+
+        apps = data.get("apps") or []
+        # 替换已有同 appId 的条目，或追加
+        new_entry = {"appId": app_id, "appSecret": app_secret, "brand": "feishu"}
+        replaced = False
+        for i, a in enumerate(apps):
+            if a.get("appId") == app_id:
+                apps[i] = {**a, **new_entry}
+                replaced = True
+                break
+        if not replaced:
+            # 新 app 放首位（lark-cli 使用 apps[0] 作为当前应用）
+            apps.insert(0, new_entry)
+        data["apps"] = apps
+        cfg_file.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        logger.info("[lark-deps] keychain blocked, wrote config.json directly for %s", app_id)
+        return True, ""
+    except Exception as e:
+        return False, f"keychain 被阻止，回退写 config.json 也失败：{e}"
 
 
 def ensure_lark_deps(
