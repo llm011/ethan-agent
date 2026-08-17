@@ -44,15 +44,15 @@ process.stderr.write("[Step 2/5] Vite build done\n");
 
 // ── 3. Start http-server to serve dist/ ──
 const PORT = 10000 + Math.floor(Math.random() * 5000);
-const server = spawn("npx", ["http-server", distDir, "-p", String(PORT), "-a", "127.0.0.1", "--cors", "-s"],
-  { cwd: __dirname, stdio: "ignore", detached: true });
-server.unref();
-
-// Wait for server to be ready
 const url = `http://127.0.0.1:${PORT}`;
+let server;
 
 try {
-  // 放进 try：超时 reject 后 finally 才能顺带 kill 掉 detached 的 http-server
+  server = spawn("npx", ["http-server", distDir, "-p", String(PORT), "-a", "127.0.0.1", "--cors", "-s"],
+    { cwd: __dirname, stdio: "ignore", detached: true });
+  server.unref();
+
+  // Wait for server to be ready
   await new Promise((resolve, reject) => {
     const deadline = Date.now() + 10_000;
     const check = async () => {
@@ -73,8 +73,8 @@ try {
   process.stderr.write(`[Step 3/5] Discovering compositions from ${url}...\n`);
   process.stderr.write(`timeline scenes: ${timeline.scenes?.length}, totalDurationMs: ${timeline.totalDurationMs}\n`);
   const compositions = await getCompositions(url, { inputProps: timeline, timeout: 60000 });
-  const comp = compositions.find((c) => c.id === "ArticleVideo") || compositions[0];
-  if (!comp) throw new Error("No composition found — ArticleVideo not registered");
+  const comp = compositions.find((c) => c.id === "ArticleVideo");
+  if (!comp) throw new Error(`No composition "ArticleVideo" found (got: ${compositions.map(c=>c.id).join(", ")})`);
 
   // Use timeline.json values for config — getCompositions may return defaults if calculateMetadata isn't invoked
   const fps = comp.fps || timeline.fps || 30;
@@ -187,7 +187,7 @@ try {
 
 } finally {
   // ── Cleanup: kill http-server + remove all temp files ──
-  try { if (server.pid) process.kill(-server.pid); } catch {}
+  try { if (server?.pid) process.kill(-server.pid); } catch {}
   // Remove rendered frames + Vite build output (distDir is child of tmpDir)
   try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
   // Remove debug screenshots
