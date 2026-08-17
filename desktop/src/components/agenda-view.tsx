@@ -93,6 +93,28 @@ function groupEventsByDate(events: AgendaEvent[]): DateGroup[] {
 
 // ── 月历导航组件 ─────────────────────────────────────────────────
 
+// ── 当前时间指示器 ─────────────────────────────────────────────────
+
+function useNow(intervalMs = 1000): Date {
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), intervalMs);
+    return () => clearInterval(timer);
+  }, [intervalMs]);
+  return now;
+}
+
+function NowIndicator({ now }: { now: Date }) {
+  const timeStr = now.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+  return (
+    <div className="relative flex items-center gap-0 my-1 -ml-[3px]">
+      <div className="w-[7px] h-[7px] rounded-full bg-red-500 shrink-0 z-10" />
+      <div className="flex-1 h-px bg-red-500/70" />
+      <span className="text-[9px] font-mono text-red-500 ml-1.5 shrink-0 tabular-nums">{timeStr}</span>
+    </div>
+  );
+}
+
 function MonthCalendar({ currentDate, eventDates, onSelectDate }: {
   currentDate: Date;
   eventDates: Set<string>;
@@ -331,6 +353,7 @@ export function AgendaView() {
   const [scrolledToToday, setScrolledToToday] = useState(false);
   const timelineRef = useRef<HTMLDivElement>(null);
   const groupRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const now = useNow();
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -525,53 +548,67 @@ export function AgendaView() {
                         )}
                       </div>
                       <div className="relative flex-1 pb-4">
-                        {group.events.map((ev) => {
-                          const d = (ev.status === "pending" && ev.next_run_time)
-                            ? new Date(ev.next_run_time)
-                            : parseWhen(ev.when);
-                          const timeStr = d && !isNaN(d.getTime())
-                            ? d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })
-                            : "--:--";
-                          const badge = STATUS_BADGE[ev.status] || STATUS_BADGE.pending;
-                          const rep = repeatLabel(ev);
-                          return (
-                            <div key={ev.id} className="relative flex items-start gap-3 group mb-2 last:mb-0">
-                              <div className={`relative z-10 mt-2.5 w-[7px] h-[7px] rounded-full shrink-0 ring-2 ring-background ${
-                                ev.status === "pending" ? "bg-primary" : ev.status === "missed" ? "bg-destructive" : "bg-muted-foreground/40"
-                              }`} />
-                              <span className="text-[11px] font-mono text-muted-foreground mt-2 w-[38px] shrink-0">{timeStr}</span>
-                              <div className={`flex-1 min-w-0 border border-border/50 rounded-lg px-3 py-2 transition-colors hover:border-border hover:bg-muted/20 ${
-                                ev.status === "done" ? "opacity-60" : ""
-                              }`}>
-                                <div className="flex items-center justify-between gap-2">
-                                  <div className="flex items-center gap-2 min-w-0">
-                                    <span className={`text-sm font-medium truncate ${ev.status === "done" ? "line-through" : ""}`}>{ev.title}</span>
-                                    <Badge variant={badge.variant} className="text-[9px] px-1.5 py-0 h-4 shrink-0">{badge.label}</Badge>
-                                    {rep && (
-                                      <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 shrink-0">{rep}</Badge>
-                                    )}
-                                  </div>
-                                  <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                                    {ev.status !== "done" && (
-                                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => void doComplete(ev)} title="标记完成">
-                                        <Check className="h-3 w-3" />
+                        {(() => {
+                          const nowTs = now.getTime();
+                          let nowInserted = false;
+                          const items: React.ReactNode[] = [];
+                          for (const ev of group.events) {
+                            const d = (ev.status === "pending" && ev.next_run_time)
+                              ? new Date(ev.next_run_time)
+                              : parseWhen(ev.when);
+                            const evTs = d && !isNaN(d.getTime()) ? d.getTime() : 0;
+                            if (group.isToday && !nowInserted && evTs > nowTs) {
+                              items.push(<NowIndicator key="__now__" now={now} />);
+                              nowInserted = true;
+                            }
+                            const timeStr = d && !isNaN(d.getTime())
+                              ? d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })
+                              : "--:--";
+                            const badge = STATUS_BADGE[ev.status] || STATUS_BADGE.pending;
+                            const rep = repeatLabel(ev);
+                            items.push(
+                              <div key={ev.id} className="relative flex items-start gap-3 group mb-2 last:mb-0">
+                                <div className={`relative z-10 mt-2.5 w-[7px] h-[7px] rounded-full shrink-0 ring-2 ring-background ${
+                                  ev.status === "pending" ? "bg-primary" : ev.status === "missed" ? "bg-destructive" : "bg-muted-foreground/40"
+                                }`} />
+                                <span className="text-[11px] font-mono text-muted-foreground mt-2 w-[38px] shrink-0">{timeStr}</span>
+                                <div className={`flex-1 min-w-0 border border-border/50 rounded-lg px-3 py-2 transition-colors hover:border-border hover:bg-muted/20 ${
+                                  ev.status === "done" ? "opacity-60" : ""
+                                }`}>
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <span className={`text-sm font-medium truncate ${ev.status === "done" ? "line-through" : ""}`}>{ev.title}</span>
+                                      <Badge variant={badge.variant} className="text-[9px] px-1.5 py-0 h-4 shrink-0">{badge.label}</Badge>
+                                      {rep && (
+                                        <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 shrink-0">{rep}</Badge>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                                      {ev.status !== "done" && (
+                                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => void doComplete(ev)} title="标记完成">
+                                          <Check className="h-3 w-3" />
+                                        </Button>
+                                      )}
+                                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setDialogState({ open: true, editing: ev })} title="编辑">
+                                        <Pencil className="h-3 w-3" />
                                       </Button>
-                                    )}
-                                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setDialogState({ open: true, editing: ev })} title="编辑">
-                                      <Pencil className="h-3 w-3" />
-                                    </Button>
-                                    <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive/70 hover:text-destructive" onClick={() => setConfirmState({ open: true, id: ev.id })} title="删除">
-                                      <Trash2 className="h-3 w-3" />
-                                    </Button>
+                                      <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive/70 hover:text-destructive" onClick={() => setConfirmState({ open: true, id: ev.id })} title="删除">
+                                        <Trash2 className="h-3 w-3" />
+                                      </Button>
+                                    </div>
                                   </div>
+                                  {ev.note && (
+                                    <p className="mt-1 text-[11px] text-muted-foreground whitespace-pre-wrap break-words line-clamp-2">{ev.note}</p>
+                                  )}
                                 </div>
-                                {ev.note && (
-                                  <p className="mt-1 text-[11px] text-muted-foreground whitespace-pre-wrap break-words line-clamp-2">{ev.note}</p>
-                                )}
                               </div>
-                            </div>
-                          );
-                        })}
+                            );
+                          }
+                          if (group.isToday && !nowInserted) {
+                            items.push(<NowIndicator key="__now__" now={now} />);
+                          }
+                          return items;
+                        })()}
                       </div>
                     </div>
                   </div>
