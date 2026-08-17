@@ -150,6 +150,35 @@ def _brew_install_lark_cli() -> tuple[bool, str]:
         return False, f"brew install 异常：{e}"
 
 
+def _npm_install_lark_cli() -> tuple[bool, str]:
+    """通过 npm 安装 lark-cli（Linux/Docker 路径）。返回 (成功, 错误消息)。"""
+    try:
+        result = subprocess.run(
+            ["npm", "install", "-g", "@larksuite/cli"],
+            capture_output=True, text=True, timeout=300,
+        )
+        if result.returncode == 0:
+            return True, ""
+        return False, (result.stderr.strip() or result.stdout.strip())[-400:]
+    except subprocess.TimeoutExpired:
+        return False, "npm install lark-cli 超时（300s）"
+    except Exception as e:
+        return False, f"npm install 异常：{e}"
+
+
+def _install_lark_cli() -> tuple[bool, str]:
+    """安装 lark-cli：macOS 走 brew，Linux/Docker 走 npm（镜像不内置时的运行时补装路径）。"""
+    if shutil.which("brew"):
+        return _brew_install_lark_cli()
+    if shutil.which("npm"):
+        return _npm_install_lark_cli()
+    return False, (
+        "未检测到 Homebrew 或 npm。macOS 请先安装 Homebrew：\n"
+        "  /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"\n"
+        "Linux/Docker 请先安装 Node.js（含 npm）后重新触发飞书渠道配置。"
+    )
+
+
 def _sync_lark_cli_app(app_id: str, app_secret: str) -> tuple[bool, str]:
     """调 lark-cli config init 把 app 同步过去（secret 走 stdin 防泄露）。
 
@@ -281,8 +310,8 @@ def ensure_lark_deps(
             if status.lark_cli_installed:
                 _emit("[dim]✓ lark-cli 已安装[/dim]")
             else:
-                _emit("[yellow]→ 安装 lark-cli 二进制（brew）…[/yellow]")
-                ok, err = _brew_install_lark_cli()
+                _emit("[yellow]→ 安装 lark-cli 二进制…[/yellow]")
+                ok, err = _install_lark_cli()
                 if ok:
                     status.lark_cli_installed = True
                     _emit("[green]✓ lark-cli 安装成功[/green]")
