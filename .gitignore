@@ -124,3 +124,7 @@ ethan/defaults/skills/article-to-video/assets/open-motion-template/dist/
 ethan/defaults/skills/article-to-video/assets/open-motion-template/node_modules/
 ethan/defaults/skills/article-to-video/assets/open-motion-template/.open-motion-tmp/
 ethan/defaults/skills/article-to-video/assets/open-motion-template/debug-*.png
+
+# Code review / temp files
+.review_diff.txt
+AGENTS.md
