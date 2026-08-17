@@ -152,6 +152,7 @@ export interface StructuredMemory {
   updated_at: number;
   last_recalled_at: number | null;
   superseded_by: string | null;
+  dormant_at: number | null;
 }
 
 export interface StructuredMemoryPatch {
@@ -249,6 +250,19 @@ export async function confirmStructuredCandidate(id: string): Promise<Structured
   const res = await fetch(`${getApiUrl()}/memory/records/${id}/confirm`, { method: "POST", headers: headers() });
   if (!res.ok) throw new Error("Failed to confirm memory candidate");
   return res.json().then(data => data.record ?? null);
+}
+
+export async function wakeStructuredMemory(id: string): Promise<StructuredMemory | null> {
+  const res = await fetch(`${getApiUrl()}/memory/records/${id}/wake`, { method: "POST", headers: headers() });
+  if (!res.ok) throw new Error("Failed to wake dormant memory");
+  return res.json().then(data => data.record ?? null);
+}
+
+export async function wakeScopeMemories(scopeType: string, scopeId: string): Promise<number> {
+  const q = new URLSearchParams({ scope_type: scopeType, scope_id: scopeId });
+  const res = await fetch(`${getApiUrl()}/memory/records/wake-scope?${q.toString()}`, { method: "POST", headers: headers() });
+  if (!res.ok) throw new Error("Failed to wake dormant memories in scope");
+  return res.json().then(data => data.woken ?? 0);
 }
 
 export async function fetchDailySummaries(params: {

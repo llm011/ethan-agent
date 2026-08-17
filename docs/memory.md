@@ -37,7 +37,8 @@ Ethan 的长期记忆以**结构化记忆管道**为核心（`memory.db` 是唯�
 
 夜间统一沉淀（0 点,run_nightly_consolidation,做梦与每日沉淀合并）:
   ① 结构化每日沉淀:兜底扫描短会话（user_turns<3 但内容有价值）
-    → pending 跨 session 复评 → TTL 过期 → general/companion 分域日摘要
+    → pending 跨 session 复评 → TTL 过期 → 记忆衰减/归档 + 置信度晋升
+    → general/companion 分域日摘要
   ② 重建 memory 向量索引（自愈漂移）
   ③ 做梦（daily_consolidation）:从 memory.db 读取当日 active 记忆（已替代 daily/*.jsonl）
     → _sync_corpus_to_memory_db 把 memories 同步进向量库作为去重底库
@@ -71,6 +72,10 @@ Ethan 的长期记忆以**结构化记忆管道**为核心（`memory.db` 是唯�
 - 个人事实类证据必须来自 user 消息；companion 类型仅陪伴模式可产出；
   companion 诊断词表（抑郁/焦虑症/PTSD 等 25 词）硬拒绝
 - observed 候选 confidence 封顶 0.6
+- **tentative 标记**（decision/activity 专用）："先试试/暂时/就这一次"类临时
+  决定由模型标 `tentative=true`，落库为 `structured_data.tentative=True`，
+  进入 Tier C 快速衰减轨道（见"记忆衰减与强化"）；定稿表述（定了/最终/以后
+  都这样）省略该字段。其他类型上的 tentative 静默丢弃。
 
 ### 维度注册表（`ethan/memory/dimensions.py`）
 
@@ -107,7 +112,21 @@ observed 模式可用 `ETHAN_ADMISSION_OBSERVED_MODE=accrual` 切换为：
 - observed → 仍须先过 ≥2 session 门，晋升时并入近邻而非新建
 - companion 域不参与语义配对
 
-所有配对决策写入 `processing_reason`（`semantic_superseded:l2=…` 等）可审计。
+**跨 scope 偏好配对**（`ETHAN_MEMORY_PAIR_CROSS_L2`，默认 0.6）：project scope
+的 `preference.*` 候选（explicit/inferred）若与 user/user_domain/user_skill 级
+既有偏好维度严格相等且 L2 达标 → 只补证据到 user 级记忆（永不 supersede，
+不建 project 副本）。解决"论文做成PPT"在每个项目里以 project 候选出现、
+user 级置信度却永远卡首次准入值的问题——证据的独立 session 数随后由夜间
+晋升阶梯自愈。
+
+**tentative 清标**：tentative 记忆被非临时候选强化（同 scope merge 或跨
+scope 配对）→ 清掉标记退出 Tier C，updated_at 重置（强化即活跃信号）。
+
+**project 唤醒钩子**：任一候选在 project scope 落地（admitted/merged）→
+该 scope 全部 dormant 记忆立即唤醒，重新参与召回（项目回归信号）。
+
+所有配对决策写入 `processing_reason`（`semantic_superseded:l2=…`、
+`cross_scope_reinforced:l2=…` 等）可审计。
 
 ## 召回（混合双通道）
 
@@ -136,7 +155,62 @@ observed 模式可用 `ETHAN_ADMISSION_OBSERVED_MODE=accrual` 切换为：
   召回 +7-10s 延迟。候选池 FTS 修活后 8-12 条、0% 低于
   `MIN_CANDIDATES=4`，判官不会被跳过。
 - 无命中回退 importance top-N（身份类事实始终可用）
+- **排序软降权**（`ETHAN_MEMORY_RANK_DECAY`，默认开）：RRF 分数乘 tier 半衰期
+  因子（见"记忆衰减与强化"）。因子只影响排序不改状态；Tier A 恒 1.0；
+  关闭时因子恒 1.0，排序与旧实现逐位一致（回归测试硬断言）
 - companion 域仅陪伴模式召回；restricted 永不注入；forget 同步删除向量索引
+
+## 记忆衰减与强化（`ethan/memory/decay.py`）
+
+记忆的价值由**未来行为投票**：触发情境复现 + 召回后改变行为 → 强化；
+长期无信号 → 衰减遗忘。两条链路全部确定性规则、零 LLM，挂载于夜间结构化
+沉淀（`run_structured_consolidation`）。
+
+**Tier 规则表**（判定优先级 A > C > B）：
+
+| Tier | 归档 | 召回半衰期 | 判定 |
+|------|------|-----------|------|
+| A | 豁免 | 不衰减 | companion 域；scope ∈ {user, user_domain, user_skill}；dimension 前缀 ∈ {identity, preference, relationship} |
+| B | 21 天休眠 | 30 天 | 其余（project scope 的 decision/methodology 等） |
+| C | 14 天无强化 | 3 天 | decision/activity 且 `structured_data.tentative is True`（"先试试"） |
+
+**衰减链路**（`ETHAN_MEMORY_DECAY=1` 时夜间执行，默认关）：
+- project scope 连续 21 天无信号（updated_at / created_at / last_recalled_at /
+  evidence.created_at 四路 MAX）→ 非 Tier A 记忆批量转 **dormant**（第 7 态：
+  保留内容与证据、退出 FTS/向量召回、可随时唤醒）
+- tentative 决定 14 天无强化 → dormant
+- dormant 超 180 天 → forgotten（脱敏硬删，复用 `forget_memory`）
+
+**强化链路**（`ETHAN_MEMORY_PROMOTE=1`，默认开，独立于衰减开关）：
+- evidence 独立 session 数达阶梯（默认 2:0.8 / 3:0.9 / 5:0.95）→ confidence
+  单调抬升到阶梯值（`bulk_set_confidence_quiet` 单事务批量写入、不动
+  updated_at，避免批量晋升重置 scope 休眠计时）——修复"多次发生的偏好
+  卡在首次准入 60%"的存量问题
+- 补证据（add_evidence bump updated_at）、召回（last_recalled_at）、tentative
+  清标（bump updated_at）都是活跃信号，自动重置衰减锚点
+
+**唤醒**：dormant 可唤醒——UI 单条唤醒（`POST /memory/records/{id}/wake`）、
+scope 批量（`POST /memory/records/wake-scope`）、或项目回归时准入钩子自动唤醒。
+
+**上线流程**：先 `ETHAN_MEMORY_DECAY=1 ETHAN_MEMORY_DECAY_DRY_RUN=1` 跑真实
+库（只读不改，日志与返回计数真实），确认归档/遗忘量合理后再去 DRY_RUN。
+
+环境变量一览：
+
+| 变量 | 默认 | 作用 |
+|------|------|------|
+| `ETHAN_MEMORY_RANK_DECAY` | 1 | 召回排序软降权开关 |
+| `ETHAN_MEMORY_RANK_HALF_LIFE_PROJECT` | 30 | Tier B 半衰期（天） |
+| `ETHAN_MEMORY_RANK_HALF_LIFE_TENTATIVE` | 3 | Tier C 半衰期（天） |
+| `ETHAN_MEMORY_PROMOTE` | 1 | 置信度晋升开关 |
+| `ETHAN_MEMORY_PROMOTE_LADDER` | 2:0.8,3:0.9,5:0.95 | session 数→置信度阶梯 |
+| `ETHAN_MEMORY_PROMOTE_DOMAINS` | general | 晋升生效域（companion 默认豁免） |
+| `ETHAN_MEMORY_PAIR_CROSS_L2` | 0.6 | 跨 scope 偏好配对阈值 |
+| `ETHAN_MEMORY_DECAY` | 0 | 夜间归档/遗忘开关 |
+| `ETHAN_MEMORY_DECAY_DRY_RUN` | 0 | 只读模拟 |
+| `ETHAN_MEMORY_DECAY_PROJECT_IDLE_DAYS` | 21 | 项目休眠判定（天） |
+| `ETHAN_MEMORY_DECAY_TENTATIVE_GRACE_DAYS` | 14 | tentative 宽限期（天） |
+| `ETHAN_MEMORY_DECAY_FORGET_DAYS` | 180 | dormant 硬删（天） |
 
 ## 夜间沉淀与做梦
 
@@ -158,7 +232,8 @@ insight 不会与刚提取的记忆重复反写。两步各自保留独立的
 
 ## 存储布局
 
-`memory.db`（per-profile 物理隔离）：`memories`（6 态状态机）+
+`memory.db`（per-profile 物理隔离，schema v4）：`memories`（7 态状态机：
+candidate/active/disputed/superseded/expired/**dormant**/forgotten）+
 `memory_evidence`（quote 证据链）+ `memory_candidates`（4 态）+
 `consolidation_jobs`（幂等水位线）+ `daily_summaries` + `memory_fts`（FTS5）+
 `vec_items`/`vec_index`（sqlite-vec：insight、fact_sync 镜像、memory 语义索引）。

@@ -29,7 +29,7 @@ from ethan.memory.records import (
 
 logger = logging.getLogger(__name__)
 
-_SCHEMA_VERSION = "3"
+_SCHEMA_VERSION = "4"
 
 
 class MemoryStore:
@@ -118,6 +118,7 @@ class MemoryStore:
                 last_recalled_at REAL,
                 superseded_by TEXT,
                 forgotten_at REAL,
+                dormant_at REAL,
                 FOREIGN KEY (superseded_by) REFERENCES memories(id)
             );
             CREATE INDEX IF NOT EXISTS idx_memories_status_domain_type
@@ -285,6 +286,23 @@ class MemoryStore:
                 "INSERT OR REPLACE INTO structured_memory_meta(key, value) "
                 "VALUES ('v3_migrated', '1')"
             )
+
+        # schema v4: 加 dormant_at 列（记忆休眠归档时间戳，遗忘/衰减功能）。
+        # 与 v3 同理放在 FTS reindex 之前；索引必须在 ALTER 补列之后建，不能进
+        # executescript——旧库此列尚不存在，executescript 会因引用未定义列整体回滚。
+        # 无需回填——旧行 NULL 即"从未休眠"。守卫只看列存在性；仍写 v4_migrated
+        # meta key 保持与 v3 相同的防御模式（本迁移无回填步骤，key 用于审计）。
+        if "dormant_at" not in existing_cols:
+            conn.execute("ALTER TABLE memories ADD COLUMN dormant_at REAL")
+            logger.info("schema v4: added memories.dormant_at")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_dormant "
+            "ON memories(status, dormant_at)"
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO structured_memory_meta(key, value) "
+            "VALUES ('v4_migrated', '1')"
+        )
 
         try:
             # schema v2: 修中文词法通道。v1 用默认 unicode61 tokenizer + 原文索引，
@@ -524,13 +542,13 @@ class MemoryStore:
                 id,user_id,memory_type,dimension,memory_key,content,structured_data,scope_type,
                 scope_id,memory_domain,memory_role,status,evidence_level,confidence,importance,
                 sensitivity,valid_from,valid_until,source_session_id,source_message_id,created_at,
-                updated_at,last_recalled_at,superseded_by,forgotten_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                updated_at,last_recalled_at,superseded_by,forgotten_at,dormant_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             r.id,r.user_id,r.memory_type,r.dimension,r.memory_key,r.content,self._json(r.structured_data),
             r.scope_type,r.scope_id,r.memory_domain,r.memory_role,r.status,r.evidence_level,r.confidence,
             r.importance,r.sensitivity,r.valid_from,r.valid_until,r.source_session_id,r.source_message_id,
-            r.created_at,r.updated_at,r.last_recalled_at,r.superseded_by,r.forgotten_at,
+            r.created_at,r.updated_at,r.last_recalled_at,r.superseded_by,r.forgotten_at,r.dormant_at,
         ))
 
     def _insert_evidence(self, conn: sqlite3.Connection, e: MemoryEvidence) -> None:
@@ -546,8 +564,17 @@ class MemoryStore:
         ))
 
     def add_evidence(self, evidence: MemoryEvidence) -> None:
+        """补证据 = 强化 = 活跃信号：插入 evidence 行后同事务 bump updated_at。
+
+        不 bump 的话，Tier B scope 休眠检测（project_scope_last_activity 含
+        MAX(updated_at)）会漏掉 merge 强化，把仍在被反复印证的项目误判休眠。
+        """
         with self.transaction() as conn:
             self._insert_evidence(conn, evidence)
+            conn.execute(
+                "UPDATE memories SET updated_at=? WHERE id=?",
+                (time.time(), evidence.memory_id),
+            )
 
     def find_current_by_key_scope(
         self, memory_key: str, scope_type: str, scope_id: str, memory_domain: str
@@ -691,6 +718,7 @@ class MemoryStore:
                 last_recalled_at=current.last_recalled_at,
                 superseded_by=current.superseded_by,
                 forgotten_at=current.forgotten_at,
+                dormant_at=current.dormant_at,
             )
             conn.execute(
                 """UPDATE memories SET content=?, structured_data=?, confidence=?, importance=?,
@@ -812,12 +840,28 @@ class MemoryStore:
                 ).fetchone()
                 if not evidence:
                     raise ValueError("active memory requires evidence")
+            now = time.time()
             record.status = status
-            record.updated_at = time.time()
-            conn.execute(
-                "UPDATE memories SET status=?, updated_at=? WHERE id=?",
-                (status, record.updated_at, memory_id),
-            )
+            record.updated_at = now
+            if status == MemoryStatus.DORMANT.value:
+                # 转入休眠写时间戳——180 天硬遗忘窗口（decay._forget_long_dormant）靠它判定
+                record.dormant_at = now
+                conn.execute(
+                    "UPDATE memories SET status=?, dormant_at=?, updated_at=? WHERE id=?",
+                    (status, now, now, memory_id),
+                )
+            elif row["dormant_at"] is not None:
+                # 从 dormant 迁出（唤醒/转 expired 等）时清掉休眠时间戳
+                record.dormant_at = None
+                conn.execute(
+                    "UPDATE memories SET status=?, dormant_at=NULL, updated_at=? WHERE id=?",
+                    (status, now, memory_id),
+                )
+            else:
+                conn.execute(
+                    "UPDATE memories SET status=?, updated_at=? WHERE id=?",
+                    (status, now, memory_id),
+                )
             self._sync_fts(conn, record)
 
     def forget_memory(self, memory_id: str) -> None:
@@ -848,6 +892,165 @@ class MemoryStore:
         from ethan.memory.memory_vectors import remove_memory_index
         remove_memory_index(memory_id, db_path=self._db_path)
         return cursor.rowcount > 0
+
+    def bulk_set_dormant(self, memory_ids: list[str]) -> int:
+        """active → dormant 批量（Tier B 项目休眠归档）。单事务 bulk UPDATE + 批量
+        FTS 删除；向量索引不动——同夜 reindex_all 只重灌 active 自然清除，召回侧
+        status 复查兜住白天窗口。只迁移 status=active 的行，幂等。返回实际迁移数。
+        """
+        if not memory_ids:
+            return 0
+        now = time.time()
+        with self.transaction() as conn:
+            changed = 0
+            for start in range(0, len(memory_ids), 500):  # SQLite 999 变量上限防御
+                ids = memory_ids[start : start + 500]
+                placeholders = ",".join("?" * len(ids))
+                cursor = conn.execute(
+                    f"UPDATE memories SET status=?, dormant_at=?, updated_at=? "
+                    f"WHERE id IN ({placeholders}) AND status=?",
+                    (MemoryStatus.DORMANT.value, now, now, *ids, MemoryStatus.ACTIVE.value),
+                )
+                changed += cursor.rowcount
+                if self._fts_available:
+                    conn.execute(
+                        f"DELETE FROM memory_fts WHERE memory_id IN ({placeholders})", ids
+                    )
+        return changed
+
+    def wake_memories(self, memory_ids: list[str]) -> int:
+        """dormant → active。逐条走 set_status（含 evidence 完整性检查与 FTS 恢复），
+        再显式重建向量索引——set_status 不碰向量，等夜间 reindex 最多滞后 24h，
+        唤醒的记忆应立即参与语义召回。返回唤醒数。
+        """
+        woken = 0
+        for memory_id in memory_ids:
+            record = self.get_memory(memory_id)
+            if record is None or record.status != MemoryStatus.DORMANT.value:
+                continue
+            try:
+                self.set_status(memory_id, MemoryStatus.ACTIVE.value)
+            except (ValueError, KeyError) as exc:
+                # ValueError: evidence 被清（理论上 dormant 不脱敏不会发生）
+                # KeyError: record 并发删除（极端场景）
+                # 两种情况跳过而非中断整批
+                logger.warning("wake skipped for %s: %s: %s", memory_id, type(exc).__name__, exc)
+                continue
+            try:
+                from ethan.memory.memory_vectors import index_memory
+
+                index_memory(self.get_memory(memory_id), db_path=self._db_path)
+            except Exception:
+                # sqlite-vec 虚拟表 UNIQUE 约束等异常在 index_memory 内部未必被
+                # 完全吞掉（virtual table 的 OperationalError 有时穿透 Python
+                # try/except）。唤醒失败只意味着该记忆晚一步再索引，不阻塞主链路。
+                logger.debug("[MemoryStore] reindex failed for %s during wake", memory_id, exc_info=True)
+            woken += 1
+        return woken
+
+    def wake_scope(self, scope_type: str, scope_id: str) -> int:
+        """唤醒一个 scope 下全部 dormant 记忆（项目回归时 admission 唤醒钩子 / UI 批量恢复用）。"""
+        ids = [
+            record.id
+            for record in self.list_memories(
+                scope_type=scope_type, scope_id=scope_id,
+                status=MemoryStatus.DORMANT.value, limit=1000,
+            )
+        ]
+        return self.wake_memories(ids)
+
+    def evidence_session_counts(self, *, status: str | None = None) -> dict[str, int]:
+        """按 memory_id 聚合 distinct evidence session 数。夜间批量晋升用——
+        一趟 GROUP BY 拿全量，避免逐条 COUNT。status=None 不过滤（默认只查 active
+        由调用方传）。"""
+        sql = (
+            "SELECT e.memory_id AS memory_id, COUNT(DISTINCT e.source_session_id) AS sessions "
+            "FROM memory_evidence e JOIN memories m ON m.id=e.memory_id"
+        )
+        params: list[Any] = []
+        if status is not None:
+            sql += " WHERE m.status=?"
+            params.append(status)
+        sql += " GROUP BY e.memory_id"
+        rows = self._get_conn().execute(sql, params).fetchall()
+        return {row["memory_id"]: row["sessions"] for row in rows}
+
+    def batch_last_evidence_at(self, memory_ids: list[str]) -> dict[str, float]:
+        """批量查询多条记忆的最后 evidence 时间，返回 {memory_id: timestamp}。
+
+        替代逐条 last_evidence_at 调用，消除 N+1 查询。分 chunk 避免 SQLite 999 变量上限。
+        """
+        if not memory_ids:
+            return {}
+        result: dict[str, float] = {}
+        for i in range(0, len(memory_ids), 500):
+            chunk = memory_ids[i:i + 500]
+            placeholders = ",".join("?" for _ in chunk)
+            rows = self._get_conn().execute(
+                f"SELECT memory_id, MAX(created_at) AS t FROM memory_evidence "
+                f"WHERE memory_id IN ({placeholders}) GROUP BY memory_id",
+                chunk,
+            ).fetchall()
+            for row in rows:
+                if row["t"] is not None:
+                    result[row["memory_id"]] = float(row["t"])
+        return result
+
+    def project_scope_last_activity(self) -> list[tuple[str, float]]:
+        """每个 project scope 的最后活跃时间（用于休眠检测）。
+
+        四路信号取 MAX：updated_at（编辑/强化 bump）、created_at（新准入）、
+        last_recalled_at（召回 touch）、evidence.created_at（兜住历史上
+        add_evidence 不 bump updated_at 的存量数据——没有这路上线首跑会把
+        真实活跃的老项目误判休眠）。
+        """
+        rows = self._get_conn().execute("""
+            SELECT m.scope_id AS scope_id,
+                   MAX(m.updated_at) AS lu, MAX(m.created_at) AS lc,
+                   MAX(m.last_recalled_at) AS lr, MAX(e.created_at) AS le
+            FROM memories m LEFT JOIN memory_evidence e ON e.memory_id=m.id
+            WHERE m.scope_type=? AND m.status=?
+            GROUP BY m.scope_id
+        """, ("project", MemoryStatus.ACTIVE.value)).fetchall()
+        return [
+            (row["scope_id"], max(row["lu"] or 0.0, row["lc"] or 0.0, row["lr"] or 0.0, row["le"] or 0.0))
+            for row in rows
+        ]
+
+    def list_active_tentative(self) -> list[MemoryRecord]:
+        """active 且 structured_data 带 tentative 的 decision/activity（Tier C 扫描集）。
+        LIKE 预筛 + Python 精判（structured_data.get("tentative") is True），
+        decision/activity 子集小。"""
+        rows = self._get_conn().execute(
+            "SELECT * FROM memories WHERE status=? AND memory_type IN ('decision','activity') "
+            "AND structured_data LIKE '%\"tentative\"%' ORDER BY updated_at",
+            (MemoryStatus.ACTIVE.value,),
+        ).fetchall()
+        return [r for r in (self._record_from_row(row) for row in rows)
+                if r.structured_data.get("tentative") is True]
+
+    def set_confidence_quiet(self, memory_id: str, confidence: float) -> None:
+        """只动 confidence，不动 updated_at（单条便捷入口，不变量见批量版）。"""
+        self.bulk_set_confidence_quiet([(memory_id, confidence)])
+
+    def bulk_set_confidence_quiet(self, updates: list[tuple[str, float]]) -> None:
+        """批量只动 confidence，不动 updated_at；整体单事务、一次 commit。
+
+        夜间晋升阶梯的关键不变量：批量晋升若刷新 updated_at 会永久重置 Tier B
+        scope 休眠计时（scope 活跃信号含 MAX(updated_at)），休眠检测失效。
+
+        必须整体走单个事务：若逐条内部 commit，会打断调用方的外层事务
+        （第一条就提前提交，后续退化回逐条自动提交，N 条 N 次 fsync），
+        且中途失败无法整体回滚、留下半批晋升状态。
+        """
+        if not updates:
+            return
+        rows = [
+            (min(1.0, max(0.0, float(confidence))), memory_id)
+            for memory_id, confidence in updates
+        ]
+        with self.transaction() as conn:
+            conn.executemany("UPDATE memories SET confidence=? WHERE id=?", rows)
 
     def touch_recalled(self, memory_ids: list[str]) -> None:
         if not memory_ids:
@@ -1005,6 +1208,7 @@ class MemoryStore:
             source_session_id=row["source_session_id"] or "",source_message_id=row["source_message_id"] or "",
             created_at=row["created_at"],updated_at=row["updated_at"],last_recalled_at=row["last_recalled_at"],
             superseded_by=row["superseded_by"],forgotten_at=row["forgotten_at"],
+            dormant_at=row["dormant_at"],
         )
 
     @staticmethod

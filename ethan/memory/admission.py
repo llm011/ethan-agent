@@ -41,6 +41,16 @@ OBSERVED_MODE = _os.environ.get("ETHAN_ADMISSION_OBSERVED_MODE", "gate")
 # observed candidate to an active inferred memory.
 PROMOTION_SESSION_THRESHOLD = 2
 
+# 跨 scope 偏好配对（ETHAN_MEMORY_PAIR_CROSS_L2）：project 内沉淀的偏好候选
+# → user 级既有偏好的强化通道。场景：「论文做成PPT」在每个项目里都以 project
+# scope 候选出现，同 scope 配对永远配不上 user 级既有偏好——偏好本该在 user
+# 级被反复强化（evidence 独立 session 数 → confidence 晋升）。只补证据永不
+# supersede；阈值比同 scope 配对（0.7）更严。
+CROSS_SCOPE_PAIR_L2 = float(_os.environ.get("ETHAN_MEMORY_PAIR_CROSS_L2", "0.6"))
+# cross-scope 偏好配对的目标 scope 类型 = Tier A 豁免的 user 级 scope。
+# 与 decay.EXEMPT_SCOPE_TYPES 同源，共用一处定义。
+from ethan.memory.decay import EXEMPT_SCOPE_TYPES as CROSS_SCOPE_SCOPE_TYPES
+
 
 @dataclass
 class AdmissionResult:
@@ -64,6 +74,7 @@ class AdmissionPolicy:
 
     def __init__(self, store: MemoryStore):
         self._store = store
+        self._last_same_scope: bool | None = None  # admit_candidate 后可读取
 
     def admit_candidate(self, candidate: MemoryCandidate) -> tuple[str | None, str]:
         """Admit one candidate.
@@ -81,9 +92,13 @@ class AdmissionPolicy:
         # 确定性的 merge/supersede,避免"住在深圳"和"家在深圳南山"各存一条。
         # companion 域不参与(情感记忆的语义合并风险高于收益)。
         if candidate.memory_domain == MemoryDomain.GENERAL.value:
+            self._last_same_scope = None  # 重置上一轮状态，避免泄漏
             pair = self._semantic_pair(candidate)
             if pair is not None:
                 return self._admit_with_pair(candidate, *pair)
+            cross = self._cross_scope_preference_pair(candidate)
+            if cross is not None:
+                return self._reinforce_cross_scope(candidate, *cross)
         level = candidate.evidence_level
         if level in (EvidenceLevel.EXPLICIT.value, EvidenceLevel.CORRECTED.value):
             return self._admit_explicit(candidate)
@@ -113,6 +128,89 @@ class AdmissionPolicy:
             if existing and existing.status == MemoryStatus.ACTIVE.value:
                 return existing, hit["distance"]
         return None
+
+    def _cross_scope_preference_pair(
+        self, candidate: MemoryCandidate
+    ) -> tuple[MemoryRecord, float] | None:
+        """project scope 偏好候选 → user 级既有偏好的跨 scope 配对（只建议，决策护栏全在这里）。
+
+        护栏（全部确定性）：
+        1. 候选必须是 preference.* 维度 + project scope——decision/activity 跨
+           scope 会把项目决策误灌进 user 级偏好；
+        2. evidence ∈ {explicit, inferred}：corrected 的替换语义不该走"只补证据"
+           通道，observed 噪声不值得跨 scope；
+        3. 只找 user/user_domain/user_skill scope 的 active 近邻（Tier A 豁免域，
+           不会反向把 user 偏好灌进别的项目）；
+        4. 既有记忆 dimension 与候选严格相等；
+        5. L2 <= CROSS_SCOPE_PAIR_L2（默认 0.6，比同 scope 的 0.7 严——跨 scope
+           误合并的代价更高）。
+        """
+        if candidate.scope_type != "project":
+            return None
+        if not candidate.dimension.startswith("preference."):
+            return None
+        if candidate.evidence_level not in (
+            EvidenceLevel.EXPLICIT.value, EvidenceLevel.INFERRED.value,
+        ):
+            return None
+        from ethan.memory.memory_vectors import semantic_neighbors
+
+        hits = semantic_neighbors(
+            content=candidate.content,
+            memory_domain=candidate.memory_domain,
+            db_path=self._store.db_path,
+            limit=16,
+        )
+        for hit in hits:
+            if hit["distance"] > CROSS_SCOPE_PAIR_L2:
+                continue
+            existing = self._store.get_memory(hit["id"])
+            if existing is None or existing.status != MemoryStatus.ACTIVE.value:
+                continue
+            if existing.scope_type not in CROSS_SCOPE_SCOPE_TYPES:
+                continue
+            if existing.dimension != candidate.dimension:
+                continue
+            return existing, hit["distance"]
+        return None
+
+    def _reinforce_cross_scope(
+        self, candidate: MemoryCandidate, existing: MemoryRecord, distance: float
+    ) -> tuple[str | None, str]:
+        """跨 scope 强化：只补证据，永不 supersede。
+
+        project 候选配到 user 级偏好 → 证据挂到 user 级记忆上（evidence 独立
+        session 数随之增长，夜间 confidence 晋升自愈"多次发生仍卡 60%"），
+        不新建 project 副本污染项目 scope。
+        """
+        tag = f"cross_scope_reinforced:l2={distance:.3f}"
+        self._store.add_evidence(self._evidence_from_candidate(candidate, existing.id))
+        self._maybe_clear_tentative(existing, candidate)
+        self._store.mark_candidate_processed(
+            candidate.id, CandidateStatus.MERGED.value, tag, existing.id)
+        # 标记是否同 scope 合并：cross-scope 合并不触发 project scope 唤醒
+        self._last_same_scope = (existing.scope_type == candidate.scope_type)
+        return existing.id, OUTCOME_MERGED
+
+    def _maybe_clear_tentative(
+        self, existing: MemoryRecord, candidate: MemoryCandidate
+    ) -> None:
+        """tentative 记忆被非临时候选强化 → 清标。
+
+        「先试试方案A」后来被定稿表述强化（同 scope merge 或跨 scope 配对）时
+        清掉 tentative，退出 Tier C 快速衰减轨道。update_memory 顺带 bump
+        updated_at——清标本身就是强化信号，衰减锚点应重置（decay 不变量 4）。
+        """
+        if existing.structured_data.get("tentative") is not True:
+            return
+        if candidate.structured_data.get("tentative") is True:
+            return
+        data = dict(existing.structured_data)
+        data.pop("tentative", None)
+        try:
+            self._store.update_memory(existing.id, structured_data=data)
+        except Exception:
+            logger.warning("clear tentative flag failed for %s", existing.id, exc_info=True)
 
     def _admit_with_pair(
         self, candidate: MemoryCandidate, existing: MemoryRecord, distance: float
@@ -151,11 +249,13 @@ class AdmissionPolicy:
                     candidate.id, CandidateStatus.ADMITTED.value, f"semantic_superseded:{tag}", record.id)
                 return record.id, OUTCOME_ADMITTED
             self._store.add_evidence(self._evidence_from_candidate(candidate, existing.id))
+            self._maybe_clear_tentative(existing, candidate)
             self._store.mark_candidate_processed(
                 candidate.id, CandidateStatus.MERGED.value, f"semantic_reinforced:{tag}", existing.id)
             return existing.id, OUTCOME_MERGED
         if level == EvidenceLevel.INFERRED.value:
             self._store.add_evidence(self._evidence_from_candidate(candidate, existing.id))
+            self._maybe_clear_tentative(existing, candidate)
             self._store.mark_candidate_processed(
                 candidate.id, CandidateStatus.MERGED.value, f"semantic_merged:{tag}", existing.id)
             return existing.id, OUTCOME_MERGED
@@ -165,6 +265,7 @@ class AdmissionPolicy:
             return None, OUTCOME_PENDING
         self._store.add_evidence(
             self._evidence_from_candidate(candidate, existing.id, EvidenceLevel.INFERRED.value))
+        self._maybe_clear_tentative(existing, candidate)
         self._store.mark_candidate_processed(
             candidate.id, CandidateStatus.MERGED.value, f"semantic_promoted_merge:{tag}", existing.id)
         return existing.id, OUTCOME_MERGED
@@ -208,6 +309,7 @@ class AdmissionPolicy:
             return record.id, OUTCOME_ADMITTED
         # Same explicit content already active — reinforce with additional evidence.
         self._store.add_evidence(self._evidence_from_candidate(candidate, existing.id))
+        self._maybe_clear_tentative(existing, candidate)
         self._store.mark_candidate_processed(candidate.id, CandidateStatus.MERGED.value, "reinforced", existing.id)
         return existing.id, OUTCOME_MERGED
 
@@ -229,6 +331,7 @@ class AdmissionPolicy:
             return record.id, OUTCOME_ADMITTED
         # Reinforce existing active record.
         self._store.add_evidence(self._evidence_from_candidate(candidate, existing.id))
+        self._maybe_clear_tentative(existing, candidate)
         self._store.mark_candidate_processed(candidate.id, CandidateStatus.MERGED.value, "reinforced", existing.id)
         return existing.id, OUTCOME_MERGED
 
@@ -254,6 +357,7 @@ class AdmissionPolicy:
                     )
                     if existing:
                         self._store.add_evidence(self._evidence_from_candidate(candidate, existing.id))
+                        self._maybe_clear_tentative(existing, candidate)
                         self._store.mark_candidate_processed(candidate.id, CandidateStatus.MERGED.value, "reinforced", existing.id)
                         return existing.id, OUTCOME_MERGED
                     self._store.mark_candidate_processed(candidate.id, CandidateStatus.REJECTED.value, "race")
@@ -276,6 +380,7 @@ class AdmissionPolicy:
             )
             if existing:
                 self._store.add_evidence(self._evidence_from_candidate(candidate, existing.id, EvidenceLevel.INFERRED.value))
+                self._maybe_clear_tentative(existing, candidate)
                 self._store.mark_candidate_processed(candidate.id, CandidateStatus.MERGED.value, "reinforced", existing.id)
                 return existing.id, OUTCOME_MERGED
             self._store.mark_candidate_processed(candidate.id, CandidateStatus.REJECTED.value, "race")
@@ -311,6 +416,8 @@ class AdmissionPolicy:
         merged: list[str] = []
         rejected: list[str] = []
         disputed: list[str] = []
+        # 收集需要唤醒的 project scope，循环后一次性唤醒（避免逐 candidate 重复扫描）
+        scopes_to_wake: set[tuple[str, str]] = set()
         for candidate in candidates:
             try:
                 memory_id, outcome = self.admit_candidate(candidate)
@@ -331,14 +438,27 @@ class AdmissionPolicy:
             if outcome == OUTCOME_MERGED:
                 if memory_id:
                     merged.append(memory_id)
+                    # 只有同 scope 合并才唤醒 project scope；
+                    # cross-scope 合并（_reinforce_cross_scope）只是往 user scope 补证据，
+                    # project scope 没有新活动，不需要唤醒
+                    if (candidate.scope_type == "project" and candidate.scope_id
+                            and self._last_same_scope is not False):
+                        scopes_to_wake.add(("project", candidate.scope_id))
                 continue
             # OUTCOME_ADMITTED — a new/active memory was produced.
             if memory_id is None:
                 continue
             admitted.append(memory_id)
+            if candidate.scope_type == "project" and candidate.scope_id:
+                scopes_to_wake.add(("project", candidate.scope_id))
             key_scope = (candidate.memory_key, candidate.scope_type, candidate.scope_id, candidate.memory_domain)
             if self._has_conflicting_evidence(key_scope, exclude_memory_id=memory_id):
                 disputed.append(memory_id)
+        # 统一唤醒所有有新候选落地的 project scope（一次扫描，避免逐 candidate 重复）
+        if scopes_to_wake:
+            from ethan.memory.decay import wake_scope_dormant
+            for scope_type, scope_id in scopes_to_wake:
+                wake_scope_dormant(self._store, scope_type, scope_id)
         return AdmissionResult(admitted=admitted, merged=merged, rejected=rejected, disputed=disputed)
 
     def _has_conflicting_evidence(self, key_scope: tuple[str, str, str, str], *, exclude_memory_id: str) -> bool:
