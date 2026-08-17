@@ -120,29 +120,29 @@ function MonthCalendar({ currentDate, eventDates, onSelectDate }: {
   const selectedKey = dateKey(currentDate);
 
   return (
-    <div className="px-4 py-3 border-b border-border shrink-0">
+    <div className="px-3 py-3 shrink-0">
       <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <button onClick={prevMonth} className="p-1 rounded hover:bg-muted transition-colors">
-            <ChevronLeft className="h-4 w-4 text-muted-foreground" />
+        <div className="flex items-center gap-1">
+          <button onClick={prevMonth} className="p-0.5 rounded hover:bg-muted transition-colors">
+            <ChevronLeft className="h-3.5 w-3.5 text-muted-foreground" />
           </button>
-          <span className="text-sm font-medium min-w-[80px] text-center">
+          <span className="text-xs font-medium min-w-[70px] text-center">
             {displayMonth.getFullYear()}年{displayMonth.getMonth() + 1}月
           </span>
-          <button onClick={nextMonth} className="p-1 rounded hover:bg-muted transition-colors">
-            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          <button onClick={nextMonth} className="p-0.5 rounded hover:bg-muted transition-colors">
+            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
           </button>
         </div>
         <button
           onClick={goToday}
-          className="text-xs text-primary hover:text-primary/80 font-medium px-2 py-0.5 rounded hover:bg-primary/10 transition-colors"
+          className="text-[10px] text-primary hover:text-primary/80 font-medium px-1.5 py-0.5 rounded hover:bg-primary/10 transition-colors"
         >
           今天
         </button>
       </div>
       <div className="grid grid-cols-7 gap-0">
         {WEEKDAY_SHORT.map(w => (
-          <div key={w} className="text-center text-[10px] text-muted-foreground py-1">{w}</div>
+          <div key={w} className="text-center text-[9px] text-muted-foreground py-0.5">{w}</div>
         ))}
         {cells.map((date, i) => {
           if (!date) return <div key={`empty-${i}`} />;
@@ -154,7 +154,7 @@ function MonthCalendar({ currentDate, eventDates, onSelectDate }: {
             <button
               key={key}
               onClick={() => onSelectDate(key)}
-              className={`relative flex flex-col items-center justify-center h-7 rounded-md text-xs transition-colors ${
+              className={`relative flex flex-col items-center justify-center h-6 rounded text-[11px] transition-colors ${
                 isSelected
                   ? "bg-primary text-primary-foreground"
                   : isToday
@@ -164,7 +164,7 @@ function MonthCalendar({ currentDate, eventDates, onSelectDate }: {
             >
               {date.getDate()}
               {hasEvent && (
-                <span className={`absolute bottom-0.5 w-1 h-1 rounded-full ${
+                <span className={`absolute bottom-0 w-1 h-1 rounded-full ${
                   isSelected ? "bg-primary-foreground" : "bg-primary"
                 }`} />
               )}
@@ -487,124 +487,127 @@ export function AgendaView() {
         </div>
       </header>
 
-      {/* 月历导航 */}
-      <MonthCalendar
-        currentDate={selectedDate}
-        eventDates={eventDates}
-        onSelectDate={handleSelectDate}
-      />
-
-      {/* Agent 日程工具开关 */}
-      <div className="border-b border-border px-4 py-2 flex items-center justify-between gap-4 shrink-0">
-        <div className="flex items-center gap-2 min-w-0">
-          <BellRing className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <span className="text-xs text-muted-foreground">Agent 日程工具</span>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          {togglingEnabled && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
-          <button
-            onClick={() => void toggleEnabled(!enabled)}
-            role="switch"
-            aria-checked={enabled}
-            className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors ${enabled ? "bg-primary" : "bg-muted"}`}
-          >
-            <span
-              className={`inline-block h-3 w-3 transform rounded-full bg-background transition-transform ${enabled ? "translate-x-3.5" : "translate-x-0.5"}`}
-            />
-          </button>
-        </div>
-      </div>
-
-      {/* 时间轴 */}
-      <div ref={timelineRef} className="flex-1 overflow-y-auto p-4 pt-3">
-        {loading && events.length === 0 ? (
-          <div className="flex items-center justify-center h-full pt-10">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          </div>
-        ) : dateGroups.length === 0 ? (
-          <div className="text-center text-muted-foreground pt-10">
-            暂无日程，点击右上角「添加」创建
-          </div>
-        ) : (
-          <div className="relative pl-2">
-            <div className="absolute left-[91px] top-0 bottom-0 w-px bg-border" />
-            {dateGroups.map((group, gi) => {
-              const prevGroup = gi > 0 ? dateGroups[gi - 1] : null;
-              const showYearMonth = gi === 0 || !prevGroup || prevGroup.year !== group.year || prevGroup.month !== group.month;
-              return (
-                <div
-                  key={group.key}
-                  className="relative"
-                  ref={(el) => { if (el) groupRefs.current.set(group.key, el); }}
-                >
-                  {showYearMonth && (
-                    <div className="flex items-baseline gap-1 shrink-0 min-w-[80px] mb-2 mt-4 first:mt-0">
-                      <span className="text-lg font-bold text-foreground">{group.month}月</span>
-                      <span className="text-xs text-muted-foreground">{group.year}</span>
-                    </div>
-                  )}
-                  <div className="flex gap-0">
-                    <div className="w-[80px] shrink-0 pt-1 flex items-baseline gap-1.5">
-                      <span className="text-xs font-semibold text-muted-foreground">{group.day}日</span>
-                      {group.isToday && (
-                        <span className="text-[10px] text-primary font-medium">今天</span>
-                      )}
-                    </div>
-                    <div className="relative flex-1 pb-4">
-                      {group.events.map((ev) => {
-                        const d = (ev.status === "pending" && ev.next_run_time)
-                          ? new Date(ev.next_run_time)
-                          : parseWhen(ev.when);
-                        const timeStr = d && !isNaN(d.getTime())
-                          ? d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })
-                          : "--:--";
-                        const badge = STATUS_BADGE[ev.status] || STATUS_BADGE.pending;
-                        const rep = repeatLabel(ev);
-                        return (
-                          <div key={ev.id} className="relative flex items-start gap-3 group mb-2 last:mb-0">
-                            <div className={`relative z-10 mt-2.5 w-[7px] h-[7px] rounded-full shrink-0 ring-2 ring-background ${
-                              ev.status === "pending" ? "bg-primary" : ev.status === "missed" ? "bg-destructive" : "bg-muted-foreground/40"
-                            }`} />
-                            <span className="text-[11px] font-mono text-muted-foreground mt-2 w-[38px] shrink-0">{timeStr}</span>
-                            <div className={`flex-1 min-w-0 max-w-[520px] border border-border/50 rounded-lg px-3 py-2 transition-colors hover:border-border hover:bg-muted/20 ${
-                              ev.status === "done" ? "opacity-60" : ""
-                            }`}>
-                              <div className="flex items-center justify-between gap-2">
-                                <div className="flex items-center gap-2 min-w-0">
-                                  <span className={`text-sm font-medium truncate ${ev.status === "done" ? "line-through" : ""}`}>{ev.title}</span>
-                                  <Badge variant={badge.variant} className="text-[9px] px-1.5 py-0 h-4 shrink-0">{badge.label}</Badge>
-                                  {rep && (
-                                    <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 shrink-0">{rep}</Badge>
-                                  )}
-                                </div>
-                                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                                  {ev.status !== "done" && (
-                                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => void doComplete(ev)} title="标记完成">
-                                      <Check className="h-3 w-3" />
+      {/* 左右布局：左侧时间轴（主体） + 右侧月历 */}
+      <div className="flex flex-1 min-h-0">
+        {/* 左侧：时间轴 */}
+        <div ref={timelineRef} className="flex-1 overflow-y-auto p-4 pt-3 min-w-0">
+          {loading && events.length === 0 ? (
+            <div className="flex items-center justify-center h-full pt-10">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+          ) : dateGroups.length === 0 ? (
+            <div className="text-center text-muted-foreground pt-10">
+              暂无日程，点击右上角「添加」创建
+            </div>
+          ) : (
+            <div className="relative pl-2">
+              <div className="absolute left-[91px] top-0 bottom-0 w-px bg-border" />
+              {dateGroups.map((group, gi) => {
+                const prevGroup = gi > 0 ? dateGroups[gi - 1] : null;
+                const showYearMonth = gi === 0 || !prevGroup || prevGroup.year !== group.year || prevGroup.month !== group.month;
+                return (
+                  <div
+                    key={group.key}
+                    className="relative"
+                    ref={(el) => { if (el) groupRefs.current.set(group.key, el); }}
+                  >
+                    {showYearMonth && (
+                      <div className="flex items-baseline gap-1 shrink-0 min-w-[80px] mb-2 mt-4 first:mt-0">
+                        <span className="text-lg font-bold text-foreground">{group.month}月</span>
+                        <span className="text-xs text-muted-foreground">{group.year}</span>
+                      </div>
+                    )}
+                    <div className="flex gap-0">
+                      <div className="w-[80px] shrink-0 pt-1 flex items-baseline gap-1.5">
+                        <span className="text-xs font-semibold text-muted-foreground">{group.day}日</span>
+                        {group.isToday && (
+                          <span className="text-[10px] text-primary font-medium">今天</span>
+                        )}
+                      </div>
+                      <div className="relative flex-1 pb-4">
+                        {group.events.map((ev) => {
+                          const d = (ev.status === "pending" && ev.next_run_time)
+                            ? new Date(ev.next_run_time)
+                            : parseWhen(ev.when);
+                          const timeStr = d && !isNaN(d.getTime())
+                            ? d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })
+                            : "--:--";
+                          const badge = STATUS_BADGE[ev.status] || STATUS_BADGE.pending;
+                          const rep = repeatLabel(ev);
+                          return (
+                            <div key={ev.id} className="relative flex items-start gap-3 group mb-2 last:mb-0">
+                              <div className={`relative z-10 mt-2.5 w-[7px] h-[7px] rounded-full shrink-0 ring-2 ring-background ${
+                                ev.status === "pending" ? "bg-primary" : ev.status === "missed" ? "bg-destructive" : "bg-muted-foreground/40"
+                              }`} />
+                              <span className="text-[11px] font-mono text-muted-foreground mt-2 w-[38px] shrink-0">{timeStr}</span>
+                              <div className={`flex-1 min-w-0 border border-border/50 rounded-lg px-3 py-2 transition-colors hover:border-border hover:bg-muted/20 ${
+                                ev.status === "done" ? "opacity-60" : ""
+                              }`}>
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <span className={`text-sm font-medium truncate ${ev.status === "done" ? "line-through" : ""}`}>{ev.title}</span>
+                                    <Badge variant={badge.variant} className="text-[9px] px-1.5 py-0 h-4 shrink-0">{badge.label}</Badge>
+                                    {rep && (
+                                      <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 shrink-0">{rep}</Badge>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                                    {ev.status !== "done" && (
+                                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => void doComplete(ev)} title="标记完成">
+                                        <Check className="h-3 w-3" />
+                                      </Button>
+                                    )}
+                                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setDialogState({ open: true, editing: ev })} title="编辑">
+                                      <Pencil className="h-3 w-3" />
                                     </Button>
-                                  )}
-                                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setDialogState({ open: true, editing: ev })} title="编辑">
-                                    <Pencil className="h-3 w-3" />
-                                  </Button>
-                                  <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive/70 hover:text-destructive" onClick={() => setConfirmState({ open: true, id: ev.id })} title="删除">
-                                    <Trash2 className="h-3 w-3" />
-                                  </Button>
+                                    <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive/70 hover:text-destructive" onClick={() => setConfirmState({ open: true, id: ev.id })} title="删除">
+                                      <Trash2 className="h-3 w-3" />
+                                    </Button>
+                                  </div>
                                 </div>
+                                {ev.note && (
+                                  <p className="mt-1 text-[11px] text-muted-foreground whitespace-pre-wrap break-words line-clamp-2">{ev.note}</p>
+                                )}
                               </div>
-                              {ev.note && (
-                                <p className="mt-1 text-[11px] text-muted-foreground whitespace-pre-wrap break-words line-clamp-2">{ev.note}</p>
-                              )}
                             </div>
-                          </div>
-                        );
-                      })}
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* 右侧：月历 + Agent 开关 */}
+        <div className="w-[220px] shrink-0 border-l border-border flex flex-col">
+          <MonthCalendar
+            currentDate={selectedDate}
+            eventDates={eventDates}
+            onSelectDate={handleSelectDate}
+          />
+          <div className="px-3 py-2 flex items-center justify-between gap-2 mt-auto border-t border-border">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <BellRing className="h-3 w-3 shrink-0 text-muted-foreground" />
+              <span className="text-[10px] text-muted-foreground truncate">Agent 工具</span>
+            </div>
+            <div className="flex items-center gap-1 shrink-0">
+              {togglingEnabled && <Loader2 className="h-2.5 w-2.5 animate-spin text-muted-foreground" />}
+              <button
+                onClick={() => void toggleEnabled(!enabled)}
+                role="switch"
+                aria-checked={enabled}
+                className={`relative inline-flex h-3.5 w-6 shrink-0 items-center rounded-full transition-colors ${enabled ? "bg-primary" : "bg-muted"}`}
+              >
+                <span
+                  className={`inline-block h-2.5 w-2.5 transform rounded-full bg-background transition-transform ${enabled ? "translate-x-3" : "translate-x-0.5"}`}
+                />
+              </button>
+            </div>
           </div>
-        )}
+        </div>
       </div>
     </div>
   );
