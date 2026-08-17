@@ -154,6 +154,14 @@ class AnthropicProvider(BaseProvider):
                     })
                 if msg.content:
                     content.append({"type": "text", "text": msg.content})
+                # 非 vision 模型：剥离图片 blocks，只保留文本。
+                # GLM/Kimi 等通过 Anthropic 协议中转时，不支持 image content blocks，
+                # 会导致 400 "Input should be a valid string" 格式校验失败。
+                model = (self._model or "").lower()
+                _vision_kws = ("vision", "gpt-4o", "gpt-4.1", "claude", "gemini", "glm-4v")
+                if not any(kw in model for kw in _vision_kws):
+                    text_only = [p["text"] for p in content if isinstance(p, dict) and p.get("type") == "text"]
+                    content = [{"type": "text", "text": "\n".join(text_only)}] if text_only else [{"type": "text", "text": ""}]
                 result.append({"role": "user", "content": content})
             else:
                 result.append({"role": msg.role, "content": msg.content})

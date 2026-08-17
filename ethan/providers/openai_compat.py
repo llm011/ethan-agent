@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import AsyncIterator, Optional
+from typing import Any, AsyncIterator, Optional
 from urllib.parse import urlparse
 
 import httpx
@@ -123,6 +123,14 @@ class OpenAICompatProvider(BaseProvider):
 
         # 末尾剩余的图片消息（最后一组 tool messages 后面没有后续消息时）
         result.extend(pending_img_messages)
+
+        # 非 vision 模型：剥离 content 中的图片 blocks，只保留文本。
+        # GLM-5.2 等模型的 content 必须是 string，image_url blocks 会导致 400 格式校验失败。
+        if not self._supports_vision():
+            for msg_dict in result:
+                if isinstance(msg_dict.get("content"), list):
+                    msg_dict["content"] = self._strip_images_from_content(msg_dict["content"])
+
         return result
 
     def _to_openai_tools(self, tools: list[ToolDefinition]) -> list[dict]:
@@ -319,6 +327,8 @@ class OpenAICompatProvider(BaseProvider):
     # --- reasoning / thinking 协议（DeepSeek R1 / deepseek-reasoner / 兼容 reasoning_content 的转发）---
 
     _REASONING_MODEL_PATTERNS = ("deepseek-r1", "deepseek-reasoner")
+    # 支持图像输入的模型关键词；不匹配的模型发送消息时会剥离图片 content blocks
+    _VISION_KEYWORDS = ("vision", "gpt-4o", "gpt-4.1", "claude", "gemini", "glm-4v", "glm-4.0v")
 
     def _wants_reasoning(self) -> bool:
         """当前模型是否走 reasoning 协议（序列化历史 reasoning_content + 注入顶层 thinking）。
@@ -329,6 +339,27 @@ class OpenAICompatProvider(BaseProvider):
         """
         model = (self._model or "").lower()
         return any(k in model for k in self._REASONING_MODEL_PATTERNS)
+
+    def _supports_vision(self) -> bool:
+        """检查当前模型是否支持图像输入（content 中可含 image_url blocks）。"""
+        model = (self._model or "").lower()
+        return any(kw in model for kw in self._VISION_KEYWORDS)
+
+    @staticmethod
+    def _strip_images_from_content(content: Any) -> Any:
+        """剥离 content 中的图片 blocks，只保留文本部分。
+        非 vision 模型（如 GLM-5.2）不接受 image_url content blocks，
+        如果不剥离会导致 400 "Input should be a valid string" 格式校验失败。"""
+        if not isinstance(content, list):
+            return content
+        text_parts = []
+        for part in content:
+            if isinstance(part, dict):
+                if part.get("type") == "text":
+                    text_parts.append(part.get("text", ""))
+            elif isinstance(part, str):
+                text_parts.append(part)
+        return "\n".join(text_parts) if text_parts else ""
 
     def _skip_thinking_field(self) -> bool:
         """直连 DeepSeek 官方 API 时不传顶层 thinking 字段：

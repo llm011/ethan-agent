@@ -235,6 +235,11 @@ def main() -> int:
                     {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{png_b64}"}},
                 ]}],
             )
+            if not resp.choices:
+                last_err = "API 返回空 choices 列表（网关限流或模型过载）"
+                wait = backoffs[min(attempt, len(backoffs) - 1)]
+                time.sleep(wait)
+                continue
             msg = resp.choices[0].message
             # 部分中转网关把结构化输出包成 tool_call
             text = (msg.content or "").strip()
