@@ -8,6 +8,8 @@
 """
 from __future__ import annotations
 
+import re
+
 CATALOG = "https://a2ui.org/specification/v0_9_1/catalogs/basic/catalog.json"
 
 
@@ -24,6 +26,11 @@ def _text(v: str) -> str:
     if not isinstance(v, str):
         v = str(v)
     return v.replace("\\n", "\n")
+
+
+def _clean_bullet(t: str) -> str:
+    """清理开头的列表前缀符号（如 '- ', '* ', '• ', '+ ' 等），避免与模板自带的 bullet 叠加。"""
+    return re.sub(r"^(?:[•\-\*\+]\s*)+", "", t.strip())
 
 
 def _build_compare(card: dict) -> list[dict]:
@@ -144,6 +151,7 @@ def _extract_body_items(node: dict) -> list[str] | None:
 
     字段优先级：items（推荐，与 rank/stats 命名一致）> body。
     body 支持 str | list[str]：str 按真换行切块，list[str] 直接用。
+    自动剔除条目开头的 `- `、`• ` 等 bullet 标号，避免与模板生成的 bullet 叠加。
     """
     src = node.get("items")
     if src is None:
@@ -153,12 +161,12 @@ def _extract_body_items(node: dict) -> list[str] | None:
     if isinstance(src, list):
         items: list[str] = []
         for x in src:
-            t = _text(x)
-            if t.strip():
-                items.append(t.strip())
+            t = _clean_bullet(_text(x))
+            if t:
+                items.append(t)
         return items or None
     text = _text(src)
-    lines = [ln.strip() for ln in text.split("\n")]
+    lines = [_clean_bullet(ln) for ln in text.split("\n")]
     lines = [ln for ln in lines if ln]
     return lines or None
 
