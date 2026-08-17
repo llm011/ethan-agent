@@ -569,6 +569,17 @@ export function Sidebar() {
         <Button
           variant="ghost"
           className={`w-full justify-start h-9 px-3 ${
+            pathname === "/agenda"
+              ? "bg-accent text-accent-foreground"
+              : "text-muted-foreground"
+          }`}
+          onClick={() => navigate("/agenda")}
+        >
+          <CalendarDays className="h-4 w-4 mr-2" /> 日程 (Agenda)
+        </Button>
+        <Button
+          variant="ghost"
+          className={`w-full justify-start h-9 px-3 ${
             pathname === "/memory"
               ? "bg-accent text-accent-foreground"
               : "text-muted-foreground"
@@ -609,17 +620,6 @@ export function Sidebar() {
           onClick={() => navigate("/schedule")}
         >
           <Clock className="h-4 w-4 mr-2" /> 定时任务 (Schedule)
-        </Button>
-        <Button
-          variant="ghost"
-          className={`w-full justify-start h-9 px-3 ${
-            pathname === "/agenda"
-              ? "bg-accent text-accent-foreground"
-              : "text-muted-foreground"
-          }`}
-          onClick={() => navigate("/agenda")}
-        >
-          <CalendarDays className="h-4 w-4 mr-2" /> 日程 (Agenda)
         </Button>
         <Button
           variant="ghost"
