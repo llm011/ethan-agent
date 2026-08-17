@@ -50,8 +50,9 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           mkdir -p web/public
-          LATEST_TAG=$(gh release list --repo "$REPO" --limit 30 --json tagName,assets \
-            -q '[.[] | select(.assets[]?.name == "latest.json")] | .[0].tagName')
+          # gh release list --json 不支持 assets 字段，走 REST API（响应原生含 assets 数组）
+          LATEST_TAG=$(gh api "repos/$REPO/releases?per_page=30" \
+            -q '[.[] | select(.assets[]?.name == "latest.json")] | .[0].tag_name // empty')
           if [ -n "$LATEST_TAG" ]; then
             gh release download "$LATEST_TAG" --repo "$REPO" --pattern "latest.json" --dir web/public
             echo "Fetched latest.json from release $LATEST_TAG"

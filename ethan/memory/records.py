@@ -31,6 +31,7 @@ class MemoryStatus(StrEnum):
     DISPUTED = "disputed"
     SUPERSEDED = "superseded"
     EXPIRED = "expired"
+    DORMANT = "dormant"
     FORGOTTEN = "forgotten"
 
 
@@ -133,6 +134,7 @@ class MemoryRecord:
     last_recalled_at: float | None = None
     superseded_by: str | None = None
     forgotten_at: float | None = None
+    dormant_at: float | None = None
 
     def __post_init__(self) -> None:
         self.memory_type = _enum_value(self.memory_type, MemoryType, "memory_type")
@@ -162,6 +164,8 @@ class MemoryRecord:
         if self.valid_from is not None and self.valid_until is not None:
             if self.valid_until < self.valid_from:
                 raise ValueError("valid_until cannot precede valid_from")
+        if self.dormant_at is not None:
+            self.dormant_at = float(self.dormant_at)
         if self.memory_domain == MemoryDomain.COMPANION.value:
             if self.memory_type != MemoryType.COMPANION.value:
                 raise ValueError("companion domain requires companion memory_type")
@@ -172,7 +176,7 @@ class MemoryRecord:
         # preference / activity.*→activity / methodology.*→methodology / 其余→
         # task_context），与 classifier.infer_memory_role 同口径。显式传入的合法值
         # 优先，允许调用方覆盖推断结果；非法值回退推断。
-        from ethan.memory.classifier import infer_memory_role, MEMORY_ROLES
+        from ethan.memory.classifier import MEMORY_ROLES, infer_memory_role
 
         if not self.memory_role or self.memory_role not in MEMORY_ROLES:
             self.memory_role = infer_memory_role(self.dimension)

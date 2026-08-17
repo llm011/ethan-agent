@@ -31,6 +31,9 @@ _EXTRACTION_MAX_TOKENS = 16384
 # Dimensions allowed per memory_type are defined in the registry
 # (ethan/memory/dimensions.py) — 白名单校验与 prompt 维度段落都由注册表生成，
 # 保证模型看到的维度与校验集合严格一致。custom.* 前缀维度放行但强制 observed。
+# tentative 标记只对 decision/activity 有效（与 decay.TENTATIVE_MEMORY_TYPES
+# 同源，避免两处白名单漂移）
+from ethan.memory.decay import TENTATIVE_MEMORY_TYPES as _TENTATIVE_TYPES  # noqa: E402
 from ethan.memory.dimensions import CUSTOM_PREFIX, build_dimension_prompt, valid_dimensions  # noqa: E402
 
 # 苏念陪伴模式情感提取的完整 system prompt(职责/边界/禁止项/状态机)。
@@ -291,6 +294,8 @@ class StructuredMemoryExtractor:
             "一次性行为标 observed；用户明确陈述标 explicit（口语化、一句话的简短陈述也算 explicit）；"
             "用户明确纠正标 corrected。\n"
             "不要把单次行为泛化为稳定人格特征。\n"
+            "决定/活动分清临时与定稿：临时的（先试试/暂时/就这一次/待定）把 tentative 设为 true，"
+            "这类记忆会快速衰减；用户明确定稿的（定了/最终/以后都这样）省略 tentative 字段。\n"
             "scope_type 只能是 user/user_domain/user_skill/project/mode 之一。\n"
             "一段对话可能包含多个值得记住的事实：请逐句检查每条用户消息，不要遗漏。\n"
             "用户说「别/不要/不喜欢/别再用」也是明确的负面偏好（preference.negative），同样值得提取。"
@@ -317,6 +322,7 @@ class StructuredMemoryExtractor:
             '"scope_type":"user|user_domain|user_skill|project|mode","scope_id":"...",'
             '"message_id":<引用的 msg_id>,"quote":"用户原文精确子串",'
             '"confidence":0~1,"importance":0~1,"valid_until":<unix秒或null>,'
+            '"tentative":true|false,'
             '"structured":{...}'
             "}]}\n\n"
             "dimension 必须完整照抄下列维度名(含 memory_type 前缀),不得省略前缀、不得自造;"
@@ -397,6 +403,21 @@ class StructuredMemoryExtractor:
             raise ValueError("structured must be an object")
         if memory_type == MemoryType.METHODOLOGY.value:
             _validate_methodology_structured(structured)
+
+        # tentative（"先试试"类临时决定）：写入 structured_data.tentative=True，
+        # 供 Tier C 快速衰减轨道判定（见 decay.memory_tier）。只认 decision/
+        # activity，其他类型静默丢弃——偏好/方法论没有"临时"语义。模型输出
+        # 形状不稳：布尔真或 "true"/"1"/"yes" 字符串都算真。
+        tentative_raw = item.get("tentative")
+        tentative = (
+            tentative_raw is True
+            or (
+                isinstance(tentative_raw, str)
+                and tentative_raw.strip().lower() in {"true", "1", "yes"}
+            )
+        )
+        if tentative and memory_type in _TENTATIVE_TYPES:
+            structured = {**structured, "tentative": True}
 
         # Companion safety: reject diagnostic / personality labels anywhere in content.
         # companion 模式下对全部类型生效——诊断标签不管被标成什么 memory_type

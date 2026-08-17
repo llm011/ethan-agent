@@ -180,6 +180,7 @@ class _StructuredRecordApi(BaseModel):
     updated_at: float
     last_recalled_at: float | None = None
     superseded_by: str | None = None
+    dormant_at: float | None = None
 
 
 class _UpdateRecordRequest(BaseModel):
@@ -222,6 +223,7 @@ def _record_to_api(record) -> _StructuredRecordApi:
         updated_at=record.updated_at,
         last_recalled_at=record.last_recalled_at,
         superseded_by=record.superseded_by,
+        dormant_at=record.dormant_at,
     )
 
 
@@ -320,6 +322,23 @@ async def list_records(
         store.close()
 
 
+@router.post("/records/wake-scope")
+async def wake_scope_records(
+    scope_type: str = Query(..., description="scope type, e.g. project"),
+    scope_id: str = Query(..., description="scope id, e.g. project name"),
+    user_id: str = Depends(verify_token),
+):
+    """唤醒一个 scope 下全部 dormant 记忆（项目回归 / 手动批量恢复）。"""
+    from ethan.memory.decay import wake_scope_dormant
+
+    store = _structured_store()
+    try:
+        woken = wake_scope_dormant(store, scope_type, scope_id)
+        return {"ok": True, "woken": woken}
+    finally:
+        store.close()
+
+
 @router.get("/records/{memory_id}")
 async def get_record(memory_id: str, user_id: str = Depends(verify_token)):
     store = _structured_store()
@@ -398,6 +417,23 @@ async def confirm_record(memory_id: str, user_id: str = Depends(verify_token)):
         policy.admit_candidate(candidate)
         record = store.get_memory(memory_id)
         return {"ok": True, "record": _record_to_api(record).model_dump() if record else None}
+    finally:
+        store.close()
+
+
+@router.post("/records/{memory_id}/wake")
+async def wake_record(memory_id: str, user_id: str = Depends(verify_token)):
+    """唤醒单条 dormant 记忆回 active（重新参与召回）。非 dormant 返回 400。"""
+    store = _structured_store()
+    try:
+        record = store.get_memory(memory_id)
+        if not record:
+            raise HTTPException(404, "Memory not found")
+        from ethan.memory.records import MemoryStatus
+        if record.status != MemoryStatus.DORMANT.value:
+            raise HTTPException(400, "Memory is not dormant")
+        woken = store.wake_memories([memory_id])
+        return {"ok": True, "woken": woken, "record": _record_to_api(store.get_memory(memory_id)).model_dump()}
     finally:
         store.close()
 

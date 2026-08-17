@@ -286,7 +286,7 @@ export async function consumeStream(
       }
     }
   } catch (err) {
-    if (err instanceof DOMException && err.name === "AbortError") {
+    if ((err as { name?: string })?.name === "AbortError") {
       setConsentRequest(null);
       setCleanupConfirm(null);
       setAskUserRequest(null);
@@ -294,7 +294,7 @@ export async function consumeStream(
       return { failed: false };
     }
     const errMsg = err instanceof Error ? err.message : "";
-    const isNetworkDrop = /load failed|network|aborted|connection|SSE connection dropped/i.test(errMsg);
+    const isNetworkDrop = /load failed|network|connection|SSE connection dropped/i.test(errMsg);
     if (isNetworkDrop && activeSession) {
       // WebKit 网络中断 / SSE 静默断开 — 尝试重连活跃 run，失败再拉最终结果
       try {

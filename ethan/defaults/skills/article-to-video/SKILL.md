@@ -1,7 +1,7 @@
 ---
 name: article-to-video
-description: "把主题、文章正文、本地 Markdown/TXT 文件或公开 URL 制作成带 AI 剧本、Edge TTS 配音、动态字幕和 Remotion 动画的 MP4 视频。当用户说文章转视频、主题做视频、URL 做视频、生成口播视频、制作短视频或要求交付配音成片时使用。"
-trigger: "文章转视频|主题做视频|URL转视频|链接转视频|网页转视频|生成视频|制作视频|口播视频|配音视频|短视频|article to video|topic to video|remotion video"
+description: "把主题、文章正文、本地 Markdown/TXT 文件或公开 URL 制作成带 AI 剧本、Edge TTS 配音、动态字幕和 Open Motion 动画的 MP4 视频。当用户说文章转视频、主题做视频、URL 做视频、生成口播视频、制作短视频或要求交付配音成片时使用。"
+trigger: "文章转视频|主题做视频|URL转视频|链接转视频|网页转视频|生成视频|制作视频|口播视频|配音视频|短视频|article to video|topic to video|open motion video"
 version: 0.1.0
 ---
 
@@ -53,16 +53,34 @@ python3 ~/.ethan/skills/article-to-video/scripts/video_pipeline.py \
 for cmd in uv node pnpm; do command -v "$cmd" >/dev/null || echo "MISSING: $cmd"; done
 ```
 
-使用 `uv` 临时注入 `edge-tts`，避免把可选依赖加入 Ethan 主安装包：
+使用 `uv` 临时注入 `edge-tts`，避免把可选依赖加入 Ethan 主安装包。**渲染耗时较长（5-15 分钟），必须后台运行**：
 
 ```bash
-uv run --isolated --no-project --with 'edge-tts>=7,<8' python \
+# 后台渲染，日志写入文件，不阻塞 agent
+nohup uv run --isolated --no-project --with 'edge-tts>=7,<8' python \
   ~/.ethan/skills/article-to-video/scripts/video_pipeline.py run \
   --manifest "$PROJECT/manifest.json" \
-  --output-dir "$PROJECT"
+  --output-dir "$PROJECT" \
+  > "$PROJECT/render.log" 2>&1 &
+
+RENDER_PID=$!
+echo "渲染已启动，PID: $RENDER_PID，日志: $PROJECT/render.log"
+
+# 等待 5 秒后开始轮询进度
+sleep 5
+while kill -0 $RENDER_PID 2>/dev/null; do
+  tail -3 "$PROJECT/render.log"
+  echo "---"
+  sleep 30
+done
+
+# 渲染完成，检查结果
+tail -5 "$PROJECT/render.log"
 ```
 
-脚本会按场景原子缓存音频与 SRT、合并全局字幕、生成 Remotion timeline、用实际语音检查目标时长、懒安装锁定的 Node 依赖、在隔离目录渲染并校验 H.264/AAC MP4，再原子发布成片和封面。首次运行需要联网安装 `edge-tts`、Node 依赖和 Remotion Chromium；Remotion v4 自带 FFmpeg，不要求系统安装。
+脚本会按场景原子缓存音频与 SRT、合并全局字幕、生成 Open Motion timeline、用实际语音检查目标时长、懒安装锁定的 Node 依赖、在隔离目录渲染并校验 H.264/AAC MP4，再原子发布成片和封面。首次运行需要联网安装 `edge-tts`、Node 依赖和 Playwright Chromium；Open Motion 渲染依赖系统已安装 FFmpeg。
+
+渲染进度会在日志中实时报告：`Step 1/5: TTS` → `Step 2/5: Timeline` → `Step 3/5: Frames (1200/5289, 23%)` → `Step 4/5: Encode` → `Step 5/5: Verify`。
 
 Edge TTS 是第三方库连接的在线服务。网络失败时最多重试三次；仍失败则保留项目并报告可重跑命令。不要声称它有官方 SLA。
 
@@ -96,7 +114,6 @@ deliver_file(path="<PROJECT绝对路径>/deliverables.zip", title="<视频标题
 - 尊重文章来源和图片版权；未获授权时只做代码生成视觉，不重新分发原文图片。
 - 不自动发布到社交平台，不自动上传云端。
 - 不把用户全文、URL 内容或音频发送给 Edge TTS 以外的额外服务。
-- Remotion 使用独立许可；个人用户符合其 Free License，其他组织在使用前自行核对资格。
 - 旁白过长时拆成场景；单场景建议 20–180 个汉字。
 - 修改某个场景后保持其 `id` 稳定；脚本会只重做内容哈希变化的 TTS。
 - 重跑会把上一版正式产物移入 `work/previous-runs/`，新成片只有在完整校验通过后才会发布到项目根目录；失败时不得交付旧文件或渲染临时文件。

@@ -194,6 +194,7 @@ def create_event(title: str, when: str, repeat: str = "none", weekdays: list[int
     if repeat == "none" and dt < _now() - timedelta(seconds=MISFIRE_GRACE_SECONDS):
         raise AgendaError(f"时间 {when} 已过去超过 {MISFIRE_GRACE_SECONDS // 60} 分钟，无法创建日程")
 
+    now_iso = _now().isoformat()
     event = {
         "id": f"{AGENDA_JOB_PREFIX}{secrets.token_hex(4)}",
         "title": title.strip(),
@@ -203,8 +204,8 @@ def create_event(title: str, when: str, repeat: str = "none", weekdays: list[int
         "repeat": repeat,
         "weekdays": sorted(set(weekdays)) if repeat == "weekly" else [],
         "status": "pending",
-        "created_at": _now().isoformat(),
-        "updated_at": _now().isoformat(),
+        "created_at": now_iso,
+        "updated_at": now_iso,
     }
     store = get_agenda_store()
     # 先写 store 再注册 job：若顺序相反，二者之间 job 恰好到点触发时

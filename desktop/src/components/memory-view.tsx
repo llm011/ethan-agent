@@ -10,13 +10,14 @@ import {
   forgetStructuredMemory,
   triggerStructuredConsolidation,
   updateStructuredMemory,
+  wakeStructuredMemory,
 } from "@/lib/api";
 import { Card, CardContent, CardDescription, CardHeader } from "@ethan/shared/ui/card";
 import { ScrollArea } from "@ethan/shared/ui/scroll-area";
 import { Button } from "@ethan/shared/ui/button";
 import { Badge } from "@ethan/shared/ui/badge";
 import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
-import { Calendar, Check, Loader2, Pencil, RefreshCw, Trash2, X, Zap } from "lucide-react";
+import { Archive, Calendar, Check, Loader2, Pencil, RefreshCw, RotateCcw, Trash2, X, Zap } from "lucide-react";
 
 const CJK = /[一-鿿㐀-䶿　-〿＀-￯⺀-⻿]/;
 function fixBold(text: string): string {
@@ -117,6 +118,7 @@ function statusLabel(status: string): string {
     superseded: "已替代",
     expired: "已过期",
     forgotten: "已遗忘",
+    dormant: "已归档",
   };
   return labels[status] || status;
 }
@@ -127,13 +129,16 @@ function MemoryCard({
   onEdit,
   onSave,
   onDelete,
+  onWake,
 }: {
   memory: StructuredMemory;
   editing: boolean;
   onEdit: () => void;
   onSave: (content: string) => Promise<void>;
   onDelete: () => void;
+  onWake?: () => void;
 }) {
+  const dormant = memory.status === "dormant";
   return (
     <Card className="shadow-none border-border/60 bg-muted/10">
       <CardHeader className="pb-2">
@@ -146,9 +151,17 @@ function MemoryCard({
             </span>
           </div>
           <div className="flex items-center gap-1 shrink-0">
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onEdit} aria-label="编辑记忆">
-              <Pencil className="h-3.5 w-3.5" />
-            </Button>
+            {dormant ? (
+              onWake && (
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onWake} aria-label="唤醒记忆">
+                  <RotateCcw className="h-3.5 w-3.5" />
+                </Button>
+              )
+            ) : (
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onEdit} aria-label="编辑记忆">
+                <Pencil className="h-3.5 w-3.5" />
+              </Button>
+            )}
             <Button variant="ghost" size="icon" className="h-7 w-7 hover:text-destructive" onClick={onDelete} aria-label="遗忘记忆">
               <Trash2 className="h-3.5 w-3.5" />
             </Button>
@@ -157,6 +170,7 @@ function MemoryCard({
         <CardDescription className="text-[11px]">
           {new Date(memory.updated_at * 1000).toLocaleString()} · {Math.round(memory.confidence * 100)}% 置信度
           {memory.source_session_id ? ` · 来源 ${memory.source_session_id}` : ""}
+          {dormant && memory.dormant_at ? ` · 归档于 ${new Date(memory.dormant_at * 1000).toLocaleDateString()}` : ""}
         </CardDescription>
       </CardHeader>
       <CardContent className="pt-0">
@@ -205,6 +219,7 @@ export function MemoryView() {
   const [loading, setLoading] = useState(false);
   const [consolidating, setConsolidating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [showDormant, setShowDormant] = useState(false);
   const [error, setError] = useState("");
   // 操作提示（成功/失败），3 秒后自动清除
   const [notice, setNotice] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -229,7 +244,7 @@ export function MemoryView() {
       const types = activeConfig.types || [];
       const batches = await Promise.all(types.map(type => fetchStructuredMemories({
         type,
-        status: "active",
+        status: showDormant ? "dormant" : "active",
         domain: activeConfig.domain || "general",
         limit: 100,
       })));
@@ -241,11 +256,17 @@ export function MemoryView() {
     } finally {
       setLoading(false);
     }
-  }, [activeConfig, activeTab, dateFilter]);
+  }, [activeConfig, activeTab, dateFilter, showDormant]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), 3000);
+    return () => clearTimeout(t);
+  }, [notice]);
 
   const handleSave = async (memory: StructuredMemory, content: string) => {
     await updateStructuredMemory(memory.id, { content });
@@ -256,13 +277,26 @@ export function MemoryView() {
   const handleDelete = (memory: StructuredMemory) => {
     setConfirmState({
       open: true,
-      description: "确认遗忘这条结构化记忆？内容和来源引用将被清除，操作不可撤销。",
+      description: memory.status === "dormant"
+        ? "这条记忆已归档（不再参与召回）。确认彻底遗忘？内容和来源引用将被清除，操作不可撤销。"
+        : "确认遗忘这条结构化记忆？内容和来源引用将被清除，操作不可撤销。",
       onConfirm: async () => {
         setConfirmState(prev => ({ ...prev, open: false }));
         await forgetStructuredMemory(memory.id);
         await loadData();
       },
     });
+  };
+
+  const handleWake = async (memory: StructuredMemory) => {
+    try {
+      await wakeStructuredMemory(memory.id);
+      setNotice({ type: "success", text: "记忆已唤醒，重新参与召回" });
+      await loadData();
+    } catch (err) {
+      console.error(err);
+      setNotice({ type: "error", text: "唤醒记忆失败" });
+    }
   };
 
   const handleConsolidate = async () => {
@@ -306,6 +340,16 @@ export function MemoryView() {
             ))}
           </div>
         </div>
+        <Button
+          variant={showDormant ? "default" : "ghost"}
+          size="sm"
+          onClick={() => setShowDormant(prev => !prev)}
+          disabled={activeTab === "daily"}
+          aria-label="切换归档视图"
+        >
+          <Archive className="h-3.5 w-3.5 mr-1" />
+          归档
+        </Button>
         <Button variant="ghost" size="icon" onClick={loadData} disabled={loading} aria-label="刷新记忆">
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
         </Button>
@@ -345,7 +389,7 @@ export function MemoryView() {
           {error && <div className="text-center text-destructive py-8 text-sm">{error}</div>}
           {!loading && !error && activeTab !== "daily" && memories.length === 0 && (
             <div className="text-center text-muted-foreground py-12 text-sm">
-              {activeConfig.empty}
+              {showDormant ? "暂无归档记忆" : activeConfig.empty}
               <p className="mt-2 text-xs">结构化记忆会在每 5 轮对话和每日沉淀时更新</p>
             </div>
           )}
@@ -364,6 +408,7 @@ export function MemoryView() {
               onEdit={() => setEditingId(editingId === memory.id ? null : memory.id)}
               onSave={content => handleSave(memory, content)}
               onDelete={() => handleDelete(memory)}
+              onWake={() => handleWake(memory)}
             />
           ))}
           {activeTab === "daily" && summaries.map(summary => <DailySummaryCard key={summary.id} summary={summary} />)}

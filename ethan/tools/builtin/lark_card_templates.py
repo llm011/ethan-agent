@@ -19,11 +19,6 @@ def _text(v) -> str:
     return v.replace("\\n", "\n")
 
 
-def _clean_bullet(t: str) -> str:
-    """清理开头的列表前缀符号（如 '- ', '* ', '• ', '+ ' 等），避免与模板自带的 bullet 叠加。"""
-    return re.sub(r"^(?:[•\-\*\+]\s*)+", "", t.strip())
-
-
 def _md_hardbreak(text: str) -> str:
     """飞书 markdown：单 \\n 会被折叠成空格。把孤立单 \\n 转成硬换行 "  \\n"，保留 \\n\\n 作段落。"""
     return re.sub(r"(?<!\n)\n(?!\n)", "  \n", text)
@@ -111,25 +106,9 @@ def _build_stats(card: dict) -> dict:
 
 
 def _extract_body_items(node: dict) -> list[str] | None:
-    """从节点抽取分点文本；与 ui_card_templates._extract_body_items 逻辑保持一致：
-    items（list/string）优先，缺则退回 body；string 时按真换行切块。
-    自动剔除条目开头的 `- `、`• ` 等 bullet 标号，避免双重前缀。"""
-    src = node.get("items")
-    if src is None:
-        src = node.get("body")
-    if src is None or src == "":
-        return None
-    if isinstance(src, list):
-        items: list[str] = []
-        for x in src:
-            t = _clean_bullet(_text(x))
-            if t:
-                items.append(t)
-        return items or None
-    text = _text(src)
-    lines = [_clean_bullet(ln) for ln in text.split("\n") if ln.strip()]
-    lines = [ln for ln in lines if ln]
-    return lines or None
+    """从节点抽取分点文本；复用 ui_card_templates 的实现，保持一致性。"""
+    from ethan.tools.builtin.ui_card_templates import _extract_body_items as _ui_extract
+    return _ui_extract(node)
 
 
 def _build_timeline(card: dict) -> dict:

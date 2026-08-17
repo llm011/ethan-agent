@@ -11,6 +11,7 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 **记忆体系**
 - **结构化长期记忆**（`memory.db`，用户事实的唯一事实源）：短会话（<3 轮）即时提取、之后每 3 轮增量提取带原文 quote 佐证的候选（quote 必须是用户消息精确子串），确定性准入——explicit 立即生效，observed 需 ≥2 个独立 session 复证才晋升。64 个维度 × 7 大类（个人信息/偏好/活动/决定/关系/方法论/陪伴），支持 TTL 过期、supersede 纠正链、遗忘脱敏
 - **语义召回与去重**：FTS5 + BGE 向量双通道（RRF 融合）供给唯一的 `<memory_context>` 注入块；准入时向量近邻配对，按确定性规则 merge/supersede（"住在深圳"和"家在深圳南山"不会各存一条）
+- **记忆衰减与强化**：纯确定性 tier 规则（零 LLM）——身份/偏好/陪伴记忆豁免不衰减；闲置 21 天的项目 scope 批量归档（dormant，保留可唤醒）；"先试试"类临时决定按 3 天半衰期快速沉底；跨 session 反复发生的证据自动阶梯晋升置信度。价值由未来行为投票：复现即强化，长期无信号即归档
 - **维度注册表**：提取 prompt 的维度说明与校验白名单由同一份声明式注册表生成——扩展维度不再需要手写 prompt
 - 热区/温区滑动窗口维持长对话上下文（REPL），廉价模型自动压缩较早内容
 - 行为准则 Procedures：从用户纠正中自动学习，每次对话加载（`playbook.json`）
@@ -40,7 +41,7 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 **Skill 技能系统**
 - 触发词匹配，自动注入 system prompt 引导行为
 - 语义路由器（BGE INT8 + LR 头）在关键词之上补召回，换个说法也能命中——内置，依赖随 `pip install ethan-agent` 安装；BGE 模型首次使用时自动下载（~24MB）
-- 内置 `article-to-video`：把主题、文章、本地 Markdown/TXT 文件或公开 URL 生成带 Edge TTS 配音、时间轴字幕和 Remotion 动效的 MP4；Web 与 Desktop 文件卡片均可直接播放和下载，媒体依赖首次使用时按需安装
+- 内置 `article-to-video`：把主题、文章、本地 Markdown/TXT 文件或公开 URL 生成带 Edge TTS 配音、时间轴字幕和 Open Motion 动效的 MP4；Web 与 Desktop 文件卡片均可直接播放和下载，媒体依赖首次使用时按需安装
 - `fast_path: true` 触发后走毫秒级快速路径，适合全屋智能等高频控制
 - `channels: [lark, web]` 按渠道过滤，Skill 只在指定场景下生效
 - `modes: [法律]` 按对话模式过滤，Skill 只在指定模式下生效（空 = 所有模式）
@@ -441,7 +442,7 @@ version: "1.0"
 
 Skill 会累积命中次数和用户纠正记录。当纠正达到阈值（默认 2 条），Heartbeat 任务用廉价模型将纠正合并进 Skill 文件。
 
-内置 `article-to-video` 可将主题、文章正文、本地 Markdown/TXT 文件或公开 URL 制作为 MP4：模型生成结构化剧本和分镜，Edge TTS 逐场景生成配音与字幕，Remotion 根据真实语音时长渲染代码生成动效。成片通过 Web/Desktop 文件卡片直接播放或下载，制作文件另行交付；`edge-tts`、Remotion 和 Chromium 均在首次使用时按需安装，不进入 Ethan 的 Python 主依赖。
+内置 `article-to-video` 可将主题、文章正文、本地 Markdown/TXT 文件或公开 URL 制作为 MP4：模型生成结构化剧本和分镜，Edge TTS 逐场景生成配音与字幕，Open Motion 根据真实语音时长渲染代码生成动效。成片通过 Web/Desktop 文件卡片直接播放或下载，制作文件另行交付；`edge-tts`、Playwright（Open Motion 渲染依赖）和 FFmpeg 均在首次使用时按需安装，不进入 Ethan 的 Python 主依赖。
 
 ---
 

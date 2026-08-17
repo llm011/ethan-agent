@@ -29,7 +29,7 @@
 }
 ```
 
-`theme` 支持 `background`、`surface`、`primary`、`secondary`、`text` 六位十六进制颜色。
+`theme` 支持 `background`、`surface`、`primary`、`secondary`、`text` 六位十六进制颜色，未知字段会校验失败。只需填入要覆盖的字段。
 
 ## 场景字段
 
@@ -39,20 +39,73 @@
 | `narration` | 是 | 实际送入 TTS 的旁白，20–180 个汉字为宜 |
 | `headline` | 是 | 屏幕主标题，建议不超过 24 个汉字 |
 | `body` | 否 | 屏幕补充文本，建议不超过 60 个汉字 |
-| `visual` | 是 | 视觉预设及其数据 |
+| `visual` | 是 | 视觉预设及其数据（5 种类型，见下） |
+
+## visual 类型详细定义
+
+### kinetic-text — 关键词展示
+
+```json
+{ "type": "kinetic-text", "keywords": ["关键词1", "关键词2", "关键词3"] }
+```
+
+最多 5 个关键词，每个 ≤80 字符。每词独立卡片，首词高亮。
+
+### steps — 流程步骤
+
+```json
+{ "type": "steps", "items": ["步骤一", "步骤二", "步骤三"] }
+```
+
+最多 5 项，带编号展示。
+
+### stat — 数字展示
+
+```json
+{ "type": "stat", "value": "92.7%", "label": "MMLU 基准测试得分" }
+```
+
+`value` ≤24 字符，`label` ≤80 字符。字号随 value 长度自适应（越短字号越大）。
+
+### quote — 引用
+
+```json
+{ "type": "quote", "quote": "引用文字", "attribution": "来源" }
+```
+
+引用 ≤160 字符，归属 ≤80 字符，归属可省略。
+
+### summary — 结尾回顾
+
+```json
+{ "type": "summary", "items": ["要点一", "要点二", "要点三"] }
+```
+
+最多 5 项，带编号展示。
+
+## 轻量公式渲染
+
+`kinetic-text` 的关键词与场景 `body` 支持轻量 LaTeX 子集，用于科普/论文类内容的公式展示：
+
+- 上标 `^{...}` 或 `^X`；下标 `_{...}` 或 `_X`
+- 命令：`\sqrt{...}`、`\times`、`\cdot`、`\text{...}`、`\frac`（渲染为 `/`）
+- 希腊字母与常用符号：`\alpha`、`\beta`、`\sigma`、`\pi`、`\infty`、`\sum`、`\leq`、`\geq`、`\approx`、`\pm`、`\rightarrow` 等
+- 不支持的命令原样显示
+
+注意在 JSON 中反斜杠需转义（写成 `\\times`）。
 
 ## 完整示例
 
 ```json
 {
-  "title": "AI Agent 为什么正在改变软件",
-  "summary": "从工具到行动者，软件交互正在发生变化。",
+  "title": "Transformer 注意力机制详解",
+  "summary": "每个词直接看全局：注意力如何解决长序列遗忘。",
   "width": 1080,
   "height": 1920,
   "fps": 30,
-  "targetDurationSec": 60,
-  "durationToleranceSec": 6,
+  "targetDurationSec": 75,
   "language": "zh-CN",
+  "sourceUrl": "https://example.com/attention",
   "voice": {
     "name": "zh-CN-XiaoxiaoNeural",
     "rate": "+5%",
@@ -69,22 +122,22 @@
   "scenes": [
     {
       "id": "opening-question",
-      "narration": "为什么 AI Agent 可能比聊天机器人更深刻地改变软件？",
-      "headline": "软件，开始自己行动",
-      "body": "AI Agent 不只回答问题，也能拆解目标并调用工具。",
-      "visual": {
-        "type": "kinetic-text",
-        "keywords": ["理解目标", "调用工具", "完成任务"]
-      }
+      "narration": "你知道 ChatGPT 背后的 Transformer 是怎么理解每个词的含义的吗？",
+      "headline": "注意力的力量",
+      "body": "序列越长，RNN 遗忘越严重：P(x_t | x_{t-n})。",
+      "visual": { "type": "kinetic-text", "keywords": ["全局视野", "并行计算", "长序列记忆"] }
     },
     {
-      "id": "three-changes",
-      "narration": "它带来三个变化：操作步骤变少，软件之间开始协作，人的角色转向设定目标和审核结果。",
-      "headline": "三个变化",
-      "visual": {
-        "type": "steps",
-        "items": ["步骤更少", "软件协作", "人负责目标与审核"]
-      }
+      "id": "key-metric",
+      "narration": "在机器翻译任务上，Transformer 比 RNN 提升了 2 个 BLEU 分数，训练速度还快了 4 倍。",
+      "headline": "实验结果",
+      "visual": { "type": "stat", "value": "4x", "label": "训练速度提升" }
+    },
+    {
+      "id": "conclusion",
+      "narration": "注意力机制让模型不再受序列长度限制，成为现代大语言模型的基石。",
+      "headline": "奠基之作",
+      "visual": { "type": "summary", "items": ["解决长序列遗忘", "训练可并行", "现代 LLM 的基石"] }
     }
   ]
 }

@@ -98,6 +98,12 @@ def _collect(
     from ethan.memory.classifier import INTENT_ROLE_MAP
 
     role_filter = INTENT_ROLE_MAP.get(intent)
+    # 时间衰减软降权（ETHAN_MEMORY_RANK_DECAY，默认开）：factor 只影响排序，
+    # 不改状态。Tier A 恒 1.0；RANK_DECAY=0 时恒 1.0——乘以 1.0 不改变任何
+    # 比较结果，排序与旧实现逐位一致（回归测试的硬断言）。
+    import time as _time
+
+    from ethan.memory.decay import RANK_DECAY_ENABLED, rank_decay_factor
 
     statuses = [MemoryStatus.ACTIVE.value]
     fts_hits: list[Any] = []
@@ -122,18 +128,26 @@ def _collect(
         # 按 importance 注入同 role 记忆比跨 role 注入噪声合理；该 role 无记忆(如
         # emotion→task_context 在 GENERAL 域)则返回空,由其他域(COMPANION)提供相关记忆。
         # role_filter=None(unknown intent)时跨全 role 取 top-N,等价改造前安全网。
-        return [
+        pool = [
             memory
             for memory in store.list_memories(
                 memory_domain=domain, status=MemoryStatus.ACTIVE.value,
                 memory_role=role_filter, limit=max_items * 3,
             )
             if memory.sensitivity != "restricted"
-        ][:max_items]
+        ]
+        if RANK_DECAY_ENABLED:
+            # 兜底路径同样软降权：主键 importance×factor（同时修正了本函数
+            # docstring 里 "importance top-N" 与实际 updated_at DESC 切片的
+            # 历史不一致）。开关关闭时保持 list_memories 的 updated_at DESC
+            # 原行为，与旧实现逐位一致。
+            now = _time.time()
+            pool.sort(
+                key=lambda m: (-m.importance * rank_decay_factor(m, now), -m.confidence)
+            )
+        return pool[:max_items]
 
     # Reciprocal Rank Fusion(k=60):对两通道的排名取倒数求和,无需标定分数量纲
-    import time as _time
-
     now = _time.time()
     scores: dict[str, float] = {}
     by_id: dict[str, Any] = {}
@@ -178,9 +192,16 @@ def _collect(
         by_id = {mid: m for mid, m in by_id.items() if mid in keep_ids or mid not in dist}
         scores = {mid: s for mid, s in scores.items() if mid in keep_ids or mid not in dist}
 
+    # 软降权乘在 RRF 分数上（Layer 2 截断之后——截断基于向量相对距离，与分
+    # 数量纲无关，两者正交）。tie-break 链原样保留，因子=1.0 时乘法不改变
+    # 比较结果，RANK_DECAY=0 与旧序严格一致。
     merged = sorted(
         by_id.values(),
-        key=lambda m: (-scores[m.id], -m.importance, -m.confidence),
+        key=lambda m: (
+            -scores[m.id] * rank_decay_factor(m, now),
+            -m.importance,
+            -m.confidence,
+        ),
     )
     return merged[:max_items]
 

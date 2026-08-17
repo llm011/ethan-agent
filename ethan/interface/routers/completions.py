@@ -179,7 +179,8 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
                 stopped_content = (collector.full or "") + "\n\n_（已停止）_"
                 stopped_msg = Message(
                     role="assistant", content=stopped_content,
-                    thought=collector.thought, usage=collector.usage_dict,
+                    thought=collector.thought, reasoning=collector.reasoning,
+                    usage=collector.usage_dict,
                     tool_steps=collector.tool_steps or [], a2ui=collector.a2ui or None,
                     mcp_apps=collector.mcp_apps or None,
                     matched_skills=collector.matched_skills or None,
@@ -201,7 +202,8 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
         error_content = (collector.full + "\n\n" if collector.full else "") + err_text
         err_msg = Message(
             role="assistant", content=error_content,
-            thought=collector.thought, usage=collector.usage_dict,
+            thought=collector.thought, reasoning=collector.reasoning,
+            usage=collector.usage_dict,
             tool_steps=collector.tool_steps or [], a2ui=collector.a2ui or None,
             mcp_apps=collector.mcp_apps or None,
             matched_skills=collector.matched_skills or None,
@@ -299,7 +301,8 @@ async def _stream_completions(agent, messages, store, session_id: str, model: st
                 stopped_content = (collector.full or "") + "\n\n_（已停止）_"
                 stopped_msg = Message(
                     role="assistant", content=stopped_content,
-                    thought=collector.thought, usage=collector.usage_dict,
+                    thought=collector.thought, reasoning=collector.reasoning,
+                    usage=collector.usage_dict,
                     tool_steps=collector.tool_steps or [], a2ui=collector.a2ui or None,
                     mcp_apps=collector.mcp_apps or None,
                     matched_skills=collector.matched_skills or None,

@@ -1,6 +1,6 @@
 # 视觉预设
 
-MVP 只使用 Remotion/CSS 生成的可复现视觉，不依赖外部图片。
+MVP 只使用 Open Motion/CSS 生成的可复现视觉，不依赖外部图片。
 
 | `visual.type` | 数据字段 | 适用场景 |
 |---|---|---|

@@ -41,6 +41,10 @@ _IMAGE_ERROR_PATTERNS = (
     "unknown variant",   # non-VLM 模型拒绝 image_url content block
     "unknown variant `image_url`",  # image_url 反序列化失败（精确匹配反序列化错误）
     "image_url, expected",
+    # Anthropic 协议中转网关（如 Console Go）校验失败格式
+    "input should be a valid string",
+    "should be a valid string",
+    "valid string, field",
 )
 
 
