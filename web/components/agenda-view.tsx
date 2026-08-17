@@ -161,7 +161,7 @@ function MonthCalendar({ currentDate, eventDates, onSelectDate }: {
             <button
               key={key}
               onClick={() => onSelectDate(key)}
-              className={`relative flex flex-col items-center justify-center h-6 rounded text-[11px] transition-colors ${
+              className={`relative flex flex-col items-center justify-center h-7 rounded text-[11px] transition-colors ${
                 isSelected
                   ? "bg-primary text-primary-foreground"
                   : isToday
@@ -171,7 +171,7 @@ function MonthCalendar({ currentDate, eventDates, onSelectDate }: {
             >
               {date.getDate()}
               {hasEvent && (
-                <span className={`absolute bottom-0 w-1 h-1 rounded-full ${
+                <span className={`absolute bottom-0.5 w-1 h-1 rounded-full ${
                   isSelected ? "bg-primary-foreground" : "bg-primary"
                 }`} />
               )}
