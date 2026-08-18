@@ -138,6 +138,7 @@ export async function timelineLifecycle(timelineId: string, action: "skip_phase"
 
 export type AgendaRepeat = "none" | "daily" | "weekly";
 export type AgendaStatus = "pending" | "fired" | "missed" | "done";
+export type AgendaCompletion = "not_started" | "done" | "partial" | "abandoned";
 
 export interface AgendaEvent {
   id: string;
@@ -147,6 +148,7 @@ export interface AgendaEvent {
   repeat: AgendaRepeat;
   weekdays: number[];
   status: AgendaStatus;
+  completion?: AgendaCompletion;
   created_at: string;
   updated_at: string;
   next_run_time?: string | null;
@@ -176,7 +178,7 @@ export async function createAgendaEvent(item: { title: string; when: string; rep
   return res.json().then(d => d.event);
 }
 
-export async function updateAgendaEvent(id: string, patch: Partial<{ title: string; when: string; repeat: AgendaRepeat; weekdays: number[]; note: string }>): Promise<AgendaEvent> {
+export async function updateAgendaEvent(id: string, patch: Partial<{ title: string; when: string; repeat: AgendaRepeat; weekdays: number[]; note: string; completion: AgendaCompletion }>): Promise<AgendaEvent> {
   const res = await fetch(`${API_URL}/agenda/${encodeURIComponent(id)}`, {
     method: "PATCH",
     headers: headers(),

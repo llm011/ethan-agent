@@ -204,6 +204,7 @@ def create_event(title: str, when: str, repeat: str = "none", weekdays: list[int
         "repeat": repeat,
         "weekdays": sorted(set(weekdays)) if repeat == "weekly" else [],
         "status": "pending",
+        "completion": "not_started",
         "created_at": now_iso,
         "updated_at": now_iso,
     }
@@ -217,7 +218,8 @@ def create_event(title: str, when: str, repeat: str = "none", weekdays: list[int
 
 def update_event(event_id: str, title: str | None = None, when: str | None = None,
                  repeat: str | None = None, weekdays: list[int] | None = None,
-                 note: str | None = None, short_title: str | None = None) -> dict:
+                 note: str | None = None, short_title: str | None = None,
+                 completion: str | None = None) -> dict:
     """修改日程。时间/重复规则变化时重建调度 job；已终结（fired/missed/done）
     的事件改时间会重新激活为 pending。"""
     store = get_agenda_store()
@@ -246,6 +248,11 @@ def update_event(event_id: str, title: str | None = None, when: str | None = Non
         "weekdays": sorted(set(new_weekdays)) if new_repeat == "weekly" else [],
         "updated_at": _now().isoformat(),
     })
+    if completion is not None:
+        _COMPLETION_VALUES = ("not_started", "done", "partial", "abandoned")
+        if completion not in _COMPLETION_VALUES:
+            raise AgendaError(f"completion 必须是 {'/'.join(_COMPLETION_VALUES)}")
+        updated["completion"] = completion
     if rescheduled:
         updated["status"] = "pending"
     store.upsert(updated)
