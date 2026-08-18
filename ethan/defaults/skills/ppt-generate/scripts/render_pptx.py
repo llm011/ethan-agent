@@ -83,7 +83,10 @@ def _ensure_pptx():
         user_site = site.getusersitepackages()
         if user_site not in sys.path:
             sys.path.insert(0, user_site)
-        import pptx  # noqa: F401
+        # 验证所有依赖都可导入
+        failed = [m for m in _DEPS_MODS if not _try_import(m)]
+        if failed:
+            raise ImportError(f"pip install succeeded but still missing: {failed}")
         print("[render_pptx] 依赖安装成功", file=sys.stderr)
         _write_deps_marker()
     except Exception as e:  # noqa: BLE001
@@ -2031,7 +2034,7 @@ def validate_deck(deck: dict, theme: dict | None = None, deck_dir: Path | None =
                     if geom_ok and widths_ok and cells_ok:
                         check_table_overflow(el, theme, ep, ch, err, warn)
 
-    # ── 主题质量校验（仅在 deck 显式指定了主题时检查，DEFAULT_THEME 不报）──
+    # ── 主题质量校验 ──
     theme_colors = (theme or {}).get("themeColors", [])
     if not isinstance(theme_colors, list) or len(theme_colors) < 3:
         warn(f"主题色数量不足（{len(theme_colors) if isinstance(theme_colors, list) else 'N/A'} 个），建议至少 3 个主题色")
