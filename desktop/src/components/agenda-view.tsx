@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import {
   AgendaEvent, AgendaRepeat, AgendaCompletion, fetchAgenda, createAgendaEvent, updateAgendaEvent,
   completeAgendaEvent, deleteAgendaEvent, setAgendaEnabled,
@@ -110,16 +110,16 @@ function useNow(intervalMs = 1000): Date {
   return now;
 }
 
-function NowIndicator({ now }: { now: Date }) {
+const NowIndicator = React.forwardRef<HTMLDivElement, { now: Date }>(function NowIndicator({ now }, ref) {
   const timeStr = now.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
   return (
-    <div className="relative flex items-center gap-0 my-1 -ml-[3px]">
+    <div ref={ref} className="relative flex items-center gap-0 my-1 -ml-[3px]">
       <div className="w-[7px] h-[7px] rounded-full bg-red-500 shrink-0 z-10" />
       <div className="flex-1 h-px bg-red-500/70" />
       <span className="text-[9px] font-mono text-red-500 ml-1.5 shrink-0 tabular-nums">{timeStr}</span>
     </div>
   );
-}
+});
 
 function MonthCalendar({ currentDate, eventDates, onSelectDate }: {
   currentDate: Date;
@@ -393,6 +393,7 @@ export function AgendaView() {
   const [scrolledToToday, setScrolledToToday] = useState(false);
   const timelineRef = useRef<HTMLDivElement>(null);
   const groupRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const nowIndicatorRef = useRef<HTMLDivElement>(null);
   const now = useNow();
 
   const loadData = useCallback(async () => {
@@ -432,12 +433,18 @@ export function AgendaView() {
     return set;
   }, [events]);
 
-  // 首次加载完成后自动滚到今天
+  // 首次加载完成后自动滚到当前时间指示器（红线）并垂直居中
   useEffect(() => {
     if (!loading && dateGroups.length > 0 && !scrolledToToday) {
       setScrolledToToday(true);
-      const todayKey = dateKey(new Date());
-      scrollToDate(todayKey);
+      requestAnimationFrame(() => {
+        if (nowIndicatorRef.current) {
+          nowIndicatorRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+        } else {
+          const todayKey = dateKey(new Date());
+          scrollToDate(todayKey);
+        }
+      });
     }
   }, [loading, dateGroups, scrolledToToday]);
 
@@ -649,7 +656,7 @@ export function AgendaView() {
                               : parseWhen(ev.when);
                             const evTs = d && !isNaN(d.getTime()) ? d.getTime() : 0;
                             if (group.isToday && !nowInserted && evTs > nowTs) {
-                              items.push(<NowIndicator key="__now__" now={now} />);
+                              items.push(<NowIndicator key="__now__" ref={nowIndicatorRef} now={now} />);
                               nowInserted = true;
                             }
                             const timeStr = d && !isNaN(d.getTime())
@@ -695,7 +702,7 @@ export function AgendaView() {
                             );
                           }
                           if (group.isToday && !nowInserted) {
-                            items.push(<NowIndicator key="__now__" now={now} />);
+                            items.push(<NowIndicator key="__now__" ref={nowIndicatorRef} now={now} />);
                           }
                           return items;
                         })()}
