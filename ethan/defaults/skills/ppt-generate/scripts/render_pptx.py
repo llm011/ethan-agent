@@ -39,15 +39,19 @@ def _try_import(mod: str) -> bool:
     try:
         __import__(mod)
         return True
-    except ImportError:
+    except Exception:
+        # 捕获所有导入错误：ImportError（模块不存在）、
+        # OSError（native DLL 缺失/ABI 不匹配）、AttributeError（半损坏包）等
         return False
 
 
 def _write_deps_marker():
-    """记录当前 Python 路径到 marker，下次同 Python 运行可跳过安装。"""
+    """原子写入 marker：先写 .tmp 再 rename，防止并发/异常导致损坏。"""
     try:
         _DEPS_MARKER.parent.mkdir(parents=True, exist_ok=True)
-        _DEPS_MARKER.write_text(sys.executable)
+        tmp = _DEPS_MARKER.with_suffix(".tmp")
+        tmp.write_text(sys.executable, encoding="utf-8")
+        tmp.replace(_DEPS_MARKER)
     except OSError:
         pass
 
@@ -61,10 +65,10 @@ def _ensure_pptx():
     # marker 命中且 Python 匹配 → 跳过
     if not missing and _DEPS_MARKER.exists():
         try:
-            if _DEPS_MARKER.read_text().strip() == sys.executable:
+            if _DEPS_MARKER.read_text(encoding="utf-8").strip() == sys.executable:
                 return
-        except OSError:
-            pass
+        except (OSError, UnicodeDecodeError, ValueError):
+            pass  # marker 损坏，忽略后继续
 
     if not missing:
         _write_deps_marker()
@@ -84,9 +88,14 @@ def _ensure_pptx():
         if user_site not in sys.path:
             sys.path.insert(0, user_site)
         # 验证所有依赖都可导入
-        failed = [m for m in _DEPS_MODS if not _try_import(m)]
-        if failed:
-            raise ImportError(f"pip install succeeded but still missing: {failed}")
+        still_missing = [m for m in _DEPS_MODS if not _try_import(m)]
+        if still_missing:
+            print(
+                "[render_pptx] pip 安装成功但以下模块仍不可用: %s\n"
+                "请检查是否有平台兼容性问题，或手动安装: pip3 install %s" % (still_missing, " ".join(pkgs)),
+                file=sys.stderr,
+            )
+            sys.exit(2)
         print("[render_pptx] 依赖安装成功", file=sys.stderr)
         _write_deps_marker()
     except Exception as e:  # noqa: BLE001
