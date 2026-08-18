@@ -116,22 +116,36 @@ try {
       if (pct % 10 === 0) process.stderr.write(`[Step 4/5] Frames: ${frame}/${config.durationInFrames} (${pct}%)\n`);
     },
   });
-  const audioAssets = result?.audioAssets || [];
   process.stderr.write(`[Step 4/5] Frames complete: ${config.durationInFrames}/${config.durationInFrames} (100%)\n`);
 
   // ── 6. Encode frames → MP4 with audio mixing ──
+  // Use audioAssets from renderFrames (authoritative frame-level timing from React's <Audio> placement)
+  const audioAssetsFromRenderer = result?.audioAssets || [];
+  // Fallback: if renderer didn't return audioAssets, derive from timeline.scenes
   const scenes = timeline.scenes || [];
-  const audioEntries = []; // { inputIdx, path, delayMs }
+  const audioEntries = audioAssetsFromRenderer.length > 0
+    ? audioAssetsFromRenderer.map((a, i) => ({
+        inputIdx: i + 1, // input 0 is the image sequence
+        path: a.src?.startsWith('/') ? a.src : path.join(publicDir, a.src),
+        delayMs: Math.round((a.startFrame / fps) * 1000),
+      }))
+    : (() => {
+        // Legacy fallback: re-derive audio timing from timeline
+        const entries = [];
+        scenes.forEach((scene) => {
+          const audioPath = path.join(publicDir, scene.audio);
+          if (fs.existsSync(audioPath)) {
+            const inputIdx = entries.length + 1;
+            const delayMs = Math.round(scene.startMs);
+            entries.push({ inputIdx, path: audioPath, delayMs });
+          }
+        });
+        return entries;
+      })();
+
   const filterParts = [];
-  scenes.forEach((scene) => {
-    const audioPath = path.join(publicDir, scene.audio);
-    if (fs.existsSync(audioPath)) {
-      // inputIdx starts at 1 because input 0 is the image sequence (no audio)
-      const inputIdx = audioEntries.length + 1;
-      const delayMs = Math.round(scene.startMs);
-      filterParts.push(`[${inputIdx}:a]adelay=${delayMs}|${delayMs},asetpts=PTS-STARTPTS[a${audioEntries.length}]`);
-      audioEntries.push({ inputIdx, path: audioPath, delayMs });
-    }
+  audioEntries.forEach((entry, i) => {
+    filterParts.push(`[${entry.inputIdx}:a]adelay=${entry.delayMs}|${entry.delayMs},asetpts=PTS-STARTPTS[a${i}]`);
   });
 
   if (audioEntries.length > 0) {
@@ -192,6 +206,7 @@ try {
     durationInFrames: config.durationInFrames,
     expectedDurationMs: timeline.totalDurationMs,
     sceneCount: timeline.scenes?.length || 0,
+    durationSec: ((timeline.totalDurationMs || config.durationInFrames * 1000 / config.fps) / 1000).toFixed(1),
     videoBytes,
     coverBytes,
     audioAssets,

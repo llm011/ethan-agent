@@ -49,8 +49,7 @@ def _ensure_pptx():
                     return
                 except ImportError:
                     pass  # marker 过期，继续重装
-        except OSError:
-            pass
+        except (OSError, ValueError):  # OSError = file not found; ValueError = UnicodeDecodeError on corrupt marker
 
     missing = []
     for mod in ("pptx", "latex2mathml", "mathml2omml"):
@@ -63,8 +62,7 @@ def _ensure_pptx():
         try:
             _DEPS_MARKER.parent.mkdir(parents=True, exist_ok=True)
             _DEPS_MARKER.write_text(sys.executable)
-        except OSError:
-            pass
+        except (OSError, ValueError):  # OSError = file not found; ValueError = UnicodeDecodeError on corrupt marker
         return
     pkg_map = {"pptx": "python-pptx", "latex2mathml": "latex2mathml", "mathml2omml": "mathml2omml"}
     pkgs = [pkg_map[m] for m in missing]
@@ -80,7 +78,12 @@ def _ensure_pptx():
         if user_site not in sys.path:
             sys.path.insert(0, user_site)
         # 验证所有依赖都可导入
-        failed = [m for m in _DEPS_MODS if not _try_import(m)]
+        failed = []
+        for mod in ("pptx", "latex2mathml", "mathml2omml"):
+            try:
+                __import__(mod)
+            except Exception:
+                failed.append(mod)
         if failed:
             raise ImportError(f"pip install succeeded but still missing: {failed}")
         print("[render_pptx] 依赖安装成功", file=sys.stderr)
@@ -88,8 +91,7 @@ def _ensure_pptx():
         try:
             _DEPS_MARKER.parent.mkdir(parents=True, exist_ok=True)
             _DEPS_MARKER.write_text(sys.executable)
-        except OSError:
-            pass
+        except (OSError, ValueError):  # OSError = file not found; ValueError = UnicodeDecodeError on corrupt marker
     except Exception as e:  # noqa: BLE001
         print(
             "[render_pptx] 自动安装失败: %s\n请手动执行: pip3 install python-pptx latex2mathml mathml2omml" % e,
