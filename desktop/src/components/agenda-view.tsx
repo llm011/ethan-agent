@@ -1,11 +1,11 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import {
   AgendaEvent, AgendaRepeat, AgendaCompletion, fetchAgenda, createAgendaEvent, updateAgendaEvent,
-  completeAgendaEvent, deleteAgendaEvent, setAgendaEnabled,
+  deleteAgendaEvent, setAgendaEnabled,
 } from "@/lib/api";
 import { Badge } from "@ethan/shared/ui/badge";
 import { Button } from "@ethan/shared/ui/button";
-import { Loader2, RefreshCw, Trash2, Pencil, Check, Plus, BellRing, ChevronLeft, ChevronRight } from "lucide-react";
+import { Loader2, RefreshCw, Trash2, Pencil, Plus, BellRing, ChevronLeft, ChevronRight } from "lucide-react";
 import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
 import {
   DropdownMenu,
@@ -505,17 +505,6 @@ export function AgendaView() {
     }
   };
 
-  const doComplete = async (ev: AgendaEvent) => {
-    setEvents(prev => prev.map(e => e.id === ev.id ? { ...e, status: "done" } : e));
-    try {
-      await completeAgendaEvent(ev.id);
-      await loadData();
-    } catch (e) {
-      console.error("Failed to complete agenda event", e);
-      await loadData();
-    }
-  };
-
   const doSetCompletion = async (ev: AgendaEvent, completion: AgendaCompletion) => {
     if (completion === "abandoned") {
       setAbandonState({ open: true, event: ev, text: "" });
@@ -586,7 +575,7 @@ export function AgendaView() {
               onChange={(e) => setAbandonState(s => ({ ...s, text: e.target.value }))}
               placeholder={abandonState.event?.title || "实际做了什么..."}
               autoFocus
-              onKeyDown={(e) => e.key === "Enter" && doConfirmAbandon()}
+              onKeyDown={(e) => e.key === "Enter" && !e.nativeEvent.isComposing && doConfirmAbandon()}
             />
           </div>
           <DialogFooter>

@@ -3,11 +3,11 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import {
   AgendaEvent, AgendaRepeat, AgendaCompletion, fetchAgenda, createAgendaEvent, updateAgendaEvent,
-  completeAgendaEvent, deleteAgendaEvent, setAgendaEnabled,
+  deleteAgendaEvent, setAgendaEnabled,
 } from "@/lib/api-misc";
 import { Badge } from "@ethan/shared/ui/badge";
 import { Button } from "@ethan/shared/ui/button";
-import { Loader2, RefreshCw, Trash2, Pencil, Check, Plus, BellRing, ChevronLeft, ChevronRight } from "lucide-react";
+import { Loader2, RefreshCw, Trash2, Pencil, Plus, BellRing, ChevronLeft, ChevronRight } from "lucide-react";
 import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
 import {
   DropdownMenu,
@@ -206,6 +206,13 @@ function MonthCalendar({ currentDate, eventDates, onSelectDate }: {
 
 // ── 完成状态切换组件 ─────────────────────────────────────────────
 
+const COMPLETION_OPTIONS: { value: AgendaCompletion; label: string; icon: string; color: string }[] = [
+  { value: "not_started", label: "未开始", icon: "○", color: "text-muted-foreground" },
+  { value: "partial", label: "完成部分", icon: "◐", color: "text-amber-500" },
+  { value: "done", label: "已完成", icon: "●", color: "text-green-500" },
+  { value: "abandoned", label: "废弃", icon: "✕", color: "text-red-400" },
+];
+
 function CompletionToggle({ event, onChange }: { event: AgendaEvent; onChange: (c: AgendaCompletion) => void }) {
   const current = COMPLETION_OPTIONS.find(o => o.value === (event.completion || "not_started")) || COMPLETION_OPTIONS[0];
   return (
@@ -391,13 +398,6 @@ const STATUS_BADGE: Record<string, { label: string; variant: "default" | "second
   done: { label: "已完成", variant: "outline" },
 };
 
-const COMPLETION_OPTIONS: { value: AgendaCompletion; label: string; icon: string; color: string }[] = [
-  { value: "not_started", label: "未开始", icon: "○", color: "text-muted-foreground" },
-  { value: "partial", label: "完成部分", icon: "◐", color: "text-amber-500" },
-  { value: "done", label: "已完成", icon: "●", color: "text-green-500" },
-  { value: "abandoned", label: "废弃", icon: "✕", color: "text-red-400" },
-];
-
 export function AgendaView() {
   const [events, setEvents] = useState<AgendaEvent[]>([]);
   const [enabled, setEnabled] = useState(false);
@@ -519,17 +519,6 @@ export function AgendaView() {
     }
   };
 
-  const doComplete = async (ev: AgendaEvent) => {
-    setEvents(prev => prev.map(e => e.id === ev.id ? { ...e, status: "done" } : e));
-    try {
-      await completeAgendaEvent(ev.id);
-      await loadData();
-    } catch (e) {
-      console.error("Failed to complete agenda event", e);
-      await loadData();
-    }
-  };
-
   const doSetCompletion = async (ev: AgendaEvent, completion: AgendaCompletion) => {
     if (completion === "abandoned") {
       setAbandonState({ open: true, event: ev, text: "" });
@@ -600,7 +589,7 @@ export function AgendaView() {
               onChange={(e) => setAbandonState(s => ({ ...s, text: e.target.value }))}
               placeholder={abandonState.event?.title || "实际做了什么..."}
               autoFocus
-              onKeyDown={(e) => e.key === "Enter" && doConfirmAbandon()}
+              onKeyDown={(e) => e.key === "Enter" && !e.nativeEvent.isComposing && doConfirmAbandon()}
             />
           </div>
           <DialogFooter>
