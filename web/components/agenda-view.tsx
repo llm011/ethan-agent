@@ -1,14 +1,20 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import {
-  AgendaEvent, AgendaRepeat, fetchAgenda, createAgendaEvent, updateAgendaEvent,
-  completeAgendaEvent, deleteAgendaEvent, setAgendaEnabled,
+  AgendaEvent, AgendaRepeat, AgendaCompletion, fetchAgenda, createAgendaEvent, updateAgendaEvent,
+  deleteAgendaEvent, setAgendaEnabled,
 } from "@/lib/api-misc";
 import { Badge } from "@ethan/shared/ui/badge";
 import { Button } from "@ethan/shared/ui/button";
-import { Loader2, RefreshCw, Trash2, Pencil, Check, Plus, BellRing, ChevronLeft, ChevronRight } from "lucide-react";
+import { Loader2, RefreshCw, Trash2, Pencil, Plus, BellRing, ChevronLeft, ChevronRight } from "lucide-react";
 import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@ethan/shared/ui/dropdown-menu";
 import {
   Dialog,
   DialogContent,
@@ -102,16 +108,16 @@ function useNow(intervalMs = 1000): Date {
   return now;
 }
 
-function NowIndicator({ now }: { now: Date }) {
+const NowIndicator = React.forwardRef<HTMLDivElement, { now: Date }>(function NowIndicator({ now }, ref) {
   const timeStr = now.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
   return (
-    <div className="relative flex items-center gap-0 my-1 -ml-[3px]">
+    <div ref={ref} className="relative flex items-center gap-0 my-1 -ml-[3px]">
       <div className="w-[7px] h-[7px] rounded-full bg-red-500 shrink-0 z-10" />
       <div className="flex-1 h-px bg-red-500/70" />
       <span className="text-[9px] font-mono text-red-500 ml-1.5 shrink-0 tabular-nums">{timeStr}</span>
     </div>
   );
-}
+});
 
 // ── 月历导航组件 ─────────────────────────────────────────────────
 
@@ -195,6 +201,41 @@ function MonthCalendar({ currentDate, eventDates, onSelectDate }: {
         })}
       </div>
     </div>
+  );
+}
+
+// ── 完成状态切换组件 ─────────────────────────────────────────────
+
+const COMPLETION_OPTIONS: { value: AgendaCompletion; label: string; icon: string; color: string }[] = [
+  { value: "not_started", label: "未开始", icon: "○", color: "text-muted-foreground" },
+  { value: "partial", label: "完成部分", icon: "◐", color: "text-amber-500" },
+  { value: "done", label: "已完成", icon: "●", color: "text-green-500" },
+  { value: "abandoned", label: "废弃", icon: "✕", color: "text-red-400" },
+];
+
+function CompletionToggle({ event, onChange }: { event: AgendaEvent; onChange: (c: AgendaCompletion) => void }) {
+  const current = COMPLETION_OPTIONS.find(o => o.value === (event.completion || "not_started")) || COMPLETION_OPTIONS[0];
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        className={`shrink-0 w-5 h-5 flex items-center justify-center rounded hover:bg-muted transition-colors text-sm leading-none ${current.color}`}
+        title={current.label}
+      >
+        {current.icon}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent side="bottom" align="start" className="min-w-[120px]">
+        {COMPLETION_OPTIONS.map(opt => (
+          <DropdownMenuItem
+            key={opt.value}
+            className={`text-xs gap-2 ${opt.value === current.value ? "font-medium" : ""}`}
+            onClick={() => onChange(opt.value)}
+          >
+            <span className={opt.color}>{opt.icon}</span>
+            {opt.label}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -364,10 +405,12 @@ export function AgendaView() {
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [confirmState, setConfirmState] = useState<{ open: boolean; id: string }>({ open: false, id: "" });
   const [dialogState, setDialogState] = useState<{ open: boolean; editing: AgendaEvent | null }>({ open: false, editing: null });
+  const [abandonState, setAbandonState] = useState<{ open: boolean; event: AgendaEvent | null; text: string }>({ open: false, event: null, text: "" });
   const [togglingEnabled, setTogglingEnabled] = useState(false);
   const [scrolledToToday, setScrolledToToday] = useState(false);
   const timelineRef = useRef<HTMLDivElement>(null);
   const groupRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const nowIndicatorRef = useRef<HTMLDivElement>(null);
   const now = useNow();
 
   const loadData = useCallback(async () => {
@@ -403,12 +446,18 @@ export function AgendaView() {
     return set;
   }, [events]);
 
-  // 首次加载完成后自动滚到今天
+  // 首次加载完成后自动滚到当前时间指示器（红线）并垂直居中
   useEffect(() => {
     if (!loading && dateGroups.length > 0 && !scrolledToToday) {
       setScrolledToToday(true);
-      const todayKey = dateKey(new Date());
-      scrollToDate(todayKey);
+      requestAnimationFrame(() => {
+        if (nowIndicatorRef.current) {
+          nowIndicatorRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+        } else {
+          const todayKey = dateKey(new Date());
+          scrollToDate(todayKey);
+        }
+      });
     }
   }, [loading, dateGroups, scrolledToToday]);
 
@@ -470,13 +519,32 @@ export function AgendaView() {
     }
   };
 
-  const doComplete = async (ev: AgendaEvent) => {
-    setEvents(prev => prev.map(e => e.id === ev.id ? { ...e, status: "done" } : e));
+  const doSetCompletion = async (ev: AgendaEvent, completion: AgendaCompletion) => {
+    if (completion === "abandoned") {
+      setAbandonState({ open: true, event: ev, text: "" });
+      return;
+    }
+    setEvents(prev => prev.map(e => e.id === ev.id ? { ...e, completion } : e));
     try {
-      await completeAgendaEvent(ev.id);
+      await updateAgendaEvent(ev.id, { completion });
       await loadData();
     } catch (e) {
-      console.error("Failed to complete agenda event", e);
+      console.error("Failed to update completion", e);
+      await loadData();
+    }
+  };
+
+  const doConfirmAbandon = async () => {
+    const ev = abandonState.event;
+    if (!ev) return;
+    const newTitle = abandonState.text.trim() || ev.title;
+    setAbandonState({ open: false, event: null, text: "" });
+    setEvents(prev => prev.map(e => e.id === ev.id ? { ...e, completion: "abandoned", title: newTitle } : e));
+    try {
+      await updateAgendaEvent(ev.id, { completion: "abandoned", title: newTitle });
+      await loadData();
+    } catch (e) {
+      console.error("Failed to abandon event", e);
       await loadData();
     }
   };
@@ -509,6 +577,27 @@ export function AgendaView() {
         onConfirm={submitEvent}
         onCancel={() => setDialogState({ open: false, editing: null })}
       />
+      <Dialog open={abandonState.open} onOpenChange={(o: boolean) => !o && setAbandonState({ open: false, event: null, text: "" })}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>废弃日程</DialogTitle>
+            <DialogDescription>这个时间段实际做了什么？将覆盖原日程标题。</DialogDescription>
+          </DialogHeader>
+          <div className="py-2">
+            <Input
+              value={abandonState.text}
+              onChange={(e) => setAbandonState(s => ({ ...s, text: e.target.value }))}
+              placeholder={abandonState.event?.title || "实际做了什么..."}
+              autoFocus
+              onKeyDown={(e) => e.key === "Enter" && !e.nativeEvent.isComposing && doConfirmAbandon()}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAbandonState({ open: false, event: null, text: "" })}>取消</Button>
+            <Button onClick={doConfirmAbandon}>确认废弃</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <header className="h-12 border-b border-border flex items-center px-4 justify-between shrink-0">
         <h1 className="font-semibold text-lg">日程 (Agenda)</h1>
@@ -570,7 +659,7 @@ export function AgendaView() {
                               : parseWhen(ev.when);
                             const evTs = d && !isNaN(d.getTime()) ? d.getTime() : 0;
                             if (group.isToday && !nowInserted && evTs > nowTs) {
-                              items.push(<NowIndicator key="__now__" now={now} />);
+                              items.push(<NowIndicator key="__now__" ref={nowIndicatorRef} now={now} />);
                               nowInserted = true;
                             }
                             const timeStr = d && !isNaN(d.getTime())
@@ -585,22 +674,21 @@ export function AgendaView() {
                                 }`} />
                                 <span className="text-[11px] font-mono text-muted-foreground mt-2 w-[38px] shrink-0">{timeStr}</span>
                                 <div className={`flex-1 min-w-0 border border-border/50 rounded-lg px-3 py-2 transition-colors hover:border-border hover:bg-muted/20 ${
-                                  ev.status === "done" ? "opacity-60" : ""
+                                  (ev.completion === "done" || ev.completion === "abandoned") ? "opacity-60" : ""
                                 }`}>
                                   <div className="flex items-center justify-between gap-2">
                                     <div className="flex items-center gap-2 min-w-0">
-                                      <span className={`text-sm font-medium truncate ${ev.status === "done" ? "line-through" : ""}`}>{ev.title}</span>
+                                      <CompletionToggle event={ev} onChange={(c) => void doSetCompletion(ev, c)} />
+                                      <span className={`text-sm font-medium truncate ${
+                                        ev.completion === "done" ? "line-through text-muted-foreground" :
+                                        ev.completion === "abandoned" ? "line-through text-red-400/70" : ""
+                                      }`}>{ev.title}</span>
                                       <Badge variant={badge.variant} className="text-[9px] px-1.5 py-0 h-4 shrink-0">{badge.label}</Badge>
                                       {rep && (
                                         <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 shrink-0">{rep}</Badge>
                                       )}
                                     </div>
                                     <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                                      {ev.status !== "done" && (
-                                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => void doComplete(ev)} title="标记完成">
-                                          <Check className="h-3 w-3" />
-                                        </Button>
-                                      )}
                                       <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setDialogState({ open: true, editing: ev })} title="编辑">
                                         <Pencil className="h-3 w-3" />
                                       </Button>
@@ -617,7 +705,7 @@ export function AgendaView() {
                             );
                           }
                           if (group.isToday && !nowInserted) {
-                            items.push(<NowIndicator key="__now__" now={now} />);
+                            items.push(<NowIndicator key="__now__" ref={nowIndicatorRef} now={now} />);
                           }
                           return items;
                         })()}
