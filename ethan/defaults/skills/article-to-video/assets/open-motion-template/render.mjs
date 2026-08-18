@@ -27,27 +27,18 @@ const tmpDir = path.join(renderDir, "temp");
 const distDir = path.join(tmpDir, "vite-dist");
 
 // ── 1. Ensure Playwright browsers are installed ──
-const chromiumMarker = path.join(os.homedir(), '.cache', 'ms-playwright', '.chromium-installed');
 process.stderr.write("[Step 1/5] Checking Playwright browsers...\n");
+let chromiumPath;
 try {
-  if (fs.existsSync(chromiumMarker)) {
-    const recordedPath = fs.readFileSync(chromiumMarker, 'utf8').trim();
-    const currentPath = chromium.executablePath();
-    if (recordedPath === currentPath) {
-      process.stderr.write("[Step 1/5] Playwright OK (cached)\n");
-    } else {
-      throw new Error('browser path changed');
-    }
-  } else {
-    throw new Error('no marker');
-  }
+  chromiumPath = chromium.executablePath();
 } catch {
+  chromiumPath = null;
+}
+if (chromiumPath && fs.existsSync(chromiumPath)) {
+  process.stderr.write("[Step 1/5] Playwright OK (cached)\n");
+} else {
   process.stderr.write("[Step 1/5] Installing Playwright Chromium...\n");
   execSync("npx playwright install chromium", { cwd: __dirname, stdio: "inherit" });
-  try {
-    fs.mkdirSync(path.dirname(chromiumMarker), { recursive: true });
-    fs.writeFileSync(chromiumMarker, chromium.executablePath());
-  } catch { /* non-fatal */ }
 }
 
 // ── 2. Vite build ──
@@ -91,10 +82,10 @@ try {
   if (!comp) throw new Error(`No composition "ArticleVideo" found (got: ${compositions.map(c=>c.id).join(", ")})`);
 
   // Use timeline.json values for config — getCompositions may return defaults if calculateMetadata isn't invoked
-  const fps = comp.fps || timeline.fps || 30;
+  const fps = timeline.fps || comp.fps || 30;
   const config = {
-    width: comp.width || timeline.width || 1080,
-    height: comp.height || timeline.height || 1920,
+    width: timeline.width || comp.width || 1080,
+    height: timeline.height || comp.height || 1920,
     fps,
     durationInFrames: Math.max(1, Math.ceil(((timeline.totalDurationMs || 3000) / 1000) * fps)),
   };
@@ -119,29 +110,44 @@ try {
   process.stderr.write(`[Step 4/5] Frames complete: ${config.durationInFrames}/${config.durationInFrames} (100%)\n`);
 
   // ── 6. Encode frames → MP4 with audio mixing ──
-  // Use audioAssets from renderFrames (authoritative frame-level timing from React's <Audio> placement)
+  // renderFrames records every visible <Audio> on every frame. Collapse those
+  // observations back to one start frame per scene before building FFmpeg inputs.
   const audioAssetsFromRenderer = result?.audioAssets || [];
-  // Fallback: if renderer didn't return audioAssets, derive from timeline.scenes
   const scenes = timeline.scenes || [];
-  const audioEntries = audioAssetsFromRenderer.length > 0
-    ? audioAssetsFromRenderer.map((a, i) => ({
-        inputIdx: i + 1, // input 0 is the image sequence
-        path: a.src?.startsWith('/') ? a.src : path.join(publicDir, a.src),
-        delayMs: Math.round((a.startFrame / fps) * 1000),
-      }))
-    : (() => {
-        // Legacy fallback: re-derive audio timing from timeline
-        const entries = [];
-        scenes.forEach((scene) => {
-          const audioPath = path.join(publicDir, scene.audio);
-          if (fs.existsSync(audioPath)) {
-            const inputIdx = entries.length + 1;
-            const delayMs = Math.round(scene.startMs);
-            entries.push({ inputIdx, path: audioPath, delayMs });
-          }
-        });
-        return entries;
-      })();
+  const firstFrameBySrc = new Map();
+  audioAssetsFromRenderer.forEach((asset) => {
+    if (!asset || typeof asset.src !== "string" || !Number.isFinite(asset.startFrame)) return;
+    const src = `/${asset.src.replace(/^\/+/, "")}`;
+    const previous = firstFrameBySrc.get(src);
+    if (previous === undefined || asset.startFrame < previous) {
+      firstFrameBySrc.set(src, asset.startFrame);
+    }
+  });
+
+  const publicRoot = path.resolve(publicDir);
+  const audioEntries = [];
+  scenes.forEach((scene) => {
+    if (typeof scene.audio !== "string" || !scene.audio) return;
+    const relativeAudio = scene.audio.replace(/^[\\/]+/, "");
+    const audioPath = path.resolve(publicRoot, relativeAudio);
+    if (audioPath !== publicRoot && !audioPath.startsWith(`${publicRoot}${path.sep}`)) {
+      throw new Error(`Audio path escapes public directory: ${scene.audio}`);
+    }
+    if (!fs.existsSync(audioPath)) {
+      throw new Error(`Missing audio asset: ${audioPath}`);
+    }
+
+    const publicSrc = `/${relativeAudio.split(path.sep).join("/")}`;
+    const fallbackStartFrame = Math.round((scene.startMs / 1000) * fps);
+    const startFrame = firstFrameBySrc.get(publicSrc) ?? fallbackStartFrame;
+    audioEntries.push({
+      inputIdx: audioEntries.length + 1, // input 0 is the image sequence
+      path: audioPath,
+      src: publicSrc,
+      startFrame,
+      delayMs: Math.round((startFrame / fps) * 1000),
+    });
+  });
 
   const filterParts = [];
   audioEntries.forEach((entry, i) => {
@@ -209,7 +215,7 @@ try {
     durationSec: ((timeline.totalDurationMs || config.durationInFrames * 1000 / config.fps) / 1000).toFixed(1),
     videoBytes,
     coverBytes,
-    audioAssets,
+    audioAssets: audioEntries.map(({src, startFrame, delayMs}) => ({src, startFrame, delayMs})),
   };
   fs.writeFileSync(reportPath, JSON.stringify(report, null, 2) + "\n", "utf8");
   process.stdout.write(JSON.stringify(report) + "\n");
