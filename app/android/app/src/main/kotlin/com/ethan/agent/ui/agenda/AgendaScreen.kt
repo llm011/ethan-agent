@@ -8,6 +8,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -143,7 +145,14 @@ fun AgendaScreen(
     val snackbar = remember { SnackbarHostState() }
     ErrorSnackbar(state.error, onClearError, snackbar)
 
-    val today = remember { java.time.LocalDate.now().toString() }
+    // 秒级刷新 today（字符串结构相等，仅跨午夜时触发重组），与 Web 端每秒重算行为一致
+    var today by remember { mutableStateOf(java.time.LocalDate.now().toString()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1000)
+            today = java.time.LocalDate.now().toString()
+        }
+    }
     val eventDates = remember(state.events) { state.events.mapNotNull { eventDateKey(it) }.toSet() }
     val dayEvents = remember(state.events, state.selectedDateKey) {
         state.events.mapNotNull { ev ->
@@ -620,7 +629,7 @@ private fun EmptyDayHint(selectedIsToday: Boolean) {
 
 // ── 添加 / 编辑日程底部表单 ───────────────────────────────────────────────
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun EventEditSheet(
     form: AgendaEventForm,
@@ -682,7 +691,11 @@ private fun EventEditSheet(
             }
 
             if (form.repeat == "weekly") {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                // FlowRow：7 个 chip（各 48dp 最小交互宽）在窄屏单行放不下，自动换行
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
                     WEEKDAY_LABELS.forEachIndexed { i, label ->
                         val iso = i + 1
                         val active = iso in form.weekdays
