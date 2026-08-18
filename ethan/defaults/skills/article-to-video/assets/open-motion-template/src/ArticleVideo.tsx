@@ -206,9 +206,10 @@ const VisualContent: React.FC<{visual: Visual; primary: string; secondary: strin
             ...panel,
             ...itemStyle(index),
             padding: "28px 38px",
-            background: index === 0 ? `${primary}22` : "rgba(255,255,255,0.05)",
-            color: text,
-            fontSize: visual.type === "kinetic-text" ? 52 : 40,
+            background: index === 0 ? `${primary}30` : "rgba(255,255,255,0.06)",
+            borderLeft: index === 0 ? `4px solid ${primary}` : "4px solid transparent",
+            color: index === 0 ? primary : (index % 2 === 1 ? secondary : text),
+            fontSize: visual.type === "kinetic-text" ? (index === 0 ? 52 : 42) : 40,
             fontWeight: index === 0 ? 800 : 650,
             display: "flex",
             alignItems: "center",
@@ -259,7 +260,7 @@ export const ArticleVideo: React.FC<VideoTimeline> = (timeline) => {
   return (
     <AbsoluteFill
       style={{
-        background: `radial-gradient(circle at 15% 15%, ${theme.primary}22, transparent 35%), radial-gradient(circle at 90% 75%, ${theme.secondary}24, transparent 40%), ${theme.background}`,
+        background: `radial-gradient(circle at 15% 15%, ${theme.primary}40, transparent 35%), radial-gradient(circle at 90% 75%, ${theme.secondary}44, transparent 40%), ${theme.background}`,
         fontFamily: "Inter, PingFang SC, Microsoft YaHei, system-ui, sans-serif",
         overflow: "hidden",
       }}
@@ -279,7 +280,7 @@ export const ArticleVideo: React.FC<VideoTimeline> = (timeline) => {
       })}
       <div style={{position: "absolute", left: 58, right: 58, bottom: 72, minHeight: 122, display: "flex", alignItems: "center", justifyContent: "center"}}>
         {caption ? (
-          <div style={{background: "rgba(3,8,18,0.86)", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 26, padding: "22px 34px", color: theme.text, fontSize: 38, lineHeight: 1.45, fontWeight: 700, textAlign: "center", boxShadow: "0 18px 60px rgba(0,0,0,0.4)"}}>
+          <div style={{background: "rgba(3,8,18,0.86)", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 26, padding: "18px 30px", color: theme.text, fontSize: 32, lineHeight: 1.4, fontWeight: 600, textAlign: "center", maxWidth: "85%", boxShadow: "0 18px 60px rgba(0,0,0,0.4)"}}>
             {caption.text}
           </div>
         ) : null}

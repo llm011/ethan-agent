@@ -27,13 +27,27 @@ const tmpDir = path.join(renderDir, "temp");
 const distDir = path.join(tmpDir, "vite-dist");
 
 // ── 1. Ensure Playwright browsers are installed ──
+const chromiumMarker = path.join(os.homedir(), '.cache', 'ms-playwright', '.chromium-installed');
 process.stderr.write("[Step 1/5] Checking Playwright browsers...\n");
 try {
-  chromium.executablePath();
-  process.stderr.write("[Step 1/5] Playwright OK\n");
+  if (fs.existsSync(chromiumMarker)) {
+    const recordedPath = fs.readFileSync(chromiumMarker, 'utf8').trim();
+    const currentPath = chromium.executablePath();
+    if (recordedPath === currentPath) {
+      process.stderr.write("[Step 1/5] Playwright OK (cached)\n");
+    } else {
+      throw new Error('browser path changed');
+    }
+  } else {
+    throw new Error('no marker');
+  }
 } catch {
   process.stderr.write("[Step 1/5] Installing Playwright Chromium...\n");
   execSync("npx playwright install chromium", { cwd: __dirname, stdio: "inherit" });
+  try {
+    fs.mkdirSync(path.dirname(chromiumMarker), { recursive: true });
+    fs.writeFileSync(chromiumMarker, chromium.executablePath());
+  } catch { /* non-fatal */ }
 }
 
 // ── 2. Vite build ──
