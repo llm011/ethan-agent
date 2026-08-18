@@ -389,11 +389,19 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   }, [sessionTitle]);
 
   const prevSessionRef = useRef(initialSessionId);
+  const queueDrainTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => {
     // 仅 streaming 从 true→false 时 drain 队列；切会话（initialSessionId 变化）不触发
     const sessionChanged = prevSessionRef.current !== initialSessionId;
     prevSessionRef.current = initialSessionId;
-    if (sessionChanged) return;
+    if (sessionChanged) {
+      // 切换会话时取消尚未执行的排队消息发送，防止它发到新会话
+      if (queueDrainTimerRef.current !== undefined) {
+        clearTimeout(queueDrainTimerRef.current);
+        queueDrainTimerRef.current = undefined;
+      }
+      return;
+    }
 
     if (!streaming) {
       setTimeout(() => inputRef.current?.focus(), 50);
@@ -406,7 +414,11 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         if (first.images && first.images.length > 0) {
           setPendingFiles(first.images);
         }
-        setTimeout(() => {
+        const targetSession = initialSessionId;
+        queueDrainTimerRef.current = setTimeout(() => {
+          queueDrainTimerRef.current = undefined;
+          // 发送前校验会话未切走，防止竞态导致消息发到错误会话
+          if (prevSessionRef.current !== targetSession) return;
           handleSendRef.current(first.text);
         }, 100);
       }
