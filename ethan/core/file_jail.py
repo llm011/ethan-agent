@@ -12,11 +12,12 @@ from pathlib import Path
 # IMAGE_EXTS 是「作为独立文件交付」的图片（deliver_file 直接交付一张图）。
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp"}
 # 可通过 /files/view 内联呈现的媒体类型。MP4 使用浏览器原生 video 控件，
+# MP3/M4A 使用浏览器原生 audio 控件（book-audio-digest 交付的听书音频），
 # 仍需经过与下载接口相同的 session grant 与签名校验。
-INLINE_VIEW_EXTS = IMAGE_EXTS | {".mp4"}
+INLINE_VIEW_EXTS = IMAGE_EXTS | {".mp4", ".mp3", ".m4a"}
 # 允许交付/下载的扩展名（按需扩充）。图片并入——交付图片时走文件卡片（kind=png 等），
 # 前端识别图片 kind 后渲染缩略图 + 点击 Lightbox 放大，其余类型走下载/预览。
-DELIVER_EXTS = {".pptx", ".pdf", ".docx", ".xlsx", ".csv", ".zip", ".md", ".html", ".mp4"} | IMAGE_EXTS
+DELIVER_EXTS = {".pptx", ".pdf", ".docx", ".xlsx", ".csv", ".zip", ".md", ".html", ".mp4", ".mp3", ".m4a"} | IMAGE_EXTS
 # 项目 assets/ 里允许直出的图片扩展名
 ASSET_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp"}
 
