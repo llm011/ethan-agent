@@ -1,7 +1,8 @@
 import { getCompositions, renderFrames } from "@open-motion/renderer";
 import { chromium } from "playwright";
-import { execFileSync, execSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,6 +21,51 @@ const coverPath = path.resolve(coverPathArg);
 const reportPath = path.resolve(reportPathArg);
 const publicDir = path.resolve(publicDirArg);
 const timeline = JSON.parse(fs.readFileSync(timelinePath, "utf8"));
+const scenes = Array.isArray(timeline.scenes) ? timeline.scenes : [];
+if (scenes.length === 0) {
+  throw new Error("Timeline must contain at least one scene");
+}
+
+// Validate every deterministic audio input before Vite/Playwright performs any
+// expensive work. Timelines produced by video_pipeline always require one audio
+// file per scene; silently dropping one would publish a successful silent video.
+let publicRoot;
+try {
+  publicRoot = fs.realpathSync(path.resolve(publicDir));
+} catch {
+  throw new Error(`Public directory does not exist: ${publicDir}`);
+}
+const sceneAudioInputs = scenes.map((scene, index) => {
+  if (!scene || typeof scene.audio !== "string" || !scene.audio.trim()) {
+    throw new Error(`Scene ${scene?.id || index} is missing a non-empty audio path`);
+  }
+  const relativeAudio = scene.audio.trim().replace(/^[\\/]+/, "");
+  const requestedAudioPath = path.resolve(publicRoot, relativeAudio);
+  if (requestedAudioPath !== publicRoot && !requestedAudioPath.startsWith(`${publicRoot}${path.sep}`)) {
+    throw new Error(`Audio path escapes public directory: ${scene.audio}`);
+  }
+  let audioPath;
+  let audioStat;
+  try {
+    // Resolve symlinks before the containment check: a seemingly local audio
+    // file must not be able to point outside the supplied public directory.
+    audioPath = fs.realpathSync(requestedAudioPath);
+    audioStat = fs.statSync(audioPath);
+  } catch {
+    throw new Error(`Missing audio asset: ${requestedAudioPath}`);
+  }
+  if (audioPath !== publicRoot && !audioPath.startsWith(`${publicRoot}${path.sep}`)) {
+    throw new Error(`Audio path escapes public directory: ${scene.audio}`);
+  }
+  if (!audioStat.isFile() || audioStat.size === 0) {
+    throw new Error(`Invalid audio asset: ${audioPath}`);
+  }
+  return {
+    scene,
+    path: audioPath,
+    src: `/${relativeAudio.split(path.sep).join("/")}`,
+  };
+});
 
 // ── Derive output paths ──
 const renderDir = path.dirname(outputPath);
@@ -27,60 +73,96 @@ const tmpDir = path.join(renderDir, "temp");
 const distDir = path.join(tmpDir, "vite-dist");
 
 // ── 1. Ensure Playwright browsers are installed ──
-const chromiumMarker = path.join(os.homedir(), '.cache', 'ms-playwright', '.chromium-installed');
 process.stderr.write("[Step 1/5] Checking Playwright browsers...\n");
-try {
-  if (fs.existsSync(chromiumMarker)) {
-    const recordedPath = fs.readFileSync(chromiumMarker, 'utf8').trim();
-    const currentPath = chromium.executablePath();
-    if (recordedPath === currentPath) {
-      process.stderr.write("[Step 1/5] Playwright OK (cached)\n");
-    } else {
-      throw new Error('browser path changed');
-    }
-  } else {
-    throw new Error('no marker');
-  }
-} catch {
-  process.stderr.write("[Step 1/5] Installing Playwright Chromium...\n");
-  execSync("npx playwright install chromium", { cwd: __dirname, stdio: "inherit" });
+const configuredChromiumPath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH?.trim();
+const isBrowserFile = (candidate) => {
+  if (!candidate) return false;
   try {
-    fs.mkdirSync(path.dirname(chromiumMarker), { recursive: true });
-    fs.writeFileSync(chromiumMarker, chromium.executablePath());
-  } catch { /* non-fatal */ }
+    return fs.statSync(candidate).isFile();
+  } catch {
+    return false;
+  }
+};
+let chromiumPath = configuredChromiumPath;
+if (configuredChromiumPath) {
+  if (!isBrowserFile(configuredChromiumPath)) {
+    throw new Error(`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH is not a file: ${configuredChromiumPath}`);
+  }
+  process.stderr.write("[Step 1/5] Playwright OK (configured executable)\n");
+} else {
+  try {
+    chromiumPath = chromium.executablePath();
+  } catch {
+    chromiumPath = null;
+  }
+  if (isBrowserFile(chromiumPath)) {
+    process.stderr.write("[Step 1/5] Playwright OK (cached)\n");
+  } else {
+    process.stderr.write("[Step 1/5] Installing Playwright Chromium...\n");
+    execFileSync("npx", ["playwright", "install", "chromium"], { cwd: __dirname, stdio: "inherit" });
+    chromiumPath = chromium.executablePath();
+    if (!isBrowserFile(chromiumPath)) {
+      throw new Error(`Playwright Chromium install completed but executable is missing: ${chromiumPath}`);
+    }
+  }
 }
 
 // ── 2. Vite build ──
 process.stderr.write("[Step 2/5] Building with Vite...\n");
 fs.mkdirSync(distDir, { recursive: true });
-execSync(`npx vite build --outDir "${distDir}"`, { cwd: __dirname, stdio: "inherit" });
+execFileSync("npx", ["vite", "build", "--outDir", distDir], { cwd: __dirname, stdio: "inherit" });
 process.stderr.write("[Step 2/5] Vite build done\n");
 
-// ── 3. Start http-server to serve dist/ ──
-const PORT = 10000 + Math.floor(Math.random() * 5000);
-const url = `http://127.0.0.1:${PORT}`;
+// ── 3. Serve dist/ on an OS-assigned loopback port ──
+// A random fixed port can collide with an existing local process. Using port 0
+// lets the kernel choose an available port, and avoids depending on http-server.
+const MIME_TYPES = {
+  ".css": "text/css; charset=utf-8",
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+};
 let server;
+let url;
 
 try {
-  server = spawn("npx", ["http-server", distDir, "-p", String(PORT), "-a", "127.0.0.1", "--cors", "-s"],
-    { cwd: __dirname, stdio: "ignore", detached: true });
-  server.unref();
-
-  // Wait for server to be ready
+  server = http.createServer((request, response) => {
+    let requestPath;
+    try {
+      requestPath = decodeURIComponent(new URL(request.url || "/", "http://127.0.0.1").pathname);
+    } catch {
+      response.writeHead(400).end("Invalid request path");
+      return;
+    }
+    const candidate = path.resolve(distDir, `.${requestPath}`);
+    if (candidate !== distDir && !candidate.startsWith(`${distDir}${path.sep}`)) {
+      response.writeHead(403).end("Forbidden");
+      return;
+    }
+    let filePath = candidate;
+    try {
+      if (!fs.statSync(filePath).isFile()) filePath = path.join(distDir, "index.html");
+    } catch {
+      filePath = path.join(distDir, "index.html");
+    }
+    response.writeHead(200, {"Content-Type": MIME_TYPES[path.extname(filePath)] || "application/octet-stream"});
+    fs.createReadStream(filePath).on("error", () => response.destroy()).pipe(response);
+  });
   await new Promise((resolve, reject) => {
-    const deadline = Date.now() + 10_000;
-    const check = async () => {
-      if (Date.now() > deadline) {
-        reject(new Error(`http-server not ready on port ${PORT} within 10s`));
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        reject(new Error("Unable to determine local render server port"));
         return;
       }
-      try {
-        const res = await fetch(url);
-        if (res.ok) { resolve(); return; }
-      } catch {}
-      setTimeout(check, 200);
-    };
-    check();
+      url = `http://127.0.0.1:${address.port}`;
+      resolve();
+    });
   });
 
   // ── 4. Discover compositions ──
@@ -91,10 +173,10 @@ try {
   if (!comp) throw new Error(`No composition "ArticleVideo" found (got: ${compositions.map(c=>c.id).join(", ")})`);
 
   // Use timeline.json values for config — getCompositions may return defaults if calculateMetadata isn't invoked
-  const fps = comp.fps || timeline.fps || 30;
+  const fps = timeline.fps || comp.fps || 30;
   const config = {
-    width: comp.width || timeline.width || 1080,
-    height: comp.height || timeline.height || 1920,
+    width: timeline.width || comp.width || 1080,
+    height: timeline.height || comp.height || 1920,
     fps,
     durationInFrames: Math.max(1, Math.ceil(((timeline.totalDurationMs || 3000) / 1000) * fps)),
   };
@@ -116,25 +198,41 @@ try {
       if (pct % 10 === 0) process.stderr.write(`[Step 4/5] Frames: ${frame}/${config.durationInFrames} (${pct}%)\n`);
     },
   });
-  const audioAssets = result?.audioAssets || [];
   process.stderr.write(`[Step 4/5] Frames complete: ${config.durationInFrames}/${config.durationInFrames} (100%)\n`);
 
   // ── 6. Encode frames → MP4 with audio mixing ──
-  const scenes = timeline.scenes || [];
-  const audioEntries = []; // { inputIdx, path, delayMs }
-  const filterParts = [];
-  scenes.forEach((scene) => {
-    const audioPath = path.join(publicDir, scene.audio);
-    if (fs.existsSync(audioPath)) {
-      // inputIdx starts at 1 because input 0 is the image sequence (no audio)
-      const inputIdx = audioEntries.length + 1;
-      const delayMs = Math.round(scene.startMs);
-      filterParts.push(`[${inputIdx}:a]adelay=${delayMs}|${delayMs},asetpts=PTS-STARTPTS[a${audioEntries.length}]`);
-      audioEntries.push({ inputIdx, path: audioPath, delayMs });
+  // renderFrames records every visible <Audio> on every frame. Collapse those
+  // observations back to one start frame per scene before building FFmpeg inputs.
+  const audioAssetsFromRenderer = result?.audioAssets || [];
+  const firstFrameBySrc = new Map();
+  audioAssetsFromRenderer.forEach((asset) => {
+    if (!asset || typeof asset.src !== "string" || !Number.isFinite(asset.startFrame)) return;
+    const src = `/${asset.src.replace(/^\/+/, "")}`;
+    const previous = firstFrameBySrc.get(src);
+    if (previous === undefined || asset.startFrame < previous) {
+      firstFrameBySrc.set(src, asset.startFrame);
     }
   });
 
+  const audioEntries = sceneAudioInputs.map(({scene, path: audioPath, src: publicSrc}, index) => {
+    const fallbackStartFrame = Math.round((scene.startMs / 1000) * fps);
+    const startFrame = firstFrameBySrc.get(publicSrc) ?? fallbackStartFrame;
+    return {
+      inputIdx: index + 1, // input 0 is the image sequence
+      path: audioPath,
+      src: publicSrc,
+      startFrame,
+      delayMs: Math.round((startFrame / fps) * 1000),
+    };
+  });
+
+  const filterParts = [];
+  audioEntries.forEach((entry, i) => {
+    filterParts.push(`[${entry.inputIdx}:a]adelay=${entry.delayMs}|${entry.delayMs},asetpts=PTS-STARTPTS[a${i}]`);
+  });
+
   if (audioEntries.length > 0) {
+    const encodedDurationSec = config.durationInFrames / config.fps;
     const audioInputArgs = audioEntries.flatMap((e) => ["-i", e.path]);
     const mixInputs = audioEntries.map((e, i) => `[a${i}]`).join("");
     filterParts.push(`${mixInputs}amix=inputs=${audioEntries.length}:duration=longest:normalize=0[aout]`);
@@ -150,6 +248,7 @@ try {
         ...audioInputArgs,
         "-filter_complex", filterComplex,
         "-map", "0:v", "-map", "[aout]",
+        "-t", String(encodedDurationSec),
         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "20",
         "-c:a", "aac", "-b:a", "128k",
         outputPath,
@@ -157,12 +256,14 @@ try {
       { stdio: "inherit" },
     );
   } else {
+    const encodedDurationSec = config.durationInFrames / config.fps;
     process.stderr.write("[Step 5/5] Encoding MP4 with FFmpeg (video only)...\n");
     execFileSync(
       "ffmpeg",
       [
         "-y", "-framerate", String(config.fps),
         "-i", `${tmpDir}/frame-%05d.png`,
+        "-t", String(encodedDurationSec),
         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "20",
         outputPath,
       ],
@@ -183,6 +284,10 @@ try {
   // ── 8. Write render-report.json (compatible with video_pipeline.py) ──
   const videoBytes = fs.existsSync(outputPath) ? fs.statSync(outputPath).size : 0;
   const coverBytes = fs.existsSync(coverPath) ? fs.statSync(coverPath).size : 0;
+  const durationSec = Math.round((config.durationInFrames / config.fps) * 1000) / 1000;
+  const expectedDurationSec = Math.round(
+    ((timeline.totalDurationMs || config.durationInFrames * 1000 / config.fps) / 1000) * 1000,
+  ) / 1000;
   const report = {
     status: "ok",
     composition: comp.id,
@@ -191,17 +296,19 @@ try {
     fps: config.fps,
     durationInFrames: config.durationInFrames,
     expectedDurationMs: timeline.totalDurationMs,
+    expectedDurationSec,
     sceneCount: timeline.scenes?.length || 0,
+    durationSec,
     videoBytes,
     coverBytes,
-    audioAssets,
+    audioAssets: audioEntries.map(({src, startFrame, delayMs}) => ({src, startFrame, delayMs})),
   };
   fs.writeFileSync(reportPath, JSON.stringify(report, null, 2) + "\n", "utf8");
   process.stdout.write(JSON.stringify(report) + "\n");
 
 } finally {
-  // ── Cleanup: kill http-server + remove all temp files ──
-  try { if (server?.pid) process.kill(-server.pid); } catch {}
+  // ── Cleanup: stop local server + remove all temp files ──
+  try { await new Promise((resolve) => server?.close(resolve)); } catch {}
   // Remove rendered frames + Vite build output (distDir is child of tmpDir)
   try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
   // Remove debug screenshots
