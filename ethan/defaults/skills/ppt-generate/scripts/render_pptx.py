@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import copy
 import hashlib
+import importlib.util
 import json
 import math
 import os
@@ -46,6 +47,18 @@ def _try_import(mod: str) -> bool:
         return False
 
 
+def _module_present(mod: str) -> bool:
+    """Return whether Python can locate an installed module without importing it."""
+    try:
+        return importlib.util.find_spec(mod) is not None
+    except ModuleNotFoundError:
+        return False
+    except Exception:
+        # Any other locator failure indicates a partially initialized or broken
+        # installation. Treat it as present so pip is told to repair it.
+        return True
+
+
 def _write_deps_marker() -> None:
     """Best-effort atomic marker write; dependency availability remains authoritative."""
     try:
@@ -61,24 +74,35 @@ def _ensure_pptx():
     """检查 python-pptx 等依赖是否可用，缺少则安装。
     使用持久化 marker 文件避免每次运行都重装——marker 记录安装时的 Python 路径，
     路径变化（切换 venv/system）时自动重装。"""
-    missing = [mod for mod in _DEPS_MODS if not _try_import(mod)]
+    unavailable = [mod for mod in _DEPS_MODS if not _try_import(mod)]
+    broken = [mod for mod in unavailable if _module_present(mod)]
 
-    if not missing and _DEPS_MARKER.exists():
+    if not unavailable and _DEPS_MARKER.exists():
         try:
             if _DEPS_MARKER.read_text(encoding="utf-8").strip() == sys.executable:
                 return
         except (OSError, UnicodeDecodeError, ValueError):
             pass
 
-    if not missing:
+    if not unavailable:
         _write_deps_marker()
         return
     pkg_map = {"pptx": "python-pptx", "latex2mathml": "latex2mathml", "mathml2omml": "mathml2omml"}
-    pkgs = [pkg_map[m] for m in missing]
+    pkgs = [pkg_map[m] for m in unavailable]
     print(f"[render_pptx] 缺少依赖 {pkgs}，尝试 pip 安装 ...", file=sys.stderr)
     # venv 内直接装（--user 会报错）；非 venv 用 --user 避免污染系统环境
     in_venv = sys.prefix != getattr(sys, "base_prefix", sys.prefix)
-    cmd = [sys.executable, "-m", "pip", "install", "--quiet", *([] if in_venv else ["--user"]), *pkgs]
+    repair_args = ["--upgrade", "--force-reinstall"] if broken else []
+    cmd = [
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--quiet",
+        *([] if in_venv else ["--user"]),
+        *repair_args,
+        *pkgs,
+    ]
     try:
         subprocess.check_call(cmd)
         import site
