@@ -2035,12 +2035,12 @@ def validate_deck(deck: dict, theme: dict | None = None, deck_dir: Path | None =
     # ── 主题质量校验 ──
     theme_bg = (theme or {}).get("backgroundColor", "")
     if isinstance(theme_bg, str) and theme_bg.upper() in ("#FFFFFF", "#FFF", "WHITE", ""):
-        issues.append(_issue("theme", f"背景色为纯白 {theme_bg!r}，建议使用主题色背景", "warn"))
+        warn(f"背景色为纯白 {theme_bg!r}，建议使用主题色背景")
 
     # 检查是否使用了默认占位配色（gray/placeholder）
     theme_colors = (theme or {}).get("themeColors", [])
     if not theme_colors or len(theme_colors) < 3:
-        issues.append(_issue("theme", f"主题色数量不足（{len(theme_colors)} 个），建议至少 3 个主题色", "warn"))
+        warn(f"主题色数量不足（{len(theme_colors)} 个），建议至少 3 个主题色")
 
     return issues
 

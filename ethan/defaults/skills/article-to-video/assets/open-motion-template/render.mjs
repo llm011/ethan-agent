@@ -33,10 +33,10 @@ try {
   if (fs.existsSync(chromiumMarker)) {
     const recordedPath = fs.readFileSync(chromiumMarker, 'utf8').trim();
     const currentPath = chromium.executablePath();
-    if (recordedPath === currentPath) {
+    if (recordedPath === currentPath && fs.existsSync(currentPath)) {
       process.stderr.write("[Step 1/5] Playwright OK (cached)\n");
     } else {
-      throw new Error('browser path changed');
+      throw new Error('browser path changed or binary missing');
     }
   } else {
     throw new Error('no marker');
