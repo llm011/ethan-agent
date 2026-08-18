@@ -51,6 +51,12 @@ metadata:
    - 字体配对与字号阶梯（标题/正文/注释）。
 3. **落成内联 theme 对象**写进项目 `deck.json`（结构见 schema.md 的 SlideTheme，`typography` 按 textType 给默认值）。预设主题（business-blue / dark-tech / fresh-green / vibrant-orange）只作为快速兜底或定制起点，可在其基础上改色改字体。
 
+> ⚠️ **质量红线（强制）**：
+> 1. **必须有主题色**：禁止纯白背景 + 黑色文字的"默认"样式。每页必须有背景色/渐变 + 主题色点缀。
+> 2. **必须从预设主题起步**：至少从 business-blue / dark-tech / fresh-green / vibrant-orange 中选一个作为定制起点，禁止完全自创配色（除非用户明确指定）。
+> 3. **禁止空页面**：每页必须有标题 + 正文内容，不允许只有标题无内容的空白页。
+> 4. **标题必须是 action title**：完整句子，表达结论或观点，不能是"概述""背景"等名词短语。
+
 ### Step 3：建项目目录
 
 ```

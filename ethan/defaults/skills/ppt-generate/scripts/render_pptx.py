@@ -31,7 +31,27 @@ from project_loader import load_deck
 # 依赖自举：python-pptx（ Pillow 随其自动安装 ）
 # ---------------------------------------------------------------------------
 
+_DEPS_MARKER = Path.home() / ".ethan" / "cache" / "ppt-deps" / ".installed"
+
+
 def _ensure_pptx():
+    """检查 python-pptx 等依赖是否可用，缺少则安装。
+    使用持久化 marker 文件避免每次运行都重装——marker 记录安装时的 Python 路径，
+    路径变化（切换 venv/system）时自动重装。"""
+    if _DEPS_MARKER.exists():
+        try:
+            recorded_python = _DEPS_MARKER.read_text().strip()
+            if recorded_python == sys.executable:
+                # marker 匹配且 import 成功 → 跳过
+                try:
+                    for mod in ("pptx", "latex2mathml", "mathml2omml"):
+                        __import__(mod)
+                    return
+                except ImportError:
+                    pass  # marker 过期，继续重装
+        except OSError:
+            pass
+
     missing = []
     for mod in ("pptx", "latex2mathml", "mathml2omml"):
         try:
@@ -39,6 +59,12 @@ def _ensure_pptx():
         except ImportError:
             missing.append(mod)
     if not missing:
+        # 写 marker
+        try:
+            _DEPS_MARKER.parent.mkdir(parents=True, exist_ok=True)
+            _DEPS_MARKER.write_text(sys.executable)
+        except OSError:
+            pass
         return
     pkg_map = {"pptx": "python-pptx", "latex2mathml": "latex2mathml", "mathml2omml": "mathml2omml"}
     pkgs = [pkg_map[m] for m in missing]
@@ -55,6 +81,12 @@ def _ensure_pptx():
             sys.path.insert(0, user_site)
         import pptx  # noqa: F401
         print("[render_pptx] 依赖安装成功", file=sys.stderr)
+        # 写 marker 避免下次重装
+        try:
+            _DEPS_MARKER.parent.mkdir(parents=True, exist_ok=True)
+            _DEPS_MARKER.write_text(sys.executable)
+        except OSError:
+            pass
     except Exception as e:  # noqa: BLE001
         print(
             "[render_pptx] 自动安装失败: %s\n请手动执行: pip3 install python-pptx latex2mathml mathml2omml" % e,
@@ -1999,6 +2031,17 @@ def validate_deck(deck: dict, theme: dict | None = None, deck_dir: Path | None =
                             warn(f"{ep} colWidths 之和为 {cw_sum:.3f}（建议归一到 1.0）")
                     if geom_ok and widths_ok and cells_ok:
                         check_table_overflow(el, theme, ep, ch, err, warn)
+
+    # ── 主题质量校验 ──
+    theme_bg = (theme or {}).get("backgroundColor", "")
+    if isinstance(theme_bg, str) and theme_bg.upper() in ("#FFFFFF", "#FFF", "WHITE", ""):
+        issues.append(_issue("theme", f"背景色为纯白 {theme_bg!r}，建议使用主题色背景", "warn"))
+
+    # 检查是否使用了默认占位配色（gray/placeholder）
+    theme_colors = (theme or {}).get("themeColors", [])
+    if not theme_colors or len(theme_colors) < 3:
+        issues.append(_issue("theme", f"主题色数量不足（{len(theme_colors)} 个），建议至少 3 个主题色", "warn"))
+
     return issues
 
 
