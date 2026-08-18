@@ -79,7 +79,10 @@ def _ensure_pptx():
         user_site = site.getusersitepackages()
         if user_site not in sys.path:
             sys.path.insert(0, user_site)
-        import pptx  # noqa: F401
+        # 验证所有依赖都可导入
+        failed = [m for m in _DEPS_MODS if not _try_import(m)]
+        if failed:
+            raise ImportError(f"pip install succeeded but still missing: {failed}")
         print("[render_pptx] 依赖安装成功", file=sys.stderr)
         # 写 marker 避免下次重装
         try:
@@ -2039,8 +2042,9 @@ def validate_deck(deck: dict, theme: dict | None = None, deck_dir: Path | None =
 
     # 检查是否使用了默认占位配色（gray/placeholder）
     theme_colors = (theme or {}).get("themeColors", [])
-    if not theme_colors or len(theme_colors) < 3:
-        issues.append(_issue("theme", f"主题色数量不足（{len(theme_colors)} 个），建议至少 3 个主题色", "warn"))
+    if not isinstance(theme_colors, list) or len(theme_colors) < 3:
+        count_str = str(len(theme_colors)) if isinstance(theme_colors, list) else "N/A"
+        issues.append(_issue("theme", f"主题色数量不足（{count_str} 个），建议至少 3 个主题色", "warn"))
 
     return issues
 
