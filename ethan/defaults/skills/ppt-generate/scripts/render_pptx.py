@@ -110,18 +110,25 @@ def _ensure_pptx():
         user_site = site.getusersitepackages()
         if user_site not in sys.path:
             sys.path.insert(0, user_site)
-        # 验证所有依赖都可导入
-        failed = [mod for mod in _DEPS_MODS if not _try_import(mod)]
-        if failed:
-            raise ImportError(f"pip install succeeded but still missing: {failed}")
-        print("[render_pptx] 依赖安装成功", file=sys.stderr)
-        _write_deps_marker()
     except Exception as e:  # noqa: BLE001
         print(
-            "[render_pptx] 自动安装失败: %s\n请手动执行: pip3 install python-pptx latex2mathml mathml2omml" % e,
+            "[render_pptx] 自动安装失败: %s\n请手动执行: pip3 install %s" % (e, " ".join(pkgs)),
             file=sys.stderr,
         )
         sys.exit(2)
+
+    # pip 退出码 0 不代表模块可用（native 库缺失 / ABI 不匹配 / 安装残缺）
+    failed = [mod for mod in _DEPS_MODS if not _try_import(mod)]
+    if failed:
+        print(
+            "[render_pptx] pip 安装已完成，但以下模块仍无法导入: %s\n"
+            "多为系统级动态库缺失或 ABI 不匹配；请运行 `%s -c \"import %s\"` 查看真实报错"
+            % (failed, sys.executable, failed[0]),
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    print("[render_pptx] 依赖安装成功", file=sys.stderr)
+    _write_deps_marker()
 
 
 _ensure_pptx()
