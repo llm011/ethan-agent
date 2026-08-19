@@ -244,4 +244,342 @@ def test_skill_metadata_and_references_are_discoverable():
         "manifest-schema.md",
         "script-guide.md",
         "visual-presets.md",
+        "asset-library.md",
+        "presenter-guide.md",
     }
+
+
+# ── P1: domain / presenter / candlestick / callouts ──
+
+
+def make_presenter_library(root: Path, presenter_id: str = "xiaoyu", *, voice: dict | None = None) -> Path:
+    """在临时库根下造一个 ready 状态的 presenter 角色包（两姿势）。"""
+    presenter_dir = root / "presenters" / presenter_id
+    poses_dir = presenter_dir / "poses"
+    poses_dir.mkdir(parents=True)
+    for name in ("standing", "pointing"):
+        (poses_dir / f"{name}.png").write_bytes(b"\x89PNG\r\n\x1a\nfake")
+    character = {
+        "id": presenter_id,
+        "name": "晓玉",
+        "status": "ready",
+        "createdAt": "2026-08-19T00:00:00",
+        "voice": voice if voice is not None else {"name": "zh-CN-XiaoyiNeural", "rate": "+5%", "volume": "+0%", "pitch": "+0Hz"},
+        "poses": {"standing": "poses/standing.png", "pointing": "poses/pointing.png"},
+        "cutout": True,
+    }
+    (presenter_dir / "character.json").write_text(json.dumps(character, ensure_ascii=False), encoding="utf-8")
+    return presenter_dir
+
+
+def finance_manifest(**overrides):
+    manifest = sample_manifest()
+    manifest["domain"] = "finance"
+    manifest.update(overrides)
+    return manifest
+
+
+def test_domain_defaults_to_general_with_original_theme():
+    result = pipeline.normalize_manifest(sample_manifest())
+
+    assert result["domain"] == "general"
+    assert result["theme"]["background"] == "#081120"
+    assert "accent" not in result["theme"] or result["theme"]["accent"]  # 可选键存在即可
+
+
+def test_domain_theme_merge_priority():
+    # finance 主题覆盖 DEFAULT_THEME
+    result = pipeline.normalize_manifest(finance_manifest())
+    assert result["theme"]["background"] == "#0A0E1A"
+    assert result["theme"]["primary"] == "#FFD54A"
+    assert result["theme"]["positive"] == "#EF4444"  # 红涨
+    assert result["theme"]["negative"] == "#22C55E"  # 绿跌
+
+    # 用户 theme 覆盖 domain 主题
+    custom = finance_manifest(theme={"primary": "#FF0000"})
+    result = pipeline.normalize_manifest(custom)
+    assert result["theme"]["primary"] == "#FF0000"
+    assert result["theme"]["background"] == "#0A0E1A"  # domain 其他键保留
+
+
+@pytest.mark.parametrize("domain", ["bloomberg", "FINANCE", "fin ance"])
+def test_unknown_domain_rejected(domain):
+    with pytest.raises(pipeline.ManifestError, match="domain must be one of"):
+        pipeline.normalize_manifest(finance_manifest(domain=domain))
+
+
+def test_domain_null_falls_back_to_general():
+    manifest = sample_manifest()
+    manifest["domain"] = None
+    assert pipeline.normalize_manifest(manifest)["domain"] == "general"
+
+
+def test_presenter_loaded_from_library(tmp_path):
+    root = tmp_path / "library"
+    make_presenter_library(root)
+    manifest = finance_manifest(presenter={"id": "xiaoyu"})
+
+    result = pipeline.normalize_manifest(manifest, library_root=root)
+
+    presenter = result["presenter"]
+    assert presenter["id"] == "xiaoyu"
+    assert presenter["position"] == "right"
+    assert presenter["scale"] == 1.0
+    assert presenter["defaultPose"] == "standing"
+    assert presenter["cutout"] is True
+    assert presenter["poses"] == {
+        "standing": "presenters/xiaoyu/poses/standing.png",
+        "pointing": "presenters/xiaoyu/poses/pointing.png",
+    }
+    assert "voice" not in presenter  # voice 只用于 TTS 继承，不进 timeline
+
+
+def test_presenter_voice_inherited_when_manifest_omits_voice(tmp_path):
+    root = tmp_path / "library"
+    make_presenter_library(root, voice={"name": "zh-CN-XiaoyiNeural", "rate": "+5%", "volume": "+0%", "pitch": "+0Hz"})
+    manifest = finance_manifest(presenter={"id": "xiaoyu"})
+
+    result = pipeline.normalize_manifest(manifest, library_root=root)
+
+    assert result["voice"]["name"] == "zh-CN-XiaoyiNeural"
+    assert result["voice"]["rate"] == "+5%"
+
+
+def test_presenter_voice_manifest_explicit_wins(tmp_path):
+    root = tmp_path / "library"
+    make_presenter_library(root)
+    manifest = finance_manifest(presenter={"id": "xiaoyu"}, voice={"name": "zh-CN-YunxiNeural"})
+
+    result = pipeline.normalize_manifest(manifest, library_root=root)
+
+    assert result["voice"]["name"] == "zh-CN-YunxiNeural"
+
+
+def test_presenter_missing_error_points_to_presenter_gen(tmp_path):
+    root = tmp_path / "library"
+    (root / "presenters").mkdir(parents=True)
+    manifest = finance_manifest(presenter={"id": "ghost"})
+
+    with pytest.raises(pipeline.ManifestError, match="presenter_gen.py"):
+        pipeline.normalize_manifest(manifest, library_root=root)
+
+
+def test_presenter_not_ready_rejected(tmp_path):
+    root = tmp_path / "library"
+    presenter_dir = make_presenter_library(root)
+    char = json.loads((presenter_dir / "character.json").read_text(encoding="utf-8"))
+    char["status"] = "pending"
+    (presenter_dir / "character.json").write_text(json.dumps(char, ensure_ascii=False), encoding="utf-8")
+
+    with pytest.raises(pipeline.ManifestError, match="not ready"):
+        pipeline.normalize_manifest(finance_manifest(presenter={"id": "xiaoyu"}), library_root=root)
+
+
+def test_presenter_missing_pose_file_rejected(tmp_path):
+    root = tmp_path / "library"
+    presenter_dir = make_presenter_library(root)
+    (presenter_dir / "poses" / "pointing.png").unlink()
+
+    with pytest.raises(pipeline.ManifestError, match="pose image missing"):
+        pipeline.normalize_manifest(finance_manifest(presenter={"id": "xiaoyu"}), library_root=root)
+
+
+@pytest.mark.parametrize(
+    "presenter_patch, message",
+    [
+        ({"id": "XiaoYu"}, "kebab-case"),
+        ({"id": "xiaoyu", "position": "center"}, "position"),
+        ({"id": "xiaoyu", "scale": 2.0}, "scale"),
+        ({"id": "xiaoyu", "defaultPose": "dancing"}, "defaultPose"),
+    ],
+)
+def test_presenter_field_validation(tmp_path, presenter_patch, message):
+    root = tmp_path / "library"
+    make_presenter_library(root)
+
+    with pytest.raises(pipeline.ManifestError, match=message):
+        pipeline.normalize_manifest(finance_manifest(presenter=presenter_patch), library_root=root)
+
+
+def test_scene_presenter_override_and_hide(tmp_path):
+    root = tmp_path / "library"
+    make_presenter_library(root)
+    manifest = finance_manifest(presenter={"id": "xiaoyu"})
+    manifest["scenes"][0]["presenter"] = {"pose": "pointing"}
+    manifest["scenes"][1]["presenter"] = {"visible": False}
+
+    result = pipeline.normalize_manifest(manifest, library_root=root)
+
+    assert result["scenes"][0]["presenter"] == {"pose": "pointing", "visible": True}
+    assert result["scenes"][1]["presenter"] == {"pose": None, "visible": False}
+
+
+def test_scene_presenter_requires_top_level_presenter(tmp_path):
+    manifest = finance_manifest()
+    manifest["scenes"][0]["presenter"] = {"pose": "pointing"}
+
+    with pytest.raises(pipeline.ManifestError, match="requires a top-level presenter"):
+        pipeline.normalize_manifest(manifest, library_root=tmp_path)
+
+
+def test_scene_presenter_unknown_pose_rejected(tmp_path):
+    root = tmp_path / "library"
+    make_presenter_library(root)
+    manifest = finance_manifest(presenter={"id": "xiaoyu"})
+    manifest["scenes"][0]["presenter"] = {"pose": "dancing"}
+
+    with pytest.raises(pipeline.ManifestError, match="pose must be one of"):
+        pipeline.normalize_manifest(manifest, library_root=root)
+
+
+def closes_series():
+    return [3120.5, 3128.0, 3115.2, 3140.8, 3152.3, 3144.0, 3161.5, 3158.9, 3170.2, 3165.0]
+
+
+def test_candlestick_closes_and_markers():
+    manifest = finance_manifest()
+    manifest["scenes"][0]["visual"] = {
+        "type": "candlestick",
+        "closes": closes_series(),
+        "bands": {"middle": [3120.0 + i for i in range(10)]},
+        "markers": [{"index": 3, "label": "突破", "tone": "positive", "position": "above"}],
+    }
+
+    result = pipeline.normalize_manifest(manifest)
+    visual = result["scenes"][0]["visual"]
+
+    assert visual["type"] == "candlestick"
+    assert len(visual["closes"]) == 10
+    assert visual["bands"]["middle"][0] == 3120.0
+    assert visual["markers"] == [{"index": 3, "label": "突破", "tone": "positive", "position": "above"}]
+
+
+def test_candlestick_explicit_candles():
+    manifest = finance_manifest()
+    manifest["scenes"][0]["visual"] = {
+        "type": "candlestick",
+        "candles": [
+            {"o": 100, "h": 105, "l": 98, "c": 103},
+            {"o": 103, "h": 106, "l": 98, "c": 99},
+        ],
+    }
+
+    visual = pipeline.normalize_manifest(manifest)["scenes"][0]["visual"]
+    assert len(visual["candles"]) == 2
+    assert visual["candles"][1] == {"o": 103.0, "h": 106.0, "l": 98.0, "c": 99.0}
+
+
+@pytest.mark.parametrize(
+    "visual_patch, message",
+    [
+        ({"closes": closes_series(), "candles": [{"o": 1, "h": 2, "l": 0.5, "c": 1.5}, {"o": 1.5, "h": 2, "l": 1, "c": 1.8}]}, "exactly one of closes or candles"),
+        ({}, "exactly one of closes or candles"),
+        ({"closes": [1.0, 2.0, 3.0]}, "between 8 and 120"),
+        ({"closes": closes_series(), "markers": [{"index": 10, "label": "x"}]}, "within \\[0, 10\\)"),
+        ({"closes": closes_series(), "markers": [{"index": i, "label": f"m{i}"} for i in range(5)]}, "between 1 and 4"),
+        ({"closes": closes_series(), "markers": [{"index": 0, "label": "这个标签实在是太长了超过十二字"}]}, "at most 12"),
+        ({"closes": closes_series(), "bands": {"upper": [1.0, 2.0]}}, "same length as the series"),
+    ],
+)
+def test_candlestick_validation(visual_patch, message):
+    manifest = finance_manifest()
+    manifest["scenes"][0]["visual"] = {"type": "candlestick", **visual_patch}
+
+    with pytest.raises(pipeline.ManifestError, match=message):
+        pipeline.normalize_manifest(manifest)
+
+
+def test_candlestick_invalid_ohlc():
+    manifest = finance_manifest()
+    manifest["scenes"][0]["visual"] = {
+        "type": "candlestick",
+        "candles": [
+            {"o": 100, "h": 105, "l": 98, "c": 103},
+            {"o": 103, "h": 100, "l": 101, "c": 99},  # h < max(o,c)
+            {"o": 99, "h": 102, "l": 97, "c": 101},
+        ],
+    }
+
+    with pytest.raises(pipeline.ManifestError, match=r"h >= max\(o, c\)"):
+        pipeline.normalize_manifest(manifest)
+
+
+def test_callouts_normalized_and_validated():
+    manifest = finance_manifest()
+    manifest["scenes"][0]["callouts"] = [
+        {"text": "布林带陷阱", "tone": "accent"},
+        {"text": "缩量上涨"},  # tone 默认 accent
+    ]
+
+    result = pipeline.normalize_manifest(manifest)
+
+    assert result["scenes"][0]["callouts"] == [
+        {"text": "布林带陷阱", "tone": "accent"},
+        {"text": "缩量上涨", "tone": "accent"},
+    ]
+    assert "callouts" not in result["scenes"][1]  # 未设置不出现在输出里
+
+
+@pytest.mark.parametrize(
+    "callouts, message",
+    [
+        ([{"text": f"c{i}", "tone": "accent"} for i in range(4)], "between 1 and 3"),
+        ([{"text": "x", "tone": "hot"}], "tone must be one of"),
+        ([{"text": "这条标注文字真的超过十二个字了喔"}], "at most 12"),
+    ],
+)
+def test_callouts_validation(callouts, message):
+    manifest = finance_manifest()
+    manifest["scenes"][0]["callouts"] = callouts
+
+    with pytest.raises(pipeline.ManifestError, match=message):
+        pipeline.normalize_manifest(manifest)
+
+
+def test_old_manifest_output_unchanged_without_new_fields():
+    # 不含新字段的旧 manifest，输出结构与 domain/presenter 引入前一致（回归保护）。
+    result = pipeline.normalize_manifest(sample_manifest())
+
+    assert result["domain"] == "general"
+    assert "presenter" not in result
+    for scene in result["scenes"]:
+        assert "callouts" not in scene
+        assert "presenter" not in scene
+
+
+def test_stage_assets_hardlinks_presenter_poses(tmp_path):
+    root = tmp_path / "library"
+    make_presenter_library(root)
+    manifest = finance_manifest(presenter={"id": "xiaoyu"})
+    normalized = pipeline.normalize_manifest(manifest, library_root=root)
+    output_dir = tmp_path / "output"
+
+    pipeline.stage_assets(normalized, output_dir, library_root=root)
+
+    for rel in normalized["presenter"]["poses"].values():
+        staged = output_dir / "work" / "public" / rel
+        assert staged.is_file()
+        assert staged.read_bytes() == (root / rel).read_bytes()
+
+
+def test_stage_assets_noop_without_presenter(tmp_path):
+    normalized = pipeline.normalize_manifest(sample_manifest())
+
+    pipeline.stage_assets(normalized, tmp_path / "output", library_root=tmp_path)
+
+    assert not (tmp_path / "output").exists()
+
+
+def test_timeline_carries_domain_and_presenter(tmp_path):
+    root = tmp_path / "library"
+    make_presenter_library(root)
+    manifest = finance_manifest(presenter={"id": "xiaoyu"})
+    normalized = pipeline.normalize_manifest(manifest, library_root=root)
+    srt = tmp_path / "a.srt"
+    srt.write_text("1\n00:00:00,000 --> 00:00:01,000\n字幕\n", encoding="utf-8")
+
+    timeline = pipeline.build_timeline(normalized, [{"srt": srt}, {"srt": srt}])
+
+    assert timeline["domain"] == "finance"
+    assert timeline["presenter"]["id"] == "xiaoyu"
+    assert "voice" not in timeline["presenter"]

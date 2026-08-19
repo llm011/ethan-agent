@@ -2,7 +2,7 @@
 name: article-to-video
 description: "把主题、文章正文、本地 Markdown/TXT 文件或公开 URL 制作成带 AI 剧本、Edge TTS 配音、动态字幕和 Open Motion 动画的 MP4 视频。当用户说文章转视频、主题做视频、URL 做视频、生成口播视频、制作短视频或要求交付配音成片时使用。"
 trigger: "文章转视频|主题做视频|URL转视频|链接转视频|网页转视频|生成视频|制作视频|口播视频|配音视频|短视频|article to video|topic to video|open motion video"
-version: 0.1.0
+version: 0.2.0
 ---
 
 # Article to Video
@@ -30,11 +30,25 @@ mkdir -p "$PROJECT"
 
 不要把产物写在 Skill 安装目录。不要删除失败项目；保留中间文件供重试。
 
-### 3. 生成 manifest
+### 3. 定领域、备资产
+
+按内容确定 `domain`（写进 manifest）：
+
+| domain | 适用 | 视觉特征 |
+|---|---|---|
+| `general`（默认） | 通用口播 | 现有 5 种文字卡片预设 |
+| `finance` | 财经/行情解读 | 深蓝金配色（红涨绿跌）、`candlestick` K线图、黄色关键词 `callouts`、虚拟人立绘 |
+| `paper` | 论文/技术解读 | 紫色主题（Manim/流程图在后续版本接入） |
+
+金融领域建议配虚拟人立绘（`presenter`）。角色包存于资产库 `~/.ethan/assets/library/presenters/<id>/`（详见 `references/asset-library.md`）。**manifest 引用的 presenter 缺失时**：运行 `scripts/presenter_gen.py prompts <id>` 打印一整套出图 prompt，交给用户用 GPT image 2 按 `references/presenter-guide.md` 的流程逐姿势出图，再 `presenter_gen.py import <id> <目录>` 入库。不要自己编造立绘文件路径。
+
+### 4. 生成 manifest
 
 先读 `references/manifest-schema.md` 和 `references/script-guide.md`，再把剧本写入 `$PROJECT/manifest.json`。用户指定时长时必须填写 `targetDurationSec`；每个场景必须包含唯一 `id`、可朗读的 `narration`、屏幕标题和一个受支持的视觉预设。
 
 只在需要选择视觉形式时读 `references/visual-presets.md`。MVP 不依赖付费图库；默认使用文字、数字、引用、步骤和摘要卡片动画。
+
+金融场景的经验法则：开场场景用 `candlestick` + `markers`（标注关键点位）+ `callouts`（≤3 条、每条 ≤12 字的黄色关键词）；立绘默认右侧，在总结类场景用 `presenter: {"visible": false}` 隐藏避免遮挡。
 
 先做无网络校验：
 
@@ -45,7 +59,7 @@ python3 ~/.ethan/skills/article-to-video/scripts/video_pipeline.py \
 
 修正所有校验错误后再合成语音，不能跳过。
 
-### 4. 合成并渲染
+### 5. 合成并渲染
 
 先确认 `uv`、Node.js 和 `pnpm` 可用；缺少时停止并告诉用户安装哪个命令，不静默修改系统环境：
 
@@ -86,7 +100,7 @@ Edge TTS 是第三方库连接的在线服务。网络失败时最多重试三�
 
 若实际语音时长超出 `targetDurationSec ± durationToleranceSec`，脚本会在渲染前停止。根据报告缩短或扩写旁白，保持场景 ID 不变，再执行同一命令；未变化场景的 TTS 会命中缓存。
 
-### 5. 复核
+### 6. 复核
 
 确认脚本输出 `status: ok`，并检查：
 
@@ -98,7 +112,7 @@ Edge TTS 是第三方库连接的在线服务。网络失败时最多重试三�
 
 任何检查失败都要修正后重新运行，不能交付半成品。
 
-### 6. 交付
+### 7. 交付
 
 渲染和复核成功后，必须调用：
 

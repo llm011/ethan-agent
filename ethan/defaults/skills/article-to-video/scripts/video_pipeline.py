@@ -7,6 +7,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -18,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-VISUAL_TYPES = {"kinetic-text", "steps", "stat", "quote", "summary"}
+VISUAL_TYPES = {"kinetic-text", "steps", "stat", "quote", "summary", "candlestick"}
 FPS_VALUES = {24, 25, 30, 60}
 DEFAULT_THEME = {
     "background": "#081120",
@@ -27,6 +28,33 @@ DEFAULT_THEME = {
     "secondary": "#A78BFA",
     "text": "#F8FAFC",
 }
+DOMAINS = {"general", "finance", "paper"}
+# 金融主题里 positive=红、negative=绿（A 股红涨绿跌约定），蜡烛图涨红跌绿。
+DOMAIN_THEMES: dict[str, dict[str, str]] = {
+    "general": {},  # 空 = 沿用 DEFAULT_THEME
+    "finance": {
+        "background": "#0A0E1A",
+        "surface": "#141A2E",
+        "primary": "#FFD54A",
+        "secondary": "#7DD3FC",
+        "text": "#F8FAFC",
+        "accent": "#FACC15",
+        "positive": "#EF4444",
+        "negative": "#22C55E",
+    },
+    "paper": {
+        "background": "#0C0A1D",
+        "surface": "#151030",
+        "primary": "#A78BFA",
+        "secondary": "#C084FC",
+        "text": "#F8FAFC",
+        "accent": "#F59E0B",
+        "positive": "#34D399",
+        "negative": "#F87171",
+    },
+}
+THEME_FIELDS = frozenset(DEFAULT_THEME) | {"accent", "positive", "negative"}
+CALLOUT_TONES = {"accent", "positive", "negative"}
 COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 PROSODY_RE = re.compile(r"^[+-]\d+%$")
@@ -62,7 +90,174 @@ def _string_list(value: Any, field: str, *, maximum: int) -> list[str]:
     return [_require_text(item, f"{field}[]", maximum=80) for item in value]
 
 
-def normalize_manifest(raw: Any) -> dict[str, Any]:
+def _number(value: Any, field: str) -> float:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise ManifestError(f"{field} must be a number")
+    return float(value)
+
+
+def _resolve_library_root(library_root: Path | None) -> Path:
+    # 脚本跑在 uv --isolated 下，不能 import ethan；这里复制 ethan/core/config.py 的根目录约定。
+    if library_root is not None:
+        return library_root
+    data_dir = os.environ.get("ETHAN_DATA_DIR")
+    base = Path(data_dir).expanduser() if data_dir else Path.home() / ".ethan"
+    return base / "assets" / "library"
+
+
+def _presenter_hint(presenter_id: str) -> str:
+    gen_script = Path(__file__).resolve().parent / "presenter_gen.py"
+    return (
+        f"create it with: python3 {gen_script} prompts {presenter_id}  "
+        "# print the prompt pack, generate the images with GPT image 2, then: "
+        f"python3 {gen_script} import {presenter_id} <image-dir>"
+    )
+
+
+def _load_presenter(presenter_raw: Any, library_root: Path) -> dict[str, Any]:
+    if not isinstance(presenter_raw, dict):
+        raise ManifestError("presenter must be an object")
+    presenter_id = _require_text(presenter_raw.get("id"), "presenter.id", maximum=64)
+    if not ID_RE.fullmatch(presenter_id):
+        raise ManifestError("presenter.id must be kebab-case")
+    presenter_dir = library_root / "presenters" / presenter_id
+    char_path = presenter_dir / "character.json"
+    try:
+        character = json.loads(char_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise ManifestError(
+            f"presenter '{presenter_id}' not found in {library_root / 'presenters'} — "
+            f"{_presenter_hint(presenter_id)}"
+        ) from None
+    except json.JSONDecodeError as exc:
+        raise ManifestError(f"presenter '{presenter_id}' character.json is invalid JSON: {exc}") from None
+    if not isinstance(character, dict):
+        raise ManifestError(f"presenter '{presenter_id}' character.json must be an object")
+    if character.get("status") != "ready":
+        raise ManifestError(
+            f"presenter '{presenter_id}' is not ready (status={character.get('status')!r}) — "
+            f"finish image generation, then run: "
+            f"python3 {Path(__file__).resolve().parent / 'presenter_gen.py'} import {presenter_id} <image-dir>"
+        )
+    poses_raw = character.get("poses")
+    if not isinstance(poses_raw, dict) or not poses_raw:
+        raise ManifestError(f"presenter '{presenter_id}' has no poses in character.json")
+    poses: dict[str, str] = {}
+    for name, rel in poses_raw.items():
+        if not isinstance(name, str) or not ID_RE.fullmatch(name):
+            raise ManifestError(f"presenter '{presenter_id}' pose names must be kebab-case")
+        if not isinstance(rel, str) or not rel:
+            raise ManifestError(f"presenter '{presenter_id}' pose '{name}' path must be a non-empty string")
+        rel_path = Path(rel)
+        if rel_path.is_absolute() or ".." in rel_path.parts:
+            raise ManifestError(f"presenter '{presenter_id}' pose '{name}' path must stay inside the presenter dir")
+        if not (presenter_dir / rel_path).is_file():
+            raise ManifestError(
+                f"presenter '{presenter_id}' pose image missing: {rel} — {_presenter_hint(presenter_id)}"
+            )
+        poses[name] = f"presenters/{presenter_id}/{rel_path.as_posix()}"
+    default_pose = presenter_raw.get("defaultPose", "standing")
+    if not isinstance(default_pose, str) or default_pose not in poses:
+        raise ManifestError(f"presenter.defaultPose must be one of {sorted(poses)}")
+    position = presenter_raw.get("position", "right")
+    if position not in {"right", "left"}:
+        raise ManifestError("presenter.position must be 'right' or 'left'")
+    scale = presenter_raw.get("scale", 1.0)
+    if not isinstance(scale, (int, float)) or isinstance(scale, bool) or not 0.6 <= float(scale) <= 1.4:
+        raise ManifestError("presenter.scale must be a number between 0.6 and 1.4")
+    voice = character.get("voice")
+    if voice is not None and not isinstance(voice, dict):
+        raise ManifestError(f"presenter '{presenter_id}' voice in character.json must be an object")
+    return {
+        "id": presenter_id,
+        "position": position,
+        "scale": float(scale),
+        "defaultPose": default_pose,
+        "cutout": bool(character.get("cutout", True)),
+        "poses": poses,
+        "voice": voice,
+    }
+
+
+def _normalize_candlestick(visual: dict[str, Any], visual_raw: dict[str, Any], field: str) -> int:
+    """校验 candlestick 数据并写入 visual，返回序列长度供 markers 越界检查。"""
+    closes_raw = visual_raw.get("closes")
+    candles_raw = visual_raw.get("candles")
+    if (closes_raw is None) == (candles_raw is None):
+        raise ManifestError(f"{field}.visual must provide exactly one of closes or candles")
+    if closes_raw is not None:
+        if not isinstance(closes_raw, list) or not 8 <= len(closes_raw) <= 120:
+            raise ManifestError(f"{field}.visual.closes must contain between 8 and 120 numbers")
+        visual["closes"] = [_number(v, f"{field}.visual.closes[]") for v in closes_raw]
+        series_len = len(visual["closes"])
+    else:
+        if not isinstance(candles_raw, list) or not 2 <= len(candles_raw) <= 60:
+            raise ManifestError(f"{field}.visual.candles must contain between 2 and 60 items")
+        candles: list[dict[str, float]] = []
+        for candle_index, candle in enumerate(candles_raw):
+            candle_field = f"{field}.visual.candles[{candle_index}]"
+            if not isinstance(candle, dict):
+                raise ManifestError(f"{candle_field} must be an object")
+            values = {key: _number(candle.get(key), f"{candle_field}.{key}") for key in ("o", "h", "l", "c")}
+            if values["h"] < max(values["o"], values["c"]) or values["l"] > min(values["o"], values["c"]):
+                raise ManifestError(f"{candle_field} must satisfy h >= max(o, c) and l <= min(o, c)")
+            candles.append(values)
+        visual["candles"] = candles
+        series_len = len(candles)
+    bands_raw = visual_raw.get("bands")
+    if bands_raw is not None:
+        if not isinstance(bands_raw, dict):
+            raise ManifestError(f"{field}.visual.bands must be an object")
+        bands: dict[str, list[float]] = {}
+        for band_name in ("upper", "middle", "lower"):
+            band_raw = bands_raw.get(band_name)
+            if band_raw is None:
+                continue
+            if not isinstance(band_raw, list) or not band_raw:
+                raise ManifestError(f"{field}.visual.bands.{band_name} must be a non-empty list")
+            band = [_number(v, f"{field}.visual.bands.{band_name}[]") for v in band_raw]
+            if len(band) != series_len:
+                raise ManifestError(
+                    f"{field}.visual.bands.{band_name} must have the same length as the series ({series_len})"
+                )
+            bands[band_name] = band
+        if bands:
+            visual["bands"] = bands
+    return series_len
+
+
+def _normalize_markers(visual: dict[str, Any], visual_raw: dict[str, Any], field: str, series_len: int) -> None:
+    markers_raw = visual_raw.get("markers")
+    if markers_raw is None:
+        return
+    if not isinstance(markers_raw, list) or not 1 <= len(markers_raw) <= 4:
+        raise ManifestError(f"{field}.visual.markers must contain between 1 and 4 items")
+    markers: list[dict[str, Any]] = []
+    for marker_index, marker in enumerate(markers_raw):
+        marker_field = f"{field}.visual.markers[{marker_index}]"
+        if not isinstance(marker, dict):
+            raise ManifestError(f"{marker_field} must be an object")
+        index = marker.get("index")
+        if not isinstance(index, int) or isinstance(index, bool) or not 0 <= index < series_len:
+            raise ManifestError(f"{marker_field}.index must be an integer within [0, {series_len})")
+        tone = marker.get("tone", "accent")
+        if tone not in CALLOUT_TONES:
+            raise ManifestError(f"{marker_field}.tone must be one of {sorted(CALLOUT_TONES)}")
+        position = marker.get("position", "above")
+        if position not in {"above", "below"}:
+            raise ManifestError(f"{marker_field}.position must be 'above' or 'below'")
+        markers.append(
+            {
+                "index": index,
+                "label": _require_text(marker.get("label"), f"{marker_field}.label", maximum=12),
+                "tone": tone,
+                "position": position,
+            }
+        )
+    visual["markers"] = markers
+
+
+def normalize_manifest(raw: Any, *, library_root: Path | None = None) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise ManifestError("manifest root must be an object")
     title = _require_text(raw.get("title"), "title", maximum=100)
@@ -94,7 +289,25 @@ def normalize_manifest(raw: Any) -> dict[str, Any]:
     elif duration_tolerance is not None:
         raise ManifestError("durationToleranceSec requires targetDurationSec")
 
-    voice_raw = raw.get("voice") or {}
+    domain_raw = raw.get("domain", "general")
+    if domain_raw is None:
+        domain = "general"
+    elif isinstance(domain_raw, str):
+        domain = domain_raw.strip() or "general"
+    else:
+        raise ManifestError("domain must be a string or null")
+    if domain not in DOMAINS:
+        raise ManifestError(f"domain must be one of {sorted(DOMAINS)}")
+
+    presenter = None
+    if raw.get("presenter") is not None:
+        presenter = _load_presenter(raw["presenter"], _resolve_library_root(library_root))
+
+    voice_raw = raw.get("voice")
+    if voice_raw is None and presenter and presenter.get("voice"):
+        # 角色包自带音色：manifest 不显式指定 voice 时继承，让虚拟 IP 声音稳定。
+        voice_raw = presenter["voice"]
+    voice_raw = voice_raw or {}
     if not isinstance(voice_raw, dict):
         raise ManifestError("voice must be an object")
     voice = {
@@ -113,9 +326,9 @@ def normalize_manifest(raw: Any) -> dict[str, Any]:
     theme_raw = raw.get("theme") or {}
     if not isinstance(theme_raw, dict):
         raise ManifestError("theme must be an object")
-    theme = {**DEFAULT_THEME, **theme_raw}
+    theme = {**DEFAULT_THEME, **DOMAIN_THEMES.get(domain, {}), **theme_raw}
     for key, color in theme.items():
-        if key not in DEFAULT_THEME:
+        if key not in THEME_FIELDS:
             raise ManifestError(f"unknown theme field: {key}")
         if not isinstance(color, str) or not COLOR_RE.fullmatch(color):
             raise ManifestError(f"theme.{key} must be a six-digit hex color")
@@ -157,15 +370,50 @@ def normalize_manifest(raw: Any) -> dict[str, Any]:
             if not isinstance(attribution, str) or len(attribution.strip()) > 80:
                 raise ManifestError(f"{field}.visual.attribution must be a string with at most 80 characters")
             visual["attribution"] = attribution.strip()
-        scenes.append(
-            {
-                "id": scene_id,
-                "narration": narration,
-                "headline": headline,
-                "body": body.strip(),
-                "visual": visual,
-            }
-        )
+        elif visual_type == "candlestick":
+            series_len = _normalize_candlestick(visual, visual_raw, field)
+            _normalize_markers(visual, visual_raw, field, series_len)
+        callouts_raw = item.get("callouts")
+        callouts: list[dict[str, Any]] = []
+        if callouts_raw is not None:
+            if not isinstance(callouts_raw, list) or not 1 <= len(callouts_raw) <= 3:
+                raise ManifestError(f"{field}.callouts must contain between 1 and 3 items")
+            for callout_index, callout in enumerate(callouts_raw):
+                callout_field = f"{field}.callouts[{callout_index}]"
+                if not isinstance(callout, dict):
+                    raise ManifestError(f"{callout_field} must be an object")
+                tone = callout.get("tone", "accent")
+                if tone not in CALLOUT_TONES:
+                    raise ManifestError(f"{callout_field}.tone must be one of {sorted(CALLOUT_TONES)}")
+                callouts.append(
+                    {"text": _require_text(callout.get("text"), f"{callout_field}.text", maximum=12), "tone": tone}
+                )
+        scene_presenter_raw = item.get("presenter")
+        scene_presenter: dict[str, Any] | None = None
+        if scene_presenter_raw is not None:
+            if presenter is None:
+                raise ManifestError(f"{field}.presenter requires a top-level presenter")
+            if not isinstance(scene_presenter_raw, dict):
+                raise ManifestError(f"{field}.presenter must be an object")
+            visible = scene_presenter_raw.get("visible", True)
+            if not isinstance(visible, bool):
+                raise ManifestError(f"{field}.presenter.visible must be a boolean")
+            pose = scene_presenter_raw.get("pose")
+            if pose is not None and (not isinstance(pose, str) or pose not in presenter["poses"]):
+                raise ManifestError(f"{field}.presenter.pose must be one of {sorted(presenter['poses'])}")
+            scene_presenter = {"pose": pose, "visible": visible}
+        scene: dict[str, Any] = {
+            "id": scene_id,
+            "narration": narration,
+            "headline": headline,
+            "body": body.strip(),
+            "visual": visual,
+        }
+        if callouts:
+            scene["callouts"] = callouts
+        if scene_presenter is not None:
+            scene["presenter"] = scene_presenter
+        scenes.append(scene)
 
     summary_raw = raw.get("summary", "")
     if summary_raw is None:
@@ -196,23 +444,27 @@ def normalize_manifest(raw: Any) -> dict[str, Any]:
         "durationToleranceSec": float(duration_tolerance) if duration_tolerance is not None else None,
         "language": language,
         "sourceUrl": source_url,
+        "domain": domain,
         "voice": voice,
         "theme": theme,
         "scenes": scenes,
     }
+    if presenter is not None:
+        # voice 只用于 TTS 继承，不进 timeline/渲染侧。
+        result["presenter"] = {key: value for key, value in presenter.items() if key != "voice"}
     if len(result["summary"]) > 200:
         raise ManifestError("summary must be at most 200 characters")
     return result
 
 
-def load_manifest(path: Path) -> dict[str, Any]:
+def load_manifest(path: Path, *, library_root: Path | None = None) -> dict[str, Any]:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
         raise ManifestError(f"manifest not found: {path}") from exc
     except json.JSONDecodeError as exc:
         raise ManifestError(f"manifest is not valid JSON: {exc}") from exc
-    return normalize_manifest(raw)
+    return normalize_manifest(raw, library_root=library_root)
 
 
 def _parse_timestamp(value: str) -> int:
@@ -465,18 +717,43 @@ def build_timeline(
             combined.append(global_item)
             captions.append({"text": global_item.text, "startMs": global_item.start_ms, "endMs": global_item.end_ms})
         offset += duration_ms
-    return {
+    timeline = {
         "title": manifest["title"],
         "summary": manifest["summary"],
         "width": manifest["width"],
         "height": manifest["height"],
         "fps": manifest["fps"],
         "totalDurationMs": offset,
+        "domain": manifest.get("domain", "general"),
         "theme": manifest["theme"],
         "scenes": scenes,
         "captions": captions,
         "_combinedSubtitles": combined,
     }
+    if manifest.get("presenter"):
+        timeline["presenter"] = manifest["presenter"]
+    return timeline
+
+
+def stage_assets(manifest: dict[str, Any], output_dir: Path, *, library_root: Path | None = None) -> None:
+    """把资产库里的 presenter 立绘铺到 work/public/ 下，供渲染时通过 HTTP 访问。
+
+    poses 的值形如 presenters/<id>/poses/<name>.png，本身就是相对库根的路径。
+    优先硬链接（同盘零拷贝），跨设备时回退 copy2。validate 已确认姿势文件存在。
+    """
+    presenter = manifest.get("presenter")
+    if not presenter:
+        return
+    root = _resolve_library_root(library_root)
+    for public_rel in presenter["poses"].values():
+        src = root / public_rel
+        dst = output_dir / "work" / "public" / public_rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.unlink(missing_ok=True)
+        try:
+            os.link(src, dst)
+        except OSError:
+            shutil.copy2(src, dst)
 
 
 def _run_command(command: list[str], *, cwd: Path, timeout: float) -> None:
@@ -645,6 +922,7 @@ def run_pipeline(manifest_path: Path, output_dir: Path) -> dict[str, Any]:
     try:
         normalized_manifest_path = output_dir / "manifest.json"
         _write_json_atomic(normalized_manifest_path, manifest)
+        stage_assets(manifest, output_dir)
         artifacts = synthesize_scenes(manifest, output_dir)
         timeline = build_timeline(manifest, artifacts)
         combined = timeline.pop("_combinedSubtitles")

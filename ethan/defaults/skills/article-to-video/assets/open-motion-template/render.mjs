@@ -130,6 +130,17 @@ const MIME_TYPES = {
   ".svg": "image/svg+xml",
   ".woff": "font/woff",
   ".woff2": "font/woff2",
+  // 资产库回退：presenter 立绘 / b-roll 素材由 video_pipeline stage 到 publicDir，
+  // 不在 vite dist 里，需要 server 兜底服务
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".mp4": "video/mp4",
+  ".webm": "video/webm",
+  ".mp3": "audio/mpeg",
+  ".wav": "audio/wav",
+  ".m4a": "audio/mp4",
 };
 let server;
 let url;
@@ -149,13 +160,29 @@ try {
       return;
     }
     let filePath = candidate;
-    const isFile = (() => {
+    let isFile = (() => {
       try {
         return fs.statSync(filePath).isFile();
       } catch {
         return false;
       }
     })();
+    if (!isFile && path.extname(requestPath)) {
+      // dist miss → 回退到 publicDir（presenter 立绘 / 音频 / b-roll 等 stage 资产）。
+      // 同样的 containment 检查，防路径逃逸。
+      const publicCandidate = path.resolve(publicRoot, `.${requestPath}`);
+      if (publicCandidate !== publicRoot && publicCandidate.startsWith(`${publicRoot}${path.sep}`)) {
+        try {
+          const resolved = fs.realpathSync(publicCandidate);
+          if ((resolved === publicRoot || resolved.startsWith(`${publicRoot}${path.sep}`)) && fs.statSync(resolved).isFile()) {
+            filePath = resolved;
+            isFile = true;
+          }
+        } catch {
+          // fall through to 404
+        }
+      }
+    }
     if (!isFile) {
       // Only extension-less paths are SPA routes worth rewriting to index.html.
       // A missing .js/.css/.png means the Vite build is stale or partial; answering

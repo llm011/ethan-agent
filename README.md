@@ -43,7 +43,7 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 **Skill system**
 - Keyword trigger matching, auto-injected into system prompt
 - Semantic router (BGE INT8 + LR head) adds recall on top of keywords so differently-phrased requests still match — built-in, deps ship with `pip install ethan-agent`; the BGE model auto-downloads on first use (~24MB)
-- Built-in `article-to-video` turns a topic, article, local Markdown/TXT file, or public URL into a narrated MP4 with Edge TTS, timed captions, and deterministic Open Motion motion graphics; Web and Desktop file cards provide inline playback plus download, and optional media dependencies install lazily on first use
+- Built-in `article-to-video` turns a topic, article, local Markdown/TXT file, or public URL into a narrated MP4 with Edge TTS, timed captions, and deterministic Open Motion motion graphics; domain-aware visuals (finance-domain candlestick charts, keyword callouts, reusable virtual-presenter sprite packs); Web and Desktop file cards provide inline playback plus download, and optional media dependencies install lazily on first use
 - `fast_path: true` routes matched input to the millisecond fast track
 - `channels: [lark, web]` filters skills by channel so each surface gets only relevant skills
 - `modes: [法律]` filters skills by conversation mode so each mode gets only relevant skills (empty = all modes)
@@ -455,7 +455,7 @@ When a user message matches a skill's `trigger`, the skill content is injected i
 
 Skills accumulate hit stats and user corrections. When corrections reach a threshold (default: 2), the Heartbeat job merges them into the skill file using a cheap model.
 
-The built-in `article-to-video` skill turns a topic, article body, local Markdown/TXT file, or public URL into an MP4. The model creates the structured script and storyboard; Edge TTS generates per-scene narration and captions; Open Motion renders code-generated motion graphics against the measured audio timeline. Web and Desktop file cards can play or download the finished video, while production files are delivered separately. `edge-tts`, Playwright (for Open Motion rendering), and FFmpeg install lazily and do not enter Ethan's core Python dependencies.
+The built-in `article-to-video` skill turns a topic, article body, local Markdown/TXT file, or public URL into an MP4. The model creates the structured script and storyboard; Edge TTS generates per-scene narration and captions; Open Motion renders code-generated motion graphics against the measured audio timeline. Domain-aware visuals are supported: the finance domain adds candlestick charts with Bollinger bands and markers, yellow keyword callouts, and a reusable virtual-presenter sprite pack (images are produced with GPT image 2 from the shipped prompt pack, then imported into `~/.ethan/assets/library/`). Web and Desktop file cards can play or download the finished video, while production files are delivered separately. `edge-tts`, Playwright (for Open Motion rendering), and FFmpeg install lazily and do not enter Ethan's core Python dependencies.
 
 ---
 
