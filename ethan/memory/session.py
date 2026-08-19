@@ -6,6 +6,7 @@
 架构：进程级单例 SessionStore（通过 get_session_store() 获取），
 同一 db_path 只维护一个连接实例，消除多连接写锁竞争。
 """
+
 import asyncio
 import logging
 import re
@@ -24,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 class PaginatedList(list):
     """A list that carries a .total attribute for pagination."""
+
     total: int = 0
 
 
@@ -86,13 +88,14 @@ def _build_intermediate_markdown(msg: Message) -> str:
 def _auto_title(messages: list[Message]) -> str:
     """从第一条用户消息提取占位标题（已清洗 markdown / 命令前缀）。"""
     import re
+
     for m in messages:
         if m.role == "user" and m.content:
             t = m.content.strip()
             # 去掉 markdown 标记（**粗体**、# 标题、`代码`、_斜体_、~删除~）
-            t = re.sub(r'[*#`_~]', '', t)
+            t = re.sub(r"[*#`_~]", "", t)
             # 去掉命令前缀（/help xxx → xxx；/review url 保留 url 由 _review_title 处理）
-            t = re.sub(r'^/(?:help|new|model|token|btw|stop)\s+', '', t)
+            t = re.sub(r"^/(?:help|new|model|token|btw|stop)\s+", "", t)
             t = t.replace("\n", " ").strip()
             if not t:
                 t = m.content.strip().replace("\n", " ")
@@ -110,12 +113,13 @@ def _count_content(text: str) -> int:
       "hi" → 1
     """
     import re
+
     if not text:
         return 0
     # 中日韩字符（含全角标点）每个算 1
-    cjk = len(re.findall(r'[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]', text))
+    cjk = len(re.findall(r"[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]", text))
     # 去掉 CJK 后按空白拆分英文单词
-    non_cjk = re.sub(r'[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]', ' ', text)
+    non_cjk = re.sub(r"[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]", " ", text)
     words = [w for w in non_cjk.split() if w and any(c.isalnum() for c in w)]
     return cjk + len(words)
 
@@ -133,17 +137,24 @@ async def _generate_smart_title(messages: list[Message], retries: int = 3) -> st
     - lite 模型可用但调用全部失败（超时/限流/endpoint 抖动）→ 退避重试后返回 None。
     """
     import asyncio
+    import re as _re
 
     from ethan.core.config import get_config
     from ethan.memory.consolidator import get_lite_model
     from ethan.providers.manager import create_provider
 
-    turns = [(m.role, m.content[:100]) for m in messages if m.role in ("user", "assistant") and m.content][:6]
+    # 去掉 URL，避免 lite 模型误以为需要访问外链而拒绝生成标题
+    _url_re = _re.compile(r"https?://\S+")
+
+    def _clean(text: str) -> str:
+        return _url_re.sub("[链接]", text[:100]).strip()
+
+    turns = [(m.role, _clean(m.content)) for m in messages if m.role in ("user", "assistant") and m.content][:6]
     if not turns:
         return None
 
     conv = "\n".join(f"{'用户' if r == 'user' else 'AI'}: {c}" for r, c in turns)
-    prompt = f"根据以下对话，用不超过15个汉字或30个英文字符生成一个简洁的标题，只输出标题本身：\n\n{conv}"
+    prompt = f"根据以下对话文本，用不超过15个汉字或30个英文字符生成一个简洁的标题，只输出标题本身：\n\n{conv}"
 
     try:
         cfg = get_config()
@@ -152,12 +163,20 @@ async def _generate_smart_title(messages: list[Message], retries: int = 3) -> st
     except Exception:
         return None
 
+    # 模型拒绝/跑偏时的典型开头（如 "I can't access external links"），视为生成失败
+    _refusal_re = _re.compile(
+        r"^(i can'?t|i cannot|i'm unable|i am unable|sorry|抱歉|对不起|无法|我不能)",
+        _re.IGNORECASE,
+    )
+
     for attempt in range(retries):
         try:
-            resp = await provider.chat([Message(role="user", content=prompt)],
-                                       system="你是一个标题生成助手，只输出标题，不加引号或标点。")
+            resp = await provider.chat(
+                [Message(role="user", content=prompt)],
+                system="你是一个标题生成助手。你只能基于给出的文本总结标题，无法也无需访问任何链接或外部资源；只输出标题本身，不加引号或标点。",
+            )
             title = resp.content.strip().strip('"\'""').strip()
-            if title:
+            if title and not _refusal_re.match(title):
                 return title[:20]
         except Exception:
             pass
@@ -172,6 +191,7 @@ _PROTECTED_PREFIXES = ("[定时]", "[后台]", "[心跳]")
 def _review_title(text: str) -> str | None:
     """从 /review 命令中解析 PR 标题，格式如 'PR #70 llm011/ethan-agent'。"""
     import re as _re
+
     t = text.strip()
     if not (t.lower().startswith("/review ") or t.lower() == "/review"):
         return None
@@ -231,6 +251,7 @@ class SessionStore:
         # 不传时按当前 user context 求值，避免模块级缓存击穿 per-user 隔离
         if db_path is None:
             from ethan.core.paths import user_sessions_db_path
+
             db_path = user_sessions_db_path()
         self._db_path = db_path
         self._db: aiosqlite.Connection | None = None
@@ -293,7 +314,23 @@ class SessionStore:
         """)
         await self._db.commit()
         # Migration: add columns if they don't exist (for existing databases)
-        for col, definition in [("created_at", "REAL"), ("usage", "TEXT"), ("tool_steps", "TEXT"), ("thought", "TEXT"), ("quote", "TEXT"), ("a2ui", "TEXT"), ("mcp_apps", "TEXT"), ("images", "TEXT"), ("matched_skills", "TEXT"), ("ttfb_ms", "INTEGER"), ("total_ms", "INTEGER"), ("cards", "TEXT"), ("intermediate_blob_id", "INTEGER NOT NULL DEFAULT 0"), ("status", "TEXT NOT NULL DEFAULT 'completed'"), ("reasoning", "TEXT NOT NULL DEFAULT ''")]:
+        for col, definition in [
+            ("created_at", "REAL"),
+            ("usage", "TEXT"),
+            ("tool_steps", "TEXT"),
+            ("thought", "TEXT"),
+            ("quote", "TEXT"),
+            ("a2ui", "TEXT"),
+            ("mcp_apps", "TEXT"),
+            ("images", "TEXT"),
+            ("matched_skills", "TEXT"),
+            ("ttfb_ms", "INTEGER"),
+            ("total_ms", "INTEGER"),
+            ("cards", "TEXT"),
+            ("intermediate_blob_id", "INTEGER NOT NULL DEFAULT 0"),
+            ("status", "TEXT NOT NULL DEFAULT 'completed'"),
+            ("reasoning", "TEXT NOT NULL DEFAULT ''"),
+        ]:
             try:
                 await self._db.execute(f"ALTER TABLE messages ADD COLUMN {col} {definition}")
                 await self._db.commit()
@@ -303,9 +340,7 @@ class SessionStore:
         # SELECT cards FROM messages WHERE session_id=?，无索引会全表扫；长会话 + 一页多图
         # 的 N+1 直链请求下会卡事件循环。IF NOT EXISTS 幂等。
         try:
-            await self._db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id)"
-            )
+            await self._db.execute("CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id)")
             await self._db.commit()
         except Exception:
             pass
@@ -333,9 +368,7 @@ class SessionStore:
         # running 状态只存在于进程内存（ChatRun），进程重启后这些消息永远不会被更新，
         # 必须在此兜底标记，前端才能据此显示「继续」按钮。
         try:
-            cursor = await self._db.execute(
-                "UPDATE messages SET status='interrupted' WHERE status='running'"
-            )
+            cursor = await self._db.execute("UPDATE messages SET status='interrupted' WHERE status='running'")
             if cursor.rowcount > 0:
                 await self._db.commit()
                 logger.info("[SessionStore] Marked %d interrupted messages on startup", cursor.rowcount)
@@ -355,6 +388,7 @@ class SessionStore:
         if not self._should_persist_intermediate(msg):
             return 0
         from ethan.core.paths import user_intermediate_dir
+
         content = _build_intermediate_markdown(msg)
         if len(content.strip()) <= len("# 过程记录"):
             return 0
@@ -364,9 +398,7 @@ class SessionStore:
         file_path.write_text(content, encoding="utf-8")
         preview = _intermediate_preview(content)
         size_bytes = file_path.stat().st_size
-        async with self._db.execute(
-            "SELECT intermediate_blob_id FROM messages WHERE id=?", (message_id,)
-        ) as cursor:
+        async with self._db.execute("SELECT intermediate_blob_id FROM messages WHERE id=?", (message_id,)) as cursor:
             row = await cursor.fetchone()
         existing_blob_id = int(row[0] or 0) if row else 0
         if existing_blob_id:
@@ -378,7 +410,17 @@ class SessionStore:
             return existing_blob_id
         cursor = await self._db.execute(
             "INSERT INTO message_intermediate_blobs (message_id, session_id, kind, file_path, format, size_bytes, preview_text, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (message_id, session_id, "process", str(file_path), "markdown", size_bytes, preview, time.time(), time.time()),
+            (
+                message_id,
+                session_id,
+                "process",
+                str(file_path),
+                "markdown",
+                size_bytes,
+                preview,
+                time.time(),
+                time.time(),
+            ),
         )
         blob_id = cursor.lastrowid
         await self._db.execute("UPDATE messages SET intermediate_blob_id=? WHERE id=?", (blob_id, message_id))
@@ -386,9 +428,7 @@ class SessionStore:
         return blob_id
 
     async def _delete_intermediate_blob_for_message(self, row_id: int) -> None:
-        async with self._db.execute(
-            "SELECT intermediate_blob_id FROM messages WHERE id=?", (row_id,)
-        ) as cursor:
+        async with self._db.execute("SELECT intermediate_blob_id FROM messages WHERE id=?", (row_id,)) as cursor:
             row = await cursor.fetchone()
         blob_id = int(row[0] or 0) if row else 0
         if not blob_id:
@@ -418,7 +458,14 @@ class SessionStore:
             return None
         path = Path(row[1])
         if not path.exists():
-            return {"id": row[0], "missing": True, "format": row[2], "size_bytes": row[3], "preview_text": row[4], "kind": row[5]}
+            return {
+                "id": row[0],
+                "missing": True,
+                "format": row[2],
+                "size_bytes": row[3],
+                "preview_text": row[4],
+                "kind": row[5],
+            }
         return {
             "id": row[0],
             "format": row[2],
@@ -468,10 +515,12 @@ class SessionStore:
 
     async def save_message(self, session_id: str, msg: Message) -> int:
         import json
-        tool_calls_json = json.dumps([
-            {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
-            for tc in msg.tool_calls
-        ]) if msg.tool_calls else None
+
+        tool_calls_json = (
+            json.dumps([{"id": tc.id, "name": tc.name, "arguments": tc.arguments} for tc in msg.tool_calls])
+            if msg.tool_calls
+            else None
+        )
 
         msg_created_at = msg.created_at if msg.created_at else time.time()
         usage_json = json.dumps(msg.usage) if msg.usage else None
@@ -485,7 +534,28 @@ class SessionStore:
 
         cursor = await self._db.execute(
             "INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui, images, matched_skills, ttfb_ms, total_ms, mcp_apps, cards, intermediate_blob_id, status, reasoning) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (session_id, msg.role, msg.content, tool_calls_json, msg.tool_call_id, msg_created_at, usage_json, tool_steps_json, msg.thought, quote_json, a2ui_json, images_json, matched_skills_json, msg.ttfb_ms, msg.total_ms, mcp_apps_json, cards_json, 0, msg.status, msg.reasoning or ""),
+            (
+                session_id,
+                msg.role,
+                msg.content,
+                tool_calls_json,
+                msg.tool_call_id,
+                msg_created_at,
+                usage_json,
+                tool_steps_json,
+                msg.thought,
+                quote_json,
+                a2ui_json,
+                images_json,
+                matched_skills_json,
+                msg.ttfb_ms,
+                msg.total_ms,
+                mcp_apps_json,
+                cards_json,
+                0,
+                msg.status,
+                msg.reasoning or "",
+            ),
         )
         await self._db.commit()
         row_id = cursor.lastrowid
@@ -501,10 +571,12 @@ class SessionStore:
         再 UPDATE 写入最终正文/usage/a2ui。这样工具过程实时留存，且整轮只占一行。
         """
         import json
-        tool_calls_json = json.dumps([
-            {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
-            for tc in msg.tool_calls
-        ]) if msg.tool_calls else None
+
+        tool_calls_json = (
+            json.dumps([{"id": tc.id, "name": tc.name, "arguments": tc.arguments} for tc in msg.tool_calls])
+            if msg.tool_calls
+            else None
+        )
         usage_json = json.dumps(msg.usage) if msg.usage else None
         tool_steps_json = json.dumps(msg.tool_steps) if msg.tool_steps else None
         a2ui_json = json.dumps(msg.a2ui, ensure_ascii=False) if msg.a2ui else None
@@ -515,8 +587,24 @@ class SessionStore:
         await self._db.execute(
             "UPDATE messages SET content=?, tool_calls=?, usage=?, tool_steps=?, thought=?, a2ui=?, mcp_apps=?, matched_skills=?, ttfb_ms=?, total_ms=?, cards=?, created_at=?, status=?, reasoning=? "
             "WHERE id=? AND session_id=?",
-            (msg.content, tool_calls_json, usage_json, tool_steps_json, msg.thought, a2ui_json,
-             mcp_apps_json, matched_skills_json, msg.ttfb_ms, msg.total_ms, cards_json, msg.created_at or time.time(), msg.status, msg.reasoning or "", row_id, session_id),
+            (
+                msg.content,
+                tool_calls_json,
+                usage_json,
+                tool_steps_json,
+                msg.thought,
+                a2ui_json,
+                mcp_apps_json,
+                matched_skills_json,
+                msg.ttfb_ms,
+                msg.total_ms,
+                cards_json,
+                msg.created_at or time.time(),
+                msg.status,
+                msg.reasoning or "",
+                row_id,
+                session_id,
+            ),
         )
         await self._db.commit()
         msg.intermediate_blob_id = await self._ensure_intermediate_blob(session_id, row_id, msg)
@@ -541,7 +629,6 @@ class SessionStore:
         await self._delete_intermediate_blob_for_message(row_id)
         await self._db.execute("DELETE FROM messages WHERE id=?", (row_id,))
         await self._db.commit()
-
 
     async def update_title(self, session_id: str, title: str) -> None:
         await self._db.execute(
@@ -578,11 +665,18 @@ class SessionStore:
             "FROM sessions WHERE pinned_at > 0 ORDER BY pinned_at DESC"
         ) as cursor:
             async for row in cursor:
-                sessions.append(Session(
-                    id=row[0], title=row[1], model=row[2],
-                    created_at=row[3], updated_at=row[4],
-                    source=row[5], mode=row[6], pinned_at=row[7],
-                ))
+                sessions.append(
+                    Session(
+                        id=row[0],
+                        title=row[1],
+                        model=row[2],
+                        created_at=row[3],
+                        updated_at=row[4],
+                        source=row[5],
+                        mode=row[6],
+                        pinned_at=row[7],
+                    )
+                )
         return sessions
 
     async def touch(self, session_id: str) -> None:
@@ -593,12 +687,11 @@ class SessionStore:
         await self._db.commit()
 
     async def delete(self, session_id: str) -> bool:
-        async with self._db.execute(
-            "SELECT id FROM sessions WHERE id = ?", (session_id,)
-        ) as cursor:
+        async with self._db.execute("SELECT id FROM sessions WHERE id = ?", (session_id,)) as cursor:
             if not await cursor.fetchone():
                 return False
         from ethan.core.paths import user_intermediate_dir
+
         shutil.rmtree(user_intermediate_dir() / session_id, ignore_errors=True)
         await self._db.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
         await self._db.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
@@ -611,6 +704,7 @@ class SessionStore:
         保留 session 记录本身，只清空 messages 再重写，并 touch 更新时间。
         """
         from ethan.core.paths import user_intermediate_dir
+
         shutil.rmtree(user_intermediate_dir() / session_id, ignore_errors=True)
         await self._db.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
         await self._db.commit()
@@ -632,9 +726,13 @@ class SessionStore:
                 return None
 
         session = Session(
-            id=row[0], title=row[1], model=row[2],
-            created_at=row[3], updated_at=row[4],
-            source=row[5], mode=row[6],
+            id=row[0],
+            title=row[1],
+            model=row[2],
+            created_at=row[3],
+            updated_at=row[4],
+            source=row[5],
+            mode=row[6],
         )
 
         async with self._db.execute(
@@ -659,27 +757,30 @@ class SessionStore:
                 intermediate_blob_id = int(r[17] or 0) if len(r) > 17 and r[17] is not None else 0
                 _status = r[18] if len(r) > 18 and r[18] else "completed"
                 _reasoning = r[19] if len(r) > 19 and r[19] else ""
-                session.messages.append(Message(
-                    role=r[1], content=r[2],
-                    id=r[0],
-                    tool_calls=tool_calls,
-                    tool_call_id=r[4],
-                    created_at=r[5],
-                    usage=usage,
-                    tool_steps=tool_steps,
-                    thought=r[8],
-                    reasoning=_reasoning,
-                    quote=quote,
-                    a2ui=a2ui,
-                    images=images,
-                    matched_skills=matched_skills,
-                    ttfb_ms=ttfb_ms,
-                    total_ms=total_ms,
-                    mcp_apps=mcp_apps,
-                    cards=cards,
-                    intermediate_blob_id=intermediate_blob_id,
-                    status=_status,
-                ))
+                session.messages.append(
+                    Message(
+                        role=r[1],
+                        content=r[2],
+                        id=r[0],
+                        tool_calls=tool_calls,
+                        tool_call_id=r[4],
+                        created_at=r[5],
+                        usage=usage,
+                        tool_steps=tool_steps,
+                        thought=r[8],
+                        reasoning=_reasoning,
+                        quote=quote,
+                        a2ui=a2ui,
+                        images=images,
+                        matched_skills=matched_skills,
+                        ttfb_ms=ttfb_ms,
+                        total_ms=total_ms,
+                        mcp_apps=mcp_apps,
+                        cards=cards,
+                        intermediate_blob_id=intermediate_blob_id,
+                        status=_status,
+                    )
+                )
 
         return session
 
@@ -691,9 +792,7 @@ class SessionStore:
         """
         import json
 
-        async with self._db.execute(
-            "SELECT 1 FROM sessions WHERE id = ?", (session_id,)
-        ) as cursor:
+        async with self._db.execute("SELECT 1 FROM sessions WHERE id = ?", (session_id,)) as cursor:
             if not await cursor.fetchone():
                 return None
 
@@ -711,12 +810,18 @@ class SessionStore:
                     continue
         return cards
 
-    async def list_recent(self, limit: int = 20, offset: int = 0, *,
-                          source: str = "", mode: str | None = None,
-                          exclude_sources: list[str] | None = None,
-                          exclude_title_prefixes: list[str] | None = None,
-                          include_title_prefixes: list[str] | None = None,
-                          has_images: bool = False) -> list[Session]:
+    async def list_recent(
+        self,
+        limit: int = 20,
+        offset: int = 0,
+        *,
+        source: str = "",
+        mode: str | None = None,
+        exclude_sources: list[str] | None = None,
+        exclude_title_prefixes: list[str] | None = None,
+        include_title_prefixes: list[str] | None = None,
+        has_images: bool = False,
+    ) -> list[Session]:
         """最近会话列表。source 非空时按渠道过滤；mode 非 None 时按对话模式过滤
         （传空串可筛默认模式会话）。exclude_sources 排除指定渠道。过滤在 SQL 层做，分页对过滤后结果生效。
         include_title_prefixes 非空时只保留标题以任一前缀开头的会话（OR 关系）。
@@ -744,7 +849,9 @@ class SessionStore:
             params.extend(f"{prefix}%" for prefix in include_title_prefixes)
         if has_images:
             # EXISTS 短路：找到第一条 images 非空即命中，不走全表
-            where.append("EXISTS (SELECT 1 FROM messages m WHERE m.session_id = sessions.id AND m.images IS NOT NULL AND m.images != '[]' AND m.images != '')")
+            where.append(
+                "EXISTS (SELECT 1 FROM messages m WHERE m.session_id = sessions.id AND m.images IS NOT NULL AND m.images != '[]' AND m.images != '')"
+            )
         where_sql = (" WHERE " + " AND ".join(where)) if where else ""
         count_params = list(params)
         params.extend([limit, offset])
@@ -765,14 +872,19 @@ class SessionStore:
         ) as cursor:
             async for row in cursor:
                 snippet = row[7] if len(row) > 7 and row[7] else None
-                sessions.append(Session(
-                    id=row[0], title=row[1], model=row[2],
-                    created_at=row[3], updated_at=row[4],
-                    source=row[5] if len(row) > 5 else "web",
-                    mode=row[6] if len(row) > 6 else "",
-                    snippet=snippet,
-                    pinned_at=row[8] if len(row) > 8 else 0.0,
-                ))
+                sessions.append(
+                    Session(
+                        id=row[0],
+                        title=row[1],
+                        model=row[2],
+                        created_at=row[3],
+                        updated_at=row[4],
+                        source=row[5] if len(row) > 5 else "web",
+                        mode=row[6] if len(row) > 6 else "",
+                        snippet=snippet,
+                        pinned_at=row[8] if len(row) > 8 else 0.0,
+                    )
+                )
         # Attach total as attribute for callers that need it
         sessions.total = total  # type: ignore[attr-defined]
         return sessions
@@ -811,12 +923,17 @@ class SessionStore:
             tuple(params),
         ) as cursor:
             async for row in cursor:
-                sessions.append(Session(
-                    id=row[0], title=row[1], model=row[2],
-                    created_at=row[3], updated_at=row[4],
-                    source=row[5] if len(row) > 5 else "web",
-                    mode=row[6] if len(row) > 6 else "",
-                ))
+                sessions.append(
+                    Session(
+                        id=row[0],
+                        title=row[1],
+                        model=row[2],
+                        created_at=row[3],
+                        updated_at=row[4],
+                        source=row[5] if len(row) > 5 else "web",
+                        mode=row[6] if len(row) > 6 else "",
+                    )
+                )
         return sessions
 
     async def find_today_session(self, source: str) -> Session | None:
@@ -828,6 +945,7 @@ class SessionStore:
         from datetime import datetime, timedelta
 
         from ethan.core.timezone import get_local_timezone
+
         tz = get_local_timezone()
         now = datetime.now(tz)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -843,9 +961,13 @@ class SessionStore:
             if row is None:
                 return None
             return Session(
-                id=row[0], title=row[1], model=row[2],
-                created_at=row[3], updated_at=row[4],
-                source=row[5], mode=row[6],
+                id=row[0],
+                title=row[1],
+                model=row[2],
+                created_at=row[3],
+                updated_at=row[4],
+                source=row[5],
+                mode=row[6],
             )
 
     async def count_today_runs(self, session_id: str) -> int:
@@ -857,6 +979,7 @@ class SessionStore:
         from datetime import datetime, timedelta
 
         from ethan.core.timezone import get_local_timezone
+
         tz = get_local_timezone()
         now = datetime.now(tz)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -879,7 +1002,9 @@ class SessionStore:
             (q, limit),
         ) as cursor:
             async for row in cursor:
-                sessions[row[0]] = Session(id=row[0], title=row[1], model=row[2], created_at=row[3], updated_at=row[4], mode=row[5])
+                sessions[row[0]] = Session(
+                    id=row[0], title=row[1], model=row[2], created_at=row[3], updated_at=row[4], mode=row[5]
+                )
         # 再搜消息内容，找到对应的 session
         async with self._db.execute(
             """SELECT s.id, s.title, s.model, s.created_at, s.updated_at, m.content, COALESCE(s.mode, '')
@@ -896,12 +1021,24 @@ class SessionStore:
                 if idx >= 0:
                     start = max(0, idx - 20)
                     end = min(len(content), idx + len(query) + 20)
-                    snippet = ("..." if start > 0 else "") + content[start:end].replace("\n", " ") + ("..." if end < len(content) else "")
+                    snippet = (
+                        ("..." if start > 0 else "")
+                        + content[start:end].replace("\n", " ")
+                        + ("..." if end < len(content) else "")
+                    )
                 else:
                     snippet = None
 
                 if sid not in sessions:
-                    sessions[sid] = Session(id=row[0], title=row[1], model=row[2], created_at=row[3], updated_at=row[4], snippet=snippet, mode=row[6])
+                    sessions[sid] = Session(
+                        id=row[0],
+                        title=row[1],
+                        model=row[2],
+                        created_at=row[3],
+                        updated_at=row[4],
+                        snippet=snippet,
+                        mode=row[6],
+                    )
                 elif snippet and not sessions[sid].snippet:
                     sessions[sid].snippet = snippet
         # 按 updated_at 倒序返回
@@ -930,6 +1067,7 @@ class SessionStore:
     async def cleanup_trivial(self) -> tuple[int, list[str]]:
         """删除无意义会话：空会话 + 只含试探性消息的会话 + 无回复的单条会话，返回 (deleted_count, deleted_ids)。"""
         import re
+
         trivial_patterns = re.compile(
             r"^(h[ei]|hi|hello|hey|yo|test|测试|你好|你是谁|谁|在吗|在不在|你是什么|什么|哈喽|嗨|ok|okay|嗯|哦|喂|1|11|111|aaa|啊|哈|嘿|\.+|。+|…+|\?+|？+|!+|！+)$",
             re.IGNORECASE,
@@ -988,7 +1126,9 @@ class SessionStore:
 
     # ── sessions.db 轮转（防止无限膨胀） ──────────────────────────
 
-    SESSION_DB_SIZE_THRESHOLD = 500 * 1024 * 1024  # 500 MB — SQLite 可轻松处理 GB 级数据，10MB 阈值过于激进导致频繁清空用户数据
+    SESSION_DB_SIZE_THRESHOLD = (
+        500 * 1024 * 1024
+    )  # 500 MB — SQLite 可轻松处理 GB 级数据，10MB 阈值过于激进导致频繁清空用户数据
 
     async def rotate_if_needed(self, threshold: int = SESSION_DB_SIZE_THRESHOLD) -> bool:
         """如果 sessions.db 超过 threshold，快照归档 + 清空 active db。
@@ -1004,18 +1144,18 @@ class SessionStore:
             return False
 
         # 查日期跨度
-        async with self._db.execute(
-            "SELECT MIN(created_at), MAX(created_at) FROM sessions"
-        ) as cursor:
+        async with self._db.execute("SELECT MIN(created_at), MAX(created_at) FROM sessions") as cursor:
             row = await cursor.fetchone()
         if not row or row[0] is None:
             return False  # 空库不轮转
 
         from datetime import datetime
+
         start_date = datetime.fromtimestamp(row[0]).strftime("%Y-%m-%d")
         end_date = datetime.fromtimestamp(row[1]).strftime("%Y-%m-%d")
 
         from ethan.core.paths import user_session_archive_dir
+
         archive_dir = user_session_archive_dir()
         archive_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1033,6 +1173,7 @@ class SessionStore:
         except Exception:
             # VACUUM INTO 不可用时 fallback：文件级复制
             import shutil
+
             shutil.copy2(str(self._db_path), str(archive_path))
 
         # 清空 active db
@@ -1047,6 +1188,7 @@ class SessionStore:
             pass
 
         import logging
+
         logging.getLogger(__name__).info(
             "[SessionStore] Rotated sessions.db (%.1f MB → %s), archive: %s",
             size / 1024 / 1024,
@@ -1083,6 +1225,7 @@ async def get_session_store(db_path: Path | None = None) -> "SessionStore":
     """
     if db_path is None:
         from ethan.core.paths import user_sessions_db_path
+
         db_path = user_sessions_db_path()
     key = str(db_path)
 
@@ -1128,4 +1271,3 @@ def list_archived_dbs() -> list[tuple[Path, str, str]]:
             result.append((f, m.group(1), m.group(2)))
     result.sort(key=lambda x: x[1])
     return result
-
