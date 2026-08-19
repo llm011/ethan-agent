@@ -389,6 +389,32 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     });
   }, []);
 
+  // 从其他页面（如 Agenda「拆解该安排」）带过来的待发送 prompt：
+  // sessionStorage 优先，URL ?q= 兜底。仅新会话视图消费；延迟到 timer 里真正发送时才清除，
+  // 这样 StrictMode 双挂载（或挂载后立即切走）时 cleanup 可整体撤销，不会丢 prompt。
+  useEffect(() => {
+    if (initialSessionId) return;
+    let prompt = "";
+    try {
+      prompt = sessionStorage.getItem("ethan:pending-prompt") || "";
+    } catch {}
+    let fromUrl = false;
+    if (!prompt) {
+      const q = new URLSearchParams(window.location.search).get("q");
+      if (q) {
+        prompt = q;
+        fromUrl = true;
+      }
+    }
+    if (!prompt) return;
+    const timer = setTimeout(() => {
+      try { sessionStorage.removeItem("ethan:pending-prompt"); } catch {}
+      if (fromUrl) window.history.replaceState(null, "", window.location.pathname);
+      handleSendRef.current(prompt);
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [initialSessionId]);
+
   useEffect(() => {
     fetchModes().then(setModes).catch(() => {});
   }, []);

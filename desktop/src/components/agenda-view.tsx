@@ -1,11 +1,12 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   AgendaEvent, AgendaRepeat, AgendaCompletion, fetchAgenda, createAgendaEvent, updateAgendaEvent,
   deleteAgendaEvent, setAgendaEnabled,
 } from "@/lib/api";
 import { Badge } from "@ethan/shared/ui/badge";
 import { Button } from "@ethan/shared/ui/button";
-import { Loader2, RefreshCw, Trash2, Pencil, Plus, BellRing, ChevronLeft, ChevronRight } from "lucide-react";
+import { Loader2, RefreshCw, Trash2, Pencil, Plus, BellRing, ChevronLeft, ChevronRight, MessageCircle } from "lucide-react";
 import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
 import {
   DropdownMenu,
@@ -381,7 +382,24 @@ function CompletionToggle({ event, onChange }: { event: AgendaEvent; onChange: (
   );
 }
 
+// 「拆解该安排」：生成发给新对话的 prompt（ChatView 挂载时消费 sessionStorage 中的 pending prompt）
+const PENDING_PROMPT_KEY = "ethan:pending-prompt";
+
+function buildBreakdownPrompt(ev: AgendaEvent): string {
+  const lines = ["帮我拆解并准备这个日程安排：", "", `【安排】${ev.title}`];
+  if (ev.note) lines.push(`【描述】${ev.note}`);
+  lines.push(
+    "",
+    "请从我的知识库（knowledge_search / knowledge_read）中收集整理与这个安排相关的资料：",
+    "1. 汇总相关笔记和资料的要点；",
+    "2. 相关资料如有链接，用 markdown 链接格式列出；",
+    "3. 最后给出一份简短的行动指引（分步骤），帮我快速上手这件事。"
+  );
+  return lines.join("\n");
+}
+
 export function AgendaView() {
+  const navigate = useNavigate();
   const [events, setEvents] = useState<AgendaEvent[]>([]);
   const [enabled, setEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -547,6 +565,17 @@ export function AgendaView() {
     }
   };
 
+  // 拆解该安排：把 prompt 存入 sessionStorage，跳到新对话页由 ChatView 自动发送
+  const startBreakdownChat = (ev: AgendaEvent) => {
+    try {
+      sessionStorage.setItem(PENDING_PROMPT_KEY, buildBreakdownPrompt(ev));
+      navigate("/chat");
+    } catch {
+      // sessionStorage 不可用（极端情况）时降级为 URL 参数
+      navigate(`/chat?q=${encodeURIComponent(buildBreakdownPrompt(ev))}`);
+    }
+  };
+
   return (
     <div className="flex flex-col h-full bg-background text-foreground">
       <ConfirmDialog
@@ -675,6 +704,9 @@ export function AgendaView() {
                                       )}
                                     </div>
                                     <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => startBreakdownChat(ev)} title="拆解该安排">
+                                        <MessageCircle className="h-3 w-3" />
+                                      </Button>
                                       <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setDialogState({ open: true, editing: ev })} title="编辑">
                                         <Pencil className="h-3 w-3" />
                                       </Button>

@@ -439,6 +439,35 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     }
   }, [sessionTitle]);
 
+  // 从其他页面（如 Agenda「拆解该安排」）带过来的待发送 prompt：
+  // sessionStorage 优先，hash 中的 ?q= 兜底。仅新会话视图消费；延迟到 timer 里真正发送时才清除，
+  // 这样 StrictMode 双挂载（或挂载后立即切走）时 cleanup 可整体撤销，不会丢 prompt。
+  useEffect(() => {
+    if (initialSessionId) return;
+    let prompt = "";
+    try {
+      prompt = sessionStorage.getItem("ethan:pending-prompt") || "";
+    } catch {}
+    let hashQuery = "";
+    if (!prompt) {
+      const hash = window.location.hash;
+      const qIdx = hash.indexOf("?");
+      const q = qIdx >= 0 ? new URLSearchParams(hash.slice(qIdx + 1)).get("q") : null;
+      if (q) {
+        prompt = q;
+        hashQuery = hash.slice(0, qIdx);
+      }
+    }
+    if (!prompt) return;
+    const timer = setTimeout(() => {
+      try { sessionStorage.removeItem("ethan:pending-prompt"); } catch {}
+      // 清掉 hash 里的 query（replaceState 不触发 hashchange，不会引发额外导航）
+      if (hashQuery) window.history.replaceState(null, "", hashQuery);
+      handleSendRef.current(prompt);
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [initialSessionId]);
+
   const prevSessionRef = useRef(initialSessionId);
   const queueDrainTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => {
