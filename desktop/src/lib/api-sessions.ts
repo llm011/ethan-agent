@@ -11,6 +11,7 @@ export interface SessionInfo {
   snippet?: string;
   source?: string;
   mode?: string;
+  pinned_at?: number;
 }
 
 export interface SessionDetail {
@@ -96,6 +97,13 @@ export async function unpinSession(id: string): Promise<void> {
     headers: headers(),
   });
   if (!res.ok) throw new Error("Failed to unpin session");
+}
+
+export async function fetchPinnedSessions(): Promise<SessionInfo[]> {
+  const res = await fetch(`${getApiUrl()}/sessions/pinned`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed to fetch pinned sessions");
+  const data = await res.json();
+  return data.sessions as SessionInfo[];
 }
 
 export async function regenSessionTitle(id: string): Promise<string | null> {
