@@ -52,11 +52,13 @@ _CONTEXT_REQUIRED_KEYWORDS = frozenset({
     "上一步", "刚才", "之前",
 })
 
-# 时间类关键词
-_TIME_KEYWORDS = frozenset({
+# 时间类关键词：中文多字词子串匹配误报率低；英文必须词边界整词匹配，
+# 否则 "knowledge" 含 "now" 子串会把正常长 prompt 误判成时间查询
+_TIME_KEYWORDS_CN = (
     "现在几点", "几点了", "今天几号", "今天星期几", "什么时间",
-    "当前时间", "现在时间", "now", "what time",
-})
+    "当前时间", "现在时间",
+)
+_TIME_KEYWORDS_EN_RE = re.compile(r"\b(what time|what's the time|now)\b", re.IGNORECASE)
 
 
 @dataclass
@@ -143,8 +145,8 @@ def classify_instant(text: str) -> InstantResult | None:
         if answer is not None:
             return InstantResult(kind="math", answer=answer)
 
-    # 2) 时间查询
-    if any(kw in lower for kw in _TIME_KEYWORDS):
+    # 2) 时间查询（中文子串 / 英文词边界）
+    if any(kw in lower for kw in _TIME_KEYWORDS_CN) or _TIME_KEYWORDS_EN_RE.search(stripped):
         from datetime import datetime
 
         from ethan.core.timezone import get_local_timezone
