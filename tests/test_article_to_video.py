@@ -22,6 +22,13 @@ pipeline = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = pipeline
 SPEC.loader.exec_module(pipeline)
 
+PRESENTER_GEN_SCRIPT = SCRIPT.with_name("presenter_gen.py")
+PG_SPEC = importlib.util.spec_from_file_location("presenter_gen", PRESENTER_GEN_SCRIPT)
+assert PG_SPEC and PG_SPEC.loader
+presenter_gen = importlib.util.module_from_spec(PG_SPEC)
+sys.modules[PG_SPEC.name] = presenter_gen
+PG_SPEC.loader.exec_module(presenter_gen)
+
 
 def sample_manifest():
     return {
@@ -583,3 +590,56 @@ def test_timeline_carries_domain_and_presenter(tmp_path):
     assert timeline["domain"] == "finance"
     assert timeline["presenter"]["id"] == "xiaoyu"
     assert "voice" not in timeline["presenter"]
+
+
+# ---------------------------------------------------------------------------
+# presenter_gen 抠图后处理（白底设定集裁图流程）
+# ---------------------------------------------------------------------------
+
+Image = pytest.importorskip("PIL.Image", reason="Pillow 缺失，跳过抠图后处理测试")
+
+
+def test_despeckle_removes_small_islands_keeps_body():
+    img = Image.new("RGBA", (60, 60), (0, 0, 0, 0))
+    for y in range(10, 50):  # 主体 40x40
+        for x in range(10, 50):
+            img.putpixel((x, y), (20, 20, 30, 255))
+    for y in range(2, 5):  # 3x3 噪点岛
+        for x in range(52, 55):
+            img.putpixel((x, y), (200, 210, 225, 255))
+
+    presenter_gen.despeckle_alpha(img, min_component=600)
+
+    assert img.getpixel((30, 30))[3] == 255  # 主体保留
+    assert img.getpixel((53, 3))[3] == 0  # 噪点被清
+
+
+def test_autocrop_alpha_crops_to_bbox_with_margin():
+    img = Image.new("RGBA", (100, 80), (0, 0, 0, 0))
+    for y in range(20, 60):
+        for x in range(30, 70):
+            img.putpixel((x, y), (20, 20, 30, 255))
+
+    cropped = presenter_gen.autocrop_alpha(img, margin=4)
+
+    assert cropped.size == (48, 48)  # (70-30+8, 60-20+8)
+    assert cropped.getpixel((4, 4))[3] == 255
+
+
+def test_cutout_low_tolerance_preserves_skin_tone(tmp_path):
+    """白底 + 肤色的回归测试：默认容差 42 会把皮肤误判成背景吃掉，12 不会。"""
+    src = tmp_path / "skin.png"
+    img = Image.new("RGBA", (50, 50), (255, 255, 255, 255))  # 白底（模拟设定集）
+    for y in range(15, 35):
+        for x in range(15, 35):
+            img.putpixel((x, y), (255, 220, 200, 255))  # 肤色方块
+    img.save(src)
+
+    eaten = tmp_path / "eaten.png"
+    kept = tmp_path / "kept.png"
+    assert presenter_gen.cutout_to_png(src, eaten, tolerance=42)
+    assert presenter_gen.cutout_to_png(src, kept, tolerance=12)
+
+    assert Image.open(eaten).getpixel((25, 25))[3] == 0  # 高容差：皮肤被误吃
+    assert Image.open(kept).getpixel((25, 25))[3] == 255  # 低容差：皮肤保留
+    assert Image.open(kept).getpixel((2, 2))[3] == 0  # 白底仍被抠掉

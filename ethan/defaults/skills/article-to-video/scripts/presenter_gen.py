@@ -206,10 +206,12 @@ def _pillow():
     return None
 
 
-def cutout_to_png(src: Path, dst: Path, *, tolerance: int = 42) -> bool:
+def cutout_to_png(src: Path, dst: Path, *, tolerance: int = 42, cleanup: bool = False) -> bool:
     """边缘泛洪抠图：以边缘采样色为 key，从四边 BFS 把背景像素 alpha 置 0。
 
     品红底（或任何近纯色底）都适用；发丝等复杂边缘可能有少量残留，动漫立绘可接受。
+    白底/浅色底要把 tolerance 降到 10-15（默认 42 会把肤色/白发误判成背景），
+    并配合 cleanup=True 去掉残留的小色块和外围空白。
     """
     Image = _pillow()
     if Image is None:
@@ -270,12 +272,71 @@ def cutout_to_png(src: Path, dst: Path, *, tolerance: int = 42) -> bool:
             if y < height - 1:
                 queue.append(index + width)
         img.putalpha(Image.frombytes("L", (width, height), bytes(alpha)))
+        if cleanup:
+            img = despeckle_alpha(img)
+            img = autocrop_alpha(img)
         dst.parent.mkdir(parents=True, exist_ok=True)
         img.save(dst, "PNG")
         return True
     except Exception as exc:  # noqa: BLE001
         print(f"  [warn] 抠图失败 {src.name}: {exc}", file=sys.stderr)
         return False
+
+
+def despeckle_alpha(img, min_component: int = 600):
+    """清除独立小色块：BFS 找 alpha>0 连通域，小于 min_component 的整块置透明。
+
+    用于清理低容差泛洪后残留的卡片边框、标签角、噪点（白底设定集裁图常见）。
+    阈值按立绘主体的 ~0.5% 设定，细发丝若与主体断开且小于阈值会被一并清掉。
+    """
+    from PIL import Image
+
+    width, height = img.size
+    alpha = img.getchannel("A").tobytes()
+    out = bytearray(alpha)
+    visited = bytearray(width * height)
+    for start in range(width * height):
+        if visited[start] or out[start] == 0:
+            continue
+        component = []
+        queue = [start]
+        visited[start] = 1
+        head = 0
+        while head < len(queue):
+            index = queue[head]
+            head += 1
+            component.append(index)
+            x, y = index % width, index // width
+            if x > 0 and not visited[index - 1] and out[index - 1]:
+                visited[index - 1] = 1
+                queue.append(index - 1)
+            if x < width - 1 and not visited[index + 1] and out[index + 1]:
+                visited[index + 1] = 1
+                queue.append(index + 1)
+            if y > 0 and not visited[index - width] and out[index - width]:
+                visited[index - width] = 1
+                queue.append(index - width)
+            if y < height - 1 and not visited[index + width] and out[index + width]:
+                visited[index + width] = 1
+                queue.append(index + width)
+        if len(component) < min_component:
+            for index in component:
+                out[index] = 0
+    img.putalpha(Image.frombytes("L", (width, height), bytes(out)))
+    return img
+
+
+def autocrop_alpha(img, margin: int = 4):
+    """按 alpha 包围盒裁掉外围空白（留 margin 边距）。"""
+    bbox = img.getchannel("A").getbbox()
+    if bbox is None:
+        return img
+    left, top, right, bottom = bbox
+    left = max(0, left - margin)
+    top = max(0, top - margin)
+    right = min(img.width, right + margin)
+    bottom = min(img.height, bottom + margin)
+    return img.crop((left, top, right, bottom))
 
 
 def normalize_image(src: Path, dst: Path) -> bool:
@@ -328,7 +389,7 @@ def match_pose_files(image_dir: Path, pose_names: list[str]) -> dict[str, Path]:
     return assigned
 
 
-def cmd_import(presenter_id: str, image_dir: Path) -> None:
+def cmd_import(presenter_id: str, image_dir: Path, *, tolerance: int = 42, cleanup: bool = False) -> None:
     character = _load_character(presenter_id)
     pose_names = list(character.get("posesPrompts") or DEFAULT_POSES)
     if not image_dir.is_dir():
@@ -348,7 +409,7 @@ def cmd_import(presenter_id: str, image_dir: Path) -> None:
             cut = True
         else:
             print(f"  [info] {src.name} 无 alpha，尝试抠图 ...", file=sys.stderr)
-            ok = cutout_to_png(src, dst)
+            ok = cutout_to_png(src, dst, tolerance=tolerance, cleanup=cleanup)
             cut = ok
             if not ok:
                 # 抠不动也能用：原样拷贝，前端用卡片框渲染。
@@ -567,6 +628,10 @@ def build_parser() -> argparse.ArgumentParser:
     import_cmd = sub.add_parser("import", help="导入出图目录，抠图并置为 ready")
     import_cmd.add_argument("id")
     import_cmd.add_argument("dir", type=Path, help="图片目录（文件名按姿势名匹配）")
+    import_cmd.add_argument("--tolerance", type=int, default=42,
+                            help="抠图容差：品红底默认 42；白底/浅色底（设定集裁图）建议 10-15")
+    import_cmd.add_argument("--cleanup", action="store_true",
+                            help="抠图后去除残留小色块并按内容裁边（白底裁图建议开启）")
 
     regen = sub.add_parser("regen", help="重新打印单个姿势的 prompt")
     regen.add_argument("id")
@@ -585,7 +650,7 @@ def main() -> int:
     elif args.command == "create":
         cmd_create(args.id, args)
     elif args.command == "import":
-        cmd_import(args.id, args.dir.expanduser().resolve())
+        cmd_import(args.id, args.dir.expanduser().resolve(), tolerance=args.tolerance, cleanup=args.cleanup)
     elif args.command == "regen":
         cmd_regen(args.id, args.pose)
     elif args.command == "list":
