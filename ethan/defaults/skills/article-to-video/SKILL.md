@@ -48,7 +48,7 @@ mkdir -p "$PROJECT"
 
 只在需要选择视觉形式时读 `references/visual-presets.md`。MVP 不依赖付费图库；默认使用文字、数字、引用、步骤和摘要卡片动画。
 
-金融场景的经验法则：开场场景用 `candlestick` + `markers`（标注关键点位）+ `callouts`（≤3 条、每条 ≤12 字的黄色关键词）；立绘默认右侧，在总结类场景用 `presenter: {"visible": false}` 隐藏避免遮挡。
+金融场景的经验法则：开场场景用 `candlestick` + `markers`（标注关键点位）+ `callouts`（≤3 条、每条 ≤12 字的黄色关键词）；立绘默认右侧，布局采用硬车道分离（立绘钳在边缘 `440×scale` px 车道内，内容列约 508px，零重叠由 CSS 保证）。K线、长引用等全宽视觉在该场景用 `presenter: {"visible": false}` 隐藏立绘——validate 会对偏挤组合输出 WARNING。
 
 先做无网络校验：
 

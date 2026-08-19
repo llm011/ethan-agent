@@ -8,6 +8,7 @@ import {
   useVideoConfig,
 } from "@open-motion/core";
 import type {Scene, VideoTimeline, Visual, Theme} from "./types";
+import {PRESENTER_EDGE_INSET, PRESENTER_LANE_GAP, presenterLanePx} from "./types";
 import {CalloutLayer} from "./components/CalloutLayer";
 import {CandlestickChart} from "./components/CandlestickChart";
 import {PresenterLayer} from "./components/PresenterLayer";
@@ -170,7 +171,8 @@ const VisualContent: React.FC<{
   theme: Theme;
   sceneId: string;
   sceneFrames: number;
-}> = ({visual, theme, sceneId, sceneFrames}) => {
+  withPresenter?: boolean;
+}> = ({visual, theme, sceneId, sceneFrames, withPresenter = false}) => {
   const {primary, secondary, text} = theme;
   const frame = useCurrentFrame();
   const {fps} = useVideoConfig();
@@ -190,13 +192,15 @@ const VisualContent: React.FC<{
 
   if (visual.type === "stat") {
     // Dynamically size stat value: shorter text → bigger font, longer text → smaller font
-    // 1080px container, padding 78px each side → ~924px usable width
+    // 无立绘：内容宽约 924px；有立绘：硬车道后内容列约 508px，字号整体降一档
     const valueLen = (visual.value || "").length;
-    const statFontSize = valueLen <= 4 ? 170 : valueLen <= 8 ? 130 : valueLen <= 12 ? 100 : valueLen <= 16 ? 80 : 60;
+    const statFontSize = withPresenter
+      ? valueLen <= 4 ? 120 : valueLen <= 8 ? 96 : valueLen <= 12 ? 76 : valueLen <= 16 ? 60 : 46
+      : valueLen <= 4 ? 170 : valueLen <= 8 ? 130 : valueLen <= 12 ? 100 : valueLen <= 16 ? 80 : 60;
     return (
-      <div style={{textAlign: "center", transform: `scale(${0.86 + enter * 0.14})`}}>
+      <div style={{textAlign: "center", transform: `scale(${0.86 + enter * 0.14})`, maxWidth: "100%"}}>
         <div style={{fontSize: statFontSize, lineHeight: 1, fontWeight: 900, color: primary, whiteSpace: "nowrap"}}>{visual.value}</div>
-        <div style={{fontSize: 42, marginTop: 28, color: text, opacity: 0.8}}>{visual.label}</div>
+        <div style={{fontSize: withPresenter ? 34 : 42, marginTop: 28, color: text, opacity: 0.8}}>{visual.label}</div>
       </div>
     );
   }
@@ -204,9 +208,9 @@ const VisualContent: React.FC<{
   if (visual.type === "quote") {
     return (
       <div style={{...panel, background: "rgba(255,255,255,0.055)", transform: `scale(${0.94 + enter * 0.06})`}}>
-        <div style={{fontSize: 96, color: primary, lineHeight: 0.6}}>"</div>
-        <div style={{fontSize: 48, lineHeight: 1.45, fontWeight: 650, color: text}}>{visual.quote}</div>
-        {visual.attribution ? <div style={{fontSize: 30, marginTop: 30, color: secondary}}>— {visual.attribution}</div> : null}
+        <div style={{fontSize: withPresenter ? 72 : 96, color: primary, lineHeight: 0.6}}>"</div>
+        <div style={{fontSize: withPresenter ? 36 : 48, lineHeight: 1.45, fontWeight: 650, color: text}}>{visual.quote}</div>
+        {visual.attribution ? <div style={{fontSize: withPresenter ? 26 : 30, marginTop: 30, color: secondary}}>— {visual.attribution}</div> : null}
       </div>
     );
   }
@@ -248,11 +252,17 @@ const SceneView: React.FC<{scene: Scene; timeline: VideoTimeline; index: number}
   const fade = interpolate(frame, [0, 9, Math.max(10, sceneFrames - 9), sceneFrames], [0, 1, 1, 0], clamp);
   const rise = interpolate(frame, [0, 18], [44, 0], clamp);
   const {theme} = timeline;
-  // 有立绘时内容列收窄到左侧，给右中位置的 presenter 让出空间
+  // 有立绘时内容列让出立绘硬车道：车道侧 padding 加大到 边缘间距+车道宽+留白，
+  // 车道内的立绘（CSS 双轴 contain，与姿势图宽高比无关）与内容列永不相交。
   const withPresenter = Boolean(timeline.presenter) && scene.presenter?.visible !== false;
+  const lanePad = withPresenter
+    ? PRESENTER_EDGE_INSET + presenterLanePx(timeline.presenter!.scale) + PRESENTER_LANE_GAP
+    : 78;
+  const padLeft = withPresenter && timeline.presenter!.position === "left" ? lanePad : 78;
+  const padRight = withPresenter && timeline.presenter!.position !== "left" ? lanePad : 78;
 
   return (
-    <AbsoluteFill style={{opacity: fade, padding: "108px 78px 280px", color: theme.text, overflow: "hidden", boxSizing: "border-box"}}>
+    <AbsoluteFill style={{opacity: fade, padding: `108px ${padRight}px 280px ${padLeft}px`, color: theme.text, overflow: "hidden", boxSizing: "border-box"}}>
       <div style={{fontSize: 25, letterSpacing: 5, color: theme.primary, fontWeight: 800}}>
         {String(index + 1).padStart(2, "0")} / {String(timeline.scenes.length).padStart(2, "0")}
       </div>
@@ -274,7 +284,7 @@ const SceneView: React.FC<{scene: Scene; timeline: VideoTimeline; index: number}
       ) : null}
       {scene.callouts && scene.callouts.length > 0 ? <CalloutLayer callouts={scene.callouts} theme={theme} /> : null}
       <div style={{flex: 1, display: "flex", alignItems: "center", justifyContent: withPresenter ? "flex-start" : "center", marginTop: 44, maxWidth: withPresenter ? 640 : undefined}}>
-        <VisualContent visual={scene.visual} theme={theme} sceneId={scene.id} sceneFrames={sceneFrames} />
+        <VisualContent visual={scene.visual} theme={theme} sceneId={scene.id} sceneFrames={sceneFrames} withPresenter={withPresenter} />
       </div>
     </AbsoluteFill>
   );

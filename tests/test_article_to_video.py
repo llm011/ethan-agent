@@ -643,3 +643,59 @@ def test_cutout_low_tolerance_preserves_skin_tone(tmp_path):
     assert Image.open(eaten).getpixel((25, 25))[3] == 0  # 高容差：皮肤被误吃
     assert Image.open(kept).getpixel((25, 25))[3] == 255  # 低容差：皮肤保留
     assert Image.open(kept).getpixel((2, 2))[3] == 0  # 白底仍被抠掉
+
+
+def _crowded_manifest(**presenter_override):
+    """立绘可见 + 三种偏挤视觉，用于遮挡警告测试。"""
+    manifest = finance_manifest(presenter={"id": "xiaoyu"})
+    manifest["scenes"] = [
+        {
+            "id": "kline",
+            "narration": "看 K 线。",
+            "headline": "行情",
+            "visual": {"type": "candlestick", "closes": [1, 2, 3, 4, 5, 6, 7, 8]},
+        },
+        {
+            "id": "long-quote",
+            "narration": "读引用。",
+            "headline": "观点",
+            "visual": {"type": "quote", "quote": "长" * 61},
+        },
+        {
+            "id": "long-stat",
+            "narration": "看数字。",
+            "headline": "指标",
+            "visual": {"type": "stat", "value": "40G → 24G+", "label": "显存"},
+        },
+    ]
+    for scene in manifest["scenes"]:
+        if presenter_override:
+            scene["presenter"] = dict(presenter_override)
+    return manifest
+
+
+def test_presenter_overlap_warnings_for_crowded_visuals(tmp_path):
+    root = tmp_path / "library"
+    make_presenter_library(root)
+
+    result = pipeline.normalize_manifest(_crowded_manifest(), library_root=root)
+
+    warnings = result["warnings"]
+    assert any("kline" in item and "candlestick" in item for item in warnings)
+    assert any("long-quote" in item and "长引用" in item for item in warnings)
+    assert any("long-stat" in item and "stat" in item for item in warnings)
+
+
+def test_presenter_overlap_warnings_suppressed_when_hidden(tmp_path):
+    root = tmp_path / "library"
+    make_presenter_library(root)
+
+    result = pipeline.normalize_manifest(_crowded_manifest(visible=False), library_root=root)
+
+    assert "warnings" not in result
+
+
+def test_no_presenter_no_warnings_key():
+    result = pipeline.normalize_manifest(sample_manifest())
+
+    assert "warnings" not in result

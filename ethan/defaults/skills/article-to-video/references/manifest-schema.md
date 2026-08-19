@@ -51,6 +51,8 @@
 - `scale`：0.6–1.4，默认 1.0
 - `defaultPose`：必须是角色包里已有的姿势名（默认 `standing`）
 
+**立绘布局是硬车道分离**：presenter 可见时，立绘被 CSS 约束在屏幕边缘 `ceil(440 × scale)` px 宽的车道内（双轴 contain，与姿势图宽高比无关），所有标题、正文、callouts 和视觉图表被限制在剩余内容列（1080 竖屏、scale=1 时约 508px）。两侧永不相交——不遮挡由布局保证，不依赖作者避让。代价是内容列变窄：stat/quote 字号会自动降档，但 `candlestick`、长 quote（>60 字）和长 stat 值（>8 字符）在窄列里仍偏挤，validate 会对这些组合给出 WARNING，建议该场景 `presenter: {"visible": false}` 用满全宽。
+
 ## 场景字段
 
 | 字段 | 必需 | 说明 |

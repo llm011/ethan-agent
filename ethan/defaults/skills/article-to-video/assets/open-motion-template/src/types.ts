@@ -89,3 +89,12 @@ export const toneColor = (theme: Theme, tone: Tone): string =>
     : tone === "positive"
       ? theme.positive ?? "#EF4444"
       : theme.negative ?? "#22C55E";
+
+// ── 立绘硬车道 ──
+// presenter 可见时，立绘被 CSS 约束在屏幕边缘 ceil(LANE × scale) px 宽的车道内
+// （img 宽/高双轴 100% + objectFit contain，与姿势图宽高比无关）；内容区按同一
+// 宽度收 padding。两侧永不相交 —— 不遮挡是布局保证的，不靠作者小心。
+export const PRESENTER_LANE_WIDTH = 440;
+export const PRESENTER_LANE_GAP = 24; // 内容列与车道之间的留白
+export const PRESENTER_EDGE_INSET = 30; // 车道距屏幕边缘的距离（与 PresenterLayer 的 left/right 一致）
+export const presenterLanePx = (scale: number): number => Math.ceil(PRESENTER_LANE_WIDTH * scale);

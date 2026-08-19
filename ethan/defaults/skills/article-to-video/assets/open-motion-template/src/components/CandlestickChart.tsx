@@ -42,11 +42,23 @@ const synthesizeCandles = (closes: number[], sceneId: string): Candle[] => {
 const formatPrice = (value: number): string =>
   Math.abs(value) >= 10000 ? `${(value / 1000).toFixed(1)}k` : value.toFixed(Math.abs(value) < 10 ? 2 : 1);
 
+// 估算 marker 文本宽度（CJK≈1em，ASCII≈0.56em），把芯片加宽到能容纳文字。
+// 不做 DOM measure，保持帧驱动确定性。
+const labelWidthPx = (label: string, fontSize: number): number => {
+  let width = 0;
+  for (const ch of label) {
+    width += /[⺀-鿿　-〿＀-￯—–]/.test(ch) ? fontSize : fontSize * 0.56;
+  }
+  return width;
+};
+
 const W = 920;
-const H = 560;
+const H = 640;
+// 上下 padding 必须容得下一个完整 marker 芯片（38 高 + 引线间距），
+// 否则标注打在最高/最低蜡烛上时会被 SVG 视口裁掉。
 const PAD_X = 18;
-const PAD_TOP = 26;
-const PAD_BOTTOM = 34;
+const PAD_TOP = 68;
+const PAD_BOTTOM = 72;
 
 export const CandlestickChart: React.FC<{
   visual: Visual;
@@ -152,11 +164,16 @@ export const CandlestickChart: React.FC<{
         const anchorY = marker.position === "above" ? y(candle.h) - 14 : y(candle.l) + 14;
         const chipY = marker.position === "above" ? anchorY - 46 : anchorY + 12;
         const color = toneColor(theme, marker.tone);
+        // 芯片宽度随文本自适应：深色文字溢出芯片到深背景上会不可读（不是被裁剪）。
+        const chipW = Math.max(116, Math.ceil(labelWidthPx(marker.label, 23)) + 36);
+        // 宽芯片贴近图表左右缘时会被 SVG 视口裁掉：把芯片中心钳进视口，引线仍锚在蜡烛上。
+        const candleX = cx(marker.index);
+        const chipOffset = Math.min(Math.max(0, 4 - (candleX - chipW / 2)), W - 4 - (candleX + chipW / 2));
         return (
-          <g key={mi} opacity={pop} transform={`translate(${cx(marker.index)}, 0) scale(${0.5 + pop * 0.5})`} style={{transformOrigin: `${cx(marker.index)}px ${anchorY}px`}}>
+          <g key={mi} opacity={pop} transform={`translate(${candleX}, 0) scale(${0.5 + pop * 0.5})`} style={{transformOrigin: `${candleX}px ${anchorY}px`}}>
             <line x1={0} x2={0} y1={anchorY} y2={chipY + (marker.position === "above" ? 34 : 0)} stroke={color} strokeWidth={2} />
-            <g transform={`rotate(-1.5, 0, ${chipY + 17})`}>
-              <rect x={-58} y={chipY} width={116} height={38} rx={9} fill={color} />
+            <g transform={`translate(${chipOffset}, 0) rotate(-1.5, 0, ${chipY + 17})`}>
+              <rect x={-chipW / 2} y={chipY} width={chipW} height={38} rx={9} fill={color} />
               <text x={0} y={chipY + 27} textAnchor="middle" fontSize={23} fontWeight={800} fill="#1A1A1A">
                 {marker.label}
               </text>

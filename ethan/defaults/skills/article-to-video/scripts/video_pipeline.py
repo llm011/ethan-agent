@@ -21,6 +21,12 @@ from typing import Any
 
 VISUAL_TYPES = {"kinetic-text", "steps", "stat", "quote", "summary", "candlestick"}
 FPS_VALUES = {24, 25, 30, 60}
+# 立绘硬车道常量，与 open-motion-template/src/types.ts 保持同步：
+# 渲染侧把 presenter 钳在 ceil(440 × scale) px 宽的车道内，内容列让出同一宽度。
+PRESENTER_LANE_WIDTH = 440
+PRESENTER_LANE_GAP = 24
+PRESENTER_EDGE_INSET = 30
+CONTENT_SIDE_PADDING = 78
 DEFAULT_THEME = {
     "background": "#081120",
     "surface": "#111D32",
@@ -257,6 +263,38 @@ def _normalize_markers(visual: dict[str, Any], visual_raw: dict[str, Any], field
     visual["markers"] = markers
 
 
+def _presenter_overlap_warnings(
+    presenter: dict[str, Any], scenes: list[dict[str, Any]], width: int
+) -> list[str]:
+    """立绘硬车道保证零重叠，但有些组合会被挤得太窄 —— 给出布局建议（不阻断渲染）。"""
+    scale = float(presenter.get("scale", 1.0))
+    lane_px = int(PRESENTER_LANE_WIDTH * scale + 0.999)  # ceil，与 TS 侧 presenterLanePx 一致
+    content_px = width - CONTENT_SIDE_PADDING - (PRESENTER_EDGE_INSET + lane_px + PRESENTER_LANE_GAP)
+    warnings: list[str] = []
+    for scene in scenes:
+        override = scene.get("presenter") or {}
+        if override.get("visible") is False:
+            continue
+        visual = scene.get("visual") or {}
+        visual_type = visual.get("type")
+        if visual_type == "candlestick":
+            warnings.append(
+                f"scenes[{scene['id']}]: candlestick 与立绘同屏时图表仅约 {content_px}px 宽，"
+                '建议该场景 presenter: {"visible": false} 用满全宽'
+            )
+        elif visual_type == "quote" and len(str(visual.get("quote") or "")) > 60:
+            warnings.append(
+                f"scenes[{scene['id']}]: 长引用（>60 字）与立绘同屏会排得过挤，"
+                '建议该场景 presenter: {"visible": false}'
+            )
+        elif visual_type == "stat" and len(str(visual.get("value") or "")) > 8:
+            warnings.append(
+                f"scenes[{scene['id']}]: stat 值超过 8 字符，与立绘同屏时字号会被压缩，"
+                "建议缩短 value 或隐藏立绘"
+            )
+    return warnings
+
+
 def normalize_manifest(raw: Any, *, library_root: Path | None = None) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise ManifestError("manifest root must be an object")
@@ -452,6 +490,9 @@ def normalize_manifest(raw: Any, *, library_root: Path | None = None) -> dict[st
     if presenter is not None:
         # voice 只用于 TTS 继承，不进 timeline/渲染侧。
         result["presenter"] = {key: value for key, value in presenter.items() if key != "voice"}
+        warnings = _presenter_overlap_warnings(presenter, scenes, width)
+        if warnings:
+            result["warnings"] = warnings
     if len(result["summary"]) > 200:
         raise ManifestError("summary must be at most 200 characters")
     return result
@@ -911,6 +952,8 @@ def enforce_target_duration(manifest: dict[str, Any], timeline: dict[str, Any]) 
 
 def run_pipeline(manifest_path: Path, output_dir: Path) -> dict[str, Any]:
     manifest = load_manifest(manifest_path)
+    for warning in manifest.get("warnings", []):
+        print(f"WARNING: {warning}", file=sys.stderr)
     output_dir.mkdir(parents=True, exist_ok=True)
     run_id = f"{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
     previous_outputs = _archive_published_outputs(output_dir, run_id)
@@ -993,12 +1036,15 @@ def main() -> int:
     try:
         if args.command == "validate":
             manifest = load_manifest(args.manifest)
+            for warning in manifest.get("warnings", []):
+                print(f"WARNING: {warning}", file=sys.stderr)
             result = {
                 "status": "ok",
                 "title": manifest["title"],
                 "sceneCount": len(manifest["scenes"]),
                 "targetDurationSec": manifest["targetDurationSec"],
                 "durationToleranceSec": manifest["durationToleranceSec"],
+                "warnings": manifest.get("warnings", []),
             }
         else:
             result = run_pipeline(args.manifest.resolve(), args.output_dir.expanduser().resolve())

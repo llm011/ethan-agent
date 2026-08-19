@@ -1,6 +1,7 @@
 import React from "react";
 import {continueRender, delayRender, interpolate, spring, useCurrentFrame, useVideoConfig} from "@open-motion/core";
 import type {Presenter, Scene} from "../types";
+import {PRESENTER_LANE_WIDTH} from "../types";
 
 const clamp = {extrapolateLeft: "clamp" as const, extrapolateRight: "clamp" as const};
 
@@ -59,10 +60,13 @@ export const PresenterLayer: React.FC<{presenter: Presenter; scenes: Scene[]}> =
   }
 
   const side = presenter.position === "left" ? {left: 30} : {right: 30};
+  // 硬车道：宽被钳在 PRESENTER_LANE_WIDTH（外层 transform scale 同步放大车道），
+  // img 双轴 contain —— 任何宽高比的姿势图都不可能溢出车道，内容侧按同宽收 padding。
   const imgStyle = (opacity: number): React.CSSProperties => ({
     position: "absolute",
     bottom: 0,
     ...(presenter.position === "left" ? {left: 0} : {right: 0}),
+    width: "100%",
     height: "100%",
     objectFit: "contain",
     objectPosition: "bottom",
@@ -78,6 +82,7 @@ export const PresenterLayer: React.FC<{presenter: Presenter; scenes: Scene[]}> =
       style={{
         position: "absolute",
         bottom: 240, // 避开底部字幕区
+        width: PRESENTER_LANE_WIDTH,
         height: "46%",
         zIndex: 5,
         ...side,
