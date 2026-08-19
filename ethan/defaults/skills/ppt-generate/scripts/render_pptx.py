@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import copy
 import hashlib
+import importlib.util
 import json
 import math
 import os
@@ -36,23 +37,36 @@ _DEPS_MODS = ("pptx", "latex2mathml", "mathml2omml")
 
 
 def _try_import(mod: str) -> bool:
+    """Return whether a dependency imports cleanly, including native extensions."""
     try:
         __import__(mod)
         return True
     except Exception:
-        # 捕获所有导入错误：ImportError（模块不存在）、
-        # OSError（native DLL 缺失/ABI 不匹配）、AttributeError（半损坏包）等
+        # A package can be present but unusable because of a missing native library,
+        # an ABI mismatch, or a partially broken installation.
         return False
 
 
-def _write_deps_marker():
-    """原子写入 marker：先写 .tmp 再 rename，防止并发/异常导致损坏。"""
+def _module_present(mod: str) -> bool:
+    """Return whether Python can locate an installed module without importing it."""
+    try:
+        return importlib.util.find_spec(mod) is not None
+    except ModuleNotFoundError:
+        return False
+    except Exception:
+        # Any other locator failure indicates a partially initialized or broken
+        # installation. Treat it as present so pip is told to repair it.
+        return True
+
+
+def _write_deps_marker() -> None:
+    """Best-effort atomic marker write; dependency availability remains authoritative."""
     try:
         _DEPS_MARKER.parent.mkdir(parents=True, exist_ok=True)
         tmp = _DEPS_MARKER.with_suffix(".tmp")
         tmp.write_text(sys.executable, encoding="utf-8")
         tmp.replace(_DEPS_MARKER)
-    except OSError:
+    except (OSError, ValueError):
         pass
 
 
@@ -60,26 +74,35 @@ def _ensure_pptx():
     """检查 python-pptx 等依赖是否可用，缺少则安装。
     使用持久化 marker 文件避免每次运行都重装——marker 记录安装时的 Python 路径，
     路径变化（切换 venv/system）时自动重装。"""
-    missing = [m for m in _DEPS_MODS if not _try_import(m)]
+    unavailable = [mod for mod in _DEPS_MODS if not _try_import(mod)]
+    broken = [mod for mod in unavailable if _module_present(mod)]
 
-    # marker 命中且 Python 匹配 → 跳过
-    if not missing and _DEPS_MARKER.exists():
+    if not unavailable and _DEPS_MARKER.exists():
         try:
             if _DEPS_MARKER.read_text(encoding="utf-8").strip() == sys.executable:
                 return
         except (OSError, UnicodeDecodeError, ValueError):
-            pass  # marker 损坏，忽略后继续
+            pass
 
-    if not missing:
+    if not unavailable:
         _write_deps_marker()
         return
-
     pkg_map = {"pptx": "python-pptx", "latex2mathml": "latex2mathml", "mathml2omml": "mathml2omml"}
-    pkgs = [pkg_map[m] for m in missing]
+    pkgs = [pkg_map[m] for m in unavailable]
     print(f"[render_pptx] 缺少依赖 {pkgs}，尝试 pip 安装 ...", file=sys.stderr)
     # venv 内直接装（--user 会报错）；非 venv 用 --user 避免污染系统环境
     in_venv = sys.prefix != getattr(sys, "base_prefix", sys.prefix)
-    cmd = [sys.executable, "-m", "pip", "install", "--quiet", *([] if in_venv else ["--user"]), *pkgs]
+    repair_args = ["--upgrade", "--force-reinstall"] if broken else []
+    cmd = [
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--quiet",
+        *([] if in_venv else ["--user"]),
+        *repair_args,
+        *pkgs,
+    ]
     try:
         subprocess.check_call(cmd)
         import site
@@ -87,23 +110,25 @@ def _ensure_pptx():
         user_site = site.getusersitepackages()
         if user_site not in sys.path:
             sys.path.insert(0, user_site)
-        # 验证所有依赖都可导入
-        still_missing = [m for m in _DEPS_MODS if not _try_import(m)]
-        if still_missing:
-            print(
-                "[render_pptx] pip 安装成功但以下模块仍不可用: %s\n"
-                "请检查是否有平台兼容性问题，或手动安装: pip3 install %s" % (still_missing, " ".join(pkgs)),
-                file=sys.stderr,
-            )
-            sys.exit(2)
-        print("[render_pptx] 依赖安装成功", file=sys.stderr)
-        _write_deps_marker()
     except Exception as e:  # noqa: BLE001
         print(
-            "[render_pptx] 自动安装失败: %s\n请手动执行: pip3 install python-pptx latex2mathml mathml2omml" % e,
+            "[render_pptx] 自动安装失败: %s\n请手动执行: pip3 install %s" % (e, " ".join(pkgs)),
             file=sys.stderr,
         )
         sys.exit(2)
+
+    # pip 退出码 0 不代表模块可用（native 库缺失 / ABI 不匹配 / 安装残缺）
+    failed = [mod for mod in _DEPS_MODS if not _try_import(mod)]
+    if failed:
+        print(
+            "[render_pptx] pip 安装已完成，但以下模块仍无法导入: %s\n"
+            "多为系统级动态库缺失或 ABI 不匹配；请运行 `%s -c \"import %s\"` 查看真实报错"
+            % (failed, sys.executable, failed[0]),
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    print("[render_pptx] 依赖安装成功", file=sys.stderr)
+    _write_deps_marker()
 
 
 _ensure_pptx()
@@ -2046,7 +2071,8 @@ def validate_deck(deck: dict, theme: dict | None = None, deck_dir: Path | None =
     # ── 主题质量校验 ──
     theme_colors = (theme or {}).get("themeColors", [])
     if not isinstance(theme_colors, list) or len(theme_colors) < 3:
-        warn(f"主题色数量不足（{len(theme_colors) if isinstance(theme_colors, list) else 'N/A'} 个），建议至少 3 个主题色")
+        count_str = str(len(theme_colors)) if isinstance(theme_colors, list) else "N/A"
+        warn(f"主题色数量不足（{count_str} 个），建议至少 3 个主题色", code="theme")
 
     return issues
 

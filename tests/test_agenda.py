@@ -142,6 +142,62 @@ def test_fire_ignores_done(monkeypatch, isolated):
     assert not called
 
 
+# ── completion（完成状态） ───────────────────────────────
+
+
+def test_update_completion_validation(isolated):
+    ev = agenda_mod.create_event("校验", _when_future())
+    with pytest.raises(agenda_mod.AgendaError):
+        agenda_mod.update_event(ev["id"], completion="finished")
+    updated = agenda_mod.update_event(ev["id"], completion="partial")
+    assert updated["completion"] == "partial"
+
+
+def test_fire_suppresses_notification_when_marked_done(monkeypatch, isolated):
+    """标记 done/abandoned 后到点不再打扰：跳过通知，一次性日程仍推进到 fired。"""
+    ev = agenda_mod.create_event("提前做完", _when_future())
+    agenda_mod.update_event(ev["id"], completion="done")
+    called = []
+    monkeypatch.setattr(agenda_mod, "_dispatch_notification", lambda e: called.append(e))
+    agenda_mod.fire_agenda_event(ev["id"])
+    assert not called
+    store = agenda_mod.get_agenda_store()
+    assert store.get(ev["id"])["status"] == "fired"
+    assert store.get(ev["id"])["completion"] == "done"  # 历史记录保留
+
+
+def test_fire_suppresses_notification_when_abandoned(monkeypatch, isolated):
+    ev = agenda_mod.create_event("废弃不提醒", _when_future())
+    agenda_mod.update_event(ev["id"], completion="abandoned")
+    called = []
+    monkeypatch.setattr(agenda_mod, "_dispatch_notification", lambda e: called.append(e))
+    agenda_mod.fire_agenda_event(ev["id"])
+    assert not called
+
+
+def test_fire_resets_completion_for_repeat(monkeypatch, isolated):
+    """重复日程每轮独立：本轮标记 done，触发后 completion 重置为下一轮 not_started。"""
+    ev = agenda_mod.create_event("每天喝水", _when_future(), repeat="daily")
+    agenda_mod.update_event(ev["id"], completion="done")
+    called = []
+    monkeypatch.setattr(agenda_mod, "_dispatch_notification", lambda e: called.append(e))
+    agenda_mod.fire_agenda_event(ev["id"])
+    assert not called  # 本轮已标记完成，不提醒
+    store = agenda_mod.get_agenda_store()
+    got = store.get(ev["id"])
+    assert got["status"] == "pending"
+    assert got["completion"] == "not_started"  # 下一轮从零开始
+
+
+def test_update_reschedule_resets_completion(isolated):
+    """改期视为新一轮：完成状态重置并重新激活。"""
+    ev = agenda_mod.create_event("改期", _when_future())
+    agenda_mod.update_event(ev["id"], completion="done")
+    updated = agenda_mod.update_event(ev["id"], when=_when_future(days=2, hour=15))
+    assert updated["status"] == "pending"
+    assert updated["completion"] == "not_started"
+
+
 # ── reconcile 对账 ───────────────────────────────────────
 
 

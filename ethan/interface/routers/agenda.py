@@ -49,13 +49,15 @@ class AgendaPatchRequest(BaseModel):
     repeat: str | None = None
     weekdays: list[int] | None = None
     note: str | None = None
+    completion: str | None = None
 
 
 @router.patch("/{event_id}", dependencies=[Depends(verify_token)])
 async def patch_agenda(event_id: str, req: AgendaPatchRequest):
     from ethan.scheduler.agenda import AgendaError, update_event
     try:
-        ev = update_event(event_id, req.title, req.when, req.repeat, req.weekdays, req.note)
+        ev = update_event(event_id, req.title, req.when, req.repeat, req.weekdays, req.note,
+                          completion=req.completion)
     except AgendaError as e:
         raise HTTPException(400, str(e))
     return {"ok": True, "event": ev}

@@ -54,6 +54,7 @@ private val drawerToolItems = listOf(
     DrawerToolItem(Screen.Memory, "记忆 Memory"),
     DrawerToolItem(Screen.Knowledge, "知识库 Knowledge"),
     DrawerToolItem(Screen.Skills, "技能 Skills"),
+    DrawerToolItem(Screen.Agenda, "日程 Agenda"),
     DrawerToolItem(Screen.Schedule, "定时任务 Schedule"),
     DrawerToolItem(Screen.BackgroundTasks, "后台任务 Tasks"),
     DrawerToolItem(Screen.Docs, "文档 Docs"),

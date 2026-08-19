@@ -29,6 +29,7 @@ DB_PATH = CONFIG_DIR / "db" / "agenda.json"
 MISFIRE_GRACE_SECONDS = 300
 
 _REPEAT_VALUES = ("none", "daily", "weekly")
+_COMPLETION_VALUES = ("not_started", "done", "partial", "abandoned")
 # ISO weekday：1=周一 … 7=周日
 _WEEKDAY_ABBR = {1: "mon", 2: "tue", 3: "wed", 4: "thu", 5: "fri", 6: "sat", 7: "sun"}
 
@@ -204,6 +205,7 @@ def create_event(title: str, when: str, repeat: str = "none", weekdays: list[int
         "repeat": repeat,
         "weekdays": sorted(set(weekdays)) if repeat == "weekly" else [],
         "status": "pending",
+        "completion": "not_started",
         "created_at": now_iso,
         "updated_at": now_iso,
     }
@@ -217,7 +219,8 @@ def create_event(title: str, when: str, repeat: str = "none", weekdays: list[int
 
 def update_event(event_id: str, title: str | None = None, when: str | None = None,
                  repeat: str | None = None, weekdays: list[int] | None = None,
-                 note: str | None = None, short_title: str | None = None) -> dict:
+                 note: str | None = None, short_title: str | None = None,
+                 completion: str | None = None) -> dict:
     """修改日程。时间/重复规则变化时重建调度 job；已终结（fired/missed/done）
     的事件改时间会重新激活为 pending。"""
     store = get_agenda_store()
@@ -248,6 +251,12 @@ def update_event(event_id: str, title: str | None = None, when: str | None = Non
     })
     if rescheduled:
         updated["status"] = "pending"
+        # 改期视为新一轮：完成状态重置（同请求显式传 completion 则以后者为准）
+        updated["completion"] = "not_started"
+    if completion is not None:
+        if completion not in _COMPLETION_VALUES:
+            raise AgendaError(f"completion 必须是 {'/'.join(_COMPLETION_VALUES)}")
+        updated["completion"] = completion
     store.upsert(updated)
     if rescheduled:
         _register_job(updated)  # replace_existing 原子替换
@@ -289,8 +298,14 @@ def fire_agenda_event(event_id: str) -> None:
     ev = store.get(event_id)
     if not ev or ev["status"] != "pending":
         return  # 已删除/已完成/已提醒过（防御：正常情况下 job 已随状态移除）
+    completion = ev.get("completion", "not_started")
     if ev["repeat"] == "none":
         store.set_status(event_id, "fired")
+    elif completion != "not_started":
+        # 重复日程进入下一轮：本轮的完成状态不带入下一轮
+        store.upsert({**ev, "completion": "not_started", "updated_at": _now().isoformat()})
+    if completion in ("done", "abandoned"):
+        return  # 用户已标记完成/废弃：本轮不再打扰（跳过通知 + 倒计时）
     _dispatch_notification(ev)
 
 

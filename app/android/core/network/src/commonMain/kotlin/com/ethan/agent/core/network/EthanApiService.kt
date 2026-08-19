@@ -1,6 +1,12 @@
 package com.ethan.agent.core.network
 
 import com.ethan.agent.core.model.AgentSettings
+import com.ethan.agent.core.model.AgendaCreateRequest
+import com.ethan.agent.core.model.AgendaEnabledRequest
+import com.ethan.agent.core.model.AgendaEnabledResponse
+import com.ethan.agent.core.model.AgendaEventResponse
+import com.ethan.agent.core.model.AgendaPatchRequest
+import com.ethan.agent.core.model.AgendaResponse
 import com.ethan.agent.core.model.ApiKeyCreateRequest
 import com.ethan.agent.core.model.ApiKeyCreated
 import com.ethan.agent.core.model.ApiKeysResponse
@@ -379,6 +385,26 @@ class EthanApiService(
 
     suspend fun cleanupTimelineLark(timelineId: String): TimelineActionResponse =
         client.post(url("schedule/timeline/$timelineId/cleanup-lark")).body()
+
+    // ── Agenda 日程 ─────────────────────────────────────────────────────────
+
+    suspend fun getAgenda(): AgendaResponse = client.get(url("agenda")).body()
+
+    suspend fun createAgenda(body: AgendaCreateRequest): AgendaEventResponse =
+        client.post(url("agenda")) { jsonBody(body) }.body()
+
+    suspend fun patchAgenda(eventId: String, body: AgendaPatchRequest): AgendaEventResponse =
+        client.patch(url("agenda/$eventId")) { jsonBody(body) }.body()
+
+    suspend fun completeAgenda(eventId: String): AgendaEventResponse =
+        client.post(url("agenda/$eventId/complete")).body()
+
+    suspend fun deleteAgenda(eventId: String) {
+        client.delete(url("agenda/$eventId"))
+    }
+
+    suspend fun setAgendaEnabled(body: AgendaEnabledRequest): AgendaEnabledResponse =
+        client.put(url("agenda/enabled")) { jsonBody(body) }.body()
 
     // ── Knowledge ───────────────────────────────────────────────────────────
 

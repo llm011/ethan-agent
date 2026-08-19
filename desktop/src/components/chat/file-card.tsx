@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, type SyntheticEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { FileText, FileSpreadsheet, FileArchive, File as FileIcon, Presentation, Download, ImageIcon, Video } from "lucide-react";
+import { AudioLines, FileText, FileSpreadsheet, FileArchive, File as FileIcon, Presentation, Download, ImageIcon, Video } from "lucide-react";
 import { getApiUrl, getAuthToken } from "@/lib/api-base";
 import { openUrl } from "@/lib/external-link";
 import { signFileUrl } from "@ethan/shared/ppt/preview";
@@ -21,7 +21,11 @@ const KIND_ICON: Record<string, typeof FileIcon> = {
   xlsx: FileSpreadsheet,
   csv: FileSpreadsheet,
   zip: FileArchive,
+  mp3: AudioLines,
+  m4a: AudioLines,
 };
+
+const AUDIO_KINDS = new Set(["mp3", "m4a"]);
 
 function fmtSize(kb: number | null): string {
   if (kb == null) return "";
@@ -188,7 +192,106 @@ function VideoFileCard({ card, sessionId }: { card: FileCard; sessionId?: string
   );
 }
 
-// 文件卡片：图片渲染缩略图 + Lightbox；MP4 内嵌播放并保留下载按钮；
+// 交付的音频（book-audio-digest 听书 MP3）：内嵌原生 audio 播放器 + 下载按钮。
+// 签名过期续播策略与 VideoFileCard 一致：点播放 401 时换一次新签名，仍失败降级下载。
+function AudioFileCard({ card, sessionId }: { card: FileCard; sessionId?: string | null }) {
+  const [url, setUrl] = useState<string>("");
+  const sid = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : "";
+  const refreshCountRef = useRef(0);
+
+  const refreshUrl = async (): Promise<string | undefined> => {
+    try {
+      const u = await signedViewUrl(card.path, sid);
+      setUrl(u);
+      return u;
+    } catch {
+      return undefined;
+    }
+  };
+
+  useEffect(() => {
+    let alive = true;
+    void signedViewUrl(card.path, sid)
+      .then((u) => { if (alive) setUrl(u); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [card.path, sid]);
+
+  const handlePlay = (e: SyntheticEvent<HTMLAudioElement>) => {
+    const audio = e.currentTarget;
+    if (audio.readyState === 0 || audio.error) {
+      if (refreshCountRef.current >= 1) {
+        setUrl("");
+        return;
+      }
+      refreshCountRef.current += 1;
+      void refreshUrl().then((fresh) => {
+        if (fresh) {
+          const t = audio.currentTime;
+          audio.src = fresh;
+          audio.currentTime = t;
+          audio.play().catch(() => {});
+        }
+      });
+    }
+  };
+
+  const handleDownload = async () => {
+    try {
+      openUrl(await downloadSignedUrl(card.path, sid));
+    } catch {
+      // 签名接口失败时静默处理，避免 unhandled rejection
+    }
+  };
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-border/50 bg-muted/30 w-full max-w-[520px]">
+      <div className="flex items-center gap-3 px-4 pt-3">
+        <span className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-primary/10 text-primary flex-shrink-0">
+          <AudioLines className="w-5 h-5" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium truncate">{card.title || card.filename}</div>
+          <div className="text-xs text-muted-foreground truncate">
+            {card.kind.toUpperCase()}
+            {card.size_kb != null && ` · ${fmtSize(card.size_kb)}`}
+          </div>
+        </div>
+      </div>
+      {url ? (
+        <audio
+          src={url}
+          controls
+          preload="metadata"
+          className="block w-full px-3 py-2"
+          aria-label={card.title || card.filename}
+          onPlay={handlePlay}
+          onError={handlePlay}
+        />
+      ) : (
+        <div className="flex items-center justify-center h-10 text-xs text-muted-foreground">
+          音频加载中…
+        </div>
+      )}
+      <div className="flex items-center gap-3 border-t border-border/50 px-3 py-2">
+        <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+          点击下载可保存到本地（车机/通勤场景）
+        </span>
+        <button
+          type="button"
+          onClick={() => void handleDownload()}
+          className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-primary hover:bg-primary/10"
+          aria-label={`下载 ${card.title || card.filename}`}
+        >
+          <Download className="h-3.5 w-3.5" />
+          下载
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// 文件卡片：图片渲染缩略图 + Lightbox；MP4/MP3 内嵌播放并保留下载按钮；
 // pptx 项目进入 /ppt-preview；其余点击直接下载。
 // 所有 URL 带 session_id——服务端只放行本 session 交付过的文件（会话级隔离）。
 export function FileCardView({ card, sessionId }: { card: FileCard; sessionId?: string | null }) {
@@ -199,6 +302,9 @@ export function FileCardView({ card, sessionId }: { card: FileCard; sessionId?: 
   }
   if (card.kind === "mp4") {
     return <VideoFileCard card={card} sessionId={sessionId} />;
+  }
+  if (AUDIO_KINDS.has(card.kind)) {
+    return <AudioFileCard card={card} sessionId={sessionId} />;
   }
 
   const Icon = KIND_ICON[card.kind] ?? FileIcon;

@@ -27,7 +27,7 @@ private data class ToolGroup(val title: String, val items: List<Screen>)
 
 private val toolGroups = listOf(
     ToolGroup("智能助手", listOf(Screen.Memory, Screen.Knowledge, Screen.Skills)),
-    ToolGroup("自动化", listOf(Screen.Schedule)),
+    ToolGroup("自动化", listOf(Screen.Agenda, Screen.Schedule)),
     ToolGroup("资料", listOf(Screen.Docs)),
 )
 

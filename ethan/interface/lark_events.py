@@ -51,8 +51,24 @@ async def _event_loop(event_key: str) -> None:
 
     lark_cli = shutil.which("lark-cli")
     if not lark_cli:
-        logger.warning("[Lark] lark-cli not found — event listener not started")
-        return
+        # 镜像不再内置 lark-cli（插件化：由 plugin/channel 配置或此处自动补装）。
+        # npm 安装放后台线程跑，不阻塞 lifespan 端口绑定；幂等，多个 event key
+        # 并发触发由 lark_deps 的进程级 _INSTALL_LOCK 串行化。装不上仅本 listener 不工作。
+        from ethan.core.config import get_config as _gcfg
+        from ethan.interface.lark_deps import ensure_lark_deps
+        _lc = getattr(_gcfg(), "lark", None)
+        logger.info("[Lark] lark-cli not found — auto-installing (brew/npm)...")
+        status = await asyncio.to_thread(
+            ensure_lark_deps,
+            (_lc.app_id if _lc else "") or "",
+            (_lc.app_secret if _lc else "") or "",
+            triggered_by="serve",
+        )
+        lark_cli = shutil.which("lark-cli")
+        if not lark_cli:
+            detail = f": {status.last_error}" if status and status.last_error else ""
+            logger.error("[Lark] lark-cli auto-install failed%s — event listener not started", detail)
+            return
 
     from ethan.core.config import get_config
     cfg = get_config()

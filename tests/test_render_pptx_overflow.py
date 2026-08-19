@@ -559,3 +559,38 @@ def test_check_json_reports_missing_local_image(tmp_path):
     assert r.returncode == 1 and data["ok"] is False
     assert "image.not-found" in _codes(data["issues"])
     assert r.stderr == ""
+
+
+@pytest.mark.parametrize("installed_but_broken", [False, True])
+def test_dependency_bootstrap_force_reinstalls_only_broken_packages(
+    monkeypatch, tmp_path, installed_but_broken
+):
+    commands = []
+    monkeypatch.setattr(render_pptx, "_DEPS_MODS", ("pptx",))
+    monkeypatch.setattr(render_pptx, "_DEPS_MARKER", tmp_path / ".installed")
+    monkeypatch.setattr(render_pptx, "_try_import", lambda _mod: False)
+    monkeypatch.setattr(render_pptx, "_module_present", lambda _mod: installed_but_broken)
+    monkeypatch.setattr(render_pptx.subprocess, "check_call", lambda command: commands.append(command))
+
+    with pytest.raises(SystemExit) as exc_info:
+        render_pptx._ensure_pptx()
+
+    assert exc_info.value.code == 2
+    assert len(commands) == 1
+    command = commands[0]
+    assert ("--force-reinstall" in command) is installed_but_broken
+    assert ("--upgrade" in command) is installed_but_broken
+
+
+def test_module_present_treats_locator_failure_as_broken(monkeypatch):
+    def _raise_value_error(_mod):
+        raise ValueError("broken module spec")
+
+    monkeypatch.setattr(render_pptx.importlib.util, "find_spec", _raise_value_error)
+    assert render_pptx._module_present("pptx") is True
+
+    def _raise_module_not_found(_mod):
+        raise ModuleNotFoundError("not installed")
+
+    monkeypatch.setattr(render_pptx.importlib.util, "find_spec", _raise_module_not_found)
+    assert render_pptx._module_present("pptx") is False

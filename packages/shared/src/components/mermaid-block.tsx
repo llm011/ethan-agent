@@ -143,7 +143,7 @@ export function MermaidBlock({ code }: MermaidBlockProps) {
       )}
 
       <Lightbox
-        images={svgDataUrl ? [{ url: svgDataUrl, title: "Mermaid Diagram" }] : []}
+        images={svg ? [{ url: svgDataUrl, html: svg, title: "Mermaid Diagram" }] : []}
         index={0}
         open={zoomOpen}
         onOpenChange={setZoomOpen}

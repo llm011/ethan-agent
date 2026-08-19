@@ -7,6 +7,7 @@ export interface LightboxImage {
   url: string;
   title?: string;
   source?: string;
+  html?: string;
 }
 
 interface LightboxProps {
@@ -206,14 +207,22 @@ export function Lightbox({ images, index, open, onOpenChange, onIndexChange }: L
           onPointerCancel={handlePointerUp}
           onDoubleClick={handleDoubleClick}
         >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={current.url}
-            alt={current.title || ""}
-            draggable={false}
-            className="max-w-[90vw] max-h-[90vh] object-contain transition-transform duration-150"
-            style={{ transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)` }}
-          />
+          {current.html ? (
+            <div
+              dangerouslySetInnerHTML={{ __html: current.html }}
+              className="w-full h-full overflow-auto bg-white flex items-center justify-center p-6 transition-transform duration-150 [&>svg]:max-w-full [&>svg]:max-h-full [&>svg]:w-auto [&>svg]:h-auto"
+              style={{ transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)` }}
+            />
+          ) : (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={current.url}
+              alt={current.title || ""}
+              draggable={false}
+              className="max-w-[90vw] max-h-[90vh] object-contain transition-transform duration-150"
+              style={{ transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)` }}
+            />
+          )}
         </div>
 
         {/* 底部标题与来源 */}
