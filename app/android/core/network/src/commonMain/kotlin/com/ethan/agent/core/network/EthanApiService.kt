@@ -38,6 +38,7 @@ import com.ethan.agent.core.model.OnboardingCompleteRequest
 import com.ethan.agent.core.model.OnboardingCompleteResponse
 import com.ethan.agent.core.model.OnboardingStatus
 import com.ethan.agent.core.model.PollData
+import com.ethan.agent.core.model.PinnedSessionsResponse
 import com.ethan.agent.core.model.ProceduresResponse
 import com.ethan.agent.core.model.ProfileRequest
 import com.ethan.agent.core.model.ProfileResponse
@@ -71,6 +72,7 @@ import com.ethan.agent.core.model.InjectRequest
 import com.ethan.agent.core.model.InjectResponse
 import com.ethan.agent.core.model.InsightsByDateResponse
 import com.ethan.agent.core.model.InsightsListResponse
+import com.ethan.agent.core.model.InteractionValueRequest
 import com.ethan.agent.core.model.KnowledgeValidateRequest
 import com.ethan.agent.core.model.KnowledgeValidateResponse
 import com.ethan.agent.core.model.LarkDepsStatus
@@ -213,6 +215,23 @@ class EthanApiService(
         client.post(url("consent/$requestId")) { jsonBody(body) }.body()
 
     suspend fun poll(): PollData = client.get(url("poll")).body()
+
+    // ── Pin / 交互回传（ask_user / wait_for_user） ─────────────────────────
+
+    suspend fun pinSession(id: String): OkResponse =
+        client.post(url("sessions/$id/pin")).body()
+
+    suspend fun unpinSession(id: String): OkResponse =
+        client.delete(url("sessions/$id/pin")).body()
+
+    suspend fun getPinnedSessions(): PinnedSessionsResponse =
+        client.get(url("sessions/pinned")).body()
+
+    suspend fun respondAskUser(requestId: String, body: InteractionValueRequest): OkResponse =
+        client.post(url("ask-user/$requestId")) { jsonBody(body) }.body()
+
+    suspend fun respondWaitForUser(requestId: String, body: InteractionValueRequest): OkResponse =
+        client.post(url("wait-for-user/$requestId")) { jsonBody(body) }.body()
 
     // ── Settings ──────────────────────────────────────────────────────────
 
@@ -395,9 +414,6 @@ class EthanApiService(
 
     suspend fun patchAgenda(eventId: String, body: AgendaPatchRequest): AgendaEventResponse =
         client.patch(url("agenda/$eventId")) { jsonBody(body) }.body()
-
-    suspend fun completeAgenda(eventId: String): AgendaEventResponse =
-        client.post(url("agenda/$eventId/complete")).body()
 
     suspend fun deleteAgenda(eventId: String) {
         client.delete(url("agenda/$eventId"))
