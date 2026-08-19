@@ -7,6 +7,8 @@ import {
 } from "lucide-react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type { SearchResultCard } from "../chat/search-card-carousel";
 
 export interface SubStep {
@@ -465,7 +467,7 @@ function StepRow({ step, isLast, highlight, fallbackCards, onCancelTool }: { ste
               详情
             </button>
           )}
-          {step.duration_ms !== undefined && step.state !== "running" && (
+          {step.duration_ms != null && step.state !== "running" && (
             <span className="ml-auto text-xs text-muted-foreground/60 flex items-center gap-0.5 shrink-0">
               <Clock className="h-2.5 w-2.5" />
               {formatDuration(step.duration_ms)}
@@ -491,7 +493,7 @@ function StepRow({ step, isLast, highlight, fallbackCards, onCancelTool }: { ste
                     {sub.args && (
                       <ArgsPopover text={sub.args} maxW="max-w-[550px]" />
                     )}
-                    {sub.duration_ms !== undefined && sub.state !== "running" && (
+                    {sub.duration_ms != null && sub.state !== "running" && (
                       <span className="ml-auto text-xs text-muted-foreground/50 shrink-0">
                         {formatDuration(sub.duration_ms)}
                       </span>
@@ -528,9 +530,9 @@ function StepRow({ step, isLast, highlight, fallbackCards, onCancelTool }: { ste
             {step.thought && (
               <div className="px-3 py-2 border-b border-border/50">
                 <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">思考</div>
-                <p className="text-sm text-foreground/80 whitespace-pre-wrap leading-relaxed">
-                  {step.thought}
-                </p>
+                <div className="text-sm text-foreground/80 leading-relaxed prose prose-sm prose-neutral dark:prose-invert max-w-none">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{step.thought}</ReactMarkdown>
+                </div>
               </div>
             )}
             {step.result_detail && (
@@ -545,7 +547,11 @@ function StepRow({ step, isLast, highlight, fallbackCards, onCancelTool }: { ste
   );
 }
 
-export function ToolTimeline({ steps, defaultExpanded = false, highlightIndex, messageCards, onCancelTool }: ToolTimelineProps) {
+export function ToolTimeline({ steps: rawSteps, defaultExpanded = false, highlightIndex, messageCards, onCancelTool }: ToolTimelineProps) {
+  const steps = useMemo(() => {
+    if (onCancelTool || !rawSteps.some(s => s.state === "running")) return rawSteps;
+    return rawSteps.map(s => s.state === "running" ? { ...s, state: "cancelled" as const } : s);
+  }, [rawSteps, onCancelTool]);
   const hasHighlight = highlightIndex !== undefined;
   const [expanded, setExpanded] = useState(defaultExpanded || hasHighlight);
   const hasRunning = steps.some(s => s.state === "running");

@@ -378,6 +378,9 @@ async def _run_generation(
             consent.cancel_all()
         # 进度占位行：用户主动停止则就地更新成最终内容（含 tool_steps）+ [已停止] 标记，
         # 复用同一行；新 run 替换则删除占位行，不残留空壳。
+        for step in (collector.tool_steps or []):
+            if step.get("state") == "running":
+                step["state"] = "cancelled"
         if progress_msg_id and session_id:
             try:
                 if getattr(run, "stop_requested", False):
