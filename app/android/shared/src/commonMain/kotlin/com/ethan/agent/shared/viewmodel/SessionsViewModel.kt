@@ -30,9 +30,15 @@ data class SessionsUiState(
     val selectedSources: Set<String> = emptySet(),
     val unreadSessionIds: Set<String> = emptySet(),
 ) {
+    /** 置顶分组：pinned_at > 0，按置顶时间倒序 */
+    val pinnedSessions: List<SessionInfo>
+        get() = sessions.filter { it.pinnedAt > 0 }.sortedByDescending { it.pinnedAt }
+
+    /** 普通列表：排除置顶（置顶在顶部独立分组展示） */
     val filteredSessions: List<SessionInfo>
-        get() = if (selectedSources.isEmpty()) sessions
-        else sessions.filter { s -> selectedSources.contains(s.source ?: "") }
+        get() = (if (selectedSources.isEmpty()) sessions
+        else sessions.filter { s -> selectedSources.contains(s.source ?: "") })
+            .filter { it.pinnedAt == 0L }
 }
 
 class SessionsViewModel(
@@ -156,6 +162,33 @@ class SessionsViewModel(
     }
 
     fun cancelRename() { _state.update { it.copy(renameTarget = null) } }
+
+    /** 置顶/取消置顶：本地即时更新，下次轮询自动对齐服务端 */
+    fun togglePin(session: SessionInfo) {
+        viewModelScope.launch {
+            try {
+                if (session.pinnedAt > 0) {
+                    repository.unpinSession(session.id)
+                } else {
+                    repository.pinSession(session.id)
+                }
+                _state.update { s ->
+                    val nowSec = kotlinx.datetime.Clock.System.now().toEpochMilliseconds() / 1000
+                    s.copy(
+                        sessions = s.sessions.map {
+                            if (it.id == session.id) {
+                                it.copy(pinnedAt = if (session.pinnedAt > 0) 0L else nowSec)
+                            } else {
+                                it
+                            }
+                        },
+                    )
+                }
+            } catch (e: Exception) {
+                _state.update { it.copy(error = repository.friendlyError(e)) }
+            }
+        }
+    }
 
     fun deleteSession(id: String) {
         viewModelScope.launch {
