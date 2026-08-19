@@ -57,3 +57,13 @@ export async function deleteAnnotation(annoId: number): Promise<void> {
   });
   if (!res.ok) throw new Error("Failed to delete annotation");
 }
+
+/** 更新标注偏移（正文编辑后按 quote 重定位）。 */
+export async function updateAnnotationOffset(annoId: number, start: number, end: number): Promise<void> {
+  const res = await fetch(`${API_URL}/annotations/${annoId}`, {
+    method: "PATCH",
+    headers: { ...headers(), "Content-Type": "application/json" },
+    body: JSON.stringify({ start, end }),
+  });
+  if (!res.ok) throw new Error("Failed to update annotation offset");
+}

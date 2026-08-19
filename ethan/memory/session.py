@@ -630,6 +630,15 @@ class SessionStore:
         await self._db.execute("DELETE FROM messages WHERE id=?", (row_id,))
         await self._db.commit()
 
+    async def update_message_content(self, row_id: int, content: str) -> bool:
+        """按主键更新消息正文（阅读模式编辑用）。返回消息是否存在。"""
+        cursor = await self._db.execute(
+            "UPDATE messages SET content=? WHERE id=?",
+            (content, row_id),
+        )
+        await self._db.commit()
+        return cursor.rowcount > 0
+
     async def update_title(self, session_id: str, title: str) -> None:
         await self._db.execute(
             "UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?",

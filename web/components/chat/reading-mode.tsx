@@ -7,10 +7,12 @@ import {
   Bookmark as BookmarkIcon,
   MessageSquareText,
   Trash2,
+  Pencil,
+  Check,
 } from "lucide-react";
 import type { Message } from "@ethan/shared/chat/types";
 import type { Annotation, AnnotationColor, AnnotationType } from "@/lib/api";
-import { createAnnotation, deleteAnnotation } from "@/lib/api";
+import { createAnnotation, deleteAnnotation, updateAnnotationOffset, updateMessage } from "@/lib/api";
 import { MarkdownContent } from "./markdown";
 import { applyHighlights, getSelectionOffsets, type HighlightSpan } from "@/lib/highlight";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@ethan/shared/ui/tooltip";
@@ -19,8 +21,12 @@ interface ReadingModeProps {
   open: boolean;
   message: Message | null;
   annotations: Annotation[];
+  /** 编辑保存需要：定位会话 */
+  sessionId?: string;
   onClose: () => void;
   onChange: (next: Annotation[]) => void;
+  /** 编辑保存成功后回写正文（父组件更新 messages state） */
+  onEditContent?: (content: string) => void;
 }
 
 const HL_COLORS: { key: AnnotationColor; label: string; bg: string }[] = [
@@ -53,7 +59,7 @@ function formatTime(ts?: number): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-export function ReadingMode({ open, message, annotations, onClose, onChange }: ReadingModeProps) {
+export function ReadingMode({ open, message, annotations, sessionId, onClose, onChange, onEditContent }: ReadingModeProps) {
   const [local, setLocal] = useState<Annotation[]>(annotations);
   const [sel, setSel] = useState<{ start: number; end: number; text: string; top: number; left: number } | null>(null);
   const [noteMode, setNoteMode] = useState(false);
@@ -62,6 +68,14 @@ export function ReadingMode({ open, message, annotations, onClose, onChange }: R
   const [filter, setFilter] = useState<"all" | "bookmark">("all");
   const contentRef = useRef<HTMLDivElement>(null);
   const [hoverNote, setHoverNote] = useState<{text: string; top: number; left: number} | null>(null);
+  // 编辑态
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+  const localRef = useRef(local);
+  localRef.current = local;
+  // 保存后待重定位标记：等 message.content 更新并重新渲染完成，再按 quote 重算标注 offset
+  const pendingRelocateRef = useRef(false);
   const bookmarks = local.filter((a) => a.type === "bookmark");
   const shown = filter === "bookmark" ? bookmarks : local;
 
@@ -85,7 +99,7 @@ export function ReadingMode({ open, message, annotations, onClose, onChange }: R
   // 批注 hover tooltip：mark[data-note] 上悬浮即时展示
   useEffect(() => {
     const root = contentRef.current;
-    if (!open || !root) return;
+    if (!open || !root || editing) return;
     const onEnter = (e: Event) => {
       const mark = e.currentTarget as HTMLElement;
       const note = mark.dataset.note;
@@ -105,17 +119,80 @@ export function ReadingMode({ open, message, annotations, onClose, onChange }: R
         m.removeEventListener("mouseleave", onLeave);
       });
     };
-  }, [open, local, message?.content]);
+  }, [open, local, message?.content, editing]);
 
-  // Esc 关闭
+  // 正文编辑保存后：等新内容渲染完成（下一帧），按 quote 在新纯文本中重新定位标注。
+  // 定位不到的（原文被删改）删除；成功重定位的同步更新后端 offset。
+  useEffect(() => {
+    if (!pendingRelocateRef.current || editing) return;
+    const raf = requestAnimationFrame(() => {
+      pendingRelocateRef.current = false;
+      const root = contentRef.current;
+      if (!root) return;
+      const text = root.textContent ?? "";
+      const next: Annotation[] = [];
+      for (const a of localRef.current) {
+        const quote = a.quote ?? "";
+        const idx = quote ? text.indexOf(quote) : -1;
+        if (idx < 0) {
+          deleteAnnotation(a.id).catch(() => {});
+          continue;
+        }
+        if (idx !== a.start || idx + quote.length !== a.end) {
+          updateAnnotationOffset(a.id, idx, idx + quote.length).catch(() => {});
+          next.push({ ...a, start: idx, end: idx + quote.length });
+        } else {
+          next.push(a);
+        }
+      }
+      setLocal(next);
+      onChange(next);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [message?.content, editing]);
+
+  // Esc：编辑态先退出编辑（防误触丢草稿），非编辑态关闭阅读模式
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        if (editing) {
+          setEditing(false);
+          setSel(null);
+        } else {
+          onClose();
+        }
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open, onClose, editing]);
+
+  const startEdit = () => {
+    setDraft(message?.content ?? "");
+    setEditing(true);
+    setSel(null);
+    setActiveId(null);
+  };
+
+  const doSave = async () => {
+    if (!message || message.id == null || saving) return;
+    if (draft === message.content) {
+      setEditing(false);
+      return;
+    }
+    setSaving(true);
+    try {
+      await updateMessage(sessionId ?? "", message.id, draft);
+      onEditContent?.(draft);
+      pendingRelocateRef.current = true;
+      setEditing(false);
+    } catch {
+      // 保存失败停留在编辑态，让用户重试或取消
+    } finally {
+      setSaving(false);
+    }
+  };
 
   if (!open || !message) return null;
 
@@ -218,22 +295,74 @@ export function ReadingMode({ open, message, annotations, onClose, onChange }: R
           <TooltipContent side="bottom">退出阅读模式 (Esc)</TooltipContent>
         </Tooltip>
         <div className="text-sm font-medium">阅读模式</div>
-        {message.created_at && (
+        {message.created_at && !editing && (
           <div className="text-xs text-muted-foreground">{formatTime(message.created_at)}</div>
         )}
-        <div className="ml-auto flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-0.5 text-xs text-muted-foreground">
-          <span>{local.length} 处标注</span>
-          {bookmarks.length > 0 && (
-            <>
-              <span className="inline-block h-3 w-px bg-muted-foreground/30" />
-              <BookmarkIcon className="h-3 w-3 text-pink-500" />
-              <span>{bookmarks.length}</span>
-            </>
-          )}
-        </div>
+        {editing ? (
+          <div className="ml-auto flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">编辑正文（Markdown），保存后已有标注按原文自动重定位</span>
+            <button
+              onClick={() => { setEditing(false); setSel(null); }}
+              disabled={saving}
+              className="rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted disabled:opacity-40"
+            >
+              取消
+            </button>
+            <button
+              onClick={doSave}
+              disabled={saving}
+              className="flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-xs text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
+            >
+              <Check className="h-3 w-3" /> {saving ? "保存中…" : "保存"}
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="ml-auto flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-0.5 text-xs text-muted-foreground">
+              <span>{local.length} 处标注</span>
+              {bookmarks.length > 0 && (
+                <>
+                  <span className="inline-block h-3 w-px bg-muted-foreground/30" />
+                  <BookmarkIcon className="h-3 w-3 text-pink-500" />
+                  <span>{bookmarks.length}</span>
+                </>
+              )}
+            </div>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    onClick={startEdit}
+                    className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"
+                  />
+                }
+              >
+                <Pencil className="h-4 w-4" />
+              </TooltipTrigger>
+              <TooltipContent side="bottom">编辑正文</TooltipContent>
+            </Tooltip>
+          </>
+        )}
       </div>
 
       <div className="flex min-h-0 flex-1">
+        {editing ? (
+          /* 编辑态：与正文同布局的 textarea */
+          <div className="flex-1 overflow-y-auto px-4 py-10">
+            <textarea
+              autoFocus
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) doSave();
+              }}
+              spellCheck={false}
+              className="mx-auto block h-full min-h-[60vh] w-full max-w-[720px] resize-none rounded-md border border-border bg-background p-4 text-sm leading-7 outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              placeholder="编辑正文内容（Markdown）…"
+            />
+          </div>
+        ) : (
+        <>
         {/* 正文（可滚动、居中、舒适行宽） */}
         <div
           className="flex-1 overflow-y-auto px-4 py-10"
@@ -315,10 +444,12 @@ export function ReadingMode({ open, message, annotations, onClose, onChange }: R
             </div>
           )}
         </aside>
+        </>
+        )}
       </div>
 
       {/* 选区工具条（fixed 定位到选区下方） */}
-      {sel && (
+      {sel && !editing && (
         <div
           className="fixed z-[70] flex -translate-x-1/2 items-center gap-1 rounded-lg border border-border bg-popover p-1 shadow-lg"
           style={{ top: sel.top, left: sel.left }}

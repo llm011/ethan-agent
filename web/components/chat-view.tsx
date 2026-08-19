@@ -31,6 +31,7 @@ import {
   unpinSession,
   type Annotation,
 } from "@/lib/api";
+import { updateSessionDetail } from "@/lib/session-db";
 import { ReadingMode } from "@/components/chat/reading-mode";
 import { ShareMode } from "@/components/chat/share-mode";
 import type { Message, Usage, Quote, PendingFile } from "@ethan/shared/chat/types";
@@ -167,6 +168,18 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     const mid = readingMessage.id;
     setAnnotationsByMessage((prev) => ({ ...prev, [mid]: next }));
   };
+
+  // 阅读模式编辑正文回写：更新内存 state + IndexedDB 离线缓存里的同一条消息
+  const handleEditContent = useCallback((mid: number, content: string) => {
+    setMessages(prev => prev.map(m => (m.id === mid ? { ...m, content } : m)));
+    setReadingMessage(prev => (prev && prev.id === mid ? { ...prev, content } : prev));
+    if (activeSession) {
+      updateSessionDetail(activeSession, (detail) => ({
+        ...detail,
+        messages: detail.messages.map(m => (m.id === mid ? { ...m, content } : m)),
+      })).catch(() => {});
+    }
+  }, [activeSession]);
 
   const handleShare = useCallback((msg: Message) => {
     const key = msg.id != null ? `id:${msg.id}` : `idx:${messagesRef.current.indexOf(msg)}`;
@@ -711,8 +724,10 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         open={readingMessage != null}
         message={readingMessage}
         annotations={readingMessage?.id != null ? (annotationsByMessage[readingMessage.id] ?? []) : []}
+        sessionId={activeSession ?? undefined}
         onClose={() => setReadingMessage(null)}
         onChange={handleAnnotationsChange}
+        onEditContent={readingMessage?.id != null ? (content) => handleEditContent(readingMessage.id!, content) : undefined}
       />
 
       <ShareMode

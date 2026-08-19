@@ -186,6 +186,12 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     setAnnotationsByMessage((prev) => ({ ...prev, [mid]: next }));
   };
 
+  // 阅读模式编辑正文回写：更新内存 state（desktop 无离线缓存层）
+  const handleEditContent = useCallback((mid: number, content: string) => {
+    setMessages(prev => prev.map(m => (m.id === mid ? { ...m, content } : m)));
+    setReadingMessage(prev => (prev && prev.id === mid ? { ...prev, content } : prev));
+  }, []);
+
   const handleShare = useCallback((msg: Message) => {
     const key = msg.id != null ? `id:${msg.id}` : `idx:${messagesRef.current.indexOf(msg)}`;
     setShareDefaultKey(key);
@@ -757,8 +763,10 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         open={readingMessage != null}
         message={readingMessage}
         annotations={readingMessage?.id != null ? (annotationsByMessage[readingMessage.id] ?? []) : []}
+        sessionId={activeSession ?? undefined}
         onClose={() => setReadingMessage(null)}
         onChange={handleAnnotationsChange}
+        onEditContent={readingMessage?.id != null ? (content) => handleEditContent(readingMessage.id!, content) : undefined}
       />
 
       <ShareMode

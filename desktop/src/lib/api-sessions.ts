@@ -153,6 +153,16 @@ export async function deleteMessage(sessionId: string, messageId: number): Promi
   if (!res.ok) throw new Error("Delete message failed");
 }
 
+/** 编辑消息正文（阅读模式编辑）。后续对话上下文使用编辑后的版本。 */
+export async function updateMessage(sessionId: string, messageId: number, content: string): Promise<void> {
+  const res = await fetch(`${getApiUrl()}/sessions/${sessionId}/messages/${messageId}`, {
+    method: "PATCH",
+    headers: { ...headers(), "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+  if (!res.ok) throw new Error("Update message failed");
+}
+
 export async function fetchMessageIntermediate(sessionId: string, messageId: number): Promise<string> {
   const res = await fetch(`${getApiUrl()}/sessions/${sessionId}/messages/${messageId}/intermediate`, { headers: headers() });
   if (!res.ok) {
