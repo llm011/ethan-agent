@@ -2,6 +2,7 @@ package com.ethan.agent.shared.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.ethan.agent.core.model.AskUserInfo
 import com.ethan.agent.core.model.ChatMessage
 import com.ethan.agent.core.model.ChatStreamEvent
 import com.ethan.agent.core.model.ConsentInfo
@@ -11,6 +12,7 @@ import com.ethan.agent.core.model.OnboardingStatus
 import com.ethan.agent.core.model.Quote
 import com.ethan.agent.core.model.ToolStep
 import com.ethan.agent.core.model.Usage
+import com.ethan.agent.core.model.WaitForUserInfo
 import com.ethan.agent.shared.EthanRepository
 import com.ethan.agent.shared.UiMessage
 import com.ethan.agent.shared.UiMessageImage
@@ -24,6 +26,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 enum class ConnectionState { Idle, Streaming, Reconnecting, Disconnected }
 
@@ -54,6 +57,12 @@ data class ChatUiState(
     val unreadCount: Int = 0,
     val error: String? = null,
     val consent: ConsentInfo? = null,
+    val askUser: AskUserInfo? = null,
+    /** ask_user 卡片剩余秒数（倒计时，超时自动走 default） */
+    val askUserRemaining: Int = 0,
+    val waitForUser: WaitForUserInfo? = null,
+    /** wait_for_user 卡片剩余秒数（倒计时，超时自动回传 "timeout"） */
+    val waitForUserRemaining: Int = 0,
     val quote: Quote? = null,
     val onboarding: OnboardingStatus? = null,
     val showOnboarding: Boolean = false,
@@ -68,6 +77,8 @@ class ChatViewModel(
     private val _state = MutableStateFlow(ChatUiState())
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
     private var streamJob: Job? = null
+    private var askUserCountdownJob: Job? = null
+    private var waitForUserCountdownJob: Job? = null
 
     init {
         loadInitial(sessionId)
@@ -180,6 +191,22 @@ class ChatViewModel(
     }
 
     fun onInputChange(text: String) { _state.update { it.copy(inputText = text) } }
+
+    /**
+     * 消费跨页面（如 Agenda「拆解该安排」）带来的自动发送 prompt。
+     * 等模型就绪后再发送（新会话 isLoading 立即为 false，selectedModel 依赖缓存流；2s 兜底防卡死）。
+     */
+    fun autoSendPrompt(prompt: String) {
+        if (prompt.isBlank()) return
+        viewModelScope.launch {
+            withTimeoutOrNull(2_000) {
+                _state.first { !it.isLoading && it.selectedModel != null }
+            }
+            _state.update { it.copy(inputText = prompt) }
+            sendMessage()
+        }
+    }
+
     fun onModelSelected(model: String) { _state.update { it.copy(selectedModel = model) } }
     fun onModeSelected(mode: String) { _state.update { it.copy(selectedMode = mode) } }
     fun setQuote(quote: Quote?) { _state.update { it.copy(quote = quote) } }
@@ -404,6 +431,30 @@ class ChatViewModel(
                             )
                         }
                     }
+                    event.askUserRequest == true -> {
+                        startAskUserCountdown(
+                            AskUserInfo(
+                                requestId = event.requestId ?: "",
+                                question = event.question ?: "",
+                                options = event.options ?: emptyList(),
+                                default = event.default ?: "",
+                                timeout = event.timeout ?: 20,
+                            ),
+                        )
+                    }
+                    event.waitForUserRequest == true -> {
+                        startWaitForUserCountdown(
+                            WaitForUserInfo(
+                                requestId = event.requestId ?: "",
+                                prompt = event.prompt ?: "",
+                                inputType = event.inputType ?: "confirm",
+                                placeholder = event.placeholder ?: "",
+                                confirmLabel = event.confirmLabel ?: "已完成",
+                                cancelLabel = event.cancelLabel ?: "取消",
+                                timeout = event.timeout ?: 300,
+                            ),
+                        )
+                    }
                     event.content != null -> {
                         if (firstContentMs == null) {
                             firstContentMs = Clock.System.now().toEpochMilliseconds()
@@ -448,13 +499,28 @@ class ChatViewModel(
             val generationDurationMs = firstContentMs?.let { Clock.System.now().toEpochMilliseconds() - it }
             _state.update { s ->
                 val msgs = s.messages.toMutableList()
-                if (assistantIndex < msgs.size) msgs[assistantIndex] = msgs[assistantIndex].copy(
-                    isStreaming = false,
-                    usage = usage,
-                    ttfbMs = ttfbMs,
-                    totalDurationMs = totalDurationMs,
-                    generationDurationMs = generationDurationMs,
-                )
+                if (assistantIndex < msgs.size) {
+                    // 防御：流结束/中止时仍处于 running/start 的步骤标记为 cancelled（与后端保存逻辑对齐）
+                    val sanitizedSteps = msgs[assistantIndex].toolSteps.map { step ->
+                        val newState = if (step.state == "running" || step.state == "start") "cancelled" else step.state
+                        val newSubs = step.subSteps?.map { sub ->
+                            if (sub.state == "running" || sub.state == "start") sub.copy(state = "cancelled") else sub
+                        }
+                        if (newState != step.state || newSubs !== step.subSteps) {
+                            step.copy(state = newState, subSteps = newSubs)
+                        } else {
+                            step
+                        }
+                    }
+                    msgs[assistantIndex] = msgs[assistantIndex].copy(
+                        isStreaming = false,
+                        toolSteps = sanitizedSteps,
+                        usage = usage,
+                        ttfbMs = ttfbMs,
+                        totalDurationMs = totalDurationMs,
+                        generationDurationMs = generationDurationMs,
+                    )
+                }
                 s.copy(messages = msgs, isStreaming = false)
             }
         }
@@ -523,6 +589,77 @@ class ChatViewModel(
     }
 
     fun dismissConsent() { _state.update { it.copy(consent = null) } }
+
+    // ── ask_user / wait_for_user 交互卡片 ──────────────────────────────────
+
+    /** 收到 ask_user 事件：设置卡片并启动倒计时（超时自动回传 default）。 */
+    private fun startAskUserCountdown(info: AskUserInfo) {
+        askUserCountdownJob?.cancel()
+        _state.update { it.copy(askUser = info, askUserRemaining = info.timeout) }
+        askUserCountdownJob = viewModelScope.launch {
+            var remaining = info.timeout
+            while (remaining > 0) {
+                kotlinx.coroutines.delay(1000)
+                // 卡片已被响应/替换则停止
+                if (_state.value.askUser?.requestId != info.requestId) return@launch
+                remaining -= 1
+                _state.update { it.copy(askUserRemaining = remaining) }
+            }
+            if (_state.value.askUser?.requestId == info.requestId) {
+                respondAskUser(info.default)
+            }
+        }
+    }
+
+    /** 收到 wait_for_user 事件：设置卡片并启动倒计时（超时自动回传 "timeout"）。 */
+    private fun startWaitForUserCountdown(info: WaitForUserInfo) {
+        waitForUserCountdownJob?.cancel()
+        _state.update { it.copy(waitForUser = info, waitForUserRemaining = info.timeout) }
+        waitForUserCountdownJob = viewModelScope.launch {
+            var remaining = info.timeout
+            while (remaining > 0) {
+                kotlinx.coroutines.delay(1000)
+                if (_state.value.waitForUser?.requestId != info.requestId) return@launch
+                remaining -= 1
+                _state.update { it.copy(waitForUserRemaining = remaining) }
+            }
+            if (_state.value.waitForUser?.requestId == info.requestId) {
+                respondWaitForUser("timeout")
+            }
+        }
+    }
+
+    /** ask_user 卡片回传选择；失败保留卡片可重试（agent 在后端一直等到超时）。 */
+    fun respondAskUser(value: String) {
+        val askUser = _state.value.askUser ?: return
+        askUserCountdownJob?.cancel()
+        viewModelScope.launch {
+            try {
+                repository.respondAskUser(askUser.requestId, value)
+                if (_state.value.askUser?.requestId == askUser.requestId) {
+                    _state.update { it.copy(askUser = null) }
+                }
+            } catch (e: Exception) {
+                _state.update { it.copy(error = "选择回传失败，请重试：${repository.friendlyError(e)}") }
+            }
+        }
+    }
+
+    /** wait_for_user 卡片回传："done" / "cancel" / 用户文本 / "timeout"。 */
+    fun respondWaitForUser(value: String) {
+        val waitForUser = _state.value.waitForUser ?: return
+        waitForUserCountdownJob?.cancel()
+        viewModelScope.launch {
+            try {
+                repository.respondWaitForUser(waitForUser.requestId, value)
+                if (_state.value.waitForUser?.requestId == waitForUser.requestId) {
+                    _state.update { it.copy(waitForUser = null) }
+                }
+            } catch (e: Exception) {
+                _state.update { it.copy(error = "回传失败，请重试：${repository.friendlyError(e)}") }
+            }
+        }
+    }
 
     fun uploadAttachment(data: ByteArray, filename: String) {
         viewModelScope.launch {
