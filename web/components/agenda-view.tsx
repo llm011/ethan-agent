@@ -407,7 +407,7 @@ function buildBreakdownPrompt(ev: AgendaEvent): string {
   if (ev.note) lines.push(`【描述】${ev.note}`);
   lines.push(
     "",
-    "请从我的知识库（knowledge_search / knowledge_read）中收集整理与这个安排相关的资料：",
+    "请总结并从我的知识库中收集整理与这个安排相关的资料：",
     "1. 汇总相关笔记和资料的要点；",
     "2. 相关资料如有链接，用 markdown 链接格式列出；",
     "3. 最后给出一份简短的行动指引（分步骤），帮我快速上手这件事。"
