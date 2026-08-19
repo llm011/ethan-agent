@@ -42,6 +42,21 @@ function formatTime(ts?: number): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+/** 正文编辑后按 quote 重定位 offset：
+ * 1. 原位置仍是 quote（该处未被编辑影响）→ 保持不动；
+ * 2. 重复文本歧义 → 在原位置前后就近取最近的匹配，而非从头 indexOf；
+ * 3. 找不到（原文被删改）→ 返回 -1，调用方删除该标注。 */
+function locateQuote(text: string, quote: string, prevStart: number): number {
+  if (!quote) return -1;
+  if (text.startsWith(quote, prevStart)) return prevStart;
+  if (!text.includes(quote)) return -1;
+  const fwd = text.indexOf(quote, prevStart);
+  const bwd = prevStart > 0 ? text.lastIndexOf(quote, prevStart - 1) : -1;
+  if (fwd < 0) return bwd;
+  if (bwd < 0) return fwd;
+  return fwd - prevStart <= prevStart - bwd ? fwd : bwd;
+}
+
 export function ReadingMode({ open, message, annotations, sessionId, onClose, onChange, onEditContent }: ReadingModeProps) {
   const [local, setLocal] = useState<Annotation[]>(annotations);
   const [sel, setSel] = useState<{ start: number; end: number; text: string; top: number; left: number } | null>(null);
@@ -65,8 +80,10 @@ export function ReadingMode({ open, message, annotations, sessionId, onClose, on
   // 把标注画进正文（阅读模式用全强度）。
   // 注意：local 的初始值即打开时传入的 annotations；切换不同消息由父组件用
   // key={message.id} 触发整体重挂载，从而拿到新消息的标注重置，无需在 effect 里 setState。
+  // pendingRelocateRef 为 true（编辑已保存、待重定位）时跳过：避免用旧 offset 在
+  // 新文本上画出错位高亮，等重定位完成后由 local 变化触发重画。
   useEffect(() => {
-    if (open && contentRef.current) {
+    if (open && contentRef.current && !pendingRelocateRef.current) {
       const spans: HighlightSpan[] = local.map((a) => ({
         id: a.id,
         type: a.type,
@@ -105,7 +122,8 @@ export function ReadingMode({ open, message, annotations, sessionId, onClose, on
   }, [open, local, message?.content, editing]);
 
   // 正文编辑保存后：等新内容渲染完成（下一帧），按 quote 在新纯文本中重新定位标注。
-  // 定位不到的（原文被删改）删除；成功重定位的同步更新后端 offset。
+  // 原位置优先、就近匹配（防重复文本歧义）；定位不到的（原文被删改）删除；
+  // 成功重定位的同步更新后端 offset。
   useEffect(() => {
     if (!pendingRelocateRef.current || editing) return;
     const raf = requestAnimationFrame(() => {
@@ -116,7 +134,7 @@ export function ReadingMode({ open, message, annotations, sessionId, onClose, on
       const next: Annotation[] = [];
       for (const a of localRef.current) {
         const quote = a.quote ?? "";
-        const idx = quote ? text.indexOf(quote) : -1;
+        const idx = locateQuote(text, quote, a.start);
         if (idx < 0) {
           deleteAnnotation(a.id).catch(() => {});
           continue;
