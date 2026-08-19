@@ -46,6 +46,9 @@ import { placeholderTitle, mapDetailMessages, isFirstQuerySignificant } from "@/
 import { consumeStream, type ConsumeStreamActions } from "@/components/chat/use-chat-stream";
 import { handleCommand } from "@/components/chat/chat-commands";
 import { useInputStore } from "@/components/chat/use-input-store";
+import { usePreview } from "@/components/preview-panel/preview-context";
+import { PreviewPanel, getStoredPanelSize, storePanelSize } from "@/components/preview-panel/preview-panel";
+import { ResizeHandle } from "@/components/preview-panel/resize-handle";
 
 interface ChatViewProps {
   initialSessionId?: string;
@@ -100,6 +103,28 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const inputStore = useInputStore();
   const inputStoreRef = useRef(inputStore);
   inputStoreRef.current = inputStore;
+
+  const preview = usePreview();
+  const previewOpen = !!preview.file;
+  const panelWidthRef = useRef(getStoredPanelSize());
+  const [panelWidth, setPanelWidth] = useState(() => getStoredPanelSize());
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const handleResize = useCallback((deltaX: number) => {
+    const container = containerRef.current;
+    if (!container) return;
+    const totalWidth = container.offsetWidth;
+    const newPct = Math.max(20, Math.min(60, panelWidthRef.current + (-deltaX / totalWidth) * 100));
+    setPanelWidth(newPct);
+  }, []);
+
+  const handleResizeEnd = useCallback(() => {
+    setPanelWidth((current) => {
+      panelWidthRef.current = current;
+      storePanelSize(current);
+      return current;
+    });
+  }, []);
 
   const fetchAnnotationsFor = async (msgs: Message[]) => {
     const ids = msgs.filter((m) => m.role === "assistant" && m.id != null).map((m) => m.id as number);
@@ -229,6 +254,14 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
   // Load session when route param changes
   useEffect(() => {
+    if (justFinishedRef.current === initialSessionId) {
+      justFinishedRef.current = null;
+      return;
+    }
+
+    streamAbortRef.current?.abort();
+    streamAbortRef.current = null;
+
     if (!initialSessionId) {
       // 切换到新会话 — 保存当前输入并切换状态机
       inputStore.switchTo(null, inputRef.current?.value);
@@ -251,11 +284,6 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     }
 
     if (initialSessionId === activeSession && streaming) return;
-
-    if (justFinishedRef.current === initialSessionId) {
-      justFinishedRef.current = null;
-      return;
-    }
 
     // 切换到目标会话 — 保存当前输入并恢复目标会话的输入状态
     inputStore.switchTo(initialSessionId, inputRef.current?.value);
@@ -327,6 +355,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         if (detail.active_run) {
           setStreaming(true);
           const resumeAc = new AbortController();
+          streamAbortRef.current = resumeAc;
           const stream = await streamResume(initialSessionId, resumeAc.signal).catch(() => null);
           if (cancelled) { resumeAc.abort(); return; }
           if (stream) {
@@ -443,7 +472,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
   const handleSend = async (text: string) => {
     if (!text.trim() && pendingFiles.length === 0) return;
-    if (streaming) return;
+    // 用 ref 读取最新值，避免 state 批处理延迟导致新会话被旧 streaming=true 拦截
+    if (streamingRef.current) return;
 
     const trimmed = text.trim();
     const isBtw = trimmed.toLowerCase().startsWith("/btw ");
@@ -461,22 +491,38 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
     let sessionId = activeSession;
     if (!sessionId) {
-      const s = await createSession(selectedModel, mode, "desktop");
-      sessionId = s.id;
-      setActiveSession(s.id);
-      const pTitle = placeholderTitle(text);
-      setSessionTitle(pTitle);
-      window.dispatchEvent(new CustomEvent("session:title-updated", {
-        detail: { sessionId: s.id, title: pTitle }
-      }));
-      // 首轮：如果 query 信息量足够，同时 fire-and-forget 把占位标题写入后端，
-      // 防止 3s 会话列表轮询把本地标题覆盖回"新对话"（createSession 返回"新对话"与后端
-      // chat.py init_title 之间存在竞态）。
-      if (isFirstQuerySignificant(text) && pTitle && pTitle !== "新对话") {
-        renameSession(s.id, pTitle).catch(() => { /* 失败静默忽略，后端稍后会补 */ });
+      if (initialSessionId) {
+        sessionId = initialSessionId;
+        justFinishedRef.current = initialSessionId;
+        setActiveSession(initialSessionId);
+        setLoadingSession(false);
+      } else {
+        try {
+          const s = await createSession(selectedModel, mode, "desktop");
+          sessionId = s.id;
+          setActiveSession(s.id);
+          const pTitle = placeholderTitle(text);
+          setSessionTitle(pTitle);
+          window.dispatchEvent(new CustomEvent("session:title-updated", {
+            detail: { sessionId: s.id, title: pTitle }
+          }));
+          // 首轮：如果 query 信息量足够，同时 fire-and-forget 把占位标题写入后端，
+          // 防止 3s 会话列表轮询把本地标题覆盖回"新对话"（createSession 返回"新对话"与后端
+          // chat.py init_title 之间存在竞态）。
+          if (isFirstQuerySignificant(text) && pTitle && pTitle !== "新对话") {
+            renameSession(s.id, pTitle).catch(() => { /* 失败静默忽略，后端稍后会补 */ });
+          }
+          justFinishedRef.current = s.id;
+          window.history.replaceState(null, "", `/chat/${s.id}/`);
+        } catch (e) {
+          setMessages(prev => [...prev, {
+            role: "assistant",
+            content: `⚠️ 创建会话失败：${e instanceof Error ? e.message : "未知错误"}\n\n请重试，或检查后端服务是否正常。`,
+            created_at: Date.now() / 1000,
+          }]);
+          return;
+        }
       }
-      justFinishedRef.current = s.id;
-      window.history.replaceState(null, "", `/chat/${s.id}/`);
     }
     let content = isBtw ? (btwQuestion ?? text) : text;
     if (isReview) {
@@ -559,7 +605,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   handleSendRef.current = handleSend;
 
   return (
-    <div className="flex flex-col flex-1 min-h-0">
+    <div ref={containerRef} className="flex flex-1 min-h-0">
+      <div className="flex flex-col flex-1 min-w-0 min-h-0">
       <ChatHeader
         sessionId={activeSession}
         title={sessionTitle}
@@ -738,6 +785,16 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           onQueueReorder={inputStore.reorderQueue}
         />
       </div>
+    </div>
+
+      {previewOpen && (
+        <>
+          <ResizeHandle onResize={handleResize} onResizeEnd={handleResizeEnd} />
+          <div className="shrink-0 h-full overflow-hidden" style={{ width: `${panelWidth}%` }}>
+            <PreviewPanel />
+          </div>
+        </>
+      )}
     </div>
   );
 }
