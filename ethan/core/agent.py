@@ -38,7 +38,7 @@ _IMAGE_ERROR_PATTERNS = (
     "max allowed size",
     "图片过大",
     "图片尺寸",
-    "unknown variant",   # non-VLM 模型拒绝 image_url content block
+    "unknown variant",  # non-VLM 模型拒绝 image_url content block
     "unknown variant `image_url`",  # image_url 反序列化失败（精确匹配反序列化错误）
     "image_url, expected",
     # Anthropic 协议中转网关（如 Console Go）校验失败格式
@@ -124,20 +124,14 @@ def _empty_reply_fallback_text(reason: str, tool_call_count: int) -> str:
             return "模型多次返回空回复，未能生成最终回复。可能上下文过大或模型异常，请重试。"
         return "任务执行完毕但未生成回复。可能上下文过大或模型异常，请重试。"
     if reason == "varied":
-        return (
-            f"已经连续执行了 {n} 轮批量操作，先到这里。"
-            "你可以看看当前效果，需要继续的话告诉我。"
-        )
+        return f"已经连续执行了 {n} 轮批量操作，先到这里。你可以看看当前效果，需要继续的话告诉我。"
     if reason == "stuck":
         return (
             f"在当前任务上尝试了多种策略仍未突破，未能生成最终回复。已执行 {n} 轮工具调用。\n\n"
             "建议：检查工具调用是否有权限/网络问题，或拆分任务重试。"
         )
     if reason == "nudge_exhausted":
-        return (
-            f"模型多次返回空回复，未能生成最终回复。已执行 {n} 轮工具调用。\n\n"
-            "建议：精简上下文后重试，或拆分任务。"
-        )
+        return f"模型多次返回空回复，未能生成最终回复。已执行 {n} 轮工具调用。\n\n建议：精简上下文后重试，或拆分任务。"
     # finalize（max_iters 达限）——唯一提步数限制的原因
     return f"已达到最大执行步数限制。任务执行了 {n} 轮工具调用，未能生成最终回复。"
 
@@ -170,6 +164,7 @@ class Agent:
     ):
         from ethan.core.context import set_user_id
         from ethan.core.paths import user_procedures_path
+
         config = get_config()
         if user_id:
             set_user_id(user_id)
@@ -203,6 +198,7 @@ class Agent:
     def _load_system_files(self) -> None:
         """启动时一次性读入 system 目录下的 md 文件，避免每次对话都做磁盘 I/O。"""
         from ethan.core.paths import user_profile_path
+
         cfg = get_config()
         workspace = cfg.defaults.workspace
         # system/*.md 全局共享（ethan 角色定义）；user_profile.md 按 profile 隔离
@@ -226,14 +222,13 @@ class Agent:
         """读取 APScheduler SQLite 数据库，返回当前活跃定时任务摘要（不需要启动 scheduler）。"""
         import datetime as dt
         import sqlite3
+
         db_path = Path(workspace) / "scheduler.db"
         if not db_path.exists():
             return ""
         try:
             con = sqlite3.connect(str(db_path))
-            rows = con.execute(
-                "SELECT id, next_run_time, job_state FROM apscheduler_jobs"
-            ).fetchall()
+            rows = con.execute("SELECT id, next_run_time, job_state FROM apscheduler_jobs").fetchall()
             con.close()
             if not rows:
                 return ""
@@ -243,19 +238,22 @@ class Agent:
                 if next_run_ts:
                     try:
                         from ethan.core.timezone import get_local_timezone
-                        next_run = dt.datetime.fromtimestamp(next_run_ts, get_local_timezone()).strftime("%Y-%m-%d %H:%M")
+
+                        next_run = dt.datetime.fromtimestamp(next_run_ts, get_local_timezone()).strftime(
+                            "%Y-%m-%d %H:%M"
+                        )
                     except Exception:
                         pass
                 # Extract prompt from kwargs if available
                 prompt = ""
                 try:
-                    state = __import__('pickle').loads(job_state_blob)
+                    state = __import__("pickle").loads(job_state_blob)
                     prompt = state.get("kwargs", {}).get("prompt", "")[:60]
                 except Exception:
                     pass
                 line = f"- {job_id}: next={next_run}"
                 if prompt:
-                    line += f", task=\"{prompt}\""
+                    line += f', task="{prompt}"'
                 lines.append(line)
             return "\n".join(lines)
         except Exception:
@@ -277,6 +275,7 @@ class Agent:
         candidates: list[Path] = []
         try:
             from ethan.core.paths import user_skills_dir
+
             base = user_skills_dir()
             for name in skill_names:
                 candidates.append(base / name / "SKILL.md")
@@ -303,6 +302,7 @@ class Agent:
         措辞保持通用（不出现任何具体人格名），具体人格由 skill 正文自己声明。
         """
         from ethan.core.modes import resolve_mode
+
         mode = resolve_mode(self._mode)
         if not mode.persona_skills:
             return None
@@ -324,6 +324,7 @@ class Agent:
         用于「法律专家」这类工具型模式——确保问「你是谁」时回答专业身份，而非默认日常人设。
         """
         from ethan.core.modes import resolve_mode
+
         mode = resolve_mode(self._mode)
         if not mode.identity:
             return None
@@ -348,6 +349,7 @@ class Agent:
         只在该模式会话的**前 2 个用户回合**注入，避免装好前/装不上时每条消息都唠叨。
         """
         from ethan.core.modes import resolve_mode
+
         mode = resolve_mode(self._mode)
         if not mode.requires_skill or not self._skills:
             return None
@@ -364,7 +366,7 @@ class Agent:
             f"[CRITICAL] 用户已切换到「{mode.label}」模式，但依赖技能 `{mode.requires_skill}` 尚未安装。"
             "用户主动切到本模式即视为同意安装，请按以下步骤自动完成，不要再反问要不要装：\n"
             f"1. 先用一句话告知：正在为「{mode.label}」模式安装依赖技能，请稍候。\n"
-            f"2. 立即调用 install_skill(source=\"{src}\") 安装（无需重启，安装后下次对话即生效）。\n"
+            f'2. 立即调用 install_skill(source="{src}") 安装（无需重启，安装后下次对话即生效）。\n'
             f"3. 安装成功：简短告知已就绪，并继续回答用户当前的问题。\n"
             f"4. 安装失败（如网络/代理不通）：明确说明原因，并提示用户可在命令行手动运行 "
             f"`ethan skill add {alias}` 后重试。\n"
@@ -433,6 +435,7 @@ class Agent:
         # 从缓存读取，避免每次对话都做磁盘 I/O
         identity_content = self._system_files.get("identity", "You are a helpful assistant.")
         from ethan.core.timezone import get_local_timezone
+
         now = datetime.now(get_local_timezone()).strftime("%Y-%m-%d %H:%M:%S %A")
 
         self.last_matched_skills = []
@@ -442,6 +445,7 @@ class Agent:
         _memory_signal = None
         if last_user_text_for_recall:
             from ethan.memory.signals import detect_memory_signal
+
             _memory_signal = detect_memory_signal(last_user_text_for_recall)
 
         soul_content = self._system_files.get("soul", "")
@@ -464,7 +468,9 @@ class Agent:
                 parts.append(f"<agent_protocols>\n{agent_content}\n</agent_protocols>")
             parts.append(f"Current time: {now}")
             parts.append(f"Your workspace directory is {workspace}.")
-            parts.append(f"Current model: {self._provider.model}（用户问起你用的什么模型/是谁驱动时，如实回答这个 model id）")
+            parts.append(
+                f"Current model: {self._provider.model}（用户问起你用的什么模型/是谁驱动时，如实回答这个 model id）"
+            )
             parts.append(
                 "[工具] 你当前只挂载了少量常用工具。如果要做的事现有工具做不到"
                 "（写文件除外——file_write 已可用），先调 `find_tools` 激活进阶工具"
@@ -498,6 +504,7 @@ class Agent:
             last_user = last_user_text_for_recall
             if self._skills and last_user:
                 from ethan.core.modes import resolve_mode
+
                 mode_key = resolve_mode(self._mode).key
                 matched = self._skills.match(last_user, channel=self._channel, mode=mode_key)
                 # 命中 fast_rule 时，把规则声明的 skills 也并入（去重），不靠触发词——规则命中即明确意图
@@ -526,8 +533,8 @@ class Agent:
                     # skill 内容里提到的非 fast 工具自动激活，避免 fast 档看不见 skill 依赖的工具、
                     # 逼模型多绕一步 find_tools。声明即可用，下一轮 _broadcast_tools 即纳入广播。
                     from ethan.core.context import activate_tools
-                    referenced = [t.name for t in self._registry.all()
-                                  if not t.fast_path and t.name in skill_ctx]
+
+                    referenced = [t.name for t in self._registry.all() if not t.fast_path and t.name in skill_ctx]
                     if referenced:
                         activate_tools(referenced)
                 if brief_parts:
@@ -543,9 +550,12 @@ class Agent:
                 _sig_cat, _sig_hint = _memory_signal
                 parts.append(f"<memory_signal>\n{_sig_hint}\n</memory_signal>")
                 from ethan.core.context import activate_tools
+
                 activate_tools(["memory_write", "procedure_write"])
             if self.runtime_context:
-                parts.append(f"<runtime_context>\n[CRITICAL — 当前会话上下文，结合 soul 的主人/授权准则判断]\n\n{self.runtime_context}\n</runtime_context>")
+                parts.append(
+                    f"<runtime_context>\n[CRITICAL — 当前会话上下文，结合 soul 的主人/授权准则判断]\n\n{self.runtime_context}\n</runtime_context>"
+                )
             prev_summary = self._build_previous_run_summary(messages)
             if prev_summary:
                 parts.append(prev_summary)
@@ -578,22 +588,23 @@ class Agent:
         # 只列 name + description 首行（≤80 字符），discoverable 类在下方单独列（name+trigger），
         # plugin 类不在 _skills 中（未安装）。这样保持 prompt 稳定可缓存，且不重复注入。
         if self._skills:
-            default_list = [s for s in self._skills.all()
-                            if getattr(s, "category", "default") == "default"]
+            default_list = [s for s in self._skills.all() if getattr(s, "category", "default") == "default"]
             if default_list:
                 skill_lines = [
-                    f"- {s.name}: {s.description[:80]}{'…' if len(s.description) > 80 else ''}"
-                    for s in default_list
+                    f"- {s.name}: {s.description[:80]}{'…' if len(s.description) > 80 else ''}" for s in default_list
                 ]
                 parts.append(
                     "<available_skills>\n"
                     "[默认技能简表 — 完整清单、分类和描述请调 skill_list 工具，不要直接念本块回答用户「你有哪些技能」]\n"
-                    + "\n".join(skill_lines) + "\n</available_skills>"
+                    + "\n".join(skill_lines)
+                    + "\n</available_skills>"
                 )
 
         # --- 动态内容放后面，不命中缓存 ---
         parts.append(f"Current time: {now}")
-        parts.append(f"Current model: {self._provider.model}（用户问起你用的什么模型/是谁驱动时，如实回答这个 model id）")
+        parts.append(
+            f"Current model: {self._provider.model}（用户问起你用的什么模型/是谁驱动时，如实回答这个 model id）"
+        )
         parts.append(f"Your workspace directory is {workspace}. System configurations and memories reside here.")
 
         # 记忆召回改为按需工具调用（recall_memory），不再前置注入 system prompt
@@ -610,8 +621,7 @@ class Agent:
         profile_content = self._system_files.get("user_profile", "")
         # 只有实质内容（非空行/标题）才注入，避免把空模板塞进 system prompt
         _profile_text = "\n".join(
-            line for line in profile_content.splitlines()
-            if line.strip() and not line.strip().startswith("#")
+            line for line in profile_content.splitlines() if line.strip() and not line.strip().startswith("#")
         )
         if _profile_text:
             parts.append(
@@ -630,6 +640,7 @@ class Agent:
         last_user = last_user_text_for_recall
         if self._skills and last_user:
             from ethan.core.modes import resolve_mode
+
             mode_key = resolve_mode(self._mode).key
             matched = self._skills.match(last_user, channel=self._channel, mode=mode_key)
             self.last_matched_skills = [s.name for s in matched]
@@ -647,11 +658,14 @@ class Agent:
                 no_trig = [s for s in discoverable if not s.trigger]
                 lines = [f"- {s.name}: {' | '.join(s.trigger[:5])}" for s in with_trig]
                 if no_trig:
-                    lines.append(f"- （另有 {len(no_trig)} 个工具型技能无触发词，如 bytedance-*/lark-*，调 skill_list 查看完整清单）")
+                    lines.append(
+                        f"- （另有 {len(no_trig)} 个工具型技能无触发词，如 bytedance-*/lark-*，调 skill_list 查看完整清单）"
+                    )
                 parts.append(
                     "<available_skills>\n"
                     "[按需技能简表 — 命中触发词时用 skill_read 拉全文；完整清单和分类请调 skill_list，不要念本块回答「你有哪些技能」]\n"
-                    + "\n".join(lines) + "\n</available_skills>"
+                    + "\n".join(lines)
+                    + "\n</available_skills>"
                 )
 
         mode_hint = self._mode_install_hint(messages)
@@ -664,7 +678,9 @@ class Agent:
             parts.append(f"<memory_signal>\n{_sig_hint}\n</memory_signal>")
 
         if self.runtime_context:
-            parts.append(f"<runtime_context>\n[CRITICAL — 当前会话上下文，结合 soul 的主人/授权准则判断]\n\n{self.runtime_context}\n</runtime_context>")
+            parts.append(
+                f"<runtime_context>\n[CRITICAL — 当前会话上下文，结合 soul 的主人/授权准则判断]\n\n{self.runtime_context}\n</runtime_context>"
+            )
 
         prev_summary = self._build_previous_run_summary(messages)
         if prev_summary:
@@ -675,10 +691,7 @@ class Agent:
     def route_for(self, messages: list[Message]) -> str:
         """返回路由档位 'fast' | 'full'，供渠道决定回复策略（如飞书 card vs post）。"""
         last_user = self._get_last_user_text(list(messages))
-        skill_triggers = [
-            kw for s in (self._skills.all() if self._skills else [])
-            if s.fast_path for kw in s.trigger
-        ]
+        skill_triggers = [kw for s in (self._skills.all() if self._skills else []) if s.fast_path for kw in s.trigger]
         return _get_route(last_user, skill_triggers=skill_triggers)
 
     def _select_route(self, messages: list[Message]) -> tuple[str, str, list, int]:
@@ -688,10 +701,7 @@ class Agent:
         """
         working = list(messages)
         last_user = self._get_last_user_text(working)
-        skill_triggers = [
-            kw for s in (self._skills.all() if self._skills else [])
-            if s.fast_path for kw in s.trigger
-        ]
+        skill_triggers = [kw for s in (self._skills.all() if self._skills else []) if s.fast_path for kw in s.trigger]
         route = _get_route(last_user, skill_triggers=skill_triggers)
         routing = get_config().defaults.routing
         max_iters = get_config().defaults.max_tool_iterations
@@ -733,8 +743,7 @@ class Agent:
             logger.warning("极简 prompt 重试失败", exc_info=True)
             return None
 
-    async def _ensure_non_empty(self, response: Message, working: list[Message],
-                                monitor, reason: str) -> Message:
+    async def _ensure_non_empty(self, response: Message, working: list[Message], monitor, reason: str) -> Message:
         """确保返回给用户的回复非空。
 
         当模型在 finalize / stuck / nudge_exhausted 轮返回空内容时（常见于超大上下文
@@ -769,13 +778,14 @@ class Agent:
 
         # 优先检测 DSML 格式
         from ethan.providers.openai_compat import OpenAICompatProvider
+
         dsml_results = OpenAICompatProvider._parse_dsml_tool_calls(content)
         if dsml_results:
             return dsml_results
 
         pattern = re.compile(
-            r'call:\w+:(?P<tool>\w+)\{(?P<args>[^}]*)\}'
-            r'|call:(?P<tool2>\w+)\{(?P<args2>[^}]*)\}'
+            r"call:\w+:(?P<tool>\w+)\{(?P<args>[^}]*)\}"
+            r"|call:(?P<tool2>\w+)\{(?P<args2>[^}]*)\}"
         )
         results = []
         for m in pattern.finditer(content):
@@ -784,7 +794,7 @@ class Agent:
             if not tool_name:
                 continue
             args = {}
-            key_pattern = re.compile(r'(\w+):')
+            key_pattern = re.compile(r"(\w+):")
             key_positions = [(km.start(), km.group(1)) for km in key_pattern.finditer(args_str)]
             for i, (pos, key) in enumerate(key_positions):
                 val_start = pos + len(key) + 1
@@ -792,14 +802,16 @@ class Agent:
                     val_end = key_positions[i + 1][0]
                 else:
                     val_end = len(args_str)
-                val = args_str[val_start:val_end].rstrip(',').strip()
+                val = args_str[val_start:val_end].rstrip(",").strip()
                 args[key] = val
             if args:
-                results.append(ToolCall(
-                    id=f"call_{uuid.uuid4().hex[:8]}",
-                    name=tool_name,
-                    arguments=args,
-                ))
+                results.append(
+                    ToolCall(
+                        id=f"call_{uuid.uuid4().hex[:8]}",
+                        name=tool_name,
+                        arguments=args,
+                    )
+                )
         return results
 
     def _broadcast_tools(self, tools_list: list):
@@ -809,10 +821,10 @@ class Agent:
         供前端/飞书显示。标准 schema 参数，切模型安全；缺失时回退旧 args 摘要。
         """
         from ethan.core.context import get_active_tools
+
         base_names = {t.name for t in tools_list}
         active = get_active_tools()
-        extra = [t for t in self._registry.all()
-                 if t.name in active and t.name not in base_names]
+        extra = [t for t in self._registry.all() if t.name in active and t.name not in base_names]
         defs = [t.to_definition() for t in (tools_list + extra)]
         return [_with_intent_param(d) for d in defs] or None
 
@@ -846,8 +858,11 @@ class Agent:
             return ""
         try:
             from ethan.memory.recall import build_structured_recall_async
+
             recall_result = await build_structured_recall_async(
-                query=query, mode=self._mode, max_items=max_items,
+                query=query,
+                mode=self._mode,
+                max_items=max_items,
             )
             return recall_result.text if recall_result else ""
         except Exception:
@@ -885,6 +900,7 @@ class Agent:
             if self._lite_provider is None:
                 try:
                     from ethan.memory.consolidator import get_lite_model
+
                     lite_model = get_lite_model(self._model)
                     # lite 与主模型相同则不必新建，直接复用主 provider
                     if lite_model and lite_model != self._provider.model:
@@ -906,6 +922,7 @@ class Agent:
         这里只兜底处理非流式 chat() 的情况。
         """
         from ethan.core.consent import get_consent_provider
+
         provider = get_consent_provider()
         if provider is None:
             return True
@@ -917,10 +934,12 @@ class Agent:
     async def chat(self, messages: list[Message]) -> Message:
         """运行对话。fast/full 两档路由，按关键词规则自动选择。"""
         from ethan.core.context import reset_active_tools
+
         self._executor.reset_cache()
         reset_active_tools()  # 清空本请求的 find_tools 激活集
         working = list(messages)
         from ethan.core.artifacts import inject_artifacts_prompt
+
         inject_artifacts_prompt(working)  # 注入本会话已生成/交付的文件清单，供后续轮次直接引用
         enforce_context_budget(working)  # 历史 tool result 也可能很大，进循环前先管控
         compress_previous_round_tools(working, self.session_id)  # 压缩上一轮 search/fetch 结果
@@ -939,6 +958,7 @@ class Agent:
             reflection_message,
             should_trigger_decision,
         )
+
         monitor = LoopMonitor()
         pending_suffix = ""  # 反思提示，仅附加到「下一轮」的 system，附完即清
         _need_enhanced_context = False  # 上一轮模型响应是否提到"需要更多信息"
@@ -960,6 +980,7 @@ class Agent:
             # append 到 working 末尾（即 prompt 结尾），下一轮调模型时立即可见。
             # 协议合规：Anthropic/OpenAI 都允许 tool 消息后跟 user 消息。
             from ethan.core.context import get_injected_messages as _drain_inject
+
             _injected = _drain_inject()
             if _injected:
                 _inject_text = "\n\n".join(f"[用户运行中补充]：{m}" for m in _injected)
@@ -982,12 +1003,14 @@ class Agent:
                         _inject_extra_rounds += 1
                         logger.info(
                             "chat() iter=%d 开头收到补充，递增 _inject_extra_rounds=%d 推迟 finalize",
-                            i, _inject_extra_rounds,
+                            i,
+                            _inject_extra_rounds,
                         )
                     else:
                         logger.warning(
                             "chat() iter=%d 收到补充信息但追加轮次已达上限（%d），本轮仍会 finalize，补充可能未被完整处理",
-                            i, _inject_extra_rounds,
+                            i,
+                            _inject_extra_rounds,
                         )
             # finalize 判断：
             # - i 抵达「原始最后一轮 + 已追加轮次」即正常 finalize，每追加 1 轮就在该轮内允许收尾
@@ -1078,10 +1101,12 @@ class Agent:
                         resp = await self._ensure_non_empty(resp, working, monitor, "finalize")
                         if resp.content:
                             working.append(Message(role="assistant", content=resp.content))
-                        working.append(Message(
-                            role="user",
-                            content="\n\n".join(f"[用户运行中补充]：{m}" for m in _late_injected),
-                        ))
+                        working.append(
+                            Message(
+                                role="user",
+                                content="\n\n".join(f"[用户运行中补充]：{m}" for m in _late_injected),
+                            )
+                        )
                         _inject_extra_rounds += 1
                         logger.info("chat() finalize 前收到补充信息，追加第 %d 轮处理", _inject_extra_rounds)
                         _decision_prompt_injected = False
@@ -1099,9 +1124,14 @@ class Agent:
                     monitor.awaiting_decision_response = False
                     logger.warning(
                         "[decision-silent] iter=%d → 模型用正文回应决策提示（silent_count=%d），注入 nudge 重试",
-                        i + 1, monitor.silent_decision_count
+                        i + 1,
+                        monitor.silent_decision_count,
                     )
-                    working.append(Message(role="user", content="[继续执行任务。请直接调用工具完成下一步，不要用文字描述你的决策。]"))
+                    working.append(
+                        Message(
+                            role="user", content="[继续执行任务。请直接调用工具完成下一步，不要用文字描述你的决策。]"
+                        )
+                    )
                     continue
                 # 返回前检查是否有运行中补充信息刚进来，有则再跑一轮处理
                 _late_injected = _drain_inject()
@@ -1162,18 +1192,22 @@ class Agent:
                         logger.info("[decision-choice] iter=%d → 隐式选 B（调 plan_write）", i + 1)
                     elif implicit == "C":
                         _need_enhanced_context = True
-                        logger.info("[decision-choice] iter=%d → 隐式选 C（调 find_tools），下一轮将追加增强上下文", i + 1)
+                        logger.info(
+                            "[decision-choice] iter=%d → 隐式选 C（调 find_tools），下一轮将追加增强上下文", i + 1
+                        )
                     elif implicit == "A":
                         monitor.silent_decision_count += 1
                         _tools = [tc.name for tc in response.tool_calls][:3]
-                        logger.info("[decision-choice] iter=%d → 隐式选 A（直接干活 %s）silent_count=%d",
-                                    i + 1, _tools, monitor.silent_decision_count)
+                        logger.info(
+                            "[decision-choice] iter=%d → 隐式选 A（直接干活 %s）silent_count=%d",
+                            i + 1,
+                            _tools,
+                            monitor.silent_decision_count,
+                        )
                     monitor.awaiting_decision_response = False
 
             # 工具调用日志：记录每轮工具执行情况，便于 debug
-            tool_summary = ", ".join(
-                f"{tc.name}({_format_args(tc.arguments)})" for tc in response.tool_calls
-            )
+            tool_summary = ", ".join(f"{tc.name}({_format_args(tc.arguments)})" for tc in response.tool_calls)
             logger.info("chat() iter=%d/%d tools=[%s]", i + 1, max_iters, tool_summary)
 
             if not response.is_tool_call:
@@ -1185,18 +1219,24 @@ class Agent:
                 for idx, r in enumerate(results):
                     rlen = len(r.content or "")
                     if r.is_error:
-                        logger.warning("  └─ tool[%d] %s ERROR len=%d: %s",
-                                       idx, response.tool_calls[idx].name if idx < len(response.tool_calls) else "?",
-                                       rlen, (r.content or "")[:200])
+                        logger.warning(
+                            "  └─ tool[%d] %s ERROR len=%d: %s",
+                            idx,
+                            response.tool_calls[idx].name if idx < len(response.tool_calls) else "?",
+                            rlen,
+                            (r.content or "")[:200],
+                        )
                     else:
                         logger.info("  └─ tool[%d] ok len=%d", idx, rlen)
                 for r in results:
-                    working.append(Message(
-                        role="tool",
-                        content=r.content,
-                        tool_call_id=r.tool_call_id,
-                        images=r.images or [],
-                    ))
+                    working.append(
+                        Message(
+                            role="tool",
+                            content=r.content,
+                            tool_call_id=r.tool_call_id,
+                            images=r.images or [],
+                        )
+                    )
                 enforce_context_budget(working)  # 新 tool result 进上下文前管控体积，防撑爆
                 compress_previous_round_tools(working, self.session_id)  # 压缩上一轮 search/fetch 结果
                 monitor.record(response.tool_calls, had_error)
@@ -1224,8 +1264,7 @@ class Agent:
                 _decision_prompt_injected = True
                 monitor.decision_count += 1
                 monitor.awaiting_decision_response = True
-                logger.info("[decision-prompt] iter=%d → 注入决策提示 (count=%d)",
-                            i + 1, monitor.decision_count)
+                logger.info("[decision-prompt] iter=%d → 注入决策提示 (count=%d)", i + 1, monitor.decision_count)
 
             # 反思后仍重复同一操作 → 二次强提醒，逼它换路
             if monitor.awaiting_reflection_followup:
@@ -1251,10 +1290,12 @@ class Agent:
                     if _late_injected and _inject_extra_rounds < MAX_INJECT_EXTRA_ROUNDS:
                         if resp.content:
                             working.append(Message(role="assistant", content=resp.content))
-                        working.append(Message(
-                            role="user",
-                            content="\n\n".join(f"[用户运行中补充]：{m}" for m in _late_injected),
-                        ))
+                        working.append(
+                            Message(
+                                role="user",
+                                content="\n\n".join(f"[用户运行中补充]：{m}" for m in _late_injected),
+                            )
+                        )
                         _inject_extra_rounds += 1
                         logger.info("chat() varied 收尾前收到补充信息，追加第 %d 轮处理", _inject_extra_rounds)
                         _decision_prompt_injected = False
@@ -1278,10 +1319,12 @@ class Agent:
                     if _late_injected and _inject_extra_rounds < MAX_INJECT_EXTRA_ROUNDS:
                         if resp.content:
                             working.append(Message(role="assistant", content=resp.content))
-                        working.append(Message(
-                            role="user",
-                            content="\n\n".join(f"[用户运行中补充]：{m}" for m in _late_injected),
-                        ))
+                        working.append(
+                            Message(
+                                role="user",
+                                content="\n\n".join(f"[用户运行中补充]：{m}" for m in _late_injected),
+                            )
+                        )
                         _inject_extra_rounds += 1
                         logger.info("chat() stuck 收尾前收到补充信息，追加第 %d 轮处理", _inject_extra_rounds)
                         _decision_prompt_injected = False
@@ -1336,6 +1379,7 @@ class Agent:
             # greeting: LLM 裸答（无 tools、无 memory recall、极简 system）
             if instant.kind == "greeting":
                 from ethan.core.timezone import get_local_timezone
+
                 now = datetime.now(get_local_timezone()).strftime("%Y-%m-%d %H:%M:%S %A")
                 minimal_system = (
                     f"{self._system_files.get('identity', 'You are a helpful assistant.')}\n"
@@ -1356,6 +1400,7 @@ class Agent:
                 return
 
         from ethan.core.artifacts import inject_artifacts_prompt
+
         inject_artifacts_prompt(working)  # 注入本会话已生成/交付的文件清单，供后续轮次直接引用
         enforce_context_budget(working)  # 历史 tool result 也可能很大，进循环前先管控
         compress_previous_round_tools(working, self.session_id)  # 压缩上一轮 search/fetch 结果
@@ -1367,11 +1412,13 @@ class Agent:
             skills_info = []
             for name in self.last_matched_skills:
                 sk = self._skills.get(name) if self._skills else None
-                skills_info.append({
-                    "name": name,
-                    "is_default": getattr(sk, "is_default", False),
-                    "category": getattr(sk, "category", "default"),
-                })
+                skills_info.append(
+                    {
+                        "name": name,
+                        "is_default": getattr(sk, "is_default", False),
+                        "category": getattr(sk, "category", "default"),
+                    }
+                )
             yield SkillsMatchedEvent(skills=skills_info)
 
         # 记忆召回已改为 recall_memory 工具按需调用，ToolEvent 由工具执行路径自动产生
@@ -1388,6 +1435,7 @@ class Agent:
             reflection_message,
             should_trigger_decision,
         )
+
         monitor = LoopMonitor()
         pending_suffix = ""  # 反思提示，仅附加到「下一轮」的 system，附完即清
         _need_enhanced_context = False  # 上一轮模型响应是否提到"需要更多信息"
@@ -1410,6 +1458,7 @@ class Agent:
             # append 到 working 末尾（即 prompt 结尾），下一轮调模型时立即可见。
             # 协议合规：Anthropic/OpenAI 都允许 tool 消息后跟 user 消息。
             from ethan.core.context import get_injected_messages as _drain_inject
+
             _injected = _drain_inject()
             if _injected:
                 _inject_text = "\n\n".join(f"[用户运行中补充]：{m}" for m in _injected)
@@ -1433,12 +1482,14 @@ class Agent:
                         _inject_extra_rounds += 1
                         logger.info(
                             "stream_chat() iter=%d 开头收到补充，递增 _inject_extra_rounds=%d 推迟 finalize",
-                            i, _inject_extra_rounds,
+                            i,
+                            _inject_extra_rounds,
                         )
                     else:
                         logger.warning(
                             "stream_chat() iter=%d 收到补充信息但追加轮次已达上限（%d），本轮仍会 finalize，补充可能未被完整处理",
-                            i, _inject_extra_rounds,
+                            i,
+                            _inject_extra_rounds,
                         )
             # finalize 判断：
             # - i 抵达「原始最后一轮 + 已追加轮次」即正常 finalize，每追加 1 轮就在该轮内允许收尾
@@ -1494,7 +1545,9 @@ class Agent:
                 # 若还没产出任何内容，回退主模型重试本轮一次，并禁用 lite provider
                 # 避免后续 fast 档重复踩坑。
                 elif provider is not self._provider and not full_content:
-                    logger.warning("fast 档 lite provider 调用失败，回退主模型重试（后续 fast 档将直接用主模型）", exc_info=True)
+                    logger.warning(
+                        "fast 档 lite provider 调用失败，回退主模型重试（后续 fast 档将直接用主模型）", exc_info=True
+                    )
                     provider = self._provider
                     self._lite_provider = self._provider  # 禁用 lite，后续 fast 档不再重试
                     full_content = ""
@@ -1519,11 +1572,13 @@ class Agent:
                     tool_calls = parsed
                     # 保留 DSML/call 标记之前的正文作为 thought 内容
                     from ethan.providers.openai_compat import OpenAICompatProvider
+
                     if OpenAICompatProvider._contains_dsml(full_content):
                         # 截取 DSML 标记之前的文本
                         import re
-                        dsml_start = re.search(r'<[｜|][｜|]DSML[｜|][｜|]', full_content)
-                        full_content = full_content[:dsml_start.start()].rstrip() if dsml_start else ""
+
+                        dsml_start = re.search(r"<[｜|][｜|]DSML[｜|][｜|]", full_content)
+                        full_content = full_content[: dsml_start.start()].rstrip() if dsml_start else ""
                     else:
                         full_content = ""
                     response = Message(role="assistant", content=full_content, tool_calls=tool_calls)
@@ -1534,15 +1589,22 @@ class Agent:
             working.append(response)
 
             # SSL 断连自动续接：检测到 truncated 且为纯文本回复时，注入续接提示重新调模型
-            if (final_chunk and final_chunk.truncated
-                    and not response.is_tool_call and full_content
-                    and not _ssl_continue_used and not finalize):
+            if (
+                final_chunk
+                and final_chunk.truncated
+                and not response.is_tool_call
+                and full_content
+                and not _ssl_continue_used
+                and not finalize
+            ):
                 _ssl_continue_used = True
                 logger.warning("stream_chat() iter=%d SSL truncated, auto-continuing", i + 1)
-                working.append(Message(
-                    role="user",
-                    content="[网络中断，请从断点继续你的回复，不要重复已说内容。]",
-                ))
+                working.append(
+                    Message(
+                        role="user",
+                        content="[网络中断，请从断点继续你的回复，不要重复已说内容。]",
+                    )
+                )
                 continue
 
             # 空响应（既无正文也无工具调用）= 模型静默放弃。
@@ -1591,7 +1653,9 @@ class Agent:
                                     images=getattr(working[-1], "images", None) or [],
                                 )
                             _inject_extra_rounds += 1
-                            logger.info("stream_chat() 空响应重试结束前收到补充信息，追加第 %d 轮处理", _inject_extra_rounds)
+                            logger.info(
+                                "stream_chat() 空响应重试结束前收到补充信息，追加第 %d 轮处理", _inject_extra_rounds
+                            )
                             yield InjectEvent(messages=list(_late_injected))
                             _decision_prompt_injected = False
                             _enhanced_context_injected = False
@@ -1630,12 +1694,16 @@ class Agent:
                             yield fin_content
                         # 把 finalize 的回复放入 working，让模型知道自己说了什么
                         working.append(Message(role="assistant", content=fin_content))
-                        working.append(Message(
-                            role="user",
-                            content="\n\n".join(f"[用户运行中补充]：{m}" for m in _late_injected),
-                        ))
+                        working.append(
+                            Message(
+                                role="user",
+                                content="\n\n".join(f"[用户运行中补充]：{m}" for m in _late_injected),
+                            )
+                        )
                         _inject_extra_rounds += 1
-                        logger.info("stream_chat() nudge_exhausted 前收到补充信息，追加第 %d 轮处理", _inject_extra_rounds)
+                        logger.info(
+                            "stream_chat() nudge_exhausted 前收到补充信息，追加第 %d 轮处理", _inject_extra_rounds
+                        )
                         yield InjectEvent(messages=list(_late_injected))
                         _decision_prompt_injected = False
                         _enhanced_context_injected = False
@@ -1658,9 +1726,12 @@ class Agent:
                     monitor.awaiting_decision_response = False
                     logger.warning(
                         "[decision-silent] iter=%d → 模型用正文回应决策提示（silent_count=%d），注入 nudge 重试",
-                        i + 1, monitor.silent_decision_count
+                        i + 1,
+                        monitor.silent_decision_count,
                     )
-                    nudge = Message(role="user", content="[继续执行任务。请直接调用工具完成下一步，不要用文字描述你的决策。]")
+                    nudge = Message(
+                        role="user", content="[继续执行任务。请直接调用工具完成下一步，不要用文字描述你的决策。]"
+                    )
                     working.append(nudge)
                     continue
                 # finalize 轮可能因上下文过大模型返回空 → 兜底
@@ -1764,8 +1835,12 @@ class Agent:
                         _decision_prompt_injected = True
                         monitor.decision_count += 1
                         monitor.awaiting_decision_response = True
-                        logger.info("[decision-prompt] iter=%d → 注入决策提示 (count=%d, has_planned=%s)",
-                                    i + 1, monitor.decision_count, monitor.has_planned)
+                        logger.info(
+                            "[decision-prompt] iter=%d → 注入决策提示 (count=%d, has_planned=%s)",
+                            i + 1,
+                            monitor.decision_count,
+                            monitor.has_planned,
+                        )
                     continue  # 直接下一轮，不走授权/执行
             else:
                 # [隐式决策检测] 模型没调 decide 但直接干活时，通过它调的工具反推决策
@@ -1779,18 +1854,25 @@ class Agent:
                         logger.info("[decision-choice] iter=%d → 隐式选 B（调 plan_write）", i + 1)
                     elif implicit == "C":
                         _need_enhanced_context = True
-                        logger.info("[decision-choice] iter=%d → 隐式选 C（调 find_tools），下一轮将追加增强上下文", i + 1)
+                        logger.info(
+                            "[decision-choice] iter=%d → 隐式选 C（调 find_tools），下一轮将追加增强上下文", i + 1
+                        )
                     elif implicit == "A":
                         monitor.silent_decision_count += 1
                         _tools = [tc.name for tc in tool_calls][:3]
-                        logger.info("[decision-choice] iter=%d → 隐式选 A（直接干活 %s）silent_count=%d",
-                                    i + 1, _tools, monitor.silent_decision_count)
+                        logger.info(
+                            "[decision-choice] iter=%d → 隐式选 A（直接干活 %s）silent_count=%d",
+                            i + 1,
+                            _tools,
+                            monitor.silent_decision_count,
+                        )
                     monitor.awaiting_decision_response = False
 
             # --- 授权检查：执行前对工具做（1）渠道硬策略 + （2）consent 确认 ---
             import asyncio as _aio
 
             from ethan.core.consent import get_consent_provider
+
             allowed_calls = []
             for tc in tool_calls:
                 tool = self._registry.get(tc.name)
@@ -1802,34 +1884,48 @@ class Agent:
                 #   用户在三方渠道端完全无感知。需要在非 Web 渠道用飞书交互卡片/微信公众号菜单替换。
                 if tc.name == "ask_user":
                     from ethan.core.ask_user import AskUserProvider
+
                     args = tc.arguments or {}
                     question = args.get("question", "")
                     options = args.get("options") or []
                     default = args.get("default", "")
                     timeout = 20
 
-                    yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary=question,
-                                    state="start", skill_category=resolve_skill_category(tc.name, tc.arguments))
+                    yield ToolEvent(
+                        tool_name=tc.name,
+                        tool_call_id=tc.id,
+                        args_summary=question,
+                        state="start",
+                        skill_category=resolve_skill_category(tc.name, tc.arguments),
+                    )
 
                     _ask_provider = AskUserProvider()
                     _ask_event, _ask_fut = _ask_provider.create(question, options, default, timeout)
                     yield _ask_event
 
                     try:
-                        _ask_result = await _aio.wait_for(_ask_fut, timeout=timeout)
+                        # 后端比前端倒计时多留 5s 余量：用户在倒计时最后几秒点击时，
+                        # POST 有网络延迟，若与前端倒计时同刻超时会导致用户选择被丢弃
+                        _ask_result = await _aio.wait_for(_ask_fut, timeout=timeout + 5)
                     except (_aio.CancelledError, _aio.TimeoutError):
                         _ask_result = default
                         _ask_provider.cancel_all()
 
-                    yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary=question,
-                                    state="done", result_preview=f"用户选择：{_ask_result}",
-                                    skill_category=resolve_skill_category(tc.name, tc.arguments))
+                    yield ToolEvent(
+                        tool_name=tc.name,
+                        tool_call_id=tc.id,
+                        args_summary=question,
+                        state="done",
+                        result_preview=f"用户选择：{_ask_result}",
+                        skill_category=resolve_skill_category(tc.name, tc.arguments),
+                    )
                     working.append(Message(role="tool", content=f"用户选择：{_ask_result}", tool_call_id=tc.id))
                     continue
 
                 # [wait_for_user 拦截] 等待用户完成外部操作（OAuth/浏览器操作等），不进 executor，长超时阻塞
                 if tc.name == "wait_for_user":
                     from ethan.core.wait_for_user import WaitForUserProvider
+
                     args = tc.arguments or {}
                     prompt = args.get("prompt", "")
                     input_type = args.get("input_type", "confirm")
@@ -1842,17 +1938,28 @@ class Agent:
                     except (TypeError, ValueError):
                         timeout = 300
 
-                    yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary=prompt,
-                                    state="start", skill_category=resolve_skill_category(tc.name, tc.arguments))
+                    yield ToolEvent(
+                        tool_name=tc.name,
+                        tool_call_id=tc.id,
+                        args_summary=prompt,
+                        state="start",
+                        skill_category=resolve_skill_category(tc.name, tc.arguments),
+                    )
 
                     _wfu_provider = WaitForUserProvider()
                     _wfu_event, _wfu_fut = _wfu_provider.create(
-                        prompt, input_type, placeholder, confirm_label, cancel_label, timeout,
+                        prompt,
+                        input_type,
+                        placeholder,
+                        confirm_label,
+                        cancel_label,
+                        timeout,
                     )
                     yield _wfu_event
 
                     try:
-                        _wfu_result = await _aio.wait_for(_wfu_fut, timeout=timeout)
+                        # 后端比前端倒计时多留 5s 余量，避免用户最后时刻点击被超时丢弃
+                        _wfu_result = await _aio.wait_for(_wfu_fut, timeout=timeout + 5)
                     except _aio.CancelledError:
                         _wfu_provider.cancel_all()
                         raise
@@ -1869,9 +1976,14 @@ class Agent:
                     else:
                         _wfu_preview = f"用户输入：{_wfu_result}"
 
-                    yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary=prompt,
-                                    state="done", result_preview=_wfu_preview,
-                                    skill_category=resolve_skill_category(tc.name, tc.arguments))
+                    yield ToolEvent(
+                        tool_name=tc.name,
+                        tool_call_id=tc.id,
+                        args_summary=prompt,
+                        state="done",
+                        result_preview=_wfu_preview,
+                        skill_category=resolve_skill_category(tc.name, tc.arguments),
+                    )
                     working.append(Message(role="tool", content=_wfu_preview, tool_call_id=tc.id))
                     continue
 
@@ -1895,12 +2007,22 @@ class Agent:
                     # 同会话内此 scope 已授权过则直接放行（目录授权后子目录免问）。
                     # 但 consent_always=True 的高危调用（如 rm -rf）绕过记忆，每次都问、且不记入放行。
                     from ethan.core.consent import is_granted, record_grant
+
                     sess_id = getattr(consent_provider, "session_id", "") if consent_provider else ""
                     scope = tool.consent_scope(**tc.arguments) if tool else tc.name
                     always = tool.consent_always(**tc.arguments) if tool else False
                     if not always and is_granted(sess_id, scope):
                         allowed_calls.append(tc)
-                        yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary=_format_args(tc.arguments), intent=str(tc.arguments.get("intent", "") or ""), state="start", entity_type=classify_tool(tc.name), entity_id=extract_entity_id(tc.name, tc.arguments), skill_category=resolve_skill_category(tc.name, tc.arguments))
+                        yield ToolEvent(
+                            tool_name=tc.name,
+                            tool_call_id=tc.id,
+                            args_summary=_format_args(tc.arguments),
+                            intent=str(tc.arguments.get("intent", "") or ""),
+                            state="start",
+                            entity_type=classify_tool(tc.name),
+                            entity_id=extract_entity_id(tc.name, tc.arguments),
+                            skill_category=resolve_skill_category(tc.name, tc.arguments),
+                        )
                         continue
                     detail = _format_args(tc.arguments)
                     ok = True
@@ -1914,6 +2036,7 @@ class Agent:
                         yield event
                         try:
                             from ethan.core.consent import ConsentResult
+
                             result = await _aio.wait_for(fut, timeout=300)
                             if isinstance(result, ConsentResult):
                                 ok = result.allowed
@@ -1931,19 +2054,35 @@ class Agent:
                         reject_text = "[用户拒绝此操作]"
                         if consent_msg:
                             reject_text += f"\n用户补充说明：{consent_msg}"
-                        yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary=_format_args(tc.arguments), intent=str(tc.arguments.get("intent", "") or ""), state="start", entity_type=classify_tool(tc.name), entity_id=extract_entity_id(tc.name, tc.arguments), skill_category=resolve_skill_category(tc.name, tc.arguments))
-                        yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary="", state="error",
-                                        result_preview="用户拒绝",
-                                        skill_category=resolve_skill_category(tc.name, tc.arguments))
-                        working.append(Message(
-                            role="tool",
-                            content=reject_text,
+                        yield ToolEvent(
+                            tool_name=tc.name,
                             tool_call_id=tc.id,
-                        ))
+                            args_summary=_format_args(tc.arguments),
+                            intent=str(tc.arguments.get("intent", "") or ""),
+                            state="start",
+                            entity_type=classify_tool(tc.name),
+                            entity_id=extract_entity_id(tc.name, tc.arguments),
+                            skill_category=resolve_skill_category(tc.name, tc.arguments),
+                        )
+                        yield ToolEvent(
+                            tool_name=tc.name,
+                            tool_call_id=tc.id,
+                            args_summary="",
+                            state="error",
+                            result_preview="用户拒绝",
+                            skill_category=resolve_skill_category(tc.name, tc.arguments),
+                        )
+                        working.append(
+                            Message(
+                                role="tool",
+                                content=reject_text,
+                                tool_call_id=tc.id,
+                            )
+                        )
                         continue
                     # 授权通过：如有用户补充信息，暂存待拼入 tool 结果（不插 user 消息，避免破坏 LLM 消息协议）
                     if consent_msg:
-                        if not hasattr(self, '_consent_msgs'):
+                        if not hasattr(self, "_consent_msgs"):
                             self._consent_msgs = {}
                         self._consent_msgs[tc.id] = consent_msg
                     # 授权通过：记录到 session 维度（按 scope），后续同 scope 不再弹。
@@ -1951,22 +2090,33 @@ class Agent:
                     if not always:
                         record_grant(sess_id, scope)
                 allowed_calls.append(tc)
-                yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary=_format_args(tc.arguments), intent=str(tc.arguments.get("intent", "") or ""), state="start", entity_type=classify_tool(tc.name), entity_id=extract_entity_id(tc.name, tc.arguments), skill_category=resolve_skill_category(tc.name, tc.arguments))
+                yield ToolEvent(
+                    tool_name=tc.name,
+                    tool_call_id=tc.id,
+                    args_summary=_format_args(tc.arguments),
+                    intent=str(tc.arguments.get("intent", "") or ""),
+                    state="start",
+                    entity_type=classify_tool(tc.name),
+                    entity_id=extract_entity_id(tc.name, tc.arguments),
+                    skill_category=resolve_skill_category(tc.name, tc.arguments),
+                )
 
             results: list[ToolResult] = await self._executor.execute(allowed_calls) if allowed_calls else []
             had_error = any(getattr(r, "is_error", False) for r in results)
 
             # 工具调用日志
-            tool_summary = ", ".join(
-                f"{tc.name}({_format_args(tc.arguments)})" for tc in allowed_calls
-            )
+            tool_summary = ", ".join(f"{tc.name}({_format_args(tc.arguments)})" for tc in allowed_calls)
             logger.info("stream_chat() iter=%d/%d tools=[%s]", i + 1, max_iters, tool_summary)
             for idx, r in enumerate(results):
                 rlen = len(r.content or "")
                 if r.is_error:
-                    logger.warning("  └─ tool[%d] %s ERROR len=%d: %s",
-                                   idx, allowed_calls[idx].name if idx < len(allowed_calls) else "?",
-                                   rlen, (r.content or "")[:200])
+                    logger.warning(
+                        "  └─ tool[%d] %s ERROR len=%d: %s",
+                        idx,
+                        allowed_calls[idx].name if idx < len(allowed_calls) else "?",
+                        rlen,
+                        (r.content or "")[:200],
+                    )
                 else:
                     logger.info("  └─ tool[%d] ok len=%d", idx, rlen)
 
@@ -1974,20 +2124,38 @@ class Agent:
                 # content 原文进模型上下文（get_secret 取出的 key Agent 要能用）；
                 # 但展示用的 preview/detail 一律过掩码，避免明文 secret 在 UI 里露出。
                 from ethan.core.secrets_store import mask_text
+
                 preview = mask_text(_preview(r.content)) if r.content else ""
                 detail = mask_text(_detail(r.content)) if r.content else ""
-                yield ToolEvent(tool_name=tc.name, tool_call_id=tc.id, args_summary="", state="cancelled" if getattr(r, "is_cancelled", False) else ("done" if not r.is_error else "error"), result_preview=preview, result_detail=detail, sub_steps=getattr(r, "sub_steps", []) or [], ui=getattr(r, "ui", None), mcp_app=getattr(r, "mcp_app", None), cards=getattr(r, "cards", None), cards_meta=getattr(r, "cards_meta", None), entity_type=classify_tool(tc.name), entity_id=extract_entity_id(tc.name, tc.arguments), skill_category=resolve_skill_category(tc.name, tc.arguments))
+                yield ToolEvent(
+                    tool_name=tc.name,
+                    tool_call_id=tc.id,
+                    args_summary="",
+                    state="cancelled" if getattr(r, "is_cancelled", False) else ("done" if not r.is_error else "error"),
+                    result_preview=preview,
+                    result_detail=detail,
+                    sub_steps=getattr(r, "sub_steps", []) or [],
+                    ui=getattr(r, "ui", None),
+                    mcp_app=getattr(r, "mcp_app", None),
+                    cards=getattr(r, "cards", None),
+                    cards_meta=getattr(r, "cards_meta", None),
+                    entity_type=classify_tool(tc.name),
+                    entity_id=extract_entity_id(tc.name, tc.arguments),
+                    skill_category=resolve_skill_category(tc.name, tc.arguments),
+                )
                 # 如果授权时用户有补充信息，拼到 tool 结果内容头部
                 tool_content = r.content or ""
-                consent_extra = getattr(self, '_consent_msgs', {}).pop(tc.id, None)
+                consent_extra = getattr(self, "_consent_msgs", {}).pop(tc.id, None)
                 if consent_extra:
                     tool_content = f"[用户在授权时补充]：{consent_extra}\n\n{tool_content}"
-                working.append(Message(
-                    role="tool",
-                    content=tool_content,
-                    tool_call_id=r.tool_call_id,
-                    images=r.images or [],
-                ))
+                working.append(
+                    Message(
+                        role="tool",
+                        content=tool_content,
+                        tool_call_id=r.tool_call_id,
+                        images=r.images or [],
+                    )
+                )
 
             enforce_context_budget(working)  # 新 tool result 进上下文前管控体积，防撑爆
             compress_previous_round_tools(working, self.session_id)  # 压缩上一轮 search/fetch 结果
@@ -1997,9 +2165,15 @@ class Agent:
                 _sig = monitor._signatures[-1] if monitor._signatures else ""
                 _sig_hash = hash(_sig) & 0xFFFFFF
                 _eff_name = monitor._tool_names[-1] if monitor._tool_names else ""
-                logger.info("[sig-debug] iter=%d tools=%s eff_name=%s sig_hash=%06x sig_len=%d stuck=%s",
-                            i + 1, [tc.name for tc in tool_calls], _eff_name,
-                            _sig_hash, len(_sig), monitor.is_stuck() if len(monitor._signatures) >= 3 else False)
+                logger.info(
+                    "[sig-debug] iter=%d tools=%s eff_name=%s sig_hash=%06x sig_len=%d stuck=%s",
+                    i + 1,
+                    [tc.name for tc in tool_calls],
+                    _eff_name,
+                    _sig_hash,
+                    len(_sig),
+                    monitor.is_stuck() if len(monitor._signatures) >= 3 else False,
+                )
 
             # plan 工具调用感知：如果本轮调了 plan_write，标记已规划
             if any(tc.name == "plan_write" for tc in tool_calls):
@@ -2027,8 +2201,12 @@ class Agent:
                 _decision_prompt_injected = True
                 monitor.decision_count += 1
                 monitor.awaiting_decision_response = True  # 标记下一轮检测是否选 C
-                logger.info("[decision-prompt] iter=%d → 注入决策提示 (count=%d, has_planned=%s)",
-                            i + 1, monitor.decision_count, monitor.has_planned)
+                logger.info(
+                    "[decision-prompt] iter=%d → 注入决策提示 (count=%d, has_planned=%s)",
+                    i + 1,
+                    monitor.decision_count,
+                    monitor.has_planned,
+                )
 
             # 反思后仍重复同一操作 → 二次强提醒，逼它换路
             if monitor.awaiting_reflection_followup:
@@ -2061,10 +2239,12 @@ class Agent:
                     if _late_injected and _inject_extra_rounds < MAX_INJECT_EXTRA_ROUNDS:
                         if varied_content:
                             working.append(Message(role="assistant", content=varied_content))
-                        working.append(Message(
-                            role="user",
-                            content="\n\n".join(f"[用户运行中补充]：{m}" for m in _late_injected),
-                        ))
+                        working.append(
+                            Message(
+                                role="user",
+                                content="\n\n".join(f"[用户运行中补充]：{m}" for m in _late_injected),
+                            )
+                        )
                         _inject_extra_rounds += 1
                         logger.info("stream_chat() varied 收尾前收到补充信息，追加第 %d 轮处理", _inject_extra_rounds)
                         yield InjectEvent(messages=list(_late_injected))
@@ -2098,10 +2278,12 @@ class Agent:
                     if _late_injected and _inject_extra_rounds < MAX_INJECT_EXTRA_ROUNDS:
                         if stuck_content:
                             working.append(Message(role="assistant", content=stuck_content))
-                        working.append(Message(
-                            role="user",
-                            content="\n\n".join(f"[用户运行中补充]：{m}" for m in _late_injected),
-                        ))
+                        working.append(
+                            Message(
+                                role="user",
+                                content="\n\n".join(f"[用户运行中补充]：{m}" for m in _late_injected),
+                            )
+                        )
                         _inject_extra_rounds += 1
                         logger.info("stream_chat() stuck 收尾前收到补充信息，追加第 %d 轮处理", _inject_extra_rounds)
                         yield InjectEvent(messages=list(_late_injected))

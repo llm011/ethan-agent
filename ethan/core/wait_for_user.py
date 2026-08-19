@@ -15,6 +15,7 @@
 - 用户点击后 POST /api/wait-for-user/{id} → resolve Future
 - 结果作为 tool result 写入 working messages，进入下一轮 LLM
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -25,6 +26,7 @@ from dataclasses import dataclass
 @dataclass
 class WaitForUserEvent:
     """向 SSE 流注入的事件 —— 请求用户完成外部操作后确认。"""
+
     request_id: str
     prompt: str
     input_type: str = "confirm"  # "confirm" | "text"
@@ -71,6 +73,13 @@ class WaitForUserProvider:
             fut.set_result(value)
             return True
         return False
+
+    def cancel(self, request_id: str) -> None:
+        """取消单个待决请求（producer 收尾时按 run 精确清理用）。"""
+        fut = self._pending.pop(request_id, None)
+        _REGISTRY.pop(request_id, None)
+        if fut is not None and not fut.done():
+            fut.cancel()
 
     def cancel_all(self) -> None:
         for req_id, fut in list(self._pending.items()):

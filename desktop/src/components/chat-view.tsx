@@ -136,32 +136,43 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   };
 
   const handleConsentRespond = async (requestId: string, allowed: boolean, message?: string) => {
-    setConsentRequest(null);
     try {
       await respondConsent(requestId, allowed, message);
-    } catch {}
+      setConsentRequest(null);
+    } catch (err) {
+      // 回传失败保留卡片让用户重试，否则 agent 会一直等到超时
+      console.error("consent 回传失败:", err);
+    }
   };
 
   const handleCleanupRespond = async (requestId: string, action: "close" | "keep") => {
     try {
       const { respondBrowserCleanup } = await import("@/lib/api-base");
       await respondBrowserCleanup(requestId, action);
-    } catch {}
+    } catch (err) {
+      console.error("cleanup 回传失败:", err);
+    }
     setCleanupConfirm(null);
   };
 
   const handleAskUserRespond = async (requestId: string, value: string) => {
-    setAskUserRequest(null);
     try {
       await respondAskUser(requestId, value);
-    } catch {}
+      setAskUserRequest(null);
+    } catch (err) {
+      // 回传失败保留卡片让用户重试，否则 agent 会一直等到超时
+      console.error("ask_user 回传失败:", err);
+    }
   };
 
   const handleWaitForUserRespond = async (requestId: string, value: string) => {
-    setWaitForUserRequest(null);
     try {
       await respondWaitForUser(requestId, value);
-    } catch {}
+      setWaitForUserRequest(null);
+    } catch (err) {
+      // 回传失败保留卡片让用户重试，否则 agent 会一直等到超时
+      console.error("wait_for_user 回传失败:", err);
+    }
   };
 
   const handleRead = useCallback((msg: Message) => {
