@@ -479,10 +479,27 @@ def build_timeline(
     }
 
 
-def _run_command(command: list[str], *, cwd: Path) -> None:
+def _run_command(command: list[str], *, cwd: Path, timeout: float) -> None:
     # 捕获 stderr，失败时把 Node/Open Motion/pnpm 的诊断写进 run-status.json，
     # 否则只留 "non-zero exit status 1"，agent 无法定位渲染失败原因。
-    completed = subprocess.run(command, cwd=cwd, check=False, capture_output=True, text=True)
+    # timeout 必传：渲染器内部（Playwright / Chromium / 本地 http server）任一环节
+    # 挂死时，不带 timeout 的 subprocess.run 会让整条流水线无限期等待，且不留任何诊断。
+    try:
+        completed = subprocess.run(
+            command, cwd=cwd, check=False, capture_output=True, text=True, timeout=timeout
+        )
+    except subprocess.TimeoutExpired as exc:
+        # TimeoutExpired 的 stderr 是超时前已捕获的部分输出，保留它才能看出卡在哪一步。
+        # 注意：即使传了 text=True，超时路径给回来的仍是 bytes（CPython 不在该路径解码），
+        # 所以必须自己解码，否则这段诊断会被静默丢掉。
+        raw = exc.stderr
+        if isinstance(raw, (bytes, bytearray)):
+            raw = raw.decode("utf-8", errors="replace")
+        partial = (raw or "").strip()
+        detail = f"\npartial stderr:\n{partial}" if partial else ""
+        raise RuntimeError(
+            f"command timed out after {timeout:.0f}s ({' '.join(command)}){detail}"
+        ) from exc
     if completed.returncode != 0:
         stderr = completed.stderr.strip()
         detail = f"\nstderr:\n{stderr}" if stderr else ""
@@ -492,12 +509,22 @@ def _run_command(command: list[str], *, cwd: Path) -> None:
         sys.stderr.write(completed.stderr)
 
 
+# pnpm install（含首次拉取 Playwright Chromium）与整轮渲染的上限。渲染侧
+# renderFrames 自带 600s 帧捕获超时，外层留足 vite build + ffmpeg 编码的余量。
+INSTALL_TIMEOUT_SEC = 1800.0
+RENDER_TIMEOUT_SEC = 3600.0
+
+
 def ensure_renderer(template_dir: Path) -> None:
     if shutil.which("node") is None or shutil.which("pnpm") is None:
         raise RuntimeError("Node.js and pnpm are required to render the video")
     marker = template_dir / "node_modules" / "@open-motion" / "core" / "package.json"
     if not marker.exists():
-        _run_command(["pnpm", "install", "--ignore-workspace", "--frozen-lockfile"], cwd=template_dir)
+        _run_command(
+            ["pnpm", "install", "--ignore-workspace", "--frozen-lockfile"],
+            cwd=template_dir,
+            timeout=INSTALL_TIMEOUT_SEC,
+        )
 
 
 def render_video(template_dir: Path, render_dir: Path, timeline_path: Path, public_dir: Path) -> None:
@@ -514,6 +541,7 @@ def render_video(template_dir: Path, render_dir: Path, timeline_path: Path, publ
             str(public_dir),
         ],
         cwd=template_dir,
+        timeout=RENDER_TIMEOUT_SEC,
     )
 
 

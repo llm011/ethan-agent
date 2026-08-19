@@ -39,6 +39,12 @@ const sceneAudioInputs = scenes.map((scene, index) => {
   if (!scene || typeof scene.audio !== "string" || !scene.audio.trim()) {
     throw new Error(`Scene ${scene?.id || index} is missing a non-empty audio path`);
   }
+  // startMs feeds the adelay fallback. A non-numeric value only surfaces as
+  // `adelay=NaN|NaN` once every frame has already been rendered, so reject it
+  // here instead of after a ten-minute render.
+  if (!Number.isFinite(scene.startMs) || scene.startMs < 0) {
+    throw new Error(`Scene ${scene?.id || index} has an invalid startMs: ${scene.startMs}`);
+  }
   const relativeAudio = scene.audio.trim().replace(/^[\\/]+/, "");
   const requestedAudioPath = path.resolve(publicRoot, relativeAudio);
   if (requestedAudioPath !== publicRoot && !requestedAudioPath.startsWith(`${publicRoot}${path.sep}`)) {
@@ -143,13 +149,35 @@ try {
       return;
     }
     let filePath = candidate;
-    try {
-      if (!fs.statSync(filePath).isFile()) filePath = path.join(distDir, "index.html");
-    } catch {
+    const isFile = (() => {
+      try {
+        return fs.statSync(filePath).isFile();
+      } catch {
+        return false;
+      }
+    })();
+    if (!isFile) {
+      // Only extension-less paths are SPA routes worth rewriting to index.html.
+      // A missing .js/.css/.png means the Vite build is stale or partial; answering
+      // 200 + index.html there turns that into an opaque "no composition found"
+      // or a 600s frame-capture timeout instead of a diagnosable 404.
+      if (path.extname(requestPath)) {
+        response.writeHead(404).end(`Not found: ${requestPath}`);
+        return;
+      }
       filePath = path.join(distDir, "index.html");
+      if (!fs.existsSync(filePath)) {
+        response.writeHead(404).end("Vite build output is missing index.html");
+        return;
+      }
     }
     response.writeHead(200, {"Content-Type": MIME_TYPES[path.extname(filePath)] || "application/octet-stream"});
-    fs.createReadStream(filePath).on("error", () => response.destroy()).pipe(response);
+    // Both halves of the pipe need an error listener: the read stream can fail on
+    // a truncated build, and the response emits errors when Chromium aborts a
+    // request mid-stream. An unhandled one there would take down the renderer.
+    const body = fs.createReadStream(filePath);
+    response.on("error", () => body.destroy());
+    body.on("error", () => response.destroy()).pipe(response);
   });
   await new Promise((resolve, reject) => {
     server.once("error", reject);
@@ -203,20 +231,34 @@ try {
   // ── 6. Encode frames → MP4 with audio mixing ──
   // renderFrames records every visible <Audio> on every frame. Collapse those
   // observations back to one start frame per scene before building FFmpeg inputs.
+  // @open-motion/core's <Audio> registers itself with useAbsoluteFrame(), i.e. the
+  // frame being screenshotted, and the renderer's dedup key includes startFrame.
+  // A scene therefore contributes one observation per frame it stays visible, and
+  // the observations for one src are the frame numbers that src was audible on.
+  // Taking the minimum per src would hand two scenes sharing one audio file the
+  // earlier scene's offset — the clip gets mixed twice at the same instant and the
+  // later scene plays silent. Match each scene to the observation nearest its own
+  // timeline position instead.
   const audioAssetsFromRenderer = result?.audioAssets || [];
-  const firstFrameBySrc = new Map();
+  const framesBySrc = new Map();
   audioAssetsFromRenderer.forEach((asset) => {
     if (!asset || typeof asset.src !== "string" || !Number.isFinite(asset.startFrame)) return;
     const src = `/${asset.src.replace(/^\/+/, "")}`;
-    const previous = firstFrameBySrc.get(src);
-    if (previous === undefined || asset.startFrame < previous) {
-      firstFrameBySrc.set(src, asset.startFrame);
-    }
+    if (!framesBySrc.has(src)) framesBySrc.set(src, []);
+    framesBySrc.get(src).push(asset.startFrame);
   });
+
+  const nearestObservedStartFrame = (publicSrc, expectedStartFrame) => {
+    const observed = framesBySrc.get(publicSrc);
+    if (!observed || observed.length === 0) return expectedStartFrame;
+    return observed.reduce((best, frame) =>
+      Math.abs(frame - expectedStartFrame) < Math.abs(best - expectedStartFrame) ? frame : best,
+    );
+  };
 
   const audioEntries = sceneAudioInputs.map(({scene, path: audioPath, src: publicSrc}, index) => {
     const fallbackStartFrame = Math.round((scene.startMs / 1000) * fps);
-    const startFrame = firstFrameBySrc.get(publicSrc) ?? fallbackStartFrame;
+    const startFrame = nearestObservedStartFrame(publicSrc, fallbackStartFrame);
     return {
       inputIdx: index + 1, // input 0 is the image sequence
       path: audioPath,
@@ -308,7 +350,14 @@ try {
 
 } finally {
   // ── Cleanup: stop local server + remove all temp files ──
-  try { await new Promise((resolve) => server?.close(resolve)); } catch {}
+  // Never await close(): its callback only fires once every client socket is
+  // gone, and a Chromium left alive by a mid-render throw can hold a request
+  // in flight forever — that would hang this finally block and swallow the real
+  // error. Destroy the sockets outright, then close without waiting.
+  try {
+    server?.closeAllConnections?.();
+    server?.close();
+  } catch {}
   // Remove rendered frames + Vite build output (distDir is child of tmpDir)
   try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
   // Remove debug screenshots

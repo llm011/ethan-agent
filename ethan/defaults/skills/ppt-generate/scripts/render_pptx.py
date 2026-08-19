@@ -1728,6 +1728,42 @@ def render_background(slide, bg: dict | None, theme, canvas_w, canvas_h, emu_per
 # 校验
 # ---------------------------------------------------------------------------
 
+def _is_pure_white(color) -> bool:
+    """颜色是否为纯白（#FFF / #FFFFFF / #FFFFFFxx 均算）。
+
+    无法解析时按"非白"处理：格式错误已由 validate_color_fields 单独报告，
+    不在这里重复报一遍。
+    """
+    try:
+        rgb, _ = parse_color(color)
+    except DeckError:
+        return False
+    return str(rgb).upper() == "FFFFFF"
+
+
+def _slide_bg_is_pure_white(slide: dict, theme: dict) -> bool:
+    """页面生效背景是否纯白。
+
+    解析顺序与 render_background 严格对齐（页级 background 缺失/非 dict → 回退
+    主题 backgroundColor → 回退 #FFFFFF），否则 --check 与渲染结果会 diverge。
+    """
+    theme_bg = (theme or {}).get("backgroundColor") or "#FFFFFF"
+    bg = slide.get("background")
+    if not isinstance(bg, dict):
+        return _is_pure_white(theme_bg)
+    btype = bg.get("type", "solid")
+    if btype == "gradient" and bg.get("gradient"):
+        gradient = bg["gradient"]
+        stops = gradient.get("colors") if isinstance(gradient, dict) else None
+        if not isinstance(stops, list) or not stops:
+            return False
+        # 全部色标为纯白的渐变视觉上仍是纯白，同样违反红线
+        return all(isinstance(s, dict) and _is_pure_white(s.get("color")) for s in stops)
+    if btype == "image" and (bg.get("image") or {}).get("src"):
+        return False
+    return _is_pure_white(bg.get("color") or theme_bg)
+
+
 def _check_text_overflow(spec: dict, theme: dict, ep: str, err, warn):
     """文字溢出三级判定 + 可执行建议。
 
@@ -1906,6 +1942,7 @@ def validate_deck(deck: dict, theme: dict | None = None, deck_dir: Path | None =
     canvas = deck.get("canvas") or {}
     cw, ch = float(canvas.get("width", DEFAULT_CANVAS_W)), float(canvas.get("height", DEFAULT_CANVAS_H))
     seen_slide_ids = set()
+    white_bg_slides = []  # SKILL.md 质量红线：禁止纯白背景，逐页判定后汇总成一条 warn
 
     for si, slide in enumerate(deck["slides"]):
         sprefix = f"slides[{si}]"
@@ -1924,6 +1961,8 @@ def validate_deck(deck: dict, theme: dict | None = None, deck_dir: Path | None =
         if stype and (not isinstance(stype, str) or stype not in SLIDE_TYPES):
             warn(f"{sprefix} 未知 slideType: {stype}")
         validate_color_fields(slide.get("background"), f"{sprefix}.background")
+        if _slide_bg_is_pure_white(slide, theme):
+            white_bg_slides.append(sid if isinstance(sid, str) and sid else sprefix)
         elements = slide.get("elements")
         if not isinstance(elements, list):
             err(f"{sprefix} 缺少 elements 数组")
@@ -2069,6 +2108,15 @@ def validate_deck(deck: dict, theme: dict | None = None, deck_dir: Path | None =
                         check_table_overflow(el, theme, ep, ch, err, warn)
 
     # ── 主题质量校验 ──
+    # SKILL.md 质量红线 1：禁止纯白背景。按页判定（页级 background 可覆盖主题），
+    # 所以主题 backgroundColor 是白色但每页都自带背景时不会误报。
+    if white_bg_slides:
+        shown = "、".join(white_bg_slides[:5])
+        more = f" 等 {len(white_bg_slides)} 页" if len(white_bg_slides) > 5 else ""
+        warn(
+            f"背景为纯白的页面：{shown}{more}；SKILL.md 质量红线要求每页有背景色/渐变 + 主题色点缀",
+            code="theme.white-background",
+        )
     theme_colors = (theme or {}).get("themeColors", [])
     if not isinstance(theme_colors, list) or len(theme_colors) < 3:
         count_str = str(len(theme_colors)) if isinstance(theme_colors, list) else "N/A"

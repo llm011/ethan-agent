@@ -28,6 +28,7 @@ spec.loader.exec_module(render_pptx)
 
 THEME = render_pptx.DEFAULT_THEME
 QN = render_pptx.qn
+NON_WHITE_BG = {"type": "solid", "color": "#0F172A"}
 
 
 def _content_defaults():
@@ -35,7 +36,9 @@ def _content_defaults():
 
 
 def _issues_for(*elements, deck_dir=None):
-    deck = {"slides": [{"id": "s1", "elements": list(elements)}]}
+    # 显式给非白背景：DEFAULT_THEME 的 backgroundColor 是 #FFFFFF，会触发
+    # theme.white-background 红线告警，与这些用例要断言的溢出分级无关。
+    deck = {"slides": [{"id": "s1", "background": NON_WHITE_BG, "elements": list(elements)}]}
     return render_pptx.validate_deck(deck, THEME, deck_dir)
 
 
@@ -450,9 +453,39 @@ def test_check_json_output(tmp_path):
     assert all(set(i) >= {"severity", "code", "message"} for i in data["issues"])
 
 
+def _bg_codes(background, theme=THEME):
+    deck = {"slides": [{"id": "s1", "background": background, "elements": []}]}
+    return _codes(render_pptx.validate_deck(deck, theme))
+
+
+def test_pure_white_background_is_flagged():
+    """SKILL.md 质量红线 1：禁止纯白背景。页级背景缺失时回退主题 backgroundColor。"""
+    WHITE = "theme.white-background"
+    # 页级背景缺失 → 回退 DEFAULT_THEME 的 #FFFFFF
+    assert WHITE in _bg_codes(None)
+    assert WHITE in _bg_codes({"type": "solid", "color": "#FFFFFF"})
+    assert WHITE in _bg_codes({"type": "solid", "color": "#fff"})  # 3 位缩写同样是纯白
+    # 全白渐变视觉上仍是纯白
+    assert WHITE in _bg_codes({"type": "gradient", "gradient": {
+        "type": "linear", "colors": [{"pos": 0, "color": "#FFFFFF"}, {"pos": 100, "color": "#FFF"}]}})
+
+
+def test_non_white_background_is_not_flagged():
+    WHITE = "theme.white-background"
+    assert WHITE not in _bg_codes(NON_WHITE_BG)
+    # 渐变只要有一个非白色标就不算纯白
+    assert WHITE not in _bg_codes({"type": "gradient", "gradient": {
+        "type": "linear", "colors": [{"pos": 0, "color": "#FFFFFF"}, {"pos": 100, "color": "#3B82F6"}]}})
+    # 背景图盖住底色，不判定为纯白
+    assert WHITE not in _bg_codes({"type": "image", "color": "#FFFFFF", "image": {"src": "bg.png"}})
+    # 主题背景非白且页级未覆盖
+    dark_theme = {**THEME, "backgroundColor": "#0F172A"}
+    assert WHITE not in _bg_codes(None, theme=dark_theme)
+
+
 def test_check_json_ok(tmp_path):
     deck = {"canvas": {"width": 1000, "height": 562.5},
-            "slides": [{"id": "s1", "elements": [
+            "slides": [{"id": "s1", "background": NON_WHITE_BG, "elements": [
                 {"id": "k1", "type": "text", "left": 40, "top": 40, "width": 300, "height": 60,
                  "paragraphs": [{"runs": [{"text": "你好世界", "fontSize": 14}]}]},
             ]}]}
