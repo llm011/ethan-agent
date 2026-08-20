@@ -30,6 +30,10 @@ class OpenAICompatProvider(BaseProvider):
             base_url=provider_cfg.base_url,
             http_client=http_client,
             timeout=120.0,  # 2 分钟超时，防止 LLM 不响应导致无限挂起
+            # 禁用 SDK 内部重试：默认 max_retries=2 会静默重试 3 次 × 120s ≈ 6 分钟，
+            # 期间 agent 层完全无感知（lite 档回退主模型的逻辑被拖到超时后才触发）。
+            # 失败立即冒泡，交给 agent 层回退/流式断连重试兜底。
+            max_retries=0,
         )
         self._model = model
         self._base_url = (provider_cfg.base_url or "").lower()
