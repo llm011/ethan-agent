@@ -7,6 +7,7 @@ import {
   Trash2,
   Pencil,
   Check,
+  AlertCircle,
 } from "lucide-react";
 import type { Message } from "@ethan/shared/chat/types";
 import type { Annotation, AnnotationColor, AnnotationType } from "@/lib/api";
@@ -70,6 +71,10 @@ export function ReadingMode({ open, message, annotations, sessionId, onClose, on
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
+  // 保存/同步失败提示：静默吞错会导致「本地已更新、后端没保存」，
+  // 重开会话后 offset/正文不一致，这里收集起来明确提示并支持重试
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [syncFails, setSyncFails] = useState<{ id: number; kind: "offset" | "delete"; start: number; end: number }[]>([]);
   const localRef = useRef(local);
   localRef.current = local;
   // 保存后待重定位标记：等 message.content 更新并重新渲染完成，再按 quote 重算标注 offset
@@ -136,11 +141,15 @@ export function ReadingMode({ open, message, annotations, sessionId, onClose, on
         const quote = a.quote ?? "";
         const idx = locateQuote(text, quote, a.start);
         if (idx < 0) {
-          deleteAnnotation(a.id).catch(() => {});
+          deleteAnnotation(a.id).catch(() => {
+            setSyncFails((prev) => [...prev, { id: a.id, kind: "delete", start: 0, end: 0 }]);
+          });
           continue;
         }
         if (idx !== a.start || idx + quote.length !== a.end) {
-          updateAnnotationOffset(a.id, idx, idx + quote.length).catch(() => {});
+          updateAnnotationOffset(a.id, idx, idx + quote.length).catch(() => {
+            setSyncFails((prev) => [...prev, { id: a.id, kind: "offset", start: idx, end: idx + quote.length }]);
+          });
           next.push({ ...a, start: idx, end: idx + quote.length });
         } else {
           next.push(a);
@@ -185,13 +194,15 @@ export function ReadingMode({ open, message, annotations, sessionId, onClose, on
       return;
     }
     setSaving(true);
+    setSaveError(null);
     try {
       await updateMessage(sessionId ?? "", message.id, draft);
       onEditContent?.(draft);
       pendingRelocateRef.current = true;
       setEditing(false);
     } catch {
-      // 保存失败停留在编辑态，让用户重试或取消
+      // 保存失败停留在编辑态并明确提示，让用户重试或取消
+      setSaveError("保存失败：正文未写入后端，重开会话会恢复旧内容，请重试。");
     } finally {
       setSaving(false);
     }
@@ -261,12 +272,29 @@ export function ReadingMode({ open, message, annotations, sessionId, onClose, on
     try {
       await deleteAnnotation(id);
     } catch {
-      // ignore
+      // 本地已删除但后端失败：收集到同步失败提示，供重试（重开会话会“复活”该标注）
+      setSyncFails((prev) => [...prev, { id, kind: "delete", start: 0, end: 0 }]);
     }
     const next = local.filter((a) => a.id !== id);
     setLocal(next);
     onChange(next);
     if (activeId === id) setActiveId(null);
+  };
+
+  // 重试同步失败的标注操作（重定位 offset / 删除）
+  const retrySync = async () => {
+    const fails = syncFails;
+    setSyncFails([]);
+    const remaining: typeof fails = [];
+    for (const f of fails) {
+      try {
+        if (f.kind === "delete") await deleteAnnotation(f.id);
+        else await updateAnnotationOffset(f.id, f.start, f.end);
+      } catch {
+        remaining.push(f);
+      }
+    }
+    if (remaining.length > 0) setSyncFails(remaining);
   };
 
   const jumpTo = (id: number) => {
@@ -302,8 +330,9 @@ export function ReadingMode({ open, message, annotations, sessionId, onClose, on
         {editing ? (
           <div className="ml-auto flex items-center gap-2">
             <span className="text-xs text-muted-foreground">编辑正文（Markdown），保存后已有标注按原文自动重定位</span>
+            {saveError && <span className="text-xs text-destructive">{saveError}</span>}
             <button
-              onClick={() => { setEditing(false); setSel(null); }}
+              onClick={() => { setEditing(false); setSel(null); setSaveError(null); }}
               disabled={saving}
               className="rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted disabled:opacity-40"
             >
@@ -345,6 +374,20 @@ export function ReadingMode({ open, message, annotations, sessionId, onClose, on
           </>
         )}
       </div>
+
+      {/* 标注同步失败提示：本地已生效但后端未保存，不提示会在重开后表现为错位/复活 */}
+      {syncFails.length > 0 && (
+        <div className="flex items-center gap-2 border-b border-border bg-destructive/10 px-4 py-1.5 text-xs text-destructive">
+          <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+          <span className="flex-1">{syncFails.length} 处标注同步失败，重开会话后可能错位。</span>
+          <button
+            onClick={retrySync}
+            className="rounded-md border border-destructive/40 px-2 py-0.5 hover:bg-destructive/20"
+          >
+            重试
+          </button>
+        </div>
+      )}
 
       <div className="flex min-h-0 flex-1">
         {editing ? (
