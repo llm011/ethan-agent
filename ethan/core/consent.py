@@ -112,6 +112,17 @@ class WebConsentProvider(ConsentProvider):
             return True
         return False
 
+    def expire(self, request_id: str) -> None:
+        """等待超时后摘除注册（fut 已被 wait_for 取消，这里只清条目）。
+
+        不摘除的话：迟到的「允许」POST 会 resolve 到已取消的 fut（返回 False），
+        但前端不看 ok 字段、直接关弹窗当成功——用户以为批准了，命令实际早已
+        按拒绝处理。摘除后迟到的 resolve() 干净地返回 False，前端据此把卡片
+        标记为已失效。
+        """
+        self._pending.pop(request_id, None)
+        _REGISTRY.pop(request_id, None)
+
     def cancel_all(self) -> None:
         """请求结束/中断时，把未决的 Future 全部取消，避免泄漏。"""
         for req_id, fut in list(self._pending.items()):

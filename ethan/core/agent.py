@@ -2028,6 +2028,7 @@ class Agent:
                     ok = True
                     consent_msg = ""  # 预初始化，避免 consent_provider is None 分支未赋值
                     consent_timed_out = False
+                    consent_cancelled = False
                     if consent_provider is None:
                         ok = True
                     elif getattr(consent_provider, "auto_approve", False) and not always:
@@ -2053,16 +2054,26 @@ class Agent:
                             ok = False
                             consent_msg = ""
                             consent_timed_out = True
+                            # 超时即摘除注册：fut 已被 wait_for 取消，但条目仍在
+                            # _pending/_REGISTRY——迟到的「允许」会让前端误以为已批准
+                            # （实际早已按拒绝处理），且条目要等到 cancel_all 才清
+                            consent_provider.expire(event.request_id)
                         except _aio.CancelledError:
+                            # 「停止生成」等外层取消：非用户拒绝，单独标记，
+                            # 避免模型误以为用户表达过否定意见而停下来追问
                             ok = False
                             consent_msg = ""
+                            consent_cancelled = True
                     else:
                         ok = await consent_provider.request(desc, tc.name, detail, always=always)
                         consent_msg = ""
                     if not ok:
-                        # 拒绝来源区分：无人值守自动拒绝 / 等待超时 ≠ 用户主动拒绝。
+                        # 拒绝来源区分：无人值守自动拒绝 / 等待超时 / 生成取消 ≠ 用户主动拒绝。
                         # 统一标「用户拒绝」会误导模型以为用户表达过否定意见而停下来追问。
-                        if consent_timed_out:
+                        if consent_cancelled:
+                            reject_text = "[授权请求已取消（本次生成已停止），操作未执行]"
+                            reject_preview = "已取消"
+                        elif consent_timed_out:
                             reject_text = "[授权确认等待超时（5 分钟无响应），本次操作已按拒绝处理]"
                             reject_preview = "授权超时"
                         elif isinstance(consent_provider, AutoConsentProvider):

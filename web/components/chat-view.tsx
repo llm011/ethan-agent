@@ -82,6 +82,9 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const [schedules, setSchedules] = useState<any[]>([]);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [consentRequest, setConsentRequest] = useState<ConsentRequest | null>(null);
+  // 授权卡片已失效（迟到响应：请求已被后端超时清理）。新请求到达或卡片清空时复位。
+  const [consentExpired, setConsentExpired] = useState(false);
+  useEffect(() => { setConsentExpired(false); }, [consentRequest]);
   const [cleanupConfirm, setCleanupConfirm] = useState<CleanupConfirmRequest | null>(null);
   const [askUserRequest, setAskUserRequest] = useState<AskUserRequest | null>(null);
   const [waitforUserRequest, setWaitForUserRequest] = useState<WaitForUserRequest | null>(null);
@@ -121,8 +124,14 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
   const handleConsentRespond = async (requestId: string, allowed: boolean, message?: string) => {
     try {
-      await respondConsent(requestId, allowed, message);
-      setConsentRequest(null);
+      const res = await respondConsent(requestId, allowed, message);
+      if (res.ok) {
+        setConsentRequest(null);
+      } else {
+        // 迟到的响应：请求已被后端超时清理。直接关卡片会让用户误以为「允许」
+        // 生效，而命令实际早已按拒绝处理——标记失效交由用户确认关闭。
+        setConsentExpired(true);
+      }
     } catch (err) {
       // 回传失败保留卡片让用户重试，否则 agent 会一直等到超时
       console.error("consent 回传失败:", err);
@@ -746,7 +755,12 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
             <OnboardingBanner onDismiss={() => setShowOnboarding(false)} />
           </div>
         )}
-        <ConsentGate request={consentRequest} onRespond={handleConsentRespond} />
+        <ConsentGate
+          request={consentRequest}
+          expired={consentExpired}
+          onRespond={handleConsentRespond}
+          onDismiss={() => setConsentRequest(null)}
+        />
         <CleanupConfirmGate request={cleanupConfirm} onRespond={handleCleanupRespond} />
         {askUserRequest && (
           <div className="max-w-3xl mx-auto px-4 pb-2">
