@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import {
   ChevronDown, ChevronRight, Terminal, Globe, FileText,
   Search, Clock, CheckCircle2, XCircle, Loader2, Code2, Sparkles,
-  WrapText, Copy, Check, BrainCircuit, MessageSquareText, X, Ban
+  WrapText, Copy, Check, BrainCircuit, MessageSquareText, X, Ban, CircleHelp
 } from "lucide-react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
@@ -14,7 +14,9 @@ import type { SearchResultCard } from "../chat/search-card-carousel";
 export interface SubStep {
   tool: string;
   args: string;
-  state: "running" | "done" | "error" | "cancelled";
+  /** interrupted：仅前端展示态。只读场景残留的 running（流中断/其他设备在跑），
+   *  由 ToolTimeline 内部映射，后端不会产出该值。 */
+  state: "running" | "done" | "error" | "cancelled" | "interrupted";
   duration_ms?: number;
   result_preview?: string;
 }
@@ -23,7 +25,7 @@ export interface ToolStep {
   tool: string;
   args: string;
   intent?: string;
-  state: "running" | "done" | "error" | "cancelled";
+  state: "running" | "done" | "error" | "cancelled" | "interrupted";
   duration_ms?: number;
   result_preview?: string;
   result_detail?: string;
@@ -65,6 +67,8 @@ function StateIcon({ state }: { state: ToolStep["state"] }) {
   if (state === "running") return <Loader2 className="h-3 w-3 animate-spin text-blue-400" />;
   if (state === "done")    return <CheckCircle2 className="h-3 w-3 text-green-400" />;
   if (state === "cancelled") return <Ban className="h-3 w-3 text-muted-foreground" />;
+  // 中断/状态未知：可能是流中断，也可能正在其他设备运行，不能用「已取消」误导
+  if (state === "interrupted") return <CircleHelp className="h-3 w-3 text-muted-foreground/70" />;
   return <XCircle className="h-3 w-3 text-red-400" />;
 }
 
@@ -550,7 +554,10 @@ function StepRow({ step, isLast, highlight, fallbackCards, onCancelTool }: { ste
 export function ToolTimeline({ steps: rawSteps, defaultExpanded = false, highlightIndex, messageCards, onCancelTool }: ToolTimelineProps) {
   const steps = useMemo(() => {
     if (onCancelTool || !rawSteps.some(s => s.state === "running")) return rawSteps;
-    return rawSteps.map(s => s.state === "running" ? { ...s, state: "cancelled" as const } : s);
+    // 只读场景（无 onCancelTool，如分享/历史回放）残留的 running：真实取消会由后端
+    // 落库为 cancelled；这里残留的 running 多为流中断或「会话正在其他设备运行」，
+    // 标成 cancelled 会误导，显示为 interrupted（状态未知）更诚实。
+    return rawSteps.map(s => s.state === "running" ? { ...s, state: "interrupted" as const } : s);
   }, [rawSteps, onCancelTool]);
   const hasHighlight = highlightIndex !== undefined;
   const [expanded, setExpanded] = useState(defaultExpanded || hasHighlight);
