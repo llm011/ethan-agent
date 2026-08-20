@@ -26,6 +26,7 @@ export interface SessionDetail {
   messages: {
     role: string;
     content: string;
+    id?: number;
     created_at?: number;
     quote?: { role: "user" | "assistant"; content: string } | null;
     usage?: { input: number; output: number; cache: number };
@@ -197,6 +198,16 @@ export async function deleteSession(id: string): Promise<void> {
 export async function deleteMessage(sessionId: string, messageId: number): Promise<void> {
   const res = await fetch(`${API_URL}/sessions/${sessionId}/messages/${messageId}`, { method: "DELETE", headers: headers() });
   if (!res.ok) throw new Error("Delete message failed");
+}
+
+/** 编辑消息正文（阅读模式编辑）。后续对话上下文使用编辑后的版本。 */
+export async function updateMessage(sessionId: string, messageId: number, content: string): Promise<void> {
+  const res = await fetch(`${API_URL}/sessions/${sessionId}/messages/${messageId}`, {
+    method: "PATCH",
+    headers: { ...headers(), "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+  if (!res.ok) throw new Error("Update message failed");
 }
 
 export async function fetchMessageIntermediate(sessionId: string, messageId: number): Promise<string> {

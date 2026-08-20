@@ -31,6 +31,7 @@ import {
   unpinSession,
   type Annotation,
 } from "@/lib/api";
+import { updateSessionDetail } from "@/lib/session-db";
 import { ReadingMode } from "@/components/chat/reading-mode";
 import { ShareMode } from "@/components/chat/share-mode";
 import type { Message, Usage, Quote, PendingFile } from "@ethan/shared/chat/types";
@@ -119,31 +120,42 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   };
 
   const handleConsentRespond = async (requestId: string, allowed: boolean, message?: string) => {
-    setConsentRequest(null);
     try {
       await respondConsent(requestId, allowed, message);
-    } catch {}
+      setConsentRequest(null);
+    } catch (err) {
+      // 回传失败保留卡片让用户重试，否则 agent 会一直等到超时
+      console.error("consent 回传失败:", err);
+    }
   };
 
   const handleCleanupRespond = async (requestId: string, action: "close" | "keep") => {
     try {
       await respondBrowserCleanup(requestId, action);
-    } catch {}
+    } catch (err) {
+      console.error("cleanup 回传失败:", err);
+    }
     setCleanupConfirm(null);
   };
 
   const handleAskUserRespond = async (requestId: string, value: string) => {
-    setAskUserRequest(null);
     try {
       await respondAskUser(requestId, value);
-    } catch {}
+      setAskUserRequest(null);
+    } catch (err) {
+      // 回传失败保留卡片让用户重试，否则 agent 会一直等到超时
+      console.error("ask_user 回传失败:", err);
+    }
   };
 
   const handleWaitForUserRespond = async (requestId: string, value: string) => {
-    setWaitForUserRequest(null);
     try {
       await respondWaitForUser(requestId, value);
-    } catch {}
+      setWaitForUserRequest(null);
+    } catch (err) {
+      // 回传失败保留卡片让用户重试，否则 agent 会一直等到超时
+      console.error("wait_for_user 回传失败:", err);
+    }
   };
 
   const handleRead = useCallback((msg: Message) => {
@@ -156,6 +168,18 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     const mid = readingMessage.id;
     setAnnotationsByMessage((prev) => ({ ...prev, [mid]: next }));
   };
+
+  // 阅读模式编辑正文回写：更新内存 state + IndexedDB 离线缓存里的同一条消息
+  const handleEditContent = useCallback((mid: number, content: string) => {
+    setMessages(prev => prev.map(m => (m.id === mid ? { ...m, content } : m)));
+    setReadingMessage(prev => (prev && prev.id === mid ? { ...prev, content } : prev));
+    if (activeSession) {
+      updateSessionDetail(activeSession, (detail) => ({
+        ...detail,
+        messages: detail.messages.map(m => (m.id === mid ? { ...m, content } : m)),
+      })).catch(() => {});
+    }
+  }, [activeSession]);
 
   const handleShare = useCallback((msg: Message) => {
     const key = msg.id != null ? `id:${msg.id}` : `idx:${messagesRef.current.indexOf(msg)}`;
@@ -245,10 +269,12 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   useEffect(() => {
     // 守卫：handleSend 刚创建了新会话并启动了流式响应，replaceState 触发了
     // initialSessionId 变化。此时绝不能 abort 正在进行的流。
-    if (justFinishedRef.current === initialSessionId) {
-      justFinishedRef.current = null;
-      return;
-    }
+    // 标记只允许消费一次，无论是否命中都无条件清掉（对齐 desktop）：
+    // 否则「加载 A 时发消息 → 切 B → 切回 A」时残留标记会让 effect 跳过加载，
+    // activeSession 停留在 B，后续发送会静默发到 B。
+    const skipLoad = justFinishedRef.current === initialSessionId;
+    justFinishedRef.current = null;
+    if (skipLoad) return;
 
     streamAbortRef.current?.abort();
     streamAbortRef.current = null;
@@ -377,6 +403,32 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       }).catch(() => {});
     });
   }, []);
+
+  // 从其他页面（如 Agenda「拆解该安排」）带过来的待发送 prompt：
+  // sessionStorage 优先，URL ?q= 兜底。仅新会话视图消费；延迟到 timer 里真正发送时才清除，
+  // 这样 StrictMode 双挂载（或挂载后立即切走）时 cleanup 可整体撤销，不会丢 prompt。
+  useEffect(() => {
+    if (initialSessionId) return;
+    let prompt = "";
+    try {
+      prompt = sessionStorage.getItem("ethan:pending-prompt") || "";
+    } catch {}
+    let fromUrl = false;
+    if (!prompt) {
+      const q = new URLSearchParams(window.location.search).get("q");
+      if (q) {
+        prompt = q;
+        fromUrl = true;
+      }
+    }
+    if (!prompt) return;
+    const timer = setTimeout(() => {
+      try { sessionStorage.removeItem("ethan:pending-prompt"); } catch {}
+      if (fromUrl) window.history.replaceState(null, "", window.location.pathname);
+      handleSendRef.current(prompt);
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [initialSessionId]);
 
   useEffect(() => {
     fetchModes().then(setModes).catch(() => {});
@@ -674,8 +726,10 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         open={readingMessage != null}
         message={readingMessage}
         annotations={readingMessage?.id != null ? (annotationsByMessage[readingMessage.id] ?? []) : []}
+        sessionId={activeSession ?? undefined}
         onClose={() => setReadingMessage(null)}
         onChange={handleAnnotationsChange}
+        onEditContent={readingMessage?.id != null ? (content) => handleEditContent(readingMessage.id!, content) : undefined}
       />
 
       <ShareMode

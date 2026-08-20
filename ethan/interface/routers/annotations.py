@@ -148,6 +148,16 @@ class AnnotationStore:
         await self._db.commit()
         return cur.rowcount > 0
 
+    async def update_offset(self, anno_id: int, user_id: str, start: int, end: int) -> bool:
+        """更新标注偏移（正文编辑后按 quote 重定位）。返回标注是否存在。"""
+        await self.init()
+        cur = await self._db.execute(
+            "UPDATE annotations SET start=?, end=? WHERE id=? AND user_id=?",
+            (start, end, anno_id, user_id),
+        )
+        await self._db.commit()
+        return cur.rowcount > 0
+
 
 _store = AnnotationStore()
 
@@ -203,4 +213,18 @@ async def create_annotation(body: AnnotationCreate, user_id: str = Depends(verif
 @router.delete("/annotations/{anno_id}")
 async def delete_annotation(anno_id: int, user_id: str = Depends(verify_token)):
     ok = await _store.delete(anno_id, user_id)
+    return {"ok": ok}
+
+
+class AnnotationOffsetUpdate(BaseModel):
+    start: int
+    end: int
+
+
+@router.patch("/annotations/{anno_id}")
+async def update_annotation_offset(anno_id: int, body: AnnotationOffsetUpdate, user_id: str = Depends(verify_token)):
+    """更新标注偏移（正文编辑后按 quote 重定位）。"""
+    if body.start < 0 or body.end <= body.start:
+        raise HTTPException(status_code=400, detail="invalid range: start < end required")
+    ok = await _store.update_offset(anno_id, user_id, body.start, body.end)
     return {"ok": ok}

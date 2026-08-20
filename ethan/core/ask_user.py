@@ -11,6 +11,7 @@
 - 用户点击后 POST /api/ask-user/{id} → resolve Future
 - 结果作为 tool result 写入 working messages，进入下一轮 LLM
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -21,6 +22,7 @@ from dataclasses import dataclass, field
 @dataclass
 class AskUserEvent:
     """向 SSE 流注入的事件 —— 请求用户选择。"""
+
     request_id: str
     question: str
     options: list[dict] = field(default_factory=list)  # [{"label": "...", "value": "..."}]
@@ -68,6 +70,14 @@ class AskUserProvider:
             fut.set_result(value)
             return True
         return False
+
+    def cancel(self, request_id: str) -> None:
+        """取消单个待决请求（producer 收尾时按 run 精确清理用）。"""
+        fut = self._pending.pop(request_id, None)
+        _REGISTRY.pop(request_id, None)
+        _OPTIONS_REGISTRY.pop(request_id, None)
+        if fut is not None and not fut.done():
+            fut.cancel()
 
     def cancel_all(self) -> None:
         for req_id, fut in list(self._pending.items()):

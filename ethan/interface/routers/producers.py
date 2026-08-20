@@ -1,4 +1,5 @@
 """Producer tasks: background generation functions that emit events into a ChatRun."""
+
 from __future__ import annotations
 
 import asyncio
@@ -15,14 +16,19 @@ logger = logging.getLogger(__name__)
 
 def _RunManager_schedule_removal(session_id: str) -> None:
     from ethan.core.run_manager import RunManager
+
     RunManager.instance().schedule_removal(session_id)
 
 
-async def _save_progress(store: SessionStore, session_id: str,
-                         progress_msg_id: int | None,
-                         tool_steps: list, a2ui: list | None,
-                         mcp_apps: list | None = None,
-                         cards: list | None = None) -> int:
+async def _save_progress(
+    store: SessionStore,
+    session_id: str,
+    progress_msg_id: int | None,
+    tool_steps: list,
+    a2ui: list | None,
+    mcp_apps: list | None = None,
+    cards: list | None = None,
+) -> int:
     """工具过程实时落库：把当前 tool_steps 快照写进一条 assistant 消息。
 
     首次（progress_msg_id is None）：INSERT 一条占位行（content 空、tool_steps 为当前步骤），
@@ -76,8 +82,12 @@ async def _close_browser_sessions(session_id: str | None, run=None) -> None:
                 continue
             if smap.is_keep_alive(bsid):
                 try:
-                    await hub.call(METHODS["session_release"], {"sessionId": bsid},
-                                   client_name=client_name, browser_session_id=bsid)
+                    await hub.call(
+                        METHODS["session_release"],
+                        {"sessionId": bsid},
+                        client_name=client_name,
+                        browser_session_id=bsid,
+                    )
                 except Exception:
                     logger.warning("browser: release keep_alive session failed for %s", bsid)
                 finally:
@@ -95,7 +105,9 @@ async def _close_browser_sessions(session_id: str | None, run=None) -> None:
         try:
             first_client = to_confirm[0]["_client"]
             list_result = await hub.call(METHODS["session_list"], {}, client_name=first_client)
-            sessions_info = {s.get("sessionId"): s for s in (list_result or {}).get("sessions", []) if isinstance(s, dict)}
+            sessions_info = {
+                s.get("sessionId"): s for s in (list_result or {}).get("sessions", []) if isinstance(s, dict)
+            }
             for item in to_confirm:
                 info = sessions_info.get(item["sessionId"])
                 if info:
@@ -106,12 +118,17 @@ async def _close_browser_sessions(session_id: str | None, run=None) -> None:
 
         confirm_req = create_confirm(session_id, to_confirm)
         if run is not None:
-            run.emit({
-                "confirm_browser_cleanup": True,
-                "request_id": confirm_req.request_id,
-                "sessions": [{"sessionId": s["sessionId"], "title": s["title"], "tabCount": s["tabCount"]} for s in to_confirm],
-                "timeout": TIMEOUT_SECONDS,
-            })
+            run.emit(
+                {
+                    "confirm_browser_cleanup": True,
+                    "request_id": confirm_req.request_id,
+                    "sessions": [
+                        {"sessionId": s["sessionId"], "title": s["title"], "tabCount": s["tabCount"]}
+                        for s in to_confirm
+                    ],
+                    "timeout": TIMEOUT_SECONDS,
+                }
+            )
 
         action = await await_confirm(confirm_req)
 
@@ -124,8 +141,9 @@ async def _close_browser_sessions(session_id: str | None, run=None) -> None:
                 continue
             try:
                 if action == "close":
-                    await hub.call(METHODS["session_close"], {"sessionId": bsid},
-                                   client_name=cname, browser_session_id=bsid)
+                    await hub.call(
+                        METHODS["session_close"], {"sessionId": bsid}, client_name=cname, browser_session_id=bsid
+                    )
                 # "keep" 只解绑后端映射，不调 session_release：
                 # 扩展继续追踪该 session，下次对话可通过 list + attach 复用。
             except Exception:
@@ -163,14 +181,16 @@ async def _run_delegate_generation(
             emitted_text = True
             run.emit({"content": data})
         elif etype == "step" and isinstance(data, dict):
-            run.emit({
-                "tool": data.get("tool", ""),
-                "args": data.get("args", ""),
-                "state": data.get("state", "done"),
-                "id": f"mirror-{id(data)}",
-                "duration_ms": data.get("duration_ms"),
-                "result_preview": data.get("result_preview", ""),
-            })
+            run.emit(
+                {
+                    "tool": data.get("tool", ""),
+                    "args": data.get("args", ""),
+                    "state": data.get("state", "done"),
+                    "id": f"mirror-{id(data)}",
+                    "duration_ms": data.get("duration_ms"),
+                    "result_preview": data.get("result_preview", ""),
+                }
+            )
 
     # cwd 可能已被删除（临时目录、项目移动等）。提前给出清晰提示，
     # 避免 codex/claude 子进程抛出晦涩的 "[Errno 2] No such file or directory"。
@@ -190,8 +210,14 @@ async def _run_delegate_generation(
     result = None
     try:
         result = await delegate(
-            prompt=prompt, cwd=cwd, prefer=agent_name, timeout=240,
-            resume=True, user_id=user_id, mirror=False, on_event=_emit,
+            prompt=prompt,
+            cwd=cwd,
+            prefer=agent_name,
+            timeout=240,
+            resume=True,
+            user_id=user_id,
+            mirror=False,
+            on_event=_emit,
         )
     except asyncio.CancelledError:
         run.emit({"stopped": True, "usage": {}})
@@ -212,9 +238,14 @@ async def _run_delegate_generation(
             # 把最终结果作为 content 补推一次，避免 live 流空返回（刷新才看到）。
             if not emitted_text:
                 run.emit({"content": content})
-            await store.save_message(session_id, Message(
-                role="assistant", content=content, tool_steps=result.sub_steps or [],
-            ))
+            await store.save_message(
+                session_id,
+                Message(
+                    role="assistant",
+                    content=content,
+                    tool_steps=result.sub_steps or [],
+                ),
+            )
             await store.touch(session_id)
     except Exception:
         logger.exception("保存委派续接结果失败 session=%s", session_id)
@@ -254,6 +285,7 @@ async def _run_generation(
     set_consent_provider(consent)
     # 「运行中补充信息」drainer 也经 ContextVar 注入：agent loop 每轮开头调它取走 inbox 内容。
     from ethan.core.context import set_inject_drainer
+
     set_inject_drainer(run.drain_injected)
 
     collector = StreamCollector().bind(agent)
@@ -266,6 +298,7 @@ async def _run_generation(
     try:
         async for item in agent.stream_chat(messages):
             if isinstance(item, ConsentEvent):
+                run.interaction_ids.add(item.request_id)
                 evt = {
                     "consent_request": True,
                     "request_id": item.request_id,
@@ -279,6 +312,7 @@ async def _run_generation(
                 # 避免用户只开着浏览器没看聊天页面时错过授权。
                 try:
                     from ethan.browser.hub import get_hub
+
                     hub = get_hub()
                     if hub.connected:
                         await hub.broadcast_notification(
@@ -296,25 +330,31 @@ async def _run_generation(
                 except Exception:
                     logger.exception("向浏览器扩展广播 consent 通知失败")
             elif isinstance(item, AskUserEvent):
-                run.emit({
-                    "ask_user_request": True,
-                    "request_id": item.request_id,
-                    "question": item.question,
-                    "options": item.options,
-                    "default": item.default,
-                    "timeout": item.timeout,
-                })
+                run.interaction_ids.add(item.request_id)
+                run.emit(
+                    {
+                        "ask_user_request": True,
+                        "request_id": item.request_id,
+                        "question": item.question,
+                        "options": item.options,
+                        "default": item.default,
+                        "timeout": item.timeout,
+                    }
+                )
             elif isinstance(item, WaitForUserEvent):
-                run.emit({
-                    "wait_for_user_request": True,
-                    "request_id": item.request_id,
-                    "prompt": item.prompt,
-                    "input_type": item.input_type,
-                    "placeholder": item.placeholder,
-                    "confirm_label": item.confirm_label,
-                    "cancel_label": item.cancel_label,
-                    "timeout": item.timeout,
-                })
+                run.interaction_ids.add(item.request_id)
+                run.emit(
+                    {
+                        "wait_for_user_request": True,
+                        "request_id": item.request_id,
+                        "prompt": item.prompt,
+                        "input_type": item.input_type,
+                        "placeholder": item.placeholder,
+                        "confirm_label": item.confirm_label,
+                        "cancel_label": item.cancel_label,
+                        "timeout": item.timeout,
+                    }
+                )
             elif isinstance(item, SkillsMatchedEvent):
                 collector.feed(item)
                 run.emit({"skills_matched": item.skills})
@@ -327,11 +367,18 @@ async def _run_generation(
                 collector.feed(item)
                 if item.state == "start":
                     step = collector.tool_steps[-1] if collector.tool_steps else {}
-                    run.emit({"tool": item.tool_name, "args": item.args_summary, "state": "start",
-                              "id": item.tool_call_id, "intent": item.intent or "",
-                              "entity_type": item.entity_type or "",
-                              "entity_id": item.entity_id or "",
-                              "injected": step.get("injected", [])})
+                    run.emit(
+                        {
+                            "tool": item.tool_name,
+                            "args": item.args_summary,
+                            "state": "start",
+                            "id": item.tool_call_id,
+                            "intent": item.intent or "",
+                            "entity_type": item.entity_type or "",
+                            "entity_id": item.entity_id or "",
+                            "injected": step.get("injected", []),
+                        }
+                    )
                 else:
                     step = collector.tool_steps[-1] if collector.tool_steps else {}
                     evt = {
@@ -360,8 +407,11 @@ async def _run_generation(
                 if session_id and consent is not None:
                     try:
                         progress_msg_id = await _save_progress(
-                            store, session_id, progress_msg_id,
-                            collector.tool_steps or [], collector.a2ui or None,
+                            store,
+                            session_id,
+                            progress_msg_id,
+                            collector.tool_steps or [],
+                            collector.a2ui or None,
                             collector.mcp_apps or None,
                             collector.cards or None,
                         )
@@ -378,25 +428,32 @@ async def _run_generation(
             consent.cancel_all()
         # 进度占位行：用户主动停止则就地更新成最终内容（含 tool_steps）+ [已停止] 标记，
         # 复用同一行；新 run 替换则删除占位行，不残留空壳。
+        for step in collector.tool_steps or []:
+            if step.get("state") == "running":
+                step["state"] = "cancelled"
         if progress_msg_id and session_id:
             try:
                 if getattr(run, "stop_requested", False):
                     stopped_content = (collector.full or "") + "\n\n_（已停止）_"
-                    await store.update_message(progress_msg_id, session_id, Message(
-                        role="assistant",
-                        content=stopped_content,
-                        thought=collector.thought,
-                        reasoning=collector.reasoning,
-                        usage=collector.usage_dict,
-                        tool_steps=collector.tool_steps or [],
-                        a2ui=collector.a2ui or None,
-                        mcp_apps=collector.mcp_apps or None,
-                        cards=collector.cards or None,
-                        matched_skills=collector.matched_skills or None,
-                        ttfb_ms=collector.ttfb_ms,
-                        total_ms=collector.total_ms,
-                        status="stopped",
-                    ))
+                    await store.update_message(
+                        progress_msg_id,
+                        session_id,
+                        Message(
+                            role="assistant",
+                            content=stopped_content,
+                            thought=collector.thought,
+                            reasoning=collector.reasoning,
+                            usage=collector.usage_dict,
+                            tool_steps=collector.tool_steps or [],
+                            a2ui=collector.a2ui or None,
+                            mcp_apps=collector.mcp_apps or None,
+                            cards=collector.cards or None,
+                            matched_skills=collector.matched_skills or None,
+                            ttfb_ms=collector.ttfb_ms,
+                            total_ms=collector.total_ms,
+                            status="stopped",
+                        ),
+                    )
                     await store.touch(session_id)
                 else:
                     await store.delete_message_by_id(progress_msg_id)
@@ -485,6 +542,18 @@ async def _run_generation(
         # 流结束（正常/异常）时取消未决授权 Future，避免泄漏
         if consent is not None:
             consent.cancel_all()
+        # ask_user / wait_for_user 的 Provider 在 agent loop 内局部创建，
+        # producer 结束（stop/替换/异常）时按本 run 记录的 request_id 精确清理，
+        # 避免未决 Future 泄漏到超时；不做全量清理，防止误杀其他并发 run 的等待。
+        from ethan.core.ask_user import _REGISTRY as _ASK_REGISTRY
+        from ethan.core.wait_for_user import _REGISTRY as _WFU_REGISTRY
+
+        for req_id in run.interaction_ids:
+            for registry in (_ASK_REGISTRY, _WFU_REGISTRY):
+                provider = registry.get(req_id)
+                if provider is not None:
+                    provider.cancel(req_id)
+        run.interaction_ids.clear()
         # 浏览器 session 清理移至 done 事件之前（见下方），
         # 因为 finally 在 stop/error 路径已 run.finish() 之后才执行，
         # 此时 SSE 连接已断，无法送达 confirm 卡片。
@@ -500,6 +569,7 @@ async def _run_generation(
     final_cards = list(collector.cards or [])
     try:
         from ethan.core.file_jail import scan_file_cards_in_text
+
         existing_paths = {c.get("path") for c in final_cards if c.get("type") == "file"}
         fallback_cards = scan_file_cards_in_text(collector.full or "", existing_paths)
         if fallback_cards:
@@ -543,22 +613,22 @@ async def _run_generation(
         asyncio.create_task(_maybe_consolidate(session_id, agent._provider.model, user_id, mode=mode))
         asyncio.create_task(_maybe_generate_skill(session_id, agent._provider.model, user_id))
 
-
     # --- Get笔记 异步任务后台轮询 ---
     # 从 agent 回复中提取 getnote task_id，后台轮询直到完成，
     # 完成后把笔记内容作为独立消息推送给前端（复用 SSE 流）。
     # 用独立变量引用 store 以保持语义清晰。
     from ethan.core.background_polling import extract_task_id, poll_getnote_task
+
     task_id = extract_task_id(collector.full or "")
     if task_id:
         bg_store = await get_session_store()
-        run.emit({"background_polling": True, "polling_message":
-                  "\U0001f4e1 Get笔记正在提取视频内容，请稍候..."})
+        run.emit({"background_polling": True, "polling_message": "\U0001f4e1 Get笔记正在提取视频内容，请稍候..."})
         try:
+
             async def _on_progress(status, note_id):
                 if status in ("processing", "pending"):
-                    run.emit({"background_polling": True, "polling_message":
-                              "\u23f3 仍在提取中..."})
+                    run.emit({"background_polling": True, "polling_message": "\u23f3 仍在提取中..."})
+
             result = await poll_getnote_task(task_id, on_progress=_on_progress)
         except Exception as e:
             logger.exception("getnote 后台轮询异常: %s", e)
@@ -571,9 +641,13 @@ async def _run_generation(
             # 用 new_message 事件推送独立消息（不拼到当前消息末尾）
             run.emit({"new_message": True, "content": bg_msg})
             try:
-                await bg_store.save_message(session_id, Message(
-                    role="assistant", content=bg_msg,
-                ))
+                await bg_store.save_message(
+                    session_id,
+                    Message(
+                        role="assistant",
+                        content=bg_msg,
+                    ),
+                )
                 await bg_store.touch(session_id)
             except Exception:
                 logger.exception("保存 getnote 后台结果失败 session=%s", session_id)
@@ -582,9 +656,13 @@ async def _run_generation(
             detail_msg = f"\u2705 Get笔记任务已完成（note_id: {result.get('note_id', '?')}, task_id: {result.get('task_id', '?')}），但内容拉取失败，请用「查一下笔记」重试。"
             run.emit({"new_message": True, "content": detail_msg})
             try:
-                await bg_store.save_message(session_id, Message(
-                    role="assistant", content=detail_msg,
-                ))
+                await bg_store.save_message(
+                    session_id,
+                    Message(
+                        role="assistant",
+                        content=detail_msg,
+                    ),
+                )
                 await bg_store.touch(session_id)
             except Exception:
                 logger.exception("保存 getnote detail 失败提示失败 session=%s", session_id)
@@ -592,13 +670,16 @@ async def _run_generation(
             timeout_msg = "\u23f3 Get笔记提取超时，请稍后用「查一下笔记」重试。"
             run.emit({"new_message": True, "content": timeout_msg})
             try:
-                await bg_store.save_message(session_id, Message(
-                    role="assistant", content=timeout_msg,
-                ))
+                await bg_store.save_message(
+                    session_id,
+                    Message(
+                        role="assistant",
+                        content=timeout_msg,
+                    ),
+                )
                 await bg_store.touch(session_id)
             except Exception:
                 logger.exception("保存 getnote 超时提示失败 session=%s", session_id)
-
 
     # 标题生成：await 以便把结果带进 done 事件，前端实时更新
     new_title = await _maybe_regen_title(session_id)
@@ -607,7 +688,14 @@ async def _run_generation(
     await _close_browser_sessions(session_id, run=run)
 
     # 通知所有订阅者「流结束」并附最终 usage
-    done_evt: dict = {"done": True, "usage": usage_dict, "ttfb_ms": collector.ttfb_ms, "total_ms": collector.total_ms, "message_id": msg_id, "model": agent._provider.model}
+    done_evt: dict = {
+        "done": True,
+        "usage": usage_dict,
+        "ttfb_ms": collector.ttfb_ms,
+        "total_ms": collector.total_ms,
+        "message_id": msg_id,
+        "model": agent._provider.model,
+    }
     if new_title:
         done_evt["title"] = new_title
     run.emit(done_evt)

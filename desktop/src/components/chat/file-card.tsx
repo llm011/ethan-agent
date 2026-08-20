@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef, type SyntheticEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { AudioLines, FileText, FileSpreadsheet, FileArchive, File as FileIcon, Presentation, Download, ImageIcon, Video } from "lucide-react";
+import { AudioLines, FileText, FileSpreadsheet, FileArchive, File as FileIcon, Presentation, Download, ImageIcon, Eye, Video } from "lucide-react";
 import { getApiUrl, getAuthToken } from "@/lib/api-base";
 import { openUrl } from "@/lib/external-link";
 import { signFileUrl } from "@ethan/shared/ppt/preview";
 import { Lightbox } from "./lightbox";
+import { usePreview } from "@/components/preview-panel/preview-context";
 import type { FileCard } from "@ethan/shared/chat/types";
 
 // 文件卡片类型以 packages/shared 为准（web/desktop 共用，避免三处声明漂移）
@@ -193,6 +194,7 @@ function VideoFileCard({ card, sessionId }: { card: FileCard; sessionId?: string
 }
 
 // 交付的音频（book-audio-digest 听书 MP3）：内嵌原生 audio 播放器 + 下载按钮。
+// （签名续播逻辑同 VideoFileCard，见下方组件）
 // 签名过期续播策略与 VideoFileCard 一致：点播放 401 时换一次新签名，仍失败降级下载。
 function AudioFileCard({ card, sessionId }: { card: FileCard; sessionId?: string | null }) {
   const [url, setUrl] = useState<string>("");
@@ -292,10 +294,12 @@ function AudioFileCard({ card, sessionId }: { card: FileCard; sessionId?: string
 }
 
 // 文件卡片：图片渲染缩略图 + Lightbox；MP4/MP3 内嵌播放并保留下载按钮；
-// pptx 项目进入 /ppt-preview；其余点击直接下载。
+// pptx 项目进入 /ppt-preview；md/html 在侧边面板预览；其余点击直接下载。
+const PREVIEWABLE_KINDS = new Set(["md", "html", "htm"]);
 // 所有 URL 带 session_id——服务端只放行本 session 交付过的文件（会话级隔离）。
 export function FileCardView({ card, sessionId }: { card: FileCard; sessionId?: string | null }) {
   const navigate = useNavigate();
+  const preview = usePreview();
 
   if (IMAGE_KINDS.has(card.kind)) {
     return <ImageFileCard card={card} sessionId={sessionId} />;
@@ -309,13 +313,20 @@ export function FileCardView({ card, sessionId }: { card: FileCard; sessionId?: 
 
   const Icon = KIND_ICON[card.kind] ?? FileIcon;
   const previewable = card.kind === "pptx" && !!card.project_dir;
+  const sidePreviewable = PREVIEWABLE_KINDS.has(card.kind);
 
   const handleClick = async () => {
     const sid = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : "";
-    if (previewable) {
+    if (sidePreviewable) {
+      preview.open({
+        path: card.path,
+        filename: card.title || card.filename,
+        kind: card.kind === "htm" ? "html" : card.kind as "md" | "html",
+        sessionId,
+      });
+    } else if (previewable) {
       navigate(`/ppt-preview?path=${encodeURIComponent(card.path)}${sid}`);
     } else {
-      // Tauri webview 里直接点击会被顶走，走系统浏览器下载
       openUrl(await downloadSignedUrl(card.path, sid));
     }
   };
@@ -337,7 +348,9 @@ export function FileCardView({ card, sessionId }: { card: FileCard; sessionId?: 
           {card.page_count != null && ` · ${card.page_count} 页`}
         </span>
       </span>
-      {previewable ? (
+      {sidePreviewable ? (
+        <Eye className="w-4 h-4 text-primary flex-shrink-0" />
+      ) : previewable ? (
         <span className="text-xs text-primary flex-shrink-0">预览</span>
       ) : (
         <Download className="w-4 h-4 text-muted-foreground flex-shrink-0" />

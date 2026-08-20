@@ -2,6 +2,7 @@ import { useAuth } from "@/lib/auth-context";
 import { LoginView } from "@/components/login-view";
 import { Sidebar } from "@/components/Sidebar";
 import { UpdateToast } from "@/components/update-toast";
+import { PreviewProvider } from "@/components/preview-panel/preview-context";
 import { useState, useEffect, createContext, useContext } from "react";
 import { ChevronLeft, ChevronRight, Menu } from "lucide-react";
 import { Outlet } from "react-router-dom";
@@ -34,6 +35,7 @@ export function LayoutShell() {
 
   return (
     <SidebarContext.Provider value={{ sidebarOpen, setSidebarOpen }}>
+      <PreviewProvider>
       <div className="flex h-screen bg-background overflow-hidden rounded-xl">
         {/* Mobile overlay backdrop */}
         {sidebarOpen && (
@@ -84,6 +86,7 @@ export function LayoutShell() {
         {/* 半静默更新提示：下载完成后右下角弹卡片 */}
         <UpdateToast />
       </div>
+      </PreviewProvider>
     </SidebarContext.Provider>
   );
 }
