@@ -30,6 +30,31 @@ async function fetchFileContent(path: string, sessionId?: string | null): Promis
   return res.text();
 }
 
+// sandbox="allow-scripts" 只隔离了同源（父页面 DOM/cookie/localStorage），
+// 但脚本仍可发起任意网络请求（内网探测、本地服务副作用、数据外带）。
+// 注入严格 CSP：阻断一切网络加载与请求，只保留内联脚本/样式和 data:/blob: 资源。
+const CSP_META =
+  '<meta http-equiv="Content-Security-Policy" content="' +
+  "default-src 'none'; " +
+  "script-src 'unsafe-inline'; " +
+  "style-src 'unsafe-inline'; " +
+  "img-src data: blob:; " +
+  "font-src data: blob:; " +
+  "media-src data: blob:; " +
+  'form-action \'none\'; ' +
+  'base-uri \'none\'">';
+
+function hardenHtml(html: string): string {
+  if (/<head[^>]*>/i.test(html)) {
+    // 插到 head 开头，确保先于任何会触发加载的元素生效
+    return html.replace(/<head([^>]*)>/i, `<head$1>${CSP_META}`);
+  }
+  if (/<html[^>]*>/i.test(html)) {
+    return html.replace(/<html([^>]*)>/i, `<html$1><head>${CSP_META}</head>`);
+  }
+  return `${CSP_META}${html}`;
+}
+
 async function buildDownloadUrl(path: string, sessionId?: string | null): Promise<string> {
   const sidQ = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : "";
   const sig = await signFileUrl(getApiUrl(), getAuthToken(), [path]);
@@ -111,7 +136,7 @@ export function PreviewPanel() {
         )}
         {!loading && !error && file.kind === "html" && content && (
           <iframe
-            srcDoc={content}
+            srcDoc={hardenHtml(content)}
             className="w-full h-full border-0"
             sandbox="allow-scripts"
             title={file.filename}
