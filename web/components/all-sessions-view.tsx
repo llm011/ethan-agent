@@ -10,6 +10,7 @@ import { Button } from "@ethan/shared/ui/button";
 import { Badge } from "@ethan/shared/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@ethan/shared/ui/select";
 import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
+import { HeaderFillet } from "@/components/header-fillet";
 
 const escapeReg = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const escapeHtml = (s: string) => s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
@@ -155,7 +156,7 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
   };
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-background overflow-hidden">
+    <div className="flex-1 flex flex-col h-full bg-background">
       <ConfirmDialog
         open={confirmState.open}
         title="删除对话"
@@ -164,7 +165,8 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
         onConfirm={doDelete}
         onCancel={() => setConfirmState({ open: false, id: "" })}
       />
-      <div className="p-4 border-b border-border flex items-center justify-between gap-3 shrink-0 flex-wrap">
+      <div className="relative p-4 border-b border-border bg-sidebar flex items-center justify-between gap-3 shrink-0 flex-wrap">
+        <HeaderFillet />
         <h1 className="text-lg font-semibold shrink-0">全部历史对话 <span className="text-sm font-normal text-muted-foreground ml-1">({total})</span></h1>
         <div className="flex items-center gap-2 flex-wrap">
           <Button

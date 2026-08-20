@@ -5,6 +5,7 @@ import { Pencil, Check, X, RefreshCw, Pin, PinOff } from "lucide-react";
 import { Clock, Calendar } from "lucide-react";
 import { Button } from "@ethan/shared/ui/button";
 import { renameSession, regenSessionTitle } from "@/lib/api";
+import { HeaderFillet } from "@/components/header-fillet";
 import { fmtTokens } from "@/lib/utils";
 import { formatTrigger, formatNextRun } from "@/lib/utils";
 import { ThemePicker } from "./theme-picker";
@@ -65,7 +66,8 @@ export function ChatHeader({ sessionId, title, source, usage, schedules, pinnedA
   })() : null;
 
   return (
-    <header className="h-auto min-h-14 border-b border-border flex flex-col justify-center px-4 py-2 shrink-0">
+    <header className="relative h-auto min-h-14 border-b border-border bg-sidebar flex flex-col justify-center px-4 py-2 shrink-0">
+      <HeaderFillet />
       <div className="flex items-center gap-3 w-full">
         {sessionId && title && (
           isEditing ? (
