@@ -269,6 +269,11 @@ export function Sidebar() {
     if (isPinned) {
       await unpinSession(id);
       setPinnedSessions((prev) => prev.filter((s) => s.id !== id));
+      // 同步 sessions 中该会话的 pinned_at：否则 renderSession 仍按
+      // pinned_at > 0 显示实心 Pin 图标，直到 30s 轮询刷新才恢复
+      setSessions((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, pinned_at: 0 } : s))
+      );
     } else {
       await pinSession(id);
       fetchPinnedSessions().then(setPinnedSessions).catch(() => {});
