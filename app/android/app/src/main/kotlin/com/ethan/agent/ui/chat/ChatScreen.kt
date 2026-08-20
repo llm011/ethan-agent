@@ -364,9 +364,9 @@ fun ChatScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     if (ask.options.isEmpty()) {
                         // 后端校验回传值必须在 options 内（空 options 时任何回传都会 400），
-                        // 无法提供按钮，只能等超时走默认值——至少说明现状，避免"死"对话框
+                        // 无法提供按钮；超时后只清卡片、不回传，由后端超时机制走默认值
                         Text(
-                            "无可选选项，${state.askUserRemaining}s 后将自动使用默认值",
+                            "无可选选项，${state.askUserRemaining}s 后由服务端按默认值处理",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

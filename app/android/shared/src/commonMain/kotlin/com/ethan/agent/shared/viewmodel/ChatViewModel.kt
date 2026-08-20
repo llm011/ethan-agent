@@ -594,7 +594,7 @@ class ChatViewModel(
 
     // ── ask_user / wait_for_user 交互卡片 ──────────────────────────────────
 
-    /** 收到 ask_user 事件：设置卡片并启动倒计时（超时自动回传 default）。 */
+    /** 收到 ask_user 事件：设置卡片并启动倒计时（超时自动回传 default；空 options 见下）。 */
     private fun startAskUserCountdown(info: AskUserInfo) {
         askUserCountdownJob?.cancel()
         _state.update { it.copy(askUser = info, askUserRemaining = info.timeout) }
@@ -608,7 +608,14 @@ class ChatViewModel(
                 _state.update { it.copy(askUserRemaining = remaining) }
             }
             if (_state.value.askUser?.requestId == info.requestId) {
-                respondAskUser(info.default)
+                if (info.options.isEmpty()) {
+                    // 空 options：后端校验回传值必须在 options 内，任何回传都会 400，
+                    // 回传失败还会恢复卡片（无按钮可点）导致卡死。超时只清卡片不回传，
+                    // 由后端 ask-user 自身的超时机制走默认值。
+                    _state.update { it.copy(askUser = null) }
+                } else {
+                    respondAskUser(info.default)
+                }
             }
         }
     }

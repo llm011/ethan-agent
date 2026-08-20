@@ -30,15 +30,18 @@ data class SessionsUiState(
     val selectedSources: Set<String> = emptySet(),
     val unreadSessionIds: Set<String> = emptySet(),
 ) {
-    /** 置顶分组：pinned_at > 0，按置顶时间倒序 */
+    /** 按来源筛选后的全集（空集合表示全部），置顶与普通列表共用，保证筛选行为一致 */
+    private val sourceFiltered: List<SessionInfo>
+        get() = if (selectedSources.isEmpty()) sessions
+        else sessions.filter { s -> selectedSources.contains(s.source ?: "") }
+
+    /** 置顶分组：pinned_at > 0，按置顶时间倒序（同样套用来源筛选） */
     val pinnedSessions: List<SessionInfo>
-        get() = sessions.filter { it.pinnedAt > 0 }.sortedByDescending { it.pinnedAt }
+        get() = sourceFiltered.filter { it.pinnedAt > 0 }.sortedByDescending { it.pinnedAt }
 
     /** 普通列表：排除置顶（置顶在顶部独立分组展示） */
     val filteredSessions: List<SessionInfo>
-        get() = (if (selectedSources.isEmpty()) sessions
-        else sessions.filter { s -> selectedSources.contains(s.source ?: "") })
-            .filter { it.pinnedAt == 0L }
+        get() = sourceFiltered.filter { it.pinnedAt == 0L }
 }
 
 class SessionsViewModel(
