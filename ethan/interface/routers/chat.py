@@ -367,17 +367,19 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
         # (3) 普通 chat：生成与连接解耦——把 agent.stream_chat 放进后台 producer 任务，
         # 事件写入 ChatRun 缓冲并扇出给订阅者。SSE 响应只是一个订阅者，断开（刷新）只退订，
         # 不影响 producer——生成照常跑完并入库。刷新后可经 GET /chat/{id}/stream 重连回放。
-        from ethan.core.consent import AutoConsentProvider, WebConsentProvider
+        from ethan.core.consent import SuperConsentProvider, WebConsentProvider
 
-        # 安全约束：auto_consent 会自动批准所有工具授权（含 shell 执行），相当于在
+        # 安全约束：auto_consent 会自动批准普通工具授权（含 shell 执行），相当于在
         # 用户主机上放开任意命令执行。绝不能单方面信任请求体里的 auto_consent 字段——
         # 否则 token 一旦泄露（XSS / 日志 / 配置文件），远程攻击者即可构造请求静默
         # 执行任意脚本（RCE）。因此强制限定：仅当请求来自本地回环或 RFC1918 私有网段
         # 时才允许生效，公网来源一律降级为 WebConsentProvider（逐项弹窗确认）。
         # 注：私有网段放行是为了支持 docker 部署（容器内看到的 client 是网桥 IP）。
+        # 高危命令（consent_always=True，如 rm -rf）即使用户开启超级权限也仍弹窗确认——
+        # 用户就在屏幕前，交还用户拍板，而非静默拒绝。
         consent = None
         if req.auto_consent and _is_local(request):
-            consent = AutoConsentProvider(session_id=req.session_id or "")
+            consent = SuperConsentProvider(session_id=req.session_id or "")
         else:
             consent = WebConsentProvider(session_id=req.session_id or "")
         manager = RunManager.instance()
