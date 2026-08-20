@@ -163,8 +163,25 @@ class SessionsViewModel(
 
     fun cancelRename() { _state.update { it.copy(renameTarget = null) } }
 
-    /** 置顶/取消置顶：本地即时更新，下次轮询自动对齐服务端 */
+    /** 置顶/取消置顶的 in-flight 会话 ID：防快速双击时两个反向操作交错（viewModelScope 在主线程，无需同步）。 */
+    private val pinInFlight = mutableSetOf<String>()
+
+    /** 置顶/取消置顶：本地乐观更新（与 Web 端一致），失败回滚并提示；下次轮询自动对齐服务端。 */
     fun togglePin(session: SessionInfo) {
+        if (!pinInFlight.add(session.id)) return
+        val nowSec = kotlinx.datetime.Clock.System.now().toEpochMilliseconds() / 1000
+        // 乐观更新：先改本地，UI 即时反馈
+        _state.update { s ->
+            s.copy(
+                sessions = s.sessions.map {
+                    if (it.id == session.id) {
+                        it.copy(pinnedAt = if (session.pinnedAt > 0) 0L else nowSec)
+                    } else {
+                        it
+                    }
+                },
+            )
+        }
         viewModelScope.launch {
             try {
                 if (session.pinnedAt > 0) {
@@ -172,20 +189,18 @@ class SessionsViewModel(
                 } else {
                     repository.pinSession(session.id)
                 }
+            } catch (e: Exception) {
+                // 失败回滚到操作前的状态
                 _state.update { s ->
-                    val nowSec = kotlinx.datetime.Clock.System.now().toEpochMilliseconds() / 1000
                     s.copy(
                         sessions = s.sessions.map {
-                            if (it.id == session.id) {
-                                it.copy(pinnedAt = if (session.pinnedAt > 0) 0L else nowSec)
-                            } else {
-                                it
-                            }
+                            if (it.id == session.id) it.copy(pinnedAt = session.pinnedAt) else it
                         },
+                        error = repository.friendlyError(e),
                     )
                 }
-            } catch (e: Exception) {
-                _state.update { it.copy(error = repository.friendlyError(e)) }
+            } finally {
+                pinInFlight.remove(session.id)
             }
         }
     }

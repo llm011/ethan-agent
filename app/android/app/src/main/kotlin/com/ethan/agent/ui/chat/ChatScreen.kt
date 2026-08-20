@@ -362,23 +362,33 @@ fun ChatScreen(
             title = { Text(ask.question) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    ask.options.forEach { opt ->
-                        TextButton(
-                            onClick = { onAskUserRespond(opt.value) },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(
-                                text = opt.label + if (opt.value == ask.default) "（默认）" else "",
+                    if (ask.options.isEmpty()) {
+                        // 后端校验回传值必须在 options 内（空 options 时任何回传都会 400），
+                        // 无法提供按钮，只能等超时走默认值——至少说明现状，避免"死"对话框
+                        Text(
+                            "无可选选项，${state.askUserRemaining}s 后将自动使用默认值",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        ask.options.forEach { opt ->
+                            TextButton(
+                                onClick = { onAskUserRespond(opt.value) },
                                 modifier = Modifier.fillMaxWidth(),
-                                textAlign = TextAlign.Start,
-                            )
+                            ) {
+                                Text(
+                                    text = opt.label + if (opt.value == ask.default) "（默认）" else "",
+                                    modifier = Modifier.fillMaxWidth(),
+                                    textAlign = TextAlign.Start,
+                                )
+                            }
                         }
+                        Text(
+                            "${state.askUserRemaining}s 后自动选择默认项",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
-                    Text(
-                        "${state.askUserRemaining}s 后自动选择默认项",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                 }
             },
             confirmButton = {},

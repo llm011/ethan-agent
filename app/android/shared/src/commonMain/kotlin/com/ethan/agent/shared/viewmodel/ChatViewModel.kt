@@ -194,16 +194,18 @@ class ChatViewModel(
 
     /**
      * 消费跨页面（如 Agenda「拆解该安排」）带来的自动发送 prompt。
-     * 等模型就绪后再发送（新会话 isLoading 立即为 false，selectedModel 依赖缓存流；2s 兜底防卡死）。
+     * 等模型就绪后再发送（新会话 isLoading 立即为 false，selectedModel 依赖缓存流）。
+     * 10s 兜底：超时仍未就绪则退化为预填输入框（不自动发送）——避免 selectedModel=null
+     * 让 createSession 落到后端默认模型，prompt 也不会丢。
      */
     fun autoSendPrompt(prompt: String) {
         if (prompt.isBlank()) return
         viewModelScope.launch {
-            withTimeoutOrNull(2_000) {
+            val ready = withTimeoutOrNull(10_000) {
                 _state.first { !it.isLoading && it.selectedModel != null }
             }
             _state.update { it.copy(inputText = prompt) }
-            sendMessage()
+            if (ready != null) sendMessage()
         }
     }
 
@@ -629,33 +631,55 @@ class ChatViewModel(
         }
     }
 
-    /** ask_user 卡片回传选择；失败保留卡片可重试（agent 在后端一直等到超时）。 */
+    /**
+     * ask_user 卡片回传选择；失败恢复卡片可重试（agent 在后端一直等到超时）。
+     *
+     * 原子认领防双重回传：倒计时归零与用户点击竞态时（cancel 是协作式的，拦不住已越过挂起点的
+     * 倒计时协程），先通过 CAS 把卡片从 state 摘除的一方才发请求，后到的一方读到 null 直接返回。
+     */
     fun respondAskUser(value: String) {
         val askUser = _state.value.askUser ?: return
+        var claimed = false
+        _state.update {
+            if (it.askUser?.requestId == askUser.requestId) {
+                claimed = true
+                it.copy(askUser = null)
+            } else {
+                it
+            }
+        }
+        if (!claimed) return
         askUserCountdownJob?.cancel()
         viewModelScope.launch {
             try {
                 repository.respondAskUser(askUser.requestId, value)
-                if (_state.value.askUser?.requestId == askUser.requestId) {
-                    _state.update { it.copy(askUser = null) }
-                }
             } catch (e: Exception) {
+                // 失败恢复卡片以便重试；仅当期间没有新卡片到达时才恢复
+                _state.update { if (it.askUser == null) it.copy(askUser = askUser) else it }
                 _state.update { it.copy(error = "选择回传失败，请重试：${repository.friendlyError(e)}") }
             }
         }
     }
 
-    /** wait_for_user 卡片回传："done" / "cancel" / 用户文本 / "timeout"。 */
+    /** wait_for_user 卡片回传："done" / "cancel" / 用户文本 / "timeout"。认领防双重回传同 [respondAskUser]。 */
     fun respondWaitForUser(value: String) {
         val waitForUser = _state.value.waitForUser ?: return
+        var claimed = false
+        _state.update {
+            if (it.waitForUser?.requestId == waitForUser.requestId) {
+                claimed = true
+                it.copy(waitForUser = null)
+            } else {
+                it
+            }
+        }
+        if (!claimed) return
         waitForUserCountdownJob?.cancel()
         viewModelScope.launch {
             try {
                 repository.respondWaitForUser(waitForUser.requestId, value)
-                if (_state.value.waitForUser?.requestId == waitForUser.requestId) {
-                    _state.update { it.copy(waitForUser = null) }
-                }
             } catch (e: Exception) {
+                _state.update { if (it.waitForUser == null) it.copy(waitForUser = waitForUser) else it }
                 _state.update { it.copy(error = "回传失败，请重试：${repository.friendlyError(e)}") }
             }
         }
