@@ -271,10 +271,13 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
   // Load session when route param changes
   useEffect(() => {
-    if (justFinishedRef.current === initialSessionId) {
-      justFinishedRef.current = null;
-      return;
-    }
+    // justFinishedRef 只允许消费一次（创建会话/加载中发消息后跳过一次重载）。
+    // 无论是否命中都无条件清掉：否则「加载 A 时发消息 → 切 B → 切回 A」时，
+    // 残留的标记会让 effect 直接 return 跳过加载，activeSession 停留在 B，
+    // 界面显示 B 的消息、后续发送也会静默发到 B。
+    const skipLoad = justFinishedRef.current === initialSessionId;
+    justFinishedRef.current = null;
+    if (skipLoad) return;
 
     streamAbortRef.current?.abort();
     streamAbortRef.current = null;
@@ -347,6 +350,12 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     fetchSession(initialSessionId)
       .then(async (detail) => {
         if (cancelled) return;
+        // 竞态保护（对齐 web 端）：如果 handleSend 已经基于 initialSessionId 启动了流式响应，
+        // 就不要再用 DB 里的旧消息覆盖正在写入的实时消息；也不要重设 activeSession/title 等。
+        if (justFinishedRef.current === initialSessionId) {
+          justFinishedRef.current = null;
+          return;
+        }
         // 写入本地缓存
         writeSessionCache(initialSessionId, detail);
         setLoadingSession(false);

@@ -269,10 +269,12 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   useEffect(() => {
     // 守卫：handleSend 刚创建了新会话并启动了流式响应，replaceState 触发了
     // initialSessionId 变化。此时绝不能 abort 正在进行的流。
-    if (justFinishedRef.current === initialSessionId) {
-      justFinishedRef.current = null;
-      return;
-    }
+    // 标记只允许消费一次，无论是否命中都无条件清掉（对齐 desktop）：
+    // 否则「加载 A 时发消息 → 切 B → 切回 A」时残留标记会让 effect 跳过加载，
+    // activeSession 停留在 B，后续发送会静默发到 B。
+    const skipLoad = justFinishedRef.current === initialSessionId;
+    justFinishedRef.current = null;
+    if (skipLoad) return;
 
     streamAbortRef.current?.abort();
     streamAbortRef.current = null;
