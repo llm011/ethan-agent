@@ -63,6 +63,25 @@ _ENV_DUMP_RE = re.compile(
     r')\b'
 )
 
+# 引号字符串字面量（'...' / "..."）。grep/sed/jq/awk 的正则参数常写成
+# '(a|env|svg)$' 这种带 | 交替的模式，里面的 env/set 会被 _ENV_DUMP_RE 的
+# `env(?=\s*[;&|])` 误当成「管道后的 env dump 命令」（把正则 | 当成 shell 管道），
+# 导致 code-review 里 `jq ... | grep -vE '(...|env|...)'` 在超级模式下仍弹窗。
+# 引号内内容永远是命令的「参数」而非可执行命令，env-dump / secret 引用检测前先剔除。
+_SINGLE_QUOTED_RE = re.compile(r"'[^']*'")
+_DOUBLE_QUOTED_RE = re.compile(r'"[^"]*"')
+
+
+def _strip_env_dump_noise(cmd: str) -> str:
+    """剔除引号字面量，只留 shell 命令层，供 env-dump 检测避免引号内正则误伤。
+
+    单/双引号内容都是参数、不是命令：真正的 `env;` / `printenv` dump 命令不会
+    被引号包裹。注意这不放宽既有防护——`bash -c 'env'` 这类形态本就不被
+    _ENV_DUMP_RE 命中（env 紧跟引号，非 [;&|]/行尾），剔除引号只去掉误报。
+    """
+    return _DOUBLE_QUOTED_RE.sub('""', _SINGLE_QUOTED_RE.sub("''", cmd))
+
+
 # 只读无副作用命令白名单：匹配到直接跳过 consent 弹窗。
 # 目的：避免「ls 某脚本目录是否存在 / python -c 仅 Path.exists() 探测」
 # 这类零风险命令被误拒后，模型绕到 web_fetch 等低质量替代路径。
@@ -250,8 +269,9 @@ class ShellTool(BaseTool):
             # 高危命令：文案标红提示，且每次都问（见 consent_always）
             return f"⚠️ 高危 shell 命令，请确认：{cmd[:200]}"
         # 环境变量列举命令（env/printenv/set 等）：不需要 $VAR 就能 dump 所有 secret，
-        # 每次重新授权。
-        if _ENV_DUMP_RE.search(cmd):
+        # 每次重新授权。检测前剔除引号字面量，避免 grep/sed 正则里 '(...|env|...)'
+        # 的 env 被误判（引号内是参数不是命令）。
+        if _ENV_DUMP_RE.search(_strip_env_dump_noise(cmd)):
             return f"⚠️ 命令可能泄露环境变量（含 secret），请确认：{cmd[:200]}"
         # 命令引用了 secret 环境变量：可被诱导泄露密钥（编码能绕过 mask_text），
         # 每次重新授权，让用户在弹窗里看到具体引用了哪个 secret 变量。
@@ -275,7 +295,7 @@ class ShellTool(BaseTool):
         cmd = command or ""
         if _RM_TMP_ONLY_RE.match(cmd):
             return False
-        return bool(_DANGEROUS_RE.search(cmd)) or bool(_ENV_DUMP_RE.search(cmd)) or bool(_detect_secret_env_refs(cmd))
+        return bool(_DANGEROUS_RE.search(cmd)) or bool(_ENV_DUMP_RE.search(_strip_env_dump_noise(cmd))) or bool(_detect_secret_env_refs(cmd))
     parameters = {
         "type": "object",
         "properties": {

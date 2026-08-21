@@ -13,7 +13,13 @@ r"""Tests for shell 高危判定 + 只读白名单 + 超级权限 Provider 行�
 from __future__ import annotations
 
 from ethan.core.consent import AutoConsentProvider, SuperConsentProvider, WebConsentProvider
-from ethan.tools.builtin.shell import _DANGEROUS_RE, ShellTool, _is_safe_readonly
+from ethan.tools.builtin.shell import (
+    _DANGEROUS_RE,
+    _ENV_DUMP_RE,
+    ShellTool,
+    _is_safe_readonly,
+    _strip_env_dump_noise,
+)
 
 # ── 1. /dev/null 等安全重定向目标不再误伤 ─────────────────────
 
@@ -67,7 +73,52 @@ def test_dev_null_like_suffix_still_dangerous():
 def test_device_overwrite_consent_always():
     tool = ShellTool()
     assert tool.consent_always(command="echo x > /dev/sda")
-    assert tool.consent_always(command="rm -rf /tmp/x")
+    assert tool.consent_always(command="rm -rf /home/user/data")
+
+
+# ── 2.5 rm -rf /tmp/... 不算高危（临时目录清理极常见，免弹窗）──
+
+def test_rm_tmp_not_dangerous():
+    """rm -rf /tmp/... 降级为普通命令：不判高危、consent_always=False。"""
+    tool = ShellTool()
+    for cmd in ("rm -rf /tmp/ethan", "rm -rf /tmp/ethan/server.pid", "rm -r /tmp/cache", "rm -f /tmp/lock"):
+        assert not tool.consent_always(command=cmd), cmd
+        assert not (tool.consent_check(command=cmd) or "").startswith("⚠️ 高危"), cmd
+
+
+def test_rm_tmp_multi_target_still_dangerous():
+    """rm 目标除了 /tmp 还有别的路径（或拼接命令）→ 仍判高危。"""
+    tool = ShellTool()
+    assert tool.consent_always(command="rm -rf /tmp/foo /home/user")
+    assert tool.consent_always(command="rm -rf /tmp/foo && rm -rf /home")
+
+
+# ── 2.6 env-dump 检测：引号内正则参数不再误判 ──────────────────
+
+def test_grep_regex_env_alternation_not_env_dump():
+    """grep/sed 正则参数里的 '(a|env|svg)$' 不是 env dump 命令（引号内是参数）。
+
+    根因：_ENV_DUMP_RE 的 `env(?=\\s*[;&|])` 把正则交替符 | 当成 shell 管道。
+    修复：检测前用 _strip_env_dump_noise 剔除引号字面量。
+    """
+    tool = ShellTool()
+    review = (
+        r"""jq -r '.[]' /tmp/pr.json """
+        r"""| grep -vE '\.(jsonl|conf|env|svg|png|min\.js)$' """
+        r"""| grep -vE '(_test\.(go|py)$|(^|/)(tests?|__tests__|spec|e2e)/)'"""
+    )
+    assert not _ENV_DUMP_RE.search(_strip_env_dump_noise(review))
+    assert not tool.consent_always(command=review)
+    assert "泄露环境变量" not in (tool.consent_check(command=review) or "")
+
+
+def test_real_env_dump_still_detected():
+    """真正的 env/printenv/set dump 命令必须仍被拦截。"""
+    tool = ShellTool()
+    for cmd in ("env", "env; echo done", "printenv | grep KEY", "set | grep TOKEN",
+                "export -p", "declare -x", "compgen -v", "cat foo && env"):
+        assert _ENV_DUMP_RE.search(_strip_env_dump_noise(cmd)), cmd
+        assert tool.consent_always(command=cmd), cmd
 
 
 # ── 3. Provider 行为：超级权限 vs 自动 vs 普通 web ────────────
