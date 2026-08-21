@@ -254,8 +254,15 @@ def _is_valid_image(path: Path) -> bool:
     try:
         if not path.is_file() or path.stat().st_size <= 0:
             return False
+    except OSError:
+        return False
+    try:
         from PIL import Image
-
+    except ImportError:
+        # Pillow 缺失做不了深度校验：宁可保守认为已生成的图有效（重新生图有
+        # API 费用），不能把用户已生成的姿势图全删了重来。
+        return True
+    try:
         with Image.open(path) as img:
             img.verify()
         return True

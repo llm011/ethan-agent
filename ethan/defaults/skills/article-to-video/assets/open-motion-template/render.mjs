@@ -10,6 +10,12 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// 与 video_pipeline.py 的 ID_RE 一致：kebab-case。stills 会把 scene.id 拼进输出
+// 文件名，非法 id 可逃逸 stillsDir，重复 id 会静默互相覆盖。
+// 必须定义在模块顶部：stills 分支在顶层 await exportStills()，此时文件底部的
+// const 尚未初始化（TDZ），引用会直接 ReferenceError。
+const SCENE_ID_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
 // ── CLI arguments ──
 // 视频模式:  node render.mjs <timeline.json> <output.mp4> <cover.png> <report.json> <public-dir>
 // 静帧模式:  node render.mjs stills <timeline.json> <stills-dir> <public-dir>
@@ -21,9 +27,10 @@ if (argv[0] === "stills") {
     throw new Error("Usage: node render.mjs stills <timeline.json> <stills-dir> <public-dir>");
   }
   await exportStills(path.resolve(timelineArg), path.resolve(stillsDirArg), path.resolve(publicArg));
-  // 不用 process.exit(0)：它不等异步 I/O 排空，stdout 报告可能被截断；
-  // exportStills 返回时 server/browser 均已关闭，事件循环自然结束。
-  process.exitCode = 0;
+  // ESM 禁止顶层 return，不显式退出会落入下方视频模式的参数解析（stills 只带 4 个
+  // 参数，必然 Usage 报错、exit 1）。POSIX 下 stdout 管道/TTY 写是同步的，
+  // process.exit 不会截断报告。
+  process.exit(0);
 }
 
 const [timelinePathArg, outputPathArg, coverPathArg, reportPathArg, publicDirArg] = argv;
@@ -431,10 +438,6 @@ async function startAssetServer(distDir, publicRoot) {
 // clean-plate 通过 presenter.forceHidden 只藏立绘图层、不动硬车道布局，
 // 两张图的文字/数据位置才逐像素对齐（h3-presenter-pipeline.md 的镜头包契约）。
 
-// 与 video_pipeline.py 的 ID_RE 一致：kebab-case。stills 会把 scene.id 拼进输出
-// 文件名，非法 id 可逃逸 stillsDir，重复 id 会静默互相覆盖。
-const SCENE_ID_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-
 async function exportStills(timelinePath, stillsDir, publicDir) {
   const timeline = JSON.parse(fs.readFileSync(timelinePath, "utf8"));
   const scenes = Array.isArray(timeline.scenes) ? timeline.scenes : [];
@@ -500,10 +503,17 @@ async function exportStills(timelinePath, stillsDir, publicDir) {
             ? {...timeline, presenter: {...timeline.presenter, forceHidden: true}}
             : timeline;
         const page = await openStillPage({browser, url, config, frame: frameForScene(scenes[0]), inputProps});
+        let currentFrame = frameForScene(scenes[0]);
         try {
           for (const scene of scenes) {
             const frame = frameForScene(scene);
-            await seekStillFrame({page, config, frame});
+            // 帧号与页面当前帧相同就不能派发 frame-update：React 对相同值的 setState
+            // 会 bail out 且不重跑 effect，READY 永远回不到 true → waitForFunction
+            // 60s 超时。库的 renderFrames 同样只对首帧之后的帧走换帧路径。
+            if (frame !== currentFrame) {
+              await seekStillFrame({page, config, frame});
+              currentFrame = frame;
+            }
             const file = path.join(stillsDir, `${scene.id}-${variant}.png`);
             await page.screenshot({path: file, type: "png"});
             stills.push({sceneId: scene.id, variant, frame, path: file});
@@ -558,6 +568,9 @@ async function openStillPage({browser, url, config, frame, inputProps}) {
       return ready && delayCount === 0;
     }, undefined, {timeout: 60000});
     await page.waitForLoadState("networkidle");
+    // 首帧不走 seekStillFrame（同帧重复派发会挂死，见调用方注释），稳定等待放在这里。
+    await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 150)));
+    await new Promise((resolve) => setTimeout(resolve, 100));
     return page;
   } catch (error) {
     await page.close().catch(() => {});

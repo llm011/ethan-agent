@@ -24,7 +24,7 @@
 
 ```json
 {
-  "name": "zh-CN-XiaoxiaoNeural",
+  "name": "zh-CN-XiaoyiNeural",
   "rate": "+5%",
   "volume": "+0%",
   "pitch": "+0Hz"
@@ -147,7 +147,7 @@
   "language": "zh-CN",
   "sourceUrl": "https://example.com/attention",
   "voice": {
-    "name": "zh-CN-XiaoxiaoNeural",
+    "name": "zh-CN-XiaoyiNeural",
     "rate": "+5%",
     "volume": "+0%",
     "pitch": "+0Hz"
