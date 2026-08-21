@@ -451,21 +451,97 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
   const prevSessionRef = useRef(initialSessionId);
   const queueDrainTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const bgDrainAbortRef = useRef<AbortController | null>(null);
+
+  // 后台 drain：轮询旧会话直到 active_run=false，然后逐条发送排队消息
+  const startBgDrain = useCallback((sessionId: string) => {
+    bgDrainAbortRef.current?.abort();
+    const ac = new AbortController();
+    bgDrainAbortRef.current = ac;
+
+    (async () => {
+      const POLL_INTERVAL = 2000;
+      const MAX_POLLS = 300;
+
+      for (let i = 0; i < MAX_POLLS; i++) {
+        if (ac.signal.aborted) return;
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL));
+        if (ac.signal.aborted) return;
+
+        // 如果用户切回了这个会话，停止后台 drain，交给前台 effect 处理
+        if (prevSessionRef.current === sessionId) {
+          return;
+        }
+
+        try {
+          const detail = await fetchSession(sessionId);
+          if (detail.active_run) continue;
+        } catch {
+          return;
+        }
+
+        // active_run=false，开始发送排队消息
+        const store = inputStoreRef.current;
+        const q = store.getQueueForSession(sessionId);
+        if (q.length === 0) return;
+
+        const first = q[0];
+        store.removeFromQueueForSession(sessionId, first.id);
+
+        const chatMessages: ChatMessage[] = [{ role: "user", content: first.text }];
+        if (first.images && first.images.length > 0) {
+          chatMessages[0].images = first.images
+            .filter((f) => f.isImage)
+            .map((img) => ({
+              data: img.dataUrl?.split(",")[1] ?? "",
+              media_type: img.dataUrl?.split(";")[0].replace("data:", "") ?? "image/png",
+            }));
+        }
+
+        try {
+          const stream = streamChat(chatMessages, undefined, sessionId, { signal: ac.signal });
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          for await (const _ of stream) {
+            if (ac.signal.aborted) return;
+          }
+        } catch {
+          return;
+        }
+
+        // 发送完一条后，检查是否还有更多排队消息 — 继续循环等下一轮 active_run=false
+      }
+    })();
+  }, []);
+
   useEffect(() => {
     // 仅 streaming 从 true→false 时 drain 队列；切会话（initialSessionId 变化）不触发
     const sessionChanged = prevSessionRef.current !== initialSessionId;
+    const oldSession = prevSessionRef.current;
     prevSessionRef.current = initialSessionId;
     if (sessionChanged) {
-      // 切换会话时取消尚未执行的排队消息发送，防止它发到新会话
+      // 切换会话时取消尚未执行的排队消息发送（前台 timer），防止它发到新会话
       if (queueDrainTimerRef.current !== undefined) {
         clearTimeout(queueDrainTimerRef.current);
         queueDrainTimerRef.current = undefined;
+      }
+      // 如果旧会话有排队消息，启动后台 drain
+      if (oldSession) {
+        const store = inputStoreRef.current;
+        const q = store.getQueueForSession(oldSession);
+        if (q.length > 0) {
+          startBgDrain(oldSession);
+        }
       }
       return;
     }
 
     if (!streaming) {
       setTimeout(() => inputRef.current?.focus(), 50);
+      // 用户切回时如果有后台 drain 在跑，停掉，交给前台处理
+      if (bgDrainAbortRef.current && initialSessionId) {
+        bgDrainAbortRef.current.abort();
+        bgDrainAbortRef.current = null;
+      }
       // streaming 结束后，如果有排队消息，自动发送第一条（附带其图片）
       const store = inputStoreRef.current;
       if (store.queue.length > 0) {
