@@ -136,6 +136,19 @@ export const markdownComponents: Components = {
       <table>{children}</table>
     </div>
   ),
+  // 外链一律新开标签页，避免点击后把当前会话页面顶走（回不来）。
+  // 锚点链接（#xxx）保持默认行为，仍在页内跳转。
+  a: ({ href, children }) => {
+    const url = String(href || "");
+    if (!url || url.startsWith("#")) {
+      return <a href={href}>{children}</a>;
+    }
+    return (
+      <a href={href} target="_blank" rel="noopener noreferrer">
+        {children}
+      </a>
+    );
+  },
 };
 
 // 气泡与阅读模式共用同一个渲染入口，确保 DOM 文本节点序列完全一致，
