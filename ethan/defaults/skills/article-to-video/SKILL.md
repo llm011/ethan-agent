@@ -131,7 +131,7 @@ Edge TTS 是第三方库连接的在线服务。网络失败时最多重试三�
 
 流程概要（每个 presenter 场景）：
 
-1. 用 stills `--first-frame` 导出场景起点帧 `combined-reference.png`（首帧是 Seedance 图生视频的起点）：
+1. 用 stills `--first-frame` 导出场景稳定帧 `combined-reference.png`（取场景 50% 处——揭示动画完成、淡出未开始；Seedance 会把画面冻结在首帧布局，起点帧上 UI 还在入场会导致整段不完整）：
    `node ~/.ethan/skills/article-to-video/assets/open-motion-template/render.mjs stills "$PROJECT/timeline.json" <输出目录> "$PROJECT/work/public" --first-frame`
 2. `seedance_presenter_pipeline.py prepare`（台词/时长/起点 → Seedance 中文 prompt + scene.json，情绪基调自动判定）。
 3. `submit`（首帧 base64 + prompt 提交任务，真实计费）→ `poll`（轮询下载 `raw-seedance.mp4`，注意视频生成要几分钟，后台跑日志轮询）。

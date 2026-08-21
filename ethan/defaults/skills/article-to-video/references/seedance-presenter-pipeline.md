@@ -46,7 +46,8 @@ seedance:
 PIPE=~/.ethan/skills/article-to-video/scripts
 # 0. 渲染完成后拿到 final.mp4 / timeline.json
 
-# 1. 导出场景起点帧（--first-frame 是关键：2/3 帧会让场景开头瞬移）
+# 1. 导出场景稳定帧（--first-frame 取场景 50% 处：揭示动画已完成、淡出未开始；
+#    Seedance 会把整段画面冻结在首帧布局上，喂起点帧会让 UI 整段不完整）
 node ~/.ethan/skills/article-to-video/assets/open-motion-template/render.mjs stills \
   "$PROJECT/timeline.json" "$PROJECT/work/seedance/stills" "$PROJECT/work/public" --first-frame
 
@@ -105,6 +106,10 @@ python3 "$PIPE/seedance_presenter_pipeline.py" verify --scene-dir <场景目录>
 |---|---|
 | `mode` 报 seedance 未配置 | config.yaml 段不完整（gateway_url/api_key/edge_secret/models.video 必填）；等号后不要跟行内注释 |
 | `gateway HTTP 4xx` | 看 stderr 返回体；401/403 查 api_key 与 edge_secret，400 常见为 resolution 与模型档不符（fast/mini 已自动降 720p） |
+| `gateway HTTP 403` 且返回体含 `code: 1010` | Cloudflare Browser Integrity Check 封禁非浏览器 UA（与凭证无关）；管线已内置浏览器 UA（`_BROWSER_UA`），若仍出现说明 UA 过期，更新该常量即可 |
+| poll 轮询期间网络抖动 / 网关 5xx / 429 | 已自动按间隔递增重试（上限 60s）直到 deadline；只有 4xx 永久错误会立刻中止 |
 | poll 超时 | 默认 900s，`--timeout` 调大；任务失败会带平台 error 信息 |
+| compose 报像素格式/concat 错误 | 已在 splice filter 各段归一 `format=yuv420p`（Seedance 可能返回 10bit）；仍报错时用 `ffprobe` 查 raw-seedance.mp4 的 pix_fmt |
+| 参考图格式问题 | prepare 按魔数嗅探真实格式落盘（jpg 也会以 `.jpg` 存并按 `image/jpeg` 传输）；不支持的格式直接报错 |
 | 首帧图 >30MB | 压缩（1080x1920 PNG 正常 <3MB）或 `--image-url` 公网地址 |
 | 替换后音画错位 | 检查 `--start-seconds/--duration` 是否与 timeline.json 一致（startMs/durationMs ÷1000） |

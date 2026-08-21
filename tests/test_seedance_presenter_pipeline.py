@@ -439,3 +439,157 @@ def test_load_scene_rejects_non_seedance_package(tmp_path):
     (tmp_path / "scene.json").unlink()
     with pytest.raises(seedance.PipelineError):  # scene.json 缺失
         seedance._load_scene(tmp_path)
+
+
+# ── 瞬态错误分类与 poll 重试 ────────────────────────────────────────────────
+
+
+def _http_error(code: int):
+    import urllib.error
+
+    return urllib.error.HTTPError(
+        url="https://gw/x", code=code, msg="err", hdrs=None, fp=None
+    )
+
+
+def test_http_json_classifies_transient_and_permanent(monkeypatch):
+    import urllib.error
+
+    config = seedance.GatewayConfig(
+        gateway_url="https://gw", api_key="k", edge_secret="s", models={"video": "ep"}
+    )
+
+    def fake_urlopen_raising(exc):
+        def urlopen(request, timeout=None):
+            raise exc
+
+        return urlopen
+
+    # 5xx / 429 / 网络不可达 → 瞬态（可重试）
+    for exc in (_http_error(502), _http_error(429),
+                urllib.error.URLError("connection reset")):
+        monkeypatch.setattr(
+            seedance.urllib.request, "urlopen", fake_urlopen_raising(exc)
+        )
+        with pytest.raises(seedance.TransientGatewayError):
+            seedance._http_json(config, "GET", "/x")
+    # 4xx 永久错误 → 普通 PipelineError
+    monkeypatch.setattr(
+        seedance.urllib.request, "urlopen", fake_urlopen_raising(_http_error(401))
+    )
+    with pytest.raises(seedance.PipelineError) as excinfo:
+        seedance._http_json(config, "GET", "/x")
+    assert not isinstance(excinfo.value, seedance.TransientGatewayError)
+
+
+def test_poll_retries_transient_then_succeeds(tmp_path, monkeypatch):
+    scene_dir = _prepared_scene(tmp_path, monkeypatch)
+    metadata = json.loads((scene_dir / "scene.json").read_text(encoding="utf-8"))
+    metadata["seedance"]["taskId"] = "t-retry"
+    h3._write_text_atomic(
+        scene_dir / "scene.json", json.dumps(metadata, ensure_ascii=False, indent=2) + "\n"
+    )
+
+    calls = iter(
+        [
+            seedance.TransientGatewayError("cannot reach gateway: reset"),
+            seedance.TransientGatewayError("gateway HTTP 502 on GET /x: bad gw"),
+            {"data": {"status": "succeeded", "content": {"video_url": "https://cdn/x.mp4"}}},
+        ]
+    )
+
+    def fake_http(config, method, path, payload=None, timeout=60):
+        first = next(calls)
+        if isinstance(first, Exception):
+            raise first
+        return first
+
+    monkeypatch.setattr(seedance, "_http_json", fake_http)
+    monkeypatch.setattr(seedance.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(
+        seedance, "_download", lambda url, destination, timeout=600: destination.write_bytes(PNG_1PX)
+    )
+    result = seedance.poll_task(scene_dir=scene_dir, timeout_seconds=30)
+    assert result["status"] == "ok"  # 抖动两次后成功，任务没有作废
+
+
+def test_poll_transient_error_aborts_at_deadline(tmp_path, monkeypatch):
+    scene_dir = _prepared_scene(tmp_path, monkeypatch)
+    metadata = json.loads((scene_dir / "scene.json").read_text(encoding="utf-8"))
+    metadata["seedance"]["taskId"] = "t-dead"
+    h3._write_text_atomic(
+        scene_dir / "scene.json", json.dumps(metadata, ensure_ascii=False, indent=2) + "\n"
+    )
+    monkeypatch.setattr(
+        seedance, "_http_json",
+        lambda *a, **k: (_ for _ in ()).throw(seedance.TransientGatewayError("down")),
+    )
+    monkeypatch.setattr(seedance.time, "sleep", lambda seconds: None)
+    # 递增时钟：deadline=5，下一次读数 5 → 到点放弃（恒定假时钟会死循环）
+    ticks = iter(range(0, 100, 5))
+    monkeypatch.setattr(seedance.time, "monotonic", lambda: next(ticks))
+    with pytest.raises(seedance.PipelineError, match="持续不可用"):
+        seedance.poll_task(scene_dir=scene_dir, timeout_seconds=5)
+
+
+# ── 图片格式嗅探（#4：不信任文件后缀） ─────────────────────────────────────
+
+
+JPEG_1PX = bytes.fromhex("ffd8ffe000104a46494600010100000100010000ffd9")
+
+
+def test_sniff_image_detects_real_format(tmp_path):
+    jpg_named_png = tmp_path / "ref.png"
+    jpg_named_png.write_bytes(JPEG_1PX)
+    assert seedance._sniff_image(jpg_named_png) == ("jpg", "jpeg")
+    png = tmp_path / "real.png"
+    png.write_bytes(PNG_1PX)
+    assert seedance._sniff_image(png) == ("png", "png")
+    bogus = tmp_path / "bogus.png"
+    bogus.write_bytes(b"not an image at all")
+    with pytest.raises(seedance.PipelineError, match="图片格式"):
+        seedance._sniff_image(bogus)
+
+
+def test_prepare_stores_jpeg_reference_with_real_extension(monkeypatch, tmp_path):
+    (tmp_path / "ref.png").write_bytes(JPEG_1PX)  # jpg 字节流顶着 png 名字
+    _fake_probe(monkeypatch)
+    config = seedance.GatewayConfig(
+        gateway_url="https://gw", api_key="k", edge_secret="s",
+        models={"video": "ep-video"}, resolution="1080p",
+    )
+    monkeypatch.setattr(seedance, "load_gateway_config", lambda path=None: config)
+    seedance.prepare_scene(
+        scene_dir=tmp_path / "scene", combined_reference=tmp_path / "ref.png",
+        dialogue="测试台词", duration_seconds=5.0,
+    )
+    scene_dir = tmp_path / "scene"
+    metadata = json.loads((scene_dir / "scene.json").read_text(encoding="utf-8"))
+    stored = Path(metadata["references"]["firstFrame"])
+    assert stored.name == "combined-reference.jpg"
+    # base64 传输按真实 mime 编码，不会再出现 jpg→data:image/png
+    transport, value = seedance._image_transport(stored, None)
+    assert transport == "base64" and value.startswith("data:image/jpeg;base64,")
+
+
+# ── splice filter 与 dry-run ────────────────────────────────────────────────
+
+
+def test_splice_filter_normalizes_pixel_format():
+    graph = seedance._splice_filter(3.0, 5.0, 60.0, 1080, 1920, "30/1")
+    # 三段链尾都归一 yuv420p：Seedance 可能返回 10bit，直接 concat 会格式不匹配
+    assert graph.count("format=yuv420p") == 3
+    head_graph = seedance._splice_filter(0.0, 5.0, 5.0, 1080, 1920, "30/1")
+    assert head_graph.count("format=yuv420p") == 1  # 只有 [seg]
+
+
+def test_submit_dry_run_skips_base64_encoding(tmp_path, monkeypatch):
+    scene_dir = _prepared_scene(tmp_path, monkeypatch)
+
+    def fail_transport(*args, **kwargs):
+        raise AssertionError("dry-run 不应读取/编码整图")
+
+    monkeypatch.setattr(seedance, "_image_transport", fail_transport)
+    result = seedance.submit_task(scene_dir=scene_dir, dry_run=True)
+    assert result["status"] == "dry-run"
+    assert "omitted" in result["payload"]["content"][1]["image_url"]["url"]

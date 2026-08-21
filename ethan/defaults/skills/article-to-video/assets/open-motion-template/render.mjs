@@ -481,12 +481,14 @@ async function exportStills(timelinePath, stillsDir, publicDir, {firstFrameMode 
     ? Math.max(0, Math.ceil((timeline.totalDurationMs / 1000) * fps) - 1)
     : Infinity;
   // 取场景 2/3 处的帧：揭示动画（前 40%）与 marker 弹簧已稳定，场景淡出（末 9 帧）未开始。
-  // --first-frame（Seedance 图生视频）：取场景起点帧，作为生成视频的第一帧。
+  // --first-frame（Seedance 图生视频）：Seedance 会把整段画面冻结在首帧布局上，
+  // 因此必须喂"揭示完成后"的稳定帧（50% 处）。起点帧上标题/图表还在入场动画中
+  // （甚至 opacity 0），生成视频里 UI 会整段不完整。
   const frameForScene = (scene) => {
-    if (firstFrameMode) {
-      return Math.min(maxFrame, Math.max(0, Math.round((scene.startMs / 1000) * fps)));
-    }
-    return Math.min(maxFrame, Math.max(0, Math.round(((scene.startMs + (scene.durationMs * 2) / 3) / 1000) * fps)));
+    const atMs = firstFrameMode
+      ? scene.startMs + scene.durationMs / 2
+      : scene.startMs + (scene.durationMs * 2) / 3;
+    return Math.min(maxFrame, Math.max(0, Math.round((atMs / 1000) * fps)));
   };
   const tmpDir = path.join(stillsDir, "temp");
   const distDir = path.join(tmpDir, "vite-dist");

@@ -37,6 +37,40 @@ import h3_presenter_pipeline as h3
 
 PipelineError = h3.PipelineError
 
+
+class TransientGatewayError(PipelineError):
+    """网络不可达 / 网关 5xx / 429 限流——重试有意义，与 4xx 永久错误区分。"""
+
+
+# 网关前置 Cloudflare 的 Browser Integrity Check 按 UA 封禁 Python-urllib/*
+# （403 error code: 1010，与凭证无关），必须带浏览器 UA。实测 2026-08 有效。
+_BROWSER_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+)
+
+# 图片魔数 → (扩展名, mime)：复制参考帧与 base64 传输都以真实格式为准，
+# 不信任源文件后缀（jpg 字节流存成 .png 会被网关按 mime 拒收）。
+_IMAGE_MAGIC: tuple[tuple[bytes, str, str], ...] = (
+    (b"\x89PNG\r\n\x1a\n", "png", "png"),
+    (b"\xff\xd8\xff", "jpg", "jpeg"),
+    (b"BM", "bmp", "bmp"),
+)
+
+
+def _sniff_image(path: Path) -> tuple[str, str]:
+    """读魔数返回 (扩展名, mime)；RIFF 容器需进一步看 WEBP 标记。"""
+    with path.open("rb") as handle:
+        head = handle.read(16)
+    for magic, ext, mime in _IMAGE_MAGIC:
+        if head.startswith(magic):
+            return ext, mime
+    if head.startswith(b"RIFF") and head[8:12] == b"WEBP":
+        return "webp", "webp"
+    raise PipelineError(
+        f"{path.name} 不是受支持的图片格式（PNG/JPEG/WebP/BMP），请用导出的 PNG 参考帧"
+    )
+
 SEEDANCE_SECTION = "seedance"
 _MIN_DURATION, _MAX_DURATION = 4, 15
 _PROMPT_CHAR_LIMIT = 500  # 官方提示词指南：中文提示词不超过 500 字
@@ -370,6 +404,7 @@ def prepare_scene(
 
     combined_reference = h3._require_file(combined_reference, "combined reference (first frame)")
     combined_info = h3.probe_media(combined_reference)
+    combined_ext, _combined_mime = _sniff_image(combined_reference)
     plate_dest = None
     if clean_plate is not None:
         clean_plate = h3._require_file(clean_plate, "clean plate")
@@ -379,7 +414,8 @@ def prepare_scene(
                 "combined-reference and clean-plate must have identical dimensions; "
                 f"got {combined_info.width}x{combined_info.height} and {plate_info.width}x{plate_info.height}"
             )
-        plate_dest = h3._copy_asset(clean_plate, scene_dir / "references" / "clean-plate.png")
+        plate_ext, _plate_mime = _sniff_image(clean_plate)
+        plate_dest = h3._copy_asset(clean_plate, scene_dir / "references" / f"clean-plate.{plate_ext}")
 
     identity = h3._load_presenter_identity(presenter_id)
     emotion = detect_emotion(dialogue)
@@ -390,7 +426,9 @@ def prepare_scene(
     )
     prompt_path = scene_dir / "seedance-prompt.txt"
     h3._write_text_atomic(prompt_path, prompt + "\n")
-    first_frame_dest = h3._copy_asset(combined_reference, scene_dir / "references" / "combined-reference.png")
+    first_frame_dest = h3._copy_asset(
+        combined_reference, scene_dir / "references" / f"combined-reference.{combined_ext}"
+    )
     payload = {
         "version": 1,
         "provider": "seedance",
@@ -427,9 +465,7 @@ def _headers(config: GatewayConfig) -> dict[str, str]:
         "Authorization": f"Bearer {config.api_key}",
         "x-byteplus-gateway-secret": config.edge_secret,
         "Content-Type": "application/json",
-        # 网关前置 Cloudflare 的 Browser Integrity Check 按 UA 封禁 Python-urllib/*
-        # （403 error code: 1010，与凭证无关），必须带浏览器 UA。实测 2026-08 有效。
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+        "User-Agent": _BROWSER_UA,
     }
 
 
@@ -445,9 +481,12 @@ def _http_json(config: GatewayConfig, method: str, path: str, payload: dict[str,
             detail = exc.read(4096).decode("utf-8", "replace").strip()
         except Exception:  # noqa: BLE001 - HTTPError.read 自身失败时保底
             detail = ""
-        raise PipelineError(f"gateway HTTP {exc.code} on {method} {path}: {detail[:500]}") from exc
+        message = f"gateway HTTP {exc.code} on {method} {path}: {detail[:500]}"
+        if exc.code >= 500 or exc.code == 429:
+            raise TransientGatewayError(message) from exc
+        raise PipelineError(message) from exc
     except urllib.error.URLError as exc:
-        raise PipelineError(f"cannot reach gateway {config.gateway_url}: {exc.reason}") from exc
+        raise TransientGatewayError(f"cannot reach gateway {config.gateway_url}: {exc.reason}") from exc
     if not body:
         return None
     try:
@@ -493,16 +532,16 @@ def video_url_from(data: Any) -> str | None:
 
 
 def _image_transport(image_path: Path, image_url_override: str | None) -> tuple[str, str]:
-    """返回 (transport, value)：外部 URL 或 base64 data URI。"""
+    """返回 (transport, value)：外部 URL 或 base64 data URI。
+
+    mime 以魔数嗅探为准，不信任文件后缀——防止 jpg 字节流顶着 .png
+    名字被编码成 data:image/png 导致网关拒收。
+    """
     if image_url_override:
         if not image_url_override.startswith(("http://", "https://")):
             raise PipelineError("--image-url 必须是 http(s) 公网地址")
         return "url", image_url_override
-    mime = image_path.suffix.lower().lstrip(".") or "png"
-    if mime == "jpg":
-        mime = "jpeg"
-    if mime not in ("png", "jpeg", "webp", "bmp"):
-        raise PipelineError(f"first-frame 参考不支持 {mime} 格式，请用 PNG")
+    _ext, mime = _sniff_image(image_path)
     size = image_path.stat().st_size
     if size > _MAX_IMAGE_BYTES:
         raise PipelineError(
@@ -520,13 +559,17 @@ def submit_task(*, scene_dir: Path, model_key: str | None = None, image_url: str
     first_frame = h3._require_file(Path(metadata["references"]["firstFrame"]), "first-frame reference")
     config = require_gateway_config()
     model_key = model_key or metadata["seedance"].get("modelKey", "video")
-    transport, value = _image_transport(first_frame, image_url)
+    if dry_run and image_url is None:
+        # dry-run 只为校验请求结构：不把整图 base64 读进内存。
+        image_url_value = "<base64 omitted in dry-run>"
+    else:
+        _transport, image_url_value = _image_transport(first_frame, image_url)
     payload = {
         "model": config.model_endpoint(model_key),
         # content 数组顺序是官方硬性要求：text → image_url → video_url → audio_url
         "content": [
             {"type": "text", "text": prompt},
-            {"type": "image_url", "image_url": {"url": value}, "role": "first_frame"},
+            {"type": "image_url", "image_url": {"url": image_url_value}, "role": "first_frame"},
         ],
         "generate_audio": bool(metadata.get("generateAudio", False)),
         "ratio": metadata["ratio"],
@@ -534,10 +577,11 @@ def submit_task(*, scene_dir: Path, model_key: str | None = None, image_url: str
         "duration": int(metadata["requestedDuration"]),
         "watermark": False,
     }
-    trace_payload = json.loads(json.dumps(payload))
-    trace_payload["content"][1]["image_url"]["url"] = f"<{transport}:{len(value)} chars omitted>"
     if dry_run:
-        return {"status": "dry-run", "payload": trace_payload}
+        return {"status": "dry-run", "payload": payload}
+    trace_payload = json.loads(json.dumps(payload))
+    if image_url is None:
+        trace_payload["content"][1]["image_url"]["url"] = "<base64 omitted>"
     h3._write_text_atomic(scene_dir / "seedance-request.json", json.dumps(trace_payload, ensure_ascii=False, indent=2) + "\n")
     response = _http_json(config, "POST", "/contents/generations/tasks", payload, timeout=120)
     task_id = task_id_from(response)
@@ -575,8 +619,27 @@ def poll_task(*, scene_dir: Path, timeout_seconds: float = 900.0, interval_secon
     config = require_gateway_config()
     deadline = time.monotonic() + timeout_seconds
     status = ""
+    consecutive_errors = 0
     while True:
-        response = _http_json(config, "GET", f"/contents/generations/tasks/{task_id}", timeout=30)
+        try:
+            response = _http_json(config, "GET", f"/contents/generations/tasks/{task_id}", timeout=30)
+            consecutive_errors = 0
+        except TransientGatewayError as exc:
+            # 任务已提交已计费：网络抖动 / 网关 5xx / 429 限流只重试不放弃，
+            # 直到 deadline；4xx 永久错误仍从 _http_json 直接抛出。
+            consecutive_errors += 1
+            if time.monotonic() >= deadline:
+                raise PipelineError(
+                    f"轮询超时（{timeout_seconds:g}s）：网关持续不可用，"
+                    f"最后错误：{exc}（task={task_id}）"
+                ) from exc
+            wait = min(interval_seconds * consecutive_errors, 60.0)
+            print(
+                f"task={task_id} 轮询暂时失败（第 {consecutive_errors} 次）：{exc}，{wait:g}s 后重试",
+                file=sys.stderr,
+            )
+            time.sleep(wait)
+            continue
         status = task_status_from(response)
         if status in _TERMINAL_OK:
             video_url = video_url_from(response)
@@ -621,16 +684,19 @@ def _splice_filter(start: float, duration: float, total: float, width: int, heig
     end = start + duration
     parts = []
     labels = []
+    # 每段链尾 format=yuv420p：Seedance 可能返回 10bit（yuv420p10le），
+    # 与舞台 8bit 段直接 concat 会因像素格式不一致报错；编码端 -pix_fmt
+    # 救不了 filter 阶段的格式协商，必须在 filter 里归一。
     if start > 0.001:
-        parts.append(f"[0:v]trim=duration={start:.3f},setpts=PTS-STARTPTS[pre]")
+        parts.append(f"[0:v]trim=duration={start:.3f},setpts=PTS-STARTPTS,format=yuv420p[pre]")
         labels.append("[pre]")
     parts.append(
         f"[1:v]fps={fps},scale={width}:{height}:force_original_aspect_ratio=increase,"
-        f"crop={width}:{height},trim=duration={duration:.3f},setpts=PTS-STARTPTS[seg]"
+        f"crop={width}:{height},trim=duration={duration:.3f},setpts=PTS-STARTPTS,format=yuv420p[seg]"
     )
     labels.append("[seg]")
     if end < total - 0.001:
-        parts.append(f"[0:v]trim=start={end:.3f},setpts=PTS-STARTPTS[post]")
+        parts.append(f"[0:v]trim=start={end:.3f},setpts=PTS-STARTPTS,format=yuv420p[post]")
         labels.append("[post]")
     parts.append(f"{''.join(labels)}concat=n={len(labels)}:v=1:a=0[outv]")
     return ";".join(parts)
