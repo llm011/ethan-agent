@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -56,11 +57,23 @@ DEFAULT_MOTION_PLAN = """0.0–1.5s: {name} faces the camera with a warm smile a
 5.5–6.5s: Lower the hand slightly and return to a reassuring smile. Hair and outfit details have subtle secondary motion."""
 
 
-def _run(command: list[str], *, capture: bool = True) -> subprocess.CompletedProcess[str]:
+def _run(
+    command: list[str], *, capture: bool = True, timeout: float = 1800.0
+) -> subprocess.CompletedProcess[str]:
     try:
-        result = subprocess.run(command, check=False, text=True, capture_output=capture)
+        result = subprocess.run(
+            command,
+            check=False,
+            text=True,
+            capture_output=capture,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+        )
     except FileNotFoundError as exc:
         raise PipelineError(f"required executable not found: {command[0]}") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise PipelineError(f"command timed out after {timeout:g}s ({' '.join(command)})") from exc
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "unknown error").strip()
         raise PipelineError(f"command failed ({' '.join(command)}): {detail}")
@@ -85,7 +98,8 @@ def _probe_json(path: Path) -> dict[str, Any]:
             "-of",
             "json",
             str(path),
-        ]
+        ],
+        timeout=60,
     )
     try:
         return json.loads(result.stdout)
@@ -97,7 +111,8 @@ def probe_media(path: Path) -> MediaInfo:
     """Return the first video stream and audio presence using ffprobe."""
     path = _require_file(path, "media")
     payload = _probe_json(path)
-    streams = payload.get("streams") or []
+    # 畸形 ffprobe 输出里可能混入非 dict 元素，先过滤再取字段。
+    streams = [stream for stream in (payload.get("streams") or []) if isinstance(stream, dict)]
     video = next((stream for stream in streams if stream.get("codec_type") == "video"), None)
     if not isinstance(video, dict):
         raise PipelineError(f"media has no video stream: {path}")
@@ -123,6 +138,29 @@ def _ratio(info: MediaInfo) -> float:
     return info.width / info.height
 
 
+def _parse_frame_rate(value: str | None, default: float = 25.0) -> float:
+    """解析 ffprobe 的 r_frame_rate（"N/D" 格式）。分母为 0、非法或缺省时回退 default。"""
+    if isinstance(value, str):
+        parts = value.strip().split("/")
+        if len(parts) in (1, 2):
+            try:
+                numbers = [float(part) for part in parts]
+            except ValueError:
+                return default
+            numerator = numbers[0]
+            denominator = numbers[1] if len(numbers) == 2 else 1.0
+            if numerator > 0 and denominator > 0:
+                return numerator / denominator
+    return default
+
+
+def _frame_rate_option(fps: str | None) -> str:
+    """给 -framerate / nullsrc r= 的参数：合法时原样复用 r_frame_rate，否则回退 25。"""
+    if isinstance(fps, str) and fps.strip() and _parse_frame_rate(fps, default=0.0) > 0:
+        return fps.strip()
+    return "25"
+
+
 def _validate_reference_pair(combined: Path, clean_plate: Path) -> tuple[MediaInfo, MediaInfo]:
     combined_info = probe_media(combined)
     plate_info = probe_media(clean_plate)
@@ -144,6 +182,9 @@ def _read_text_argument(value: str | None, file_path: Path | None, label: str) -
     return value.strip()
 
 
+_PRESENTER_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]+")
+
+
 def _presenter_character_path(presenter_id: str) -> Path:
     # 与 presenter_gen.py 的 data_dir()/library_root() 约定保持一致
     # （脚本在 uv --isolated 下运行，不能 import ethan；为可独立拷贝也不 import 兄弟脚本）。
@@ -156,13 +197,22 @@ def _load_presenter_identity(presenter_id: str | None) -> dict[str, Any]:
     """H3 prompt 的 presenter 身份：默认内置小雨；传 id 时以角色包 character.json 为准。"""
     if presenter_id is None:
         return {"id": None, **DEFAULT_PRESENTER}
+    # id 会拼进资产库路径，只允许文件名安全字符，挡住 "../evil" 之类的穿越输入。
+    if not _PRESENTER_ID_PATTERN.fullmatch(presenter_id):
+        raise PipelineError(
+            f"invalid presenter id {presenter_id!r}: only letters, digits, '_' and '-' are allowed"
+        )
     path = _presenter_character_path(presenter_id)
     if not path.is_file():
         raise PipelineError(f"presenter 角色包不存在: {path}（先用 presenter_gen.py 建角色）")
     try:
         character = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise PipelineError(f"无法读取 presenter character.json: {path}") from exc
     except json.JSONDecodeError as exc:
         raise PipelineError(f"presenter character.json 无效: {path}") from exc
+    if not isinstance(character, dict):
+        raise PipelineError(f"presenter character.json 顶层必须是 JSON 对象: {path}")
     description = character.get("description")
     if not isinstance(description, str) or not description.strip():
         raise PipelineError(f"presenter character.json 缺少 description: {path}")
@@ -227,9 +277,35 @@ Polished 2D anime illustration, stable anatomy, sharp facial details, subtle nat
 def _copy_asset(source: Path, destination: Path) -> Path:
     destination.parent.mkdir(parents=True, exist_ok=True)
     pending = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
-    shutil.copy2(source, pending)
-    pending.replace(destination)
+    try:
+        shutil.copy2(source, pending)
+        os.replace(pending, destination)
+    finally:
+        # copy/replace 中途失败时清掉半成品 tmp，不留垃圾文件。
+        if pending.exists():
+            pending.unlink(missing_ok=True)
     return destination
+
+
+def _write_text_atomic(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pending = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        pending.write_text(content, encoding="utf-8")
+        os.replace(pending, path)
+    finally:
+        if pending.exists():
+            pending.unlink(missing_ok=True)
+
+
+def _validate_scene_inputs(*, duration_seconds: float, dialogue: str, motion_plan: str | None) -> None:
+    """复制任何资产前先校验纯文本输入，失败时不留下半成品 scene 目录。"""
+    if not 4 <= duration_seconds <= 15:
+        raise PipelineError("duration must be between 4 and 15 seconds for MiniMax H3")
+    if not isinstance(dialogue, str) or not dialogue.strip():
+        raise PipelineError("dialogue must be non-empty")
+    if motion_plan is not None and (not isinstance(motion_plan, str) or not motion_plan.strip()):
+        raise PipelineError("motion plan must be non-empty")
 
 
 def prepare_scene(
@@ -245,6 +321,8 @@ def prepare_scene(
     presenter_id: str | None = None,
 ) -> dict[str, Any]:
     """Create a self-contained H3 scene package for handoff to ComfyUI."""
+    # 全部纯文本校验前置：失败时不会复制任何 references 文件。
+    _validate_scene_inputs(duration_seconds=duration_seconds, dialogue=dialogue, motion_plan=motion_plan)
     combined_reference = _require_file(combined_reference, "combined reference")
     clean_plate = _require_file(clean_plate, "clean plate")
     combined_info, plate_info = _validate_reference_pair(combined_reference, clean_plate)
@@ -273,8 +351,7 @@ def prepare_scene(
         presenter=identity,
     )
     prompt_path = scene_dir / "h3-prompt.txt"
-    prompt_path.parent.mkdir(parents=True, exist_ok=True)
-    prompt_path.write_text(prompt + "\n", encoding="utf-8")
+    _write_text_atomic(prompt_path, prompt + "\n")
     payload = {
         "version": 1,
         "durationSeconds": duration_seconds,
@@ -299,7 +376,7 @@ def prepare_scene(
         },
     }
     metadata_path = scene_dir / "scene.json"
-    metadata_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _write_text_atomic(metadata_path, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
     return {"sceneDir": str(scene_dir), "prompt": str(prompt_path), "metadata": str(metadata_path), **payload}
 
 
@@ -308,7 +385,9 @@ def _fit_crop_body(width: int, height: int) -> str:
     return f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}"
 
 
-def _safe_boundary_filter(*, width: int, height: int, panel_edge_px: int, feather_px: int) -> str:
+def _safe_boundary_filter(
+    *, width: int, height: int, panel_edge_px: int, feather_px: int, frame_rate: str = "25/1"
+) -> str:
     if not 0 < panel_edge_px < width:
         raise PipelineError(f"panel edge must be within (0, {width}), got {panel_edge_px}")
     if not 0 <= feather_px <= min(160, width - panel_edge_px):
@@ -322,9 +401,10 @@ def _safe_boundary_filter(*, width: int, height: int, panel_edge_px: int, feathe
     return (
         f"[0:v]{_fit_crop_body(width, height)}[base];"
         f"[1:v]scale={width}:{height}[plate];"
-        # 遮罩只与 X 坐标有关，是静态图：geq 求值一帧（d=0.04 → nullsrc 默认 25fps 下恰一帧）
-        # 再 loop 无限重复，避免逐帧逐像素重算同一个表达式。
-        f"nullsrc=s={width}x{height}:d=0.04,format=gray,geq=lum='{expression}',loop=loop=-1:size=1[panel-mask];"
+        # 遮罩只与 X 坐标有关，是静态图：geq 求值一帧（d=0.04 在任意帧率下至少出一帧，
+        # loop 只重复第一帧）再 loop 无限重复，避免逐帧逐像素重算同一个表达式。
+        # nullsrc 的 r 与源帧率对齐，防止静态图链路把合成输出抬到 25fps。
+        f"nullsrc=s={width}x{height}:r={frame_rate}:d=0.04,format=gray,geq=lum='{expression}',loop=loop=-1:size=1[panel-mask];"
         "[plate][panel-mask]alphamerge[panel];"
         "[base][panel]overlay=0:0:format=auto[outv]"
     )
@@ -394,6 +474,10 @@ def compose_scene(
         raise PipelineError("H3 video has no audio stream; refusing to silently create a mute presenter video")
     if abs(_ratio(h3_info) - _ratio(plate_info)) > 0.08:
         raise PipelineError("H3 video and clean plate aspect ratios differ by more than 8%")
+    # clean plate 是 PNG 静图：-loop 1 输入默认 25fps，而 plate 正是 overlay 的第一输入，
+    # 不显式对齐源帧率会把合成输出整体抬到 25fps（24fps 源每秒丢一帧）。
+    frame_rate = _frame_rate_option(h3_info.fps)
+    source_fps = _parse_frame_rate(h3_info.fps)
 
     output = output.expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -404,13 +488,30 @@ def compose_scene(
         mask_info = probe_media(foreground_mask)
         if abs(_ratio(mask_info) - _ratio(h3_info)) > 0.03:
             raise PipelineError("foreground mask aspect ratio must match H3 video within 3%")
-        command.extend(["-i", str(foreground_mask), "-loop", "1", "-i", str(clean_plate)])
+        if (
+            mask_info.duration_seconds is not None
+            and h3_info.duration_seconds is not None
+            and abs(mask_info.duration_seconds - h3_info.duration_seconds) > 0.1
+        ):
+            raise PipelineError(
+                "foreground mask duration must match the H3 video within 0.1s; "
+                f"mask is {mask_info.duration_seconds:.3f}s but H3 video is "
+                f"{h3_info.duration_seconds:.3f}s. Re-export the mask with the same "
+                "frame count as the H3 video."
+            )
+        command.extend(
+            ["-i", str(foreground_mask), "-framerate", frame_rate, "-loop", "1", "-i", str(clean_plate)]
+        )
         filter_graph = _foreground_mask_filter(width=width, height=height)
         mode = "foreground-mask"
     else:
-        command.extend(["-loop", "1", "-i", str(clean_plate)])
+        command.extend(["-framerate", frame_rate, "-loop", "1", "-i", str(clean_plate)])
         filter_graph = _safe_boundary_filter(
-            width=width, height=height, panel_edge_px=int(panel_edge_px), feather_px=feather_px
+            width=width,
+            height=height,
+            panel_edge_px=int(panel_edge_px),
+            feather_px=feather_px,
+            frame_rate=frame_rate,
         )
         mode = "safe-boundary"
     command.extend(
@@ -442,6 +543,11 @@ def compose_scene(
     result = probe_media(output)
     if (result.width, result.height) != (width, height) or not result.has_audio:
         raise PipelineError("composite verification failed: output dimensions or audio stream mismatch")
+    if abs(_parse_frame_rate(result.fps) - source_fps) > 0.1:
+        raise PipelineError(
+            "composite verification failed: output frame rate "
+            f"{result.fps} does not match H3 source frame rate {h3_info.fps}"
+        )
     report = {
         "status": "ok",
         "mode": mode,
@@ -450,8 +556,10 @@ def compose_scene(
         "cleanPlate": asdict(plate_info),
         "output": str(output),
     }
-    report_path = output.with_suffix(".composition.json")
-    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    # 用 stem 显式拼接而非 with_suffix：后者做的是"替换最后一个后缀"，
+    # 遇到多点或无常规后缀的文件名（如 my.video）会把 .video 当后缀错切掉。
+    report_path = output.with_name(output.stem + ".composition.json")
+    _write_text_atomic(report_path, json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     return report
 
 
@@ -466,8 +574,20 @@ def verify_scene(scene_dir: Path, h3_video: Path | None = None) -> dict[str, Any
     refs = metadata.get("references")
     if not isinstance(refs, dict):
         raise PipelineError("scene metadata has no references object")
-    combined = _require_file(Path(str(refs.get("picture1"))), "combined reference")
-    clean_plate = _require_file(Path(str(refs.get("cleanPlate"))), "clean plate")
+    picture1 = refs.get("picture1")
+    if not isinstance(picture1, str) or not picture1.strip():
+        raise PipelineError("scene metadata references.picture1 is missing")
+    clean_plate_ref = refs.get("cleanPlate")
+    if not isinstance(clean_plate_ref, str) or not clean_plate_ref.strip():
+        raise PipelineError("scene metadata references.cleanPlate is missing")
+    combined = _require_file(Path(picture1), "combined reference")
+    clean_plate = _require_file(Path(clean_plate_ref), "clean plate")
+    # metadata 声称有 picture2（角色参考）时，必须同样校验文件真实存在。
+    picture2 = refs.get("picture2")
+    if picture2 is not None:
+        if not isinstance(picture2, str) or not picture2.strip():
+            raise PipelineError("scene metadata references.picture2 is invalid")
+        _require_file(Path(picture2), "character reference")
     combined_info, plate_info = _validate_reference_pair(combined, clean_plate)
     result: dict[str, Any] = {
         "status": "ok",

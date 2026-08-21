@@ -22,6 +22,7 @@ import json
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import urllib.request
@@ -76,27 +77,40 @@ def presenter_dir(presenter_id: str) -> Path:
     return library_root() / "presenters" / presenter_id
 
 
+# secrets 目录解析缓存：config_value 高频调用，避免每次全量扫描磁盘（进程内解析一次）。
+_secrets_cache: dict[str, str] | None = None
+
+
+def _load_secrets() -> dict[str, str]:
+    """扫 ~/.ethan/.secrets/ 下所有文件的 KEY=value（镜像 secrets_store 格式），首个命中优先。"""
+    global _secrets_cache
+    if _secrets_cache is None:
+        cache: dict[str, str] = {}
+        secrets_dir = data_dir() / ".secrets"
+        if secrets_dir.is_dir():
+            for path in sorted(secrets_dir.iterdir()):
+                if not path.is_file():
+                    continue
+                try:
+                    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+                        stripped = line.strip()
+                        if stripped.startswith("#") or "=" not in stripped:
+                            continue
+                        key, _, raw = stripped.partition("=")
+                        if key.strip():
+                            cache.setdefault(key.strip(), raw.strip().strip("'\""))
+                except OSError:
+                    continue
+        _secrets_cache = cache
+    return _secrets_cache
+
+
 def config_value(name: str) -> str | None:
     """env 优先，再兜底扫 ~/.ethan/.secrets/ 下所有文件的 KEY=value（镜像 secrets_store 格式）。"""
     value = os.environ.get(name)
     if value:
         return value
-    secrets_dir = data_dir() / ".secrets"
-    if secrets_dir.is_dir():
-        for path in sorted(secrets_dir.iterdir()):
-            if not path.is_file():
-                continue
-            try:
-                for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-                    stripped = line.strip()
-                    if stripped.startswith("#") or "=" not in stripped:
-                        continue
-                    key, _, raw = stripped.partition("=")
-                    if key.strip() == name:
-                        return raw.strip().strip("'\"")
-            except OSError:
-                continue
-    return None
+    return _load_secrets().get(name)
 
 
 def _write_json(path: Path, payload: dict) -> None:
@@ -104,11 +118,38 @@ def _write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def _validate_character(presenter_id: str, character: object) -> None:
+    """character.json 字段防护：缺字段/类型不对时友好报错退出，不让裸 KeyError 冒 traceback。"""
+    path = presenter_dir(presenter_id) / "character.json"
+
+    def _fail(field: str) -> None:
+        print(f"[error] character.json 缺少字段 {field}: {path}（先运行 prompts 子命令重建）", file=sys.stderr)
+        raise SystemExit(1)
+
+    if not isinstance(character, dict):
+        _fail("顶层对象（JSON object）")
+    name = character.get("name")
+    if not isinstance(name, str) or not name.strip():
+        _fail("name（非空字符串）")
+    sheet = character.get("sheet")
+    if not isinstance(sheet, str) or not sheet.strip():
+        _fail("sheet（非空字符串）")
+    poses_prompts = character.get("posesPrompts")
+    if not isinstance(poses_prompts, dict) or not poses_prompts:
+        _fail("posesPrompts（非空对象）")
+
+
 def _load_character(presenter_id: str) -> dict:
     path = presenter_dir(presenter_id) / "character.json"
     if not path.is_file():
         raise SystemExit(f"[error] 角色不存在: {path}（先运行 prompts 子命令）")
-    return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        character = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        print(f"[error] character.json 不是合法 JSON: {exc}", file=sys.stderr)
+        raise SystemExit(1) from None
+    _validate_character(presenter_id, character)
+    return character
 
 
 def _save_character(presenter_id: str, character: dict) -> None:
@@ -157,11 +198,14 @@ def print_prompt_pack(presenter_id: str, character: dict) -> None:
 # PNG alpha 嗅探与抠图
 # ---------------------------------------------------------------------------
 
-def png_has_alpha(path: Path) -> bool:
-    """stdlib 读 PNG 头 64KB：色类型 6=RGBA、4=灰度+alpha，或存在 tRNS 块。非 PNG 返回 False。
+def _png_header_has_alpha(path: Path) -> bool:
+    """stdlib 读 PNG 头 64KB：色类型 6=RGBA、4=灰度+alpha，或 chunk 链里存在 tRNS 块。
 
     IHDR 固定在偏移 25，tRNS 按规范必须出现在第一个 IDAT 之前（64KB 足以覆盖），
-    嗅探不必读入整文件。
+    嗅探不必读入整文件。chunk 链按 struct 解析 4 字节长度 + 4 字节类型逐块推进
+    （遇 IDAT 即停），不做 `b"tRNS" in data` 子串匹配——chunk 数据区里碰巧出现的
+    tRNS 字节会误报；每步 offset 至少前进 12 字节且以 64KB 窗口为界，畸形长度
+    不会死循环。非 PNG 返回 False。
     """
     try:
         with path.open("rb") as fh:
@@ -170,10 +214,53 @@ def png_has_alpha(path: Path) -> bool:
         return False
     if not data.startswith(b"\x89PNG\r\n\x1a\n") or len(data) < 33:
         return False
-    color_type = data[25]
-    if color_type in (4, 6):
+    if data[25] in (4, 6):
         return True
-    return b"tRNS" in data
+    offset = 8  # 跳过 8 字节签名；每个 chunk = 4B 长度 + 4B 类型 + 数据 + 4B CRC
+    while offset + 8 <= len(data):
+        (length,) = struct.unpack_from(">I", data, offset)
+        chunk_type = data[offset + 4 : offset + 8]
+        if chunk_type == b"tRNS":
+            return True
+        if chunk_type == b"IDAT":
+            return False
+        offset += 12 + length
+    return False
+
+
+def png_has_alpha(path: Path) -> bool:
+    """PNG 是否真的带透明：头部判定 + Pillow 像素级验证。
+
+    头部有 alpha 只是必要条件——RGBA 但全不透明的图会被误判已抠图，品红底
+    直接进成片。Pillow 可导入且图片能打开时，用 alpha 通道最小值 < 255 验证
+    确实存在透明像素；Pillow 不可用或图片打不开时保守沿用头部判定。
+    """
+    if not _png_header_has_alpha(path):
+        return False
+    try:
+        from PIL import Image
+    except ImportError:
+        return True
+    try:
+        with Image.open(path) as img:
+            # convert("RGBA") 兼容 P 模式带 tRNS（调色板透明色真正落到像素上）。
+            return img.convert("RGBA").getchannel("A").getextrema()[0] < 255
+    except Exception:  # noqa: BLE001 — 打不开/读不了时保守沿用头部判定
+        return True
+
+
+def _is_valid_image(path: Path) -> bool:
+    """断点续跑前的产物校验：文件存在、size>0，且 Pillow 能 open+verify。任何异常返回 False。"""
+    try:
+        if not path.is_file() or path.stat().st_size <= 0:
+            return False
+        from PIL import Image
+
+        with Image.open(path) as img:
+            img.verify()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _pip_install(*packages: str) -> bool:
@@ -181,7 +268,7 @@ def _pip_install(*packages: str) -> bool:
     in_venv = sys.prefix != getattr(sys, "base_prefix", sys.prefix)
     cmd = [sys.executable, "-m", "pip", "install", "--quiet", *([] if in_venv else ["--user"]), *packages]
     try:
-        subprocess.check_call(cmd)
+        subprocess.check_call(cmd, timeout=300)
         import site
 
         user_site = site.getusersitepackages()
@@ -591,7 +678,16 @@ def cmd_create(presenter_id: str, args: argparse.Namespace) -> None:
         name: build_pose_prompt(character["sheet"], phrase, first=index == 0)
         for index, (name, phrase) in enumerate(character["posesPrompts"].items())
     }
-    pending = [(name, prompt) for name, prompt in prompts.items() if not (staging / f"{name}.png").exists()]
+    pending = []
+    for name, prompt in prompts.items():
+        staged = staging / f"{name}.png"
+        if staged.exists() and _is_valid_image(staged):
+            continue
+        if staged.exists():
+            # exists() 即跳过会永久跳过坏文件（0 字节/截断），先删掉再重新生成。
+            print(f"  [warn] 已生成的 {name}.png 无效，删除重新生成", file=sys.stderr)
+            staged.unlink()
+        pending.append((name, prompt))
     if pending:
         # 逐姿势 HTTP 生图（单张最长 TIMEOUT 秒）：串行 6 张最坏 ~18 分钟，
         # 并行后总耗时 ≈ 最慢的一张。重跑安全：已存在的 dest 不进 pending。
@@ -678,6 +774,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
+    # 所有带 id 的子命令统一做 kebab-case 校验，堵住 ../x 之类的路径逃逸
+    # （此前 import/regen/show 只拿 id 拼 presenter_dir，未校验就落盘）。
+    if getattr(args, "id", None) is not None:
+        _validate_id(args.id)
     if args.command == "prompts":
         cmd_prompts(args.id, args)
     elif args.command == "create":

@@ -37,6 +37,9 @@ export const PresenterLayer: React.FC<{presenter: Presenter; scenes: Scene[]; la
     });
     return () => {
       cancelled = true;
+      // 卸载时必须无条件释放 handle：只设 cancelled 会让 then 分支跳过 continueRender，
+      // delayRender 计数永久 ≥1，渲染挂死到超时。重复调用 continueRender 只递减计数，安全。
+      continueRender(handle);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

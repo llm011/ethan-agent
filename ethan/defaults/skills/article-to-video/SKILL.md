@@ -51,6 +51,8 @@ test -f "$H3_ENV" && . "$H3_ENV"
 test -n "$H3_COMFYUI_URL" && echo "MODE: h3-dynamic ($H3_COMFYUI_URL)" || echo "MODE: static"
 ```
 
+注意 `h3-comfyui.env` 里等号后不要跟行内注释（如 `H3_COMFYUI_URL=http://127.0.0.1:8188 # ComfyUI`），否则变量不生效，模式检测会静默回退 static 立绘。
+
 - `MODE: static` → 走默认步骤 4–7，presenter 始终是静态立绘，不要尝试 H3 流程。
 - `MODE: h3-dynamic` → presenter 按「H3 动态 Presenter」一节走，先读 `references/h3-presenter-pipeline.md`；静态渲染仍负责 clean plate / 菜单 / 数据层。可先用 `curl -m 3 -s "$H3_COMFYUI_URL/system_stats"` 探活，连不上时提醒用户启动 ComfyUI，不自动回退静态。
 
@@ -130,8 +132,8 @@ Edge TTS 是第三方库连接的在线服务。网络失败时最多重试三�
 `scripts/h3_presenter_pipeline.py`，并先读
 `references/h3-presenter-pipeline.md`。此模式的原则是：article-to-video 产出
 `combined-reference.png`（小雨 + 舞台）与同尺寸 `clean-plate.png`（无人物）——用渲染模板的
-stills 模式成对导出（`node assets/open-motion-template/render.mjs stills "$PROJECT/timeline.json"
-<输出目录> "$PROJECT/work/public"`，clean-plate 只藏立绘、布局逐像素一致）；MiniMax H3
+stills 模式成对导出（`node ~/.ethan/skills/article-to-video/assets/open-motion-template/render.mjs stills "$PROJECT/timeline.json" <输出目录> "$PROJECT/work/public"`，
+clean-plate 只藏立绘、布局逐像素一致）；MiniMax H3
 只生成小雨动作/原生中文声音；最终将带人物遮罩的 H3 前景覆盖回 clean plate。
 
 未配置 `H3_COMFYUI_URL` 时，即使内容适合动态 presenter，也一律走静态立绘；想启用时向用户说明：在 `h3-comfyui.env` 写一行 `H3_COMFYUI_URL=http://127.0.0.1:8188` 即可。

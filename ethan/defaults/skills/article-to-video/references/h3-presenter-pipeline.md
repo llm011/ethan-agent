@@ -10,6 +10,8 @@ MiniMax H3 负责「小雨像一个人在讲」：身体动作、手势、表情
 H3_COMFYUI_URL=http://127.0.0.1:8188
 ```
 
+警告：env 文件中等号后不要写行内注释（如 `H3_COMFYUI_URL=http://127.0.0.1:8188 # ComfyUI 地址`），否则变量不生效，模式检测会静默回退 static 立绘流程。
+
 `H3_COMFYUI_URL` 指运行 MiniMax H3 Reference to Video（Ref2VA）工作流的 ComfyUI 实例地址。SKILL.md 第 3 步的模式检测读不到该变量时走静态立绘流程，不进入本流水线。运行前可用 `curl -m 3 -s "$H3_COMFYUI_URL/system_stats"` 探活；连不上时提醒用户启动 ComfyUI。
 
 最终分层顺序：
@@ -49,7 +51,7 @@ node ~/.ethan/skills/article-to-video/assets/open-motion-template/render.mjs \
 ## 1. 准备镜头包
 
 ```bash
-H3=ethan/defaults/skills/article-to-video/scripts/h3_presenter_pipeline.py
+H3=~/.ethan/skills/article-to-video/scripts/h3_presenter_pipeline.py
 
 python3 "$H3" prepare \
   --scene-dir "$PROJECT/h3-scenes/kuaishou-summary" \
@@ -88,6 +90,8 @@ python3 "$H3" prepare \
 
 建议用 SAM 2 / RVM / AE Roto Brush 跟踪「小雨全身」，而不是只框脸或身体。手臂和手指要包含在白色区域中，这样小雨能把手指伸到价格卡或图表前方。
 
+遮罩时长必须与 `raw-h3.mp4` 一致（±0.1s）：compose 会校验两者时长差，超差直接报错拒绝合成。遮罩帧数不对时按 H3 源的帧数重新导出遮罩，不要靠裁剪或放帧凑合。
+
 `safe-boundary` 是无遮罩时的快速模式：它只覆盖左侧菜单，适用于人物始终在右侧车道、手不深入内容区的镜头。它不能替代人物遮罩。
 
 ## 4. 合成最终镜头
@@ -112,7 +116,7 @@ python3 "$H3" compose \
   --output "$PROJECT/h3-scenes/kuaishou-summary/final-preview.mp4"
 ```
 
-输出尺寸默认取 `scene.json` 里 combined-reference 的原生尺寸（竖屏场景不再被压成 1280×720）；需要缩放时 `--width`/`--height` 必须成对传入。合成保留 H3 原生音轨，输出 H.264/AAC、`yuv420p`、faststart MP4，并在旁边写入 `.composition.json` 报告。
+输出尺寸默认取 `scene.json` 里 combined-reference 的原生尺寸（竖屏场景不再被压成 1280×720）；需要缩放时 `--width`/`--height` 必须成对传入。音轨用 `-c:a copy` 直拷，输出 H.264 视频 + 保留 H3 原生音轨编码、`yuv420p`、faststart MP4，并在旁边写入 `.composition.json` 报告。输出帧率严格跟随 H3 源视频：脚本会按源帧率对齐 clean plate 静图输入，不会把 24fps 源抬成静图默认的 25fps。
 
 ## 验收
 

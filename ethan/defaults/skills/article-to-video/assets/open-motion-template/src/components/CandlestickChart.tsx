@@ -85,6 +85,11 @@ export const CandlestickChart: React.FC<{
     }
     return {min: Math.min(...lows), max: Math.max(...highs)};
   }, [candles, visual.bands]);
+  // 空 closes/candles（手改 timeline 直跑渲染时可能）：Math.min(...[]) = Infinity，
+  // 坐标全 NaN。早退必须在所有 hooks 之后（hooks 不能条件执行）。
+  if (candles.length === 0) {
+    return null;
+  }
   const pad = (max - min) * 0.06 || 1e-9;
   const y = (value: number) => PAD_TOP + (1 - (value - (min - pad)) / (max - min + 2 * pad)) * (H - PAD_TOP - PAD_BOTTOM);
   const stepX = (W - PAD_X * 2) / n;
@@ -159,7 +164,8 @@ export const CandlestickChart: React.FC<{
       </g>
       {/* 标记：在其蜡烛被揭示后 +6 帧弹簧弹出 */}
       {(visual.markers ?? []).map((marker, mi) => {
-        if (marker.index >= n) return null;
+        // 手改 timeline 可能带负数/非整数 index：candles[-1] 为 undefined，下行 candle.h 直接崩
+        if (!Number.isInteger(marker.index) || marker.index < 0 || marker.index >= n) return null;
         const candle = candles[marker.index];
         const pop = spring({
           frame: Math.max(0, frame - (revealFrameAt(marker.index) + 6)),
@@ -175,8 +181,10 @@ export const CandlestickChart: React.FC<{
         // 宽芯片贴近图表左右缘时会被 SVG 视口裁掉：把芯片中心钳进视口，引线仍锚在蜡烛上。
         const candleX = cx(marker.index);
         const chipOffset = Math.min(Math.max(0, 4 - (candleX - chipW / 2)), W - 4 - (candleX + chipW / 2));
+        // transformOrigin 必须是蜡烛本地坐标 (0, anchorY)：几何以 x=0 绘制，
+        // origin 取 candleX 会让芯片在弹出期间从右侧飞入（矩阵 T(O)·transform·T(-O)）。
         return (
-          <g key={mi} opacity={pop} transform={`translate(${candleX}, 0) scale(${0.5 + pop * 0.5})`} style={{transformOrigin: `${candleX}px ${anchorY}px`}}>
+          <g key={mi} opacity={pop} transform={`translate(${candleX}, 0) scale(${0.5 + pop * 0.5})`} style={{transformOrigin: `0px ${anchorY}px`}}>
             <line x1={0} x2={0} y1={anchorY} y2={chipY + (marker.position === "above" ? 34 : 0)} stroke={color} strokeWidth={2} />
             <g transform={`translate(${chipOffset}, 0) rotate(-1.5, 0, ${chipY + 17})`}>
               <rect x={-chipW / 2} y={chipY} width={chipW} height={38} rx={9} fill={color} />

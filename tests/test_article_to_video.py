@@ -1,6 +1,8 @@
 import importlib.util
 import json
+import struct
 import sys
+import zlib
 from pathlib import Path
 
 import pytest
@@ -57,7 +59,8 @@ def test_normalize_manifest_adds_deterministic_defaults():
     assert result["width"] == 1080
     assert result["height"] == 1920
     assert result["fps"] == 30
-    assert result["voice"]["name"] == "zh-CN-XiaoxiaoNeural"
+    # 默认音色与 presenter_gen.DEFAULT_VOICE 统一为 Xiaoyi（本分支既有改动）。
+    assert result["voice"]["name"] == "zh-CN-XiaoyiNeural"
     assert result["theme"]["background"] == "#081120"
     assert result["scenes"][0]["body"] == ""
     assert result["targetDurationSec"] is None
@@ -700,3 +703,116 @@ def test_no_presenter_no_warnings_key():
     result = pipeline.normalize_manifest(sample_manifest())
 
     assert "warnings" not in result
+
+
+# ---------------------------------------------------------------------------
+# P2 修复回归：非有限数值 / png_has_alpha / CLI id 校验 / 极端窄画布 / voice 继承报错
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_candlestick_non_finite_numbers_rejected(bad):
+    # NaN/Infinity 能通过 isinstance(float) 检查，但渲染成 K 线必炸，必须在校验层拦下。
+    manifest = finance_manifest()
+    closes = closes_series()
+    closes[0] = bad
+    manifest["scenes"][0]["visual"] = {"type": "candlestick", "closes": closes}
+
+    with pytest.raises(pipeline.ManifestError, match="finite"):
+        pipeline.normalize_manifest(manifest)
+
+
+def test_png_has_alpha_fully_opaque_rgba_is_false(tmp_path):
+    # RGBA 但全不透明：会被误判已抠图、品红底直接进成片，必须返回 False 走抠图路径。
+    path = tmp_path / "opaque.png"
+    Image.new("RGBA", (8, 8), (255, 0, 255, 255)).save(path)
+
+    assert presenter_gen.png_has_alpha(path) is False
+
+
+def test_png_has_alpha_transparent_rgba_is_true(tmp_path):
+    path = tmp_path / "transparent.png"
+    img = Image.new("RGBA", (8, 8), (255, 0, 255, 255))
+    img.putpixel((0, 0), (255, 0, 255, 0))
+    img.save(path)
+
+    assert presenter_gen.png_has_alpha(path) is True
+
+
+def test_png_has_alpha_ignores_trns_bytes_inside_chunk_data(tmp_path):
+    # 回归：旧实现按 b"tRNS" 子串匹配，chunk 数据区里碰巧出现的 tRNS 字节会误报有 alpha。
+    path = tmp_path / "fake-trns.png"
+    Image.new("RGB", (8, 8), (255, 0, 255)).save(path)
+    data = path.read_bytes()
+    payload = b"comment\x00this chunk data mentions tRNS but is not a real tRNS chunk"
+    chunk = struct.pack(">I", len(payload)) + b"tEXt" + payload
+    chunk += struct.pack(">I", zlib.crc32(b"tEXt" + payload) & 0xFFFFFFFF)
+    ihdr_end = 8 + 4 + 4 + 13 + 4  # 签名 8B + IHDR（长度 4B + 类型 4B + 数据 13B + CRC 4B）
+    path.write_bytes(data[:ihdr_end] + chunk + data[ihdr_end:])
+
+    assert presenter_gen.png_has_alpha(path) is False
+
+
+def test_png_has_alpha_palette_with_transparency_is_true(tmp_path):
+    path = tmp_path / "palette.png"
+    img = Image.new("P", (8, 8), 1)
+    img.putpalette([255, 0, 255] * 256)
+    img.save(path, transparency=1)  # 索引 1 透明，且全图都是索引 1
+
+    assert presenter_gen.png_has_alpha(path) is True
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["presenter_gen.py", "show", "../evil"],
+        ["presenter_gen.py", "import", "../evil", "/nonexistent-dir"],
+        ["presenter_gen.py", "regen", "../evil", "standing"],
+        ["presenter_gen.py", "prompts", "x/y"],
+    ],
+)
+def test_cli_rejects_non_kebab_case_presenter_id(monkeypatch, argv):
+    # main() 分发前统一校验 id，堵住 ../x 之类的路径逃逸（import/regen/show 此前不校验）。
+    monkeypatch.setattr(sys, "argv", argv)
+
+    with pytest.raises(SystemExit) as exc_info:
+        presenter_gen.main()
+
+    assert "kebab-case" in str(exc_info.value.code)
+
+
+def test_extreme_narrow_canvas_with_presenter_rejected(tmp_path):
+    # 宽 320（下限）+ scale 1.4（上限）：内容列被立绘车道挤成负数，直接拒绝而不是只警告。
+    root = tmp_path / "library"
+    make_presenter_library(root)
+    manifest = finance_manifest(presenter={"id": "xiaoyu", "scale": 1.4})
+    manifest["width"] = 320
+    manifest["height"] = 320
+    manifest["scenes"][0]["visual"] = {"type": "candlestick", "closes": closes_series()}
+
+    with pytest.raises(pipeline.ManifestError, match="no room left"):
+        pipeline.normalize_manifest(manifest, library_root=root)
+
+
+def test_presenter_voice_inherited_error_points_to_character_json(tmp_path):
+    # voice 继承自 character.json 时报错要指向真正的修改位置，而不是 manifest。
+    root = tmp_path / "library"
+    make_presenter_library(
+        root, voice={"name": "zh-CN-XiaoyiNeural", "rate": "fast", "volume": "+0%", "pitch": "+0Hz"}
+    )
+    manifest = finance_manifest(presenter={"id": "xiaoyu"})
+
+    with pytest.raises(pipeline.ManifestError, match="inherited from presenter character.json"):
+        pipeline.normalize_manifest(manifest, library_root=root)
+
+
+def test_manifest_explicit_voice_error_keeps_original_message(tmp_path):
+    # manifest 显式写的 voice 校验失败：报错保持原样，不带 inherited 字样。
+    root = tmp_path / "library"
+    make_presenter_library(root)
+    manifest = finance_manifest(presenter={"id": "xiaoyu"}, voice={"rate": "fast"})
+
+    with pytest.raises(pipeline.ManifestError, match="voice.rate must look like") as exc_info:
+        pipeline.normalize_manifest(manifest, library_root=root)
+
+    assert "inherited" not in str(exc_info.value)

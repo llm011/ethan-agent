@@ -7,9 +7,11 @@ import argparse
 import asyncio
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -104,7 +106,10 @@ def _string_list(value: Any, field: str, *, maximum: int) -> list[str]:
 def _number(value: Any, field: str) -> float:
     if not isinstance(value, (int, float)) or isinstance(value, bool):
         raise ManifestError(f"{field} must be a number")
-    return float(value)
+    number = float(value)
+    if not math.isfinite(number):
+        raise ManifestError(f"{field} must be a finite number")
+    return number
 
 
 def _resolve_library_root(library_root: Path | None) -> Path:
@@ -271,10 +276,16 @@ def _normalize_markers(visual: dict[str, Any], visual_raw: dict[str, Any], field
 def _presenter_overlap_warnings(
     presenter: dict[str, Any], scenes: list[dict[str, Any]], width: int
 ) -> list[str]:
-    """立绘硬车道保证零重叠，但有些组合会被挤得太窄 —— 给出布局建议（不阻断渲染）。"""
+    """立绘硬车道保证零重叠：内容列被挤没（<=0）直接报错，只是偏窄则给出布局建议。"""
     scale = float(presenter.get("scale", 1.0))
     lane_px = int(PRESENTER_LANE_WIDTH * scale + 0.999)  # ceil，与 TS 侧 presenterLanePx 一致
     content_px = width - CONTENT_SIDE_PADDING - (PRESENTER_EDGE_INSET + lane_px + PRESENTER_LANE_GAP)
+    if content_px <= 0:
+        # 极端组合（窄画布 + 大 scale）下内容列被立绘车道挤没，渲染必炸，直接拒绝。
+        raise ManifestError(
+            f"content column has no room left ({content_px}px at width={width} with presenter "
+            f"scale={scale:g}): reduce presenter.scale, increase width, or hide the presenter per scene"
+        )
     warnings: list[str] = []
     for scene in scenes:
         override = scene.get("presenter") or {}
@@ -347,24 +358,35 @@ def normalize_manifest(raw: Any, *, library_root: Path | None = None) -> dict[st
         presenter = _load_presenter(raw["presenter"], _resolve_library_root(library_root))
 
     voice_raw = raw.get("voice")
-    if voice_raw is None and presenter and presenter.get("voice"):
+    voice_inherited = voice_raw is None and presenter is not None and bool(presenter.get("voice"))
+    if voice_inherited:
         # 角色包自带音色：manifest 不显式指定 voice 时继承，让虚拟 IP 声音稳定。
         voice_raw = presenter["voice"]
     voice_raw = voice_raw or {}
     if not isinstance(voice_raw, dict):
         raise ManifestError("voice must be an object")
-    voice = {
-        "name": _require_text(voice_raw.get("name", "zh-CN-XiaoxiaoNeural"), "voice.name", maximum=100),
-        "rate": voice_raw.get("rate", "+0%"),
-        "volume": voice_raw.get("volume", "+0%"),
-        "pitch": voice_raw.get("pitch", "+0Hz"),
-    }
-    if not isinstance(voice["rate"], str) or not PROSODY_RE.fullmatch(voice["rate"]):
-        raise ManifestError("voice.rate must look like +5% or -10%")
-    if not isinstance(voice["volume"], str) or not PROSODY_RE.fullmatch(voice["volume"]):
-        raise ManifestError("voice.volume must look like +0% or -10%")
-    if not isinstance(voice["pitch"], str) or not PITCH_RE.fullmatch(voice["pitch"]):
-        raise ManifestError("voice.pitch must look like +0Hz or -10Hz")
+    try:
+        voice = {
+            "name": _require_text(voice_raw.get("name", "zh-CN-XiaoyiNeural"), "voice.name", maximum=100),
+            "rate": voice_raw.get("rate", "+0%"),
+            "volume": voice_raw.get("volume", "+0%"),
+            "pitch": voice_raw.get("pitch", "+0Hz"),
+        }
+        if not isinstance(voice["rate"], str) or not PROSODY_RE.fullmatch(voice["rate"]):
+            raise ManifestError("voice.rate must look like +5% or -10%")
+        if not isinstance(voice["volume"], str) or not PROSODY_RE.fullmatch(voice["volume"]):
+            raise ManifestError("voice.volume must look like +0% or -10%")
+        if not isinstance(voice["pitch"], str) or not PITCH_RE.fullmatch(voice["pitch"]):
+            raise ManifestError("voice.pitch must look like +0Hz or -10Hz")
+    except ManifestError as exc:
+        if voice_inherited:
+            # 报错要指向真正的修改位置：这个 voice 来自 presenter 的 character.json，
+            # 不是 manifest 里显式写的。
+            raise ManifestError(
+                f"{exc} (inherited from presenter character.json — fix the voice "
+                "object in the presenter's character.json, not the manifest)"
+            ) from None
+        raise
 
     theme_raw = raw.get("theme") or {}
     if not isinstance(theme_raw, dict):
@@ -814,14 +836,43 @@ def _run_command(command: list[str], *, cwd: Path, timeout: float) -> None:
     # 捕获 stderr，失败时把 Node/Open Motion/pnpm 的诊断写进 run-status.json，
     # 否则只留 "non-zero exit status 1"，agent 无法定位渲染失败原因。
     # timeout 必传：渲染器内部（Playwright / Chromium / 本地 http server）任一环节
-    # 挂死时，不带 timeout 的 subprocess.run 会让整条流水线无限期等待，且不留任何诊断。
+    # 挂死时必须超时终止，否则整条流水线无限期等待，且不留任何诊断。
+    # 显式 encoding/errors 代替 text=True：后者跟随 locale（如 POSIX C locale 下按
+    # ASCII 解码）遇到非 ASCII 输出直接 UnicodeDecodeError 崩溃。
+    # 新会话/新进程组：渲染会 fork 出 Chromium 多代子进程，超时必须杀整个进程组，
+    # 只杀父进程会留下孤儿 Chromium 继续吃 CPU/内存。
+    popen_kwargs: dict[str, Any] = {}
+    if os.name == "nt":
+        popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        popen_kwargs["start_new_session"] = True
+    process = subprocess.Popen(
+        command,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        encoding="utf-8",
+        errors="replace",
+        **popen_kwargs,
+    )
     try:
-        completed = subprocess.run(
-            command, cwd=cwd, check=False, capture_output=True, text=True, timeout=timeout
-        )
+        _, stderr = process.communicate(timeout=timeout)
     except subprocess.TimeoutExpired as exc:
+        # POSIX：SIGKILL 整个进程组（start_new_session 让渲染进程自成组长）；
+        # 进程组已消失/无权限时容错退回只杀父进程，再 communicate() 收尸回收管道。
+        if os.name == "nt":
+            process.kill()
+        else:
+            try:
+                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                process.kill()
+        try:
+            process.communicate(timeout=30)
+        except (subprocess.TimeoutExpired, OSError):
+            pass
         # TimeoutExpired 的 stderr 是超时前已捕获的部分输出，保留它才能看出卡在哪一步。
-        # 注意：即使传了 text=True，超时路径给回来的仍是 bytes（CPython 不在该路径解码），
+        # 注意：即使传了 encoding，超时路径给回来的仍是 bytes（CPython 不在该路径解码），
         # 所以必须自己解码，否则这段诊断会被静默丢掉。
         raw = exc.stderr
         if isinstance(raw, (bytes, bytearray)):
@@ -831,13 +882,12 @@ def _run_command(command: list[str], *, cwd: Path, timeout: float) -> None:
         raise RuntimeError(
             f"command timed out after {timeout:.0f}s ({' '.join(command)}){detail}"
         ) from exc
-    if completed.returncode != 0:
-        stderr = completed.stderr.strip()
-        detail = f"\nstderr:\n{stderr}" if stderr else ""
-        raise RuntimeError(f"command failed ({' '.join(command)}): exit {completed.returncode}{detail}")
+    if process.returncode != 0:
+        detail = f"\nstderr:\n{stderr.strip()}" if stderr and stderr.strip() else ""
+        raise RuntimeError(f"command failed ({' '.join(command)}): exit {process.returncode}{detail}")
     # pnpm/node 正常输出走 stderr（进度日志），透传给上层日志，不静默吞掉。
-    if completed.stderr.strip():
-        sys.stderr.write(completed.stderr)
+    if stderr and stderr.strip():
+        sys.stderr.write(stderr)
 
 
 # pnpm install（含首次拉取 Playwright Chromium）与整轮渲染的上限。渲染侧
@@ -858,9 +908,19 @@ def ensure_renderer(template_dir: Path) -> None:
         )
 
 
-def render_video(template_dir: Path, render_dir: Path, timeline_path: Path, public_dir: Path) -> None:
+def render_video(
+    template_dir: Path,
+    render_dir: Path,
+    timeline_path: Path,
+    public_dir: Path,
+    *,
+    target_duration_sec: float = 0.0,
+) -> None:
     ensure_renderer(template_dir)
     render_dir.mkdir(parents=True, exist_ok=True)
+    # 渲染超时随片长伸缩：长片按 6× 目标时长取上限（1800s 长片 → 10800s），
+    # 短片仍以 RENDER_TIMEOUT_SEC 兜底；pnpm install 超时保持不变（ensure_renderer 内）。
+    timeout = max(RENDER_TIMEOUT_SEC, int(target_duration_sec * 6))
     _run_command(
         [
             "node",
@@ -872,7 +932,7 @@ def render_video(template_dir: Path, render_dir: Path, timeline_path: Path, publ
             str(public_dir),
         ],
         cwd=template_dir,
-        timeout=RENDER_TIMEOUT_SEC,
+        timeout=timeout,
     )
 
 
@@ -989,7 +1049,16 @@ def run_pipeline(manifest_path: Path, output_dir: Path) -> dict[str, Any]:
 
         render_dir = output_dir / "work" / "render-runs" / run_id
         template_dir = Path(__file__).resolve().parent.parent / "assets" / "open-motion-template"
-        render_video(template_dir, render_dir, timeline_path, output_dir / "work" / "public")
+        # 渲染超时按片长伸缩：优先用 manifest 校验过的 targetDurationSec，
+        # 未设目标时长则用 timeline 实际总时长兜底。
+        target_duration_sec = manifest["targetDurationSec"] or timeline["totalDurationMs"] / 1000
+        render_video(
+            template_dir,
+            render_dir,
+            timeline_path,
+            output_dir / "work" / "public",
+            target_duration_sec=target_duration_sec,
+        )
         report = verify_outputs(render_dir, timeline)
         staged_archive = package_deliverables(
             output_dir,
@@ -1021,6 +1090,10 @@ def run_pipeline(manifest_path: Path, output_dir: Path) -> dict[str, Any]:
         _write_json_atomic(status_path, {"status": "ok", "runId": run_id, **result})
         return result
     except Exception as exc:
+        # 本次 run 的渲染目录里只有半成品（成功产物在成功路径已 replace 到 output_dir
+        # 根），best-effort 清掉防止 render-runs 堆积垃圾；共享缓存（tts-cache/public/
+        # previous-runs）不动，只清本次 run_id 的目录。
+        shutil.rmtree(output_dir / "work" / "render-runs" / run_id, ignore_errors=True)
         _write_json_atomic(
             status_path,
             {

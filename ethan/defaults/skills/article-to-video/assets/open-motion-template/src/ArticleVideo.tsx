@@ -199,7 +199,9 @@ const VisualContent: React.FC<{
       : valueLen <= 4 ? 170 : valueLen <= 8 ? 130 : valueLen <= 12 ? 100 : valueLen <= 16 ? 80 : 60;
     return (
       <div style={{textAlign: "center", transform: `scale(${0.86 + enter * 0.14})`, maxWidth: "100%"}}>
-        <div style={{fontSize: statFontSize, lineHeight: 1, fontWeight: 900, color: primary, whiteSpace: "nowrap"}}>{visual.value}</div>
+        {/* nowrap 的大字号数值会溢出内容列画进立绘车道（立绘 zIndex 更高会盖住）：
+            在内容列边界截断 + 省略号，保住"硬车道零遮挡"承诺 */}
+        <div style={{fontSize: statFontSize, lineHeight: 1, fontWeight: 900, color: primary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%"}}>{visual.value}</div>
         <div style={{fontSize: withPresenter ? 34 : 42, marginTop: 28, color: text, opacity: 0.8}}>{visual.label}</div>
       </div>
     );

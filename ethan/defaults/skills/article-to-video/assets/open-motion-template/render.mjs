@@ -21,7 +21,9 @@ if (argv[0] === "stills") {
     throw new Error("Usage: node render.mjs stills <timeline.json> <stills-dir> <public-dir>");
   }
   await exportStills(path.resolve(timelineArg), path.resolve(stillsDirArg), path.resolve(publicArg));
-  process.exit(0);
+  // 不用 process.exit(0)：它不等异步 I/O 排空，stdout 报告可能被截断；
+  // exportStills 返回时 server/browser 均已关闭，事件循环自然结束。
+  process.exitCode = 0;
 }
 
 const [timelinePathArg, outputPathArg, coverPathArg, reportPathArg, publicDirArg] = argv;
@@ -92,22 +94,21 @@ const renderDir = path.dirname(outputPath);
 const tmpDir = path.join(renderDir, "temp");
 const distDir = path.join(tmpDir, "vite-dist");
 
-// ── 1. Ensure Playwright browsers are installed ──
-process.stderr.write("[Step 1/5] Checking Playwright browsers...\n");
-ensureChromiumPath();
-
-// ── 2. Vite build ──
-process.stderr.write("[Step 2/5] Building with Vite...\n");
-buildRenderer(distDir);
-process.stderr.write("[Step 2/5] Vite build done\n");
-
-// ── 3. Serve dist/ on an OS-assigned loopback port ──
-// A random fixed port can collide with an existing local process. Using port 0
-// lets the kernel choose an available port, and avoids depending on http-server.
+// ── 1./2./3. 都放进 try：vite build / Chromium 安装半途失败也要清掉 tmpDir 半成品 ──
 let server;
 let url;
 
 try {
+  process.stderr.write("[Step 1/5] Checking Playwright browsers...\n");
+  ensureChromiumPath();
+
+  process.stderr.write("[Step 2/5] Building with Vite...\n");
+  buildRenderer(distDir);
+  process.stderr.write("[Step 2/5] Vite build done\n");
+
+  // Serve dist/ on an OS-assigned loopback port.
+  // A random fixed port can collide with an existing local process. Using port 0
+  // lets the kernel choose an available port, and avoids depending on http-server.
   ({server, url} = await startAssetServer(distDir, publicRoot));
 
   // ── 4. Discover compositions ──
@@ -429,12 +430,35 @@ async function startAssetServer(distDir, publicRoot) {
 //   <scene-id>-clean-plate.png  同一舞台无立绘（最终合成的确定性底）
 // clean-plate 通过 presenter.forceHidden 只藏立绘图层、不动硬车道布局，
 // 两张图的文字/数据位置才逐像素对齐（h3-presenter-pipeline.md 的镜头包契约）。
+
+// 与 video_pipeline.py 的 ID_RE 一致：kebab-case。stills 会把 scene.id 拼进输出
+// 文件名，非法 id 可逃逸 stillsDir，重复 id 会静默互相覆盖。
+const SCENE_ID_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
 async function exportStills(timelinePath, stillsDir, publicDir) {
   const timeline = JSON.parse(fs.readFileSync(timelinePath, "utf8"));
   const scenes = Array.isArray(timeline.scenes) ? timeline.scenes : [];
   if (scenes.length === 0) {
     throw new Error("Timeline must contain at least one scene");
   }
+  // 输入校验前置（对齐视频模式对 startMs 的姿态）：非数值 startMs/durationMs 会算出
+  // NaN 帧号，所有 Sequence 在 NaN 帧上隐形 —— 截出一堆空白底图还报告 ok。
+  const seenIds = new Set();
+  scenes.forEach((scene, index) => {
+    if (!scene || typeof scene.id !== "string" || !SCENE_ID_RE.test(scene.id)) {
+      throw new Error(`Scene ${index} has an invalid id (expected kebab-case): ${scene?.id}`);
+    }
+    if (seenIds.has(scene.id)) {
+      throw new Error(`Duplicate scene.id: ${scene.id}`);
+    }
+    seenIds.add(scene.id);
+    if (!Number.isFinite(scene.startMs) || scene.startMs < 0) {
+      throw new Error(`Scene ${scene.id} has an invalid startMs: ${scene.startMs}`);
+    }
+    if (!Number.isFinite(scene.durationMs) || scene.durationMs <= 0) {
+      throw new Error(`Scene ${scene.id} has an invalid durationMs: ${scene.durationMs}`);
+    }
+  });
   let publicRoot;
   try {
     publicRoot = fs.realpathSync(path.resolve(publicDir));
@@ -446,36 +470,52 @@ async function exportStills(timelinePath, stillsDir, publicDir) {
   }
   const fps = timeline.fps || 30;
   const config = {width: timeline.width || 1080, height: timeline.height || 1920, fps};
+  // 手写时间线的 totalDurationMs 可能与末场景终点不齐：把帧号钳进总时长，越界帧上同样所有图层隐形。
+  const maxFrame = Number.isFinite(timeline.totalDurationMs) && timeline.totalDurationMs > 0
+    ? Math.max(0, Math.ceil((timeline.totalDurationMs / 1000) * fps) - 1)
+    : Infinity;
+  // 取场景 2/3 处的帧：揭示动画（前 40%）与 marker 弹簧已稳定，场景淡出（末 9 帧）未开始。
+  const frameForScene = (scene) =>
+    Math.min(maxFrame, Math.max(0, Math.round(((scene.startMs + (scene.durationMs * 2) / 3) / 1000) * fps)));
   const tmpDir = path.join(stillsDir, "temp");
   const distDir = path.join(tmpDir, "vite-dist");
-  fs.mkdirSync(stillsDir, { recursive: true });
-
-  ensureChromiumPath();
-  buildRenderer(distDir);
-  const {server, url} = await startAssetServer(distDir, publicRoot);
+  let server;
+  let url;
   const stills = [];
   try {
+    fs.mkdirSync(stillsDir, { recursive: true });
+    ensureChromiumPath();
+    buildRenderer(distDir);
+    ({server, url} = await startAssetServer(distDir, publicRoot));
     const browser = await chromium.launch({
       executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
       args: ["--disable-dev-shm-usage", "--disable-setuid-sandbox", "--no-sandbox"],
     });
     try {
-      for (const scene of scenes) {
-        // 取场景 2/3 处的帧：揭示动画（前 40%）与 marker 弹簧已稳定，场景淡出（末 9 帧）未开始。
-        const frame = Math.max(0, Math.round(((scene.startMs + (scene.durationMs * 2) / 3) / 1000) * fps));
-        for (const variant of ["combined", "clean-plate"]) {
-          const inputProps =
-            variant === "clean-plate" && timeline.presenter
-              ? {...timeline, presenter: {...timeline.presenter, forceHidden: true}}
-              : timeline;
-          const file = path.join(stillsDir, `${scene.id}-${variant}.png`);
-          await renderStillShot({browser, url, config, frame, inputProps, outputPath: file});
-          stills.push({sceneId: scene.id, variant, frame, path: file});
-          process.stderr.write(`[stills] ${scene.id} ${variant} (frame ${frame}) -> ${file}\n`);
+      // 页面复用：同一 variant 的 inputProps 跨场景完全相同、只有帧号变，
+      // 按 renderFrames 的换帧路径（frame-update 事件）切换，省掉每张静帧一次完整页面加载。
+      for (const variant of ["combined", "clean-plate"]) {
+        const inputProps =
+          variant === "clean-plate" && timeline.presenter
+            ? {...timeline, presenter: {...timeline.presenter, forceHidden: true}}
+            : timeline;
+        const page = await openStillPage({browser, url, config, frame: frameForScene(scenes[0]), inputProps});
+        try {
+          for (const scene of scenes) {
+            const frame = frameForScene(scene);
+            await seekStillFrame({page, config, frame});
+            const file = path.join(stillsDir, `${scene.id}-${variant}.png`);
+            await page.screenshot({path: file, type: "png"});
+            stills.push({sceneId: scene.id, variant, frame, path: file});
+            process.stderr.write(`[stills] ${scene.id} ${variant} (frame ${frame}) -> ${file}\n`);
+          }
+        } finally {
+          // close 失败（浏览器已崩溃等）不应掩盖渲染的真实错误
+          await page.close().catch(() => {});
         }
       }
     } finally {
-      await browser.close();
+      await browser.close().catch(() => {});
     }
   } finally {
     // 同主流程：不 await close()，直接断连后关闭，避免悬挂请求拖死清理。
@@ -489,9 +529,9 @@ async function exportStills(timelinePath, stillsDir, publicDir) {
   process.stdout.write(JSON.stringify(report, null, 2) + "\n");
 }
 
-// 单帧截图：复刻 renderFrames 的单帧路径（init script 注入时间劫持 + inputProps，
-// 等 READY 且 delayRender 清零后截图）。inputProps 不同的帧必须开新 page。
-async function renderStillShot({browser, url, config, frame, inputProps, outputPath}) {
+// 打开一个 stills 页面：首帧走完整加载（init script 注入时间劫持 + inputProps，
+// 等 READY 且 delayRender 清零）。inputProps 不同的渲染必须开新 page。
+async function openStillPage({browser, url, config, frame, inputProps}) {
   const page = await browser.newPage({viewport: {width: config.width, height: config.height}});
   page.setDefaultTimeout(60000);
   page.setDefaultNavigationTimeout(60000);
@@ -518,11 +558,31 @@ async function renderStillShot({browser, url, config, frame, inputProps, outputP
       return ready && delayCount === 0;
     }, undefined, {timeout: 60000});
     await page.waitForLoadState("networkidle");
-    // 与 renderFrames 相同的稳定等待，避免字体/布局未收敛就截图
-    await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 150)));
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    await page.screenshot({path: outputPath, type: "png"});
-  } finally {
-    await page.close();
+    return page;
+  } catch (error) {
+    await page.close().catch(() => {});
+    throw error;
   }
+}
+
+// 换帧：复刻 @open-motion/renderer 的 frame-update 路径（READY 置否 → 重设帧 →
+// 重放时间劫持 → 派发事件），等 ready + delayRender 清零后再交给调用方截图。
+async function seekStillFrame({page, config, frame}) {
+  await page.evaluate(({frame, fps, hijackScript}) => {
+    window.__OPEN_MOTION_READY__ = false;
+    window.__OPEN_MOTION_FRAME__ = frame;
+    window.__OPEN_MOTION_VIDEO_ASSETS__ = [];
+    eval(hijackScript);
+    window.dispatchEvent(new CustomEvent("open-motion-frame-update", { detail: { frame } }));
+  }, {frame, fps: config.fps, hijackScript: getTimeHijackScript(frame, config.fps)});
+  await page.waitForFunction(() => {
+    const ready = window.__OPEN_MOTION_READY__ === true;
+    const delayCount = window.__OPEN_MOTION_DELAY_RENDER_COUNT__ || 0;
+    return ready && delayCount === 0;
+  }, undefined, {timeout: 60000});
+  // 换到新场景可能首次触发该场景的懒加载资产：有界等待网络静默，超时不致命。
+  await page.waitForLoadState("networkidle", {timeout: 5000}).catch(() => {});
+  // 与 renderFrames 相同的稳定等待，避免字体/布局未收敛就截图
+  await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 150)));
+  await new Promise((resolve) => setTimeout(resolve, 100));
 }
