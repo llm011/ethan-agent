@@ -81,7 +81,7 @@ def _ensure_pptx():
         try:
             if _DEPS_MARKER.read_text(encoding="utf-8").strip() == sys.executable:
                 return
-        except (OSError, UnicodeDecodeError, ValueError):
+        except (OSError, ValueError):
             pass
 
     if not unavailable:
@@ -1701,8 +1701,19 @@ def _render_latex_omml(slide, el, theme, emu_per_px):
     return box
 
 
+def resolve_effective_background(bg: dict | None, theme: dict) -> dict:
+    """解析页面生效背景：页级 background 缺失/为空/非 dict → 主题 backgroundColor → #FFFFFF。
+
+    render_background 与 --check 的 _slide_bg_is_pure_white 共用这一条解析链，
+    回退顺序的调整只改这里，校验与渲染不会 diverge。
+    """
+    if not isinstance(bg, dict) or not bg:
+        return {"type": "solid", "color": (theme or {}).get("backgroundColor") or "#FFFFFF"}
+    return bg
+
+
 def render_background(slide, bg: dict | None, theme, canvas_w, canvas_h, emu_per_px, deck_dir):
-    bg = bg or {"type": "solid", "color": theme.get("backgroundColor") or "#FFFFFF"}
+    bg = resolve_effective_background(bg, theme)
     btype = bg.get("type", "solid")
     if btype == "gradient" and bg.get("gradient"):
         apply_gradient_fill(slide.background.fill, bg["gradient"], emu_per_px)
@@ -1742,15 +1753,8 @@ def _is_pure_white(color) -> bool:
 
 
 def _slide_bg_is_pure_white(slide: dict, theme: dict) -> bool:
-    """页面生效背景是否纯白。
-
-    解析顺序与 render_background 严格对齐（页级 background 缺失/非 dict → 回退
-    主题 backgroundColor → 回退 #FFFFFF），否则 --check 与渲染结果会 diverge。
-    """
-    theme_bg = (theme or {}).get("backgroundColor") or "#FFFFFF"
-    bg = slide.get("background")
-    if not isinstance(bg, dict):
-        return _is_pure_white(theme_bg)
+    """页面生效背景是否纯白（解析链与 render_background 共用 resolve_effective_background）。"""
+    bg = resolve_effective_background(slide.get("background"), theme)
     btype = bg.get("type", "solid")
     if btype == "gradient" and bg.get("gradient"):
         gradient = bg["gradient"]
@@ -1761,7 +1765,7 @@ def _slide_bg_is_pure_white(slide: dict, theme: dict) -> bool:
         return all(isinstance(s, dict) and _is_pure_white(s.get("color")) for s in stops)
     if btype == "image" and (bg.get("image") or {}).get("src"):
         return False
-    return _is_pure_white(bg.get("color") or theme_bg)
+    return _is_pure_white(bg.get("color") or (theme or {}).get("backgroundColor") or "#FFFFFF")
 
 
 def _check_text_overflow(spec: dict, theme: dict, ep: str, err, warn):
