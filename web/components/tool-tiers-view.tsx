@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { fetchToolTiers, ToolTiers, TierTool } from "@/lib/api";
+import { HeaderFillet } from "@/components/header-fillet";
 import { Button } from "@ethan/shared/ui/button";
 import {
   Tooltip,
@@ -200,7 +201,8 @@ export function ToolTiersView({ embedded = false }: { embedded?: boolean }) {
   return (
     <div className="flex flex-col h-full bg-background text-foreground">
       {!embedded && (
-        <header className="h-12 border-b border-border flex items-center px-4 justify-between shrink-0">
+        <header className="relative h-12 border-b border-border bg-sidebar flex items-center px-4 justify-between shrink-0">
+          <HeaderFillet />
           <h1 className="font-semibold text-lg">模式工具集 (Tool Tiers)</h1>
           <Button variant="ghost" size="icon" onClick={load} disabled={loading}>
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />

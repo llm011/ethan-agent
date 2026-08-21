@@ -2006,7 +2006,7 @@ class Agent:
                     # session 维度授权记忆：按 consent_scope 粒度（工具名 或 目录路径）记忆，
                     # 同会话内此 scope 已授权过则直接放行（目录授权后子目录免问）。
                     # 但 consent_always=True 的高危调用（如 rm -rf）绕过记忆，每次都问、且不记入放行。
-                    from ethan.core.consent import is_granted, record_grant
+                    from ethan.core.consent import AutoConsentProvider, is_granted, record_grant
 
                     sess_id = getattr(consent_provider, "session_id", "") if consent_provider else ""
                     scope = tool.consent_scope(**tc.arguments) if tool else tc.name
@@ -2027,7 +2027,13 @@ class Agent:
                     detail = _format_args(tc.arguments)
                     ok = True
                     consent_msg = ""  # 预初始化，避免 consent_provider is None 分支未赋值
+                    consent_timed_out = False
+                    consent_cancelled = False
                     if consent_provider is None:
+                        ok = True
+                    elif getattr(consent_provider, "auto_approve", False) and not always:
+                        # 超级权限（web SuperConsentProvider）：非高危授权自动放行，不弹窗；
+                        # 高危（always=True）仍走下方弹窗分支交还用户确认。
                         ok = True
                     elif consent_provider.streamed:
                         # Web：向流注入 ConsentEvent，await 前端响应（加超时兜底，
@@ -2044,14 +2050,42 @@ class Agent:
                             else:
                                 ok = bool(result)
                                 consent_msg = ""
-                        except (_aio.CancelledError, _aio.TimeoutError):
+                        except _aio.TimeoutError:
                             ok = False
                             consent_msg = ""
+                            consent_timed_out = True
+                            # 超时即摘除注册：fut 已被 wait_for 取消，但条目仍在
+                            # _pending/_REGISTRY——迟到的「允许」会让前端误以为已批准
+                            # （实际早已按拒绝处理），且条目要等到 cancel_all 才清
+                            consent_provider.expire(event.request_id)
+                        except _aio.CancelledError:
+                            # 「停止生成」等外层取消：非用户拒绝，单独标记，
+                            # 避免模型误以为用户表达过否定意见而停下来追问
+                            ok = False
+                            consent_msg = ""
+                            consent_cancelled = True
                     else:
                         ok = await consent_provider.request(desc, tc.name, detail, always=always)
                         consent_msg = ""
                     if not ok:
-                        reject_text = "[用户拒绝此操作]"
+                        # 拒绝来源区分：无人值守自动拒绝 / 等待超时 / 生成取消 ≠ 用户主动拒绝。
+                        # 统一标「用户拒绝」会误导模型以为用户表达过否定意见而停下来追问。
+                        if consent_cancelled:
+                            reject_text = "[授权请求已取消（本次生成已停止），操作未执行]"
+                            reject_preview = "已取消"
+                        elif consent_timed_out:
+                            reject_text = "[授权确认等待超时（5 分钟无响应），本次操作已按拒绝处理]"
+                            reject_preview = "授权超时"
+                        elif isinstance(consent_provider, AutoConsentProvider):
+                            reject_text = (
+                                "[自动授权模式下高危命令不会自动批准，本次已拒绝。"
+                                "如确需执行，请在交互渠道（Web/桌面端）发起并在弹窗中确认，"
+                                "或告知用户手动执行]"
+                            )
+                            reject_preview = "高危命令·自动拒绝"
+                        else:
+                            reject_text = "[用户拒绝此操作]"
+                            reject_preview = "用户拒绝"
                         if consent_msg:
                             reject_text += f"\n用户补充说明：{consent_msg}"
                         yield ToolEvent(
@@ -2069,7 +2103,7 @@ class Agent:
                             tool_call_id=tc.id,
                             args_summary="",
                             state="error",
-                            result_preview="用户拒绝",
+                            result_preview=reject_preview,
                             skill_category=resolve_skill_category(tc.name, tc.arguments),
                         )
                         working.append(

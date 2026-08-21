@@ -7,6 +7,7 @@ import {
   deleteAgendaEvent, setAgendaEnabled,
 } from "@/lib/api-misc";
 import { Badge } from "@ethan/shared/ui/badge";
+import { HeaderFillet } from "@/components/header-fillet";
 import { Button } from "@ethan/shared/ui/button";
 import { Loader2, RefreshCw, Trash2, Pencil, Plus, BellRing, ChevronLeft, ChevronRight, MessageCircle } from "lucide-react";
 import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
@@ -629,7 +630,8 @@ export function AgendaView() {
         </DialogContent>
       </Dialog>
 
-      <header className="h-12 border-b border-border flex items-center px-4 justify-between shrink-0">
+      <header className="relative h-12 border-b border-border bg-sidebar flex items-center px-4 justify-between shrink-0">
+        <HeaderFillet />
         <h1 className="font-semibold text-lg">日程 (Agenda)</h1>
         <div className="flex items-center gap-2">
           <Button size="sm" variant="outline" onClick={() => setDialogState({ open: true, editing: null })}>

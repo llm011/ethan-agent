@@ -112,6 +112,17 @@ class WebConsentProvider(ConsentProvider):
             return True
         return False
 
+    def expire(self, request_id: str) -> None:
+        """等待超时后摘除注册（fut 已被 wait_for 取消，这里只清条目）。
+
+        不摘除的话：迟到的「允许」POST 会 resolve 到已取消的 fut（返回 False），
+        但前端不看 ok 字段、直接关弹窗当成功——用户以为批准了，命令实际早已
+        按拒绝处理。摘除后迟到的 resolve() 干净地返回 False，前端据此把卡片
+        标记为已失效。
+        """
+        self._pending.pop(request_id, None)
+        _REGISTRY.pop(request_id, None)
+
     def cancel_all(self) -> None:
         """请求结束/中断时，把未决的 Future 全部取消，避免泄漏。"""
         for req_id, fut in list(self._pending.items()):
@@ -119,6 +130,22 @@ class WebConsentProvider(ConsentProvider):
             if not fut.done():
                 fut.cancel()
         self._pending.clear()
+
+
+class SuperConsentProvider(WebConsentProvider):
+    """Web 超级权限（auto_consent）：普通授权自动批准（不弹窗），高危命令仍弹窗确认。
+
+    与 AutoConsentProvider 的区别：后者面向无人值守场景（定时任务 / CLI -p），
+    没有交互 UI，高危命令只能直接拒绝；本 Provider 面向有人在线的 Web 会话——
+    用户就在屏幕前，高危命令（consent_always=True，如 rm -rf）应弹窗交还用户拍板，
+    而不是静默拒绝。静默拒绝曾配合「用户拒绝」文案让模型误以为用户表达过否定
+    意见而停下来追问（见 2026-08-20 会话 s_20260820_1117_81b1 的排查）。
+
+    auto_approve=True：agent loop 据此对非高危（always=False）授权直接放行，
+    不创建 ConsentEvent；高危命令照常走 create() + await 弹窗（300s 超时按拒绝）。
+    """
+
+    auto_approve = True
 
 
 class AutoConsentProvider(ConsentProvider):
