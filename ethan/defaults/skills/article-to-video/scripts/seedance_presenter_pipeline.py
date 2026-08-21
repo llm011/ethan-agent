@@ -427,6 +427,9 @@ def _headers(config: GatewayConfig) -> dict[str, str]:
         "Authorization": f"Bearer {config.api_key}",
         "x-byteplus-gateway-secret": config.edge_secret,
         "Content-Type": "application/json",
+        # 网关前置 Cloudflare 的 Browser Integrity Check 按 UA 封禁 Python-urllib/*
+        # （403 error code: 1010，与凭证无关），必须带浏览器 UA。实测 2026-08 有效。
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
     }
 
 
