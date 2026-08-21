@@ -36,6 +36,12 @@ _DANGEROUS_PATTERNS = [
 ]
 _DANGEROUS_RE = re.compile("|".join(_DANGEROUS_PATTERNS))
 
+# rm -rf 目标为 /tmp/ 下路径时降级为普通命令（不算高危）：
+# /tmp 是临时目录，清理操作极为常见且低风险，不需要每次都弹授权。
+_RM_TMP_ONLY_RE = re.compile(
+    r'^\s*rm\s+(?:-\w+\s+)*/tmp/\S+\s*$'
+)
+
 # 检测命令里引用 secret 环境变量的语法：$VAR / ${VAR}。
 # secrets 通过 load_secret_env() 注入 shell 子进程环境（见 run()），agent 可被诱导
 # `echo $TOKEN | base64` 套出密钥（编码后可绕过 mask_text 的全字符串匹配）。
@@ -240,7 +246,7 @@ class ShellTool(BaseTool):
     def consent_check(self, command: str = "", **kwargs) -> str | None:
         # shell 可执行任意副作用操作，执行前请求授权。
         cmd = command or ""
-        if _DANGEROUS_RE.search(cmd):
+        if _DANGEROUS_RE.search(cmd) and not _RM_TMP_ONLY_RE.match(cmd):
             # 高危命令：文案标红提示，且每次都问（见 consent_always）
             return f"⚠️ 高危 shell 命令，请确认：{cmd[:200]}"
         # 环境变量列举命令（env/printenv/set 等）：不需要 $VAR 就能 dump 所有 secret，
@@ -265,7 +271,10 @@ class ShellTool(BaseTool):
 
     def consent_always(self, command: str = "", **kwargs) -> bool:
         # 高危命令始终重新询问，即使本会话已授权过 shell，也不计入会话放行
+        # 但 rm -rf /tmp/... 不算高危（临时目录清理极为常见）
         cmd = command or ""
+        if _RM_TMP_ONLY_RE.match(cmd):
+            return False
         return bool(_DANGEROUS_RE.search(cmd)) or bool(_ENV_DUMP_RE.search(cmd)) or bool(_detect_secret_env_refs(cmd))
     parameters = {
         "type": "object",
