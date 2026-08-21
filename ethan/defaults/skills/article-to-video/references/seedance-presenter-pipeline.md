@@ -92,6 +92,21 @@ python3 "$PIPE/seedance_presenter_pipeline.py" verify --scene-dir <场景目录>
 
 所有情绪共享：目光以注视镜头为主、指向图表时短暂移开、口型随台词节奏开合——这是 presenter 情感交互的基本盘，台词关键词只调节情绪色彩。生成结果情绪不达标时，重跑 `prepare`（可改台词措辞触发其他情绪档）→ `submit`。
 
+## 全能参考模式（omni-reference，实验性）
+
+首帧模式要求参考图本身已是"人物+舞台"合成帧。当手里只有分离的舞台底图和人物立绘时（如绿幕人物采集），可用全能参考模式：
+
+```bash
+python3 "$PIPE/seedance_presenter_pipeline.py" prepare \
+  --scene-dir <场景目录> --combined-reference <合成帧> \
+  --clean-plate <无人物舞台底图> --character-reference <人物立绘> \
+  --dialogue "<台词>" --duration <秒>
+```
+
+- 同时传 `--clean-plate` 与 `--character-reference` 即进入 omni 模式（scene.json 记 `mode: omni-reference`）：两张图都以 `reference_image` 角色发送，prompt 显式指派"图片1=舞台底图、图片2=人物立绘"及站位/保真对象。只传 `--character-reference` 不传底图会报错（底图是构图锚点）。
+- omni 与首帧角色互斥（官方约定），不能混发；omni 模式下 `--image-url` 不可用（双图只走 base64）。
+- **数据警告**：omni 模式没有任何一帧被像素锁定，模型会重绘整个舞台——实测金融看板数字被稳定篡改（TTM 市盈率 8.13x → "3.164"，所有采样帧一致，非抖动）。**带数字/图表的场景必须用首帧模式**；omni 只适用于无精确数据露出的场景（如绿幕人物动作采集）。
+
 ## 硬约束与已知边界
 
 - 单镜头 **4–15s**：场景时长超界会在 prepare 报错（先在 manifest 阶段拆场景）。

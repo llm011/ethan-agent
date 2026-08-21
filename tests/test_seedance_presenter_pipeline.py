@@ -593,3 +593,71 @@ def test_submit_dry_run_skips_base64_encoding(tmp_path, monkeypatch):
     result = seedance.submit_task(scene_dir=scene_dir, dry_run=True)
     assert result["status"] == "dry-run"
     assert "omitted" in result["payload"]["content"][1]["image_url"]["url"]
+
+
+# ── 全能参考模式（omni-reference：舞台底图 + 人物立绘，双 reference_image） ──
+
+
+def _prepared_omni_scene(tmp_path, monkeypatch):
+    (tmp_path / "ref.png").write_bytes(PNG_1PX)
+    (tmp_path / "plate.png").write_bytes(PNG_1PX)
+    (tmp_path / "char.png").write_bytes(PNG_1PX)
+    _fake_probe(monkeypatch)
+    config = seedance.GatewayConfig(
+        gateway_url="https://gw", api_key="k", edge_secret="s",
+        models={"video": "ep-video"}, resolution="1080p",
+    )
+    monkeypatch.setattr(seedance, "load_gateway_config", lambda path=None: config)
+    seedance.prepare_scene(
+        scene_dir=tmp_path / "scene", combined_reference=tmp_path / "ref.png",
+        clean_plate=tmp_path / "plate.png", character_reference=tmp_path / "char.png",
+        dialogue="测试台词", duration_seconds=5.0,
+    )
+    return tmp_path / "scene"
+
+
+def test_build_omni_prompt_assigns_image_roles():
+    prompt = seedance.build_omni_prompt(dialogue="测试台词", presenter=PRESENTER)
+    assert "参考图片1" in prompt and "参考图片2" in prompt  # 两图角色都被显式指派
+    assert "参考图片1即首帧" not in prompt  # 不混用首帧语义
+    assert "{测试台词}" in prompt
+    assert "请勿生成字幕" in prompt
+    assert len(prompt) <= 500
+    with pytest.raises(seedance.PipelineError):
+        seedance.build_omni_prompt(dialogue="  ", presenter=PRESENTER)
+
+
+def test_prepare_omni_mode_marks_scene_and_requires_plate(tmp_path, monkeypatch):
+    scene_dir = _prepared_omni_scene(tmp_path, monkeypatch)
+    metadata = json.loads((scene_dir / "scene.json").read_text(encoding="utf-8"))
+    assert metadata["mode"] == "omni-reference"
+    assert metadata["references"]["character"] is not None
+    assert (scene_dir / "references" / "character-reference.png").is_file()
+    prompt = (scene_dir / "seedance-prompt.txt").read_text(encoding="utf-8")
+    assert "参考图片2" in prompt
+    # 缺 clean-plate 时 omni 模式拒绝（舞台底图是构图锚点）
+    with pytest.raises(seedance.PipelineError):
+        seedance.prepare_scene(
+            scene_dir=tmp_path / "s2", combined_reference=tmp_path / "ref.png",
+            character_reference=tmp_path / "char.png",
+            dialogue="测试台词", duration_seconds=5.0,
+        )
+    # 不传 character_reference 则保持首帧模式
+    (tmp_path / "plain").mkdir()
+    metadata_default = json.loads(
+        (_prepared_scene(tmp_path / "plain", monkeypatch) / "scene.json").read_text(encoding="utf-8")
+    )
+    assert metadata_default["mode"] == "first-frame"
+    assert metadata_default["references"]["character"] is None
+
+
+def test_submit_omni_sends_two_reference_images(tmp_path, monkeypatch):
+    scene_dir = _prepared_omni_scene(tmp_path, monkeypatch)
+    result = seedance.submit_task(scene_dir=scene_dir, dry_run=True)
+    content = result["payload"]["content"]
+    assert content[0]["type"] == "text"
+    assert [entry["role"] for entry in content[1:]] == ["reference_image", "reference_image"]
+    assert all("omitted" in entry["image_url"]["url"] for entry in content[1:])
+    # --image-url 与 omni 双图不兼容，必须显式报错而不是静默只换一张
+    with pytest.raises(seedance.PipelineError):
+        seedance.submit_task(scene_dir=scene_dir, image_url="https://example.com/x.png")

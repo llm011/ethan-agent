@@ -341,6 +341,52 @@ def build_seedance_prompt(
     return prompt[:_PROMPT_CHAR_LIMIT]
 
 
+def build_omni_prompt(
+    *,
+    dialogue: str,
+    presenter: dict[str, Any],
+    emotion: str = "neutral",
+    generate_audio: bool = False,
+) -> str:
+    """全能参考模式（role=reference_image，Seedance 2.0 支持 1–9 张）的双图 prompt。
+
+    与首帧模式的根本差异：没有任何一帧被像素级锁定，构图由模型按参考图自由合成，
+    所以 prompt 必须显式指派每张图的角色（图片1=舞台底图、图片2=人物立绘）、
+    人物站位，以及保真对象（看板跟图片1、人物跟图片2）。
+    """
+    if not dialogue.strip():
+        raise PipelineError("dialogue must be non-empty")
+    profile = _EMOTION_PROFILES.get(emotion) or _EMOTION_PROFILES["neutral"]
+    name = str(presenter.get("name", "主播"))
+    description = _clamp_text(str(presenter.get("description", "")), 60)
+
+    lines = [
+        "参考图片1是舞台底图（无人物的金融数据看板场景），参考图片2是虚拟主播的形象立绘。",
+        f"把参考图片2的虚拟主播{name}（{description}）放到参考图片1的画面右侧，半身出镜、面向镜头口播。",
+        f"情绪基调：{profile['mood']}。",
+        f"表演：{profile['beats']}。目光以注视镜头为主，指向图表时短暂移开后回到镜头；口型随台词节奏自然开合。",
+        "台词：{" + dialogue.strip() + "}",
+    ]
+    if generate_audio:
+        lines.append("声音：清晰自然的中文口播，语气与台词情绪一致；(轻柔电子氛围垫乐，音量克制)。")
+    lines.append("镜头：固定机位，全程不推拉不横移，构图始终与参考图片1一致。")
+    lines.append("约束：看板文字、数字与图表样式跟参考图片1完全一致，人物服饰发型跟参考图片2一致；请勿生成字幕、水印或任何新增文字。")
+    prompt = "\n".join(lines)
+    if len(prompt) > _PROMPT_CHAR_LIMIT:  # 超字数预算 → 换紧凑情绪句式，再不行硬截断
+        compact = [
+            "参考图片1是无人物的金融看板舞台，参考图片2是虚拟主播立绘。",
+            f"把{name}（{description}）放到参考图片1画面右侧，面向镜头口播。",
+            f"情绪基调：{profile['mood_short']}。表演：{profile['beats_short']}，口型随台词开合。",
+            "台词：{" + dialogue.strip() + "}",
+            "镜头：固定机位，构图与参考图片1一致。",
+            "约束：看板与图片1一致，人物与图片2一致；请勿生成字幕与水印。",
+        ]
+        if generate_audio:
+            compact.append("声音：清晰自然中文口播。")
+        prompt = "\n".join(compact)
+    return prompt[:_PROMPT_CHAR_LIMIT]
+
+
 def _ratio_key(width: int, height: int) -> str:
     target = width / height
     return min(_SUPPORTED_RATIOS, key=lambda key: abs(_SUPPORTED_RATIOS[key] - target))
@@ -387,6 +433,7 @@ def prepare_scene(
     duration_seconds: float,
     start_seconds: float = 0.0,
     clean_plate: Path | None = None,
+    character_reference: Path | None = None,
     presenter_id: str | None = None,
     generate_audio: bool | None = None,
     resolution: str | None = None,
@@ -417,13 +464,30 @@ def prepare_scene(
         plate_ext, _plate_mime = _sniff_image(clean_plate)
         plate_dest = h3._copy_asset(clean_plate, scene_dir / "references" / f"clean-plate.{plate_ext}")
 
+    character_dest = None
+    if character_reference is not None:
+        # 全能参考模式：舞台底图（clean-plate）+ 人物立绘都作为 reference_image 发送，
+        # 没有像素级锁帧，因此舞台底图是必需的（否则模型没有构图锚点）。
+        if clean_plate is None:
+            raise PipelineError(
+                "全能参考模式必须同时提供 --clean-plate（舞台底图）和 --character-reference（人物立绘）"
+            )
+        character_reference = h3._require_file(character_reference, "character reference")
+        character_ext, _character_mime = _sniff_image(character_reference)
+        character_dest = h3._copy_asset(
+            character_reference, scene_dir / "references" / f"character-reference.{character_ext}"
+        )
+
     identity = h3._load_presenter_identity(presenter_id)
     emotion = detect_emotion(dialogue)
     audio = config.generate_audio if generate_audio is None else generate_audio
     resolution = resolution or config.resolution_for(model_key)
-    prompt = build_seedance_prompt(
-        dialogue=dialogue, presenter=identity, emotion=emotion, generate_audio=audio
-    )
+    if character_dest is not None:
+        prompt = build_omni_prompt(dialogue=dialogue, presenter=identity, emotion=emotion, generate_audio=audio)
+    else:
+        prompt = build_seedance_prompt(
+            dialogue=dialogue, presenter=identity, emotion=emotion, generate_audio=audio
+        )
     prompt_path = scene_dir / "seedance-prompt.txt"
     h3._write_text_atomic(prompt_path, prompt + "\n")
     first_frame_dest = h3._copy_asset(
@@ -432,6 +496,7 @@ def prepare_scene(
     payload = {
         "version": 1,
         "provider": "seedance",
+        "mode": "omni-reference" if character_dest is not None else "first-frame",
         "startSeconds": start_seconds,
         "durationSeconds": duration_seconds,
         "requestedDuration": requested,
@@ -444,6 +509,7 @@ def prepare_scene(
         "references": {
             "firstFrame": str(first_frame_dest),
             "cleanPlate": str(plate_dest) if plate_dest else None,
+            "character": str(character_dest) if character_dest else None,
         },
         "referenceMedia": {"firstFrame": h3.asdict(combined_info)},
         "seedance": {
@@ -556,21 +622,38 @@ def submit_task(*, scene_dir: Path, model_key: str | None = None, image_url: str
     scene_dir = scene_dir.expanduser().resolve()
     metadata = _load_scene(scene_dir)
     prompt = h3._require_file(scene_dir / "seedance-prompt.txt", "seedance prompt").read_text(encoding="utf-8").strip()
-    first_frame = h3._require_file(Path(metadata["references"]["firstFrame"]), "first-frame reference")
     config = require_gateway_config()
     model_key = model_key or metadata["seedance"].get("modelKey", "video")
-    if dry_run and image_url is None:
-        # dry-run 只为校验请求结构：不把整图 base64 读进内存。
-        image_url_value = "<base64 omitted in dry-run>"
+    omni = metadata.get("mode") == "omni-reference"
+    if omni:
+        # 全能参考：图片1=舞台底图、图片2=人物立绘，均为 reference_image（无像素锁帧）。
+        # 官方约定 first_frame/last_frame 与 reference_image 场景互斥，不能混发。
+        if image_url is not None:
+            raise PipelineError("全能参考模式暂不支持 --image-url（两张参考图都走 base64 直传）")
+        plate = h3._require_file(Path(metadata["references"]["cleanPlate"]), "clean-plate reference")
+        character = h3._require_file(Path(metadata["references"]["character"]), "character reference")
+        if dry_run:
+            # dry-run 只为校验请求结构：不把整图 base64 读进内存。
+            plate_value = character_value = "<base64 omitted in dry-run>"
+        else:
+            _transport, plate_value = _image_transport(plate, None)
+            _transport, character_value = _image_transport(character, None)
+        images = [
+            {"type": "image_url", "image_url": {"url": plate_value}, "role": "reference_image"},
+            {"type": "image_url", "image_url": {"url": character_value}, "role": "reference_image"},
+        ]
     else:
-        _transport, image_url_value = _image_transport(first_frame, image_url)
+        first_frame = h3._require_file(Path(metadata["references"]["firstFrame"]), "first-frame reference")
+        if dry_run and image_url is None:
+            # dry-run 只为校验请求结构：不把整图 base64 读进内存。
+            image_url_value = "<base64 omitted in dry-run>"
+        else:
+            _transport, image_url_value = _image_transport(first_frame, image_url)
+        images = [{"type": "image_url", "image_url": {"url": image_url_value}, "role": "first_frame"}]
     payload = {
         "model": config.model_endpoint(model_key),
         # content 数组顺序是官方硬性要求：text → image_url → video_url → audio_url
-        "content": [
-            {"type": "text", "text": prompt},
-            {"type": "image_url", "image_url": {"url": image_url_value}, "role": "first_frame"},
-        ],
+        "content": [{"type": "text", "text": prompt}, *images],
         "generate_audio": bool(metadata.get("generateAudio", False)),
         "ratio": metadata["ratio"],
         "resolution": metadata.get("resolution") or config.resolution_for(model_key),
@@ -581,7 +664,9 @@ def submit_task(*, scene_dir: Path, model_key: str | None = None, image_url: str
         return {"status": "dry-run", "payload": payload}
     trace_payload = json.loads(json.dumps(payload))
     if image_url is None:
-        trace_payload["content"][1]["image_url"]["url"] = "<base64 omitted>"
+        for entry in trace_payload["content"]:
+            if entry.get("type") == "image_url":
+                entry["image_url"]["url"] = "<base64 omitted>"
     h3._write_text_atomic(scene_dir / "seedance-request.json", json.dumps(trace_payload, ensure_ascii=False, indent=2) + "\n")
     response = _http_json(config, "POST", "/contents/generations/tasks", payload, timeout=120)
     task_id = task_id_from(response)
@@ -797,6 +882,11 @@ def build_parser() -> argparse.ArgumentParser:
     prepare.add_argument("--scene-dir", type=Path, required=True)
     prepare.add_argument("--combined-reference", type=Path, required=True, help="场景首帧（presenter+舞台）")
     prepare.add_argument("--clean-plate", type=Path, help="可选：无人物参考帧（备将来遮罩合成用）")
+    prepare.add_argument(
+        "--character-reference",
+        type=Path,
+        help="全能参考模式：人物立绘（与 --clean-plate 舞台底图一起以 reference_image 发送，无像素锁帧）",
+    )
     prepare.add_argument("--presenter", help="资产库 presenter id")
     prepare.add_argument("--dialogue")
     prepare.add_argument("--dialogue-file", type=Path)
@@ -842,6 +932,7 @@ def main() -> int:
                 scene_dir=args.scene_dir,
                 combined_reference=args.combined_reference,
                 clean_plate=args.clean_plate,
+                character_reference=args.character_reference,
                 dialogue=dialogue,
                 duration_seconds=args.duration,
                 start_seconds=args.start_seconds,
