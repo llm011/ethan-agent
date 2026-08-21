@@ -1,4 +1,5 @@
 import { getCompositions, renderFrames } from "@open-motion/renderer";
+import { getTimeHijackScript } from "@open-motion/core";
 import { chromium } from "playwright";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -9,8 +10,21 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// ── CLI arguments (same contract as before: 5 positional args) ──
-const [timelinePathArg, outputPathArg, coverPathArg, reportPathArg, publicDirArg] = process.argv.slice(2);
+// ── CLI arguments ──
+// 视频模式:  node render.mjs <timeline.json> <output.mp4> <cover.png> <report.json> <public-dir>
+// 静帧模式:  node render.mjs stills <timeline.json> <stills-dir> <public-dir>
+//            （H3 流水线用：每个场景导出 presenter 开/关两张 PNG，见文件底部 exportStills）
+const argv = process.argv.slice(2);
+if (argv[0] === "stills") {
+  const [, timelineArg, stillsDirArg, publicArg] = argv;
+  if (!timelineArg || !stillsDirArg || !publicArg) {
+    throw new Error("Usage: node render.mjs stills <timeline.json> <stills-dir> <public-dir>");
+  }
+  await exportStills(path.resolve(timelineArg), path.resolve(stillsDirArg), path.resolve(publicArg));
+  process.exit(0);
+}
+
+const [timelinePathArg, outputPathArg, coverPathArg, reportPathArg, publicDirArg] = argv;
 if (!timelinePathArg || !outputPathArg || !coverPathArg || !reportPathArg || !publicDirArg) {
   throw new Error("Usage: node render.mjs <timeline.json> <output.mp4> <cover.png> <report.json> <public-dir>");
 }
@@ -80,145 +94,21 @@ const distDir = path.join(tmpDir, "vite-dist");
 
 // ── 1. Ensure Playwright browsers are installed ──
 process.stderr.write("[Step 1/5] Checking Playwright browsers...\n");
-const configuredChromiumPath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH?.trim();
-const isBrowserFile = (candidate) => {
-  if (!candidate) return false;
-  try {
-    return fs.statSync(candidate).isFile();
-  } catch {
-    return false;
-  }
-};
-let chromiumPath = configuredChromiumPath;
-if (configuredChromiumPath) {
-  if (!isBrowserFile(configuredChromiumPath)) {
-    throw new Error(`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH is not a file: ${configuredChromiumPath}`);
-  }
-  process.stderr.write("[Step 1/5] Playwright OK (configured executable)\n");
-} else {
-  try {
-    chromiumPath = chromium.executablePath();
-  } catch {
-    chromiumPath = null;
-  }
-  if (isBrowserFile(chromiumPath)) {
-    process.stderr.write("[Step 1/5] Playwright OK (cached)\n");
-  } else {
-    process.stderr.write("[Step 1/5] Installing Playwright Chromium...\n");
-    execFileSync("npx", ["playwright", "install", "chromium"], { cwd: __dirname, stdio: "inherit" });
-    chromiumPath = chromium.executablePath();
-    if (!isBrowserFile(chromiumPath)) {
-      throw new Error(`Playwright Chromium install completed but executable is missing: ${chromiumPath}`);
-    }
-  }
-}
+ensureChromiumPath();
 
 // ── 2. Vite build ──
 process.stderr.write("[Step 2/5] Building with Vite...\n");
-fs.mkdirSync(distDir, { recursive: true });
-execFileSync("npx", ["vite", "build", "--outDir", distDir], { cwd: __dirname, stdio: "inherit" });
+buildRenderer(distDir);
 process.stderr.write("[Step 2/5] Vite build done\n");
 
 // ── 3. Serve dist/ on an OS-assigned loopback port ──
 // A random fixed port can collide with an existing local process. Using port 0
 // lets the kernel choose an available port, and avoids depending on http-server.
-const MIME_TYPES = {
-  ".css": "text/css; charset=utf-8",
-  ".html": "text/html; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8",
-  ".json": "application/json; charset=utf-8",
-  ".svg": "image/svg+xml",
-  ".woff": "font/woff",
-  ".woff2": "font/woff2",
-  // 资产库回退：presenter 立绘 / b-roll 素材由 video_pipeline stage 到 publicDir，
-  // 不在 vite dist 里，需要 server 兜底服务
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".webp": "image/webp",
-  ".mp4": "video/mp4",
-  ".webm": "video/webm",
-  ".mp3": "audio/mpeg",
-  ".wav": "audio/wav",
-  ".m4a": "audio/mp4",
-};
 let server;
 let url;
 
 try {
-  server = http.createServer((request, response) => {
-    let requestPath;
-    try {
-      requestPath = decodeURIComponent(new URL(request.url || "/", "http://127.0.0.1").pathname);
-    } catch {
-      response.writeHead(400).end("Invalid request path");
-      return;
-    }
-    const candidate = path.resolve(distDir, `.${requestPath}`);
-    if (candidate !== distDir && !candidate.startsWith(`${distDir}${path.sep}`)) {
-      response.writeHead(403).end("Forbidden");
-      return;
-    }
-    let filePath = candidate;
-    let isFile = (() => {
-      try {
-        return fs.statSync(filePath).isFile();
-      } catch {
-        return false;
-      }
-    })();
-    if (!isFile && path.extname(requestPath)) {
-      // dist miss → 回退到 publicDir（presenter 立绘 / 音频 / b-roll 等 stage 资产）。
-      // 同样的 containment 检查，防路径逃逸。
-      const publicCandidate = path.resolve(publicRoot, `.${requestPath}`);
-      if (publicCandidate !== publicRoot && publicCandidate.startsWith(`${publicRoot}${path.sep}`)) {
-        try {
-          const resolved = fs.realpathSync(publicCandidate);
-          if ((resolved === publicRoot || resolved.startsWith(`${publicRoot}${path.sep}`)) && fs.statSync(resolved).isFile()) {
-            filePath = resolved;
-            isFile = true;
-          }
-        } catch {
-          // fall through to 404
-        }
-      }
-    }
-    if (!isFile) {
-      // Only extension-less paths are SPA routes worth rewriting to index.html.
-      // A missing .js/.css/.png means the Vite build is stale or partial; answering
-      // 200 + index.html there turns that into an opaque "no composition found"
-      // or a 600s frame-capture timeout instead of a diagnosable 404.
-      if (path.extname(requestPath)) {
-        response.writeHead(404).end(`Not found: ${requestPath}`);
-        return;
-      }
-      filePath = path.join(distDir, "index.html");
-      if (!fs.existsSync(filePath)) {
-        response.writeHead(404).end("Vite build output is missing index.html");
-        return;
-      }
-    }
-    response.writeHead(200, {"Content-Type": MIME_TYPES[path.extname(filePath)] || "application/octet-stream"});
-    // Both halves of the pipe need an error listener: the read stream can fail on
-    // a truncated build, and the response emits errors when Chromium aborts a
-    // request mid-stream. An unhandled one there would take down the renderer.
-    const body = fs.createReadStream(filePath);
-    response.on("error", () => body.destroy());
-    body.on("error", () => response.destroy()).pipe(response);
-  });
-  await new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      server.off("error", reject);
-      const address = server.address();
-      if (!address || typeof address === "string") {
-        reject(new Error("Unable to determine local render server port"));
-        return;
-      }
-      url = `http://127.0.0.1:${address.port}`;
-      resolve();
-    });
-  });
+  ({server, url} = await startAssetServer(distDir, publicRoot));
 
   // ── 4. Discover compositions ──
   process.stderr.write(`[Step 3/5] Discovering compositions from ${url}...\n`);
@@ -300,8 +190,8 @@ try {
     filterParts.push(`[${entry.inputIdx}:a]adelay=${entry.delayMs}|${entry.delayMs},asetpts=PTS-STARTPTS[a${i}]`);
   });
 
+  const encodedDurationSec = config.durationInFrames / config.fps;
   if (audioEntries.length > 0) {
-    const encodedDurationSec = config.durationInFrames / config.fps;
     const audioInputArgs = audioEntries.flatMap((e) => ["-i", e.path]);
     const mixInputs = audioEntries.map((e, i) => `[a${i}]`).join("");
     filterParts.push(`${mixInputs}amix=inputs=${audioEntries.length}:duration=longest:normalize=0[aout]`);
@@ -325,7 +215,6 @@ try {
       { stdio: "inherit" },
     );
   } else {
-    const encodedDurationSec = config.durationInFrames / config.fps;
     process.stderr.write("[Step 5/5] Encoding MP4 with FFmpeg (video only)...\n");
     execFileSync(
       "ffmpeg",
@@ -353,10 +242,6 @@ try {
   // ── 8. Write render-report.json (compatible with video_pipeline.py) ──
   const videoBytes = fs.existsSync(outputPath) ? fs.statSync(outputPath).size : 0;
   const coverBytes = fs.existsSync(coverPath) ? fs.statSync(coverPath).size : 0;
-  const durationSec = Math.round((config.durationInFrames / config.fps) * 1000) / 1000;
-  const expectedDurationSec = Math.round(
-    ((timeline.totalDurationMs || config.durationInFrames * 1000 / config.fps) / 1000) * 1000,
-  ) / 1000;
   const report = {
     status: "ok",
     composition: comp.id,
@@ -365,9 +250,7 @@ try {
     fps: config.fps,
     durationInFrames: config.durationInFrames,
     expectedDurationMs: timeline.totalDurationMs,
-    expectedDurationSec,
     sceneCount: timeline.scenes?.length || 0,
-    durationSec,
     videoBytes,
     coverBytes,
     audioAssets: audioEntries.map(({src, startFrame, delayMs}) => ({src, startFrame, delayMs})),
@@ -396,4 +279,250 @@ try {
     }
   } catch {}
   process.stderr.write("Temp files cleaned up.\n");
+}
+
+// ─── Shared helpers（视频模式与 stills 模式共用）───
+
+function isBrowserFile(candidate) {
+  if (!candidate) return false;
+  try {
+    return fs.statSync(candidate).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function ensureChromiumPath() {
+  const configuredChromiumPath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH?.trim();
+  let chromiumPath = configuredChromiumPath;
+  if (configuredChromiumPath) {
+    if (!isBrowserFile(configuredChromiumPath)) {
+      throw new Error(`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH is not a file: ${configuredChromiumPath}`);
+    }
+    process.stderr.write("[Step 1/5] Playwright OK (configured executable)\n");
+    return chromiumPath;
+  }
+  try {
+    chromiumPath = chromium.executablePath();
+  } catch {
+    chromiumPath = null;
+  }
+  if (isBrowserFile(chromiumPath)) {
+    process.stderr.write("[Step 1/5] Playwright OK (cached)\n");
+    return chromiumPath;
+  }
+  process.stderr.write("[Step 1/5] Installing Playwright Chromium...\n");
+  execFileSync("npx", ["playwright", "install", "chromium"], { cwd: __dirname, stdio: "inherit" });
+  chromiumPath = chromium.executablePath();
+  if (!isBrowserFile(chromiumPath)) {
+    throw new Error(`Playwright Chromium install completed but executable is missing: ${chromiumPath}`);
+  }
+  return chromiumPath;
+}
+
+function buildRenderer(distDir) {
+  fs.mkdirSync(distDir, { recursive: true });
+  execFileSync("npx", ["vite", "build", "--outDir", distDir], { cwd: __dirname, stdio: "inherit" });
+}
+
+// dist/ 优先、publicDir 兜底的静态 server，监听 127.0.0.1 的 OS 分配端口。
+async function startAssetServer(distDir, publicRoot) {
+  // 注意必须留在函数体内：stills 模式在模块顶层 await 本函数，顶层 const 尚未初始化（TDZ）。
+  const MIME_TYPES = {
+    ".css": "text/css; charset=utf-8",
+    ".html": "text/html; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+    // 资产库回退：presenter 立绘 / b-roll 素材由 video_pipeline stage 到 publicDir，
+    // 不在 vite dist 里，需要 server 兜底服务
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".mp4": "video/mp4",
+    ".webm": "video/webm",
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".m4a": "audio/mp4",
+  };
+  const server = http.createServer((request, response) => {
+    let requestPath;
+    try {
+      requestPath = decodeURIComponent(new URL(request.url || "/", "http://127.0.0.1").pathname);
+    } catch {
+      response.writeHead(400).end("Invalid request path");
+      return;
+    }
+    const candidate = path.resolve(distDir, `.${requestPath}`);
+    if (candidate !== distDir && !candidate.startsWith(`${distDir}${path.sep}`)) {
+      response.writeHead(403).end("Forbidden");
+      return;
+    }
+    let filePath = candidate;
+    let isFile = (() => {
+      try {
+        return fs.statSync(filePath).isFile();
+      } catch {
+        return false;
+      }
+    })();
+    if (!isFile && path.extname(requestPath)) {
+      // dist miss → 回退到 publicDir（presenter 立绘 / 音频 / b-roll 等 stage 资产）。
+      // 同样的 containment 检查，防路径逃逸。
+      const publicCandidate = path.resolve(publicRoot, `.${requestPath}`);
+      if (publicCandidate !== publicRoot && publicCandidate.startsWith(`${publicRoot}${path.sep}`)) {
+        try {
+          const resolved = fs.realpathSync(publicCandidate);
+          if ((resolved === publicRoot || resolved.startsWith(`${publicRoot}${path.sep}`)) && fs.statSync(resolved).isFile()) {
+            filePath = resolved;
+            isFile = true;
+          }
+        } catch {
+          // fall through to 404
+        }
+      }
+    }
+    if (!isFile) {
+      // Only extension-less paths are SPA routes worth rewriting to index.html.
+      // A missing .js/.css/.png means the Vite build is stale or partial; answering
+      // 200 + index.html there turns that into an opaque "no composition found"
+      // or a 600s frame-capture timeout instead of a diagnosable 404.
+      if (path.extname(requestPath)) {
+        response.writeHead(404).end(`Not found: ${requestPath}`);
+        return;
+      }
+      filePath = path.join(distDir, "index.html");
+      if (!fs.existsSync(filePath)) {
+        response.writeHead(404).end("Vite build output is missing index.html");
+        return;
+      }
+    }
+    response.writeHead(200, {"Content-Type": MIME_TYPES[path.extname(filePath)] || "application/octet-stream"});
+    // Both halves of the pipe need an error listener: the read stream can fail on
+    // a truncated build, and the response emits errors when Chromium aborts a
+    // request mid-stream. An unhandled one there would take down the renderer.
+    const body = fs.createReadStream(filePath);
+    response.on("error", () => body.destroy());
+    body.on("error", () => response.destroy()).pipe(response);
+  });
+  const url = await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        reject(new Error("Unable to determine local render server port"));
+        return;
+      }
+      resolve(`http://127.0.0.1:${address.port}`);
+    });
+  });
+  return {server, url};
+}
+
+// ─── Stills 导出（H3 流水线）───
+// 每个场景导出 presenter 开/关两张 PNG：
+//   <scene-id>-combined.png     立绘 + 舞台（给 H3 做构图参考 Picture 1）
+//   <scene-id>-clean-plate.png  同一舞台无立绘（最终合成的确定性底）
+// clean-plate 通过 presenter.forceHidden 只藏立绘图层、不动硬车道布局，
+// 两张图的文字/数据位置才逐像素对齐（h3-presenter-pipeline.md 的镜头包契约）。
+async function exportStills(timelinePath, stillsDir, publicDir) {
+  const timeline = JSON.parse(fs.readFileSync(timelinePath, "utf8"));
+  const scenes = Array.isArray(timeline.scenes) ? timeline.scenes : [];
+  if (scenes.length === 0) {
+    throw new Error("Timeline must contain at least one scene");
+  }
+  let publicRoot;
+  try {
+    publicRoot = fs.realpathSync(path.resolve(publicDir));
+  } catch {
+    throw new Error(`Public directory does not exist: ${publicDir}`);
+  }
+  if (!timeline.presenter) {
+    process.stderr.write("[stills] timeline has no presenter; combined and clean-plate will be identical\n");
+  }
+  const fps = timeline.fps || 30;
+  const config = {width: timeline.width || 1080, height: timeline.height || 1920, fps};
+  const tmpDir = path.join(stillsDir, "temp");
+  const distDir = path.join(tmpDir, "vite-dist");
+  fs.mkdirSync(stillsDir, { recursive: true });
+
+  ensureChromiumPath();
+  buildRenderer(distDir);
+  const {server, url} = await startAssetServer(distDir, publicRoot);
+  const stills = [];
+  try {
+    const browser = await chromium.launch({
+      executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
+      args: ["--disable-dev-shm-usage", "--disable-setuid-sandbox", "--no-sandbox"],
+    });
+    try {
+      for (const scene of scenes) {
+        // 取场景 2/3 处的帧：揭示动画（前 40%）与 marker 弹簧已稳定，场景淡出（末 9 帧）未开始。
+        const frame = Math.max(0, Math.round(((scene.startMs + (scene.durationMs * 2) / 3) / 1000) * fps));
+        for (const variant of ["combined", "clean-plate"]) {
+          const inputProps =
+            variant === "clean-plate" && timeline.presenter
+              ? {...timeline, presenter: {...timeline.presenter, forceHidden: true}}
+              : timeline;
+          const file = path.join(stillsDir, `${scene.id}-${variant}.png`);
+          await renderStillShot({browser, url, config, frame, inputProps, outputPath: file});
+          stills.push({sceneId: scene.id, variant, frame, path: file});
+          process.stderr.write(`[stills] ${scene.id} ${variant} (frame ${frame}) -> ${file}\n`);
+        }
+      }
+    } finally {
+      await browser.close();
+    }
+  } finally {
+    // 同主流程：不 await close()，直接断连后关闭，避免悬挂请求拖死清理。
+    try {
+      server?.closeAllConnections?.();
+      server?.close();
+    } catch {}
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+  }
+  const report = {status: "ok", width: config.width, height: config.height, fps, stills};
+  process.stdout.write(JSON.stringify(report, null, 2) + "\n");
+}
+
+// 单帧截图：复刻 renderFrames 的单帧路径（init script 注入时间劫持 + inputProps，
+// 等 READY 且 delayRender 清零后截图）。inputProps 不同的帧必须开新 page。
+async function renderStillShot({browser, url, config, frame, inputProps, outputPath}) {
+  const page = await browser.newPage({viewport: {width: config.width, height: config.height}});
+  page.setDefaultTimeout(60000);
+  page.setDefaultNavigationTimeout(60000);
+  try {
+    await page.addInitScript(({frame, fps, hijackScript, inputProps}) => {
+      window.__OPEN_MOTION_FRAME__ = frame;
+      window.__OPEN_MOTION_COMPOSITION_ID__ = "ArticleVideo";
+      window.__OPEN_MOTION_INPUT_PROPS__ = inputProps;
+      window.__OPEN_MOTION_READY__ = false;
+      window.__OPEN_MOTION_VIDEO_FRAMES__ = {};
+      const script = document.createElement("script");
+      script.textContent = hijackScript;
+      document.documentElement.appendChild(script);
+      script.remove();
+      // 保证 #root 占满整个视口，但不添加 flex center 避免影响内部组件布局
+      const style = document.createElement("style");
+      style.textContent = "body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; } #root { width: 100%; height: 100%; display: block; }";
+      document.head.appendChild(style);
+    }, {frame, fps: config.fps, hijackScript: getTimeHijackScript(frame, config.fps), inputProps});
+    await page.goto(url);
+    await page.waitForFunction(() => {
+      const ready = window.__OPEN_MOTION_READY__ === true;
+      const delayCount = window.__OPEN_MOTION_DELAY_RENDER_COUNT__ || 0;
+      return ready && delayCount === 0;
+    }, undefined, {timeout: 60000});
+    await page.waitForLoadState("networkidle");
+    // 与 renderFrames 相同的稳定等待，避免字体/布局未收敛就截图
+    await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 150)));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await page.screenshot({path: outputPath, type: "png"});
+  } finally {
+    await page.close();
+  }
 }

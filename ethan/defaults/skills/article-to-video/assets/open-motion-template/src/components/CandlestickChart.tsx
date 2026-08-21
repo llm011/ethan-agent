@@ -68,17 +68,23 @@ export const CandlestickChart: React.FC<{
 }> = ({visual, theme, sceneId, sceneFrames}) => {
   const frame = useCurrentFrame();
   const {fps} = useVideoConfig();
-  const candles = visual.candles ?? synthesizeCandles(visual.closes ?? [], sceneId);
+  // closes→OHLC 合成与 min/max 与帧无关，逐帧重算纯属浪费 —— 按输入引用记忆化
+  // （timeline 是渲染期不变的 inputProps，引用稳定）。
+  const candles = React.useMemo(
+    () => visual.candles ?? synthesizeCandles(visual.closes ?? [], sceneId),
+    [visual.candles, visual.closes, sceneId],
+  );
   const n = Math.max(1, candles.length);
 
-  const lows = candles.map((c) => c.l);
-  const highs = candles.map((c) => c.h);
-  for (const band of Object.values(visual.bands ?? {})) {
-    lows.push(...band);
-    highs.push(...band);
-  }
-  const min = Math.min(...lows);
-  const max = Math.max(...highs);
+  const {min, max} = React.useMemo(() => {
+    const lows = candles.map((c) => c.l);
+    const highs = candles.map((c) => c.h);
+    for (const band of Object.values(visual.bands ?? {})) {
+      lows.push(...band);
+      highs.push(...band);
+    }
+    return {min: Math.min(...lows), max: Math.max(...highs)};
+  }, [candles, visual.bands]);
   const pad = (max - min) * 0.06 || 1e-9;
   const y = (value: number) => PAD_TOP + (1 - (value - (min - pad)) / (max - min + 2 * pad)) * (H - PAD_TOP - PAD_BOTTOM);
   const stepX = (W - PAD_X * 2) / n;
@@ -143,7 +149,7 @@ export const CandlestickChart: React.FC<{
                 y={bodyTop}
                 width={bodyW}
                 height={Math.max(2.5, bodyBottom - bodyTop)}
-                fill={up ? color : color}
+                fill={color}
                 opacity={up ? 0.95 : 0.9}
                 rx={1.5}
               />

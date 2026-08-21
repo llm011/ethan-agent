@@ -41,7 +41,7 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 **Skill 技能系统**
 - 触发词匹配，自动注入 system prompt 引导行为
 - 语义路由器（BGE INT8 + LR 头）在关键词之上补召回，换个说法也能命中——内置，依赖随 `pip install ethan-agent` 安装；BGE 模型首次使用时自动下载（~24MB）
-- 内置 `article-to-video`：把主题、文章、本地 Markdown/TXT 文件或公开 URL 生成带 Edge TTS 配音、时间轴字幕和 Open Motion 动效的 MP4；支持分领域视觉（金融域 K线图 + 黄色关键词标注 + 可复用的虚拟人立绘角色包），Web 与 Desktop 文件卡片均可直接播放和下载，媒体依赖首次使用时按需安装
+- 内置 `article-to-video`：把主题、文章、本地 Markdown/TXT 文件或公开 URL 生成带 Edge TTS 配音、时间轴字幕和 Open Motion 动效的 MP4；支持分领域视觉（金融域 K线图 + 黄色关键词标注 + 可复用的虚拟人立绘角色包），并可选 MiniMax H3 动态 presenter 管线（在 `~/.ethan/skills/article-to-video/h3-comfyui.env` 配置 ComfyUI workflow 地址后启用）：小雨动作/口型作为前景，菜单和数据由确定性画面恢复；Web 与 Desktop 文件卡片均可直接播放和下载，媒体依赖首次使用时按需安装
 - `fast_path: true` 触发后走毫秒级快速路径，适合全屋智能等高频控制
 - `channels: [lark, web]` 按渠道过滤，Skill 只在指定场景下生效
 - `modes: [法律]` 按对话模式过滤，Skill 只在指定模式下生效（空 = 所有模式）

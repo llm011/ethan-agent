@@ -1,7 +1,7 @@
 import React from "react";
 import {continueRender, delayRender, interpolate, spring, useCurrentFrame, useVideoConfig} from "@open-motion/core";
-import type {Presenter, Scene} from "../types";
-import {PRESENTER_LANE_WIDTH} from "../types";
+import type {Presenter, PresenterLayout, Scene} from "../types";
+import {PRESENTER_BOTTOM_PX} from "../types";
 
 const clamp = {extrapolateLeft: "clamp" as const, extrapolateRight: "clamp" as const};
 
@@ -11,7 +11,7 @@ const effectivePose = (scene: Scene | undefined, presenter: Presenter): string =
 
 // 虚拟人立绘层：挂在组合根上（不进 Sequence），呼吸浮动跨场景连续。
 // 所有动画都是绝对帧的纯函数（时间劫持下 CSS transition/animation 不可控，禁用）。
-export const PresenterLayer: React.FC<{presenter: Presenter; scenes: Scene[]}> = ({presenter, scenes}) => {
+export const PresenterLayer: React.FC<{presenter: Presenter; scenes: Scene[]; layout: PresenterLayout}> = ({presenter, scenes, layout}) => {
   const frame = useCurrentFrame(); // 根组件上 = 绝对帧
   const {fps} = useVideoConfig();
   const [ready, setReady] = React.useState(false);
@@ -55,12 +55,12 @@ export const PresenterLayer: React.FC<{presenter: Presenter; scenes: Scene[]}> =
   const crossfade = prevPose !== pose ? interpolate(localFrame, [0, 6], [0, 1], clamp) : 1;
   const bob = Math.sin(frame / 16) * 5;
 
-  if (!ready || !visible) {
+  if (presenter.forceHidden || !ready || !visible) {
     return null;
   }
 
-  const side = presenter.position === "left" ? {left: 30} : {right: 30};
-  // 硬车道：宽被钳在 PRESENTER_LANE_WIDTH（外层 transform scale 同步放大车道），
+  const side = presenter.position === "left" ? {left: layout.presenterEdgeInset} : {right: layout.presenterEdgeInset};
+  // 硬车道：宽被钳在 layout.presenterLaneWidth（外层 transform scale 同步放大车道），
   // img 双轴 contain —— 任何宽高比的姿势图都不可能溢出车道，内容侧按同宽收 padding。
   const imgStyle = (opacity: number): React.CSSProperties => ({
     position: "absolute",
@@ -81,8 +81,8 @@ export const PresenterLayer: React.FC<{presenter: Presenter; scenes: Scene[]}> =
     <div
       style={{
         position: "absolute",
-        bottom: 240, // 避开底部字幕区
-        width: PRESENTER_LANE_WIDTH,
+        bottom: PRESENTER_BOTTOM_PX, // 避开底部字幕区（字幕 bottom + 最小高 + 留白，见 types.ts）
+        width: layout.presenterLaneWidth,
         height: "46%",
         zIndex: 5,
         ...side,

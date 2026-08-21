@@ -125,6 +125,9 @@ ethan/defaults/skills/article-to-video/assets/open-motion-template/node_modules/
 ethan/defaults/skills/article-to-video/assets/open-motion-template/.open-motion-tmp/
 ethan/defaults/skills/article-to-video/assets/open-motion-template/debug-*.png
 
+# article-to-video 任务产物/中间结果（视频、参考图、合成临时文件，正式产物在 ~/.ethan/output/）
+artifacts/
+
 # Code review / temp files
 .review_diff.txt
 AGENTS.md

@@ -8,7 +8,7 @@ import {
   useVideoConfig,
 } from "@open-motion/core";
 import type {Scene, VideoTimeline, Visual, Theme} from "./types";
-import {PRESENTER_EDGE_INSET, PRESENTER_LANE_GAP, presenterLanePx} from "./types";
+import {CAPTION_BOTTOM_PX, CAPTION_MIN_HEIGHT_PX, presenterLanePx, resolveLayout} from "./types";
 import {CalloutLayer} from "./components/CalloutLayer";
 import {CandlestickChart} from "./components/CandlestickChart";
 import {PresenterLayer} from "./components/PresenterLayer";
@@ -254,12 +254,14 @@ const SceneView: React.FC<{scene: Scene; timeline: VideoTimeline; index: number}
   const {theme} = timeline;
   // 有立绘时内容列让出立绘硬车道：车道侧 padding 加大到 边缘间距+车道宽+留白，
   // 车道内的立绘（CSS 双轴 contain，与姿势图宽高比无关）与内容列永不相交。
+  // 布局几何单源在 video_pipeline.py（timeline.layout 注入），resolveLayout 负责回退。
+  const layout = resolveLayout(timeline);
   const withPresenter = Boolean(timeline.presenter) && scene.presenter?.visible !== false;
   const lanePad = withPresenter
-    ? PRESENTER_EDGE_INSET + presenterLanePx(timeline.presenter!.scale) + PRESENTER_LANE_GAP
-    : 78;
-  const padLeft = withPresenter && timeline.presenter!.position === "left" ? lanePad : 78;
-  const padRight = withPresenter && timeline.presenter!.position !== "left" ? lanePad : 78;
+    ? layout.presenterEdgeInset + presenterLanePx(layout.presenterLaneWidth, timeline.presenter!.scale) + layout.presenterLaneGap
+    : layout.contentSidePadding;
+  const padLeft = withPresenter && timeline.presenter!.position === "left" ? lanePad : layout.contentSidePadding;
+  const padRight = withPresenter && timeline.presenter!.position !== "left" ? lanePad : layout.contentSidePadding;
 
   return (
     <AbsoluteFill style={{opacity: fade, padding: `108px ${padRight}px 280px ${padLeft}px`, color: theme.text, overflow: "hidden", boxSizing: "border-box"}}>
@@ -320,8 +322,8 @@ export const ArticleVideo: React.FC<VideoTimeline> = (timeline) => {
         );
       })}
       {/* 虚拟人立绘：挂在根上（不进 Sequence），呼吸浮动跨场景连续；字幕之上、内容之下由 zIndex 控制 */}
-      {timeline.presenter ? <PresenterLayer presenter={timeline.presenter} scenes={timeline.scenes} /> : null}
-      <div style={{position: "absolute", left: 58, right: 58, bottom: 72, minHeight: 122, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10}}>
+      {timeline.presenter ? <PresenterLayer presenter={timeline.presenter} scenes={timeline.scenes} layout={resolveLayout(timeline)} /> : null}
+      <div style={{position: "absolute", left: 58, right: 58, bottom: CAPTION_BOTTOM_PX, minHeight: CAPTION_MIN_HEIGHT_PX, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10}}>
         {caption ? (
           <div style={{background: "rgba(3,8,18,0.86)", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 26, padding: "18px 30px", color: theme.text, fontSize: 32, lineHeight: 1.4, fontWeight: 600, textAlign: "center", maxWidth: "85%", boxShadow: "0 18px 60px rgba(0,0,0,0.4)"}}>
             {caption.text}

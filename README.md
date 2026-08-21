@@ -43,7 +43,7 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 **Skill system**
 - Keyword trigger matching, auto-injected into system prompt
 - Semantic router (BGE INT8 + LR head) adds recall on top of keywords so differently-phrased requests still match — built-in, deps ship with `pip install ethan-agent`; the BGE model auto-downloads on first use (~24MB)
-- Built-in `article-to-video` turns a topic, article, local Markdown/TXT file, or public URL into a narrated MP4 with Edge TTS, timed captions, and deterministic Open Motion motion graphics; domain-aware visuals (finance-domain candlestick charts, keyword callouts, reusable virtual-presenter sprite packs); Web and Desktop file cards provide inline playback plus download, and optional media dependencies install lazily on first use
+- Built-in `article-to-video` turns a topic, article, local Markdown/TXT file, or public URL into a narrated MP4 with Edge TTS, timed captions, and deterministic Open Motion motion graphics; domain-aware visuals (finance-domain candlestick charts, keyword callouts, reusable virtual-presenter sprite packs), plus an optional MiniMax H3 presenter pipeline (enabled by setting a ComfyUI workflow URL in `~/.ethan/skills/article-to-video/h3-comfyui.env`) that restores deterministic menus/data behind an animated, lip-synced presenter foreground; Web and Desktop file cards provide inline playback plus download, and optional media dependencies install lazily on first use
 - `fast_path: true` routes matched input to the millisecond fast track
 - `channels: [lark, web]` filters skills by channel so each surface gets only relevant skills
 - `modes: [法律]` filters skills by conversation mode so each mode gets only relevant skills (empty = all modes)

@@ -25,6 +25,7 @@ import shutil
 import subprocess
 import sys
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
@@ -157,9 +158,14 @@ def print_prompt_pack(presenter_id: str, character: dict) -> None:
 # ---------------------------------------------------------------------------
 
 def png_has_alpha(path: Path) -> bool:
-    """stdlib 读 PNG IHDR：色类型 6=RGBA、4=灰度+alpha，或存在 tRNS 块。非 PNG 返回 False。"""
+    """stdlib 读 PNG 头 64KB：色类型 6=RGBA、4=灰度+alpha，或存在 tRNS 块。非 PNG 返回 False。
+
+    IHDR 固定在偏移 25，tRNS 按规范必须出现在第一个 IDAT 之前（64KB 足以覆盖），
+    嗅探不必读入整文件。
+    """
     try:
-        data = path.read_bytes()
+        with path.open("rb") as fh:
+            data = fh.read(65536)
     except OSError:
         return False
     if not data.startswith(b"\x89PNG\r\n\x1a\n") or len(data) < 33:
@@ -167,7 +173,7 @@ def png_has_alpha(path: Path) -> bool:
     color_type = data[25]
     if color_type in (4, 6):
         return True
-    return b"tRNS" in data[:65536]
+    return b"tRNS" in data
 
 
 def _pip_install(*packages: str) -> bool:
@@ -188,12 +194,6 @@ def _pip_install(*packages: str) -> bool:
 
 
 def _pillow():
-    try:
-        from PIL import Image
-
-        return Image
-    except ImportError:
-        pass
     for attempt in range(2):
         try:
             from PIL import Image
@@ -204,6 +204,32 @@ def _pillow():
                 continue
             return None
     return None
+
+
+def _match_mask(raw: bytes, pixel_count: int, key: tuple[int, ...], tolerance_sq: int) -> bytearray:
+    """背景色匹配掩码：dr²+dg²+db² ≤ tolerance² 的像素置 1。
+
+    有 numpy 时向量化（1536² 图从 ~2s 降到 ~20ms），没有则回退逐像素循环；
+    numpy 不做自动安装——它只是加速件，不是功能依赖。
+    """
+    try:
+        import numpy as np
+    except ImportError:
+        np = None
+    if np is not None:
+        rgb = np.frombuffer(raw, dtype=np.uint8).reshape(pixel_count, 4)[:, :3].astype(np.int32)
+        diff = rgb - np.array(key, dtype=np.int32)
+        return bytearray(np.asarray((diff * diff).sum(axis=1) <= tolerance_sq, dtype=np.uint8).tobytes())
+    matches = bytearray(pixel_count)
+    kr, kg, kb = key
+    for i in range(pixel_count):
+        offset = i * 4
+        dr = raw[offset] - kr
+        dg = raw[offset + 1] - kg
+        db = raw[offset + 2] - kb
+        if dr * dr + dg * dg + db * db <= tolerance_sq:
+            matches[i] = 1
+    return matches
 
 
 def cutout_to_png(src: Path, dst: Path, *, tolerance: int = 42, cleanup: bool = False) -> bool:
@@ -237,39 +263,39 @@ def cutout_to_png(src: Path, dst: Path, *, tolerance: int = 42, cleanup: bool = 
         # 走原始字节（getdata/putdata 在 Pillow 12+ 已弃用）：匹配掩码 + BFS + putalpha。
         raw = img.tobytes()
         pixel_count = width * height
-        matches = bytearray(pixel_count)
-        kr, kg, kb = key
-        for i in range(pixel_count):
-            offset = i * 4
-            dr = raw[offset] - kr
-            dg = raw[offset + 1] - kg
-            db = raw[offset + 2] - kb
-            if dr * dr + dg * dg + db * db <= tolerance_sq:
-                matches[i] = 1
+        matches = _match_mask(raw, pixel_count, key, tolerance_sq)
 
         visited = bytearray(pixel_count)
         alpha = bytearray(b"\xff") * pixel_count
-        queue: list[int] = []
+        border: list[int] = []
         for x in range(width):
-            queue.extend((x, x + (height - 1) * width))
+            border.extend((x, x + (height - 1) * width))
         for y in range(height):
-            queue.extend((y * width, width - 1 + y * width))
+            border.extend((y * width, width - 1 + y * width))
+        # 入队即标记 visited 并预过滤非背景：出队的不必是合法背景像素。
+        # 队列长度 = 背景连通域大小（旧写法每像素最多入队 4 次再靠出队去重）。
+        queue: list[int] = []
+        for index in border:
+            if not visited[index] and matches[index]:
+                visited[index] = 1
+                queue.append(index)
         head = 0
         while head < len(queue):
             index = queue[head]
             head += 1
-            if visited[index] or not matches[index]:
-                continue
-            visited[index] = 1
             alpha[index] = 0
             x, y = index % width, index // width
-            if x > 0:
+            if x > 0 and not visited[index - 1] and matches[index - 1]:
+                visited[index - 1] = 1
                 queue.append(index - 1)
-            if x < width - 1:
+            if x < width - 1 and not visited[index + 1] and matches[index + 1]:
+                visited[index + 1] = 1
                 queue.append(index + 1)
-            if y > 0:
+            if y > 0 and not visited[index - width] and matches[index - width]:
+                visited[index - width] = 1
                 queue.append(index - width)
-            if y < height - 1:
+            if y < height - 1 and not visited[index + width] and matches[index + width]:
+                visited[index + width] = 1
                 queue.append(index + width)
         img.putalpha(Image.frombytes("L", (width, height), bytes(alpha)))
         if cleanup:
@@ -295,7 +321,16 @@ def despeckle_alpha(img, min_component: int = 600):
     alpha = img.getchannel("A").tobytes()
     out = bytearray(alpha)
     visited = bytearray(width * height)
-    for start in range(width * height):
+    # 起点候选只看不透明像素：抠图后背景占大头，全图 Python 循环白扫一遍。
+    # 有 numpy 用 nonzero，没有则 range + 循环内 out[start]==0 过滤（语义相同）。
+    try:
+        import numpy as np
+    except ImportError:
+        np = None
+    candidates = (
+        np.nonzero(np.frombuffer(alpha, dtype=np.uint8))[0].tolist() if np is not None else range(width * height)
+    )
+    for start in candidates:
         if visited[start] or out[start] == 0:
             continue
         component = []
@@ -457,27 +492,31 @@ def _parse_pose_overrides(raw: str | None) -> dict[str, str]:
     return poses
 
 
-def cmd_prompts(presenter_id: str, args: argparse.Namespace) -> None:
-    _validate_id(presenter_id)
-    existing = presenter_dir(presenter_id) / "character.json"
-    if existing.is_file() and not args.force:
-        raise SystemExit(f"[error] 角色 {presenter_id} 已存在（--force 可覆盖重建）")
+def _new_character(presenter_id: str, args: argparse.Namespace, *, source: str | None, attribution: str) -> dict:
+    """构造 pending 状态的角色元数据（prompts 手动出图 / create API 出图共用骨架）。"""
     description = (args.description or DEFAULT_DESCRIPTION).strip()
-    poses_prompts = _parse_pose_overrides(args.poses)
-    character = {
+    return {
         "id": presenter_id,
         "name": args.name or presenter_id,
         "status": "pending",
         "createdAt": datetime.now().isoformat(timespec="seconds"),
         "description": description,
         "sheet": build_sheet(description),
-        "posesPrompts": poses_prompts,
+        "posesPrompts": _parse_pose_overrides(args.poses),
         "voice": DEFAULT_VOICE,
         "poses": {},
         "cutout": True,
-        "source": None,
-        "attribution": "user-generated with GPT image 2",
+        "source": source,
+        "attribution": attribution,
     }
+
+
+def cmd_prompts(presenter_id: str, args: argparse.Namespace) -> None:
+    _validate_id(presenter_id)
+    existing = presenter_dir(presenter_id) / "character.json"
+    if existing.is_file() and not args.force:
+        raise SystemExit(f"[error] 角色 {presenter_id} 已存在（--force 可覆盖重建）")
+    character = _new_character(presenter_id, args, source=None, attribution="user-generated with GPT image 2")
     _save_character(presenter_id, character)
     print_prompt_pack(presenter_id, character)
 
@@ -543,35 +582,29 @@ def cmd_create(presenter_id: str, args: argparse.Namespace) -> None:
     if not transparent_ok:
         print(f"  [info] 模型 {model} 不支持透明背景，走品红底 + 导入抠图", file=sys.stderr)
     if not (presenter_dir(presenter_id) / "character.json").is_file() or args.force:
-        description = (args.description or DEFAULT_DESCRIPTION).strip()
-        character = {
-            "id": presenter_id,
-            "name": args.name or presenter_id,
-            "status": "pending",
-            "createdAt": datetime.now().isoformat(timespec="seconds"),
-            "description": description,
-            "sheet": build_sheet(description),
-            "posesPrompts": _parse_pose_overrides(args.poses),
-            "voice": DEFAULT_VOICE,
-            "poses": {},
-            "cutout": True,
-            "source": "api",
-            "attribution": f"generated via {model}",
-        }
-        _save_character(presenter_id, character)
+        _save_character(
+            presenter_id, _new_character(presenter_id, args, source="api", attribution=f"generated via {model}")
+        )
     character = _load_character(presenter_id)
     staging = presenter_dir(presenter_id) / "work" / "raw"
     prompts = {
         name: build_pose_prompt(character["sheet"], phrase, first=index == 0)
         for index, (name, phrase) in enumerate(character["posesPrompts"].items())
     }
-    for name, prompt in prompts.items():
-        dest = staging / f"{name}.png"
-        if dest.exists():
-            continue
-        print(f"  [info] 生成姿势 {name} ...", file=sys.stderr)
-        if not _image_gen_request(prompt, dest, transparent_ok=transparent_ok):
-            raise SystemExit(f"[error] 姿势 {name} 生成失败，可重试（已生成的会跳过）")
+    pending = [(name, prompt) for name, prompt in prompts.items() if not (staging / f"{name}.png").exists()]
+    if pending:
+        # 逐姿势 HTTP 生图（单张最长 TIMEOUT 秒）：串行 6 张最坏 ~18 分钟，
+        # 并行后总耗时 ≈ 最慢的一张。重跑安全：已存在的 dest 不进 pending。
+
+        def _generate(item: tuple[str, str]) -> tuple[str, bool]:
+            name, prompt = item
+            print(f"  [info] 生成姿势 {name} ...", file=sys.stderr)
+            return name, _image_gen_request(prompt, staging / f"{name}.png", transparent_ok=transparent_ok)
+
+        with ThreadPoolExecutor(max_workers=min(4, len(pending))) as pool:
+            failed = [name for name, ok in pool.map(_generate, pending) if not ok]
+        if failed:
+            raise SystemExit(f"[error] 姿势 {', '.join(failed)} 生成失败，可重试（已生成的会跳过）")
     cmd_import(presenter_id, staging)
 
 

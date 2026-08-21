@@ -42,6 +42,18 @@ mkdir -p "$PROJECT"
 
 金融领域建议配虚拟人立绘（`presenter`）。角色包存于资产库 `~/.ethan/assets/library/presenters/<id>/`（详见 `references/asset-library.md`）。**manifest 引用的 presenter 缺失时**：运行 `scripts/presenter_gen.py prompts <id>` 打印一整套出图 prompt，交给用户用 GPT image 2 按 `references/presenter-guide.md` 的流程逐姿势出图，再 `presenter_gen.py import <id> <目录>` 入库。不要自己编造立绘文件路径。
 
+**presenter 模式检测**（决定立绘是静态图还是 H3 动态 presenter）：
+
+```bash
+# 配置了 ComfyUI H3 workflow 地址 → 动态 presenter；否则 → 静态立绘
+H3_ENV="$HOME/.ethan/skills/article-to-video/h3-comfyui.env"
+test -f "$H3_ENV" && . "$H3_ENV"
+test -n "$H3_COMFYUI_URL" && echo "MODE: h3-dynamic ($H3_COMFYUI_URL)" || echo "MODE: static"
+```
+
+- `MODE: static` → 走默认步骤 4–7，presenter 始终是静态立绘，不要尝试 H3 流程。
+- `MODE: h3-dynamic` → presenter 按「H3 动态 Presenter」一节走，先读 `references/h3-presenter-pipeline.md`；静态渲染仍负责 clean plate / 菜单 / 数据层。可先用 `curl -m 3 -s "$H3_COMFYUI_URL/system_stats"` 探活，连不上时提醒用户启动 ComfyUI，不自动回退静态。
+
 ### 4. 生成 manifest
 
 先读 `references/manifest-schema.md` 和 `references/script-guide.md`，再把剧本写入 `$PROJECT/manifest.json`。用户指定时长时必须填写 `targetDurationSec`；每个场景必须包含唯一 `id`、可朗读的 `narration`、屏幕标题和一个受支持的视觉预设。
@@ -111,6 +123,21 @@ Edge TTS 是第三方库连接的在线服务。网络失败时最多重试三�
 - 没有空旁白、重复场景 ID、负时间或字幕越界。
 
 任何检查失败都要修正后重新运行，不能交付半成品。
+
+### H3 动态 Presenter（需配置启用）
+
+仅当 `~/.ethan/skills/article-to-video/h3-comfyui.env` 中配置了 `H3_COMFYUI_URL`（ComfyUI H3 workflow 地址）时使用本模式——第 3 步的模式检测会输出 `MODE: h3-dynamic`。使用
+`scripts/h3_presenter_pipeline.py`，并先读
+`references/h3-presenter-pipeline.md`。此模式的原则是：article-to-video 产出
+`combined-reference.png`（小雨 + 舞台）与同尺寸 `clean-plate.png`（无人物）——用渲染模板的
+stills 模式成对导出（`node assets/open-motion-template/render.mjs stills "$PROJECT/timeline.json"
+<输出目录> "$PROJECT/work/public"`，clean-plate 只藏立绘、布局逐像素一致）；MiniMax H3
+只生成小雨动作/原生中文声音；最终将带人物遮罩的 H3 前景覆盖回 clean plate。
+
+未配置 `H3_COMFYUI_URL` 时，即使内容适合动态 presenter，也一律走静态立绘；想启用时向用户说明：在 `h3-comfyui.env` 写一行 `H3_COMFYUI_URL=http://127.0.0.1:8188` 即可。
+
+不要让 H3 作为最终中文、数字和图表渲染器。无人物遮罩时只能用 `safe-boundary` 快速预览；
+人物手会深入菜单或图表时，必须使用逐帧前景遮罩，保证手指在 UI 前景。
 
 ### 7. 交付
 

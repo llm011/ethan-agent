@@ -21,7 +21,8 @@ from typing import Any
 
 VISUAL_TYPES = {"kinetic-text", "steps", "stat", "quote", "summary", "candlestick"}
 FPS_VALUES = {24, 25, 30, 60}
-# 立绘硬车道常量，与 open-motion-template/src/types.ts 保持同步：
+# 立绘硬车道常量 —— 这套几何的单源就在这里：build_timeline 把它注入 timeline.layout，
+# open-motion-template/src/types.ts 只保留同名常量作为旧时间线（无 layout 字段）的回退。
 # 渲染侧把 presenter 钳在 ceil(440 × scale) px 宽的车道内，内容列让出同一宽度。
 PRESENTER_LANE_WIDTH = 440
 PRESENTER_LANE_GAP = 24
@@ -33,6 +34,10 @@ DEFAULT_THEME = {
     "primary": "#6EE7F9",
     "secondary": "#A78BFA",
     "text": "#F8FAFC",
+    # tone 色板（callouts/K线标注用）也在这里注入，TS 侧 toneColor 不再自带回退色。
+    "accent": "#FACC15",
+    "positive": "#EF4444",
+    "negative": "#22C55E",
 }
 DOMAINS = {"general", "finance", "paper"}
 # 金融主题里 positive=红、negative=绿（A 股红涨绿跌约定），蜡烛图涨红跌绿。
@@ -767,6 +772,14 @@ def build_timeline(
         "totalDurationMs": offset,
         "domain": manifest.get("domain", "general"),
         "theme": manifest["theme"],
+        # 立绘硬车道几何注入（单源在本文件顶部常量）：渲染侧 resolveLayout 直接消费，
+        # validate 的 _presenter_overlap_warnings 也用同一组值，三处永不漂移。
+        "layout": {
+            "presenterLaneWidth": PRESENTER_LANE_WIDTH,
+            "presenterLaneGap": PRESENTER_LANE_GAP,
+            "presenterEdgeInset": PRESENTER_EDGE_INSET,
+            "contentSidePadding": CONTENT_SIDE_PADDING,
+        },
         "scenes": scenes,
         "captions": captions,
         "_combinedSubtitles": combined,

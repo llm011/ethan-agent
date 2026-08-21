@@ -53,9 +53,10 @@ export type Theme = {
   primary: string;
   secondary: string;
   text: string;
-  accent?: string;
-  positive?: string;
-  negative?: string;
+  // accent/positive/negative 由 video_pipeline 的 DEFAULT_THEME 保证注入，不是可选
+  accent: string;
+  positive: string;
+  negative: string;
 };
 
 // 虚拟人角色包（由 video_pipeline 从资产库解析后注入 timeline）
@@ -66,6 +67,9 @@ export type Presenter = {
   defaultPose: string;
   cutout: boolean;
   poses: Record<string, string>; // 姿势名 → public 相对路径（presenters/<id>/poses/<name>.png）
+  // render.mjs stills 模式导出 clean-plate 时置 true：只藏立绘图层，
+  // 不动 SceneView 的硬车道 padding —— 两张静帧的文字/数据位置才逐像素对齐。
+  forceHidden?: boolean;
 };
 
 export type VideoTimeline = {
@@ -77,24 +81,53 @@ export type VideoTimeline = {
   totalDurationMs: number;
   domain?: "general" | "finance" | "paper";
   theme: Theme;
+  layout?: Partial<PresenterLayout>;
   presenter?: Presenter;
   scenes: Scene[];
   captions: Caption[];
 };
 
-// tone 色板回退：金融主题里 positive=红（涨）、negative=绿（跌）（A 股约定）。
-export const toneColor = (theme: Theme, tone: Tone): string =>
-  tone === "accent"
-    ? theme.accent ?? "#FACC15"
-    : tone === "positive"
-      ? theme.positive ?? "#EF4444"
-      : theme.negative ?? "#22C55E";
+// tone 色板由 video_pipeline 的 DEFAULT_THEME 注入（金融主题 positive=红涨、
+// negative=绿跌，A 股约定）。缺失说明时间线不是 pipeline 产物 —— 抛错好过静默用错颜色。
+export const toneColor = (theme: Theme, tone: Tone): string => {
+  const color = theme[tone];
+  if (!color) {
+    throw new Error(`timeline theme is missing "${tone}" (video_pipeline DEFAULT_THEME injects it)`);
+  }
+  return color;
+};
 
 // ── 立绘硬车道 ──
-// presenter 可见时，立绘被 CSS 约束在屏幕边缘 ceil(LANE × scale) px 宽的车道内
+// presenter 可见时，立绘被 CSS 约束在屏幕边缘 ceil(laneWidth × scale) px 宽的车道内
 // （img 宽/高双轴 100% + objectFit contain，与姿势图宽高比无关）；内容区按同一
 // 宽度收 padding。两侧永不相交 —— 不遮挡是布局保证的，不靠作者小心。
+//
+// 单源在 video_pipeline.py：build_timeline 把这套几何注入 timeline.layout；
+// 以下常量只作为旧时间线（无 layout 字段）的回退值，改动必须与 Python 侧同步。
 export const PRESENTER_LANE_WIDTH = 440;
 export const PRESENTER_LANE_GAP = 24; // 内容列与车道之间的留白
-export const PRESENTER_EDGE_INSET = 30; // 车道距屏幕边缘的距离（与 PresenterLayer 的 left/right 一致）
-export const presenterLanePx = (scale: number): number => Math.ceil(PRESENTER_LANE_WIDTH * scale);
+export const PRESENTER_EDGE_INSET = 30; // 车道距屏幕边缘的距离
+export const CONTENT_SIDE_PADDING = 78; // 无立绘时内容列的左右 padding
+
+// 字幕区几何：立绘底部 = 字幕 bottom + 字幕最小高度 + 两者之间留白（72+122+46=240）。
+export const CAPTION_BOTTOM_PX = 72;
+export const CAPTION_MIN_HEIGHT_PX = 122;
+export const CAPTION_LANE_GAP_PX = 46;
+export const PRESENTER_BOTTOM_PX = CAPTION_BOTTOM_PX + CAPTION_MIN_HEIGHT_PX + CAPTION_LANE_GAP_PX;
+
+export type PresenterLayout = {
+  presenterLaneWidth: number;
+  presenterLaneGap: number;
+  presenterEdgeInset: number;
+  contentSidePadding: number;
+};
+
+// 布局解析：优先 timeline.layout（pipeline 注入），旧时间线回退到上面的同步常量。
+export const resolveLayout = (timeline: {layout?: Partial<PresenterLayout>}): PresenterLayout => ({
+  presenterLaneWidth: timeline.layout?.presenterLaneWidth ?? PRESENTER_LANE_WIDTH,
+  presenterLaneGap: timeline.layout?.presenterLaneGap ?? PRESENTER_LANE_GAP,
+  presenterEdgeInset: timeline.layout?.presenterEdgeInset ?? PRESENTER_EDGE_INSET,
+  contentSidePadding: timeline.layout?.contentSidePadding ?? CONTENT_SIDE_PADDING,
+});
+
+export const presenterLanePx = (laneWidth: number, scale: number): number => Math.ceil(laneWidth * scale);
