@@ -24,7 +24,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
@@ -39,6 +39,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -136,7 +138,11 @@ fun AgendaScreen(
     onDismissSheet: () -> Unit,
     onUpdateForm: (AgendaEventForm) -> Unit,
     onSubmit: () -> Unit,
-    onComplete: (AgendaEvent) -> Unit,
+    onSetCompletion: (AgendaEvent, String) -> Unit,
+    onCancelAbandon: () -> Unit,
+    onAbandonTextChange: (String) -> Unit,
+    onConfirmAbandon: () -> Unit,
+    onBreakdown: (AgendaEvent) -> Unit,
     onRequestDelete: (String) -> Unit,
     onCancelDelete: () -> Unit,
     onConfirmDelete: () -> Unit,
@@ -236,8 +242,9 @@ fun AgendaScreen(
                     dayEvents = dayEvents,
                     isToday = state.selectedDateKey == today,
                     completingIds = state.completingIds,
-                    onComplete = onComplete,
+                    onSetCompletion = onSetCompletion,
                     onEdit = onEditEvent,
+                    onBreakdown = onBreakdown,
                     onDelete = onRequestDelete,
                 )
             }
@@ -261,6 +268,35 @@ fun AgendaScreen(
                 text = { Text("确定要删除这个日程吗？此操作无法撤销。") },
                 confirmButton = { TextButton(onClick = onConfirmDelete) { Text("删除", color = MaterialTheme.colorScheme.error) } },
                 dismissButton = { TextButton(onClick = onCancelDelete) { Text("取消") } },
+            )
+        }
+
+        // 废弃弹窗：输入这个时间段实际做了什么（将覆盖原日程标题）
+        state.pendingAbandonEvent?.let { ev ->
+            AlertDialog(
+                onDismissRequest = onCancelAbandon,
+                title = { Text("废弃日程") },
+                text = {
+                    Column {
+                        Text(
+                            "这个时间段实际做了什么？将覆盖原日程标题。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = state.abandonText,
+                            onValueChange = onAbandonTextChange,
+                            placeholder = { Text(ev.title.ifBlank { "实际做了什么..." }) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = onConfirmAbandon) { Text("确认废弃", color = MaterialTheme.colorScheme.error) }
+                },
+                dismissButton = { TextButton(onClick = onCancelAbandon) { Text("取消") } },
             )
         }
     }
@@ -428,8 +464,9 @@ private fun DayEventList(
     dayEvents: List<Triple<AgendaEvent, String, String>>,
     isToday: Boolean,
     completingIds: Set<String>,
-    onComplete: (AgendaEvent) -> Unit,
+    onSetCompletion: (AgendaEvent, String) -> Unit,
     onEdit: (AgendaEvent) -> Unit,
+    onBreakdown: (AgendaEvent) -> Unit,
     onDelete: (String) -> Unit,
 ) {
     // 每秒刷新的"现在"指示器（红点 + 横线 + HH:mm:ss），与 Web 端一致
@@ -457,8 +494,9 @@ private fun DayEventList(
                     ev = ev,
                     timeText = timeText,
                     completing = ev.id in completingIds,
-                    onComplete = { onComplete(ev) },
+                    onSetCompletion = { completion -> onSetCompletion(ev, completion) },
                     onEdit = { onEdit(ev) },
+                    onBreakdown = { onBreakdown(ev) },
                     onDelete = { onDelete(ev.id) },
                 )
             }
@@ -491,23 +529,88 @@ private fun NowIndicator(nowText: String) {
     }
 }
 
+// ── 完成度 4 态切换（与 Web 端 CompletionToggle 一致） ─────────────────────
+
+private val COMPLETION_OPTIONS = listOf(
+    Triple("not_started", "○", "未开始"),
+    Triple("partial", "◐", "完成部分"),
+    Triple("done", "●", "已完成"),
+    Triple("abandoned", "✕", "废弃"),
+)
+
+@Composable
+private fun completionColor(value: String): Color = when (value) {
+    "partial" -> Color(0xFFF59E0B)     // amber-500
+    "done" -> Color(0xFF22C55E)        // green-500
+    "abandoned" -> Color(0xFFF87171)   // red-400
+    else -> MaterialTheme.colorScheme.onSurfaceVariant
+}
+
+@Composable
+private fun CompletionToggle(
+    ev: AgendaEvent,
+    completing: Boolean,
+    onChange: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val current = COMPLETION_OPTIONS.firstOrNull { it.first == ev.completion } ?: COMPLETION_OPTIONS[0]
+    Box {
+        IconButton(
+            onClick = { expanded = true },
+            enabled = !completing,
+            modifier = Modifier.size(30.dp),
+        ) {
+            if (completing) {
+                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+            } else {
+                Text(
+                    current.second,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = completionColor(current.first),
+                )
+            }
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            COMPLETION_OPTIONS.forEach { (value, symbol, label) ->
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            "$symbol  $label" + if (value == current.first) "（当前）" else "",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = if (value == current.first) FontWeight.Medium else FontWeight.Normal,
+                        )
+                    },
+                    onClick = {
+                        expanded = false
+                        if (value != current.first) onChange(value)
+                    },
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun EventCard(
     ev: AgendaEvent,
     timeText: String,
     completing: Boolean,
-    onComplete: () -> Unit,
+    onSetCompletion: (String) -> Unit,
     onEdit: () -> Unit,
+    onBreakdown: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    val isDone = ev.status == "done"
+    val completion = ev.completion.ifBlank { "not_started" }
+    val isDone = completion == "done"
+    val isAbandoned = completion == "abandoned"
+    val dimmed = isDone || isAbandoned
     val dotColor = when (ev.status) {
         "pending" -> MaterialTheme.colorScheme.primary
         "missed" -> MaterialTheme.colorScheme.error
         else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
     }
     Card(
-        Modifier.fillMaxWidth().alpha(if (isDone) 0.6f else 1f),
+        Modifier.fillMaxWidth().alpha(if (dimmed) 0.6f else 1f),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
     ) {
@@ -520,11 +623,13 @@ private fun EventCard(
                     style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Spacer(Modifier.width(8.dp))
+                CompletionToggle(ev = ev, completing = completing, onChange = onSetCompletion)
                 Text(
                     ev.title,
                     style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
-                    textDecoration = if (isDone) TextDecoration.LineThrough else null,
+                    textDecoration = if (dimmed) TextDecoration.LineThrough else null,
+                    color = if (isAbandoned) MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
+                    else MaterialTheme.colorScheme.onSurface,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),
@@ -564,19 +669,13 @@ private fun EventCard(
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (!isDone) {
-                    IconButton(onClick = onComplete, enabled = !completing, modifier = Modifier.size(32.dp)) {
-                        if (completing) {
-                            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                        } else {
-                            Icon(
-                                Icons.Default.Check,
-                                contentDescription = "标记完成",
-                                modifier = Modifier.size(16.dp),
-                                tint = MaterialTheme.colorScheme.primary,
-                            )
-                        }
-                    }
+                IconButton(onClick = onBreakdown, modifier = Modifier.size(32.dp)) {
+                    Icon(
+                        Icons.Default.ChatBubble,
+                        contentDescription = "拆解该安排",
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
                 IconButton(onClick = onEdit, modifier = Modifier.size(32.dp)) {
                     Icon(

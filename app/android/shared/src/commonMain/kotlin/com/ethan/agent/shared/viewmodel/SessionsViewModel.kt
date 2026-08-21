@@ -30,9 +30,18 @@ data class SessionsUiState(
     val selectedSources: Set<String> = emptySet(),
     val unreadSessionIds: Set<String> = emptySet(),
 ) {
-    val filteredSessions: List<SessionInfo>
+    /** 按来源筛选后的全集（空集合表示全部），置顶与普通列表共用，保证筛选行为一致 */
+    private val sourceFiltered: List<SessionInfo>
         get() = if (selectedSources.isEmpty()) sessions
         else sessions.filter { s -> selectedSources.contains(s.source ?: "") }
+
+    /** 置顶分组：pinned_at > 0，按置顶时间倒序（同样套用来源筛选） */
+    val pinnedSessions: List<SessionInfo>
+        get() = sourceFiltered.filter { it.pinnedAt > 0 }.sortedByDescending { it.pinnedAt }
+
+    /** 普通列表：排除置顶（置顶在顶部独立分组展示） */
+    val filteredSessions: List<SessionInfo>
+        get() = sourceFiltered.filter { it.pinnedAt == 0L }
 }
 
 class SessionsViewModel(
@@ -156,6 +165,48 @@ class SessionsViewModel(
     }
 
     fun cancelRename() { _state.update { it.copy(renameTarget = null) } }
+
+    /** 置顶/取消置顶的 in-flight 会话 ID：防快速双击时两个反向操作交错（viewModelScope 在主线程，无需同步）。 */
+    private val pinInFlight = mutableSetOf<String>()
+
+    /** 置顶/取消置顶：本地乐观更新（与 Web 端一致），失败回滚并提示；下次轮询自动对齐服务端。 */
+    fun togglePin(session: SessionInfo) {
+        if (!pinInFlight.add(session.id)) return
+        val nowSec = kotlinx.datetime.Clock.System.now().toEpochMilliseconds() / 1000
+        // 乐观更新：先改本地，UI 即时反馈
+        _state.update { s ->
+            s.copy(
+                sessions = s.sessions.map {
+                    if (it.id == session.id) {
+                        it.copy(pinnedAt = if (session.pinnedAt > 0) 0L else nowSec)
+                    } else {
+                        it
+                    }
+                },
+            )
+        }
+        viewModelScope.launch {
+            try {
+                if (session.pinnedAt > 0) {
+                    repository.unpinSession(session.id)
+                } else {
+                    repository.pinSession(session.id)
+                }
+            } catch (e: Exception) {
+                // 失败回滚到操作前的状态
+                _state.update { s ->
+                    s.copy(
+                        sessions = s.sessions.map {
+                            if (it.id == session.id) it.copy(pinnedAt = session.pinnedAt) else it
+                        },
+                        error = repository.friendlyError(e),
+                    )
+                }
+            } finally {
+                pinInFlight.remove(session.id)
+            }
+        }
+    }
 
     fun deleteSession(id: String) {
         viewModelScope.launch {

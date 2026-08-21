@@ -218,13 +218,22 @@ fun <T> EthanScrollableTabBar(
 }
 
 @Composable
-fun ToolTimeline(steps: List<ToolStep>, modifier: Modifier = Modifier) {
+fun ToolTimeline(steps: List<ToolStep>, modifier: Modifier = Modifier, isStreaming: Boolean = false) {
     if (steps.isEmpty()) return
 
+    // 防御：非 streaming 消息中残留的 running/start 步骤视为 cancelled
+    // （中止/断流时后端已尽量标记，这里兜底避免 spinner 永久残留）
+    val effectiveSteps = if (isStreaming) {
+        steps
+    } else {
+        remember(steps) { steps.map { it.asTerminal() } }
+    }
+
     var expanded by remember { mutableStateOf(true) }
-    val totalDuration = steps.mapNotNull { it.durationMs }.sum()
-    val hasAnyError = steps.any { it.state == "error" }
-    val allDone = steps.all { it.state == "done" || it.state == "completed" || it.state == "error" }
+    val totalDuration = effectiveSteps.mapNotNull { it.durationMs }.sum()
+    val hasAnyError = effectiveSteps.any { it.state == "error" }
+    val hasAnyCancelled = effectiveSteps.any { it.state == "cancelled" }
+    val allDone = effectiveSteps.all { it.state != "running" && it.state != "start" }
 
     // 整体带边框的日志卡片
     Surface(
@@ -249,14 +258,18 @@ fun ToolTimeline(steps: List<ToolStep>, modifier: Modifier = Modifier) {
                 )
                 Text(
                     if (allDone) {
-                        if (hasAnyError) "执行完成（有错误）" else "正在执行自动化操作"
+                        when {
+                            hasAnyError -> "执行完成（有错误）"
+                            hasAnyCancelled -> "已中止（部分步骤取消）"
+                            else -> "执行完成"
+                        }
                     } else {
                         "正在执行自动化操作"
                     },
                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
                 )
                 Text(
-                    "[${steps.size}步]",
+                    "[${effectiveSteps.size}步]",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -279,7 +292,7 @@ fun ToolTimeline(steps: List<ToolStep>, modifier: Modifier = Modifier) {
             if (expanded) {
                 Spacer(Modifier.height(4.dp))
                 Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                    steps.forEach { step ->
+                    effectiveSteps.forEach { step ->
                         ToolStepRow(step, indent = 0)
                     }
                 }
@@ -288,20 +301,32 @@ fun ToolTimeline(steps: List<ToolStep>, modifier: Modifier = Modifier) {
     }
 }
 
+/** 非终态（running/start）视为 cancelled：用于非 streaming 消息的防御性渲染。 */
+private fun ToolStep.asTerminal(): ToolStep {
+    val newState = if (state == "running" || state == "start") "cancelled" else state
+    val newSubs = subSteps?.map { sub ->
+        if (sub.state == "running" || sub.state == "start") sub.copy(state = "cancelled") else sub
+    }
+    return if (newState != state || newSubs !== subSteps) copy(state = newState, subSteps = newSubs) else this
+}
+
 @Composable
 private fun ToolStepRow(step: ToolStep, indent: Int) {
     val isDone = step.state == "done" || step.state == "completed"
     val isError = step.state == "error"
+    val isCancelled = step.state == "cancelled"
     val isRunning = step.state == "running"
     val statusColor = when {
         isError -> Color(0xFFE53935)
         isDone -> Color(0xFF43A047)
+        isCancelled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
     val statusMark = when {
         isDone -> "✓"
         isError -> "✗"
         isRunning -> "⟳"
+        isCancelled -> "⊘"
         else -> "○"
     }
     val hasSubSteps = !step.subSteps.isNullOrEmpty()
@@ -404,14 +429,17 @@ private fun ToolStepRow(step: ToolStep, indent: Int) {
 private fun SubToolStepRow(sub: com.ethan.agent.core.model.SubToolStep, indent: Int) {
     val isDone = sub.state == "done" || sub.state == "completed"
     val isError = sub.state == "error"
+    val isCancelled = sub.state == "cancelled"
     val statusColor = when {
         isError -> Color(0xFFE53935)
         isDone -> Color(0xFF43A047)
+        isCancelled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
     val statusMark = when {
         isDone -> "✓"
         isError -> "✗"
+        isCancelled -> "⊘"
         else -> "○"
     }
 

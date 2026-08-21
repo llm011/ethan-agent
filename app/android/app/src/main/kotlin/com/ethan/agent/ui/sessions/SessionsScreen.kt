@@ -49,6 +49,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -90,6 +91,7 @@ fun SessionsScreen(
     onToggleHideScheduled: () -> Unit = {},
     onToggleSource: (String) -> Unit = {},
     onSelectAllSources: () -> Unit = {},
+    onTogglePin: (SessionInfo) -> Unit = {},
     onBack: () -> Unit = {},
 ) {
     val snackbar = remember { SnackbarHostState() }
@@ -272,6 +274,28 @@ fun SessionsScreen(
                     contentPadding = PaddingValues(12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                    // 置顶分组（独立展示于顶部）
+                    if (state.pinnedSessions.isNotEmpty()) {
+                        item(key = "pinned_header") {
+                            GroupHeader("置顶")
+                        }
+                        items(state.pinnedSessions, key = { it.id }) { session ->
+                            SessionCard(
+                                session = session,
+                                isRegening = session.id in state.regeningIds,
+                                onClick = { onSessionClick(session.id) },
+                                onRename = { onRename(session) },
+                                onDelete = { onDelete(session.id) },
+                                onRegenTitle = { onRegenTitle(session.id) },
+                                onSummary = { onSummary(session.id) },
+                                onTogglePin = { onTogglePin(session) },
+                            )
+                        }
+                    }
+
+                    item(key = "all_header") {
+                        GroupHeader("全部对话")
+                    }
                     items(state.filteredSessions, key = { it.id }) { session ->
                         SessionCard(
                             session = session,
@@ -281,12 +305,23 @@ fun SessionsScreen(
                             onDelete = { onDelete(session.id) },
                             onRegenTitle = { onRegenTitle(session.id) },
                             onSummary = { onSummary(session.id) },
+                            onTogglePin = { onTogglePin(session) },
                         )
                     }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun GroupHeader(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 2.dp),
+    )
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -299,11 +334,13 @@ private fun SessionCard(
     onDelete: () -> Unit,
     onRegenTitle: () -> Unit,
     onSummary: () -> Unit,
+    onTogglePin: () -> Unit = {},
 ) {
     val date = remember(session.updatedAt) {
         SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(session.updatedAt * 1000))
     }
     var menuExpanded by remember { mutableStateOf(false) }
+    val isPinned = session.pinnedAt > 0
 
     Surface(
         modifier = Modifier.fillMaxWidth().combinedClickable(
@@ -319,13 +356,25 @@ private fun SessionCard(
         ),
     ) {
         Column(Modifier.padding(16.dp)) {
-            Text(
-                if (isRegening) "生成中..." else session.title,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (isPinned) {
+                    Icon(
+                        Icons.Default.PushPin,
+                        contentDescription = "已置顶",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(14.dp),
+                    )
+                    androidx.compose.foundation.layout.Spacer(Modifier.size(4.dp))
+                }
+                Text(
+                    if (isRegening) "生成中..." else session.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+            }
             session.snippet?.let {
                 Text(
                     it,
@@ -352,6 +401,10 @@ private fun SessionCard(
 
         DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
             DropdownMenuItem(text = { Text("重命名") }, onClick = { menuExpanded = false; onRename() })
+            DropdownMenuItem(
+                text = { Text(if (isPinned) "取消置顶" else "置顶") },
+                onClick = { menuExpanded = false; onTogglePin() },
+            )
             DropdownMenuItem(
                 text = { Text("重生成标题") },
                 onClick = { menuExpanded = false; onRegenTitle() },

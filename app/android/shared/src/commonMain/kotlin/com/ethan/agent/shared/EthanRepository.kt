@@ -291,6 +291,29 @@ class EthanRepository(
         api.respondConsent(requestId, com.ethan.agent.core.model.ConsentRequest(allowed))
     }
 
+    /** ask_user / wait_for_user 卡片回传用户的选择/确认。失败抛异常，调用方保留卡片可重试。 */
+    suspend fun respondAskUser(requestId: String, value: String) {
+        api.respondAskUser(requestId, com.ethan.agent.core.model.InteractionValueRequest(value))
+    }
+
+    suspend fun respondWaitForUser(requestId: String, value: String) {
+        api.respondWaitForUser(requestId, com.ethan.agent.core.model.InteractionValueRequest(value))
+    }
+
+    // ── 会话置顶 ────────────────────────────────────────────────────────────
+
+    suspend fun pinSession(id: String) {
+        api.pinSession(id)
+    }
+
+    suspend fun unpinSession(id: String) {
+        api.unpinSession(id)
+    }
+
+    suspend fun getPinnedSessions(): List<SessionInfo> {
+        return api.getPinnedSessions().sessions
+    }
+
     suspend fun uploadAttachment(data: ByteArray, filename: String): String {
         return api.uploadFile(data, filename, "application/octet-stream").path
     }
@@ -689,10 +712,6 @@ class EthanRepository(
 
     suspend fun patchAgenda(eventId: String, body: AgendaPatchRequest) {
         api.patchAgenda(eventId, body)
-    }
-
-    suspend fun completeAgenda(eventId: String) {
-        api.completeAgenda(eventId)
     }
 
     suspend fun deleteAgenda(eventId: String) {

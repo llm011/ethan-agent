@@ -49,6 +49,9 @@ data class AgendaUiState(
     // per-item 操作中
     val completingIds: Set<String> = emptySet(),
     val togglingEnabled: Boolean = false,
+    // 废弃弹窗（completion=abandoned 时先收集「实际做了什么」，覆盖原标题）
+    val pendingAbandonEvent: AgendaEvent? = null,
+    val abandonText: String = "",
 )
 
 // ── 日期工具（commonMain，kotlinx-datetime；供 ViewModel 与 app UI 共用） ──
@@ -244,11 +247,38 @@ class AgendaViewModel(
         }
     }
 
-    fun completeEvent(ev: AgendaEvent) {
+    /** completion 4 态切换（not_started/partial/done/abandoned）；abandoned 先弹窗收集「实际做了什么」。 */
+    fun setCompletion(ev: AgendaEvent, completion: String) {
+        if (completion == "abandoned") {
+            _state.update { it.copy(pendingAbandonEvent = ev, abandonText = "") }
+            return
+        }
         viewModelScope.launch {
             _state.update { it.copy(completingIds = it.completingIds + ev.id) }
             try {
-                repository.completeAgenda(ev.id)
+                repository.patchAgenda(ev.id, AgendaPatchRequest(completion = completion))
+                load(silent = true)
+            } catch (e: Exception) {
+                _state.update { it.copy(error = repository.friendlyError(e)) }
+            } finally {
+                _state.update { it.copy(completingIds = it.completingIds - ev.id) }
+            }
+        }
+    }
+
+    fun cancelAbandon() { _state.update { it.copy(pendingAbandonEvent = null, abandonText = "") } }
+
+    fun updateAbandonText(text: String) { _state.update { it.copy(abandonText = text) } }
+
+    /** 确认废弃：输入不为空则覆盖原标题（记录该时间段实际做了什么）。 */
+    fun confirmAbandon() {
+        val ev = _state.value.pendingAbandonEvent ?: return
+        val newTitle = _state.value.abandonText.trim().ifBlank { ev.title }
+        _state.update { it.copy(pendingAbandonEvent = null, abandonText = "") }
+        viewModelScope.launch {
+            _state.update { it.copy(completingIds = it.completingIds + ev.id) }
+            try {
+                repository.patchAgenda(ev.id, AgendaPatchRequest(completion = "abandoned", title = newTitle))
                 load(silent = true)
             } catch (e: Exception) {
                 _state.update { it.copy(error = repository.friendlyError(e)) }
