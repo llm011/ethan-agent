@@ -1,6 +1,12 @@
 package com.ethan.agent.core.network
 
 import com.ethan.agent.core.model.AgentSettings
+import com.ethan.agent.core.model.AgendaCreateRequest
+import com.ethan.agent.core.model.AgendaEnabledRequest
+import com.ethan.agent.core.model.AgendaEnabledResponse
+import com.ethan.agent.core.model.AgendaEventResponse
+import com.ethan.agent.core.model.AgendaPatchRequest
+import com.ethan.agent.core.model.AgendaResponse
 import com.ethan.agent.core.model.ApiKeyCreateRequest
 import com.ethan.agent.core.model.ApiKeyCreated
 import com.ethan.agent.core.model.ApiKeysResponse
@@ -32,6 +38,7 @@ import com.ethan.agent.core.model.OnboardingCompleteRequest
 import com.ethan.agent.core.model.OnboardingCompleteResponse
 import com.ethan.agent.core.model.OnboardingStatus
 import com.ethan.agent.core.model.PollData
+import com.ethan.agent.core.model.PinnedSessionsResponse
 import com.ethan.agent.core.model.ProceduresResponse
 import com.ethan.agent.core.model.ProfileRequest
 import com.ethan.agent.core.model.ProfileResponse
@@ -65,6 +72,7 @@ import com.ethan.agent.core.model.InjectRequest
 import com.ethan.agent.core.model.InjectResponse
 import com.ethan.agent.core.model.InsightsByDateResponse
 import com.ethan.agent.core.model.InsightsListResponse
+import com.ethan.agent.core.model.InteractionValueRequest
 import com.ethan.agent.core.model.KnowledgeValidateRequest
 import com.ethan.agent.core.model.KnowledgeValidateResponse
 import com.ethan.agent.core.model.LarkDepsStatus
@@ -207,6 +215,23 @@ class EthanApiService(
         client.post(url("consent/$requestId")) { jsonBody(body) }.body()
 
     suspend fun poll(): PollData = client.get(url("poll")).body()
+
+    // ── Pin / 交互回传（ask_user / wait_for_user） ─────────────────────────
+
+    suspend fun pinSession(id: String): OkResponse =
+        client.post(url("sessions/$id/pin")).body()
+
+    suspend fun unpinSession(id: String): OkResponse =
+        client.delete(url("sessions/$id/pin")).body()
+
+    suspend fun getPinnedSessions(): PinnedSessionsResponse =
+        client.get(url("sessions/pinned")).body()
+
+    suspend fun respondAskUser(requestId: String, body: InteractionValueRequest): OkResponse =
+        client.post(url("ask-user/$requestId")) { jsonBody(body) }.body()
+
+    suspend fun respondWaitForUser(requestId: String, body: InteractionValueRequest): OkResponse =
+        client.post(url("wait-for-user/$requestId")) { jsonBody(body) }.body()
 
     // ── Settings ──────────────────────────────────────────────────────────
 
@@ -379,6 +404,23 @@ class EthanApiService(
 
     suspend fun cleanupTimelineLark(timelineId: String): TimelineActionResponse =
         client.post(url("schedule/timeline/$timelineId/cleanup-lark")).body()
+
+    // ── Agenda 日程 ─────────────────────────────────────────────────────────
+
+    suspend fun getAgenda(): AgendaResponse = client.get(url("agenda")).body()
+
+    suspend fun createAgenda(body: AgendaCreateRequest): AgendaEventResponse =
+        client.post(url("agenda")) { jsonBody(body) }.body()
+
+    suspend fun patchAgenda(eventId: String, body: AgendaPatchRequest): AgendaEventResponse =
+        client.patch(url("agenda/$eventId")) { jsonBody(body) }.body()
+
+    suspend fun deleteAgenda(eventId: String) {
+        client.delete(url("agenda/$eventId"))
+    }
+
+    suspend fun setAgendaEnabled(body: AgendaEnabledRequest): AgendaEnabledResponse =
+        client.put(url("agenda/enabled")) { jsonBody(body) }.body()
 
     // ── Knowledge ───────────────────────────────────────────────────────────
 

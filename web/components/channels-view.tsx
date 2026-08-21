@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { ChannelInfo, fetchChannels, patchChannel, LarkDepsStatus, fetchLarkDepsStatus, installLarkDeps } from "@/lib/api";
+import { HeaderFillet } from "@/components/header-fillet";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@ethan/shared/ui/card";
 import { Badge } from "@ethan/shared/ui/badge";
 import { Button } from "@ethan/shared/ui/button";
@@ -84,7 +85,8 @@ export function ChannelsView() {
 
   return (
     <div className="flex flex-col h-full bg-background text-foreground">
-      <header className="h-12 border-b border-border flex items-center px-4 shrink-0">
+      <header className="relative h-12 border-b border-border bg-sidebar flex items-center px-4 shrink-0">
+        <HeaderFillet />
         <h1 className="font-semibold text-lg">渠道 (Channels)</h1>
       </header>
       <ScrollArea className="flex-1 p-6">

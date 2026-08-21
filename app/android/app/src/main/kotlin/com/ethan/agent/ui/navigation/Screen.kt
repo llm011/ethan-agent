@@ -4,6 +4,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Assignment
 import androidx.compose.material.icons.filled.AutoStories
+import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.MoreHoriz
@@ -24,6 +25,7 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector?
     data object Memory : Screen("memory", "记忆", Icons.Default.Psychology)
     data object Knowledge : Screen("knowledge", "知识库", Icons.Default.MenuBook)
     data object Skills : Screen("skills", "技能", Icons.Default.Extension)
+    data object Agenda : Screen("agenda", "日程", Icons.Default.Event)
     data object Schedule : Screen("schedule", "定时任务", Icons.Default.Schedule)
     data object Settings : Screen("settings", "设置", Icons.Default.Settings)
     data object Docs : Screen("docs", "文档", Icons.Default.AutoStories)

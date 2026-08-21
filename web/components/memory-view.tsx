@@ -17,6 +17,7 @@ import {
 import { Card, CardContent, CardDescription, CardHeader } from "@ethan/shared/ui/card";
 import { ScrollArea } from "@ethan/shared/ui/scroll-area";
 import { Button } from "@ethan/shared/ui/button";
+import { HeaderFillet } from "@/components/header-fillet";
 import { Badge } from "@ethan/shared/ui/badge";
 import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
 import { Archive, Calendar, Check, Loader2, Pencil, RefreshCw, RotateCcw, Trash2, X, Zap } from "lucide-react";
@@ -325,7 +326,8 @@ export function MemoryView() {
         onCancel={() => setConfirmState(prev => ({ ...prev, open: false }))}
       />
 
-      <header className="h-12 border-b border-border flex items-center px-4 gap-3 shrink-0">
+      <header className="relative h-12 border-b border-border bg-sidebar flex items-center px-4 gap-3 shrink-0">
+        <HeaderFillet />
         <div className="flex-1 overflow-x-auto">
           <div className="flex gap-4 min-w-max pr-2">
             {TABS.map(tab => (

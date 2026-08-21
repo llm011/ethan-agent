@@ -96,6 +96,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
@@ -129,6 +130,8 @@ fun ChatScreen(
     onRemoveImage: (Int) -> Unit,
     onConsent: (Boolean) -> Unit,
     onDismissConsent: () -> Unit,
+    onAskUserRespond: (String) -> Unit = {},
+    onWaitForUserRespond: (String) -> Unit = {},
     onStop: () -> Unit,
     onOnboardingChange: (String, String) -> Unit,
     onCompleteOnboarding: () -> Unit,
@@ -349,6 +352,83 @@ fun ChatScreen(
             },
             confirmButton = { TextButton(onClick = { onConsent(true) }) { Text("允许") } },
             dismissButton = { TextButton(onClick = { onConsent(false) }) { Text("拒绝") } },
+        )
+    }
+
+    // ask_user 选择卡片：问题 + 选项 + 倒计时（超时后端走 default，这里同步展示）
+    state.askUser?.let { ask ->
+        AlertDialog(
+            onDismissRequest = { /* 不可关闭：必须选择，超时自动走默认 */ },
+            title = { Text(ask.question) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    if (ask.options.isEmpty()) {
+                        // 后端校验回传值必须在 options 内（空 options 时任何回传都会 400），
+                        // 无法提供按钮；超时后只清卡片、不回传，由后端超时机制走默认值
+                        Text(
+                            "无可选选项，${state.askUserRemaining}s 后由服务端按默认值处理",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        ask.options.forEach { opt ->
+                            TextButton(
+                                onClick = { onAskUserRespond(opt.value) },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text(
+                                    text = opt.label + if (opt.value == ask.default) "（默认）" else "",
+                                    modifier = Modifier.fillMaxWidth(),
+                                    textAlign = TextAlign.Start,
+                                )
+                            }
+                        }
+                        Text(
+                            "${state.askUserRemaining}s 后自动选择默认项",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            },
+            confirmButton = {},
+        )
+    }
+
+    // wait_for_user 等待卡片：确认/取消（或文本输入）+ 倒计时
+    state.waitForUser?.let { wfu ->
+        var textValue by remember(wfu.requestId) { mutableStateOf("") }
+        val isText = wfu.inputType == "text"
+        AlertDialog(
+            onDismissRequest = { /* 不可关闭：必须确认/取消，超时自动回传 timeout */ },
+            title = { Text(wfu.prompt, style = MaterialTheme.typography.titleSmall) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (isText) {
+                        OutlinedTextField(
+                            value = textValue,
+                            onValueChange = { textValue = it },
+                            placeholder = { Text(wfu.placeholder.ifBlank { "请输入…" }) },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    Text(
+                        "${formatRemainingSeconds(state.waitForUserRemaining)}后超时",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onWaitForUserRespond(if (isText) textValue.trim().ifBlank { "done" } else "done")
+                    },
+                ) { Text(wfu.confirmLabel) }
+            },
+            dismissButton = {
+                TextButton(onClick = { onWaitForUserRespond("cancel") }) { Text(wfu.cancelLabel) }
+            },
         )
     }
 
@@ -787,7 +867,7 @@ private fun MessageBubble(message: UiMessage, onLongPress: () -> Unit) {
                     // 工具调用在前（折叠式）
                     if (message.toolSteps.isNotEmpty()) {
                         CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides textColor) {
-                            ToolTimeline(message.toolSteps)
+                            ToolTimeline(message.toolSteps, isStreaming = message.isStreaming)
                         }
                         if (message.content.isNotBlank()) {
                             Spacer(Modifier.height(6.dp))
@@ -895,6 +975,12 @@ private fun formatTokenCount(count: Int): String = when {
 private fun formatDuration(ms: Long): String = when {
     ms >= 1000 -> "${String.format("%.1f", ms / 1000.0)}s"
     else -> "${ms}ms"
+}
+
+/** wait_for_user 倒计时展示：>=60s 显示「M分S秒」，否则「Ns」。 */
+private fun formatRemainingSeconds(seconds: Int): String = when {
+    seconds >= 60 -> "${seconds / 60}分${seconds % 60}秒"
+    else -> "${seconds}秒"
 }
 
 @Composable

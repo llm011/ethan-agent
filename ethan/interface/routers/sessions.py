@@ -208,6 +208,27 @@ async def delete_message(session_id: str, message_id: int, user_id: str = Depend
     return {"ok": True}
 
 
+class UpdateMessageRequest(BaseModel):
+    content: str
+
+
+@router.patch("/sessions/{session_id}/messages/{message_id}")
+async def update_message(session_id: str, message_id: int, req: UpdateMessageRequest, user_id: str = Depends(verify_token)):
+    """编辑消息正文（阅读模式编辑）。后续对话上下文使用编辑后的版本。"""
+    store = await get_session_store()
+    session = await store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    belongs = any(getattr(m, "id", None) == message_id for m in session.messages)
+    if not belongs:
+        raise HTTPException(status_code=404, detail="Message not found in this session")
+    ok = await store.update_message_content(message_id, req.content)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Message not found")
+    await store.touch(session_id)
+    return {"ok": True}
+
+
 class RenameSessionRequest(BaseModel):
     title: str | None = None
     mode: str | None = None

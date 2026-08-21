@@ -46,6 +46,9 @@ import { placeholderTitle, mapDetailMessages, isFirstQuerySignificant } from "@/
 import { consumeStream, type ConsumeStreamActions } from "@/components/chat/use-chat-stream";
 import { handleCommand } from "@/components/chat/chat-commands";
 import { useInputStore } from "@/components/chat/use-input-store";
+import { usePreview } from "@/components/preview-panel/preview-context";
+import { PreviewPanel, getStoredPanelSize, storePanelSize } from "@/components/preview-panel/preview-panel";
+import { ResizeHandle } from "@/components/preview-panel/resize-handle";
 
 interface ChatViewProps {
   initialSessionId?: string;
@@ -74,6 +77,9 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const [schedules, setSchedules] = useState<any[]>([]);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [consentRequest, setConsentRequest] = useState<ConsentRequest | null>(null);
+  // 授权卡片已失效（迟到响应：请求已被后端超时清理）。新请求到达或卡片清空时复位。
+  const [consentExpired, setConsentExpired] = useState(false);
+  useEffect(() => { setConsentExpired(false); }, [consentRequest]);
   const [cleanupConfirm, setCleanupConfirm] = useState<CleanupConfirmRequest | null>(null);
   const [askUserRequest, setAskUserRequest] = useState<AskUserRequest | null>(null);
   const [waitforUserRequest, setWaitForUserRequest] = useState<WaitForUserRequest | null>(null);
@@ -101,6 +107,28 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const inputStoreRef = useRef(inputStore);
   inputStoreRef.current = inputStore;
 
+  const preview = usePreview();
+  const previewOpen = !!preview.file;
+  const panelWidthRef = useRef(getStoredPanelSize());
+  const [panelWidth, setPanelWidth] = useState(() => getStoredPanelSize());
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const handleResize = useCallback((deltaX: number) => {
+    const container = containerRef.current;
+    if (!container) return;
+    const totalWidth = container.offsetWidth;
+    const newPct = Math.max(20, Math.min(60, panelWidthRef.current + (-deltaX / totalWidth) * 100));
+    setPanelWidth(newPct);
+  }, []);
+
+  const handleResizeEnd = useCallback(() => {
+    setPanelWidth((current) => {
+      panelWidthRef.current = current;
+      storePanelSize(current);
+      return current;
+    });
+  }, []);
+
   const fetchAnnotationsFor = async (msgs: Message[]) => {
     const ids = msgs.filter((m) => m.role === "assistant" && m.id != null).map((m) => m.id as number);
     if (ids.length === 0) return;
@@ -111,32 +139,49 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   };
 
   const handleConsentRespond = async (requestId: string, allowed: boolean, message?: string) => {
-    setConsentRequest(null);
     try {
-      await respondConsent(requestId, allowed, message);
-    } catch {}
+      const res = await respondConsent(requestId, allowed, message);
+      if (res.ok) {
+        setConsentRequest(null);
+      } else {
+        // 迟到的响应：请求已被后端超时清理。直接关卡片会让用户误以为「允许」
+        // 生效，而命令实际早已按拒绝处理——标记失效交由用户确认关闭。
+        setConsentExpired(true);
+      }
+    } catch (err) {
+      // 回传失败保留卡片让用户重试，否则 agent 会一直等到超时
+      console.error("consent 回传失败:", err);
+    }
   };
 
   const handleCleanupRespond = async (requestId: string, action: "close" | "keep") => {
     try {
       const { respondBrowserCleanup } = await import("@/lib/api-base");
       await respondBrowserCleanup(requestId, action);
-    } catch {}
+    } catch (err) {
+      console.error("cleanup 回传失败:", err);
+    }
     setCleanupConfirm(null);
   };
 
   const handleAskUserRespond = async (requestId: string, value: string) => {
-    setAskUserRequest(null);
     try {
       await respondAskUser(requestId, value);
-    } catch {}
+      setAskUserRequest(null);
+    } catch (err) {
+      // 回传失败保留卡片让用户重试，否则 agent 会一直等到超时
+      console.error("ask_user 回传失败:", err);
+    }
   };
 
   const handleWaitForUserRespond = async (requestId: string, value: string) => {
-    setWaitForUserRequest(null);
     try {
       await respondWaitForUser(requestId, value);
-    } catch {}
+      setWaitForUserRequest(null);
+    } catch (err) {
+      // 回传失败保留卡片让用户重试，否则 agent 会一直等到超时
+      console.error("wait_for_user 回传失败:", err);
+    }
   };
 
   const handleRead = useCallback((msg: Message) => {
@@ -149,6 +194,12 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     const mid = readingMessage.id;
     setAnnotationsByMessage((prev) => ({ ...prev, [mid]: next }));
   };
+
+  // 阅读模式编辑正文回写：更新内存 state（desktop 无离线缓存层）
+  const handleEditContent = useCallback((mid: number, content: string) => {
+    setMessages(prev => prev.map(m => (m.id === mid ? { ...m, content } : m)));
+    setReadingMessage(prev => (prev && prev.id === mid ? { ...prev, content } : prev));
+  }, []);
 
   const handleShare = useCallback((msg: Message) => {
     const key = msg.id != null ? `id:${msg.id}` : `idx:${messagesRef.current.indexOf(msg)}`;
@@ -229,6 +280,17 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
   // Load session when route param changes
   useEffect(() => {
+    // justFinishedRef 只允许消费一次（创建会话/加载中发消息后跳过一次重载）。
+    // 无论是否命中都无条件清掉：否则「加载 A 时发消息 → 切 B → 切回 A」时，
+    // 残留的标记会让 effect 直接 return 跳过加载，activeSession 停留在 B，
+    // 界面显示 B 的消息、后续发送也会静默发到 B。
+    const skipLoad = justFinishedRef.current === initialSessionId;
+    justFinishedRef.current = null;
+    if (skipLoad) return;
+
+    streamAbortRef.current?.abort();
+    streamAbortRef.current = null;
+
     if (!initialSessionId) {
       // 切换到新会话 — 保存当前输入并切换状态机
       inputStore.switchTo(null, inputRef.current?.value);
@@ -251,11 +313,6 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     }
 
     if (initialSessionId === activeSession && streaming) return;
-
-    if (justFinishedRef.current === initialSessionId) {
-      justFinishedRef.current = null;
-      return;
-    }
 
     // 切换到目标会话 — 保存当前输入并恢复目标会话的输入状态
     inputStore.switchTo(initialSessionId, inputRef.current?.value);
@@ -302,6 +359,12 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     fetchSession(initialSessionId)
       .then(async (detail) => {
         if (cancelled) return;
+        // 竞态保护（对齐 web 端）：如果 handleSend 已经基于 initialSessionId 启动了流式响应，
+        // 就不要再用 DB 里的旧消息覆盖正在写入的实时消息；也不要重设 activeSession/title 等。
+        if (justFinishedRef.current === initialSessionId) {
+          justFinishedRef.current = null;
+          return;
+        }
         // 写入本地缓存
         writeSessionCache(initialSessionId, detail);
         setLoadingSession(false);
@@ -327,6 +390,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         if (detail.active_run) {
           setStreaming(true);
           const resumeAc = new AbortController();
+          streamAbortRef.current = resumeAc;
           const stream = await streamResume(initialSessionId, resumeAc.signal).catch(() => null);
           if (cancelled) { resumeAc.abort(); return; }
           if (stream) {
@@ -399,12 +463,48 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     }
   }, [sessionTitle]);
 
+  // 从其他页面（如 Agenda「拆解该安排」）带过来的待发送 prompt：
+  // sessionStorage 优先，hash 中的 ?q= 兜底。仅新会话视图消费；延迟到 timer 里真正发送时才清除，
+  // 这样 StrictMode 双挂载（或挂载后立即切走）时 cleanup 可整体撤销，不会丢 prompt。
+  useEffect(() => {
+    if (initialSessionId) return;
+    let prompt = "";
+    try {
+      prompt = sessionStorage.getItem("ethan:pending-prompt") || "";
+    } catch {}
+    let hashQuery = "";
+    if (!prompt) {
+      const hash = window.location.hash;
+      const qIdx = hash.indexOf("?");
+      const q = qIdx >= 0 ? new URLSearchParams(hash.slice(qIdx + 1)).get("q") : null;
+      if (q) {
+        prompt = q;
+        hashQuery = hash.slice(0, qIdx);
+      }
+    }
+    if (!prompt) return;
+    const timer = setTimeout(() => {
+      try { sessionStorage.removeItem("ethan:pending-prompt"); } catch {}
+      // 清掉 hash 里的 query（replaceState 不触发 hashchange，不会引发额外导航）
+      if (hashQuery) window.history.replaceState(null, "", hashQuery);
+      handleSendRef.current(prompt);
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [initialSessionId]);
+
   const prevSessionRef = useRef(initialSessionId);
+  const queueDrainTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => {
     // 仅 streaming 从 true→false 时 drain 队列；切会话（initialSessionId 变化）不触发
     const sessionChanged = prevSessionRef.current !== initialSessionId;
     prevSessionRef.current = initialSessionId;
-    if (sessionChanged) return;
+    if (sessionChanged) {
+      if (queueDrainTimerRef.current !== undefined) {
+        clearTimeout(queueDrainTimerRef.current);
+        queueDrainTimerRef.current = undefined;
+      }
+      return;
+    }
 
     if (!streaming) {
       setTimeout(() => inputRef.current?.focus(), 50);
@@ -423,7 +523,10 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         if (first.images && first.images.length > 0) {
           setPendingFiles(first.images);
         }
-        setTimeout(() => {
+        const targetSession = initialSessionId;
+        queueDrainTimerRef.current = setTimeout(() => {
+          queueDrainTimerRef.current = undefined;
+          if (prevSessionRef.current !== targetSession) return;
           handleSendRef.current(first.text);
         }, 100);
       }
@@ -433,7 +536,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
   const handleSend = async (text: string) => {
     if (!text.trim() && pendingFiles.length === 0) return;
-    if (streaming) return;
+    // 用 ref 读取最新值，避免 state 批处理延迟导致新会话被旧 streaming=true 拦截
+    if (streamingRef.current) return;
 
     const trimmed = text.trim();
     const isBtw = trimmed.toLowerCase().startsWith("/btw ");
@@ -451,22 +555,38 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
     let sessionId = activeSession;
     if (!sessionId) {
-      const s = await createSession(selectedModel, mode, "desktop");
-      sessionId = s.id;
-      setActiveSession(s.id);
-      const pTitle = placeholderTitle(text);
-      setSessionTitle(pTitle);
-      window.dispatchEvent(new CustomEvent("session:title-updated", {
-        detail: { sessionId: s.id, title: pTitle }
-      }));
-      // 首轮：如果 query 信息量足够，同时 fire-and-forget 把占位标题写入后端，
-      // 防止 3s 会话列表轮询把本地标题覆盖回"新对话"（createSession 返回"新对话"与后端
-      // chat.py init_title 之间存在竞态）。
-      if (isFirstQuerySignificant(text) && pTitle && pTitle !== "新对话") {
-        renameSession(s.id, pTitle).catch(() => { /* 失败静默忽略，后端稍后会补 */ });
+      if (initialSessionId) {
+        sessionId = initialSessionId;
+        justFinishedRef.current = initialSessionId;
+        setActiveSession(initialSessionId);
+        setLoadingSession(false);
+      } else {
+        try {
+          const s = await createSession(selectedModel, mode, "desktop");
+          sessionId = s.id;
+          setActiveSession(s.id);
+          const pTitle = placeholderTitle(text);
+          setSessionTitle(pTitle);
+          window.dispatchEvent(new CustomEvent("session:title-updated", {
+            detail: { sessionId: s.id, title: pTitle }
+          }));
+          // 首轮：如果 query 信息量足够，同时 fire-and-forget 把占位标题写入后端，
+          // 防止 3s 会话列表轮询把本地标题覆盖回"新对话"（createSession 返回"新对话"与后端
+          // chat.py init_title 之间存在竞态）。
+          if (isFirstQuerySignificant(text) && pTitle && pTitle !== "新对话") {
+            renameSession(s.id, pTitle).catch(() => { /* 失败静默忽略，后端稍后会补 */ });
+          }
+          justFinishedRef.current = s.id;
+          window.history.replaceState(null, "", `/chat/${s.id}/`);
+        } catch (e) {
+          setMessages(prev => [...prev, {
+            role: "assistant",
+            content: `⚠️ 创建会话失败：${e instanceof Error ? e.message : "未知错误"}\n\n请重试，或检查后端服务是否正常。`,
+            created_at: Date.now() / 1000,
+          }]);
+          return;
+        }
       }
-      justFinishedRef.current = s.id;
-      window.history.replaceState(null, "", `/chat/${s.id}/`);
     }
     let content = isBtw ? (btwQuestion ?? text) : text;
     if (isReview) {
@@ -549,7 +669,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   handleSendRef.current = handleSend;
 
   return (
-    <div className="flex flex-col flex-1 min-h-0">
+    <div ref={containerRef} className="flex flex-1 min-h-0">
+      <div className="flex flex-col flex-1 min-w-0 min-h-0">
       <ChatHeader
         sessionId={activeSession}
         title={sessionTitle}
@@ -660,8 +781,10 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         open={readingMessage != null}
         message={readingMessage}
         annotations={readingMessage?.id != null ? (annotationsByMessage[readingMessage.id] ?? []) : []}
+        sessionId={activeSession ?? undefined}
         onClose={() => setReadingMessage(null)}
         onChange={handleAnnotationsChange}
+        onEditContent={readingMessage?.id != null ? (content) => handleEditContent(readingMessage.id!, content) : undefined}
       />
 
       <ShareMode
@@ -678,7 +801,12 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
             <OnboardingBanner onDismiss={() => setShowOnboarding(false)} />
           </div>
         )}
-        <ConsentGate request={consentRequest} onRespond={handleConsentRespond} />
+        <ConsentGate
+          request={consentRequest}
+          expired={consentExpired}
+          onRespond={handleConsentRespond}
+          onDismiss={() => setConsentRequest(null)}
+        />
         <CleanupConfirmGate request={cleanupConfirm} onRespond={handleCleanupRespond} />
         {askUserRequest && (
           <div className="max-w-3xl mx-auto px-4 pb-2">
@@ -728,6 +856,16 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           onQueueReorder={inputStore.reorderQueue}
         />
       </div>
+    </div>
+
+      {previewOpen && (
+        <>
+          <ResizeHandle onResize={handleResize} onResizeEnd={handleResizeEnd} />
+          <div className="shrink-0 h-full overflow-hidden" style={{ width: `${panelWidth}%` }}>
+            <PreviewPanel />
+          </div>
+        </>
+      )}
     </div>
   );
 }

@@ -2,6 +2,10 @@ package com.ethan.agent.shared
 
 import com.ethan.agent.core.datastore.AppConfig
 import com.ethan.agent.core.datastore.AppConfigStore
+import com.ethan.agent.core.model.AgendaCreateRequest
+import com.ethan.agent.core.model.AgendaEnabledRequest
+import com.ethan.agent.core.model.AgendaPatchRequest
+import com.ethan.agent.core.model.AgendaResponse
 import com.ethan.agent.core.model.AgentSettings
 import com.ethan.agent.core.model.ApiKeyCreated
 import com.ethan.agent.core.model.ApiKeyInfo
@@ -285,6 +289,29 @@ class EthanRepository(
 
     suspend fun respondConsent(requestId: String, allowed: Boolean) {
         api.respondConsent(requestId, com.ethan.agent.core.model.ConsentRequest(allowed))
+    }
+
+    /** ask_user / wait_for_user 卡片回传用户的选择/确认。失败抛异常，调用方保留卡片可重试。 */
+    suspend fun respondAskUser(requestId: String, value: String) {
+        api.respondAskUser(requestId, com.ethan.agent.core.model.InteractionValueRequest(value))
+    }
+
+    suspend fun respondWaitForUser(requestId: String, value: String) {
+        api.respondWaitForUser(requestId, com.ethan.agent.core.model.InteractionValueRequest(value))
+    }
+
+    // ── 会话置顶 ────────────────────────────────────────────────────────────
+
+    suspend fun pinSession(id: String) {
+        api.pinSession(id)
+    }
+
+    suspend fun unpinSession(id: String) {
+        api.unpinSession(id)
+    }
+
+    suspend fun getPinnedSessions(): List<SessionInfo> {
+        return api.getPinnedSessions().sessions
     }
 
     suspend fun uploadAttachment(data: ByteArray, filename: String): String {
@@ -673,6 +700,26 @@ class EthanRepository(
     /** 清空本地文件缓存（Settings 「清空缓存」入口用）。 */
     suspend fun clearLocalCache() {
         localCache.clear()
+    }
+
+    // ── Agenda 日程 ─────────────────────────────────────────────────────────
+
+    suspend fun getAgenda(): AgendaResponse = api.getAgenda()
+
+    suspend fun createAgenda(body: AgendaCreateRequest) {
+        api.createAgenda(body)
+    }
+
+    suspend fun patchAgenda(eventId: String, body: AgendaPatchRequest) {
+        api.patchAgenda(eventId, body)
+    }
+
+    suspend fun deleteAgenda(eventId: String) {
+        api.deleteAgenda(eventId)
+    }
+
+    suspend fun setAgendaEnabled(enabled: Boolean) {
+        api.setAgendaEnabled(AgendaEnabledRequest(enabled))
     }
 
     fun friendlyError(e: Throwable): String = when (e) {

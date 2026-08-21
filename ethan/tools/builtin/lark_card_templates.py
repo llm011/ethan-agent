@@ -44,21 +44,66 @@ def _hr() -> dict:
 
 
 def _build_compare(card: dict) -> dict:
-    """对比卡 → markdown 表格。card = {title, columns:[名1,名2], rows:[{label, values:[v1,v2]}]}"""
-    cols = card.get("columns") or []
-    rows = card.get("rows") or []
-    # 表头：首列空（指标列）+ 各对比列名
-    header_cells = [""] + [_text(c) for c in cols]
+    """对比卡 → markdown 表格。
+
+    格式自适应（按数据自动检测归一，与 ui_card_templates 一致）：
+    - 标准新格式：columns 包含所有列名，rows:[{values:[v1,v2,...]}]，label 不用传
+    - label 旧格式：columns 不含第一列名，rows:[{label, values:[v2,v3,...]}]
+    - 模型混用法：columns 含所有列名，rows:[{label, values:[...]}]（label 作第一列值）
+
+    核心保证：最终列数一致，数据行单元格数严格等于列数，杜绝列错位。
+    """
+    raw_cols = [_text(c) for c in (card.get("columns") or [])]
+    raw_rows = card.get("rows") or []
+
+    def _trim_trailing_empty(vals: list) -> list:
+        i = len(vals)
+        while i > 0 and (vals[i - 1] is None or (isinstance(vals[i - 1], str) and vals[i - 1].strip() == "")):
+            i -= 1
+        return vals[:i]
+
+    label_rows = [r for r in raw_rows if isinstance(r, dict) and "label" in r]
+    unlabeled_rows = [r for r in raw_rows if isinstance(r, dict) and "label" not in r]
+    is_legacy = bool(label_rows) and not unlabeled_rows and all(
+        len(_trim_trailing_empty(r.get("values") or [])) == len(raw_cols) for r in label_rows
+    )
+
+    if is_legacy:
+        col_names = [""] + raw_cols
+        n_cols = len(col_names)
+        def row_values(row: dict) -> list[str]:
+            return [_text(row.get("label", ""))] + [_text(v) for v in (row.get("values") or [])]
+    else:
+        col_names = list(raw_cols)
+        n_cols = len(col_names)
+        def row_values(row: dict) -> list[str]:
+            vals = [_text(v) for v in (row.get("values") or [])]
+            if "label" in row:
+                vals = [_text(row.get("label", ""))] + vals[:n_cols - 1]
+            return vals
+
+    if n_cols == 0:
+        return _card(card.get("title", "对比"), [])
+
+    # 表头
+    header_cells = col_names
     lines = ["| " + " | ".join(header_cells) + " |"]
-    lines.append("| " + " | ".join(["---"] * len(header_cells)) + " |")
-    for row in rows:
-        label = _text(row.get("label", ""))
-        values = row.get("values") or []
-        cells = [f"**{label}**"]
-        for ci in range(len(cols)):
-            v = _text(values[ci]) if ci < len(values) else ""
-            # 表格单元格内不能有换行，折叠成空格
-            cells.append(v.replace("\n", " "))
+    lines.append("| " + " | ".join(["---"] * n_cols) + " |")
+    for row in raw_rows:
+        if not isinstance(row, dict):
+            continue
+        vals = row_values(row)
+        # 归一化：不足补空，多余截断
+        if len(vals) < n_cols:
+            vals = vals + [""] * (n_cols - len(vals))
+        elif len(vals) > n_cols:
+            vals = vals[:n_cols]
+        cells = []
+        for ci, v in enumerate(vals):
+            cell_text = v.replace("\n", " ")
+            if ci == 0 and cell_text:
+                cell_text = f"**{cell_text}**"
+            cells.append(cell_text)
         lines.append("| " + " | ".join(cells) + " |")
     return _card(card.get("title", "对比"), [{"tag": "markdown", "content": "\n".join(lines)}])
 

@@ -24,7 +24,10 @@ _DANGEROUS_PATTERNS = [
     r'\b(?:sudo|doas)\b',                      # 提权
     r'\bmkfs\b|\bfdisk\b|\bparted\b',          # 格式化/分区
     r'\bdd\b\s+.*\bof=',                       # dd 写盘
-    r'>\s*/dev/|>\s*/etc/|>\s*/sys/|>\s*/boot/',  # 覆写系统/设备文件
+    # 覆写系统/设备文件。/dev/null、/dev/stdout、/dev/stderr 是重定向黑洞/透传目标，
+    # 写入无副作用，放行（否则 `2>/dev/null` 这类极常见写法会被误判高危，
+    # 在超级权限模式下被静默拒绝）；/dev/sda、/dev/tcp 等仍拦截。
+    r'>\s*/dev/(?!null\b|stdout\b|stderr\b)|>\s*/etc/|>\s*/sys/|>\s*/boot/',
     r'\b(?:curl|wget)\b[^|]*\|\s*(?:sudo\s+)?(?:ba)?sh\b',  # 下载管道执行
     r'\beval\b|\bsource\s+/dev/stdin',          # eval / 执行 stdin
     r'\bchmod\s+(?:-\w+\s+)*0?777\b|\bchown\s+-\w*R',  # 危险权限/递归改属主

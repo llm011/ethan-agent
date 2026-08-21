@@ -92,8 +92,10 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
           </button>
         )}
 
-        {/* Main content */}
-        <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
+        {/* Main content
+            注意：不要加 overflow-hidden —— HeaderFillet 需要向左溢出 1px 覆盖 sidebar 的 border-r；
+            垂直/水平溢出由外层 h-screen overflow-hidden 兜底 */}
+        <main className="flex-1 flex flex-col min-w-0 relative">
           {children}
         </main>
       </div>

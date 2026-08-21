@@ -51,10 +51,15 @@ data class SessionInfo(
     val snippet: String? = null,
     val source: String? = null,
     val mode: String? = null,
+    /** 置顶时间戳（epoch 秒）；0/null 表示未置顶 */
+    @SerialName("pinned_at") @Serializable(with = EpochSecondsSerializer::class) val pinnedAt: Long = 0,
 )
 
 @Serializable
 data class SessionsResponse(val sessions: List<SessionInfo> = emptyList())
+
+@Serializable
+data class PinnedSessionsResponse(val sessions: List<SessionInfo> = emptyList())
 
 @Serializable
 data class CreateSessionResponse(
@@ -440,9 +445,22 @@ data class ChatStreamEvent(
     val thought: String? = null,
     val intent: String? = null,
     @SerialName("consent_request") val consentRequest: Boolean? = null,
+    @SerialName("ask_user_request") val askUserRequest: Boolean? = null,
+    @SerialName("wait_for_user_request") val waitForUserRequest: Boolean? = null,
     @SerialName("request_id") val requestId: String? = null,
     val description: String? = null,
     val detail: String? = null,
+    // ask_user 事件负载
+    val question: String? = null,
+    val options: List<AskUserOption>? = null,
+    val default: String? = null,
+    val timeout: Int? = null,
+    // wait_for_user 事件负载
+    val prompt: String? = null,
+    @SerialName("input_type") val inputType: String? = null,
+    val placeholder: String? = null,
+    @SerialName("confirm_label") val confirmLabel: String? = null,
+    @SerialName("cancel_label") val cancelLabel: String? = null,
 )
 
 @Serializable
@@ -452,3 +470,35 @@ data class ConsentInfo(
     val description: String,
     val detail: String? = null,
 )
+
+@Serializable
+data class AskUserOption(
+    val label: String = "",
+    val value: String = "",
+)
+
+/** ask_user 弹卡片：问题 + 选项 + 倒计时（超时走 default） */
+@Serializable
+data class AskUserInfo(
+    val requestId: String,
+    val question: String,
+    val options: List<AskUserOption> = emptyList(),
+    val default: String = "",
+    val timeout: Int = 20,
+)
+
+/** wait_for_user 弹卡片：等待用户确认/输入（confirm / text 两种形态） */
+@Serializable
+data class WaitForUserInfo(
+    val requestId: String,
+    val prompt: String,
+    val inputType: String = "confirm", // confirm | text
+    val placeholder: String = "",
+    val confirmLabel: String = "已完成",
+    val cancelLabel: String = "取消",
+    val timeout: Int = 300,
+)
+
+/** ask-user / wait-for-user 回传请求体：{"value": "..."} */
+@Serializable
+data class InteractionValueRequest(val value: String)

@@ -194,6 +194,17 @@ class TestTimeInstant:
         assert r is not None
         assert r.kind == "time"
 
+    def test_now_en_word_boundary(self):
+        r = classify_instant("what time is it now")
+        assert r is not None
+        assert r.kind == "time"
+
+    def test_knowledge_not_time(self):
+        """回归：'knowledge' 含 'now' 子串，不得误判为时间查询（Agenda 拆解 prompt 曾踩坑）"""
+        assert classify_instant("请从 knowledge_search 收集资料") is None
+        assert classify_instant("snow is white, and now let's start") is not None
+        assert classify_instant("snow is white") is None  # 子串 'now' 不算
+
 
 # ---------------------------------------------------------------------------
 # 4. Greetings / confirmations — LLM bare answer

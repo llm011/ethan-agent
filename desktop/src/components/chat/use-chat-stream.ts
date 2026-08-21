@@ -305,6 +305,47 @@ export async function consumeStream(
         if (resumed) {
           // 后端仍有活跃 run：续接 SSE 流，继续接收后续事件
           for await (const chunk of resumed) {
+            // 重连后后端会回放仍在 pending 的交互事件，必须与主分支对齐处理，
+            // 否则断线重连后卡片不再弹出、agent 卡在等待直到超时。
+            if (chunk.consent_request) {
+              setConsentRequest({
+                request_id: chunk.request_id || "",
+                tool: chunk.tool || "",
+                description: chunk.description || "",
+                detail: chunk.detail,
+              });
+              continue;
+            }
+            if (chunk.confirm_browser_cleanup) {
+              setCleanupConfirm({
+                request_id: chunk.request_id || "",
+                sessions: chunk.sessions || [],
+                timeout: chunk.timeout || 120,
+              });
+              continue;
+            }
+            if (chunk.ask_user_request) {
+              setAskUserRequest({
+                request_id: chunk.request_id || "",
+                question: chunk.question || "",
+                options: chunk.options || [],
+                default: chunk.default || "",
+                timeout: chunk.timeout || 20,
+              });
+              continue;
+            }
+            if (chunk.wait_for_user_request) {
+              setWaitForUserRequest({
+                request_id: chunk.request_id || "",
+                prompt: chunk.prompt || "",
+                input_type: (chunk.input_type as "confirm" | "text") || "confirm",
+                placeholder: chunk.placeholder || "",
+                confirm_label: chunk.confirm_label || "已完成",
+                cancel_label: chunk.cancel_label || "取消",
+                timeout: chunk.timeout || 300,
+              });
+              continue;
+            }
             // 复用主循环的核心处理逻辑
             if (chunk.content) assistantContent += chunk.content;
             if (chunk.tool || chunk.state) {
