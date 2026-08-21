@@ -34,39 +34,95 @@ def _clean_bullet(t: str) -> str:
 
 
 def _build_compare(card: dict) -> list[dict]:
-    """对比卡（表格式）：title + 列头行 + 每个指标一行（带行分隔线）。
-    card = {title, columns:[名1,名2,...], rows:[{label, values:[v1,v2,...]}]}
+    """对比卡（表格式）：title + 列头行 + 每行数据（带行分隔线）。
+
+    格式自适应（按数据自动检测归一）：
+    - 标准新格式：columns 包含所有列名，rows:[{values:[v1,v2,...]}]，label 字段不用传
+    - label 旧格式：columns 不含第一列名，rows:[{label, values:[v2,v3,...]}]（第一列表头留空）
+    - 模型混用法：columns 含所有列名，rows:[{label, values:[...]}]（label 作第一列值，values 多传的冗余空串会被丢弃）
+
+    核心保证：无论模型怎么传，最终列数 == len(columns)（旧格式自动+1列），
+    所有数据行的单元格数严格等于列数，杜绝列错位。
     """
     sid = "compare"
-    cols = card.get("columns") or []
-    rows = card.get("rows") or []
-    comps: list[dict] = [
-        {"id": "root", "component": "Card", "child": "col"},
-    ]
+    raw_cols = [_text(c) for c in (card.get("columns") or [])]
+    raw_rows = card.get("rows") or []
+
+    # 判定是否旧格式（label 作无表头的行标题列，columns 不含第一列）：
+    # - 必须所有行都带 label
+    # - 去掉每行 values 末尾空串后，长度恰好 == len(raw_cols)
+    # 否则按新格式处理（columns 含所有列名，label 若存在则作第一列值，values 为后续列，自动补空/截断）
+    def _trim_trailing_empty(vals: list) -> list:
+        """去掉 values 末尾的空串/None（模型多传的冗余值）。"""
+        i = len(vals)
+        while i > 0 and (vals[i - 1] is None or (isinstance(vals[i - 1], str) and vals[i - 1].strip() == "")):
+            i -= 1
+        return vals[:i]
+
+    label_rows = [r for r in raw_rows if isinstance(r, dict) and "label" in r]
+    unlabeled_rows = [r for r in raw_rows if isinstance(r, dict) and "label" not in r]
+    is_legacy = bool(label_rows) and not unlabeled_rows and all(
+        len(_trim_trailing_empty(r.get("values") or [])) == len(raw_cols) for r in label_rows
+    )
+
+    if is_legacy:
+        col_names = [""] + raw_cols  # 第一列表头留空
+        n_cols = len(col_names)
+        def row_values(row: dict) -> list[str]:
+            return [_text(row.get("label", ""))] + [_text(v) for v in (row.get("values") or [])]
+    else:
+        col_names = list(raw_cols)
+        n_cols = len(col_names)
+        def row_values(row: dict) -> list[str]:
+            vals = [_text(v) for v in (row.get("values") or [])]
+            if "label" in row:
+                # label 作第一列值，values 的前 n_cols-1 个作为后续列，多余（含尾部空串）截断丢弃
+                vals = [_text(row.get("label", ""))] + vals[:n_cols - 1]
+            return vals
+
+    if n_cols == 0:
+        return [_surface(sid), _components(sid, [
+            {"id": "root", "component": "Card", "child": "col"},
+            {"id": "col", "component": "Column", "children": [
+                {"id": "title", "component": "Text", "text": _text(card.get("title", "对比")), "variant": "h3"},
+            ]},
+        ])]
+
+    col_weight = 1
+
+    comps: list[dict] = [{"id": "root", "component": "Card", "child": "col"}]
     col_children = ["title", "div0", "head"]
     comps.append({"id": "title", "component": "Text", "text": _text(card.get("title", "对比")), "variant": "h3"})
     comps.append({"id": "div0", "component": "Divider"})
 
-    # 列头行：第一格空（指标列），其余是列名
-    head_children = ["h-label"]
-    comps.append({"id": "h-label", "component": "Text", "text": "", "weight": 1, "variant": "caption"})
-    for ci, cname in enumerate(cols):
+    # 列头行
+    head_children: list[str] = []
+    for ci, cname in enumerate(col_names):
         hid = f"h-{ci}"
         head_children.append(hid)
-        comps.append({"id": hid, "component": "Text", "text": _text(cname), "weight": 2, "variant": "h5"})
+        comps.append({"id": hid, "component": "Text", "text": cname, "weight": col_weight, "variant": "h5"})
     comps.append({"id": "head", "component": "Row", "align": "start", "children": head_children})
 
-    # 数据行：label + 各列值，行之间插分隔线
-    for ri, row in enumerate(rows):
+    # 数据行
+    for ri, row in enumerate(raw_rows):
+        if not isinstance(row, dict):
+            continue
+        vals = row_values(row)
+        # 归一化：不足补空，多余截断
+        if len(vals) < n_cols:
+            vals = vals + [""] * (n_cols - len(vals))
+        elif len(vals) > n_cols:
+            vals = vals[:n_cols]
+
         rid = f"r-{ri}"
-        row_children = [f"{rid}-label"]
-        comps.append({"id": f"{rid}-label", "component": "Text", "text": _text(row.get("label", "")), "weight": 1, "variant": "h5"})
-        values = row.get("values") or []
-        for ci in range(len(cols)):
+        row_children: list[str] = []
+        for ci, val in enumerate(vals):
             vid = f"{rid}-c{ci}"
             row_children.append(vid)
-            val = values[ci] if ci < len(values) else ""
-            comps.append({"id": vid, "component": "Text", "text": _text(val), "weight": 2})
+            if ci == 0:
+                comps.append({"id": vid, "component": "Text", "text": val, "weight": col_weight, "variant": "h5"})
+            else:
+                comps.append({"id": vid, "component": "Text", "text": val, "weight": col_weight})
         comps.append({"id": rid, "component": "Row", "align": "start", "children": row_children})
         col_children.append(f"{rid}-div")
         comps.append({"id": f"{rid}-div", "component": "Divider"})
