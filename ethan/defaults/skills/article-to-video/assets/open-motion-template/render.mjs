@@ -18,15 +18,18 @@ const SCENE_ID_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 // ── CLI arguments ──
 // 视频模式:  node render.mjs <timeline.json> <output.mp4> <cover.png> <report.json> <public-dir>
-// 静帧模式:  node render.mjs stills <timeline.json> <stills-dir> <public-dir>
+// 静帧模式:  node render.mjs stills <timeline.json> <stills-dir> <public-dir> [--first-frame]
 //            （H3 流水线用：每个场景导出 presenter 开/关两张 PNG，见文件底部 exportStills）
+//            --first-frame：取场景起点帧而非 2/3 帧（Seedance 图生视频需要首帧作起点，
+//            2/3 帧会让成片场景开头瞬移到"动画已稳定"状态）。
 const argv = process.argv.slice(2);
 if (argv[0] === "stills") {
   const [, timelineArg, stillsDirArg, publicArg] = argv;
   if (!timelineArg || !stillsDirArg || !publicArg) {
-    throw new Error("Usage: node render.mjs stills <timeline.json> <stills-dir> <public-dir>");
+    throw new Error("Usage: node render.mjs stills <timeline.json> <stills-dir> <public-dir> [--first-frame]");
   }
-  await exportStills(path.resolve(timelineArg), path.resolve(stillsDirArg), path.resolve(publicArg));
+  const firstFrameMode = argv.includes("--first-frame");
+  await exportStills(path.resolve(timelineArg), path.resolve(stillsDirArg), path.resolve(publicArg), {firstFrameMode});
   // ESM 禁止顶层 return，不显式退出会落入下方视频模式的参数解析（stills 只带 4 个
   // 参数，必然 Usage 报错、exit 1）。POSIX 下 stdout 管道/TTY 写是同步的，
   // process.exit 不会截断报告。
@@ -438,7 +441,7 @@ async function startAssetServer(distDir, publicRoot) {
 // clean-plate 通过 presenter.forceHidden 只藏立绘图层、不动硬车道布局，
 // 两张图的文字/数据位置才逐像素对齐（h3-presenter-pipeline.md 的镜头包契约）。
 
-async function exportStills(timelinePath, stillsDir, publicDir) {
+async function exportStills(timelinePath, stillsDir, publicDir, {firstFrameMode = false} = {}) {
   const timeline = JSON.parse(fs.readFileSync(timelinePath, "utf8"));
   const scenes = Array.isArray(timeline.scenes) ? timeline.scenes : [];
   if (scenes.length === 0) {
@@ -478,8 +481,13 @@ async function exportStills(timelinePath, stillsDir, publicDir) {
     ? Math.max(0, Math.ceil((timeline.totalDurationMs / 1000) * fps) - 1)
     : Infinity;
   // 取场景 2/3 处的帧：揭示动画（前 40%）与 marker 弹簧已稳定，场景淡出（末 9 帧）未开始。
-  const frameForScene = (scene) =>
-    Math.min(maxFrame, Math.max(0, Math.round(((scene.startMs + (scene.durationMs * 2) / 3) / 1000) * fps)));
+  // --first-frame（Seedance 图生视频）：取场景起点帧，作为生成视频的第一帧。
+  const frameForScene = (scene) => {
+    if (firstFrameMode) {
+      return Math.min(maxFrame, Math.max(0, Math.round((scene.startMs / 1000) * fps)));
+    }
+    return Math.min(maxFrame, Math.max(0, Math.round(((scene.startMs + (scene.durationMs * 2) / 3) / 1000) * fps)));
+  };
   const tmpDir = path.join(stillsDir, "temp");
   const distDir = path.join(tmpDir, "vite-dist");
   let server;

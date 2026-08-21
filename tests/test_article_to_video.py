@@ -257,6 +257,7 @@ def test_skill_metadata_and_references_are_discoverable():
         "asset-library.md",
         "presenter-guide.md",
         "h3-presenter-pipeline.md",
+        "seedance-presenter-pipeline.md",
     }
 
 

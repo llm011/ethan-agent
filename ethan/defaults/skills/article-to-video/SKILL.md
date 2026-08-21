@@ -2,7 +2,7 @@
 name: article-to-video
 description: "把主题、文章正文、本地 Markdown/TXT 文件或公开 URL 制作成带 AI 剧本、Edge TTS 配音、动态字幕和 Open Motion 动画的 MP4 视频。当用户说文章转视频、主题做视频、URL 做视频、生成口播视频、制作短视频或要求交付配音成片时使用。"
 trigger: "文章转视频|主题做视频|URL转视频|链接转视频|网页转视频|生成视频|制作视频|口播视频|配音视频|短视频|article to video|topic to video|open motion video"
-version: 0.2.0
+version: 0.3.0
 ---
 
 # Article to Video
@@ -42,19 +42,18 @@ mkdir -p "$PROJECT"
 
 金融领域建议配虚拟人立绘（`presenter`）。角色包存于资产库 `~/.ethan/assets/library/presenters/<id>/`（详见 `references/asset-library.md`）。**manifest 引用的 presenter 缺失时**：运行 `scripts/presenter_gen.py prompts <id>` 打印一整套出图 prompt，交给用户用 GPT image 2 按 `references/presenter-guide.md` 的流程逐姿势出图，再 `presenter_gen.py import <id> <目录>` 入库。不要自己编造立绘文件路径。
 
-**presenter 模式检测**（决定立绘是静态图还是 H3 动态 presenter）：
+**presenter 模式检测**（决定立绘是静态图还是动态 presenter、用哪个生成器）：
 
 ```bash
-# 配置了 ComfyUI H3 workflow 地址 → 动态 presenter；否则 → 静态立绘
-H3_ENV="$HOME/.ethan/skills/article-to-video/h3-comfyui.env"
-test -f "$H3_ENV" && . "$H3_ENV"
-test -n "$H3_COMFYUI_URL" && echo "MODE: h3-dynamic ($H3_COMFYUI_URL)" || echo "MODE: static"
+# 优先级：用户显式指定 > seedance（config.yaml）> h3（ComfyUI）> 静态立绘
+python3 ~/.ethan/skills/article-to-video/scripts/seedance_presenter_pipeline.py mode
 ```
 
-注意 `h3-comfyui.env` 里等号后不要跟行内注释（如 `H3_COMFYUI_URL=http://127.0.0.1:8188 # ComfyUI`），否则变量不生效，模式检测会静默回退 static 立绘。
+用户明确说"用 seedance / 用 h3 / 不要用大模型（静态立绘）"时属于显式指示，加 `--prefer` 确认后必须照做（如 `mode --prefer h3`）；指定的模式没配置会明确报错，绝不静默回退别的模式。
 
-- `MODE: static` → 走默认步骤 4–7，presenter 始终是静态立绘，不要尝试 H3 流程。
-- `MODE: h3-dynamic` → presenter 按「H3 动态 Presenter」一节走，先读 `references/h3-presenter-pipeline.md`；静态渲染仍负责 clean plate / 菜单 / 数据层。可先用 `curl -m 3 -s "$H3_COMFYUI_URL/system_stats"` 探活，连不上时提醒用户启动 ComfyUI，不自动回退静态。
+- `MODE: static` → 走默认步骤 4–7，presenter 始终是静态立绘，不要尝试动态流程。
+- `MODE: seedance` → 按「Seedance 动态 Presenter」一节走，先读 `references/seedance-presenter-pipeline.md`。
+- `MODE: h3` → presenter 按「H3 动态 Presenter」一节走，先读 `references/h3-presenter-pipeline.md`；静态渲染仍负责 clean plate / 菜单 / 数据层。可先用 `curl -m 3 -s "$H3_COMFYUI_URL/system_stats"` 探活，连不上时提醒用户启动 ComfyUI，不自动回退静态（seedance 与 h3 都配置且用户未指定时，默认 seedance）。
 
 ### 4. 生成 manifest
 
@@ -126,9 +125,23 @@ Edge TTS 是第三方库连接的在线服务。网络失败时最多重试三�
 
 任何检查失败都要修正后重新运行，不能交付半成品。
 
+### Seedance 动态 Presenter（默认动态档，需 config.yaml 配置）
+
+`~/.ethan/config.yaml` 配置了 `seedance:` 段（BytePlus ModelArk 经 Glowix gateway）且用户未显式指定 h3/静态时使用——模式检测输出 `MODE: seedance`。先读 `references/seedance-presenter-pipeline.md`。
+
+流程概要（每个 presenter 场景）：
+
+1. 用 stills `--first-frame` 导出场景起点帧 `combined-reference.png`（首帧是 Seedance 图生视频的起点）：
+   `node ~/.ethan/skills/article-to-video/assets/open-motion-template/render.mjs stills "$PROJECT/timeline.json" <输出目录> "$PROJECT/work/public" --first-frame`
+2. `seedance_presenter_pipeline.py prepare`（台词/时长/起点 → Seedance 中文 prompt + scene.json，情绪基调自动判定）。
+3. `submit`（首帧 base64 + prompt 提交任务，真实计费）→ `poll`（轮询下载 `raw-seedance.mp4`，注意视频生成要几分钟，后台跑日志轮询）。
+4. `compose --stage-video final.mp4` 把生成段精确替换回该场景时间窗（音轨沿用原片 TTS，多场景串行替换）。
+
+密钥只存 config.yaml（`gateway_url/api_key/edge_secret/models`），代码与日志永不出现。gateway 冒烟测试用仓库 `scripts/test-all-models.mjs`（`--dry-run` 不联网）。
+
 ### H3 动态 Presenter（需配置启用）
 
-仅当 `~/.ethan/skills/article-to-video/h3-comfyui.env` 中配置了 `H3_COMFYUI_URL`（ComfyUI H3 workflow 地址）时使用本模式——第 3 步的模式检测会输出 `MODE: h3-dynamic`。使用
+仅当模式检测输出 `MODE: h3`（配置了 `H3_COMFYUI_URL` 且 seedance 未配置/用户显式指定 h3）时使用本模式。使用
 `scripts/h3_presenter_pipeline.py`，并先读
 `references/h3-presenter-pipeline.md`。此模式的原则是：article-to-video 产出
 `combined-reference.png`（小雨 + 舞台）与同尺寸 `clean-plate.png`（无人物）——用渲染模板的
@@ -136,7 +149,7 @@ stills 模式成对导出（`node ~/.ethan/skills/article-to-video/assets/open-m
 clean-plate 只藏立绘、布局逐像素一致）；MiniMax H3
 只生成小雨动作/原生中文声音；最终将带人物遮罩的 H3 前景覆盖回 clean plate。
 
-未配置 `H3_COMFYUI_URL` 时，即使内容适合动态 presenter，也一律走静态立绘；想启用时向用户说明：在 `h3-comfyui.env` 写一行 `H3_COMFYUI_URL=http://127.0.0.1:8188` 即可。
+想启用时向用户说明：在 `h3-comfyui.env` 写一行 `H3_COMFYUI_URL=http://127.0.0.1:8188`（等号后不要跟行内注释）。
 
 不要让 H3 作为最终中文、数字和图表渲染器。无人物遮罩时只能用 `safe-boundary` 快速预览；
 人物手会深入菜单或图表时，必须使用逐帧前景遮罩，保证手指在 UI 前景。
