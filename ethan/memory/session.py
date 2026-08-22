@@ -11,10 +11,13 @@ import asyncio
 import logging
 import re
 import shutil
+import sqlite3
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import aiosqlite
 
@@ -624,6 +627,20 @@ class SessionStore:
         await self._db.commit()
         return cursor.rowcount > 0
 
+    async def interrupt_running_messages(self, session_id: str) -> int:
+        """把会话内所有 running 态的 assistant 消息标记为 interrupted。
+
+        producer 崩溃/异常退出时的兜底：实时进度占位行（content 空、status=running）
+        若无人定稿，刷新后 UI 会无限转圈。watchdog 补丁与落库失败路径调用；
+        已正常定稿的行是 completed，不会被误伤。返回更新行数。
+        """
+        cursor = await self._db.execute(
+            "UPDATE messages SET status='interrupted' WHERE session_id=? AND role='assistant' AND status='running'",
+            (session_id,),
+        )
+        await self._db.commit()
+        return cursor.rowcount
+
     async def delete_message_by_id(self, row_id: int) -> None:
         """按主键 id 删除单条消息（新 run 替换旧 run 时丢弃残留的进度占位行用）。"""
         await self._delete_intermediate_blob_for_message(row_id)
@@ -1224,6 +1241,42 @@ def _is_store_alive(store: "SessionStore") -> bool:
         return store._db is not None and bool(store._db._running)
     except AttributeError:
         return False
+
+
+async def retry_on_db_locked(
+    fn: Callable[..., Awaitable[Any]],
+    *args: Any,
+    retries: int = 5,
+    base_delay: float = 0.5,
+    **kwargs: Any,
+) -> Any:
+    """对 sqlite「database is locked / busy」做指数退避重试。
+
+    sessions.db 为 DELETE journal 模式，写锁全库排他；多个连接（对话 producer、
+    定时任务、heartbeat 各自的 store）并发写时，busy_timeout（30s）耗尽会抛
+    OperationalError。用于「失败即永久丢失」的关键落库点（如最终回复持久化）；
+    普通进度落库失败可容忍，无需经过本函数。非锁类错误不重试，直接抛出。
+    """
+    delay = base_delay
+    for attempt in range(retries + 1):
+        try:
+            return await fn(*args, **kwargs)
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e).lower() and "busy" not in str(e).lower():
+                raise
+            if attempt >= retries:
+                raise
+            logger.warning(
+                "数据库撞锁，%.1fs 后重试 %s（第 %d/%d 次）: %s",
+                delay,
+                getattr(fn, "__name__", fn),
+                attempt + 1,
+                retries,
+                e,
+            )
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 8.0)
+    raise AssertionError("unreachable")
 
 
 async def get_session_store(db_path: Path | None = None) -> "SessionStore":

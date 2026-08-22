@@ -162,6 +162,21 @@ async def _run_watchdog(run: ChatRun, manager: "RunManager") -> None:
                         err_msg = _friendly_error(exc, None)
                     except Exception:
                         err_msg = str(exc)[:200]
+                # producer 崩溃没走到定稿时，DB 里可能残留 status='running' 的进度
+                # 占位行（content 空），不处理的话刷新后该行会无限转圈。标记 interrupted。
+                try:
+                    from ethan.memory.session import get_session_store, retry_on_db_locked
+
+                    store = await get_session_store()
+                    n = await retry_on_db_locked(store.interrupt_running_messages, run.session_id)
+                    if n:
+                        logger.info(
+                            "[Watchdog] %s 已将 %d 条 running 消息标记为 interrupted",
+                            run.session_id,
+                            n,
+                        )
+                except Exception:
+                    logger.exception("[Watchdog] %s 标记 interrupted 失败", run.session_id)
                 run.emit({"error": err_msg})
                 run.finish()
                 manager.schedule_removal(run.session_id)
