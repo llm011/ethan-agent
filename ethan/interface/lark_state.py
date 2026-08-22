@@ -413,3 +413,22 @@ def _get_answer_entry(answer_msg_id: str) -> dict | None:
         _lark_answer_map.pop(answer_msg_id, None)
         return None
     return entry
+
+
+def _collect_tail_feedback(history) -> list[str]:
+    """收集最后一条 assistant 之后的 [用户反馈] 行（reaction 👍/👎 落库的孤立 user 行）。
+
+    上下文构建按 user→assistant 严格配对，孤立的反馈行永远配不进热区——不显式
+    收集就永远进不了 agent 上下文。拼进本轮 agent_user_text 前缀后，本轮回答
+    落库，反馈行位于新的最后一条 assistant 之前，后续轮次自然不再重复收集。
+    返回时间正序。
+    """
+    out: list[str] = []
+    for m in reversed(history):
+        role = getattr(m, "role", "")
+        if role == "assistant":
+            break
+        if role == "user" and (getattr(m, "content", "") or "").startswith("[用户反馈]"):
+            out.append(m.content.strip())
+    out.reverse()
+    return out

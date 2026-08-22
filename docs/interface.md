@@ -343,10 +343,10 @@ lark-cli event consume <EventKey>（每个 EventKey 一个子进程，WebSocket 
 最终答案卡片定稿时附加交互能力（`lark_agent.py` 定稿处 + `lark_event_handlers.py` 回调）：
 
 - **操作按钮**：卡片底部带「🔄 重新生成」「📋 复制原文」两个按钮（`card.action.trigger` 回调）。
-  - 重新生成：从答案登记表（`lark_state._lark_answer_map`，内存、24h TTL、上限 100 条）反查原问题 → 删上一轮 user/assistant 落库行 → 复用 `_handle_agent_message(save_user_msg=False)` 重跑。起独立 task，不阻塞事件消费循环；同 chat 有任务在跑会提示先 `/stop`。
+  - 重新生成：从答案登记表（`lark_state._lark_answer_map`，内存、24h TTL、上限 100 条）反查原问题 → 删上一轮 user/assistant 落库行（优先用落库时回写的 assistant 行 id 精确锚定；旧条目无 id 时按原问题内容从后往前锚定，绝不误删最新一轮）→ 复用 `_handle_agent_message(save_user_msg=False)` 重跑。task 登记 `_lark_running_tasks`，`/stop` 可取消；同 chat 有任务在跑会提示先 `/stop`。
   - 复制原文：把答案原始 markdown 用 post 气泡重发（post 文本可长按复制），超 4000 字符自动分段。
-- **Reaction 反馈**：用户对答案卡片点 👍/👎 → 反馈写入会话历史（`[用户反馈] ...` user 消息，agent 下轮可见），bot 加 ✅ reaction 确认。其它 emoji 及非答案卡片上的 reaction 忽略。
-- **长答案分段**：定稿内容超 6000 字符时按段落边界拆分多张卡片（首段写回原卡片带按钮，其余追加新卡片），避免 patch 超限静默失败丢内容。见 `lark_render._split_long_text`。
+- **Reaction 反馈**：用户对答案卡片点 👍/👎 → 反馈写入会话历史（`[用户反馈] ...` user 消息），bot 加 ✅ reaction 确认。其它 emoji 及非答案卡片上的 reaction 忽略。反馈是孤立 user 行，配不进 user→assistant 上下文配对——下轮处理时由 `_collect_tail_feedback` 显式拼进 agent 上下文（本轮回答落库后自然去重）。
+- **长答案分段**：定稿内容超 6000 字符时按段落边界拆分多张卡片（首段写回原卡片带按钮，其余追加新卡片并一并登记，reaction/复制原文在分段卡片上也可命中），切点避开未闭合的 ``` 代码围栏，避免 patch 超限静默失败丢内容。见 `lark_render._split_long_text`。
 
 > 登记表仅内存态：进程重启后旧卡片的按钮/反馈会回复「找不到上下文」，直接重发问题即可。
 

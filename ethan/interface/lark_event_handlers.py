@@ -154,7 +154,25 @@ async def _do_copy_answer(card_msg_id: str, chat_id: str) -> None:
 
 
 async def _do_regenerate(card_msg_id: str, chat_id: str, operator_open_id: str) -> None:
-    """重新生成：定位原问题 → 删上一轮 user/assistant 落库行 → 重跑 Agent（不重复存 user 消息）。"""
+    """重新生成：定位原问题 → 删上一轮 user/assistant 落库行 → 重跑 Agent（不重复存 user 消息）。
+
+    task 登记进 _lark_running_tasks，/stop 可取消（与 _handle_message 同规则）。
+    """
+    import asyncio as _aio
+
+    from ethan.interface.lark_state import _lark_running_tasks, _untrack_task
+
+    cur_task = _aio.current_task()
+    if cur_task is not None:
+        _lark_running_tasks.setdefault(chat_id, set()).add(cur_task)
+    try:
+        await _do_regenerate_inner(card_msg_id, chat_id, operator_open_id)
+    finally:
+        if cur_task is not None:
+            _untrack_task(chat_id, cur_task)
+
+
+async def _do_regenerate_inner(card_msg_id: str, chat_id: str, operator_open_id: str) -> None:
     from ethan.interface.lark_fetch import _send_reply
     from ethan.interface.lark_send import TypingState
     from ethan.interface.lark_state import _get_answer_entry, _lark_running_tasks
@@ -181,8 +199,12 @@ async def _do_regenerate(card_msg_id: str, chat_id: str, operator_open_id: str) 
     is_owner = bool(owner_open_id) and bool(operator_open_id) and operator_open_id == owner_open_id
     owner_claimed = bool(owner_open_id)
 
-    # 删上一轮落库行：尾部 assistant（registry 的 row id 兜底扫最后一条 assistant）
-    # + 其之前最近的一条 user（本轮问题）。删掉后 history 尾部干净，重跑上下文正确。
+    # 删上一轮落库行（本卡片对应的那一轮）：
+    # - 有 assistant_row_id（落库时回写）：直接用，精确删这张卡片对应的 assistant 行；
+    # - 无 row id（旧条目兜底）：按原问题内容从后往前锚定——找与本卡片问题一致的最后一条
+    #   user 行，删它之后的第一条 assistant。绝不能兜底扫「最后一条 assistant」：
+    #   用户点旧卡片时会误删最新一轮，重跑上下文直接串掉。
+    # - 都锚定不到：不删行直接重跑（宁可上下文多一轮冗余，不可删错）。
     from ethan.memory.session import get_session_store
     store = await get_session_store()
     session_obj = await store.load(entry["session_id"])
@@ -190,18 +212,30 @@ async def _do_regenerate(card_msg_id: str, chat_id: str, operator_open_id: str) 
     if session_obj:
         msgs = session_obj.messages
         assistant_row = entry.get("assistant_row_id")
-        if not assistant_row:
-            for m in reversed(msgs):
-                if m.role == "assistant":
-                    assistant_row = getattr(m, "id", None)
-                    break
         if assistant_row:
             rows_to_delete.append(assistant_row)
+            # 问题行 = assistant 行之前最近的非反馈 user 行（跳过 [用户反馈] 标记行）
             for m in reversed(msgs):
                 if m.role == "user" and getattr(m, "id", 0) and m.id < assistant_row:
+                    if (m.content or "").startswith("[用户反馈]"):
+                        continue
                     rows_to_delete.append(m.id)
                     break
-    for rid in rows_to_delete:
+        else:
+            q = question.strip()
+            for idx in range(len(msgs) - 1, -1, -1):
+                m = msgs[idx]
+                if m.role != "user" or not getattr(m, "id", None):
+                    continue
+                if m.content.startswith("[用户反馈]") or (m.content or "").strip() != q:
+                    continue
+                for j in range(idx + 1, len(msgs)):
+                    if msgs[j].role == "assistant" and getattr(msgs[j], "id", None):
+                        rows_to_delete.append(m.id)
+                        rows_to_delete.append(msgs[j].id)
+                        break
+                break
+    for rid in dict.fromkeys(rows_to_delete):  # 去重，保序
         try:
             await store.delete_message_by_id(rid)
         except Exception:

@@ -466,11 +466,26 @@ def _render_post_content(text: str) -> str:
 ANSWER_SPLIT_THRESHOLD = 6000
 
 
+def _fence_adjust(window: str, cut: int, min_cut: int) -> int:
+    """若 cut 落在未闭合的 ``` 代码围栏内，回退到围栏开始行之前，避免切断代码块。
+
+    回退后低于 min_cut（围栏离段首太近，说明代码块本身超长）时保持原 cut 硬切。
+    """
+    before = window[:cut]
+    if before.count("```") % 2 == 0:
+        return cut  # 切点在普通文本，安全
+    fence = before.rfind("```")
+    if fence < 0:
+        return cut
+    line_start = before.rfind("\n", 0, fence) + 1
+    return line_start if line_start >= min_cut else cut
+
+
 def _split_long_text(text: str, limit: int = ANSWER_SPLIT_THRESHOLD) -> list[str]:
     """把超长文本拆成多段（每段 ≤ limit 字符），优先在段落边界切，其次行边界，最后硬切。
 
-    保证返回至少 1 段；空文本返回 [""]。代码块被切断时给后续段补 ``` 闭合/开头的兜底不做了——
-    6000 字符内单代码块超限属极少数，飞书卡片本身也渲染不了那么长的代码块。
+    保证返回至少 1 段；空文本返回 [""]。切点避开未闭合的 ``` 代码围栏
+    （回退到围栏开始行之前）；单个代码块本身超过 limit 时只能硬切。
     """
     if len(text) <= limit:
         return [text]
@@ -484,6 +499,8 @@ def _split_long_text(text: str, limit: int = ANSWER_SPLIT_THRESHOLD) -> list[str
             cut = window.rfind("\n")
         if cut < limit // 2:
             cut = limit
+        # 切点落在未闭合代码围栏内时回退到围栏开始前（段长足够的前提下）
+        cut = _fence_adjust(window, cut, limit // 2)
         parts.append(rest[:cut].rstrip())
         rest = rest[cut:].lstrip("\n")
     if rest.strip():
