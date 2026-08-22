@@ -226,9 +226,17 @@ def test_env_dump_command_position_flagged():
     assert _is_env_dump("env | grep TOKEN")
     assert _is_env_dump("FOO=1 env")
     assert _is_env_dump("curl -sL https://x.com/a && env")
+    # 绝对/相对路径命令（评审意见：/usr/bin/env 此前漏判）
+    assert _is_env_dump("/usr/bin/env")
+    assert _is_env_dump("/bin/printenv")
+    assert _is_env_dump("echo hi && /usr/bin/env")
+    assert _is_env_dump("./env")
     # 带参数的 env/set 是设置/执行，不是 dump
     assert not _is_env_dump("env VAR=1 cmd")
     assert not _is_env_dump("set -x")
+    # 纯赋值（把路径赋给变量）不是命令；路径前缀正则排除 = 防此误判
+    assert not _is_env_dump("FOO=/usr/bin/env")
+    assert not _is_env_dump("FOO=bar /usr/bin/env true")  # 赋值前缀 + 带参 env
 
 
 def test_curl_consent_not_always():
@@ -250,6 +258,13 @@ def test_destructive_tier():
     tool = ShellTool()
     # 破坏性：超级模式仍强制弹窗
     assert tool.consent_destructive(command="rm -rf /tmp/x")
+    # GNU 长参数与短长混合（评审意见：长参数形式此前漏判）
+    assert tool.consent_destructive(command="rm --recursive /tmp/x")
+    assert tool.consent_destructive(command="rm --force /tmp/x")
+    assert tool.consent_destructive(command="rm -r --force /tmp/x")
+    assert tool.consent_destructive(command="rm --recursive -f /tmp/x")
+    assert tool.consent_destructive(command="rm --interactive=always --force /tmp/x")
+    assert tool.consent_destructive(command="rm -R /tmp/x")  # 大写递归
     assert tool.consent_destructive(command="mkfs /dev/sda")
     assert tool.consent_destructive(command="dd if=x of=/dev/sda")
     assert tool.consent_destructive(command="echo x > /dev/sda")

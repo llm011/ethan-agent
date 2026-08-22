@@ -27,7 +27,9 @@ _MISSING_BIN_HINTS = {
 #
 # 两级合计仍构成完整高危集合 _DANGEROUS_RE：普通模式行为不变。
 _DESTRUCTIVE_PATTERNS = [
-    r'\brm\s+(?:-\w*\s+)*-\w*[rf]',          # rm -rf / rm -r -f / rm -fr 等
+    # rm -rf / -r -f / -fr / -R（大写递归）及 GNU 长参数 --recursive / --force，
+    # 支持短长混合（rm -r --force、rm --interactive=always --force 等）。
+    r'\brm\s+(?:-[^\s]+\s+)*-(?:\w*[rfR]|-(?:recursive|force))\b',
     r'\bmkfs\b|\bfdisk\b|\bparted\b',          # 格式化/分区
     r'\bdd\b\s+.*\bof=',                       # dd 写盘
     # 覆写系统/设备文件。/dev/null、/dev/stdout、/dev/stderr 是重定向黑洞/透传目标，
@@ -65,6 +67,7 @@ _DOLLAR_VAR_RE = re.compile(r'\$\{([A-Za-z_][A-Za-z0-9_]*)(?::[^}]*)?\}|\$([A-Za
 _ENV_DUMP_SPLIT_RE = re.compile(r'[;\n|&`]')  # 切分命令段（含 || && 的组成部分）
 _ENV_DUMP_HEAD_RE = re.compile(
     r'^(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*'  # 剥掉 VAR=val 赋值前缀
+    r'(?:[^\s/=]*/)*'                        # 可选路径前缀：/usr/bin/env、./env、bin/printenv
     r'(printenv|env|set|export|declare|compgen)\b\s*(.*)$',
     re.DOTALL,
 )
