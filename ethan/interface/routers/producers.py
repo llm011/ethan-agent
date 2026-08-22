@@ -619,7 +619,6 @@ async def _run_generation(
                 msg_id = progress_msg_id
             else:
                 msg_id = await retry_on_db_locked(store.save_message, session_id, asst_msg)
-            await retry_on_db_locked(store.touch, session_id)
         except Exception:
             logger.exception("最终回复落库失败（重试耗尽）session=%s row=%s", session_id, progress_msg_id)
             if progress_msg_id:
@@ -638,6 +637,14 @@ async def _run_generation(
                     asyncio.create_task(asyncio.to_thread(agent._skills.record_hit, _name))
             asyncio.create_task(_maybe_consolidate(session_id, agent._provider.model, user_id, mode=mode))
             asyncio.create_task(_maybe_generate_skill(session_id, agent._provider.model, user_id))
+
+        # touch 只更新会话列表的 updated_at 排序时间戳，与主消息落库解耦：
+        # 极端情况下主消息已保存成功、touch 撞锁重试耗尽时，不该给前端报
+        # 「保存失败」，更不该把已成功的定稿误标 interrupted——单独容错，失败仅记日志。
+        try:
+            await retry_on_db_locked(store.touch, session_id)
+        except Exception:
+            logger.warning("touch 会话时间戳失败（重试耗尽）session=%s", session_id, exc_info=True)
 
     # --- Get笔记 异步任务后台轮询 ---
     # 从 agent 回复中提取 getnote task_id，后台轮询直到完成，
