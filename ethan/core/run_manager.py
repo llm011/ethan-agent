@@ -13,6 +13,7 @@
 并发安全：emit / subscribe 都是同步函数（中间无 await），asyncio 单线程下原子，
 所以「快照缓冲 + 注册队列」之间不会有 emit 插队，重连不丢事件也不重复。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -30,9 +31,9 @@ _GRACE_SECONDS = 90
 _SENTINEL = object()
 
 # Watchdog 参数
-_WATCHDOG_INTERVAL = 180   # 每次检查间隔（秒），3 分钟
-_WATCHDOG_MAX_CHECKS = 2   # 最多检查次数（超过则放弃）
-_WATCHDOG_STALL_SECS = 180 # 超过此时间无新事件视为卡住（秒）
+_WATCHDOG_INTERVAL = 180  # 每次检查间隔（秒），3 分钟
+_WATCHDOG_MAX_CHECKS = 2  # 最多检查次数（超过则放弃）
+_WATCHDOG_STALL_SECS = 180  # 超过此时间无新事件视为卡住（秒）
 
 
 @dataclass
@@ -59,6 +60,9 @@ class ChatRun:
     tool_tasks: dict[str, asyncio.Task] = field(default_factory=dict)
     # 用户主动取消的工具 ID 集合：_run_one 据此区分「单工具取消」与「整轮取消」。
     cancelled_tool_ids: set[str] = field(default_factory=set)
+    # 本 run 弹出的交互请求 ID（consent/ask_user/wait_for_user）：
+    # producer 收尾时按 id 精确清理注册表，避免全量清理误杀其他并发 run。
+    interaction_ids: set[str] = field(default_factory=set)
 
     def emit(self, event: dict) -> None:
         """记录一个事件并扇出给所有当前订阅者（同步，无 await）。"""
@@ -147,11 +151,13 @@ async def _run_watchdog(run: ChatRun, manager: "RunManager") -> None:
             if not run.done:
                 logger.warning(
                     "[Watchdog] producer for %s ended without finish() (exc=%s), patching",
-                    run.session_id, exc,
+                    run.session_id,
+                    exc,
                 )
                 err_msg = "任务意外终止（内部错误）。如需继续请重新发送消息。"
                 if exc:
                     from ethan.interface.routers.helpers import _friendly_error
+
                     try:
                         err_msg = _friendly_error(exc, None)
                     except Exception:
@@ -169,7 +175,10 @@ async def _run_watchdog(run: ChatRun, manager: "RunManager") -> None:
             run.emit({"heartbeat": True, "elapsed": elapsed})
             logger.info(
                 "[Watchdog] %s stalled %.0fs, emitted heartbeat (check %d/%d)",
-                run.session_id, stall_secs, run.watchdog_checks, _WATCHDOG_MAX_CHECKS,
+                run.session_id,
+                stall_secs,
+                run.watchdog_checks,
+                _WATCHDOG_MAX_CHECKS,
             )
         else:
             # 任务活跃（有新事件），重置计数器
@@ -274,4 +283,3 @@ class RunManager:
 
 
 SENTINEL = _SENTINEL
-

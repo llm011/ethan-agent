@@ -7,8 +7,11 @@ import argparse
 import asyncio
 import hashlib
 import json
+import math
+import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -18,15 +21,53 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-VISUAL_TYPES = {"kinetic-text", "steps", "stat", "quote", "summary"}
+VISUAL_TYPES = {"kinetic-text", "steps", "stat", "quote", "summary", "candlestick"}
 FPS_VALUES = {24, 25, 30, 60}
+# 立绘硬车道常量 —— 这套几何的单源就在这里：build_timeline 把它注入 timeline.layout，
+# open-motion-template/src/types.ts 只保留同名常量作为旧时间线（无 layout 字段）的回退。
+# 渲染侧把 presenter 钳在 ceil(440 × scale) px 宽的车道内，内容列让出同一宽度。
+PRESENTER_LANE_WIDTH = 440
+PRESENTER_LANE_GAP = 24
+PRESENTER_EDGE_INSET = 30
+CONTENT_SIDE_PADDING = 78
 DEFAULT_THEME = {
     "background": "#081120",
     "surface": "#111D32",
     "primary": "#6EE7F9",
     "secondary": "#A78BFA",
     "text": "#F8FAFC",
+    # tone 色板（callouts/K线标注用）也在这里注入，TS 侧 toneColor 不再自带回退色。
+    "accent": "#FACC15",
+    "positive": "#EF4444",
+    "negative": "#22C55E",
 }
+DOMAINS = {"general", "finance", "paper"}
+# 金融主题里 positive=红、negative=绿（A 股红涨绿跌约定），蜡烛图涨红跌绿。
+DOMAIN_THEMES: dict[str, dict[str, str]] = {
+    "general": {},  # 空 = 沿用 DEFAULT_THEME
+    "finance": {
+        "background": "#0A0E1A",
+        "surface": "#141A2E",
+        "primary": "#FFD54A",
+        "secondary": "#7DD3FC",
+        "text": "#F8FAFC",
+        "accent": "#FACC15",
+        "positive": "#EF4444",
+        "negative": "#22C55E",
+    },
+    "paper": {
+        "background": "#0C0A1D",
+        "surface": "#151030",
+        "primary": "#A78BFA",
+        "secondary": "#C084FC",
+        "text": "#F8FAFC",
+        "accent": "#F59E0B",
+        "positive": "#34D399",
+        "negative": "#F87171",
+    },
+}
+THEME_FIELDS = frozenset(DEFAULT_THEME) | {"accent", "positive", "negative"}
+CALLOUT_TONES = {"accent", "positive", "negative"}
 COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 PROSODY_RE = re.compile(r"^[+-]\d+%$")
@@ -62,7 +103,215 @@ def _string_list(value: Any, field: str, *, maximum: int) -> list[str]:
     return [_require_text(item, f"{field}[]", maximum=80) for item in value]
 
 
-def normalize_manifest(raw: Any) -> dict[str, Any]:
+def _number(value: Any, field: str) -> float:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise ManifestError(f"{field} must be a number")
+    number = float(value)
+    if not math.isfinite(number):
+        raise ManifestError(f"{field} must be a finite number")
+    return number
+
+
+def _resolve_library_root(library_root: Path | None) -> Path:
+    # 脚本跑在 uv --isolated 下，不能 import ethan；这里复制 ethan/core/config.py 的根目录约定。
+    if library_root is not None:
+        return library_root
+    data_dir = os.environ.get("ETHAN_DATA_DIR")
+    base = Path(data_dir).expanduser() if data_dir else Path.home() / ".ethan"
+    return base / "assets" / "library"
+
+
+def _presenter_hint(presenter_id: str) -> str:
+    gen_script = Path(__file__).resolve().parent / "presenter_gen.py"
+    return (
+        f"create it with: python3 {gen_script} prompts {presenter_id}  "
+        "# print the prompt pack, generate the images with GPT image 2, then: "
+        f"python3 {gen_script} import {presenter_id} <image-dir>"
+    )
+
+
+def _load_presenter(presenter_raw: Any, library_root: Path) -> dict[str, Any]:
+    if not isinstance(presenter_raw, dict):
+        raise ManifestError("presenter must be an object")
+    presenter_id = _require_text(presenter_raw.get("id"), "presenter.id", maximum=64)
+    if not ID_RE.fullmatch(presenter_id):
+        raise ManifestError("presenter.id must be kebab-case")
+    presenter_dir = library_root / "presenters" / presenter_id
+    char_path = presenter_dir / "character.json"
+    try:
+        character = json.loads(char_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise ManifestError(
+            f"presenter '{presenter_id}' not found in {library_root / 'presenters'} — "
+            f"{_presenter_hint(presenter_id)}"
+        ) from None
+    except json.JSONDecodeError as exc:
+        raise ManifestError(f"presenter '{presenter_id}' character.json is invalid JSON: {exc}") from None
+    if not isinstance(character, dict):
+        raise ManifestError(f"presenter '{presenter_id}' character.json must be an object")
+    if character.get("status") != "ready":
+        raise ManifestError(
+            f"presenter '{presenter_id}' is not ready (status={character.get('status')!r}) — "
+            f"finish image generation, then run: "
+            f"python3 {Path(__file__).resolve().parent / 'presenter_gen.py'} import {presenter_id} <image-dir>"
+        )
+    poses_raw = character.get("poses")
+    if not isinstance(poses_raw, dict) or not poses_raw:
+        raise ManifestError(f"presenter '{presenter_id}' has no poses in character.json")
+    poses: dict[str, str] = {}
+    for name, rel in poses_raw.items():
+        if not isinstance(name, str) or not ID_RE.fullmatch(name):
+            raise ManifestError(f"presenter '{presenter_id}' pose names must be kebab-case")
+        if not isinstance(rel, str) or not rel:
+            raise ManifestError(f"presenter '{presenter_id}' pose '{name}' path must be a non-empty string")
+        rel_path = Path(rel)
+        if rel_path.is_absolute() or ".." in rel_path.parts:
+            raise ManifestError(f"presenter '{presenter_id}' pose '{name}' path must stay inside the presenter dir")
+        if not (presenter_dir / rel_path).is_file():
+            raise ManifestError(
+                f"presenter '{presenter_id}' pose image missing: {rel} — {_presenter_hint(presenter_id)}"
+            )
+        poses[name] = f"presenters/{presenter_id}/{rel_path.as_posix()}"
+    default_pose = presenter_raw.get("defaultPose", "standing")
+    if not isinstance(default_pose, str) or default_pose not in poses:
+        raise ManifestError(f"presenter.defaultPose must be one of {sorted(poses)}")
+    position = presenter_raw.get("position", "right")
+    if position not in {"right", "left"}:
+        raise ManifestError("presenter.position must be 'right' or 'left'")
+    scale = presenter_raw.get("scale", 1.0)
+    if not isinstance(scale, (int, float)) or isinstance(scale, bool) or not 0.6 <= float(scale) <= 1.4:
+        raise ManifestError("presenter.scale must be a number between 0.6 and 1.4")
+    voice = character.get("voice")
+    if voice is not None and not isinstance(voice, dict):
+        raise ManifestError(f"presenter '{presenter_id}' voice in character.json must be an object")
+    return {
+        "id": presenter_id,
+        "position": position,
+        "scale": float(scale),
+        "defaultPose": default_pose,
+        "cutout": bool(character.get("cutout", True)),
+        "poses": poses,
+        "voice": voice,
+    }
+
+
+def _normalize_candlestick(visual: dict[str, Any], visual_raw: dict[str, Any], field: str) -> int:
+    """校验 candlestick 数据并写入 visual，返回序列长度供 markers 越界检查。"""
+    closes_raw = visual_raw.get("closes")
+    candles_raw = visual_raw.get("candles")
+    if (closes_raw is None) == (candles_raw is None):
+        raise ManifestError(f"{field}.visual must provide exactly one of closes or candles")
+    if closes_raw is not None:
+        if not isinstance(closes_raw, list) or not 8 <= len(closes_raw) <= 120:
+            raise ManifestError(f"{field}.visual.closes must contain between 8 and 120 numbers")
+        visual["closes"] = [_number(v, f"{field}.visual.closes[]") for v in closes_raw]
+        series_len = len(visual["closes"])
+    else:
+        if not isinstance(candles_raw, list) or not 2 <= len(candles_raw) <= 60:
+            raise ManifestError(f"{field}.visual.candles must contain between 2 and 60 items")
+        candles: list[dict[str, float]] = []
+        for candle_index, candle in enumerate(candles_raw):
+            candle_field = f"{field}.visual.candles[{candle_index}]"
+            if not isinstance(candle, dict):
+                raise ManifestError(f"{candle_field} must be an object")
+            values = {key: _number(candle.get(key), f"{candle_field}.{key}") for key in ("o", "h", "l", "c")}
+            if values["h"] < max(values["o"], values["c"]) or values["l"] > min(values["o"], values["c"]):
+                raise ManifestError(f"{candle_field} must satisfy h >= max(o, c) and l <= min(o, c)")
+            candles.append(values)
+        visual["candles"] = candles
+        series_len = len(candles)
+    bands_raw = visual_raw.get("bands")
+    if bands_raw is not None:
+        if not isinstance(bands_raw, dict):
+            raise ManifestError(f"{field}.visual.bands must be an object")
+        bands: dict[str, list[float]] = {}
+        for band_name in ("upper", "middle", "lower"):
+            band_raw = bands_raw.get(band_name)
+            if band_raw is None:
+                continue
+            if not isinstance(band_raw, list) or not band_raw:
+                raise ManifestError(f"{field}.visual.bands.{band_name} must be a non-empty list")
+            band = [_number(v, f"{field}.visual.bands.{band_name}[]") for v in band_raw]
+            if len(band) != series_len:
+                raise ManifestError(
+                    f"{field}.visual.bands.{band_name} must have the same length as the series ({series_len})"
+                )
+            bands[band_name] = band
+        if bands:
+            visual["bands"] = bands
+    return series_len
+
+
+def _normalize_markers(visual: dict[str, Any], visual_raw: dict[str, Any], field: str, series_len: int) -> None:
+    markers_raw = visual_raw.get("markers")
+    if markers_raw is None:
+        return
+    if not isinstance(markers_raw, list) or not 1 <= len(markers_raw) <= 4:
+        raise ManifestError(f"{field}.visual.markers must contain between 1 and 4 items")
+    markers: list[dict[str, Any]] = []
+    for marker_index, marker in enumerate(markers_raw):
+        marker_field = f"{field}.visual.markers[{marker_index}]"
+        if not isinstance(marker, dict):
+            raise ManifestError(f"{marker_field} must be an object")
+        index = marker.get("index")
+        if not isinstance(index, int) or isinstance(index, bool) or not 0 <= index < series_len:
+            raise ManifestError(f"{marker_field}.index must be an integer within [0, {series_len})")
+        tone = marker.get("tone", "accent")
+        if tone not in CALLOUT_TONES:
+            raise ManifestError(f"{marker_field}.tone must be one of {sorted(CALLOUT_TONES)}")
+        position = marker.get("position", "above")
+        if position not in {"above", "below"}:
+            raise ManifestError(f"{marker_field}.position must be 'above' or 'below'")
+        markers.append(
+            {
+                "index": index,
+                "label": _require_text(marker.get("label"), f"{marker_field}.label", maximum=12),
+                "tone": tone,
+                "position": position,
+            }
+        )
+    visual["markers"] = markers
+
+
+def _presenter_overlap_warnings(
+    presenter: dict[str, Any], scenes: list[dict[str, Any]], width: int
+) -> list[str]:
+    """立绘硬车道保证零重叠：内容列被挤没（<=0）直接报错，只是偏窄则给出布局建议。"""
+    scale = float(presenter.get("scale", 1.0))
+    lane_px = int(PRESENTER_LANE_WIDTH * scale + 0.999)  # ceil，与 TS 侧 presenterLanePx 一致
+    content_px = width - CONTENT_SIDE_PADDING - (PRESENTER_EDGE_INSET + lane_px + PRESENTER_LANE_GAP)
+    if content_px <= 0:
+        # 极端组合（窄画布 + 大 scale）下内容列被立绘车道挤没，渲染必炸，直接拒绝。
+        raise ManifestError(
+            f"content column has no room left ({content_px}px at width={width} with presenter "
+            f"scale={scale:g}): reduce presenter.scale, increase width, or hide the presenter per scene"
+        )
+    warnings: list[str] = []
+    for scene in scenes:
+        override = scene.get("presenter") or {}
+        if override.get("visible") is False:
+            continue
+        visual = scene.get("visual") or {}
+        visual_type = visual.get("type")
+        if visual_type == "candlestick":
+            warnings.append(
+                f"scenes[{scene['id']}]: candlestick 与立绘同屏时图表仅约 {content_px}px 宽，"
+                '建议该场景 presenter: {"visible": false} 用满全宽'
+            )
+        elif visual_type == "quote" and len(str(visual.get("quote") or "")) > 60:
+            warnings.append(
+                f"scenes[{scene['id']}]: 长引用（>60 字）与立绘同屏会排得过挤，"
+                '建议该场景 presenter: {"visible": false}'
+            )
+        elif visual_type == "stat" and len(str(visual.get("value") or "")) > 8:
+            warnings.append(
+                f"scenes[{scene['id']}]: stat 值超过 8 字符，与立绘同屏时字号会被压缩，"
+                "建议缩短 value 或隐藏立绘"
+            )
+    return warnings
+
+
+def normalize_manifest(raw: Any, *, library_root: Path | None = None) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise ManifestError("manifest root must be an object")
     title = _require_text(raw.get("title"), "title", maximum=100)
@@ -94,28 +343,57 @@ def normalize_manifest(raw: Any) -> dict[str, Any]:
     elif duration_tolerance is not None:
         raise ManifestError("durationToleranceSec requires targetDurationSec")
 
-    voice_raw = raw.get("voice") or {}
+    domain_raw = raw.get("domain", "general")
+    if domain_raw is None:
+        domain = "general"
+    elif isinstance(domain_raw, str):
+        domain = domain_raw.strip() or "general"
+    else:
+        raise ManifestError("domain must be a string or null")
+    if domain not in DOMAINS:
+        raise ManifestError(f"domain must be one of {sorted(DOMAINS)}")
+
+    presenter = None
+    if raw.get("presenter") is not None:
+        presenter = _load_presenter(raw["presenter"], _resolve_library_root(library_root))
+
+    voice_raw = raw.get("voice")
+    voice_inherited = voice_raw is None and presenter is not None and bool(presenter.get("voice"))
+    if voice_inherited:
+        # 角色包自带音色：manifest 不显式指定 voice 时继承，让虚拟 IP 声音稳定。
+        voice_raw = presenter["voice"]
+    voice_raw = voice_raw or {}
     if not isinstance(voice_raw, dict):
         raise ManifestError("voice must be an object")
-    voice = {
-        "name": _require_text(voice_raw.get("name", "zh-CN-XiaoxiaoNeural"), "voice.name", maximum=100),
-        "rate": voice_raw.get("rate", "+0%"),
-        "volume": voice_raw.get("volume", "+0%"),
-        "pitch": voice_raw.get("pitch", "+0Hz"),
-    }
-    if not isinstance(voice["rate"], str) or not PROSODY_RE.fullmatch(voice["rate"]):
-        raise ManifestError("voice.rate must look like +5% or -10%")
-    if not isinstance(voice["volume"], str) or not PROSODY_RE.fullmatch(voice["volume"]):
-        raise ManifestError("voice.volume must look like +0% or -10%")
-    if not isinstance(voice["pitch"], str) or not PITCH_RE.fullmatch(voice["pitch"]):
-        raise ManifestError("voice.pitch must look like +0Hz or -10Hz")
+    try:
+        voice = {
+            "name": _require_text(voice_raw.get("name", "zh-CN-XiaoyiNeural"), "voice.name", maximum=100),
+            "rate": voice_raw.get("rate", "+0%"),
+            "volume": voice_raw.get("volume", "+0%"),
+            "pitch": voice_raw.get("pitch", "+0Hz"),
+        }
+        if not isinstance(voice["rate"], str) or not PROSODY_RE.fullmatch(voice["rate"]):
+            raise ManifestError("voice.rate must look like +5% or -10%")
+        if not isinstance(voice["volume"], str) or not PROSODY_RE.fullmatch(voice["volume"]):
+            raise ManifestError("voice.volume must look like +0% or -10%")
+        if not isinstance(voice["pitch"], str) or not PITCH_RE.fullmatch(voice["pitch"]):
+            raise ManifestError("voice.pitch must look like +0Hz or -10Hz")
+    except ManifestError as exc:
+        if voice_inherited:
+            # 报错要指向真正的修改位置：这个 voice 来自 presenter 的 character.json，
+            # 不是 manifest 里显式写的。
+            raise ManifestError(
+                f"{exc} (inherited from presenter character.json — fix the voice "
+                "object in the presenter's character.json, not the manifest)"
+            ) from None
+        raise
 
     theme_raw = raw.get("theme") or {}
     if not isinstance(theme_raw, dict):
         raise ManifestError("theme must be an object")
-    theme = {**DEFAULT_THEME, **theme_raw}
+    theme = {**DEFAULT_THEME, **DOMAIN_THEMES.get(domain, {}), **theme_raw}
     for key, color in theme.items():
-        if key not in DEFAULT_THEME:
+        if key not in THEME_FIELDS:
             raise ManifestError(f"unknown theme field: {key}")
         if not isinstance(color, str) or not COLOR_RE.fullmatch(color):
             raise ManifestError(f"theme.{key} must be a six-digit hex color")
@@ -157,15 +435,50 @@ def normalize_manifest(raw: Any) -> dict[str, Any]:
             if not isinstance(attribution, str) or len(attribution.strip()) > 80:
                 raise ManifestError(f"{field}.visual.attribution must be a string with at most 80 characters")
             visual["attribution"] = attribution.strip()
-        scenes.append(
-            {
-                "id": scene_id,
-                "narration": narration,
-                "headline": headline,
-                "body": body.strip(),
-                "visual": visual,
-            }
-        )
+        elif visual_type == "candlestick":
+            series_len = _normalize_candlestick(visual, visual_raw, field)
+            _normalize_markers(visual, visual_raw, field, series_len)
+        callouts_raw = item.get("callouts")
+        callouts: list[dict[str, Any]] = []
+        if callouts_raw is not None:
+            if not isinstance(callouts_raw, list) or not 1 <= len(callouts_raw) <= 3:
+                raise ManifestError(f"{field}.callouts must contain between 1 and 3 items")
+            for callout_index, callout in enumerate(callouts_raw):
+                callout_field = f"{field}.callouts[{callout_index}]"
+                if not isinstance(callout, dict):
+                    raise ManifestError(f"{callout_field} must be an object")
+                tone = callout.get("tone", "accent")
+                if tone not in CALLOUT_TONES:
+                    raise ManifestError(f"{callout_field}.tone must be one of {sorted(CALLOUT_TONES)}")
+                callouts.append(
+                    {"text": _require_text(callout.get("text"), f"{callout_field}.text", maximum=12), "tone": tone}
+                )
+        scene_presenter_raw = item.get("presenter")
+        scene_presenter: dict[str, Any] | None = None
+        if scene_presenter_raw is not None:
+            if presenter is None:
+                raise ManifestError(f"{field}.presenter requires a top-level presenter")
+            if not isinstance(scene_presenter_raw, dict):
+                raise ManifestError(f"{field}.presenter must be an object")
+            visible = scene_presenter_raw.get("visible", True)
+            if not isinstance(visible, bool):
+                raise ManifestError(f"{field}.presenter.visible must be a boolean")
+            pose = scene_presenter_raw.get("pose")
+            if pose is not None and (not isinstance(pose, str) or pose not in presenter["poses"]):
+                raise ManifestError(f"{field}.presenter.pose must be one of {sorted(presenter['poses'])}")
+            scene_presenter = {"pose": pose, "visible": visible}
+        scene: dict[str, Any] = {
+            "id": scene_id,
+            "narration": narration,
+            "headline": headline,
+            "body": body.strip(),
+            "visual": visual,
+        }
+        if callouts:
+            scene["callouts"] = callouts
+        if scene_presenter is not None:
+            scene["presenter"] = scene_presenter
+        scenes.append(scene)
 
     summary_raw = raw.get("summary", "")
     if summary_raw is None:
@@ -196,23 +509,30 @@ def normalize_manifest(raw: Any) -> dict[str, Any]:
         "durationToleranceSec": float(duration_tolerance) if duration_tolerance is not None else None,
         "language": language,
         "sourceUrl": source_url,
+        "domain": domain,
         "voice": voice,
         "theme": theme,
         "scenes": scenes,
     }
+    if presenter is not None:
+        # voice 只用于 TTS 继承，不进 timeline/渲染侧。
+        result["presenter"] = {key: value for key, value in presenter.items() if key != "voice"}
+        warnings = _presenter_overlap_warnings(presenter, scenes, width)
+        if warnings:
+            result["warnings"] = warnings
     if len(result["summary"]) > 200:
         raise ManifestError("summary must be at most 200 characters")
     return result
 
 
-def load_manifest(path: Path) -> dict[str, Any]:
+def load_manifest(path: Path, *, library_root: Path | None = None) -> dict[str, Any]:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
         raise ManifestError(f"manifest not found: {path}") from exc
     except json.JSONDecodeError as exc:
         raise ManifestError(f"manifest is not valid JSON: {exc}") from exc
-    return normalize_manifest(raw)
+    return normalize_manifest(raw, library_root=library_root)
 
 
 def _parse_timestamp(value: str) -> int:
@@ -465,31 +785,115 @@ def build_timeline(
             combined.append(global_item)
             captions.append({"text": global_item.text, "startMs": global_item.start_ms, "endMs": global_item.end_ms})
         offset += duration_ms
-    return {
+    timeline = {
         "title": manifest["title"],
         "summary": manifest["summary"],
         "width": manifest["width"],
         "height": manifest["height"],
         "fps": manifest["fps"],
         "totalDurationMs": offset,
+        "domain": manifest.get("domain", "general"),
         "theme": manifest["theme"],
+        # 立绘硬车道几何注入（单源在本文件顶部常量）：渲染侧 resolveLayout 直接消费，
+        # validate 的 _presenter_overlap_warnings 也用同一组值，三处永不漂移。
+        "layout": {
+            "presenterLaneWidth": PRESENTER_LANE_WIDTH,
+            "presenterLaneGap": PRESENTER_LANE_GAP,
+            "presenterEdgeInset": PRESENTER_EDGE_INSET,
+            "contentSidePadding": CONTENT_SIDE_PADDING,
+        },
         "scenes": scenes,
         "captions": captions,
         "_combinedSubtitles": combined,
     }
+    if manifest.get("presenter"):
+        timeline["presenter"] = manifest["presenter"]
+    return timeline
 
 
-def _run_command(command: list[str], *, cwd: Path) -> None:
+def stage_assets(manifest: dict[str, Any], output_dir: Path, *, library_root: Path | None = None) -> None:
+    """把资产库里的 presenter 立绘铺到 work/public/ 下，供渲染时通过 HTTP 访问。
+
+    poses 的值形如 presenters/<id>/poses/<name>.png，本身就是相对库根的路径。
+    优先硬链接（同盘零拷贝），跨设备时回退 copy2。validate 已确认姿势文件存在。
+    """
+    presenter = manifest.get("presenter")
+    if not presenter:
+        return
+    root = _resolve_library_root(library_root)
+    for public_rel in presenter["poses"].values():
+        src = root / public_rel
+        dst = output_dir / "work" / "public" / public_rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.unlink(missing_ok=True)
+        try:
+            os.link(src, dst)
+        except OSError:
+            shutil.copy2(src, dst)
+
+
+def _run_command(command: list[str], *, cwd: Path, timeout: float) -> None:
     # 捕获 stderr，失败时把 Node/Open Motion/pnpm 的诊断写进 run-status.json，
     # 否则只留 "non-zero exit status 1"，agent 无法定位渲染失败原因。
-    completed = subprocess.run(command, cwd=cwd, check=False, capture_output=True, text=True)
-    if completed.returncode != 0:
-        stderr = completed.stderr.strip()
-        detail = f"\nstderr:\n{stderr}" if stderr else ""
-        raise RuntimeError(f"command failed ({' '.join(command)}): exit {completed.returncode}{detail}")
+    # timeout 必传：渲染器内部（Playwright / Chromium / 本地 http server）任一环节
+    # 挂死时必须超时终止，否则整条流水线无限期等待，且不留任何诊断。
+    # 显式 encoding/errors 代替 text=True：后者跟随 locale（如 POSIX C locale 下按
+    # ASCII 解码）遇到非 ASCII 输出直接 UnicodeDecodeError 崩溃。
+    # 新会话/新进程组：渲染会 fork 出 Chromium 多代子进程，超时必须杀整个进程组，
+    # 只杀父进程会留下孤儿 Chromium 继续吃 CPU/内存。
+    popen_kwargs: dict[str, Any] = {}
+    if os.name == "nt":
+        popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        popen_kwargs["start_new_session"] = True
+    process = subprocess.Popen(
+        command,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        encoding="utf-8",
+        errors="replace",
+        **popen_kwargs,
+    )
+    try:
+        _, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        # POSIX：SIGKILL 整个进程组（start_new_session 让渲染进程自成组长）；
+        # 进程组已消失/无权限时容错退回只杀父进程，再 communicate() 收尸回收管道。
+        if os.name == "nt":
+            process.kill()
+        else:
+            try:
+                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                process.kill()
+        try:
+            process.communicate(timeout=30)
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+        # TimeoutExpired 的 stderr 是超时前已捕获的部分输出，保留它才能看出卡在哪一步。
+        # 注意：即使传了 encoding，超时路径给回来的仍是 bytes（CPython 不在该路径解码），
+        # 所以必须自己解码，否则这段诊断会被静默丢掉。
+        raw = exc.stderr
+        if isinstance(raw, (bytes, bytearray)):
+            raw = raw.decode("utf-8", errors="replace")
+        partial = (raw or "").strip()
+        detail = f"\npartial stderr:\n{partial}" if partial else ""
+        raise RuntimeError(
+            f"command timed out after {timeout:.0f}s ({' '.join(command)}){detail}"
+        ) from exc
+    if process.returncode != 0:
+        detail = f"\nstderr:\n{stderr.strip()}" if stderr and stderr.strip() else ""
+        raise RuntimeError(f"command failed ({' '.join(command)}): exit {process.returncode}{detail}")
     # pnpm/node 正常输出走 stderr（进度日志），透传给上层日志，不静默吞掉。
-    if completed.stderr.strip():
-        sys.stderr.write(completed.stderr)
+    if stderr and stderr.strip():
+        sys.stderr.write(stderr)
+
+
+# pnpm install（含首次拉取 Playwright Chromium）与整轮渲染的上限。渲染侧
+# renderFrames 自带 600s 帧捕获超时，外层留足 vite build + ffmpeg 编码的余量。
+INSTALL_TIMEOUT_SEC = 1800.0
+RENDER_TIMEOUT_SEC = 3600.0
 
 
 def ensure_renderer(template_dir: Path) -> None:
@@ -497,12 +901,26 @@ def ensure_renderer(template_dir: Path) -> None:
         raise RuntimeError("Node.js and pnpm are required to render the video")
     marker = template_dir / "node_modules" / "@open-motion" / "core" / "package.json"
     if not marker.exists():
-        _run_command(["pnpm", "install", "--ignore-workspace", "--frozen-lockfile"], cwd=template_dir)
+        _run_command(
+            ["pnpm", "install", "--ignore-workspace", "--frozen-lockfile"],
+            cwd=template_dir,
+            timeout=INSTALL_TIMEOUT_SEC,
+        )
 
 
-def render_video(template_dir: Path, render_dir: Path, timeline_path: Path, public_dir: Path) -> None:
+def render_video(
+    template_dir: Path,
+    render_dir: Path,
+    timeline_path: Path,
+    public_dir: Path,
+    *,
+    target_duration_sec: float = 0.0,
+) -> None:
     ensure_renderer(template_dir)
     render_dir.mkdir(parents=True, exist_ok=True)
+    # 渲染超时随片长伸缩：长片按 6× 目标时长取上限（1800s 长片 → 10800s），
+    # 短片仍以 RENDER_TIMEOUT_SEC 兜底；pnpm install 超时保持不变（ensure_renderer 内）。
+    timeout = max(RENDER_TIMEOUT_SEC, int(target_duration_sec * 6))
     _run_command(
         [
             "node",
@@ -514,6 +932,7 @@ def render_video(template_dir: Path, render_dir: Path, timeline_path: Path, publ
             str(public_dir),
         ],
         cwd=template_dir,
+        timeout=timeout,
     )
 
 
@@ -606,6 +1025,8 @@ def enforce_target_duration(manifest: dict[str, Any], timeline: dict[str, Any]) 
 
 def run_pipeline(manifest_path: Path, output_dir: Path) -> dict[str, Any]:
     manifest = load_manifest(manifest_path)
+    for warning in manifest.get("warnings", []):
+        print(f"WARNING: {warning}", file=sys.stderr)
     output_dir.mkdir(parents=True, exist_ok=True)
     run_id = f"{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
     previous_outputs = _archive_published_outputs(output_dir, run_id)
@@ -617,6 +1038,7 @@ def run_pipeline(manifest_path: Path, output_dir: Path) -> dict[str, Any]:
     try:
         normalized_manifest_path = output_dir / "manifest.json"
         _write_json_atomic(normalized_manifest_path, manifest)
+        stage_assets(manifest, output_dir)
         artifacts = synthesize_scenes(manifest, output_dir)
         timeline = build_timeline(manifest, artifacts)
         combined = timeline.pop("_combinedSubtitles")
@@ -627,7 +1049,16 @@ def run_pipeline(manifest_path: Path, output_dir: Path) -> dict[str, Any]:
 
         render_dir = output_dir / "work" / "render-runs" / run_id
         template_dir = Path(__file__).resolve().parent.parent / "assets" / "open-motion-template"
-        render_video(template_dir, render_dir, timeline_path, output_dir / "work" / "public")
+        # 渲染超时按片长伸缩：优先用 manifest 校验过的 targetDurationSec，
+        # 未设目标时长则用 timeline 实际总时长兜底。
+        target_duration_sec = manifest["targetDurationSec"] or timeline["totalDurationMs"] / 1000
+        render_video(
+            template_dir,
+            render_dir,
+            timeline_path,
+            output_dir / "work" / "public",
+            target_duration_sec=target_duration_sec,
+        )
         report = verify_outputs(render_dir, timeline)
         staged_archive = package_deliverables(
             output_dir,
@@ -659,6 +1090,10 @@ def run_pipeline(manifest_path: Path, output_dir: Path) -> dict[str, Any]:
         _write_json_atomic(status_path, {"status": "ok", "runId": run_id, **result})
         return result
     except Exception as exc:
+        # 本次 run 的渲染目录里只有半成品（成功产物在成功路径已 replace 到 output_dir
+        # 根），best-effort 清掉防止 render-runs 堆积垃圾；共享缓存（tts-cache/public/
+        # previous-runs）不动，只清本次 run_id 的目录。
+        shutil.rmtree(output_dir / "work" / "render-runs" / run_id, ignore_errors=True)
         _write_json_atomic(
             status_path,
             {
@@ -687,12 +1122,15 @@ def main() -> int:
     try:
         if args.command == "validate":
             manifest = load_manifest(args.manifest)
+            for warning in manifest.get("warnings", []):
+                print(f"WARNING: {warning}", file=sys.stderr)
             result = {
                 "status": "ok",
                 "title": manifest["title"],
                 "sceneCount": len(manifest["scenes"]),
                 "targetDurationSec": manifest["targetDurationSec"],
                 "durationToleranceSec": manifest["durationToleranceSec"],
+                "warnings": manifest.get("warnings", []),
             }
         else:
             result = run_pipeline(args.manifest.resolve(), args.output_dir.expanduser().resolve())

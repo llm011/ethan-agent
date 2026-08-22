@@ -7,6 +7,7 @@ import {
   fetchSessions, SessionInfo,
 } from "@/lib/api";
 import { Badge } from "@ethan/shared/ui/badge";
+import { HeaderFillet } from "@/components/header-fillet";
 import { Button } from "@ethan/shared/ui/button";
 import { ScrollArea } from "@ethan/shared/ui/scroll-area";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@ethan/shared/ui/card";
@@ -411,7 +412,8 @@ export function ScheduleView() {
         onConfirm={doEditPrompt}
         onCancel={() => setPromptDialog({ open: false, id: "", currentPrompt: "" })}
       />
-      <header className="h-12 border-b border-border flex items-center px-4 justify-between shrink-0">
+      <header className="relative h-12 border-b border-border bg-sidebar flex items-center px-4 justify-between shrink-0">
+        <HeaderFillet />
         <h1 className="font-semibold text-lg">定时任务 (Schedules)</h1>
         <div className="flex items-center gap-2">
           {/* View mode switch: today / all */}

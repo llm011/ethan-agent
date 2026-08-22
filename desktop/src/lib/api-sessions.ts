@@ -11,6 +11,7 @@ export interface SessionInfo {
   snippet?: string;
   source?: string;
   mode?: string;
+  pinned_at?: number;
 }
 
 export interface SessionDetail {
@@ -98,6 +99,13 @@ export async function unpinSession(id: string): Promise<void> {
   if (!res.ok) throw new Error("Failed to unpin session");
 }
 
+export async function fetchPinnedSessions(): Promise<SessionInfo[]> {
+  const res = await fetch(`${getApiUrl()}/sessions/pinned`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed to fetch pinned sessions");
+  const data = await res.json();
+  return data.sessions as SessionInfo[];
+}
+
 export async function regenSessionTitle(id: string): Promise<string | null> {
   const res = await fetch(`${getApiUrl()}/sessions/${id}/regen-title`, {
     method: "POST",
@@ -143,6 +151,16 @@ export async function deleteSession(id: string): Promise<void> {
 export async function deleteMessage(sessionId: string, messageId: number): Promise<void> {
   const res = await fetch(`${getApiUrl()}/sessions/${sessionId}/messages/${messageId}`, { method: "DELETE", headers: headers() });
   if (!res.ok) throw new Error("Delete message failed");
+}
+
+/** 编辑消息正文（阅读模式编辑）。后续对话上下文使用编辑后的版本。 */
+export async function updateMessage(sessionId: string, messageId: number, content: string): Promise<void> {
+  const res = await fetch(`${getApiUrl()}/sessions/${sessionId}/messages/${messageId}`, {
+    method: "PATCH",
+    headers: { ...headers(), "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+  if (!res.ok) throw new Error("Update message failed");
 }
 
 export async function fetchMessageIntermediate(sessionId: string, messageId: number): Promise<string> {

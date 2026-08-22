@@ -71,9 +71,12 @@ fun AppDrawerContent(
     onNavigate: (String) -> Unit,
     onClose: () -> Unit,
 ) {
-    // 分组：最近对话(非定时非心跳)、定时任务对话、心跳对话
+    // 分组：置顶、最近对话(非定时非心跳非置顶)、定时任务对话、心跳对话
+    val pinnedSessions = remember(sessions) {
+        sessions.filter { it.pinnedAt > 0 }.sortedByDescending { it.pinnedAt }
+    }
     val recentSessions = remember(sessions) {
-        sessions.filter { it.source != "scheduled" && it.source != "heartbeat" }.take(5)
+        sessions.filter { it.source != "scheduled" && it.source != "heartbeat" && it.pinnedAt == 0L }.take(5)
     }
     val scheduledSessions = remember(sessions) {
         sessions.filter { it.source == "scheduled" }.take(5)
@@ -139,6 +142,18 @@ fun AppDrawerContent(
             }
 
             Spacer(Modifier.height(8.dp))
+
+            // 置顶对话 — 独立分组，默认展开
+            if (pinnedSessions.isNotEmpty()) {
+                CollapsibleSessionGroup(
+                    title = "置顶",
+                    sessions = pinnedSessions,
+                    unreadCount = pinnedSessions.count { it.id in unreadSessionIds },
+                    unreadSessionIds = unreadSessionIds,
+                    defaultExpanded = true,
+                    onSessionClick = { id -> onSessionClick(id); onClose() },
+                )
+            }
 
             // 最新对话 — 默认展开
             CollapsibleSessionGroup(

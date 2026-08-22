@@ -7,7 +7,14 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from "@open-motion/core";
-import type {Scene, VideoTimeline, Visual} from "./types";
+import type {Scene, VideoTimeline, Visual, Theme} from "./types";
+import {CAPTION_BOTTOM_PX, CAPTION_MIN_HEIGHT_PX, presenterLanePx, resolveLayout} from "./types";
+import {CalloutLayer} from "./components/CalloutLayer";
+import {CandlestickChart} from "./components/CandlestickChart";
+import {PresenterLayer} from "./components/PresenterLayer";
+
+// ⚠️ 帧驱动动画不变量：渲染器通过时间劫持 mock Date/rAF，CSS transition/animation
+// 走墙钟不可控 —— 本文件及 components/ 下所有动画必须用 interpolate/spring/useCurrentFrame。
 
 // Open Motion does not export AbsoluteFill — define inline
 const AbsoluteFill: React.FC<{style?: React.CSSProperties; children?: React.ReactNode}> = ({style, children}) => (
@@ -159,12 +166,14 @@ const panel: React.CSSProperties = {
   boxSizing: "border-box" as const,
 };
 
-const VisualContent: React.FC<{visual: Visual; primary: string; secondary: string; text: string}> = ({
-  visual,
-  primary,
-  secondary,
-  text,
-}) => {
+const VisualContent: React.FC<{
+  visual: Visual;
+  theme: Theme;
+  sceneId: string;
+  sceneFrames: number;
+  withPresenter?: boolean;
+}> = ({visual, theme, sceneId, sceneFrames, withPresenter = false}) => {
+  const {primary, secondary, text} = theme;
   const frame = useCurrentFrame();
   const {fps} = useVideoConfig();
   const enter = spring({frame, fps, config: {damping: 16, stiffness: 120}});
@@ -173,15 +182,27 @@ const VisualContent: React.FC<{visual: Visual; primary: string; secondary: strin
     transform: `translateY(${interpolate(frame, [index * 6, index * 6 + 12], [28, 0], clamp)}px)`,
   });
 
+  if (visual.type === "candlestick") {
+    return (
+      <div style={{transform: `scale(${0.92 + enter * 0.08})`, opacity: enter}}>
+        <CandlestickChart visual={visual} theme={theme} sceneId={sceneId} sceneFrames={sceneFrames} />
+      </div>
+    );
+  }
+
   if (visual.type === "stat") {
     // Dynamically size stat value: shorter text → bigger font, longer text → smaller font
-    // 1080px container, padding 78px each side → ~924px usable width
+    // 无立绘：内容宽约 924px；有立绘：硬车道后内容列约 508px，字号整体降一档
     const valueLen = (visual.value || "").length;
-    const statFontSize = valueLen <= 4 ? 170 : valueLen <= 8 ? 130 : valueLen <= 12 ? 100 : valueLen <= 16 ? 80 : 60;
+    const statFontSize = withPresenter
+      ? valueLen <= 4 ? 120 : valueLen <= 8 ? 96 : valueLen <= 12 ? 76 : valueLen <= 16 ? 60 : 46
+      : valueLen <= 4 ? 170 : valueLen <= 8 ? 130 : valueLen <= 12 ? 100 : valueLen <= 16 ? 80 : 60;
     return (
-      <div style={{textAlign: "center", transform: `scale(${0.86 + enter * 0.14})`}}>
-        <div style={{fontSize: statFontSize, lineHeight: 1, fontWeight: 900, color: primary, whiteSpace: "nowrap"}}>{visual.value}</div>
-        <div style={{fontSize: 42, marginTop: 28, color: text, opacity: 0.8}}>{visual.label}</div>
+      <div style={{textAlign: "center", transform: `scale(${0.86 + enter * 0.14})`, maxWidth: "100%"}}>
+        {/* nowrap 的大字号数值会溢出内容列画进立绘车道（立绘 zIndex 更高会盖住）：
+            在内容列边界截断 + 省略号，保住"硬车道零遮挡"承诺 */}
+        <div style={{fontSize: statFontSize, lineHeight: 1, fontWeight: 900, color: primary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%"}}>{visual.value}</div>
+        <div style={{fontSize: withPresenter ? 34 : 42, marginTop: 28, color: text, opacity: 0.8}}>{visual.label}</div>
       </div>
     );
   }
@@ -189,9 +210,9 @@ const VisualContent: React.FC<{visual: Visual; primary: string; secondary: strin
   if (visual.type === "quote") {
     return (
       <div style={{...panel, background: "rgba(255,255,255,0.055)", transform: `scale(${0.94 + enter * 0.06})`}}>
-        <div style={{fontSize: 96, color: primary, lineHeight: 0.6}}>"</div>
-        <div style={{fontSize: 48, lineHeight: 1.45, fontWeight: 650, color: text}}>{visual.quote}</div>
-        {visual.attribution ? <div style={{fontSize: 30, marginTop: 30, color: secondary}}>— {visual.attribution}</div> : null}
+        <div style={{fontSize: withPresenter ? 72 : 96, color: primary, lineHeight: 0.6}}>"</div>
+        <div style={{fontSize: withPresenter ? 36 : 48, lineHeight: 1.45, fontWeight: 650, color: text}}>{visual.quote}</div>
+        {visual.attribution ? <div style={{fontSize: withPresenter ? 26 : 30, marginTop: 30, color: secondary}}>— {visual.attribution}</div> : null}
       </div>
     );
   }
@@ -229,21 +250,45 @@ const VisualContent: React.FC<{visual: Visual; primary: string; secondary: strin
 const SceneView: React.FC<{scene: Scene; timeline: VideoTimeline; index: number}> = ({scene, timeline, index}) => {
   const frame = useCurrentFrame();
   const {fps} = useVideoConfig();
-  const fade = interpolate(frame, [0, 9, Math.max(10, (scene.durationMs / 1000) * fps - 9), (scene.durationMs / 1000) * fps], [0, 1, 1, 0], clamp);
+  const sceneFrames = Math.max(1, Math.ceil((scene.durationMs / 1000) * fps));
+  const fade = interpolate(frame, [0, 9, Math.max(10, sceneFrames - 9), sceneFrames], [0, 1, 1, 0], clamp);
   const rise = interpolate(frame, [0, 18], [44, 0], clamp);
   const {theme} = timeline;
+  // 有立绘时内容列让出立绘硬车道：车道侧 padding 加大到 边缘间距+车道宽+留白，
+  // 车道内的立绘（CSS 双轴 contain，与姿势图宽高比无关）与内容列永不相交。
+  // 布局几何单源在 video_pipeline.py（timeline.layout 注入），resolveLayout 负责回退。
+  const layout = resolveLayout(timeline);
+  const withPresenter = Boolean(timeline.presenter) && scene.presenter?.visible !== false;
+  const lanePad = withPresenter
+    ? layout.presenterEdgeInset + presenterLanePx(layout.presenterLaneWidth, timeline.presenter!.scale) + layout.presenterLaneGap
+    : layout.contentSidePadding;
+  const padLeft = withPresenter && timeline.presenter!.position === "left" ? lanePad : layout.contentSidePadding;
+  const padRight = withPresenter && timeline.presenter!.position !== "left" ? lanePad : layout.contentSidePadding;
 
   return (
-    <AbsoluteFill style={{opacity: fade, padding: "108px 78px 280px", color: theme.text, overflow: "hidden", boxSizing: "border-box"}}>
+    <AbsoluteFill style={{opacity: fade, padding: `108px ${padRight}px 280px ${padLeft}px`, color: theme.text, overflow: "hidden", boxSizing: "border-box"}}>
       <div style={{fontSize: 25, letterSpacing: 5, color: theme.primary, fontWeight: 800}}>
         {String(index + 1).padStart(2, "0")} / {String(timeline.scenes.length).padStart(2, "0")}
       </div>
-      <h1 style={{fontSize: 74, lineHeight: 1.12, margin: "34px 0 22px", transform: `translateY(${rise}px)`, maxWidth: 920}}>
+      <h1
+        style={{
+          fontSize: withPresenter ? 62 : 74,
+          lineHeight: 1.12,
+          margin: "34px 0 22px",
+          transform: `translateY(${rise}px)`,
+          maxWidth: withPresenter ? 620 : 920,
+        }}
+      >
         {scene.headline}
       </h1>
-      {scene.body ? <p style={{fontSize: 34, lineHeight: 1.5, margin: 0, opacity: 0.72, maxWidth: 900}}>{renderFormula(scene.body)}</p> : null}
-      <div style={{flex: 1, display: "flex", alignItems: "center", justifyContent: "center", marginTop: 44}}>
-        <VisualContent visual={scene.visual} primary={theme.primary} secondary={theme.secondary} text={theme.text} />
+      {scene.body ? (
+        <p style={{fontSize: withPresenter ? 30 : 34, lineHeight: 1.5, margin: 0, opacity: 0.72, maxWidth: withPresenter ? 620 : 900}}>
+          {renderFormula(scene.body)}
+        </p>
+      ) : null}
+      {scene.callouts && scene.callouts.length > 0 ? <CalloutLayer callouts={scene.callouts} theme={theme} /> : null}
+      <div style={{flex: 1, display: "flex", alignItems: "center", justifyContent: withPresenter ? "flex-start" : "center", marginTop: 44, maxWidth: withPresenter ? 640 : undefined}}>
+        <VisualContent visual={scene.visual} theme={theme} sceneId={scene.id} sceneFrames={sceneFrames} withPresenter={withPresenter} />
       </div>
     </AbsoluteFill>
   );
@@ -278,7 +323,9 @@ export const ArticleVideo: React.FC<VideoTimeline> = (timeline) => {
           </Sequence>
         );
       })}
-      <div style={{position: "absolute", left: 58, right: 58, bottom: 72, minHeight: 122, display: "flex", alignItems: "center", justifyContent: "center"}}>
+      {/* 虚拟人立绘：挂在根上（不进 Sequence），呼吸浮动跨场景连续；字幕之上、内容之下由 zIndex 控制 */}
+      {timeline.presenter ? <PresenterLayer presenter={timeline.presenter} scenes={timeline.scenes} layout={resolveLayout(timeline)} /> : null}
+      <div style={{position: "absolute", left: 58, right: 58, bottom: CAPTION_BOTTOM_PX, minHeight: CAPTION_MIN_HEIGHT_PX, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10}}>
         {caption ? (
           <div style={{background: "rgba(3,8,18,0.86)", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 26, padding: "18px 30px", color: theme.text, fontSize: 32, lineHeight: 1.4, fontWeight: 600, textAlign: "center", maxWidth: "85%", boxShadow: "0 18px 60px rgba(0,0,0,0.4)"}}>
             {caption.text}

@@ -10,6 +10,7 @@ import kotlinx.serialization.Serializable
  * - repeat: none / daily / weekly
  * - weekdays: ISO 1=周一 … 7=周日（仅 weekly）
  * - status: pending / fired / missed / done
+ * - completion: not_started / partial / done / abandoned（完成度，与 status 独立）
  * - next_run_time: ISO 8601（含时区偏移），仅 pending 时由 GET /agenda 附加
  */
 @Serializable
@@ -21,6 +22,7 @@ data class AgendaEvent(
     val repeat: String = "none",
     val weekdays: List<Int> = emptyList(),
     val status: String = "pending",
+    val completion: String = "not_started",
     @SerialName("next_run_time") val nextRunTime: String? = null,
     @SerialName("created_at") val createdAt: String = "",
     @SerialName("updated_at") val updatedAt: String = "",
@@ -48,6 +50,8 @@ data class AgendaPatchRequest(
     val repeat: String? = null,
     val weekdays: List<Int>? = null,
     val note: String? = null,
+    /** 完成度：not_started / partial / done / abandoned */
+    val completion: String? = null,
 )
 
 @Serializable

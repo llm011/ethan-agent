@@ -14,22 +14,44 @@
 | `durationToleranceSec` | 否 | 允许误差，默认目标时长的 10%，最少 2 秒 |
 | `language` | 否 | 默认 `zh-CN` |
 | `sourceUrl` | 否 | URL 输入的原始链接 |
-| `voice` | 否 | Edge TTS 参数 |
+| `voice` | 否 | Edge TTS 参数；配了 `presenter` 且省略时继承角色包音色 |
 | `theme` | 否 | 颜色主题 |
+| `domain` | 否 | `general`（默认）/ `finance` / `paper`，决定主题底色与可用视觉 |
+| `presenter` | 否 | 虚拟人立绘配置（引用资产库角色包） |
 | `scenes` | 是 | 1–50 个场景 |
 
 `voice`：
 
 ```json
 {
-  "name": "zh-CN-XiaoxiaoNeural",
+  "name": "zh-CN-XiaoyiNeural",
   "rate": "+5%",
   "volume": "+0%",
   "pitch": "+0Hz"
 }
 ```
 
-`theme` 支持 `background`、`surface`、`primary`、`secondary`、`text` 六位十六进制颜色，未知字段会校验失败。只需填入要覆盖的字段。
+`theme` 支持 `background`、`surface`、`primary`、`secondary`、`text` 以及可选的 `accent`（强调色，callout 默认底色）、`positive` / `negative`（金融域约定红涨绿跌）六位十六进制颜色，未知字段会校验失败。只需填入要覆盖的字段。合并优先级：内置默认 ← `domain` 主题 ← 用户 `theme`。
+
+`domain` 主题：`finance` = 深蓝底 + 金色主色（`positive` 红 / `negative` 绿，A 股约定）；`paper` = 紫色系；`general` = 内置默认。
+
+`presenter`（虚拟人立绘，引用 `~/.ethan/assets/library/presenters/<id>/`，制作流程见 `presenter-guide.md`）：
+
+```json
+{
+  "id": "xiaoyu",
+  "position": "right",
+  "scale": 1.0,
+  "defaultPose": "standing"
+}
+```
+
+- `id`：kebab-case，必须已在资产库中且 `status == "ready"`，否则 validate 报错并给出 `presenter_gen.py` 修复命令
+- `position`：`right`（默认）/ `left`
+- `scale`：0.6–1.4，默认 1.0
+- `defaultPose`：必须是角色包里已有的姿势名（默认 `standing`）
+
+**立绘布局是硬车道分离**：presenter 可见时，立绘被 CSS 约束在屏幕边缘 `ceil(440 × scale)` px 宽的车道内（双轴 contain，与姿势图宽高比无关），所有标题、正文、callouts 和视觉图表被限制在剩余内容列（1080 竖屏、scale=1 时约 508px）。两侧永不相交——不遮挡由布局保证，不依赖作者避让。代价是内容列变窄：stat/quote 字号会自动降档，但 `candlestick`、长 quote（>60 字）和长 stat 值（>8 字符）在窄列里仍偏挤，validate 会对这些组合给出 WARNING，建议该场景 `presenter: {"visible": false}` 用满全宽。这组几何数字的单源在 `scripts/video_pipeline.py` 的常量（构建 timeline 时注入 `layout` 字段），本文数值是 scale=1 时的当前默认值。
 
 ## 场景字段
 
@@ -39,7 +61,9 @@
 | `narration` | 是 | 实际送入 TTS 的旁白，20–180 个汉字为宜 |
 | `headline` | 是 | 屏幕主标题，建议不超过 24 个汉字 |
 | `body` | 否 | 屏幕补充文本，建议不超过 60 个汉字 |
-| `visual` | 是 | 视觉预设及其数据（5 种类型，见下） |
+| `visual` | 是 | 视觉预设及其数据（6 种类型，见下） |
+| `callouts` | 否 | 1–3 条黄色关键词标注（晓玉说同款），每条 `{"text": "≤12字", "tone": "accent\|positive\|negative"}` |
+| `presenter` | 否 | 场景级立绘控制：`{"pose": "pointing"}` 切姿势，`{"visible": false}` 隐藏；要求顶层已配 `presenter` |
 
 ## visual 类型详细定义
 
@@ -83,6 +107,22 @@
 
 最多 5 项，带编号展示。
 
+### candlestick — K线图（金融域）
+
+```json
+{
+  "type": "candlestick",
+  "closes": [3120.5, 3128.0, 3115.2, 3140.8, 3152.3, 3144.0, 3161.5, 3158.9],
+  "bands": {"upper": [...], "middle": [...], "lower": [...]},
+  "markers": [{"index": 5, "label": "假突破", "tone": "accent", "position": "above"}]
+}
+```
+
+- `closes`（收盘价序列，8–120 个数）与 `candles`（显式 OHLC，2–60 根，`{"o","h","l","c"}` 且 `h >= max(o,c)`、`l <= min(o,c)`）**二选一**；只给 `closes` 时上下影线由确定性伪随机合成（同 manifest 重渲染画面一致）
+- `bands` 可选（如布林带），每条与序列等长；`upper`/`lower` 虚线用 accent 色，`middle` 用 secondary 色
+- `markers` 可选，≤4 个：`index` 必须落在 `[0, 序列长度)`，`label` ≤12 字，`tone` 同 callouts，`position` 为 `above` / `below`
+- 动画：左到右揭示（场景前 40% 帧），marker 在其蜡烛揭示后弹簧弹出；蜡烛红涨绿跌取 theme 的 `positive`/`negative`
+
 ## 轻量公式渲染
 
 `kinetic-text` 的关键词与场景 `body` 支持轻量 LaTeX 子集，用于科普/论文类内容的公式展示：
@@ -107,7 +147,7 @@
   "language": "zh-CN",
   "sourceUrl": "https://example.com/attention",
   "voice": {
-    "name": "zh-CN-XiaoxiaoNeural",
+    "name": "zh-CN-XiaoyiNeural",
     "rate": "+5%",
     "volume": "+0%",
     "pitch": "+0Hz"

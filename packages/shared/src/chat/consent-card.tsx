@@ -3,7 +3,7 @@
 // 「卡片为主，模态保底」：ConsentCard 渲染异常时由 ErrorBoundary 回退到 ConsentDialog 模态框。
 
 import { Component, type ReactNode, useState } from "react";
-import { ShieldCheck, ChevronDown, ChevronRight } from "lucide-react";
+import { ShieldCheck, ShieldOff, ChevronDown, ChevronRight } from "lucide-react";
 import { Card } from "../ui/card";
 import { Button } from "../ui/button";
 import { ConsentDialog, type ConsentRequest } from "../components/consent-dialog";
@@ -95,7 +95,11 @@ function ConsentCard({ request, onRespond }: ConsentCardProps) {
 
 interface GateProps {
   request: ConsentRequest | null;
+  /** 迟到响应（请求已被后端超时清理）：卡片标记失效，不再允许/拒绝 */
+  expired?: boolean;
   onRespond: (requestId: string, allowed: boolean, message?: string) => void;
+  /** 关闭已失效的卡片 */
+  onDismiss?: () => void;
 }
 
 interface GateState {
@@ -111,8 +115,30 @@ export class ConsentGate extends Component<GateProps, GateState> {
   }
 
   render() {
-    const { request, onRespond } = this.props;
+    const { request, expired, onRespond, onDismiss } = this.props;
     if (!request) return null;
+    if (expired) {
+      return (
+        <div className="max-w-3xl mx-auto px-4 pb-2">
+          <Card className="p-4 gap-3 border border-muted-foreground/30 bg-muted/30 shadow-md ring-0">
+            <div className="flex items-center gap-2">
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted">
+                <ShieldOff className="h-4 w-4 text-muted-foreground" />
+              </div>
+              <div className="text-sm font-semibold">该授权请求已失效</div>
+            </div>
+            <div className="text-xs text-muted-foreground">
+              等待确认超时，本次操作已按拒绝处理；之后点击「允许」不会生效。
+            </div>
+            <div className="flex justify-end">
+              <Button variant="outline" size="sm" onClick={onDismiss}>
+                知道了
+              </Button>
+            </div>
+          </Card>
+        </div>
+      );
+    }
     if (this.state.failed) {
       return <ConsentDialog request={request} onRespond={onRespond} />;
     }

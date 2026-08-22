@@ -1,13 +1,15 @@
 "use client";
 
 import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { useRouter } from "next/navigation";
 import {
   AgendaEvent, AgendaRepeat, AgendaCompletion, fetchAgenda, createAgendaEvent, updateAgendaEvent,
   deleteAgendaEvent, setAgendaEnabled,
 } from "@/lib/api-misc";
 import { Badge } from "@ethan/shared/ui/badge";
+import { HeaderFillet } from "@/components/header-fillet";
 import { Button } from "@ethan/shared/ui/button";
-import { Loader2, RefreshCw, Trash2, Pencil, Plus, BellRing, ChevronLeft, ChevronRight } from "lucide-react";
+import { Loader2, RefreshCw, Trash2, Pencil, Plus, BellRing, ChevronLeft, ChevronRight, MessageCircle } from "lucide-react";
 import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
 import {
   DropdownMenu,
@@ -398,7 +400,24 @@ const STATUS_BADGE: Record<string, { label: string; variant: "default" | "second
   done: { label: "已完成", variant: "outline" },
 };
 
+// 「拆解该安排」：生成发给新对话的 prompt（ChatView 挂载时消费 sessionStorage 中的 pending prompt）
+const PENDING_PROMPT_KEY = "ethan:pending-prompt";
+
+function buildBreakdownPrompt(ev: AgendaEvent): string {
+  const lines = ["帮我拆解并准备这个日程安排：", "", `【安排】${ev.title}`];
+  if (ev.note) lines.push(`【描述】${ev.note}`);
+  lines.push(
+    "",
+    "请总结并从我的知识库中收集整理与这个安排相关的资料：",
+    "1. 汇总相关笔记和资料的要点；",
+    "2. 相关资料如有链接，用 markdown 链接格式列出；",
+    "3. 最后给出一份简短的行动指引（分步骤），帮我快速上手这件事。"
+  );
+  return lines.join("\n");
+}
+
 export function AgendaView() {
+  const router = useRouter();
   const [events, setEvents] = useState<AgendaEvent[]>([]);
   const [enabled, setEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -561,6 +580,18 @@ export function AgendaView() {
     }
   };
 
+  // 拆解该安排：把 prompt 存入 sessionStorage，跳到新对话页由 ChatView 自动发送
+  const startBreakdownChat = (ev: AgendaEvent) => {
+    try {
+      sessionStorage.setItem(PENDING_PROMPT_KEY, buildBreakdownPrompt(ev));
+    } catch {
+      // sessionStorage 不可用（极端情况）时降级为 URL 参数
+      router.push(`/chat/new?q=${encodeURIComponent(buildBreakdownPrompt(ev))}`);
+      return;
+    }
+    router.push("/chat/new");
+  };
+
   return (
     <div className="flex flex-col h-full bg-background text-foreground">
       <ConfirmDialog
@@ -599,7 +630,8 @@ export function AgendaView() {
         </DialogContent>
       </Dialog>
 
-      <header className="h-12 border-b border-border flex items-center px-4 justify-between shrink-0">
+      <header className="relative h-12 border-b border-border bg-sidebar flex items-center px-4 justify-between shrink-0">
+        <HeaderFillet />
         <h1 className="font-semibold text-lg">日程 (Agenda)</h1>
         <div className="flex items-center gap-2">
           <Button size="sm" variant="outline" onClick={() => setDialogState({ open: true, editing: null })}>
@@ -689,6 +721,9 @@ export function AgendaView() {
                                       )}
                                     </div>
                                     <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => startBreakdownChat(ev)} title="拆解该安排">
+                                        <MessageCircle className="h-3 w-3" />
+                                      </Button>
                                       <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setDialogState({ open: true, editing: ev })} title="编辑">
                                         <Pencil className="h-3 w-3" />
                                       </Button>

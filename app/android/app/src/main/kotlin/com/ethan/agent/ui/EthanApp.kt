@@ -7,8 +7,10 @@ import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.Modifier
@@ -20,6 +22,8 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.ethan.agent.core.model.AgendaEvent
+import com.ethan.agent.shared.ChatLauncherBus
 import com.ethan.agent.shared.viewmodel.AgendaViewModel
 import com.ethan.agent.shared.viewmodel.AuthUiState
 import com.ethan.agent.shared.viewmodel.AuthViewModel
@@ -155,6 +159,11 @@ private fun MainContent(authViewModel: AuthViewModel) {
             ) {
                 val vm: ChatViewModel = koinViewModel { parametersOf(it.arguments?.getString("sessionId")) }
                 val state by vm.state.collectAsState()
+                // 从其他页（如 Agenda「拆解该安排」）带过来的自动发送 prompt：该 entry 首次组合时一次性消费
+                val launchPrompt = remember { ChatLauncherBus.take() }
+                LaunchedEffect(launchPrompt) {
+                    if (launchPrompt != null) vm.autoSendPrompt(launchPrompt)
+                }
                 ChatScreen(
                     state = state,
                     onInputChange = vm::onInputChange,
@@ -167,6 +176,8 @@ private fun MainContent(authViewModel: AuthViewModel) {
                     onRemoveImage = vm::removeImage,
                     onConsent = vm::respondConsent,
                     onDismissConsent = vm::dismissConsent,
+                    onAskUserRespond = vm::respondAskUser,
+                    onWaitForUserRespond = vm::respondWaitForUser,
                     onStop = vm::stopStreaming,
                     onOnboardingChange = vm::onOnboardingChange,
                     onCompleteOnboarding = vm::completeOnboarding,
@@ -197,6 +208,7 @@ private fun MainContent(authViewModel: AuthViewModel) {
                     onToggleHideScheduled = vm::toggleHideScheduled,
                     onToggleSource = vm::toggleSource,
                     onSelectAllSources = vm::selectAllSources,
+                    onTogglePin = vm::togglePin,
                     onBack = { navController.popBackStack() },
                 )
             }
@@ -337,7 +349,16 @@ private fun MainContent(authViewModel: AuthViewModel) {
                     onDismissSheet = vm::dismissSheet,
                     onUpdateForm = vm::updateForm,
                     onSubmit = vm::submitEvent,
-                    onComplete = vm::completeEvent,
+                    onSetCompletion = vm::setCompletion,
+                    onCancelAbandon = vm::cancelAbandon,
+                    onAbandonTextChange = vm::updateAbandonText,
+                    onConfirmAbandon = vm::confirmAbandon,
+                    onBreakdown = { ev ->
+                        ChatLauncherBus.post(buildBreakdownPrompt(ev))
+                        navController.navigate("chat") {
+                            launchSingleTop = true
+                        }
+                    },
                     onRequestDelete = vm::requestDelete,
                     onCancelDelete = vm::cancelDelete,
                     onConfirmDelete = vm::confirmDelete,
@@ -441,4 +462,20 @@ private fun MainContent(authViewModel: AuthViewModel) {
         // 全局更新提示（自动检查 + 手动触发）
         UpdateDialog(updateViewModel)
     }
+}
+
+/** 「拆解该安排」：生成发给新对话的 prompt（与 Web/Desktop 端 buildBreakdownPrompt 一致）。 */
+private fun buildBreakdownPrompt(ev: AgendaEvent): String {
+    val lines = mutableListOf("帮我拆解并准备这个日程安排：", "", "【安排】${ev.title}")
+    if (ev.note.isNotBlank()) lines.add("【描述】${ev.note}")
+    lines.addAll(
+        listOf(
+            "",
+            "请总结并从我的知识库中收集整理与这个安排相关的资料：",
+            "1. 汇总相关笔记和资料的要点；",
+            "2. 相关资料如有链接，用 markdown 链接格式列出；",
+            "3. 最后给出一份简短的行动指引（分步骤），帮我快速上手这件事。",
+        ),
+    )
+    return lines.joinToString("\n")
 }
