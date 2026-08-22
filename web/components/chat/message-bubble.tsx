@@ -416,7 +416,19 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
                 </div>
               </details>
             )}
-            {/* 运行中「补充信息」待处理区：展示在「调用可视化」（工具时间线）上方。
+            {msg.toolSteps && msg.toolSteps.length > 0 && (
+              <ToolTimeline
+                steps={msg.toolSteps}
+                defaultExpanded={msg.toolsExpanded ?? false}
+                highlightIndex={highlightedStep}
+                messageCards={msg.cards?.filter((c): c is SearchResultCard => c.type === "search_result")}
+                onCancelTool={isStreaming && isLast ? onCancelTool : undefined}
+              />
+            )}
+            {msg.toolSteps && msg.toolSteps.length > 0 && msg.toolSteps.some(s => s.entity_type) && (
+              <SwimlaneDiagram steps={msg.toolSteps} matchedSkills={msg.matchedSkills} onStepClick={setHighlightedStep} />
+            )}
+            {/* 运行中「补充信息」待处理区：展示在「调用可视化」（工具时间线）下方。
                 未被消费前可删除；被模型处理后自动消失（信息保留在工具步骤的 injected 里）。 */}
             {isStreaming && isLast && pendingInjected && pendingInjected.length > 0 && (
               <div className="mb-2 rounded-lg border border-border/50 bg-background/30 px-3 py-2 space-y-1.5">
@@ -437,18 +449,6 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
                 ))}
                 <div className="text-[10px] text-muted-foreground/50">下一轮调用模型时读取；点 × 可在处理前删除</div>
               </div>
-            )}
-            {msg.toolSteps && msg.toolSteps.length > 0 && (
-              <ToolTimeline
-                steps={msg.toolSteps}
-                defaultExpanded={msg.toolsExpanded ?? false}
-                highlightIndex={highlightedStep}
-                messageCards={msg.cards?.filter((c): c is SearchResultCard => c.type === "search_result")}
-                onCancelTool={isStreaming && isLast ? onCancelTool : undefined}
-              />
-            )}
-            {msg.toolSteps && msg.toolSteps.length > 0 && msg.toolSteps.some(s => s.entity_type) && (
-              <SwimlaneDiagram steps={msg.toolSteps} matchedSkills={msg.matchedSkills} onStepClick={setHighlightedStep} />
             )}
             {/* 运行中「补充信息」入口：仅在最后一条 assistant 消息流式生成中显示。
                 提交后内容塞入 ChatRun inbox，agent loop 下一轮调模型前 append 到 working 末尾。 */}
