@@ -5,7 +5,14 @@ import { useRouter, usePathname } from "next/navigation";
 import Image from "next/image";
 import { Plus, Trash2, Search, Settings, Book, BookOpen, Pencil, Check, X, List, Wrench, RefreshCw, Loader2, Pin, PinOff } from "lucide-react";
 import { Clock, Database, CalendarDays } from "lucide-react";
+import { Ellipsis, CircleCheck } from "lucide-react";
 import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@ethan/shared/ui/dropdown-menu";
 import { useSidebar } from "@/app/layout-shell";
 import { Button } from "@ethan/shared/ui/button";
 import { Input } from "@ethan/shared/ui/input";
@@ -250,6 +257,19 @@ export function Sidebar() {
     }
   };
 
+  // 完成/取消完成：在标题前加/去 ✅ 前缀（复用 rename 接口改 title）
+  const handleToggleDone = async (id: string, title: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const newTitle = title.startsWith("✅")
+      ? title.replace(/^✅\s*/, "")
+      : `✅ ${title}`;
+    await renameSession(id, newTitle);
+    const patch = (list: SessionInfo[]) =>
+      list.map((s) => (s.id === id ? { ...s, title: newTitle } : s));
+    setSessions(patch);
+    setPinnedSessions(patch);
+  };
+
   const renderSession = (s: SessionInfo) => (
     <div
       key={s.id}
@@ -335,32 +355,39 @@ export function Sidebar() {
             </button>
           </div>
         ) : (
-          <div className="hidden group-hover:flex shrink-0 gap-0.5">
+          <div className="hidden group-hover:flex shrink-0 items-center gap-0.5">
             <Button
               variant="ghost"
               size="icon"
               className="h-5 w-5"
-              onClick={(e) => handleRegenTitle(s.id, e)}
-              title="AI 重新生成标题"
+              onClick={(e) => handleToggleDone(s.id, s.title, e)}
+              title={s.title.startsWith("✅") ? "取消完成标记" : "标记完成"}
             >
-              <RefreshCw className={`h-3 w-3 ${regeneratingId === s.id ? "animate-spin" : ""}`} />
+              <CircleCheck className={`h-3 w-3 ${s.title.startsWith("✅") ? "text-primary" : "text-muted-foreground"}`} />
             </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-5 w-5"
-              onClick={(e) => startEdit(s.id, s.title, e)}
-            >
-              <Pencil className="h-3 w-3" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-5 w-5"
-              onClick={(e) => handleDeleteSession(s.id, e)}
-            >
-              <Trash2 className="h-3 w-3" />
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                className="shrink-0 w-5 h-5 flex items-center justify-center rounded hover:bg-muted transition-colors text-muted-foreground"
+                title="更多操作"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <Ellipsis className="h-3 w-3" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+                <DropdownMenuItem onClick={(e) => handleRegenTitle(s.id, e)}>
+                  <RefreshCw className={`h-3 w-3 ${regeneratingId === s.id ? "animate-spin" : ""}`} />
+                  AI 重新生成标题
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={(e) => startEdit(s.id, s.title, e)}>
+                  <Pencil className="h-3 w-3" />
+                  重命名
+                </DropdownMenuItem>
+                <DropdownMenuItem variant="destructive" onClick={(e) => handleDeleteSession(s.id, e)}>
+                  <Trash2 className="h-3 w-3" />
+                  删除
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         )}
       </div>
