@@ -34,8 +34,11 @@ async def _handle_agent_message(
     owner_claimed: bool,
     btw_mode: bool,
     ts: "TypingState",
+    save_user_msg: bool = True,
 ) -> None:
-    """真正的 Agent 流式处理（在持锁串行下运行）。_handle_message 完成去重/命令/主人判定后调本函数。"""
+    """真正的 Agent 流式处理（在持锁串行下运行）。_handle_message 完成去重/命令/主人判定后调本函数。
+
+    save_user_msg=False 供「重新生成」复用：不重复落库 user 消息（旧行已由回调方删除）。"""
     # shared state from lark_stream (lazy import avoids circular dep)
     from ethan.core.agent import Agent
 
@@ -126,8 +129,9 @@ async def _handle_agent_message(
         history = session_obj.messages if session_obj else []
         session_mode = getattr(session_obj, "mode", "") or "" if session_obj else ""
 
-        user_msg = Message(role="user", content=text)
-        await store.save_message(session_id, user_msg)
+        if save_user_msg:
+            user_msg = Message(role="user", content=text)
+            await store.save_message(session_id, user_msg)
 
         # 引用消息：lark-cli 压平的事件里没有 parent_id，需用 message_id 先 mget 当前消息详情，
         # 从详情里找被引用消息 id 再取其文本，拼到本轮发给 agent 的消息里
@@ -558,11 +562,34 @@ async def _handle_agent_message(
         stats_line = "  ".join(stats_parts)
 
         if answer_msg_id:
+            # 答案卡片操作按钮：定稿时才追加（流式 patch 阶段不带，避免中途渲染按钮）
+            _ANSWER_ACTIONS = [
+                {"cmd": "regenerate", "text": "🔄 重新生成"},
+                {"cmd": "copy", "text": "📋 复制原文"},
+            ]
             if _looks_like_tool_trace(answer_text):
                 await _edit_message(answer_msg_id, "⚠️ 本轮未生成有效总结（输出像工具过程而非结论），工具过程已记录在上方。可重试或补充说明。", use_card=True)
             else:
                 final_answer = (answer_text or "（没有找到相关内容）").rstrip() + f"\n\n---\n_{stats_line}_"
-                await _edit_message(answer_msg_id, final_answer, use_card=True)
+                # 超长答案分段：首段写回原卡片（带操作按钮），其余段落追加新卡片，避免 patch 超限静默失败
+                from ethan.interface.lark_render import _split_long_text
+                chunks = _split_long_text(final_answer)
+                await _edit_message(answer_msg_id, chunks[0], use_card=True, actions=_ANSWER_ACTIONS)
+                if len(chunks) > 1:
+                    logger.info("[Lark] long answer split into %d cards chat=%s", len(chunks), chat_id)
+                    for extra_chunk in chunks[1:]:
+                        await _send_message(chat_id, extra_chunk, use_card=True)
+            # 登记答案上下文：卡片按钮回调（重新生成/复制原文）与 reaction 反馈（👍/👎）反查用
+            from ethan.interface.lark_state import _register_answer, _update_answer_entry
+            _register_answer(
+                answer_msg_id,
+                chat_id=chat_id,
+                session_id=session_id,
+                question=text,
+                question_msg_id=message_id,
+                assistant_row_id=progress_msg_id,
+            )
+            _update_answer_entry(answer_msg_id, answer_text=answer_text, assistant_row_id=progress_msg_id)
             # 结果卡片已定稿，立刻移除打字中表情（不必等到 finally）
             await ts.clear()
         elif tool_msg_id:

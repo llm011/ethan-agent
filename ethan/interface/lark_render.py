@@ -289,7 +289,28 @@ def _hard_wrap_outside_tables(text: str) -> str:
     return "".join(parts)
 
 
-def _render_card_content(text: str) -> str:
+def _card_action_buttons(actions: list[dict] | None) -> list[dict]:
+    """把 [{cmd, text, type?}] 规格转成飞书卡片 action 元素的按钮列表。
+
+    飞书 Card 2.0 按钮：{"tag":"button","text":{"tag":"plain_text","content":...},
+    "type":"default|primary", "value":{...}}。value.cmd 由 card.action.trigger 回调解析。
+    """
+    buttons = []
+    for a in actions or []:
+        cmd = (a or {}).get("cmd", "")
+        label = (a or {}).get("text", "")
+        if not cmd or not label:
+            continue
+        buttons.append({
+            "tag": "button",
+            "text": {"tag": "plain_text", "content": label},
+            "type": (a or {}).get("type", "default"),
+            "value": {"cmd": cmd},
+        })
+    return buttons
+
+
+def _render_card_content(text: str, actions: list[dict] | None = None) -> str:
     """把文本/markdown 渲染成飞书 interactive 卡片的 content JSON。
 
     飞书卡片 markdown element 遵循 CommonMark：
@@ -298,6 +319,9 @@ def _render_card_content(text: str) -> str:
     - \n\n 是段落分隔（有额外间距）
     预处理：先表格兜底 + 样式优化，再把孤立的单 \n 转为 "  \n"（硬换行），保留 \n\n 作段落。
 
+    actions 非空时在 markdown 元素后追加一行操作按钮（重新生成/复制原文等），
+    按钮回调经 card.action.trigger 事件回到 _handle_card_action。
+
     表格超 `FEISHU_CARD_TABLE_LIMIT` 张时走 `_render_card_content_rich`：超出部分改用
     CardBuilder 原生 table 元素（不再降级成代码块）。rich 路径失败时回退到此处的手拼 markdown
     + `_sanitize_text_for_card` 降级，保证不崩。
@@ -305,7 +329,7 @@ def _render_card_content(text: str) -> str:
     import json as _json
     # 代码块外 markdown 表格超过上限 → 走 CardBuilder 原生 table 元素路径
     if len(_find_markdown_tables_outside_code_blocks(text)) > FEISHU_CARD_TABLE_LIMIT:
-        rich = _render_card_content_rich(text)
+        rich = _render_card_content_rich(text, actions=actions)
         if rich is not None:
             return rich
         # rich 路径失败（import 失败 / build 失败）→ 回退到手拼 markdown + 降级
@@ -313,9 +337,13 @@ def _render_card_content(text: str) -> str:
     text = _optimize_markdown_style(text)
     # 对非表格区域执行单 \n → "  \n" 硬换行转换；表格区域保持原始 \n（否则飞书解析列错位）
     processed = _hard_wrap_outside_tables(text)
+    elements: list[dict] = [{"tag": "markdown", "content": processed}]
+    buttons = _card_action_buttons(actions)
+    if buttons:
+        elements.append({"tag": "action", "actions": buttons})
     return _json.dumps({
         "schema": "2.0",
-        "body": {"elements": [{"tag": "markdown", "content": processed}]},
+        "body": {"elements": elements},
     }, ensure_ascii=False)
 
 
@@ -368,7 +396,7 @@ def _split_around_tables(
     return segments
 
 
-def _render_card_content_rich(text: str) -> str | None:
+def _render_card_content_rich(text: str, actions: list[dict] | None = None) -> str | None:
     """超 3 张表格时走 CardBuilder 原生 table 元素路径。失败返回 None（让调用方 fallback）。
 
     策略：代码块外的 markdown 表格，前 `FEISHU_CARD_TABLE_LIMIT` 张保留在 markdown 元素里
@@ -409,6 +437,13 @@ def _render_card_content_rich(text: str) -> str | None:
                     c.markdown(md)
                 # 全是空白的片段跳过——CardBuilder 不需要空 markdown 元素
         result = c.to_dict()
+        # 按钮元素直接追加到 to_dict() 结果（CardBuilder 的 action 方法名不确定，不依赖）
+        buttons = _card_action_buttons(actions)
+        if buttons:
+            try:
+                result["body"]["elements"].append({"tag": "action", "actions": buttons})
+            except Exception:
+                pass
         return _json.dumps(result, ensure_ascii=False)
     except Exception:
         return None
@@ -424,3 +459,33 @@ def _render_post_content(text: str) -> str:
     lines = text.split("\n") if text else [""]
     content = [[{"tag": "text", "text": line}] for line in lines]
     return _json.dumps({"zh_cn": {"content": content}}, ensure_ascii=False)
+
+
+# 答案卡片单段长度上限：飞书卡片 content 约 30KB，markdown 渲染后膨胀，保守取 6000 字符。
+# 超长答案在定稿时按此拆分多张卡片，避免 patch 超限静默失败丢内容。
+ANSWER_SPLIT_THRESHOLD = 6000
+
+
+def _split_long_text(text: str, limit: int = ANSWER_SPLIT_THRESHOLD) -> list[str]:
+    """把超长文本拆成多段（每段 ≤ limit 字符），优先在段落边界切，其次行边界，最后硬切。
+
+    保证返回至少 1 段；空文本返回 [""]。代码块被切断时给后续段补 ``` 闭合/开头的兜底不做了——
+    6000 字符内单代码块超限属极少数，飞书卡片本身也渲染不了那么长的代码块。
+    """
+    if len(text) <= limit:
+        return [text]
+    parts: list[str] = []
+    rest = text
+    while len(rest) > limit:
+        window = rest[:limit]
+        # 优先段落边界（\n\n），其次单行边界，最后硬切
+        cut = window.rfind("\n\n")
+        if cut < limit // 2:
+            cut = window.rfind("\n")
+        if cut < limit // 2:
+            cut = limit
+        parts.append(rest[:cut].rstrip())
+        rest = rest[cut:].lstrip("\n")
+    if rest.strip():
+        parts.append(rest.rstrip())
+    return parts or [text]

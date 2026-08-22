@@ -348,3 +348,68 @@ def _looks_like_tool_trace(text: str) -> bool:
         return False
     tool_lines = sum(1 for ln in lines if _TOOL_LINE_RE.search(ln))
     return tool_lines >= 2
+
+
+# ── 答案卡片登记表 ─────────────────────────────────────────────────────────────
+# answer_msg_id → {chat_id, session_id, question, question_msg_id, answer_text,
+#                   assistant_row_id, _ts}。供卡片按钮回调（重新生成/复制原文）和
+# reaction 反馈（👍/👎）定位上下文。仅内存：进程重启后旧卡片按钮回复"找不到上下文"。
+_ANSWER_MAP_TTL = 86400.0  # 24h
+_ANSWER_MAP_MAX = 100
+_lark_answer_map: dict[str, dict] = {}
+
+
+def _prune_answer_map() -> None:
+    """清理过期条目并限制总量（插入时调用，代价低）。"""
+    now = _time.time()
+    expired = [k for k, v in _lark_answer_map.items() if now - v.get("_ts", 0) > _ANSWER_MAP_TTL]
+    for k in expired:
+        _lark_answer_map.pop(k, None)
+    while len(_lark_answer_map) > _ANSWER_MAP_MAX:
+        _lark_answer_map.pop(next(iter(_lark_answer_map)), None)
+
+
+def _register_answer(
+    answer_msg_id: str,
+    *,
+    chat_id: str,
+    session_id: str,
+    question: str,
+    question_msg_id: str,
+    assistant_row_id: int | None = None,
+) -> None:
+    """定稿答案卡片时登记上下文，供按钮回调 / reaction 反馈反查。"""
+    if not answer_msg_id:
+        return
+    _prune_answer_map()
+    _lark_answer_map[answer_msg_id] = {
+        "chat_id": chat_id,
+        "session_id": session_id,
+        "question": question,
+        "question_msg_id": question_msg_id,
+        "answer_text": "",
+        "assistant_row_id": assistant_row_id,
+        "_ts": _time.time(),
+    }
+    while len(_lark_answer_map) > _ANSWER_MAP_MAX:
+        _lark_answer_map.pop(next(iter(_lark_answer_map)), None)
+
+
+def _update_answer_entry(answer_msg_id: str, *, answer_text: str, assistant_row_id: int | None = None) -> None:
+    """定稿后补写最终答案文本/落库行 id（登记时答案可能还在流式更新）。"""
+    entry = _lark_answer_map.get(answer_msg_id)
+    if not entry:
+        return
+    entry["answer_text"] = answer_text
+    if assistant_row_id is not None:
+        entry["assistant_row_id"] = assistant_row_id
+
+
+def _get_answer_entry(answer_msg_id: str) -> dict | None:
+    if not answer_msg_id:
+        return None
+    entry = _lark_answer_map.get(answer_msg_id)
+    if entry and _time.time() - entry.get("_ts", 0) > _ANSWER_MAP_TTL:
+        _lark_answer_map.pop(answer_msg_id, None)
+        return None
+    return entry

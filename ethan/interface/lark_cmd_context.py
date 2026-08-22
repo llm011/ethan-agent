@@ -160,6 +160,37 @@ async def _set_lark_mode(cid: str, mode_key: str) -> None:
         await store.update_mode(sid, mode_key)
 
 
+async def _list_bg_tasks_text() -> str:
+    """后台任务列表（同进程 background_task registry），无任务返回空串。"""
+    from ethan.tools.builtin.background_task import list_tasks
+    items = list_tasks()
+    if not items:
+        return ""
+    lines = ["🖥 后台任务："]
+    marks = {"running": "▶️", "done": "✅", "error": "❌", "stopped": "⏹"}
+    for t in items[:10]:
+        mark = marks.get(t.get("status", ""), "•")
+        title = t.get("title", "") or t.get("id", "")
+        lines.append(f"  {mark} {title[:36]} — {t.get('status', '?')}（{t.get('elapsed_seconds', 0)}s）")
+    if len(items) > 10:
+        lines.append(f"  …还有 {len(items) - 10} 个")
+    return "\n".join(lines)
+
+
+async def _list_cron_jobs_text() -> str:
+    """定时任务列表（进程级共享 scheduler），无任务返回空串。"""
+    from ethan.scheduler.cron import get_scheduler
+    jobs = get_scheduler().list_jobs()
+    if not jobs:
+        return ""
+    lines = ["⏰ 定时任务："]
+    for j in jobs[:10]:
+        lines.append(f"  • {j.get('name', j.get('id', ''))} — {j.get('trigger', '')} → {j.get('next_run', '')}")
+    if len(jobs) > 10:
+        lines.append(f"  …还有 {len(jobs) - 10} 个")
+    return "\n".join(lines)
+
+
 def build_cmd_context(chat_id: str, text: str, sender_open_id: str, *, is_group_chat: bool = False) -> CommandContext:
     """构建命令上下文，注入所有飞书 session 回调。
 
@@ -184,4 +215,6 @@ def build_cmd_context(chat_id: str, text: str, sender_open_id: str, *, is_group_
         get_mode=_get_lark_mode,
         set_mode=_set_lark_mode,
         stop_task=_stop_lark_task,
+        list_bg_tasks=_list_bg_tasks_text,
+        list_cron_jobs=_list_cron_jobs_text,
     )

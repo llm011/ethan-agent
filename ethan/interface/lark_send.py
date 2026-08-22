@@ -274,11 +274,12 @@ async def _send_interactive_card(chat_id: str, card: dict, reply_to_msg_id: str 
         return None
 
 
-async def _edit_message(message_id: str, text: str, use_card: bool) -> bool:
+async def _edit_message(message_id: str, text: str, use_card: bool, actions: list[dict] | None = None) -> bool:
     """更新已发送消息的内容（流式追加效果）。
 
     卡片用 message.patch（更新卡片 API）；post 用 message.update（更新消息内容 API，需带 msg_type）。
-    两者整体替换 content。失败返回 False（调用方决定是否重试/兜底）。
+    两者整体替换 content。actions（卡片专用）非空时在卡片底部渲染操作按钮。
+    失败返回 False（调用方决定是否重试/兜底）。
     """
     from lark_oapi.api.im.v1 import (
         PatchMessageRequest,
@@ -295,7 +296,7 @@ async def _edit_message(message_id: str, text: str, use_card: bool) -> bool:
             req = (
                 PatchMessageRequest.builder()
                 .message_id(message_id)
-                .request_body(PatchMessageRequestBody.builder().content(_render_card_content(text)).build())
+                .request_body(PatchMessageRequestBody.builder().content(_render_card_content(text, actions=actions)).build())
                 .build()
             )
             resp = await asyncio.to_thread(client.im.v1.message.patch, req)
