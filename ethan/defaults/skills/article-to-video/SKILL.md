@@ -2,7 +2,7 @@
 name: article-to-video
 description: "把主题、文章正文、本地 Markdown/TXT 文件或公开 URL 制作成带 AI 剧本、Edge TTS 配音、动态字幕和 Open Motion 动画的 MP4 视频。当用户说文章转视频、主题做视频、URL 做视频、生成口播视频、制作短视频或要求交付配音成片时使用。"
 trigger: "文章转视频|主题做视频|URL转视频|链接转视频|网页转视频|生成视频|制作视频|口播视频|配音视频|短视频|article to video|topic to video|open motion video"
-version: 0.1.0
+version: 0.3.0
 ---
 
 # Article to Video
@@ -30,11 +30,38 @@ mkdir -p "$PROJECT"
 
 不要把产物写在 Skill 安装目录。不要删除失败项目；保留中间文件供重试。
 
-### 3. 生成 manifest
+### 3. 定领域、备资产
+
+按内容确定 `domain`（写进 manifest）：
+
+| domain | 适用 | 视觉特征 |
+|---|---|---|
+| `general`（默认） | 通用口播 | 现有 5 种文字卡片预设 |
+| `finance` | 财经/行情解读 | 深蓝金配色（红涨绿跌）、`candlestick` K线图、黄色关键词 `callouts`、虚拟人立绘 |
+| `paper` | 论文/技术解读 | 紫色主题（Manim/流程图在后续版本接入） |
+
+金融领域建议配虚拟人立绘（`presenter`）。角色包存于资产库 `~/.ethan/assets/library/presenters/<id>/`（详见 `references/asset-library.md`）。**manifest 引用的 presenter 缺失时**：运行 `scripts/presenter_gen.py prompts <id>` 打印一整套出图 prompt，交给用户用 GPT image 2 按 `references/presenter-guide.md` 的流程逐姿势出图，再 `presenter_gen.py import <id> <目录>` 入库。不要自己编造立绘文件路径。
+
+**presenter 模式检测**（决定立绘是静态图还是动态 presenter、用哪个生成器）：
+
+```bash
+# 优先级：用户显式指定 > seedance（config.yaml）> h3（ComfyUI）> 静态立绘
+python3 ~/.ethan/skills/article-to-video/scripts/seedance_presenter_pipeline.py mode
+```
+
+用户明确说"用 seedance / 用 h3 / 不要用大模型（静态立绘）"时属于显式指示，加 `--prefer` 确认后必须照做（如 `mode --prefer h3`）；指定的模式没配置会明确报错，绝不静默回退别的模式。
+
+- `MODE: static` → 走默认步骤 4–7，presenter 始终是静态立绘，不要尝试动态流程。
+- `MODE: seedance` → 按「Seedance 动态 Presenter」一节走，先读 `references/seedance-presenter-pipeline.md`。
+- `MODE: h3` → presenter 按「H3 动态 Presenter」一节走，先读 `references/h3-presenter-pipeline.md`；静态渲染仍负责 clean plate / 菜单 / 数据层。可先用 `curl -m 3 -s "$H3_COMFYUI_URL/system_stats"` 探活，连不上时提醒用户启动 ComfyUI，不自动回退静态（seedance 与 h3 都配置且用户未指定时，默认 seedance）。
+
+### 4. 生成 manifest
 
 先读 `references/manifest-schema.md` 和 `references/script-guide.md`，再把剧本写入 `$PROJECT/manifest.json`。用户指定时长时必须填写 `targetDurationSec`；每个场景必须包含唯一 `id`、可朗读的 `narration`、屏幕标题和一个受支持的视觉预设。
 
 只在需要选择视觉形式时读 `references/visual-presets.md`。MVP 不依赖付费图库；默认使用文字、数字、引用、步骤和摘要卡片动画。
+
+金融场景的经验法则：开场场景用 `candlestick` + `markers`（标注关键点位）+ `callouts`（≤3 条、每条 ≤12 字的黄色关键词）；立绘默认右侧，布局采用硬车道分离（立绘钳在边缘 `440×scale` px 车道内，内容列约 508px，零重叠由 CSS 保证）。K线、长引用等全宽视觉在该场景用 `presenter: {"visible": false}` 隐藏立绘——validate 会对偏挤组合输出 WARNING。
 
 先做无网络校验：
 
@@ -45,7 +72,7 @@ python3 ~/.ethan/skills/article-to-video/scripts/video_pipeline.py \
 
 修正所有校验错误后再合成语音，不能跳过。
 
-### 4. 合成并渲染
+### 5. 合成并渲染
 
 先确认 `uv`、Node.js 和 `pnpm` 可用；缺少时停止并告诉用户安装哪个命令，不静默修改系统环境：
 
@@ -86,7 +113,7 @@ Edge TTS 是第三方库连接的在线服务。网络失败时最多重试三�
 
 若实际语音时长超出 `targetDurationSec ± durationToleranceSec`，脚本会在渲染前停止。根据报告缩短或扩写旁白，保持场景 ID 不变，再执行同一命令；未变化场景的 TTS 会命中缓存。
 
-### 5. 复核
+### 6. 复核
 
 确认脚本输出 `status: ok`，并检查：
 
@@ -98,7 +125,36 @@ Edge TTS 是第三方库连接的在线服务。网络失败时最多重试三�
 
 任何检查失败都要修正后重新运行，不能交付半成品。
 
-### 6. 交付
+### Seedance 动态 Presenter（默认动态档，需 config.yaml 配置）
+
+`~/.ethan/config.yaml` 配置了 `seedance:` 段（BytePlus ModelArk 经 Glowix gateway）且用户未显式指定 h3/静态时使用——模式检测输出 `MODE: seedance`。先读 `references/seedance-presenter-pipeline.md`。
+
+流程概要（每个 presenter 场景）：
+
+1. 用 stills `--first-frame` 导出场景稳定帧 `combined-reference.png`（取场景 50% 处——揭示动画完成、淡出未开始；Seedance 会把画面冻结在首帧布局，起点帧上 UI 还在入场会导致整段不完整）：
+   `node ~/.ethan/skills/article-to-video/assets/open-motion-template/render.mjs stills "$PROJECT/timeline.json" <输出目录> "$PROJECT/work/public" --first-frame`
+2. `seedance_presenter_pipeline.py prepare`（台词/时长/起点 → Seedance 中文 prompt + scene.json，情绪基调自动判定）。
+3. `submit`（首帧 base64 + prompt 提交任务，真实计费）→ `poll`（轮询下载 `raw-seedance.mp4`，注意视频生成要几分钟，后台跑日志轮询）。
+4. `compose --stage-video final.mp4` 把生成段精确替换回该场景时间窗（音轨沿用原片 TTS，多场景串行替换）。
+
+密钥只存 config.yaml（`gateway_url/api_key/edge_secret/models`），代码与日志永不出现。gateway 冒烟测试用仓库 `scripts/test-all-models.mjs`（`--dry-run` 不联网）。
+
+### H3 动态 Presenter（需配置启用）
+
+仅当模式检测输出 `MODE: h3`（配置了 `H3_COMFYUI_URL` 且 seedance 未配置/用户显式指定 h3）时使用本模式。使用
+`scripts/h3_presenter_pipeline.py`，并先读
+`references/h3-presenter-pipeline.md`。此模式的原则是：article-to-video 产出
+`combined-reference.png`（小雨 + 舞台）与同尺寸 `clean-plate.png`（无人物）——用渲染模板的
+stills 模式成对导出（`node ~/.ethan/skills/article-to-video/assets/open-motion-template/render.mjs stills "$PROJECT/timeline.json" <输出目录> "$PROJECT/work/public"`，
+clean-plate 只藏立绘、布局逐像素一致）；MiniMax H3
+只生成小雨动作/原生中文声音；最终将带人物遮罩的 H3 前景覆盖回 clean plate。
+
+想启用时向用户说明：在 `h3-comfyui.env` 写一行 `H3_COMFYUI_URL=http://127.0.0.1:8188`（等号后不要跟行内注释）。
+
+不要让 H3 作为最终中文、数字和图表渲染器。无人物遮罩时只能用 `safe-boundary` 快速预览；
+人物手会深入菜单或图表时，必须使用逐帧前景遮罩，保证手指在 UI 前景。
+
+### 7. 交付
 
 渲染和复核成功后，必须调用：
 
