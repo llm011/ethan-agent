@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse
 
 from ethan import __version__
 from ethan.core.run_manager import RunManager
-from ethan.memory.session import get_session_store
+from ethan.memory.session import get_session_store, retry_on_db_locked
 from ethan.providers.base import Message
 
 from .deps import create_agent, verify_token
@@ -489,8 +489,42 @@ async def inject_message(session_id: str, req: InjectRequest, user_id: str = Dep
     content = (req.content or "").strip()
     if not content:
         raise HTTPException(status_code=400, detail="补充信息不能为空")
-    run.inject(content)
-    return {"ok": True, "queued": True}
+    import uuid
+
+    inj_id = f"inj_{uuid.uuid4().hex[:8]}"
+    run.inject({"id": inj_id, "content": content})
+    # 广播给所有订阅端（含事件缓冲，断线重连回放也能补齐）：
+    # 前端在「调用可视化」区域上方展示这条待处理的补充信息，处理前可删除。
+    run.emit({"injected_added": {"id": inj_id, "content": content}})
+    # DB 持久化镜像：页面刷新 / 进程重启后仍能看到未消费的补充信息
+    try:
+        store = await get_session_store()
+        await retry_on_db_locked(store.save_pending_injected, session_id, list(run.injected_messages))
+    except Exception:
+        logger.exception("持久化补充信息失败 session=%s inj=%s", session_id, inj_id)
+    return {"ok": True, "queued": True, "id": inj_id}
+
+
+@router.delete("/chat/{session_id}/inject/{inj_id}")
+async def delete_injected_message(session_id: str, inj_id: str, user_id: str = Depends(verify_token)):
+    """删除一条尚未被消费的「补充信息」（前端待处理区点 ×）。
+
+    仅从待消费队列移除，模型下一轮不会再读到；已消费的不受影响
+    （仍保留在工具时间线的 injected 信息里）。user_id 校验归属。
+    """
+    from ethan.core.run_manager import RunManager
+    run = RunManager.instance().get(session_id, user_id=user_id)
+    if run is None or run.done:
+        raise HTTPException(status_code=409, detail="当前没有进行中的任务")
+    if not run.remove_injected(inj_id):
+        raise HTTPException(status_code=404, detail="该补充信息不存在或已被处理")
+    run.emit({"injected_removed": inj_id})
+    try:
+        store = await get_session_store()
+        await retry_on_db_locked(store.save_pending_injected, session_id, list(run.injected_messages))
+    except Exception:
+        logger.exception("同步补充信息删除失败 session=%s inj=%s", session_id, inj_id)
+    return {"ok": True}
 
 
 @router.post("/chat/{session_id}/resume/{message_id}")

@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, memo } from "react";
 import Image from "next/image";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Quote as QuoteIcon, BookOpen as BookOpenIcon, Share2 as ShareIcon, Plus as PlusIcon, Send as SendIcon, Trash2 as TrashIcon, RotateCcw as RotateCcwIcon } from "lucide-react";
+import { Quote as QuoteIcon, BookOpen as BookOpenIcon, Share2 as ShareIcon, Plus as PlusIcon, Send as SendIcon, Trash2 as TrashIcon, RotateCcw as RotateCcwIcon, X as XIcon } from "lucide-react";
 import { ToolTimeline } from "@ethan/shared/components/tool-timeline";
 import { SwimlaneDiagram } from "@ethan/shared/components/swimlane-diagram";
 import { fmtTokens } from "@/lib/utils";
@@ -225,13 +225,15 @@ interface MessageBubbleProps {
   onShare?: (msg: Message) => void;
   onDelete?: (msg: Message) => void;
   onInject?: (content: string) => Promise<{ ok: boolean; error?: string }>;
+  pendingInjected?: { id: string; content: string }[];
+  onRemoveInjected?: (injId: string) => void;
   onCancelTool?: (toolCallId: string) => void;
   onActionConfirm?: (message: string) => void;
   onResume?: (msg: Message) => void;
   annotations?: Annotation[];
 }
 
-export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuote, onCardAction, onRead, onShare, onDelete, onInject, onCancelTool, onActionConfirm, onResume, annotations }: MessageBubbleProps) {
+export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuote, onCardAction, onRead, onShare, onDelete, onInject, pendingInjected, onRemoveInjected, onCancelTool, onActionConfirm, onResume, annotations }: MessageBubbleProps) {
   const [highlightedStep, setHighlightedStep] = useState<number | undefined>(undefined);
   // 思考过程（thought）默认展开，用户可手动折叠
   const [thoughtOpen, setThoughtOpen] = useState(true);
@@ -413,6 +415,28 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
                   {msg.thought}
                 </div>
               </details>
+            )}
+            {/* 运行中「补充信息」待处理区：展示在「调用可视化」（工具时间线）上方。
+                未被消费前可删除；被模型处理后自动消失（信息保留在工具步骤的 injected 里）。 */}
+            {isStreaming && isLast && pendingInjected && pendingInjected.length > 0 && (
+              <div className="mb-2 rounded-lg border border-border/50 bg-background/30 px-3 py-2 space-y-1.5">
+                <div className="text-xs font-medium text-muted-foreground">📨 待处理的补充信息</div>
+                {pendingInjected.map((pi) => (
+                  <div key={pi.id} className="flex items-start gap-2 text-xs text-muted-foreground bg-background/60 rounded-md px-2 py-1.5">
+                    <span className="whitespace-pre-wrap break-words flex-1 leading-relaxed">{pi.content}</span>
+                    {onRemoveInjected && (
+                      <button
+                        onClick={() => onRemoveInjected(pi.id)}
+                        className="shrink-0 opacity-40 hover:opacity-100 transition-opacity mt-0.5"
+                        title="删除（模型下一轮就读不到了）"
+                      >
+                        <XIcon className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <div className="text-[10px] text-muted-foreground/50">下一轮调用模型时读取；点 × 可在处理前删除</div>
+              </div>
             )}
             {msg.toolSteps && msg.toolSteps.length > 0 && (
               <ToolTimeline

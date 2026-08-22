@@ -23,6 +23,7 @@ export interface ConsumeStreamActions {
   setSessionUsage: React.Dispatch<React.SetStateAction<Usage>>;
   setStopping: (v: boolean) => void;
   setStreaming: (v: boolean) => void;
+  setPendingInjected: React.Dispatch<React.SetStateAction<{ id: string; content: string }[]>>;
   activeSession: string | null;
 }
 
@@ -38,7 +39,7 @@ export async function consumeStream(
 ): Promise<{ failed: boolean }> {
   const {
     setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setWaitForUserRequest, setBgPolling,
-    setSessionTitle, setSessionUsage, setStopping, setStreaming,
+    setSessionTitle, setSessionUsage, setStopping, setStreaming, setPendingInjected,
     activeSession,
   } = actions;
 
@@ -126,6 +127,24 @@ export async function consumeStream(
           const body = Array.from(bodyText).slice(0, 80).join("");
           void notifyDesktop({ title: "Ethan Agent", body });
         }
+        continue;
+      }
+      if (chunk.injected_added) {
+        // 新补充一条待处理信息（含断线重连回放）：按 id 去重
+        const item = chunk.injected_added;
+        setPendingInjected(prev => (prev.some(p => p.id === item.id) ? prev : [...prev, item]));
+        continue;
+      }
+      if (chunk.injected_removed) {
+        // 用户在待处理区删除了一条（处理前）
+        setPendingInjected(prev => prev.filter(p => p.id !== chunk.injected_removed));
+        continue;
+      }
+      if (chunk.injected && !chunk.tool) {
+        // 被模型消费：从待处理区移除（drain 一次性取走全部，按内容匹配；
+        // 注意 tool start 事件也带 injected 字段，需排除）
+        const consumed = new Set(chunk.injected);
+        setPendingInjected(prev => prev.filter(p => !consumed.has(p.content)));
         continue;
       }
       if (chunk.heartbeat) {
@@ -291,6 +310,7 @@ export async function consumeStream(
       setCleanupConfirm(null);
       setAskUserRequest(null);
       setWaitForUserRequest(null);
+      setPendingInjected([]);
       return { failed: false };
     }
     const errMsg = err instanceof Error ? err.message : "";
@@ -386,6 +406,7 @@ export async function consumeStream(
           setCleanupConfirm(null);
           setAskUserRequest(null);
           setWaitForUserRequest(null);
+          setPendingInjected([]);
           setStopping(false);
           setStreaming(false);
           failed = false;
@@ -403,6 +424,7 @@ export async function consumeStream(
             setCleanupConfirm(null);
             setAskUserRequest(null);
             setWaitForUserRequest(null);
+            setPendingInjected([]);
             setStopping(false);
             setStreaming(false);
             return { failed: false };
@@ -475,6 +497,8 @@ export async function consumeStream(
   setWaitForUserRequest(null);
   setStopping(false);
   setStreaming(false);
+  // run 结束：待处理补充信息区清空（后端同样在 run 收尾清空 DB 镜像）
+  setPendingInjected([]);
 
   return { failed };
 }

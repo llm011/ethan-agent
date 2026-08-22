@@ -288,6 +288,17 @@ async def _run_generation(
 
     set_inject_drainer(run.drain_injected)
 
+    # 恢复 DB 中遗留的未消费「补充信息」：正常结束/停止会在 finally 清空镜像，
+    # 这里只会在进程崩溃/重启残留时读到非空，交给本轮 agent loop 消费，避免用户补充静默丢失。
+    if session_id:
+        try:
+            leftover = await retry_on_db_locked(store.load_pending_injected, session_id)
+            if leftover:
+                run.injected_messages.extend(leftover)
+                logger.info("恢复 %d 条遗留补充信息进新 run session=%s", len(leftover), session_id)
+        except Exception:
+            logger.debug("恢复遗留补充信息失败 session=%s", session_id, exc_info=True)
+
     collector = StreamCollector().bind(agent)
     # 工具过程实时持久化：每条工具事件 emit 给前端的同时，也把步骤快照落库。
     # 这样即便后续 finalize 失败 / 进程崩溃 / 用户关页面，工具调用过程也留存，不会白干。
@@ -363,6 +374,15 @@ async def _run_generation(
             elif isinstance(item, InjectEvent):
                 collector.feed(item)
                 run.emit({"injected": item.messages})
+                # 已被模型消费：同步 DB 镜像（run.injected_messages 此刻为消费后剩余，
+                # 通常是空；消费期间新注入的会保留）。
+                if session_id:
+                    try:
+                        await retry_on_db_locked(
+                            store.save_pending_injected, session_id, list(run.injected_messages)
+                        )
+                    except Exception:
+                        logger.debug("同步补充信息消费失败 session=%s", session_id, exc_info=True)
             elif isinstance(item, ToolEvent):
                 collector.feed(item)
                 if item.state == "start":
@@ -561,6 +581,13 @@ async def _run_generation(
                 if provider is not None:
                     provider.cancel(req_id)
         run.interaction_ids.clear()
+        # run 结束（正常/停止/替换/异常）：清空 DB 中的「补充信息」待消费镜像。
+        # 已消费的留在工具时间线的 injected 信息里；未消费的随 run 结束丢弃，不再展示。
+        if session_id:
+            try:
+                await retry_on_db_locked(store.save_pending_injected, session_id, [])
+            except Exception:
+                logger.debug("清空补充信息镜像失败 session=%s", session_id, exc_info=True)
         # 浏览器 session 清理移至 done 事件之前（见下方），
         # 因为 finally 在 stop/error 路径已 run.finish() 之后才执行，
         # 此时 SSE 连接已断，无法送达 confirm 卡片。

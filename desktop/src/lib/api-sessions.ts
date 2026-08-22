@@ -22,6 +22,7 @@ export interface SessionDetail {
   mode?: string;
   pinned_at?: number;
   active_run?: boolean;
+  pending_injected?: Array<{ id: string; content: string }>;
   messages: {
     role: string;
     content: string;

@@ -54,7 +54,8 @@ class ChatRun:
     watchdog_task: asyncio.Task | None = None  # watchdog 强引用，finish() 时取消
     # 用户「运行中补充信息」收件箱：inject() 入队，agent loop 每轮开头 drain_injected() 取走。
     # asyncio 单线程下 list.append / clear 原子，无需 lock。
-    injected_messages: list[str] = field(default_factory=list)
+    # 元素为 {"id": str, "content": str}：id 供前端删除定位（与 sessions.pending_injected 落库结构一致）。
+    injected_messages: list[dict] = field(default_factory=list)
     # 当前正在执行的工具 task 引用（tool_call_id → asyncio.Task），由 ToolExecutor 注册/注销。
     # 用户可按 tool_call_id 取消单个工具而不影响整轮生成。
     tool_tasks: dict[str, asyncio.Task] = field(default_factory=dict)
@@ -71,18 +72,27 @@ class ChatRun:
         for q in self.subscribers:
             q.put_nowait(event)
 
-    def inject(self, content: str) -> None:
+    def inject(self, item: dict) -> None:
         """外部异步注入补充信息：等下一轮调模型前由 agent loop 消费。
 
-        同步操作，asyncio 单线程下与 drain_injected() 互不交错。
+        item 形如 {"id": str, "content": str}。同步操作，asyncio 单线程下与 drain_injected() 互不交错。
         """
-        self.injected_messages.append(content)
+        self.injected_messages.append(item)
+
+    def remove_injected(self, inj_id: str) -> bool:
+        """消费前删除一条补充信息（用户点 X）。返回是否真的删到了。"""
+        before = len(self.injected_messages)
+        self.injected_messages = [m for m in self.injected_messages if m.get("id") != inj_id]
+        return len(self.injected_messages) < before
 
     def drain_injected(self) -> list[str]:
-        """agent loop 每轮开头调一次：取走并清空待消费的补充信息。无则返回空列表。"""
+        """agent loop 每轮开头调一次：取走并清空待消费的补充信息。无则返回空列表。
+
+        返回纯文本列表（id 只用于删除定位，消费侧不需要），agent 侧拼 prompt 直接用。
+        """
         if not self.injected_messages:
             return []
-        msgs = self.injected_messages.copy()
+        msgs = [m["content"] if isinstance(m, dict) else m for m in self.injected_messages]
         self.injected_messages.clear()
         return msgs
 

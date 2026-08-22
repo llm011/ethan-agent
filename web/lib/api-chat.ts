@@ -9,7 +9,7 @@ export interface ChatMessage {
   images?: { data: string; media_type: string }[];  // base64 raw (no data: prefix)
 }
 
-export type StreamChunk = { content?: string; done?: boolean; stopped?: boolean; error?: string; model?: string; usage?: Record<string, number>; ttfb_ms?: number; total_ms?: number; message_id?: number; title?: string; tool?: string; args?: string; intent?: string; state?: string; id?: string; duration_ms?: number; result_preview?: string; result_detail?: string; entity_type?: string; entity_id?: string; injected?: string[]; sub_steps?: Array<{ tool: string; args: string; state: string; duration_ms?: number | null; result_preview?: string }>; ui?: unknown[]; mcp_app?: { uri: string; data?: Record<string, unknown>; html?: string; csp?: Record<string, string[]> }; cards?: Array<{ type: string; [key: string]: unknown }>; consent_request?: boolean; request_id?: string; description?: string; detail?: string; thinking?: boolean; heartbeat?: boolean; elapsed?: number; skills_matched?: Array<{ name: string; is_default?: boolean }>; background_polling?: boolean; polling_message?: string; new_message?: boolean; confirm_browser_cleanup?: boolean; sessions?: Array<{ sessionId: string; title: string; tabCount: number }>; ask_user_request?: boolean; question?: string; options?: Array<{ label: string; value: string }>; default?: string; timeout?: number; wait_for_user_request?: boolean; prompt?: string; input_type?: string; placeholder?: string; confirm_label?: string; cancel_label?: string };
+export type StreamChunk = { content?: string; done?: boolean; stopped?: boolean; error?: string; model?: string; usage?: Record<string, number>; ttfb_ms?: number; total_ms?: number; message_id?: number; title?: string; tool?: string; args?: string; intent?: string; state?: string; id?: string; duration_ms?: number; result_preview?: string; result_detail?: string; entity_type?: string; entity_id?: string; injected?: string[]; injected_added?: { id: string; content: string }; injected_removed?: string; sub_steps?: Array<{ tool: string; args: string; state: string; duration_ms?: number | null; result_preview?: string }>; ui?: unknown[]; mcp_app?: { uri: string; data?: Record<string, unknown>; html?: string; csp?: Record<string, string[]> }; cards?: Array<{ type: string; [key: string]: unknown }>; consent_request?: boolean; request_id?: string; description?: string; detail?: string; thinking?: boolean; heartbeat?: boolean; elapsed?: number; skills_matched?: Array<{ name: string; is_default?: boolean }>; background_polling?: boolean; polling_message?: string; new_message?: boolean; confirm_browser_cleanup?: boolean; sessions?: Array<{ sessionId: string; title: string; tabCount: number }>; ask_user_request?: boolean; question?: string; options?: Array<{ label: string; value: string }>; default?: string; timeout?: number; wait_for_user_request?: boolean; prompt?: string; input_type?: string; placeholder?: string; confirm_label?: string; cancel_label?: string };
 
 /** 把一个 SSE Response body 解析成事件流（streamChat / streamResume 共用）。
  *  如果连接被静默断开（未收到 done 事件就 EOF），抛错让调用方触发重连。 */
@@ -151,7 +151,7 @@ export async function cancelToolCall(sessionId: string, toolCallId: string): Pro
 /** 运行中向当前 session 的 Agent 上下文「补充信息」。
  *  信息会插入到下一轮调模型前的 working 列表末尾（prompt 结尾）。
  *  无活跃 run（已结束）时后端返回 409，这里抛错由调用方提示。 */
-export async function injectMessage(sessionId: string, content: string): Promise<{ ok: boolean; queued: boolean }> {
+export async function injectMessage(sessionId: string, content: string): Promise<{ ok: boolean; queued: boolean; id?: string }> {
   const res = await fetch(`${API_URL}/chat/${encodeURIComponent(sessionId)}/inject`, {
     method: "POST",
     headers: headers(),
@@ -169,6 +169,24 @@ export async function injectMessage(sessionId: string, content: string): Promise
       else detail = `提交失败（${res.status}）`;
     }
     throw new Error(detail);
+  }
+  return res.json();
+}
+
+/** 删除一条尚未被消费的「补充信息」（待处理区点 ×）。
+ *  已消费的不受影响（仍在工具时间线的 injected 信息里）。 */
+export async function deleteInjectedMessage(sessionId: string, injId: string): Promise<{ ok: boolean }> {
+  const res = await fetch(`${API_URL}/chat/${encodeURIComponent(sessionId)}/inject/${encodeURIComponent(injId)}`, {
+    method: "DELETE",
+    headers: headers(),
+  });
+  if (!res.ok) {
+    let detail = "";
+    try {
+      const body = await res.clone().json();
+      detail = typeof body?.detail === "string" ? body.detail : "";
+    } catch {}
+    throw new Error(detail || `删除失败（${res.status}）`);
   }
   return res.json();
 }
