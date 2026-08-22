@@ -419,11 +419,11 @@ rank→编号列表、stats→`column_set` 大数字、timeline→分节）。�
 
 ### 工具如何声明需要授权
 
-工具重写 `consent_check(**kwargs) -> str | None`：返回非空字符串表示需要授权（字符串是给用户看的操作说明），返回 `None` 放行。另可重写 `consent_scope(**kwargs) -> str` 决定**授权记忆的粒度**（默认工具名，文件类返回目录路径），以及 `consent_always(**kwargs) -> bool` 标记**高危调用每次都问**（绕过会话记忆，且不计入放行）。当前声明授权的工具：
+工具重写 `consent_check(**kwargs) -> str | None`：返回非空字符串表示需要授权（字符串是给用户看的操作说明），返回 `None` 放行。另可重写 `consent_scope(**kwargs) -> str` 决定**授权记忆的粒度**（默认工具名，文件类返回目录路径）、`consent_always(**kwargs) -> bool` 标记**高危调用每次都问**（绕过会话记忆，且不计入放行），以及 `consent_destructive(**kwargs) -> bool` 标记**破坏性调用**——超级权限模式下仅此类调用保留弹窗（默认跟随 `consent_always`，shell 覆写为仅破坏性子集）。当前声明授权的工具：
 
 | 工具 | 触发条件 | 授权记忆粒度（scope） |
 |------|---------|----------------------|
-| `shell` | 任意命令；**高危命令**（rm -rf / sudo / 管道执行 / dd / mkfs / 覆写系统文件 / fork bomb / 破坏性 git 等）`consent_always=True` 每次必问 | 工具名（普通命令授权一次，本会话其余普通命令放行；高危命令不计入放行） |
+| `shell` | 任意命令；**高危命令**（rm -rf / sudo / 管道执行 / dd / mkfs / 覆写系统文件 / fork bomb / 破坏性 git / env dump / secret 引用等）`consent_always=True` 每次必问；其中**破坏性**子集（rm -rf / 格式化 / 写设备 / fork bomb / 破坏性 git）`consent_destructive=True` 超级权限下也必问 | 工具名（普通命令授权一次，本会话其余普通命令放行；高危命令不计入放行） |
 | `file_write` | 任意路径，但 `/tmp` 等临时目录**默认豁免** | **目录**（授权某目录后，其子目录/同目录文件免问） |
 | `file_read` | 仅当路径在 `~/.ethan/.secrets/` 内 | **单文件**（每个密钥单独问一次，不目录放行） |
 | `get_secret` | 任意密钥读取 | 工具名 |
@@ -435,5 +435,6 @@ rank→编号列表、stats→`column_set` 大数字、timeline→分节）。�
 ### 各渠道的授权 Provider（`ethan/core/consent.py`）
 
 - **Web**（`WebConsentProvider`）：向 SSE 流注入 `consent_request` 事件，前端渲染授权卡片，await 用户点击。前端 `POST /api/consent/{request_id}` 解析 Future，流继续。
+- **Web 超级权限**（`SuperConsentProvider`，`auto_consent`）：普通及高危非破坏性授权自动批准（不弹窗）；仅**破坏性**调用（`consent_destructive=True`，如 rm -rf）仍弹窗交还用户拍板。仅本地回环/RFC1918 来源的请求可激活（防 token 泄露后远程静默 RCE）。
 - **TUI/REPL**（`TuiConsentProvider`）：阻塞式 `y/N` 输入。
 - **三方渠道**（`ChannelGuardProvider`，如飞书）：无交互 UI，认主人后非主人调用 `side_effect=True` 工具一律硬拒绝。

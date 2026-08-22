@@ -20,7 +20,13 @@ from typing import Any
 from unittest.mock import patch
 
 from ethan.core.agent import Agent, UsageStats
-from ethan.core.consent import AutoConsentProvider, ConsentEvent, WebConsentProvider, set_consent_provider
+from ethan.core.consent import (
+    AutoConsentProvider,
+    ConsentEvent,
+    SuperConsentProvider,
+    WebConsentProvider,
+    set_consent_provider,
+)
 from ethan.providers.base import Message, StreamChunk, ToolCall, ToolEvent
 from ethan.tools.base import BaseTool
 from ethan.tools.registry import ToolRegistry
@@ -30,8 +36,11 @@ from ethan.tools.registry import ToolRegistry
 class SecretTool(BaseTool):
     """consent_check 恒命中 → 每次调用都进 consent 分支。"""
 
-    def __init__(self, always: bool = False):
+    def __init__(self, always: bool = False, destructive: bool | None = None):
         self._always = always
+        # 默认跟随 always（BaseTool.consent_destructive 的保守默认）；
+        # 显式传 False 模拟「高危但非破坏性」（如 sudo / env dump）。
+        self._destructive = always if destructive is None else destructive
 
     @property
     def name(self) -> str:
@@ -50,6 +59,9 @@ class SecretTool(BaseTool):
 
     def consent_always(self, **kwargs) -> bool:
         return self._always
+
+    def consent_destructive(self, **kwargs) -> bool:
+        return self._destructive
 
     async def run(self, **kwargs) -> str:
         return "sk-test"
@@ -226,3 +238,73 @@ def test_cancelled_not_labeled_user_reject():
     msg = _tool_message_of_second_round(provider_llm)
     assert "已取消" in msg
     assert "用户拒绝" not in msg
+
+
+# ── 5. 超级权限分级（2026-08-22 调整） ─────────────────────────
+# 超级权限（SuperConsentProvider.auto_approve）只对 consent_destructive=True
+# 的调用保留强制弹窗；其余高危自动放行。普通 web / 无人值守模式口径不变。
+
+def test_super_mode_risky_auto_approved():
+    """Super + always=True 但非破坏性 → 不弹窗直接放行。"""
+    provider_llm = FakeProvider(ToolCall(id="call_1", name="fake_get_secret", arguments={}))
+    agent = _make_agent(
+        SecretTool(always=True, destructive=False), provider_llm, session_id="t-super-risky"
+    )
+    set_consent_provider(SuperConsentProvider(session_id="t-super-risky"))
+
+    events = _drive(agent)
+    # 自动放行：不产出 ConsentEvent，无 error，工具照常 start
+    assert not [e for e in events if isinstance(e, ConsentEvent)]
+    assert not [e for e in _tool_events(events) if e.state == "error"]
+    assert any(e.state == "start" for e in _tool_events(events))
+
+
+def test_super_mode_destructive_still_popups():
+    """Super + 破坏性 → 仍弹 ConsentEvent（always=True），用户批准后执行。"""
+    provider_llm = FakeProvider(ToolCall(id="call_1", name="fake_get_secret", arguments={}))
+    agent = _make_agent(
+        SecretTool(always=True, destructive=True), provider_llm, session_id="t-super-destructive"
+    )
+    consent = SuperConsentProvider(session_id="t-super-destructive")
+    set_consent_provider(consent)
+
+    def on_event(ev):
+        if isinstance(ev, ConsentEvent):
+            consent.resolve(ev.request_id, allowed=True)  # 用户点「允许」
+
+    events = _drive(agent, on_event)
+    consent_events = [e for e in events if isinstance(e, ConsentEvent)]
+    assert consent_events and consent_events[0].always is True
+    assert not [e for e in _tool_events(events) if e.state == "error"]
+
+
+def test_web_mode_always_still_popups():
+    """普通 web 模式口径不变：always=True（即使非破坏性）仍每次弹窗。"""
+    provider_llm = FakeProvider(ToolCall(id="call_1", name="fake_get_secret", arguments={}))
+    agent = _make_agent(
+        SecretTool(always=True, destructive=False), provider_llm, session_id="t-web-always"
+    )
+    consent = WebConsentProvider(session_id="t-web-always")
+    set_consent_provider(consent)
+
+    def on_event(ev):
+        if isinstance(ev, ConsentEvent):
+            consent.resolve(ev.request_id, allowed=False)
+
+    events = _drive(agent, on_event)
+    assert [e for e in events if isinstance(e, ConsentEvent)]
+    previews = [e.result_preview for e in _tool_events(events) if e.state == "error"]
+    assert previews == ["用户拒绝"]
+
+
+def test_auto_mode_always_still_rejected():
+    """无人值守模式口径不变：always=True（即使非破坏性）仍自动拒绝。"""
+    provider_llm = FakeProvider(ToolCall(id="call_1", name="fake_get_secret", arguments={}))
+    agent = _make_agent(
+        SecretTool(always=True, destructive=False), provider_llm, session_id="t-auto-always"
+    )
+    set_consent_provider(AutoConsentProvider(session_id="t-auto-always"))
+
+    events = _drive(agent)
+    previews = [e.result_preview for e in _tool_events(events) if e.state == "error"]
+    assert previews == ["高危命令·自动拒绝"]

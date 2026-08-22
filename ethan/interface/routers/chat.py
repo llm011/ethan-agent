@@ -375,8 +375,9 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
         # 执行任意脚本（RCE）。因此强制限定：仅当请求来自本地回环或 RFC1918 私有网段
         # 时才允许生效，公网来源一律降级为 WebConsentProvider（逐项弹窗确认）。
         # 注：私有网段放行是为了支持 docker 部署（容器内看到的 client 是网桥 IP）。
-        # 高危命令（consent_always=True，如 rm -rf）即使用户开启超级权限也仍弹窗确认——
-        # 用户就在屏幕前，交还用户拍板，而非静默拒绝。
+        # 破坏性命令（consent_destructive=True，如 rm -rf）即使用户开启超级权限也仍
+        # 弹窗确认——用户就在屏幕前，交还用户拍板，而非静默拒绝；其余高危（sudo 等）
+        # 在超级权限下自动放行。
         consent = None
         if req.auto_consent and _is_local(request):
             consent = SuperConsentProvider(session_id=req.session_id or "")
