@@ -72,7 +72,6 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const [sessionUsage, setSessionUsage] = useState<Usage>({ input: 0, output: 0, cache: 0 });
   const [models, setModels] = useState<ModelEntry[]>([]);
   const [selectedModel, setSelectedModel] = useState("");
-  const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [schedules, setSchedules] = useState<any[]>([]);
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -104,6 +103,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
   // 输入框状态机：按 session 缓存 draft 和排队消息
   const inputStore = useInputStore();
+  // 输入框附件（贴图等）也由 inputStore 管理：切走会话时随快照保存，切回时恢复
+  const { files: pendingFiles, setFiles: setPendingFiles } = inputStore;
   const inputStoreRef = useRef(inputStore);
   inputStoreRef.current = inputStore;
 

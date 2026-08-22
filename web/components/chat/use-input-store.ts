@@ -16,11 +16,13 @@ export interface QueuedMessage {
 interface InputState {
   draft: string;
   queue: QueuedMessage[];
+  /** 输入框当前附件（贴图等）。仅随内存快照保存/恢复（会话切换），不落 sessionStorage */
+  files: PendingFile[];
 }
 
 const STORAGE_KEY = "ethan_input_store";
 
-const emptyState = (): InputState => ({ draft: "", queue: [] });
+const emptyState = (): InputState => ({ draft: "", queue: [], files: [] });
 
 let nextQueueId = 1;
 export function genQueueId() {
@@ -34,11 +36,16 @@ function loadStore(): Map<string | null, InputState> {
   try {
     const raw = sessionStorage.getItem(STORAGE_KEY);
     if (!raw) return new Map();
-    const obj = JSON.parse(raw) as Record<string, InputState>;
+    const obj = JSON.parse(raw) as Record<string, Partial<InputState>>;
     // JSON 里 null key 会变成 "null" 字符串
     const map = new Map<string | null, InputState>();
     for (const [k, v] of Object.entries(obj)) {
-      map.set(k === "__null__" ? null : k, v);
+      // files 不入 sessionStorage（见 persistStore），读取时兜底为空
+      map.set(k === "__null__" ? null : k, {
+        draft: v.draft ?? "",
+        queue: v.queue ?? [],
+        files: [],
+      });
     }
     return map;
   } catch {
@@ -49,11 +56,14 @@ function loadStore(): Map<string | null, InputState> {
 function persistStore(store: Map<string | null, InputState>) {
   if (typeof window === "undefined") return;
   try {
-    const obj: Record<string, InputState> = {};
+    const obj: Record<string, Pick<InputState, "draft" | "queue">> = {};
     for (const [k, v] of store.entries()) {
       // 只保存非空状态
       if (v.draft || v.queue.length > 0) {
-        obj[k === null ? "__null__" : k] = v;
+        // files 不入 sessionStorage：贴图是 base64 dataUrl，单张即可能 1~2MB，
+        // ~5MB 配额下整体 JSON.stringify 会失败，连累 draft/queue 一起丢。
+        // files 只随内存快照在会话切换间保存/恢复（页面刷新后不恢复）。
+        obj[k === null ? "__null__" : k] = { draft: v.draft, queue: v.queue };
       }
     }
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
@@ -83,27 +93,32 @@ export function useInputStore() {
     const saved = storeRef.current.get(null);
     return saved?.queue ?? [];
   });
+  const [files, setFilesState] = useState<PendingFile[]>(() => {
+    const saved = storeRef.current.get(null);
+    return saved?.files ?? [];
+  });
 
   // 状态变化时持久化
   const persist = useCallback(() => {
     // 先更新当前 session 的快照
-    storeRef.current.set(currentSessionRef.current, { draft, queue });
+    storeRef.current.set(currentSessionRef.current, { draft, queue, files });
     persistStore(storeRef.current);
-  }, [draft, queue]);
+  }, [draft, queue, files]);
 
   useEffect(() => {
     persist();
   }, [persist]);
 
   // 保存当前状态到 store
-  const saveCurrent = useCallback((draftOverride?: string, queueOverride?: QueuedMessage[]) => {
+  const saveCurrent = useCallback((draftOverride?: string, queueOverride?: QueuedMessage[], filesOverride?: PendingFile[]) => {
     const key = currentSessionRef.current;
     storeRef.current.set(key, {
       draft: draftOverride ?? draft,
       queue: queueOverride ?? queue,
+      files: filesOverride ?? files,
     });
     persistStore(storeRef.current);
-  }, [draft, queue]);
+  }, [draft, queue, files]);
 
   // 切换会话
   const switchTo = useCallback((sessionId: string | null, currentDraft?: string) => {
@@ -111,6 +126,7 @@ export function useInputStore() {
     storeRef.current.set(currentSessionRef.current, {
       draft: currentDraft ?? draft,
       queue,
+      files,
     });
     // 切换
     currentSessionRef.current = sessionId;
@@ -118,12 +134,17 @@ export function useInputStore() {
     const saved = storeRef.current.get(sessionId) ?? emptyState();
     setDraftState(saved.draft);
     setQueue(saved.queue);
+    setFilesState(saved.files);
     // 持久化
     persistStore(storeRef.current);
-  }, [draft, queue]);
+  }, [draft, queue, files]);
 
   const setDraft = useCallback((text: string) => {
     setDraftState(text);
+  }, []);
+
+  const setFiles = useCallback((next: PendingFile[]) => {
+    setFilesState(next);
   }, []);
 
   const addToQueue = useCallback((text: string, images?: PendingFile[]) => {
@@ -186,6 +207,8 @@ export function useInputStore() {
   return {
     draft,
     setDraft,
+    files,
+    setFiles,
     queue,
     addToQueue,
     removeFromQueue,
