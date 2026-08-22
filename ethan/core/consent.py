@@ -133,16 +133,19 @@ class WebConsentProvider(ConsentProvider):
 
 
 class SuperConsentProvider(WebConsentProvider):
-    """Web 超级权限（auto_consent）：普通授权自动批准（不弹窗），高危命令仍弹窗确认。
+    """Web 超级权限（auto_consent）：普通及高危非破坏性授权自动批准（不弹窗），
+    仅破坏性命令（rm -rf 等，见 BaseTool.consent_destructive）仍弹窗确认。
 
     与 AutoConsentProvider 的区别：后者面向无人值守场景（定时任务 / CLI -p），
     没有交互 UI，高危命令只能直接拒绝；本 Provider 面向有人在线的 Web 会话——
-    用户就在屏幕前，高危命令（consent_always=True，如 rm -rf）应弹窗交还用户拍板，
-    而不是静默拒绝。静默拒绝曾配合「用户拒绝」文案让模型误以为用户表达过否定
-    意见而停下来追问（见 2026-08-20 会话 s_20260820_1117_81b1 的排查）。
+    用户就在屏幕前，破坏性命令应弹窗交还用户拍板，而不是静默拒绝。静默拒绝曾
+    配合「用户拒绝」文案让模型误以为用户表达过否定意见而停下来追问（见
+    2026-08-20 会话 s_20260820_1117_81b1 的排查）。
 
-    auto_approve=True：agent loop 据此对非高危（always=False）授权直接放行，
-    不创建 ConsentEvent；高危命令照常走 create() + await 弹窗（300s 超时按拒绝）。
+    auto_approve=True：agent loop 据此对非破坏性授权直接放行，不创建
+    ConsentEvent；破坏性命令照常走 create() + await 弹窗（300s 超时按拒绝）。
+    （2026-08-22 调整：此前所有 consent_always=True 的高危都弹窗，curl 等日常
+    命令被 env-dump 误判成高危后也被反复弹窗，用户反馈只拦 rm -rf 级破坏。）
     """
 
     auto_approve = True

@@ -17,24 +17,34 @@ _MISSING_BIN_HINTS = {
     ),
 }
 
-# 高危命令模式：命中则每次都重新询问授权，且不计入会话放行（即使本会话已授权过 shell）。
-# 目标是拦住「一次授权 = 整个会话任意高危命令」最坏情况，日常命令仍走会话记忆免问。
-_DANGEROUS_PATTERNS = [
+# 高危命令分两级（2026-08-22 调整，用户反馈超级模式下 curl 等日常命令被反复弹窗）：
+#
+# · 破坏性（_DESTRUCTIVE_PATTERNS）：不可逆的本地数据/系统破坏。即使超级权限
+#   （auto_consent）模式也强制弹窗交还用户拍板——见 ShellTool.consent_destructive。
+# · 高危非破坏性（_RISKY_PATTERNS）：提权 / 下载管道执行 / 动态执行 / 危险权限。
+#   普通模式下与破坏性同等对待（每次必问、不计会话放行）；超级权限模式下
+#   自动放行——用户开启超级权限即接管这部分风险，避免日常命令被反复打断。
+#
+# 两级合计仍构成完整高危集合 _DANGEROUS_RE：普通模式行为不变。
+_DESTRUCTIVE_PATTERNS = [
     r'\brm\s+(?:-\w*\s+)*-\w*[rf]',          # rm -rf / rm -r -f / rm -fr 等
-    r'\b(?:sudo|doas)\b',                      # 提权
     r'\bmkfs\b|\bfdisk\b|\bparted\b',          # 格式化/分区
     r'\bdd\b\s+.*\bof=',                       # dd 写盘
     # 覆写系统/设备文件。/dev/null、/dev/stdout、/dev/stderr 是重定向黑洞/透传目标，
     # 写入无副作用，放行（否则 `2>/dev/null` 这类极常见写法会被误判高危，
     # 在超级权限模式下被静默拒绝）；/dev/sda、/dev/tcp 等仍拦截。
     r'>\s*/dev/(?!null\b|stdout\b|stderr\b)|>\s*/etc/|>\s*/sys/|>\s*/boot/',
-    r'\b(?:curl|wget)\b[^|]*\|\s*(?:sudo\s+)?(?:ba)?sh\b',  # 下载管道执行
-    r'\beval\b|\bsource\s+/dev/stdin',          # eval / 执行 stdin
-    r'\bchmod\s+(?:-\w+\s+)*0?777\b|\bchown\s+-\w*R',  # 危险权限/递归改属主
     r':\(\)\s*\{.*\|.*&.*\}',                   # fork bomb
     r'\bgit\b.*\b(?:reset\s+--hard|clean\s+-\w*[fd]|push\s+.*--force|push\s+.*-f)\b',  # 破坏性 git
 ]
-_DANGEROUS_RE = re.compile("|".join(_DANGEROUS_PATTERNS))
+_RISKY_PATTERNS = [
+    r'\b(?:sudo|doas)\b',                       # 提权
+    r'\b(?:curl|wget)\b[^|]*\|\s*(?:sudo\s+)?(?:ba)?sh\b',  # 下载管道执行
+    r'\beval\b|\bsource\s+/dev/stdin',          # eval / 执行 stdin
+    r'\bchmod\s+(?:-\w+\s+)*0?777\b|\bchown\s+-\w*R',  # 危险权限/递归改属主
+]
+_DESTRUCTIVE_RE = re.compile("|".join(_DESTRUCTIVE_PATTERNS))
+_DANGEROUS_RE = re.compile("|".join(_DESTRUCTIVE_PATTERNS + _RISKY_PATTERNS))
 
 # 检测命令里引用 secret 环境变量的语法：$VAR / ${VAR}。
 # secrets 通过 load_secret_env() 注入 shell 子进程环境（见 run()），agent 可被诱导
@@ -45,22 +55,46 @@ _DOLLAR_VAR_RE = re.compile(r'\$\{([A-Za-z_][A-Za-z0-9_]*)(?::[^}]*)?\}|\$([A-Za
 
 # 能列举环境变量的命令：env/printenv/set/export -p/declare -x/compgen -v。
 # 这些命令不需要 $VAR 语法就能 dump 所有 secret（含注入的密钥），必须单独拦截。
-# env/set 后面必须是分隔符（;|&或行尾）才算 dump（env VAR=val cmd 是设置不是列举）。
-_ENV_DUMP_RE = re.compile(
-    r'\b(?:'
-    r'printenv'
-    r'|env(?=\s*(?:[;&|]|$))'
-    r'|set(?=\s*(?:[;&|]|$))'
-    r'|export\s+-p'
-    r'|declare\s+-[xp]'
-    r'|compgen\s+-v'
-    r')\b'
+# 判定要求命令出现在「命令位置」（命令串开头，或 ; | & ( ` 换行等 shell 分隔符
+# 之后，剥掉 VAR= 赋值前缀），而不是字符串任意位置——旧版按 \b 词边界 + 后瞻
+# 分隔符匹配，URL 里的 env/set 子串会被误判：
+#   curl -sL https://api.x.com/v1/env | jq     （路径以 /env 结尾 + 管道）
+#   curl -sL 'https://x.com/a?token=env&u=1'   （查询串里的 env& ）
+#   curl -sL https://x.com/set                 （路径以 /set 结尾）
+# 这些误判走 always 路径，导致超级权限模式下 curl 也被强制弹窗（2026-08-22 反馈）。
+_ENV_DUMP_SPLIT_RE = re.compile(r'[;\n|&`]')  # 切分命令段（含 || && 的组成部分）
+_ENV_DUMP_HEAD_RE = re.compile(
+    r'^(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*'  # 剥掉 VAR=val 赋值前缀
+    r'(printenv|env|set|export|declare|compgen)\b\s*(.*)$',
+    re.DOTALL,
 )
+
+
+def _is_env_dump(command: str) -> bool:
+    """命令是否会在某段中以 env/printenv/set 等列举环境变量（含注入的 secret）。"""
+    for seg in _ENV_DUMP_SPLIT_RE.split(command or ""):
+        m = _ENV_DUMP_HEAD_RE.match(seg.strip())
+        if not m:
+            continue
+        head, rest = m.group(1), (m.group(2) or "").strip()
+        if head == "printenv":
+            return True
+        if head in ("env", "set"):
+            # 裸 env/set 才是 dump；带参数（env VAR=1 cmd / set -x）是设置/执行
+            if not rest:
+                return True
+        elif head == "export" and rest.startswith("-p"):
+            return True
+        elif head == "declare" and re.match(r'-\w*[xp]', rest):
+            return True
+        elif head == "compgen" and rest.startswith("-v"):
+            return True
+    return False
 
 # 只读无副作用命令白名单：匹配到直接跳过 consent 弹窗。
 # 目的：避免「ls 某脚本目录是否存在 / python -c 仅 Path.exists() 探测」
 # 这类零风险命令被误拒后，模型绕到 web_fetch 等低质量替代路径。
-# 注意：这只是不弹授权，不影响其他安全拦截（_DANGEROUS_RE / _ENV_DUMP_RE 仍优先命中）。
+# 注意：这只是不弹授权，不影响其他安全拦截（_DANGEROUS_RE / _is_env_dump 仍优先命中）。
 _SAFE_READONLY_CMD_RE = re.compile(
     r'^(?:'
     # ls 纯列表：允许 ls + 路径/通配 + 常见只读选项 + 尾部 && echo <标识符>
@@ -245,7 +279,7 @@ class ShellTool(BaseTool):
             return f"⚠️ 高危 shell 命令，请确认：{cmd[:200]}"
         # 环境变量列举命令（env/printenv/set 等）：不需要 $VAR 就能 dump 所有 secret，
         # 每次重新授权。
-        if _ENV_DUMP_RE.search(cmd):
+        if _is_env_dump(cmd):
             return f"⚠️ 命令可能泄露环境变量（含 secret），请确认：{cmd[:200]}"
         # 命令引用了 secret 环境变量：可被诱导泄露密钥（编码能绕过 mask_text），
         # 每次重新授权，让用户在弹窗里看到具体引用了哪个 secret 变量。
@@ -264,9 +298,21 @@ class ShellTool(BaseTool):
         return "执行 shell 命令（授权后本会话内的所有 shell 命令都不再询问）"
 
     def consent_always(self, command: str = "", **kwargs) -> bool:
-        # 高危命令始终重新询问，即使本会话已授权过 shell，也不计入会话放行
+        # 高危命令始终重新询问，即使本会话已授权过 shell，也不计入会话放行。
+        # 这是普通模式/无人值守模式的口径（破坏性 + 高危非破坏性 + 密钥泄露面）。
         cmd = command or ""
-        return bool(_DANGEROUS_RE.search(cmd)) or bool(_ENV_DUMP_RE.search(cmd)) or bool(_detect_secret_env_refs(cmd))
+        return (
+            bool(_DANGEROUS_RE.search(cmd))
+            or _is_env_dump(cmd)
+            or bool(_detect_secret_env_refs(cmd))
+        )
+
+    def consent_destructive(self, command: str = "", **kwargs) -> bool:
+        # 破坏性命令（rm -rf / 格式化 / 写设备 / fork 炸弹 / 破坏性 git）：
+        # 即使超级权限（auto_consent）模式也强制弹窗。其余高危（sudo / 管道执行 /
+        # eval / chmod 777 / env dump / secret 引用）在超级模式下自动放行——
+        # 见 agent loop 对 auto_approve 的处理。
+        return bool(_DESTRUCTIVE_RE.search(command or ""))
     parameters = {
         "type": "object",
         "properties": {

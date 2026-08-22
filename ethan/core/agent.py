@@ -2011,6 +2011,13 @@ class Agent:
                     sess_id = getattr(consent_provider, "session_id", "") if consent_provider else ""
                     scope = tool.consent_scope(**tc.arguments) if tool else tc.name
                     always = tool.consent_always(**tc.arguments) if tool else False
+                    # 超级权限（auto_approve）模式只对「破坏性」调用保留强制弹窗
+                    # （rm -rf / 格式化 / 写设备等，见 consent_destructive）；
+                    # 其余高危（sudo / 管道执行 / env dump / secret 引用等）自动放行
+                    # ——用户开启超级权限即接管这部分风险，避免 curl 等日常命令
+                    # 被反复弹窗打断（2026-08-22 用户反馈）。
+                    if always and getattr(consent_provider, "auto_approve", False):
+                        always = bool(tool.consent_destructive(**tc.arguments)) if tool else always
                     if not always and is_granted(sess_id, scope):
                         allowed_calls.append(tc)
                         yield ToolEvent(

@@ -51,6 +51,17 @@ class BaseTool(ABC):
         """
         return False
 
+    def consent_destructive(self, **kwargs) -> bool:
+        """本次调用是否属于「破坏性」操作——即使超级权限（auto_consent）模式也强制弹窗。
+
+        与 consent_always 的区别：consent_always 覆盖全部高危（含提权 / 密钥泄露面等），
+        本方法只圈定不可逆破坏（rm -rf / 格式化 / 写设备等）。agent loop 在超级权限
+        （auto_approve）模式下只对本方法返回 True 的调用保留弹窗，其余自动放行。
+        默认跟随 consent_always（保守：超级模式下高危照常弹窗）；shell 工具覆写为
+        仅破坏性子集。
+        """
+        return self.consent_always(**kwargs)
+
     @property
     @abstractmethod
     def name(self) -> str: ...
