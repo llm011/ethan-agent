@@ -2,7 +2,20 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom"
 import { Plus, Trash2, Search, Settings, Book, BookOpen, Pencil, Check, X, List, Wrench, RefreshCw, Loader2, Pin, PinOff } from "lucide-react";
 import { Clock, Database, CalendarDays } from "lucide-react";
+import { Ellipsis, CircleCheck } from "lucide-react";
 import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@ethan/shared/ui/dropdown-menu";
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+  TooltipProvider,
+} from "@ethan/shared/ui/tooltip";
 import { useSidebar } from "@/components/layout-shell";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
 import { getVersion as getTauriAppVersion } from "@tauri-apps/api/app";
@@ -121,7 +134,7 @@ export function Sidebar() {
   // 主列表请求已 hide 心跳/定时（否则高频心跳会话会挤爆前 50，把普通会话顶出去）；
   // 定时/心跳两个分组改用 title_prefixes 独立拉取，互不影响。
   const pinnedIds = new Set(pinnedSessions.map((s) => s.id));
-  const normalSessions = sessions.filter((s) => !s.title.startsWith("[定时]") && !s.title.startsWith("[心跳]") && s.source !== "browser-extension" && !pinnedIds.has(s.id));
+  const normalSessions = sessions.filter((s) => !s.title.startsWith("✅") && !s.title.startsWith("[定时]") && !s.title.startsWith("[心跳]") && s.source !== "browser-extension" && !pinnedIds.has(s.id));
   const scheduleSessions = scheduleGroupSessions;
   const heartbeatSessions = heartbeatGroupSessions;
   const scheduleUnreadCount = scheduleSessions.filter(
@@ -280,6 +293,25 @@ export function Sidebar() {
     }
   };
 
+  // 完成/取消完成：在标题前加/去 ✅ 前缀（复用 rename 接口改 title）
+  const handleToggleDone = async (id: string, title: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    // 兜底：标题恰好只剩 "✅" 时去掉前缀会变空串（后端 400），回退为默认标题
+    const newTitle = title.startsWith("✅")
+      ? title.replace(/^✅\s*/, "") || "新对话"
+      : `✅ ${title}`;
+    try {
+      await renameSession(id, newTitle);
+    } catch {
+      alert("操作失败，请稍后重试");
+      return;
+    }
+    const patch = (list: SessionInfo[]) =>
+      list.map((s) => (s.id === id ? { ...s, title: newTitle } : s));
+    setSessions(patch);
+    setPinnedSessions(patch);
+  };
+
   const renderSession = (s: SessionInfo) => (
     <div
       key={s.id}
@@ -367,32 +399,48 @@ export function Sidebar() {
             </button>
           </div>
         ) : (
-          <div className="hidden group-hover:flex shrink-0 gap-0.5">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-5 w-5"
-              onClick={(e) => handleRegenTitle(s.id, e)}
-              title="AI 重新生成标题"
-            >
-              <RefreshCw className={`h-3 w-3 ${regeneratingId === s.id ? "animate-spin" : ""}`} />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-5 w-5"
-              onClick={(e) => startEdit(s.id, s.title, e)}
-            >
-              <Pencil className="h-3 w-3" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-5 w-5"
-              onClick={(e) => handleDeleteSession(s.id, e)}
-            >
-              <Trash2 className="h-3 w-3" />
-            </Button>
+          <div className="hidden group-hover:flex shrink-0 items-center gap-0.5">
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-5 w-5"
+                    onClick={(e) => handleToggleDone(s.id, s.title, e)}
+                  />
+                }
+              >
+                <CircleCheck className={`h-3 w-3 ${s.title.startsWith("✅") ? "text-primary" : "text-muted-foreground"}`} />
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="max-w-52 flex-col items-start gap-0.5 text-left">
+                <span className="font-medium">{s.title.startsWith("✅") ? "取消完成标记" : "标记完成"}</span>
+                <span className="opacity-80">仅标识标题，会话仍可继续聊</span>
+              </TooltipContent>
+            </Tooltip>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                className="shrink-0 w-5 h-5 flex items-center justify-center rounded hover:bg-muted transition-colors text-muted-foreground"
+                title="更多操作"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <Ellipsis className="h-3 w-3" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+                <DropdownMenuItem onClick={(e) => handleRegenTitle(s.id, e)}>
+                  <RefreshCw className={`h-3 w-3 ${regeneratingId === s.id ? "animate-spin" : ""}`} />
+                  AI 重新生成标题
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={(e) => startEdit(s.id, s.title, e)}>
+                  <Pencil className="h-3 w-3" />
+                  重命名
+                </DropdownMenuItem>
+                <DropdownMenuItem variant="destructive" onClick={(e) => handleDeleteSession(s.id, e)}>
+                  <Trash2 className="h-3 w-3" />
+                  删除
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         )}
       </div>
@@ -412,7 +460,7 @@ export function Sidebar() {
   );
 
   return (
-    <>
+    <TooltipProvider delay={0}>
     <ConfirmDialog
       open={confirmState.open}
       title="删除对话"
@@ -668,6 +716,6 @@ export function Sidebar() {
         </Button>
       </div>
     </aside>
-    </>
+    </TooltipProvider>
   );
 }
