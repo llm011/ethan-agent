@@ -13,6 +13,7 @@ import {
   resumeFromMessage,
   stopGeneration,
   injectMessage,
+  deleteInjectedMessage,
   cancelToolCall,
   updateSessionMode,
   respondConsent,
@@ -219,16 +220,37 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     }
   }, [activeSession]);
 
+  // 运行中「补充信息」待处理列表：SSE injected_added/injected/injected_removed 事件驱动，
+  // 刷新后从 session detail 的 pending_injected（DB 持久化镜像）恢复。
+  const [pendingInjected, setPendingInjected] = useState<{ id: string; content: string }[]>([]);
+
   // 运行中「补充信息」：调 POST /chat/{id}/inject，把内容塞入 ChatRun inbox。
   // agent loop 下一轮调模型前会 append 到 working 末尾（prompt 结尾）。
   // 无活跃 run 时后端返回 409，这里返回 {ok:false, error} 由 InjectBox 提示。
   const handleInject = useCallback(async (content: string): Promise<{ ok: boolean; error?: string }> => {
     if (!activeSession) return { ok: false, error: "无活跃会话" };
     try {
-      await injectMessage(activeSession, content);
+      const res = await injectMessage(activeSession, content);
+      // 乐观追加：SSE injected_added 事件按 id 去重，不会重复
+      if (res.id) {
+        setPendingInjected(prev => (prev.some(p => p.id === res.id) ? prev : [...prev, { id: res.id!, content }]));
+      }
       return { ok: true };
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : "提交失败" };
+    }
+  }, [activeSession]);
+
+  // 待处理区点 × 删除一条补充信息（处理前才可删）。
+  // 等 DELETE 成功才本地移除：删除失败时后端不会 emit injected_removed，
+  // 乐观移除会导致 UI 不显示、run 队列/DB 镜像里仍在，模型下一轮照样读到。
+  const handleRemoveInjected = useCallback(async (injId: string) => {
+    if (!activeSession) return;
+    try {
+      await deleteInjectedMessage(activeSession, injId);
+      setPendingInjected(prev => prev.filter(p => p.id !== injId));
+    } catch (e) {
+      alert(e instanceof Error && e.message ? e.message : "删除失败，请稍后重试");
     }
   }, [activeSession]);
 
@@ -268,7 +290,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       const stream = resumeFromMessage(activeSession, msg.id);
       await consumeStream(stream, messages, {
         setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setWaitForUserRequest, setBgPolling,
-        setSessionTitle, setSessionUsage, setStopping, setStreaming: _setStreaming,
+        setSessionTitle, setSessionUsage, setStopping, setStreaming: _setStreaming, setPendingInjected,
         activeSession,
       }, false, ac.signal);
     } catch {
@@ -299,6 +321,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       setSessionTitle("");
       setMessages([]);
       setSessionUsage({ input: 0, output: 0, cache: 0 });
+      setPendingInjected([]);
       setSessionSource("web");
       setSessionPinnedAt(0);
       setMode("");
@@ -333,6 +356,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       setSessionTitle(cached.detail.title || "");
       setSessionSource(cached.detail.source || "web");
       setSessionPinnedAt(cached.detail.pinned_at || 0);
+      setPendingInjected(cached.detail.pending_injected || []);
       setMessages(cachedMsgs);
       setSelectedModel(cached.detail.model);
       setMode(cached.detail.mode || "");
@@ -353,6 +377,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       setMessages([]);
       setSessionTitle("");
       setSessionUsage({ input: 0, output: 0, cache: 0 });
+      setPendingInjected([]);
     }
 
     let cancelled = false;
@@ -374,6 +399,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         setSessionTitle(detail.title || "");
         setSessionSource(detail.source || "web");
         setSessionPinnedAt(detail.pinned_at || 0);
+        // 刷新后恢复未消费的「补充信息」（DB 持久化镜像）；SSE 回放事件按 id 去重不会重复
+        setPendingInjected(detail.pending_injected || []);
         const loaded = mapDetailMessages(detail);
         setMessages(loaded);
         fetchAnnotationsFor(loaded);
@@ -400,7 +427,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
               : loaded;
             await consumeStream(stream, base, {
               setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setWaitForUserRequest, setBgPolling,
-              setSessionTitle, setSessionUsage, setStopping, setStreaming,
+              setSessionTitle, setSessionUsage, setStopping, setStreaming, setPendingInjected,
               activeSession: initialSessionId,
             }, false, resumeAc.signal);
           } else {
@@ -754,6 +781,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     const ac = new AbortController();
     streamAbortRef.current = ac;
 
+    setPendingInjected([]); // 新 run：待处理队列重新开始
     const chatMessages: ChatMessage[] = newMessages.map((m) => ({
       role: m.role,
       content: m.content,
@@ -766,7 +794,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     await consumeStream(
       streamChat(chatMessages, selectedModel, sessionId, { quote: sentQuote, mode, btw: isBtw, review: isReview, autoConsent }),
       newMessages,
-      { setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setWaitForUserRequest, setBgPolling, setSessionTitle, setSessionUsage, setStopping, setStreaming, activeSession: sessionId },
+      { setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setWaitForUserRequest, setBgPolling, setSessionTitle, setSessionUsage, setStopping, setStreaming, setPendingInjected, activeSession: sessionId },
       true,
       ac.signal,
     );
@@ -865,6 +893,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         onShare={handleShare}
         onDelete={handleDelete}
         onInject={handleInject}
+        pendingInjected={pendingInjected}
+        onRemoveInjected={handleRemoveInjected}
         onCancelTool={handleCancelTool}
         onActionConfirm={handleActionConfirm}
         onResume={handleResume}

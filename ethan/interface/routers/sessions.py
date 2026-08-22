@@ -133,6 +133,9 @@ async def get_session(session_id: str, user_id: str = Depends(verify_token)):
         # 该会话是否有正在进行的生成（producer 未结束）。前端据此决定刷新后重连流。
         # 此处 session 已从当前用户的 store 取到（归属已确认），仍传 user_id 做纵深防御。
         "active_run": RunManager.instance().has_active(session_id, user_id=user_id),
+        # 运行中「补充信息」待消费队列（DB 镜像，run 结束时清空）：
+        # 前端刷新后在「调用可视化」区域上方重新展示，可删除。
+        "pending_injected": getattr(session, "pending_injected", None) or [],
         "messages": [
             {
                 "id": getattr(m, "id", None),
