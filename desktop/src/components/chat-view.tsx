@@ -241,14 +241,16 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     }
   }, [activeSession]);
 
-  // 待处理区点 × 删除一条补充信息（处理前才可删；失败静默，SSE 事件会纠正状态）
+  // 待处理区点 × 删除一条补充信息（处理前才可删）。
+  // 等 DELETE 成功才本地移除：删除失败时后端不会 emit injected_removed，
+  // 乐观移除会导致 UI 不显示、run 队列/DB 镜像里仍在，模型下一轮照样读到。
   const handleRemoveInjected = useCallback(async (injId: string) => {
     if (!activeSession) return;
-    setPendingInjected(prev => prev.filter(p => p.id !== injId));
     try {
       await deleteInjectedMessage(activeSession, injId);
-    } catch {
-      // 删除失败：不回滚，等 SSE injected_removed 事件或刷新纠正（罕见）
+      setPendingInjected(prev => prev.filter(p => p.id !== injId));
+    } catch (e) {
+      alert(e instanceof Error && e.message ? e.message : "删除失败，请稍后重试");
     }
   }, [activeSession]);
 
