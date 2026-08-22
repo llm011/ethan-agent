@@ -128,7 +128,7 @@ export function Sidebar() {
   // 主列表请求已 hide 心跳/定时（否则高频心跳会话会挤爆前 50，把普通会话顶出去）；
   // 定时/心跳两个分组改用 title_prefixes 独立拉取，互不影响。
   const pinnedIds = new Set(pinnedSessions.map((s) => s.id));
-  const normalSessions = sessions.filter((s) => !s.title.startsWith("[定时]") && !s.title.startsWith("[心跳]") && s.source !== "browser-extension" && !pinnedIds.has(s.id));
+  const normalSessions = sessions.filter((s) => !s.title.startsWith("✅") && !s.title.startsWith("[定时]") && !s.title.startsWith("[心跳]") && s.source !== "browser-extension" && !pinnedIds.has(s.id));
   const scheduleSessions = scheduleGroupSessions;
   const heartbeatSessions = heartbeatGroupSessions;
   const scheduleUnreadCount = scheduleSessions.filter(
