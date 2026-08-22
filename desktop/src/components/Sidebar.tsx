@@ -82,6 +82,10 @@ export function Sidebar() {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
+  // 当前打开「更多操作」菜单的会话 id：菜单打开期间保持按钮区可见，
+  // 否则鼠标移到菜单上时 group-hover 失效、trigger 被 display:none，
+  // 浮层失去锚点坐标会跳到屏幕左上角
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [loadingSessionId, setLoadingSessionId] = useState<string | null>(null);
   const [confirmState, setConfirmState] = useState<{ open: boolean; id: string }>({ open: false, id: "" });
   const [normalExpanded, setNormalExpanded] = useState(true);
@@ -399,7 +403,11 @@ export function Sidebar() {
             </button>
           </div>
         ) : (
-          <div className="hidden group-hover:flex shrink-0 items-center gap-0.5">
+          <div
+            className={`shrink-0 items-center gap-0.5 ${
+              openMenuId === s.id ? "flex" : "hidden group-hover:flex"
+            }`}
+          >
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -418,7 +426,10 @@ export function Sidebar() {
                 <span className="opacity-80">仅标识标题，会话仍可继续聊</span>
               </TooltipContent>
             </Tooltip>
-            <DropdownMenu>
+            <DropdownMenu
+              open={openMenuId === s.id}
+              onOpenChange={(o) => setOpenMenuId(o ? s.id : null)}
+            >
               <DropdownMenuTrigger
                 className="shrink-0 w-5 h-5 flex items-center justify-center rounded hover:bg-muted transition-colors text-muted-foreground"
                 title="更多操作"
