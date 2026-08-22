@@ -13,6 +13,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@ethan/shared/ui/dropdown-menu";
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+  TooltipProvider,
+} from "@ethan/shared/ui/tooltip";
 import { useSidebar } from "@/app/layout-shell";
 import { Button } from "@ethan/shared/ui/button";
 import { Input } from "@ethan/shared/ui/input";
@@ -356,15 +362,24 @@ export function Sidebar() {
           </div>
         ) : (
           <div className="hidden group-hover:flex shrink-0 items-center gap-0.5">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-5 w-5"
-              onClick={(e) => handleToggleDone(s.id, s.title, e)}
-              title={s.title.startsWith("✅") ? "取消完成标记" : "标记完成"}
-            >
-              <CircleCheck className={`h-3 w-3 ${s.title.startsWith("✅") ? "text-primary" : "text-muted-foreground"}`} />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-5 w-5"
+                    onClick={(e) => handleToggleDone(s.id, s.title, e)}
+                  />
+                }
+              >
+                <CircleCheck className={`h-3 w-3 ${s.title.startsWith("✅") ? "text-primary" : "text-muted-foreground"}`} />
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="max-w-52 flex-col items-start gap-0.5 text-left">
+                <span className="font-medium">{s.title.startsWith("✅") ? "取消完成标记" : "标记完成"}</span>
+                <span className="opacity-80">仅标识标题，会话仍可继续聊</span>
+              </TooltipContent>
+            </Tooltip>
             <DropdownMenu>
               <DropdownMenuTrigger
                 className="shrink-0 w-5 h-5 flex items-center justify-center rounded hover:bg-muted transition-colors text-muted-foreground"
@@ -407,7 +422,7 @@ export function Sidebar() {
   );
 
   return (
-    <>
+    <TooltipProvider delay={0}>
     <ConfirmDialog
       open={confirmState.open}
       title="删除对话"
@@ -672,6 +687,6 @@ export function Sidebar() {
         </Button>
       </div>
     </aside>
-    </>
+    </TooltipProvider>
   );
 }
