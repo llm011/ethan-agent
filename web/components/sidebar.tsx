@@ -266,10 +266,16 @@ export function Sidebar() {
   // 完成/取消完成：在标题前加/去 ✅ 前缀（复用 rename 接口改 title）
   const handleToggleDone = async (id: string, title: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    // 兜底：标题恰好只剩 "✅" 时去掉前缀会变空串（后端 400），回退为默认标题
     const newTitle = title.startsWith("✅")
-      ? title.replace(/^✅\s*/, "")
+      ? title.replace(/^✅\s*/, "") || "新对话"
       : `✅ ${title}`;
-    await renameSession(id, newTitle);
+    try {
+      await renameSession(id, newTitle);
+    } catch {
+      alert("操作失败，请稍后重试");
+      return;
+    }
     const patch = (list: SessionInfo[]) =>
       list.map((s) => (s.id === id ? { ...s, title: newTitle } : s));
     setSessions(patch);
