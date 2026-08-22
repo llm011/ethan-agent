@@ -494,14 +494,118 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
   const prevSessionRef = useRef(initialSessionId);
   const queueDrainTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // 按 sessionId 维护各会话后台 drain 的 AbortController，避免多会话切换时互相误杀
+  const bgDrainAbortsRef = useRef<Map<string, AbortController>>(new Map());
+
+  // 后台 drain：轮询旧会话直到 active_run=false，然后逐条发送排队消息
+  const startBgDrain = useCallback((sessionId: string) => {
+    // 同一会话重复启动时先终止旧任务；不同会话的任务互不影响
+    bgDrainAbortsRef.current.get(sessionId)?.abort();
+    const ac = new AbortController();
+    bgDrainAbortsRef.current.set(sessionId, ac);
+
+    (async () => {
+      const POLL_INTERVAL = 2000;
+      const MAX_POLLS = 300;
+
+      for (let i = 0; i < MAX_POLLS; i++) {
+        if (ac.signal.aborted) return;
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL));
+        if (ac.signal.aborted) return;
+
+        // 如果用户切回了这个会话，停止后台 drain，交给前台 effect 处理
+        if (prevSessionRef.current === sessionId) {
+          return;
+        }
+
+        try {
+          const detail = await fetchSession(sessionId);
+          if (detail.active_run) continue;
+        } catch {
+          return;
+        }
+
+        // active_run=false，开始发送排队消息
+        const store = inputStoreRef.current;
+        const q = store.getQueueForSession(sessionId);
+        if (q.length === 0) return;
+
+        const first = q[0];
+        // 不提前出队：等流式拿到第一个 chunk（后端已接受请求）才移除，
+        // 避免请求失败 / 被中止时排队消息被静默丢弃
+
+        const chatMessages: ChatMessage[] = [{ role: "user", content: first.text }];
+        if (first.images && first.images.length > 0) {
+          chatMessages[0].images = first.images
+            .filter((f) => f.isImage)
+            .map((img) => ({
+              data: img.dataUrl?.split(",")[1] ?? "",
+              media_type: img.dataUrl?.split(";")[0].replace("data:", "") ?? "image/png",
+            }));
+        }
+
+        let accepted = false;
+        try {
+          const stream = streamChat(chatMessages, undefined, sessionId, { signal: ac.signal });
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          for await (const _ of stream) {
+            // 拿到第一个 chunk 才出队（后端已接受请求）；首个 chunk 前失败/中止的消息留在队列
+            if (!accepted) {
+              accepted = true;
+              store.removeFromQueueForSession(sessionId, first.id);
+            }
+            if (ac.signal.aborted) return;
+          }
+        } catch {
+          // 请求失败或被中止：尚未出队的消息留在队列里，等下次 drain 或用户手动重发
+          return;
+        }
+        if (!accepted) return;
+
+        // 发送完一条后，检查是否还有更多排队消息 — 继续循环等下一轮 active_run=false
+      }
+    })().finally(() => {
+      // 任务结束（完成/中止/出错）后清理自己的注册，防止 Map 泄漏
+      if (bgDrainAbortsRef.current.get(sessionId) === ac) {
+        bgDrainAbortsRef.current.delete(sessionId);
+      }
+    });
+  }, []);
+
+  // 组件卸载（离开 chat 页面）时终止所有后台 drain，
+  // 防止脱离生命周期的孤儿任务在重新进入后与前台重复消费同一个流
+  useEffect(() => {
+    const aborts = bgDrainAbortsRef.current;
+    return () => {
+      aborts.forEach((ac) => ac.abort());
+      aborts.clear();
+    };
+  }, []);
+
   useEffect(() => {
     // 仅 streaming 从 true→false 时 drain 队列；切会话（initialSessionId 变化）不触发
     const sessionChanged = prevSessionRef.current !== initialSessionId;
+    const oldSession = prevSessionRef.current;
     prevSessionRef.current = initialSessionId;
     if (sessionChanged) {
+      // 切换会话时取消尚未执行的排队消息发送（前台 timer），防止它发到新会话
       if (queueDrainTimerRef.current !== undefined) {
         clearTimeout(queueDrainTimerRef.current);
         queueDrainTimerRef.current = undefined;
+      }
+      // 如果旧会话有排队消息，启动后台 drain
+      if (oldSession) {
+        const store = inputStoreRef.current;
+        const q = store.getQueueForSession(oldSession);
+        if (q.length > 0) {
+          startBgDrain(oldSession);
+        }
+      }
+      // 切回的目标会话如果还有后台 drain 在跑（可能正在 stream），立即终止并交还前台：
+      // 会话加载检测到 active_run 后会 resume 流式展示，结束后由前台继续 drain 剩余队列
+      if (initialSessionId) {
+        bgDrainAbortsRef.current.get(initialSessionId)?.abort();
+        bgDrainAbortsRef.current.delete(initialSessionId);
       }
       return;
     }

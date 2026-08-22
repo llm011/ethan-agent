@@ -76,17 +76,20 @@ export async function* streamChat(
     btw?: boolean;
     review?: boolean;
     autoConsent?: boolean;
+    signal?: AbortSignal;
   },
 ): AsyncGenerator<StreamChunk> {
-  const { quote = null, mode = "", btw = false, review = false, autoConsent = false } = options ?? {};
+  const { quote = null, mode = "", btw = false, review = false, autoConsent = false, signal } = options ?? {};
   let res: Response;
   try {
     res = await fetch(`${getApiUrl()}/chat`, {
       method: "POST",
       headers: headers(),
+      signal,
       body: JSON.stringify({ messages, model, stream: true, session_id: sessionId, quote: quote ?? undefined, mode: mode || undefined, btw: btw || undefined, auto_consent: autoConsent || review || undefined }),
     });
-  } catch {
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "AbortError") throw e;
     // fetch 直接抛错 = 连不上后端（服务没起 / 端口不通）
     throw new Error("连接不上 Ethan 服务，请确认后端已启动（ethan serve）后重试。");
   }

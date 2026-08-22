@@ -168,6 +168,21 @@ export function useInputStore() {
     return drained;
   }, []);
 
+  const getQueueForSession = useCallback((sessionId: string | null): QueuedMessage[] => {
+    return storeRef.current.get(sessionId)?.queue ?? [];
+  }, []);
+
+  const removeFromQueueForSession = useCallback((sessionId: string | null, id: string) => {
+    const state = storeRef.current.get(sessionId);
+    if (!state) return;
+    state.queue = state.queue.filter((m) => m.id !== id);
+    storeRef.current.set(sessionId, state);
+    persistStore(storeRef.current);
+    if (sessionId === currentSessionRef.current) {
+      setQueue(state.queue);
+    }
+  }, []);
+
   return {
     draft,
     setDraft,
@@ -180,5 +195,7 @@ export function useInputStore() {
     drainQueue,
     switchTo,
     saveCurrent,
+    getQueueForSession,
+    removeFromQueueForSession,
   };
 }
