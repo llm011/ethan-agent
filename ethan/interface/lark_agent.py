@@ -34,8 +34,11 @@ async def _handle_agent_message(
     owner_claimed: bool,
     btw_mode: bool,
     ts: "TypingState",
+    save_user_msg: bool = True,
 ) -> None:
-    """真正的 Agent 流式处理（在持锁串行下运行）。_handle_message 完成去重/命令/主人判定后调本函数。"""
+    """真正的 Agent 流式处理（在持锁串行下运行）。_handle_message 完成去重/命令/主人判定后调本函数。
+
+    save_user_msg=False 供「重新生成」复用：不重复落库 user 消息（旧行已由回调方删除）。"""
     # shared state from lark_stream (lazy import avoids circular dep)
     from ethan.core.agent import Agent
 
@@ -126,8 +129,9 @@ async def _handle_agent_message(
         history = session_obj.messages if session_obj else []
         session_mode = getattr(session_obj, "mode", "") or "" if session_obj else ""
 
-        user_msg = Message(role="user", content=text)
-        await store.save_message(session_id, user_msg)
+        if save_user_msg:
+            user_msg = Message(role="user", content=text)
+            await store.save_message(session_id, user_msg)
 
         # 引用消息：lark-cli 压平的事件里没有 parent_id，需用 message_id 先 mget 当前消息详情，
         # 从详情里找被引用消息 id 再取其文本，拼到本轮发给 agent 的消息里
@@ -143,6 +147,14 @@ async def _handle_agent_message(
         forwarded = _pop_forwarded(chat_id)
         if forwarded:
             agent_user_text = f"[用户此前转发来以下消息，请结合本条说明一起处理]\n{forwarded}\n\n---\n{agent_user_text}"
+
+        # 尾部未消化的用户反馈（reaction 👍/👎 落库的孤立 user 行）：配不进
+        # user→assistant 上下文配对，显式拼进本轮消息确保 agent 可见。
+        # 仅进 agent 上下文，不污染存库的原始 user_msg（与引用/转发同策略）。
+        from ethan.interface.lark_state import _collect_tail_feedback
+        tail_feedback = _collect_tail_feedback(history)
+        if tail_feedback:
+            agent_user_text = "\n".join(tail_feedback) + "\n\n---\n" + agent_user_text
 
         # 非文本消息：解析资源 key，注入明确的下载指令
         # 同时扫引用的原消息（quoted_msg_id），让 agent 能下载引用消息里的图片/文件
@@ -558,11 +570,41 @@ async def _handle_agent_message(
         stats_line = "  ".join(stats_parts)
 
         if answer_msg_id:
+            # 答案卡片操作按钮：定稿时才追加（流式 patch 阶段不带，避免中途渲染按钮）
+            _ANSWER_ACTIONS = [
+                {"cmd": "regenerate", "text": "🔄 重新生成"},
+                {"cmd": "copy", "text": "📋 复制原文"},
+            ]
             if _looks_like_tool_trace(answer_text):
                 await _edit_message(answer_msg_id, "⚠️ 本轮未生成有效总结（输出像工具过程而非结论），工具过程已记录在上方。可重试或补充说明。", use_card=True)
+                extra_msg_ids: list[str] = []
             else:
                 final_answer = (answer_text or "（没有找到相关内容）").rstrip() + f"\n\n---\n_{stats_line}_"
-                await _edit_message(answer_msg_id, final_answer, use_card=True)
+                # 超长答案分段：首段写回原卡片（带操作按钮），其余段落追加新卡片，避免 patch 超限静默失败
+                from ethan.interface.lark_render import _split_long_text
+                chunks = _split_long_text(final_answer)
+                await _edit_message(answer_msg_id, chunks[0], use_card=True, actions=_ANSWER_ACTIONS)
+                extra_msg_ids = []
+                if len(chunks) > 1:
+                    logger.info("[Lark] long answer split into %d cards chat=%s", len(chunks), chat_id)
+                    for extra_chunk in chunks[1:]:
+                        extra_id, _ = await _send_message(chat_id, extra_chunk, use_card=True)
+                        if extra_id:
+                            extra_msg_ids.append(extra_id)
+            # 登记答案上下文：卡片按钮回调（重新生成/复制原文）与 reaction 反馈（👍/👎）反查用。
+            # 后续分段卡片一并登记（不带按钮，但 reaction 👍/👎 和复制原文可命中），
+            # 否则用户在分段卡片上点 reaction 无响应。
+            from ethan.interface.lark_state import _register_answer, _update_answer_entry
+            for mid in [answer_msg_id, *extra_msg_ids]:
+                _register_answer(
+                    mid,
+                    chat_id=chat_id,
+                    session_id=session_id,
+                    question=text,
+                    question_msg_id=message_id,
+                    assistant_row_id=progress_msg_id,
+                )
+                _update_answer_entry(mid, answer_text=answer_text, assistant_row_id=progress_msg_id)
             # 结果卡片已定稿，立刻移除打字中表情（不必等到 finally）
             await ts.clear()
         elif tool_msg_id:
@@ -616,9 +658,16 @@ async def _handle_agent_message(
         # 复用实时进度行（避免重复两条 assistant 消息），无进度行则新建
         if progress_msg_id:
             await store.update_message(progress_msg_id, session_id, response)
+            final_assistant_row = progress_msg_id
         else:
-            await store.save_message(session_id, response)
+            final_assistant_row = await store.save_message(session_id, response)
         await store.touch(session_id)
+        # 回写最终 assistant 落库行 id 到答案登记表：regenerate 删行精确锚定用。
+        # 纯对话（无工具进度行）时 entry 此前缺 row id，regenerate 只能兜底扫
+        # 「最后一条 assistant」——点旧卡片时会误删最新一轮，这里补上精确 id。
+        if answer_msg_id:
+            from ethan.interface.lark_state import _update_answer_entry as _uae
+            _uae(answer_msg_id, assistant_row_id=final_assistant_row)
 
     except asyncio.CancelledError:
         # 用户 /stop 主动取消：把已生成的部分内容落库并标记「已停止」，清理表情。

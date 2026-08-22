@@ -39,6 +39,8 @@ class CommandContext:
     get_mode: callable | None = None        # async (chat_id) -> str：取当前会话 mode（"" = 默认）
     set_mode: callable | None = None        # async (chat_id, mode_key) -> None：切换当前会话 mode
     stop_task: callable | None = None       # async (chat_id) -> bool：停止当前进行中的生成，返回是否真的停了
+    list_bg_tasks: callable | None = None   # async () -> str：后台任务列表文本（空串=无）
+    list_cron_jobs: callable | None = None  # async () -> str：定时任务列表文本（空串=无）
     extra_help: str = ""                    # 渠道额外的 help 行（如 web/REPL 专属命令提示）
 
 
@@ -51,6 +53,7 @@ COMMANDS = {
     "summary": ("总结对话：对当前对话生成结构化总结", False),
     "sessions": ("列出最近的会话", False),
     "stop": ("停止当前进行中的回复", False),
+    "tasks": ("查看后台任务和定时任务", False),
     "resume": ("恢复指定会话（用法 /resume <id>）", True),
     "model": ("查看/切换模型（用法 /model [id]）", False),
     "mode": ("查看/切换对话模式（用法 /mode [名称]，不带参数或 default 切回默认）", False),
@@ -161,6 +164,28 @@ async def handle_command(ctx: CommandContext) -> str | None:
             logger.exception("stop_task failed for chat %s", ctx.chat_id)
             return "⚠️ 停止失败，请稍后再试。"
         return "🛑 已停止当前回复。" if stopped else "当前没有进行中的回复。"
+
+    if name == "tasks":
+        lines = []
+        if ctx.list_bg_tasks is not None:
+            try:
+                bg = await ctx.list_bg_tasks()
+                if bg:
+                    lines.append(bg)
+            except Exception:
+                logger.exception("list_bg_tasks failed")
+                lines.append("⚠️ 后台任务读取失败。")
+        if ctx.list_cron_jobs is not None:
+            try:
+                cron = await ctx.list_cron_jobs()
+                if cron:
+                    lines.append(cron)
+            except Exception:
+                logger.exception("list_cron_jobs failed")
+                lines.append("⚠️ 定时任务读取失败。")
+        if not lines:
+            return "当前没有后台任务，也没有定时任务。"
+        return "\n\n".join(lines)
 
     if name == "resume":
         if ctx.resume_session is None:

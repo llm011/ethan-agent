@@ -131,6 +131,37 @@ async def _summary_wechat_session(chat_key: str) -> str:
     return await summary_session(store, sid, get_config().defaults.model)
 
 
+async def _list_bg_tasks_text() -> str:
+    """后台任务列表（与飞书渠道共用 registry），无任务返回空串。"""
+    from ethan.tools.builtin.background_task import list_tasks
+    items = list_tasks()
+    if not items:
+        return ""
+    lines = ["后台任务："]
+    marks = {"running": "▶", "done": "✓", "error": "×", "stopped": "■"}
+    for t in items[:10]:
+        mark = marks.get(t.get("status", ""), "•")
+        title = t.get("title", "") or t.get("id", "")
+        lines.append(f"  {mark} {title[:36]} — {t.get('status', '?')}({t.get('elapsed_seconds', 0)}s)")
+    if len(items) > 10:
+        lines.append(f"  …还有 {len(items) - 10} 个")
+    return "\n".join(lines)
+
+
+async def _list_cron_jobs_text() -> str:
+    """定时任务列表（进程级共享 scheduler），无任务返回空串。"""
+    from ethan.scheduler.cron import get_scheduler
+    jobs = get_scheduler().list_jobs()
+    if not jobs:
+        return ""
+    lines = ["定时任务："]
+    for j in jobs[:10]:
+        lines.append(f"  • {j.get('name', j.get('id', ''))} — {j.get('trigger', '')} → {j.get('next_run', '')}")
+    if len(jobs) > 10:
+        lines.append(f"  …还有 {len(jobs) - 10} 个")
+    return "\n".join(lines)
+
+
 def build_wechat_cmd_context(
     chat_key: str,
     text: str,
@@ -155,6 +186,8 @@ def build_wechat_cmd_context(
         compact_session=_compact_wechat_session,
         summary_session=_summary_wechat_session,
         stop_task=_stop_wechat_task,
+        list_bg_tasks=_list_bg_tasks_text,
+        list_cron_jobs=_list_cron_jobs_text,
         extra_help=(
             "微信渠道提示：\n"
             "- 会话通过 title 前缀管理，/new 会废弃当前会话\n"

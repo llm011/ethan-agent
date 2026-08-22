@@ -338,6 +338,22 @@ lark-cli event consume <EventKey>（每个 EventKey 一个子进程，WebSocket 
 - **最终回答**：interactive 卡片，流式 `message.patch`；首段缓冲到阈值再发，避免孤立短卡片，出现新工具调用时撤回已发的 narration 卡片。
 - **自定义卡片（增量）**：`ui_card` 工具（`channel="lark"`）走 `lark_card_templates` 生成飞书卡片 JSON，经 `ToolEvent.ui` 透传，工具完成时作为独立 interactive 卡片补发。这是「可有可无、有则更好看」的增量能力——基础的工具进度/答案输出不依赖它。Web 端同一套结构化 `card` 数据则渲染成 A2UI（见 [tools.md](./tools.md#ui_carda2ui-结构化卡片)）。
 
+### 答案卡片交互（按钮 / 反馈 / 长文分段）
+
+最终答案卡片定稿时附加交互能力（`lark_agent.py` 定稿处 + `lark_event_handlers.py` 回调）：
+
+- **操作按钮**：卡片底部带「🔄 重新生成」「📋 复制原文」两个按钮（`card.action.trigger` 回调）。
+  - 重新生成：从答案登记表（`lark_state._lark_answer_map`，内存、24h TTL、上限 100 条）反查原问题 → 删上一轮 user/assistant 落库行（优先用落库时回写的 assistant 行 id 精确锚定；旧条目无 id 时按原问题内容从后往前锚定，绝不误删最新一轮）→ 复用 `_handle_agent_message(save_user_msg=False)` 重跑。task 登记 `_lark_running_tasks`，`/stop` 可取消；同 chat 有任务在跑会提示先 `/stop`。
+  - 复制原文：把答案原始 markdown 用 post 气泡重发（post 文本可长按复制），超 4000 字符自动分段。
+- **Reaction 反馈**：用户对答案卡片点 👍/👎 → 反馈写入会话历史（`[用户反馈] ...` user 消息），bot 加 ✅ reaction 确认。其它 emoji 及非答案卡片上的 reaction 忽略。反馈是孤立 user 行，配不进 user→assistant 上下文配对——下轮处理时由 `_collect_tail_feedback` 显式拼进 agent 上下文（本轮回答落库后自然去重）。
+- **长答案分段**：定稿内容超 6000 字符时按段落边界拆分多张卡片（首段写回原卡片带按钮，其余追加新卡片并一并登记，reaction/复制原文在分段卡片上也可命中），切点避开未闭合的 ``` 代码围栏，避免 patch 超限静默失败丢内容。见 `lark_render._split_long_text`。
+
+> 登记表仅内存态：进程重启后旧卡片的按钮/反馈会回复「找不到上下文」，直接重发问题即可。
+
+### /tasks 命令
+
+消息渠道（飞书/微信）通用命令，列出同进程的后台任务（`background_task.list_tasks`）与定时任务（`scheduler.cron.get_scheduler().list_jobs`），各显示前 10 条。渠道通过 `CommandContext.list_bg_tasks` / `list_cron_jobs` 回调注入，未注入的渠道显示空态。
+
 ### 卡片 markdown 表格渲染
 
 飞书卡片 markdown element 内嵌的 GFM pipe-table 触发上限：超过 3 张表格会报 `230099 / 11310`。`lark_render._render_card_content` 按表格数量分两路：
