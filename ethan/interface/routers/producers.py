@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from ethan.memory.session import SessionStore, get_session_store
+from ethan.memory.session import SessionStore, get_session_store, retry_on_db_locked
 from ethan.providers.base import Message
 
 from .helpers import _friendly_error
@@ -501,6 +501,13 @@ async def _run_generation(
         if not err_text:
             # transient DB error (e.g. locked) — suppress, task already done
             logger.warning("Suppressed transient error in generation: %s", e)
+            # 进度占位行可能还停在 running 态（本次异常没人定稿它），标记
+            # interrupted，否则刷新后 UI 会无限转圈
+            if progress_msg_id:
+                try:
+                    await retry_on_db_locked(store.update_message_status, progress_msg_id, "interrupted", "running")
+                except Exception:
+                    logger.exception("标记进度行 interrupted 失败 session=%s row=%s", session_id, progress_msg_id)
             run.emit({"done": True, "usage": collector.usage_dict})
             run.finish()
             _RunManager_schedule_removal(run.session_id)
@@ -601,17 +608,43 @@ async def _run_generation(
         )
         # 正常结束：把实时进度行就地更新为最终回复（content/usage/tool_steps/a2ui 全写全），
         # 复用同一行，避免「占位行 + 最终行」重复两条 assistant 消息。无进度行则照常新建。
-        if progress_msg_id:
-            await store.update_message(progress_msg_id, session_id, asst_msg)
-            msg_id = progress_msg_id
+        # 最终回复只存在于内存 collector.full，这里是唯一落库点：并发写库（定时任务、
+        # heartbeat、其他会话）撞 database is locked 时，异常若裸冒出去会绕过上方所有
+        # 兜底分支——run 不 finish、SSE 挂死、回复永久丢失、占位行永远停在 running。
+        # 所以锁冲突退避重试；重试耗尽也不能崩溃：标记 interrupted 并 emit error，
+        # 让 run 走正常收尾。
+        try:
+            if progress_msg_id:
+                await retry_on_db_locked(store.update_message, progress_msg_id, session_id, asst_msg)
+                msg_id = progress_msg_id
+            else:
+                msg_id = await retry_on_db_locked(store.save_message, session_id, asst_msg)
+        except Exception:
+            logger.exception("最终回复落库失败（重试耗尽）session=%s row=%s", session_id, progress_msg_id)
+            if progress_msg_id:
+                try:
+                    await retry_on_db_locked(store.update_message_status, progress_msg_id, "interrupted", "running")
+                except Exception:
+                    logger.exception(
+                        "落库失败后标记 interrupted 也失败 session=%s row=%s",
+                        session_id,
+                        progress_msg_id,
+                    )
+            run.emit({"error": "回复已生成，但写数据库时一直被锁，保存失败。请重发这条消息重试。"})
         else:
-            msg_id = await store.save_message(session_id, asst_msg)
-        await store.touch(session_id)
-        if agent._skills and agent.last_matched_skills:
-            for _name in agent.last_matched_skills:
-                asyncio.create_task(asyncio.to_thread(agent._skills.record_hit, _name))
-        asyncio.create_task(_maybe_consolidate(session_id, agent._provider.model, user_id, mode=mode))
-        asyncio.create_task(_maybe_generate_skill(session_id, agent._provider.model, user_id))
+            if agent._skills and agent.last_matched_skills:
+                for _name in agent.last_matched_skills:
+                    asyncio.create_task(asyncio.to_thread(agent._skills.record_hit, _name))
+            asyncio.create_task(_maybe_consolidate(session_id, agent._provider.model, user_id, mode=mode))
+            asyncio.create_task(_maybe_generate_skill(session_id, agent._provider.model, user_id))
+
+        # touch 只更新会话列表的 updated_at 排序时间戳，与主消息落库解耦：
+        # 极端情况下主消息已保存成功、touch 撞锁重试耗尽时，不该给前端报
+        # 「保存失败」，更不该把已成功的定稿误标 interrupted——单独容错，失败仅记日志。
+        try:
+            await retry_on_db_locked(store.touch, session_id)
+        except Exception:
+            logger.warning("touch 会话时间戳失败（重试耗尽）session=%s", session_id, exc_info=True)
 
     # --- Get笔记 异步任务后台轮询 ---
     # 从 agent 回复中提取 getnote task_id，后台轮询直到完成，
