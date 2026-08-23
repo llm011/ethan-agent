@@ -58,6 +58,27 @@ export function Sidebar() {
   const [extensionSessions, setExtensionSessions] = useState<SessionInfo[]>([]);
   const [activeSessions, setActiveSessions] = useState<Set<string>>(new Set());
 
+  // 点击后正在加载的会话 id：路由跳转 + fetchSession 期间该项显示 pulse，
+  // 给用户即时反馈（加载完成由 session:loaded 事件清除，5s 超时兜底）
+  const [loadingSessionId, setLoadingSessionId] = useState<string | null>(null);
+
+  // 会话加载完成后清除 loading 指示（ChatView 广播 session:loaded）
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { sessionId } = (e as CustomEvent).detail || {};
+      if (sessionId && sessionId === loadingSessionId) {
+        setLoadingSessionId(null);
+      }
+    };
+    window.addEventListener("session:loaded", handler);
+    // 超时保护：5s 后强制清除，避免 loading 卡死
+    const timeout = loadingSessionId ? setTimeout(() => setLoadingSessionId(null), 5000) : undefined;
+    return () => {
+      window.removeEventListener("session:loaded", handler);
+      if (timeout) clearTimeout(timeout);
+    };
+  }, [loadingSessionId]);
+
   // 监听 ChatView 广播的标题更新事件，立即同步左侧列表（不等下次轮询）
   useEffect(() => {
     const handler = (e: Event) => {
@@ -203,7 +224,8 @@ export function Sidebar() {
   };
 
   const handleSelectSession = (id: string) => {
-    if (editingSessionId !== id) {
+    if (editingSessionId !== id && activeSessionId !== id) {
+      setLoadingSessionId(id);
       router.push(`/chat/${id}`);
     }
   };
@@ -292,7 +314,9 @@ export function Sidebar() {
       className={`group flex flex-col px-3 py-2 rounded-lg cursor-pointer text-sm transition-colors ${
         activeSessionId === s.id
           ? "bg-accent text-accent-foreground"
-          : "hover:bg-muted"
+          : loadingSessionId === s.id
+            ? "bg-accent/50 animate-pulse"
+            : "hover:bg-muted"
       }`}
       onClick={() => handleSelectSession(s.id)}
     >

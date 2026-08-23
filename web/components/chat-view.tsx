@@ -345,6 +345,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           return;
         }
         setLoadingSession(false);
+        window.dispatchEvent(new CustomEvent("session:loaded", { detail: { sessionId: initialSessionId } }));
         setActiveSession(initialSessionId);
         setSessionTitle(detail.title || "");
         setSessionSource(detail.source || "web");
@@ -393,6 +394,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       .catch(() => {
         if (cancelled) return;
         setLoadingSession(false);
+        window.dispatchEvent(new CustomEvent("session:loaded", { detail: { sessionId: initialSessionId } }));
         setActiveSession(null);
         setSessionTitle("");
         setMessages([]);
