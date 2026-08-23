@@ -125,13 +125,13 @@ export function ChatHeader({ sessionId, title, source, usage, schedules, pinnedA
                   setRegenerating(false);
                   if (newTitle) {
                     onTitleChange(newTitle);
-                    // 同步 Sidebar：AI 重新生成标题后立即广播事件
+                    // 同步 Sidebar：更新标题后立即广播事件
                     window.dispatchEvent(new CustomEvent("session:title-updated", { detail: { sessionId, title: newTitle } }));
                   } else {
                     alert("标题重新生成失败");
                   }
                 }}
-                title="AI 重新生成标题"
+                title="更新标题"
               >
                 <RefreshCw className={`h-3 w-3 ${regenerating ? "animate-spin" : ""}`} />
               </button>
