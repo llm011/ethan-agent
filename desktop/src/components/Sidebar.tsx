@@ -429,7 +429,7 @@ export function Sidebar() {
               <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
                 <DropdownMenuItem onClick={(e) => handleRegenTitle(s.id, e)}>
                   <RefreshCw className={`h-3 w-3 ${regeneratingId === s.id ? "animate-spin" : ""}`} />
-                  AI 重新生成标题
+                  更新标题
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={(e) => startEdit(s.id, s.title, e)}>
                   <Pencil className="h-3 w-3" />
