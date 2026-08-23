@@ -323,8 +323,11 @@ export const ArticleVideo: React.FC<VideoTimeline> = (timeline) => {
           </Sequence>
         );
       })}
-      {/* 虚拟人立绘：挂在根上（不进 Sequence），呼吸浮动跨场景连续；字幕之上、内容之下由 zIndex 控制 */}
-      {timeline.presenter ? <PresenterLayer presenter={timeline.presenter} scenes={timeline.scenes} layout={resolveLayout(timeline)} /> : null}
+      {/* 虚拟人立绘：挂在根上（不进 Sequence），呼吸浮动跨场景连续；字幕之上、内容之下由 zIndex 控制。
+          captions 供口型联动：有活跃字幕时才切换 talk 变体。 */}
+      {timeline.presenter ? (
+        <PresenterLayer presenter={timeline.presenter} scenes={timeline.scenes} captions={timeline.captions} layout={resolveLayout(timeline)} />
+      ) : null}
       <div style={{position: "absolute", left: 58, right: 58, bottom: CAPTION_BOTTOM_PX, minHeight: CAPTION_MIN_HEIGHT_PX, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10}}>
         {caption ? (
           <div style={{background: "rgba(3,8,18,0.86)", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 26, padding: "18px 30px", color: theme.text, fontSize: 32, lineHeight: 1.4, fontWeight: 600, textAlign: "center", maxWidth: "85%", boxShadow: "0 18px 60px rgba(0,0,0,0.4)"}}>

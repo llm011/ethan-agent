@@ -59,6 +59,10 @@ export type Theme = {
   negative: string;
 };
 
+// 姿势的面部变体（可选"活人感"素材）：blink = 闭眼帧，talk = 张嘴说话帧。
+// pipeline 从 character.json 的 variants 注入；缺了退化为静态立绘（渐进增强）。
+export type PoseVariants = {blink?: string; talk?: string};
+
 // 虚拟人角色包（由 video_pipeline 从资产库解析后注入 timeline）
 export type Presenter = {
   id: string;
@@ -67,6 +71,7 @@ export type Presenter = {
   defaultPose: string;
   cutout: boolean;
   poses: Record<string, string>; // 姿势名 → public 相对路径（presenters/<id>/poses/<name>.png）
+  variants?: Record<string, PoseVariants>; // 姿势名 → 变体路径（presenters/<id>/poses/<pose>-<variant>.png）
   // render.mjs stills 模式导出 clean-plate 时置 true：只藏立绘图层，
   // 不动 SceneView 的硬车道 padding —— 两张静帧的文字/数据位置才逐像素对齐。
   forceHidden?: boolean;

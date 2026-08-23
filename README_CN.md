@@ -442,7 +442,7 @@ version: "1.0"
 
 Skill 会累积命中次数和用户纠正记录。当纠正达到阈值（默认 2 条），Heartbeat 任务用廉价模型将纠正合并进 Skill 文件。
 
-内置 `article-to-video` 可将主题、文章正文、本地 Markdown/TXT 文件或公开 URL 制作为 MP4：模型生成结构化剧本和分镜，Edge TTS 逐场景生成配音与字幕，Open Motion 根据真实语音时长渲染代码生成动效。支持分领域视觉：金融域提供 K线图（含布林带与点位标注）、黄色关键词标注，以及可复用的虚拟人立绘角色包（用随技能附带的 prompt 包在 GPT image 2 出图后导入 `~/.ethan/assets/library/`）。成片通过 Web/Desktop 文件卡片直接播放或下载，制作文件另行交付；`edge-tts`、Playwright（Open Motion 渲染依赖）和 FFmpeg 均在首次使用时按需安装，不进入 Ethan 的 Python 主依赖。
+内置 `article-to-video` 可将主题、文章正文、本地 Markdown/TXT 文件或公开 URL 制作为 MP4：模型生成结构化剧本和分镜，Edge TTS 逐场景生成配音与字幕，Open Motion 根据真实语音时长渲染代码生成动效。支持分领域视觉：金融域提供 K线图（含布林带与点位标注）、黄色关键词标注，以及可复用的虚拟人立绘角色包（用随技能附带的 prompt 包在 GPT image 2 出图后导入 `~/.ethan/assets/library/`）；可选的眨眼/说话口型变体图让立绘在成片中眨眼并随配音口型张合，缺省时自动退化为静态立绘。成片通过 Web/Desktop 文件卡片直接播放或下载，制作文件另行交付；`edge-tts`、Playwright（Open Motion 渲染依赖）和 FFmpeg 均在首次使用时按需安装，不进入 Ethan 的 Python 主依赖。
 
 ---
 

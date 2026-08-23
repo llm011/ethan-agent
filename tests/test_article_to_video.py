@@ -264,8 +264,10 @@ def test_skill_metadata_and_references_are_discoverable():
 # ── P1: domain / presenter / candlestick / callouts ──
 
 
-def make_presenter_library(root: Path, presenter_id: str = "xiaoyu", *, voice: dict | None = None) -> Path:
-    """在临时库根下造一个 ready 状态的 presenter 角色包（两姿势）。"""
+def make_presenter_library(
+    root: Path, presenter_id: str = "xiaoyu", *, voice: dict | None = None, variants: bool = False
+) -> Path:
+    """在临时库根下造一个 ready 状态的 presenter 角色包（两姿势，可选变体）。"""
     presenter_dir = root / "presenters" / presenter_id
     poses_dir = presenter_dir / "poses"
     poses_dir.mkdir(parents=True)
@@ -280,6 +282,13 @@ def make_presenter_library(root: Path, presenter_id: str = "xiaoyu", *, voice: d
         "poses": {"standing": "poses/standing.png", "pointing": "poses/pointing.png"},
         "cutout": True,
     }
+    if variants:
+        # 变体只挂在 standing 上：覆盖"部分姿势有变体"的真实情况
+        for variant in ("blink", "talk"):
+            (poses_dir / f"standing-{variant}.png").write_bytes(b"\x89PNG\r\n\x1a\nfake")
+        character["variants"] = {
+            "standing": {"blink": "poses/standing-blink.png", "talk": "poses/standing-talk.png"}
+        }
     (presenter_dir / "character.json").write_text(json.dumps(character, ensure_ascii=False), encoding="utf-8")
     return presenter_dir
 
@@ -344,6 +353,32 @@ def test_presenter_loaded_from_library(tmp_path):
         "pointing": "presenters/xiaoyu/poses/pointing.png",
     }
     assert "voice" not in presenter  # voice 只用于 TTS 继承，不进 timeline
+
+
+def test_presenter_variants_loaded_from_library(tmp_path):
+    root = tmp_path / "library"
+    make_presenter_library(root, variants=True)
+    manifest = finance_manifest(presenter={"id": "xiaoyu"})
+
+    result = pipeline.normalize_manifest(manifest, library_root=root)
+
+    assert result["presenter"]["variants"] == {
+        "standing": {
+            "blink": "presenters/xiaoyu/poses/standing-blink.png",
+            "talk": "presenters/xiaoyu/poses/standing-talk.png",
+        }
+    }
+
+
+def test_presenter_variants_omitted_when_absent(tmp_path):
+    # 旧 character.json 没有变体：payload 不出现 variants 键（渲染端退化为静态立绘）。
+    root = tmp_path / "library"
+    make_presenter_library(root)
+    manifest = finance_manifest(presenter={"id": "xiaoyu"})
+
+    result = pipeline.normalize_manifest(manifest, library_root=root)
+
+    assert "variants" not in result["presenter"]
 
 
 def test_presenter_voice_inherited_when_manifest_omits_voice(tmp_path):
@@ -411,6 +446,31 @@ def test_presenter_field_validation(tmp_path, presenter_patch, message):
 
     with pytest.raises(pipeline.ManifestError, match=message):
         pipeline.normalize_manifest(finance_manifest(presenter=presenter_patch), library_root=root)
+
+
+@pytest.mark.parametrize(
+    "variants_patch, message",
+    [
+        ("not-an-object", "must be an object"),
+        ({"dancing": {"blink": "poses/standing-blink.png"}}, "not a known pose"),
+        ({"standing": {}}, "non-empty object"),
+        ({"standing": {"wink": "poses/standing-blink.png"}}, "blink' or 'talk"),
+        ({"standing": {"blink": "poses/ghost.png"}}, "variant image missing"),
+        ({"standing": {"blink": "../standing.png"}}, "stay inside"),
+        ({"standing": {"blink": "/tmp/evil.png"}}, "stay inside"),
+    ],
+)
+def test_presenter_variants_validation(tmp_path, variants_patch, message):
+    # 变体是可选的，但一旦出现就与 poses 同级防护：结构/路径/文件存在性全查。
+    root = tmp_path / "library"
+    presenter_dir = make_presenter_library(root)
+    (presenter_dir / "poses" / "standing-blink.png").write_bytes(b"\x89PNG\r\n\x1a\nfake")
+    char = json.loads((presenter_dir / "character.json").read_text(encoding="utf-8"))
+    char["variants"] = variants_patch
+    (presenter_dir / "character.json").write_text(json.dumps(char, ensure_ascii=False), encoding="utf-8")
+
+    with pytest.raises(pipeline.ManifestError, match=message):
+        pipeline.normalize_manifest(finance_manifest(presenter={"id": "xiaoyu"}), library_root=root)
 
 
 def test_scene_presenter_override_and_hide(tmp_path):
@@ -574,6 +634,22 @@ def test_stage_assets_hardlinks_presenter_poses(tmp_path):
         assert staged.read_bytes() == (root / rel).read_bytes()
 
 
+def test_stage_assets_stages_variant_images(tmp_path):
+    root = tmp_path / "library"
+    make_presenter_library(root, variants=True)
+    manifest = finance_manifest(presenter={"id": "xiaoyu"})
+    normalized = pipeline.normalize_manifest(manifest, library_root=root)
+    output_dir = tmp_path / "output"
+
+    pipeline.stage_assets(normalized, output_dir, library_root=root)
+
+    for entry in normalized["presenter"]["variants"].values():
+        for rel in entry.values():
+            staged = output_dir / "work" / "public" / rel
+            assert staged.is_file()
+            assert staged.read_bytes() == (root / rel).read_bytes()
+
+
 def test_stage_assets_noop_without_presenter(tmp_path):
     normalized = pipeline.normalize_manifest(sample_manifest())
 
@@ -595,6 +671,67 @@ def test_timeline_carries_domain_and_presenter(tmp_path):
     assert timeline["domain"] == "finance"
     assert timeline["presenter"]["id"] == "xiaoyu"
     assert "voice" not in timeline["presenter"]
+
+
+def test_timeline_carries_presenter_variants(tmp_path):
+    root = tmp_path / "library"
+    make_presenter_library(root, variants=True)
+    manifest = finance_manifest(presenter={"id": "xiaoyu"})
+    normalized = pipeline.normalize_manifest(manifest, library_root=root)
+    srt = tmp_path / "a.srt"
+    srt.write_text("1\n00:00:00,000 --> 00:00:01,000\n字幕\n", encoding="utf-8")
+
+    timeline = pipeline.build_timeline(normalized, [{"srt": srt}, {"srt": srt}])
+
+    assert timeline["presenter"]["variants"]["standing"] == {
+        "blink": "presenters/xiaoyu/poses/standing-blink.png",
+        "talk": "presenters/xiaoyu/poses/standing-talk.png",
+    }
+
+
+# ---------------------------------------------------------------------------
+# presenter_gen 变体文件匹配（纯函数，不需要 Pillow）
+# ---------------------------------------------------------------------------
+
+
+def test_split_variant_files_separates_variants_from_poses(tmp_path):
+    files = [
+        tmp_path / "standing.png",
+        tmp_path / "standing-blink.png",
+        tmp_path / "standing-talk.png",
+        tmp_path / "pointing.png",
+        tmp_path / "random.png",
+    ]
+
+    base, variants = presenter_gen.split_variant_files(files, ["standing", "pointing"])
+
+    assert base == [tmp_path / "standing.png", tmp_path / "pointing.png", tmp_path / "random.png"]
+    assert variants == {
+        ("standing", "blink"): tmp_path / "standing-blink.png",
+        ("standing", "talk"): tmp_path / "standing-talk.png",
+    }
+
+
+def test_split_variant_files_pose_name_wins_over_variant_suffix(tmp_path):
+    # 用户自定义了 standing-blink 姿势名时，同名文件是姿势不是变体。
+    files = [tmp_path / "standing-blink.png"]
+
+    base, variants = presenter_gen.split_variant_files(files, ["standing-blink"])
+
+    assert base == files
+    assert variants == {}
+
+
+def test_match_pose_files_variants_never_fill_poses(tmp_path):
+    # 变体文件必须从姿势匹配池剔除：否则 "standing" in "standing-blink" 的
+    # 包含匹配会把闭眼图误配给 standing 姿势本体。
+    for name in ("standing.png", "standing-blink.png"):
+        (tmp_path / name).write_bytes(b"x")
+
+    assigned, variants = presenter_gen.match_pose_files(tmp_path, ["standing"])
+
+    assert assigned == {"standing": tmp_path / "standing.png"}
+    assert variants == {("standing", "blink"): tmp_path / "standing-blink.png"}
 
 
 # ---------------------------------------------------------------------------
@@ -648,6 +785,75 @@ def test_cutout_low_tolerance_preserves_skin_tone(tmp_path):
     assert Image.open(eaten).getpixel((25, 25))[3] == 0  # 高容差：皮肤被误吃
     assert Image.open(kept).getpixel((25, 25))[3] == 255  # 低容差：皮肤保留
     assert Image.open(kept).getpixel((2, 2))[3] == 0  # 白底仍被抠掉
+
+
+def _write_alpha_png(path: Path) -> None:
+    # RGBA + 至少一个透明像素：png_has_alpha 像素级验证通过，import 走归一而非抠图。
+    img = Image.new("RGBA", (40, 60), (255, 0, 255, 255))
+    img.putpixel((0, 0), (0, 0, 0, 0))
+    img.save(path)
+
+
+def test_cmd_import_variants_written_to_character(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("ETHAN_DATA_DIR", str(tmp_path))
+    presenter_dir = tmp_path / "assets" / "library" / "presenters" / "xiaoyu"
+    presenter_dir.mkdir(parents=True)
+    character = {
+        "id": "xiaoyu",
+        "name": "晓玉",
+        "status": "pending",
+        "sheet": "cute anime presenter",
+        "posesPrompts": {"standing": "stand", "pointing": "point"},
+    }
+    (presenter_dir / "character.json").write_text(json.dumps(character, ensure_ascii=False), encoding="utf-8")
+    images = tmp_path / "images"
+    images.mkdir()
+    for name in ("standing.png", "standing-blink.png", "standing-talk.png", "pointing.png"):
+        _write_alpha_png(images / name)
+
+    presenter_gen.cmd_import("xiaoyu", images)
+
+    saved = json.loads((presenter_dir / "character.json").read_text(encoding="utf-8"))
+    assert saved["status"] == "ready"
+    assert saved["variants"] == {
+        "standing": {"blink": "poses/standing-blink.png", "talk": "poses/standing-talk.png"}
+    }
+    assert (presenter_dir / "poses" / "standing-blink.png").is_file()
+    assert (presenter_dir / "poses" / "standing-talk.png").is_file()
+
+    # 导入的角色包直接被 pipeline 接受（变体贯通到 timeline 数据）
+    manifest = finance_manifest(presenter={"id": "xiaoyu"})
+    normalized = pipeline.normalize_manifest(manifest, library_root=tmp_path / "assets" / "library")
+    assert normalized["presenter"]["variants"]["standing"]["blink"] == (
+        "presenters/xiaoyu/poses/standing-blink.png"
+    )
+
+
+def test_cmd_import_without_variants_degrades_to_static(tmp_path, monkeypatch):
+    # 目录里没有变体图：character.json 的 variants 写成空 dict，pipeline 侧不出现该键。
+    monkeypatch.setenv("ETHAN_DATA_DIR", str(tmp_path))
+    presenter_dir = tmp_path / "assets" / "library" / "presenters" / "xiaoyu"
+    presenter_dir.mkdir(parents=True)
+    character = {
+        "id": "xiaoyu",
+        "name": "晓玉",
+        "status": "pending",
+        "sheet": "cute anime presenter",
+        "posesPrompts": {"standing": "stand", "pointing": "point"},
+    }
+    (presenter_dir / "character.json").write_text(json.dumps(character, ensure_ascii=False), encoding="utf-8")
+    images = tmp_path / "images"
+    images.mkdir()
+    for name in ("standing.png", "pointing.png"):
+        _write_alpha_png(images / name)
+
+    presenter_gen.cmd_import("xiaoyu", images)
+
+    saved = json.loads((presenter_dir / "character.json").read_text(encoding="utf-8"))
+    assert saved["variants"] == {}
+    manifest = finance_manifest(presenter={"id": "xiaoyu"})
+    normalized = pipeline.normalize_manifest(manifest, library_root=tmp_path / "assets" / "library")
+    assert "variants" not in normalized["presenter"]
 
 
 def _crowded_manifest(**presenter_override):
