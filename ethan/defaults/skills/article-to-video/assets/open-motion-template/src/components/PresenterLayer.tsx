@@ -1,6 +1,6 @@
 import React from "react";
 import {continueRender, delayRender, interpolate, spring, useCurrentFrame, useVideoConfig} from "@open-motion/core";
-import type {Presenter, PresenterLayout, Scene} from "../types";
+import type {Caption, Presenter, PresenterLayout, Scene} from "../types";
 import {PRESENTER_BOTTOM_PX} from "../types";
 
 const clamp = {extrapolateLeft: "clamp" as const, extrapolateRight: "clamp" as const};
@@ -9,19 +9,70 @@ const clamp = {extrapolateLeft: "clamp" as const, extrapolateRight: "clamp" as c
 const effectivePose = (scene: Scene | undefined, presenter: Presenter): string =>
   scene?.presenter?.pose ?? presenter.defaultPose;
 
+// ── 确定性伪随机 ──
+// 渲染器逐帧截图且分批并行，Math.random() 会让同一帧在不同 worker 上结果不同
+// （眨眼在帧 N 出现在 worker A、消失在 worker B）。所有节律必须由整数 hash
+// 驱动：同 seed 同值，跨帧跨 worker 可复现。
+const hash32 = (seed: number): number => {
+  let h = seed | 0;
+  h = Math.imul(h ^ (h >>> 16), 0x7feb352d);
+  h = Math.imul(h ^ (h >>> 15), 0x846ca68b);
+  h ^= h >>> 16;
+  return h >>> 0;
+};
+const rand01 = (seed: number): number => hash32(seed) / 0xffffffff;
+
+// 眨眼节律：间隔 2.2–5.5s 伪随机、单次眨眼窗 140ms。光标从 0 推进到当前
+// 时间，每帧 O(眨眼序号)，60s 视频约 15 次眨眼，成本可忽略。
+const BLINK_GAP_MIN_MS = 2200;
+const BLINK_GAP_MAX_MS = 5500;
+const BLINK_DURATION_MS = 140;
+
+const blinkActiveAt = (ms: number): boolean => {
+  let cursor = 0;
+  let index = 0;
+  while (cursor <= ms) {
+    const gap = BLINK_GAP_MIN_MS + rand01(hash32(index * 2654435761)) * (BLINK_GAP_MAX_MS - BLINK_GAP_MIN_MS);
+    if (ms < cursor + gap) return false;
+    if (ms < cursor + gap + BLINK_DURATION_MS) return true;
+    cursor += gap + BLINK_DURATION_MS;
+    index++;
+  }
+  return false;
+};
+
+// 说话口型：captions 有活跃字幕即视为说话；开合以 ~110ms 拍的伪随机方波
+// 驱动（约 55% 时间张嘴），节律不机械。字幕间隙自动闭嘴。
+const TALK_BEAT_MS = 110;
+
+const talkOpenAt = (ms: number, speaking: boolean): boolean => {
+  if (!speaking) return false;
+  const beat = Math.floor(ms / TALK_BEAT_MS);
+  return rand01(hash32(beat * 40503 + 7)) > 0.45;
+};
+
 // 虚拟人立绘层：挂在组合根上（不进 Sequence），呼吸浮动跨场景连续。
 // 所有动画都是绝对帧的纯函数（时间劫持下 CSS transition/animation 不可控，禁用）。
-export const PresenterLayer: React.FC<{presenter: Presenter; scenes: Scene[]; layout: PresenterLayout}> = ({presenter, scenes, layout}) => {
+export const PresenterLayer: React.FC<{
+  presenter: Presenter;
+  scenes: Scene[];
+  captions: Caption[];
+  layout: PresenterLayout;
+}> = ({presenter, scenes, captions, layout}) => {
   const frame = useCurrentFrame(); // 根组件上 = 绝对帧
   const {fps} = useVideoConfig();
   const [ready, setReady] = React.useState(false);
 
-  // 预加载所有姿势图，避免姿势切换帧白闪；失败也放行（不阻塞渲染）。
+  // 预加载所有姿势图和变体图，避免姿势切换帧白闪；失败也放行（不阻塞渲染）。
   React.useEffect(() => {
     const handle = delayRender("presenter images preload");
     let cancelled = false;
+    const sources = [
+      ...Object.values(presenter.poses),
+      ...Object.values(presenter.variants ?? {}).flatMap((entry) => Object.values(entry)),
+    ];
     Promise.all(
-      Object.values(presenter.poses).map(
+      sources.map(
         (src) =>
           new Promise<void>((resolve) => {
             const img = new Image();
@@ -56,11 +107,26 @@ export const PresenterLayer: React.FC<{presenter: Presenter; scenes: Scene[]; la
   const enter = spring({frame: localFrame, fps, config: {damping: 18, stiffness: 110}});
   // 姿势只在场景边界切换：从前一场景姿势 6 帧交叉淡化，worker 分批也不影响确定性。
   const crossfade = prevPose !== pose ? interpolate(localFrame, [0, 6], [0, 1], clamp) : 1;
-  const bob = Math.sin(frame / 16) * 5;
+  // 复合呼吸浮动：主起伏 + 慢漂移双频叠加，再加 ±0.6° 微摆（绕底部锚点，
+  // 脚底不飘），消除单频 sin 的"贴图感"。
+  const bob = Math.sin(frame / 16) * 4 + Math.sin(frame / 29 + 1.7) * 2.2;
+  const sway = Math.sin(frame / 37 + 0.5) * 0.6;
 
   if (presenter.forceHidden || !ready || !visible) {
     return null;
   }
+
+  // 面部变体调度：眨眼优先于口型（闭眼帧只有 4-5 帧，嘴型状态不可见）。
+  // 变体是渐进增强的：某姿势缺 blink/talk 图时自动落回基础姿势图。
+  const variants = presenter.variants?.[pose] ?? {};
+  const speaking = captions.some((item) => currentMs >= item.startMs && currentMs < item.endMs);
+  const pickImage = (poseName: string): string => {
+    if (poseName === pose) {
+      if (blinkActiveAt(currentMs) && variants.blink) return variants.blink;
+      if (talkOpenAt(currentMs, speaking) && variants.talk) return variants.talk;
+    }
+    return presenter.poses[poseName];
+  };
 
   const side = presenter.position === "left" ? {left: layout.presenterEdgeInset} : {right: layout.presenterEdgeInset};
   // 硬车道：宽被钳在 layout.presenterLaneWidth（外层 transform scale 同步放大车道），
@@ -90,12 +156,12 @@ export const PresenterLayer: React.FC<{presenter: Presenter; scenes: Scene[]; la
         zIndex: 5,
         ...side,
         opacity: enter,
-        transform: `translateX(${(1 - enter) * (presenter.position === "left" ? -120 : 120)}px) translateY(${bob}px) scale(${presenter.scale})`,
+        transform: `translateX(${(1 - enter) * (presenter.position === "left" ? -120 : 120)}px) translateY(${bob}px) rotate(${sway}deg) scale(${presenter.scale})`,
         transformOrigin: presenter.position === "left" ? "bottom left" : "bottom right",
       }}
     >
-      {prevPose !== pose ? <img src={`/${presenter.poses[prevPose]}`} style={imgStyle(1 - crossfade)} alt="" /> : null}
-      <img src={`/${presenter.poses[pose]}`} style={imgStyle(crossfade)} alt="" />
+      {prevPose !== pose ? <img src={`/${pickImage(prevPose)}`} style={imgStyle(1 - crossfade)} alt="" /> : null}
+      <img src={`/${pickImage(pose)}`} style={imgStyle(crossfade)} alt="" />
     </div>
   );
 };

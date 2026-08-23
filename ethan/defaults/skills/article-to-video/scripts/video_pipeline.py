@@ -130,6 +130,56 @@ def _presenter_hint(presenter_id: str) -> str:
     )
 
 
+def _load_presenter_variants(
+    character: dict[str, Any], poses: dict[str, str], presenter_id: str, presenter_dir: Path
+) -> dict[str, dict[str, str]]:
+    """解析 character.json 的可选 variants（姿势名 → {blink/talk → 库内相对路径}）。
+
+    变体是可选的：字段缺失返回空 dict，渲染端退化为静态立绘；
+    出现但结构/路径不合法则报错（与 poses 同样的防护级别）。
+    """
+    variants_raw = character.get("variants")
+    if variants_raw is None:
+        return {}
+    if not isinstance(variants_raw, dict):
+        raise ManifestError(f"presenter '{presenter_id}' variants in character.json must be an object")
+    variants: dict[str, dict[str, str]] = {}
+    for pose_name, variant_map in variants_raw.items():
+        if pose_name not in poses:
+            raise ManifestError(
+                f"presenter '{presenter_id}' variant pose '{pose_name}' is not a known pose — "
+                f"must be one of {sorted(poses)}"
+            )
+        if not isinstance(variant_map, dict) or not variant_map:
+            raise ManifestError(
+                f"presenter '{presenter_id}' variants['{pose_name}'] must be a non-empty object"
+            )
+        entry: dict[str, str] = {}
+        for variant, rel in variant_map.items():
+            if variant not in {"blink", "talk"}:
+                raise ManifestError(
+                    f"presenter '{presenter_id}' variant kind must be 'blink' or 'talk', got '{variant}'"
+                )
+            if not isinstance(rel, str) or not rel:
+                raise ManifestError(
+                    f"presenter '{presenter_id}' variants['{pose_name}']['{variant}'] "
+                    "path must be a non-empty string"
+                )
+            rel_path = Path(rel)
+            if rel_path.is_absolute() or ".." in rel_path.parts:
+                raise ManifestError(
+                    f"presenter '{presenter_id}' variants['{pose_name}']['{variant}'] "
+                    "path must stay inside the presenter dir"
+                )
+            if not (presenter_dir / rel_path).is_file():
+                raise ManifestError(
+                    f"presenter '{presenter_id}' variant image missing: {rel} — {_presenter_hint(presenter_id)}"
+                )
+            entry[variant] = f"presenters/{presenter_id}/{rel_path.as_posix()}"
+        variants[pose_name] = entry
+    return variants
+
+
 def _load_presenter(presenter_raw: Any, library_root: Path) -> dict[str, Any]:
     if not isinstance(presenter_raw, dict):
         raise ManifestError("presenter must be an object")
@@ -172,6 +222,7 @@ def _load_presenter(presenter_raw: Any, library_root: Path) -> dict[str, Any]:
                 f"presenter '{presenter_id}' pose image missing: {rel} — {_presenter_hint(presenter_id)}"
             )
         poses[name] = f"presenters/{presenter_id}/{rel_path.as_posix()}"
+    variants = _load_presenter_variants(character, poses, presenter_id, presenter_dir)
     default_pose = presenter_raw.get("defaultPose", "standing")
     if not isinstance(default_pose, str) or default_pose not in poses:
         raise ManifestError(f"presenter.defaultPose must be one of {sorted(poses)}")
@@ -184,7 +235,7 @@ def _load_presenter(presenter_raw: Any, library_root: Path) -> dict[str, Any]:
     voice = character.get("voice")
     if voice is not None and not isinstance(voice, dict):
         raise ManifestError(f"presenter '{presenter_id}' voice in character.json must be an object")
-    return {
+    payload: dict[str, Any] = {
         "id": presenter_id,
         "position": position,
         "scale": float(scale),
@@ -193,6 +244,10 @@ def _load_presenter(presenter_raw: Any, library_root: Path) -> dict[str, Any]:
         "poses": poses,
         "voice": voice,
     }
+    # 变体是可选的：没有就整个字段不出现（旧 character.json 完全兼容）。
+    if variants:
+        payload["variants"] = variants
+    return payload
 
 
 def _normalize_candlestick(visual: dict[str, Any], visual_raw: dict[str, Any], field: str) -> int:
@@ -812,16 +867,19 @@ def build_timeline(
 
 
 def stage_assets(manifest: dict[str, Any], output_dir: Path, *, library_root: Path | None = None) -> None:
-    """把资产库里的 presenter 立绘铺到 work/public/ 下，供渲染时通过 HTTP 访问。
+    """把资产库里的 presenter 立绘（含可选变体图）铺到 work/public/ 下，供渲染时 HTTP 访问。
 
-    poses 的值形如 presenters/<id>/poses/<name>.png，本身就是相对库根的路径。
+    poses/variants 的值形如 presenters/<id>/poses/<name>.png，本身就是相对库根的路径。
     优先硬链接（同盘零拷贝），跨设备时回退 copy2。validate 已确认姿势文件存在。
     """
     presenter = manifest.get("presenter")
     if not presenter:
         return
     root = _resolve_library_root(library_root)
-    for public_rel in presenter["poses"].values():
+    staged_paths = list(presenter["poses"].values())
+    for entry in (presenter.get("variants") or {}).values():
+        staged_paths.extend(entry.values())
+    for public_rel in staged_paths:
         src = root / public_rel
         dst = output_dir / "work" / "public" / public_rel
         dst.parent.mkdir(parents=True, exist_ok=True)

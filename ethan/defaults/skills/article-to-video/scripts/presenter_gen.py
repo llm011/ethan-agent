@@ -59,6 +59,20 @@ SHEET_TEMPLATE = (
 # 支持 background:"transparent" 的模型前缀（GPT image 2 会拒绝该参数，不能发）。
 TRANSPARENT_MODEL_PREFIXES = ("gpt-image-1", "gpt-5-image")
 
+# 面部变体（可选"活人感"素材）：每个姿势可再出 blink/talk 两张变体图，
+# 渲染端按确定性节律整图快切，实现眨眼与说话口型。变体是可选的——
+# 缺了就退化为静态立绘，不阻塞任何流程。
+POSE_VARIANTS: dict[str, str] = {
+    "blink": "both eyes gently and fully closed, like a soft natural blink",
+    "talk": "mouth softly open mid-sentence as if speaking, relaxed natural lip shape, eyes still open",
+}
+VARIANT_PROMPT_TEMPLATE = (
+    "Same character as the reference image — identical face shape, hairstyle, hair color, "
+    "eyes, outfit, art style, camera framing, body pose, character position and scale. "
+    "Keep the solid pure magenta background (#FF00FF). Only change: {change}. "
+    "Everything else stays identical. Half-body portrait, no text, no watermark."
+)
+
 
 # ---------------------------------------------------------------------------
 # 路径与配置
@@ -181,16 +195,22 @@ def print_prompt_pack(presenter_id: str, character: dict) -> None:
     print(f"\n=== 角色「{character['name']}」({presenter_id}) 出图 prompt 包 ===\n")
     print("操作流程（关键：全程在同一个 GPT image 2 会话里，保证角色一致）：\n")
     print(f"  1. 粘贴下面的【姿势 1 / {names[0]}】prompt，生成第一张图")
-    print(f"  2. 满意后，把这张图发回同一个会话作为参考图，再粘贴【姿势 2】的 prompt")
-    print(f"  3. 之后每个姿势都带上第一张参考图 + 对应 prompt，逐张生成")
+    print("  2. 满意后，把这张图发回同一个会话作为参考图，再粘贴【姿势 2】的 prompt")
+    print("  3. 之后每个姿势都带上第一张参考图 + 对应 prompt，逐张生成")
     print(f"  4. 全部存进一个目录，文件名改成 <姿势名>.png（如 {names[0]}.png）")
     print(f"  5. 运行: python3 {Path(__file__).resolve()} import {presenter_id} <图片目录>\n")
     print("提示：背景必须是纯品红（#FF00FF），纯色才能自动抠图；")
-    print("      某张不满意就在同会话里让它重画，或事后用 regen 子命令重打该姿势的 prompt。\n")
+    print("      某张不满意就在同会话里让它重画，或事后用 regen 子命令重打该姿势的 prompt。")
+    print("可选（推荐）：每个姿势满意后再出 blink/talk 两张变体图（闭眼/张嘴说话），")
+    print("      成片里会有眨眼和口型，立绘更生动。文件名 <姿势名>-blink.png / <姿势名>-talk.png；")
+    print("      不出也行，导入时自动降级为静态立绘。\n")
     for index, (name, phrase) in enumerate(poses.items()):
         label = f"姿势 {index + 1} / {name}"
         prompt = build_pose_prompt(sheet, phrase, first=index == 0)
         print(f"----- {label} -----\n{prompt}\n")
+        for variant, change in POSE_VARIANTS.items():
+            variant_prompt = VARIANT_PROMPT_TEMPLATE.format(change=change)
+            print(f"----- {label} 变体 {variant}（可选，存为 {name}-{variant}.png）-----\n{variant_prompt}\n")
     print("=" * 60 + "\n")
 
 
@@ -491,13 +511,54 @@ def normalize_image(src: Path, dst: Path) -> bool:
 # import：导入用户出图
 # ---------------------------------------------------------------------------
 
-def match_pose_files(image_dir: Path, pose_names: list[str]) -> dict[str, Path]:
-    """文件名匹配姿势：精确词干 → 包含匹配 → 剩余文件按排序补齐剩余姿势。"""
+def split_variant_files(
+    files: list[Path], pose_names: list[str]
+) -> tuple[list[Path], dict[tuple[str, str], Path]]:
+    """把 <pose>-<variant>.ext 变体文件从普通姿势候选里分离出来。
+
+    词干精确等于某个姿势名的文件优先当普通姿势（用户可能自定义出
+    standing-blink 这种姿势名，此时它是姿势不是变体）；其余再按
+    <pose>-<blink|talk> 拆分。不分离的话，变体文件会被后续"包含匹配"
+    误配给姿势（"standing" in "standing-blink" 为真），或被"按顺序补齐"
+    吃掉。"""
+    pose_set = set(pose_names)
+    base_files: list[Path] = []
+    variant_files: dict[tuple[str, str], Path] = {}
+    for path in files:
+        stem = path.stem.lower()
+        if stem in pose_set:
+            base_files.append(path)
+            continue
+        matched = next(
+            (
+                (pose, variant)
+                for pose in pose_names
+                for variant in POSE_VARIANTS
+                if stem == f"{pose}-{variant}"
+            ),
+            None,
+        )
+        if matched:
+            variant_files[matched] = path
+        else:
+            base_files.append(path)
+    return base_files, variant_files
+
+
+def match_pose_files(
+    image_dir: Path, pose_names: list[str]
+) -> tuple[dict[str, Path], dict[tuple[str, str], Path]]:
+    """文件名匹配姿势：精确词干 → 包含匹配 → 剩余文件按排序补齐剩余姿势。
+
+    返回 (姿势→文件, (姿势, 变体)→文件)。变体文件先被分离出候选池，
+    绝不参与姿势匹配；变体是可选的，缺了不报错。
+    """
     files = sorted(p for p in image_dir.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_EXTS)
+    base_files, variant_files = split_variant_files(files, pose_names)
     assigned: dict[str, Path] = {}
     used: set[Path] = set()
     for name in pose_names:
-        for path in files:
+        for path in base_files:
             if path not in used and path.stem.lower() == name:
                 assigned[name] = path
                 used.add(path)
@@ -505,17 +566,17 @@ def match_pose_files(image_dir: Path, pose_names: list[str]) -> dict[str, Path]:
     for name in pose_names:
         if name in assigned:
             continue
-        for path in files:
+        for path in base_files:
             if path not in used and name in path.stem.lower():
                 assigned[name] = path
                 used.add(path)
                 break
     remaining_poses = [name for name in pose_names if name not in assigned]
-    remaining_files = [path for path in files if path not in used]
+    remaining_files = [path for path in base_files if path not in used]
     for name, path in zip(remaining_poses, remaining_files):
         assigned[name] = path
         print(f"  [info] {path.name} 按顺序匹配到姿势 {name}", file=sys.stderr)
-    return assigned
+    return assigned, variant_files
 
 
 def cmd_import(presenter_id: str, image_dir: Path, *, tolerance: int = 42, cleanup: bool = False) -> None:
@@ -523,7 +584,7 @@ def cmd_import(presenter_id: str, image_dir: Path, *, tolerance: int = 42, clean
     pose_names = list(character.get("posesPrompts") or DEFAULT_POSES)
     if not image_dir.is_dir():
         raise SystemExit(f"[error] 图片目录不存在: {image_dir}")
-    assigned = match_pose_files(image_dir, pose_names)
+    assigned, variant_files = match_pose_files(image_dir, pose_names)
     missing = [name for name in pose_names if name not in assigned]
     if missing:
         raise SystemExit(f"[error] 目录里没有可匹配的图片，缺少姿势: {', '.join(missing)}")
@@ -531,31 +592,49 @@ def cmd_import(presenter_id: str, image_dir: Path, *, tolerance: int = 42, clean
     dest_dir = presenter_dir(presenter_id) / "poses"
     poses: dict[str, str] = {}
     all_cutout = True
+
+    def _process(src: Path, dst: Path) -> tuple[bool, bool]:
+        """单图导入：有 alpha 归一，无 alpha 抠品红底（失败原样拷贝降级）。
+
+        返回 (处理成功, 是否抠图成功)。抠图失败不硬失败：cutout=False，
+        前端用卡片框渲染。
+        """
+        if png_has_alpha(src):
+            return normalize_image(src, dst), True
+        print(f"  [info] {src.name} 无 alpha，尝试抠图 ...", file=sys.stderr)
+        if cutout_to_png(src, dst, tolerance=tolerance, cleanup=cleanup):
+            return True, True
+        return normalize_image(src, dst), False
+
     for name, src in assigned.items():
         dst = dest_dir / f"{name}.png"
-        if png_has_alpha(src):
-            ok = normalize_image(src, dst)
-            cut = True
-        else:
-            print(f"  [info] {src.name} 无 alpha，尝试抠图 ...", file=sys.stderr)
-            ok = cutout_to_png(src, dst, tolerance=tolerance, cleanup=cleanup)
-            cut = ok
-            if not ok:
-                # 抠不动也能用：原样拷贝，前端用卡片框渲染。
-                ok = normalize_image(src, dst)
+        ok, cut = _process(src, dst)
         if not ok:
             raise SystemExit(f"[error] 处理失败: {src}")
         all_cutout = all_cutout and cut
         poses[name] = f"poses/{name}.png"
         print(f"  [ok] {name} <- {src.name}{'' if cut else '（未抠图，卡片框降级）'}")
 
+    # 变体是可选的：只导入目录里实际出现的变体文件
+    variants: dict[str, dict[str, str]] = {}
+    for (pose_name, variant), src in sorted(variant_files.items()):
+        dst = dest_dir / f"{pose_name}-{variant}.png"
+        ok, cut = _process(src, dst)
+        if not ok:
+            raise SystemExit(f"[error] 处理失败: {src}")
+        all_cutout = all_cutout and cut
+        variants.setdefault(pose_name, {})[variant] = f"poses/{pose_name}-{variant}.png"
+        print(f"  [ok] {pose_name}-{variant} <- {src.name}")
+
     character["poses"] = poses
+    character["variants"] = variants
     character["cutout"] = all_cutout
     character["status"] = "ready"
     character["source"] = character.get("source") or "manual"
     _save_character(presenter_id, character)
+    variant_note = f"；变体: {sum(len(v) for v in variants.values())} 张" if variants else ""
     print(f"\n[ok] 角色「{character['name']}」已就绪: {presenter_dir(presenter_id)}")
-    print(f"     姿势: {', '.join(poses)}；抠图: {'是' if all_cutout else '否（卡片框渲染）'}")
+    print(f"     姿势: {', '.join(poses)}{variant_note}；抠图: {'是' if all_cutout else '否（卡片框渲染）'}")
     print(f"     现在可以在 manifest 里引用: \"presenter\": {{\"id\": \"{presenter_id}\"}}")
 
 
@@ -615,11 +694,18 @@ def cmd_prompts(presenter_id: str, args: argparse.Namespace) -> None:
     print_prompt_pack(presenter_id, character)
 
 
-def cmd_regen(presenter_id: str, pose: str) -> None:
+def cmd_regen(presenter_id: str, pose: str, variant: str | None = None) -> None:
     character = _load_character(presenter_id)
     poses_prompts: dict[str, str] = character.get("posesPrompts") or {}
     if pose not in poses_prompts:
         raise SystemExit(f"[error] 未知姿势 {pose}，可选: {', '.join(poses_prompts)}")
+    if variant is not None:
+        if variant not in POSE_VARIANTS:
+            raise SystemExit(f"[error] 未知变体 {variant}，可选: {', '.join(POSE_VARIANTS)}")
+        print(f"在同一会话里带上【{pose}】姿势的立绘作为参考图，粘贴：\n")
+        print(VARIANT_PROMPT_TEMPLATE.format(change=POSE_VARIANTS[variant]))
+        print(f"\n生成后覆盖 <图片目录>/{pose}-{variant}.png 并重新运行 import。")
+        return
     print("在同一会话里带上第一张立绘参考图，粘贴：\n")
     print(build_pose_prompt(character["sheet"], poses_prompts[pose], first=False))
     print(f"\n生成后覆盖 <图片目录>/{pose}.png 并重新运行 import。")
@@ -769,9 +855,10 @@ def build_parser() -> argparse.ArgumentParser:
     import_cmd.add_argument("--cleanup", action="store_true",
                             help="抠图后去除残留小色块并按内容裁边（白底裁图建议开启）")
 
-    regen = sub.add_parser("regen", help="重新打印单个姿势的 prompt")
+    regen = sub.add_parser("regen", help="重新打印单个姿势/变体的 prompt")
     regen.add_argument("id")
     regen.add_argument("pose")
+    regen.add_argument("--variant", choices=sorted(POSE_VARIANTS), help="出变体图 prompt（blink/talk）")
 
     sub.add_parser("list", help="列出角色库")
     show = sub.add_parser("show", help="查看角色详情")
@@ -792,7 +879,7 @@ def main() -> int:
     elif args.command == "import":
         cmd_import(args.id, args.dir.expanduser().resolve(), tolerance=args.tolerance, cleanup=args.cleanup)
     elif args.command == "regen":
-        cmd_regen(args.id, args.pose)
+        cmd_regen(args.id, args.pose, variant=getattr(args, "variant", None))
     elif args.command == "list":
         cmd_list()
     elif args.command == "show":
