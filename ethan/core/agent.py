@@ -7,7 +7,6 @@ from ethan.core.config import get_config
 from ethan.core.context_budget import compress_previous_round_tools, enforce_context_budget
 from ethan.core.routing import _get_route, _match_fast_rule, classify_instant
 from ethan.core.tool_format import (
-    _INTENT_SYSTEM_INSTRUCTION,
     _detail,
     _format_args,
     _preview,
@@ -218,475 +217,54 @@ class Agent:
         """Settings 更新后调用，重新加载 system 文件缓存。"""
         self._load_system_files()
 
+
     def _build_schedule_context(self, workspace: str) -> str:
-        """读取 APScheduler SQLite 数据库，返回当前活跃定时任务摘要（不需要启动 scheduler）。"""
-        import datetime as dt
-        import sqlite3
-
-        db_path = Path(workspace) / "scheduler.db"
-        if not db_path.exists():
-            return ""
-        try:
-            con = sqlite3.connect(str(db_path))
-            rows = con.execute("SELECT id, next_run_time, job_state FROM apscheduler_jobs").fetchall()
-            con.close()
-            if not rows:
-                return ""
-            lines = []
-            for job_id, next_run_ts, job_state_blob in rows:
-                next_run = "paused"
-                if next_run_ts:
-                    try:
-                        from ethan.core.timezone import get_local_timezone
-
-                        next_run = dt.datetime.fromtimestamp(next_run_ts, get_local_timezone()).strftime(
-                            "%Y-%m-%d %H:%M"
-                        )
-                    except Exception:
-                        pass
-                # Extract prompt from kwargs if available
-                prompt = ""
-                try:
-                    state = __import__("pickle").loads(job_state_blob)
-                    prompt = state.get("kwargs", {}).get("prompt", "")[:60]
-                except Exception:
-                    pass
-                line = f"- {job_id}: next={next_run}"
-                if prompt:
-                    line += f', task="{prompt}"'
-                lines.append(line)
-            return "\n".join(lines)
-        except Exception:
-            return ""
+        from ethan.core.system_prompt import build_schedule_context
+        return build_schedule_context(workspace)
 
     def _get_last_user_text(self, messages: list[Message]) -> str:
-        for m in reversed(messages):
-            if m.role == "user" and m.content:
-                return m.content
-        return ""
+        from ethan.core.system_prompt import get_last_user_text
+        return get_last_user_text(messages)
 
     def _persona_text(self, skill_names: tuple[str, ...]) -> str:
-        """读取某个 persona 正文（去掉 YAML frontmatter）。
-
-        每次都从磁盘读，使 Web UI 改完 SKILL.md 后下条消息即生效，无需重启。
-        优先用户 skills 目录（可被用户改写），回退包内默认。找不到返回空串。
-        skill_names 按序查找首个命中（兼容英文/中文目录名）。
-        """
-        candidates: list[Path] = []
-        try:
-            from ethan.core.paths import user_skills_dir
-
-            base = user_skills_dir()
-            for name in skill_names:
-                candidates.append(base / name / "SKILL.md")
-                candidates.append(base / f"{name}.md")
-        except Exception:
-            pass
-        # 包内默认：ethan/defaults/skills/<name>/SKILL.md
-        pkg = Path(__file__).resolve().parent.parent / "defaults" / "skills"
-        for name in skill_names:
-            candidates.append(pkg / name / "SKILL.md")
-        for p in candidates:
-            if p.exists():
-                text = p.read_text(encoding="utf-8")
-                if text.startswith("---"):
-                    seg = text.split("---", 2)
-                    if len(seg) >= 3:
-                        text = seg[2]
-                return text.strip()
-        return ""
+        from ethan.core.system_prompt import get_persona_text
+        return get_persona_text(skill_names, self._skills)
 
     def _persona_block(self) -> str | None:
-        """当前 mode 若绑定了 persona，返回注入用的人格覆盖块；否则返回 None。
-
-        措辞保持通用（不出现任何具体人格名），具体人格由 skill 正文自己声明。
-        """
-        from ethan.core.modes import resolve_mode
-
-        mode = resolve_mode(self._mode)
-        if not mode.persona_skills:
-            return None
-        persona = self._persona_text(mode.persona_skills)
-        if not persona:
-            return None
-        return (
-            "<persona_override>\n"
-            f"[CRITICAL — 当前处于「{mode.label}」模式。以下人格覆盖你的默认身份，"
-            "请完全化身该人格，用其语气、温度和方式回应，严格遵守其中的说话方式要求。]\n\n"
-            f"{persona}\n"
-            "</persona_override>"
-        )
+        from ethan.core.system_prompt import build_persona_block
+        return build_persona_block(self._mode, self._skills)
 
     def _mode_identity_block(self) -> str | None:
-        """当前 mode 声明了 identity 时，返回身份覆盖块（不依赖触发词，进模式即生效）。
-
-        与 persona_skills 不同：identity 是轻量的、模式级的身份声明，直接写在 modes.py，
-        用于「法律专家」这类工具型模式——确保问「你是谁」时回答专业身份，而非默认日常人设。
-        """
-        from ethan.core.modes import resolve_mode
-
-        mode = resolve_mode(self._mode)
-        if not mode.identity:
-            return None
-        return (
-            "<mode_identity>\n"
-            f"[CRITICAL — 当前处于「{mode.label}」模式，以下身份覆盖默认身份与记忆里的日常人设]\n\n"
-            f"{mode.identity}\n"
-            "</mode_identity>"
-        )
+        from ethan.core.system_prompt import build_mode_identity_block
+        return build_mode_identity_block(self._mode)
 
     def _mode_install_hint(self, messages: list[Message] | None = None) -> str | None:
-        """当前 mode 依赖某 skill 但尚未安装时，返回「自动安装」指令；否则 None。
-
-        通用机制：mode 在 modes.py 里声明 requires_skill + install_source(+ install_alias)，
-        内核不认任何具体技能名。
-
-        接入体验（友好默认，见记忆 feedback-mode-skill-onboarding）：
-        - 自动安装：用户切到该模式即强意图信号，直接装，不先问一轮。
-        - 可见反馈：安装前先说一句「正在为 X 模式安装技能…」，不静默联网。
-        - 失败兜底：装失败（离线/代理不通）时，降级提示用户手动 `ethan skill add <alias>`。
-
-        只在该模式会话的**前 2 个用户回合**注入，避免装好前/装不上时每条消息都唠叨。
-        """
-        from ethan.core.modes import resolve_mode
-
-        mode = resolve_mode(self._mode)
-        if not mode.requires_skill or not self._skills:
-            return None
-        if self._skills.get(mode.requires_skill) is not None:
-            return None
-        if messages is not None:
-            user_turns = sum(1 for m in messages if m.role == "user")
-            if user_turns > 2:
-                return None
-        src = mode.install_source or mode.requires_skill
-        alias = mode.install_alias or mode.requires_skill
-        return (
-            "<mode_setup>\n"
-            f"[CRITICAL] 用户已切换到「{mode.label}」模式，但依赖技能 `{mode.requires_skill}` 尚未安装。"
-            "用户主动切到本模式即视为同意安装，请按以下步骤自动完成，不要再反问要不要装：\n"
-            f"1. 先用一句话告知：正在为「{mode.label}」模式安装依赖技能，请稍候。\n"
-            f'2. 立即调用 install_skill(source="{src}") 安装（无需重启，安装后下次对话即生效）。\n'
-            f"3. 安装成功：简短告知已就绪，并继续回答用户当前的问题。\n"
-            f"4. 安装失败（如网络/代理不通）：明确说明原因，并提示用户可在命令行手动运行 "
-            f"`ethan skill add {alias}` 后重试。\n"
-            "在技能装好前，不要假装已具备该模式的完整专业能力。\n"
-            "</mode_setup>"
-        )
+        from ethan.core.system_prompt import build_mode_install_hint
+        return build_mode_install_hint(self._mode, self._skills, messages)
 
     def _build_previous_run_summary(self, messages: list[Message]) -> str | None:
-        """从历史消息中找到「上一轮 assistant 回复」，若有 tool_steps 则生成精简摘要。
-
-        下一轮对话时，模型看不到数据库里的 tool_steps（只有 role/content 进 messages），
-        所以上一轮具体调了哪些工具、拿到了什么结果摘要对模型是"盲区"。这里把关键信息
-        作为 system prompt 末尾的一段上下文注入，帮助模型在续跑时衔接上一轮动作。
-
-        内容刻意精简：只给工具名 + intent + result_preview（≤60字），不塞 result_detail
-        （避免爆 token，完整细节模型可自己追问/查本地文件）。
-        """
-        # 找最后一条 assistant 消息（= 上一轮 AI 回复；当前 messages 末尾是本轮新 user 输入）
-        last_assistant: Message | None = None
-        for m in reversed(messages):
-            if m.role == "assistant":
-                last_assistant = m
-                break
-        if last_assistant is None:
-            return None
-        steps = getattr(last_assistant, "tool_steps", None) or []
-        if not steps:
-            return None
-        lines: list[str] = []
-        for idx, step in enumerate(steps, start=1):
-            tool = step.get("tool") or "unknown_tool"
-            state = step.get("state") or "done"
-            state_tag = "✓" if state == "done" else ("✗" if state == "error" else "…")
-            parts = [f"{idx}. {state_tag} {tool}"]
-            intent = (step.get("intent") or "").strip()
-            if intent:
-                parts.append(f"— {intent[:40]}")
-            preview = (step.get("result_preview") or "").strip()
-            if preview:
-                preview = preview.replace("\n", " ")
-                if len(preview) > 60:
-                    preview = preview[:57] + "…"
-                parts.append(f" → {preview}")
-            lines.append(" ".join(parts))
-        if not lines:
-            return None
-        summary = "\n".join(lines)
-        return (
-            "<previous_run_summary>\n"
-            f"[System note: 以下是同一会话中上一轮 AI 执行的 {len(steps)} 个工具步骤摘要，"
-            "仅用于衔接上下文（不是本轮要做的事）。如果用户要求「继续」「修复刚才的问题」等，"
-            "请结合这些信息理解上一轮做了什么、卡在哪里；正常提问则忽略即可。]\n\n"
-            f"{summary}\n"
-            "</previous_run_summary>"
-        )
+        from ethan.core.system_prompt import build_previous_run_summary
+        return build_previous_run_summary(messages)
 
     def _build_system(self, messages: list[Message], fast: bool = False, fast_rule=None) -> str:
-        """构建 system prompt。fast=True 时使用极简版本减少 token。
-
-        fast_rule（命中的 FastRule）非空时，把它声明的 skills 强制注入 prompt 并激活其 tools，
-        不依赖 skill 自身的触发词匹配——规则命中即视为用户意图已明确。
-        """
-        config = get_config()
-        workspace = config.defaults.workspace
-
-        # 从缓存读取，避免每次对话都做磁盘 I/O
-        identity_content = self._system_files.get("identity", "You are a helpful assistant.")
-        from ethan.core.timezone import get_local_timezone
-
-        now = datetime.now(get_local_timezone()).strftime("%Y-%m-%d %H:%M:%S %A")
-
-        self.last_matched_skills = []
-
-        # A2: 记忆信号检测 — 规则驱动，不依赖 LLM 自主判断
-        last_user_text_for_recall = self._get_last_user_text(messages)
-        _memory_signal = None
-        if last_user_text_for_recall:
-            from ethan.memory.signals import detect_memory_signal
-
-            _memory_signal = detect_memory_signal(last_user_text_for_recall)
-
-        soul_content = self._system_files.get("soul", "")
-        agent_content = self._system_files.get("agent", "")
-        tools_content = self._system_files.get("tools", "")
-
-        if fast:
-            # Fast Path: 极简 Prompt — 核心准则 + 身份 + 时间 + 记忆 + 行为规则 + 相关 Skill
-            parts = []
-            if soul_content:
-                parts.append(f"<soul>\n[CRITICAL — 以下准则必须严格遵守]\n\n{soul_content}\n</soul>")
-            parts.append(f"<identity>\n{identity_content}\n</identity>")
-            persona_block = self._persona_block()
-            if persona_block:
-                parts.append(persona_block)
-            mode_identity = self._mode_identity_block()
-            if mode_identity:
-                parts.append(mode_identity)
-            if agent_content:
-                parts.append(f"<agent_protocols>\n{agent_content}\n</agent_protocols>")
-            parts.append(f"Current time: {now}")
-            parts.append(f"Your workspace directory is {workspace}.")
-            parts.append(
-                f"Current model: {self._provider.model}（用户问起你用的什么模型/是谁驱动时，如实回答这个 model id）"
-            )
-            parts.append(
-                "[工具] 你当前只挂载了少量常用工具。如果要做的事现有工具做不到"
-                "（写文件除外——file_write 已可用），先调 `find_tools` 激活进阶工具"
-                "（知识库/定时任务/密钥/记忆写入/代码委派等），激活后直接调用。"
-                "绝不要用 shell/terminal 跑 python 去硬凑这些能力。"
-            )
-            parts.append(_INTENT_SYSTEM_INSTRUCTION)
-            # 记忆召回改为按需工具调用（recall_memory），不再前置注入 system prompt。
-            # 模型在第一轮自行判断是否需要召回，若需要则调用 recall_memory(query) 并传入
-            # 改写后的自包含 query（用对话上下文消解代词/省略）。
-            if self.is_owner:
-                parts.append(
-                    "<memory_recall_hint>\n"
-                    "你有 recall_memory(query) 工具可召回用户长期记忆。当用户消息涉及个人上下文/"
-                    "历史偏好/过往交互且你缺少相关信息时，在回答前调用它，传入改写后的自包含 query"
-                    "（用对话上下文消解代词/省略，如用户说「继续」时传入正在讨论的主题）。"
-                    "自包含问题（如天气、数学、通用知识）无需调用。每轮最多调一次。\n"
-                    "</memory_recall_hint>"
-                )
-            profile_content = self._system_files.get("user_profile", "")
-            if profile_content:
-                parts.append(f"<user_profile>\n{profile_content}\n</user_profile>")
-            proc_ctx = self._procedures.build_context()
-            if proc_ctx:
-                parts.append(
-                    "<behavioral_guidelines>\n"
-                    "[System note: Rules learned from past corrections. Apply consistently.]\n\n"
-                    f"{proc_ctx}\n"
-                    "</behavioral_guidelines>"
-                )
-            last_user = last_user_text_for_recall
-            if self._skills and last_user:
-                from ethan.core.modes import resolve_mode
-
-                mode_key = resolve_mode(self._mode).key
-                matched = self._skills.match(last_user, channel=self._channel, mode=mode_key)
-                # 命中 fast_rule 时，把规则声明的 skills 也并入（去重），不靠触发词——规则命中即明确意图
-                if fast_rule and fast_rule.skills:
-                    have = {s.name for s in matched}
-                    for sname in fast_rule.skills:
-                        if sname not in have:
-                            sk = self._skills.get(sname)
-                            if sk:
-                                matched.append(sk)
-                                have.add(sname)
-                self.last_matched_skills = [s.name for s in matched]
-                # 按 category 分流注入：
-                # - default: 完整 content（截断到 3000 字）
-                # - discoverable: 命中 trigger 时只注入 name + description（精简），模型用 skill_read 拉取全文
-                full_parts = []
-                brief_parts = []
-                for s in matched:
-                    if getattr(s, "category", "default") == "discoverable":
-                        brief_parts.append(f"- {s.name}: {' | '.join(s.trigger[:5])} — {s.description[:80]}")
-                    else:
-                        full_parts.append(f"[Skill: {s.name}]\n{s.content[:3000]}")
-                skill_ctx = "\n\n".join(full_parts) if full_parts else ""
-                if skill_ctx:
-                    parts.append(f"<relevant_skills>\n{skill_ctx}\n</relevant_skills>")
-                    # skill 内容里提到的非 fast 工具自动激活，避免 fast 档看不见 skill 依赖的工具、
-                    # 逼模型多绕一步 find_tools。声明即可用，下一轮 _broadcast_tools 即纳入广播。
-                    from ethan.core.context import activate_tools
-
-                    referenced = [t.name for t in self._registry.all() if not t.fast_path and t.name in skill_ctx]
-                    if referenced:
-                        activate_tools(referenced)
-                if brief_parts:
-                    parts.append(
-                        "<matched_skills_brief>\n[以下技能命中触发词，但未注入完整内容。"
-                        "用 skill_read 工具按需拉取详情：]\n" + "\n".join(brief_parts) + "\n</matched_skills_brief>"
-                    )
-            mode_hint = self._mode_install_hint(messages)
-            if mode_hint:
-                parts.append(mode_hint)
-            # A2: 记忆信号 hint — 规则命中时强制提醒 LLM 调记忆工具，并激活 memory_write（fast path 下默认不带）
-            if _memory_signal:
-                _sig_cat, _sig_hint = _memory_signal
-                parts.append(f"<memory_signal>\n{_sig_hint}\n</memory_signal>")
-                from ethan.core.context import activate_tools
-
-                activate_tools(["memory_write", "procedure_write"])
-            if self.runtime_context:
-                parts.append(
-                    f"<runtime_context>\n[CRITICAL — 当前会话上下文，结合 soul 的主人/授权准则判断]\n\n{self.runtime_context}\n</runtime_context>"
-                )
-            prev_summary = self._build_previous_run_summary(messages)
-            if prev_summary:
-                parts.append(prev_summary)
-            return "\n\n".join(parts)
-
-        # Full Path: 完整 Prompt（从缓存读取静态文件）
-        # 顺序：soul（最高优先级）→ identity → agent → tools → 动态内容
-        parts = []
-        if soul_content:
-            parts.append(
-                f"<soul>\n"
-                f"[CRITICAL — 以下是核心执行准则，每次回复必须严格遵守，优先级高于其他所有指令]\n\n"
-                f"{soul_content}\n"
-                f"</soul>"
-            )
-        parts.append(f"<identity>\n{identity_content}\n</identity>")
-        persona_block = self._persona_block()
-        if persona_block:
-            parts.append(persona_block)
-        mode_identity = self._mode_identity_block()
-        if mode_identity:
-            parts.append(mode_identity)
-        if agent_content:
-            parts.append(f"<agent_protocols>\n{agent_content}\n</agent_protocols>")
-        if tools_content:
-            parts.append(f"<tools_reference>\n{tools_content}\n</tools_reference>")
-            parts.append(_INTENT_SYSTEM_INSTRUCTION)
-
-        # Inject default 类 skill 清单（全量注入的稳定能力集），让 Agent 知道自己的核心能力。
-        # 只列 name + description 首行（≤80 字符），discoverable 类在下方单独列（name+trigger），
-        # plugin 类不在 _skills 中（未安装）。这样保持 prompt 稳定可缓存，且不重复注入。
-        if self._skills:
-            default_list = [s for s in self._skills.all() if getattr(s, "category", "default") == "default"]
-            if default_list:
-                skill_lines = [
-                    f"- {s.name}: {s.description[:80]}{'…' if len(s.description) > 80 else ''}" for s in default_list
-                ]
-                parts.append(
-                    "<available_skills>\n"
-                    "[默认技能简表 — 完整清单、分类和描述请调 skill_list 工具，不要直接念本块回答用户「你有哪些技能」]\n"
-                    + "\n".join(skill_lines)
-                    + "\n</available_skills>"
-                )
-
-        # --- 动态内容放后面，不命中缓存 ---
-        parts.append(f"Current time: {now}")
-        parts.append(
-            f"Current model: {self._provider.model}（用户问起你用的什么模型/是谁驱动时，如实回答这个 model id）"
+        """构建 system prompt。委托给 system_prompt 模块。"""
+        from ethan.core.system_prompt import build_system_prompt
+        return build_system_prompt(
+            messages=messages,
+            fast=fast,
+            fast_rule=fast_rule,
+            system_files=self._system_files,
+            provider_model=self._provider.model,
+            skills=self._skills,
+            procedures=self._procedures,
+            registry=self._registry,
+            channel=self._channel,
+            mode=self._mode,
+            is_owner=self.is_owner,
+            runtime_context=self.runtime_context,
+            last_matched_skills_out=self.last_matched_skills,
         )
-        parts.append(f"Your workspace directory is {workspace}. System configurations and memories reside here.")
 
-        # 记忆召回改为按需工具调用（recall_memory），不再前置注入 system prompt
-        if self.is_owner:
-            parts.append(
-                "<memory_recall_hint>\n"
-                "你有 recall_memory(query) 工具可召回用户长期记忆。当用户消息涉及个人上下文/"
-                "历史偏好/过往交互且你缺少相关信息时，在回答前调用它，传入改写后的自包含 query"
-                "（用对话上下文消解代词/省略，如用户说「继续」时传入正在讨论的主题）。"
-                "自包含问题（如天气、数学、通用知识）无需调用。可与其它工具并行调用。每轮最多调一次。\n"
-                "</memory_recall_hint>"
-            )
-
-        profile_content = self._system_files.get("user_profile", "")
-        # 只有实质内容（非空行/标题）才注入，避免把空模板塞进 system prompt
-        _profile_text = "\n".join(
-            line for line in profile_content.splitlines() if line.strip() and not line.strip().startswith("#")
-        )
-        if _profile_text:
-            parts.append(
-                f"<user_profile>\n[User profile — personalize responses]\n\n{profile_content}\n</user_profile>"
-            )
-
-        proc_ctx = self._procedures.build_context()
-        if proc_ctx:
-            parts.append(
-                "<behavioral_guidelines>\n"
-                "[System note: Rules learned from past corrections. Apply consistently.]\n\n"
-                f"{proc_ctx}\n"
-                "</behavioral_guidelines>"
-            )
-
-        last_user = last_user_text_for_recall
-        if self._skills and last_user:
-            from ethan.core.modes import resolve_mode
-
-            mode_key = resolve_mode(self._mode).key
-            matched = self._skills.match(last_user, channel=self._channel, mode=mode_key)
-            self.last_matched_skills = [s.name for s in matched]
-            skill_ctx = self._skills.build_context(last_user, channel=self._channel, mode=mode_key)
-            if skill_ctx:
-                parts.append(f"<relevant_skills>\n{skill_ctx}\n</relevant_skills>")
-
-        # 可发现型 skill 目录：列出有 trigger 的 discoverable skill（模型可按触发词判断是否 skill_read），
-        # 无 trigger 的只给数量统计（多为 bytedance-*/lark-* 工具型技能，逐行列空 trigger 占 token 且无信息量）。
-        # 元查询（"你有哪些技能"）时模型应调 skill_list 拿完整清单，不念本块。
-        if self._skills:
-            discoverable = [s for s in self._skills.all() if getattr(s, "category", "default") == "discoverable"]
-            if discoverable:
-                with_trig = [s for s in discoverable if s.trigger]
-                no_trig = [s for s in discoverable if not s.trigger]
-                lines = [f"- {s.name}: {' | '.join(s.trigger[:5])}" for s in with_trig]
-                if no_trig:
-                    lines.append(
-                        f"- （另有 {len(no_trig)} 个工具型技能无触发词，如 bytedance-*/lark-*，调 skill_list 查看完整清单）"
-                    )
-                parts.append(
-                    "<available_skills>\n"
-                    "[按需技能简表 — 命中触发词时用 skill_read 拉全文；完整清单和分类请调 skill_list，不要念本块回答「你有哪些技能」]\n"
-                    + "\n".join(lines)
-                    + "\n</available_skills>"
-                )
-
-        mode_hint = self._mode_install_hint(messages)
-        if mode_hint:
-            parts.append(mode_hint)
-
-        # A2: 记忆信号 hint — full path 下 memory_write 已在 base_tools 里，只需提醒
-        if _memory_signal:
-            _sig_cat, _sig_hint = _memory_signal
-            parts.append(f"<memory_signal>\n{_sig_hint}\n</memory_signal>")
-
-        if self.runtime_context:
-            parts.append(
-                f"<runtime_context>\n[CRITICAL — 当前会话上下文，结合 soul 的主人/授权准则判断]\n\n{self.runtime_context}\n</runtime_context>"
-            )
-
-        prev_summary = self._build_previous_run_summary(messages)
-        if prev_summary:
-            parts.append(prev_summary)
-
-        return "\n\n".join(parts)
 
     def route_for(self, messages: list[Message]) -> str:
         """返回路由档位 'fast' | 'full'，供渠道决定回复策略（如飞书 card vs post）。"""
