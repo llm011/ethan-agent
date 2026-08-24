@@ -25,6 +25,7 @@ import { ThemeSwatch } from "@ethan/shared/components/theme-swatch";
 import { PromptPreview } from "./settings/prompt-preview";
 import { ProfileEditor } from "./settings/profile-editor";
 import { FastRulesTab } from "./settings/fast-rules-tab";
+import { PluginsTab } from "./settings/plugins-tab";
 import { ToolTiersView } from "./tool-tiers-view";
 import { ConfirmDialog } from "./confirm-dialog";
 
@@ -33,7 +34,7 @@ interface SettingsViewProps {
   initialTab?: TabId;
 }
 
-type TabId = "general" | "fast-rules" | "providers" | "channels" | "identity" | "soul" | "tools" | "heartbeat" | "profile" | "prompt-preview" | "api-keys" | "tool-tiers";
+type TabId = "general" | "fast-rules" | "providers" | "channels" | "plugins" | "identity" | "soul" | "tools" | "heartbeat" | "profile" | "prompt-preview" | "api-keys" | "tool-tiers";
 
 const TAB_GROUPS = [
   {
@@ -43,6 +44,7 @@ const TAB_GROUPS = [
       { id: "fast-rules" as TabId, label: "快捷路由" },
       { id: "providers" as TabId, label: "模型 provider" },
       { id: "channels" as TabId, label: "渠道" },
+      { id: "plugins" as TabId, label: "插件" },
     ],
   },
   {
@@ -898,6 +900,8 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
                 <ToolTiersView embedded />
               </div>
             )}
+
+            {activeTab === "plugins" && <PluginsTab />}
 
             {activeTab === "api-keys" && (
               <div className="space-y-6">

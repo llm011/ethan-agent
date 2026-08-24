@@ -7,9 +7,8 @@ metadata:
   requires:
     bins: ["uv", "ffmpeg", "ffprobe"]
     secrets:
-      - path: "~/.ethan/.secrets/wechat-reading.env"
-        fields: ["WEREAD_API_KEY"]
-        description: "微信读书 Agent API Key，见 wechat-reading 技能。"
+      - name: "WEREAD_API_KEY"
+        description: "微信读书 Agent API Key，见 wechat-reading 技能。通过 get_secret 读取。"
   relates:
     - skill: wechat-reading
       scope: "书籍信息/目录/热门划线采集规范与限流避坑，本技能复用其 API 调用纪律。"

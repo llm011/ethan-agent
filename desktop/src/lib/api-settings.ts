@@ -224,3 +224,60 @@ export async function updateFastRules(patch: Partial<FastRules>): Promise<void> 
     body: JSON.stringify(patch),
   });
 }
+
+// ── Plugins ─────────────────────────────────────────────────────
+
+export interface PluginField {
+  key: string;
+  label: string;
+  secret: boolean;
+  default: string;
+  hint: string;
+  boolean: boolean;
+}
+
+export interface PluginInfo {
+  name: string;
+  label: string;
+  description: string;
+  category: "config" | "preset" | "builtin";
+  status: "enabled" | "disabled" | "not_installed" | "always";
+  fields: PluginField[];
+  config_path: string;
+  current_values: Record<string, string>;
+}
+
+export async function fetchPlugins(): Promise<PluginInfo[]> {
+  const res = await fetch(`${getApiUrl()}/plugins`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed to fetch plugins");
+  const data = await res.json();
+  return data.plugins;
+}
+
+export async function addPlugin(name: string, values: Record<string, string> = {}): Promise<{ ok: boolean; message: string; restart_required: boolean }> {
+  const res = await fetch(`${getApiUrl()}/plugins/${encodeURIComponent(name)}`, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify({ values }),
+  });
+  if (!res.ok) throw new Error("Failed to add plugin");
+  return res.json();
+}
+
+export async function removePlugin(name: string): Promise<{ ok: boolean; message: string; restart_required: boolean }> {
+  const res = await fetch(`${getApiUrl()}/plugins/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+    headers: headers(),
+  });
+  if (!res.ok) throw new Error("Failed to remove plugin");
+  return res.json();
+}
+
+export async function restartServer(): Promise<{ ok: boolean; message: string }> {
+  const res = await fetch(`${getApiUrl()}/server/restart`, {
+    method: "POST",
+    headers: headers(),
+  });
+  if (!res.ok) throw new Error("Failed to restart server");
+  return res.json();
+}

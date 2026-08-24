@@ -31,6 +31,7 @@ from ethan.interface.routers import (
     logs,
     memory,
     models,
+    plugins,
     reading,
     schedule,
     sessions,
@@ -217,6 +218,7 @@ app.include_router(schedule.router, prefix="/api")
 app.include_router(agenda.router, prefix="/api")
 app.include_router(knowledge.router, prefix="/api")
 app.include_router(skills.router, prefix="/api")
+app.include_router(plugins.router, prefix="/api")
 app.include_router(docs.router, prefix="/api")
 app.include_router(completions.router)  # /v1 OpenAI-compat, no /api prefix
 app.include_router(logs.router, prefix="/api")
