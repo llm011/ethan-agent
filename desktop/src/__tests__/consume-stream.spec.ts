@@ -15,6 +15,7 @@ function mockActions(): ConsumeStreamActions {
     setSessionUsage: vi.fn(),
     setStopping: vi.fn(),
     setStreaming: vi.fn(),
+    setPendingInjected: vi.fn(),
     activeSession: "test-session",
   };
 }

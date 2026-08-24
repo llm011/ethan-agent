@@ -44,6 +44,9 @@ class Session:
     source: str = "web"  # web | repl | lark | cli | desktop | custom
     mode: str = ""  # "" = 工作助手; 规范英文 key，如 "legal"/"companion"（见 core/modes.py）
     pinned_at: float = 0.0  # >0 表示已置顶，值为置顶时间戳
+    # 运行中「补充信息」待消费队列（跨刷新持久化）：[{"id": str, "content": str}]。
+    # inject 时落库；agent drain / run 结束时清空。前端在工具时间线上方展示，可删除。
+    pending_injected: list = field(default_factory=list)
 
 
 def _generate_id() -> str:
@@ -367,6 +370,12 @@ class SessionStore:
             await self._db.commit()
         except Exception:
             pass
+        # Migration: sessions.pending_injected（运行中补充信息待消费队列，JSON 数组）
+        try:
+            await self._db.execute("ALTER TABLE sessions ADD COLUMN pending_injected TEXT NOT NULL DEFAULT '[]'")
+            await self._db.commit()
+        except Exception:
+            pass
         # 启动扫描：把上次进程崩溃/重启时仍处于 running 的消息标记为 interrupted。
         # running 状态只存在于进程内存（ChatRun），进程重启后这些消息永远不会被更新，
         # 必须在此兜底标记，前端才能据此显示「继续」按钮。
@@ -684,6 +693,38 @@ class SessionStore:
         )
         await self._db.commit()
 
+    async def load_pending_injected(self, session_id: str) -> list:
+        """轻量读取会话的「补充信息」待消费队列（不加载消息）。
+
+        供 producer 启动时恢复崩溃残留、inject 端点同步镜像用。
+        """
+        import json
+
+        async with self._db.execute(
+            "SELECT COALESCE(pending_injected, '[]') FROM sessions WHERE id = ?", (session_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        if not row:
+            return []
+        try:
+            items = json.loads(row[0] or "[]")
+        except Exception:
+            return []
+        return [i for i in items if isinstance(i, dict) and i.get("id") and i.get("content")]
+
+    async def save_pending_injected(self, session_id: str, items: list) -> None:
+        """整体覆写「补充信息」待消费队列（DB 恒为活跃 run inbox 的镜像）。
+
+        不 touch updated_at：补充信息不应把会话顶到最近列表顶部。
+        """
+        import json
+
+        await self._db.execute(
+            "UPDATE sessions SET pending_injected = ? WHERE id = ?",
+            (json.dumps(items or [], ensure_ascii=False), session_id),
+        )
+        await self._db.commit()
+
     async def list_pinned(self) -> list[Session]:
         sessions: list[Session] = []
         async with self._db.execute(
@@ -744,7 +785,7 @@ class SessionStore:
         from ethan.providers.base import ToolCall
 
         async with self._db.execute(
-            "SELECT id, title, model, created_at, updated_at, COALESCE(source, 'web'), COALESCE(mode, '') FROM sessions WHERE id = ?",
+            "SELECT id, title, model, created_at, updated_at, COALESCE(source, 'web'), COALESCE(mode, ''), COALESCE(pending_injected, '[]') FROM sessions WHERE id = ?",
             (session_id,),
         ) as cursor:
             row = await cursor.fetchone()
@@ -760,6 +801,14 @@ class SessionStore:
             source=row[5],
             mode=row[6],
         )
+        # 「补充信息」待消费队列（跨刷新/重启持久化）；坏数据直接丢弃
+        try:
+            _pending = json.loads(row[7]) if len(row) > 7 and row[7] else []
+        except Exception:
+            _pending = []
+        session.pending_injected = [
+            i for i in _pending if isinstance(i, dict) and i.get("id") and i.get("content")
+        ]
 
         async with self._db.execute(
             "SELECT id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui, images, matched_skills, ttfb_ms, total_ms, mcp_apps, cards, intermediate_blob_id, status, reasoning FROM messages WHERE session_id = ? ORDER BY id",
