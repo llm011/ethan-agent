@@ -10,6 +10,7 @@ import {
   type ReactComponentImplementation,
 } from "@a2ui/react/v0_9";
 import { renderMarkdown } from "@a2ui/markdown-it";
+import { dedupeSurfaceIds } from "./a2ui-dedupe";
 import { shadcnCatalog } from "./a2ui-catalog";
 
 interface A2uiCardImplProps {
@@ -41,6 +42,8 @@ export default function A2uiCardImpl({ surfaces: envelopes, onAction }: A2uiCard
         const cs = m?.createSurface as { catalogId?: string } | undefined;
         if (cs && typeof cs === "object") cs.catalogId = basicCatalog.id;
       }
+      // 撞 surfaceId 的多张卡改名，避免被 surfacesMap 吞掉（见 a2ui-dedupe.ts）
+      dedupeSurfaceIds(msgs);
       proc.processMessages(msgs as unknown as Parameters<typeof proc.processMessages>[0]);
     } catch (e) {
       console.error("A2UI processMessages failed", e);
