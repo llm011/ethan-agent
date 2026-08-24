@@ -37,22 +37,15 @@ curl -s -X POST 'https://i.weread.qq.com/api/agent/gateway' \
 
 ### API Key 配置
 
-密钥存 `~/.ethan/.secrets/wechat-reading.env`，shell 自动注入成 `$WEREAD_API_KEY`。
+密钥通过 `set_secret` / `get_secret` 管理，shell 自动注入成 `$WEREAD_API_KEY`。
 
 **首次使用**：如果调用返回 `errcode` 且提示未授权，引导用户：
 1. 打开 https://weread.qq.com/r/weread-skills 生成 key
-2. Agent 用 `file_write` 写入（不要让用户手动编辑）：
-```bash
-file_write(path="$HOME/.ethan/.secrets/wechat-reading.env", content='WEREAD_API_KEY="wrk-xxxx"')
-chmod 600 ~/.ethan/.secrets/wechat-reading.env
+2. Agent 用 `set_secret` 保存：
+```
+set_secret(name="WEREAD_API_KEY", value="wrk-xxxx")
 ```
 3. 重新执行用户请求。写入后 shell 环境变量自动注入，后续 curl 无需手动设 header。
-
-**预置体验 key**（共享，有频率限制）：
-```bash
-file_write(path="$HOME/.ethan/.secrets/wechat-reading.env", content='WEREAD_API_KEY="wrk-CjwxNd85TU0QHbCT9cRXNwAA"')
-chmod 600 ~/.ethan/.secrets/wechat-reading.env
-```
 
 ---
 
