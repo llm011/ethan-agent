@@ -856,6 +856,208 @@ def test_cmd_import_without_variants_degrades_to_static(tmp_path, monkeypatch):
     assert "variants" not in normalized["presenter"]
 
 
+# ---------------------------------------------------------------------------
+# presenter_gen 设定集切分与变体对齐（import-sheet）
+# ---------------------------------------------------------------------------
+
+
+def _block_pattern(rng, height: int, width: int, block: int = 40):
+    """大色块图案：SSD 对齐搜索需要结构化内容（纯色/噪声都会让 SSD 平坦）。"""
+    import numpy as np
+
+    rows = (height + block - 1) // block
+    cols = (width + block - 1) // block
+    arr = rng.integers(0, 255, (rows, cols, 3), dtype=np.uint8)
+    return np.repeat(np.repeat(arr, block, axis=0), block, axis=1)[:height, :width]
+
+
+def test_build_sheet_prompt_panels_and_grid():
+    character = {"sheet": "BASE SHEET TEXT", "posesPrompts": {"standing": "stand phrase", "pointing": "point phrase"}}
+
+    prompt, panels = presenter_gen.build_sheet_prompt(character)
+
+    # 全部基础姿势 + 默认姿势（第一个）的 blink/talk 变体，阅读顺序
+    assert panels == ["standing", "standing-blink", "standing-talk", "pointing"]
+    assert "BASE SHEET TEXT" in prompt
+    assert "4 separate panels" in prompt
+    assert "2x2 grid" in prompt
+
+
+def test_split_sheet_reading_order_and_alpha(tmp_path):
+    # 2x2 布局；第二行故意整体更低、行内 y 错位（行分组按垂直重叠，不按绝对 y）
+    sheet = tmp_path / "sheet.png"
+    img = Image.new("RGB", (800, 620), (255, 0, 255))
+    from PIL import ImageDraw
+
+    draw = ImageDraw.Draw(img)
+    draw.rectangle([40, 30, 380, 290], fill=(120, 30, 30))     # row1 col1
+    draw.rectangle([420, 60, 760, 320], fill=(30, 120, 30))    # row1 col2（更低仍同行）
+    draw.rectangle([40, 380, 380, 590], fill=(30, 30, 120))    # row2 col1
+    draw.rectangle([420, 410, 760, 610], fill=(120, 120, 30))  # row2 col2
+    img.save(sheet)
+
+    panels = presenter_gen.split_sheet(sheet)
+
+    assert len(panels) == 4
+    colors = [img.convert("RGB").getpixel((5, 5)) for _, img in panels]
+    assert colors == [(120, 30, 30), (30, 120, 30), (30, 30, 120), (120, 120, 30)]
+    # 品红底被抠成透明：面板角内不透明、角外（bbox 收紧后不存在）无残留
+    assert panels[0][1].getpixel((0, 0))[3] == 255
+
+
+def test_split_sheet_ignores_small_specks(tmp_path):
+    sheet = tmp_path / "sheet.png"
+    img = Image.new("RGB", (800, 400), (255, 0, 255))
+    from PIL import ImageDraw
+
+    draw = ImageDraw.Draw(img)
+    draw.rectangle([40, 40, 380, 340], fill=(120, 30, 30))
+    draw.rectangle([420, 40, 760, 340], fill=(30, 120, 30))
+    draw.rectangle([600, 370, 604, 374], fill=(255, 255, 255))  # 5x5 噪点
+    img.save(sheet)
+
+    panels = presenter_gen.split_sheet(sheet)
+
+    assert len(panels) == 2
+
+
+def test_split_sheet_merges_disconnected_fragments(tmp_path):
+    # 抬手姿势：手臂与身体之间被背景隔开（泛洪切成两块连通域）→ 碎片就近并回同一面板
+    sheet = tmp_path / "sheet.png"
+    img = Image.new("RGB", (900, 400), (255, 0, 255))
+    from PIL import ImageDraw
+
+    draw = ImageDraw.Draw(img)
+    draw.rectangle([40, 40, 380, 340], fill=(120, 30, 30))    # 面板1 身体
+    draw.rectangle([385, 100, 410, 170], fill=(200, 30, 30))  # 断开的手臂碎片（更近面板1）
+    draw.rectangle([480, 40, 860, 340], fill=(30, 120, 30))   # 面板2（尺寸相近，不并）
+    img.save(sheet)
+
+    panels = presenter_gen.split_sheet(sheet)
+
+    assert len(panels) == 2
+    # 手臂并入面板1：bbox = 身体 ∪ 手臂（ImageDraw 端点含闭）；面板2 原样
+    assert panels[0][0] == (40, 40, 411, 341)
+    assert panels[1][0] == (480, 40, 861, 341)
+
+
+def test_split_sheet_uses_native_alpha(tmp_path):
+    # 自带透明背景的 PNG 设定集：直接用 alpha 通道，不走泛洪
+    img = Image.new("RGBA", (400, 200), (0, 0, 0, 0))
+    img.paste(Image.new("RGBA", (120, 150), (10, 200, 30, 255)), (20, 20))
+    img.paste(Image.new("RGBA", (120, 150), (30, 220, 40, 255)), (240, 30))
+    sheet = tmp_path / "sheet.png"
+    img.save(sheet)
+
+    panels = presenter_gen.split_sheet(sheet)
+
+    assert len(panels) == 2
+    assert panels[0][0] == (20, 20, 140, 170)
+
+
+def test_align_variant_recovers_translation():
+    np = pytest.importorskip("numpy")
+    pattern = Image.fromarray(_block_pattern(np.random.default_rng(42), 260, 300), "RGB").convert("RGBA")
+    base = Image.new("RGBA", (340, 300), (0, 0, 0, 0))
+    base.paste(pattern, (0, 0))
+    shifted = Image.new("RGBA", (340, 300), (0, 0, 0, 0))
+    shifted.paste(pattern, (13, 9))
+
+    scale, dx, dy = presenter_gen.align_variant(base, shifted)
+
+    # 变体内容右移 13、下移 9 → 对齐偏移 (-13, -9)
+    assert abs(scale - 1.0) < 1e-9
+    assert (dx, dy) == (-13, -9)
+
+
+def test_compose_pose_group_aligns_variants():
+    np = pytest.importorskip("numpy")
+    pattern = Image.fromarray(_block_pattern(np.random.default_rng(7), 280, 180), "RGB").convert("RGBA")
+    base_canvas = Image.new("RGBA", (200, 300), (0, 0, 0, 0))
+    base_canvas.paste(pattern, (10, 10))
+    var_canvas = Image.new("RGBA", (220, 320), (0, 0, 0, 0))
+    var_canvas.paste(pattern, (16, 14))  # 基础图内容右移 6、下移 4
+    group = {
+        "": ((10, 10, 190, 290), base_canvas.crop((10, 10, 190, 290))),
+        "blink": ((16, 14, 196, 294), var_canvas.crop((16, 14, 196, 294))),
+    }
+
+    out = presenter_gen._compose_pose_group(group)
+
+    # 同尺寸画布 + 内容像素级重合（bbox 完全一致）
+    assert out[""].size == out["blink"].size
+    assert out[""].getbbox() == out["blink"].getbbox()
+
+
+def _make_pending_sheet_character(tmp_path: Path, presenter_id: str) -> Path:
+    presenter_dir = tmp_path / "assets" / "library" / "presenters" / presenter_id
+    presenter_dir.mkdir(parents=True)
+    character = {
+        "id": presenter_id,
+        "name": "设定集娘",
+        "status": "pending",
+        "sheet": "cute anime presenter",
+        "posesPrompts": {"standing": "stand", "pointing": "point"},
+    }
+    (presenter_dir / "character.json").write_text(json.dumps(character, ensure_ascii=False), encoding="utf-8")
+    return presenter_dir
+
+
+def test_cmd_import_sheet_end_to_end(tmp_path, monkeypatch):
+    pytest.importorskip("numpy")  # 对齐路径需要 numpy；缺失时整链降级，这里测对齐路径
+    monkeypatch.setenv("ETHAN_DATA_DIR", str(tmp_path))
+    presenter_dir = _make_pending_sheet_character(tmp_path, "sheetgirl")
+    # 品红底 2x2：standing / standing-blink / standing-talk / pointing（阅读顺序）
+    sheet = tmp_path / "sheet.png"
+    img = Image.new("RGB", (800, 620), (255, 0, 255))
+    from PIL import ImageDraw
+
+    draw = ImageDraw.Draw(img)
+    draw.rectangle([40, 30, 380, 290], fill=(120, 140, 160))
+    draw.rectangle([420, 30, 760, 290], fill=(120, 140, 160))
+    draw.rectangle([40, 330, 380, 590], fill=(150, 120, 170))
+    draw.rectangle([420, 330, 760, 590], fill=(160, 130, 120))
+    img.save(sheet)
+
+    presenter_gen.cmd_import_sheet(
+        "sheetgirl", sheet, order=["standing", "standing-blink", "standing-talk", "pointing"]
+    )
+
+    saved = json.loads((presenter_dir / "character.json").read_text(encoding="utf-8"))
+    assert saved["status"] == "ready"
+    assert saved["cutout"] is True
+    assert set(saved["poses"]) == {"standing", "pointing"}
+    assert set(saved["variants"]["standing"]) == {"blink", "talk"}
+    # 组内同尺寸画布（渲染端 contain-fit 同缩放、切换零跳动的关键）
+    standing = Image.open(presenter_dir / "poses" / "standing.png")
+    blink = Image.open(presenter_dir / "poses" / "standing-blink.png")
+    talk = Image.open(presenter_dir / "poses" / "standing-talk.png")
+    assert standing.size == blink.size == talk.size
+    # 导入的角色包直接被 pipeline 接受（变体贯通到 timeline 数据）
+    manifest = finance_manifest(presenter={"id": "sheetgirl"})
+    normalized = pipeline.normalize_manifest(manifest, library_root=tmp_path / "assets" / "library")
+    assert normalized["presenter"]["variants"]["standing"]["blink"] == (
+        "presenters/sheetgirl/poses/standing-blink.png"
+    )
+
+
+def test_cmd_import_sheet_order_validation(tmp_path, monkeypatch):
+    monkeypatch.setenv("ETHAN_DATA_DIR", str(tmp_path))
+    _make_pending_sheet_character(tmp_path, "sheetgirl")
+    sheet = tmp_path / "sheet.png"
+    Image.new("RGB", (100, 100), (255, 0, 255)).save(sheet)
+
+    with pytest.raises(SystemExit, match="无法识别"):
+        presenter_gen.cmd_import_sheet("sheetgirl", sheet, order=["standing", "dancing"])
+    with pytest.raises(SystemExit, match="重复名字"):
+        presenter_gen.cmd_import_sheet("sheetgirl", sheet, order=["standing", "standing"])
+    with pytest.raises(SystemExit, match="缺少基础姿势"):
+        presenter_gen.cmd_import_sheet("sheetgirl", sheet, order=["standing", "standing-blink"])
+    # 纯品红图切不出面板 → 数量不匹配诊断
+    with pytest.raises(SystemExit, match="面板"):
+        presenter_gen.cmd_import_sheet("sheetgirl", sheet, order=["standing", "pointing"])
+
+
 def _crowded_manifest(**presenter_override):
     """立绘可见 + 三种偏挤视觉，用于遮挡警告测试。"""
     manifest = finance_manifest(presenter={"id": "xiaoyu"})
