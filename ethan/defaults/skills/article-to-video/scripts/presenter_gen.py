@@ -9,6 +9,10 @@
   2. 用户在自己的 GPT image 2 会话里出图（先生成姿势 1，再把它传回同一会话做参考逐张换姿势）
   3. import   导入图片目录：尺寸归一 → alpha 嗅探 → 无 alpha 则 Pillow 抠品红底 → status=ready
 
+更省事的单图路径（推荐，杜绝角色漂移）：prompts --sheet 打印"设定集"prompt
+（一张图出全部姿势 + 默认姿势变体，同一次生成角色必然一致），import-sheet
+自动切分面板并把变体对齐到基础图同尺寸画布（渲染端短交叉淡化切换，零硬闪）。
+
 可选兜底：create 子命令在配了 ETHAN_IMAGE_GEN_* 时走 OpenAI 兼容端点自动生成
 （仅 gpt-image-1*/gpt-5-image* 支持 transparent 背景；GPT image 2 等走品红底 + 抠图）。
 
@@ -19,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import shutil
@@ -60,7 +65,7 @@ SHEET_TEMPLATE = (
 TRANSPARENT_MODEL_PREFIXES = ("gpt-image-1", "gpt-5-image")
 
 # 面部变体（可选"活人感"素材）：每个姿势可再出 blink/talk 两张变体图，
-# 渲染端按确定性节律整图快切，实现眨眼与说话口型。变体是可选的——
+# 渲染端按确定性节律切换（带短交叉淡化），实现眨眼与说话口型。变体是可选的——
 # 缺了就退化为静态立绘，不阻塞任何流程。
 POSE_VARIANTS: dict[str, str] = {
     "blink": "both eyes gently and fully closed, like a soft natural blink",
@@ -72,6 +77,9 @@ VARIANT_PROMPT_TEMPLATE = (
     "Keep the solid pure magenta background (#FF00FF). Only change: {change}. "
     "Everything else stays identical. Half-body portrait, no text, no watermark."
 )
+
+# 设定集切分时小于该面积的前景连通域视为噪点丢弃（面板残渣/水印碎块）。
+SHEET_MIN_COMPONENT = 1500
 
 
 # ---------------------------------------------------------------------------
@@ -186,6 +194,49 @@ def build_pose_prompt(sheet: str, pose_phrase: str, *, first: bool) -> str:
         f"eyes, outfit and art style. Keep the solid pure magenta background (#FF00FF). "
         f"Only change the pose and expression to: {pose_phrase}. Half-body portrait, no text."
     )
+
+
+def build_sheet_prompt(character: dict) -> tuple[str, list[str]]:
+    """设定集 prompt + 面板名清单（阅读顺序：左→右、上→下）。
+
+    一张图出全部基础姿势 + 默认姿势（第一个姿势）的 blink/talk 变体。变体只给
+    默认姿势：面板过多会掉生成质量，而默认姿势是渲染时的 defaultPose，快切最
+    频繁，对齐收益最大。
+    """
+    poses: dict[str, str] = character["posesPrompts"]
+    panels: list[tuple[str, str]] = []
+    for index, (name, phrase) in enumerate(poses.items()):
+        panels.append((name, phrase))
+        if index == 0:
+            for variant, change in POSE_VARIANTS.items():
+                panels.append((f"{name}-{variant}", f"{phrase}, but with {change}"))
+    cols = max(1, math.ceil(math.sqrt(len(panels))))
+    rows = math.ceil(len(panels) / cols)
+    described = "; ".join(
+        f"row {index // cols + 1} column {index % cols + 1}: {text}" for index, (_, text) in enumerate(panels)
+    )
+    prompt = (
+        f"{character['sheet']}. Arrange as ONE character reference sheet: the same character in "
+        f"{len(panels)} separate panels in a {rows}x{cols} grid, reading order left to right then "
+        f"top to bottom ({described}). Every panel shows the same character with identical face, "
+        "hairstyle, outfit, art style, camera framing and character scale; generous blank space "
+        "between panels; panels never touch or overlap; no text, no labels, no numbers, no "
+        "borders, no grid lines, no watermark."
+    )
+    return prompt, [name for name, _ in panels]
+
+
+def print_sheet_prompt(presenter_id: str, character: dict) -> None:
+    prompt, panels = build_sheet_prompt(character)
+    print(f"\n=== 角色「{character['name']}」({presenter_id}) 设定集 prompt（单张出图，推荐） ===\n")
+    print("一张图出全部姿势 + 默认姿势的 blink/talk 变体：同一次生成角色必然一致，")
+    print("import-sheet 会自动切分面板并把变体对齐到基础图（切换不跳）。\n")
+    print(f"----- 设定集（{len(panels)} 面板）-----\n{prompt}\n")
+    print("出图存为 sheet.png，然后运行：")
+    print(f"  python3 {Path(__file__).resolve()} import-sheet {presenter_id} sheet.png --order {','.join(panels)}\n")
+    print("面板顺序 = 阅读顺序（左→右、上→下）；切分数量对不上会报面板诊断，")
+    print("按报错调整 --order 或重新出图（加大面板间距）。\n")
+    print("=" * 60 + "\n")
 
 
 def print_prompt_pack(presenter_id: str, character: dict) -> None:
@@ -346,6 +397,59 @@ def _match_mask(raw: bytes, pixel_count: int, key: tuple[int, ...], tolerance_sq
     return matches
 
 
+def _edge_background_key(img) -> tuple[int, int, int]:
+    """四边等距采样取每通道中位色，作为泛洪背景 key（对 JPEG 边缘噪声稳）。"""
+    width, height = img.size
+    pixels = img.load()
+    step_x = max(1, width // 60)
+    step_y = max(1, height // 60)
+    samples = []
+    for x in range(0, width, step_x):
+        samples.append(pixels[x, 0][:3])
+        samples.append(pixels[x, height - 1][:3])
+    for y in range(0, height, step_y):
+        samples.append(pixels[0, y][:3])
+        samples.append(pixels[width - 1, y][:3])
+    return tuple(sorted(c[i] for c in samples)[len(samples) // 2] for i in range(3))  # type: ignore[return-value]
+
+
+def _flood_background(width: int, height: int, matches: bytearray) -> bytearray:
+    """从四边 BFS 出与边缘连通的背景掩码（1=背景）。
+
+    入队即标记 visited 并预过滤非背景：出队的不必是合法背景像素。
+    队列长度 = 背景连通域大小（旧写法每像素最多入队 4 次再靠出队去重）。
+    """
+    visited = bytearray(width * height)
+    border: list[int] = []
+    for x in range(width):
+        border.extend((x, x + (height - 1) * width))
+    for y in range(height):
+        border.extend((y * width, width - 1 + y * width))
+    queue: list[int] = []
+    for index in border:
+        if not visited[index] and matches[index]:
+            visited[index] = 1
+            queue.append(index)
+    head = 0
+    while head < len(queue):
+        index = queue[head]
+        head += 1
+        x, y = index % width, index // width
+        if x > 0 and not visited[index - 1] and matches[index - 1]:
+            visited[index - 1] = 1
+            queue.append(index - 1)
+        if x < width - 1 and not visited[index + 1] and matches[index + 1]:
+            visited[index + 1] = 1
+            queue.append(index + 1)
+        if y > 0 and not visited[index - width] and matches[index - width]:
+            visited[index - width] = 1
+            queue.append(index - width)
+        if y < height - 1 and not visited[index + width] and matches[index + width]:
+            visited[index + width] = 1
+            queue.append(index + width)
+    return visited
+
+
 def cutout_to_png(src: Path, dst: Path, *, tolerance: int = 42, cleanup: bool = False) -> bool:
     """边缘泛洪抠图：以边缘采样色为 key，从四边 BFS 把背景像素 alpha 置 0。
 
@@ -361,57 +465,13 @@ def cutout_to_png(src: Path, dst: Path, *, tolerance: int = 42, cleanup: bool = 
         if max(img.size) > MAX_EDGE:
             img.thumbnail((MAX_EDGE, MAX_EDGE), Image.LANCZOS)
         width, height = img.size
-        pixels = img.load()
-        step_x = max(1, width // 60)
-        step_y = max(1, height // 60)
-        samples = []
-        for x in range(0, width, step_x):
-            samples.append(pixels[x, 0][:3])
-            samples.append(pixels[x, height - 1][:3])
-        for y in range(0, height, step_y):
-            samples.append(pixels[0, y][:3])
-            samples.append(pixels[width - 1, y][:3])
-        key = tuple(sorted(c[i] for c in samples)[len(samples) // 2] for i in range(3))
-        tolerance_sq = (tolerance * 3) ** 2
+        key = _edge_background_key(img)
 
         # 走原始字节（getdata/putdata 在 Pillow 12+ 已弃用）：匹配掩码 + BFS + putalpha。
-        raw = img.tobytes()
-        pixel_count = width * height
-        matches = _match_mask(raw, pixel_count, key, tolerance_sq)
-
-        visited = bytearray(pixel_count)
-        alpha = bytearray(b"\xff") * pixel_count
-        border: list[int] = []
-        for x in range(width):
-            border.extend((x, x + (height - 1) * width))
-        for y in range(height):
-            border.extend((y * width, width - 1 + y * width))
-        # 入队即标记 visited 并预过滤非背景：出队的不必是合法背景像素。
-        # 队列长度 = 背景连通域大小（旧写法每像素最多入队 4 次再靠出队去重）。
-        queue: list[int] = []
-        for index in border:
-            if not visited[index] and matches[index]:
-                visited[index] = 1
-                queue.append(index)
-        head = 0
-        while head < len(queue):
-            index = queue[head]
-            head += 1
-            alpha[index] = 0
-            x, y = index % width, index // width
-            if x > 0 and not visited[index - 1] and matches[index - 1]:
-                visited[index - 1] = 1
-                queue.append(index - 1)
-            if x < width - 1 and not visited[index + 1] and matches[index + 1]:
-                visited[index + 1] = 1
-                queue.append(index + 1)
-            if y > 0 and not visited[index - width] and matches[index - width]:
-                visited[index - width] = 1
-                queue.append(index - width)
-            if y < height - 1 and not visited[index + width] and matches[index + width]:
-                visited[index + width] = 1
-                queue.append(index + width)
-        img.putalpha(Image.frombytes("L", (width, height), bytes(alpha)))
+        matches = _match_mask(img.tobytes(), width * height, key, (tolerance * 3) ** 2)
+        background = _flood_background(width, height, matches)
+        alpha = bytes(0 if background[index] else 255 for index in range(width * height))
+        img.putalpha(Image.frombytes("L", (width, height), alpha))
         if cleanup:
             img = despeckle_alpha(img)
             img = autocrop_alpha(img)
@@ -505,6 +565,295 @@ def normalize_image(src: Path, dst: Path) -> bool:
     except Exception as exc:  # noqa: BLE001
         print(f"  [warn] 图片处理失败 {src.name}: {exc}", file=sys.stderr)
         return False
+
+
+# ---------------------------------------------------------------------------
+# import-sheet：单张设定集 → 自动切分面板 + 变体对齐
+# ---------------------------------------------------------------------------
+
+def _foreground_components(alpha: bytes, width: int, height: int, min_size: int) -> list[tuple[int, int, int, int]]:
+    """alpha>0 连通域 → 外接框列表（未排序）。面积 < min_size 的连通域当噪点丢弃。
+
+    纯 Python BFS（与 despeckle_alpha 同模式）：设定集导入是一次性操作，
+    2MP 图几秒可接受。有 numpy 时用 nonzero 只遍历前景起点。
+    """
+    try:
+        import numpy as np
+    except ImportError:
+        np = None
+    candidates = (
+        np.nonzero(np.frombuffer(alpha, dtype=np.uint8))[0].tolist()
+        if np is not None
+        else range(width * height)
+    )
+    visited = bytearray(width * height)
+    boxes: list[tuple[int, int, int, int]] = []
+    for start in candidates:
+        if visited[start] or alpha[start] == 0:
+            continue
+        queue = [start]
+        visited[start] = 1
+        head = 0
+        min_x = max_x = start % width
+        min_y = max_y = start // width
+        size = 0
+        while head < len(queue):
+            index = queue[head]
+            head += 1
+            size += 1
+            x, y = index % width, index // width
+            if x < min_x:
+                min_x = x
+            elif x > max_x:
+                max_x = x
+            if y < min_y:
+                min_y = y
+            elif y > max_y:
+                max_y = y
+            if x > 0 and not visited[index - 1] and alpha[index - 1]:
+                visited[index - 1] = 1
+                queue.append(index - 1)
+            if x < width - 1 and not visited[index + 1] and alpha[index + 1]:
+                visited[index + 1] = 1
+                queue.append(index + 1)
+            if y > 0 and not visited[index - width] and alpha[index - width]:
+                visited[index - width] = 1
+                queue.append(index - width)
+            if y < height - 1 and not visited[index + width] and alpha[index + width]:
+                visited[index + width] = 1
+                queue.append(index + width)
+        if size >= min_size:
+            boxes.append((min_x, min_y, max_x + 1, max_y + 1))
+    return boxes
+
+
+def _merge_fragments(
+    boxes: list[tuple[int, int, int, int]], *, gap: int = 110, ratio: float = 0.35
+) -> list[tuple[int, int, int, int]]:
+    """小碎片并入邻近大面板：抬手/张开手臂的姿势常被背景泛洪切成身体 + 手臂
+    两块（间隙或轮廓断线）。碎片特征是尺寸远小于面板（max 边 < ratio×目标
+    max 边）且紧挨着某个大面板（bbox 间隙 < gap 或相交）；真面板之间尺寸相
+    近、间距大，不会被误并。小并大、就近优先，迭代到稳定。
+    """
+    def _bbox_gap(a, b) -> int:
+        dx = max(b[0] - a[2], a[0] - b[2], 0)
+        dy = max(b[1] - a[3], a[1] - b[3], 0)
+        return max(dx, dy)
+
+    def _max_edge(b) -> int:
+        return max(b[2] - b[0], b[3] - b[1])
+
+    merged = [list(b) for b in boxes]
+    changed = True
+    while changed:
+        changed = False
+        merged.sort(key=lambda b: (b[2] - b[0]) * (b[3] - b[1]))
+        for index, small in enumerate(merged):
+            best: tuple[int, int] | None = None  # (gap, 目标下标)
+            for other in range(len(merged)):
+                if other == index:
+                    continue
+                big = merged[other]
+                if _max_edge(small) >= ratio * _max_edge(big):
+                    continue  # 尺寸相近 → 是对面板，不是碎片
+                g = _bbox_gap(small, big)
+                if g < gap and (best is None or g < best[0]):
+                    best = (g, other)
+            if best is not None:
+                big = merged[best[1]]
+                big[0], big[1] = min(big[0], small[0]), min(big[1], small[1])
+                big[2], big[3] = max(big[2], small[2]), max(big[3], small[3])
+                merged.pop(index)
+                changed = True
+                break
+    return [tuple(b) for b in merged]  # type: ignore[return-value]
+
+
+def _reading_order(boxes: list[tuple[int, int, int, int]]) -> list[tuple[int, int, int, int]]:
+    """阅读顺序排序：按垂直重叠分行（重叠 > 30% 面板高算同行），行内按 x。
+
+    不按绝对 y 排：生成模型经常把同一行的面板画得一高一低。
+    """
+    rows: list[list[tuple[int, int, int, int]]] = []
+    for box in sorted(boxes, key=lambda b: b[1]):
+        if rows:
+            row = rows[-1]
+            row_top = min(b[1] for b in row)
+            row_bottom = max(b[3] for b in row)
+            overlap = min(row_bottom, box[3]) - max(row_top, box[1])
+            if overlap > 0.3 * (box[3] - box[1]):
+                row.append(box)
+                continue
+        rows.append([box])
+    ordered: list[tuple[int, int, int, int]] = []
+    for row in rows:
+        ordered.extend(sorted(row, key=lambda b: b[0]))
+    return ordered
+
+
+def split_sheet(src: Path, *, tolerance: int = 42) -> list[tuple[tuple[int, int, int, int], object]]:
+    """设定集大图 → [(bbox, 带前景 alpha 的 RGBA 裁剪图)]，阅读顺序（左→右、上→下）。
+
+    背景判定：PNG 自带真 alpha 直接用 alpha 通道；否则边缘泛洪（品红底）。
+    前景连通域 = 各面板角色；小碎片（被泛洪切开的手臂等）就近并入大面板。
+    bbox 保留设定集坐标系——同组姿势/变体共享坐标系，是后续对齐的基础。
+    """
+    Image = _pillow()
+    if Image is None:
+        raise SystemExit("[error] 设定集切分需要 Pillow（pip install pillow）")
+    if not src.is_file():
+        raise SystemExit(f"[error] 设定集图片不存在: {src}")
+    try:
+        img = Image.open(src).convert("RGBA")
+    except Exception as exc:  # noqa: BLE001
+        raise SystemExit(f"[error] 设定集图片无法打开: {src} ({exc})") from None
+    if max(img.size) > 2048:
+        img.thumbnail((2048, 2048), Image.LANCZOS)
+    width, height = img.size
+    if png_has_alpha(src):
+        raw_alpha = img.getchannel("A").tobytes()
+        alpha = bytes(255 if value >= 128 else 0 for value in raw_alpha)
+    else:
+        key = _edge_background_key(img)
+        matches = _match_mask(img.tobytes(), width * height, key, (tolerance * 3) ** 2)
+        background = _flood_background(width, height, matches)
+        alpha = bytes(0 if background[index] else 255 for index in range(width * height))
+    panels: list[tuple[tuple[int, int, int, int], object]] = []
+    components = _merge_fragments(_foreground_components(alpha, width, height, SHEET_MIN_COMPONENT))
+    for x0, y0, x1, y1 in _reading_order(components):
+        crop = img.crop((x0, y0, x1, y1))
+        mask = b"".join(alpha[y * width + x0 : y * width + x1] for y in range(y0, y1))
+        crop.putalpha(Image.frombytes("L", (x1 - x0, y1 - y0), mask))
+        panels.append(((x0, y0, x1, y1), crop))
+    return panels
+
+
+def _ssd_at(base_rgb, base_a, var_rgb, var_a, dx: int, dy: int, *, min_overlap: float):
+    """平移 (dx,dy) 处的重叠加权 SSD；重叠太小返回 None。
+
+    约定：variant(x - dx, y - dy) ≈ base(x, y)，即变体内容平移 (dx,dy) 后与
+    基础图重合（合成画布时直接用这个偏移）。
+    """
+    H, W = base_a.shape
+    h, w = var_a.shape
+    x0, x1 = max(0, dx), min(W, w + dx)
+    y0, y1 = max(0, dy), min(H, h + dy)
+    if x1 - x0 < 8 or y1 - y0 < 8:
+        return None
+    weight = base_a[y0:y1, x0:x1] * var_a[y0 - dy : y1 - dy, x0 - dx : x1 - dx]
+    total = float(weight.sum())
+    if total <= 0 or total < min_overlap:
+        return None
+    diff = base_rgb[y0:y1, x0:x1] - var_rgb[y0 - dy : y1 - dy, x0 - dx : x1 - dx]
+    return float((weight * (diff * diff).sum(axis=2)).sum()) / total
+
+
+_ALIGN_SCALES = (0.94, 0.97, 1.0, 1.03, 1.06)
+
+
+def align_variant(base_img, variant_img, *, search: int = 48):
+    """估计 (scale, dx, dy)：变体内容缩放 scale 倍后平移 (dx,dy) 与 base 内容像素级重合。
+
+    两个面板都是 bbox 收紧的裁剪图，面板在设定集里的摆放位置差已被 bbox 归
+    一化吸收，这里只测生成模型造成的组内漂移（小幅平移 + 缩放）。约定：
+    variant 缩放后其内容平移 (dx,dy)（绕自身左上角缩放）与 base 内容重合，
+    调用方据此把变体粘到「基础图 bbox 原点 + (dx,dy)」。两阶段搜索：1/4 分
+    辨率粗搜（缩放 × 平移，0 为中心），全分辨率 ±6 精修。变体与基础图只差
+    眼/嘴，SSD 最小值就是正确对齐。numpy 不可用返回 None（调用方退化为
+    原样粘贴——仍远好于独立生成的两张图）。
+    """
+    try:
+        import numpy as np
+    except ImportError:
+        return None
+    from PIL import Image
+
+    def _arrays(img, size):
+        resized = img.resize(size, Image.LANCZOS) if img.size != size else img
+        arr = np.asarray(resized.convert("RGBA"), dtype=np.float64)
+        return arr[..., :3], arr[..., 3] / 255.0
+
+    W, H = base_img.size
+    w, h = variant_img.size
+    coarse = 4
+    base_rgb_c, base_a_c = _arrays(base_img, (max(8, W // coarse), max(8, H // coarse)))
+    threshold_c = 0.05 * min(float(base_a_c.sum()), float(base_a_c.size))
+    best: tuple[float, float, int, int] | None = None
+    radius = max(4, search // coarse)
+    center_x = center_y = 0  # 漂移围绕 0 搜索：bbox 归一化后面板位置差已吸收
+    for scale in _ALIGN_SCALES:
+        vw = max(8, int(w * scale / coarse))
+        vh = max(8, int(h * scale / coarse))
+        var_rgb_c, var_a_c = _arrays(variant_img, (vw, vh))
+        for dy in range(center_y - radius, center_y + radius + 1):
+            for dx in range(center_x - radius, center_x + radius + 1):
+                score = _ssd_at(base_rgb_c, base_a_c, var_rgb_c, var_a_c, dx, dy, min_overlap=threshold_c)
+                if score is not None and (best is None or score < best[0]):
+                    best = (score, scale, dx * coarse, dy * coarse)
+    if best is None:
+        return None
+    _, scale, dx, dy = best
+    # 全分辨率精修：固定 scale，在粗搜偏移附近 ±6 平移
+    var_rgb, var_a = _arrays(variant_img, (max(8, int(w * scale)), max(8, int(h * scale))))
+    base_rgb, base_a = _arrays(base_img, (W, H))
+    threshold = 0.05 * min(float(base_a.sum()), float(var_a.sum()))
+    refined = (best[0], dx, dy)
+    for oy in range(-6, 7):
+        for ox in range(-6, 7):
+            score = _ssd_at(base_rgb, base_a, var_rgb, var_a, dx + ox, dy + oy, min_overlap=threshold)
+            if score is not None and score < refined[0]:
+                refined = (score, dx + ox, dy + oy)
+    return scale, refined[1], refined[2]
+
+
+def _paste_on_canvas(img, x: int, y: int, size: tuple[int, int]):
+    from PIL import Image
+
+    canvas = Image.new("RGBA", size, (0, 0, 0, 0))
+    canvas.paste(img, (x, y), img)
+    return canvas
+
+
+def _compose_pose_group(group: dict) -> dict:
+    """一组姿势面板（""=基础图，其余键为变体名）→ 同尺寸画布的 RGBA 集合。
+
+    变体先做 scale+平移对齐（align_variant），变换后的外接框与基础图外接框
+    取并集作为画布——组内所有图画布完全一致，前端 contain-fit 缩放相同，
+    渲染端切换零跳动（配短交叉淡化后残差也不硬闪）。画布超 MAX_EDGE 时整组等比缩放
+    （组内同因子，对齐保持）。
+    """
+    from PIL import Image
+
+    base_bbox, base_img = group[""]
+    canvas = list(base_bbox)
+    transforms: dict[str, tuple[float, float, float]] = {}
+    for key, (bbox, img) in group.items():
+        if key == "":
+            continue
+        scale, dx, dy = align_variant(base_img, img) or (1.0, 0, 0)
+        # 粘贴位置 = 基础图 bbox 原点 + 漂移；变体绕自身左上角缩放后粘到这里
+        px0, py0 = base_bbox[0] + dx, base_bbox[1] + dy
+        px1, py1 = px0 + img.size[0] * scale, py0 + img.size[1] * scale
+        canvas[0] = min(canvas[0], px0)
+        canvas[1] = min(canvas[1], py0)
+        canvas[2] = max(canvas[2], px1)
+        canvas[3] = max(canvas[3], py1)
+        transforms[key] = (scale, px0, py0)
+    cx0, cy0 = int(round(canvas[0])), int(round(canvas[1]))
+    cx1, cy1 = int(round(canvas[2])), int(round(canvas[3]))
+    size = (max(1, cx1 - cx0), max(1, cy1 - cy0))
+    out = {"": _paste_on_canvas(base_img, int(base_bbox[0] - cx0), int(base_bbox[1] - cy0), size)}
+    for key, (scale, px0, py0) in transforms.items():
+        w, h = group[key][1].size
+        resized = group[key][1].resize(
+            (max(1, int(round(w * scale))), max(1, int(round(h * scale)))), Image.LANCZOS
+        )
+        out[key] = _paste_on_canvas(resized, int(round(px0)) - cx0, int(round(py0)) - cy0, size)
+    if max(size) > MAX_EDGE:
+        ratio = MAX_EDGE / max(size)
+        resized_size = (max(1, int(size[0] * ratio)), max(1, int(size[1] * ratio)))
+        out = {key: img.resize(resized_size, Image.LANCZOS) for key, img in out.items()}
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -638,6 +987,78 @@ def cmd_import(presenter_id: str, image_dir: Path, *, tolerance: int = 42, clean
     print(f"     现在可以在 manifest 里引用: \"presenter\": {{\"id\": \"{presenter_id}\"}}")
 
 
+def _parse_panel_name(name: str, pose_names: list[str]) -> tuple[str, str | None]:
+    """面板名 → (姿势, 变体|None)。姿势名本身是 kebab-case，必须整体匹配。"""
+    for pose in pose_names:
+        if name == pose:
+            return pose, None
+        for variant in POSE_VARIANTS:
+            if name == f"{pose}-{variant}":
+                return pose, variant
+    raise SystemExit(f"[error] 无法解析面板名: {name}")
+
+
+def cmd_import_sheet(presenter_id: str, sheet_path: Path, *, order: list[str], tolerance: int = 42) -> None:
+    """单张设定集 → 自动切分面板 + 变体对齐 → ready 角色包。
+
+    --order 是面板名的阅读顺序清单（左→右、上→下），prompts --sheet 打印的
+    提示里带现成的。变体面板与基础姿势面板同组对齐成同尺寸画布，切换
+    零跳动。切分数量与 --order 不符时报面板诊断（粘连→重新出图加大间距）。
+    """
+    character = _load_character(presenter_id)
+    pose_names = list(character.get("posesPrompts") or DEFAULT_POSES)
+    valid = set(pose_names) | {f"{name}-{variant}" for name in pose_names for variant in POSE_VARIANTS}
+    unknown = [name for name in order if name not in valid]
+    if unknown:
+        raise SystemExit(
+            f"[error] --order 里的名字无法识别: {', '.join(unknown)}"
+            f"（姿势: {', '.join(pose_names)}；变体: <姿势>-blink / <姿势>-talk）"
+        )
+    if len(order) != len(set(order)):
+        raise SystemExit("[error] --order 存在重复名字")
+    missing = [name for name in pose_names if name not in order]
+    if missing:
+        raise SystemExit(f"[error] --order 缺少基础姿势: {', '.join(missing)}")
+    panels_raw = split_sheet(sheet_path, tolerance=tolerance)
+    if len(panels_raw) != len(order):
+        detail = ", ".join(f"{x1 - x0}x{y1 - y0}@({x0},{y0})" for (x0, y0, x1, y1), _ in panels_raw)
+        raise SystemExit(
+            f"[error] 设定集切出 {len(panels_raw)} 个面板，但 --order 有 {len(order)} 个名字。"
+            f"面板: {detail or '（无）'}。面板粘连/数量对不上请重新出图（加大面板间距），"
+            "或按实际面板增删 --order 条目"
+        )
+    panels = dict(zip(order, panels_raw))
+    groups: dict[str, dict] = {}
+    for name, panel in panels.items():
+        pose, variant = _parse_panel_name(name, pose_names)
+        groups.setdefault(pose, {})[variant or ""] = panel
+
+    dest_dir = presenter_dir(presenter_id) / "poses"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    poses: dict[str, str] = {}
+    variants: dict[str, dict[str, str]] = {}
+    for pose in pose_names:
+        images = _compose_pose_group(groups[pose])
+        for key, img in images.items():
+            name = pose if key == "" else f"{pose}-{key}"
+            img.save(dest_dir / f"{name}.png", "PNG")
+            print(f"  [ok] {name}（{img.size[0]}x{img.size[1]}）")
+        poses[pose] = f"poses/{pose}.png"
+        pose_variants = {key: f"poses/{pose}-{key}.png" for key in images if key}
+        if pose_variants:
+            variants[pose] = pose_variants
+    character["poses"] = poses
+    character["variants"] = variants
+    character["cutout"] = True
+    character["status"] = "ready"
+    character["source"] = character.get("source") or "sheet"
+    _save_character(presenter_id, character)
+    total = sum(len(v) for v in variants.values())
+    print(f"\n[ok] 角色「{character['name']}」已就绪: {presenter_dir(presenter_id)}")
+    print(f"     姿势: {', '.join(poses)}；变体: {total} 张（已对齐同尺寸画布）；抠图: 是")
+    print(f"     现在可以在 manifest 里引用: \"presenter\": {{\"id\": \"{presenter_id}\"}}")
+
+
 # ---------------------------------------------------------------------------
 # prompts / regen
 # ---------------------------------------------------------------------------
@@ -691,7 +1112,10 @@ def cmd_prompts(presenter_id: str, args: argparse.Namespace) -> None:
         raise SystemExit(f"[error] 角色 {presenter_id} 已存在（--force 可覆盖重建）")
     character = _new_character(presenter_id, args, source=None, attribution="user-generated with GPT image 2")
     _save_character(presenter_id, character)
-    print_prompt_pack(presenter_id, character)
+    if getattr(args, "sheet", False):
+        print_sheet_prompt(presenter_id, character)
+    else:
+        print_prompt_pack(presenter_id, character)
 
 
 def cmd_regen(presenter_id: str, pose: str, variant: str | None = None) -> None:
@@ -844,7 +1268,11 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--name", help="角色显示名（默认同 id）")
         p.add_argument("--force", action="store_true", help="覆盖已有角色包")
 
-    _common(sub.add_parser("prompts", help="打印出图 prompt 包并初始化角色（pending）"))
+    prompts_cmd = sub.add_parser("prompts", help="打印出图 prompt 包并初始化角色（pending）")
+    _common(prompts_cmd)
+    prompts_cmd.add_argument(
+        "--sheet", action="store_true", help="打印单张设定集 prompt（一张图出全部姿势+默认姿势变体）"
+    )
     _common(sub.add_parser("create", help="可选兜底：调 OpenAI 兼容端点自动生成"))
 
     import_cmd = sub.add_parser("import", help="导入出图目录，抠图并置为 ready")
@@ -854,6 +1282,12 @@ def build_parser() -> argparse.ArgumentParser:
                             help="抠图容差：品红底默认 42；白底/浅色底（设定集裁图）建议 10-15")
     import_cmd.add_argument("--cleanup", action="store_true",
                             help="抠图后去除残留小色块并按内容裁边（白底裁图建议开启）")
+
+    sheet_cmd = sub.add_parser("import-sheet", help="导入单张设定集大图：自动切分面板并对齐变体")
+    sheet_cmd.add_argument("id")
+    sheet_cmd.add_argument("sheet", type=Path, help="设定集图片路径")
+    sheet_cmd.add_argument("--order", required=True, help="面板名清单（阅读顺序：左→右、上→下），逗号分隔")
+    sheet_cmd.add_argument("--tolerance", type=int, default=42, help="背景泛洪容差（品红底默认 42）")
 
     regen = sub.add_parser("regen", help="重新打印单个姿势/变体的 prompt")
     regen.add_argument("id")
@@ -878,6 +1312,9 @@ def main() -> int:
         cmd_create(args.id, args)
     elif args.command == "import":
         cmd_import(args.id, args.dir.expanduser().resolve(), tolerance=args.tolerance, cleanup=args.cleanup)
+    elif args.command == "import-sheet":
+        order = [name.strip() for name in args.order.split(",") if name.strip()]
+        cmd_import_sheet(args.id, args.sheet.expanduser().resolve(), order=order, tolerance=args.tolerance)
     elif args.command == "regen":
         cmd_regen(args.id, args.pose, variant=getattr(args, "variant", None))
     elif args.command == "list":

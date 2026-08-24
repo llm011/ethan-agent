@@ -76,6 +76,9 @@ ethan = "ethan.interface.cli:app"
 dev = [
     "pytest>=9.1.1",
     "ruff>=0.11.0",
+    # presenter_gen 抠图/设定集切分与对应测试需要 Pillow（运行时可选、自动安装，
+    # 但测试环境必须真装上，否则 test_article_to_video.py 会被模块级 skip 整体跳过）。
+    "pillow>=10.0",
 ]
 
 [tool.ruff]

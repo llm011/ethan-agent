@@ -545,6 +545,7 @@ lark = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "pillow" },
     { name = "pytest" },
     { name = "ruff" },
 ]
@@ -579,6 +580,7 @@ provides-extras = ["embedding", "router", "computer", "lark"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "pillow", specifier = ">=10.0" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "ruff", specifier = ">=0.11.0" },
 ]
