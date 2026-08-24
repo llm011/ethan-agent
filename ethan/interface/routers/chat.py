@@ -142,6 +142,7 @@ async def poll(hide_heartbeat: bool = False, hide_scheduled: bool = False,
                 "source": getattr(s, "source", "web"),
                 "mode": getattr(s, "mode", "") or "",
                 "pinned_at": getattr(s, "pinned_at", 0) or 0,
+                "last_read_at": getattr(s, "last_read_at", 0) or 0,
             }
             for s in sessions
         ],
