@@ -4,6 +4,8 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { format } from "date-fns";
 import { zhCN } from "date-fns/locale";
 import { SessionInfo, fetchSessions, renameSession, deleteSession, cleanupTrivialSessions, fetchModes, pinSession, unpinSession, type ModeEntry } from "@/lib/api";
+import { hasUnread } from "@ethan/shared/lib/unread";
+import { UnreadDot } from "@ethan/shared/components/unread-dot";
 import { Loader2, Search, Calendar, MessageSquare, ChevronLeft, ChevronRight, Pencil, Trash2, Check, X, Eraser, Pin, PinOff } from "lucide-react";
 import { Input } from "@ethan/shared/ui/input";
 import { Button } from "@ethan/shared/ui/button";
@@ -310,6 +312,9 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
                   onClick={() => onSelectSession(session.id)}
                   className="group relative p-4 rounded-2xl border border-border bg-card hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5 hover:-translate-y-0.5 transition-all duration-200 cursor-pointer flex flex-col min-h-[112px]"
                 >
+                  {hasUnread(session) && (
+                    <UnreadDot className="absolute top-3 right-3 ring-4 ring-card group-hover:opacity-0 transition-opacity" />
+                  )}
                   <div className="flex items-start gap-2.5 mb-1">
                     {/* mode/会话 图标头像 */}
                     <div className={`shrink-0 h-9 w-9 rounded-xl ring-1 flex items-center justify-center text-base ${modeRing}`}>
