@@ -40,7 +40,7 @@ mkdir -p "$PROJECT"
 | `finance` | 财经/行情解读 | 深蓝金配色（红涨绿跌）、`candlestick` K线图、黄色关键词 `callouts`、虚拟人立绘 |
 | `paper` | 论文/技术解读 | 紫色主题（Manim/流程图在后续版本接入） |
 
-金融领域建议配虚拟人立绘（`presenter`）。角色包存于资产库 `~/.ethan/assets/library/presenters/<id>/`（详见 `references/asset-library.md`）。**manifest 引用的 presenter 缺失时**：运行 `scripts/presenter_gen.py prompts <id>` 打印一整套出图 prompt，交给用户用 GPT image 2 按 `references/presenter-guide.md` 的流程逐姿势出图，再 `presenter_gen.py import <id> <目录>` 入库。prompt 包里每个姿势还附带可选的 blink/talk 变体（闭眼/张嘴说话）出图 prompt，出了图成片里立绘会眨眼、随字幕口型张合，不出则自动退化为静态立绘（详见 presenter-guide.md「面部变体」）。不要自己编造立绘文件路径。
+金融领域建议配虚拟人立绘（`presenter`）。角色包存于资产库 `~/.ethan/assets/library/presenters/<id>/`（详见 `references/asset-library.md`）。**manifest 引用的 presenter 缺失时**：运行 `scripts/presenter_gen.py prompts <id> --sheet` 打印**单张设定集** prompt（一张图出全部姿势 + blink/talk 变体，角色零漂移，推荐），交给用户用 GPT image 2 出一张图后 `presenter_gen.py import-sheet <id> sheet.png --order ...` 自动切分/对齐入库；需要逐姿势精细控制时才用 `prompts <id>` + 逐姿势出图 + `import <id> <目录>`（见 `references/presenter-guide.md`）。变体出了图成片里立绘会眨眼、随字幕口型张合（切换带 2 帧交叉淡化），不出则自动退化为静态立绘（详见 presenter-guide.md「面部变体」）。不要自己编造立绘文件路径。
 
 **presenter 模式检测**（决定立绘是静态图还是动态 presenter、用哪个生成器）：
 

@@ -120,13 +120,29 @@ export const PresenterLayer: React.FC<{
   // 变体是渐进增强的：某姿势缺 blink/talk 图时自动落回基础姿势图。
   const variants = presenter.variants?.[pose] ?? {};
   const speaking = captions.some((item) => currentMs >= item.startMs && currentMs < item.endMs);
-  const pickImage = (poseName: string): string => {
-    if (poseName === pose) {
-      if (blinkActiveAt(currentMs) && variants.blink) return variants.blink;
-      if (talkOpenAt(currentMs, speaking) && variants.talk) return variants.talk;
-    }
-    return presenter.poses[poseName];
+  const variantImageAt = (ms: number): string => {
+    if (blinkActiveAt(ms) && variants.blink) return variants.blink;
+    if (talkOpenAt(ms, speaking) && variants.talk) return variants.talk;
+    return presenter.poses[pose];
   };
+  const currentImage = variantImageAt(currentMs);
+  // 变体切换短交叉淡化：同一设定集切出的面板经 SSD 对齐后仍有 1px 级残差，
+  // 整图硬切会沿轮廓边缘闪一下；2 帧淡化把硬闪压成不可察觉的柔切。回溯最近
+  // 一次变体变化（纯函数，跨 worker 确定性），变化发生在 back 帧前 → 新图
+  // 权重 back/(L+1)，超出回溯窗口视为淡化已完成。
+  const VARIANT_FADE_FRAMES = 2;
+  let fadeFrom: string | null = null;
+  let fadeProgress = 1;
+  for (let back = 1; back <= VARIANT_FADE_FRAMES; back++) {
+    const prev = variantImageAt(((frame - back) / fps) * 1000);
+    if (prev !== currentImage) {
+      fadeFrom = prev;
+      fadeProgress = back / (VARIANT_FADE_FRAMES + 1);
+      break;
+    }
+  }
+  const pickImage = (poseName: string): string =>
+    poseName === pose ? currentImage : presenter.poses[poseName];
 
   const side = presenter.position === "left" ? {left: layout.presenterEdgeInset} : {right: layout.presenterEdgeInset};
   // 硬车道：宽被钳在 layout.presenterLaneWidth（外层 transform scale 同步放大车道），
@@ -161,7 +177,8 @@ export const PresenterLayer: React.FC<{
       }}
     >
       {prevPose !== pose ? <img src={`/${pickImage(prevPose)}`} style={imgStyle(1 - crossfade)} alt="" /> : null}
-      <img src={`/${pickImage(pose)}`} style={imgStyle(crossfade)} alt="" />
+      {fadeFrom ? <img src={`/${fadeFrom}`} style={imgStyle(crossfade * (1 - fadeProgress))} alt="" /> : null}
+      <img src={`/${currentImage}`} style={imgStyle(crossfade * fadeProgress)} alt="" />
     </div>
   );
 };
