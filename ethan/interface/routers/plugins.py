@@ -82,7 +82,10 @@ async def list_plugins():
         if obj:
             for f in plugin.fields:
                 val = getattr(obj, f.key, "")
-                current_values[f.key] = str(val) if val else ""
+                if f.secret:
+                    current_values[f.key] = "••••••" if val else ""
+                else:
+                    current_values[f.key] = str(val) if val else ""
 
         plugins.append(
             PluginOut(
@@ -145,6 +148,10 @@ async def add_plugin(name: str, req: AddPluginRequest) -> PluginActionResponse:
                 if f.boolean:
                     values[f.key] = "true"
         _apply_plugin_config(config, plugin, values)
+        # tavily/searxng: 启用时自动切换 web_search.provider
+        if name in ("tavily", "searxng"):
+            ws = config.tools.web_search
+            ws.provider = name
         save_config(config)
         if name == "dida" and values.get("enabled", "").lower() in ("1", "true", "yes", "on"):
             asyncio.get_event_loop().run_in_executor(None, _install_dida_cli)
@@ -179,6 +186,11 @@ async def remove_plugin(name: str) -> PluginActionResponse:
         return PluginActionResponse(ok=True, message=f"插件 {name} 当前未启用", restart_required=False)
 
     _clear_plugin_config(config, plugin)
+    # tavily/searxng: 移除时回退 web_search.provider 到 duckduckgo
+    if name in ("tavily", "searxng"):
+        ws = config.tools.web_search
+        if ws.provider == name:
+            ws.provider = "duckduckgo"
     save_config(config)
     return PluginActionResponse(ok=True, message=f"插件 {name} 已移除", restart_required=True)
 

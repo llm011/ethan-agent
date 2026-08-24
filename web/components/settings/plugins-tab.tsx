@@ -11,6 +11,7 @@ import {
   fetchPlugins, addPlugin, removePlugin, restartServer,
   PluginInfo, PluginField,
 } from "@/lib/api";
+import { API_URL } from "@/lib/api-base";
 
 export function PluginsTab() {
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
@@ -118,7 +119,7 @@ export function PluginsTab() {
       for (let i = 0; i < 30; i++) {
         await new Promise(r => setTimeout(r, 2000));
         try {
-          const res = await fetch(`${window.location.origin}/api/health`);
+          const res = await fetch(`${API_URL}/health`);
           if (res.ok) {
             setRestarting(false);
             setRestartNeeded(false);
