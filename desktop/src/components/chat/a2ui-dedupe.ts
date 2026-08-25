@@ -48,13 +48,18 @@ export function dedupeSurfaceIds(msgs: Array<Record<string, unknown>>): void {
         const list = instances.get(sid);
         const idx = active.get(sid);
         if (!list || idx === undefined) continue;
-        let target = list[idx];
-        if (touched.get(target)) {
-          const fallback = list.find((id) => !touched.get(id));
-          if (fallback !== undefined) target = fallback;
+        if (kind === "deleteSurface") {
+          // deleteSurface 是破坏性精确操作，直接路由到 active 指针，不参与 touched 回退
+          body.surfaceId = list[idx];
+        } else {
+          let target = list[idx];
+          if (touched.get(target)) {
+            const fallback = list.find((id) => !touched.get(id));
+            if (fallback !== undefined) target = fallback;
+          }
+          touched.set(target, true);
+          body.surfaceId = target;
         }
-        touched.set(target, true);
-        body.surfaceId = target;
       }
     }
   }
