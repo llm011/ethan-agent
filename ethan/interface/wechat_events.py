@@ -100,6 +100,8 @@ async def _bot_loop() -> None:
                     msgs, buf = await get_updates(client, creds, buf)
                     for msg in msgs:
                         asyncio.ensure_future(_handle_message(msg, creds))
+                    if not msgs:
+                        await asyncio.sleep(1)
 
         except asyncio.CancelledError:
             raise
