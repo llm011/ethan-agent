@@ -569,7 +569,7 @@ def _build_resume_summary(target, process_md: str) -> str:
         intent = step.get("intent") or ""
         preview = step.get("result_preview") or ""
         state = step.get("state") or "unknown"
-        state_emoji = {"done": "✅", "error": "❌", "running": "⏳", "cancelled": "🚫"}.get(state, "⏸️")
+        state_emoji = {"done": "✅", "error": "❌", "running": "⏳", "start": "⏳", "cancelled": "🚫"}.get(state, "⏸️")
         head = f"{idx}. {state_emoji} {tool}"
         if state not in ("done",):
             head += f"（{state}）"

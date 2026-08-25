@@ -328,9 +328,8 @@ class FileEditTool(BaseTool):
             if new_string is None:
                 return "Error: mode=replace 必须提供 new_string（空替换传空串）。"
             count = original.count(old_string)
+            lines = original.splitlines()
             if count == 0:
-                # 给一点线索：提示最长的公共前缀匹配在哪一行，辅助模型调整 old_string
-                lines = original.splitlines()
                 context = _find_context_for_missing(lines, old_string)
                 return (
                     f"Error: old_string 在 {p} 中没有出现。"

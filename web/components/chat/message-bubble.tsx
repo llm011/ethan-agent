@@ -90,7 +90,6 @@ function CardRenderer({ cards, sessionId }: { cards: CardData[]; sessionId?: str
 function InjectBox({ onInject }: { onInject: (content: string) => Promise<{ ok: boolean; error?: string }> }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
-  const [submitting, setSubmitting] = useState(false);
   const [status, setStatus] = useState<{ kind: "ok" | "err"; msg: string } | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
 
@@ -111,7 +110,7 @@ function InjectBox({ onInject }: { onInject: (content: string) => Promise<{ ok: 
 
   const handleSubmit = async () => {
     const content = text.trim();
-    if (!content || submitting) return;
+    if (!content) return;
     // 按下提交后立即清空输入框、关掉「发送中」观感——让用户感知即刻响应。
     // 失败时才把内容恢复回来并报错；成功状态提示异步呈现。
     setText("");
