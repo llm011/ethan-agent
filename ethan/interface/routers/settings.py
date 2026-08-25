@@ -79,6 +79,8 @@ class AgentSettingsPatch(BaseModel):
     lite_model: str | None = None
     heartbeat_enabled: bool | None = None
     heartbeat_interval_minutes: int | None = None
+    heartbeat_model: str | None = None
+    schedule_model: str | None = None
     proxy: str | None = None
     max_tokens: int | None = None
     max_tool_iterations: int | None = None
@@ -95,6 +97,8 @@ async def get_agent_settings():
         "lite_model": config.defaults.lite_model,
         "heartbeat_enabled": config.defaults.heartbeat.enabled,
         "heartbeat_interval_minutes": config.defaults.heartbeat.interval_minutes,
+        "heartbeat_model": config.defaults.heartbeat.model,
+        "schedule_model": config.defaults.schedule_model,
         "proxy": config.network.proxy or "",
         "max_tokens": config.defaults.max_tokens,
         "max_tool_iterations": config.defaults.max_tool_iterations,
@@ -118,6 +122,10 @@ async def update_agent_settings(req: AgentSettingsPatch):
         config.defaults.heartbeat.enabled = req.heartbeat_enabled
     if req.heartbeat_interval_minutes is not None:
         config.defaults.heartbeat.interval_minutes = req.heartbeat_interval_minutes
+    if req.heartbeat_model is not None:
+        config.defaults.heartbeat.model = req.heartbeat_model
+    if req.schedule_model is not None:
+        config.defaults.schedule_model = req.schedule_model
     if req.proxy is not None:
         config.network.proxy = req.proxy or None
     if req.max_tokens is not None:

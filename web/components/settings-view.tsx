@@ -127,6 +127,8 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
     lite_model: "",
     heartbeat_enabled: true,
     heartbeat_interval_minutes: 10,
+    heartbeat_model: "",
+    schedule_model: "",
     proxy: "",
     max_tokens: 4096,
     max_tool_iterations: 100,
@@ -556,6 +558,46 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
                         </label>
                       </div>
                       <p className="text-xs text-muted-foreground">系统级定时维护：facts 去重整理 + 执行 heartbeat.md 中的任务</p>
+                    </div>
+
+                    <div className="grid gap-2">
+                      <label className="text-sm font-medium">心跳任务模型</label>
+                      <Select
+                        value={agentForm.heartbeat_model ?? ""}
+                        onValueChange={(val) => setAgentForm({ ...agentForm, heartbeat_model: val || "" })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="留空则跟随默认模型" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="">留空（跟随默认模型）</SelectItem>
+                          {modelList.map((m) => (
+                            <SelectItem key={m.id} value={m.id}>
+                              {m.description || m.id}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="grid gap-2">
+                      <label className="text-sm font-medium">定时任务模型</label>
+                      <Select
+                        value={agentForm.schedule_model ?? ""}
+                        onValueChange={(val) => setAgentForm({ ...agentForm, schedule_model: val || "" })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="留空则跟随默认模型" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="">留空（跟随默认模型）</SelectItem>
+                          {modelList.map((m) => (
+                            <SelectItem key={m.id} value={m.id}>
+                              {m.description || m.id}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
 
                     <div className="grid gap-2">

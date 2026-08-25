@@ -13,6 +13,8 @@ export interface AgentSettings {
   lite_model: string;
   heartbeat_enabled: boolean;
   heartbeat_interval_minutes: number;
+  heartbeat_model: string;
+  schedule_model: string;
   proxy: string;
   max_tokens: number;
   max_tool_iterations: number;
