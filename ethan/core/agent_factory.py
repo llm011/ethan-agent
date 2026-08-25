@@ -29,7 +29,7 @@ from ethan.tools.builtin.dida_tools import (
     DidaTaskCreateTool,
     DidaTaskListTool,
 )
-from ethan.tools.builtin.file import FileListTool, FileReadTool, FileWriteTool
+from ethan.tools.builtin.file import FileEditTool, FileListTool, FileReadTool, FileWriteTool
 from ethan.tools.builtin.find_tools import FindToolsTool
 from ethan.tools.builtin.heartbeat import HeartbeatAddTool, HeartbeatListTool, HeartbeatRemoveTool
 from ethan.tools.builtin.image_search import ImageSearchTool
@@ -114,6 +114,7 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
     registry.register(ChartTool())
     registry.register(FileReadTool())
     registry.register(FileWriteTool())
+    registry.register(FileEditTool())
     registry.register(FileListTool())
     registry.register(DeliverFileTool())
     # DIDA（滴答清单）CLI wrapper tools — 仅 DIDA_ENABLED=true 时注册（可选插件）。

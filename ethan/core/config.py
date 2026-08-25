@@ -101,7 +101,7 @@ class RoutingConfig(BaseModel):
         # browser 工具已移入初始集：扩展连上时直接可用；未连时模型调用后会得到
         # "扩展未连接"的明确报错，优于因 find_tools 激活失败陷入发现死循环超时。
         "shell", "web_search", "web_fetch", "get_weather", "generate_chart",
-        "file_read", "file_write", "file_list",
+        "file_read", "file_write", "file_edit", "file_list",
         "skill_read", "skill_list", "find_tools",
         "rg_search", "fd_find",
         "knowledge_search", "knowledge_read", "knowledge_add", "knowledge_edit",
