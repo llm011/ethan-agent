@@ -231,6 +231,188 @@ class FileWriteTool(BaseTool):
             return f"Write error: {e}"
 
 
+class FileEditTool(BaseTool):
+    """在现有文件里做搜索替换式局部修改，避免 model 整文件覆写丢失上下文。
+
+    支持两种模式：
+    1. replace：给定 old_string / new_string，替换首次出现的片段。old_string 必须在文件里
+       精确唯一地出现一次；多处或零处都会报错，告知现状并让模型换片段重发或退用 file_write。
+    2. insert：给定 anchor + text + position (before|after)，在锚定行的上方/下方插入，
+       anchor 必须精确唯一匹配。
+    """
+    fast_path = True
+    side_effect = True
+    name = "file_edit"
+    description = (
+        "Edit a local file in-place by search-and-replace (replace) or anchor-based insert "
+        "(insert). Use this when only a small section of a file should be changed; for full "
+        "rewrites use file_write. old_string must appear exactly once in the file."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Absolute or relative file path.",
+            },
+            "mode": {
+                "type": "string",
+                "enum": ["replace", "insert"],
+                "description": "replace = substitute old_string → new_string exactly once; "
+                               "insert = insert text before/after a single anchor line.",
+                "default": "replace",
+            },
+            "old_string": {
+                "type": "string",
+                "description": "[mode=replace] The exact text to match in the file (must be unique). "
+                               "Include surrounding indentation/context so it matches exactly once.",
+            },
+            "new_string": {
+                "type": "string",
+                "description": "[mode=replace] The replacement text.",
+            },
+            "anchor": {
+                "type": "string",
+                "description": "[mode=insert] The exact line/block to anchor on (must match exactly once).",
+            },
+            "text": {
+                "type": "string",
+                "description": "[mode=insert] The text to insert.",
+            },
+            "position": {
+                "type": "string",
+                "enum": ["before", "after"],
+                "description": "[mode=insert] Insert before or after the anchor match.",
+                "default": "after",
+            },
+        },
+        "required": ["path"],
+    }
+
+    def consent_check(self, path: str = "", **kwargs) -> str | None:
+        if _is_safe_path(str(path)):
+            return None
+        scope = _dir_scope(str(path))
+        return f"编辑文件 {path}（授权后本会话对 {scope} 目录及其子目录的写入都不再询问）"
+
+    def consent_scope(self, path: str = "", **kwargs) -> str:
+        return _dir_scope(str(path))
+
+    async def run(
+        self,
+        path: str,
+        mode: str = "replace",
+        old_string: str | None = None,
+        new_string: str | None = None,
+        anchor: str | None = None,
+        text: str | None = None,
+        position: str = "after",
+    ) -> str:
+        p = Path(path).expanduser().resolve()
+        if _is_inside_secrets(str(p)):
+            return "Error: 禁止编辑 .secrets 目录下的文件。密钥只能通过 set_secret 工具管理。"
+        if not p.exists():
+            return f"Error: file not found: {p}. 新建文件请用 file_write。"
+        if not p.is_file():
+            return f"Error: not a file: {p}"
+        try:
+            original = p.read_text(encoding="utf-8")
+        except UnicodeDecodeError as e:
+            return f"Error: 二进制文件无法编辑：{e}"
+        except Exception as e:
+            return f"Error reading {p}: {e}"
+
+        if mode == "replace":
+            if not old_string:
+                return "Error: mode=replace 必须提供 old_string。"
+            if new_string is None:
+                return "Error: mode=replace 必须提供 new_string（空替换传空串）。"
+            count = original.count(old_string)
+            if count == 0:
+                # 给一点线索：提示最长的公共前缀匹配在哪一行，辅助模型调整 old_string
+                lines = original.splitlines()
+                context = _find_context_for_missing(lines, old_string)
+                return (
+                    f"Error: old_string 在 {p} 中没有出现。"
+                    f"请确认缩进/换行完全一致。{context}"
+                )
+            if count > 1:
+                line_num = _first_line_of(lines, old_string)
+                return (
+                    f"Error: old_string 在 {p} 中出现了 {count} 次（第一次在第 {line_num} 行），"
+                    "必须唯一匹配。请包含更多上下文缩小到唯一处，或改用 file_write 整文件写入。"
+                )
+            if old_string == new_string:
+                return f"No-op: old_string 与 new_string 完全相同，未修改 {p}。"
+            modified = original.replace(old_string, new_string, 1)
+            p.write_text(modified, encoding="utf-8")
+            lines_changed = _diff_changed_lines(original, modified)
+            return f"Edited {p}（replace，1 处）：{lines_changed}"
+
+        if mode == "insert":
+            if not anchor:
+                return "Error: mode=insert 必须提供 anchor。"
+            if text is None:
+                return "Error: mode=insert 必须提供 text。"
+            count = original.count(anchor)
+            if count == 0:
+                lines = original.splitlines()
+                context = _find_context_for_missing(lines, anchor)
+                return f"Error: anchor 在 {p} 中没有出现。{context}"
+            if count > 1:
+                return (
+                    f"Error: anchor 在 {p} 中出现了 {count} 次，必须唯一匹配。"
+                    "请包含更多上下文。"
+                )
+            idx = original.index(anchor)
+            if position == "before":
+                modified = original[:idx] + text + original[idx:]
+            else:  # after
+                modified = original[: idx + len(anchor)] + text + original[idx + len(anchor) :]
+            p.write_text(modified, encoding="utf-8")
+            return f"Edited {p}（insert {position} anchor，插入 {len(text)} chars）。"
+
+        return f"Error: 不支持的 mode={mode}。可选 replace / insert。"
+
+
+def _first_line_of(lines: list[str], needle: str) -> int:
+    """needle 在第几行（1-based）。找不到返回 -1。"""
+    for i, line in enumerate(lines, 1):
+        if needle in line:
+            return i
+    return -1
+
+
+def _find_context_for_missing(lines: list[str], needle: str) -> str:
+    """old_string/anchor 未命中时给最接近的 2 行含公共首 token 的上下文，方便模型调参。"""
+    try:
+        # 取 needle 前 3 行 / 后 10 字符作为「最相似候选」的弱信号：第一行（前 40 字）
+        first = needle.splitlines()[0][:40].strip() if needle else ""
+        if not first:
+            return ""
+        for i, line in enumerate(lines, 1):
+            if first and first in line:
+                # 返回 3 行上下文
+                start = max(0, i - 2)
+                end = min(len(lines), i + 1)
+                snippet = "\n".join(
+                    f"{n}: {ln}" for n, ln in zip(range(start + 1, end + 1), lines[start:end])
+                )
+                return f"最接近的上下文（第 {i} 行附近）：\n{snippet}"
+    except Exception:
+        pass
+    return ""
+
+
+def _diff_changed_lines(original: str, modified: str) -> str:
+    """弱描述：前后行数变化 + 首尾 40 字差异摘要，给人快速判断改对没。"""
+    before = original.splitlines()
+    after = modified.splitlines()
+    delta = len(after) - len(before)
+    sign = "+" if delta > 0 else ""
+    return f"行数 {len(before)} → {len(after)}（{sign}{delta}）"
+
+
 class FileListTool(BaseTool):
     fast_path = False
     name = "file_list"

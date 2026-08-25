@@ -112,19 +112,21 @@ function InjectBox({ onInject }: { onInject: (content: string) => Promise<{ ok: 
   const handleSubmit = async () => {
     const content = text.trim();
     if (!content || submitting) return;
-    setSubmitting(true);
+    // 按下提交后立即清空输入框、关掉「发送中」观感——让用户感知即刻响应。
+    // 失败时才把内容恢复回来并报错；成功状态提示异步呈现。
+    setText("");
+    const fire = onInject(content);
     try {
-      const res = await onInject(content);
+      const res = await fire;
       if (res.ok) {
-        setText("");
         setStatus({ kind: "ok", msg: "已加入上下文，下一轮调用模型时读取" });
       } else {
+        setText(content);
         setStatus({ kind: "err", msg: res.error || "提交失败" });
       }
     } catch (e) {
+      setText(content);
       setStatus({ kind: "err", msg: e instanceof Error ? e.message : "提交失败" });
-    } finally {
-      setSubmitting(false);
     }
   };
 
@@ -175,10 +177,10 @@ function InjectBox({ onInject }: { onInject: (content: string) => Promise<{ ok: 
           <button
             onClick={handleSubmit}
             className="text-xs px-2.5 py-0.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors inline-flex items-center gap-1"
-            disabled={submitting || !text.trim()}
+            disabled={!text.trim()}
           >
             <SendIcon className="h-3 w-3" />
-            {submitting ? "提交中…" : "提交"}
+            提交
           </button>
         </div>
       </div>
@@ -428,33 +430,6 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
             {msg.toolSteps && msg.toolSteps.length > 0 && msg.toolSteps.some(s => s.entity_type) && (
               <SwimlaneDiagram steps={msg.toolSteps} matchedSkills={msg.matchedSkills} onStepClick={setHighlightedStep} />
             )}
-            {/* 运行中「补充信息」待处理区：展示在「调用可视化」（工具时间线）下方。
-                未被消费前可删除；被模型处理后自动消失（信息保留在工具步骤的 injected 里）。 */}
-            {isStreaming && isLast && pendingInjected && pendingInjected.length > 0 && (
-              <div className="mb-2 rounded-lg border border-border/50 bg-background/30 px-3 py-2 space-y-1.5">
-                <div className="text-xs font-medium text-muted-foreground">📨 待处理的补充信息</div>
-                {pendingInjected.map((pi) => (
-                  <div key={pi.id} className="flex items-start gap-2 text-xs text-muted-foreground bg-background/60 rounded-md px-2 py-1.5">
-                    <span className="whitespace-pre-wrap break-words flex-1 leading-relaxed">{pi.content}</span>
-                    {onRemoveInjected && (
-                      <button
-                        onClick={() => onRemoveInjected(pi.id)}
-                        className="shrink-0 opacity-40 hover:opacity-100 transition-opacity mt-0.5"
-                        title="删除（模型下一轮就读不到了）"
-                      >
-                        <XIcon className="h-3 w-3" />
-                      </button>
-                    )}
-                  </div>
-                ))}
-                <div className="text-[10px] text-muted-foreground/50">下一轮调用模型时读取；点 × 可在处理前删除</div>
-              </div>
-            )}
-            {/* 运行中「补充信息」入口：仅在最后一条 assistant 消息流式生成中显示。
-                提交后内容塞入 ChatRun inbox，agent loop 下一轮调模型前 append 到 working 末尾。 */}
-            {isStreaming && isLast && onInject && (
-              <InjectBox onInject={onInject} />
-            )}
             {msg.intermediateOutput ? (
               isStreaming && isLast ? (
                 <div className="mb-2 rounded-lg border border-border/50 bg-background/30 px-3 py-2 process-record">
@@ -519,6 +494,31 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
             )}
             {msg.mcpApps && msg.mcpApps.length > 0 && (
               <McpAppView apps={msg.mcpApps} />
+            )}
+            {/* 运行中「补充信息」待处理区：展示在内容输出下方，未被消费前可删除。 */}
+            {isStreaming && isLast && pendingInjected && pendingInjected.length > 0 && (
+              <div className="mt-2 mb-1 rounded-lg border border-border/50 bg-background/30 px-3 py-2 space-y-1.5">
+                <div className="text-xs font-medium text-muted-foreground">📨 待处理的补充信息</div>
+                {pendingInjected.map((pi) => (
+                  <div key={pi.id} className="flex items-start gap-2 text-xs text-muted-foreground bg-background/60 rounded-md px-2 py-1.5">
+                    <span className="whitespace-pre-wrap break-words flex-1 leading-relaxed">{pi.content}</span>
+                    {onRemoveInjected && (
+                      <button
+                        onClick={() => onRemoveInjected(pi.id)}
+                        className="shrink-0 opacity-40 hover:opacity-100 transition-opacity mt-0.5"
+                        title="删除（模型下一轮就读不到了）"
+                      >
+                        <XIcon className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <div className="text-[10px] text-muted-foreground/50">下一轮调用模型时读取；点 × 可在处理前删除</div>
+              </div>
+            )}
+            {/* 运行中「补充信息」入口：仅在最后一条 assistant 消息流式生成中显示。 */}
+            {isStreaming && isLast && onInject && (
+              <InjectBox onInject={onInject} />
             )}
             {onActionConfirm && msg.role === "assistant" && (
               <ActionConfirmBar

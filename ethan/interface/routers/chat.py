@@ -30,6 +30,21 @@ router = APIRouter()
 
 logger = logging.getLogger(__name__)
 
+
+def _emit_resume_summary(run, summary: str) -> None:
+    """按字符分片把「中断前进度反思总结」推给前端（模拟流式输出），结束后加一个空行分隔。
+
+    不进模型上下文，只是用户端看到的 assistant 消息首段文本；模型自己也会在
+    working 滑窗里看到这条已出现在对话历史中的 assistant 行，相当于零成本把反思
+    摘要并入模型下一轮的可参考上下文。
+    """
+    # 12 字左右一块，既能让用户看到流式打字感，又不会 SSE 事件太多。
+    chunk_size = 12
+    for i in range(0, len(summary), chunk_size):
+        run.emit({"content": summary[i : i + chunk_size]})
+    # 用两个换行把总结段和后续模型生成的正文断开
+    run.emit({"content": "\n\n"})
+
 # 本地/私有网络来源：auto_consent 仅允许来自这些地址的请求生效。
 # 回环：直连宿主机（127.0.0.1）；私有网段：docker 网桥（172.16/12）、局域网（192.168/16、10/8）。
 _LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
@@ -385,6 +400,12 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
             consent = WebConsentProvider(session_id=req.session_id or "")
         manager = RunManager.instance()
         run = manager.create(req.session_id or "", consent=consent, user_id=user_id)
+        # 继续执行：先把进度反思总结按字符分片 emit，呈现为 assistant 消息首段输出，
+        # 视觉上就是「系统先总结已做的事，再继续往下做」——给用户确认续跑确实基于旧进度，
+        # 也是给模型自己一个可回看的反思锚点（模型首条 assistant 消息就已包含进度摘要，
+        # 进入 working 后能读到，不额外占上下文窗口）。
+        if req.resume_summary:
+            _emit_resume_summary(run, req.resume_summary)
         run.task = asyncio.create_task(
             _run_generation(run, agent, messages, store, req.session_id, user_id, consent, mode=req.mode)
         )
@@ -527,6 +548,59 @@ async def delete_injected_message(session_id: str, inj_id: str, user_id: str = D
     return {"ok": True}
 
 
+def _build_resume_summary(target, process_md: str) -> str:
+    """把中断前已执行的步骤压缩成「给用户看的反思摘要」，不超过 ~800 字。
+
+    结构：
+      🔄 中断恢复 · 进度回顾
+      - 已完成 N 个步骤：
+        1. 工具名（意图一句话）：结果一行摘要
+        2. ...
+      - 下一步建议：基于中间输出的 TODO 标题或最后未完成的步骤
+    """
+    lines = ["🔄 中断恢复 · 进度回顾"]
+    steps = target.tool_steps or []
+    if not steps and not process_md:
+        return lines[0] + "\n\n（之前没有记录到具体执行步骤，直接继续即可。）"
+
+    lines.append(f"\n已完成 {len(steps)} 个步骤：")
+    for idx, step in enumerate(steps, start=1):
+        tool = step.get("tool") or f"step_{idx}"
+        intent = step.get("intent") or ""
+        preview = step.get("result_preview") or ""
+        state = step.get("state") or "unknown"
+        state_emoji = {"done": "✅", "error": "❌", "running": "⏳", "cancelled": "🚫"}.get(state, "⏸️")
+        head = f"{idx}. {state_emoji} {tool}"
+        if state not in ("done",):
+            head += f"（{state}）"
+        parts = [head]
+        if intent and len(intent) < 120:
+            parts.append(f"   意图：{intent.strip()}")
+        elif intent:
+            parts.append(f"   意图：{intent.strip()[:117]}…")
+        if preview:
+            one = preview.strip().splitlines()[0]
+            if len(one) > 120:
+                one = one[:117] + "…"
+            parts.append(f"   结果：{one}")
+        lines.append("\n".join(parts))
+
+    # 从过程记录 markdown 里找「下一步 / TODO / 待办」字样，作为建议
+    hint = ""
+    if process_md:
+        import re as _re
+        for match in _re.finditer(r"(?im)^.*(下一步|TODO|待办|接着|然后|接下来).*$", process_md):
+            s = match.group(0).lstrip("# ")
+            if len(s) < 200:
+                hint = s
+                break
+    if hint:
+        lines.append(f"\n📝 之前记录的「下一步」提示：{hint}")
+
+    lines.append("\n正在基于上述进度继续处理，以下是后续操作…")
+    return "\n".join(lines)
+
+
 @router.post("/chat/{session_id}/resume/{message_id}")
 async def resume_from_message(session_id: str, message_id: int, request: Request,
                               user_id: str = Depends(verify_token)):
@@ -562,14 +636,23 @@ async def resume_from_message(session_id: str, message_id: int, request: Request
         from ethan.memory.session import _build_intermediate_markdown
         process_md = _build_intermediate_markdown(target)
 
+    # 进度反思总结：面向用户输出（emit 到 SSE 流，占 assistant 消息首段），
+    # 先写标题，再把步骤摘要按序号压缩（每个 step 取 tool + intent/result_preview 两行），
+    # 避免把 完整 tool_steps markdown 全塞进去——过程记录本身已经在「过程记录」
+    # 展开面板里，这里只需要"看起来有反思"的精简版。
+    summary = _build_resume_summary(target, process_md)
+
+    # 给模型的 runtime_context 保持短：只说继续，不给大段过程（模型 working 滑窗
+    # 本身就能读到前面的 tool_steps assistant 行，重复塞会挤占窗口）。
     resume_context = (
-        "上面的任务因服务重启而中断。以下是中断前已完成的进度记录：\n\n"
-        + (process_md or "（无过程记录）")
-        + "\n\n请基于以上进度继续完成任务。注意：进度记录是工具调用的摘要，"
-        "可能缺少部分细节，请根据情况判断是否需要重新执行某些步骤。"
+        "这是一次「继续执行」续跑。上一轮任务在生成了若干工具步骤后被中断。"
+        "对话历史里已经有完整的已执行步骤和结果，你可以直接读取它们。"
+        "要求：\n"
+        "1. 不要重述进度——你刚看到 assistant 第一条消息已经把进度摘要总结给了用户，"
+        "那是系统提示，不用再重复；\n"
+        "2. 基于对话历史里的步骤判断接下来该做什么，必要时复查上一步结果。"
     )
 
-    # 用 runtime_context 传递续跑上下文，避免污染用户消息历史
     req = ChatRequest(
         messages=[{"role": "user", "content": "继续执行"}],
         session_id=session_id,
@@ -578,6 +661,7 @@ async def resume_from_message(session_id: str, message_id: int, request: Request
         mode=session.mode,
         auto_consent=_is_local(request),
         runtime_context=resume_context,
+        resume_summary=summary,
     )
     try:
         return await chat(req, request, user_id)
