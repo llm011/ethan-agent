@@ -200,6 +200,7 @@ class HeartbeatConfig(BaseModel):
     interval_minutes: int = 10
     # 画像每日压缩触发钟点（北京时间 0-23）。该点之后的首个心跳 tick 触发，每天一次。
     profile_consolidate_hour: int = 2
+    model: str = ""  # 心跳任务使用的模型；空则跟随 defaults.model
 
 
 class DefaultsConfig(BaseModel):
@@ -214,6 +215,7 @@ class DefaultsConfig(BaseModel):
     max_tool_iterations: int = 100
     # 定时任务 session 轮转阈值：当天执行次数超此值则新建对话，避免高频任务会话无限膨胀
     schedule_session_rotate_threshold: int = 24
+    schedule_model: str = ""  # 定时任务使用的模型；空则跟随 defaults.model
     routing: RoutingConfig = Field(default_factory=RoutingConfig)
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
 
@@ -343,6 +345,7 @@ def _default_config() -> dict:
             "model": os.environ.get("AGENT_DEFAULT_MODEL", "claude-sonnet-4.6"),
             "lite_model": os.environ.get("AGENT_LITE_MODEL", ""),  # 轻量模型（记忆压缩/标题生成等后台任务用）；空则按主模型推断或与主模型相同
             "fallback_model": os.environ.get("AGENT_FALLBACK_MODEL", ""),  # 主模型不可用时的兜底模型（模型 id，支持 provider/model）；空=不兜底
+            "schedule_model": os.environ.get("AGENT_SCHEDULE_MODEL", ""),  # 定时任务模型；空则跟随主模型
             "max_tokens": 8192,
             "max_tool_iterations": 100,
         },

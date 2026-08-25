@@ -240,7 +240,8 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
             await store.save_message(session_id, user_msg)
 
             # 创建 agent（与普通对话路径一致）
-            agent = create_agent(None, channel="schedule", user_id=user_id)
+            schedule_model = _gc().defaults.schedule_model or None
+            agent = create_agent(schedule_model, channel="schedule", user_id=user_id)
             agent.session_id = session_id
             if agent.runtime_context:
                 agent.runtime_context = agent.runtime_context + "\n\n" + schedule_ctx

@@ -192,7 +192,8 @@ async def _run_heartbeat_md() -> None:
     from ethan.core.users import get_user_store
     hb_user_id = get_user_store().get_admin_user_id()
     from ethan.core.agent_factory import create_agent as _create_agent
-    agent = _create_agent(user_id=hb_user_id, toolset="heartbeat")
+    heartbeat_model = cfg.defaults.heartbeat.model or None
+    agent = _create_agent(model=heartbeat_model, user_id=hb_user_id, toolset="heartbeat")
 
     logger.info("[Heartbeat] Running heartbeat.md tasks...")
     prompt = f"[Heartbeat] 正在执行系统心跳任务：heartbeat.md\n\n{content.strip()}"
