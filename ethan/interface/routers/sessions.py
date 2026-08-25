@@ -84,6 +84,7 @@ async def list_sessions(limit: int = 50, offset: int = 0, q: str | None = None,
             "source": getattr(s, "source", "web"),
             "mode": getattr(s, "mode", "") or "",
             "pinned_at": getattr(s, "pinned_at", 0) or 0,
+            "last_read_at": getattr(s, "last_read_at", 0) or 0,
         }
         for s in sessions
     ], "total": total}
@@ -111,9 +112,21 @@ async def list_pinned(user_id: str = Depends(verify_token)):
             "source": getattr(s, "source", "web"),
             "mode": getattr(s, "mode", "") or "",
             "pinned_at": s.pinned_at,
+            "last_read_at": getattr(s, "last_read_at", 0) or 0,
         }
         for s in sessions
     ]}
+
+
+@router.post("/sessions/{session_id}/read")
+async def mark_session_read(session_id: str, user_id: str = Depends(verify_token)):
+    """标记会话已读：未读水位（last_read_at）推进到 updated_at，消除侧边栏红点。
+
+    幂等；返回 advanced 表示本次是否有实际推进（False = 本来就已读）。
+    """
+    store = await get_session_store()
+    advanced = await store.mark_read(session_id)
+    return {"ok": True, "advanced": advanced}
 
 
 @router.get("/sessions/{session_id}")

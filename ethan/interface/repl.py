@@ -317,8 +317,8 @@ async def run_repl(agent: Agent, resume_id: str | None = None, auto_consent: boo
             if session.title == "新对话":
                 session.title = user_input.strip().replace("\n", " ")[:40]
             await store._db.execute(
-                "INSERT INTO sessions (id, title, model, created_at, updated_at, source, mode) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (session.id, session.title, session.model, session.created_at, session.updated_at, "repl", getattr(session, "mode", "") or ""),
+                "INSERT INTO sessions (id, title, model, created_at, updated_at, source, mode, last_read_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (session.id, session.title, session.model, session.created_at, session.updated_at, "repl", getattr(session, "mode", "") or "", session.updated_at),
             )
             await store._db.commit()
             session_persisted = True

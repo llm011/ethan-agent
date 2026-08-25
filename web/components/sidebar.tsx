@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Image from "next/image";
 import { Plus, Trash2, Search, Settings, Book, BookOpen, Pencil, Check, X, List, Wrench, RefreshCw, Loader2, Pin, PinOff } from "lucide-react";
@@ -37,8 +37,11 @@ import {
   pinSession,
   unpinSession,
   fetchPinnedSessions,
+  markSessionRead,
   type ModeEntry,
 } from "@/lib/api";
+import { hasUnread, withReadMark } from "@ethan/shared/lib/unread";
+import { UnreadDot } from "@ethan/shared/components/unread-dot";
 
 export function Sidebar() {
   const router = useRouter();
@@ -139,6 +142,32 @@ export function Sidebar() {
     ? "chat"
     : pathname.slice(1).replace(/\/$/, ""); // "memory", "knowledge", etc.
 
+  // 未读红点：打开/切换会话时立即标记已读（乐观清除红点，不等轮询）。
+  // 轮询/分组刷新若发现正在查看的会话又有新消息（后台回复实时到达），
+  // 同样推进水位，保证当前会话永不亮红点。
+  const activeSessionIdRef = useRef(activeSessionId);
+  activeSessionIdRef.current = activeSessionId;
+
+  useEffect(() => {
+    if (!activeSessionId) return;
+    const patch = (list: SessionInfo[]) =>
+      list.map((s) => (s.id === activeSessionId ? withReadMark(s) : s));
+    setSessions(patch);
+    setPinnedSessions(patch);
+    setScheduleGroupSessions(patch);
+    setHeartbeatGroupSessions(patch);
+    setExtensionSessions(patch);
+    markSessionRead(activeSessionId).catch(() => {});
+  }, [activeSessionId]);
+
+  const markActiveRead = (list: SessionInfo[]) => {
+    const id = activeSessionIdRef.current;
+    if (!id) return;
+    if (list.some((s) => s.id === id && hasUnread(s))) {
+      markSessionRead(id).catch(() => {});
+    }
+  };
+
   // 主列表请求已 hide 心跳/定时（否则高频心跳会话会挤爆前 50，把普通会话顶出去）；
   // 定时/心跳两个分组改用 title_prefixes 独立拉取，互不影响。
   const pinnedIds = new Set(pinnedSessions.map((s) => s.id));
@@ -167,16 +196,16 @@ export function Sidebar() {
   useEffect(() => {
     const fetchGroups = () => {
       fetchSessions(5, 0, undefined, undefined, undefined, false, false, "[定时]")
-        .then(setScheduleGroupSessions)
+        .then((l) => { setScheduleGroupSessions(l); markActiveRead(l); })
         .catch(() => {});
       fetchSessions(5, 0, undefined, undefined, undefined, false, false, "[心跳]")
-        .then(setHeartbeatGroupSessions)
+        .then((l) => { setHeartbeatGroupSessions(l); markActiveRead(l); })
         .catch(() => {});
       fetchSessions(5, 0, undefined, "browser-extension")
-        .then(setExtensionSessions)
+        .then((l) => { setExtensionSessions(l); markActiveRead(l); })
         .catch(() => {});
       fetchPinnedSessions()
-        .then(setPinnedSessions)
+        .then((l) => { setPinnedSessions(l); markActiveRead(l); })
         .catch(() => {});
     };
     fetchGroups();
@@ -204,12 +233,13 @@ export function Sidebar() {
       if (sessionSearch.trim()) return; // don't interfere while searching
       try {
         const data = await fetchPoll(true, true);
+        const incoming = data.sessions as SessionInfo[];
         setSessions(prev => {
-          const incoming = data.sessions as SessionInfo[];
           const changed = incoming.length !== prev.length ||
             incoming.some((s, i) => s.updated_at !== prev[i]?.updated_at || s.title !== prev[i]?.title);
           return changed ? incoming : prev;
         });
+        markActiveRead(incoming);
         if (data.active_sessions) {
           setActiveSessions(new Set(data.active_sessions));
         }
@@ -360,18 +390,21 @@ export function Sidebar() {
             className="flex-1 bg-transparent outline-none border-b border-primary"
           />
         ) : (
-          <span
-            className="truncate flex-1 font-medium"
-            dangerouslySetInnerHTML={{
-              __html: sessionSearch
-                ? s.title.replace(
-                    new RegExp(sessionSearch, "gi"),
-                    (match) =>
-                      `<span class="bg-yellow-500/30 text-yellow-500 rounded px-0.5">${match}</span>`
-                  )
-                : s.title,
-            }}
-          />
+          <>
+            <span
+              className="truncate flex-1 font-medium"
+              dangerouslySetInnerHTML={{
+                __html: sessionSearch
+                  ? s.title.replace(
+                      new RegExp(sessionSearch, "gi"),
+                      (match) =>
+                        `<span class="bg-yellow-500/30 text-yellow-500 rounded px-0.5">${match}</span>`
+                    )
+                  : s.title,
+              }}
+            />
+            {hasUnread(s) && s.id !== activeSessionId && <UnreadDot />}
+          </>
         )}
         {editingSessionId === s.id ? (
           <div className="flex gap-1 shrink-0">

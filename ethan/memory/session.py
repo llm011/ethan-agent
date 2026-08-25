@@ -44,6 +44,7 @@ class Session:
     source: str = "web"  # web | repl | lark | cli | desktop | custom
     mode: str = ""  # "" = 工作助手; 规范英文 key，如 "legal"/"companion"（见 core/modes.py）
     pinned_at: float = 0.0  # >0 表示已置顶，值为置顶时间戳
+    last_read_at: float = 0.0  # 未读水位：updated_at > last_read_at 即有未读（侧边栏红点）
     # 运行中「补充信息」待消费队列（跨刷新持久化）：[{"id": str, "content": str}]。
     # inject 时落库；agent drain / run 结束时清空。前端在工具时间线上方展示，可删除。
     pending_injected: list = field(default_factory=list)
@@ -370,6 +371,19 @@ class SessionStore:
             await self._db.commit()
         except Exception:
             pass
+        # Migration: sessions.last_read_at（未读红点水位）。存量会话回填为已读
+        # （水位=updated_at），避免升级后满屏红点；新会话由 create 显式写水位，
+        # mark_read 端点写入的值恒 > 0，回填只命中历史行，幂等。
+        try:
+            await self._db.execute("ALTER TABLE sessions ADD COLUMN last_read_at REAL NOT NULL DEFAULT 0")
+            await self._db.commit()
+        except Exception:
+            pass  # Column already exists
+        try:
+            await self._db.execute("UPDATE sessions SET last_read_at = updated_at WHERE last_read_at = 0")
+            await self._db.commit()
+        except Exception:
+            pass
         # Migration: sessions.pending_injected（运行中补充信息待消费队列，JSON 数组）
         try:
             await self._db.execute("ALTER TABLE sessions ADD COLUMN pending_injected TEXT NOT NULL DEFAULT '[]'")
@@ -498,10 +512,11 @@ class SessionStore:
             updated_at=now,
             source=source,
             mode=mode,
+            last_read_at=now,
         )
         await self._db.execute(
-            "INSERT INTO sessions (id, title, model, created_at, updated_at, source, mode) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (session.id, session.title, session.model, session.created_at, session.updated_at, source, mode),
+            "INSERT INTO sessions (id, title, model, created_at, updated_at, source, mode, last_read_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (session.id, session.title, session.model, session.created_at, session.updated_at, source, mode, now),
         )
         await self._db.commit()
         return session
@@ -517,10 +532,11 @@ class SessionStore:
             updated_at=now,
             source=source,
             mode=mode,
+            last_read_at=now,
         )
         await self._db.execute(
-            "INSERT INTO sessions (id, title, model, created_at, updated_at, source, mode) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (session.id, session.title, session.model, session.created_at, session.updated_at, source, mode),
+            "INSERT INTO sessions (id, title, model, created_at, updated_at, source, mode, last_read_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (session.id, session.title, session.model, session.created_at, session.updated_at, source, mode, now),
         )
         await self._db.commit()
         return session
@@ -666,16 +682,25 @@ class SessionStore:
         return cursor.rowcount > 0
 
     async def update_title(self, session_id: str, title: str) -> None:
+        now = time.time()
         await self._db.execute(
-            "UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?",
-            (title, time.time(), session_id),
+            # 标题是元数据，不应制造未读：已读会话水位跟随 updated_at 保持已读，
+            # 未读会话水位不动保持未读（SET 表达式取旧行值）。
+            "UPDATE sessions SET title = ?, updated_at = ?, "
+            "last_read_at = CASE WHEN last_read_at >= updated_at THEN ? ELSE last_read_at END "
+            "WHERE id = ?",
+            (title, now, now, session_id),
         )
         await self._db.commit()
 
     async def update_mode(self, session_id: str, mode: str) -> None:
+        now = time.time()
         await self._db.execute(
-            "UPDATE sessions SET mode = ?, updated_at = ? WHERE id = ?",
-            (mode, time.time(), session_id),
+            # 同 update_title：模式切换是元数据变更，不制造未读。
+            "UPDATE sessions SET mode = ?, updated_at = ?, "
+            "last_read_at = CASE WHEN last_read_at >= updated_at THEN ? ELSE last_read_at END "
+            "WHERE id = ?",
+            (mode, now, now, session_id),
         )
         await self._db.commit()
 
@@ -728,7 +753,8 @@ class SessionStore:
     async def list_pinned(self) -> list[Session]:
         sessions: list[Session] = []
         async with self._db.execute(
-            "SELECT id, title, model, created_at, updated_at, COALESCE(source, 'web') as source, COALESCE(mode, '') as mode, pinned_at "
+            "SELECT id, title, model, created_at, updated_at, COALESCE(source, 'web') as source, COALESCE(mode, '') as mode, pinned_at, "
+            "COALESCE(last_read_at, 0) as last_read_at "
             "FROM sessions WHERE pinned_at > 0 ORDER BY pinned_at DESC"
         ) as cursor:
             async for row in cursor:
@@ -742,6 +768,7 @@ class SessionStore:
                         source=row[5],
                         mode=row[6],
                         pinned_at=row[7],
+                        last_read_at=row[8],
                     )
                 )
         return sessions
@@ -752,6 +779,19 @@ class SessionStore:
             (time.time(), session_id),
         )
         await self._db.commit()
+
+    async def mark_read(self, session_id: str) -> bool:
+        """未读水位推进到当前 updated_at（前端打开会话时调用，消除红点）。
+
+        单条 UPDATE 原子取 updated_at，避免与并发到达的消息竞态；
+        last_read_at < updated_at 才写，已读时是 no-op。返回是否有实际推进。
+        """
+        cursor = await self._db.execute(
+            "UPDATE sessions SET last_read_at = updated_at WHERE id = ? AND last_read_at < updated_at",
+            (session_id,),
+        )
+        await self._db.commit()
+        return bool(cursor.rowcount)
 
     async def delete(self, session_id: str) -> bool:
         async with self._db.execute("SELECT id FROM sessions WHERE id = ?", (session_id,)) as cursor:
@@ -941,7 +981,7 @@ class SessionStore:
         async with self._db.execute(
             "SELECT id, title, model, created_at, updated_at, COALESCE(source, 'web') as source, COALESCE(mode, '') as mode, "
             "(SELECT substr(m.content, 1, 80) FROM messages m WHERE m.session_id = sessions.id AND m.role = 'user' ORDER BY m.id LIMIT 1) as first_query, "
-            "COALESCE(pinned_at, 0) as pinned_at "
+            "COALESCE(pinned_at, 0) as pinned_at, COALESCE(last_read_at, 0) as last_read_at "
             f"FROM sessions{where_sql} ORDER BY updated_at DESC LIMIT ? OFFSET ?",
             tuple(params),
         ) as cursor:
@@ -958,6 +998,7 @@ class SessionStore:
                         mode=row[6] if len(row) > 6 else "",
                         snippet=snippet,
                         pinned_at=row[8] if len(row) > 8 else 0.0,
+                        last_read_at=row[9] if len(row) > 9 else 0.0,
                     )
                 )
         # Attach total as attribute for callers that need it
@@ -1073,16 +1114,17 @@ class SessionStore:
         sessions: dict[str, Session] = {}
         # 先搜标题
         async with self._db.execute(
-            "SELECT id, title, model, created_at, updated_at, COALESCE(mode, '') FROM sessions WHERE title LIKE ? ORDER BY updated_at DESC LIMIT ?",
+            "SELECT id, title, model, created_at, updated_at, COALESCE(mode, ''), COALESCE(last_read_at, 0) FROM sessions WHERE title LIKE ? ORDER BY updated_at DESC LIMIT ?",
             (q, limit),
         ) as cursor:
             async for row in cursor:
                 sessions[row[0]] = Session(
-                    id=row[0], title=row[1], model=row[2], created_at=row[3], updated_at=row[4], mode=row[5]
+                    id=row[0], title=row[1], model=row[2], created_at=row[3], updated_at=row[4], mode=row[5],
+                    last_read_at=row[6],
                 )
         # 再搜消息内容，找到对应的 session
         async with self._db.execute(
-            """SELECT s.id, s.title, s.model, s.created_at, s.updated_at, m.content, COALESCE(s.mode, '')
+            """SELECT s.id, s.title, s.model, s.created_at, s.updated_at, m.content, COALESCE(s.mode, ''), COALESCE(s.last_read_at, 0)
                FROM sessions s
                JOIN messages m ON m.session_id = s.id
                WHERE m.content LIKE ? AND m.role IN ('user', 'assistant')
@@ -1113,6 +1155,7 @@ class SessionStore:
                         updated_at=row[4],
                         snippet=snippet,
                         mode=row[6],
+                        last_read_at=row[7],
                     )
                 elif snippet and not sessions[sid].snippet:
                     sessions[sid].snippet = snippet

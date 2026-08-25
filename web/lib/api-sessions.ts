@@ -13,6 +13,7 @@ export interface SessionInfo {
   source?: string;
   mode?: string;
   pinned_at?: number;
+  last_read_at?: number;
 }
 
 export interface SessionDetail {
@@ -94,6 +95,17 @@ export async function fetchSessions(limit = 50, offset = 0, q?: string, source?:
   const cacheKey = makeListKey({ limit, offset, q, source, mode, hideHeartbeat, hideScheduled, titlePrefixes });
   writeSessionList(cacheKey, sessions).catch(() => {});
   return sessions;
+}
+
+/** 标记会话已读：未读水位推进到 updated_at（消除红点）。返回是否有实际推进。 */
+export async function markSessionRead(id: string): Promise<boolean> {
+  const res = await fetch(`${API_URL}/sessions/${id}/read`, {
+    method: "POST",
+    headers: headers(),
+  });
+  if (!res.ok) throw new Error("Failed to mark session read");
+  const data = await res.json();
+  return !!data.advanced;
 }
 
 export async function renameSession(id: string, title: string): Promise<void> {
