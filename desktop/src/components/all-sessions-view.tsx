@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { format } from "date-fns";
 import { zhCN } from "date-fns/locale";
-import { SessionInfo, fetchSessions, renameSession, deleteSession, cleanupTrivialSessions, fetchModes, pinSession, unpinSession, type ModeEntry } from "@/lib/api";
+import { SessionInfo, fetchSessions, fetchSession, renameSession, deleteSession, cleanupTrivialSessions, fetchModes, pinSession, unpinSession, type ModeEntry } from "@/lib/api";
 import { hasUnread } from "@ethan/shared/lib/unread";
 import { UnreadDot } from "@ethan/shared/components/unread-dot";
 import { Loader2, Search, Calendar, MessageSquare, ChevronLeft, ChevronRight, Pencil, Trash2, Check, X, Eraser, Pin, PinOff } from "lucide-react";
@@ -10,6 +10,10 @@ import { Button } from "@ethan/shared/ui/button";
 import { Badge } from "@ethan/shared/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@ethan/shared/ui/select";
 import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from "@ethan/shared/ui/sheet";
+import { MessageList } from "./chat/message-list";
+import { mapDetailMessages } from "./chat/chat-helpers";
+import type { Message } from "@ethan/shared/chat/types";
 
 
 // 转义正则元字符，避免用户输入 ( [ * \ 等导致 new RegExp 抛 SyntaxError
@@ -49,6 +53,10 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
   const [filterHasImages, setFilterHasImages] = useState(false);
   const [cleanupLoading, setCleanupLoading] = useState(false);
   const [cleanupMsg, setCleanupMsg] = useState("");
+  const [previewSessionId, setPreviewSessionId] = useState<string | null>(null);
+  const [previewMessages, setPreviewMessages] = useState<Message[]>([]);
+  const [previewTitle, setPreviewTitle] = useState("");
+  const [previewLoading, setPreviewLoading] = useState(false);
   const limit = 21;
 
   useEffect(() => {
@@ -129,6 +137,22 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
       setSessions((prev) => prev.map((s) => s.id === id ? { ...s, pinned_at: Date.now() / 1000 } : s));
     }
     window.dispatchEvent(new CustomEvent("sessions:refresh"));
+  };
+
+  const handlePreviewSession = async (id: string) => {
+    setPreviewSessionId(id);
+    setPreviewLoading(true);
+    setPreviewMessages([]);
+    try {
+      const detail = await fetchSession(id);
+      setPreviewTitle(detail.title || "");
+      setPreviewMessages(mapDetailMessages(detail));
+    } catch {
+      onSelectSession(id);
+      setPreviewSessionId(null);
+    } finally {
+      setPreviewLoading(false);
+    }
   };
 
   const doDelete = async () => {
@@ -311,7 +335,7 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
               return (
                 <div
                   key={session.id}
-                  onClick={() => onSelectSession(session.id)}
+                  onClick={() => handlePreviewSession(session.id)}
                   className="group relative p-4 rounded-2xl border border-border bg-card hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5 hover:-translate-y-0.5 transition-all duration-200 cursor-pointer flex flex-col min-h-[112px]"
                 >
                   {hasUnread(session) && (
@@ -429,6 +453,34 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
           );
         })()}
       </div>
+
+      <Sheet open={previewSessionId != null} onOpenChange={(open) => {
+        if (!open) { setPreviewSessionId(null); setPreviewMessages([]); }
+      }}>
+        <SheetContent side="right" className="sm:!max-w-none w-[820px] max-w-[90vw] p-0 flex flex-col">
+          <SheetHeader className="px-4 pt-4 pb-2 border-b shrink-0">
+            <SheetTitle className="line-clamp-1">{previewTitle || "对话预览"}</SheetTitle>
+          </SheetHeader>
+          <div className="flex-1 min-h-0 relative">
+            {previewLoading ? (
+              <div className="flex items-center justify-center h-full">
+                <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              </div>
+            ) : (
+              <MessageList messages={previewMessages} streaming={false} sessionId={previewSessionId} />
+            )}
+          </div>
+          <SheetFooter className="px-4 py-3 border-t shrink-0">
+            <Button className="w-full" onClick={() => {
+              const id = previewSessionId;
+              setPreviewSessionId(null);
+              if (id) onSelectSession(id);
+            }}>
+              进入对话
+            </Button>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

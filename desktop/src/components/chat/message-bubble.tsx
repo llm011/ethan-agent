@@ -165,7 +165,7 @@ function InjectBox({ onInject }: { onInject: (content: string) => Promise<{ ok: 
           <button
             onClick={() => { setOpen(false); setText(""); setStatus(null); }}
             className="text-xs px-2 py-0.5 rounded text-muted-foreground hover:bg-muted transition-colors"
-            disabled={submitting}
+            disabled={!text.trim()}
           >
             收起
           </button>
