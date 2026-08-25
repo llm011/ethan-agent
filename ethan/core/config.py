@@ -31,6 +31,7 @@ class NetworkConfig(BaseModel):
     base_url: str = ""  # 服务端外部可达地址（如 http://localhost:8900），用于拼接 assets URL；空=自动推断
     auth_token: str = ""  # Web UI 浏览器登录 token（default profile 的 web_token）
     api_keys: list[str] = Field(default_factory=list)  # /v1/chat/completions API keys（default profile）
+    mcp_api_key: str = ""  # MCP Server 端点鉴权 key（豆包等外部 MCP 客户端连接时使用）
 
 
 class WeChatConfig(BaseModel):

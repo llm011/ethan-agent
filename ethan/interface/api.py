@@ -40,6 +40,7 @@ from ethan.interface.routers import (
     ui_resources,
     wait_for_user,
 )
+from ethan.interface.routers.mcp_server import get_mcp_app as _get_mcp_app
 from ethan.memory.api_keys import APIKeyStore
 
 # 飞书接入走 WebSocket 长连接（lark_events.py，由 lifespan 里 start_lark_listener 启动），
@@ -237,6 +238,9 @@ app.include_router(files.router, prefix="/api")  # /api/files — deliver_file �
 app.include_router(browser_ws_router)  # /ws/browser, WebSocket, no prefix
 app.include_router(desktop_ws_router)  # /ws/desktop, WebSocket, no prefix
 app.include_router(browser_http_router, prefix="/api")  # /api/browser/shot/{name}
+
+# MCP Server endpoint: 豆包等外部 MCP 客户端通过 http://localhost:8900/mcp 连接
+app.mount("/mcp", _get_mcp_app())
 
 if _WEB_DIST.exists():
     app.mount("/_next", StaticFiles(directory=str(_WEB_DIST / "_next")), name="next-static")
