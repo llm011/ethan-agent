@@ -15,7 +15,13 @@ from __future__ import annotations
 import logging
 from typing import AsyncIterator
 
-from ethan.providers.base import BaseProvider, Message, StreamChunk, ToolDefinition
+from ethan.providers.base import (
+    BaseProvider,
+    Message,
+    MidstreamBreakError,
+    StreamChunk,
+    ToolDefinition,
+)
 from ethan.providers.circuit_breaker import get_circuit_breaker
 
 logger = logging.getLogger(__name__)
@@ -23,6 +29,10 @@ logger = logging.getLogger(__name__)
 
 def _is_retriable(e: Exception) -> bool:
     """Return True if the exception represents a transient network/infra failure."""
+    # 流式中途断连重试耗尽（openai_compat 包装）：对当前 provider 已重试多次，
+    # 但换下一个 provider 仍值得一试。
+    if isinstance(e, MidstreamBreakError):
+        return True
     try:
         import httpx
         if isinstance(e, (httpx.ConnectError, httpx.TimeoutException,

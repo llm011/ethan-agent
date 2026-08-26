@@ -258,6 +258,7 @@ providers:
 - 流式结束条件：`finish_reason == "tool_calls"` 或 `"stop"`
 - tool result 的 role 就是 `"tool"`，不需要包在 user 消息里
 - reasoning 模型（如 deepseek-reasoner）把思考放在 `delta.reasoning_content`（部分中转放在 `model_extra` 里），Provider 会读出并收进 `StreamChunk.reasoning`，与正文 `content` 分流
+- 流式中途断连（`peer closed connection` / `incomplete chunked read` 等，多见于中转不稳）：已产出内容时以 `truncated` 收尾、由 Agent 层自动续接；未产出内容时退避重试最多 2 次，仍失败抛 `MidstreamBreakError`（用户提示为"重试失败、重新发送"，而非"发「继续」"）。断连关键词（`MIDSTREAM_BREAK_KEYWORDS`）由 provider 层与 interface 层共用，定义在 `ethan/providers/base.py`
 
 ---
 

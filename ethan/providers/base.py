@@ -2,6 +2,26 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Optional
 
+# 流式响应中途断连的错误消息特征（TLS 记录层中断 / 连接被重置 / 中转提前断开等）。
+# provider 层（salvage / 重试判断，见 openai_compat.stream_chat）与 interface 层
+# （错误文案分类，见 routers/helpers._friendly_error）共用这一份常量，避免两份
+# 独立列表漂移（历史 bug：broken pipe 只加了一侧，导致文案分类漏判）。
+MIDSTREAM_BREAK_KEYWORDS: tuple[str, ...] = (
+    "record layer failure", "_ssl.c", "ssl", "sslerror",
+    "connection reset", "peer closed", "unexpected eof",
+    "broken pipe", "incomplete chunked", "incompleteread",
+    "chunkedencodingerror", "remoteprotocolerror", "stream ended",
+)
+
+
+class MidstreamBreakError(Exception):
+    """流式中途断连且 provider 层自动重试已耗尽（全程未产出任何内容）。
+
+    由 openai_compat.stream_chat 在 salvage / 重试都失败后抛出（原始错误挂在
+    __cause__）。上层据此区分两种用户提示：
+    「有产出 → 已保存，发「继续」补全」与「无产出 → 重试失败，重新发送」。
+    """
+
 
 @dataclass
 class ToolDefinition:
@@ -52,7 +72,7 @@ class StreamChunk:
     is_final: bool = False
     usage: Optional[dict] = None
     reasoning: str = ""  # 模型思考内容（reasoning_content / thinking）；与 content 分流，不当正文展示
-    truncated: bool = False  # SSL 中途断连导致输出被截断，上层可据此决定是否续接
+    truncated: bool = False  # 中途断连导致输出被截断，上层可据此决定是否续接
 
 
 @dataclass
