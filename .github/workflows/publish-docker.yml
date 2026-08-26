@@ -6,6 +6,14 @@ name: Publish Docker Images
 #
 # 首次发布后如拉取报 403，到 Packages → ethan-agent → Package settings
 # 把可见性改为 public（只需操作一次）。
+#
+# 多平台构建采用 docker 官方「原生 runner + digest 分发」模式（而非 qemu 模拟）：
+#   build(matrix)  各平台在原生 runner 上构建，push-by-digest 推匿名 manifest
+#   merge          下载 digest，imagetools create 合并成 manifest list 并打 tag
+# 原因：qemu 用户态模拟 arm64 跑 Node 20（pnpm install / next build）会触发
+# Illegal instruction（exit 132，V8 JIT 代码命中 qemu 指令模拟缺陷），
+# v0.5.182 挂 6h、v0.5.183 直接失败均源于此。原生 arm64 runner（公开仓库免费）
+# 构建更快且无模拟层问题。
 
 on:
   push:
@@ -17,7 +25,69 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  build-and-push:
+  build:
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare platform pair (linux/arm64 -> linux-arm64)
+        run: |
+          platform=${{ matrix.platform }}
+          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./deploy/Dockerfile
+          platforms: ${{ matrix.platform }}
+          # 匿名 digest manifest，等 merge job 统一打 tag
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=build-${{ env.PLATFORM_PAIR }}
+          cache-to: type=gha,mode=max,scope=build-${{ env.PLATFORM_PAIR }}
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ env.PLATFORM_PAIR }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write   # 建 GitHub Release 需要 write（read 会导致 releases API 403）
@@ -27,9 +97,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # QEMU + buildx：同时产出 linux/amd64 与 linux/arm64（Apple Silicon / ARM NAS 原生运行）
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -50,17 +123,24 @@ jobs:
             type=raw,value=latest
             type=semver,pattern={{version}}
 
-      - name: Build and push image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./deploy/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          # meta.outputs.tags 多行且自带完整镜像前缀（ghcr.io/...:latest、ghcr.io/...:0.5.x），
+          # 逐行拼 -t，避免整体被当成一个参数
+          TAG_ARGS=""
+          for t in ${{ steps.meta.outputs.tags }}; do
+            TAG_ARGS="$TAG_ARGS -t $t"
+          done
+          # shellcheck disable=SC2086
+          docker buildx imagetools create $TAG_ARGS \
+            $(printf "$IMAGE@sha256:%s " *)
+
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect \
+            "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}"
 
       # 创建/更新该 tag 的 GitHub Release：--generate-notes 自动生成 changelog，
       # 下方 notes 追加 Docker 部署说明（镜像地址 + compose 一键部署）。
