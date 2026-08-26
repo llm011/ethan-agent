@@ -41,17 +41,20 @@ def _friendly_error(e: Exception, agent) -> str:
             f"当前模型 {model_id} 的 API 不支持当前所在地区（Error 400 FAILED_PRECONDITION）。"
             "请在设置页切换到其他模型（如 Claude / OpenAI），或为服务端配置代理后重试。"
         )
-    # 网络层 fetch failed（多见于第三方中转服务挂了）
-    if "fetch failed" in lower or "connection" in lower or "timeout" in lower:
-        return f"请求上游服务失败（可能中转服务不可达）：{msg[:120]}。建议在设置页切换 model 重试。"
-    # 流式输出中途断连（上游/中转在生成过程中关闭了连接）
+    # 流式输出中途断连（上游/中转在生成过程中关闭了连接）。
+    # 必须放在通用 connection 判断之前：这类错误消息里通常也含 "connection"
+    # （如 "peer closed connection without sending complete message body"），
+    # 先走通用分支会被误判成"中转不可达"，误导用户去切换模型而非发「继续」补全。
     if any(k in lower for k in ("unexpected eof", "peer closed", "incomplete chunked",
                                 "remoteprotocolerror", "connection reset",
                                 "stream ended", "incompleteread", "chunkedencodingerror")):
-        return "上游连接在生成中途断开（多见于中转服务不稳）。以上内容已保存，可直接发「继续」补全，或在设置页切换 model 重试。"
+        return "上游连接在生成中途断开（多见于中转服务不稳）。已生成内容已保存，可直接发「继续」补全，或在设置页切换 model 重试。"
     # TLS 记录层失败：Docker 网络抖动 / 中转服务 TLS 中断，特征是 _ssl.c 行号
     if "record layer failure" in lower or "ssl" in lower and ("_ssl.c" in lower or "sslerror" in lower):
-        return "上游 TLS 连接中断（record layer failure，多见于容器网络抖动或中转服务不稳）。以上内容已保存，可直接发「继续」补全，或在设置页切换 model 重试。"
+        return "上游 TLS 连接中断（record layer failure，多见于容器网络抖动或中转服务不稳）。已生成内容已保存，可直接发「继续」补全，或在设置页切换 model 重试。"
+    # 网络层 fetch failed（多见于第三方中转服务挂了）——建立连接就失败，无任何内容产出
+    if "fetch failed" in lower or "connection" in lower or "timeout" in lower:
+        return f"请求上游服务失败（可能中转服务不可达）：{msg[:120]}。建议在设置页切换 model 重试。"
     # SQLite database locked — 瞬态并发冲突，任务本身已完成，不应暴露给用户
     if "database is locked" in lower:
         return ""

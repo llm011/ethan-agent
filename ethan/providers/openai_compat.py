@@ -17,6 +17,7 @@ from ethan.providers.base import (
 )
 
 _CHUNK_TIMEOUT = 120  # 单个 chunk 超时（秒）
+_MAX_STREAM_BREAK_RETRIES = 2  # 流式中途断连且未产出内容时，最多重试次数（共 3 次尝试）
 
 
 class OpenAICompatProvider(BaseProvider):
@@ -457,8 +458,11 @@ class OpenAICompatProvider(BaseProvider):
             raise
 
         aiter = resp_iter.__aiter__()
-        _ssl_retried = False  # 流式中途 SSL 断连只重试一次
-        _ssl_salvaged = False  # 标记是否因 SSL 断连而 salvage 退出
+        _break_retries = 0  # 中途断连（未产出内容时）已重试次数
+        _salvaged = False  # 标记是否因中途断连而 salvage 退出
+        # 是否已向调用方产出过正文/思考。不能用 content_buf 判断：它只是 DSML 检测
+        # 缓冲，正常文本每次 yield 后即清空，多数时刻为空。
+        _produced_any = False
         while True:
             try:
                 chunk = await asyncio.wait_for(aiter.__anext__(), timeout=_CHUNK_TIMEOUT)
@@ -475,9 +479,10 @@ class OpenAICompatProvider(BaseProvider):
                     "请稍后重试，或检查网络状况。"
                 )
             except Exception as e:
-                # 流式读取中途 TLS 记录层失败 / 连接被重置（Docker 网络抖动、中转服务不稳）。
+                # 流式读取中途 TLS 记录层失败 / 连接被重置 / 中转提前断开
+                # （如 "peer closed connection without sending complete message body"）。
                 # 已产出部分内容时直接当作正常结束，保留已生成内容避免整段丢失；
-                # 未产出任何内容时重试一次。
+                # 未产出任何内容时带退避重试。
                 _msg = str(e).lower()
                 is_midstream_break = any(k in _msg for k in (
                     "record layer failure", "_ssl.c", "ssl", "connection reset",
@@ -489,22 +494,29 @@ class OpenAICompatProvider(BaseProvider):
                     await resp_iter.aclose()
                 except Exception:
                     pass
-                # 已有内容或 tool_calls → 优雅收尾，不丢用户已等到的输出
-                if content_buf or final_tool_calls or any(tc.get("args_raw") for tc in tool_calls_acc.values()):
+                # 已向调用方产出过内容或 tool_calls → 优雅收尾（标记 truncated，
+                # 上层 agent 会自动续接），既不丢用户已等到的输出，也避免整段重发
+                # 造成内容重复。
+                if _produced_any or content_buf or final_tool_calls or any(
+                    tc.get("args_raw") for tc in tool_calls_acc.values()
+                ):
                     import logging as _log
                     _log.getLogger("ethan.providers.openai_compat").warning(
-                        "[stream_chat] midstream SSL break, salvaging partial output: %s", e
+                        "[stream_chat] midstream break, salvaging partial output: %s", e
                     )
-                    _ssl_salvaged = True
+                    _salvaged = True
                     break
-                # 无内容且未重试过 → 重新建连重试一次
-                if _ssl_retried:
+                # 未产出任何内容 → 退避后重建连接重试（中转抖动多为瞬态，立即重试
+                # 一次往往不够）
+                if _break_retries >= _MAX_STREAM_BREAK_RETRIES:
                     raise
-                _ssl_retried = True
+                _break_retries += 1
                 import logging as _log
                 _log.getLogger("ethan.providers.openai_compat").warning(
-                    "[stream_chat] midstream SSL break with no output, retrying once: %s", e
+                    "[stream_chat] midstream break with no output, retry %d/%d: %s",
+                    _break_retries, _MAX_STREAM_BREAK_RETRIES, e
                 )
+                await asyncio.sleep(0.6 * _break_retries)
                 resp_iter = await self._client.chat.completions.create(**kwargs)  # type: ignore
                 aiter = resp_iter.__aiter__()
                 continue
@@ -532,9 +544,11 @@ class OpenAICompatProvider(BaseProvider):
                 me = getattr(delta, "model_extra", None) or {}
                 rc = me.get("reasoning_content")
             if rc:
+                _produced_any = True
                 yield StreamChunk(content="", reasoning=rc)
 
             if delta.content:
+                _produced_any = True
                 content_buf += delta.content
                 # DSML 标记开头特征：一旦检测到就持续缓冲直到流结束或 finish
                 if self._contains_dsml(content_buf):
@@ -603,8 +617,8 @@ class OpenAICompatProvider(BaseProvider):
                 final_tool_calls = tool_calls  # 保存：若后续有独立 usage chunk，其 final yield 需要带上
                 yield StreamChunk(content="", tool_calls=tool_calls, is_final=is_final_now, usage=stream_usage if is_final_now else None)
 
-        # SSL 中途断连 salvage：flush 剩余缓冲并标记 truncated，上层 agent 据此自动续接
-        if _ssl_salvaged:
+        # 中途断连 salvage：flush 剩余缓冲并标记 truncated，上层 agent 据此自动续接
+        if _salvaged:
             if content_buf:
                 yield StreamChunk(content=content_buf)
             yield StreamChunk(content="", is_final=True, truncated=True)
