@@ -125,13 +125,16 @@ jobs:
 
       - name: Create manifest list and push
         working-directory: /tmp/digests
+        env:
+          # tags 是多行输出（每行一个完整 tag），必须经 env 传入、运行时按 IFS
+          # 分词。不能用 ${{ }} 直接内联进脚本源码：换行会落在 for 词表中间，
+          # bash 词表内不允许裸换行，v0.5.187 的 merge job 即因此 syntax error。
+          TAGS: ${{ steps.meta.outputs.tags }}
         run: |
           IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
-          # meta.outputs.tags 多行且自带完整镜像前缀（ghcr.io/...:latest、ghcr.io/...:0.5.x），
-          # 逐行拼 -t，避免整体被当成一个参数
           TAG_ARGS=""
-          for t in ${{ steps.meta.outputs.tags }}; do
-            TAG_ARGS="$TAG_ARGS -t $t"
+          for t in $TAGS; do
+            [ -n "$t" ] && TAG_ARGS="$TAG_ARGS -t $t"
           done
           # shellcheck disable=SC2086
           docker buildx imagetools create $TAG_ARGS \
