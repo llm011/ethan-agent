@@ -351,9 +351,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               <SelectContent className="min-w-[280px] max-h-[50vh] overflow-y-auto">
                 {models.map((m) => {
                   const displayName = m.alias?.length ? m.alias[0] : (m.description || m.id);
-                  const isSelected = m.id === selectedModel;
                   return (
-                    <SelectItem key={m.id} value={m.id} className={`text-xs ${isSelected ? "bg-accent text-accent-foreground font-medium" : ""}`}>
+                    <SelectItem key={m.id} value={m.id} className="text-xs">
                       <span className="flex items-center gap-2 w-full">
                         <span className="truncate">{displayName}</span>
                         {m.provider && <span className="text-muted-foreground/60 text-[10px] ml-auto shrink-0">{m.provider}</span>}
