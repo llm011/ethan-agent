@@ -28,7 +28,7 @@ const OFF_STYLE =
 interface ChatInputProps {
   streaming: boolean;
   stopping?: boolean;
-  models: { id: string; description: string }[];
+  models: { id: string; description: string; provider?: string; alias?: string[] }[];
   selectedModel: string;
   pendingFiles: PendingFile[];
   quote: Quote | null;
@@ -331,13 +331,21 @@ export function ChatInput({
             </button>
             <input ref={fileRef} type="file" className="hidden" multiple accept="*/*" onChange={handleFileUpload} />
             <Select value={selectedModel} onValueChange={(v) => v && onModelChange(v)} disabled={streaming}>
-              <SelectTrigger className="h-7 px-2.5 text-xs bg-transparent border-0 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg shadow-none focus:ring-0 focus:ring-offset-0 gap-1 w-auto max-w-[160px]">
+              <SelectTrigger className="h-7 px-2.5 text-xs bg-transparent border-0 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg shadow-none focus:ring-0 focus:ring-offset-0 gap-1 w-auto max-w-[200px]">
                 <SelectValue placeholder="模型" />
               </SelectTrigger>
-              <SelectContent>
-                {models.map((m) => (
-                  <SelectItem key={m.id} value={m.id} className="text-xs">{m.description || m.id}</SelectItem>
-                ))}
+              <SelectContent className="min-w-[280px] max-h-[50vh] overflow-y-auto">
+                {models.map((m) => {
+                  const displayName = m.alias?.length ? m.alias[0] : (m.description || m.id);
+                  return (
+                    <SelectItem key={m.id} value={m.id} className="text-xs">
+                      <span className="flex items-center gap-2 w-full">
+                        <span className="truncate">{displayName}</span>
+                        {m.provider && <span className="text-muted-foreground/60 text-[10px] ml-auto shrink-0">{m.provider}</span>}
+                      </span>
+                    </SelectItem>
+                  );
+                })}
               </SelectContent>
             </Select>
             {/* 对话模式下拉：由 /modes 表驱动（含默认）；选中即切换，已有会话立即落库 */}
