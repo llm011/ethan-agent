@@ -25,7 +25,12 @@ COPY packages/shared/ ./packages/shared/
 ENV NEXT_TELEMETRY_DISABLED=1
 # export 模式：产出纯静态文件，由 FastAPI 直接 serve
 ENV NEXT_OUTPUT=export
-RUN cd web && pnpm run build
+# pnpm 11 的 run/exec 前依赖状态检查（runDepsStatusCheck）在 workspace 子目录下
+# 会把子目录当作独立 root 解析（对比空 root importer），误判依赖过期并隐式触发
+# pnpm install，进而 ERR_PNPM_WORKSPACE_PKG_NOT_FOUND（web 子目录解析不到
+# @ethan/shared）。依赖已由上一层显式装好且 lockfile 同步，禁用该检查。
+# --config.verify-deps-before-run=false 已本地验证可跳过检查（env 形式无效）。
+RUN cd web && pnpm --config.verify-deps-before-run=false run build
 
 # ── Stage 2: Python 运行时 ────────────────────────────────────
 FROM python:3.12-slim
