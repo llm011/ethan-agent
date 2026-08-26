@@ -183,6 +183,23 @@ def _is_allowed_echo_tail(cmd: str) -> bool:
     return bool(re.search(r'&&\s*echo\s+[A-Za-z_][A-Za-z0-9_]*\s*$', cmd))
 
 
+def _is_rm_tmp_only(command: str) -> bool:
+    """rm 命令的所有操作目标是否全部位于 /tmp/ 下。
+
+    只检查 rm 开头的命令；如果命令有管道/分号组合，保守返回 False。
+    """
+    cmd = (command or "").strip()
+    if not re.match(r'\brm\b', cmd):
+        return False
+    if re.search(r'[;|&`]|\$\(', cmd):
+        return False
+    parts = cmd.split()
+    paths = [p for p in parts[1:] if not p.startswith("-")]
+    if not paths:
+        return False
+    return all(p.startswith("/tmp/") or (p == "/tmp") for p in paths)
+
+
 def _is_safe_readonly(command: str) -> bool:
     """保守判定 cmd 是否纯读、零副作用。命中可免 consent 弹窗。"""
     cmd = (command or "").strip()
@@ -303,19 +320,27 @@ class ShellTool(BaseTool):
     def consent_always(self, command: str = "", **kwargs) -> bool:
         # 高危命令始终重新询问，即使本会话已授权过 shell，也不计入会话放行。
         # 这是普通模式/无人值守模式的口径（破坏性 + 高危非破坏性 + 密钥泄露面）。
+        # 例外：rm 操作目标全部在 /tmp/ 下时放行，不反复弹窗。
         cmd = command or ""
-        return (
-            bool(_DANGEROUS_RE.search(cmd))
-            or _is_env_dump(cmd)
-            or bool(_detect_secret_env_refs(cmd))
-        )
+        if _DANGEROUS_RE.search(cmd):
+            if _is_rm_tmp_only(cmd):
+                return False
+            return True
+        return _is_env_dump(cmd) or bool(_detect_secret_env_refs(cmd))
 
     def consent_destructive(self, command: str = "", **kwargs) -> bool:
         # 破坏性命令（rm -rf / 格式化 / 写设备 / fork 炸弹 / 破坏性 git）：
         # 即使超级权限（auto_consent）模式也强制弹窗。其余高危（sudo / 管道执行 /
         # eval / chmod 777 / env dump / secret 引用）在超级模式下自动放行——
         # 见 agent loop 对 auto_approve 的处理。
-        return bool(_DESTRUCTIVE_RE.search(command or ""))
+        #
+        # 例外：rm 操作目标全部在 /tmp/ 下时视为安全（临时文件清理），不弹窗。
+        cmd = command or ""
+        if not _DESTRUCTIVE_RE.search(cmd):
+            return False
+        if _is_rm_tmp_only(cmd):
+            return False
+        return True
     parameters = {
         "type": "object",
         "properties": {
