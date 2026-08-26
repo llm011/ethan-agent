@@ -215,6 +215,14 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
                 await store.create_with_id(session_id, _gc().defaults.model,
                                            source="schedule", mode="")
 
+            # 防护：确保 session 标题保持 [定时] 前缀（防止被 regen-title 覆盖）
+            if existing and not (existing.title or "").startswith("[定时]"):
+                _expected_title = f"[定时] {title}" if title else "[定时] 未命名任务"
+                try:
+                    await store.update_title(session_id, _expected_title)
+                except Exception:
+                    pass
+
             # session 轮转：当天执行次数超阈值则新建对话，避免高频任务会话无限膨胀
             _rotate_threshold = _gc().defaults.schedule_session_rotate_threshold
             if _rotate_threshold > 0:
@@ -357,10 +365,8 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
                     ctx = json.loads(channel_context)
                     chat_id = ctx.get("chat_id", "")
                     if chat_id:
-                        from ethan.interface.lark import _get_lark_client, _send_lark_reply
-                        client = _get_lark_client()
-                        if client:
-                            await _send_lark_reply(client, chat_id, formatted)
+                        from ethan.interface.lark_send import send_lark_notification
+                        await send_lark_notification(chat_id, formatted)
                 except Exception as e3:
                     _logger.error("Schedule lark reply error: %s", e3)
 
