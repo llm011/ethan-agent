@@ -22,7 +22,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # pnpm@11 要求 node >=22.13，与 deploy/Dockerfile 的 node:22-alpine 保持一致
+          node-version: '22'
 
       - name: Install pnpm
         # 固定版本：pnpm 12.0.0 曾短暂占据 latest 并默认启用 supply-chain 检查导致构建失败

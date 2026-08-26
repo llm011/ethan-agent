@@ -6,7 +6,9 @@
 # 启动：ethan setup 幂等初始化（无 TTY 时仅初始化目录/config）→ ethan serve
 
 # ── Stage 1: 构建 Web UI（静态导出） ──────────────────────────
-FROM node:20-alpine AS web-builder
+# node 22：pnpm 11 要求 node >=22.13（node 20 下 pnpm 直接 ERR_UNKNOWN_BUILTIN_MODULE），
+# 与本地开发环境（node 22+ + pnpm 11）保持一致。
+FROM node:22-alpine AS web-builder
 
 WORKDIR /build
 # Workspace 模式：根目录安装会自动链接 packages/shared → web/node_modules
