@@ -103,6 +103,9 @@ async def lifespan(app: FastAPI):
         ethan_logger.addHandler(handler)
     ethan_logger.propagate = False  # 已有自己的 handler，别再冒泡到 root 重复打印
 
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+
     if _lark_ready():
         # import lark_events 只顺带加载 lark_send/lark_stream——这俩的 lark_oapi 全是
         # 函数内 lazy import，所以这里 ~1.7s 而非 40s，不会让 restart 的端口探测超时。
