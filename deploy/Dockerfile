@@ -13,7 +13,10 @@ WORKDIR /build
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY web/package.json ./web/
 COPY packages/shared/package.json ./packages/shared/
-RUN npm install -g pnpm && pnpm install --frozen-lockfile --filter web... --filter "@ethan/shared"
+# 固定 pnpm 大版本：latest tag 不可控（pnpm 12.0.0 发布当天曾短暂成为 latest 并
+# 默认启用 supply-chain policy 检查，导致 web build 失败后被官方回滚）。
+# 升级 pnpm 时需同步验证 web build。
+RUN npm install -g pnpm@11.24.0 && pnpm install --frozen-lockfile --filter web... --filter "@ethan/shared"
 
 COPY web/ ./web/
 COPY packages/shared/ ./packages/shared/
