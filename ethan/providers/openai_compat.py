@@ -9,8 +9,10 @@ import httpx
 
 from ethan.core.config import ProviderConfig
 from ethan.providers.base import (
+    MIDSTREAM_BREAK_KEYWORDS,
     BaseProvider,
     Message,
+    MidstreamBreakError,
     StreamChunk,
     ToolCall,
     ToolDefinition,
@@ -483,11 +485,9 @@ class OpenAICompatProvider(BaseProvider):
                 # （如 "peer closed connection without sending complete message body"）。
                 # 已产出部分内容时直接当作正常结束，保留已生成内容避免整段丢失；
                 # 未产出任何内容时带退避重试。
+                # 关键词与 interface 层文案分类共用 MIDSTREAM_BREAK_KEYWORDS，防止漂移
                 _msg = str(e).lower()
-                is_midstream_break = any(k in _msg for k in (
-                    "record layer failure", "_ssl.c", "ssl", "connection reset",
-                    "peer closed", "unexpected eof", "broken pipe",
-                ))
+                is_midstream_break = any(k in _msg for k in MIDSTREAM_BREAK_KEYWORDS)
                 if not is_midstream_break:
                     raise
                 try:
@@ -509,7 +509,10 @@ class OpenAICompatProvider(BaseProvider):
                 # 未产出任何内容 → 退避后重建连接重试（中转抖动多为瞬态，立即重试
                 # 一次往往不够）
                 if _break_retries >= _MAX_STREAM_BREAK_RETRIES:
-                    raise
+                    raise MidstreamBreakError(
+                        "上游连接在流式响应中途断开，自动重试 "
+                        f"{_MAX_STREAM_BREAK_RETRIES} 次后仍失败（未产出任何内容）：{e}"
+                    ) from e
                 _break_retries += 1
                 import logging as _log
                 _log.getLogger("ethan.providers.openai_compat").warning(

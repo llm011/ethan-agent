@@ -6,7 +6,7 @@ import json
 import logging
 from typing import AsyncGenerator
 
-from ethan.providers.base import Message
+from ethan.providers.base import MIDSTREAM_BREAK_KEYWORDS, Message, MidstreamBreakError
 
 logger = logging.getLogger(__name__)
 
@@ -41,17 +41,18 @@ def _friendly_error(e: Exception, agent) -> str:
             f"当前模型 {model_id} 的 API 不支持当前所在地区（Error 400 FAILED_PRECONDITION）。"
             "请在设置页切换到其他模型（如 Claude / OpenAI），或为服务端配置代理后重试。"
         )
-    # 流式输出中途断连（上游/中转在生成过程中关闭了连接）。
+    # 中途断连且 provider 层自动重试已耗尽（全程未产出任何内容）→ 如实提示重试
+    # 失败。此时说"已生成内容已保存"是不实文案，用户发「继续」也接不上任何内容。
+    if isinstance(e, MidstreamBreakError):
+        return "上游连接中断且自动重试失败，本次未产出任何内容。可直接重新发送，或在设置页切换 model 重试。"
+    # 流式输出中途断连（上游/中转在生成过程中关闭了连接，含 TLS 记录层中断）。
     # 必须放在通用 connection 判断之前：这类错误消息里通常也含 "connection"
     # （如 "peer closed connection without sending complete message body"），
     # 先走通用分支会被误判成"中转不可达"，误导用户去切换模型而非发「继续」补全。
-    if any(k in lower for k in ("unexpected eof", "peer closed", "incomplete chunked",
-                                "remoteprotocolerror", "connection reset",
-                                "stream ended", "incompleteread", "chunkedencodingerror")):
-        return "上游连接在生成中途断开（多见于中转服务不稳）。已生成内容已保存，可直接发「继续」补全，或在设置页切换 model 重试。"
-    # TLS 记录层失败：Docker 网络抖动 / 中转服务 TLS 中断，特征是 _ssl.c 行号
-    if "record layer failure" in lower or "ssl" in lower and ("_ssl.c" in lower or "sslerror" in lower):
-        return "上游 TLS 连接中断（record layer failure，多见于容器网络抖动或中转服务不稳）。已生成内容已保存，可直接发「继续」补全，或在设置页切换 model 重试。"
+    # 关键词与 openai_compat 的 salvage/重试判断共用 MIDSTREAM_BREAK_KEYWORDS，
+    # 防止两份列表漂移（历史 bug：broken pipe 只加了一侧）。
+    if any(k in lower for k in MIDSTREAM_BREAK_KEYWORDS):
+        return "上游连接在生成中途断开（多见于中转服务不稳或网络抖动）。已生成内容已保存，可直接发「继续」补全，或在设置页切换 model 重试。"
     # 网络层 fetch failed（多见于第三方中转服务挂了）——建立连接就失败，无任何内容产出
     if "fetch failed" in lower or "connection" in lower or "timeout" in lower:
         return f"请求上游服务失败（可能中转服务不可达）：{msg[:120]}。建议在设置页切换 model 重试。"
