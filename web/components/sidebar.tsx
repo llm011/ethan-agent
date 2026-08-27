@@ -165,6 +165,13 @@ export function Sidebar() {
     if (!id) return;
     if (list.some((s) => s.id === id && hasUnread(s))) {
       markSessionRead(id).catch(() => {});
+      const patch = (prev: SessionInfo[]) =>
+        prev.map((s) => (s.id === id ? withReadMark(s) : s));
+      setSessions(patch);
+      setPinnedSessions(patch);
+      setScheduleGroupSessions(patch);
+      setHeartbeatGroupSessions(patch);
+      setExtensionSessions(patch);
     }
   };
 
