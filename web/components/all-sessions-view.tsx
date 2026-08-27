@@ -455,7 +455,7 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
       <Sheet open={previewSessionId != null} onOpenChange={(open) => {
         if (!open) { setPreviewSessionId(null); setPreviewMessages([]); }
       }}>
-        <SheetContent side="right" className="sm:!max-w-none w-[820px] max-w-[90vw] p-0 flex flex-col">
+        <SheetContent side="right" className="sm:!max-w-none w-[520px] max-w-[80vw] p-0 flex flex-col">
           <SheetHeader className="px-4 pt-4 pb-2 border-b shrink-0">
             <SheetTitle className="line-clamp-1">{previewTitle || "对话预览"}</SheetTitle>
           </SheetHeader>
