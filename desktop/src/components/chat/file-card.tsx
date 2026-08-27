@@ -247,7 +247,7 @@ function AudioFileCard({ card, sessionId }: { card: FileCard; sessionId?: string
   };
 
   return (
-    <div className="overflow-hidden rounded-lg border border-border/50 bg-muted/30 w-full max-w-[520px]">
+    <div className="overflow-hidden rounded-lg border border-border/50 bg-background w-full max-w-[520px]">
       <div className="flex items-center gap-3 px-4 pt-3">
         <span className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-primary/10 text-primary flex-shrink-0">
           <AudioLines className="w-5 h-5" />
