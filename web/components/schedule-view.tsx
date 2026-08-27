@@ -161,6 +161,7 @@ export function ScheduleView() {
     setJobs(prev => prev.filter(j => j.id !== id));
     try {
       await deleteSchedule(id);
+      await loadData();
     } catch (e) {
       console.error("Failed to delete schedule", e);
       await loadData();
@@ -482,8 +483,8 @@ export function ScheduleView() {
       <div className="flex-1 flex overflow-hidden">
         {/* 左侧：时间轴 */}
         <ScrollArea className="flex-1 p-6">
-          {/* load more：all 模式下往未来多取一天，放在顶部 */}
-          {viewMode === "all" && !loading && visibleJobs.length > 0 && (
+          {/* load more：all 模式下且有被截断的任务时才显示 */}
+          {viewMode === "all" && !loading && visibleJobs.length > 0 && visibleJobs.length < sceneJobs.length && (
             <div className="pb-3 text-center">
               <button
                 onClick={() => setFutureDays(d => d + 1)}
