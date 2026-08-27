@@ -337,6 +337,7 @@ class SessionStore:
             ("intermediate_blob_id", "INTEGER NOT NULL DEFAULT 0"),
             ("status", "TEXT NOT NULL DEFAULT 'completed'"),
             ("reasoning", "TEXT NOT NULL DEFAULT ''"),
+            ("model", "TEXT"),
         ]:
             try:
                 await self._db.execute(f"ALTER TABLE messages ADD COLUMN {col} {definition}")
@@ -561,7 +562,7 @@ class SessionStore:
         cards_json = json.dumps(msg.cards, ensure_ascii=False) if msg.cards else None
 
         cursor = await self._db.execute(
-            "INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui, images, matched_skills, ttfb_ms, total_ms, mcp_apps, cards, intermediate_blob_id, status, reasoning) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui, images, matched_skills, ttfb_ms, total_ms, mcp_apps, cards, intermediate_blob_id, status, reasoning, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 session_id,
                 msg.role,
@@ -583,6 +584,7 @@ class SessionStore:
                 0,
                 msg.status,
                 msg.reasoning or "",
+                msg.model or None,
             ),
         )
         await self._db.commit()
@@ -613,7 +615,7 @@ class SessionStore:
         cards_json = json.dumps(msg.cards, ensure_ascii=False) if msg.cards else None
 
         await self._db.execute(
-            "UPDATE messages SET content=?, tool_calls=?, usage=?, tool_steps=?, thought=?, a2ui=?, mcp_apps=?, matched_skills=?, ttfb_ms=?, total_ms=?, cards=?, created_at=?, status=?, reasoning=? "
+            "UPDATE messages SET content=?, tool_calls=?, usage=?, tool_steps=?, thought=?, a2ui=?, mcp_apps=?, matched_skills=?, ttfb_ms=?, total_ms=?, cards=?, created_at=?, status=?, reasoning=?, model=? "
             "WHERE id=? AND session_id=?",
             (
                 msg.content,
@@ -630,6 +632,7 @@ class SessionStore:
                 msg.created_at or time.time(),
                 msg.status,
                 msg.reasoning or "",
+                msg.model or None,
                 row_id,
                 session_id,
             ),
@@ -851,7 +854,7 @@ class SessionStore:
         ]
 
         async with self._db.execute(
-            "SELECT id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui, images, matched_skills, ttfb_ms, total_ms, mcp_apps, cards, intermediate_blob_id, status, reasoning FROM messages WHERE session_id = ? ORDER BY id",
+            "SELECT id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui, images, matched_skills, ttfb_ms, total_ms, mcp_apps, cards, intermediate_blob_id, status, reasoning, model FROM messages WHERE session_id = ? ORDER BY id",
             (session_id,),
         ) as cursor:
             async for r in cursor:
@@ -872,6 +875,7 @@ class SessionStore:
                 intermediate_blob_id = int(r[17] or 0) if len(r) > 17 and r[17] is not None else 0
                 _status = r[18] if len(r) > 18 and r[18] else "completed"
                 _reasoning = r[19] if len(r) > 19 and r[19] else ""
+                _model = r[20] if len(r) > 20 and r[20] else None
                 session.messages.append(
                     Message(
                         role=r[1],
@@ -894,6 +898,7 @@ class SessionStore:
                         cards=cards,
                         intermediate_blob_id=intermediate_blob_id,
                         status=_status,
+                        model=_model,
                     )
                 )
 
