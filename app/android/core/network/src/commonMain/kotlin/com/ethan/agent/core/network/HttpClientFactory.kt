@@ -57,7 +57,9 @@ object NetworkFactory {
                 // requestTimeout 限制整个请求（含流式 body）：流式场景必须禁用，否则
                 // 长生成会被 HttpRequestTimeoutException 中断。0 表示不超时。
                 requestTimeoutMillis = if (streaming) Long.MAX_VALUE else 120_000L
-                socketTimeoutMillis = 120_000
+                // 流式场景：工具执行可能长时间无输出（但后端有 15s SSE 心跳保活），
+                // 移动网络下心跳可能延迟，留 5 分钟余量避免误断。
+                socketTimeoutMillis = if (streaming) 300_000L else 120_000L
             }
 
             if (!streaming && isDebugBuild()) {

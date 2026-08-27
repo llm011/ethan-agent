@@ -30,6 +30,9 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 enum class ConnectionState { Idle, Streaming, Reconnecting, Disconnected }
 
+private const val MAX_AUTO_RECONNECT = 3
+private val RECONNECT_DELAYS_MS = longArrayOf(1_000, 3_000, 10_000)
+
 /** 待发送的图片：内存临时持有，发送后清空。不落 DB。 */
 data class PendingImage(
     val dataUrl: String,        // "data:image/png;base64,..." 用于预览
@@ -298,7 +301,11 @@ class ChatViewModel(
                     )
                     _state.update { it.copy(connectionState = ConnectionState.Idle) }
                 } catch (e: Exception) {
-                    _state.update { it.copy(isStreaming = false, connectionState = ConnectionState.Disconnected, error = repository.friendlyError(e)) }
+                    // SSE 断连后自动重连（指数退避），失败才显示横幅
+                    val reconnected = autoReconnect(sessionId, assistantIndex)
+                    if (!reconnected) {
+                        _state.update { it.copy(isStreaming = false, connectionState = ConnectionState.Disconnected, error = repository.friendlyError(e)) }
+                    }
                 }
             }
         }
@@ -349,7 +356,15 @@ class ChatViewModel(
                 )
                 _state.update { it.copy(connectionState = ConnectionState.Idle) }
             } catch (e: Exception) {
-                _state.update { it.copy(connectionState = ConnectionState.Disconnected, error = repository.friendlyError(e)) }
+                // 自动重连：仅当曾经收到过事件（说明 run 仍活跃）时尝试
+                if (gotAnyEvent) {
+                    val reconnected = autoReconnect(sessionId, assistantIndex)
+                    if (!reconnected) {
+                        _state.update { it.copy(connectionState = ConnectionState.Disconnected, error = repository.friendlyError(e)) }
+                    }
+                } else {
+                    _state.update { it.copy(connectionState = ConnectionState.Disconnected, error = repository.friendlyError(e)) }
+                }
             } finally {
                 // 仅当追加了新占位且没收到任何事件时才 drop，避免误删复用的旧气泡
                 if (!reuseLast && !gotAnyEvent) {
@@ -358,6 +373,35 @@ class ChatViewModel(
                 _state.update { it.copy(isResuming = false, isStreaming = false) }
             }
         }
+    }
+
+    /**
+     * 断连后自动重连（指数退避 1s/3s/10s）。
+     * 返回 true 表示成功接回流，false 表示全部重试失败或 run 已结束。
+     */
+    private suspend fun autoReconnect(sessionId: String, assistantIndex: Int): Boolean {
+        for (attempt in 0 until MAX_AUTO_RECONNECT) {
+            _state.update { it.copy(connectionState = ConnectionState.Reconnecting) }
+            kotlinx.coroutines.delay(RECONNECT_DELAYS_MS[attempt.coerceAtMost(RECONNECT_DELAYS_MS.lastIndex)])
+            try {
+                var gotEvent = false
+                collectSseStream(
+                    flow = repository.resumeStream(sessionId),
+                    assistantIndex = assistantIndex,
+                    onFirstEvent = { gotEvent = true },
+                )
+                // 204（无活跃 run）返回空流：run 已结束，不算重连成功
+                if (!gotEvent) {
+                    _state.update { it.copy(connectionState = ConnectionState.Idle) }
+                    return false
+                }
+                _state.update { it.copy(connectionState = ConnectionState.Idle) }
+                return true
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+            }
+        }
+        return false
     }
 
     /** 停止生成：先调后端 API，再取消本地 job */
