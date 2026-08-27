@@ -352,7 +352,7 @@ function ArgsPopover({ text, maxW = "max-w-[800px]" }: { text: string; maxW?: st
       </span>
       <button
         onClick={handleCopy}
-        className="ml-1 shrink-0 opacity-0 group-hover/args:opacity-100 transition-opacity text-muted-foreground/60 hover:text-foreground"
+        className="ml-1 shrink-0 text-muted-foreground/60 hover:text-foreground transition-colors"
         title="复制参数"
       >
         {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
@@ -369,7 +369,7 @@ function ArgsPopover({ text, maxW = "max-w-[800px]" }: { text: string; maxW?: st
         side="bottom"
         align="start"
         sideOffset={4}
-        className="max-w-[min(90vw,700px)] max-h-[200px] overflow-auto bg-popover text-popover-foreground shadow-md font-mono text-xs whitespace-pre-wrap break-all px-3 py-2 rounded-md border"
+        className="!max-w-[min(80vw,500px)] max-h-[200px] overflow-auto bg-popover text-popover-foreground shadow-md font-mono text-xs whitespace-pre-wrap break-words px-3 py-2 rounded-md border"
       >
         {text}
       </TooltipContent>
