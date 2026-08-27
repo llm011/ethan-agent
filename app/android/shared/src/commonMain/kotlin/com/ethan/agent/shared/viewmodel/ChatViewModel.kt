@@ -390,11 +390,15 @@ class ChatViewModel(
                     assistantIndex = assistantIndex,
                     onFirstEvent = { gotEvent = true },
                 )
-                // 204（无活跃 run）返回空流，不算成功重连但也不是错误
+                // 204（无活跃 run）返回空流：run 已结束，不算重连成功
+                if (!gotEvent) {
+                    _state.update { it.copy(connectionState = ConnectionState.Idle) }
+                    return false
+                }
                 _state.update { it.copy(connectionState = ConnectionState.Idle) }
                 return true
-            } catch (_: Exception) {
-                // 继续重试
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
             }
         }
         return false
