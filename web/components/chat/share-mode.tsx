@@ -95,6 +95,8 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
       else next.add(key);
       return next;
     });
+    setResultImage(null);
+    setSaveInfo(null);
   };
 
   const generate = async () => {
@@ -110,18 +112,22 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
         backgroundColor: "#ffffff",
       });
       setResultImage(dataUrl);
-      const filename = `ethan-share-${Date.now()}.png`;
-      const a = document.createElement("a");
-      a.href = dataUrl;
-      a.download = filename;
-      a.click();
-      setSaveInfo({ filename });
     } catch (err) {
       console.error("生成分享图片失败", err);
       alert("生成图片失败，请重试");
     } finally {
       setGenerating(false);
     }
+  };
+
+  const downloadImage = () => {
+    if (!resultImage) return;
+    const filename = `ethan-share-${Date.now()}.png`;
+    const a = document.createElement("a");
+    a.href = resultImage;
+    a.download = filename;
+    a.click();
+    setSaveInfo({ filename });
   };
 
   const copyImage = async () => {
@@ -415,12 +421,16 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
               <div className="flex items-center gap-1.5 text-red-600">
                 <AlertCircle className="h-3.5 w-3.5 shrink-0" />
                 <span>
-                  复制到剪贴板失败。浏览器可能限制了图片剪贴板权限，请使用「生成图片」直接下载。
+                  复制到剪贴板失败。浏览器可能限制了图片剪贴板权限，请使用「下载图片」直接下载。
                 </span>
               </div>
+            ) : resultImage ? (
+              <span className="text-muted-foreground">
+                图片已生成，可下载或复制到剪贴板。
+              </span>
             ) : (
               <span className="text-muted-foreground">
-                生成后图片会下载到浏览器默认下载目录。
+                生成后可下载图片或复制到剪贴板。
               </span>
             )}
           </div>
@@ -438,14 +448,23 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
                 {copied ? "已复制" : copyFailed ? "复制失败" : "复制图片"}
               </button>
             )}
-            <button
-              onClick={generate}
-              disabled={generating || selectedMessages.length === 0}
-              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
-            >
-              {generating && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-              {generating ? "生成中…" : "生成图片"}
-            </button>
+            {resultImage ? (
+              <button
+                onClick={downloadImage}
+                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90"
+              >
+                下载图片
+              </button>
+            ) : (
+              <button
+                onClick={generate}
+                disabled={generating || selectedMessages.length === 0}
+                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+              >
+                {generating && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                {generating ? "生成中…" : "生成图片"}
+              </button>
+            )}
           </div>
         </div>
       </div>
