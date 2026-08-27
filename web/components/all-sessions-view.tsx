@@ -459,7 +459,7 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
           <SheetHeader className="px-4 pt-4 pb-2 border-b shrink-0">
             <SheetTitle className="line-clamp-1">{previewTitle || "对话预览"}</SheetTitle>
           </SheetHeader>
-          <div className="flex-1 min-h-0 relative">
+          <div className="flex flex-col flex-1 min-h-0 relative">
             {previewLoading ? (
               <div className="flex items-center justify-center h-full">
                 <Loader2 className="h-6 w-6 animate-spin text-primary" />
