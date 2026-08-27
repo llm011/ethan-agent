@@ -455,28 +455,30 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
       <Sheet open={previewSessionId != null} onOpenChange={(open) => {
         if (!open) { setPreviewSessionId(null); setPreviewMessages([]); }
       }}>
-        <SheetContent side="right" className="sm:!max-w-none w-[820px] max-w-[90vw] p-0 flex flex-col">
-          <SheetHeader className="px-4 pt-4 pb-2 border-b shrink-0">
-            <SheetTitle className="line-clamp-1">{previewTitle || "对话预览"}</SheetTitle>
-          </SheetHeader>
-          <div className="flex-1 min-h-0 relative">
-            {previewLoading ? (
-              <div className="flex items-center justify-center h-full">
-                <Loader2 className="h-6 w-6 animate-spin text-primary" />
-              </div>
-            ) : (
-              <MessageList messages={previewMessages} streaming={false} sessionId={previewSessionId} />
-            )}
+        <SheetContent side="right" className="sm:!max-w-none w-[520px] max-w-[80vw] p-0 !gap-0 h-full overflow-hidden">
+          <div className="flex flex-col h-full overflow-hidden">
+            <SheetHeader className="px-4 pt-4 pb-2 border-b shrink-0">
+              <SheetTitle className="line-clamp-1">{previewTitle || "对话预览"}</SheetTitle>
+            </SheetHeader>
+            <div className="flex-1 min-h-0 relative">
+              {previewLoading ? (
+                <div className="flex items-center justify-center h-full">
+                  <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                </div>
+              ) : (
+                <MessageList messages={previewMessages} streaming={false} sessionId={previewSessionId} />
+              )}
+            </div>
+            <SheetFooter className="px-4 py-3 border-t shrink-0">
+              <Button className="w-full" onClick={() => {
+                const id = previewSessionId;
+                setPreviewSessionId(null);
+                if (id) onSelectSession(id);
+              }}>
+                进入对话
+              </Button>
+            </SheetFooter>
           </div>
-          <SheetFooter className="px-4 py-3 border-t shrink-0">
-            <Button className="w-full" onClick={() => {
-              const id = previewSessionId;
-              setPreviewSessionId(null);
-              if (id) onSelectSession(id);
-            }}>
-              进入对话
-            </Button>
-          </SheetFooter>
         </SheetContent>
       </Sheet>
     </div>
