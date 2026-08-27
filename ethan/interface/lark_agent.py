@@ -654,6 +654,7 @@ async def _handle_agent_message(
             role="assistant", content=stored_content, usage=usage_dict,
             tool_steps=collected_tool_steps or [],
             ttfb_ms=ttfb_ms, total_ms=total_ms,
+            model=agent._provider.model,
         )
         # 复用实时进度行（避免重复两条 assistant 消息），无进度行则新建
         if progress_msg_id:

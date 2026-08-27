@@ -303,6 +303,7 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
                     matched_skills=collector.matched_skills or None,
                     ttfb_ms=collector.ttfb_ms,
                     total_ms=collector.total_ms,
+                    model=agent._provider.model,
                 )
                 if progress_msg_id:
                     await store.update_message(progress_msg_id, session_id, asst_msg)
