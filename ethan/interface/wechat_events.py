@@ -169,12 +169,15 @@ async def _handle_message(msg: dict[str, Any], creds: Any) -> None:
 
     # 自动记录主人 user_id：首次收到私聊消息时写入配置
     if sender and not group_id:
-        from ethan.core.config import get_config, save_config
-        cfg = get_config()
-        if not cfg.wechat.owner_user_id:
-            cfg.wechat.owner_user_id = sender
-            save_config(cfg)
-            logger.info("[WeChat] 自动记录主人 user_id: %s", sender[:20])
+        try:
+            from ethan.core.config import get_config, save_config
+            cfg = get_config()
+            if not cfg.wechat.owner_user_id:
+                cfg.wechat.owner_user_id = sender
+                save_config(cfg)
+                logger.info("[WeChat] 自动记录主人 user_id: %s", sender[:20])
+        except Exception:
+            logger.warning("[WeChat] 自动记录 owner_user_id 失败", exc_info=True)
 
     if not context_token:
         logger.warning("[WeChat] no context_token, cannot reply")
