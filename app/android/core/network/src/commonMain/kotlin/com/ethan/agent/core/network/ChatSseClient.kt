@@ -82,8 +82,8 @@ class ChatSseClient(
                 if (payload.isNotEmpty()) {
                     try {
                         emitter(json.decodeFromString(ChatStreamEvent.serializer(), payload))
-                    } catch (_: Exception) {
-                        // skip malformed chunks
+                    } catch (e: Exception) {
+                        println("[SSE] Failed to parse chunk: ${e.message} | payload=$payload")
                     }
                 }
             }

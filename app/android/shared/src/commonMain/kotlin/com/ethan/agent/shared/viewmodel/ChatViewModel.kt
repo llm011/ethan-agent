@@ -71,6 +71,8 @@ data class ChatUiState(
     val showOnboarding: Boolean = false,
     val agentName: String = "",
     val userInfo: String = "",
+    val autoConsent: Boolean = false,
+    val serverUrl: String = "",
 )
 
 class ChatViewModel(
@@ -150,10 +152,12 @@ class ChatViewModel(
                 } catch (_: Exception) { }
             }
 
+            // 取 serverUrl 用于拼接历史消息里的图片相对路径
+            val serverUrl = repository.config.first().serverUrl
+            _state.update { it.copy(serverUrl = serverUrl) }
+
             // session 详情：cached flow 先秒出缓存数据，再网络刷新
             if (sessionId != null) {
-                // 取 serverUrl 用于拼接历史消息里的图片相对路径
-                val serverUrl = repository.config.first().serverUrl
                 try {
                     repository.cachedSession(sessionId).collect { session ->
                         _state.update {
@@ -173,6 +177,7 @@ class ChatViewModel(
                                         images = msg.images?.mapNotNull { img ->
                                             img.url?.let { UiMessageImage(displayUrl = "${serverUrl.trimEnd('/')}/api/${it}") }
                                         } ?: emptyList(),
+                                        cards = msg.cards ?: emptyList(),
                                     )
                                 },
                                 isLoading = false,
@@ -214,6 +219,7 @@ class ChatViewModel(
 
     fun onModelSelected(model: String) { _state.update { it.copy(selectedModel = model) } }
     fun onModeSelected(mode: String) { _state.update { it.copy(selectedMode = mode) } }
+    fun toggleAutoConsent() { _state.update { it.copy(autoConsent = !it.autoConsent) } }
     fun setQuote(quote: Quote?) { _state.update { it.copy(quote = quote) } }
     fun clearQuote() { _state.update { it.copy(quote = null) } }
 
@@ -296,6 +302,7 @@ class ChatViewModel(
                             sessionId = sessionId,
                             quote = userMessage.quote,
                             mode = _state.value.selectedMode,
+                            autoConsent = _state.value.autoConsent,
                         ),
                         assistantIndex = assistantIndex,
                     )
@@ -437,6 +444,7 @@ class ChatViewModel(
         onFirstEvent: (() -> Unit)? = null,
     ) {
         val toolSteps = mutableListOf<ToolStep>()
+        val cardsCollected = mutableListOf<com.ethan.agent.core.model.FileCard>()
         var usage: Usage? = null
         val contentBuilder = StringBuilder()
         var lastFlushMs = 0L
@@ -528,9 +536,23 @@ class ChatViewModel(
                         )
                         val existing = toolSteps.indexOfFirst { it.id == step.id && step.id != null }
                         if (existing >= 0) toolSteps[existing] = step else toolSteps.add(step)
+                        if (event.cards != null) {
+                            cardsCollected.addAll(event.cards!!)
+                        }
                         _state.update { s ->
                             val msgs = s.messages.toMutableList()
-                            if (assistantIndex < msgs.size) msgs[assistantIndex] = msgs[assistantIndex].copy(toolSteps = toolSteps.toList())
+                            if (assistantIndex < msgs.size) msgs[assistantIndex] = msgs[assistantIndex].copy(
+                                toolSteps = toolSteps.toList(),
+                                cards = if (cardsCollected.isNotEmpty()) cardsCollected.toList() else msgs[assistantIndex].cards,
+                            )
+                            s.copy(messages = msgs)
+                        }
+                    }
+                    event.cards != null && event.tool == null -> {
+                        cardsCollected.addAll(event.cards!!)
+                        _state.update { s ->
+                            val msgs = s.messages.toMutableList()
+                            if (assistantIndex < msgs.size) msgs[assistantIndex] = msgs[assistantIndex].copy(cards = cardsCollected.toList())
                             s.copy(messages = msgs)
                         }
                     }
@@ -565,6 +587,7 @@ class ChatViewModel(
                         ttfbMs = ttfbMs,
                         totalDurationMs = totalDurationMs,
                         generationDurationMs = generationDurationMs,
+                        cards = if (cardsCollected.isNotEmpty()) cardsCollected.toList() else msgs[assistantIndex].cards,
                     )
                 }
                 s.copy(messages = msgs, isStreaming = false)

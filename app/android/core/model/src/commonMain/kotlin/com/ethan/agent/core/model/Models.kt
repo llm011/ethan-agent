@@ -106,6 +106,18 @@ data class ToolStep(
 )
 
 @Serializable
+data class FileCard(
+    val type: String = "file",
+    val filename: String = "",
+    val title: String? = null,
+    val path: String = "",
+    @SerialName("size_kb") val sizeKb: Float? = null,
+    val kind: String = "",
+    @SerialName("project_dir") val projectDir: String? = null,
+    @SerialName("page_count") val pageCount: Int? = null,
+)
+
+@Serializable
 data class Message(
     val role: String,
     val content: String,
@@ -114,6 +126,7 @@ data class Message(
     val usage: Usage? = null,
     @SerialName("tool_steps") val toolSteps: List<ToolStep>? = null,
     val images: List<MessageImage>? = null,
+    val cards: List<FileCard>? = null,
 )
 
 @Serializable
@@ -152,6 +165,7 @@ data class ChatRequest(
     @SerialName("session_id") val sessionId: String? = null,
     val quote: Quote? = null,
     val mode: String? = null,
+    @SerialName("auto_consent") val autoConsent: Boolean = false,
 )
 
 @Serializable
@@ -461,6 +475,8 @@ data class ChatStreamEvent(
     val placeholder: String? = null,
     @SerialName("confirm_label") val confirmLabel: String? = null,
     @SerialName("cancel_label") val cancelLabel: String? = null,
+    // file cards 事件负载
+    val cards: List<FileCard>? = null,
 )
 
 @Serializable

@@ -52,6 +52,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.BadgedBox
@@ -140,6 +142,7 @@ fun ChatScreen(
     onScrollToBottom: () -> Unit = {},
     onResumeStream: () -> Unit = {},
     onOpenDrawer: () -> Unit = {},
+    onToggleAutoConsent: () -> Unit = {},
 ) {
     val snackbar = remember { SnackbarHostState() }
     val listState = rememberLazyListState()
@@ -552,7 +555,7 @@ fun ChatScreen(
                         }
                     }
                     itemsIndexed(visibleMessages) { _, msg ->
-                        MessageBubble(msg, onLongPress = {
+                        MessageBubble(msg, serverUrl = state.serverUrl, sessionId = state.sessionId, onLongPress = {
                             onQuote(Quote(role = msg.role, content = msg.content))
                         })
                     }
@@ -670,6 +673,27 @@ fun ChatScreen(
                                 )
                             }
                         }
+                        // 超级权限开关
+                        Surface(
+                            onClick = onToggleAutoConsent,
+                            shape = CircleShape,
+                            color = if (state.autoConsent) MaterialTheme.colorScheme.tertiaryContainer
+                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier.size(32.dp).padding(start = 2.dp),
+                        ) {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    if (state.autoConsent) Icons.Default.VerifiedUser else Icons.Default.Shield,
+                                    contentDescription = if (state.autoConsent) "超级权限已开启" else "超级权限",
+                                    tint = if (state.autoConsent) MaterialTheme.colorScheme.onTertiaryContainer
+                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            }
+                        }
                         // 输入框 + 发送按钮
                         Row(
                             modifier = Modifier.weight(1f).padding(start = 4.dp, end = 2.dp),
@@ -783,7 +807,7 @@ private fun ConnectionStateIndicator(state: ConnectionState, isResuming: Boolean
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
-private fun MessageBubble(message: UiMessage, onLongPress: () -> Unit) {
+private fun MessageBubble(message: UiMessage, serverUrl: String = "", sessionId: String? = null, onLongPress: () -> Unit) {
     val isUser = message.role == "user"
     val bubbleColor = if (isUser) {
         MaterialTheme.colorScheme.primary
@@ -879,6 +903,19 @@ private fun MessageBubble(message: UiMessage, onLongPress: () -> Unit) {
                             text = message.content,
                             textColor = textColor,
                         )
+                    }
+                    // 文件卡片
+                    if (message.cards.isNotEmpty()) {
+                        Spacer(Modifier.height(6.dp))
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            message.cards.forEach { card ->
+                                com.ethan.agent.ui.components.FileCardView(
+                                    card = card,
+                                    serverUrl = serverUrl,
+                                    sessionId = sessionId,
+                                )
+                            }
+                        }
                     }
                     if (message.isStreaming && message.content.isEmpty() && message.toolSteps.isEmpty()) {
                         Text(
