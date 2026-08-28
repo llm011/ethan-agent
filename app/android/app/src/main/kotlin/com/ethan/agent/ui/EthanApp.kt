@@ -184,6 +184,8 @@ private fun MainContent(authViewModel: AuthViewModel) {
                     onDismissOnboarding = vm::dismissOnboarding,
                     onClearError = vm::clearError,
                     onOpenDrawer = { scope.launch { drawerState.open() } },
+                    onToggleAutoConsent = vm::toggleAutoConsent,
+                    onSignFile = vm::signFile,
                 )
             }
 

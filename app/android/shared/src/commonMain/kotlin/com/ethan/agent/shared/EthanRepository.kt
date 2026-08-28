@@ -106,6 +106,13 @@ class EthanRepository(
 
     val isLoggedIn: Flow<Boolean> = config.map { it.authToken.isNotBlank() }
 
+    /** 超级权限开关（持久化偏好，跨会话/重启保留） */
+    val autoConsent: Flow<Boolean> = config.map { it.autoConsentEnabled }
+
+    suspend fun setAutoConsent(enabled: Boolean) {
+        configStore.setAutoConsentEnabled(enabled)
+    }
+
     suspend fun repairStoredUrlIfNeeded() {
         configStore.repairStoredUrlIfNeeded()
     }
@@ -274,6 +281,7 @@ class EthanRepository(
         sessionId: String?,
         quote: Quote?,
         mode: String?,
+        autoConsent: Boolean = false,
     ): Flow<ChatStreamEvent> = flow {
         val cfg = configStore.config.first()
         val request = ChatRequest(
@@ -283,6 +291,7 @@ class EthanRepository(
             sessionId = sessionId,
             quote = quote,
             mode = mode?.ifBlank { null },
+            autoConsent = autoConsent,
         )
         sseClient.streamChat(request).collect { emit(it) }
     }.flowOn(ioDispatcher)
@@ -757,4 +766,5 @@ data class UiMessage(
     val totalDurationMs: Long? = null,
     val generationDurationMs: Long? = null,
     val images: List<UiMessageImage> = emptyList(),
+    val cards: List<com.ethan.agent.core.model.FileCard> = emptyList(),
 )

@@ -33,6 +33,7 @@ data class AppConfig(
     val isAdmin: Boolean = false,
     val themeId: String = "honey",
     val appLockEnabled: Boolean = false,
+    val autoConsentEnabled: Boolean = false,
 ) {
     val apiBaseUrl: String
         get() = ServerUrlUtils.toApiBaseUrl(serverUrl)
@@ -57,6 +58,7 @@ class AppConfigStore(
         val IS_ADMIN = booleanPreferencesKey("is_admin")
         val THEME_ID = stringPreferencesKey("theme_id")
         val APP_LOCK = booleanPreferencesKey("app_lock_enabled")
+        val AUTO_CONSENT = booleanPreferencesKey("auto_consent_enabled")
     }
 
     val config: Flow<AppConfig> = dataStore.data.map { prefs ->
@@ -71,6 +73,7 @@ class AppConfigStore(
             isAdmin = prefs[Keys.IS_ADMIN] ?: false,
             themeId = prefs[Keys.THEME_ID] ?: "honey",
             appLockEnabled = prefs[Keys.APP_LOCK] ?: false,
+            autoConsentEnabled = prefs[Keys.AUTO_CONSENT] ?: false,
         )
     }
 
@@ -116,5 +119,9 @@ class AppConfigStore(
 
     suspend fun setAppLockEnabled(enabled: Boolean) {
         dataStore.edit { it[Keys.APP_LOCK] = enabled }
+    }
+
+    suspend fun setAutoConsentEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.AUTO_CONSENT] = enabled }
     }
 }

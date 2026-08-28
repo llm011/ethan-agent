@@ -82,8 +82,13 @@ class ChatSseClient(
                 if (payload.isNotEmpty()) {
                     try {
                         emitter(json.decodeFromString(ChatStreamEvent.serializer(), payload))
-                    } catch (_: Exception) {
-                        // skip malformed chunks
+                    } catch (e: Exception) {
+                        // 完整 SSE chunk 含用户消息/工具参数等敏感内容，println 在 release 也会
+                        // 打到 logcat System.out——仅 debug 构建输出且截断到 200 字符
+                        if (isDebugBuild()) {
+                            val preview = if (payload.length > 200) payload.take(200) + "…" else payload
+                            println("[SSE] Failed to parse chunk: ${e.message} | payload=$preview")
+                        }
                     }
                 }
             }
