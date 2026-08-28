@@ -103,6 +103,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import com.ethan.agent.R
+import com.ethan.agent.core.model.FileSignature
 import com.ethan.agent.core.model.Quote
 import com.ethan.agent.shared.UiMessage
 import com.ethan.agent.ui.components.ErrorSnackbar
@@ -143,6 +144,7 @@ fun ChatScreen(
     onResumeStream: () -> Unit = {},
     onOpenDrawer: () -> Unit = {},
     onToggleAutoConsent: () -> Unit = {},
+    onSignFile: suspend (String) -> FileSignature? = { null },
 ) {
     val snackbar = remember { SnackbarHostState() }
     val listState = rememberLazyListState()
@@ -555,7 +557,7 @@ fun ChatScreen(
                         }
                     }
                     itemsIndexed(visibleMessages) { _, msg ->
-                        MessageBubble(msg, serverUrl = state.serverUrl, sessionId = state.sessionId, onLongPress = {
+                        MessageBubble(msg, serverUrl = state.serverUrl, sessionId = state.sessionId, signFile = onSignFile, onLongPress = {
                             onQuote(Quote(role = msg.role, content = msg.content))
                         })
                     }
@@ -807,7 +809,7 @@ private fun ConnectionStateIndicator(state: ConnectionState, isResuming: Boolean
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
-private fun MessageBubble(message: UiMessage, serverUrl: String = "", sessionId: String? = null, onLongPress: () -> Unit) {
+private fun MessageBubble(message: UiMessage, serverUrl: String = "", sessionId: String? = null, signFile: (suspend (String) -> FileSignature?)? = null, onLongPress: () -> Unit) {
     val isUser = message.role == "user"
     val bubbleColor = if (isUser) {
         MaterialTheme.colorScheme.primary
@@ -913,6 +915,7 @@ private fun MessageBubble(message: UiMessage, serverUrl: String = "", sessionId:
                                     card = card,
                                     serverUrl = serverUrl,
                                     sessionId = sessionId,
+                                    signFile = signFile,
                                 )
                             }
                         }

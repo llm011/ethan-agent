@@ -106,6 +106,13 @@ class EthanRepository(
 
     val isLoggedIn: Flow<Boolean> = config.map { it.authToken.isNotBlank() }
 
+    /** 超级权限开关（持久化偏好，跨会话/重启保留） */
+    val autoConsent: Flow<Boolean> = config.map { it.autoConsentEnabled }
+
+    suspend fun setAutoConsent(enabled: Boolean) {
+        configStore.setAutoConsentEnabled(enabled)
+    }
+
     suspend fun repairStoredUrlIfNeeded() {
         configStore.repairStoredUrlIfNeeded()
     }

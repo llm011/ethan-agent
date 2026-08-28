@@ -6,6 +6,7 @@ import com.ethan.agent.core.model.AskUserInfo
 import com.ethan.agent.core.model.ChatMessage
 import com.ethan.agent.core.model.ChatStreamEvent
 import com.ethan.agent.core.model.ConsentInfo
+import com.ethan.agent.core.model.FileSignature
 import com.ethan.agent.core.model.ModeEntry
 import com.ethan.agent.core.model.ModelEntry
 import com.ethan.agent.core.model.OnboardingStatus
@@ -88,6 +89,7 @@ class ChatViewModel(
     init {
         loadInitial(sessionId)
         observeSharedText()
+        observeAutoConsent()
     }
 
     /**
@@ -106,6 +108,19 @@ class ChatViewModel(
                 // 原子清空，避免误清 collect 期间到达的新分享
                 ShareBus.consumeText(shared)
             }
+        }
+    }
+
+    /** 超级权限开关持久化在 DataStore（AppConfig），跨会话/重启保留 */
+    private fun observeAutoConsent() {
+        viewModelScope.launch {
+            try {
+                repository.autoConsent.collect { enabled ->
+                    if (_state.value.autoConsent != enabled) {
+                        _state.update { it.copy(autoConsent = enabled) }
+                    }
+                }
+            } catch (_: Exception) { }
         }
     }
 
@@ -219,7 +234,19 @@ class ChatViewModel(
 
     fun onModelSelected(model: String) { _state.update { it.copy(selectedModel = model) } }
     fun onModeSelected(mode: String) { _state.update { it.copy(selectedMode = mode) } }
-    fun toggleAutoConsent() { _state.update { it.copy(autoConsent = !it.autoConsent) } }
+    fun toggleAutoConsent() {
+        val next = !_state.value.autoConsent
+        _state.update { it.copy(autoConsent = next) }
+        viewModelScope.launch {
+            try { repository.setAutoConsent(next) } catch (_: Exception) { }
+        }
+    }
+
+    /** 为文件卡片换 path 级签名（Bearer → ?user=&sig=），供 view/download 直链鉴权 */
+    suspend fun signFile(path: String): FileSignature? = try {
+        val resp = repository.signFiles(listOf(path))
+        resp.signatures[path]?.let { FileSignature(resp.user, it) }
+    } catch (_: Exception) { null }
     fun setQuote(quote: Quote?) { _state.update { it.copy(quote = quote) } }
     fun clearQuote() { _state.update { it.copy(quote = null) } }
 
@@ -536,6 +563,8 @@ class ChatViewModel(
                         )
                         val existing = toolSteps.indexOfFirst { it.id == step.id && step.id != null }
                         if (existing >= 0) toolSteps[existing] = step else toolSteps.add(step)
+                        // 协议假设：服务端 cards 永远随 tool 事件下发（producers.py 把 cards
+                        // 挂在 tool 事件上，不存在独立的 cards 事件），故只在此处收集
                         if (event.cards != null) {
                             cardsCollected.addAll(event.cards!!)
                         }
@@ -548,13 +577,10 @@ class ChatViewModel(
                             s.copy(messages = msgs)
                         }
                     }
-                    event.cards != null && event.tool == null -> {
-                        cardsCollected.addAll(event.cards!!)
-                        _state.update { s ->
-                            val msgs = s.messages.toMutableList()
-                            if (assistantIndex < msgs.size) msgs[assistantIndex] = msgs[assistantIndex].copy(cards = cardsCollected.toList())
-                            s.copy(messages = msgs)
-                        }
+                    event.autoConsentDegraded == true -> {
+                        // 服务端安全约束：公网来源的 auto_consent 强制降级为逐项弹窗，
+                        // 显式提示，避免「开关亮着却仍弹窗」被当成功能坏了
+                        _state.update { it.copy(error = "当前经公网访问服务器，超级权限不可用，已降级为逐项确认") }
                     }
                     event.done == true -> { usage = event.usage }
                     event.error != null -> { _state.update { it.copy(error = event.error) } }

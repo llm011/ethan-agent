@@ -401,6 +401,10 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
             consent = WebConsentProvider(session_id=req.session_id or "")
         manager = RunManager.instance()
         run = manager.create(req.session_id or "", consent=consent, user_id=user_id)
+        # 客户端请求了 auto_consent 但来源非本地：上方安全约束已强制降级为逐项弹窗，
+        # 显式下发信号让客户端提示，避免「开关亮着却仍弹窗」被当成功能坏了
+        if req.auto_consent and not _is_local(request):
+            run.emit({"auto_consent_degraded": True})
         # 继续执行：先把进度反思总结按字符分片 emit，呈现为 assistant 消息首段输出，
         # 视觉上就是「系统先总结已做的事，再继续往下做」——给用户确认续跑确实基于旧进度，
         # 也是给模型自己一个可回看的反思锚点（模型首条 assistant 消息就已包含进度摘要，

@@ -42,6 +42,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.ethan.agent.core.model.FileCard
+import com.ethan.agent.core.model.FileSignature
 
 private val IMAGE_KINDS = setOf("png", "jpg", "jpeg", "gif", "webp", "svg", "bmp")
 private val AUDIO_KINDS = setOf("mp3", "m4a", "wav", "ogg", "flac")
@@ -52,21 +53,25 @@ fun FileCardView(
     card: FileCard,
     serverUrl: String,
     sessionId: String?,
-    signedParams: SignedParams? = null,
+    signFile: (suspend (String) -> FileSignature?)? = null,
 ) {
     val context = LocalContext.current
+    // 渲染时换 path 级签名（?user=&sig=，10 分钟有效）：AsyncImage 与系统浏览器都带
+    // 不上 Authorization header / cookie，签名 URL 是唯一可行的鉴权通道（deps.py 三通道）
+    var signature by remember(card.path) { mutableStateOf<FileSignature?>(null) }
+    LaunchedEffect(card.path) { signature = signFile?.invoke(card.path) }
 
     fun buildViewUrl(): String {
         val base = "${serverUrl.trimEnd('/')}/api/files/view?path=${Uri.encode(card.path)}"
         val sid = if (sessionId != null) "&session_id=${Uri.encode(sessionId)}" else ""
-        val sig = if (signedParams != null) "&user=${Uri.encode(signedParams.user)}&sig=${Uri.encode(signedParams.sig)}" else ""
+        val sig = signature?.let { "&user=${Uri.encode(it.user)}&sig=${Uri.encode(it.sig)}" } ?: ""
         return "$base$sid$sig"
     }
 
     fun buildDownloadUrl(): String {
         val base = "${serverUrl.trimEnd('/')}/api/files/download?path=${Uri.encode(card.path)}"
         val sid = if (sessionId != null) "&session_id=${Uri.encode(sessionId)}" else ""
-        val sig = if (signedParams != null) "&user=${Uri.encode(signedParams.user)}&sig=${Uri.encode(signedParams.sig)}" else ""
+        val sig = signature?.let { "&user=${Uri.encode(it.user)}&sig=${Uri.encode(it.sig)}" } ?: ""
         return "$base$sid$sig"
     }
 
@@ -96,8 +101,6 @@ fun FileCardView(
         )
     }
 }
-
-data class SignedParams(val user: String, val sig: String)
 
 @Composable
 private fun ImageFileCardView(card: FileCard, viewUrl: String) {

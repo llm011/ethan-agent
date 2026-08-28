@@ -477,6 +477,8 @@ data class ChatStreamEvent(
     @SerialName("cancel_label") val cancelLabel: String? = null,
     // file cards 事件负载
     val cards: List<FileCard>? = null,
+    // 服务端检测到 auto_consent 来自公网、被安全约束降级为逐项弹窗时下发
+    @SerialName("auto_consent_degraded") val autoConsentDegraded: Boolean? = null,
 )
 
 @Serializable
