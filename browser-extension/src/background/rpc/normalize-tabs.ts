@@ -21,7 +21,7 @@ export function normalizeTabOpenParams(params: unknown): BrowserTabOpenParams {
   return {
     sessionId: normalizeSessionId(nextParams.sessionId),
     url: normalizeHttpUrl(nextParams.url, 'tabs.open'),
-    active: typeof nextParams.active === 'boolean' ? nextParams.active : true,
+    active: typeof nextParams.active === 'boolean' ? nextParams.active : false,
   };
 }
 
