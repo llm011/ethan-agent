@@ -300,8 +300,12 @@ async def send_text(
     to_user_id: str,
     context_token: str,
     text: str,
-) -> None:
-    """Send a plain-text reply. Uses Hermes-compatible iLink sendmessage format."""
+) -> dict:
+    """Send a plain-text reply. Uses Hermes-compatible iLink sendmessage format.
+
+    Returns the response body dict. Raises RuntimeError on business-level failure
+    (ret not in {0, -1}) so callers can detect send failures.
+    """
     import uuid
     message = {
         "from_user_id": "",
@@ -321,8 +325,11 @@ async def send_text(
     )
     r.raise_for_status()
     body = r.json()
-    if body.get("ret", -1) not in (0, -1):
+    ret = body.get("ret", -1)
+    if ret not in (0, -1):
         logger.warning("[WeChat] sendmessage failed: %s", body)
+        raise RuntimeError(f"iLink sendmessage business error: ret={ret}, body={body}")
+    return body
 
 
 async def send_typing(

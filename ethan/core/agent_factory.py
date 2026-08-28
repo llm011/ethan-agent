@@ -59,6 +59,7 @@ from ethan.tools.builtin.wait_for_user import WaitForUserTool
 from ethan.tools.builtin.weather import WeatherTool
 from ethan.tools.builtin.web import WebFetchTool
 from ethan.tools.builtin.web_search import WebSearchTool
+from ethan.tools.builtin.wechat_tools import WeChatMessageSendTool
 from ethan.tools.registry import ToolRegistry
 
 # 进程级 SkillRegistry 缓存：{user_id: (skills_dir_mtime, registry)}
@@ -216,6 +217,9 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
         registry.register(LarkMessageSendTool())
         registry.register(LarkAuthStartTool())
         registry.register(LarkAuthCompleteTool())
+    # WeChat tools — 仅微信渠道注册
+    if channel == "wechat":
+        registry.register(WeChatMessageSendTool())
     # ui_card 在能渲染卡片的渠道注册：web/repl 走 A2UI，lark 走飞书 interactive 卡片。
     # 同一套结构化 card 数据，按渠道选渲染目标（见 UiCardTool）。api 等无渲染器的渠道不暴露。
     if channel in ("web", "repl", "lark", "schedule"):
