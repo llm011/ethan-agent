@@ -31,13 +31,13 @@ export class BrowserSessionStore extends BrowserSessionStoreTabs {
 
     const tab = await createTab({
       url: params.url,
-      active: params.active ?? true,
+      active: params.active ?? false,
       windowId: session.windowId,
     });
     const tabId = getTabId(tab, 'Cannot open a tab without tab id');
     await groupTabs([tabId], session.groupId);
 
-    if (params.active ?? true) {
+    if (params.active ?? false) {
       session.activeTabId = tabId;
       session.updatedAt = Date.now();
     }

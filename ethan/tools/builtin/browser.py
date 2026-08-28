@@ -495,12 +495,12 @@ class BrowserSessionTool(_BrowserToolBase):
             "title": {"type": "string", "description": "session 标题(create/attach_current/rename)"},
             "color": {"type": "string", "description": "Tab Group 颜色（grey/blue/red/yellow/green/pink/purple/cyan/orange）"},
             "keep_alive": {"type": "boolean", "description": "create/attach/attach_current 时标记此 session 在对话结束后保留（不自动关闭 tab group）。默认 false（用完即关）。用户只是让帮个忙、页面还要继续看时设 true。"},
-            "background": {"type": "boolean", "description": "create 时为 true 则在后台新窗口打开，不抢用户焦点。默认 false。"},
+            "background": {"type": "boolean", "description": "create 时为 true 则在后台新窗口打开，不抢用户焦点。默认 true。设为 false 可在前台打开。"},
         },
         "required": ["action"],
     }
 
-    async def run(self, action: str, session: str = "", url: str = "", title: str = "", color: str = "", keep_alive: bool = False, background: bool = False) -> str:
+    async def run(self, action: str, session: str = "", url: str = "", title: str = "", color: str = "", keep_alive: bool = False, background: bool = True) -> str:
         self._authorize()
         try:
             if action == "create":
