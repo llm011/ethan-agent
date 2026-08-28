@@ -79,9 +79,12 @@ class FallbackProvider(BaseProvider):
     def __init__(self, providers: list[tuple[str, BaseProvider]]) -> None:
         # providers: [(provider_key, provider_instance), ...]  primary first
         self._providers = providers
+        self._last_used: BaseProvider | None = None
 
     @property
     def model(self) -> str:
+        if self._last_used is not None:
+            return self._last_used.model
         return self._providers[0][1].model
 
     async def chat(
@@ -100,6 +103,7 @@ class FallbackProvider(BaseProvider):
             try:
                 result = await provider.chat(messages, tools, system, max_tokens=max_tokens)
                 breaker.record_success(key)
+                self._last_used = provider
                 if key != self._providers[0][0]:
                     logger.info("fallback: %s succeeded (primary was unavailable)", key)
                 return result
@@ -130,6 +134,7 @@ class FallbackProvider(BaseProvider):
                     started = True
                     yield chunk
                 breaker.record_success(key)
+                self._last_used = provider
                 if key != self._providers[0][0]:
                     logger.info("fallback: %s stream succeeded (primary was unavailable)", key)
                 return

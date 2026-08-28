@@ -187,6 +187,7 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
                     ttfb_ms=collector.ttfb_ms,
                     total_ms=collector.total_ms,
                     cards=collector.cards or None,
+                    model=agent._provider.model,
                 )
                 if progress_msg_id:
                     await store.update_message(progress_msg_id, session_id, stopped_msg)
@@ -210,6 +211,7 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
             ttfb_ms=collector.ttfb_ms,
             total_ms=collector.total_ms,
             cards=collector.cards or None,
+            model=agent._provider.model,
         )
         try:
             if progress_msg_id:
@@ -236,6 +238,7 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
         ttfb_ms=collector.ttfb_ms,
         total_ms=collector.total_ms,
         cards=collector.cards or None,
+        model=agent._provider.model,
     )
     # 正常结束：把实时进度行更新为最终回复，复用同一行避免重复两条 assistant 消息
     if progress_msg_id:
@@ -307,6 +310,7 @@ async def _stream_completions(agent, messages, store, session_id: str, model: st
                     mcp_apps=collector.mcp_apps or None,
                     matched_skills=collector.matched_skills or None,
                     cards=collector.cards or None,
+                    model=agent._provider.model,
                 )
                 if progress_msg_id:
                     await store.update_message(progress_msg_id, session_id, stopped_msg)
@@ -329,6 +333,7 @@ async def _stream_completions(agent, messages, store, session_id: str, model: st
             mcp_apps=collector.mcp_apps or None,
             matched_skills=collector.matched_skills or None,
             cards=collector.cards or None,
+            model=agent._provider.model,
         )
         try:
             if progress_msg_id:
@@ -353,6 +358,7 @@ async def _stream_completions(agent, messages, store, session_id: str, model: st
             mcp_apps=collector.mcp_apps or None,
             matched_skills=collector.matched_skills or None,
             cards=collector.cards or None,
+            model=agent._provider.model,
         )
         # 正常结束：把实时进度行更新为最终回复，复用同一行避免重复两条 assistant 消息
         if progress_msg_id:

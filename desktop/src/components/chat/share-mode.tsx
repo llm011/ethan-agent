@@ -95,6 +95,8 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
       else next.add(key);
       return next;
     });
+    setResultImage(null);
+    setSaveInfo(null);
   };
 
   const generate = async () => {
@@ -110,24 +112,27 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
         backgroundColor: "#ffffff",
       });
       setResultImage(dataUrl);
-      const filename = `ethan-share-${Date.now()}.png`;
-      // 优先走 Tauri 保存到 ~/Pictures/Ethan/，失败则降级浏览器下载
-      try {
-        const savedPath = await invoke<string>("save_share_image", { dataUrl, filename });
-        setSaveInfo({ path: savedPath, filename });
-      } catch (err) {
-        console.warn("Tauri 保存失败，降级为浏览器下载", err);
-        const a = document.createElement("a");
-        a.href = dataUrl;
-        a.download = filename;
-        a.click();
-        setSaveInfo({ path: null, filename });
-      }
     } catch (err) {
       console.error("生成分享图片失败", err);
       alert("生成图片失败，请重试");
     } finally {
       setGenerating(false);
+    }
+  };
+
+  const downloadImage = async () => {
+    if (!resultImage) return;
+    const filename = `ethan-share-${Date.now()}.png`;
+    try {
+      const savedPath = await invoke<string>("save_share_image", { dataUrl: resultImage, filename });
+      setSaveInfo({ path: savedPath, filename });
+    } catch (err) {
+      console.warn("Tauri 保存失败，降级为浏览器下载", err);
+      const a = document.createElement("a");
+      a.href = resultImage;
+      a.download = filename;
+      a.click();
+      setSaveInfo({ path: null, filename });
     }
   };
 
@@ -443,8 +448,12 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
             ) : copyFailed ? (
               <div className="flex items-center gap-1.5 text-red-600">
                 <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                <span>复制到剪贴板失败。点击「生成图片」会同时保存到本地，可直接在文件夹中找到。</span>
+                <span>复制到剪贴板失败。点击「下载图片」会保存到本地，可直接在文件夹中找到。</span>
               </div>
+            ) : resultImage ? (
+              <span className="text-muted-foreground">
+                图片已生成，可下载或复制到剪贴板。
+              </span>
             ) : (
               <span className="text-muted-foreground">
                 生成后图片会保存到「图片/Ethan」目录，并可直接打开文件夹定位。
@@ -465,14 +474,23 @@ export function ShareMode({ open, messages, defaultSelectedKey, onClose }: Share
                 {copied ? "已复制" : copyFailed ? "复制失败" : "复制图片"}
               </button>
             )}
-            <button
-              onClick={generate}
-              disabled={generating || selectedMessages.length === 0}
-              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
-            >
-              {generating && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-              {generating ? "生成中…" : "生成图片"}
-            </button>
+            {resultImage ? (
+              <button
+                onClick={downloadImage}
+                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90"
+              >
+                下载图片
+              </button>
+            ) : (
+              <button
+                onClick={generate}
+                disabled={generating || selectedMessages.length === 0}
+                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+              >
+                {generating && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                {generating ? "生成中…" : "生成图片"}
+              </button>
+            )}
           </div>
         </div>
       </div>

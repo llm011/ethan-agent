@@ -328,7 +328,7 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
                     save_user_cb = _save_user
                 async def _save_assistant(full_text: str):
                     s = _local_store
-                    m = Message(role="assistant", content=full_text)
+                    m = Message(role="assistant", content=full_text, model=agent._provider.model)
                     await s.save_message(req.session_id, m)
                     await s.touch(req.session_id)
                 save_assistant_cb = _save_assistant
@@ -423,6 +423,7 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
     response = await agent.chat(messages)
 
     if req.session_id:
+        response.model = agent._provider.model
         await store.save_message(req.session_id, response)
         await store.touch(req.session_id)
 
