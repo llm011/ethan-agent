@@ -472,6 +472,7 @@ async def _run_generation(
                             ttfb_ms=collector.ttfb_ms,
                             total_ms=collector.total_ms,
                             status="stopped",
+                            model=agent._provider.model,
                         ),
                     )
                     await store.touch(session_id)
@@ -496,6 +497,7 @@ async def _run_generation(
                     ttfb_ms=collector.ttfb_ms,
                     total_ms=collector.total_ms,
                     status="stopped",
+                    model=agent._provider.model,
                 )
                 await store.save_message(session_id, stopped_msg)
                 await store.touch(session_id)
@@ -552,6 +554,7 @@ async def _run_generation(
                 ttfb_ms=collector.ttfb_ms,
                 total_ms=collector.total_ms,
                 status="interrupted",
+                model=agent._provider.model,
             )
             try:
                 if progress_msg_id:
