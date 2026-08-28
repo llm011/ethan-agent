@@ -615,7 +615,7 @@ class SessionStore:
         cards_json = json.dumps(msg.cards, ensure_ascii=False) if msg.cards else None
 
         await self._db.execute(
-            "UPDATE messages SET content=?, tool_calls=?, usage=?, tool_steps=?, thought=?, a2ui=?, mcp_apps=?, matched_skills=?, ttfb_ms=?, total_ms=?, cards=?, created_at=?, status=?, reasoning=?, model=? "
+            "UPDATE messages SET content=?, tool_calls=?, usage=?, tool_steps=?, thought=?, a2ui=?, mcp_apps=?, matched_skills=?, ttfb_ms=?, total_ms=?, cards=?, created_at=?, status=?, reasoning=?, model=COALESCE(?, model) "
             "WHERE id=? AND session_id=?",
             (
                 msg.content,
