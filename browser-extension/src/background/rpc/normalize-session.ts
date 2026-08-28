@@ -26,6 +26,12 @@ export function normalizeSessionCreateParams(
       ? { url: normalizeHttpUrl(nextParams.url, 'sessions.create') }
       : {}),
     ...(title ? { title } : {}),
+    ...(typeof nextParams.background === 'boolean'
+      ? { background: nextParams.background }
+      : {}),
+    ...(typeof nextParams.color === 'string'
+      ? { color: nextParams.color.trim() }
+      : {}),
   };
 }
 

@@ -37,10 +37,8 @@ export class BrowserSessionStore extends BrowserSessionStoreTabs {
     const tabId = getTabId(tab, 'Cannot open a tab without tab id');
     await groupTabs([tabId], session.groupId);
 
-    if (params.active ?? false) {
-      session.activeTabId = tabId;
-      session.updatedAt = Date.now();
-    }
+    session.activeTabId = tabId;
+    session.updatedAt = Date.now();
 
     const normalizedTab = await getTab(tabId);
     await this.persist();
