@@ -38,6 +38,7 @@ class WeChatConfig(BaseModel):
     enabled: bool = False  # 设为 true 后 ethan serve 自动启动 iLink 长轮询
     # 登录凭证由 ethan wechat login（或首次启动时扫码）自动写入
     # ~/.ethan/memory/wechat_credentials.json，无需手动填写。
+    owner_user_id: str = ""  # 主人的 iLink user_id，首次私聊自动记录
 
 
 class LarkConfig(BaseModel):
