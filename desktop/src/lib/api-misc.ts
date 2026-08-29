@@ -76,6 +76,24 @@ export async function updateScheduleCron(jobId: string, cron: string): Promise<v
   }
 }
 
+export interface ScheduleUpdate {
+  title?: string;
+  scene?: string;
+  cron?: string;
+}
+
+export async function updateSchedule(jobId: string, patch: ScheduleUpdate): Promise<void> {
+  const res = await fetch(`${getApiUrl()}/schedule/${jobId}`, {
+    method: "PATCH",
+    headers: headers(),
+    body: JSON.stringify(patch)
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed (${res.status})`);
+  }
+}
+
 export async function triggerSchedule(jobId: string): Promise<void> {
   const res = await fetch(`${getApiUrl()}/schedule/${jobId}/trigger`, {
     method: "POST",

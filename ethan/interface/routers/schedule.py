@@ -170,6 +170,7 @@ class SchedulePatchRequest(BaseModel):
     title: str | None = None
     prompt: str | None = None
     cron: str | None = None
+    scene: str | None = None  # work / life / ...；修改任务分类
 
 
 @router.patch("/{job_id}", dependencies=[Depends(verify_token)])
@@ -207,6 +208,10 @@ async def patch_schedule(job_id: str, req: SchedulePatchRequest):
                 raise HTTPException(404, "Job not found")
         except ValueError as e:
             raise HTTPException(400, f"Invalid cron expression: {e}")
+    if req.scene is not None:
+        _validate_scene(req.scene)
+        if not scheduler.modify_kwargs(job_id, scene=req.scene):
+            raise HTTPException(404, "Job not found or could not update scene")
     return {"ok": True}
 
 
