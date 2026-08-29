@@ -6,6 +6,7 @@ import {
 } from "@/lib/api";
 import { Badge } from "@ethan/shared/ui/badge";
 import { Button } from "@ethan/shared/ui/button";
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@ethan/shared/ui/tooltip";
 import { ScrollArea } from "@ethan/shared/ui/scroll-area";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@ethan/shared/ui/card";
 import { Loader2, RefreshCw, Play, Pause, Trash2, MessageSquare, ChevronDown, ChevronRight, Pencil, Clock, CalendarClock, TerminalSquare, Zap } from "lucide-react";
@@ -383,6 +384,7 @@ export function ScheduleView() {
   }
 
   return (
+    <TooltipProvider delay={0}>
     <div className="flex flex-col h-full bg-background text-foreground">
       <ConfirmDialog
         open={confirmState.open}
@@ -443,9 +445,12 @@ export function ScheduleView() {
               }`}
             >列表</button>
           </div>
-          <Button variant="ghost" size="icon" onClick={loadData} disabled={loading}>
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger render={<Button variant="ghost" size="icon" onClick={loadData} disabled={loading} />}>
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            </TooltipTrigger>
+            <TooltipContent>刷新</TooltipContent>
+          </Tooltip>
         </div>
       </header>
 
@@ -535,21 +540,36 @@ export function ScheduleView() {
                     </div>
                   </CardContent>
                   <CardFooter className="pt-2 pb-3 flex justify-end gap-1 border-t border-border/30 mt-auto">
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => triggerJob(job)} title="手动触发" disabled={triggeringId === job.id}>
-                      {triggeringId === job.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Zap className="h-3 w-3" />}
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openRename(job)} title="重命名">
-                      <Pencil className="h-3 w-3" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => navigate(`/chat/${job.session_id}`)} title="查看对话">
-                      <MessageSquare className="h-3 w-3" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => toggleStatus(job)} title={job.status === "active" ? "暂停" : "恢复"}>
-                      {job.status === "active" ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive/70 hover:text-destructive" onClick={() => removeJob(job.id)} title="删除">
-                      <Trash2 className="h-3 w-3" />
-                    </Button>
+                    <Tooltip>
+                      <TooltipTrigger render={<Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => triggerJob(job)} disabled={triggeringId === job.id} />}>
+                        {triggeringId === job.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Zap className="h-3 w-3" />}
+                      </TooltipTrigger>
+                      <TooltipContent>手动触发</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger render={<Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openRename(job)} />}>
+                        <Pencil className="h-3 w-3" />
+                      </TooltipTrigger>
+                      <TooltipContent>重命名</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger render={<Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => navigate(`/chat/${job.session_id}`)} />}>
+                        <MessageSquare className="h-3 w-3" />
+                      </TooltipTrigger>
+                      <TooltipContent>查看对话</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger render={<Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => toggleStatus(job)} />}>
+                        {job.status === "active" ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                      </TooltipTrigger>
+                      <TooltipContent>{job.status === "active" ? "暂停" : "恢复"}</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger render={<Button variant="ghost" size="icon" className="h-6 w-6 text-destructive/70 hover:text-destructive" onClick={() => removeJob(job.id)} />}>
+                        <Trash2 className="h-3 w-3" />
+                      </TooltipTrigger>
+                      <TooltipContent>删除</TooltipContent>
+                    </Tooltip>
                   </CardFooter>
                 </Card>
               ))}
@@ -619,26 +639,44 @@ export function ScheduleView() {
                                 </div>
                                 {/* Actions — show on hover */}
                                 <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => triggerJob(job)} title="手动触发" disabled={triggeringId === job.id}>
-                                    {triggeringId === job.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Zap className="h-3 w-3" />}
-                                  </Button>
-                                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openRename(job)} title="重命名">
-                                    <Pencil className="h-3 w-3" />
-                                  </Button>
+                                  <Tooltip>
+                                    <TooltipTrigger render={<Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => triggerJob(job)} disabled={triggeringId === job.id} />}>
+                                      {triggeringId === job.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Zap className="h-3 w-3" />}
+                                    </TooltipTrigger>
+                                    <TooltipContent>手动触发</TooltipContent>
+                                  </Tooltip>
+                                  <Tooltip>
+                                    <TooltipTrigger render={<Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openRename(job)} />}>
+                                      <Pencil className="h-3 w-3" />
+                                    </TooltipTrigger>
+                                    <TooltipContent>重命名</TooltipContent>
+                                  </Tooltip>
                                   {job.cron && (
-                                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEditCron(job)} title="修改定时时间">
-                                      <CalendarClock className="h-3 w-3" />
-                                    </Button>
+                                    <Tooltip>
+                                      <TooltipTrigger render={<Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEditCron(job)} />}>
+                                        <CalendarClock className="h-3 w-3" />
+                                      </TooltipTrigger>
+                                      <TooltipContent>修改定时时间</TooltipContent>
+                                    </Tooltip>
                                   )}
-                                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => navigate(`/chat/${job.session_id}`)} title="查看对话">
-                                    <MessageSquare className="h-3 w-3" />
-                                  </Button>
-                                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => toggleStatus(job)} title={job.status === "active" ? "暂停" : "恢复"}>
-                                    {job.status === "active" ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
-                                  </Button>
-                                  <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive/70 hover:text-destructive" onClick={() => removeJob(job.id)} title="删除">
-                                    <Trash2 className="h-3 w-3" />
-                                  </Button>
+                                  <Tooltip>
+                                    <TooltipTrigger render={<Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => navigate(`/chat/${job.session_id}`)} />}>
+                                      <MessageSquare className="h-3 w-3" />
+                                    </TooltipTrigger>
+                                    <TooltipContent>查看对话</TooltipContent>
+                                  </Tooltip>
+                                  <Tooltip>
+                                    <TooltipTrigger render={<Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => toggleStatus(job)} />}>
+                                      {job.status === "active" ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                                    </TooltipTrigger>
+                                    <TooltipContent>{job.status === "active" ? "暂停" : "恢复"}</TooltipContent>
+                                  </Tooltip>
+                                  <Tooltip>
+                                    <TooltipTrigger render={<Button variant="ghost" size="icon" className="h-6 w-6 text-destructive/70 hover:text-destructive" onClick={() => removeJob(job.id)} />}>
+                                      <Trash2 className="h-3 w-3" />
+                                    </TooltipTrigger>
+                                    <TooltipContent>删除</TooltipContent>
+                                  </Tooltip>
                                 </div>
                               </div>
                               {/* Subtitle: trigger + prompt (clickable to edit) */}
@@ -752,5 +790,6 @@ export function ScheduleView() {
         </div>
       </div>
     </div>
+    </TooltipProvider>
   );
 }
