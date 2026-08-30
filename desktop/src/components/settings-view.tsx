@@ -16,7 +16,7 @@ import {
   deleteProvider, fetchProviderPresets, ProviderPreset,
   fetchChannels, patchChannel, ChannelInfo,
   fetchAPIKeys, createAPIKey, deleteAPIKey, APIKeyInfo, APIKeyCreated,
-  fetchModels, addModel, deleteModel, discoverModels, ModelEntry,
+  fetchModels, addModel, addModelsBatch, deleteModel, deleteModelsBatch, discoverModels, ModelEntry,
 } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@ethan/shared/ui/card";
 import { Badge } from "@ethan/shared/ui/badge";
@@ -117,6 +117,13 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set()); // 弹窗里勾选的 model id
   const [discoverSearch, setDiscoverSearch] = useState(""); // 弹窗搜索词
   const [newModel, setNewModel] = useState<ModelEntry>({ id: "", provider: "openai_compat", description: "", alias: [], vision: true });
+  // 批量删除/添加模型
+  const [selectedModelKeys, setSelectedModelKeys] = useState<Set<string>>(new Set()); // 勾选的 "provider/id"
+  const [batchAddOpen, setBatchAddOpen] = useState(false);
+  const [batchAddProvider, setBatchAddProvider] = useState("");
+  const [batchAddText, setBatchAddText] = useState("");
+  const [batchAdding, setBatchAdding] = useState(false);
+  const [batchDeleting, setBatchDeleting] = useState(false);
   const [channelExpanded, setChannelExpanded] = useState<string | null>("lark");
   const [channelForms, setChannelForms] = useState<Record<string, Record<string, string>>>({});
   const [channelSaving, setChannelSaving] = useState<string | null>(null);
@@ -257,6 +264,51 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
       api_key: "",
       disable_prompt_cache: preset.disable_prompt_cache ?? false,
     });
+  };
+
+  // 批量删除勾选的模型（key 格式 "provider/id"，id 本身可能含 "/"，用第一个 "/" 切分）
+  const handleDeleteModelSelected = async () => {
+    if (selectedModelKeys.size === 0) return;
+    setBatchDeleting(true);
+    try {
+      const items = [...selectedModelKeys].map((k) => {
+        const idx = k.indexOf("/");
+        return { provider: k.slice(0, idx), id: k.slice(idx + 1) };
+      });
+      const r = await deleteModelsBatch(items);
+      if (r.ok) {
+        setModelList(await fetchModels());
+        setSelectedModelKeys(new Set());
+        setMessage({ type: "success", text: `已删除 ${r.deleted} 个模型` });
+        setTimeout(() => setMessage(null), 3000);
+      } else {
+        setMessage({ type: "error", text: r.error || "批量删除失败" });
+      }
+    } finally {
+      setBatchDeleting(false);
+    }
+  };
+
+  // 批量添加模型（textarea 每行一个 model id）
+  const handleBatchAdd = async () => {
+    const ids = batchAddText.split("\n").map((s) => s.trim()).filter(Boolean);
+    if (ids.length === 0 || !batchAddProvider) return;
+    setBatchAdding(true);
+    try {
+      const r = await addModelsBatch(ids.map((id) => ({ id, provider: batchAddProvider, description: id, alias: [], vision: true })));
+      if (r.ok) {
+        setModelList(await fetchModels());
+        setBatchAddOpen(false);
+        setBatchAddText("");
+        const skippedCount = r.skipped?.length ?? 0;
+        setMessage({ type: "success", text: `已添加 ${r.added} 个模型${skippedCount > 0 ? `，跳过 ${skippedCount} 个重复` : ""}` });
+        setTimeout(() => setMessage(null), 3000);
+      } else {
+        setMessage({ type: "error", text: r.error || "批量添加失败" });
+      }
+    } finally {
+      setBatchAdding(false);
+    }
   };
 
   // 删除 provider：实时调用 DELETE
@@ -419,26 +471,73 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
                     <div className="grid gap-2">
                       <div className="flex items-center justify-between">
                         <label className="text-sm font-medium">模型列表</label>
-                        <span className="text-xs text-muted-foreground">{modelList.length} 个</span>
+                        <div className="flex items-center gap-2">
+                          {selectedModelKeys.size > 0 && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-red-500 hover:text-red-600"
+                              disabled={batchDeleting}
+                              onClick={handleDeleteModelSelected}
+                            >{batchDeleting ? "删除中..." : `删除所选（${selectedModelKeys.size}）`}</Button>
+                          )}
+                          <span className="text-xs text-muted-foreground">{modelList.length} 个</span>
+                        </div>
                       </div>
                       <div className="rounded-md border border-border/60 divide-y divide-border/40">
-                        {modelList.map((m, i) => (
-                          <div key={`${m.provider}/${m.id}`} className="flex items-center gap-2 px-3 py-2 text-sm">
-                            <span className="font-mono text-xs text-muted-foreground shrink-0">{m.provider}</span>
-                            <span className="font-mono">{m.id}</span>
-                            {m.description && m.description !== m.id && (
-                              <span className="text-xs text-muted-foreground truncate">· {m.description}</span>
-                            )}
-                            <button
-                              className="ml-auto text-xs text-muted-foreground hover:text-red-400 shrink-0"
-                              onClick={async () => {
-                                const r = await deleteModel(m.provider, m.id);
-                                if (r.ok) setModelList(await fetchModels());
-                                else setMessage({ type: "error", text: r.error || "删除失败" });
+                        {modelList.length > 0 && (
+                          <label className="flex items-center gap-2 px-3 py-1.5 text-xs text-muted-foreground cursor-pointer bg-muted/20">
+                            <input
+                              type="checkbox"
+                              className="accent-primary"
+                              checked={modelList.length > 0 && selectedModelKeys.size === modelList.length}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedModelKeys(new Set(modelList.map((m) => `${m.provider}/${m.id}`)));
+                                } else {
+                                  setSelectedModelKeys(new Set());
+                                }
                               }}
-                            >删除</button>
-                          </div>
-                        ))}
+                            />
+                            全选
+                          </label>
+                        )}
+                        {modelList.map((m) => {
+                          const key = `${m.provider}/${m.id}`;
+                          return (
+                            <div key={key} className="flex items-center gap-2 px-3 py-2 text-sm">
+                              <input
+                                type="checkbox"
+                                className="accent-primary shrink-0"
+                                checked={selectedModelKeys.has(key)}
+                                onChange={(e) => {
+                                  setSelectedModelKeys((prev) => {
+                                    const next = new Set(prev);
+                                    if (e.target.checked) next.add(key);
+                                    else next.delete(key);
+                                    return next;
+                                  });
+                                }}
+                              />
+                              <span className="font-mono text-xs text-muted-foreground shrink-0">{m.provider}</span>
+                              <span className="font-mono">{m.id}</span>
+                              {m.description && m.description !== m.id && (
+                                <span className="text-xs text-muted-foreground truncate">· {m.description}</span>
+                              )}
+                              <button
+                                className="ml-auto text-xs text-muted-foreground hover:text-red-400 shrink-0"
+                                onClick={async () => {
+                                  const r = await deleteModel(m.provider, m.id);
+                                  if (r.ok) {
+                                    setModelList(await fetchModels());
+                                    setSelectedModelKeys((prev) => { const n = new Set(prev); n.delete(key); return n; });
+                                  }
+                                  else setMessage({ type: "error", text: r.error || "删除失败" });
+                                }}
+                              >删除</button>
+                            </div>
+                          );
+                        })}
                         {modelList.length === 0 && (
                           <div className="px-3 py-3 text-sm text-muted-foreground">暂无模型</div>
                         )}
@@ -472,6 +571,15 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
                             else setMessage({ type: "error", text: r.error || "添加失败" });
                           }}
                         >添加</Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-muted-foreground"
+                          onClick={() => {
+                            setNewProvider({ key: "", type: "openai_compat", base_url: "", api_key: "", disable_prompt_cache: false });
+                            setAddProviderOpen(true);
+                          }}
+                        ><Plus className="h-3.5 w-3.5" /> Provider</Button>
                       </div>
 
                       {/* provider 模型发现 */}
@@ -503,6 +611,14 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
                             } finally { setDiscovering(false); }
                           }}
                         >{discovering ? "拉取中…" : "从 provider 拉取候选"}</Button>
+                        <Button
+                          variant="outline"
+                          onClick={() => {
+                            setBatchAddProvider(discoverProvider || Object.keys(providerForm)[0] || "");
+                            setBatchAddText("");
+                            setBatchAddOpen(true);
+                          }}
+                        >批量添加</Button>
                       </div>
 
                       {/* 拉取结果弹窗：搜索 + 勾选 + 批量加入 */}
@@ -555,18 +671,18 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
                             <Button
                               disabled={selectedIds.size === 0}
                               onClick={async () => {
-                                let added = 0;
-                                for (const m of discovered) {
-                                  if (selectedIds.has(m.id) && !m.exists) {
-                                    const r = await addModel({ id: m.id, provider: m.provider, description: m.description, alias: [], vision: true });
-                                    if (r.ok) added++;
-                                  }
+                                const toAdd = discovered.filter((m) => selectedIds.has(m.id) && !m.exists);
+                                if (toAdd.length === 0) { setDiscoverOpen(false); return; }
+                                const r = await addModelsBatch(toAdd.map((m) => ({ id: m.id, provider: m.provider, description: m.description, alias: [], vision: true })));
+                                if (r.ok) {
+                                  setModelList(await fetchModels());
+                                  setSelectedIds(new Set());
+                                  setDiscoverOpen(false);
+                                  setMessage({ type: "success", text: `已加入 ${r.added} 个模型` });
+                                  setTimeout(() => setMessage(null), 3000);
+                                } else {
+                                  setMessage({ type: "error", text: r.error || "批量加入失败" });
                                 }
-                                setModelList(await fetchModels());
-                                setDiscovered((prev) => prev.map((x) => selectedIds.has(x.id) ? { ...x, exists: true } : x));
-                                setSelectedIds(new Set());
-                                setDiscoverOpen(false);
-                                if (added > 0) setMessage({ type: "success", text: `已加入 ${added} 个模型` });
                               }}
                             >确认加入{selectedIds.size > 0 ? `（${selectedIds.size}）` : ""}</Button>
                           </DialogFooter>
@@ -1184,6 +1300,44 @@ Content-Type: application/json
           <DialogFooter>
             <Button variant="outline" onClick={() => setAddProviderOpen(false)}>取消</Button>
             <Button onClick={handleAddProvider} disabled={!newProvider.key.trim()}>添加</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 批量添加模型对话框：每行一个 model id */}
+      <Dialog open={batchAddOpen} onOpenChange={setBatchAddOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>批量添加模型</DialogTitle>
+            <DialogDescription>每行一个 model id，重复的会自动跳过。</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="grid gap-2">
+              <label className="text-xs text-muted-foreground">所属 Provider</label>
+              <Select value={batchAddProvider} onValueChange={(v) => setBatchAddProvider(v || "")}>
+                <SelectTrigger><SelectValue placeholder="选择 provider" /></SelectTrigger>
+                <SelectContent>
+                  {Object.keys(providerForm).map((p) => (
+                    <SelectItem key={p} value={p}>{p}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <label className="text-xs text-muted-foreground">Model ID 列表</label>
+              <textarea
+                className="min-h-[140px] rounded-md border border-border/60 bg-transparent px-3 py-2 font-mono text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                placeholder={"gpt-5.2\ngpt-5.2-mini\ndeepseek-ai/DeepSeek-V3"}
+                value={batchAddText}
+                onChange={(e) => setBatchAddText(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBatchAddOpen(false)}>取消</Button>
+            <Button onClick={handleBatchAdd} disabled={batchAdding || !batchAddProvider || !batchAddText.trim()}>
+              {batchAdding ? "添加中..." : "添加"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

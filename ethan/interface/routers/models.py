@@ -40,6 +40,32 @@ async def add_model(req: ModelEntry):
     return {"ok": True}
 
 
+class BatchAddRequest(BaseModel):
+    models: list[ModelEntry]
+
+
+@router.post("/models/batch", dependencies=[Depends(verify_token)])
+async def add_models_batch(req: BatchAddRequest):
+    """批量添加模型：逐条去重（同 id 同 provider 跳过），一次性写盘。"""
+    if not req.models:
+        return {"ok": False, "error": "models is empty"}
+    config = get_config()
+    existing = {(m.id, m.provider) for m in config.models}
+    added = 0
+    skipped: list[dict] = []
+    for entry in req.models:
+        if (entry.id, entry.provider) in existing:
+            skipped.append({"id": entry.id, "provider": entry.provider, "reason": "exists"})
+            continue
+        config.models.append(_to_config_model(entry))
+        existing.add((entry.id, entry.provider))
+        added += 1
+    if added > 0:
+        save_config(config)
+        reload_config()
+    return {"ok": True, "added": added, "skipped": skipped}
+
+
 @router.put("/models/{provider}/{model_id}", dependencies=[Depends(verify_token)])
 async def update_model(provider: str, model_id: str, req: ModelEntry):
     config = get_config()
@@ -62,6 +88,32 @@ async def delete_model(provider: str, model_id: str):
     save_config(config)
     reload_config()
     return {"ok": True}
+
+
+class BatchDeleteItem(BaseModel):
+    provider: str
+    id: str
+
+
+class BatchDeleteRequest(BaseModel):
+    items: list[BatchDeleteItem]
+
+
+@router.post("/models/delete-batch", dependencies=[Depends(verify_token)])
+async def delete_models_batch(req: BatchDeleteRequest):
+    """批量删除模型。items 里的 (provider, id) 存在几个删几个，返回删除数量。"""
+    if not req.items:
+        return {"ok": False, "error": "items is empty"}
+    config = get_config()
+    targets = {(i.provider, i.id) for i in req.items}
+    before = len(config.models)
+    config.models = [m for m in config.models if (m.provider, m.id) not in targets]
+    deleted = before - len(config.models)
+    if deleted == 0:
+        return {"ok": False, "error": "no matching models"}
+    save_config(config)
+    reload_config()
+    return {"ok": True, "deleted": deleted}
 
 
 class DiscoverRequest(BaseModel):
