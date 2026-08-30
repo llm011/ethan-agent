@@ -107,6 +107,19 @@ function MathSpan({ latex, display }: { latex: string; display: boolean }) {
 
 
 export const markdownComponents: Components = {
+  // 外链一律新开标签页，避免点击后把当前会话页面顶走（回不来）。
+  // 锚点链接（#xxx）保持默认行为，仍在页内跳转。
+  a: ({ href, children }) => {
+    const url = String(href || "");
+    if (!url || url.startsWith("#")) {
+      return <a href={href}>{children}</a>;
+    }
+    return (
+      <a href={href} target="_blank" rel="noopener noreferrer">
+        {children}
+      </a>
+    );
+  },
   code: ({ className, children }) => {
     const match = /language-(\w+)/.exec(className || "");
     const raw = String(children);
