@@ -60,11 +60,27 @@ export async function consumeStream(
   let messageId: number | undefined;
   let finalUsage: Usage | undefined;
   let finalModel: string | undefined;
-  setMessages([...baseMessages, { role: "assistant", content: "", created_at: Date.now() / 1000 }]);
+  setMessages([...baseMessages, { role: "assistant", content: "", created_at: Date.now() / 1000, model: finalModel }]);
 
   try {
     for await (const chunk of stream) {
       if (trackTtft && ttft === undefined) ttft = Date.now() - sendTime;
+
+      // 模型在回复一开始就被后端 emit，立即记下并刷新气泡底部（与开始时间并列显示），
+      // 不再等到 done 事件才出现。done/error/stopped 事件也带 model，但各自要走自己的分支逻辑，
+      // 所以这里只对「纯 model 事件」单独重渲染，其他情况交给下方各分支 + 定稿。
+      if (chunk.model) {
+        finalModel = chunk.model;
+        const onlyModel = !chunk.done && !chunk.error && !chunk.stopped && !chunk.content && !chunk.tool && !chunk.heartbeat;
+        if (onlyModel) {
+          setMessages(prev =>
+            prev.length && prev[prev.length - 1]?.role === "assistant"
+              ? prev.map((m, i) => (i === prev.length - 1 ? { ...m, model: finalModel } : m))
+              : prev,
+          );
+          continue;
+        }
+      }
 
       if (chunk.consent_request) {
         setConsentRequest({
@@ -153,6 +169,7 @@ export async function consumeStream(
           toolSteps: currentToolSteps.length > 0 ? [...currentToolSteps] : undefined,
           toolsExpanded: currentToolSteps.length > 0 ? true : undefined,
           created_at: Date.now() / 1000,
+          model: finalModel,
           intermediateOutput: intermediateOutput || undefined,
         }]);
         continue;
@@ -180,6 +197,7 @@ export async function consumeStream(
         setMessages([...baseMessages, {
           role: "assistant", content: assistantContent, thought: assistantThought,
           toolSteps: [...currentToolSteps], toolsExpanded: true, created_at: Date.now() / 1000,
+          model: finalModel,
         }]);
       }
       if (chunk.tool && (chunk.state === "done" || chunk.state === "error")) {
@@ -235,6 +253,7 @@ export async function consumeStream(
         setMessages([...baseMessages, {
           role: "assistant", content: assistantContent, thought: assistantThought,
           toolSteps: [...currentToolSteps], toolsExpanded: true, created_at: Date.now() / 1000,
+          model: finalModel,
           intermediateOutput: intermediateOutput || undefined,
         }]);
       }
@@ -246,6 +265,7 @@ export async function consumeStream(
           toolSteps: currentToolSteps.length > 0 ? [...currentToolSteps] : undefined,
           toolsExpanded: currentToolSteps.length > 0 ? true : undefined,
           created_at: Date.now() / 1000,
+          model: finalModel,
           intermediateOutput: intermediateOutput || undefined,
         }]);
       }
@@ -257,6 +277,7 @@ export async function consumeStream(
           toolSteps: currentToolSteps.length > 0 ? [...currentToolSteps] : undefined,
           toolsExpanded: currentToolSteps.length > 0 ? true : undefined,
           created_at: Date.now() / 1000,
+          model: finalModel,
           intermediateOutput: intermediateOutput || undefined,
           cards: cardsCollected as any,
         }]);

@@ -288,6 +288,14 @@ async def _run_generation(
 
     set_inject_drainer(run.drain_injected)
 
+    # 模型在回复一开始就已确定（agent 创建时即绑定 provider.model），尽早 emit 给前端，
+    # 让气泡底部「开始时间」旁立即显示所用模型，而不是等到 done 事件才出现。
+    # 前端会在收到该事件时把 model 写进当前 assistant 气泡并即时重渲染。
+    try:
+        run.emit({"model": agent._provider.model})
+    except Exception:
+        logger.debug("emit model event failed session=%s", session_id, exc_info=True)
+
     # 恢复 DB 中遗留的未消费「补充信息」：正常结束/停止会在 finally 清空镜像，
     # 这里只会在进程崩溃/重启残留时读到非空，交给本轮 agent loop 消费，避免用户补充静默丢失。
     if session_id:
