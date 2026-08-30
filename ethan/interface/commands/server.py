@@ -152,6 +152,7 @@ def _install_cua_driver(console: Console) -> None:
 
 
 
+@app.command("uninstall")
 def uninstall() -> None:
     """卸载 Ethan 开机自启服务。"""
     console = Console()
