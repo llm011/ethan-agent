@@ -104,6 +104,45 @@ def test_pinned_and_search_carry_last_read_at(tmp_path):
     asyncio.run(_run())
 
 
+def test_touch_mark_read_does_not_create_unread(tmp_path):
+    """touch(mark_read=True)：落消息时用户正在查看（有订阅者），应同步推进水位，不制造未读。"""
+    async def _run():
+        store = await _mk_store(tmp_path)
+        sid = (await store.create("m", source="web", mode="")).id
+        # 制造未读
+        await store.save_message(sid, Message(role="assistant", content="后台回复"))
+        await store.touch(sid)
+        (s,) = await store.list_recent(10)
+        assert _unread(s), "前置：普通 touch 应制造未读"
+
+        # mark_read 后再 mark_read 的 touch：不应重新制造未读（用户正看着）
+        await store.mark_read(sid)
+        await store.touch(sid, mark_read=True)
+        (s,) = await store.list_recent(10)
+        assert not _unread(s), "mark_read touch 不应制造未读（用户正在查看）"
+        # 且 updated_at 确实被推进（排除『没更新导致不未读』的假阳性）
+        assert s.last_read_at == s.updated_at
+
+    asyncio.run(_run())
+
+
+def test_touch_mark_read_follows_after_normal_unread(tmp_path):
+    """mark_read touch 在已有未读时也会推进水位，等价 mark_read 的效果（幂等方向正确）。"""
+    async def _run():
+        store = await _mk_store(tmp_path)
+        sid = (await store.create("m", source="web", mode="")).id
+        await store.save_message(sid, Message(role="assistant", content="后台回复"))
+        await store.touch(sid)
+
+        # 直接 mark_read touch（未先 mark_read）：水位同步推进，未读消除
+        await store.touch(sid, mark_read=True)
+        (s,) = await store.list_recent(10)
+        assert not _unread(s)
+        assert s.last_read_at == s.updated_at
+
+    asyncio.run(_run())
+
+
 def test_legacy_db_backfills_read(tmp_path):
     """旧版本 DB（无 last_read_at 列）：迁移后存量会话视为已读。"""
 
