@@ -9,6 +9,7 @@
 | （空） | — | 默认「工作助手」 |
 | `companion` | 陪伴 / counselor / 苏念 | 苏念 · 陪伴倾听（人格覆盖，熟读《臣服实验》） |
 | `legal` | 法律 / 法律专家 / 法务 | 法律专家（依赖外部技能 `legal-assistant`，按需安装） |
+| `minimal` | 精简 / 精简模式 | **精简模式**：只挂基础工具、用极简 system prompt、不注入记忆、不带历史上下文（引用某条消息时才带上那条 + 其 tool 调用与产出文件路径） |
 
 > **key 是稳定的英文 slug**（持久化到 `sessions.mode` / 比较用），中文走 `label`（UI 展示）和 `aliases`（用户输入 `/mode 法律` 也能切）。这样 DB 值与显示名解耦，改显示名不动 key。
 
@@ -28,6 +29,17 @@
 - **Web**：输入框旁的模式下拉，选「⚖️ 法律专家」等即可；切换即持久化到当前会话，刷新/重进保持。
 - **CLI / 飞书等渠道**：`/mode 法律` 切入、`/mode default` 切回默认。模式名无法识别时**保持当前模式不变**（不会误切回默认）。
 - 模式存在会话上（`sessions.mode`），`/resume`、新建会话、跨渠道都会还原。
+
+## 精简模式（minimal）
+
+`minimal` 是一个「无状态、干活用」的工作态，适合「只想要个干净助手、不要被记忆/历史/人格带偏」的场景。切到它后：
+
+- **工具集固定**：只挂 [`MINIMAL_TOOLS`](../ethan/core/modes.py) 白名单（文件读写 `file_read/write/edit/list`、检索 `rg_search/fd_find`、`shell`、`web_search/web_fetch`、`skill_read/skill_list`、`find_tools`）。记忆 / 定时 / 委派 / 浏览器 / deliver_file 等长尾工具一概不注册。
+- **system prompt 极简**：只保留 `<soul>`（基础原则）+ `<identity>`，外加一句模式说明、当前时间/模型/工作目录。不注入 user_profile、行为准则、技能匹配、历史摘要、记忆召回提示、记忆信号。
+- **不用记忆**：不注入长期记忆，`recall_memory` 等记忆工具不注册，对话结束后也不触发记忆合并（`_maybe_consolidate` 直接跳过）。
+- **不带历史上下文**：每次请求只带「当前这条消息」。只有在**引用某条消息**时，才把那条消息带上——并且若它是执行过工具的 assistant 消息，还会附上其 **tool 调用列表** 和 **产出文件的路径 + 简短描述**（不读文件内容）。引用定位优先用 `quote.message_id`（前端引用按钮已带上），无 message_id 时按内容兜底。
+
+> 实现入口：`ethan/core/modes.py`（`minimal` 标志 + `MINIMAL_TOOLS`）、`ethan/core/agent_factory.py`（工具注册门控）、`ethan/core/agent.py::_select_route`（路由门控）、`ethan/core/system_prompt.py`（精简 prompt 分支）、`ethan/interface/routers/chat.py`（历史裁剪 + 引用增强）、`ethan/interface/routers/helpers.py::_enrich_quote_for_minimal`（引用 tool/文件附带）、`ethan/interface/routers/tasks.py`（跳过记忆合并）。
 
 ## 技能与模式的关系（零污染）
 

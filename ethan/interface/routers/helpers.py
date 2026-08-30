@@ -118,6 +118,108 @@ def _with_quote(user_msg: Message, quote: dict | None) -> Message:
     return Message(role=user_msg.role, content=prefixed, created_at=user_msg.created_at, images=user_msg.images)
 
 
+def _find_quoted_message(history: list[Message], quote: dict) -> Message | None:
+    """按 quote.message_id 精确找被引用的历史消息；无 message_id 时按 content 模糊兜底。"""
+    mid = quote.get("message_id")
+    if mid is not None:
+        for m in history:
+            if m.id == mid:
+                return m
+    qcontent = str(quote.get("content") or "").strip()
+    if not qcontent:
+        return None
+    # 内容兜底：优先精确匹配，其次包含匹配
+    for m in history:
+        if (m.content or "").strip() == qcontent:
+            return m
+    for m in history:
+        if qcontent and qcontent in (m.content or ""):
+            return m
+    return None
+
+
+def _extract_file_paths(*texts: str) -> list[str]:
+    """从工具参数/结果文本里粗提取常见文件路径（/tmp/ 等绝对路径），去重保序。"""
+    import re
+
+    seen: list[str] = []
+    pat = re.compile(r"(?:/tmp|/var|/private|~|\.)/[^\s\"'`，,；;]+")
+    for t in texts:
+        if not t:
+            continue
+        for m in pat.finditer(t):
+            p = m.group(0).rstrip("/,.;'\"")
+            if p not in seen:
+                seen.append(p)
+    return seen
+
+
+def _enrich_quote_for_minimal(history: list[Message], quote: dict, current_user: Message) -> Message:
+    """精简模式专用：把引用消息拼到当前消息上，并附上该消息的 tool 调用列表与产出文件路径。
+
+    与 _with_quote 的区别：
+      - 引用消息不仅带正文，若它是 assistant 消息且执行过工具，则追加：
+          * tool 调用列表（工具名 + 参数摘要）
+          * 相关文件路径 + 简短描述（不读文件内容）
+      - 找不到被引用消息时退回 _with_quote 的纯正文行为。
+    """
+    if not quote or not quote.get("content"):
+        return current_user
+    role_label = "用户" if quote.get("role") == "user" else "Ethan"
+    quote_text = str(quote["content"]).replace("\n", "\n> ")
+    parts = [f"> [引用 {role_label} 的消息]:\n> {quote_text}"]
+
+    ref = _find_quoted_message(history, quote)
+    if ref is not None:
+        extras: list[str] = []
+        # 1) tool 调用列表
+        if ref.tool_calls:
+            call_lines = [
+                f"  - {tc.name}({_short_args(tc.arguments)})" for tc in ref.tool_calls[:20]
+            ]
+            extras.append("该消息执行过的工具调用：\n" + "\n".join(call_lines))
+        # 2) 相关文件路径 + 简短描述（从 tool_steps 的 args / result 里粗提）
+        file_lines: list[str] = []
+        step_files: list[str] = []
+        if ref.tool_steps:
+            for step in ref.tool_steps:
+                sargs = str(step.get("args") or "")
+                sres = str(step.get("result_preview") or "") + " " + str(step.get("result_detail") or "")
+                step_files.extend(_extract_file_paths(sargs, sres))
+        args_blob = " ".join(_short_args(tc.arguments) for tc in (ref.tool_calls or []) if tc.arguments)
+        step_files.extend(_extract_file_paths(args_blob))
+        seen_files: list[str] = []
+        for p in step_files:
+            if p not in seen_files:
+                seen_files.append(p)
+        for p in seen_files[:20]:
+            file_lines.append(f"  - {p}")
+        if file_lines:
+            extras.append(
+                "该消息涉及的产出文件路径（可自行读取，勿把内容贴回）：\n" + "\n".join(file_lines)
+            )
+        if extras:
+            parts.append("[引用消息的附加上下文]\n" + "\n".join(extras))
+
+    parts.append(current_user.content or "")
+    return Message(
+        role=current_user.role,
+        content="\n\n".join(parts),
+        created_at=current_user.created_at,
+        images=current_user.images,
+    )
+
+
+def _short_args(arguments: dict, limit: int = 120) -> str:
+    """把工具参数压缩成单行摘要（去 intent，截断）。"""
+    if not arguments:
+        return ""
+    d = dict(arguments)
+    d.pop("intent", None)
+    s = json.dumps(d, ensure_ascii=False, sort_keys=True, default=str)
+    return s[:limit] + ("…" if len(s) > limit else "")
+
+
 def _persist_images_to_disk(msg: Message, session_id: str) -> tuple[list[str], list[str]]:
     """将消息中的 base64 图片保存为本地文件，msg.images 就地替换为路径格式。
 

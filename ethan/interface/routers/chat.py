@@ -269,17 +269,29 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
                 await store.update_mode(req.session_id, req.mode)
 
         if req.session_id and not req.btw:
+            from ethan.core.modes import resolve_mode
             from ethan.memory.working import WorkingMemory
 
             session = await store.load(req.session_id)
             history = session.messages if session else []
 
-            # 长期记忆由 agent system prompt 的 <memory_context> 统一注入，
-            # 这里只保留会话内 hot 滑窗，不再重复注入 cold facts 伪消息对
-            memory = WorkingMemory.from_history(history, hot_size=10)
+            if resolve_mode(req.mode or "").minimal:
+                # 精简模式：不带历史上下文，只带当前消息 + 引用的那条消息。
+                # 若引用了某条消息，则把那条的 tool 调用列表与产出文件路径也附上。
+                from ethan.interface.routers.helpers import _enrich_quote_for_minimal
 
-            current_user = _with_quote(messages[-1], req.quote)
-            messages = memory.build_context() + [current_user]
+                current_user = messages[-1]
+                if req.quote and req.quote.get("content"):
+                    messages = [_enrich_quote_for_minimal(history, req.quote, current_user)]
+                else:
+                    messages = [_with_quote(current_user, req.quote)]
+            else:
+                # 长期记忆由 agent system prompt 的 <memory_context> 统一注入，
+                # 这里只保留会话内 hot 滑窗，不再重复注入 cold facts 伪消息对
+                memory = WorkingMemory.from_history(history, hot_size=10)
+
+                current_user = _with_quote(messages[-1], req.quote)
+                messages = memory.build_context() + [current_user]
             # 历史消息中的图片从 {path} 格式解析为 {data} base64（LLM 需要）
             _resolve_images_for_llm(messages)
         elif req.btw and messages:

@@ -97,6 +97,31 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
     飞书/api 等无渲染器的渠道不暴露它，避免模型调了卡片却只能看到 ack 文字。
     """
     registry = ToolRegistry()
+    # ── 精简模式：只注册 MINIMAL_TOOLS 固定白名单，不注册记忆/定时/委派等长尾工具 ──
+    from ethan.core.modes import MINIMAL_TOOLS, resolve_mode
+
+    if resolve_mode(mode).minimal:
+        _minimal_instances: dict[str, object] = {
+            "file_read": FileReadTool(),
+            "file_write": FileWriteTool(),
+            "file_edit": FileEditTool(),
+            "file_list": FileListTool(),
+            "rg_search": RipgrepTool(),
+            "fd_find": FdTool(),
+            "shell": ShellTool(),
+            "web_search": WebSearchTool(),
+            "web_fetch": WebFetchTool(),
+            "skill_read": SkillReadTool(),
+            "skill_list": SkillListTool(),
+        }
+        for _name in MINIMAL_TOOLS:
+            _inst = _minimal_instances.get(_name)
+            if _inst is not None:
+                registry.register(_inst)
+        # find_tools 元工具：持有 registry 引用，供模型在极少数需要长尾能力时临时激活。
+        registry.register(FindToolsTool(registry))
+        return registry
+
     # 基础工具（所有 toolset 共有）
     registry.register(ShellTool())
     registry.register(WebSearchTool())

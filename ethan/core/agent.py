@@ -278,6 +278,18 @@ class Agent:
         路由仅影响工具集和模型选择；迭代上限统一用 defaults.max_tool_iterations。
         """
         working = list(messages)
+        # ── 精简模式：固定只用 MINIMAL_TOOLS 白名单工具、极简 system prompt ──
+        # 不走 fast/full 的 keyword 路由，也不用 owner 专属的 recall_memory/deliver_file
+        # （精简模式刻意「无记忆、不交付」）。
+        from ethan.core.modes import resolve_mode
+
+        if resolve_mode(self._mode).minimal:
+            from ethan.core.modes import MINIMAL_TOOLS
+
+            tools_list = [t for t in self._registry.all() if t.name in MINIMAL_TOOLS]
+            system = self._build_system(working, fast=False)
+            return "minimal", system, tools_list, get_config().defaults.max_tool_iterations
+
         last_user = self._get_last_user_text(working)
         skill_triggers = [kw for s in (self._skills.all() if self._skills else []) if s.fast_path for kw in s.trigger]
         route = _get_route(last_user, skill_triggers=skill_triggers)

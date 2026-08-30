@@ -266,7 +266,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const handleQuote = useCallback((m: Message) => {
-    setQuote({ role: m.role, content: m.content });
+    setQuote({ role: m.role, content: m.content, message_id: m.id });
     setTimeout(() => inputRef.current?.focus(), 30);
   }, []);
 

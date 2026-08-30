@@ -31,6 +31,21 @@ class Mode:
     install_alias: str = ""           # 对应 `ethan skill add <alias>` 的友好别名（失败兜底时提示用户手动装）
     delegate_agent: str = ""          # 非空 = 「沉浸式工具模式」：整条会话的每句话都续接该 coding agent
                                       # （codex/claude/opencode），而不是走 Ethan 的 chat 模型。
+    minimal: bool = False             # 精简模式：只挂基础工具、只用极简 system prompt、
+                                      # 不注入记忆 / 不带历史上下文（除非引用某条消息）。
+
+
+# 精简模式（minimal）的固定工具白名单。内核在 build_tool_registry / _select_route
+# 里用它作为该模式的唯一工具集：模型看到的只有这批，不用 find_tools 也能直接用；
+# 这里故意不含记忆 / 定时 / 委派等长尾工具，保持「精简、无状态」的定位。
+MINIMAL_TOOLS: tuple[str, ...] = (
+    "file_read", "file_write", "file_edit", "file_list",
+    "rg_search", "fd_find",
+    "shell",
+    "web_search", "web_fetch",
+    "skill_read", "skill_list",
+    "find_tools",  # 保留发现能力：万一需要进阶工具，仍可临时激活（不自动持久化）
+)
 
 
 # 唯一真相源：所有内置对话模式。
@@ -93,6 +108,19 @@ MODES: tuple[Mode, ...] = (
         accent="amber",
         delegate_agent="opencode",
         blurb="已进入 OpenCode 模式：每条消息都直接交给 OpenCode 在本会话工作目录里执行",
+    ),
+    # ── 精简模式 ───────────────────────────────────────────────
+    # 无状态工作态：只挂 MINIMAL_TOOLS 基础工具、system prompt 砍到只剩 soul 等基础原则、
+    # 不注入记忆、不带历史上下文（引用某条消息时才带上那条 + 其 tool 调用与产出文件路径）。
+    # 供「只想要一个能干点活的干净助手、不要被记忆/历史/人格带偏」的场景。
+    Mode(
+        key="minimal",
+        aliases=("minimal", "精简", "精简模式"),
+        label="精简模式",
+        icon="⚡",
+        accent="green",
+        minimal=True,
+        blurb="已进入精简模式：只挂基础工具、不用记忆、不带历史上下文；引用消息时仅带上那条消息",
     ),
 )
 

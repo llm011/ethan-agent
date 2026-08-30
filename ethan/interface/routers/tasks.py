@@ -174,6 +174,11 @@ async def _maybe_consolidate(session_id: str, model: str, user_id: str = "", mod
     from ethan.memory.session_backup import schedule_backup
     schedule_backup()
 
+    # 精简模式刻意「不用记忆」：不触发任何记忆抽取/合并
+    from ethan.core.modes import resolve_mode
+    if resolve_mode(mode).minimal:
+        return
+
     try:
         # 心理画像是否额外抽取：由当前 mode 自身声明，不在此硬编码模式名
         from ethan.core.modes import resolve_mode

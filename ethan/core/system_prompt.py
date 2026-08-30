@@ -237,6 +237,30 @@ def build_system_prompt(
     agent_content = system_files.get("agent", "")
     tools_content = system_files.get("tools", "")
 
+    # ── 精简模式：system prompt 只保留基础原则（soul）+ 身份，不注入记忆/人格/技能/历史摘要 ──
+    from ethan.core.modes import resolve_mode
+
+    if resolve_mode(mode).minimal:
+        parts = []
+        if soul_content:
+            parts.append(
+                f"<soul>\n[CRITICAL — 以下基础原则必须严格遵守]\n\n{soul_content}\n</soul>"
+            )
+        parts.append(f"<identity>\n{identity_content}\n</identity>")
+        parts.append(
+            "<mode_note>\n"
+            "当前处于「精简模式」：只挂载少量基础工具（文件读写/检索/shell/网页搜索与抓取/技能读取），"
+            "不注入长期记忆，也不携带历史对话上下文。请基于当前这条消息（及引用的消息，如有）独立作答。"
+            "</mode_note>"
+        )
+        parts.append(f"Current time: {now}")
+        parts.append(
+            f"Current model: {provider_model}（用户问起你用的什么模型/是谁驱动时，如实回答这个 model id）"
+        )
+        parts.append(f"Your workspace directory is {workspace}.")
+        # 精简模式不产出 previous_run_summary —— 上一轮上下文不自动带上。
+        return "\n\n".join(parts)
+
     if fast:
         parts = []
         if soul_content:
