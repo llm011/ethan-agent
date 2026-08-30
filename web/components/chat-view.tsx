@@ -722,7 +722,10 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       content = `${fileContext}\n\n${content}`;
     }
 
-    const modelInfo = models.find((m) => m.id === selectedModel);
+    // selectedModel 可能是纯 id 或 provider/id 复合格式（重名模型时前端存复合格式）
+    const modelInfo = models.find(
+      (m) => m.id === selectedModel || (m.provider ? `${m.provider}/${m.id}` : m.id) === selectedModel
+    );
     const visionSupported = modelInfo?.vision !== false;
     let imagesToSend = imageFiles;
     if (imageFiles.length > 0 && !visionSupported) {

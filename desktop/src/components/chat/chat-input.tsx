@@ -7,6 +7,9 @@ import { MdEditor } from "@/components/md-editor";
 import { QueuedMessages } from "./queued-messages";
 import type { QueuedMessage } from "./use-input-store";
 
+// 哨兵值：旧会话存的纯 model id 命中多个 provider 时的「待重选」态，不可作为真实选择提交
+const NEED_CHOICE = "__need_model_choice__";
+
 // mode.accent → 完整 Tailwind 类（必须静态写全，Tailwind 不识别动态拼接的类名）。
 // 新增带新配色的模式时在此补一条；未知 accent 回退 neutral。
 const ACCENT_STYLES: Record<string, { on: string }> = {
@@ -175,7 +178,23 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     onFilesChange([...pendingFiles, ...added]);
   }, [pendingFiles, onFilesChange]);
 
+  // 旧会话可能只存了纯 model id。升级策略：
+  // - 唯一匹配：确定无疑，直接升级为 provider/id
+  // - 多个 provider 配了同名模型：不做任何猜测（否则消息会悄悄发给另一家 provider），
+  //   标记为待确认，界面上强制用户显式重选后才允许发送
+  const fullIdOf = (m: { id: string; provider?: string }) => (m.provider ? `${m.provider}/${m.id}` : m.id);
+  const effectiveModelValue = (() => {
+    if (models.some((m) => fullIdOf(m) === selectedModel)) return selectedModel;
+    const hits = models.filter((m) => m.id === selectedModel);
+    if (hits.length === 1) return fullIdOf(hits[0]); // 唯一匹配，安全升级
+    return hits.length > 1 ? NEED_CHOICE : selectedModel; // 重名：不猜，交给用户选
+  })();
+  const ambiguousLegacy =
+    !models.some((m) => fullIdOf(m) === selectedModel) &&
+    models.filter((m) => m.id === selectedModel).length > 1;
+
   const handleSend = () => {
+    if (ambiguousLegacy) return; // 同名模型歧义未解决，先让用户选 provider
     if (!input.trim() && pendingFiles.length === 0) return;
     // streaming 中发送 → 进入排队队列（连同附图一起入队）
     if (streaming && onQueueSend) {
@@ -224,6 +243,24 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
             >
               <X className="h-3 w-3" />
             </button>
+          </div>
+        )}
+
+        {/* 旧会话存的纯 id 命中多个同名模型：列出候选让用户选择，选择前不能发送 */}
+        {ambiguousLegacy && (
+          <div className="flex items-center gap-2 mb-2 px-3 py-1.5 rounded-md bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-xs text-amber-700 dark:text-amber-300 flex-wrap">
+            <span className="shrink-0">模型「{selectedModel}」在多个 provider 下重名，请选择要使用的：</span>
+            {models
+              .filter((m) => m.id === selectedModel)
+              .map((m) => (
+                <button
+                  key={fullIdOf(m)}
+                  onClick={() => onModelChange(fullIdOf(m))}
+                  className="px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-900/60 hover:bg-amber-200 dark:hover:bg-amber-900 font-mono"
+                >
+                  {fullIdOf(m)}
+                </button>
+              ))}
           </div>
         )}
 
@@ -344,15 +381,27 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               <Paperclip className="h-4 w-4" />
             </button>
             <input ref={fileRef} type="file" className="hidden" multiple accept="*/*" onChange={handleFileUpload} />
-            <Select value={selectedModel} onValueChange={(v) => v && onModelChange(v)} disabled={streaming}>
+            <Select
+              value={effectiveModelValue}
+              onValueChange={(v) => v && v !== NEED_CHOICE && onModelChange(v)}
+              disabled={streaming}
+            >
               <SelectTrigger className="h-7 px-2.5 text-xs bg-transparent border-0 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg shadow-none focus:ring-0 focus:ring-offset-0 gap-1 w-auto max-w-[200px]">
                 <SelectValue placeholder="模型" />
               </SelectTrigger>
               <SelectContent className="min-w-[280px] max-h-[50vh] overflow-y-auto">
+                {ambiguousLegacy && (
+                  <SelectItem value={NEED_CHOICE} disabled className="text-xs text-amber-600 dark:text-amber-500">
+                    有多个 provider 提供该模型，请指定一个
+                  </SelectItem>
+                )}
                 {models.map((m) => {
                   const displayName = m.alias?.length ? m.alias[0] : (m.description || m.id);
+                  // 不同 provider 可能有同名模型（如两个 provider 都配了 glm-5.3），
+                  // value 必须全局唯一（provider/id），否则 Select 会把同名项全部标为选中
+                  const fullId = m.provider ? `${m.provider}/${m.id}` : m.id;
                   return (
-                    <SelectItem key={m.id} value={m.id} className="text-xs">
+                    <SelectItem key={fullId} value={fullId} className="text-xs">
                       <span className="flex items-center gap-2 w-full">
                         <span className="truncate">{displayName}</span>
                         {m.provider && <span className="text-muted-foreground/60 text-[10px] ml-auto shrink-0">{m.provider}</span>}
@@ -427,9 +476,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
             )}
             <button
               onClick={handleSend}
-              disabled={!input.trim() && pendingFiles.length === 0}
+              disabled={ambiguousLegacy || (!input.trim() && pendingFiles.length === 0)}
+              title={ambiguousLegacy ? "请先选择要使用的 provider" : streaming ? "排队发送" : "发送"}
               className="h-7 w-7 flex items-center justify-center rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
-              title={streaming ? "排队发送" : "发送"}
             >
               <Send className="h-3.5 w-3.5" />
             </button>
