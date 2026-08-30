@@ -5,7 +5,7 @@ import asyncio
 import ipaddress
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from ethan import __version__
@@ -609,6 +609,7 @@ def _build_resume_summary(target, process_md: str) -> str:
 
 @router.post("/chat/{session_id}/resume/{message_id}")
 async def resume_from_message(session_id: str, message_id: int, request: Request,
+                              model: str | None = Query(None),
                               user_id: str = Depends(verify_token)):
     """从一条中断的消息继续执行。
 
@@ -665,6 +666,8 @@ async def resume_from_message(session_id: str, message_id: int, request: Request
         stream=True,
         channel="web",
         mode=session.mode,
+        # 沿用当前窗口选中的模型（前端透传 selectedModel），不回退到默认模型
+        model=model or None,
         auto_consent=_is_local(request),
         runtime_context=resume_context,
         resume_summary=summary,

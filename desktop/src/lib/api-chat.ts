@@ -50,10 +50,13 @@ async function* parseSSE(res: Response): AsyncGenerator<StreamChunk> {
 export async function* resumeFromMessage(
   sessionId: string,
   messageId: number,
+  model?: string,
 ): AsyncGenerator<StreamChunk> {
   let res: Response;
+  // 沿用当前窗口选中的模型，避免 resume 回退到默认模型
+  const query = model ? `?model=${encodeURIComponent(model)}` : "";
   try {
-    res = await fetch(`${getApiUrl()}/chat/${encodeURIComponent(sessionId)}/resume/${encodeURIComponent(messageId)}`, {
+    res = await fetch(`${getApiUrl()}/chat/${encodeURIComponent(sessionId)}/resume/${encodeURIComponent(messageId)}${query}`, {
       method: "POST",
       headers: headers(),
     });
