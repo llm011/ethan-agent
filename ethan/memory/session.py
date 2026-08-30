@@ -776,11 +776,25 @@ class SessionStore:
                 )
         return sessions
 
-    async def touch(self, session_id: str) -> None:
-        await self._db.execute(
-            "UPDATE sessions SET updated_at = ? WHERE id = ?",
-            (time.time(), session_id),
-        )
+    async def touch(self, session_id: str, mark_read: bool = False) -> None:
+        """推进会话 updated_at（列表排序时间戳）。
+
+        mark_read=True 时同步把未读水位 last_read_at 一起推进，表示「落消息的同时
+        用户正在查看该会话」，不应制造未读红点。用于 producer 流式落库：只要还有
+        活跃 SSE 订阅者（用户窗口正开着、正接收实时流），就同步推进水位，避免
+        「正在看的对话因为后台 touch 而闪烁红点」。
+        """
+        now = time.time()
+        if mark_read:
+            await self._db.execute(
+                "UPDATE sessions SET updated_at = ?, last_read_at = ? WHERE id = ?",
+                (now, now, session_id),
+            )
+        else:
+            await self._db.execute(
+                "UPDATE sessions SET updated_at = ? WHERE id = ?",
+                (now, session_id),
+            )
         await self._db.commit()
 
     async def mark_read(self, session_id: str) -> bool:

@@ -199,7 +199,7 @@ async def _run_delegate_generation(
         run.emit({"content": msg})
         try:
             await store.save_message(session_id, Message(role="assistant", content=msg))
-            await store.touch(session_id)
+            await store.touch(session_id, mark_read=bool(run.subscribers))
         except Exception:
             pass
         run.emit({"done": True, "usage": {}})
@@ -246,7 +246,7 @@ async def _run_delegate_generation(
                     tool_steps=result.sub_steps or [],
                 ),
             )
-            await store.touch(session_id)
+            await store.touch(session_id, mark_read=bool(run.subscribers))
     except Exception:
         logger.exception("保存委派续接结果失败 session=%s", session_id)
 
@@ -483,7 +483,7 @@ async def _run_generation(
                             model=agent._provider.model,
                         ),
                     )
-                    await store.touch(session_id)
+                    await store.touch(session_id, mark_read=bool(run.subscribers))
                 else:
                     await store.delete_message_by_id(progress_msg_id)
             except Exception:
@@ -508,7 +508,7 @@ async def _run_generation(
                     model=agent._provider.model,
                 )
                 await store.save_message(session_id, stopped_msg)
-                await store.touch(session_id)
+                await store.touch(session_id, mark_read=bool(run.subscribers))
             except Exception:
                 logger.exception("保存已停止生成的部分内容失败 session=%s", session_id)
         # 被 stop/watchdog cancel 时也尝试生成标题（新会话第一轮就被 cancel 则没有标题）
@@ -569,7 +569,7 @@ async def _run_generation(
                     await store.update_message(progress_msg_id, session_id, err_msg)
                 else:
                     await store.save_message(session_id, err_msg)
-                await store.touch(session_id)
+                await store.touch(session_id, mark_read=bool(run.subscribers))
             except Exception:
                 logger.exception("保存错误消息失败 session=%s", session_id)
         run.emit({"done": True, "usage": collector.usage_dict})
@@ -680,8 +680,10 @@ async def _run_generation(
         # touch 只更新会话列表的 updated_at 排序时间戳，与主消息落库解耦：
         # 极端情况下主消息已保存成功、touch 撞锁重试耗尽时，不该给前端报
         # 「保存失败」，更不该把已成功的定稿误标 interrupted——单独容错，失败仅记日志。
+        # mark_read=有活跃订阅者：用户窗口正开着这轮对话、正接收实时流，落消息
+        # 时同步推进未读水位，避免「正在看的会话因后台 touch 闪烁红点」。
         try:
-            await retry_on_db_locked(store.touch, session_id)
+            await retry_on_db_locked(store.touch, session_id, mark_read=bool(run.subscribers))
         except Exception:
             logger.warning("touch 会话时间戳失败（重试耗尽）session=%s", session_id, exc_info=True)
 
@@ -720,7 +722,7 @@ async def _run_generation(
                         content=bg_msg,
                     ),
                 )
-                await bg_store.touch(session_id)
+                await bg_store.touch(session_id, mark_read=bool(run.subscribers))
             except Exception:
                 logger.exception("保存 getnote 后台结果失败 session=%s", session_id)
         elif result and result.get("detail_failed"):
@@ -735,7 +737,7 @@ async def _run_generation(
                         content=detail_msg,
                     ),
                 )
-                await bg_store.touch(session_id)
+                await bg_store.touch(session_id, mark_read=bool(run.subscribers))
             except Exception:
                 logger.exception("保存 getnote detail 失败提示失败 session=%s", session_id)
         else:
@@ -749,7 +751,7 @@ async def _run_generation(
                         content=timeout_msg,
                     ),
                 )
-                await bg_store.touch(session_id)
+                await bg_store.touch(session_id, mark_read=bool(run.subscribers))
             except Exception:
                 logger.exception("保存 getnote 超时提示失败 session=%s", session_id)
 
