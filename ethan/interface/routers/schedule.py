@@ -41,11 +41,16 @@ def _validate_path_in_config(path_str: str) -> Path:
 
 
 _SCENE_RE = re.compile(r"^[a-zA-Z0-9_\-]+$")
+_SCENE_MAX_LEN = 32
 
 
 def _validate_scene(scene: str) -> str:
-    """校验 scene 名称，防止路径穿越。只允许字母数字下划线和短横线。"""
-    if not scene or not _SCENE_RE.match(scene):
+    """校验 scene 名称，防止路径穿越。
+
+    只允许字母数字下划线和短横线（`/`、`.` 等均过不了白名单），并限制长度。
+    scene 是开放集合（work/life 预置，health/study 等按需惰性创建），故不限定固定枚举。
+    """
+    if not scene or len(scene) > _SCENE_MAX_LEN or not _SCENE_RE.match(scene):
         raise HTTPException(400, f"Invalid scene name: {scene!r}")
     return scene
 
@@ -170,6 +175,7 @@ class SchedulePatchRequest(BaseModel):
     title: str | None = None
     prompt: str | None = None
     cron: str | None = None
+    scene: str | None = None  # work / life / ...；修改任务分类
 
 
 @router.patch("/{job_id}", dependencies=[Depends(verify_token)])
@@ -207,6 +213,10 @@ async def patch_schedule(job_id: str, req: SchedulePatchRequest):
                 raise HTTPException(404, "Job not found")
         except ValueError as e:
             raise HTTPException(400, f"Invalid cron expression: {e}")
+    if req.scene is not None:
+        _validate_scene(req.scene)
+        if not scheduler.modify_kwargs(job_id, scene=req.scene):
+            raise HTTPException(404, "Job not found or could not update scene")
     return {"ok": True}
 
 

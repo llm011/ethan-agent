@@ -1,14 +1,15 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom"
 import {
-  ScheduleJob, fetchSchedules, deleteSchedule, patchSchedule, renameSchedule, updateSchedulePrompt, updateScheduleCron, triggerSchedule,
+  ScheduleJob, fetchSchedules, deleteSchedule, patchSchedule, updateSchedulePrompt, updateSchedule, triggerSchedule,
   fetchSessions, SessionInfo,
 } from "@/lib/api";
 import { Badge } from "@ethan/shared/ui/badge";
 import { Button } from "@ethan/shared/ui/button";
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@ethan/shared/ui/tooltip";
 import { ScrollArea } from "@ethan/shared/ui/scroll-area";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@ethan/shared/ui/card";
-import { Loader2, RefreshCw, Play, Pause, Trash2, MessageSquare, ChevronDown, ChevronRight, Pencil, Clock, CalendarClock, TerminalSquare, Zap } from "lucide-react";
+import { Loader2, RefreshCw, Play, Pause, Trash2, MessageSquare, ChevronDown, ChevronRight, Pencil, Clock, TerminalSquare, Zap } from "lucide-react";
 import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
 import { formatTrigger, formatNextRun } from "@/lib/utils";
 import {
@@ -91,9 +92,8 @@ export function ScheduleView() {
   const [sessionsExpanded, setSessionsExpanded] = useState(false);
   const [heartbeatSessions, setHeartbeatSessions] = useState<SessionInfo[]>([]);
   const [heartbeatExpanded, setHeartbeatExpanded] = useState(false);
-  const [renameDialog, setRenameDialog] = useState<{ open: boolean; id: string; currentName: string }>({ open: false, id: "", currentName: "" });
+  const [editDialog, setEditDialog] = useState<{ open: boolean; id: string; name: string; scene: string; cron: string }>({ open: false, id: "", name: "", scene: "work", cron: "" });
   const [promptDialog, setPromptDialog] = useState<{ open: boolean; id: string; currentPrompt: string }>({ open: false, id: "", currentPrompt: "" });
-  const [cronDialog, setCronDialog] = useState<{ open: boolean; id: string; currentCron: string }>({ open: false, id: "", currentCron: "" });
 
   // ── Scene 维度：work / life 预置 + 动态发现 ──
   const scenes = useMemo(() => {
@@ -165,18 +165,26 @@ export function ScheduleView() {
     }
   };
 
-  const openRename = (job: ScheduleJob) => {
-    setRenameDialog({ open: true, id: job.id, currentName: job.name });
+  const openEditJob = (job: ScheduleJob) => {
+    setEditDialog({ open: true, id: job.id, name: job.name, scene: job.scene || "work", cron: job.cron || "" });
   };
 
-  const doRename = async (newName: string) => {
-    const id = renameDialog.id;
-    setRenameDialog({ open: false, id: "", currentName: "" });
-    setJobs(prev => prev.map(j => j.id === id ? { ...j, name: newName } : j));
+  const doEditJob = async (data: { name: string; scene: string; cron: string }) => {
+    const id = editDialog.id;
+    const originalCron = editDialog.cron;
+    const originalScene = editDialog.scene;
+    setEditDialog({ open: false, id: "", name: "", scene: "work", cron: "" });
+    setJobs(prev => prev.map(j => j.id === id ? { ...j, name: data.name, scene: data.scene, ...(j.cron ? { cron: data.cron } : {}) } : j));
     try {
-      await renameSchedule(id, newName);
+      const patch: { title: string; scene: string; cron?: string } = { title: data.name, scene: data.scene };
+      if (originalCron && data.cron && data.cron !== originalCron) patch.cron = data.cron;
+      const changedScene = data.scene !== originalScene;
+      await updateSchedule(id, patch);
+      // cron 变了刷新 next_run_time；scene 变了任务会离开当前 tab，重新拉取让列表和 tab 对齐
+      if (patch.cron || changedScene) await loadData();
     } catch (e) {
-      console.error("Failed to rename schedule", e);
+      console.error("Failed to update schedule", e);
+      alert(e instanceof Error ? e.message : "修改定时任务失败");
       await loadData();
     }
   };
@@ -197,22 +205,6 @@ export function ScheduleView() {
     }
   };
 
-  const openEditCron = (job: ScheduleJob) => {
-    setCronDialog({ open: true, id: job.id, currentCron: job.cron || "" });
-  };
-
-  const doEditCron = async (newCron: string) => {
-    const id = cronDialog.id;
-    setCronDialog({ open: false, id: "", currentCron: "" });
-    try {
-      await updateScheduleCron(id, newCron);
-      await loadData();  // 重新拉取以刷新 next_run_time / trigger 展示
-    } catch (e) {
-      console.error("Failed to update schedule cron", e);
-      alert(e instanceof Error ? e.message : "修改定时时间失败");
-      await loadData();
-    }
-  };
 
   const [triggeringId, setTriggeringId] = useState<string>("");
   const triggerJob = async (job: ScheduleJob) => {
@@ -281,32 +273,71 @@ export function ScheduleView() {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   }
 
-  function RenameDialog({ open, currentName, onConfirm, onCancel }: {
-    open: boolean; currentName: string; onConfirm: (name: string) => void; onCancel: () => void
+  function EditJobDialog({ open, currentName, currentScene, currentCron, onConfirm, onCancel }: {
+    open: boolean; currentName: string; currentScene: string; currentCron: string;
+    onConfirm: (data: { name: string; scene: string; cron: string }) => void; onCancel: () => void
   }) {
-    const [inputValue, setInputValue] = useState(currentName);
+    const [name, setName] = useState(currentName);
+    const [scene, setScene] = useState(currentScene);
+    const [cron, setCron] = useState(currentCron);
     useEffect(() => {
-      if (open) setInputValue(currentName);
-    }, [open, currentName]);
+      if (open) { setName(currentName); setScene(currentScene); setCron(currentCron); }
+    }, [open, currentName, currentScene, currentCron]);
+    const canSubmit = !!name.trim() && (!currentCron || !!cron.trim());
     return (
       <Dialog open={open} onOpenChange={(o: boolean) => !o && onCancel()}>
         <DialogContent showCloseButton={false}>
           <DialogHeader>
-            <DialogTitle>重命名定时任务</DialogTitle>
-            <DialogDescription className="mt-1">将 &ldquo;{currentName}&rdquo; 改为：</DialogDescription>
+            <DialogTitle>编辑定时任务</DialogTitle>
+            <DialogDescription className="mt-1">修改任务的名称、分类和定时规则。</DialogDescription>
           </DialogHeader>
-          <div className="space-y-2 py-2">
-            <Input
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              placeholder="输入新名称"
-              onKeyDown={(e) => e.key === "Enter" && inputValue.trim() && onConfirm(inputValue.trim())}
-              autoFocus
-            />
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground">名称</label>
+              <Input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="任务名称"
+                onKeyDown={(e) => e.key === "Enter" && canSubmit && onConfirm({ name: name.trim(), scene, cron: currentCron ? cron.trim() : "" })}
+                autoFocus
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground">分类</label>
+              <div className="flex gap-2">
+                {(["work", "life"] as const).map((s) => (
+                  <Button
+                    key={s}
+                    type="button"
+                    variant={scene === s ? "default" : "outline"}
+                    size="sm"
+                    className="h-7 px-4"
+                    onClick={() => setScene(s)}
+                  >
+                    {s === "work" ? "工作" : "生活"}
+                  </Button>
+                ))}
+              </div>
+            </div>
+            {currentCron && (
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground">定时规则（cron 表达式，5 段：分 时 日 月 周）</label>
+                <Input
+                  value={cron}
+                  onChange={(e) => setCron(e.target.value)}
+                  placeholder="0 9 * * 1-5"
+                  className="font-mono"
+                  onKeyDown={(e) => e.key === "Enter" && canSubmit && onConfirm({ name: name.trim(), scene, cron: cron.trim() })}
+                />
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  例：<code className="text-foreground">0 9 * * 1-5</code> 表示工作日每天 9:00；周字段 0/7=周日，1=周一 … 6=周六。
+                </p>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={onCancel}>取消</Button>
-            <Button onClick={() => inputValue.trim() && onConfirm(inputValue.trim())} disabled={!inputValue.trim()}>确认</Button>
+            <Button onClick={() => canSubmit && onConfirm({ name: name.trim(), scene, cron: currentCron ? cron.trim() : "" })} disabled={!canSubmit}>保存</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -344,45 +375,8 @@ export function ScheduleView() {
     );
   }
 
-  function EditCronDialog({ open, currentCron, onConfirm, onCancel }: {
-    open: boolean; currentCron: string; onConfirm: (cron: string) => void; onCancel: () => void
-  }) {
-    const [inputValue, setInputValue] = useState(currentCron);
-    useEffect(() => {
-      if (open) setInputValue(currentCron);
-    }, [open, currentCron]);
-    return (
-      <Dialog open={open} onOpenChange={(o: boolean) => !o && onCancel()}>
-        <DialogContent showCloseButton={false}>
-          <DialogHeader>
-            <DialogTitle>修改定时时间</DialogTitle>
-            <DialogDescription className="mt-1">
-              直接编辑 cron 表达式（5 段：分 时 日 月 周）。例：<code className="text-foreground">0 9 * * 1-5</code> 表示工作日每天 9:00。
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2 py-2">
-            <Input
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              placeholder="0 9 * * 1-5"
-              className="font-mono"
-              onKeyDown={(e) => e.key === "Enter" && inputValue.trim() && onConfirm(inputValue.trim())}
-              autoFocus
-            />
-            <p className="text-[11px] text-muted-foreground leading-relaxed">
-              周字段：0/7=周日，1=周一 … 6=周六。留空的段用 <code>*</code>。仅支持 cron 周期任务，一次性任务请删除后重建。
-            </p>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={onCancel}>取消</Button>
-            <Button onClick={() => inputValue.trim() && onConfirm(inputValue.trim())} disabled={!inputValue.trim()}>确认</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    );
-  }
-
   return (
+    <TooltipProvider delay={0}>
     <div className="flex flex-col h-full bg-background text-foreground">
       <ConfirmDialog
         open={confirmState.open}
@@ -392,17 +386,13 @@ export function ScheduleView() {
         onConfirm={doRemoveJob}
         onCancel={() => setConfirmState({ open: false, id: "" })}
       />
-      <EditCronDialog
-        open={cronDialog.open}
-        currentCron={cronDialog.currentCron}
-        onConfirm={doEditCron}
-        onCancel={() => setCronDialog({ open: false, id: "", currentCron: "" })}
-      />
-      <RenameDialog
-        open={renameDialog.open}
-        currentName={renameDialog.currentName}
-        onConfirm={doRename}
-        onCancel={() => setRenameDialog({ open: false, id: "", currentName: "" })}
+      <EditJobDialog
+        open={editDialog.open}
+        currentName={editDialog.name}
+        currentScene={editDialog.scene}
+        currentCron={editDialog.cron}
+        onConfirm={doEditJob}
+        onCancel={() => setEditDialog({ open: false, id: "", name: "", scene: "work", cron: "" })}
       />
       <EditPromptDialog
         open={promptDialog.open}
@@ -443,9 +433,12 @@ export function ScheduleView() {
               }`}
             >列表</button>
           </div>
-          <Button variant="ghost" size="icon" onClick={loadData} disabled={loading}>
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger render={<Button variant="ghost" size="icon" onClick={loadData} disabled={loading} />}>
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            </TooltipTrigger>
+            <TooltipContent>刷新</TooltipContent>
+          </Tooltip>
         </div>
       </header>
 
@@ -503,7 +496,7 @@ export function ScheduleView() {
                 <Card key={job.id} className={`flex flex-col shadow-sm border-border/60 bg-muted/10 ${job.status === "paused" ? "opacity-60" : ""}`}>
                   <CardHeader className="pb-3 border-b border-border/30">
                     <div className="flex justify-between items-start gap-2">
-                      <CardTitle className="text-sm font-semibold leading-tight line-clamp-2 flex-1 cursor-pointer hover:text-primary/70 transition-colors" onClick={() => openRename(job)} title="点击重命名">
+                      <CardTitle className="text-sm font-semibold leading-tight line-clamp-2 flex-1 cursor-pointer hover:text-primary/70 transition-colors" onClick={() => openEditJob(job)} title="点击编辑">
                         {job.name}
                       </CardTitle>
                       <div className="flex items-center gap-1 shrink-0">
@@ -535,21 +528,36 @@ export function ScheduleView() {
                     </div>
                   </CardContent>
                   <CardFooter className="pt-2 pb-3 flex justify-end gap-1 border-t border-border/30 mt-auto">
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => triggerJob(job)} title="手动触发" disabled={triggeringId === job.id}>
-                      {triggeringId === job.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Zap className="h-3 w-3" />}
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openRename(job)} title="重命名">
-                      <Pencil className="h-3 w-3" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => navigate(`/chat/${job.session_id}`)} title="查看对话">
-                      <MessageSquare className="h-3 w-3" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => toggleStatus(job)} title={job.status === "active" ? "暂停" : "恢复"}>
-                      {job.status === "active" ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive/70 hover:text-destructive" onClick={() => removeJob(job.id)} title="删除">
-                      <Trash2 className="h-3 w-3" />
-                    </Button>
+                    <Tooltip>
+                      <TooltipTrigger render={<Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => triggerJob(job)} disabled={triggeringId === job.id} />}>
+                        {triggeringId === job.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Zap className="h-3 w-3" />}
+                      </TooltipTrigger>
+                      <TooltipContent>手动触发</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger render={<Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEditJob(job)} />}>
+                        <Pencil className="h-3 w-3" />
+                      </TooltipTrigger>
+                      <TooltipContent>编辑</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger render={<Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => navigate(`/chat/${job.session_id}`)} />}>
+                        <MessageSquare className="h-3 w-3" />
+                      </TooltipTrigger>
+                      <TooltipContent>查看对话</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger render={<Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => toggleStatus(job)} />}>
+                        {job.status === "active" ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                      </TooltipTrigger>
+                      <TooltipContent>{job.status === "active" ? "暂停" : "恢复"}</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger render={<Button variant="ghost" size="icon" className="h-6 w-6 text-destructive/70 hover:text-destructive" onClick={() => removeJob(job.id)} />}>
+                        <Trash2 className="h-3 w-3" />
+                      </TooltipTrigger>
+                      <TooltipContent>删除</TooltipContent>
+                    </Tooltip>
                   </CardFooter>
                 </Card>
               ))}
@@ -619,26 +627,36 @@ export function ScheduleView() {
                                 </div>
                                 {/* Actions — show on hover */}
                                 <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => triggerJob(job)} title="手动触发" disabled={triggeringId === job.id}>
-                                    {triggeringId === job.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Zap className="h-3 w-3" />}
-                                  </Button>
-                                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openRename(job)} title="重命名">
-                                    <Pencil className="h-3 w-3" />
-                                  </Button>
-                                  {job.cron && (
-                                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEditCron(job)} title="修改定时时间">
-                                      <CalendarClock className="h-3 w-3" />
-                                    </Button>
-                                  )}
-                                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => navigate(`/chat/${job.session_id}`)} title="查看对话">
-                                    <MessageSquare className="h-3 w-3" />
-                                  </Button>
-                                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => toggleStatus(job)} title={job.status === "active" ? "暂停" : "恢复"}>
-                                    {job.status === "active" ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
-                                  </Button>
-                                  <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive/70 hover:text-destructive" onClick={() => removeJob(job.id)} title="删除">
-                                    <Trash2 className="h-3 w-3" />
-                                  </Button>
+                                  <Tooltip>
+                                    <TooltipTrigger render={<Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => triggerJob(job)} disabled={triggeringId === job.id} />}>
+                                      {triggeringId === job.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Zap className="h-3 w-3" />}
+                                    </TooltipTrigger>
+                                    <TooltipContent>手动触发</TooltipContent>
+                                  </Tooltip>
+                                  <Tooltip>
+                                    <TooltipTrigger render={<Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEditJob(job)} />}>
+                                      <Pencil className="h-3 w-3" />
+                                    </TooltipTrigger>
+                                    <TooltipContent>编辑</TooltipContent>
+                                  </Tooltip>
+                                  <Tooltip>
+                                    <TooltipTrigger render={<Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => navigate(`/chat/${job.session_id}`)} />}>
+                                      <MessageSquare className="h-3 w-3" />
+                                    </TooltipTrigger>
+                                    <TooltipContent>查看对话</TooltipContent>
+                                  </Tooltip>
+                                  <Tooltip>
+                                    <TooltipTrigger render={<Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => toggleStatus(job)} />}>
+                                      {job.status === "active" ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                                    </TooltipTrigger>
+                                    <TooltipContent>{job.status === "active" ? "暂停" : "恢复"}</TooltipContent>
+                                  </Tooltip>
+                                  <Tooltip>
+                                    <TooltipTrigger render={<Button variant="ghost" size="icon" className="h-6 w-6 text-destructive/70 hover:text-destructive" onClick={() => removeJob(job.id)} />}>
+                                      <Trash2 className="h-3 w-3" />
+                                    </TooltipTrigger>
+                                    <TooltipContent>删除</TooltipContent>
+                                  </Tooltip>
                                 </div>
                               </div>
                               {/* Subtitle: trigger + prompt (clickable to edit) */}
@@ -752,5 +770,6 @@ export function ScheduleView() {
         </div>
       </div>
     </div>
+    </TooltipProvider>
   );
 }
