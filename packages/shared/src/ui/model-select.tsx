@@ -58,15 +58,21 @@ function displayNameOf(m: ModelOption): string {
 }
 
 function ModelItemLabel({ m, valueMode }: { m: ModelOption; valueMode: "fullId" | "id" }) {
+  // id 模式用纯 id 作 value，同名模型（尤其不同 provider 提供同 alias）会撞车；
+  // 右侧标注 provider 或原始 id，帮用户在列表里分辨，避免误选。
+  const disambig =
+    valueMode === "id"
+      ? m.provider
+        ? m.provider
+        : displayNameOf(m) !== m.id
+          ? m.id
+          : null
+      : m.provider || null;
   return (
     <span className="flex items-center gap-2 w-full">
       <span className="truncate">{displayNameOf(m)}</span>
-      {m.provider && (
-        <span className="text-muted-foreground/60 text-[10px] ml-auto shrink-0">{m.provider}</span>
-      )}
-      {/* valueMode=id 时若存在 provider 冲突，仍标注，帮助用户区分 */}
-      {valueMode === "id" && m.id !== displayNameOf(m) && !m.provider && (
-        <span className="text-muted-foreground/60 text-[10px] ml-auto shrink-0">{m.id}</span>
+      {disambig && (
+        <span className="text-muted-foreground/60 text-[10px] ml-auto shrink-0">{disambig}</span>
       )}
     </span>
   );
@@ -90,16 +96,23 @@ export function ModelSelect({
   const itemValue = (m: ModelOption) => (valueMode === "fullId" ? fullIdOf(m) : m.id);
 
   return (
-    <Select value={value} onValueChange={(v) => v && onValueChange(v as string)} disabled={disabled}>
+    <Select value={value} onValueChange={(v) => v != null && onValueChange(v as string)} disabled={disabled}>
       <SelectTrigger size={size} className={cn("w-full", triggerClassName)}>
         <SelectValue placeholder={placeholder}>
           {(val: unknown) => {
             const v = typeof val === "string" ? val : "";
+            // id 模式下「主动留空跟随默认」是独立语义：即使传了 allowEmpty，触发按钮也要显示 emptyLabel
+            // 而不是混成「未选择」的 placeholder。
+            if (v === "" && allowEmpty) {
+              return <span className="text-muted-foreground">{emptyLabel ?? "留空（自动推断）"}</span>;
+            }
             if (v === "") {
               return <span className="text-muted-foreground">{placeholder}</span>;
             }
             const m = models.find((x) => fullIdOf(x) === v || x.id === v);
-            if (!m) return <span className="text-muted-foreground">{placeholder}</span>;
+            // 匹配不到：fullId 模式下可能是 legacy 裸 id / NEED_CHOICE 哨兵，兜底显示裸值本身，
+            // 避免触发按钮退化成 placeholder 让用户看不出当前状态。
+            if (!m) return <span className="text-muted-foreground">{v}</span>;
             return (
               <span className="flex items-center gap-1.5 min-w-0">
                 <span className="truncate">{displayNameOf(m)}</span>
