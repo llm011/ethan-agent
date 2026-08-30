@@ -60,11 +60,29 @@ export async function consumeStream(
   let messageId: number | undefined;
   let finalUsage: Usage | undefined;
   let finalModel: string | undefined;
-  setMessages([...baseMessages, { role: "assistant", content: "", created_at: Date.now() / 1000 }]);
+  setMessages([...baseMessages, { role: "assistant", content: "", created_at: Date.now() / 1000, model: finalModel }]);
 
   try {
     for await (const chunk of stream) {
       if (trackTtft && ttft === undefined) ttft = Date.now() - sendTime;
+
+      // 模型在回复一开始就被后端 emit，立即记下并刷新气泡底部（与开始时间并列显示），
+      // 不再等到 done 事件才出现。done 事件也带 model（error/stopped 不带），但各事件要走自己的分支逻辑，
+      // 所以这里只对「纯 model 事件」单独重渲染，其他情况交给下方各分支 + 定稿。
+      // 用白名单判定：除 model 外无任何其它字段才算纯 model 事件，
+      // 避免以后新增字段（如带上 consent_request）时被黑名单漏判而 continue 跳过。
+      if (chunk.model) {
+        finalModel = chunk.model;
+        const onlyModel = Object.keys(chunk).every(k => k === "model");
+        if (onlyModel) {
+          setMessages(prev =>
+            prev.length && prev[prev.length - 1]?.role === "assistant"
+              ? prev.map((m, i) => (i === prev.length - 1 ? { ...m, model: finalModel } : m))
+              : prev,
+          );
+          continue;
+        }
+      }
 
       if (chunk.consent_request) {
         setConsentRequest({
@@ -153,6 +171,7 @@ export async function consumeStream(
           toolSteps: currentToolSteps.length > 0 ? [...currentToolSteps] : undefined,
           toolsExpanded: currentToolSteps.length > 0 ? true : undefined,
           created_at: Date.now() / 1000,
+          model: finalModel,
           intermediateOutput: intermediateOutput || undefined,
         }]);
         continue;
@@ -180,6 +199,7 @@ export async function consumeStream(
         setMessages([...baseMessages, {
           role: "assistant", content: assistantContent, thought: assistantThought,
           toolSteps: [...currentToolSteps], toolsExpanded: true, created_at: Date.now() / 1000,
+          model: finalModel,
         }]);
       }
       if (chunk.tool && (chunk.state === "done" || chunk.state === "error")) {
@@ -235,6 +255,7 @@ export async function consumeStream(
         setMessages([...baseMessages, {
           role: "assistant", content: assistantContent, thought: assistantThought,
           toolSteps: [...currentToolSteps], toolsExpanded: true, created_at: Date.now() / 1000,
+          model: finalModel,
           intermediateOutput: intermediateOutput || undefined,
         }]);
       }
@@ -246,6 +267,7 @@ export async function consumeStream(
           toolSteps: currentToolSteps.length > 0 ? [...currentToolSteps] : undefined,
           toolsExpanded: currentToolSteps.length > 0 ? true : undefined,
           created_at: Date.now() / 1000,
+          model: finalModel,
           intermediateOutput: intermediateOutput || undefined,
         }]);
       }
@@ -257,6 +279,7 @@ export async function consumeStream(
           toolSteps: currentToolSteps.length > 0 ? [...currentToolSteps] : undefined,
           toolsExpanded: currentToolSteps.length > 0 ? true : undefined,
           created_at: Date.now() / 1000,
+          model: finalModel,
           intermediateOutput: intermediateOutput || undefined,
           cards: cardsCollected as any,
         }]);
@@ -314,6 +337,9 @@ export async function consumeStream(
         if (resumed) {
           // 后端仍有活跃 run：续接 SSE 流，继续接收后续事件
           for await (const chunk of resumed) {
+            // 断线可能发生在首个事件送达之前，model 事件会在重连后才到，这里同样记下来，
+            // 定稿时写入气泡（model: finalModel ?? last.model），避免重连后气泡不显示模型。
+            if (chunk.model) finalModel = chunk.model;
             // 重连后后端会回放仍在 pending 的交互事件（consent/ask_user/wait_for_user），
             // 必须与主分支对齐处理，否则断线重连后卡片不再弹出、agent 卡在等待直到超时。
             if (chunk.consent_request) {
