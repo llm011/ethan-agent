@@ -73,6 +73,9 @@ def normalize_manifest(raw: Any) -> dict[str, Any]:
         "rate": voice_raw.get("rate", "+0%"),
         "volume": voice_raw.get("volume", "+0%"),
         "pitch": voice_raw.get("pitch", "+0Hz"),
+        # cosyvoice zero-shot 克隆的参考音频（可选；无则要求 name 是预置音色）
+        "promptWav": voice_raw.get("promptWav", ""),
+        "promptText": voice_raw.get("promptText", ""),
     }
     if not isinstance(voice["rate"], str) or not PROSODY_RE.fullmatch(voice["rate"]):
         raise ManifestError("voice.rate must look like +5% or -10%")
@@ -113,8 +116,13 @@ def normalize_manifest(raw: Any) -> dict[str, Any]:
         narration = _require_text(item.get("narration"), f"{field}.narration", maximum=MAX_NARRATION_CHARS)
         sections.append({"id": section_id, "narration": narration})
 
+    engine = raw.get("engine", "edge-tts")
+    if engine not in {"edge-tts", "cosyvoice"}:
+        raise ManifestError("engine must be 'edge-tts' or 'cosyvoice'")
+
     return {
         "title": title,
+        "engine": engine,
         "voice": voice,
         "gapMs": gap_ms,
         "targetDurationSec": float(target_duration) if target_duration is not None else None,
@@ -280,7 +288,35 @@ async def _synthesize_section(
         _inflight_tts.pop(key, None)
 
 
+def _synthesize_sections_cosyvoice(manifest: dict[str, Any], output_dir: Path) -> list[dict[str, Any]]:
+    """CosyVoice 引擎：重依赖隔离在独立 venv，子进程合成，产出与 edge-tts 同构的缓存布局。"""
+    import os
+
+    python_bin = os.environ.get(
+        "COSYVOICE_PYTHON", str(Path.home() / ".ethan" / "cosyvoice-venv" / "bin" / "python")
+    )
+    helper = Path(__file__).with_name("cosyvoice_tts.py")
+    manifest_tmp = output_dir / "work" / "cv-manifest.json"
+    manifest_tmp.parent.mkdir(parents=True, exist_ok=True)
+    manifest_tmp.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+    completed = subprocess.run(
+        [python_bin, str(helper), "--manifest", str(manifest_tmp), "--output-dir", str(output_dir)],
+        capture_output=True, text=True,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(f"CosyVoice synthesis failed: {completed.stderr.strip()[-2000:]}")
+    payload = json.loads(completed.stdout.strip().splitlines()[-1])
+    if payload.get("status") != "ok":
+        raise RuntimeError(f"CosyVoice synthesis error: {payload}")
+    return [
+        {"id": a["id"], "audio": Path(a["audio"]), "srt": Path(a["srt"])}
+        for a in payload["artifacts"]
+    ]
+
+
 def synthesize_sections(manifest: dict[str, Any], output_dir: Path, *, retries: int = 3) -> list[dict[str, Any]]:
+    if manifest.get("engine") == "cosyvoice":
+        return _synthesize_sections_cosyvoice(manifest, output_dir)
     cache_dir = output_dir / "work" / "tts-cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
     _inflight_tts.clear()  # 上次 run 的 Future 属于旧事件循环，必须清掉

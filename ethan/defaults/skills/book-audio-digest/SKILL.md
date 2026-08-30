@@ -7,8 +7,9 @@ metadata:
   requires:
     bins: ["uv", "ffmpeg", "ffprobe"]
     secrets:
-      - name: "WEREAD_API_KEY"
-        description: "微信读书 Agent API Key，见 wechat-reading 技能。通过 get_secret 读取。"
+      - path: "~/.ethan/.secrets/wechat-reading.env"
+        fields: ["WEREAD_API_KEY"]
+        description: "微信读书 Agent API Key，见 wechat-reading 技能。"
   relates:
     - skill: wechat-reading
       scope: "书籍信息/目录/热门划线采集规范与限流避坑，本技能复用其 API 调用纪律。"
@@ -50,8 +51,10 @@ knowledge_search 做 2–3 个查询（书名/作者/核心主题），limit 2�
 **b. 音频脚本**：按 `references/audio-script-guide.md` 把笔记**口语化改写**（不是照念文档），写入 `$PROJECT/manifest.json`：
 
 ```json
-{"title": "《态度》深度听书", "voice": {"name": "zh-CN-YunxiNeural", "rate": "+0%", "volume": "+0%", "pitch": "+0Hz"}, "gapMs": 700, "targetDurationSec": 600,
+{"title": "《态度》深度听书", "engine": "cosyvoice", "voice": {"name": "longcheng", "rate": "+0%", "volume": "+0%", "pitch": "+0Hz"}, "gapMs": 700, "targetDurationSec": 600,
  "sections": [{"id": "opening", "narration": "..."}, {"id": "insight-1", "narration": "..."}]}
+
+`engine` 省略时默认 `edge-tts`（零部署）。`cosyvoice` 音质/情感更好，但依赖独立 venv `~/.ethan/cosyvoice-venv`（torch + FunAudioLLM/CosyVoice 仓库）和模型 `~/.ethan/CosyVoice/pretrained_models/CosyVoice2-0.5B`，首次环境准备见 references/cosyvoice-setup.md；voice.name 用 CosyVoice 预置音色（跑 `list_available_spks` 查询）。
 ```
 
 ### 5. 音频合成
