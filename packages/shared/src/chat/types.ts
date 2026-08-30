@@ -9,6 +9,7 @@ export interface Usage {
 export interface Quote {
   role: "user" | "assistant";
   content: string;
+  message_id?: number;  // 被引用消息的后端行 id；精简模式按此精确定位该消息以附上 tool 调用/文件路径
 }
 
 export interface PendingFile {
