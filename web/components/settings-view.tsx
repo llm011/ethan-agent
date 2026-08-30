@@ -238,10 +238,16 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
         return { provider: k.slice(0, idx), id: k.slice(idx + 1) };
       });
       const r = await deleteModelsBatch(items);
-      if (r.ok) {
+      // deleted 是真正删掉的，missing 是勾了但配置里已经没有的（比如别的窗口刚删过）。
+      // 只报 deleted 会让用户以为全删完了，所以 missing > 0 时一并说明。
+      const missing = r.missing ?? 0;
+      if (r.ok || missing > 0) {
         setModelList(await fetchModels());
         setSelectedModelKeys(new Set());
-        setMessage({ type: "success", text: `已删除 ${r.deleted} 个模型` });
+        const text = r.deleted > 0
+          ? `已删除 ${r.deleted} 个模型${missing > 0 ? `，另有 ${missing} 个已不存在` : ""}`
+          : `${missing} 个模型已不存在，列表已刷新`;
+        setMessage({ type: "success", text });
         setTimeout(() => setMessage(null), 3000);
       } else {
         setMessage({ type: "error", text: r.error || "批量删除失败" });

@@ -101,7 +101,12 @@ class BatchDeleteRequest(BaseModel):
 
 @router.post("/models/delete-batch", dependencies=[Depends(verify_token)])
 async def delete_models_batch(req: BatchDeleteRequest):
-    """批量删除模型。items 里的 (provider, id) 存在几个删几个，返回删除数量。"""
+    """批量删除模型。items 里的 (provider, id) 存在几个删几个。
+
+    deleted 是真正删掉的数量，missing 是「勾了但配置里已经没有」的数量（比如别的
+    窗口/设备刚删过）。两者分开返回，前端才能提示"另有 N 个已不存在"，而不是只说
+    "已删除 M 个"把没删掉的静默吞掉。
+    """
     if not req.items:
         return {"ok": False, "error": "items is empty"}
     config = get_config()
@@ -109,11 +114,14 @@ async def delete_models_batch(req: BatchDeleteRequest):
     before = len(config.models)
     config.models = [m for m in config.models if (m.provider, m.id) not in targets]
     deleted = before - len(config.models)
+    missing = len(targets) - deleted
     if deleted == 0:
-        return {"ok": False, "error": "no matching models"}
+        # 一个都没删成功：要么全都不存在，要么传了空 items。带上 missing 让前端
+        # 区分"列表过期了，刷新即可"和"真出错"。
+        return {"ok": False, "error": "no matching models", "deleted": 0, "missing": missing}
     save_config(config)
     reload_config()
-    return {"ok": True, "deleted": deleted}
+    return {"ok": True, "deleted": deleted, "missing": missing}
 
 
 class DiscoverRequest(BaseModel):

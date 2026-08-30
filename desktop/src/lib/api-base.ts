@@ -143,7 +143,7 @@ export async function addModelsBatch(models: ModelEntry[]): Promise<{ ok: boolea
   return data;
 }
 
-export async function deleteModelsBatch(items: { provider: string; id: string }[]): Promise<{ ok: boolean; deleted: number; error?: string }> {
+export async function deleteModelsBatch(items: { provider: string; id: string }[]): Promise<{ ok: boolean; deleted: number; missing?: number; error?: string }> {
   const res = await fetch(`${getApiUrl()}/models/delete-batch`, {
     method: "POST", headers: { ...headers(), "Content-Type": "application/json" },
     body: JSON.stringify({ items }),
