@@ -172,13 +172,16 @@ export function ScheduleView() {
   const doEditJob = async (data: { name: string; scene: string; cron: string }) => {
     const id = editDialog.id;
     const originalCron = editDialog.cron;
+    const originalScene = editDialog.scene;
     setEditDialog({ open: false, id: "", name: "", scene: "work", cron: "" });
     setJobs(prev => prev.map(j => j.id === id ? { ...j, name: data.name, scene: data.scene, ...(j.cron ? { cron: data.cron } : {}) } : j));
     try {
       const patch: { title: string; scene: string; cron?: string } = { title: data.name, scene: data.scene };
       if (originalCron && data.cron && data.cron !== originalCron) patch.cron = data.cron;
+      const changedScene = data.scene !== originalScene;
       await updateSchedule(id, patch);
-      if (patch.cron) await loadData();  // cron 变了，重新拉取以刷新 next_run_time / trigger 展示
+      // cron 变了刷新 next_run_time；scene 变了任务会离开当前 tab，重新拉取让列表和 tab 对齐
+      if (patch.cron || changedScene) await loadData();
     } catch (e) {
       console.error("Failed to update schedule", e);
       alert(e instanceof Error ? e.message : "修改定时任务失败");
