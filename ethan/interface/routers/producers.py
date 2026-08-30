@@ -292,7 +292,7 @@ async def _run_generation(
     # 让气泡底部「开始时间」旁立即显示所用模型，而不是等到 done 事件才出现。
     # 前端会在收到该事件时把 model 写进当前 assistant 气泡并即时重渲染。
     try:
-        run.emit({"model": agent._provider.model})
+        run.emit({"model": agent.model})
     except Exception:
         logger.debug("emit model event failed session=%s", session_id, exc_info=True)
 
