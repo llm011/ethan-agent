@@ -582,8 +582,39 @@ def save_config(config: Config) -> None:
     _write_raw(data)
 
 
+BACKUP_DIR = CONFIG_DIR / "backup"
+BACKUP_KEEP = 30  # backup 目录最多保留的备份份数（超出删最旧的）
+
+
+def _backup_config() -> None:
+    """写 config 前按时间戳备份现有 config.yaml 到 CONFIG_DIR/backup/。
+
+    - 文件名：config.yaml.YYYYMMDD-HHMMSS.bak（同秒内多次写入会覆盖同名备份，可接受）
+    - 备份失败只打 warning，绝不阻断正常写入
+    - 超过 BACKUP_KEEP 份时删最旧的
+    """
+    import shutil
+    import time
+
+    if not CONFIG_FILE.exists():
+        return
+    try:
+        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        ts = time.strftime("%Y%m%d-%H%M%S")
+        dst = BACKUP_DIR / f"{CONFIG_FILE.name}.{ts}.bak"
+        shutil.copy2(str(CONFIG_FILE), str(dst))
+        # 清理超量的旧备份（按文件名时间戳排序，删最旧）
+        backups = sorted(BACKUP_DIR.glob(f"{CONFIG_FILE.name}.*.bak"))
+        for old in backups[:-BACKUP_KEEP]:
+            old.unlink(missing_ok=True)
+    except Exception as e:  # noqa: BLE001 备份失败不阻断写入
+        import sys
+        print(f"[config] backup failed (ignored): {e}", file=sys.stderr)
+
+
 def _write_raw(data: dict) -> None:
     import yaml
+    _backup_config()
     with open(CONFIG_FILE, "w") as f:
         yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
 

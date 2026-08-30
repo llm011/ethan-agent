@@ -119,6 +119,22 @@ export async function deleteModel(provider: string, modelId: string): Promise<{ 
   return res.json();
 }
 
+export async function addModelsBatch(models: ModelEntry[]): Promise<{ ok: boolean; added: number; skipped: { id: string; provider: string; reason: string }[]; error?: string }> {
+  const res = await fetch(`${API_URL}/models/batch`, {
+    method: "POST", headers: { ...headers(), "Content-Type": "application/json" },
+    body: JSON.stringify({ models }),
+  });
+  return res.json();
+}
+
+export async function deleteModelsBatch(items: { provider: string; id: string }[]): Promise<{ ok: boolean; deleted: number; missing?: number; error?: string }> {
+  const res = await fetch(`${API_URL}/models/delete-batch`, {
+    method: "POST", headers: { ...headers(), "Content-Type": "application/json" },
+    body: JSON.stringify({ items }),
+  });
+  return res.json();
+}
+
 export async function discoverModels(provider: string): Promise<{ ok: boolean; models?: (ModelEntry & { exists?: boolean })[]; error?: string; url?: string }> {
   const res = await fetch(`${API_URL}/models/discover`, {
     method: "POST", headers: { ...headers(), "Content-Type": "application/json" },
