@@ -205,6 +205,8 @@ export interface BrowserTabAttachResult {
   attached: true;
   sessionId: string;
   tab: BrowserSessionTab;
+  /** 若该 tab 此前被别的 session 占用，自动释放其控制权（保留 tab）后挂到本 session，则记录旧 sessionId。 */
+  releasedFrom?: string;
 }
 
 export interface BrowserTabActiveParams {
@@ -248,6 +250,8 @@ export interface BrowserTabAttachBatchResult {
   attached: true;
   sessionId: string;
   tabs: BrowserSessionTab[];
+  /** 被自动释放旧 session 控制权的 tab 列表（保留 tab 后挂到本 session）。 */
+  releasedFrom?: { tabId: number; sessionId: string }[];
 }
 
 export interface BrowserTabDetachParams {
