@@ -196,6 +196,15 @@ export function ChatInput({
   const images = pendingFiles.filter((f) => f.isImage);
   const nonImages = pendingFiles.filter((f) => !f.isImage);
 
+  // 选择值统一为唯一的 provider/id；旧会话存的纯 id 自动升级为第一个同名模型的 provider/id
+  const fullIdOf = (m: { id: string; provider?: string }) => (m.provider ? `${m.provider}/${m.id}` : m.id);
+  const effectiveModelValue = models.some((m) => fullIdOf(m) === selectedModel)
+    ? selectedModel
+    : (() => {
+        const hit = models.find((m) => m.id === selectedModel);
+        return hit ? fullIdOf(hit) : selectedModel;
+      })();
+
   return (
     <div className="px-4 pb-4 pt-1">
       <div className="max-w-3xl mx-auto">
@@ -330,15 +339,18 @@ export function ChatInput({
               <Paperclip className="h-4 w-4" />
             </button>
             <input ref={fileRef} type="file" className="hidden" multiple accept="*/*" onChange={handleFileUpload} />
-            <Select value={selectedModel} onValueChange={(v) => v && onModelChange(v)} disabled={streaming}>
+            <Select value={effectiveModelValue} onValueChange={(v) => v && onModelChange(v)} disabled={streaming}>
               <SelectTrigger className="h-7 px-2.5 text-xs bg-transparent border-0 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg shadow-none focus:ring-0 focus:ring-offset-0 gap-1 w-auto max-w-[200px]">
                 <SelectValue placeholder="模型" />
               </SelectTrigger>
               <SelectContent className="min-w-[280px] max-h-[50vh] overflow-y-auto">
                 {models.map((m) => {
                   const displayName = m.alias?.length ? m.alias[0] : (m.description || m.id);
+                  // 不同 provider 可能有同名模型（如两个 provider 都配了 glm-5.3），
+                  // value 必须全局唯一（provider/id），否则 Select 会把同名项全部标为选中
+                  const fullId = m.provider ? `${m.provider}/${m.id}` : m.id;
                   return (
-                    <SelectItem key={m.id} value={m.id} className="text-xs">
+                    <SelectItem key={fullId} value={fullId} className="text-xs">
                       <span className="flex items-center gap-2 w-full">
                         <span className="truncate">{displayName}</span>
                         {m.provider && <span className="text-muted-foreground/60 text-[10px] ml-auto shrink-0">{m.provider}</span>}
