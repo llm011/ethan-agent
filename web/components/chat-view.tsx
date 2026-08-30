@@ -276,7 +276,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     const ac = new AbortController();
     streamAbortRef.current = ac;
     try {
-      const stream = resumeFromMessage(activeSession, msg.id);
+      const stream = resumeFromMessage(activeSession, msg.id, selectedModel);
       await consumeStream(stream, messages, {
         setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setWaitForUserRequest, setBgPolling,
         setSessionTitle, setSessionUsage, setStopping, setStreaming: _setStreaming, setPendingInjected,
@@ -286,7 +286,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       _setStreaming(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSession, messages]);
+  }, [activeSession, messages, selectedModel]);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const justFinishedRef = useRef<string | null>(null);
