@@ -17,7 +17,7 @@ in their `SKILL.md` frontmatter.
 | excalidraw | https://github.com/axtonliu/axton-obsidian-visual-skills + https://github.com/coleam00/excalidraw-diagram-skill | MIT + NO LICENSE | See `excalidraw/NOTICE.md` for risk assessment |
 | gws-gmail | https://github.com/googleworkspace/cli (gws CLI) | Apache-2.0 (unconfirmed) | Skill wraps the gws CLI; CLI license applies to binary, skill code is project MIT |
 | hsk-deploy | https://hsk.oray.com/doc/cli-setup.md (@aweray/hsk-cli) | 花生壳服务 ToS | Skill wraps the hsk-cli npm package; CLI license applies to binary, 花生壳服务 ToS 管控数据流，skill 代码为项目 MIT |
-| archify | https://github.com/tt-a1i/archify | MIT | v2.16, upstream LICENSE retained; JSON-IR architecture/workflow/sequence/dataflow/lifecycle diagram renderer |
+| archify | https://github.com/tt-a1i/archify | MIT | v2.16; runtime source NOT vendored — `install.sh` fetches from upstream at install time (see `archify/SKILL.md`); JSON-IR architecture/workflow/sequence/dataflow/lifecycle diagram renderer |
 
 ## Self-Maintained Skills (project MIT)
 
