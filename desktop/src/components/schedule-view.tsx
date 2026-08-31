@@ -219,14 +219,17 @@ export function ScheduleView() {
   };
 
   // 每个 scene 的任务计数（用于 scene Tab badge）
+  // 区分「总任务数」与「暂停数」：badge 显示总数，暂停的在旁边单独标注，一眼分辨
   const sceneCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const s of scenes) counts[s] = 0;
+    const paused: Record<string, number> = {};
+    for (const s of scenes) { counts[s] = 0; paused[s] = 0; }
     for (const j of jobs) {
       const s = j.scene || "work";
       counts[s] = (counts[s] || 0) + 1;
+      if (j.status === "paused") paused[s] = (paused[s] || 0) + 1;
     }
-    return counts;
+    return { counts, paused };
   }, [scenes, jobs]);
 
   // today 模式：只展示今天+明天的任务；all 模式：过去全部 + 今天到未来 futureDays 天，点 load more 扩展
@@ -446,7 +449,8 @@ export function ScheduleView() {
       <div className="border-b border-border px-4 flex gap-1 shrink-0">
         {scenes.map(scene => {
           const active = activeScene === scene;
-          const count = sceneCounts[scene] || 0;
+          const total = sceneCounts.counts[scene] || 0;
+          const paused = sceneCounts.paused[scene] || 0;
           return (
             <button
               key={scene}
@@ -461,8 +465,15 @@ export function ScheduleView() {
               <span className={`text-xs px-1.5 py-0.5 rounded-full ${
                 active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
               }`}>
-                {count}
+                {total}
               </span>
+              {paused > 0 && (
+                <span className={`text-[10px] px-1 py-px rounded-full ${
+                  active ? "bg-primary/20 text-primary" : "bg-muted/70 text-muted-foreground"
+                }`} title={`${paused} 个已暂停`}>
+                  {paused} 暂停
+                </span>
+              )}
             </button>
           );
         })}
