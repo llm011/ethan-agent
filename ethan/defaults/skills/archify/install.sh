@@ -106,10 +106,13 @@ done
 log "安装到 $RUNTIME_DIR ..."
 rm -rf "$RUNTIME_DIR"
 mkdir -p "$RUNTIME_DIR"
-# 只拷贝运行时必需内容，排除测试与开发工具
+# 只拷贝运行时必需内容，排除测试、开发工具、以及成品 HTML 样例
+# （examples/*.html 是给人看的渲染结果，每个 700KB+，agent 生成图用不到，
+#   保留 *.json 样例即可；排除它们可省 3.5MB 并避免被误读进上下文）
 rsync -a \
   --exclude='test/' \
   --exclude='package-lock.json' \
+  --exclude='examples/*.html' \
   "$SRC/" "$RUNTIME_DIR/"
 
 # 写版本标记
