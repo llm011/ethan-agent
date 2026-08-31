@@ -134,6 +134,16 @@ export async function updateSessionMode(id: string, mode: string): Promise<void>
   });
 }
 
+/** 将会话绑定的模型写回后端，用于「点击重名候选 → 持久化到当前会话」场景。
+ *  PATCH /sessions/{id} 接受 { model }，与 updateSessionMode 复用同一端点。 */
+export async function updateSessionModel(id: string, model: string): Promise<void> {
+  await fetch(`${API_URL}/sessions/${id}`, {
+    method: "PATCH",
+    headers: headers(),
+    body: JSON.stringify({ model }),
+  });
+}
+
 export async function pinSession(id: string): Promise<void> {
   const res = await fetch(`${API_URL}/sessions/${id}/pin`, {
     method: "POST",

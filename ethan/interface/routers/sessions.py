@@ -248,6 +248,7 @@ async def update_message(session_id: str, message_id: int, req: UpdateMessageReq
 class RenameSessionRequest(BaseModel):
     title: str | None = None
     mode: str | None = None
+    model: str | None = None
 
 
 @router.patch("/sessions/{session_id}")
@@ -261,6 +262,9 @@ async def rename_session(session_id: str, req: RenameSessionRequest, user_id: st
     # mode 可为空字符串（切回默认模式），故用 is not None 判断
     if req.mode is not None:
         await store.update_mode(session_id, req.mode)
+    # model：用于「重名模型点击候选后写回」场景；前端通常传复合格式 `provider/id`
+    if req.model is not None:
+        await store.update_model(session_id, req.model)
     return {"ok": True}
 
 

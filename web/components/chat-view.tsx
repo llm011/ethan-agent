@@ -20,6 +20,7 @@ import {
   injectMessage,
   deleteInjectedMessage,
   updateSessionMode,
+  updateSessionModel,
   fetchOnboardingStatus,
   fetchAgentSettings,
   respondConsent,
@@ -627,6 +628,44 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 选模型 → 立刻更新本地 state，并把当前会话的 model 写回后端。
+  // 这里跟「点选重名候选」复用的 onModelChange 都走同一条路径；
+  // 不在 activeSession 上时不做 PATCH（新会话的 model 会随 createSession 时一起落库）。
+  //
+  // 竞态保护：用户在会话内快速连点多个候选/下拉选项时，若每个选择都发一个并发
+  // PATCH，HTTP 请求到达后端不保证有序，最终落库的可能是较早的选择而非最后一次。
+  // 这里用一个 ref 做「最新待落库 + 是否 in-flight」的串行队列——同时最多一个在途请求，
+  // 请求期间又选的新值记到 pending，等当前请求完成后再串行发一次，保证后发的永远排最后、
+  // 后端最终落库的一定是最后一次点击。内存里 selectedModel 是同步 set，永远是最新值。
+  const modelSyncRef = useRef<{ pending: string | null; inFlight: boolean }>({
+    pending: null,
+    inFlight: false,
+  });
+
+  const flushModelSync = useCallback(async () => {
+    if (!activeSession) return;
+    const s = modelSyncRef.current;
+    if (s.inFlight || s.pending === null) return;
+    const model = s.pending;
+    s.inFlight = true;
+    try {
+      await updateSessionModel(activeSession, model);
+    } catch {
+      // PATCH 失败静默：下次进入该会话会重新加载旧值并再次提示重名；
+      // 这种场景下重名提示反而是合理的——保留现状即可。
+    } finally {
+      s.inFlight = false;
+      // 等待期间又选了新值 → 再串行发一次，保证最终是最后一次选择。
+      if (s.pending !== null) flushModelSync();
+    }
+  }, [activeSession]);
+
+  const handleModelChange = useCallback((model: string) => {
+    setSelectedModel(model);
+    modelSyncRef.current.pending = model;
+    flushModelSync();
+  }, [flushModelSync]);
+
   const handleSend = async (text: string) => {
     if (!text.trim() && pendingFiles.length === 0) return;
     // 用 ref 读取最新值，避免 state 批处理延迟导致新会话被旧 streaming=true 拦截
@@ -917,7 +956,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           pendingFiles={pendingFiles}
           quote={quote}
           inputRef={inputRef}
-          onModelChange={setSelectedModel}
+          onModelChange={handleModelChange}
           onSend={handleSend}
           onStop={() => {
             if (activeSession && !stopping) {
