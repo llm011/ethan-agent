@@ -173,6 +173,7 @@ async def get_session(session_id: str, user_id: str = Depends(verify_token)):
                 "total_ms": getattr(m, "total_ms", None),
                 "model": getattr(m, "model", None),
                 "status": getattr(m, "status", "completed"),
+                "error": getattr(m, "error", None) or "",
             }
             for m in session.messages if m.role in ("user", "assistant")
         ],

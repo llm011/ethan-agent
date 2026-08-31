@@ -338,6 +338,7 @@ class SessionStore:
             ("status", "TEXT NOT NULL DEFAULT 'completed'"),
             ("reasoning", "TEXT NOT NULL DEFAULT ''"),
             ("model", "TEXT"),
+            ("error", "TEXT NOT NULL DEFAULT ''"),
         ]:
             try:
                 await self._db.execute(f"ALTER TABLE messages ADD COLUMN {col} {definition}")
@@ -562,7 +563,7 @@ class SessionStore:
         cards_json = json.dumps(msg.cards, ensure_ascii=False) if msg.cards else None
 
         cursor = await self._db.execute(
-            "INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui, images, matched_skills, ttfb_ms, total_ms, mcp_apps, cards, intermediate_blob_id, status, reasoning, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui, images, matched_skills, ttfb_ms, total_ms, mcp_apps, cards, intermediate_blob_id, status, reasoning, model, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 session_id,
                 msg.role,
@@ -585,6 +586,7 @@ class SessionStore:
                 msg.status,
                 msg.reasoning or "",
                 msg.model or None,
+                msg.error or "",
             ),
         )
         await self._db.commit()
@@ -615,7 +617,7 @@ class SessionStore:
         cards_json = json.dumps(msg.cards, ensure_ascii=False) if msg.cards else None
 
         await self._db.execute(
-            "UPDATE messages SET content=?, tool_calls=?, usage=?, tool_steps=?, thought=?, a2ui=?, mcp_apps=?, matched_skills=?, ttfb_ms=?, total_ms=?, cards=?, created_at=?, status=?, reasoning=?, model=COALESCE(?, model) "
+            "UPDATE messages SET content=?, tool_calls=?, usage=?, tool_steps=?, thought=?, a2ui=?, mcp_apps=?, matched_skills=?, ttfb_ms=?, total_ms=?, cards=?, created_at=?, status=?, reasoning=?, model=COALESCE(?, model), error=? "
             "WHERE id=? AND session_id=?",
             (
                 msg.content,
@@ -633,6 +635,7 @@ class SessionStore:
                 msg.status,
                 msg.reasoning or "",
                 msg.model or None,
+                msg.error or "",
                 row_id,
                 session_id,
             ),
@@ -655,17 +658,28 @@ class SessionStore:
         await self._db.commit()
         return cursor.rowcount > 0
 
-    async def interrupt_running_messages(self, session_id: str) -> int:
+    async def interrupt_running_messages(self, session_id: str, reason: str = "") -> int:
         """把会话内所有 running 态的 assistant 消息标记为 interrupted。
 
         producer 崩溃/异常退出时的兜底：实时进度占位行（content 空、status=running）
         若无人定稿，刷新后 UI 会无限转圈。watchdog 补丁与落库失败路径调用；
         已正常定稿的行是 completed，不会被误伤。返回更新行数。
+
+        传入 reason（如“任务意外终止…/友好错误文案”）时，会把该说明写入独立 error
+        字段（而非 content），让中断原因持久化且不与回复正文语义混淆——否则前端
+        会把错误文案当正常正文渲染、提示条措辞与实际内容错位。
         """
-        cursor = await self._db.execute(
-            "UPDATE messages SET status='interrupted' WHERE session_id=? AND role='assistant' AND status='running'",
-            (session_id,),
-        )
+        if reason:
+            cursor = await self._db.execute(
+                "UPDATE messages SET status='interrupted', error=? "
+                "WHERE session_id=? AND role='assistant' AND status='running'",
+                (reason, session_id),
+            )
+        else:
+            cursor = await self._db.execute(
+                "UPDATE messages SET status='interrupted' WHERE session_id=? AND role='assistant' AND status='running'",
+                (session_id,),
+            )
         await self._db.commit()
         return cursor.rowcount
 
@@ -883,7 +897,7 @@ class SessionStore:
         ]
 
         async with self._db.execute(
-            "SELECT id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui, images, matched_skills, ttfb_ms, total_ms, mcp_apps, cards, intermediate_blob_id, status, reasoning, model FROM messages WHERE session_id = ? ORDER BY id",
+            "SELECT id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui, images, matched_skills, ttfb_ms, total_ms, mcp_apps, cards, intermediate_blob_id, status, reasoning, model, error FROM messages WHERE session_id = ? ORDER BY id",
             (session_id,),
         ) as cursor:
             async for r in cursor:
@@ -905,6 +919,7 @@ class SessionStore:
                 _status = r[18] if len(r) > 18 and r[18] else "completed"
                 _reasoning = r[19] if len(r) > 19 and r[19] else ""
                 _model = r[20] if len(r) > 20 and r[20] else None
+                _error = r[21] if len(r) > 21 and r[21] else ""
                 session.messages.append(
                     Message(
                         role=r[1],
@@ -928,6 +943,7 @@ class SessionStore:
                         intermediate_blob_id=intermediate_blob_id,
                         status=_status,
                         model=_model,
+                        error=_error,
                     )
                 )
 

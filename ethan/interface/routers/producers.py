@@ -547,10 +547,11 @@ async def _run_generation(
         # 已有进度行（有 tool_steps）则 UPDATE；否则新建一条 assistant 消息。
         # 两种情形都覆盖：(1) 工具调用中途报错 (2) provider 直接失败、无任何工具步骤。
         if session_id:
-            error_content = (collector.full + "\n\n" if collector.full else "") + err_text
+            # 异常中断：错误原因放独立 error 字段（前端「已中断 + 原因」提示条读取），
+            # content 只保留已产出的正文，避免把错误文案混入回复正文语义。
             err_msg = Message(
                 role="assistant",
-                content=error_content,
+                content=collector.full,
                 thought=collector.thought,
                 reasoning=collector.reasoning,
                 usage=collector.usage_dict,
@@ -563,6 +564,7 @@ async def _run_generation(
                 total_ms=collector.total_ms,
                 status="interrupted",
                 model=agent._provider.model,
+                error=err_text,
             )
             try:
                 if progress_msg_id:

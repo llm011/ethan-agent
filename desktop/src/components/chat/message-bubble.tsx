@@ -523,15 +523,37 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
                 onConfirm={onActionConfirm}
               />
             )}
-            {msg.role === "assistant" && msg.status === "interrupted" && onResume && !isStreaming && (
-              <div className="flex items-center mt-2 mb-1">
-                <button
-                  onClick={() => onResume(msg)}
-                  className="text-xs px-2.5 py-1 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20 transition-colors inline-flex items-center gap-1"
-                >
-                  <RotateCcwIcon className="h-3 w-3" />
-                  继续执行
-                </button>
+            {msg.role === "assistant" && msg.status === "running" && !msg.content && !isStreaming && isLast && (
+              <div className="flex items-center gap-2 mt-2 mb-1 rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2">
+                <span className="text-xs text-blue-700 dark:text-blue-400 inline-flex items-center gap-1.5">
+                  <span className="inline-flex items-center gap-0.5" aria-hidden>
+                    <span className="h-1.5 w-1.5 rounded-full bg-blue-500/70 animate-bounce" style={{ animationDelay: "0ms", animationDuration: "0.9s" }} />
+                    <span className="h-1.5 w-1.5 rounded-full bg-blue-500/70 animate-bounce" style={{ animationDelay: "150ms", animationDuration: "0.9s" }} />
+                    <span className="h-1.5 w-1.5 rounded-full bg-blue-500/70 animate-bounce" style={{ animationDelay: "300ms", animationDuration: "0.9s" }} />
+                  </span>
+                  <span>任务执行中，完成后这里会显示结果</span>
+                </span>
+              </div>
+            )}
+            {msg.role === "assistant" && msg.status === "interrupted" && !isStreaming && (
+              <div className="flex items-center gap-2 mt-2 mb-1 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+                <span className="text-xs text-amber-700 dark:text-amber-400 inline-flex items-center gap-1.5">
+                  <span className="shrink-0">⚠️</span>
+                  {msg.error
+                    ? `任务已中断：${msg.error}`
+                    : msg.content
+                      ? "这条回复已中断，以下内容可能不完整"
+                      : "任务已中断，未生成最终结果"}
+                </span>
+                {onResume && (
+                  <button
+                    onClick={() => onResume(msg)}
+                    className="ml-auto text-xs px-2.5 py-1 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20 transition-colors inline-flex items-center gap-1 shrink-0"
+                  >
+                    <RotateCcwIcon className="h-3 w-3" />
+                    继续执行
+                  </button>
+                )}
               </div>
             )}
             <div className="flex justify-end items-center mt-2 gap-1.5 text-[10px] text-muted-foreground/40 tabular-nums flex-wrap">

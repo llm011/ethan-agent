@@ -99,7 +99,10 @@ export async function triggerSchedule(jobId: string): Promise<void> {
     method: "POST",
     headers: headers(),
   });
-  if (!res.ok) throw new Error("Failed");
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err && err.detail) || `Failed (${res.status})`);
+  }
 }
 
 // ── Agenda（日程） ────────────────────────────────────────────────

@@ -60,6 +60,7 @@ class Message:
     intermediate_blob_id: int = 0  # 中间过程正文外置文件索引；0 表示无
     status: str = "completed"  # running | completed | interrupted | stopped — 消息生成状态，用于中断检测与续跑
     model: Optional[str] = None  # 实际使用的模型标识，持久化到 DB 以便前端展示
+    error: Optional[str] = None  # 中断/失败原因（独立字段，区别于回复正文 content），前端据此展示「任务已中断 + 原因」
 
     @property
     def is_tool_call(self) -> bool:

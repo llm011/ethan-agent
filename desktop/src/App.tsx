@@ -4,6 +4,7 @@ import { type ModelEntry } from "@/lib/api";
 import { fetchModels } from "@/lib/api-base";
 import { useCachedResource } from "@/lib/use-cached-resource";
 import { AuthProvider } from "@/lib/auth-context";
+import { Toaster } from "@ethan/shared/components/toaster";
 import { useDeepLink } from "@/lib/use-deep-link";
 import { LayoutShell } from "@/components/layout-shell";
 import { ChatView } from "@/components/chat-view";
@@ -95,6 +96,7 @@ function RoutesTree() {
 function App() {
   return (
     <AuthProvider>
+      <Toaster />
       <HashRouter>
         <RoutesTree />
       </HashRouter>
