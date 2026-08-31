@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@ethan/shared/ui/button";
 import { Input } from "@ethan/shared/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@ethan/shared/ui/select";
+import { ModelSelect } from "@ethan/shared/ui/model-select";
 import { Check, ChevronDown, ChevronRight, Plus, Trash2 } from "lucide-react";
 import { MdEditor } from "@ethan/shared/components/md-editor";
 import {
@@ -390,41 +391,26 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
 
                     <div className="grid gap-2">
                       <label className="text-sm font-medium">默认模型</label>
-                      <Select
-                        value={agentForm.default_model}
-                        onValueChange={(val) => setAgentForm({ ...agentForm, default_model: val || "" })}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="选择模型" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {modelList.map((m) => (
-                            <SelectItem key={m.id} value={m.id}>
-                              {m.description || m.id}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <ModelSelect
+                        models={modelList}
+                        value={agentForm.default_model ?? ""}
+                        onValueChange={(val) => setAgentForm({ ...agentForm, default_model: val })}
+                        valueMode="id"
+                        placeholder="选择模型"
+                      />
                     </div>
 
                     <div className="grid gap-2">
                       <label className="text-sm font-medium">轻量模型（可选）</label>
-                      <Select
-                        value={agentForm.lite_model}
+                      <ModelSelect
+                        models={modelList}
+                        value={agentForm.lite_model ?? ""}
                         onValueChange={(val) => setAgentForm({ ...agentForm, lite_model: val || "" })}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="留空则按主模型推断" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="">留空（自动推断）</SelectItem>
-                          {modelList.map((m) => (
-                            <SelectItem key={m.id} value={m.id}>
-                              {m.description || m.id}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        valueMode="id"
+                        allowEmpty
+                        emptyLabel="留空（自动推断）"
+                        placeholder="留空则按主模型推断"
+                      />
                       <p className="text-xs text-muted-foreground">用于记忆压缩、智能标题、skill 自生成等后台任务，选个便宜快的。</p>
                     </div>
 
@@ -715,42 +701,28 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
 
                     <div className="grid gap-2">
                       <label className="text-sm font-medium">心跳任务模型</label>
-                      <Select
+                      <ModelSelect
+                        models={modelList}
                         value={agentForm.heartbeat_model ?? ""}
                         onValueChange={(val) => setAgentForm({ ...agentForm, heartbeat_model: val || "" })}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="留空则跟随默认模型" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="">留空（跟随默认模型）</SelectItem>
-                          {modelList.map((m) => (
-                            <SelectItem key={m.id} value={m.id}>
-                              {m.description || m.id}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        valueMode="id"
+                        allowEmpty
+                        emptyLabel="留空（跟随默认模型）"
+                        placeholder="留空则跟随默认模型"
+                      />
                     </div>
 
                     <div className="grid gap-2">
                       <label className="text-sm font-medium">定时任务模型</label>
-                      <Select
+                      <ModelSelect
+                        models={modelList}
                         value={agentForm.schedule_model ?? ""}
                         onValueChange={(val) => setAgentForm({ ...agentForm, schedule_model: val || "" })}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="留空则跟随默认模型" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="">留空（跟随默认模型）</SelectItem>
-                          {modelList.map((m) => (
-                            <SelectItem key={m.id} value={m.id}>
-                              {m.description || m.id}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        valueMode="id"
+                        allowEmpty
+                        emptyLabel="留空（跟随默认模型）"
+                        placeholder="留空则跟随默认模型"
+                      />
                     </div>
 
                     <div className="grid gap-2">
