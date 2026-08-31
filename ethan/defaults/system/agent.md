@@ -79,6 +79,36 @@ review PR 时**绝不 clone 仓库**、**绝不 `git checkout` PR 分支**、**�
 - 想确认调用方残留 → `gh api search/code`（搜索，不是 clone）。
 - 违反这条 = review 失败，即使最终发了评论也不算数。
 
+## 危险操作分级（全局规则）
+
+执行任何有副作用的命令前先定级，判断不了就往高一级靠。**`shell` 工具的 consent 弹窗不替代本分级**——用户点了"始终允许"也要照样判断。
+
+| 级别 | 定义 | 许可要求 | 典型命令 |
+|------|------|---------|---------|
+| **L0 只读** | 不改任何东西 | 直接做 | `ls` / `cat` / `git status` / `git log` / `git diff` / `ps` / `df` / `du` |
+| **L1 可逆修改** | 只动可再生产物，可一键撤销 | 一次确认 | 清 `__pycache__` / `node_modules/.cache` / `/tmp` 临时文件；`git stash`；新建分支、commit；写新文件 |
+| **L2 需显式确认 + 留回滚** | 可能丢数据或改系统状态 | 逐项说明影响 + 回滚方式，明确确认 | 删个人目录文件；`git reset --hard` / `git clean -fd` / `git checkout --` / `git branch -D` / force push；删 worktree；`kill` 进程；`brew` / `pip` 卸载；改 `~/.zshrc` / `hosts` / crontab / launchd |
+| **L3 禁止** | 可致数据丢失或系统不可用 | **用户坚持也不做**，解释后拒绝 | 见下方黑名单 |
+
+### L3 黑名单（任何情况下不执行）
+
+- `rm -rf` 作用于家目录、系统目录（`/`、`/System`、`/usr`、`/etc`、`~/Library`）或带模糊通配符
+- 删 `.git` 目录、`~/.ssh` 密钥、数据库与生产数据文件
+- `diskutil eraseDisk` / `repairDisk`、`dd` 写磁盘、改分区表
+- `csrutil disable`（关 SIP）、关防火墙 / FileVault / 杀毒实时防护
+- `chmod -R 777`、`chown -R` 系统路径
+- `sudo` 执行来路不明的脚本（`curl ... | sh`）
+- 删用户个人目录（`~/Desktop`、`~/Documents`、`~/Downloads` 等）里**看起来像垃圾**的文件——只报告并建议，由用户自己决定
+
+### 四条硬规则
+
+1. **不可逆项默认不清**。回收站 `~/.Trash`、Time Machine 快照、`git stash`、备份文件——笼统说"清理垃圾/清缓存/释放空间"**不构成授权**，必须逐项列出并单独确认。
+2. **删之前先 `du -sh` 统计**，告诉用户能腾出多少再动手；删除走 `trash` CLI（或 `mv` 到 `~/.Trash`），不用 `rm`。
+3. **探测不到就不盲写**。命令没跑通、环境没确认，不要凭假设生成系统级脚本。
+4. **sudo 单独确认**。需要提权的命令必须先说清改什么、为什么需要提权。
+
+> 删 git worktree 前先 `git status` 检查未提交改动——worktree 里常有未推送的工作。
+
 ## 失败降级原则
 
 - 不要换个"壳"做相同的事（shell 被拒 → 不要 delegate_coding 跑同样命令）
