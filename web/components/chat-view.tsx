@@ -20,6 +20,7 @@ import {
   injectMessage,
   deleteInjectedMessage,
   updateSessionMode,
+  updateSessionModel,
   fetchOnboardingStatus,
   fetchAgentSettings,
   respondConsent,
@@ -627,6 +628,19 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 选模型 → 立刻更新本地 state，并把当前会话的 model 写回后端。
+  // 这里跟「点选重名候选」复用的 onModelChange 都走同一条路径；
+  // 不在 activeSession 上时不做 PATCH（新会话的 model 会随 createSession 时一起落库）。
+  const handleModelChange = useCallback((model: string) => {
+    setSelectedModel(model);
+    if (activeSession) {
+      updateSessionModel(activeSession, model).catch(() => {
+        // PATCH 失败静默忽略，下次再切回来会重新加载到旧值并再次提示重名；
+        // 这种场景下重名提示反而是合理的——保留现状即可。
+      });
+    }
+  }, [activeSession]);
+
   const handleSend = async (text: string) => {
     if (!text.trim() && pendingFiles.length === 0) return;
     // 用 ref 读取最新值，避免 state 批处理延迟导致新会话被旧 streaming=true 拦截
@@ -917,7 +931,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           pendingFiles={pendingFiles}
           quote={quote}
           inputRef={inputRef}
-          onModelChange={setSelectedModel}
+          onModelChange={handleModelChange}
           onSend={handleSend}
           onStop={() => {
             if (activeSession && !stopping) {

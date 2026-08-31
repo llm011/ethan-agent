@@ -707,6 +707,21 @@ class SessionStore:
         )
         await self._db.commit()
 
+    async def update_model(self, session_id: str, model: str) -> None:
+        """更新会话绑定的模型。用于「点击重名模型候选后把选择持久化到当前会话」场景。
+
+        与 update_mode 同款语义：模型选择是元数据变更，不制造未读。
+        注：写入的可能是复合格式 ``provider/id``（与前端 selectedModel 的存储一致）。
+        """
+        now = time.time()
+        await self._db.execute(
+            "UPDATE sessions SET model = ?, updated_at = ?, "
+            "last_read_at = CASE WHEN last_read_at >= updated_at THEN ? ELSE last_read_at END "
+            "WHERE id = ?",
+            (model, now, now, session_id),
+        )
+        await self._db.commit()
+
     async def pin_session(self, session_id: str) -> None:
         await self._db.execute(
             "UPDATE sessions SET pinned_at = ? WHERE id = ?",
