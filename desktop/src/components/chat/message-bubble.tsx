@@ -539,9 +539,11 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
               <div className="flex items-center gap-2 mt-2 mb-1 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2">
                 <span className="text-xs text-amber-700 dark:text-amber-400 inline-flex items-center gap-1.5">
                   <span className="shrink-0">⚠️</span>
-                  {msg.content
-                    ? "这条回复已中断，以下内容可能不完整"
-                    : "任务已中断，未生成最终结果"}
+                  {msg.error
+                    ? `任务已中断：${msg.error}`
+                    : msg.content
+                      ? "这条回复已中断，以下内容可能不完整"
+                      : "任务已中断，未生成最终结果"}
                 </span>
                 {onResume && (
                   <button

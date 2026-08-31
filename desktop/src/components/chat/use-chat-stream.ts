@@ -46,6 +46,7 @@ export async function consumeStream(
   let failed = false;
   let hadBackgroundPolling = false;
   let assistantContent = "";
+  let lastError: string | undefined;
   let intermediateOutput = "";
   const assistantThought = "";
   const currentToolSteps: ToolStep[] = [];
@@ -185,10 +186,9 @@ export async function consumeStream(
       }
       if (chunk.error) {
         failed = true;
-        const errLine = `⚠️ ${chunk.error}`;
-        assistantContent = assistantContent.trim()
-          ? `${assistantContent}\n\n---\n${errLine}`
-          : errLine;
+        // 错误原因走独立 error 字段（message-bubble 的「已中断」提示条读取），
+        // 不混入 content 正文，避免把错误文案当正常回复渲染、同一信息展示两遍。
+        lastError = chunk.error;
         break;
       }
       if (chunk.tool && chunk.state === "start") {
@@ -468,10 +468,7 @@ export async function consumeStream(
       }
     }
     if (failed) {
-      const errLine = `⚠️ ${err instanceof Error ? err.message : "连接中断"}`;
-      assistantContent = assistantContent.trim()
-        ? `${assistantContent}\n\n---\n${errLine}`
-        : errLine;
+      lastError = lastError || (err instanceof Error ? err.message : "连接中断");
     }
   }
 
@@ -495,6 +492,7 @@ export async function consumeStream(
         id: messageId ?? last.id,
         intermediateOutput: intermediateOutput || undefined,
         model: finalModel ?? last.model,
+        error: lastError || undefined,
       };
       return msgs;
     }
@@ -514,6 +512,7 @@ export async function consumeStream(
       id: messageId,
       intermediateOutput: intermediateOutput || undefined,
       model: finalModel,
+      error: lastError || undefined,
     }];
   });
   setBgPolling(null);

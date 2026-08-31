@@ -96,4 +96,5 @@ export interface Message {
   cards?: CardData[];  // 结构化卡片数据（web_search/image_search 产出）
   model?: string;
   status?: string;  // running | completed | interrupted | stopped
+  error?: string;  // 中断/失败原因（独立字段，区别于 content 正文），message-bubble 据此展示「任务已中断 + 原因」
 }
