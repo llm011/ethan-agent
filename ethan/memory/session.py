@@ -655,17 +655,28 @@ class SessionStore:
         await self._db.commit()
         return cursor.rowcount > 0
 
-    async def interrupt_running_messages(self, session_id: str) -> int:
+    async def interrupt_running_messages(self, session_id: str, reason: str = "") -> int:
         """把会话内所有 running 态的 assistant 消息标记为 interrupted。
 
         producer 崩溃/异常退出时的兜底：实时进度占位行（content 空、status=running）
         若无人定稿，刷新后 UI 会无限转圈。watchdog 补丁与落库失败路径调用；
         已正常定稿的行是 completed，不会被误伤。返回更新行数。
+
+        传入 reason（如“任务意外终止…/友好错误文案”）时，会把该说明写入 content 为空的
+        占位行，让中断原因持久化到 DB——否则前端刷新后只见一条空白消息，误以为还在跑。
         """
-        cursor = await self._db.execute(
-            "UPDATE messages SET status='interrupted' WHERE session_id=? AND role='assistant' AND status='running'",
-            (session_id,),
-        )
+        if reason:
+            cursor = await self._db.execute(
+                "UPDATE messages SET status='interrupted', "
+                "content=CASE WHEN content IS NULL OR content='' THEN ? ELSE content END "
+                "WHERE session_id=? AND role='assistant' AND status='running'",
+                (reason, session_id),
+            )
+        else:
+            cursor = await self._db.execute(
+                "UPDATE messages SET status='interrupted' WHERE session_id=? AND role='assistant' AND status='running'",
+                (session_id,),
+            )
         await self._db.commit()
         return cursor.rowcount
 

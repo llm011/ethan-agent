@@ -14,6 +14,7 @@ import { ScrollArea } from "@ethan/shared/ui/scroll-area";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@ethan/shared/ui/card";
 import { Loader2, RefreshCw, Play, Pause, Trash2, MessageSquare, ChevronDown, ChevronRight, Pencil, Clock, TerminalSquare, Zap } from "lucide-react";
 import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
+import { toast } from "@ethan/shared/components/toaster";
 import { formatTrigger, formatNextRun } from "@/lib/utils";
 import {
   Dialog,
@@ -214,8 +215,9 @@ export function ScheduleView() {
     setTriggeringId(job.id);
     try {
       await triggerSchedule(job.id);
-    } catch {
-      // 失败不 reload，让用户看到当前状态
+      toast.success(`已触发「${job.name}」，任务将在后台执行`);
+    } catch (e) {
+      toast.error(`触发「${job.name}」失败：${e instanceof Error ? e.message : "未知错误"}`);
     } finally {
       setTriggeringId("");
     }

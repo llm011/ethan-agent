@@ -178,7 +178,7 @@ async def _run_watchdog(run: ChatRun, manager: "RunManager") -> None:
                     from ethan.memory.session import get_session_store, retry_on_db_locked
 
                     store = await get_session_store()
-                    n = await retry_on_db_locked(store.interrupt_running_messages, run.session_id)
+                    n = await retry_on_db_locked(store.interrupt_running_messages, run.session_id, err_msg)
                     if n:
                         logger.info(
                             "[Watchdog] %s 已将 %d 条 running 消息标记为 interrupted",
