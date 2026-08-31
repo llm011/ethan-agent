@@ -22,6 +22,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { useTheme } from "@/components/chat/use-theme";
 import { THEMES } from "@/components/chat/themes";
 import { ThemeSwatch } from "@ethan/shared/components/theme-swatch";
+import { ModelSelect } from "@ethan/shared/components/model-select";
 import { PromptPreview } from "./settings/prompt-preview";
 import { ProfileEditor } from "./settings/profile-editor";
 import { FastRulesTab } from "./settings/fast-rules-tab";
@@ -297,41 +298,23 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
 
                     <div className="grid gap-2">
                       <label className="text-sm font-medium">默认模型</label>
-                      <Select
+                      <ModelSelect
+                        models={modelList}
                         value={agentForm.default_model}
-                        onValueChange={(val) => setAgentForm({ ...agentForm, default_model: val || "" })}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="选择模型" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {modelList.map((m) => (
-                            <SelectItem key={m.id} value={m.id}>
-                              {m.description || m.id}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        onChange={(val) => setAgentForm({ ...agentForm, default_model: val })}
+                        placeholder="选择模型"
+                      />
                     </div>
 
                     <div className="grid gap-2">
                       <label className="text-sm font-medium">轻量模型（可选）</label>
-                      <Select
+                      <ModelSelect
+                        models={modelList}
                         value={agentForm.lite_model}
-                        onValueChange={(val) => setAgentForm({ ...agentForm, lite_model: val || "" })}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="留空则按主模型推断" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="">留空（自动推断）</SelectItem>
-                          {modelList.map((m) => (
-                            <SelectItem key={m.id} value={m.id}>
-                              {m.description || m.id}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        onChange={(val) => setAgentForm({ ...agentForm, lite_model: val })}
+                        placeholder="留空则按主模型推断"
+                        emptyOption={{ value: "", label: "留空（自动推断）" }}
+                      />
                       <p className="text-xs text-muted-foreground">用于记忆压缩、智能标题、skill 自生成等后台任务，选个便宜快的。</p>
                     </div>
 

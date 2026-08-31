@@ -1,6 +1,7 @@
 import { useState, useRef, RefObject, useCallback, useEffect, useImperativeHandle, forwardRef } from "react";
 import { Send, Paperclip, X, Reply, Square, ImageIcon } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@ethan/shared/ui/select";
+import { ModelSelect, type ModelOption } from "@ethan/shared/components/model-select";
 import { uploadFile, type ModeEntry } from "@/lib/api";
 import type { Quote, PendingFile } from "@ethan/shared/chat/types";
 import { QueuedMessages } from "./queued-messages";
@@ -32,7 +33,7 @@ export interface ChatInputHandle {
 interface ChatInputProps {
   streaming: boolean;
   stopping?: boolean;
-  models: { id: string; description: string }[];
+  models: ModelOption[];
   selectedModel: string;
   pendingFiles: PendingFile[];
   quote: Quote | null;
@@ -305,16 +306,14 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               <Paperclip className="h-4 w-4" />
             </button>
             <input ref={fileRef} type="file" className="hidden" multiple accept="*/*" onChange={handleFileUpload} />
-            <Select value={selectedModel} onValueChange={(v) => v && onModelChange(v)} disabled={streaming}>
-              <SelectTrigger className="h-7 px-2.5 text-xs bg-transparent border-0 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg shadow-none focus:ring-0 focus:ring-offset-0 gap-1 w-auto max-w-[160px]">
-                <SelectValue placeholder="模型" />
-              </SelectTrigger>
-              <SelectContent>
-                {models.map((m) => (
-                  <SelectItem key={m.id} value={m.id} className="text-xs">{m.description || m.id}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <ModelSelect
+              variant="inline"
+              models={models}
+              value={selectedModel}
+              onChange={onModelChange}
+              disabled={streaming}
+              placeholder="模型"
+            />
             {/* 对话模式下拉：由 /modes 表驱动（含默认）；选中即切换，已有会话立即落库 */}
             {modes.length > 0 && (
               <Select
