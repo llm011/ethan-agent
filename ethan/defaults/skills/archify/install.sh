@@ -67,7 +67,7 @@ check_deps() {
 
 if [ "$MODE" = "check" ]; then
   if is_complete; then
-    log "已安装且完整（$TAG）"
+    log "已安装且完整（${TAG}）"
     exit 0
   else
     warn "未安装或不完整，请运行: $0"
@@ -76,7 +76,7 @@ if [ "$MODE" = "check" ]; then
 fi
 
 if [ "$MODE" != "force" ] && is_complete; then
-  log "已安装 $TAG，跳过（用 --force 可强制重装）"
+  log "已安装 ${TAG}，跳过（用 --force 可强制重装）"
   exit 0
 fi
 
