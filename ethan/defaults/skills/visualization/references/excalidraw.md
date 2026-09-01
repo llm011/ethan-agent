@@ -1,19 +1,12 @@
----
-name: excalidraw
-description: >
-  TRIGGER WHEN: 用户要求"画流程图"、"画架构图"、"可视化业务逻辑"、"绘制示意图"、
-  "Excalidraw"、".excalidraw"、"在 Obsidian 里画图"、"思维导图"、"diagram"、
-  "标准 Excalidraw"、"Excalidraw 动画"或提到需要把逻辑/架构/流程转为可视化图形时。
-  在 Obsidian vault 内通过 DSL 或 JSON 生成可编辑的 Excalidraw 图（.md / .excalidraw），
-  默认输出 Obsidian Excalidraw 插件可直接打开的 .md 文件。
-version: 1.0.0
-source: https://github.com/axtonliu/axton-obsidian-visual-skills + https://github.com/coleam00/excalidraw-diagram-skill
-license: MIT (axtonliu) + NO LICENSE (coleam00)
----
+# Excalidraw 绘图工作流 (Obsidian 优先)
 
-# Excalidraw 绘图助手 (Obsidian 优先)
+> 本文档原为独立 `excalidraw` 技能，已并入 `visualization` 技能作为 reference。
+> 何时读：用户要"在 Obsidian 里画图"、要 .excalidraw 文件、要可拖拽微调的手绘风图或动画图（落盘文件场景）；
+> 对话内即时看图不要读本文，直接用 generate_chart / mermaid / SVG（见 SKILL.md 路由树）。
+> 来源与许可：https://github.com/axtonliu/axton-obsidian-visual-skills (MIT) +
+> https://github.com/coleam00/excalidraw-diagram-skill (NO LICENSE)，详见同目录 `excalidraw-NOTICE.md`。
 
-本技能将自然语言描述转化为可编辑、可论证的 Excalidraw 图形，默认面向 Obsidian Excalidraw 插件
+本工作流将自然语言描述转化为可编辑、可论证的 Excalidraw 图形，默认面向 Obsidian Excalidraw 插件
 （zsviczian/obsidian-excalidraw-plugin）工作流。综合三条来源的精华：
 
 - **DSL 快速模式**（来自 macmini `excalidraw-flowchart`）：用简洁 DSL 一行生成流程图。

@@ -1,6 +1,6 @@
 ---
 name: visualization
-description: 统一可视化路由。当回答内容包含可被图形更清晰表达的结构化关系（流程与顺序、多对象比较、构成与分布、趋势与时间序列、机制与因果、架构与关系）时主动使用，即使用户未明确要求。核心原则：精确信息用确定性渲染（代码图表/SVG），不编造数据，交互只在变化本身有价值时使用；纯文字更清楚、确认/翻译/改写类任务不可视化。与 ui-card 技能分工：少量结构化条目（几行对比/榜单/大数字）由 ui-card 卡片承载，本技能负责图表与图形类（趋势/占比/分布/流程/架构/示意图）。
+description: 统一可视化路由。当回答内容包含可被图形更清晰表达的结构化关系（流程与顺序、多对象比较、构成与分布、趋势与时间序列、机制与因果、架构与关系）时主动使用，即使用户未明确要求。核心原则：精确信息用确定性渲染（代码图表/SVG），不编造数据，交互只在变化本身有价值时使用；纯文字更清楚、确认/翻译/改写类任务不可视化。与 ui-card 技能分工：少量结构化条目（几行对比/榜单/大数字）由 ui-card 卡片承载，本技能负责图表与图形类（趋势/占比/分布/流程/架构/示意图）。对话内数据图表优先用内置 generate_chart 工具；需产出可编辑图文件落盘（Obsidian/.excalidraw）时按 references/excalidraw.md 的 Excalidraw 工作流执行。
 trigger:
   - 可视化
   - 画图
@@ -40,14 +40,23 @@ trigger:
 ├─ 短小结构化内容（对比/排行/统计/时间轴/进度/清单）
 │   → ui_card 工具（固定模板优先，card 参数填结构化数据）
 ├─ 精确数值、趋势、占比、分布（多数据点、需要坐标/比例）
-│   → 代码生成图表（HTML/Chart.js/SVG，确定性渲染）
+│   → generate_chart 工具（内置，Web 端出交互图表卡片 + PNG 降级）
+│   → 工具不可用/不适用（自定义布局、组合图、主题适配）时手写 HTML/Chart.js/SVG
 ├─ 概念、机制、流程、关系（非精确数值）
-│   → SVG 示意图 / mermaid / 结构化文字图
+│   → SVG 示意图 / mermaid（Web 端原生渲染 mermaid 代码块）/ 结构化文字图
+├─ 需要可编辑图文件落盘（Obsidian vault / .excalidraw / 手绘风 / 动画图）
+│   → Excalidraw 工作流（见 references/excalidraw.md）
 ├─ 参数变化、状态迁移、步骤演示（动态本身有价值）
 │   → HTML 交互
 └─ 图示收益不足
     → 纯文字
 ```
+
+## 内置工具与 Excalidraw 工作流
+
+- **generate_chart 工具（对话内数据图表首选）**：Chart.js 语法，Web 端渲染交互图表卡片，同时产 PNG 供飞书等渠道降级。折线/柱状/饼/环/雷达都走它，别手写 HTML 重复造轮子；只有工具参数表达不了（复杂组合图、特殊布局、主题深度适配）才手写。
+- **Excalidraw 工作流（落盘文件）**：用户要"在 Obsidian 里画图"、要 .excalidraw 文件、要可拖拽微调的手绘风图或动画图时使用，产出落盘到 Obsidian vault 的可编辑文件。完整流程（DSL 快速模式 / JSON 完整模式 / 三种输出模式 / 设计规范 / 避坑指南）见 [references/excalidraw.md](references/excalidraw.md)，DSL 语法见 [references/dsl-syntax.md](references/dsl-syntax.md)。
+- 判断口诀：**对话里看 → generate_chart / mermaid / SVG；vault 里存 → Excalidraw**。
 
 分支可组合（如「卡片给结论摘要 + 图表给趋势细节」），但默认一个主模块，复杂任务最多加一个辅助模块，且每个模块必须表达不同信息。
 
