@@ -376,6 +376,9 @@ export function ChatInput({
               valueMode="fullId"
               size="sm"
               placeholder="模型"
+              unmatchedLabel={(v) =>
+                v === NEED_CHOICE ? "有多个 provider 提供该模型，请指定一个" : v
+              }
               extraItems={
                 ambiguousLegacy ? (
                   <SelectItem value={NEED_CHOICE} disabled className="text-xs text-amber-600 dark:text-amber-500">

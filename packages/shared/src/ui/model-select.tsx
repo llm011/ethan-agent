@@ -38,6 +38,12 @@ export interface ModelSelectProps {
   emptyLabel?: string;
   /** 未选中时触发按钮展示的占位文案 */
   placeholder?: string;
+  /**
+   * value 匹配不到任何模型时，触发按钮展示的兜底文案（替代直接显示原始 value）。
+   * 用于哨兵值（如聊天输入框的 NEED_CHOICE「重名待重选」）——避免把实现细节字符串
+   * 直接抖给用户。缺省时回退为显示原始 value。
+   */
+  unmatchedLabel?: (value: string) => React.ReactNode;
   disabled?: boolean;
   /** 触发按钮尺寸，聊天输入框紧凑场景用 "sm" */
   size?: "sm" | "default";
@@ -86,6 +92,7 @@ export function ModelSelect({
   allowEmpty = false,
   emptyLabel,
   placeholder = "选择模型",
+  unmatchedLabel,
   disabled,
   size = "default",
   triggerClassName,
@@ -93,10 +100,39 @@ export function ModelSelect({
   triggerSuffix,
   extraItems,
 }: ModelSelectProps) {
-  const itemValue = (m: ModelOption) => (valueMode === "fullId" ? fullIdOf(m) : m.id);
+  // 是否存在跨 provider 的同名（同 id）模型。id 模式下这些模型的裸 id 会撞车，
+  // 导致 radix Select 把它们当成同一 item（选中一个则同名的全高亮/匹配混乱）。
+  const hasIdCollision = valueMode === "id" && new Set(models.map((m) => m.id)).size !== models.length;
+
+  // id 模式默认用裸 id 作 value（落库兼容存量配置）；但若存在同名撞车，
+  // 则退回用 provider/id 保证 item value 全局唯一，onValueChange 再拆回裸 id 落库。
+  const itemValue = (m: ModelOption) => {
+    if (valueMode === "fullId") return fullIdOf(m);
+    return hasIdCollision && m.provider ? `${m.provider}/${m.id}` : m.id;
+  };
+
+  // 撞车时传入的 value 也要升级成 provider/id，否则 radix 拿裸 id 匹配不到 item、选中态丢失。
+  // 裸 id 唯一命中 → 升级为对应 provider/id；歧义（命中多个同名）→ 保持原样走 unmatched 兜底。
+  const effectiveValue = (() => {
+    if (valueMode !== "id" || !hasIdCollision) return value;
+    const hits = models.filter((m) => m.id === value);
+    if (hits.length === 1 && hits[0].provider) return `${hits[0].provider}/${hits[0].id}`;
+    return value;
+  })();
+
+  const handleValueChange = (v: string) => {
+    if (v == null) return;
+    // id 模式且因同名撞车而用了 provider/id 作 value 时，拆回裸 id 落库。
+    if (valueMode === "id" && hasIdCollision) {
+      const isComposite = v.includes("/") && models.some((m) => fullIdOf(m) === v);
+      onValueChange(isComposite ? v.split("/", 1)[0] : v);
+      return;
+    }
+    onValueChange(v);
+  };
 
   return (
-    <Select value={value} onValueChange={(v) => v != null && onValueChange(v as string)} disabled={disabled}>
+    <Select value={effectiveValue} onValueChange={(v) => handleValueChange(v as string)} disabled={disabled}>
       <SelectTrigger size={size} className={cn("w-full", triggerClassName)}>
         <SelectValue placeholder={placeholder}>
           {(val: unknown) => {
@@ -112,7 +148,13 @@ export function ModelSelect({
             const m = models.find((x) => fullIdOf(x) === v || x.id === v);
             // 匹配不到：fullId 模式下可能是 legacy 裸 id / NEED_CHOICE 哨兵，兜底显示裸值本身，
             // 避免触发按钮退化成 placeholder 让用户看不出当前状态。
-            if (!m) return <span className="text-muted-foreground">{v}</span>;
+            if (!m) {
+              return (
+                <span className="text-muted-foreground">
+                  {unmatchedLabel ? unmatchedLabel(v) : v}
+                </span>
+              );
+            }
             return (
               <span className="flex items-center gap-1.5 min-w-0">
                 <span className="truncate">{displayNameOf(m)}</span>
