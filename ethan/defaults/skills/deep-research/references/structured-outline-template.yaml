@@ -1,0 +1,18 @@
+# 结构化调研 outline.yaml 模板（来自 workbuddy Deep-Research-skills）
+# 复制本文件为 <topic>/outline.yaml 后按需修改。
+topic: 调研主题（如 "AI Agent 框架横评"）
+
+# 调研对象列表：每个 item 是一个待收集数据的实体
+items:
+  - name: 对象A名称
+    category: 分类（如 国际产品 / 开源框架 / 论文）
+    description: 一句话说明为什么纳入调研
+  - name: 对象B名称
+    category: 分类
+    description: 一句话说明为什么纳入调研
+
+# 执行配置
+execution:
+  batch_size: 3          # 每批并行启动几个后台调研任务（建议 2-4，避免过度并发）
+  items_per_agent: 1     # 每个后台任务负责调研几个对象（建议 1，任务聚焦）
+  output_dir: ./results  # 逐对象 JSON 结果输出目录（相对 <topic>/ 目录）
