@@ -189,10 +189,10 @@ def cache_dir_for(search_key):
     return os.path.join(base, sanitize(search_key))
 
 
-def cache_find(cache_dir, server, tool):
-    """返回 (path, query_date) 中最新的一份缓存；无则 (None, None)。"""
+def cache_candidates(cache_dir, server, tool):
+    """按查询日期从新到旧返回 [(path, query_date), ...]。"""
     pattern = os.path.join(cache_dir, f"{sanitize(server)}.{sanitize(tool)}_*.md")
-    best = (None, None)
+    out = []
     for path in glob.glob(pattern):
         m = re.search(r"_(\d{4}-\d{2}-\d{2})\.md$", path)
         if not m:
@@ -201,9 +201,27 @@ def cache_find(cache_dir, server, tool):
             d = datetime.strptime(m.group(1), "%Y-%m-%d").date()
         except ValueError:
             continue
-        if best[1] is None or d > best[1]:
-            best = (path, d)
-    return best
+        out.append((path, d))
+    out.sort(key=lambda x: x[1], reverse=True)
+    return out
+
+
+def parse_cache_header_args(path):
+    """从缓存文件 header 的 `args:` 行解析出原始参数；解析失败返回 None。"""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            head = f.read(4096)
+    except OSError:
+        return None
+    if not head.startswith("---"):
+        return None
+    m = re.search(r"^args: (.*)$", head, re.MULTILINE)
+    if not m:
+        return None
+    try:
+        return json.loads(m.group(1))
+    except json.JSONDecodeError:
+        return None
 
 
 def cache_read(path):
@@ -255,8 +273,15 @@ def cmd_call(server, tool, args, use_cache=True, ttl_days=DEFAULT_TTL_DAYS, time
     cache_dir = cache_dir_for(search_key) if search_key else None
 
     if use_cache and cache_dir:
-        path, d = cache_find(cache_dir, server, tool)
-        if path and cache_age_days(d) < ttl_days:
+        # 候选按日期从新到旧逐个校验：只有 header 里存的原始 args 与本次
+        # 完全一致才算命中——sanitize 后的目录名可能撞名（如 "ABC 科技 有限公司"
+        # 与 "ABC_科技_有限公司"），仅靠目录名匹配会把别的主体的数据误当成本次结果。
+        for path, d in cache_candidates(cache_dir, server, tool):
+            if cache_age_days(d) >= ttl_days:
+                break  # 候选按日期从新到旧，最新的都过期了，剩余必过期
+            cached_args = parse_cache_header_args(path)
+            if cached_args is None or cached_args != args:
+                continue
             age = cache_age_days(d)
             print(f"# [qcc 缓存命中] {path}（{d} 查询，{age} 天前，未调接口）\n")
             print(pretty(strip_cache_header(cache_read(path))))
