@@ -1,8 +1,22 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""将飞书 Slide XML 渲染为可离线浏览的 HTML 幻灯片"""
+"""将飞书 Slide XML 渲染为可离线浏览的 HTML 幻灯片（画廊式布局）
+
+布局：
+- 左侧：12 页缩略图导航（可点击切换）
+- 右侧：当前页大图预览（真实 DOM 渲染，非截图，文字可选中）
+- 下方：当前页演讲者备注
+
+用法：
+  python3 ppt_to_html.py <xml_path> <out_path>
+
+注意：
+  - 元素坐标必须读 topLeftX/topLeftY/width/height，否则塌缩到 (0,0) 压住标题
+  - 预览缩略图用 CSS transform: scale() 对同一 DOM 缩放，保证文字可选中且离线
+"""
 import re
 import html
+import sys
 import xml.etree.ElementTree as ET
 
 NS = "https://www.larkoffice.com/sml/2.0"
@@ -11,7 +25,6 @@ def q(tag):
     return f"{{{NS}}}{tag}"
 
 def rgba_to_css(rgba_str, default="#fff"):
-    """rgba(255,255,255,1) -> #ffffff 或 rgba()"""
     if not rgba_str:
         return default
     m = re.match(r'rgba?\(([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:[,/\s]+([\d.]+))?\)', rgba_str)
@@ -25,8 +38,7 @@ def rgba_to_css(rgba_str, default="#fff"):
     return rgba_str
 
 def parse_fill(style_elem):
-    """解析 <style><fill><fillColor color=.../></fill></style>"""
-    fill = style_elem.find(q('fill'))
+    fill = style_elem.find(q('fill')) if style_elem is not None else None
     if fill is None:
         return None
     fc = fill.find(q('fillColor'))
@@ -34,8 +46,29 @@ def parse_fill(style_elem):
         return rgba_to_css(fc.get('color'))
     return None
 
+def render_inline(elem):
+    out = []
+    if elem.text:
+        out.append(html.escape(elem.text))
+    for c in elem:
+        if c.tag == q('strong'):
+            out.append(f"<strong>{render_inline(c)}</strong>")
+        elif c.tag == q('span'):
+            color = c.get('color')
+            inner = render_inline(c)
+            if color:
+                out.append(f'<span style="color:{rgba_to_css(color)}">{inner}</span>')
+            else:
+                out.append(inner)
+        elif c.tag == q('br'):
+            out.append("<br>")
+        elif c.text:
+            out.append(html.escape(c.text))
+        if c.tail:
+            out.append(html.escape(c.tail))
+    return "".join(out)
+
 def parse_content(shape):
-    """解析 <content> 下的 <p> 文本和 <ul>/<li> 列表"""
     content = shape.find(q('content'))
     if content is None:
         return "", {}
@@ -66,40 +99,9 @@ def parse_content(shape):
                             inner.append(render_inline(c2))
                     items.append("<li>" + "".join(inner) + "</li>")
             parts.append("<ul>" + "".join(items) + "</ul>")
-        elif tag == q('br'):
-            parts.append("<br>")
     return "".join(parts), attrs
 
-def render_inline(elem):
-    """渲染 <p>/<span>/<strong> 等内联元素"""
-    # 直接文本
-    if elem.text:
-        return html.escape(elem.text)
-    out = []
-    for c in elem:
-        if c.tag == q('strong'):
-            inner = render_inline(c)
-            color = c.get('color')
-            if color:
-                inner = f'<strong style="color:{rgba_to_css(color)}">' + inner.split('</strong>')[0] if False else inner
-            out.append(f"<strong>{render_inline(c)}</strong>")
-        elif c.tag == q('span'):
-            color = c.get('color')
-            inner = render_inline(c)
-            if color:
-                out.append(f'<span style="color:{rgba_to_css(color)}">{inner}</span>')
-            else:
-                out.append(inner)
-        elif c.tag == q('br'):
-            out.append("<br>")
-        elif c.text:
-            out.append(html.escape(c.text))
-        if c.tail:
-            out.append(html.escape(c.tail))
-    return "".join(out)
-
 def icon_emoji(icon_type):
-    """根据 icon 类型返回一个合适 emoji"""
     if not icon_type:
         return "⬜"
     t = icon_type.lower()
@@ -119,8 +121,6 @@ def icon_emoji(icon_type):
     return "🔹"
 
 def render_table(table):
-    """渲染 <table>，读取自身坐标"""
-    # 表格自身坐标（关键：之前漏掉了，导致塌缩到 0,0）
     tx = float(table.get('topLeftX', 0))
     ty = float(table.get('topLeftY', 0))
     tw = float(table.get('width', 840))
@@ -130,7 +130,6 @@ def render_table(table):
     if colgroup is not None:
         for col in colgroup:
             col_widths.append(float(col.get('width', 100)))
-    # 列宽占比，用于给每列定宽
     total_cw = sum(col_widths) if col_widths else 0
     html_rows = []
     for tr in table:
@@ -159,18 +158,50 @@ def render_table(table):
                 style += f"font-size:{fs}px;"
             cells.append(f"<td style='{style}'>{content}</td>")
         html_rows.append("<tr>" + "".join(cells) + "</tr>")
-    # 设定表格绝对定位 + 列宽
     table_style = f"position:absolute;left:{tx}px;top:{ty}px;width:{tw}px;height:{th}px;"
     return f"<table style='{table_style}'>" + "".join(html_rows) + "</table>"
 
-def render_shape(shape, notes):
-    """渲染 shape/text 元素"""
+def render_icon(elem):
+    x = float(elem.get('topLeftX', 0)); y = float(elem.get('topLeftY', 0))
+    w = float(elem.get('width', 40)); h = float(elem.get('height', 40))
+    fill = elem.find(q('fill'))
+    fg = "rgba(37,99,235,1)"
+    if fill is not None:
+        fc = fill.find(q('fillColor'))
+        if fc is not None:
+            fg = fc.get('color')
+    emo = icon_emoji(elem.get('iconType'))
+    return (f"<div class='icon' style='left:{x}px;top:{y}px;width:{w}px;height:{h}px;"
+            f"background:{rgba_to_css(fg)};'>"
+            f"<span style='color:rgba(255,255,255,.92);font-size:{int(h)*0.6}px;'>{emo}</span></div>")
+
+def render_line(elem):
+    x1 = float(elem.get('startX', 0)); y1 = float(elem.get('startY', 0))
+    x2 = float(elem.get('endX', 0)); y2 = float(elem.get('endY', 0))
+    border = elem.find(q('border'))
+    color = "rgba(83,97,116,.3)"
+    if border is not None:
+        bc = border.get('color')
+        if bc:
+            color = rgba_to_css(bc)
+    has_arrow = elem.find(q('endArrow')) is not None
+    marker = ""
+    if has_arrow:
+        marker = ' marker-end="url(#arrowhead)"'
+    return (f"<svg class='line' style='position:absolute;left:0;top:0;width:960px;height:540px;pointer-events:none;' "
+            f"width='960' height='540'>"
+            f"<defs><marker id='arrowhead' markerWidth='10' markerHeight='7' "
+            f"refX='9' refY='3.5' orient='auto'>"
+            f"<polygon points='0 0, 10 3.5, 0 7' fill='{color}'/></marker></defs>"
+            f"<line x1='{x1}' y1='{y1}' x2='{x2}' y2='{y2}' "
+            f"stroke='{color}' stroke-width='2'{marker}/></svg>")
+
+def render_shape(shape):
     etype = shape.get('type', 'text')
     x = float(shape.get('topLeftX', 0))
     y = float(shape.get('topLeftY', 0))
     w = float(shape.get('width', 0))
     h = float(shape.get('height', 0))
-    # 先读 fill 背景色（ellipse 会用到）
     fill_el = shape.find(q('fill'))
     bg = None
     if fill_el is not None:
@@ -178,24 +209,18 @@ def render_shape(shape, notes):
         if fc is not None:
             bg = rgba_to_css(fc.get('color'))
     content, attrs = parse_content(shape)
-    # ellipse：画圆形背景，有独立 text 覆盖
     if etype == 'ellipse':
         style = f"left:{x}px;top:{y}px;width:{w}px;height:{h}px;border-radius:50%;"
         if bg:
             style += f"background:{bg};"
         return f"<div class='shape ellipse' style='{style}'></div>"
-    # rect：背景框，可能带圆角/描边（仅填色，无文本）
     if etype == 'rect':
         border_el = shape.find(q('border'))
         border_color = ""
-        border_w = ""
         if border_el is not None:
             bc = border_el.get('color')
             if bc:
                 border_color = rgba_to_css(bc)
-            bw = border_el.get('width')
-            if bw:
-                border_w = bw
         style = f"left:{x}px;top:{y}px;width:{w}px;height:{h}px;"
         if bg:
             style += f"background:{bg};"
@@ -217,120 +242,170 @@ def render_shape(shape, notes):
     ta = attrs.get('textAlign')
     if ta:
         style += f"text-align:{ta};"
-    # 换行/间距
     style += "line-height:1.4;"
     return f"<div class='shape' style='{style}'>{content}</div>"
 
+def parse_note(slide):
+    """读取 slide 下的 <note><content><p>..."""
+    note = slide.find(q('note'))
+    if note is None:
+        return ""
+    content = note.find(q('content'))
+    if content is None:
+        return ""
+    ps = []
+    for p in content:
+        if p.tag == q('p'):
+            txt = "".join(render_inline(p) for _ in [p]) if False else "".join(render_inline(p) for c in [] )
+            # 直接用 render_inline 读出纯文本
+            txt = render_inline(p)
+            # 去掉标签只留文本
+            txt = re.sub(r'<[^>]+>', '', txt)
+            txt = html.unescape(txt)
+            ps.append(txt)
+    return "\n".join(ps)
+
 def render_slide(slide, idx, total):
-    """渲染单个 slide"""
-    # 背景
     style_el = slide.find(q('style'))
     bg = parse_fill(style_el) if style_el is not None else "#ffffff"
     parts = []
     for child in slide:
         tag = child.tag
-        if tag == q('style'):
+        if tag == q('style') or tag == q('note'):
             continue
         elif tag == q('data'):
             for elem in child:
                 et = elem.tag
                 if et == q('shape'):
-                    parts.append(render_shape(elem, None))
+                    parts.append(render_shape(elem))
                 elif et == q('table'):
                     parts.append(render_table(elem))
                 elif et == q('icon'):
-                    x = float(elem.get('topLeftX', 0)); y = float(elem.get('topLeftY', 0))
-                    w = float(elem.get('width', 40)); h = float(elem.get('height', 40))
-                    fill = elem.find(q('fill'))
-                    fg = "rgba(37,99,235,1)"
-                    if fill is not None:
-                        fc = fill.find(q('fillColor'))
-                        if fc is not None:
-                            fg = fc.get('color')
-                    emo = icon_emoji(elem.get('iconType'))
-                    parts.append(
-                        f"<div class='icon' style='left:{x}px;top:{y}px;width:{w}px;height:{h}px;"
-                        f"background:{rgba_to_css(fg)};'>"
-                        f"<span style='color:rgba(255,255,255,.92);font-size:{int(h)*0.6}px;'>{emo}</span></div>"
-                    )
+                    parts.append(render_icon(elem))
                 elif et == q('line'):
-                    x1 = float(elem.get('startX', 0)); y1 = float(elem.get('startY', 0))
-                    x2 = float(elem.get('endX', 0)); y2 = float(elem.get('endY', 0))
-                    border = elem.find(q('border'))
-                    color = "rgba(83,97,116,.3)"
-                    if border is not None:
-                        bc = border.get('color')
-                        if bc:
-                            color = rgba_to_css(bc)
-                    # 是否有箭头
-                    has_arrow = elem.find(q('endArrow')) is not None
-                    marker = ""
-                    if has_arrow:
-                        marker = ' marker-end="url(#arrowhead)"'
-                    parts.append(
-                        f"<svg class='line' style='position:absolute;left:0;top:0;width:960px;height:540px;pointer-events:none;' "
-                        f"width='960' height='540'>"
-                        f"<defs><marker id='arrowhead' markerWidth='10' markerHeight='7' "
-                        f"refX='9' refY='3.5' orient='auto'>"
-                        f"<polygon points='0 0, 10 3.5, 0 7' fill='{color}'/></marker></defs>"
-                        f"<line x1='{x1}' y1='{y1}' x2='{x2}' y2='{y2}' "
-                        f"stroke='{color}' stroke-width='2'{marker}/></svg>"
-                    )
-    # 页脚页码
+                    parts.append(render_line(elem))
     parts.append(f"<div class='pagenum'>{idx}/{total}</div>")
     return f"<div class='slide' style='background:{bg};'>{''.join(parts)}</div>"
 
 def main():
-    content = open('/tmp/ppt_content.xml', encoding='utf-8').read()
-    # 用正则切割每个 slide（避免命名空间解析问题）
-    slide_blocks = re.findall(r'<slide id="([^"]+)"[^>]*>(.*?)</slide>\s*</presentation>|</slide>(?=</presentation>)', content, re.S)
-    # 更简单：先取 presentation 包裹
+    xml_path = sys.argv[1] if len(sys.argv) > 1 else '/tmp/ppt_content.xml'
+    out_path = sys.argv[2] if len(sys.argv) > 2 else '/Users/jsongo/.ethan/out/lark-ppt/Agent_Harness.html'
+    content = open(xml_path, encoding='utf-8').read()
     m = re.search(r'(<presentation.*?</presentation>)', content, re.S)
     xml_content = m.group(1)
     root = ET.fromstring(xml_content)
     slides = root.findall(q('slide'))
     title = root.find(q('title'))
     title = title.text if title is not None else "PPT"
-    
+
     slides_html = []
+    notes_html = []
     for i, slide in enumerate(slides, 1):
         slides_html.append(render_slide(slide, i, len(slides)))
-    
+        note = parse_note(slide)
+        notes_html.append(note)
+
+    # notes HTML 转义后放进 data-note
+    escaped_notes = [html.escape(n) if n else "" for n in notes_html]
+
+    import json
+    slides_js = json.dumps(slides_html, ensure_ascii=False)
+    notes_js = json.dumps(escaped_notes, ensure_ascii=False)
+
     html_doc = f"""<!DOCTYPE html>
 <html lang="zh">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{html.escape(title)}</title>
 <style>
 * {{ margin:0; padding:0; box-sizing:border-box; }}
-body {{ background:#e5e7eb; font-family:'思源黑体','PingFang SC','Microsoft YaHei',sans-serif; padding:20px; }}
-h1 {{ text-align:center; color:#1f2937; font-size:24px; margin-bottom:16px; }}
-.deck {{ max-width:960px; margin:0 auto; }}
-.slide {{ position:relative; width:960px; height:540px; margin:20px auto; border-radius:8px;
-  box-shadow:0 8px 24px rgba(0,0,0,.15); overflow:hidden; }}
-.shape {{ position:absolute; }}
-.shape p {{ margin:0; }}
-.shape ul {{ margin:6px 0 0 0; padding-left:22px; }}
-.shape li {{ margin:6px 0; }}
-.shape.ellipse {{ display:flex; align-items:center; justify-content:center; }}
-table {{ position:absolute; border-collapse:collapse; }}
-table td {{ border:1px solid rgba(83,97,116,.25); padding:10px 12px; vertical-align:middle; }}
-.icon {{ position:absolute; border-radius:8px; display:flex; align-items:center; justify-content:center; }}
-.line {{ position:absolute; }}
-.pagenum {{ position:absolute; right:20px; bottom:12px; font-size:12px; color:rgba(83,97,116,.6); }}
+body {{ background:#eef1f5; font-family:'思源黑体','PingFang SC','Microsoft YaHei',sans-serif; }}
+.app {{ display:flex; height:100vh; overflow:hidden; }}
+
+/* ===== 左侧缩略图导航 ===== */
+.sidebar {{ width:280px; background:#fff; border-right:1px solid #e5e7eb; padding:12px;
+  overflow-y:auto; flex-shrink:0; }}
+.sidebar .deck-title {{ font-size:14px; font-weight:700; color:#1f2937; padding:6px 4px 12px;
+  border-bottom:1px solid #eef0f3; margin-bottom:10px; word-break:break-all; }}
+.thumb-wrap {{ display:flex; gap:10px; padding:8px; border-radius:8px; cursor:pointer;
+  border:2px solid transparent; margin-bottom:6px; }}
+.thumb-wrap.active {{ border-color:#2563eb; background:#f0f6ff; }}
+.thumb-num {{ width:20px; font-size:12px; color:#9ca3af; text-align:center; line-height:100px; flex-shrink:0; }}
+.thumb-box {{ position:relative; width:200px; height:112px; overflow:hidden; flex-shrink:0;
+  box-shadow:0 2px 6px rgba(0,0,0,.1); border-radius:4px; }}
+.thumb-box .slide-mini {{ width:960px; height:540px; transform:scale(0.20833); transform-origin:0 0; }}
+
+/* ===== 右侧预览区 ===== */
+.main {{ flex:1; display:flex; flex-direction:column; overflow:hidden; }}
+.preview-wrap {{ flex:1; display:flex; align-items:center; justify-content:center;
+  padding:24px; overflow:auto; }}
+.preview {{ position:relative; width:960px; height:540px; border-radius:12px;
+  box-shadow:0 12px 40px rgba(0,0,0,.18); overflow:hidden; background:#fff; }}
+.notes-panel {{ padding:16px 24px; background:#fff; border-top:1px solid #e5e7eb;
+  max-height:180px; overflow-y:auto; }}
+.notes-panel h3 {{ font-size:13px; color:#9ca3af; font-weight:600; margin-bottom:6px; }}
+.notes-panel .notes-text {{ font-size:14px; color:#374151; line-height:1.7; white-space:pre-wrap; }}
+
+/* ===== slide 内部通用 ===== */
+.slide {{ position:relative; width:960px; height:540px; }}
+.slide .shape {{ position:absolute; }}
+.slide .shape p {{ margin:0; }}
+.slide .shape ul {{ margin:6px 0 0 0; padding-left:22px; }}
+.slide .shape li {{ margin:6px 0; }}
+.slide .shape.ellipse {{ display:flex; align-items:center; justify-content:center; }}
+.slide table {{ position:absolute; border-collapse:collapse; }}
+.slide table td {{ border:1px solid rgba(83,97,116,.25); padding:10px 12px; vertical-align:middle; }}
+.slide .icon {{ position:absolute; border-radius:8px; display:flex; align-items:center; justify-content:center; }}
+.slide .line {{ position:absolute; }}
+.slide .pagenum {{ position:absolute; right:20px; bottom:12px; font-size:12px; color:rgba(83,97,116,.6); }}
 </style>
 </head>
 <body>
-<h1>{html.escape(title)}</h1>
-<div class="deck">
-{''.join(slides_html)}
+<div class="app">
+  <!-- 左侧导航 -->
+  <div class="sidebar">
+    <div class="deck-title">{html.escape(title)}</div>
+    <div id="thumb-list">
+    {' '.join(f'''<div class="thumb-wrap {'active' if i==1 else ''}" data-idx="{i}" onclick="showPage({i})">
+      <div class="thumb-num">{i}</div>
+      <div class="thumb-box"><div class="slide-mini">{slides_html[i-1]}</div></div>
+    </div>''' for i in range(1, len(slides)+1))}
+    </div>
+  </div>
+
+  <!-- 右侧预览 -->
+  <div class="main">
+    <div class="preview-wrap" id="preview-wrap">
+      <div class="preview" id="preview">{slides_html[0]}</div>
+    </div>
+    <div class="notes-panel">
+      <h3>演讲者备注</h3>
+      <div class="notes-text" id="notes">{escaped_notes[0] or '（无备注）'}</div>
+    </div>
+  </div>
 </div>
+
+<script>
+const slides = {slides_js};
+const notes = {notes_js};
+function showPage(idx) {{
+  const pv = document.getElementById('preview');
+  pv.innerHTML = slides[idx-1];
+  document.getElementById('notes').innerHTML = notes[idx-1] || '（无备注）';
+  document.querySelectorAll('.thumb-wrap').forEach(el => el.classList.remove('active'));
+  const tw = document.querySelector(`.thumb-wrap[data-idx="${{idx}}"]`);
+  if (tw) tw.classList.add('active');
+}}
+</script>
 </body>
 </html>"""
-    out = '/Users/jsongo/.ethan/out/lark-ppt/Agent_Harness.html'
-    with open(out, 'w', encoding='utf-8') as f:
+
+    import os
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, 'w', encoding='utf-8') as f:
         f.write(html_doc)
-    print("生成完成:", out)
+    print("生成完成:", out_path)
     print("页数:", len(slides))
 
 if __name__ == '__main__':
