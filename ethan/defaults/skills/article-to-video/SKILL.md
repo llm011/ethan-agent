@@ -55,6 +55,8 @@ python3 ~/.ethan/skills/article-to-video/scripts/seedance_presenter_pipeline.py 
 - `MODE: seedance` → 按「Seedance 动态 Presenter」一节走，先读 `references/seedance-presenter-pipeline.md`。
 - `MODE: h3` → presenter 按「H3 动态 Presenter」一节走，先读 `references/h3-presenter-pipeline.md`；静态渲染仍负责 clean plate / 菜单 / 数据层。可先用 `curl -m 3 -s "$H3_COMFYUI_URL/system_stats"` 探活，连不上时提醒用户启动 ComfyUI，不自动回退静态（seedance 与 h3 都配置且用户未指定时，默认 seedance）。
 
+**Lottie 动画素材**：需要角色 / 插画 / 加载动画等元素时，可复用技能内置的 `.lottie` 素材（`assets/lottie/`，含教师、机器人、双人对话、头像眨眼、加载动画等）。使用前先解压出内部动画 json 放渲染项目 `public/`，再用 `lottie-web` 逐帧驱动（`lottie-web` 依赖已内置在 open-motion-template 的 package.json，首次渲染自动安装）。完整清单见 `assets/lottie/README.md`，使用步骤与播放代码见 `references/lottie.md`。
+
 ### 4. 生成 manifest
 
 先读 `references/manifest-schema.md` 和 `references/script-guide.md`，再把剧本写入 `$PROJECT/manifest.json`。用户指定时长时必须填写 `targetDurationSec`；每个场景必须包含唯一 `id`、可朗读的 `narration`、屏幕标题和一个受支持的视觉预设。
