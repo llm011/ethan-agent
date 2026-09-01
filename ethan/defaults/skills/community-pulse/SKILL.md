@@ -55,7 +55,7 @@ python3 scripts/pulse.py "RAG" --days 7 --sources hn --limit 10
 # 只看最近新建的 GitHub 仓库
 python3 scripts/pulse.py "MCP server" --sources github --new
 
-# 跨源混排（各源归一化后竞争，arXiv 不参与）
+# 跨源混排（各源归一化后竞争，arXiv 无热度指标、附在末尾）
 python3 scripts/pulse.py "AI agents" --mix --limit 10
 
 # 结构化输出，便于自己再加工
@@ -79,7 +79,7 @@ python3 scripts/pulse.py "GRPO" --sources arxiv --json
 | 源 | 信号 | 可用性 | 备注 |
 |----|------|--------|------|
 | **hn** | points + comments | 直连可用 | Algolia 官方 API，支持时间窗口过滤 |
-| **github** | stars | 需 `gh auth login` | stars 是**累积量**，用 `--new` 或看 created/updated 判断新近度 |
+| **github** | stars | 需 `gh auth login` | stars 是**累积量**，按 updatedAt 排序/过滤找「近期有动静」的仓库 |
 | **arxiv** | 提交时间 | 国内通常需代理 | 论文没有热度指标，只按时间倒序 |
 | **reddit** | score + comments | 国内常不可达 | 默认关闭，显式 `--sources reddit` 才启用 |
 
@@ -91,7 +91,7 @@ python3 scripts/pulse.py "GRPO" --sources arxiv --json
 默认**按源分组**展示，因为各源量纲不可比（HN 几百 vs GitHub 十几万 stars，混排会被 GitHub 老仓库刷屏）。
 组内各自按"参与度 ÷ 时间衰减"排序——`score = engagement / (age_days + 2)^0.6`，越新越热分越高。
 
-想看跨源统一排名用 `--mix`：各源内先归一化到 0-100 再竞争。arXiv 因无热度指标不参与混排。
+想看跨源统一排名用 `--mix`：各源内先归一化到 0-100 再竞争。arXiv 无热度指标不参与混排，单独归一组附在末尾。
 
 ## 代理
 

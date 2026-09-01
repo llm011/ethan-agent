@@ -144,7 +144,7 @@ def fetch_github(query, days, limit, now, new_only=False, **_):
         proc = subprocess.run(
             [
                 "gh", "search", "repos", query,
-                "--sort", "stars",
+                "--sort", "updated",
                 "--limit", str(max(limit * 3, 20)),
                 "--json", "fullName,stargazersCount,createdAt,updatedAt,description,url",
             ],
@@ -181,7 +181,7 @@ def fetch_github(query, days, limit, now, new_only=False, **_):
                 r.get("fullName") or "(unknown)",
                 r.get("url") or "",
                 stars,
-                created,
+                updated,
                 now,
                 {"stars": stars},
                 {
@@ -279,6 +279,11 @@ def fetch_reddit(query, days, limit, now, sub=None, **_):
         comments = d.get("num_comments") or 0
         created = d.get("created_utc")
         dt = datetime.fromtimestamp(created, tz=timezone.utc) if created else None
+        # 窗口只是粗粒度映射（≤7 天 week、否则 month），返回结果再按 --days 精确筛一遍，
+        # 避免把超出时间窗口的 top 帖混进来，和其它源行为对齐。
+        age = _age_days(dt, now)
+        if age is not None and age > days:
+            continue
         out.append(
             _mk(
                 "Reddit",
@@ -395,9 +400,10 @@ def render(items, status, query, days, limit, mix=False):
 
     if mix:
         # 跨源混排：先在各源内归一化到 0-100，再做时间衰减，避免量纲碾压。
-        # 没有真实热度指标的源（arXiv）不参与，只在分组里出现。
+        # 没有真实热度指标的源（arXiv）不参与打分，混排后单独归一组追加到末尾。
         pool = [it for it in items if it.get("rankable", True)]
-        skipped = sorted({it["source"] for it in items if not it.get("rankable", True)})
+        unrankable = [it for it in items if not it.get("rankable", True)]
+        skipped = sorted({it["source"] for it in unrankable})
         peak = {}
         for it in pool:
             src = it["source"]
@@ -409,7 +415,7 @@ def render(items, status, query, days, limit, mix=False):
         items = pool
         note = "跨源混排（各源内归一化后按热度+时间衰减排序，共 {} 条，展示前 {} 条）".format(len(items), min(limit, len(items)))
         if skipped:
-            note += "；{} 无热度指标，不参与混排".format("/".join(skipped))
+            note += "；{} 无热度指标，不参与混排，单独附在末尾".format("/".join(skipped))
         lines.append(note)
         lines.append("")
         for i, it in enumerate(items[:limit], 1):
@@ -417,6 +423,16 @@ def render(items, status, query, days, limit, mix=False):
             blk[0] = "{}. [{}] {}".format(i, it["source"], it["title"])
             lines.extend(blk)
             lines.append("")
+        # 非 rankable 源（如 arXiv）按源分组追加，避免在 mix 下被整体丢弃
+        for s in SOURCE_ORDER:
+            group = [it for it in unrankable if it["source"] == s]
+            if not group:
+                continue
+            lines.append("### {}（{}）".format(GROUP_LABEL.get(s, s), len(group)))
+            lines.append("")
+            for i, it in enumerate(group[:limit], 1):
+                lines.extend(_render_one(i, it))
+                lines.append("")
         return "\n".join(lines)
 
     lines.append("共 {} 条。各源量纲不同（HN 几百 vs GitHub 十几万），**按源分组**展示，组内各自排序：".format(len(items)))

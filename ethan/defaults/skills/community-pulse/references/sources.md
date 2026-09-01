@@ -45,13 +45,15 @@ https://hn.algolia.com/api/v1/search?query=<q>&tags=story&hitsPerPage=<n>&numeri
 走 `gh` CLI（不直接调 REST API，省去鉴权处理）：
 
 ```bash
-gh search repos "<query>" --sort stars --limit <n> \
+gh search repos "<query>" --sort updated --limit <n> \
   --json fullName,stargazersCount,createdAt,updatedAt,description,url
 ```
 
 - 需 `gh auth login`，未登录会报 `gh 未登录，先跑 gh auth login`。
 - **stars 是累积量**，这是本源最大的解读陷阱。老仓库天然 stars 高，
-  所以脚本默认按 `updatedAt` 过滤窗口（最近还在更新 = 还活着），并输出 `created` / `updated` 供判断。
+  所以脚本按 `updatedAt` 排序取「近期有动静」的仓库，再叠加 `updatedAt` 过滤窗口（最近还在更新 = 还活着），
+  并输出 `created` / `updated` 供判断。
+- 打分的时间衰减也基于 `updatedAt`（不是 `createdAt`），与过滤语义一致：目标是「最近在动的仓库」而非「创建时间新的仓库」。
 - `--new` 可只看窗口内**新建**的仓库（用 `createdAt` 再过滤一层）。
 - 想看近期 star 增速：免费 API 拿不到，别想办法绕——直接看 `created` 判断。
 
@@ -81,6 +83,7 @@ https://www.reddit.com/search.json?q=<q>&sort=top&t=<week|month>&limit=<n>
 
 - 需带 User-Agent（脚本统一用 `EthanAgent/1.0`），否则可能被 429。
 - `t=` 窗口只有 hour/day/week/month/year/all 几档，按 `--days` 映射：≤7 天用 week，否则 month。
+- 因为 `t=` 只是粗粒度映射，返回结果会再按 `--days` 精确筛一遍（跳过 `age_days > days` 的帖子），避免超窗帖子混进来。
 - **国内网络经常不可达**（SSL 握手超时），属预期行为。脚本会降级跳过并打印 `[warn]`，不算失败。
 - 不带 `--sub` 时走全站搜索，噪音较大；能确定子版块就尽量用 `--sub LocalLLaMA` 这类精确指定。
 
