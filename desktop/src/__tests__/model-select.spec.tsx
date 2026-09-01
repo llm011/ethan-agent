@@ -1,6 +1,24 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { ModelSelect } from "@ethan/shared/ui/model-select";
+import { ModelSelect, bareIdFromComposite } from "@ethan/shared/ui/model-select";
+
+// 回归：撞车回退时复合 value `provider/id` 必须拆回「斜杠后的模型 id」。
+// 曾误写成 split("/", 1)[0]（取斜杠前第一段），导致选了模型却把 provider 名
+// （如 "workbuddy"）落库成默认模型，触发按钮显示 provider 名、下拉无勾选。
+describe("bareIdFromComposite 拆回裸 id", () => {
+  it("剥掉 provider 前缀，保留斜杠后的模型 id", () => {
+    expect(bareIdFromComposite("workbuddy/glm-5.3")).toBe("glm-5.3");
+    expect(bareIdFromComposite("glm/glm-5.3")).toBe("glm-5.3");
+  });
+
+  it("不含斜杠时原样返回", () => {
+    expect(bareIdFromComposite("glm-5.3")).toBe("glm-5.3");
+  });
+
+  it("id 中含斜杠时只剥第一个前缀", () => {
+    expect(bareIdFromComposite("workbuddy/openai/gpt-5")).toBe("openai/gpt-5");
+  });
+});
 
 // base-ui 的 Select 在 jsdom 下弹层交互较受限，这里聚焦两个纯逻辑层面的修复：
 // 1) valueMode="id" 下同名不同 provider 模型的 item value 必须唯一（否则 radix 会撞车）；
