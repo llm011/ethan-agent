@@ -171,6 +171,7 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
                      session_id, title, dedicated_store)
         result_text = ""
         collector = None
+        agent = None
         consent = None
         progress_msg_id: int | None = None
         store = None
@@ -335,6 +336,7 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
                     role="assistant",
                     content=err_content,
                     tool_steps=collector.tool_steps if collector else [],
+                    model=agent._provider.model if agent else None,
                 )
                 if progress_msg_id:
                     await err_store.update_message(progress_msg_id, session_id, err_msg)
