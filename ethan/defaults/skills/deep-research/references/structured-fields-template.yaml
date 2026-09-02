@@ -1,0 +1,62 @@
+# 结构化调研 fields.yaml 模板（来自 workbuddy Deep-Research-skills）
+# 复制本文件为 <topic>/fields.yaml 后按需删改字段。
+# 每个字段：name=字段名，description=字段含义，required=是否必填，detail_level=收集精度（极简/简要/详细）。
+field_categories:
+  - category: 基本信息
+    fields:
+      - name: name
+        description: 对象名称
+        required: true
+        detail_level: 极简
+      - name: release_date
+        description: 发布日期/首次发布年份
+        required: false
+        detail_level: 简要
+      - name: company
+        description: 开发方/所属机构
+        required: true
+        detail_level: 简要
+
+  - category: 技术特性
+    fields:
+      - name: underlying_model
+        description: 底层模型/技术方案
+        required: false
+        detail_level: 简要
+      - name: architecture
+        description: 架构（如 MoE、Transformer）
+        required: false
+        detail_level: 简要
+
+  - category: 性能指标
+    fields:
+      - name: benchmark_score
+        description: 关键 benchmark 得分（如 SWE-bench、Arena 等）
+        required: false
+        detail_level: 详细
+      - name: context_window
+        description: 上下文长度
+        required: false
+        detail_level: 简要
+
+  - category: 定价与成本
+    fields:
+      - name: pricing
+        description: 定价（API 输入/输出每百万 token）
+        required: false
+        detail_level: 详细
+
+  - category: 生态与开源
+    fields:
+      - name: open_source
+        description: 是否开源及许可证
+        required: false
+        detail_level: 简要
+      - name: ecosystem
+        description: 生态情况（插件、社区、集成）
+        required: false
+        detail_level: 详细
+
+# 备注：
+# - 收集过程中不确定的字段值标 [不确定]，并在 JSON 末尾的 uncertain 数组列出字段名。
+# - 对象 JSON 里出现 fields.yaml 未定义的字段，会归入报告"其他信息"，无需删除。

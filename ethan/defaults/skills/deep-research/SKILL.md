@@ -1,7 +1,7 @@
 ---
 name: deep-research
-description: "深度调研/对比分析/研究报告：多轮检索 + 数据缺口回填 + 图表可视化 + 决策导向报告"
-version: 1.1.0
+description: "深度调研/对比分析/研究报告：多轮检索 + 数据缺口回填 + 图表可视化 + 决策导向报告；也支持大规模多对象结构化调研（outline.yaml 拆解 + 断点续传 + 并行后台 agent + JSON 字段校验），后者来自 workbuddy 生态的 Deep-Research-skills"
+version: 1.2.0
 author: Hermes Agent
 license: MIT
 trigger:
@@ -15,12 +15,16 @@ trigger:
   - deep research
   - market research
   - industry research
+  - 结构化调研
+  - 多对象调研
+  - 大规模调研
+  - research outline
 platforms: [linux, macos, windows]
 metadata:
   hermes:
     tags: [Research, Analysis, Report, Comparison, Decision]
     related_skills: [arxiv, paper-analysis, llm-wiki]
-source: internal (hermes agent)
+source: internal (hermes agent) + workbuddy Deep-Research-skills
 ---
 # 深度调研
 
@@ -149,3 +153,91 @@ web_search 返回卡片的 url 就是引用源，不要丢弃。
 - [ ] 输出模板匹配输入类型（对比 vs 单主题）？
 
 完整 annotated 示例见 `references/report-template.md`（用 skill_read 查阅）。
+
+---
+
+# 模式二：大规模结构化调研（来自 workbuddy）
+
+> **来源**：本模式融合自 workbuddy 生态的 [Deep-Research-skills](https://github.com/Weizhena/Deep-Research-skills)（homepage: `https://github.com/Weizhena/Deep-Research-skills`），MIT 许可。与上面的「决策导向报告」互补：**决策导向**适合「X vs Y / 选哪个」这类给结论的报告；**结构化调研**适合「需要系统性盘点 N 个对象、每个对象按统一字段收集」的横向调研（学术综述、benchmark 对比、技术选型横评、竞品盘点）。
+
+## 何时走模式二
+
+当调研对象是**多个并列实体**、且每个都要按**同一套字段**收集数据时，用结构化流水线。典型：盘点 10 个 Agent 框架、对比 8 个向量库、综述某方向 20 篇论文、横向评估 5 家云厂商。
+
+对象 ≤2 个、只要一个结论 → 走上面的决策导向模式，不要用本模式（重了）。
+
+## 结构化流水线（4 步，按序）
+
+```
+Step 1 拆解：把话题拆成 items（调研对象）+ fields（统一字段），写入 outline.yaml / fields.yaml
+Step 2 确认：展示 outline 给用户，确认 items 是否增减、字段是否齐全、并行度
+Step 3 深挖：每个 item 一个后台调研任务（background_task 并行），逐字段收集数据，产出 <item>.json
+Step 4 汇总：读全部 JSON，按 fields.yaml 结构汇总成 report.md
+```
+
+### Step 1：拆解话题
+
+基于已有知识列出：
+- **items**：该领域的主要研究对象（如具体产品、框架、论文、公司）
+- **fields**：每个对象要收集的字段（基本信息/技术特性/性能指标/定价/生态…），标注 required 与否
+
+写入两个文件（模板见 `references/structured-outline-template.yaml` 和 `references/structured-fields-template.yaml`，用 skill_read 查阅）：
+
+**outline.yaml**：
+```yaml
+topic: 调研主题
+items:
+  - name: 对象A
+    category: 分类
+    description: 一句话说明为什么纳入
+execution:
+  batch_size: 3        # 每批并行调研几个对象
+  items_per_agent: 1   # 每个后台任务负责几个对象
+  output_dir: ./results
+```
+
+**fields.yaml**：
+```yaml
+field_categories:
+  - category: 基本信息
+    fields:
+      - name: release_date
+        description: 发布日期
+        required: true
+        detail_level: 简要
+```
+
+### Step 2：确认
+
+把生成的 outline.yaml / fields.yaml 展示给用户，用 AskUserQuestion 确认：
+- items 是否要增删？
+- 字段框架是否够？
+- 时间范围（近 6 个月 / 不限…）？
+- 每批并行几个后台任务？
+
+### Step 3：深挖（断点续传 + 并行）
+
+每个 item 发起一个 `background_task`，prompt 里写明：调研对象、要读的 fields.yaml 路径、输出 `<item_slug>.json` 路径、字段值中文、不确定标 `[不确定]` 并进 `uncertain` 数组。
+
+**断点续传**：`results/` 下已存在的 `.json` 视为已完成，跳过；中断后重跑只补缺的 item。一批跑完、用户同意后再起下一批。
+
+每个后台任务产出 JSON 后，用 `scripts/validate_json.py` 校验字段覆盖率：
+```bash
+python <skill_dir>/scripts/validate_json.py -f <topic>/fields.yaml -j <results>/<item>.json
+```
+必填字段缺失（coverage < 100% 或 missing_required 非空）即视为失败，需补调研重跑。
+
+### Step 4：汇总报告
+
+读全部 `<item>.json`，按 fields.yaml 的 field_categories 结构汇总为 `report.md`：
+- 开头给总览表（每个 item 一行 + 关键摘要字段，如 stars/score/date）
+- 正文按 item 分节，逐字段展示
+- 值含 `[不确定]` 的字段跳过或标注"未确认"
+- 多出的、fields.yaml 没定义的字段归入「其他信息」
+
+## 脚本与模板
+
+- `scripts/validate_json.py` — 校验 JSON 是否覆盖 fields.yaml 全部必填字段（用法见上）
+- `references/structured-outline-template.yaml` — outline.yaml 模板
+- `references/structured-fields-template.yaml` — fields.yaml 模板（含常用字段分类，可扩展）
+- 完整工作流说明见 `references/structured-workflow.md`（用 skill_read 查阅）
