@@ -134,7 +134,7 @@ async def discover_models(req: DiscoverRequest):
 
     Anthropic provider 不支持 /models 列表，会返回其已知模型清单的硬编码兜底。
     """
-    import httpx
+    from ethan.core.http_client import create_http_client
     config = get_config()
     provider_cfg = config.providers.get(req.provider)
     if not provider_cfg:
@@ -157,7 +157,9 @@ async def discover_models(req: DiscoverRequest):
         # OpenAI 兼容：GET /v1/models（或 base_url 自带 /v1 则直接 /models）
         url = f"{base_url}/models" if base_url.endswith("/v1") else f"{base_url}/v1/models"
         try:
-            async with httpx.AsyncClient(timeout=15) as client:
+            # 用统一工厂创建客户端（trust_env=False），避免把回环地址（如
+            # 127.0.0.1:8787 的本机 proxy）误发给系统代理导致 502。
+            async with create_http_client(timeout=15) as client:
                 resp = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
                 resp.raise_for_status()
                 data = resp.json()
