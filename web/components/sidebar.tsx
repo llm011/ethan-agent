@@ -209,7 +209,11 @@ export function Sidebar() {
         .then((l) => { setHeartbeatGroupSessions(l); markActiveRead(l); })
         .catch(() => {});
       fetchSessions(5, 0, undefined, "browser-extension")
-        .then((l) => { setExtensionSessions(l); markActiveRead(l); })
+        .then((l) => {
+          // 标记完成（✅ 前缀）的插件会话从分组隐藏；分组按 source 拉取，服务端过滤不了标题
+          setExtensionSessions(l.filter((s) => !s.title.startsWith("✅")));
+          markActiveRead(l);
+        })
         .catch(() => {});
       fetchPinnedSessions()
         .then((l) => { setPinnedSessions(l); markActiveRead(l); })
@@ -343,6 +347,15 @@ export function Sidebar() {
       list.map((s) => (s.id === id ? { ...s, title: newTitle } : s));
     setSessions(patch);
     setPinnedSessions(patch);
+    // 定时/心跳/浏览器插件分组也走 renderSession，但状态各自独立：
+    // 必须同步 patch，否则点「完成」后分组内毫无变化（要等 30s 轮询）。
+    // 标记完成后立即从分组移除（与服务端「[定时]/[心跳]」前缀过滤一致；
+    // 插件分组按 source 拉取，前缀过滤不了，靠本地 filter 兜底）。
+    const patchGroup = (list: SessionInfo[]) =>
+      newTitle.startsWith("✅") ? list.filter((s) => s.id !== id) : patch(list);
+    setScheduleGroupSessions(patchGroup);
+    setHeartbeatGroupSessions(patchGroup);
+    setExtensionSessions(patchGroup);
   };
 
   const renderSession = (s: SessionInfo) => (
