@@ -196,28 +196,32 @@ export function Sidebar() {
   }, [sessionSearch, pathname]);
 
   // 定时/心跳/浏览器插件三个分组：各拉前 5 条，30s 低频轮询（不参与 3s 主 poll）
+  // fetchGroups 提为组件级函数：handleToggleDone 取消完成时需要立即 refetch——
+  // 标记完成时分组里该会话已被移除，undo 的本地 patch 匹配不到 id 加不回来，
+  // 不 refetch 就要等 30s 轮询才回到视野（正是本 PR 要消灭的体验）。
+  const fetchGroups = () => {
+    fetchSessions(5, 0, undefined, undefined, undefined, false, false, "[定时]")
+      .then((l) => { setScheduleGroupSessions(l); markActiveRead(l); })
+      .catch(() => {});
+    fetchSessions(5, 0, undefined, undefined, undefined, false, false, "[心跳]")
+      .then((l) => { setHeartbeatGroupSessions(l); markActiveRead(l); })
+      .catch(() => {});
+    fetchSessions(5, 0, undefined, "browser-extension")
+      .then((l) => {
+        // 标记完成（✅ 前缀）的插件会话从分组隐藏；分组按 source 拉取，服务端过滤不了标题
+        setExtensionSessions(l.filter((s) => !s.title.startsWith("✅")));
+        markActiveRead(l);
+      })
+      .catch(() => {});
+    fetchPinnedSessions()
+      .then((l) => { setPinnedSessions(l); markActiveRead(l); })
+      .catch(() => {});
+  };
   useEffect(() => {
-    const fetchGroups = () => {
-      fetchSessions(5, 0, undefined, undefined, undefined, false, false, "[定时]")
-        .then((l) => { setScheduleGroupSessions(l); markActiveRead(l); })
-        .catch(() => {});
-      fetchSessions(5, 0, undefined, undefined, undefined, false, false, "[心跳]")
-        .then((l) => { setHeartbeatGroupSessions(l); markActiveRead(l); })
-        .catch(() => {});
-      fetchSessions(5, 0, undefined, "browser-extension")
-        .then((l) => {
-          // 标记完成（✅ 前缀）的插件会话从分组隐藏；分组按 source 拉取，服务端过滤不了标题
-          setExtensionSessions(l.filter((s) => !s.title.startsWith("✅")));
-          markActiveRead(l);
-        })
-        .catch(() => {});
-      fetchPinnedSessions()
-        .then((l) => { setPinnedSessions(l); markActiveRead(l); })
-        .catch(() => {});
-    };
     fetchGroups();
     const interval = setInterval(fetchGroups, 30000);
     return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname]);
 
   useEffect(() => {
@@ -364,6 +368,11 @@ export function Sidebar() {
     setScheduleGroupSessions(patchGroup);
     setHeartbeatGroupSessions(patchGroup);
     setExtensionSessions(patchGroup);
+    // undo（去掉 ✅）：会话可能已被移出分组，本地 patch 匹配不到 id 加不回来，
+    // 直接 refetch 分组让它立即回到视野。
+    if (!newTitle.startsWith("✅")) {
+      fetchGroups();
+    }
   };
 
   const renderSession = (s: SessionInfo) => (
