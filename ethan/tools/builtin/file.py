@@ -55,8 +55,27 @@ def _is_inside_secrets(path: str) -> bool:
         return ".secrets" in Path(path).parts
 
 
+def _trusted_roots() -> list[Path]:
+    """用户配置的信任目录白名单（config.yaml tools.trusted_dirs，见 `ethan trust`）。
+
+    跳过空串和 "/"（白名单根目录等于全盘放行，属误配置，静默忽略）。
+    """
+    try:
+        from ethan.core.config import get_config
+
+        roots = []
+        for d in get_config().tools.trusted_dirs:
+            if not d or d.strip() == "/":
+                continue
+            roots.append(Path(d).expanduser().resolve())
+        return roots
+    except Exception:
+        return []
+
+
 def _is_safe_path(path: str) -> bool:
-    """是否落在「默认豁免」目录内（写入无需授权）：系统临时目录 /tmp 等。
+    """是否落在「默认豁免」目录内（写入无需授权）：系统临时目录 /tmp 等，
+    或用户配置的信任目录（tools.trusted_dirs，含子目录）。
     安全起见：密钥目录永不豁免。"""
     if _is_inside_secrets(path):
         return False
@@ -64,6 +83,7 @@ def _is_safe_path(path: str) -> bool:
         import tempfile
         p = Path(path).expanduser().resolve()
         safe_roots = [Path("/tmp").resolve(), Path(tempfile.gettempdir()).resolve()]
+        safe_roots.extend(_trusted_roots())
         return any(root == p or root in p.parents for root in safe_roots)
     except Exception:
         return False

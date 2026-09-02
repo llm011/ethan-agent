@@ -268,6 +268,9 @@ class ToolsConfig(BaseModel):
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     dida: DidaConfig = Field(default_factory=DidaConfig)
     agenda: AgendaConfig = Field(default_factory=AgendaConfig)
+    # 信任目录白名单：这些目录（含子目录）内的文件写入/编辑不再弹授权提示。
+    # .secrets 永不豁免。用 `ethan trust add <dir>` 管理，持久化在 config.yaml。
+    trusted_dirs: list[str] = Field(default_factory=list)
 
 
 class Config(BaseModel):
