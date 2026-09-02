@@ -108,6 +108,24 @@ def _strip_images_from_messages(messages: list[Message], session_id: str = "") -
     return stripped
 
 
+# 合成 user 消息前缀（agent loop 注入，非用户真实输入）。
+# _minimal_retry 挑选「发给模型的 user 消息」时须排除这类消息，
+# 否则兜底重试会只看到一条孤立的注入指令，丢失原始任务上下文。
+_SYNTHETIC_USER_PREFIXES = (
+    "[用户运行中补充]：",  # 运行中补充信息（注入为独立 user 消息时）
+    "[System 决策提示]",  # 决策提示（A/B/C）
+    "[System 增强上下文]",  # 增强上下文
+    "[继续。",  # 空响应 nudge
+    "[继续执行任务。",  # 决策 silent nudge
+    "[网络中断，",  # SSL 断连续接提示
+)
+
+
+def _is_synthetic_user_msg(content: str) -> bool:
+    """判断一条 user 消息是否为 agent loop 注入的合成消息（前缀匹配）。"""
+    return any((content or "").strip().startswith(p) for p in _SYNTHETIC_USER_PREFIXES)
+
+
 def _empty_reply_fallback_text(reason: str, tool_call_count: int) -> str:
     """空回复兜底文案。reason: 'stuck' | 'nudge_exhausted' | 'varied' | 'finalize'。
 
@@ -317,14 +335,31 @@ class Agent:
         return route, system, tools_list, max_iters
 
     async def _minimal_retry(self, working: list[Message]) -> str | None:
-        """极简 prompt 重试：只给最后一条 user 消息 + 禁工具，逼模型至少说一句话。
+        """极简 prompt 重试：原始任务 + 最后一条真实 user 消息 + 禁工具，逼模型至少说一句话。
+
+        只发「最后一条 user 消息」的老实现有个隐含假设——它就是用户当前的问题。
+        但运行中注入的补充信息 / nudge 会被 append 成独立的 user 消息，成为 working
+        里的最后一条 user；超大上下文触发空回复兜底时，模型只看到一行孤立的注入
+        指令（如「[用户运行中补充]：别弄混了」），原始任务和历史全不在场，只能回复
+        「没有任务上下文」（真实案例：PR review 会话跑了 18 步后失忆）。
+        修复：过滤掉合成消息，取首条真实 user（原始任务）+ 末条真实 user，同一条则只发一条。
 
         返回非空内容字符串，或 None（重试失败/仍空）。供 _ensure_non_empty
         和 stream_chat 的各空回复兜底点共用。
         """
         try:
-            last_user = next((m for m in reversed(working) if m.role == "user"), None)
-            mini_msgs = [last_user] if last_user else []
+            real_users = [
+                m for m in working if m.role == "user" and not _is_synthetic_user_msg(m.content or "")
+            ]
+            if not real_users:
+                # 全是合成消息（极端情况）：退回旧的取法，至少给模型点什么
+                last_user = next((m for m in reversed(working) if m.role == "user"), None)
+                mini_msgs = [last_user] if last_user else []
+            elif len(real_users) == 1:
+                mini_msgs = [real_users[0]]
+            else:
+                first, last = real_users[0], real_users[-1]
+                mini_msgs = [first] if first is last else [first, last]
             mini_sys = "请用中文简洁回答用户的问题。如果任务已完成，请总结你做了什么。如果遇到问题，请说明卡在哪里。"
             resp = await self._provider.chat(mini_msgs, tools=None, system=mini_sys)
             self.usage.add(resp.usage)
