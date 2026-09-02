@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect, useRef, memo } from "react";
+import { useState, useEffect, useRef, useCallback, memo } from "react";
 import Image from "next/image";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Quote as QuoteIcon, BookOpen as BookOpenIcon, Share2 as ShareIcon, Plus as PlusIcon, Send as SendIcon, Trash2 as TrashIcon, RotateCcw as RotateCcwIcon, X as XIcon } from "lucide-react";
+import { Quote as QuoteIcon, BookOpen as BookOpenIcon, Share2 as ShareIcon, Plus as PlusIcon, Send as SendIcon, Trash2 as TrashIcon, RotateCcw as RotateCcwIcon, X as XIcon, RefreshCw as RefreshCwIcon } from "lucide-react";
 import { ToolTimeline } from "@ethan/shared/components/tool-timeline";
 import { SwimlaneDiagram } from "@ethan/shared/components/swimlane-diagram";
 import { fmtTokens } from "@/lib/utils";
@@ -231,10 +231,11 @@ interface MessageBubbleProps {
   onCancelTool?: (toolCallId: string) => void;
   onActionConfirm?: (message: string) => void;
   onResume?: (msg: Message) => void;
+  onRefresh?: () => void;
   annotations?: Annotation[];
 }
 
-export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuote, onCardAction, onRead, onShare, onDelete, onInject, pendingInjected, onRemoveInjected, onCancelTool, onActionConfirm, onResume, annotations }: MessageBubbleProps) {
+export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuote, onCardAction, onRead, onShare, onDelete, onInject, pendingInjected, onRemoveInjected, onCancelTool, onActionConfirm, onResume, onRefresh, annotations }: MessageBubbleProps) {
   const [highlightedStep, setHighlightedStep] = useState<number | undefined>(undefined);
   // 思考过程（thought）默认展开，用户可手动折叠
   const [thoughtOpen, setThoughtOpen] = useState(true);
@@ -245,6 +246,24 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
   const [intermediateContent, setIntermediateContent] = useState<string | null>(msg.intermediateContent || null);
   const [intermediateError, setIntermediateError] = useState<string | null>(msg.intermediateError || null);
   const contentRef = useRef<HTMLDivElement>(null);
+  // 后台会话（定时任务等）执行中无 SSE 可连：「任务执行中」占位条支持手动刷新 + 5s 自动拉取
+  const showRunningPlaceholder =
+    msg.role === "assistant" && msg.status === "running" && !msg.content && !isStreaming && isLast;
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefreshRef = useRef(onRefresh);
+  onRefreshRef.current = onRefresh;
+  const manualRefresh = useCallback(() => {
+    if (!onRefreshRef.current || refreshing) return;
+    setRefreshing(true);
+    Promise.resolve(onRefreshRef.current()).finally(() => setRefreshing(false));
+  }, [refreshing]);
+  useEffect(() => {
+    if (!showRunningPlaceholder) return;
+    const timer = window.setInterval(() => {
+      if (!refreshing) onRefreshRef.current?.();
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [showRunningPlaceholder, refreshing]);
   // 用户附带的图片点击放大用的 Lightbox 状态
   const [userImages, setUserImages] = useState<LightboxImage[]>([]);
   const [userImageIndex, setUserImageIndex] = useState(0);
@@ -527,7 +546,7 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
                 onConfirm={onActionConfirm}
               />
             )}
-            {msg.role === "assistant" && msg.status === "running" && !msg.content && !isStreaming && isLast && (
+            {showRunningPlaceholder && (
               <div className="flex items-center gap-2 mt-2 mb-1 rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2">
                 <span className="text-xs text-blue-700 dark:text-blue-400 inline-flex items-center gap-1.5">
                   <span className="inline-flex items-center gap-0.5" aria-hidden>
@@ -537,6 +556,16 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
                   </span>
                   <span>任务执行中，完成后这里会显示结果</span>
                 </span>
+                {onRefresh && (
+                  <button
+                    onClick={() => void manualRefresh()}
+                    className="ml-auto shrink-0 inline-flex items-center gap-1 text-[10px] text-blue-600/70 dark:text-blue-400/70 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                    title="拉取最新进度"
+                  >
+                    <RefreshCwIcon className={`h-3 w-3 ${refreshing ? "animate-spin" : ""}`} />
+                    刷新
+                  </button>
+                )}
               </div>
             )}
             {msg.role === "assistant" && msg.status === "interrupted" && !isStreaming && (

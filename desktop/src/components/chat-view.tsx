@@ -281,6 +281,29 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     handleSendRef.current(message);
   }, []);
 
+  // 后台会话（定时任务等）执行中无 SSE 可连时，供「任务执行中」占位条拉取最新消息。
+  // 不清空旧消息/不闪 loading：静默替换；正在流式输出时跳过，避免覆盖实时消息。
+  const handleRefreshSession = useCallback(async () => {
+    const sid = activeSession;
+    if (!sid || streaming || bgPolling) return;
+    const detail = await fetchSession(sid).catch(() => null);
+    if (!detail) return;
+    writeSessionCache(sid, detail);
+    setSessionTitle(detail.title || "");
+    const loaded = mapDetailMessages(detail);
+    setMessages(loaded);
+    fetchAnnotationsFor(loaded);
+    const historicUsage = detail.messages
+      .filter((m: any) => m.role === "assistant" && m.usage)
+      .reduce((acc: any, m: any) => ({
+        input: acc.input + (m.usage.input || 0),
+        output: acc.output + (m.usage.output || 0),
+        cache: acc.cache + (m.usage.cache || 0),
+      }), { input: 0, output: 0, cache: 0 });
+    setSessionUsage(historicUsage);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSession, streaming, bgPolling]);
+
   const handleResume = useCallback(async (msg: Message) => {
     if (!activeSession || msg.id == null) return;
     _setStreaming(true);
@@ -940,6 +963,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         onCancelTool={handleCancelTool}
         onActionConfirm={handleActionConfirm}
         onResume={handleResume}
+        onRefresh={handleRefreshSession}
         annotationsByMessage={annotationsByMessage}
       />
       )}
