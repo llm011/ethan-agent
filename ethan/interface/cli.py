@@ -11,6 +11,7 @@
   ethan skill ...          管理 Skills
   ethan schedule ...       管理定时任务
   ethan knowledge ...      管理个人知识库
+  ethan trust ...          管理文件写入授权的信任目录白名单
 """
 from typing import Optional
 
@@ -43,6 +44,7 @@ def _register_subcommands():
     from ethan.interface.commands import session as session_cmd
     from ethan.interface.commands import setup as setup_cmd
     from ethan.interface.commands import skill as skill_cmd
+    from ethan.interface.commands import trust as trust_cmd
     from ethan.interface.commands import update as update_cmd
 
     app.add_typer(model_cmd.app, name="model")
@@ -61,6 +63,7 @@ def _register_subcommands():
     app.add_typer(command_cmd.app, name="command")
     app.add_typer(server_cmd.app, name="server")
     app.add_typer(setup_cmd.app, name="setup")
+    app.add_typer(trust_cmd.app, name="trust")
 
 
 serve_app = typer.Typer(help="管理 API 服务")

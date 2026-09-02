@@ -512,6 +512,7 @@ ethan provider list|set
 ethan session list|show|delete
 ethan skill list|show|add|create
 ethan schedule list|remove|pause|resume
+ethan trust add|list|remove       Trusted dirs (skip write-consent prompts)
 ```
 
 ---

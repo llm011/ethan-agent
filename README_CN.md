@@ -500,6 +500,7 @@ ethan provider list|set
 ethan session list|show|delete
 ethan skill list|show|add|create
 ethan schedule list|remove|pause|resume
+ethan trust add|list|remove       信任目录白名单（写入免授权提示）
 ```
 
 ---

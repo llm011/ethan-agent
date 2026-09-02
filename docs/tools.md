@@ -424,13 +424,28 @@ rank→编号列表、stats→`column_set` 大数字、timeline→分节）。�
 | 工具 | 触发条件 | 授权记忆粒度（scope） |
 |------|---------|----------------------|
 | `shell` | 任意命令；**高危命令**（rm -rf / sudo / 管道执行 / dd / mkfs / 覆写系统文件 / fork bomb / 破坏性 git / env dump / secret 引用等）`consent_always=True` 每次必问；其中**破坏性**子集（rm -rf / 格式化 / 写设备 / fork bomb / 破坏性 git）`consent_destructive=True` 超级权限下也必问 | 工具名（普通命令授权一次，本会话其余普通命令放行；高危命令不计入放行） |
-| `file_write` | 任意路径，但 `/tmp` 等临时目录**默认豁免** | **目录**（授权某目录后，其子目录/同目录文件免问） |
+| `file_write` / `file_edit` | 任意路径，但 `/tmp` 等临时目录**默认豁免**，`tools.trusted_dirs` 白名单目录（含子目录）也免问（见下文「信任目录白名单」） | **目录**（授权某目录后，其子目录/同目录文件免问） |
 | `file_read` | 仅当路径在 `~/.ethan/.secrets/` 内 | **单文件**（每个密钥单独问一次，不目录放行） |
 | `get_secret` | 任意密钥读取 | 工具名 |
 
 ### session 维度授权记忆 + 目录覆盖
 
 授权按 `consent_scope` 粒度记到 session（`ethan/core/consent.py` 的 `_SESSION_GRANTS`，**内存态、不落盘、后端重启清空**）。`is_granted` 对路径型 scope 做**子树覆盖**：授权 `/a/b` 后，`/a/b` 及 `/a/b/c` 等子目录都放行；`/a/other` 仍单独问。`consent_always=True` 的调用（如 shell 高危命令）绕过这套记忆——每次都弹、批准也不记入放行，下次同类仍问。Web 与 TUI 均生效（TUI 在 REPL 主循环把当前 `session.id` 绑到 provider，`/new`、`/resume` 切换时同步）。会话删除时 `clear_session_grants` 清除记忆。
+
+### 信任目录白名单（`tools.trusted_dirs`）
+
+会话级授权记忆不落盘、重启即清空；对高频写入的工作目录（如外置盘的音频库），用白名单**持久化**免授权：
+
+```bash
+ethan trust add /Volumes/SSDExt/documents/audio   # 该目录及子目录写入/编辑不再弹授权
+ethan trust list                                   # 查看白名单
+ethan trust remove /Volumes/SSDExt/documents/audio # 移除
+```
+
+- 持久化在 `config.yaml` 的 `tools.trusted_dirs`，跨会话、跨重启生效，`file_write` / `file_edit` 均生效
+- 判定逻辑与 `/tmp` 默认豁免同源（`ethan/tools/builtin/file.py` 的 `_is_safe_path`）：目录级子树覆盖
+- 安全边界：`~/.ethan/.secrets/` **永不豁免**；`ethan trust add /` 被拒绝（等于全盘免授权）
+- shell 命令不受白名单影响（其授权按命令而非路径判定）
 
 ### 各渠道的授权 Provider（`ethan/core/consent.py`）
 
