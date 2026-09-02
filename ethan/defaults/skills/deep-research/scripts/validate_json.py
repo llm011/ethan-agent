@@ -8,17 +8,6 @@ from pathlib import Path
 
 import yaml
 
-CATEGORY_MAPPING = {
-    "基本信息": ["basic_info", "基本信息"],
-    "技术特性": ["technical_features", "technical_characteristics", "技术特性"],
-    "性能指标": ["performance_metrics", "performance", "性能指标"],
-    "里程碑意义": ["milestone_significance", "milestones", "里程碑意义"],
-    "商业信息": ["business_info", "commercial_info", "商业信息"],
-    "竞争与生态": ["competition_ecosystem", "competition", "竞争与生态"],
-    "历史沿革": ["history", "历史沿革"],
-    "市场定位": ["market_positioning", "market", "市场定位"],
-}
-
 _SKIP_KEYS = {"_source_file", "uncertain"}
 
 
@@ -36,31 +25,42 @@ def load_fields_yaml(fields_path):
     return all_fields, required_fields, field_categories
 
 
-def extract_json_fields(data, category_mapping=None):
-    category_mapping = CATEGORY_MAPPING if category_mapping is None else category_mapping
-    nested_keys = {k for keys in category_mapping.values() for k in keys}
+def extract_json_fields(data, category_names=None, known_fields=None):
+    """递归提取 JSON 里的字段名。
+
+    - 分类层判断不靠硬编码别名：category_names 来自 fields.yaml 的分类名集合。
+    - 通用兜底：值为 dict 且 key 不是 fields.yaml 里定义的字段时，视为分组层下钻，
+      兼容模型输出英文别名分组（如 basic_info）或自定义嵌套。
+    - key 是已定义字段（即使值是 dict，如 pricing={...}）或值为非 dict 时，一律计为字段，
+      避免字段名与分类别名撞车时被吞。
+    """
+    nested_keys = set(category_names or ())
+    known = set(known_fields or ())
     fields = set()
-    stack = [(data, True)]
+    stack = [data]
     while stack:
-        obj, is_category_level = stack.pop()
+        obj = stack.pop()
         if isinstance(obj, dict):
             for k, v in obj.items():
                 if k in _SKIP_KEYS:
                     continue
-                if is_category_level and k in nested_keys:
-                    if isinstance(v, dict):
-                        stack.append((v, True))
+                if isinstance(v, dict) and (k in nested_keys or k not in known):
+                    stack.append(v)
                     continue
                 fields.add(k)
         elif isinstance(obj, list):
-            stack.extend((item, is_category_level) for item in obj if isinstance(item, dict))
+            stack.extend(item for item in obj if isinstance(item, (dict, list)))
     return fields
 
 
 def validate_json(json_path, all_fields, required_fields, field_categories):
     with json_path.open(encoding="utf-8") as f:
         data = json.load(f)
-    json_fields = extract_json_fields(data)
+    json_fields = extract_json_fields(
+        data,
+        category_names=set(field_categories.values()),
+        known_fields=all_fields,
+    )
     covered = all_fields & json_fields
     missing = all_fields - json_fields
     extra = json_fields - all_fields
