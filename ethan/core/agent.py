@@ -126,6 +126,23 @@ def _is_synthetic_user_msg(content: str) -> bool:
     return any((content or "").strip().startswith(p) for p in _SYNTHETIC_USER_PREFIXES)
 
 
+def _is_degenerate_reply(content: str | None, tools: list | None) -> bool:
+    """收尾轮退化检测：最终回复恰好只是一个工具名（如 "recall_memory"）。
+
+    实测 badcase（会话 s_20260903_1935_42ff）：模型在工具成功后的收尾轮不写正文，
+    只吐了字面工具名，ethan 视为非空正常回复直接结束 turn，用户看到光秃秃的
+    工具名、像"卡住"。与空回复同族，复用 nudge 重试路径处理。
+    容忍包裹在 markdown 强调符号里的形态（**recall_memory** / `recall_memory`）。
+    """
+    if not content:
+        return False
+    stripped = content.strip().strip("*`_")
+    if not stripped or not tools:
+        return False
+    names = {t.name.lower() for t in tools if getattr(t, "name", None)}
+    return stripped.lower() in names
+
+
 def _empty_reply_fallback_text(reason: str, tool_call_count: int) -> str:
     """空回复兜底文案。reason: 'stuck' | 'nudge_exhausted' | 'varied' | 'finalize'。
 
@@ -671,7 +688,11 @@ class Agent:
 
             # 空响应（既无正文也无工具调用）= 模型静默放弃。
             # 移除空 assistant 消息，注入 nudge 重试一次（带工具）；仍空才 finalize 兜底。
-            if not finalize and not response.is_tool_call and not (response.content or "").strip():
+            # 收尾轮只吐一个工具名（如 "recall_memory"）也是同族退化：非空但无信息量，
+            # 走同样的 nudge 重试（badcase 实测见 _is_degenerate_reply 注释）。
+            if not finalize and not response.is_tool_call and (
+                not (response.content or "").strip() or _is_degenerate_reply(response.content, tools)
+            ):
                 working.pop()  # 移除空 assistant 消息
                 logger.warning("chat() 空响应，注入 nudge 重试")
                 nudge = Message(role="user", content="[继续。请根据已有信息回答问题，或继续使用工具完成任务。]")
@@ -1236,7 +1257,11 @@ class Agent:
             # 修复：移除空 assistant 消息，注入 nudge 唤醒模型再重试一轮（带工具）。
             # 这样模型可以继续工具调用（SWE-bench 场景）或直接回答（GAIA 场景）。
             # 仍空则走 finalize 兜底。
-            if not finalize and not response.is_tool_call and not full_content:
+            # 只吐一个工具名的退化收尾（如 "recall_memory"）同样触发 nudge 重试；
+            # 注意流式下退化片段已 yield 给下游，重试的真实回答会接在其后。
+            if not finalize and not response.is_tool_call and (
+                not full_content or _is_degenerate_reply(full_content, tools)
+            ):
                 working.pop()  # 移除空 assistant 消息
                 logger.warning("模型返回空响应（iter=%d），注入 nudge 重试", i)
                 nudge = Message(role="user", content="[继续。请根据已有信息回答问题，或继续使用工具完成任务。]")
