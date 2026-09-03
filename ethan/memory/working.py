@@ -57,25 +57,54 @@ class WorkingMemory:
 
     @classmethod
     def from_history(cls, history: list[Message], cold_facts: str = "", hot_size: int = 10) -> "WorkingMemory":
-        """从历史消息构建 WorkingMemory：配对 user/assistant，取最近 hot_size 轮进热区。
+        """从历史消息构建 WorkingMemory：按轮切分，取最近 hot_size 轮进热区。
+
+        一轮 = assistant 之前的全部连续 user 消息 + 该 assistant。连续多条
+        user（用户连发补充、任务后跟"重试下"之类）必须合并进同一轮——
+        旧版按 (user, assistant) 严格配对，遇 user,user 会把第一条静默丢弃，
+        导致任务原文（URL/key 等）从会话第二轮起就不再进模型上下文。
+
+        合并成单条 user 是为了维持 user/assistant 严格交替（部分网关对连续
+        同角色消息返回 400），多条合并用空行连接、图片按序拼接。
+
+        尾部没有 assistant 回应的 user 消息不进热区：调用方（chat/lark/
+        schedule 等）会把当前这条 user 消息单独 append 到上下文末尾，这里
+        再带上就会重复。
 
         消除 chat/lark/repl/completions 六处重复的「遍历 history 配对 append」逻辑。
         """
         memory = cls(config=MemoryConfig(hot_size=hot_size))
         memory.cold_facts = cold_facts
         hist_ua = [m for m in history if m.role in ("user", "assistant")]
-        pairs: list[tuple[Message, Message]] = []
-        i = 0
-        while i < len(hist_ua) - 1:
-            if hist_ua[i].role == "user" and hist_ua[i + 1].role == "assistant":
-                pairs.append((hist_ua[i], hist_ua[i + 1]))
-                i += 2
+        rounds: list[list[Message]] = []
+        pending_users: list[Message] = []
+        for m in hist_ua:
+            if m.role == "user":
+                pending_users.append(m)
+            elif pending_users:
+                rounds.append([cls._merge_users(pending_users), m])
+                pending_users = []
             else:
-                i += 1
-        for u, a in pairs[-hot_size:]:
-            memory.hot.append(u)
-            memory.hot.append(a)
+                rounds.append([m])  # 开头孤立 assistant：原样保留，不注入空 user
+        for r in rounds[-hot_size:]:
+            memory.hot.extend(r)
         return memory
+
+    @staticmethod
+    def _merge_users(users: list[Message]) -> Message:
+        """把同一轮的多条连续 user 消息合并为一条（单条时原样返回）。"""
+        if len(users) <= 1:
+            return users[0] if users else Message(role="user", content="")
+        merged = Message(
+            role="user",
+            content="\n\n".join(u.content or "" for u in users),
+            images=[img for u in users for img in (u.images or [])],
+        )
+        for u in users:
+            if u.quote:
+                merged.quote = u.quote
+                break
+        return merged
 
     def needs_compression(self) -> bool:
         """压缩缓冲区是否攒够了一批。"""

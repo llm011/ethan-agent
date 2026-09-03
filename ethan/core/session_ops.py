@@ -18,23 +18,27 @@ logger = logging.getLogger(__name__)
 def _split_keep_recent(messages: list[Message], keep_pairs: int) -> tuple[list[Message], list[Message]]:
     """把消息切成 (保留的最近 keep_pairs 轮, 其余待压缩)。
 
-    一轮 = 一对 (user, assistant)。从末尾往前数 keep_pairs 个完整轮次归入「保留」，
-    其余全部归入「待压缩」。中间无法配对的消息（如连续 user）归入待压缩。
+    一轮 = assistant 之前的全部连续 user 消息 + 该 assistant。连续多条 user
+    （如任务原文后跟"重试下"）归入同一轮——旧版严格 (user, assistant) 配对
+    会把配不上对的首条 user 静默挤进压缩区甚至丢失边界，这里改为按轮切分，
+    保证任何消息都进「保留」或「待压缩」之一，不凭空消失。
+
+    尾部没有 assistant 回应的 user 消息归入「待压缩」（会被摘要保留，不丢），
+    且不占用保留轮数的名额。
     """
-    # 从末尾向前找 keep_pairs 个 user→assistant 配对的边界
-    pairs_found = 0
-    split_idx = len(messages)
-    for i in range(len(messages) - 2, -1, -1):
-        if messages[i].role == "user" and messages[i + 1].role == "assistant":
-            pairs_found += 1
-            if pairs_found == keep_pairs:
-                split_idx = i
-                break
-        # 遇到非配对就继续往前
-    if pairs_found == 0:
-        # 没有完整轮次可保留 → 全部压缩
-        return [], list(messages)
-    return list(messages[split_idx:]), list(messages[:split_idx])
+    rounds: list[list[Message]] = []
+    pending_users: list[Message] = []
+    for m in messages:
+        if m.role == "user":
+            pending_users.append(m)
+        elif m.role == "assistant":
+            rounds.append(pending_users + [m])
+            pending_users = []
+    trailing_users = pending_users  # 尾部悬空 user：进压缩区，不占保留名额
+    kept_start = max(0, len(rounds) - keep_pairs) if keep_pairs > 0 else len(rounds)
+    kept = [m for r in rounds[kept_start:] for m in r]
+    to_compress = [m for r in rounds[:kept_start] for m in r] + list(trailing_users)
+    return kept, to_compress
 
 
 async def compact_session(store, session_id: str, model: str, keep_last_pairs: int = 1) -> str:
