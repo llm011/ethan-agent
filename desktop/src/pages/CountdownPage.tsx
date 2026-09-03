@@ -5,7 +5,36 @@ import { type ThemeId, THEMES, normalizeThemeId } from "../components/chat/theme
 import { notifyDesktop } from "../lib/notify";
 
 const DEFAULT_MINUTES = parseInt(localStorage.getItem("countdown_minutes") || "25") || 25;
+const STATE_KEY = "countdown_state";
 type Phase = "idle" | "running" | "paused" | "done";
+
+interface SavedState {
+  phase: Phase;
+  totalSeconds: number;
+  remaining: number;
+  endAt: number;
+}
+
+function loadSavedState(defaultTotal: number): SavedState {
+  const idle: SavedState = { phase: "idle", totalSeconds: defaultTotal, remaining: defaultTotal, endAt: 0 };
+  try {
+    const raw = localStorage.getItem(STATE_KEY);
+    if (!raw) return idle;
+    const s = JSON.parse(raw) as Partial<SavedState>;
+    const totalSeconds = typeof s.totalSeconds === "number" && s.totalSeconds > 0 ? s.totalSeconds : defaultTotal;
+    if (s.phase === "running" && typeof s.endAt === "number" && s.endAt > 0) {
+      const rem = Math.ceil((s.endAt - Date.now()) / 1000);
+      if (rem > 0) return { phase: "running", totalSeconds, remaining: rem, endAt: s.endAt };
+      return { ...idle, totalSeconds };
+    }
+    if (s.phase === "paused" && typeof s.remaining === "number" && s.remaining > 0) {
+      return { phase: "paused", totalSeconds, remaining: s.remaining, endAt: 0 };
+    }
+    return { ...idle, totalSeconds };
+  } catch {
+    return idle;
+  }
+}
 
 function playChime() {
   try {
@@ -102,9 +131,10 @@ function FlipCard({ value }: { value: string }) {
 }
 
 export default function CountdownPage() {
-  const [totalSeconds, setTotalSeconds] = useState(DEFAULT_MINUTES * 60);
-  const [remaining, setRemaining] = useState(DEFAULT_MINUTES * 60);
-  const [phase, setPhase] = useState<Phase>("idle");
+  const [initial] = useState<SavedState>(() => loadSavedState(DEFAULT_MINUTES * 60));
+  const [totalSeconds, setTotalSeconds] = useState(initial.totalSeconds);
+  const [remaining, setRemaining] = useState(initial.remaining);
+  const [phase, setPhase] = useState<Phase>(initial.phase);
   const [alwaysOnTop, setAlwaysOnTop] = useState(() => {
     const saved = localStorage.getItem("countdown_pin");
     return saved !== null ? saved === "1" : true;
@@ -115,6 +145,15 @@ export default function CountdownPage() {
   // 导致 running 中改 countdown_minutes 时 phase 仍被读成 "idle" 而覆盖剩余时间。
   const phaseRef = useRef(phase);
   useEffect(() => { phaseRef.current = phase; }, [phase]);
+
+  useEffect(() => {
+    localStorage.setItem(STATE_KEY, JSON.stringify({
+      phase,
+      totalSeconds,
+      remaining,
+      endAt: phase === "running" ? Date.now() + remaining * 1000 : 0,
+    } satisfies SavedState));
+  }, [phase, totalSeconds, remaining]);
 
   const [colors, setColors] = useState<CountdownColors>(() =>
     getColorsForTheme(normalizeThemeId(localStorage.getItem("ethan-theme")))
