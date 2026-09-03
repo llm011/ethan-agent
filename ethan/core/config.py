@@ -641,6 +641,13 @@ def _apply_env_overrides(raw: dict) -> None:
         "glm":           ("GLM_API_KEY", "ZHIPU_API_KEY", None, "anthropic"),
     }
     for key, (env_key1, env_key2, env_base, default_type) in mapping.items():
+        has_env = (env_key1 and os.environ.get(env_key1)) or \
+                 (env_key2 and os.environ.get(env_key2)) or \
+                 (env_base and os.environ.get(env_base))
+
+        if key not in providers and not has_env:
+            continue
+
         p = providers.setdefault(key, {})
         if "type" not in p:
             p["type"] = default_type
