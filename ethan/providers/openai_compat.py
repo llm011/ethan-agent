@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
+import uuid
 from typing import Any, AsyncIterator, Optional
 from urllib.parse import urlparse
 
@@ -19,7 +21,76 @@ from ethan.providers.base import (
 )
 
 _CHUNK_TIMEOUT = 120  # 单个 chunk 超时（秒）
-_MAX_STREAM_BREAK_RETRIES = 2  # 流式中途断连且未产出内容时，最多重试次数（共 3 次尝试）
+_MAX_STREAM_BREAK_RETRIES = 2
+
+# 一些网关/中转不返回标准 tool_calls，而是把工具调用拼成字符串再用包裹符包起来下发。
+# ethan 原本只识别 DSML（<｜｜DSML｜｜…）与 `call:tool{args}` 两种文本格式；GLM 兼容层、本地
+# workbuddy 等会换包裹符。这里统一兜底识别，并把它们从「展示正文」里剥掉，避免 JSON 原样
+# 漏给用户（表现为 assistant 消息里出现一段裸工具调用文本）。
+_MARKED_TOOL_RE = re.compile(
+    r'<\s*(?P<open>tool_call|tool_use)\s*[^>]*>\s*'
+    r'(?P<body>\{[\s\S]*?\})\s*'
+    r'</\s*(?P=open)\s*>',
+    re.IGNORECASE,
+)
+
+
+def _strip_marked_tool_blocks(content: str) -> str:
+    """把 <tool_call>/<tool_use> 包裹的工具调用片段从正文中剥掉，只留真正文。
+
+    无论能否解析成工具调用，都先移除，防止序列化后的工具调用露出为可见正文。
+    """
+    if not content:
+        return content
+    return _MARKED_TOOL_RE.sub("", content)
+
+
+def _buf_has_unclosed_marked_tool(content: str) -> bool:
+    """判断文本缓冲区是否包含「尚未闭合」的标记型工具调用块。
+
+    流式分片时 <tool_call>/<tool_use> 的开头标签可能先到、闭合标签后到，若按普通文本
+    yield 出去就会露馅。检测到未闭合时持续缓冲，直到流结束再统一解析。
+    """
+    for tag in ("tool_call", "tool_use"):
+        opens = len(re.findall(r'<\s*' + tag + r'\b', content, re.IGNORECASE))
+        closes = len(re.findall(r'<\s*/\s*' + tag + r'\s*>', content, re.IGNORECASE))
+        if opens > closes:
+            return True
+    return False
+
+
+def parse_marked_text_tool_calls(content: str) -> list[ToolCall]:
+    """解析以包裹符序列化的文本工具调用。
+
+    兼容两种形状：
+      - 直接 {"name": ..., "arguments": {...}}
+      - 嵌套 {"function": {"name":..., "arguments":...}}
+      解析失败静默跳过，不抛错。返回 ToolCall 列表（可能为空）。
+    """
+    results: list[ToolCall] = []
+    for m in _MARKED_TOOL_RE.finditer(content or ""):
+        raw = m.group("body").strip()
+        try:
+            obj = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if not isinstance(obj, dict):
+            continue
+        name = obj.get("name") or obj.get("tool_name")
+        arguments = obj.get("arguments") or obj.get("input")
+        if isinstance(obj.get("function"), dict):
+            fn = obj["function"]
+            name = name or fn.get("name")
+            if arguments is None:
+                arguments = fn.get("arguments")
+        if not name or not isinstance(arguments, dict):
+            continue
+        results.append(ToolCall(
+            id=f"call_{uuid.uuid4().hex[:8]}",
+            name=str(name),
+            arguments=arguments,
+        ))
+    return results
 
 
 class OpenAICompatProvider(BaseProvider):
@@ -196,6 +267,11 @@ class OpenAICompatProvider(BaseProvider):
             if parsed:
                 tool_calls = parsed
                 content_text = ""
+            else:
+                marked = parse_marked_text_tool_calls(content_text)
+                if marked:
+                    tool_calls = marked
+                    content_text = _strip_marked_tool_blocks(content_text)
 
         usage_dict = None
         if usage:
@@ -553,8 +629,11 @@ class OpenAICompatProvider(BaseProvider):
             if delta.content:
                 _produced_any = True
                 content_buf += delta.content
+                # 标记型工具调用（<tool_call>/<tool_use>）分片未闭合 → 继续缓冲，不 yield
+                if _buf_has_unclosed_marked_tool(content_buf):
+                    pass
                 # DSML 标记开头特征：一旦检测到就持续缓冲直到流结束或 finish
-                if self._contains_dsml(content_buf):
+                elif self._contains_dsml(content_buf):
                     pass  # 继续缓冲，不 yield
                 elif "<｜" in content_buf or "<|" in content_buf:
                     # 可能是 DSML 片段还没完整，继续缓冲（最多 200 字符探测）
@@ -588,25 +667,38 @@ class OpenAICompatProvider(BaseProvider):
                             tool_calls_acc[idx]["args_raw"] += tc_delta.function.arguments
 
             if chunk.choices and chunk.choices[0].finish_reason in ("tool_calls", "stop"):
-                # 处理缓冲区中可能的 DSML 文本 tool calls
+                # 处理缓冲区中可能的文本 tool calls：标记型（<tool_call>/<tool_use>）优先，
+                # 其次 DSML
                 if content_buf:
-                    dsml_calls = self._parse_dsml_tool_calls(content_buf)
-                    if dsml_calls:
-                        # 保留 DSML 标记之前的正文
-                        import re as _re
-                        dsml_start = _re.search(r'<[｜|][｜|]DSML[｜|][｜|]', content_buf)
-                        pre_text = content_buf[:dsml_start.start()].rstrip() if dsml_start else ""
+                    marked_calls = parse_marked_text_tool_calls(content_buf)
+                    if marked_calls:
+                        pre_text = _strip_marked_tool_blocks(content_buf).strip()
                         if pre_text:
                             yield StreamChunk(content=pre_text)
-                        for dc in dsml_calls:
+                        for mc in marked_calls:
                             tool_calls_acc[len(tool_calls_acc)] = {
-                                "id": dc.id, "name": dc.name, "args_raw": json.dumps(dc.arguments, ensure_ascii=False)
+                                "id": mc.id, "name": mc.name,
+                                "args_raw": json.dumps(mc.arguments, ensure_ascii=False),
                             }
                         content_buf = ""
                     else:
-                        yield StreamChunk(content=content_buf)
-                        content_buf = ""
-
+                        dsml_calls = self._parse_dsml_tool_calls(content_buf)
+                        if dsml_calls:
+                            # 保留 DSML 标记之前的正文
+                            import re as _re
+                            dsml_start = _re.search(r'<[｜|][｜|]DSML[｜|][｜|]', content_buf)
+                            pre_text = content_buf[:dsml_start.start()].rstrip() if dsml_start else ""
+                            if pre_text:
+                                yield StreamChunk(content=pre_text)
+                            for dc in dsml_calls:
+                                tool_calls_acc[len(tool_calls_acc)] = {
+                                    "id": dc.id, "name": dc.name, "args_raw": json.dumps(dc.arguments, ensure_ascii=False)
+                                }
+                            content_buf = ""
+                        else:
+                            yield StreamChunk(content=content_buf)
+                            content_buf = ""
+                
                 tool_calls = []
                 for tc in tool_calls_acc.values():
                     try:
