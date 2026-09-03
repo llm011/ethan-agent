@@ -315,6 +315,8 @@ async def rename_provider(key: str, req: RenameProviderRequest):
     new_key = req.new_key.strip()
     if not new_key:
         raise HTTPException(400, "Provider 名称不能为空")
+    if "/" in new_key:
+        raise HTTPException(400, "Provider 名称不能包含 '/'（会与 provider/model 格式冲突）")
     if key not in config.providers:
         raise HTTPException(404, f"Provider '{key}' 不存在")
     if new_key in config.providers:
@@ -324,6 +326,21 @@ async def rename_provider(key: str, req: RenameProviderRequest):
     for m in config.models:
         if m.provider == key:
             m.provider = new_key
+        # 同步 fallback_providers 引用（"oldkey" 或 "oldkey/model"两种写法）
+        m.fallback_providers = [
+            new_key + fb[len(key):] if fb == key or fb.startswith(key + "/") else fb
+            for fb in (m.fallback_providers or [])
+        ]
+
+    # 同步 defaults / heartbeat 里的 "provider/model" 引用（如 model set-default 写入的格式）
+    defaults = config.defaults
+    for field in ("model", "lite_model", "fallback_model", "schedule_model"):
+        val = getattr(defaults, field, "") or ""
+        if val.startswith(key + "/"):
+            setattr(defaults, field, new_key + val[len(key):])
+    hb_model = defaults.heartbeat.model or ""
+    if hb_model.startswith(key + "/"):
+        defaults.heartbeat.model = new_key + hb_model[len(key):]
 
     save_config(config)
     reload_config()
