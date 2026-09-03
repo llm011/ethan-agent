@@ -6,13 +6,13 @@ import { Button } from "@ethan/shared/ui/button";
 import { Input } from "@ethan/shared/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@ethan/shared/ui/select";
 import { ModelSelect } from "@ethan/shared/ui/model-select";
-import { Check, ChevronDown, ChevronRight, Plus, Trash2 } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Plus, Pencil, Trash2 } from "lucide-react";
 import { MdEditor } from "@ethan/shared/components/md-editor";
 import {
   fetchAgentSettings, updateAgentSettings, AgentSettings,
   fetchSystemSettings, updateSystemSettings, SystemSettings,
   fetchProviderSettings, updateProviderSettings, ProviderSettings, ProviderPreset,
-  fetchProviderPresets, deleteProvider,
+  fetchProviderPresets, deleteProvider, renameProvider,
   fetchChannels, patchChannel, ChannelInfo,
   fetchAPIKeys, createAPIKey, deleteAPIKey, APIKeyInfo, APIKeyCreated,
   fetchModels, addModel, addModelsBatch, deleteModel, deleteModelsBatch, discoverModels, ModelEntry,
@@ -155,6 +155,9 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
   const [addProviderOpen, setAddProviderOpen] = useState(false);
   const [newProvider, setNewProvider] = useState<{ key: string; type: string; base_url: string; api_key: string; disable_prompt_cache: boolean }>({ key: "", type: "openai_compat", base_url: "", api_key: "", disable_prompt_cache: false });
   const [deleteProviderKey, setDeleteProviderKey] = useState<string | null>(null);
+  const [renameProviderTarget, setRenameProviderTarget] = useState<string | null>(null);
+  const [newProviderName, setNewProviderName] = useState("");
+  const [renaming, setRenaming] = useState(false);
   const [providerMsg, setProviderMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   const [loading, setLoading] = useState(true);
@@ -289,6 +292,39 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
       api_key: "",
       disable_prompt_cache: preset.disable_prompt_cache ?? false,
     });
+  };
+
+  // 重命名 provider：实时调 API，成功后刷新 provider 和模型列表
+  const handleRenameProvider = async () => {
+    if (!renameProviderTarget) return;
+    const oldKey = renameProviderTarget;
+    const newKey = newProviderName.trim();
+    if (!newKey) {
+      showProviderMsg("error", "Provider 名称不能为空");
+      return;
+    }
+    if (newKey === oldKey) {
+      setRenameProviderTarget(null);
+      return;
+    }
+    if (newKey in providerForm) {
+      showProviderMsg("error", `Provider '${newKey}' 已存在`);
+      return;
+    }
+    setRenaming(true);
+    try {
+      await renameProvider(oldKey, newKey);
+      const refreshed = await fetchProviderSettings();
+      setProviderForm(refreshed);
+      setModelList(await fetchModels());
+      showProviderMsg("success", `Provider 已重命名为 '${newKey}'`);
+      setRenameProviderTarget(null);
+    } catch (e) {
+      console.error("重命名 provider 失败", e);
+      showProviderMsg("error", "重命名失败，请重试");
+    } finally {
+      setRenaming(false);
+    }
   };
 
   // 删除 provider：实时调 API，成功后刷新 provider 和模型列表（引用该 provider 的模型已被级联删除）
@@ -776,7 +812,19 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
                     {Object.entries(providerForm).map(([key, config]) => (
                       <div key={key} className="border p-4 rounded-md space-y-4">
                         <div className="flex items-center justify-between">
-                          <h4 className="font-medium text-sm capitalize">{key}</h4>
+                          <div className="flex items-center gap-2">
+                            <h4 className="font-medium text-sm capitalize">{key}</h4>
+                            <button
+                              className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+                              title="重命名"
+                              onClick={() => {
+                                setRenameProviderTarget(key);
+                                setNewProviderName(key);
+                              }}
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
                           <button
                             className="text-xs text-muted-foreground hover:text-red-500 flex items-center gap-1"
                             onClick={() => setDeleteProviderKey(key)}
@@ -1221,6 +1269,35 @@ Content-Type: application/json
               <Button variant="outline" onClick={() => setBatchAddOpen(false)}>取消</Button>
               <Button onClick={handleBatchAdd} disabled={batchAdding || !batchAddProvider || !batchAddText.trim()}>
                 {batchAdding ? "添加中..." : "添加"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* 重命名 Provider 对话框 */}
+        <Dialog open={renameProviderTarget !== null} onOpenChange={(open) => { if (!open) setRenameProviderTarget(null); }}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>重命名 Provider</DialogTitle>
+              <DialogDescription>
+                修改 Provider 的标识名称。所有引用该 Provider 的模型配置将自动更新。
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div className="grid gap-2">
+                <label className="text-xs font-medium text-muted-foreground">Provider 名称</label>
+                <Input
+                  value={newProviderName}
+                  onChange={(e) => setNewProviderName(e.target.value)}
+                  placeholder="例如: openai, deepseek"
+                  onKeyDown={(e) => { if (e.key === "Enter") handleRenameProvider(); }}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setRenameProviderTarget(null)}>取消</Button>
+              <Button onClick={handleRenameProvider} disabled={renaming || !newProviderName.trim() || newProviderName.trim() === renameProviderTarget}>
+                {renaming ? "保存中..." : "保存"}
               </Button>
             </DialogFooter>
           </DialogContent>

@@ -80,6 +80,15 @@ export async function deleteProvider(key: string): Promise<void> {
   });
 }
 
+export async function renameProvider(oldKey: string, newKey: string): Promise<void> {
+  const res = await fetch(`${API_URL}/settings/providers/${encodeURIComponent(oldKey)}/rename`, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify({ new_key: newKey }),
+  });
+  if (!res.ok) throw new Error("Failed to rename provider");
+}
+
 // ── System Settings ───────────────────────────────────────────────
 
 export interface SystemSettings {

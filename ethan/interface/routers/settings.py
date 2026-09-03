@@ -304,6 +304,31 @@ async def update_provider_settings(req: dict[str, dict]):
     return {"ok": True}
 
 
+
+class RenameProviderRequest(BaseModel):
+    new_key: str
+
+
+@router.post("/settings/providers/{key}/rename", dependencies=[Depends(verify_token)])
+async def rename_provider(key: str, req: RenameProviderRequest):
+    config = get_config()
+    new_key = req.new_key.strip()
+    if not new_key:
+        raise HTTPException(400, "Provider 名称不能为空")
+    if key not in config.providers:
+        raise HTTPException(404, f"Provider '{key}' 不存在")
+    if new_key in config.providers:
+        raise HTTPException(400, f"Provider '{new_key}' 已存在")
+
+    config.providers[new_key] = config.providers.pop(key)
+    for m in config.models:
+        if m.provider == key:
+            m.provider = new_key
+
+    save_config(config)
+    reload_config()
+    return {"ok": True}
+
 @router.delete("/settings/providers/{key}", dependencies=[Depends(verify_token)])
 async def delete_provider(key: str):
     """删除单个 provider 配置。同时清理引用该 provider 的模型条目。"""
