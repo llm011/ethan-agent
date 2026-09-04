@@ -43,6 +43,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Timer? askTimer, waitTimer;
   int unread = 0;
   StreamSubscription<ChatEvent>? streamSub;
+  // 当前 _consume 的完成信号：onDone/onError/取消时都要 complete，
+  // 否则 await 方（send/_resume）会永远挂起，streaming/resuming 卡死。
+  Completer<void>? _streamDone;
   List<MessageImage> pendingImages = [];
   QuoteInfo? quote;
   OnboardingStatus? onboarding;
@@ -69,7 +72,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _load() async {
-    await streamSub?.cancel();
+    await _cancelStream();
     final nextId = widget.sessionId;
     if (mounted)
       setState(() {
@@ -133,8 +136,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final id = sessionId;
     if (id == null || streaming || resuming) return;
     setState(() => resuming = true);
-    await _consume(widget.api.resumeStream(id), resumed: true);
-    if (mounted) setState(() => resuming = false);
+    try {
+      await _consume(widget.api.resumeStream(id), resumed: true);
+    } catch (e) {
+      if (mounted) setState(() => error = e.toString());
+    } finally {
+      if (mounted) setState(() => resuming = false);
+    }
   }
 
   Future<void> send() async {
@@ -191,7 +199,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   model: selectedModel,
                   mode: selectedMode.isEmpty ? null : selectedMode))
               .id;
-      if (mounted) setState(() => sessionId = active);
+      // createSession 期间用户可能已切到别的会话，不能再拽回旧会话
+      if (!mounted || (sessionId != null && sessionId != active)) {
+        if (mounted)
+          setState(() {
+            streaming = false;
+            if (messages.isNotEmpty && messages.last.isStreaming)
+              messages = messages.sublist(0, messages.length - 1);
+          });
+        return;
+      }
+      setState(() => sessionId = active);
       await _consume(widget.api.chat(
           text: text,
           sessionId: active,
@@ -231,7 +249,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             const ChatMessage(
                 text: '', isUser: false, time: '', isStreaming: true)
           ]);
-    await streamSub?.cancel();
+    await _cancelStream();
+    final done = Completer<void>();
+    _streamDone = done;
     streamSub = events.listen((event) {
       if (!mounted) return;
       if (event.error != null) {
@@ -298,6 +318,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _messageArrived();
     }, onError: (Object e) {
       if (mounted) setState(() => error = e.toString());
+      if (!done.isCompleted) done.complete();
     }, onDone: () {
       if (mounted && messages.isNotEmpty && messages.last.isStreaming)
         setState(() => messages = [
@@ -316,8 +337,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                       ? null
                       : DateTime.now().difference(firstContent!).inMilliseconds)
             ]);
+      if (!done.isCompleted) done.complete();
     });
-    await streamSub!.asFuture<void>();
+    await done.future;
+    if (identical(_streamDone, done)) _streamDone = null;
+  }
+
+  /// 取消当前流并唤醒等待中的 _consume（订阅 cancel 不会触发 onDone，
+  /// 必须在这里手动 complete，否则 send/_resume 会永远挂起）。
+  Future<void> _cancelStream() async {
+    final sub = streamSub;
+    streamSub = null;
+    final done = _streamDone;
+    if (done != null && !done.isCompleted) done.complete();
+    await sub?.cancel();
   }
 
   void _showAsk(ChatEvent e) {
@@ -416,7 +449,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     try {
       if (id != null) await widget.api.stopChat(id);
     } catch (_) {}
-    await streamSub?.cancel();
+    await _cancelStream();
     if (mounted) {
       setState(() {
         streaming = false;
@@ -443,7 +476,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     scroll.removeListener(_onScroll);
-    streamSub?.cancel();
+    _cancelStream();
     askTimer?.cancel();
     waitTimer?.cancel();
     input.dispose();
@@ -458,7 +491,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (mounted) input.clear();
     switch (cmd) {
       case '/new':
-        await streamSub?.cancel();
+        await _cancelStream();
         if (mounted)
           setState(() {
             sessionId = null;
@@ -1162,7 +1195,7 @@ class _MessageImageView extends StatelessWidget {
   }
 }
 
-class _MediaCards extends StatelessWidget {
+class _MediaCards extends StatefulWidget {
   const _MediaCards(
       {required this.cards,
       required this.api,
@@ -1172,6 +1205,18 @@ class _MediaCards extends StatelessWidget {
   final EthanApiClient api;
   final EthanApiService workspaceApi;
   final String? sessionId;
+
+  @override
+  State<_MediaCards> createState() => _MediaCardsState();
+}
+
+class _MediaCardsState extends State<_MediaCards> {
+  // build 里内联创建 Future 会让流式期间每次重建都重新请求媒体，
+  // 按 path 缓存住，同一文件只拉一次。
+  final _mediaFutures = <String, Future<Uint8List>>{};
+
+  Future<Uint8List> _futureFor(String path) => _mediaFutures.putIfAbsent(
+      path, () => widget.api.fetchMediaBytes(path, sessionId: widget.sessionId));
 
   @override
   Widget build(BuildContext context) => Column(
@@ -1189,7 +1234,7 @@ class _MediaCards extends StatelessWidget {
                       color: Theme.of(context).colorScheme.secondary)),
             ]),
           ),
-          ...cards.map((card) {
+          ...widget.cards.map((card) {
             if (card.isImage) {
               final source = card.url.isNotEmpty ? card.url : card.path;
               if (source.startsWith('data:')) {
@@ -1212,9 +1257,11 @@ class _MediaCards extends StatelessWidget {
                   );
                 } catch (_) {}
               }
-              if (card.isFile && sessionId != null && sessionId!.isNotEmpty) {
+              if (card.isFile &&
+                  widget.sessionId != null &&
+                  widget.sessionId!.isNotEmpty) {
                 return FutureBuilder<Uint8List>(
-                  future: api.fetchMediaBytes(card.path, sessionId: sessionId),
+                  future: _futureFor(card.path),
                   builder: (_, snapshot) => Padding(
                     padding: const EdgeInsets.only(top: 8),
                     child: snapshot.hasData
@@ -1238,7 +1285,7 @@ class _MediaCards extends StatelessWidget {
                       child: InteractiveViewer(
                           child: Image.network(source,
                               fit: BoxFit.contain,
-                              headers: api.headersFor(uri))),
+                              headers: widget.api.headersFor(uri))),
                     ),
                   ),
                   child: Padding(
@@ -1246,7 +1293,7 @@ class _MediaCards extends StatelessWidget {
                     child: Image.network(source,
                         height: 180,
                         fit: BoxFit.contain,
-                        headers: api.headersFor(uri),
+                        headers: widget.api.headersFor(uri),
                         errorBuilder: (_, __, ___) =>
                             const Icon(Icons.broken_image_outlined)),
                   ),
@@ -1275,16 +1322,16 @@ class _MediaCards extends StatelessWidget {
                 onTap: card.isVideo
                     ? () => Navigator.of(context).push(MaterialPageRoute(
                           builder: (_) => VideoPreviewScreen(
-                              api: api,
-                              sessionId: sessionId ?? '',
+                              api: widget.api,
+                              sessionId: widget.sessionId ?? '',
                               path: card.path,
                               title: card.title),
                         ))
-                    : card.isPpt && sessionId != null
+                    : card.isPpt && widget.sessionId != null
                         ? () => Navigator.of(context).push(MaterialPageRoute(
                               builder: (_) => PptPreviewScreen(
-                                  api: workspaceApi,
-                                  sessionId: sessionId!,
+                                  api: widget.workspaceApi,
+                                  sessionId: widget.sessionId!,
                                   deckPath: card.path),
                             ))
                         : null,
