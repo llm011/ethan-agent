@@ -44,7 +44,7 @@ import { ConsentGate } from "@ethan/shared/chat/consent-card";
 import { CleanupConfirmGate, type CleanupConfirmRequest } from "@ethan/shared/chat/cleanup-confirm-card";
 import { AskUserCard, type AskUserRequest } from "@ethan/shared/chat/ask-user-card";
 import { WaitForUserCard, type WaitForUserRequest } from "@ethan/shared/chat/wait-for-user-card";
-import { placeholderTitle, mapDetailMessages, isFirstQuerySignificant } from "@/components/chat/chat-helpers";
+import { placeholderTitle, mapDetailMessages, isFirstQuerySignificant, pendingFileToImagePayload } from "@/components/chat/chat-helpers";
 import { consumeStream, type ConsumeStreamActions } from "@/components/chat/use-chat-stream";
 import { handleCommand } from "@/components/chat/chat-commands";
 import { useInputStore } from "@/components/chat/use-input-store";
@@ -588,12 +588,9 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
         const chatMessages: ChatMessage[] = [{ role: "user", content: first.text }];
         if (first.images && first.images.length > 0) {
-          chatMessages[0].images = first.images
-            .filter((f) => f.isImage)
-            .map((img) => ({
-              data: img.dataUrl?.split(",")[1] ?? "",
-              media_type: img.dataUrl?.split(";")[0].replace("data:", "") ?? "image/png",
-            }));
+          chatMessages[0].images = await Promise.all(
+            first.images.filter((f) => f.isImage).map(pendingFileToImagePayload)
+          );
         }
 
         let accepted = false;
@@ -847,14 +844,11 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     streamAbortRef.current = ac;
 
     setPendingInjected([]); // 新 run：待处理队列重新开始
-    const chatMessages: ChatMessage[] = newMessages.map((m) => ({
+    const chatMessages: ChatMessage[] = await Promise.all(newMessages.map(async (m) => ({
       role: m.role,
       content: m.content,
-      images: m.images?.map((img) => ({
-        data: img.dataUrl?.split(",")[1] ?? "",
-        media_type: img.dataUrl?.split(";")[0].replace("data:", "") ?? "image/png",
-      })),
-    }));
+      images: m.images ? await Promise.all(m.images.map(pendingFileToImagePayload)) : undefined,
+    })));
 
     await consumeStream(
       streamChat(chatMessages, selectedModel, sessionId, { quote: sentQuote, mode, btw: isBtw, review: isReview, autoConsent }),

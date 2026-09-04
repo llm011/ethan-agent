@@ -117,21 +117,13 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   const [expanded, setExpanded] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // 读图片文件为 base64 dataUrl，返回 PendingFile
-  const readImageFile = (file: File): Promise<PendingFile> =>
-    new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        resolve({
-          name: file.name,
-          path: "",  // 图片不走 server upload
-          isImage: true,
-          dataUrl: reader.result as string,
-        });
-      };
-      reader.onerror = () => reject(new Error(`Failed to read file: ${file.name}`));
-      reader.readAsDataURL(file);
-    });
+  const readImageFile = (file: File): PendingFile => ({
+    name: file.name,
+    path: "",
+    isImage: true,
+    dataUrl: URL.createObjectURL(file),
+    file,
+  });
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -219,6 +211,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   };
 
   const removeFile = (index: number) => {
+    const removed = pendingFiles[index];
+    if (removed?.dataUrl?.startsWith("blob:")) URL.revokeObjectURL(removed.dataUrl);
     onFilesChange(pendingFiles.filter((_, i) => i !== index));
   };
 
