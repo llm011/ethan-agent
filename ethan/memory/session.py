@@ -1158,14 +1158,74 @@ class SessionStore:
             row = await cursor.fetchone()
             return row[0] if row else 0
 
-    async def search(self, query: str, limit: int = 50) -> list[Session]:
-        """全文搜索：匹配 session 标题或消息内容。返回去重后的 session 列表。"""
+    def _session_filter_clauses(
+        self,
+        *,
+        source: str = "",
+        mode: str | None = None,
+        exclude_title_prefixes: list[str] | None = None,
+        include_title_prefixes: list[str] | None = None,
+        has_images: bool = False,
+        alias: str = "s",
+    ) -> tuple[list[str], list]:
+        """构造会话级过滤 SQL 片段（search/count_search 与搜索词 AND 合成用）。
+        与 list_recent 的过滤语义保持一致。返回 (sql_parts, params)，列统一带 alias 前缀。"""
+        parts: list[str] = []
+        params: list = []
+        if source:
+            parts.append(f"COALESCE({alias}.source, 'web') = ?")
+            params.append(source)
+        if mode is not None:
+            parts.append(f"COALESCE({alias}.mode, '') = ?")
+            params.append(mode)
+        if exclude_title_prefixes:
+            for prefix in exclude_title_prefixes:
+                parts.append(f"{alias}.title NOT LIKE ?")
+                params.append(f"{prefix}%")
+        if include_title_prefixes:
+            ors = " OR ".join(f"{alias}.title LIKE ?" for _ in include_title_prefixes)
+            parts.append(f"({ors})")
+            params.extend(f"{prefix}%" for prefix in include_title_prefixes)
+        if has_images:
+            parts.append(
+                "EXISTS (SELECT 1 FROM messages m WHERE m.session_id = "
+                f"{alias}.id AND m.images IS NOT NULL AND m.images != '[]' AND m.images != '')"
+            )
+        return parts, params
+
+    async def search(
+        self,
+        query: str,
+        limit: int = 50,
+        offset: int = 0,
+        *,
+        source: str = "",
+        mode: str | None = None,
+        exclude_title_prefixes: list[str] | None = None,
+        include_title_prefixes: list[str] | None = None,
+        has_images: bool = False,
+    ) -> list[Session]:
+        """全文搜索：匹配 session 标题或消息内容。返回去重后的 session 列表。
+
+        支持与 list_recent 一致的会话级过滤（source/mode/标题前缀/含图），
+        过滤条件在 SQL 层与搜索词 AND 合成。标题命中与内容命中需合并去重后统一按
+        updated_at 排序，故多取 offset+limit 条候选，再做内存切片实现分页。
+        """
         q = f"%{query}%"
+        filter_parts, filter_params = self._session_filter_clauses(
+            source=source, mode=mode,
+            exclude_title_prefixes=exclude_title_prefixes,
+            include_title_prefixes=include_title_prefixes,
+            has_images=has_images,
+        )
+        filter_sql = (" AND " + " AND ".join(filter_parts)) if filter_parts else ""
+        fetch_n = offset + limit
         sessions: dict[str, Session] = {}
         # 先搜标题
         async with self._db.execute(
-            "SELECT id, title, model, created_at, updated_at, COALESCE(mode, ''), COALESCE(last_read_at, 0) FROM sessions WHERE title LIKE ? ORDER BY updated_at DESC LIMIT ?",
-            (q, limit),
+            "SELECT s.id, s.title, s.model, s.created_at, s.updated_at, COALESCE(s.mode, ''), COALESCE(s.last_read_at, 0) FROM sessions s "
+            f"WHERE s.title LIKE ?{filter_sql} ORDER BY s.updated_at DESC LIMIT ?",
+            tuple([q] + filter_params + [fetch_n]),
         ) as cursor:
             async for row in cursor:
                 sessions[row[0]] = Session(
@@ -1177,9 +1237,9 @@ class SessionStore:
             """SELECT s.id, s.title, s.model, s.created_at, s.updated_at, m.content, COALESCE(s.mode, ''), COALESCE(s.last_read_at, 0)
                FROM sessions s
                JOIN messages m ON m.session_id = s.id
-               WHERE m.content LIKE ? AND m.role IN ('user', 'assistant')
-               ORDER BY s.updated_at DESC LIMIT ?""",
-            (q, limit * 2),
+               WHERE m.content LIKE ? AND m.role IN ('user', 'assistant')""" + filter_sql +
+            " ORDER BY s.updated_at DESC LIMIT ?",
+            tuple([q] + filter_params + [fetch_n * 2]),
         ) as cursor:
             async for row in cursor:
                 sid = row[0]
@@ -1209,17 +1269,34 @@ class SessionStore:
                     )
                 elif snippet and not sessions[sid].snippet:
                     sessions[sid].snippet = snippet
-        # 按 updated_at 倒序返回
-        return sorted(sessions.values(), key=lambda s: s.updated_at, reverse=True)[:limit]
+        # 按 updated_at 倒序返回（含 offset 切片）
+        ordered = sorted(sessions.values(), key=lambda s: s.updated_at, reverse=True)
+        return ordered[offset:offset + limit]
 
-    async def count_search(self, query: str) -> int:
-        """统计搜索匹配的去重 session 总数（标题或消息内容匹配）。"""
+    async def count_search(
+        self,
+        query: str,
+        *,
+        source: str = "",
+        mode: str | None = None,
+        exclude_title_prefixes: list[str] | None = None,
+        include_title_prefixes: list[str] | None = None,
+        has_images: bool = False,
+    ) -> int:
+        """统计搜索匹配的去重 session 总数（标题或消息内容匹配，含会话级过滤）。"""
         q = f"%{query}%"
+        filter_parts, filter_params = self._session_filter_clauses(
+            source=source, mode=mode,
+            exclude_title_prefixes=exclude_title_prefixes,
+            include_title_prefixes=include_title_prefixes,
+            has_images=has_images,
+        )
+        filter_sql = (" AND " + " AND ".join(filter_parts)) if filter_parts else ""
         async with self._db.execute(
             """SELECT COUNT(DISTINCT s.id) FROM sessions s
                LEFT JOIN messages m ON m.session_id = s.id AND m.role IN ('user', 'assistant')
-               WHERE s.title LIKE ? OR m.content LIKE ?""",
-            (q, q),
+               WHERE (s.title LIKE ? OR m.content LIKE ?)""" + filter_sql,
+            tuple([q, q] + filter_params),
         ) as cursor:
             row = await cursor.fetchone()
             return row[0] if row else 0

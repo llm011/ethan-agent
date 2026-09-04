@@ -162,6 +162,7 @@ export function makeListKey(params: {
   hideHeartbeat?: boolean;
   hideScheduled?: boolean;
   titlePrefixes?: string;
+  hasImages?: boolean;
 }): string {
   const parts = [
     `l=${params.limit ?? 50}`,
@@ -172,6 +173,7 @@ export function makeListKey(params: {
     `hb=${params.hideHeartbeat ? "1" : "0"}`,
     `hs=${params.hideScheduled ? "1" : "0"}`,
     `tp=${params.titlePrefixes ?? ""}`,
+    `hi=${params.hasImages ? "1" : "0"}`,
   ];
   return parts.join("|");
 }

@@ -58,16 +58,23 @@ async def list_sessions(limit: int = 50, offset: int = 0, q: str | None = None,
                         has_images: bool = False,
                         user_id: str = Depends(verify_token)):
     store = await get_session_store()
+    exclude_prefixes = []
+    if hide_heartbeat:
+        exclude_prefixes.append("[心跳]")
+    if hide_scheduled:
+        exclude_prefixes.append("[定时]")
+    include_prefixes = [p for p in (title_prefixes or "").split(",") if p] or None
     if q:
-        sessions = await store.search(q, limit)
-        total = await store.count_search(q)
+        # 搜索与过滤条件 AND 合成：分类/渠道/含图在搜索时同样生效，且支持分页
+        sessions = await store.search(q, limit, offset=offset, source=source or "", mode=mode,
+                                      exclude_title_prefixes=exclude_prefixes or None,
+                                      include_title_prefixes=include_prefixes,
+                                      has_images=has_images)
+        total = await store.count_search(q, source=source or "", mode=mode,
+                                         exclude_title_prefixes=exclude_prefixes or None,
+                                         include_title_prefixes=include_prefixes,
+                                         has_images=has_images)
     else:
-        exclude_prefixes = []
-        if hide_heartbeat:
-            exclude_prefixes.append("[心跳]")
-        if hide_scheduled:
-            exclude_prefixes.append("[定时]")
-        include_prefixes = [p for p in (title_prefixes or "").split(",") if p] or None
         sessions = await store.list_recent(limit, offset, source=source or "", mode=mode,
                                            exclude_title_prefixes=exclude_prefixes or None,
                                            include_title_prefixes=include_prefixes,
