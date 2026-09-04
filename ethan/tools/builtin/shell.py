@@ -183,6 +183,105 @@ def _is_allowed_echo_tail(cmd: str) -> bool:
     return bool(re.search(r'&&\s*echo\s+[A-Za-z_][A-Za-z0-9_]*\s*$', cmd))
 
 
+# ── heredoc 正文剥离：把「纯数据写入」的 heredoc body 从危险扫描里去掉 ──
+#
+# 背景：`cat > /tmp/task.md <<'EOF' ... EOF` 只是把任务说明写进文件，body 是文本
+# 而非命令。此前 _DANGEROUS_RE 扫整条命令串，body 里出现 "git push --force"、
+# "rm -rf" 等【描述性文字】就会被误判成破坏性命令，超级模式下也被强制弹窗。
+#
+# 保守剥离条件（全部满足才剥，否则原样返回、行为与旧版一致）：
+# 1. 每个 heredoc opener 所在行，`<<` 之前的段以 cat 开头（cat 消费 heredoc 是
+#    拼接/写出，不执行 body；sh <<EOF / python <<EOF / tee <<EOF 等一律不剥）；
+# 2. 所有 opener 都能找到终止行（找不到说明 body 边界不明，不剥）；
+# 3. 剥离后剩余的命令段里没有能执行 body 的向量（sh/bash/python/eval/source/
+#    xargs/命令替换等）——防止 `cat > x.sh <<EOF … EOF` + `sh x.sh` 这种
+#    「写脚本再执行」的命令借剥离藏住 body 里的危险内容。
+_HEREDOC_OPENER_RE = re.compile(r"(?<!<)<<(-?)\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\2(?!<)")
+
+# opener 行 `<<` 之前那一段必须长这样：可选 VAR= 赋值、可选 sudo/doas、cat + 任意参数。
+# 参数里出现 $( 或反引号则拒绝（可能是命令替换）。
+_CAT_HEREDOC_SEG_RE = re.compile(
+    r'^\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:(?:sudo|doas)\s+)?cat(?:\s+\S+)*\s*$'
+)
+
+# 会执行脚本/字符串的解释器命令词：出现在剥离后命令段的首位即视为「可执行 body」。
+_EXEC_CMD_WORDS = frozenset({
+    "sh", "bash", "zsh", "dash", "ksh", "fish",
+    "eval", "source", "exec", "xargs",
+    "python", "python3", "perl", "ruby", "node", "lua",
+    "osascript", "expect", "awk",
+})
+
+
+def _is_cat_heredoc_pre_segment(seg: str) -> bool:
+    """opener 行 `<<` 之前的最后一个命令段是否为「cat 写文件」形态。"""
+    if "$(" in seg or "`" in seg:
+        return False
+    return bool(_CAT_HEREDOC_SEG_RE.match(seg))
+
+
+def _has_exec_vector(stripped: str) -> bool:
+    """剥离后的命令里是否残留能执行隐藏正文的向量。"""
+    for seg in re.split(r'[;\n|&]+', stripped):
+        s = seg.strip()
+        if not s:
+            continue
+        if "$(" in s or "`" in s:
+            return True
+        # 去掉重定向目标和 heredoc opener 残留，取首个命令词判断
+        s = re.sub(r'>>?\s*\S+', ' ', s)
+        s = re.sub(r'<<-?\s*[\'"]?[A-Za-z_]\w*[\'"]?', ' ', s)
+        tokens = s.split()
+        while tokens and re.match(r'^[A-Za-z_]\w*=', tokens[0]):
+            tokens.pop(0)
+        if tokens and tokens[0] in ("sudo", "doas"):
+            tokens.pop(0)
+        if not tokens:
+            continue
+        if tokens[0].rsplit("/", 1)[-1] in _EXEC_CMD_WORDS:
+            return True
+    return False
+
+
+def _strip_heredoc_data_body(cmd: str) -> str:
+    """把「cat 写文件」型 heredoc 的正文与终止行替换掉，返回用于危险扫描的命令串。
+
+    不满足保守条件时原样返回（等价于旧版全串扫描）。
+    """
+    cmd = cmd or ""
+    if "<<" not in cmd or "\n" not in cmd:
+        return cmd
+    lines = cmd.split("\n")
+    out: list[str] = []
+    pending: list[tuple[str, bool]] = []  # (tag, 是否 <<- 允许前导制表符)
+    for line in lines:
+        if pending:
+            tag, allow_tabs = pending[0]
+            probe = line.lstrip("\t") if allow_tabs else line
+            if probe.strip() == tag:
+                pending.pop(0)
+            # 终止行与正文行一样，一律从扫描文本中丢弃
+            continue
+        m = _HEREDOC_OPENER_RE.search(line)
+        if not m:
+            out.append(line)
+            continue
+        pre = line[:m.start()]
+        pre_segs = [s for s in re.split(r'[;&|]', pre) if s.strip()]
+        last = pre_segs[-1] if pre_segs else ""
+        if not _is_cat_heredoc_pre_segment(last):
+            return cmd
+        for om in _HEREDOC_OPENER_RE.finditer(line):
+            pending.append((om.group(3), om.group(1) == "-"))
+        out.append(line)
+    if pending:
+        return cmd
+    stripped = "\n".join(out)
+    if _has_exec_vector(stripped):
+        return cmd
+    return stripped
+
+
 def _is_rm_tmp_only(command: str) -> bool:
     """rm 命令的所有操作目标是否全部位于 /tmp/ 下。
 
@@ -294,15 +393,21 @@ class ShellTool(BaseTool):
     def consent_check(self, command: str = "", **kwargs) -> str | None:
         # shell 可执行任意副作用操作，执行前请求授权。
         cmd = command or ""
-        if _DANGEROUS_RE.search(cmd):
+        # 「cat 写文件」型 heredoc 的正文是纯数据（见 _strip_heredoc_data_body），
+        # 剥离后再扫危险模式，避免 body 里的描述性文字（如任务说明里的
+        # "git push --force"）被误判成破坏性命令。
+        scan_cmd = _strip_heredoc_data_body(cmd)
+        if _DANGEROUS_RE.search(scan_cmd):
             # 高危命令：文案标红提示，且每次都问（见 consent_always）
             return f"⚠️ 高危 shell 命令，请确认：{cmd[:200]}"
         # 环境变量列举命令（env/printenv/set 等）：不需要 $VAR 就能 dump 所有 secret，
         # 每次重新授权。
-        if _is_env_dump(cmd):
+        if _is_env_dump(scan_cmd):
             return f"⚠️ 命令可能泄露环境变量（含 secret），请确认：{cmd[:200]}"
         # 命令引用了 secret 环境变量：可被诱导泄露密钥（编码能绕过 mask_text），
         # 每次重新授权，让用户在弹窗里看到具体引用了哪个 secret 变量。
+        # 注意：这里扫原始命令（不剥 heredoc）——body 里引用 $SECRET 写进文件，
+        # 后续若被执行同样会泄露，保守不豁免。
         secret_refs = _detect_secret_env_refs(cmd)
         if secret_refs:
             return (
@@ -321,12 +426,14 @@ class ShellTool(BaseTool):
         # 高危命令始终重新询问，即使本会话已授权过 shell，也不计入会话放行。
         # 这是普通模式/无人值守模式的口径（破坏性 + 高危非破坏性 + 密钥泄露面）。
         # 例外：rm 操作目标全部在 /tmp/ 下时放行，不反复弹窗。
+        # 危险扫描用剥离 heredoc 数据正文后的命令串（同 consent_check）。
         cmd = command or ""
-        if _DANGEROUS_RE.search(cmd):
+        scan_cmd = _strip_heredoc_data_body(cmd)
+        if _DANGEROUS_RE.search(scan_cmd):
             if _is_rm_tmp_only(cmd):
                 return False
             return True
-        return _is_env_dump(cmd) or bool(_detect_secret_env_refs(cmd))
+        return _is_env_dump(scan_cmd) or bool(_detect_secret_env_refs(cmd))
 
     def consent_destructive(self, command: str = "", **kwargs) -> bool:
         # 破坏性命令（rm -rf / 格式化 / 写设备 / fork 炸弹 / 破坏性 git）：
@@ -335,8 +442,9 @@ class ShellTool(BaseTool):
         # 见 agent loop 对 auto_approve 的处理。
         #
         # 例外：rm 操作目标全部在 /tmp/ 下时视为安全（临时文件清理），不弹窗。
+        # 危险扫描用剥离 heredoc 数据正文后的命令串（同 consent_check）。
         cmd = command or ""
-        if not _DESTRUCTIVE_RE.search(cmd):
+        if not _DESTRUCTIVE_RE.search(_strip_heredoc_data_body(cmd)):
             return False
         if _is_rm_tmp_only(cmd):
             return False

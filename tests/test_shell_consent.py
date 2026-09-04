@@ -294,3 +294,114 @@ def test_dangerous_re_is_union_of_tiers():
     assert _DANGEROUS_RE.search("rm -rf /tmp/x")
     assert _DANGEROUS_RE.search("sudo ls")
     assert not _DESTRUCTIVE_RE.search("sudo ls")
+
+
+# ── 7. heredoc 数据正文剥离（2026-09-05） ────────────────────
+# `cat > /tmp/task.md <<'EOF' ... EOF` 只是写文件，body 是文本而非命令。
+# 此前 body 里出现 "git push --force"、"rm -rf" 等描述性文字会被误判成
+# 破坏性命令，超级模式下也被强制弹窗（WorkBuddy 侧 /tmp/wbuddy_conflict_task.md 实例）。
+
+from ethan.tools.builtin.shell import _strip_heredoc_data_body  # noqa: E402
+
+
+def _heredoc_task_md(body: str) -> str:
+    return f"cat > /tmp/task.md <<'EOF'\n{body}\nEOF"
+
+
+def test_heredoc_body_with_force_push_text_not_destructive():
+    """body 里的破坏性 git 字样是描述文字，不应判破坏性（超级模式不弹窗）。"""
+    tool = ShellTool()
+    cmd = _heredoc_task_md(
+        "# 任务：解决 PR 冲突并推送\n"
+        "冲突解决后：git push --force-with-lease origin feat/x"
+    )
+    assert not tool.consent_destructive(command=cmd)
+    assert not tool.consent_always(command=cmd)
+    assert tool.consent_check(command=cmd)  # 仍非只读，普通模式照常弹（会话级授权）
+
+
+def test_heredoc_body_with_rm_rf_text_not_dangerous():
+    tool = ShellTool()
+    cmd = _heredoc_task_md("先 rm -rf /tmp/wbuddy_fix 再重新 clone")
+    assert not tool.consent_destructive(command=cmd)
+    assert not tool.consent_always(command=cmd)
+
+
+def test_heredoc_body_env_line_not_env_dump():
+    """body 里的 env 行是文件内容，不构成环境变量泄露。"""
+    tool = ShellTool()
+    cmd = _heredoc_task_md("env 用法见文档")
+    assert not tool.consent_always(command=cmd)
+
+
+def test_heredoc_unquoted_tag_stripped():
+    tool = ShellTool()
+    cmd = "cat > /tmp/task.md <<EOF\ngit push --force\nEOF"
+    assert not tool.consent_destructive(command=cmd)
+
+
+def test_heredoc_dashed_tag_stripped():
+    tool = ShellTool()
+    cmd = "cat > /tmp/task.md <<-EOF\n\trm -rf /\n\tEOF"
+    assert not tool.consent_destructive(command=cmd)
+
+
+def test_real_destructive_cmd_still_destructive():
+    """真破坏性命令不受剥离影响（注意 /tmp 目标有既有豁免，用非 /tmp 路径）。"""
+    tool = ShellTool()
+    assert tool.consent_destructive(command="rm -rf /data/x")
+    assert tool.consent_destructive(command="git push origin main --force")
+
+
+def test_heredoc_fed_to_sh_not_stripped():
+    """sh <<EOF 的 body 会被执行，危险内容必须照常拦截。"""
+    tool = ShellTool()
+    cmd = "sh <<'EOF'\nrm -rf /\nEOF"
+    assert _strip_heredoc_data_body(cmd) == cmd  # 未剥离
+    assert tool.consent_destructive(command=cmd)
+
+
+def test_heredoc_written_then_executed_not_stripped():
+    """写脚本 + 执行的组合：body 不得借剥离隐藏。"""
+    tool = ShellTool()
+    cmd = "cat > /tmp/x.sh <<'EOF'\nrm -rf /\nEOF\nbash /tmp/x.sh"
+    assert _strip_heredoc_data_body(cmd) == cmd
+    assert tool.consent_destructive(command=cmd)
+
+
+def test_heredoc_piped_to_sh_not_stripped():
+    tool = ShellTool()
+    cmd = "cat <<'EOF' | sh\nrm -rf /\nEOF"
+    assert _strip_heredoc_data_body(cmd) == cmd
+    assert tool.consent_destructive(command=cmd)
+
+
+def test_heredoc_without_terminator_not_stripped():
+    tool = ShellTool()
+    cmd = "cat > /tmp/task.md <<'EOF'\ngit push --force"
+    assert _strip_heredoc_data_body(cmd) == cmd
+    assert tool.consent_destructive(command=cmd)
+
+
+def test_heredoc_followed_by_python_not_stripped():
+    cmd = "cat > /tmp/x.md <<'EOF'\ngit push --force\nEOF\npython3 /tmp/gen.py"
+    assert _strip_heredoc_data_body(cmd) == cmd
+
+
+def test_heredoc_safe_tail_echo_still_stripped():
+    """结尾追加无害 echo 不影响剥离。"""
+    tool = ShellTool()
+    cmd = _heredoc_task_md("git push --force") + "\necho done"
+    assert _strip_heredoc_data_body(cmd) != cmd
+    assert not tool.consent_destructive(command=cmd)
+
+
+def test_heredoc_no_newline_unchanged():
+    """单行命令（无换行）不可能有 body，原样返回。"""
+    assert _strip_heredoc_data_body("cat > /tmp/x <<EOF") == "cat > /tmp/x <<EOF"
+
+
+def test_herestring_not_treated_as_heredoc():
+    """<<< 是 herestring，不按 heredoc 剥离。"""
+    cmd = 'cat <<< "hello"\necho done'
+    assert _strip_heredoc_data_body(cmd) == cmd
