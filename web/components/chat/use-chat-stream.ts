@@ -2,7 +2,7 @@
 
 import type { StreamChunk } from "@/lib/api";
 import type { ToolStep } from "@ethan/shared/components/tool-timeline";
-import type { Message, Usage, CardData } from "@ethan/shared/chat/types";
+import type { Message, Usage } from "@ethan/shared/chat/types";
 import type { ConsentRequest } from "@ethan/shared/components/consent-dialog";
 import type { AskUserRequest } from "@ethan/shared/chat/ask-user-card";
 import type { WaitForUserRequest } from "@ethan/shared/chat/wait-for-user-card";
@@ -62,6 +62,39 @@ export async function consumeStream(
   let finalUsage: Usage | undefined;
   let finalModel: string | undefined;
   setMessages([...baseMessages, { role: "assistant", content: "", created_at: Date.now() / 1000, model: finalModel }]);
+
+  let _rafId: number | null = null;
+  const buildMsg = (extra?: Partial<Message>): Message => ({
+    role: "assistant" as const,
+    content: assistantContent,
+    thought: assistantThought,
+    toolSteps: currentToolSteps.length > 0 ? [...currentToolSteps] : undefined,
+    toolsExpanded: currentToolSteps.length > 0 ? true : undefined,
+    created_at: Date.now() / 1000,
+    model: finalModel,
+    intermediateOutput: intermediateOutput || undefined,
+    ...extra,
+  });
+  const flushAssistant = (extra?: Partial<Message>) => {
+    const msg = buildMsg(extra);
+    setMessages(prev => {
+      if (!prev.length) return [...prev, msg];
+      const next = [...prev];
+      if (next[next.length - 1]?.role === "assistant") {
+        next[next.length - 1] = msg;
+      } else {
+        next.push(msg);
+      }
+      return next;
+    });
+  };
+  const scheduleFlush = () => {
+    if (_rafId !== null) return;
+    _rafId = requestAnimationFrame(() => { _rafId = null; flushAssistant(); });
+  };
+  const cancelScheduledFlush = () => {
+    if (_rafId !== null) { cancelAnimationFrame(_rafId); _rafId = null; }
+  };
 
   try {
     for await (const chunk of stream) {
@@ -165,16 +198,7 @@ export async function consumeStream(
         const secs = elapsed % 60;
         const timeStr = mins > 0 ? `${mins} 分 ${secs} 秒` : `${secs} 秒`;
         const statusNote = `_⏳ 任务仍在运行中，已用时 ${timeStr}，请稍候…_`;
-        setMessages([...baseMessages, {
-          role: "assistant",
-          content: assistantContent || statusNote,
-          thought: assistantThought,
-          toolSteps: currentToolSteps.length > 0 ? [...currentToolSteps] : undefined,
-          toolsExpanded: currentToolSteps.length > 0 ? true : undefined,
-          created_at: Date.now() / 1000,
-          model: finalModel,
-          intermediateOutput: intermediateOutput || undefined,
-        }]);
+        flushAssistant({ content: assistantContent || statusNote });
         continue;
       }
       if (chunk.error) {
@@ -196,11 +220,8 @@ export async function consumeStream(
           entity_id: chunk.entity_id || undefined,
           injected: chunk.injected || undefined,
         });
-        setMessages([...baseMessages, {
-          role: "assistant", content: assistantContent, thought: assistantThought,
-          toolSteps: [...currentToolSteps], toolsExpanded: true, created_at: Date.now() / 1000,
-          model: finalModel,
-        }]);
+        cancelScheduledFlush();
+        flushAssistant();
       }
       if (chunk.tool && (chunk.state === "done" || chunk.state === "error")) {
         // 动作完成时清除之前的思考文本
@@ -252,37 +273,19 @@ export async function consumeStream(
         }
         if (Array.isArray(chunk.ui)) a2uiSurfaces.push(...chunk.ui);
         if (chunk.mcp_app) mcpAppsCollected.push(chunk.mcp_app);
-        setMessages([...baseMessages, {
-          role: "assistant", content: assistantContent, thought: assistantThought,
-          toolSteps: [...currentToolSteps], toolsExpanded: true, created_at: Date.now() / 1000,
-          model: finalModel,
-          intermediateOutput: intermediateOutput || undefined,
-        }]);
+        cancelScheduledFlush();
+        flushAssistant();
       }
       if (chunk.content) {
         setBgPolling(null);
         assistantContent += chunk.content;
-        setMessages([...baseMessages, {
-          role: "assistant", content: assistantContent, thought: assistantThought,
-          toolSteps: currentToolSteps.length > 0 ? [...currentToolSteps] : undefined,
-          toolsExpanded: currentToolSteps.length > 0 ? true : undefined,
-          created_at: Date.now() / 1000,
-          model: finalModel,
-          intermediateOutput: intermediateOutput || undefined,
-        }]);
+        scheduleFlush();
       }
       // 顶层 cards 事件（无 tool 字段）：正文兜底补的文件卡片，直播中即时渲染。
       if (chunk.cards && !chunk.tool && Array.isArray(chunk.cards)) {
         cardsCollected.push(...chunk.cards);
-        setMessages([...baseMessages, {
-          role: "assistant", content: assistantContent, thought: assistantThought,
-          toolSteps: currentToolSteps.length > 0 ? [...currentToolSteps] : undefined,
-          toolsExpanded: currentToolSteps.length > 0 ? true : undefined,
-          created_at: Date.now() / 1000,
-          model: finalModel,
-          intermediateOutput: intermediateOutput || undefined,
-          cards: cardsCollected as any,
-        }]);
+        cancelScheduledFlush();
+        flushAssistant({ cards: cardsCollected as unknown as Message["cards"] });
       }
       if (chunk.done && chunk.usage) {
         finalUsage = { input: chunk.usage.input || 0, output: chunk.usage.output || 0, cache: chunk.usage.cache || 0 };
@@ -318,6 +321,7 @@ export async function consumeStream(
   } catch (err) {
     if ((err as { name?: string })?.name === "AbortError") {
       // 切换会话/发新消息 abort 旧流：清理残留的交互卡片状态，避免新会话误显示
+      cancelScheduledFlush();
       setConsentRequest(null);
       setCleanupConfirm(null);
       setAskUserRequest(null);
@@ -456,6 +460,7 @@ export async function consumeStream(
     }
   }
 
+  cancelScheduledFlush();
   setMessages(prev => {
     const msgs = [...prev];
     const last = msgs[msgs.length - 1];
@@ -471,7 +476,7 @@ export async function consumeStream(
         total_ms: totalMs ?? last.total_ms,
         a2ui: a2uiSurfaces.length > 0 ? a2uiSurfaces : undefined,
         mcpApps: mcpAppsCollected.length > 0 ? mcpAppsCollected : undefined,
-        cards: cardsCollected.length > 0 ? cardsCollected as any : undefined,
+        cards: cardsCollected.length > 0 ? cardsCollected as unknown as Message["cards"] : undefined,
         matchedSkills: currentMatchedSkills,
         id: messageId ?? last.id,
         intermediateOutput: intermediateOutput || undefined,
@@ -480,7 +485,7 @@ export async function consumeStream(
       };
       return msgs;
     }
-    return [...baseMessages, {
+    return [...prev, {
       role: "assistant",
       content: assistantContent,
       thought: assistantThought,
@@ -491,7 +496,7 @@ export async function consumeStream(
       total_ms: totalMs,
       a2ui: a2uiSurfaces.length > 0 ? a2uiSurfaces : undefined,
       mcpApps: mcpAppsCollected.length > 0 ? mcpAppsCollected : undefined,
-      cards: cardsCollected.length > 0 ? cardsCollected as any : undefined,
+      cards: cardsCollected.length > 0 ? cardsCollected as unknown as Message["cards"] : undefined,
       matchedSkills: currentMatchedSkills,
       id: messageId,
       intermediateOutput: intermediateOutput || undefined,
