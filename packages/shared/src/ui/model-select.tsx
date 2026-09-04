@@ -59,15 +59,6 @@ function fullIdOf(m: ModelOption): string {
   return m.provider ? `${m.provider}/${m.id}` : m.id;
 }
 
-/**
- * id 模式撞车回退时，把内部用的 `provider/id` 复合 value 拆回裸 id 落库。
- * 只剥掉第一个斜杠前的 provider 前缀，其余（含 id 中可能出现的斜杠）原样保留。
- */
-export function bareIdFromComposite(v: string): string {
-  const i = v.indexOf("/");
-  return i === -1 ? v : v.slice(i + 1);
-}
-
 function displayNameOf(m: ModelOption): string {
   return m.alias?.[0] || m.description || m.id;
 }
@@ -131,15 +122,6 @@ export function ModelSelect({
 
   const handleValueChange = (v: string) => {
     if (v == null) return;
-    // id 模式且因同名撞车而用了 provider/id 作 value 时，拆回裸 id 落库。
-    if (valueMode === "id" && hasIdCollision) {
-      const isComposite = v.includes("/") && models.some((m) => fullIdOf(m) === v);
-      // 去掉 provider 前缀、保留斜杠后的模型 id（bareIdFromComposite）。
-      // 此前写成 v.split("/", 1)[0]，取到的是斜杠前的 provider 名，
-      // 导致「选了模型却把 provider 名落库成默认模型」的 bug。
-      onValueChange(isComposite ? bareIdFromComposite(v) : v);
-      return;
-    }
     onValueChange(v);
   };
 
