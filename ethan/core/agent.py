@@ -538,6 +538,26 @@ class Agent:
             return self._lite_provider or self._provider
         return self._provider
 
+    def _get_timeout_fallback(self, current_provider):
+        """Get a fallback provider when the current one times out mid-stream."""
+        from ethan.providers.fallback import FallbackProvider
+
+        if isinstance(current_provider, FallbackProvider):
+            next_p = current_provider.get_next_provider()
+            if next_p is not None:
+                return next_p
+
+        fb_model = get_config().defaults.fallback_model
+        if not fb_model:
+            return None
+        try:
+            fb = create_provider(fb_model)
+            if fb.model != current_provider.model:
+                return fb
+        except Exception:
+            logger.warning("创建 timeout fallback provider 失败: %s", fb_model, exc_info=True)
+        return None
+
     async def _request_consent(self, description: str, tool: str, detail: str = "") -> bool:
         """请求用户授权。根据 channel 走不同 provider：
         - 无 provider（如 heartbeat）：放行
@@ -1186,6 +1206,26 @@ class Agent:
                         if chunk.is_final:
                             final_chunk = chunk
                             self.usage.add(chunk.usage)
+                elif isinstance(e, TimeoutError) and not full_content:
+                    _timeout_fb = self._get_timeout_fallback(provider)
+                    if _timeout_fb is not None:
+                        logger.warning(
+                            "stream_chat() iter=%d 模型响应超时，切换备选模型重试: %s → %s",
+                            i + 1, provider.model, _timeout_fb.model,
+                        )
+                        full_content = ""
+                        final_chunk = None
+                        async for chunk in _timeout_fb.stream_chat(working, tools=tools, system=sys):
+                            if chunk.reasoning:
+                                yield ThinkingEvent(delta=chunk.reasoning)
+                            if chunk.content:
+                                full_content += chunk.content
+                                yield chunk.content
+                            if chunk.is_final:
+                                final_chunk = chunk
+                                self.usage.add(chunk.usage)
+                    else:
+                        raise
                 else:
                     raise
 
