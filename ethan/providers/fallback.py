@@ -87,6 +87,24 @@ class FallbackProvider(BaseProvider):
             return self._last_used.model
         return self._providers[0][1].model
 
+    def get_next_provider(self) -> BaseProvider | None:
+        """Return the next available provider after the last used one.
+
+        Used by the agent layer when mid-stream timeout requires switching
+        to a different provider (FallbackProvider itself can't retry
+        mid-stream because chunks have already been yielded to the caller).
+        """
+        breaker = get_circuit_breaker()
+        found = False
+        for key, provider in self._providers:
+            if provider is self._last_used:
+                found = True
+                breaker.record_failure(key)
+                continue
+            if found and breaker.is_available(key):
+                return provider
+        return None
+
     async def chat(
         self,
         messages: list[Message],
