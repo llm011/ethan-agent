@@ -96,6 +96,7 @@ class StreamCollector:
             self._times[item.tool_name] = time.time()
             self.tool_steps.append({
                 "tool": item.tool_name,
+                "id": item.tool_call_id or "",
                 "args": item.args_summary,
                 "intent": item.intent or "",
                 "state": "running",

@@ -16,7 +16,7 @@ import { ImageGallery, type ImageCard } from "./image-gallery";
 import { type SearchResultCard } from "./search-card-carousel";
 import { FileCardView, type FileCard } from "./file-card";
 import { applyHighlights } from "@/lib/highlight";
-import { fetchMessageIntermediate } from "@/lib/api-sessions";
+import { fetchMessageIntermediate, fetchToolRaw } from "@/lib/api-sessions";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@ethan/shared/ui/tooltip";
 import { ActionConfirmBar } from "@ethan/shared/chat/action-confirm-bar";
 import type { CardData, Message } from "@ethan/shared/chat/types";
@@ -443,6 +443,9 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
                 highlightIndex={highlightedStep}
                 messageCards={msg.cards?.filter((c): c is SearchResultCard => c.type === "search_result")}
                 onCancelTool={isStreaming && isLast ? onCancelTool : undefined}
+                sessionId={sessionId ?? undefined}
+                messageId={msg.id}
+                fetchToolRaw={fetchToolRaw}
               />
             )}
             {msg.toolSteps && msg.toolSteps.length > 0 && msg.toolSteps.some(s => s.entity_type) && (

@@ -49,6 +49,9 @@ interface ToolTimelineProps {
   messageCards?: SearchResultCard[];
   /** 取消正在运行的工具调用（tool_call_id）。仅在工具 running 状态可用。 */
   onCancelTool?: (toolCallId: string) => void;
+  sessionId?: string;
+  messageId?: number;
+  fetchToolRaw?: (sessionId: string, messageId: number, index: number, field: "args" | "result" | "both", toolCallId?: string) => Promise<{ args?: string; result?: string }>;
 }
 
 const TOOL_ICONS: Record<string, React.ReactNode> = {
@@ -175,7 +178,7 @@ function ImageOutput({ detail }: { detail: string }) {
   );
 }
 
-function DetailOutput({ detail }: { detail: string }) {
+function DetailOutput({ detail, onFetchFull }: { detail: string; onFetchFull?: () => Promise<string | undefined> }) {
   const [wrap, setWrap] = useState(false);
   const [copied, setCopied] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -194,7 +197,16 @@ function DetailOutput({ detail }: { detail: string }) {
   }, [wrap]);
 
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(detail);
+    try {
+      let content = detail;
+      if (onFetchFull) {
+        const full = await onFetchFull();
+        if (full) content = full;
+      }
+      await navigator.clipboard.writeText(content);
+    } catch {
+      await navigator.clipboard.writeText(detail);
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -334,14 +346,23 @@ function SearchResultList({ results }: { results: SearchResultCard[] }) {
 
 /** 工具参数：截断显示 + hover 弹出完整内容 + 复制按钮
  *  使用 Tooltip(Portal+Positioner) 弹出：超出容器/视口时自动翻转方向，不会被祖先 overflow 裁剪 */
-function ArgsPopover({ text, maxW = "max-w-[800px]" }: { text: string; maxW?: string }) {
+function ArgsPopover({ text, maxW = "max-w-[800px]", onFetchFull }: { text: string; maxW?: string; onFetchFull?: () => Promise<string | undefined> }) {
   const [copied, setCopied] = useState(false);
 
-  const handleCopy = (e: React.MouseEvent) => {
+  const handleCopy = async (e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
-    void navigator.clipboard.writeText(text);
     setCopied(true);
+    try {
+      let content = text;
+      if (onFetchFull) {
+        const full = await onFetchFull();
+        if (full) content = full;
+      }
+      await navigator.clipboard.writeText(content);
+    } catch {
+      await navigator.clipboard.writeText(text);
+    }
     setTimeout(() => setCopied(false), 1500);
   };
 
@@ -377,11 +398,27 @@ function ArgsPopover({ text, maxW = "max-w-[800px]" }: { text: string; maxW?: st
   );
 }
 
-function StepRow({ step, isLast, highlight, fallbackCards, onCancelTool }: { step: ToolStep; isLast: boolean; highlight: boolean; fallbackCards?: SearchResultCard[]; onCancelTool?: (toolCallId: string) => void }) {
+function StepRow({ step, isLast, highlight, fallbackCards, onCancelTool, sessionId, messageId, stepIndex, fetchToolRaw }: { step: ToolStep; isLast: boolean; highlight: boolean; fallbackCards?: SearchResultCard[]; onCancelTool?: (toolCallId: string) => void; sessionId?: string; messageId?: number; stepIndex: number; fetchToolRaw?: (sessionId: string, messageId: number, index: number, field: "args" | "result" | "both", toolCallId?: string) => Promise<{ args?: string; result?: string }> }) {
   const hasSubs = step.sub_steps && step.sub_steps.length > 0;
   const [subOpen, setSubOpen] = useState(false);
   const isDelegate = step.tool === "delegate_coding";
   const subDoneCount = hasSubs ? step.sub_steps!.filter(s => s.state !== "running").length : 0;
+
+  const fetchArgs = useMemo(() => {
+    if (!fetchToolRaw || !sessionId || messageId == null) return undefined;
+    return async () => {
+      const data = await fetchToolRaw(sessionId, messageId, stepIndex, "args", step.id);
+      return data.args;
+    };
+  }, [fetchToolRaw, sessionId, messageId, stepIndex, step.id]);
+
+  const fetchResult = useMemo(() => {
+    if (!fetchToolRaw || !sessionId || messageId == null) return undefined;
+    return async () => {
+      const data = await fetchToolRaw(sessionId, messageId, stepIndex, "result", step.id);
+      return data.result;
+    };
+  }, [fetchToolRaw, sessionId, messageId, stepIndex, step.id]);
 
   const hasDetail = (step.thought || step.result_detail) && step.state !== "running";
   const [detailOpen, setDetailOpen] = useState(false);
@@ -452,7 +489,7 @@ function StepRow({ step, isLast, highlight, fallbackCards, onCancelTool }: { ste
             </span>
           )}
           {step.args && (
-            <ArgsPopover text={step.args} />
+            <ArgsPopover text={step.args} onFetchFull={fetchArgs} />
           )}
           {hasSubs && (
             <button
@@ -546,7 +583,7 @@ function StepRow({ step, isLast, highlight, fallbackCards, onCancelTool }: { ste
             )}
             {step.result_detail && (
               <div className="px-3 py-2">
-                {searchResults ? <SearchResultList results={searchResults} /> : <DetailOutput detail={step.result_detail} />}
+                {searchResults ? <SearchResultList results={searchResults} /> : <DetailOutput detail={step.result_detail} onFetchFull={fetchResult} />}
               </div>
             )}
           </div>
@@ -556,7 +593,7 @@ function StepRow({ step, isLast, highlight, fallbackCards, onCancelTool }: { ste
   );
 }
 
-export function ToolTimeline({ steps: rawSteps, defaultExpanded = false, highlightIndex, messageCards, onCancelTool }: ToolTimelineProps) {
+export function ToolTimeline({ steps: rawSteps, defaultExpanded = false, highlightIndex, messageCards, onCancelTool, sessionId, messageId, fetchToolRaw }: ToolTimelineProps) {
   const steps = useMemo(() => {
     if (onCancelTool || !rawSteps.some(s => s.state === "running")) return rawSteps;
     // 只读场景（无 onCancelTool，如分享/历史回放）残留的 running：真实取消会由后端
@@ -604,7 +641,7 @@ export function ToolTimeline({ steps: rawSteps, defaultExpanded = false, highlig
       {expanded && (
         <div className="px-3 pb-2 space-y-0">
           {steps.map((step, i) => (
-            <StepRow key={i} step={step} isLast={i === steps.length - 1} highlight={i === highlightIndex} fallbackCards={fallbackCards} onCancelTool={onCancelTool} />
+            <StepRow key={i} step={step} isLast={i === steps.length - 1} highlight={i === highlightIndex} fallbackCards={fallbackCards} onCancelTool={onCancelTool} sessionId={sessionId} messageId={messageId} stepIndex={i} fetchToolRaw={fetchToolRaw} />
           ))}
         </div>
       )}

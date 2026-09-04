@@ -1,4 +1,6 @@
 """sessions 路由：Session CRUD + /auth + /models。"""
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
@@ -339,3 +341,75 @@ async def summary_session(session_id: str, user_id: str = Depends(verify_token))
     store = await get_session_store()
     result = await _summary(store, session_id, get_config().defaults.model)
     return {"ok": True, "summary": result}
+
+@router.get("/sessions/{session_id}/messages/{message_id}/tool-raw")
+async def get_tool_raw(session_id: str, message_id: int,
+                       index: int = 0, tool_call_id: str | None = None,
+                       field: str = "args",
+                       user_id: str = Depends(verify_token)):
+    """返回工具调用的原始参数或结果（未压缩、未截断）。"""
+    store = await get_session_store()
+    session = await store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # 找到目标消息
+    msg = None
+    for m in session.messages:
+        if getattr(m, "id", None) == message_id:
+            msg = m
+            break
+    if msg is None:
+        raise HTTPException(status_code=404, detail="Message not found in this session")
+
+    tool_calls = getattr(msg, "tool_calls", None) or []
+    if not tool_calls:
+        raise HTTPException(status_code=404, detail="Message has no tool_calls")
+
+    # 优先按 tool_call_id 匹配，回退到 index
+    tc = None
+    if tool_call_id:
+        for t in tool_calls:
+            if getattr(t, "id", None) == tool_call_id:
+                tc = t
+                break
+    if tc is None:
+        if index < 0 or index >= len(tool_calls):
+            raise HTTPException(status_code=404, detail="tool_calls index out of range")
+        tc = tool_calls[index]
+
+    result = {}
+    tc_id = getattr(tc, "id", None)
+
+    if field in ("args", "both"):
+        args = getattr(tc, "arguments", None)
+        if args is None:
+            result["args"] = "{}"
+        elif isinstance(args, str):
+            # 尝试格式化 JSON 字符串
+            try:
+                result["args"] = json.dumps(json.loads(args), ensure_ascii=False, indent=2)
+            except (json.JSONDecodeError, TypeError):
+                result["args"] = args
+        else:
+            result["args"] = json.dumps(args, ensure_ascii=False, indent=2)
+
+    if field in ("result", "both"):
+        # 在后续消息中找到 tool role 且 tool_call_id 匹配的消息
+        tool_msg = None
+        if tc_id:
+            for m in session.messages:
+                if getattr(m, "role", None) == "tool" and getattr(m, "tool_call_id", None) == tc_id:
+                    tool_msg = m
+                    break
+        if tool_msg is None:
+            if field == "result":
+                raise HTTPException(status_code=404, detail="Tool result message not found")
+            result["result"] = None
+        else:
+            result["result"] = tool_msg.content
+
+    if not result:
+        raise HTTPException(status_code=400, detail=f"Invalid field: {field}. Use args, result, or both.")
+
+    return result

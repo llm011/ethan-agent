@@ -284,3 +284,19 @@ export async function uploadFile(file: File): Promise<{ path: string; filename: 
   if (!res.ok) throw new Error("Upload failed");
   return res.json();
 }
+
+export async function fetchToolRaw(
+  sessionId: string,
+  messageId: number,
+  index: number,
+  field: "args" | "result" | "both" = "args",
+  toolCallId?: string,
+): Promise<{ args?: string; result?: string }> {
+  const params = new URLSearchParams({ index: String(index), field });
+  if (toolCallId) params.set("tool_call_id", toolCallId);
+  const res = await fetch(`${API_URL}/sessions/${sessionId}/messages/${messageId}/tool-raw?${params}`, {
+    headers: headers(),
+  });
+  if (!res.ok) throw new Error(`Failed to fetch tool raw: ${res.status}`);
+  return res.json();
+}
