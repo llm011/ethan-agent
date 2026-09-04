@@ -78,9 +78,25 @@ class ToolExecutor:
                 return ToolResult(tool_call_id=tc.id, content=self._cache[cache_key])
 
         try:
+            # 必填参数预校验：模型偶尔漏传/写错参数名（实测 recall_memory 被写成
+            # input=query "..."，run() 抛裸 TypeError "missing 1 required positional
+            # argument"）。在这里拦下并给可读错误，模型拿到后能立刻自查重试。
+            valid_params = set(tool.parameters.get("properties", {}).keys())
+            required = tool.parameters.get("required") or []
+            missing = [p for p in required if p not in tc.arguments]
+            if missing:
+                user_facing = sorted(valid_params - {"intent"})
+                return ToolResult(
+                    tool_call_id=tc.id,
+                    content=(
+                        f"Tool error: missing required argument(s) {', '.join(missing)} "
+                        f"for '{tool.name}'. Valid arguments: {user_facing}. "
+                        f"Received: {sorted(tc.arguments.keys())}. Fix the arguments and retry."
+                    ),
+                    is_error=True,
+                )
             # 只传工具 schema 里声明的参数：剥掉 intent（展示用）以及模型偶尔幻觉出的
             # 多余字段（如 description=），防止 run() 报 unexpected keyword argument。
-            valid_params = set(tool.parameters.get("properties", {}).keys())
             run_args = {k: v for k, v in tc.arguments.items() if k in valid_params}
             out = await tool.run(**run_args)
             # 工具可返回 str（普通）或 ToolResult（携带 sub_steps 等元信息）
