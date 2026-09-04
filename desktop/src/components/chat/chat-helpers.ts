@@ -73,6 +73,7 @@ export function mapDetailMessages(detail: { messages: any[] }): Message[] {
       : undefined,
     toolSteps: m.tool_steps && m.tool_steps.length > 0
       ? m.tool_steps.map((s: any) => ({
+          id: s.id,
           tool: s.tool,
           args: s.args,
           intent: s.intent,
