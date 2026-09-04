@@ -3,13 +3,21 @@
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import katex from "katex";
 import "katex/dist/katex.min.css";
 import { CodeBlock } from "@ethan/shared/components/code-block";
 import { PlainCodeBlock } from "@ethan/shared/components/plain-code-block";
 import { MermaidBlock } from "@ethan/shared/components/mermaid-block";
-import { forwardRef, useMemo, useState } from "react";
+import { forwardRef, useMemo, useState, useEffect } from "react";
 import { Lightbox, type LightboxImage } from "./lightbox";
+
+let _katex: typeof import("katex").default | undefined;
+let _katexLoading: Promise<void> | undefined;
+function loadKatex() {
+  if (!_katexLoading) {
+    _katexLoading = import("katex").then(m => { _katex = m.default; });
+  }
+  return _katexLoading;
+}
 
 // CommonMark 规定 ** 紧内侧不能有空格，否则不渲染加粗。
 // 此函数去掉 AI 生成文本中 ** 内侧的多余空白，修复渲染。
@@ -92,14 +100,18 @@ function remarkMath(): (tree: any) => void {
 }
 
 function MathSpan({ latex, display }: { latex: string; display: boolean }) {
+  const [ready, setReady] = useState(!!_katex);
+  useEffect(() => {
+    if (!_katex) loadKatex().then(() => setReady(true));
+  }, []);
   const html = useMemo(() => {
+    if (!_katex) return null;
     try {
-      // output:"html" 只产出可见文本的 text 节点，标注 TreeWalker 可正常遍历
-      return katex.renderToString(latex, { displayMode: display, throwOnError: false, output: "html" });
+      return _katex.renderToString(latex, { displayMode: display, throwOnError: false, output: "html" });
     } catch {
       return null;
     }
-  }, [latex, display]);
+  }, [latex, display, ready]);
   if (!html) return <code className="bg-background/50 px-1 py-0.5 rounded text-xs font-mono">{latex}</code>;
   // display 时 KaTeX 自带 katex-display 样式（居中块级），外层 span 仅作挂载点
   return <span dangerouslySetInnerHTML={{ __html: html }} />;

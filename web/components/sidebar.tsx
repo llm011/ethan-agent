@@ -223,8 +223,13 @@ export function Sidebar() {
   };
   useEffect(() => {
     fetchGroups();
-    const interval = setInterval(fetchGroups, 30000);
-    return () => clearInterval(interval);
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const start = () => { if (!timer) timer = setInterval(() => { if (!document.hidden) fetchGroups(); }, 30000); };
+    const stop = () => { if (timer) { clearInterval(timer); timer = null; } };
+    const onVis = () => { document.hidden ? stop() : start(); };
+    start();
+    document.addEventListener("visibilitychange", onVis);
+    return () => { stop(); document.removeEventListener("visibilitychange", onVis); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname]);
 
@@ -242,10 +247,11 @@ export function Sidebar() {
     fetchModes().then(setModes).catch(() => {});
   }, []);
 
-  // Poll every 3s — skip if user is actively searching
+  // Poll every 3s — skip if user is actively searching or page is hidden
   useEffect(() => {
-    const interval = setInterval(async () => {
-      if (sessionSearch.trim()) return; // don't interfere while searching
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const poll = async () => {
+      if (sessionSearch.trim() || document.hidden) return;
       try {
         const data = await fetchPoll(true, true);
         const incoming = data.sessions as SessionInfo[];
@@ -259,8 +265,13 @@ export function Sidebar() {
           setActiveSessions(new Set(data.active_sessions));
         }
       } catch {}
-    }, 3000);
-    return () => clearInterval(interval);
+    };
+    const start = () => { if (!timer) timer = setInterval(poll, 3000); };
+    const stop = () => { if (timer) { clearInterval(timer); timer = null; } };
+    const onVisibility = () => { document.hidden ? stop() : start(); };
+    start();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => { stop(); document.removeEventListener("visibilitychange", onVisibility); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionSearch]);
 

@@ -1,5 +1,25 @@
 import type { Message } from "@ethan/shared/chat/types";
+import type { PendingFile } from "@ethan/shared/chat/types";
 import { assetUrl } from "../../lib/api-base";
+
+export async function pendingFileToImagePayload(img: PendingFile): Promise<{ data: string; media_type: string }> {
+  if (img.file) {
+    const dataUrl: string = await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result as string);
+      r.onerror = () => reject(r.error);
+      r.readAsDataURL(img.file!);
+    });
+    return {
+      data: dataUrl.split(",")[1] ?? "",
+      media_type: img.file.type || "image/png",
+    };
+  }
+  return {
+    data: img.dataUrl?.split(",")[1] ?? "",
+    media_type: img.dataUrl?.split(";")[0].replace("data:", "") ?? "image/png",
+  };
+}
 
 // 清洗后的占位标题：去 markdown 标记 / 命令前缀，截断 40 字
 // 与后端 _auto_title 逻辑对齐，让前端 0ms 显示可读标题

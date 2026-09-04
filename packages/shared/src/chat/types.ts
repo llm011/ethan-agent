@@ -16,7 +16,8 @@ export interface PendingFile {
   name: string;
   path: string;
   isImage?: boolean;
-  dataUrl?: string;  // base64 预览，仅图片有效
+  dataUrl?: string;  // Blob URL 或 base64 dataUrl，用于渲染预览
+  file?: File;       // 原始 File 引用，发送时按需读取 base64，避免常驻内存
 }
 
 export interface SkillMatch {
