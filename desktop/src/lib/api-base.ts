@@ -153,6 +153,16 @@ export async function deleteModelsBatch(items: { provider: string; id: string }[
   return data;
 }
 
+export async function reorderModels(items: { provider: string; id: string }[]): Promise<{ ok: boolean; error?: string }> {
+  const res = await fetch(`${getApiUrl()}/models/reorder`, {
+    method: "POST", headers: { ...headers(), "Content-Type": "application/json" },
+    body: JSON.stringify({ items }),
+  });
+  const data = await res.json();
+  if (data.ok) bustCache("models");
+  return data;
+}
+
 export async function discoverModels(provider: string): Promise<{ ok: boolean; models?: (ModelEntry & { exists?: boolean })[]; error?: string; url?: string }> {
   const res = await fetch(`${getApiUrl()}/models/discover`, {
     method: "POST", headers: { ...headers(), "Content-Type": "application/json" },

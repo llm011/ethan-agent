@@ -4,7 +4,7 @@ import { Button } from "@ethan/shared/ui/button";
 import { Input } from "@ethan/shared/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@ethan/shared/ui/select";
 import { ModelSelect } from "@ethan/shared/ui/model-select";
-import { Check, ChevronDown, ChevronRight, Pencil, Trash2, Plus } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Pencil, Trash2, Plus, GripVertical } from "lucide-react";
 import { useTheme } from "@/components/chat/use-theme";
 import { THEMES } from "@/components/chat/themes";
 import { ThemeSwatch } from "@ethan/shared/components/theme-swatch";
@@ -16,7 +16,7 @@ import {
   deleteProvider, renameProvider, fetchProviderPresets, ProviderPreset,
   fetchChannels, patchChannel, ChannelInfo,
   fetchAPIKeys, createAPIKey, deleteAPIKey, APIKeyInfo, APIKeyCreated,
-  fetchModels, addModel, addModelsBatch, deleteModel, deleteModelsBatch, discoverModels, ModelEntry,
+  fetchModels, addModel, addModelsBatch, deleteModel, deleteModelsBatch, reorderModels, discoverModels, ModelEntry,
 } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@ethan/shared/ui/card";
 import { Badge } from "@ethan/shared/ui/badge";
@@ -119,6 +119,9 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
   const [newModel, setNewModel] = useState<ModelEntry>({ id: "", provider: "openai_compat", description: "", alias: [], vision: true });
   // 批量删除/添加模型
   const [selectedModelKeys, setSelectedModelKeys] = useState<Set<string>>(new Set()); // 勾选的 "provider/id"
+  // 模型拖拽排序
+  const [modelDragIndex, setModelDragIndex] = useState<number | null>(null);
+  const [modelDragOverIndex, setModelDragOverIndex] = useState<number | null>(null);
   const [batchAddOpen, setBatchAddOpen] = useState(false);
   const [batchAddProvider, setBatchAddProvider] = useState("");
   const [batchAddText, setBatchAddText] = useState("");
@@ -267,6 +270,24 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
       api_key: "",
       disable_prompt_cache: preset.disable_prompt_cache ?? false,
     });
+  };
+
+  // 拖拽落点：先本地换序（乐观更新），再调 reorder 持久化；失败则拉回服务端顺序
+  const handleModelDrop = async (e: React.DragEvent, toIndex: number) => {
+    e.preventDefault();
+    const fromIndex = modelDragIndex;
+    setModelDragIndex(null);
+    setModelDragOverIndex(null);
+    if (fromIndex === null || fromIndex === toIndex) return;
+    const next = [...modelList];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
+    setModelList(next);
+    const r = await reorderModels(next.map((m) => ({ provider: m.provider, id: m.id })));
+    if (!r.ok) {
+      setMessage({ type: "error", text: r.error || "排序保存失败" });
+      setModelList(await fetchModels());
+    }
   };
 
   // 批量删除勾选的模型（key 格式 "provider/id"，id 本身可能含 "/"，用第一个 "/" 切分）
@@ -543,10 +564,33 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
                             全选
                           </label>
                         )}
-                        {modelList.map((m) => {
+                        {modelList.map((m, index) => {
                           const key = `${m.provider}/${m.id}`;
+                          const isDragging = modelDragIndex === index;
+                          const isDragOver = modelDragOverIndex === index && modelDragIndex !== index;
                           return (
-                            <div key={key} className="flex items-center gap-2 px-3 py-2 text-sm">
+                            <div
+                              key={key}
+                              draggable
+                              onDragStart={(e) => {
+                                setModelDragIndex(index);
+                                e.dataTransfer.effectAllowed = "move";
+                              }}
+                              onDragOver={(e) => {
+                                e.preventDefault();
+                                e.dataTransfer.dropEffect = "move";
+                                setModelDragOverIndex(index);
+                              }}
+                              onDrop={(e) => handleModelDrop(e, index)}
+                              onDragEnd={() => {
+                                setModelDragIndex(null);
+                                setModelDragOverIndex(null);
+                              }}
+                              className={`flex items-center gap-2 px-3 py-2 text-sm transition-opacity ${
+                                isDragging ? "opacity-40" : ""
+                              } ${isDragOver ? "bg-primary/5 ring-1 ring-inset ring-primary/20" : ""}`}
+                            >
+                              <GripVertical className="h-3.5 w-3.5 text-muted-foreground/40 cursor-grab active:cursor-grabbing shrink-0" />
                               <input
                                 type="checkbox"
                                 className="accent-primary shrink-0"
