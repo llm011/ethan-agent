@@ -28,6 +28,8 @@ _SPLIT_HEIGHT_THRESHOLD = 8000
 _SPLIT_SEGMENT = 6000
 # 切分结果缓存目录（按 sha256(raw) 索引，避免重复计算）
 _SPLIT_CACHE_DIR = ASSETS_DIR / "image_split_cache"
+# RGB565 缩略图缓存目录（低内存嵌入式设备直显用）
+THUMBS_DIR = ASSETS_DIR / "thumbs"
 
 # MIME → 扩展名
 _MIME_TO_EXT: dict[str, str] = {
@@ -93,6 +95,50 @@ def load_image_b64(relative_path: str) -> str | None:
 def image_file_path(relative_path: str) -> Path:
     """根据相对路径返回绝对文件路径（供 FileResponse 用）。"""
     return IMAGES_DIR / relative_path
+
+
+# RGB565 缩略图宽度边界：过小无意义，过大撑爆设备内存
+_RGB565_MIN_W, _RGB565_MAX_W = 16, 480
+
+
+def build_rgb565_thumbnail(src: Path, width: int) -> tuple[Path, int, int] | None:
+    """生成 RGB565 小端裸像素缩略图（供 ESP32 等无解码器设备直接渲染）。
+
+    宽度超过 width 的图按比例缩小；小图不放大。结果缓存到
+    THUMBS_DIR/{session_id}/{filename}.{width}w.rgb565，尺寸存同名 .json，
+    源文件更新（mtime 更新）时自动重建。Pillow/numpy 不可用或解码失败返回 None。
+    """
+    try:
+        import numpy as np  # noqa: PLC0415
+        from PIL import Image  # noqa: PLC0415
+
+        width = min(max(width, _RGB565_MIN_W), _RGB565_MAX_W)
+        cache_dir = THUMBS_DIR / src.parent.name
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cache = cache_dir / f"{src.name}.{width}w.rgb565"
+        meta = cache_dir / f"{src.name}.{width}w.json"
+        src_mtime = src.stat().st_mtime
+
+        if cache.is_file() and meta.is_file() and cache.stat().st_mtime >= src_mtime:
+            m = json.loads(meta.read_text())
+            return cache, m["w"], m["h"]
+
+        img = Image.open(src).convert("RGB")
+        W, H = img.size
+        if W > width:
+            img = img.resize((width, max(1, round(H * width / W))), Image.LANCZOS)
+        arr = np.asarray(img, dtype=np.uint8)
+        r = (arr[..., 0].astype(np.uint16) >> 3) << 11
+        g = (arr[..., 1].astype(np.uint16) >> 2) << 5
+        b = arr[..., 2].astype(np.uint16) >> 3
+        cache.write_bytes((r | g | b).astype("<u2").tobytes())
+        w2, h2 = img.size
+        meta.write_text(json.dumps({"w": w2, "h": h2}))
+        logger.debug("rgb565 thumbnail: %s -> %dx%d (%s)", src.name, w2, h2, cache)
+        return cache, w2, h2
+    except Exception:
+        logger.warning("rgb565 thumbnail failed: %s", src, exc_info=True)
+        return None
 
 
 # 大多数 LLM provider 对图片单边尺寸限制 8000px（Anthropic/Kiro 等）
