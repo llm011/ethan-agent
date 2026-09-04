@@ -99,6 +99,42 @@ class BatchDeleteRequest(BaseModel):
     items: list[BatchDeleteItem]
 
 
+class ReorderItem(BaseModel):
+    provider: str
+    id: str
+
+
+class ReorderRequest(BaseModel):
+    items: list[ReorderItem]
+
+
+@router.post("/models/reorder", dependencies=[Depends(verify_token)])
+async def reorder_models(req: ReorderRequest):
+    """按前端给定顺序重排 config.models（settings 页拖拽排序）。
+
+    items 里不在当前配置中的（比如别的窗口刚删过）直接跳过；items 里没提到
+    的（比如别的窗口刚加的）按原相对顺序追加到末尾，保证不丢模型。
+    """
+    if not req.items:
+        return {"ok": False, "error": "items is empty"}
+    config = get_config()
+    by_key = {(m.provider, m.id): m for m in config.models}
+    new_models: list = []
+    seen: set[tuple[str, str]] = set()
+    for item in req.items:
+        key = (item.provider, item.id)
+        if key in by_key and key not in seen:
+            new_models.append(by_key[key])
+            seen.add(key)
+    for key, m in by_key.items():
+        if key not in seen:
+            new_models.append(m)
+    config.models = new_models
+    save_config(config)
+    reload_config()
+    return {"ok": True, "skipped": len(req.items) - len(seen)}
+
+
 @router.post("/models/delete-batch", dependencies=[Depends(verify_token)])
 async def delete_models_batch(req: BatchDeleteRequest):
     """批量删除模型。items 里的 (provider, id) 存在几个删几个。
