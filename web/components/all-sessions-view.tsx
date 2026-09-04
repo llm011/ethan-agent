@@ -47,9 +47,8 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
   const [modes, setModes] = useState<ModeEntry[]>([]);
   const [filterSource, setFilterSource] = useState<string>("");
   const [filterMode, setFilterMode] = useState<string>("__all__");
-  const [showHeartbeat, setShowHeartbeat] = useState(false);
-  const [showScheduled, setShowScheduled] = useState(false);
-  const [filterHasImages, setFilterHasImages] = useState(false);
+  // 排他筛选：点击后只显示该类会话（空串 = 不过滤）
+  const [categoryFilter, setCategoryFilter] = useState<"" | "scheduled" | "heartbeat" | "images">("");
   const [cleanupLoading, setCleanupLoading] = useState(false);
   const [cleanupMsg, setCleanupMsg] = useState("");
   const [previewSessionId, setPreviewSessionId] = useState<string | null>(null);
@@ -62,12 +61,14 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
     fetchModes().then(setModes).catch(() => {});
   }, []);
 
-  const loadSessions = useCallback(async (pageNum: number, q: string, src: string, md: string, hb: boolean, sched: boolean, hasImg: boolean) => {
+  const loadSessions = useCallback(async (pageNum: number, q: string, src: string, md: string, category: "" | "scheduled" | "heartbeat" | "images") => {
     setLoading(true);
     try {
       const offset = (pageNum - 1) * limit;
       const modeParam = md === "__all__" ? undefined : (md === "__default__" ? "" : md);
-      const data = await fetchSessions(limit, offset, q || undefined, src || undefined, modeParam, !hb, !sched, undefined, hasImg || undefined);
+      // 排他筛选：定时/心跳走 title_prefixes 只保留对应前缀；图片走 has_images
+      const prefixes = category === "scheduled" ? "[定时]" : category === "heartbeat" ? "[心跳]" : undefined;
+      const data = await fetchSessions(limit, offset, q || undefined, src || undefined, modeParam, category === "" , category === "", prefixes, category === "images" || undefined);
       const t = (data as SessionInfo[] & { total?: number }).total;
       if (t != null) setTotal(t);
       setSessions(data);
@@ -82,24 +83,24 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
     const q = search.trim();
     const timer = setTimeout(() => {
       setPage(1);
-      loadSessions(1, q, filterSource, filterMode, showHeartbeat, showScheduled, filterHasImages);
+      loadSessions(1, q, filterSource, filterMode, categoryFilter);
     }, 300);
     return () => clearTimeout(timer);
-  }, [search, filterSource, filterMode, showHeartbeat, showScheduled, filterHasImages, loadSessions]);
+  }, [search, filterSource, filterMode, categoryFilter, loadSessions]);
 
   useEffect(() => {
     if (page > 1) {
-      loadSessions(page, search.trim(), filterSource, filterMode, showHeartbeat, showScheduled, filterHasImages);
+      loadSessions(page, search.trim(), filterSource, filterMode, categoryFilter);
     }
-  }, [page, search, filterSource, filterMode, showHeartbeat, showScheduled, filterHasImages, loadSessions]);
+  }, [page, search, filterSource, filterMode, categoryFilter, loadSessions]);
 
   // Poll for new sessions every 3s（搜索/筛选/非第一页时暂停，避免轮询结果覆盖当前视图）
   useEffect(() => {
     const interval = setInterval(async () => {
       if (page !== 1) return;
-      if (search.trim() || filterSource || filterMode !== "__all__" || filterHasImages) return;
+      if (search.trim() || filterSource || filterMode !== "__all__" || categoryFilter) return;
       try {
-        const data = await fetchSessions(limit, 0, undefined, undefined, undefined, !showHeartbeat, !showScheduled);
+        const data = await fetchSessions(limit, 0, undefined, undefined, undefined, true, true);
         setSessions(prev => {
           const changed = data.length !== prev.length ||
             data.some((s, i) => s.updated_at !== prev[i]?.updated_at || s.title !== prev[i]?.title);
@@ -109,7 +110,7 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
     }, 3000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, search, filterSource, filterMode, showHeartbeat, showScheduled, filterHasImages]);
+  }, [page, search, filterSource, filterMode, categoryFilter]);
 
   const commitRename = async (id: string) => {
     const title = editingTitle.trim();
@@ -168,7 +169,7 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
       const result = await cleanupTrivialSessions();
       if (result.deleted > 0) {
         setCleanupMsg(`已清理 ${result.deleted} 个无意义对话`);
-        loadSessions(1, search.trim(), filterSource, filterMode, showHeartbeat, showScheduled, filterHasImages);
+        loadSessions(1, search.trim(), filterSource, filterMode, categoryFilter);
         window.dispatchEvent(new CustomEvent("sessions:refresh"));
       } else {
         setCleanupMsg("没有需要清理的对话");
@@ -209,31 +210,22 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
           {cleanupMsg && (
             <span className="text-xs text-muted-foreground">{cleanupMsg}</span>
           )}
-          {/* 心跳/定时 开关 */}
-          <Button
-            variant={showHeartbeat ? "default" : "outline"}
-            size="sm"
-            className="h-8 text-xs px-2.5"
-            onClick={() => setShowHeartbeat(v => !v)}
-          >
-            心跳
-          </Button>
-          <Button
-            variant={showScheduled ? "default" : "outline"}
-            size="sm"
-            className="h-8 text-xs px-2.5"
-            onClick={() => setShowScheduled(v => !v)}
-          >
-            定时
-          </Button>
-          <Button
-            variant={filterHasImages ? "default" : "outline"}
-            size="sm"
-            className="h-8 text-xs px-2.5"
-            onClick={() => setFilterHasImages(v => !v)}
-          >
-            图片
-          </Button>
+          {/* 定时/心跳/图片：互斥的排他筛选，选中后只显示该类会话 */}
+          {([
+            ["scheduled", "定时"],
+            ["heartbeat", "心跳"],
+            ["images", "图片"],
+          ] as const).map(([value, label]) => (
+            <Button
+              key={value}
+              variant={categoryFilter === value ? "default" : "outline"}
+              size="sm"
+              className="h-8 text-xs px-2.5"
+              onClick={() => setCategoryFilter(v => (v === value ? "" : value))}
+            >
+              {label}
+            </Button>
+          ))}
           {/* 渠道筛选 */}
           <Select value={filterSource || "__all__"} onValueChange={(v) => { if (v) setFilterSource(v === "__all__" ? "" : v); }}>
             <SelectTrigger className="h-8 text-xs w-auto min-w-[88px] gap-1">
