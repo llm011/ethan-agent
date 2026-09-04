@@ -39,10 +39,15 @@ def _strip_marked_tool_blocks(content: str) -> str:
     """把 <tool_call>/<tool_use> 包裹的工具调用片段从正文中剥掉，只留真正文。
 
     无论能否解析成工具调用，都先移除，防止序列化后的工具调用露出为可见正文。
+    流被截断时闭合标签可能永远没到：未闭合的开头标签连带其后内容一并去掉。
     """
     if not content:
         return content
-    return _MARKED_TOOL_RE.sub("", content)
+    stripped = _MARKED_TOOL_RE.sub("", content)
+    m = re.search(r"<\s*(?:tool_call|tool_use)\b[^>]*>[\s\S]*$", stripped, re.IGNORECASE)
+    if m:
+        stripped = stripped[: m.start()]
+    return stripped
 
 
 def _buf_has_unclosed_marked_tool(content: str) -> bool:
@@ -77,7 +82,11 @@ def parse_marked_text_tool_calls(content: str) -> list[ToolCall]:
         if not isinstance(obj, dict):
             continue
         name = obj.get("name") or obj.get("tool_name")
-        arguments = obj.get("arguments") or obj.get("input")
+        # 注意用 None 判断而不是 or：无参工具的合法 arguments={} 是 falsy，
+        # 用 or 会把它误当成缺失、整条调用被丢弃
+        arguments = obj.get("arguments")
+        if arguments is None:
+            arguments = obj.get("input")
         if isinstance(obj.get("function"), dict):
             fn = obj["function"]
             name = name or fn.get("name")
@@ -269,7 +278,7 @@ class OpenAICompatProvider(BaseProvider):
                 content_text = ""
             else:
                 marked = parse_marked_text_tool_calls(content_text)
-                if marked:
+                if marked or _MARKED_TOOL_RE.search(content_text):
                     tool_calls = marked
                     content_text = _strip_marked_tool_blocks(content_text)
 
@@ -629,8 +638,10 @@ class OpenAICompatProvider(BaseProvider):
             if delta.content:
                 _produced_any = True
                 content_buf += delta.content
-                # 标记型工具调用（<tool_call>/<tool_use>）分片未闭合 → 继续缓冲，不 yield
-                if _buf_has_unclosed_marked_tool(content_buf):
+                # 标记型工具调用（<tool_call>/<tool_use>）：未闭合 → 持续缓冲；
+                # 已闭合 → 同样缓冲到 finish 统一解析。否则闭合标签到达的瞬间
+                # opens==closes，整块会被下面的 else 当正文 yield 漏给用户。
+                if _buf_has_unclosed_marked_tool(content_buf) or _MARKED_TOOL_RE.search(content_buf):
                     pass
                 # DSML 标记开头特征：一旦检测到就持续缓冲直到流结束或 finish
                 elif self._contains_dsml(content_buf):
@@ -671,7 +682,9 @@ class OpenAICompatProvider(BaseProvider):
                 # 其次 DSML
                 if content_buf:
                     marked_calls = parse_marked_text_tool_calls(content_buf)
-                    if marked_calls:
+                    if marked_calls or _MARKED_TOOL_RE.search(content_buf):
+                        # 哪怕一个块都解析不出来（如截断的半截块）也要剥，
+                        # 否则包裹符里的内容会当正文漏给用户
                         pre_text = _strip_marked_tool_blocks(content_buf).strip()
                         if pre_text:
                             yield StreamChunk(content=pre_text)
@@ -715,5 +728,7 @@ class OpenAICompatProvider(BaseProvider):
         # 中途断连 salvage：flush 剩余缓冲并标记 truncated，上层 agent 据此自动续接
         if _salvaged:
             if content_buf:
-                yield StreamChunk(content=content_buf)
+                pre = _strip_marked_tool_blocks(content_buf)
+                if pre.strip():
+                    yield StreamChunk(content=pre)
             yield StreamChunk(content="", is_final=True, truncated=True)
