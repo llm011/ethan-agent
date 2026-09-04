@@ -74,7 +74,7 @@ export async function fetchSessions(limit = 50, offset = 0, q?: string, source?:
 
   // 离线时直接返回缓存
   if (isOffline()) {
-    const cacheKey = makeListKey({ limit, offset, q, source, mode, hideHeartbeat, hideScheduled, titlePrefixes });
+    const cacheKey = makeListKey({ limit, offset, q, source, mode, hideHeartbeat, hideScheduled, titlePrefixes, hasImages });
     const cached = await readSessionList(cacheKey);
     if (cached) return cached;
     throw new Error("离线模式：无可用缓存");
@@ -83,7 +83,7 @@ export async function fetchSessions(limit = 50, offset = 0, q?: string, source?:
   const res = await fetch(`${API_URL}/sessions?${params}`, { headers: headers() });
   if (!res.ok) {
     // 网络失败时降级到缓存，与 fetchSession 行为一致
-    const cacheKey = makeListKey({ limit, offset, q, source, mode, hideHeartbeat, hideScheduled, titlePrefixes });
+    const cacheKey = makeListKey({ limit, offset, q, source, mode, hideHeartbeat, hideScheduled, titlePrefixes, hasImages });
     const cached = await readSessionList(cacheKey);
     if (cached) return cached;
     throw new Error("Failed to fetch sessions");
@@ -92,7 +92,7 @@ export async function fetchSessions(limit = 50, offset = 0, q?: string, source?:
   const sessions = data.sessions as SessionInfo[];
   (sessions as SessionInfo[] & { total?: number }).total = data.total ?? undefined;
   // 写入缓存（fire-and-forget，不阻塞返回）
-  const cacheKey = makeListKey({ limit, offset, q, source, mode, hideHeartbeat, hideScheduled, titlePrefixes });
+  const cacheKey = makeListKey({ limit, offset, q, source, mode, hideHeartbeat, hideScheduled, titlePrefixes, hasImages });
   writeSessionList(cacheKey, sessions).catch(() => {});
   return sessions;
 }
