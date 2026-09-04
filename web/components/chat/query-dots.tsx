@@ -98,7 +98,7 @@ export function QueryDots({ messages, scrollRef }: QueryDotsProps) {
 
       {tooltip && createPortal(
         <div
-          className="fixed z-[9999] w-72 max-h-64 px-2.5 py-1.5 rounded-lg bg-foreground text-background text-xs leading-snug shadow-lg overflow-y-auto break-words whitespace-normal"
+          className="fixed z-[9999] w-[576px] max-h-64 px-2.5 py-1.5 rounded-lg bg-foreground text-background text-xs leading-snug shadow-lg overflow-y-auto break-words whitespace-normal"
           style={{
             top: tooltip.top,
             left: tooltip.left,
