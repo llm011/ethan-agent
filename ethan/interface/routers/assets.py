@@ -46,8 +46,13 @@ async def _verify_token_or_cookie(request: Request) -> str:
 
 
 @router.get("/images/{session_id}/{filename}", dependencies=[Depends(_verify_token_or_cookie)])
-async def get_asset_image(session_id: str, filename: str):
-    """读取用户上传的图片文件。"""
+async def get_asset_image(session_id: str, filename: str, fmt: str | None = None, w: int | None = None):
+    """读取用户上传的图片文件。
+
+    fmt=rgb565：返回按宽 w（默认 240）缩放的 RGB565 小端裸像素，
+    响应头 X-Img-Width / X-Img-Height 给出尺寸。供 ESP32 等
+    无图片解码器的低内存设备直接渲染，避免传输和解码原图。
+    """
     # 防目录穿越
     if "/" in filename or "\\" in filename or ".." in session_id or ".." in filename:
         raise HTTPException(status_code=400, detail="invalid path")
@@ -60,4 +65,26 @@ async def get_asset_image(session_id: str, filename: str):
     path = image_file_path(f"{session_id}/{filename}")
     if not path.is_file():
         raise HTTPException(status_code=404, detail="not found")
+
+    if fmt == "rgb565":
+        if p.suffix.lower() == ".svg":
+            raise HTTPException(status_code=400, detail="svg not supported for rgb565")
+        import asyncio
+
+        from ethan.core.assets import build_rgb565_thumbnail
+
+        built = await asyncio.to_thread(build_rgb565_thumbnail, path, w or 240)
+        if built is None:
+            raise HTTPException(status_code=500, detail="thumbnail generation failed")
+        cache, tw, th = built
+        return FileResponse(
+            cache,
+            media_type="application/octet-stream",
+            headers={
+                "X-Img-Width": str(tw),
+                "X-Img-Height": str(th),
+                "Cache-Control": "public, max-age=86400",
+            },
+        )
+
     return FileResponse(path, headers={"Cache-Control": "public, max-age=31536000, immutable"})
