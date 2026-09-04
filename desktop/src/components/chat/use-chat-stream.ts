@@ -78,9 +78,13 @@ export async function consumeStream(
   const flushAssistant = (extra?: Partial<Message>) => {
     const msg = buildMsg(extra);
     setMessages(prev => {
-      if (!prev.length || prev[prev.length - 1]?.role !== "assistant") return prev;
+      if (!prev.length) return [...prev, msg];
       const next = [...prev];
-      next[next.length - 1] = msg;
+      if (next[next.length - 1]?.role === "assistant") {
+        next[next.length - 1] = msg;
+      } else {
+        next.push(msg);
+      }
       return next;
     });
   };

@@ -2,7 +2,7 @@
 
 import type { StreamChunk } from "@/lib/api";
 import type { ToolStep } from "@ethan/shared/components/tool-timeline";
-import type { Message, Usage, CardData } from "@ethan/shared/chat/types";
+import type { Message, Usage } from "@ethan/shared/chat/types";
 import type { ConsentRequest } from "@ethan/shared/components/consent-dialog";
 import type { AskUserRequest } from "@ethan/shared/chat/ask-user-card";
 import type { WaitForUserRequest } from "@ethan/shared/chat/wait-for-user-card";
@@ -78,9 +78,13 @@ export async function consumeStream(
   const flushAssistant = (extra?: Partial<Message>) => {
     const msg = buildMsg(extra);
     setMessages(prev => {
-      if (!prev.length || prev[prev.length - 1]?.role !== "assistant") return prev;
+      if (!prev.length) return [...prev, msg];
       const next = [...prev];
-      next[next.length - 1] = msg;
+      if (next[next.length - 1]?.role === "assistant") {
+        next[next.length - 1] = msg;
+      } else {
+        next.push(msg);
+      }
       return next;
     });
   };
@@ -281,7 +285,7 @@ export async function consumeStream(
       if (chunk.cards && !chunk.tool && Array.isArray(chunk.cards)) {
         cardsCollected.push(...chunk.cards);
         cancelScheduledFlush();
-        flushAssistant({ cards: cardsCollected as unknown as CardData[] });
+        flushAssistant({ cards: cardsCollected as unknown as Message["cards"] });
       }
       if (chunk.done && chunk.usage) {
         finalUsage = { input: chunk.usage.input || 0, output: chunk.usage.output || 0, cache: chunk.usage.cache || 0 };
@@ -472,7 +476,7 @@ export async function consumeStream(
         total_ms: totalMs ?? last.total_ms,
         a2ui: a2uiSurfaces.length > 0 ? a2uiSurfaces : undefined,
         mcpApps: mcpAppsCollected.length > 0 ? mcpAppsCollected : undefined,
-        cards: cardsCollected.length > 0 ? cardsCollected as any : undefined,
+        cards: cardsCollected.length > 0 ? cardsCollected as unknown as Message["cards"] : undefined,
         matchedSkills: currentMatchedSkills,
         id: messageId ?? last.id,
         intermediateOutput: intermediateOutput || undefined,
@@ -492,7 +496,7 @@ export async function consumeStream(
       total_ms: totalMs,
       a2ui: a2uiSurfaces.length > 0 ? a2uiSurfaces : undefined,
       mcpApps: mcpAppsCollected.length > 0 ? mcpAppsCollected : undefined,
-      cards: cardsCollected.length > 0 ? cardsCollected as any : undefined,
+      cards: cardsCollected.length > 0 ? cardsCollected as unknown as Message["cards"] : undefined,
       matchedSkills: currentMatchedSkills,
       id: messageId,
       intermediateOutput: intermediateOutput || undefined,
