@@ -194,8 +194,13 @@ def _is_allowed_echo_tail(cmd: str) -> bool:
 #    拼接/写出，不执行 body；sh <<EOF / python <<EOF / tee <<EOF 等一律不剥）；
 # 2. 所有 opener 都能找到终止行（找不到说明 body 边界不明，不剥）；
 # 3. 剥离后剩余的命令段里没有能执行 body 的向量（sh/bash/python/eval/source/
-#    xargs/命令替换等）——防止 `cat > x.sh <<EOF … EOF` + `sh x.sh` 这种
-#    「写脚本再执行」的命令借剥离藏住 body 里的危险内容。
+#    xargs/命令替换等，含 env/nice/nohup 等透传 wrapper，全 token 检查）——
+#    防止 `cat > x.sh <<EOF … EOF` + `sh x.sh` 这种「写脚本再执行」的命令
+#    借剥离藏住 body 里的危险内容；
+# 4. 无引号 tag（<<EOF）的 body 行出现 $( / 反引号即不剥：bash 会对其做命令
+#    替换，body 是可执行内容而非纯数据（带引号的 <<'EOF' body 照常剥）；
+# 5. 同一行每个 opener 前方最近的命令段都必须是 cat 形态（`cat <<A && env sh <<B`
+#    的第二个 opener 由 env sh 消费，不得剥）。
 _HEREDOC_OPENER_RE = re.compile(r"(?<!<)<<(-?)\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\2(?!<)")
 
 # opener 行 `<<` 之前那一段必须长这样：可选 VAR= 赋值、可选 sudo/doas、cat + 任意参数。
@@ -204,12 +209,16 @@ _CAT_HEREDOC_SEG_RE = re.compile(
     r'^\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:(?:sudo|doas)\s+)?cat(?:\s+\S+)*\s*$'
 )
 
-# 会执行脚本/字符串的解释器命令词：出现在剥离后命令段的首位即视为「可执行 body」。
+# 会执行脚本/字符串的解释器命令词：剥离后命令段的任意 token 命中即视为「可执行 body」。
+# 含 env/nice/nohup/timeout 等常见透传 wrapper：真正执行的程序藏在参数位
+# （如 `env sh /tmp/x.sh`），只查首位 token 会被绕过。
 _EXEC_CMD_WORDS = frozenset({
     "sh", "bash", "zsh", "dash", "ksh", "fish",
     "eval", "source", "exec", "xargs",
     "python", "python3", "perl", "ruby", "node", "lua",
     "osascript", "expect", "awk",
+    "env", "nice", "nohup", "timeout", "stdbuf", "command", "builtin",
+    "time", "setsid", "ionice", "strace", "watch",
 })
 
 
@@ -238,7 +247,9 @@ def _has_exec_vector(stripped: str) -> bool:
             tokens.pop(0)
         if not tokens:
             continue
-        if tokens[0].rsplit("/", 1)[-1] in _EXEC_CMD_WORDS:
+        # 任意 token 命中即算（防 `env sh x.sh` 之类 wrapper 藏在非首位）；
+        # 文件名恰好叫 sh 只会误报为放弃剥离、回到全串扫描，安全侧保守可接受。
+        if any(t.rsplit("/", 1)[-1] in _EXEC_CMD_WORDS for t in tokens):
             return True
     return False
 
@@ -253,26 +264,32 @@ def _strip_heredoc_data_body(cmd: str) -> str:
         return cmd
     lines = cmd.split("\n")
     out: list[str] = []
-    pending: list[tuple[str, bool]] = []  # (tag, 是否 <<- 允许前导制表符)
+    pending: list[tuple[str, bool, bool]] = []  # (tag, 是否 <<- 允许前导制表符, tag 是否带引号)
     for line in lines:
         if pending:
-            tag, allow_tabs = pending[0]
+            tag, allow_tabs, quoted = pending[0]
+            # 无引号 tag：bash 会对 body 做 $(…)/反引号命令替换，body 是可执行内容，
+            # 不能从扫描里丢掉——放弃剥离、回到全串扫描。
+            if not quoted and ("$(" in line or "`" in line):
+                return cmd
             probe = line.lstrip("\t") if allow_tabs else line
             if probe.strip() == tag:
                 pending.pop(0)
             # 终止行与正文行一样，一律从扫描文本中丢弃
             continue
-        m = _HEREDOC_OPENER_RE.search(line)
-        if not m:
+        openers = list(_HEREDOC_OPENER_RE.finditer(line))
+        if not openers:
             out.append(line)
             continue
-        pre = line[:m.start()]
-        pre_segs = [s for s in re.split(r'[;&|]', pre) if s.strip()]
-        last = pre_segs[-1] if pre_segs else ""
-        if not _is_cat_heredoc_pre_segment(last):
-            return cmd
-        for om in _HEREDOC_OPENER_RE.finditer(line):
-            pending.append((om.group(3), om.group(1) == "-"))
+        # 每个 opener 前方最近的一个命令段（按 [;&|] 切）都必须是 cat 形态：
+        # `cat <<A && env sh <<B` 的第二个 opener 由 env sh 消费，不得剥。
+        for om in openers:
+            pre_segs = [s for s in re.split(r'[;&|]', line[:om.start()]) if s.strip()]
+            last = pre_segs[-1] if pre_segs else ""
+            if not _is_cat_heredoc_pre_segment(last):
+                return cmd
+        for om in openers:
+            pending.append((om.group(3), om.group(1) == "-", om.group(2) != ""))
         out.append(line)
     if pending:
         return cmd
