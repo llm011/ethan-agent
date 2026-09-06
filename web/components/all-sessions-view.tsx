@@ -6,7 +6,7 @@ import { zhCN } from "date-fns/locale";
 import { SessionInfo, fetchSessions, fetchSession, renameSession, deleteSession, cleanupTrivialSessions, fetchModes, pinSession, unpinSession, type ModeEntry } from "@/lib/api";
 import { hasUnread } from "@ethan/shared/lib/unread";
 import { UnreadDot } from "@ethan/shared/components/unread-dot";
-import { Loader2, Search, Calendar, MessageSquare, ChevronLeft, ChevronRight, Pencil, Trash2, Check, X, Eraser, Pin, PinOff } from "lucide-react";
+import { Loader2, Search, Calendar, MessageSquare, ChevronLeft, ChevronRight, Pencil, Trash2, Check, X, Eraser, Pin, PinOff, CircleCheck } from "lucide-react";
 import { Input } from "@ethan/shared/ui/input";
 import { Button } from "@ethan/shared/ui/button";
 import { Badge } from "@ethan/shared/ui/badge";
@@ -123,6 +123,25 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
 
   const handleDelete = (id: string) => {
     setConfirmState({ open: true, id });
+  };
+
+  // 完成/取消完成：在标题前加/去 ✅ 前缀（复用 rename 接口改 title），与侧边栏行为一致
+  const handleToggleDone = async (id: string, title: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    // 兜底：标题恰好只剩 "✅" 时去掉前缀会变空串（后端 400），回退为默认标题
+    const newTitle = title.startsWith("✅")
+      ? title.replace(/^✅\s*/, "") || "新对话"
+      : `✅ ${title}`;
+    try {
+      await renameSession(id, newTitle);
+    } catch {
+      alert("操作失败，请稍后重试");
+      return;
+    }
+    setSessions((prev) =>
+      prev.map((s) => (s.id === id ? { ...s, title: newTitle } : s))
+    );
+    window.dispatchEvent(new CustomEvent("sessions:refresh"));
   };
 
   const handleTogglePin = async (id: string, e: React.MouseEvent) => {
@@ -368,6 +387,13 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
                         {session.pinned_at && session.pinned_at > 0
                           ? <PinOff className="h-3.5 w-3.5" />
                           : <Pin className="h-3.5 w-3.5" />}
+                      </button>
+                      <button
+                        onClick={e => handleToggleDone(session.id, session.title, e)}
+                        className="p-1.5 hover:text-primary hover:bg-primary/10 text-muted-foreground rounded-lg"
+                        title={session.title.startsWith("✅") ? "取消完成标记（仅标识标题，会话仍可继续聊）" : "标记完成（仅标识标题，会话仍可继续聊）"}
+                      >
+                        <CircleCheck className={`h-3.5 w-3.5 ${session.title.startsWith("✅") ? "text-primary" : ""}`} />
                       </button>
                       <button
                         onClick={e => { e.stopPropagation(); setEditingTitle(session.title); setEditingId(session.id); }}
