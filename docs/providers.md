@@ -277,6 +277,25 @@ gemini-*              → OpenAICompatProvider（需配置 base_url）
 
 实际路由逻辑：先在 `config.models` 中查找 `model_id`（支持 alias），找到后按其 `provider` 字段选 Provider；找不到时按名称前缀猜测。
 
+### provider/id 复合键与带 "/" 的模型 id
+
+`provider/model` 复合格式（如 `trae/glm-5.3-flash`）按**第一个 "/"** 拆分：前面是 provider 名，后面整段都是模型 id。模型 id 本身允许再含 "/"——聚合网关（new-api 等）常见的 `vendor/model` 命名（如 `trae/glm-5.3-flash`）直接把完整 id 注册进 `models` 即可原样发给上游：
+
+```yaml
+providers:
+  trae:
+    api_key: "sk-xxx"
+    base_url: "https://gw.example.com/v1"
+
+models:
+  - id: trae/glm-5.3-flash   # id 完整含 "/"，上游收到的 model 就是这个全名
+    provider: trae            # 本地命名空间，不会发给上游
+```
+
+注意：
+- provider 名**不能**含 "/"（会与复合格式冲突），设置页和 CLI 都会校验。
+- id 带 "/" 的模型在 UI 选中键是 `provider/id` 再拼一层（如 `trae/trae/glm-5.3-flash`），命令行指定时同理。
+
 ### 配置示例
 
 ```yaml

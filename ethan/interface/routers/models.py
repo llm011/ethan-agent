@@ -19,6 +19,8 @@ class ModelEntry(BaseModel):
     description: str = ""
     alias: list[str] = []
     vision: bool = True  # 是否支持图片输入
+    # None=更新时保留 entry 现有值、新增时取默认空；显式传列表则覆盖
+    fallback_providers: list[str] | None = None
 
 
 @router.get("/models", dependencies=[Depends(verify_token)])
@@ -66,23 +68,26 @@ async def add_models_batch(req: BatchAddRequest):
     return {"ok": True, "added": added, "skipped": skipped}
 
 
-@router.put("/models/{provider}/{model_id}", dependencies=[Depends(verify_token)])
-async def update_model(provider: str, model_id: str, req: ModelEntry):
+# 更新/删除单个模型不走 /models/{provider}/{model_id} 路径参数：model id 本身可能
+# 含 "/"（如聚合网关的 "trae/glm-5.3-flash"），路径段匹配不到（%2F 会被提前解码）。
+# 复合键约定：按第一个 "/" 拆，前面是 provider，后面整段（可再含 "/"）都是 id。
+@router.put("/models", dependencies=[Depends(verify_token)])
+async def update_model(req: ModelEntry):
     config = get_config()
     for i, m in enumerate(config.models):
-        if m.id == model_id and m.provider == provider:
-            config.models[i] = _to_config_model(req)
+        if m.id == req.id and m.provider == req.provider:
+            config.models[i] = _to_config_model(req, existing=m)
             save_config(config)
             reload_config()
             return {"ok": True}
     return {"ok": False, "error": "model not found"}
 
 
-@router.delete("/models/{provider}/{model_id}", dependencies=[Depends(verify_token)])
-async def delete_model(provider: str, model_id: str):
+@router.delete("/models", dependencies=[Depends(verify_token)])
+async def delete_model(provider: str, id: str):
     config = get_config()
     before = len(config.models)
-    config.models = [m for m in config.models if not (m.id == model_id and m.provider == provider)]
+    config.models = [m for m in config.models if not (m.id == id and m.provider == provider)]
     if len(config.models) == before:
         return {"ok": False, "error": "model not found"}
     save_config(config)
@@ -213,6 +218,12 @@ async def discover_models(req: DiscoverRequest):
     return {"ok": True, "models": discovered}
 
 
-def _to_config_model(req: ModelEntry):
+def _to_config_model(req: ModelEntry, existing=None):
     from ethan.core.config import ModelEntry as CfgModelEntry
-    return CfgModelEntry(id=req.id, provider=req.provider, description=req.description, alias=req.alias)
+    # fallback_providers 未显式传时保留被更新 entry 的现有值，避免走 API 改
+    # 描述/vision 就把兜底链抹掉；新增时默认空列表
+    fallback = req.fallback_providers
+    if fallback is None:
+        fallback = list(existing.fallback_providers) if existing is not None else []
+    return CfgModelEntry(id=req.id, provider=req.provider, description=req.description,
+                         alias=req.alias, vision=req.vision, fallback_providers=fallback)

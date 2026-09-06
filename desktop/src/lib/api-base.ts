@@ -125,7 +125,9 @@ export async function addModel(m: ModelEntry): Promise<{ ok: boolean; error?: st
 }
 
 export async function deleteModel(provider: string, modelId: string): Promise<{ ok: boolean; error?: string }> {
-  const res = await fetch(`${getApiUrl()}/models/${encodeURIComponent(provider)}/${encodeURIComponent(modelId)}`, {
+  // model id 可能含 "/"（如 trae/glm-5.3-flash），走 query 参数而不是路径段
+  const params = new URLSearchParams({ provider, id: modelId });
+  const res = await fetch(`${getApiUrl()}/models?${params.toString()}`, {
     method: "DELETE", headers: headers(),
   });
   const data = await res.json();

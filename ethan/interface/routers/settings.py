@@ -288,6 +288,8 @@ async def update_provider_settings(req: dict[str, dict]):
     config = get_config()
     for k, v in req.items():
         if k not in config.providers:
+            if "/" in k:
+                raise HTTPException(400, "Provider 名称不能包含 '/'（会与 provider/model 格式冲突）")
             config.providers[k] = ProviderConfig()
         if "api_key" in v and v["api_key"] is not None:
             config.providers[k].api_key = v["api_key"]
