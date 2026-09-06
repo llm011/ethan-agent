@@ -554,6 +554,7 @@ class ChatViewModel(
                             args = event.args ?: "",
                             state = event.state ?: "start",
                             durationMs = event.durationMs,
+                            genMs = event.genMs,
                             resultPreview = event.resultPreview,
                             resultDetail = event.resultDetail,
                             thought = event.thought,

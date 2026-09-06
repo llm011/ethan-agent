@@ -84,6 +84,8 @@ class StreamCollector:
         return text
 
     def _handle_tool_event(self, item: ToolEvent) -> None:
+        # 计时/配对 key：tool_call_id 唯一，同名工具并发时不串（空 id 兜底回退 tool_name）。
+        key = item.tool_call_id or item.tool_name
         if item.state == "start":
             # 工具开始前累积的文本：作为这个工具的 thought（前端可折叠展示），不污染全局
             pre_thought = ""
@@ -93,7 +95,7 @@ class StreamCollector:
             # 第一次工具调用开始 = 用户看到第一个东西，记为 TTFB 起点
             if self._first_visible_at is None:
                 self._first_visible_at = time.time()
-            self._times[item.tool_name] = time.time()
+            self._times[key] = time.time()
             self.tool_steps.append({
                 "tool": item.tool_name,
                 "id": item.tool_call_id or "",
@@ -101,6 +103,7 @@ class StreamCollector:
                 "intent": item.intent or "",
                 "state": "running",
                 "duration_ms": None,
+                "gen_ms": item.gen_ms,
                 "result_preview": "",
                 "result_detail": "",
                 "thought": pre_thought,
@@ -113,7 +116,7 @@ class StreamCollector:
             self._pending_injected.clear()
         else:  # done / error
             duration_ms = int(
-                (time.time() - self._times.pop(item.tool_name, time.time())) * 1000
+                (time.time() - self._times.pop(key, time.time())) * 1000
             )
             if getattr(item, "ui", None):
                 self.a2ui.extend(item.ui)
@@ -121,23 +124,34 @@ class StreamCollector:
                 self.mcp_apps.append(item.mcp_app)
             if getattr(item, "cards", None):
                 self.cards.extend(item.cards)
-            # 找最近一个同名 running step 关闭
-            for step in reversed(self.tool_steps):
-                if step["tool"] == item.tool_name and step["state"] == "running":
-                    step["state"] = item.state
-                    step["duration_ms"] = duration_ms
-                    step["result_preview"] = item.result_preview or ""
-                    step["result_detail"] = item.result_detail or ""
-                    step["sub_steps"] = item.sub_steps or []
-                    # 结构化卡片（如 web_search 结果）挂到该 step，供前端时间线直接渲染
-                    if getattr(item, "cards", None):
-                        step["cards"] = item.cards
-                    # done/error 时补全 entity_type/entity_id（start 时已设，但兜底）
-                    if not step.get("entity_type") and item.entity_type:
-                        step["entity_type"] = item.entity_type
-                    if not step.get("entity_id") and item.entity_id:
-                        step["entity_id"] = item.entity_id
-                    break
+            # 找对应的 running step 关闭：优先按 tool_call_id 精确匹配（同名并发不串），
+            # 找不到（如旧事件无 id）回退旧的「最近一个同名」匹配。
+            matched = None
+            if item.tool_call_id:
+                for step in reversed(self.tool_steps):
+                    if step["id"] == item.tool_call_id and step["state"] == "running":
+                        matched = step
+                        break
+            if matched is None:
+                for step in reversed(self.tool_steps):
+                    if step["tool"] == item.tool_name and step["state"] == "running":
+                        matched = step
+                        break
+            if matched is not None:
+                step = matched
+                step["state"] = item.state
+                step["duration_ms"] = duration_ms
+                step["result_preview"] = item.result_preview or ""
+                step["result_detail"] = item.result_detail or ""
+                step["sub_steps"] = item.sub_steps or []
+                # 结构化卡片（如 web_search 结果）挂到该 step，供前端时间线直接渲染
+                if getattr(item, "cards", None):
+                    step["cards"] = item.cards
+                # done/error 时补全 entity_type/entity_id（start 时已设，但兜底）
+                if not step.get("entity_type") and item.entity_type:
+                    step["entity_type"] = item.entity_type
+                if not step.get("entity_id") and item.entity_id:
+                    step["entity_id"] = item.entity_id
 
     def flush_pending_injected(self) -> None:
         """流结束时兜底：若仍有未挂载的补充信息（inject 之后模型只回文本、没再调工具，

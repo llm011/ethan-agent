@@ -226,28 +226,42 @@ async def _run_heartbeat_md() -> None:
             if isinstance(item, ThinkingEvent):
                 continue  # 思考内容不计入 heartbeat 正文
             if isinstance(item, ToolEvent):
+                # 计时/配对 key 用 tool_call_id（同名工具并发时不串），空 id 兜底 tool_name
+                _hb_key = item.tool_call_id or item.tool_name
                 if item.state == "start":
                     if full:
                         thought += ("\n\n" if thought else "") + full
                         full = ""
-                    tool_start_times[item.tool_name] = time.time()
+                    tool_start_times[_hb_key] = time.time()
                     collected_tool_steps.append({
                         "tool": item.tool_name,
+                        "id": item.tool_call_id or "",
                         "args": item.args_summary,
                         "state": "running",
                         "duration_ms": None,
+                        "gen_ms": item.gen_ms,
                         "result_preview": "",
                     })
                 else:
                     duration_ms = int(
-                        (time.time() - tool_start_times.pop(item.tool_name, time.time())) * 1000
+                        (time.time() - tool_start_times.pop(_hb_key, time.time())) * 1000
                     )
-                    for step in reversed(collected_tool_steps):
-                        if step["tool"] == item.tool_name and step["state"] == "running":
-                            step["state"] = item.state
-                            step["duration_ms"] = duration_ms
-                            step["result_preview"] = item.result_preview or ""
-                            break
+                    # 优先按 tool_call_id 精确配对，找不到（旧事件无 id）回退按名匹配
+                    _matched = None
+                    if item.tool_call_id:
+                        for step in reversed(collected_tool_steps):
+                            if step.get("id") == item.tool_call_id and step["state"] == "running":
+                                _matched = step
+                                break
+                    if _matched is None:
+                        for step in reversed(collected_tool_steps):
+                            if step["tool"] == item.tool_name and step["state"] == "running":
+                                _matched = step
+                                break
+                    if _matched is not None:
+                        _matched["state"] = item.state
+                        _matched["duration_ms"] = duration_ms
+                        _matched["result_preview"] = item.result_preview or ""
             elif isinstance(item, str):
                 full += item
 

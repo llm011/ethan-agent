@@ -310,6 +310,10 @@ private fun ToolStep.asTerminal(): ToolStep {
     return if (newState != state || newSubs !== subSteps) copy(state = newState, subSteps = newSubs) else this
 }
 
+/** 对齐 web formatDuration：<1000ms 显示 "Nms"，否则显示一位小数秒（如 1.2s）。 */
+private fun formatMs(ms: Long): String =
+    if (ms < 1000) "${ms}ms" else String.format("%.1fs", ms / 1000.0)
+
 @Composable
 private fun ToolStepRow(step: ToolStep, indent: Int) {
     val isDone = step.state == "done" || step.state == "completed"
@@ -366,14 +370,26 @@ private fun ToolStepRow(step: ToolStep, indent: Int) {
 
             Spacer(Modifier.weight(1f))
 
-            // 耗时
-            if (step.durationMs != null) {
-                Text(
-                    "${step.durationMs}ms",
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                )
+            // 双耗时：✨模型生成耗时（start 即有，running 态也显示）+ 🕐工具执行耗时（done 后显示）
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                val genMs = step.genMs
+                if (genMs != null) {
+                    Text(
+                        "✨${formatMs(genMs)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    )
+                }
+                val durationMs = step.durationMs
+                if (durationMs != null) {
+                    Text(
+                        "🕐${formatMs(durationMs)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    )
+                }
             }
             Spacer(Modifier.width(4.dp))
             // 右侧状态图标

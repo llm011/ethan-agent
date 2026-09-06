@@ -226,6 +226,7 @@ export async function consumeStream(
           entity_type: chunk.entity_type || undefined,
           entity_id: chunk.entity_id || undefined,
           injected: chunk.injected || undefined,
+          gen_ms: chunk.gen_ms ?? undefined,
         });
         cancelScheduledFlush();
         flushAssistant();
@@ -253,6 +254,7 @@ export async function consumeStream(
             ...currentToolSteps[matchedIdx],
             state: chunk.state as "done" | "error",
             duration_ms: chunk.duration_ms,
+            gen_ms: chunk.gen_ms ?? undefined,
             result_preview: chunk.result_preview,
             result_detail: chunk.result_detail,
             cards: (chunk.cards as ToolStep["cards"]) || currentToolSteps[matchedIdx].cards,
@@ -413,6 +415,7 @@ export async function consumeStream(
                         ...updated[idx],
                         state: chunk.state as "running" | "done" | "error",
                         duration_ms: chunk.duration_ms ?? updated[idx].duration_ms,
+                        gen_ms: chunk.gen_ms ?? updated[idx].gen_ms,
                         result_preview: chunk.result_preview ?? updated[idx].result_preview,
                         result_detail: chunk.result_detail ?? updated[idx].result_detail,
                       };

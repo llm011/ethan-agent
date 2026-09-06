@@ -405,16 +405,23 @@ async def _run_generation(
                             "entity_type": item.entity_type or "",
                             "entity_id": item.entity_id or "",
                             "injected": step.get("injected", []),
+                            "gen_ms": item.gen_ms,
                         }
                     )
                 else:
-                    step = collector.tool_steps[-1] if collector.tool_steps else {}
+                    # 按 tool_call_id 找对应 step 取时长：tool_steps[-1] 在同名工具
+                    # 并发乱序完成时会把别人的 duration 带给错误的工具。
+                    step = next(
+                        (s for s in reversed(collector.tool_steps) if s.get("id") == item.tool_call_id),
+                        collector.tool_steps[-1] if collector.tool_steps else {},
+                    )
                     evt = {
                         "tool": item.tool_name,
                         "args": item.args_summary,
                         "state": item.state,
                         "id": item.tool_call_id,
                         "duration_ms": step.get("duration_ms"),
+                        "gen_ms": step.get("gen_ms"),
                         "result_preview": item.result_preview or "",
                         "result_detail": item.result_detail or "",
                         "sub_steps": item.sub_steps or [],
