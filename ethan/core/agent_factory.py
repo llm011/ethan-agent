@@ -220,6 +220,8 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
     registry.register(SkillReadTool())
     registry.register(SkillListTool())
     registry.register(DelegateCodingTool(user_id=user_id))
+    from ethan.tools.builtin.task_fanout import TaskFanoutTool
+    registry.register(TaskFanoutTool(user_id=user_id))
     registry.register(ConfigGetTool())
     registry.register(ConfigSetTool())
     registry.register(HeartbeatAddTool())
