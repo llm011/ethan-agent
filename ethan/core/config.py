@@ -290,7 +290,8 @@ class Config(BaseModel):
             if 0 <= idx < len(self.models):
                 return self.models[idx]
 
-        # 格式支持: "my-provider/gemini-1.5"
+        # 复合格式 "provider/id"：按第一个 "/" 拆分，前面是 provider 名，后面整段都是
+        # model id（id 本身允许再含 "/"，如聚合网关的 "trae/glm-5.3-flash"）。
         target_provider = None
         target_model = model_id
         if "/" in model_id:

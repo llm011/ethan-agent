@@ -71,6 +71,9 @@ def set_provider(
     也可用 --base-url / --type / --models 显式覆盖。
     """
     config = get_config()
+    if "/" in key:
+        console.print("[red]Provider 名称不能包含 '/'（会与 provider/model 格式冲突）。[/red]")
+        raise typer.Exit(1)
     preset = get_preset(key)
 
     if key not in config.providers:

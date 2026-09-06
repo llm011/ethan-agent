@@ -66,11 +66,14 @@ async def add_models_batch(req: BatchAddRequest):
     return {"ok": True, "added": added, "skipped": skipped}
 
 
-@router.put("/models/{provider}/{model_id}", dependencies=[Depends(verify_token)])
-async def update_model(provider: str, model_id: str, req: ModelEntry):
+# 更新/删除单个模型不走 /models/{provider}/{model_id} 路径参数：model id 本身可能
+# 含 "/"（如聚合网关的 "trae/glm-5.3-flash"），路径段匹配不到（%2F 会被提前解码）。
+# 复合键约定：按第一个 "/" 拆，前面是 provider，后面整段（可再含 "/"）都是 id。
+@router.put("/models", dependencies=[Depends(verify_token)])
+async def update_model(req: ModelEntry):
     config = get_config()
     for i, m in enumerate(config.models):
-        if m.id == model_id and m.provider == provider:
+        if m.id == req.id and m.provider == req.provider:
             config.models[i] = _to_config_model(req)
             save_config(config)
             reload_config()
@@ -78,11 +81,11 @@ async def update_model(provider: str, model_id: str, req: ModelEntry):
     return {"ok": False, "error": "model not found"}
 
 
-@router.delete("/models/{provider}/{model_id}", dependencies=[Depends(verify_token)])
-async def delete_model(provider: str, model_id: str):
+@router.delete("/models", dependencies=[Depends(verify_token)])
+async def delete_model(provider: str, id: str):
     config = get_config()
     before = len(config.models)
-    config.models = [m for m in config.models if not (m.id == model_id and m.provider == provider)]
+    config.models = [m for m in config.models if not (m.id == id and m.provider == provider)]
     if len(config.models) == before:
         return {"ok": False, "error": "model not found"}
     save_config(config)
@@ -215,4 +218,5 @@ async def discover_models(req: DiscoverRequest):
 
 def _to_config_model(req: ModelEntry):
     from ethan.core.config import ModelEntry as CfgModelEntry
-    return CfgModelEntry(id=req.id, provider=req.provider, description=req.description, alias=req.alias)
+    return CfgModelEntry(id=req.id, provider=req.provider, description=req.description,
+                         alias=req.alias, vision=req.vision)
