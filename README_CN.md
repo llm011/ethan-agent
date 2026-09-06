@@ -728,7 +728,7 @@ EOF
 - [x] heartbeat.md：自然语言定义周期任务，系统自动执行
 
 **渠道与 API**
-- [x] Web UI（Next.js）：对话时间轴、记忆管理、技能、定时、知识库、设置
+- [x] Web UI（Next.js）：对话时间轴（工具行并排展示模型生成耗时 + 工具执行耗时）、记忆管理、技能、定时、知识库、设置
 - [x] Android App（Kotlin/Compose）：移动端客户端，聊天 SSE、会话、记忆、设置等
 - [x] 飞书 WebSocket（无需公网 IP）
 - [x] OpenAI 兼容 Completions API（`/v1/chat/completions`）+ API Key 管理

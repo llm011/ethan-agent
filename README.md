@@ -639,7 +639,7 @@ Environment variables in `.env` override config values (useful for secrets).
 **Channels & API**
 - [x] Web UI (Next.js): chat timeline, memory, skills, schedule, knowledge, settings
 - [x] Android App (Kotlin/Compose): mobile client with chat SSE, sessions, memory, settings
-- [x] Tool call timeline (collapsible, with icons + duration)
+- [x] Tool call timeline (collapsible, with icons + model-generation time + execution duration)
 - [x] Feishu/Lark WebSocket (no public IP required)
 - [x] OpenAI-compatible Completions API (`/v1/chat/completions`) + API key management
 - [x] Docker deployment + macOS launchd auto-start

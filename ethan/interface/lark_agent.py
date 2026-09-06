@@ -438,13 +438,17 @@ async def _handle_agent_message(
                 continue
             if isinstance(chunk, ToolEvent):
                 if chunk.state == "start":
-                    lark_tool_start_times[chunk.tool_name] = _lark_time.time()
+                    # 计时/配对 key 用 tool_call_id（同名工具并发时不串），空 id 兜底 tool_name
+                    _lark_key = chunk.tool_call_id or chunk.tool_name
+                    lark_tool_start_times[_lark_key] = _lark_time.time()
                     collected_tool_steps.append({
                         "tool": chunk.tool_name,
+                        "id": chunk.tool_call_id or "",
                         "args": chunk.args_summary,
                         "intent": chunk.intent or "",
                         "state": "running",
                         "duration_ms": None,
+                        "gen_ms": chunk.gen_ms,
                         "result_preview": "",
                     })
                     # 工具开始：标记本条消息已用工具，并丢弃此前累积的 pending 文字。
@@ -496,16 +500,27 @@ async def _handle_agent_message(
                     tool_text = (tool_text.rstrip() + "\n---\n" + tool_name_line + "\n") if tool_text else tool_name_line + "\n"
                     await _update_tool_msg()
                 else:  # done / error
+                    _lark_key = chunk.tool_call_id or chunk.tool_name
                     duration_ms = int(
-                        (_lark_time.time() - lark_tool_start_times.pop(chunk.tool_name, _lark_time.time())) * 1000
+                        (_lark_time.time() - lark_tool_start_times.pop(_lark_key, _lark_time.time())) * 1000
                     )
-                    for step in reversed(collected_tool_steps):
-                        if step["tool"] == chunk.tool_name and step["state"] == "running":
-                            step["state"] = chunk.state
-                            step["duration_ms"] = duration_ms
-                            # result_preview 可能回显含 token 的命令/URL，脱敏后再存/展示
-                            step["result_preview"] = sanitize_result_preview(chunk.result_preview or "")
-                            break
+                    # 优先按 tool_call_id 精确配对，找不到（旧事件无 id）回退按名匹配
+                    _matched = None
+                    if chunk.tool_call_id:
+                        for step in reversed(collected_tool_steps):
+                            if step.get("id") == chunk.tool_call_id and step["state"] == "running":
+                                _matched = step
+                                break
+                    if _matched is None:
+                        for step in reversed(collected_tool_steps):
+                            if step["tool"] == chunk.tool_name and step["state"] == "running":
+                                _matched = step
+                                break
+                    if _matched is not None:
+                        _matched["state"] = chunk.state
+                        _matched["duration_ms"] = duration_ms
+                        # result_preview 可能回显含 token 的命令/URL，脱敏后再存/展示
+                        _matched["result_preview"] = sanitize_result_preview(chunk.result_preview or "")
                     mark = "✓" if chunk.state == "done" else "✗"
                     # 耗时格式：<1s 用 ms，否则保留 1 位小数秒（始终带在结果行，不再只在没有 preview 时显示）
                     dur_str = f"{duration_ms}ms" if duration_ms < 1000 else f"{duration_ms/1000:.1f}s"

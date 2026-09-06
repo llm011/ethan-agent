@@ -1,4 +1,5 @@
 import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -1175,6 +1176,9 @@ class Agent:
             full_content = ""
             final_chunk = None
 
+            # 本轮模型生成计时（含流式传输与异常兜底重试），随 start ToolEvent 下发，
+            # 前端在工具行展示「模型生成」耗时——与工具执行时长（collector 计算）分开。
+            gen_start = time.monotonic()
             try:
                 async for chunk in provider.stream_chat(working, tools=tools, system=sys):
                     if chunk.reasoning:
@@ -1250,6 +1254,8 @@ class Agent:
                 else:
                     raise
 
+            gen_ms = int((time.monotonic() - gen_start) * 1000)
+
             tool_calls = final_chunk.tool_calls if final_chunk else []
             # Fallback：模型把工具调用写成文本时，从 content 解析
             if not tool_calls and full_content:
@@ -1309,6 +1315,9 @@ class Agent:
                 # 带工具重试：让模型可以选择继续调用工具或直接回答
                 retry_content = ""
                 retry_final = None
+                # nudge 重试产出的 tool_calls 会直接进工具执行路径，
+                # gen_start 需重置——否则这批工具的 gen_ms 只含第一轮（失败的）生成时间。
+                gen_start = time.monotonic()
                 async for chunk in self._provider.stream_chat(working, tools=tools, system=system):
                     if chunk.reasoning:
                         yield ThinkingEvent(delta=chunk.reasoning)
@@ -1318,6 +1327,7 @@ class Agent:
                     if chunk.is_final:
                         retry_final = chunk
                         self.usage.add(chunk.usage)
+                gen_ms = int((time.monotonic() - gen_start) * 1000)
                 working.pop()  # 移除 nudge
                 retry_tool_calls = retry_final.tool_calls if retry_final else []
                 if retry_content or retry_tool_calls:
@@ -1587,6 +1597,7 @@ class Agent:
                         args_summary=question,
                         state="start",
                         skill_category=resolve_skill_category(tc.name, tc.arguments),
+                        gen_ms=gen_ms,
                     )
 
                     _ask_provider = AskUserProvider()
@@ -1634,6 +1645,7 @@ class Agent:
                         args_summary=prompt,
                         state="start",
                         skill_category=resolve_skill_category(tc.name, tc.arguments),
+                        gen_ms=gen_ms,
                     )
 
                     _wfu_provider = WaitForUserProvider()
@@ -1719,6 +1731,7 @@ class Agent:
                             entity_type=classify_tool(tc.name),
                             entity_id=extract_entity_id(tc.name, tc.arguments),
                             skill_category=resolve_skill_category(tc.name, tc.arguments),
+                            gen_ms=gen_ms,
                         )
                         continue
                     detail = _format_args(tc.arguments)
@@ -1794,6 +1807,7 @@ class Agent:
                             entity_type=classify_tool(tc.name),
                             entity_id=extract_entity_id(tc.name, tc.arguments),
                             skill_category=resolve_skill_category(tc.name, tc.arguments),
+                            gen_ms=gen_ms,
                         )
                         yield ToolEvent(
                             tool_name=tc.name,
@@ -1830,6 +1844,7 @@ class Agent:
                     entity_type=classify_tool(tc.name),
                     entity_id=extract_entity_id(tc.name, tc.arguments),
                     skill_category=resolve_skill_category(tc.name, tc.arguments),
+                    gen_ms=gen_ms,
                 )
 
             results: list[ToolResult] = await self._executor.execute(allowed_calls) if allowed_calls else []

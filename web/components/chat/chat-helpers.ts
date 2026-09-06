@@ -88,6 +88,7 @@ export function mapDetailMessages(detail: { messages: any[] }): Message[] {
           intent: s.intent,
           state: s.state as "running" | "done" | "error",
           duration_ms: s.duration_ms,
+          gen_ms: s.gen_ms ?? undefined,
           result_preview: s.result_preview,
           result_detail: s.result_detail,
           thought: s.thought,

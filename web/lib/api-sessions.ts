@@ -45,6 +45,7 @@ export interface SessionDetail {
       intent?: string;
       state: string;
       duration_ms?: number | null;
+      gen_ms?: number | null;
       result_preview?: string;
       result_detail?: string;
       thought?: string;

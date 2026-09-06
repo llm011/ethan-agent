@@ -227,7 +227,18 @@ SSE chunk 类型汇总：
 | `done` | 生成结束，附带 `model` / `usage` |
 | `error` | 生成出错，附带错误描述字符串 |
 | `heartbeat` | 任务卡住超 3 分钟无新事件时由 watchdog 发出，附带 `elapsed`（已用秒数），前端渲染等待提示 |
-| `tool_*` | 工具调用进度（见下方工具调用事件） |
+| `tool_*` | 工具调用进度（见下方工具调用事件），tool 事件额外带 `id`（tool_call_id）/ `gen_ms` / `duration_ms` |
+
+### 工具事件计时字段
+
+工具 start/done 事件携带两个独立的耗时指标，前端时间线并排展示两个徽标：
+
+| 字段 | 语义 | 下发时机 |
+|------|------|----------|
+| `gen_ms` | **模型生成耗时**：本轮从调用 `provider.stream_chat` 到拿到 final_chunk（含异常重试与 nudge 重试）的毫秒数，即模型产出这批 tool_calls 花了多久 | start 事件即携带（工具还在执行时就能显示），done/error 原样透传 |
+| `duration_ms` | **工具执行耗时**：ToolEvent start→done 的墙钟毫秒数（不含模型生成、不含 consent/ask_user 等待） | done/error 时才计算下发 |
+
+按 `id`（tool_call_id）配对计时：同名工具并行时不串时长（空 id 的旧事件回退按 `tool_name` 匹配）。
 
 ### 启动方式
 

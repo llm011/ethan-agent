@@ -28,6 +28,8 @@ export interface ToolStep {
   intent?: string;
   state: "running" | "done" | "error" | "cancelled" | "interrupted";
   duration_ms?: number;
+  /** 模型生成这批 tool_calls 的流式耗时（ms）。start 事件即携带，running 态也可显示。 */
+  gen_ms?: number;
   result_preview?: string;
   result_detail?: string;
   thought?: string;
@@ -513,10 +515,32 @@ function StepRow({ step, isLast, highlight, fallbackCards, onCancelTool, session
               详情
             </button>
           )}
-          {step.duration_ms != null && step.state !== "running" && (
-            <span className="ml-auto text-xs text-muted-foreground/60 flex items-center gap-0.5 shrink-0">
-              <Clock className="h-2.5 w-2.5" />
-              {formatDuration(step.duration_ms)}
+          {(step.gen_ms != null || (step.duration_ms != null && step.state !== "running")) && (
+            <span className="ml-auto text-xs text-muted-foreground/60 flex items-center gap-2 shrink-0">
+              {/* ✨ 模型生成耗时：start 事件即下发，running 态也显示 */}
+              {step.gen_ms != null && (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={<span className="flex items-center gap-0.5">
+                      <Sparkles className="h-2.5 w-2.5" />
+                      {formatDuration(step.gen_ms)}
+                    </span>}
+                  />
+                  <TooltipContent side="top">模型生成耗时</TooltipContent>
+                </Tooltip>
+              )}
+              {/* 🕐 工具执行耗时：与原行为一致，done 后才显示 */}
+              {step.duration_ms != null && step.state !== "running" && (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={<span className="flex items-center gap-0.5">
+                      <Clock className="h-2.5 w-2.5" />
+                      {formatDuration(step.duration_ms)}
+                    </span>}
+                  />
+                  <TooltipContent side="top">工具执行耗时</TooltipContent>
+                </Tooltip>
+              )}
             </span>
           )}
           {step.state === "running" && onCancelTool && step.id && (
