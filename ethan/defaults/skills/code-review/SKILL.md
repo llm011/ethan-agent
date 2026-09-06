@@ -17,9 +17,9 @@ description: "对代码变更做审查：识别 bug、安全漏洞、性能问�
 | 模式 | 触发 | 流程文档 | 特点 |
 |------|------|---------|------|
 | 快速模式（默认） | 用户说 review / 审查 / 看看代码，但**没**强调深度 | 本文件下方「硬约束 + 6 步流程」 | 只看 diff，快 |
-| 深度模式 | 用户明确说「深度 review / deep review / thorough review / 严格审查 / 彻底 review / 仔细审查 / deep code review」 | `references/deep-review.md` | 读 diff 外上下文 + 多 agent 扇出 + 对抗式验证，慢 5-10 倍 |
+| 深度模式 | 用户明确说「深度 review / deep review / thorough review / 严格审查 / 彻底 review / 仔细审查 / deep code review」 | `references/deep-review.md` | 读 diff 外上下文 + `task_fanout` 并行扇出 + 对抗式验证，比快速模式慢 2-3 倍（子 agent 并行，不串行累加） |
 
-**不确定 → 走快速模式。** 别自作主张进深度模式（它慢很多，且会读 diff 外文件）。
+**不确定 → 走快速模式。** 别自作主张进深度模式（它更慢，且会读 diff 外文件）。
 
 深度模式与下方硬约束的关系：
 - **继承**：只读不写、跳过噪音文件、评论风格、P0/P1/P2 分级、发评论方式、GitHub 访问策略、评论语言。
