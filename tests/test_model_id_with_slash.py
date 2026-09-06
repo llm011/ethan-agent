@@ -116,6 +116,23 @@ def test_update_slash_id_via_body(client):
     assert entry.vision is False
 
 
+def test_update_preserves_fallback_providers(client):
+    """更新时没传 fallback_providers 不能把已有兜底链抹掉（PR #308 review 回归）。"""
+    cfg = models_router.get_config()
+    cfg.models.append(ModelEntry(id="m1", provider="p1", fallback_providers=["glm", "deepseek"]))
+
+    r = client.put("/models", json={"id": "m1", "provider": "p1", "description": "new desc"})
+    assert r.json()["ok"] is True
+    entry = next(m for m in cfg.models if m.id == "m1")
+    assert entry.description == "new desc"
+    assert entry.fallback_providers == ["glm", "deepseek"]  # 关键：没传就保留
+
+    r2 = client.put("/models", json={"id": "m1", "provider": "p1", "fallback_providers": ["glm"]})
+    assert r2.json()["ok"] is True
+    entry = next(m for m in cfg.models if m.id == "m1")
+    assert entry.fallback_providers == ["glm"]  # 显式传了才覆盖
+
+
 # ── provider 名仍禁止含 "/"（复合键的第一段必须无歧义）──────────────────
 
 

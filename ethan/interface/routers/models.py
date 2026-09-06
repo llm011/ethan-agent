@@ -19,6 +19,8 @@ class ModelEntry(BaseModel):
     description: str = ""
     alias: list[str] = []
     vision: bool = True  # 是否支持图片输入
+    # None=更新时保留 entry 现有值、新增时取默认空；显式传列表则覆盖
+    fallback_providers: list[str] | None = None
 
 
 @router.get("/models", dependencies=[Depends(verify_token)])
@@ -74,7 +76,7 @@ async def update_model(req: ModelEntry):
     config = get_config()
     for i, m in enumerate(config.models):
         if m.id == req.id and m.provider == req.provider:
-            config.models[i] = _to_config_model(req)
+            config.models[i] = _to_config_model(req, existing=m)
             save_config(config)
             reload_config()
             return {"ok": True}
@@ -216,7 +218,12 @@ async def discover_models(req: DiscoverRequest):
     return {"ok": True, "models": discovered}
 
 
-def _to_config_model(req: ModelEntry):
+def _to_config_model(req: ModelEntry, existing=None):
     from ethan.core.config import ModelEntry as CfgModelEntry
+    # fallback_providers 未显式传时保留被更新 entry 的现有值，避免走 API 改
+    # 描述/vision 就把兜底链抹掉；新增时默认空列表
+    fallback = req.fallback_providers
+    if fallback is None:
+        fallback = list(existing.fallback_providers) if existing is not None else []
     return CfgModelEntry(id=req.id, provider=req.provider, description=req.description,
-                         alias=req.alias, vision=req.vision)
+                         alias=req.alias, vision=req.vision, fallback_providers=fallback)
