@@ -8,7 +8,7 @@ from ethan.core.agent import Agent
 from ethan.core.config import get_config
 from ethan.memory.session import Session, SessionStore
 
-from .repl_ui import console
+from .ui import console
 
 
 class ProfileSwitchException(Exception):

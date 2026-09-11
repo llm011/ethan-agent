@@ -85,8 +85,8 @@ Next.js 16 App Router 构建的浏览器界面，通过 FastAPI SSE 与后端通
 ### 桌面端 (`desktop/`)
 基于 Tauri 2 的原生桌面应用，内嵌 Web UI（React 19 + Vite 构建），支持 macOS（aarch64 + x86_64）和 Windows。CI 在打 `v*` tag 时通过 `publish-desktop.yml` 自动构建并发布到 GitHub Release。详见 [interface.md](./interface.md)。
 
-### 飞书 / Lark 集成 (`ethan/interface/lark_events.py`)
-基于 **WebSocket 长连接**方案：`ethan serve` 启动时自动调用 `lark-cli event consume im.message.receive_v1` 建立长连接，无需公网 IP。收到消息后先加 THINKING 表情确认收到，随后流式回复——工具进度走 post 富文本气泡、最终回答走 interactive 卡片（流式编辑）；`ui_card` 工具产出的自定义卡片（对比/排行/统计/时间轴）作为增量额外补发一条 interactive 卡片。`chat_id` → `session_id` 映射持久化到 JSON 文件。实现按职责拆分到同目录子模块：`lark_render`（消息渲染）、`lark_send`（收发 IO）、`lark_stream`（消息处理 + Agent 流式回复），`lark_events` 仅保留事件消费循环与 start/stop 生命周期并 re-export 公共符号。
+### 飞书 / Lark 集成 (`ethan/interface/channels/lark/events.py`)
+基于 **WebSocket 长连接**方案：`ethan serve` 启动时自动调用 `lark-cli event consume im.message.receive_v1` 建立长连接，无需公网 IP。收到消息后先加 THINKING 表情确认收到，随后流式回复——工具进度走 post 富文本气泡、最终回答走 interactive 卡片（流式编辑）；`ui_card` 工具产出的自定义卡片（对比/排行/统计/时间轴）作为增量额外补发一条 interactive 卡片。`chat_id` → `session_id` 映射持久化到 JSON 文件。实现按职责拆分到同目录子模块：`render`（消息渲染）、`send`（收发 IO）、`stream`（消息处理 + Agent 流式回复），`events` 仅保留事件消费循环与 start/stop 生命周期并 re-export 公共符号。
 → 详见 [interface.md](./interface.md)
 
 ### Fast-path Router
@@ -218,9 +218,11 @@ ethan-ai/
 │   │   └── mirror.py         # 委派镜像会话（落 Ethan session + 注册 RunManager run 实时推送）
 │   └── interface/
 │       ├── cli.py            # Typer CLI（含延迟导入优化）
-│       ├── repl.py           # 交互式 REPL（prompt_toolkit）
 │       ├── api.py            # FastAPI HTTP + SSE
-│       ├── lark.py           # 飞书 Bot（WebSocket 长连接）
+│       ├── repl/             # 交互式 REPL（prompt_toolkit）
+│       ├── channels/
+│       │   ├── lark/         # 飞书 Bot（WebSocket 长连接）
+│       │   └── wechat/       # 微信接入
 │       └── commands/         # 子命令（model/provider/session/skill/schedule）
 ├── web/                      # Next.js 16 Web UI
 ├── desktop/                  # Tauri 2 桌面应用（React 19 + Vite + Rust）

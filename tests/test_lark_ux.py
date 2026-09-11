@@ -8,13 +8,13 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from ethan.interface.channel_commands import CommandContext, handle_command
-from ethan.interface.lark_render import (
+from ethan.interface.channels.lark.render import (
     ANSWER_SPLIT_THRESHOLD,
     _card_action_buttons,
     _render_card_content,
     _split_long_text,
 )
-from ethan.interface.lark_state import (
+from ethan.interface.channels.lark.state import (
     _get_answer_entry,
     _lark_answer_map,
     _register_answer,
@@ -138,7 +138,7 @@ def test_answer_map_max_prune():
 
 
 def test_answer_entry_ttl_expiry():
-    import ethan.interface.lark_state as st
+    import ethan.interface.channels.lark.state as st
     _register_answer("om_old", chat_id="c", session_id="s", question="q", question_msg_id="qm")
     # 把时间戳拨到 25h 前
     _lark_answer_map["om_old"]["_ts"] -= st._ANSWER_MAP_TTL + 1
@@ -180,7 +180,7 @@ def test_tasks_command_no_callbacks():
 # ── 卡片回调路由 ──────────────────────────────────────────────────────────────
 
 def test_card_action_copy_uses_registry():
-    from ethan.interface.lark_event_handlers import _handle_card_action
+    from ethan.interface.channels.lark.event_handlers import _handle_card_action
     _register_answer("om_card", chat_id="oc_c", session_id="s", question="q", question_msg_id="qm")
     _update_answer_entry("om_card", answer_text="答案原文")
     event = {
@@ -190,7 +190,7 @@ def test_card_action_copy_uses_registry():
         "chat_id": "oc_c",
         "open_id": "ou_user",
     }
-    with patch("ethan.interface.lark_fetch._send_reply", new=AsyncMock()) as mock_send:
+    with patch("ethan.interface.channels.lark.fetch._send_reply", new=AsyncMock()) as mock_send:
         run_async(_handle_card_action(event))
         mock_send.assert_awaited_once()
         sent = mock_send.call_args[0][1]
@@ -198,7 +198,7 @@ def test_card_action_copy_uses_registry():
 
 
 def test_card_action_copy_missing_entry():
-    from ethan.interface.lark_event_handlers import _handle_card_action
+    from ethan.interface.channels.lark.event_handlers import _handle_card_action
     event = {
         "action_tag": "button",
         "action_value": json.dumps({"cmd": "copy"}),
@@ -206,14 +206,14 @@ def test_card_action_copy_missing_entry():
         "chat_id": "oc_c",
         "open_id": "ou_user",
     }
-    with patch("ethan.interface.lark_fetch._send_reply", new=AsyncMock()) as mock_send:
+    with patch("ethan.interface.channels.lark.fetch._send_reply", new=AsyncMock()) as mock_send:
         run_async(_handle_card_action(event))
         mock_send.assert_awaited_once()
         assert "找不到原答案" in mock_send.call_args[0][1]
 
 
 def test_card_action_regenerate_missing_entry():
-    from ethan.interface.lark_event_handlers import _handle_card_action
+    from ethan.interface.channels.lark.event_handlers import _handle_card_action
     event = {
         "action_tag": "button",
         "action_value": json.dumps({"cmd": "regenerate"}),
@@ -221,7 +221,7 @@ def test_card_action_regenerate_missing_entry():
         "chat_id": "oc_c",
         "open_id": "ou_user",
     }
-    with patch("ethan.interface.lark_fetch._send_reply", new=AsyncMock()) as mock_send:
+    with patch("ethan.interface.channels.lark.fetch._send_reply", new=AsyncMock()) as mock_send:
         run_async(_handle_card_action(event))
         # regenerate 走 create_task，异步执行；等一拍
         run_async(asyncio.sleep(0.05))
@@ -231,13 +231,13 @@ def test_card_action_regenerate_missing_entry():
 # ── reaction 反馈 ─────────────────────────────────────────────────────────────
 
 def test_reaction_feedback_recorded():
-    from ethan.interface.lark_event_handlers import _handle_reaction
+    from ethan.interface.channels.lark.event_handlers import _handle_reaction
     _register_answer("om_card", chat_id="oc_c", session_id="sess_fb", question="q", question_msg_id="qm")
 
     store = AsyncMock()
     store.save_message = AsyncMock(return_value=1)
     with patch("ethan.memory.session.get_session_store", return_value=store), \
-         patch("ethan.interface.lark_typing._send_reaction", new=AsyncMock()) as mock_react:
+         patch("ethan.interface.channels.lark.typing._send_reaction", new=AsyncMock()) as mock_react:
         run_async(_handle_reaction({
             "reaction_type": "THUMBSUP",
             "message_id": "om_card",
@@ -253,8 +253,8 @@ def test_reaction_feedback_recorded():
 
 
 def test_reaction_non_answer_ignored():
-    from ethan.interface.lark_event_handlers import _handle_reaction
-    with patch("ethan.interface.lark_typing._send_reaction", new=AsyncMock()) as mock_react:
+    from ethan.interface.channels.lark.event_handlers import _handle_reaction
+    with patch("ethan.interface.channels.lark.typing._send_reaction", new=AsyncMock()) as mock_react:
         run_async(_handle_reaction({
             "reaction_type": "THUMBSUP",
             "message_id": "om_user_msg",  # 不在登记表
@@ -265,9 +265,9 @@ def test_reaction_non_answer_ignored():
 
 
 def test_reaction_other_emoji_ignored():
-    from ethan.interface.lark_event_handlers import _handle_reaction
+    from ethan.interface.channels.lark.event_handlers import _handle_reaction
     _register_answer("om_card", chat_id="oc_c", session_id="s", question="q", question_msg_id="qm")
-    with patch("ethan.interface.lark_typing._send_reaction", new=AsyncMock()) as mock_react:
+    with patch("ethan.interface.channels.lark.typing._send_reaction", new=AsyncMock()) as mock_react:
         run_async(_handle_reaction({
             "reaction_type": "THINKING",  # bot 自己的打字表情
             "message_id": "om_card",
@@ -300,8 +300,8 @@ class _NullLock:
 
 def test_regenerate_registers_running_task():
     """regenerate task 必须登记进 _lark_running_tasks：/stop 才能取消它。"""
-    from ethan.interface import lark_event_handlers as handlers
-    from ethan.interface.lark_state import _lark_running_tasks
+    from ethan.interface.channels.lark import event_handlers as handlers
+    from ethan.interface.channels.lark.state import _lark_running_tasks
 
     entry = {"chat_id": "oc_c", "session_id": "s", "question": "q",
              "question_msg_id": "qm", "answer_text": "a", "assistant_row_id": 7}
@@ -315,7 +315,7 @@ def test_regenerate_registers_running_task():
             inner_calls += 1
             await release.wait()  # 阻塞住，模拟 Agent 重跑中
 
-        with patch("ethan.interface.lark_state._get_answer_entry", return_value=entry), \
+        with patch("ethan.interface.channels.lark.state._get_answer_entry", return_value=entry), \
              patch.object(handlers, "_do_regenerate_inner", new=_slow_inner):
             t = asyncio.create_task(handlers._do_regenerate("om_card", "oc_c", "ou_u"))
             await asyncio.sleep(0.01)
@@ -333,7 +333,7 @@ def test_regenerate_registers_running_task():
 
 def test_regenerate_delete_rows_anchor_by_question():
     """无 assistant_row_id 的旧条目：按问题内容锚定，不误删最新一轮。"""
-    from ethan.interface import lark_event_handlers as handlers
+    from ethan.interface.channels.lark import event_handlers as handlers
 
     # 历史：u1(旧问题) a1(旧答案) u2(新问题) a2(新答案)。点的是「旧卡片」。
     msgs = [
@@ -349,12 +349,12 @@ def test_regenerate_delete_rows_anchor_by_question():
     store.delete_message_by_id = AsyncMock()
 
     async def _run():
-        with patch("ethan.interface.lark_state._get_answer_entry", return_value=entry), \
+        with patch("ethan.interface.channels.lark.state._get_answer_entry", return_value=entry), \
              patch("ethan.memory.session.get_session_store", return_value=store), \
              patch("ethan.core.config.get_config"), \
-             patch("ethan.interface.lark_agent._handle_agent_message", new=AsyncMock()), \
-             patch("ethan.interface.lark_stream._get_chat_lock", new=lambda cid: _NullLock()), \
-             patch("ethan.interface.lark_send.TypingState") as _ts:
+             patch("ethan.interface.channels.lark.agent._handle_agent_message", new=AsyncMock()), \
+             patch("ethan.interface.channels.lark.stream._get_chat_lock", new=lambda cid: _NullLock()), \
+             patch("ethan.interface.channels.lark.send.TypingState") as _ts:
             _ts.return_value.__aenter__ = AsyncMock(return_value=None)
             _ts.return_value.clear = AsyncMock()
             await handlers._do_regenerate_inner("om_old_card", "oc_c", "ou_owner")
@@ -366,7 +366,7 @@ def test_regenerate_delete_rows_anchor_by_question():
 
 def test_regenerate_delete_rows_skip_feedback_rows():
     """有 assistant_row_id：问题行锚定要跳过 [用户反馈] 标记行。"""
-    from ethan.interface import lark_event_handlers as handlers
+    from ethan.interface.channels.lark import event_handlers as handlers
 
     msgs = [
         _Msg(1, "user", "旧问题"),
@@ -381,12 +381,12 @@ def test_regenerate_delete_rows_skip_feedback_rows():
     store.delete_message_by_id = AsyncMock()
 
     async def _run():
-        with patch("ethan.interface.lark_state._get_answer_entry", return_value=entry), \
+        with patch("ethan.interface.channels.lark.state._get_answer_entry", return_value=entry), \
              patch("ethan.memory.session.get_session_store", return_value=store), \
              patch("ethan.core.config.get_config"), \
-             patch("ethan.interface.lark_agent._handle_agent_message", new=AsyncMock()), \
-             patch("ethan.interface.lark_stream._get_chat_lock", new=lambda cid: _NullLock()), \
-             patch("ethan.interface.lark_send.TypingState") as _ts:
+             patch("ethan.interface.channels.lark.agent._handle_agent_message", new=AsyncMock()), \
+             patch("ethan.interface.channels.lark.stream._get_chat_lock", new=lambda cid: _NullLock()), \
+             patch("ethan.interface.channels.lark.send.TypingState") as _ts:
             _ts.return_value.__aenter__ = AsyncMock(return_value=None)
             _ts.return_value.clear = AsyncMock()
             await handlers._do_regenerate_inner("om_old_card", "oc_c", "ou_owner")
@@ -399,7 +399,7 @@ def test_regenerate_delete_rows_skip_feedback_rows():
 # ── 尾部反馈收集（reaction 反馈进 agent 上下文）──────────────────────────────
 
 def test_collect_tail_feedback():
-    from ethan.interface.lark_state import _collect_tail_feedback
+    from ethan.interface.channels.lark.state import _collect_tail_feedback
     history = [
         _Msg(1, "user", "问题1"),
         _Msg(2, "assistant", "答案1"),

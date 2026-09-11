@@ -63,7 +63,7 @@ def stop_wechat_listener() -> None:
 async def _bot_loop() -> None:
     import httpx
 
-    from ethan.interface.wechat_ilink import (
+    from ethan.interface.channels.wechat.ilink import (
         get_updates,
         load_credentials,
         login_via_qrcode,
@@ -107,7 +107,7 @@ async def _bot_loop() -> None:
             raise
         except PermissionError as e:
             logger.warning("[WeChat] Token expired: %s — clearing creds, will re-login", e)
-            from ethan.interface.wechat_ilink import clear_credentials
+            from ethan.interface.channels.wechat.ilink import clear_credentials
             clear_credentials()
             consecutive_errors = 0
 
@@ -132,7 +132,7 @@ async def _handle_message(msg: dict[str, Any], creds: Any) -> None:
     """Process a single iLink message: load history, stream Agent, send tool progress + reply."""
     import httpx
 
-    from ethan.interface.wechat_ilink import send_text, send_typing
+    from ethan.interface.channels.wechat.ilink import send_text, send_typing
     from ethan.providers.base import Message, ToolEvent
 
     # ── Deduplicate ──────────────────────────────────────────────────────────
@@ -189,7 +189,7 @@ async def _handle_message(msg: dict[str, Any], creds: Any) -> None:
     # 命令不命中时原样走下面的 Agent 流程；命令命中则 return
     from ethan.interface.channel_commands import handle_command, is_command
     if is_command(text):
-        from ethan.interface.wechat_cmd_context import build_wechat_cmd_context
+        from ethan.interface.channels.wechat.cmd_context import build_wechat_cmd_context
         cmd_ctx = build_wechat_cmd_context(chat_key, text, sender, is_group_chat=bool(group_id))
         try:
             reply = await handle_command(cmd_ctx)
@@ -248,14 +248,14 @@ async def _handle_message(msg: dict[str, Any], creds: Any) -> None:
 
     # ── Stream Agent ──────────────────────────────────────────────────────────
     from ethan.core.agent_factory import create_agent
-    from ethan.interface.lark_tool_trace import sanitize_args_summary, sanitize_result_preview
+    from ethan.interface.channels.lark.tool_trace import sanitize_args_summary, sanitize_result_preview
     from ethan.tools.builtin.schedule import wechat_chat_id_var
     wechat_token = wechat_chat_id_var.set(reply_to)
     agent = create_agent(channel="wechat", user_id=user_id, toolset="full")
     final_answer = ""
 
     # 登记 task 供 /stop 取消（仅 Agent 流程；命令分支不登记，避免 /stop 取消自己）
-    from ethan.interface.wechat_cmd_context import _register_wechat_task, _untrack_wechat_task
+    from ethan.interface.channels.wechat.cmd_context import _register_wechat_task, _untrack_wechat_task
     _cur_task = asyncio.current_task()
     if _cur_task is not None:
         _register_wechat_task(chat_key, _cur_task)

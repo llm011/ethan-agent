@@ -88,7 +88,7 @@ schedule_create(
 
 ```python
 import asyncio
-from ethan.interface.lark_events import send_lark_notification
+from ethan.interface.channels.lark.events import send_lark_notification
 from ethan.core.config import get_config
 
 chat_id = getattr(getattr(get_config(), "lark", None), "main_chat_id", "") or ""

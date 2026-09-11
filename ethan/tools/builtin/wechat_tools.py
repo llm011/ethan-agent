@@ -43,7 +43,7 @@ class WeChatMessageSendTool(BaseTool):
             return "Error: content is required"
 
         from ethan.core.config import get_config
-        from ethan.interface.wechat_ilink import load_credentials, send_text
+        from ethan.interface.channels.wechat.ilink import load_credentials, send_text
 
         cfg = get_config()
         owner_id = cfg.wechat.owner_user_id

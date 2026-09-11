@@ -34,7 +34,7 @@ def _restart_serve() -> None:
 @app.command("login")
 def wechat_login() -> None:
     """扫码登录微信（iLink Bot API），自动开启监听并重启 serve。"""
-    from ethan.interface.wechat_ilink import login_via_qrcode
+    from ethan.interface.channels.wechat.ilink import login_via_qrcode
 
     console.print("[dim]正在请求二维码，请稍候...[/dim]")
     try:
@@ -65,7 +65,7 @@ def wechat_login() -> None:
 @app.command("logout")
 def wechat_logout() -> None:
     """清除微信登录凭证并关闭监听。"""
-    from ethan.interface.wechat_ilink import _CREDS_PATH, clear_credentials
+    from ethan.interface.channels.wechat.ilink import _CREDS_PATH, clear_credentials
     if _CREDS_PATH.exists():
         clear_credentials()
         console.print("[green]✓ 微信凭证已清除。[/green]")
@@ -89,7 +89,7 @@ def wechat_logout() -> None:
 def wechat_status() -> None:
     """显示当前微信登录状态。"""
     from ethan.core.config import get_config
-    from ethan.interface.wechat_ilink import load_credentials
+    from ethan.interface.channels.wechat.ilink import load_credentials
 
     creds = load_credentials()
     cfg = get_config()

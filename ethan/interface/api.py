@@ -111,11 +111,11 @@ async def lifespan(app: FastAPI):
         # 函数内 lazy import，所以这里 ~1.7s 而非 40s，不会让 restart 的端口探测超时。
         # （注意：uvicorn 是 lifespan.startup() 跑完之后才绑端口，所以这步必须快。）
         # lark_events 内部走 lark-cli 子进程收事件，lark_oapi 的重量级加载在子进程里，不挡本进程。
-        from ethan.interface.lark_events import start_lark_listener, stop_lark_listener
+        from ethan.interface.channels.lark.events import start_lark_listener, stop_lark_listener
         start_lark_listener()
     from ethan.core.config import get_config as _gcfg
     if getattr(_gcfg().wechat, "enabled", False):
-        from ethan.interface.wechat_events import start_wechat_listener
+        from ethan.interface.channels.wechat.events import start_wechat_listener
         start_wechat_listener()
     start_heartbeat()
     # facts.json → memories 一次性迁移（结构化记忆统一）：本地 SQLite+文件操作，
@@ -167,10 +167,10 @@ async def lifespan(app: FastAPI):
     app.state.api_key_store = key_store
     yield
     if _lark_ready():
-        from ethan.interface.lark_events import _wait_lark_listener_stopped, stop_lark_listener
+        from ethan.interface.channels.lark.events import _wait_lark_listener_stopped, stop_lark_listener
         stop_lark_listener()
         await _wait_lark_listener_stopped()
-    from ethan.interface.wechat_events import stop_wechat_listener
+    from ethan.interface.channels.wechat.events import stop_wechat_listener
     stop_wechat_listener()
     stop_heartbeat()
     stop_idle_sweep()

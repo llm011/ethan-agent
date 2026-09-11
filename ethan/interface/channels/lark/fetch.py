@@ -5,7 +5,7 @@ import asyncio
 import json
 import logging
 
-from ethan.interface.lark_auth import _is_lark_auth_error, _send_auth_guidance_card
+from ethan.interface.channels.lark.auth import _is_lark_auth_error, _send_auth_guidance_card
 
 logger = logging.getLogger(__name__)
 

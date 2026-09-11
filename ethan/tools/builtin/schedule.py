@@ -368,7 +368,7 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
                     ctx = json.loads(channel_context)
                     chat_id = ctx.get("chat_id", "")
                     if chat_id:
-                        from ethan.interface.lark_send import send_lark_notification
+                        from ethan.interface.channels.lark.send import send_lark_notification
                         await send_lark_notification(chat_id, formatted)
                 except Exception as e3:
                     _logger.error("Schedule lark reply error: %s", e3)
@@ -379,7 +379,7 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
                     to_user_id = ctx.get("to_user_id", "")
                     if to_user_id:
 
-                        from ethan.interface.wechat_ilink import load_credentials, send_text
+                        from ethan.interface.channels.wechat.ilink import load_credentials, send_text
                         creds = load_credentials()
                         if creds:
                             async with _http_client() as client:

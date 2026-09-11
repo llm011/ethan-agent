@@ -321,7 +321,7 @@ def _schedule_debounce_flush(q: dict, chat_id: str, sender_open_id: str) -> None
     remaining = _DEBOUNCE_MAX - elapsed
     delay = min(_DEBOUNCE_INITIAL, max(0.1, remaining))
     # 延迟导入避免循环依赖（lark_stream 反向导入 state 的纯数据函数）
-    from ethan.interface.lark_stream import _delayed_debounce_flush
+    from ethan.interface.channels.lark.stream import _delayed_debounce_flush
     q["timer"] = asyncio.create_task(_delayed_debounce_flush(chat_id, sender_open_id, delay))
 
 

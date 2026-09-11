@@ -11,7 +11,7 @@ from ethan.interface.channel_commands import CommandContext
 
 async def _reset_lark_session(cid: str) -> None:
     """清空该飞书 chat 的会话映射，下次消息新建 session。"""
-    from ethan.interface.lark_stream import _lark_chat_map, _load_lark_map, _save_lark_map
+    from ethan.interface.channels.lark.stream import _lark_chat_map, _load_lark_map, _save_lark_map
     if not _lark_chat_map:
         _lark_chat_map.update(_load_lark_map())
     if cid in _lark_chat_map:
@@ -30,7 +30,7 @@ async def _get_model() -> str:
 
 
 async def _resolve_lark_session(cid: str) -> str | None:
-    from ethan.interface.lark_stream import _lark_chat_map, _load_lark_map
+    from ethan.interface.channels.lark.stream import _lark_chat_map, _load_lark_map
     if not _lark_chat_map:
         _lark_chat_map.update(_load_lark_map())
     return _lark_chat_map.get(cid)
@@ -39,7 +39,7 @@ async def _resolve_lark_session(cid: str) -> str | None:
 async def _list_lark_sessions(cid: str) -> str:
     from datetime import datetime
 
-    from ethan.interface.lark_stream import _lark_chat_map
+    from ethan.interface.channels.lark.stream import _lark_chat_map
     from ethan.memory.session import get_session_store
     store = await get_session_store()
     recent = await store.list_recent(5)
@@ -57,7 +57,7 @@ async def _list_lark_sessions(cid: str) -> str:
 
 
 async def _resume_lark_session(cid: str, sid_prefix: str) -> str:
-    from ethan.interface.lark_stream import _lark_chat_map, _load_lark_map, _save_lark_map
+    from ethan.interface.channels.lark.stream import _lark_chat_map, _load_lark_map, _save_lark_map
     from ethan.memory.session import get_session_store
     store = await get_session_store()
     recent = await store.list_recent(50)
@@ -74,7 +74,7 @@ async def _resume_lark_session(cid: str, sid_prefix: str) -> str:
 async def _compact_lark_session(cid: str) -> str:
     from ethan.core.config import get_config
     from ethan.core.session_ops import compact_session
-    from ethan.interface.lark_stream import _lark_chat_map, _load_lark_map
+    from ethan.interface.channels.lark.stream import _lark_chat_map, _load_lark_map
     from ethan.memory.session import get_session_store
     sid = _lark_chat_map.get(cid)
     if not sid:
@@ -90,7 +90,7 @@ async def _compact_lark_session(cid: str) -> str:
 async def _summary_lark_session(cid: str) -> str:
     from ethan.core.config import get_config
     from ethan.core.session_ops import summary_session
-    from ethan.interface.lark_stream import _lark_chat_map, _load_lark_map
+    from ethan.interface.channels.lark.stream import _lark_chat_map, _load_lark_map
     from ethan.memory.session import get_session_store
     sid = _lark_chat_map.get(cid)
     if not sid:
@@ -129,7 +129,7 @@ async def _set_lark_owner(cid: str, sid: str) -> str:
 
 
 async def _get_lark_mode(cid: str) -> str:
-    from ethan.interface.lark_stream import _lark_chat_map, _load_lark_map
+    from ethan.interface.channels.lark.stream import _lark_chat_map, _load_lark_map
     from ethan.memory.session import get_session_store
     sid = _lark_chat_map.get(cid)
     if not sid:
@@ -146,7 +146,7 @@ async def _get_lark_mode(cid: str) -> str:
 async def _set_lark_mode(cid: str, mode_key: str) -> None:
     """切换当前飞书会话模式；无会话则新建一个带该模式的 session。"""
     from ethan.core.config import get_config as _gc
-    from ethan.interface.lark_stream import _lark_chat_map, _load_lark_map, _save_lark_map
+    from ethan.interface.channels.lark.stream import _lark_chat_map, _load_lark_map, _save_lark_map
     from ethan.memory.session import get_session_store
     if not _lark_chat_map:
         _lark_chat_map.update(_load_lark_map())
@@ -196,7 +196,7 @@ def build_cmd_context(chat_id: str, text: str, sender_open_id: str, *, is_group_
 
     在 _handle_message 的 is_command 分支调用，替代原来的 10 个内嵌闭包。
     """
-    from ethan.interface.lark_stream import _stop_lark_task
+    from ethan.interface.channels.lark.stream import _stop_lark_task
 
     return CommandContext(
         chat_id=chat_id,
