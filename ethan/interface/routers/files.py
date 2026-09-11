@@ -11,7 +11,7 @@ deliver_file 工具把文件路径写进消息卡片，前端点击卡片后通�
   2. session 隔离——必须带 session_id，且该 session 的消息卡片里确实交付过这个文件
      （授权派生自已持久化的 cards 列，无额外状态，重启不丢）。
 鉴权：download/asset 走 cookie/签名 URL 双通道（浏览器直链无法带 header，签名由
-  POST /files/sign 用 Bearer 换发，10 分钟有效，见 ethan.core.signed_url），deck 走 Bearer。
+  POST /files/sign 用 Bearer 换发，10 分钟有效，见 ethan.core.services.signed_url），deck 走 Bearer。
 """
 from __future__ import annotations
 
@@ -25,8 +25,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from ethan.core.file_jail import ASSET_EXTS, DELIVER_EXTS, INLINE_VIEW_EXTS, is_project_dir, resolve_jailed
-from ethan.core.signed_url import sign_path
+from ethan.core.services.file_jail import ASSET_EXTS, DELIVER_EXTS, INLINE_VIEW_EXTS, is_project_dir, resolve_jailed
+from ethan.core.services.signed_url import sign_path
 from ethan.interface.routers.deps import verify_token, verify_token_or_cookie
 
 logger = logging.getLogger(__name__)
@@ -51,7 +51,7 @@ async def sign_files(req: SignRequest, user_id: str = Depends(verify_token)):
 
 
 def _resolve_jailed(path: str) -> Path:
-    """共享 jail（ethan.core.file_jail.resolve_jailed），不合法时按 HTTP 语义报错。"""
+    """共享 jail（ethan.core.services.file_jail.resolve_jailed），不合法时按 HTTP 语义报错。"""
     p = resolve_jailed(path)
     if p is not None:
         return p

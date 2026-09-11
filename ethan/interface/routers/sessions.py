@@ -325,7 +325,7 @@ async def compact_session(session_id: str, user_id: str = Depends(verify_token))
 
     供 Web 的 /compact 命令调用。返回 {ok, summary}，前端拿 summary 回显并刷新会话。
     """
-    from ethan.core.session_ops import compact_session as _compact
+    from ethan.core.services.session_ops import compact_session as _compact
     store = await get_session_store()
     summary = await _compact(store, session_id, get_config().defaults.model)
     return {"ok": True, "summary": summary}
@@ -337,7 +337,7 @@ async def summary_session(session_id: str, user_id: str = Depends(verify_token))
 
     供 Web 的 /summary 命令调用。返回 {ok, summary}。
     """
-    from ethan.core.session_ops import summary_session as _summary
+    from ethan.core.services.session_ops import summary_session as _summary
     store = await get_session_store()
     result = await _summary(store, session_id, get_config().defaults.model)
     return {"ok": True, "summary": result}

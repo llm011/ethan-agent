@@ -373,7 +373,7 @@ def _detect_secret_env_refs(command: str) -> list[str]:
     与 shell 子进程注入同源（load_secret_env），确保检测口径和注入口径一致。
     """
     try:
-        from ethan.core.secrets_store import load_secret_env
+        from ethan.core.services.secrets_store import load_secret_env
         secret_keys = set(load_secret_env().keys())
     except Exception:
         return []
@@ -511,7 +511,7 @@ class ShellTool(BaseTool):
             # 模型上下文里从不出现明文。注入失败不影响命令执行。
             env = dict(os.environ)
             try:
-                from ethan.core.secrets_store import load_secret_env
+                from ethan.core.services.secrets_store import load_secret_env
                 env.update(load_secret_env())
             except Exception:
                 pass

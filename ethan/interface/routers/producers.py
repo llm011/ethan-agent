@@ -622,7 +622,7 @@ async def _run_generation(
     # 补进 cards 列 = 同时补下载授权（/files 路由授权源自持久化的 cards），卡片才点得动。
     final_cards = list(collector.cards or [])
     try:
-        from ethan.core.file_jail import scan_file_cards_in_text
+        from ethan.core.services.file_jail import scan_file_cards_in_text
 
         existing_paths = {c.get("path") for c in final_cards if c.get("type") == "file"}
         fallback_cards = scan_file_cards_in_text(collector.full or "", existing_paths)
@@ -700,7 +700,7 @@ async def _run_generation(
     # 从 agent 回复中提取 getnote task_id，后台轮询直到完成，
     # 完成后把笔记内容作为独立消息推送给前端（复用 SSE 流）。
     # 用独立变量引用 store 以保持语义清晰。
-    from ethan.core.background_polling import extract_task_id, poll_getnote_task
+    from ethan.core.services.background_polling import extract_task_id, poll_getnote_task
 
     task_id = extract_task_id(collector.full or "")
     if task_id:

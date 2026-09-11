@@ -104,7 +104,7 @@ async def run_repl(agent: Agent, resume_id: str | None = None, auto_consent: boo
     consent_provider.session_id = session.id
 
     # ── Provider setup (runs any time no API key is configured) ──
-    from ethan.core.onboarding import ONBOARDING_MESSAGE, is_first_time, needs_provider_setup
+    from ethan.core.services.onboarding import ONBOARDING_MESSAGE, is_first_time, needs_provider_setup
     if needs_provider_setup():
         console.print()
         console.print(Panel(

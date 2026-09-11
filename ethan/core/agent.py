@@ -1869,7 +1869,7 @@ class Agent:
             for r, tc in zip(results, allowed_calls):
                 # content 原文进模型上下文（get_secret 取出的 key Agent 要能用）；
                 # 但展示用的 preview/detail 一律过掩码，避免明文 secret 在 UI 里露出。
-                from ethan.core.secrets_store import mask_text
+                from ethan.core.services.secrets_store import mask_text
 
                 preview = mask_text(_preview(r.content)) if r.content else ""
                 detail = mask_text(_detail(r.content)) if r.content else ""

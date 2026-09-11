@@ -44,7 +44,7 @@ async def verify_token_or_cookie(request: Request) -> str:
     <img src> / <a href download> 这类浏览器直接发起的请求无法带 Authorization
     header：Web 同源部署从 cookie 读 token（前端 setAuthToken 已写 cookie，path=/）；
     跨源/Tauri webview cookie 带不上，用 ?user=&sig= 短期签名（前端先调
-    POST /files/sign 换 path 级签名，详见 ethan.core.signed_url），不再把长效
+    POST /files/sign 换 path 级签名，详见 ethan.core.services.signed_url），不再把长效
     token 放进 URL（会留在访问日志/浏览器历史里）。
     其余流程与 verify_token 一致：解析 user_id、set_user_id、注入 request.state。
     """
@@ -64,7 +64,7 @@ async def verify_token_or_cookie(request: Request) -> str:
             return user_id
 
     # 签名通道：user + sig（"exp.sighex"）+ path（签名消息含 path，从 query 原样取）
-    from ethan.core.signed_url import verify_path_sig
+    from ethan.core.services.signed_url import verify_path_sig
 
     user = request.query_params.get("user")
     sig = request.query_params.get("sig", "")

@@ -26,7 +26,7 @@ class OnboardingCompleteRequest(BaseModel):
 
 @router.get("/onboarding/status")
 async def onboarding_status(user_id: str = Depends(verify_token)):
-    from ethan.core.onboarding import ONBOARDING_MESSAGE, is_first_time
+    from ethan.core.services.onboarding import ONBOARDING_MESSAGE, is_first_time
     first_time = is_first_time(user_id)
     return {"first_time": first_time, "message": ONBOARDING_MESSAGE if first_time else ""}
 
@@ -34,7 +34,7 @@ async def onboarding_status(user_id: str = Depends(verify_token)):
 @router.post("/onboarding/complete")
 async def onboarding_complete(req: OnboardingCompleteRequest, user_id: str = Depends(verify_token)):
     from ethan.core.config import CONFIG_DIR
-    from ethan.core.onboarding import mark_onboarded
+    from ethan.core.services.onboarding import mark_onboarded
 
     agent_name = req.agent_name.strip() or "Ethan"
     user_info = req.user_info.strip()
@@ -241,7 +241,7 @@ class UserProfilePatch(BaseModel):
 async def get_user_profile(user_id: str = Depends(verify_token)):
     """读取当前用户的 user_profile.md(不存在则生成含全部 section 的空模板)。"""
     from ethan.core.paths import user_profile_path
-    from ethan.core.profile import ensure_profile
+    from ethan.core.services.profile import ensure_profile
     content = ensure_profile(user_profile_path())
     return {"content": content}
 

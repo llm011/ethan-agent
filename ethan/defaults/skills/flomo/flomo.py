@@ -101,7 +101,7 @@ def _find_access_token() -> str:
     """
     # 方式 0：secrets（与 shell 子进程注入同源的 load_secret_env，不直接读文件）
     try:
-        from ethan.core.secrets_store import load_secret_env
+        from ethan.core.services.secrets_store import load_secret_env
         token = load_secret_env().get("FLOMO_ACCESS_TOKEN")
         if token:
             return token
@@ -150,7 +150,7 @@ def _find_access_token() -> str:
 def _find_webhook_key() -> str:
     """从 secrets 读 webhook key（与 shell 注入同源）。"""
     try:
-        from ethan.core.secrets_store import load_secret_env
+        from ethan.core.services.secrets_store import load_secret_env
         return load_secret_env().get("FLOMO_WEBHOOK_KEY", "")
     except Exception:
         return ""
