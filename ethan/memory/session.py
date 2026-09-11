@@ -142,22 +142,35 @@ _THINK_BLOCK_RE = re.compile(r"<think\b[^>]*>.*?</think\s*>", re.IGNORECASE | re
 _THINK_OPEN_RE = re.compile(r"<think\b[^>]*>.*$", re.IGNORECASE | re.DOTALL)
 # 任何残余的 think 标签碎片
 _THINK_TAG_RE = re.compile(r"</?think\b[^>]*>", re.IGNORECASE)
-# markdown 行内/块级标记：** * _ ` ~ # >，标题里一律去掉
-_MD_MARK_RE = re.compile(r"[*_`~#>]+")
+# 行首块级标记：heading（# ## …）和 quote（>），出现在标题开头才剥
+_MD_BLOCK_PREFIX_RE = re.compile(r"^\s*(?:#{1,6}\s+|>+\s*)+")
+# 首尾成对的行内强调定界符：**bold** *italic* _em_ `code` ~~del~~
+# 只剥掉包裹整个标题的定界符，保留标题内部的 _ # > 等合法字符
+_MD_WRAP_RE = re.compile(r"^\s*([*_`~]{1,3})(.+?)\1\s*$", re.DOTALL)
 
 
 def _sanitize_title(raw: str) -> str:
-    """清洗模型返回的标题：去掉 <think> 思考块、markdown 标记、首尾引号/空白。
+    """清洗模型返回的标题：去掉 <think> 思考块、包裹用的 markdown 标记、首尾引号/空白。
 
     某些 lite 模型/中转会把推理过程以内联 <think>...</think> 塞进正文，或输出
     markdown 标记（如 **标题**）；直接当标题会出现 "<think>**Creating a" 这类脏值。
+
+    注意：只剥掉「包裹整个标题的」行内强调定界符和「行首的」块级标记，
+    保留标题内部的合法字符——`foo_bar`、`C# guide`、`A > B` 不应被改动。
     """
     if not raw:
         return ""
     t = _THINK_BLOCK_RE.sub("", raw)  # 先去成对思考块
     t = _THINK_OPEN_RE.sub("", t)     # 再去未闭合的开标签及其后内容
     t = _THINK_TAG_RE.sub("", t)      # 兜底清掉残余标签碎片
-    t = _MD_MARK_RE.sub("", t)        # 去 markdown 标记
+    t = t.strip()
+    t = _MD_BLOCK_PREFIX_RE.sub("", t)  # 去行首 heading/quote 标记
+    # 反复剥掉成对包裹的强调定界符（如 **`标题`** 这类嵌套）
+    while True:
+        m = _MD_WRAP_RE.match(t)
+        if not m:
+            break
+        t = m.group(2).strip()
     t = t.strip().strip('"\'“”').strip()
     return t
 
