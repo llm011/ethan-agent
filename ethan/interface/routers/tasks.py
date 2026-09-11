@@ -190,7 +190,7 @@ async def _maybe_consolidate(session_id: str, model: str, user_id: str = "", mod
             return
 
         # 脱敏：在喂给 consolidator 前，把消息正文里的 secret 真值替换为引用
-        from ethan.core.secrets_store import mask_text
+        from ethan.core.services.secrets_store import mask_text
         for m in session.messages:
             if m.content:
                 m.content = mask_text(m.content)

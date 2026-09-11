@@ -26,7 +26,7 @@ def list_commands() -> None:
     """列出所有自定义命令。"""
     from rich.table import Table
 
-    from ethan.core.custom_commands import load_commands
+    from ethan.core.services.custom_commands import load_commands
 
     cmds = load_commands()
     if not cmds:
@@ -53,7 +53,7 @@ def add_command(
       ethan command add review-cn -d "用中文做代码审查，重点关注安全和性能"
       ethan command add greet       # 交互输入
     """
-    from ethan.core.custom_commands import load_commands, save_command
+    from ethan.core.services.custom_commands import load_commands, save_command
 
     # 校验命令名
     if not name.replace("-", "").replace("_", "").isalnum():
@@ -91,7 +91,7 @@ def remove_command(
     name: str = typer.Argument(..., help="要删除的命令名（不含 /）"),
 ) -> None:
     """删除自定义命令。"""
-    from ethan.core.custom_commands import remove_command as _remove
+    from ethan.core.services.custom_commands import remove_command as _remove
 
     if _remove(name):
         console.print(f"[green]✓ 已删除 /{name}[/green]")

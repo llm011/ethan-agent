@@ -66,7 +66,7 @@ class ProcedureStore:
         self._path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def add(self, rule: str, context: str = "") -> None:
-        from ethan.core.secrets_store import mask_text
+        from ethan.core.services.secrets_store import mask_text
         rule = mask_text(rule)
         for p in self._procedures:
             if p.rule.lower().strip() == rule.lower().strip():

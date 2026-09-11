@@ -85,7 +85,7 @@ class TestFromHistoryOrphanUser:
 
 class TestSplitKeepRecentOrphanUser:
     def _split(self, messages, keep_pairs):
-        from ethan.core.session_ops import _split_keep_recent
+        from ethan.core.services.session_ops import _split_keep_recent
         return _split_keep_recent(messages, keep_pairs)
 
     def test_no_message_lost_with_consecutive_users(self):

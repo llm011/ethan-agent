@@ -73,7 +73,7 @@ async def _resume_lark_session(cid: str, sid_prefix: str) -> str:
 
 async def _compact_lark_session(cid: str) -> str:
     from ethan.core.config import get_config
-    from ethan.core.session_ops import compact_session
+    from ethan.core.services.session_ops import compact_session
     from ethan.interface.channels.lark.stream import _lark_chat_map, _load_lark_map
     from ethan.memory.session import get_session_store
     sid = _lark_chat_map.get(cid)
@@ -89,7 +89,7 @@ async def _compact_lark_session(cid: str) -> str:
 
 async def _summary_lark_session(cid: str) -> str:
     from ethan.core.config import get_config
-    from ethan.core.session_ops import summary_session
+    from ethan.core.services.session_ops import summary_session
     from ethan.interface.channels.lark.stream import _lark_chat_map, _load_lark_map
     from ethan.memory.session import get_session_store
     sid = _lark_chat_map.get(cid)

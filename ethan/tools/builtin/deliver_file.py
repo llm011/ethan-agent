@@ -8,7 +8,7 @@ icon + 文件名的卡片，点击进入 /ppt-preview 预览页或直接下载�
 """
 from __future__ import annotations
 
-from ethan.core.file_jail import DELIVER_EXTS, build_file_card, resolve_jailed
+from ethan.core.services.file_jail import DELIVER_EXTS, build_file_card, resolve_jailed
 from ethan.tools.base import BaseTool, ToolResult
 
 

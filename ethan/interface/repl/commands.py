@@ -195,7 +195,7 @@ async def _handle_slash_command(cmd: str, store: SessionStore, session: Session,
         return None
 
     elif command == "/compact":
-        from ethan.core.session_ops import compact_session
+        from ethan.core.services.session_ops import compact_session
         with console.status("[dim]压缩历史中...[/dim]"):
             summary = await compact_session(store, session.id, agent._provider.model)
         if summary.startswith(("对话太短", "没有可压缩", "压缩失败", "会话不存在")):
@@ -209,7 +209,7 @@ async def _handle_slash_command(cmd: str, store: SessionStore, session: Session,
         return reloaded
 
     elif command == "/summary":
-        from ethan.core.session_ops import summary_session
+        from ethan.core.services.session_ops import summary_session
         with console.status("[dim]总结对话中...[/dim]"):
             result = await summary_session(store, session.id, agent._provider.model)
         if result.startswith(("对话太短", "总结失败", "会话不存在")):

@@ -111,7 +111,7 @@ async def _list_wechat_sessions(chat_key: str) -> str:
 
 async def _compact_wechat_session(chat_key: str) -> str:
     from ethan.core.config import get_config
-    from ethan.core.session_ops import compact_session
+    from ethan.core.services.session_ops import compact_session
     from ethan.memory.session import get_session_store
     sid = await _resolve_wechat_session(chat_key)
     if not sid:
@@ -122,7 +122,7 @@ async def _compact_wechat_session(chat_key: str) -> str:
 
 async def _summary_wechat_session(chat_key: str) -> str:
     from ethan.core.config import get_config
-    from ethan.core.session_ops import summary_session
+    from ethan.core.services.session_ops import summary_session
     from ethan.memory.session import get_session_store
     sid = await _resolve_wechat_session(chat_key)
     if not sid:

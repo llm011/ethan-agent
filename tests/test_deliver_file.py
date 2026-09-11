@@ -89,7 +89,7 @@ def test_deliver_file_mp4_card():
 def test_fallback_scan_does_not_auto_grant_mp4():
     # .mp4 不在 FALLBACK_CARD_EXTS 里——视频是重交付物，正文提到路径不应自动建卡 + 授权。
     # 必须经 deliver_file 显式交付（见 test_deliver_file_mp4_card）。
-    from ethan.core.file_jail import scan_file_cards_in_text
+    from ethan.core.services.file_jail import scan_file_cards_in_text
 
     video = Path("/tmp/fallback_video.mp4")
     video.write_bytes(b"fake-mp4")
@@ -319,7 +319,7 @@ def signed_client(monkeypatch):
 
 def test_signed_url_unit(monkeypatch):
     import ethan.core.users as users_mod
-    from ethan.core.signed_url import sign_path, verify_path_sig
+    from ethan.core.services.signed_url import sign_path, verify_path_sig
     from ethan.core.users import UserConfig, UserStore
 
     store = UserStore([UserConfig(id="u1", web_token="tok-u1")])
@@ -367,7 +367,7 @@ def test_signed_url_flow(signed_client):
 # ── 正文兜底扫描（agent 忘调 deliver_file，直接把路径写进正文）────────────────
 
 def test_scan_file_cards_in_text():
-    from ethan.core.file_jail import scan_file_cards_in_text
+    from ethan.core.services.file_jail import scan_file_cards_in_text
 
     d = Path("/tmp/scan_fallback_test")
     d.mkdir(exist_ok=True)

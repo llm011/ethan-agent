@@ -110,7 +110,7 @@ class ToolExecutor:
             # 防止 `echo $KEY` 这类把注入的密钥回流进模型上下文。
             # get_secret 是授权取值路径，放行原文（否则 Agent 取出来没法用）。
             if tc.name != "get_secret" and result.content:
-                from ethan.core.secrets_store import mask_text
+                from ethan.core.services.secrets_store import mask_text
                 result.content = mask_text(result.content)
 
             if tool.cacheable:

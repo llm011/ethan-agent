@@ -1,14 +1,14 @@
 """用户画像更新工具 — 操作 user_profile.md 的指定章节。
 
-section 体系与 consolidator 后台自动抽取共用 ethan.core.profile,保持一致。
-章节(完整列表见 ethan.core.profile.SECTIONS):
+section 体系与 consolidator 后台自动抽取共用 ethan.core.services.profile,保持一致。
+章节(完整列表见 ethan.core.services.profile.SECTIONS):
 - 基础特征(名字/年龄/性格/兴趣)
 - 身份与背景 / 目标与方向 / 工作与沟通方式
 - 心理与情绪(情绪模式/压力源/什么能安抚/重要内心感受/价值观)
 - 个人语言与激励 / 与 Agent 的约定
 """
-from ethan.core.profile import SECTIONS as _SECTIONS
-from ethan.core.profile import ensure_profile, update_profile_section
+from ethan.core.services.profile import SECTIONS as _SECTIONS
+from ethan.core.services.profile import ensure_profile, update_profile_section
 from ethan.tools.base import BaseTool
 
 

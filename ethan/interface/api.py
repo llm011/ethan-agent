@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from ethan import __version__
 from ethan.browser.http_route import router as browser_http_router
 from ethan.browser.ws_route import router as browser_ws_router
-from ethan.core.heartbeat import start_heartbeat, stop_heartbeat
+from ethan.core.services.heartbeat import start_heartbeat, stop_heartbeat
 from ethan.desktop.ws_route import router as desktop_ws_router
 from ethan.interface.routers import (
     agenda,

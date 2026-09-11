@@ -84,7 +84,7 @@ async def _consolidate_profile_for_user(user_id: str) -> None:
     from ethan.core.config import get_config
     from ethan.core.context import ETHAN_USER_ID
     from ethan.core.paths import user_memory_dir, user_profile_path
-    from ethan.core.profile import (
+    from ethan.core.services.profile import (
         PROFILE_GROUP_AGREEMENT,
         PROFILE_GROUP_EMOTION,
         PROFILE_GROUP_IDENTITY,

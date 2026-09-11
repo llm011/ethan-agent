@@ -6,7 +6,7 @@
 设计原则：
 - 命令逻辑与具体渠道解耦，渠道只需在 CommandContext 里填回调即可
 - /new 等命令需要重置当前 chat 的会话上下文，由各渠道提供 reset_session 回调
-- /compact 复用 ethan.core.session_ops.compact_session，各渠道只需提供 resolve_session_id 回调
+- /compact 复用 ethan.core.services.session_ops.compact_session，各渠道只需提供 resolve_session_id 回调
 """
 from __future__ import annotations
 
@@ -77,7 +77,7 @@ def resolve_custom_command(text: str) -> str | None:
     t = text.strip()
     if not t.startswith("/"):
         return None
-    from ethan.core.custom_commands import load_commands
+    from ethan.core.services.custom_commands import load_commands
     parts = t[1:].split(None, 1)
     if not parts:
         return None
@@ -290,7 +290,7 @@ async def handle_command(ctx: CommandContext) -> str | None:
         for cmd, (desc, _) in COMMANDS.items():
             lines.append(f"  /{cmd} — {desc}")
         # 列出自定义命令
-        from ethan.core.custom_commands import load_commands
+        from ethan.core.services.custom_commands import load_commands
         custom = load_commands()
         if custom:
             lines.append("")
@@ -314,7 +314,7 @@ async def handle_command(ctx: CommandContext) -> str | None:
 
 def _handle_command_cmd(arg: str) -> str:
     """/command add <name> [desc] | list | remove <name> 的渠道内处理。"""
-    from ethan.core.custom_commands import load_commands, remove_command, save_command
+    from ethan.core.services.custom_commands import load_commands, remove_command, save_command
 
     sub_parts = arg.strip().split(None, 2) if arg else []
     if not sub_parts:
