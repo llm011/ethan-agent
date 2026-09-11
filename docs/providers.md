@@ -51,6 +51,8 @@ class BaseProvider(ABC):
         messages: list[Message],
         tools: list[ToolDefinition] | None = None,
         system: str | None = None,
+        max_tokens: int | None = None,
+        disable_thinking: bool = False,  # True 时尽量关闭推理（标题生成等轻量任务）
     ) -> Message: ...
 
     async def stream_chat(
