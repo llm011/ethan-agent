@@ -2,14 +2,28 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
-import uuid
 from typing import Any, AsyncIterator, Optional
 from urllib.parse import urlparse
 
 import httpx
 
 from ethan.core.config import ProviderConfig
+from ethan.providers import _responses, _transform
+from ethan.providers._text_toolcalls import (
+    _MARKED_TOOL_RE,
+    _buf_has_unclosed_marked_tool,
+    _strip_marked_tool_blocks,
+    parse_marked_text_tool_calls,
+)
+from ethan.providers._text_toolcalls import (
+    contains_dsml as _contains_dsml_impl,
+)
+from ethan.providers._text_toolcalls import (
+    parse_dsml_tool_calls as _parse_dsml_tool_calls_impl,
+)
+from ethan.providers._text_toolcalls import (
+    parse_text_tool_calls as _parse_text_tool_calls_impl,
+)
 from ethan.providers.base import (
     MIDSTREAM_BREAK_KEYWORDS,
     BaseProvider,
@@ -20,86 +34,20 @@ from ethan.providers.base import (
     ToolDefinition,
 )
 
+# 文本/标记型工具调用解析拆到 ethan/providers/_text_toolcalls.py，请求构造拆到 _transform.py，
+# 响应解析拆到 _responses.py。此处 re-import 保留 openai_compat 命名空间对外可见（既有单测
+# 从本模块导入 _MARKED_TOOL_RE / _strip_marked_tool_blocks / parse_marked_text_tool_calls，
+# 且 stream_chat 状态机内以裸名引用 _buf_has_unclosed_marked_tool 等），避免破坏导入路径。
+__all__ = [
+    "OpenAICompatProvider",
+    "_MARKED_TOOL_RE",
+    "_strip_marked_tool_blocks",
+    "_buf_has_unclosed_marked_tool",
+    "parse_marked_text_tool_calls",
+]
+
 _CHUNK_TIMEOUT = 120  # 单个 chunk 超时（秒）
 _MAX_STREAM_BREAK_RETRIES = 2
-
-# 一些网关/中转不返回标准 tool_calls，而是把工具调用拼成字符串再用包裹符包起来下发。
-# ethan 原本只识别 DSML（<｜｜DSML｜｜…）与 `call:tool{args}` 两种文本格式；GLM 兼容层、本地
-# workbuddy 等会换包裹符。这里统一兜底识别，并把它们从「展示正文」里剥掉，避免 JSON 原样
-# 漏给用户（表现为 assistant 消息里出现一段裸工具调用文本）。
-_MARKED_TOOL_RE = re.compile(
-    r'<\s*(?P<open>tool_call|tool_use)\s*[^>]*>\s*'
-    r'(?P<body>\{[\s\S]*?\})\s*'
-    r'</\s*(?P=open)\s*>',
-    re.IGNORECASE,
-)
-
-
-def _strip_marked_tool_blocks(content: str) -> str:
-    """把 <tool_call>/<tool_use> 包裹的工具调用片段从正文中剥掉，只留真正文。
-
-    无论能否解析成工具调用，都先移除，防止序列化后的工具调用露出为可见正文。
-    流被截断时闭合标签可能永远没到：未闭合的开头标签连带其后内容一并去掉。
-    """
-    if not content:
-        return content
-    stripped = _MARKED_TOOL_RE.sub("", content)
-    m = re.search(r"<\s*(?:tool_call|tool_use)\b[^>]*>[\s\S]*$", stripped, re.IGNORECASE)
-    if m:
-        stripped = stripped[: m.start()]
-    return stripped
-
-
-def _buf_has_unclosed_marked_tool(content: str) -> bool:
-    """判断文本缓冲区是否包含「尚未闭合」的标记型工具调用块。
-
-    流式分片时 <tool_call>/<tool_use> 的开头标签可能先到、闭合标签后到，若按普通文本
-    yield 出去就会露馅。检测到未闭合时持续缓冲，直到流结束再统一解析。
-    """
-    for tag in ("tool_call", "tool_use"):
-        opens = len(re.findall(r'<\s*' + tag + r'\b', content, re.IGNORECASE))
-        closes = len(re.findall(r'<\s*/\s*' + tag + r'\s*>', content, re.IGNORECASE))
-        if opens > closes:
-            return True
-    return False
-
-
-def parse_marked_text_tool_calls(content: str) -> list[ToolCall]:
-    """解析以包裹符序列化的文本工具调用。
-
-    兼容两种形状：
-      - 直接 {"name": ..., "arguments": {...}}
-      - 嵌套 {"function": {"name":..., "arguments":...}}
-      解析失败静默跳过，不抛错。返回 ToolCall 列表（可能为空）。
-    """
-    results: list[ToolCall] = []
-    for m in _MARKED_TOOL_RE.finditer(content or ""):
-        raw = m.group("body").strip()
-        try:
-            obj = json.loads(raw)
-        except (json.JSONDecodeError, ValueError):
-            continue
-        if not isinstance(obj, dict):
-            continue
-        name = obj.get("name") or obj.get("tool_name")
-        # 注意用 None 判断而不是 or：无参工具的合法 arguments={} 是 falsy，
-        # 用 or 会把它误当成缺失、整条调用被丢弃
-        arguments = obj.get("arguments")
-        if arguments is None:
-            arguments = obj.get("input")
-        if isinstance(obj.get("function"), dict):
-            fn = obj["function"]
-            name = name or fn.get("name")
-            if arguments is None:
-                arguments = fn.get("arguments")
-        if not name or not isinstance(arguments, dict):
-            continue
-        results.append(ToolCall(
-            id=f"call_{uuid.uuid4().hex[:8]}",
-            name=str(name),
-            arguments=arguments,
-        ))
-    return results
 
 
 class OpenAICompatProvider(BaseProvider):
@@ -126,295 +74,49 @@ class OpenAICompatProvider(BaseProvider):
         return self._model
 
     def _to_openai_messages(self, messages: list[Message], include_reasoning: bool = False) -> list[dict]:
-        result = []
-        # 第一遍：按原顺序转换所有消息，图片 user 消息先暂存
-        pending_img_messages: list[dict] = []
-
-        for msg in messages:
-            if msg.role == "tool":
-                result.append({
-                    "role": "tool",
-                    "tool_call_id": msg.tool_call_id,
-                    "content": msg.content or "Screenshot taken.",
-                })
-                if msg.images:
-                    img_parts: list[dict] = []
-                    for img in msg.images:
-                        media_type = img.get("media_type", "image/png")
-                        data = img["data"]
-                        img_parts.append({
-                            "type": "image_url",
-                            "image_url": {"url": f"data:{media_type};base64,{data}"},
-                        })
-                    img_parts.append({"type": "text", "text": "Above is the screenshot result."})
-                    pending_img_messages.append({"role": "user", "content": img_parts})
-            elif msg.is_tool_call:
-                # 遇到新的 assistant tool_call 消息前，先把积压的图片 user 消息刷出
-                # （说明上一组 tool 消息已全部到齐）
-                result.extend(pending_img_messages)
-                pending_img_messages = []
-                oai_tool_calls = [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.name,
-                            "arguments": json.dumps(tc.arguments),
-                        },
-                    }
-                    for tc in msg.tool_calls
-                ]
-                msg_dict = {
-                    "role": "assistant",
-                    "content": msg.content or None,
-                    "tool_calls": oai_tool_calls,
-                }
-                if msg.reasoning and include_reasoning:
-                    # DeepSeek / deepseek-reasoner 等 reasoning 模型要求：上一轮 API 返回过
-                    # reasoning_content（思考过程），下一轮请求必须原样回传在 assistant 消息里，
-                    # 否则返回 400: "The reasoning_content in the thinking mode must be passed back to the API."
-                    # 仅当前模型走 reasoning 协议时才序列化，避免切换模型后污染新端点。
-                    msg_dict["reasoning_content"] = msg.reasoning
-                result.append(msg_dict)
-            elif msg.role == "user" and msg.images:
-                # 普通用户图片消息（发送时粘贴的图），同样先刷积压图片
-                result.extend(pending_img_messages)
-                pending_img_messages = []
-                content = []
-                for img in msg.images:
-                    media_type = img.get("media_type", "image/png")
-                    data = img["data"]
-                    content.append({
-                        "type": "image_url",
-                        "image_url": {"url": f"data:{media_type};base64,{data}"},
-                    })
-                if msg.content:
-                    content.append({"type": "text", "text": msg.content})
-                result.append({"role": "user", "content": content})
-            else:
-                # 非 tool 消息：刷积压图片后追加
-                result.extend(pending_img_messages)
-                pending_img_messages = []
-                # 跳过空 assistant 消息（带 tool_calls 的已在上方 elif is_tool_call 分支处理，
-                # 能到这里的 assistant 必然无 tool_calls），Gemini 不接受纯空 assistant 消息。
-                # 但如果该消息携带 reasoning_content（推理模型的思考过程），必须保留——
-                # DeepSeek 等 API 要求 reasoning_content 原样回传，丢弃会导致 400。
-                if msg.role == "assistant" and not msg.content:
-                    if not (msg.reasoning and include_reasoning):
-                        continue
-                out = {"role": msg.role, "content": msg.content}
-                if msg.role == "assistant" and msg.reasoning and include_reasoning:
-                    # reasoning_content 回传：详见上方 is_tool_call 分支注释
-                    out["reasoning_content"] = msg.reasoning
-                result.append(out)
-
-        # 末尾剩余的图片消息（最后一组 tool messages 后面没有后续消息时）
-        result.extend(pending_img_messages)
-
-        # 非 vision 模型：剥离 content 中的图片 blocks，只保留文本。
-        # GLM-5.2 等模型的 content 必须是 string，image_url blocks 会导致 400 格式校验失败。
-        if not self._supports_vision():
-            for msg_dict in result:
-                if isinstance(msg_dict.get("content"), list):
-                    msg_dict["content"] = self._strip_images_from_content(msg_dict["content"])
-
-        return result
+        return _transform.to_openai_messages(
+            messages,
+            include_reasoning=include_reasoning,
+            supports_vision=self._supports_vision(),
+        )
 
     def _to_openai_tools(self, tools: list[ToolDefinition]) -> list[dict]:
-        return [
-            {
-                "type": "function",
-                "function": {
-                    "name": t.name,
-                    "description": t.description,
-                    "parameters": self._strip_unsupported_schema_fields(t.parameters),
-                },
-            }
-            for t in tools
-        ]
+        return _transform.to_openai_tools(tools)
 
     @staticmethod
     def _strip_unsupported_schema_fields(schema: dict | None) -> dict:
         """递归移除 JSON Schema 中 Gemini 等模型不支持的字段（如 default、additionalProperties）。"""
-        if not schema or not isinstance(schema, dict):
-            return schema or {}
-        import copy
-        s = copy.deepcopy(schema)
-        _UNSUPPORTED = {"default", "additionalProperties"}
-
-        def _clean(obj):
-            if isinstance(obj, dict):
-                for key in list(obj.keys()):
-                    if key in _UNSUPPORTED:
-                        del obj[key]
-                    else:
-                        _clean(obj[key])
-            elif isinstance(obj, list):
-                for item in obj:
-                    _clean(item)
-        _clean(s)
-        return s
+        return _transform.strip_unsupported_schema_fields(schema)
 
     def _parse_choice(self, choice, usage=None) -> Message:
-        msg = choice.message
-        tool_calls = []
-        if msg.tool_calls:
-            for tc in msg.tool_calls:
-                try:
-                    args = json.loads(tc.function.arguments)
-                except (json.JSONDecodeError, AttributeError):
-                    args = {}
-                tool_calls.append(ToolCall(id=tc.id, name=tc.function.name, arguments=args))
-
-        # Fallback：某些模型/中转偶尔不返回标准 tool_calls，而是把工具调用写成文本。
-        # 支持两种格式：
-        # 1. Gemini 经 cliproxy: `call:default_api:shell{command:...,intent:...}`
-        # 2. DeepSeek DSML: `<｜｜DSML｜｜tool_calls>...<｜｜DSML｜｜invoke name="...">...`
-        content_text = msg.content or ""
-        if not tool_calls and content_text:
-            parsed = self._parse_dsml_tool_calls(content_text) or self._parse_text_tool_calls(content_text)
-            if parsed:
-                tool_calls = parsed
-                content_text = ""
-            else:
-                marked = parse_marked_text_tool_calls(content_text)
-                if marked or _MARKED_TOOL_RE.search(content_text):
-                    tool_calls = marked
-                    content_text = _strip_marked_tool_blocks(content_text)
-
-        usage_dict = None
-        if usage:
-            usage_dict = self._parse_usage(usage)
-
-        return Message(
-            role="assistant",
-            content=content_text,
-            tool_calls=tool_calls,
-            usage=usage_dict,
-        )
+        return _responses.parse_choice(choice, usage)
 
     @staticmethod
     def _parse_usage(usage) -> dict:
-        """解析 usage，统一读取 OpenAI 标准 + DeepSeek 专有的缓存字段。
-
-        各家返回结构：
-        - OpenAI 标准：prompt_tokens_details.cached_tokens
-        - DeepSeek 官方：prompt_cache_hit_tokens / prompt_cache_miss_tokens
-          （同时也会在 prompt_tokens_details.cached_tokens 回填，两者取一致值）
-        - 火山 ARK：prompt_tokens_details.cached_tokens
-
-        返回统一字段：input/output/cache，其中 cache = 命中缓存的 token 数。
-        """
-        usage_dict = {
-            "input": getattr(usage, "prompt_tokens", 0) or 0,
-            "output": getattr(usage, "completion_tokens", 0) or 0,
-            "cache": 0,
-        }
-        # OpenAI 标准 / ARK 隐式缓存的 cached_tokens
-        ptd = getattr(usage, "prompt_tokens_details", None)
-        if ptd:
-            usage_dict["cache"] = getattr(ptd, "cached_tokens", 0) or 0
-        # DeepSeek 专有字段（优先级高于标准字段，若两者不一致以专有字段为准）
-        hit = getattr(usage, "prompt_cache_hit_tokens", None)
-        if hit and hit > usage_dict["cache"]:
-            usage_dict["cache"] = hit
-        return usage_dict
+        """解析 usage，统一读取 OpenAI 标准 + DeepSeek 专有的缓存字段。"""
+        return _responses.parse_usage(usage)
 
     @staticmethod
     def _parse_dsml_tool_calls(content: str) -> list[ToolCall]:
         """解析 DeepSeek DSML 格式的工具调用文本。
 
-        DeepSeek 模型偶尔会在 content 中以自有标记格式输出 tool calls：
-            <｜｜DSML｜｜tool_calls> <｜｜DSML｜｜invoke name="tool"> <｜｜DSML｜｜parameter name="key" string="true">value</｜｜DSML｜｜parameter> ...
+        实现见 _text_toolcalls.parse_dsml_tool_calls。保留本类同名 staticmethod 转发：
+        agent.py 以 `OpenAICompatProvider._parse_dsml_tool_calls(...)` 类属性方式调用。
         """
-        import re
-        import uuid
-
-        # 全角和半角竖线都匹配
-        sep = r'[｜|]'
-        tag = sep + sep + r'DSML' + sep + sep
-
-        if "DSML" not in content:
-            return []
-
-        results = []
-        # 匹配每个 invoke 块
-        invoke_pattern = re.compile(
-            r'<' + tag + r'invoke\s+name="([^"]+)"[^>]*>(.*?)</' + tag + r'invoke>',
-            re.DOTALL
-        )
-        param_pattern = re.compile(
-            r'<' + tag + r'parameter\s+name="([^"]+)"[^>]*>(.*?)</' + tag + r'parameter>',
-            re.DOTALL
-        )
-
-        for inv_match in invoke_pattern.finditer(content):
-            tool_name = inv_match.group(1)
-            body = inv_match.group(2)
-            args = {}
-            for p_match in param_pattern.finditer(body):
-                args[p_match.group(1)] = p_match.group(2).strip()
-            results.append(ToolCall(
-                id=f"call_{uuid.uuid4().hex[:8]}",
-                name=tool_name,
-                arguments=args,
-            ))
-
-        return results
+        return _parse_dsml_tool_calls_impl(content)
 
     @staticmethod
     def _contains_dsml(content: str) -> bool:
-        return "DSML" in content and ("｜｜DSML｜｜" in content or "||DSML||" in content)
+        # 保留本类同名 staticmethod 转发：agent.py 以 `OpenAICompatProvider._contains_dsml(...)`
+        # 类属性方式调用。实现见 _text_toolcalls.contains_dsml。
+        return _contains_dsml_impl(content)
 
     def _parse_text_tool_calls(self, content: str) -> list[ToolCall]:
         """从文本中解析 `call:<tool_name>{<args>}` 格式的工具调用。
 
-        某些中转 API（如 cliproxy 转发 Gemini）在 function calling 退化时，
-        会把工具调用序列化成文本而非标准 tool_calls 字段。格式示例：
-            call:default_api:shell{command:gh auth status,intent:检查权限}
-
-        其中 default_api 是 provider 前缀，实际工具名是冒号后的部分。
-        args 不是标准 JSON（key 不带引号），需要宽松解析。
+        实现见 _text_toolcalls.parse_text_tool_calls（不依赖实例状态）。
         """
-        import re
-        import uuid
-
-        # 匹配 call:<prefix>:<tool_name>{<args>} 或 call:<tool_name>{<args>}
-        pattern = re.compile(
-            r'call:\w+:(?P<tool>\w+)\{(?P<args>[^}]*)\}'
-            r'|call:(?P<tool2>\w+)\{(?P<args2>[^}]*)\}'
-        )
-        results = []
-        for m in pattern.finditer(content):
-            tool_name = m.group("tool") or m.group("tool2") or ""
-            args_str = m.group("args") or m.group("args2") or ""
-            if not tool_name:
-                continue
-
-            # 宽松解析 args：key:value,key:value 格式
-            # value 可能包含逗号（如 shell 命令），用贪心匹配到最后一个 value
-            args = {}
-            # 尝试按 key:value 拆分，但 value 里可能含逗号
-            # 策略：找到所有 key: 模式，然后取到下一个 key: 之前的内容作为 value
-            key_pattern = re.compile(r'(\w+):')
-            key_positions = [(km.start(), km.group(1)) for km in key_pattern.finditer(args_str)]
-            for i, (pos, key) in enumerate(key_positions):
-                val_start = pos + len(key) + 1  # 跳过 "key:"
-                if i + 1 < len(key_positions):
-                    val_end = key_positions[i + 1][0]
-                else:
-                    val_end = len(args_str)
-                val = args_str[val_start:val_end].rstrip(',').strip()
-                args[key] = val
-
-            if args:
-                results.append(ToolCall(
-                    id=f"call_{uuid.uuid4().hex[:8]}",
-                    name=tool_name,
-                    arguments=args,
-                ))
-
-        return results
+        return _parse_text_tool_calls_impl(content)
 
     # --- reasoning / thinking 协议（DeepSeek R1 / deepseek-reasoner / 兼容 reasoning_content 的转发）---
 
@@ -442,16 +144,7 @@ class OpenAICompatProvider(BaseProvider):
         """剥离 content 中的图片 blocks，只保留文本部分。
         非 vision 模型（如 GLM-5.2）不接受 image_url content blocks，
         如果不剥离会导致 400 "Input should be a valid string" 格式校验失败。"""
-        if not isinstance(content, list):
-            return content
-        text_parts = []
-        for part in content:
-            if isinstance(part, dict):
-                if part.get("type") == "text":
-                    text_parts.append(part.get("text", ""))
-            elif isinstance(part, str):
-                text_parts.append(part)
-        return "\n".join(text_parts) if text_parts else ""
+        return _transform.strip_images_from_content(content)
 
     def _skip_thinking_field(self) -> bool:
         """直连 DeepSeek 官方 API 时不传顶层 thinking 字段：
@@ -713,7 +406,7 @@ class OpenAICompatProvider(BaseProvider):
                         else:
                             yield StreamChunk(content=content_buf)
                             content_buf = ""
-                
+
                 tool_calls = []
                 for tc in tool_calls_acc.values():
                     try:
