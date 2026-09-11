@@ -66,7 +66,7 @@ def list_channels(ctx: typer.Context):
     )
 
     # wechat
-    from ethan.interface.wechat_ilink import load_credentials as _wechat_creds
+    from ethan.interface.channels.wechat.ilink import load_credentials as _wechat_creds
     wechat_cred = _wechat_creds()
     wechat_enabled = bool(config.wechat.enabled)
     wechat_fields = []
@@ -170,7 +170,7 @@ def set_channel(
 
     # 脚本化配置也触发依赖安装（除非显式 --skip-deps）
     if not skip_deps and (config.lark.app_id or config.lark.app_secret):
-        from ethan.interface.lark_deps import ensure_lark_deps
+        from ethan.interface.channels.lark.deps import ensure_lark_deps
         console.print()
         console.print("[bold]依赖就绪检查与安装[/bold]")
         ensure_lark_deps(
@@ -242,7 +242,7 @@ def _add_lark_interactive():
     console.print("[green]✓ 飞书配置已保存[/green]")
 
     # 自动安装依赖 + 同步 lark-cli app（lark-oapi 包 / lark-cli 二进制 / app sync）
-    from ethan.interface.lark_deps import ensure_lark_deps
+    from ethan.interface.channels.lark.deps import ensure_lark_deps
     console.print()
     console.print("[bold]依赖就绪检查与安装[/bold]")
     status = ensure_lark_deps(
@@ -297,7 +297,7 @@ def _add_wechat():
     """扫码登录微信（iLink Bot API），自动开启监听并重启 serve。"""
     import asyncio
 
-    from ethan.interface.wechat_ilink import login_via_qrcode
+    from ethan.interface.channels.wechat.ilink import login_via_qrcode
 
     console.print()
     console.print("[bold cyan]微信（WeChat）渠道配置[/bold cyan]")
@@ -330,7 +330,7 @@ def _add_wechat():
 
 def _unset_wechat():
     """清除微信登录凭证并关闭监听。"""
-    from ethan.interface.wechat_ilink import _CREDS_PATH, clear_credentials
+    from ethan.interface.channels.wechat.ilink import _CREDS_PATH, clear_credentials
     if _CREDS_PATH.exists():
         clear_credentials()
         console.print("[green]✓ 微信凭证已清除。[/green]")
@@ -353,7 +353,7 @@ def _unset_wechat():
 def _status_wechat():
     """显示当前微信登录状态。"""
     from ethan.core.config import get_config
-    from ethan.interface.wechat_ilink import load_credentials
+    from ethan.interface.channels.wechat.ilink import load_credentials
 
     creds = load_credentials()
     cfg = get_config()

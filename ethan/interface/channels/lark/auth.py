@@ -84,7 +84,7 @@ async def _send_auth_guidance_card(chat_id: str) -> bool:
         },
     }
     # lazy import 避免循环依赖lark_send 依赖 lark_auth，lark_auth 不能顶层导入 lark_send）
-    from ethan.interface.lark_send import _send_interactive_card
+    from ethan.interface.channels.lark.send import _send_interactive_card
     msg_id = await _send_interactive_card(chat_id, card)
     if msg_id:
         _auth_card_sent[chat_id] = now

@@ -7,8 +7,8 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from ethan.interface.lark_render import _render_tool_msg_content
-from ethan.interface.lark_send import (
+from ethan.interface.channels.lark.render import _render_tool_msg_content
+from ethan.interface.channels.lark.send import (
     TypingState,
     _delete_message,
     _edit_message,
@@ -18,7 +18,7 @@ from ethan.interface.lark_send import (
     _send_message,
     _send_reply,
 )
-from ethan.interface.lark_tool_trace import sanitize_args_summary, sanitize_result_preview
+from ethan.interface.channels.lark.tool_trace import sanitize_args_summary, sanitize_result_preview
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ async def _handle_agent_message(
     from ethan.core.agent import Agent
 
     # 查找或创建对应的 Session（lark 渠道归 admin）
-    from ethan.interface.lark_stream import (
+    from ethan.interface.channels.lark.stream import (
         _lark_chat_map,
         _lark_running_tasks,
         _lark_welcomed,
@@ -151,7 +151,7 @@ async def _handle_agent_message(
         # 尾部未消化的用户反馈（reaction 👍/👎 落库的孤立 user 行）：配不进
         # user→assistant 上下文配对，显式拼进本轮消息确保 agent 可见。
         # 仅进 agent 上下文，不污染存库的原始 user_msg（与引用/转发同策略）。
-        from ethan.interface.lark_state import _collect_tail_feedback
+        from ethan.interface.channels.lark.state import _collect_tail_feedback
         tail_feedback = _collect_tail_feedback(history)
         if tail_feedback:
             agent_user_text = "\n".join(tail_feedback) + "\n\n---\n" + agent_user_text
@@ -197,7 +197,7 @@ async def _handle_agent_message(
         # 从本地缓存读取群聊背景消息，替代每次拉 API（零延迟）
         # 仅限群聊且非 /btw 模式
         if not btw_mode and chat_id.startswith("oc_"):
-            from ethan.interface.lark_state import _get_group_context
+            from ethan.interface.channels.lark.state import _get_group_context
             recent_msgs = _get_group_context(chat_id, limit=10)
             if recent_msgs:
                 lines = ["[群聊近期消息（供背景参考）]"]
@@ -596,7 +596,7 @@ async def _handle_agent_message(
             else:
                 final_answer = (answer_text or "（没有找到相关内容）").rstrip() + f"\n\n---\n_{stats_line}_"
                 # 超长答案分段：首段写回原卡片（带操作按钮），其余段落追加新卡片，避免 patch 超限静默失败
-                from ethan.interface.lark_render import _split_long_text
+                from ethan.interface.channels.lark.render import _split_long_text
                 chunks = _split_long_text(final_answer)
                 await _edit_message(answer_msg_id, chunks[0], use_card=True, actions=_ANSWER_ACTIONS)
                 extra_msg_ids = []
@@ -609,7 +609,7 @@ async def _handle_agent_message(
             # 登记答案上下文：卡片按钮回调（重新生成/复制原文）与 reaction 反馈（👍/👎）反查用。
             # 后续分段卡片一并登记（不带按钮，但 reaction 👍/👎 和复制原文可命中），
             # 否则用户在分段卡片上点 reaction 无响应。
-            from ethan.interface.lark_state import _register_answer, _update_answer_entry
+            from ethan.interface.channels.lark.state import _register_answer, _update_answer_entry
             for mid in [answer_msg_id, *extra_msg_ids]:
                 _register_answer(
                     mid,
@@ -682,7 +682,7 @@ async def _handle_agent_message(
         # 纯对话（无工具进度行）时 entry 此前缺 row id，regenerate 只能兜底扫
         # 「最后一条 assistant」——点旧卡片时会误删最新一轮，这里补上精确 id。
         if answer_msg_id:
-            from ethan.interface.lark_state import _update_answer_entry as _uae
+            from ethan.interface.channels.lark.state import _update_answer_entry as _uae
             _uae(answer_msg_id, assistant_row_id=final_assistant_row)
 
     except asyncio.CancelledError:

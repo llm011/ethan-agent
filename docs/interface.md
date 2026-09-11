@@ -73,7 +73,7 @@ pnpm tauri build  # 产出 dmg/exe
 
 ---
 
-## REPL 模式（`ethan/interface/repl.py`）
+## REPL 模式（`ethan/interface/repl/`）
 
 ### 设计思路
 
@@ -282,7 +282,7 @@ ethan code "query"              → ACP 委派 Coding Agent（详见 acp.md）
 
 ---
 
-## 飞书 (Lark) 接入（`ethan/interface/lark_events.py`）
+## 飞书 (Lark) 接入（`ethan/interface/channels/lark/events.py`）
 
 ### 概述
 
@@ -290,17 +290,17 @@ ethan code "query"              → ACP 委派 Coding Agent（详见 acp.md）
 
 ### 模块划分
 
-飞书逻辑按职责拆分到 `ethan/interface/` 下的几个平级模块（`lark.py` 已被占用，故用 `lark_*` 前缀而非包目录）：
+飞书逻辑按职责拆分到 `ethan/interface/channels/lark/` 包下的几个模块：
 
 | 模块 | 职责 |
 |------|------|
-| `lark_render.py` | 纯渲染：把文本/markdown/工具进度转成 post 富文本或 interactive 卡片的 content JSON。无 IO。 |
-| `lark_send.py` | 收发 IO：client 构建、发送/编辑/删除/回复消息、通知/图片、消息详情拉取、引用解析。 |
-| `lark_stream.py` | 消息处理：会话状态（去重 / `chat_id`→`session_id` 映射 / 进行中任务登记）、`/命令` 路由、`_handle_message` 的 Agent 流式回复主循环。 |
-| `lark_events.py` | 入口：`lark-cli event consume` 事件循环 + `start/stop_lark_listener` 生命周期，并 re-export `send_lark_notification` / `send_lark_image` 等供外部（定时任务、browser 模块）使用。 |
-| `lark.py` | **遗留**：旧的 webhook 模式（`/lark/webhook` 端点），当前未挂载、未使用。保留是因为 `background_task` / `schedule` 仍 import 它的 `_get_lark_client` / `_send_lark_reply`（纯文本回复兜底）。注意：它在模块顶层 `import lark_oapi`，故 **不能** 被 `api.py` 在模块级 `include_router`——否则会触发 lark_oapi 的 ~40s 全量加载，拖垮 `ethan serve` 冷启动。 |
+| `render.py` | 纯渲染：把文本/markdown/工具进度转成 post 富文本或 interactive 卡片的 content JSON。无 IO。 |
+| `send.py` | 收发 IO：client 构建、发送/编辑/删除/回复消息、通知/图片、消息详情拉取、引用解析。 |
+| `stream.py` | 消息处理：会话状态（去重 / `chat_id`→`session_id` 映射 / 进行中任务登记）、`/命令` 路由、`_handle_message` 的 Agent 流式回复主循环。 |
+| `events.py` | 入口：`lark-cli event consume` 事件循环 + `start/stop_lark_listener` 生命周期，并 re-export `send_lark_notification` / `send_lark_image` 等供外部（定时任务、browser 模块）使用。 |
+| `webhook.py` | **遗留**：旧的 webhook 模式（`/lark/webhook` 端点），当前未挂载、未使用。保留是因为 `background_task` / `schedule` 仍 import 它的 `_get_lark_client` / `_send_lark_reply`（纯文本回复兜底）。注意：它在模块顶层 `import lark_oapi`，故 **不能** 被 `api.py` 在模块级 `include_router`——否则会触发 lark_oapi 的 ~40s 全量加载，拖垮 `ethan serve` 冷启动。 |
 
-依赖方向单向无环：`lark_events → lark_stream → lark_send → lark_render`。`api.py` 仍从 `lark_events` 导入 `start/stop_lark_listener`，外部导入路径不变。
+依赖方向单向无环：`events → stream → send → render`。`api.py` 仍从 `channels.lark.events` 导入 `start/stop_lark_listener`。
 
 ### 配置方式
 
@@ -351,13 +351,13 @@ lark-cli event consume <EventKey>（每个 EventKey 一个子进程，WebSocket 
 
 ### 答案卡片交互（按钮 / 反馈 / 长文分段）
 
-最终答案卡片定稿时附加交互能力（`lark_agent.py` 定稿处 + `lark_event_handlers.py` 回调）：
+最终答案卡片定稿时附加交互能力（`agent.py` 定稿处 + `event_handlers.py` 回调）：
 
 - **操作按钮**：卡片底部带「🔄 重新生成」「📋 复制原文」两个按钮（`card.action.trigger` 回调）。
-  - 重新生成：从答案登记表（`lark_state._lark_answer_map`，内存、24h TTL、上限 100 条）反查原问题 → 删上一轮 user/assistant 落库行（优先用落库时回写的 assistant 行 id 精确锚定；旧条目无 id 时按原问题内容从后往前锚定，绝不误删最新一轮）→ 复用 `_handle_agent_message(save_user_msg=False)` 重跑。task 登记 `_lark_running_tasks`，`/stop` 可取消；同 chat 有任务在跑会提示先 `/stop`。
+  - 重新生成：从答案登记表（`state._lark_answer_map`，内存、24h TTL、上限 100 条）反查原问题 → 删上一轮 user/assistant 落库行（优先用落库时回写的 assistant 行 id 精确锚定；旧条目无 id 时按原问题内容从后往前锚定，绝不误删最新一轮）→ 复用 `_handle_agent_message(save_user_msg=False)` 重跑。task 登记 `_lark_running_tasks`，`/stop` 可取消；同 chat 有任务在跑会提示先 `/stop`。
   - 复制原文：把答案原始 markdown 用 post 气泡重发（post 文本可长按复制），超 4000 字符自动分段。
 - **Reaction 反馈**：用户对答案卡片点 👍/👎 → 反馈写入会话历史（`[用户反馈] ...` user 消息），bot 加 ✅ reaction 确认。其它 emoji 及非答案卡片上的 reaction 忽略。反馈是孤立 user 行，配不进 user→assistant 上下文配对——下轮处理时由 `_collect_tail_feedback` 显式拼进 agent 上下文（本轮回答落库后自然去重）。
-- **长答案分段**：定稿内容超 6000 字符时按段落边界拆分多张卡片（首段写回原卡片带按钮，其余追加新卡片并一并登记，reaction/复制原文在分段卡片上也可命中），切点避开未闭合的 ``` 代码围栏，避免 patch 超限静默失败丢内容。见 `lark_render._split_long_text`。
+- **长答案分段**：定稿内容超 6000 字符时按段落边界拆分多张卡片（首段写回原卡片带按钮，其余追加新卡片并一并登记，reaction/复制原文在分段卡片上也可命中），切点避开未闭合的 ``` 代码围栏，避免 patch 超限静默失败丢内容。见 `render._split_long_text`。
 
 > 登记表仅内存态：进程重启后旧卡片的按钮/反馈会回复「找不到上下文」，直接重发问题即可。
 
@@ -367,7 +367,7 @@ lark-cli event consume <EventKey>（每个 EventKey 一个子进程，WebSocket 
 
 ### 卡片 markdown 表格渲染
 
-飞书卡片 markdown element 内嵌的 GFM pipe-table 触发上限：超过 3 张表格会报 `230099 / 11310`。`lark_render._render_card_content` 按表格数量分两路：
+飞书卡片 markdown element 内嵌的 GFM pipe-table 触发上限：超过 3 张表格会报 `230099 / 11310`。`render._render_card_content` 按表格数量分两路：
 
 - **≤3 张表格**：手拼 `{"tag":"markdown","content":...}` 单元素，前 3 张表格由飞书原生 markdown 解析渲染（样式与正文一致）。0 表格也走这条路——不付 `lark_oapi.channel.card` 的 lazy import 成本（~10s 首次）。
 - **>3 张表格**：走 `_render_card_content_rich`，lazy import `lark_oapi.channel.card.new_card`（CardBuilder fluent API）。前 3 张表格仍留在 markdown 元素里，超出部分用 `c.table(headers, rows, page_size=10)` 原生 table 元素（`page_size` 被 CardBuilder clamp 到飞书 Card 2.0 允许的 1-10 范围）。表格之间的文本继续走 `c.markdown()`，正文样式优化（标题降级 / 硬换行）与手拼路径一致。
@@ -407,7 +407,7 @@ lark-cli event consume <EventKey>（每个 EventKey 一个子进程，WebSocket 
 
 lark-cli 调用用户身份接口（如 `_fetch_recent_chat_messages` 走 `--as user`）时，若 user token 缺失或过期，会触发授权引导卡片，避免群里「静默无回复」的尴尬体验。
 
-**触发条件**（`_is_lark_auth_error` 判定，任一命中即触发）：
+**触发条件**（`_is_auth_error` 判定，任一命中即触发）：
 - stderr 含 `need_user_authorization` / `No user logged in`（用户未登录的常见 stderr）
 - stdout JSON 的 `error.type == "auth_error"`
 - stdout JSON 的 `error.code` 为 `99991663`（user auth missing）/ `99991661`（token invalid）
@@ -419,7 +419,7 @@ lark-cli 调用用户身份接口（如 `_fetch_recent_chat_messages` 走 `--as 
 
 **卡片内容**：红色 header「需要飞书用户授权」+ markdown body 指引用户在终端执行 `lark-cli auth login --domain im` 完成浏览器授权。复用现有 `_send_interactive_card` 通道发送，结构同 `lark_card_templates` 的 schema 2.0。
 
-**覆盖调用点**（`lark_send.py`）：
+**覆盖调用点**（`send.py`）：
 - `_fetch_recent_chat_messages`：用户身份调用，最易触发 → 发卡片
 - `_send_reply`：bot 身份，理论上不会 user 鉴权失败，但保留检测 → 发卡片
 - `_fetch_message_detail`：bot 身份 mget，保留检测 → 仅日志不 发卡片（避免 bot 鉴权失败时刷屏）
@@ -428,7 +428,7 @@ lark-cli 调用用户身份接口（如 `_fetch_recent_chat_messages` 走 `--as 
 
 ### 多事件订阅与卡片回调
 
-`lark_events._EVENT_KEYS` 列出要订阅的 EventKey，`start_lark_listener` 为每个 key 各起一个 `_event_loop` task（独立子进程、独立断线重连、互不影响）。每个子进程把 NDJSON 行解析成 event dict 后交给 `lark_stream._dispatch` 路由：
+`events._EVENT_KEYS` 列出要订阅的 EventKey，`start_lark_listener` 为每个 key 各起一个 `_event_loop` task（独立子进程、独立断线重连、互不影响）。每个子进程把 NDJSON 行解析成 event dict 后交给 `stream._dispatch` 路由：
 
 | EventKey | handler | 用途 |
 |----------|---------|------|
@@ -457,10 +457,10 @@ lark-cli 调用用户身份接口（如 `_fetch_recent_chat_messages` 走 `--as 
 
 延迟导入重量级模块（`anthropic`、`openai` 只在实际发起对话时加载），加上 `uv` 的依赖缓存，`ethan` 命令冷启动到第一次响应已降至约 0.16s（相比优化前的 7.6s）。
 
-`ethan serve` 同样避免在模块加载阶段触发重型 import。飞书 SDK `lark_oapi` 因加载大量业务域 model 包（acs/corehr/hire/calendar/…）单次 import 约 40s，若在 `api.py` 模块级挂 `lark.py` 的 webhook 路由会直接卡死冷启动。对策：
+`ethan serve` 同样避免在模块加载阶段触发重型 import。飞书 SDK `lark_oapi` 因加载大量业务域 model 包（acs/corehr/hire/calendar/…）单次 import 约 40s，若在 `api.py` 模块级挂 `webhook.py` 的 webhook 路由会直接卡死冷启动。对策：
 
-- `api.py` 不 `include_router` 任何 lark 路由；飞书接入走 `lark_events.py` 的 WebSocket 子进程模式，在 lifespan 里启动。
-- `lark_send.py` / `lark_stream.py` 里所有 `lark_oapi` 都是**函数内 lazy import**（首次用到才加载），模块级 import 不触发。
+- `api.py` 不 `include_router` 任何 lark 路由；飞书接入走 `events.py` 的 WebSocket 子进程模式，在 lifespan 里启动。
+- `send.py` / `stream.py` 里所有 `lark_oapi` 都是**函数内 lazy import**（首次用到才加载），模块级 import 不触发。
 - `api.py` 用 `importlib.util.find_spec("lark_oapi")` 轻量探测是否安装，不触发完整 import。
 
 这样 `from ethan.interface.api import app` 约 1.6s，`ethan serve restart` 端口探测在 15s 内通过，不再误报「端口未就绪」。

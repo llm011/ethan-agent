@@ -173,7 +173,7 @@ def _run_background(task: _BgTask, prompt: str, channel: str, channel_context: s
             if chat_id:
                 import asyncio
 
-                from ethan.interface.lark import _get_lark_client, _send_lark_reply
+                from ethan.interface.channels.lark.webhook import _get_lark_client, _send_lark_reply
                 client = _get_lark_client()
                 if client:
                     prefix = f"【后台任务完成】{task.title}\n\n"

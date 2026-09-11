@@ -103,7 +103,7 @@ async def _add_reaction(client: lark.Client, message_id: str, emoji: str = "THIN
     webhook 路径下的早期添加（client 已构建好）；如果 lark_send 自己能拿到 client 就直接用，
     否则退回到这里传入的 client。为避免双 client 不一致，这里直接调 _send_reaction。
     """
-    from ethan.interface.lark_send import _send_reaction
+    from ethan.interface.channels.lark.send import _send_reaction
     await _send_reaction(message_id)
 
 

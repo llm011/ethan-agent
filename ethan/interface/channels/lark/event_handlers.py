@@ -45,7 +45,7 @@ async def _handle_reaction(event_data: dict) -> None:
         logger.debug("[Lark] reaction %s ignored (not feedback emoji) chat=%s", rt, chat_id)
         return
 
-    from ethan.interface.lark_state import _get_answer_entry
+    from ethan.interface.channels.lark.state import _get_answer_entry
     entry = _get_answer_entry(message_id)
     if not entry:
         logger.debug("[Lark] reaction %s on non-answer msg %s ignored", rt, message_id)
@@ -63,7 +63,7 @@ async def _handle_reaction(event_data: dict) -> None:
         await store.save_message(entry["session_id"], Message(role="user", content=note))
         await store.touch(entry["session_id"])
         # bot 加 ✅ reaction 作为确认（不发消息，避免噪音）
-        from ethan.interface.lark_typing import _send_reaction
+        from ethan.interface.channels.lark.typing import _send_reaction
         await _send_reaction(message_id, "DONE")
         logger.info(
             "[Lark] feedback recorded: chat=%s session=%s good=%s by=%s",
@@ -117,7 +117,7 @@ async def _handle_card_action(event_data: dict) -> None:
                 ]
             },
         }
-        from ethan.interface.lark_send import _send_interactive_card
+        from ethan.interface.channels.lark.send import _send_interactive_card
         await _send_interactive_card(chat_id, card)
         logger.debug(
             "[Lark] card action test echo sent: chat=%s token_present=%s",
@@ -137,9 +137,9 @@ async def _handle_card_action(event_data: dict) -> None:
 
 async def _do_copy_answer(card_msg_id: str, chat_id: str) -> None:
     """复制原文：把答案原始 markdown 用 post 气泡重发（post 文本可长按复制）。"""
-    from ethan.interface.lark_fetch import _send_reply
-    from ethan.interface.lark_render import _split_long_text
-    from ethan.interface.lark_state import _get_answer_entry
+    from ethan.interface.channels.lark.fetch import _send_reply
+    from ethan.interface.channels.lark.render import _split_long_text
+    from ethan.interface.channels.lark.state import _get_answer_entry
 
     entry = _get_answer_entry(card_msg_id)
     text = (entry or {}).get("answer_text", "") or ""
@@ -160,7 +160,7 @@ async def _do_regenerate(card_msg_id: str, chat_id: str, operator_open_id: str) 
     """
     import asyncio as _aio
 
-    from ethan.interface.lark_state import _lark_running_tasks, _untrack_task
+    from ethan.interface.channels.lark.state import _lark_running_tasks, _untrack_task
 
     cur_task = _aio.current_task()
     if cur_task is not None:
@@ -173,9 +173,9 @@ async def _do_regenerate(card_msg_id: str, chat_id: str, operator_open_id: str) 
 
 
 async def _do_regenerate_inner(card_msg_id: str, chat_id: str, operator_open_id: str) -> None:
-    from ethan.interface.lark_fetch import _send_reply
-    from ethan.interface.lark_send import TypingState
-    from ethan.interface.lark_state import _get_answer_entry, _lark_running_tasks
+    from ethan.interface.channels.lark.fetch import _send_reply
+    from ethan.interface.channels.lark.send import TypingState
+    from ethan.interface.channels.lark.state import _get_answer_entry, _lark_running_tasks
 
     entry = _get_answer_entry(card_msg_id)
     if not entry:
@@ -251,8 +251,8 @@ async def _do_regenerate_inner(card_msg_id: str, chat_id: str, operator_open_id:
         "create_time": str(int(_t.time() * 1000)),
         "sender_id": operator_open_id,
     }
-    from ethan.interface.lark_agent import _handle_agent_message
-    from ethan.interface.lark_stream import _get_chat_lock
+    from ethan.interface.channels.lark.agent import _handle_agent_message
+    from ethan.interface.channels.lark.stream import _get_chat_lock
 
     ts = TypingState(card_msg_id)  # THINKING 挂在旧答案卡片上，指示正在重新生成
     await ts.__aenter__()

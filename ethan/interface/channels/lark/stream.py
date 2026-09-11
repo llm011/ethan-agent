@@ -12,17 +12,17 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from ethan.interface.lark_event_handlers import (
+from ethan.interface.channels.lark.event_handlers import (
     _handle_card_action,
     _handle_message_read,
     _handle_reaction,
 )
-from ethan.interface.lark_send import (
+from ethan.interface.channels.lark.send import (
     TypingState,
     _send_interactive_card,
     _send_reply,
 )
-from ethan.interface.lark_state import (
+from ethan.interface.channels.lark.state import (
     _ABORT_KEYWORDS,
     _already_handled,
     _append_debounce_queue,
@@ -54,7 +54,7 @@ logger = logging.getLogger(__name__)
 async def _run_debounce_flush(chat_id: str, sender_open_id: str) -> None:
     """实际触发合并后的 Agent 调用。从队列取出所有文本拼接，用第 1 条的 event_data/identity。
     走原来的串行锁 + _handle_agent_message，保持行为一致。"""
-    from ethan.interface.lark_agent import _handle_agent_message
+    from ethan.interface.channels.lark.agent import _handle_agent_message
     q = _pop_debounce_queue(chat_id, sender_open_id)
     if q is None:
         return
@@ -336,7 +336,7 @@ async def _handle_message(event_data: dict) -> None:
 
     # ── /command：以 / 开头的命令先于 Agent 处理（不加思考表情，直接回复）──
     if is_command(text):
-        from ethan.interface.lark_cmd_context import build_cmd_context
+        from ethan.interface.channels.lark.cmd_context import build_cmd_context
         cmd_ctx = build_cmd_context(chat_id, text, sender_open_id, is_group_chat=is_group_chat)
         reply = await handle_command(cmd_ctx)
         if reply:

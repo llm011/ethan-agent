@@ -46,4 +46,4 @@
 | [浏览器控制 · 扩展内核 (CDP/AX)](./browser/extension-internals.md) | SW 保活、CDP attach 缓存、AX 快照算法、ref 生命周期、各动作 CDP 实现 |
 | [浏览器控制 · 会话/并发/安全](./browser/session-security.md) | 会话绑定隔离、per-session 锁、idle release、鉴权/授权/归属、截图清理、eval 边界 |
 | [浏览器控制 · 设计决策记录](./browser-control-plan.md) | grill 阶段确定的 10 项关键决策(Q1–Q10)及其理由 |
-| Feishu/Lark 集成 | WebSocket 长连接、消息格式、onboarding 流程（见 `ethan/interface/lark_events.py`） |
+| Feishu/Lark 集成 | WebSocket 长连接、消息格式、onboarding 流程（见 `ethan/interface/channels/lark/events.py`） |

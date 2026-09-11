@@ -8,7 +8,7 @@ from rich.spinner import Spinner
 from ethan.core.agent import Agent
 from ethan.providers.base import Message
 
-from .repl_ui import console
+from .ui import console
 
 
 async def run_once(agent: Agent, prompt: str) -> None:

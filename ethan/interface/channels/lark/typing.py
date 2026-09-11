@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from ethan.interface.lark_client import _lark_client
+from ethan.interface.channels.lark.client import _lark_client
 
 logger = logging.getLogger(__name__)
 

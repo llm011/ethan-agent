@@ -737,7 +737,7 @@ def _install_cli_tool(plugin: dict) -> None:
 
 def _is_lark_channel_ready() -> bool:
     """飞书渠道依赖是否就绪：lark-oapi + lark-cli 都装好。"""
-    from ethan.interface.lark_deps import get_lark_deps_status
+    from ethan.interface.channels.lark.deps import get_lark_deps_status
     s = get_lark_deps_status()
     return s.lark_oapi_installed and s.lark_cli_installed
 
@@ -748,7 +748,7 @@ def _install_lark_channel_deps() -> None:
     从已保存的 config 读 app 凭证；若未配置则提示用户先跑渠道配置。
     """
     from ethan.core.config import get_config
-    from ethan.interface.lark_deps import ensure_lark_deps
+    from ethan.interface.channels.lark.deps import ensure_lark_deps
 
     cfg = get_config()
     app_id = cfg.lark.app_id or ""
@@ -1012,7 +1012,7 @@ def _setup_lark() -> None:
     console.print("[green]✓ 飞书配置已保存[/green]")
 
     # 统一调用 ensure_lark_deps：装 lark-oapi + 装 lark-cli + sync app
-    from ethan.interface.lark_deps import ensure_lark_deps
+    from ethan.interface.channels.lark.deps import ensure_lark_deps
     console.print()
     console.print("[bold]依赖就绪检查与安装[/bold]")
     status = ensure_lark_deps(

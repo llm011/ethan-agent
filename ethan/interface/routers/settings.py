@@ -373,7 +373,7 @@ class ChannelPatchRequest(BaseModel):
 @router.get("/channels", dependencies=[Depends(verify_token)])
 async def get_channels():
     config = get_config()
-    from ethan.interface.wechat_ilink import load_credentials as _load_wechat_creds
+    from ethan.interface.channels.wechat.ilink import load_credentials as _load_wechat_creds
     wechat_creds = _load_wechat_creds()
     return {
         "channels": [
@@ -414,7 +414,7 @@ async def patch_channel(req: ChannelPatchRequest):
         if app_id and app_secret:
             import asyncio
 
-            from ethan.interface.lark_deps import ensure_lark_deps
+            from ethan.interface.channels.lark.deps import ensure_lark_deps
             asyncio.create_task(
                 asyncio.to_thread(
                     ensure_lark_deps,
@@ -439,7 +439,7 @@ async def get_lark_deps_status():
 
     前端在 PATCH /api/channels 后轮询此端点，直到 installing=False。
     """
-    from ethan.interface.lark_deps import get_lark_deps_status as _status
+    from ethan.interface.channels.lark.deps import get_lark_deps_status as _status
     return _status().to_dict()
 
 
@@ -449,7 +449,7 @@ async def install_lark_deps():
     import asyncio
 
     from ethan.core.config import get_config as _cfg
-    from ethan.interface.lark_deps import ensure_lark_deps
+    from ethan.interface.channels.lark.deps import ensure_lark_deps
     cfg = _cfg()
     app_id = cfg.lark.app_id or ""
     app_secret = cfg.lark.app_secret or ""

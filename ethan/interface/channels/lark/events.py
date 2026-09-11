@@ -15,7 +15,7 @@ import json
 import logging
 import shutil
 
-from ethan.interface.lark_send import (  # re-export: 外部（browser/定时任务）依赖这些
+from ethan.interface.channels.lark.send import (  # re-export: 外部（browser/定时任务）依赖这些
     send_lark_image,
     send_lark_notification,
 )
@@ -55,7 +55,7 @@ async def _event_loop(event_key: str) -> None:
         # npm 安装放后台线程跑，不阻塞 lifespan 端口绑定；幂等，多个 event key
         # 并发触发由 lark_deps 的进程级 _INSTALL_LOCK 串行化。装不上仅本 listener 不工作。
         from ethan.core.config import get_config as _gcfg
-        from ethan.interface.lark_deps import ensure_lark_deps
+        from ethan.interface.channels.lark.deps import ensure_lark_deps
         _lc = getattr(_gcfg(), "lark", None)
         logger.info("[Lark] lark-cli not found — auto-installing (brew/npm)...")
         status = await asyncio.to_thread(
@@ -80,7 +80,7 @@ async def _event_loop(event_key: str) -> None:
     logger.info("[Lark] Starting WebSocket event listener for %s via lark-cli...", event_key)
 
     # 确保 lark-cli 已绑定正确的 app（容器重启后 ~/.lark-cli/ 丢失时自动重建）
-    from ethan.interface.lark_deps import _lark_cli_current_app, _sync_lark_cli_app
+    from ethan.interface.channels.lark.deps import _lark_cli_current_app, _sync_lark_cli_app
     current_app = _lark_cli_current_app()
     if current_app != lark_cfg.app_id:
         logger.info("[Lark] Syncing lark-cli app config (current=%s, expected=%s)...",
@@ -91,7 +91,7 @@ async def _event_loop(event_key: str) -> None:
             return
 
     # 延迟导入 _dispatch，避免模块加载时拉起 lark_oapi（与原实现一致：lark_oapi 留给子进程）。
-    from ethan.interface.lark_stream import _dispatch
+    from ethan.interface.channels.lark.stream import _dispatch
 
     backoff = 5
     while True:

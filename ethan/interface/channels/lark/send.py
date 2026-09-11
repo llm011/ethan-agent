@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from ethan.interface.lark_render import (
+from ethan.interface.channels.lark.render import (
     _markdown_to_post_elements,
     _render_card_content,
     _render_post_content,
@@ -21,13 +21,13 @@ from ethan.interface.lark_render import (
 logger = logging.getLogger(__name__)
 
 # ── re-exports：保持原有 import 路径可用 ──────────────────────────────────────
-from ethan.interface.lark_client import _lark_client  # noqa: E402
-from ethan.interface.lark_fetch import (  # noqa: E402
+from ethan.interface.channels.lark.client import _lark_client  # noqa: E402
+from ethan.interface.channels.lark.fetch import (  # noqa: E402
     _fetch_recent_chat_messages,
     _resolve_quoted_text,
     _send_reply,
 )
-from ethan.interface.lark_typing import TypingState  # noqa: E402
+from ethan.interface.channels.lark.typing import TypingState  # noqa: E402
 
 __all__ = [
     "_lark_client",
