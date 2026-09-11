@@ -224,7 +224,11 @@ class AnthropicProvider(BaseProvider):
         tools: list[ToolDefinition] | None = None,
         system: str | None = None,
         max_tokens: int | None = None,
+        disable_thinking: bool = False,
     ) -> Message:
+        # disable_thinking 对本 provider 是 no-op：这里从不传 thinking 参数，
+        # 扩展思考本就未开启（见 stream_chat 里 thinking_delta 分支的说明），
+        # 无需也无从关闭；参数仅为与 BaseProvider 接口保持一致。
         self._check_auth()
         kwargs: dict = {
             "model": self._model,

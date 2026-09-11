@@ -471,6 +471,7 @@ class OpenAICompatProvider(BaseProvider):
         tools: list[ToolDefinition] | None = None,
         system: str | None = None,
         max_tokens: int | None = None,
+        disable_thinking: bool = False,
     ) -> Message:
         reasoning = self._wants_reasoning()
         oai_messages = self._to_openai_messages(messages, include_reasoning=reasoning)
@@ -487,7 +488,8 @@ class OpenAICompatProvider(BaseProvider):
             kwargs["tools"] = self._to_openai_tools(tools)
             kwargs["tool_choice"] = "auto"
         if reasoning and not self._skip_thinking_field():
-            kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
+            state = "disabled" if disable_thinking else "enabled"
+            kwargs["extra_body"] = {"thinking": {"type": state}}
 
         response = await self._client.chat.completions.create(**kwargs)
         if not response.choices:

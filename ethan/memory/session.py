@@ -136,6 +136,33 @@ def _count_content(text: str) -> int:
 SHORT_QUESTION_CHARS = 3
 
 
+# 成对的 <think>...</think> 思考块（跨行）
+_THINK_BLOCK_RE = re.compile(r"<think\b[^>]*>.*?</think\s*>", re.IGNORECASE | re.DOTALL)
+# 残留的未闭合 <think>（被截断时只剩开标签），其后内容全丢
+_THINK_OPEN_RE = re.compile(r"<think\b[^>]*>.*$", re.IGNORECASE | re.DOTALL)
+# 任何残余的 think 标签碎片
+_THINK_TAG_RE = re.compile(r"</?think\b[^>]*>", re.IGNORECASE)
+# markdown 行内/块级标记：** * _ ` ~ # >，标题里一律去掉
+_MD_MARK_RE = re.compile(r"[*_`~#>]+")
+
+
+def _sanitize_title(raw: str) -> str:
+    """清洗模型返回的标题：去掉 <think> 思考块、markdown 标记、首尾引号/空白。
+
+    某些 lite 模型/中转会把推理过程以内联 <think>...</think> 塞进正文，或输出
+    markdown 标记（如 **标题**）；直接当标题会出现 "<think>**Creating a" 这类脏值。
+    """
+    if not raw:
+        return ""
+    t = _THINK_BLOCK_RE.sub("", raw)  # 先去成对思考块
+    t = _THINK_OPEN_RE.sub("", t)     # 再去未闭合的开标签及其后内容
+    t = _THINK_TAG_RE.sub("", t)      # 兜底清掉残余标签碎片
+    t = _MD_MARK_RE.sub("", t)        # 去 markdown 标记
+    t = t.strip().strip('"\'“”').strip()
+    return t
+
+
+
 async def _generate_smart_title(messages: list[Message], retries: int = 3) -> str | None:
     """用廉价模型生成 ≤20 字的简洁标题；lite 模型可用时失败重试 retries 次。
 
@@ -181,8 +208,9 @@ async def _generate_smart_title(messages: list[Message], retries: int = 3) -> st
             resp = await provider.chat(
                 [Message(role="user", content=prompt)],
                 system="你是一个标题生成助手。你只能基于给出的文本总结标题，无法也无需访问任何链接或外部资源；只输出标题本身，不加引号或标点。",
+                disable_thinking=True,
             )
-            title = resp.content.strip().strip('"\'""').strip()
+            title = _sanitize_title(resp.content)
             if title and not _refusal_re.match(title):
                 return title[:20]
         except Exception:

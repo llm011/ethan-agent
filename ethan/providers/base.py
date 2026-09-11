@@ -132,7 +132,14 @@ class BaseProvider(ABC):
         tools: list[ToolDefinition] | None = None,
         system: str | None = None,
         max_tokens: int | None = None,
-    ) -> Message: ...
+        disable_thinking: bool = False,
+    ) -> Message:
+        """disable_thinking=True 时尽量关闭模型推理（用于标题生成等轻量任务）。
+
+        仅在 provider 支持显式关闭时生效；直连 DeepSeek 官方 API 等强制推理的
+        场景无法关闭，需靠调用方对返回文本做清洗兜底。
+        """
+        ...
 
     @abstractmethod
     async def stream_chat(
