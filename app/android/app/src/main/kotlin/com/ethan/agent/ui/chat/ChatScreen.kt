@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -62,6 +63,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -99,11 +101,13 @@ import androidx.compose.ui.res.painterResource
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import com.ethan.agent.R
 import com.ethan.agent.core.model.FileSignature
+import com.ethan.agent.core.model.ModelSelection
 import com.ethan.agent.core.model.Quote
 import com.ethan.agent.core.model.fullId
 import com.ethan.agent.shared.UiMessage
@@ -279,7 +283,8 @@ fun ChatScreen(
 
                 HorizontalDivider()
 
-                // Model selector
+                // 模型选择器 —— 对齐 Web 的 ModelSelect：
+                // 显示 alias/description 而非裸 id，右侧标 provider 消歧，选中值为 provider/id。
                 Text("模型", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (state.modelAmbiguous) {
                     Text(
@@ -289,36 +294,78 @@ fun ChatScreen(
                     )
                 }
                 var modelExpanded by remember { mutableStateOf(false) }
+                val effectiveModel = remember(state.models, state.selectedModel) {
+                    ModelSelection.effectiveValue(state.models, state.selectedModel)
+                }
+                val modelAmbiguous = remember(state.models, state.selectedModel) {
+                    ModelSelection.isAmbiguous(state.models, state.selectedModel)
+                }
+                val currentModel = remember(state.models, effectiveModel) {
+                    ModelSelection.findById(state.models, effectiveModel)
+                }
+                val selectedModelRaw = state.selectedModel
+                val modelFieldText = when {
+                    modelAmbiguous -> "有多个 provider 提供该模型，请指定一个"
+                    currentModel != null -> ModelSelection.displayNameOf(currentModel)
+                    // 匹配不到就显示原始值，别退化成占位符——用户至少能看出当前状态
+                    !selectedModelRaw.isNullOrBlank() -> selectedModelRaw
+                    else -> ""
+                }
+                val modelProviderLabel = currentModel?.provider?.takeIf { it.isNotBlank() }
                 ExposedDropdownMenuBox(expanded = modelExpanded, onExpandedChange = { modelExpanded = it }) {
-                    AssistChip(
-                        onClick = { modelExpanded = true },
-                        // 歧义时裸 id 并不在候选列表里，直接展示会让用户以为已经选中；
-                        // 与 web 的 unmatchedLabel 一致，改成「请指定一个」的提示文案
-                        label = {
-                            Text(
-                                if (state.modelAmbiguous) "有多个 provider 提供该模型，请指定一个"
-                                else state.selectedModel ?: "选择模型",
-                                maxLines = 1,
-                            )
-                        },
+                    OutlinedTextField(
+                        value = modelFieldText,
+                        onValueChange = {},
+                        readOnly = true,
+                        singleLine = true,
+                        placeholder = { Text("选择模型") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = modelExpanded) },
+                        // 消歧标注跟在选中名下面，和列表项右侧的 provider 标注一致
+                        supportingText = if (modelProviderLabel != null) {
+                            { Text(modelProviderLabel) }
+                        } else null,
                         modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
                     )
-                    ExposedDropdownMenu(expanded = modelExpanded, onDismissRequest = { modelExpanded = false }) {
-                        state.models.forEach { model ->
+                    ExposedDropdownMenu(
+                        expanded = modelExpanded,
+                        onDismissRequest = { modelExpanded = false },
+                        modifier = Modifier.heightIn(max = 360.dp),
+                    ) {
+                        if (state.models.isEmpty()) {
                             DropdownMenuItem(
-                                // label 用别名（或描述/id），副标题标 provider，方便分辨不同 provider 的同名模型
+                                text = { Text("暂无模型", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                                onClick = {},
+                                enabled = false,
+                            )
+                        }
+                        state.models.forEach { model ->
+                            val itemValue = ModelSelection.fullIdOf(model)
+                            DropdownMenuItem(
                                 text = {
-                                    Column {
-                                        Text(model.alias.firstOrNull() ?: model.description.ifBlank { model.id })
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
                                         Text(
-                                            model.provider,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            ModelSelection.displayNameOf(model),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f, fill = false),
                                         )
+                                        if (model.provider.isNotBlank()) {
+                                            Spacer(Modifier.width(8.dp))
+                                            Text(
+                                                model.provider,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                                maxLines = 1,
+                                                modifier = Modifier.weight(1f),
+                                            )
+                                        }
                                     }
                                 },
                                 onClick = {
-                                    onModelSelected(model.fullId)
+                                    onModelSelected(itemValue)
                                     modelExpanded = false
                                 },
                             )
@@ -326,16 +373,57 @@ fun ChatScreen(
                     }
                 }
 
-                // Mode chips
+                // 模式选择器 —— Web 上是单个下拉（不是一排 chip）。原来用 Row 排 FilterChip，
+                // 选项一多就把最后一个挤到只剩一个字宽换行，窄屏尤其明显。
                 if (state.modes.isNotEmpty()) {
                     Text("模式", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        state.modes.forEach { mode ->
-                            FilterChip(
-                                selected = state.selectedMode == mode.key,
-                                onClick = { onModeSelected(if (state.selectedMode == mode.key) "" else mode.key) },
-                                label = { Text(mode.label) },
+                    var modeExpanded by remember { mutableStateOf(false) }
+                    val currentMode = remember(state.modes, state.selectedMode) {
+                        state.modes.firstOrNull { it.key == state.selectedMode }
+                    }
+                    ExposedDropdownMenuBox(expanded = modeExpanded, onExpandedChange = { modeExpanded = it }) {
+                        OutlinedTextField(
+                            value = currentMode?.label ?: "",
+                            onValueChange = {},
+                            readOnly = true,
+                            singleLine = true,
+                            placeholder = { Text("模式") },
+                            leadingIcon = currentMode?.icon?.takeIf { it.isNotBlank() }?.let { icon ->
+                                { Text(icon) }
+                            },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = modeExpanded) },
+                            modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
+                        )
+                        ExposedDropdownMenu(
+                            expanded = modeExpanded,
+                            onDismissRequest = { modeExpanded = false },
+                            modifier = Modifier.heightIn(max = 360.dp),
+                        ) {
+                            // 首项是「不指定模式」——对应 Web 的 `__default__` 空选项
+                            DropdownMenuItem(
+                                text = { Text("默认（不指定）") },
+                                onClick = {
+                                    onModeSelected("")
+                                    modeExpanded = false
+                                },
                             )
+                            state.modes.forEach { mode ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            if (mode.icon.isNotBlank()) {
+                                                Text(mode.icon)
+                                                Spacer(Modifier.width(8.dp))
+                                            }
+                                            Text(mode.label)
+                                        }
+                                    },
+                                    onClick = {
+                                        onModeSelected(mode.key)
+                                        modeExpanded = false
+                                    },
+                                )
+                            }
                         }
                     }
                 }
