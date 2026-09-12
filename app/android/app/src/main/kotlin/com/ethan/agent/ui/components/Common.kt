@@ -174,63 +174,71 @@ fun <T> EthanScrollableTabBar(
     modifier: Modifier = Modifier,
     subtitleOf: ((T) -> String)? = null,
     horizontalPadding: androidx.compose.ui.unit.Dp = 12.dp,
+    /** 右侧常驻操作（如「事实」tab 收起搜索框后露出的放大镜）。tab 多时会被挤出去滚走。 */
+    action: (@Composable () -> Unit)? = null,
 ) {
     val scrollState = rememberScrollState()
     Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .horizontalScroll(scrollState)
-            .padding(horizontal = horizontalPadding),
-        horizontalArrangement = Arrangement.spacedBy(0.dp),
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        tabs.forEach { tab ->
-            val selected = tab == selectedTab
-            val hasSubtitle = subtitleOf != null
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier
-                    .clickable(
-                        indication = null,
-                        interactionSource = remember { MutableInteractionSource() },
-                    ) { onTabSelected(tab) }
-                    .padding(
-                        horizontal = if (hasSubtitle) 16.dp else 12.dp,
-                        vertical = if (hasSubtitle) 10.dp else 8.dp,
-                    ),
-            ) {
-                Text(
-                    text = labelOf(tab),
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                    ),
-                    color = if (selected) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (hasSubtitle) {
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .horizontalScroll(scrollState)
+                .padding(horizontal = horizontalPadding),
+            horizontalArrangement = Arrangement.spacedBy(0.dp),
+        ) {
+            tabs.forEach { tab ->
+                val selected = tab == selectedTab
+                val hasSubtitle = subtitleOf != null
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .clickable(
+                            indication = null,
+                            interactionSource = remember { MutableInteractionSource() },
+                        ) { onTabSelected(tab) }
+                        .padding(
+                            horizontal = if (hasSubtitle) 16.dp else 12.dp,
+                            vertical = if (hasSubtitle) 10.dp else 8.dp,
+                        ),
+                ) {
                     Text(
-                        text = subtitleOf!!(tab),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
-                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        text = labelOf(tab),
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                        ),
+                        color = if (selected) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Spacer(Modifier.height(6.dp))
-                } else {
-                    Spacer(Modifier.height(4.dp))
+                    if (hasSubtitle) {
+                        Text(
+                            text = subtitleOf!!(tab),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                    } else {
+                        Spacer(Modifier.height(4.dp))
+                    }
+                    Surface(
+                        modifier = Modifier.size(
+                            width = if (hasSubtitle) 32.dp else 24.dp,
+                            height = 3.dp,
+                        ),
+                        shape = RoundedCornerShape(2.dp),
+                        color = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                    ) {}
                 }
-                Surface(
-                    modifier = Modifier.size(
-                        width = if (hasSubtitle) 32.dp else 24.dp,
-                        height = 3.dp,
-                    ),
-                    shape = RoundedCornerShape(2.dp),
-                    color = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
-                ) {}
             }
         }
+        action?.invoke()
     }
 }
 

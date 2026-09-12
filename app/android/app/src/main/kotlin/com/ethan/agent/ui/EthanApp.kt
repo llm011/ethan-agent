@@ -157,6 +157,11 @@ private fun MainContent(authViewModel: AuthViewModel) {
         // 实测顶栏文字落到 272px（多出约 74dp 的空白带）—— 就是用户说的
         // 「header 离顶部那么远」。既然各页自己管，这个外层 Scaffold 就一个 inset
         // 都不该加，innerPadding 也就不需要了。
+        //
+        // lint 的 UnusedMaterial3ScaffoldPaddingParameter 在这里是误报：它假设
+        // contentPadding 里带着 app bar 的高度，但本 Scaffold 既没有 appBar 也把
+        // contentWindowInsets 归了零，innerPadding 恒为 0，忽略它是刻意的。
+        @Suppress("UnusedMaterial3ScaffoldPaddingParameter")
         Scaffold(contentWindowInsets = WindowInsets(0, 0, 0, 0)) { _ ->
             NavHost(
                 navController = navController,
