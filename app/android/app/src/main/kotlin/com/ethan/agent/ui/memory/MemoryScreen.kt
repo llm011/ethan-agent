@@ -76,6 +76,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -106,6 +107,7 @@ import com.ethan.agent.ui.components.SnackbarContainer
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -444,21 +446,78 @@ private fun FactsListContent(
 ) {
     val listState = rememberLazyListState()
 
-    // 滚动方向驱动的收起/展开。
+    // 滚动驱动的收起/展开。
     //
-    // 判定用「当前可见项」而不是 `listState.isScrollInProgress` + 累计位移 ——
-    // 后者在 fling 时方向会抖，搜索框会跟着抽。
-    // 规则：滑过第一项（正在看列表深处）就收起；回到顶部附近就展开。
-    LaunchedEffect(listState) {
+    // 累积的是「**相对起点**滚了多远」，不是「首项露出多少」——
+    // 位置量会和下面的「收起后把首项对齐到顶部」互相打架：一收起就把列表拉回
+    // 顶部 → 位置量变小 → 又判定成没滚过 → 搜索框弹回来 → 抖动（实测过）。
+    // 行程是个不进反馈环的量：对齐顶部会把 `anchor` 一起重置，但那时已经收起了，
+    // 重置只会让下一次收起重新需要一个完整行程去触发，用户无感。
+    //
+    // [index, offset] 是「列表顶端正对着哪一项、偏了多少像素」，两者相减即绝对位置。
+    val collapseThresholdPx = with(LocalDensity.current) { 48.dp.toPx() }
+    LaunchedEffect(listState, collapseThresholdPx) {
+        var anchor = 0f          // 下行行程的起点（绝对位置）
+        var collapsedAt = 0f     // 收起时记住的位置
+        var armed = false        // 是否正在累计下行行程
         snapshotFlow {
-            val info = listState.layoutInfo
-            val firstVisible = info.visibleItemsInfo.firstOrNull()
-                ?: return@snapshotFlow false
-            // 首项整体已滚出屏幕上方 → 视为「在看后面」
-            firstVisible.index > 0 || firstVisible.offset < -24
+            val first = listState.layoutInfo.visibleItemsInfo.firstOrNull()
+                ?: return@snapshotFlow Pair(Int.MIN_VALUE, 0f)
+            Pair(first.index, first.offset.toFloat())
         }
             .distinctUntilChanged()
-            .collect { scrolledPastTop -> onCollapsedChange(scrolledPastTop) }
+            .collect { (index, offset) ->
+                val pos = index * 1_000_000f + offset
+
+                // 回到顶部（首项完好地停在顶端）→ 展开，并复位检测
+                if (index == 0 && offset >= 0f) {
+                    armed = false
+                    onCollapsedChange(false)
+                    return@collect
+                }
+                if (!listState.isScrollInProgress) return@collect
+
+                if (!armed) {
+                    armed = true
+                    anchor = if (collapsed) collapsedAt else pos
+                }
+                // 往下滑了足够远 → 收起（已经收起就不重复触发）
+                if (!collapsed && pos - anchor >= collapseThresholdPx) {
+                    collapsedAt = pos
+                    onCollapsedChange(true)
+                }
+                // 往回滑回来（相对收起点）→ 展开
+                if (collapsed && collapsedAt - pos >= collapseThresholdPx) {
+                    armed = false
+                    onCollapsedChange(false)
+                }
+            }
+    }
+
+    // 收起的那一刻，把「当前停在列表顶端的那一项」对齐到顶端。
+    //
+    // 否则搜索框让出的高度会让内容「悬」在半空 —— 顶端那张卡片只剩下半截，
+    // 看着就像第一条不见了（用户反馈的原话）。
+    //
+    // 注意对齐的**不是第 0 项**：用户一滑可能已经滑过好几张卡片，硬拉回第 0 项
+    // 等于把人拽回列表开头。对齐首项只是把它从「被切一半」变成「完整显示」，
+    // 视觉上内容几乎没动，卡片却容易读了。
+    //
+    // 由 collapsed 边沿触发，不塞进上面的方向检测里 —— 后者会让「对齐」影响
+    // 检测的输入，形成抖动（实测过）。
+    // 必须**等收起动画走完**再对齐：动画这 180ms 里列表可视高度一直在长高，
+    // 对齐早了，多出来的高度会从上方把上一张卡片的尾巴露出来（实测就是
+    // 顶栏下面挂着半行字）。等高度定下来再对，才算真的对齐。
+    var wasCollapsed by remember { mutableStateOf(false) }
+    LaunchedEffect(collapsed) {
+        if (collapsed && !wasCollapsed) {
+            delay(200)
+            // 只有首项确实被切掉一截时才动；完好对齐时不动，避免无谓的滚动动画
+            if (listState.firstVisibleItemScrollOffset > 0) {
+                listState.animateScrollToItem(listState.firstVisibleItemIndex)
+            }
+        }
+        wasCollapsed = collapsed
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -515,8 +574,14 @@ private fun FactsListContent(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            // 上边距给 4dp：搜索框自己带了 6dp 的下边距，再叠 8dp 顶部会显空。
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
+            // 搜索框在时上边距给 4dp（它自己带了 6dp 下边距，再叠 8dp 会显空）；
+            // 收起后 4dp 太贴，第一张卡片会紧挨 tab 栏，所以补到 8dp。
+            contentPadding = PaddingValues(
+                start = 16.dp,
+                end = 16.dp,
+                top = if (collapsed) 8.dp else 4.dp,
+                bottom = 24.dp,
+            ),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             items(filteredFacts, key = { it.index }) { item ->
@@ -750,17 +815,52 @@ private fun RecordsTab(
     val chipsScrollState = rememberScrollState()
     val listState = rememberLazyListState()
 
-    // 滚动方向驱动的收起/展开 —— 与 FactsListContent 同一套判定逻辑（用「当前可见项」
-    // 而非 isScrollInProgress + 累计位移，后者在 fling 时方向会抖、会跟搜索框一起抽）。
-    LaunchedEffect(listState) {
+    // 滚动驱动的收起/展开 —— 与 FactsListContent 同一套判据，理由见那边的注释。
+    val collapseThresholdPx = with(LocalDensity.current) { 48.dp.toPx() }
+    LaunchedEffect(listState, collapseThresholdPx) {
+        var anchor = 0f
+        var collapsedAt = 0f
+        var armed = false
         snapshotFlow {
-            val info = listState.layoutInfo
-            val firstVisible = info.visibleItemsInfo.firstOrNull()
-                ?: return@snapshotFlow false
-            firstVisible.index > 0 || firstVisible.offset < -24
+            val first = listState.layoutInfo.visibleItemsInfo.firstOrNull()
+                ?: return@snapshotFlow Pair(Int.MIN_VALUE, 0f)
+            Pair(first.index, first.offset.toFloat())
         }
             .distinctUntilChanged()
-            .collect { scrolledPastTop -> onCollapsedChange(scrolledPastTop) }
+            .collect { (index, offset) ->
+                val pos = index * 1_000_000f + offset
+                if (index == 0 && offset >= 0f) {
+                    armed = false
+                    onCollapsedChange(false)
+                    return@collect
+                }
+                if (!listState.isScrollInProgress) return@collect
+                if (!armed) {
+                    armed = true
+                    anchor = if (collapsed) collapsedAt else pos
+                }
+                if (!collapsed && pos - anchor >= collapseThresholdPx) {
+                    collapsedAt = pos
+                    onCollapsedChange(true)
+                }
+                if (collapsed && collapsedAt - pos >= collapseThresholdPx) {
+                    armed = false
+                    onCollapsedChange(false)
+                }
+            }
+    }
+
+    // 收起后把停在顶端的那一项对齐到顶端（同 FactsListContent，理由见那边 ——
+    // 尤其是「要等动画走完再对齐」这一点）。
+    var wasCollapsed by remember { mutableStateOf(false) }
+    LaunchedEffect(collapsed) {
+        if (collapsed && !wasCollapsed) {
+            delay(200)
+            if (listState.firstVisibleItemScrollOffset > 0) {
+                listState.animateScrollToItem(listState.firstVisibleItemIndex)
+            }
+        }
+        wasCollapsed = collapsed
     }
 
     Column(Modifier.fillMaxSize()) {
