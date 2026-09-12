@@ -17,7 +17,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -27,6 +26,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.ethan.agent.ui.components.ErrorSnackbar
 import com.ethan.agent.ui.components.EthanTopBar
+import com.ethan.agent.ui.components.EthanScaffold
 import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.SnackbarContainer
 
@@ -43,7 +43,7 @@ fun LogsScreen(
     val snackbar = remember { SnackbarHostState() }
     ErrorSnackbar(state.error, onClearError, snackbar)
 
-    Scaffold(
+    EthanScaffold(
         topBar = {
             EthanTopBar(
                 title = "日志",

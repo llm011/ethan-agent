@@ -106,6 +106,15 @@ class EthanRepository(
 ) {
     val config: Flow<AppConfig> = configStore.config
 
+    /**
+     * 后端 API 根地址（形如 `http://host:port/api`）。
+     *
+     * 文档正文里的图片写的是相对路径（`./images/x.jpg`），Compose 的 markdown
+     * 渲染器没法直接加载 —— 需要拼成绝对 URL 才能取到（对齐 Web 的
+     * `resolveDocsImageUrl()`，它拼的也是 `${API_URL}/docs/images/<file>`）。
+     */
+    suspend fun apiBaseUrl(): String = api.apiBaseUrl()
+
     val isLoggedIn: Flow<Boolean> = config.map { it.authToken.isNotBlank() }
 
     /** 超级权限开关（持久化偏好，跨会话/重启保留） */

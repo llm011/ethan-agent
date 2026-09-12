@@ -55,7 +55,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
@@ -79,6 +78,7 @@ import com.ethan.agent.ui.components.EthanCard
 import com.ethan.agent.ui.components.ErrorSnackbar
 import com.ethan.agent.ui.components.EthanScrollableTabBar
 import com.ethan.agent.ui.components.EthanTopBar
+import com.ethan.agent.ui.components.EthanScaffold
 import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.SnackbarContainer
 
@@ -142,7 +142,7 @@ fun ScheduleScreen(
         onClearTriggerSuccess()
     }
 
-    Scaffold(
+    EthanScaffold(
         topBar = {
             // 顶栏只留「返回 + 标题 + 刷新」——两组切换放到下方筛选行，
             // 否则在 360dp 宽的手机上与居中标题重叠（实测标题被压住）。

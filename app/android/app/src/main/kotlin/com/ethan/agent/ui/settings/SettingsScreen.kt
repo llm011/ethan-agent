@@ -41,7 +41,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -77,6 +76,7 @@ import com.ethan.agent.ui.components.EthanPrimaryButton
 import com.ethan.agent.ui.components.EthanSecondaryButton
 import com.ethan.agent.ui.components.EthanScrollableTabBar
 import com.ethan.agent.ui.components.EthanTopBar
+import com.ethan.agent.ui.components.EthanScaffold
 import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.SnackbarContainer
 import com.ethan.agent.ui.components.StatusSuccess
@@ -150,7 +150,7 @@ fun SettingsScreen(
         )
     }
 
-    Scaffold(
+    EthanScaffold(
         topBar = { EthanTopBar(title = "设置", onBack = onBack) },
         snackbarHost = { SnackbarContainer(snackbar) },
     ) { padding ->

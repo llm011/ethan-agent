@@ -19,7 +19,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -31,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.filled.Description
 import com.ethan.agent.ui.components.EthanEmptyState
 import com.ethan.agent.ui.components.EthanTopBar
+import com.ethan.agent.ui.components.EthanScaffold
 import com.ethan.agent.ui.components.ErrorSnackbar
 import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.SimpleMarkdown
@@ -47,7 +47,7 @@ fun PptPreviewScreen(
     ErrorSnackbar(state.error, onClearError, snackbar)
     val scope = rememberCoroutineScope()
 
-    Scaffold(
+    EthanScaffold(
         topBar = {
             EthanTopBar(
                 title = state.deckName.ifBlank { "PPT 预览" },
@@ -58,7 +58,7 @@ fun PptPreviewScreen(
     ) { padding ->
         if (state.isLoading) {
             LoadingBox(Modifier.padding(padding))
-            return@Scaffold
+            return@EthanScaffold
         }
 
         if (state.slides.isEmpty()) {
@@ -68,7 +68,7 @@ fun PptPreviewScreen(
                 icon = Icons.Default.Description,
                 modifier = Modifier.padding(padding),
             )
-            return@Scaffold
+            return@EthanScaffold
         }
 
         val pagerState = rememberPagerState(initialPage = 0) { state.slides.size }

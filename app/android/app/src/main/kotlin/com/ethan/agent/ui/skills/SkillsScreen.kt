@@ -25,7 +25,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -38,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import com.ethan.agent.core.model.SkillInfo
 import com.ethan.agent.ui.components.ErrorSnackbar
 import com.ethan.agent.ui.components.EthanTopBar
+import com.ethan.agent.ui.components.EthanScaffold
 import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.SnackbarContainer
 
@@ -63,7 +63,7 @@ fun SkillsScreen(
 
     val isDetailOpen = state.selected != null || state.isCreating
 
-    Scaffold(
+    EthanScaffold(
         topBar = {
             if (isDetailOpen) {
                 EthanTopBar(
@@ -96,7 +96,7 @@ fun SkillsScreen(
     ) { padding ->
         if (state.isLoading && state.skills.isEmpty()) {
             LoadingBox(Modifier.padding(padding))
-            return@Scaffold
+            return@EthanScaffold
         }
 
         Column(Modifier.fillMaxSize().padding(padding)) {

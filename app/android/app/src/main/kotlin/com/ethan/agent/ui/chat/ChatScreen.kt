@@ -1,5 +1,7 @@
 package com.ethan.agent.ui.chat
 
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBarsPadding
 import com.ethan.agent.shared.viewmodel.ChatUiState
 import com.ethan.agent.shared.viewmodel.ConnectionState
 
@@ -555,10 +557,14 @@ fun ChatScreen(
     }
 
     Scaffold(
+        // 外层 Scaffold 已不再分发 inset（见 EthanApp.kt），这里自己的顶栏要负责
+        // 状态栏区域，否则标题会被状态栏文字压住。
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .statusBarsPadding()
                     .padding(horizontal = 4.dp, vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),

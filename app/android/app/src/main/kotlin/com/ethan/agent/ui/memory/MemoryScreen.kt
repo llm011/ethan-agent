@@ -53,7 +53,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
@@ -87,6 +86,7 @@ import com.ethan.agent.ui.components.ErrorSnackbar
 import com.ethan.agent.ui.components.EthanEmptyState
 import com.ethan.agent.ui.components.EthanScrollableTabBar
 import com.ethan.agent.ui.components.EthanTopBar
+import com.ethan.agent.ui.components.EthanScaffold
 import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.SimpleMarkdown
 import com.ethan.agent.ui.components.SnackbarContainer
@@ -178,7 +178,7 @@ fun MemoryScreen(
 
     var factsSearchQuery by remember { mutableStateOf("") }
 
-    Scaffold(
+    EthanScaffold(
         topBar = {
             EthanTopBar(
                 title = "记忆",
@@ -277,7 +277,7 @@ private fun FactEditorScreen(
         )
     }
 
-    Scaffold(
+    EthanScaffold(
         topBar = {
             TopAppBar(
                 title = { Text(if (isEditing) "编辑事实" else "事实详情") },
@@ -366,7 +366,7 @@ private fun RecordEditorScreen(
         )
     }
 
-    Scaffold(
+    EthanScaffold(
         topBar = {
             TopAppBar(
                 title = { Text("编辑记录") },

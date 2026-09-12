@@ -1,5 +1,9 @@
 package com.ethan.agent.ui.components
 
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Scaffold
+import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -344,3 +348,39 @@ val StatusSuccess = Color(0xFF22C55E)
 
 /** red-500 */
 val StatusError = Color(0xFFE53935)
+
+/**
+ * 页面骨架。**所有页面都应该用它，而不是直接用 material3 的 `Scaffold`。**
+ *
+ * 为什么必须包一层：M3 的 `Scaffold` 默认把 **系统栏 inset** 算进内容的
+ * `paddingValues`（`contentWindowInsets = ScaffoldDefaults.contentWindowInsets`
+ * = safeDrawing）。而本项目的 [EthanTopBar] 已经自己用 `statusBarsPadding()`
+ * 把状态栏区域吃掉了 —— 于是同一个状态栏高度被算了两次：顶栏下方又多出一条
+ * 状态栏高度的空白带，看起来就是「标题离顶部很远、上面空一大块」。
+ *
+ * 这里把 `contentWindowInsets` 归零，让**顶栏成为唯一**负责状态栏的角色；
+ * 底部仍然通过 `navigationBarsPadding()` 交给各页面的滚动容器自行处理。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EthanScaffold(
+    modifier: Modifier = Modifier,
+    topBar: @Composable () -> Unit = {},
+    bottomBar: @Composable () -> Unit = {},
+    snackbarHost: @Composable () -> Unit = {},
+    floatingActionButton: @Composable () -> Unit = {},
+    containerColor: Color = Color.Unspecified,
+    content: @Composable (PaddingValues) -> Unit,
+) {
+    Scaffold(
+        modifier = modifier,
+        topBar = topBar,
+        bottomBar = bottomBar,
+        snackbarHost = snackbarHost,
+        floatingActionButton = floatingActionButton,
+        containerColor = if (containerColor.isSpecified) containerColor else MaterialTheme.colorScheme.background,
+        // 见上方注释：顶栏已处理状态栏，这里不能再算一遍。
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        content = content,
+    )
+}

@@ -27,7 +27,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -42,6 +41,7 @@ import com.ethan.agent.core.model.KnowledgeItem
 import com.ethan.agent.ui.components.EthanCard
 import com.ethan.agent.ui.components.ErrorSnackbar
 import com.ethan.agent.ui.components.EthanTopBar
+import com.ethan.agent.ui.components.EthanScaffold
 import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.SnackbarContainer
 
@@ -69,7 +69,7 @@ fun KnowledgeScreen(
 
     val isDetailOpen = state.selected != null || state.isCreating
 
-    Scaffold(
+    EthanScaffold(
         topBar = {
             if (isDetailOpen) {
                 EthanTopBar(
@@ -102,7 +102,7 @@ fun KnowledgeScreen(
     ) { padding ->
         if (state.isLoading && state.items.isEmpty()) {
             LoadingBox(Modifier.padding(padding))
-            return@Scaffold
+            return@EthanScaffold
         }
 
         Column(Modifier.fillMaxSize().padding(padding)) {

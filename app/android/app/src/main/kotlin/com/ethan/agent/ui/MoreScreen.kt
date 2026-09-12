@@ -1,5 +1,7 @@
 package com.ethan.agent.ui
 
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -38,6 +40,9 @@ private val toolGroups = listOf(
 @Composable
 fun MoreScreen(onNavigate: (String) -> Unit) {
     Scaffold(
+        // 外层 Scaffold 已不再分发 inset（见 EthanApp.kt），本页没有用 EthanTopBar，
+        // 所以状态栏区域得由自己的标题栏承担。其余三边 inset 照常保留。
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             Surface(
                 modifier = Modifier.fillMaxWidth(),
@@ -47,7 +52,9 @@ fun MoreScreen(onNavigate: (String) -> Unit) {
                     text = "工具箱",
                     style = MaterialTheme.typography.titleLarge,
                     color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                    modifier = Modifier
+                        .statusBarsPadding()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
                 )
             }
         },

@@ -123,8 +123,11 @@ class EthanApiService(
     private val client: HttpClient,
     private val baseUrlProvider: () -> String,
 ) {
+    /** 当前配置推导出的 API 根地址（`scheme://host:port/api`）。 */
+    fun apiBaseUrl(): String = ServerUrlUtils.toApiBaseUrl(baseUrlProvider())
+
     private fun url(path: String): String {
-        val apiBase = ServerUrlUtils.toApiBaseUrl(baseUrlProvider())
+        val apiBase = apiBaseUrl()
         return "${apiBase.trimEnd('/')}/$path"
     }
 

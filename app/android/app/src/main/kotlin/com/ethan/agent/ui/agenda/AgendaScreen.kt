@@ -51,7 +51,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -87,6 +86,7 @@ import com.ethan.agent.shared.viewmodel.eventTimeText
 import com.ethan.agent.shared.viewmodel.firstDayOfMonthIso
 import com.ethan.agent.ui.components.ErrorSnackbar
 import com.ethan.agent.ui.components.EthanTopBar
+import com.ethan.agent.ui.components.EthanScaffold
 import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.SnackbarContainer
 import kotlinx.coroutines.delay
@@ -167,7 +167,7 @@ fun AgendaScreen(
         }.sortedBy { it.third }
     }
 
-    Scaffold(
+    EthanScaffold(
         topBar = {
             EthanTopBar(
                 title = "日程",

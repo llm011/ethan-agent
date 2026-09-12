@@ -17,7 +17,6 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -29,6 +28,7 @@ import com.ethan.agent.ui.components.EthanEmptyState
 import com.ethan.agent.ui.components.EthanListRow
 import com.ethan.agent.ui.components.ErrorSnackbar
 import com.ethan.agent.ui.components.EthanTopBar
+import com.ethan.agent.ui.components.EthanScaffold
 import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.SimpleMarkdown
 import com.ethan.agent.ui.components.SnackbarContainer
@@ -45,13 +45,13 @@ fun DocsScreen(
     val snackbar = remember { SnackbarHostState() }
     ErrorSnackbar(state.error, onClearError, snackbar)
 
-    Scaffold(
+    EthanScaffold(
         topBar = { EthanTopBar(title = "文档", onBack = onBack) },
         snackbarHost = { SnackbarContainer(snackbar) },
     ) { padding ->
         if (state.isLoading) {
             LoadingBox(Modifier.padding(padding))
-            return@Scaffold
+            return@EthanScaffold
         }
 
         if (showListOnly || state.selectedSlug == null) {
@@ -111,7 +111,17 @@ fun DocsScreen(
                         description = "内容为空",
                     )
                 } else {
-                    SimpleMarkdown(text = state.content)
+                    // 正文里的 `[架构总览](./architecture.md)` 这类相对链接转成站内跳转，
+                    // 而不是丢给系统 ACTION_VIEW（相对路径不是合法 URI，会被拒 → 点了没反应）。
+                    SimpleMarkdown(
+                        text = state.content,
+                        // 正文里的图片是相对路径，需要后端地址才能取到。
+                        apiBase = state.apiBase,
+                        onDocLink = { slug ->
+                            // 只在目标确实存在时跳，避免点了跳到空文档让人以为坏了
+                            if (state.docs.any { it.slug == slug }) onSelectDoc(slug)
+                        },
+                    )
                 }
             }
         }
