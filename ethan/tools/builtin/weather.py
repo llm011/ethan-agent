@@ -38,6 +38,9 @@ class WeatherTool(BaseTool):
                 timeout=10.0,
                 follow_redirects=True,
                 headers={"User-Agent": "curl/7.68.0", "Accept": "application/json"},
+                # 代理只认 ethan 配置，不读 all_proxy/HTTPS_PROXY 环境变量
+                # （SOCKS 代理缺 socksio 包时会在构造 client 阶段直接抛 ImportError）
+                trust_env=False,
             ) as client:
                 resp = await client.get(url)
                 resp.raise_for_status()

@@ -58,6 +58,12 @@ export function formatTrigger(trigger: string): string {
       const mm = isWild(m) ? "00" : m.padStart(2, "0")
       return `${hh}:${mm}`
     }
+    // 小时字段可能是多值（`9,21`）：展开成「09:00、21:00」，
+    // 否则会拼出 `9,21:00` 这种读不通的结果（Android 端 ScheduleFormat 同此逻辑）
+    const fmtHours = (h: string, m: string) =>
+      h.includes(",")
+        ? h.split(",").map(x => padTime(x.trim(), m)).join("、")
+        : padTime(h, m)
 
     // every N minutes via */N
     if (minute.startsWith("*/")) {
@@ -67,7 +73,7 @@ export function formatTrigger(trigger: string): string {
 
     // daily at fixed time
     if (!isWild(hour) && isWild(dow) && isWild(dom)) {
-      return `每天 ${padTime(hour, minute)}`
+      return `每天 ${fmtHours(hour, minute)}`
     }
 
     // specific weekdays
@@ -79,12 +85,12 @@ export function formatTrigger(trigger: string): string {
         "fri": "周五", "sat": "周六", "sun": "周日",
       }
       const days = dow.split(",").map(d => dayNames[d.trim()] ?? d).join("、")
-      return `每 ${days} ${padTime(hour, minute)}`
+      return `每 ${days} ${fmtHours(hour, minute)}`
     }
 
     // monthly
     if (!isWild(dom) && isWild(dow)) {
-      return `每月 ${dom} 日 ${padTime(hour, minute)}`
+      return `每月 ${dom} 日 ${fmtHours(hour, minute)}`
     }
   }
 

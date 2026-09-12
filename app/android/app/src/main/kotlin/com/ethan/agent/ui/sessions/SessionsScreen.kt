@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -123,11 +125,21 @@ fun SessionsScreen(
     ) { padding ->
         var searchExpanded by remember { mutableStateOf(false) }
 
-        Column(Modifier.fillMaxSize().padding(padding)) {
+        // 本页没有 topBar，而 enableEdgeToEdge 下 Scaffold 的 contentPadding 仍包含状态栏
+        // 高度 —— 于是顶部会留出一条空白（筛选条本该紧贴状态栏）。
+        // 这里把状态栏 inset 消费掉，改由筛选条自己用 statusBarsPadding() 顶上去，
+        // 让「返回 + 来源筛选 + 搜索」这条筛选栏充当事实上的顶栏。
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .consumeWindowInsets(padding),
+        ) {
             // Filter bar card
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .statusBarsPadding()
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 shape = MaterialTheme.shapes.extraLarge,
                 color = MaterialTheme.colorScheme.surfaceContainerLow,

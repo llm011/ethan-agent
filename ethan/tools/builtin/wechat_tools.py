@@ -60,7 +60,7 @@ class WeChatMessageSendTool(BaseTool):
 
         try:
             import httpx
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(trust_env=False) as client:
                 await send_text(client, creds, owner_id, "", content)
             return "Message sent to owner via WeChat."
         except Exception as e:

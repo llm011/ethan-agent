@@ -21,6 +21,9 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(libs.kotlinx.serialization.json)
+            // 时间格式化（ScheduleFormat）：纯 Kotlin 多平台库，无 Android 依赖，
+            // 项目 `shared` 模块已在用，此处复用同一版本，不引入新的第三方包。
+            implementation(libs.kotlinx.datetime)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))

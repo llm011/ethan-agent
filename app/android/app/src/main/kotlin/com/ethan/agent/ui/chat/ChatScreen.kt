@@ -572,6 +572,10 @@ fun ChatScreen(
                     text = state.title,
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.primary,
+                    // 单行 + 省略号：标题过长时不能换行把右侧的连接状态徽章挤走
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
                 )
                 ConnectionStateIndicator(state.connectionState, state.isResuming)
             }
@@ -925,14 +929,58 @@ fun ChatScreen(
                     } // end outer Row
                 } // end Surface
 
-                Text(
-                    text = "对话由 AI 生成",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                    modifier = Modifier.padding(top = 2.dp, bottom = 4.dp),
-                )
+                // 底部状态行：左侧放「当前模型 + 运行状态」，右侧固定一行免责声明。
+                // 之前只有居中的「对话由 AI 生成」，既浪费了一整行高度，也没告诉
+                // 用户正在用哪个模型、是否在生成中 —— 这两件事恰好在手机上最需要
+                // 一眼看到（模型选错要立刻发现，生成中要能判断该不该等）。
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    state.selectedModel?.takeIf { it.isNotBlank() }?.let { model ->
+                        Text(
+                            text = model,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                    }
+                    when {
+                        state.isResuming -> FooterStatusDot("重连中", MaterialTheme.colorScheme.tertiary)
+                        state.isStreaming -> FooterStatusDot("生成中", MaterialTheme.colorScheme.primary)
+                        state.connectionState == ConnectionState.Disconnected ->
+                            FooterStatusDot("已断开", MaterialTheme.colorScheme.error)
+                    }
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        text = "对话由 AI 生成",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        maxLines = 1,
+                    )
+                }
             } // end input Column (bottom-aligned)
         }
+    }
+}
+
+/** 底部状态行的小圆点 + 文案（生成中 / 重连中 / 已断开）。 */
+@Composable
+private fun FooterStatusDot(label: String, color: androidx.compose.ui.graphics.Color) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Box(Modifier.size(5.dp).clip(CircleShape).background(color))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = color,
+            maxLines = 1,
+        )
     }
 }
 

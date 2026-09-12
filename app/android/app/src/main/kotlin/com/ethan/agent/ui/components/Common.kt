@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 
 import androidx.compose.foundation.rememberScrollState
@@ -85,7 +86,15 @@ fun SnackbarContainer(snackbarHostState: SnackbarHostState) {
 
 /**
  * 通用顶栏：标题居中，左侧返回按钮，右侧可选操作按钮。
- * 紧凑无多余空白，参考图 3 风格。
+ *
+ * 采用 Gmail 的 edge-to-edge 做法（见 PRD 1.2 C）：
+ * - 背景色**铺到状态栏底下**（顶栏是一条通栏色带，不是浮在内容上方的小条）
+ * - 内容靠 `statusBarsPadding()` 下移到状态栏之下 —— 注意这让开的是**内容**，
+ *   不是顶栏本身；顶栏容器仍然覆盖状态栏区域，所以不会出现「独立色带」。
+ * - 行高 52dp（比 M3 默认 64dp 紧凑，但仍 ≥48dp 触控标准）
+ *
+ * 底色用 `surface`（与页面内容同色，切主题时自动跟随），
+ * 不额外加分隔线 —— 靠色阶与留白区分，避免满屏发丝线。
  */
 @Composable
 fun EthanTopBar(
@@ -94,12 +103,17 @@ fun EthanTopBar(
     onBack: (() -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(48.dp)
-            .padding(horizontal = 4.dp),
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surface,
     ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .height(52.dp)
+                .padding(horizontal = 4.dp),
+        ) {
             // 左侧返回
             if (onBack != null) {
                 IconButton(
@@ -140,6 +154,7 @@ fun EthanTopBar(
                 modifier = Modifier.align(Alignment.CenterEnd),
                 content = actions,
             )
+        }
     }
 }
 

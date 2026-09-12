@@ -61,9 +61,18 @@ class OpenAICompatProvider(BaseProvider):
     def __init__(self, provider_cfg: ProviderConfig, model: str, proxy: Optional[str] = None,
                  vision: Optional[bool] = None):
         from openai import AsyncOpenAI  # lazy: SDK is heavy; only load when a provider instance is created
-        http_client = None
-        if proxy:
-            http_client = httpx.AsyncClient(proxy=proxy, timeout=httpx.Timeout(120.0, connect=10.0))
+        # 必须显式关闭 trust_env，否则 httpx 会读取环境变量里的 all_proxy/HTTPS_PROXY。
+        # 用户机器上常见 `all_proxy=socks5://127.0.0.1:7890`（走本地代理），而 httpx 的
+        # SOCKS 支持需要可选的 socksio 包 —— 没装时 httpx 在**构造 client 时**直接抛
+        # ImportError，整个对话发起失败（报错文案就是 "Using SOCKS proxy, but the
+        # 'socksio' package is not installed"）。这类环境变量本来就该由
+        # `network.proxy` / `provider.proxy` 配置接管，不该被隐式读取。
+        # 与 create_http_client(trust_env=False) 的默认行为保持一致。
+        http_client = httpx.AsyncClient(
+            proxy=proxy if proxy else None,
+            trust_env=False,
+            timeout=httpx.Timeout(120.0, connect=10.0),
+        )
         self._client = AsyncOpenAI(
             api_key=provider_cfg.api_key or "none",
             base_url=provider_cfg.base_url,

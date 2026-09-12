@@ -92,7 +92,7 @@ async def _bot_loop() -> None:
                 continue
 
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(trust_env=False) as client:
                 logger.info("[WeChat] Connected, polling for messages...")
                 consecutive_errors = 0
                 buf = ""
@@ -197,7 +197,7 @@ async def _handle_message(msg: dict[str, Any], creds: Any) -> None:
             logger.exception("[WeChat] command handler failed for chat_key=%s", chat_key)
             reply = "⚠️ 命令处理失败。"
         if reply:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(trust_env=False) as client:
                 try:
                     await send_text(client, creds, reply_to, context_token, reply)
                 except Exception:
@@ -205,7 +205,7 @@ async def _handle_message(msg: dict[str, Any], creds: Any) -> None:
         return
 
     # ── Ack immediately ───────────────────────────────────────────────────────
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(trust_env=False) as client:
         try:
             await send_text(client, creds, reply_to, context_token, "收到，处理中...")
             logger.debug("[WeChat] ack sent to %s", reply_to[:20])
@@ -273,7 +273,7 @@ async def _handle_message(msg: dict[str, Any], creds: Any) -> None:
                         line += f" · {intent}"
                     elif args:
                         line += f" · {args}"
-                    async with httpx.AsyncClient() as client:
+                    async with httpx.AsyncClient(trust_env=False) as client:
                         try:
                             await send_text(client, creds, reply_to, context_token, line)
                         except Exception:
@@ -281,13 +281,13 @@ async def _handle_message(msg: dict[str, Any], creds: Any) -> None:
                 elif chunk.state == "done":
                     preview = sanitize_result_preview(chunk.result_preview or "")
                     if preview:
-                        async with httpx.AsyncClient() as client:
+                        async with httpx.AsyncClient(trust_env=False) as client:
                             try:
                                 await send_text(client, creds, reply_to, context_token, f"✓ {preview[:300]}")
                             except Exception:
                                 pass
                 elif chunk.state == "error":
-                    async with httpx.AsyncClient() as client:
+                    async with httpx.AsyncClient(trust_env=False) as client:
                         try:
                             await send_text(client, creds, reply_to, context_token, f"✗ {chunk.result_preview or '工具调用失败'}")
                         except Exception:
@@ -320,7 +320,7 @@ async def _handle_message(msg: dict[str, Any], creds: Any) -> None:
         pass
 
     if reply:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(trust_env=False) as client:
             try:
                 await send_text(client, creds, reply_to, context_token, reply)
             except Exception:

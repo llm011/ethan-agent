@@ -132,7 +132,7 @@ async def _save_qr_image(data_or_url: str) -> Path:
 
     # Might be a URL — download it
     if data_or_url.startswith("http"):
-        async with httpx.AsyncClient(timeout=10) as c:
+        async with httpx.AsyncClient(timeout=10, trust_env=False) as c:
             r = await c.get(data_or_url)
             r.raise_for_status()
             qr_path.write_bytes(r.content)
@@ -149,7 +149,7 @@ async def login_via_qrcode() -> WeChatCredentials:
     Displays a QR code for the user to scan with WeChat, then polls until
     the login is confirmed. Returns credentials on success.
     """
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(timeout=30, trust_env=False) as client:
         for attempt in range(_QR_REFRESH_LIMIT):
             # 1. Request QR code
             r = await client.post(

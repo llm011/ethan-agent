@@ -24,11 +24,11 @@ class ExternalKnowledgeBase(KnowledgeBase):
 
     def _client(self):
         import httpx
-        return httpx.Client(base_url=self._base_url, headers=self._headers, timeout=30)
+        return httpx.Client(base_url=self._base_url, headers=self._headers, timeout=30, trust_env=False)
 
     def _async_client(self):
         import httpx
-        return httpx.AsyncClient(base_url=self._base_url, headers=self._headers, timeout=30)
+        return httpx.AsyncClient(base_url=self._base_url, headers=self._headers, timeout=30, trust_env=False)
 
     @staticmethod
     def _encode_source(source: str) -> str:
