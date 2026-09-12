@@ -17,6 +17,7 @@ from ethan.core.tool_format import (
     resolve_skill_category,
 )
 from ethan.memory.procedures import ProcedureStore
+from ethan.providers._text_toolcalls import contains_invoke as _contains_invoke
 from ethan.providers.base import Message, ToolCall
 from ethan.providers.manager import create_provider
 from ethan.skills.registry import SkillRegistry
@@ -412,9 +413,12 @@ class Agent:
 
         流式模式下，如果模型把工具调用写成文本，它会作为 delta.content
         流式返回，不会出现在 delta.tool_calls 里。此方法在 final chunk 后做一次检测。
-        支持两种格式：
+        支持三种格式：
         1. Gemini call:xxx{args}
         2. DeepSeek DSML 标记
+        3. Anthropic 风格 <invoke name="…"><parameter …>（无 DSML 前缀）
+           —— 部分 anthropic 兼容网关在 function calling 退化时把原生 tool_use
+           当正文文本下发。若不识别，这一轮就没有工具可执行，表现为「跑到一半不动了」。
         """
         import re
         import uuid
@@ -425,6 +429,13 @@ class Agent:
         dsml_results = OpenAICompatProvider._parse_dsml_tool_calls(content)
         if dsml_results:
             return dsml_results
+
+        # Anthropic 风格 invoke/parameter 标记（文本工具调用降级）
+        from ethan.providers._text_toolcalls import parse_invoke_tool_calls
+
+        invoke_results = parse_invoke_tool_calls(content)
+        if invoke_results:
+            return invoke_results
 
         pattern = re.compile(
             r"call:\w+:(?P<tool>\w+)\{(?P<args>[^}]*)\}"
@@ -1262,7 +1273,7 @@ class Agent:
                 parsed = self._parse_stream_text_tool_calls(full_content)
                 if parsed:
                     tool_calls = parsed
-                    # 保留 DSML/call 标记之前的正文作为 thought 内容
+                    # 保留标记之前的正文作为 thought 内容
                     from ethan.providers.openai_compat import OpenAICompatProvider
 
                     if OpenAICompatProvider._contains_dsml(full_content):
@@ -1271,6 +1282,12 @@ class Agent:
 
                         dsml_start = re.search(r"<[｜|][｜|]DSML[｜|][｜|]", full_content)
                         full_content = full_content[: dsml_start.start()].rstrip() if dsml_start else ""
+                    elif _contains_invoke(full_content):
+                        # Anthropic 风格标记：剥掉标记本身，保留前后的正文
+                        # （模型可能先写一句「我来帮你操作」再跟工具调用标记）。
+                        from ethan.providers._text_toolcalls import strip_invoke_tool_blocks
+
+                        full_content = strip_invoke_tool_blocks(full_content).strip()
                     else:
                         full_content = ""
                     response = Message(role="assistant", content=full_content, tool_calls=tool_calls)

@@ -13,7 +13,11 @@ from ethan.providers._text_toolcalls import (
     _MARKED_TOOL_RE,
     _buf_has_unclosed_marked_tool,
     _strip_marked_tool_blocks,
+    buf_has_unclosed_invoke,
+    contains_invoke,
+    parse_invoke_tool_calls,
     parse_marked_text_tool_calls,
+    strip_invoke_tool_blocks,
 )
 from ethan.providers._text_toolcalls import (
     contains_dsml as _contains_dsml_impl,
@@ -44,6 +48,9 @@ __all__ = [
     "_strip_marked_tool_blocks",
     "_buf_has_unclosed_marked_tool",
     "parse_marked_text_tool_calls",
+    "buf_has_unclosed_invoke",
+    "strip_invoke_tool_blocks",
+    "parse_invoke_tool_calls",
 ]
 
 _CHUNK_TIMEOUT = 120  # 单个 chunk 超时（秒）
@@ -338,6 +345,10 @@ class OpenAICompatProvider(BaseProvider):
                 # opens==closes，整块会被下面的 else 当正文 yield 漏给用户。
                 if _buf_has_unclosed_marked_tool(content_buf) or _MARKED_TOOL_RE.search(content_buf):
                     pass
+                # Anthropic 风格 <tool_calls>/<invoke> 标记（function calling 退化成文本）：
+                # 未闭合 → 持续缓冲，避免半截 XML 漏给用户；已闭合 → 也缓冲到 finish 统一解析。
+                elif buf_has_unclosed_invoke(content_buf) or contains_invoke(content_buf):
+                    pass
                 # DSML 标记开头特征：一旦检测到就持续缓冲直到流结束或 finish
                 elif self._contains_dsml(content_buf):
                     pass  # 继续缓冲，不 yield
@@ -389,6 +400,17 @@ class OpenAICompatProvider(BaseProvider):
                                 "args_raw": json.dumps(mc.arguments, ensure_ascii=False),
                             }
                         content_buf = ""
+                    elif parse_invoke_tool_calls(content_buf) or contains_invoke(content_buf):
+                        # Anthropic 风格标记：剥掉标记，保留标记前后的正文
+                        pre_text = strip_invoke_tool_blocks(content_buf).strip()
+                        if pre_text:
+                            yield StreamChunk(content=pre_text)
+                        for ic in parse_invoke_tool_calls(content_buf):
+                            tool_calls_acc[len(tool_calls_acc)] = {
+                                "id": ic.id, "name": ic.name,
+                                "args_raw": json.dumps(ic.arguments, ensure_ascii=False),
+                            }
+                        content_buf = ""
                     else:
                         dsml_calls = self._parse_dsml_tool_calls(content_buf)
                         if dsml_calls:
@@ -423,7 +445,7 @@ class OpenAICompatProvider(BaseProvider):
         # 中途断连 salvage：flush 剩余缓冲并标记 truncated，上层 agent 据此自动续接
         if _salvaged:
             if content_buf:
-                pre = _strip_marked_tool_blocks(content_buf)
+                pre = strip_invoke_tool_blocks(_strip_marked_tool_blocks(content_buf))
                 if pre.strip():
                     yield StreamChunk(content=pre)
             yield StreamChunk(content="", is_final=True, truncated=True)
