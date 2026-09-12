@@ -39,6 +39,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -126,6 +127,10 @@ import java.util.Locale
 import coil.compose.rememberAsyncImagePainter
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.platform.LocalConfiguration
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -162,6 +167,8 @@ fun ChatScreen(
     var showPlusSheet by remember { mutableStateOf(false) }
     // 超级权限「关→开」时的二次确认（开启是高危方向，必须让用户明确知道代价）
     var showAutoConsentConfirm by remember { mutableStateOf(false) }
+    // 阅读模式（双击气泡进入）：非空时全屏覆盖在聊天页之上
+    var readingMessage by remember { mutableStateOf<UiMessage?>(null) }
     // 渐进加载：初始只渲染最后 10 条，向上滚动加载更多
     val pageSize = 10
     var visibleCount by remember { mutableStateOf(pageSize) }
@@ -683,10 +690,23 @@ fun ChatScreen(
                             }
                         }
                     }
-                    itemsIndexed(visibleMessages) { _, msg ->
-                        MessageBubble(msg, serverUrl = state.serverUrl, sessionId = state.sessionId, signFile = onSignFile, onLongPress = {
-                            onQuote(Quote(role = msg.role, content = msg.content))
-                        })
+                    itemsIndexed(visibleMessages, key = { index, msg ->
+                        "${state.sessionId ?: ""}#${state.messages.size - visibleMessages.size + index}#${msg.role}"
+                    }) { _, msg ->
+                        MessageBubble(
+                            message = msg,
+                            serverUrl = state.serverUrl,
+                            sessionId = state.sessionId,
+                            signFile = onSignFile,
+                            onLongPress = {
+                                // 长按：为空消息做不了什么（没有可引用的正文），直接忽略
+                                if (msg.content.isNotBlank()) {
+                                    onQuote(Quote(role = msg.role, content = msg.content))
+                                }
+                            },
+                            // 双击进入阅读模式（对齐 Web 的阅读模式入口）
+                            onOpenReading = { readingMessage = msg },
+                        )
                     }
                 }
             }
@@ -947,7 +967,10 @@ fun ChatScreen(
                 // 用户正在用哪个模型、是否在生成中 —— 这两件事恰好在手机上最需要
                 // 一眼看到（模型选错要立刻发现，生成中要能判断该不该等）。
                 Row(
-                    Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 4.dp),
+                    // 左侧留 8dp：这段文字原来紧贴屏幕边缘（外层只有 12dp 的
+                    // horizontal padding，视觉上正好压在气泡的左对齐线上），
+                    // 和上方气泡的起始位置对不齐，看着「太靠左」。
+                    Modifier.fillMaxWidth().padding(start = 8.dp, top = 2.dp, bottom = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
@@ -976,10 +999,20 @@ fun ChatScreen(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                         maxLines = 1,
+                        // 固定靠右：模型名过长时省略号吃掉的是左侧的空间，
+                        // 免责声明始终贴住右边缘（用户明确要求靠右对齐）。
+                        textAlign = TextAlign.End,
+                        modifier = Modifier.wrapContentWidth(align = Alignment.End),
                     )
                 }
             } // end input Column (bottom-aligned)
         }
+    }
+
+    // 阅读模式：全屏覆盖在聊天页之上（不在 Scaffold 里，避免继承 padding/FAB）。
+    // 这样退出时聊天页的滚动位置原封不动 —— 用户回到的就是离开时那一屏。
+    readingMessage?.let { msg ->
+        ReadingModeScreen(message = msg, onClose = { readingMessage = null })
     }
 
     // 超级权限二次确认：只在关→开时弹一次。取消则不改状态（保持关闭）。
@@ -1043,7 +1076,7 @@ private fun ConnectionStateIndicator(state: ConnectionState, isResuming: Boolean
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
-private fun MessageBubble(message: UiMessage, serverUrl: String = "", sessionId: String? = null, signFile: (suspend (String) -> FileSignature?)? = null, onLongPress: () -> Unit) {
+private fun MessageBubble(message: UiMessage, serverUrl: String = "", sessionId: String? = null, signFile: (suspend (String) -> FileSignature?)? = null, onLongPress: () -> Unit, onOpenReading: () -> Unit = {}) {
     val isUser = message.role == "user"
     // 对齐 Web（web/components/chat/message-bubble.tsx）：
     //   用户   bg-primary/10 text-foreground
@@ -1087,6 +1120,7 @@ private fun MessageBubble(message: UiMessage, serverUrl: String = "", sessionId:
                     indication = null,
                     onClick = {},
                     onLongClick = onLongPress,
+                    onDoubleClick = onOpenReading,
                 ),
                 shape = MaterialTheme.shapes.extraLarge,
                 color = bubbleColor,
@@ -1131,10 +1165,87 @@ private fun MessageBubble(message: UiMessage, serverUrl: String = "", sessionId:
                     }
                     // 文本结论在后
                     if (message.content.isNotBlank()) {
-                        SimpleMarkdown(
-                            text = message.content,
-                            textColor = textColor,
-                        )
+                        // 长消息折叠：超过半屏高就截断，底部给「查看全部 / 收起」。
+                        // 只在真实尺寸超过阈值时展开 UI，短消息完全不受影响（无额外高度、无多余按钮）。
+                        val density = LocalDensity.current
+                        val configuration = LocalConfiguration.current
+                        val screenWidthDp = configuration.screenWidthDp.toFloat()
+                        val screenHeightDp = configuration.screenHeightDp.toFloat()
+                        // 用 remember 而不是 rememberSaveable：MessageCollapseState 是自定义类，
+                        // SaveableStateRegistry 只接受能进 Bundle 的类型，直接塞会抛
+                        // IllegalArgumentException 把 App 打崩（已踩过）。而「展开/收起」
+                        // 本来就属于一次性 UI 状态，进程被回收后恢复成折叠态完全可以接受。
+                        //
+                        // key 用 isStreaming 而不是 content：流式期间 content 每帧都变，
+                        // 拿它做 key 会让「生成中就点开查看全部」立刻被重置回折叠态。
+                        val collapseState = remember(message.isStreaming) {
+                            messageCollapseState(
+                                text = message.content,
+                                screenWidthDp = screenWidthDp,
+                                screenHeightDp = screenHeightDp,
+                                fontScale = density.fontScale,
+                            )
+                        }
+                        // 流结束后正文才是最终值（最后一轮 tool 之后还有结论），
+                        // 此时按最终长度重新判定一次；只更新「可折叠与否 / 高度上限」，
+                        // 不动 expanded —— 用户已经手动展开的就别给他收回去。
+                        LaunchedEffect(message.isStreaming, message.content) {
+                            if (!message.isStreaming) {
+                                collapseState.recompute(
+                                    messageCollapseState(
+                                        text = message.content,
+                                        screenWidthDp = screenWidthDp,
+                                        screenHeightDp = screenHeightDp,
+                                        fontScale = density.fontScale,
+                                    )
+                                )
+                            }
+                        }
+                        Column(
+                            modifier = if (collapseState.collapsible) {
+                                Modifier
+                                    // animateContentSize 全程只跟约束走，不碰滚动位置，
+                                    // 所以展开/收起不会把用户的阅读位置顶走。
+                                    .animateContentSize()
+                                    .clipToBounds()
+                                    .then(
+                                        if (collapseState.expanded) Modifier
+                                        else Modifier.heightIn(max = collapseState.maxHeight)
+                                    )
+                            } else {
+                                Modifier
+                            },
+                        ) {
+                            SimpleMarkdown(
+                                text = message.content,
+                                textColor = textColor,
+                            )
+
+                            if (collapseState.collapsible) {
+                                // 「收起」放在内容末尾（用户明确要求「内底部」也要有收起交互），
+                                // 展开后在文末出现，不用回头往上滚。
+                                if (collapseState.expanded) {
+                                    Spacer(Modifier.height(8.dp))
+                                    BubbleActionLink(
+                                        label = "收起",
+                                        onClick = { collapseState.expanded = false },
+                                        color = textColor.copy(alpha = 0.65f),
+                                    )
+                                }
+                            }
+                        }
+                        if (collapseState.collapsible && !collapseState.expanded) {
+                            // 折叠态：按钮钉在气泡底部。外面包一层跟气泡同色的 Surface，
+                            // 让被截断的文字行从按钮底下「透出来」之前先被遮住，
+                            // 视觉上明确是「还有内容没显示」，而不是排版断了。
+                            Surface(color = bubbleColor) {
+                                BubbleActionLink(
+                                    label = "查看全部",
+                                    onClick = { collapseState.expanded = true },
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
                     }
                     // 文件卡片
                     if (message.cards.isNotEmpty()) {
@@ -1166,6 +1277,95 @@ private fun MessageBubble(message: UiMessage, serverUrl: String = "", sessionId:
             }
         }
     }
+}
+
+/**
+ * 长消息折叠的状态：是否可折叠、当前是否展开、折叠高度上限。
+ *
+ * 不是 data class —— `expanded` 是可变状态，直接放在普通类里让 Compose 观察到；
+ * 用 `rememberSaveable(message.content) { ... }` 重建（内容变了就重置回折叠态，
+ * 流式追加期间也不会因为闭包捕获旧值而卡住）。
+ */
+private class MessageCollapseState(
+    collapsible: Boolean,
+    maxHeight: androidx.compose.ui.unit.Dp,
+    expanded: Boolean,
+) {
+    var collapsible by mutableStateOf(collapsible)
+        private set
+    var maxHeight by mutableStateOf(maxHeight)
+        private set
+    var expanded by mutableStateOf(expanded)
+
+    /**
+     * 流结束、正文定型后按最终长度重判一次。
+     * 只更新「要不要折叠 / 折叠高度」，**保留** expanded —— 用户手动展开的
+     * 状态不能被自动重算收回去（否则刚点开就被关上，很像 bug）。
+     * 另外：本来不可折叠的消息若在流结束后变长了，这里也会把它切成可折叠。
+     */
+    fun recompute(next: MessageCollapseState) {
+        if (collapsible == next.collapsible && maxHeight == next.maxHeight) return
+        collapsible = next.collapsible
+        maxHeight = next.maxHeight
+        if (!collapsible) expanded = false
+    }
+}
+
+/** 折叠高度上限：半屏（用户明确要求「半屏高的最大高度」）。 */
+private const val COLLAPSE_SCREEN_FRACTION = 0.5f
+
+/**
+ * 估算「半屏高」并判断是否值得折叠。
+ *
+ * 为什么要估算而不是用 BoxWithConstraints 实测：只有**先**知道是不是长消息，
+ * 才谈得上决定要不要给约束。用 `heightIn(max=...)` 配合 `clipToBounds` 来做截断效果，
+ * animateContentSize 负责展开/收起的过渡——全过程不触碰 LazyColumn 的滚动位置。
+ *
+ * 估算依据：bodyMedium 的字号（14sp）与默认行高（约 22sp 行距 ≈ 1.6×），
+ * 再把字符宽度按 0.55×字号 粗算。只用来判断「要不要折叠」，允许有偏差；
+ * 真的按估算折叠了但内容其实不长，用户点一下「查看全部」即可，不会丢内容。
+ * 反过来（长内容被漏判）才是问题，所以这里刻意估得保守一点（宁可多折叠）。
+ */
+private fun messageCollapseState(
+    text: String,
+    screenWidthDp: Float,
+    screenHeightDp: Float,
+    fontScale: Float,
+): MessageCollapseState {
+    val fontSizeDp = 14f * fontScale          // bodyMedium 基准字号
+    val lineHeightDp = fontSizeDp * 1.62f     // 默认行高约 1.6×
+    val charWidthDp = fontSizeDp * 0.55f      // 中英混排的粗略平均字宽
+
+    // 气泡内可用宽度：屏宽 - LazyColumn 横向 padding(12dp×2) - 头像(30dp+6dp)
+    //                   - 气泡内 padding(16dp×2) - 外层 padding(4dp×2)
+    val contentWidthDp = (screenWidthDp - 100f).coerceAtLeast(fontSizeDp * 8f)
+
+    val charsPerLine = (contentWidthDp / charWidthDp).coerceAtLeast(8f)
+    val lineCount = text.split('\n').sumOf { line ->
+        // 空行也占一行；超长行按字符数折算（Markdown 标记、英文长词会让它偏小，
+        // 所以下面乘了 1.15 的安全系数）
+        kotlin.math.ceil(line.length / charsPerLine).toInt().coerceAtLeast(1)
+    }
+    val estimatedDp = lineCount * lineHeightDp * 1.15f + 24f   // +24dp：气泡上下 padding
+
+    val maxHeightDp = screenHeightDp * COLLAPSE_SCREEN_FRACTION
+    // 折叠能省下的高度不到 80dp 就不折腾用户了
+    val collapsible = estimatedDp > maxHeightDp + 80f
+    return MessageCollapseState(collapsible, maxHeightDp.dp, expanded = false)
+}
+
+/** 气泡底部的行内文字按钮（「查看全部」/「收起」）——轻量、不抢视觉重心。 */
+@Composable
+private fun BubbleActionLink(label: String, onClick: () -> Unit, color: Color) {
+    Text(
+        text = label,
+        style = MaterialTheme.typography.labelLarge,
+        color = color,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 6.dp),
+    )
 }
 
 @Composable

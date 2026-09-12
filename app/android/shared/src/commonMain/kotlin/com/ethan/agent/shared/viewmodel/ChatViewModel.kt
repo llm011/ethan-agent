@@ -462,6 +462,9 @@ class ChatViewModel(
                     flow = repository.resumeStream(sessionId),
                     assistantIndex = assistantIndex,
                     onFirstEvent = { gotAnyEvent = true },
+                    // 复用旧气泡时必须带上它已有的正文（app 切回前台、rotating 等场景），
+                    // 否则回放会把已渲染的内容覆盖掉 —— 见 appendContent 的说明。
+                    localContent = if (reuseLast) msgs.getOrNull(lastIdx)?.content.orEmpty() else "",
                 )
                 _state.update { it.copy(connectionState = ConnectionState.Idle) }
             } catch (e: Exception) {
@@ -494,10 +497,15 @@ class ChatViewModel(
             kotlinx.coroutines.delay(RECONNECT_DELAYS_MS[attempt.coerceAtMost(RECONNECT_DELAYS_MS.lastIndex)])
             try {
                 var gotEvent = false
+                // 带上气泡里已经渲染出来的正文：重连的 backlog 是从头回放的，
+                // 交给 appendContent 做「回放 vs 增量」甄别，避免内容被清空重填或重复。
+                val localContent = _state.value.messages
+                    .getOrNull(assistantIndex)?.content.orEmpty()
                 collectSseStream(
                     flow = repository.resumeStream(sessionId),
                     assistantIndex = assistantIndex,
                     onFirstEvent = { gotEvent = true },
+                    localContent = localContent,
                 )
                 // 204（无活跃 run）返回空流：run 已结束，不算重连成功
                 if (!gotEvent) {
@@ -544,25 +552,59 @@ class ChatViewModel(
         flow: Flow<ChatStreamEvent>,
         assistantIndex: Int,
         onFirstEvent: (() -> Unit)? = null,
+        /**
+         * 断线重连时传入气泡里已有的正文（本地已渲染到的进度）。
+         *
+         * 重连端点（`GET /chat/{id}/stream` → `_sse_from_run`）会**从头回放**这段 run 的
+         * 全部缓冲，而本地 builder 若从空串开始拼，就会出现两个问题：
+         *   1. 回放期间气泡被清空再逐字重填，用户看到字「闪没了」；
+         *   2. `finally` 用这个不完整/被重写的 builder 覆盖气泡 —— 若回放流在补全之前
+         *      结束（run 已 done、缓冲被裁剪），末尾那段内容就永久丢了。
+         * 症状就是「最后一个 chunk 的字没打出来」。所以这里带上本地进度，
+         * 并在回放时取两者较长者（见 appendContent）。
+         */
+        localContent: String = "",
     ) {
         val toolSteps = mutableListOf<ToolStep>()
         val cardsCollected = mutableListOf<com.ethan.agent.core.model.FileCard>()
         var usage: Usage? = null
-        val contentBuilder = StringBuilder()
+        var content = localContent
         var lastFlushMs = 0L
         var firstEvent = true
         val streamStartMs = Clock.System.now().toEpochMilliseconds()
         var ttfbMs: Long? = null
         var firstContentMs: Long? = null
 
+        /**
+         * 合并一个增量 content 事件。
+         *
+         * 正常续流：重放会从 run 的开头重发整段，因此**不能**直接拼接 —— 那样会把
+         * 已经渲染的内容重复一遍（"你好" + 重放的"你好世界" = "你好你好世界"）。
+         *
+         * 判据：如果服务端这次给的片段正好接在本地已渲染内容的后面（`content` 是
+         * `incoming` 的前缀），说明是回放 —— 直接采用服务端的版本（它更权威、
+         * 且天然包含本地可能漏掉的部分）。否则才当作真正的增量追加。
+         */
+        fun appendContent(incoming: String) {
+            val current: String = content
+            content = when {
+                // 回放（含重复回放）：服务端版本覆盖本地，取更长的那份
+                incoming.startsWith(current) -> incoming
+                // 本地已超前（服务端缓冲被裁剪）：保留本地，忽略这次回放
+                current.startsWith(incoming) -> current
+                // 真正的新增量
+                else -> current + incoming
+            }
+        }
+
         fun flush(force: Boolean = false) {
             val now = Clock.System.now().toEpochMilliseconds()
             if (!force && now - lastFlushMs < 50L) return
             lastFlushMs = now
-            val content = contentBuilder.toString()
+            val snapshot = content
             _state.update { s ->
                 val msgs = s.messages.toMutableList()
-                if (assistantIndex < msgs.size) msgs[assistantIndex] = msgs[assistantIndex].copy(content = content)
+                if (assistantIndex < msgs.size) msgs[assistantIndex] = msgs[assistantIndex].copy(content = snapshot)
                 s.copy(messages = msgs)
             }
         }
@@ -611,12 +653,15 @@ class ChatViewModel(
                             ),
                         )
                     }
+                    // event.content 是跨模块的 nullable 属性，编译器不做 smart cast，
+                    // 这里先落到局部 val 再用，避免跨模块的 `event.content` 不参与 smart cast
                     event.content != null -> {
+                        val chunk = event.content ?: ""
                         if (firstContentMs == null) {
                             firstContentMs = Clock.System.now().toEpochMilliseconds()
                             ttfbMs = firstContentMs!! - streamStartMs
                         }
-                        contentBuilder.append(event.content)
+                        appendContent(chunk)
                         flush()
                         if (_state.value.showScrollToBottom) {
                             _state.update { it.copy(unreadCount = it.unreadCount + 1) }

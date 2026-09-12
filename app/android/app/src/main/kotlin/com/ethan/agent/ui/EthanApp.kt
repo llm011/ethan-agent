@@ -122,8 +122,15 @@ private fun MainContent(authViewModel: AuthViewModel) {
                 sessions = sessionsState.sessions,
                 unreadSessionIds = sessionsState.unreadSessionIds,
                 onNewChat = {
+                    // 开新会话。两个坑：
+                    //  1. `launchSingleTop = true` 在这里**不能**用 —— Chat 的路由是
+                    //     `chat?sessionId={sessionId}`，去重是按 route 模板比的，所以
+                    //     只要当前已经在 Chat 页（无论带不带 sessionId），这次导航会被
+                    //     静默丢弃，用户看到的就是「点了新建对话没反应，还是当前会话」。
+                    //  2. 直接 navigate 会不断往回退栈里压 chat 条目，来回点几次后
+                    //     返回键要按很多下。所以先 popUpTo 掉已有的 chat，再压新的。
                     navController.navigate("chat") {
-                        launchSingleTop = true
+                        popUpTo("chat?sessionId={sessionId}") { inclusive = true }
                     }
                 },
                 onSessionClick = { id ->

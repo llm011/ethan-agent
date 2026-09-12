@@ -227,10 +227,29 @@ fun SimpleMarkdown(
     linkColor: Color = MaterialTheme.colorScheme.primary,
     onDocLink: ((String) -> Unit)? = null,
     apiBase: String? = null,
+    /**
+     * 阅读模式用：正文行高放宽（对齐 Web reading-mode 的 `leading-7` ≈ 1.75×）。
+     * 聊天气泡里保持默认紧凑行高——气泡本来就窄，行距再大就撑爆了。
+     */
+    relaxedLeading: Boolean = false,
 ) {
     val context = LocalContext.current
     val defaultColor = MaterialTheme.colorScheme.onSurface
     val resolvedTextColor = if (textColor.isSpecified) textColor else defaultColor
+
+    // 正文基准字号与行高（阅读模式放宽，气泡内保持紧凑）
+    val baseBody = MaterialTheme.typography.bodyMedium
+    val bodyTextStyle = remember(relaxedLeading, resolvedTextColor, baseBody) {
+        if (relaxedLeading) {
+            baseBody.copy(
+                color = resolvedTextColor,
+                lineHeight = baseBody.fontSize * 1.75f,
+                fontSize = baseBody.fontSize * 1.07f,
+            )
+        } else {
+            baseBody.copy(color = resolvedTextColor)
+        }
+    }
 
     // 先归一化：剥掉 HTML 注释、把相对图片路径补成绝对 URL（见 preprocessDocMarkdown）。
     val normalized = remember(text, apiBase) { preprocessDocMarkdown(text, apiBase) }
@@ -259,9 +278,7 @@ fun SimpleMarkdown(
                     if (token.value.isNotBlank()) {
                         MarkdownText(
                             markdown = token.value,
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                color = resolvedTextColor,
-                            ),
+                            style = bodyTextStyle,
                             onLinkClicked = { url ->
                                 // Check if URL is an image — open lightbox
                                 val imgIdx = imageUrls.indexOf(url)

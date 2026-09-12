@@ -246,11 +246,17 @@ fun ToolTimeline(steps: List<ToolStep>, modifier: Modifier = Modifier, isStreami
         remember(steps) { steps.map { it.asTerminal() } }
     }
 
-    var expanded by remember { mutableStateOf(true) }
     val totalDuration = effectiveSteps.mapNotNull { it.durationMs }.sum()
     val hasAnyError = effectiveSteps.any { it.state == "error" }
     val hasAnyCancelled = effectiveSteps.any { it.state == "cancelled" }
     val allDone = effectiveSteps.all { it.state != "running" && it.state != "start" }
+    // 用户要求：执行完成后工具列表自动折叠（气泡里一长串日志很占屏），
+    // 只留一行"执行完成 [N步] [耗时]"摘要，点击再展开。
+    // 执行中保持展开，让用户看到当前在跑哪一步。
+    // 折叠发生在「执行中 → 已完成」的跃变那一刻，之后用户手动展开的状态由 userToggled 固定，
+    // 不会被重组的 remember 初始值覆盖（Steps 会持续刷新，但 allDone 已稳定）。
+    var userToggled by remember { mutableStateOf<Boolean?>(null) }
+    val expanded = userToggled ?: !allDone
 
     // 整体带边框的日志卡片
     Surface(
@@ -264,7 +270,7 @@ fun ToolTimeline(steps: List<ToolStep>, modifier: Modifier = Modifier, isStreami
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { expanded = !expanded },
+                    .clickable { userToggled = !expanded },
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {

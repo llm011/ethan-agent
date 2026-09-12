@@ -89,7 +89,7 @@ import com.ethan.agent.ui.components.SnackbarContainer
  * 二是和旁边的「今天/全部」文字切换拉开形状差异，不会连读成「四选一」。
  */
 private enum class JobLayout(val label: String, val icon: ImageVector) {
-    Timeline("时间轴视图", Icons.Default.ViewTimeline),
+    Timeline("时间轴视图（同「时间线」tab）", Icons.Default.ViewTimeline),
     List("列表视图", Icons.AutoMirrored.Filled.ViewList),
 }
 
@@ -190,10 +190,16 @@ fun ScheduleScreen(
                     onOpenSession = onOpenSession,
                 )
                 ScheduleTab.Timelines -> TimelinesContent(
+                    jobs = state.jobs,
                     timelines = state.timelines,
                     isSyncing = state.isSyncingTimelines,
                     onSync = onSyncTimelines,
                     onAction = onTimelineAction,
+                    triggeringIds = state.triggeringIds,
+                    onTrigger = onTrigger,
+                    onToggle = onToggle,
+                    onDelete = { id -> pendingDelete = state.jobs.firstOrNull { it.id == id } },
+                    onOpenSession = onOpenSession,
                 )
             }
         }
@@ -485,6 +491,9 @@ private fun TimelineLayout(
     onToggle: (ScheduleJob) -> Unit,
     onDelete: (String) -> Unit,
     onOpenSession: (String) -> Unit,
+    /** 按任务名索引的阶段流信息（timelines.yaml）；时间线 tab 下才传。 */
+    phaseByJobId: Map<String, TimelineItem> = emptyMap(),
+    onTimelineAction: (String, String) -> Unit = { _, _ -> },
 ) {
     // 按日期分组（与 Web 的 groupJobsByDate 一致：无时间的归入「待定」）
     val groups = remember(jobs) {
@@ -509,41 +518,54 @@ private fun TimelineLayout(
 
         groups.forEachIndexed { groupIndex, (dateKey, groupJobs) ->
             item(key = "date_$dateKey") {
-                // 日期标题左缩进 = 轴线位置（GUTTER - 61dp），这样标题、轴线、时间标签
-                // 三者的左缘落在同一列上，形成一条干净的竖向基线。
-                // 之前标题顶到屏幕最左（x≈12dp）而卡片在 x≈70dp，左边参差。
+                // 日期标题**在轴线右侧**、贴着轴线起排。
+                //
+                // 之前把日期/时间做成轴线左侧的 68dp 标签列，结果轴线被推到
+                // 屏幕中间偏右，左侧空出一大片（用户反馈「左侧还是有大片空白」）。
+                // 轴线贴左 + 标签跟着轴线往右排，水平空间才不浪费。
                 Row(
-                    Modifier.padding(
-                        start = TIMELINE_GUTTER,
-                        top = if (groupIndex == 0) 2.dp else 18.dp,
-                        bottom = 6.dp,
-                    ),
+                    Modifier
+                        .fillMaxWidth()
+                        .height(IntrinsicSize.Min)
+                        .padding(top = if (groupIndex == 0) 2.dp else 16.dp, bottom = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    if (dateKey.isNotBlank()) {
+                    // 轴列：与任务行同一列，保证线在同一条竖线上。
+                    // 线要**通长填满这一行**（fillMaxHeight），否则日期行上下各留
+                    // 一截空白，整条轴线看起来是断断续续的虚线。
+                    Box(Modifier.width(AXIS_COLUMN).fillMaxHeight()) {
+                        Box(
+                            Modifier
+                                .align(Alignment.Center)
+                                .width(1.dp)
+                                .fillMaxHeight()
+                                .background(MaterialTheme.colorScheme.outlineVariant),
+                        )
+                    }
+                    Spacer(Modifier.width(AXIS_TO_CONTENT))
+                    val label = if (dateKey.isNotBlank()) {
                         val parts = dateKey.split("-")
                         val month = parts.getOrNull(1)?.toIntOrNull() ?: 0
                         val day = parts.getOrNull(2)?.toIntOrNull() ?: 0
-                        Text(
-                            text = "${month}月${day}日",
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                        // 「今天」徽章会让人误以为是可切换的胶囊按钮（旁边正好有
-                        // 「今天/全部」切换），改成中性灰文字，纯标注、不可点。
-                        if (dateKey == todayKey) {
-                            Text(
-                                text = "· 今天",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
+                        "${month}月${day}日"
                     } else {
+                        "待定"
+                    }
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = if (dateKey == todayKey) MaterialTheme.colorScheme.onSurface
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                    // 「今天」徽章会让人误以为是可切换的胶囊按钮（旁边正好有
+                    // 「今天/全部」切换），改成中性灰文字，纯标注、不可点。
+                    if (dateKey == todayKey) {
                         Text(
-                            text = "待定",
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            text = "今天",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(start = 6.dp),
                         )
                     }
                 }
@@ -552,33 +574,50 @@ private fun TimelineLayout(
                 TimelineRow(
                     job = job,
                     triggering = job.id in triggeringIds,
-                    isFirst = index == 0,
-                    isLast = index == groupJobs.lastIndex,
+                    // 轴线的「断头」判断要按**整个列表**算，不能按组内的 first/last ——
+                    // 否则每组第一行都不画上半段、最后一行都不画下半段，多个日期组
+                    // 排在一起时轴线被切成一根根短线，不成一条时间线。
+                    // 日期标题那一行也不画线，所以它的高度天然留出了组间空隙，不必再断线。
+                    isFirst = groupIndex == 0 && index == 0,
+                    isLast = groupIndex == groups.lastIndex && index == groupJobs.lastIndex,
                     onTrigger = { onTrigger(job) },
                     onToggle = { onToggle(job) },
                     onDelete = { onDelete(job.id) },
                     onOpenSession = { onOpenSession(job.sessionId) },
+                    phase = phaseByJobId[job.name]?.currentPhase
+                        ?.let { "阶段：$it" },
                 )
             }
         }
     }
 }
 
-/**
- * 时间轴左侧栏宽度 = 轴线列(16dp) + 时间标签(46dp) + 间距(8dp)。
- * 日期标题、轴线、卡片三者的左缘都从这里推导，保证全页一条竖线对齐。
- *
- * 注意：轴线画在**第 8dp** 处，所以日期标题也要用同样的左缩进，
- * 否则标题会顶到屏幕最左边（x≈12dp），与卡片（x≈70dp）参差，整页看着没对齐。
- */
-private val TIMELINE_GUTTER = 70.dp
+/** 圆点直径。 */
+private val DOT_SIZE = 8.dp
 
 /**
- * 时间轴一行：轴线 + 圆点 + 时间标签 + 卡片。
+ * 轴列宽度 = 圆点直径 + 左右各 2dp 余量；轴线画在它正中。
  *
- * 轴线**用两条**（上/下）拼出「不过头、不断尾」的效果：第一行不画上半段、
- * 最后一行不画下半段，中间行上下贯通。之前是整列画满，结果轴线从屏幕顶
- * 一直垂到屏幕底，下方没有任务时看着像根断掉的电线。
+ * 轴线**贴在最左边**（不再给日期/时间留一条 68dp 的左侧标签列）。
+ * 之前做成「标签列 | 轴线 | 卡片」三段式，轴线被推到屏幕中间偏右，
+ * 左侧空出一大片 —— 手机上横向空间本来就紧张，这样排是纯浪费。
+ */
+private val AXIS_COLUMN = DOT_SIZE + 4.dp
+
+/** 轴线与右侧内容（日期标题 / 卡片）之间的间隙。 */
+private val AXIS_TO_CONTENT = 14.dp
+
+/** 圆点中心距行顶的距离 —— 对齐卡片首行标题（titleSmall ≈ 20sp）的视觉中心。 */
+private val DOT_CENTER_Y = 26.dp
+
+/**
+ * 时间轴一行：轴线 + 卡片（时间在卡片内首行）。
+ *
+ * 布局要点：
+ *   - 轴线贴左列，卡片紧跟其后；**时间标签移到卡片内部首行**，
+ *     不再单独占一列，横向空间全部让给卡片正文。
+ *   - 轴线在行内是通长竖线（圆点叠在线上），只有整个列表的第一行不画上段、
+ *     最后一行不画下段，相邻行之间线头自然接续成一条连续时间线。
  */
 @Composable
 private fun TimelineRow(
@@ -590,63 +629,48 @@ private fun TimelineRow(
     onToggle: () -> Unit,
     onDelete: () -> Unit,
     onOpenSession: () -> Unit,
+    phase: String? = null,
 ) {
     val active = job.status == "active"
-    // 圆点的垂直位置：卡片首行标题（titleSmall，行高约 20sp）的视觉中心。
-    // 用固定值而非测量，是为了让轴线、圆点、时间标签三者共用同一条水平带。
-    val dotCenterY = 26.dp
-    val dotSize = 8.dp
-    // 轴线画在 16dp 轴列的中心（8dp），圆点同轴心
-    val axisX = 8.dp
 
     Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
-        Box(Modifier.width(TIMELINE_GUTTER)) {
-            // 从行顶到圆点之前的短竖线：第一行不画（时间轴上端不悬空）。
+        // 轴列：整行一条竖线，圆点压在线中间。
+        // fillMaxHeight 保证下半段能一直延伸到行底（含卡片下面的 10dp 间距），
+        // 这样下一组的第一行接上来时线是连着的。
+        Box(Modifier.width(AXIS_COLUMN).fillMaxHeight()) {
+            // 上半段：第一行不画（时间轴上端不悬空）
             if (!isFirst) {
                 Box(
                     Modifier
-                        .padding(start = axisX - 0.5.dp)
+                        .align(Alignment.TopCenter)
                         .width(1.dp)
-                        .height(dotCenterY - dotSize / 2)
+                        .height(DOT_CENTER_Y - DOT_SIZE / 2)
                         .background(MaterialTheme.colorScheme.outlineVariant),
                 )
             }
-            // 圆点：压在两段轴线之间，形成「节点」而不是「线上一个色块」
             Box(
                 Modifier
-                    .padding(start = axisX - dotSize / 2, top = dotCenterY - dotSize / 2)
-                    .size(dotSize)
+                    .align(Alignment.TopCenter)
+                    .padding(top = DOT_CENTER_Y - DOT_SIZE / 2)
+                    .size(DOT_SIZE)
                     .clip(CircleShape)
                     .background(
                         if (active) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.outlineVariant
                     ),
             )
-            // 圆点之后到行底：最后一行不画（时间轴下端不拖尾）
-            if (!isLast) {
-                Box(
-                    Modifier
-                        .padding(start = axisX - 0.5.dp, top = dotCenterY + dotSize / 2)
-                        .width(1.dp)
-                        .fillMaxHeight()
-                        .background(MaterialTheme.colorScheme.outlineVariant),
-                )
-            }
+            // 下半段：最后一行不画（时间轴下端不拖尾）
+            Box(
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = DOT_CENTER_Y + DOT_SIZE / 2)
+                    .width(1.dp)
+                    .fillMaxHeight()
+                    .background(MaterialTheme.colorScheme.outlineVariant),
+            )
         }
 
-        // 时间标签：与卡片首行同一水平带
-        Text(
-            text = ScheduleFormat.timeLabelOf(job.nextRunTime),
-            style = MaterialTheme.typography.labelMedium,
-            color = if (active) MaterialTheme.colorScheme.onSurface
-            else MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            modifier = Modifier
-                .width(46.dp)
-                .padding(top = 20.dp),
-        )
-
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(AXIS_TO_CONTENT))
 
         JobRowCard(
             job = job,
@@ -655,7 +679,10 @@ private fun TimelineRow(
             onToggle = onToggle,
             onDelete = onDelete,
             onOpenSession = onOpenSession,
-            modifier = Modifier.weight(1f).padding(bottom = 8.dp),
+            modifier = Modifier.weight(1f).padding(bottom = 10.dp),
+            phase = phase,
+            // 时间轴视图里，时间放在卡片首行（替代列表视图那行「8小时后(09:00)」）
+            timeBadge = ScheduleFormat.timeLabelOf(job.nextRunTime),
         )
     }
 }
@@ -706,17 +733,29 @@ private fun JobRowCard(
     onOpenSession: () -> Unit,
     modifier: Modifier = Modifier,
     showPrompt: Boolean = false,
+    phase: String? = null,
+    /** 时间轴视图用：把「09:00」放在首行最左，代替列表视图里的「N 小时后」那行。 */
+    timeBadge: String? = null,
 ) {
     val active = job.status == "active"
 
     EthanCard(modifier = modifier) {
         Column(Modifier.padding(start = 14.dp, end = 4.dp, top = 12.dp, bottom = 2.dp)) {
-            // 名称 + 状态徽章
+            // 名称 + 状态徽章（时间轴视图下，时间在最前面当行首）
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.padding(end = 10.dp),
             ) {
+                if (timeBadge != null) {
+                    Text(
+                        text = timeBadge,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (active) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                }
                 Text(
                     text = job.name,
                     style = MaterialTheme.typography.titleSmall,
@@ -739,7 +778,8 @@ private fun JobRowCard(
             // 分两行后每段各自独占一行，完整可读，总共也只多 16dp。
             // 暂停的任务没有 next_run_time，`formatNextRun` 会返回「已暂停」，
             // 与状态徽章语义重复 —— 那种情况只显示触发规则。
-            if (active) {
+            // 时间轴视图已经在行首放了时刻，这行「N 小时后」就不必再占一行。
+            if (active && timeBadge == null) {
                 Text(
                     text = ScheduleFormat.formatNextRun(job.nextRunTime, ScheduleFormat.nowEpochSeconds()),
                     style = MaterialTheme.typography.bodySmall,
@@ -758,6 +798,20 @@ private fun JobRowCard(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(end = 10.dp).fillMaxWidth(),
             )
+
+            // 阶段流（来自 timelines.yaml）：只挂一条当前阶段的文字，不占独立一行高度，
+            // 因为它对多数任务都为空。
+            if (!phase.isNullOrBlank()) {
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    text = phase,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(end = 10.dp).fillMaxWidth(),
+                )
+            }
 
             if (showPrompt && job.prompt.isNotBlank()) {
                 Spacer(Modifier.height(4.dp))
@@ -863,21 +917,54 @@ private fun StatusBadge(active: Boolean) {
     )
 }
 
-/** ── 时间线 Tab ─────────────────────────────────────────────────── */
+/**
+ * ── 时间线 Tab ─────────────────────────────────────────────────────
+ *
+ * 「时间线」这个名字指的是**时间轴**那一张视图（一条竖线把任务按时间串起来），
+ * 不是 timelines.yaml 那套「阶段流」数据 —— 之前两者都叫「时间线」，tab 下的
+ * 内容却是卡片列表，而「任务」tab 才是时间轴，正好弄反了。
+ *
+ * 现在这里对齐 Web 的 `viewLayout === "timeline"` 分支：一条连续的竖轴，
+ * 左侧是日期/时间标签列，右侧是紧凑卡片；顶部只留一个「同步阶段流」按钮，
+ * 用来刷新 timelines.yaml（阶段流数据在卡片下方单独展开，不占主轴）。
+ */
 @Composable
 private fun TimelinesContent(
+    jobs: List<ScheduleJob>,
     timelines: List<TimelineItem>,
     isSyncing: Boolean,
     onSync: () -> Unit,
     onAction: (String, String) -> Unit,
+    triggeringIds: Set<String>,
+    onTrigger: (ScheduleJob) -> Unit,
+    onToggle: (ScheduleJob) -> Unit,
+    onDelete: (String) -> Unit,
+    onOpenSession: (String) -> Unit,
 ) {
+    var range by remember { mutableStateOf(JobRange.Today) }
+
+    // 「今天」= 今天和明天；无 next_run_time 的（待定）始终保留（与「任务」tab 同口径）
+    val visibleJobs = remember(jobs, range) {
+        if (range == JobRange.All) jobs
+        else jobs.filter { job ->
+            val key = ScheduleFormat.dateKeyOf(job.nextRunTime)
+            key == null || key <= todayPlusDays(1)
+        }
+    }
+
     Column(Modifier.fillMaxSize()) {
-        // 同步按钮：右对齐的紧凑文字按钮，不再占满一整行
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.End,
+            Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            SegmentedToggle(
+                options = JobRange.entries.map { it.label },
+                selectedIndex = range.ordinal,
+                onSelect = { range = JobRange.entries[it] },
+            )
+            Spacer(Modifier.weight(1f))
+            // 阶段流同步：数据源是 timelines.yaml，与上面的任务列表无关，
+            // 放在这里是为了保留入口（原来整个 tab 就是它的界面）。
             TextButton(onClick = onSync, enabled = !isSyncing) {
                 if (isSyncing) {
                     CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
@@ -885,123 +972,27 @@ private fun TimelinesContent(
                     Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(16.dp))
                 }
                 Spacer(Modifier.width(6.dp))
-                Text("同步")
+                Text("同步阶段流")
             }
         }
 
-        if (timelines.isEmpty()) {
-            EmptyScheduleText("暂无时间线")
+        if (visibleJobs.isEmpty()) {
+            EmptyScheduleText(if (range == JobRange.Today) "今天和明天暂无定时任务" else "暂无定时任务")
             return@Column
         }
 
-        val grouped = timelines.groupBy { it.scene }
-        LazyColumn(
-            Modifier.fillMaxSize(),
-            // 底部 96dp：与其它两个列表一致，给 FAB 让位，最后一张卡片不被压住
-            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 96.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            grouped.forEach { (scene, items) ->
-                item(key = "header_$scene") {
-                    Text(
-                        text = ScheduleFormat.sceneLabel(scene.ifBlank { "work" }),
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(top = 8.dp, bottom = 2.dp),
-                    )
-                }
-                items(items, key = { it.id }) { timeline ->
-                    TimelineCard(timeline = timeline, onAction = { action -> onAction(timeline.id, action) })
-                }
-            }
-        }
+        TimelineLayout(
+            jobs = visibleJobs,
+            triggeringIds = triggeringIds,
+            onTrigger = onTrigger,
+            onToggle = onToggle,
+            onDelete = onDelete,
+            onOpenSession = onOpenSession,
+            // 阶段流：只有在时间线 tab 下才把 timelines.yaml 的阶段信息附在卡片上
+            phaseByJobId = remember(timelines) { timelines.associateBy { it.name } },
+            onTimelineAction = onAction,
+        )
     }
-}
-
-@Composable
-private fun TimelineCard(timeline: TimelineItem, onAction: (String) -> Unit) {
-    val active = timeline.status == "active"
-
-    EthanCard {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(
-                    text = timeline.name,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-                StatusBadge(active = active)
-            }
-
-            // 阶段流：当前 → 下一阶段，用箭头串起来，比两行文字更像「时间线」
-            if (timeline.currentPhase != null || timeline.nextPhase != null) {
-                Spacer(Modifier.height(8.dp))
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    timeline.currentPhase?.let { PhaseChip(text = it, emphasized = true) }
-                    if (timeline.currentPhase != null && timeline.nextPhase != null) {
-                        Text(
-                            text = "→",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    timeline.nextPhase?.let { PhaseChip(text = it, emphasized = false) }
-                }
-            }
-
-            if (timeline.nextAnchor.isNotBlank()) {
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    text = "锚点：${timeline.nextAnchor}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-
-            Spacer(Modifier.height(6.dp))
-
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                TextButton(onClick = { onAction("skip_phase") }) { Text("跳过") }
-                TextButton(onClick = { onAction("advance_phase") }) { Text("进入下阶段") }
-                if (active) {
-                    TextButton(onClick = { onAction("pause") }) { Text("暂停") }
-                } else {
-                    TextButton(onClick = { onAction("resume") }) { Text("恢复") }
-                }
-                TextButton(onClick = { onAction("cleanup") }) { Text("清理") }
-            }
-        }
-    }
-}
-
-@Composable
-private fun PhaseChip(text: String, emphasized: Boolean) {
-    val bg = if (emphasized) MaterialTheme.colorScheme.primaryContainer
-    else MaterialTheme.colorScheme.surfaceVariant
-    val fg = if (emphasized) MaterialTheme.colorScheme.onPrimaryContainer
-    else MaterialTheme.colorScheme.onSurfaceVariant
-    Text(
-        text = text,
-        style = MaterialTheme.typography.labelMedium,
-        color = fg,
-        modifier = Modifier
-            .clip(MaterialTheme.shapes.small)
-            .background(bg)
-            .padding(horizontal = 8.dp, vertical = 3.dp),
-    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
