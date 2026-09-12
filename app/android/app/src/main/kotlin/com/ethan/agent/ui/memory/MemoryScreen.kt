@@ -183,10 +183,13 @@ fun MemoryScreen(
 
     var factsSearchQuery by remember { mutableStateOf("") }
 
-    // 「事实」tab 搜索框的收起状态：往下滑收起（tab 栏右侧出现小放大镜），
-    // 往上滑或回到顶部再展开。收起只在事实 tab 有意义，切 tab 时复位。
+    // 搜索框收起状态（事实 / 结构化记忆两个 tab 共用同一套交互）：
+    // 往下滑收起（tab 栏右侧出现小放大镜），往上滑或回到顶部再展开。
+    // 切 tab 时复位 —— 在别的 tab 收起的图标带过来会让人以为这页的搜索没了。
     var factsSearchCollapsed by remember { mutableStateOf(false) }
     var factsSearchForcedOpen by remember { mutableStateOf(false) }
+    var recordsSearchCollapsed by remember { mutableStateOf(false) }
+    var recordsSearchForcedOpen by remember { mutableStateOf(false) }
 
     EthanScaffold(
         topBar = {
@@ -220,24 +223,25 @@ fun MemoryScreen(
                 tabs = MemoryTab.entries.toList(),
                 selectedTab = state.tab,
                 onTabSelected = { tab ->
-                    // 切 tab 时把搜索框复位成展开 —— 在别的 tab 收起的图标
-                    // 带过来会让人以为「事实」页的搜索没了。
+                    // 切 tab 时把两个搜索框都复位成展开 —— 在别的 tab 收起的图标
+                    // 带过来会让人以为这页的搜索没了。
                     factsSearchCollapsed = false
+                    factsSearchForcedOpen = false
+                    recordsSearchCollapsed = false
+                    recordsSearchForcedOpen = false
                     onTabChange(tab)
                 },
                 labelOf = { it.title },
-                action = if (state.tab == MemoryTab.Facts && factsSearchCollapsed) {
-                    {
-                        // 收起后搜索的入口挪到这儿：点一下展开并把焦点留在搜索框上
-                        IconButton(onClick = { factsSearchForcedOpen = true }) {
-                            Icon(
-                                Icons.Default.Search,
-                                contentDescription = "搜索",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
+                action = when {
+                    state.tab == MemoryTab.Facts && factsSearchCollapsed -> {
+                        // 收起后搜索的入口挪到这儿：点一下展开
+                        { SearchActionButton(onClick = { factsSearchForcedOpen = true }) }
                     }
-                } else null,
+                    state.tab == MemoryTab.Records && recordsSearchCollapsed -> {
+                        { SearchActionButton(onClick = { recordsSearchForcedOpen = true }) }
+                    }
+                    else -> null
+                },
             )
 
             if (state.isLoading) {
@@ -259,6 +263,7 @@ fun MemoryScreen(
                         if (collapsed) factsSearchForcedOpen = false
                     },
                 )
+
                 MemoryTab.Insights -> InsightsTab(
                     insights = state.insights,
                     date = state.insightsDate,
@@ -279,6 +284,13 @@ fun MemoryScreen(
                     onEdit = onSelectRecord,
                     onConfirm = onConfirmRecord,
                     onDelete = onDeleteRecord,
+                    collapsed = recordsSearchCollapsed && !recordsSearchForcedOpen,
+                    onCollapsedChange = { collapsed ->
+                        recordsSearchCollapsed = collapsed
+                        // 同「事实」：手动点开搜索后清掉强制展开标记，
+                        // 下一次下滑仍应能收起。
+                        if (collapsed) recordsSearchForcedOpen = false
+                    },
                 )
             }
         }
@@ -402,6 +414,23 @@ private fun EditorMetaRow(target: MemoryEditTarget) {
 }
 
 // ── Facts tab ────────────────────────────────────────────────────────────────
+
+/**
+ * 搜索框收起后，tab 栏右侧露出的放大镜。
+ *
+ * 「事实」和「结构化记忆」两个 tab 共用 —— 收起后的入口长得一样、位置一样，
+ * 点一下都是把它那一页的搜索框重新展开。
+ */
+@Composable
+private fun SearchActionButton(onClick: () -> Unit) {
+    IconButton(onClick = onClick) {
+        Icon(
+            Icons.Default.Search,
+            contentDescription = "搜索",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
 
 @Composable
 private fun FactsListContent(
@@ -714,44 +743,82 @@ private fun RecordsTab(
     onEdit: (StructuredRecord) -> Unit,
     onConfirm: (String) -> Unit,
     onDelete: (String) -> Unit,
+    /** 列表是否已下滑到底 —— true 时把「筛选 + 搜索」整块收起来，只留 tab 栏右侧的小图标。 */
+    collapsed: Boolean = false,
+    onCollapsedChange: (Boolean) -> Unit = {},
 ) {
-    var searchVisible by remember { mutableStateOf(false) }
-    val scrollState = rememberScrollState()
+    val chipsScrollState = rememberScrollState()
+    val listState = rememberLazyListState()
+
+    // 滚动方向驱动的收起/展开 —— 与 FactsListContent 同一套判定逻辑（用「当前可见项」
+    // 而非 isScrollInProgress + 累计位移，后者在 fling 时方向会抖、会跟搜索框一起抽）。
+    LaunchedEffect(listState) {
+        snapshotFlow {
+            val info = listState.layoutInfo
+            val firstVisible = info.visibleItemsInfo.firstOrNull()
+                ?: return@snapshotFlow false
+            firstVisible.index > 0 || firstVisible.offset < -24
+        }
+            .distinctUntilChanged()
+            .collect { scrolledPastTop -> onCollapsedChange(scrolledPastTop) }
+    }
 
     Column(Modifier.fillMaxSize()) {
-        // Top bar: filter chips (always visible) + search icon
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        // 筛选 chips + 搜索框整体作为一个「头部」收起/展开。
+        //
+        // 之前这里是：chips 行常驻 + 一个切换 searchVisible 的放大镜按钮 + 单独
+        // AnimatedVisibility 的搜索框。现在改成和「事实」tab 一致的下滑收起，
+        // 两块一起走，收起后入口统一收到右上角 tab 栏的放大镜上。
+        AnimatedVisibility(
+            visible = !collapsed,
+            enter = expandVertically(animationSpec = tween(180)),
+            exit = shrinkVertically(animationSpec = tween(180)),
         ) {
-            val statuses = listOf(null to "全部", "pending" to "候选", "confirmed" to "已确认", "superseded" to "已替代")
-            Row(
-                modifier = Modifier.weight(1f).horizontalScroll(scrollState),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                statuses.forEach { (value, label) ->
-                    FilterChip(
-                        selected = filter.status == value,
-                        onClick = { onFilterChange(filter.copy(status = value)) },
-                        label = { Text(label) },
+            Column {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    val statuses = listOf(
+                        null to "全部", "pending" to "候选",
+                        "confirmed" to "已确认", "superseded" to "已替代",
                     )
+                    Row(
+                        modifier = Modifier.weight(1f).horizontalScroll(chipsScrollState),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        statuses.forEach { (value, label) ->
+                            FilterChip(
+                                selected = filter.status == value,
+                                onClick = { onFilterChange(filter.copy(status = value)) },
+                                label = { Text(label) },
+                            )
+                        }
+                    }
                 }
-            }
-            IconButton(onClick = { searchVisible = !searchVisible }, modifier = Modifier.size(40.dp)) {
-                Icon(Icons.Default.Search, contentDescription = "搜索", modifier = Modifier.size(20.dp))
-            }
-        }
 
-        // Search field (conditionally shown)
-        AnimatedVisibility(visible = searchVisible) {
-            OutlinedTextField(
-                value = search,
-                onValueChange = onSearchChange,
-                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 6.dp),
-                placeholder = { Text("搜索记录…") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                singleLine = true,
-            )
+                OutlinedTextField(
+                    value = search,
+                    onValueChange = onSearchChange,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 6.dp),
+                    placeholder = { Text("搜索记录…") },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Default.Search,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    },
+                    singleLine = true,
+                    shape = MaterialTheme.shapes.small,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                    ),
+                )
+            }
         }
 
         if (records.isEmpty()) {
@@ -762,6 +829,7 @@ private fun RecordsTab(
         }
 
         LazyColumn(
+            state = listState,
             modifier = Modifier.fillMaxSize(),
             // 顶部间距收到 8dp。这里原本是「chips 行下边距 + Spacer(4dp) + 列表
             // contentPadding 16dp」三层叠加，卡片离筛选栏老远 —— 用户反馈的
