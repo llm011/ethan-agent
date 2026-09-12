@@ -31,24 +31,27 @@ export interface ConsumeStreamActions {
 // 把本地刚发出的 user 消息补回后端返回的消息列表，避免后端漏存时用户那条
 // query 从界面上消失（用户反馈：回复失败后连自己发的 query 都找不回）。
 //
-// 只处理「本地列表末尾那段 user 消息」——即本轮刚发出、后端可能还没落库的那条。
-// 不碰更早的历史消息（那些若不在后端结果里，说明是本地脏数据，不该被复活）。
-// 去重按 content：后端已有同样内容就不再补，避免重复气泡。
-function mergeMissingUserMessages(local: Message[], fromServer: Message[]): Message[] {
-  const serverUserContents = new Set(
-    fromServer.filter((m) => m.role === "user").map((m) => m.content),
-  );
-  // 末尾那段：从最后一条 user 消息起（含）到列表末尾。本轮发出的 query 会落在这里。
-  const lastUserIdx = local.reduce(
-    (acc, m, i) => (m.role === "user" ? i : acc),
-    -1,
-  );
-  if (lastUserIdx < 0) return fromServer;
+// 按 content 的**出现次数差额**补：本地有几条、后端有几条，差多少补多少。
+// 两个理由：
+//  1. 后端正常落库的历史消息，本地与后端条数一致 → 差额为 0，不会被复活
+//     （早前版本只看「本地末尾那段」，会漏掉更早出现的重复 query）。
+//  2. 同一会话连发两条完全相同的 query（重试、复制粘贴、队列 drain）时，后端可能
+//     只落了第一条。若只判「这个 content 出现过没有」，第二条会被当成已存在而不补，
+//     query 照样消失——正是本函数要修的那个 bug 本身。
+export function mergeMissingUserMessages(local: Message[], fromServer: Message[]): Message[] {
+  const countUserContent = (msgs: Message[], content: string) =>
+    msgs.filter((m) => m.role === "user" && m.content === content).length;
 
-  // 只补「该位置之后的 assistant 消息不在后端」的那些 user 消息；
-  // 若本轮 assistant 已在后端（说明这轮已落库），则整段都不补。
-  const tailUserMsgs = local.slice(lastUserIdx).filter((m) => m.role === "user");
-  const missing = tailUserMsgs.filter((m) => !serverUserContents.has(m.content));
+  // 逐条扫描本地的 user 消息，累计「该 content 本地出现到第几次」，
+  // 后端条数不够这么多就说明这一条没落库，需要补。
+  const seen = new Map<string, number>();
+  const missing: Message[] = [];
+  for (const m of local) {
+    if (m.role !== "user" || !m.content) continue;
+    const nth = (seen.get(m.content) ?? 0) + 1;
+    seen.set(m.content, nth);
+    if (countUserContent(fromServer, m.content) < nth) missing.push(m);
+  }
   if (missing.length === 0) return fromServer;
 
   return [...fromServer, ...missing];

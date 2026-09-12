@@ -104,3 +104,53 @@ def test_user_message_persisted_on_stream_setup_error(client, store):
     sid = sessions[0].id
     contents = [m.content for m in _load_messages(store, sid) if m.role == "user"]
     assert query in contents, f"用户消息必须已落库，实际 user 消息: {contents}"
+
+
+# 1x1 透明 PNG
+B64_PNG = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk"
+    "YPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+)
+
+
+def test_user_message_quote_and_images_persisted_with_correct_shape(client, store):
+    """quote 与 images 的落库格式必须与改造前一致（本 PR 换了落库实现，最易静默回归）。
+
+    用户消息来源从 Message 对象换成了 req.messages 里的 raw dict，且 path 的取值
+    逻辑变了。这里锁死三件事：
+      - quote 非空，且内容正确（刷新后仍能渲染引用气泡）；
+      - images 落成 [{path, media_type}]，不是原始 base64；
+      - 不把 base64 的 data 字段写进库（否则 DB 体积膨胀、且渲染层拿到的是错的）。
+    """
+    query = "带引用和图片的 query"
+    resp = client.post(
+        "/chat",
+        json={
+            "messages": [
+                {
+                    "role": "user",
+                    "content": query,
+                    "images": [{"data": B64_PNG, "media_type": "image/png"}],
+                }
+            ],
+            "quote": {"role": "assistant", "content": "被引用的内容"},
+            "model": "dummy-model",
+            "stream": False,
+        },
+    )
+    assert resp.status_code >= 400, resp.text
+
+    sessions = asyncio.run(store.list_recent(limit=10))
+    assert sessions, "应至少创建了一个 session"
+    sid = sessions[0].id
+    user_msgs = [m for m in _load_messages(store, sid) if m.role == "user"]
+    assert user_msgs, "用户消息必须已落库"
+    msg = user_msgs[0]
+
+    assert msg.quote, "引用信息必须落库，刷新后仍能渲染引用气泡"
+    assert msg.quote.get("content") == "被引用的内容"
+
+    assert msg.images, "图片必须落库"
+    first = msg.images[0]
+    assert first.get("path"), f"图片必须以 path 格式落库，实际: {first}"
+    assert "data" not in first, "不应把原始 base64 写进库"

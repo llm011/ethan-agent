@@ -78,15 +78,15 @@ def _is_local(request: Request) -> bool:
     return ip.is_loopback or any(ip in net for net in _PRIVATE_NETWORKS)
 
 
-async def _direct_stream(agent, messages: list, *,
-                        save_user=None, save_assistant=None):
+async def _direct_stream(agent, messages: list, *, save_assistant=None):
     """Direct LLM streaming: skip agent loop, no tools, no skills. Fastest path.
 
-    save_user / save_assistant 可选：传入 coroutine 工厂。save_assistant 形如
-    `(text, err=None)`，成功时 err 为 None、出错时带错误原因。给 direct=true +
-    session_id 场景提供与正常 chat 一致的落库行为（会话列表能看到摘要/翻译的内容）。
-    注：调用方（chat 路由）已把用户消息提前统一落库，故实际只传 save_assistant；
-    save_user 参数保留以兼容其它潜在调用方。
+    save_assistant 可选：传入 coroutine 工厂，形如 `(text, err=None)`，成功时
+    err 为 None、出错时带错误原因。给 direct=true + session_id 场景提供与正常
+    chat 一致的落库行为（会话列表能看到摘要/翻译的内容）。
+
+    用户消息不在这里落库：调用方（chat 路由）已把它提前统一落库——早于本函数，
+    因此回复失败时用户那句也不会丢。故本函数只负责助手消息。
 
     出错时也要落库：过去只在 `not saw_error and full` 才存助手消息，于是
     provider 失败时这条 direct 会话在库里只剩用户那句，刷新后整轮对话消失。
@@ -98,14 +98,6 @@ async def _direct_stream(agent, messages: list, *,
     如后续 direct 也需要多模态或稳定重试，应改调用 agent 层公开方法。
     """
     import json
-
-    if save_user:
-        try:
-            await save_user()
-        except Exception as e:  # noqa: BLE001
-            # 用户消息落库失败不该中断生成
-            import logging as _log
-            _log.getLogger(__name__).warning("direct save_user failed: %s", e)
 
     full = ""
     saw_error = False
@@ -123,7 +115,7 @@ async def _direct_stream(agent, messages: list, *,
 
     # 出错也要落库：有部分产出存部分产出 + interrupted 状态和错误原因；
     # 即便一个字都没产出，也存一条带 error 的 assistant 行，保证这轮对话
-    # 在会话列表里留下一段可回看的过程（用户消息本身已由 save_user 落下）。
+    # 在会话列表里留下一段可回看的过程（用户消息已由调用方提前落库）。
     if save_assistant and (full or saw_error):
         try:
             await save_assistant(full, err_text if saw_error else None)
