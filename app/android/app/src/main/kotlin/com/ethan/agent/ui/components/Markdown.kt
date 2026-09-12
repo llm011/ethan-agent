@@ -208,8 +208,8 @@ private fun MarkdownTable(
 
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(8.dp))
-            .border(1.dp, borderColor, RoundedCornerShape(8.dp))
+            .clip(MaterialTheme.shapes.small)
+            .border(1.dp, borderColor, MaterialTheme.shapes.small)
             .horizontalScroll(rememberScrollState()),
     ) {
         Column {

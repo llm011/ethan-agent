@@ -110,7 +110,7 @@ private fun ImageFileCardView(card: FileCard, viewUrl: String) {
         Surface(
             modifier = Modifier
                 .sizeIn(maxWidth = 240.dp, maxHeight = 180.dp)
-                .clip(RoundedCornerShape(8.dp))
+                .clip(MaterialTheme.shapes.small)
                 .clickable { showLightbox = true },
             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
         ) {
@@ -143,7 +143,7 @@ private fun ImageFileCardView(card: FileCard, viewUrl: String) {
 @Composable
 private fun AudioFileCardView(card: FileCard, onPlay: () -> Unit, onDownload: () -> Unit) {
     Surface(
-        shape = RoundedCornerShape(12.dp),
+        shape = MaterialTheme.shapes.small,
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
         modifier = Modifier.fillMaxWidth().sizeIn(maxWidth = 300.dp),
     ) {
@@ -197,7 +197,7 @@ private fun AudioFileCardView(card: FileCard, onPlay: () -> Unit, onDownload: ()
 @Composable
 private fun VideoFileCardView(card: FileCard, onPlay: () -> Unit, onDownload: () -> Unit) {
     Surface(
-        shape = RoundedCornerShape(12.dp),
+        shape = MaterialTheme.shapes.small,
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
         modifier = Modifier.fillMaxWidth().sizeIn(maxWidth = 300.dp),
     ) {
@@ -252,7 +252,7 @@ private fun VideoFileCardView(card: FileCard, onPlay: () -> Unit, onDownload: ()
 private fun GenericFileCardView(card: FileCard, onDownload: () -> Unit) {
     Surface(
         onClick = onDownload,
-        shape = RoundedCornerShape(12.dp),
+        shape = MaterialTheme.shapes.small,
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
         modifier = Modifier.fillMaxWidth().sizeIn(maxWidth = 300.dp),
     ) {

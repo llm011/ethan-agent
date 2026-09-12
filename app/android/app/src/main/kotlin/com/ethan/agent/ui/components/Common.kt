@@ -25,8 +25,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -238,7 +240,7 @@ fun ToolTimeline(steps: List<ToolStep>, modifier: Modifier = Modifier, isStreami
     // 整体带边框的日志卡片
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
+        shape = MaterialTheme.shapes.small,
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
         border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
     ) {
@@ -321,8 +323,8 @@ private fun ToolStepRow(step: ToolStep, indent: Int) {
     val isCancelled = step.state == "cancelled"
     val isRunning = step.state == "running"
     val statusColor = when {
-        isError -> Color(0xFFE53935)
-        isDone -> Color(0xFF43A047)
+        isError -> StatusError
+        isDone -> StatusSuccess
         isCancelled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
@@ -447,8 +449,8 @@ private fun SubToolStepRow(sub: com.ethan.agent.core.model.SubToolStep, indent: 
     val isError = sub.state == "error"
     val isCancelled = sub.state == "cancelled"
     val statusColor = when {
-        isError -> Color(0xFFE53935)
-        isDone -> Color(0xFF43A047)
+        isError -> StatusError
+        isDone -> StatusSuccess
         isCancelled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
@@ -532,6 +534,12 @@ fun SourceBadge(source: String?) {
     Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
 }
 
+/**
+ * 主按钮。
+ *
+ * 用真正的 M3 [Button]（而不是 Surface + Box 手搓）—— 这样才有涟漪、state layer、
+ * disabled 语义和正确的无障碍角色。只覆盖尺寸与圆角。
+ */
 @Composable
 fun EthanPrimaryButton(
     text: String,
@@ -539,26 +547,17 @@ fun EthanPrimaryButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
-    Surface(
+    Button(
         onClick = onClick,
-        enabled = enabled,
         modifier = modifier.heightIn(min = 40.dp),
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.primary,
-        contentColor = MaterialTheme.colorScheme.onPrimary,
+        enabled = enabled,
+        shape = MaterialTheme.shapes.large,
     ) {
-        Box(
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
-            contentAlignment = androidx.compose.ui.Alignment.Center,
-        ) {
-            Text(
-                text = text,
-                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Medium),
-            )
-        }
+        Text(text, style = MaterialTheme.typography.labelLarge)
     }
 }
 
+/** 次按钮：M3 [OutlinedButton]，描边用 outline（而非主色淡化），避免满屏彩色线条。 */
 @Composable
 fun EthanSecondaryButton(
     text: String,
@@ -566,23 +565,13 @@ fun EthanSecondaryButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
-    Surface(
+    OutlinedButton(
         onClick = onClick,
-        enabled = enabled,
         modifier = modifier.heightIn(min = 40.dp),
-        shape = RoundedCornerShape(24.dp),
-        color = Color.Transparent,
-        contentColor = MaterialTheme.colorScheme.primary,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)),
+        enabled = enabled,
+        shape = MaterialTheme.shapes.large,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
     ) {
-        Box(
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
-            contentAlignment = androidx.compose.ui.Alignment.Center,
-        ) {
-            Text(
-                text = text,
-                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Medium),
-            )
-        }
+        Text(text, style = MaterialTheme.typography.labelLarge)
     }
 }

@@ -36,7 +36,7 @@ fun CodeBlock(language: String, code: String, modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
+            .clip(MaterialTheme.shapes.small)
             .background(bg),
     ) {
         // Header: language label + copy button

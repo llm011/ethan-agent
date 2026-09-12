@@ -192,36 +192,14 @@ fun AppDrawerContent(
             )
             Spacer(Modifier.height(12.dp))
 
-            // Tool navigation items
+            // Tool navigation items —— 用与 MoreScreen 共用的 EthanListRow，
+            // 替代此前两份各写一遍的图标行。
             drawerToolItems.forEach { item ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onNavigate(item.screen.route); onClose() }
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
-                        modifier = Modifier.size(32.dp),
-                    ) {
-                        item.screen.icon?.let { icon ->
-                            Icon(
-                                imageVector = icon,
-                                contentDescription = null,
-                                modifier = Modifier.padding(6.dp),
-                                tint = MaterialTheme.colorScheme.primary,
-                            )
-                        }
-                    }
-                    Text(
-                        text = item.label,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                }
+                EthanListRow(
+                    title = item.label,
+                    icon = item.screen.icon,
+                    onClick = { onNavigate(item.screen.route); onClose() },
+                )
             }
 
             Spacer(Modifier.height(16.dp))
@@ -261,12 +239,12 @@ private fun CollapsibleSessionGroup(
                 modifier = Modifier
                     .size(20.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFFE53935)),
+                    .background(MaterialTheme.colorScheme.error),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     text = if (unreadCount > 9) "9+" else unreadCount.toString(),
-                    color = Color.White,
+                    color = MaterialTheme.colorScheme.onError,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
                 )
@@ -305,7 +283,7 @@ private fun CollapsibleSessionGroup(
                             modifier = Modifier
                                 .size(8.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xFFE53935)),
+                                .background(MaterialTheme.colorScheme.error),
                         )
                         Spacer(Modifier.width(8.dp))
                     }
