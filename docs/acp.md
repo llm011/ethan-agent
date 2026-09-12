@@ -121,7 +121,13 @@ Coding Agent 把「turn 是否进行中」记在自己的 session 文件里。�
 - **同库**：走 per-user 的 `SessionStore`（`user_sessions_db_path()`），与普通 web 会话同库，侧边栏天然能列出（按 `source` 区分）
 - **model 字段**：存**真实可用的 chat 模型**（取 `defaults.model`），**不能**用 agent 名——否则用户在该会话里直接发消息时会被当成 chat 模型，导致 `unknown provider for model codex` 502。渠道归类由 `source` 表达，与 model 解耦。
 - **best-effort**：写库/注册任何一步失败都吞掉异常，绝不影响主委派流程
-- **并发安全**：「查映射 → 建会话 → 写映射」整体按 `(agent, cwd)` 加锁（`MirrorSession.start` 内 `mapping_lock`）。否则一批并行的 `delegate_coding`（典型：deep-review 的多维度扫描退化成一串并行委派）会全部查不到别人刚写的映射，各建一条 Ethan 会话，侧边栏表现为「同一个任务冒出 N 条会话」。`acp_sessions.json` 的所有读改写经 `update_sessions()` 持文件级锁串行化，避免并发覆盖丢映射。
+- **并发安全**：「查映射 → 建会话 → 写映射」整体按 `(agent, cwd)` 加锁（`MirrorSession.start` 内 `mapping_lock`）。否则一批并行的 `delegate_coding`（典型：deep-review 的多维度扫描退化成一串并行委派）会全部查不到别人刚写的映射，各建一条 Ethan 会话，侧边栏表现为「同一个任务冒出 N 条会话」。
+
+  `acp_sessions.json` 是单个 JSON 文件，**同一个 dict 里任意两个 key 的读改写都会互相覆盖**，所以所有写操作（镜像映射，以及 coding-agent 自己的 `set_session` / `clear_session`）都走同一个 `update_sessions()`，持**文件级**锁串行化——per-key 锁挡不住「A 改 key1 时 B 在读同一份快照改 key2」。`clear_session` 由 `reset_session=True` 触发，若不纳入同一把锁，它「pop 自己的 key → 整份覆盖写」会把并发写入的镜像映射整份抹掉。
+
+- **损坏不放大**：`_load_sessions` 区分「文件不存在」（正常首次使用，返回 `{}`）与「存在但解析失败」（抛 `SessionsFileCorruptError`）。若后者也返回 `{}`，后续读-改-写会拿空 dict 当基底整份覆盖回去，把原文件里其它映射全抹掉。写侧让异常抛出（不再静默 `except: pass`），读侧（`get_session` / `get_mirror_session` / `get_mirror_info`）则放宽为「当作无历史」，避免委派整个炸掉。
+
+- **锁的存活**：`_mapping_locks` 是 `WeakValueDictionary`（而非 `defaultdict`），否则每个新 `(agent, cwd)` 都会永久驻留一把锁、长跑 server 里随 work_dir 数无上限增长。弱引用需配一个「临界区内强引用」的表（`_mapping_locks_pinned`）——只靠 `get` 返回的临时引用，`await` 让出期间锁可能被 GC 掉，等于没锁。另注意 `asyncio.Lock` 绑定创建它的 event loop，跨 loop 复用会炸；生产是单 loop，若将来引入多 loop 需改为按 loop 分桶。
 - 可用 `delegate(mirror=False)` 关闭
 
 ### 实时推送

@@ -108,7 +108,7 @@ async def _run_opencode(
         await _terminate_proc(proc)
         # 同 codex：超时可能让 opencode session 卡在进行中，清掉以免下次续接到坏会话。
         if session_id:
-            clear_session(work_dir, user_id=user_id, agent="opencode")
+            await clear_session(work_dir, user_id=user_id, agent="opencode")
         return ACPResult(success=False, output=f"Timed out after {timeout}s",
                          agent="opencode", session_id=session_id, sub_steps=sub_steps)
     except Exception as e:
@@ -122,7 +122,7 @@ async def _run_opencode(
         final_result = final_result[:12000] + "\n...(truncated)"
 
     if session_id:
-        set_session(work_dir, session_id, user_id=user_id, agent="opencode")
+        await set_session(work_dir, session_id, user_id=user_id, agent="opencode")
 
     return ACPResult(
         success=not is_error and bool(final_result),

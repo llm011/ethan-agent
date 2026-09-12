@@ -184,7 +184,7 @@ async def _run_codex(
         # 超时即便优雅终止，该 thread 也可能停在「turn 进行中」而无法 resume；
         # 清掉持久化的 session_id，下次该 (codex, cwd) 自动从新会话开始，避免续接到坏 thread。
         if session_id:
-            clear_session(work_dir, user_id=user_id, agent="codex")
+            await clear_session(work_dir, user_id=user_id, agent="codex")
         return ACPResult(success=False, output=f"Timed out after {timeout}s",
                          agent="codex", session_id=session_id, sub_steps=sub_steps)
     except Exception as e:
@@ -197,7 +197,7 @@ async def _run_codex(
         final_result = final_result[:12000] + "\n...(truncated)"
 
     if session_id:
-        set_session(work_dir, session_id, user_id=user_id, agent="codex")
+        await set_session(work_dir, session_id, user_id=user_id, agent="codex")
 
     return ACPResult(
         success=not is_error and bool(final_result),

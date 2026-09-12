@@ -126,7 +126,7 @@ async def _dispatch(
     if prefer == "opencode":
         resume_sid = None
         if reset_session:
-            clear_session(work_dir, user_id=user_id, agent="opencode")
+            await clear_session(work_dir, user_id=user_id, agent="opencode")
         elif resume:
             resume_sid = get_session(work_dir, user_id=user_id, agent="opencode")
         return await _run_opencode(
@@ -136,7 +136,7 @@ async def _dispatch(
     if prefer == "codex":
         resume_sid = None
         if reset_session:
-            clear_session(work_dir, user_id=user_id, agent="codex")
+            await clear_session(work_dir, user_id=user_id, agent="codex")
         elif resume:
             resume_sid = get_session(work_dir, user_id=user_id, agent="codex")
         return await _run_codex(
@@ -148,7 +148,7 @@ async def _dispatch(
     if agent_name == "claude":
         resume_sid = None
         if reset_session:
-            clear_session(work_dir, user_id=user_id, agent="claude")
+            await clear_session(work_dir, user_id=user_id, agent="claude")
         elif resume:
             resume_sid = get_session(work_dir, user_id=user_id, agent="claude")
         return await _run_claude_code(
