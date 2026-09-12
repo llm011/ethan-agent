@@ -119,10 +119,9 @@ fun LoginScreen(
             // Main Rounded Cute Container
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(24.dp),
+                shape = MaterialTheme.shapes.extraLarge,
                 color = MaterialTheme.colorScheme.surface,
-                border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
-                shadowElevation = 2.dp,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             ) {
                 Column(
                     modifier = Modifier.padding(20.dp),
@@ -142,7 +141,7 @@ fun LoginScreen(
                             placeholder = { Text("http://192.168.1.100:8900", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)) },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
-                            shape = RoundedCornerShape(18.dp),
+                            shape = MaterialTheme.shapes.large,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                             leadingIcon = {
                                 Icon(
@@ -183,7 +182,7 @@ fun LoginScreen(
                             placeholder = { Text("输入 token", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)) },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
-                            shape = RoundedCornerShape(18.dp),
+                            shape = MaterialTheme.shapes.large,
                             visualTransformation = if (showToken) VisualTransformation.None else PasswordVisualTransformation(),
                             leadingIcon = {
                                 Icon(
@@ -215,7 +214,7 @@ fun LoginScreen(
                     // Error Box
                     state.error?.let { err ->
                         Surface(
-                            shape = RoundedCornerShape(14.dp),
+                            shape = MaterialTheme.shapes.large,
                             color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f),
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.3f)),
                         ) {

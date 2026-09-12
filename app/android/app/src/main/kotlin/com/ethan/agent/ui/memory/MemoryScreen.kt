@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
@@ -83,6 +84,7 @@ import com.ethan.agent.core.model.InsightItem
 import com.ethan.agent.core.model.Procedure
 import com.ethan.agent.core.model.StructuredRecord
 import com.ethan.agent.ui.components.ErrorSnackbar
+import com.ethan.agent.ui.components.EthanEmptyState
 import com.ethan.agent.ui.components.EthanScrollableTabBar
 import com.ethan.agent.ui.components.EthanTopBar
 import com.ethan.agent.ui.components.LoadingBox
@@ -128,7 +130,7 @@ fun MemoryScreen(
     // Consolidating dialog
     if (state.isConsolidating) {
         Dialog(onDismissRequest = {}) {
-            Surface(shape = RoundedCornerShape(16.dp)) {
+            Surface(shape = MaterialTheme.shapes.large) {
                 Column(
                     Modifier.padding(24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -417,7 +419,7 @@ private fun FactsListContent(
             placeholder = { Text("搜索记忆，支持 Markdown...") },
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
             singleLine = true,
-            shape = RoundedCornerShape(12.dp),
+            shape = MaterialTheme.shapes.small,
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
                 unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
@@ -463,7 +465,7 @@ private fun FactListCard(item: FactItem, onClick: () -> Unit) {
 
     Card(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-        shape = RoundedCornerShape(16.dp),
+        shape = MaterialTheme.shapes.large,
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
@@ -475,7 +477,7 @@ private fun FactListCard(item: FactItem, onClick: () -> Unit) {
             // 左侧大脑图标
             Surface(
                 modifier = Modifier.size(40.dp),
-                shape = RoundedCornerShape(12.dp),
+                shape = MaterialTheme.shapes.small,
                 color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
             ) {
                 Box(contentAlignment = Alignment.Center) {
@@ -537,7 +539,7 @@ private fun CategoryChip(category: String) {
     }
 
     Surface(
-        shape = RoundedCornerShape(6.dp),
+        shape = MaterialTheme.shapes.extraSmall,
         color = bgColor,
     ) {
         Text(
@@ -591,7 +593,7 @@ private fun InsightsTab(
         ) {
             Row(
                 modifier = Modifier.weight(1f).clickable { showDatePicker = true }
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(MaterialTheme.shapes.small)
                     .background(MaterialTheme.colorScheme.surfaceContainerLow)
                     .padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -612,9 +614,11 @@ private fun InsightsTab(
             }
         }
         if (insights.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("暂无永久记忆", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+            EthanEmptyState(
+                title = "还没有永久记忆",
+                description = "Ethan 会把重要的事记在这里",
+                icon = Icons.Default.Psychology,
+            )
             return@Column
         }
         LazyColumn(
@@ -698,7 +702,7 @@ private fun ProceduresTab(procedures: List<Procedure>, onDelete: (String) -> Uni
                     Box(
                         Modifier
                             .fillMaxSize()
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(MaterialTheme.shapes.small)
                             .background(MaterialTheme.colorScheme.errorContainer)
                             .padding(horizontal = 20.dp),
                         contentAlignment = Alignment.CenterEnd,
@@ -883,7 +887,7 @@ private fun SummariesDialog(summaries: List<JsonElement>, onDismiss: () -> Unit)
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(summaries) { item ->
-                        Surface(shape = RoundedCornerShape(8.dp), tonalElevation = 2.dp) {
+                        Surface(shape = MaterialTheme.shapes.small, tonalElevation = 2.dp) {
                             Text(
                                 item.toString().take(200),
                                 modifier = Modifier.padding(12.dp),
@@ -904,7 +908,7 @@ private fun SummariesDialog(summaries: List<JsonElement>, onDismiss: () -> Unit)
 
 @Composable
 private fun MetaChip(label: String) {
-    Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.secondaryContainer) {
+    Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.secondaryContainer) {
         Text(
             label,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),

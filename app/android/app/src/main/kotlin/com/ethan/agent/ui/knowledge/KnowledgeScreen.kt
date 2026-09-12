@@ -39,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ethan.agent.core.model.KnowledgeItem
+import com.ethan.agent.ui.components.EthanCard
 import com.ethan.agent.ui.components.ErrorSnackbar
 import com.ethan.agent.ui.components.EthanTopBar
 import com.ethan.agent.ui.components.LoadingBox
@@ -237,9 +238,7 @@ private fun Chip(label: String, onRemove: () -> Unit) {
 
 @Composable
 private fun KnowledgeCard(item: KnowledgeItem, query: String = "", onClick: () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-    ) {
+    EthanCard(onClick = onClick) {
         Column(Modifier.padding(12.dp)) {
             Text(
                 item.title,

@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
@@ -206,15 +207,20 @@ private fun SkillDetailContent(
 
 @Composable
 private fun SkillCard(skill: SkillInfo, isSelected: Boolean, onClick: () -> Unit) {
+    // 用真 Card(onClick) 拿涟漪；选中态用 secondaryContainer（与主题同色系，
+    // 比默认的 primaryContainer 淡、不抢眼）。
     Card(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-        colors = if (isSelected) {
-            androidx.compose.material3.CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-            )
-        } else {
-            androidx.compose.material3.CardDefaults.cardColors()
-        },
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(
+            containerColor = if (isSelected) {
+                MaterialTheme.colorScheme.secondaryContainer
+            } else {
+                MaterialTheme.colorScheme.surfaceContainerLow
+            },
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Column(Modifier.padding(12.dp)) {
             Text(skill.name, style = MaterialTheme.typography.titleSmall)

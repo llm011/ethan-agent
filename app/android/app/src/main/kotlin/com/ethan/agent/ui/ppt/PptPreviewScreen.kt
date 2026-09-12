@@ -28,6 +28,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.material.icons.filled.Description
+import com.ethan.agent.ui.components.EthanEmptyState
 import com.ethan.agent.ui.components.EthanTopBar
 import com.ethan.agent.ui.components.ErrorSnackbar
 import com.ethan.agent.ui.components.LoadingBox
@@ -60,9 +62,12 @@ fun PptPreviewScreen(
         }
 
         if (state.slides.isEmpty()) {
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Text("暂无页面", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+            EthanEmptyState(
+                title = "这个文稿还没有页面",
+                description = "内容为空",
+                icon = Icons.Default.Description,
+                modifier = Modifier.padding(padding),
+            )
             return@Scaffold
         }
 

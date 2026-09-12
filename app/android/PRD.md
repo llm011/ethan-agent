@@ -207,7 +207,7 @@ app/android/
 |--------|------|------|
 | 服务器地址 | 登录页 / 设置→连接 | 如 `http://NAS_IP:8900` |
 | Access Token | 登录页 | 与服务端 auth_token 一致 |
-| 主题 | 跟随系统（可扩展） | Material 3 动态取色 |
+| 主题 | 跟随系统（可扩展） | 与 Web/Desktop 共享同一套 5 套主题：青瓦（默认）/ 暖橙 / 素纸 / 微雾 / 深色（见 `web/components/chat/themes.ts`） |
 
 ### 4.3 可选配置
 

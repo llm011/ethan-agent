@@ -3,8 +3,11 @@ package com.ethan.agent.ui.settings
 import com.ethan.agent.shared.viewmodel.SettingsTab
 import com.ethan.agent.shared.viewmodel.SettingsUiState
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -12,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
@@ -19,9 +23,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
@@ -52,6 +58,8 @@ import androidx.compose.runtime.setValue
 import android.widget.Toast
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -62,6 +70,8 @@ import com.ethan.agent.core.model.AgentSettings
 import com.ethan.agent.core.model.KnowledgeValidateRequest
 import com.ethan.agent.core.model.ProviderConfig
 import com.ethan.agent.core.model.SystemSettings
+import com.ethan.agent.ui.components.EthanCard
+import com.ethan.agent.ui.components.EthanSectionHeader
 import com.ethan.agent.ui.components.ErrorSnackbar
 import com.ethan.agent.ui.components.EthanPrimaryButton
 import com.ethan.agent.ui.components.EthanSecondaryButton
@@ -69,6 +79,10 @@ import com.ethan.agent.ui.components.EthanScrollableTabBar
 import com.ethan.agent.ui.components.EthanTopBar
 import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.SnackbarContainer
+import com.ethan.agent.ui.components.StatusSuccess
+import com.ethan.agent.ui.theme.EthanThemeId
+import com.ethan.agent.ui.theme.THEME_FOLLOW_SYSTEM
+import com.ethan.agent.ui.theme.normalizeThemeId
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -274,14 +288,14 @@ private fun ConnectionTab(
     CuteCard {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("服务器连接", style = MaterialTheme.typography.titleSmall)
-            OutlinedTextField(state.serverUrl, onUrlChange, label = { Text("服务器地址") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+            OutlinedTextField(state.serverUrl, onUrlChange, label = { Text("服务器地址") }, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small)
             OutlinedTextField(
                 value = state.authToken,
                 onValueChange = onAuthTokenChange,
                 label = { Text("Access Token") },
                 placeholder = { Text("留空不修改，输入新 Token 以重新认证", style = MaterialTheme.typography.bodySmall) },
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
+                shape = MaterialTheme.shapes.small,
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
             )
@@ -296,15 +310,63 @@ private fun ConnectionTab(
     }
 }
 
-private val THEME_OPTIONS = listOf(
-    "warm_orange" to "暖橙",
-    "system" to "跟随系统",
-    "light" to "浅色",
-    "dark" to "深色",
-    "qingwa" to "青瓦",
-    "plain_paper" to "素纸",
-    "mist" to "微雾",
-)
+/**
+ * 主题选择器 —— 与 Web 的调色盘下拉一致：每项带三色圆点预览 + 名称 + 选中打勾。
+ *
+ * 主题清单直接来自 [EthanThemeId]（和 Web/Desktop 共用同一份定义），不再单独
+ * 维护一份列表——之前就是因为两边各写一份，导致 4 套主题定义了却永远选不到。
+ */
+@Composable
+private fun ThemePicker(currentThemeId: String, onSetTheme: (String) -> Unit) {
+    val normalized = normalizeThemeId(currentThemeId)
+    val options = buildList {
+        add(THEME_FOLLOW_SYSTEM to "跟随系统")
+        EthanThemeId.entries.forEach { add(it.id to it.label) }
+    }
+    Column {
+        options.forEach { (id, label) ->
+            val selected = normalized == id
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable { onSetTheme(id) }
+                    .padding(horizontal = 4.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // 三色圆点预览（跟随系统用中性的亮/暗示意）
+                val swatch = EthanThemeId.fromIdOrNull(id)?.swatch
+                    ?: listOf(Color(0xFFF5F7F2), Color(0xFF6F9B86), Color(0xFF1F1F1F))
+                Row(Modifier.width(44.dp)) {
+                    swatch.forEachIndexed { i, c ->
+                        Box(
+                            Modifier
+                                .size(14.dp)
+                                .offset(x = (-5 * i).dp)
+                                .clip(CircleShape)
+                                .background(c)
+                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape),
+                        )
+                    }
+                }
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    label,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f),
+                )
+                if (selected) {
+                    Icon(
+                        Icons.Default.Check,
+                        contentDescription = "已选中",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun GeneralTab(
@@ -320,10 +382,10 @@ private fun GeneralTab(
 ) {
     CuteCard {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            OutlinedTextField(settings.agentName, { onUpdate(settings.copy(agentName = it)) }, label = { Text("Agent 名称") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
-            OutlinedTextField(settings.defaultModel, { onUpdate(settings.copy(defaultModel = it)) }, label = { Text("默认模型") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
-            OutlinedTextField(settings.liteModel, { onUpdate(settings.copy(liteModel = it)) }, label = { Text("轻量模型") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
-            OutlinedTextField(settings.language, { onUpdate(settings.copy(language = it)) }, label = { Text("语言 (zh/en)") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+            OutlinedTextField(settings.agentName, { onUpdate(settings.copy(agentName = it)) }, label = { Text("Agent 名称") }, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small)
+            OutlinedTextField(settings.defaultModel, { onUpdate(settings.copy(defaultModel = it)) }, label = { Text("默认模型") }, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small)
+            OutlinedTextField(settings.liteModel, { onUpdate(settings.copy(liteModel = it)) }, label = { Text("轻量模型") }, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small)
+            OutlinedTextField(settings.language, { onUpdate(settings.copy(language = it)) }, label = { Text("语言 (zh/en)") }, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("心跳")
                 Switch(settings.heartbeatEnabled, { onUpdate(settings.copy(heartbeatEnabled = it)) })
@@ -334,21 +396,8 @@ private fun GeneralTab(
 
     CuteCard {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(0.dp)) {
-            Text("主题", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(bottom = 4.dp))
-            THEME_OPTIONS.forEach { (id, label) ->
-                Row(
-                    Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text(label, style = MaterialTheme.typography.bodyMedium)
-                    if (themeId == id) {
-                        Text("✓", color = MaterialTheme.colorScheme.primary)
-                    } else {
-                        TextButton(onClick = { onSetTheme(id) }) { Text("选择") }
-                    }
-                }
-            }
+            EthanSectionHeader(title = "主题")
+            ThemePicker(currentThemeId = themeId, onSetTheme = onSetTheme)
         }
     }
 
@@ -434,14 +483,14 @@ private fun ProvidersTab(
                     label = { Text("API Key") },
                     modifier = Modifier.fillMaxWidth(),
                     visualTransformation = PasswordVisualTransformation(),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = MaterialTheme.shapes.small,
                 )
                 OutlinedTextField(
                     config.baseUrl ?: "",
                     { onUpdate(name, config.copy(baseUrl = it.ifBlank { null })) },
                     label = { Text("Base URL") },
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = MaterialTheme.shapes.small,
                 )
             }
         }
@@ -468,7 +517,7 @@ private fun ChannelsTab(
                         { onChange(channel.id, key, it) },
                         label = { Text(key) },
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = MaterialTheme.shapes.small,
                     )
                 }
 
@@ -511,7 +560,7 @@ private fun LarkDepsStatus(state: SettingsUiState) {
             return
         }
         Surface(
-            shape = RoundedCornerShape(8.dp),
+            shape = MaterialTheme.shapes.small,
             color = androidx.compose.ui.graphics.Color(0xFF1A1A1A),
             modifier = Modifier.fillMaxWidth(),
         ) {
@@ -538,12 +587,12 @@ private fun LarkDepsStatus(state: SettingsUiState) {
 
 @Composable
 private fun DepChip(label: String, ok: Boolean, onDark: Boolean = false) {
-    val color = if (ok) androidx.compose.ui.graphics.Color(0xFF4CAF50) else MaterialTheme.colorScheme.error
+    val color = if (ok) StatusSuccess else MaterialTheme.colorScheme.error
     val icon = if (ok) "✓" else "✗"
     Text(
         "$label: $icon",
         style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
-        color = if (onDark) androidx.compose.ui.graphics.Color.White else color,
+        color = if (onDark) Color.White else color,
     )
 }
 
@@ -602,7 +651,7 @@ private fun KnowledgeValidateSheet(
                 val isSelected = backend == b
                 Surface(
                     onClick = { backend = b },
-                    shape = RoundedCornerShape(20.dp),
+                    shape = MaterialTheme.shapes.extraLarge,
                     color = if (isSelected) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.surface,
                     border = BorderStroke(
@@ -623,20 +672,20 @@ private fun KnowledgeValidateSheet(
         }
 
         when (backend) {
-            "filesystem" -> OutlinedTextField(path, { path = it }, label = { Text("路径") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+            "filesystem" -> OutlinedTextField(path, { path = it }, label = { Text("路径") }, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small)
             "obsidian" -> {
-                OutlinedTextField(vault, { vault = it }, label = { Text("Vault 路径") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
-                OutlinedTextField(folder, { folder = it }, label = { Text("Folder") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+                OutlinedTextField(vault, { vault = it }, label = { Text("Vault 路径") }, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small)
+                OutlinedTextField(folder, { folder = it }, label = { Text("Folder") }, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small)
             }
             "external" -> {
-                OutlinedTextField(endpoint, { endpoint = it }, label = { Text("Endpoint") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+                OutlinedTextField(endpoint, { endpoint = it }, label = { Text("Endpoint") }, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small)
                 OutlinedTextField(
                     apiKey,
                     { apiKey = it },
                     label = { Text("API Key") },
                     modifier = Modifier.fillMaxWidth(),
                     visualTransformation = PasswordVisualTransformation(),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = MaterialTheme.shapes.small,
                 )
             }
         }
@@ -670,7 +719,7 @@ private fun SystemTextTab(title: String, content: String, onChange: (String) -> 
     CuteCard {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
             Text(title, style = MaterialTheme.typography.titleSmall)
-            OutlinedTextField(content, onChange, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), minLines = 10, shape = RoundedCornerShape(12.dp))
+            OutlinedTextField(content, onChange, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), minLines = 10, shape = MaterialTheme.shapes.small)
             EthanPrimaryButton("保存", onClick = onSave, modifier = Modifier.fillMaxWidth())
         }
     }
@@ -681,7 +730,7 @@ private fun ProfileTab(content: String, onChange: (String) -> Unit, onSave: () -
     CuteCard {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
             Text("我的画像", style = MaterialTheme.typography.titleSmall)
-            OutlinedTextField(content, onChange, modifier = Modifier.fillMaxWidth(), minLines = 12, shape = RoundedCornerShape(12.dp))
+            OutlinedTextField(content, onChange, modifier = Modifier.fillMaxWidth(), minLines = 12, shape = MaterialTheme.shapes.small)
             EthanPrimaryButton("保存", onClick = onSave, modifier = Modifier.fillMaxWidth())
         }
     }
@@ -701,7 +750,7 @@ private fun PromptPreviewTab(state: SettingsUiState, onLoad: () -> Unit) {
                 readOnly = true,
                 modifier = Modifier.fillMaxWidth(),
                 minLines = 8,
-                shape = RoundedCornerShape(12.dp),
+                shape = MaterialTheme.shapes.small,
             )
         }
     }
@@ -723,7 +772,7 @@ private fun ApiKeysTab(
             name, { name = it },
             label = { Text("名称") },
             modifier = Modifier.weight(1f),
-            shape = RoundedCornerShape(12.dp),
+            shape = MaterialTheme.shapes.small,
         )
         EthanPrimaryButton("创建", onClick = { onCreate(name); name = "" })
     }
@@ -870,15 +919,14 @@ private fun ToolTiersTab(state: SettingsUiState) {
     }
 }
 
+/**
+ * 设置项分组卡片。
+ *
+ * 保留这个名字只为少改调用点，实现已改为设计系统的 [EthanCard]——原先的版本带
+ * 1dp 主色描边 + 1dp 阴影，满屏淡色线条正是「廉价感」的来源。M3 靠 surface
+ * 色阶表达层级，不需要描边。
+ */
 @Composable
 private fun CuteCard(content: @Composable () -> Unit) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
-        shadowElevation = 1.dp,
-    ) {
-        content()
-    }
+    EthanCard { content() }
 }

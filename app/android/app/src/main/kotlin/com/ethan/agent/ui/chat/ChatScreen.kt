@@ -107,6 +107,7 @@ import com.ethan.agent.core.model.FileSignature
 import com.ethan.agent.core.model.Quote
 import com.ethan.agent.core.model.fullId
 import com.ethan.agent.shared.UiMessage
+import com.ethan.agent.ui.components.EthanBadge
 import com.ethan.agent.ui.components.ErrorSnackbar
 import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.SnackbarContainer
@@ -262,7 +263,7 @@ fun ChatScreen(
                 // Upload section
                 Surface(
                     onClick = { filePicker.launch("*/*"); showPlusSheet = false },
-                    shape = RoundedCornerShape(12.dp),
+                    shape = MaterialTheme.shapes.small,
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
@@ -632,7 +633,7 @@ fun ChatScreen(
                                     contentDescription = img.filename,
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .clip(RoundedCornerShape(8.dp)),
+                                        .clip(MaterialTheme.shapes.small),
                                     contentScale = ContentScale.Crop,
                                 )
                                 Surface(
@@ -703,9 +704,9 @@ fun ChatScreen(
 
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    color = MaterialTheme.colorScheme.surface,
-                    shadowElevation = 6.dp,
-                    shape = RoundedCornerShape(28.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLowest,
+                    shape = MaterialTheme.shapes.extraLarge,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 ) {
                     Row(
                         Modifier
@@ -855,33 +856,27 @@ private fun ConnectionStateIndicator(state: ConnectionState, isResuming: Boolean
         state == ConnectionState.Disconnected -> Pair(MaterialTheme.colorScheme.error, "已断开")
         else -> return
     }
-    Surface(
-        shape = RoundedCornerShape(50),
-        color = color.copy(alpha = 0.15f),
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = color,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-        )
-    }
+    EthanBadge(
+        text = label,
+        containerColor = color.copy(alpha = 0.15f),
+        contentColor = color,
+    )
 }
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 private fun MessageBubble(message: UiMessage, serverUrl: String = "", sessionId: String? = null, signFile: (suspend (String) -> FileSignature?)? = null, onLongPress: () -> Unit) {
     val isUser = message.role == "user"
+    // 对齐 Web（web/components/chat/message-bubble.tsx）：
+    //   用户   bg-primary/10 text-foreground
+    //   助手   bg-muted
+    // 之前用户气泡是实心 primary + onPrimary 文字，在一片浅色里非常刺眼，也和 Web 对不上。
     val bubbleColor = if (isUser) {
-        MaterialTheme.colorScheme.primary
+        MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
     } else {
-        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+        MaterialTheme.colorScheme.surfaceVariant
     }
-    val textColor = if (isUser) {
-        MaterialTheme.colorScheme.onPrimary
-    } else {
-        MaterialTheme.colorScheme.onSurface
-    }
+    val textColor = MaterialTheme.colorScheme.onSurface
 
     Row(
         modifier = Modifier
@@ -893,7 +888,7 @@ private fun MessageBubble(message: UiMessage, serverUrl: String = "", sessionId:
         // Assistant avatar (left)
         if (!isUser) {
             Image(
-                painter = painterResource(id = R.mipmap.ic_launcher_round),
+                painter = painterResource(id = R.drawable.ethan_logo_avatar),
                 contentDescription = "Assistant",
                 modifier = Modifier
                     .size(30.dp)
@@ -902,9 +897,10 @@ private fun MessageBubble(message: UiMessage, serverUrl: String = "", sessionId:
             Spacer(Modifier.width(6.dp))
         }
 
-        // Bubble content
+        // Bubble content —— 宽度对齐 Web 的 max-w-[90%]，四角统一 rounded-2xl（18dp）。
+        // 之前是固定 310dp + 不对称的一角切平，换机型/字号后容易显得局促。
         Column(
-            modifier = Modifier.widthIn(max = 310.dp),
+            modifier = Modifier.weight(1f, fill = false),
             horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
         ) {
             Surface(
@@ -914,16 +910,11 @@ private fun MessageBubble(message: UiMessage, serverUrl: String = "", sessionId:
                     onClick = {},
                     onLongClick = onLongPress,
                 ),
-                shape = RoundedCornerShape(
-                    topStart = 18.dp,
-                    topEnd = 18.dp,
-                    bottomStart = if (isUser) 18.dp else 4.dp,
-                    bottomEnd = if (isUser) 4.dp else 18.dp,
-                ),
+                shape = MaterialTheme.shapes.extraLarge,
                 color = bubbleColor,
                 shadowElevation = 0.dp,
             ) {
-                Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                     // 用户消息图片（在文本之前）
                     if (message.images.isNotEmpty()) {
                         Row(
@@ -936,7 +927,7 @@ private fun MessageBubble(message: UiMessage, serverUrl: String = "", sessionId:
                                     contentDescription = null,
                                     modifier = Modifier
                                         .sizeIn(maxHeight = 160.dp, maxWidth = 160.dp)
-                                        .clip(RoundedCornerShape(8.dp)),
+                                        .clip(MaterialTheme.shapes.small),
                                     contentScale = ContentScale.FillWidth,
                                 )
                             }
@@ -1024,48 +1015,55 @@ private fun MessageStatsBar(message: UiMessage, isUser: Boolean = false) {
             )
         }
 
-        // Token usage pill
+        // Token usage pill —— 对齐 Web 的 `bg-green-500/8 text-green-600/50`
         message.usage?.let { u ->
             if (u.input > 0 || u.output > 0) {
                 StatPill(
                     text = "↑${formatTokenCount(u.input)} ↓${formatTokenCount(u.output)}" +
                         if (u.cache > 0) " ⚡${formatTokenCount(u.cache)}" else "",
-                    color = Color(0xFF4CAF50),
+                    color = StatGreen,
                 )
             }
         }
 
-        // TTFB pill
+        // TTFB pill —— Web 用 amber-500
         message.ttfbMs?.let { ms ->
-            StatPill(text = "TTFB ${formatDuration(ms)}", color = Color(0xFFFF9800))
+            StatPill(text = "TTFB ${formatDuration(ms)}", color = StatAmber)
         }
 
-        // Total duration pill
+        // 总耗时 pill —— Web 用 purple-500
         message.totalDurationMs?.let { ms ->
-            StatPill(text = "总 ${formatDuration(ms)}", color = Color(0xFF9C27B0))
+            StatPill(text = "总 ${formatDuration(ms)}", color = StatPurple)
         }
 
-        // Generation duration pill
+        // 实际生成耗时 pill —— Web 用 green-500
         message.generationDurationMs?.let { ms ->
-            StatPill(text = "生成 ${formatDuration(ms)}", color = Color(0xFF009688))
+            StatPill(text = "生成 ${formatDuration(ms)}", color = StatGreen)
         }
     }
 }
 
+// Tailwind 500 号色阶——与 Web 的 message-bubble.tsx 中统计药丸一一对应。
+// 取 600 号（Tailwind 的 text-<hue>-600）作为文字色，因为 Web 的文字是 600 号。
+private val StatAmber = Color(0xFFF59E0B)   // amber-500
+private val StatPurple = Color(0xFFA855F7)  // purple-500
+private val StatGreen = Color(0xFF22C55E)   // green-500
+
+/**
+ * 统计小药丸（token / TTFB / 耗时）。
+ *
+ * 配色对齐 Web 的 `bg-<hue>-500/8 text-<hue>-600/50`：极淡的底色 + 半透明的同色文字。
+ * 之前是用 Material 500 号原色（0xFF4CAF50 之类）+ 12% 底，饱和度太高，在一屏浅色里
+ * 几个彩色小方块特别扎眼，也和 Web 的克制观感不一致。
+ */
 @Composable
 private fun StatPill(text: String, color: Color) {
-    Surface(
-        shape = RoundedCornerShape(10.dp),
-        color = color.copy(alpha = 0.12f),
+    EthanBadge(
+        text = text,
+        containerColor = color.copy(alpha = 0.08f),
+        contentColor = color.copy(alpha = 0.55f),
         modifier = Modifier.padding(end = 4.dp),
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelSmall,
-            color = color,
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-        )
-    }
+    )
 }
 
 private fun formatTokenCount(count: Int): String = when {
@@ -1102,7 +1100,7 @@ private fun EmptyChatState(
     ) {
         // 头像 - 圆形 app logo
         Image(
-            painter = painterResource(id = R.mipmap.ic_launcher_round),
+            painter = painterResource(id = R.drawable.ethan_logo_avatar),
             contentDescription = "Ethan",
             modifier = Modifier.size(72.dp).clip(CircleShape),
         )
@@ -1125,19 +1123,15 @@ private fun EmptyChatState(
             quickActions.forEach { (label, payload) ->
                 Surface(
                     onClick = { onQuickAction(payload) },
-                    shape = RoundedCornerShape(20.dp),
-                    color = MaterialTheme.colorScheme.surface,
-                    border = BorderStroke(
-                        1.5.dp,
-                        MaterialTheme.colorScheme.outlineVariant,
-                    ),
+                    shape = MaterialTheme.shapes.extraLarge,
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 ) {
                     Text(
                         text = label,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onBackground,
-                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
                 }
             }

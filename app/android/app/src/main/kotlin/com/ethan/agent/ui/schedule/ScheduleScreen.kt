@@ -51,6 +51,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.ethan.agent.core.model.ScheduleJob
+import com.ethan.agent.ui.components.EthanCard
 import com.ethan.agent.ui.components.ErrorSnackbar
 import com.ethan.agent.ui.components.EthanScrollableTabBar
 import com.ethan.agent.ui.components.EthanTopBar
@@ -181,7 +182,7 @@ private fun JobCard(
     onDelete: () -> Unit,
     onOpenSession: () -> Unit,
 ) {
-    Card(Modifier.fillMaxWidth()) {
+    EthanCard {
         Column(Modifier.padding(16.dp)) {
             Text(job.name, style = MaterialTheme.typography.titleMedium)
             Text(job.trigger, style = MaterialTheme.typography.bodySmall)
@@ -269,7 +270,7 @@ private fun TimelinesContent(
 
 @Composable
 private fun TimelineCard(timeline: TimelineItem, onAction: (String) -> Unit) {
-    Card(Modifier.fillMaxWidth()) {
+    EthanCard {
         Column(Modifier.padding(16.dp)) {
             Text(timeline.name, style = MaterialTheme.typography.titleMedium)
             timeline.currentPhase?.let { Text("当前阶段：$it", style = MaterialTheme.typography.bodySmall) }
