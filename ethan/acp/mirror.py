@@ -122,36 +122,42 @@ class MirrorSession:
         store = None
         try:
             from ethan.acp import get_mirror_session, set_mirror_info, set_mirror_session
+            from ethan.acp.session import _mirror_key, mapping_lock
             from ethan.memory.session import get_session_store
             from ethan.providers.base import Message
 
             store = await get_session_store()
 
+            # 「查映射 → 建会话 → 写映射」必须整体串行化：否则并发的多个委派（如一次
+            # task_fanout / 并行 delegate_coding 落同一个 cwd）会全部查不到别人刚写的
+            # 映射，各建一条 Ethan 镜像会话——用户侧表现为「同一个任务冒出 N 条会话」。
+            # 锁按 (agent, cwd) 粒度，不同 cwd 的委派仍可并行。
             session_id = None
-            if reuse:
-                prev = get_mirror_session(cwd, user_id=user_id, agent=agent)
-                if prev and await store.load(prev) is not None:
-                    session_id = prev  # 续接已有镜像会话（多轮）
+            async with mapping_lock(_mirror_key(cwd, agent)):
+                if reuse:
+                    prev = get_mirror_session(cwd, user_id=user_id, agent=agent)
+                    if prev and await store.load(prev) is not None:
+                        session_id = prev  # 续接已有镜像会话（多轮）
 
-            if session_id is None:
-                # session.model 必须是一个「实在的、可用于 chat 的模型」。
-                # 不能用 agent 名（codex/claude/opencode）——那不是 ethan 的注册模型，
-                # 用户在镜像会话里直接发消息时会被当成 chat 模型，导致
-                # "unknown provider for model codex" 502。渠道归类已由 source=agent 表达。
-                real_model = model
-                if not real_model:
-                    try:
-                        from ethan.core.config import get_config
-                        real_model = get_config().defaults.model
-                    except Exception:
-                        real_model = ""
-                session = await store.create(model=real_model, source=agent)
-                session_id = session.id
-                await store.update_title(session_id, _title_for(agent, task))
-                set_mirror_session(cwd, session_id, user_id=user_id, agent=agent)
+                if session_id is None:
+                    # session.model 必须是一个「实在的、可用于 chat 的模型」。
+                    # 不能用 agent 名（codex/claude/opencode）——那不是 ethan 的注册模型，
+                    # 用户在镜像会话里直接发消息时会被当成 chat 模型，导致
+                    # "unknown provider for model codex" 502。渠道归类已由 source=agent 表达。
+                    real_model = model
+                    if not real_model:
+                        try:
+                            from ethan.core.config import get_config
+                            real_model = get_config().defaults.model
+                        except Exception:
+                            real_model = ""
+                    session = await store.create(model=real_model, source=agent)
+                    session_id = session.id
+                    await store.update_title(session_id, _title_for(agent, task))
+                    await set_mirror_session(cwd, session_id, user_id=user_id, agent=agent)
 
-            # 反向映射：让用户直接在这条镜像会话里发消息时，能查出续接哪个 agent/cwd
-            set_mirror_info(session_id, agent=agent, cwd=cwd, user_id=user_id)
+                # 反向映射：让用户直接在这条镜像会话里发消息时，能查出续接哪个 agent/cwd
+                await set_mirror_info(session_id, agent=agent, cwd=cwd, user_id=user_id)
 
             # 下发的 query 作为 user 消息落库（每一轮都追加）
             await store.save_message(session_id, Message(

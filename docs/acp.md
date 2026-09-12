@@ -121,6 +121,7 @@ Coding Agent 把「turn 是否进行中」记在自己的 session 文件里。�
 - **同库**：走 per-user 的 `SessionStore`（`user_sessions_db_path()`），与普通 web 会话同库，侧边栏天然能列出（按 `source` 区分）
 - **model 字段**：存**真实可用的 chat 模型**（取 `defaults.model`），**不能**用 agent 名——否则用户在该会话里直接发消息时会被当成 chat 模型，导致 `unknown provider for model codex` 502。渠道归类由 `source` 表达，与 model 解耦。
 - **best-effort**：写库/注册任何一步失败都吞掉异常，绝不影响主委派流程
+- **并发安全**：「查映射 → 建会话 → 写映射」整体按 `(agent, cwd)` 加锁（`MirrorSession.start` 内 `mapping_lock`）。否则一批并行的 `delegate_coding`（典型：deep-review 的多维度扫描退化成一串并行委派）会全部查不到别人刚写的映射，各建一条 Ethan 会话，侧边栏表现为「同一个任务冒出 N 条会话」。`acp_sessions.json` 的所有读改写经 `update_sessions()` 持文件级锁串行化，避免并发覆盖丢映射。
 - 可用 `delegate(mirror=False)` 关闭
 
 ### 实时推送
