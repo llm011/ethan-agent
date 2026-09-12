@@ -19,6 +19,7 @@ from ethan.interface.routers import (
     annotations,
     ask_user,
     assets,
+    auto_consent,
     background_tasks,
     chat,
     completions,
@@ -228,6 +229,7 @@ app.include_router(completions.router)  # /v1 OpenAI-compat, no /api prefix
 app.include_router(logs.router, prefix="/api")
 app.include_router(models.router, prefix="/api")
 app.include_router(consent.router, prefix="/api")
+app.include_router(auto_consent.router, prefix="/api")  # /api/chat/auto-consent — 运行期切换超级权限
 app.include_router(ask_user.router, prefix="/api")
 app.include_router(wait_for_user.router, prefix="/api")
 app.include_router(annotations.router, prefix="/api")

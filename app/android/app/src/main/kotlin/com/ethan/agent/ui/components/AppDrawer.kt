@@ -50,13 +50,20 @@ import com.ethan.agent.ui.navigation.Screen
 
 private data class DrawerToolItem(val screen: Screen, val label: String)
 
+/**
+ * 抽屉里的工具入口 —— 必须与 Web 侧边栏逐项对应。
+ *
+ * 「后台任务 Tasks」在 Web 上已经下掉了（`web/components/sidebar.tsx` 只剩
+ * 日程/记忆/知识库/技能/定时任务/文档/设置 七项），Android 还留着会让两端菜单
+ * 对不上。刻意不删 `Screen.BackgroundTasks` 这个路由和目标页 —— 定时任务页
+ * 里仍会跳到它，只是不再从菜单进入。
+ */
 private val drawerToolItems = listOf(
     DrawerToolItem(Screen.Memory, "记忆 Memory"),
     DrawerToolItem(Screen.Knowledge, "知识库 Knowledge"),
     DrawerToolItem(Screen.Skills, "技能 Skills"),
     DrawerToolItem(Screen.Agenda, "日程 Agenda"),
     DrawerToolItem(Screen.Schedule, "定时任务 Schedule"),
-    DrawerToolItem(Screen.BackgroundTasks, "后台任务 Tasks"),
     DrawerToolItem(Screen.Docs, "文档 Docs"),
     DrawerToolItem(Screen.Settings, "设置 Settings"),
 )

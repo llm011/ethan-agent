@@ -158,6 +158,8 @@ fun ChatScreen(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var showPlusSheet by remember { mutableStateOf(false) }
+    // 超级权限「关→开」时的二次确认（开启是高危方向，必须让用户明确知道代价）
+    var showAutoConsentConfirm by remember { mutableStateOf(false) }
     // 渐进加载：初始只渲染最后 10 条，向上滚动加载更多
     val pageSize = 10
     var visibleCount by remember { mutableStateOf(pageSize) }
@@ -825,9 +827,14 @@ fun ChatScreen(
                                 )
                             }
                         }
-                        // 超级权限开关
+                        // 超级权限开关。关闭→开启时必须过一道二次确认（见本 composable
+                        // 末尾的 AlertDialog）：长时间运行时用户容易忘了自己开着自动批准，
+                        // 导致普通 shell / 写文件操作一路放行。取消弹窗则保持关闭。
                         Surface(
-                            onClick = onToggleAutoConsent,
+                            onClick = {
+                                if (state.autoConsent) onToggleAutoConsent() // 关：降权，直接生效
+                                else showAutoConsentConfirm = true          // 开：先弹警示
+                            },
                             shape = CircleShape,
                             color = if (state.autoConsent) MaterialTheme.colorScheme.tertiaryContainer
                                 else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
@@ -938,9 +945,12 @@ fun ChatScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    state.selectedModel?.takeIf { it.isNotBlank() }?.let { model ->
+                    // 显示**可读名**（alias/description）而不是 provider/id 原始值 ——
+                    // 与模型选择器里的选中名、Web 的展示口径一致。落库/提交仍用 fullId。
+                    state.selectedModel?.takeIf { it.isNotBlank() }?.let { raw ->
                         Text(
-                            text = model,
+                            text = ModelSelection.findById(state.models, raw)
+                                ?.let(ModelSelection::displayNameOf) ?: raw,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                             maxLines = 1,
@@ -964,6 +974,32 @@ fun ChatScreen(
                 }
             } // end input Column (bottom-aligned)
         }
+    }
+
+    // 超级权限二次确认：只在关→开时弹一次。取消则不改状态（保持关闭）。
+    // 与 Web/Desktop 的文案保持一致（三端同一份说明）。
+    if (showAutoConsentConfirm) {
+        AlertDialog(
+            onDismissRequest = { showAutoConsentConfirm = false },
+            icon = { Icon(Icons.Default.Shield, contentDescription = null) },
+            title = { Text("开启超级权限？") },
+            text = {
+                Text(
+                    "开启后，普通工具授权（读写文件、执行普通 shell 命令等）将不再弹窗，" +
+                        "直接放行；高危命令（rm -rf 等）仍会确认。\n\n" +
+                        "请确认你了解当前正在对话的 Agent 会做什么。",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showAutoConsentConfirm = false
+                    onToggleAutoConsent()
+                }) { Text("开启") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAutoConsentConfirm = false }) { Text("取消") }
+            },
+        )
     }
 }
 

@@ -9,6 +9,7 @@ import com.ethan.agent.core.model.ConsentInfo
 import com.ethan.agent.core.model.FileSignature
 import com.ethan.agent.core.model.ModeEntry
 import com.ethan.agent.core.model.ModelEntry
+import com.ethan.agent.core.model.ModelSelection
 import com.ethan.agent.core.model.OnboardingStatus
 import com.ethan.agent.core.model.Quote
 import com.ethan.agent.core.model.ToolStep
@@ -289,6 +290,12 @@ class ChatViewModel(
         _state.update { it.copy(autoConsent = next) }
         viewModelScope.launch {
             try { repository.setAutoConsent(next) } catch (_: Exception) { }
+            // 会话正在跑时，还要把开关推给那个 run —— 否则开关亮着也不生效，
+            // 用户体感是「以开始时的状态为准」。没有活跃 run 时后端 applied=false，
+            // 静默忽略即可（偏好已存好，下一次发消息会带上）。
+            _state.value.sessionId?.takeIf { it.isNotBlank() }?.let { sid ->
+                try { repository.pushAutoConsent(sid, next) } catch (_: Exception) { }
+            }
         }
     }
 
@@ -351,7 +358,14 @@ class ChatViewModel(
             var sessionId = current.sessionId
             if (sessionId == null) {
                 try {
-                    val created = repository.createSession(current.selectedModel, current.selectedMode.ifBlank { null })
+                    // 落库同样的 fullId：会话表里存的 model 会被「恢复会话」读回来直接发出去，
+                    // 存裸 id 等于把同一个 bug 持久化下来。
+                    val created = repository.createSession(
+                        ModelSelection.effectiveValue(current.models, current.selectedModel)
+                            .takeIf { it != ModelSelection.NEED_CHOICE }
+                            ?: current.selectedModel,
+                        current.selectedMode.ifBlank { null },
+                    )
                     sessionId = created.id
                     _state.update { it.copy(sessionId = sessionId, title = created.title) }
                 } catch (e: Exception) {
@@ -372,12 +386,21 @@ class ChatViewModel(
             val assistantIndex = _state.value.messages.size
             _state.update { it.copy(messages = it.messages + UiMessage(role = "assistant", content = "", isStreaming = true, createdAt = Clock.System.now().toEpochMilliseconds() / 1000)) }
 
+            // 发出去之前做最后一道解析：把可能残留的裸 id 升级成 fullId。
+            // 前面几处写入（列表默认 / 设置默认 / 会话恢复）都做了升级，但
+            // `effectiveValue` 在 models 还没加载完时无法升级，会原样返回裸 id；
+            // 这里 models 一定已就绪（sendMessage 依赖它），补这一刀才能保证
+            // 后端 `providers/manager.py` 拿到的是 `provider/id`。
+            val sendModel = ModelSelection
+                .effectiveValue(_state.value.models, _state.value.selectedModel)
+                .takeIf { it != ModelSelection.NEED_CHOICE }   // 重名未定：交给后端按原值处理/报错更明确
+
             streamJob = viewModelScope.launch {
                 try {
                     collectSseStream(
                         flow = repository.streamChat(
                             messages = history,
-                            model = _state.value.selectedModel,
+                            model = sendModel,
                             sessionId = sessionId,
                             quote = userMessage.quote,
                             mode = _state.value.selectedMode,

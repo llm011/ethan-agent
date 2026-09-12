@@ -141,6 +141,29 @@ export async function stopGeneration(sessionId: string): Promise<{ ok: boolean; 
   return res.json();
 }
 
+/** 运行中切换超级权限（auto_consent）。
+ *
+ *  启动时的 auto_consent 只在发起那一刻写入 run 的 ConsentProvider，用户在生成
+ *  过程中才点开关的话不会生效（体感是「以开始时的状态为准」）。这个接口直接改
+ *  活跃 run 的 provider 实例属性，下一次工具调用即按新策略走。
+ *
+ *  无活跃 run 时后端返回 applied=false（不报错）——开关值本身存在客户端，
+ *  下一次 /api/chat 请求体会带上 auto_consent，行为依然正确。
+ *  非本地来源会被后端 403（超级权限不允许远程打开）。
+ */
+export async function setAutoConsent(
+  sessionId: string,
+  enabled: boolean,
+): Promise<{ ok: boolean; enabled: boolean; applied: boolean; reason?: string }> {
+  const res = await fetch(`${API_URL}/chat/auto-consent`, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify({ session_id: sessionId, enabled }),
+  });
+  if (!res.ok) return { ok: false, enabled, applied: false };
+  return res.json();
+}
+
 /** 取消单个工具调用（不影响整轮生成）。被取消的工具回灌为「用户已取消」。 */
 export async function cancelToolCall(sessionId: string, toolCallId: string): Promise<{ ok: boolean; cancelled: boolean }> {
   const res = await fetch(`${API_URL}/chat/${encodeURIComponent(sessionId)}/tool/${encodeURIComponent(toolCallId)}/cancel`, {

@@ -9,6 +9,7 @@ import type { Quote, PendingFile } from "@ethan/shared/chat/types";
 import { MdEditor } from "@/components/md-editor";
 import { QueuedMessages } from "./queued-messages";
 import type { QueuedMessage } from "./use-input-store";
+import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
 
 // 哨兵值：旧会话存的纯 model id 命中多个 provider 时的「待重选」态，不可作为真实选择提交
 const NEED_CHOICE = "__need_model_choice__";
@@ -87,6 +88,8 @@ export function ChatInput({
   const [internalInput, setInternalInput] = useState("");
   const [dragging, setDragging] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  // 超级权限「关→开」时的二次确认
+  const [showAutoConsentConfirm, setShowAutoConsentConfirm] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   // 外部驱动 draft 时使用外部值，否则使用内部 state
@@ -421,14 +424,16 @@ export function ChatInput({
                 </SelectContent>
               </Select>
             )}
-            {/* 超级权限开关：开启后普通工具授权自动批准；高危命令（rm -rf 等）仍弹窗确认 */}
-            {/* TODO(开启态视觉不醒目 + 无二次确认): 当前只是 amber 浅色 pill + "已授权" 字样，
-                长时间运行时用户可能忘了自己开着自动批准，导致普通 shell/写文件操作一路放行。
-                建议：开启时加一圈脉动环、按钮文字改"⚠ 自动授权中"、hover tooltip 显示风险提示；
-                或首次开启时弹一个二次确认（"确定开启自动批准？普通写文件、shell 执行将不弹窗"）。 */}
+            {/* 超级权限开关：开启后普通工具授权自动批准；高危命令（rm -rf 等）仍弹窗确认。
+                关闭→开启时必须过一道二次确认（见下方 ConfirmDialog）：长时间运行时
+                用户容易忘了自己开着自动批准，导致普通 shell/写文件操作一路放行。
+                取消弹窗则不改变状态（保持关闭）。 */}
             {onAutoConsentChange && (
               <button
-                onClick={() => onAutoConsentChange(!autoConsent)}
+                onClick={() => {
+                  if (autoConsent) onAutoConsentChange(false);
+                  else setShowAutoConsentConfirm(true); // 仅关→开时确认
+                }}
                 className={`h-7 flex items-center gap-1 px-1.5 rounded-lg transition-colors text-xs ${autoConsent ? "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400" : "text-muted-foreground hover:text-foreground hover:bg-muted"}`}
                 title={autoConsent ? "超级权限已开启：普通操作自动批准；高危命令仍会弹窗确认" : "超级权限：开启后自动批准普通工具授权，高危命令仍需确认"}
               >
@@ -461,6 +466,21 @@ export function ChatInput({
           </div>
         </div>
       </div>
+
+      {/* 超级权限二次确认：只在关→开时出现一次。取消则不改状态（保持关闭）。 */}
+      <ConfirmDialog
+        open={showAutoConsentConfirm}
+        title="开启超级权限？"
+        description="开启后，普通工具授权（读写文件、执行普通 shell 命令等）将不再弹窗，直接放行。高危命令（rm -rf 等）仍会确认。请确认你了解当前正在对话的 Agent 会做什么。"
+        confirmLabel="开启"
+        cancelLabel="取消"
+        destructive={false}
+        onConfirm={() => {
+          setShowAutoConsentConfirm(false);
+          onAutoConsentChange?.(true);
+        }}
+        onCancel={() => setShowAutoConsentConfirm(false)}
+      />
     </div>
   );
 }

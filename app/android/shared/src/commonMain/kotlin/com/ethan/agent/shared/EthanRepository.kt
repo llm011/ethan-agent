@@ -10,6 +10,8 @@ import com.ethan.agent.core.model.AgentSettings
 import com.ethan.agent.core.model.ApiKeyCreated
 import com.ethan.agent.core.model.ApiKeyInfo
 import com.ethan.agent.core.model.AuthResponse
+import com.ethan.agent.core.model.AutoConsentRequest
+import com.ethan.agent.core.model.AutoConsentResponse
 import com.ethan.agent.core.model.ChannelInfo
 import com.ethan.agent.core.model.ChatMessage
 import com.ethan.agent.core.model.ChatRequest
@@ -112,6 +114,16 @@ class EthanRepository(
     suspend fun setAutoConsent(enabled: Boolean) {
         configStore.setAutoConsentEnabled(enabled)
     }
+
+    /**
+     * 运行中切换超级权限：把开关推给正在跑的那个 run（见 api.setAutoConsent）。
+     *
+     * 与 [setAutoConsent]（只存本地偏好）不同，这里是「立即生效」的优化：
+     * 没有活跃 run 时后端返回 applied=false，不抛错 —— 本地偏好已经存好，
+     * 下一次发消息的请求体会带上 auto_consent。
+     */
+    suspend fun pushAutoConsent(sessionId: String, enabled: Boolean): AutoConsentResponse =
+        api.setAutoConsent(AutoConsentRequest(sessionId = sessionId, enabled = enabled))
 
     suspend fun repairStoredUrlIfNeeded() {
         configStore.repairStoredUrlIfNeeded()
