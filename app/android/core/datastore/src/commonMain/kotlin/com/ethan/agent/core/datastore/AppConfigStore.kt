@@ -31,7 +31,7 @@ data class AppConfig(
     val userId: String? = null,
     val userName: String? = null,
     val isAdmin: Boolean = false,
-    val themeId: String = "honey",
+    val themeId: String = "system",
     val appLockEnabled: Boolean = false,
     val autoConsentEnabled: Boolean = false,
 ) {
@@ -71,7 +71,7 @@ class AppConfigStore(
             userId = prefs[Keys.USER_ID],
             userName = prefs[Keys.USER_NAME],
             isAdmin = prefs[Keys.IS_ADMIN] ?: false,
-            themeId = prefs[Keys.THEME_ID] ?: "honey",
+            themeId = prefs[Keys.THEME_ID] ?: "system",
             appLockEnabled = prefs[Keys.APP_LOCK] ?: false,
             autoConsentEnabled = prefs[Keys.AUTO_CONSENT] ?: false,
         )

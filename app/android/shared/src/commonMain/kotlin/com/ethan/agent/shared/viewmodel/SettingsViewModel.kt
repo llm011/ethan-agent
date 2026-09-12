@@ -60,7 +60,7 @@ data class SettingsUiState(
     val knowledgeValidating: Boolean = false,
     val knowledgeValidateResult: String? = null,
     // Theme
-    val themeId: String = "honey",
+    val themeId: String = "system",
     // App lock (biometric)
     val appLockEnabled: Boolean = false,
     // Cache
