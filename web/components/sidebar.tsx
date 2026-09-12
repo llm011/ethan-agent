@@ -95,7 +95,7 @@ export function Sidebar() {
 
   useEffect(() => {
     const handler = () => {
-      fetchSessions(50, 0, undefined, undefined, undefined, true, true)
+      fetchSessions(50, 0, undefined, undefined, undefined, true, true, undefined, undefined, true)
         .then(setSessions).catch(() => {});
       fetchPinnedSessions().then(setPinnedSessions).catch(() => {});
     };
@@ -190,7 +190,7 @@ export function Sidebar() {
     const q = sessionSearch.trim();
     const timer = setTimeout(() => {
       setSearchLoading(true);
-      fetchSessions(50, 0, q || undefined, undefined, undefined, true, true)
+      fetchSessions(50, 0, q || undefined, undefined, undefined, true, true, undefined, undefined, true)
         .then(setSessions)
         .catch(() => {})
         .finally(() => setSearchLoading(false));

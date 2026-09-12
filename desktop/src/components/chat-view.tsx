@@ -30,11 +30,13 @@ import { fetchModels } from "@/lib/api-base";
 import { fetchModes } from "@/lib/api-base";
 import { fetchAgentSettings, type AgentSettings } from "@/lib/api-settings";
 import { fetchOnboardingStatus, type OnboardingStatus } from "@/lib/api-misc";
+import { fetchBackgroundTasks, type BackgroundTask } from "@/lib/api-misc";
 import { useCachedResource } from "@/lib/use-cached-resource";
 import { readSessionCache, writeSessionCache } from "@/lib/session-cache";
 import { ReadingMode } from "@/components/chat/reading-mode";
 import { ShareMode } from "@/components/chat/share-mode";
 import type { Message, Usage, Quote, PendingFile } from "@ethan/shared/chat/types";
+import { BackgroundTaskBar } from "@ethan/shared/components/background-task-bar";
 import { ChatHeader } from "@/components/chat/chat-header";
 import { MessageList } from "@/components/chat/message-list";
 import { ChatInput } from "@/components/chat/chat-input";
@@ -64,6 +66,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const [streaming, setStreaming] = useState(false);
   const streamingRef = useRef(false);
   const _setStreaming = (v: boolean) => { streamingRef.current = v; setStreaming(v); };
+  // 后台任务条：展示本进程内运行中/刚完成的后台任务（其会话不在侧边栏列表里）
+  const [bgTasks, setBgTasks] = useState<BackgroundTask[]>([]);
   const [bgPolling, setBgPolling] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
   const [activeSession, setActiveSession] = useState<string | null>(null);
@@ -81,6 +85,34 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   // 授权卡片已失效（迟到响应：请求已被后端超时清理）。新请求到达或卡片清空时复位。
   const [consentExpired, setConsentExpired] = useState(false);
   useEffect(() => { setConsentExpired(false); }, [consentRequest]);
+
+  // 后台任务条：运行中 5s 轮询，空闲时降到 30s 心跳（ethan 无 WS 推送，轮询兜底）。
+  // 不能「无运行中任务就彻底停表」——那样新发起的后台任务不会自动浮现。
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval> | null = null;
+    let stopped = false;
+
+    const schedule = (ms: number) => {
+      if (stopped) return;
+      if (timer) clearInterval(timer);
+      timer = setInterval(async () => {
+        try {
+          const list = await fetchBackgroundTasks();
+          if (stopped) return;
+          setBgTasks(list);
+          schedule(list.some(t => t.status === "running") ? 5000 : 30000);
+        } catch {
+          schedule(30000); // 出错退避
+        }
+      }, ms);
+    };
+
+    fetchBackgroundTasks()
+      .then(list => { if (!stopped) { setBgTasks(list); schedule(list.some(t => t.status === "running") ? 5000 : 30000); } })
+      .catch(() => schedule(30000));
+
+    return () => { stopped = true; if (timer) clearInterval(timer); };
+  }, []);
   const [cleanupConfirm, setCleanupConfirm] = useState<CleanupConfirmRequest | null>(null);
   const [askUserRequest, setAskUserRequest] = useState<AskUserRequest | null>(null);
   const [waitforUserRequest, setWaitForUserRequest] = useState<WaitForUserRequest | null>(null);
@@ -916,6 +948,13 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
             setLoadingSession(false);
           });
         } : undefined}
+      />
+
+      {/* 后台任务条：这些任务的会话不在侧边栏/全部会话里，从主会话这里进详情 */}
+      <BackgroundTaskBar
+        tasks={bgTasks.filter(t => t.status === "running" || t.status === "done" || t.status === "error").slice(0, 6)}
+        onOpen={(id) => navigate(`/chat/${id}`)}
+        onOpenCenter={() => navigate("/background-tasks")}
       />
 
       {loadingSession && messages.length === 0 ? (

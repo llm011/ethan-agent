@@ -36,11 +36,13 @@
 
 ## 执行流程
 
-1. **发起**（`background_task` 工具）：建一个独立 session「[后台] {标题}」，首条用户消息（任务描述）入库；起一个 daemon 线程对它跑 **streaming** `/chat`。工具立即返回「已在后台开始：{标题}（任务 ID：{session_id}）」。
+1. **发起**（`background_task` 工具）：建一个独立 session「[后台] {标题}」（**只建会话、不预存消息**，见下）；起一个 daemon 线程对它跑 **streaming** `/chat`。工具立即返回「已在后台开始：{标题}（任务 ID：{session_id}）」。
 2. **后台跑**：线程 drain SSE——遇到 `consent_request` 时**分级处理**：低风险自动批准；高危调用（`always=True`，如 `rm -rf`）一律拒绝并记录，回灌时提示用户去前台确认。累计 `content`、记录 `stopped`/`error`/`done`。走流式管线是为了让 `RunManager` 持有一个可停止的 run（终止功能依赖它）。
 3. **回灌**：
    - **lark**：把最终结果经 `_send_lark_reply` 推回发起任务的 chat（前缀「【后台任务完成】」）。
-   - **web**：结果落在后台 session，侧边栏经 `/poll` 浮现；`/background-tasks` 页可点「查看对话」查看。
+   - **web**：结果落在后台 session；`/background-tasks` 页可点「查看对话」查看，主会话顶部任务条也可直达。
+
+> **query 只落一次**：建会话阶段**不**预存 prompt。`_run_background` 会把同一个 prompt 经 `POST /api/chat` 发一次，而 `/api/chat` 自己会把 `req.messages` 里的 user 消息落库。早先版本在建会话时额外预存了一次，导致后台会话里同一条 query 出现两遍——已在 `background_task.py` 去掉预存，回归测试见 `tests/test_background_task_sessions.py`。
 
 ---
 
@@ -52,11 +54,15 @@
 
 ## Web 交互
 
-`/background-tasks` 页（侧边栏「后台任务」入口，带运行中数量角标）：
+**后台会话不进常规会话列表**：`[后台]` / `✅ [后台]` 前缀的 session 不在侧边栏和「全部会话」里展示——一次深度任务会扇出多条，全堆进去会把正常对话挤没。实现上由后端过滤（`GET /api/sessions?hide_background=true`，内部展开为 `exclude_title_prefixes`），而非前端过滤，这样分页 `total` 与搜索结果数也一致。前端 web / desktop 的侧边栏与「全部会话」均带上该参数。
 
-- **任务卡片**：标题、状态灯（运行中/已完成/失败/已停止）、已运行时长、「查看对话」、运行中显示「终止」按钮。
-- **轮询刷新**：有运行中任务时每 5 秒刷新一次，全部结束停轮询。ethan 当前**无 WebSocket 任务推送**，故用轮询兜底——这也意味着 web 端是「被动浮现」（侧边栏/任务页更新），而非在当前对话里主动弹通知；lark 渠道才有真·主动推送。
-- **历史后台会话**：折叠区列出所有 `[后台]` 前缀的 session（含进程重启后状态已清、但 session 仍在的）。
+入口收敛为两处：
+
+1. **主会话顶部任务条**：`BackgroundTaskBar`（`packages/shared`，web/desktop 共用），展示本进程内运行中/刚完成的任务，点击直达对应会话，右侧「全部」进任务中心。运行中每 5 秒轮询，空闲降到 30 秒心跳（不能彻底停表——否则新发起的后台任务不会自动浮现）。
+2. **`/background-tasks` 任务中心**（侧边栏「后台任务」入口，带运行中数量角标）：
+   - **任务卡片**：标题、状态灯（运行中/已完成/失败/已停止）、已运行时长、「查看对话」、运行中显示「终止」按钮。
+   - **轮询刷新**：有运行中任务时每 5 秒刷新一次，全部结束停轮询。ethan 当前**无 WebSocket 任务推送**，故用轮询兜底——这也意味着 web 端是「被动浮现」（任务条/任务页更新），而非在当前对话里主动弹通知；lark 渠道才有真·主动推送。
+   - **历史后台会话**：折叠区列出所有 `[后台]` 前缀的 session（含进程重启后状态已清、但 session 仍在的）。该处刻意**不**带 `hide_background`，因为这里正要看它们。
 
 ---
 

@@ -161,6 +161,7 @@ export function makeListKey(params: {
   mode?: string;
   hideHeartbeat?: boolean;
   hideScheduled?: boolean;
+  hideBackground?: boolean;
   titlePrefixes?: string;
   hasImages?: boolean;
 }): string {
@@ -172,6 +173,7 @@ export function makeListKey(params: {
     `m=${params.mode ?? ""}`,
     `hb=${params.hideHeartbeat ? "1" : "0"}`,
     `hs=${params.hideScheduled ? "1" : "0"}`,
+    `hbg=${params.hideBackground ? "1" : "0"}`,
     `tp=${params.titlePrefixes ?? ""}`,
     `hi=${params.hasImages ? "1" : "0"}`,
   ];

@@ -63,19 +63,20 @@ export interface SessionDetail {
   }[];
 }
 
-export async function fetchSessions(limit = 50, offset = 0, q?: string, source?: string, mode?: string, hideHeartbeat?: boolean, hideScheduled?: boolean, titlePrefixes?: string, hasImages?: boolean): Promise<SessionInfo[]> {
+export async function fetchSessions(limit = 50, offset = 0, q?: string, source?: string, mode?: string, hideHeartbeat?: boolean, hideScheduled?: boolean, titlePrefixes?: string, hasImages?: boolean, hideBackground?: boolean): Promise<SessionInfo[]> {
   const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
   if (q) params.set("q", q);
   if (source) params.set("source", source);
   if (mode !== undefined) params.set("mode", mode);
   if (hideHeartbeat) params.set("hide_heartbeat", "true");
   if (hideScheduled) params.set("hide_scheduled", "true");
+  if (hideBackground) params.set("hide_background", "true");
   if (titlePrefixes) params.set("title_prefixes", titlePrefixes);
   if (hasImages) params.set("has_images", "true");
 
   // 离线时直接返回缓存
   if (isOffline()) {
-    const cacheKey = makeListKey({ limit, offset, q, source, mode, hideHeartbeat, hideScheduled, titlePrefixes, hasImages });
+    const cacheKey = makeListKey({ limit, offset, q, source, mode, hideHeartbeat, hideScheduled, hideBackground, titlePrefixes, hasImages });
     const cached = await readSessionList(cacheKey);
     if (cached) return cached;
     throw new Error("离线模式：无可用缓存");
@@ -84,7 +85,7 @@ export async function fetchSessions(limit = 50, offset = 0, q?: string, source?:
   const res = await fetch(`${API_URL}/sessions?${params}`, { headers: headers() });
   if (!res.ok) {
     // 网络失败时降级到缓存，与 fetchSession 行为一致
-    const cacheKey = makeListKey({ limit, offset, q, source, mode, hideHeartbeat, hideScheduled, titlePrefixes, hasImages });
+    const cacheKey = makeListKey({ limit, offset, q, source, mode, hideHeartbeat, hideScheduled, hideBackground, titlePrefixes, hasImages });
     const cached = await readSessionList(cacheKey);
     if (cached) return cached;
     throw new Error("Failed to fetch sessions");
@@ -93,7 +94,7 @@ export async function fetchSessions(limit = 50, offset = 0, q?: string, source?:
   const sessions = data.sessions as SessionInfo[];
   (sessions as SessionInfo[] & { total?: number }).total = data.total ?? undefined;
   // 写入缓存（fire-and-forget，不阻塞返回）
-  const cacheKey = makeListKey({ limit, offset, q, source, mode, hideHeartbeat, hideScheduled, titlePrefixes, hasImages });
+  const cacheKey = makeListKey({ limit, offset, q, source, mode, hideHeartbeat, hideScheduled, hideBackground, titlePrefixes, hasImages });
   writeSessionList(cacheKey, sessions).catch(() => {});
   return sessions;
 }
