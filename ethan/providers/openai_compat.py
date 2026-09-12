@@ -51,7 +51,8 @@ _MAX_STREAM_BREAK_RETRIES = 2
 
 
 class OpenAICompatProvider(BaseProvider):
-    def __init__(self, provider_cfg: ProviderConfig, model: str, proxy: Optional[str] = None):
+    def __init__(self, provider_cfg: ProviderConfig, model: str, proxy: Optional[str] = None,
+                 vision: Optional[bool] = None):
         from openai import AsyncOpenAI  # lazy: SDK is heavy; only load when a provider instance is created
         http_client = None
         if proxy:
@@ -68,6 +69,8 @@ class OpenAICompatProvider(BaseProvider):
         )
         self._model = model
         self._base_url = (provider_cfg.base_url or "").lower()
+        # 配置显式声明的图片能力（None = 未声明 → 照发图片，详见 _supports_vision）
+        self._vision = vision
 
     @property
     def model(self) -> str:
@@ -121,8 +124,6 @@ class OpenAICompatProvider(BaseProvider):
     # --- reasoning / thinking 协议（DeepSeek R1 / deepseek-reasoner / 兼容 reasoning_content 的转发）---
 
     _REASONING_MODEL_PATTERNS = ("deepseek-r1", "deepseek-reasoner")
-    # 支持图像输入的模型关键词；不匹配的模型发送消息时会剥离图片 content blocks
-    _VISION_KEYWORDS = ("vision", "gpt-4o", "gpt-4.1", "claude", "gemini", "glm-4v", "glm-4.0v")
 
     def _wants_reasoning(self) -> bool:
         """当前模型是否走 reasoning 协议（序列化历史 reasoning_content + 注入顶层 thinking）。
@@ -135,9 +136,25 @@ class OpenAICompatProvider(BaseProvider):
         return any(k in model for k in self._REASONING_MODEL_PATTERNS)
 
     def _supports_vision(self) -> bool:
-        """检查当前模型是否支持图像输入（content 中可含 image_url blocks）。"""
-        model = (self._model or "").lower()
-        return any(kw in model for kw in self._VISION_KEYWORDS)
+        """当前模型是否支持图像输入（content 中可含 image_url blocks）。
+
+        判定顺序：
+        1. 配置显式声明（ModelEntry.vision）——权威，True/False 都以此为准；
+        2. 未声明 → 默认 True（照发图片）。
+
+        第 2 步刻意与「保守剥掉」相反：剥掉图片是**静默失败**——模型看不到图，
+        用户只看到「这个模型读不了图」，没有任何报错线索；而发出去的代价是
+        上游 400，agent 层会把图片落盘并重试（_is_image_error 路径），行为
+        可观测、可排查。
+
+        此前这里按硬编码关键词表（vision/gpt-4o/claude…）猜模型名，猜不中
+        就剥图。该表必然滞后于新模型发布——deepseek-v4.1-flash 这类新多模态
+        模型不在表内，于是图片在客户端就被剥掉，表现为「proxy/agent 不支持
+        读图」。改为「声明优先、未声明即照发」后，能力判断不再依赖模型名。
+        """
+        if self._vision is None:
+            return True
+        return bool(self._vision)
 
     @staticmethod
     def _strip_images_from_content(content: Any) -> Any:

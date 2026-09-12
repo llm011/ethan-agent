@@ -22,7 +22,10 @@ class ModelEntry(BaseModel):
     provider: str
     description: str = ""
     alias: list[str] = Field(default_factory=list)  # 短名，如 ["flash", "gemini"]
-    vision: bool = True  # 是否支持图片输入（大多数现代模型支持，旧文本模型可手动设为 False）
+    # 是否支持图片输入。None = 未声明 → 照发图片（让上游显式报错，而不是
+    # 静默剥掉，详见 OpenAICompatProvider._supports_vision）。
+    # 显式 True/False 为权威值，优先于任何按模型名的推测。
+    vision: Optional[bool] = None
     fallback_providers: list[str] = Field(default_factory=list)  # 主 provider 不可用时依次尝试的备选 provider key 列表
 
 

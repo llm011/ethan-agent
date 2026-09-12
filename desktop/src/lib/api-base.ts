@@ -88,7 +88,8 @@ export interface ModelEntry {
   provider: string;
   description: string;
   alias: string[];
-  vision: boolean;
+  // null = 未声明图片能力（由后端按模型名判断，默认照发图片）
+  vision: boolean | null;
 }
 
 export async function fetchModels(): Promise<ModelEntry[]> {

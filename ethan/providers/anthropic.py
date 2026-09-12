@@ -57,7 +57,8 @@ def _build_system_blocks(system: str) -> list[dict]:
 
 
 class AnthropicProvider(BaseProvider):
-    def __init__(self, provider_cfg: ProviderConfig, model: str, proxy: Optional[str] = None):
+    def __init__(self, provider_cfg: ProviderConfig, model: str, proxy: Optional[str] = None,
+                 vision: Optional[bool] = None):
         import anthropic  # lazy: SDK is heavy; only load when a provider instance is created
 
         # httpx event hooks must be async; strip SDK fingerprint headers that
@@ -88,6 +89,8 @@ class AnthropicProvider(BaseProvider):
             or __import__("os").environ.get("ANTHROPIC_AUTH_TOKEN")
         )
         self._disable_prompt_cache = getattr(provider_cfg, "disable_prompt_cache", False)
+        # 配置显式声明的图片能力（None = 未声明 → 照发图片）
+        self._vision = vision
 
     @property
     def model(self) -> str:
@@ -157,9 +160,11 @@ class AnthropicProvider(BaseProvider):
                 # 非 vision 模型：剥离图片 blocks，只保留文本。
                 # GLM/Kimi 等通过 Anthropic 协议中转时，不支持 image content blocks，
                 # 会导致 400 "Input should be a valid string" 格式校验失败。
-                model = (self._model or "").lower()
-                _vision_kws = ("vision", "gpt-4o", "gpt-4.1", "claude", "gemini", "glm-4v")
-                if not any(kw in model for kw in _vision_kws):
+                #
+                # 能力判定与 OpenAICompatProvider 同口径：配置声明优先（None =
+                # 未声明 → 照发图片，让上游显式报错，而不是静默剥图）。此前按
+                # 硬编码关键词猜模型名，新多模态模型不在表内就被静默剥掉图片。
+                if self._vision is False:
                     text_only = [p["text"] for p in content if isinstance(p, dict) and p.get("type") == "text"]
                     content = [{"type": "text", "text": "\n".join(text_only)}] if text_only else [{"type": "text", "text": ""}]
                 result.append({"role": "user", "content": content})
