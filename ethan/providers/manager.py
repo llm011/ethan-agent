@@ -8,7 +8,7 @@ def _build_single_provider(provider_key: str, model_id: str,
     """构造单个 provider。
 
     ``vision`` 来自 ModelEntry.vision（配置里显式声明的图片能力）：
-    None = 未声明，provider 内部按模型名关键词回退判断。不传则视为未声明。
+    None = 未声明 → provider 默认照发图片（详见 _supports_vision）。不传视为未声明。
     """
     provider_type = getattr(provider_cfg, "type", None) or (
         "anthropic" if provider_key == "anthropic" else "openai_compat"
@@ -103,7 +103,7 @@ def create_provider(model: str | None = None) -> BaseProvider:
             continue
         fb_proxy = fb_cfg.proxy or proxy
         # 兜底模型可能与主模型不同（能力也不同），优先用它自己的声明；
-        # 兜底条目查不到时退回主模型的声明，都没有就让 provider 按名字猜。
+        # 兜底条目查不到时退回主模型的声明；都没有则保持未声明（照发图片）。
         fb_entry = config.get_model(fb_model)
         fb_vision = getattr(fb_entry, "vision", None) if fb_entry else (
             getattr(entry, "vision", None) if entry else None
