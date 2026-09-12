@@ -170,3 +170,42 @@ class TestStreamInvokeToolCall:
 
         assert "".join(c.content for c in out if c.content) == "你好，有什么可以帮你？"
         assert not [c for c in out if c.is_final][-1].tool_calls
+
+    def test_prose_mentioning_invoke_is_not_eaten(self):
+        """模型讲解 <invoke> 用法时，正文不能被当工具调用剥掉。
+
+        回归：`contains_invoke` 若退化成 `"<invoke" in content` 的子串判断，
+        剥除兜底正则会从该点截到字符串末尾，把后半段讲解整段吃掉。
+        """
+        prose = '你需要使用 <invoke name="x"> 标签来调用工具，它就会执行。'
+        events = [_chunk(prose), _chunk(finish_reason="stop"), _usage_chunk()]
+        p = _make_provider([FakeStream(events)])
+        out = _collect(p)
+
+        visible = "".join(c.content for c in out if c.content)
+        assert visible == prose, f"讲解性正文被吃掉：{visible!r}"
+        assert not [c for c in out if c.is_final][-1].tool_calls
+
+    def test_mixed_markup_parses_and_strips_both(self):
+        """同一段 content 混排 <tool_call>{json} 与 <invoke> 时，两者都要解析并剥离。
+
+        回归：finish 分支原是互斥 if/elif 链，marked 命中后 invoke 块既不解析也不剥离
+        ——工具静默丢失、XML 原样漏给用户，且 tool_calls 非空让 agent 兜底被跳过。
+        """
+        mixed = (
+            '正文A。<tool_call>{"name":"shell","arguments":{"command":"ls"}}</tool_call>'
+            '中间。<tool_calls><invoke name="browser_page">'
+            '<parameter name="action">mouse</parameter></invoke></tool_calls>尾部。'
+        )
+        events = [_chunk(mixed), _chunk(finish_reason="stop"), _usage_chunk()]
+        p = _make_provider([FakeStream(events)])
+        out = _collect(p)
+
+        visible = "".join(c.content for c in out if c.content)
+        assert "<invoke" not in visible, f"invoke XML 漏给用户：{visible!r}"
+        assert "<tool_call>" not in visible, f"marked XML 漏给用户：{visible!r}"
+        assert visible == "正文A。中间。尾部。", visible
+
+        calls = [c for c in out if c.is_final][-1].tool_calls
+        names = sorted(tc.name for tc in calls)
+        assert names == ["browser_page", "shell"], f"混排时漏解析工具：{names}"

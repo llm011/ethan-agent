@@ -164,11 +164,16 @@ _INVOKE_PARAM_RE = re.compile(
 
 
 def contains_invoke(content: str) -> bool:
-    """正文里是否含有 Anthropic 风格 <invoke name="..."> 标记。
+    """正文里是否有**完整的** Anthropic 风格 `<invoke name="...">…</invoke>` 工具调用块。
 
-    用于判断「模型把工具调用写成了文本」，需要在流式阶段缓冲、结束后统一解析。
+    注意不要退化成 `"<invoke" in content` 的子串判断：模型讲解用法、写 XML 示例
+    （如「你需要使用 <invoke name="x"> 标签来调用工具」）时正文里就含字面量 `<invoke`，
+    但并没有真正的工具调用。若拿子串当门槛，调用方会去剥除，而 `strip_invoke_tool_blocks`
+    的未闭合兜底是从匹配点截到**字符串末尾**，这段解释性正文会被整段吃掉。
+
+    故这里要求必须匹配到成对的 <invoke>…</invoke>（即真的解析得出工具调用）。
     """
-    return bool(content) and "<invoke" in content.lower()
+    return bool(parse_invoke_tool_calls(content))
 
 
 def parse_invoke_tool_calls(content: str) -> list[ToolCall]:
@@ -198,21 +203,34 @@ def parse_invoke_tool_calls(content: str) -> list[ToolCall]:
 def strip_invoke_tool_blocks(content: str) -> str:
     """把 <invoke>…</invoke> 工具调用标记从展示正文里剥掉，只留真正文。
 
-    与 _strip_marked_tool_blocks 同理：无论能否解析成工具调用都先移除，防止
-    序列化后的工具调用（XML 原文）漏给用户。外层 <tool_calls> 包裹标签也一起去掉。
-    流被截断时闭合标签可能永远没到：未闭合的开头标签连带其后内容一并去掉。
+    与 _strip_marked_tool_blocks 同理：成对的块无论能否解析都先移除，防止序列化后的
+    工具调用（XML 原文）漏给用户。外层 <tool_calls> 包裹标签也一起去掉。
+
+    **只在「确实像是在下发工具调用」时才动刀**——判据是出现 `<tool_calls>` 包裹标签
+    或 `<parameter …>` 子标签（真实调用二选一必居其一）。否则正文里但凡提一句
+    `<invoke name="x">` 作讲解，就会被下面的未闭合兜底正则从该点截到字符串末尾，
+    后半段正文整段消失。宁可偶有漏剥（模型把没有 parameter 的裸 invoke 写进正文），
+    也不能把正常正文吃掉——漏剥只影响展示，吃正文是丢内容。
+
+    未闭合块的兜底：流被截断时闭合标签可能永远没到，此时从开头标签截到结尾。
     """
     if not content or "<invoke" not in content.lower():
+        return content
+    looks_like_call = bool(
+        re.search(r"<\s*tool_calls\b", content, re.IGNORECASE)
+        or re.search(r"<\s*parameter\b", content, re.IGNORECASE)
+    )
+    if not looks_like_call:
         return content
     stripped = re.sub(
         r'<\s*tool_calls\s*>.*?</\s*tool_calls\s*>', "", content,
         flags=re.DOTALL | re.IGNORECASE,
     )
     stripped = re.sub(
-        r'<\s*invoke\b.*?</\s*invoke\s*>', "", stripped,
+        r'<\s*invoke\b[^>]*>.*?</\s*invoke\s*>', "", stripped,
         flags=re.DOTALL | re.IGNORECASE,
     )
-    # 截断的未闭合块：从开头标签起到结尾全去掉
+    # 截断的未闭合块：从开头标签截到结尾
     m = re.search(r"<\s*(?:tool_calls|invoke)\b[\s\S]*$", stripped, re.IGNORECASE)
     if m:
         stripped = stripped[: m.start()]
@@ -224,12 +242,15 @@ def buf_has_unclosed_invoke(content: str) -> bool:
 
     流式分片时开头标签先到、闭合标签后到，若按普通文本 yield 出去用户会看到半截
     XML。检测到未闭合时持续缓冲，直到流结束再统一解析。
+
+    `<invoke>` 的开头标签要求带 `name=`：只认真正的工具调用标签，避免正文里
+    提到 `<invoke` 一词（讲解用法）就无谓地一直缓冲、把正常正文延迟输出。
     """
     if not content:
         return False
     for open_pat, close_pat in (
         (r'<\s*tool_calls\b', r'<\s*/\s*tool_calls\s*>'),
-        (r'<\s*invoke\b', r'<\s*/\s*invoke\s*>'),
+        (r'<\s*invoke\s+name="', r'<\s*/\s*invoke\s*>'),
     ):
         if len(re.findall(open_pat, content, re.IGNORECASE)) > len(
             re.findall(close_pat, content, re.IGNORECASE)

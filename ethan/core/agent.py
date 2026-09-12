@@ -17,7 +17,6 @@ from ethan.core.tool_format import (
     resolve_skill_category,
 )
 from ethan.memory.procedures import ProcedureStore
-from ethan.providers._text_toolcalls import contains_invoke as _contains_invoke
 from ethan.providers.base import Message, ToolCall
 from ethan.providers.manager import create_provider
 from ethan.skills.registry import SkillRegistry
@@ -1276,19 +1275,27 @@ class Agent:
                     # 保留标记之前的正文作为 thought 内容
                     from ethan.providers.openai_compat import OpenAICompatProvider
 
+                    # 顺序、非互斥地剥离：一段 content 可能混排多种标记，互斥 elif
+                    # 会让先命中的分支把后面的标记留在正文里漏给用户。
                     if OpenAICompatProvider._contains_dsml(full_content):
                         # 截取 DSML 标记之前的文本
                         import re
 
                         dsml_start = re.search(r"<[｜|][｜|]DSML[｜|][｜|]", full_content)
-                        full_content = full_content[: dsml_start.start()].rstrip() if dsml_start else ""
-                    elif _contains_invoke(full_content):
+                        if dsml_start:
+                            full_content = full_content[: dsml_start.start()].rstrip()
+                    from ethan.providers._text_toolcalls import (
+                        parse_invoke_tool_calls,
+                        strip_invoke_tool_blocks,
+                    )
+
+                    # 仅在确实解析出 invoke 调用时才剥（contains_invoke 同样基于解析结果）：
+                    # 正文里只是提到 `<invoke` 一词时不该动它。
+                    if parse_invoke_tool_calls(full_content):
                         # Anthropic 风格标记：剥掉标记本身，保留前后的正文
                         # （模型可能先写一句「我来帮你操作」再跟工具调用标记）。
-                        from ethan.providers._text_toolcalls import strip_invoke_tool_blocks
-
                         full_content = strip_invoke_tool_blocks(full_content).strip()
-                    else:
+                    if not full_content.strip():
                         full_content = ""
                     response = Message(role="assistant", content=full_content, tool_calls=tool_calls)
                 else:

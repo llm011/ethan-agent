@@ -277,6 +277,9 @@ providers:
 
 - **流式缓冲**：开头标签可能先到、闭合标签后到，若中途按普通文本 yield 出去，用户会看到半截 XML。检测到未闭合（或已闭合但尚未到 `finish`）时持续缓冲，结束再统一解析。中途断连时 salvage 分支同样要先剥标记。
 - **正文保留**：标记前后的真正文（如"我来帮你操作浏览器。"）要保留，不能整段清空。
+- **剥除门槛不要用子串**：`strip_*` 的未闭合兜底是从匹配点**截到字符串末尾**，所以不能拿 `"<invoke" in content` 这种子串判断当门槛——模型讲解用法（「你需要使用 `<invoke name="x">` 标签来调用工具」）时正文里就含字面量，会被整段吃掉。`strip_invoke_tool_blocks` 内部只在出现 `<tool_calls>` 或 `<parameter>` 时才动刀；流式/兜底判定用 `contains_invoke`（基于 `parse_invoke_tool_calls` 是否非空）。
+  例外：断连 salvage **必须**无条件剥（截断块的 parse 必然失败，而剥掉半截 XML 正是它的目的），安全性由上面这条内部判据保证。
+- **三种格式顺序处理，不要写成互斥 `elif`**：同一段 content 可能混排（如 `<tool_call>{json}</tool_call>` 与 `<invoke>` 同时出现）。互斥链下先命中的分支会让后面的块既不解析也不剥离——工具静默丢失，XML 原样漏给用户；又因为 `tool_calls` 非空，agent 层的文本兜底会被跳过，兜不回来。finish 分支（`openai_compat`）与 agent 兜底剥离都是**顺序、非互斥**的。
 - **Agent 兜底**：`_parse_stream_text_tool_calls` 在 `final_chunk` 没有 `tool_calls` 时从 `full_content` 再解析一次。**认不出的后果是这一轮没有工具可执行、agent 静默停住**——即"跑了 N 步后不再运行"。
 - **参数类型修正**：XML 只携带字符串，而工具签名可能是 `int`/`bool`/`list`。`ToolExecutor` 按工具 schema 的 `type` 做保守转换（`"608"` → `608`，转不了就原样留给工具报错）。没有这一步，`browser_page` 这类期望数字坐标的工具会直接崩。
 - **回环**：从文本恢复的 `ToolCall` 用本地合成 id（`call_xxxxxxxx`）。回传给 anthropic 端点时会被序列化成原生 `tool_use` 块，工具结果以同一 id 走 `tool_result` 回填，闭环成立。
