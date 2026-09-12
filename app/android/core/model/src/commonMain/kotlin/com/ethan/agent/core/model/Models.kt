@@ -26,6 +26,45 @@ data class ModelEntry(
     val alias: List<String> = emptyList(),
 )
 
+/**
+ * 模型的唯一选择键 `provider/id`（id 本身可能再含 "/"，如聚合网关的
+ * `trae/glm-5.3-flash`，此时键为 `trae/trae/glm-5.3-flash`）。
+ *
+ * 不同 provider 可能提供同名 model，纯 id 作键会撞车，因此会话 model、默认模型
+ * 等一律以复合键为准。与 web/desktop 的 `fullIdOf` 保持一致。
+ */
+val ModelEntry.fullId: String
+    get() = if (provider.isBlank()) id else "$provider/$id"
+
+/**
+ * 解析任意 model 引用到列表里的唯一模型。
+ *
+ * 兼容三种写法：复合键 `provider/id`、纯 id、以及 alias。纯 id/alias 命中多个
+ * 同名模型时返回 null（歧义，不能猜——静默切到另一个 provider 可能涉及计费/隐私，
+ * 交由上层提示用户显式选择）。
+ */
+fun List<ModelEntry>.resolveModel(ref: String?): ModelEntry? {
+    if (ref.isNullOrBlank()) return null
+    // 1) 精确匹配复合键
+    firstOrNull { it.fullId == ref }?.let { return it }
+    // 2) 复合写法但缺前缀/前缀写错：按第一个 "/" 拆出 provider 再匹配整段 id
+    if ("/" in ref) {
+        val provider = ref.substringBefore("/")
+        val id = ref.substringAfter("/")
+        return firstOrNull { it.provider == provider && it.id == id }
+    }
+    // 3) 旧会话存的纯 id / alias：唯一命中才安全升级，多个同名不猜
+    val hits = filter { it.id == ref || ref in it.alias }
+    return hits.singleOrNull()
+}
+
+/** 纯 id/alias 命中多个同名模型（歧义，需要用户显式选择）。 */
+fun List<ModelEntry>.isAmbiguous(ref: String?): Boolean {
+    if (ref.isNullOrBlank() || any { it.fullId == ref }) return false
+    if ("/" in ref) return false
+    return count { it.id == ref || ref in it.alias } > 1
+}
+
 @Serializable
 data class ModelsResponse(val models: List<ModelEntry> = emptyList())
 

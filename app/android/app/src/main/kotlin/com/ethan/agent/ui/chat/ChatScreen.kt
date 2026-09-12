@@ -105,6 +105,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.ethan.agent.R
 import com.ethan.agent.core.model.FileSignature
 import com.ethan.agent.core.model.Quote
+import com.ethan.agent.core.model.fullId
 import com.ethan.agent.shared.UiMessage
 import com.ethan.agent.ui.components.ErrorSnackbar
 import com.ethan.agent.ui.components.LoadingBox
@@ -279,6 +280,13 @@ fun ChatScreen(
 
                 // Model selector
                 Text("模型", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (state.modelAmbiguous) {
+                    Text(
+                        "模型「${state.selectedModel}」在多个 provider 下重名，请重新选择要使用的模型",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
                 var modelExpanded by remember { mutableStateOf(false) }
                 ExposedDropdownMenuBox(expanded = modelExpanded, onExpandedChange = { modelExpanded = it }) {
                     AssistChip(
@@ -289,9 +297,19 @@ fun ChatScreen(
                     ExposedDropdownMenu(expanded = modelExpanded, onDismissRequest = { modelExpanded = false }) {
                         state.models.forEach { model ->
                             DropdownMenuItem(
-                                text = { Text(model.id) },
+                                // label 用别名（或描述/id），副标题标 provider，方便分辨不同 provider 的同名模型
+                                text = {
+                                    Column {
+                                        Text(model.alias.firstOrNull() ?: model.description.ifBlank { model.id })
+                                        Text(
+                                            model.provider,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                },
                                 onClick = {
-                                    onModelSelected(model.id)
+                                    onModelSelected(model.fullId)
                                     modelExpanded = false
                                 },
                             )
@@ -757,7 +775,8 @@ fun ChatScreen(
                                         ) {
                                             IconButton(
                                                 onClick = onSend,
-                                                enabled = state.inputText.isNotBlank() || state.pendingImages.isNotEmpty(),
+                                                // 模型歧义时禁用发送，强制用户先显式选一个 provider
+                                                enabled = (state.inputText.isNotBlank() || state.pendingImages.isNotEmpty()) && !state.modelAmbiguous,
                                             ) {
                                                 Icon(
                                                     Icons.AutoMirrored.Filled.Send,

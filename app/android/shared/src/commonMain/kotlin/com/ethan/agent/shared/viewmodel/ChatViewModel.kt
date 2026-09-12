@@ -14,6 +14,9 @@ import com.ethan.agent.core.model.Quote
 import com.ethan.agent.core.model.ToolStep
 import com.ethan.agent.core.model.Usage
 import com.ethan.agent.core.model.WaitForUserInfo
+import com.ethan.agent.core.model.fullId
+import com.ethan.agent.core.model.isAmbiguous
+import com.ethan.agent.core.model.resolveModel
 import com.ethan.agent.shared.EthanRepository
 import com.ethan.agent.shared.UiMessage
 import com.ethan.agent.shared.UiMessageImage
@@ -48,7 +51,13 @@ data class ChatUiState(
     val messages: List<UiMessage> = emptyList(),
     val models: List<ModelEntry> = emptyList(),
     val modes: List<ModeEntry> = emptyList(),
+    /** 选中模型，复合键 `provider/id`（见 ModelEntry.fullId） */
     val selectedModel: String? = null,
+    /**
+     * 旧会话存的纯 id/alias 命中多个同名模型：歧义，需用户显式选择。
+     * true 时禁用发送，避免静默切到另一个 provider（可能涉及计费/隐私）。
+     */
+    val modelAmbiguous: Boolean = false,
     val selectedMode: String = "",
     val inputText: String = "",
     val pendingImages: List<PendingImage> = emptyList(),
@@ -132,8 +141,16 @@ class ChatViewModel(
             launch {
                 try {
                     repository.cachedModels().collect { models ->
-                        _state.update {
-                            it.copy(models = models, selectedModel = it.selectedModel ?: models.firstOrNull()?.id)
+                        _state.update { st ->
+                            val resolved = models.resolveModel(st.selectedModel)
+                            when {
+                                // 旧会话存的纯 id 命中多个同名模型 → 保持原值并标记歧义，等用户选
+                                st.selectedModel != null && resolved == null && models.isAmbiguous(st.selectedModel) ->
+                                    st.copy(models = models, modelAmbiguous = true)
+                                resolved != null -> st.copy(models = models, selectedModel = resolved.fullId, modelAmbiguous = false)
+                                st.selectedModel == null -> st.copy(models = models, selectedModel = models.firstOrNull()?.fullId)
+                                else -> st.copy(models = models)
+                            }
                         }
                     }
                 } catch (_: Exception) { }
@@ -150,9 +167,14 @@ class ChatViewModel(
                     repository.cachedAgentSettings().collect { settings ->
                         _state.update { it.copy(agentName = settings.agentName) }
                         if (sessionId == null) {
-                            _state.update {
-                                it.copy(
-                                    selectedModel = settings.defaultModel.ifBlank { it.models.firstOrNull()?.id },
+                            _state.update { st ->
+                                // 默认模型也可能是旧格式纯 id：能唯一解析就升级成复合键，
+                                // 解析不出就保留原值（可能是还没加载到的模型 id）
+                                val fallback = st.models.firstOrNull()?.fullId
+                                val resolved = st.models.resolveModel(settings.defaultModel)
+                                st.copy(
+                                    selectedModel = resolved?.fullId
+                                        ?: settings.defaultModel.ifBlank { fallback.orEmpty() }.ifBlank { null },
                                     isLoading = false,
                                 )
                             }
@@ -175,11 +197,15 @@ class ChatViewModel(
             if (sessionId != null) {
                 try {
                     repository.cachedSession(sessionId).collect { session ->
-                        _state.update {
-                            it.copy(
+                        _state.update { st ->
+                            // session.model 由服务端存储：新会话已是 provider/id 复合键，
+                            // 老会话可能是纯 id → 唯一命中就升级，多个同名标记歧义等用户选
+                            val resolved = st.models.resolveModel(session.model)
+                            st.copy(
                                 sessionId = session.id,
                                 title = session.title,
-                                selectedModel = session.model,
+                                selectedModel = resolved?.fullId ?: session.model,
+                                modelAmbiguous = st.models.isAmbiguous(session.model),
                                 selectedMode = session.mode ?: "",
                                 messages = session.messages.map { msg ->
                                     UiMessage(
@@ -232,7 +258,10 @@ class ChatViewModel(
         }
     }
 
-    fun onModelSelected(model: String) { _state.update { it.copy(selectedModel = model) } }
+    /** model 为复合键 `provider/id`（见 ModelEntry.fullId）；显式选择后消除歧义态。 */
+    fun onModelSelected(model: String) {
+        _state.update { it.copy(selectedModel = model, modelAmbiguous = false) }
+    }
     fun onModeSelected(mode: String) { _state.update { it.copy(selectedMode = mode) } }
     fun toggleAutoConsent() {
         val next = !_state.value.autoConsent
@@ -267,6 +296,8 @@ class ChatViewModel(
         val text = current.inputText.trim()
         val images = current.pendingImages
         if (text.isEmpty() && images.isEmpty()) return
+        // 模型歧义（旧纯 id 命中多个同名）时不能发：避免静默切到另一个 provider
+        if (current.modelAmbiguous) return
 
         if (current.isStreaming && streamJob?.isActive == true) {
             if (text.isNotEmpty()) injectMessage(text)
