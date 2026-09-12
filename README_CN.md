@@ -72,7 +72,7 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 **定时任务与后台任务**
 - 对话中创建 cron 或 interval 任务，SQLite 持久化，重启自动恢复
 - `heartbeat.md`：写入自然语言任务，系统定期自动执行
-- 后台任务：把耗时长任务丢到后台独立会话异步执行，不阻塞当前对话；完成后结果回灌（飞书推回原会话，web 在侧边栏会话浮现）。在 `/background-tasks` 页查看/终止，侧边栏带运行中数量角标
+- 后台任务：把耗时长任务丢到后台独立会话异步执行，不阻塞当前对话；完成后结果回灌（飞书推回原会话，web 在主会话顶部任务条浮现）。后台会话不进侧边栏/「全部会话」（避免一次任务扇出的多条占满列表），入口是主会话顶部任务条与 `/background-tasks` 页（可查看/终止，侧边栏带运行中数量角标）
 
 **工具系统**
 - Shell 执行、Web 搜索（默认 DuckDuckGo，可配置切换 Tavily 或自建 SearXNG，见 `deploy/docker-compose.searxng.yml`）、Web 抓取、文件读写、知识库检索

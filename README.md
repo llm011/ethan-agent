@@ -74,7 +74,7 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 **Scheduler & background tasks**
 - Create cron or interval jobs in conversation; SQLite-persisted, survives restarts
 - `heartbeat.md`: write natural-language tasks; the system runs them periodically
-- Background tasks: kick off a long-running task that runs async in its own session without blocking the current chat; result is fed back when done (Lark pushes to the originating chat, web surfaces the session). View/stop them on the `/background-tasks` page, with a running-count badge in the sidebar
+- Background tasks: kick off a long-running task that runs async in its own session without blocking the current chat; result is fed back when done (Lark pushes to the originating chat, web surfaces it in the task bar atop the main chat). Background sessions stay out of the sidebar and "All sessions" (a single task can fan out into many), reachable via the task bar and the `/background-tasks` page (view/stop, with a running-count badge in the sidebar)
 
 **Tool system**
 - Shell execution, web search (DuckDuckGo by default, or Tavily / self-hosted SearXNG via config — see `deploy/docker-compose.searxng.yml`), web fetch, file I/O, knowledge base

@@ -56,6 +56,7 @@ async def list_modes(user_id: str = Depends(verify_token)):
 async def list_sessions(limit: int = 50, offset: int = 0, q: str | None = None,
                         source: str | None = None, mode: str | None = None,
                         hide_heartbeat: bool = False, hide_scheduled: bool = False,
+                        hide_background: bool = False,
                         title_prefixes: str | None = None,
                         has_images: bool = False,
                         user_id: str = Depends(verify_token)):
@@ -65,6 +66,12 @@ async def list_sessions(limit: int = 50, offset: int = 0, q: str | None = None,
         exclude_prefixes.append("[心跳]")
     if hide_scheduled:
         exclude_prefixes.append("[定时]")
+    # 后台任务会话（background_task 工具建的独立会话）不参与常规会话列表：
+    # 一次 deep-review 之类的任务会扇出多条，全部堆进侧边栏/全部会话会把正常对话挤没。
+    # 其入口是 /background-tasks 任务中心 + 主会话顶部的任务条。
+    if hide_background:
+        exclude_prefixes.append("[后台]")
+        exclude_prefixes.append("✅ [后台]")  # 已完成后被标记的前缀（见 background_task 完成回灌）
     include_prefixes = [p for p in (title_prefixes or "").split(",") if p] or None
     if q:
         # 搜索与过滤条件 AND 合成：分类/渠道/含图在搜索时同样生效，且支持分页

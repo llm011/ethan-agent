@@ -213,13 +213,13 @@ class BackgroundTaskTool(BaseTool):
         channel = "lark" if chat_id else "web"
         channel_context = json.dumps({"chat_id": chat_id}) if chat_id else "{}"
 
-        # 为该任务建一个独立 session（per-user），结果落在这里
+        # 为该任务建一个独立 session（per-user），结果落在这里。
+        # 注意：这里**不**预存 prompt。_run_background 会把同一个 prompt 经
+        # POST /api/chat 再发一次，而 /api/chat 自己会把 req.messages 里的 user
+        # 消息落库——预存会导致后台会话里同一条 query 出现两次（用户反馈）。
         store = await get_session_store()
         session = await store.create(get_config().defaults.model)
         await store.update_title(session.id, f"[后台] {title}")
-        # 首条用户消息入库，刷新后台会话能看到任务内容
-        from ethan.providers.base import Message
-        await store.save_message(session.id, Message(role="user", content=prompt))
 
         task = _BgTask(session_id=session.id, title=title, started_at=time.time(), channel=channel)
         t = threading.Thread(

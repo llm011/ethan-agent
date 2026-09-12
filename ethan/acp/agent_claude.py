@@ -137,7 +137,7 @@ async def _run_claude_code(
         await _terminate_proc(proc)
         # 超时可能让 claude session 卡在进行中，清掉以免下次续接到坏会话。
         if session_id:
-            clear_session(work_dir, user_id=user_id, agent="claude")
+            await clear_session(work_dir, user_id=user_id, agent="claude")
         return ACPResult(
             success=False,
             output=f"Timed out after {timeout}s",
@@ -157,7 +157,7 @@ async def _run_claude_code(
 
     # 持久化 session_id 供下次续接
     if session_id:
-        set_session(work_dir, session_id, user_id=user_id, agent="claude")
+        await set_session(work_dir, session_id, user_id=user_id, agent="claude")
 
     return ACPResult(
         success=not is_error and bool(final_result),

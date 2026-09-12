@@ -23,6 +23,7 @@ from .session import (
     get_mirror_info,
     get_mirror_session,
     get_session,
+    mapping_lock,
     set_mirror_info,
     set_mirror_session,
     set_session,
@@ -37,6 +38,7 @@ __all__ = [
     "get_mirror_session",
     "set_mirror_session",
     "clear_mirror_session",
+    "mapping_lock",
     "set_mirror_info",
     "get_mirror_info",
     "delegate",
@@ -124,7 +126,7 @@ async def _dispatch(
     if prefer == "opencode":
         resume_sid = None
         if reset_session:
-            clear_session(work_dir, user_id=user_id, agent="opencode")
+            await clear_session(work_dir, user_id=user_id, agent="opencode")
         elif resume:
             resume_sid = get_session(work_dir, user_id=user_id, agent="opencode")
         return await _run_opencode(
@@ -134,7 +136,7 @@ async def _dispatch(
     if prefer == "codex":
         resume_sid = None
         if reset_session:
-            clear_session(work_dir, user_id=user_id, agent="codex")
+            await clear_session(work_dir, user_id=user_id, agent="codex")
         elif resume:
             resume_sid = get_session(work_dir, user_id=user_id, agent="codex")
         return await _run_codex(
@@ -146,7 +148,7 @@ async def _dispatch(
     if agent_name == "claude":
         resume_sid = None
         if reset_session:
-            clear_session(work_dir, user_id=user_id, agent="claude")
+            await clear_session(work_dir, user_id=user_id, agent="claude")
         elif resume:
             resume_sid = get_session(work_dir, user_id=user_id, agent="claude")
         return await _run_claude_code(

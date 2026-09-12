@@ -69,7 +69,7 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
       const modeParam = md === "__all__" ? undefined : (md === "__default__" ? "" : md);
       // 排他筛选：定时/心跳走 title_prefixes 只保留对应前缀；图片走 has_images
       const prefixes = category === "scheduled" ? "[定时]" : category === "heartbeat" ? "[心跳]" : undefined;
-      const data = await fetchSessions(limit, offset, q || undefined, src || undefined, modeParam, category === "", category === "", prefixes, category === "images" || undefined);
+      const data = await fetchSessions(limit, offset, q || undefined, src || undefined, modeParam, category === "", category === "", prefixes, category === "images" || undefined, true);
       const t = (data as SessionInfo[] & { total?: number }).total;
       if (t != null) setTotal(t);
       setSessions(data);
@@ -101,7 +101,7 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
       if (page !== 1) return;
       if (search.trim() || filterSource || filterMode !== "__all__" || categoryFilter) return;
       try {
-        const data = await fetchSessions(limit, 0, undefined, undefined, undefined, true, true);
+        const data = await fetchSessions(limit, 0, undefined, undefined, undefined, true, true, undefined, undefined, true);
         setSessions(prev => {
           const changed = data.length !== prev.length ||
             data.some((s, i) => s.updated_at !== prev[i]?.updated_at || s.title !== prev[i]?.title);
