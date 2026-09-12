@@ -32,6 +32,7 @@ import com.ethan.agent.core.model.ModelEntry
 import com.ethan.agent.core.model.OnboardingCompleteRequest
 import com.ethan.agent.core.model.OnboardingStatus
 import com.ethan.agent.core.model.Procedure
+import com.ethan.agent.core.model.ProcedureUpdateRequest
 import com.ethan.agent.core.model.ProviderConfig
 import com.ethan.agent.core.model.Quote
 import com.ethan.agent.core.model.RenameSessionRequest
@@ -413,6 +414,10 @@ class EthanRepository(
 
     suspend fun getProcedures(): List<Procedure> {
         return api.getProcedures().procedures
+    }
+
+    suspend fun updateProcedure(id: String, rule: String) {
+        api.updateProcedure(id, ProcedureUpdateRequest(rule))
     }
 
     suspend fun deleteProcedure(id: String) {

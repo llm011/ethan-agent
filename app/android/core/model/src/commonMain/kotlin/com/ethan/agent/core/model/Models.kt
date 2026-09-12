@@ -271,6 +271,16 @@ data class ProfileRequest(val content: String)
 
 @Serializable
 data class Fact(
+    /**
+     * memories 表的 `id`。
+     *
+     * 后端 `_record_to_fact` 一直在返回它，但这里以前没声明，字段被静默丢弃 ——
+     * 于是修改/删除只能退化成「传数组下标」，而后端 `PATCH /memory/facts/{id}`
+     * 是按 `id` 精确查找（`store.update_memory(fact_id, ...)`）。下标和 id 一旦
+     * 错位（列表过滤掉了 superseded、或期间有新记忆写入）就会改到别的记录上。
+     * 默认空串是为了兼容老缓存里没有这个字段的 JSON。
+     */
+    val id: String = "",
     val content: String,
     val confidence: Double = 0.0,
     val category: String = "",
@@ -312,6 +322,13 @@ data class Procedure(
 
 @Serializable
 data class ProceduresResponse(val procedures: List<Procedure> = emptyList())
+
+/** 改写一条准则。`rule` 是新的正文；后端按位置下标寻址（`Procedure` 无独立 id）。 */
+@Serializable
+data class ProcedureUpdateRequest(
+    val rule: String,
+    val context: String? = null,
+)
 
 @Serializable
 data class ScheduleJob(

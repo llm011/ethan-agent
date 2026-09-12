@@ -2,14 +2,17 @@ package com.ethan.agent.ui.memory
 
 import com.ethan.agent.shared.viewmodel.MemoryUiState
 import com.ethan.agent.shared.viewmodel.FactItem
+import com.ethan.agent.shared.viewmodel.MemoryEditTarget
 import com.ethan.agent.shared.viewmodel.MemoryTab
 import com.ethan.agent.shared.viewmodel.RecordsFilter
+import com.ethan.agent.shared.viewmodel.recordId
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -79,6 +82,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -115,24 +119,23 @@ fun MemoryScreen(
     state: MemoryUiState,
     onTabChange: (MemoryTab) -> Unit,
     onSelectFact: (FactItem) -> Unit,
-    onDismissFactEditor: () -> Unit,
     onEditChange: (String) -> Unit,
-    onSaveFact: () -> Unit,
-    onDeleteFact: (String) -> Unit,
-    onDeleteProcedure: (String) -> Unit,
     onClearError: () -> Unit,
     onBack: () -> Unit = {},
+    // 共用编辑器
+    onDismissEditor: () -> Unit = {},
+    onSaveEditing: () -> Unit = {},
+    onDeleteEditing: () -> Unit = {},
     // new
     onInsightsDateChange: (String) -> Unit = {},
     onRefreshInsights: () -> Unit = {},
     onRecordsFilterChange: (RecordsFilter) -> Unit = {},
     onRecordsSearchChange: (String) -> Unit = {},
     onSelectRecord: (StructuredRecord) -> Unit = {},
-    onDismissRecord: () -> Unit = {},
-    onRecordEditContent: (String) -> Unit = {},
-    onSaveRecord: () -> Unit = {},
+    onSelectProcedure: (Procedure) -> Unit = {},
     onDeleteRecord: (String) -> Unit = {},
     onConfirmRecord: (String) -> Unit = {},
+    onDeleteProcedure: (String) -> Unit = {},
     onConsolidate: () -> Unit = {},
     onConsolidateRecords: () -> Unit = {},
     onLoadSummaries: () -> Unit = {},
@@ -162,30 +165,18 @@ fun MemoryScreen(
         SummariesDialog(summaries = state.summaries, onDismiss = onHideSummaries)
     }
 
-    // Fact editor overlay
-    val selectedFact = state.selectedFact
-    if (selectedFact != null && state.tab == MemoryTab.Facts) {
-        FactEditorScreen(
-            fact = selectedFact,
+    // 编辑页覆盖层：事实 / 流程 / 结构化记忆共用一个编辑器。
+    // 以前「事实」是先开详情页再点编辑进第二层，「流程」压根没有编辑，
+    // 「结构化记忆」点一下就直接跳进编辑 —— 三个 tab 三种行为。现在统一。
+    val editing = state.editing
+    if (editing != null) {
+        MemoryEditorScreen(
+            target = editing,
             content = state.editContent,
-            onBack = onDismissFactEditor,
+            onBack = onDismissEditor,
             onContentChange = onEditChange,
-            onSave = onSaveFact,
-            onDelete = { state.selectedFactIndex?.let(onDeleteFact) },
-        )
-        return
-    }
-
-    // Record editor overlay
-    val selectedRecord = state.selectedRecord
-    if (selectedRecord != null && state.tab == MemoryTab.Records) {
-        RecordEditorScreen(
-            record = selectedRecord,
-            content = state.recordEditContent,
-            onBack = onDismissRecord,
-            onContentChange = onRecordEditContent,
-            onSave = onSaveRecord,
-            onDelete = { onDeleteRecord(selectedRecord.id) },
+            onSave = onSaveEditing,
+            onDelete = onDeleteEditing,
         )
         return
     }
@@ -274,14 +265,18 @@ fun MemoryScreen(
                     onDateChange = onInsightsDateChange,
                     onRefresh = onRefreshInsights,
                 )
-                MemoryTab.Procedures -> ProceduresTab(state.procedures, onDeleteProcedure)
+                MemoryTab.Procedures -> ProceduresTab(
+                    procedures = state.procedures,
+                    onEdit = onSelectProcedure,
+                    onDelete = onDeleteProcedure,
+                )
                 MemoryTab.Records -> RecordsTab(
                     records = state.records,
                     filter = state.recordsFilter,
                     search = state.recordsSearch,
                     onFilterChange = onRecordsFilterChange,
                     onSearchChange = onRecordsSearchChange,
-                    onSelect = onSelectRecord,
+                    onEdit = onSelectRecord,
                     onConfirm = onConfirmRecord,
                     onDelete = onDeleteRecord,
                 )
@@ -290,12 +285,24 @@ fun MemoryScreen(
     }
 }
 
-// ── Fact editor ──────────────────────────────────────────────────────────────
+// ── 共用编辑器（事实 / 流程 / 结构化记忆）─────────────────────────────────────
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+/**
+ * 三张卡共用的编辑页。
+ *
+ * 统一的不只是「双击进编辑」这个入口，页面本身也收敛了：
+ * - 顶栏固定三段式：返回 | 标题 | 删除 + 保存（都用 [EthanTopBar]，不再手搓 `TopAppBar`）
+ * - 正文一个多行输入框，占据中间全部高度
+ * - 底部一行只读的元信息，与列表卡片的 [MemoryCardMeta] 同字号同配色
+ *
+ * 删掉的两套旧实现里，「事实」是「详情页 + 二级编辑」两层，「记录」是点卡片直接进，
+ * 元信息一行靠 `RecordMetaRow` 自己贴左边缘（用户反馈的「底下的字顶到左边」就是
+ * 它没吃到横向 padding）。
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun FactEditorScreen(
-    fact: Fact,
+private fun MemoryEditorScreen(
+    target: MemoryEditTarget,
     content: String,
     onBack: () -> Unit,
     onContentChange: (String) -> Unit,
@@ -303,8 +310,6 @@ private fun FactEditorScreen(
     onDelete: () -> Unit,
 ) {
     var showDeleteConfirm by remember { mutableStateOf(false) }
-    // 默认预览模式，点编辑才进入编辑模式
-    var isEditing by remember { mutableStateOf(false) }
 
     if (showDeleteConfirm) {
         AlertDialog(
@@ -320,125 +325,79 @@ private fun FactEditorScreen(
         )
     }
 
+    // 内容为空时不给保存：后端会因为空正文写入一条无意义记录。
+    val canSave = content.isNotBlank()
+
     EthanScaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(if (isEditing) "编辑事实" else "事实详情") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
-                },
+            EthanTopBar(
+                title = target.title,
+                onBack = onBack,
                 actions = {
                     IconButton(onClick = { showDeleteConfirm = true }) {
                         Icon(Icons.Default.Delete, contentDescription = "删除")
                     }
-                    if (isEditing) {
-                        TextButton(onClick = { isEditing = false; onSave() }) {
-                            Text("保存", fontWeight = FontWeight.SemiBold)
-                        }
-                    } else {
-                        IconButton(onClick = { isEditing = true }) {
-                            Icon(Icons.Default.Edit, contentDescription = "编辑")
-                        }
+                    TextButton(onClick = onSave, enabled = canSave) {
+                        Text("保存", fontWeight = FontWeight.SemiBold)
                     }
-                },
-            )
-        },
-    ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).imePadding()) {
-            FlowRow(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                MetaChip(fact.category.ifBlank { "knowledge" })
-                MetaChip("置信度 ${(fact.confidence * 100).toInt()}%")
-                if (fact.source.isNotBlank()) MetaChip("来源 ${fact.source.take(12)}")
-            }
-            if (isEditing) {
-                OutlinedTextField(
-                    value = content,
-                    onValueChange = onContentChange,
-                    modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = 16.dp),
-                    placeholder = { Text("输入记忆内容，支持 Markdown") },
-                    textStyle = MaterialTheme.typography.bodyLarge,
-                )
-            } else {
-                // 预览模式：Markdown 渲染，可滚动
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 16.dp),
-                ) {
-                    SimpleMarkdown(
-                        text = content.ifBlank { "*暂无内容*" },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-            }
-        }
-    }
-}
-
-// ── Record editor ────────────────────────────────────────────────────────────
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun RecordEditorScreen(
-    record: StructuredRecord,
-    content: String,
-    onBack: () -> Unit,
-    onContentChange: (String) -> Unit,
-    onSave: () -> Unit,
-    onDelete: () -> Unit,
-) {
-    var showDeleteConfirm by remember { mutableStateOf(false) }
-    if (showDeleteConfirm) {
-        AlertDialog(
-            onDismissRequest = { showDeleteConfirm = false },
-            title = { Text("删除这条记录？") },
-            text = { Text("删除后无法恢复。") },
-            confirmButton = {
-                TextButton(onClick = { showDeleteConfirm = false; onDelete() }) { Text("删除") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteConfirm = false }) { Text("取消") }
-            },
-        )
-    }
-
-    EthanScaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("编辑记录") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { showDeleteConfirm = true }) {
-                        Icon(Icons.Default.Delete, contentDescription = "删除")
-                    }
-                    TextButton(onClick = onSave) { Text("保存", fontWeight = FontWeight.SemiBold) }
                 },
             )
         },
     ) { padding ->
         Column(
-            Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).imePadding()
+            Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .verticalScroll(rememberScrollState())
+                .imePadding(),
         ) {
             OutlinedTextField(
                 value = content,
                 onValueChange = onContentChange,
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                label = { Text("内容") },
-                minLines = 4,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+                label = { Text(if (target is MemoryEditTarget.Procedure) "规则" else "内容") },
+                placeholder = { Text("支持 Markdown") },
+                textStyle = MaterialTheme.typography.bodyLarge,
+                minLines = 6,
             )
-            RecordMetaRow(record)
+
+            // 元信息行：整行加横向 padding —— 旧实现里它直接贴着 Column 左上角，
+            // 于是「preference 生效 置信度 100%…」那行字顶到了屏幕最左边。
+            Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                EditorMetaRow(target)
+            }
         }
+    }
+}
+
+/** 编辑页底部的只读元信息。字段随卡片类型变化，样式统一走 [MemoryCardMeta]。 */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun EditorMetaRow(target: MemoryEditTarget) {
+    when (target) {
+        is MemoryEditTarget.Fact -> {
+            val fact = target.original
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                MemoryCardMeta(
+                    fact.category.ifBlank { "knowledge" } to true,
+                    "置信度 ${(fact.confidence * 100).toInt()}%" to false,
+                    formatEpochDate(fact.createdAt) to false,
+                    (if (fact.source.isNotBlank()) "来源 ${fact.source.take(12)}" else "") to false,
+                )
+            }
+        }
+        is MemoryEditTarget.Procedure -> {
+            val proc = target.original
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                MemoryCardMeta(
+                    "命中 ${proc.hitCount} 次" to false,
+                    formatEpochDate(proc.createdAt) to false,
+                )
+            }
+        }
+        is MemoryEditTarget.Record -> RecordMetaRow(target.original)
     }
 }
 
@@ -546,7 +505,10 @@ private fun FactListCard(item: FactItem, onClick: () -> Unit) {
     // 不再放 🧠 头像：四个 tab 里只有它带头像，且 emoji 在深浅主题下
     // 渲染出来的观感飘忽（不是主题色、不跟随 tint）。正文直接从卡片左边起排，
     // 横向空间也让给了内容。
-    MemoryCard(onClick = onClick) {
+    //
+    // 双击进编辑：以前是单击 → 详情页 → 再点右上角编辑 → 才进编辑，两层跳。
+    // 详情页本身没有额外信息（就是同一段正文的只读渲染），所以整层砍掉。
+    MemoryCard(onDoubleClick = onClick) {
         MemoryCardBody(fact.content)
         MemoryCardMeta(
             fact.category to true,
@@ -661,11 +623,17 @@ private fun InsightCard(item: InsightItem) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ProceduresTab(procedures: List<Procedure>, onDelete: (String) -> Unit) {
+private fun ProceduresTab(
+    procedures: List<Procedure>,
+    onEdit: (Procedure) -> Unit,
+    onDelete: (String) -> Unit,
+) {
     if (procedures.isEmpty()) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("暂无流程记忆", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
+        EthanEmptyState(
+            title = "暂无流程记忆",
+            description = "Ethan 从你的纠正里学到的行为准则会记在这里",
+            icon = Icons.Default.Psychology,
+        )
         return
     }
     LazyColumn(
@@ -719,7 +687,9 @@ private fun ProceduresTab(procedures: List<Procedure>, onDelete: (String) -> Uni
                 },
                 enableDismissFromStartToEnd = false,
             ) {
-                MemoryCard {
+                // 双击进编辑，与另外两个 tab 一致（单击不做事 —— 流程卡片以前
+                // 完全没有编辑入口，现在给了入口就要避免误触）。
+                MemoryCard(onDoubleClick = { onEdit(proc) }) {
                     MemoryCardBody(proc.rule, maxLines = 4)
                     MemoryCardMeta(
                         "命中 ${proc.hitCount} 次" to false,
@@ -741,7 +711,7 @@ private fun RecordsTab(
     search: String,
     onFilterChange: (RecordsFilter) -> Unit,
     onSearchChange: (String) -> Unit,
-    onSelect: (StructuredRecord) -> Unit,
+    onEdit: (StructuredRecord) -> Unit,
     onConfirm: (String) -> Unit,
     onDelete: (String) -> Unit,
 ) {
@@ -802,7 +772,7 @@ private fun RecordsTab(
             items(records, key = { it.id }) { record ->
                 RecordCard(
                     record = record,
-                    onSelect = { onSelect(record) },
+                    onEdit = { onEdit(record) },
                     onConfirm = { onConfirm(record.id) },
                     onDelete = { onDelete(record.id) },
                 )
@@ -814,7 +784,7 @@ private fun RecordsTab(
 @Composable
 private fun RecordCard(
     record: StructuredRecord,
-    onSelect: () -> Unit,
+    onEdit: () -> Unit,
     onConfirm: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -832,7 +802,7 @@ private fun RecordCard(
         )
     }
 
-    MemoryCard(onClick = onSelect) {
+    MemoryCard(onDoubleClick = onEdit) {
         Row(verticalAlignment = Alignment.Top) {
             Box(Modifier.weight(1f)) {
                 MemoryCardBody(record.content)
@@ -1048,16 +1018,32 @@ private fun DailySummaryCard(item: JsonElement) {
  * 流程没有描边、结构化记忆又用了 `elevation = 1.dp`，看起来像四拨人做的。这里收敛成
  * 一个 `EthanCard` + 统一的 `columns` 文案列，只有「正文怎么排」由调用方决定。
  *
- * @param onClick 传了就有涟漪（列表项）；不传就是纯展示
+ * **双击进编辑，单击不响应**：卡片上原本单击 = 进编辑（结构化记忆）或进详情页
+ * （事实），手指在列表里滑一下就误进了编辑页，反馈很强烈。双击是「明确要改」的
+ * 手势，误触率低得多；长按留给引用/菜单之类的扩展。
+ *
+ * 实现说明：`EthanCard(onClick=…)` 走的是 M3 `Card` 的 clickable，吃不到「双击」，
+ * 所以这里自己用 `detectTapGestures(onDoubleTap=…)`。**不加 `indication`** —— 单击
+ * 不做事时给涟漪反而让人以为点中了。
  */
 @Composable
 private fun MemoryCard(
-    onClick: (() -> Unit)? = null,
+    onDoubleClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    EthanCard(onClick = onClick) {
+    val tapModifier = if (onDoubleClick != null) {
+        Modifier.pointerInput(onDoubleClick) {
+            detectTapGestures(onDoubleTap = { onDoubleClick() })
+        }
+    } else {
+        Modifier
+    }
+    EthanCard {
         Column(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(tapModifier)
+                .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
             content = content,
         )

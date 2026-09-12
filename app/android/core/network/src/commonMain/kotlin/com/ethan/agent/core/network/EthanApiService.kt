@@ -39,6 +39,7 @@ import com.ethan.agent.core.model.OnboardingCompleteResponse
 import com.ethan.agent.core.model.OnboardingStatus
 import com.ethan.agent.core.model.PollData
 import com.ethan.agent.core.model.PinnedSessionsResponse
+import com.ethan.agent.core.model.ProcedureUpdateRequest
 import com.ethan.agent.core.model.ProceduresResponse
 import com.ethan.agent.core.model.ProfileRequest
 import com.ethan.agent.core.model.ProfileResponse
@@ -297,6 +298,10 @@ class EthanApiService(
     }
 
     suspend fun getProcedures(): ProceduresResponse = client.get(url("memory/procedures")).body()
+
+    suspend fun updateProcedure(id: String, body: ProcedureUpdateRequest) {
+        client.patch(url("memory/procedures/$id")) { jsonBody(body) }
+    }
 
     suspend fun deleteProcedure(id: String) {
         client.delete(url("memory/procedures/$id"))

@@ -87,6 +87,37 @@ class ProcedureStore:
     def all(self) -> list[Procedure]:
         return list(self._procedures)
 
+    def update(self, index: int, rule: str, context: str | None = None) -> bool:
+        """按位置改写一条准则（前端「流程」tab 的编辑入口）。
+
+        位置下标而不是 id，是因为 `Procedure` 本身没有稳定标识 —— 它只由
+        `rule` 唯一，而 `rule` 正是这里要改的字段，拿它当 key 会在「改 rule」
+        这个动作上自相矛盾。列表接口的 id 也一直是 enumerate 出来的下标，
+        两边保持一致。
+
+        新 rule 与**其他**条目重复时返回 False（不改）—— 去重逻辑和 `add`
+        一致，否则会出现两条一模一样的准则。
+        编辑不走 `_save` 的 mask_text：用户手动输入的内容不该被当成密钥打码，
+        真正的密钥过滤在写入侧（`add` / `procedure_write` 工具）已经做过。
+
+        :param rule: 新内容；空白串视为非法，返回 False
+        :param context: None = 保持原值
+        """
+        if index < 0 or index >= len(self._procedures):
+            return False
+        if not rule or not rule.strip():
+            return False
+        normalized = rule.lower().strip()
+        for i, p in enumerate(self._procedures):
+            if i != index and p.rule.lower().strip() == normalized:
+                return False
+        target = self._procedures[index]
+        target.rule = rule
+        if context is not None:
+            target.context = context
+        self._save()
+        return True
+
     def build_context(self) -> str:
         if not self._procedures:
             return ""

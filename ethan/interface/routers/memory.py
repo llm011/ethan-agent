@@ -106,10 +106,36 @@ async def list_procedures(user_id: str = Depends(verify_token)):
     ]}
 
 
+@router.patch("/procedures/{proc_id}")
+async def update_procedure(proc_id: str, req: dict, user_id: str = Depends(verify_token)):
+    """改写一条行为准则。
+
+    `proc_id` 是列表接口里 enumerate 出来的位置下标（`Procedure` 没有独立 id）。
+    409 表示新内容与已有条目重复 —— 用 409 而不是 400，前端可以据此提示
+    「已存在同样的准则」而不是「参数错误」。
+    """
+    store = _procedure_store(user_id)
+    try:
+        idx = int(proc_id)
+    except ValueError:
+        raise HTTPException(400, "Invalid procedure id")
+    rule = req.get("rule")
+    if not isinstance(rule, str) or not rule.strip():
+        raise HTTPException(400, "rule is required")
+    if not store.update(idx, rule, req.get("context")):
+        if idx < 0 or idx >= len(store.all()):
+            raise HTTPException(404, "Not found")
+        raise HTTPException(409, "Duplicate procedure")
+    return {"ok": True}
+
+
 @router.delete("/procedures/{proc_id}")
 async def delete_procedure(proc_id: str, user_id: str = Depends(verify_token)):
     store = _procedure_store(user_id)
-    idx = int(proc_id)
+    try:
+        idx = int(proc_id)
+    except ValueError:
+        raise HTTPException(400, "Invalid procedure id")
     if idx < 0 or idx >= len(store._procedures):
         raise HTTPException(404, "Not found")
     store._procedures.pop(idx)

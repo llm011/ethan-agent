@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 import time
 
+import pytest
+
 # ---------------------------------------------------------------------------
 # A2: detect_memory_signal
 # ---------------------------------------------------------------------------
@@ -477,3 +479,100 @@ class TestConsolidationThreshold:
         assert ".extract_cold(" not in source
         assert "WorkingMemory(" not in source
         assert "FactStore(" not in source
+
+
+# ---------------------------------------------------------------------------
+# ProcedureStore.update + PATCH /memory/procedures/{id}（前端「流程」tab 的编辑入口）
+# ---------------------------------------------------------------------------
+
+class TestProcedureStoreUpdate:
+    def _store(self, tmp_path, *rules):
+        from ethan.memory.procedures import ProcedureStore
+        store = ProcedureStore(path=tmp_path / "playbook.json")
+        for r in rules:
+            store.add(r)
+        return store
+
+    def test_updates_rule_and_persists(self, tmp_path):
+        store = self._store(tmp_path, "准则 A", "准则 B")
+        assert store.update(0, "准则 A2") is True
+        assert [p.rule for p in store.all()] == ["准则 A2", "准则 B"]
+        # 落盘：重新加载后仍是新值
+        from ethan.memory.procedures import ProcedureStore
+        assert [p.rule for p in ProcedureStore(path=tmp_path / "playbook.json").all()] == [
+            "准则 A2", "准则 B",
+        ]
+
+    def test_context_none_keeps_original(self, tmp_path):
+        store = self._store(tmp_path, "准则 A")
+        store.update(0, "准则 A2")  # 不传 context
+        assert store.all()[0].context == ""
+
+    def test_rejects_duplicate_ignoring_case(self, tmp_path):
+        """与**其他**条目重复时拒绝，且大小写不敏感（与 add 的去重口径一致）。"""
+        store = self._store(tmp_path, "准则 A", "准则 B")
+        assert store.update(1, "准则 A") is False
+        assert store.update(1, "  准则 a  ") is False
+        assert [p.rule for p in store.all()] == ["准则 A", "准则 B"]
+
+    def test_self_rename_is_allowed(self, tmp_path):
+        """改自己不算重复 —— 只有改动大小写/空白时走这条路。"""
+        store = self._store(tmp_path, "准则 A")
+        assert store.update(0, " 准则 A ") is True
+
+    def test_rejects_blank_and_out_of_range(self, tmp_path):
+        store = self._store(tmp_path, "准则 A")
+        assert store.update(0, "   ") is False
+        assert store.update(0, "") is False
+        assert store.update(5, "X") is False
+        assert store.update(-1, "X") is False
+        assert [p.rule for p in store.all()] == ["准则 A"]
+
+
+class TestProcedureEndpoints:
+    """PATCH/DELETE /memory/procedures/{id} 的状态码契约（Android 端据此提示）。"""
+
+    @pytest.fixture
+    def client(self, tmp_path, monkeypatch):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        import ethan.memory.procedures as procedures_mod
+        from ethan.interface.routers import memory as memory_mod
+        from ethan.interface.routers.deps import verify_token
+
+        path = tmp_path / "playbook.json"
+        seed = procedures_mod.ProcedureStore(path=path)
+        seed.add("准则 A")
+        seed.add("准则 B")
+
+        monkeypatch.setattr(
+            memory_mod, "_procedure_store",
+            lambda user_id: procedures_mod.ProcedureStore(path=path),
+        )
+
+        app = FastAPI()
+        app.include_router(memory_mod.router)
+        app.dependency_overrides[verify_token] = lambda: "test-user"
+        return TestClient(app)
+
+    def test_patch_updates(self, client):
+        assert client.patch("/memory/procedures/0", json={"rule": "准则 A2"}).status_code == 200
+        rules = [p["rule"] for p in client.get("/memory/procedures").json()["procedures"]]
+        assert rules == ["准则 A2", "准则 B"]
+
+    def test_patch_duplicate_is_409(self, client):
+        # 409 而不是 400：前端据此区分「已存在同样准则」和「参数错误」
+        assert client.patch("/memory/procedures/1", json={"rule": "准则 A"}).status_code == 409
+
+    def test_patch_blank_and_missing_rule_are_400(self, client):
+        assert client.patch("/memory/procedures/0", json={"rule": "   "}).status_code == 400
+        assert client.patch("/memory/procedures/0", json={}).status_code == 400
+
+    def test_patch_out_of_range_is_404(self, client):
+        assert client.patch("/memory/procedures/9", json={"rule": "X"}).status_code == 404
+
+    def test_non_numeric_id_is_400_not_500(self, client):
+        """int() 抛 ValueError 不该冒成 500。"""
+        assert client.patch("/memory/procedures/abc", json={"rule": "X"}).status_code == 400
+        assert client.delete("/memory/procedures/abc").status_code == 400
