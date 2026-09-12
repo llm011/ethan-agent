@@ -18,7 +18,10 @@ class ModelEntry(BaseModel):
     provider: str
     description: str = ""
     alias: list[str] = []
-    vision: bool = True  # 是否支持图片输入
+    # 是否支持图片输入。None = 未声明（由 provider 按名字判断，默认照发图片）。
+    # 刻意不用 True 作默认：True 是「已声明支持」的权威值，会和「没填」混淆，
+    # 使纯文本模型被当成多模态（与 vision=False 漏填的 bug 同族，方向相反）。
+    vision: bool | None = None
     # None=更新时保留 entry 现有值、新增时取默认空；显式传列表则覆盖
     fallback_providers: list[str] | None = None
 

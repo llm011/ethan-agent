@@ -3,16 +3,24 @@ from ethan.providers.base import BaseProvider
 
 
 def _build_single_provider(provider_key: str, model_id: str,
-                            provider_cfg: ProviderConfig, proxy: str | None) -> BaseProvider:
+                            provider_cfg: ProviderConfig, proxy: str | None,
+                            vision: bool | None = None) -> BaseProvider:
+    """构造单个 provider。
+
+    ``vision`` 来自 ModelEntry.vision（配置里显式声明的图片能力）：
+    None = 未声明，provider 内部按模型名关键词回退判断。不传则视为未声明。
+    """
     provider_type = getattr(provider_cfg, "type", None) or (
         "anthropic" if provider_key == "anthropic" else "openai_compat"
     )
     if provider_type == "anthropic":
         from ethan.providers.anthropic import AnthropicProvider
-        return AnthropicProvider(provider_cfg=provider_cfg, model=model_id, proxy=proxy)
+        return AnthropicProvider(provider_cfg=provider_cfg, model=model_id, proxy=proxy,
+                                 vision=vision)
     else:
         from ethan.providers.openai_compat import OpenAICompatProvider
-        return OpenAICompatProvider(provider_cfg=provider_cfg, model=model_id, proxy=proxy)
+        return OpenAICompatProvider(provider_cfg=provider_cfg, model=model_id, proxy=proxy,
+                                    vision=vision)
 
 
 def _parse_fallback_entry(entry: str) -> tuple[str, str | None]:
@@ -59,7 +67,9 @@ def create_provider(model: str | None = None) -> BaseProvider:
         raise ValueError(f"Provider '{provider_key}' not found in config. Run: ethan model add")
 
     effective_proxy = provider_cfg.proxy or proxy
-    primary = _build_single_provider(provider_key, model_id, provider_cfg, effective_proxy)
+    # 图片能力以配置声明为准；未声明（None）时由 provider 按模型名回退判断。
+    primary = _build_single_provider(provider_key, model_id, provider_cfg, effective_proxy,
+                                     vision=getattr(entry, "vision", None) if entry else None)
 
     # Build fallback chain if configured
     fallback_keys: list[str] = list(getattr(entry, "fallback_providers", []) or []) if entry else []
@@ -92,8 +102,15 @@ def create_provider(model: str | None = None) -> BaseProvider:
             )
             continue
         fb_proxy = fb_cfg.proxy or proxy
+        # 兜底模型可能与主模型不同（能力也不同），优先用它自己的声明；
+        # 兜底条目查不到时退回主模型的声明，都没有就让 provider 按名字猜。
+        fb_entry = config.get_model(fb_model)
+        fb_vision = getattr(fb_entry, "vision", None) if fb_entry else (
+            getattr(entry, "vision", None) if entry else None
+        )
         try:
-            fb_provider = _build_single_provider(fb_key, fb_model, fb_cfg, fb_proxy)
+            fb_provider = _build_single_provider(fb_key, fb_model, fb_cfg, fb_proxy,
+                                                 vision=fb_vision)
             pairs.append((fb_key, fb_provider))
         except Exception as exc:
             import logging

@@ -116,7 +116,7 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
   const [discoverOpen, setDiscoverOpen] = useState(false); // 拉取弹窗开关
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set()); // 弹窗里勾选的 model id
   const [discoverSearch, setDiscoverSearch] = useState(""); // 弹窗搜索词
-  const [newModel, setNewModel] = useState<ModelEntry>({ id: "", provider: "openai_compat", description: "", alias: [], vision: true });
+  const [newModel, setNewModel] = useState<ModelEntry>({ id: "", provider: "openai_compat", description: "", alias: [], vision: null });
   // 批量删除/添加模型
   const [selectedModelKeys, setSelectedModelKeys] = useState<Set<string>>(new Set()); // 勾选的 "provider/id"
   // 模型拖拽排序
@@ -325,7 +325,7 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
     if (ids.length === 0 || !batchAddProvider) return;
     setBatchAdding(true);
     try {
-      const r = await addModelsBatch(ids.map((id) => ({ id, provider: batchAddProvider, description: id, alias: [], vision: true })));
+      const r = await addModelsBatch(ids.map((id) => ({ id, provider: batchAddProvider, description: id, alias: [], vision: null })));
       if (r.ok) {
         setModelList(await fetchModels());
         setBatchAddOpen(false);
@@ -758,7 +758,7 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
                               onClick={async () => {
                                 const toAdd = discovered.filter((m) => selectedIds.has(m.id) && !m.exists);
                                 if (toAdd.length === 0) { setDiscoverOpen(false); return; }
-                                const r = await addModelsBatch(toAdd.map((m) => ({ id: m.id, provider: m.provider, description: m.description, alias: [], vision: true })));
+                                const r = await addModelsBatch(toAdd.map((m) => ({ id: m.id, provider: m.provider, description: m.description, alias: [], vision: null })));
                                 if (r.ok) {
                                   setModelList(await fetchModels());
                                   setSelectedIds(new Set());
