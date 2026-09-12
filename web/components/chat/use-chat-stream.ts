@@ -28,6 +28,35 @@ export interface ConsumeStreamActions {
   activeSession: string | null;
 }
 
+// 把本地刚发出的 user 消息补回后端返回的消息列表，避免后端漏存时用户那条
+// query 从界面上消失（用户反馈：回复失败后连自己发的 query 都找不回）。
+//
+// 按 content 的**出现次数差额**补：本地有几条、后端有几条，差多少补多少。
+// 两个理由：
+//  1. 后端正常落库的历史消息，本地与后端条数一致 → 差额为 0，不会被复活
+//     （早前版本只看「本地末尾那段」，会漏掉更早出现的重复 query）。
+//  2. 同一会话连发两条完全相同的 query（重试、复制粘贴、队列 drain）时，后端可能
+//     只落了第一条。若只判「这个 content 出现过没有」，第二条会被当成已存在而不补，
+//     query 照样消失——正是本函数要修的那个 bug 本身。
+export function mergeMissingUserMessages(local: Message[], fromServer: Message[]): Message[] {
+  const countUserContent = (msgs: Message[], content: string) =>
+    msgs.filter((m) => m.role === "user" && m.content === content).length;
+
+  // 逐条扫描本地的 user 消息，累计「该 content 本地出现到第几次」，
+  // 后端条数不够这么多就说明这一条没落库，需要补。
+  const seen = new Map<string, number>();
+  const missing: Message[] = [];
+  for (const m of local) {
+    if (m.role !== "user" || !m.content) continue;
+    const nth = (seen.get(m.content) ?? 0) + 1;
+    seen.set(m.content, nth);
+    if (countUserContent(fromServer, m.content) < nth) missing.push(m);
+  }
+  if (missing.length === 0) return fromServer;
+
+  return [...fromServer, ...missing];
+}
+
 // 消费一条 SSE 事件流，增量更新最后一条 assistant 消息，结束后定稿。
 // 首次发送（streamChat）与刷新重连（streamResume）共用此逻辑。
 // baseMessages = assistant 之前的全部消息（含用户那句）；trackTtft 仅首发为 true。
@@ -434,7 +463,11 @@ export async function consumeStream(
           if (fresh?.messages?.length) {
             const { mapDetailMessages } = await import("@/components/chat/chat-helpers");
             const freshMsgs = mapDetailMessages(fresh);
-            setMessages(freshMsgs);
+            // 后端可能压根没存下用户刚发的那条 query（如建 agent 阶段就失败，
+            // 或落库异常）。若这里直接用后端结果整表替换，用户会看到自己发的
+            // 消息"凭空消失"。因此把 baseMessages 里后端缺失的 user 消息补回去。
+            const mergedMsgs = mergeMissingUserMessages(baseMessages, freshMsgs);
+            setMessages(mergedMsgs);
             setBgPolling(null);
             setConsentRequest(null);
             setCleanupConfirm(null);

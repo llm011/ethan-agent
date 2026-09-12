@@ -78,13 +78,20 @@ def _is_local(request: Request) -> bool:
     return ip.is_loopback or any(ip in net for net in _PRIVATE_NETWORKS)
 
 
-async def _direct_stream(agent, messages: list, *,
-                        save_user=None, save_assistant=None):
+async def _direct_stream(agent, messages: list, *, save_assistant=None):
     """Direct LLM streaming: skip agent loop, no tools, no skills. Fastest path.
 
-    save_user / save_assistant 可选：传入 coroutine 工厂（零参数返回 Awaitable）
-    后会在首块前落用户消息、done 时落助手消息。给 direct=true + session_id 场景
-    提供与正常 chat 一致的落库行为（会话列表能看到摘要/翻译的内容）。
+    save_assistant 可选：传入 coroutine 工厂，形如 `(text, err=None)`，成功时
+    err 为 None、出错时带错误原因。给 direct=true + session_id 场景提供与正常
+    chat 一致的落库行为（会话列表能看到摘要/翻译的内容）。
+
+    用户消息不在这里落库：调用方（chat 路由）已把它提前统一落库——早于本函数，
+    因此回复失败时用户那句也不会丢。故本函数只负责助手消息。
+
+    出错时也要落库：过去只在 `not saw_error and full` 才存助手消息，于是
+    provider 失败时这条 direct 会话在库里只剩用户那句，刷新后整轮对话消失。
+    现在只要有部分产出、或发生过错误就存，并带上 interrupted 状态 + 错误原因，
+    与 producers.py 的异常路径行为对齐。
 
     TODO(绕过抽象层): 这里直接访问 agent._provider 私有属性，跳过了 agent.stream_chat 包装的
     图片剥离、工具注入、指数退避错误重试等兜底。翻译/摘要场景不涉及多模态/重试故暂可接受；
@@ -92,16 +99,9 @@ async def _direct_stream(agent, messages: list, *,
     """
     import json
 
-    if save_user:
-        try:
-            await save_user()
-        except Exception as e:  # noqa: BLE001
-            # 用户消息落库失败不该中断生成
-            import logging as _log
-            _log.getLogger(__name__).warning("direct save_user failed: %s", e)
-
     full = ""
     saw_error = False
+    err_text = ""
     try:
         async for chunk in agent._provider.stream_chat(messages, tools=None, system=None):
             if chunk.content:
@@ -110,11 +110,15 @@ async def _direct_stream(agent, messages: list, *,
         yield f"data: {json.dumps({'done': True})}\n\n"
     except Exception as e:
         saw_error = True
-        yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        err_text = str(e)
+        yield f"data: {json.dumps({'error': err_text})}\n\n"
 
-    if save_assistant and (not saw_error) and full:
+    # 出错也要落库：有部分产出存部分产出 + interrupted 状态和错误原因；
+    # 即便一个字都没产出，也存一条带 error 的 assistant 行，保证这轮对话
+    # 在会话列表里留下一段可回看的过程（用户消息已由调用方提前落库）。
+    if save_assistant and (full or saw_error):
         try:
-            await save_assistant(full)
+            await save_assistant(full, err_text if saw_error else None)
         except Exception as e:  # noqa: BLE001
             import logging as _log
             _log.getLogger(__name__).warning("direct save_assistant failed: %s", e)
@@ -184,7 +188,45 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
 
     set_session_id(req.session_id)  # browser 工具按对话隔离/授权
 
-    # 请求建立阶段（建 agent / 开会话库 / 持久化用户消息 / 拼历史上下文）整体兜底。
+    # 用户消息「先落库，再建 agent」：落库必须早于任何可能失败的步骤。
+    # 过去这件事放在下面 try 块里、且在 create_agent 之后，于是 provider 未配置
+    # api_key / model 非法等「建 agent 失败」的场景下，用户消息根本没进库 ——
+    # 前端刷新后从后端拉消息列表，那条 query 就凭空消失了（用户反馈：
+    # 「回复失败，连我发的 query 都找不回」）。这里把它前移并单独兜底：
+    # 落库失败（如 DB 初始化异常）不阻断生成，只记日志。
+    if req.session_id and req.messages:
+        try:
+            store = await get_session_store()
+            # 确保 session 记录存在（前端竞态或外部入口直接带 id 进来时可能没有）。
+            existing = await store.load(req.session_id)
+            if not existing:
+                from ethan.core.config import get_config as _gc
+                await store.create_with_id(req.session_id, req.model or _gc().defaults.model,
+                                           source=req.channel or "web", mode=req.mode or "")
+            _raw_user = next(
+                (m for m in reversed(req.messages) if m.get("role") == "user"), None
+            )
+            if _raw_user is not None:
+                _um = Message(
+                    role="user",
+                    content=_raw_user.get("content", ""),
+                    images=_raw_user.get("images") or [],
+                    cards=_raw_user.get("cards"),
+                    quote=_raw_user.get("quote"),
+                )
+                # 图片持久化到本地文件，DB 只存路径
+                if _um.images:
+                    _persist_images_to_disk(_um, req.session_id)
+                # 把引用信息附到消息上一起持久化，刷新后仍能渲染引用气泡
+                if req.quote and req.quote.get("content"):
+                    _um.quote = req.quote
+                # save_message 持久化 path 格式图片（含切分分段）；
+                # 不再恢复原始 base64 —— 切分后的分段需原样流入 _resolve_images_for_llm
+                await store.save_message(req.session_id, _um)
+        except Exception as e:  # noqa: BLE001
+            logger.exception("持久化用户消息失败（不阻断生成）session=%s: %s", req.session_id, e)
+
+    # 请求建立阶段（建 agent / 开会话库 / 拼历史上下文）整体兜底。
     # 这段过去裸奔，任一步抛错都会冒泡成 FastAPI 默认 500，前端只显示生硬的
     # "Chat failed: 500"。首次使用时最容易在这里踩坑（如 ~/.ethan 目录/DB 初始化、
     # provider 未配置导致 create_agent 失败等）。这里统一转成友好错误：
@@ -213,24 +255,9 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
         store = await get_session_store()
 
         if req.session_id:
-            # 确保 session 记录存在（防止前端竞态或外部入口直接带 id 进来）
-            existing = await store.load(req.session_id)
-            if not existing:
-                from ethan.core.config import get_config as _gc
-                await store.create_with_id(req.session_id, req.model or _gc().defaults.model,
-                                           source=req.channel or "web", mode=req.mode or "")
-            session_obj = existing or await store.load(req.session_id)
-            for m in messages[-1:]:
-                if m.role == "user":
-                    # 图片持久化到本地文件，DB 只存路径
-                    if m.images:
-                        _persist_images_to_disk(m, req.session_id)
-                    # 把引用信息附到消息上一起持久化，刷新后仍能渲染引用气泡
-                    if req.quote and req.quote.get("content"):
-                        m.quote = req.quote
-                    # save_message 持久化 path 格式图片（含切分分段）；
-                    # 不再恢复原始 base64 —— 切分后的分段需原样流入 _resolve_images_for_llm
-                    await store.save_message(req.session_id, m)
+            # 注意：用户消息已在上面「先落库」阶段持久化，这里不再重复 save。
+            # 只需取回 session_obj 供下面标题逻辑判断当前标题。
+            session_obj = await store.load(req.session_id)
             # 首轮对话立即写标题：避免"新对话"残留很久，也避免前端本地 placeholderTitle
             # 被 3s 会话列表轮询覆盖回"新对话"。与 completions.py / repl_stream.py 初始化思路对齐。
             # 策略（仅首轮生效，且当前标题仍是默认"新对话"才写）：
@@ -315,38 +342,26 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
     if req.stream:
         # (0) Direct 模式：跳过 agent loop，直调 LLM 流式输出。
         #     适用于浏览器扩展的翻译、摘要等无需工具/技能的轻量请求。
-        #     当请求带 session_id 时，消息要落库（会话列表里能看到），
-        #     所以在 _direct_stream 里挂一对 save_user/save_assistant 回调。
+        #     用户消息已由上面「先落库」阶段统一下盘（不能再在 _direct_stream 里
+        #     存一次，否则同一条 query 会重复入库），这里只挂存助手消息的回调。
         if req.direct:
-            save_user_cb = None
             save_assistant_cb = None
             if req.session_id:
                 _local_store = await get_session_store()
-                _user_msgs = [
-                    Message(role=m["role"], content=m.get("content", ""),
-                            images=m.get("images") or [])
-                    for m in req.messages if m.get("role") == "user"
-                ]
-                if _user_msgs:
-                    async def _save_user():
-                        s = _local_store
-                        sid = req.session_id
-                        for _m in _user_msgs:
-                            if _m.images:
-                                _persist_images_to_disk(_m, sid)
-                            if req.quote and req.quote.get("content"):
-                                _m.quote = req.quote
-                            await s.save_message(sid, _m)
-                    save_user_cb = _save_user
-                async def _save_assistant(full_text: str):
+                async def _save_assistant(full_text: str, err: str | None = None):
                     s = _local_store
-                    m = Message(role="assistant", content=full_text, model=agent._provider.model)
+                    m = Message(
+                        role="assistant",
+                        content=full_text,
+                        model=agent._provider.model,
+                        status="interrupted" if err else "completed",
+                        error=err or None,
+                    )
                     await s.save_message(req.session_id, m)
                     await s.touch(req.session_id)
                 save_assistant_cb = _save_assistant
             return StreamingResponse(
                 _direct_stream(agent, messages,
-                               save_user=save_user_cb,
                                save_assistant=save_assistant_cb),
                 media_type="text/event-stream",
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
